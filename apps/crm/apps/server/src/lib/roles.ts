@@ -315,6 +315,23 @@ export const PERMISSIONS = {
 	canResendContractLinks: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
 
+	// Vincular con un contrato de la oportunidad un documento armado a mano en
+	// WeeTrust: el que no salió a firma porque no se encontraron los espacios,
+	// o uno que sí salió y se cambia por otro (eso le deja muertos al cliente
+	// los enlaces que tenía). Lo hacen análisis, que lleva la firma, y jurídico,
+	// que es quien subió el documento.
+	canLinkWeetrustDocument: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
+	// Lo mismo con los contratos de un inversionista. Es de quien le da
+	// seguimiento a su firma —inversiones— y de jurídico.
+	canLinkInvestorWeetrustDocument: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	// Anular un contrato lo descarta sin reemplazarlo: la oportunidad se queda
 	// sin ese documento hasta que se genere o suba otro. Lo deciden los dos que
 	// trabajan la papelería —jurídico en 80% y análisis en 85%—, no quien sólo

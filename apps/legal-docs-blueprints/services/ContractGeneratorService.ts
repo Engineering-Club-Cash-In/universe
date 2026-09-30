@@ -1410,6 +1410,17 @@ export class ContractGeneratorService {
        * nadie referencia.
        */
       r2KeyExistente?: string;
+      /**
+       * Qué hacer si el PDF no trae las líneas de firma que el layout declara.
+       *
+       * Por defecto se rechaza. Con esto en `true` —sólo lo pide el CRM cuando
+       * una persona sube el contrato a mano— el PDF se guarda igual, SIN
+       * mandarlo a WeeTrust, y la respuesta lo dice en `sinLineasDeFirma`:
+       * alguien lo sube a WeeTrust, acomoda las firmas a mano y vincula ese
+       * documento desde el CRM. No aplica a la reemisión ni al paquete de
+       * cartas, que salen de nuestras plantillas: ahí el desajuste es un error.
+       */
+      guardarSiNoHayLineas?: boolean;
     } = {},
   ): Promise<ContractGenerationResponse> {
     const config = this.templateRegistry.get(contractType);
@@ -1555,6 +1566,43 @@ export class ContractGeneratorService {
         message: `Contrato ${contractType} subido y enviado a firma`,
       };
     } catch (error) {
+      // Las firmas no se pudieron ubicar en un documento armado por fuera: no
+      // se inventan posiciones, pero tampoco se pierde el trabajo. El PDF queda
+      // guardado sin salir a firma, para que alguien lo suba a WeeTrust, ponga
+      // las firmas a mano y lo vincule. El borrador que se alcanzó a crear allá
+      // ya lo borró `createDocumentAndGetSigningLinks`.
+      if (
+        error instanceof SignatureLayoutError &&
+        options.guardarSiNoHayLineas &&
+        !options.r2KeyExistente &&
+        !esPaquete
+      ) {
+        console.warn(
+          `[signExistingPdf] ${contractType}: sin líneas de firma, se guarda sin enviar — ${error.message}`,
+        );
+        try {
+          const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
+          return {
+            ...respuestaBase,
+            success: true,
+            r2Key,
+            linkDocument: '',
+            signatureMode: getSignatureMode(contractType),
+            sinLineasDeFirma: error.message,
+            message: `Contrato ${contractType} guardado sin enviar a firma: no se encontraron las líneas de firma`,
+          };
+        } catch (errorAlGuardar) {
+          console.error(`[signExistingPdf] ${contractType}: no se pudo guardar el PDF:`, errorAlGuardar);
+          return {
+            ...respuestaBase,
+            success: false,
+            linkDocument: '',
+            message: 'No se pudo guardar el contrato',
+            error: errorMessage(errorAlGuardar),
+          };
+        }
+      }
+
       // A diferencia del camino automático, acá NO se cae a Documenso: el
       // documento lo subió una persona y lo que corresponde es decírselo.
       console.error(`[signExistingPdf] ${contractType}:`, error);

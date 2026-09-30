@@ -34,6 +34,11 @@ import {
 	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
 } from "../lib/contrato-estado-firma";
+import {
+	conMarcaDeFaltaVincular,
+	faltaVincular,
+	vinculadoDesdeWeeTrust,
+} from "../lib/contrato-falta-vincular";
 import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import {
 	etiquetaDeMotivo,
@@ -69,7 +74,18 @@ import { PERMISSIONS, ROLES } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import {
+	exigirQueElActualNoEsteFirmado,
+	type FirmanteEsperado,
+	guiaParaVincular,
+	leerDocumentoParaVincular,
+	motivoPorElQueNoSeVincula,
+	renovarEnlacesDelVinculado,
+	terminarDeVincular,
+	vincularEnLaFila,
+} from "../lib/vincular-documento-weetrust";
+import {
 	borrarDocumentoDeWeeTrust,
+	type ContractSigner,
 	consultarEstadoFirma,
 	type DocumentResult,
 	type EstadoDocumentoFirma,
@@ -197,8 +213,9 @@ async function contratoDeInversionista(contractId: string): Promise<{
 
 	if (!contrato.weetrustDocumentId) {
 		throw new ORPCError("BAD_REQUEST", {
-			message:
-				"Este contrato no tiene documento en WeeTrust. Hay que emitirlo de nuevo.",
+			message: faltaVincular(contrato.apiResponse)
+				? "Este contrato todavía no salió a firma: falta subirlo a WeeTrust y agregarlo manualmente."
+				: "Este contrato no tiene documento en WeeTrust. Hay que emitirlo de nuevo.",
 		});
 	}
 
@@ -234,6 +251,12 @@ async function guardarContratoDeInversion(params: {
 	userId: string;
 	/** Lo armó una persona por fuera, no la plantilla. */
 	subidoAMano?: boolean;
+	/**
+	 * El PDF subido no trae los espacios de firma y NO salió a firmar: se guarda
+	 * sin documento ni firmantes, esperando que alguien lo suba a WeeTrust y lo
+	 * vincule. Trae el motivo que dio el generador y para quiénes se subió.
+	 */
+	sinLineasDeFirma?: { motivo: string; firmantes: ContractSigner[] };
 	/**
 	 * Qué verificación de identidad se le pidió al inversionista. Queda en el
 	 * contrato para que renovarle los enlaces pida lo mismo.
@@ -273,7 +296,7 @@ async function guardarContratoDeInversion(params: {
 	const { resultado } = params;
 	const firmantes = resultado.signatories ?? [];
 
-	if (firmantes.length === 0) {
+	if (firmantes.length === 0 && !params.sinLineasDeFirma) {
 		throw new Error(
 			"El generador no devolvió firmantes: sin ellos no se pueden renovar ni reenviar los enlaces",
 		);
@@ -423,9 +446,19 @@ async function guardarContratoDeInversion(params: {
 				// verificación de identidad se le pidió.
 				apiResponse: conMarcaDeIdentificacion(
 					(() => {
-						const respuesta = params.subidoAMano
+						const subido = params.subidoAMano
 							? conMarcaDeSubidoAMano(resultado)
 							: resultado;
+						const respuesta = params.sinLineasDeFirma
+							? conMarcaDeFaltaVincular(subido, {
+									motivo: params.sinLineasDeFirma.motivo,
+									desde: new Date().toISOString(),
+									// Contra ellos se compara el documento que se agregue.
+									firmantes: params.sinLineasDeFirma.firmantes.map(
+										({ role, email, name }) => ({ role, email, name }),
+									),
+								})
+							: subido;
 						return bateria
 							? conMarcaDeCompra(respuesta, bateria.acceptedAt)
 							: respuesta;
@@ -443,9 +476,13 @@ async function guardarContratoDeInversion(params: {
 
 		if (!guardado) throw new Error("No se pudo guardar el contrato");
 
-		await tx
-			.insert(contractSignatories)
-			.values(filasDeFirmantes(guardado.id, firmantes));
+		// El que no salió a firma no tiene a nadie todavía: sus firmantes entran
+		// cuando se vincula el documento de WeeTrust.
+		if (firmantes.length > 0) {
+			await tx
+				.insert(contractSignatories)
+				.values(filasDeFirmantes(guardado.id, firmantes));
+		}
 
 		if (params.reemplaza) {
 			await tx
@@ -547,6 +584,8 @@ const ROLES_DE_INVERSIONES = [
  * Best-effort: el contrato ya quedó emitido, y un aviso que no sale no lo
  * deshace.
  */
+const TITULO_CONTRATOS_EN_FIRMA = "Contratos en firma:";
+
 async function avisarAInversiones(
 	batchId: string,
 	quien: Pick<NewNotification, "createdBy" | "createdByRole">,
@@ -578,6 +617,9 @@ async function avisarAInversiones(
 						eq(notifications.relatedEntityId, batchId),
 						eq(notifications.relatedEntityType, "contract"),
 						inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
+						// Sólo este aviso: el de "falta subir a WeeTrust" cuelga de la
+						// misma batería y puede haber llegado antes del Listo.
+						sql`${notifications.titulo} like ${`${TITULO_CONTRATOS_EN_FIRMA}%`}`,
 					),
 				)
 				.limit(1);
@@ -587,7 +629,7 @@ async function avisarAInversiones(
 			for (const rol of ROLES_DE_INVERSIONES) {
 				await createNotification(
 					{
-						titulo: `Contratos en firma: ${bateria.investorName}`,
+						titulo: `${TITULO_CONTRATOS_EN_FIRMA} ${bateria.investorName}`,
 						descripcion:
 							`Jurídico emitió los contratos de la compra de Q${monto}. ` +
 							"Los enlaces de firma están en la ficha del inversionista, y lo que se agregue después aparece ahí también.",
@@ -604,6 +646,261 @@ async function avisarAInversiones(
 	} catch (error) {
 		console.error(
 			`[avisarAInversiones] no se pudo avisar la batería ${batchId}:`,
+			error,
+		);
+	}
+}
+
+/**
+ * El contrato de un inversionista al que se le quiere vincular un documento de
+ * WeeTrust, con su batería, o el motivo por el que no se puede.
+ */
+async function contratoDeInversionParaVincular(
+	contractId: string,
+	rol: string,
+): Promise<{
+	contrato: typeof generatedLegalContracts.$inferSelect;
+	bateria: typeof investorContractBatches.$inferSelect;
+}> {
+	// Ver los contratos no alcanza: esto cambia a qué documento apuntan.
+	if (!PERMISSIONS.canLinkInvestorWeetrustDocument(rol)) {
+		throw new ORPCError("FORBIDDEN", {
+			message:
+				"Sólo inversiones y jurídico pueden agregar un documento de WeeTrust",
+		});
+	}
+
+	const [contrato] = await db
+		.select()
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId))
+		.limit(1);
+
+	if (!contrato?.investorId || !contrato.batchId) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Ese contrato no es de una batería de inversionista.",
+		});
+	}
+	if (contrato.status !== "pending" || contrato.replacedByContractId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Este contrato ya no está pendiente de firma: no se le puede agregar un documento.",
+		});
+	}
+	const motivo = motivoPorElQueNoSeVincula(contrato);
+	if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
+
+	const [bateria] = await db
+		.select()
+		.from(investorContractBatches)
+		.where(eq(investorContractBatches.id, contrato.batchId))
+		.limit(1);
+	if (!bateria) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "La batería de este contrato ya no existe.",
+		});
+	}
+	if (bateria.status === "descartada" || bateria.status === "completada") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				bateria.status === "descartada"
+					? "La batería de este contrato se descartó: no se le puede agregar un documento."
+					: "La batería de este contrato está cerrada: no se le puede agregar un documento.",
+		});
+	}
+
+	return { contrato, bateria };
+}
+
+/**
+ * Quiénes tienen que firmar el documento que se vincula, y qué verificación de
+ * identidad le toca al inversionista.
+ *
+ * Si el contrato ya salió a firma, los mismos que tenía. Si no, los que
+ * quedaron anotados al subirlo (la batería pudo cambiar en el medio). La
+ * verificación es la que se decidió
+ * al guardarlo (selfie y DPI en la primera compra, sólo firma después).
+ */
+async function firmantesParaVincularInversion(
+	contrato: typeof generatedLegalContracts.$inferSelect,
+	bateria: typeof investorContractBatches.$inferSelect,
+): Promise<{
+	esperados: FirmanteEsperado[];
+	identificacion: IdentificacionDelInversionista;
+}> {
+	const identificacion =
+		identificacionDelContrato(contrato.apiResponse) ??
+		// Los de antes de guardarlo salieron con selfie.
+		identificacionParaLaCompra(null);
+
+	const guardados = await db
+		.select()
+		.from(contractSignatories)
+		.where(eq(contractSignatories.contractId, contrato.id))
+		.orderBy(contractSignatories.position);
+
+	if (guardados.length === 0) {
+		// Subido sin espacios de firma: los que se decidieron al subirlo.
+		const deLaSubida = faltaVincular(contrato.apiResponse)?.firmantes;
+		if (deLaSubida?.length) {
+			return {
+				esperados: deLaSubida.map((f) => ({
+					role: f.role as SignerRole,
+					email: f.email,
+					name: f.name,
+				})),
+				identificacion,
+			};
+		}
+		return {
+			esperados: firmantesDeContratoDeInversion(contrato.contractType, {
+				nombre: bateria.investorName,
+				email: bateria.investorEmail,
+				identificacion,
+			}),
+			identificacion,
+		};
+	}
+
+	const lista: FirmanteEsperado[] = guardados.map((f) => ({
+		role: f.role as SignerRole,
+		email: f.email,
+		name: f.name,
+	}));
+	if (!isTestModeEnabled()) return { esperados: lista, identificacion };
+
+	const faltan = correosDePruebaFaltantes(lista);
+	if (faltan.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: el documento saldría a los correos reales.`,
+		});
+	}
+	return { esperados: aplicarCorreosDePrueba(lista), identificacion };
+}
+
+/**
+ * Renueva los enlaces de un contrato de inversión armado a mano en WeeTrust,
+ * sobre su mismo documento (ver `renovarEnlacesDelVinculado`).
+ */
+async function renovarEnlacesDeUnVinculado(
+	contrato: typeof generatedLegalContracts.$inferSelect,
+) {
+	const documentID = contrato.weetrustDocumentId as string;
+	const tarea = async () => {
+		if (contrato.batchId) {
+			const [bateria] = await db
+				.select({ status: investorContractBatches.status })
+				.from(investorContractBatches)
+				.where(eq(investorContractBatches.id, contrato.batchId))
+				.limit(1);
+			if (
+				bateria?.status === "descartada" ||
+				bateria?.status === "completada"
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						bateria.status === "descartada"
+							? "La batería de este contrato se descartó: no se pueden regenerar sus enlaces."
+							: "La batería de este contrato está cerrada: no se pueden regenerar sus enlaces.",
+				});
+			}
+		}
+
+		// Otra persona pudo anularlo, reemplazarlo o vincularle otro documento.
+		const [ahora] = await db
+			.select({
+				status: generatedLegalContracts.status,
+				reemplazadoPor: generatedLegalContracts.replacedByContractId,
+				weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+			})
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, contrato.id))
+			.limit(1);
+		if (
+			!ahora ||
+			ahora.status !== "pending" ||
+			ahora.reemplazadoPor ||
+			ahora.weetrustDocumentId !== documentID
+		) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Otra persona acaba de cambiar este contrato. Recargá para verlo.",
+			});
+		}
+
+		try {
+			return await renovarEnlacesDelVinculado(contrato.id, documentID);
+		} catch (error) {
+			console.error(
+				`[refreshInvestorContractSigningLinks] ${documentID}: no se renovaron los enlaces:`,
+				error,
+			);
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"WeeTrust no renovó los enlaces de este documento (pasa cuando ya firmaron todos). Si hay que mandarlo de nuevo, armá otro en WeeTrust y agregalo manualmente.",
+			});
+		}
+	};
+
+	const enlaces = contrato.batchId
+		? await conCandadoDeBateria(contrato.batchId, tarea)
+		: await tarea();
+
+	// Los enlaces que estaban en el hilo ya no sirven: van los nuevos.
+	const correo = contrato.batchId
+		? await mandarAlHiloSiYaSeMando(contrato.batchId, [
+				{ id: contrato.id, reemplazo: true },
+			])
+		: null;
+
+	return {
+		success: true,
+		message: "Enlaces regenerados: los anteriores ya no sirven",
+		contractId: contrato.id,
+		documentID,
+		enlaces,
+		correo,
+	};
+}
+
+/** Cómo se le dice a quien sube el documento qué pedirle al inversionista. */
+const VERIFICACION_EN_WEETRUST: Record<IdentificacionDelInversionista, string> =
+	{
+		face: "Selfie y DPI",
+		id: "DPI",
+		none: "Ninguna",
+	};
+
+/**
+ * Le avisa a inversiones que un contrato subido a mano no salió a firma.
+ *
+ * Inversiones es quien le da seguimiento a la firma con el inversionista: baja
+ * el PDF de la ficha, lo sube a WeeTrust, pone las firmas y pega el enlace para
+ * vincularlo. Best-effort: el contrato ya quedó guardado y marcado en la ficha.
+ */
+async function avisarQueFaltaVincular(params: {
+	batchId: string;
+	inversionista: string;
+	contractName: string;
+	quien: Pick<NewNotification, "createdBy" | "createdByRole">;
+}): Promise<void> {
+	try {
+		for (const rol of ROLES_DE_INVERSIONES) {
+			await createNotification({
+				titulo: `Contrato por subir a WeeTrust: ${params.inversionista}`,
+				descripcion:
+					`Jurídico subió "${params.contractName}", pero no se encontraron los espacios de firma y no salió a firmar. ` +
+					'Bajá el PDF desde la ficha del inversionista, subilo a WeeTrust, poné las firmas y pegá el enlace en "Agregar manualmente de WeeTrust".',
+				type: "action_required",
+				...params.quien,
+				assignedToRole: rol,
+				relatedEntityType: "contract",
+				relatedEntityId: params.batchId,
+			});
+		}
+	} catch (error) {
+		console.error(
+			`[uploadInvestorContract] no se pudo avisar a inversiones de ${params.batchId}:`,
 			error,
 		);
 	}
@@ -1332,12 +1629,19 @@ export const investorContractsRouter = {
 				documentName: bateria.investorName,
 				signers,
 				observers: CONTRATOS_OBSERVADORES,
+				// Un documento armado por fuera puede no traer los espacios de firma
+				// donde los espera el layout: se guarda igual, sin mandarlo.
+				guardarSiNoHayLineas: true,
 			});
 
 			const falla = motivoDeFalla(resultado);
 			if (falla) {
 				throw new ORPCError("BAD_REQUEST", { message: falla });
 			}
+
+			// No salió a firma: queda guardado, esperando que inversiones lo suba
+			// a WeeTrust y lo vincule.
+			const sinLineas = resultado.sinLineasDeFirma ?? null;
 
 			let contractId: string;
 			let estadoDelReemplazado: string | null = null;
@@ -1354,6 +1658,9 @@ export const investorContractsRouter = {
 						userId: context.userId,
 						identificacion,
 						subidoAMano: true,
+						...(sinLineas
+							? { sinLineasDeFirma: { motivo: sinLineas, firmantes: signers } }
+							: {}),
 						...(reemplazado && input.motivo
 							? {
 									reemplaza: {
@@ -1403,6 +1710,34 @@ export const investorContractsRouter = {
 			}
 
 			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
+
+			if (sinLineas) {
+				// Al hilo no va todavía: no tiene enlaces. Sale cuando se vincule.
+				await avisarQueFaltaVincular({
+					batchId: input.batchId,
+					inversionista: bateria.investorName,
+					contractName: input.contractName,
+					quien: { createdBy: context.userId, createdByRole: context.userRole },
+				});
+
+				return {
+					success: true,
+					correo: null,
+					/** No salió a firma: falta subirlo a WeeTrust y vincularlo. */
+					faltaVincular: true,
+					message:
+						"No se encontraron los espacios de firma en el PDF. El contrato quedó guardado sin enviar, y se le avisó a inversiones para que lo suba a WeeTrust y lo agregue manualmente.",
+					contractId,
+					contractType: input.contractType,
+					contractName: input.contractName,
+					documentLink: resultado.r2Key
+						? await getFileUrlWithBucketInKey(resultado.r2Key)
+						: resultado.linkDocument,
+					signingLinks: [],
+					signatories: [],
+				};
+			}
+
 			const correo = await mandarAlHiloSiYaSeMando(input.batchId, [
 				{ id: contractId, reemplazo: Boolean(reemplazado && input.motivo) },
 			]);
@@ -1410,6 +1745,7 @@ export const investorContractsRouter = {
 			return {
 				success: true,
 				correo,
+				faltaVincular: false,
 				message: reemplazado
 					? "Contrato reemplazado y mandado a firmar"
 					: "Contrato subido y mandado a firmar",
@@ -2041,6 +2377,140 @@ export const investorContractsRouter = {
 		}),
 
 	/**
+	 * Lo que hace falta para armar en WeeTrust el documento de un contrato de
+	 * inversión y vincularlo: a quiénes agregar como firmantes, con qué correo y
+	 * qué verificación de identidad pedirle a cada uno.
+	 */
+	getInvestorWeetrustLinkGuide: viewInvestorContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const { contrato, bateria } = await contratoDeInversionParaVincular(
+				input.contractId,
+				context.userRole,
+			);
+			const { esperados, identificacion } =
+				await firmantesParaVincularInversion(contrato, bateria);
+
+			return {
+				firmantes: guiaParaVincular(
+					esperados,
+					VERIFICACION_EN_WEETRUST[identificacion],
+				),
+				/** Ya tiene documento en WeeTrust: vincular otro lo reemplaza. */
+				reemplaza: Boolean(contrato.weetrustDocumentId),
+			};
+		}),
+
+	/**
+	 * Vincula con un contrato de inversión un documento que alguien armó a mano
+	 * en WeeTrust. Es lo mismo que en ventas (`linkWeetrustDocument`): para el
+	 * contrato subido a mano que no salió a firma porque el PDF no trae los
+	 * espacios, y para el que sí salió y se cambia por otro.
+	 *
+	 * Con `soloRevisar` no guarda nada: devuelve lo que encontró.
+	 */
+	linkInvestorWeetrustDocument: viewInvestorContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				/** Un enlace del documento en WeeTrust, o su ID. */
+				enlace: z.string().trim().min(1).max(600),
+				soloRevisar: z.boolean().default(false),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { contrato, bateria } = await contratoDeInversionParaVincular(
+				input.contractId,
+				context.userRole,
+			);
+			const batchId = bateria.id;
+
+			const { esperados } = await firmantesParaVincularInversion(
+				contrato,
+				bateria,
+			);
+			const { revision, estado, observadoEn } = await leerDocumentoParaVincular(
+				input.enlace,
+				esperados,
+			);
+			const { enviados: _enviados, ...loQueSeVio } = revision;
+
+			if (input.soloRevisar) {
+				return {
+					vinculado: false as const,
+					revision: loQueSeVio,
+					aviso: null,
+					reemplazo: false,
+					correo: null,
+				};
+			}
+			if (revision.problema) {
+				throw new ORPCError("BAD_REQUEST", { message: revision.problema });
+			}
+
+			// Con el candado de la batería, el mismo del descarte y del Listo: la
+			// batería se miró abierta, pero mientras WeeTrust contestaba pudo
+			// descartarse o cerrarse.
+			const { documentoAnterior } = await conCandadoDeBateria(
+				batchId,
+				async () => {
+					const [ahora] = await db
+						.select({ status: investorContractBatches.status })
+						.from(investorContractBatches)
+						.where(eq(investorContractBatches.id, batchId))
+						.limit(1);
+					if (ahora?.status !== "pendiente" && ahora?.status !== "en_proceso") {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La batería se cerró o se descartó mientras se agregaba el documento: no se guardó.",
+						});
+					}
+
+					// El documento que tiene ahora pudo terminar de firmarse sin que el
+					// CRM se enterara: reemplazarlo borraría un acuerdo firmado.
+					await exigirQueElActualNoEsteFirmado(contrato.id);
+
+					return db.transaction((tx) =>
+						vincularEnLaFila(tx, {
+							contractId: contrato.id,
+							revision,
+							observerUrl: estado.observerUrl ?? null,
+							observadoEn,
+							por:
+								context.session?.user?.name ||
+								context.session?.user?.email ||
+								context.userId,
+						}),
+					);
+				},
+			);
+
+			// Fuera del candado: bajar quién ya firmó (puede cerrar la batería y
+			// mandar el firmado a cartera) y borrar en WeeTrust el que tenía.
+			const { aviso } = await terminarDeVincular({
+				contractId: contrato.id,
+				estado,
+				observadoEn,
+				documentoAnterior,
+			});
+			await recalcularEstadoDeLaBateria(batchId, context.userId);
+
+			// Si jurídico ya dio el Listo, los enlaces van al hilo de la compra:
+			// es donde inversiones y los representantes esperan los suyos.
+			const correo = await mandarAlHiloSiYaSeMando(batchId, [
+				{ id: contrato.id, reemplazo: Boolean(documentoAnterior) },
+			]);
+
+			return {
+				vinculado: true as const,
+				revision: loQueSeVio,
+				aviso,
+				reemplazo: Boolean(documentoAnterior),
+				correo,
+			};
+		}),
+
+	/**
 	 * Emite el MISMO contrato con enlaces nuevos.
 	 *
 	 * Es la salida para los dos casos que pasan: el enlace venció, o la persona
@@ -2085,6 +2555,13 @@ export const investorContractsRouter = {
 					message:
 						"Este contrato ya lo firmaron todos: no hay enlaces que regenerar.",
 				});
+			}
+
+			// Armado a mano en WeeTrust: no se puede reemitir, porque sus firmas no
+			// están donde el layout las busca. Se le renuevan los enlaces sobre el
+			// mismo documento; los que ya firmaron no se tocan.
+			if (vinculadoDesdeWeeTrust(contrato.apiResponse)) {
+				return renovarEnlacesDeUnVinculado(contrato);
 			}
 
 			// La batería se mira antes de reemitir: WeeTrust manda las invitaciones

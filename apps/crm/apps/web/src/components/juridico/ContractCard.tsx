@@ -14,10 +14,16 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import { faltaVincular } from "server/src/lib/contrato-falta-vincular";
 import { PAQUETE_CARTAS } from "server/src/lib/paquete-cartas";
 import { toast } from "sonner";
 import { CartasDelPaquete } from "@/components/contracts/CartasDelPaquete";
 import { DescargarFirmadoButton } from "@/components/contracts/DescargarFirmadoButton";
+import {
+	AvisoFaltaVincular,
+	ETIQUETA_FALTA_VINCULAR,
+	EtiquetaVinculado,
+} from "@/components/contracts/FaltaVincular";
 import {
 	EtiquetaSubidoAMano,
 	RevisarSubidoAMano,
@@ -158,6 +164,8 @@ export function ContractCard({
 	// (allá casi siempre ya no existe).
 	const reemplazado = !!contract.replacedByContractId;
 	const inactivo = estaAnulado(contract);
+	// Subido a mano sin espacios de firma: guardado, pero sin salir a firmar.
+	const sinVincular = !inactivo && Boolean(faltaVincular(contract.apiResponse));
 	const estado =
 		reemplazado && contract.status === "pending"
 			? { label: "Reemplazado", color: statusConfig.cancelled.color }
@@ -246,6 +254,16 @@ export function ContractCard({
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
 						<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
+						<EtiquetaVinculado apiResponse={contract.apiResponse} />
+						{sinVincular && (
+							<Badge
+								variant="outline"
+								className={ETIQUETA_FALTA_VINCULAR.className}
+								title={ETIQUETA_FALTA_VINCULAR.title}
+							>
+								{ETIQUETA_FALTA_VINCULAR.label}
+							</Badge>
+						)}
 						{firmaEnPapel && (
 							<Badge
 								variant="outline"
@@ -316,12 +334,24 @@ export function ContractCard({
 					</div>
 				)}
 
-				{!firmaEnPapel && !inactivo && contract.status === "pending" && (
-					<RevisarSubidoAMano
+				{sinVincular && (
+					<AvisoFaltaVincular
 						apiResponse={contract.apiResponse}
-						observerUrl={contract.observerUrl}
+						puedeVincular={false}
+						quienVincula="análisis, que ya tiene el aviso"
+						onVincular={() => {}}
 					/>
 				)}
+
+				{!firmaEnPapel &&
+					!inactivo &&
+					!sinVincular &&
+					contract.status === "pending" && (
+						<RevisarSubidoAMano
+							apiResponse={contract.apiResponse}
+							observerUrl={contract.observerUrl}
+						/>
+					)}
 
 				{/* Enlaces de firma, uno por firmante y con su rol real */}
 				{!firmaEnPapel && firmantes.length > 0 && (

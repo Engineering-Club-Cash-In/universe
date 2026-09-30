@@ -103,7 +103,13 @@ export function UploadContractModal({
 			});
 		},
 		onSuccess: (data) => {
-			toast.success(data.message);
+			// Sin espacios de firma quedó guardado pero sin salir: no es un éxito
+			// a secas, y jurídico tiene que saber que lo sigue análisis.
+			if (data.faltaVincular) {
+				toast.warning(data.message, { duration: 12_000 });
+			} else {
+				toast.success(data.message);
+			}
 			limpiar();
 			onOpenChange(false);
 			onUploaded?.({

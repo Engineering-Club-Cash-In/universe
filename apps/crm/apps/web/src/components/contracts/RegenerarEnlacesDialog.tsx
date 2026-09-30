@@ -33,6 +33,7 @@ export function RegenerarEnlacesDialog({
 	contractId,
 	contractName,
 	hayFirmas,
+	mismoDocumento = false,
 	open,
 	onOpenChange,
 	onRegenerado,
@@ -41,6 +42,11 @@ export function RegenerarEnlacesDialog({
 	contractId: string;
 	contractName: string;
 	hayFirmas: boolean;
+	/**
+	 * El documento se armó a mano en WeeTrust: no se reemite, se le renuevan
+	 * los enlaces sobre el mismo documento a quien todavía no firmó.
+	 */
+	mismoDocumento?: boolean;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	/**
@@ -96,8 +102,9 @@ export function RegenerarEnlacesDialog({
 				<DialogHeader>
 					<DialogTitle>Renovar enlaces de firma</DialogTitle>
 					<DialogDescription>
-						Se manda otra vez "{contractName}" a firmar, con el mismo documento
-						y enlaces nuevos para todos.
+						{mismoDocumento
+							? `"${contractName}" se armó a mano en WeeTrust: se le piden enlaces nuevos sobre el mismo documento a quien todavía no firmó. Lo que ya se firmó se queda.`
+							: `Se manda otra vez "${contractName}" a firmar, con el mismo documento y enlaces nuevos para todos.`}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -120,7 +127,7 @@ export function RegenerarEnlacesDialog({
 						</Select>
 					</div>
 
-					{hayFirmas && (
+					{hayFirmas && !mismoDocumento && (
 						<p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
 							Este contrato ya tiene firmas. Al renovar los enlaces quedan sin
 							efecto y todos tendrán que firmar de nuevo. El documento anterior

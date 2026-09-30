@@ -12,6 +12,7 @@ import {
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
 import { auditRecord } from "../lib/audit";
+import { faltaVincular } from "../lib/contrato-falta-vincular";
 import { conCandadoDeFirma } from "../lib/contratos-candado";
 import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
 import {
@@ -279,6 +280,7 @@ async function enviarEnlacesDeFirma(params: {
 			pdfLink: generatedLegalContracts.pdfLink,
 			weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
 			signingProvider: generatedLegalContracts.signingProvider,
+			apiResponse: generatedLegalContracts.apiResponse,
 		})
 		.from(generatedLegalContracts)
 		.where(
@@ -418,6 +420,14 @@ async function enviarEnlacesDeFirma(params: {
 			(c.weetrustDocumentId || c.signingProvider) && !conFirmantes.has(c.id),
 	);
 
+	// Subidos a mano que no salieron a firma: están guardados, pero todavía sin
+	// documento en WeeTrust. No tienen firmantes, así que no se sabe a quién le
+	// faltaría: no se manda nada hasta que alguien los vincule. Si no, el resto
+	// sale como "enviado" y ese contrato no lo recibe nadie.
+	const sinVincular = contratosDeFirma.filter((c) =>
+		faltaVincular(c.apiResponse),
+	);
+
 	// Primero se decide qué le toca a cada uno, sin tocar la red.
 	const planes: Array<{
 		destinatario: DestinatarioDeFirma;
@@ -490,6 +500,8 @@ async function enviarEnlacesDeFirma(params: {
 		let motivo: string | undefined;
 		if (!stClient) {
 			motivo = "Servicio de mensajería no configurado";
+		} else if (sinVincular.length > 0) {
+			motivo = `Falta subir a WeeTrust y agregar manualmente: ${sinVincular.map((c) => c.contractName).join(", ")}. Hasta entonces no se manda ningún enlace.`;
 		} else if (sinFirmantesGuardados.length > 0) {
 			motivo = `No se guardaron los firmantes de: ${sinFirmantesGuardados.map((c) => c.contractName).join(", ")}. Hay que reemplazarlos desde jurídico antes de mandar.`;
 		} else if (

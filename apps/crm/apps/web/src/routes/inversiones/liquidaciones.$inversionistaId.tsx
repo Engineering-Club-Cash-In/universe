@@ -1306,6 +1306,7 @@ function InvestorLiquidacionesPage() {
 					puedeRenovar={PERMISSIONS.canRegenerateInvestorContractLinks(
 						userRole,
 					)}
+					puedeVincular={PERMISSIONS.canLinkInvestorWeetrustDocument(userRole)}
 				/>
 
 				{/* Documentos */}

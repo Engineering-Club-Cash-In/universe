@@ -26,7 +26,10 @@ import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
-import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
+import {
+	usuarioDuenoEnCartera,
+	usuariosDuenosPorSifco,
+} from "../lib/acceso-caso-cobro";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
@@ -147,11 +150,16 @@ export async function resolverPendientesInmovilizacion(
 
 /**
  * Al aprobar/rechazar: avisa al asesor que solicitó. El rechazo lleva el
- * motivo del supervisor.
+ * motivo del supervisor. Un apagado APROBADO, en cambio, lo ejecuta quien lleva
+ * el crédito en cartera HOY (puede no ser quien lo pidió si cartera lo reasignó
+ * mientras esperaba la decisión), así que ese aviso va al dueño actual, con
+ * quien solicitó de respaldo (review de Codex, PR #1807).
  */
 export async function notificarInmovilizacionResuelta(params: {
 	inmovilizacionId: string;
 	casoCobroId: string;
+	/** Crédito del caso: con él se resuelve el dueño en cartera del apagado aprobado. */
+	numeroCreditoSifco?: string | null;
 	accion: "apagado" | "reactivacion";
 	decision: "aprobada" | "rechazada";
 	motivoRechazo?: string | null;
@@ -175,6 +183,13 @@ export async function notificarInmovilizacionResuelta(params: {
 					: `El supervisor aprobó la solicitud de ${accionTexto} de unidad.`
 				: `El supervisor rechazó la solicitud de ${accionTexto} de unidad. Motivo: ${params.motivoRechazo ?? "sin especificar"}.`;
 
+		const ejecutaElDueno =
+			params.decision === "aprobada" && params.accion === "apagado";
+		const destinatario =
+			(ejecutaElDueno
+				? await usuarioDuenoEnCartera(params.numeroCreditoSifco)
+				: null) ?? params.solicitanteUserId;
+
 		await db.insert(notifications).values({
 			titulo,
 			descripcion,
@@ -188,7 +203,7 @@ export async function notificarInmovilizacionResuelta(params: {
 			createdBy: params.decididoPorUserId,
 			createdByRole: params.decididoPorRole ?? ("cobros_supervisor" as const),
 			assignedToRole: "cobros" as const,
-			assignedTo: params.solicitanteUserId,
+			assignedTo: destinatario,
 		});
 	});
 

@@ -263,8 +263,6 @@ export function InmovilizacionCard({
 							)}
 						{/* El apagado lo ejecuta el asesor, no el supervisor: LEGION lo
 						    aplica y acá se deja constancia con su confirmación. */}
-						{/* El apagado lo ejecuta el asesor, no el supervisor: LEGION lo
-						    aplica y acá se deja constancia con su confirmación. */}
 						{solicitudAbierta.accion === "apagado" &&
 							solicitudAbierta.estado === "aprobada" && (
 								<div className="mt-3 space-y-2">
@@ -272,18 +270,36 @@ export function InmovilizacionCard({
 										Aprobada. Pedile a LEGION que apague la unidad y, cuando lo
 										confirme, registralo acá con su confirmación.
 									</p>
-									<Button
-										onClick={() => setEjecutandoId(solicitudAbierta.id)}
-										size="sm"
-										variant="destructive"
-									>
-										<Lock className="mr-2 h-4 w-4" />
-										Registrar apagado ejecutado
-									</Button>
+									<div className="flex flex-wrap gap-2">
+										<Button
+											onClick={() => setEjecutandoId(solicitudAbierta.id)}
+											size="sm"
+											variant="destructive"
+										>
+											<Lock className="mr-2 h-4 w-4" />
+											Registrar apagado ejecutado
+										</Button>
+										{/* Si LEGION no lo aplica o ya no corresponde: sin esto la
+									    solicitud quedaba aprobada para siempre. El server exige el
+									    mismo acceso que para ejecutarlo. */}
+										<Button
+											disabled={cancelar.isPending}
+											onClick={() =>
+												cancelar.mutate({ id: solicitudAbierta.id })
+											}
+											size="sm"
+											variant="outline"
+										>
+											{cancelar.isPending && (
+												<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+											)}
+											Cancelar apagado
+										</Button>
+									</div>
 								</div>
 							)}
-						{/* Solo quien la pidió, y solo antes de que se decida: el server
-						    aplica la misma regla (cancelarSolicitud). */}
+						{/* Antes de que se decida solo quien la pidió (el server aplica
+						    la misma regla en cancelarSolicitud). */}
 						{solicitudAbierta.estado === "pendiente_aprobacion" &&
 							solicitudAbierta.solicitadoPor === session?.user?.id && (
 								<Button

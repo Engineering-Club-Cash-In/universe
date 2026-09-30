@@ -58,6 +58,15 @@ let historialUnidadFisicaMock: Record<string, unknown>[] | null = null;
 let llamadasAntesDeHistorialFisico = 1;
 let llamadasHistorialUnidad = 0;
 let updateDevuelveFila = true;
+// Fila que lee cancelarSolicitud antes de decidir quién puede cancelar; null
+// = la solicitud no existe (se comporta como pendiente de aprobación).
+let solicitudACancelarMock: {
+	accion: string;
+	estado: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string;
+} | null = null;
+let recordatoriosEjecucionResueltos: string[] = [];
 let contactoExisteMock = true;
 let contactoInmovilizacionIdMock: string | null = null;
 let contactoUpdateDevuelveFila = true;
@@ -149,6 +158,21 @@ function mockDb() {
 									? [{ id: CASO_ID }]
 									: [];
 							},
+						}),
+					};
+				}
+				if (
+					tabla === inmovilizacionesUnidad &&
+					campos &&
+					"estado" in campos &&
+					"accion" in campos &&
+					!("id" in campos)
+				) {
+					// cancelarSolicitud: select({ accion, estado, casoCobroId, sifco }).limit()
+					return {
+						where: () => ({
+							limit: async () =>
+								solicitudACancelarMock ? [solicitudACancelarMock] : [],
 						}),
 					};
 				}
@@ -418,7 +442,9 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	resolverPendientesInmovilizacion: async (id: string) => {
 		resolverPendientesLlamadas.push(id);
 	},
-	resolverRecordatoriosEjecucion: async () => undefined,
+	resolverRecordatoriosEjecucion: async (id: string) => {
+		recordatoriosEjecucionResueltos.push(id);
+	},
 	recordarInmovilizacionesSinEjecutar: async () => 0,
 	reconciliarAvisosLlamarCliente: async (casoCobroIds?: readonly string[]) => {
 		reconciliarAvisosLlamadas.push(casoCobroIds);
@@ -492,6 +518,8 @@ function reset() {
 	llamadasAntesDeHistorialFisico = 1;
 	llamadasHistorialUnidad = 0;
 	updateDevuelveFila = true;
+	solicitudACancelarMock = null;
+	recordatoriosEjecucionResueltos = [];
 	contactoExisteMock = true;
 	contactoInmovilizacionIdMock = null;
 	contactoUpdateDevuelveFila = true;
@@ -1661,6 +1689,64 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{ context: ctx("cobros") },
 		);
 		expect(resolverPendientesLlamadas).toEqual([INMOV_ID]);
+	});
+
+	it("cancelarSolicitud de un apagado aprobado: lo cancela el que lo puede ejecutar y cierra sus recordatorios", async () => {
+		solicitudACancelarMock = {
+			accion: "apagado",
+			estado: "aprobada",
+			casoCobroId: CASO_ID,
+			numeroCreditoSifco: "01010214100000",
+		};
+		const res = await call(
+			inmovilizacionUnidadRouter.cancelarSolicitud,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res).toEqual({ ok: true });
+		expect(eventosInsertados[0]).toMatchObject({
+			evento: "cancelar",
+			estadoAnterior: "aprobada",
+			estadoNuevo: "cancelada",
+		});
+		expect(resolverPendientesLlamadas).toEqual([INMOV_ID]);
+		expect(recordatoriosEjecucionResueltos).toEqual([INMOV_ID]);
+	});
+
+	it("cancelarSolicitud de un apagado aprobado por alguien sin acceso al caso: no cancela", async () => {
+		solicitudACancelarMock = {
+			accion: "apagado",
+			estado: "aprobada",
+			casoCobroId: CASO_ID,
+			numeroCreditoSifco: "01010214100000",
+		};
+		responsableCasoMock = "otro-asesor";
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.cancelarSolicitud,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		expect(eventosInsertados).toHaveLength(0);
+		expect(resolverPendientesLlamadas).toHaveLength(0);
+	});
+
+	it("cancelarSolicitud de una reactivación aprobada sigue sin permitirse (solo pendientes)", async () => {
+		solicitudACancelarMock = {
+			accion: "reactivacion",
+			estado: "aprobada",
+			casoCobroId: CASO_ID,
+			numeroCreditoSifco: "01010214100000",
+		};
+		updateDevuelveFila = false; // el UPDATE exige estado pendiente: no hay fila
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.cancelarSolicitud,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "CONFLICT" });
 	});
 
 	it("cancelarSolicitud que ya no está pendiente: CONFLICT y no toca avisos", async () => {

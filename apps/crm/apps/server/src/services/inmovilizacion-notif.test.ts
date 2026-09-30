@@ -348,6 +348,43 @@ describe("CB-041 — apagado aprobado: aviso al asesor", () => {
 		expect(String(aviso.descripcion)).toContain("Ficha 360");
 	});
 
+	it("si cartera reasignó el crédito mientras esperaba la decisión, el aviso va al dueño de hoy (review de Codex, PR #1807)", async () => {
+		duenoEnCarteraMock = "asesor-nuevo";
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "apagado",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-nuevo",
+		});
+	});
+
+	it("dueño sin usuario en el CRM: el aviso de apagado aprobado cae en quien solicitó", async () => {
+		duenoEnCarteraMock = null;
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "apagado",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-1",
+		});
+	});
+
+	it("un rechazo sigue yendo a quien solicitó aunque el crédito tenga otro dueño", async () => {
+		duenoEnCarteraMock = "asesor-nuevo";
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "apagado",
+			decision: "rechazada",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-1",
+		});
+	});
+
 	it("al aprobar una reactivación el texto sigue siendo el de siempre (la ejecuta el supervisor)", async () => {
 		await notificarInmovilizacionResuelta({
 			...aprobada,

@@ -1728,13 +1728,46 @@ export const inmovilizacionUnidadRouter = {
 		}),
 
 	/**
-	 * El propio solicitante cancela su solicitud, solo mientras siga
-	 * `pendiente_aprobacion`. Una vez aprobada ya no se cancela desde acá: el
-	 * supervisor ya la está coordinando con LEGION.
+	 * Cancela una solicitud abierta. Mientras está `pendiente_aprobacion` solo
+	 * la retira quien la pidió. Un APAGADO ya aprobado lo retira quien puede
+	 * ejecutarlo (mismo acceso que `ejecutarApagado`): si LEGION no lo aplica o
+	 * ya no corresponde, sin esto la solicitud quedaba `aprobada` para siempre,
+	 * bloqueando nuevas solicitudes del caso y con un recordatorio diario que
+	 * nadie podía cerrar (review de Codex, PR #1807).
 	 */
 	cancelarSolicitud: cobrosProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			const [previa] = await db
+				.select({
+					accion: inmovilizacionesUnidad.accion,
+					estado: inmovilizacionesUnidad.estado,
+					casoCobroId: inmovilizacionesUnidad.casoCobroId,
+					numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
+				})
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, input.id))
+				.limit(1);
+
+			const cancelaApagadoAprobado =
+				previa?.accion === "apagado" && previa.estado === "aprobada";
+			if (cancelaApagadoAprobado) {
+				await assertAccesoCasoCobro(
+					previa.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: previa.numeroCreditoSifco,
+					emailUsuario: context.session.user.email,
+					userRole: context.userRole,
+					accion: "cancelar el apagado aprobado de la unidad",
+				});
+			}
+			const estadoAnterior = cancelaApagadoAprobado
+				? ("aprobada" as const)
+				: ("pendiente_aprobacion" as const);
+
 			const cancelada = await db.transaction(async (tx) => {
 				const [fila] = await tx
 					.update(inmovilizacionesUnidad)
@@ -1742,8 +1775,10 @@ export const inmovilizacionUnidadRouter = {
 					.where(
 						and(
 							eq(inmovilizacionesUnidad.id, input.id),
-							eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
-							eq(inmovilizacionesUnidad.estado, "pendiente_aprobacion"),
+							eq(inmovilizacionesUnidad.estado, estadoAnterior),
+							cancelaApagadoAprobado
+								? eq(inmovilizacionesUnidad.accion, "apagado")
+								: eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
 						),
 					)
 					.returning({ id: inmovilizacionesUnidad.id });
@@ -1752,7 +1787,7 @@ export const inmovilizacionUnidadRouter = {
 				await tx.insert(inmovilizacionesUnidadEventos).values({
 					inmovilizacionId: input.id,
 					evento: "cancelar",
-					estadoAnterior: "pendiente_aprobacion",
+					estadoAnterior,
 					estadoNuevo: "cancelada",
 					usuarioId: context.userId,
 				});
@@ -1762,13 +1797,15 @@ export const inmovilizacionUnidadRouter = {
 			if (!cancelada) {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"La solicitud ya no está pendiente de aprobación, o no te pertenece.",
+						"La solicitud ya no se puede cancelar (ya se decidió o ejecutó), o no te pertenece.",
 				});
 			}
 
 			// Los supervisores ya no tienen nada que decidir: sin esto seguían
-			// viendo el aviso y al abrirlo chocaban con un CONFLICT.
+			// viendo el aviso y al abrirlo chocaban con un CONFLICT. Y el
+			// recordatorio de "falta ejecutarlo" deja de aplicar.
 			await resolverPendientesInmovilizacion(input.id);
+			await resolverRecordatoriosEjecucion(input.id);
 
 			return { ok: true };
 		}),
@@ -1894,6 +1931,7 @@ export const inmovilizacionUnidadRouter = {
 						casoCobroId: inmovilizacionesUnidad.casoCobroId,
 						accion: inmovilizacionesUnidad.accion,
 						solicitadoPor: inmovilizacionesUnidad.solicitadoPor,
+						numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
 					});
 				if (!fila) return null;
 
@@ -1920,6 +1958,7 @@ export const inmovilizacionUnidadRouter = {
 			await notificarInmovilizacionResuelta({
 				inmovilizacionId: actualizada.id,
 				casoCobroId: actualizada.casoCobroId,
+				numeroCreditoSifco: actualizada.numeroCreditoSifco,
 				accion: actualizada.accion,
 				decision: nuevoEstado,
 				motivoRechazo: input.motivoRechazo,

@@ -378,9 +378,6 @@ if (facturasExistentes.length > 0) {
               .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
           : undefined;
         if (cuotaInfo?.pagado !== false) {
-          if (pagoData.bandera_reinversion) {
-            throw new Error("nexa_invoice_distribution_requires_reconciliation");
-          }
           const recipients = rows.length === 0 ? [] : await db.select({
             inversionista_id: inversionistas.inversionista_id,
             nombre: inversionistas.nombre,
@@ -1014,7 +1011,7 @@ if (facturasExistentes.length > 0) {
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
-      } else if (tieneOperacionesPendientesFacturar) {
+      } else if (!nexaInvoiceAmounts && tieneOperacionesPendientesFacturar) {
         // ============================================
         // 🆕 NUEVO FLUJO DE INTERESES — PRORRATEO POR FECHA DE COMPRA/REINVERSIÓN
         //

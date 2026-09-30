@@ -78,7 +78,8 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router.indexOf("nexaPersistedInvoiceAmounts(rows.map")).toBeLessThan(router.indexOf("// 3️⃣ CONSTRUIR RECEPTOR"));
   expect(router).toContain("rows.length === 0 && pagoData.cuota_id !== null");
   expect(router).toContain("cuotaInfo?.pagado !== false");
-  expect(router.indexOf("cuotaInfo?.pagado !== false")).toBeLessThan(router.indexOf("pagoData.bandera_reinversion"));
+  expect(router).not.toContain("nexa_invoice_distribution_requires_reconciliation");
+  expect(router).toContain("} else if (!nexaInvoiceAmounts && tieneOperacionesPendientesFacturar) {");
   expect(router).toContain(".from(inversionistas)");
   expect(router).toContain("inArray(inversionistas.inversionista_id, rows.map(row => row.inversionista_id))");
   expect(router).not.toContain("investorIds: [...inversionistasDelPago.map");

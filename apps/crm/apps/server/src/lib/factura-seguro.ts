@@ -123,23 +123,36 @@ export function resolverAseguradora(
 	return valor === "gyt" ? "gyt" : "universales";
 }
 
-const VARIABLE_DESTINATARIOS: Record<Aseguradora, string> = {
-	gyt: "CORREOS_ASEGURADORA_GYT",
-	universales: "CORREOS_ASEGURADORA_UNIVERSALES",
+// Correos de pólizas de cada aseguradora: son fijos. Mientras negocio no pase
+// los reales, apuntan a Frederic. Fuera de producción no les llega nada:
+// @cci/email con SERVER=DEV redirige todo a EMAIL_DEV_RECIPIENT.
+export const CORREOS_POLIZAS_GYT: readonly string[] = [
+	"frederic.s@clubcashin.com",
+];
+export const CORREOS_POLIZAS_UNIVERSALES: readonly string[] = [
+	"frederic.s@clubcashin.com",
+];
+
+export type CorreosPorAseguradora = Record<Aseguradora, readonly string[]>;
+
+const CORREOS_POLIZAS: CorreosPorAseguradora = {
+	gyt: CORREOS_POLIZAS_GYT,
+	universales: CORREOS_POLIZAS_UNIVERSALES,
 };
 
 const correo = z.string().email();
 
-/** Destinatarios configurados para la aseguradora; los inválidos se descartan. */
+/**
+ * Destinatarios de la aseguradora, limpios y sin duplicados. Una lista vacía
+ * deja el envío en `sin_destinatario`.
+ */
 export function destinatariosDe(
 	aseguradora: Aseguradora,
-	env: Record<string, string | undefined> = process.env,
+	correos: CorreosPorAseguradora = CORREOS_POLIZAS,
 ): string[] {
-	const crudo = env[VARIABLE_DESTINATARIOS[aseguradora]] ?? "";
 	return [
 		...new Set(
-			crudo
-				.split(",")
+			correos[aseguradora]
 				.map((c) => c.trim().toLowerCase())
 				.filter((c) => correo.safeParse(c).success),
 		),

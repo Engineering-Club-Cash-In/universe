@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+	CORREOS_POLIZAS_GYT,
+	CORREOS_POLIZAS_UNIVERSALES,
 	destinatariosDe,
 	puedeReenviarFacturaSeguro,
 	puedeSubirFacturaSeguro,
@@ -81,14 +83,22 @@ describe("resolverAseguradora", () => {
 });
 
 describe("destinatariosDe", () => {
-	test("lee la lista de la aseguradora, limpia y sin duplicados", () => {
-		const env = {
-			CORREOS_ASEGURADORA_GYT: " a@gyt.com, B@gyt.com ,a@gyt.com,no-es-correo,",
-			CORREOS_ASEGURADORA_UNIVERSALES: "",
+	test("usa la lista de la aseguradora, limpia y sin duplicados", () => {
+		const correos = {
+			gyt: [" a@gyt.com", "B@gyt.com ", "a@gyt.com", "no-es-correo", ""],
+			universales: [],
 		};
-		expect(destinatariosDe("gyt", env)).toEqual(["a@gyt.com", "b@gyt.com"]);
-		expect(destinatariosDe("universales", env)).toEqual([]);
-		expect(destinatariosDe("universales", {})).toEqual([]);
+		expect(destinatariosDe("gyt", correos)).toEqual(["a@gyt.com", "b@gyt.com"]);
+		expect(destinatariosDe("universales", correos)).toEqual([]);
+	});
+
+	test("por defecto, las listas fijas de pólizas de cada aseguradora", () => {
+		expect(destinatariosDe("gyt")).toEqual([...CORREOS_POLIZAS_GYT]);
+		expect(destinatariosDe("universales")).toEqual([
+			...CORREOS_POLIZAS_UNIVERSALES,
+		]);
+		expect(destinatariosDe("gyt").length).toBeGreaterThan(0);
+		expect(destinatariosDe("universales").length).toBeGreaterThan(0);
 	});
 });
 

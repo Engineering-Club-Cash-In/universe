@@ -14,6 +14,7 @@ import {
 	partnerMembers,
 } from "../db/schema/partners";
 import { quotations } from "../db/schema/quotations";
+import type { CorreosPorAseguradora } from "../lib/factura-seguro";
 import { ROLES } from "../lib/roles";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -143,6 +144,19 @@ mock.module("../lib/storage", () => ({
 	},
 	getFileUrl: async (key: string) => `https://r2.test/${key}`,
 }));
+// Solo cambia la lista por defecto; con una lista explícita (los tests de
+// lib/factura-seguro) se comporta como el módulo real.
+const facturaReal = await import("../lib/factura-seguro");
+// Se guarda antes de mockear: Bun reemplaza los exports del módulo ya cargado.
+const destinatariosReal = facturaReal.destinatariosDe;
+let correosPolizas: CorreosPorAseguradora = { gyt: [], universales: [] };
+mock.module("../lib/factura-seguro", () => ({
+	...facturaReal,
+	destinatariosDe: (
+		aseguradora: "gyt" | "universales",
+		correos?: CorreosPorAseguradora,
+	) => destinatariosReal(aseguradora, correos ?? correosPolizas),
+}));
 // La plantilla real sí corre; solo el envío se simula.
 const correoReal = await import("../lib/correo-factura-seguro");
 mock.module("../lib/correo-factura-seguro", () => ({
@@ -204,8 +218,10 @@ beforeEach(() => {
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
-	process.env.CORREOS_ASEGURADORA_GYT = "polizas@gyt.test";
-	process.env.CORREOS_ASEGURADORA_UNIVERSALES = "polizas@universales.test";
+	correosPolizas = {
+		gyt: ["polizas@gyt.test"],
+		universales: ["polizas@universales.test"],
+	};
 });
 
 describe("facturaSeguro en el caso", () => {
@@ -357,8 +373,8 @@ describe("subirFacturaSeguro", () => {
 		expect(borradosR2).toHaveLength(0);
 	});
 
-	test("sin destinatarios configurados no se envía, pero la factura queda", async () => {
-		process.env.CORREOS_ASEGURADORA_GYT = "";
+	test("sin destinatarios no se envía, pero la factura queda", async () => {
+		correosPolizas = { ...correosPolizas, gyt: [] };
 		const r = await subir();
 		expect(r.envio).toBe("sin_destinatario");
 		expect(correos).toHaveLength(0);

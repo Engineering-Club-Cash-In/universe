@@ -384,27 +384,20 @@ if (facturasExistentes.length > 0) {
               .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
           : undefined;
         if (cuotaInfo?.pagado !== false) {
-          const absentCubeFullSale = rows.length > 0
-            && !inversionistasDelCredito.some(inv => inv.inversionista_id === 86);
           const rowInvestorIds = rows.map(row => row.inversionista_id);
           const recipients = rows.length === 0 ? [] : await db.select({
             inversionista_id: inversionistas.inversionista_id,
             nombre: inversionistas.nombre,
             emite_factura: inversionistas.emite_factura,
           }).from(inversionistas)
-            .where(inArray(inversionistas.inversionista_id, absentCubeFullSale
-              ? [...rowInvestorIds, 86]
-              : rowInvestorIds));
+            .where(inArray(inversionistas.inversionista_id, [...new Set([...rowInvestorIds, 86])]));
           const persistedRecipients = recipients.filter(inv => rowInvestorIds.includes(inv.inversionista_id));
           nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
             ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
           })), {
             interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
             recipients: persistedRecipients,
-            absentCubeFullSale: absentCubeFullSale ? {
-              investorIds: inversionistasDelCredito.map(inv => inv.inversionista_id),
-              cube: recipients.find(inv => inv.inversionista_id === 86),
-            } : undefined,
+            canonicalCube: recipients.find(inv => inv.inversionista_id === 86),
           });
           nexaInvoiceRecipients = new Map(recipients
             .filter(inv => nexaInvoiceAmounts?.has(inv.inversionista_id))
@@ -1380,10 +1373,10 @@ if (facturasExistentes.length > 0) {
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
           const persistedCubeId = nexaInvoiceAmounts ? 86 : cubeId;
-          const persistedCube = persistedCubeId == null ? undefined : nexaInvoiceAmounts?.get(persistedCubeId);
+          const persistedCube = nexaInvoiceAmounts?.get(86);
           interesCubeIvaPersistido = persistedCube?.montoImpuesto;
-          const totalCubeFinal = persistedCube
-            ? new Big(persistedCube.total)
+          const totalCubeFinal = nexaInvoiceAmounts
+            ? new Big(persistedCube?.total ?? 0)
             : repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
 
           // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
@@ -1895,7 +1888,9 @@ if (facturasExistentes.length > 0) {
 
         const persistedCube = nexaInvoiceAmounts?.get(86);
         interesCubeIvaPersistido = persistedCube?.montoImpuesto;
-        const totalCube = persistedCube ? new Big(persistedCube.total) : cubePropio.plus(cashInAcumulado);
+        const totalCube = nexaInvoiceAmounts
+          ? new Big(persistedCube?.total ?? 0)
+          : cubePropio.plus(cashInAcumulado);
 
         // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
         interesCubeConIva = totalCube;

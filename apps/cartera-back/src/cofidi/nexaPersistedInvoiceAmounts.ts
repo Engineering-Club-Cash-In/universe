@@ -19,7 +19,7 @@ export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
   interest: string;
   vat: string;
   recipients: Recipient[];
-  absentCubeFullSale?: { investorIds: number[]; cube: Recipient | undefined };
+  canonicalCube?: Recipient;
 }) {
   const result = new Map<number, {
     precioUnitario: number; precio: number; montoGravable: number;
@@ -56,17 +56,12 @@ export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
     throw new Error("nexa_invoice_distribution_invalid");
   }
   if (!interest.eq(expected.interest) || !vat.eq(expected.vat)) {
-    const fullSale = expected.absentCubeFullSale;
-    const investorIds = fullSale?.investorIds ?? [];
-    const cube = fullSale?.cube;
+    const cube = expected.canonicalCube;
     const expectedInterest = new Big(expected.interest);
     const expectedVat = new Big(expected.vat);
     const residualInterest = expectedInterest.minus(interest);
     const residualVat = expectedVat.minus(vat);
-    if (result.has(86)
-      || investorIds.length !== result.size
-      || new Set(investorIds).size !== investorIds.length
-      || investorIds.some(id => id === 86 || !result.has(id))
+    if (result.size === 0 || result.has(86)
       || !cube
       || cube.inversionista_id !== 86
       || !cube.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")

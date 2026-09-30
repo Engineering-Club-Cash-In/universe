@@ -40,7 +40,7 @@ test("recovers the exact persisted CUBE base and IVA residual after a full sale"
   const result = nexaPersistedInvoiceAmounts([rows[0]!], {
     ...expected,
     recipients: [recipients[0]!],
-    absentCubeFullSale: { investorIds: [1], cube: recipients[1] },
+    canonicalCube: recipients[1],
   });
 
   expect(result.get(86)).toEqual({
@@ -51,34 +51,39 @@ test("recovers the exact persisted CUBE base and IVA residual after a full sale"
     total: 235.05,
   });
 });
-test("rejects absent-CUBE residuals without an unambiguous full-sale shape", () => {
+test("recovers an absent-CUBE residual without consulting the current credit roster", () => {
+  expect(nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+    canonicalCube: recipients[1],
+  }).get(86)?.total).toBe(235.05);
+});
+test("rejects invalid absent-CUBE residuals", () => {
   expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
     ...expected,
     recipients: [recipients[0]!],
-  })).toThrow("nexa_invoice_distribution_mismatch");
-  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
-    ...expected,
-    recipients: [recipients[0]!],
-    absentCubeFullSale: { investorIds: [1, 2], cube: recipients[1] },
   })).toThrow("nexa_invoice_distribution_mismatch");
   expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
     interest: "500",
     vat: "60",
     recipients: [recipients[0]!],
-    absentCubeFullSale: { investorIds: [1], cube: recipients[1] },
+    canonicalCube: recipients[1],
+  })).toThrow("nexa_invoice_distribution_mismatch");
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    interest: "779.521",
+    vat: expected.vat,
+    recipients: [recipients[0]!],
+    canonicalCube: recipients[1],
   })).toThrow("nexa_invoice_distribution_mismatch");
   expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
     ...expected,
     recipients: [recipients[0]!],
-    absentCubeFullSale: { investorIds: [1], cube: undefined },
+    canonicalCube: { ...recipients[1]!, nombre: "OTRO INVERSOR" },
   })).toThrow("nexa_invoice_distribution_mismatch");
   expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
     ...expected,
     recipients: [recipients[0]!],
-    absentCubeFullSale: {
-      investorIds: [1],
-      cube: { ...recipients[1]!, nombre: "OTRO INVERSOR" },
-    },
+    canonicalCube: { ...recipients[1]!, inversionista_id: 87 },
   })).toThrow("nexa_invoice_distribution_mismatch");
 });
 test("requires canonical id 86 when CUBE is present", () => {
@@ -167,8 +172,9 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).not.toContain("nexa_invoice_distribution_requires_reconciliation");
   expect(router).toContain("} else if (!nexaInvoiceAmounts && tieneOperacionesPendientesFacturar) {");
   expect(router).toContain(".from(inversionistas)");
-  expect(router).toContain("inArray(inversionistas.inversionista_id, absentCubeFullSale");
+  expect(router).toContain("new Set([...rowInvestorIds, 86])");
   expect(router).not.toContain("investorIds: [...inversionistasDelPago.map");
+  expect(router).not.toContain("investorIds: inversionistasDelCredito.map");
   expect(router).toContain("const inversionistasMalConfigurados = nexaInvoiceAmounts ? [] : inversionistasDelCredito");
   expect(router).toContain("const persistedCubeId = nexaInvoiceAmounts ? 86 : cubeId");
   expect(router).toContain(".filter(id => id !== persistedCubeId)");
@@ -176,8 +182,7 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain(": inversionistasDelPago.map(inv => inv.inversionista_id)");
   expect(router).toContain("const inv = nexaInvoiceRecipients?.get(invId)");
   expect(router).toContain("const persistedCube = nexaInvoiceAmounts?.get(86)");
-  expect(router).toContain("absentCubeFullSale:");
-  expect(router).toContain("investorIds: inversionistasDelCredito.map(inv => inv.inversionista_id)");
+  expect(router).toContain("canonicalCube: recipients.find(inv => inv.inversionista_id === 86)");
   expect(router).toContain("fecha_aplicado: pagos_credito.fecha_aplicado");
   expect(router).toContain("createdAt: pagos_credito.createdAt");
   expect(router).toContain("updated_at: compras_credito_inversionista.updated_at");
@@ -193,5 +198,9 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)))");
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)))");
   expect(router.match(/interesCubeIvaPersistido = persistedCube\?\.montoImpuesto;/g)).toHaveLength(2);
+  expect(router).toMatch(/const totalCubeFinal = nexaInvoiceAmounts\s*\? new Big\(persistedCube\?\.total \?\? 0\)/);
+  expect(router).toMatch(/const totalCube = nexaInvoiceAmounts\s*\? new Big\(persistedCube\?\.total \?\? 0\)/);
+  expect(router).not.toContain("const totalCubeFinal = persistedCube");
+  expect(router).not.toContain("const totalCube = persistedCube");
   expect(router).toContain('pushRubro("INTERES", interesCubeConIva, true, interesCubeIvaPersistido)');
 });

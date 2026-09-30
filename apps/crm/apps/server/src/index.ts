@@ -113,6 +113,7 @@ import {
 } from "./routers/pagalo-supervision";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import { referenciasCobrosRouter } from "./routers/referencias-cobros";
+import { tareasCobrosRouter } from "./routers/tareas-cobros";
 import { visitasCobrosRouter } from "./routers/visitas-cobros";
 import { wialonRouter } from "./routers/wialon";
 import externalContractsRouter from "./routes/external-contracts";
@@ -271,6 +272,7 @@ const handler = new RPCHandler(
 		gpsEventosRouter,
 		referenciasCobrosRouter,
 		visitasCobrosRouter,
+		tareasCobrosRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

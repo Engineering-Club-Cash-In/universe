@@ -165,6 +165,16 @@ intervenir a tiempo. Si nadie llama dentro del plazo, se genera una alerta.
   esa alerta. Son señales distintas (falta del asesor vs. tarea del supervisor); si el ruido
   molesta, excluir B3 de `sin_contacto_3d` es un cambio de una línea, pero es decisión de
   negocio.
+- **Dónde se ve la tarea:**
+  - **Notificaciones:** el filtro de alertas de cobros tiene la opción **"Solo tareas"**
+    (solo `b3_llamada_supervisor`; la alerta de vencida no es tarea). La tarjeta muestra
+    "Vence el dd/mm/aaaa".
+  - **"Mis tareas" en la Cola del día** (`/cobros/cola`, solo supervisor): el supervisor no
+    tiene agenda propia — `/cobros/mi-dia` lo redirige a la cola del equipo — así que sus
+    tareas abiertas se listan en un bloque arriba de la cola, ordenadas vencidas → vencen
+    hoy → en plazo, con badge de plazo y botón "Ver caso". Se alimenta de `getMisTareasCobros`
+    (solo `notifications` local): se ve aunque cartera-back esté caído y la cola falle. Se
+    oculta si no hay tareas.
 - **Fuera de alcance:** las tareas **no** son ítems de la cola ni entran a los snapshots de
   agenda ni al % de cumplimiento (mide gestión de créditos del asesor). Migración:
   `0068_cb035_b3_llamada.sql`.

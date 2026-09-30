@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import { BucketMultiSelect } from "@/components/cobros/bucket-multi-select";
 import { ConfigurarSlaModal } from "@/components/cobros/configurar-sla-modal";
+import { MisTareasB3 } from "@/components/cobros/mis-tareas-b3";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -402,6 +403,10 @@ function ColaDiaPage() {
 							</Button>
 						))}
 					</div>
+					{/* CB-035: tareas B3 del supervisor, dentro de la misma tarjeta.
+					    Independiente de la cola (no usa cartera-back), así que se ve
+					    aunque `getColaDia` falle. */}
+					{esSupervisor && <MisTareasB3 onVerCaso={irAlDetalle} />}
 				</CardHeader>
 			</Card>
 

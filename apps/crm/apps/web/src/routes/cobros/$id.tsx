@@ -328,6 +328,16 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 		clase:
 			"bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
 	},
+	// CB-035: tarea de llamada por ingreso a B3, y su alerta de vencimiento.
+	b3_llamada_supervisor: {
+		label: "Llamar: ingresó a B3",
+		clase:
+			"bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+	},
+	b3_llamada_vencida: {
+		label: "Llamada B3 vencida",
+		clase: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+	},
 };
 
 function getMetodoIcon(metodo: string) {

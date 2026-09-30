@@ -1,0 +1,55 @@
+import { describe, expect, test } from "bun:test";
+import { etiquetaEnvioAseguradora, textoSubidoPor } from "./envio-aseguradora";
+
+describe("etiquetaEnvioAseguradora", () => {
+	test("nombra a la aseguradora según el estado del correo", () => {
+		expect(
+			etiquetaEnvioAseguradora({
+				estado: "enviado",
+				aseguradora: "universales",
+			})?.texto,
+		).toBe("Correo enviado a Seguros Universales");
+		expect(
+			etiquetaEnvioAseguradora({ estado: "fallido", aseguradora: "gyt" })
+				?.texto,
+		).toBe("No se pudo enviar el correo a Seguros G&T");
+		expect(
+			etiquetaEnvioAseguradora({
+				estado: "sin_destinatario",
+				aseguradora: "gyt",
+			})?.texto,
+		).toBe("Correo a Seguros G&T pendiente de configuración");
+		expect(
+			etiquetaEnvioAseguradora({ estado: "pendiente", aseguradora: "gyt" })
+				?.texto,
+		).toBe("Correo a Seguros G&T en proceso");
+	});
+
+	test("un documento que no es la factura del tracker no lleva etiqueta", () => {
+		expect(etiquetaEnvioAseguradora(null)).toBeNull();
+		expect(etiquetaEnvioAseguradora(undefined)).toBeNull();
+		expect(
+			etiquetaEnvioAseguradora({ estado: null, aseguradora: null }),
+		).toBeNull();
+	});
+});
+
+describe("textoSubidoPor", () => {
+	test("la factura del tracker dice desde qué agencia se subió", () => {
+		expect(
+			textoSubidoPor({
+				uploadedBy: { name: "QA Tracker Socio Vendedor" },
+				subidoDesde: "JIM GUATEMALA ",
+			}),
+		).toBe("Subido desde JIM GUATEMALA por QA Tracker Socio Vendedor");
+	});
+
+	test("los demás documentos quedan igual que antes", () => {
+		expect(
+			textoSubidoPor({ uploadedBy: { name: "Ana" }, subidoDesde: null }),
+		).toBe("Subido por Ana");
+		expect(textoSubidoPor({ uploadedBy: null })).toBe(
+			"Subido por Usuario desconocido",
+		);
+	});
+});

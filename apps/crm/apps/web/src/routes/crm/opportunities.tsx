@@ -108,6 +108,10 @@ import {
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import {
+	etiquetaEnvioAseguradora,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
+import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
@@ -4922,6 +4926,16 @@ function DocumentsManager({
 													</Badge>
 												);
 											})()}
+										{(() => {
+											const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+											return (
+												envio && (
+													<Badge className={`flex-shrink-0 text-xs ${envio.className}`}>
+														{envio.texto}
+													</Badge>
+												)
+											);
+										})()}
 									</div>
 											{doc.description && (
 												<p className="mt-1 text-muted-foreground text-xs">
@@ -4930,10 +4944,7 @@ function DocumentsManager({
 											)}
 											<div className="mt-1 flex items-center gap-4 text-muted-foreground text-xs">
 												<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-												<span>
-													Subido por{" "}
-													{doc.uploadedBy?.name || "Usuario desconocido"}
-												</span>
+												<span>{textoSubidoPor(doc)}</span>
 												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
 											</div>
 										</div>

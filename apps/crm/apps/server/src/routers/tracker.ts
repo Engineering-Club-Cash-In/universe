@@ -32,6 +32,7 @@ import {
 import {
 	type Aseguradora,
 	destinatariosDe,
+	envioSinConfirmar,
 	MENSAJE_MOTIVO,
 	MENSAJE_SIN_REENVIO,
 	MIME_FACTURA_SEGURO,
@@ -97,6 +98,8 @@ export type CasoTracker = {
 		subidaAt: string | null;
 		envio: EstadoEnvioFactura | null;
 		reenviable: boolean;
+		/** `pendiente` pasado el plazo, para cualquier rol (ver envioSinConfirmar). */
+		sinConfirmar: boolean;
 	};
 };
 
@@ -322,6 +325,10 @@ function aCaso(
 				sellerId: fila.sellerId,
 				membresias,
 			}).ok,
+			sinConfirmar: envioSinConfirmar({
+				envio: fila.facturaEnvio ?? null,
+				envioActualizadoAt: fila.facturaActualizadaAt ?? null,
+			}),
 		},
 	};
 }

@@ -137,6 +137,24 @@ export const MENSAJE_SIN_REENVIO: Record<MotivoSinReenvio, string> = {
 // entre reservar y registrar el resultado) y se puede reenviar.
 export const PENDIENTE_ABANDONADO_MS = 10 * 60 * 1000;
 
+/**
+ * Un envío `pendiente` que ya pasó el plazo: no se sabe si salió. Vale para
+ * cualquiera que vea el caso (el gerente también), no solo para quien puede
+ * reintentarlo.
+ */
+export function envioSinConfirmar(caso: {
+	envio: string | null;
+	envioActualizadoAt?: Date | null;
+	ahora?: Date;
+}): boolean {
+	if (caso.envio !== "pendiente" || !caso.envioActualizadoAt) return false;
+	const ahora = caso.ahora ?? new Date();
+	return (
+		ahora.getTime() - caso.envioActualizadoAt.getTime() >
+		PENDIENTE_ABANDONADO_MS
+	);
+}
+
 /** El reenvío existe solo para cuando el primer envío no salió. */
 export function puedeReenviarFacturaSeguro(caso: {
 	envio: string | null;
@@ -150,13 +168,8 @@ export function puedeReenviarFacturaSeguro(caso: {
 		return { ok: false, motivo: "no_es_el_vendedor" };
 	if (caso.envio === null) return { ok: false, motivo: "sin_factura" };
 	if (caso.envio === "enviado") return { ok: false, motivo: "ya_enviada" };
-	if (caso.envio === "pendiente") {
-		const ahora = caso.ahora ?? new Date();
-		const abandonado =
-			!!caso.envioActualizadoAt &&
-			ahora.getTime() - caso.envioActualizadoAt.getTime() >
-				PENDIENTE_ABANDONADO_MS;
-		if (!abandonado) return { ok: false, motivo: "en_curso" };
+	if (caso.envio === "pendiente" && !envioSinConfirmar(caso)) {
+		return { ok: false, motivo: "en_curso" };
 	}
 	return { ok: true };
 }

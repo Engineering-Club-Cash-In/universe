@@ -3,6 +3,7 @@ import {
 	CORREOS_POLIZAS_GYT,
 	CORREOS_POLIZAS_UNIVERSALES,
 	destinatariosDe,
+	envioSinConfirmar,
 	nombreDeFactura,
 	tipoRealDeFactura,
 	puedeReenviarFacturaSeguro,
@@ -104,6 +105,38 @@ describe("destinatariosDe", () => {
 		]);
 		expect(destinatariosDe("gyt").length).toBeGreaterThan(0);
 		expect(destinatariosDe("universales").length).toBeGreaterThan(0);
+	});
+});
+
+describe("envioSinConfirmar", () => {
+	const ahora = new Date("2026-09-30T12:00:00Z");
+	const hace = (minutos: number) =>
+		new Date(ahora.getTime() - minutos * 60_000);
+
+	test("pendiente pasado el plazo: sin confirmar", () => {
+		expect(
+			envioSinConfirmar({
+				envio: "pendiente",
+				envioActualizadoAt: hace(11),
+				ahora,
+			}),
+		).toBe(true);
+	});
+
+	test("pendiente reciente, otro estado o sin fecha: no", () => {
+		expect(
+			envioSinConfirmar({
+				envio: "pendiente",
+				envioActualizadoAt: hace(5),
+				ahora,
+			}),
+		).toBe(false);
+		for (const envio of ["enviado", "fallido", "sin_destinatario", null]) {
+			expect(
+				envioSinConfirmar({ envio, envioActualizadoAt: hace(60), ahora }),
+			).toBe(false);
+		}
+		expect(envioSinConfirmar({ envio: "pendiente", ahora })).toBe(false);
 	});
 });
 

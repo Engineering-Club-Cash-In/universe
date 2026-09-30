@@ -3,6 +3,7 @@ import { describe, it, expect } from "bun:test";
 import Big from "big.js";
 import {
   decidirMoraDelCron,
+  decidirMoraTrasRomperConvenio,
 } from "./latefee";
 import {
   moraPendientePorCuota,
@@ -185,6 +186,44 @@ describe("moraRestaPendiente — max(0) es por cuota, no global", () => {
     // Total no debe restar el sobrante de la cuota 1 a la cuota 2
     const sumaIndividual = pendiente1.pendiente.plus(pendiente2.pendiente);
     expect(resultado.total.toFixed(2)).toBe(sumaIndividual.toFixed(2));
+  });
+});
+
+describe("moraRestaPendiente — contrato entre los cuatro", () => {
+  it("Prueba 2.1: decidirMoraDelCron y decidirMoraTrasRomperConvenio devuelven el mismo monto", () => {
+    const capital = new Big(10_000);
+    const diasAtraso = [15, 25];
+
+    // Via decidirMoraDelCron
+    const cuotasParaPendiente: CuotaParaPendiente[] = diasAtraso.map(
+      (dias, idx) => ({
+        cuota_id: idx + 1,
+        diasAtraso: dias,
+        pagado: 0,
+      })
+    );
+    const decisionCron = decidirMoraDelCron({
+      capital,
+      cuotasParaPendiente,
+    });
+
+    // Via decidirMoraTrasRomperConvenio
+    const decisionConvenio = decidirMoraTrasRomperConvenio({
+      capital,
+      cuotasParaPendiente,
+    });
+
+    // Ambas deben dar la misma acción y monto
+    if (decisionCron.accion === "APLICAR" && decisionConvenio.accion === "CREAR_MORA") {
+      expect(decisionCron.montoStr).toBe(decisionConvenio.montoMora.toFixed(2));
+    } else if (decisionCron.accion === "DESACTIVAR" && decisionConvenio.accion === "ACTIVAR") {
+      // Ambas rechazan
+      expect(true).toBe(true);
+    } else {
+      throw new Error(
+        `Mismatch: cron=${decisionCron.accion}, convenio=${decisionConvenio.accion}`
+      );
+    }
   });
 });
 

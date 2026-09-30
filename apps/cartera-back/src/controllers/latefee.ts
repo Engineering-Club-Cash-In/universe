@@ -91,10 +91,10 @@ export { STATUS_EXCLUIDOS_MORA };
  *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
  *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
  *
- * Fuera de la regla quedan los caminos NO transaccionales (`createMora`,
- * `condonarTodasLasMoras`): cada statement autocommitea y suelta su candado
- * antes del siguiente, así que no pueden sostener un ciclo. Si alguien los
- * envuelve en una transacción, pasan a deberle el orden a esta regla.
+ * `createMora` sin `dbClient` autocommitea cada statement y no puede sostener
+ * un ciclo. CON `dbClient` corre dentro de la transacción de quien la llama
+ * (la ruptura de convenio), que por eso bloquea `creditos` PRIMERO. La
+ * condonación masiva es transaccional y también bloquea `creditos` primero.
  *
  * Los tests de `moraOrdenDeCandados.test.ts` fallan si alguna de estas
  * transacciones vuelve a pedir `moras_credito` antes que `creditos`.
@@ -490,21 +490,35 @@ function crecimientoDeLaMoraEn(
  */
 export function decidirMoraTrasRomperConvenio(params: {
   capital: Big | string | number | null;
-  factorDias: Big | string | number;
-  numCuotasAtrasadas: number;
+  cuotasParaPendiente: CuotaParaPendiente[];
 }): { accion: "CREAR_MORA"; montoMora: number } | { accion: "ACTIVAR"; motivo: string } {
   const capital = new Big(params.capital || 0);
-  const factor = new Big(params.factorDias || 0);
-  const montoMora = capital.lte(0) ? new Big(0) : capital.times(TASA_MORA_MENSUAL).times(factor);
-  const montoRedondeado = Number(montoMora.toFixed(2));
 
-  if (params.numCuotasAtrasadas <= 0) {
+  if (params.cuotasParaPendiente.length <= 0) {
     return { accion: "ACTIVAR", motivo: "sin cuotas atrasadas" };
   }
+
+  if (capital.lte(0)) {
+    return { accion: "ACTIVAR", motivo: "Crédito sin capital — no aplica mora" };
+  }
+
+  const resultado = moraPendientePorCuota({
+    capital,
+    cuotas: params.cuotasParaPendiente,
+  });
+
+  const montoRedondeado = Number(resultado.total.toFixed(2));
+
   if (!(montoRedondeado > 0)) {
+    // El factor sale de lo que `moraPendientePorCuota` ya calculó: sin una
+    // segunda pasada por la fórmula.
+    const devengado = resultado.porCuota.reduce((a, c) => a.plus(c.devengado), new Big(0));
+    const cargoMensual = capital.times(TASA_MORA_MENSUAL);
+    const factorDias = cargoMensual.gt(0) ? devengado.div(cargoMensual) : new Big(0);
+
     return {
       accion: "ACTIVAR",
-      motivo: `mora proporcional de ${params.numCuotasAtrasadas} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factor.toFixed(4)})`,
+      motivo: `mora proporcional de ${params.cuotasParaPendiente.length} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factorDias.toFixed(4)})`,
     };
   }
   return { accion: "CREAR_MORA", montoMora: montoRedondeado };
@@ -942,6 +956,7 @@ export async function createMora({
   usuario_id,
   usuario_email,
   override = false,
+  dbClient,
 }: {
   credito_id: number;
   monto_mora?: number;
@@ -951,7 +966,15 @@ export async function createMora({
   usuario_id?: number;
   usuario_email?: string;
   override?: boolean;
+  /**
+   * La transacción del llamador, si la hay. Con ella, TODAS las escrituras de
+   * esta función van por esa transacción: el llamador ve sus propios cambios
+   * sin commitear (p. ej. el crédito ya puesto en MOROSO al romper un convenio)
+   * y no hay dos conexiones peleando por el candado de la misma fila.
+   */
+  dbClient?: typeof db;
 }) {
+  const ejecutor = dbClient ?? db;
   const startedAt = safeNow();
   const requestId = `${credito_id}-${Date.now()}`;
 
@@ -979,7 +1002,7 @@ export async function createMora({
     }
 
     // Traer el crédito una sola vez: capital (para validar + fotografiar) y status (para no des-castigar).
-    const [credito] = await db
+    const [credito] = await ejecutor
       .select({ capital: creditos.capital, statusCredit: creditos.statusCredit })
       .from(creditos)
       .where(eq(creditos.credito_id, credito_id));
@@ -999,7 +1022,7 @@ export async function createMora({
     // no es un bloque por cuota sino proporcional a los días de atraso (con techo
     // de un cargo mensual). Va en el MISMO query para no pagar un segundo viaje ni
     // arriesgar que los dos vean fotos distintas de las cuotas.
-    const ovRes = await db.execute<any>(sql`
+    const ovRes = await ejecutor.execute<any>(sql`
       SELECT COUNT(*)::int AS n,
              COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
       FROM cartera.cuotas_credito cu
@@ -1069,7 +1092,7 @@ export async function createMora({
     // se resuelve por email. Best-effort: la atribución no debe bloquear la operación.
     let usuarioId: number | undefined = usuario_id ?? undefined;
     if (!usuarioId && usuario_email) {
-      const [u] = await db
+      const [u] = await ejecutor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -1079,7 +1102,7 @@ export async function createMora({
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
 
 
-    const [moraExistente] = await db
+    const [moraExistente] = await ejecutor
       .select({
         mora_id: moras_credito.mora_id,
         monto_mora: moras_credito.monto_mora,
@@ -1106,7 +1129,7 @@ export async function createMora({
       cuotas_anteriores = moraExistente.cuotas_atrasadas;
       tipo_evento = "RECALCULO";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .update(moras_credito)
         .set({
           monto_mora: monto_mora.toString(),
@@ -1123,7 +1146,7 @@ export async function createMora({
 
       tipo_evento = "CREACION";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .insert(moras_credito)
         .values({
           credito_id,
@@ -1140,14 +1163,14 @@ export async function createMora({
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
     //
-    // 🔒 Esta función NO es transaccional: cada statement autocommitea y suelta
-    // su candado antes del siguiente, así que no puede sostener el ciclo que
-    // previene la regla de orden del inicio del archivo (por eso el status
-    // puede quedar después del write de la mora). Si alguien la envuelve en una
-    // transacción, el UPDATE de `creditos` tiene que pasar ARRIBA del write de
-    // `moras_credito`.
+    // 🔒 Sin `dbClient`, cada statement autocommitea y suelta su candado antes
+    // del siguiente: no hay ciclo posible aunque el status quede después del
+    // write de la mora. CON `dbClient` corre dentro de la transacción de quien
+    // llama, que TIENE que haber bloqueado `creditos` antes (la ruptura de
+    // convenio lo hace como primera sentencia); si no, este UPDATE escalaría el
+    // candado después de tocar `moras_credito` y podría trabarse (40P01).
 
-    await db
+    await ejecutor
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
@@ -1166,6 +1189,20 @@ export async function createMora({
       porcentaje_mora: newMora.porcentaje_mora,
       usuario_id: usuarioId,
       motivo,
+      dbClient: ejecutor,
+      // Propagar el error SOLO si corre dentro de la transacción del llamador.
+      //
+      // Adentro de una transacción, tragarse el error MIENTE: un statement
+      // fallido aborta la transacción entera y el COMMIT posterior devuelve
+      // ROLLBACK sin levantar excepción, así que la función reportaría éxito con
+      // nada escrito. Ahí hay que propagar, para que el llamador revierta todo.
+      //
+      // Suelta —llamada desde la API, sin transacción— es OTRA cosa: la mora y
+      // el MOROSO ya están commiteados cuando se intenta la bitácora. Propagar
+      // ahí devolvería `success: false` sobre una mora que SÍ existe, y los
+      // llamadores la tratarían como si no, dejando el estado inconsistente. Por
+      // eso sin transacción se conserva el comportamiento de siempre.
+      propagarError: dbClient != null,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "create", durationMs: elapsedMilliseconds(startedAt) });

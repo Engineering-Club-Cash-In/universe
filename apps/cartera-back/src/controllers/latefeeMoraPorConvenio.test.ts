@@ -356,3 +356,12 @@ describe("desactivarMoraPorConvenio", () => {
     expect(state.commits).toBe(0);
   });
 });
+
+describe("decidirMoraTrasRomperConvenio — el factor del mensaje sale del devengado sin redondear", () => {
+  it("capital Q0.50, 15 días: redondea a Q0.00 y el factor es 0.5000", async () => {
+    const { decidirMoraTrasRomperConvenio } = await import("./latefee");
+    const d = decidirMoraTrasRomperConvenio({ capital: "0.5", cuotasParaPendiente: [{ cuota_id: 1, diasAtraso: 15, pagado: 0 }] });
+    expect(d.accion).toBe("ACTIVAR");
+    expect(d.accion === "ACTIVAR" && d.motivo).toContain("factor 0.5000");
+  });
+});

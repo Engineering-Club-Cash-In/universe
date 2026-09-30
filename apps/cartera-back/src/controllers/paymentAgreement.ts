@@ -19,12 +19,14 @@ import {
 } from "./registerPaymentPolicy";
 import {
   createMora,
+  cuotasParaPendienteDeCreditos,
   decidirMoraTrasRomperConvenio,
   desactivarMoraPorConvenio,
 } from "./latefee";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
+import { cerrarMoraPagadaDeCredito } from "../utils/cerrarMoraPagadaDeCredito";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -1647,108 +1649,151 @@ export const updateConvenioStatus = async (
     if (!status) {
       console.log("🔴 Eliminando convenio y procesando mora...");
 
-      // Eliminar cuotas del convenio
-      await db
-        .delete(convenio_cuotas)
-        .where(eq(convenio_cuotas.convenio_id, convenio_id));
-      console.log("✅ Cuotas del convenio eliminadas");
+      // 🔥 Toda la ruptura del convenio y el cierre de la mora van en una
+      // MISMA transacción: si algo falla (cierre de mora, recreación de mora,
+      // cualquier cosa), TODA la ruptura se revierte. Un fallo NO deja el
+      // convenio a medias borrado.
+      return await db.transaction(async (tx) => {
+        // 🔒 CRÉDITO PRIMERO, igual que condonarMora y la masiva: el insert al
+        // ledger de abajo toma KEY SHARE sobre este crédito por la FK, y el
+        // UPDATE posterior escalaría el candado y podría trabarse (40P01).
+        await tx
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(eq(creditos.credito_id, creditoId))
+          .for("update");
 
-      // Eliminar pagos asociados al convenio (pivot)
-      await db
-        .delete(convenios_pagos_resume)
-        .where(eq(convenios_pagos_resume.convenio_id, convenio_id));
-      console.log("✅ Relación pagos-convenio eliminada");
+        // Eliminar cuotas del convenio
+        await tx
+          .delete(convenio_cuotas)
+          .where(eq(convenio_cuotas.convenio_id, convenio_id));
+        console.log("✅ Cuotas del convenio eliminadas");
 
-      // Eliminar el convenio
-      await db
-        .delete(convenios_pago)
-        .where(eq(convenios_pago.convenio_id, convenio_id));
-      console.log("✅ Convenio eliminado");
+        // Eliminar pagos asociados al convenio (pivot)
+        await tx
+          .delete(convenios_pagos_resume)
+          .where(eq(convenios_pagos_resume.convenio_id, convenio_id));
+        console.log("✅ Relación pagos-convenio eliminada");
 
-      // Obtener el capital del crédito para calcular mora
-      const [credito] = await db
-        .select({ capital: creditos.capital })
-        .from(creditos)
-        .where(eq(creditos.credito_id, creditoId));
+        // Eliminar el convenio
+        await tx
+          .delete(convenios_pago)
+          .where(eq(convenios_pago.convenio_id, convenio_id));
+        console.log("✅ Convenio eliminado");
 
-      if (!credito) {
-        return { success: false, message: "Crédito no encontrado" };
-      }
+        // 🔥 CIERRE DE MORA: compensar todas las anotaciones vivas del crédito
+        // DENTRO de la transacción. Si esto falla, la ruptura no pasa.
+        console.log("✅ Paso: Cerrando contador de mora del crédito...");
+        const compensadas = await cerrarMoraPagadaDeCredito(
+          { credito_id: creditoId },
+          tx as unknown as typeof db
+        );
+        console.log(`✅ Mora cerrada: ${compensadas} anotación(es) compensada(s)`);
 
-      // Contar cuotas vencidas con la MISMA lógica que createMora/procesarMoras
-      // (< hoy GT, impaga, sin pago cubriente validated/no_required CON plata real
-      // aplicada — monto_aplicado > 0, igual que el guard cuotasReales) para que el
-      // conteo coincida con el que recalcula createMora y no lo rechace por mismatch.
-      // El `factor` (Σ min(1, días/30)) replica el guard de createMora: si acá
-      // recreáramos la mora con el bloque fijo por cuota, createMora la vería
-      // fuera de rango o la escribiría por un monto que el cron corrige esa noche.
-      const ovRes = await db.execute<any>(sql`
-        SELECT COUNT(*)::int AS n,
-               COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
-        FROM cartera.cuotas_credito cu
-        WHERE cu.credito_id = ${creditoId}
-          AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-          AND cu.pagado = false
-          AND NOT EXISTS (
-            SELECT 1 FROM cartera.pagos_credito pc
-            WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-              AND pc.validation_status IN ('validated', 'no_required')
-              AND COALESCE(pc.monto_aplicado, 0) > 0)`);
-      const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
-      const factorDiasMora = new Big(ovRes.rows?.[0]?.factor ?? 0);
-
-      console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
-
-      // Mora = capital × 1.12% × Σ min(1, días/30) de las cuotas vencidas, con
-      // la decisión de crear-o-no extraída a un helper puro (ver su doc: un
-      // monto que redondea a Q0.00 haría que createMora rechace y el crédito
-      // quedaría sin convenio, sin mora y nunca MOROSO).
-      const decision = decidirMoraTrasRomperConvenio({
-        capital: credito.capital,
-        factorDias: factorDiasMora,
-        numCuotasAtrasadas,
-      });
-
-      if (decision.accion === "CREAR_MORA") {
-        console.log(`💰 Monto mora calculado: Q${decision.montoMora.toFixed(2)}`);
-        // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
-        // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
-        // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
-        // sin mora, nunca MOROSO).
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
+        // Obtener el capital del crédito para calcular mora
+        const [credito] = await tx
+          .select({ capital: creditos.capital })
+          .from(creditos)
           .where(eq(creditos.credito_id, creditoId));
 
-        // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
-        const resultMora = await createMora({
-          credito_id: creditoId,
-          monto_mora: decision.montoMora,
-          cuotas_atrasadas: numCuotasAtrasadas,
-        });
-        if (!resultMora.success) {
-          // No tragar el fallo: el convenio ya se borró y el crédito quedó MOROSO; si la mora
-          // no se recreó hay que reportarlo (no devolver un success falso).
-          console.error("⚠️ createMora falló al recrear mora tras eliminar convenio:", resultMora.message);
-          return {
-            success: false,
-            message: `Convenio eliminado pero NO se pudo recrear la mora del crédito ${creditoId}: ${resultMora.message}`,
-          };
+        if (!credito) {
+          throw new Error("Crédito no encontrado durante ruptura de convenio");
         }
 
-        console.log("✅ Resultado createMora:", resultMora);
-      } else {
-        // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
-        // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO.
-        await db
+        // Cargar cuotas con el MISMO criterio que el cron: usa cuotasParaPendienteDeCreditos
+        // que ya filtra por vencidas elegibles (< hoy GT, impaga, sin pago cubriente,
+        // estado no excluido) y ordena por fecha_vencimiento + cuota_id. Reusa la misma
+        // subconsulta hasPaidPayment que procesarMoras, la misma función isOverdueInstallmentForMora,
+        // y calcula diasAtrasoMora en calendario de Guatemala — así coincide exactamente
+        // con lo que luego procesarMoras verá, y el criterio de elegibilidad no puede divergir.
+        //
+        // La lectura de lo pagado (moraPagadaPorCuota) va por `tx`, no por `db`: la
+        // compensación que acabamos de insertar en cerrarMoraPagadaDeCredito solo es
+        // visible DENTRO de esta transacción. Otra conexión vería la mora VIEJA, sin
+        // el cierre. Es aislamiento de Postgres — la tx que escribió no commiteó todavía,
+        // así que otros observadores no ven sus cambios. Leer por `db` haría que
+        // recreemos la mora MENOS de lo que corresponde (saldría más baja al no restar
+        // los montos compensados).
+        //
+        // ⚠️ El cargador aplica la exclusión de estados del cron, y EN_CONVENIO
+        // está excluido: con el crédito todavía en EN_CONVENIO devolvería cero
+        // cuotas y el convenio roto terminaría ACTIVO sin mora. El convenio ya
+        // no existe, así que el crédito sale de EN_CONVENIO ANTES de cargar;
+        // abajo la decisión lo deja MOROSO o ACTIVO.
+        await tx
           .update(creditos)
           .set({ statusCredit: "ACTIVO" })
           .where(eq(creditos.credito_id, creditoId));
 
-        console.log(`✅ Crédito actualizado a ACTIVO (${decision.motivo})`);
-      }
+        // «Hoy» de la BASE, no del reloj de la app: `createMora` recuenta las
+        // cuotas atrasadas con `now()`, que dentro de la tx queda fijo en su
+        // inicio. Si la tx cruza la medianoche de Guatemala (o los relojes
+        // difieren), con `hoyGuatemala` el conteo no coincidiría y
+        // `overdue_count_mismatch` tumbaría el rompimiento entero.
+        // Como texto: un `::date` crudo puede volver corrido de huso.
+        const { rows: [{ d: hoyBase }] } = await tx.execute<{ d: string }>(
+          sql`SELECT to_char((now() AT TIME ZONE 'America/Guatemala')::date, 'YYYY-MM-DD') AS d`,
+        );
+        const [anio, mes, dia] = hoyBase.split("-").map(Number);
+        const hoy = new Date(anio, mes - 1, dia);
+        const cargado = (
+          await cuotasParaPendienteDeCreditos(
+            [creditoId],
+            tx as unknown as typeof db,
+            hoy,
+          )
+        ).get(creditoId);
 
-      return { success: true, message: "Convenio eliminado exitosamente" };
+        const cuotasParaPendiente = cargado?.cuotas ?? [];
+        const numCuotasAtrasadas = cuotasParaPendiente.length;
+
+        console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
+
+        const decision = decidirMoraTrasRomperConvenio({
+          capital: credito.capital,
+          cuotasParaPendiente,
+        });
+
+        if (decision.accion === "CREAR_MORA") {
+          console.log(`💰 Monto mora calculado: Q${decision.montoMora.toFixed(2)}`);
+          // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
+          // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
+          // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
+          // sin mora, nunca MOROSO).
+          await tx
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(eq(creditos.credito_id, creditoId));
+
+          // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
+          const resultMora = await createMora({
+            credito_id: creditoId,
+            monto_mora: decision.montoMora,
+            cuotas_atrasadas: numCuotasAtrasadas,
+            dbClient: tx as unknown as typeof db,
+          });
+          if (!resultMora.success) {
+            // No tragar el fallo: si createMora falla, la transacción entero se revierte.
+            console.error("⚠️ createMora falló al recrear mora tras eliminar convenio:", resultMora.message);
+            throw new Error(
+              `No se pudo recrear la mora del crédito ${creditoId}: ${resultMora.message}`
+            );
+          }
+
+          console.log("✅ Resultado createMora:", resultMora);
+        } else {
+          // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
+          // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO.
+          await tx
+            .update(creditos)
+            .set({ statusCredit: "ACTIVO" })
+            .where(eq(creditos.credito_id, creditoId));
+
+          console.log(`✅ Crédito actualizado a ACTIVO (${decision.motivo})`);
+        }
+
+        return { success: true, message: "Convenio eliminado exitosamente" };
+      });
     }
 
     // Si status = true, solo activar el convenio

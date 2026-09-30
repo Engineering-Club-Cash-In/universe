@@ -3,6 +3,7 @@ import {
 	skipToken,
 	useMutation,
 	useQuery,
+	useQueryClient,
 } from "@tanstack/react-query";
 import {
 	Copy,
@@ -14,7 +15,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { GpsConsultasHistorial } from "@/components/cobros/gps-consultas-historial";
+import { DatosTelemetria } from "@/components/cobros/gps-telemetria-datos";
+import {
+	UbicacionesClaveResultado,
+	useUbicacionesClaveQuery,
+} from "@/components/cobros/gps-ubicaciones-clave-card";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -34,16 +40,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	ESTADO_SENAL_CONFIG,
-	formatCoordenadas,
-	formatFechaSenal,
-	formatIgnicion,
-	formatUltimaSenal,
-	formatVelocidad,
-	googleMapsUrl,
 	limpiarPlacaParaBusqueda,
 	MOTIVO_SIN_VINCULO,
-	resolveEstadoSenal,
 } from "@/routes/cobros/-gps-ficha";
 import { type client, orpc } from "@/utils/orpc";
 
@@ -66,13 +64,18 @@ export function GpsVehiculoCard({
 	casoCobroId,
 	vehicleId,
 	esSupervisor,
+	mostrarUbicacionesClave = false,
 }: {
 	// El servidor valida acceso al caso y que el vehículo sea el suyo, y toma
 	// de ahí el SIFCO de la bitácora (no se manda desde el cliente).
 	casoCobroId: string;
 	vehicleId: string;
 	esSupervisor: boolean;
+	// Créditos en B4 / recuperación: suma la sección de ubicaciones clave
+	// (CB-119, D-15) bajo el mismo motivo confirmado.
+	mostrarUbicacionesClave?: boolean;
 }) {
+	const queryClient = useQueryClient();
 	const [motivo, setMotivo] = useState("");
 	const [motivoConfirmado, setMotivoConfirmado] = useState<string | null>(null);
 
@@ -104,6 +107,25 @@ export function GpsVehiculoCard({
 		refetchOnMount: false,
 		retry: false,
 	});
+
+	// Un solo motivo habilita ambas consultas; cada una queda auditada por
+	// separado en el servidor.
+	const ubicacionesClave = useUbicacionesClaveQuery({
+		casoCobroId,
+		vehicleId,
+		motivo: mostrarUbicacionesClave ? motivoConfirmado : null,
+	});
+
+	// La consulta inserta una fila en gps_consulta_logs: el historial se
+	// refresca cuando termina, no antes (la fila aún no existe).
+	const { dataUpdatedAt } = gps;
+	useEffect(() => {
+		if (dataUpdatedAt > 0) {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getGpsConsultasCaso.key(),
+			});
+		}
+	}, [dataUpdatedAt, queryClient]);
 
 	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
 
@@ -203,6 +225,19 @@ export function GpsVehiculoCard({
 						)}
 					</div>
 				)}
+				{motivoConfirmado != null && mostrarUbicacionesClave && (
+					<div className="mt-4 space-y-3 border-t pt-4">
+						<div>
+							<h4 className="font-medium text-sm">Ubicaciones clave</h4>
+							<p className="text-muted-foreground text-xs">
+								Lugares donde el vehículo pasa más tiempo (casa, trabajo,
+								lugares recurrentes) según los últimos 60 días de historial GPS.
+								Orienta la búsqueda si hay que recuperarlo.
+							</p>
+						</div>
+						<UbicacionesClaveResultado ubicaciones={ubicacionesClave} />
+					</div>
+				)}
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">
 						<p className="text-muted-foreground text-xs">
@@ -230,6 +265,12 @@ export function GpsVehiculoCard({
 						</Button>
 					</div>
 				)}
+				<div className="mt-3 border-t pt-2">
+					<GpsConsultasHistorial
+						casoCobroId={casoCobroId}
+						vehicleId={vehicleId}
+					/>
+				</div>
 			</CardContent>
 		</Card>
 	);
@@ -252,94 +293,23 @@ function TelemetriaVinculada({
 	onVinculado: () => void;
 	vehicleId: string;
 }) {
-	const { telemetria } = datos;
-	const ignicion = formatIgnicion(telemetria.isIgnitionOn);
-	const IgnicionIcon = ignicion.icon;
-	// La frescura que se muestra es la de la UBICACIÓN (pos.t), no la del
-	// último mensaje: un equipo puede seguir reportando sin fix de GPS y las
-	// coordenadas quedarse viejas. Marcarlas "reciente" mandaría a un gestor
-	// a un lugar desactualizado.
-	const estadoSenal = resolveEstadoSenal(telemetria.ultimaPosicionAt);
-	const sinFixReciente =
-		resolveEstadoSenal(telemetria.ultimaSenalAt) === "fresca" &&
-		estadoSenal !== "fresca";
-	const configSenal = ESTADO_SENAL_CONFIG[estadoSenal];
-	const mapsUrl = googleMapsUrl(telemetria.latitude, telemetria.longitude);
-
 	return (
 		<div className="space-y-4">
-			<div className="flex flex-wrap items-center gap-2">
-				<Badge className={configSenal.badgeClass} variant="secondary">
-					{configSenal.label}
-				</Badge>
-				<span className="flex items-center gap-1.5 font-medium text-sm">
-					<IgnicionIcon className={`h-4 w-4 ${ignicion.className}`} />
-					<span className={ignicion.className}>{ignicion.label}</span>
-				</span>
-			</div>
-			{sinFixReciente && (
-				<p className="text-amber-700 text-xs dark:text-amber-400">
-					El GPS sigue reportando, pero sin posición nueva: la ubicación es de{" "}
-					{formatFechaSenal(telemetria.ultimaPosicionAt)}.
-				</p>
-			)}
-
-			<div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-				<Dato
-					label="Última señal"
-					value={formatUltimaSenal(telemetria.ultimaSenalAt)}
-					hint={formatFechaSenal(telemetria.ultimaSenalAt)}
-				/>
-				<Dato label="Velocidad" value={formatVelocidad(telemetria.speedKmh)} />
-				<Dato
-					label="Ubicación"
-					value={formatCoordenadas(telemetria.latitude, telemetria.longitude)}
-					hint={
-						telemetria.ultimaPosicionAt
-							? `Posición de ${formatUltimaSenal(telemetria.ultimaPosicionAt)}`
-							: "Sin fecha de posición"
-					}
-				/>
-				<Dato
-					label="Odómetro"
-					value={
-						telemetria.mileageFormatted ||
-						(telemetria.mileageKm != null
-							? `${Math.round(telemetria.mileageKm).toLocaleString("es-GT")} km`
-							: "—")
-					}
-				/>
-				<Dato
-					label="Horas de motor"
-					value={
-						telemetria.engineHoursFormatted ||
-						(telemetria.engineHours != null
-							? `${Math.round(telemetria.engineHours).toLocaleString("es-GT")} h`
-							: "—")
-					}
-				/>
-				<Dato label="Unidad GPS" value={datos.unitName} />
-			</div>
-
-			<div className="flex flex-wrap gap-2">
-				{mapsUrl && (
-					<Button asChild size="sm" variant="outline">
-						<a href={mapsUrl} rel="noopener noreferrer" target="_blank">
-							<MapPin className="mr-2 h-4 w-4" />
-							Abrir en Google Maps
-						</a>
-					</Button>
-				)}
-				{esSupervisor && (
-					<TrackingLinkDialog
-						// key: al corregir el vínculo cambia la unidad y el diálogo se
-						// reutilizaría con la URL de rastreo de la unidad ANTERIOR.
-						key={datos.unitId}
-						unitId={datos.unitId}
-						unitName={datos.unitName}
-					/>
-				)}
-			</div>
+			<DatosTelemetria
+				telemetria={datos.telemetria}
+				unitName={datos.unitName}
+				acciones={
+					esSupervisor ? (
+						<TrackingLinkDialog
+							// key: al corregir el vínculo cambia la unidad y el diálogo se
+							// reutilizaría con la URL de rastreo de la unidad ANTERIOR.
+							key={datos.unitId}
+							unitId={datos.unitId}
+							unitName={datos.unitName}
+						/>
+					) : null
+				}
+			/>
 
 			{/* También para vínculos que fijó un supervisor: si eligió mal, esta
 			    es la única forma de corregirlo desde la UI. */}
@@ -349,26 +319,6 @@ function TelemetriaVinculada({
 					placa={datos.placa}
 					vehicleId={vehicleId}
 				/>
-			)}
-		</div>
-	);
-}
-
-function Dato({
-	label,
-	value,
-	hint,
-}: {
-	label: string;
-	value: string;
-	hint?: string;
-}) {
-	return (
-		<div>
-			<p className="text-muted-foreground text-sm">{label}</p>
-			<p className="font-medium">{value}</p>
-			{hint && hint !== "—" && (
-				<p className="text-muted-foreground text-xs">{hint}</p>
 			)}
 		</div>
 	);

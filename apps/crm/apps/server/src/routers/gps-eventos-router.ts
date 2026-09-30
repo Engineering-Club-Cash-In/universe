@@ -8,22 +8,57 @@
  * a un router ya grande.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
+import { agruparConsultasGps } from "../services/wialon/gps-consultas-agrupar";
 import {
+	gpsConsultasCasoInputSchema,
+	gpsConsultasCasoOutputSchema,
 	gpsEventosCasoInputSchema,
 	gpsEventosCasoOutputSchema,
+	gpsVehiculoOutputSchema,
 	ubicacionesClaveCasoInputSchema,
 	ubicacionesClaveCasoOutputSchema,
 } from "../services/wialon/wialon-types";
 import { assertAccesoCasoCobro } from "./cobros";
 import { resolverCasoParaGps } from "./wialon";
+
+/**
+ * El snapshot viaja como JSON: las fechas de la telemetría llegan como texto
+ * ISO y el schema de salida espera `Date`. Un snapshot que no cumple el schema
+ * (formato viejo, dato corrupto) se descarta en lugar de tumbar el historial.
+ */
+function leerSnapshotGps(valor: unknown) {
+	if (!valor || typeof valor !== "object") return null;
+	const crudo = valor as Record<string, unknown>;
+	const tel = crudo.telemetria;
+	const aFecha = (v: unknown) =>
+		typeof v === "string" || typeof v === "number" ? new Date(v) : null;
+	const candidato =
+		tel && typeof tel === "object"
+			? {
+					...crudo,
+					telemetria: {
+						...(tel as Record<string, unknown>),
+						ultimaSenalAt: aFecha(
+							(tel as Record<string, unknown>).ultimaSenalAt,
+						),
+						ultimaPosicionAt: aFecha(
+							(tel as Record<string, unknown>).ultimaPosicionAt,
+						),
+					},
+				}
+			: crudo;
+	const parsed = gpsVehiculoOutputSchema.safeParse(candidato);
+	return parsed.success ? parsed.data : null;
+}
 
 export const gpsEventosRouter = {
 	/**
@@ -80,6 +115,65 @@ export const gpsEventosRouter = {
 		}),
 
 	/**
+	 * Historial de consultas GPS del vehículo (quién, cuándo, con qué motivo).
+	 *
+	 * Mismo gate de acceso que `getGpsVehiculo` (`resolverCasoParaGps`: acceso
+	 * al caso, vehículo del caso y cartera), pero NO registra auditoría ni pide
+	 * motivo: leer el historial no consulta Wialon.
+	 *
+	 * OJO: cada consulta de telemetría trae su `snapshot`, que incluye
+	 * coordenadas y velocidad. Quien abre el historial ve esa ubicación sin dar
+	 * un motivo nuevo ni dejar rastro de la vista. Es deliberado (ver la consulta
+	 * anterior sin repetirla), pero si producto exige auditar esa vista, el
+	 * control va aquí.
+	 *
+	 * Las consultas de telemetría con la misma ubicación se devuelven agrupadas
+	 * en una entrada (ver `agruparConsultasGps`); la auditoría no se modifica.
+	 *
+	 * Se acota al vehículo Y al crédito del caso: un vehículo puede pasar a otro
+	 * crédito y su historial no debe verse desde el nuevo.
+	 */
+	getGpsConsultasCaso: cobrosProcedure
+		.input(gpsConsultasCasoInputSchema)
+		.output(gpsConsultasCasoOutputSchema)
+		.handler(async ({ input, context }) => {
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+				context.user?.email || context.session?.user?.email,
+			);
+
+			const filas = await db
+				.select({
+					id: gpsConsultaLogs.id,
+					motivo: gpsConsultaLogs.motivo,
+					origen: gpsConsultaLogs.origen,
+					unitName: gpsConsultaLogs.unitName,
+					userNombre: user.name,
+					createdAt: gpsConsultaLogs.createdAt,
+					snapshot: gpsConsultaLogs.snapshot,
+				})
+				.from(gpsConsultaLogs)
+				.leftJoin(user, eq(gpsConsultaLogs.userId, user.id))
+				.where(
+					and(
+						eq(gpsConsultaLogs.vehicleId, input.vehicleId),
+						numeroCreditoSifco == null
+							? isNull(gpsConsultaLogs.numeroCreditoSifco)
+							: eq(gpsConsultaLogs.numeroCreditoSifco, numeroCreditoSifco),
+					),
+				)
+				.orderBy(desc(gpsConsultaLogs.createdAt))
+				.limit(input.limit);
+
+			return agruparConsultasGps(
+				filas.map((f) => ({ ...f, userNombre: f.userNombre ?? null })),
+			).map((e) => ({ ...e, snapshot: leerSnapshotGps(e.snapshot) }));
+		}),
+
+	/**
 	 * Ubicaciones clave del vehículo (D-15): casa, trabajo, lugares
 	 * recurrentes, calculadas por el job nocturno a partir del historial de
 	 * Wialon. Revela dónde vive/trabaja el cliente — mismo gate de acceso Y
@@ -118,6 +212,7 @@ export const gpsEventosRouter = {
 					motivo: input.motivo,
 					unitId: null,
 					unitName: null,
+					origen: "ubicaciones_clave",
 					userId,
 				});
 			} catch (error) {

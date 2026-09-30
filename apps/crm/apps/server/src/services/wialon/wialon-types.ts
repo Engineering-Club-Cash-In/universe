@@ -330,6 +330,46 @@ export const gpsBitacoraOutputSchema = z.object({
 });
 export type GpsBitacoraOutput = z.infer<typeof gpsBitacoraOutputSchema>;
 
+// ── Historial de consultas GPS de un vehículo en la Ficha 360 ─────────────────
+
+export const gpsConsultasCasoInputSchema = z.object({
+	casoCobroId: z.string().uuid(),
+	vehicleId: z.string().uuid(),
+	limit: z.number().int().min(1).max(100).default(20),
+});
+export type GpsConsultasCasoInput = z.infer<typeof gpsConsultasCasoInputSchema>;
+
+export const gpsConsultasCasoOutputSchema = z.array(
+	z.object({
+		id: z.string(),
+		motivo: z.string(),
+		// 'telemetria' | 'ubicaciones_clave'; null en filas anteriores a la 0070.
+		origen: z.string().nullable(),
+		unitName: z.string().nullable(),
+		userNombre: z.string().nullable(),
+		createdAt: z.date(),
+		// Lo que respondió Wialon en esa consulta (misma forma que
+		// getGpsVehiculo). Null en consultas de ubicaciones clave, en filas
+		// anteriores a la 0070 y si el snapshot no se pudo guardar.
+		snapshot: gpsVehiculoOutputSchema.nullable(),
+		// Consultas de telemetría con la misma ubicación se muestran juntas: la
+		// entrada lleva los datos de la más reciente y aquí van TODAS (la más
+		// reciente primero, incluida la propia). Una entrada suelta trae solo la
+		// suya. La auditoría no se toca: esto es solo presentación.
+		consultas: z.array(
+			z.object({
+				id: z.string(),
+				motivo: z.string(),
+				userNombre: z.string().nullable(),
+				createdAt: z.date(),
+			}),
+		),
+	}),
+);
+export type GpsConsultasCasoOutput = z.infer<
+	typeof gpsConsultasCasoOutputSchema
+>;
+
 // ── Bitácora técnica y alertas de la integración (CB-121) ─────────────────────
 // Solo admin: es diagnóstico de infraestructura, no una vista de negocio.
 

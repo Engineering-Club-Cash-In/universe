@@ -57,7 +57,6 @@ import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
-import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
@@ -5014,6 +5013,7 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`${id}:${caso.vehicleId}`}
+								mostrarUbicacionesClave={bucketNumero === 4 || enRecuperacion}
 								vehicleId={caso.vehicleId}
 							/>
 						)}
@@ -5022,20 +5022,6 @@ function RouteComponent() {
 						    requiere caso.id (a diferencia de GpsVehiculoCard, no audita
 						    consulta ni depende del vehículo: lee eventos ya guardados). */}
 						{caso.id && <GpsEventosHistorial casoCobroId={caso.id} />}
-						{/* CB-119 (D-15): ubicaciones clave (casa, trabajo, lugares
-						    recurrentes) calculadas por el job nocturno para casos en B4
-						    o recuperación. Mismo gate de motivo auditado que
-						    GpsVehiculoCard — revela dónde vive/trabaja el cliente, así
-						    que necesita caso.vehicleId, no solo caso.id. */}
-						{caso.id &&
-							caso.vehicleId &&
-							(bucketNumero === 4 || enRecuperacion) && (
-								<GpsUbicacionesClaveCard
-									casoCobroId={caso.id}
-									key={`${id}:${caso.vehicleId}`}
-									vehicleId={caso.vehicleId}
-								/>
-							)}
 						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
 						    con llamada posterior al cliente. Solo requiere caso.id (a
 						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad

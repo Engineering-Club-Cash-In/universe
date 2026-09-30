@@ -12,6 +12,7 @@ const base: Caso["facturaSeguro"] = {
 	subidaAt: null,
 	envio: null,
 	reenviable: false,
+	sinConfirmar: false,
 };
 
 function caso(
@@ -36,14 +37,18 @@ describe("documentosDelCaso", () => {
 		}
 	});
 
-	test("subida: enviada, en proceso, sin confirmar o sin destinatario no piden nada", () => {
+	test("subida: enviada, en proceso o sin destinatario no piden nada", () => {
 		for (const envio of ["enviado", "pendiente", "sin_destinatario"] as const) {
 			expect(documentosDelCaso(caso({ envio }))[0]?.estado).toBe("subido");
 		}
-		expect(
-			documentosDelCaso(caso({ envio: "pendiente", reenviable: true }))[0]
-				?.estado,
-		).toBe("subido");
+	});
+
+	test("envío sin confirmar: hay que revisarlo, para el vendedor y para el gerente", () => {
+		for (const reenviable of [true, false]) {
+			const c = caso({ envio: "pendiente", sinConfirmar: true, reenviable });
+			expect(documentosDelCaso(c)[0]?.estado).toBe("atencion");
+			expect(tieneDocumentosPendientes(c)).toBe(false);
+		}
 	});
 
 	test("subida pero el envío falló: hay que revisarla, no está pendiente", () => {

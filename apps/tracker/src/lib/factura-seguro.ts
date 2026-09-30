@@ -40,7 +40,7 @@ export function vistaFacturaSeguro(
 			etiquetaReenvio: null,
 		};
 	}
-	if (f.envio === "pendiente" && !f.reenviable) {
+	if (f.envio === "pendiente" && !f.sinConfirmar) {
 		return {
 			tono: "proceso",
 			titulo: "Enviando la factura a la aseguradora",
@@ -51,13 +51,15 @@ export function vistaFacturaSeguro(
 	}
 	// Un envío que quedó a medias pudo haber salido: no se afirma que falló.
 	// Tampoco se promete que el reintento no duplique: Resend solo lo evita
-	// durante 24 h.
+	// durante 24 h. El gerente también lo ve, aunque no pueda reintentarlo.
 	if (f.envio === "pendiente") {
 		return {
 			tono: "info",
 			titulo: "No pudimos confirmar el envío",
-			texto: `La factura está guardada, pero no pudimos confirmar si el correo llegó a la aseguradora. Puedes reintentar el envío.${subida}`,
-			accion: "reenviar",
+			texto: f.reenviable
+				? `La factura está guardada, pero no pudimos confirmar si el correo llegó a la aseguradora. Puedes reintentar el envío.${subida}`
+				: `La factura está guardada, pero no pudimos confirmar si el correo llegó a la aseguradora. El vendedor asignado puede reintentar el envío.${subida}`,
+			accion: f.reenviable ? "reenviar" : null,
 			etiquetaReenvio: "Reintentar envío",
 		};
 	}

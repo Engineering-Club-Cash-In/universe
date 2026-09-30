@@ -54,6 +54,21 @@ describe("revisar el documento que se va a vincular", () => {
 		);
 	});
 
+	test("lleva lo que dijo WeeTrust: quién ya firmó y cuándo vence su enlace", () => {
+		const revision = revisarDocumento(
+			ESPERADOS,
+			estado([
+				{ ...firmante("ana@x.com", true), expiry: 1_792_864_976_203 },
+				firmante("andres@x.com"),
+			]),
+		);
+
+		expect(revision.enviados.map((f) => [f.email, f.firmo, f.expiry])).toEqual([
+			["ana@x.com", true, 1_792_864_976_203],
+			["andres@x.com", false, null],
+		]);
+	});
+
 	test("que falte un codeudor se avisa pero no impide", () => {
 		const revision = revisarDocumento(
 			ESPERADOS,

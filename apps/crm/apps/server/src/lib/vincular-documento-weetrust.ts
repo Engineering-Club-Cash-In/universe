@@ -59,6 +59,16 @@ export interface RevisionDelDocumento {
 	problema: string | null;
 }
 
+/**
+ * Un firmante del documento, ya con su rol en el contrato y con lo que WeeTrust
+ * dice de él al momento de leerlo: si firmó y cuándo vence su enlace.
+ */
+export type FirmanteDelDocumento = FirmanteEnviado & {
+	firmo: boolean;
+	/** Epoch en milisegundos, o null si el enlace no vence. */
+	expiry: number | null;
+};
+
 /** Un firmante esperado, con lo que hay que pedirle en WeeTrust. */
 export interface FirmanteDeLaGuia {
 	role: SignerRole;
@@ -113,10 +123,10 @@ const normalizar = (correo: string) => correo.trim().toLowerCase();
 export function revisarDocumento(
 	esperados: FirmanteEsperado[],
 	estado: EstadoDocumentoFirma,
-): RevisionDelDocumento & { enviados: FirmanteEnviado[] } {
+): RevisionDelDocumento & { enviados: FirmanteDelDocumento[] } {
 	const porCorreo = new Map(esperados.map((e) => [normalizar(e.email), e]));
 
-	const enviados: FirmanteEnviado[] = [];
+	const enviados: FirmanteDelDocumento[] = [];
 	const firmantes: RevisionDelDocumento["firmantes"] = [];
 	const desconocidos: string[] = [];
 	const vistos = new Set<string>();
@@ -138,6 +148,8 @@ export function revisarDocumento(
 			name: esperado.name,
 			signatoryID: firmante.signatoryID || undefined,
 			signingUrl: firmante.signingUrl ?? undefined,
+			firmo: firmante.isSigned,
+			expiry: firmante.expiry ?? null,
 		});
 		firmantes.push({
 			role: esperado.role,
@@ -186,7 +198,7 @@ export async function leerDocumentoParaVincular(
 	pegado: string,
 	esperados: FirmanteEsperado[],
 ): Promise<{
-	revision: RevisionDelDocumento & { enviados: FirmanteEnviado[] };
+	revision: RevisionDelDocumento & { enviados: FirmanteDelDocumento[] };
 	estado: EstadoDocumentoFirma;
 	observadoEn: Date;
 }> {
@@ -231,17 +243,28 @@ type Transaccion = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Vuelve a mirar la fila, bloqueada: mientras WeeTrust contestaba, otra persona
  * pudo vincularla, reemplazarla, anularla, o el contrato pudo terminar de
  * firmarse. Y el documento no puede ser ya el de otro contrato.
+ *
+ * Esa última revisión va con un candado por documento: dos personas que pegan
+ * el mismo documento en dos contratos a la vez bloquean cada una su fila, y sin
+ * él ninguna veía el cambio sin confirmar de la otra —no hay índice único en
+ * `weetrust_document_id`—. Con el candado, la segunda espera y lo encuentra.
  */
 export async function vincularEnLaFila(
 	tx: Transaccion,
 	params: {
 		contractId: string;
-		revision: RevisionDelDocumento & { enviados: FirmanteEnviado[] };
+		revision: RevisionDelDocumento & { enviados: FirmanteDelDocumento[] };
 		observerUrl: string | null;
 		por: string;
+		/** Cuándo se leyó el documento en WeeTrust. */
+		observadoEn: Date;
 	},
 ): Promise<{ documentoAnterior: string | null }> {
 	const { contractId, revision } = params;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(hashtext(${`weetrust-documento:${revision.documentID}`}::text))`,
+	);
 
 	const [fila] = await tx
 		.select({
@@ -315,9 +338,27 @@ export async function vincularEnLaFila(
 	await tx
 		.delete(contractSignatories)
 		.where(eq(contractSignatories.contractId, contractId));
-	await tx
-		.insert(contractSignatories)
-		.values(filasDeFirmantes(contractId, revision.enviados));
+
+	// Con lo que dijo WeeTrust al leerlo: quién ya firmó y cuándo vence cada
+	// enlace. Sin esto nacían todos pendientes y sin vencimiento, y la
+	// sincronización de después no los corregía: su foto es de antes de que
+	// existieran las filas, y no pisa filas más nuevas que ella. Con
+	// `updatedAt` en el momento de la lectura, esa misma foto sí las alcanza.
+	const porCorreo = new Map(
+		revision.enviados.map((f) => [f.email.toLowerCase(), f]),
+	);
+	await tx.insert(contractSignatories).values(
+		filasDeFirmantes(contractId, revision.enviados).map((fila) => {
+			const leido = porCorreo.get(fila.email.toLowerCase());
+			return {
+				...fila,
+				status: leido?.firmo ? ("signed" as const) : ("pending" as const),
+				signedAt: leido?.firmo ? params.observadoEn : null,
+				signingUrlExpiry: leido?.expiry ? new Date(leido.expiry) : null,
+				updatedAt: params.observadoEn,
+			};
+		}),
+	);
 
 	return { documentoAnterior };
 }

@@ -2450,6 +2450,7 @@ export const investorContractsRouter = {
 							contractId: contrato.id,
 							revision,
 							observerUrl: estado.observerUrl ?? null,
+							observadoEn,
 							por:
 								context.session?.user?.name ||
 								context.session?.user?.email ||

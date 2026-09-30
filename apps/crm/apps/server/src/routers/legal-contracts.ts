@@ -2450,6 +2450,7 @@ export const legalContractsRouter = {
 						contractId: input.contractId,
 						revision,
 						observerUrl: estado.observerUrl ?? null,
+						observadoEn,
 						por:
 							context.session?.user?.name ||
 							context.session?.user?.email ||

@@ -1,5 +1,7 @@
 import { call } from "@orpc/server";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { user } from "../db/schema/auth";
 import {
 	companies,
@@ -13,7 +15,10 @@ import {
 	partnerAccounts,
 	partnerMembers,
 } from "../db/schema/partners";
-import { quotations } from "../db/schema/quotations";
+import {
+	opportunityCloseQuotations,
+	quotations,
+} from "../db/schema/quotations";
 import type { CorreosPorAseguradora } from "../lib/factura-seguro";
 import { ROLES } from "../lib/roles";
 
@@ -26,6 +31,9 @@ let facturaPrevia: Array<Record<string, unknown>> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
+// Cotización que guardó el cierre, y el filtro con el que se buscó la cotización.
+let cotizacionDelCierre: Array<{ quotationId: string }> = [];
+let filtroCotizacion: unknown;
 let resultadoCorreo:
 	| { ok: true }
 	| {
@@ -40,12 +48,18 @@ const correos: Array<Record<string, unknown>> = [];
 const subidosR2: Array<{ key: string; mime: string }> = [];
 const borradosR2: string[] = [];
 
-function cadena<T>(obtenerFilas: () => T[]) {
+function cadena<T>(
+	obtenerFilas: () => T[],
+	alFiltrar?: (condicion: unknown) => void,
+) {
 	const nodo = {
 		from: () => nodo,
 		innerJoin: () => nodo,
 		leftJoin: () => nodo,
-		where: () => nodo,
+		where: (condicion: unknown) => {
+			alFiltrar?.(condicion);
+			return nodo;
+		},
 		orderBy: () => nodo,
 		limit: () => nodo,
 		for: () => nodo,
@@ -71,10 +85,17 @@ const dbFalsa = {
 				return cadena(() => [{ passwordChangedAt: new Date("2026-01-01") }]);
 			if (tabla === opportunities) return cadena(() => [caso]);
 			if (tabla === quotations)
-				return cadena(() => {
-					if (fallaLecturaCotizacion) throw new Error("BD no disponible");
-					return cotizacion;
-				});
+				return cadena(
+					() => {
+						if (fallaLecturaCotizacion) throw new Error("BD no disponible");
+						return cotizacion;
+					},
+					(condicion) => {
+						filtroCotizacion = condicion;
+					},
+				);
+			if (tabla === opportunityCloseQuotations)
+				return cadena(() => cotizacionDelCierre);
 			if (tabla === opportunityAgencySellers)
 				return cadena(() => [
 					{
@@ -219,6 +240,8 @@ beforeEach(() => {
 	facturaPrevia = [];
 	vendedorVigente = undefined;
 	fallaLecturaCotizacion = false;
+	cotizacionDelCierre = [];
+	filtroCotizacion = undefined;
 	resultadoCorreo = { ok: true };
 	insertados.length = 0;
 	actualizados.length = 0;
@@ -300,6 +323,33 @@ describe("subirFacturaSeguro", () => {
 			insuranceProvider: "universales",
 			recipients: ["polizas@universales.test"],
 		});
+	});
+
+	test("ya ganada, si el cierre guardó su cotización se usa exactamente esa", async () => {
+		caso = casoAl(90, {
+			status: "won",
+			actualCloseDate: new Date("2026-09-01"),
+		});
+		cotizacionDelCierre = [{ quotationId: "cot-del-cierre" }];
+		await subir();
+		const { params } = new PgDialect().sqlToQuery(filtroCotizacion as SQL);
+		expect(params).toContain("cot-del-cierre");
+		// Con la del cierre no se reconstruye por fecha.
+		expect(
+			params.some((p) => p instanceof Date || /^\d{4}-/.test(String(p))),
+		).toBe(false);
+	});
+
+	test("ya ganada sin cotización guardada (cierres anteriores): se reconstruye con la fecha del cierre", async () => {
+		caso = casoAl(90, {
+			status: "won",
+			actualCloseDate: new Date("2026-09-01T00:00:00Z"),
+		});
+		await subir();
+		const { params } = new PgDialect().sqlToQuery(filtroCotizacion as SQL);
+		expect(params.map(String).some((p) => p.startsWith("2026-09-01"))).toBe(
+			true,
+		);
 	});
 
 	test("sin cerrar, la aseguradora sigue saliendo de la cotización", async () => {

@@ -21,6 +21,7 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 import {
   estadoMoraTrasElPago,
   marcarDecrementoAnulado,
@@ -348,6 +349,10 @@ export function createReversePayment(
       // ======================================================================
       // 6️⃣ REVERSAR MORA SI EXISTÍA
       // ======================================================================
+      // Orden fijo: primero la restitución de `moras_credito` (si toca), que
+      // corre en OTRA conexión y pide el crédito FOR UPDATE; DESPUÉS la
+      // compensación del ledger, cuyo FK deja el crédito en FOR KEY SHARE hasta
+      // el commit. Al revés, las dos conexiones se esperan entre sí para siempre.
       if (pago.mora && Number(pago.mora) > 0) {
         // ── ¿HAY ALGO QUE RESTITUIR? ──────────────────────────────────────
         // Esto sumaba `pago.mora` A CIEGAS, y por eso sobrecobraba: registrar
@@ -394,6 +399,13 @@ export function createReversePayment(
           await marcarDecrementoAnulado(tx, decremento.historial_id);
         }
 
+        // ⚠️ La compensación del ledger va DENTRO de esta tx; la restitución de
+        // `moras_credito` (el `updateMora` de abajo) va FUERA. Si la tx confirma
+        // y `updateMora` falla después, el ledger ya devolvió lo pagado pero la
+        // mora del día NO se restituye: el cliente ve MENOS mora de la que debe
+        // hasta que el cron de la noche la recalcula desde el ledger. Se
+        // auto-repara; unirlas exige tocar el orden de candados del módulo.
+
         if (restitucion) {
           mayHaveGlobalPersistence = true;
           // 🔒 SIN `dbClient`, A PROPÓSITO: el ajuste sigue yendo por el `db`
@@ -402,11 +414,14 @@ export function createReversePayment(
           // eso —el portero del paso 4️⃣.5️⃣ se adelanta justamente porque acá se
           // escribe fuera de la tx, y `mayHaveGlobalPersistence` es lo que hace
           // que un fallo posterior se reporte como `manual_action_required`—.
-          // Meterlo adentro no rompería el orden de candados (`updateMora` pide
-          // `creditos` FOR UPDATE antes que `moras_credito`, y esta transacción
-          // no tiene candada ninguna de las dos al llegar acá), pero cambiaría
-          // la semántica de rollback de toda la reversa: es otra tarea, con sus
-          // propias pruebas. Acá el alcance es cuánta mora se restituye.
+          // Como corre en OTRA conexión, esta transacción no puede tener
+          // candada todavía la fila del crédito: `updateMora` pide `creditos`
+          // FOR UPDATE y se quedaría esperando a esta tx, que a su vez lo
+          // espera a él (Postgres no ve ese ciclo: pasa por Node). Por eso la
+          // compensación del ledger —cuyo FK sí toma FOR KEY SHARE sobre el
+          // crédito— va DESPUÉS de este bloque. Meter el ajuste adentro
+          // cambiaría la semántica de rollback de toda la reversa: es otra
+          // tarea, con sus propias pruebas.
           const reverseMoraResult = await dependencies.restituirMora({
             credito_id,
             tipo: "INCREMENTO",
@@ -423,6 +438,23 @@ export function createReversePayment(
           }
         }
       }
+
+      // Compensar lo que este pago anotó en el ledger, SIEMPRE, sin mirar la
+      // columna `pago.mora`: el ledger es la fuente de verdad y esa columna
+      // puede estar en 0 aunque haya anotaciones vivas (el reset y el paso a
+      // INCOBRABLE la ponen en 0 en pagos que siguen valiendo). Cero filas
+      // compensadas es legítimo. Va DENTRO de tx: si falla, la reversa no pasa.
+      //
+      // 🔒 Va DESPUÉS de la restitución, no antes: insertar en
+      // `mora_pagada_cuota` hace que el FK tome FOR KEY SHARE sobre la fila del
+      // crédito hasta el commit, y `updateMora` (arriba, por el `db` global =
+      // otra conexión) pide esa misma fila FOR UPDATE, que choca con KEY SHARE.
+      // En el orden inverso la reversa se colgaba esperándose a sí misma. Nada
+      // de lo de arriba lee el ledger, así que el orden no cambia los montos.
+      // Costo: si esto falla después de restituir, el error sale como
+      // `manual_action_required` (`mayHaveGlobalPersistence`), no como un
+      // rollback limpio.
+      await revertirMoraPagadaDePago({ pago_id, tipo: "REVERSA" }, tx);
 
       // ======================================================================
       // 6️⃣.5️⃣ REVERSAR PAGO DE CONVENIO SI EXISTÍA

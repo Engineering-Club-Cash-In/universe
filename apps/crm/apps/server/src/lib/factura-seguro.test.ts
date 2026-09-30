@@ -3,6 +3,8 @@ import {
 	CORREOS_POLIZAS_GYT,
 	CORREOS_POLIZAS_UNIVERSALES,
 	destinatariosDe,
+	nombreDeFactura,
+	tipoRealDeFactura,
 	puedeReenviarFacturaSeguro,
 	puedeSubirFacturaSeguro,
 	resolverAseguradora,
@@ -150,5 +152,62 @@ describe("puedeReenviarFacturaSeguro", () => {
 			ok: false,
 			motivo: "no_es_el_vendedor",
 		});
+	});
+});
+
+describe("tipoRealDeFactura", () => {
+	const bytes = (...inicio: number[]) => {
+		const b = new Uint8Array(64);
+		b.set(inicio);
+		return b;
+	};
+	const texto = (t: string) => new TextEncoder().encode(t);
+
+	test("reconoce PDF, JPEG, PNG y WebP por su firma", () => {
+		expect(tipoRealDeFactura(texto("%PDF-1.7\n..."))).toBe("application/pdf");
+		expect(tipoRealDeFactura(bytes(0xff, 0xd8, 0xff, 0xe0))).toBe("image/jpeg");
+		expect(
+			tipoRealDeFactura(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
+		).toBe("image/png");
+		expect(
+			tipoRealDeFactura(texto("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ")),
+		).toBe("image/webp");
+	});
+
+	test("un PDF con basura antes del encabezado (lo admite el estándar)", () => {
+		expect(tipoRealDeFactura(texto("\r\n  %PDF-1.4"))).toBe("application/pdf");
+	});
+
+	test("rechaza ejecutables, documentos de Office, vacíos o sin firma", () => {
+		expect(tipoRealDeFactura(bytes(0x4d, 0x5a, 0x90))).toBeNull();
+		expect(tipoRealDeFactura(bytes(0x50, 0x4b, 0x03, 0x04))).toBeNull();
+		expect(tipoRealDeFactura(new Uint8Array(0))).toBeNull();
+		expect(tipoRealDeFactura(new Uint8Array(64))).toBeNull();
+		expect(
+			tipoRealDeFactura(texto("RIFF\u0000\u0000\u0000\u0000WAVE")),
+		).toBeNull();
+	});
+});
+
+describe("nombreDeFactura", () => {
+	test("pone la extensión del tipo real", () => {
+		expect(nombreDeFactura("factura.exe", "application/pdf")).toBe(
+			"factura.pdf",
+		);
+		expect(nombreDeFactura("Factura QA.PDF", "application/pdf")).toBe(
+			"Factura QA.pdf",
+		);
+		expect(nombreDeFactura("foto.jpeg", "image/jpeg")).toBe("foto.jpg");
+		expect(nombreDeFactura("sin-extension", "image/png")).toBe(
+			"sin-extension.png",
+		);
+	});
+
+	test("quita rutas y caracteres raros; sin nombre usable queda 'factura'", () => {
+		expect(nombreDeFactura("C:\\fakepath\\póliza.pdf", "application/pdf")).toBe(
+			"póliza.pdf",
+		);
+		expect(nombreDeFactura("../../x<>|.pdf", "application/pdf")).toBe("x.pdf");
+		expect(nombreDeFactura("<>.pdf", "application/pdf")).toBe("factura.pdf");
 	});
 });

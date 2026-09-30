@@ -14,6 +14,51 @@ export const MIME_FACTURA_SEGURO = [
 	"image/webp",
 ] as const;
 
+export type MimeFacturaSeguro = (typeof MIME_FACTURA_SEGURO)[number];
+
+const EXTENSION_FACTURA: Record<MimeFacturaSeguro, string> = {
+	"application/pdf": ".pdf",
+	"image/jpeg": ".jpg",
+	"image/png": ".png",
+	"image/webp": ".webp",
+};
+
+function empiezaCon(bytes: Uint8Array, firma: number[], desde = 0) {
+	return firma.every((b, i) => bytes[desde + i] === b);
+}
+
+/**
+ * Tipo real del archivo según su firma, o null si no es PDF ni imagen
+ * admitida. El tipo y el nombre que manda el cliente no se usan: el archivo
+ * sale adjunto en un correo de Club Cash In.
+ */
+export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
+	// El estándar de PDF admite basura antes del encabezado (hasta 1024 bytes).
+	const inicio = Buffer.from(bytes.subarray(0, 1024)).toString("latin1");
+	if (inicio.includes("%PDF-")) return "application/pdf";
+	if (empiezaCon(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg";
+	if (empiezaCon(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+		return "image/png";
+	if (
+		empiezaCon(bytes, [0x52, 0x49, 0x46, 0x46]) &&
+		empiezaCon(bytes, [0x57, 0x45, 0x42, 0x50], 8)
+	)
+		return "image/webp";
+	return null;
+}
+
+/** Nombre del adjunto con la extensión del tipo real ("factura.exe" → "factura.pdf"). */
+export function nombreDeFactura(
+	original: string,
+	tipo: MimeFacturaSeguro,
+): string {
+	const base = (original.split(/[\\/]/).pop() ?? "")
+		.replace(/\.[^.]*$/, "")
+		.replace(/[^\p{L}\p{N} ._-]/gu, "")
+		.trim();
+	return `${base || "factura"}${EXTENSION_FACTURA[tipo]}`;
+}
+
 export type Aseguradora = "gyt" | "universales";
 
 export type MotivoSinFactura =

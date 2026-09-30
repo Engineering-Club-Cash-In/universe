@@ -202,8 +202,15 @@ function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 
 // Key que arma el mock de storage para "factura.pdf" en esta oportunidad.
 const KEY = `opportunities/${ID}/123-abc-factura.pdf`;
+// Con encabezado real: el server valida el contenido, no el tipo declarado.
+const ENCABEZADO_PDF = new TextEncoder().encode("%PDF-1.4\n");
+function conContenido(inicio: Uint8Array, bytes: number) {
+	const contenido = new Uint8Array(bytes);
+	contenido.set(inicio.subarray(0, bytes));
+	return contenido;
+}
 const pdf = (nombre = "factura.pdf", tipo = "application/pdf", bytes = 2048) =>
-	new File([new Uint8Array(bytes)], nombre, { type: tipo });
+	new File([conContenido(ENCABEZADO_PDF, bytes)], nombre, { type: tipo });
 
 beforeEach(() => {
 	membresias = [{ companyId: "agencia-1", sellerId: "v1" }];
@@ -370,6 +377,53 @@ describe("subirFacturaSeguro", () => {
 			subir(pdf("factura.pdf", "application/pdf", 10 * 1024 * 1024 + 1)),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
 		expect(subidosR2).toHaveLength(0);
+	});
+
+	test("un ejecutable declarado como PDF → BAD_REQUEST, sin subir ni enviar nada", async () => {
+		// "MZ" es la firma de un .exe de Windows.
+		const exe = new File(
+			[conContenido(new Uint8Array([0x4d, 0x5a, 0x90, 0x00]), 2048)],
+			"factura.pdf",
+			{ type: "application/pdf" },
+		);
+		await expect(subir(exe)).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: "El archivo no es un PDF ni una imagen válida (JPG, PNG o WebP)",
+		});
+		expect(subidosR2).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+	});
+
+	test("un PDF de verdad con otra extensión se guarda y se adjunta como .pdf", async () => {
+		await subir(pdf("factura.exe"));
+		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
+		expect(
+			insertados.find((i) => i.tabla === opportunityDocuments)?.valores,
+		).toMatchObject({
+			originalName: "factura.pdf",
+			mimeType: "application/pdf",
+		});
+		expect(correos[0]).toMatchObject({
+			archivo: { key: KEY, nombre: "factura.pdf" },
+		});
+	});
+
+	test("el tipo guardado es el del contenido, no el declarado", async () => {
+		const png = new File(
+			[
+				conContenido(
+					new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+					2048,
+				),
+			],
+			"factura.jpg",
+			{ type: "image/jpeg" },
+		);
+		await subir(png);
+		expect(subidosR2[0]?.mime).toBe("image/png");
+		expect(
+			insertados.find((i) => i.tabla === opportunityDocuments)?.valores,
+		).toMatchObject({ originalName: "factura.png", mimeType: "image/png" });
 	});
 
 	test("si otra subida ganó la carrera: CONFLICT y se borra solo el archivo recién subido", async () => {

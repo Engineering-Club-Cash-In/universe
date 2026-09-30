@@ -2,14 +2,16 @@ import Big from "big.js";
 
 type Row = { inversionista_id: number; abono_interes: string; abono_iva_12: string };
 
-export function oldestPendingPurchaseAtCutoff<T extends { id: number; created_at: Date }>(
+export function oldestActivatedPendingPurchaseAtCutoff<T extends { id: number; fecha_completada: Date | null }>(
   operations: T[],
   cutoff: Date | null | undefined,
 ) {
   if (!cutoff) return undefined;
   return operations
-    .filter(operation => operation.created_at <= cutoff)
-    .sort((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.id - b.id)[0];
+    .filter((operation): operation is T & { fecha_completada: Date } =>
+      operation.fecha_completada !== null && operation.fecha_completada <= cutoff
+    )
+    .sort((a, b) => a.fecha_completada.getTime() - b.fecha_completada.getTime() || a.id - b.id)[0];
 }
 
 export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
@@ -36,9 +38,6 @@ export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
     });
     interest = interest.plus(base); vat = vat.plus(tax);
   }
-  if (!result.has(86)) {
-    throw new Error("nexa_invoice_distribution_invalid");
-  }
   const recipients = new Map(expected.recipients.map(recipient => [recipient.inversionista_id, recipient]));
   if (recipients.size !== expected.recipients.length
     || expected.recipients.some(recipient => !result.has(recipient.inversionista_id))) {
@@ -50,7 +49,8 @@ export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
   const cubeRecipients = expected.recipients.filter(recipient =>
     recipient.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")
   );
-  if (cubeRecipients.length !== 1 || cubeRecipients[0]?.inversionista_id !== 86) {
+  if (cubeRecipients.length !== Number(result.has(86))
+    || cubeRecipients.some(recipient => recipient.inversionista_id !== 86)) {
     throw new Error("nexa_invoice_distribution_invalid");
   }
   if (!interest.eq(expected.interest) || !vat.eq(expected.vat)) {

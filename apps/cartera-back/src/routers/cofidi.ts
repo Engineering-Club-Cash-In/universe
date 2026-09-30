@@ -13,7 +13,7 @@ import {
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import {
   nexaPersistedInvoiceAmounts,
-  oldestPendingPurchaseAtCutoff,
+  oldestActivatedPendingPurchaseAtCutoff,
 } from "../cofidi/nexaPersistedInvoiceAmounts";
 import { db } from "../database";
 import {
@@ -333,7 +333,6 @@ if (facturasExistentes.length > 0) {
           tipo_reinversion: compras_credito_inversionista.tipo_reinversion,
           status: compras_credito_inversionista.status,
           fecha: compras_credito_inversionista.fecha,
-          created_at: compras_credito_inversionista.created_at,
           fecha_completada: compras_credito_inversionista.fecha_completada,
         })
         .from(compras_credito_inversionista)
@@ -1981,7 +1980,7 @@ if (facturasExistentes.length > 0) {
         cutoffNexa &&
         process.env.SIMULAR_FACTURAS !== "true"
       ) {
-        const operacionPendienteNexa = oldestPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa);
+        const operacionPendienteNexa = oldestActivatedPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa);
         if (operacionPendienteNexa) {
           const [cuotaInfo] = await db
             .select({ pagado: cuotas_credito.pagado })
@@ -2105,7 +2104,7 @@ if (facturasExistentes.length > 0) {
             --    duplicaría en el snapshot. Misma condición que el redirigirACube.
             --    NOT EXISTS (no JOIN) para no multiplicar filas ni romper con NULL.
             AND NOT (
-              ${pagoData.bandera_reinversion === true}
+              ${!nexaInvoiceAmounts && pagoData.bandera_reinversion === true}
               AND EXISTS (
                 SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
                 WHERE esp.credito_id = ${pagoData.credito_id}

@@ -32,9 +32,11 @@ import {
 	MENSAJE_MOTIVO,
 	MENSAJE_SIN_REENVIO,
 	MIME_FACTURA_SEGURO,
+	nombreDeFactura,
 	puedeReenviarFacturaSeguro,
 	puedeSubirFacturaSeguro,
 	resolverAseguradora,
+	tipoRealDeFactura,
 } from "../lib/factura-seguro";
 import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
 import { PARTNER_CHANGE_PASSWORD_PATH, partnerAuth } from "../lib/partner-auth";
@@ -712,9 +714,8 @@ export const trackerRouter = {
 			// Antes de escribir en R2: si el caso no califica, no se sube nada.
 			exigirReglaFactura(fila, context.membresias);
 
-			const nombre = input.archivo.name;
-			const mimeType = mimeDeFactura({
-				name: nombre,
+			mimeDeFactura({
+				name: input.archivo.name,
 				type: input.archivo.type || undefined,
 			});
 			if (input.archivo.size === 0) {
@@ -728,6 +729,19 @@ export const trackerRouter = {
 				});
 			}
 
+			// El tipo que declara el cliente no alcanza: el archivo sale adjunto
+			// en un correo de Club Cash In. Manda el contenido, y el nombre lleva
+			// la extensión de ese tipo.
+			const contenido = Buffer.from(await input.archivo.arrayBuffer());
+			const mimeType = tipoRealDeFactura(contenido);
+			if (!mimeType) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El archivo no es un PDF ni una imagen válida (JPG, PNG o WebP)",
+				});
+			}
+			const nombre = nombreDeFactura(input.archivo.name, mimeType);
+
 			// Todo lo que puede fallar va antes de subir a R2: así la subida queda
 			// pegada a la transacción y a su limpieza, sin archivos huérfanos.
 			const { aseguradora, datos } = await datosDelCorreo(fila);
@@ -736,7 +750,6 @@ export const trackerRouter = {
 			// fecha (createdAt del registro), no la hora de cada reintento.
 			const creadoAt = new Date();
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
-			const contenido = Buffer.from(await input.archivo.arrayBuffer());
 
 			const subido = {
 				key: `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`,

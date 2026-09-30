@@ -13,12 +13,12 @@ const base: Caso["facturaSeguro"] = {
 function vista(
 	factura: Partial<Caso["facturaSeguro"]>,
 	porcentaje = 90,
-	cerrado = false,
+	estado: Caso["estado"] = "en_proceso",
 ) {
 	return vistaFacturaSeguro({
 		facturaSeguro: { ...base, ...factura },
 		porcentaje,
-		cerrado,
+		estado,
 	});
 }
 
@@ -99,10 +99,16 @@ describe("vistaFacturaSeguro", () => {
 		});
 	});
 
-	test("antes del 90%, desembolsado o cerrado sin factura: no se muestra", () => {
+	test("al 90% ya ganado (flujo normal), el gerente sigue viendo el pendiente", () => {
+		expect(vista({ motivo: "La sube el vendedor asignado" }, 90, "aprobado")).toMatchObject({
+			titulo: "Factura del seguro pendiente",
+		});
+	});
+
+	test("antes del 90%, desembolsado o perdido sin factura: no se muestra", () => {
 		expect(vista({}, 85)).toBeNull();
-		expect(vista({}, 100)).toBeNull();
-		expect(vista({}, 90, true)).toBeNull();
+		expect(vista({}, 100, "aprobado")).toBeNull();
+		expect(vista({}, 90, "rechazado")).toBeNull();
 	});
 });
 

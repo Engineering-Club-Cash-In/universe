@@ -17,9 +17,9 @@ const base: Caso["facturaSeguro"] = {
 function caso(
 	factura: Partial<Caso["facturaSeguro"]>,
 	porcentaje = 90,
-	cerrado = false,
+	estado: Caso["estado"] = "en_proceso",
 ) {
-	return { facturaSeguro: { ...base, ...factura }, porcentaje, cerrado };
+	return { facturaSeguro: { ...base, ...factura }, porcentaje, estado };
 }
 
 describe("documentosDelCaso", () => {
@@ -52,15 +52,20 @@ describe("documentosDelCaso", () => {
 		expect(tieneDocumentosPendientes(c)).toBe(false);
 	});
 
-	test("antes del 90%, cerrado o desembolsado sin factura: no pide documentos", () => {
+	test("al 90% ya ganado (flujo normal) sin factura: está pendiente y entra al filtro", () => {
+		expect(tieneDocumentosPendientes(caso({ habilitada: true }, 90, "aprobado"))).toBe(true);
+		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
+	});
+
+	test("antes del 90%, perdido o desembolsado sin factura: no pide documentos", () => {
 		expect(documentosDelCaso(caso({}, 85))).toEqual([]);
-		expect(documentosDelCaso(caso({}, 90, true))).toEqual([]);
-		expect(documentosDelCaso(caso({}, 100))).toEqual([]);
+		expect(documentosDelCaso(caso({}, 90, "rechazado"))).toEqual([]);
+		expect(documentosDelCaso(caso({}, 100, "aprobado"))).toEqual([]);
 		expect(tieneDocumentosPendientes(caso({}, 85))).toBe(false);
 	});
 
 	test("desembolsado con la factura enviada: se sigue viendo como subida", () => {
-		expect(documentosDelCaso(caso({ envio: "enviado" }, 100, true))[0]?.estado).toBe(
+		expect(documentosDelCaso(caso({ envio: "enviado" }, 100, "aprobado"))[0]?.estado).toBe(
 			"subido",
 		);
 	});

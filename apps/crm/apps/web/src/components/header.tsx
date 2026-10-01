@@ -276,7 +276,7 @@ export default function Header() {
 											grupo: para él no se pinta ningún encabezado. */}
 									{PERMISSIONS.canAssignCobros(userRole) && (
 										<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
-											Mi día a día
+											Gestión diaria
 										</DropdownMenuLabel>
 									)}
 									<DropdownMenuGroup>
@@ -309,7 +309,7 @@ export default function Header() {
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/promesas" className="cursor-pointer">
 												<BellRing className="mr-2 h-4 w-4" />
-												Alertas de Promesas
+												Alertas de Promesas de Pago
 											</Link>
 										</DropdownMenuItem>
 										<DropdownMenuItem asChild>
@@ -416,7 +416,7 @@ export default function Header() {
 														className="cursor-pointer"
 													>
 														<Car className="mr-2 h-4 w-4" />
-														Recuperación de vehículo
+														Recuperación del vehículo
 													</Link>
 												</DropdownMenuItem>
 											</DropdownMenuGroup>
@@ -794,7 +794,7 @@ function MobileNav({
 								{userRole && PERMISSIONS.canAccessCobros(userRole) && (
 									<MobileSection label="Cobros">
 										{PERMISSIONS.canAssignCobros(userRole) && (
-											<MobileGroupLabel>Mi día a día</MobileGroupLabel>
+											<MobileGroupLabel>Gestión diaria</MobileGroupLabel>
 										)}
 										<Link to="/cobros" className={MOBILE_LINK_CLASS}>
 											<Banknote />
@@ -813,7 +813,7 @@ function MobileNav({
 										)}
 										<Link to="/cobros/promesas" className={MOBILE_LINK_CLASS}>
 											<BellRing />
-											Alertas de Promesas
+											Alertas de Promesas de Pago
 										</Link>
 										<Link to="/cobros/convenios" className={MOBILE_LINK_CLASS}>
 											<Handshake />
@@ -879,7 +879,7 @@ function MobileNav({
 													className={MOBILE_LINK_CLASS}
 												>
 													<Car />
-													Recuperación de vehículo
+													Recuperación del vehículo
 												</Link>
 												<MobileGroupLabel>
 													Configuración y análisis

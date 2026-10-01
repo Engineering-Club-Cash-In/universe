@@ -2,10 +2,10 @@
 
 **Estado:** ✅ Implementado. El traslado funciona y se sostiene con el estado
 `EN_RECUPERACION` ([plan 08](./08-plan-convenios-y-recuperacion.md), fase 4). Desde
-**CB-042** hay **dos tipos de envío** —recuperación forzosa y entrega voluntaria— y cada
+**CB-042** hay **dos tipos de envío** —recuperación del vehículo y entrega voluntaria— y cada
 uno deja un formulario en el CRM que ve el asesor de B4. Ver
 [Los dos envíos y su formulario](#los-dos-envíos-y-su-formulario-cb-042). Desde
-**CB-043** la forzosa de un asesor es una **solicitud con checklist que aprueba un
+**CB-043** la recuperación de un asesor es una **solicitud con checklist que aprueba un
 supervisor**. Ver [La solicitud y la aprobación](#la-solicitud-y-la-aprobación-cb-043).
 **Migraciones CRM `0065` y `0071` pendientes en producción.**
 
@@ -63,9 +63,10 @@ cliente colaborando.
   (odómetro), y guarda la unidad y la hora de la señal. Si la señal tiene más de dos
   horas, el formulario lo avisa: un GPS que no reporta también es información para B4.
 - **El motivo que llega a cartera** lleva el tipo adelante (`Entrega voluntaria: …`,
+  `Recuperación del vehículo: …`; los registros de antes del 2026-10-01 dicen
   `Recuperación forzosa: …`), así la bitácora de buckets distingue los dos envíos sin
   cruzar con el CRM.
-- **"Deshacer convenio y mandar a recuperación"** también deja registro: forzosa, motivo
+- **"Deshacer convenio y mandar a recuperación"** también deja registro: recuperación del vehículo, motivo
   «Incumplió el convenio», con el texto del modal de deshacer.
 
 ### Dónde vive: `recuperaciones_vehiculo` (CRM)
@@ -114,7 +115,7 @@ explicación no se explica solo.
 
 `enviarCreditoARecuperacion` recibe `tipo` y `detalle` **opcionales**. Un llamador que
 manda solo `motivo` (por ejemplo, el cierre "no pagó" de la inmovilización de CB-041)
-sigue funcionando y queda registrado como forzosa con ese texto.
+sigue funcionando y queda registrado como recuperación del vehículo con ese texto.
 
 ---
 
@@ -122,13 +123,13 @@ sigue funcionando y queda registrado como forzosa con ese texto.
 
 CB-043 pedía "activar B4 antes del día 91 si ya se agotaron los pasos de B3, con checklist
 y aprobación de supervisor/gerente", con un subestado "B4 operativo anticipado". El PM lo
-**unificó con la recuperación forzosa** (2026-09-30): las dos terminan igual —B4 con
+**unificó con la recuperación del vehículo** (2026-09-30): las dos terminan igual —B4 con
 `EN_RECUPERACION`, por el mismo endpoint de cartera— y no tenía sentido que una fuera
 directa y la otra pasara por aprobación. Dicho por el PM: *"¿qué pasa si un asesor dice
 'no quiero tratar este caso, mandémoslo a B4'? El supervisor tiene que ver la
 justificación."* Así quedó:
 
-| Quién | Recuperación forzosa | Entrega voluntaria |
+| Quién | Recuperación del vehículo | Entrega voluntaria |
 | --- | --- | --- |
 | Asesor, supervisor o admin | **Solicita**: el crédito no se mueve hasta que la apruebe **otro** supervisor o admin | Directa, como siempre |
 
@@ -139,7 +140,7 @@ no queda ninguno (la pidió el único supervisor), va a los admins.
 
 ### Qué lleva la solicitud
 
-- Lo de siempre de la forzosa (motivos, dónde está la unidad, estado) más una
+- Lo de siempre de la recuperación (motivos, dónde está la unidad, estado) más una
   **justificación obligatoria** de al menos 20 caracteres: por qué ya no hay otra salida.
 - El **checklist de gestión**: nueve pasos que salen de la épica B3 · Rescate (CB-035 a
   CB-042) más lo básico de cualquier cobro. Es un checklist de **evidencia**, no de
@@ -159,13 +160,13 @@ no queda ninguno (la pidió el único supervisor), va a los admins.
   | Ubicación por GPS | Consultas en `gps_consulta_logs` del vehículo |
   | Apagado de la unidad | La última solicitud de CB-041 (ejecutada = hecho; pedida o rechazada = a medias) |
 
-  Lo que no está hecho **se justifica** con un catálogo (no aplica, sin datos, nadie
-  contesta, no se localiza, se niega a pagar, alertaría al cliente y escondería el
-  vehículo, urgencia, zona de riesgo, sin GPS, se hizo fuera del CRM, otro). "Se hizo fuera
-  del CRM" y "Otro" piden nota. **No se bloquea por pasos pendientes** —obligaría a
-  inventar registros—, pero ninguno queda sin explicación. Cuando falta el dato para hacer
-  el paso (sin referencias, sin lugar de trabajo, sin GPS) la justificación viene
-  sugerida.
+  Lo que no está hecho **se justifica** con las razones de **ese paso**: cada uno tiene
+  su pregunta ("¿Por qué no hay llamadas al cliente?", "¿Por qué no hay convenios de
+  pago?", …) y su propia lista. Desde el 2026-10-01 (pedido del PM) no hay "No aplica" y
+  la **nota es siempre opcional**. **No se bloquea por pasos pendientes** —obligaría a
+  inventar registros—, pero ninguno queda sin explicación. Cuando el CRM ya sabe la razón
+  (sin referencias, sin lugar de trabajo, sin GPS, apagado pedido o rechazado) viene
+  preseleccionada.
 - **Qué quedó afuera (2026-09-30):** la *llamada del supervisor* (no depende del asesor:
   no la puede hacer ni justificar) y la *búsqueda en redes sociales* (CB-039 no estaba
   hecho; ya hay dónde registrarla, ver [doc 11](./11-investigacion-redes-sociales.md), pero el
@@ -173,10 +174,16 @@ no queda ninguno (la pidió el único supervisor), va a los admins.
   ("no se sabe si hubo convenio") en vez de afirmar que no hubo.
 - El checklist lo **arma el servidor** dos veces: para mostrar el formulario y otra vez al
   guardar. Del navegador solo salen las justificaciones y notas: lo que lee el supervisor
-  es lo que el CRM encontró, no lo que alguien dijo que encontró.
-- Catálogos provisionales en `lib/recuperacion-solicitud.ts`, en TypeScript: el checklist
-  se guarda como jsonb con su título y su evidencia, así que cambiar pasos no rompe los
-  registros viejos.
+  es lo que el CRM encontró, no lo que alguien dijo que encontró. Al guardar, la razón
+  elegida se valida contra el catálogo de ese paso.
+- **Dónde vive cada cosa.** Los **pasos** están en `lib/recuperacion-solicitud.ts` (cada uno
+  está atado al código que detecta su evidencia). Las **razones** están en la tabla
+  `cobros_checklist_justificaciones` (migración `0074`: `paso`, `clave`, `etiqueta`, `orden`,
+  `activo`), así que se agregan o retiran con un INSERT/UPDATE, sin deploy. Una razón no se
+  borra: se pone `activo = false`. El checklist se guarda como jsonb con el título, la
+  evidencia, la clave **y la etiqueta** elegida, así que cambiar pasos o razones no rompe
+  las solicitudes viejas. Las de antes de la 0074 (catálogo genérico) se leen con sus
+  etiquetas de entonces.
 
 ### El ciclo
 
@@ -354,7 +361,7 @@ la misma que usa el job. O sea:
 
 `cobrosProcedure` → **cualquiera del módulo de cobros** (`canAccessCobros`: asesor,
 supervisor o admin). Lo inicia el asesor que lleva la cuenta: es quien sabe que la unidad
-ya no se recupera por teléfono. **Desde CB-043 la forzosa solo crea la solicitud, la pida
+ya no se recupera por teléfono. **Desde CB-043 la recuperación solo crea la solicitud, la pida
 quien la pida**; el traslado lo hace `decidirSolicitudRecuperacion`, que exige
 `cobrosSupervisorProcedure` (supervisor o admin) y que quien decide no sea quien pidió. La
 entrega voluntaria sigue siendo directa.

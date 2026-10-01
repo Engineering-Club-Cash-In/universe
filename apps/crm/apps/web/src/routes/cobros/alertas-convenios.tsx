@@ -88,7 +88,7 @@ const CATEGORIA_CONFIG: Record<
 	},
 	por_vencer: {
 		label: "Por vencer",
-		descripcion: "Se acerca la fecha — confirmá que va a pagar",
+		descripcion: "Se acerca la fecha — confirme el pago con el cliente",
 		icon: Clock,
 		card: "border-sky-200 dark:border-sky-900/50",
 		iconWrap: "bg-sky-100 dark:bg-sky-900/40",
@@ -261,7 +261,7 @@ function RouteComponent() {
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
-						No tienes permisos para acceder a la sección de cobros.
+						No tiene permisos para acceder a la sección de cobros.
 					</p>
 				</div>
 			</div>
@@ -280,7 +280,7 @@ function RouteComponent() {
 				<p className="text-muted-foreground">
 					{esSupervisor
 						? "Convenios del equipo que requieren seguimiento — incumplidos, de hoy y próximos a vencer"
-						: "Tus convenios que requieren seguimiento — incumplidos, de hoy y próximos a vencer"}
+						: "Sus convenios que requieren seguimiento — incumplidos, de hoy y próximos a vencer"}
 				</p>
 			</div>
 

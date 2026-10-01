@@ -31,6 +31,7 @@ import {
 import { clients } from "../db/schema/crm";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { leerCatalogoJustificaciones } from "../services/recuperacion-justificaciones";
 import {
 	definicionPaso,
 	leerChecklistGuardado,
@@ -78,7 +79,7 @@ async function creditoDelCaso(
 	if (!fila.creditoId) {
 		throw new ORPCError("NOT_FOUND", {
 			message:
-				"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
+				"No se encontró el crédito en cartera para este caso. Abra la ficha del crédito e intente de nuevo.",
 		});
 	}
 	return { numeroSifco: fila.numeroSifco, creditoId: fila.creditoId };
@@ -168,17 +169,26 @@ export const recuperacionSolicitudesRouter = {
 				userRole: context.userRole,
 				accion: "solicitar su recuperación",
 			});
-			const { desde, pasos } = await checklistDelCaso({
-				casoCobroId: input.casoCobroId,
-				creditoId,
-			});
+			const [{ desde, pasos }, catalogo] = await Promise.all([
+				checklistDelCaso({ casoCobroId: input.casoCobroId, creditoId }),
+				leerCatalogoJustificaciones(),
+			]);
 			return {
 				desde,
-				pasos: pasos.map((p) => ({
-					...p,
-					titulo: definicionPaso(p.paso)?.titulo ?? p.paso,
-					ayuda: definicionPaso(p.paso)?.ayuda ?? "",
-				})),
+				pasos: pasos.map((p) => {
+					const opciones = catalogo[p.paso] ?? [];
+					return {
+						...p,
+						titulo: definicionPaso(p.paso)?.titulo ?? p.paso,
+						ayuda: definicionPaso(p.paso)?.ayuda ?? "",
+						pregunta: definicionPaso(p.paso)?.pregunta ?? "",
+						opciones,
+						// La sugerencia solo sirve si el catálogo todavía la tiene.
+						sugerencia: opciones.some((o) => o.clave === p.sugerencia)
+							? p.sugerencia
+							: null,
+					};
+				}),
 			};
 		}),
 
@@ -245,7 +255,7 @@ export const recuperacionSolicitudesRouter = {
 			if (solicitud.estadoSolicitud !== "pendiente") {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"Esta solicitud ya no está esperando aprobación: alguien la decidió o se canceló. Actualizá la vista.",
+						"Esta solicitud ya no está esperando aprobación: ya se decidió o se canceló. Actualice la vista.",
 				});
 			}
 			// Cuatro ojos: la decide OTRA persona, así al menos un supervisor o
@@ -254,7 +264,7 @@ export const recuperacionSolicitudesRouter = {
 			if (solicitud.registradoPor === context.userId) {
 				throw new ORPCError("FORBIDDEN", {
 					message:
-						"No podés aprobar ni rechazar tu propia solicitud: la decide otro supervisor o admin. Si ya no aplica, cancelala.",
+						"No puede aprobar ni rechazar su propia solicitud: debe decidirla otro supervisor o administrador. Si ya no aplica, cancélela.",
 				});
 			}
 
@@ -286,7 +296,7 @@ export const recuperacionSolicitudesRouter = {
 				);
 				throw new ORPCError("SERVICE_UNAVAILABLE", {
 					message:
-						"No se pudo confirmar el bucket del crédito. Intentá de nuevo en un momento.",
+						"No se pudo confirmar el bucket del crédito. Intente de nuevo en un momento.",
 				});
 			}
 			const sinEfecto = motivoSolicitudSinEfecto(

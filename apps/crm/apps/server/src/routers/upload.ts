@@ -233,7 +233,7 @@ async function assertCanUploadToResource(params: {
 		case "cobros_visita_evidencia": {
 			if (!PERMISSIONS.canAccessCobros(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para subir evidencia de visitas",
+					message: "No tiene permiso para subir evidencia de visitas",
 				});
 			}
 			await assertAccesoCasoCobro(resourceId, userId, userRole);
@@ -245,7 +245,7 @@ async function assertCanUploadToResource(params: {
 		case "cobros_inmovilizacion_evidencia": {
 			if (!PERMISSIONS.canAccessCobros(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para subir evidencia de inmovilización",
+					message: "No tiene permiso para subir evidencia de inmovilización",
 				});
 			}
 			await assertAccesoCasoCobro(resourceId, userId, userRole);
@@ -257,7 +257,7 @@ async function assertCanUploadToResource(params: {
 		case "cobros_investigacion_evidencia": {
 			if (!PERMISSIONS.canAccessCobros(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para subir evidencia de investigación",
+					message: "No tiene permiso para subir evidencia de investigación",
 				});
 			}
 			await assertAccesoCasoCobro(resourceId, userId, userRole);

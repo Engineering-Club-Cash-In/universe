@@ -4,7 +4,9 @@ import { etiquetaEnAgenda, etiquetaMotivoAgenda } from "./cumplimiento-agenda";
 test("traduce motivos técnicos de agenda a texto visible", () => {
 	expect(etiquetaMotivoAgenda("D-0")).toBe("Pago programado");
 	expect(etiquetaMotivoAgenda("sla_hoy")).toBe("Gestión SLA programada");
-	expect(etiquetaMotivoAgenda("promesa_hoy")).toBe("Promesa programada");
+	expect(etiquetaMotivoAgenda("promesa_hoy")).toBe(
+		"Promesa de pago programada",
+	);
 });
 
 test("distingue en-agenda, fuera-de-agenda y desconocido", () => {

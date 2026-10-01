@@ -410,7 +410,7 @@ app.post("/api/upload-boleta-pago", async (c) => {
 
 		const userRole = context.session.user.role;
 		if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
-			return c.json({ error: "No tienes permiso para registrar pagos" }, 403);
+			return c.json({ error: "No tiene permiso para registrar pagos" }, 403);
 		}
 
 		const formData = await c.req.formData();
@@ -464,7 +464,7 @@ app.post("/api/leer-boleta-pago", async (c) => {
 
 		const userRole = context.session.user.role;
 		if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
-			return c.json({ error: "No tienes permiso para registrar pagos" }, 403);
+			return c.json({ error: "No tiene permiso para registrar pagos" }, 403);
 		}
 
 		const formData = await c.req.formData();
@@ -498,7 +498,7 @@ app.post("/api/leer-boleta-pago", async (c) => {
 			return c.json(
 				{
 					error:
-						"No se pudo leer la boleta automáticamente. Completá los datos a mano.",
+						"No se pudo leer la boleta automáticamente. Complete los datos manualmente.",
 				},
 				503,
 			);
@@ -1413,7 +1413,7 @@ async function proxyPagaloSupervisionArchivo(
 	const userRole = context.session.user.role;
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
 		return c.json(
-			{ error: "No tenés permiso para exportar la supervisión Págalo" },
+			{ error: "No tiene permiso para exportar la supervisión Págalo" },
 			403,
 		);
 	}
@@ -1437,7 +1437,7 @@ async function proxyPagaloSupervisionArchivo(
 	}
 	if (scope.forbidden) {
 		return c.json(
-			{ error: "No tenés permiso para filtrar por otro asesor." },
+			{ error: "No tiene permiso para filtrar por otro asesor." },
 			403,
 		);
 	}
@@ -1834,7 +1834,10 @@ app.post("/api/premora/run", async (c) => {
 	}
 	const userRole = context.session.user.role;
 	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
-		return c.json({ error: "No tienes permiso para correr premora" }, 403);
+		return c.json(
+			{ error: "No tiene permiso para ejecutar los recordatorios premora" },
+			403,
+		);
 	}
 
 	// Filtros de la corrida. REGLA (review Codex): un filtro PRESENTE pero
@@ -1926,7 +1929,7 @@ app.post("/api/convenio/recordatorios/run", async (c) => {
 	const userRole = context.session.user.role;
 	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
 		return c.json(
-			{ error: "No tienes permiso para correr recordatorios de convenio" },
+			{ error: "No tiene permiso para ejecutar los recordatorios de convenio" },
 			403,
 		);
 	}
@@ -1993,7 +1996,10 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 	}
 	const userRole = context.session.user.role;
 	if (!userRole || !PERMISSIONS.canAssignCobros(userRole)) {
-		return c.json({ error: "No tienes permiso para correr este job" }, 403);
+		return c.json(
+			{ error: "No tiene permiso para ejecutar este proceso" },
+			403,
+		);
 	}
 	const resumen = await refreshPremoraElegibilidad();
 	return c.json({ success: true, resumen });

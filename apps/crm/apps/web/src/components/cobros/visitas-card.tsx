@@ -15,6 +15,7 @@ import {
 	ChevronDown,
 	ExternalLink,
 	HandCoins,
+	Handshake,
 	Home,
 	KeyRound,
 	MapPin,
@@ -57,6 +58,7 @@ const RESULTADO_BADGE: Record<string, string> = {
 		"bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
 	pago_parcial_promesa:
 		"bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+	convenio: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
 	entrega_voluntaria:
 		"bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
 	sin_contacto: "bg-muted text-muted-foreground",
@@ -108,6 +110,12 @@ interface VisitasCardProps {
 	onRegistrarResultado: (visita: VisitaProgramadaParaCompletar) => void;
 	onRegistrarPromesa: (visita: Visita) => void;
 	onRegistrarEntrega: (visita: Visita) => void;
+	/**
+	 * Abre el convenio. Viene solo si el crédito todavía puede tenerlo (sin
+	 * convenio vigente ni pendiente): la visita no guarda el convenio, así que
+	 * "no hay convenio" es la señal de que falta registrarlo.
+	 */
+	onRegistrarConvenio?: () => void;
 	/** Botones de "Registrar Pago" (link o boleta) para las visitas con pago. */
 	accionesPago?: ReactNode;
 }
@@ -118,6 +126,7 @@ export function VisitasCard({
 	onRegistrarResultado,
 	onRegistrarPromesa,
 	onRegistrarEntrega,
+	onRegistrarConvenio,
 	accionesPago,
 }: VisitasCardProps) {
 	const [cancelando, setCancelando] = useState<Visita | null>(null);
@@ -134,6 +143,13 @@ export function VisitasCard({
 	// El pago de una visita solo se ofrece en la más reciente: en las viejas ya
 	// no dice nada útil.
 	const ultimaRealizada = resto.find((v) => v.estado === "realizada")?.id;
+	// El convenio pendiente se ofrece en la visita de convenio más reciente,
+	// aunque después se hayan registrado otras: mientras el crédito no tenga
+	// convenio (`onRegistrarConvenio` solo viene entonces), sigue faltando.
+	// Una sola vez, para no repetir el aviso en convenios viejos (Codex, PR #1831).
+	const ultimaConConvenio = resto.find(
+		(v) => v.estado === "realizada" && v.pasos?.convenio,
+	)?.id;
 
 	const fila = (v: Visita) => (
 		<FilaVisita
@@ -143,6 +159,9 @@ export function VisitasCard({
 			onRegistrarResultado={onRegistrarResultado}
 			onRegistrarPromesa={onRegistrarPromesa}
 			onRegistrarEntrega={onRegistrarEntrega}
+			onRegistrarConvenio={
+				v.id === ultimaConConvenio ? onRegistrarConvenio : undefined
+			}
 			onCancelar={setCancelando}
 			accionesPago={v.id === ultimaRealizada ? accionesPago : undefined}
 		/>
@@ -193,6 +212,7 @@ function FilaVisita({
 	onRegistrarResultado,
 	onRegistrarPromesa,
 	onRegistrarEntrega,
+	onRegistrarConvenio,
 	onCancelar,
 	accionesPago,
 }: {
@@ -201,6 +221,7 @@ function FilaVisita({
 	onRegistrarResultado: (visita: VisitaProgramadaParaCompletar) => void;
 	onRegistrarPromesa: (visita: Visita) => void;
 	onRegistrarEntrega: (visita: Visita) => void;
+	onRegistrarConvenio?: () => void;
 	onCancelar: (visita: Visita) => void;
 	accionesPago?: ReactNode;
 }) {
@@ -229,7 +250,8 @@ function FilaVisita({
 					{fechaHora(v.fechaProgramada)}
 					<span className="text-muted-foreground">
 						{" "}
-						· {relativo(v.fechaProgramada)} · va {v.responsable ?? "—"}
+						· {relativo(v.fechaProgramada)} · responsable:{" "}
+						{v.responsable ?? "—"}
 					</span>
 				</p>
 				<p className="break-words text-muted-foreground text-sm">
@@ -245,7 +267,7 @@ function FilaVisita({
 				)}
 				{v.programadaPor && (
 					<p className="text-muted-foreground text-xs">
-						La programó {v.programadaPor} el {fecha(v.createdAt)}
+						Programada por {v.programadaPor} el {fecha(v.createdAt)}
 					</p>
 				)}
 				{puedeGestionar && (
@@ -315,7 +337,7 @@ function FilaVisita({
 				{fechaHora(v.fechaVisita)}
 				<span className="text-muted-foreground">
 					{" "}
-					· fue {v.responsable ?? "—"}
+					· responsable: {v.responsable ?? "—"}
 				</span>
 			</p>
 			<p className="break-words text-muted-foreground text-sm">
@@ -330,7 +352,7 @@ function FilaVisita({
 							rel="noreferrer"
 							className="inline-flex items-center gap-0.5 text-primary hover:underline"
 						>
-							dónde se registró
+							ubicación registrada
 							<ExternalLink className="h-3 w-3" />
 						</a>
 					</>
@@ -379,7 +401,7 @@ function FilaVisita({
 					<span>
 						{v.falta.entrega
 							? "Falta registrar la entrega voluntaria."
-							: "Falta registrar la promesa."}
+							: "Falta registrar la promesa de pago."}
 					</span>
 					{v.falta.promesa && (
 						<Button
@@ -403,6 +425,20 @@ function FilaVisita({
 							Registrar entrega
 						</Button>
 					)}
+				</div>
+			)}
+			{puedeGestionar && v.pasos?.convenio && onRegistrarConvenio && (
+				<div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 p-2 text-amber-900 text-sm dark:bg-amber-950/40 dark:text-amber-200">
+					<span>Falta registrar el convenio de pago.</span>
+					<Button
+						size="sm"
+						variant="outline"
+						className="h-8 bg-background"
+						onClick={onRegistrarConvenio}
+					>
+						<Handshake className="mr-1.5 h-4 w-4" />
+						Registrar convenio
+					</Button>
 				</div>
 			)}
 			{puedeGestionar && v.pasos?.pago && accionesPago && (
@@ -474,7 +510,7 @@ function CancelarVisitaDialog({
 						value={motivo}
 						onChange={(e) => setMotivo(e.target.value)}
 						rows={3}
-						placeholder="Ej: el cliente pagó antes de la visita"
+						placeholder="Ej.: el cliente pagó antes de la visita"
 					/>
 				</div>
 				<DialogFooter>
@@ -488,7 +524,9 @@ function CancelarVisitaDialog({
 					<Button
 						onClick={() => {
 							if (motivo.trim().length < 5) {
-								toast.error("Contá por qué no se hizo (mínimo 5 caracteres).");
+								toast.error(
+									"Indique el motivo de la cancelación (mínimo 5 caracteres).",
+								);
 								return;
 							}
 							cancelar.mutate();

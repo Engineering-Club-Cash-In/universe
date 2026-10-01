@@ -146,7 +146,7 @@ const ALERTA_LABEL: Record<string, string> = {
 	sin_contacto_3d: "Sin contacto",
 	bot_cliente_escribio: "Escribió al bot",
 	bot_modo_agente: "Esperando asesor",
-	recuperacion_vehiculo: "Recuperación de vehículo",
+	recuperacion_vehiculo: "Recuperación del vehículo",
 	visita_programada: "Visita programada",
 	b3_llamada_supervisor: "Llamar: ingresó a B3",
 	b3_llamada_vencida: "Llamada B3 vencida",
@@ -533,7 +533,7 @@ export function PanelGestionRapida({
 													className="h-8 text-xs"
 												>
 													<HandCoins className="mr-1.5 h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-													Promesa
+													Registrar promesa
 												</Button>
 											</ContactoModal>
 										)}

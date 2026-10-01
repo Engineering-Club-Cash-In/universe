@@ -76,7 +76,7 @@ export async function bucketActualEstricto(
 			error,
 		);
 		throw new ORPCError("SERVICE_UNAVAILABLE", {
-			message: "No se pudo confirmar el bucket del crédito. Intentá de nuevo.",
+			message: "No se pudo confirmar el bucket del crédito. Intente de nuevo.",
 		});
 	}
 }
@@ -177,7 +177,7 @@ export function assertResponsablePosible(
 	if (!posibles.some((r) => r.id === responsableId)) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"Esa persona no trabaja este crédito: elegí a quien lo lleva en cartera, a quien lo cubre hoy o a un supervisor.",
+				"Esa persona no gestiona este crédito. Seleccione al asesor asignado en cartera, al que lo cubre hoy o a un supervisor.",
 		});
 	}
 }

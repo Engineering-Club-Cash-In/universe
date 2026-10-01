@@ -538,7 +538,7 @@ async function notificarPromesasPorVencer(
 			casoId: t.casoId,
 			cobrosTipo: "promesa_por_vencer",
 			titulo: "Promesa de pago por vencer",
-			descripcion: `La promesa de pago del crédito ${credito} vence el ${fechaStr}. Dale seguimiento antes de que se caiga.`,
+			descripcion: `La promesa de pago del crédito ${credito} vence el ${fechaStr}. Dé seguimiento antes de que se incumpla.`,
 			asesorUserId:
 				t.asesorId != null ? (mapaAsesor.get(t.asesorId) ?? null) : null,
 			supervisores: [], // solo asesor

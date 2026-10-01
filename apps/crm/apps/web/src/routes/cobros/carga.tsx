@@ -311,7 +311,7 @@ function RouteComponent() {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center text-muted-foreground">
-					No tienes permiso para acceder a esta página.
+					No tiene permiso para acceder a esta página.
 				</div>
 			</div>
 		);
@@ -368,7 +368,8 @@ function RouteComponent() {
 
 			{query.isError && (
 				<p className="text-destructive text-sm">
-					No se pudo cargar la carga por asesor y bucket. Intenta de nuevo.
+					No se pudo cargar la carga de cuentas por asesor y bucket. Intente de
+					nuevo.
 				</p>
 			)}
 

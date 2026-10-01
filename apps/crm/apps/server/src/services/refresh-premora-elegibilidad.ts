@@ -233,7 +233,7 @@ async function notificarAutoRevoke(sifcos: string[]): Promise<void> {
 			const casoId = casoPorSifco.get(sifco) ?? null;
 			return supervisores.map((supervisorId) => ({
 				titulo: "Reducción de recordatorios retirada",
-				descripcion: `El crédito ${sifco} dejó de pagar al día, así que el sistema restauró sus recordatorios premora completos. Revisa su gestión.`,
+				descripcion: `El crédito ${sifco} dejó de pagar al día, así que el sistema restauró sus recordatorios premora completos. Revise la gestión del crédito.`,
 				type: "aviso" as const,
 				status: "pending" as const,
 				createdBy: usuarioSistema,

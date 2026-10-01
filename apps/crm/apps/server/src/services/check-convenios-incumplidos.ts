@@ -146,7 +146,7 @@ export async function checkConveniosIncumplidos(): Promise<ConveniosIncumplidosR
 					casoId,
 					cobrosTipo: "convenio_incumplido",
 					titulo: "Convenio incumplido",
-					descripcion: `${cliente} (crédito ${alerta.numero_credito_sifco}) tiene ${cuantas} de su convenio ${desde}. Debe ${Q(alerta.monto_vencido)}. Contactalo y dejá registrada la gestión.`,
+					descripcion: `${cliente} (crédito ${alerta.numero_credito_sifco}) tiene ${cuantas} de su convenio ${desde}. Debe ${Q(alerta.monto_vencido)}. Contáctelo y registre la gestión.`,
 					descripcionSupervisor: `El crédito ${alerta.numero_credito_sifco} (${cliente}), de ${alerta.asesor || "sin asesor asignado"}, tiene ${cuantas} de su convenio ${desde} por ${Q(alerta.monto_vencido)}.`,
 					asesorUserId,
 					supervisores,

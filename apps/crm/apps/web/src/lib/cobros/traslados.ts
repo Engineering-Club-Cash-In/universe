@@ -9,17 +9,17 @@ export function validarFormularioTraslado(input: {
 	motivo: string;
 }): string | null {
 	if (!/^\d+$/.test(input.origen) || Number(input.origen) <= 0)
-		return "Selecciona un asesor de origen.";
+		return "Seleccione un asesor de origen.";
 	if (!input.motivo.trim())
-		return "Selecciona un motivo y completa la explicación.";
+		return "Seleccione un motivo y complete la explicación.";
 	if (input.modo === "traslado_completo") {
-		if (!input.destino) return "Selecciona un asesor de destino.";
+		if (!input.destino) return "Seleccione un asesor de destino.";
 		if (input.destino === input.origen)
 			return "Origen y destino deben ser distintos.";
 	}
 	if (input.requiereDestinoEspecial) {
 		if (!input.destinoEspecial)
-			return "Selecciona responsable para cuentas sin bucket operativo.";
+			return "Seleccione un responsable para las cuentas sin bucket operativo.";
 		if (input.destinoEspecial === input.origen)
 			return "El responsable de cuentas sin bucket debe ser distinto del origen.";
 	}
@@ -28,7 +28,7 @@ export function validarFormularioTraslado(input: {
 			(bucket) => !input.destinosPorBucket?.[bucket],
 		);
 		if (faltante !== undefined)
-			return `Selecciona un asesor de destino para B${faltante}.`;
+			return `Seleccione un asesor de destino para B${faltante}.`;
 		// Fallback `{}`, no `[]`: el tipo es un objeto por bucket. Con `[]`
 		// funcionaba de casualidad (Object.values de un array vacío también da
 		// []) pero mentía sobre la forma del dato.

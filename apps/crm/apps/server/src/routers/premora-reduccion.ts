@@ -29,7 +29,7 @@ const MAX_PASOS_QUITABLES = 2;
 
 const pasosSchema = z
 	.array(z.number().int())
-	.min(1, "Debes quitar al menos un recordatorio")
+	.min(1, "Debe quitar al menos un recordatorio")
 	.max(MAX_PASOS_QUITABLES, `Máximo ${MAX_PASOS_QUITABLES} recordatorios`)
 	.transform((arr) => [...new Set(arr)])
 	.refine(
@@ -163,7 +163,7 @@ export const premoraReduccionRouter = {
 			z.object({
 				numerosCreditoSifco: z
 					.array(z.string().min(1).max(100))
-					.min(1, "Selecciona al menos un crédito")
+					.min(1, "Seleccione al menos un crédito")
 					.max(500, "Máximo 500 créditos por lote")
 					.transform((arr) => [...new Set(arr)]),
 				pasosRemovidos: pasosSchema,

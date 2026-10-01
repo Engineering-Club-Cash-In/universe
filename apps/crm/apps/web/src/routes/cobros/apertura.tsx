@@ -316,7 +316,7 @@ function AperturaDiaPage() {
 							Apertura del día
 						</h1>
 						<p className="text-gray-500 text-sm">
-							Casos críticos y estado de la cartera para arrancar la jornada.
+							Casos críticos y estado de la cartera para iniciar la jornada.
 						</p>
 					</div>
 				</div>
@@ -352,7 +352,8 @@ function AperturaDiaPage() {
 				<Card className="border-red-300 bg-red-50 dark:bg-red-950/30">
 					<CardContent className="flex items-center gap-2 py-4 text-red-700 dark:text-red-300">
 						<AlertTriangle className="h-5 w-5" />
-						No se pudo cargar la apertura del día. Reintenta en unos segundos.
+						No se pudo cargar la apertura del día. Intente de nuevo en unos
+						segundos.
 					</CardContent>
 				</Card>
 			)}
@@ -463,7 +464,7 @@ function AperturaDiaPage() {
 												</span>
 												{grupo && grupo.peor_monto > 0 && (
 													<span className="text-gray-400 text-sm">
-														peor: {montoQ(grupo.peor_monto)}
+														monto más alto: {montoQ(grupo.peor_monto)}
 													</span>
 												)}
 											</div>
@@ -764,9 +765,9 @@ function AperturaDiaPage() {
 										<TableHeader>
 											<TableRow>
 												<TableHead>Asesor</TableHead>
-												<TableHead>Atiende</TableHead>
-												<TableHead className="text-right">Ingresaron</TableHead>
-												<TableHead>Vienen de</TableHead>
+												<TableHead>Buckets asignados</TableHead>
+												<TableHead className="text-right">Ingresos</TableHead>
+												<TableHead>Origen</TableHead>
 											</TableRow>
 										</TableHeader>
 										<TableBody>

@@ -315,7 +315,7 @@ export function ReferenciasView({
 																	</TooltipTrigger>
 																	<TooltipContent>
 																		{t.original
-																			? "Ya venía en la referencia y cobros lo volvió a agregar"
+																			? "Ya estaba en la referencia y cobros lo volvió a agregar"
 																			: "Agregado en cobros"}
 																		{t.agregados[0].registradoPor
 																			? ` por ${t.agregados[0].registradoPor}`
@@ -325,8 +325,8 @@ export function ReferenciasView({
 																			: ""}
 																		.{" "}
 																		{t.original
-																			? "Clic para quitar el repetido (el número se queda)."
-																			: "Clic para quitarlo."}
+																			? "Haga clic para quitar el duplicado (el número se conserva)."
+																			: "Haga clic para quitarlo."}
 																	</TooltipContent>
 																</Tooltip>
 															)}
@@ -440,7 +440,7 @@ export function ReferenciasView({
 					<CardContent>
 						{hallazgos.length === 0 ? (
 							<p className="py-4 text-center text-muted-foreground text-sm">
-								Todavía no se ha conseguido información nueva.
+								Todavía no se ha obtenido información nueva.
 							</p>
 						) : (
 							<div className="space-y-2">
@@ -488,7 +488,7 @@ export function ReferenciasView({
 												)}
 												<p className="text-muted-foreground text-xs">
 													{h.referenciaNombre
-														? `Lo dio ${h.referenciaNombre}`
+														? `Proporcionado por ${h.referenciaNombre}`
 														: "Registrado sin gestión a referencia"}{" "}
 													· {h.registradoPor ?? "—"} ·{" "}
 													{formatGuatemalaDateTime(h.createdAt)}
@@ -622,7 +622,7 @@ export function ReferenciasView({
 						<DialogDescription>
 							¿Eliminar a{" "}
 							<span className="font-medium">{borrando?.nombre}</span>? Las
-							gestiones que ya se le hicieron se quedan en la bitácora.
+							gestiones ya realizadas se conservan en la bitácora.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>

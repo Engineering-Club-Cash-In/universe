@@ -98,7 +98,7 @@ function Formulario({
 	const opcionesMutation = {
 		onSuccess: (data: { advertencia?: string | null }) => {
 			toast.success(
-				`${esApagado ? "Apagado" : "Reactivación"} registrad${esApagado ? "o" : "a"}. Ahora registrá la llamada al cliente.`,
+				`${esApagado ? "Apagado" : "Reactivación"} registrad${esApagado ? "o" : "a"}. Registre ahora la llamada al cliente.`,
 			);
 			// Registrado igual, pero con algo que saber (p. ej. el crédito ya bajó
 			// de bucket porque el cliente pagó: hay que solicitar la reactivación).
@@ -131,11 +131,11 @@ function Formulario({
 		if (
 			!(MIME_EVIDENCIA_INMOVILIZACION as readonly string[]).includes(file.type)
 		) {
-			toast.error("El archivo tiene que ser JPG, PNG, WebP o PDF.");
+			toast.error("El archivo debe ser JPG, PNG, WebP o PDF.");
 			return;
 		}
 		if (file.size > MAX_ARCHIVO_BYTES) {
-			toast.error("El archivo pesa más de 10 MB.");
+			toast.error("El archivo supera los 10 MB.");
 			return;
 		}
 		const intento = ++intentoRef.current;
@@ -174,7 +174,7 @@ function Formulario({
 	// Mismas reglas que el server: el botón se habilita con lo que va a aceptar.
 	const error =
 		archivo?.estado === "subiendo"
-			? "Esperá a que termine de subir el archivo."
+			? "Espere a que termine de subir el archivo."
 			: erroresEvidenciaEjecucion({ evidencia, nota });
 
 	return (
@@ -186,9 +186,9 @@ function Formulario({
 						: "Registrar reactivación ejecutada"}
 				</DialogTitle>
 				<DialogDescription>
-					Confirmá que LEGION ya {esApagado ? "apagó" : "reactivó"} la unidad.
-					Adjuntá su confirmación: queda registrado que la subiste vos, con la
-					fecha{esApagado ? " y la ubicación" : ""}.
+					Confirme que LEGION ya {esApagado ? "apagó" : "reactivó"} la unidad.
+					Adjunte su confirmación: se registrará quién la subió, con la fecha
+					{esApagado ? " y la ubicación" : ""}.
 				</DialogDescription>
 			</DialogHeader>
 
@@ -247,14 +247,14 @@ function Formulario({
 					<Label className="pt-1 font-normal text-sm" htmlFor="nota-apagado">
 						Nota{" "}
 						<span className="text-muted-foreground">
-							(opcional si adjuntás un archivo)
+							(opcional si adjunta un archivo)
 						</span>
 					</Label>
 					<Textarea
 						id="nota-apagado"
 						maxLength={1000}
 						onChange={(e) => setNota(e.target.value)}
-						placeholder={`Ej: LEGION confirmó por WhatsApp a las 10:32 que la unidad quedó ${esApagado ? "apagada" : "reactivada"}`}
+						placeholder={`Ej.: LEGION confirmó por WhatsApp a las 10:32 que la unidad quedó ${esApagado ? "apagada" : "reactivada"}`}
 						rows={3}
 						value={nota}
 					/>
@@ -266,7 +266,7 @@ function Formulario({
 						errorRed={gps.errorRed}
 						onActualizar={gps.actualizar}
 						resultado={gps.resultado}
-						titulo="Dónde está el vehículo ahora"
+						titulo="Ubicación actual del vehículo"
 					/>
 				)}
 			</div>

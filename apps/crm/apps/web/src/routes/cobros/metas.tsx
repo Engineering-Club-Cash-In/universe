@@ -184,7 +184,7 @@ function MetasMoraPage() {
 						Metas {anio}
 					</CardTitle>
 					<CardDescription>
-						Ingresa los porcentajes objetivo para cada mes y categoría. Los
+						Ingrese los porcentajes objetivo para cada mes y categoría. Los
 						valores representan el % máximo de mora permitido.
 					</CardDescription>
 				</CardHeader>

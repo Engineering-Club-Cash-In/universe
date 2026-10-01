@@ -29,7 +29,7 @@ export function DistribucionPagoDetalle({
 		<div className="space-y-2.5 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950/20">
 			<p className="flex items-center gap-1.5 font-bold text-green-900 text-xs dark:text-green-100">
 				<FileText className="h-3.5 w-3.5" />
-				Distribución del Pago
+				Distribución del pago
 			</p>
 
 			<div className="space-y-1">
@@ -46,7 +46,7 @@ export function DistribucionPagoDetalle({
 				))}
 				{distribucion.length === 0 && (
 					<p className="text-muted-foreground text-xs">
-						Indica el monto de la boleta para ver la distribución.
+						Ingrese el monto de la boleta para ver la distribución.
 					</p>
 				)}
 			</div>
@@ -74,7 +74,7 @@ export function DistribucionPagoDetalle({
 				</div>
 				{saldoAFavor > 0 && (
 					<div className="flex justify-between text-purple-700 dark:text-purple-400">
-						<span className="font-medium">+ Saldo a Favor:</span>
+						<span className="font-medium">+ Saldo a favor:</span>
 						<span className="font-bold">Q{saldoAFavor.toFixed(2)}</span>
 					</div>
 				)}
@@ -92,13 +92,13 @@ export function DistribucionPagoDetalle({
 				)}
 				{convenioAplicado > 0 && (
 					<div className="flex justify-between text-muted-foreground">
-						<span className="font-medium">- Cuota Convenio:</span>
+						<span className="font-medium">- Cuota de convenio:</span>
 						<span className="font-bold">Q{convenioAplicado.toFixed(2)}</span>
 					</div>
 				)}
 				<div className="flex justify-between border-green-200 border-t pt-1 text-sm dark:border-green-900">
 					<span className="font-bold text-green-900 dark:text-green-100">
-						= Total Disponible:
+						= Total disponible:
 					</span>
 					<span className="font-extrabold text-green-700 dark:text-green-400">
 						Q{(montoBoleta + saldoAFavor).toFixed(2)}

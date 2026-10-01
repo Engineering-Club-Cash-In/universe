@@ -52,7 +52,7 @@ const MENSAJES_ERROR: Record<ReciboPagoErrorCodigo, string> = {
 	SIN_USUARIO_SISTEMA:
 		"No se encontró un usuario cobros_supervisor para registrar el envío.",
 	ERROR_ENVIO: "No se pudo enviar el mensaje de WhatsApp.",
-	ERROR_INTERNO: "No se pudo preparar el envío. Intenta de nuevo.",
+	ERROR_INTERNO: "No se pudo preparar el envío. Intente de nuevo.",
 };
 
 export interface SendReciboPagoWhatsappParams {

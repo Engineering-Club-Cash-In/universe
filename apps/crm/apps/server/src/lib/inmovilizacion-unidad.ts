@@ -218,12 +218,12 @@ export function erroresMotivosInmovilizacion(
 	motivos: readonly string[],
 	detalle: string | null | undefined,
 ): string | null {
-	if (motivos.length === 0) return "Elegí al menos un motivo.";
+	if (motivos.length === 0) return "Seleccione al menos un motivo.";
 	const invalido = motivos.find((m) => !(m in MOTIVOS_INMOVILIZACION));
 	if (invalido) return `Motivo no válido para un apagado: ${invalido}`;
 	if (new Set(motivos).size !== motivos.length) return "Hay motivos repetidos.";
 	if (motivos.includes("otro") && !detalle?.trim()) {
-		return "Marcaste «Otro»: contá en el detalle cuál es el motivo.";
+		return "Seleccionó «Otro»: indique el motivo en el detalle.";
 	}
 	return null;
 }
@@ -254,7 +254,7 @@ export function erroresUbicacionSolicitud(u: {
 	enlace?: string | null;
 }): string | null {
 	if (u.consultaLogId || u.direccion?.trim() || u.enlace?.trim()) return null;
-	return "Falta la ubicación del vehículo: tomala del GPS o escribí la dirección.";
+	return "Falta la ubicación del vehículo: consúltela en el GPS o ingrese la dirección.";
 }
 
 /**
@@ -266,7 +266,7 @@ export function erroresEvidenciaEjecucion(e: {
 	nota?: string | null;
 }): string | null {
 	if (e.evidencia?.key || e.nota?.trim()) return null;
-	return "Adjuntá la confirmación de LEGION (archivo) o escribí una nota.";
+	return "Adjunte la confirmación de LEGION (archivo) o escriba una nota.";
 }
 
 /** Formatos de la confirmación de LEGION: captura, foto o PDF del mensaje. */
@@ -295,7 +295,7 @@ export const QUE_PASO_REACTIVACION = {
 			"Se comprometió a pagar en una fecha. La promesa tiene que estar registrada.",
 	},
 	pago_parcial_promesa: {
-		label: "50% + promesa",
+		label: "Pago parcial + promesa",
 		descripcion:
 			"Pagó una parte ahora y promete el resto en una fecha. Pago y promesa registrados.",
 	},
@@ -406,10 +406,10 @@ export function erroresRespaldoReactivacion(
 	respaldo: { pago?: unknown; promesa?: unknown },
 ): string | null {
 	if (quePasoRequierePago(quePaso) && !respaldo.pago) {
-		return "Elegí el pago que respalda la reactivación (tiene que estar registrado después del apagado).";
+		return "Seleccione el pago que respalda la reactivación (debe estar registrado después del apagado).";
 	}
 	if (quePasoRequierePromesa(quePaso) && !respaldo.promesa) {
-		return "El caso no tiene una promesa de pago activa: registrala primero en «Promesa / Convenio».";
+		return "El caso no tiene una promesa de pago activa: regístrela primero en «Promesa / Convenio».";
 	}
 	return null;
 }
@@ -432,7 +432,7 @@ export function reactivacionSinRespaldo(fila: {
 }
 
 export const MENSAJE_REACTIVACION_SIN_RESPALDO =
-	"Esta reactivación se pidió sin el respaldo de pago o promesa que ahora se exige. Pedila de nuevo eligiendo qué pasó.";
+	"Esta reactivación se solicitó sin el respaldo de pago o promesa de pago que ahora se exige. Solicítela de nuevo y seleccione el respaldo.";
 
 /** Texto de la columna `motivo` de una reactivación: opción elegida y detalle. */
 export function componerMotivoReactivacion(

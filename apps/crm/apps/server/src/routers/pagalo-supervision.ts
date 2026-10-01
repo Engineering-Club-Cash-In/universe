@@ -180,7 +180,7 @@ export const pagaloSupervisionRouter = {
 			);
 			if (forbidden) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tenés permiso para filtrar por otro asesor.",
+					message: "No tiene permiso para filtrar por otro asesor.",
 				});
 			}
 

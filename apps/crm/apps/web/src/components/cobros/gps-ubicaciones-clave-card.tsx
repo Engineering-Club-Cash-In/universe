@@ -242,11 +242,11 @@ export function UbicacionesClaveLista({
 
 const MENSAJE_CALCULO: Record<string, string> = {
 	en_proceso:
-		"Este vehículo se está calculando ahora mismo. Espera un momento.",
+		"Este vehículo se está calculando ahora mismo. Espere un momento.",
 	incompleto:
-		"Wialon no devolvió el historial completo. Intenta de nuevo en unos minutos.",
+		"Wialon no devolvió el historial completo. Intente de nuevo en unos minutos.",
 	sin_unidad:
-		"Este vehículo no tiene una unidad GPS vinculada. Abre la pestaña GPS / Wialon para identificarla.",
+		"Este vehículo no tiene una unidad GPS vinculada. Abra la pestaña GPS / Wialon para identificarla.",
 };
 
 /**
@@ -412,7 +412,8 @@ export function GpsUbicacionesClaveCard({
 				>
 					Lugares donde el vehículo pasa más tiempo (casa, trabajo, lugares
 					recurrentes), calculados automáticamente contra los últimos 60 días de
-					historial GPS. Orienta la búsqueda si el vehículo hay que recuperarlo.
+					historial GPS. Orienta la búsqueda si es necesario recuperar el
+					vehículo.
 				</Descripcion>
 			</Cabecera>
 			<Cuerpo>
@@ -433,7 +434,7 @@ export function GpsUbicacionesClaveCard({
 							<Input
 								id={`motivo-ubicaciones-${vehicleId}`}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej: Preparar visita de recuperación"
+								placeholder="Ej.: Preparar visita de recuperación"
 								value={motivo}
 							/>
 						</div>

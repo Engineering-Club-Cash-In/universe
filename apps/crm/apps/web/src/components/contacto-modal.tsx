@@ -66,7 +66,7 @@ import { client, orpc } from "@/utils/orpc";
 // (Codex, PR #1147). Centralizado para que un cambio de mensaje o condición
 // no pueda desincronizarse entre las 3 copias.
 const MENSAJE_RANGO_O_MORA_REQUERIDO =
-	"Indica un rango de cuotas, marca que incluye mora, o ambos";
+	"Indique un rango de cuotas, marque que incluye mora, o ambos";
 
 function faltaRangoOMora(
 	cuotaInicio: number | null | undefined,
@@ -158,9 +158,17 @@ interface ContactoModalProps {
 		fechaAlerta?: string | Date | null;
 		proximoPaso?: string | null;
 	} | null;
-	// CB-037/038: la promesa sale de una visita ("promesa" o "50% + promesa").
-	// Se manda al server, que la anota en la visita.
+	// CB-037/038: la promesa sale de una visita ("promesa" o "pago parcial +
+	// promesa"). Se manda al server, que la anota en la visita.
 	visitaId?: string;
+	/**
+	 * Lo que el cliente ya pagó en la visita ("pago parcial + promesa"). Es la
+	 * ÚNICA variante con el monto editable: se propone lo que falta (lo
+	 * seleccionado menos lo pagado) y el asesor lo ajusta si hace falta. Sin
+	 * esto, el monto es lo seleccionado (cuotas + mora) y no se edita
+	 * (pedido del PM, 2026-10-01).
+	 */
+	montoYaPagado?: number;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -208,6 +216,7 @@ export function ContactoModal({
 	cuotaConvenio,
 	promesaActiva = null,
 	visitaId,
+	montoYaPagado,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -419,9 +428,10 @@ export function ContactoModal({
 			incluyeMora: esEdicion
 				? !!promesaActiva?.incluyeMora
 				: esPromesa && !esConvenio,
-			// CB-025: monto que el cliente prometió pagar — informativo, opcional.
-			// En promesa se pre-llena con lo que debe (cuota + mora) para que el
-			// asesor no lo teclee; sigue editable. En edición: el monto guardado.
+			// CB-025: monto que el cliente prometió pagar — informativo.
+			// En promesa se llena con lo que debe (cuotas + mora) y sigue a la
+			// selección; solo es editable si viene de un pago parcial en una
+			// visita (`montoYaPagado`). En edición: el monto guardado.
 			montoComprometido: esEdicion
 				? (promesaActiva?.montoComprometido ?? "")
 				: esPromesa && montoSugerido != null && montoSugerido > 0
@@ -535,13 +545,22 @@ export function ContactoModal({
 	 * (Codex PR #1228 lo congeló para que el selector no lo pisara; el efecto
 	 * secundario era que la selección dejaba de reflejarse).
 	 */
-	const montoPromesaDe = (seleccion: Set<number>, incluyeMora: boolean) =>
+	const totalPromesaDe = (seleccion: Set<number>, incluyeMora: boolean) =>
 		esConvenio
 			? // Con convenio la cuota del convenio REEMPLAZA la mora (mismo criterio
 				// que el card "Total a Cobrar" de la ficha, PR #1191): sumar ambas
 				// inflaba el monto comprometido (Codex).
 				totalDeSeleccion(seleccion, false) + (cuotaConvenio ?? 0)
 			: totalDeSeleccion(seleccion, incluyeMora);
+
+	// Pago parcial en una visita: la promesa es por lo que falta. Antes este
+	// valor se calculaba en la ficha (`montoSugerido`), pero el re-sembrado al
+	// abrir lo pisaba con el total completo.
+	const yaPagado =
+		montoYaPagado != null && montoYaPagado > 0 ? montoYaPagado : 0;
+	const montoEditable = yaPagado > 0;
+	const montoPromesaDe = (seleccion: Set<number>, incluyeMora: boolean) =>
+		Math.max(0, totalPromesaDe(seleccion, incluyeMora) - yaPagado);
 
 	// Al (re)abrir la promesa, re-sembrar la selección con todo lo atrasado y
 	// sincronizar el rango + el monto del form (por si cambiaron las cuotas).
@@ -635,7 +654,7 @@ export function ContactoModal({
 			"cuotaFin",
 			nums.length ? nums[nums.length - 1] : undefined,
 		);
-		// El monto sigue a la selección (editable).
+		// El monto sigue a la selección.
 		form.setFieldValue(
 			"montoComprometido",
 			montoPromesaDe(siguiente, !!form.getFieldValue("incluyeMora")).toFixed(2),
@@ -709,7 +728,7 @@ export function ContactoModal({
 			registrarTrasEnvio("WhatsApp");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando WhatsApp"),
+			toast.error(error?.message || "Error al enviar el WhatsApp"),
 	});
 
 	const emailApiMutation = useMutation({
@@ -729,7 +748,7 @@ export function ContactoModal({
 			registrarTrasEnvio("Email");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando email"),
+			toast.error(error?.message || "Error al enviar el correo"),
 	});
 
 	const smsApiMutation = useMutation({
@@ -745,7 +764,7 @@ export function ContactoModal({
 			registrarTrasEnvio("SMS");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando SMS"),
+			toast.error(error?.message || "Error al enviar el SMS"),
 	});
 
 	// Incluye el registro automático: si solo mirara los envíos, el botón se
@@ -901,10 +920,10 @@ export function ContactoModal({
 					</DialogTitle>
 					<DialogDescription>
 						{esEdicion
-							? "Este caso ya tiene una promesa activa. Estás editándola (no se crea otra)."
+							? "Este caso ya tiene una promesa de pago activa. Está editando esa promesa (no se crea otra)."
 							: esPromesa
-								? "Registra lo hablado y la fecha en la que el cliente prometió pagar."
-								: "Registra los detalles de la interacción con el cliente y programa el próximo seguimiento."}
+								? "Registre lo conversado y la fecha en la que el cliente prometió pagar."
+								: "Registre los detalles de la interacción con el cliente y programe el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -1114,7 +1133,7 @@ export function ContactoModal({
 													<Label>Duración de la Llamada (segundos)</Label>
 													<Input
 														type="number"
-														placeholder="Ej: 180"
+														placeholder="Ej.: 180"
 														value={field.state.value}
 														onChange={(e) =>
 															field.handleChange(Number(e.target.value))
@@ -1148,8 +1167,8 @@ export function ContactoModal({
 									<Textarea
 										placeholder={
 											esPromesa
-												? "Describe qué se habló, qué acordó y cualquier detalle del compromiso del cliente."
-												: "Describe qué se habló en el contacto, la actitud del cliente, etc."
+												? "Describa lo conversado, lo acordado y cualquier detalle del compromiso del cliente."
+												: "Describa lo conversado en el contacto, la actitud del cliente, etc."
 										}
 										className="min-h-[72px]"
 										value={field.state.value}
@@ -1223,9 +1242,10 @@ export function ContactoModal({
 					    alternarCuotaPromesa); Mora es independiente. */}
 					{esPromesa && (
 						<div className="space-y-3">
-							<h3 className="font-semibold text-base">¿Qué prometió pagar?</h3>
+							<h3 className="font-semibold text-base">Conceptos a pagar</h3>
 							<p className="text-muted-foreground text-sm">
-								Arranca con todo lo atrasado + mora; destilda lo que no aplique.
+								Se incluyen todas las cuotas atrasadas y la mora; desmarque lo
+								que no aplique.
 							</p>
 
 							<div className="overflow-hidden rounded-lg border">
@@ -1414,20 +1434,30 @@ export function ContactoModal({
 								}
 							</form.Subscribe>
 
-							{/* CB-025: monto comprometido — se autollena con el total seleccionado
-							    (cuota + mora) y queda editable. Informativo: no participa en
+							{/* CB-025: monto comprometido — sale de lo seleccionado (cuotas +
+							    mora) y no se edita: para cambiarlo se marcan o desmarcan
+							    cuotas. Solo con un pago parcial en la visita se propone lo
+							    que falta y se puede ajustar. Informativo: no participa en
 							    evaluarPromesa. */}
 							<form.Field name="montoComprometido">
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor="montoComprometido">
-											Monto comprometido (editable)
+											{montoEditable
+												? "Monto comprometido (saldo pendiente)"
+												: "Monto comprometido"}
 										</Label>
 										<CurrencyInput
 											id="montoComprometido"
 											value={field.state.value}
 											onChange={(value) => field.handleChange(value)}
+											disabled={!montoEditable}
 										/>
+										<p className="text-muted-foreground text-xs">
+											{montoEditable
+												? `El cliente pagó Q${yaPagado.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en la visita. Se propone el saldo pendiente; puede ajustarse si el acuerdo fue otro.`
+												: "Se calcula con las cuotas seleccionadas y la mora."}
+										</p>
 									</div>
 								)}
 							</form.Field>
@@ -1532,7 +1562,7 @@ export function ContactoModal({
 							<form.Field name="fechaAlerta">
 								{(field) => (
 									<div className="space-y-2">
-										<Label>Avisarme el (opcional)</Label>
+										<Label>Fecha de aviso (opcional)</Label>
 										<Popover>
 											<PopoverTrigger asChild>
 												<Button
@@ -1578,8 +1608,8 @@ export function ContactoModal({
 											</PopoverContent>
 										</Popover>
 										<p className="text-muted-foreground text-xs">
-											Te recordamos ese día para darle seguimiento antes de que
-											venza.
+											Ese día recibirá un recordatorio para dar seguimiento
+											antes de que venza.
 										</p>
 									</div>
 								)}
@@ -1592,12 +1622,10 @@ export function ContactoModal({
 						<form.Field name="proximoPaso">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor="proximoPaso">
-										¿Cuál es el próximo paso? (opcional)
-									</Label>
+									<Label htmlFor="proximoPaso">Próximo paso (opcional)</Label>
 									<Textarea
 										id="proximoPaso"
-										placeholder="Ej. Llamar de nuevo, enviar carta notarial, escalar a jurídico..."
+										placeholder="Ej.: llamar de nuevo, enviar carta notarial, escalar a jurídico..."
 										value={field.state.value}
 										onChange={(e) => field.handleChange(e.target.value)}
 									/>

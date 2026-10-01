@@ -169,7 +169,7 @@ function LinkPagalo({
 						className={`text-xs ${antiguedad.alerta ? "text-amber-700" : "text-muted-foreground"}`}
 					>
 						{["EXPIRED", "CANCELLED"].includes(link.status)
-							? `Págalo lo dio por ${link.status === "EXPIRED" ? "vencido" : "cancelado"} — ${antiguedad.etiqueta}`
+							? `Marcado como ${link.status === "EXPIRED" ? "vencido" : "cancelado"} por Págalo — ${antiguedad.etiqueta}`
 							: `Antigüedad: ${antiguedad.etiqueta}`}
 					</p>
 				)}
@@ -311,7 +311,7 @@ function GrupoPagalo({
 				<p className="text-green-700 text-sm">
 					<CheckCircle2 className="mr-1 inline h-4 w-4" />
 					Pago validado y aplicado en cartera (importación #
-					{grupo.carteraImportId}); la factura sale después
+					{grupo.carteraImportId}); la factura se emite después
 				</p>
 			)}
 			{grupo.carteraImportId && grupo.status !== "COMPLETED" && (
@@ -431,7 +431,7 @@ export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
 				<div>
 					<h3 className="flex items-center gap-2 font-medium text-sm">
 						<CreditCard className="h-4 w-4" />
-						Historial Links de Pagos
+						Historial de links de pago
 					</h3>
 					<p className="text-muted-foreground text-xs">
 						Todos los links Págalo generados para este crédito

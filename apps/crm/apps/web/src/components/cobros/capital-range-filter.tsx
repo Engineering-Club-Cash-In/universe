@@ -68,13 +68,13 @@ export function CapitalRangeFilter({
 								{capitalMax !== undefined ? formatCapital(capitalMax) : "Sin máx."}
 							</span>
 						) : (
-							<span>Rango de Capital</span>
+							<span>Rango de capital</span>
 						)}
 					</Button>
 				</PopoverTrigger>
 				<PopoverContent className="w-[220px] p-4" align="start">
 					<div className="flex flex-col gap-3">
-						<p className="font-semibold text-sm">Filtrar por Capital</p>
+						<p className="font-semibold text-sm">Filtrar por capital</p>
 						<div className="flex flex-col gap-1">
 							<Label htmlFor="capital-min" className="text-xs text-muted-foreground">
 								Mínimo (Q)
@@ -83,7 +83,7 @@ export function CapitalRangeFilter({
 								id="capital-min"
 								type="number"
 								min={0}
-								placeholder="Ej: 10000"
+								placeholder="Ej.: 10000"
 								value={minInput}
 								onChange={(e) => setMinInput(e.target.value)}
 							/>
@@ -96,7 +96,7 @@ export function CapitalRangeFilter({
 								id="capital-max"
 								type="number"
 								min={0}
-								placeholder="Ej: 100000"
+								placeholder="Ej.: 100000"
 								value={maxInput}
 								onChange={(e) => setMaxInput(e.target.value)}
 							/>

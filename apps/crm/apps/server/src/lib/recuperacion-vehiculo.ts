@@ -50,7 +50,7 @@ export const TIPO_RECUPERACION_LABEL: Record<
 	TipoEnvioRecuperacion | "orden_secuestro",
 	string
 > = {
-	tomado: "Recuperación forzosa",
+	tomado: "Recuperación del vehículo",
 	entrega_voluntaria: "Entrega voluntaria",
 	orden_secuestro: "Orden de secuestro",
 };
@@ -212,7 +212,7 @@ export const MIN_JUSTIFICACION_FORZOSA = 20;
 export const detalleRecuperacionSchema = z.object({
 	motivos: z
 		.array(z.string().min(1).max(60))
-		.min(1, "Elegí al menos un motivo")
+		.min(1, "Seleccione al menos un motivo")
 		.max(12),
 	// En la entrega voluntaria es opcional: los motivos ya dicen el porqué, y
 	// solo se exige si se marcó "Otro". En la forzosa es la justificación que
@@ -251,7 +251,7 @@ export function erroresDetalleRecuperacion(
 		return "Hay motivos repetidos.";
 	}
 	if (detalle.motivos.includes("otro") && !detalle.motivoDetalle) {
-		return "Marcaste «Otro»: contá en el detalle cuál es el motivo.";
+		return "Seleccionó «Otro»: indique el motivo en el detalle.";
 	}
 
 	if (tipo === "tomado") {
@@ -259,7 +259,7 @@ export function erroresDetalleRecuperacion(
 			return "Los datos de entrega son solo para la entrega voluntaria.";
 		}
 		if ((detalle.motivoDetalle?.length ?? 0) < MIN_JUSTIFICACION_FORZOSA) {
-			return `Escribí la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres): por qué ya no hay otra salida que recuperar el vehículo.`;
+			return `Escriba la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres): por qué la recuperación del vehículo es la única alternativa.`;
 		}
 		return null;
 	}
@@ -273,7 +273,7 @@ export function erroresDetalleRecuperacion(
 		return `La fecha de entrega no puede pasar de ${DIAS_ENTREGA_FUTURO} días adelante.`;
 	}
 	if (dias < -DIAS_ENTREGA_PASADO) {
-		return "La fecha de entrega es de hace más de un año: revisala.";
+		return "La fecha de entrega es de hace más de un año. Verifique la fecha.";
 	}
 	return null;
 }
@@ -325,10 +325,10 @@ export function erroresRecepcionUnidad(
 ): string | null {
 	const t = recepcion.fechaRecepcion.getTime();
 	if (t > ahora.getTime() + TOLERANCIA_RELOJ_MS) {
-		return "La recepción es algo que ya pasó: la fecha no puede ser futura.";
+		return "La fecha de recepción no puede ser futura.";
 	}
 	if (t < ahora.getTime() - DIAS_ENTREGA_PASADO * 86_400_000) {
-		return "La fecha de recepción es de hace más de un año: revisala.";
+		return "La fecha de recepción es de hace más de un año. Verifique la fecha.";
 	}
 	return null;
 }
@@ -366,7 +366,7 @@ export function referenciaDelRegistro(registroId: string): string {
 }
 
 export const MENSAJE_TRASLADO_INCIERTO =
-	"No se pudo confirmar si el crédito pasó a B4: cartera no respondió. El formulario quedó guardado. Revisá el bucket en la ficha antes de volver a intentarlo.";
+	"No se pudo confirmar si el crédito pasó a B4: cartera no respondió. El formulario quedó guardado. Revise el bucket en la ficha antes de volver a intentarlo.";
 
 // ── Lo que llega a cartera ──────────────────────────────────────────────────
 
@@ -476,7 +476,7 @@ export function textoAvisoRecuperacion(params: {
 		.map(etiquetaMotivo)
 		.join(", ");
 	return {
-		titulo: "Crédito enviado a recuperación de vehículo",
+		titulo: "Crédito enviado a recuperación del vehículo",
 		descripcion: `${quien}: ${motivos || params.detalle.motivoDetalle || "sin motivo indicado"}.${por}`,
 	};
 }

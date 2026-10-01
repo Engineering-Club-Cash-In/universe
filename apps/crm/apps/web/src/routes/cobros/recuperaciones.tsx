@@ -74,7 +74,7 @@ function RecuperacionesPage() {
 			<div className="p-6">
 				<Card>
 					<CardContent className="pt-6 text-center text-muted-foreground">
-						No tenés permiso para ver esta página.
+						No tiene permiso para ver esta página.
 					</CardContent>
 				</Card>
 			</div>
@@ -121,11 +121,11 @@ function Bandeja() {
 			<div>
 				<h1 className="flex items-center gap-2 font-semibold text-2xl">
 					<Car className="h-6 w-6" />
-					Recuperación de vehículo
+					Recuperación del vehículo
 				</h1>
 				<p className="text-muted-foreground text-sm">
-					Lo que piden los asesores para mandar un crédito a B4. Al aprobar,
-					pasa a B4 en estado En recuperación.
+					Solicitudes de los asesores para enviar un crédito a B4. Al aprobarse,
+					el crédito pasa a B4 en estado En recuperación.
 				</p>
 			</div>
 			<Tabs className="w-full" defaultValue="pendientes">
@@ -327,9 +327,9 @@ function SolicitudPorAprobar({ s }: { s: Solicitud }) {
 					s.esMia ? (
 						<Badge
 							variant="secondary"
-							title="La tiene que aprobar otro supervisor o admin. Si ya no aplica, cancelala desde la ficha."
+							title="Debe aprobarla otro supervisor o administrador. Si ya no aplica, cancélela desde la ficha."
 						>
-							Tu solicitud
+							Su solicitud
 						</Badge>
 					) : (
 						<>
@@ -425,8 +425,8 @@ function Historial({ historial }: { historial: Solicitud[] }) {
 								pie={
 									<p className="text-muted-foreground text-xs">
 										{s.estadoSolicitud === "cancelada"
-											? "La canceló"
-											: "Decidió"}{" "}
+											? "Cancelada por"
+											: "Decidida por"}{" "}
 										{s.decidioPor ?? "—"} el {fecha(s.decididoAt)}
 										{s.motivoDecision ? `: ${s.motivoDecision}` : ""}
 									</p>

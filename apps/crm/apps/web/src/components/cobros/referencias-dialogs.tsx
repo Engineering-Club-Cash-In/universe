@@ -56,9 +56,9 @@ type Parentesco = Parameters<
 type HallazgoForm = { tipo: TipoHallazgo; valor: string; enlaceMapa: string };
 
 const PLACEHOLDER_HALLAZGO: Record<TipoHallazgo, string> = {
-	telefono: "Ej: 5555-5555",
-	direccion: "Ej: 5a. avenida 10-20 zona 1, Mixco",
-	ubicacion: "Ej: Trabaja en el taller frente al mercado de Villa Nueva",
+	telefono: "Ej.: 5555-5555",
+	direccion: "Ej.: 5a. avenida 10-20 zona 1, Mixco",
+	ubicacion: "Ej.: Trabaja en el taller frente al mercado de Villa Nueva",
 };
 
 function useInvalidarReferencias(casoCobroId: string) {
@@ -121,7 +121,7 @@ function CamposHallazgo({
 						? "Teléfono nuevo del cliente"
 						: hallazgo.tipo === "direccion"
 							? "Dirección"
-							: "Dónde se le puede encontrar"}
+							: "Lugar donde se le puede encontrar"}
 				</Label>
 				<Input
 					id={`${idPrefix}-valor`}
@@ -215,11 +215,11 @@ export function RegistrarGestionReferenciaDialog({
 
 	const guardar = () => {
 		if (!resultado) {
-			toast.error("Elegí el resultado de la gestión");
+			toast.error("Seleccione el resultado de la gestión");
 			return;
 		}
 		if (!esVisita && !telefono) {
-			toast.error("Elegí a qué teléfono se contactó");
+			toast.error("Seleccione el teléfono al que se contactó");
 			return;
 		}
 		mutation.mutate({
@@ -273,7 +273,7 @@ export function RegistrarGestionReferenciaDialog({
 								<Label htmlFor="gestion-telefono">Teléfono</Label>
 								<Select value={telefono} onValueChange={setTelefono}>
 									<SelectTrigger id="gestion-telefono">
-										<SelectValue placeholder="Elegí el número" />
+										<SelectValue placeholder="Seleccionar número" />
 									</SelectTrigger>
 									<SelectContent>
 										{referencia.telefonos.map((t) => (
@@ -290,7 +290,7 @@ export function RegistrarGestionReferenciaDialog({
 					{sinTelefonos && (
 						<p className="text-muted-foreground text-xs">
 							Esta referencia no tiene teléfono: solo se puede registrar una
-							visita. Para llamarla, agregale un número primero.
+							visita. Para llamarla, primero agregue un número.
 						</p>
 					)}
 
@@ -303,7 +303,7 @@ export function RegistrarGestionReferenciaDialog({
 							onValueChange={(v) => setResultado(v as Resultado)}
 						>
 							<SelectTrigger id="gestion-resultado">
-								<SelectValue placeholder="¿Qué pasó?" />
+								<SelectValue placeholder="Seleccionar resultado" />
 							</SelectTrigger>
 							<SelectContent>
 								{RESULTADOS_CONTACTO_REFERENCIA.map((r) => (
@@ -321,7 +321,7 @@ export function RegistrarGestionReferenciaDialog({
 							id="gestion-comentarios"
 							value={comentarios}
 							onChange={(e) => setComentarios(e.target.value)}
-							placeholder="Qué dijo, cuándo volver a llamar…"
+							placeholder="Lo que indicó la referencia, cuándo volver a llamar…"
 							rows={3}
 						/>
 					</div>
@@ -333,8 +333,8 @@ export function RegistrarGestionReferenciaDialog({
 									Información nueva del cliente
 								</p>
 								<p className="text-muted-foreground text-xs">
-									Teléfono, dirección o dónde encontrarlo, si la referencia lo
-									dio.
+									Teléfono, dirección o lugar donde encontrarlo, si la
+									referencia lo proporcionó.
 								</p>
 							</div>
 							<Button
@@ -458,16 +458,16 @@ export function AgregarTelefonoReferenciaDialog({
 							id="ref-tel-nuevo"
 							value={telefono}
 							onChange={(e) => setTelefono(e.target.value)}
-							placeholder="Ej: 5555-5555"
+							placeholder="Ej.: 5555-5555"
 						/>
 					</div>
 					<div className="space-y-1.5">
-						<Label htmlFor="ref-tel-notas">De dónde salió (opcional)</Label>
+						<Label htmlFor="ref-tel-notas">Origen del dato (opcional)</Label>
 						<Input
 							id="ref-tel-notas"
 							value={notas}
 							onChange={(e) => setNotas(e.target.value)}
-							placeholder="Ej: Lo dio la mamá del cliente"
+							placeholder="Ej.: Lo proporcionó la madre del cliente"
 						/>
 					</div>
 				</div>
@@ -602,7 +602,7 @@ export function ReferenciaCobrosDialog({
 								onChange={(e) =>
 									setForm((prev) => ({ ...prev, nombre: e.target.value }))
 								}
-								placeholder="Ej: María López"
+								placeholder="Ej.: María López"
 							/>
 						</div>
 						<div className="space-y-1.5">
@@ -615,7 +615,7 @@ export function ReferenciaCobrosDialog({
 								onChange={(e) =>
 									setForm((prev) => ({ ...prev, telefono: e.target.value }))
 								}
-								placeholder="Ej: 5555-5555"
+								placeholder="Ej.: 5555-5555"
 							/>
 						</div>
 					</div>
@@ -712,7 +712,7 @@ export function RegistrarHallazgoDialog({
 	const guardar = () => {
 		const [dato] = hallazgosParaEnviar([hallazgo]);
 		if (!dato) {
-			toast.error("Escribí el dato nuevo");
+			toast.error("Ingrese el dato nuevo");
 			return;
 		}
 		mutation.mutate({
@@ -728,8 +728,9 @@ export function RegistrarHallazgoDialog({
 				<DialogHeader>
 					<DialogTitle>Registrar dato nuevo del cliente</DialogTitle>
 					<DialogDescription>
-						Un teléfono, una dirección o dónde encontrarlo. Si salió de una
-						referencia, mejor registralo desde su gestión.
+						Un teléfono, una dirección o un lugar donde encontrarlo. Si lo
+						proporcionó una referencia, regístrelo desde la gestión de esa
+						referencia.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="grid gap-4 py-2">
@@ -740,13 +741,13 @@ export function RegistrarHallazgoDialog({
 					/>
 					<div className="space-y-1.5">
 						<Label htmlFor="hallazgo-suelto-notas">
-							De dónde salió (opcional)
+							Origen del dato (opcional)
 						</Label>
 						<Input
 							id="hallazgo-suelto-notas"
 							value={notas}
 							onChange={(e) => setNotas(e.target.value)}
-							placeholder="Ej: Lo dijo el cliente en la última llamada"
+							placeholder="Ej.: Lo indicó el cliente en la última llamada"
 						/>
 					</div>
 				</div>

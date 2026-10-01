@@ -90,7 +90,7 @@ export function SeguimientoRecurrenteModal({
 				<DialogHeader>
 					<DialogTitle>Programar Seguimiento Recurrente</DialogTitle>
 					<DialogDescription>
-						Automatiza los recordatorios y contactos periódicos para este caso.
+						Programe recordatorios y contactos periódicos para este caso.
 					</DialogDescription>
 				</DialogHeader>
 				<form onSubmit={handleSubmit} className="space-y-4 pt-4">
@@ -98,7 +98,7 @@ export function SeguimientoRecurrenteModal({
 						<Label>Frecuencia</Label>
 						<Select value={preset} onValueChange={setPreset}>
 							<SelectTrigger>
-								<SelectValue placeholder="Seleccione una frecuencia" />
+								<SelectValue placeholder="Seleccionar frecuencia" />
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="diario">Diario</SelectItem>
@@ -125,7 +125,7 @@ export function SeguimientoRecurrenteModal({
 						<Label>Método de Contacto</Label>
 						<Select value={metodo} onValueChange={(val: any) => setMetodo(val)}>
 							<SelectTrigger>
-								<SelectValue placeholder="Método" />
+								<SelectValue placeholder="Seleccionar método" />
 							</SelectTrigger>
 							<SelectContent>
 								<SelectItem value="llamada">Llamada</SelectItem>
@@ -150,7 +150,7 @@ export function SeguimientoRecurrenteModal({
 						<DatePicker
 							date={fechaFin}
 							onDateChange={setFechaFin}
-							placeholder="Seleccione fecha de finalización"
+							placeholder="Seleccionar fecha de finalización"
 						/>
 					</div>
 

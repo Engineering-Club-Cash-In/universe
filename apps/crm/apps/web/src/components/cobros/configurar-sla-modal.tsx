@@ -120,10 +120,11 @@ export function ConfigurarSlaModal({
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2 text-xl font-bold">
 						<Clock className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-						Configurar Días de SLA por Bucket
+						Configurar días de SLA por bucket
 					</DialogTitle>
 					<DialogDescription>
-						Define los días de plazo (entre 1 y 30 días) para contactar a un cliente según su bucket de mora.
+						Defina los días de plazo (entre 1 y 30) para contactar a un cliente
+						según su bucket de mora.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -192,7 +193,9 @@ export function ConfigurarSlaModal({
 						<div className="flex items-center gap-2 p-3 rounded-md bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-300 text-xs border border-red-200 dark:border-red-800">
 							<AlertCircle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
 							<span>
-								No es posible guardar: El plazo de SLA para el bucket <strong>B{invalidBucket?.numero}</strong> debe estar en el rango de <strong>1 a 30 días</strong>.
+								No es posible guardar: el plazo de SLA para el bucket{" "}
+								<strong>B{invalidBucket?.numero}</strong> debe estar en el rango
+								de <strong>1 a 30 días</strong>.
 							</span>
 						</div>
 					)}
@@ -213,7 +216,7 @@ export function ConfigurarSlaModal({
 							!catalogoListo
 								? "Esperando a que cargue el catálogo de buckets..."
 								: !isValid
-									? "Debes ingresar valores entre 1 y 30 días para todos los buckets"
+									? "Ingrese valores entre 1 y 30 días para todos los buckets"
 									: ""
 						}
 						className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
@@ -223,7 +226,7 @@ export function ConfigurarSlaModal({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						Guardar Cambios
+						Guardar cambios
 					</Button>
 				</DialogFooter>
 			</DialogContent>

@@ -42,7 +42,7 @@ export function ContactoQuickAction({
 			toast.error(
 				detalles.error instanceof Error
 					? detalles.error.message
-					: "No se pudo cargar el caso. Reintentá.",
+					: "No se pudo cargar el caso. Intente de nuevo.",
 			);
 			setOpen(false);
 		}

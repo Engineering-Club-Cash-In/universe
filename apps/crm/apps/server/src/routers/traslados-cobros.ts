@@ -96,7 +96,7 @@ export const trasladosCobrosRouter = {
 					)
 						ctx.addIssue({
 							code: "custom",
-							message: "Selecciona destinos por bucket",
+							message: "Seleccione destinos por bucket",
 						});
 				}),
 		)

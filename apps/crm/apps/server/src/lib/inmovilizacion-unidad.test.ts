@@ -274,14 +274,14 @@ describe("ubicación y evidencia del apagado", () => {
 });
 
 describe("reactivación: qué pasó y respaldo", () => {
-	it("son tres opciones: pago, promesa de pago y 50% + promesa", () => {
+	it("son tres opciones: pago, promesa de pago y pago parcial + promesa", () => {
 		expect(Object.keys(QUE_PASO_REACTIVACION)).toEqual([
 			"pago",
 			"promesa",
 			"pago_parcial_promesa",
 		]);
 		expect(QUE_PASO_REACTIVACION.pago_parcial_promesa.label).toBe(
-			"50% + promesa",
+			"Pago parcial + promesa",
 		);
 	});
 

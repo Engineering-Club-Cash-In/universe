@@ -94,7 +94,7 @@ function motivoNoEfectivo(
 ): string {
 	if (origen === "premora") return "Recordatorio automático";
 	if (origen === "wsp_masivo") return "Envío masivo";
-	if (estadoContacto === "promesa_pago") return "Cuenta como promesa";
+	if (estadoContacto === "promesa_pago") return "Cuenta como promesa de pago";
 	if (estadoContacto === "no_contesta") return "No contestó";
 	if (estadoContacto === "mensaje_enviado") return "Mensaje enviado, sin respuesta";
 	if (estadoContacto === "numero_equivocado") return "Número equivocado";
@@ -233,7 +233,8 @@ function CierreDiarioPage() {
 				<Card className="border-red-300 bg-red-50 dark:bg-red-950/30">
 					<CardContent className="flex items-center gap-2 py-4 text-red-700 dark:text-red-300">
 						<AlertTriangle className="h-5 w-5" />
-						No se pudo cargar el cierre diario. Reintenta en unos segundos.
+						No se pudo cargar el cierre diario. Intente de nuevo en unos
+						segundos.
 					</CardContent>
 				</Card>
 			)}
@@ -445,8 +446,8 @@ function FilaAsesor({
 											<TableRow>
 												<TableHead>Crédito</TableHead>
 												<TableHead>Movimiento</TableHead>
-												<TableHead>Salió de</TableHead>
-												<TableHead>Llegó a</TableHead>
+												<TableHead>Bucket anterior</TableHead>
+												<TableHead>Bucket nuevo</TableHead>
 											</TableRow>
 										</TableHeader>
 										<TableBody>

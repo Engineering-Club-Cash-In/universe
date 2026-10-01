@@ -384,7 +384,7 @@ function PagaloSupervisionPage() {
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
-						No tenés permiso para ver la bandeja de supervisión Págalo.
+						No tiene permiso para ver la bandeja de supervisión Págalo.
 					</p>
 				</div>
 			</div>
@@ -411,10 +411,10 @@ function PagaloSupervisionPage() {
 
 		if (total > LIMITE_EXPORT_PAGALO) {
 			const seguir = window.confirm(
-				`Tu filtro tiene ${total.toLocaleString("es-GT")} grupos. ` +
+				`El filtro tiene ${total.toLocaleString("es-GT")} grupos. ` +
 					`Por rendimiento del navegador, se exportarán los primeros ${LIMITE_EXPORT_PAGALO.toLocaleString("es-GT")}.\n\n` +
-					"Te recomendamos acotar el rango de fechas si necesitás el reporte completo.\n\n" +
-					"¿Deseás continuar con la exportación parcial?",
+					"Si necesita el reporte completo, reduzca el rango de fechas.\n\n" +
+					"¿Desea continuar con la exportación parcial?",
 			);
 			if (!seguir) return;
 		}
@@ -429,7 +429,7 @@ function PagaloSupervisionPage() {
 
 			if (resultado.truncado) {
 				toast.warning(
-					`Se exportaron los primeros ${resultado.cantidad.toLocaleString("es-GT")} de ${resultado.total.toLocaleString("es-GT")} grupos (límite alcanzado). Acotá las fechas para el reporte completo.`,
+					`Se exportaron los primeros ${resultado.cantidad.toLocaleString("es-GT")} de ${resultado.total.toLocaleString("es-GT")} grupos (límite alcanzado). Reduzca el rango de fechas para obtener el reporte completo.`,
 					{ duration: 6000 },
 				);
 			} else {
@@ -439,7 +439,7 @@ function PagaloSupervisionPage() {
 			}
 		} catch (error) {
 			console.error("[pagalo] Error exportando:", error);
-			toast.error("No se pudo generar el archivo. Intentá de nuevo.");
+			toast.error("No se pudo generar el archivo. Intente de nuevo.");
 		} finally {
 			setExportando(null);
 		}
@@ -452,12 +452,12 @@ function PagaloSupervisionPage() {
 					<h1 className="font-bold text-2xl">Supervisión Págalo</h1>
 					<p className="text-muted-foreground text-sm">
 						Grupos con links vencidos, fallidos o duplicados. Sin estados
-						seleccionados se muestran todos los grupos; al elegir uno o más,
-						solo esos.
+						seleccionados se muestran todos los grupos; al seleccionar uno o
+						más, solo esos.
 					</p>
 					{!esSupervisor && (
 						<p className="mt-1 text-muted-foreground text-sm">
-							Mostrando créditos de tus buckets asignados.
+							Mostrando créditos de sus buckets asignados.
 						</p>
 					)}
 				</div>
@@ -580,7 +580,7 @@ function PagaloSupervisionPage() {
 							<SelectItem value="todos">Todos los asesores</SelectItem>
 							{asesoresQuery.isError && (
 								<div className="px-2 py-1.5 text-destructive text-xs">
-									No se pudo cargar asesores
+									No se pudieron cargar los asesores
 								</div>
 							)}
 							{asesores.map((asesor) => (

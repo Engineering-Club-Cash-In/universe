@@ -19,6 +19,7 @@ import {
 	crearControlCandadoDistribuido,
 	desacoplarVerificacionSat,
 	esAlertaSat,
+	esListadoTitularIncompleto,
 	estadoCorridaDesdeSat,
 	estadoLoteDesdeCorridas,
 	estadoLoteParaUsuario,
@@ -352,6 +353,15 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(estadoLoteDesdeCorridas(["ok", "error"])).toBe("error");
 		expect(estadoLoteDesdeCorridas(["error", "bloqueado"])).toBe("error");
 		expect(estadoLoteDesdeCorridas([])).toBe("error");
+	});
+
+	test("acepta un listado completo aunque el titular no tenga vehículos", () => {
+		expect(
+			esListadoTitularIncompleto({ estado: "OK", listadoCompleto: true }),
+		).toBe(false);
+		expect(
+			esListadoTitularIncompleto({ estado: "OK", listadoCompleto: false }),
+		).toBe(true);
 	});
 
 	test("la interfaz reduce los estados del lote a proceso, completado o error", () => {

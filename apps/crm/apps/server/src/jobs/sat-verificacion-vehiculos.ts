@@ -9,6 +9,7 @@ import type {
 	SatTitularObjetivo,
 	SatVehiculosDelegadosResponse,
 	SatVehiculosPropiosResponse,
+	SatVehiculosTitularResponse,
 	VehiculoSatPropio,
 } from "../controllers/satVehiculos";
 import {
@@ -148,6 +149,14 @@ export function estadoLoteParaUsuario(
 	if (estado === "en_proceso") return "en_proceso";
 	if (estado === "ok") return "ok";
 	return "error";
+}
+
+export function esListadoTitularIncompleto(
+	titular:
+		| Pick<SatVehiculosTitularResponse, "estado" | "listadoCompleto">
+		| undefined,
+): boolean {
+	return titular?.estado === "OK" && !titular.listadoCompleto;
 }
 
 function contarPlacasUnicas(placas: string[]): number {
@@ -810,9 +819,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		for (const corrida of corridas) {
 			asegurarConsultaSatActiva(signal);
 			const titular = respuestasPorNit.get(normalizarNit(corrida.titularNit));
-			const listadoIncompleto =
-				titular?.estado === "OK" &&
-				(!titular.listadoCompleto || titular.vehiculos.length === 0);
+			const listadoIncompleto = esListadoTitularIncompleto(titular);
 
 			if (!titular || titular.estado !== "OK" || listadoIncompleto) {
 				const estado = titular
@@ -823,7 +830,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 				const mensajeError =
 					titular?.mensajeError ??
 					(listadoIncompleto
-						? "SAT devolvió un listado vacío o incompleto; no se generaron alertas para evitar falsos positivos."
+						? "SAT devolvió un listado incompleto; no se generaron alertas para evitar falsos positivos."
 						: "SAT no devolvió resultado para el titular configurado.");
 
 				await db

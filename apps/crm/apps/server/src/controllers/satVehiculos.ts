@@ -1371,7 +1371,7 @@ function estadoGeneralDelegado(
 	return "ERROR";
 }
 
-interface ContextoTitularDelegado {
+export interface ContextoTitularDelegado {
 	titular: SatTitularObjetivo;
 	page: Page;
 	frame: Frame;
@@ -1397,10 +1397,20 @@ async function prepararContextoTitular(
 	await seleccionarTitular(page, titular);
 	const frame = await irAListadoVehiculosDelegado(page, titular.nit);
 	const totalRegistros = await leerTotalRegistros(frame);
-	if (totalRegistros === null || totalRegistros <= 0) {
+	if (totalRegistros === null) {
 		throw new SatScrapeError(
 			`SAT no informó un total válido para el titular ${titular.nit}.`,
 		);
+	}
+	if (totalRegistros === 0) {
+		return {
+			titular,
+			page,
+			frame,
+			totalRegistros: 0,
+			tamanoPagina: 0,
+			totalPaginas: 0,
+		};
 	}
 	const primeraPagina = await leerTablaVehiculos(
 		frame,
@@ -1422,10 +1432,19 @@ async function prepararContextoTitular(
 	};
 }
 
-async function consultarContextoTitular(
+export async function consultarContextoTitular(
 	principal: ContextoTitularDelegado,
 	secundarios: ContextoTitularDelegado[] = [],
 ): Promise<SatVehiculosTitularResponse> {
+	if (principal.totalRegistros === 0) {
+		return {
+			...principal.titular,
+			estado: "OK",
+			vehiculos: [],
+			listadoCompleto: true,
+		};
+	}
+
 	const trabajadores = [principal, ...secundarios];
 	for (const trabajador of trabajadores.slice(1)) {
 		if (

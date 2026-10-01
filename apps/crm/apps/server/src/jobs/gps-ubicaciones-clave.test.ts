@@ -739,6 +739,40 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		expect(intentadas.size).toBeGreaterThan(100);
 	});
 
+	// Con 100 o más unidades de B4 sin cursor, las plazas se iban todas a B4 y
+	// ninguna unidad de otro bucket recibía su cálculo inicial.
+	it("si hay 100 o más candidatas de B4, las demás unidades conservan plazas de backfill", async () => {
+		const unidades = Array.from({ length: 200 }, (_, i) => ({
+			wialonUnitId: 3000 + i,
+			numeroCreditoSifco: `S${i}`,
+		}));
+		// Las primeras 150 están en B4 y fallan siempre.
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(
+			unidades.slice(0, 150).map((u) => u.numeroCreditoSifco),
+		);
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue(unidades);
+		const getHistorialPosiciones = mock().mockImplementation(
+			async (unitId: number) =>
+				unitId < 3150
+					? {
+							mensajes: [],
+							completo: false,
+							tramosTotal: 9,
+							tramosCompletados: 0,
+						}
+					: historialCompleto(9),
+		);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones,
+		} as any);
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(getHistorialPosiciones).toHaveBeenCalledTimes(100);
+		// Las que no son de B4 (3150..3199) alcanzaron plaza: se procesaron.
+		expect(res.unidadesProcesadas).toBeGreaterThan(0);
+	});
+
 	it("si cartera-back falla no se salta la corrida, solo no se prioriza", async () => {
 		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(null);
 		wialonMock();
@@ -970,6 +1004,34 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 		const res = await calcularUbicacionesUnidadBajoDemanda(203, ["A"]);
 
 		expect(res).toEqual({ estado: "incompleto" });
+	});
+
+	// Si Wialon falla, una unidad sin cursor no tiene enfriamiento (el cursor no
+	// se escribe): cada clic repetiría la descarga de 60 días en plena caída.
+	it("un cálculo que falló no se reintenta de inmediato desde el botón", async () => {
+		const historial = wialonMock({
+			mensajes: [],
+			completo: false,
+			tramosTotal: 9,
+			tramosCompletados: 3,
+		});
+
+		try {
+			setSystemTime(new Date("2026-10-01T15:00:00Z"));
+			const primero = await calcularUbicacionesUnidadBajoDemanda(220, ["A"]);
+			setSystemTime(new Date("2026-10-01T15:02:00Z"));
+			const segundo = await calcularUbicacionesUnidadBajoDemanda(220, ["A"]);
+			// Pasado el enfriamiento vuelve a intentar.
+			setSystemTime(new Date("2026-10-01T15:07:00Z"));
+			const tercero = await calcularUbicacionesUnidadBajoDemanda(220, ["A"]);
+
+			expect(primero).toEqual({ estado: "incompleto" });
+			expect(segundo).toEqual({ estado: "incompleto" });
+			expect(tercero).toEqual({ estado: "incompleto" });
+			expect(historial).toHaveBeenCalledTimes(2);
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	it("dos clics a la vez: el segundo no recalcula la misma unidad", async () => {

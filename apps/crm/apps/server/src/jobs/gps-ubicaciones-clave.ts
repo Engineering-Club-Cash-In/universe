@@ -73,6 +73,11 @@ const MS_POR_DIA = 24 * 60 * 60 * 1000;
 // de todos a la vez no cabe en una noche.
 const BACKFILL_MAX_POR_CORRIDA = 100;
 
+// Plazas de backfill que se reservan para unidades que no son de B4 cuando
+// las hay: B4 va primero, pero si hace falta más de lo que cabe, no puede
+// llevarse las 100 y dejar sin cálculo inicial a todas las demás.
+const BACKFILL_RESERVA_NO_B4 = 30;
+
 /**
  * Segunda mitad del cálculo, sin tocar Wialon: lee las estancias guardadas de
  * la unidad (últimos 60 días), calcula las ubicaciones clave y reemplaza las de
@@ -200,6 +205,14 @@ async function guardarUbicacionesDeUnidad({
  * instancia que `corridaEnCurso`.
  */
 const unidadesEnProceso = new Set<number>();
+
+// Cuándo falló por última vez el cálculo de una unidad (epoch ms). Una unidad
+// sin cursor (primer backfill, o cursor vencido) no tiene el enfriamiento de
+// «ya calculada hace poco»: si Wialon falla, cada clic del botón repetiría la
+// descarga de 60 días (9 tramos) en plena caída del proveedor. En memoria, mismo
+// supuesto de una sola instancia que `unidadesEnProceso`.
+const ENFRIAMIENTO_INTENTO_FALLIDO_MS = 5 * 60 * 1000;
+const ultimoFallo = new Map<number, number>();
 
 /**
  * Estado de procesamiento de una unidad. `ultimoMensajeAt` es el último
@@ -353,6 +366,7 @@ export async function calcularUbicacionesUnidad({
 			console.warn(
 				`${LOG_PREFIX} No se pudo obtener el historial completo de la unidad ${wialonUnitId}: ${historial.tramosCompletados}/${historial.tramosTotal} tramos completados. Se preserva el snapshot previo y el cursor no avanza.`,
 			);
+			ultimoFallo.set(wialonUnitId, Date.now());
 			return { estado: "incompleto" };
 		}
 
@@ -435,6 +449,8 @@ export async function calcularUbicacionesUnidad({
 			ahora,
 			ventanaDesde,
 		});
+		// Solo limpieza de memoria: una entrada vieja ya vencida no bloquea nada.
+		ultimoFallo.delete(wialonUnitId);
 		return {
 			estado: "ok",
 			ubicaciones: cantidad,
@@ -454,7 +470,9 @@ const ENFRIAMIENTO_BAJO_DEMANDA_MS = 15 * 60 * 1000;
  * para el vehículo que todavía no tiene ubicaciones porque aún no le toca el
  * backfill del job (o es nuevo). Sin tope de backfill: es una unidad, a
  * pedido de una persona. Si se calculó hace menos de 15 minutos no vuelve a
+
  * Wialon, pero sí arma las ubicaciones del crédito desde las estancias guardadas.
+ * Un intento que falló tampoco se repite durante 5 minutos.
  */
 export async function calcularUbicacionesUnidadBajoDemanda(
 	wialonUnitId: number,
@@ -504,13 +522,26 @@ export async function calcularUbicacionesUnidadBajoDemanda(
 		}
 	}
 
-	const resultado = await calcularUbicacionesUnidad({
-		wialonUnitId,
-		sifcos,
-		cursor: fila && aCursorUnidad(fila),
-		ahora,
-		ventanaDesde,
-	});
+	// Si el último intento falló hace poco no se vuelve a Wialon: se evita que
+	// el botón martille al proveedor mientras está caído o limitando.
+	const fallo = ultimoFallo.get(wialonUnitId);
+	if (fallo && Date.now() - fallo < ENFRIAMIENTO_INTENTO_FALLIDO_MS) {
+		return { estado: "incompleto" };
+	}
+
+	let resultado: Awaited<ReturnType<typeof calcularUbicacionesUnidad>>;
+	try {
+		resultado = await calcularUbicacionesUnidad({
+			wialonUnitId,
+			sifcos,
+			cursor: fila && aCursorUnidad(fila),
+			ahora,
+			ventanaDesde,
+		});
+	} catch (error) {
+		ultimoFallo.set(wialonUnitId, Date.now());
+		throw error;
+	}
 	return resultado.estado === "ok"
 		? { estado: "calculado", ubicaciones: resultado.ubicaciones }
 		: resultado;
@@ -712,12 +743,19 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	const candidatos = idsOrdenados.filter(necesitaBackfill);
 	const candidatosB4 = candidatos.filter(esB4);
 	const candidatosResto = candidatos.filter((id) => !esB4(id));
-	const conBackfill = new Set(
-		[
-			...rotar(candidatosB4, BACKFILL_MAX_POR_CORRIDA),
-			...rotar(candidatosResto, BACKFILL_MAX_POR_CORRIDA - candidatosB4.length),
-		].slice(0, BACKFILL_MAX_POR_CORRIDA),
+	// B4 tiene prioridad, pero deja la reserva a las demás (si las hay): con 100
+	// o más candidatas de B4 que fallan o tardan, sin reserva ninguna otra unidad
+	// recibiría su cálculo inicial.
+	const plazasB4 = Math.min(
+		candidatosB4.length,
+		BACKFILL_MAX_POR_CORRIDA -
+			Math.min(candidatosResto.length, BACKFILL_RESERVA_NO_B4),
 	);
+	const plazasResto = BACKFILL_MAX_POR_CORRIDA - plazasB4;
+	const conBackfill = new Set([
+		...rotar(candidatosB4, plazasB4).slice(0, plazasB4),
+		...rotar(candidatosResto, plazasResto).slice(0, plazasResto),
+	]);
 
 	// Secuencial, no en paralelo: son llamadas pesadas a Wialon para
 	// potencialmente cientos de unidades — correrlas en paralelo saturaría la

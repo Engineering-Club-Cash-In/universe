@@ -2101,7 +2101,7 @@ const JOBS_PROGRAMADOS = {
 	 *  GPS vinculado, a partir del historial de posiciones de Wialon.
 	 *  Reemplaza el enfoque de "salida de geocerca" (retirado). Es incremental
 	 *  (solo pide a Wialon lo posterior al último cálculo; el backfill de 60 días
-	 *  se reparte en varias noches) y necesita las migraciones 0061 y 0074
+	 *  se reparte en varias noches) y necesita las migraciones 0061 y 0075
 	 *  aplicadas. Default `false` FIJO — exige `GPS_UBICACIONES_ENABLED=true`
 	 *  explícito. */
 	ubicacionesClaveGps: process.env.GPS_UBICACIONES_ENABLED === "true",

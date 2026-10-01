@@ -25,6 +25,26 @@ describe("etiquetaEnvioAseguradora", () => {
 		).toBe("Correo a Seguros G&T en proceso");
 	});
 
+	test("un envío pendiente pasado el plazo no se muestra como en proceso", () => {
+		expect(
+			etiquetaEnvioAseguradora({
+				estado: "pendiente",
+				aseguradora: "universales",
+				sinConfirmar: true,
+			}),
+		).toEqual({
+			texto: "No se pudo confirmar el correo a Seguros Universales",
+			className: "bg-amber-100 text-amber-800",
+		});
+		expect(
+			etiquetaEnvioAseguradora({
+				estado: "pendiente",
+				aseguradora: "universales",
+				sinConfirmar: false,
+			})?.texto,
+		).toBe("Correo a Seguros Universales en proceso");
+	});
+
 	test("un documento que no es la factura del tracker no lleva etiqueta", () => {
 		expect(etiquetaEnvioAseguradora(null)).toBeNull();
 		expect(etiquetaEnvioAseguradora(undefined)).toBeNull();

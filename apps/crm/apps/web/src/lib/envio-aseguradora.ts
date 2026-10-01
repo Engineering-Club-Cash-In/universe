@@ -6,6 +6,8 @@ const ASEGURADORAS: Record<string, string> = {
 interface EnvioAseguradora {
 	estado: string | null;
 	aseguradora: string | null;
+	/** `pendiente` pasado el plazo: no se sabe si salió. */
+	sinConfirmar?: boolean;
 }
 
 /** Estado del correo de la factura del seguro subida desde el tracker. */
@@ -21,10 +23,15 @@ export function etiquetaEnvioAseguradora(
 				className: "bg-green-100 text-green-800",
 			};
 		case "pendiente":
-			return {
-				texto: `Correo a ${aseguradora} en proceso`,
-				className: "bg-blue-100 text-blue-800",
-			};
+			return envio.sinConfirmar
+				? {
+						texto: `No se pudo confirmar el correo a ${aseguradora}`,
+						className: "bg-amber-100 text-amber-800",
+					}
+				: {
+						texto: `Correo a ${aseguradora} en proceso`,
+						className: "bg-blue-100 text-blue-800",
+					};
 		case "fallido":
 			return {
 				texto: `No se pudo enviar el correo a ${aseguradora}`,

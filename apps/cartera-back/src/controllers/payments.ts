@@ -2634,6 +2634,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
   try {
     const offset = (page - 1) * pageSize;
 
+    // Nexa stores the bank's calendar date, not a UTC instant. Keep the
+    // same date expression for display and filters; legacy payments retain UTC→GT.
+    const fechaPagoLocalSQL = `CASE WHEN p.nexa_payment_event_id IS NOT NULL
+      THEN p.fecha_pago
+      ELSE p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'
+    END`;
+
     // 🔹 Construcción dinámica de filtros
     const whereClauses: string[] = [];
 
@@ -2644,19 +2651,19 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 📅 Rango de fechas (zona Guatemala UTC-6)
     if (fechaInicio) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
+        `(${fechaPagoLocalSQL})::date >= '${fechaInicio}'::date`
       );
     }
     if (fechaFin) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
+        `(${fechaPagoLocalSQL})::date <= '${fechaFin}'::date`
       );
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
-    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${anio}`);
-    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
-    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM ${fechaPagoLocalSQL}) = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM ${fechaPagoLocalSQL}) = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM ${fechaPagoLocalSQL}) = ${dia}`);
 
     if (validationStatus) {
       whereClauses.push(`p.validation_status = '${validationStatus}'`);
@@ -2815,7 +2822,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.credito_id AS "creditoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
+        TO_CHAR(${sql.raw(fechaPagoLocalSQL)}, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",

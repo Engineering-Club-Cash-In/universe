@@ -88,6 +88,7 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
+import { envioSinConfirmar } from "../lib/factura-seguro";
 import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
@@ -6316,6 +6317,7 @@ export const crmRouter = {
 						estado: insuranceInvoiceSubmissions.status,
 						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
 						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+						actualizadoAt: insuranceInvoiceSubmissions.updatedAt,
 					},
 				})
 				.from(opportunityDocuments)
@@ -6335,11 +6337,23 @@ export const crmRouter = {
 			const documentsWithUrls = await Promise.all(
 				documents.map(async (doc) => {
 					const url = await getFileUrl(doc.filePath);
+					const { envioAseguradora } = doc;
 					return {
 						...doc,
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
+						// Un `pendiente` pasado el plazo no está "en proceso": quedó sin
+						// confirmar (misma regla que el tracker).
+						envioAseguradora: envioAseguradora && {
+							estado: envioAseguradora.estado,
+							aseguradora: envioAseguradora.aseguradora,
+							enviadoAt: envioAseguradora.enviadoAt,
+							sinConfirmar: envioSinConfirmar({
+								envio: envioAseguradora.estado,
+								envioActualizadoAt: envioAseguradora.actualizadoAt,
+							}),
+						},
 						url,
 					};
 				}),

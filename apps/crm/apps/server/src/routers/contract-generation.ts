@@ -984,6 +984,11 @@ export const contractGenerationRouter = {
 				dpi: z.string().length(13),
 				documentNames: z.array(z.string()).min(1),
 				opportunityId: z.string().uuid().optional(),
+				/**
+				 * El que eligieron en pantalla porque RENAP no respondió. Manda sobre
+				 * el del CRM: es lo que la persona confirmó para este contrato.
+				 */
+				genero: z.enum(["hombre", "mujer"]).optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -1017,11 +1022,12 @@ export const contractGenerationRouter = {
 
 				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
 				const generoFallback =
-					gender === "female"
+					input.genero ??
+					(gender === "female"
 						? ("mujer" as const)
 						: gender === "male"
 							? ("hombre" as const)
-							: undefined;
+							: undefined);
 
 				const response = await getDocumentsByDpi(
 					input.dpi,
@@ -1031,6 +1037,11 @@ export const contractGenerationRouter = {
 				if (!response.success) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: response.message || "Error al obtener documentos",
+						// RENAP no respondió y no hubo género de dónde sacarlo (en
+						// inversiones no hay lead): la pantalla lo pide y reintenta.
+						data: {
+							pideGenero: !generoFallback && Boolean(response.renapError),
+						},
 					});
 				}
 				if (response.renapUnavailable) {

@@ -219,3 +219,52 @@ export const gpsUbicacionesClave = pgTable(
 		index("idx_gps_ubicaciones_clave_caso").on(t.casoCobroId),
 	],
 );
+
+/**
+ * Estancias detectadas por unidad Wialon (cálculo incremental de ubicaciones
+ * clave). Una estancia es "el vehículo estuvo quieto en este punto desde X
+ * hasta Y": es el resultado del primer paso del pipeline
+ * (`detectarEstancias`) y lo único que necesitan los pasos siguientes
+ * (agrupar y clasificar). Guardarlas permite que el job nocturno pida a
+ * Wialon solo lo nuevo en vez de volver a bajar 60 días de mensajes crudos
+ * por unidad.
+ *
+ * Por unidad física, NO por crédito: una unidad compartida por dos créditos
+ * se baja una sola vez. Solo se retienen los últimos 60 días, y solo de
+ * unidades con caso de cobro activo (se purgan junto con
+ * `gps_ubicaciones_clave`).
+ */
+export const gpsEstancias = pgTable(
+	"gps_estancias",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		wialonUnitId: integer("wialon_unit_id").notNull(),
+		lat: doublePrecision("lat").notNull(),
+		lon: doublePrecision("lon").notNull(),
+		desde: timestamp("desde").notNull(),
+		hasta: timestamp("hasta").notNull(),
+	},
+	(t) => [index("idx_gps_estancias_unidad_desde").on(t.wialonUnitId, t.desde)],
+);
+
+/**
+ * Hasta dónde se procesó el historial de cada unidad. Sin esto, una unidad
+ * sin estancias (siempre en movimiento, o sin datos) no se distingue de una
+ * unidad nunca procesada y se volvería a bajar completa cada noche.
+ */
+export const gpsEstanciasCursor = pgTable("gps_estancias_cursor", {
+	wialonUnitId: integer("wialon_unit_id").primaryKey(),
+	procesadoHasta: timestamp("procesado_hasta").notNull(),
+	// Último mensaje de posición leído de Wialon. Si la última estancia guardada
+	// termina exactamente ahí, quedó abierta (el carro sigue en ese lugar); si
+	// no, ya se cerró y no hay que fusionarla con lo nuevo. Null = no se sabe.
+	ultimoMensajeAt: timestamp("ultimo_mensaje_at"),
+	// Tramo en curso al terminar la última corrida cuando aún no llegaba a 20 min
+	// (por eso no es una estancia guardada). Se siembra en la siguiente: sin
+	// esto, una parada que cruza el cursor con dos mitades <20 min se perdía.
+	pendienteLat: doublePrecision("pendiente_lat"),
+	pendienteLon: doublePrecision("pendiente_lon"),
+	pendienteDesde: timestamp("pendiente_desde"),
+	pendienteHasta: timestamp("pendiente_hasta"),
+	actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
+});

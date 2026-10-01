@@ -801,6 +801,17 @@ export type UbicacionesClaveCasoOutput = z.infer<
 	typeof ubicacionesClaveCasoOutputSchema
 >;
 
+// Cálculo bajo demanda de las ubicaciones de un vehículo (botón "Calcular
+// ahora"): para el que aún no tiene datos porque no le ha tocado el backfill.
+export const calcularUbicacionesClaveCasoInputSchema = z.object({
+	casoCobroId: z.string().uuid(),
+	vehicleId: z.string().uuid(),
+});
+export const calcularUbicacionesClaveCasoOutputSchema = z.object({
+	estado: z.enum(["calculado", "en_proceso", "incompleto", "sin_unidad"]),
+	ubicaciones: z.number().int(),
+});
+
 // ── Historial de consultas de ubicaciones clave ──────────────────────────────
 // Cada consulta guarda en gps_consulta_logs.snapshot lo que se mostró, para
 // verlo después sin volver a pedirlo con un motivo. El snapshot viaja como

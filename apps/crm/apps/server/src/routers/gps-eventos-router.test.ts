@@ -18,6 +18,7 @@ import { casosCobros } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import { vehicles } from "../db/schema/vehicles";
 import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 
@@ -41,6 +42,7 @@ let ubicacionesWhereCondition: unknown = null;
 let ubicacionesClaveBorradasCount = 0;
 let consultasFilasMock: Record<string, unknown>[] = [];
 let consultasLimitPedido: number | null = null;
+let vehiculoWialonUnitIdMock: number | null = 100;
 
 function mockDb() {
 	return {
@@ -102,6 +104,14 @@ function mockDb() {
 									},
 								}),
 							}),
+						}),
+					};
+				}
+
+				if (tabla === vehicles) {
+					return {
+						where: () => ({
+							limit: async () => [{ wialonUnitId: vehiculoWialonUnitIdMock }],
 						}),
 					};
 				}
@@ -181,6 +191,7 @@ mock.module("../lib/acceso-caso-cobro", () =>
 
 const { gpsEventosRouter } = await import("./gps-eventos-router");
 const { carteraBackClient } = await import("../services/cartera-back-client");
+const jobUbicaciones = await import("../jobs/gps-ubicaciones-clave");
 
 function ctx(role: string): Context {
 	rolUsuarioMock = role;
@@ -331,12 +342,6 @@ describe("CB-119 — getGpsEventosCaso", () => {
 });
 
 describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
-	beforeEach(() => {
-		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
-			bucket: 4,
-		} as never);
-	});
-
 	afterEach(() => {
 		ubicacionesFilasMock = [];
 		casoGpsMock = {
@@ -489,13 +494,11 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(ubicacionesWhereCondition).toBeDefined();
 	});
 
-	it("crédito fuera de B4 (bucket !== 4): purga filas y no expone ubicaciones", async () => {
+	it("expone las ubicaciones sin importar el bucket del crédito y no consulta ni purga por bucket", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
 		} as never);
-		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
-			bucket: 2, // B2
-		} as never);
+		const bucketSpy = spyOn(carteraBackClient, "getBucketActualCredito");
 
 		ubicacionesFilasMock = [
 			{
@@ -519,46 +522,10 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		});
 
 		expect(res.auditada).toBe(true);
-		expect(res.ubicaciones).toEqual([]);
-		expect(ubicacionesClaveBorradasCount).toBe(1);
-		// Fuera de B4 también se limpia el snapshot guardado en el historial.
-		expect(gpsConsultaLogsActualizados).toEqual([{ snapshot: null }]);
-	});
-
-	it("cartera-back no disponible (rechaza / bucketActual === null): fail closed, no expone ubicaciones y no purga la DB", async () => {
-		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
-			asesor: { emailCashIn: "u@example.com" },
-		} as never);
-		spyOn(carteraBackClient, "getBucketActualCredito").mockRejectedValue(
-			new Error("cartera-back caído"),
-		);
-
-		ubicacionesFilasMock = [
-			{
-				id: "ub-1",
-				lat: 14.5951,
-				lon: -90.5069,
-				radioM: 200,
-				tipo: "probable_casa",
-				horasTotales: 480,
-				diasDistintos: 55,
-				visitas: 55,
-				patron: { nocturna: 55, laboral: 0, finDeSemana: 0 },
-				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
-				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
-				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
-			},
-		];
-
-		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
-			context: ctx("cobros"),
-		});
-
-		expect(res.auditada).toBe(true);
-		expect(res.ubicaciones).toEqual([]);
+		expect(res.ubicaciones).toHaveLength(1);
+		expect(bucketSpy).not.toHaveBeenCalled();
 		expect(ubicacionesClaveBorradasCount).toBe(0);
-		// Un fallo transitorio de red no debe borrar snapshots del historial.
-		expect(gpsConsultaLogsActualizados).toEqual([]);
+		expect(gpsConsultaLogsActualizados).not.toContainEqual({ snapshot: null });
 	});
 
 	it("caso sin numeroCreditoSifco: no expone ubicaciones", async () => {
@@ -786,9 +753,6 @@ describe("getUbicacionesConsultasCaso (historial de ubicaciones clave)", () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
 		} as never);
-		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
-			bucket: 4,
-		} as never);
 	});
 
 	afterEach(() => {
@@ -870,10 +834,8 @@ describe("getUbicacionesConsultasCaso (historial de ubicaciones clave)", () => {
 		expect(res[0]?.snapshot).toBeNull();
 	});
 
-	it("crédito fuera de B4: no expone el historial de ubicaciones", async () => {
-		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
-			bucket: 2,
-		} as never);
+	it("expone el historial sin consultar el bucket del crédito", async () => {
+		const bucketSpy = spyOn(carteraBackClient, "getBucketActualCredito");
 		consultasFilasMock = [
 			{
 				id: "log-1",
@@ -892,6 +854,95 @@ describe("getUbicacionesConsultasCaso (historial de ubicaciones clave)", () => {
 			},
 		);
 
-		expect(res).toEqual([]);
+		expect(res).toHaveLength(1);
+		expect(bucketSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("calcularUbicacionesClaveCaso — botón «Calcular ahora»", () => {
+	const input = { casoCobroId: CASO_ID, vehicleId: VEHICLE_ID };
+
+	beforeEach(() => {
+		rolUsuarioMock = "cobros";
+		responsableCasoMock = "user-test";
+		vehiculoWialonUnitIdMock = 100;
+		casoGpsMock = {
+			casoSifco: "01010214100000",
+			vehiculoOportunidad: VEHICLE_ID,
+		};
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+	});
+
+	afterEach(() => {
+		mock.restore();
+	});
+
+	it("calcula la unidad del vehículo con el SIFCO del caso", async () => {
+		const calcular = spyOn(
+			jobUbicaciones,
+			"calcularUbicacionesUnidadBajoDemanda",
+		).mockResolvedValue({ estado: "calculado", ubicaciones: 3 });
+
+		const res = await call(
+			gpsEventosRouter.calcularUbicacionesClaveCaso,
+			input,
+			{
+				context: ctx("cobros"),
+			},
+		);
+
+		expect(res).toEqual({ estado: "calculado", ubicaciones: 3 });
+		expect(calcular).toHaveBeenCalledWith(100, ["01010214100000"]);
+	});
+
+	it("vehículo sin unidad GPS vinculada: no llama a Wialon", async () => {
+		vehiculoWialonUnitIdMock = null;
+		const calcular = spyOn(
+			jobUbicaciones,
+			"calcularUbicacionesUnidadBajoDemanda",
+		);
+
+		const res = await call(
+			gpsEventosRouter.calcularUbicacionesClaveCaso,
+			input,
+			{
+				context: ctx("cobros"),
+			},
+		);
+
+		expect(res).toEqual({ estado: "sin_unidad", ubicaciones: 0 });
+		expect(calcular).not.toHaveBeenCalled();
+	});
+
+	it("propaga 'en_proceso' sin ubicaciones", async () => {
+		spyOn(
+			jobUbicaciones,
+			"calcularUbicacionesUnidadBajoDemanda",
+		).mockResolvedValue({ estado: "en_proceso" });
+
+		const res = await call(
+			gpsEventosRouter.calcularUbicacionesClaveCaso,
+			input,
+			{ context: ctx("cobros") },
+		);
+
+		expect(res).toEqual({ estado: "en_proceso", ubicaciones: 0 });
+	});
+
+	it("sin acceso al caso: rechaza y no calcula", async () => {
+		responsableCasoMock = "otro-usuario";
+		const calcular = spyOn(
+			jobUbicaciones,
+			"calcularUbicacionesUnidadBajoDemanda",
+		);
+
+		await expect(
+			call(gpsEventosRouter.calcularUbicacionesClaveCaso, input, {
+				context: ctx("cobros"),
+			}),
+		).rejects.toThrow();
+		expect(calcular).not.toHaveBeenCalled();
 	});
 });

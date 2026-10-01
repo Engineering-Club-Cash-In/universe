@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
 	AlertCircle,
 	CheckCircle,
@@ -7,9 +8,14 @@ import {
 	Loader2,
 	RefreshCw,
 } from "lucide-react";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	type FirmanteDeContrato,
+	firmantesEnFicha,
+} from "@/lib/contract-signers-display";
 
 export interface ContractResult {
 	contractType: string;
@@ -19,8 +25,20 @@ export interface ContractResult {
 	documentLink?: string;
 	r2Key?: string;
 	signingLinks?: string[];
+	/**
+	 * Firmantes con su rol. Sin esto los links se etiquetaban por posición y
+	 * mentían: en los contratos donde el representante legal firma primero, el
+	 * primer link salía rotulado "Firma Cliente".
+	 */
+	signatories?: FirmanteDeContrato[];
 	templateId?: number;
 	apiResponse?: unknown;
+	/**
+	 * El documento en WeeTrust y el comprobante que firma el servidor para poder
+	 * descartarlo si nunca se enlaza.
+	 */
+	documentID?: string;
+	descarte?: string;
 	error?: string;
 }
 
@@ -33,6 +51,13 @@ interface ContractResultsProps {
 	onRetry?: (contractType: string) => void;
 	/** Tipo de contrato que se está reintentando en este momento */
 	retryingType?: string | null;
+	/**
+	 * Una acción propia del área por cada contrato, al lado del estado.
+	 *
+	 * Inversiones pone ahí "Reemplazar": es su última oportunidad de corregir un
+	 * documento, porque al darle "Listo" la batería sale de su lista.
+	 */
+	accionPorContrato?: (result: ContractResult) => ReactNode;
 }
 
 export function ContractResults({
@@ -42,6 +67,7 @@ export function ContractResults({
 	failCount,
 	onRetry,
 	retryingType,
+	accionPorContrato,
 }: ContractResultsProps) {
 	const failedNames = results
 		.filter((r) => !r.success)
@@ -107,9 +133,12 @@ export function ContractResults({
 									</span>
 								</div>
 							</div>
-							<Badge variant={result.success ? "default" : "destructive"}>
-								{result.success ? "Generado" : "Error"}
-							</Badge>
+							<div className="flex items-center gap-2">
+								{accionPorContrato?.(result)}
+								<Badge variant={result.success ? "default" : "destructive"}>
+									{result.success ? "Generado" : "Error"}
+								</Badge>
+							</div>
 						</div>
 
 						{result.success && (
@@ -145,25 +174,46 @@ export function ContractResults({
 									</div>
 								)}
 
-								{/* Signing links */}
-								{result.signingLinks?.map((link, linkIndex) => {
-									const linkLabel =
-										linkIndex === 0
-											? "Firma Cliente"
-											: linkIndex === 1
-												? "Firma Representante"
-												: `Firma ${linkIndex + 1}`;
-									return (
+								{/* Firma en papel: no hay links y no debería parecer un faltante */}
+								{esFirmaFisica(result.contractType) && (
+									<div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-amber-800 text-sm">
+										<FileText className="h-4 w-4 shrink-0" />
+										<span>
+											Se firma en papel: imprimí el PDF y que lo firme el
+											vendedor. No lleva link de firma.
+										</span>
+									</div>
+								)}
+
+								{/* Enlaces de firma, etiquetados por el rol real de cada quien */}
+								{firmantesEnFicha(result.signatories, {
+									clientSigningLink: result.signingLinks?.[0] ?? null,
+									representativeSigningLink: result.signingLinks?.[1] ?? null,
+									additionalSigningLinks: result.signingLinks?.slice(2) ?? null,
+								}).map((firmante) =>
+									firmante.url ? (
 										<div
-											key={linkIndex}
+											key={firmante.clave}
 											className="flex items-center justify-between rounded bg-muted/50 p-2"
 										>
-											<span className="text-sm">{linkLabel}</span>
-											<div className="flex gap-2">
+											<div className="min-w-0">
+												<span className="text-sm">{firmante.etiqueta}</span>
+												{firmante.nombre && (
+													<p className="truncate text-muted-foreground text-xs">
+														{firmante.nombre}
+													</p>
+												)}
+											</div>
+											<div className="flex shrink-0 gap-2">
 												<Button
 													variant="ghost"
 													size="sm"
-													onClick={() => copyToClipboard(link, linkLabel)}
+													onClick={() =>
+														copyToClipboard(
+															firmante.url as string,
+															firmante.etiqueta,
+														)
+													}
 												>
 													<Copy className="mr-1 h-4 w-4" />
 													Copiar
@@ -171,15 +221,17 @@ export function ContractResults({
 												<Button
 													variant="ghost"
 													size="sm"
-													onClick={() => window.open(link, "_blank")}
+													onClick={() =>
+														window.open(firmante.url as string, "_blank")
+													}
 												>
 													<ExternalLink className="mr-1 h-4 w-4" />
 													Abrir
 												</Button>
 											</div>
 										</div>
-									);
-								})}
+									) : null,
+								)}
 							</div>
 						)}
 

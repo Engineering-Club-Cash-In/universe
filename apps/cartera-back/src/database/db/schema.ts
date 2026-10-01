@@ -16,6 +16,7 @@
     bigint,
     index,
     jsonb,
+    type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -424,6 +425,19 @@
     }),
   );
 
+  /**
+   * Nombre del índice único parcial que garantiza UNA sola mora activa por
+   * crédito.
+   *
+   * Vive como constante y no como literal suelto porque el código que atrapa
+   * el 23505 de este índice (ver `procesarMoras` en `controllers/latefee.ts`)
+   * tiene que comparar contra el MISMO nombre: `pg` expone el nombre del
+   * índice violado en `error.constraint`, y si el literal del `catch` y el de
+   * la definición se separaran, el `catch` dejaría de reconocer la carrera
+   * benigna —o, peor, absorbería la violación de otra restricción—.
+   */
+  export const MORAS_CREDITO_UQ_ACTIVA = "moras_credito_uq_activa";
+
   export const moras_credito = customSchema.table(
     "moras_credito",
     {
@@ -447,7 +461,7 @@
       // Garantiza UNA sola mora activa por crédito. Bloquea a nivel BD la
       // condición de carrera de procesarMoras corriendo en paralelo (varias
       // réplicas) que insertaba filas activa=true duplicadas e inflaba el total.
-      uniqueIndex("moras_credito_uq_activa")
+      uniqueIndex(MORAS_CREDITO_UQ_ACTIVA)
         .on(t.credito_id)
         .where(sql`${t.activa} = true`),
     ]
@@ -469,6 +483,64 @@
       .references(() => platform_users.id, { onDelete: "cascade" }),
     fecha: timestamp("fecha").defaultNow().notNull(),
   });
+
+  // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
+  export type MoraPagadaTipo = "PAGO" | "CONDONACION" | "REVERSA" | "ANULACION";
+
+  export const MORA_PAGADA_CUOTA_UQ_PAGO = "mora_pagada_cuota_uq_pago";
+  export const MORA_PAGADA_CUOTA_UQ_REVIERTE = "mora_pagada_cuota_uq_revierte";
+
+  export const mora_pagada_cuota = customSchema.table(
+    "mora_pagada_cuota",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      cuota_id: integer("cuota_id")
+        .notNull()
+        .references(() => cuotas_credito.cuota_id, { onDelete: "cascade" }),
+      // SIN llave foránea, igual que en la migración 0043: el registro tiene
+      // que sobrevivir al pago revertido (ver la nota de la migración).
+      pago_id: integer("pago_id"),
+      // 6 decimales: ver la nota de 0043 (restos de redondeo por cuota).
+      monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
+      tipo: text("tipo").notNull(),
+      // FK a la misma tabla, igual que en 0043: una compensatoria siempre
+      // apunta a una fila real.
+      revierte_a: integer("revierte_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      // reemplaza_a apunta a la fila PAGO anterior (compensada por revierte_a) cuando
+      // reversePayment reutiliza pago_id del mismo (pago_id, cuota_id). Ver migración 0043.
+      reemplaza_a: integer("reemplaza_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      usuario_id: integer("usuario_id"),
+      motivo: text("motivo"),
+      fecha: timestamp("fecha")
+        .default(sql`clock_timestamp()`)
+        .notNull(),
+    },
+    (table) => [
+      // Impide doble clic: el mismo pago no puede registrar mora dos veces en la misma cuota.
+      // Sin este índice un race condition genera dos filas duplicadas y el saldo de mora se dobla.
+      // El COALESCE(reemplaza_a, 0) permite que filas compensadas (reemplaza_a = id anterior)
+      // y filas nuevas (reemplaza_a = NULL → 0) tengan claves distintas. Ver migración 0043.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_PAGO)
+        .on(table.pago_id, table.cuota_id, sql`COALESCE(${table.reemplaza_a}, 0)`)
+        .where(sql`${table.tipo} = 'PAGO'`),
+
+      // Impide revertir dos veces: una fila compensatoria puede apuntar a UNA sola original.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_REVIERTE)
+        .on(table.revierte_a)
+        .where(sql`${table.revierte_a} IS NOT NULL`),
+
+      // Buscar por cuota: snapshot de mora por crédito y cuota.
+      index("mora_pagada_cuota_idx_cuota").on(table.credito_id, table.cuota_id),
+
+      // Buscar por pago: listar qué mora registró un pago específico.
+      index("mora_pagada_cuota_idx_pago").on(table.pago_id).where(
+        sql`${table.pago_id} IS NOT NULL`
+      ),
+    ]
+  );
 
   export const moraEventoTipoEnum = customSchema.enum("mora_evento_tipo", [
     "CREACION",
@@ -508,10 +580,16 @@
     usuario_id: integer("usuario_id")
       .references(() => platform_users.id, { onDelete: "set null" }),
     motivo: text("motivo"),
+    // Qué pago causó este movimiento de mora. Anulable: hay movimientos que no
+    // vienen de ningún pago (recálculo del cron, condonación, ajuste manual).
+    // SIN FK a propósito: la reversa borra filas de pagos_credito; con FK el SET NULL
+    // borraría el vínculo justo cuando se necesita para auditar.
+    pago_id: integer("pago_id"),
     fecha: timestamp("fecha").defaultNow().notNull(),
   }, (table) => [
     index("moras_historial_credito_idx").on(table.credito_id),
     index("moras_historial_fecha_idx").on(table.fecha),
+    index("moras_historial_idx_pago").on(table.pago_id).where(sql`${table.pago_id} IS NOT NULL`),
   ]);
 
   export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
@@ -766,6 +844,25 @@
   // monto_aportado del espejo (que ya incluye lo que el inversionista
   // tenía antes en el crédito).
   // ====================================================================
+  /**
+   * Avisos al CRM de "compra aceptada" que no llegaron: se reintentan solos
+   * (ver src/controllers/bateriasCrmPendientes.ts).
+   */
+  export const baterias_crm_pendientes = customSchema.table(
+    "baterias_crm_pendientes",
+    {
+      id: serial("id").primaryKey(),
+      inversionista_id: integer("inversionista_id").notNull(),
+      payload: jsonb("payload").notNull(),
+      intentos: integer("intentos").notNull().default(0),
+      ultimo_error: text("ultimo_error"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+      enviado_at: timestamp("enviado_at", { withTimezone: true }),
+    },
+  );
+
   export const compras_credito_inversionista = customSchema.table(
     "compras_credito_inversionista",
     {
@@ -803,6 +900,10 @@
       tipo_compra: tipoCompraEnum("tipo_compra")
         .notNull()
         .default("sin_clasificar"),
+      // Cargada en el modo manual: así se vuelve a meter una compra que se cayó
+      // porque el inversionista tardó en pagar. Sus contratos jurídico ya los
+      // hizo, así que al aceptarla no se le abre batería en el CRM.
+      origen_manual: boolean("origen_manual").notNull().default(false),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),
@@ -1999,8 +2100,43 @@
     visible: boolean("visible").notNull().default(false),
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: varchar("created_by", { length: 250 }),
+
+    // ── Contratos de inversión emitidos desde el CRM ──
+    // Nulas en toda la papelería que se sube a mano, que es casi todo lo que hay
+    // acá. Sólo las llena el CRM cuando la fila ES un contrato: así el portal y
+    // la ficha siguen leyendo la misma tabla de siempre, y la pantalla de
+    // contratos filtra por `contrato_id`.
+
+    /** Id del contrato en el CRM. Sin FK: es otra base. */
+    contrato_id: varchar("contrato_id", { length: 64 }),
+    tipo_contrato: varchar("tipo_contrato", { length: 120 }),
+    weetrust_document_id: varchar("weetrust_document_id", { length: 120 }),
+    /**
+     * Enlace de observador: muestra el documento y cómo va la firma, sin dejar
+     * firmar. Es el único que se le puede pasar a alguien para que mire.
+     */
+    observer_url: text("observer_url"),
+    /**
+     * Quién firma, con su rol, su enlace y su estado.
+     *
+     * Va como JSON y no en columnas fijas (cliente / representante) porque el
+     * reparto por posición ya falló: en cuanto hay un firmante más, el enlace
+     * rotulado "representante" es el de otra persona.
+     */
+    firmantes: jsonb("firmantes"),
+    /** "pending" | "signed" | "cancelled", como lo dice el CRM. */
+    estado_firma: varchar("estado_firma", { length: 20 }),
+    /** Cuándo el CRM actualizó por última vez el estado de firma. */
+    actualizado_at: timestamp("actualizado_at"),
   }, (table) => ({
     inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
+    // Un contrato del CRM ocupa una sola fila: el espejo se vuelve a mandar cada
+    // vez que alguien firma y no puede ir dejando copias.
+    contratoUx: uniqueIndex("ux_docs_inversionista_contrato")
+      .on(table.contrato_id)
+      // Parcial: la papelería que se sube a mano no tiene contrato, y sin esto
+      // sólo podría haber una fila sin contrato en toda la tabla.
+      .where(sql`${table.contrato_id} is not null`),
   }));
 
   // ========================================

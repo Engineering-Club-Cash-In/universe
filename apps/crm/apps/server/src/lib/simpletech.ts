@@ -67,7 +67,15 @@ function normalizeParamsForTemplate(
 	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
-export function getSimpletechClient(): SimpleTechClient | null {
+export function getSimpletechClient(opciones?: {
+	/**
+	 * Cuánto espera cada petición antes de abortarla. El cliente ya trae 30s por
+	 * defecto; se pasa cuando quien llama necesita que el tope sea explícito
+	 * porque está esperando el resultado con algo tomado (por ejemplo, el
+	 * candado de firma de una oportunidad).
+	 */
+	timeoutMs?: number;
+}): SimpleTechClient | null {
 	if (
 		!process.env.SIMPLETECH_BASE_URL ||
 		!process.env.SIMPLETECH_USERNAME ||
@@ -82,6 +90,7 @@ export function getSimpletechClient(): SimpleTechClient | null {
 			password: process.env.SIMPLETECH_PASSWORD,
 		},
 		baseUrl: process.env.SIMPLETECH_BASE_URL,
+		...(opciones?.timeoutMs ? { timeout: opciones.timeoutMs } : {}),
 	});
 }
 
@@ -173,9 +182,17 @@ export async function sendWhatsappTemplate(params: {
 	phone: string;
 	message: string;
 	logPrefix?: string;
+	/**
+	 * No escribir las URL del mensaje en el log. Los enlaces de firma de
+	 * contratos firman en nombre de la persona: quien tenga acceso a los logs
+	 * no debería poder usarlos.
+	 */
+	ocultarEnlacesEnLog?: boolean;
+	/** Tope de la petición; sin esto rige el del cliente (30s). */
+	timeoutMs?: number;
 }): Promise<WhatsappSendResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech]";
-	const client = getSimpletechClient();
+	const client = getSimpletechClient({ timeoutMs: params.timeoutMs });
 	if (!client) {
 		return { success: false, error: "Servicio de mensajería no configurado" };
 	}
@@ -198,7 +215,13 @@ export async function sendWhatsappTemplate(params: {
 	};
 
 	console.log(`${prefix} Enviando template a:`, phoneNormalized);
-	console.log(`${prefix} Request:`, JSON.stringify(templateRequest, null, 2));
+	const requestParaLog = JSON.stringify(templateRequest, null, 2);
+	console.log(
+		`${prefix} Request:`,
+		params.ocultarEnlacesEnLog
+			? requestParaLog.replace(/https?:\/\/[^\s"\\]+/g, "[enlace]")
+			: requestParaLog,
+	);
 
 	try {
 		const result = await client.sendTemplate(templateRequest);

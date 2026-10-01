@@ -1454,7 +1454,9 @@ describe("fecha del pago interno Nexa", () => {
       expect(body).toContain("fecha_pago: paymentRegistrationDate()");
     }
     expect(registerPaymentSource).toContain("const fechaGuatemala = paymentRegistrationDate()");
-    expect(registerPaymentSource).toContain("fecha_pago,\n\n      renuevo_o_nuevo");
+    // La sangría no importa (insertarPago escribe ahora dentro de su tx): sí
+    // que `renuevo_o_nuevo` siga inmediatamente después de `fecha_pago`.
+    expect(registerPaymentSource).toMatch(/fecha_pago,\n\n\s+renuevo_o_nuevo/);
   });
 });
 

@@ -385,6 +385,32 @@ export interface RubroPendiente {
   obligatorio: boolean;
 }
 
+/**
+ * El «por qué» de la mora, cuota por cuota (lo arma el back con el mismo
+ * cálculo del cron). Montos como string con 2 decimales.
+ */
+export interface DesgloseMora {
+  cargoMensual: string;
+  cargoDiario: string;
+  cuotas: {
+    numero_cuota: number;
+    fecha_vencimiento: string;
+    dias_atraso: number;
+    topada: boolean;
+    en_validacion: boolean;
+    generado: string;
+    abonado: string;
+    pendiente: string;
+  }[];
+  total: string;
+  /** total − Σ pendiente de las filas (puede ser negativo). */
+  ajusteRedondeo?: string;
+  /** El total de mañana si no paga hoy (incluye las cuotas que vencen hoy). */
+  totalManana?: string;
+  /** Cuántas cuotas suben mañana (vencidas sin tope + las que vencen hoy). */
+  cuotasQueSubenManana?: number;
+}
+
 export interface GetCreditoByNumeroActivoResponse {
   flujo: "ACTIVO";
   credito: Credito;
@@ -402,6 +428,9 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
+
+  // El porqué de la mora para el asesor (ausente en respuestas viejas).
+  desgloseMora?: DesgloseMora;
 
   // 🔥 CONVENIO (puede ser null)
   convenioActivo: ConvenioActivo | null;

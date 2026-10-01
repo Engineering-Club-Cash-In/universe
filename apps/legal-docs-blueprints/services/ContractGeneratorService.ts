@@ -9,14 +9,85 @@ import {
   ContractGenerationResponse,
   ContractGeneratorOptions,
   ContractTemplateConfig,
-  AnyContractData
+  AnyContractData,
+  SignerRole,
+  type ContractSigner
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { getRequiredEmailCount } from '../config/docusealConfig';
+import {
+  esCartaUnificable,
+  getSignatureMode,
+  SignatureLayoutError,
+} from './signaturePatterns';
+import {
+  type CartaEnPdf,
+  leerComposicion,
+  posicionesDelPaquete,
+  unirCartas,
+} from './paqueteCartas';
 import { crmApiService } from './CrmApiService';
-import { uploadPdfToR2 } from './R2Service';
+import { uploadPdfToR2, urlFirmadaDePdf } from './R2Service';
+
+/** Texto legible de un error desconocido, para reportarlo al CRM. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Nombre con el que el documento se ve en WeeTrust y en el correo de firma.
+ *
+ * Es lo que lee el cliente, así que dice quién firma y qué está firmando:
+ * "Albertsond Gabriel Velásquez Ramírez - Pagaré único libre de protesto".
+ *
+ * No es el nombre de archivo. El de archivo lleva el tipo de contrato y un
+ * timestamp porque tiene que ser único en R2; arrastrar eso hasta WeeTrust
+ * producía nombres como
+ * `Albertsond_Gabriel_..._pagare_unico_libre_protesto_pagare_unico_libre_protesto_2026-09-23T16-21-33`,
+ * con el tipo repetido (el CRM ya lo mandaba en el prefijo y acá se volvía a
+ * pegar) y el timestamp a la vista.
+ */
+/** Cómo se llama el paquete de cartas en WeeTrust, en la ficha y en el correo. */
+const ETIQUETA_PAQUETE_CARTAS = 'Cartas';
+
+function nombreDeDocumento(
+  nombrePersona: string | undefined,
+  descripcion: string,
+  /**
+   * El identificador técnico del tipo. Las fotos de generación guardadas antes
+   * de separar los nombres traen el prefijo como `<nombre>_<tipo>`, y al
+   * regenerarlas el tipo se colaba en lo que lee el cliente: compararlo con la
+   * descripción no lo detecta ("pagare_unico_libre_protesto" no contiene
+   * "Pagaré único libre de protesto", por las tildes y el "de").
+   */
+  contractType?: string,
+): string {
+  const sinTipo =
+    contractType && nombrePersona
+      ? nombrePersona.split(contractType).join(' ')
+      : nombrePersona;
+  const persona = (sinTipo ?? '')
+    .replace(/\.pdf$/i, '')
+    // Timestamps que algunos llamadores meten en el prefijo para que el archivo
+    // sea único: `Date.now()` (legal-documents) o una fecha ISO. Son para el
+    // archivo, no para lo que lee el cliente.
+    .replace(/\d{4}-\d{2}-\d{2}T[\d-]+Z?/g, ' ')
+    .replace(/\d{10,}/g, ' ')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Sin nombre de persona queda la descripción sola: es preferible a inventar
+  // un nombre o a dejar el identificador técnico del tipo de contrato.
+  //
+  // Y si lo que llegó como "persona" ya es la descripción (o la contiene),
+  // tampoco se pega dos veces: de ahí salían los nombres con el tipo repetido.
+  const normalizar = (t: string) => t.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  const yaLaDice = normalizar(persona).includes(normalizar(descripcion));
+  const completo = persona && !yaLaDice ? `${persona} - ${descripcion}` : persona || descripcion;
+  return completo.slice(0, 150);
+}
 
 // Instancia de WeeTrust (servicio principal de firma)
 // Si WEETRUST_DISABLED=true o faltan credenciales, queda como null y se usa Documenso directo.
@@ -580,8 +651,24 @@ export class ContractGeneratorService {
     contracts: Array<{
       contractType: ContractType;
       data: Record<string, any>;
+      /**
+       * Firmantes con su rol. Es por donde manda el CRM desde que la firma se
+       * reparte por rol; `emails` es el camino viejo.
+       */
+      signers?: ContractSigner[];
+      /** Observadores: ven el flujo de firma sin firmar. */
+      observers?: string[];
       emails?: string[];
-      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female"; isPlural?: boolean };
+      options?: { generatePdf?: boolean; filenamePrefix?: string; documentName?: string; gender?: "male" | "female"; isPlural?: boolean };
+      /**
+       * Sólo en un `paquete_cartas`: las cartas que lo forman, en orden. Cada
+       * una trae sus propios datos y opciones, como si fuera suelta.
+       */
+      cartas?: Array<{
+        contractType: ContractType;
+        data: Record<string, any>;
+        options?: { gender?: "male" | "female"; isPlural?: boolean };
+      }>;
     }>
   ): Promise<{
     success: boolean;
@@ -601,13 +688,35 @@ export class ContractGeneratorService {
 
     // Procesar cada contrato de manera secuencial
     for (let i = 0; i < contracts.length; i++) {
-      const { contractType, data, emails, options } = contracts[i];
+      const { contractType, data, signers, observers, emails, options, cartas } =
+        contracts[i];
 
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
       console.log(`  Options recibidas:`, JSON.stringify(options));
 
+      // Las cartas unidas no tienen template: se arman con las que traen.
+      if (contractType === ContractType.PAQUETE_CARTAS) {
+        const result = await this.generarPaqueteDeCartas({
+          cartas: cartas ?? [],
+          signers,
+          observers,
+          options,
+        });
+        results.push(result);
+        console.log(result.success ? `  ✅ Éxito: ${result.message}` : `  ❌ Error: ${result.error}`);
+        continue;
+      }
+
       try {
-        const result = await this.generateContract(contractType, data, { ...options, emails });
+        // `signers` y `observers` tienen que viajar igual que `emails`: el batch
+        // es el camino que usa el wizard, y dejarlos afuera hacía que el
+        // contrato saliera sin firmantes y, por lo tanto, sin links.
+        const result = await this.generateContract(contractType, data, {
+          ...options,
+          signers,
+          observers,
+          emails,
+        });
         results.push(result);
         
         if (result.success) {
@@ -663,10 +772,257 @@ export class ContractGeneratorService {
   /**
    * Genera un contrato basado en el tipo y los datos proporcionados
    */
+  /**
+   * Arma las cartas, las une en un solo PDF y las manda a firmar como un
+   * documento.
+   *
+   * Cada carta se arma igual que si fuera suelta (su template, su género, su
+   * plural), pero ninguna se sube a R2 ni a WeeTrust por su cuenta: lo que se
+   * sube es el PDF unido. Las firmas se ubican carta por carta sobre ese PDF
+   * (ver `posicionesDelPaquete`), así que cada una cae donde caía antes.
+   *
+   * Todo o nada: si una sola carta no se puede armar o no calza con su layout,
+   * falla el paquete. Mandar a firmar un paquete al que le falta una carta, o
+   * con una carta sin firma, es peor que no mandarlo.
+   */
+  public async generarPaqueteDeCartas(entrada: {
+    cartas: Array<{
+      contractType: ContractType;
+      data: Record<string, any>;
+      options?: { gender?: 'male' | 'female'; isPlural?: boolean };
+    }>;
+    signers?: ContractSigner[];
+    observers?: string[];
+    options?: { filenamePrefix?: string; documentName?: string };
+  }): Promise<ContractGenerationResponse> {
+    const contractType = ContractType.PAQUETE_CARTAS;
+    const respuestaBase = {
+      templateId: 0,
+      nameDocument: [{ enum: contractType, label: ETIQUETA_PAQUETE_CARTAS }],
+      data: [],
+      contractType,
+      generatedAt: new Date().toISOString(),
+    };
+    const fallo = (error: string): ContractGenerationResponse => ({
+      ...respuestaBase,
+      success: false,
+      linkDocument: '',
+      message: 'No se pudieron generar las cartas',
+      error,
+    });
+
+    if (!entrada.cartas?.length) return fallo('No se pidió ninguna carta.');
+
+    const noSonCartas = entrada.cartas
+      .map((c) => c.contractType)
+      .filter((t) => !esCartaUnificable(t));
+    if (noSonCartas.length > 0) {
+      return fallo(`Sólo las cartas van unidas; esto no lo es: ${noSonCartas.join(', ')}.`);
+    }
+
+    // Firman el cliente y sus codeudores, igual que en cada carta. Sin firmantes
+    // el paquete no tiene sentido: las cartas no se imprimen.
+    const signers = entrada.signers ?? [];
+    if (signers.length === 0) return fallo('Las cartas no tienen quién las firme.');
+    if (!weeTrustService) return fallo('WeeTrust deshabilitado o no inicializado');
+
+    console.log(`\n📨 Armando ${entrada.cartas.length} carta(s) en un solo documento...`);
+
+    // 1. Cada carta a PDF, sin subir ni mandar nada.
+    const enPdf: CartaEnPdf[] = [];
+    for (const carta of entrada.cartas) {
+      const config = this.getTemplateConfig(carta.contractType);
+
+      const validation = this.validateRequiredFields(carta.data, config.requiredFields);
+      if (!validation.valid) {
+        return fallo(
+          `${config.description}: faltan ${validation.missing.join(', ')}`,
+        );
+      }
+
+      try {
+        const docx = await this.renderizarDocx(config, carta.data, carta.options ?? {});
+        const pdf = await this.convertToPdf(docx);
+        enPdf.push({ contractType: carta.contractType, label: config.description, pdf });
+        console.log(`  ✓ ${config.description}`);
+      } catch (error) {
+        return fallo(`${config.description}: no se pudo convertir a PDF (${errorMessage(error)})`);
+      }
+    }
+
+    try {
+      // 2. Unirlas y 3. ubicar las firmas de cada una en el PDF unido.
+      const { pdf, composicion } = await unirCartas(enPdf);
+      const posiciones = await posicionesDelPaquete(pdf, composicion, signers);
+      console.log(
+        `  → ${composicion.reduce((n, c) => n + c.paginas, 0)} página(s), ${posiciones.length} firma(s)`,
+      );
+
+      // 4. El PDF unido a R2: es el que se reemite y el que se descarga.
+      const primera = entrada.cartas[0].data;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
+      const prefix =
+        entrada.options?.filenamePrefix ||
+        primera.client_name?.replace(/\s+/g, '_') ||
+        'cartas';
+      const { r2Key } = await uploadPdfToR2(pdf, `${prefix}_${contractType}_${timestamp}`);
+
+      // 5. Un solo documento a WeeTrust, con las posiciones ya resueltas.
+      const documentName = nombreDeDocumento(
+        entrada.options?.documentName?.trim() || primera.client_name || prefix,
+        ETIQUETA_PAQUETE_CARTAS,
+      );
+      const signing = await weeTrustService.createDocumentForSigning(
+        documentName,
+        pdf,
+        contractType,
+        signers,
+        entrada.observers,
+        'rol',
+        posiciones,
+      );
+
+      return {
+        ...respuestaBase,
+        success: signing.signs.length > 0,
+        signing_links: signing.signs,
+        signatureMode: 'electronica',
+        linkDocument: signing.linkDocument,
+        signingProvider: 'weetrust',
+        r2Key,
+        documentID: signing.documentID,
+        observerUrl: signing.observerUrl,
+        signatories: signing.signatories,
+        cartas: composicion,
+        message: `${composicion.length} carta(s) unidas en un solo documento`,
+        error: signing.signs.length > 0 ? undefined : 'No se generaron links de firma',
+      };
+    } catch (error) {
+      console.error('✗ Error armando el paquete de cartas:', error);
+      return fallo(errorMessage(error));
+    }
+  }
+
+  /**
+   * Arma el DOCX con los datos: elige el template (género y plural), arma las
+   * filas de firmantes si es plural, y lo renderiza.
+   *
+   * No guarda, no convierte ni sube nada. Está aparte para que el paquete de
+   * cartas pueda armar cada carta sin que cada una termine en R2 y en WeeTrust
+   * por su cuenta.
+   */
+  private async renderizarDocx(
+    config: ContractTemplateConfig,
+    data: Record<string, any>,
+    options: { gender?: "male" | "female"; isPlural?: boolean },
+  ): Promise<Buffer> {
+    // 3. Seleccionar template según género y plural
+    let templateFilename: string;
+    if (options.isPlural) {
+      // Template plural
+      if (options.gender === "female") {
+        templateFilename = config.templateFilenameFemalePlural || config.templateFilenameFemale;
+      } else {
+        templateFilename = config.templateFilenamePlural || config.templateFilename;
+      }
+    } else {
+      // Template singular
+      templateFilename = options.gender === "female" ? config.templateFilenameFemale : config.templateFilename;
+    }
+
+    // 4. Cargar template
+    console.log(`  → Template seleccionado: ${templateFilename}`);
+    const templatePath = path.join(this.templatesDir, templateFilename);
+    const templateContent = await fs.readFile(templatePath, 'binary');
+    const zip = new PizZip(templateContent);
+
+    // 5. Crear instancia de docxtemplater
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      nullGetter: () => '-', // Reemplazar nulls con '-'
+      parser: (tag: string) => {
+        // remplazar cadenas vacías por guion
+        return {
+          get: (scope: any) => {
+            const value = scope[tag];
+            if (value === null || value === undefined || value === '') {
+              return '- ';
+            }
+            return value;
+          }
+        };
+      }
+    })
+
+    // 6. Preparar datos para renderizado
+    let renderData = { ...data };
+
+    // Si es plural, crear array de firmantes (deudor 1 + deudores adicionales)
+    if (options.isPlural) {
+      const deudor1 = {
+        nombreCompleto: data.nombreCompleto,
+        dpiTexto: data.dpiTexto,
+        dpi: data.dpi
+      };
+
+      const deudoresAdicionales = data.deudoresAdicionales || [];
+
+      // Array de firmantes = deudor 1 + deudores adicionales
+      const firmantes = [deudor1, ...deudoresAdicionales];
+
+      // Agrupar firmantes en filas de 2 columnas (aplanar datos para evitar problemas con parser)
+      const firmantesFilas: Array<{
+        col1nombreCompleto: string;
+        col1dpi: string;
+        col2nombreCompleto?: string;
+        col2dpi?: string;
+        tieneCol2: boolean;
+      }> = [];
+
+      for (let i = 0; i < firmantes.length; i += 2) {
+        const f1 = firmantes[i];
+        const f2 = firmantes[i + 1];
+        firmantesFilas.push({
+          col1nombreCompleto: f1.nombreCompleto,
+          col1dpi: f1.dpi,
+          col2nombreCompleto: f2?.nombreCompleto,
+          col2dpi: f2?.dpi,
+          tieneCol2: !!f2
+        });
+      }
+
+      renderData.firmantesFilas = firmantesFilas;
+      console.log(`✓ Plural: ${firmantes.length} firmante(s) en ${firmantesFilas.length} fila(s)`);
+      console.log(`  firmantesFilas:`, JSON.stringify(firmantesFilas, null, 2));
+    }
+
+    // 7. Renderizar con los datos
+    doc.render(renderData);
+
+    // 7. Generar buffer del DOCX
+    return doc.getZip().generate({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    });
+  }
+
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[]; isPlural?: boolean } = { gender: "male" }
+    options: {
+      gender?: "male" | "female";
+      generatePdf?: boolean;
+      filenamePrefix?: string;
+      /** Ver `nombreDeDocumento`: cómo se ve en WeeTrust, no el nombre de archivo. */
+      documentName?: string;
+      /** @deprecated Usar `signers`, que lleva el rol de cada firmante. */
+      emails?: string[];
+      signers?: ContractSigner[];
+      observers?: string[];
+      isPlural?: boolean;
+    } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
@@ -684,101 +1040,29 @@ export class ContractGeneratorService {
         };
       }
 
-      // 3. Seleccionar template según género y plural
-      let templateFilename: string;
-      if (options.isPlural) {
-        // Template plural
-        if (options.gender === "female") {
-          templateFilename = config.templateFilenameFemalePlural || config.templateFilenameFemale;
-        } else {
-          templateFilename = config.templateFilenamePlural || config.templateFilename;
-        }
-      } else {
-        // Template singular
-        templateFilename = options.gender === "female" ? config.templateFilenameFemale : config.templateFilename;
-      }
-
-      // 4. Cargar template
-      console.log(`  → Template seleccionado: ${templateFilename}`);
-      const templatePath = path.join(this.templatesDir, templateFilename);
-      const templateContent = await fs.readFile(templatePath, 'binary');
-      const zip = new PizZip(templateContent);
-
-      // 5. Crear instancia de docxtemplater
-      const doc = new Docxtemplater(zip, {
-        paragraphLoop: true,
-        linebreaks: true,
-        nullGetter: () => '-', // Reemplazar nulls con '-'
-        parser: (tag: string) => {
-          // remplazar cadenas vacías por guion
-          return {
-            get: (scope: any) => {
-              const value = scope[tag];
-              if (value === null || value === undefined || value === '') {
-                return '- ';
-              }
-              return value;
-            }
-          };
-        }
-      })
-
-      // 6. Preparar datos para renderizado
-      let renderData = { ...data };
-
-      // Si es plural, crear array de firmantes (deudor 1 + deudores adicionales)
-      if (options.isPlural) {
-        const deudor1 = {
-          nombreCompleto: data.nombreCompleto,
-          dpiTexto: data.dpiTexto,
-          dpi: data.dpi
-        };
-
-        const deudoresAdicionales = data.deudoresAdicionales || [];
-
-        // Array de firmantes = deudor 1 + deudores adicionales
-        const firmantes = [deudor1, ...deudoresAdicionales];
-
-        // Agrupar firmantes en filas de 2 columnas (aplanar datos para evitar problemas con parser)
-        const firmantesFilas: Array<{
-          col1nombreCompleto: string;
-          col1dpi: string;
-          col2nombreCompleto?: string;
-          col2dpi?: string;
-          tieneCol2: boolean;
-        }> = [];
-
-        for (let i = 0; i < firmantes.length; i += 2) {
-          const f1 = firmantes[i];
-          const f2 = firmantes[i + 1];
-          firmantesFilas.push({
-            col1nombreCompleto: f1.nombreCompleto,
-            col1dpi: f1.dpi,
-            col2nombreCompleto: f2?.nombreCompleto,
-            col2dpi: f2?.dpi,
-            tieneCol2: !!f2
-          });
-        }
-
-        renderData.firmantesFilas = firmantesFilas;
-        console.log(`✓ Plural: ${firmantes.length} firmante(s) en ${firmantesFilas.length} fila(s)`);
-        console.log(`  firmantesFilas:`, JSON.stringify(firmantesFilas, null, 2));
-      }
-
-      // 7. Renderizar con los datos
-      doc.render(renderData);
-
-      // 7. Generar buffer del DOCX
-      const docxBuffer = doc.getZip().generate({
-        type: 'nodebuffer',
-        compression: 'DEFLATE',
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      });
+      // 3-7. Armar el DOCX con los datos
+      const docxBuffer = await this.renderizarDocx(config, data, options);
 
       // 8. Generar nombres de archivo
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
       const prefix = options.filenamePrefix || data.client_name?.replace(/\s+/g, '_') || 'contract';
       const baseFilename = `${prefix}_${contractType}_${timestamp}`;
+
+      // Lo que ve el cliente en WeeTrust, que no es el nombre de archivo.
+      // Al CRM le basta con mandar el nombre de quien firma: la descripción la
+      // pone el generador desde su propio registro de plantillas, que es el
+      // que manda.
+      // El nombre de la persona tal como vino en los datos, antes que el prefijo:
+      // `apps/legal-documents` no manda `documentName` y arma el prefijo pegando
+      // nombre, tipo y `Date.now()`.
+      const documentName = nombreDeDocumento(
+        options.documentName?.trim() ||
+          data.client_name ||
+          data.nombreCompleto ||
+          prefix,
+        config.description,
+        contractType,
+      );
 
       // 9. Asegurar que el directorio de salida existe
       await fs.mkdir(this.outputDir, { recursive: true });
@@ -831,18 +1115,52 @@ export class ContractGeneratorService {
         signs: string[];
         linkDocument: string;
         r2Key?: string;
+        documentID?: string;
+        observerUrl?: string;
+        signatories?: Array<{
+          role: SignerRole;
+          email: string;
+          name: string;
+          signatoryID?: string;
+          signingUrl?: string;
+        }>;
        } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
       let signingProvider: 'weetrust' | 'documenso' | undefined;
+      /** Motivo por el que no hay links de firma, si se pidieron. */
+      let signingError: string | undefined;
 
-      if (options.emails && options.emails.length > 0 && pdfBuffer) {
-        // Validar número de emails
-        const requiredEmails = getRequiredEmailCount(contractType);
-        if (options.emails.length !== requiredEmails) {
-          console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
-        }
+      // Los firmantes pueden venir con rol (`signers`) o como lista plana de
+      // emails (`emails`, el camino viejo). La lista plana se interpreta como
+      // titular seguido de cofirmantes, que es como la armaba el CRM.
+      // Quien manda `signers` usa el reparto por rol. Quien sólo manda `emails`
+      // (la app legal-documents) sigue con el comportamiento de siempre.
+      const firmaPorRol = Boolean(options.signers && options.signers.length > 0);
+      const signers: ContractSigner[] =
+        options.signers && options.signers.length > 0
+          ? options.signers
+          : (options.emails ?? []).map((email, i) => ({
+              role: i === 0 ? SignerRole.TITULAR : SignerRole.COFIRMANTE,
+              email,
+              // Cada cofirmante con su propio nombre, no con el del titular.
+              name:
+                (i === 0
+                  ? data.nombreCompleto
+                  : data.deudoresAdicionales?.[i - 1]?.nombreCompleto) ?? email,
+            }));
 
+      // Hay contratos que no se firman electrónicamente: se imprimen y se
+      // firman en papel. Para esos el PDF en R2 ES el entregable, y pedirles
+      // links de firma (o marcarlos como fallidos por no tenerlos) es tratar
+      // como error algo que está bien.
+      const signatureMode = getSignatureMode(contractType);
+
+      if (signatureMode === 'fisica') {
+        console.log(
+          `✍️  ${contractType} se firma en papel: no se envía a firma electrónica.`,
+        );
+      } else if (signers.length > 0 && pdfBuffer) {
         // Intentar primero con WeeTrust (si está habilitado)
         try {
           if (!weeTrustService) {
@@ -852,10 +1170,12 @@ export class ContractGeneratorService {
           console.log(`🔗 Creando documento en WeeTrust para firma...`);
 
           signing = await weeTrustService.createDocumentForSigning(
-            baseFilename,
+            documentName,
             pdfBuffer,
             contractType,
-            options.emails
+            signers,
+            options.observers,
+            firmaPorRol ? 'rol' : 'legado',
           );
 
           signingLinks = signing.signs ?? [];
@@ -865,29 +1185,52 @@ export class ContractGeneratorService {
           shouldCleanupFiles = true;
 
         } catch (weeTrustError) {
-          console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
+          // Un desajuste de layout es un problema de nuestra configuración, no
+          // del proveedor: mandarlo a Documenso pondría las firmas igual de mal.
+          // Se corta acá para que el error salga a la vista.
+          if (weeTrustError instanceof SignatureLayoutError) {
+            signingError = weeTrustError.message;
+            console.error(`✗ Layout de firmas inválido: ${weeTrustError.message}`);
+          } else if (firmaPorRol) {
+            // Con roles no se cae a Documenso: no arma las firmas dinámicas (más
+            // codeudores, la cobertura con dos juegos) ni agrega observadores, y
+            // el contrato saldría "bien" con firmas faltantes. Mejor un error a
+            // la vista y reintentar.
+            signingError = `WeeTrust: ${errorMessage(weeTrustError)}`;
+            console.error('✗ Error con WeeTrust (sin fallback para firma por rol):', weeTrustError);
+          } else {
+            console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
 
-          // Fallback a Documenso
-          try {
-            console.log(`🔗 Creando documento en Documenso (fallback)...`);
+            // Fallback a Documenso, sólo para quien manda `emails` sin rol
+            // (legal-documents): es el comportamiento de siempre.
+            try {
+              console.log(`🔗 Creando documento en Documenso (fallback)...`);
 
-            signing = await documensoService.createDocumentAndGetSigningLinks(
-              baseFilename,
-              pdfBuffer,
-              contractType,
-              options.emails
-            );
+              signing = await documensoService.createDocumentAndGetSigningLinks(
+                documentName,
+                pdfBuffer,
+                contractType,
+                signers.map((s) => s.email)
+              );
 
-            signingLinks = signing.signs ?? [];
-            signingProvider = 'documenso';
+              signingLinks = signing.signs ?? [];
+              signingProvider = 'documenso';
 
-            console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
-            shouldCleanupFiles = true;
+              console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
+              shouldCleanupFiles = true;
 
-          } catch (documensoError) {
-            console.error('⚠ Error al crear documento en Documenso:', documensoError);
-            // No fallar si ambos servicios fallan, los archivos ya están generados
+            } catch (documensoError) {
+              console.error('⚠ Error al crear documento en Documenso:', documensoError);
+              signingError = `WeeTrust: ${errorMessage(weeTrustError)} | Documenso: ${errorMessage(documensoError)}`;
+            }
           }
+        }
+
+        // Pedimos firma y no la conseguimos. Devolver `success: true` acá era lo
+        // que dejaba pasar contratos sin link: el CRM los guardaba como buenos y
+        // nadie se enteraba hasta que alguien iba a firmarlos.
+        if (!signingLinks || signingLinks.length === 0) {
+          signingError ??= 'No se generaron links de firma';
         }
       }
 
@@ -970,20 +1313,42 @@ export class ContractGeneratorService {
         // });
       }
 
+      // En papel no hay documento en WeeTrust: el link del documento es el PDF.
+      // Quien sólo lee `linkDocument` (legal-documents) no tenía cómo abrirlo.
+      let linkDelPdfEnPapel: string | undefined;
+      if (signatureMode === 'fisica' && r2KeyDirect) {
+        linkDelPdfEnPapel = await urlFirmadaDePdf(r2KeyDirect).catch((error) => {
+          console.warn('⚠ No se pudo firmar la URL del PDF en papel:', error);
+          return undefined;
+        });
+      }
+
       return {
         templateId: Math.floor(Math.random() * 100000), // ID de template simulado
-        success: true,
+        // Se pidió firma y no hubo links: el contrato no sirve, aunque el PDF exista.
+        success: !signingError,
         nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
-        linkDocument: signing?.linkDocument || '',
+        signatureMode,
+        linkDocument: signing?.linkDocument || linkDelPdfEnPapel || '',
         signingProvider,
         r2Key: r2KeyDirect || signing?.r2Key,
+        // Identificadores de WeeTrust: sin ellos no se puede consultar el estado
+        // del documento ni reintentar la firma de una persona más adelante.
+        documentID: signing?.documentID,
+        observerUrl: signing?.observerUrl,
+        signatories: signing?.signatories,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
         pdf_path: pdfPath,
-        message: `Contrato ${contractType} generado exitosamente`,
+        message: signingError
+          ? `Contrato ${contractType} generado, pero sin firma electrónica`
+          : signatureMode === 'fisica'
+            ? `Contrato ${contractType} generado para firma en papel`
+            : `Contrato ${contractType} generado exitosamente`,
+        error: signingError,
         generatedAt: new Date().toISOString()
       };
 
@@ -1010,6 +1375,247 @@ export class ContractGeneratorService {
   /**
    * Espera a que haya un slot disponible para conversión PDF
    */
+  /**
+   * Manda a firmar un PDF que ya existe, sin generarlo desde el template.
+   *
+   * Es el camino para cuando jurídico sube el contrato a mano: hay casos en que
+   * el documento se arma fuera (una versión negociada, un escaneo corregido),
+   * pero el tipo de contrato sigue siendo uno de los que tenemos mapeados, así
+   * que las líneas de firma están donde siempre y se puede repartir por rol
+   * igual que en el camino automático.
+   *
+   * No se inventa nada: si el PDF subido no trae las líneas de firma que el
+   * layout declara, `locateSignatureWidgets` lanza `SignatureLayoutError` y no
+   * se manda nada a firmar. Un PDF que no es el contrato que dice ser se
+   * detecta acá y no cuando alguien vaya a firmarlo.
+   */
+  async signExistingPdf(
+    contractType: ContractType,
+    pdfBuffer: Buffer,
+    options: {
+      filenamePrefix?: string;
+      /**
+       * Nombre con el que se ve en WeeTrust. Sin esto, la reemisión mandaba el
+       * `filenamePrefix` que le pasaba el CRM, que era la descripción del
+       * documento ("Pagaré único libre de protesto"): el documento reemitido
+       * perdía el nombre de la persona y quedaba imposible de ubicar entre
+       * decenas de pagarés.
+       */
+      documentName?: string;
+      signers?: ContractSigner[];
+      observers?: string[];
+      /**
+       * El PDF ya está en R2 con esta key (reemisión): no se vuelve a subir.
+       * Si no, cada regeneración dejaba una copia más del mismo contrato que
+       * nadie referencia.
+       */
+      r2KeyExistente?: string;
+      /**
+       * Qué hacer si el PDF no trae las líneas de firma que el layout declara.
+       *
+       * Por defecto se rechaza. Con esto en `true` —sólo lo pide el CRM cuando
+       * una persona sube el contrato a mano— el PDF se guarda igual, SIN
+       * mandarlo a WeeTrust, y la respuesta lo dice en `sinLineasDeFirma`:
+       * alguien lo sube a WeeTrust, acomoda las firmas a mano y vincula ese
+       * documento desde el CRM. No aplica a la reemisión ni al paquete de
+       * cartas, que salen de nuestras plantillas: ahí el desajuste es un error.
+       */
+      guardarSiNoHayLineas?: boolean;
+    } = {},
+  ): Promise<ContractGenerationResponse> {
+    const config = this.templateRegistry.get(contractType);
+    const esPaquete = contractType === ContractType.PAQUETE_CARTAS;
+    // El paquete no está en el registro de plantillas: no tiene template propio.
+    const descripcion = esPaquete
+      ? ETIQUETA_PAQUETE_CARTAS
+      : config?.description ?? contractType;
+    const baseFilename = options.filenamePrefix || `manual_${contractType}`;
+    const documentName = nombreDeDocumento(
+      options.documentName?.trim() || options.filenamePrefix,
+      descripcion,
+      contractType,
+    );
+
+    const respuestaBase = {
+      templateId: 0,
+      nameDocument: [{ enum: contractType, label: descripcion }],
+      data: [],
+      contractType,
+      generatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const signatureMode = getSignatureMode(contractType);
+
+      // Los contratos en papel no tienen líneas que contrastar (y el archivo
+      // puede ser un escaneo, sin texto), pero por lo menos tiene que abrir:
+      // si no, un archivo roto quedaba registrado como el contrato.
+      if (signatureMode === 'fisica') {
+        try {
+          const paginas = await WeeTrustService.contarPaginas(pdfBuffer);
+          if (paginas === 0) throw new Error('el PDF no tiene páginas');
+        } catch (error) {
+          return {
+            ...respuestaBase,
+            success: false,
+            linkDocument: '',
+            signatureMode,
+            message: 'El archivo no es un PDF válido',
+            error: `No se pudo abrir el PDF: ${errorMessage(error)}`,
+          };
+        }
+      }
+
+      // El PDF va a R2 sólo cuando el contrato quedó bien: si la firma falla,
+      // el CRM no guarda nada y el archivo quedaba en R2 sin nadie que lo
+      // referencie ni forma de borrarlo. Jurídico lo tiene en su máquina.
+      if (signatureMode === 'fisica') {
+        const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
+        return {
+          ...respuestaBase,
+          success: true,
+          r2Key,
+          linkDocument: '',
+          signatureMode,
+          message: `Contrato ${contractType} subido para firma en papel`,
+        };
+      }
+
+      const signers = options.signers ?? [];
+      if (signers.length === 0) {
+        return {
+          ...respuestaBase,
+          success: false,
+          linkDocument: '',
+          signatureMode,
+          message: 'Contrato no enviado: sin firmantes',
+          error: 'No se recibió ningún firmante para este contrato',
+        };
+      }
+
+      if (!weeTrustService) {
+        return {
+          ...respuestaBase,
+          success: false,
+          linkDocument: '',
+          signatureMode,
+          message: 'Contrato no enviado: sin firma electrónica',
+          error: 'WeeTrust deshabilitado o no inicializado',
+        };
+      }
+
+      // El paquete de cartas no tiene una línea de firma propia que buscar: sus
+      // posiciones salen de cada carta, y qué páginas son de cuál lo dice el
+      // propio PDF (lo escribió `unirCartas` al armarlo).
+      let posiciones: Awaited<ReturnType<typeof posicionesDelPaquete>> | undefined;
+      let composicion: ContractGenerationResponse['cartas'];
+      if (esPaquete) {
+        const leida = await leerComposicion(pdfBuffer);
+        if (!leida) {
+          return {
+            ...respuestaBase,
+            success: false,
+            linkDocument: '',
+            signatureMode,
+            message: 'No es un paquete de cartas',
+            error:
+              'Este PDF no dice qué cartas trae: no se puede volver a mandar a firmar. Hay que regenerar las cartas.',
+          };
+        }
+        posiciones = await posicionesDelPaquete(pdfBuffer, leida, signers);
+        composicion = leida.map((c) => ({
+          ...c,
+          label: this.templateRegistry.get(c.contractType)?.description ?? c.contractType,
+        }));
+      }
+
+      const signing = await weeTrustService.createDocumentForSigning(
+        documentName,
+        pdfBuffer,
+        contractType,
+        signers,
+        options.observers,
+        'rol',
+        posiciones,
+      );
+
+      // Si R2 falla con el documento ya enviado, se borra en WeeTrust: sin el
+      // PDF guardado el CRM no lo registra, y quedaría vivo sin dueño.
+      let r2Key: string;
+      try {
+        r2Key =
+          options.r2KeyExistente ??
+          (await uploadPdfToR2(pdfBuffer, baseFilename)).r2Key;
+      } catch (error) {
+        await weeTrustService.deleteDocument(signing.documentID).catch(() => {});
+        throw error;
+      }
+
+      return {
+        ...respuestaBase,
+        success: true,
+        r2Key,
+        signing_links: signing.signs,
+        signatureMode,
+        linkDocument: signing.linkDocument,
+        signingProvider: 'weetrust',
+        documentID: signing.documentID,
+        observerUrl: signing.observerUrl,
+        signatories: signing.signatories,
+        cartas: composicion,
+        message: `Contrato ${contractType} subido y enviado a firma`,
+      };
+    } catch (error) {
+      // Las firmas no se pudieron ubicar en un documento armado por fuera: no
+      // se inventan posiciones, pero tampoco se pierde el trabajo. El PDF queda
+      // guardado sin salir a firma, para que alguien lo suba a WeeTrust, ponga
+      // las firmas a mano y lo vincule. El borrador que se alcanzó a crear allá
+      // ya lo borró `createDocumentAndGetSigningLinks`.
+      if (
+        error instanceof SignatureLayoutError &&
+        options.guardarSiNoHayLineas &&
+        !options.r2KeyExistente &&
+        !esPaquete
+      ) {
+        console.warn(
+          `[signExistingPdf] ${contractType}: sin líneas de firma, se guarda sin enviar — ${error.message}`,
+        );
+        try {
+          const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
+          return {
+            ...respuestaBase,
+            success: true,
+            r2Key,
+            linkDocument: '',
+            signatureMode: getSignatureMode(contractType),
+            sinLineasDeFirma: error.message,
+            message: `Contrato ${contractType} guardado sin enviar a firma: no se encontraron las líneas de firma`,
+          };
+        } catch (errorAlGuardar) {
+          console.error(`[signExistingPdf] ${contractType}: no se pudo guardar el PDF:`, errorAlGuardar);
+          return {
+            ...respuestaBase,
+            success: false,
+            linkDocument: '',
+            message: 'No se pudo guardar el contrato',
+            error: errorMessage(errorAlGuardar),
+          };
+        }
+      }
+
+      // A diferencia del camino automático, acá NO se cae a Documenso: el
+      // documento lo subió una persona y lo que corresponde es decírselo.
+      console.error(`[signExistingPdf] ${contractType}:`, error);
+      return {
+        ...respuestaBase,
+        success: false,
+        linkDocument: '',
+        message: 'No se pudo enviar el contrato a firma',
+        error: errorMessage(error),
+      };
+    }
+  }
+
   private async acquirePdfSlot(): Promise<void> {
     if (this.activePdfConversions < this.maxConcurrentPdfConversions) {
       this.activePdfConversions++;

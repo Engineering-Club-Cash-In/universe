@@ -403,6 +403,23 @@ function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
 	return { bucket, key };
 }
 
+/**
+ * Sube un PDF y devuelve la key **con el bucket al inicio**, que es la forma en
+ * la que se guardan las keys de los contratos.
+ *
+ * Los PDF de contratos los sube el generador a su propio bucket y guarda la key
+ * completa, para que `getFileUrlWithBucketInKey` sepa dónde buscarlos. Lo que
+ * sube el CRM va a otro bucket, así que sin el prefijo la URL firmada apuntaría
+ * al bucket equivocado.
+ */
+export async function uploadPdfWithBucketInKey(
+	key: string,
+	buffer: Buffer,
+): Promise<string> {
+	await uploadBufferToR2(key, buffer);
+	return `${R2_BUCKET_NAME}/${key}`;
+}
+
 // obtener URL firmada para un archivo que tiene el bucket al inicio de la key (con cache)
 export async function getFileUrlWithBucketInKey(
 	fullKey: string,

@@ -10,8 +10,13 @@
  *    AND creditos."statusCredit" NOT IN (STATUS_EXCLUIDOS_MORA)
  *    AND NOT EXISTS pago que la cubra
  *        (paymentFalse = false AND pagado = true
- *         AND validation_status IN ('validated','no_required')
- *         AND COALESCE(monto_aplicado, 0) > 0)
+ *         AND COALESCE(monto_aplicado, 0) > 0
+ *         AND (validation_status IN ('validated','no_required')
+ *              OR (validation_status = 'pending'
+ *                  AND fecha_pago::date >= hoy_GT - 7
+ *                  AND fecha_pago::date <= hoy_GT + 1)))
+ *
+ * (`hasPaidPaymentSql` en `cartera-back/src/utils/cuotaYaPagadaSql.ts`.)
  *
  * La pantalla afirma en su leyenda que usa "el mismo criterio con el que el
  * sistema calcula la mora". Vive en `src/lib` para poder probar esa afirmación
@@ -48,8 +53,18 @@ export interface PagoParaAtraso {
   pagado?: boolean | null;
   validationStatus?: string | null;
   monto_aplicado?: string | number | null;
+  /** Fecha del pago: la edad de un pago pendiente se mide con ella. */
+  fecha_pago?: string | Date | null;
   statusCredit?: string | null;
 }
+
+/**
+ * Días que un pago pendiente de validación frena la mora de su cuota. Espejo
+ * de `DIAS_PAGO_PENDIENTE_FRENA_MORA` en el backend: contabilidad valida días
+ * después del cobro y, mientras tanto, no se le cobra mora a quien pagó a
+ * tiempo; con tope, porque hay pendientes olvidados que la frenarían siempre.
+ */
+export const DIAS_PAGO_PENDIENTE_FRENA_MORA = 7;
 
 /**
  * ¿Este pago CUBRE la cuota a la que está colgado?
@@ -58,6 +73,7 @@ export interface PagoParaAtraso {
  * mora / otros / convenio) y las famosas filas-cero se cuelgan de la cuota con
  * `pagado = true` y `monto_aplicado = 0` SIN cubrirla. Sin esa condición la
  * cuota se pintaba como cubierta mientras el backend le seguía cobrando mora.
+ * Un pago PENDIENTE cubre solo mientras tenga ≤7 días (`pendienteVigente`).
  */
 type EstadoVisible = { label: string; tone: "blue" | "amber" | "green" | "red" };
 
@@ -86,13 +102,29 @@ export function estadoVisiblePago(p: Pick<
   };
 }
 
-export function pagoCubreCuota(p: PagoParaAtraso): boolean {
-  return (
-    p.paymentFalse === false &&
-    p.pagado === true &&
-    (p.validationStatus === "validated" || p.validationStatus === "no_required") &&
-    Number(p.monto_aplicado ?? 0) > 0
-  );
+export function pagoCubreCuota(p: PagoParaAtraso, hoy: string = hoyGT()): boolean {
+  if (p.paymentFalse !== false || p.pagado !== true) return false;
+  if (!(Number(p.monto_aplicado ?? 0) > 0)) return false;
+  if (p.validationStatus === "validated" || p.validationStatus === "no_required") return true;
+  return p.validationStatus === "pending" && pendienteVigente(p.fecha_pago, hoy);
+}
+
+/**
+ * ¿El pago pendiente tiene a lo sumo `DIAS_PAGO_PENDIENTE_FRENA_MORA` días?
+ * Mismo corte que el SQL: `hoy − 7 <= fecha_pago::date <= hoy + 1`, en días
+ * de calendario (el tope de arriba impide que una fecha futura alargue el
+ * freno; se admite mañana por las filas guardadas en UTC). `fecha_pago` es un `timestamp` sin zona que el JSON trae como
+ * "…T…Z": su día se lee por los componentes UTC (`diaVencimiento`), igual que
+ * el `::date` de Postgres. Sin fecha no hay cómo acotarlo: no cubre.
+ */
+function pendienteVigente(fechaPago: string | Date | null | undefined, hoy: string): boolean {
+  const dia = diaVencimiento(fechaPago);
+  if (!dia) return false;
+  const desde = new Date(`${hoy}T00:00:00Z`);
+  desde.setUTCDate(desde.getUTCDate() - DIAS_PAGO_PENDIENTE_FRENA_MORA);
+  const hasta = new Date(`${hoy}T00:00:00Z`);
+  hasta.setUTCDate(hasta.getUTCDate() + 1);
+  return dia >= desde.toISOString().slice(0, 10) && dia <= hasta.toISOString().slice(0, 10);
 }
 
 /**
@@ -137,7 +169,7 @@ export function cuotasEnAtraso(
     const p = item?.pago;
     if (!p || p.cuota_id == null) continue;
 
-    if (pagoCubreCuota(p)) cubiertas.add(p.cuota_id);
+    if (pagoCubreCuota(p, hoy)) cubiertas.add(p.cuota_id);
 
     // Estado excluido: la cuota no devenga mora, así que no se marca (pero el
     // pago sí pudo haber entrado a `cubiertas` arriba, que es inocuo).

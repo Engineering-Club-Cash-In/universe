@@ -12,6 +12,12 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
+// La constante se IMPORTA, no se repite: un literal duplicado entre el guard y
+// este router se desincroniza en silencio —el router deja de reconocer el error
+// y lo degrada a un 400 genérico— y no hay nada que lo delate.
+// ⚠️ El hermano de más abajo, `CREDIT_PENDING_RETURN_AUTHORIZATION`, sigue con
+// el literal duplicado; arreglarlo es alcance de otra rebanada.
+import { CREDIT_WITHOUT_INVESTOR_MIRROR_CODE } from "../utils/espejoInversionistasGuard";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
@@ -220,6 +226,24 @@ export const paymentRouter = new Elysia()
           code: error.code,
           message: error.message,
           creditos_bloqueados: error.creditos_bloqueados,
+        };
+      }
+      // Mismo trato que el de arriba, y por la misma razón: la petición está
+      // bien formada y el sistema está sano — lo que no admite la operación es
+      // el estado del dato. Un 400 con "Failed to mark payment as false" haría
+      // que el operador reintentara para siempre una anulación que nunca va a
+      // salir, en vez de ir a cargarle los inversionistas al crédito.
+      //
+      // Lo importante es que este error se levanta ANTES de escribir nada: el
+      // "no se anuló nada" del mensaje es literal.
+      if (error?.code === CREDIT_WITHOUT_INVESTOR_MIRROR_CODE) {
+        set.status = 422;
+        return {
+          success: false,
+          warning: true,
+          code: error.code,
+          message: error.message,
+          credito_id: error.credito_id,
         };
       }
       set.status = 400;

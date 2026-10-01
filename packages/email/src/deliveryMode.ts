@@ -15,13 +15,26 @@ export interface EmailDeliveryMode {
   server: string;
   /** `true` si el correo NO llega a su destinatario original. */
   redirige: boolean;
-  /** La bandeja a la que se desvía todo, o `null` si no hay desvío. */
+  /**
+   * Las bandejas a las que se desvía todo, separadas por coma, o `null` si no
+   * hay desvío. Es texto para mostrar ("se desvió a …"); para mandar, usar
+   * `destinatarios`. Conserva el nombre de cuando era una sola.
+   */
   destinatarioUnico: string | null;
+  /** Las mismas bandejas, una por una. Vacío si no hay desvío. */
+  destinatarios: string[];
 }
 
 /** Default histórico del paquete: sin `SERVER` NO se manda a destinatarios reales. */
 export const DEFAULT_SERVER = "DEV";
-export const DEFAULT_DEV_RECIPIENT = "jalvarado@clubcashin.com";
+/**
+ * Quiénes reciben las pruebas si nadie dice otra cosa. Son los que prueban los
+ * flujos que mandan correo: con una sola bandeja, el otro no veía lo que salía.
+ */
+export const DEFAULT_DEV_RECIPIENTS = [
+  "jalvarado@clubcashin.com",
+  "daniel.r@clubcashin.com",
+];
 
 /**
  * Versión pura: recibe el entorno en vez de leerlo. Es la que se testea.
@@ -31,13 +44,21 @@ export const resolveEmailDeliveryMode = (
 ): EmailDeliveryMode => {
   const server = (environment.SERVER ?? DEFAULT_SERVER).toUpperCase();
   const redirige = server !== "PROD";
-
+  // EMAIL_DEV_RECIPIENT acepta varias, separadas por coma.
+  const deLaEnv = (environment.EMAIL_DEV_RECIPIENT ?? "")
+    .split(",")
+    .map((correo) => correo.trim())
+    .filter(Boolean);
+  const destinatarios = redirige
+    ? deLaEnv.length > 0
+      ? deLaEnv
+      : DEFAULT_DEV_RECIPIENTS
+    : [];
   return {
     server,
     redirige,
-    destinatarioUnico: redirige
-      ? environment.EMAIL_DEV_RECIPIENT ?? DEFAULT_DEV_RECIPIENT
-      : null,
+    destinatarioUnico: redirige ? destinatarios.join(", ") : null,
+    destinatarios,
   };
 };
 

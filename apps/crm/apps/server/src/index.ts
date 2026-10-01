@@ -68,7 +68,10 @@ import {
 	correrPurgaGpsIntegracionLogs,
 	correrSaludGpsIntegracion,
 } from "./jobs/gps-integracion-salud";
-import { correrCalculoUbicacionesClave } from "./jobs/gps-ubicaciones-clave";
+import {
+	correrCalculoUbicacionesClave,
+	correrPurgaUbicacionesClave,
+} from "./jobs/gps-ubicaciones-clave";
 import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
 import {
@@ -2216,6 +2219,13 @@ function scheduleAtUbicacionesClaveGT() {
 if (JOBS_PROGRAMADOS.ubicacionesClaveGps) {
 	scheduleAtUbicacionesClaveGT();
 }
+// Retención de ubicaciones y estancias SÍ fuera de la bandera, igual que la
+// purga de gps_eventos: el botón «Calcular ahora» de la ficha escribe esas
+// tablas aunque el cron nocturno esté apagado, y esos datos (dónde vive o
+// trabaja el cliente) no pueden quedarse sin purga. Corre también al arrancar
+// por si el proceso se reinicia antes de 24 h.
+void correrPurgaUbicacionesClave();
+setInterval(correrPurgaUbicacionesClave, 24 * 60 * 60 * 1000);
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
 // del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,

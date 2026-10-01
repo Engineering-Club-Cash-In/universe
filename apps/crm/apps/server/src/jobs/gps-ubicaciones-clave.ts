@@ -418,13 +418,24 @@ export async function calcularUbicacionesUnidadBajoDemanda(
 		: resultado;
 }
 
-export async function ejecutarCalculoUbicacionesClave(): Promise<{
-	unidadesProcesadas: number;
-	unidadesConError: number;
-	ubicacionesCalculadas: number;
-	unidadesPendientesBackfill: number;
-}> {
-	const unidades = await unidadesConCasoActivo();
+type UnidadActiva = Awaited<ReturnType<typeof unidadesConCasoActivo>>[number];
+
+/**
+ * Retención de lo que guarda el cálculo de ubicaciones clave: ubicaciones,
+ * estancias, cursores y la copia en el historial de consultas. Solo se conserva
+ * lo de unidades con caso de cobro activo y, de las estancias, los últimos 60
+ * días. Son datos de dónde vive/trabaja el cliente, así que no se retienen de
+ * más.
+ *
+ * Va aparte del cálculo y corre SIEMPRE (`correrPurgaUbicacionesClave`), no
+ * detrás de GPS_UBICACIONES_ENABLED: el botón «Calcular ahora» escribe estas
+ * tablas aunque el cron nocturno esté apagado, y sin purga esos datos se
+ * quedarían para siempre (incluso con el caso cerrado).
+ */
+export async function purgarDatosUbicacionesVencidos(
+	unidades: UnidadActiva[],
+	ventanaDesde: Date,
+): Promise<void> {
 	if (unidades.length === 0) {
 		// Sin unidades con caso activo hoy (casos cerrados o GPS desvinculado):
 		// se purga todo lo que se retenía.
@@ -432,20 +443,11 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 		await db.delete(gpsEstancias);
 		await db.delete(gpsEstanciasCursor);
 		await purgarSnapshotsUbicacionesClave();
-		return {
-			unidadesProcesadas: 0,
-			unidadesConError: 0,
-			ubicacionesCalculadas: 0,
-			unidadesPendientesBackfill: 0,
-		};
+		return;
 	}
 
-	const ahora = new Date();
-	const ventanaDesde = new Date(ahora.getTime() - VENTANA_DIAS * MS_POR_DIA);
-
-	// Purgar snapshots de pares (unidad, SIFCO) que ya no están activos
-	// (casos cerrados o GPS desvinculado) para no retener ubicaciones
-	// sensibles de más.
+	// Purgar ubicaciones de pares (unidad, SIFCO) que ya no están activos
+	// (casos cerrados o GPS desvinculado).
 	const paresActivos = unidades.map((u) =>
 		and(
 			eq(gpsUbicacionesClave.wialonUnitId, u.wialonUnitId),
@@ -480,6 +482,43 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	await db
 		.delete(gpsEstanciasCursor)
 		.where(notInArray(gpsEstanciasCursor.wialonUnitId, idsUnidades));
+}
+
+/**
+ * Purga diaria independiente de la bandera del cálculo (ver
+ * `purgarDatosUbicacionesVencidos`). Nunca lanza.
+ */
+export async function correrPurgaUbicacionesClave(): Promise<void> {
+	try {
+		const ventanaDesde = new Date(Date.now() - VENTANA_DIAS * MS_POR_DIA);
+		await purgarDatosUbicacionesVencidos(
+			await unidadesConCasoActivo(),
+			ventanaDesde,
+		);
+	} catch (error) {
+		console.error(`${LOG_PREFIX} Error en la purga de ubicaciones:`, error);
+	}
+}
+
+export async function ejecutarCalculoUbicacionesClave(): Promise<{
+	unidadesProcesadas: number;
+	unidadesConError: number;
+	ubicacionesCalculadas: number;
+	unidadesPendientesBackfill: number;
+}> {
+	const unidades = await unidadesConCasoActivo();
+	const ahora = new Date();
+	const ventanaDesde = new Date(ahora.getTime() - VENTANA_DIAS * MS_POR_DIA);
+
+	await purgarDatosUbicacionesVencidos(unidades, ventanaDesde);
+	if (unidades.length === 0) {
+		return {
+			unidadesProcesadas: 0,
+			unidadesConError: 0,
+			ubicacionesCalculadas: 0,
+			unidadesPendientesBackfill: 0,
+		};
+	}
 
 	// SIFCOs por unidad: una unidad compartida por dos créditos se baja una
 	// sola vez y genera ubicaciones para cada SIFCO.

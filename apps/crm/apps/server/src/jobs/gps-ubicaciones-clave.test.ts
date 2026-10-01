@@ -13,6 +13,7 @@ import * as wialonClientModule from "../services/wialon/wialon-client";
 import * as gpsEventosPoll from "./gps-eventos-poll";
 import {
 	calcularUbicacionesUnidadBajoDemanda,
+	correrPurgaUbicacionesClave,
 	ejecutarCalculoUbicacionesClave,
 } from "./gps-ubicaciones-clave";
 
@@ -649,5 +650,64 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 		expect(segundo).toEqual({ estado: "en_proceso" });
 		expect((await primero).estado).toBe("calculado");
 		expect(historial).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("correrPurgaUbicacionesClave (retención, independiente de la bandera del cálculo)", () => {
+	let borradas: unknown[] = [];
+	let snapshotsPurgados: unknown[] = [];
+
+	beforeEach(() => {
+		borradas = [];
+		snapshotsPurgados = [];
+		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
+			borradas.push(tabla);
+			return Object.assign(Promise.resolve(), { where: async () => {} });
+		}) as any);
+		spyOn(db, "update").mockReturnValue({
+			set: (valores: unknown) => ({
+				where: async () => {
+					snapshotsPurgados.push(valores);
+				},
+			}),
+		} as any);
+	});
+
+	afterEach(() => {
+		mock.restore();
+	});
+
+	it("purga sin llamar a Wialon ni a cartera-back (no depende del cálculo)", async () => {
+		const getWialonClient = spyOn(wialonClientModule, "getWialonClient");
+		const sifcosEnB4 = spyOn(gpsEventosPoll, "sifcosEnB4");
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+
+		await correrPurgaUbicacionesClave();
+
+		// ubicaciones inactivas + estancias + cursores.
+		expect(borradas).toHaveLength(3);
+		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
+		expect(getWialonClient).not.toHaveBeenCalled();
+		expect(sifcosEnB4).not.toHaveBeenCalled();
+	});
+
+	it("sin casos activos purga todo lo retenido, incluido el snapshot del historial", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([]);
+
+		await correrPurgaUbicacionesClave();
+
+		expect(borradas).toHaveLength(3);
+		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
+	});
+
+	it("un fallo de BD no lanza (no tumba el proceso al arrancar)", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockRejectedValue(
+			new Error("db caída"),
+		);
+
+		await expect(correrPurgaUbicacionesClave()).resolves.toBeUndefined();
+		expect(borradas).toHaveLength(0);
 	});
 });

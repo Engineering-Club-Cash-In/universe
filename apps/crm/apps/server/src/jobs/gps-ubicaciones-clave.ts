@@ -501,8 +501,9 @@ type UnidadActiva = Awaited<ReturnType<typeof unidadesConCasoActivo>>[number];
 /**
  * Retención de lo que guarda el cálculo de ubicaciones clave: ubicaciones,
  * estancias, cursores y la copia en el historial de consultas. Solo se conserva
- * lo de unidades con caso de cobro activo y, de las estancias, los últimos 60
- * días (las que cruzan el borde se recortan a él). Son datos de dónde vive/trabaja el cliente, así que no se retienen de
+ * lo de unidades con caso de cobro activo y, de lo calculado, los últimos 60
+ * días: estancias (las que cruzan el borde se recortan a él), ubicaciones
+ * (`calculado_at`) y snapshots del historial (`created_at` de la consulta). Son datos de dónde vive/trabaja el cliente, así que no se retienen de
  * más.
  *
  * Va aparte del cálculo y corre SIEMPRE (`correrPurgaUbicacionesClave`), no
@@ -534,15 +535,29 @@ export async function purgarDatosUbicacionesVencidos(
 	);
 	const condicionActivos =
 		paresActivos.length > 1 ? or(...paresActivos)! : paresActivos[0]!;
-	await db.delete(gpsUbicacionesClave).where(not(condicionActivos));
+	// También las que se calcularon hace más de la ventana: un caso activo de
+	// larga vida con el cron nocturno apagado solo se recalcula si alguien usa
+	// «Calcular ahora», y sin este corte esas coordenadas (hechas de los 60 días
+	// anteriores a su cálculo) se quedarían guardadas y visibles indefinidamente.
+	// Con el cron prendido se recalculan cada noche y nunca llegan a vencer.
+	await db
+		.delete(gpsUbicacionesClave)
+		.where(
+			or(
+				not(condicionActivos),
+				lt(gpsUbicacionesClave.calculadoAt, ventanaDesde),
+			),
+		);
 	// Lo mismo con la copia que guarda el historial de consultas: se limpia el
-	// snapshot de los créditos que ya no están activos (la auditoría queda).
+	// snapshot de los créditos que ya no están activos y el de las consultas de
+	// hace más de la ventana (la fila de auditoría —motivo, usuario, fecha— queda).
 	await purgarSnapshotsUbicacionesClave(
 		or(
 			isNull(gpsConsultaLogs.numeroCreditoSifco),
 			notInArray(gpsConsultaLogs.numeroCreditoSifco, [
 				...new Set(unidades.map((u) => u.numeroCreditoSifco)),
 			]),
+			lt(gpsConsultaLogs.createdAt, ventanaDesde),
 		),
 	);
 

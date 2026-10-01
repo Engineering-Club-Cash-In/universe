@@ -7,9 +7,10 @@ import {
 	mock,
 	spyOn,
 } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
-import { gpsEstancias } from "../db/schema/gps-eventos";
+import { gpsEstancias, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import * as gpsEventosService from "../services/wialon/gps-eventos";
 import * as wialonClientModule from "../services/wialon/wialon-client";
 import * as gpsEventosPoll from "./gps-eventos-poll";
@@ -866,20 +867,32 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 	let borradas: unknown[] = [];
 	let snapshotsPurgados: unknown[] = [];
 	let estanciasRecortadas: unknown[] = [];
+	// Condiciones del DELETE de ubicaciones y del UPDATE de snapshots del historial.
+	let condicionUbicaciones: unknown = null;
+	let condicionSnapshots: unknown = null;
+	const sqlDe = (cond: unknown) => new PgDialect().sqlToQuery(cond as any).sql;
 
 	beforeEach(() => {
 		borradas = [];
 		snapshotsPurgados = [];
 		estanciasRecortadas = [];
+		condicionUbicaciones = null;
+		condicionSnapshots = null;
 		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
 			borradas.push(tabla);
-			return Object.assign(Promise.resolve(), { where: async () => {} });
+			return Object.assign(Promise.resolve(), {
+				where: async (cond: unknown) => {
+					if (tabla === gpsUbicacionesClave) condicionUbicaciones = cond;
+				},
+			});
 		}) as any);
 		spyOn(db, "update").mockImplementation(((tabla: unknown) => ({
 			set: (valores: unknown) => ({
-				where: async () => {
-					if (tabla === gpsConsultaLogs) snapshotsPurgados.push(valores);
-					else if (tabla === gpsEstancias) estanciasRecortadas.push(valores);
+				where: async (cond: unknown) => {
+					if (tabla === gpsConsultaLogs) {
+						snapshotsPurgados.push(valores);
+						condicionSnapshots = cond;
+					} else if (tabla === gpsEstancias) estanciasRecortadas.push(valores);
 				},
 			}),
 		})) as any);
@@ -919,6 +932,23 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		const { desde } = estanciasRecortadas[0] as { desde: Date };
 		const dias = (antes - desde.getTime()) / DIA_MS;
 		expect(Math.round(dias)).toBe(60);
+	});
+
+	// Con el cron apagado, un caso activo de larga vida solo se recalcula si
+	// alguien usa «Calcular ahora»: la retención no puede depender de que el par
+	// siga activo, también tiene que vencer por edad.
+	it("las ubicaciones y los snapshots del historial vencen por edad, no solo por caso inactivo", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+
+		await correrPurgaUbicacionesClave();
+
+		expect(sqlDe(condicionUbicaciones)).toContain('"calculado_at" <');
+		expect(sqlDe(condicionSnapshots)).toContain('"created_at" <');
+		// Y siguen vencidos los de pares que ya no están activos.
+		expect(sqlDe(condicionUbicaciones)).toContain("not");
+		expect(sqlDe(condicionSnapshots)).toContain("not in");
 	});
 
 	it("sin casos activos purga todo lo retenido, incluido el snapshot del historial", async () => {

@@ -39,6 +39,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 8 | [**Plan** · Convenios y `EN_RECUPERACION`](./08-plan-convenios-y-recuperacion.md) | Lo acordado con el PM el 10-sep: el convenio congela el bucket, el estado nuevo actúa como piso en B4, y las 4 fases pendientes |
 | 9 | [Integración GPS / Wialon (La Legión)](./09-integracion-gps-wialon.md) | Rastreo satelital en vivo, telemetría (odómetro, ignición), generación y revocación de links Locator para recuperación de unidades |
 | 10 | [Visitas a residencia y trabajo](./10-visitas.md) | CB-037/038: programar y registrar visitas de B2 a B4, con fotos desde el celular; el resultado abre la promesa o la entrega voluntaria |
+| 11 | [Investigación en redes sociales](./11-investigacion-redes-sociales.md) | CB-039: registrar fuente, hallazgos y capturas de lo que se encuentra del cliente en redes; solo B2 y B3 (configurable) |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:
@@ -139,6 +140,7 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Convenios que no bajan de bucket | 🔵 Acordado, sin implementar. Hoy el job hace lo CONTRARIO (un convenio nuevo cae a B0). [Doc 8, fase 2](./08-plan-convenios-y-recuperacion.md) |
 | Referencias y contactos de emergencia (CB-036) | ✅ Implementado — seis fuentes juntas (cobros, ventas, cónyuge, emergencia, cofirmantes), bitácora de gestiones, teléfonos agregados e información nueva del cliente. Migración CRM `0060` pendiente en prod. Ver [Ficha 360 §4.c](./06-ficha-360.md#4c-referencias-y-contactos-de-emergencia-cb-036) |
 | Visitas a residencia y trabajo (CB-037/038) | ✅ Implementado — botón propio de B2 a B4, programar o registrar, fotos desde el celular, avisos al responsable; el resultado abre la promesa o la entrega voluntaria de CB-042. Datos laborales de la solicitud en la tarjeta de contacto. Migración CRM `0069` pendiente en prod. Ver [doc 10](./10-visitas.md) |
+| Investigación en redes sociales (CB-039) | ✅ Implementado en código — tarjeta en la pestaña Referencias, bitácora con capturas, solo B2 y B3 (lista configurable en un solo lugar). Migración CRM `0073` pendiente. Falta validar privacidad con Legal. Ver [doc 11](./11-investigacion-redes-sociales.md) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---

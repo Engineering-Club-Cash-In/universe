@@ -120,6 +120,9 @@ export const UPLOAD_RESOURCE_TYPES = [
 	// CB-041: confirmación de LEGION de que la unidad ya se apagó. Igual que
 	// las visitas, el id es el del CASO: el archivo se sube antes de ejecutar.
 	"cobros_inmovilizacion_evidencia",
+	// CB-039: capturas de una investigación en redes sociales. Igual que las
+	// visitas, el id es el del CASO: se suben antes de guardar el registro.
+	"cobros_investigacion_evidencia",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -162,6 +165,8 @@ export function buildUploadPrefix(
 			return `cobros/visitas/${resourceId}`;
 		case "cobros_inmovilizacion_evidencia":
 			return `cobros/inmovilizaciones/${resourceId}`;
+		case "cobros_investigacion_evidencia":
+			return `cobros/investigaciones/${resourceId}`;
 	}
 }
 

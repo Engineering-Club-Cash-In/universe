@@ -14,7 +14,8 @@ type UploadResourceType =
 	| "bank_statement"
 	| "investment_document"
 	| "cobros_visita_evidencia"
-	| "cobros_inmovilizacion_evidencia";
+	| "cobros_inmovilizacion_evidencia"
+	| "cobros_investigacion_evidencia";
 
 interface UploadTarget {
 	resourceType: UploadResourceType;

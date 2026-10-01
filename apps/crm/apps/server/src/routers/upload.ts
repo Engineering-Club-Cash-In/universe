@@ -8,6 +8,7 @@ import { notifications } from "../db/schema/notifications";
 import { vehicles } from "../db/schema/vehicles";
 import { assertAccesoCasoCobro } from "../lib/acceso-caso-cobro";
 import { MIME_EVIDENCIA_INMOVILIZACION } from "../lib/inmovilizacion-unidad";
+import { MIME_EVIDENCIA_INVESTIGACION } from "../lib/investigaciones-redes-cobros";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -250,6 +251,18 @@ async function assertCanUploadToResource(params: {
 			await assertAccesoCasoCobro(resourceId, userId, userRole);
 			return;
 		}
+
+		// CB-039: capturas de la investigación en redes sociales. Mismo gate que
+		// las fotos de visita: el caso tiene que ser uno que el usuario trabaja.
+		case "cobros_investigacion_evidencia": {
+			if (!PERMISSIONS.canAccessCobros(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir evidencia de investigación",
+				});
+			}
+			await assertAccesoCasoCobro(resourceId, userId, userRole);
+			return;
+		}
 	}
 }
 
@@ -324,6 +337,18 @@ export const uploadRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "La confirmación de LEGION va en JPG, PNG, WebP o PDF.",
+				});
+			}
+
+			if (
+				input.resourceType === "cobros_investigacion_evidencia" &&
+				!(MIME_EVIDENCIA_INVESTIGACION as readonly string[]).includes(
+					resolvedMime.mimeType,
+				)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"La evidencia de la investigación va en JPG, PNG, WebP o PDF.",
 				});
 			}
 

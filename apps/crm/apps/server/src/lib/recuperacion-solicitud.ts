@@ -102,7 +102,8 @@ type DefinicionPaso = {
  *
  * Recortado el 2026-09-30: sin "Llamada del supervisor" (no depende del
  * asesor, no la puede justificar) ni "Búsqueda en redes sociales" (CB-039 no
- * está hecho: no hay dónde registrarla).
+ * estaba hecho). Ya hay dónde registrarla (investigaciones_redes_cobros): falta
+ * decidir si el paso vuelve al checklist.
  */
 export const PASOS_CHECKLIST_RECUPERACION = [
 	{

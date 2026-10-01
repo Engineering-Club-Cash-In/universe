@@ -564,6 +564,18 @@ function aNumero(valor: string | null | undefined): number | null {
 	return Number.isFinite(numero) ? numero : null;
 }
 
+// El correo se arma antes del bloqueo con los datos de ese momento. Si el caso
+// cambió de estado mientras tanto (por ejemplo, se cerró y el cierre eligió su
+// cotización), esos datos pueden ser viejos: se rechaza y se reintenta.
+function exigirMismoEstado(bajoBloqueo: string | undefined, alEmpezar: string) {
+	if (bajoBloqueo !== undefined && bajoBloqueo !== alEmpezar) {
+		throw new ORPCError("CONFLICT", {
+			message:
+				"El caso cambió mientras se procesaba la factura. Vuelve a intentarlo.",
+		});
+	}
+}
+
 function mimeDeFactura(file: { name: string; type?: string }) {
 	const resuelto = validateResolvedMimeType(file);
 	const mime = resuelto.mimeType;
@@ -794,6 +806,7 @@ export const trackerRouter = {
 						.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
 						.where(eq(opportunities.id, fila.id))
 						.for("update", { of: opportunities });
+					exigirMismoEstado(vigente?.status, fila.status);
 					const [asignado] = await tx
 						.select({ sellerId: opportunityAgencySellers.sellerId })
 						.from(opportunityAgencySellers)
@@ -888,10 +901,14 @@ export const trackerRouter = {
 				// Oportunidad FOR UPDATE y vendedor releído bajo el bloqueo: si lo
 				// reasignaron, el vendedor anterior ya no puede reenviar.
 				const [vigente] = await tx
-					.select({ companyId: opportunities.companyId })
+					.select({
+						companyId: opportunities.companyId,
+						status: opportunities.status,
+					})
 					.from(opportunities)
 					.where(eq(opportunities.id, fila.id))
 					.for("update");
+				exigirMismoEstado(vigente?.status, fila.status);
 				const [asignado] = await tx
 					.select({ sellerId: opportunityAgencySellers.sellerId })
 					.from(opportunityAgencySellers)

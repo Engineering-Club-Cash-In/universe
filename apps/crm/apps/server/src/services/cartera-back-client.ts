@@ -26,6 +26,7 @@ import type {
 	CreditActionInput,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	ProyeccionMoraMesResponse,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -1547,6 +1548,31 @@ export class CarteraBackClient {
 		);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
+	}
+
+	/**
+	 * Proyección de mora del mes en curso, día por día (días pasados reales,
+	 * de hoy en adelante proyectados). Sin caché, a diferencia de `getCredito`:
+	 * un pago registrado hace un minuto tiene que verse en la tarjeta.
+	 */
+	async getProyeccionMora(
+		numeroSifco: string,
+	): Promise<ProyeccionMoraMesResponse> {
+		return this.request<ProyeccionMoraMesResponse>(
+			`/credito/mora/proyeccion?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+			{ method: "GET" },
+			false,
+			undefined,
+			undefined,
+			// DENTRO del breaker (como `consultarMoraPorDpi`): un 200 sin días es
+			// el endpoint enfermo. Validado después de `request()`, el breaker ya
+			// lo había contado como éxito y el GET no se reintentaba.
+			(crudo) => {
+				if (!Array.isArray((crudo as { dias?: unknown } | null)?.dias)) {
+					throw new Error(`Proyección de mora inválida para ${numeroSifco}`);
+				}
+			},
+		);
 	}
 
 	async getAllCreditos(

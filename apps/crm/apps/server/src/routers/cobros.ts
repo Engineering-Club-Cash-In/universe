@@ -1891,6 +1891,21 @@ export const cobrosRouter = {
 			return contrato[0] || null;
 		}),
 
+	// Proyección de mora del mes en curso de un crédito (tarjeta del caso de
+	// cobros). Mismo acceso que el detalle de abajo: cualquiera que pueda ver el
+	// caso puede ver cuánto va a deber. El número llega tal cual lo devuelve el
+	// detalle (`numeroCreditoSifco`), así que acá no hay UUID que resolver.
+	getProyeccionMoraCarteraBack: cobrosProcedure
+		.input(z.object({ numeroSifco: z.string().min(1) }))
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con Cartera-Back no está habilitada",
+				});
+			}
+			return carteraBackClient.getProyeccionMora(input.numeroSifco);
+		}),
+
 	// Obtener detalles de un crédito desde Cartera-Back
 	// Usa el endpoint directo /credito y combina con datos del CRM (vehículo, caso de cobros)
 	getDetallesCreditoCarteraBack: cobrosProcedure

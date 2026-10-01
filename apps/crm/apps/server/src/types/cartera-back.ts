@@ -981,3 +981,35 @@ export class CarteraBackValidationError extends CarteraBackError {
 		this.name = "CarteraBackValidationError";
 	}
 }
+
+/**
+ * Un día de la proyección de mora del mes (GET /credito/mora/proyeccion).
+ *
+ * `mora` es la mora con la que el crédito termina ese día (lo que el cron
+ * escribió a las 00:05 más lo que cambió durante el día): en los días `real`
+ * es lo que el sistema anotó; en `hoy` y `proyeccion`, lo que el cron escribe
+ * ese día si no entra ningún pago más.
+ */
+export interface ProyeccionMoraDia {
+	fecha: string; // YYYY-MM-DD (calendario de Guatemala)
+	mora: string; // decimal viene como string
+	/** Cambio contra el día anterior; negativo si ese día pagó. */
+	incremento: string;
+	/** `mora` menos la mora con la que arrancó el mes. */
+	acumuladoMes: string;
+	/** Cuotas que al día siguiente deben más. `null` en días ya pasados. */
+	cuotasSumando: number | null;
+	tipo: "real" | "hoy" | "proyeccion";
+}
+
+export interface ProyeccionMoraMesResponse {
+	mes: string; // YYYY-MM, siempre el mes en curso
+	hoy: string;
+	/** Lo que suma UNA cuota por día (capital × 1.12% ÷ 30). */
+	cargoDiario: string;
+	moraInicioMes: string;
+	/** Lo que el crédito debe de mora en este momento. */
+	moraHoy: string;
+	moraFinMes: string;
+	dias: ProyeccionMoraDia[];
+}

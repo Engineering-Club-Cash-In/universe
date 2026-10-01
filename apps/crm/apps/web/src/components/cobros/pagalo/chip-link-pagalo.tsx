@@ -123,8 +123,8 @@ function DialogoAccionLink({
 									<AlertDescription>
 										El grupo queda en revisión (no se cancela) porque ya no hay
 										certeza de que pueda completarse tal como está. El link real
-										en Págalo sigue cobrable hasta cancelarlo a mano en su
-										panel.
+										en Págalo sigue cobrable hasta que se cancele manualmente en
+										su panel.
 									</AlertDescription>
 								</Alert>
 							)}
@@ -139,8 +139,8 @@ function DialogoAccionLink({
 											El link anterior sigue existiendo en Págalo y puede seguir
 											siendo cobrable — especialmente si quedó en ERROR, donde
 											Págalo pudo haber procesado el pedido aunque la respuesta
-											fallara. Cancelalo a mano en su panel si no querés que el
-											cliente lo use.
+											fallara. Cancélelo manualmente en su panel si no desea que
+											el cliente lo use.
 										</AlertDescription>
 									</Alert>
 								</>
@@ -390,8 +390,7 @@ export function ChipLinkPagalo({
 								// ni el navegador lo aseguran), así que un tooltip ahí podía
 								// nunca mostrarse (hallazgo de code review).
 								<div className="max-w-64 whitespace-normal break-words px-2 py-1.5 text-muted-foreground text-xs">
-									Aún es solo en nuestra DB — en espera de integrar cancelación
-									real con Págalo.
+									No disponible hasta integrar la cancelación con Págalo.
 								</div>
 							)}
 						</>
@@ -513,7 +512,7 @@ export function AccionesLinkPagalo({
 					title={
 						INVALIDAR_HABILITADO
 							? undefined
-							: "Aún es solo en nuestra DB — en espera de integrar cancelación real con Págalo"
+							: "No disponible hasta integrar la cancelación con Págalo."
 					}
 					onClick={() => {
 						if (!INVALIDAR_HABILITADO) return;

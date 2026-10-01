@@ -157,7 +157,7 @@ function FormularioRecuperacion({
 	/** La forzosa se solicita, no se traslada (CB-043). */
 	const esSolicitud = !voluntaria;
 
-	// CB-043: el checklist de la forzosa, con la evidencia que el CRM tiene hoy.
+	// CB-043: el checklist de la solicitud, con la evidencia que el CRM tiene hoy.
 	const checklist = useQuery({
 		...orpc.getChecklistRecuperacion.queryOptions({ input: { casoCobroId } }),
 		enabled: !voluntaria,
@@ -181,7 +181,10 @@ function FormularioRecuperacion({
 			},
 		});
 	const faltantesChecklist: Record<string, string | null> = Object.fromEntries(
-		pasos.map((p) => [p.paso, faltanteDePaso(p, respuestasActuales[p.paso])]),
+		pasos.map((p) => [
+			p.paso,
+			faltanteDePaso(p, respuestasActuales[p.paso], p.opciones),
+		]),
 	);
 
 	const [motivos, setMotivos] = useState<string[]>([]);
@@ -244,15 +247,15 @@ function FormularioRecuperacion({
 	// Lo que falta, con las reglas del servidor. El primer problema basta: el
 	// asesor lo resuelve y aparece el siguiente.
 	const faltante = (() => {
-		if (motivos.length === 0) return "Elegí al menos un motivo.";
+		if (motivos.length === 0) return "Seleccione al menos un motivo.";
 		if (motivos.includes("otro") && !motivoDetalle.trim())
-			return "Marcaste «Otro»: contá en el detalle cuál es el motivo.";
+			return "Seleccionó «Otro»: indique el motivo en el detalle.";
 		if (!voluntaria) {
 			if (motivoDetalle.trim().length < MIN_JUSTIFICACION_FORZOSA)
-				return `Escribí la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres).`;
+				return `Escriba la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres).`;
 			if (checklist.isPending) return "Cargando el checklist…";
 			if (checklist.isError)
-				return "No se pudo cargar el checklist. Cerrá y volvé a intentar.";
+				return "No se pudo cargar el checklist. Cierre el formulario e intente de nuevo.";
 			const pasoFaltante = Object.values(faltantesChecklist).find(Boolean);
 			if (pasoFaltante) return pasoFaltante;
 		}
@@ -260,10 +263,10 @@ function FormularioRecuperacion({
 		if (voluntaria && lugarEntrega.trim().length < 3)
 			return "Falta el lugar de la entrega.";
 		if (kilometraje.trim() && !/^\d+$/.test(kilometraje.trim()))
-			return "El kilometraje va en números enteros.";
+			return "Ingrese el kilometraje en números enteros.";
 		const parsed = detalleRecuperacionSchema.safeParse(detalle);
 		if (!parsed.success)
-			return parsed.error.issues[0]?.message ?? "Revisá el formulario.";
+			return parsed.error.issues[0]?.message ?? "Revise el formulario.";
 		return erroresDetalleRecuperacion(tipo, parsed.data);
 	})();
 
@@ -280,7 +283,7 @@ function FormularioRecuperacion({
 			if (r.estado !== "vinculado") {
 				setAvisoGps(
 					r.estado === "sin_vinculo"
-						? "Este vehículo no tiene GPS vinculado. Escribí la ubicación a mano."
+						? "Este vehículo no tiene GPS vinculado. Ingrese la ubicación manualmente."
 						: `No se pudo consultar el GPS${r.error?.message ? `: ${r.error.message}` : "."}`,
 				);
 				return;
@@ -288,7 +291,7 @@ function FormularioRecuperacion({
 			const t = r.telemetria;
 			if (t.latitude == null || t.longitude == null) {
 				setAvisoGps(
-					"El GPS respondió, pero sin posición. Escribí la ubicación a mano.",
+					"El GPS respondió sin posición. Ingrese la ubicación manualmente.",
 				);
 				return;
 			}
@@ -308,7 +311,7 @@ function FormularioRecuperacion({
 			// de reportar, y eso también es información para B4.
 			setAvisoGps(
 				resolveEstadoSenal(senalAt) === "vieja"
-					? `Ojo: la última posición es de ${formatUltimaSenal(senalAt).toLowerCase()}. El GPS no está reportando.`
+					? `Atención: la última posición es de ${formatUltimaSenal(senalAt).toLowerCase()}. El GPS no está reportando.`
 					: null,
 			);
 		},
@@ -347,7 +350,7 @@ function FormularioRecuperacion({
 		onSuccess: (r) => {
 			if (r === null) {
 				toast.success(
-					"Entrega voluntaria registrada. El asesor de B4 ya tiene el aviso.",
+					"Entrega voluntaria registrada. Se notificó al asesor de B4.",
 				);
 			} else if (r.modo === "solicitud") {
 				toast.success(
@@ -356,8 +359,8 @@ function FormularioRecuperacion({
 			} else {
 				toast.success(
 					r.asesor_sin_cambio
-						? `Crédito trasladado a B${r.bucket_nuevo}. El asesor no cambia: ya cubre ese bucket.`
-						: `Crédito trasladado a B${r.bucket_nuevo} y reasignado. Ya se le avisó al asesor.`,
+						? `Crédito trasladado a B${r.bucket_nuevo}. El asesor no cambia porque ya tiene asignado ese bucket.`
+						: `Crédito trasladado a B${r.bucket_nuevo} y reasignado. Se notificó al asesor.`,
 				);
 			}
 			queryClient.invalidateQueries({
@@ -387,46 +390,47 @@ function FormularioRecuperacion({
 			<DialogHeader>
 				<DialogTitle>
 					{esSolicitud
-						? "Solicitar recuperación forzosa"
+						? "Solicitar recuperación del vehículo"
 						: TIPO_RECUPERACION_LABEL[tipo]}
 				</DialogTitle>
 				<DialogDescription asChild>
 					<div className="space-y-2">
 						{esSolicitud ? (
 							<p>
-								La recuperación la aprueba{" "}
-								<strong>otro supervisor o admin</strong>. Le llega esta
-								solicitud con tu justificación y el checklist de lo que ya se
-								hizo; cuando la apruebe, el crédito pasa a{" "}
+								La recuperación debe aprobarla{" "}
+								<strong>otro supervisor o administrador</strong>. Recibirá esta
+								solicitud con su justificación y el checklist de las gestiones
+								realizadas; al aprobarla, el crédito pasa a{" "}
 								<strong>B4 · Última Instancia / Pre Jurídico</strong> en estado{" "}
-								<strong>En recuperación</strong>. Hasta entonces sigue donde
-								está.
+								<strong>En recuperación</strong>. Hasta entonces permanece en su
+								bucket actual.
 							</p>
 						) : operacion === "trasladar" ? (
 							<p>
 								El crédito pasa a{" "}
 								<strong>B4 · Última Instancia / Pre Jurídico</strong> en estado{" "}
 								<strong>En recuperación</strong> y queda con el asesor de ese
-								bucket. Lo que llenes acá es lo que va a ver para{" "}
-								{voluntaria ? "recibir la unidad" : "ir a buscar la unidad"}.
+								bucket. Ese asesor verá la información de este formulario para{" "}
+								{voluntaria ? "recibir la unidad" : "recuperar la unidad"}.
 							</p>
 						) : (
 							<p>
-								El crédito ya está en <strong>B4</strong>: se guarda la entrega
-								sin moverlo, y le llega el aviso al asesor que lo lleva.
+								El crédito ya está en <strong>B4</strong>: se registra la
+								entrega sin cambiarlo de bucket y se notifica al asesor
+								responsable.
 							</p>
 						)}
 						{operacion === "trasladar" && (
 							<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
 								El estado se levanta <strong>solo</strong> si el cliente paga
 								todo lo que debe —cuotas vencidas y mora— y contabilidad valida
-								ese pago. Un convenio no lo levanta.
+								ese pago. Un convenio de pago no lo levanta.
 							</p>
 						)}
 						{desdeVisita && (
 							<p className="rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-900 text-xs dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
-								Viene de la visita: el lugar y la fecha ya están puestos.
-								Revisalos y completá el resto.
+								Registro desde la visita: el lugar y la fecha ya están cargados.
+								Revíselos y complete el resto.
 							</p>
 						)}
 					</div>
@@ -437,7 +441,7 @@ function FormularioRecuperacion({
 				{/* 1 · Por qué */}
 				<section className="space-y-2">
 					<Label>
-						{voluntaria ? "¿Por qué la entrega?" : "¿Por qué se recupera?"}{" "}
+						{voluntaria ? "Motivo de la entrega" : "Motivo de la recuperación"}{" "}
 						<span className="text-red-600">*</span>
 					</Label>
 					<div className="grid gap-2 sm:grid-cols-2">
@@ -470,8 +474,8 @@ function FormularioRecuperacion({
 						onChange={(e) => setMotivoDetalle(e.target.value)}
 						placeholder={
 							voluntaria
-								? "Ej: Perdió el trabajo, prefiere entregar el carro antes de seguir atrasándose"
-								: "Por qué ya no hay otra salida. Ej: Tercera promesa rota, no contesta desde el 10/09 y en la visita la familia dijo que se fue del país"
+								? "Ej.: Perdió el trabajo y prefiere entregar el vehículo antes de seguir atrasándose"
+								: "Explique por qué no hay otra alternativa. Ej.: Tercera promesa incumplida, no contesta desde el 10/09 y en la visita la familia indicó que salió del país"
 						}
 						rows={voluntaria ? 2 : 3}
 					/>
@@ -482,14 +486,14 @@ function FormularioRecuperacion({
 					<section className="space-y-2">
 						<div>
 							<h3 className="font-medium text-sm">
-								Lo que ya se hizo <span className="text-red-600">*</span>
+								Gestiones realizadas <span className="text-red-600">*</span>
 							</h3>
 							<p className="text-muted-foreground text-xs">
-								Lo marcado sale de lo que el CRM tiene registrado
+								Lo marcado proviene de lo registrado en el CRM
 								{checklist.data
 									? ` desde el ${new Date(checklist.data.desde).toLocaleDateString("es-GT")}`
 									: ""}
-								. Lo que no se hizo, justificalo: es lo primero que lee el
+								. Justifique lo que no se realizó: es lo primero que revisa el
 								supervisor.
 							</p>
 						</div>
@@ -517,7 +521,7 @@ function FormularioRecuperacion({
 				{/* 2 · La entrega (solo voluntaria) */}
 				{voluntaria && (
 					<section className="space-y-3">
-						<h3 className="font-medium text-sm">La entrega</h3>
+						<h3 className="font-medium text-sm">Datos de la entrega</h3>
 						<div className="grid gap-3 sm:grid-cols-2">
 							<div className="space-y-1.5">
 								<Label htmlFor="fecha-entrega">
@@ -534,7 +538,7 @@ function FormularioRecuperacion({
 									className="text-primary text-xs hover:underline"
 									onClick={() => setFechaEntrega(aDatetimeLocal(new Date()))}
 								>
-									Ya la entregó: usar ahora
+									Ya se entregó: usar fecha actual
 								</button>
 							</div>
 							<div className="space-y-1.5">
@@ -545,16 +549,16 @@ function FormularioRecuperacion({
 									id="lugar-entrega"
 									value={lugarEntrega}
 									onChange={(e) => setLugarEntrega(e.target.value)}
-									placeholder="Ej: Agencia zona 9, o la dirección"
+									placeholder="Ej.: Agencia zona 9 o la dirección"
 								/>
 							</div>
 							<div className="space-y-1.5">
-								<Label htmlFor="persona-entrega">Quién la entrega</Label>
+								<Label htmlFor="persona-entrega">Persona que entrega</Label>
 								<Input
 									id="persona-entrega"
 									value={persona}
 									onChange={(e) => setPersona(e.target.value)}
-									placeholder="Nombre (vacío si es el cliente)"
+									placeholder="Nombre (dejar vacío si es el cliente)"
 								/>
 							</div>
 							<div className="space-y-1.5">
@@ -565,7 +569,7 @@ function FormularioRecuperacion({
 									id="relacion-entrega"
 									value={relacion}
 									onChange={(e) => setRelacion(e.target.value)}
-									placeholder="Ej: hermano, esposa"
+									placeholder="Ej.: hermano, esposa"
 								/>
 							</div>
 						</div>
@@ -604,8 +608,8 @@ function FormularioRecuperacion({
 					<div className="flex flex-wrap items-center justify-between gap-2">
 						<h3 className="font-medium text-sm">
 							{voluntaria
-								? "Dónde está el vehículo ahora"
-								: "Dónde está el vehículo"}
+								? "Ubicación actual del vehículo"
+								: "Ubicación del vehículo"}
 						</h3>
 						{vehicleId && (
 							<Button
@@ -620,7 +624,7 @@ function FormularioRecuperacion({
 								) : (
 									<Navigation className="mr-1.5 h-3.5 w-3.5" />
 								)}
-								{gps ? "Actualizar del GPS" : "Tomar del GPS"}
+								{gps ? "Actualizar desde el GPS" : "Obtener del GPS"}
 							</Button>
 						)}
 					</div>
@@ -651,7 +655,7 @@ function FormularioRecuperacion({
 						aria-label="Dirección o referencia"
 						value={direccion}
 						onChange={(e) => setDireccion(e.target.value)}
-						placeholder="Dirección o referencia (ej: casa de la mamá, 3a calle 4-10 zona 7)"
+						placeholder="Dirección o referencia (Ej.: casa de un familiar, 3a. calle 4-10 zona 7)"
 					/>
 					<Input
 						aria-label="Enlace de mapa"
@@ -671,7 +675,11 @@ function FormularioRecuperacion({
 						<Select value={estado} onValueChange={setEstado}>
 							<SelectTrigger aria-label="Estado del vehículo">
 								<SelectValue
-									placeholder={voluntaria ? "Elegí el estado" : "Si se sabe"}
+									placeholder={
+										voluntaria
+											? "Seleccionar estado"
+											: "Seleccionar estado (si se conoce)"
+									}
 								/>
 							</SelectTrigger>
 							<SelectContent>
@@ -694,7 +702,7 @@ function FormularioRecuperacion({
 						aria-label="Detalle del estado"
 						value={estadoDetalle}
 						onChange={(e) => setEstadoDetalle(e.target.value)}
-						placeholder="Daños, golpes, llantas, lo que se sepa (opcional)"
+						placeholder="Daños, golpes, llantas u otros detalles conocidos (opcional)"
 						rows={2}
 					/>
 				</section>
@@ -708,7 +716,7 @@ function FormularioRecuperacion({
 							id="observaciones-recuperacion"
 							value={observaciones}
 							onChange={(e) => setObservaciones(e.target.value)}
-							placeholder="Algo más que deba saber quien recibe"
+							placeholder="Información adicional para quien recibe la unidad"
 							rows={2}
 						/>
 					</section>

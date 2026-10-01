@@ -163,9 +163,9 @@ describe("erroresRegistroVisita", () => {
 	});
 
 	it("el pago exige el monto; el parcial, además, el porcentaje", () => {
-		expect(
-			erroresRegistroVisita(registro({ resultado: "pago" }), AHORA),
-		).toBe("Falta el monto que pagó el cliente.");
+		expect(erroresRegistroVisita(registro({ resultado: "pago" }), AHORA)).toBe(
+			"Falta el monto que pagó el cliente.",
+		);
 		expect(
 			erroresRegistroVisita(
 				registro({ resultado: "pago", montoRecibido: 6644.92 }),
@@ -199,7 +199,11 @@ describe("erroresRegistroVisita", () => {
 		).toContain("solo aplica");
 		expect(
 			erroresRegistroVisita(
-				registro({ resultado: "pago", montoRecibido: 100, porcentajePagado: 50 }),
+				registro({
+					resultado: "pago",
+					montoRecibido: 100,
+					porcentajePagado: 50,
+				}),
 				AHORA,
 			),
 		).toContain("solo aplica");
@@ -328,9 +332,9 @@ describe("textoAvisoVisitaProgramada", () => {
 		esHoy: true,
 	};
 
-	it("al responsable: «Hoy tenés una visita»", () => {
+	it("al responsable: «Hoy tiene una visita»", () => {
 		expect(textoAvisoVisitaProgramada(base).titulo).toBe(
-			"Hoy tenés una visita a residencia",
+			"Hoy tiene una visita a residencia",
 		);
 	});
 
@@ -341,7 +345,7 @@ describe("textoAvisoVisitaProgramada", () => {
 		});
 		expect(t.titulo).toBe("Hoy hay una visita a residencia pendiente");
 		expect(t.descripcion).toContain(
-			"La tenía Samuel Gamboa, que ya no lleva el crédito",
+			"Estaba asignada a Samuel Gamboa, que ya no lleva el crédito",
 		);
 	});
 });

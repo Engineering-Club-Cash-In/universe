@@ -217,7 +217,7 @@ export const MOTIVO_SIN_VINCULO: Record<
 	sin_coincidencia:
 		"Ninguna unidad del catálogo de La Legión coincide con la placa de este vehículo.",
 	ambiguo:
-		"Varias unidades coinciden con esta placa. Hay que elegir cuál corresponde.",
+		"Varias unidades coinciden con esta placa. Se debe seleccionar la que corresponde.",
 	asignada_a_otro:
 		"La unidad GPS que coincide con esta placa está vinculada a otro vehículo. Un supervisor debe confirmar a cuál corresponde.",
 };

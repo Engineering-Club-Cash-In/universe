@@ -141,12 +141,12 @@ function BucketBadge({
 const URGENCIA: Record<number, { titulo: string; chip: string; dot: string }> =
 	{
 		0: {
-			titulo: "Pagan HOY",
+			titulo: "Vencen hoy",
 			chip: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
 			dot: "bg-red-500",
 		},
 		1: {
-			titulo: "Pagan mañana",
+			titulo: "Vencen mañana",
 			chip: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
 			dot: "bg-amber-500",
 		},
@@ -333,7 +333,7 @@ function AgendaDiaPage() {
 									variant="outline"
 									className={`border-transparent ${URGENCIA[0].chip}`}
 								>
-									{totalHoy} pagan hoy
+									{totalHoy} vencen hoy
 								</Badge>
 							)}
 							<Badge variant="secondary">{totalCuentas} cuentas</Badge>
@@ -379,8 +379,8 @@ function AgendaDiaPage() {
 			{sinAsesor && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						Tu usuario no está vinculado a un asesor de cartera (por correo).
-						Pedile al supervisor que revise tu correo de asesor.
+						Su usuario no está vinculado a un asesor de cartera (por correo).
+						Solicite al supervisor que revise su correo de asesor.
 					</CardContent>
 				</Card>
 			)}
@@ -392,7 +392,7 @@ function AgendaDiaPage() {
 					<CardContent className="py-10 text-center text-muted-foreground">
 						{esSupervisor && asesorForzado
 							? `${asesorForzado.nombre} está registrado como ausente hoy: su agenda la está trabajando su suplente.`
-							: `Estás registrado como ausente hoy: tu agenda la está trabajando tu suplente. Tu cartera sigue siendo tuya.`}
+							: `Hoy está registrado como ausente: su suplente está trabajando su agenda. Su cartera sigue asignada a usted.`}
 					</CardContent>
 				</Card>
 			)}
@@ -400,7 +400,7 @@ function AgendaDiaPage() {
 			{sinCuotas && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						Sin cuotas próximas a vencer en los próximos 5 días. 🎉
+						No hay cuotas por vencer en los próximos 5 días.
 					</CardContent>
 				</Card>
 			)}

@@ -114,14 +114,14 @@ export function AccionesSupervisorPagalo({
 				toast.success("Pago aplicado en cartera.");
 			} else if (resultado === "REVIEW_REQUIRED") {
 				toast.warning(
-					"Cartera lo volvió a mandar a revisión — mirá el motivo en la bitácora.",
+					"Cartera volvió a enviar el grupo a revisión. Revise el motivo en la bitácora.",
 				);
 			} else if (resultado === "ERROR") {
 				toast.error(
 					"El intento falló. El motivo queda en la bitácora del grupo.",
 				);
 			} else {
-				toast.success("Reintento de aplicación disparado.");
+				toast.success("Reintento de aplicación iniciado.");
 			}
 			invalidarQueries();
 			cerrar();
@@ -146,11 +146,11 @@ export function AccionesSupervisorPagalo({
 				);
 			else if (r?.statusFinal === "REVIEW_REQUIRED")
 				toast.warning(
-					"El grupo está en revisión — mirá el motivo en la bitácora.",
+					"El grupo está en revisión. Revise el motivo en la bitácora.",
 				);
 			else
 				toast.info(
-					"Págalo todavía no reporta el pago. Probá de nuevo en un rato.",
+					"Págalo todavía no reporta el pago. Intente de nuevo más tarde.",
 				);
 			invalidarQueries();
 		},
@@ -199,7 +199,7 @@ export function AccionesSupervisorPagalo({
 					variant="outline"
 					disabled={pendiente}
 					onClick={() => mutationVerificar.mutate()}
-					title="Le pregunta a Págalo por estos links sin esperar el ciclo automático y, si ya están pagados, aplica el pago."
+					title="Consulta a Págalo el estado de estos links sin esperar el ciclo automático y, si ya están pagados, aplica el pago."
 				>
 					{mutationVerificar.isPending && (
 						<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -254,8 +254,8 @@ export function AccionesSupervisorPagalo({
 					</span>
 				</TooltipTrigger>
 				<TooltipContent>
-					Págalo todavía no documenta cómo cancelar un link. Por ahora hay que
-					cancelarlo a mano en el panel de Págalo.
+					Págalo todavía no documenta cómo cancelar un link. Por ahora debe
+					cancelarse manualmente en el panel de Págalo.
 				</TooltipContent>
 			</Tooltip>
 
@@ -278,8 +278,8 @@ export function AccionesSupervisorPagalo({
 									<Alert>
 										<AlertDescription>
 											{status === "REVIEW_REQUIRED"
-												? "Cartera ya revisó este grupo y lo dejó pendiente. Forzarlo vuelve a mandárselo: si el motivo sigue vivo, lo rechaza igual — no se salta ninguna validación. Sirve cuando ya arreglaste la causa."
-												: "El grupo quedó colgado aplicándose (un proceso que murió a medias). Forzarlo lo vuelve a reclamar y reintenta el envío; solo se puede si el proceso anterior ya no responde."}
+												? "Cartera ya revisó este grupo y lo dejó pendiente. Forzar la aplicación lo vuelve a enviar: si el motivo persiste, lo rechazará de nuevo; no se omite ninguna validación. Úselo cuando ya haya corregido la causa."
+												: "El grupo quedó detenido durante la aplicación (un proceso se interrumpió sin terminar). Forzar la aplicación lo retoma y reintenta el envío; solo es posible si el proceso anterior ya no responde."}
 										</AlertDescription>
 									</Alert>
 									<p className="text-muted-foreground text-sm">
@@ -291,10 +291,10 @@ export function AccionesSupervisorPagalo({
 								<div className="space-y-3">
 									<Alert variant="destructive">
 										<AlertDescription>
-											El link viejo sigue siendo cobrable. Págalo no tiene API
-											de cancelación: hay que cancelarlo a mano en el panel de
-											Págalo. Si el cliente lo paga después, el grupo cae en
-											revisión.
+											El link anterior sigue siendo cobrable. Págalo no tiene
+											API de cancelación: debe cancelarse manualmente en el
+											panel de Págalo. Si el cliente lo paga después, el grupo
+											pasa a revisión.
 											{accionAbierta === "regenerar" &&
 												" Se creará un grupo nuevo con las mismas cuotas y montos."}
 										</AlertDescription>

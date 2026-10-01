@@ -255,7 +255,7 @@ describe("cuando sí se avisa", () => {
 		});
 		expect(insertadas).toHaveLength(1);
 		expect(String(insertadas[0].descripcion)).toContain(
-			"El bot no pudo completarlo",
+			"El bot no pudo completar la solicitud",
 		);
 	});
 

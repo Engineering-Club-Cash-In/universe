@@ -477,9 +477,9 @@ function HistorialAgendasContent() {
 		const total = datos?.total ?? 0;
 		if (total > LIMITE_EXPORT || datos?.totalEsAproximado) {
 			const seguir = window.confirm(
-				`Tu filtro tiene ${datos?.totalEsAproximado ? "más de " : ""}${total.toLocaleString("es-GT")} registros. ` +
+				`El filtro tiene ${datos?.totalEsAproximado ? "más de " : ""}${total.toLocaleString("es-GT")} registros. ` +
 					`Se exportarán los primeros ${LIMITE_EXPORT.toLocaleString("es-GT")}. ` +
-					"Acotá el rango de fechas si necesitás el export completo.\n\n¿Continuar?",
+					"Si necesita la exportación completa, reduzca el rango de fechas.\n\n¿Desea continuar?",
 			);
 			if (!seguir) return;
 		}
@@ -630,7 +630,7 @@ function HistorialAgendasContent() {
 			);
 		} catch (error) {
 			console.error("[historial-agendas] Error exportando:", error);
-			toast.error("No se pudo generar el archivo. Intentá de nuevo.");
+			toast.error("No se pudo generar el archivo. Intente de nuevo.");
 		} finally {
 			setExportando(false);
 		}
@@ -653,7 +653,7 @@ function HistorialAgendasContent() {
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
-						No tenés permiso para ver el historial de agendas.
+						No tiene permiso para ver el historial de agendas.
 					</p>
 				</div>
 			</div>
@@ -672,7 +672,7 @@ function HistorialAgendasContent() {
 						<p className="text-gray-500 text-sm">
 							{esSupervisor
 								? "Gestión registrada por todo el equipo, segmentada por bucket."
-								: "Tus gestiones registradas, segmentadas por bucket."}
+								: "Sus gestiones registradas, segmentadas por bucket."}
 						</p>
 					</div>
 				</div>
@@ -714,7 +714,7 @@ function HistorialAgendasContent() {
 					error={resumen.isError}
 				/>
 				<TarjetaKpi
-					titulo="Promesas"
+					titulo="Promesas de pago"
 					valor={resumenData?.promesas}
 					cargando={resumen.isPending}
 					error={resumen.isError}
@@ -816,7 +816,7 @@ function HistorialAgendasContent() {
 
 						<FiltroSelect
 							ancho="w-40"
-							placeholder="Toda promesa"
+							placeholder="Todas las promesas"
 							valor={estadoPromesa}
 							onChange={(v) => {
 								setEstadoPromesa(v);
@@ -935,8 +935,8 @@ function HistorialAgendasContent() {
 			{datos?.rangoAplicado?.esDefault && (
 				<p className="mb-3 flex items-center gap-1.5 text-gray-500 text-xs">
 					<CalendarClock className="h-3.5 w-3.5" />
-					Mostrando los últimos 30 días. Elegí un rango de fechas para ver otro
-					período.
+					Mostrando los últimos 30 días. Seleccione un rango de fechas para ver
+					otro período.
 				</p>
 			)}
 
@@ -944,7 +944,7 @@ function HistorialAgendasContent() {
 				<Card className="border-red-300 bg-red-50 dark:bg-red-950/30">
 					<CardContent className="flex items-center gap-2 py-4 text-red-700 dark:text-red-300">
 						<AlertTriangle className="h-5 w-5" />
-						No se pudo cargar el historial. Reintentá en unos segundos.
+						No se pudo cargar el historial. Intente de nuevo en unos segundos.
 					</CardContent>
 				</Card>
 			)}
@@ -976,7 +976,7 @@ function HistorialAgendasContent() {
 				items.length === 0 &&
 				page > 1 && (
 					<p className="py-10 text-center text-gray-400 text-sm">
-						Esta página no tiene resultados. Volvé a la página anterior.
+						Esta página no tiene resultados. Regrese a la página anterior.
 					</p>
 				)}
 

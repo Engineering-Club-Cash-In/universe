@@ -131,7 +131,7 @@ export async function leerSolicitud(
 const yaNoPendiente = () =>
 	new ORPCError("CONFLICT", {
 		message:
-			"Esta solicitud ya no está esperando aprobación: alguien la decidió o se canceló. Actualizá la vista.",
+			"Esta solicitud ya no está esperando aprobación: ya se decidió o se canceló. Actualice la vista.",
 	});
 
 /**
@@ -343,7 +343,7 @@ export async function cancelarSolicitudRecuperacion(params: {
 		.update(recuperacionesVehiculo)
 		.set({
 			estadoSolicitud: "cancelada",
-			motivoDecision: "La retiró quien la pidió.",
+			motivoDecision: "La canceló el solicitante.",
 			decididoPor: params.usuarioId,
 			decididoAt: new Date(),
 			updatedAt: new Date(),
@@ -359,7 +359,7 @@ export async function cancelarSolicitudRecuperacion(params: {
 	if (!fila) {
 		throw new ORPCError("CONFLICT", {
 			message:
-				"La solicitud ya no está esperando aprobación, o la pidió otra persona.",
+				"La solicitud ya no está esperando aprobación, o la registró otra persona.",
 		});
 	}
 	await avisarDecisionSolicitud({

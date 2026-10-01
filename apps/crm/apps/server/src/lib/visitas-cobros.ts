@@ -438,16 +438,16 @@ export function textoAvisoVisitaProgramada(params: {
 		const deQuien = params.reasignadaDe ?? "otra persona";
 		return {
 			titulo: `Hoy hay una ${tipo} pendiente`,
-			descripcion: `${quien}: ${cuando} en ${params.direccion}. La tenía ${deQuien}, que ya no lleva el crédito: decidí quién va o cancelala.`,
+			descripcion: `${quien}: ${cuando} en ${params.direccion}. Estaba asignada a ${deQuien}, que ya no lleva el crédito. Asigne un responsable o cancele la visita.`,
 		};
 	}
 	return params.esHoy
 		? {
-				titulo: `Hoy tenés una ${tipo}`,
+				titulo: `Hoy tiene una ${tipo}`,
 				descripcion: `${quien}: ${cuando} en ${params.direccion}.${por}`,
 			}
 		: {
-				titulo: `Te programaron una ${tipo}`,
+				titulo: `Se le programó una ${tipo}`,
 				descripcion: `${quien}: ${cuando} en ${params.direccion}.${por}`,
 			};
 }

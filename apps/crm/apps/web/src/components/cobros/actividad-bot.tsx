@@ -63,7 +63,7 @@ function describir(interaccion: InteraccionBot): string {
 			const busqueda = texto(d.busqueda);
 			const destino = texto(d.otpEnviadoA);
 			const simulado = d.otpSimulado === true ? " · simulado" : "";
-			return `Entró al bot${tipo ? ` con ${tipo}` : ""}${
+			return `Ingresó al bot${tipo ? ` con ${tipo}` : ""}${
 				busqueda ? ` (${busqueda})` : ""
 			} — código enviado${destino ? ` a ${destino}` : ""}${simulado}`;
 		}
@@ -71,11 +71,11 @@ function describir(interaccion: InteraccionBot): string {
 		case "acceso_fallido":
 			switch (interaccion.codigo) {
 				case "DEMASIADOS_ENVIOS":
-					return "Quiso entrar, pero ya había pedido demasiados códigos";
+					return "Intentó ingresar, pero ya había solicitado demasiados códigos";
 				case "SIN_TELEFONO_REGISTRADO":
-					return "Quiso entrar, pero no tiene un celular utilizable registrado";
+					return "Intentó ingresar, pero no tiene un celular válido registrado";
 				case "OTP_NO_ENVIADO":
-					return "Quiso entrar y nuestro SMS falló";
+					return "Intentó ingresar, pero no se pudo enviar el SMS";
 				default:
 					return `Intento de acceso fallido (${interaccion.codigo ?? "sin código"})`;
 			}
@@ -93,14 +93,14 @@ function describir(interaccion: InteraccionBot): string {
 						typeof d.intentosRestantes === "number"
 							? ` (le quedaban ${d.intentosRestantes})`
 							: "";
-					return `Escribió un código incorrecto${restantes}`;
+					return `Ingresó un código incorrecto${restantes}`;
 				}
 				case "DEMASIADOS_INTENTOS":
-					return "Se bloqueó por intentos: necesita pedir un código nuevo";
+					return "Se bloqueó por exceso de intentos; debe solicitar un código nuevo";
 				case "OTP_VENCIDO":
-					return "Escribió un código que ya había vencido";
+					return "Ingresó un código vencido";
 				case "OTP_YA_USADO":
-					return "Reusó un código ya canjeado";
+					return "Ingresó un código que ya había utilizado";
 				case "SIN_CREDITOS":
 					return "Código validado, pero sin créditos que listar";
 				default:
@@ -115,7 +115,7 @@ function describir(interaccion: InteraccionBot): string {
 
 		case "estado_cuenta":
 			return interaccion.exito
-				? "Pidió su estado de cuenta"
+				? "Solicitó su estado de cuenta"
 				: `No pudo obtener su estado de cuenta (${interaccion.codigo})`;
 
 		case "boleta_leer": {
@@ -130,7 +130,7 @@ function describir(interaccion: InteraccionBot): string {
 				case "BOLETA_ILEGIBLE":
 					return "Subió una boleta que no se pudo leer";
 				case "BOLETA_DUPLICADA":
-					return "Subió una boleta que ya nos había mandado";
+					return "Subió una boleta que ya había enviado";
 				case "DEMASIADOS_INTENTOS":
 					return "Agotó sus intentos de lectura de boleta";
 				default:
@@ -146,7 +146,7 @@ function describir(interaccion: InteraccionBot): string {
 					monto ? ` de Q${monto}` : ""
 				} registrado en cartera${pagos && pagos > 1 ? ` (${pagos} pagos)` : ""}`;
 			}
-			return `Quiso confirmar la boleta y no se pudo (${interaccion.codigo})`;
+			return `No se pudo confirmar la boleta (${interaccion.codigo})`;
 		}
 
 		// Una acción futura sin traducción se muestra igual (regla general del

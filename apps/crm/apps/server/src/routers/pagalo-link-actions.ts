@@ -71,7 +71,7 @@ function traducirReemplazoInvalido(error: unknown): never {
 	if (error instanceof PagaloReemplazoInvalido) {
 		throw new ORPCError("CONFLICT", {
 			message:
-				"El grupo cambió: ya tiene un pago registrado o fue cerrado. Recargá el historial.",
+				"El grupo cambió: ya tiene un pago registrado o fue cerrado. Recargue el historial.",
 		});
 	}
 	throw error;
@@ -245,7 +245,7 @@ export const pagaloLinkActionsRouter = {
 				if (grupo.status === "REVIEW_REQUIRED") {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Un grupo en revisión no se reintenta: el comando es determinístico. Invalidá el grupo o resolvé en cartera.",
+							"Un grupo en revisión no se reintenta: el comando es determinístico. Invalide el grupo o resuélvalo en cartera.",
 					});
 				}
 				throw new ORPCError("BAD_REQUEST", {
@@ -265,7 +265,7 @@ export const pagaloLinkActionsRouter = {
 				if (leaseVence > Date.now()) {
 					throw new ORPCError("CONFLICT", {
 						message:
-							"El grupo se está aplicando en este momento. Esperá un par de minutos y recargá el historial.",
+							"El grupo se está aplicando en este momento. Espere un par de minutos y recargue el historial.",
 					});
 				}
 			}
@@ -296,7 +296,7 @@ export const pagaloLinkActionsRouter = {
 			if (!limpiado) {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"El grupo cambió justo antes del reintento — recargá el historial.",
+						"El grupo cambió justo antes del reintento. Recargue el historial.",
 				});
 			}
 			// Limpiar el lease acá (arriba) deja el grupo "libre para reclamar"
@@ -316,7 +316,7 @@ export const pagaloLinkActionsRouter = {
 			if (resultado === "NO_RECLAMADO") {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"El grupo ya estaba siendo procesado (por el ciclo automático u otro reintento) — recargá el historial.",
+						"El grupo ya estaba siendo procesado (por el ciclo automático u otro reintento). Recargue el historial.",
 				});
 			}
 			await db.insert(pagaloPaymentEvents).values({

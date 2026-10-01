@@ -78,7 +78,7 @@ export function TelefonosEditor({
 						}}
 						value={valor}
 						inputMode="tel"
-						placeholder="Ej: 5555-5555"
+						placeholder="Ej.: 5555-5555"
 						onFocus={() => {
 							valorGuardado.current[i] = valor;
 						}}

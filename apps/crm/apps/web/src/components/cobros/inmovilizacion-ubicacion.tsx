@@ -99,9 +99,9 @@ function LineaGps({
 			</p>
 			{vieja && (
 				<p className="text-amber-700 text-xs dark:text-amber-400">
-					Ojo: la última posición es de{" "}
-					{formatUltimaSenal(ubicacion.senalAt).toLowerCase()}; puede que el
-					vehículo ya no esté ahí.
+					Atención: la última posición es de{" "}
+					{formatUltimaSenal(ubicacion.senalAt).toLowerCase()}; es posible que
+					el vehículo ya no esté en ese lugar.
 				</p>
 			)}
 			{enMarcha && (
@@ -206,7 +206,7 @@ export function UbicacionGuardada({
 			{ubicacion.fuente === "manual" && (
 				<p className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
 					<MapPin className="h-3.5 w-3.5" />
-					{ubicacion.direccion || "Ubicación escrita por el asesor"}
+					{ubicacion.direccion || "Ubicación ingresada por el asesor"}
 					{ubicacion.enlace && (
 						<a
 							className="ml-1 text-primary hover:underline"

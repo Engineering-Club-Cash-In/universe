@@ -57,8 +57,8 @@ class ConflictoDecisionPendiente extends Error {
 	constructor(readonly decisionPendiente: "aprobado" | "rechazado") {
 		super(
 			decisionPendiente === "rechazado"
-				? "Hay un RECHAZO de este convenio esperando confirmación (probablemente desde otra pestaña). No se envió nada: revisá el aviso de decisiones por confirmar."
-				: "Hay una APROBACIÓN de este convenio esperando confirmación (probablemente desde otra pestaña). No se envió nada: revisá el aviso de decisiones por confirmar.",
+				? "Hay un RECHAZO de este convenio esperando confirmación (probablemente desde otra pestaña). No se envió nada: revise el aviso de decisiones por confirmar."
+				: "Hay una APROBACIÓN de este convenio esperando confirmación (probablemente desde otra pestaña). No se envió nada: revise el aviso de decisiones por confirmar.",
 		);
 		this.name = "ConflictoDecisionPendiente";
 	}
@@ -200,7 +200,7 @@ export function ConvenioAprobacionModal({
 			toast.error(
 				noSeAplico
 					? mensaje
-					: `${mensaje}. No se pudo confirmar si se aplicó: usá "Reenviar" en el aviso de arriba para verificarlo.`,
+					: `${mensaje}. No se pudo confirmar si se aplicó: use "Reenviar" en el aviso superior para verificarlo.`,
 				{ duration: 8000 },
 			);
 			onResuelto?.();
@@ -241,9 +241,9 @@ export function ConvenioAprobacionModal({
 						<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
 						<span>
 							Ya se envió esta decisión y no se pudo confirmar el resultado. Al
-							reenviar se manda <strong>exactamente la misma</strong>: si
-							cartera ya la aplicó, te devuelve lo que pasó sin repetir el
-							efecto. Por eso no se puede cambiar el motivo acá.
+							reenviar se envía <strong>exactamente la misma</strong>: si
+							cartera ya la aplicó, devuelve el resultado sin repetir el efecto.
+							Por eso no se puede cambiar el motivo.
 						</span>
 					</div>
 				)}
@@ -270,7 +270,7 @@ export function ConvenioAprobacionModal({
 								id="motivo-rechazo"
 								value={motivo}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Explicá por qué se rechaza este convenio (mínimo 5 caracteres)"
+								placeholder="Explique por qué se rechaza este convenio (mínimo 5 caracteres)"
 								rows={3}
 								readOnly={esReenvio}
 								className={esReenvio ? "bg-muted" : undefined}

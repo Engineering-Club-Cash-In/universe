@@ -112,7 +112,7 @@ export function SelectorAsesor({
 			onChange={(e) => onChange(e.target.value)}
 			disabled={disabled}
 		>
-			<option value="">Selecciona un asesor</option>
+			<option value="">Seleccionar asesor</option>
 			{asesores
 				.filter((a) => permitirInactivo || a.activo)
 				.map((a) => (
@@ -135,7 +135,7 @@ export function EstadoConsulta({
 }) {
 	return error ? (
 		<div role="alert" className="space-y-2 py-4 text-destructive text-sm">
-			<p>No se pudieron cargar los datos. Intenta de nuevo.</p>
+			<p>No se pudieron cargar los datos. Intente de nuevo.</p>
 			<Button variant="outline" onClick={retry}>
 				Reintentar
 			</Button>
@@ -208,7 +208,7 @@ export function TrasladosPanel() {
 			: `${motivos[razon]}${detalle.trim() ? `: ${detalle.trim()}` : ""}`;
 	const requiereDestinoEspecial = razon === "despido" || razon === "renuncia";
 	const errorFormulario = cargaOrigen.isError
-		? "No se pudieron cargar los buckets de la cartera. Intenta de nuevo."
+		? "No se pudieron cargar los buckets de la cartera. Intente de nuevo."
 		: cargaOrigenPendiente
 			? "Cargando buckets de la cartera…"
 			: validarFormularioTraslado({
@@ -260,7 +260,7 @@ export function TrasladosPanel() {
 	const confirmar = useMutation({
 		retry: false,
 		mutationFn: () => {
-			if (!preview) throw new Error("Previsualiza la operación primero.");
+			if (!preview) throw new Error("Primero previsualice la operación.");
 			return client.confirmarTraslado({
 				previewId: preview.previewId,
 				idempotencyKey: clave,
@@ -318,7 +318,7 @@ export function TrasladosPanel() {
 				<CardHeader>
 					<CardTitle>Traslado masivo de cartera</CardTitle>
 					<p className="text-muted-foreground text-sm">
-						Revisa la distribución por asesor y bucket antes de confirmar. Los
+						Revise la distribución por asesor y bucket antes de confirmar. Los
 						compromisos conservan sus condiciones.
 					</p>
 				</CardHeader>
@@ -431,7 +431,7 @@ export function TrasladosPanel() {
 											))
 										) : (
 											<p className="text-muted-foreground text-sm">
-												Selecciona un asesor de origen para ver sus buckets.
+												Seleccione un asesor de origen para ver sus buckets.
 											</p>
 										)}
 									</div>
@@ -457,8 +457,8 @@ export function TrasladosPanel() {
 									/>
 									<p className="text-muted-foreground text-xs">
 										Estas cuentas conservan estado y no reciben bucket; solo
-										cambia responsable. Si el origen tiene alguna, backend exige
-										seleccionar responsable para confirmar.
+										cambia el responsable. Si el origen tiene alguna, debe
+										seleccionar un responsable para confirmar.
 									</p>
 									<ul className="list-disc space-y-0.5 pl-4 text-muted-foreground text-xs">
 										<li>
@@ -531,7 +531,7 @@ export function TrasladosPanel() {
 					)}
 					{confirmar.error && (
 						<p role="alert" className="text-destructive text-sm">
-							{confirmar.error.message} Si hubo un problema de conexión, puedes
+							{confirmar.error.message} Si hubo un problema de conexión, puede
 							reintentar la misma confirmación.
 						</p>
 					)}
@@ -557,11 +557,11 @@ export function TrasladosPanel() {
 							con compromiso vigente · {excluidosPreview.length} sin destino
 						</p>
 						<p className="text-muted-foreground text-xs">
-							Puedes confirmar este reparto hasta las{" "}
+							Puede confirmar este reparto hasta las{" "}
 							{new Date(preview.venceEn).toLocaleTimeString("es-GT", {
 								timeZone: "America/Guatemala",
 							})}{" "}
-							(Guatemala). Después deberás volver a previsualizar para evitar
+							(Guatemala). Después deberá volver a previsualizar para evitar
 							aplicar una distribución desactualizada.
 						</p>
 					</CardHeader>
@@ -860,7 +860,7 @@ export function TrasladosPanel() {
 						</Button>
 						{vencido && (
 							<p role="alert" className="text-destructive text-sm">
-								La previsualización venció. Calcula el reparto nuevamente.
+								La previsualización venció. Calcule el reparto nuevamente.
 							</p>
 						)}
 					</CardContent>

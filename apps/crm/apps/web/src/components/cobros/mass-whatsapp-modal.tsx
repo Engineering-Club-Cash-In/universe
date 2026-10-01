@@ -208,7 +208,7 @@ export function MassWhatsappModal({
 			}
 		},
 		onError: (error: any) => {
-			toast.error(error?.message || "Error enviando WhatsApp masivo");
+			toast.error(error?.message || "Error al enviar el WhatsApp masivo");
 		},
 	});
 
@@ -272,10 +272,10 @@ export function MassWhatsappModal({
 									onChange={(e) => setCuerpoEditado(e.target.value)}
 								/>
 								<p className="text-muted-foreground text-xs">
-									Separá con <strong>una línea en blanco</strong> para crear un
-									nuevo párrafo (Mínimo 1, máximo 4). Las variables entre <code>{"{llaves}"}</code> se
+									Separe con <strong>una línea en blanco</strong> para crear un
+									nuevo párrafo (mínimo 1, máximo 4). Las variables entre <code>{"{llaves}"}</code> se
 									reemplazan por los datos reales de cada crédito; si una
-									variable no existe o queda mal escrita, se manda literal.
+									variable no existe o está mal escrita, se envía tal cual.
 								</p>
 								<div className="flex flex-wrap gap-1">
 									{VARIABLES_DISPONIBLES.map((v) => (
@@ -337,10 +337,10 @@ export function MassWhatsappModal({
 						<div className="flex flex-col items-center justify-center gap-2 rounded-md border border-border border-dashed bg-muted/20 p-8 text-center">
 							<MessageCircle className="h-8 w-8 text-muted-foreground" />
 							<p className="font-medium text-sm">
-								Selecciona una plantilla para continuar
+								Seleccione una plantilla para continuar
 							</p>
 							<p className="text-muted-foreground text-xs">
-								Una vez elegida verás la vista previa, los filtros aplicados y
+								Al seleccionarla verá la vista previa, los filtros aplicados y
 								la cantidad de destinatarios.
 							</p>
 						</div>
@@ -382,7 +382,7 @@ export function MassWhatsappModal({
 						Estos créditos no recibieron el mensaje: o les faltaba algún dato
 						(teléfono, cuota o asesor asignado) o el envío falló en el
 						proveedor. El motivo de cada uno se indica en la última columna.
-						Podés exportarlos a CSV para hacer seguimiento manual.
+						Puede exportarlos a CSV para darles seguimiento manual.
 					</DialogDescription>
 				</DialogHeader>
 

@@ -1333,7 +1333,7 @@ function TabDescuentos({
 				<Label className="text-xs">Buscar por crédito o cliente</Label>
 				<Input
 					className="max-w-sm"
-					placeholder="CRM-... o nombre del cliente"
+					placeholder="Ej.: CRM-... o nombre del cliente"
 					value={search}
 					onChange={(e) => {
 						setSearch(e.target.value);
@@ -1386,7 +1386,7 @@ function RouteComponent() {
 			<div className="space-y-2 p-6">
 				<h1 className="font-bold text-2xl">Reportes de Cobros</h1>
 				<p className="text-muted-foreground">
-					No tienes permiso para ver estos reportes.
+					No tiene permiso para ver estos reportes.
 				</p>
 			</div>
 		);

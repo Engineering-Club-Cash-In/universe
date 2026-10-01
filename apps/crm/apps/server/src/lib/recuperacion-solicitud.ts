@@ -90,15 +90,19 @@ type DefinicionPaso = {
 	titulo: string;
 	/** Qué cuenta como hecho, para el que llena y para el que aprueba. */
 	ayuda: string;
+	/** Lo que se pregunta cuando el paso no se hizo. */
+	pregunta: string;
 };
 
 /**
  * Los pasos de gestión que el supervisor quiere ver antes de aprobar. Salen de
  * la épica B3 · Rescate (CB-035 a CB-042) más lo básico de cualquier cobro, y
  * TODOS se detectan solos: no hay casillas que se marquen a mano.
- * Catálogo PROVISIONAL, en TypeScript y no en la base: el checklist se guarda
- * como jsonb con su texto, así que recortar o agregar pasos no rompe los
- * registros viejos.
+ * Los pasos viven en TypeScript porque cada uno está atado al código que
+ * detecta su evidencia; las razones para no haberlo hecho, en la base
+ * (`cobros_checklist_justificaciones`, una lista por paso). El checklist se
+ * guarda como jsonb con sus textos, así que recortar o agregar pasos o razones
+ * no rompe los registros viejos.
  *
  * Recortado el 2026-09-30: sin "Llamada del supervisor" (no depende del
  * asesor, no la puede justificar) ni "Búsqueda en redes sociales" (CB-039 no
@@ -110,47 +114,56 @@ export const PASOS_CHECKLIST_RECUPERACION = [
 		clave: "llamadas_cliente",
 		titulo: "Llamadas al cliente",
 		ayuda: "Al menos una llamada registrada desde que entró en mora.",
+		pregunta: "¿Por qué no hay llamadas al cliente?",
 	},
 	{
 		clave: "mensajes",
 		titulo: "WhatsApp, SMS o correo",
 		ayuda: "Mensajes al cliente registrados desde que entró en mora.",
+		pregunta: "¿Por qué no hay mensajes al cliente?",
 	},
 	{
 		clave: "promesa_pago",
 		titulo: "Promesa de pago",
 		ayuda: "Se negoció al menos una promesa de pago.",
+		pregunta: "¿Por qué no hay promesas de pago?",
 	},
 	{
 		clave: "convenio_pago",
 		titulo: "Convenio de pago",
 		ayuda:
 			"Se generó al menos un convenio, aunque después se haya rechazado o deshecho.",
+		pregunta: "¿Por qué no hay convenios de pago?",
 	},
 	{
 		clave: "referencias",
 		titulo: "Referencias y contactos de emergencia",
 		ayuda: "Se gestionaron todas las referencias del crédito.",
+		pregunta: "¿Por qué no se gestionaron todas las referencias?",
 	},
 	{
 		clave: "visita_residencia",
 		titulo: "Visita a la residencia",
 		ayuda: "Una visita realizada a la residencia (no solo programada).",
+		pregunta: "¿Por qué no hay visita a la residencia?",
 	},
 	{
 		clave: "visita_trabajo",
 		titulo: "Visita al lugar de trabajo",
 		ayuda: "Una visita realizada al lugar de trabajo.",
+		pregunta: "¿Por qué no hay visita al lugar de trabajo?",
 	},
 	{
 		clave: "ubicacion_gps",
 		titulo: "Ubicación del vehículo por GPS",
 		ayuda: "Se consultó dónde está la unidad.",
+		pregunta: "¿Por qué no se consultó la ubicación por GPS?",
 	},
 	{
 		clave: "apagado_unidad",
 		titulo: "Apagado de la unidad",
 		ayuda: "Se pidió y se ejecutó el apagado por falta de pago.",
+		pregunta: "¿Por qué no se apagó la unidad?",
 	},
 ] as const satisfies readonly DefinicionPaso[];
 
@@ -172,10 +185,23 @@ export function tituloPaso(clave: string): string {
 export type EstadoPaso = "hecho" | "parcial" | "pendiente";
 
 /**
- * Por qué un paso no se hizo (o se hizo a medias). Catálogo PROVISIONAL, igual
- * que los motivos de CB-042: text validado acá, no enum de Postgres.
+ * Por qué un paso no se hizo (o se hizo a medias): cada paso tiene su lista,
+ * en la tabla `cobros_checklist_justificaciones` (migración 0074). Se agregan
+ * o retiran razones sin deploy. Desde el 2026-10-01 no hay "No aplica" y la
+ * nota es siempre opcional (pedido del PM).
  */
-export const JUSTIFICACIONES_PASO = {
+export type OpcionJustificacion = { clave: string; etiqueta: string };
+
+/** Las razones ACTIVAS de cada paso, en orden. Lo arma el servicio desde la base. */
+export type CatalogoJustificaciones = Partial<
+	Record<string, readonly OpcionJustificacion[]>
+>;
+
+/**
+ * El catálogo genérico de antes (uno solo para todos los pasos). Solo para
+ * leer solicitudes guardadas antes de la 0074, que no traen la etiqueta.
+ */
+const ETIQUETAS_JUSTIFICACION_ANTERIORES: Record<string, string> = {
 	no_aplica: "No aplica a este caso",
 	sin_datos: "No hay datos para hacerlo (teléfono, dirección o referencias)",
 	nadie_contesta: "Nadie contesta en ningún número",
@@ -187,22 +213,7 @@ export const JUSTIFICACIONES_PASO = {
 	sin_gps: "La unidad no tiene GPS o no está reportando",
 	hecho_fuera_del_crm: "Se hizo, pero no quedó registrado en el CRM",
 	otro: "Otro",
-} as const;
-export type JustificacionPaso = keyof typeof JUSTIFICACIONES_PASO;
-const CLAVES_JUSTIFICACION = Object.keys(JUSTIFICACIONES_PASO) as [
-	JustificacionPaso,
-	...JustificacionPaso[],
-];
-
-/** Las que sin una nota no le dicen nada al supervisor. */
-export const JUSTIFICACIONES_CON_NOTA: readonly JustificacionPaso[] = [
-	"hecho_fuera_del_crm",
-	"otro",
-];
-
-export function etiquetaJustificacion(clave: string): string {
-	return (JUSTIFICACIONES_PASO as Record<string, string>)[clave] ?? clave;
-}
+};
 
 // ── Evidencia → pasos evaluados ─────────────────────────────────────────────
 
@@ -242,8 +253,11 @@ export type PasoEvaluado = {
 	estado: EstadoPaso;
 	/** Lo que se encontró, en una línea. Queda guardado tal cual en la solicitud. */
 	evidencia: string;
-	/** La justificación que probablemente aplica (la UI la preselecciona). */
-	sugerencia: JustificacionPaso | null;
+	/**
+	 * La clave de la razón que probablemente aplica (la UI la preselecciona si
+	 * está en el catálogo del paso).
+	 */
+	sugerencia: string | null;
 };
 
 const formatoDia = new Intl.DateTimeFormat("es-GT", {
@@ -261,7 +275,7 @@ export function evaluarChecklist(e: EvidenciaGestion): PasoEvaluado[] {
 	const pasos: Record<
 		ClavePaso,
 		Omit<PasoEvaluado, "paso" | "sugerencia"> & {
-			sugerencia?: JustificacionPaso | null;
+			sugerencia?: string | null;
 		}
 	> = {
 		llamadas_cliente:
@@ -299,7 +313,7 @@ export function evaluarChecklist(e: EvidenciaGestion): PasoEvaluado[] {
 				? {
 						estado: "pendiente",
 						evidencia: "El crédito no tiene referencias cargadas.",
-						sugerencia: "sin_datos",
+						sugerencia: "sin_referencias",
 					}
 				: e.referencias.gestionadas === 0
 					? {
@@ -331,11 +345,13 @@ export function evaluarChecklist(e: EvidenciaGestion): PasoEvaluado[] {
 			destino: "a la residencia",
 			dato: "dirección",
 			hayDireccion: true,
+			sugerenciaSinDato: "sin_direccion",
 		}),
 		visita_trabajo: evaluarVisita(e.visitaTrabajo, {
 			destino: "al lugar de trabajo",
 			dato: "lugar de trabajo",
 			hayDireccion: e.tieneDatosLaborales,
+			sugerenciaSinDato: "sin_datos_laborales",
 		}),
 		ubicacion_gps: !e.gps.vinculado
 			? {
@@ -368,8 +384,13 @@ export function evaluarChecklist(e: EvidenciaGestion): PasoEvaluado[] {
 
 function evaluarVisita(
 	v: ConteoConFecha & { sinContacto: number },
-	lugar: { destino: string; dato: string; hayDireccion: boolean },
-): { estado: EstadoPaso; evidencia: string; sugerencia?: JustificacionPaso } {
+	lugar: {
+		destino: string;
+		dato: string;
+		hayDireccion: boolean;
+		sugerenciaSinDato: string;
+	},
+): { estado: EstadoPaso; evidencia: string; sugerencia?: string } {
 	if (v.total === 0) {
 		return lugar.hayDireccion
 			? {
@@ -379,7 +400,7 @@ function evaluarVisita(
 			: {
 					estado: "pendiente",
 					evidencia: `No hay visitas, y la solicitud de crédito no tiene ${lugar.dato}.`,
-					sugerencia: "sin_datos",
+					sugerencia: lugar.sugerenciaSinDato,
 				};
 	}
 	const sinContacto =
@@ -393,7 +414,7 @@ function evaluarVisita(
 function evaluarApagado(e: EvidenciaGestion): {
 	estado: EstadoPaso;
 	evidencia: string;
-	sugerencia?: JustificacionPaso;
+	sugerencia?: string;
 } {
 	switch (e.apagado.estado) {
 		case "ejecutada":
@@ -406,11 +427,13 @@ function evaluarApagado(e: EvidenciaGestion): {
 			return {
 				estado: "parcial",
 				evidencia: `Apagado solicitado el ${dia(e.apagado.fecha)}, todavía sin ejecutar.`,
+				sugerencia: "apagado_pendiente",
 			};
 		case "rechazada":
 			return {
 				estado: "parcial",
 				evidencia: `Se pidió el apagado el ${dia(e.apagado.fecha)} y se rechazó.`,
+				sugerencia: "apagado_rechazado",
 			};
 		default:
 			return e.gps.vinculado
@@ -435,7 +458,8 @@ const textoOpcional = (max: number) =>
 
 export const respuestaPasoSchema = z.object({
 	paso: z.enum(CLAVES_PASO),
-	justificacion: z.enum(CLAVES_JUSTIFICACION).optional(),
+	// Clave del catálogo del paso: se valida contra la base al combinar.
+	justificacion: z.string().trim().min(1).max(64).optional(),
 	nota: textoOpcional(500),
 });
 export type RespuestaPaso = z.infer<typeof respuestaPasoSchema>;
@@ -455,26 +479,32 @@ export type PasoChecklist = {
 	titulo: string;
 	estado: EstadoPaso;
 	evidencia: string;
-	justificacion: JustificacionPaso | null;
+	justificacion: string | null;
+	/** La etiqueta al momento de pedir: si el catálogo cambia, se sigue leyendo. */
+	justificacionEtiqueta: string | null;
 	nota: string | null;
 };
 
-const MIN_NOTA = 5;
-
-/** Qué le falta a UN paso (null = está completo). Texto para quien solicita. */
+/**
+ * Qué le falta a UN paso (null = está completo). Texto para quien solicita.
+ * Con `opciones` (las razones activas del paso) también exige que la elegida
+ * esté en el catálogo; la nota es siempre opcional.
+ */
 export function faltanteDePaso(
 	evaluado: Pick<PasoEvaluado, "paso" | "estado">,
-	respuesta: Pick<RespuestaPasoInput, "justificacion" | "nota"> | undefined,
+	respuesta: Pick<RespuestaPasoInput, "justificacion"> | undefined,
+	opciones?: readonly OpcionJustificacion[],
 ): string | null {
 	if (evaluado.estado === "hecho") return null;
 	const titulo = tituloPaso(evaluado.paso);
-	const nota = respuesta?.nota?.trim() ?? "";
-	if (!respuesta?.justificacion) return `Justificá «${titulo}».`;
-	if (
-		JUSTIFICACIONES_CON_NOTA.includes(respuesta.justificacion) &&
-		nota.length < MIN_NOTA
-	) {
-		return `Agregá una nota en «${titulo}»: «${etiquetaJustificacion(respuesta.justificacion)}» sola no dice qué pasó.`;
+	if (opciones && opciones.length === 0) {
+		return `«${titulo}» no tiene justificaciones disponibles. Contacte a un administrador.`;
+	}
+	if (!respuesta?.justificacion) {
+		return `Seleccione la justificación de «${titulo}».`;
+	}
+	if (opciones && !opciones.some((o) => o.clave === respuesta.justificacion)) {
+		return `La justificación de «${titulo}» ya no está disponible. Seleccione otra.`;
 	}
 	return null;
 }
@@ -487,20 +517,27 @@ export function faltanteDePaso(
 export function combinarChecklist(
 	evaluados: readonly PasoEvaluado[],
 	respuestas: readonly RespuestaPaso[],
+	catalogo: CatalogoJustificaciones,
 ): { checklist: PasoChecklist[] } | { error: string } {
 	const porPaso = new Map(respuestas.map((r) => [r.paso, r]));
 	const checklist: PasoChecklist[] = [];
 	for (const ev of evaluados) {
 		const r = porPaso.get(ev.paso);
-		const falta = faltanteDePaso(ev, r);
+		const opciones = catalogo[ev.paso] ?? [];
+		const falta = faltanteDePaso(ev, r, opciones);
 		if (falta) return { error: falta };
+		const hecho = ev.estado === "hecho";
+		const elegida = hecho
+			? undefined
+			: opciones.find((o) => o.clave === r?.justificacion);
 		checklist.push({
 			paso: ev.paso,
 			titulo: tituloPaso(ev.paso),
 			estado: ev.estado,
 			evidencia: ev.evidencia,
-			justificacion: ev.estado === "hecho" ? null : (r?.justificacion ?? null),
-			nota: r?.nota ?? null,
+			justificacion: elegida?.clave ?? null,
+			justificacionEtiqueta: elegida?.etiqueta ?? null,
+			nota: hecho ? null : (r?.nota ?? null),
 		});
 	}
 	return { checklist };
@@ -516,16 +553,21 @@ export function leerChecklistGuardado(valor: unknown): PasoChecklist[] | null {
 		if (typeof p.paso !== "string") continue;
 		const estado =
 			p.estado === "hecho" || p.estado === "parcial" ? p.estado : "pendiente";
+		const justificacion =
+			typeof p.justificacion === "string" && p.justificacion
+				? p.justificacion
+				: null;
 		pasos.push({
 			paso: p.paso,
 			titulo: typeof p.titulo === "string" ? p.titulo : tituloPaso(p.paso),
 			estado,
 			evidencia: typeof p.evidencia === "string" ? p.evidencia : "",
-			justificacion:
-				typeof p.justificacion === "string" &&
-				p.justificacion in JUSTIFICACIONES_PASO
-					? (p.justificacion as JustificacionPaso)
-					: null,
+			justificacion,
+			justificacionEtiqueta: justificacion
+				? typeof p.justificacionEtiqueta === "string"
+					? p.justificacionEtiqueta
+					: (ETIQUETAS_JUSTIFICACION_ANTERIORES[justificacion] ?? justificacion)
+				: null,
 			nota: typeof p.nota === "string" ? p.nota : null,
 		});
 	}
@@ -595,8 +637,8 @@ export function textoAvisoSolicitudRecuperacion(params: {
 }): { titulo: string; descripcion: string } {
 	const donde = params.bucket !== null ? ` (B${params.bucket})` : "";
 	return {
-		titulo: "Solicitud de recuperación de vehículo",
-		descripcion: `${quienEs(params.cliente, params.numeroSifco)}${donde}: ${params.solicitante ?? "Un asesor"} pide mandarlo a B4 para recuperar la unidad. Checklist: ${params.resumen}.`,
+		titulo: "Solicitud de recuperación del vehículo",
+		descripcion: `${quienEs(params.cliente, params.numeroSifco)}${donde}: ${params.solicitante ?? "Un asesor"} solicita enviarlo a B4 para recuperar el vehículo. Checklist: ${params.resumen}.`,
 	};
 }
 

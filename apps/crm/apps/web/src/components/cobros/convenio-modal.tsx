@@ -208,10 +208,10 @@ export function ConvenioModal({
 				<DialogHeader className="px-6 pt-6">
 					<DialogTitle className="flex items-center gap-2">
 						<Handshake className="h-4 w-4 text-blue-700 dark:text-blue-300" />
-						Convenio de Pago - {clienteNombre}
+						Convenio de pago - {clienteNombre}
 					</DialogTitle>
 					<DialogDescription>
-						Toma la deuda de las cuotas elegidas más la mora vigente y la
+						Toma la deuda de las cuotas seleccionadas más la mora vigente y la
 						reparte en cuotas mensuales que se cobran junto con la cuota normal.
 						Al crearse, la mora se elimina y el crédito pasa a En Convenio;
 						queda pendiente de activación en cartera.
@@ -413,7 +413,7 @@ export function ConvenioModal({
 								id="convenio-motivo"
 								value={motivo}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ejemplo: cliente solicita convenio por dificultades económicas temporales"
+								placeholder="Ej.: cliente solicita convenio por dificultades económicas temporales"
 								rows={2}
 								required
 							/>

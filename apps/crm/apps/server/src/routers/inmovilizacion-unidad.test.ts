@@ -963,7 +963,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 		).rejects.toMatchObject({
 			code: "CONFLICT",
 			message:
-				"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+				"La unidad GPS del vehículo cambió durante la solicitud. Intente de nuevo.",
 		});
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
@@ -1068,7 +1068,7 @@ describe("CB-041 — decidirInmovilizacion", () => {
 			};
 			await expect(aprobar()).rejects.toMatchObject({
 				code: "CONFLICT",
-				message: expect.stringContaining("Rechazá esta solicitud"),
+				message: expect.stringContaining("Rechace esta solicitud"),
 			});
 			expect(inmovilizacionExistente?.estado).toBe("pendiente_aprobacion");
 		});
@@ -1099,7 +1099,7 @@ describe("CB-041 — decidirInmovilizacion", () => {
 			} as never);
 			await expect(aprobar()).rejects.toMatchObject({
 				code: "CONFLICT",
-				message: expect.stringContaining("Rechazá la solicitud"),
+				message: expect.stringContaining("Rechace la solicitud"),
 			});
 			expect(inmovilizacionExistente?.estado).toBe("pendiente_aprobacion");
 		});
@@ -1239,7 +1239,7 @@ describe("CB-041 — ejecución del apagado (ejecutarApagado)", () => {
 		);
 
 		expect(res.advertencia).toContain("B0");
-		expect(res.advertencia).toContain("solicitá la reactivación");
+		expect(res.advertencia).toContain("solicite la reactivación");
 		expect(inmovilizacionExistente.estado).toBe("ejecutada");
 		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(false);
 		const evento = eventosInsertados.find(
@@ -2789,7 +2789,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 		expect(inmovilizacionesInsertadas).toHaveLength(1);
 	});
 
-	it("'50% + promesa' exige las dos cosas", async () => {
+	it("'Pago parcial + promesa' exige las dos cosas", async () => {
 		conApagadoVigente();
 		promesaActivaMock = null;
 		await expect(

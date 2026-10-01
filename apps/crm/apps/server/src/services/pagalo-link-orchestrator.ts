@@ -2271,7 +2271,7 @@ export async function regenerarLinkIndividual(params: {
 	);
 	if (linkViejo.generation !== generacionMaxima) {
 		throw new Error(
-			`Este link es la generación ${linkViejo.generation}, pero ya existe una generación ${generacionMaxima} más reciente del mismo tipo — regenerá esa, no esta.`,
+			`Este link es la generación ${linkViejo.generation}, pero ya existe una generación ${generacionMaxima} más reciente del mismo tipo. Regenere esa, no esta.`,
 		);
 	}
 

@@ -179,7 +179,7 @@ export async function notificarInmovilizacionResuelta(params: {
 		// supervisor), así que el aviso le dice qué sigue.
 		const descripcion =
 			params.decision === "aprobada"
-				? `El supervisor aprobó ${params.accion === "apagado" ? "el apagado" : "la reactivación"} de la unidad. Pedile a LEGION que la aplique y, cuando lo confirme, registralo en la Ficha 360 con su confirmación.`
+				? `El supervisor aprobó ${params.accion === "apagado" ? "el apagado" : "la reactivación"} de la unidad. Solicite a LEGION que la aplique y, cuando lo confirme, regístrelo en la Ficha 360 con su confirmación.`
 				: `El supervisor rechazó la solicitud de ${accionTexto} de unidad. Motivo: ${params.motivoRechazo ?? "sin especificar"}.`;
 
 		// Apagado y reactivación aprobados los ejecuta quien lleva el crédito en
@@ -227,7 +227,7 @@ export async function notificarLlamarCliente(params: {
 		const quien = params.clienteNombre?.trim() || "El cliente";
 		await db.insert(notifications).values({
 			titulo: "Llamar al cliente: unidad apagada",
-			descripcion: `Se ejecutó el apagado de la unidad. Llamá a ${quien} y registrá la llamada en la Ficha 360.`,
+			descripcion: `Se ejecutó el apagado de la unidad. Llame a ${quien} y registre la llamada en la Ficha 360.`,
 			type: "action_required" as const,
 			status: "pending" as const,
 			cobrosTipo: "inmovilizacion_llamar_cliente" as const,
@@ -288,7 +288,7 @@ export async function notificarUnidadReactivada(params: {
 		const quien = params.clienteNombre?.trim() || "el cliente";
 		await db.insert(notifications).values({
 			titulo: "Llamar al cliente: unidad reactivada",
-			descripcion: `LEGION ya reactivó la unidad. Llamá a ${quien} para confirmarle que puede volver a usar el vehículo y registrá la gestión en la Ficha 360.`,
+			descripcion: `LEGION ya reactivó la unidad. Llame a ${quien} para confirmarle que puede volver a usar el vehículo y registre la gestión en la Ficha 360.`,
 			type: "action_required" as const,
 			status: "pending" as const,
 			cobrosTipo: "inmovilizacion_llamar_cliente" as const,
@@ -466,7 +466,7 @@ export async function recordarInmovilizacionesSinEjecutar(
 						p.accion === "apagado"
 							? "Apagado aprobado sin ejecutar"
 							: "Reactivación aprobada sin ejecutar",
-					descripcion: `Hace más de un día se aprobó ${p.accion === "apagado" ? "el apagado" : "la reactivación"} de esta unidad y todavía no se registró su ejecución. Coordiná con LEGION y registralo en la Ficha 360.`,
+					descripcion: `Hace más de un día se aprobó ${p.accion === "apagado" ? "el apagado" : "la reactivación"} de esta unidad y todavía no se registró su ejecución. Coordine con LEGION y regístrelo en la Ficha 360.`,
 					type: "action_required" as const,
 					status: "pending" as const,
 					cobrosTipo: "inmovilizacion_ejecutar_pendiente" as const,
@@ -532,7 +532,7 @@ export async function notificarEjecucionASupervisores(params: {
 			.values(
 				supervisores.map((supervisorId) => ({
 					titulo: esApagado ? "Apagado ejecutado" : "Reactivación ejecutada",
-					descripcion: `${quien?.name ?? "Un asesor"} registró que LEGION ${esApagado ? "apagó" : "reactivó"} la unidad ${deQuien}. Revisá la confirmación en la Ficha 360.${params.advertencia ? ` ${params.advertencia}` : ""}`,
+					descripcion: `${quien?.name ?? "Un asesor"} registró que LEGION ${esApagado ? "apagó" : "reactivó"} la unidad ${deQuien}. Revise la confirmación en la Ficha 360.${params.advertencia ? ` ${params.advertencia}` : ""}`,
 					type: "aviso" as const,
 					status: "pending" as const,
 					cobrosTipo: esApagado

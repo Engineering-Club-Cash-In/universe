@@ -172,7 +172,7 @@ export function GpsVehiculoCard({
 							<Input
 								id={`motivo-gps-${vehicleId}`}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej: Cliente en mora crítica, ubicar para gestión de recuperación"
+								placeholder="Ej.: Cliente en mora crítica, ubicar para gestión de recuperación"
 								value={motivo}
 							/>
 						</div>
@@ -365,7 +365,7 @@ function CorregirVinculo({
 				size="sm"
 				variant="link"
 			>
-				¿No es esta la unidad? Cambiarla
+				¿No es la unidad correcta? Cambiar unidad
 			</Button>
 		);
 	}
@@ -463,7 +463,7 @@ function SelectorUnidad({
 			<div>
 				<Label className="text-xs" htmlFor={`buscar-unidad-${vehicleId}`}>
 					{candidatos.length > 0
-						? "¿Ninguna es la correcta? Buscar otra unidad en el catálogo de La Legión"
+						? "Buscar otra unidad en el catálogo de La Legión"
 						: "Buscar unidad en el catálogo de La Legión"}
 				</Label>
 				<Input
@@ -590,7 +590,7 @@ function TrackingLinkDialog({
 								id="nota-tracking"
 								maxLength={200}
 								onChange={(e) => setNota(e.target.value)}
-								placeholder="Ej: Entrega a gestor de recuperación"
+								placeholder="Ej.: Entrega a gestor de recuperación"
 								value={nota}
 							/>
 						</div>

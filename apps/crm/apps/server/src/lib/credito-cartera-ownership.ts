@@ -45,7 +45,7 @@ export function assertCreditoAsignadoEnCartera(params: {
 
 	if (!delCredito || !delUsuario || delCredito !== delUsuario) {
 		throw new ORPCError("FORBIDDEN", {
-			message: `Este crédito no está asignado a vos en cartera; no podés ${params.accion}.`,
+			message: `Este crédito no está asignado a usted en cartera; no puede ${params.accion}.`,
 		});
 	}
 }

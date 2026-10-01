@@ -82,7 +82,7 @@ const CATEGORIA_CONFIG: Record<
 	},
 	por_vencer: {
 		label: "Por vencer",
-		descripcion: "Se acerca la fecha comprometida — dales seguimiento",
+		descripcion: "Se acerca la fecha comprometida — requieren seguimiento",
 		icon: Clock,
 		card: "border-sky-200 dark:border-sky-900/50",
 		iconWrap: "bg-sky-100 dark:bg-sky-900/40",
@@ -242,7 +242,7 @@ function RouteComponent() {
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
-						No tienes permisos para acceder a la sección de cobros.
+						No tiene permisos para acceder a la sección de cobros.
 					</p>
 				</div>
 			</div>
@@ -256,12 +256,12 @@ function RouteComponent() {
 			<div>
 				<h1 className="flex items-center gap-2 font-bold text-3xl">
 					<Target className="h-7 w-7 text-primary" />
-					Alertas de Promesas
+					Alertas de Promesas de Pago
 				</h1>
 				<p className="text-muted-foreground">
 					{esSupervisor
-						? "Promesas del equipo que requieren seguimiento — vencidas, de hoy y próximas a vencer"
-						: "Tus promesas que requieren seguimiento — vencidas, de hoy y próximas a vencer"}
+						? "Promesas de pago del equipo que requieren seguimiento — vencidas, de hoy y próximas a vencer"
+						: "Sus promesas de pago que requieren seguimiento — vencidas, de hoy y próximas a vencer"}
 				</p>
 			</div>
 
@@ -305,10 +305,10 @@ function RouteComponent() {
 					<CardContent className="flex flex-col items-center justify-center py-12">
 						<Target className="mb-4 h-12 w-12 text-muted-foreground/40" />
 						<p className="font-medium text-lg text-muted-foreground">
-							No hay promesas por atender
+							No hay promesas de pago por atender
 						</p>
 						<p className="text-muted-foreground text-sm">
-							Cuando registres una promesa de pago aparecerá aquí antes de que
+							Cuando registre una promesa de pago, aparecerá aquí antes de que
 							venza.
 						</p>
 					</CardContent>

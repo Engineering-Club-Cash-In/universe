@@ -204,6 +204,7 @@ import {
 } from "../services/pagalo-link-orchestrator";
 import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
 import { checklistDelCaso } from "../services/recuperacion-checklist";
+import { leerCatalogoJustificaciones } from "../services/recuperacion-justificaciones";
 import { crearSolicitudRecuperacion } from "../services/recuperacion-solicitud";
 import {
 	prepararEnvioRecuperacion,
@@ -614,7 +615,7 @@ export const createContactoCobrosSchema = z
 			v.cuotaFin != null ||
 			v.incluyeMora,
 		{
-			message: "Indica un rango de cuotas, marca que incluye mora, o ambos",
+			message: "Indique un rango de cuotas, marque que incluye mora, o ambos",
 			path: ["incluyeMora"],
 		},
 	)
@@ -624,7 +625,7 @@ export const createContactoCobrosSchema = z
 			v.cuotaFin == null ||
 			v.cuotaFin >= v.cuotaInicio,
 		{
-			message: "cuotaFin debe ser mayor o igual a cuotaInicio",
+			message: "La cuota final debe ser mayor o igual que la cuota inicial",
 			path: ["cuotaFin"],
 		},
 	)
@@ -654,7 +655,7 @@ export const createContactoCobrosSchema = z
 		// importar incluyeMora.
 		(v) => (v.cuotaInicio == null) === (v.cuotaFin == null),
 		{
-			message: "Debes indicar ambas cuotas (desde y hasta) o ninguna",
+			message: "Indique ambas cuotas (desde y hasta) o ninguna",
 			path: ["cuotaFin"],
 		},
 	)
@@ -2005,7 +2006,7 @@ export const cobrosRouter = {
 				if (filas.length === 0) {
 					throw new ORPCError("CONFLICT", {
 						message:
-							"La promesa ya no está activa (fue cerrada o venció); registra una nueva.",
+							"La promesa de pago ya no está activa (fue cerrada o venció). Registre una nueva.",
 					});
 				}
 			} else {
@@ -2014,7 +2015,7 @@ export const cobrosRouter = {
 				if (esPromesa && (await promesaActivaDelCaso(datos.casoCobroId))) {
 					throw new ORPCError("CONFLICT", {
 						message:
-							"Ya existe una promesa activa para este caso; editala en vez de crear otra.",
+							"Ya existe una promesa de pago activa para este caso. Edítela en lugar de crear otra.",
 					});
 				}
 				// CB-128 (AC-2): bucket del crédito AL MOMENTO de la gestión. Se
@@ -3113,7 +3114,7 @@ export const cobrosRouter = {
 						bucketActual?.bucket == null
 							? "El crédito no tiene bucket asignado todavía; un convenio se registra a partir de " +
 								`${gate.prefijoMinimo}`
-							: `Un convenio se registra a partir de ${gate.prefijoMinimo}; este crédito está en B${bucketActual.bucket}. Registrá una promesa de pago.`,
+							: `Un convenio se registra a partir de ${gate.prefijoMinimo}; este crédito está en B${bucketActual.bucket}. Registre una promesa de pago.`,
 				});
 			}
 
@@ -3133,12 +3134,12 @@ export const cobrosRouter = {
 			if (faltantes.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"Al convenio solo entran las cuotas vencidas y la cuota actual. Alguna de las elegidas es futura o ya no está pendiente; recargá la ficha y volvé a elegir.",
+						"Al convenio solo entran las cuotas vencidas y la cuota actual. Alguna de las seleccionadas es futura o ya no está pendiente. Actualice la ficha y vuelva a seleccionar las cuotas.",
 				});
 			}
 			if (sinRecibo.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Las cuotas ${sinRecibo.join(", ")} no tienen recibo en cartera y no pueden entrar al convenio. Reportalo a contabilidad.`,
+					message: `Las cuotas ${sinRecibo.join(", ")} no tienen recibo en cartera y no pueden entrar al convenio. Repórtelo a contabilidad.`,
 				});
 			}
 			if (pagoIds.length === 0) {
@@ -3157,7 +3158,7 @@ export const cobrosRouter = {
 			const deudaTotal = Number(credito.credito.deudatotal ?? 0);
 			if (deudaTotal > 0 && montoTotal > deudaTotal) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `El monto del convenio (Q${montoTotal.toFixed(2)}) supera la deuda total del crédito (Q${deudaTotal.toFixed(2)}). Revisá el monto.`,
+					message: `El monto del convenio (Q${montoTotal.toFixed(2)}) supera la deuda total del crédito (Q${deudaTotal.toFixed(2)}). Revise el monto.`,
 				});
 			}
 
@@ -3187,7 +3188,7 @@ export const cobrosRouter = {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							error.payload.message ||
-							"Cartera rechazó el convenio. Revisá las cuotas elegidas.",
+							"Cartera rechazó el convenio. Revise las cuotas seleccionadas.",
 					});
 				}
 				console.error(
@@ -3196,7 +3197,7 @@ export const cobrosRouter = {
 				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
-						"No se pudo crear el convenio en cartera. Intentá de nuevo; si persiste, verificá en cartera que no haya quedado creado.",
+						"No se pudo crear el convenio en cartera. Intente de nuevo; si el problema persiste, verifique en cartera que no haya quedado creado.",
 				});
 			}
 
@@ -4556,7 +4557,7 @@ export const cobrosRouter = {
 				if (!PERMISSIONS.canAccessCobros(context.userRole)) {
 					console.error("❌ Sin permisos para ver historial");
 					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver este historial",
+						message: "No tiene permiso para ver este historial",
 					});
 				}
 
@@ -5392,7 +5393,7 @@ export const cobrosRouter = {
 				// procesado.
 				if (result.resultadoIncierto) {
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
-						message: `No se pudo confirmar si el pago se registró en cartera-back (${result.error}). NO reintentes de inmediato — verifica antes de volver a intentarlo.`,
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${result.error}). NO reintente de inmediato — verifique antes de volver a intentarlo.`,
 					});
 				}
 				throw new ORPCError("BAD_REQUEST", {
@@ -5921,7 +5922,7 @@ export const cobrosRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"El crédito o usuario enviado no corresponde al crédito consultado — refresca la página e intenta de nuevo",
+						"El crédito o usuario enviado no corresponde al crédito consultado — actualice la página e intente de nuevo",
 				});
 			}
 
@@ -6024,7 +6025,7 @@ export const cobrosRouter = {
 				if (duplicadoReciente) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Ya se registró un pago igual (mismo caso, cuota y monto) hace menos de 2 minutos. Si no fue un envío duplicado, espera un momento antes de reintentar.",
+							"Ya se registró un pago igual (mismo caso, cuota y monto) hace menos de 2 minutos. Si no fue un envío duplicado, espere un momento antes de reintentar.",
 					});
 				}
 
@@ -6112,7 +6113,7 @@ export const cobrosRouter = {
 						error,
 					);
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
-						message: `No se pudo confirmar si el pago se registró en cartera-back (${message}). NO reintentes de inmediato — contacta a soporte para verificar antes de volver a intentarlo.`,
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${message}). NO reintente de inmediato — contacte a soporte para verificar antes de volver a intentarlo.`,
 					});
 				}
 
@@ -6222,7 +6223,7 @@ export const cobrosRouter = {
 								error,
 							);
 							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message: `El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia (${message}). NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.`,
+								message: `El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia (${message}). NO reintente el pago — contacte a soporte para verificar antes de volver a registrarlo.`,
 							});
 						}
 					}
@@ -6296,7 +6297,7 @@ export const cobrosRouter = {
 					// manualmente.
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
 						message:
-							"El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+							"El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia. NO reintente el pago — contacte a soporte para verificar antes de volver a registrarlo.",
 					});
 				}
 
@@ -6330,7 +6331,7 @@ export const cobrosRouter = {
 					);
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
 						message:
-							"El pago se registró en cartera-back pero el CRM no pudo guardar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+							"El pago se registró en cartera-back pero el CRM no pudo guardar su referencia. NO reintente el pago — contacte a soporte para verificar antes de volver a registrarlo.",
 					});
 				}
 			});
@@ -8467,14 +8468,15 @@ export const cobrosRouter = {
 						v.margenAlertaTipo !== "porcentaje" || v.margenAlertaValor <= 100,
 					{
 						message:
-							"margenAlertaValor debe ser <= 100 cuando el tipo es porcentaje",
+							"El margen de alerta no puede ser mayor que 100 cuando el tipo es porcentaje",
 						path: ["margenAlertaValor"],
 					},
 				)
 				.refine(
 					(v) => v.margenAlertaTipo !== "fijo" || v.margenAlertaValor <= 500,
 					{
-						message: "margenAlertaValor debe ser <= 500 cuando el tipo es fijo",
+						message:
+							"El margen de alerta no puede ser mayor que 500 cuando el tipo es fijo",
 						path: ["margenAlertaValor"],
 					},
 				),
@@ -8576,7 +8578,7 @@ export const cobrosRouter = {
 						ctx.addIssue({
 							code: z.ZodIssueCode.custom,
 							message:
-								"La recuperación forzosa necesita el checklist de lo que ya se hizo.",
+								"La solicitud de recuperación requiere el checklist de gestión.",
 						});
 					}
 					validarDetalleRecuperacion(v.tipo, v.detalle, ctx);
@@ -8613,7 +8615,7 @@ export const cobrosRouter = {
 			if (!referencia?.carteraCreditoId) {
 				throw new ORPCError("NOT_FOUND", {
 					message:
-						"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
+						"No se encontró el crédito en cartera para este caso. Abra la ficha del crédito e intente de nuevo.",
 				});
 			}
 			// La verdad de "de quién es este crédito" la tiene cartera (hallazgo de
@@ -8624,7 +8626,7 @@ export const cobrosRouter = {
 				numeroSifco: caso.numeroCreditoSifco,
 				emailUsuario: context.session.user.email,
 				userRole: context.userRole,
-				accion: "mandarlo a recuperación de vehículo",
+				accion: "enviarlo a recuperación del vehículo",
 			});
 			// Autorizar y escribir son dos requests distintas: entre una y otra el
 			// motor o un supervisor pueden reasignar el crédito, y sin precondición
@@ -8650,7 +8652,7 @@ export const cobrosRouter = {
 					);
 					throw new ORPCError("SERVICE_UNAVAILABLE", {
 						message:
-							"No se pudo confirmar el bucket del crédito. Intentá de nuevo en un momento.",
+							"No se pudo confirmar el bucket del crédito. Intente de nuevo en un momento.",
 					});
 				});
 			if (operacionRecuperacion(input.tipo, bucket) !== "trasladar") {
@@ -8668,16 +8670,23 @@ export const cobrosRouter = {
 				});
 			}
 
-			// CB-043: la forzosa SIEMPRE es una solicitud, la pida quien la pida
+			// CB-043: la recuperación SIEMPRE es una solicitud, la pida quien la pida
 			// (también un supervisor o un admin): nada se mueve a B4 sin que
 			// alguien la apruebe. El checklist se arma otra vez acá, con lo que el
 			// CRM tiene HOY, y se le suman las justificaciones de quien pide.
 			if (input.tipo === "tomado") {
-				const { pasos } = await checklistDelCaso({
-					casoCobroId: input.casoCobroId,
-					creditoId: referencia.carteraCreditoId,
-				});
-				const combinado = combinarChecklist(pasos, input.checklist ?? []);
+				const [{ pasos }, catalogo] = await Promise.all([
+					checklistDelCaso({
+						casoCobroId: input.casoCobroId,
+						creditoId: referencia.carteraCreditoId,
+					}),
+					leerCatalogoJustificaciones(),
+				]);
+				const combinado = combinarChecklist(
+					pasos,
+					input.checklist ?? [],
+					catalogo,
+				);
 				if ("error" in combinado) {
 					throw new ORPCError("BAD_REQUEST", { message: combinado.error });
 				}
@@ -8728,7 +8737,7 @@ export const cobrosRouter = {
 						message:
 							err instanceof Error
 								? err.message
-								: "No se pudo enviar el crédito a recuperación de vehículo",
+								: "No se pudo enviar el crédito a recuperación del vehículo",
 					});
 				}
 				res = resolucion.traslado;
@@ -8879,7 +8888,7 @@ export const cobrosRouter = {
 			if (!convenio) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"Este crédito no tiene un convenio vigente que deshacer. Si el convenio está esperando aprobación, lo que corresponde es rechazarlo.",
+						"Este crédito no tiene un convenio vigente para deshacer. Si el convenio está pendiente de aprobación, corresponde rechazarlo.",
 				});
 			}
 

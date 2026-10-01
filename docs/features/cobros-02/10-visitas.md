@@ -45,16 +45,26 @@ La visita no duplica nada: registra qué pasó y abre el flujo de siempre.
 
 | Resultado | Gestión en `contactos_cobros` | Qué abre al guardar |
 | --- | --- | --- |
-| Pago | `contactado` | Nada. El pago se registra con "Registrar Pago" (link o boleta); la tarjeta muestra esos dos botones |
-| Promesa | `contactado` | El modal de **promesa de pago** de siempre (congela en cartera, mide cumplimiento), con el canal de la visita |
-| 50% + promesa | `acuerdo_parcial` | Las dos cosas: el monto recibido queda en la visita y se abre la promesa por el resto |
+| Pago total | `contactado` | Nada. El monto es lo vencido completo (no se teclea). El pago se registra con "Registrar Pago" (link o boleta); la tarjeta muestra esos dos botones |
+| Promesa de pago | `contactado` | El modal de **promesa de pago** de siempre (congela en cartera, mide cumplimiento), con el canal de la visita |
+| Pago parcial + promesa | `acuerdo_parcial` | Las dos cosas: el asesor indica el **porcentaje** que pagó, el monto queda en la visita y se abre la promesa por el saldo |
+| Convenio de pago | `contactado` | El modal de **convenio de pago** (CB-032). Si se cierra sin crearlo, la tarjeta muestra "Falta registrar el convenio" mientras el crédito no tenga convenio |
 | Entrega voluntaria | `contactado` | El formulario de **entrega voluntaria de CB-042**, con el lugar y la fecha de la visita ya puestos. De B3 traslada a B4; en B4 solo registra ([doc 7](./07-recuperacion-de-vehiculo.md)) |
 | Sin contacto | `no_contesta` | Nada. Se pide el motivo: no estaba, ya no vive o trabaja ahí, la dirección no existe, no abrieron, otro |
 
-**El 50%** se calcula sobre la deuda vencida: cuotas vencidas × cuota + mora
-(decisión del 2026-09-29, la misma regla Mora+Cuota del modal de promesa). Es una
-referencia para el asesor y no bloquea si el cliente paga otro monto. La promesa que se
-abre después sugiere lo que falta.
+**El monto pagado no se teclea** (pedido del PM, 2026-10-01). La base es la deuda vencida:
+cuotas vencidas × cuota + mora (la misma regla Mora+Cuota del modal de promesa). «Pago
+total» es esa deuda completa; en «Pago parcial + promesa» el asesor pone el porcentaje
+(1 a 99, con atajos de 25, 50 y 75 %) y el formulario muestra el monto y el saldo. Antes
+era un 50 % fijo; el valor guardado sigue siendo `pago_parcial_promesa`, y la gestión del
+historial dice el porcentaje. Solo si el caso no trae cuotas o mora se pide el monto a mano.
+
+La promesa que se abre después propone el saldo y es **la única promesa con el monto
+editable**: en las demás el monto sale de las cuotas marcadas más la mora y no se edita.
+El convenio tampoco deja editar el monto total.
+
+Los **comentarios son obligatorios** (al menos 10 caracteres); el próximo paso sigue
+opcional.
 
 Si el asesor cierra la promesa o la entrega sin terminarla, la visita queda con el aviso
 **"Falta registrar la promesa"** o **"Falta registrar la entrega"** y un botón para
@@ -62,7 +72,7 @@ retomarla. El vínculo vive en la visita (`promesa_contacto_id`, `recuperacion_i
 servidor no deja colgar una promesa o una entrega de una visita de otro caso, o de una
 cuyo resultado no la pedía.
 
-## Quién va (responsable)
+## Responsable de la visita
 
 Sigue la regla de la casa: **la asignación la da cartera**
 ([doc 2](./02-motor-y-asignacion.md#el-crm-no-asigna-2026-09-28)). Puede ir quien puede
@@ -115,9 +125,10 @@ El formulario está pensado para llenarse **en el lugar**:
   permite elegir varias.
 - Cada foto se achica en el teléfono antes de subirse (JPEG, lado mayor 1600 px): una
   foto de celular pesa 3-8 MB y se sube con datos móviles.
-- **"Guardar mi ubicación"** (opcional, con permiso del navegador) deja la posición del
-  celular como respaldo de que la visita ocurrió. La tarjeta la muestra con un enlace a
-  Google Maps.
+- **"Registrar mi ubicación actual"** (opcional, con permiso del navegador) es un botón
+  propio, a lo ancho, y deja la posición del celular como respaldo de que la visita
+  ocurrió. Toma el punto donde está el teléfono en ese momento, así que se usa solo en el
+  lugar de la visita. La tarjeta la muestra con un enlace a Google Maps.
 - En B4 se puede abrir, desde el mismo formulario, la tarjeta de **ubicaciones clave del
   GPS** (CB-119), con su motivo auditado. En B3 no se ofrece: esas ubicaciones son solo
   para B4 (D-15).

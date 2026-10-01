@@ -228,7 +228,7 @@ const CHIPS: Array<{
 	},
 	{
 		key: "promesa_hoy",
-		label: "Promesas vencen hoy",
+		label: "Promesas que vencen hoy",
 		icon: CalendarClock,
 		activo:
 			"border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
@@ -647,8 +647,8 @@ function MiDiaPage() {
 					Buen día{primerNombre ? `, ${primerNombre}` : ""}
 				</h1>
 				<p className="text-muted-foreground">
-					Este es el estado de tu cartera hoy. Prioriza la mora temprana y
-					protege tu recuperación.
+					Este es el estado de su cartera hoy. Priorice la mora temprana y
+					proteja su recuperación.
 				</p>
 			</div>
 
@@ -755,17 +755,18 @@ function MiDiaPage() {
 								</div>
 							) : sinAsesorAgenda ? (
 								<p className="text-muted-foreground text-sm">
-									Tu usuario no está vinculado a un asesor de cartera (por
-									correo). Pedile al supervisor que revise tu correo de asesor.
+									Su usuario no está vinculado a un asesor de cartera (por
+									correo). Solicite al supervisor que revise su correo de
+									asesor.
 								</p>
 							) : ausenteAgenda ? (
 								<p className="text-muted-foreground text-sm">
-									Estás registrado como ausente hoy: tu agenda la está
-									trabajando tu suplente.
+									Hoy está registrado como ausente: su suplente está trabajando
+									su agenda.
 								</p>
 							) : resumenProximosDias.total === 0 && !errorAgenda ? (
 								<p className="text-muted-foreground text-sm">
-									No tenés vencimientos durante próximos cinco días.
+									No tiene vencimientos en los próximos cinco días.
 								</p>
 							) : (
 								proximosDias
@@ -844,7 +845,7 @@ function MiDiaPage() {
 							</h2>
 							<p className="text-muted-foreground text-xs">
 								{enCartera
-									? "Todos tus créditos, ordenados por proximidad de pago."
+									? "Todos sus créditos, ordenados por proximidad de pago."
 									: "Ordenados por prioridad de bucket y días de mora."}
 							</p>
 						</div>
@@ -893,22 +894,22 @@ function MiDiaPage() {
 						</div>
 					) : (enCartera ? carteraQuery : colaQuery).isError ? (
 						<div className="py-10 text-center text-destructive text-sm">
-							Error al cargar la cartera. Intentá recargar la página.
+							Error al cargar la cartera. Recargue la página.
 						</div>
 					) : !enCartera && sinAsesor ? (
 						<div className="py-10 text-center text-muted-foreground text-sm">
-							Tu usuario no está vinculado a un asesor de cartera (por correo).
-							Pedile al supervisor que revise tu correo de asesor.
+							Su usuario no está vinculado a un asesor de cartera (por correo).
+							Solicite al supervisor que revise su correo de asesor.
 						</div>
 					) : !enCartera && ausente ? (
 						<div className="py-10 text-center text-muted-foreground text-sm">
-							Estás registrado como ausente hoy: tu agenda la está trabajando tu
-							suplente. Tu cartera sigue siendo tuya.
+							Hoy está registrado como ausente: su suplente está trabajando su
+							agenda. Su cartera sigue asignada a usted.
 						</div>
 					) : enCartera ? (
 						carteraTotal === 0 ? (
 							<div className="py-10 text-center text-muted-foreground text-sm">
-								No tienes créditos asignados todavía.
+								Aún no tiene créditos asignados.
 							</div>
 						) : (
 							<>
@@ -995,7 +996,7 @@ function MiDiaPage() {
 						<div className="py-10 text-center text-muted-foreground text-sm">
 							{filtro
 								? "Sin casos en esta categoría hoy."
-								: "Sin casos pendientes por hoy. 🎉"}
+								: "No hay casos pendientes para hoy."}
 							<div className="mt-3">
 								<Button
 									variant="outline"
@@ -1017,7 +1018,7 @@ function MiDiaPage() {
 											<TableHead>Bucket</TableHead>
 											<TableHead>Categoría</TableHead>
 											<TableHead>Límite SLA</TableHead>
-											<TableHead>Promesa</TableHead>
+											<TableHead>Promesa de pago</TableHead>
 											<TableHead>Teléfono</TableHead>
 										</TableRow>
 									</TableHeader>

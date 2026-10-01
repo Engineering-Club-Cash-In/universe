@@ -66,7 +66,7 @@ import { client, orpc } from "@/utils/orpc";
 // (Codex, PR #1147). Centralizado para que un cambio de mensaje o condición
 // no pueda desincronizarse entre las 3 copias.
 const MENSAJE_RANGO_O_MORA_REQUERIDO =
-	"Indica un rango de cuotas, marca que incluye mora, o ambos";
+	"Indique un rango de cuotas, marque que incluye mora, o ambos";
 
 function faltaRangoOMora(
 	cuotaInicio: number | null | undefined,
@@ -728,7 +728,7 @@ export function ContactoModal({
 			registrarTrasEnvio("WhatsApp");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando WhatsApp"),
+			toast.error(error?.message || "Error al enviar el WhatsApp"),
 	});
 
 	const emailApiMutation = useMutation({
@@ -748,7 +748,7 @@ export function ContactoModal({
 			registrarTrasEnvio("Email");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando email"),
+			toast.error(error?.message || "Error al enviar el correo"),
 	});
 
 	const smsApiMutation = useMutation({
@@ -764,7 +764,7 @@ export function ContactoModal({
 			registrarTrasEnvio("SMS");
 		},
 		onError: (error: any) =>
-			toast.error(error?.message || "Error enviando SMS"),
+			toast.error(error?.message || "Error al enviar el SMS"),
 	});
 
 	// Incluye el registro automático: si solo mirara los envíos, el botón se
@@ -920,10 +920,10 @@ export function ContactoModal({
 					</DialogTitle>
 					<DialogDescription>
 						{esEdicion
-							? "Este caso ya tiene una promesa activa. Estás editándola (no se crea otra)."
+							? "Este caso ya tiene una promesa de pago activa. Está editando esa promesa (no se crea otra)."
 							: esPromesa
-								? "Registra lo hablado y la fecha en la que el cliente prometió pagar."
-								: "Registra los detalles de la interacción con el cliente y programa el próximo seguimiento."}
+								? "Registre lo conversado y la fecha en la que el cliente prometió pagar."
+								: "Registre los detalles de la interacción con el cliente y programe el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -1133,7 +1133,7 @@ export function ContactoModal({
 													<Label>Duración de la Llamada (segundos)</Label>
 													<Input
 														type="number"
-														placeholder="Ej: 180"
+														placeholder="Ej.: 180"
 														value={field.state.value}
 														onChange={(e) =>
 															field.handleChange(Number(e.target.value))
@@ -1167,8 +1167,8 @@ export function ContactoModal({
 									<Textarea
 										placeholder={
 											esPromesa
-												? "Describe qué se habló, qué acordó y cualquier detalle del compromiso del cliente."
-												: "Describe qué se habló en el contacto, la actitud del cliente, etc."
+												? "Describa lo conversado, lo acordado y cualquier detalle del compromiso del cliente."
+												: "Describa lo conversado en el contacto, la actitud del cliente, etc."
 										}
 										className="min-h-[72px]"
 										value={field.state.value}
@@ -1242,9 +1242,10 @@ export function ContactoModal({
 					    alternarCuotaPromesa); Mora es independiente. */}
 					{esPromesa && (
 						<div className="space-y-3">
-							<h3 className="font-semibold text-base">¿Qué prometió pagar?</h3>
+							<h3 className="font-semibold text-base">Conceptos a pagar</h3>
 							<p className="text-muted-foreground text-sm">
-								Arranca con todo lo atrasado + mora; destilda lo que no aplique.
+								Se incluyen todas las cuotas atrasadas y la mora; desmarque lo
+								que no aplique.
 							</p>
 
 							<div className="overflow-hidden rounded-lg border">
@@ -1561,7 +1562,7 @@ export function ContactoModal({
 							<form.Field name="fechaAlerta">
 								{(field) => (
 									<div className="space-y-2">
-										<Label>Avisarme el (opcional)</Label>
+										<Label>Fecha de aviso (opcional)</Label>
 										<Popover>
 											<PopoverTrigger asChild>
 												<Button
@@ -1607,8 +1608,8 @@ export function ContactoModal({
 											</PopoverContent>
 										</Popover>
 										<p className="text-muted-foreground text-xs">
-											Te recordamos ese día para darle seguimiento antes de que
-											venza.
+											Ese día recibirá un recordatorio para dar seguimiento
+											antes de que venza.
 										</p>
 									</div>
 								)}
@@ -1621,12 +1622,10 @@ export function ContactoModal({
 						<form.Field name="proximoPaso">
 							{(field) => (
 								<div className="space-y-2">
-									<Label htmlFor="proximoPaso">
-										¿Cuál es el próximo paso? (opcional)
-									</Label>
+									<Label htmlFor="proximoPaso">Próximo paso (opcional)</Label>
 									<Textarea
 										id="proximoPaso"
-										placeholder="Ej. Llamar de nuevo, enviar carta notarial, escalar a jurídico..."
+										placeholder="Ej.: llamar de nuevo, enviar carta notarial, escalar a jurídico..."
 										value={field.state.value}
 										onChange={(e) => field.handleChange(e.target.value)}
 									/>

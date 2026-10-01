@@ -138,3 +138,7 @@ Contrato completo: [`docs/features/bot-whatsapp-cobros/06-historial-interaccione
 ## Utilities
 - Always use zsh as the default shell
 - All texts must be in spanish when facing client side
+- Cobros (rutas `/cobros/*`, `components/cobros/`, mensajes y avisos del servidor de cobros):
+  todo texto visible sigue la [guía de redacción](../../docs/features/cobros-02/12-guia-de-redaccion.md)
+  — trato de usted, nunca voseo ni tuteo ("Seleccione", no "Elegí"); etiquetas con sustantivos
+  ("Responsable de la visita", no "Quién va"); "recuperación del vehículo", no "forzosa".

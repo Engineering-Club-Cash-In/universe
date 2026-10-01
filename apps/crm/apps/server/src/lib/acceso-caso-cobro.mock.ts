@@ -55,7 +55,7 @@ export function moduloAccesoFalso(opciones: {
 			if (opciones.carteraFalla?.()) {
 				throw new ORPCError("SERVICE_UNAVAILABLE", {
 					message:
-						"No se pudo confirmar en cartera quién lleva este crédito. Intentá de nuevo en un momento.",
+						"No se pudo confirmar en cartera el asesor de este crédito. Intente de nuevo en un momento.",
 				});
 			}
 			return dueno();

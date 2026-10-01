@@ -3,7 +3,9 @@
  *
  *  · `ChecklistFormulario` — lo llena quien pide. Cada paso llega con lo que el
  *    CRM (o cartera) encontró —llamadas, convenio, visitas, referencias,
- *    apagado…—; lo que no está hecho se justifica. Nada se marca a mano.
+ *    apagado…—; lo que no está hecho se justifica con una de las razones de
+ *    ESE paso (catálogo en la base, `opciones`). Nada se marca a mano y la
+ *    nota es siempre opcional.
  *  · `ChecklistVista` — lo lee el supervisor antes de decidir, y el asesor de
  *    B4 cuando le llega el crédito.
  *
@@ -25,11 +27,8 @@ import {
 	ESTADO_SOLICITUD_LABEL,
 	type EstadoPaso,
 	type EstadoSolicitudRecuperacion,
-	etiquetaJustificacion,
-	JUSTIFICACIONES_CON_NOTA,
-	JUSTIFICACIONES_PASO,
-	type JustificacionPaso,
 	MIN_MOTIVO_RECHAZO,
+	type OpcionJustificacion,
 	type PasoChecklist,
 	type RespuestaPasoInput,
 	resumenChecklist,
@@ -121,7 +120,7 @@ export function ChecklistVista({ pasos }: { pasos: PasoChecklist[] }) {
 								)}
 								{p.justificacion && (
 									<p className="text-amber-800 text-xs dark:text-amber-300">
-										Justificación: {etiquetaJustificacion(p.justificacion)}
+										Justificación: {p.justificacionEtiqueta ?? p.justificacion}
 									</p>
 								)}
 								{p.nota && <p className="text-xs">“{p.nota}”</p>}
@@ -142,7 +141,11 @@ export type PasoParaLlenar = {
 	ayuda: string;
 	estado: EstadoPaso;
 	evidencia: string;
-	sugerencia: JustificacionPaso | null;
+	/** "¿Por qué no hay llamadas al cliente?", etc. */
+	pregunta: string;
+	/** Las razones activas de este paso (del catálogo en la base). */
+	opciones: readonly OpcionJustificacion[];
+	sugerencia: string | null;
 };
 
 export type RespuestasChecklist = Record<string, RespuestaPasoInput>;
@@ -182,9 +185,6 @@ export function ChecklistFormulario({
 				const estado = p.estado;
 				const { Icono, clase } = ICONO_PASO[estado];
 				const falta = mostrarFaltantes ? faltantes[p.paso] : null;
-				const necesitaNota =
-					r?.justificacion != null &&
-					JUSTIFICACIONES_CON_NOTA.includes(r.justificacion);
 				return (
 					<li
 						key={p.paso}
@@ -202,35 +202,30 @@ export function ChecklistFormulario({
 						</div>
 
 						{estado !== "hecho" && (
-							<div className="ml-6.5">
+							<div className="ml-6.5 space-y-1">
+								<Label
+									htmlFor={`justificacion-${p.paso}`}
+									className="font-normal text-muted-foreground text-xs"
+								>
+									{p.pregunta || "Motivo por el que no se realizó"}
+								</Label>
 								<Select
 									value={r?.justificacion ?? ""}
-									onValueChange={(v) =>
-										onChange(p.paso, {
-											justificacion: v as JustificacionPaso,
-										})
-									}
+									onValueChange={(v) => onChange(p.paso, { justificacion: v })}
 								>
 									<SelectTrigger
+										id={`justificacion-${p.paso}`}
 										aria-label={`Justificación de ${p.titulo}`}
 										className="h-8 text-sm"
 									>
-										<SelectValue
-											placeholder={
-												estado === "parcial"
-													? "¿Por qué quedó a medias?"
-													: "¿Por qué no se hizo?"
-											}
-										/>
+										<SelectValue placeholder="Seleccionar justificación" />
 									</SelectTrigger>
 									<SelectContent>
-										{Object.entries(JUSTIFICACIONES_PASO).map(
-											([clave, label]) => (
-												<SelectItem key={clave} value={clave}>
-													{label}
-												</SelectItem>
-											),
-										)}
+										{p.opciones.map((o) => (
+											<SelectItem key={o.clave} value={o.clave}>
+												{o.etiqueta}
+											</SelectItem>
+										))}
 									</SelectContent>
 								</Select>
 							</div>
@@ -243,11 +238,7 @@ export function ChecklistFormulario({
 									className="h-8 text-sm"
 									value={r?.nota ?? ""}
 									onChange={(e) => onChange(p.paso, { nota: e.target.value })}
-									placeholder={
-										necesitaNota
-											? "Contá qué pasó (obligatorio)"
-											: "Nota (opcional)"
-									}
+									placeholder="Nota (opcional)"
 								/>
 							</div>
 						)}
@@ -291,9 +282,9 @@ export function DecidirSolicitudDialog({
 			toast.success(
 				r.decision === "aprobada"
 					? r.asesorSinCambio
-						? `Aprobada: el crédito pasó a B${r.bucketNuevo}. El asesor ya cubría ese bucket.`
-						: `Aprobada: el crédito pasó a B${r.bucketNuevo} y se reasignó. Ya se avisó.`
-					: "Solicitud rechazada. Se le avisó a quien la pidió.",
+						? `Solicitud aprobada: el crédito pasó a B${r.bucketNuevo}. El asesor ya tenía asignado ese bucket.`
+						: `Solicitud aprobada: el crédito pasó a B${r.bucketNuevo} y se reasignó. Se enviaron las notificaciones.`
+					: "Solicitud rechazada. Se notificó al solicitante.",
 			);
 			onOpenChange(false);
 		},
@@ -324,7 +315,9 @@ export function DecidirSolicitudDialog({
 						) : (
 							<XCircle className="h-5 w-5 text-red-600" />
 						)}
-						{aprobar ? "¿Aprobar la recuperación?" : "Rechazar la recuperación"}
+						{aprobar
+							? "Aprobar la recuperación del vehículo"
+							: "Rechazar la recuperación del vehículo"}
 					</DialogTitle>
 					<DialogDescription>
 						{aprobar ? (
@@ -336,8 +329,8 @@ export function DecidirSolicitudDialog({
 							</>
 						) : (
 							<>
-								{solicitud.quien} se queda en su bucket. El motivo le llega a
-								quien pidió la recuperación.
+								{solicitud.quien} permanece en su bucket. El motivo se
+								notificará a quien solicitó la recuperación.
 							</>
 						)}
 					</DialogDescription>
@@ -351,7 +344,7 @@ export function DecidirSolicitudDialog({
 							id="motivo-rechazo"
 							value={motivo}
 							onChange={(e) => setMotivo(e.target.value)}
-							placeholder="Ej: Falta visitar el lugar de trabajo antes de mandarlo a B4"
+							placeholder="Ej.: Falta visitar el lugar de trabajo antes de enviarlo a B4"
 							rows={3}
 						/>
 					</div>
@@ -368,7 +361,7 @@ export function DecidirSolicitudDialog({
 						{decidir.isPending && (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 						)}
-						{aprobar ? "Aprobar y mandar a B4" : "Rechazar"}
+						{aprobar ? "Aprobar y enviar a B4" : "Rechazar"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

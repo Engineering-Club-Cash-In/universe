@@ -63,7 +63,7 @@ function exigirLead(ctx: ContextoCaso): string {
 	if (!ctx.leadId) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"Este crédito no está enlazado a una oportunidad del CRM: no hay a quién colgarle la referencia.",
+				"Este crédito no está enlazado a una oportunidad del CRM: no se puede agregar la referencia.",
 		});
 	}
 	return ctx.leadId;
@@ -105,7 +105,7 @@ const telefonoSchema = z
 	.trim()
 	.min(1, "El teléfono es obligatorio")
 	.max(40)
-	.refine((t) => /\d/.test(t), "El teléfono tiene que traer números");
+	.refine((t) => /\d/.test(t), "El teléfono debe contener números");
 
 // Solo http(s): el enlace se pinta como <a href>, y `z.string().url()` acepta
 // también `javascript:`.
@@ -122,7 +122,7 @@ const enlaceMapaSchema = z
 
 const hallazgoBaseSchema = z.object({
 	tipo: z.enum(TIPOS_HALLAZGO),
-	valor: z.string().trim().min(1, "Escribí el dato nuevo").max(500),
+	valor: z.string().trim().min(1, "Ingrese el dato nuevo").max(500),
 	enlaceMapa: enlaceMapaSchema,
 	notas: z.string().trim().max(1000).optional(),
 });
@@ -132,7 +132,7 @@ function hallazgoTelefonoValido(h: { tipo: string; valor: string }): boolean {
 	return h.tipo !== "telefono" || /\d/.test(h.valor);
 }
 const errorHallazgoTelefono = {
-	message: "El teléfono tiene que traer números",
+	message: "El teléfono debe contener números",
 	path: ["valor"],
 };
 
@@ -337,7 +337,7 @@ export const referenciasCobrosRouter = {
 			const referencia = encontrarReferencia(referencias, input.referenciaKey);
 			if (!referencia) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "La referencia ya no existe. Recargá la ficha.",
+					message: "La referencia ya no existe. Recargue la ficha.",
 				});
 			}
 			// Se busca en TODAS las referencias del caso, no solo en la elegida:
@@ -349,7 +349,7 @@ export const referenciasCobrosRouter = {
 					message:
 						duenio.key === referencia.key
 							? "Ese teléfono ya está en la referencia."
-							: `Ese teléfono ya es de ${duenio.nombre}. Si es la misma persona, registrá la gestión desde esa referencia.`,
+							: `Ese teléfono ya es de ${duenio.nombre}. Si es la misma persona, registre la gestión desde esa referencia.`,
 				});
 			}
 			const [creado] = await db
@@ -427,7 +427,7 @@ export const referenciasCobrosRouter = {
 			const referencia = encontrarReferencia(referencias, input.referenciaKey);
 			if (!referencia) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "La referencia ya no existe. Recargá la ficha.",
+					message: "La referencia ya no existe. Recargue la ficha.",
 				});
 			}
 
@@ -439,13 +439,13 @@ export const referenciasCobrosRouter = {
 			if (!esVisita) {
 				if (!telefono) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "Elegí a qué teléfono se contactó.",
+						message: "Seleccione el teléfono al que se contactó.",
 					});
 				}
 				if (!referenciaTieneTelefono(referencia, telefono)) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Ese teléfono no es de la referencia. Agregalo primero a la referencia.",
+							"Ese teléfono no es de la referencia. Agréguelo primero a la referencia.",
 					});
 				}
 			}

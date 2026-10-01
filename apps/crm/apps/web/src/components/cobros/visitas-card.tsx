@@ -243,7 +243,8 @@ function FilaVisita({
 					{fechaHora(v.fechaProgramada)}
 					<span className="text-muted-foreground">
 						{" "}
-						· {relativo(v.fechaProgramada)} · va {v.responsable ?? "—"}
+						· {relativo(v.fechaProgramada)} · responsable:{" "}
+						{v.responsable ?? "—"}
 					</span>
 				</p>
 				<p className="break-words text-muted-foreground text-sm">
@@ -259,7 +260,7 @@ function FilaVisita({
 				)}
 				{v.programadaPor && (
 					<p className="text-muted-foreground text-xs">
-						La programó {v.programadaPor} el {fecha(v.createdAt)}
+						Programada por {v.programadaPor} el {fecha(v.createdAt)}
 					</p>
 				)}
 				{puedeGestionar && (
@@ -329,7 +330,7 @@ function FilaVisita({
 				{fechaHora(v.fechaVisita)}
 				<span className="text-muted-foreground">
 					{" "}
-					· fue {v.responsable ?? "—"}
+					· responsable: {v.responsable ?? "—"}
 				</span>
 			</p>
 			<p className="break-words text-muted-foreground text-sm">
@@ -344,7 +345,7 @@ function FilaVisita({
 							rel="noreferrer"
 							className="inline-flex items-center gap-0.5 text-primary hover:underline"
 						>
-							dónde se registró
+							ubicación registrada
 							<ExternalLink className="h-3 w-3" />
 						</a>
 					</>
@@ -393,7 +394,7 @@ function FilaVisita({
 					<span>
 						{v.falta.entrega
 							? "Falta registrar la entrega voluntaria."
-							: "Falta registrar la promesa."}
+							: "Falta registrar la promesa de pago."}
 					</span>
 					{v.falta.promesa && (
 						<Button
@@ -502,7 +503,7 @@ function CancelarVisitaDialog({
 						value={motivo}
 						onChange={(e) => setMotivo(e.target.value)}
 						rows={3}
-						placeholder="Ej: el cliente pagó antes de la visita"
+						placeholder="Ej.: el cliente pagó antes de la visita"
 					/>
 				</div>
 				<DialogFooter>
@@ -516,7 +517,9 @@ function CancelarVisitaDialog({
 					<Button
 						onClick={() => {
 							if (motivo.trim().length < 5) {
-								toast.error("Contá por qué no se hizo (mínimo 5 caracteres).");
+								toast.error(
+									"Indique el motivo de la cancelación (mínimo 5 caracteres).",
+								);
 								return;
 							}
 							cancelar.mutate();

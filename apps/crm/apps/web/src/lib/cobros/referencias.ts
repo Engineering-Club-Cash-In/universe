@@ -69,7 +69,7 @@ export const RESULTADO_REFERENCIA_LABELS: Record<
 > = {
 	dio_informacion: "Dio información del cliente",
 	pasara_mensaje: "Le pasará el mensaje al cliente",
-	sin_informacion: "Contestó, no sabe nada del cliente",
+	sin_informacion: "Contestó, pero no tiene información del cliente",
 	no_conoce_al_cliente: "Dice no conocer al cliente",
 	no_contesta: "No contesta",
 	numero_equivocado: "Número equivocado o fuera de servicio",

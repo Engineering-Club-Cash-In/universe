@@ -412,7 +412,9 @@ function FormularioVisita({
 		return undefined;
 	})();
 	const saldoParaPromesa =
-		resultado === "pago_parcial_promesa" && hayDeuda && montoPagado !== undefined
+		resultado === "pago_parcial_promesa" &&
+		hayDeuda &&
+		montoPagado !== undefined
 			? Math.max(0, Math.round((deudaVencida - montoPagado) * 100) / 100)
 			: null;
 
@@ -469,7 +471,7 @@ function FormularioVisita({
 			return `Indique el porcentaje pagado (de ${PORCENTAJE_PAGO_PARCIAL_MIN} a ${PORCENTAJE_PAGO_PARCIAL_MAX}).`;
 		}
 		if (siguientesPasos(resultado).pago && !hayDeuda && montoManualNum === null)
-			return "Indique el monto pagado en números, por ejemplo 1250.50";
+			return "Indique el monto pagado en números (Ej.: 1250.50).";
 		if (comentarios.trim().length < MIN_COMENTARIOS_VISITA)
 			return `Los comentarios son obligatorios (al menos ${MIN_COMENTARIOS_VISITA} caracteres).`;
 		if (fotos.some((f) => f.estado === "subiendo"))
@@ -751,7 +753,9 @@ function FormularioVisita({
 							<SelectTrigger className="h-10 w-full">
 								<SelectValue
 									placeholder={
-										responsables.isLoading ? "Cargando…" : "Seleccionar responsable"
+										responsables.isLoading
+											? "Cargando…"
+											: "Seleccionar responsable"
 									}
 								/>
 							</SelectTrigger>
@@ -791,7 +795,8 @@ function FormularioVisita({
 					) : (
 						<div className="space-y-1.5">
 							<Label htmlFor="visita-fecha">
-								Fecha y hora de la visita <span className="text-red-600">*</span>
+								Fecha y hora de la visita{" "}
+								<span className="text-red-600">*</span>
 							</Label>
 							<FechaHoraPicker
 								id="visita-fecha"
@@ -894,8 +899,8 @@ function FormularioVisita({
 										campoMontoManual
 									)}
 									<p className="text-muted-foreground text-xs">
-										El monto queda anotado en la visita; el pago se registra
-										en «Registrar Pago» (link o boleta).
+										El monto queda anotado en la visita; el pago se registra en
+										«Registrar Pago» (link o boleta).
 									</p>
 								</div>
 							)}
@@ -1087,8 +1092,8 @@ function FormularioVisita({
 								<span className="text-muted-foreground">(opcional)</span>
 							</Label>
 							<p className="text-muted-foreground text-xs">
-								Registra la ubicación actual del teléfono. Úselo solo si se
-								encuentra en el lugar de la visita.
+								Este botón registra la ubicación actual del teléfono. Úselo solo
+								si se encuentra en el lugar de la visita.
 							</p>
 							{ubicacion ? (
 								<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 text-sm dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
@@ -1145,7 +1150,9 @@ function FormularioVisita({
 								</Button>
 							)}
 							{avisoUbicacion && (
-								<p className="text-muted-foreground text-xs">{avisoUbicacion}</p>
+								<p className="text-muted-foreground text-xs">
+									{avisoUbicacion}
+								</p>
 							)}
 						</section>
 

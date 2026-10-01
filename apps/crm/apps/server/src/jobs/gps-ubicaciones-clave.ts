@@ -21,7 +21,8 @@
  *
  * Una unidad sin cursor (nunca procesada, o con el cursor fuera de la
  * ventana) necesita el backfill completo de 60 días; se limita a
- * `BACKFILL_MAX_POR_CORRIDA` por corrida para repartir ese costo en varias
+ * `BACKFILL_MAX_POR_CORRIDA` por corrida (rotando la ventana cada día para que
+ * unidades que fallan siempre no acaparen las plazas) para repartir ese costo en varias
  * noches. Mientras espera conserva el snapshot que ya tuviera.
  *
  * Snapshot, no acumulativo: cada corrida REEMPLAZA las filas de cada
@@ -658,7 +659,34 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	let unidadesConError = 0;
 	let unidadesPendientesBackfill = 0;
 	let ubicacionesCalculadas = 0;
-	let backfillsUsados = 0;
+
+	// Qué unidades hacen backfill esta noche. Cada intento cuenta (acota el
+	// costo aunque fallen), pero la lista rota según el día: si las primeras
+	// 100 unidades sin cursor fallan siempre (unidad inaccesible o borrada en
+	// Wialon), con un orden fijo ocuparían las mismas plazas cada noche y las
+	// demás nunca recibirían su cálculo inicial. B4 primero, y el resto avanza
+	// por una ventana distinta cada día.
+	const necesitaBackfill = (id: number) => {
+		const c = cursores.get(id);
+		return !c || c.procesadoHasta < ventanaDesde;
+	};
+	const esB4 = (id: number) =>
+		sifcosPorUnidad.get(id)!.some((s) => sifcosB4.has(s));
+	const dia = Math.floor(ahora.getTime() / MS_POR_DIA);
+	const rotar = <T>(lista: T[], plazas: number): T[] => {
+		if (lista.length === 0) return lista;
+		const k = (dia * Math.max(plazas, 1)) % lista.length;
+		return [...lista.slice(k), ...lista.slice(0, k)];
+	};
+	const candidatos = idsOrdenados.filter(necesitaBackfill);
+	const candidatosB4 = candidatos.filter(esB4);
+	const candidatosResto = candidatos.filter((id) => !esB4(id));
+	const conBackfill = new Set(
+		[
+			...rotar(candidatosB4, BACKFILL_MAX_POR_CORRIDA),
+			...rotar(candidatosResto, BACKFILL_MAX_POR_CORRIDA - candidatosB4.length),
+		].slice(0, BACKFILL_MAX_POR_CORRIDA),
+	);
 
 	// Secuencial, no en paralelo: son llamadas pesadas a Wialon para
 	// potencialmente cientos de unidades — correrlas en paralelo saturaría la
@@ -667,12 +695,9 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	for (const wialonUnitId of idsOrdenados) {
 		try {
 			const cursor = cursores.get(wialonUnitId);
-			if (!cursor || cursor.procesadoHasta < ventanaDesde) {
-				if (backfillsUsados >= BACKFILL_MAX_POR_CORRIDA) {
-					unidadesPendientesBackfill++;
-					continue;
-				}
-				backfillsUsados++;
+			if (necesitaBackfill(wialonUnitId) && !conBackfill.has(wialonUnitId)) {
+				unidadesPendientesBackfill++;
+				continue;
 			}
 
 			const resultado = await calcularUbicacionesUnidad({

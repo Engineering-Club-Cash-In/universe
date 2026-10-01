@@ -5,6 +5,7 @@ import {
 	expect,
 	it,
 	mock,
+	setSystemTime,
 	spyOn,
 } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -615,19 +616,67 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	it("las unidades en B4 hacen el backfill primero", async () => {
 		const unidades = Array.from({ length: 101 }, (_, i) => ({
 			wialonUnitId: 2000 + i,
-			numeroCreditoSifco: `0101${i}`,
+			numeroCreditoSifco: `S${i}`,
 		}));
-		// La única en B4 es la última de la lista.
-		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["010100"]);
+		// La única en B4 es la última de la lista (2100): sin prioridad quedaría
+		// fuera de las 100 plazas.
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["S100"]);
 		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue(unidades);
 		const historial = wialonMock();
 
 		await ejecutarCalculoUbicacionesClave();
 
-		expect(historial.mock.calls[0]![0]).toBe(2000);
-		const procesadas = historial.mock.calls.map((c) => c[0]);
-		expect(procesadas).toContain(2000);
-		expect(procesadas).not.toContain(2100);
+		expect(historial.mock.calls[0]![0]).toBe(2100);
+		expect(historial.mock.calls.map((c) => c[0])).toContain(2100);
+		expect(historial).toHaveBeenCalledTimes(100);
+	});
+
+	// Unidades sin cursor cuyo historial falla siempre (unidad inaccesible,
+	// borrada en Wialon…) consumían las mismas plazas cada noche y dejaban sin
+	// su backfill a todas las que venían detrás.
+	it("unidades que fallan siempre no acaparan las plazas de backfill de todas las noches", async () => {
+		const unidades = Array.from({ length: 250 }, (_, i) => ({
+			wialonUnitId: 1000 + i,
+			numeroCreditoSifco: `S${i}`,
+		}));
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue([]);
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue(unidades);
+		// Las primeras 100 fallan siempre ("incompleto"); el resto sale bien.
+		const getHistorialPosiciones = mock().mockImplementation(
+			async (unitId: number) =>
+				unitId < 1100
+					? {
+							mensajes: [],
+							completo: false,
+							tramosTotal: 9,
+							tramosCompletados: 0,
+						}
+					: historialCompleto(9),
+		);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones,
+		} as any);
+
+		const procesadasPorNoche: number[] = [];
+		try {
+			// Tres noches seguidas (la plaza se reparte por día).
+			for (const dia of [100, 101, 102]) {
+				setSystemTime(new Date(dia * DIA_MS + 8 * 3600_000));
+				const res = await ejecutarCalculoUbicacionesClave();
+				procesadasPorNoche.push(res.unidadesProcesadas);
+			}
+		} finally {
+			setSystemTime();
+		}
+
+		// En ninguna de las tres noches pueden quedar TODAS las plazas en
+		// unidades que fallan: alguna noche procesa unidades buenas, y entre las
+		// tres noches se llega a unidades distintas.
+		expect(procesadasPorNoche.some((n) => n > 0)).toBe(true);
+		const intentadas = new Set(
+			getHistorialPosiciones.mock.calls.map((c: unknown[]) => c[0]),
+		);
+		expect(intentadas.size).toBeGreaterThan(100);
 	});
 
 	it("si cartera-back falla no se salta la corrida, solo no se prioriza", async () => {

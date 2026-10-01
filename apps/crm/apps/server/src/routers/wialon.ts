@@ -19,7 +19,6 @@ import {
 	isNotNull,
 	isNull,
 	ne,
-	notLike,
 	sql,
 } from "drizzle-orm";
 import { db } from "../db";
@@ -411,7 +410,7 @@ async function bloquearUnidadWialon(tx: TransaccionDb, unitId: number) {
  *   - "error": best-effort, la consulta sigue con la unidad deducida.
  * Chequeo y escritura van en la misma transacción, con el lock de la unidad.
  */
-async function fijarVinculoPorPlaca(
+export async function fijarVinculoPorPlaca(
 	vehicleId: string,
 	unitId: number,
 	unitName: string,
@@ -511,9 +510,12 @@ async function construirRespuestaVinculada(
  *      unidad ("P-720GVH SIN APAGADO" → 720GVH) contra las placas del CRM de
  *      vehículos que todavía no tienen unidad. Es una deducción: se marca.
  *
- * Solo SIFCO reales: los "CRM-<uuid>" son identificadores internos de
- * oportunidades sin crédito en cartera y la ficha no los abre. Una unidad
- * puede devolver varios créditos (vehículo duplicado o refinanciado).
+ * Incluye los SIFCO "CRM-<uuid>": son créditos reales de cartera (alrededor de
+ * un tercio de ellos usa el id de la oportunidad como número) y la ficha los
+ * abre igual que a los numéricos. Antes se excluían por tomarlos como
+ * oportunidades sin crédito, y la unidad de esos vehículos salía sin enlace.
+ * Una unidad puede devolver varios créditos (vehículo duplicado o
+ * refinanciado).
  *
  * Best-effort: si la consulta falla (ej. 0057 sin aplicar), el catálogo se
  * muestra igual sin créditos — es información de apoyo, no el catálogo.
@@ -547,12 +549,7 @@ async function creditosPorUnidad(
 				})
 				.from(vehicles)
 				.innerJoin(opportunities, eq(opportunities.vehicleId, vehicles.id))
-				.where(
-					and(
-						isNotNull(opportunities.numeroSifco),
-						notLike(opportunities.numeroSifco, "CRM-%"),
-					),
-				),
+				.where(isNotNull(opportunities.numeroSifco)),
 			db
 				.select({
 					wialonUnitId: vehicles.wialonUnitId,
@@ -566,12 +563,7 @@ async function creditosPorUnidad(
 					eq(contratosFinanciamiento.id, casosCobros.contratoId),
 				)
 				.innerJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
-				.where(
-					and(
-						isNotNull(casosCobros.numeroCreditoSifco),
-						notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
-					),
-				),
+				.where(isNotNull(casosCobros.numeroCreditoSifco)),
 		]);
 		// Unidades por núcleo en el catálogo COMPLETO: una placa con más de una
 		// unidad es ambigua, igual que en la ficha (matchUnidadPorPlaca).

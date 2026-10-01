@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
+import { GpsUbicacionesHistorial } from "@/components/cobros/gps-ubicaciones-historial";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -140,10 +141,96 @@ export function useUbicacionesClaveQuery({
 			queryClient.invalidateQueries({
 				queryKey: orpc.getGpsConsultasCaso.key(),
 			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getUbicacionesConsultasCaso.key(),
+			});
 		}
 	}, [dataUpdatedAt, queryClient]);
 
 	return ubicaciones;
+}
+
+export type UbicacionClaveItem = {
+	id: string;
+	lat: number;
+	lon: number;
+	tipo: string;
+	horasTotales: number;
+	diasDistintos: number;
+	visitas: number;
+	patron?: unknown;
+	ultimaVisita: Date;
+};
+
+/** Lista de ubicaciones con su mapa bajo demanda; la usan la consulta en vivo y el historial. */
+export function UbicacionesClaveLista({
+	ubicaciones,
+}: {
+	ubicaciones: UbicacionClaveItem[];
+}) {
+	// Un solo mapa abierto a la vez: el iframe se monta recién al abrirlo, así
+	// que no se pide nada a Google hasta que el asesor lo pide.
+	const [mapaAbiertoId, setMapaAbiertoId] = useState<string | null>(null);
+
+	return (
+		<ul className="space-y-2">
+			{ubicaciones.map((u) => {
+				const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
+				const Icon = config.icon;
+				const mapsUrl = googleMapsUrl(u.lat, u.lon);
+				const mapaAbierto = mapaAbiertoId === u.id;
+				const patronTexto = describirPatron(u.patron, u.horasTotales);
+				return (
+					<li className="rounded-md border p-3" key={u.id}>
+						<div className="flex items-start justify-between gap-3">
+							<div className="flex items-start gap-3">
+								<Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+								<div>
+									<Badge className={config.badgeClass} variant="secondary">
+										{config.label}
+									</Badge>
+									<p className="mt-1 text-muted-foreground text-xs">
+										{Math.round(u.horasTotales)} h en total · {u.visitas}{" "}
+										visitas en {u.diasDistintos} días
+										{patronTexto ? ` · ${patronTexto}` : ""}
+									</p>
+									<p className="text-muted-foreground text-xs">
+										Última vez: {formatFechaSenal(u.ultimaVisita)}
+									</p>
+								</div>
+							</div>
+							{mapsUrl && (
+								<Button
+									aria-expanded={mapaAbierto}
+									className="shrink-0"
+									onClick={() => setMapaAbiertoId(mapaAbierto ? null : u.id)}
+									size="sm"
+									type="button"
+									variant="outline"
+								>
+									<MapIcon className="mr-1.5 h-3.5 w-3.5" />
+									{mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
+								</Button>
+							)}
+						</div>
+						{mapaAbierto && mapsUrl && (
+							<div className="mt-3 space-y-1.5">
+								<GpsMapaPreview latitude={u.lat} longitude={u.lon} />
+								<a
+									className="text-primary text-xs hover:underline"
+									href={mapsUrl}
+									rel="noreferrer"
+									target="_blank"
+								>
+									Abrir en Google Maps
+								</a>
+							</div>
+						)}
+					</li>
+				);
+			})}
+		</ul>
+	);
 }
 
 export function UbicacionesClaveResultado({
@@ -151,10 +238,6 @@ export function UbicacionesClaveResultado({
 }: {
 	ubicaciones: ReturnType<typeof useUbicacionesClaveQuery>;
 }) {
-	// Un solo mapa abierto a la vez: el iframe se monta recién al abrirlo, así
-	// que no se pide nada a Google hasta que el asesor lo pide.
-	const [mapaAbiertoId, setMapaAbiertoId] = useState<string | null>(null);
-
 	if (ubicaciones.isLoading) {
 		return (
 			<div className="flex justify-center py-4">
@@ -179,65 +262,7 @@ export function UbicacionesClaveResultado({
 		);
 	}
 	if (ubicaciones.data && ubicaciones.data.ubicaciones.length > 0) {
-		return (
-			<ul className="space-y-2">
-				{ubicaciones.data.ubicaciones.map((u) => {
-					const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
-					const Icon = config.icon;
-					const mapsUrl = googleMapsUrl(u.lat, u.lon);
-					const mapaAbierto = mapaAbiertoId === u.id;
-					const patronTexto = describirPatron(u.patron, u.horasTotales);
-					return (
-						<li className="rounded-md border p-3" key={u.id}>
-							<div className="flex items-start justify-between gap-3">
-								<div className="flex items-start gap-3">
-									<Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-									<div>
-										<Badge className={config.badgeClass} variant="secondary">
-											{config.label}
-										</Badge>
-										<p className="mt-1 text-muted-foreground text-xs">
-											{Math.round(u.horasTotales)} h en total · {u.visitas}{" "}
-											visitas en {u.diasDistintos} días
-											{patronTexto ? ` · ${patronTexto}` : ""}
-										</p>
-										<p className="text-muted-foreground text-xs">
-											Última vez: {formatFechaSenal(u.ultimaVisita)}
-										</p>
-									</div>
-								</div>
-								{mapsUrl && (
-									<Button
-										aria-expanded={mapaAbierto}
-										className="shrink-0"
-										onClick={() => setMapaAbiertoId(mapaAbierto ? null : u.id)}
-										size="sm"
-										type="button"
-										variant="outline"
-									>
-										<MapIcon className="mr-1.5 h-3.5 w-3.5" />
-										{mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
-									</Button>
-								)}
-							</div>
-							{mapaAbierto && mapsUrl && (
-								<div className="mt-3 space-y-1.5">
-									<GpsMapaPreview latitude={u.lat} longitude={u.lon} />
-									<a
-										className="text-primary text-xs hover:underline"
-										href={mapsUrl}
-										rel="noreferrer"
-										target="_blank"
-									>
-										Abrir en Google Maps
-									</a>
-								</div>
-							)}
-						</li>
-					);
-				})}
-			</ul>
-		);
+		return <UbicacionesClaveLista ubicaciones={ubicaciones.data.ubicaciones} />;
 	}
 	return (
 		<p className="text-muted-foreground text-sm italic">
@@ -347,6 +372,12 @@ export function GpsUbicacionesClaveCard({
 						</Button>
 					</div>
 				)}
+				<div className="mt-2">
+					<GpsUbicacionesHistorial
+						casoCobroId={casoCobroId}
+						vehicleId={vehicleId}
+					/>
+				</div>
 			</Cuerpo>
 		</Raiz>
 	);

@@ -26,6 +26,8 @@ import {
 	gpsVehiculoOutputSchema,
 	ubicacionesClaveCasoInputSchema,
 	ubicacionesClaveCasoOutputSchema,
+	ubicacionesClaveSnapshotSchema,
+	ubicacionesConsultasCasoOutputSchema,
 } from "../services/wialon/wialon-types";
 import { assertAccesoCasoCobro } from "./cobros";
 import { resolverCasoParaGps } from "./wialon";
@@ -57,6 +59,12 @@ function leerSnapshotGps(valor: unknown) {
 				}
 			: crudo;
 	const parsed = gpsVehiculoOutputSchema.safeParse(candidato);
+	return parsed.success ? parsed.data : null;
+}
+
+/** Mismo criterio que `leerSnapshotGps`: un snapshot inválido se descarta. */
+function leerSnapshotUbicaciones(valor: unknown) {
+	const parsed = ubicacionesClaveSnapshotSchema.safeParse(valor);
 	return parsed.success ? parsed.data : null;
 }
 
@@ -205,16 +213,21 @@ export const gpsEventosRouter = {
 				return { auditada: false, ubicaciones: [] };
 			}
 
+			let consultaLogId: string;
 			try {
-				await db.insert(gpsConsultaLogs).values({
-					vehicleId: input.vehicleId,
-					numeroCreditoSifco,
-					motivo: input.motivo,
-					unitId: null,
-					unitName: null,
-					origen: "ubicaciones_clave",
-					userId,
-				});
+				const [fila] = await db
+					.insert(gpsConsultaLogs)
+					.values({
+						vehicleId: input.vehicleId,
+						numeroCreditoSifco,
+						motivo: input.motivo,
+						unitId: null,
+						unitName: null,
+						origen: "ubicaciones_clave",
+						userId,
+					})
+					.returning({ id: gpsConsultaLogs.id });
+				consultaLogId = fila.id;
 			} catch (error) {
 				console.error("GPS_CONSULTA_LOG_FALLIDO", {
 					vehicleId: input.vehicleId,
@@ -276,6 +289,80 @@ export const gpsEventosRouter = {
 				)
 				.orderBy(desc(gpsUbicacionesClave.horasTotales));
 
+			// Se guarda lo que se muestra para poder verlo después desde el
+			// historial sin repetir la consulta. Best-effort: la auditoría ya
+			// quedó registrada, y sin snapshot el historial solo muestra el motivo.
+			await db
+				.update(gpsConsultaLogs)
+				.set({ snapshot: { ubicaciones } })
+				.where(eq(gpsConsultaLogs.id, consultaLogId))
+				.catch((error) => {
+					console.error("GPS_CONSULTA_SNAPSHOT_FALLIDO", {
+						vehicleId: input.vehicleId,
+						origen: "getUbicacionesClaveCaso",
+						message: error instanceof Error ? error.message : String(error),
+					});
+				});
+
 			return { auditada: true, ubicaciones };
+		}),
+
+	/**
+	 * Historial de consultas de ubicaciones clave de un vehículo: quién, cuándo,
+	 * con qué motivo y lo que se mostró (snapshot). Mismo gate de acceso que
+	 * `getUbicacionesClaveCaso` (`resolverCasoParaGps`) pero, como
+	 * `getGpsConsultasCaso`, ver una consulta anterior no es una consulta nueva:
+	 * no pide motivo ni registra auditoría. Es deliberado (ver lo ya consultado
+	 * sin repetirlo); si producto exige auditar esta vista, el control va aquí.
+	 *
+	 * Como la consulta en vivo, solo devuelve datos mientras el crédito sigue
+	 * en B4 (D-15): fuera de B4 el historial no expone dónde vive/trabaja el
+	 * cliente.
+	 */
+	getUbicacionesConsultasCaso: cobrosProcedure
+		.input(gpsConsultasCasoInputSchema)
+		.output(ubicacionesConsultasCasoOutputSchema)
+		.handler(async ({ input, context }) => {
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+				context.user?.email || context.session?.user?.email,
+			);
+
+			if (!numeroCreditoSifco) return [];
+			const bucketActual = await carteraBackClient
+				.getBucketActualCredito(numeroCreditoSifco)
+				.catch(() => null);
+			if (bucketActual?.bucket !== 4) return [];
+
+			const filas = await db
+				.select({
+					id: gpsConsultaLogs.id,
+					motivo: gpsConsultaLogs.motivo,
+					userNombre: user.name,
+					createdAt: gpsConsultaLogs.createdAt,
+					snapshot: gpsConsultaLogs.snapshot,
+				})
+				.from(gpsConsultaLogs)
+				.leftJoin(user, eq(gpsConsultaLogs.userId, user.id))
+				.where(
+					and(
+						eq(gpsConsultaLogs.vehicleId, input.vehicleId),
+						eq(gpsConsultaLogs.numeroCreditoSifco, numeroCreditoSifco),
+						eq(gpsConsultaLogs.origen, "ubicaciones_clave"),
+					),
+				)
+				.orderBy(desc(gpsConsultaLogs.createdAt))
+				.limit(input.limit);
+
+			return filas.map((f) => ({
+				id: f.id,
+				motivo: f.motivo,
+				userNombre: f.userNombre ?? null,
+				createdAt: f.createdAt,
+				snapshot: leerSnapshotUbicaciones(f.snapshot),
+			}));
 		}),
 };

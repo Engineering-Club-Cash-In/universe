@@ -1,6 +1,14 @@
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Home, Loader2, MapPin, Repeat } from "lucide-react";
+import {
+	Briefcase,
+	Home,
+	Loader2,
+	Map as MapIcon,
+	MapPin,
+	Repeat,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -143,6 +151,10 @@ export function UbicacionesClaveResultado({
 }: {
 	ubicaciones: ReturnType<typeof useUbicacionesClaveQuery>;
 }) {
+	// Un solo mapa abierto a la vez: el iframe se monta recién al abrirlo, así
+	// que no se pide nada a Google hasta que el asesor lo pide.
+	const [mapaAbiertoId, setMapaAbiertoId] = useState<string | null>(null);
+
 	if (ubicaciones.isLoading) {
 		return (
 			<div className="flex justify-center py-4">
@@ -173,37 +185,53 @@ export function UbicacionesClaveResultado({
 					const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
 					const Icon = config.icon;
 					const mapsUrl = googleMapsUrl(u.lat, u.lon);
+					const mapaAbierto = mapaAbiertoId === u.id;
 					const patronTexto = describirPatron(u.patron, u.horasTotales);
 					return (
-						<li
-							className="flex items-start justify-between gap-3 rounded-md border p-3"
-							key={u.id}
-						>
-							<div className="flex items-start gap-3">
-								<Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-								<div>
-									<Badge className={config.badgeClass} variant="secondary">
-										{config.label}
-									</Badge>
-									<p className="mt-1 text-muted-foreground text-xs">
-										{Math.round(u.horasTotales)} h en total · {u.visitas}{" "}
-										visitas en {u.diasDistintos} días
-										{patronTexto ? ` · ${patronTexto}` : ""}
-									</p>
-									<p className="text-muted-foreground text-xs">
-										Última vez: {formatFechaSenal(u.ultimaVisita)}
-									</p>
+						<li className="rounded-md border p-3" key={u.id}>
+							<div className="flex items-start justify-between gap-3">
+								<div className="flex items-start gap-3">
+									<Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+									<div>
+										<Badge className={config.badgeClass} variant="secondary">
+											{config.label}
+										</Badge>
+										<p className="mt-1 text-muted-foreground text-xs">
+											{Math.round(u.horasTotales)} h en total · {u.visitas}{" "}
+											visitas en {u.diasDistintos} días
+											{patronTexto ? ` · ${patronTexto}` : ""}
+										</p>
+										<p className="text-muted-foreground text-xs">
+											Última vez: {formatFechaSenal(u.ultimaVisita)}
+										</p>
+									</div>
 								</div>
+								{mapsUrl && (
+									<Button
+										aria-expanded={mapaAbierto}
+										className="shrink-0"
+										onClick={() => setMapaAbiertoId(mapaAbierto ? null : u.id)}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										<MapIcon className="mr-1.5 h-3.5 w-3.5" />
+										{mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
+									</Button>
+								)}
 							</div>
-							{mapsUrl && (
-								<a
-									className="shrink-0 text-primary text-xs hover:underline"
-									href={mapsUrl}
-									rel="noreferrer"
-									target="_blank"
-								>
-									Ver en mapa
-								</a>
+							{mapaAbierto && mapsUrl && (
+								<div className="mt-3 space-y-1.5">
+									<GpsMapaPreview latitude={u.lat} longitude={u.lon} />
+									<a
+										className="text-primary text-xs hover:underline"
+										href={mapsUrl}
+										rel="noreferrer"
+										target="_blank"
+									>
+										Abrir en Google Maps
+									</a>
+								</div>
 							)}
 						</li>
 					);
@@ -227,9 +255,12 @@ export function UbicacionesClaveResultado({
 export function GpsUbicacionesClaveCard({
 	casoCobroId,
 	vehicleId,
+	embedded = false,
 }: {
 	casoCobroId: string;
 	vehicleId: string;
+	// Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título.
+	embedded?: boolean;
 }) {
 	const [motivo, setMotivo] = useState("");
 	const [motivoConfirmado, setMotivoConfirmado] = useState<string | null>(null);
@@ -242,20 +273,29 @@ export function GpsUbicacionesClaveCard({
 
 	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
 
+	const Raiz = embedded ? "div" : Card;
+	const Cabecera = embedded ? "div" : CardHeader;
+	const Cuerpo = embedded ? "div" : CardContent;
+	const Descripcion = embedded ? "p" : CardDescription;
+
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="flex items-center gap-2">
-					<MapPin className="h-5 w-5" />
-					Ubicaciones clave
-				</CardTitle>
-				<CardDescription>
+		<Raiz>
+			<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
+				{!embedded && (
+					<CardTitle className="flex items-center gap-2">
+						<MapPin className="h-5 w-5" />
+						Ubicaciones clave
+					</CardTitle>
+				)}
+				<Descripcion
+					className={embedded ? "text-muted-foreground text-sm" : undefined}
+				>
 					Lugares donde el vehículo pasa más tiempo (casa, trabajo, lugares
 					recurrentes), calculados automáticamente contra los últimos 60 días de
 					historial GPS. Orienta la búsqueda si el vehículo hay que recuperarlo.
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
+				</Descripcion>
+			</Cabecera>
+			<Cuerpo>
 				{motivoConfirmado == null ? (
 					<form
 						className="space-y-3"
@@ -307,7 +347,7 @@ export function GpsUbicacionesClaveCard({
 						</Button>
 					</div>
 				)}
-			</CardContent>
-		</Card>
+			</Cuerpo>
+		</Raiz>
 	);
 }

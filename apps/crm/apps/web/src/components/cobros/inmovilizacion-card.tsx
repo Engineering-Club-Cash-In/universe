@@ -87,6 +87,7 @@ export function InmovilizacionCard({
 	casoCobroId,
 	esSupervisor,
 	onRegistrarLlamada,
+	embedded = false,
 }: {
 	bucketNumero: number | null;
 	casoCobroId: string;
@@ -101,6 +102,11 @@ export function InmovilizacionCard({
 		inmovilizacionId: string,
 		accion: "apagado" | "reactivacion",
 	) => void;
+	/**
+	 * Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título,
+	 * y con aviso de vacío en vez de desaparecer (la pestaña ya existe).
+	 */
+	embedded?: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const { data: session } = authClient.useSession();
@@ -140,17 +146,28 @@ export function InmovilizacionCard({
 		},
 	});
 
+	const sinInmovilizacion = embedded ? (
+		<p className="text-muted-foreground text-sm">
+			Este crédito no tiene inmovilización de unidad disponible.
+		</p>
+	) : null;
+
 	if (inmov.isLoading) {
-		return (
+		const cargando = (
+			<div className="flex items-center justify-center py-8">
+				<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+			</div>
+		);
+		return embedded ? (
+			cargando
+		) : (
 			<Card>
-				<CardContent className="flex items-center justify-center py-8">
-					<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-				</CardContent>
+				<CardContent className="p-0">{cargando}</CardContent>
 			</Card>
 		);
 	}
 
-	if (!inmov.data) return null;
+	if (!inmov.data) return sinInmovilizacion;
 
 	const {
 		estadoUnidad,
@@ -180,21 +197,30 @@ export function InmovilizacionCard({
 			tieneGps,
 		})
 	) {
-		return null;
+		return sinInmovilizacion;
 	}
 
+	const Raiz = embedded ? "div" : Card;
+	const Cabecera = embedded ? "div" : CardHeader;
+	const Cuerpo = embedded ? "div" : CardContent;
+	const Descripcion = embedded ? "p" : CardDescription;
+
 	return (
-		<Card>
-			<CardHeader>
+		<Raiz>
+			<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
 				<div className="flex items-center justify-between">
-					<CardTitle className="flex items-center gap-2 text-base">
-						{estadoUnidad === "inmovilizada" ? (
-							<Lock className="h-4 w-4 text-destructive" />
-						) : (
-							<LockOpen className="h-4 w-4 text-muted-foreground" />
-						)}
-						Inmovilización de unidad
-					</CardTitle>
+					{embedded ? (
+						<span />
+					) : (
+						<CardTitle className="flex items-center gap-2 text-base">
+							{estadoUnidad === "inmovilizada" ? (
+								<Lock className="h-4 w-4 text-destructive" />
+							) : (
+								<LockOpen className="h-4 w-4 text-muted-foreground" />
+							)}
+							Inmovilización de unidad
+						</CardTitle>
+					)}
 					<div className="flex items-center gap-2">
 						{/* Solo supervisor/admin: la cola decide/ejecuta solicitudes de
 						    TODOS los casos, no solo este — mismo gate que la ruta
@@ -216,12 +242,14 @@ export function InmovilizacionCard({
 						</Badge>
 					</div>
 				</div>
-				<CardDescription>
+				<Descripcion
+					className={embedded ? "text-muted-foreground text-sm" : undefined}
+				>
 					Solicitud de apagado o reactivación, con aprobación del supervisor.
 					Ejecución manual: LEGION la aplica por fuera del CRM.
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="space-y-4">
+				</Descripcion>
+			</Cabecera>
+			<Cuerpo className="space-y-4">
 				{solicitudAbierta && (
 					<div className="rounded-md border bg-muted/40 p-3 text-sm">
 						<p className="font-medium">
@@ -400,7 +428,7 @@ export function InmovilizacionCard({
 				{inmov.data.historial.length > 0 && (
 					<HistorialInmovilizacion historial={inmov.data.historial} />
 				)}
-			</CardContent>
+			</Cuerpo>
 
 			{decision && solicitudAbierta && (
 				<DecisionInmovilizacionModal
@@ -444,7 +472,7 @@ export function InmovilizacionCard({
 					open={!!modalAbierto}
 				/>
 			)}
-		</Card>
+		</Raiz>
 	);
 }
 

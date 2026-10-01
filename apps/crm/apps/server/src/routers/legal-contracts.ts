@@ -1517,7 +1517,17 @@ export const legalContractsRouter = {
 						});
 					}
 
-					// Marcar todos los contratos pending como signed
+					// Los contratos que están en WeeTrust NO se tocan: su estado y el de
+					// cada firmante lo pone WeeTrust (el aviso o "Actualizar estado").
+					// Pasar al 90% es una decisión de ventas, no una firma: marcarlos
+					// firmados le inventaba la firma al representante legal, que firma
+					// después, y la ficha decía "firmado" con el documento pendiente
+					// allá (01-oct-2026). Cuando WeeTrust lo complete, el CRM lo pasa a
+					// firmado solo.
+					//
+					// Sí se marcan los que no tienen documento en WeeTrust (en papel, o
+					// los de antes): para ellos esta confirmación es lo único que dice
+					// que se firmaron.
 					const confirmados = await tx
 						.update(generatedLegalContracts)
 						.set({
@@ -1528,6 +1538,7 @@ export const legalContractsRouter = {
 							and(
 								eq(generatedLegalContracts.opportunityId, input.opportunityId),
 								eq(generatedLegalContracts.status, "pending"),
+								isNull(generatedLegalContracts.weetrustDocumentId),
 								// Un original reclamado por un reemplazo ya no es el vigente:
 								// confirmarlo le inventaba firmas a un documento descartado.
 								isNull(generatedLegalContracts.replacedByContractId),
@@ -1535,8 +1546,8 @@ export const legalContractsRouter = {
 						)
 						.returning({ id: generatedLegalContracts.id });
 
-					// Y a cada firmante: si no, la ficha mostraba el contrato firmado con
-					// todas sus personas todavía "pendiente".
+					// Y a cada firmante de esos: si no, la ficha mostraba el contrato
+					// firmado con todas sus personas todavía "pendiente".
 					if (confirmados.length > 0) {
 						await tx
 							.update(contractSignatories)

@@ -165,7 +165,8 @@ export async function sifcosEnB4(): Promise<string[] | null> {
  *     `getDetallesCreditoCarteraBack` (routers/cobros.ts) para pintar la
  *     Ficha 360, y en la práctica es el que casi todos los casos usan.
  * `sifcosB4` ya viene sin prefijo `CRM-` (cartera-back nunca conoce esos
- * placeholders internos).
+ * placeholders internos). Sin `sifcosB4` no se filtra por bucket: devuelve
+ * todos los casos activos con GPS (lo usa el cálculo de ubicaciones clave).
  *
  * Devuelve UNA FILA POR (unidad, SIFCO), no una por unidad: `wialonUnitId`
  * no es UNIQUE en `vehicles` (D-10), así que una misma unidad Wialon puede
@@ -176,9 +177,9 @@ export async function sifcosEnB4(): Promise<string[] | null> {
  * asesor.
  */
 export async function unidadesConCasoActivo(
-	sifcosB4: string[],
+	sifcosB4?: string[],
 ): Promise<UnidadConCaso[]> {
-	if (sifcosB4.length === 0) return [];
+	if (sifcosB4?.length === 0) return [];
 
 	const [porContrato, porOportunidad] = await Promise.all([
 		db
@@ -198,7 +199,7 @@ export async function unidadesConCasoActivo(
 			.where(
 				and(
 					eq(casosCobros.activo, true),
-					inArray(casosCobros.numeroCreditoSifco, sifcosB4),
+					sifcosB4 && inArray(casosCobros.numeroCreditoSifco, sifcosB4),
 				),
 			),
 		db
@@ -215,7 +216,7 @@ export async function unidadesConCasoActivo(
 			.where(
 				and(
 					eq(casosCobros.activo, true),
-					inArray(opportunities.numeroSifco, sifcosB4),
+					sifcosB4 && inArray(opportunities.numeroSifco, sifcosB4),
 				),
 			),
 	]);

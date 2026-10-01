@@ -1,13 +1,20 @@
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import {
 	Briefcase,
 	Home,
 	Loader2,
 	Map as MapIcon,
 	MapPin,
+	RefreshCw,
 	Repeat,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
 import { GpsUbicacionesHistorial } from "@/components/cobros/gps-ubicaciones-historial";
 import { Badge } from "@/components/ui/badge";
@@ -233,10 +240,91 @@ export function UbicacionesClaveLista({
 	);
 }
 
+const MENSAJE_CALCULO: Record<string, string> = {
+	en_proceso:
+		"Este vehículo se está calculando ahora mismo. Espera un momento.",
+	incompleto:
+		"Wialon no devolvió el historial completo. Intenta de nuevo en unos minutos.",
+	sin_unidad:
+		"Este vehículo no tiene una unidad GPS vinculada. Abre la pestaña GPS / Wialon para identificarla.",
+};
+
+/**
+ * Para el vehículo que todavía no tiene datos: el cálculo nocturno reparte el
+ * historial de 60 días en varias noches cuando hay muchos vehículos, y esto
+ * deja calcularlo ahora sin esperar el turno. Calcular no muestra nada por sí
+ * solo: al terminar se vuelve a consultar, y esa consulta queda registrada con
+ * el mismo motivo.
+ */
+function CalcularAhora({
+	casoCobroId,
+	vehicleId,
+	onCalculado,
+}: {
+	casoCobroId: string;
+	vehicleId: string;
+	onCalculado: () => void;
+}) {
+	const calcular = useMutation({
+		...orpc.calcularUbicacionesClaveCaso.mutationOptions(),
+		onSuccess: (res) => {
+			if (res.estado === "calculado") {
+				// Calculado sin ubicaciones no es un fallo: el vehículo no tiene
+				// paradas suficientes en 60 días. Se dice, para que no parezca que
+				// el botón no hizo nada.
+				if (res.ubicaciones > 0) {
+					toast.success(
+						res.ubicaciones === 1
+							? "1 ubicación calculada."
+							: `${res.ubicaciones} ubicaciones calculadas.`,
+					);
+				} else {
+					toast.info(
+						"Cálculo completado: no se encontraron paradas frecuentes suficientes en los últimos 60 días.",
+					);
+				}
+				onCalculado();
+				return;
+			}
+			toast.info(MENSAJE_CALCULO[res.estado] ?? "No se pudo calcular.");
+		},
+		onError: (error) => {
+			toast.error(error.message || "No se pudo calcular las ubicaciones.");
+		},
+	});
+
+	return (
+		<div className="mt-3 space-y-1.5">
+			<Button
+				disabled={calcular.isPending}
+				onClick={() => calcular.mutate({ casoCobroId, vehicleId })}
+				size="sm"
+				type="button"
+				variant="outline"
+			>
+				{calcular.isPending ? (
+					<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+				) : (
+					<RefreshCw className="mr-2 h-4 w-4" />
+				)}
+				{calcular.isPending ? "Calculando…" : "Calcular ahora"}
+			</Button>
+			<p className="text-muted-foreground text-xs">
+				Si es la primera vez que se consulta este vehículo, puede tardar unos
+				segundos: se baja su historial de los últimos 60 días.
+			</p>
+		</div>
+	);
+}
+
 export function UbicacionesClaveResultado({
 	ubicaciones,
+	casoCobroId,
+	vehicleId,
 }: {
 	ubicaciones: ReturnType<typeof useUbicacionesClaveQuery>;
+	casoCobroId: string;
+	vehicleId: string;
 }) {
 	if (ubicaciones.isLoading) {
 		return (
@@ -265,10 +353,17 @@ export function UbicacionesClaveResultado({
 		return <UbicacionesClaveLista ubicaciones={ubicaciones.data.ubicaciones} />;
 	}
 	return (
-		<p className="text-muted-foreground text-sm italic">
-			No hay suficientes datos todavía para identificar ubicaciones clave de
-			este vehículo.
-		</p>
+		<div>
+			<p className="text-muted-foreground text-sm italic">
+				No hay suficientes datos todavía para identificar ubicaciones clave de
+				este vehículo.
+			</p>
+			<CalcularAhora
+				casoCobroId={casoCobroId}
+				onCalculado={() => ubicaciones.refetch()}
+				vehicleId={vehicleId}
+			/>
+		</div>
 	);
 }
 
@@ -338,7 +433,7 @@ export function GpsUbicacionesClaveCard({
 							<Input
 								id={`motivo-ubicaciones-${vehicleId}`}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej: Crédito en B4, preparar visita de recuperación"
+								placeholder="Ej: Preparar visita de recuperación"
 								value={motivo}
 							/>
 						</div>
@@ -348,7 +443,11 @@ export function GpsUbicacionesClaveCard({
 						</Button>
 					</form>
 				) : (
-					<UbicacionesClaveResultado ubicaciones={ubicaciones} />
+					<UbicacionesClaveResultado
+						casoCobroId={casoCobroId}
+						ubicaciones={ubicaciones}
+						vehicleId={vehicleId}
+					/>
 				)}
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">

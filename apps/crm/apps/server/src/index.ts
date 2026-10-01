@@ -2088,12 +2088,13 @@ const JOBS_PROGRAMADOS = {
 	 *  puede activar en dev tras aplicar la 0059 sin un deploy de código. */
 	eventosGps: process.env.GPS_EVENTOS_ENABLED === "true",
 	/** CB-119 (D-15): cálculo nocturno de "ubicaciones clave" (casa, trabajo,
-	 *  lugares recurrentes) para créditos en B4, a partir del historial de
-	 *  posiciones de Wialon. Reemplaza el enfoque de "salida de geocerca"
-	 *  (retirado). Mismo criterio que eventosGps: depende de cartera-back,
-	 *  es pesado (hasta 60 días de historial por unidad, cada noche), y
-	 *  necesita la migración 0061 aplicada. Default `false` FIJO — exige
-	 *  `GPS_UBICACIONES_ENABLED=true` explícito. */
+	 *  lugares recurrentes) para todos los vehículos con caso de cobro activo y
+	 *  GPS vinculado, a partir del historial de posiciones de Wialon.
+	 *  Reemplaza el enfoque de "salida de geocerca" (retirado). Es incremental
+	 *  (solo pide a Wialon lo posterior al último cálculo; el backfill de 60 días
+	 *  se reparte en varias noches) y necesita las migraciones 0061 y 0074
+	 *  aplicadas. Default `false` FIJO — exige `GPS_UBICACIONES_ENABLED=true`
+	 *  explícito. */
 	ubicacionesClaveGps: process.env.GPS_UBICACIONES_ENABLED === "true",
 } as const;
 
@@ -2197,10 +2198,10 @@ void correrPurgaGpsEventos();
 setInterval(correrPurgaGpsEventos, 24 * 60 * 60 * 1000);
 
 // CB-119 (D-15) — Ubicaciones clave (casa, trabajo, lugares recurrentes)
-// para créditos en B4, calculadas contra el historial de Wialon de los
-// últimos 60 días. A diferencia del polling de eventos (cada 5 min), esto
-// es pesado por unidad (hasta 9 tramos de load_interval), así que corre UNA
-// vez por noche, a las 02:00 GT (= 08:00 UTC) — horario de bajo tráfico,
+// de los vehículos con caso activo, calculadas contra el historial de Wialon
+// de los últimos 60 días. A diferencia del polling de eventos (cada 5 min),
+// el backfill es pesado por unidad (hasta 9 tramos de load_interval), así que
+// corre UNA vez por noche, a las 02:00 GT (= 08:00 UTC) — horario de bajo tráfico,
 // lejos de la medianoche de cierre diario de cobros.
 function scheduleAtUbicacionesClaveGT() {
 	const now = new Date();

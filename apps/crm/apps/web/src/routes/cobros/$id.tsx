@@ -5036,7 +5036,8 @@ function RouteComponent() {
 						      puede estar en dos créditos (refinanciamiento). Requiere
 						      caso.id: el servidor valida el acceso por caso (asesor
 						      asignado) antes de devolver la ubicación.
-						    - Ubicaciones frecuentes (CB-119, D-15): solo B4 / recuperación.
+						    - Ubicaciones frecuentes (CB-119, D-15): cualquier bucket, requiere
+						      vehículo.
 						    - Notificaciones (CB-119): eventos GPS ya guardados, solo
 						      requiere caso.id (no audita ni depende del vehículo).
 						    - Inmovilización (CB-041): solo requiere caso.id; el servidor
@@ -5055,7 +5056,6 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
-								mostrarUbicacionesClave={bucketNumero === 4 || enRecuperacion}
 								onRegistrarLlamada={(inmovilizacionId, accion) => {
 									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
 									setCanalContacto("llamada");

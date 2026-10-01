@@ -19,15 +19,12 @@ export function VehiculoGpsTabs({
 	bucketNumero,
 	casoCobroId,
 	esSupervisor,
-	mostrarUbicacionesClave,
 	onRegistrarLlamada,
 	vehicleId,
 }: {
 	bucketNumero: number | null;
 	casoCobroId: string;
 	esSupervisor: boolean;
-	// Créditos en B4 / recuperación (CB-119, D-15).
-	mostrarUbicacionesClave: boolean;
 	onRegistrarLlamada: (
 		inmovilizacionId: string,
 		accion: "apagado" | "reactivacion",
@@ -49,7 +46,7 @@ export function VehiculoGpsTabs({
 								GPS / Wialon
 							</TabsTrigger>
 						)}
-						{vehicleId && mostrarUbicacionesClave && (
+						{vehicleId && (
 							<TabsTrigger value="ubicaciones">
 								<MapPinned />
 								Ubicaciones frecuentes
@@ -75,7 +72,7 @@ export function VehiculoGpsTabs({
 							/>
 						</TabsContent>
 					)}
-					{vehicleId && mostrarUbicacionesClave && (
+					{vehicleId && (
 						<TabsContent className={contenido} forceMount value="ubicaciones">
 							<GpsUbicacionesClaveCard
 								casoCobroId={casoCobroId}

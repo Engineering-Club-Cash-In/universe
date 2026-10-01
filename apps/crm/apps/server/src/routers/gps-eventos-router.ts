@@ -14,12 +14,14 @@ import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import { vehicles } from "../db/schema/vehicles";
+import { calcularUbicacionesUnidadBajoDemanda } from "../jobs/gps-ubicaciones-clave";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
-import { carteraBackClient } from "../services/cartera-back-client";
 import { agruparConsultasGps } from "../services/wialon/gps-consultas-agrupar";
-import { purgarSnapshotsUbicacionesClave } from "../services/wialon/purgar-snapshots-ubicaciones";
 import {
+	calcularUbicacionesClaveCasoInputSchema,
+	calcularUbicacionesClaveCasoOutputSchema,
 	gpsConsultasCasoInputSchema,
 	gpsConsultasCasoOutputSchema,
 	gpsEventosCasoInputSchema,
@@ -238,36 +240,9 @@ export const gpsEventosRouter = {
 				return { auditada: false, ubicaciones: [] };
 			}
 
-			// CB-119 / D-15: Las ubicaciones clave son EXCLUSIVAMENTE para casos
-			// en B4 / recuperación. Solo se devuelven ubicaciones si la consulta en
-			// vivo a cartera-back confirma positivamente que el crédito está en B4
-			// (bucket === 4). Fail closed: si no hay SIFCO, si cartera-back no
-			// responde, o si el crédito no está en B4, no se exponen ubicaciones.
+			// Las ubicaciones clave aplican a cualquier bucket. Sin SIFCO no hay
+			// crédito al que atar las filas calculadas: fail closed.
 			if (!numeroCreditoSifco) {
-				return { auditada: true, ubicaciones: [] };
-			}
-
-			const bucketActual = await carteraBackClient
-				.getBucketActualCredito(numeroCreditoSifco)
-				.catch(() => null);
-
-			if (bucketActual?.bucket !== 4) {
-				// Si cartera-back respondió positivamente que el crédito está fuera
-				// de B4 (regularizó o cambió de bucket), se purgan de forma síncrona
-				// las filas huérfanas de este caso en la DB. Si falló la red
-				// (bucketActual === null), no borramos la DB por si es un fallo
-				// transitorio, pero no devolvemos datos al usuario.
-				if (bucketActual !== null) {
-					await db
-						.delete(gpsUbicacionesClave)
-						.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
-						.catch(() => {});
-					// Y la copia en el historial de consultas de este crédito (la
-					// fila de auditoría se conserva, solo se limpia el snapshot).
-					await purgarSnapshotsUbicacionesClave(
-						eq(gpsConsultaLogs.numeroCreditoSifco, numeroCreditoSifco),
-					);
-				}
 				return { auditada: true, ubicaciones: [] };
 			}
 
@@ -314,16 +289,52 @@ export const gpsEventosRouter = {
 		}),
 
 	/**
+	 * Calcula YA las ubicaciones clave de un vehículo (botón "Calcular ahora").
+	 * El job nocturno reparte el backfill de 60 días en varias noches cuando hay
+	 * muchos vehículos; esto deja que alguien no espere su turno. Mismo gate de
+	 * acceso que la consulta (`resolverCasoParaGps`). No devuelve ubicaciones ni
+	 * revela nada: solo las calcula y guarda, y verlas sigue pidiendo motivo y
+	 * quedando auditado en `getUbicacionesClaveCaso`.
+	 */
+	calcularUbicacionesClaveCaso: cobrosProcedure
+		.input(calcularUbicacionesClaveCasoInputSchema)
+		.output(calcularUbicacionesClaveCasoOutputSchema)
+		.handler(async ({ input, context }) => {
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+				context.user?.email || context.session?.user?.email,
+			);
+
+			const [vehiculo] = await db
+				.select({ wialonUnitId: vehicles.wialonUnitId })
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+			if (!vehiculo?.wialonUnitId || !numeroCreditoSifco) {
+				return { estado: "sin_unidad" as const, ubicaciones: 0 };
+			}
+
+			const resultado = await calcularUbicacionesUnidadBajoDemanda(
+				vehiculo.wialonUnitId,
+				[numeroCreditoSifco],
+			);
+			return {
+				estado: resultado.estado,
+				ubicaciones:
+					resultado.estado === "calculado" ? resultado.ubicaciones : 0,
+			};
+		}),
+
+	/**
 	 * Historial de consultas de ubicaciones clave de un vehículo: quién, cuándo,
 	 * con qué motivo y lo que se mostró (snapshot). Mismo gate de acceso que
 	 * `getUbicacionesClaveCaso` (`resolverCasoParaGps`) pero, como
 	 * `getGpsConsultasCaso`, ver una consulta anterior no es una consulta nueva:
 	 * no pide motivo ni registra auditoría. Es deliberado (ver lo ya consultado
 	 * sin repetirlo); si producto exige auditar esta vista, el control va aquí.
-	 *
-	 * Como la consulta en vivo, solo devuelve datos mientras el crédito sigue
-	 * en B4 (D-15): fuera de B4 el historial no expone dónde vive/trabaja el
-	 * cliente.
 	 */
 	getUbicacionesConsultasCaso: cobrosProcedure
 		.input(gpsConsultasCasoInputSchema)
@@ -338,10 +349,6 @@ export const gpsEventosRouter = {
 			);
 
 			if (!numeroCreditoSifco) return [];
-			const bucketActual = await carteraBackClient
-				.getBucketActualCredito(numeroCreditoSifco)
-				.catch(() => null);
-			if (bucketActual?.bucket !== 4) return [];
 
 			const filas = await db
 				.select({

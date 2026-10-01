@@ -381,7 +381,17 @@ export function clasificar(cluster: ClusterUbicacion): TipoUbicacionClave {
 export function calcularUbicacionesClave(
 	mensajes: WialonMensajePosicion[],
 ): UbicacionClaveClasificada[] {
-	const estancias = detectarEstancias(mensajes);
+	return calcularUbicacionesClaveDeEstancias(detectarEstancias(mensajes));
+}
+
+/**
+ * Segunda mitad del pipeline: estancias → ubicaciones clave. Es lo que corre
+ * el job incremental sobre las estancias guardadas en `gps_estancias`, sin
+ * volver a pedir mensajes crudos a Wialon.
+ */
+export function calcularUbicacionesClaveDeEstancias(
+	estancias: Estancia[],
+): UbicacionClaveClasificada[] {
 	const clusters = agruparEstancias(estancias);
 
 	return clusters

@@ -11,16 +11,70 @@ import { db } from "../db";
 import * as gpsEventosService from "../services/wialon/gps-eventos";
 import * as wialonClientModule from "../services/wialon/wialon-client";
 import * as gpsEventosPoll from "./gps-eventos-poll";
-import { ejecutarCalculoUbicacionesClave } from "./gps-ubicaciones-clave";
+import {
+	calcularUbicacionesUnidadBajoDemanda,
+	ejecutarCalculoUbicacionesClave,
+} from "./gps-ubicaciones-clave";
+
+const DIA_MS = 24 * 60 * 60 * 1000;
+// Alineado a segundos: Wialon trabaja en segundos y la semilla trunca los ms.
+const ahoraSeg = () => Math.floor(Date.now() / 1000) * 1000;
+
+const historialCompleto = (tramos = 1) => ({
+	mensajes: [],
+	completo: true,
+	tramosTotal: tramos,
+	tramosCompletados: tramos,
+});
+
+// Captura lo que el job escribe dentro de las transacciones: las estancias
+// insertadas y los valores que se mandan al cursor.
+function capturarTransaccion() {
+	let insertadas: any[] = [];
+	let cursor: any = null;
+	spyOn(db, "transaction").mockImplementation(async (cb: any) =>
+		cb({
+			execute: async () => {},
+			delete: () => ({ where: async () => {} }),
+			insert: () => ({
+				values: (v: any) => {
+					if (Array.isArray(v) && v[0]?.desde) insertadas = v;
+					else if (v?.procesadoHasta) cursor = v;
+					return Object.assign(Promise.resolve(), {
+						onConflictDoUpdate: async () => {},
+					});
+				},
+			}),
+		}),
+	);
+	return { insertadas: () => insertadas, cursor: () => cursor };
+}
 
 describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	let txCalled = false;
 	// Valores que el job manda a `update(gps_consulta_logs).set(...)`.
 	let snapshotsPurgados: unknown[] = [];
+	// Lo que devuelven los `select` del job, en el orden en que los hace por
+	// unidad: cursores (1 vez), luego [última estancia?, estancias guardadas].
+	let cursoresMock: {
+		wialonUnitId: number;
+		procesadoHasta: Date;
+		ultimoMensajeAt: Date | null;
+	}[] = [];
+	let ultimaEstanciaMock: {
+		lat: number;
+		lon: number;
+		desde: Date;
+		hasta: Date;
+	}[] = [];
+	let estanciasGuardadasMock: unknown[] = [];
 
 	beforeEach(() => {
 		txCalled = false;
 		snapshotsPurgados = [];
+		cursoresMock = [];
+		ultimaEstanciaMock = [];
+		estanciasGuardadasMock = [];
 		spyOn(db, "update").mockReturnValue({
 			set: (valores: unknown) => ({
 				where: async () => {
@@ -28,6 +82,23 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 				},
 			}),
 		} as any);
+		spyOn(db, "select").mockImplementation(((campos?: unknown) => {
+			// select() sin campos = lectura de cursores.
+			if (campos === undefined) {
+				return { from: async () => cursoresMock };
+			}
+			const c = campos as Record<string, unknown>;
+			// Con `limit` = última estancia; sin `limit` = estancias guardadas.
+			return {
+				from: () => ({
+					where: () =>
+						Object.assign(Promise.resolve(estanciasGuardadasMock), {
+							orderBy: () => ({ limit: async () => ultimaEstanciaMock }),
+						}),
+				}),
+				_campos: c,
+			};
+		}) as any);
 		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["01010214100000"]);
 		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
 			{ wialonUnitId: 100, numeroCreditoSifco: "01010214100000" },
@@ -42,8 +113,14 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
 			txCalled = true;
 			return cb({
+				execute: async () => {},
 				delete: () => ({ where: async () => {} }),
-				insert: () => ({ values: async () => {} }),
+				insert: () => ({
+					values: () =>
+						Object.assign(Promise.resolve(), {
+							onConflictDoUpdate: async () => {},
+						}),
+				}),
 			});
 		});
 	});
@@ -52,38 +129,38 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		mock.restore();
 	});
 
+	function wialonMock(resultado: unknown = historialCompleto()) {
+		const getHistorialPosiciones = mock().mockResolvedValue(resultado);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones,
+		} as any);
+		return getHistorialPosiciones;
+	}
+
+	it("consulta todos los casos activos, sin filtrar por bucket", async () => {
+		wialonMock();
+		await ejecutarCalculoUbicacionesClave();
+		expect(gpsEventosPoll.unidadesConCasoActivo).toHaveBeenCalledWith();
+	});
+
 	it("preserva el snapshot previo si el historial de Wialon está incompleto (!completo)", async () => {
-		const mockWialon = {
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: false,
-				tramosTotal: 2,
-				tramosCompletados: 1,
-			}),
-		};
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
-			mockWialon as any,
-		);
+		wialonMock({
+			mensajes: [],
+			completo: false,
+			tramosTotal: 2,
+			tramosCompletados: 1,
+		});
 
 		const res = await ejecutarCalculoUbicacionesClave();
 
 		expect(res.unidadesConError).toBe(1);
 		expect(res.unidadesProcesadas).toBe(0);
+		// Ni estancias ni cursor ni ubicaciones se tocan: el cursor no avanza.
 		expect(txCalled).toBe(false);
 	});
 
 	it("reemplaza el snapshot en DB cuando el historial de Wialon está completo", async () => {
-		const mockWialon = {
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: true,
-				tramosTotal: 2,
-				tramosCompletados: 2,
-			}),
-		};
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
-			mockWialon as any,
-		);
+		wialonMock(historialCompleto(2));
 
 		const res = await ejecutarCalculoUbicacionesClave();
 
@@ -92,66 +169,330 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		expect(txCalled).toBe(true);
 	});
 
-	it("invalida el snapshot anterior del caso (casoCobroId) y de la unidad al reemplazar", async () => {
-		let deleteCondition: unknown = null;
-		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
-			return cb({
-				delete: () => ({
-					where: async (cond: unknown) => {
-						deleteCondition = cond;
-					},
-				}),
-				insert: () => ({ values: async () => {} }),
-			});
-		});
+	it("unidad sin cursor: backfill completo de la ventana de 60 días", async () => {
+		const historial = wialonMock();
 
-		const mockWialon = {
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: true,
-				tramosTotal: 1,
-				tramosCompletados: 1,
-			}),
-		};
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
-			mockWialon as any,
-		);
+		await ejecutarCalculoUbicacionesClave();
 
-		const res = await ejecutarCalculoUbicacionesClave();
-
-		expect(res.unidadesProcesadas).toBe(1);
-		expect(deleteCondition).toBeDefined();
+		const [unitId, desde, hasta] = historial.mock.calls[0]!;
+		expect(unitId).toBe(100);
+		const dias = (hasta.getTime() - desde.getTime()) / DIA_MS;
+		expect(Math.round(dias)).toBe(60);
 	});
 
-	it("purga snapshots de unidades que salieron de B4 (no presentes en unidadesConCasoActivo)", async () => {
-		let deleteWhereCondition: unknown = null;
-		spyOn(db, "delete").mockReturnValue({
-			where: async (cond: unknown) => {
-				deleteWhereCondition = cond;
+	it("unidad con cursor reciente: pide solo desde el cursor (incremental)", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		cursoresMock = [
+			{ wialonUnitId: 100, procesadoHasta: cursor, ultimoMensajeAt: null },
+		];
+		ultimaEstanciaMock = [
+			{
+				lat: 14.6,
+				lon: -90.5,
+				desde: new Date(cursor.getTime() - 10 * 60 * 60 * 1000),
+				hasta: new Date(cursor.getTime() - 9 * 60 * 60 * 1000),
 			},
-		} as any);
+		];
+		const historial = wialonMock();
 
-		const mockWialon = {
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: true,
-				tramosTotal: 1,
-				tramosCompletados: 1,
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(historial.mock.calls[0]![1]).toEqual(cursor);
+	});
+
+	it("estancia abierta: no re-pide su historial, la extiende con lo nuevo y reemplaza la fila", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		const inicio = new Date(cursor.getTime() - 5 * DIA_MS);
+		const fin = new Date(cursor.getTime() - 60_000);
+		// Abierta: su último mensaje es el último que se leyó.
+		cursoresMock = [
+			{ wialonUnitId: 100, procesadoHasta: cursor, ultimoMensajeAt: fin },
+		];
+		ultimaEstanciaMock = [{ lat: 14.6, lon: -90.5, desde: inicio, hasta: fin }];
+		// Un mensaje nuevo, detenido en el mismo punto, 10 h después del cursor.
+		const tNuevo = Math.floor(cursor.getTime() / 1000) + 10 * 3600;
+		const historial = wialonMock({
+			mensajes: [{ t: tNuevo, lat: 14.6, lon: -90.5, velocidadKmh: 0 }],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		let insertadas: any[] = [];
+		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
+			cb({
+				execute: async () => {},
+				delete: () => ({ where: async () => {} }),
+				insert: () => ({
+					values: (v: any) => {
+						if (Array.isArray(v) && v[0]?.desde) insertadas = v;
+						return Object.assign(Promise.resolve(), {
+							onConflictDoUpdate: async () => {},
+						});
+					},
+				}),
 			}),
-		};
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
-			mockWialon as any,
 		);
 
 		await ejecutarCalculoUbicacionesClave();
 
-		expect(deleteWhereCondition).toBeDefined();
+		// Se pide desde el cursor, no desde el inicio de la estancia (5 días atrás).
+		expect(historial.mock.calls[0]![1]).toEqual(cursor);
+		// Una sola estancia: la misma de antes, ahora terminando en el mensaje nuevo.
+		expect(insertadas).toHaveLength(1);
+		expect(insertadas[0].desde).toEqual(inicio);
+		expect(insertadas[0].hasta.getTime()).toBe(tNuevo * 1000);
 	});
 
-	it("purga todos los snapshots si no hay unidades activas en B4 (unidades.length === 0)", async () => {
-		let deleteCalled = false;
-		spyOn(db, "delete").mockImplementation((() => {
-			deleteCalled = true;
+	it("estancia abierta y el vehículo se movió: se conserva tal cual y no se extiende", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		const inicio = new Date(cursor.getTime() - 5 * DIA_MS);
+		const fin = new Date(cursor.getTime() - 60_000);
+		cursoresMock = [
+			{ wialonUnitId: 100, procesadoHasta: cursor, ultimoMensajeAt: fin },
+		];
+		ultimaEstanciaMock = [{ lat: 14.6, lon: -90.5, desde: inicio, hasta: fin }];
+		wialonMock({
+			mensajes: [
+				{
+					t: Math.floor(cursor.getTime() / 1000) + 60,
+					lat: 14.7,
+					lon: -90.6,
+					velocidadKmh: 40,
+				},
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		let insertadas: any[] = [];
+		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
+			cb({
+				execute: async () => {},
+				delete: () => ({ where: async () => {} }),
+				insert: () => ({
+					values: (v: any) => {
+						if (Array.isArray(v) && v[0]?.desde) insertadas = v;
+						return Object.assign(Promise.resolve(), {
+							onConflictDoUpdate: async () => {},
+						});
+					},
+				}),
+			}),
+		);
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(insertadas).toHaveLength(1);
+		expect(insertadas[0].desde).toEqual(inicio);
+		expect(insertadas[0].hasta.getTime()).toBe(
+			Math.floor(fin.getTime() / 1000) * 1000,
+		);
+	});
+
+	// Regresión: una estancia vieja y CERRADA no debe sembrarse. Si el carro se
+	// fue y hoy vuelve al mismo lugar, fusionarlas daría una "estancia" de días.
+	it("estancia vieja y cerrada: no se fusiona con la visita de hoy al mismo lugar", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		const inicioViejo = new Date(cursor.getTime() - 10 * DIA_MS);
+		const finViejo = new Date(inicioViejo.getTime() + 3600_000);
+		// El último mensaje leído es de hace 1 h, posterior al fin de la estancia
+		// (el carro se movió después): quedó cerrada.
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: new Date(cursor.getTime() - 3600_000),
+			},
+		];
+		ultimaEstanciaMock = [
+			{ lat: 14.6, lon: -90.5, desde: inicioViejo, hasta: finViejo },
+		];
+		const t0 = Math.floor(cursor.getTime() / 1000) + 3600;
+		wialonMock({
+			mensajes: [
+				{ t: t0, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+				{ t: t0 + 1800, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { insertadas } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(insertadas()).toHaveLength(1);
+		// La visita de hoy, de 30 min, y no una de ~10 días.
+		expect(insertadas()[0].desde.getTime()).toBe(t0 * 1000);
+		expect(insertadas()[0].hasta.getTime()).toBe((t0 + 1800) * 1000);
+	});
+
+	it("cursor sin ultimoMensajeAt (anterior a la columna): no siembra", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		cursoresMock = [
+			{ wialonUnitId: 100, procesadoHasta: cursor, ultimoMensajeAt: null },
+		];
+		ultimaEstanciaMock = [
+			{
+				lat: 14.6,
+				lon: -90.5,
+				desde: new Date(cursor.getTime() - 5 * DIA_MS),
+				hasta: new Date(cursor.getTime() - 60_000),
+			},
+		];
+		const t0 = Math.floor(cursor.getTime() / 1000) + 3600;
+		wialonMock({
+			mensajes: [
+				{ t: t0, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+				{ t: t0 + 1800, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { insertadas } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(insertadas()[0].desde.getTime()).toBe(t0 * 1000);
+	});
+
+	it("guarda el último mensaje leído en el cursor; sin mensajes nuevos conserva el anterior", async () => {
+		const previo = new Date(ahoraSeg() - 2 * DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: new Date(ahoraSeg() - DIA_MS),
+				ultimoMensajeAt: previo,
+			},
+		];
+		// Sin mensajes nuevos: el último leído sigue siendo el anterior.
+		wialonMock();
+		const sinNuevos = capturarTransaccion();
+		await ejecutarCalculoUbicacionesClave();
+		expect(sinNuevos.cursor()?.ultimoMensajeAt).toEqual(previo);
+		mock.restore();
+	});
+
+	it("cursor fuera de la ventana de 60 días: se trata como backfill completo", async () => {
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: new Date(Date.now() - 90 * DIA_MS),
+				ultimoMensajeAt: null,
+			},
+		];
+		const historial = wialonMock();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		const [, desde, hasta] = historial.mock.calls[0]!;
+		expect(Math.round((hasta.getTime() - desde.getTime()) / DIA_MS)).toBe(60);
+	});
+
+	it("limita los backfills por corrida y reporta los pendientes", async () => {
+		const unidades = Array.from({ length: 105 }, (_, i) => ({
+			wialonUnitId: 1000 + i,
+			numeroCreditoSifco: `0101${i}`,
+		}));
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue(unidades);
+		const historial = wialonMock();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(historial).toHaveBeenCalledTimes(100);
+		expect(res.unidadesProcesadas).toBe(100);
+		expect(res.unidadesPendientesBackfill).toBe(5);
+	});
+
+	it("las unidades en B4 hacen el backfill primero", async () => {
+		const unidades = Array.from({ length: 101 }, (_, i) => ({
+			wialonUnitId: 2000 + i,
+			numeroCreditoSifco: `0101${i}`,
+		}));
+		// La única en B4 es la última de la lista.
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["010100"]);
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue(unidades);
+		const historial = wialonMock();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(historial.mock.calls[0]![0]).toBe(2000);
+		const procesadas = historial.mock.calls.map((c) => c[0]);
+		expect(procesadas).toContain(2000);
+		expect(procesadas).not.toContain(2100);
+	});
+
+	it("si cartera-back falla no se salta la corrida, solo no se prioriza", async () => {
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(null);
+		wialonMock();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(res.unidadesProcesadas).toBe(1);
+	});
+
+	it("una unidad compartida por dos créditos se baja una sola vez", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+			{ wialonUnitId: 100, numeroCreditoSifco: "B" },
+		]);
+		const historial = wialonMock();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(historial).toHaveBeenCalledTimes(1);
+		expect(res.unidadesProcesadas).toBe(1);
+		expect(gpsEventosService.resolverVehiculoYCaso).toHaveBeenCalledTimes(2);
+	});
+
+	it("invalida el snapshot anterior del caso (casoCobroId) y de la unidad al reemplazar", async () => {
+		const condiciones: unknown[] = [];
+		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
+			return cb({
+				execute: async () => {},
+				delete: () => ({
+					where: async (cond: unknown) => {
+						condiciones.push(cond);
+					},
+				}),
+				insert: () => ({
+					values: () =>
+						Object.assign(Promise.resolve(), {
+							onConflictDoUpdate: async () => {},
+						}),
+				}),
+			});
+		});
+		wialonMock();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(res.unidadesProcesadas).toBe(1);
+		// Una por las estancias y otra por las ubicaciones del par (unidad, SIFCO).
+		expect(condiciones).toHaveLength(2);
+		expect(condiciones.every((c) => c !== undefined)).toBe(true);
+	});
+
+	it("purga snapshots y estancias de unidades que ya no tienen caso activo", async () => {
+		const deletes: unknown[] = [];
+		spyOn(db, "delete").mockReturnValue({
+			where: async (cond: unknown) => {
+				deletes.push(cond);
+			},
+		} as any);
+		wialonMock();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		// ubicaciones inactivas + estancias + cursores.
+		expect(deletes).toHaveLength(3);
+	});
+
+	it("purga todo si no hay unidades con caso activo (unidades.length === 0)", async () => {
+		const tablasBorradas: unknown[] = [];
+		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
+			tablasBorradas.push(tabla);
 			return Promise.resolve();
 		}) as any);
 
@@ -159,21 +500,15 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 
 		const res = await ejecutarCalculoUbicacionesClave();
 
-		expect(deleteCalled).toBe(true);
+		// ubicaciones, estancias y cursores.
+		expect(tablasBorradas).toHaveLength(3);
 		expect(res.unidadesProcesadas).toBe(0);
 		// También se limpia la copia en el historial de consultas.
 		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
 	});
 
-	it("limpia el snapshot del historial de los créditos que salieron de B4 (conserva la auditoría)", async () => {
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: true,
-				tramosTotal: 1,
-				tramosCompletados: 1,
-			}),
-		} as any);
+	it("limpia el snapshot del historial de los créditos que ya no están activos (conserva la auditoría)", async () => {
+		wialonMock();
 
 		await ejecutarCalculoUbicacionesClave();
 
@@ -185,18 +520,134 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "update").mockImplementation((() => {
 			throw new Error("db caída");
 		}) as any);
-		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
-			getHistorialPosiciones: mock().mockResolvedValue({
-				mensajes: [],
-				completo: true,
-				tramosTotal: 1,
-				tramosCompletados: 1,
-			}),
-		} as any);
+		wialonMock();
 
 		const res = await ejecutarCalculoUbicacionesClave();
 
 		expect(res.unidadesProcesadas).toBe(1);
 		expect(res.unidadesConError).toBe(0);
+	});
+});
+
+describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () => {
+	let cursorMock: { procesadoHasta: Date; ultimoMensajeAt: Date | null }[] = [];
+
+	beforeEach(() => {
+		cursorMock = [];
+		spyOn(db, "select").mockImplementation(((campos?: unknown) => ({
+			from: () => ({
+				where: () =>
+					Object.assign(Promise.resolve([]), {
+						limit: async () =>
+							campos && "procesadoHasta" in (campos as object)
+								? cursorMock
+								: [],
+						orderBy: () => ({ limit: async () => [] }),
+					}),
+			}),
+		})) as any);
+		spyOn(gpsEventosService, "resolverVehiculoYCaso").mockResolvedValue({
+			vehicleId: "veh-1",
+			casoCobroId: "caso-1",
+		});
+		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
+			cb({
+				execute: async () => {},
+				delete: () => ({ where: async () => {} }),
+				insert: () => ({
+					values: () =>
+						Object.assign(Promise.resolve(), {
+							onConflictDoUpdate: async () => {},
+						}),
+				}),
+			}),
+		);
+	});
+
+	afterEach(() => {
+		mock.restore();
+	});
+
+	function wialonMock(resultado: unknown = historialCompleto()) {
+		const getHistorialPosiciones = mock().mockResolvedValue(resultado);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones,
+		} as any);
+		return getHistorialPosiciones;
+	}
+
+	it("unidad sin cursor: backfill de 60 días sin tope", async () => {
+		const historial = wialonMock();
+
+		const res = await calcularUbicacionesUnidadBajoDemanda(200, ["A"]);
+
+		expect(res.estado).toBe("calculado");
+		const [unitId, desde, hasta] = historial.mock.calls[0]!;
+		expect(unitId).toBe(200);
+		expect(Math.round((hasta.getTime() - desde.getTime()) / DIA_MS)).toBe(60);
+	});
+
+	it("calculada hace menos de 15 min: no vuelve a Wialon pero sí arma las ubicaciones del crédito", async () => {
+		cursorMock = [
+			{ procesadoHasta: new Date(Date.now() - 60_000), ultimoMensajeAt: null },
+		];
+		const historial = wialonMock();
+
+		const res = await calcularUbicacionesUnidadBajoDemanda(201, ["B"]);
+
+		// Una unidad compartida por dos créditos: el otro ya la calculó, pero este
+		// no se queda sin ubicaciones por el enfriamiento.
+		expect(res).toEqual({ estado: "calculado", ubicaciones: 0 });
+		expect(historial).not.toHaveBeenCalled();
+		expect(gpsEventosService.resolverVehiculoYCaso).toHaveBeenCalledWith(
+			201,
+			"B",
+		);
+	});
+
+	it("cursor viejo (más de 15 min): actualiza de forma incremental", async () => {
+		const cursor = new Date(Date.now() - 3 * 60 * 60 * 1000);
+		cursorMock = [{ procesadoHasta: cursor, ultimoMensajeAt: null }];
+		const historial = wialonMock();
+
+		const res = await calcularUbicacionesUnidadBajoDemanda(202, ["A"]);
+
+		expect(res.estado).toBe("calculado");
+		expect(historial.mock.calls[0]![1]).toEqual(cursor);
+	});
+
+	it("historial incompleto: no avanza y lo informa", async () => {
+		wialonMock({
+			mensajes: [],
+			completo: false,
+			tramosTotal: 9,
+			tramosCompletados: 4,
+		});
+
+		const res = await calcularUbicacionesUnidadBajoDemanda(203, ["A"]);
+
+		expect(res).toEqual({ estado: "incompleto" });
+	});
+
+	it("dos clics a la vez: el segundo no recalcula la misma unidad", async () => {
+		let liberar: () => void = () => {};
+		const historial = mock().mockImplementation(
+			() =>
+				new Promise((resolver) => {
+					liberar = () => resolver(historialCompleto());
+				}),
+		);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones: historial,
+		} as any);
+
+		const primero = calcularUbicacionesUnidadBajoDemanda(204, ["A"]);
+		await new Promise((r) => setTimeout(r, 20));
+		const segundo = await calcularUbicacionesUnidadBajoDemanda(204, ["A"]);
+		liberar();
+
+		expect(segundo).toEqual({ estado: "en_proceso" });
+		expect((await primero).estado).toBe("calculado");
+		expect(historial).toHaveBeenCalledTimes(1);
 	});
 });

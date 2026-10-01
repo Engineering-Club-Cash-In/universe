@@ -65,6 +65,22 @@ export interface Estancia {
 export function detectarEstancias(
 	mensajes: WialonMensajePosicion[],
 ): Estancia[] {
+	return detectarEstanciasConPendiente(mensajes).estancias;
+}
+
+/**
+ * Igual que `detectarEstancias`, pero además devuelve el tramo en curso al
+ * final de los mensajes cuando todavía no llega al mínimo de 20 min
+ * (`pendiente`). El cálculo incremental lo guarda y lo siembra en la corrida
+ * siguiente: sin eso, una parada que cruza el cursor y cuyas dos mitades duran
+ * menos de 20 min se perdía, aunque completa sí cumplía el mínimo.
+ *
+ * Un tramo en curso que ya cumple el mínimo se devuelve como estancia (como
+ * siempre) y `pendiente` queda en null.
+ */
+export function detectarEstanciasConPendiente(
+	mensajes: WialonMensajePosicion[],
+): { estancias: Estancia[]; pendiente: Estancia | null } {
 	const ordenados = [...mensajes].sort((a, b) => a.t - b.t);
 	const estancias: Estancia[] = [];
 
@@ -116,9 +132,19 @@ export function detectarEstancias(
 			ultimoDelTramo = msg;
 		}
 	}
-	cerrarTramo();
 
-	return estancias;
+	let pendiente: Estancia | null = null;
+	if (inicioTramo && ultimoDelTramo) {
+		const desde = new Date(inicioTramo.t * 1000);
+		const hasta = new Date(ultimoDelTramo.t * 1000);
+		if (hasta.getTime() - desde.getTime() < DURACION_MINIMA_ESTANCIA_MS) {
+			pendiente = { lat: inicioTramo.lat, lon: inicioTramo.lon, desde, hasta };
+		} else {
+			cerrarTramo();
+		}
+	}
+
+	return { estancias, pendiente };
 }
 
 interface FranjaHoraria {

@@ -7,6 +7,7 @@ import {
 	agruparEstancias,
 	calcularUbicacionesClave,
 	detectarEstancias,
+	detectarEstanciasConPendiente,
 } from "./ubicaciones-clave";
 import type { WialonMensajePosicion } from "./wialon-types";
 
@@ -77,6 +78,75 @@ describe("detectarEstancias", () => {
 			(estancias[0]!.hasta.getTime() - estancias[0]!.desde.getTime()) /
 			(60 * 60 * 1000);
 		expect(horas).toBeCloseTo(8, 1);
+	});
+});
+
+describe("detectarEstanciasConPendiente", () => {
+	const t0 = EPOCH_BASE;
+
+	test("tramo en curso de menos de 20 min al final: sin estancia, queda como pendiente", () => {
+		const r = detectarEstanciasConPendiente([
+			msg(t0, CASA),
+			msg(t0 + 12 * 60, CASA),
+		]);
+
+		expect(r.estancias).toHaveLength(0);
+		expect(r.pendiente).toEqual({
+			lat: CASA.lat,
+			lon: CASA.lon,
+			desde: new Date(t0 * 1000),
+			hasta: new Date((t0 + 12 * 60) * 1000),
+		});
+	});
+
+	test("tramo en curso que ya cumple 20 min: es estancia y no queda pendiente", () => {
+		const r = detectarEstanciasConPendiente([
+			msg(t0, CASA),
+			msg(t0 + 30 * 60, CASA),
+		]);
+
+		expect(r.estancias).toHaveLength(1);
+		expect(r.pendiente).toBeNull();
+	});
+
+	test("termina en movimiento: no hay pendiente", () => {
+		const r = detectarEstanciasConPendiente([
+			msg(t0, CASA),
+			msg(t0 + 5 * 60, TRABAJO, 40),
+		]);
+
+		expect(r.pendiente).toBeNull();
+	});
+
+	test("una parada que cruza el cursor se recupera sembrando el pendiente", () => {
+		const completo = [
+			msg(t0, CASA),
+			msg(t0 + 12 * 60, CASA),
+			msg(t0 + 24 * 60, CASA),
+		];
+		// Corrida 1 termina en el cursor (12 min): ninguna mitad llega a 20 min.
+		const primera = detectarEstanciasConPendiente(completo.slice(0, 2));
+		expect(primera.estancias).toHaveLength(0);
+		const p = primera.pendiente!;
+		// Corrida 2: se siembra el pendiente y solo se piden los mensajes nuevos.
+		const semilla = [
+			msg(Math.floor(p.desde.getTime() / 1000), p),
+			msg(Math.floor(p.hasta.getTime() / 1000), p),
+		];
+		const segunda = detectarEstanciasConPendiente([
+			...semilla,
+			...completo.slice(2),
+		]);
+
+		expect(segunda.estancias).toEqual(detectarEstancias(completo));
+		expect(segunda.estancias).toHaveLength(1);
+	});
+
+	test("detectarEstancias devuelve lo mismo que antes (solo estancias)", () => {
+		const mensajes = [msg(t0, CASA), msg(t0 + 30 * 60, CASA)];
+		expect(detectarEstancias(mensajes)).toEqual(
+			detectarEstanciasConPendiente(mensajes).estancias,
+		);
 	});
 });
 
@@ -275,4 +345,3 @@ describe("calcularUbicacionesClave — ponderación por duración", () => {
 		expect(lugar?.tipo).toBe("recurrente");
 	});
 });
-

@@ -34,5 +34,12 @@ CREATE TABLE IF NOT EXISTS "gps_estancias_cursor" (
 	-- termina exactamente ahí, quedó abierta (el carro sigue en ese lugar); si
 	-- no, ya se cerró y no hay que fusionarla con lo nuevo. Null = no se sabe.
 	"ultimo_mensaje_at" timestamp,
+	-- Tramo en curso al terminar la última corrida cuando aún no llegaba a 20 min
+	-- (por eso no es una estancia guardada). Se siembra en la siguiente: sin
+	-- esto, una parada que cruza el cursor con dos mitades <20 min se perdía.
+	"pendiente_lat" double precision,
+	"pendiente_lon" double precision,
+	"pendiente_desde" timestamp,
+	"pendiente_hasta" timestamp,
 	"actualizado_at" timestamp DEFAULT now() NOT NULL
 );

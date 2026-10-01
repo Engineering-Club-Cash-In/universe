@@ -259,5 +259,12 @@ export const gpsEstanciasCursor = pgTable("gps_estancias_cursor", {
 	// termina exactamente ahí, quedó abierta (el carro sigue en ese lugar); si
 	// no, ya se cerró y no hay que fusionarla con lo nuevo. Null = no se sabe.
 	ultimoMensajeAt: timestamp("ultimo_mensaje_at"),
+	// Tramo en curso al terminar la última corrida cuando aún no llegaba a 20 min
+	// (por eso no es una estancia guardada). Se siembra en la siguiente: sin
+	// esto, una parada que cruza el cursor con dos mitades <20 min se perdía.
+	pendienteLat: doublePrecision("pendiente_lat"),
+	pendienteLon: doublePrecision("pendiente_lon"),
+	pendienteDesde: timestamp("pendiente_desde"),
+	pendienteHasta: timestamp("pendiente_hasta"),
 	actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
 });

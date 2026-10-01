@@ -52,7 +52,7 @@ import { resolverVehiculoYCaso } from "../services/wialon/gps-eventos";
 import { purgarSnapshotsUbicacionesClave } from "../services/wialon/purgar-snapshots-ubicaciones";
 import {
 	calcularUbicacionesClaveDeEstancias,
-	detectarEstancias,
+	detectarEstanciasConPendiente,
 	type Estancia,
 } from "../services/wialon/ubicaciones-clave";
 import { getWialonClient } from "../services/wialon/wialon-client";
@@ -193,6 +193,36 @@ const unidadesEnProceso = new Set<number>();
 export interface CursorUnidad {
 	procesadoHasta: Date;
 	ultimoMensajeAt: Date | null;
+	// Tramo en curso (<20 min) al terminar la última corrida: no es estancia
+	// guardada todavía, pero la parada puede completarse con lo siguiente.
+	pendiente: Estancia | null;
+}
+
+function aCursorUnidad(fila: {
+	procesadoHasta: Date;
+	ultimoMensajeAt: Date | null;
+	pendienteLat: number | null;
+	pendienteLon: number | null;
+	pendienteDesde: Date | null;
+	pendienteHasta: Date | null;
+}): CursorUnidad {
+	const pendiente =
+		fila.pendienteLat != null &&
+		fila.pendienteLon != null &&
+		fila.pendienteDesde != null &&
+		fila.pendienteHasta != null
+			? {
+					lat: fila.pendienteLat,
+					lon: fila.pendienteLon,
+					desde: fila.pendienteDesde,
+					hasta: fila.pendienteHasta,
+				}
+			: null;
+	return {
+		procesadoHasta: fila.procesadoHasta,
+		ultimoMensajeAt: fila.ultimoMensajeAt,
+		pendiente,
+	};
 }
 
 // Serializa, entre instancias del servidor, todo lo que escribe sobre una
@@ -272,6 +302,20 @@ export async function calcularUbicacionesUnidad({
 				borrarDesde = ultima.desde;
 			} else {
 				borrarDesde = cursor.procesadoHasta;
+				// Sin estancia abierta, pudo quedar un tramo en curso de menos de 20
+				// min. Si la parada se completa con lo nuevo, juntos sí cumplen el
+				// mínimo; sin sembrarlo, esa parada se perdía.
+				if (cursor.pendiente) {
+					const punto = {
+						lat: cursor.pendiente.lat,
+						lon: cursor.pendiente.lon,
+						velocidadKmh: 0,
+					};
+					semilla = [
+						{ ...punto, t: segundos(cursor.pendiente.desde) },
+						{ ...punto, t: segundos(cursor.pendiente.hasta) },
+					];
+				}
 			}
 		}
 
@@ -295,7 +339,10 @@ export async function calcularUbicacionesUnidad({
 		// Reemplazo transaccional de lo recalculado: las estancias desde
 		// `pedirDesde` salen y entran las nuevas, y el cursor avanza junto —
 		// un fallo a medias no deja el cursor adelantado sin sus estancias.
-		const nuevas = detectarEstancias([...semilla, ...historial.mensajes]);
+		const { estancias: nuevas, pendiente } = detectarEstanciasConPendiente([
+			...semilla,
+			...historial.mensajes,
+		]);
 		// Si no llegaron mensajes, el último que se leyó sigue siendo el anterior.
 		const ultimoNuevo = historial.mensajes.reduce(
 			(max, m) => Math.max(max, m.t),
@@ -305,8 +352,25 @@ export async function calcularUbicacionesUnidad({
 			ultimoNuevo > 0
 				? new Date(ultimoNuevo * 1000)
 				: (cursor?.ultimoMensajeAt ?? null);
-		await db.transaction(async (tx) => {
+		const aplicado = await db.transaction(async (tx) => {
 			await bloquearUnidad(tx, wialonUnitId);
+
+			// Con el lock tomado, se revalida que el cursor siga siendo el que se
+			// leyó antes de pedir a Wialon. Si otra instancia procesó la unidad en
+			// el medio, esta corrida quedó vieja: escribir movería el cursor hacia
+			// atrás y borraría estancias más nuevas. Se descarta sin escribir.
+			const [actual] = await tx
+				.select({ procesadoHasta: gpsEstanciasCursor.procesadoHasta })
+				.from(gpsEstanciasCursor)
+				.where(eq(gpsEstanciasCursor.wialonUnitId, wialonUnitId))
+				.limit(1);
+			if (
+				(actual?.procesadoHasta.getTime() ?? null) !==
+				(cursor?.procesadoHasta.getTime() ?? null)
+			) {
+				return false;
+			}
+
 			await tx
 				.delete(gpsEstancias)
 				.where(
@@ -326,14 +390,24 @@ export async function calcularUbicacionesUnidad({
 					})),
 				);
 			}
+			const cursorNuevo = {
+				procesadoHasta: ahora,
+				ultimoMensajeAt,
+				pendienteLat: pendiente?.lat ?? null,
+				pendienteLon: pendiente?.lon ?? null,
+				pendienteDesde: pendiente?.desde ?? null,
+				pendienteHasta: pendiente?.hasta ?? null,
+			};
 			await tx
 				.insert(gpsEstanciasCursor)
-				.values({ wialonUnitId, procesadoHasta: ahora, ultimoMensajeAt })
+				.values({ wialonUnitId, ...cursorNuevo })
 				.onConflictDoUpdate({
 					target: gpsEstanciasCursor.wialonUnitId,
-					set: { procesadoHasta: ahora, ultimoMensajeAt, actualizadoAt: ahora },
+					set: { ...cursorNuevo, actualizadoAt: ahora },
 				});
+			return true;
 		});
+		if (!aplicado) return { estado: "en_proceso" };
 
 		const cantidad = await guardarUbicacionesDeUnidad({
 			wialonUnitId,
@@ -376,6 +450,10 @@ export async function calcularUbicacionesUnidadBajoDemanda(
 		.select({
 			procesadoHasta: gpsEstanciasCursor.procesadoHasta,
 			ultimoMensajeAt: gpsEstanciasCursor.ultimoMensajeAt,
+			pendienteLat: gpsEstanciasCursor.pendienteLat,
+			pendienteLon: gpsEstanciasCursor.pendienteLon,
+			pendienteDesde: gpsEstanciasCursor.pendienteDesde,
+			pendienteHasta: gpsEstanciasCursor.pendienteHasta,
 		})
 		.from(gpsEstanciasCursor)
 		.where(eq(gpsEstanciasCursor.wialonUnitId, wialonUnitId))
@@ -409,7 +487,7 @@ export async function calcularUbicacionesUnidadBajoDemanda(
 	const resultado = await calcularUbicacionesUnidad({
 		wialonUnitId,
 		sifcos,
-		cursor: fila,
+		cursor: fila && aCursorUnidad(fila),
 		ahora,
 		ventanaDesde,
 	});
@@ -557,7 +635,7 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	const cursores = new Map<number, CursorUnidad>(
 		(await db.select().from(gpsEstanciasCursor)).map((c) => [
 			c.wialonUnitId,
-			{ procesadoHasta: c.procesadoHasta, ultimoMensajeAt: c.ultimoMensajeAt },
+			aCursorUnidad(c),
 		]),
 	);
 

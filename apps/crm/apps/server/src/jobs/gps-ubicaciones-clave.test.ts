@@ -20,6 +20,12 @@ import {
 } from "./gps-ubicaciones-clave";
 
 const DIA_MS = 24 * 60 * 60 * 1000;
+// Cursor que ve la transacción tras tomar el lock (revalidación). Por defecto
+// el mismo que leyó la corrida; un test lo cambia para simular a otra instancia.
+let cursorEnTx: () => { procesadoHasta: Date }[] = () => [];
+const selectCursorEnTx = () => ({
+	from: () => ({ where: () => ({ limit: async () => cursorEnTx() }) }),
+});
 // Alineado a segundos: Wialon trabaja en segundos y la semilla trunca los ms.
 const ahoraSeg = () => Math.floor(Date.now() / 1000) * 1000;
 
@@ -38,6 +44,7 @@ function capturarTransaccion() {
 	spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 		cb({
 			execute: async () => {},
+			select: selectCursorEnTx,
 			delete: () => ({ where: async () => {} }),
 			insert: () => ({
 				values: (v: any) => {
@@ -79,6 +86,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		snapshotsPurgados = [];
 		estanciasRecortadas = [];
 		cursoresMock = [];
+		cursorEnTx = () => cursoresMock;
 		ultimaEstanciaMock = [];
 		estanciasGuardadasMock = [];
 		spyOn(db, "update").mockImplementation(((tabla: unknown) => ({
@@ -121,6 +129,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 			txCalled = true;
 			return cb({
 				execute: async () => {},
+				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
 					values: () =>
@@ -228,6 +237,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
 				execute: async () => {},
+				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
 					values: (v: any) => {
@@ -275,6 +285,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
 				execute: async () => {},
+				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
 					values: (v: any) => {
@@ -381,6 +392,194 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		mock.restore();
 	});
 
+	// Una parada que cruza el cursor con las dos mitades de <20 min se perdía:
+	// ninguna cumplía el mínimo por separado.
+	it("tramo corto en curso al cursor: se siembra y la parada completa se recupera", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		const t0 = Math.floor(cursor.getTime() / 1000) - 12 * 60;
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: new Date(cursor.getTime()),
+				pendienteLat: 14.6,
+				pendienteLon: -90.5,
+				pendienteDesde: new Date(t0 * 1000),
+				pendienteHasta: new Date(cursor.getTime()),
+			} as any,
+		];
+		// Pendiente: 12 min antes del cursor. Lo nuevo: 12 min después → 24 min.
+		wialonMock({
+			mensajes: [
+				{
+					t: Math.floor(cursor.getTime() / 1000) + 12 * 60,
+					lat: 14.6,
+					lon: -90.5,
+					velocidadKmh: 0,
+				},
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { insertadas } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(insertadas()).toHaveLength(1);
+		expect(insertadas()[0].desde.getTime()).toBe(t0 * 1000);
+		expect(insertadas()[0].hasta.getTime()).toBe(
+			(Math.floor(cursor.getTime() / 1000) + 12 * 60) * 1000,
+		);
+	});
+
+	it("sin pendiente guardado, esa misma parada no alcanza el mínimo (comportamiento previo)", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: null,
+				pendienteLat: null,
+				pendienteLon: null,
+				pendienteDesde: null,
+				pendienteHasta: null,
+			} as any,
+		];
+		wialonMock({
+			mensajes: [
+				{
+					t: Math.floor(cursor.getTime() / 1000) + 12 * 60,
+					lat: 14.6,
+					lon: -90.5,
+					velocidadKmh: 0,
+				},
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { insertadas } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(insertadas()).toHaveLength(0);
+	});
+
+	it("guarda en el cursor el tramo en curso (<20 min) al terminar la corrida", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: null,
+				pendienteLat: null,
+				pendienteLon: null,
+				pendienteDesde: null,
+				pendienteHasta: null,
+			} as any,
+		];
+		const t0 = Math.floor(cursor.getTime() / 1000) + 3600;
+		wialonMock({
+			mensajes: [
+				{ t: t0, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+				{ t: t0 + 10 * 60, lat: 14.6, lon: -90.5, velocidadKmh: 0 },
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { cursor: cursorGuardado } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(cursorGuardado()).toMatchObject({
+			pendienteLat: 14.6,
+			pendienteLon: -90.5,
+			pendienteDesde: new Date(t0 * 1000),
+			pendienteHasta: new Date((t0 + 600) * 1000),
+		});
+	});
+
+	it("al terminar en movimiento limpia el pendiente anterior", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: null,
+				pendienteLat: 14.6,
+				pendienteLon: -90.5,
+				pendienteDesde: new Date(cursor.getTime() - 600_000),
+				pendienteHasta: cursor,
+			} as any,
+		];
+		wialonMock({
+			mensajes: [
+				{
+					t: Math.floor(cursor.getTime() / 1000) + 60,
+					lat: 14.7,
+					lon: -90.6,
+					velocidadKmh: 50,
+				},
+			],
+			completo: true,
+			tramosTotal: 1,
+			tramosCompletados: 1,
+		});
+		const { cursor: cursorGuardado } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(cursorGuardado()).toMatchObject({
+			pendienteLat: null,
+			pendienteDesde: null,
+		});
+	});
+
+	// Dos instancias leen el mismo cursor y piden a Wialon; la que commitea
+	// después estaría vieja y movería el cursor hacia atrás.
+	it("otra instancia avanzó el cursor entre la lectura y la escritura: descarta sin escribir", async () => {
+		const cursor = new Date(ahoraSeg() - 2 * DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: null,
+				pendienteLat: null,
+				pendienteLon: null,
+				pendienteDesde: null,
+				pendienteHasta: null,
+			} as any,
+		];
+		// Dentro del lock, el cursor ya es más nuevo: otra instancia lo procesó.
+		cursorEnTx = () => [
+			{ procesadoHasta: new Date(cursor.getTime() + DIA_MS) },
+		];
+		wialonMock();
+		const { insertadas, cursor: cursorGuardado } = capturarTransaccion();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(cursorGuardado()).toBeNull();
+		expect(insertadas()).toHaveLength(0);
+		expect(res.unidadesProcesadas).toBe(0);
+		expect(res.unidadesConError).toBe(0);
+	});
+
+	it("primera corrida de una unidad que otra instancia ya empezó: descarta sin escribir", async () => {
+		// Esta corrida no vio cursor (undefined) pero dentro del lock ya existe uno.
+		cursoresMock = [];
+		cursorEnTx = () => [{ procesadoHasta: new Date() }];
+		wialonMock();
+		const { cursor: cursorGuardado } = capturarTransaccion();
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(cursorGuardado()).toBeNull();
+		expect(res.unidadesProcesadas).toBe(0);
+	});
+
 	it("cursor fuera de la ventana de 60 días: se trata como backfill completo", async () => {
 		cursoresMock = [
 			{
@@ -458,6 +657,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
 			return cb({
 				execute: async () => {},
+				select: selectCursorEnTx,
 				delete: () => ({
 					where: async (cond: unknown) => {
 						condiciones.push(cond);
@@ -542,6 +742,7 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 
 	beforeEach(() => {
 		cursorMock = [];
+		cursorEnTx = () => cursorMock;
 		spyOn(db, "select").mockImplementation(((campos?: unknown) => ({
 			from: () => ({
 				where: () =>
@@ -561,6 +762,7 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
 				execute: async () => {},
+				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
 					values: () =>

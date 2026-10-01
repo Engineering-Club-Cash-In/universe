@@ -90,41 +90,57 @@ async function guardarUbicacionesDeUnidad({
 	ahora: Date;
 	ventanaDesde: Date;
 }): Promise<number> {
-	const guardadas = await db
-		.select({
-			lat: gpsEstancias.lat,
-			lon: gpsEstancias.lon,
-			desde: gpsEstancias.desde,
-			hasta: gpsEstancias.hasta,
-		})
-		.from(gpsEstancias)
-		.where(
-			and(
-				eq(gpsEstancias.wialonUnitId, wialonUnitId),
-				gte(gpsEstancias.hasta, ventanaDesde),
-			),
-		);
-	// Una estancia que cruza el borde de la ventana cuenta solo desde el
-	// borde, igual que cuando el cálculo partía de los mensajes de 60 días.
-	const estancias: Estancia[] = guardadas.map((e) => ({
-		...e,
-		desde: e.desde < ventanaDesde ? ventanaDesde : e.desde,
-	}));
-	const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
-
+	// Se resuelven vehículo y caso de cada SIFCO antes de abrir la transacción:
+	// son lecturas que no necesitan el lock.
+	const resueltos: {
+		numeroCreditoSifco: string;
+		vehicleId: string | null;
+		casoCobroId: string | null;
+	}[] = [];
 	for (const numeroCreditoSifco of sifcos) {
-		const { vehicleId, casoCobroId } = await resolverVehiculoYCaso(
-			wialonUnitId,
+		resueltos.push({
 			numeroCreditoSifco,
-		);
+			...(await resolverVehiculoYCaso(wialonUnitId, numeroCreditoSifco)),
+		});
+	}
 
-		// Reemplazo transaccional: se borran las filas viejas de este
-		// (unidad, SIFCO) y de este caso (si existe) para no dejar huérfanos
-		// si la unidad o el vehículo cambiaron de vínculo, y se insertan las
-		// nuevas juntas — un observador nunca ve un estado intermedio "sin
-		// ubicaciones" para una unidad que sí las tenía calculadas.
-		await db.transaction(async (tx) => {
-			await bloquearUnidad(tx, wialonUnitId);
+	// Leer las estancias, calcular y reemplazar las ubicaciones ocurren en UN
+	// solo ciclo bajo el lock de la unidad. Si la lectura fuera antes del lock,
+	// con dos instancias una podría leer estancias, otra procesar un cursor más
+	// nuevo y guardar su resultado, y la primera, al obtener el lock, pisarlo
+	// con un cálculo viejo. Así cada escritura parte de lo último que hay
+	// guardado cuando le toca el turno.
+	return db.transaction(async (tx) => {
+		await bloquearUnidad(tx, wialonUnitId);
+
+		const guardadas = await tx
+			.select({
+				lat: gpsEstancias.lat,
+				lon: gpsEstancias.lon,
+				desde: gpsEstancias.desde,
+				hasta: gpsEstancias.hasta,
+			})
+			.from(gpsEstancias)
+			.where(
+				and(
+					eq(gpsEstancias.wialonUnitId, wialonUnitId),
+					gte(gpsEstancias.hasta, ventanaDesde),
+				),
+			);
+		// Una estancia que cruza el borde de la ventana cuenta solo desde el
+		// borde, igual que cuando el cálculo partía de los mensajes de 60 días.
+		const estancias: Estancia[] = guardadas.map((e) => ({
+			...e,
+			desde: e.desde < ventanaDesde ? ventanaDesde : e.desde,
+		}));
+		const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
+
+		// Reemplazo: se borran las filas viejas de cada (unidad, SIFCO) y de su
+		// caso (si existe) para no dejar huérfanos si la unidad o el vehículo
+		// cambiaron de vínculo, y se insertan las nuevas juntas — un observador
+		// nunca ve un estado intermedio "sin ubicaciones" para una unidad que sí
+		// las tenía calculadas.
+		for (const { numeroCreditoSifco, vehicleId, casoCobroId } of resueltos) {
 			const condicionesBorrado = [
 				and(
 					eq(gpsUbicacionesClave.wialonUnitId, wialonUnitId),
@@ -168,9 +184,9 @@ async function guardarUbicacionesDeUnidad({
 					})),
 				);
 			}
-		});
-	}
-	return ubicaciones.length;
+		}
+		return ubicaciones.length;
+	});
 }
 
 /**
@@ -306,7 +322,10 @@ export async function calcularUbicacionesUnidad({
 				// Sin estancia abierta, pudo quedar un tramo en curso de menos de 20
 				// min. Si la parada se completa con lo nuevo, juntos sí cumplen el
 				// mínimo; sin sembrarlo, esa parada se perdía.
-				if (cursor.pendiente) {
+				// Un pendiente de antes de la ventana no se siembra ni se reescribe:
+				// si la unidad dejó de reportar, esas coordenadas vencerían sin
+				// borrarse nunca y la retención de 60 días no se cumpliría.
+				if (cursor.pendiente && cursor.pendiente.desde >= ventanaDesde) {
 					const punto = {
 						lat: cursor.pendiente.lat,
 						lon: cursor.pendiente.lon,
@@ -576,6 +595,18 @@ export async function purgarDatosUbicacionesVencidos(
 	await db
 		.delete(gpsEstanciasCursor)
 		.where(notInArray(gpsEstanciasCursor.wialonUnitId, idsUnidades));
+	// El tramo pendiente del cursor guarda coordenadas exactas: si empezó antes
+	// de la ventana (la unidad dejó de reportar) se borra. El cursor en sí no
+	// tiene ubicación, solo fechas, y se conserva.
+	await db
+		.update(gpsEstanciasCursor)
+		.set({
+			pendienteLat: null,
+			pendienteLon: null,
+			pendienteDesde: null,
+			pendienteHasta: null,
+		})
+		.where(lt(gpsEstanciasCursor.pendienteDesde, ventanaDesde));
 
 	// Una estancia que sigue en curso (carro parado más de 60 días en el mismo
 	// lugar) extiende su `hasta` en cada corrida, así que el borrado de arriba

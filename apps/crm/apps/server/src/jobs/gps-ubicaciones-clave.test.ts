@@ -11,7 +11,11 @@ import {
 import { PgDialect } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
-import { gpsEstancias, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import {
+	gpsEstancias,
+	gpsEstanciasCursor,
+	gpsUbicacionesClave,
+} from "../db/schema/gps-eventos";
 import * as gpsEventosService from "../services/wialon/gps-eventos";
 import * as wialonClientModule from "../services/wialon/wialon-client";
 import * as gpsEventosPoll from "./gps-eventos-poll";
@@ -25,8 +29,21 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 // Cursor que ve la transacción tras tomar el lock (revalidación). Por defecto
 // el mismo que leyó la corrida; un test lo cambia para simular a otra instancia.
 let cursorEnTx: () => { procesadoHasta: Date }[] = () => [];
+// Estancias que lee, dentro del lock, el armado de ubicaciones.
+let estanciasEnTx: () => unknown[] = () => [];
+// Orden de lo que ocurre dentro de las transacciones (lock, lecturas, escrituras).
+let ordenTx: string[] = [];
+// `select` de la transacción: con `.limit` es la revalidación del cursor; sin
+// `.limit` (se hace await del where) es la lectura de estancias.
 const selectCursorEnTx = () => ({
-	from: () => ({ where: () => ({ limit: async () => cursorEnTx() }) }),
+	from: () => ({
+		where: () => {
+			ordenTx.push("select");
+			return Object.assign(Promise.resolve(estanciasEnTx()), {
+				limit: async () => cursorEnTx(),
+			});
+		},
+	}),
 });
 // Alineado a segundos: Wialon trabaja en segundos y la semilla trunca los ms.
 const ahoraSeg = () => Math.floor(Date.now() / 1000) * 1000;
@@ -45,7 +62,9 @@ function capturarTransaccion() {
 	let cursor: any = null;
 	spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 		cb({
-			execute: async () => {},
+			execute: async () => {
+				ordenTx.push("lock");
+			},
 			select: selectCursorEnTx,
 			delete: () => ({ where: async () => {} }),
 			insert: () => ({
@@ -89,6 +108,8 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		estanciasRecortadas = [];
 		cursoresMock = [];
 		cursorEnTx = () => cursoresMock;
+		estanciasEnTx = () => estanciasGuardadasMock;
+		ordenTx = [];
 		ultimaEstanciaMock = [];
 		estanciasGuardadasMock = [];
 		spyOn(db, "update").mockImplementation(((tabla: unknown) => ({
@@ -130,7 +151,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
 			txCalled = true;
 			return cb({
-				execute: async () => {},
+				execute: async () => {
+					ordenTx.push("lock");
+				},
 				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
@@ -238,7 +261,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		let insertadas: any[] = [];
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
-				execute: async () => {},
+				execute: async () => {
+					ordenTx.push("lock");
+				},
 				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
@@ -286,7 +311,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		let insertadas: any[] = [];
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
-				execute: async () => {},
+				execute: async () => {
+					ordenTx.push("lock");
+				},
 				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
@@ -582,6 +609,39 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		expect(res.unidadesProcesadas).toBe(0);
 	});
 
+	// Si la unidad dejó de reportar, un pendiente de antes de la ventana se
+	// volvería a sembrar y reescribir en cada corrida, y esas coordenadas nunca
+	// vencerían.
+	it("tramo pendiente anterior a la ventana de 60 días: no se siembra y se borra del cursor", async () => {
+		const cursor = new Date(ahoraSeg() - DIA_MS);
+		const viejo = new Date(ahoraSeg() - 70 * DIA_MS);
+		cursoresMock = [
+			{
+				wialonUnitId: 100,
+				procesadoHasta: cursor,
+				ultimoMensajeAt: null,
+				pendienteLat: 14.6,
+				pendienteLon: -90.5,
+				pendienteDesde: viejo,
+				pendienteHasta: new Date(viejo.getTime() + 600_000),
+			} as any,
+		];
+		// Sin mensajes nuevos: la unidad no reporta.
+		const historial = wialonMock();
+		const { cursor: cursorGuardado, insertadas } = capturarTransaccion();
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(historial).toHaveBeenCalledTimes(1);
+		expect(cursorGuardado()).toMatchObject({
+			pendienteLat: null,
+			pendienteLon: null,
+			pendienteDesde: null,
+			pendienteHasta: null,
+		});
+		expect(insertadas()).toHaveLength(0);
+	});
+
 	it("cursor fuera de la ventana de 60 días: se trata como backfill completo", async () => {
 		cursoresMock = [
 			{
@@ -706,7 +766,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		const condiciones: unknown[] = [];
 		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
 			return cb({
-				execute: async () => {},
+				execute: async () => {
+					ordenTx.push("lock");
+				},
 				select: selectCursorEnTx,
 				delete: () => ({
 					where: async (cond: unknown) => {
@@ -793,6 +855,8 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 	beforeEach(() => {
 		cursorMock = [];
 		cursorEnTx = () => cursorMock;
+		estanciasEnTx = () => [];
+		ordenTx = [];
 		spyOn(db, "select").mockImplementation(((campos?: unknown) => ({
 			from: () => ({
 				where: () =>
@@ -811,7 +875,9 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 		});
 		spyOn(db, "transaction").mockImplementation(async (cb: any) =>
 			cb({
-				execute: async () => {},
+				execute: async () => {
+					ordenTx.push("lock");
+				},
 				select: selectCursorEnTx,
 				delete: () => ({ where: async () => {} }),
 				insert: () => ({
@@ -845,6 +911,23 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 		const [unitId, desde, hasta] = historial.mock.calls[0]!;
 		expect(unitId).toBe(200);
 		expect(Math.round((hasta.getTime() - desde.getTime()) / DIA_MS)).toBe(60);
+	});
+
+	// Con el lock tomado, la lectura de estancias y el reemplazo de ubicaciones
+	// van en el mismo ciclo: si se leyera antes, otra instancia podría guardar un
+	// resultado más nuevo y este lo pisaría con uno viejo.
+	it("las estancias se leen dentro de la transacción, después de tomar el lock", async () => {
+		cursorMock = [
+			{
+				procesadoHasta: new Date(Date.now() - 60_000),
+				ultimoMensajeAt: null,
+			},
+		];
+		wialonMock();
+
+		await calcularUbicacionesUnidadBajoDemanda(210, ["A"]);
+
+		expect(ordenTx).toEqual(["lock", "select"]);
 	});
 
 	it("calculada hace menos de 15 min: no vuelve a Wialon pero sí arma las ubicaciones del crédito", async () => {
@@ -919,6 +1002,9 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 	// Condiciones del DELETE de ubicaciones y del UPDATE de snapshots del historial.
 	let condicionUbicaciones: unknown = null;
 	let condicionSnapshots: unknown = null;
+	// UPDATE que borra el tramo pendiente vencido del cursor.
+	let pendienteLimpiado: unknown = null;
+	let condicionPendiente: unknown = null;
 	const sqlDe = (cond: unknown) => new PgDialect().sqlToQuery(cond as any).sql;
 
 	beforeEach(() => {
@@ -927,6 +1013,8 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		estanciasRecortadas = [];
 		condicionUbicaciones = null;
 		condicionSnapshots = null;
+		pendienteLimpiado = null;
+		condicionPendiente = null;
 		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
 			borradas.push(tabla);
 			return Object.assign(Promise.resolve(), {
@@ -942,6 +1030,10 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 						snapshotsPurgados.push(valores);
 						condicionSnapshots = cond;
 					} else if (tabla === gpsEstancias) estanciasRecortadas.push(valores);
+					else if (tabla === gpsEstanciasCursor) {
+						pendienteLimpiado = valores;
+						condicionPendiente = cond;
+					}
 				},
 			}),
 		})) as any);
@@ -998,6 +1090,30 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		// Y siguen vencidos los de pares que ya no están activos.
 		expect(sqlDe(condicionUbicaciones)).toContain("not");
 		expect(sqlDe(condicionSnapshots)).toContain("not in");
+	});
+
+	// El tramo pendiente guarda coordenadas exactas. Si la unidad dejó de
+	// reportar, se reescribiría con la corrida y esas coordenadas no vencerían.
+	it("borra el tramo pendiente del cursor que empezó antes de la ventana de 60 días", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+
+		await correrPurgaUbicacionesClave();
+
+		expect(pendienteLimpiado).toEqual({
+			pendienteLat: null,
+			pendienteLon: null,
+			pendienteDesde: null,
+			pendienteHasta: null,
+		});
+		expect(sqlDe(condicionPendiente)).toContain('"pendiente_desde" <');
+		// El corte es la ventana de 60 días, no una fecha cualquiera.
+		const [corte] = new PgDialect().sqlToQuery(condicionPendiente as any)
+			.params as Date[];
+		expect(Math.round((Date.now() - new Date(corte!).getTime()) / DIA_MS)).toBe(
+			60,
+		);
 	});
 
 	it("sin casos activos purga todo lo retenido, incluido el snapshot del historial", async () => {

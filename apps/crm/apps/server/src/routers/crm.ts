@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
+	insuranceInvoiceSubmissions,
 	opportunityAgencySellers,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -6308,9 +6309,25 @@ export const crmRouter = {
 						id: user.id,
 						name: user.name,
 					},
+					// Solo la factura del seguro subida desde el tracker trae la agencia
+					// y el estado del correo a la aseguradora.
+					subidoDesde: companies.name,
+					envioAseguradora: {
+						estado: insuranceInvoiceSubmissions.status,
+						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
+						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+					},
 				})
 				.from(opportunityDocuments)
 				.leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+				.leftJoin(
+					insuranceInvoiceSubmissions,
+					eq(insuranceInvoiceSubmissions.documentId, opportunityDocuments.id),
+				)
+				.leftJoin(
+					companies,
+					eq(companies.id, insuranceInvoiceSubmissions.companyId),
+				)
 				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
 				.orderBy(opportunityDocuments.uploadedAt);
 
@@ -6563,6 +6580,20 @@ export const crmRouter = {
 			if (!document) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Documento no encontrado",
+				});
+			}
+
+			// La factura del seguro enviada desde el tracker es el respaldo del
+			// correo a la aseguradora: borrarla permitiría subir y enviar otra.
+			const [facturaDelTracker] = await db
+				.select({ id: insuranceInvoiceSubmissions.id })
+				.from(insuranceInvoiceSubmissions)
+				.where(eq(insuranceInvoiceSubmissions.documentId, input.documentId))
+				.limit(1);
+			if (facturaDelTracker) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esta factura del seguro ya se registró para la aseguradora desde el tracker y no se puede eliminar",
 				});
 			}
 

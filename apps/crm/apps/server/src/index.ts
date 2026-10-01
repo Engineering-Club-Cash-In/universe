@@ -40,6 +40,7 @@ import {
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { limiteFacturaSeguro } from "./lib/limite-factura-seguro";
 import {
 	PARTNER_AUTH_BASE_PATH,
 	PARTNER_CHANGE_PASSWORD_PATH,
@@ -226,6 +227,8 @@ const handler = new RPCHandler(
 		buroInternoProcedures,
 	),
 );
+app.use("/rpc/*", limiteFacturaSeguro());
+
 app.use("/rpc/*", async (c, next) => {
 	const context = await createContext({ context: c });
 	const { matched, response } = await handler.handle(c.req.raw, {

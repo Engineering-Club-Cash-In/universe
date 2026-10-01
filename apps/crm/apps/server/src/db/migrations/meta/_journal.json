@@ -267,6 +267,13 @@
 			"when": 1790373775351,
 			"tag": "0044_add_batch_monto_aportado_previo",
 			"breakpoints": true
+		},
+		{
+			"idx": 37,
+			"version": "7",
+			"when": 1790799299432,
+			"tag": "0045_add_sat_verificacion_vehiculos",
+			"breakpoints": true
 		}
 	]
 }

@@ -36,6 +36,7 @@ let casoGpsMock: Record<string, unknown> | null = {
 };
 let insertGpsConsultaLogFalla = false;
 let gpsConsultaLogsInsertados: Record<string, unknown>[] = [];
+let gpsConsultaLogsActualizados: Record<string, unknown>[] = [];
 let ubicacionesWhereCondition: unknown = null;
 let ubicacionesClaveBorradasCount = 0;
 let consultasFilasMock: Record<string, unknown>[] = [];
@@ -134,14 +135,28 @@ function mockDb() {
 				return {
 					values: (fila: Record<string, unknown>) => {
 						if (insertGpsConsultaLogFalla) {
-							return Promise.reject(new Error("insert falló"));
+							return {
+								returning: () => Promise.reject(new Error("insert falló")),
+							};
 						}
 						gpsConsultaLogsInsertados.push(fila);
-						return Promise.resolve();
+						return { returning: async () => [{ id: "log-nuevo" }] };
 					},
 				};
 			}
 			throw new Error(`insert en tabla no mockeada: ${String(tabla)}`);
+		},
+		update: (tabla: unknown) => {
+			if (tabla === gpsConsultaLogs) {
+				return {
+					set: (valores: Record<string, unknown>) => ({
+						where: async () => {
+							gpsConsultaLogsActualizados.push(valores);
+						},
+					}),
+				};
+			}
+			throw new Error(`update en tabla no mockeada: ${String(tabla)}`);
 		},
 		delete: (tabla: unknown) => {
 			if (tabla === gpsUbicacionesClave) {
@@ -330,6 +345,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		};
 		insertGpsConsultaLogFalla = false;
 		gpsConsultaLogsInsertados = [];
+		gpsConsultaLogsActualizados = [];
 		ubicacionesWhereCondition = null;
 		ubicacionesClaveBorradasCount = 0;
 		mock.restore();
@@ -370,6 +386,13 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.ubicaciones).toHaveLength(1);
 		expect(res.ubicaciones[0]?.tipo).toBe("probable_casa");
 		expect(gpsConsultaLogsInsertados).toHaveLength(1);
+		// Lo mostrado queda en el snapshot de esa consulta para el historial.
+		expect(gpsConsultaLogsActualizados).toHaveLength(1);
+		const guardado = gpsConsultaLogsActualizados[0]?.snapshot as {
+			ubicaciones: { id: string; tipo: string }[];
+		};
+		expect(guardado.ubicaciones).toHaveLength(1);
+		expect(guardado.ubicaciones[0]?.tipo).toBe("probable_casa");
 		expect(gpsConsultaLogsInsertados[0]?.motivo).toBe(input.motivo);
 	});
 
@@ -498,6 +521,8 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
 		expect(ubicacionesClaveBorradasCount).toBe(1);
+		// Fuera de B4 también se limpia el snapshot guardado en el historial.
+		expect(gpsConsultaLogsActualizados).toEqual([{ snapshot: null }]);
 	});
 
 	it("cartera-back no disponible (rechaza / bucketActual === null): fail closed, no expone ubicaciones y no purga la DB", async () => {
@@ -532,6 +557,8 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
 		expect(ubicacionesClaveBorradasCount).toBe(0);
+		// Un fallo transitorio de red no debe borrar snapshots del historial.
+		expect(gpsConsultaLogsActualizados).toEqual([]);
 	});
 
 	it("caso sin numeroCreditoSifco: no expone ubicaciones", async () => {
@@ -746,5 +773,125 @@ describe("getGpsConsultasCaso — historial de consultas del vehículo", () => {
 			}),
 		).rejects.toThrow();
 		expect(consultasLimitPedido).toBeNull();
+	});
+});
+
+describe("getUbicacionesConsultasCaso (historial de ubicaciones clave)", () => {
+	const input = { casoCobroId: CASO_ID, vehicleId: VEHICLE_ID, limit: 20 };
+
+	beforeEach(() => {
+		rolUsuarioMock = "cobros";
+		responsableCasoMock = "user-test";
+		numeroCreditoSifcoMock = "01010214100000";
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 4,
+		} as never);
+	});
+
+	afterEach(() => {
+		consultasFilasMock = [];
+		mock.restore();
+	});
+
+	it("devuelve motivo, usuario y las ubicaciones de cada consulta (fechas ISO -> Date)", async () => {
+		consultasFilasMock = [
+			{
+				id: "log-1",
+				motivo: "Preparar visita de recuperación",
+				userNombre: "Ana",
+				createdAt: new Date("2026-10-01T12:48:00.000Z"),
+				snapshot: {
+					ubicaciones: [
+						{
+							id: "ub-1",
+							lat: 14.5951,
+							lon: -90.5069,
+							radioM: 200,
+							tipo: "probable_casa",
+							horasTotales: 236,
+							diasDistintos: 15,
+							visitas: 26,
+							patron: { nocturna: 200 },
+							primeraVisita: "2026-07-01T00:00:00.000Z",
+							ultimaVisita: "2026-09-30T18:21:00.000Z",
+							calculadoAt: "2026-10-01T03:33:00.000Z",
+						},
+					],
+				},
+			},
+			{
+				id: "log-0",
+				motivo: "Consulta anterior al historial",
+				userNombre: null,
+				createdAt: new Date("2026-10-01T12:25:00.000Z"),
+				snapshot: null,
+			},
+		];
+
+		const res = await call(
+			gpsEventosRouter.getUbicacionesConsultasCaso,
+			input,
+			{
+				context: ctx("cobros"),
+			},
+		);
+
+		expect(res).toHaveLength(2);
+		expect(res[0]?.snapshot?.ubicaciones[0]?.tipo).toBe("probable_casa");
+		expect(res[0]?.snapshot?.ubicaciones[0]?.ultimaVisita).toBeInstanceOf(Date);
+		expect(res[1]?.snapshot).toBeNull();
+		// Ver el historial no es una consulta nueva: no audita.
+		expect(gpsConsultaLogsInsertados).toHaveLength(0);
+	});
+
+	it("un snapshot con formato inválido se descarta en vez de tumbar el historial", async () => {
+		consultasFilasMock = [
+			{
+				id: "log-1",
+				motivo: "Consulta con snapshot corrupto",
+				userNombre: "Ana",
+				createdAt: new Date("2026-10-01T12:48:00.000Z"),
+				snapshot: { ubicaciones: "no es una lista" },
+			},
+		];
+
+		const res = await call(
+			gpsEventosRouter.getUbicacionesConsultasCaso,
+			input,
+			{
+				context: ctx("cobros"),
+			},
+		);
+
+		expect(res).toHaveLength(1);
+		expect(res[0]?.snapshot).toBeNull();
+	});
+
+	it("crédito fuera de B4: no expone el historial de ubicaciones", async () => {
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+		consultasFilasMock = [
+			{
+				id: "log-1",
+				motivo: "Consulta previa",
+				userNombre: "Ana",
+				createdAt: new Date("2026-10-01T12:48:00.000Z"),
+				snapshot: { ubicaciones: [] },
+			},
+		];
+
+		const res = await call(
+			gpsEventosRouter.getUbicacionesConsultasCaso,
+			input,
+			{
+				context: ctx("cobros"),
+			},
+		);
+
+		expect(res).toEqual([]);
 	});
 });

@@ -769,24 +769,28 @@ export type UbicacionesClaveCasoInput = z.infer<
 	typeof ubicacionesClaveCasoInputSchema
 >;
 
+const ubicacionClaveShape = {
+	id: z.string(),
+	lat: z.number(),
+	lon: z.number(),
+	radioM: z.number(),
+	tipo: z.enum([
+		"probable_casa",
+		"probable_trabajo",
+		"recurrente",
+		"frecuente",
+	]),
+	horasTotales: z.number(),
+	diasDistintos: z.number(),
+	visitas: z.number(),
+	patron: z.unknown(),
+};
+
 export const ubicacionesClaveCasoOutputSchema = z.object({
 	auditada: z.boolean(),
 	ubicaciones: z.array(
 		z.object({
-			id: z.string(),
-			lat: z.number(),
-			lon: z.number(),
-			radioM: z.number(),
-			tipo: z.enum([
-				"probable_casa",
-				"probable_trabajo",
-				"recurrente",
-				"frecuente",
-			]),
-			horasTotales: z.number(),
-			diasDistintos: z.number(),
-			visitas: z.number(),
-			patron: z.unknown(),
+			...ubicacionClaveShape,
 			primeraVisita: z.date(),
 			ultimaVisita: z.date(),
 			calculadoAt: z.date(),
@@ -795,4 +799,37 @@ export const ubicacionesClaveCasoOutputSchema = z.object({
 });
 export type UbicacionesClaveCasoOutput = z.infer<
 	typeof ubicacionesClaveCasoOutputSchema
+>;
+
+// ── Historial de consultas de ubicaciones clave ──────────────────────────────
+// Cada consulta guarda en gps_consulta_logs.snapshot lo que se mostró, para
+// verlo después sin volver a pedirlo con un motivo. El snapshot viaja como
+// JSON: las fechas llegan como texto ISO, por eso `coerce`.
+
+export const ubicacionesClaveSnapshotSchema = z.object({
+	ubicaciones: z.array(
+		z.object({
+			...ubicacionClaveShape,
+			primeraVisita: z.coerce.date(),
+			ultimaVisita: z.coerce.date(),
+			calculadoAt: z.coerce.date(),
+		}),
+	),
+});
+export type UbicacionesClaveSnapshot = z.infer<
+	typeof ubicacionesClaveSnapshotSchema
+>;
+
+export const ubicacionesConsultasCasoOutputSchema = z.array(
+	z.object({
+		id: z.string(),
+		motivo: z.string(),
+		userNombre: z.string().nullable(),
+		createdAt: z.date(),
+		// Null en consultas anteriores al historial o si no se pudo guardar.
+		snapshot: ubicacionesClaveSnapshotSchema.nullable(),
+	}),
+);
+export type UbicacionesConsultasCasoOutput = z.infer<
+	typeof ubicacionesConsultasCasoOutputSchema
 >;

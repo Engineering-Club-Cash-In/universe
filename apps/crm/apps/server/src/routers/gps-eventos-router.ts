@@ -18,6 +18,7 @@ import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-o
 import { cobrosProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { agruparConsultasGps } from "../services/wialon/gps-consultas-agrupar";
+import { purgarSnapshotsUbicacionesClave } from "../services/wialon/purgar-snapshots-ubicaciones";
 import {
 	gpsConsultasCasoInputSchema,
 	gpsConsultasCasoOutputSchema,
@@ -261,6 +262,11 @@ export const gpsEventosRouter = {
 						.delete(gpsUbicacionesClave)
 						.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
 						.catch(() => {});
+					// Y la copia en el historial de consultas de este crédito (la
+					// fila de auditoría se conserva, solo se limpia el snapshot).
+					await purgarSnapshotsUbicacionesClave(
+						eq(gpsConsultaLogs.numeroCreditoSifco, numeroCreditoSifco),
+					);
 				}
 				return { auditada: true, ubicaciones: [] };
 			}

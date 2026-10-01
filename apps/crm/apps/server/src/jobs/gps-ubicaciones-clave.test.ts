@@ -15,9 +15,19 @@ import { ejecutarCalculoUbicacionesClave } from "./gps-ubicaciones-clave";
 
 describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	let txCalled = false;
+	// Valores que el job manda a `update(gps_consulta_logs).set(...)`.
+	let snapshotsPurgados: unknown[] = [];
 
 	beforeEach(() => {
 		txCalled = false;
+		snapshotsPurgados = [];
+		spyOn(db, "update").mockReturnValue({
+			set: (valores: unknown) => ({
+				where: async () => {
+					snapshotsPurgados.push(valores);
+				},
+			}),
+		} as any);
 		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["01010214100000"]);
 		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
 			{ wialonUnitId: 100, numeroCreditoSifco: "01010214100000" },
@@ -151,5 +161,42 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 
 		expect(deleteCalled).toBe(true);
 		expect(res.unidadesProcesadas).toBe(0);
+		// También se limpia la copia en el historial de consultas.
+		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
+	});
+
+	it("limpia el snapshot del historial de los créditos que salieron de B4 (conserva la auditoría)", async () => {
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones: mock().mockResolvedValue({
+				mensajes: [],
+				completo: true,
+				tramosTotal: 1,
+				tramosCompletados: 1,
+			}),
+		} as any);
+
+		await ejecutarCalculoUbicacionesClave();
+
+		// Solo se anula la columna snapshot: la fila (motivo, usuario) no se borra.
+		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
+	});
+
+	it("una purga de snapshots que falla no tumba el cálculo nocturno", async () => {
+		spyOn(db, "update").mockImplementation((() => {
+			throw new Error("db caída");
+		}) as any);
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue({
+			getHistorialPosiciones: mock().mockResolvedValue({
+				mensajes: [],
+				completo: true,
+				tramosTotal: 1,
+				tramosCompletados: 1,
+			}),
+		} as any);
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(res.unidadesProcesadas).toBe(1);
+		expect(res.unidadesConError).toBe(0);
 	});
 });

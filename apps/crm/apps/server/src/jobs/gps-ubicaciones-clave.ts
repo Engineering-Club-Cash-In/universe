@@ -16,10 +16,12 @@
  * 60 días — no se van sumando corridas viejas.
  */
 
-import { and, eq, not, or } from "drizzle-orm";
+import { and, eq, isNull, not, notInArray, or } from "drizzle-orm";
 import { db } from "../db";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { resolverVehiculoYCaso } from "../services/wialon/gps-eventos";
+import { purgarSnapshotsUbicacionesClave } from "../services/wialon/purgar-snapshots-ubicaciones";
 import { calcularUbicacionesClave } from "../services/wialon/ubicaciones-clave";
 import { getWialonClient } from "../services/wialon/wialon-client";
 import { conContextoGps } from "../services/wialon/wialon-contexto";
@@ -53,6 +55,7 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 		// CB-119: si no hay unidades con caso activo en B4 hoy, se purgan todos
 		// los snapshots previos (créditos que salieron de B4 o casos cerrados).
 		await db.delete(gpsUbicacionesClave);
+		await purgarSnapshotsUbicacionesClave();
 		return {
 			unidadesProcesadas: 0,
 			unidadesConError: 0,
@@ -72,6 +75,16 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	const condicionActivos =
 		paresActivos.length > 1 ? or(...paresActivos)! : paresActivos[0]!;
 	await db.delete(gpsUbicacionesClave).where(not(condicionActivos));
+	// Lo mismo con la copia que guarda el historial de consultas: se limpia el
+	// snapshot de los créditos que ya no están activos en B4 (la auditoría queda).
+	await purgarSnapshotsUbicacionesClave(
+		or(
+			isNull(gpsConsultaLogs.numeroCreditoSifco),
+			notInArray(gpsConsultaLogs.numeroCreditoSifco, [
+				...new Set(unidades.map((u) => u.numeroCreditoSifco)),
+			]),
+		),
+	);
 
 	const ahora = new Date();
 	const ventanaDesde = new Date(

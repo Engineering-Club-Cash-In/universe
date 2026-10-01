@@ -521,6 +521,8 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
 		expect(ubicacionesClaveBorradasCount).toBe(1);
+		// Fuera de B4 también se limpia el snapshot guardado en el historial.
+		expect(gpsConsultaLogsActualizados).toEqual([{ snapshot: null }]);
 	});
 
 	it("cartera-back no disponible (rechaza / bucketActual === null): fail closed, no expone ubicaciones y no purga la DB", async () => {
@@ -555,6 +557,8 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
 		expect(ubicacionesClaveBorradasCount).toBe(0);
+		// Un fallo transitorio de red no debe borrar snapshots del historial.
+		expect(gpsConsultaLogsActualizados).toEqual([]);
 	});
 
 	it("caso sin numeroCreditoSifco: no expone ubicaciones", async () => {

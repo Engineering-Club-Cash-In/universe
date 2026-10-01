@@ -143,6 +143,13 @@ export function VisitasCard({
 	// El pago de una visita solo se ofrece en la más reciente: en las viejas ya
 	// no dice nada útil.
 	const ultimaRealizada = resto.find((v) => v.estado === "realizada")?.id;
+	// El convenio pendiente se ofrece en la visita de convenio más reciente,
+	// aunque después se hayan registrado otras: mientras el crédito no tenga
+	// convenio (`onRegistrarConvenio` solo viene entonces), sigue faltando.
+	// Una sola vez, para no repetir el aviso en convenios viejos (Codex, PR #1831).
+	const ultimaConConvenio = resto.find(
+		(v) => v.estado === "realizada" && v.pasos?.convenio,
+	)?.id;
 
 	const fila = (v: Visita) => (
 		<FilaVisita
@@ -153,7 +160,7 @@ export function VisitasCard({
 			onRegistrarPromesa={onRegistrarPromesa}
 			onRegistrarEntrega={onRegistrarEntrega}
 			onRegistrarConvenio={
-				v.id === ultimaRealizada ? onRegistrarConvenio : undefined
+				v.id === ultimaConConvenio ? onRegistrarConvenio : undefined
 			}
 			onCancelar={setCancelando}
 			accionesPago={v.id === ultimaRealizada ? accionesPago : undefined}

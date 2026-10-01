@@ -31,6 +31,8 @@ let facturaPrevia: Array<Record<string, unknown>> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
+// La oportunidad leída FOR UPDATE, si cambió desde la lectura inicial.
+let casoBajoBloqueo: Record<string, unknown> | undefined;
 // Cotización que guardó el cierre, y el filtro con el que se buscó la cotización.
 let cotizacionDelCierre: Array<{ quotationId: string }> = [];
 let filtroCotizacion: unknown;
@@ -49,9 +51,10 @@ const subidosR2: Array<{ key: string; mime: string }> = [];
 const borradosR2: string[] = [];
 
 function cadena<T>(
-	obtenerFilas: () => T[],
+	obtenerFilas: (bajoBloqueo: boolean) => T[],
 	alFiltrar?: (condicion: unknown) => void,
 ) {
+	let bajoBloqueo = false;
 	const nodo = {
 		from: () => nodo,
 		innerJoin: () => nodo,
@@ -62,8 +65,11 @@ function cadena<T>(
 		},
 		orderBy: () => nodo,
 		limit: () => nodo,
-		for: () => nodo,
-		then: (resolve: (filas: T[]) => void) => resolve(obtenerFilas()),
+		for: () => {
+			bajoBloqueo = true;
+			return nodo;
+		},
+		then: (resolve: (filas: T[]) => void) => resolve(obtenerFilas(bajoBloqueo)),
 	};
 	return nodo;
 }
@@ -83,7 +89,10 @@ const dbFalsa = {
 			if (tabla === partnerMembers) return cadena(() => membresias);
 			if (tabla === partnerAccounts)
 				return cadena(() => [{ passwordChangedAt: new Date("2026-01-01") }]);
-			if (tabla === opportunities) return cadena(() => [caso]);
+			if (tabla === opportunities)
+				return cadena((bajoBloqueo) => [
+					bajoBloqueo && casoBajoBloqueo ? casoBajoBloqueo : caso,
+				]);
 			if (tabla === quotations)
 				return cadena(
 					() => {
@@ -240,6 +249,7 @@ beforeEach(() => {
 	facturaPrevia = [];
 	vendedorVigente = undefined;
 	fallaLecturaCotizacion = false;
+	casoBajoBloqueo = undefined;
 	cotizacionDelCierre = [];
 	filtroCotizacion = undefined;
 	resultadoCorreo = { ok: true };
@@ -480,8 +490,10 @@ describe("subirFacturaSeguro", () => {
 		expect(correos).toHaveLength(0);
 	});
 
-	test("un PDF de verdad con otra extensión se guarda y se adjunta como .pdf", async () => {
-		await subir(pdf("factura.exe"));
+	test("un PDF declarado como imagen se guarda y se adjunta como .pdf", async () => {
+		// Pasa el filtro del tipo declarado (PNG está permitido), pero el
+		// contenido manda: es un PDF.
+		await subir(pdf("factura.png", "image/png"));
 		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
 		expect(
 			insertados.find((i) => i.tabla === opportunityDocuments)?.valores,
@@ -586,6 +598,19 @@ describe("subirFacturaSeguro", () => {
 		expect(html).not.toContain("Kia");
 	});
 
+	test("si el caso se cerró mientras se subía, rechaza, borra el archivo y no manda un correo con datos de antes del cierre", async () => {
+		casoBajoBloqueo = { ...caso, status: "won" };
+		await expect(subir()).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"El caso cambió mientras se procesaba la factura. Vuelve a intentarlo.",
+		});
+		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
+		expect(borradosR2).toEqual([KEY]);
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+	});
+
 	test("sin destinatarios no se envía, pero la factura queda", async () => {
 		correosPolizas = { ...correosPolizas, gyt: [] };
 		const r = await subir();
@@ -612,6 +637,20 @@ describe("reenviarFacturaSeguro", () => {
 		insuranceProvider: "gyt",
 		key: KEY,
 		nombre: "factura.pdf",
+	});
+
+	test("si el caso cambió de estado antes del bloqueo (se cerró), no reenvía con datos viejos", async () => {
+		facturaPrevia = [registro("fallido")];
+		casoBajoBloqueo = { ...caso, status: "won" };
+		await expect(
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"El caso cambió mientras se procesaba la factura. Vuelve a intentarlo.",
+		});
+		expect(actualizados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
 	});
 
 	test("tras un rechazo: nuevo intento (nueva llave) con el correo armado de nuevo", async () => {

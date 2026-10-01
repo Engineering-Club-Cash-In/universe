@@ -56,6 +56,7 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import { InvestigacionRedesCard } from "@/components/cobros/investigacion-redes-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -5088,6 +5089,13 @@ function RouteComponent() {
 								agregarTelefonoEncontradoMutation.isPending
 							}
 						/>
+					)}
+					{/* Investigación en redes sociales (CB-039): lo que se encuentra
+					    del cliente en línea; los buckets los define el servidor. */}
+					{caso.id && (
+						<div className="mt-4">
+							<InvestigacionRedesCard casoCobroId={caso.id} />
+						</div>
 					)}
 				</TabsContent>
 			</Tabs>

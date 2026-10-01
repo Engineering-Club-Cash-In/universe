@@ -104,6 +104,7 @@ import {
 } from "./routers/index";
 import { inmovilizacionReactivacionLlamadaRouter } from "./routers/inmovilizacion-reactivacion-llamada";
 import { inmovilizacionUnidadRouter } from "./routers/inmovilizacion-unidad";
+import { investigacionesRedesCobrosRouter } from "./routers/investigaciones-redes-cobros";
 import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
@@ -277,6 +278,7 @@ const handler = new RPCHandler(
 		gpsEventosRouter,
 		referenciasCobrosRouter,
 		visitasCobrosRouter,
+		investigacionesRedesCobrosRouter,
 		tareasCobrosRouter,
 	),
 );

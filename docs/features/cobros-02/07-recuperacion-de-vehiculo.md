@@ -167,8 +167,9 @@ no queda ninguno (la pidió el único supervisor), va a los admins.
   el paso (sin referencias, sin lugar de trabajo, sin GPS) la justificación viene
   sugerida.
 - **Qué quedó afuera (2026-09-30):** la *llamada del supervisor* (no depende del asesor:
-  no la puede hacer ni justificar) y la *búsqueda en redes sociales* (CB-039 no está
-  hecho, no hay dónde registrarla). Si cartera no responde, el paso de convenio lo dice
+  no la puede hacer ni justificar) y la *búsqueda en redes sociales* (CB-039 no estaba
+  hecho; ya hay dónde registrarla, ver [doc 11](./11-investigacion-redes-sociales.md), pero el
+  paso todavía no se reincorporó al checklist). Si cartera no responde, el paso de convenio lo dice
   ("no se sabe si hubo convenio") en vez de afirmar que no hubo.
 - El checklist lo **arma el servidor** dos veces: para mostrar el formulario y otra vez al
   guardar. Del navegador solo salen las justificaciones y notas: lo que lee el supervisor

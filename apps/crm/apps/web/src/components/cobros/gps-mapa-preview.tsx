@@ -22,7 +22,7 @@ export function GpsMapaPreview({
 		<iframe
 			className={`${className} w-full rounded-md border`}
 			loading="lazy"
-			referrerPolicy="no-referrer-when-downgrade"
+			referrerPolicy="no-referrer"
 			src={src}
 			title="Ubicación de la unidad en el mapa"
 		/>

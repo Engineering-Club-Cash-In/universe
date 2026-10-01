@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { QueryBuilder } from "drizzle-orm/pg-core";
 import { cuotas_credito, creditos } from "../database/db/schema";
 import { eq } from "drizzle-orm";
-import { DIAS_PAGO_PENDIENTE_FRENA_MORA, hasPaidPaymentSql } from "./cuotaYaPagadaSql";
+import { readFileSync } from "node:fs";
+import { coberturaDeCuotaSql, DIAS_PAGO_PENDIENTE_FRENA_MORA, hasPaidPaymentSql } from "./cuotaYaPagadaSql";
 
 const CALIFICADA = 'pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"';
 
@@ -55,5 +56,34 @@ describe("hasPaidPaymentSql: un pago PENDIENTE frena la mora solo 7 días", () =
     expect(sql).toContain("AND pc.pago_id <> $1");
     expect(params).toEqual([4321]);
     expect(sql).toContain(CALIFICADA);
+  });
+});
+
+describe("coberturaDeCuotaSql cuenta las mismas filas de pago que hasPaidPaymentSql", () => {
+  // La proyección de mora del mes separa «validado» de «pendiente» para poder
+  // evaluar la ventana del pendiente en cualquier día; QUÉ fila de pago cuenta
+  // tiene que seguir siendo lo mismo que cobra el cron.
+  const fuente = readFileSync(new URL("./cuotaYaPagadaSql.ts", import.meta.url), "utf8");
+  it("repite el filtro de fila, una vez en cada función", () => {
+    for (const condicion of [
+      'WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"',
+      'AND pc."paymentFalse" = false',
+      "AND pc.pagado = true",
+      "AND COALESCE(pc.monto_aplicado, 0) > 0",
+      "validation_status IN ('validated', 'no_required')",
+      "pc.validation_status = 'pending'",
+    ]) {
+      expect(fuente.split(condicion).length - 1).toBe(2);
+    }
+  });
+  it("las dos mitades comparan contra la cuota de AFUERA y no miran now()", () => {
+    const c = coberturaDeCuotaSql();
+    const { sql } = new QueryBuilder()
+      .select({ v: c.validado, f: c.fechasPendiente })
+      .from(cuotas_credito)
+      .toSQL();
+    expect(sql.split(CALIFICADA).length - 1).toBe(2);
+    expect(sql).not.toContain("now()");
+    expect(sql).toContain("string_agg(to_char(pc.fecha_pago::date, 'YYYY-MM-DD'), ',')");
   });
 });

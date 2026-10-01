@@ -72,3 +72,31 @@ export function hasPaidPaymentSql(
       )${exclusion}
   )`;
 }
+
+/**
+ * Lo mismo que `hasPaidPaymentSql`, pero SIN evaluar la ventana del pendiente
+ * contra hoy: devuelve por separado «la cubre un pago validado» y las
+ * `fecha_pago` de sus pagos pendientes (separadas por coma, '' si no hay).
+ *
+ * Por qué existe: la proyección de mora del mes tiene que contestar «¿este
+ * pendiente todavía frena la cuota el día 20?», y `hasPaidPaymentSql` solo
+ * sabe contestarlo para `now()`. La ventana (`DIAS_PAGO_PENDIENTE_FRENA_MORA`
+ * hacia atrás, mañana hacia adelante) la aplica `proyectarMoraDelMes` día por
+ * día. Qué fila de pago cuenta —no anulada, `pagado`, con plata aplicada— es
+ * el MISMO filtro de arriba y tiene que seguir siéndolo: si divergen, la
+ * proyección de hoy deja de coincidir con lo que el cron cobra esta noche.
+ */
+export function coberturaDeCuotaSql(): { validado: SQL<boolean>; fechasPendiente: SQL<string> } {
+  const pagoQueCuenta = sql`
+    FROM cartera.pagos_credito pc
+    WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
+      AND pc."paymentFalse" = false
+      AND pc.pagado = true
+      AND COALESCE(pc.monto_aplicado, 0) > 0`;
+  return {
+    validado: sql<boolean>`EXISTS (SELECT 1 ${pagoQueCuenta}
+      AND pc.validation_status IN ('validated', 'no_required'))`,
+    fechasPendiente: sql<string>`COALESCE((SELECT string_agg(to_char(pc.fecha_pago::date, 'YYYY-MM-DD'), ',') ${pagoQueCuenta}
+      AND pc.validation_status = 'pending'), '')`,
+  };
+}

@@ -6,6 +6,7 @@ import {
 	capturarEvidenciaSat,
 	clasificarError,
 	conNavegador,
+	consultarContextoTitular,
 	dividirRangosPaginas,
 	esperarSatConReintento,
 	irAListadoVehiculosDelegado,
@@ -13,6 +14,25 @@ import {
 	leerTodasLasPaginas,
 	seleccionarTitular,
 } from "./satVehiculos";
+
+test("acepta como completo un titular con cero vehículos", async () => {
+	const resultado = await consultarContextoTitular({
+		titular: { nit: "1234567", nombre: "TITULAR SIN VEHÍCULOS" },
+		page: {} as never,
+		frame: {} as never,
+		totalRegistros: 0,
+		tamanoPagina: 0,
+		totalPaginas: 0,
+	});
+
+	expect(resultado).toEqual({
+		nit: "1234567",
+		nombre: "TITULAR SIN VEHÍCULOS",
+		estado: "OK",
+		vehiculos: [],
+		listadoCompleto: true,
+	});
+});
 
 test("propaga la causa al cancelar una consulta SAT", () => {
 	const controlador = new AbortController();

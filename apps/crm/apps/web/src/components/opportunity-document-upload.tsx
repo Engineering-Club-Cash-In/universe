@@ -10,12 +10,17 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
+import {
+	etiquetaEnvioAseguradora,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -381,6 +386,21 @@ export function OpportunityDocumentUpload({
 										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
 										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
+									{doc.subidoDesde && (
+										<p className="text-muted-foreground text-xs">
+											{textoSubidoPor(doc)}
+										</p>
+									)}
+									{(() => {
+										const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+										return (
+											envio && (
+												<Badge className={`mt-1 text-xs ${envio.className}`}>
+													{envio.texto}
+												</Badge>
+											)
+										);
+									})()}
 								</div>
 								<div className="flex items-center gap-2">
 									{doc.url && (

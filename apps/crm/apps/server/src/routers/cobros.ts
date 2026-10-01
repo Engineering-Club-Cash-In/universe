@@ -123,6 +123,7 @@ import {
 	ESTADOS_AGING_VALIDOS,
 	esperarCatalogoBuckets,
 	estadoMoraPorCuotas,
+	estadoMoraPorNumeroBucket,
 	getBucketsParaUIAsync,
 	isDynamicCatalogLoaded,
 	MORA_BUCKETS,
@@ -1637,11 +1638,18 @@ export const cobrosRouter = {
 							// `cuota × cuotas`, dando un número distinto al del detalle para el mismo crédito.
 							const montoEnMora = Number(credito.mora?.monto_mora ?? 0);
 
-							// Determinar estado de mora según statusCredit y cuotas atrasadas
-							// (MORA_BUCKETS: 0=al_dia … 4=mora_120, 5+=mora_120_plus).
+							// La etapa es el bucket del MOTOR (último de buckets_historial),
+							// el mismo que muestra la Ficha 360: un crédito mandado a
+							// recuperación está en B4 aunque tenga 2 cuotas atrasadas. Las
+							// cuotas solo cuentan si cartera no mandó bucket (crédito que el
+							// motor nunca vio).
 							let estadoMora: string | null = null;
 							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
-							else estadoMora = estadoMoraPorCuotas(cuotasAtrasadas);
+							else
+								estadoMora =
+									(credito.bucket
+										? estadoMoraPorNumeroBucket(credito.bucket.numero)
+										: undefined) ?? estadoMoraPorCuotas(cuotasAtrasadas);
 
 							// Determinar estado del contrato según statusCredit
 							let estadoContrato = "activo";

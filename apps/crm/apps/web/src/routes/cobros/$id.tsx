@@ -1641,7 +1641,8 @@ function RouteComponent() {
 			: bucketActual.isPending
 				? "Cargando el bucket del crédito…"
 				: motivoBloqueoVisita(bucketNumero, bucketPrefijo);
-	// Base del 50% de "50% + promesa": cuotas vencidas × cuota + mora.
+	// Lo vencido (cuotas vencidas × cuota + mora): el «Pago total» de una
+	// visita, y la base del porcentaje del «Pago parcial + promesa».
 	const deudaVencidaCaso = deudaVencida({
 		cuotasVencidas: caso.cuotasVencidas,
 		cuota: caso.cuotaMensual,
@@ -1670,9 +1671,12 @@ function RouteComponent() {
 		setEntregaDesdeVisita(datos);
 		setEnvioRecuperacion("entrega_voluntaria");
 	};
-	/** Al guardar la visita: abre el flujo que sigue (promesa o entrega). */
+	/** Al guardar la visita: abre el flujo que sigue (promesa, convenio o entrega). */
 	const alRegistrarVisita = (r: VisitaRegistrada) => {
-		if (r.siguientes.promesa) {
+		if (r.siguientes.convenio) {
+			if (convenioHabilitado) setConvenioAbierto(true);
+			else if (convenioMotivoBloqueo) toast.error(convenioMotivoBloqueo);
+		} else if (r.siguientes.promesa) {
 			setPromesaDesdeVisita({
 				visitaId: r.visitaId,
 				tipo: r.tipo,
@@ -2014,8 +2018,9 @@ function RouteComponent() {
 									    cuota del convenio, no se suma (Codex, PR #1191). */}
 									{/* CB-037/038: el mismo modal registra la promesa que sale
 									    de una visita, con el canal de la visita y vinculada a
-									    ella. El `key` lo remonta con esos valores. En "50% +
-									    promesa" sugiere lo que falta después de lo que pagó. */}
+									    ella. El `key` lo remonta con esos valores. En "pago
+									    parcial + promesa" propone lo que falta después de lo que
+									    pagó, y es la única variante con el monto editable. */}
 									<ContactoModal
 										key={promesaDesdeVisita?.visitaId ?? "promesa"}
 										{...propsContacto}
@@ -2025,6 +2030,7 @@ function RouteComponent() {
 												: "llamada"
 										}
 										visitaId={promesaDesdeVisita?.visitaId}
+										montoYaPagado={promesaDesdeVisita?.montoRecibido ?? undefined}
 										variante="promesa"
 										open={promesaAbierta || !!promesaDesdeVisita}
 										onOpenChange={(abierto) => {
@@ -2432,6 +2438,7 @@ function RouteComponent() {
 										programada={visitaAbierta.programada ?? null}
 										direcciones={direccionesCliente}
 										deudaVencida={deudaVencidaCaso}
+										convenioBloqueo={convenioMotivoBloqueo}
 										bucketNumero={bucketNumero}
 										vehicleId={caso.vehicleId ?? null}
 										onRegistrada={alRegistrarVisita}
@@ -2614,6 +2621,11 @@ function RouteComponent() {
 										setVisitaAbierta({ tipo: programada.tipo, programada })
 									}
 									onRegistrarPromesa={registrarPromesaDeVisita}
+									onRegistrarConvenio={
+										convenioHabilitado
+											? () => setConvenioAbierto(true)
+											: undefined
+									}
 									onRegistrarEntrega={(v) =>
 										abrirEntregaDesdeVisita({
 											visitaId: v.id,

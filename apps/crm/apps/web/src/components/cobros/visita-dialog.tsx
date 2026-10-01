@@ -9,8 +9,12 @@
  * datos móviles.
  *
  * El resultado no se queda acá: al guardar, la ficha abre el flujo que ya
- * existe para cada uno (promesa, entrega voluntaria, registrar pago) —
- * `onRegistrada` le dice cuál.
+ * existe para cada uno (promesa, convenio, entrega voluntaria, registrar
+ * pago) — `onRegistrada` le dice cuál.
+ *
+ * El monto pagado no se teclea (pedido del PM, 2026-10-01): «Pago total» es
+ * lo vencido completo, y en «Pago parcial + promesa» se indica el porcentaje
+ * y el resto queda para la promesa.
  *
  * Las reglas son las MISMAS del servidor (server/src/lib/visitas-cobros): el
  * botón se habilita con lo mismo que el servidor va a aceptar.
@@ -19,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Briefcase,
 	Camera,
+	CheckCircle2,
 	ChevronDown,
 	Home,
 	ImagePlus,
@@ -32,8 +37,11 @@ import {
 	erroresProgramacionVisita,
 	erroresRegistroVisita,
 	MAX_EVIDENCIAS_VISITA,
+	MIN_COMENTARIOS_VISITA,
 	MOTIVOS_SIN_CONTACTO,
-	montoReferenciaPagoParcial,
+	montoPagoParcial,
+	PORCENTAJE_PAGO_PARCIAL_MAX,
+	PORCENTAJE_PAGO_PARCIAL_MIN,
 	programarVisitaSchema,
 	RESULTADO_VISITA_DESCRIPCION,
 	RESULTADO_VISITA_LABEL,
@@ -109,7 +117,12 @@ export type VisitaRegistrada = {
 	visitaId: string;
 	tipo: TipoVisita;
 	resultado: ResultadoVisita;
-	siguientes: { pago: boolean; promesa: boolean; entrega: boolean };
+	siguientes: {
+		pago: boolean;
+		promesa: boolean;
+		convenio: boolean;
+		entrega: boolean;
+	};
 	direccion: string;
 	fechaVisita: Date;
 	montoRecibido: number | null;
@@ -125,8 +138,10 @@ interface VisitaDialogProps {
 	/** Si viene, se registra el resultado de esa visita (no se programa otra). */
 	programada?: VisitaProgramadaParaCompletar | null;
 	direcciones: DireccionesCliente;
-	/** Cuotas vencidas × cuota + mora: la base del 50%. */
+	/** Cuotas vencidas × cuota + mora: lo que paga un «Pago total». */
 	deudaVencida: number;
+	/** Por qué no se puede registrar un convenio (null = sí se puede). */
+	convenioBloqueo?: string | null;
 	/** En B4 se puede comparar con las ubicaciones clave del GPS (CB-119). */
 	bucketNumero: number | null;
 	vehicleId: string | null;
@@ -169,6 +184,7 @@ function FormularioVisita({
 	programada,
 	direcciones,
 	deudaVencida,
+	convenioBloqueo = null,
 	bucketNumero,
 	vehicleId,
 	onRegistrada,
@@ -203,7 +219,10 @@ function FormularioVisita({
 	);
 	const [resultado, setResultado] = useState<ResultadoVisita | null>(null);
 	const [motivoSinContacto, setMotivoSinContacto] = useState("");
-	const [montoRecibido, setMontoRecibido] = useState("");
+	const [porcentaje, setPorcentaje] = useState("");
+	// Solo si no se pudo calcular lo vencido (el caso no trae cuotas o mora):
+	// entonces sí se teclea el monto.
+	const [montoManual, setMontoManual] = useState("");
 	const [comentarios, setComentarios] = useState("");
 	const [proximoPaso, setProximoPaso] = useState("");
 	const [fotos, setFotos] = useState<Foto[]>([]);
@@ -247,7 +266,8 @@ function FormularioVisita({
 	const cambiarResultado = (r: ResultadoVisita) => {
 		setResultado(r);
 		if (r !== "sin_contacto") setMotivoSinContacto("");
-		if (!siguientesPasos(r).pago) setMontoRecibido("");
+		if (r !== "pago_parcial_promesa") setPorcentaje("");
+		if (!siguientesPasos(r).pago) setMontoManual("");
 	};
 
 	// El archivo original de cada foto, para poder reintentarla, y el intento
@@ -336,7 +356,7 @@ function FormularioVisita({
 
 	const tomarUbicacion = () => {
 		if (!("geolocation" in navigator)) {
-			setAvisoUbicacion("Este navegador no da la ubicación.");
+			setAvisoUbicacion("Este navegador no permite obtener la ubicación.");
 			return;
 		}
 		setUbicandose(true);
@@ -353,8 +373,8 @@ function FormularioVisita({
 			(err) => {
 				setAvisoUbicacion(
 					err.code === err.PERMISSION_DENIED
-						? "No diste permiso de ubicación. Se puede guardar sin ella."
-						: "No se pudo obtener la ubicación. Se puede guardar sin ella.",
+						? "No se otorgó permiso de ubicación. La visita puede guardarse sin ella."
+						: "No se pudo obtener la ubicación. La visita puede guardarse sin ella.",
 				);
 				setUbicandose(false);
 			},
@@ -364,9 +384,37 @@ function FormularioVisita({
 
 	// ── Lo que se manda, y lo que falta ────────────────────────────────────
 
-	const montoTexto = montoRecibido.trim().replace(/,/g, "");
-	const montoValido = montoTexto === "" || /^\d+(\.\d{1,2})?$/.test(montoTexto);
-	const referencia50 = montoReferenciaPagoParcial(deudaVencida);
+	// El monto pagado sale de lo vencido: completo en «Pago total», el
+	// porcentaje indicado en «Pago parcial + promesa».
+	const hayDeuda = deudaVencida > 0;
+	const porcentajeTexto = porcentaje.trim();
+	const porcentajeNum = /^\d{1,2}$/.test(porcentajeTexto)
+		? Number(porcentajeTexto)
+		: null;
+	const porcentajeValido =
+		porcentajeNum !== null &&
+		porcentajeNum >= PORCENTAJE_PAGO_PARCIAL_MIN &&
+		porcentajeNum <= PORCENTAJE_PAGO_PARCIAL_MAX;
+	const montoManualTexto = montoManual.trim().replace(/,/g, "");
+	const montoManualNum = /^\d+(\.\d{1,2})?$/.test(montoManualTexto)
+		? Number(montoManualTexto)
+		: null;
+	const montoPagado: number | undefined = (() => {
+		if (resultado === "pago") {
+			return hayDeuda ? deudaVencida : (montoManualNum ?? undefined);
+		}
+		if (resultado === "pago_parcial_promesa") {
+			if (!hayDeuda) return montoManualNum ?? undefined;
+			return porcentajeValido && porcentajeNum !== null
+				? montoPagoParcial(deudaVencida, porcentajeNum)
+				: undefined;
+		}
+		return undefined;
+	})();
+	const saldoParaPromesa =
+		resultado === "pago_parcial_promesa" && hayDeuda && montoPagado !== undefined
+			? Math.max(0, Math.round((deudaVencida - montoPagado) * 100) / 100)
+			: null;
 
 	const payloadRegistro: RegistrarVisitaInput = {
 		casoCobroId,
@@ -380,7 +428,11 @@ function FormularioVisita({
 		resultado: (resultado ?? "sin_contacto") as ResultadoVisita,
 		motivoSinContacto: (motivoSinContacto ||
 			undefined) as RegistrarVisitaInput["motivoSinContacto"],
-		montoRecibido: montoTexto && montoValido ? Number(montoTexto) : undefined,
+		montoRecibido: montoPagado && montoPagado > 0 ? montoPagado : undefined,
+		porcentajePagado:
+			resultado === "pago_parcial_promesa" && porcentajeValido
+				? (porcentajeNum ?? undefined)
+				: undefined,
 		comentarios,
 		proximoPaso,
 		ubicacion: ubicacion ?? undefined,
@@ -403,23 +455,30 @@ function FormularioVisita({
 	// El primer problema basta: el asesor lo resuelve y aparece el siguiente.
 	const faltante = (() => {
 		if (direccion.trim().length < 5) return "Falta la dirección de la visita.";
-		if (!responsableId) return "Elegí quién va a la visita.";
+		if (!responsableId) return "Seleccione el responsable de la visita.";
 		if (modo === "programar") {
 			if (!fechaProgramada) return "Falta la fecha de la visita.";
 			const p = programarVisitaSchema.safeParse(payloadProgramacion);
 			if (!p.success)
-				return p.error.issues[0]?.message ?? "Revisá el formulario.";
+				return p.error.issues[0]?.message ?? "Revise el formulario.";
 			return erroresProgramacionVisita(p.data);
 		}
-		if (!resultado) return "Elegí qué pasó en la visita.";
-		if (!montoValido) return "El monto va en números, por ejemplo 1250.50";
+		if (!resultado) return "Seleccione el resultado de la visita.";
+		if (resultado === "convenio" && convenioBloqueo) return convenioBloqueo;
+		if (resultado === "pago_parcial_promesa" && !porcentajeValido) {
+			return `Indique el porcentaje pagado (de ${PORCENTAJE_PAGO_PARCIAL_MIN} a ${PORCENTAJE_PAGO_PARCIAL_MAX}).`;
+		}
+		if (siguientesPasos(resultado).pago && !hayDeuda && montoManualNum === null)
+			return "Indique el monto pagado en números, por ejemplo 1250.50";
+		if (comentarios.trim().length < MIN_COMENTARIOS_VISITA)
+			return `Los comentarios son obligatorios (al menos ${MIN_COMENTARIOS_VISITA} caracteres).`;
 		if (fotos.some((f) => f.estado === "subiendo"))
-			return "Esperá a que terminen de subir las fotos.";
+			return "Espere a que terminen de subir las fotos.";
 		if (fotos.some((f) => f.estado === "error"))
-			return "Una foto no se pudo subir: reintentala o quitala.";
+			return "Una foto no se pudo subir: reinténtela o quítela.";
 		const p = registrarVisitaSchema.safeParse(payloadRegistro);
 		if (!p.success)
-			return p.error.issues[0]?.message ?? "Revisá el formulario.";
+			return p.error.issues[0]?.message ?? "Revise el formulario.";
 		return erroresRegistroVisita(p.data);
 	})();
 
@@ -432,8 +491,8 @@ function FormularioVisita({
 			const quien = responsables.data?.find((r) => r.id === responsableId);
 			toast.success(
 				quien && quien.id !== session?.user?.id
-					? `Visita programada. ${quien.nombre} ya tiene el aviso.`
-					: "Visita programada. Ese día te llega el aviso.",
+					? `Visita programada. Se notificó a ${quien.nombre}.`
+					: "Visita programada. El día de la visita recibirá un aviso.",
 			);
 			queryClient.invalidateQueries({ queryKey: orpc.getVisitasCaso.key() });
 			onOpenChange(false);
@@ -456,12 +515,14 @@ function FormularioVisita({
 			const res = resultado as ResultadoVisita;
 			toast.success(
 				r.siguientes.entrega
-					? "Visita guardada. Seguí con la entrega voluntaria."
-					: r.siguientes.promesa
-						? "Visita guardada. Registrá la promesa."
-						: r.siguientes.pago
-							? "Visita guardada. El pago se registra en «Registrar Pago»."
-							: "Visita guardada.",
+					? "Visita registrada. Continúe con la entrega voluntaria."
+					: r.siguientes.convenio
+						? "Visita registrada. Continúe con el convenio de pago."
+						: r.siguientes.promesa
+							? "Visita registrada. Continúe con la promesa de pago."
+							: r.siguientes.pago
+								? "Visita registrada. El pago se registra en «Registrar Pago»."
+								: "Visita registrada.",
 			);
 			onOpenChange(false);
 			onRegistrada?.({
@@ -491,15 +552,39 @@ function FormularioVisita({
 		else registrar.mutate();
 	};
 
+	// Respaldo: si el caso no trae cuotas o mora no hay de dónde calcular el
+	// monto, y se teclea.
+	const campoMontoManual = (
+		<div className="space-y-1.5">
+			<Label htmlFor="visita-monto">
+				Monto pagado <span className="text-red-600">*</span>
+			</Label>
+			<Input
+				id="visita-monto"
+				inputMode="decimal"
+				className="h-10"
+				value={montoManual}
+				onChange={(e) => setMontoManual(e.target.value)}
+				placeholder="0.00"
+			/>
+			<p className="text-muted-foreground text-xs">
+				No se pudo calcular lo vencido de este caso. Ingrese el monto que pagó
+				el cliente.
+			</p>
+		</div>
+	);
+
 	const pasos = resultado ? siguientesPasos(resultado) : null;
 	const textoBoton =
 		modo === "programar"
 			? "Programar visita"
 			: pasos?.entrega
-				? "Guardar y seguir con la entrega"
-				: pasos?.promesa
-					? "Guardar y registrar la promesa"
-					: "Guardar visita";
+				? "Guardar y continuar con la entrega"
+				: pasos?.convenio
+					? "Guardar y registrar el convenio"
+					: pasos?.promesa
+						? "Guardar y registrar la promesa"
+						: "Guardar visita";
 	const direccionSolicitud = direccionDe(tipo);
 	const puedeCompararGps = bucketNumero === 4 && !!vehicleId;
 
@@ -515,19 +600,19 @@ function FormularioVisita({
 				</DialogTitle>
 				<DialogDescription>
 					{modo === "programar"
-						? "Queda agendada con su responsable, y ese día le llega el aviso."
-						: "Lo que pasó en la visita, con fotos y el próximo paso."}
+						? "La visita queda agendada con su responsable, quien recibirá un aviso ese día."
+						: "Registre el resultado de la visita, la evidencia y el siguiente paso."}
 				</DialogDescription>
 			</DialogHeader>
 
 			<div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6">
-				{/* Ya fui / la voy a programar */}
+				{/* Visita realizada / por programar */}
 				{!completando && (
 					<div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
 						{(
 							[
-								["registrar", "Ya fui"],
-								["programar", "Programarla"],
+								["registrar", "Visita realizada"],
+								["programar", "Programar visita"],
 							] as const
 						).map(([valor, texto]) => (
 							<button
@@ -582,7 +667,7 @@ function FormularioVisita({
 								id="visita-empresa"
 								value={empresa}
 								onChange={(e) => setEmpresa(e.target.value)}
-								placeholder="Dónde trabaja"
+								placeholder="Nombre de la empresa"
 							/>
 						</div>
 					)}
@@ -597,15 +682,15 @@ function FormularioVisita({
 							rows={2}
 							placeholder={
 								tipo === "trabajo"
-									? "Dirección del trabajo"
-									: "Dirección de la casa"
+									? "Dirección del lugar de trabajo"
+									: "Dirección de residencia"
 							}
 						/>
 						{!direccionSolicitud ? (
 							<p className="text-muted-foreground text-xs">
 								{tipo === "trabajo"
-									? "La solicitud de crédito no tiene dirección de trabajo: escribila."
-									: "El CRM no tiene la dirección de la casa: escribila."}
+									? "La solicitud de crédito no tiene dirección de trabajo. Ingrésela manualmente."
+									: "El CRM no tiene la dirección de residencia. Ingrésela manualmente."}
 							</p>
 						) : (
 							direccion.trim() !== direccionSolicitud.trim() && (
@@ -620,20 +705,20 @@ function FormularioVisita({
 						)}
 						{tipo === "trabajo" && direcciones.trabajo?.horario && (
 							<p className="text-muted-foreground text-xs">
-								Horario que declaró: {direcciones.trabajo.horario}
+								Horario declarado: {direcciones.trabajo.horario}
 							</p>
 						)}
 					</div>
 					<div className="space-y-1.5">
 						<Label htmlFor="visita-referencia">
-							Cómo llegar{" "}
+							Puntos de referencia{" "}
 							<span className="text-muted-foreground">(opcional)</span>
 						</Label>
 						<Input
 							id="visita-referencia"
 							value={referencia}
 							onChange={(e) => setReferencia(e.target.value)}
-							placeholder="Ej: casa verde, portón negro, frente a la tienda"
+							placeholder="Ej.: casa verde, portón negro, frente a la tienda"
 						/>
 					</div>
 					{puedeCompararGps && vehicleId && (
@@ -656,8 +741,7 @@ function FormularioVisita({
 				<section className="grid gap-3 sm:grid-cols-2">
 					<div className="space-y-1.5">
 						<Label>
-							{modo === "programar" ? "Quién va" : "Quién fue"}{" "}
-							<span className="text-red-600">*</span>
+							Responsable de la visita <span className="text-red-600">*</span>
 						</Label>
 						<Select
 							value={responsableId}
@@ -667,7 +751,7 @@ function FormularioVisita({
 							<SelectTrigger className="h-10 w-full">
 								<SelectValue
 									placeholder={
-										responsables.isLoading ? "Cargando…" : "Elegí a alguien"
+										responsables.isLoading ? "Cargando…" : "Seleccionar responsable"
 									}
 								/>
 							</SelectTrigger>
@@ -688,14 +772,14 @@ function FormularioVisita({
 						{responsables.isError && (
 							<p className="text-destructive text-xs">
 								{responsables.error?.message ??
-									"No se pudo cargar quién puede ir."}
+									"No se pudo cargar la lista de responsables."}
 							</p>
 						)}
 					</div>
 					{modo === "programar" ? (
 						<div className="space-y-1.5">
 							<Label htmlFor="visita-fecha-programada">
-								Cuándo <span className="text-red-600">*</span>
+								Fecha y hora <span className="text-red-600">*</span>
 							</Label>
 							<FechaHoraPicker
 								id="visita-fecha-programada"
@@ -707,7 +791,7 @@ function FormularioVisita({
 					) : (
 						<div className="space-y-1.5">
 							<Label htmlFor="visita-fecha">
-								Cuándo fue <span className="text-red-600">*</span>
+								Fecha y hora de la visita <span className="text-red-600">*</span>
 							</Label>
 							<FechaHoraPicker
 								id="visita-fecha"
@@ -722,7 +806,7 @@ function FormularioVisita({
 				{modo === "programar" ? (
 					<section className="space-y-1.5">
 						<Label htmlFor="visita-notas">
-							Notas para quien va{" "}
+							Indicaciones para la visita{" "}
 							<span className="text-muted-foreground">(opcional)</span>
 						</Label>
 						<Textarea
@@ -730,50 +814,54 @@ function FormularioVisita({
 							value={notas}
 							onChange={(e) => setNotas(e.target.value)}
 							rows={2}
-							placeholder="Ej: preguntar por la entrega del carro; llega a las 6 pm"
+							placeholder="Ej.: consultar por la entrega del vehículo; el cliente llega a las 6 p. m."
 						/>
 					</section>
 				) : (
 					<>
-						{/* 3 · Qué pasó */}
+						{/* 3 · Resultado */}
 						<section className="space-y-2">
 							<Label>
-								¿Qué pasó? <span className="text-red-600">*</span>
+								Resultado de la visita <span className="text-red-600">*</span>
 							</Label>
 							<div className="grid gap-2 sm:grid-cols-2">
-								{RESULTADOS_VISITA.map((r) => (
-									<button
-										key={r}
-										type="button"
-										onClick={() => cambiarResultado(r)}
-										className={cn(
-											"rounded-md border p-3 text-left transition-colors",
-											resultado === r
-												? "border-primary bg-primary/5"
-												: "hover:bg-muted/50",
-										)}
-									>
-										<p className="font-medium text-sm">
-											{RESULTADO_VISITA_LABEL[r]}
-										</p>
-										<p className="text-muted-foreground text-xs">
-											{RESULTADO_VISITA_DESCRIPCION[r]}
-										</p>
-									</button>
-								))}
+								{RESULTADOS_VISITA.map((r) => {
+									const bloqueo = r === "convenio" ? convenioBloqueo : null;
+									return (
+										<button
+											key={r}
+											type="button"
+											disabled={!!bloqueo}
+											onClick={() => cambiarResultado(r)}
+											className={cn(
+												"rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+												resultado === r
+													? "border-primary bg-primary/5"
+													: "hover:bg-muted/50",
+											)}
+										>
+											<p className="font-medium text-sm">
+												{RESULTADO_VISITA_LABEL[r]}
+											</p>
+											<p className="text-muted-foreground text-xs">
+												{bloqueo ?? RESULTADO_VISITA_DESCRIPCION[r]}
+											</p>
+										</button>
+									);
+								})}
 							</div>
 
 							{resultado === "sin_contacto" && (
 								<div className="space-y-1.5 pt-1">
 									<Label>
-										¿Por qué? <span className="text-red-600">*</span>
+										Motivo <span className="text-red-600">*</span>
 									</Label>
 									<Select
 										value={motivoSinContacto}
 										onValueChange={setMotivoSinContacto}
 									>
 										<SelectTrigger className="h-10 w-full">
-											<SelectValue placeholder="Elegí el motivo" />
+											<SelectValue placeholder="Seleccionar motivo" />
 										</SelectTrigger>
 										<SelectContent>
 											{Object.entries(MOTIVOS_SIN_CONTACTO).map(
@@ -788,44 +876,102 @@ function FormularioVisita({
 								</div>
 							)}
 
-							{pasos?.pago && (
-								<div className="space-y-1.5 pt-1">
-									<Label htmlFor="visita-monto">
-										Monto que pagó{" "}
-										<span className="text-muted-foreground">(opcional)</span>
-									</Label>
-									<Input
-										id="visita-monto"
-										inputMode="decimal"
-										className="h-10"
-										value={montoRecibido}
-										onChange={(e) => setMontoRecibido(e.target.value)}
-										placeholder="0.00"
-									/>
-									{resultado === "pago_parcial_promesa" ? (
-										<p className="text-muted-foreground text-xs">
-											Referencia: el 50% de lo vencido (
-											{quetzales(deudaVencida)}, cuotas vencidas + mora) es{" "}
-											<button
-												type="button"
-												className="font-medium text-primary hover:underline"
-												onClick={() =>
-													setMontoRecibido(referencia50.toFixed(2))
-												}
-											>
-												{quetzales(referencia50)}
-											</button>
-											. El resto va en la promesa.
-										</p>
+							{resultado === "pago" && (
+								<div className="space-y-2 rounded-md border bg-muted/30 p-3">
+									{hayDeuda ? (
+										<>
+											<div className="flex items-center justify-between gap-2 text-sm">
+												<span className="font-medium">Monto pagado</span>
+												<span className="font-semibold tabular-nums">
+													{quetzales(deudaVencida)}
+												</span>
+											</div>
+											<p className="text-muted-foreground text-xs">
+												Total de lo vencido: cuotas vencidas más mora.
+											</p>
+										</>
 									) : (
-										<p className="text-muted-foreground text-xs">
-											Lo vencido (cuotas vencidas + mora):{" "}
-											{quetzales(deudaVencida)}.
-										</p>
+										campoMontoManual
 									)}
 									<p className="text-muted-foreground text-xs">
-										El monto queda anotado en la visita; el pago en sí se
-										registra en «Registrar Pago» (link o boleta).
+										El monto queda anotado en la visita; el pago se registra
+										en «Registrar Pago» (link o boleta).
+									</p>
+								</div>
+							)}
+
+							{resultado === "pago_parcial_promesa" && (
+								<div className="space-y-3 rounded-md border bg-muted/30 p-3">
+									<div className="space-y-1.5">
+										<Label htmlFor="visita-porcentaje">
+											Porcentaje pagado <span className="text-red-600">*</span>
+										</Label>
+										<div className="flex flex-wrap items-center gap-2">
+											<div className="relative w-24">
+												<Input
+													id="visita-porcentaje"
+													inputMode="numeric"
+													className="h-10 pr-7"
+													value={porcentaje}
+													onChange={(e) =>
+														setPorcentaje(
+															e.target.value.replace(/\D/g, "").slice(0, 2),
+														)
+													}
+													placeholder="50"
+												/>
+												<span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 text-muted-foreground text-sm">
+													%
+												</span>
+											</div>
+											{[25, 50, 75].map((n) => (
+												<Button
+													key={n}
+													type="button"
+													size="sm"
+													variant={porcentajeNum === n ? "default" : "outline"}
+													className="h-10 px-3"
+													onClick={() => setPorcentaje(String(n))}
+												>
+													{n}%
+												</Button>
+											))}
+										</div>
+									</div>
+									{hayDeuda ? (
+										<dl className="space-y-1 text-sm">
+											<div className="flex justify-between gap-2">
+												<dt className="text-muted-foreground">
+													Total vencido (cuotas + mora)
+												</dt>
+												<dd className="tabular-nums">
+													{quetzales(deudaVencida)}
+												</dd>
+											</div>
+											<div className="flex justify-between gap-2">
+												<dt className="font-medium">Monto pagado</dt>
+												<dd className="font-semibold tabular-nums">
+													{montoPagado !== undefined
+														? quetzales(montoPagado)
+														: "—"}
+												</dd>
+											</div>
+											<div className="flex justify-between gap-2">
+												<dt className="font-medium">Saldo para la promesa</dt>
+												<dd className="font-semibold tabular-nums">
+													{saldoParaPromesa !== null
+														? quetzales(saldoParaPromesa)
+														: "—"}
+												</dd>
+											</div>
+										</dl>
+									) : (
+										campoMontoManual
+									)}
+									<p className="text-muted-foreground text-xs">
+										Al guardar se abre la promesa de pago por el saldo
+										pendiente. El pago se registra en «Registrar Pago» (link o
+										boleta).
 									</p>
 								</div>
 							)}
@@ -833,17 +979,15 @@ function FormularioVisita({
 
 						{/* 4 · Evidencia */}
 						<section className="space-y-2">
-							<div className="flex items-center justify-between gap-2">
-								<Label>
-									Fotos{" "}
-									<span className="text-muted-foreground">
-										(opcional, hasta {MAX_EVIDENCIAS_VISITA})
-									</span>
-								</Label>
-							</div>
+							<Label>
+								Evidencia fotográfica{" "}
+								<span className="text-muted-foreground">
+									(opcional, hasta {MAX_EVIDENCIAS_VISITA} fotos)
+								</span>
+							</Label>
 							<p className="text-muted-foreground text-xs">
-								La fachada, el número de casa o el lugar. No le tomés fotos al
-								cliente ni a otras personas.
+								Fachada, número de casa o lugar visitado. No se deben tomar
+								fotos del cliente ni de otras personas.
 							</p>
 							<div className="grid grid-cols-2 gap-2">
 								<Button
@@ -864,7 +1008,7 @@ function FormularioVisita({
 									onClick={() => inputGaleria.current?.click()}
 								>
 									<ImagePlus className="mr-2 h-4 w-4" />
-									De la galería
+									Elegir de la galería
 								</Button>
 							</div>
 							{/* `capture` abre la cámara trasera directo en el celular; en la
@@ -917,7 +1061,7 @@ function FormularioVisita({
 													onClick={() => void subirFoto(f.id)}
 												>
 													<RotateCw className="h-3 w-3" />
-													No subió · Reintentar
+													Error · Reintentar
 												</button>
 											)}
 											<button
@@ -932,66 +1076,97 @@ function FormularioVisita({
 									))}
 								</div>
 							)}
-							<div className="flex flex-wrap items-center gap-2 pt-1">
+						</section>
+
+						{/* 5 · Ubicación: un botón de verdad, no un enlace suelto (el PM no
+						    lo veía). Toma el punto donde está el teléfono AHORA: si el
+						    asesor ya se fue del lugar, mejor no registrarla. */}
+						<section className="space-y-2">
+							<Label>
+								Ubicación de la visita{" "}
+								<span className="text-muted-foreground">(opcional)</span>
+							</Label>
+							<p className="text-muted-foreground text-xs">
+								Registra la ubicación actual del teléfono. Úselo solo si se
+								encuentra en el lugar de la visita.
+							</p>
+							{ubicacion ? (
+								<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 text-sm dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+									<span className="flex items-center gap-2 font-medium">
+										<CheckCircle2 className="h-4 w-4" />
+										Ubicación registrada
+										{ubicacion.precisionM != null
+											? ` (±${ubicacion.precisionM} m)`
+											: ""}
+									</span>
+									<div className="flex gap-2">
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											className="h-9 bg-background"
+											disabled={ubicandose}
+											onClick={tomarUbicacion}
+										>
+											{ubicandose ? (
+												<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+											) : (
+												<LocateFixed className="mr-1.5 h-4 w-4" />
+											)}
+											Actualizar
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className="h-9"
+											onClick={() => setUbicacion(null)}
+										>
+											Quitar
+										</Button>
+									</div>
+								</div>
+							) : (
 								<Button
 									type="button"
-									variant="ghost"
-									size="sm"
-									className="h-9 px-2"
+									variant="outline"
+									className="h-11 w-full border-primary/50 text-primary hover:bg-primary/5 hover:text-primary"
 									disabled={ubicandose}
 									onClick={tomarUbicacion}
 								>
 									{ubicandose ? (
-										<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 									) : (
-										<LocateFixed className="mr-1.5 h-4 w-4" />
+										<LocateFixed className="mr-2 h-4 w-4" />
 									)}
-									{ubicacion
-										? "Actualizar mi ubicación"
-										: "Guardar mi ubicación"}
+									{ubicandose
+										? "Obteniendo ubicación…"
+										: "Registrar mi ubicación actual"}
 								</Button>
-								{ubicacion && (
-									<span className="text-muted-foreground text-xs">
-										Guardada
-										{ubicacion.precisionM != null
-											? ` (±${ubicacion.precisionM} m)`
-											: ""}
-										.{" "}
-										<button
-											type="button"
-											className="text-primary hover:underline"
-											onClick={() => setUbicacion(null)}
-										>
-											Quitar
-										</button>
-									</span>
-								)}
-								{avisoUbicacion && (
-									<span className="text-muted-foreground text-xs">
-										{avisoUbicacion}
-									</span>
-								)}
-							</div>
+							)}
+							{avisoUbicacion && (
+								<p className="text-muted-foreground text-xs">{avisoUbicacion}</p>
+							)}
 						</section>
 
-						{/* 5 · Comentarios y próximo paso */}
+						{/* 6 · Comentarios y próximo paso */}
 						<section className="space-y-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="visita-comentarios">
-									Comentarios{" "}
-									{motivoSinContacto === "otro" ? (
-										<span className="text-red-600">*</span>
-									) : (
-										<span className="text-muted-foreground">(opcional)</span>
-									)}
+									Comentarios <span className="text-red-600">*</span>
 								</Label>
 								<Textarea
 									id="visita-comentarios"
 									value={comentarios}
 									onChange={(e) => setComentarios(e.target.value)}
 									rows={3}
-									placeholder="Con quién habló, qué dijo, qué se acordó"
+									placeholder="Persona con quien se habló, lo que indicó y lo acordado"
 								/>
+								{comentarios.trim().length < MIN_COMENTARIOS_VISITA && (
+									<p className="text-muted-foreground text-xs">
+										Mínimo {MIN_COMENTARIOS_VISITA} caracteres.
+									</p>
+								)}
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="visita-proximo-paso">
@@ -1002,7 +1177,7 @@ function FormularioVisita({
 									id="visita-proximo-paso"
 									value={proximoPaso}
 									onChange={(e) => setProximoPaso(e.target.value)}
-									placeholder="Ej: volver el viernes en la tarde"
+									placeholder="Ej.: regresar el viernes por la tarde"
 								/>
 							</div>
 						</section>

@@ -370,6 +370,18 @@ export function estadoMoraPorCuotas(cuotas: number): string {
 }
 
 /**
+ * Etapa de mora de un número de bucket del catálogo (B0=0 … B5=5). Es la
+ * forma de mostrar el bucket del MOTOR (`credito.bucket` de /getAllCredits):
+ * un crédito que se mandó a recuperación está en B4 con 2 cuotas atrasadas, y
+ * `estadoMoraPorCuotas` lo mostraría en B2. `undefined` si el número no está
+ * en el catálogo.
+ */
+export function estadoMoraPorNumeroBucket(numero: number): string | undefined {
+	maybeRefreshInBackground();
+	return activeBuckets().find((b) => b.key === String(numero))?.estadoMora;
+}
+
+/**
  * CB-128: estados de `statusCredit` que dejan al crédito FUERA del funnel de
  * cobros y por lo tanto sin bucket.
  *

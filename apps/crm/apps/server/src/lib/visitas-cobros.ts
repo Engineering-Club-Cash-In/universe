@@ -13,7 +13,9 @@
  * existe para eso, y la visita solo lo dispara (ver `siguientesPasos`):
  *  · pago              → "Registrar Pago" (link de Págalo o boleta);
  *  · promesa           → el modal de promesa (congela en cartera, mide cumplimiento);
- *  · 50% + promesa     → las dos cosas: el pago recibido y la promesa por el resto;
+ *  · pago parcial + promesa → las dos cosas: el pago recibido (un porcentaje
+ *    de lo vencido) y la promesa por el resto;
+ *  · convenio          → el modal de convenio de pago (CB-032);
  *  · entrega voluntaria → el formulario de CB-042, que traslada a B4 (o solo
  *    registra si ya está en B4);
  *  · sin contacto      → nada más: queda el motivo y el próximo paso.
@@ -77,31 +79,38 @@ export function metodoContactoDeVisita(
 export const ESTADOS_VISITA = ["programada", "realizada", "cancelada"] as const;
 export type EstadoVisita = (typeof ESTADOS_VISITA)[number];
 
+// `resultado` es text validado acá (no enum de la DB): agregar uno no pide
+// migración. El valor `pago_parcial_promesa` se conserva aunque ya no sea un
+// 50% fijo, para no reescribir las visitas viejas.
 export const RESULTADOS_VISITA = [
 	"pago",
 	"promesa",
 	"pago_parcial_promesa",
+	"convenio",
 	"entrega_voluntaria",
 	"sin_contacto",
 ] as const;
 export type ResultadoVisita = (typeof RESULTADOS_VISITA)[number];
 
 export const RESULTADO_VISITA_LABEL: Record<ResultadoVisita, string> = {
-	pago: "Pago",
+	pago: "Pago total",
 	promesa: "Promesa de pago",
-	pago_parcial_promesa: "50% + promesa",
+	pago_parcial_promesa: "Pago parcial + promesa",
+	convenio: "Convenio de pago",
 	entrega_voluntaria: "Entrega voluntaria",
 	sin_contacto: "Sin contacto",
 };
 
 export const RESULTADO_VISITA_DESCRIPCION: Record<ResultadoVisita, string> = {
-	pago: "Pagó lo vencido. El pago se registra con link o boleta.",
-	promesa: "Se compromete a pagar en una fecha. Se registra la promesa.",
+	pago: "El cliente pagó la totalidad de lo vencido (cuotas vencidas y mora).",
+	promesa: "El cliente se compromete a pagar en una fecha determinada.",
 	pago_parcial_promesa:
-		"Paga la mitad de lo vencido ahora y promete el resto en una fecha.",
+		"El cliente pagó un porcentaje de lo vencido y se compromete a pagar el resto.",
+	convenio:
+		"El cliente acepta un convenio de pago. Al guardar se abre el formulario del convenio.",
 	entrega_voluntaria:
-		"Entrega la unidad. Sigue el formulario de entrega voluntaria.",
-	sin_contacto: "No se habló con el cliente.",
+		"El cliente entrega la unidad. Al guardar se abre el formulario de entrega voluntaria.",
+	sin_contacto: "No fue posible hablar con el cliente.",
 };
 
 /** Catálogo provisional: text validado acá, no enum, para cambiarlo sin migración. */
@@ -145,24 +154,29 @@ export function estadoContactoDeResultado(
 export function siguientesPasos(resultado: ResultadoVisita): {
 	pago: boolean;
 	promesa: boolean;
+	convenio: boolean;
 	entrega: boolean;
 } {
 	return {
 		pago: resultado === "pago" || resultado === "pago_parcial_promesa",
 		promesa: resultado === "promesa" || resultado === "pago_parcial_promesa",
+		convenio: resultado === "convenio",
 		entrega: resultado === "entrega_voluntaria",
 	};
 }
 
-// ── 50% + promesa ───────────────────────────────────────────────────────────
+// ── Pago total y pago parcial + promesa ─────────────────────────────────────
 
 /**
- * La base del 50% es la deuda vencida: cuotas vencidas × cuota + mora
+ * La base del pago es la deuda vencida: cuotas vencidas × cuota + mora
  * (decisión del 2026-09-29; la misma regla Mora+Cuota del modal de promesa y
- * de la foto del saldo de CB-042). Es una REFERENCIA para el asesor: no
- * bloquea si el cliente paga otro monto.
+ * de la foto del saldo de CB-042). Desde el 2026-10-01 el monto no se teclea:
+ * «Pago total» es el 100% de lo vencido, y en «Pago parcial + promesa» el
+ * asesor pone el PORCENTAJE que pagó (antes era un 50% fijo) y el resto va a
+ * la promesa.
  */
-export const PORCENTAJE_PAGO_PARCIAL = 0.5;
+export const PORCENTAJE_PAGO_PARCIAL_MIN = 1;
+export const PORCENTAJE_PAGO_PARCIAL_MAX = 99;
 
 export function deudaVencida(params: {
 	cuotasVencidas: unknown;
@@ -177,8 +191,9 @@ export function deudaVencida(params: {
 	return Math.round((cuotas * n(params.cuota) + n(params.mora)) * 100) / 100;
 }
 
-export function montoReferenciaPagoParcial(deuda: number): number {
-	return Math.round(deuda * PORCENTAJE_PAGO_PARCIAL * 100) / 100;
+/** Lo que pagó quien pagó `porcentaje` de la deuda vencida. */
+export function montoPagoParcial(deuda: number, porcentaje: number): number {
+	return Math.round(deuda * porcentaje) / 100;
 }
 
 // ── Formularios ─────────────────────────────────────────────────────────────
@@ -190,6 +205,9 @@ const textoOpcional = (max: number) =>
 		.max(max)
 		.optional()
 		.transform((v) => (v ? v : undefined));
+
+/** Largo mínimo de los comentarios de una visita registrada. */
+export const MIN_COMENTARIOS_VISITA = 10;
 
 /** Fotos por visita. Suficiente para fachada, número de casa y alrededores. */
 export const MAX_EVIDENCIAS_VISITA = 5;
@@ -222,7 +240,10 @@ const baseVisita = {
 		.max(500),
 	referencia: textoOpcional(500),
 	empresa: textoOpcional(200),
-	responsableId: z.string().min(1, "Falta quién va a la visita").max(100),
+	responsableId: z
+		.string()
+		.min(1, "Falta el responsable de la visita")
+		.max(100),
 };
 
 export const programarVisitaSchema = z.object({
@@ -240,9 +261,23 @@ export const registrarVisitaSchema = z.object({
 	resultado: z.enum(RESULTADOS_VISITA),
 	motivoSinContacto: z.enum(CLAVES_MOTIVO_SIN_CONTACTO).optional(),
 	montoRecibido: z.number().positive().max(10_000_000).optional(),
-	// Opcional: el resultado y el motivo ya dicen qué pasó. Solo se exige si el
-	// motivo es "Otro" (ver erroresRegistroVisita), que sin texto no dice nada.
-	comentarios: textoOpcional(3000),
+	/** Solo en «Pago parcial + promesa»: qué porcentaje de lo vencido pagó. */
+	porcentajePagado: z
+		.number()
+		.int()
+		.min(PORCENTAJE_PAGO_PARCIAL_MIN)
+		.max(PORCENTAJE_PAGO_PARCIAL_MAX)
+		.optional(),
+	// Obligatorio desde el 2026-10-01 (pedido del PM): el resultado solo no
+	// dice con quién se habló ni qué se acordó.
+	comentarios: z
+		.string()
+		.trim()
+		.min(
+			MIN_COMENTARIOS_VISITA,
+			`Los comentarios deben tener al menos ${MIN_COMENTARIOS_VISITA} caracteres`,
+		)
+		.max(3000),
 	proximoPaso: textoOpcional(1000),
 	ubicacion: ubicacionVisitaSchema.optional(),
 	evidencias: z
@@ -274,22 +309,32 @@ export function erroresRegistroVisita(
 	const t = v.fechaVisita.getTime();
 	if (Number.isNaN(t)) return "Falta la fecha de la visita.";
 	if (t > ahora.getTime() + TOLERANCIA_RELOJ_MS) {
-		return "La visita es algo que ya pasó: la fecha no puede ser futura.";
+		return "La fecha de la visita no puede ser futura.";
 	}
 	if (t < ahora.getTime() - DIAS_MAXIMOS_REGISTRO_TARDIO * DIA_MS) {
-		return `La visita es de hace más de ${DIAS_MAXIMOS_REGISTRO_TARDIO} días: revisá la fecha.`;
+		return `La visita tiene más de ${DIAS_MAXIMOS_REGISTRO_TARDIO} días. Verifique la fecha.`;
 	}
 
 	if (v.resultado === "sin_contacto") {
-		if (!v.motivoSinContacto) return "Elegí por qué no hubo contacto.";
-		if (v.motivoSinContacto === "otro" && !v.comentarios) {
-			return "Marcaste «Otro»: contá en los comentarios qué pasó.";
+		if (!v.motivoSinContacto) {
+			return "Seleccione el motivo por el que no hubo contacto.";
 		}
 	} else if (v.motivoSinContacto) {
-		return "El motivo de «sin contacto» no aplica a este resultado.";
+		return "El motivo de «Sin contacto» no aplica a este resultado.";
 	}
-	if (v.montoRecibido !== undefined && !siguientesPasos(v.resultado).pago) {
-		return "El monto recibido es solo para «Pago» o «50% + promesa».";
+	const pago = siguientesPasos(v.resultado).pago;
+	if (pago && v.montoRecibido === undefined) {
+		return "Falta el monto que pagó el cliente.";
+	}
+	if (!pago && v.montoRecibido !== undefined) {
+		return "El monto pagado solo aplica a «Pago total» o «Pago parcial + promesa».";
+	}
+	if (v.resultado === "pago_parcial_promesa") {
+		if (v.porcentajePagado === undefined) {
+			return "Indique qué porcentaje de lo vencido pagó el cliente.";
+		}
+	} else if (v.porcentajePagado !== undefined) {
+		return "El porcentaje pagado solo aplica a «Pago parcial + promesa».";
 	}
 
 	const keys = v.evidencias.map((e) => e.key);
@@ -304,7 +349,7 @@ export function erroresProgramacionVisita(
 	const t = v.fechaProgramada.getTime();
 	if (Number.isNaN(t)) return "Falta la fecha de la visita.";
 	if (t < ahora.getTime() - TOLERANCIA_RELOJ_MS) {
-		return "La fecha de la visita ya pasó. Si ya fuiste, registrá el resultado.";
+		return "La fecha de la visita ya pasó. Si la visita ya se realizó, registre el resultado.";
 	}
 	if (t > ahora.getTime() + DIAS_MAXIMOS_PROGRAMACION * DIA_MS) {
 		return `No se puede programar a más de ${DIAS_MAXIMOS_PROGRAMACION} días.`;
@@ -333,6 +378,7 @@ export function textoGestionVisita(
 		| "motivoSinContacto"
 		| "direccion"
 		| "montoRecibido"
+		| "porcentajePagado"
 		| "comentarios"
 	>,
 ): string {
@@ -341,9 +387,11 @@ export function textoGestionVisita(
 			? `: ${etiquetaMotivoSinContacto(v.motivoSinContacto)}`
 			: "";
 	const monto =
-		v.montoRecibido !== undefined
-			? ` (recibió ${quetzales(v.montoRecibido)})`
-			: "";
+		v.montoRecibido === undefined
+			? ""
+			: v.porcentajePagado !== undefined
+				? ` (pagó el ${v.porcentajePagado}% de lo vencido: ${quetzales(v.montoRecibido)})`
+				: ` (pagó ${quetzales(v.montoRecibido)})`;
 	const partes = [
 		`${TIPO_VISITA_LABEL[v.tipo]} — ${RESULTADO_VISITA_LABEL[v.resultado]}${motivo}${monto}.`,
 		`Dirección: ${v.direccion}.`,

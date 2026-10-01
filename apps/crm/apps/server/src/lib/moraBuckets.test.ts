@@ -4,6 +4,7 @@ import {
 	__resetMoraBucketsCacheForTests,
 	esperarCatalogoBuckets,
 	estadoMoraPorCuotas,
+	estadoMoraPorNumeroBucket,
 	estaEnFunnelCobros,
 	getBucketsParaUI,
 	getBucketsParaUIAsync,
@@ -512,6 +513,31 @@ describe("numeroBucketPorCuotas", () => {
 		expect(estadoMoraPorCuotas(0)).toBe("al_dia");
 		expect(numeroBucketPorCuotas(2, "ACTIVO")).toBe(2);
 		expect(estadoMoraPorCuotas(2)).toBe("mora_60");
+	});
+});
+
+describe("estadoMoraPorNumeroBucket", () => {
+	beforeEach(() => {
+		__resetMoraBucketsCacheForTests();
+	});
+
+	test("el bucket del motor manda, no las cuotas: B4 es mora_120", async () => {
+		spyOn(carteraBackClient, "getBucketsCatalogo").mockResolvedValue(
+			buildCatalogoCompleto(),
+		);
+		await refreshMoraBucketsCache();
+		// Crédito mandado a recuperación: 2 cuotas atrasadas, motor en B4.
+		expect(estadoMoraPorCuotas(2)).toBe("mora_60");
+		expect(estadoMoraPorNumeroBucket(4)).toBe("mora_120");
+		expect(estadoMoraPorNumeroBucket(0)).toBe("al_dia");
+	});
+
+	test("un número fuera del catálogo no inventa etapa", async () => {
+		spyOn(carteraBackClient, "getBucketsCatalogo").mockResolvedValue(
+			buildCatalogoCompleto(),
+		);
+		await refreshMoraBucketsCache();
+		expect(estadoMoraPorNumeroBucket(9)).toBeUndefined();
 	});
 });
 

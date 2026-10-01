@@ -17,6 +17,7 @@ import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
 import { Route as JuridicoIndexRouteImport } from './routes/juridico/index'
 import { Route as InversionesIndexRouteImport } from './routes/inversiones/index'
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
+import { Route as VehiclesSatVerificacionRouteImport } from './routes/vehicles/sat-verificacion'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as JuridicoDashboardDataRouteImport } from './routes/juridico/dashboard-data'
@@ -94,6 +95,11 @@ const InversionesIndexRoute = InversionesIndexRouteImport.update({
 const CobrosIndexRoute = CobrosIndexRouteImport.update({
   id: '/cobros/',
   path: '/cobros/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehiclesSatVerificacionRoute = VehiclesSatVerificacionRouteImport.update({
+  id: '/vehicles/sat-verificacion',
+  path: '/vehicles/sat-verificacion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
@@ -325,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -373,6 +380,7 @@ export interface FileRoutesByTo {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros': typeof CobrosIndexRoute
   '/inversiones': typeof InversionesIndexRoute
   '/juridico': typeof JuridicoIndexRoute
@@ -422,6 +430,7 @@ export interface FileRoutesById {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -472,6 +481,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -520,6 +530,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros'
     | '/inversiones'
     | '/juridico'
@@ -568,6 +579,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -617,6 +629,7 @@ export interface RootRouteChildren {
   JuridicoDashboardDataRoute: typeof JuridicoDashboardDataRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
+  VehiclesSatVerificacionRoute: typeof VehiclesSatVerificacionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
   InversionesIndexRoute: typeof InversionesIndexRoute
   JuridicoIndexRoute: typeof JuridicoIndexRoute
@@ -695,6 +708,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros'
       fullPath: '/cobros/'
       preLoaderRoute: typeof CobrosIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicles/sat-verificacion': {
+      id: '/vehicles/sat-verificacion'
+      path: '/vehicles/sat-verificacion'
+      fullPath: '/vehicles/sat-verificacion'
+      preLoaderRoute: typeof VehiclesSatVerificacionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicles/inspection': {
@@ -993,6 +1013,7 @@ const rootRouteChildren: RootRouteChildren = {
   JuridicoDashboardDataRoute: JuridicoDashboardDataRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
+  VehiclesSatVerificacionRoute: VehiclesSatVerificacionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
   InversionesIndexRoute: InversionesIndexRoute,
   JuridicoIndexRoute: JuridicoIndexRoute,

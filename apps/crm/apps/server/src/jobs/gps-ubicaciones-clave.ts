@@ -35,6 +35,7 @@ import {
 	desc,
 	eq,
 	gte,
+	inArray,
 	isNull,
 	lt,
 	not,
@@ -49,6 +50,7 @@ import {
 	gpsEstanciasCursor,
 	gpsUbicacionesClave,
 } from "../db/schema/gps-eventos";
+import { vehicles } from "../db/schema/vehicles";
 import { resolverVehiculoYCaso } from "../services/wialon/gps-eventos";
 import { purgarSnapshotsUbicacionesClave } from "../services/wialon/purgar-snapshots-ubicaciones";
 import {
@@ -599,22 +601,43 @@ export async function purgarDatosUbicacionesVencidos(
 				lt(gpsUbicacionesClave.calculadoAt, ventanaDesde),
 			),
 		);
+	const idsUnidades = [...new Set(unidades.map((u) => u.wialonUnitId))];
+
 	// Lo mismo con la copia que guarda el historial de consultas: se limpia el
-	// snapshot de los créditos que ya no están activos y el de las consultas de
-	// hace más de la ventana (la fila de auditoría —motivo, usuario, fecha— queda).
+	// snapshot de las consultas cuyo (vehículo, SIFCO) ya no es un vínculo activo
+	// y el de las consultas de hace más de la ventana (la fila de auditoría
+	// —motivo, usuario, fecha— queda). Se cruza con el vehículo y no solo con el
+	// SIFCO: si un crédito activo cambia de vehículo (el vínculo puede cambiar de
+	// dueño con el tiempo), las coordenadas del vehículo anterior ya no
+	// corresponden a un GPS vinculado a ese crédito y no deben seguir guardadas.
+	const vehiculosActivos = await db
+		.select({ id: vehicles.id, wialonUnitId: vehicles.wialonUnitId })
+		.from(vehicles)
+		.where(inArray(vehicles.wialonUnitId, idsUnidades));
+	const paresVehiculoSifco = unidades.flatMap((u) =>
+		vehiculosActivos
+			.filter((v) => v.wialonUnitId === u.wialonUnitId)
+			.map((v) =>
+				and(
+					eq(gpsConsultaLogs.vehicleId, v.id),
+					eq(gpsConsultaLogs.numeroCreditoSifco, u.numeroCreditoSifco),
+				),
+			),
+	);
 	await purgarSnapshotsUbicacionesClave(
 		or(
 			isNull(gpsConsultaLogs.numeroCreditoSifco),
-			notInArray(gpsConsultaLogs.numeroCreditoSifco, [
-				...new Set(unidades.map((u) => u.numeroCreditoSifco)),
-			]),
+			// Sin ningún vehículo vinculado a las unidades activas no hay vínculo
+			// vigente que conservar.
+			paresVehiculoSifco.length > 0
+				? not(or(...paresVehiculoSifco)!)
+				: sql`true`,
 			lt(gpsConsultaLogs.createdAt, ventanaDesde),
 		),
 	);
 
 	// Las estancias se guardan por unidad física: se purgan las de unidades ya
 	// sin caso activo y las que quedaron fuera de la ventana de 60 días.
-	const idsUnidades = [...new Set(unidades.map((u) => u.wialonUnitId))];
 	await db
 		.delete(gpsEstancias)
 		.where(

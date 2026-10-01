@@ -1067,6 +1067,8 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 	// UPDATE que borra el tramo pendiente vencido del cursor.
 	let pendienteLimpiado: unknown = null;
 	let condicionPendiente: unknown = null;
+	// Vehículos vinculados a las unidades activas (lo que lee la purga).
+	let vehiculosMock: { id: string; wialonUnitId: number }[] = [];
 	const sqlDe = (cond: unknown) => new PgDialect().sqlToQuery(cond as any).sql;
 
 	beforeEach(() => {
@@ -1077,6 +1079,10 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		condicionSnapshots = null;
 		pendienteLimpiado = null;
 		condicionPendiente = null;
+		vehiculosMock = [{ id: "veh-activo", wialonUnitId: 100 }];
+		spyOn(db, "select").mockImplementation((() => ({
+			from: () => ({ where: async () => vehiculosMock }),
+		})) as any);
 		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
 			borradas.push(tabla);
 			return Object.assign(Promise.resolve(), {
@@ -1151,7 +1157,41 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		expect(sqlDe(condicionSnapshots)).toContain('"created_at" <');
 		// Y siguen vencidos los de pares que ya no están activos.
 		expect(sqlDe(condicionUbicaciones)).toContain("not");
-		expect(sqlDe(condicionSnapshots)).toContain("not in");
+		expect(sqlDe(condicionSnapshots)).toContain("not");
+	});
+
+	// Si un crédito activo cambia de vehículo, el snapshot del vehículo anterior
+	// (mismo SIFCO) no debe sobrevivir solo porque el SIFCO sigue activo.
+	it("el snapshot se conserva solo para el (vehículo, SIFCO) vinculado, no para cualquier vehículo con ese SIFCO", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+		// Dos vehículos: uno vinculado a la unidad activa y otro a una unidad ajena.
+		vehiculosMock = [
+			{ id: "veh-activo", wialonUnitId: 100 },
+			{ id: "veh-anterior", wialonUnitId: 999 },
+		];
+
+		await correrPurgaUbicacionesClave();
+
+		const { sql: texto, params } = new PgDialect().sqlToQuery(
+			condicionSnapshots as any,
+		);
+		expect(texto).toContain('"vehicle_id" =');
+		expect(params).toContain("veh-activo");
+		expect(params).toContain("A");
+		expect(params).not.toContain("veh-anterior");
+	});
+
+	it("sin ningún vehículo vinculado a las unidades activas no hay vínculo que conservar", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+		vehiculosMock = [];
+
+		await correrPurgaUbicacionesClave();
+
+		expect(sqlDe(condicionSnapshots)).toContain("true");
 	});
 
 	// El tramo pendiente guarda coordenadas exactas. Si la unidad dejó de

@@ -115,6 +115,12 @@ import {
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
+import {
+	COFIRMANTE_BANK_STATEMENT_HELP,
+	COFIRMANTE_BANK_STATEMENT_OPTION,
+	getManualOpportunityDocumentFields,
+	type ManualOpportunityDocumentType,
+} from "@/lib/manual-opportunity-document";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
@@ -4190,7 +4196,9 @@ function DocumentsManager({
 }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
-	const [documentType, setDocumentType] = useState<string>("");
+	const [documentType, setDocumentType] = useState<
+		ManualOpportunityDocumentType | ""
+	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
@@ -4260,8 +4268,10 @@ function DocumentsManager({
 	].includes(userProfile.data?.role ?? "");
 
 	// Upload a single document with a specific type
-	const uploadSingleDocument = async (docType: string) => {
-		if (!selectedFile) return;
+	const uploadSingleDocument = async (
+		docType: ManualOpportunityDocumentType | "",
+	) => {
+		if (!selectedFile || !docType) return;
 
 		const { key } = await uploadFileToR2WithRetry(selectedFile, {
 			resourceType: "opportunity_document",
@@ -4270,8 +4280,7 @@ function DocumentsManager({
 
 		return await client.uploadOpportunityDocument({
 			opportunityId,
-			documentType: docType as any,
-			description: description || undefined,
+			...getManualOpportunityDocumentFields(docType, description),
 			file: {
 				name: selectedFile.name,
 				type: selectedFile.type,
@@ -4408,6 +4417,7 @@ function DocumentsManager({
 		{ value: "estados_cuenta_1", label: "Estado de cuenta mes 1" },
 		{ value: "estados_cuenta_2", label: "Estado de cuenta mes 2" },
 		{ value: "estados_cuenta_3", label: "Estado de cuenta mes 3" },
+		COFIRMANTE_BANK_STATEMENT_OPTION,
 		// Documentos comerciales
 		{ value: "patente_comercio", label: "Patente de comercio" },
 		{ value: "patente_mercantil", label: "Patente mercantil" },
@@ -4789,7 +4799,9 @@ function DocumentsManager({
 						<Combobox
 							options={documentTypeOptions}
 							value={documentType}
-							onChange={setDocumentType}
+							onChange={(value) =>
+								setDocumentType(value as ManualOpportunityDocumentType | "")
+							}
 							placeholder="Buscar tipo de documento..."
 							width="full"
 							isInModal={true}
@@ -4817,6 +4829,12 @@ function DocumentsManager({
 								Este PDF incluye los 3 meses de estados de cuenta
 							</Label>
 						</div>
+					)}
+
+					{documentType === COFIRMANTE_BANK_STATEMENT_OPTION.value && (
+						<p className="text-muted-foreground text-sm">
+							{COFIRMANTE_BANK_STATEMENT_HELP}
+						</p>
 					)}
 
 					<div className="space-y-2">

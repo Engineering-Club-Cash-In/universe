@@ -17,10 +17,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { GpsConsultasHistorial } from "@/components/cobros/gps-consultas-historial";
 import { DatosTelemetria } from "@/components/cobros/gps-telemetria-datos";
-import {
-	UbicacionesClaveResultado,
-	useUbicacionesClaveQuery,
-} from "@/components/cobros/gps-ubicaciones-clave-card";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -64,16 +60,15 @@ export function GpsVehiculoCard({
 	casoCobroId,
 	vehicleId,
 	esSupervisor,
-	mostrarUbicacionesClave = false,
+	embedded = false,
 }: {
 	// El servidor valida acceso al caso y que el vehículo sea el suyo, y toma
 	// de ahí el SIFCO de la bitácora (no se manda desde el cliente).
 	casoCobroId: string;
 	vehicleId: string;
 	esSupervisor: boolean;
-	// Créditos en B4 / recuperación: suma la sección de ubicaciones clave
-	// (CB-119, D-15) bajo el mismo motivo confirmado.
-	mostrarUbicacionesClave?: boolean;
+	// Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título.
+	embedded?: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const [motivo, setMotivo] = useState("");
@@ -108,14 +103,6 @@ export function GpsVehiculoCard({
 		retry: false,
 	});
 
-	// Un solo motivo habilita ambas consultas; cada una queda auditada por
-	// separado en el servidor.
-	const ubicacionesClave = useUbicacionesClaveQuery({
-		casoCobroId,
-		vehicleId,
-		motivo: mostrarUbicacionesClave ? motivoConfirmado : null,
-	});
-
 	// La consulta inserta una fila en gps_consulta_logs: el historial se
 	// refresca cuando termina, no antes (la fila aún no existe).
 	const { dataUpdatedAt } = gps;
@@ -129,28 +116,43 @@ export function GpsVehiculoCard({
 
 	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
 
+	const Raiz = embedded ? "div" : Card;
+	const Cabecera = embedded ? "div" : CardHeader;
+	const Cuerpo = embedded ? "div" : CardContent;
+	const Descripcion = embedded ? "p" : CardDescription;
+
+	const unidadVinculada = gps.data?.estado === "vinculado" ? gps.data : null;
+	// Embebido no tiene título: sin nombre de unidad ni aviso de placa la
+	// cabecera quedaría vacía y solo sumaría margen sobre el formulario.
+	const hayCabecera = !embedded || unidadVinculada != null;
+
 	return (
-		<Card>
-			<CardHeader>
-				<div className="flex items-center justify-between">
-					<CardTitle className="flex items-center gap-2">
-						<MapPin className="h-5 w-5" />
-						GPS / Wialon
-					</CardTitle>
-					{gps.data?.estado === "vinculado" && (
-						<span className="text-muted-foreground text-xs">
-							{gps.data.unitName}
-						</span>
-					)}
-				</div>
-				{gps.data?.estado === "vinculado" &&
-					gps.data.vinculoOrigen === "placa" && (
-						<CardDescription>
+		<Raiz>
+			{hayCabecera && (
+				<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
+					<div className="flex items-center justify-between">
+						{!embedded && (
+							<CardTitle className="flex items-center gap-2">
+								<MapPin className="h-5 w-5" />
+								GPS / Wialon
+							</CardTitle>
+						)}
+						{unidadVinculada && (
+							<span className="text-muted-foreground text-xs">
+								{unidadVinculada.unitName}
+							</span>
+						)}
+					</div>
+					{unidadVinculada?.vinculoOrigen === "placa" && (
+						<Descripcion
+							className={embedded ? "text-muted-foreground text-sm" : undefined}
+						>
 							Unidad identificada automáticamente por la placa.
-						</CardDescription>
+						</Descripcion>
 					)}
-			</CardHeader>
-			<CardContent>
+				</Cabecera>
+			)}
+			<Cuerpo>
 				{motivoConfirmado == null ? (
 					// <form> para que Enter confirme el motivo igual que el botón (y
 					// respete su disabled): el asesor no tiene que soltar el teclado.
@@ -225,19 +227,6 @@ export function GpsVehiculoCard({
 						)}
 					</div>
 				)}
-				{motivoConfirmado != null && mostrarUbicacionesClave && (
-					<div className="mt-4 space-y-3 border-t pt-4">
-						<div>
-							<h4 className="font-medium text-sm">Ubicaciones clave</h4>
-							<p className="text-muted-foreground text-xs">
-								Lugares donde el vehículo pasa más tiempo (casa, trabajo,
-								lugares recurrentes) según los últimos 60 días de historial GPS.
-								Orienta la búsqueda si hay que recuperarlo.
-							</p>
-						</div>
-						<UbicacionesClaveResultado ubicaciones={ubicacionesClave} />
-					</div>
-				)}
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">
 						<p className="text-muted-foreground text-xs">
@@ -271,8 +260,8 @@ export function GpsVehiculoCard({
 						vehicleId={vehicleId}
 					/>
 				</div>
-			</CardContent>
-		</Card>
+			</Cuerpo>
+		</Raiz>
 	);
 }
 

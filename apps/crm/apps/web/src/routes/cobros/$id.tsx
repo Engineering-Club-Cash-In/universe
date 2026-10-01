@@ -56,9 +56,6 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
-import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
-import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
-import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -71,6 +68,7 @@ import {
 	TelefonosEditor,
 	telefonosParaGuardar,
 } from "@/components/cobros/telefonos-editor";
+import { VehiculoGpsTabs } from "@/components/cobros/vehiculo-gps-tabs";
 import {
 	VisitaDialog,
 	type VisitaProgramadaParaCompletar,
@@ -2574,7 +2572,7 @@ function RouteComponent() {
 						)}
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
-					<TabsTrigger value="vehiculo">Vehículo</TabsTrigger>
+					<TabsTrigger value="vehiculo">Vehículo / GPS</TabsTrigger>
 					<TabsTrigger value="referencias">
 						Referencias
 						{totalReferencias > 0 && (
@@ -5027,54 +5025,41 @@ function RouteComponent() {
 								)}
 							</CardContent>
 						</Card>
-						{/* GPS / Wialon (CB-118): va junto a los datos del activo y antes
-						    de recuperación, que es el desenlace. Query propia para que una
-						    consulta al proveedor externo no retrase el resto de la ficha.
-						    El key fuerza un componente nuevo al cambiar de crédito: esta
-						    ruta no se re-monta al cambiar $id, y sin él el motivo ya
-						    confirmado en un crédito dispararía una consulta auditada en el
-						    siguiente. Va el crédito y no solo el vehículo porque un mismo
-						    vehículo puede estar en dos créditos (refinanciamiento).
-						    Requiere caso.id: el servidor valida el acceso por caso (asesor
-						    asignado) antes de devolver la ubicación. */}
-						{caso.id && caso.vehicleId && (
-							<GpsVehiculoCard
-								casoCobroId={caso.id}
-								esSupervisor={esSupervisorCobros}
-								key={`${id}:${caso.vehicleId}`}
-								mostrarUbicacionesClave={bucketNumero === 4 || enRecuperacion}
-								vehicleId={caso.vehicleId}
-							/>
-						)}
-						{/* CB-119: historial de eventos GPS detectados automáticamente
-						    (energía, ignición, sin reportar) para créditos en B4. Solo
-						    requiere caso.id (a diferencia de GpsVehiculoCard, no audita
-						    consulta ni depende del vehículo: lee eventos ya guardados). */}
-						{caso.id && <GpsEventosHistorial casoCobroId={caso.id} />}
-						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
-						    con llamada posterior al cliente. Solo requiere caso.id (a
-						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad
-						    física desde contratos_financiamiento.vehicleId y, solo si el
-						    caso NO tiene contrato (créditos migrados de cartera), desde
-						    el vehículo de la oportunidad con ese SIFCO. No usa
-						    caso.vehicleId (que viene de opportunities.vehicleId y puede
-						    estar vacío o desactualizado aun con contrato y GPS vigentes,
-						    hallazgo de review). El propio card ya oculta sus acciones si
-						    `tieneGps` es false. El server valida bucket B2/B3/B4 para apagar
-						    (fail closed), pero el botón de "Solicitar apagado" también se
-						    oculta acá con bucketNumero — sin esto quedaba visible fuera de
-						    los buckets habilitados y el asesor solo se enteraba del
-						    rechazo después de hacer el pedido. */}
+						{/* Herramientas de la unidad en una sola tarjeta con pestañas.
+						    - GPS / Wialon (CB-118): query propia para que una consulta al
+						      proveedor externo no retrase el resto de la ficha. El key
+						      fuerza componentes nuevos al cambiar de crédito: esta ruta no
+						      se re-monta al cambiar $id, y sin él el motivo ya confirmado
+						      en un crédito dispararía una consulta auditada en el siguiente.
+						      Va el crédito y no solo el vehículo porque un mismo vehículo
+						      puede estar en dos créditos (refinanciamiento). Requiere
+						      caso.id: el servidor valida el acceso por caso (asesor
+						      asignado) antes de devolver la ubicación.
+						    - Ubicaciones frecuentes (CB-119, D-15): solo B4 / recuperación.
+						    - Notificaciones (CB-119): eventos GPS ya guardados, solo
+						      requiere caso.id (no audita ni depende del vehículo).
+						    - Inmovilización (CB-041): solo requiere caso.id; el servidor
+						      resuelve la unidad física desde
+						      contratos_financiamiento.vehicleId y, solo si el caso NO tiene
+						      contrato (créditos migrados de cartera), desde el vehículo de
+						      la oportunidad con ese SIFCO. No usa caso.vehicleId (puede
+						      estar vacío o desactualizado aun con contrato y GPS vigentes).
+						      La tarjeta oculta sus acciones si `tieneGps` es false y el
+						      botón de apagado con bucketNumero (el server valida B2/B3/B4,
+						      fail closed, pero así el asesor no se entera del rechazo solo
+						      después de hacer el pedido). */}
 						{caso.id && (
-							<InmovilizacionCard
+							<VehiculoGpsTabs
 								bucketNumero={bucketNumero}
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
-								key={`inmov:${caso.id}`}
+								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
+								mostrarUbicacionesClave={bucketNumero === 4 || enRecuperacion}
 								onRegistrarLlamada={(inmovilizacionId, accion) => {
 									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
 									setCanalContacto("llamada");
 								}}
+								vehicleId={caso.vehicleId ?? null}
 							/>
 						)}
 						{/* CB-042 · El registro de recuperación (forzosa o entrega

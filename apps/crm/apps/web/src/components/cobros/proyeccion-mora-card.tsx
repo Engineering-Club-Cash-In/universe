@@ -8,8 +8,8 @@
  *
  * Los días ya pasados son la mora real que registró el sistema (si pagó el 10,
  * ese día baja); de hoy en adelante es una proyección que asume que no entra
- * ningún pago más. Cada día dice cuál de las dos es: una es un hecho y la
- * otra un supuesto.
+ * ningún pago más. Las dos cosas se pintan distinto a propósito: una es un
+ * hecho y la otra un supuesto.
  */
 
 import { TrendingUp } from "lucide-react";
@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProyeccionMoraGrafico } from "./proyeccion-mora-grafico";
 
 /**
  * La tarjeta solo tiene sentido si el crédito debe mora o tiene cuotas
@@ -166,6 +167,12 @@ export function ProyeccionMoraCard(props: {
 								/>
 							</div>
 						</div>
+
+						<ProyeccionMoraGrafico
+							dias={p.dias}
+							seleccionado={dia.fecha}
+							onSeleccionar={setElegido}
+						/>
 
 						<p className="text-muted-foreground text-xs">
 							Cada cuota vencida suma {q(p.cargoDiario)} por día, hasta 30 días.

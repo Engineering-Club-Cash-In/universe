@@ -98,6 +98,13 @@ describe("ProyeccionMoraCard", () => {
 		);
 	});
 
+	test("la leyenda distingue real de proyección", () => {
+		const html = pintar();
+		expect(html).toContain("Real (lo que registró el sistema)");
+		expect(html).toContain("Proyección (si no paga)");
+		expect(html).toContain("Día seleccionado");
+	});
+
 	test("no se muestra si no hay mora ni cuotas vencidas", () => {
 		expect(pintar({ montoEnMora: "0.00", cuotasVencidas: 0 })).toBe("");
 		expect(pintar({ montoEnMora: null, cuotasVencidas: null })).toBe("");

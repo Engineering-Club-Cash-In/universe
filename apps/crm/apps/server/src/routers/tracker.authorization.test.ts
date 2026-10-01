@@ -12,7 +12,7 @@ import { ROLES } from "../lib/roles";
 // Filas que cada tabla "devuelve" en el test actual. Cada `describe` las pisa
 // con `beforeEach`, así un test nunca hereda estado del anterior.
 let filaUsuario: Array<{ id: string; email: string; role: string; banned: boolean }> = [];
-let filasMembresia: Array<{ companyId: string }> = [];
+let filasMembresia: Array<{ companyId: string; sellerId?: string | null }> = [];
 let filaCuentaSocio: Array<{ passwordChangedAt: Date | null }> = [];
 let filasOportunidad: Array<Record<string, unknown>> = [];
 let filasHistorial: Array<Record<string, unknown>> = [];
@@ -93,11 +93,11 @@ function contextoDeSocioValido(opciones: { ip?: string } = {}) {
 	} as never;
 }
 
-function socioConAcceso(companyId: string) {
+function socioConAcceso(companyId: string, sellerId: string | null = null) {
 	filaUsuario = [
 		{ id: "socio-1", email: "socio@example.com", role: ROLES.PARTNER, banned: false },
 	];
-	filasMembresia = [{ companyId }];
+	filasMembresia = [{ companyId, sellerId }];
 	filaCuentaSocio = [{ passwordChangedAt: new Date("2026-01-01") }];
 }
 
@@ -191,6 +191,56 @@ describe("getCasoById: aislamiento por agencia", () => {
 			code: "FORBIDDEN",
 			message: "Este caso no pertenece a tu agencia",
 		});
+	});
+});
+
+describe("getCasoById: aislamiento por vendedor", () => {
+	const id = "11111111-1111-4111-8111-111111111111";
+
+	test("un vendedor ve su propio caso y el nombre del vendedor viaja en el DTO", async () => {
+		socioConAcceso("agencia-A", "vendedor-1");
+		filasOportunidad = [
+			filaOportunidad({
+				companyId: "agencia-A",
+				sellerId: "vendedor-1",
+				vendedorNombre: "Ana López",
+			}),
+		];
+
+		const caso = await call(trackerRouter.getCasoById, { id }, contextoDeSocioValido());
+
+		expect(caso.vendedor).toBe("Ana López");
+	});
+
+	test("rechaza el caso de otro vendedor de la misma agencia", async () => {
+		socioConAcceso("agencia-A", "vendedor-1");
+		filasOportunidad = [
+			filaOportunidad({ companyId: "agencia-A", sellerId: "vendedor-2" }),
+		];
+
+		await expect(
+			call(trackerRouter.getCasoById, { id }, contextoDeSocioValido()),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+
+	test("un vendedor no ve los casos de su agencia que no tienen vendedor", async () => {
+		socioConAcceso("agencia-A", "vendedor-1");
+		filasOportunidad = [filaOportunidad({ companyId: "agencia-A", sellerId: null })];
+
+		await expect(
+			call(trackerRouter.getCasoById, { id }, contextoDeSocioValido()),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+
+	test("el gerente ve el caso de cualquier vendedor de su agencia", async () => {
+		socioConAcceso("agencia-A");
+		filasOportunidad = [
+			filaOportunidad({ companyId: "agencia-A", sellerId: "vendedor-2" }),
+		];
+
+		const caso = await call(trackerRouter.getCasoById, { id }, contextoDeSocioValido());
+
+		expect(caso.id).toBe("caso-1");
 	});
 });
 

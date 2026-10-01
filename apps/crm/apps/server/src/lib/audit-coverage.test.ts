@@ -46,7 +46,12 @@ const INVENTARIO: Record<
 	// oportunidad invalida la validación de identidad que había (ver
 	// `parcheDeIdentidadInvalidada`), y esa invalidación viaja DENTRO del UPDATE
 	// que ya existía. Es una decisión sin escritura propia, como las otras tres.
-	"routers/crm.ts": { escrituras: 17, anotaciones: 23, estado: "listo" },
+	//
+	// +1 anotación (23 → 24) sin escritura auditada nueva: asignar el vendedor
+	// de agencia (`setOpportunityAgencySeller`) escribe en
+	// `opportunity_agency_sellers`, no en `opportunities`, pero se anota sobre la
+	// oportunidad porque define qué usuarios del tracker la ven.
+	"routers/crm.ts": { escrituras: 17, anotaciones: 24, estado: "listo" },
 	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
 	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
 	// candado del DPI.

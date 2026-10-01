@@ -1,14 +1,33 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	getTableColumns,
+	ilike,
+	ne,
+	or,
+} from "drizzle-orm";
 import { z } from "zod";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { db } from "../db";
+import { companies } from "../db/schema/crm";
+import { partnerMembers } from "../db/schema/partners";
 import { renapInfo } from "../db/schema/renap";
 import {
 	type NewVehicleVendor,
 	vehicles,
 	vehicleVendors,
 } from "../db/schema/vehicles";
+import {
+	errorDeCambioDeVendedor,
+	erroresDeVendedor,
+	normalizarDatosVendedor,
+	TIPO_VENDEDOR_AGENCIA,
+	usosDelVendedor,
+	VENDOR_TYPES,
+} from "../lib/agency-sellers";
 import {
 	buildRenapFullName,
 	renapGenderToVendorGender,
@@ -17,16 +36,102 @@ import { eqDpi } from "../lib/dpi-lookup";
 import { crmProcedure } from "../lib/orpc";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 
+const vendorDataSchema = z
+	.object({
+		name: z.string().min(1, "El nombre es requerido"),
+		phone: z.string().optional(),
+		dpi: z.string().nullable().optional(),
+		vendorType: z.enum(VENDOR_TYPES, {
+			message: "Tipo de vendedor requerido",
+		}),
+		gender: z.enum(["male", "female"]).nullable().optional(),
+		companyName: z.string().optional(),
+		companyId: z.string().uuid().nullable().optional(),
+		email: z.string().email().optional().or(z.literal("")),
+		address: z.string().optional(),
+	})
+	.superRefine((data, ctx) => {
+		for (const error of erroresDeVendedor(data)) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: [error.path],
+				message: error.message,
+			});
+		}
+	});
+
+async function mensajeDpiDuplicado(dpi: string, excluirId?: string) {
+	const [vendor] = await db
+		.select()
+		.from(vehicleVendors)
+		.where(
+			excluirId
+				? and(eq(vehicleVendors.dpi, dpi), ne(vehicleVendors.id, excluirId))
+				: eq(vehicleVendors.dpi, dpi),
+		)
+		.limit(1);
+
+	if (!vendor) return null;
+	const detalle =
+		vendor.vendorType === "empresa"
+			? vendor.companyName || "Empresa"
+			: vendor.vendorType === TIPO_VENDEDOR_AGENCIA
+				? "Vendedor de agencia"
+				: "Individual";
+	return `Ya existe un vendedor con el DPI ${dpi}: ${vendor.name} (${detalle})`;
+}
+
+async function validarAgencia(companyId: string | null) {
+	if (!companyId) return;
+	const [empresa] = await db
+		.select({ id: companies.id })
+		.from(companies)
+		.where(eq(companies.id, companyId))
+		.limit(1);
+	if (!empresa) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "La agencia seleccionada no existe",
+		});
+	}
+}
+
 export const vendorsRouter = {
 	// Get all vendors
 	getAll: crmProcedure.handler(async () => {
 		const vendors = await db
-			.select()
+			.select({
+				...getTableColumns(vehicleVendors),
+				agenciaNombre: companies.name,
+			})
 			.from(vehicleVendors)
+			.leftJoin(companies, eq(companies.id, vehicleVendors.companyId))
 			.orderBy(desc(vehicleVendors.createdAt));
 
 		return vendors;
 	}),
+
+	// Vendedores de una agencia/predio, para asignarlos a una oportunidad o a
+	// un usuario del tracker.
+	getAgencySellers: crmProcedure
+		.input(z.object({ companyId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			return db
+				.select({
+					id: vehicleVendors.id,
+					name: vehicleVendors.name,
+					email: vehicleVendors.email,
+					phone: vehicleVendors.phone,
+					companyId: vehicleVendors.companyId,
+				})
+				.from(vehicleVendors)
+				.where(
+					and(
+						eq(vehicleVendors.vendorType, TIPO_VENDEDOR_AGENCIA),
+						eq(vehicleVendors.companyId, input.companyId),
+					),
+				)
+				.orderBy(asc(vehicleVendors.name));
+		}),
 
 	// Get vendor by ID
 	getById: crmProcedure
@@ -49,44 +154,22 @@ export const vendorsRouter = {
 
 	// Create new vendor
 	create: crmProcedure
-		.input(
-			z.object({
-				name: z.string().min(1, "El nombre es requerido"),
-				phone: z.string().optional(),
-				dpi: z
-					.string()
-					.min(13, "DPI debe tener 13 dígitos")
-					.max(13, "DPI debe tener 13 dígitos"),
-				vendorType: z.enum(["individual", "empresa"], {
-					message: "Tipo de vendedor requerido",
-				}),
-				gender: z.enum(["male", "female"]).nullable().optional(),
-				companyName: z.string().optional(),
-				email: z.string().email().optional().or(z.literal("")),
-				address: z.string().optional(),
-			}),
-		)
+		.input(vendorDataSchema)
 		.handler(async ({ input }) => {
-			// Check if DPI already exists
-			const existingVendor = await db
-				.select()
-				.from(vehicleVendors)
-				.where(eq(vehicleVendors.dpi, input.dpi))
-				.limit(1);
+			const datos = normalizarDatosVendedor(input);
 
-			if (existingVendor.length > 0) {
-				const vendor = existingVendor[0];
-				throw new ORPCError("CONFLICT", {
-					message: `Ya existe un vendedor con el DPI ${input.dpi}: ${vendor.name} (${vendor.vendorType === "empresa" ? vendor.companyName || "Empresa" : "Individual"})`,
-				});
+			if (datos.dpi) {
+				const duplicado = await mensajeDpiDuplicado(datos.dpi);
+				if (duplicado) throw new ORPCError("CONFLICT", { message: duplicado });
 			}
+			await validarAgencia(datos.companyId);
 
 			const [newVendor] = await db
 				.insert(vehicleVendors)
 				.values({
-					...input,
-					phone: input.phone || null,
-					email: input.email || null,
+					...datos,
+					phone: datos.phone || null,
+					email: datos.email || null,
 				} as NewVehicleVendor)
 				.returning();
 
@@ -98,59 +181,84 @@ export const vendorsRouter = {
 		.input(
 			z.object({
 				id: z.string(),
-				data: z.object({
-					name: z.string().min(1, "El nombre es requerido"),
-					phone: z.string().optional(),
-					dpi: z
-						.string()
-						.min(13, "DPI debe tener 13 dígitos")
-						.max(13, "DPI debe tener 13 dígitos"),
-					vendorType: z.enum(["individual", "empresa"]),
-					gender: z.enum(["male", "female"]).nullable().optional(),
-					companyName: z.string().optional(),
-					email: z.string().email().optional().or(z.literal("")),
-					address: z.string().optional(),
-				}),
+				data: vendorDataSchema,
 			}),
 		)
 		.handler(async ({ input }) => {
-			// Check if DPI exists for another vendor (not the current one being updated)
-			const existingVendor = await db
-				.select()
-				.from(vehicleVendors)
-				.where(
-					and(
-						eq(vehicleVendors.dpi, input.data.dpi),
-						ne(vehicleVendors.id, input.id), // Different vendor ID
-					),
-				)
-				.limit(1);
+			const datos = normalizarDatosVendedor(input.data);
 
-			if (existingVendor.length > 0) {
-				const vendor = existingVendor[0];
-				throw new ORPCError("CONFLICT", {
-					message: `Ya existe un vendedor con el DPI ${input.data.dpi}: ${vendor.name} (${vendor.vendorType === "empresa" ? vendor.companyName || "Empresa" : "Individual"})`,
-				});
+			if (datos.dpi) {
+				const duplicado = await mensajeDpiDuplicado(datos.dpi, input.id);
+				if (duplicado) throw new ORPCError("CONFLICT", { message: duplicado });
 			}
+			await validarAgencia(datos.companyId);
 
-			const [updated] = await db
-				.update(vehicleVendors)
-				.set({
-					...input.data,
-					phone: input.data.phone || null,
-					email: input.data.email || null,
-					updatedAt: new Date(),
-				})
-				.where(eq(vehicleVendors.id, input.id))
-				.returning();
+			return db.transaction(async (tx) => {
+				// FOR UPDATE antes de revisar usos: quien asigna este vendedor lo
+				// toma FOR SHARE en su propia transacción, así que un cambio de tipo
+				// o de agencia no puede cruzarse con esa asignación.
+				const [actual] = await tx
+					.select({
+						vendorType: vehicleVendors.vendorType,
+						companyId: vehicleVendors.companyId,
+					})
+					.from(vehicleVendors)
+					.where(eq(vehicleVendors.id, input.id))
+					.for("update")
+					.limit(1);
 
-			return updated;
+				if (!actual) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Vendedor no encontrado",
+					});
+				}
+
+				const cambiaAlcance =
+					actual.vendorType !== datos.vendorType ||
+					(actual.companyId ?? null) !== datos.companyId;
+				if (cambiaAlcance) {
+					const error = errorDeCambioDeVendedor(
+						{
+							vendorType: actual.vendorType,
+							companyId: actual.companyId ?? null,
+						},
+						{ vendorType: datos.vendorType, companyId: datos.companyId },
+						await usosDelVendedor(tx, input.id),
+					);
+					if (error) throw new ORPCError("CONFLICT", { message: error });
+				}
+
+				const [updated] = await tx
+					.update(vehicleVendors)
+					.set({
+						...datos,
+						phone: datos.phone || null,
+						email: datos.email || null,
+						updatedAt: new Date(),
+					})
+					.where(eq(vehicleVendors.id, input.id))
+					.returning();
+
+				return updated;
+			});
 		}),
 
 	// Delete vendor
 	delete: crmProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
+			const [conCuenta] = await db
+				.select({ id: partnerMembers.id })
+				.from(partnerMembers)
+				.where(eq(partnerMembers.sellerId, input.id))
+				.limit(1);
+			if (conCuenta) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Este vendedor tiene usuarios del tracker asignados. Quítaselos en Admin > Usuarios antes de eliminarlo",
+				});
+			}
+
 			const [deleted] = await db
 				.delete(vehicleVendors)
 				.where(eq(vehicleVendors.id, input.id))
@@ -206,14 +314,18 @@ export const vendorsRouter = {
 				);
 			}
 
-			if (input.vendorType) {
-				conditions.push(eq(vehicleVendors.vendorType, input.vendorType));
-			}
+			// Sin tipo explícito es la búsqueda del vendedor legal: un vendedor
+			// de agencia no debe aparecer ahí.
+			conditions.push(
+				input.vendorType
+					? eq(vehicleVendors.vendorType, input.vendorType)
+					: ne(vehicleVendors.vendorType, TIPO_VENDEDOR_AGENCIA),
+			);
 
 			const result = await db
 				.select()
 				.from(vehicleVendors)
-				.where(conditions.length > 0 ? and(...conditions) : undefined)
+				.where(and(...conditions))
 				.orderBy(desc(vehicleVendors.createdAt));
 
 			return result;
@@ -240,7 +352,12 @@ export const vendorsRouter = {
 			const [vendor] = await db
 				.select()
 				.from(vehicleVendors)
-				.where(eqDpi(vehicleVendors.dpi, dpi))
+				.where(
+					and(
+						eqDpi(vehicleVendors.dpi, dpi),
+						ne(vehicleVendors.vendorType, TIPO_VENDEDOR_AGENCIA),
+					),
+				)
 				.limit(1);
 
 			if (!resultadoDpi.valid) {

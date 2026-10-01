@@ -240,6 +240,7 @@ async function firmantesParaVincular(
 		}
 		const { signers } = await firmantesDeLaOportunidad(
 			contract.opportunityId as string,
+			{ subidaAMano: fueSubidoAMano(contract.apiResponse) },
 		);
 		return firmantesDelContrato(contract.contractType, signers) ?? [];
 	}

@@ -608,6 +608,36 @@ function RouteComponent() {
 										})}
 									</p>
 								</div>
+								{caso.moraPagada && caso.moraPagada !== "0.00" && (
+									<div className="space-y-2">
+										<div className="flex items-center gap-2 text-sm">
+											<Banknote className="h-4 w-4 text-muted-foreground" />
+											<span className="font-medium">Mora ya pagada (cuotas en atraso):</span>
+										</div>
+										<p className="text-green-600">
+											Q
+											{Number(caso.moraPagada).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
+										</p>
+									</div>
+								)}
+								{caso.moraCondonada && caso.moraCondonada !== "0.00" && (
+									<div className="space-y-2">
+										<div className="flex items-center gap-2 text-sm">
+											<Banknote className="h-4 w-4 text-muted-foreground" />
+											<span className="font-medium">Mora condonada (cuotas en atraso):</span>
+										</div>
+										<p className="text-slate-600">
+											Q
+											{Number(caso.moraCondonada).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
+										</p>
+									</div>
+								)}
 								{caso.cuotaConvenio != null && (
 									<div className="space-y-2">
 										<div className="flex items-center gap-2 text-sm">

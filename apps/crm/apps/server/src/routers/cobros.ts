@@ -73,9 +73,11 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
+import { buildCasoFromCartera } from "../lib/build-caso-from-cartera";
 import {
 	calcularDiasMoraExactos,
 	diasMoraDeListado,
+	diasMoraDelDetalle,
 	estadoMoraPorCuotasAtrasadas,
 } from "../lib/mora-utils";
 import {
@@ -2187,9 +2189,9 @@ export const cobrosRouter = {
 					}
 
 					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
-					const diasMora = calcularDiasMoraExactos(
+					const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
 						creditoCompleto.cuotasAtrasadas || [],
-					);
+					));
 					const montoEnMora = creditoCompleto.moraActual
 						? Number(creditoCompleto.moraActual)
 						: 0;
@@ -2248,9 +2250,9 @@ export const cobrosRouter = {
 				);
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
-				const diasMora = calcularDiasMoraExactos(
+				const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
 					creditoCompleto.cuotasAtrasadas || [],
-				);
+				));
 				const montoEnMora = Number(creditoCompleto.moraActual ?? 0);
 
 				const tieneMoraActiva = creditoCompleto.mora != null;
@@ -2309,6 +2311,10 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
+					// Lo abonado a la mora de las cuotas atrasadas, separado por origen:
+					// condonar baja la mora igual que pagar, pero no es plata que entró.
+					moraPagada: creditoCompleto.moraPagada,
+					moraCondonada: creditoCompleto.moraCondonada,
 					// Mora proporcional (misma fórmula que procesarMoras en cartera-back)
 					// para el recordatorio del día de pago: {expectativaMoraDiaria} es lo
 					// que suma cada día de atraso (1/30 del cargo mensual) y
@@ -2564,66 +2570,7 @@ export const cobrosRouter = {
 					input.numeroSifco,
 				);
 
-				// Combinar todas las cuotas
-				const todasCuotas = [
-					...(creditoData.cuotasPagadas || []),
-					...(creditoData.cuotasPendientes || []),
-					...(creditoData.cuotasAtrasadas || []),
-				];
-
-				return {
-					creditoId: creditoData.credito.credito_id,
-					numeroSifco: creditoData.credito.numero_credito_sifco,
-					fechaCreacion: creditoData.credito.fecha_creacion,
-					capital: creditoData.credito.capital,
-					porcentajeInteres: creditoData.credito.porcentaje_interes,
-					deudaTotal: creditoData.credito.deudatotal,
-					cuota: creditoData.credito.cuota,
-					plazo: creditoData.credito.plazo,
-					statusCredit: creditoData.credito.statusCredit,
-					observaciones: creditoData.credito.observaciones,
-					// Cliente
-					usuario: {
-						usuarioId: creditoData.usuario.usuario_id,
-						nombre: creditoData.usuario.nombre,
-						nit: creditoData.usuario.nit,
-						categoria: creditoData.usuario.categoria,
-						saldoAFavor: creditoData.usuario.saldo_a_favor,
-					},
-					// Asesor (devuelto por endpoint /credito)
-					asesor: creditoData.asesor
-						? {
-								asesor_id: creditoData.asesor.asesor_id,
-								nombre: creditoData.asesor.nombre,
-								telefono: creditoData.asesor.telefono,
-								activo: creditoData.asesor.activo,
-								emailCashIn: creditoData.asesor.emailCashIn,
-							}
-						: null,
-					// Cuotas
-					cuotas: todasCuotas.map((cuota) => ({
-						cuotaId: cuota.cuota_id,
-						numeroCuota: cuota.numero_cuota,
-						fechaVencimiento: cuota.fecha_vencimiento,
-						pagado: cuota.pagado,
-					})),
-					// Moras (no disponible en endpoint /credito)
-					moras: [],
-					// Inversionistas (no disponible en endpoint /credito)
-					inversionistas: [],
-					// Calculated fields
-					cuotasPagadas: creditoData.cuotasPagadas?.length || 0,
-					cuotasPendientes: creditoData.cuotasPendientes?.length || 0,
-					capitalRestante: null, // No disponible en endpoint /credito
-					interesRestante: null, // No disponible en endpoint /credito
-					totalRestante: null, // No disponible en endpoint /credito
-					// Días REALES de atraso (cuota vencida más antigua). Acá SÍ vienen
-					// las fechas de vencimiento, así que se calculan exactos en vez de
-					// aproximar a 30 por cuota, que contradice al monto proporcional.
-					diasMora: calcularDiasMoraExactos(creditoData.cuotasAtrasadas || []),
-					montoMora: creditoData.moraActual, // ya es string
-					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
-				};
+				return buildCasoFromCartera(creditoData);
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,

@@ -51,12 +51,19 @@ import {
 } from "./registerPaymentPolicy";
 import {
   BASE_DIAS_MORA,
+  contarCuotasQueVencenHoy,
   diasAtrasoMoraConSigno,
   hoyGuatemala,
   incrementoDiarioMora,
   incrementoMaximoMensualMora,
   isInstallmentWithinMoraHorizon,
+  cuotasParaPendienteDeCreditos,
 } from "./latefee";
+import { moraAbonadaPorOrigen } from "../utils/moraAbonadaPorOrigen";
+import { construirDesgloseMora } from "../utils/desgloseMora";
+import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
+import { compensarAnotacionesVivas } from "../utils/anotarMoraPagada";
+import { mora_pagada_cuota } from "../database/db/schema";
 import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
@@ -285,8 +292,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     );
 
     // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
-    // no son deuda (no van en atrasadas), pero el asesor debe verlas — mientras
-    // no se validen, el cron de moras las sigue tratando como atraso.
+    // no son deuda (no van en atrasadas), pero el asesor debe verlas. El cron
+    // les frena la mora solo 7 días desde la fecha del pago; pasado eso, si
+    // siguen sin validar, las vuelve a tratar como atraso.
     const cuotasEnValidacion = filtrarCuotasEnValidacion(
       cuotasVencidasSinCerrar,
       currentCredit.creditos.cuota ?? 0
@@ -307,8 +315,72 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
     // una rama que ningún caso puede alcanzar.
     const { incrementoDiarioMora: incrementoDiarioMoraStr,
-      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr } =
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+      diasAtrasoMoraMaximo } =
       incrementosMora.get(creditoId)!;
+
+    // El «por qué» de la mora para la pantalla de cobro: las cuotas y los días
+    // con el MISMO cargador del cron, así que incluye las cuotas cuyo pago
+    // lleva MÁS de 7 días sin validar (el cron las vuelve a cobrar aunque no se
+    // vean como atrasadas) y resta lo ya abonado a cada una.
+    const hoyGT = hoyGuatemala();
+    const cargadas =
+      (await cuotasParaPendienteDeCreditos([creditoId], db, hoyGT)).get(creditoId)?.cuotas ?? [];
+
+    // Mora pagada/condonada: separa lo que el cliente ya abonó (PAGO/REVERSA de PAGO)
+    // de lo que fue condonado (CONDONACION/REVERSA de CONDONACION).
+    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas MÁS las en
+    // validación: las atrasadas excluyen las cuotas cubiertas por boletas sin
+    // validar, y el cron —y el desglose— tampoco cuentan las de un pago
+    // pendiente de hasta 7 días; sin sumarlas, lo ya abonado a esa cuota
+    // desaparecía de `moraPagada` mientras contabilidad no validara. Y
+    // `cargadas` sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no
+    // elegibles para el cron), donde lo ya pagado se seguiría mostrando.
+    const moraAbonoOrigen = await moraAbonadaPorOrigen(
+      [...new Set([
+        ...cargadas.map((c) => c.cuota_id),
+        ...cuotasAtrasadas.map((c) => c.cuota_id),
+        ...cuotasEnValidacion.map((c) => c.cuota_id),
+      ])],
+      db
+    );
+    const moraPagada = moraAbonoOrigen.pagada.toFixed(2);
+    const moraCondonada = moraAbonoOrigen.condonada.toFixed(2);
+    const datosCuota = cargadas.length
+      ? await db
+          .select({
+            cuota_id: cuotas_credito.cuota_id,
+            numero_cuota: cuotas_credito.numero_cuota,
+            fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          })
+          .from(cuotas_credito)
+          .where(inArray(cuotas_credito.cuota_id, cargadas.map((c) => c.cuota_id)))
+      : [];
+    const datoPorCuota = new Map(datosCuota.map((d) => [d.cuota_id, d]));
+    // Cuotas sin pagar que vencen HOY: hoy no generan mora, mañana sí (su
+    // primer día). Mismo criterio de elegibilidad que el cron.
+    const cuotasQueVencenHoy = contarCuotasQueVencenHoy(
+      await db
+        .select({
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          pagado: cuotas_credito.pagado,
+          hasPaidPayment: hasPaidPaymentSql(),
+        })
+        .from(cuotas_credito)
+        .where(and(eq(cuotas_credito.credito_id, creditoId), eq(cuotas_credito.pagado, false))),
+      hoyGT,
+      currentCredit.creditos.statusCredit,
+    );
+    const desgloseMora = construirDesgloseMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      cuotas: cargadas.map((c) => ({
+        ...c,
+        numero_cuota: datoPorCuota.get(c.cuota_id)?.numero_cuota ?? 0,
+        fecha_vencimiento: String(datoPorCuota.get(c.cuota_id)?.fecha_vencimiento ?? ""),
+      })),
+      numerosEnValidacion: new Set(cuotasEnValidacion.map((c) => c.numero_cuota)),
+      cuotasQueVencenHoy,
+    });
 
     const cuotasPendientes = await db
       .select({
@@ -580,6 +652,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
         incrementoDiarioMora: incrementoDiarioMoraStr,
         incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+        diasAtrasoMoraMaximo,
+        moraPagada,
+        moraCondonada,
+        desgloseMora,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
@@ -716,6 +792,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
       incrementoDiarioMora: incrementoDiarioMoraStr,
       incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+      diasAtrasoMoraMaximo,
+      moraPagada,
+      moraCondonada,
+      desgloseMora,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0
@@ -853,22 +933,11 @@ export async function incrementosMoraPorCredito(
       credito_id: cuotas_credito.credito_id,
       fecha_vencimiento: cuotas_credito.fecha_vencimiento,
       pagado: cuotas_credito.pagado,
-      // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
-      // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
-      // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
-      // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
-      // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
-      // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
-      // elegible y el incremento salía "0.00" SIEMPRE.
-      hasPaidPayment: sql<boolean>`EXISTS (
-        SELECT 1
-        FROM cartera.pagos_credito pc
-        WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
-          AND pc."paymentFalse" = false
-          AND pc.pagado = true
-          AND pc.validation_status IN ('validated', 'no_required')
-          AND COALESCE(pc.monto_aplicado, 0) > 0
-      )`,
+      // El MISMO helper del cron (incluye el pago pendiente de hasta 7 días):
+      // una copia a mano se quedaba atrás cada vez que cambiaba el criterio y
+      // el ritmo anunciado dejaba de cuadrar con lo que el cron cobra. El
+      // helper ya trae la cuota de afuera calificada a mano (ver su comentario).
+      hasPaidPayment: hasPaidPaymentSql(),
     })
     .from(cuotas_credito)
     .where(
@@ -2063,7 +2132,20 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
             eq(pagos_credito.pagado, false)
           )
         )
-        .returning({ pago_id: pagos_credito.pago_id });
+        .returning({ pago_id: pagos_credito.pago_id, paymentFalse: pagos_credito.paymentFalse });
+
+      // Lo que estos pagos anulados habían abonado a mora sale del ledger en la
+      // MISMA tx (tipo ANULACION): si no, `mora_pagada_cuota` seguiría contando
+      // como pagada mora de boletas que ya no valen y el cron la descontaría.
+      // Solo las que quedaron anuladas: una validada es plata real y se queda.
+      const anuladosIds = pagosNoPagados.filter((p) => p.paymentFalse).map((p) => p.pago_id);
+      if (anuladosIds.length > 0) {
+        await compensarAnotacionesVivas(
+          and(inArray(mora_pagada_cuota.pago_id, anuladosIds), eq(mora_pagada_cuota.tipo, "PAGO"))!,
+          { tipo: "ANULACION", motivo: "Pago pendiente anulado al pasar el crédito a INCOBRABLE" },
+          tx as unknown as typeof db,
+        );
+      }
 
       const pagoIds = pagosNoPagados.map(p => p.pago_id);
 
@@ -2523,7 +2605,20 @@ export async function resetCredit({
             eq(pagos_credito.pagado, false),
           ),
         )
-        .returning({ pago_id: pagos_credito.pago_id });
+        .returning({ pago_id: pagos_credito.pago_id, paymentFalse: pagos_credito.paymentFalse });
+
+      // Lo que estos pagos anulados habían abonado a mora sale del ledger en la
+      // MISMA tx (tipo ANULACION): si no, `mora_pagada_cuota` seguiría contando
+      // como pagada mora de boletas que ya no valen y el cron la descontaría.
+      // Solo las que quedaron anuladas: una validada es plata real y se queda.
+      const anuladosIds = pagosAnuladosReset.filter((p) => p.paymentFalse).map((p) => p.pago_id);
+      if (anuladosIds.length > 0) {
+        await compensarAnotacionesVivas(
+          and(inArray(mora_pagada_cuota.pago_id, anuladosIds), eq(mora_pagada_cuota.tipo, "PAGO"))!,
+          { tipo: "ANULACION", motivo: "Pago pendiente anulado en el reset del crédito" },
+          tx as unknown as typeof db,
+        );
+      }
 
       // Si alguno de estos pagos anulados era el que cobró un ajuste por fecha
       // ideal de pago, resetearlo a pendiente (a lo sumo 1 fila por crédito).

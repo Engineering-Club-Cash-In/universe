@@ -497,6 +497,7 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
       "creditos", // el crédito activo
       "usuarios", // el dueño, para devolverle el saldo a favor
       "facturas_electronicas", // ¿la boleta ya se facturó? (guard de reversa)
+      "mora_pagada_cuota", // anotaciones vivas de este pago en el ledger, para compensarlas
       "rubros_pagos", // los reclamos de rubro de este pago, FOR UPDATE
       "pagos_credito", // COUNT(*) de filas vivas: ¿borrar la fila o resetearla?
     ]);

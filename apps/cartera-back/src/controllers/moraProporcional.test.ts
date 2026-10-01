@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
+import type { CuotaParaPendiente } from "../utils/moraPendiente";
 
 // latefee.ts importa la conexión a la base al cargarse; estos tests solo ejercen
 // helpers PUROS (sin DB), así que la conexión se reemplaza por un objeto vacío.
@@ -350,7 +351,9 @@ describe("maximoMoraSinOverride — el guard no puede estrecharse con la mora pr
 describe("decidirMoraTrasRomperConvenio — nunca deja el crédito en tierra de nadie", () => {
   it("con mora cobrable pide CREAR_MORA con el monto redondeado", () => {
     // 10,000 × 1.12% × 1 cuota topada = Q112.00
-    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: 1, numCuotasAtrasadas: 1 });
+    // 1 cuota topada = 30+ días de atraso
+    const cuotasParaPendiente = [{ cuota_id: 1, diasAtraso: 30, pagado: 0 }];
+    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, cuotasParaPendiente });
     expect(d.accion).toBe("CREAR_MORA");
     expect(d.accion === "CREAR_MORA" && d.montoMora).toBe(112);
   });
@@ -358,40 +361,49 @@ describe("decidirMoraTrasRomperConvenio — nunca deja el crédito en tierra de 
   it("capital chico con 1 día de atraso: la mora redondea a Q0.00 → ACTIVAR, no createMora", () => {
     // 13 × 1.12% × 1/30 = Q0.00485 → redondea a 0. createMora lo rechazaría
     // ("Monto de mora debe ser mayor a 0") con el convenio ya destruido.
-    const factor = new Big(1).div(30);
-    const d = decidirMoraTrasRomperConvenio({ capital: 13, factorDias: factor, numCuotasAtrasadas: 1 });
+    const cuotasParaPendiente = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    const d = decidirMoraTrasRomperConvenio({ capital: 13, cuotasParaPendiente });
     expect(d.accion).toBe("ACTIVAR");
     expect(d.accion === "ACTIVAR" && d.motivo).toContain("redondea a Q0.00");
   });
 
   it("el borde está en medio centavo: Q0.005 redondea hacia arriba y sí crea mora", () => {
-    const factor = new Big(1).div(30);
     // 14 × 1.12% × 1/30 = 0.005226… → Q0.01
-    const sube = decidirMoraTrasRomperConvenio({ capital: 14, factorDias: factor, numCuotasAtrasadas: 1 });
+    const subeQuotas = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    const sube = decidirMoraTrasRomperConvenio({ capital: 14, cuotasParaPendiente: subeQuotas });
     expect(sube.accion).toBe("CREAR_MORA");
     expect(sube.accion === "CREAR_MORA" && sube.montoMora).toBe(0.01);
     // 13.39 × 1.12% × 1/30 = 0.004998… → Q0.00
-    const baja = decidirMoraTrasRomperConvenio({ capital: 13.39, factorDias: factor, numCuotasAtrasadas: 1 });
+    const bajaQuotas = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    const baja = decidirMoraTrasRomperConvenio({ capital: 13.39, cuotasParaPendiente: bajaQuotas });
     expect(baja.accion).toBe("ACTIVAR");
   });
 
   it("sin cuotas atrasadas → ACTIVAR (camino de siempre)", () => {
-    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: 0, numCuotasAtrasadas: 0 });
+    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, cuotasParaPendiente: [] });
     expect(d.accion).toBe("ACTIVAR");
     expect(d.accion === "ACTIVAR" && d.motivo).toBe("sin cuotas atrasadas");
   });
 
   it("capital nulo, 0 o negativo → ACTIVAR, nunca una mora sin base", () => {
-    const factor = new Big(1);
+    const cuotasParaPendiente = [
+      { cuota_id: 1, diasAtraso: 30, pagado: 0 },
+      { cuota_id: 2, diasAtraso: 30, pagado: 0 },
+    ];
     for (const capital of [null, 0, -500]) {
-      const d = decidirMoraTrasRomperConvenio({ capital, factorDias: factor, numCuotasAtrasadas: 2 });
+      const d = decidirMoraTrasRomperConvenio({ capital, cuotasParaPendiente });
       expect(d.accion).toBe("ACTIVAR");
     }
   });
 
   it("el monto que propone SIEMPRE pasa el guard de createMora (no se autorechaza)", () => {
     for (const cuotas of [1, 3, 12]) {
-      const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: cuotas, numCuotasAtrasadas: cuotas });
+      const cuotasParaPendiente = Array.from({ length: cuotas }, (_, i) => ({
+        cuota_id: i + 1,
+        diasAtraso: 30,
+        pagado: 0,
+      }));
+      const d = decidirMoraTrasRomperConvenio({ capital: 10_000, cuotasParaPendiente });
       expect(d.accion).toBe("CREAR_MORA");
       if (d.accion !== "CREAR_MORA") continue;
       expect(d.montoMora).toBeGreaterThan(0);
@@ -441,25 +453,32 @@ describe("fechaCalendarioGT — entradas malformadas no pueden devolver una fech
 // decidirMoraTrasRomperConvenio: la regla vive detrás de tres writes a la base.
 describe("decidirMoraDelCron — el cron nunca escribe una mora activa de Q0.00", () => {
   it("capital chico con 1 día de atraso: DESACTIVAR, con su motivo propio", () => {
-    const d = decidirMoraDelCron({ capital: 10, diasAtrasadosPorCuota: [1] });
+    const cuotasParaPendiente = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    const d = decidirMoraDelCron({ capital: 10, cuotasParaPendiente });
     expect(d.accion).toBe("DESACTIVAR");
     expect(d.accion === "DESACTIVAR" && d.motivo).toBe("Mora proporcional menor a un centavo");
   });
 
   it("el motivo de capital cero es OTRO (el historial tiene que decir la verdad)", () => {
-    const d = decidirMoraDelCron({ capital: 0, diasAtrasadosPorCuota: [45] });
+    const cuotasParaPendiente = [{ cuota_id: 1, diasAtraso: 45, pagado: 0 }];
+    const d = decidirMoraDelCron({ capital: 0, cuotasParaPendiente });
     expect(d.accion).toBe("DESACTIVAR");
     expect(d.accion === "DESACTIVAR" && d.motivo).toBe("Crédito sin capital — no aplica mora");
   });
 
   it("capital nulo o negativo tampoco genera mora", () => {
     for (const capital of [null, -500]) {
-      expect(decidirMoraDelCron({ capital, diasAtrasadosPorCuota: [30] }).accion).toBe("DESACTIVAR");
+      const cuotasParaPendiente = [{ cuota_id: 1, diasAtraso: 30, pagado: 0 }];
+      expect(decidirMoraDelCron({ capital, cuotasParaPendiente }).accion).toBe("DESACTIVAR");
     }
   });
 
   it("mora cobrable: APLICAR con el monto ya redondeado que se guarda", () => {
-    const d = decidirMoraDelCron({ capital: 10_000, diasAtrasadosPorCuota: [35, 5] });
+    const cuotasParaPendiente = [
+      { cuota_id: 1, diasAtraso: 35, pagado: 0 },
+      { cuota_id: 2, diasAtraso: 5, pagado: 0 },
+    ];
+    const d = decidirMoraDelCron({ capital: 10_000, cuotasParaPendiente });
     expect(d.accion).toBe("APLICAR");
     expect(d.accion === "APLICAR" && d.montoStr).toBe("130.67");
   });
@@ -467,17 +486,20 @@ describe("decidirMoraDelCron — el cron nunca escribe una mora activa de Q0.00"
   it("el monto de APLICAR SIEMPRE es > 0 (lo que createMora exige)", () => {
     for (const capital of [10, 13.39, 13.4, 14, 100, 10_000]) {
       for (const dias of [[1], [2], [15], [30], [95, 65, 35, 5]]) {
-        const d = decidirMoraDelCron({ capital, diasAtrasadosPorCuota: dias });
-        if (d.accion !== "APLICAR") continue;
-        expect(Number(d.montoStr)).toBeGreaterThan(0);
+        const cuotasParaPendiente = dias.map((d, i) => ({ cuota_id: i + 1, diasAtraso: d, pagado: 0 }));
+        const result = decidirMoraDelCron({ capital, cuotasParaPendiente });
+        if (result.accion !== "APLICAR") continue;
+        expect(Number(result.montoStr)).toBeGreaterThan(0);
       }
     }
   });
 
   it("coincide con decidirMoraTrasRomperConvenio en el borde del medio centavo", () => {
     // 13.39 × 1.12% × 1/30 = 0.004998… → Q0.00; 13.40 → Q0.005 → Q0.01.
-    expect(decidirMoraDelCron({ capital: 13.39, diasAtrasadosPorCuota: [1] }).accion).toBe("DESACTIVAR");
-    expect(decidirMoraDelCron({ capital: 13.4, diasAtrasadosPorCuota: [1] }).accion).toBe("APLICAR");
+    const cuotasParaPendiente1 = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    expect(decidirMoraDelCron({ capital: 13.39, cuotasParaPendiente: cuotasParaPendiente1 }).accion).toBe("DESACTIVAR");
+    const cuotasParaPendiente2 = [{ cuota_id: 1, diasAtraso: 1, pagado: 0 }];
+    expect(decidirMoraDelCron({ capital: 13.4, cuotasParaPendiente: cuotasParaPendiente2 }).accion).toBe("APLICAR");
   });
 });
 

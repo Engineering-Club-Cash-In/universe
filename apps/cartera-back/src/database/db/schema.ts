@@ -16,6 +16,7 @@
     bigint,
     index,
     jsonb,
+    type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -483,6 +484,64 @@
     fecha: timestamp("fecha").defaultNow().notNull(),
   });
 
+  // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
+  export type MoraPagadaTipo = "PAGO" | "CONDONACION" | "REVERSA" | "ANULACION";
+
+  export const MORA_PAGADA_CUOTA_UQ_PAGO = "mora_pagada_cuota_uq_pago";
+  export const MORA_PAGADA_CUOTA_UQ_REVIERTE = "mora_pagada_cuota_uq_revierte";
+
+  export const mora_pagada_cuota = customSchema.table(
+    "mora_pagada_cuota",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      cuota_id: integer("cuota_id")
+        .notNull()
+        .references(() => cuotas_credito.cuota_id, { onDelete: "cascade" }),
+      // SIN llave foránea, igual que en la migración 0043: el registro tiene
+      // que sobrevivir al pago revertido (ver la nota de la migración).
+      pago_id: integer("pago_id"),
+      // 6 decimales: ver la nota de 0043 (restos de redondeo por cuota).
+      monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
+      tipo: text("tipo").notNull(),
+      // FK a la misma tabla, igual que en 0043: una compensatoria siempre
+      // apunta a una fila real.
+      revierte_a: integer("revierte_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      // reemplaza_a apunta a la fila PAGO anterior (compensada por revierte_a) cuando
+      // reversePayment reutiliza pago_id del mismo (pago_id, cuota_id). Ver migración 0043.
+      reemplaza_a: integer("reemplaza_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      usuario_id: integer("usuario_id"),
+      motivo: text("motivo"),
+      fecha: timestamp("fecha")
+        .default(sql`clock_timestamp()`)
+        .notNull(),
+    },
+    (table) => [
+      // Impide doble clic: el mismo pago no puede registrar mora dos veces en la misma cuota.
+      // Sin este índice un race condition genera dos filas duplicadas y el saldo de mora se dobla.
+      // El COALESCE(reemplaza_a, 0) permite que filas compensadas (reemplaza_a = id anterior)
+      // y filas nuevas (reemplaza_a = NULL → 0) tengan claves distintas. Ver migración 0043.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_PAGO)
+        .on(table.pago_id, table.cuota_id, sql`COALESCE(${table.reemplaza_a}, 0)`)
+        .where(sql`${table.tipo} = 'PAGO'`),
+
+      // Impide revertir dos veces: una fila compensatoria puede apuntar a UNA sola original.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_REVIERTE)
+        .on(table.revierte_a)
+        .where(sql`${table.revierte_a} IS NOT NULL`),
+
+      // Buscar por cuota: snapshot de mora por crédito y cuota.
+      index("mora_pagada_cuota_idx_cuota").on(table.credito_id, table.cuota_id),
+
+      // Buscar por pago: listar qué mora registró un pago específico.
+      index("mora_pagada_cuota_idx_pago").on(table.pago_id).where(
+        sql`${table.pago_id} IS NOT NULL`
+      ),
+    ]
+  );
+
   export const moraEventoTipoEnum = customSchema.enum("mora_evento_tipo", [
     "CREACION",
     "RECALCULO",
@@ -521,10 +580,16 @@
     usuario_id: integer("usuario_id")
       .references(() => platform_users.id, { onDelete: "set null" }),
     motivo: text("motivo"),
+    // Qué pago causó este movimiento de mora. Anulable: hay movimientos que no
+    // vienen de ningún pago (recálculo del cron, condonación, ajuste manual).
+    // SIN FK a propósito: la reversa borra filas de pagos_credito; con FK el SET NULL
+    // borraría el vínculo justo cuando se necesita para auditar.
+    pago_id: integer("pago_id"),
     fecha: timestamp("fecha").defaultNow().notNull(),
   }, (table) => [
     index("moras_historial_credito_idx").on(table.credito_id),
     index("moras_historial_fecha_idx").on(table.fecha),
+    index("moras_historial_idx_pago").on(table.pago_id).where(sql`${table.pago_id} IS NOT NULL`),
   ]);
 
   export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {

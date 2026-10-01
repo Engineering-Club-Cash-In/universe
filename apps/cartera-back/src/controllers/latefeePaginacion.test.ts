@@ -71,8 +71,15 @@ mock.module("../database", () => {
       return chain;
     }
     if ("mora_id" in selection && "monto_mora" in selection) {
-      // Créditos MOROSO + su mora activa (condonación masiva).
-      const { chain } = makeChain(() => morososMasivos);
+      // Re-lectura de moras activas dentro de la transacción de condonación.
+      // Solo devuelve las que realmente tienen mora_id (no nulls del leftJoin viejo).
+      // La re-lectura DESPUÉS del candado asegura que solo se condonan moras vigentes.
+      const { chain } = makeChain(() => morososMasivos.filter((m) => m.mora_id !== null));
+      return chain;
+    }
+    if ("cuota_id" in selection) {
+      // Cuotas para cálculo de condonación masiva; devuelve vacío (no hay cuotas vencidas).
+      const { chain } = makeChain(() => []);
       return chain;
     }
     if ("porcentaje_mora" in selection) {
@@ -81,6 +88,15 @@ mock.module("../database", () => {
     }
     if ("statusCredit" in selection) {
       const { chain } = makeChain(() => [{ statusCredit: "MOROSO" }]);
+      return chain;
+    }
+    if ("credito_id" in selection && Object.keys(selection).length === 1) {
+      // Búsqueda de créditos para lock (condonación masiva); devuelve los IDs solicitados.
+      const { chain } = makeChain(() => [
+        { credito_id: 1 },
+        { credito_id: 2 },
+        { credito_id: 3 },
+      ]);
       return chain;
     }
 
@@ -118,7 +134,9 @@ mock.module("../database", () => {
     const chain: any = {};
     chain.values = (v: any) => {
       insertados.push(v);
-      chain.filas = Array.isArray(v) ? v : [v];
+      chain.filas = Array.isArray(v)
+        ? v.map((f: any) => ({ ...f, id: 999, historial_id: 777 }))
+        : [{ ...v, id: 999, historial_id: 777 }];
       return chain;
     };
     chain.returning = () => Promise.resolve(chain.filas ?? []);
@@ -130,10 +148,18 @@ mock.module("../database", () => {
     select,
     update,
     insert,
-    transaction: (cb: any) => cb({ select, update, insert }),
+    transaction: async (cb: any) => cb({ select, update, insert }),
   };
   return { client: {}, db };
 });
+// ledger vacío = créditos existentes arrancan de cero
+mock.module("../utils/moraPagadaPorCuota", () => ({
+  moraPagadaPorCuota: async () => new Map(),
+}));
+// anotaciones del ledger no afectan los conteos de condonación
+mock.module("../utils/anotarMoraPagada", () => ({
+  anotarMoraPagada: async () => [],
+}));
 
 const {
   getCreditosWithMoras,

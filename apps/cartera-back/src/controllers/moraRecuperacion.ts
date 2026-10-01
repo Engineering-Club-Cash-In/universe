@@ -55,22 +55,35 @@ const escaparRegex = (texto: string) =>
  * las mismas constantes que escriben las marcas, para que no se puedan separar
  * con un cambio de redacción. Sale como TEXTO: el id no se usa para aritmética,
  * solo como identidad.
+ *
+ * ── MIGRACIÓN 0044: `moras_historial.pago_id` ─────────────────────────────
+ * Desde la migración 0044, los eventos nuevos traen la FK `pago_id` ligada.
+ * La columna es la fuente de verdad: es una PK establecida en el momento del
+ * evento, no una marca pegada al texto después. El SUBSTRING de texto queda
+ * como respaldo ÚNICAMENTE para el historial anterior a la columna; sin él,
+ * todo lo viejo caería a la bolsa anónima de pago desconocido, borrando la
+ * trazabilidad de cobros reales.
  */
-function pagoDelEventoSql(columnaMotivo: ReturnType<typeof sql.raw>) {
+export function pagoDelEventoSql(
+	columnaPagoId: ReturnType<typeof sql.raw>,
+	columnaMotivo: ReturnType<typeof sql.raw>,
+) {
 	const patrones = [
 		MARCA_PAGO_DEL_DECREMENTO_PREFIJO,
 		...MOTIVOS_RESTITUCION_MORA_PREFIJOS,
 	];
-	return sql`COALESCE(${sql.join(
-		patrones.map(
-			(prefijo) =>
-				// `::text` explícito: sin él el parámetro llega sin tipo y
-				// `substring(text, unknown)` tiene dos candidatas (la de posición y
-				// la de expresión regular). Acá siempre es la de expresión regular.
-				sql`SUBSTRING(${columnaMotivo} FROM ${`${escaparRegex(prefijo)}([0-9]+)`}::text)`,
-		),
-		sql`, `,
-	)})`;
+	return sql`COALESCE(
+    ${columnaPagoId}::text,
+    ${sql.join(
+			patrones.map(
+				(prefijo) =>
+					// `::text` explícito: sin él el parámetro llega sin tipo y
+					// `substring(text, unknown)` tiene dos candidatas (la de posición y
+					// la de expresión regular). Acá siempre es la de expresión regular.
+					sql`SUBSTRING(${columnaMotivo} FROM ${`${escaparRegex(prefijo)}([0-9]+)`}::text)`,
+			),
+			sql`, `,
+		)})`;
 }
 
 /**
@@ -761,7 +774,7 @@ export function buildMoraRecoveryQuery({
              ${esDecrementoAnuladoSql(sql.raw("h.motivo"))} AS anulado,
              -- El pago del que habla el evento, para ligar cada restitución
              -- con SU bajada y no con la de otro. Ver \`pagoDelEventoSql\`.
-             ${pagoDelEventoSql(sql.raw("h.motivo"))} AS pago_id
+             ${pagoDelEventoSql(sql.raw("h.pago_id"), sql.raw("h.motivo"))} AS pago_id
       FROM cartera.moras_historial h
       JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
       WHERE h.fecha >= ${inicioUtc}::timestamp

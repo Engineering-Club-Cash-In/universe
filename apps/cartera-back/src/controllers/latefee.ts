@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, inArray, notInArray, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, exists, gt, gte, ilike, inArray, notInArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
 import { MORAS_CREDITO_UQ_ACTIVA, asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
@@ -11,6 +11,16 @@ import { stat } from "fs";
 import { emitCreditLateFee } from "../utils/structuredLogger";
 import { STATUS_EXCLUIDOS_MORA } from "../constants/creditStatus";
 import type { PoolClient } from "pg";
+
+// Importar para uso interno en este archivo
+import { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
+import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
+import { moraPendientePorCuota, repartirPagoDeMora, type CuotaParaPendiente } from "../utils/moraPendiente";
+import { moraPagadaPorCuota } from "../utils/moraPagadaPorCuota";
+import { anotarMoraPagada, type AnotacionMoraPagada } from "../utils/anotarMoraPagada";
+import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
+// Re-exportar para mantener compatibilidad con importadores existentes
+export { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
 
 function safeNow(): number {
   try {
@@ -81,10 +91,10 @@ export { STATUS_EXCLUIDOS_MORA };
  *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
  *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
  *
- * Fuera de la regla quedan los caminos NO transaccionales (`createMora`,
- * `condonarTodasLasMoras`): cada statement autocommitea y suelta su candado
- * antes del siguiente, así que no pueden sostener un ciclo. Si alguien los
- * envuelve en una transacción, pasan a deberle el orden a esta regla.
+ * `createMora` sin `dbClient` autocommitea cada statement y no puede sostener
+ * un ciclo. CON `dbClient` corre dentro de la transacción de quien la llama
+ * (la ruptura de convenio), que por eso bloquea `creditos` PRIMERO. La
+ * condonación masiva es transaccional y también bloquea `creditos` primero.
  *
  * Los tests de `moraOrdenDeCandados.test.ts` fallan si alguna de estas
  * transacciones vuelve a pedir `moras_credito` antes que `creditos`.
@@ -202,6 +212,23 @@ export function isOverdueInstallmentForMora(cuota: CuotaParaMora, hoy: Date) {
 }
 
 /**
+ * Cuántas cuotas sin pagar vencen HOY: hoy no devengan mora (el cron exige
+ * vencimiento < hoy), mañana sí. Mismo criterio de elegibilidad que el cron,
+ * para que la proyección de «mañana sube» no se aparte de lo que va a cobrar.
+ */
+export function contarCuotasQueVencenHoy(
+  cuotas: Omit<CuotaParaMora, "statusCredit">[],
+  hoy: Date,
+  statusCredit: CuotaParaMora["statusCredit"],
+): number {
+  return cuotas.filter(
+    (c) =>
+      diasAtrasoMoraConSigno(c.fecha_vencimiento, hoy) === 0 &&
+      esCuotaElegibleParaMora({ ...c, statusCredit }),
+  ).length;
+}
+
+/**
  * Las cuotas que entran en la PROYECCIÓN de la mora: las elegibles cuyo
  * vencimiento cae dentro del horizonte que se le anuncia al cliente (por
  * defecto los próximos 30 días), estén ya vencidas o no.
@@ -224,13 +251,6 @@ export function isInstallmentWithinMoraHorizon(
     diasAtrasoMoraConSigno(cuota.fecha_vencimiento, hoy) >= -horizonteDias
   );
 }
-
-// Tasa mensual de mora (1.12%). En la fila de moras_credito el porcentaje se
-// sigue guardando como "1.12" — esta es la misma tasa en forma decimal.
-export const TASA_MORA_MENSUAL = "0.0112";
-// Base FIJA de 30 días (no los días calendario del mes): negocio quiere que el
-// cargo de una cuota sea el mismo sin importar si cayó en febrero o en julio.
-export const BASE_DIAS_MORA = 30;
 
 /**
  * Días enteros de atraso de una cuota: diferencia de fechas de CALENDARIO en
@@ -262,32 +282,106 @@ export function diasAtrasoMoraConSigno(
 }
 
 /**
- * Mora proporcional a los días de atraso: por CADA cuota vencida se cobra
- * capital × 1.12% × (días/30), con TECHO de un cargo mensual completo por cuota.
+ * Las cuotas que HOY devengan mora de un conjunto de créditos, cada una con lo
+ * que ya pagó — con el criterio EXACTO de `procesarMoras`.
  *
- * El techo es lo que evita que la cartera vieja se dispare: antes una cuota
- * vencida hace 365 días cobraba lo mismo que una de 30 (un bloque fijo), y sin
- * el min(1,·) ahora cobraría 12 veces más. Con el techo, atrasarse 1 día cuesta
- * 1/30 del cargo y atrasarse un año cuesta exactamente 1 cargo.
+ * ── Por qué existe ──────────────────────────────────────────────────────────
+ * Cada camino que anota lo pagado —el pago, la condonación individual, la
+ * masiva, la ruptura de convenio— tiene que repartir el monto entre las MISMAS
+ * cuotas y con los MISMOS días que después usa el cron para cobrar. Si uno de
+ * ellos decide por su cuenta qué cuota está vencida (sin `hasPaidPayment`, con
+ * `deudatotal` en vez de capital, con días en UTC en vez de calendario de
+ * Guatemala), le abona a cuotas que el cron no mira: el cron ve esas cuotas con
+ * lo pagado en cero y vuelve a cobrar la mora que el cliente ya pagó.
  *
- * Devuelve un Big SIN redondear: el .toFixed(2) va solo al final, para que
- * redondear los factores intermedios no corra el total centavo a centavo.
+ * Una revisión de código encontró exactamente eso en dos lugares distintos. Es
+ * la misma lección que la fórmula (`utils/moraFormula.ts`): el criterio se
+ * escribe UNA vez y todos lo usan.
+ *
+ * ── Qué reusa, sin reescribir ───────────────────────────────────────────────
+ * La subconsulta `hasPaidPayment` es copia literal de la del cron (una fila de
+ * pago "vouchea" la cuota solo si aplicó plata REAL, `monto_aplicado > 0`), y
+ * el filtro es `isOverdueInstallmentForMora` — la misma función, no otra igual.
+ * Los días salen de `diasAtrasoMora`, en fechas de calendario de Guatemala.
+ *
+ * Las cuotas vuelven ordenadas de la MÁS VIEJA a la más nueva, que es el orden
+ * en que se reparte un pago de mora. Quien llame no tiene que reordenar.
+ *
+ * Devuelve un Map por crédito con su capital y sus cuotas. Un crédito sin
+ * cuotas vencidas elegibles no aparece.
  */
-export function calcularMoraProporcional(params: {
+export async function cuotasParaPendienteDeCreditos(
+  creditoIds: number[],
+  ejecutor: typeof db,
+  hoy: Date,
+  /**
+   * `excluirPagoId`: el pago que se está anotando no cubre su propia cuota
+   * (ver `hasPaidPaymentSql`). Solo lo pasa el pago normal; el cron, la
+   * condonación y el desglose miran la cobertura completa.
+   */
+  opciones: { excluirPagoId?: number } = {},
+): Promise<Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>> {
+  const resultado = new Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>();
+  if (creditoIds.length === 0) return resultado;
+
+  const filas = await ejecutor
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      credito_id: cuotas_credito.credito_id,
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pagado: cuotas_credito.pagado,
+      statusCredit: creditos.statusCredit,
+      capital: creditos.capital,
+      // La subconsulta está centralizada en utils/cuotaYaPagadaSql
+      // para evitar copias desincronizadas.
+      hasPaidPayment: hasPaidPaymentSql(opciones),
+    })
+    .from(cuotas_credito)
+    .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
+    // Solo impagas: `isOverdueInstallmentForMora` ya lo exige en JS, así que no
+    // cambia el resultado, pero ahorra el EXISTS de cada cuota ya pagada.
+    .where(and(inArray(cuotas_credito.credito_id, creditoIds), eq(cuotas_credito.pagado, false)))
+    .orderBy(cuotas_credito.fecha_vencimiento, cuotas_credito.cuota_id);
+
+  const vencidas = filas.filter((c) => isOverdueInstallmentForMora(c, hoy));
+  if (vencidas.length === 0) return resultado;
+
+  const pagadoPorCuota = await moraPagadaPorCuota(
+    vencidas.map((c) => c.cuota_id),
+    ejecutor as any,
+  );
+
+  for (const c of vencidas) {
+    const credito = c.credito_id as number;
+    if (!resultado.has(credito)) {
+      resultado.set(credito, { capital: String(c.capital ?? "0"), cuotas: [] });
+    }
+    resultado.get(credito)!.cuotas.push({
+      cuota_id: c.cuota_id,
+      diasAtraso: diasAtrasoMora(c.fecha_vencimiento, hoy),
+      pagado: pagadoPorCuota.get(c.cuota_id) ?? 0,
+    });
+  }
+  return resultado;
+}
+
+/**
+ * Genera las anotaciones de condonación para un crédito.
+ *
+ * Calcula qué parte de la mora condonada corresponde a cada cuota,
+ * respetando el pendiente (devengado − pagado) por cuota. El sobrante
+ * se descarta (no tiene cuota donde anotarse).
+ */
+export function anotacionesDeCondonacion(params: {
+  credito_id: number;
+  monto: Big | string | number;
   capital: Big | string | number;
-  diasAtrasadosPorCuota: number[];
-}): Big {
-  const capital = new Big(params.capital || 0);
-  if (capital.lte(0) || params.diasAtrasadosPorCuota.length === 0) return new Big(0);
-
-  const cargoMensual = capital.times(TASA_MORA_MENSUAL);
-
-  return params.diasAtrasadosPorCuota.reduce((acc, diasRaw) => {
-    const dias = Math.max(0, diasRaw);
-    // big.js no tiene Big.min, así que el techo se hace con una comparación.
-    const factor = dias >= BASE_DIAS_MORA ? new Big(1) : new Big(dias).div(BASE_DIAS_MORA);
-    return acc.plus(cargoMensual.times(factor));
-  }, new Big(0));
+  cuotas: CuotaParaPendiente[];
+  usuario_id: number;
+  motivo: string;
+}): AnotacionMoraPagada[] {
+  // La misma regla de reparto que el pago normal (`anotarMoraPagoNormal`).
+  return anotacionesDeMoraAbonada({ ...params, tipo: "CONDONACION" });
 }
 
 /**
@@ -419,21 +513,35 @@ function crecimientoDeLaMoraEn(
  */
 export function decidirMoraTrasRomperConvenio(params: {
   capital: Big | string | number | null;
-  factorDias: Big | string | number;
-  numCuotasAtrasadas: number;
+  cuotasParaPendiente: CuotaParaPendiente[];
 }): { accion: "CREAR_MORA"; montoMora: number } | { accion: "ACTIVAR"; motivo: string } {
   const capital = new Big(params.capital || 0);
-  const factor = new Big(params.factorDias || 0);
-  const montoMora = capital.lte(0) ? new Big(0) : capital.times(TASA_MORA_MENSUAL).times(factor);
-  const montoRedondeado = Number(montoMora.toFixed(2));
 
-  if (params.numCuotasAtrasadas <= 0) {
+  if (params.cuotasParaPendiente.length <= 0) {
     return { accion: "ACTIVAR", motivo: "sin cuotas atrasadas" };
   }
+
+  if (capital.lte(0)) {
+    return { accion: "ACTIVAR", motivo: "Crédito sin capital — no aplica mora" };
+  }
+
+  const resultado = moraPendientePorCuota({
+    capital,
+    cuotas: params.cuotasParaPendiente,
+  });
+
+  const montoRedondeado = Number(resultado.total.toFixed(2));
+
   if (!(montoRedondeado > 0)) {
+    // El factor sale de lo que `moraPendientePorCuota` ya calculó: sin una
+    // segunda pasada por la fórmula.
+    const devengado = resultado.porCuota.reduce((a, c) => a.plus(c.devengado), new Big(0));
+    const cargoMensual = capital.times(TASA_MORA_MENSUAL);
+    const factorDias = cargoMensual.gt(0) ? devengado.div(cargoMensual) : new Big(0);
+
     return {
       accion: "ACTIVAR",
-      motivo: `mora proporcional de ${params.numCuotasAtrasadas} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factor.toFixed(4)})`,
+      motivo: `mora proporcional de ${params.cuotasParaPendiente.length} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factorDias.toFixed(4)})`,
     };
   }
   return { accion: "CREAR_MORA", montoMora: montoRedondeado };
@@ -463,7 +571,7 @@ export const MOTIVO_MORA_MENOR_A_UN_CENTAVO = "Mora proporcional menor a un cent
  */
 export function decidirMoraDelCron(params: {
   capital: Big | string | number | null;
-  diasAtrasadosPorCuota: number[];
+  cuotasParaPendiente: CuotaParaPendiente[];
 }): { accion: "APLICAR"; montoStr: string } | { accion: "DESACTIVAR"; motivo: string } {
   let capital: Big;
   try {
@@ -476,13 +584,29 @@ export function decidirMoraDelCron(params: {
     return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_SIN_CAPITAL };
   }
 
-  const montoStr = calcularMoraProporcional({
+  // Calcular pendiente (devengado - pagado) en una sola llamada
+  const pendienteResultado = moraPendientePorCuota({
     capital,
-    diasAtrasadosPorCuota: params.diasAtrasadosPorCuota,
-  }).toFixed(2);
+    cuotas: params.cuotasParaPendiente,
+  });
 
-  if (!(Number(montoStr) > 0)) {
+  // Calcular el devengado total sumando el devengado por cuota
+  const devengadoStr = pendienteResultado.porCuota
+    .reduce((acc, c) => acc.plus(c.devengado), new Big(0))
+    .toFixed(2);
+
+  // Si el devengado redondea a Q0.00, no hay mora que cobrar (caso viejo, comportamiento intacto)
+  if (!(Number(devengadoStr) > 0)) {
     return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_MENOR_A_UN_CENTAVO };
+  }
+
+  const montoStr = pendienteResultado.total.toFixed(2);
+
+  // Si el devengado > 0 pero el pendiente ≤ 0, el crédito ya tuvo mora que se pagó completamente,
+  // pero sigue con cuotas vencidas: se mantiene MOROSO con monto 0 y vuelve a subir cuando
+  // la cuota que no topó devengue más mora
+  if (!(Number(montoStr) > 0)) {
+    return { accion: "APLICAR", montoStr: "0.00" };
   }
 
   return { accion: "APLICAR", montoStr };
@@ -552,6 +676,9 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
+  // Qué pago causó este movimiento de mora. Opcional: habrá movimientos que no
+  // vienen de ningún pago (recálculo automático, condonación, ajuste manual).
+  pago_id?: number | null;
   dbClient?: typeof db;
   // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
   // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
@@ -580,6 +707,7 @@ async function registrarHistorialMora(params: {
           : null,
       usuario_id: params.usuario_id ?? null,
       motivo: params.motivo ?? null,
+      pago_id: params.pago_id ?? null,
       // 🕐 La hora REAL de esta escritura, no la del BEGIN.
       //
       // La columna tiene `DEFAULT now()`, y en Postgres `now()` es
@@ -673,7 +801,8 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  *
  * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
  * valida; si esa ventana cruza la corrida nocturna de procesarMoras, el cron
- * crea una mora (correcta bajo la regla "solo cuenta lo validado") que nadie
+ * crea una mora (correcta bajo la regla de cobertura; un pending solo cubre
+ * hasta 7 días, ver `hasPaidPaymentSql`) que nadie
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
@@ -685,7 +814,7 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  */
 export async function desactivarMoraSiCreditoAlDia(
   credito_id: number,
-  opts: { motivo?: string; dbClient?: typeof db } = {},
+  opts: { motivo?: string; pago_id?: number; dbClient?: typeof db } = {},
 ): Promise<{ desactivada: boolean; error?: string }> {
   const startedAt = safeNow();
   const dbi = opts.dbClient ?? db;
@@ -723,7 +852,7 @@ export async function desactivarMoraSiCreditoAlDia(
     const hoy = hoyGuatemala();
 
     // Mismo universo y criterio que procesarMoras, acotado a este crédito.
-    // El EXISTS replica el del cron, incluido COALESCE(monto_aplicado,0)>0:
+    // El EXISTS es el MISMO helper del cron, incluido COALESCE(monto_aplicado,0)>0:
     // los pagos especiales (solo mora/otros/convenio) se cuelgan de la cuota
     // con pagado=true y monto_aplicado=0 sin cubrirla de verdad.
     const cuotas = await dbi
@@ -731,15 +860,7 @@ export async function desactivarMoraSiCreditoAlDia(
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
-        hasPaidPayment: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
-            AND pc."paymentFalse" = false
-            AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0
-        )`,
+        hasPaidPayment: hasPaidPaymentSql(),
       })
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
@@ -822,6 +943,9 @@ export async function desactivarMoraSiCreditoAlDia(
         motivo: decision.sinCapital && cuotasVencidas > 0
           ? "Crédito sin capital — no aplica mora"
           : (opts.motivo ?? "Crédito se puso al día al validar pago"),
+        // Qué pago causó esta desactivación (si aplica). Si no viene, el
+        // evento se registra sin trazabilidad al pago.
+        pago_id: opts.pago_id ?? null,
         dbClient: txm as unknown as typeof db,
         propagarError: true,
       });
@@ -863,6 +987,7 @@ export async function createMora({
   usuario_id,
   usuario_email,
   override = false,
+  dbClient,
 }: {
   credito_id: number;
   monto_mora?: number;
@@ -872,7 +997,15 @@ export async function createMora({
   usuario_id?: number;
   usuario_email?: string;
   override?: boolean;
+  /**
+   * La transacción del llamador, si la hay. Con ella, TODAS las escrituras de
+   * esta función van por esa transacción: el llamador ve sus propios cambios
+   * sin commitear (p. ej. el crédito ya puesto en MOROSO al romper un convenio)
+   * y no hay dos conexiones peleando por el candado de la misma fila.
+   */
+  dbClient?: typeof db;
 }) {
+  const ejecutor = dbClient ?? db;
   const startedAt = safeNow();
   const requestId = `${credito_id}-${Date.now()}`;
 
@@ -900,7 +1033,7 @@ export async function createMora({
     }
 
     // Traer el crédito una sola vez: capital (para validar + fotografiar) y status (para no des-castigar).
-    const [credito] = await db
+    const [credito] = await ejecutor
       .select({ capital: creditos.capital, statusCredit: creditos.statusCredit })
       .from(creditos)
       .where(eq(creditos.credito_id, credito_id));
@@ -920,18 +1053,18 @@ export async function createMora({
     // no es un bloque por cuota sino proporcional a los días de atraso (con techo
     // de un cargo mensual). Va en el MISMO query para no pagar un segundo viaje ni
     // arriesgar que los dos vean fotos distintas de las cuotas.
-    const ovRes = await db.execute<any>(sql`
+    // El «ya pagada» es el MISMO helper del cron (con el pago pendiente de
+    // hasta 7 días): una copia a mano que se quedara atrás contaría una cuota
+    // que el cron no cobra y rechazaría con overdue_count_mismatch. Sin alias
+    // en la tabla: el helper la nombra completa ("cartera"."cuotas_credito").
+    const ovRes = await ejecutor.execute<any>(sql`
       SELECT COUNT(*)::int AS n,
-             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
-      FROM cartera.cuotas_credito cu
-      WHERE cu.credito_id = ${credito_id}
-        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-        AND cu.pagado = false
-        AND NOT EXISTS (
-          SELECT 1 FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
+             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cartera.cuotas_credito.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
+      FROM cartera.cuotas_credito
+      WHERE cartera.cuotas_credito.credito_id = ${credito_id}
+        AND cartera.cuotas_credito.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+        AND cartera.cuotas_credito.pagado = false
+        AND NOT ${hasPaidPaymentSql()}`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
     const factorDias = new Big(ovRes.rows?.[0]?.factor ?? 0);
 
@@ -990,7 +1123,7 @@ export async function createMora({
     // se resuelve por email. Best-effort: la atribución no debe bloquear la operación.
     let usuarioId: number | undefined = usuario_id ?? undefined;
     if (!usuarioId && usuario_email) {
-      const [u] = await db
+      const [u] = await ejecutor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -1000,7 +1133,7 @@ export async function createMora({
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
 
 
-    const [moraExistente] = await db
+    const [moraExistente] = await ejecutor
       .select({
         mora_id: moras_credito.mora_id,
         monto_mora: moras_credito.monto_mora,
@@ -1027,7 +1160,7 @@ export async function createMora({
       cuotas_anteriores = moraExistente.cuotas_atrasadas;
       tipo_evento = "RECALCULO";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .update(moras_credito)
         .set({
           monto_mora: monto_mora.toString(),
@@ -1044,7 +1177,7 @@ export async function createMora({
 
       tipo_evento = "CREACION";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .insert(moras_credito)
         .values({
           credito_id,
@@ -1061,14 +1194,14 @@ export async function createMora({
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
     //
-    // 🔒 Esta función NO es transaccional: cada statement autocommitea y suelta
-    // su candado antes del siguiente, así que no puede sostener el ciclo que
-    // previene la regla de orden del inicio del archivo (por eso el status
-    // puede quedar después del write de la mora). Si alguien la envuelve en una
-    // transacción, el UPDATE de `creditos` tiene que pasar ARRIBA del write de
-    // `moras_credito`.
+    // 🔒 Sin `dbClient`, cada statement autocommitea y suelta su candado antes
+    // del siguiente: no hay ciclo posible aunque el status quede después del
+    // write de la mora. CON `dbClient` corre dentro de la transacción de quien
+    // llama, que TIENE que haber bloqueado `creditos` antes (la ruptura de
+    // convenio lo hace como primera sentencia); si no, este UPDATE escalaría el
+    // candado después de tocar `moras_credito` y podría trabarse (40P01).
 
-    await db
+    await ejecutor
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
@@ -1087,6 +1220,20 @@ export async function createMora({
       porcentaje_mora: newMora.porcentaje_mora,
       usuario_id: usuarioId,
       motivo,
+      dbClient: ejecutor,
+      // Propagar el error SOLO si corre dentro de la transacción del llamador.
+      //
+      // Adentro de una transacción, tragarse el error MIENTE: un statement
+      // fallido aborta la transacción entera y el COMMIT posterior devuelve
+      // ROLLBACK sin levantar excepción, así que la función reportaría éxito con
+      // nada escrito. Ahí hay que propagar, para que el llamador revierta todo.
+      //
+      // Suelta —llamada desde la API, sin transacción— es OTRA cosa: la mora y
+      // el MOROSO ya están commiteados cuando se intenta la bitácora. Propagar
+      // ahí devolvería `success: false` sobre una mora que SÍ existe, y los
+      // llamadores la tratarían como si no, dejando el estado inconsistente. Por
+      // eso sin transacción se conserva el comportamiento de siempre.
+      propagarError: dbClient != null,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "create", durationMs: elapsedMilliseconds(startedAt) });
@@ -1136,6 +1283,7 @@ export async function updateMora({
   activa,
   usuario_email,
   motivo,
+  pago_id,
   dbClient,
 }: {
   credito_id?: number;
@@ -1151,6 +1299,11 @@ export async function updateMora({
    * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
    */
   motivo?: string;
+  /**
+   * El pago que causó este ajuste de mora (para restituciones). Opcional: habrá
+   * ajustes que no vienen de ningún pago (recálculo automático, condonación, etc.).
+   */
+  pago_id?: number | string | null;
   /**
    * Transacción del CALLER. Sin esto, `updateMora` abre la suya y commitea
    * sola: el ajuste de mora quedaba firme aunque el caller fallara un paso
@@ -1360,6 +1513,7 @@ export async function updateMora({
         porcentaje_mora: updated.porcentaje_mora,
         usuario_id: usuarioId,
         motivo,
+        pago_id: pago_id !== null && pago_id !== undefined ? Number(pago_id) : null,
         dbClient: tx,
         propagarError: true,
       });
@@ -1710,15 +1864,8 @@ export async function procesarMoras() {
         // ese `pagado` significa "fila completa", NO "cuota cubierta" — sin
         // este AND, pagar SOLO la mora sacaba la cuota del conteo al validar
         // (cuotas_atrasadas 2→1 → mora recalculada de menos y etapa incorrecta).
-        hasPaidPayment: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
-            AND pc."paymentFalse" = false
-            AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0
-        )`,
+        // La subconsulta está centralizada en utils/cuotaYaPagadaSql.
+        hasPaidPayment: hasPaidPaymentSql(),
       })
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id));
@@ -1736,18 +1883,24 @@ export async function procesarMoras() {
     const capitalPorCredito = new Map<number, string>();
     // Los días de atraso van POR CUOTA: la mora ya no es un bloque fijo por cuota
     // sino proporcional al tiempo real de atraso de cada una (con techo mensual).
-    const diasPorCredito = new Map<number, number[]>();
+    // Una entrada por cuota vencida, con su cuota y sus días juntos: lo pagado
+    // se completa después, con una sola consulta para todas.
+    const cuotasPorCredito = new Map<number, { cuota_id: number; diasAtraso: number }[]>();
     for (const cuota of cuotasVencidas) {
       moraPorCredito[cuota.credito_id] = (moraPorCredito[cuota.credito_id] ?? 0) + 1;
       capitalPorCredito.set(cuota.credito_id, cuota.capital);
-      const dias = diasPorCredito.get(cuota.credito_id) ?? [];
-      dias.push(diasAtrasoMora(cuota.fecha_vencimiento, hoy));
-      diasPorCredito.set(cuota.credito_id, dias);
+      const lista = cuotasPorCredito.get(cuota.credito_id) ?? [];
+      lista.push({ cuota_id: cuota.cuota_id, diasAtraso: diasAtrasoMora(cuota.fecha_vencimiento, hoy) });
+      cuotasPorCredito.set(cuota.credito_id, lista);
     }
 
 
 
-    // 4. Cargar moras activas existentes para comparar (UPSERT real)
+    // 4. Cargar mora pagada POR CUOTA (una sola consulta para todas)
+    const todasLasCuotaIds = Array.from(cuotasPorCredito.values()).flat().map((c) => c.cuota_id);
+    const moraPagadaPorCuotaMap = await moraPagadaPorCuota(todasLasCuotaIds, db);
+
+    // 4b. Cargar moras activas existentes para comparar (UPSERT real)
     const morasActivas = await db
       .select({
         mora_id: moras_credito.mora_id,
@@ -1790,9 +1943,14 @@ export async function procesarMoras() {
       // base) y mora proporcional que redondea a Q0.00 (capital chico + pocos
       // días). Ambos terminan igual: no se crea mora, se apaga la que hubiera y
       // el crédito NO se marca MOROSO.
+      const cuotasParaPendiente: CuotaParaPendiente[] = (cuotasPorCredito.get(creditoId) ?? []).map((c) => ({
+        ...c,
+        pagado: moraPagadaPorCuotaMap.get(c.cuota_id) ?? 0,
+      }));
+
       const decision = decidirMoraDelCron({
         capital: capitalStr,
-        diasAtrasadosPorCuota: diasPorCredito.get(creditoId) ?? [],
+        cuotasParaPendiente,
       });
 
       if (decision.accion === "DESACTIVAR") {
@@ -1969,9 +2127,11 @@ export async function procesarMoras() {
         // monto recalculado — deshaciendo el perdón del convenio y anotando un
         // RECALCULO después del DESACTIVACION. (Antes esto no se veía porque el
         // convenio BORRABA la fila y el update no encontraba nada que pisar.)
-        // Cero filas = otra ruta ya la apagó: no se toca el status, no se
-        // escribe historial y el crédito cae en los omitidos — no se cuenta un
-        // recálculo que no ocurrió.
+        // Lo mismo si le cambió el monto (un pago o una condonación a media
+        // corrida): el update también exige el monto leído al arrancar.
+        // Cero filas = otra ruta ya la apagó o la cambió: no se toca el status,
+        // no se escribe historial y el crédito cae en los omitidos — no se
+        // cuenta un recálculo que no ocurrió.
         //
         // 🧾 Los tres writes van JUNTOS en una transacción, por lo mismo que la
         // rama CREACION de acá arriba: sueltos y autocommiteados, un fallo en
@@ -2035,13 +2195,24 @@ export async function procesarMoras() {
               and(
                 eq(moras_credito.mora_id, moraActual.mora_id),
                 eq(moras_credito.activa, true),
+                // 🔒 Y con el MISMO monto que se leyó al arrancar: el monto nuevo
+                // sale del ledger y de esta foto, ambos leídos una sola vez al
+                // principio de la corrida. Un pago o una condonación que
+                // commiteó en el medio ya bajó la mora (y anotó en el ledger que
+                // este cálculo no vio); sin esta condición el cron la pisaba con
+                // el monto viejo y le volvía a cobrar lo pagado hasta la noche
+                // siguiente.
+                eq(moras_credito.monto_mora, moraActual.monto_mora),
               ),
             )
             .returning({ mora_id: moras_credito.mora_id });
 
-          // 🔒 Cero filas = otra ruta ya apagó la mora. Se ABORTA (no `return`):
-          // el UPDATE de `creditos` de arriba ya corrió y commitearlo dejaría
-          // MOROSO a un crédito al que el convenio le acaba de perdonar la mora.
+          // 🔒 Cero filas = otra ruta ya apagó la mora o le cambió el monto
+          // durante la corrida. Se ABORTA (no `return`): el UPDATE de
+          // `creditos` de arriba ya corrió y commitearlo dejaría MOROSO a un
+          // crédito al que el convenio le acaba de perdonar la mora. Si solo
+          // cambió el monto, la corrida de mañana lo recalcula con el ledger al
+          // día; hoy queda lo que escribió esa otra ruta.
           if (recalculadasFilas.length === 0) throw new MoraYaApagada();
 
           await registrarHistorialMora({
@@ -2199,12 +2370,16 @@ export async function condonarMora({
       // así que el candado se toma con un `SELECT … FOR UPDATE`. Con el orden
       // viejo (mora FOR UPDATE y después el UPDATE del crédito) esta ruta y la
       // del convenio se pedían los candados en cruz: ciclo de deadlock.
-      await tx
-        .select({ credito_id: creditos.credito_id })
+      const [creditoLocked] = await tx
+        .select({ credito_id: creditos.credito_id, capital: creditos.capital })
         .from(creditos)
         .where(eq(creditos.credito_id, credito_id))
         .limit(1)
         .for("update");
+
+      if (!creditoLocked) {
+        return { kind: "not_found" as const };
+      }
 
       const [moraActual] = await tx
         .select({
@@ -2227,7 +2402,12 @@ export async function condonarMora({
 
       const monto = moraActual.monto ?? "0";
 
-
+      // Una mora activa en Q0 es la que el cron deja a propósito cuando todo lo
+      // devengado ya se abonó pero quedan cuotas vencidas. No hay nada que
+      // condonar, y desactivarla pasaría a ACTIVO un crédito con atraso.
+      if (new Big(monto).lte(0)) {
+        return { kind: "mora_en_cero" as const };
+      }
 
       // Re-check activa=true en el UPDATE como defensa extra: si dos tx
       // pasaran el SELECT FOR UPDATE en algún edge case raro, solo la primera
@@ -2261,6 +2441,50 @@ export async function condonarMora({
         })
         .returning();
 
+      // Anotar la condonación como si fuera un pago, para que el pendiente
+      // baje igual y no vuelva a cobrarse mañana.
+      //
+      // Usar cuotasParaPendienteDeCreditos para obtener las cuotas con el criterio
+      // EXACTO del cron: incluye hasPaidPayment, ordena de vieja a nueva.
+      const hoy = hoyGuatemala();
+      const cuotasPorCredito = await cuotasParaPendienteDeCreditos([credito_id], tx as unknown as typeof db, hoy);
+      const creditoData = cuotasPorCredito.get(credito_id);
+      const cuotasParaPendiente = creditoData?.cuotas ?? [];
+
+      const anotaciones = anotacionesDeCondonacion({
+        credito_id,
+        monto,
+        capital: creditoLocked.capital ?? 0,
+        cuotas: cuotasParaPendiente,
+        usuario_id: user.id,
+        motivo,
+      });
+      if (anotaciones.length > 0) {
+        await anotarMoraPagada(anotaciones, tx as unknown as typeof db);
+      }
+
+      // 🔒 El historial se registra ADENTRO de la transacción para que si el
+      // INSERT falla, la condonación (el write de arriba) sea abortada y no quede
+      // mora condonada sin rastro auditable. Adentro de una tx un INSERT fallido
+      // deja la tx abortada: el COMMIT se vuelve silencioso ROLLBACK, así que sin
+      // propagarError aquí el caller creyera que la condonación fue éxito cuando en
+      // realidad no quedó escrita. Por eso se exige propagarError: true y se deja
+      // que la excepción revierte toda la tx.
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: moraActual.id,
+        tipo_evento: "CONDONACION",
+        origen: "CONDONACION_INDIVIDUAL",
+        monto_anterior: monto,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas ?? 0,
+        cuotas_atrasadas_nuevas: updatedMora?.cuotas_atrasadas ?? moraActual.cuotas_atrasadas ?? 0,
+        usuario_id: user.id,
+        motivo,
+        dbClient: tx as unknown as typeof db,
+        propagarError: true,
+      });
+
       return {
         kind: "ok" as const,
         moraId: moraActual.id,
@@ -2271,25 +2495,18 @@ export async function condonarMora({
       };
     });
 
-    if (result.kind === "not_found") {
+    if (result.kind === "not_found" || result.kind === "mora_en_cero") {
+      // Mismo código de telemetría (el catálogo es compartido); el mensaje para
+      // el asesor sí distingue la mora activa en Q0.
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
-      return { success: false, message: "[ERROR] No hay mora activa para este crédito" };
+      return {
+        success: false,
+        message:
+          result.kind === "mora_en_cero"
+            ? "[INFO] La mora activa ya está en Q0.00: el cliente abonó todo lo devengado y sigue con cuotas vencidas. No hay nada que condonar."
+            : "[ERROR] No hay mora activa para este crédito",
+      };
     }
-
-    await registrarHistorialMora({
-      credito_id,
-      mora_id: result.moraId,
-      tipo_evento: "CONDONACION",
-      origen: "CONDONACION_INDIVIDUAL",
-      monto_anterior: result.monto,
-      monto_nuevo: "0",
-      // Condonar pone el MONTO en 0; las cuotas atrasadas de la fila no se
-      // tocan. Registrar el valor real evita el "N → 0" falso en el historial.
-      cuotas_atrasadas_anterior: result.cuotas ?? 0,
-      cuotas_atrasadas_nuevas: result.updatedMora?.cuotas_atrasadas ?? result.cuotas ?? 0,
-      usuario_id: user.id,
-      motivo,
-    });
 
     emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
     return {
@@ -2786,24 +3003,13 @@ export async function condonarTodasLasMoras({
       return { success: false, message: "[ERROR] Usuario no encontrado" };
     }
 
-    // 2. Obtener todos los créditos MOROSOS con sus moras activas
+    // 2. Obtener todos los créditos MOROSOS (sin moras aún)
     const creditosMorosos = await db
       .select({
         credito_id: creditos.credito_id,
-        mora_id: moras_credito.mora_id,
-        monto_mora: moras_credito.monto_mora,
-        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
       })
       .from(creditos)
-      .leftJoin(
-        moras_credito,
-        and(
-          eq(creditos.credito_id, moras_credito.credito_id),
-          eq(moras_credito.activa, true)
-        )
-      )
       .where(eq(creditos.statusCredit, "MOROSO"));
-
 
     if (creditosMorosos.length === 0) {
       emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: 0, succeededCount: 0, failedCount: 0, skippedCount: 0 });
@@ -2814,14 +3020,167 @@ export async function condonarTodasLasMoras({
       };
     }
 
-    // El leftJoin trae también los créditos MOROSO SIN mora activa (mora_id
-    // null): esos no se actualizan, no generan condonación y no deben contarse.
-    // Contarlos inflaba el "Se condonaron N moras" y el `condonados`.
-    const conMoraActiva = creditosMorosos.filter(
-      (c): c is typeof c & { mora_id: number } => c.mora_id !== null
-    );
+    // Todo debe ir en una transacción porque una mora puesta en cero sin su anotación vuelve entera con el cron de la noche.
+    const condonaciones = await db.transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Sin esto, una condonación masiva que toma
+      // moras_credito primero puede trabarse contra una condonación individual que
+      // toma creditos primero: deadlock 40P01 que aborta la transacción.
+      // Solo se bloquean los créditos que se van a tocar (mora activa > 0): el
+      // resto de los MOROSO sigue libre para pagos y reversas durante la masiva.
+      const creditoIds = creditosMorosos.map((c) => c.credito_id);
+      // La mora activa va en un EXISTS y no en un JOIN: con JOIN hay que decir
+      // `FOR UPDATE OF creditos`, y drizzle lo escribe calificado
+      // (`of "cartera"."creditos"`), que Postgres rechaza siempre ("must specify
+      // unqualified relation names"). Sin JOIN, el FOR UPDATE simple solo toma
+      // `creditos`; `moras_credito` se bloquea abajo, en su orden.
+      const bloqueados = await tx
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        // El estado se vuelve a mirar CON el candado: un crédito que pasó a
+        // CANCELADO entre la lectura inicial y acá conserva la mora activa,
+        // pero el ledger no le anotaría la condonación (sus cuotas ya no son
+        // elegibles) y, si se reactivara, el cron la volvería a cobrar.
+        .where(
+          and(
+            inArray(creditos.credito_id, creditoIds),
+            eq(creditos.statusCredit, "MOROSO"),
+            exists(
+              tx
+                .select({ uno: sql`1` })
+                .from(moras_credito)
+                .where(
+                  and(
+                    eq(moras_credito.credito_id, creditos.credito_id),
+                    eq(moras_credito.activa, true),
+                    gt(moras_credito.monto_mora, "0"),
+                  ),
+                ),
+            ),
+          ),
+        )
+        .orderBy(creditos.credito_id)
+        .for("update");
+      const idsBloqueados = bloqueados.map((b) => b.credito_id);
 
-    if (conMoraActiva.length === 0) {
+      // Re-leer las moras ACTIVAS de estos créditos DESPUÉS de adquirir el candado.
+      // Esto evita usar datos viejos si entre la lectura inicial y el lock hubo
+      // un pago que bajó la mora o un convenio que la apagó.
+      const vigentes = await tx
+        .select({
+          credito_id: moras_credito.credito_id,
+          mora_id: moras_credito.mora_id,
+          monto_mora: moras_credito.monto_mora,
+          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        })
+        .from(moras_credito)
+        // `monto > 0`: una mora activa en Q0 (todo ya abonado, cuotas aún
+        // vencidas) no se pone en cero, no se anota ni se cuenta como condonada.
+        // Solo créditos bloqueados arriba: uno que ganó mora después del candado
+        // se queda para la próxima masiva.
+        .where(and(inArray(moras_credito.credito_id, idsBloqueados.length ? idsBloqueados : [-1]), eq(moras_credito.activa, true), gt(moras_credito.monto_mora, "0")))
+        // FOR UPDATE: un `/mora` manual no toma el candado del crédito; sin
+        // bloquear la fila, podría cambiar el monto entre esta lectura y el
+        // UPDATE, y el ledger anotaría como condonado un monto viejo. Va
+        // después del candado de `creditos` (mismo orden que el resto).
+        .for("update");
+
+      // Si entre el SELECT inicial y el lock no hay moras activas, devuelve vacío.
+      if (vigentes.length === 0) {
+        return [];
+      }
+
+      const conMoraActiva = vigentes;
+
+      // 3. Actualizar todas las moras activas a 0 (mantener activas y estado MOROSO)
+      const moraIds = conMoraActiva.map((c) => c.mora_id);
+      await tx
+        .update(moras_credito)
+        .set({
+          monto_mora: "0",
+          updated_at: new Date(),
+        })
+        .where(and(inArray(moras_credito.mora_id, moraIds), eq(moras_credito.activa, true)));
+
+      // 3.5. Cargar cuotas de TODOS los créditos en UNA sola llamada
+      const hoy = hoyGuatemala();
+      // Solo los créditos con mora vigente: los demás no se anotan y cargarlos
+      // solo alarga el tiempo que la masiva tiene bloqueados los créditos.
+      const cuotasPorCredito = await cuotasParaPendienteDeCreditos(
+        vigentes.map((v) => v.credito_id),
+        tx as unknown as typeof db,
+        hoy,
+      );
+
+      // 3.6. Preparar anotaciones: repartir la mora condonada de cada crédito
+      const anotacionesParaLedger: Parameters<typeof anotarMoraPagada>[0] = [];
+      for (const c of conMoraActiva) {
+        const creditoData = cuotasPorCredito.get(c.credito_id);
+        if (!creditoData) continue;
+
+        const anotaciones = anotacionesDeCondonacion({
+          credito_id: c.credito_id,
+          monto: c.monto_mora ?? "0",
+          capital: creditoData.capital,
+          cuotas: creditoData.cuotas,
+          usuario_id: user.id,
+          motivo,
+        });
+
+        anotacionesParaLedger.push(...anotaciones);
+      }
+
+      // 3.7. Anotar todas las líneas en UNA sola llamada
+      if (anotacionesParaLedger.length > 0) {
+        await anotarMoraPagada(anotacionesParaLedger, tx as unknown as typeof db);
+      }
+
+      // 5. Insertar registros masivos en moras_condonaciones
+      const condonacionesData = conMoraActiva.map((credito) => ({
+        credito_id: credito.credito_id,
+        mora_id: credito.mora_id,
+        motivo,
+        usuario_id: user.id,
+        montoCondonacion: credito.monto_mora ?? "0",
+      }));
+
+      const condonacionesResult = await tx
+        .insert(moras_condonaciones)
+        .values(condonacionesData)
+        .returning();
+
+      // Registrar histórico para cada condonación masiva
+      await Promise.all(
+        conMoraActiva.map((c) =>
+          registrarHistorialMora({
+            credito_id: c.credito_id,
+            mora_id: c.mora_id,
+            tipo_evento: "CONDONACION",
+            origen: "CONDONACION_MASIVA",
+            monto_anterior: c.monto_mora ?? "0",
+            monto_nuevo: "0",
+            // La condonación masiva NO toca cuotas_atrasadas de la fila: se
+            // registra el valor real (antes y después) en vez de un "→ 0" falso.
+            cuotas_atrasadas_anterior: c.cuotas_atrasadas ?? 0,
+            cuotas_atrasadas_nuevas: c.cuotas_atrasadas ?? 0,
+            usuario_id: user.id,
+            motivo,
+            // Si un historial falla, la condonación masiva no debe reportar éxito
+            // cuando en realidad quedaron moras sin rastro auditable. Acá se
+            // propaga el error para que la tx sea abortada y se reviertan todos
+            // los cambios: mora, anotaciones, condonaciones.
+            dbClient: tx as unknown as typeof db,
+            propagarError: true,
+          })
+        )
+      );
+
+      return condonacionesResult;
+    });
+
+    // Si la transacción devolvió vacío, significa que vigentes estaba vacío
+    // (no había moras activas al momento del lock).
+    if (condonaciones.length === 0 && creditosMorosos.length > 0) {
       emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: creditosMorosos.length, succeededCount: 0, failedCount: 0, skippedCount: creditosMorosos.length });
       return {
         success: true,
@@ -2832,66 +3191,20 @@ export async function condonarTodasLasMoras({
       };
     }
 
-    // 3. Actualizar todas las moras a 0 (mantener activas y estado MOROSO)
-    const moraIds = conMoraActiva.map((c) => c.mora_id);
-    await db
-      .update(moras_credito)
-      .set({
-        monto_mora: "0",
-        updated_at: new Date(),
-      })
-      .where(inArray(moras_credito.mora_id, moraIds));
-
-
-
-    // 5. Insertar registros masivos en moras_condonaciones
-    const condonacionesData = conMoraActiva.map((credito) => ({
-      credito_id: credito.credito_id,
-      mora_id: credito.mora_id,
-      motivo,
-      usuario_id: user.id,
-      montoCondonacion: credito.monto_mora ?? "0",
-    }));
-
-    const condonaciones = await db
-      .insert(moras_condonaciones)
-      .values(condonacionesData)
-      .returning();
-
-    // Registrar histórico para cada condonación masiva
-    await Promise.all(
-      conMoraActiva.map((c) =>
-        registrarHistorialMora({
-          credito_id: c.credito_id,
-          mora_id: c.mora_id,
-          tipo_evento: "CONDONACION",
-          origen: "CONDONACION_MASIVA",
-          monto_anterior: c.monto_mora ?? "0",
-          monto_nuevo: "0",
-          // La condonación masiva NO toca cuotas_atrasadas de la fila: se
-          // registra el valor real (antes y después) en vez de un "→ 0" falso.
-          cuotas_atrasadas_anterior: c.cuotas_atrasadas ?? 0,
-          cuotas_atrasadas_nuevas: c.cuotas_atrasadas ?? 0,
-          usuario_id: user.id,
-          motivo,
-        })
-      )
-    );
-
     emitCreditLateFee({
       outcome: "completed",
       operation: "bulk_condone",
       durationMs: elapsedMilliseconds(startedAt),
       processedCount: creditosMorosos.length,
-      succeededCount: condonacionesData.length,
+      succeededCount: condonaciones.length,
       failedCount: 0,
-      skippedCount: creditosMorosos.length - condonacionesData.length,
+      skippedCount: creditosMorosos.length - condonaciones.length,
     });
     return {
       success: true,
-      message: `[SUCCESS] Se condonaron ${condonacionesData.length} moras`,
-      condonados: condonacionesData.length,
-      creditos_afectados: condonacionesData.length,
+      message: `[SUCCESS] Se condonaron ${condonaciones.length} moras`,
+      condonados: condonaciones.length,
+      creditos_afectados: condonaciones.length,
       condonaciones,
     };
   } catch (error) {

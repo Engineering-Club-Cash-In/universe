@@ -329,8 +329,10 @@ async function handleRevalidatePayment(
     // al día, apagar la mora nacida durante la ventana de validación. Va
     // FUERA de la transacción: el helper lee con otra conexión y necesita
     // ver la cuota ya commiteada como pagada.
+    // Se liga el evento de desactivación al pago que la causó.
     await desactivarMoraSiCreditoAlDia(credito_id, {
       motivo: "Crédito se puso al día al revalidar pago",
+      pago_id,
     });
 
     logger.emit("payment.revalidation", "completed", {

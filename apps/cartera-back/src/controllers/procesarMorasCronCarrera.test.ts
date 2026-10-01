@@ -123,6 +123,10 @@ mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
 mock.module("../utils/structuredLogger", () => ({
   emitCreditLateFee: (p: any) => estado.emitidos.push(p),
 }));
+// ledger vacío = créditos existentes arrancan de cero
+mock.module("../utils/moraPagadaPorCuota", () => ({
+  moraPagadaPorCuota: async () => new Map(),
+}));
 
 const { procesarMoras, hoyGuatemala } = await import("./latefee");
 const { creditos, moras_credito, moras_historial } = await import("../database/db/schema");
@@ -196,6 +200,45 @@ describe("procesarMoras — carrera al desactivar la mora", () => {
     // cron "gane" también y anote un DESACTIVACION por el mismo monto.
     expect(mencionaColumna(upd.where, moras_credito.activa)).toBe(true);
     expect(mencionaColumna(upd.where, moras_credito.mora_id)).toBe(true);
+  });
+
+  // ── RECALCULO: un pago o una condonación commiteó a media corrida ───────
+  // El monto nuevo sale del ledger y de la foto de moras leídos AL ARRANCAR. Si
+  // el UPDATE solo mirara mora_id/activa, pisaría la mora que un pago acaba de
+  // bajar con el monto calculado sin ese pago: se lo volvería a cobrar.
+  it("el UPDATE del RECALCULO exige el monto leído al arrancar (no pisa un pago de a media corrida)", async () => {
+    // Capital 10,000 con 1 día ≈ Q3.73 ≠ Q112.00 → rama RECALCULO.
+    await correr([cuotaDeAyer("10000")], true);
+
+    const upd = apagadosDeMora()[0];
+    expect(upd).toBeDefined();
+    expect(upd.set).toHaveProperty("monto_mora");
+    expect(mencionaColumna(upd.where, moras_credito.monto_mora)).toBe(true);
+    const valores: unknown[] = [];
+    const juntar = (n: any): void => {
+      if (!n || typeof n !== "object") return;
+      if ("value" in n && "encoder" in n) valores.push(n.value);
+      (Array.isArray(n) ? n : n.queryChunks ?? []).forEach(juntar);
+    };
+    juntar(upd.where);
+    expect(valores).toContain(MORA_ACTIVA.monto_mora);
+  });
+
+  it("RECALCULO, el monto cambió en el medio (0 filas): no anota historial, no toca el status y no cuenta", async () => {
+    // Primer `.returning()` = el status del crédito (sigue elegible); el
+    // segundo = el update de la mora, que no matchea porque el monto cambió.
+    estado.resultados = [[cuotaDeAyer("10000")], [MORA_ACTIVA]];
+    estado.confirmados.length = 0;
+    estado.emitidos = [];
+    estado.updateReturns = [[{ credito_id: CREDITO_ID }], []];
+    const r = (await procesarMoras()) as any;
+
+    expect(apagadosDeMora()).toEqual([]);
+    expect(historial()).toEqual([]);
+    expect(updatesDeCredito()).toEqual([]);
+    expect(r.recalculadas).toBe(0);
+    expect(skippedCount()).toBe(1);
+    expect(estado.emitidos.some((e) => e.outcome === "failed")).toBe(false);
   });
 
   // ── Paso 6: el crédito se puso al día ───────────────────────────────────

@@ -35,7 +35,7 @@ const PAGO_ID = 301;
 const CREDITO_ID = 4242;
 const AYER = new Date("2026-09-22T10:00:00.000Z");
 
-type Llamada = { tabla: any; via: "select for update" | "select" | "update" };
+type Llamada = { tabla: any; via: "select for update" | "select" | "update" | "insert" };
 
 const estado: {
   selects: any[][];
@@ -105,6 +105,18 @@ const txFalso: any = {
       return b;
     },
   }),
+  insert: (tabla: any) => ({
+    values: (_rows: any) => ({
+      returning: () => {
+        estado.llamadas.push({ tabla, via: "insert" });
+        return Promise.resolve([]);
+      },
+      then: (res: any, rej: any) => {
+        estado.llamadas.push({ tabla, via: "insert" });
+        return Promise.resolve().then(res, rej);
+      },
+    }),
+  }),
 };
 
 const deps = {
@@ -134,7 +146,9 @@ const anular = () =>
 /**
  * Los SELECT que consume el camino, EN ORDEN: el crédito (candado), el pago,
  * el `DECREMENTO` marcado con este pago y —solo si no hay decremento marcado—
- * los eventos automáticos del cron posteriores al pago.
+ * los eventos automáticos del cron posteriores al pago (SI la fecha del pago
+ * no es null; si es null, elCronYaRepusoLaMora devuelve false sin hacer SELECT),
+ * y finalmente la compensación de mora en `mora_pagada_cuota` (revertirMoraPagadaDePago).
  *
  * `decremento: []` es el caso de los decrementos VIEJOS, los que se escribieron
  * antes de que la marca existiera: ahí el camino cae al criterio de antes, y es
@@ -153,9 +167,22 @@ const prepararBase = ({
   eventosDelCron?: any[];
   credito?: any[];
 }) => {
-  estado.selects = decremento.length
-    ? [credito, pago, decremento, posteriores]
-    : [credito, pago, decremento, eventosDelCron];
+  // revertirMoraPagadaDePago ahora hace un SELECT en mora_pagada_cuota
+  // Para los tests existentes, pasamos un array vacío (sin anotaciones de mora)
+  //
+  // IMPORTANTE: si pago[0].created_at es null, elCronYaRepusoLaMora retorna false
+  // sin hacer SELECT, así que el cron events array no se consume.
+  const pagoData = pago[0];
+  const haceSELECTdelCron = pagoData && pagoData.created_at;
+
+  if (decremento.length) {
+    estado.selects = [credito, pago, decremento, posteriores, []];
+  } else if (haceSELECTdelCron) {
+    estado.selects = [credito, pago, decremento, eventosDelCron, []];
+  } else {
+    // Sin decremento y sin fecha del pago: elCronYaRepusoLaMora no hace SELECT
+    estado.selects = [credito, pago, decremento, []];
+  }
 };
 
 const PAGO_CON_MORA = [

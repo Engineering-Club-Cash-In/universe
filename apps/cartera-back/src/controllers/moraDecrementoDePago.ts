@@ -22,8 +22,9 @@ import type { EstadoMoraTrasElPago } from "../utils/restitucionMoraDePago";
  * ── Por qué la pregunta existe ──────────────────────────────────────────────
  * Registrar un pago baja la mora EN EL ACTO (`insertPayment` →
  * `procesarPagoMora` → `updateMora` DECREMENTO), pero el criterio de cobertura
- * del cron solo cuenta pagos `validated`/`no_required` (el EXISTS de
- * `hasPaidPayment` en `procesarMoras`). Un pago que amanece `pending` deja su
+ * del cron solo cuenta pagos `validated`/`no_required` —y `pending` de hasta
+ * 7 días— (`hasPaidPaymentSql` en `procesarMoras`). Un pago que sigue `pending`
+ * pasado ese plazo deja su
  * cuota contada como vencida y el cron vuelve a FIJAR la mora completa desde la
  * fórmula —REEMPLAZA el monto, no lo acumula—. Después de esa corrida la bajada
  * del pago ya está deshecha, y restituirla encima —al anular la boleta o al
@@ -424,6 +425,7 @@ export async function estamparPagoEnDecremento(
 			.update(moras_historial)
 			.set({
 				motivo: sql`COALESCE(${moras_historial.motivo}, '') || ${marca}`,
+				pago_id: sql`COALESCE(${moras_historial.pago_id}, ${pago_id})`,
 			})
 			.where(
 				and(

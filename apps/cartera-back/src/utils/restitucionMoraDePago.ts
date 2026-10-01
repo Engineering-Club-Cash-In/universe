@@ -9,7 +9,7 @@ export type PagoParaRestituir = {
 };
 
 /** El ajuste de mora que deja un pago invalidado, o `null` si no deja ninguno. */
-export type RestitucionMora = { monto_cambio: number; motivo: string };
+export type RestitucionMora = { monto_cambio: number; motivo: string; pago_id: number | string };
 
 /**
  * Los dos hechos que invalidan un pago y le devuelven su mora al crédito.
@@ -86,8 +86,8 @@ export type EstadoMoraTrasElPago =
  *     para los decrementos viejos, sin marca, sigue valiendo el criterio de
  *     todo-o-nada de abajo. La cadena del
  *     sobrecobro: registrar un pago baja la mora en el acto, pero el criterio
- *     de cobertura del cron solo cuenta pagos `validated`/`no_required`
- *     (`procesarMoras`, el EXISTS de `hasPaidPayment`), así que un pago
+ *     de cobertura del cron solo cuenta pagos `validated`/`no_required` (y
+ *     `pending` de hasta 7 días; `hasPaidPaymentSql`), así que un pago
  *     todavía `pending` que sobrevive una corrida nocturna deja la cuota
  *     contada como vencida y el cron VUELVE A FIJAR la mora completa desde la
  *     fórmula —no acumula: REEMPLAZA—. Ahí la bajada del pago ya está
@@ -140,6 +140,7 @@ export function restitucionMoraDePago(
 	return {
 		monto_cambio: redondearCentavos(monto),
 		motivo: MOTIVO_POR_CAUSA[causa](pagoId),
+		pago_id: pagoId,
 	};
 }
 

@@ -26,6 +26,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+	debeMostrarProyeccionMora,
+	ProyeccionMoraCard,
+} from "@/components/cobros/proyeccion-mora-card";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import { ContactoModal } from "@/components/contacto-modal";
@@ -215,6 +219,18 @@ function RouteComponent() {
 			input: { creditoId: id },
 		}),
 		enabled: !!session && !!id,
+	});
+
+	// Proyección de mora del mes. Solo se pide si el crédito debe mora o tiene
+	// cuotas vencidas: en un crédito al día la tarjeta no se muestra.
+	const proyeccionMora = useQuery({
+		...orpc.getProyeccionMoraCarteraBack.queryOptions({
+			input: { numeroSifco: casoDetails.data?.numeroCreditoSifco || "" },
+		}),
+		enabled:
+			!!session &&
+			!!casoDetails.data?.numeroCreditoSifco &&
+			debeMostrarProyeccionMora(casoDetails.data),
 	});
 
 	// Obtener historial de contactos (solo para casos)
@@ -891,6 +907,15 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Proyección de mora del mes (se oculta sola si no hay mora ni atraso) */}
+					<ProyeccionMoraCard
+						montoEnMora={caso.montoEnMora}
+						cuotasVencidas={caso.cuotasVencidas}
+						proyeccion={proyeccionMora.data}
+						isLoading={proyeccionMora.isLoading}
+						isError={proyeccionMora.isError}
+					/>
 
 					{/* Información de Contacto */}
 					<Card>

@@ -424,7 +424,7 @@ type UnidadActiva = Awaited<ReturnType<typeof unidadesConCasoActivo>>[number];
  * Retención de lo que guarda el cálculo de ubicaciones clave: ubicaciones,
  * estancias, cursores y la copia en el historial de consultas. Solo se conserva
  * lo de unidades con caso de cobro activo y, de las estancias, los últimos 60
- * días. Son datos de dónde vive/trabaja el cliente, así que no se retienen de
+ * días (las que cruzan el borde se recortan a él). Son datos de dónde vive/trabaja el cliente, así que no se retienen de
  * más.
  *
  * Va aparte del cálculo y corre SIEMPRE (`correrPurgaUbicacionesClave`), no
@@ -482,6 +482,21 @@ export async function purgarDatosUbicacionesVencidos(
 	await db
 		.delete(gpsEstanciasCursor)
 		.where(notInArray(gpsEstanciasCursor.wialonUnitId, idsUnidades));
+
+	// Una estancia que sigue en curso (carro parado más de 60 días en el mismo
+	// lugar) extiende su `hasta` en cada corrida, así que el borrado de arriba
+	// nunca la alcanza y conservaría su `desde` original: dónde estaba el
+	// vehículo hace más de la ventana. Se recorta su inicio al borde. El cálculo
+	// ya contaba solo desde el borde, así que el resultado no cambia.
+	await db
+		.update(gpsEstancias)
+		.set({ desde: ventanaDesde })
+		.where(
+			and(
+				lt(gpsEstancias.desde, ventanaDesde),
+				gte(gpsEstancias.hasta, ventanaDesde),
+			),
+		);
 }
 
 /**

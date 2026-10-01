@@ -8,6 +8,8 @@ import {
 	spyOn,
 } from "bun:test";
 import { db } from "../db";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
+import { gpsEstancias } from "../db/schema/gps-eventos";
 import * as gpsEventosService from "../services/wialon/gps-eventos";
 import * as wialonClientModule from "../services/wialon/wialon-client";
 import * as gpsEventosPoll from "./gps-eventos-poll";
@@ -55,6 +57,8 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	let txCalled = false;
 	// Valores que el job manda a `update(gps_consulta_logs).set(...)`.
 	let snapshotsPurgados: unknown[] = [];
+	// Valores con que se recortan las estancias que cruzan el borde de 60 días.
+	let estanciasRecortadas: unknown[] = [];
 	// Lo que devuelven los `select` del job, en el orden en que los hace por
 	// unidad: cursores (1 vez), luego [última estancia?, estancias guardadas].
 	let cursoresMock: {
@@ -73,16 +77,18 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	beforeEach(() => {
 		txCalled = false;
 		snapshotsPurgados = [];
+		estanciasRecortadas = [];
 		cursoresMock = [];
 		ultimaEstanciaMock = [];
 		estanciasGuardadasMock = [];
-		spyOn(db, "update").mockReturnValue({
+		spyOn(db, "update").mockImplementation(((tabla: unknown) => ({
 			set: (valores: unknown) => ({
 				where: async () => {
-					snapshotsPurgados.push(valores);
+					if (tabla === gpsConsultaLogs) snapshotsPurgados.push(valores);
+					else if (tabla === gpsEstancias) estanciasRecortadas.push(valores);
 				},
 			}),
-		} as any);
+		})) as any);
 		spyOn(db, "select").mockImplementation(((campos?: unknown) => {
 			// select() sin campos = lectura de cursores.
 			if (campos === undefined) {
@@ -518,8 +524,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 	});
 
 	it("una purga de snapshots que falla no tumba el cálculo nocturno", async () => {
-		spyOn(db, "update").mockImplementation((() => {
-			throw new Error("db caída");
+		spyOn(db, "update").mockImplementation(((tabla: unknown) => {
+			if (tabla === gpsConsultaLogs) throw new Error("db caída");
+			return { set: () => ({ where: async () => {} }) };
 		}) as any);
 		wialonMock();
 
@@ -656,21 +663,24 @@ describe("calcularUbicacionesUnidadBajoDemanda (botón «Calcular ahora»)", () 
 describe("correrPurgaUbicacionesClave (retención, independiente de la bandera del cálculo)", () => {
 	let borradas: unknown[] = [];
 	let snapshotsPurgados: unknown[] = [];
+	let estanciasRecortadas: unknown[] = [];
 
 	beforeEach(() => {
 		borradas = [];
 		snapshotsPurgados = [];
+		estanciasRecortadas = [];
 		spyOn(db, "delete").mockImplementation(((tabla: unknown) => {
 			borradas.push(tabla);
 			return Object.assign(Promise.resolve(), { where: async () => {} });
 		}) as any);
-		spyOn(db, "update").mockReturnValue({
+		spyOn(db, "update").mockImplementation(((tabla: unknown) => ({
 			set: (valores: unknown) => ({
 				where: async () => {
-					snapshotsPurgados.push(valores);
+					if (tabla === gpsConsultaLogs) snapshotsPurgados.push(valores);
+					else if (tabla === gpsEstancias) estanciasRecortadas.push(valores);
 				},
 			}),
-		} as any);
+		})) as any);
 	});
 
 	afterEach(() => {
@@ -691,6 +701,22 @@ describe("correrPurgaUbicacionesClave (retención, independiente de la bandera d
 		expect(snapshotsPurgados).toEqual([{ snapshot: null }]);
 		expect(getWialonClient).not.toHaveBeenCalled();
 		expect(sifcosEnB4).not.toHaveBeenCalled();
+	});
+
+	it("recorta al borde de 60 días el inicio de las estancias en curso (retención)", async () => {
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
+			{ wialonUnitId: 100, numeroCreditoSifco: "A" },
+		]);
+		const antes = Date.now();
+
+		await correrPurgaUbicacionesClave();
+
+		// Una estancia que sigue en curso extiende su `hasta` y el borrado por
+		// `hasta` nunca la alcanza: su `desde` se recorta a la ventana.
+		expect(estanciasRecortadas).toHaveLength(1);
+		const { desde } = estanciasRecortadas[0] as { desde: Date };
+		const dias = (antes - desde.getTime()) / DIA_MS;
+		expect(Math.round(dias)).toBe(60);
 	});
 
 	it("sin casos activos purga todo lo retenido, incluido el snapshot del historial", async () => {

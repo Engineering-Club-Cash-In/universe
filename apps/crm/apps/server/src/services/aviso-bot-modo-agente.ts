@@ -242,7 +242,7 @@ export async function avisarAsesorModoAgente(
 		}
 
 		await deps.insertar({
-			titulo: "Tu cliente pidió hablar con un asesor",
+			titulo: "Un cliente suyo solicitó hablar con un asesor",
 			descripcion: describir(params.origen, destino, creditos),
 			type: "reminder",
 			status: "pending",
@@ -286,5 +286,5 @@ function describir(
 		origen.tipo === "telefono"
 			? ` Escribió desde el ${origen.telefono8} sin identificarse en el bot.`
 			: "";
-	return `${quien} pasó a modo agente en el bot de WhatsApp y está esperando respuesta.${desde} Contestale desde Witty Agent o llamalo.`;
+	return `${quien} pasó a modo agente en el bot de WhatsApp y está esperando respuesta.${desde} Responda desde Witty Agent o llame al cliente.`;
 }

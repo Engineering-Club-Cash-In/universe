@@ -54,7 +54,7 @@ describe("assertCreditoAsignadoEnCartera", () => {
 				...base,
 				emailAsesorCredito: "otro@clubcashin.com",
 			}),
-		).toThrow(/no está asignado a vos/);
+		).toThrow(/no está asignado a usted/);
 	});
 
 	it("el mensaje dice qué se estaba intentando hacer", () => {
@@ -71,14 +71,14 @@ describe("assertCreditoAsignadoEnCartera", () => {
 		for (const vacio of [null, undefined, "", "   "]) {
 			expect(() =>
 				assertCreditoAsignadoEnCartera({ ...base, emailAsesorCredito: vacio }),
-			).toThrow(/no está asignado a vos/);
+			).toThrow(/no está asignado a usted/);
 		}
 	});
 
 	it("una sesión sin correo no autoriza aunque el crédito tenga asesor", () => {
 		expect(() =>
 			assertCreditoAsignadoEnCartera({ ...base, emailUsuario: undefined }),
-		).toThrow(/no está asignado a vos/);
+		).toThrow(/no está asignado a usted/);
 	});
 
 	it("admin y supervisor de cobros pasan sobre cualquier crédito", () => {
@@ -100,7 +100,7 @@ describe("assertCreditoAsignadoEnCartera", () => {
 				userRole: "rol_inventado",
 				emailAsesorCredito: "otro@clubcashin.com",
 			}),
-		).toThrow(/no está asignado a vos/);
+		).toThrow(/no está asignado a usted/);
 	});
 });
 
@@ -132,7 +132,7 @@ describe("assertCreditoAsignadoEnCarteraPorSifco", () => {
 				userRole: ROLES.COBROS,
 				accion: "hacer esto",
 			}),
-		).rejects.toThrow(/no está asignado a vos/);
+		).rejects.toThrow(/no está asignado a usted/);
 	});
 
 	it("supervisor y admin no llegan ni a consultar cartera", async () => {

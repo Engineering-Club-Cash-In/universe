@@ -9,8 +9,10 @@ import {
 	jsonb,
 	pgEnum,
 	pgTable,
+	serial,
 	text,
 	timestamp,
+	unique,
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
@@ -729,6 +731,33 @@ export const recuperacionesVehiculo = pgTable(
 		index("recuperaciones_vehiculo_estado_solicitud_idx")
 			.on(t.estadoSolicitud, t.createdAt)
 			.where(sql`${t.estadoSolicitud} IS NOT NULL`),
+	],
+);
+
+/**
+ * CB-043 · Por qué no se hizo un paso del checklist de recuperación: un
+ * catálogo por paso ("¿Por qué no hay llamadas al cliente?", …). Vive en la
+ * base para agregar o retirar razones sin deploy (migración 0074). `paso` es
+ * una clave de PASOS_CHECKLIST_RECUPERACION (lib/recuperacion-solicitud.ts).
+ * Una razón no se borra: se desactiva, y la solicitud guarda su etiqueta.
+ */
+export const cobrosChecklistJustificaciones = pgTable(
+	"cobros_checklist_justificaciones",
+	{
+		id: serial("id").primaryKey(),
+		paso: text("paso").notNull(),
+		clave: text("clave").notNull(),
+		etiqueta: text("etiqueta").notNull(),
+		orden: integer("orden").notNull().default(0),
+		activo: boolean("activo").notNull().default(true),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(t) => [
+		unique("cobros_checklist_justificaciones_paso_clave_unique").on(
+			t.paso,
+			t.clave,
+		),
 	],
 );
 

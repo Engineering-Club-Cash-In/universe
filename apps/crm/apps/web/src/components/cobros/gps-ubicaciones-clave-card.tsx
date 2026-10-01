@@ -317,7 +317,8 @@ export function GpsUbicacionesClaveCard({
 				>
 					Lugares donde el vehículo pasa más tiempo (casa, trabajo, lugares
 					recurrentes), calculados automáticamente contra los últimos 60 días de
-					historial GPS. Orienta la búsqueda si el vehículo hay que recuperarlo.
+					historial GPS. Orienta la búsqueda si es necesario recuperar el
+					vehículo.
 				</Descripcion>
 			</Cabecera>
 			<Cuerpo>
@@ -338,7 +339,7 @@ export function GpsUbicacionesClaveCard({
 							<Input
 								id={`motivo-ubicaciones-${vehicleId}`}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej: Crédito en B4, preparar visita de recuperación"
+								placeholder="Ej.: Crédito en B4, preparar visita de recuperación"
 								value={motivo}
 							/>
 						</div>

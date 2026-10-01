@@ -64,7 +64,8 @@ export function RespaldoReactivacionResumen({
 		<div className="space-y-1 text-xs">
 			{etiqueta && (
 				<p className="font-medium">
-					¿Qué pasó? <span className="font-normal">{etiqueta}</span>
+					Motivo de la reactivación:{" "}
+					<span className="font-normal">{etiqueta}</span>
 				</p>
 			)}
 			{respaldo?.pago && (

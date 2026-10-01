@@ -448,6 +448,6 @@ function descripcionEvento(input: RegistrarEventoGpsInput): string {
 		case "ignicion":
 			return `Se encendió el motor de la unidad ${input.wialonUnitId} (${hora}).`;
 		case "sin_reportar":
-			return `La unidad ${input.wialonUnitId} dejó de reportar señal GPS (${hora}). Verificá el estado del equipo.`;
+			return `La unidad ${input.wialonUnitId} dejó de reportar señal GPS (${hora}). Verifique el estado del equipo.`;
 	}
 }

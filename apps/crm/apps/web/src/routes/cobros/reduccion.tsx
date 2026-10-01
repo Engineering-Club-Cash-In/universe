@@ -221,7 +221,7 @@ function ReduccionRecordatoriosPage() {
 		setDialogSteps((prev) => {
 			if (prev.includes(dia)) return prev.filter((d) => d !== dia);
 			if (prev.length >= MAX_PASOS) {
-				toast.warning(`Máximo ${MAX_PASOS} recordatorios; quita uno primero`);
+				toast.warning(`Máximo ${MAX_PASOS} recordatorios; quite uno primero`);
 				return prev;
 			}
 			return [...prev, dia];
@@ -273,9 +273,9 @@ function ReduccionRecordatoriosPage() {
 					<p className="mt-1 text-muted-foreground">
 						Los clientes que pagan al día 4 cuotas seguidas pueden recibir menos
 						recordatorios premora (se toleran hasta 2 días de gracia después del
-						vencimiento). El sistema los marca elegibles; tú decides qué pasos
-						quitarles. El recordatorio del día de vencimiento (D-0) siempre se
-						envía.
+						vencimiento). El sistema los marca como elegibles y usted decide qué
+						pasos quitar. El recordatorio del día de vencimiento (D-0) siempre
+						se envía.
 					</p>
 				</div>
 				<Button
@@ -314,8 +314,8 @@ function ReduccionRecordatoriosPage() {
 								Clientes que pagan al día
 							</CardTitle>
 							<CardDescription>
-								Elegibles sin reducción aplicada. Elige a quién quitarle
-								recordatorios.
+								Elegibles sin reducción aplicada. Seleccione a qué clientes
+								quitar recordatorios.
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
@@ -417,7 +417,7 @@ function ReduccionRecordatoriosPage() {
 						<CardHeader>
 							<CardTitle>Reducciones activas</CardTitle>
 							<CardDescription>
-								Créditos con recordatorios reducidos. Puedes editar los pasos o
+								Créditos con recordatorios reducidos. Puede editar los pasos o
 								retirar la reducción.
 							</CardDescription>
 						</CardHeader>
@@ -425,7 +425,7 @@ function ReduccionRecordatoriosPage() {
 							{configuradasQuery.isLoading ? (
 								<Cargando />
 							) : configuradas.length === 0 ? (
-								<Vacio texto="Aún no has configurado ninguna reducción." />
+								<Vacio texto="Aún no se ha configurado ninguna reducción." />
 							) : (
 								<Table>
 									<TableHeader>
@@ -537,9 +537,9 @@ function ReduccionRecordatoriosPage() {
 										<TableRow>
 											<TableHead>Cliente</TableHead>
 											<TableHead>Crédito</TableHead>
-											<TableHead>Tenía quitados</TableHead>
+											<TableHead>Recordatorios quitados</TableHead>
 											<TableHead>Cuotas al día ahora</TableHead>
-											<TableHead>Retirado</TableHead>
+											<TableHead>Fecha de retiro</TableHead>
 										</TableRow>
 									</TableHeader>
 									<TableBody>
@@ -593,7 +593,7 @@ function ReduccionRecordatoriosPage() {
 					<DialogHeader>
 						<DialogTitle>Reducir recordatorios</DialogTitle>
 						<DialogDescription>
-							{dialogLabel}. Marca los recordatorios que NO quieres enviarle
+							{dialogLabel}. Marque los recordatorios que NO desea enviar
 							(máximo {MAX_PASOS}).
 						</DialogDescription>
 					</DialogHeader>

@@ -372,7 +372,7 @@ export const notificationsRouter = {
 				!isSupervisorWithAccess
 			) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para modificar esta notificación",
+					message: "No tiene permiso para modificar esta notificación",
 				});
 			}
 

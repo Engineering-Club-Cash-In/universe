@@ -51,7 +51,7 @@ const CODIGOS_NEGOCIO_DEFINITIVOS: Record<string, string> = {
 	convenio_no_pendiente:
 		"Otro supervisor ya decidió este convenio, o ya está completado.",
 	fingerprint_no_coincide:
-		"Ese identificador de operación ya se usó para otra decisión. Recargá e intentá de nuevo.",
+		"Ese identificador de operación ya se usó para otra decisión. Recargue e intente de nuevo.",
 	motivo_requerido: "El rechazo requiere un motivo de al menos 5 caracteres.",
 	convenio_id_invalido: "El convenio indicado no es válido.",
 };
@@ -84,18 +84,18 @@ const CODIGOS_NEGOCIO_DEFINITIVOS: Record<string, string> = {
  */
 const CODIGOS_DE_REINTENTO: Record<string, string> = {
 	operacion_en_curso:
-		"Esta decisión ya se está procesando. Esperá unos segundos y volvé a consultar antes de reenviar.",
+		"Esta decisión ya se está procesando. Espere unos segundos y vuelva a consultar antes de reenviar.",
 	operacion_en_conflicto:
-		"La operación chocó con otra sobre el mismo identificador. Esperá unos segundos y reintentá.",
+		"La operación entró en conflicto con otra sobre el mismo identificador. Espere unos segundos e intente de nuevo.",
 };
 
 const CODIGOS_DE_PUERTA: Record<string, string> = {
 	convenio_decision_no_autorizado:
-		"No tenés permiso para decidir convenios en cartera. La decisión anterior puede haberse aplicado igual: el aviso de decisiones por confirmar sigue disponible para verificarlo.",
+		"No tiene permiso para decidir convenios en cartera. La decisión anterior puede haberse aplicado igual: el aviso de decisiones por confirmar sigue disponible para verificarlo.",
 	decidido_por_email_requerido:
-		"Falta identificar al supervisor que decide (configuración del CRM). Reportalo a soporte: el aviso de decisiones por confirmar se mantiene.",
+		"Falta identificar al supervisor que decide (configuración del CRM). Repórtelo a soporte: el aviso de decisiones por confirmar se mantiene.",
 	decidido_por_email_no_permitido:
-		"No se puede atribuir la decisión a otra persona desde este origen (configuración del CRM). Reportalo a soporte: el aviso de decisiones por confirmar se mantiene.",
+		"No se puede atribuir la decisión a otra persona desde este origen (configuración del CRM). Repórtelo a soporte: el aviso de decisiones por confirmar se mantiene.",
 };
 
 export const convenioDecisionRouter = {
@@ -128,7 +128,7 @@ export const convenioDecisionRouter = {
 			if (!isCarteraBackEnabled()) {
 				throw new ORPCError("SERVICE_UNAVAILABLE", {
 					message:
-						"La integración con cartera no está habilitada. Si ya habías enviado una decisión, " +
+						"La integración con cartera no está habilitada. Si ya había enviado una decisión, " +
 						"el aviso de decisiones por confirmar se mantiene para verificarla cuando se reactive.",
 				});
 			}
@@ -146,8 +146,8 @@ export const convenioDecisionRouter = {
 			if (!email) {
 				throw new ORPCError("UNAUTHORIZED", {
 					message:
-						"Usuario no autenticado. Si ya habías enviado una decisión, el aviso de " +
-						"decisiones por confirmar se mantiene: volvé a iniciar sesión para verificarla.",
+						"Usuario no autenticado. Si ya había enviado una decisión, el aviso de " +
+						"decisiones por confirmar se mantiene: vuelva a iniciar sesión para verificarla.",
 				});
 			}
 
@@ -209,7 +209,7 @@ export const convenioDecisionRouter = {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						"No se pudo confirmar el resultado de la decisión en cartera. " +
-						'Usá "Reenviar" en el aviso de decisiones por confirmar para verificar si se aplicó.',
+						'Use "Reenviar" en el aviso de decisiones por confirmar para verificar si se aplicó.',
 				});
 			}
 

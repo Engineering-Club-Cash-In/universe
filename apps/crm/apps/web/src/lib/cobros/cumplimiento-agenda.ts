@@ -1,7 +1,7 @@
 const ETIQUETAS_MOTIVO_AGENDA: Record<string, string> = {
 	"D-0": "Pago programado",
 	sla_hoy: "Gestión SLA programada",
-	promesa_hoy: "Promesa programada",
+	promesa_hoy: "Promesa de pago programada",
 };
 
 export function etiquetaMotivoAgenda(motivo: string | null): string {

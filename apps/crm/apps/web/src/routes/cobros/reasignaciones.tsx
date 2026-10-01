@@ -191,7 +191,7 @@ function ReasignarModal({
 				? "No hay otros asesores en este bucket"
 				: poolVacio
 					? "El bucket no tiene asesores en su pool"
-					: "Selecciona un asesor";
+					: "Seleccionar asesor";
 	const motivoValido = motivo.trim().length > 0;
 	const puedeGuardar = !!asesorNuevoId && motivoValido && !mutation.isPending;
 
@@ -238,14 +238,14 @@ function ReasignarModal({
 						</Select>
 						{poolQuery.isError && (
 							<p className="text-destructive text-xs">
-								No se pudo cargar el pool de asesores de este bucket. Intenta de
+								No se pudo cargar el pool de asesores de este bucket. Intente de
 								nuevo.
 							</p>
 						)}
 						{!poolQuery.isError && (soloElAsesorActual || poolVacio) && (
 							<p className="text-muted-foreground text-xs">
 								{soloElAsesorActual
-									? "Este bucket solo tiene un asesor en su pool. Agrega otro asesor al pool del bucket para poder reasignar."
+									? "Este bucket solo tiene un asesor en su pool. Agregue otro asesor al pool del bucket para poder reasignar."
 									: "Este bucket no tiene asesores configurados en su pool."}
 							</p>
 						)}
@@ -256,7 +256,7 @@ function ReasignarModal({
 						<Textarea
 							value={motivo}
 							onChange={(e) => setMotivo(e.target.value)}
-							placeholder="Explica por qué se reasigna este crédito..."
+							placeholder="Explique por qué se reasigna este crédito..."
 							rows={3}
 						/>
 					</div>
@@ -690,7 +690,7 @@ function RouteComponent() {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center text-muted-foreground">
-					No tienes permiso para acceder a esta página.
+					No tiene permiso para acceder a esta página.
 				</div>
 			</div>
 		);
@@ -725,8 +725,8 @@ function RouteComponent() {
 				</h1>
 			</div>
 			<p className="text-muted-foreground text-sm">
-				Créditos por bucket. Reasigna manualmente el asesor a un elegible del
-				pool del bucket (motivo obligatorio, queda auditado).
+				Créditos por bucket. Reasigne manualmente el asesor a uno elegible del
+				pool del bucket (el motivo es obligatorio y queda auditado).
 			</p>
 
 			<Tabs defaultValue="buckets">
@@ -746,7 +746,7 @@ function RouteComponent() {
 							<div>
 								<CardTitle className="text-base">Buscar cartera</CardTitle>
 								<p className="mt-1 text-muted-foreground text-xs">
-									Filtra por bucket, asesor o número de crédito.
+									Filtre por bucket, asesor o número de crédito.
 								</p>
 							</div>
 							{hayFiltrosActivos && (
@@ -911,7 +911,8 @@ function RouteComponent() {
 							<div>
 								<CardTitle className="text-base">Créditos asignados</CardTitle>
 								<p className="mt-1 text-muted-foreground text-xs">
-									Selecciona un crédito para abrir Ficha 360 o reasignar asesor.
+									Seleccione un crédito para abrir la Ficha 360 o reasignar el
+									asesor.
 								</p>
 							</div>
 							{!query.isLoading && !query.isError && (

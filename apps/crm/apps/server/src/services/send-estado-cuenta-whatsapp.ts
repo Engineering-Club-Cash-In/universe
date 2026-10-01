@@ -52,10 +52,10 @@ const MENSAJES_ERROR: Record<EstadoCuentaErrorCodigo, string> = {
 	SIN_TELEFONO: "El cliente no tiene un número de teléfono válido registrado.",
 	SIN_MOVIMIENTOS:
 		"Este crédito todavía no tiene movimientos, no hay estado de cuenta que enviar.",
-	CREDITO_NO_ESTA_EN_CARTERA: "No encontramos este crédito en cartera.",
-	ERROR_CARTERA: "No se pudo generar el estado de cuenta. Intenta de nuevo.",
+	CREDITO_NO_ESTA_EN_CARTERA: "No se encontró este crédito en cartera.",
+	ERROR_CARTERA: "No se pudo generar el estado de cuenta. Intente de nuevo.",
 	ERROR_ENVIO: "No se pudo enviar el mensaje de WhatsApp.",
-	ERROR_INTERNO: "No se pudo preparar el envío. Intenta de nuevo.",
+	ERROR_INTERNO: "No se pudo preparar el envío. Intente de nuevo.",
 };
 
 export interface SendEstadoCuentaWhatsappParams {

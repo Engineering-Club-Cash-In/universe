@@ -150,7 +150,7 @@ export const seguimientosRouter = {
 					ops.push(
 						db.insert(notifications).values({
 							titulo: "Seguimiento programado para hoy",
-							descripcion: `Tienes un contacto vía ${input.metodoContacto} pendiente hoy para el crédito ${caso.numeroCreditoSifco || caso.id.slice(0, 8)}`,
+							descripcion: `Tiene un contacto vía ${input.metodoContacto} pendiente hoy para el crédito ${caso.numeroCreditoSifco || caso.id.slice(0, 8)}`,
 							type: "reminder",
 							status: "pending",
 							createdBy: context.userId,

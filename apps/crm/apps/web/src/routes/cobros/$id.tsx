@@ -316,7 +316,7 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 	},
 	// CB-042: llegó a recuperación de vehículo (o entrega voluntaria en B4).
 	recuperacion_vehiculo: {
-		label: "Recuperación de vehículo",
+		label: "Recuperación del vehículo",
 		clase:
 			"bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
 	},
@@ -1216,7 +1216,7 @@ function RouteComponent() {
 			const p = telefonosParaGuardar(f.telefonoPrincipal);
 			if (p.length === 0) {
 				toast.error(
-					"El teléfono principal no puede quedar vacío: escribí otro número.",
+					"El teléfono principal no puede quedar vacío. Ingrese otro número.",
 				);
 				return;
 			}
@@ -1295,7 +1295,7 @@ function RouteComponent() {
 	const runJobMutation = useMutation({
 		mutationFn: () => client.runSeguimientosJob(),
 		onSuccess: () => {
-			toast.success("Job de seguimientos ejecutado exitosamente");
+			toast.success("Proceso de seguimientos ejecutado exitosamente");
 			const casoCobroId = casoDetails.data?.id || "";
 			queryClient.invalidateQueries(
 				orpc.getSeguimientosActivos.queryOptions({ input: { casoCobroId } }),
@@ -1312,7 +1312,9 @@ function RouteComponent() {
 			);
 		},
 		onError: (err: any) => {
-			toast.error(err.message || "Error al ejecutar el job");
+			toast.error(
+				err.message || "Error al ejecutar el proceso de seguimientos",
+			);
 		},
 	});
 
@@ -1562,7 +1564,7 @@ function RouteComponent() {
 			: bucketActual.isPending
 				? "Cargando el bucket del crédito…"
 				: !esBucketDesdeB2(bucketNumero, bucketsCatalogo.data)
-					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registrá una promesa de pago.`
+					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registre una promesa de pago.`
 					: null;
 	const convenioHabilitado = convenioMotivoBloqueo === null;
 
@@ -1607,7 +1609,7 @@ function RouteComponent() {
 	// esconden — el asesor tiene que saber que existen y por qué hoy no
 	// aplican, mismo criterio que el convenio.
 	const recuperacionBloqueoBase: string | null = !puedeRecuperarVehiculo
-		? "Solo el equipo de cobros puede mandar una cuenta a recuperación."
+		? "Solo el equipo de cobros puede enviar una cuenta a recuperación."
 		: !caso.id || !caso.numeroCreditoSifco
 			? "Este caso todavía no tiene crédito de cartera asociado."
 			: bucketActual.isPending
@@ -1624,7 +1626,7 @@ function RouteComponent() {
 	const bloqueoForzosa =
 		bloqueoRecuperacion("tomado") ??
 		(solicitudRecuperacionPendiente
-			? "Ya hay una solicitud de recuperación esperando aprobación: se decide en la tarjeta de Recuperación de vehículo."
+			? "Ya hay una solicitud de recuperación pendiente de aprobación. Se resuelve en la tarjeta de recuperación del vehículo."
 			: null);
 	const bloqueoVoluntaria = bloqueoRecuperacion("entrega_voluntaria");
 	const operacionEnvio = envioRecuperacion
@@ -1635,13 +1637,14 @@ function RouteComponent() {
 	// compartida con el servidor). Registrar el resultado de una ya programada
 	// no pasa por acá: se hace desde su tarjeta, sin mirar el bucket.
 	const bloqueoVisita: string | null = !puedeRecuperarVehiculo
-		? "Solo el equipo de cobros registra visitas."
+		? "Solo el equipo de cobros puede registrar visitas."
 		: !caso.numeroCreditoSifco
 			? "Este caso todavía no tiene crédito de cartera asociado."
 			: bucketActual.isPending
 				? "Cargando el bucket del crédito…"
 				: motivoBloqueoVisita(bucketNumero, bucketPrefijo);
-	// Base del 50% de "50% + promesa": cuotas vencidas × cuota + mora.
+	// Lo vencido (cuotas vencidas × cuota + mora): el «Pago total» de una
+	// visita, y la base del porcentaje del «Pago parcial + promesa».
 	const deudaVencidaCaso = deudaVencida({
 		cuotasVencidas: caso.cuotasVencidas,
 		cuota: caso.cuotaMensual,
@@ -1670,9 +1673,12 @@ function RouteComponent() {
 		setEntregaDesdeVisita(datos);
 		setEnvioRecuperacion("entrega_voluntaria");
 	};
-	/** Al guardar la visita: abre el flujo que sigue (promesa o entrega). */
+	/** Al guardar la visita: abre el flujo que sigue (promesa, convenio o entrega). */
 	const alRegistrarVisita = (r: VisitaRegistrada) => {
-		if (r.siguientes.promesa) {
+		if (r.siguientes.convenio) {
+			if (convenioHabilitado) setConvenioAbierto(true);
+			else if (convenioMotivoBloqueo) toast.error(convenioMotivoBloqueo);
+		} else if (r.siguientes.promesa) {
 			setPromesaDesdeVisita({
 				visitaId: r.visitaId,
 				tipo: r.tipo,
@@ -1773,13 +1779,13 @@ function RouteComponent() {
 					<TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
 					<div className="min-w-0 space-y-1">
 						<p className="font-semibold text-red-900 text-sm dark:text-red-200">
-							En recuperación y ya llegó a {bucketPrefijo ?? "B5"}
+							Crédito en recuperación que llegó a {bucketPrefijo ?? "B5"}
 						</p>
 						<p className="text-red-800 text-sm dark:text-red-300">
-							El crédito acumuló 5 cuotas atrasadas estando en recuperación de
-							vehículo, así que subió solo a jurídico. Sigue en recuperación: el
-							estado no se levanta con un convenio, solo pagando todo lo que
-							debe.
+							El crédito acumuló 5 cuotas atrasadas durante la recuperación del
+							vehículo y pasó automáticamente a jurídico. Sigue en recuperación:
+							este estado no se levanta con un convenio, solo con el pago total
+							de la deuda.
 						</p>
 					</div>
 				</div>
@@ -1987,7 +1993,7 @@ function RouteComponent() {
 													</p>
 													<p className="text-muted-foreground text-xs">
 														El cliente se compromete a pagar un monto en una
-														fecha. Cualquier bucket.
+														fecha. Disponible en cualquier bucket.
 													</p>
 												</div>
 											</DropdownMenuItem>
@@ -2001,7 +2007,7 @@ function RouteComponent() {
 													<p className="font-medium">Convenio de pago</p>
 													<p className="text-muted-foreground text-xs">
 														{convenioMotivoBloqueo ??
-															`Reparte la deuda vencida en hasta ${maxMesesConvenio} cuotas. A partir de B2.`}
+															`Reparte la deuda vencida en hasta ${maxMesesConvenio} cuotas. Disponible a partir de B2.`}
 													</p>
 												</div>
 											</DropdownMenuItem>
@@ -2014,8 +2020,9 @@ function RouteComponent() {
 									    cuota del convenio, no se suma (Codex, PR #1191). */}
 									{/* CB-037/038: el mismo modal registra la promesa que sale
 									    de una visita, con el canal de la visita y vinculada a
-									    ella. El `key` lo remonta con esos valores. En "50% +
-									    promesa" sugiere lo que falta después de lo que pagó. */}
+									    ella. El `key` lo remonta con esos valores. En "pago
+									    parcial + promesa" propone lo que falta después de lo que
+									    pagó, y es la única variante con el monto editable. */}
 									<ContactoModal
 										key={promesaDesdeVisita?.visitaId ?? "promesa"}
 										{...propsContacto}
@@ -2025,6 +2032,9 @@ function RouteComponent() {
 												: "llamada"
 										}
 										visitaId={promesaDesdeVisita?.visitaId}
+										montoYaPagado={
+											promesaDesdeVisita?.montoRecibido ?? undefined
+										}
 										variante="promesa"
 										open={promesaAbierta || !!promesaDesdeVisita}
 										onOpenChange={(abierto) => {
@@ -2201,7 +2211,7 @@ function RouteComponent() {
 													<Car className="h-4 w-4" />
 													<span className="sm:hidden">Recuperación</span>
 													<span className="hidden sm:inline">
-														Recuperación de vehículo
+														Recuperación del vehículo
 													</span>
 													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
 												</Button>
@@ -2215,11 +2225,11 @@ function RouteComponent() {
 													<Car className="mt-0.5 h-4 w-4 text-amber-600" />
 													<div>
 														<p className="font-medium">
-															Solicitar recuperación
+															Solicitar recuperación del vehículo
 														</p>
 														<p className="text-muted-foreground text-xs">
 															{bloqueoForzosa ??
-																"El cliente no paga: se pide con el checklist de lo que ya se hizo y la aprueba otro supervisor o admin."}
+																"El cliente no paga. Se solicita con el checklist de las gestiones realizadas y la aprueba otro supervisor o administrador."}
 														</p>
 													</div>
 												</DropdownMenuItem>
@@ -2432,6 +2442,7 @@ function RouteComponent() {
 										programada={visitaAbierta.programada ?? null}
 										direcciones={direccionesCliente}
 										deudaVencida={deudaVencidaCaso}
+										convenioBloqueo={convenioMotivoBloqueo}
 										bucketNumero={bucketNumero}
 										vehicleId={caso.vehicleId ?? null}
 										onRegistrada={alRegistrarVisita}
@@ -2467,8 +2478,8 @@ function RouteComponent() {
 														auditoría.
 													</p>
 													<p className="text-xs">
-														Si además hay que recuperar el vehículo, después
-														solicitalo desde «Recuperación de vehículo».
+														Si además se debe recuperar el vehículo, solicítelo
+														después desde «Recuperación del vehículo».
 													</p>
 												</div>
 											</AlertDialogDescription>
@@ -2481,7 +2492,7 @@ function RouteComponent() {
 												id="motivo-deshacer"
 												value={motivoDeshacer}
 												onChange={(e) => setMotivoDeshacer(e.target.value)}
-												placeholder="Por qué se deshace el acuerdo (mínimo 5 caracteres)"
+												placeholder="Motivo por el que se deshace el convenio (mínimo 5 caracteres)"
 												rows={3}
 											/>
 										</div>
@@ -2614,6 +2625,11 @@ function RouteComponent() {
 										setVisitaAbierta({ tipo: programada.tipo, programada })
 									}
 									onRegistrarPromesa={registrarPromesaDeVisita}
+									onRegistrarConvenio={
+										convenioHabilitado
+											? () => setConvenioAbierto(true)
+											: undefined
+									}
 									onRegistrarEntrega={(v) =>
 										abrirEntregaDesdeVisita({
 											visitaId: v.id,
@@ -2973,7 +2989,7 @@ function RouteComponent() {
 												variant="outline"
 												size="sm"
 												className="h-8 w-8 border-blue-200 p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
-												title="Ejecutar Job de Seguimientos Ahora"
+												title="Ejecutar el proceso de seguimientos ahora"
 												onClick={() => runJobMutation.mutate()}
 												disabled={runJobMutation.isPending}
 											>
@@ -3294,8 +3310,8 @@ function RouteComponent() {
 												return (
 													<div className="space-y-1.5 rounded-lg border border-dashed bg-muted/30 p-3">
 														<p className="text-muted-foreground text-xs">
-															Se consiguieron estos números del cliente. Al
-															tocarlos quedan guardados:
+															Se encontraron estos números del cliente. Haga
+															clic en uno para guardarlo:
 														</p>
 														<div className="flex flex-wrap gap-1.5">
 															{sugeridos.map((h) => (
@@ -3307,7 +3323,7 @@ function RouteComponent() {
 																	className="h-7 px-2"
 																	title={
 																		h.referenciaNombre
-																			? `Lo dio ${h.referenciaNombre}`
+																			? `Proporcionado por ${h.referenciaNombre}`
 																			: undefined
 																	}
 																	disabled={
@@ -3340,12 +3356,12 @@ function RouteComponent() {
 															emailContacto: e.target.value,
 														})
 													}
-													placeholder="Ej: correo@ejemplo.com"
+													placeholder="Ej.: correo@ejemplo.com"
 												/>
 											</div>
 											<p className="text-muted-foreground text-xs">
-												Los teléfonos se guardan solos al escribirlos o
-												quitarlos. "Guardar" es para el email.
+												Los teléfonos se guardan automáticamente al ingresarlos
+												o quitarlos. El botón «Guardar» aplica solo al email.
 											</p>
 											<div className="flex gap-2">
 												<Button
@@ -3353,7 +3369,7 @@ function RouteComponent() {
 													onClick={() => {
 														if (
 															!window.confirm(
-																"¿Estás seguro de actualizar la información de contacto?",
+																"¿Desea actualizar la información de contacto?",
 															)
 														)
 															return;
@@ -3551,14 +3567,14 @@ function RouteComponent() {
 													)}
 												</div>
 												<p className="text-muted-foreground text-xs">
-													De la solicitud de crédito.
+													Fuente: solicitud de crédito.
 												</p>
 											</div>
 										) : (
 											datosLaborales.isSuccess && (
 												<p className="flex items-center gap-2 text-muted-foreground text-xs">
 													<Briefcase className="h-3.5 w-3.5" />
-													La solicitud de crédito no tiene datos de su trabajo.
+													La solicitud de crédito no tiene datos laborales.
 												</p>
 											)
 										))}
@@ -3573,8 +3589,8 @@ function RouteComponent() {
 												{telefonosNuevosCliente.length > 0 && (
 													<div className="space-y-1">
 														<p className="text-muted-foreground text-xs">
-															Nuevos del cliente, todavía no están en sus
-															teléfonos. Con + quedan guardados.
+															Números nuevos del cliente que aún no están
+															registrados. Use + para guardarlos.
 														</p>
 														<div className="flex flex-wrap gap-1.5">
 															{telefonosNuevosCliente.map((h) => (
@@ -3586,7 +3602,7 @@ function RouteComponent() {
 																		href={`tel:${h.valor.replace(/[^0-9+]/g, "")}`}
 																		title={
 																			h.referenciaNombre
-																				? `Lo dio ${h.referenciaNombre}`
+																				? `Proporcionado por ${h.referenciaNombre}`
 																				: undefined
 																		}
 																		className="font-medium text-primary hover:underline"
@@ -3857,7 +3873,7 @@ function RouteComponent() {
 													: `Cuotas #${promesa.cuotaInicio} a #${promesa.cuotaFin}`
 												: promesa.incluyeMora
 													? "Mora del crédito"
-													: "Sin rango ni mora especificado";
+													: "Sin rango ni mora especificados";
 											return (
 												<div key={promesa.id} className="rounded-lg border p-4">
 													<div className="mb-2 flex items-start justify-between">
@@ -3871,7 +3887,7 @@ function RouteComponent() {
 																title={
 																	tieneRango || promesa.incluyeMora
 																		? undefined
-																		: "Registro anterior a la validación de rango/mora obligatorio — revisar comentarios para saber qué prometió el cliente."
+																		: "Registro anterior a la validación obligatoria de rango o mora. Revise los comentarios para conocer lo que prometió el cliente."
 																}
 															>
 																{etiquetaRango}
@@ -4835,7 +4851,7 @@ function RouteComponent() {
 														make: e.target.value,
 													}))
 												}
-												placeholder="Ej: Toyota"
+												placeholder="Ej.: Toyota"
 											/>
 										</div>
 										<div>
@@ -4849,7 +4865,7 @@ function RouteComponent() {
 														model: e.target.value,
 													}))
 												}
-												placeholder="Ej: Corolla"
+												placeholder="Ej.: Corolla"
 											/>
 										</div>
 										<div>
@@ -4864,7 +4880,7 @@ function RouteComponent() {
 														year: Number(e.target.value),
 													}))
 												}
-												placeholder="Ej: 2020"
+												placeholder="Ej.: 2020"
 											/>
 										</div>
 										<div>
@@ -4878,7 +4894,7 @@ function RouteComponent() {
 														licensePlate: e.target.value,
 													}))
 												}
-												placeholder="Ej: P-123ABC"
+												placeholder="Ej.: P-123ABC"
 											/>
 										</div>
 										<div className="flex gap-2">
@@ -4921,7 +4937,7 @@ function RouteComponent() {
 														</p>
 														<p className="text-amber-700 dark:text-amber-300">
 															Este crédito fue migrado y no tiene datos del
-															vehículo. Edita la información manualmente.
+															vehículo. Edite la información manualmente.
 														</p>
 													</div>
 												</div>

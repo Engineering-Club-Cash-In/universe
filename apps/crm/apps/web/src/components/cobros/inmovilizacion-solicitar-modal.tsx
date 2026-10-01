@@ -128,13 +128,11 @@ function FormularioApagado({
 	const errorUbicacion =
 		tieneGps || direccionLimpia || enlaceLimpio
 			? null
-			: "Falta la ubicación del vehículo: tomala del GPS o escribí la dirección.";
+			: "Falta la ubicación del vehículo. Use «Tomar del GPS» o ingrese la dirección.";
 	const error =
 		errorMotivos ??
 		errorUbicacion ??
-		(enlaceValido
-			? null
-			: "El enlace tiene que empezar con http:// o https://");
+		(enlaceValido ? null : "El enlace debe empezar con http:// o https://.");
 
 	return (
 		<>
@@ -142,14 +140,14 @@ function FormularioApagado({
 				<DialogTitle>Solicitar apagado de unidad</DialogTitle>
 				<DialogDescription>
 					Un supervisor debe aprobar la solicitud. Después, LEGION apaga la
-					unidad y vos registrás su confirmación en la Ficha 360.
+					unidad y usted registra su confirmación en la Ficha 360.
 				</DialogDescription>
 			</DialogHeader>
 
 			<div className="space-y-5">
 				<section className="space-y-2">
 					<Label>
-						¿Por qué se apaga? <span className="text-red-600">*</span>
+						Motivo del apagado <span className="text-red-600">*</span>
 					</Label>
 					<div className="grid gap-2 sm:grid-cols-2">
 						{Object.entries(MOTIVOS_INMOVILIZACION).map(([clave, label]) => (
@@ -181,7 +179,7 @@ function FormularioApagado({
 					<Textarea
 						id="motivo-apagado-detalle"
 						onChange={(e) => setDetalle(e.target.value)}
-						placeholder="Ej: Tercera promesa rota este mes y ya no contesta"
+						placeholder="Ej.: Tercera promesa incumplida este mes y ya no contesta"
 						rows={2}
 						value={detalle}
 					/>
@@ -193,12 +191,12 @@ function FormularioApagado({
 						errorRed={gps.errorRed}
 						onActualizar={gps.actualizar}
 						resultado={gps.resultado}
-						titulo="Dónde está el vehículo"
+						titulo="Ubicación del vehículo"
 					/>
 					<Input
 						aria-label="Dirección o referencia"
 						onChange={(e) => setDireccion(e.target.value)}
-						placeholder="Dirección o referencia (ej: casa de la mamá, 3a calle 4-10 zona 7)"
+						placeholder="Dirección o referencia (Ej.: casa de la madre, 3a calle 4-10 zona 7)"
 						value={direccion}
 					/>
 					<Input
@@ -283,7 +281,7 @@ function FormularioReactivacion({
 	const pagoElegido = pagos.find((p) => p.pagoId === pagoId) ?? null;
 	// Mismas reglas que el server: el botón se habilita con lo que va a aceptar.
 	const error = !quePaso
-		? "Elegí qué pasó."
+		? "Seleccione el motivo de la reactivación."
 		: erroresRespaldoReactivacion(quePaso, {
 				pago: quePasoRequierePago(quePaso) ? pagoElegido : undefined,
 				promesa: quePasoRequierePromesa(quePaso) ? promesa : undefined,
@@ -295,14 +293,14 @@ function FormularioReactivacion({
 				<DialogTitle>Solicitar reactivación de unidad</DialogTitle>
 				<DialogDescription>
 					Un supervisor debe aprobar la solicitud. Después, LEGION reactiva la
-					unidad y vos registrás su confirmación en la Ficha 360.
+					unidad y usted registra su confirmación en la Ficha 360.
 				</DialogDescription>
 			</DialogHeader>
 
 			<div className="space-y-5">
 				<section className="space-y-2">
 					<Label>
-						¿Qué pasó? <span className="text-red-600">*</span>
+						Motivo de la reactivación <span className="text-red-600">*</span>
 					</Label>
 					<div className="grid gap-2 sm:grid-cols-2">
 						{CLAVES_QUE_PASO_REACTIVACION.map((clave) => (
@@ -348,8 +346,8 @@ function FormularioReactivacion({
 							!respaldo.data.errorPagos &&
 							pagos.length === 0 && (
 								<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-									No hay pagos registrados después del apagado. Registrá el pago
-									primero con «Registrar Pago» y volvé acá.
+									No hay pagos registrados después del apagado. Registre primero
+									el pago con «Registrar Pago» y vuelva aquí.
 								</p>
 							)}
 						<div className="space-y-1.5">
@@ -403,8 +401,8 @@ function FormularioReactivacion({
 							</p>
 						) : (
 							<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-								El caso no tiene una promesa de pago activa. Registrala primero
-								con «Promesa / Convenio» y volvé acá.
+								El caso no tiene una promesa de pago activa. Registre primero la
+								promesa con «Promesa / Convenio» y vuelva aquí.
 							</p>
 						)}
 					</section>
@@ -418,7 +416,7 @@ function FormularioReactivacion({
 						id="detalle-reactivacion"
 						maxLength={2000}
 						onChange={(e) => setDetalle(e.target.value)}
-						placeholder="Ej: Depositó hoy en ventanilla y el banco ya acreditó"
+						placeholder="Ej.: Depositó hoy en ventanilla y el banco ya acreditó"
 						rows={2}
 						value={detalle}
 					/>

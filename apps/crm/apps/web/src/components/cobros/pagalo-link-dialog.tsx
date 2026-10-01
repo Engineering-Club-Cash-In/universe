@@ -205,11 +205,11 @@ export function PagaloLinkDialog({
 				);
 			else
 				toast.success(
-					`Links Págalo listos: ${q(result.totalAmount)}. No se pudo enviar el WhatsApp al cliente, compartí el link manualmente.`,
+					`Links Págalo listos: ${q(result.totalAmount)}. No se pudo enviar el WhatsApp al cliente; comparta el link manualmente.`,
 				);
 			if (result.gestionRegistrada === false)
 				toast.warning(
-					"Links creados, pero no se pudo registrar la gestión. Puedes reintentar sin generar links duplicados.",
+					"Links creados, pero no se pudo registrar la gestión. Puede reintentar sin generar links duplicados.",
 				);
 		},
 		onError: (error: Error) => {
@@ -228,8 +228,7 @@ export function PagaloLinkDialog({
 			invalidarDatosPagalo();
 			if (result.gestionRegistrada)
 				toast.success("Gestión Págalo registrada en el historial del caso.");
-			else
-				toast.error("No se pudo registrar la gestión. Intenta más tarde.");
+			else toast.error("No se pudo registrar la gestión. Intente más tarde.");
 		},
 		onError: (error: Error) => {
 			invalidarDatosPagalo();
@@ -310,11 +309,11 @@ export function PagaloLinkDialog({
 			mutation.reset();
 			console.log("[Págalo] resultado del poll:", result);
 			toast.success(
-				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revisa la consola.`,
+				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revise la consola.`,
 			);
 		},
 		onError: (error: Error) =>
-			toast.error(error.message || "Falló correr el poll de Págalo"),
+			toast.error(error.message || "No se pudo ejecutar el poll de Págalo"),
 	});
 	// CB-127: probarPollPagalo pasó a cobrosSupervisorProcedure — el botón
 	// era visible para cualquier asesor sin gate, y disparaba el poller
@@ -353,7 +352,7 @@ export function PagaloLinkDialog({
 						    cuotas. Los recién creados ya se anuncian abajo. */}
 						{links.length > 0 && linksRecienCreados.length === 0
 							? "Este crédito ya tiene links de pago generados. Se muestran los existentes; no se pueden crear nuevos hasta que se paguen o se cancelen."
-							: "Sandbox. Capital y mora/intereses salen en links separados. Links no expiran."}
+							: "Sandbox. Capital y mora/intereses se generan en links separados. Los links no expiran."}
 					</DialogDescription>
 				</DialogHeader>
 				<div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -441,7 +440,7 @@ export function PagaloLinkDialog({
 								{reviewRequired && (
 									<p className="mt-3 flex items-start gap-1.5 text-amber-700 text-xs dark:text-amber-500">
 										<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-										Este grupo quedó marcado para revisión: verificá el estado
+										Este grupo quedó marcado para revisión: verifique el estado
 										antes de compartir los links.
 									</p>
 								)}
@@ -453,7 +452,7 @@ export function PagaloLinkDialog({
 											? "El cliente ya generó estos links desde WhatsApp; se muestran los mismos."
 											: mutation.data?.whatsappEnviado === null
 												? "Ya existían links de pago para este crédito."
-												: "Grupo creado. Compartí solo los links necesarios."}
+												: "Grupo creado. Comparta solo los links necesarios."}
 									</p>
 									{mutation.data?.origen !== "BOT" &&
 										mutation.data?.whatsappEnviado !== null &&
@@ -465,7 +464,7 @@ export function PagaloLinkDialog({
 										) : (
 											<p className="flex items-center gap-1.5 text-amber-700 text-xs">
 												<AlertTriangle className="h-3.5 w-3.5" />
-												No se pudo enviar el WhatsApp al cliente, compartí el
+												No se pudo enviar el WhatsApp al cliente; comparta el
 												link manualmente.
 											</p>
 										))}
@@ -485,7 +484,7 @@ export function PagaloLinkDialog({
 											toast.success("Link copiado");
 										} catch {
 											toast.error(
-												"No se pudo copiar el link. Intentá de nuevo.",
+												"No se pudo copiar el link. Intente de nuevo.",
 											);
 										}
 									};
@@ -548,7 +547,7 @@ export function PagaloLinkDialog({
 							    —que es el número con el que el asesor decide. */}
 							<div className="flex items-end justify-between gap-4">
 								<div>
-									<p className="font-semibold text-base">Qué se va a cobrar</p>
+									<p className="font-semibold text-base">Conceptos a cobrar</p>
 									<p className="text-muted-foreground text-xs">
 										Cada cuota se cobra completa; la mora vigente siempre va
 										incluida.
@@ -683,7 +682,7 @@ export function PagaloLinkDialog({
 										<span>
 											<span className="block font-medium">Otros</span>
 											<span className="block text-muted-foreground text-xs">
-												Cargo manual que viaja junto con el link de mora e
+												Cargo manual que se incluye en el link de mora e
 												intereses
 											</span>
 										</span>
@@ -706,7 +705,8 @@ export function PagaloLinkDialog({
 										/>
 										{!otrosParseado?.valid && (
 											<p className="text-destructive text-xs">
-												Ingresá monto mayor que Q0.00, con máximo dos decimales.
+												Ingrese un monto mayor que Q0.00, con máximo dos
+												decimales.
 											</p>
 										)}
 									</div>
@@ -715,7 +715,7 @@ export function PagaloLinkDialog({
 							{(selected.length > 0 || tieneMora || otrosActivo) && (
 								<div className="rounded-xl border border-violet-200 bg-violet-50/60 p-5 dark:border-violet-900 dark:bg-violet-950/30">
 									<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-										Links que se van a crear
+										Links a crear
 									</p>
 									<div className="mt-3 space-y-1.5 text-sm">
 										{preview.capital > 0 && (

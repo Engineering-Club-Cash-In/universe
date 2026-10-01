@@ -126,8 +126,6 @@ export function ConvenioModal({
 
 	const [seleccion, setSeleccion] = useState<number[]>([]);
 	const [meses, setMeses] = useState<number>(1);
-	// null = usar la fórmula; string = el asesor lo editó a mano.
-	const [montoManual, setMontoManual] = useState<string | null>(null);
 	const [motivo, setMotivo] = useState("");
 	const [observaciones, setObservaciones] = useState("");
 
@@ -140,7 +138,6 @@ export function ConvenioModal({
 		if (!open) return;
 		setSeleccion(idsVencidas);
 		setMeses(1);
-		setMontoManual(null);
 		setMotivo("");
 		setObservaciones("");
 	}, [open]);
@@ -149,13 +146,9 @@ export function ConvenioModal({
 		seleccion.includes(c.cuotaId),
 	);
 	const totalCuotas = seleccionadas.reduce((acc, c) => acc + c.monto, 0);
-	const totalFormula = Math.round((totalCuotas + montoMora) * 100) / 100;
-	const montoManualNum =
-		montoManual !== null ? Number(montoManual) : Number.NaN;
-	const total =
-		montoManual !== null && Number.isFinite(montoManualNum)
-			? montoManualNum
-			: totalFormula;
+	// El total NO se edita (pedido del PM, 2026-10-01): son las cuotas que se
+	// marquen más la mora. Para cambiarlo se marcan o desmarcan cuotas.
+	const total = Math.round((totalCuotas + montoMora) * 100) / 100;
 	const cuotaConvenio = meses > 0 ? total / meses : 0;
 
 	const toggle = (cuotaId: number) =>
@@ -173,12 +166,11 @@ export function ConvenioModal({
 				numeroMeses: meses,
 				motivo: motivo.trim(),
 				observaciones: observaciones.trim() || undefined,
-				// SIEMPRE el total que el asesor tiene en pantalla, lo haya
-				// editado o no. Antes solo se mandaba el editado y el server
-				// recalculaba con la cuota estándar del crédito: si alguna cuota
-				// tenía otro monto, o la mora cambiaba entre que se abrió el
-				// modal y se confirmó, el convenio nacía por una cifra distinta
-				// a la aprobada (hallazgo de Codex, PR #1570).
+				// SIEMPRE el total que el asesor tiene en pantalla. Si no se
+				// manda, el server recalcula con la cuota estándar del crédito:
+				// si alguna cuota tenía otro monto, o la mora cambiaba entre que
+				// se abrió el modal y se confirmó, el convenio nacía por una
+				// cifra distinta a la aprobada (hallazgo de Codex, PR #1570).
 				montoTotal: total,
 			})) as ResultadoConvenio,
 		onSuccess: (r) => {
@@ -216,10 +208,10 @@ export function ConvenioModal({
 				<DialogHeader className="px-6 pt-6">
 					<DialogTitle className="flex items-center gap-2">
 						<Handshake className="h-4 w-4 text-blue-700 dark:text-blue-300" />
-						Convenio de Pago - {clienteNombre}
+						Convenio de pago - {clienteNombre}
 					</DialogTitle>
 					<DialogDescription>
-						Toma la deuda de las cuotas elegidas más la mora vigente y la
+						Toma la deuda de las cuotas seleccionadas más la mora vigente y la
 						reparte en cuotas mensuales que se cobran junto con la cuota normal.
 						Al crearse, la mora se elimina y el crédito pasa a En Convenio;
 						queda pendiente de activación en cartera.
@@ -355,7 +347,7 @@ export function ConvenioModal({
 										{seleccionadas.length === 1 ? "" : "s"})
 									</span>
 									<span className="font-bold text-base tabular-nums">
-										{Q(totalFormula)}
+										{Q(total)}
 									</span>
 								</div>
 							</div>
@@ -387,25 +379,16 @@ export function ConvenioModal({
 								</p>
 							</div>
 							<div className="space-y-2">
-								<div className="flex items-center justify-between">
-									<Label htmlFor="convenio-total">Monto total (editable)</Label>
-									{montoManual !== null && (
-										<button
-											type="button"
-											className="text-primary text-xs underline-offset-2 hover:underline"
-											onClick={() => setMontoManual(null)}
-										>
-											Restablecer
-										</button>
-									)}
-								</div>
+								<Label htmlFor="convenio-total">Monto total</Label>
 								<CurrencyInput
 									id="convenio-total"
-									value={
-										montoManual !== null ? montoManual : totalFormula.toFixed(2)
-									}
-									onChange={(v) => setMontoManual(v)}
+									value={total.toFixed(2)}
+									onChange={() => {}}
+									disabled
 								/>
+								<p className="text-muted-foreground text-xs">
+									Cuotas seleccionadas más la mora.
+								</p>
 							</div>
 						</div>
 
@@ -430,7 +413,7 @@ export function ConvenioModal({
 								id="convenio-motivo"
 								value={motivo}
 								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ejemplo: cliente solicita convenio por dificultades económicas temporales"
+								placeholder="Ej.: cliente solicita convenio por dificultades económicas temporales"
 								rows={2}
 								required
 							/>

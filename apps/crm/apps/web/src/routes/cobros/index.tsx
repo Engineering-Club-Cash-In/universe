@@ -284,7 +284,8 @@ function EmbudoRow({
 					{estadoStats.totalCases > 5 && (
 						<div className="border-t px-3 py-2 text-center">
 							<span className="text-muted-foreground text-xs">
-								Mostrando top 5 de {estadoStats.totalCases} casos
+								Mostrando los 5 casos de mayor capital de{" "}
+								{estadoStats.totalCases}
 							</span>
 						</div>
 					)}
@@ -638,7 +639,7 @@ function RouteComponent() {
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
-						No tienes permisos para acceder a la sección de cobros.
+						No tiene permisos para acceder a la sección de cobros.
 					</p>
 				</div>
 			</div>
@@ -734,7 +735,7 @@ function RouteComponent() {
 									{dashboardStats.data?.totalCasosAsignados || 0}
 								</div>
 								<p className="text-muted-foreground text-xs">
-									Casos bajo tu responsabilidad
+									Casos bajo su responsabilidad
 								</p>
 							</>
 						)}
@@ -827,7 +828,7 @@ function RouteComponent() {
 					<Card className="h-full transition-colors hover:bg-muted/50">
 						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 							<CardTitle className="font-medium text-sm">
-								Promesas activas
+								Promesas de pago activas
 							</CardTitle>
 							<Target className="h-4 w-4 text-muted-foreground" />
 						</CardHeader>
@@ -870,7 +871,7 @@ function RouteComponent() {
 								{promesasStats?.incumplidas ?? 0}
 							</div>
 							<p className="text-muted-foreground text-xs">
-								Promesas que se cayeron
+								Promesas de pago no cumplidas
 							</p>
 						</CardContent>
 					</Card>
@@ -885,8 +886,8 @@ function RouteComponent() {
 						Embudo de Cobranza
 					</CardTitle>
 					<CardDescription>
-						Distribución de casos por estado de mora — click en una etapa para
-						ver los casos de mayor capital
+						Distribución de casos por estado de mora — haga clic en una etapa
+						para ver los casos de mayor capital
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

@@ -410,11 +410,11 @@ function RegistrarPagoPage() {
 
 	const registrarPagoMutation = useMutation({
 		mutationFn: async () => {
-			if (!cuotaSeleccionada) throw new Error("Selecciona una cuota a pagar");
-			if (!fechaBoleta) throw new Error("Selecciona la fecha de la boleta");
+			if (!cuotaSeleccionada) throw new Error("Seleccione la cuota a pagar");
+			if (!fechaBoleta) throw new Error("Seleccione la fecha de la boleta");
 			if (!credito) throw new Error("No se pudo cargar el crédito");
-			if (!bancoId) throw new Error("Selecciona el banco");
-			if (!origenPago) throw new Error("Selecciona el origen del pago");
+			if (!bancoId) throw new Error("Seleccione el banco");
+			if (!origenPago) throw new Error("Seleccione el origen del pago");
 
 			let urlBoletas: string[] = [];
 			if (archivo) {
@@ -501,7 +501,7 @@ function RegistrarPagoPage() {
 			// silencio.
 			if (data?.gestionRegistrada === false) {
 				toast.warning(
-					"El pago se aplicó correctamente, pero no se pudo registrar como gestión en el historial del caso. Avisa a soporte para que lo agregue manualmente.",
+					"El pago se aplicó correctamente, pero no se pudo registrar como gestión en el historial del caso. Informe a soporte para que lo agregue manualmente.",
 					{ duration: 10000 },
 				);
 			}
@@ -537,7 +537,7 @@ function RegistrarPagoPage() {
 
 	function handleAbrirConfirmacion() {
 		if (!cuotaSeleccionada) {
-			toast.error("Selecciona una cuota a pagar");
+			toast.error("Seleccione la cuota a pagar");
 			return;
 		}
 		// CB-128: mientras getAbonosCuotaParaPago carga o falla, abonosYaHechos
@@ -547,17 +547,19 @@ function RegistrarPagoPage() {
 		// pago server-side, pero el asesor vería una distribución incorrecta
 		// antes de confirmar.
 		if (abonosCuotaQuery.isLoading) {
-			toast.error("Cargando abonos previos de la cuota, espera un momento");
+			toast.error(
+				"Se están cargando los abonos previos de la cuota. Espere un momento.",
+			);
 			return;
 		}
 		if (abonosCuotaQuery.isError) {
 			toast.error(
-				"No se pudieron cargar los abonos previos de la cuota, intenta de nuevo",
+				"No se pudieron cargar los abonos previos de la cuota. Intente de nuevo.",
 			);
 			return;
 		}
 		if (!montoBoletaNum || montoBoletaNum <= 0) {
-			toast.error("Indica el monto de la boleta");
+			toast.error("Ingrese el monto de la boleta");
 			return;
 		}
 		// CB-128: mismo refine (en centavos enteros) que registrarPagoCompleto
@@ -568,15 +570,15 @@ function RegistrarPagoPage() {
 			return;
 		}
 		if (!bancoId) {
-			toast.error("Selecciona el banco");
+			toast.error("Seleccione el banco");
 			return;
 		}
 		if (!origenPago) {
-			toast.error("Selecciona el origen del pago");
+			toast.error("Seleccione el origen del pago");
 			return;
 		}
 		if (!fechaBoleta) {
-			toast.error("Selecciona la fecha de la boleta");
+			toast.error("Seleccione la fecha de la boleta");
 			return;
 		}
 		// CB-128: segunda capa de defensa además del disabled del Calendar —
@@ -587,7 +589,7 @@ function RegistrarPagoPage() {
 			return;
 		}
 		if (!archivo) {
-			toast.error("Adjunta la boleta o comprobante de pago");
+			toast.error("Adjunte la boleta o el comprobante de pago");
 			return;
 		}
 		// CB-128: mismos límites de registrarPagoCompleto (cobros.ts:4371-4372)
@@ -659,9 +661,9 @@ function RegistrarPagoPage() {
 									Boleta de pago
 								</CardTitle>
 								<p className="text-muted-foreground text-sm">
-									Subí el comprobante y leemos los datos automáticamente — mismo
-									lector que usa el bot de WhatsApp. Revisalos antes de
-									registrar.
+									Suba el comprobante y el sistema leerá los datos
+									automáticamente con el mismo lector del bot de WhatsApp.
+									Revíselos antes de registrar.
 								</p>
 							</CardHeader>
 							<CardContent className="space-y-4">
@@ -727,7 +729,7 @@ function RegistrarPagoPage() {
 											<Upload className="h-5 w-5 text-muted-foreground" />
 										</span>
 										<span className="font-medium text-sm">
-											Arrastrá la boleta acá o hacé clic para elegirla
+											Arrastre la boleta aquí o haga clic para seleccionarla
 										</span>
 										<span className="text-muted-foreground text-xs">
 											JPG, PNG o PDF · hasta 10 MB
@@ -772,9 +774,9 @@ function RegistrarPagoPage() {
 										<div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
 											<ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
 											<span>
-												El archivo no parece un comprobante bancario. Revisá que
-												sea la boleta correcta; podés registrar el pago igual
-												llenando los datos a mano.
+												El archivo no parece un comprobante bancario. Verifique
+												que sea la boleta correcta; también puede registrar el
+												pago ingresando los datos manualmente.
 											</span>
 										</div>
 									)}
@@ -830,21 +832,21 @@ function RegistrarPagoPage() {
 											lectura.camposNoLeidos.length > 0) && (
 											<ul className="space-y-1 text-amber-800 text-xs dark:text-amber-300">
 												{lectura.monto === null && (
-													<li>• No se leyó el monto: escribilo a mano.</li>
+													<li>• No se leyó el monto: ingréselo manualmente.</li>
 												)}
 												{lectura.bancoId === null && (
 													<li>
-														• No reconocimos el banco
+														• No se reconoció el banco
 														{lectura.bancoLeido
 															? ` ("${lectura.bancoLeido}")`
 															: ""}
-														: elegilo de la lista.
+														: selecciónelo de la lista.
 													</li>
 												)}
 												{lectura.fechaCorregida && (
 													<li>
-														• No se leyó la fecha: quedó la de hoy, corregila si
-														la boleta es de otro día.
+														• No se leyó la fecha: se usó la de hoy. Corríjala
+														si la boleta es de otro día.
 													</li>
 												)}
 												{lectura.camposNoLeidos
@@ -876,8 +878,8 @@ function RegistrarPagoPage() {
 									Datos del pago
 								</CardTitle>
 								<p className="text-muted-foreground text-sm">
-									Se llenan con lo que leímos del comprobante. Corregí lo que
-									haga falta.
+									Se completan con los datos leídos del comprobante. Corrija lo
+									que sea necesario.
 								</p>
 							</CardHeader>
 							<CardContent className="space-y-4">
@@ -900,7 +902,7 @@ function RegistrarPagoPage() {
 										<Combobox
 											onChange={setBancoId}
 											options={bancoOptions}
-											placeholder="Selecciona banco"
+											placeholder="Seleccionar banco"
 											popOverWidth="full"
 											value={bancoId}
 											width="full"
@@ -916,7 +918,7 @@ function RegistrarPagoPage() {
 											value={origenPago}
 										>
 											<SelectTrigger className="w-full">
-												<SelectValue placeholder="Selecciona origen" />
+												<SelectValue placeholder="Seleccionar origen" />
 											</SelectTrigger>
 											<SelectContent>
 												<SelectItem value="transferencia">
@@ -933,7 +935,7 @@ function RegistrarPagoPage() {
 										<Input
 											maxLength={100}
 											onChange={(e) => setNumeroAutorizacion(e.target.value)}
-											placeholder="Ej: 123456789"
+											placeholder="Ej.: 123456789"
 											value={numeroAutorizacion}
 										/>
 									</div>

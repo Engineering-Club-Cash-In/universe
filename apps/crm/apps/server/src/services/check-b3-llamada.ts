@@ -152,7 +152,7 @@ async function crearTareas(params: {
 			cobrosTipo: "b3_llamada_supervisor",
 			type: "action_required",
 			titulo: "Llamar al cliente: ingresó a B3",
-			descripcion: `El crédito ${e.numero_credito_sifco} (${e.cliente}) ingresó a ${e.bucket_nuevo_nombre ?? "B3"}. Llamá al cliente antes del ${fechaLegibleGT(vence)} para intervenir; si no se cumple, se genera una alerta.`,
+			descripcion: `El crédito ${e.numero_credito_sifco} (${e.cliente}) ingresó a ${e.bucket_nuevo_nombre ?? "B3"}. Llame al cliente antes del ${fechaLegibleGT(vence)} para intervenir; si no se cumple, se generará una alerta.`,
 			asesorUserId: null, // la tarea es del supervisor
 			supervisores: params.supervisores,
 			usuarioSistema: params.usuarioSistema,

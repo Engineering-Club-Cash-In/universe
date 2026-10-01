@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+	type CatalogoJustificaciones,
 	combinarChecklist,
 	type EvidenciaGestion,
 	esRecuperacionEfectiva,
@@ -135,8 +136,10 @@ describe("evaluarChecklist", () => {
 				gps: { vinculado: false, consultas: 0, ultima: null },
 			}),
 		);
-		expect(paso(pasos, "visita_trabajo").sugerencia).toBe("sin_datos");
-		expect(paso(pasos, "referencias").sugerencia).toBe("sin_datos");
+		expect(paso(pasos, "visita_trabajo").sugerencia).toBe(
+			"sin_datos_laborales",
+		);
+		expect(paso(pasos, "referencias").sugerencia).toBe("sin_referencias");
 		expect(paso(pasos, "ubicacion_gps").sugerencia).toBe("sin_gps");
 		expect(paso(pasos, "apagado_unidad").sugerencia).toBe("sin_gps");
 	});
@@ -151,6 +154,15 @@ describe("evaluarChecklist", () => {
 				evidencia({ apagado: { estado, fecha: HACE_DIAS(1) } }),
 			);
 			expect(paso(pasos, "apagado_unidad").estado).toBe("parcial");
+			expect(paso(pasos, "apagado_unidad").sugerencia).toBe(
+				estado === "rechazada" ? "apagado_rechazado" : "apagado_pendiente",
+			);
+		}
+	});
+
+	it("cada paso pregunta por qué no se hizo", () => {
+		for (const def of PASOS_CHECKLIST_RECUPERACION) {
+			expect(def.pregunta).toMatch(/^¿Por qué no .+\?$/);
 		}
 	});
 });
@@ -162,39 +174,75 @@ describe("combinarChecklist", () => {
 				llamadas: { total: 3, contestadas: 0, ultima: HACE_DIAS(1) },
 			}),
 		);
+	// Un catálogo de prueba: cada paso con su "otro" y una razón propia.
+	const catalogo: CatalogoJustificaciones = Object.fromEntries(
+		PASOS_CHECKLIST_RECUPERACION.map((d) => [
+			d.clave,
+			[
+				{ clave: `propia_${d.clave}`, etiqueta: `Razón de ${d.titulo}` },
+				{ clave: "otro", etiqueta: "Otro motivo" },
+			],
+		]),
+	);
 	const justificarTodo = (pasos: PasoEvaluado[]): RespuestaPaso[] =>
 		pasos
 			.filter((p) => p.estado !== "hecho")
-			.map((p) => ({ paso: p.paso, justificacion: "no_aplica" }));
+			.map((p) => ({ paso: p.paso, justificacion: "otro" }));
 
 	it("pide justificar cada paso que no está hecho", () => {
-		const r = combinarChecklist(evaluados(), []);
-		expect("error" in r && r.error).toContain("Justificá");
+		const r = combinarChecklist(evaluados(), [], catalogo);
+		expect("error" in r && r.error).toContain("Seleccione la justificación");
 	});
 
-	it("con todo justificado devuelve el checklist para guardar", () => {
+	it("con todo justificado devuelve el checklist con la etiqueta elegida", () => {
 		const pasos = evaluados();
-		const r = combinarChecklist(pasos, justificarTodo(pasos));
+		const r = combinarChecklist(pasos, justificarTodo(pasos), catalogo);
 		if ("error" in r) throw new Error(r.error);
 		expect(r.checklist).toHaveLength(PASOS_CHECKLIST_RECUPERACION.length);
 		const llamadas = r.checklist.find((p) => p.paso === "llamadas_cliente");
-		expect(llamadas).toMatchObject({ estado: "hecho", justificacion: null });
+		expect(llamadas).toMatchObject({
+			estado: "hecho",
+			justificacion: null,
+			justificacionEtiqueta: null,
+		});
+		const mensajes = r.checklist.find((p) => p.paso === "mensajes");
+		expect(mensajes).toMatchObject({
+			justificacion: "otro",
+			justificacionEtiqueta: "Otro motivo",
+		});
 		expect(resumenChecklist(r.checklist).texto).toBe("1 de 9 pasos hechos");
 	});
 
-	it("«Otro» y «se hizo fuera del CRM» necesitan nota", () => {
+	it("la nota es siempre opcional, también con «Otro motivo»", () => {
+		const pasos = evaluados();
+		const r = combinarChecklist(pasos, justificarTodo(pasos), catalogo);
+		expect("checklist" in r).toBe(true);
+	});
+
+	it("cada paso solo acepta las razones de SU catálogo", () => {
 		const pasos = evaluados();
 		const respuestas = justificarTodo(pasos).map((r) =>
 			r.paso === "mensajes"
-				? { ...r, justificacion: "hecho_fuera_del_crm" as const }
+				? { ...r, justificacion: "propia_promesa_pago" }
 				: r,
 		);
-		const r = combinarChecklist(pasos, respuestas);
-		expect("error" in r && r.error).toContain("nota");
-		const conNota = respuestas.map((x) =>
-			x.paso === "mensajes" ? { ...x, nota: "Le escribí desde mi celular" } : x,
+		const r = combinarChecklist(pasos, respuestas, catalogo);
+		expect("error" in r && r.error).toContain("ya no está disponible");
+		const propia = justificarTodo(pasos).map((x) =>
+			x.paso === "mensajes" ? { ...x, justificacion: "propia_mensajes" } : x,
 		);
-		expect("checklist" in combinarChecklist(pasos, conNota)).toBe(true);
+		expect("checklist" in combinarChecklist(pasos, propia, catalogo)).toBe(
+			true,
+		);
+	});
+
+	it("un paso sin razones activas no se puede justificar", () => {
+		const pasos = evaluados();
+		const r = combinarChecklist(pasos, justificarTodo(pasos), {
+			...catalogo,
+			mensajes: [],
+		});
+		expect("error" in r && r.error).toContain("no tiene justificaciones");
 	});
 
 	it("la evidencia sale del servidor: un paso sin registro no se da por hecho con una nota", () => {
@@ -203,7 +251,7 @@ describe("combinarChecklist", () => {
 			...justificarTodo(pasos).filter((r) => r.paso !== "visita_residencia"),
 			{ paso: "visita_residencia", nota: "Fui ayer, no quedó" },
 		];
-		const r = combinarChecklist(pasos, respuestas);
+		const r = combinarChecklist(pasos, respuestas, catalogo);
 		expect("error" in r && r.error).toContain("Visita a la residencia");
 	});
 });
@@ -215,9 +263,22 @@ describe("leerChecklistGuardado", () => {
 		const leido = leerChecklistGuardado([
 			null,
 			{ paso: "llamada_supervisor", estado: "hecho", evidencia: "x" },
-			{ paso: "mensajes", estado: "raro", justificacion: "inventada" },
+			{ paso: "mensajes", estado: "raro" },
+			{ paso: "promesa_pago", justificacion: "nadie_contesta" },
+			{
+				paso: "convenio_pago",
+				justificacion: "cliente_rechaza",
+				justificacionEtiqueta: "El cliente rechazó la propuesta de convenio",
+			},
 		]);
-		expect(leido).toHaveLength(2);
+		expect(leido).toHaveLength(4);
+		// Las de antes de la 0074 no traen etiqueta: sale del catálogo viejo.
+		expect(leido?.[2]?.justificacionEtiqueta).toBe(
+			"Nadie contesta en ningún número",
+		);
+		expect(leido?.[3]?.justificacionEtiqueta).toBe(
+			"El cliente rechazó la propuesta de convenio",
+		);
 		expect(leido?.[0]).toMatchObject({
 			titulo: "llamada_supervisor",
 			estado: "hecho",
@@ -260,7 +321,7 @@ describe("avisos", () => {
 			solicitante: "Carlos Asesor",
 			resumen: "6 de 11 pasos hechos",
 		});
-		expect(titulo).toBe("Solicitud de recuperación de vehículo");
+		expect(titulo).toBe("Solicitud de recuperación del vehículo");
 		expect(descripcion).toContain("Juan Pérez (01010214112180) (B3)");
 		expect(descripcion).toContain("Carlos Asesor");
 		expect(descripcion).toContain("6 de 11 pasos hechos");

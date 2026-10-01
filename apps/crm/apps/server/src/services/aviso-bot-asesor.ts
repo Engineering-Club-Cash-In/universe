@@ -307,12 +307,12 @@ export async function avisarAsesorPorInteraccionBot(
 		// Cuando el bot le falló, decirlo: es la diferencia entre "escribió" y
 		// "escribió y se quedó sin respuesta", que cambia la urgencia.
 		const cierre = params.exito
-			? "Dale seguimiento: si escribió es porque algo necesita."
-			: "El bot no pudo completarlo, así que sigue esperando. Llamalo.";
+			? "Dé seguimiento: si escribió, es porque necesita algo."
+			: "El bot no pudo completar la solicitud y el cliente sigue esperando. Llame al cliente.";
 		await db
 			.insert(notifications)
 			.values({
-				titulo: "Tu cliente escribió por WhatsApp",
+				titulo: "Un cliente suyo escribió por WhatsApp",
 				descripcion: `${quien} ${queHizo} en el bot. ${cierre}`,
 				type: "reminder",
 				status: "pending",

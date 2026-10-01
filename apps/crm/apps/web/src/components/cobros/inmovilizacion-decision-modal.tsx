@@ -80,7 +80,7 @@ export function DecisionInmovilizacionModal({
 						/>
 						{!motivoValido && motivoRechazo.length > 0 && (
 							<p className="mt-1 text-destructive text-xs">
-								Ingresá al menos 5 caracteres.
+								Ingrese al menos 5 caracteres.
 							</p>
 						)}
 					</div>

@@ -419,7 +419,7 @@ function ColaDiaPage() {
 			{!colaQuery.isPending && colaQuery.isError && (
 				<Card>
 					<CardContent className="py-10 text-center text-destructive">
-						Error al cargar la cola del día. Intentá recargar la página.
+						Error al cargar la cola del día. Recargue la página.
 					</CardContent>
 				</Card>
 			)}
@@ -427,8 +427,8 @@ function ColaDiaPage() {
 			{!colaQuery.isPending && !colaQuery.isError && sinAsesor && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						Tu usuario no está vinculado a un asesor de cartera (por correo).
-						Pedile al supervisor que revise tu correo de asesor.
+						Su usuario no está vinculado a un asesor de cartera (por correo).
+						Solicite al supervisor que revise su correo de asesor.
 					</CardContent>
 				</Card>
 			)}
@@ -440,7 +440,7 @@ function ColaDiaPage() {
 					<CardContent className="py-10 text-center text-muted-foreground">
 						{esSupervisor && asesorForzado
 							? `${asesorForzado.nombre} está registrado como ausente hoy: su cola la está trabajando su suplente.`
-							: `Estás registrado como ausente hoy: tu cola la está trabajando tu suplente. Tu cartera sigue siendo tuya.`}
+							: `Hoy está registrado como ausente: su suplente está trabajando su cola. Su cartera sigue asignada a usted.`}
 					</CardContent>
 				</Card>
 			)}
@@ -452,7 +452,7 @@ function ColaDiaPage() {
 				total === 0 && (
 					<Card>
 						<CardContent className="py-10 text-center text-muted-foreground">
-							Sin cuentas pendientes en la cola de hoy. 🎉
+							No hay cuentas pendientes en la cola de hoy.
 						</CardContent>
 					</Card>
 				)}
@@ -472,7 +472,7 @@ function ColaDiaPage() {
 											<TableHead>Crédito</TableHead>
 											<TableHead>Categoría</TableHead>
 											<TableHead>Límite SLA</TableHead>
-											<TableHead>Promesa</TableHead>
+											<TableHead>Promesa de pago</TableHead>
 											<TableHead>Teléfono</TableHead>
 											{esSupervisor && asesorSel === "todos" && (
 												<TableHead>Asesor</TableHead>

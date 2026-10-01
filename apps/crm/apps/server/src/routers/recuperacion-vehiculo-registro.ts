@@ -122,7 +122,7 @@ async function resolverCreditoEnB4(
 			error,
 		);
 		throw new ORPCError("SERVICE_UNAVAILABLE", {
-			message: "No se pudo confirmar el bucket del crédito. Intentá de nuevo.",
+			message: "No se pudo confirmar el bucket del crédito. Intente de nuevo.",
 		});
 	}
 	if (bucket !== BUCKET_RECUPERACION) {
@@ -377,7 +377,7 @@ export const recuperacionVehiculoRegistroRouter = {
 				throw new ORPCError("CONFLICT", {
 					message:
 						resultado.conflicto === "mas_nuevo"
-							? "Hay un registro de recuperación más reciente. Confirmá la recepción sobre ese."
+							? "Hay un registro de recuperación más reciente. Confirme la recepción sobre ese registro."
 							: "La recepción de esta unidad ya estaba registrada.",
 				});
 			}

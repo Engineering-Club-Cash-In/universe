@@ -416,7 +416,7 @@ function ConveniosPage() {
 			{!conveniosQuery.isPending && conveniosQuery.isError && (
 				<Card>
 					<CardContent className="py-10 text-center text-destructive">
-						Error al cargar los convenios de pago. Intentá recargar la página.
+						Error al cargar los convenios de pago. Recargue la página.
 					</CardContent>
 				</Card>
 			)}
@@ -424,8 +424,8 @@ function ConveniosPage() {
 			{!conveniosQuery.isPending && !conveniosQuery.isError && sinAsesor && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						Tu usuario no está vinculado a un asesor de cartera (por correo).
-						Pedile al supervisor que revise tu correo de asesor.
+						Su usuario no está vinculado a un asesor de cartera (por correo).
+						Solicite al supervisor que revise su correo de asesor.
 					</CardContent>
 				</Card>
 			)}

@@ -133,7 +133,7 @@ export const registrarInvestigacionSchema = z.object({
 		.trim()
 		.min(
 			MIN_CARACTERES_HALLAZGOS,
-			`Contá qué encontraste (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres)`,
+			`Describa los hallazgos (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres)`,
 		)
 		.max(4000),
 	fechaInvestigacion: z.coerce.date(),
@@ -178,17 +178,16 @@ export function erroresRegistroInvestigacion(
 	const t = v.fechaInvestigacion.getTime();
 	if (Number.isNaN(t)) return "Falta la fecha de la investigación.";
 	if (t > ahora.getTime() + TOLERANCIA_RELOJ_MS) {
-		return "La investigación ya se hizo: la fecha no puede ser futura.";
+		return "La fecha de la investigación no puede ser futura.";
 	}
 	if (t < ahora.getTime() - DIAS_MAXIMOS_REGISTRO_TARDIO * DIA_MS) {
-		return `La investigación es de hace más de ${DIAS_MAXIMOS_REGISTRO_TARDIO} días: revisá la fecha.`;
+		return `La investigación tiene más de ${DIAS_MAXIMOS_REGISTRO_TARDIO} días. Verifique la fecha.`;
 	}
 
 	if (v.fuente === "otra") {
-		if (!v.fuenteOtra)
-			return "Marcaste «Otra»: escribí qué fuente consultaste.";
+		if (!v.fuenteOtra) return "Seleccionó «Otra»: indique qué fuente consultó.";
 	} else if (v.fuenteOtra) {
-		return "El nombre de otra fuente solo aplica si elegís «Otra».";
+		return "El nombre de otra fuente solo aplica si selecciona «Otra».";
 	}
 
 	if (v.enlacePerfil && !esUrlHttp(v.enlacePerfil)) {

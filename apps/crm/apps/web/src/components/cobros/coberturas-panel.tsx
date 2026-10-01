@@ -63,11 +63,11 @@ export function CoberturasPanel() {
 	const nombre = (userId: string) =>
 		asesores.data?.find((a) => a.userId === userId)?.nombre ?? userId;
 	const error = !origen
-		? "Selecciona el titular."
+		? "Seleccione el titular."
 		: !receptor
-			? "Selecciona un suplente habilitado para los buckets del titular."
+			? "Seleccione un suplente habilitado para los buckets del titular."
 			: !desde || !hasta || desde > hasta
-				? "Indica un rango de fechas válido."
+				? "Indique un rango de fechas válido."
 				: desde < hoyGT()
 					? "La cobertura debe comenzar hoy o después."
 					: null;
@@ -77,7 +77,7 @@ export function CoberturasPanel() {
 		retry: false,
 		mutationFn: () => {
 			if (!origen?.userId || !receptor?.userId)
-				throw new Error("Selecciona titular y suplente.");
+				throw new Error("Seleccione el titular y el suplente.");
 			return client.crearCobertura({
 				id,
 				titularId: origen.userId,
@@ -102,7 +102,7 @@ export function CoberturasPanel() {
 	const cancelar = useMutation({
 		mutationFn: () => {
 			if (!cancelarId)
-				throw new Error("Selecciona una cobertura para cancelar.");
+				throw new Error("Seleccione una cobertura para cancelar.");
 			return client.cancelarCobertura({ id: cancelarId });
 		},
 		onSuccess: () => {
@@ -127,7 +127,7 @@ export function CoberturasPanel() {
 						La cartera conserva su propietario.
 					</p>
 					<p className="rounded-md border border-amber-300 p-3 text-sm">
-						Durante el rango, tareas de agenda del titular aparecen para el
+						Durante el rango, las tareas de agenda del titular se muestran al
 						suplente. La cartera conserva su propietario.
 					</p>
 				</CardHeader>

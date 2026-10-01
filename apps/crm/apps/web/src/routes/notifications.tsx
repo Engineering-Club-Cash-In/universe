@@ -394,7 +394,7 @@ const COBROS_TIPO_CONFIG: Record<
 	// CB-042: un crédito llegó a recuperación de vehículo, o se registró una
 	// entrega voluntaria con el crédito ya en B4.
 	recuperacion_vehiculo: {
-		label: "Recuperación de vehículo",
+		label: "Recuperación del vehículo",
 		border: "border-amber-200 dark:border-amber-900/50",
 		bg: "bg-amber-50/50 dark:bg-amber-950/20",
 		icon: Car,
@@ -955,8 +955,8 @@ function NotificationsPage() {
 									: `${esperandoCount} clientes están esperando un asesor en WhatsApp`}
 							</p>
 							<p className="text-red-800/80 text-xs dark:text-red-300/80">
-								Pidieron hablar con una persona en el bot. Contestales desde
-								Witty Agent o llamalos.
+								Solicitaron hablar con una persona en el bot. Responda desde
+								Witty Agent o llámelos.
 							</p>
 						</div>
 					</div>

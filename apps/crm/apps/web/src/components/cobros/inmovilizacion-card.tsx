@@ -308,11 +308,11 @@ export function InmovilizacionCard({
 						{solicitudAbierta.estado === "aprobada" && (
 							<div className="mt-3 space-y-2">
 								<p className="text-muted-foreground">
-									Aprobada. Pedile a LEGION que{" "}
+									Aprobada. Solicite a LEGION que{" "}
 									{solicitudAbierta.accion === "apagado"
 										? "apague"
 										: "reactive"}{" "}
-									la unidad y, cuando lo confirme, registralo acá con su
+									la unidad y, cuando lo confirme, registre aquí su
 									confirmación.
 								</p>
 								<div className="flex flex-wrap gap-2">
@@ -500,8 +500,8 @@ function LlamarClienteBanner({
 			</p>
 			<p className="mt-1 text-amber-800 dark:text-amber-300">
 				{accion === "apagado"
-					? "Se ejecutó el apagado. Llamá al cliente para avisarle lo sucedido y registrá la llamada."
-					: "Se ejecutó la reactivación. Llamá al cliente para avisarle que ya puede usar el vehículo y registrá la llamada."}
+					? "Se ejecutó el apagado. Llame al cliente para informarle lo sucedido y registre la llamada."
+					: "Se ejecutó la reactivación. Llame al cliente para informarle que ya puede usar el vehículo y registre la llamada."}
 			</p>
 			<Button className="mt-3" onClick={onRegistrarLlamada} size="sm">
 				<PhoneCall className="mr-2 h-4 w-4" />

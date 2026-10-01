@@ -136,7 +136,7 @@ function DetalleAgenda({
 	if (query.isError) {
 		return (
 			<div className="border-t px-4 py-6 text-red-600 text-sm">
-				No se pudo cargar detalle.
+				No se pudo cargar el detalle.
 			</div>
 		);
 	}
@@ -407,7 +407,7 @@ export function CumplimientoAgendaPanel() {
 					<div>
 						<h1 className="font-bold text-2xl">Cumplimiento de agenda</h1>
 						<p className="text-gray-500 text-sm">
-							Agenda congelada a las 00:05 GT y evaluada al cerrar día completo.
+							Agenda congelada a las 00:05 GT y evaluada al cierre del día.
 						</p>
 					</div>
 				</div>
@@ -424,7 +424,7 @@ export function CumplimientoAgendaPanel() {
 						disabled={asesores.length === 0}
 					>
 						<SelectTrigger className="w-56">
-							<SelectValue placeholder="Seleccioná un asesor" />
+							<SelectValue placeholder="Seleccionar asesor" />
 						</SelectTrigger>
 						<SelectContent>
 							{asesores.map((fila) => (
@@ -443,7 +443,7 @@ export function CumplimientoAgendaPanel() {
 				</div>
 			) : query.isError ? (
 				<Card className="p-8 text-center text-red-600">
-					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
+					No se pudo cargar el cumplimiento de agenda. Intente de nuevo en unos
 					segundos.
 				</Card>
 			) : usuariosQuery.isError || asesoresConAgendaQuery.isError ? (
@@ -454,8 +454,8 @@ export function CumplimientoAgendaPanel() {
 				// selector como si de verdad no hubiera trabajado, en vez de "no
 				// se pudo saber" (hallazgo de code review, Codex).
 				<Card className="p-8 text-center text-red-600">
-					No se pudo cargar el catálogo completo de asesores. Reintentá en unos
-					segundos.
+					No se pudo cargar el catálogo completo de asesores. Intente de nuevo
+					en unos segundos.
 				</Card>
 			) : asesores.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">

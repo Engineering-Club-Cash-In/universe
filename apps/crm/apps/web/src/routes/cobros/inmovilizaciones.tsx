@@ -77,7 +77,7 @@ function InmovilizacionesPage() {
 			<div className="p-6">
 				<Card>
 					<CardContent className="pt-6 text-center text-muted-foreground">
-						No tenés permiso para ver esta página.
+						No tiene permiso para ver esta página.
 					</CardContent>
 				</Card>
 			</div>
@@ -166,7 +166,7 @@ function ColaInmovilizaciones() {
 									<TableHead>Cliente / Crédito</TableHead>
 									<TableHead>Acción</TableHead>
 									<TableHead>Motivo</TableHead>
-									<TableHead>Solicitó</TableHead>
+									<TableHead>Solicitado por</TableHead>
 									<TableHead className="text-right">Decisión</TableHead>
 								</TableRow>
 							</TableHeader>
@@ -264,8 +264,8 @@ function ColaInmovilizaciones() {
 					<CardTitle>Por ejecutar</CardTitle>
 					<CardDescription>
 						Aprobadas, esperando que LEGION las aplique. El asesor registra la
-						ejecución desde la Ficha 360, con la confirmación de LEGION; acá
-						solo se ve qué falta.
+						ejecución desde la Ficha 360, con la confirmación de LEGION; aquí
+						solo se muestra lo pendiente.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -437,9 +437,9 @@ function HistorialInmovilizaciones() {
 									<TableHead>Cliente / Crédito</TableHead>
 									<TableHead>Acción</TableHead>
 									<TableHead>Estado</TableHead>
-									<TableHead>Solicitó</TableHead>
-									<TableHead>Decidió</TableHead>
-									<TableHead>Ejecutó</TableHead>
+									<TableHead>Solicitado por</TableHead>
+									<TableHead>Decidido por</TableHead>
+									<TableHead>Ejecutado por</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>

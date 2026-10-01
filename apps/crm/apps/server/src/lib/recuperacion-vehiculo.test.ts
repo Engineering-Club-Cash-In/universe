@@ -196,7 +196,7 @@ describe("detalleRecuperacionSchema", () => {
 describe("textoMotivoCartera", () => {
 	it("lleva el tipo al principio, los motivos y el detalle", () => {
 		expect(textoMotivoCartera("tomado", forzosa())).toBe(
-			"Recuperación forzosa: Se atrasa constantemente, Incumple sus promesas de pago. Lleva tres promesas rotas este mes",
+			"Recuperación del vehículo: Se atrasa constantemente, Incumple sus promesas de pago. Lleva tres promesas rotas este mes",
 		);
 		expect(textoMotivoCartera("entrega_voluntaria", voluntaria())).toStartWith(
 			"Entrega voluntaria: Ya no puede pagar.",
@@ -206,7 +206,7 @@ describe("textoMotivoCartera", () => {
 	it("'Otro' no se escribe: lo explica el detalle", () => {
 		const d = forzosa({ motivos: ["otro"], motivoDetalle: "Se fue del país" });
 		expect(textoMotivoCartera("tomado", d)).toBe(
-			"Recuperación forzosa: Se fue del país",
+			"Recuperación del vehículo: Se fue del país",
 		);
 	});
 

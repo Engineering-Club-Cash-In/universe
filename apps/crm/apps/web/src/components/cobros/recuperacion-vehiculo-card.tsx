@@ -197,7 +197,7 @@ export function RecuperacionVehiculoCard({
 				<div className="flex flex-wrap items-center justify-between gap-2">
 					<CardTitle className="flex items-center gap-2">
 						<Car className="h-5 w-5" />
-						Recuperación de vehículo
+						Recuperación del vehículo
 					</CardTitle>
 					{vigente && (
 						<EncabezadoVigente
@@ -210,9 +210,11 @@ export function RecuperacionVehiculoCard({
 				{vigente && (
 					<p className="text-muted-foreground text-xs">
 						{vigente.trasladado
-							? `Enviado a recuperación el ${fecha(vigente.decididoAt ?? vigente.createdAt)}${vigente.registradoPor ? ` · lo pidió ${vigente.registradoPor}` : ""}${vigente.estadoSolicitud === "aprobada" && vigente.decidioPor && vigente.decidioPor !== vigente.registradoPor ? ` · lo aprobó ${vigente.decidioPor}` : ""}${vigente.bucketOrigen != null ? ` · de B${vigente.bucketOrigen} a B${vigente.bucketDestino ?? 4}` : ""}`
+							? `Enviado a recuperación el ${fecha(vigente.decididoAt ?? vigente.createdAt)}${vigente.registradoPor ? ` · solicitado por ${vigente.registradoPor}` : ""}${vigente.estadoSolicitud === "aprobada" && vigente.decidioPor && vigente.decidioPor !== vigente.registradoPor ? ` · aprobado por ${vigente.decidioPor}` : ""}${vigente.bucketOrigen != null ? ` · de B${vigente.bucketOrigen} a B${vigente.bucketDestino ?? 4}` : ""}`
 							: `Registrado el ${fecha(vigente.createdAt)}${vigente.registradoPor ? ` por ${vigente.registradoPor}` : ""}, con el crédito ya en B${vigente.bucketOrigen ?? 4}`}
-						{vigente.responsable ? ` · lo lleva ${vigente.responsable}` : ""}
+						{vigente.responsable
+							? ` · responsable: ${vigente.responsable}`
+							: ""}
 					</p>
 				)}
 			</CardHeader>
@@ -234,7 +236,7 @@ export function RecuperacionVehiculoCard({
 							: ""}
 						{cerradaReciente.decidioPor &&
 						cerradaReciente.estadoSolicitud === "rechazada"
-							? ` · la rechazó ${cerradaReciente.decidioPor}`
+							? ` · rechazada por ${cerradaReciente.decidioPor}`
 							: ""}
 						{cerradaReciente.motivoDecision
 							? `: ${cerradaReciente.motivoDecision}`
@@ -250,7 +252,7 @@ export function RecuperacionVehiculoCard({
 							<Collapsible className="border-t pt-3">
 								<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
 									<ChevronDown className="h-4 w-4" />
-									Lo que se hizo antes de mandarlo ·{" "}
+									Gestiones previas al envío ·{" "}
 									{resumenChecklist(vigente.checklist).texto}
 								</CollapsibleTrigger>
 								<CollapsibleContent className="mt-2">
@@ -338,7 +340,7 @@ function EncabezadoVigente({
 					clase: "bg-muted text-foreground",
 				}
 			: {
-					texto: "Ya salió de recuperación",
+					texto: "Fuera de recuperación",
 					clase: "bg-muted text-muted-foreground",
 				};
 	return (
@@ -366,7 +368,7 @@ function AvisoAnticipado({ registro: r }: { registro: Registro }) {
 		<p className="rounded-md border border-orange-200 bg-orange-50 p-2 text-orange-900 text-xs dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-200">
 			<strong>B4 anticipado:</strong> llegó con {r.cuotasVencidas}{" "}
 			{r.cuotasVencidas === 1 ? "cuota vencida" : "cuotas vencidas"}, antes del
-			día 91. Se mandó por decisión de gestión, no por el atraso.
+			día 91. Se envió por decisión de gestión, no por el atraso.
 		</p>
 	);
 }
@@ -407,16 +409,16 @@ function SolicitudPendiente({
 				<EstadoSolicitudBadge estado={r.estadoSolicitud} />
 			</div>
 			<p className="text-muted-foreground text-xs">
-				La pidió {r.registradoPor ?? "—"} el {fechaHora(r.createdAt)}
+				Solicitada por {r.registradoPor ?? "—"} el {fechaHora(r.createdAt)}
 				{r.bucketOrigen != null ? `, con el crédito en B${r.bucketOrigen}` : ""}
-				. El crédito no se mueve hasta que un supervisor la apruebe.
+				. El crédito no cambia de bucket hasta que un supervisor la apruebe.
 			</p>
 			<DetalleRegistro registro={r} />
 			{/* Plegado de entrada: el resumen alcanza para ubicarse (QA de CB-043). */}
 			<Collapsible>
 				<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
 					<ChevronDown className="h-4 w-4" />
-					Lo que se hizo antes de pedirla ·{" "}
+					Gestiones previas a la solicitud ·{" "}
 					{resumenChecklist(r.checklist ?? []).texto}
 				</CollapsibleTrigger>
 				<CollapsibleContent className="mt-2">
@@ -431,7 +433,7 @@ function SolicitudPendiente({
 						<>
 							<Button size="sm" onClick={() => setDecision("aprobar")}>
 								<ShieldCheck className="mr-1.5 h-4 w-4" />
-								Aprobar y mandar a B4
+								Aprobar y enviar a B4
 							</Button>
 							<Button
 								size="sm"
@@ -458,7 +460,7 @@ function SolicitudPendiente({
 								Cancelar mi solicitud
 							</Button>
 							<p className="text-muted-foreground text-xs">
-								La tiene que aprobar otro supervisor o admin.
+								Debe aprobarla otro supervisor o administrador.
 							</p>
 						</>
 					)}
@@ -515,7 +517,7 @@ function DetalleRegistro({ registro: r }: { registro: Registro }) {
 						)}
 					</Dato>
 					<Dato label="Lugar">{r.lugarEntrega ?? "—"}</Dato>
-					<Dato label="Quién entrega">
+					<Dato label="Persona que entrega">
 						{r.entregaPersona
 							? `${r.entregaPersona}${r.entregaRelacion ? ` (${r.entregaRelacion})` : ""}`
 							: "El cliente"}
@@ -536,7 +538,7 @@ function DetalleRegistro({ registro: r }: { registro: Registro }) {
 
 			<div className="grid gap-3 sm:grid-cols-2">
 				{/* Dónde está */}
-				<Dato label="Dónde está el vehículo">
+				<Dato label="Ubicación del vehículo">
 					{hayUbicacion ? (
 						<div className="space-y-1">
 							{r.ubicacionDireccion && <p>{r.ubicacionDireccion}</p>}
@@ -644,7 +646,7 @@ function Recepcion({ registro: r }: { registro: Registro }) {
 			</div>
 			{r.recepcionNotas && <p className="text-sm">{r.recepcionNotas}</p>}
 			<p className="text-muted-foreground text-xs">
-				Registró {r.recepcionRegistradaPor ?? "—"} el{" "}
+				Registrado por {r.recepcionRegistradaPor ?? "—"} el{" "}
 				{fecha(r.recepcionRegistradaAt)}
 			</p>
 		</div>
@@ -695,11 +697,11 @@ function ConfirmarRecepcionDialog({
 		: new Date(fechaRecepcion).getTime() > Date.now() + 10 * 60_000
 			? "La fecha de recepción no puede ser futura."
 			: lugar.trim().length < 3
-				? "Falta dónde se recibió."
+				? "Falta el lugar de recepción."
 				: !estado
-					? "Falta el estado en que llegó."
+					? "Falta el estado de la unidad al recibirla."
 					: kilometraje.trim() && !/^\d+$/.test(kilometraje.trim())
-						? "El kilometraje va en números enteros."
+						? "Ingrese el kilometraje en números enteros."
 						: null;
 
 	const confirmar = useMutation({
@@ -726,8 +728,8 @@ function ConfirmarRecepcionDialog({
 				<DialogHeader>
 					<DialogTitle>Confirmar recepción de la unidad</DialogTitle>
 					<DialogDescription>
-						Registrá cómo llegó la unidad. Viene lleno con lo que se reportó al
-						enviarla: cambiá lo que no coincida.
+						Registre el estado en que llegó la unidad. El formulario muestra lo
+						reportado al enviarla: corrija lo que no coincida.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="space-y-4">
@@ -745,7 +747,7 @@ function ConfirmarRecepcionDialog({
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor="lugar-recepcion">
-								Dónde se recibió <span className="text-red-600">*</span>
+								Lugar de recepción <span className="text-red-600">*</span>
 							</Label>
 							<Input
 								id="lugar-recepcion"
@@ -756,8 +758,8 @@ function ConfirmarRecepcionDialog({
 					</div>
 					<div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
 						<Select value={estado} onValueChange={setEstado}>
-							<SelectTrigger aria-label="Estado en que llegó">
-								<SelectValue placeholder="Estado en que llegó" />
+							<SelectTrigger aria-label="Estado al recibir">
+								<SelectValue placeholder="Seleccionar estado al recibir" />
 							</SelectTrigger>
 							<SelectContent>
 								{Object.entries(ESTADOS_VEHICULO).map(([clave, label]) => (
@@ -779,7 +781,7 @@ function ConfirmarRecepcionDialog({
 						aria-label="Detalle del estado"
 						value={estadoDetalle}
 						onChange={(e) => setEstadoDetalle(e.target.value)}
-						placeholder="Daños, faltantes, lo que se vea al recibir"
+						placeholder="Daños, faltantes u otras observaciones al recibir"
 						rows={2}
 					/>
 					<div className="space-y-2">
@@ -817,7 +819,7 @@ function ConfirmarRecepcionDialog({
 						aria-label="Notas"
 						value={notas}
 						onChange={(e) => setNotas(e.target.value)}
-						placeholder="Notas (opcional): quién la recibió, dónde quedó guardada…"
+						placeholder="Notas (opcional): persona que la recibió, lugar de resguardo…"
 						rows={2}
 					/>
 				</div>

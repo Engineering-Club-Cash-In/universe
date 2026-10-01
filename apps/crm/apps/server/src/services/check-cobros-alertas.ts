@@ -221,7 +221,7 @@ async function notificarClientesSubidos(
 				casoId,
 				cobrosTipo: "cliente_subido",
 				titulo: "Cliente subió de bucket",
-				descripcion: `El crédito ${e.numero_credito_sifco} (${e.cliente}) subió a ${bucketNombre}. Priorizá el contacto para bajarlo.`,
+				descripcion: `El crédito ${e.numero_credito_sifco} (${e.cliente}) subió a ${bucketNombre}. Priorice el contacto para que baje de bucket.`,
 				asesorUserId,
 				supervisores: [], // solo asesor
 				usuarioSistema,

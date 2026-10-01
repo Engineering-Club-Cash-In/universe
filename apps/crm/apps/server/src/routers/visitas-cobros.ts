@@ -486,7 +486,10 @@ export const visitasCobrosRouter = {
 				motivo: z
 					.string()
 					.trim()
-					.min(5, "Contá por qué no se hizo (mínimo 5 caracteres)")
+					.min(
+						5,
+						"Indique por qué no se realizó la visita (mínimo 5 caracteres)",
+					)
 					.max(1000),
 			}),
 		)

@@ -218,20 +218,20 @@ function Formulario({
 
 	// El primer problema basta: el asesor lo resuelve y aparece el siguiente.
 	const faltante = (() => {
-		if (!fuente) return "Elegí la fuente que consultaste.";
-		if (!resultado) return "Elegí si se encontró información o no.";
+		if (!fuente) return "Seleccione la fuente consultada.";
+		if (!resultado) return "Indique si se encontró información.";
 		if (!fecha) return "Falta la fecha de la investigación.";
 		if (hallazgos.trim().length < MIN_CARACTERES_HALLAZGOS)
 			return resultado === "sin_hallazgos"
-				? `Contá qué buscaste (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres).`
-				: `Contá qué encontraste (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres).`;
+				? `Describa la búsqueda realizada (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres).`
+				: `Describa los hallazgos (mínimo ${MIN_CARACTERES_HALLAZGOS} caracteres).`;
 		if (archivos.some((a) => a.estado === "subiendo"))
-			return "Esperá a que terminen de subir los archivos.";
+			return "Espere a que terminen de subir los archivos.";
 		if (archivos.some((a) => a.estado === "error"))
-			return "Un archivo no se pudo subir: reintentalo o quitalo.";
+			return "Un archivo no se pudo subir: reinténtelo o quítelo.";
 		const p = registrarInvestigacionSchema.safeParse(payload);
 		if (!p.success)
-			return p.error.issues[0]?.message ?? "Revisá el formulario.";
+			return p.error.issues[0]?.message ?? "Revise el formulario.";
 		return erroresRegistroInvestigacion(p.data);
 	})();
 
@@ -266,15 +266,16 @@ function Formulario({
 					Registrar investigación en redes sociales
 				</DialogTitle>
 				<DialogDescription>
-					Lo que encontraste del cliente, con las capturas que lo respaldan.
+					Información encontrada sobre el cliente, con las capturas que la
+					respaldan.
 				</DialogDescription>
 			</DialogHeader>
 
 			<div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6">
 				<p className="rounded-md bg-amber-50 p-3 text-amber-900 text-sm dark:bg-amber-950/40 dark:text-amber-200">
-					Solo información pública. No uses cuentas falsas, no pidas contraseñas
-					ni contactes al cliente por esta vía. Lo que guardes queda con tu
-					nombre y la fecha, y no se puede editar ni borrar.
+					Solo información pública. No use cuentas falsas, no pida contraseñas
+					ni contacte al cliente por esta vía. El registro queda con su nombre y
+					la fecha, y no se puede editar ni borrar.
 				</p>
 
 				<section className="grid gap-3 sm:grid-cols-2">
@@ -288,7 +289,7 @@ function Formulario({
 							}}
 						>
 							<SelectTrigger id="inv-fuente">
-								<SelectValue placeholder="Elegí una fuente" />
+								<SelectValue placeholder="Seleccionar fuente" />
 							</SelectTrigger>
 							<SelectContent>
 								{CLAVES_FUENTE_INVESTIGACION.map((clave) => (
@@ -301,13 +302,13 @@ function Formulario({
 					</div>
 					{fuente === "otra" && (
 						<div className="space-y-1.5">
-							<Label htmlFor="inv-fuente-otra">¿Cuál?</Label>
+							<Label htmlFor="inv-fuente-otra">Nombre de la fuente</Label>
 							<Input
 								id="inv-fuente-otra"
 								value={fuenteOtra}
 								maxLength={100}
 								onChange={(e) => setFuenteOtra(e.target.value)}
-								placeholder="Por ejemplo: Threads"
+								placeholder="Ej.: Threads"
 							/>
 						</div>
 					)}
@@ -330,7 +331,7 @@ function Formulario({
 				</section>
 
 				<section className="space-y-2">
-					<Label>¿Se encontró algo?</Label>
+					<Label>Resultado de la investigación</Label>
 					<div className="grid grid-cols-2 gap-2">
 						{CLAVES_RESULTADO_INVESTIGACION.map((clave) => (
 							<button
@@ -353,7 +354,7 @@ function Formulario({
 				<section className="space-y-1.5">
 					<Label htmlFor="inv-hallazgos">
 						{resultado === "sin_hallazgos"
-							? "Qué buscaste"
+							? "Búsqueda realizada"
 							: "Hallazgos relevantes"}
 					</Label>
 					<Textarea
@@ -364,14 +365,14 @@ function Formulario({
 						onChange={(e) => setHallazgos(e.target.value)}
 						placeholder={
 							resultado === "sin_hallazgos"
-								? "Por ejemplo: busqué por nombre y por teléfono, sin perfiles públicos."
-								: "Por ejemplo: perfil público con fotos del vehículo y del lugar de trabajo."
+								? "Ej.: búsqueda por nombre y por teléfono, sin perfiles públicos."
+								: "Ej.: perfil público con fotos del vehículo y del lugar de trabajo."
 						}
 					/>
 				</section>
 
 				<section className="space-y-1.5">
-					<Label htmlFor="inv-fecha">Cuándo lo investigaste</Label>
+					<Label htmlFor="inv-fecha">Fecha y hora de la investigación</Label>
 					<FechaHoraPicker
 						id="inv-fecha"
 						value={fecha}
@@ -447,7 +448,7 @@ function Formulario({
 											onClick={() => void subir(a.id)}
 										>
 											<RotateCw className="h-3 w-3" />
-											No subió · Reintentar
+											Error al subir · Reintentar
 										</button>
 									)}
 									<button

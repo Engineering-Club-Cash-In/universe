@@ -791,7 +791,7 @@ async function leerPagosPosterioresAlApagado(
 		console.error("[inmovilizacion] No se pudieron leer los pagos:", error);
 		throw new ORPCError("SERVICE_UNAVAILABLE", {
 			message:
-				"No se pudieron consultar los pagos en cartera. Intentá de nuevo en un momento.",
+				"No se pudieron consultar los pagos en cartera. Intente de nuevo en un momento.",
 		});
 	}
 	return pagosPosterioresAlApagado(pagos, apagadoEjecutadoAt);
@@ -920,9 +920,9 @@ async function ejecutarAprobada(
 		}
 		if (bucketAlEjecutar == null) {
 			advertencia =
-				"No se pudo confirmar el bucket del crédito en cartera: verificá que el apagado siga aplicando.";
+				"No se pudo confirmar el bucket del crédito en cartera: verifique que el apagado siga aplicando.";
 		} else if (!BUCKETS_INMOVILIZACION.includes(bucketAlEjecutar)) {
-			advertencia = `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucketAlEjecutar}), seguramente porque el cliente pagó. El apagado quedó registrado porque LEGION ya lo aplicó: solicitá la reactivación.`;
+			advertencia = `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucketAlEjecutar}), seguramente porque el cliente pagó. El apagado quedó registrado porque LEGION ya lo aplicó: solicite la reactivación.`;
 		}
 	}
 
@@ -1350,7 +1350,7 @@ function ejecutarPorAsesor(accion: "apagado" | "reactivacion") {
 				if (!consultada) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"La consulta de ubicación venció o no es válida. Actualizá la ubicación del GPS.",
+							"La consulta de ubicación venció o no es válida. Actualice la ubicación del GPS.",
 					});
 				}
 				ubicacion = consultada;
@@ -1558,7 +1558,7 @@ export const inmovilizacionUnidadRouter = {
 						consultaLogId: null,
 						ubicacion: null,
 						mensaje:
-							"No se pudo registrar la consulta; por seguridad no se muestra la ubicación. Intentá de nuevo.",
+							"No se pudo registrar la consulta; por seguridad no se muestra la ubicación. Intente de nuevo.",
 					};
 				}
 
@@ -1721,7 +1721,8 @@ export const inmovilizacionUnidadRouter = {
 			} else {
 				if (!input.quePaso) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "Elegí qué pasó: pago, promesa de pago o 50% + promesa.",
+						message:
+							"Seleccione una opción: pago, promesa de pago o pago parcial + promesa.",
 					});
 				}
 				motivoTexto = componerMotivoReactivacion(
@@ -1780,7 +1781,7 @@ export const inmovilizacionUnidadRouter = {
 				if (input.ubicacion?.consultaLogId && !consultada) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"La consulta de ubicación venció o no es válida. Actualizá la ubicación del GPS.",
+							"La consulta de ubicación venció o no es válida. Actualice la ubicación del GPS.",
 					});
 				}
 				const direccion = input.ubicacion?.direccion || null;
@@ -1799,7 +1800,7 @@ export const inmovilizacionUnidadRouter = {
 				} else {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"El GPS no devolvió la ubicación: escribí la dirección o el enlace del vehículo.",
+							"El GPS no devolvió la ubicación: ingrese la dirección o el enlace del vehículo.",
 					});
 				}
 			}
@@ -1858,7 +1859,7 @@ export const inmovilizacionUnidadRouter = {
 					message = "La unidad ya está inmovilizada.";
 				} else if (bucket == null) {
 					message =
-						"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
+						"No se pudo confirmar el bucket del crédito. Intente de nuevo en unos minutos.";
 				} else {
 					message = `El apagado aplica a créditos en ${bucketsInmovilizacionTexto()} y este está en B${bucket}.`;
 				}
@@ -1934,7 +1935,7 @@ export const inmovilizacionUnidadRouter = {
 						if (vehiculoTx.wialonUnitId !== wialonUnitId) {
 							throw new ORPCError("CONFLICT", {
 								message:
-									"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+									"La unidad GPS del vehículo cambió durante la solicitud. Intente de nuevo.",
 							});
 						}
 					}
@@ -1965,7 +1966,7 @@ export const inmovilizacionUnidadRouter = {
 							message = "La unidad ya está inmovilizada.";
 						} else if (bucket == null) {
 							message =
-								"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
+								"No se pudo confirmar el bucket del crédito. Intente de nuevo en unos minutos.";
 						} else {
 							message = `El apagado aplica a créditos en ${bucketsInmovilizacionTexto()} y este está en B${bucket}.`;
 						}
@@ -2112,7 +2113,7 @@ export const inmovilizacionUnidadRouter = {
 			if (!cancelada) {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"La solicitud ya no se puede cancelar (ya se decidió o ejecutó), o no te pertenece.",
+						"La solicitud ya no se puede cancelar (ya se decidió o ejecutó), o no le pertenece.",
 				});
 			}
 
@@ -2203,7 +2204,7 @@ export const inmovilizacionUnidadRouter = {
 				// aprueba: se rechaza y se pide de nuevo con el pago o la promesa.
 				if (pendiente && reactivacionSinRespaldo(pendiente)) {
 					throw new ORPCError("CONFLICT", {
-						message: `${MENSAJE_REACTIVACION_SIN_RESPALDO} Rechazá esta solicitud.`,
+						message: `${MENSAJE_REACTIVACION_SIN_RESPALDO} Rechace esta solicitud.`,
 					});
 				}
 				if (pendiente?.accion === "apagado" && isCarteraBackEnabled()) {
@@ -2222,12 +2223,12 @@ export const inmovilizacionUnidadRouter = {
 					if (bucket == null) {
 						throw new ORPCError("CONFLICT", {
 							message:
-								"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
+								"No se pudo confirmar el bucket del crédito en cartera. Intente de nuevo en unos minutos.",
 						});
 					}
 					if (!BUCKETS_INMOVILIZACION.includes(bucket)) {
 						throw new ORPCError("CONFLICT", {
-							message: `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucket}): el apagado ya no aplica. Rechazá la solicitud.`,
+							message: `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucket}): el apagado ya no aplica. Rechace la solicitud.`,
 						});
 					}
 				}

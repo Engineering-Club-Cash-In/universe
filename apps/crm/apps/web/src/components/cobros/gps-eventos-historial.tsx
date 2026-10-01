@@ -37,7 +37,7 @@ const EVENTO_CONFIG: Record<
 	desconexion_energia: {
 		label: "Desconexión de energía",
 		descripcion:
-			"El GPS dejó de recibir corriente del vehículo (voltaje externo bajo 3 V). Puede ser que desconectaron el equipo.",
+			"El GPS dejó de recibir corriente del vehículo (voltaje externo bajo 3 V). Es posible que se haya desconectado el equipo.",
 		icon: BatteryWarning,
 		badgeClass: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 	},

@@ -84,7 +84,7 @@ function FilaIntento({
 				return;
 			}
 			toast.error(
-				"Sigue sin poder confirmarse. Probá de nuevo en unos minutos: el aviso se mantiene.",
+				"Aún no se pudo confirmar. Intente de nuevo en unos minutos; el aviso se mantiene.",
 				{ duration: 8000 },
 			);
 		},

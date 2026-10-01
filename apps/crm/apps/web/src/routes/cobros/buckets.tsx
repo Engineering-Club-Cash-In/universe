@@ -651,7 +651,7 @@ function BucketsHistorialPage() {
 				<CardHeader>
 					<CardTitle className="text-lg">Migraciones</CardTitle>
 					<CardDescription>
-						Haz clic en una fila para ver la ficha completa del crédito; el No.
+						Haga clic en una fila para ver la ficha completa del crédito; el No.
 						SIFCO abre el detalle del caso.
 					</CardDescription>
 				</CardHeader>

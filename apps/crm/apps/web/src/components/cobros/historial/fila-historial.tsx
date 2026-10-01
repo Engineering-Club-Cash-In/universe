@@ -62,7 +62,7 @@ export function EncabezadoHistorial({
 			<th className="px-3 py-2 font-medium">Tipo</th>
 			<th className="px-3 py-2 font-medium">Resultado</th>
 			<th className="px-3 py-2 font-medium">Próxima acción</th>
-			<th className="px-3 py-2 font-medium">Promesa</th>
+			<th className="px-3 py-2 font-medium">Promesa de pago</th>
 			<th className="px-3 py-2 font-medium" />
 		</tr>
 	);

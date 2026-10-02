@@ -42,6 +42,9 @@ let eventoInsertadoValues: Record<string, unknown> | null = null;
 // Último evento notificado de la misma unidad+tipo+caso (ventana deslizante
 // de dedup de notificación). null = no hay ninguno (siempre notifica).
 let ultimoNotificadoMock: { ocurridoAt: Date } | null = null;
+// ¿El aviso previo de la ventana llegó a supervisores? (notifications con
+// assignedToRole cobros_supervisor y la dedupKey del evento previo).
+let previoLlegoASupervisoresMock = true;
 
 function mockDb() {
 	return {
@@ -135,6 +138,14 @@ function mockDb() {
 						}),
 					};
 				}
+				if (tabla === notifications) {
+					return {
+						where: () => ({
+							limit: async () =>
+								previoLlegoASupervisoresMock ? [{ id: "notif-previa" }] : [],
+						}),
+					};
+				}
 				throw new Error(`select from tabla no mockeada: ${String(tabla)}`);
 			},
 		}),
@@ -210,6 +221,7 @@ beforeEach(() => {
 	notificacionInsertDaFilas = true;
 	eventoInsertadoValues = null;
 	ultimoNotificadoMock = null;
+	previoLlegoASupervisoresMock = true;
 
 	// Default: cartera-back resuelve el dueño del crédito ("asesor-1"). Los
 	// tests de la resolución del asesor lo sobreescriben.
@@ -326,6 +338,18 @@ describe("CB-119 — registrarEventoGps", () => {
 		).toBe(true);
 	});
 
+	test("desconexión de energía con escalarASupervisor=false: solo al asesor", async () => {
+		await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(notificacionesInsertadas).toHaveLength(1);
+		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
+	});
+
 	test("sin reportar: también escala a supervisores", async () => {
 		await registrarEventoGps({
 			tipo: "sin_reportar",
@@ -336,6 +360,18 @@ describe("CB-119 — registrarEventoGps", () => {
 		expect(
 			notificacionesInsertadas.some((f) => f.assignedTo === "supervisor-1"),
 		).toBe(true);
+	});
+
+	test("ignición con escalarASupervisor undefined (B4): sigue sin escalar", async () => {
+		await registrarEventoGps({
+			tipo: "ignicion",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: undefined,
+		});
+
+		expect(notificacionesInsertadas).toHaveLength(1);
+		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
 	});
 
 	test("ignición: solo notifica al asesor, no a supervisores", async () => {
@@ -418,6 +454,57 @@ describe("CB-119 — ventana de dedup de notificación: deslizante, no por bucke
 			tipo: "ignicion",
 			wialonUnitId,
 			ocurridoAt: new Date("2026-09-25T00:08:00.000Z"),
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(notificacionesInsertadas).toHaveLength(0);
+	});
+
+	test("previo solo-asesor (fuera de B4) y ahora escala (B4) dentro de la ventana: avisa SOLO a supervisores", async () => {
+		ultimoNotificadoMock = {
+			ocurridoAt: new Date("2026-09-24T10:00:00.000Z"),
+		};
+		previoLlegoASupervisoresMock = false;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt: new Date("2026-09-24T12:00:00.000Z"),
+		});
+
+		expect(resultado.notificado).toBe(true);
+		expect(notificacionesInsertadas.map((f) => f.assignedTo)).toEqual([
+			"supervisor-1",
+		]);
+	});
+
+	test("previo que sí llegó a supervisores, dentro de la ventana: sigue suprimido", async () => {
+		ultimoNotificadoMock = {
+			ocurridoAt: new Date("2026-09-24T10:00:00.000Z"),
+		};
+		previoLlegoASupervisoresMock = true;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt: new Date("2026-09-24T12:00:00.000Z"),
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(notificacionesInsertadas).toHaveLength(0);
+	});
+
+	test("previo solo-asesor y el evento actual tampoco escala (fuera de B4): sigue suprimido", async () => {
+		ultimoNotificadoMock = {
+			ocurridoAt: new Date("2026-09-24T10:00:00.000Z"),
+		};
+		previoLlegoASupervisoresMock = false;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt: new Date("2026-09-24T12:00:00.000Z"),
+			escalarASupervisor: false,
 		});
 
 		expect(resultado.notificado).toBe(false);
@@ -507,6 +594,52 @@ describe("CB-119 — resolución del asesor: solo cartera-back decide quién lo 
 
 		expect(resultado.eventoId).toBeTruthy();
 		expect(notificacionesInsertadas).toHaveLength(0);
+		expect(resultado.reintentar).toBe(true);
+	});
+
+	test("cartera-back lanza en un evento solo-asesor (energía fuera de B4): pide reintentar", async () => {
+		getCreditoSpy.mockImplementation(async () => {
+			throw new Error("cartera-back caído");
+		});
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(resultado.reintentar).toBe(true);
+	});
+
+	test("cartera-back lanza pero hay supervisión: se avisa y NO se reintenta", async () => {
+		getCreditoSpy.mockImplementation(async () => {
+			throw new Error("cartera-back caído");
+		});
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+		});
+
+		expect(resultado.notificado).toBe(true);
+		expect(resultado.reintentar).toBe(false);
+	});
+
+	test("dueño sin usuario en el CRM en un evento solo-asesor: no es transitorio, no reintenta", async () => {
+		asesorActualUserIdMock = null;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(resultado.reintentar).toBe(false);
 	});
 
 	test("caso sin numeroCreditoSifco: no llama a cartera-back ni avisa a un asesor", async () => {

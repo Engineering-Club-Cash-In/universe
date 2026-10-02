@@ -164,6 +164,15 @@ describe("CB-119 — unidadesConCasoActivo", () => {
 		expect(resultado).toEqual([]);
 	});
 
+	test("sin lista de SIFCOs: no filtra por bucket y devuelve todos los casos", async () => {
+		porContratoMock = [{ wialonUnitId: 100, numeroCreditoSifco: "001" }];
+		porOportunidadMock = [{ wialonUnitId: 300, numeroCreditoSifco: "003" }];
+
+		const resultado = await unidadesConCasoActivo();
+		const ids = resultado.map((u) => u.wialonUnitId).sort((a, b) => a - b);
+		expect(ids).toEqual([100, 300]);
+	});
+
 	test("junta unidades de ambos caminos (contrato y oportunidad) sin duplicar", async () => {
 		porContratoMock = [
 			{ wialonUnitId: 100, numeroCreditoSifco: "001" },

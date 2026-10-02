@@ -14,7 +14,7 @@
  * guarda el evento.
  */
 
-import { and, desc, eq, isNotNull, notLike, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { user } from "../../db/schema/auth";
 import { casosCobros, contratosFinanciamiento } from "../../db/schema/cobros";
@@ -81,6 +81,12 @@ export interface RegistrarEventoGpsInput {
 	 * en un caso no relacionado solo por ser el más reciente.
 	 */
 	numeroCreditoSifcoEsperado?: string;
+	/**
+	 * Sobrescribe `ESCALA_A_SUPERVISOR` del tipo. El job pasa `false` para la
+	 * desconexión de energía de créditos fuera de B4 (solo avisa al asesor).
+	 * Omitido = regla por defecto del tipo.
+	 */
+	escalarASupervisor?: boolean;
 }
 
 export interface RegistrarEventoGpsResultado {
@@ -89,6 +95,15 @@ export interface RegistrarEventoGpsResultado {
 	vehicleId: string | null;
 	casoCobroId: string | null;
 	notificado: boolean;
+	/**
+	 * `true` cuando NO se pudo avisar a nadie porque falló (transitoriamente)
+	 * la resolución del asesor y no había supervisión a la cual caer — el
+	 * evento quedó guardado con `notificado=false`. El caller no debe dar la
+	 * transición por vista (no avanzar su snapshot) para que el siguiente
+	 * tick la reintente. Ausente/false = nada que reintentar (ya se avisó, se
+	 * suprimió por ventana de dedup, o no hay destinatario resoluble).
+	 */
+	reintentar?: boolean;
 }
 
 /**
@@ -127,16 +142,10 @@ export async function resolverVehiculoYCaso(
 	// desempatar por fecha: el filtro deja como mucho un caso por rama.
 	const filtroSifcoContrato = numeroCreditoSifcoEsperado
 		? eq(casosCobros.numeroCreditoSifco, numeroCreditoSifcoEsperado)
-		: and(
-				isNotNull(casosCobros.numeroCreditoSifco),
-				notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
-			);
+		: isNotNull(casosCobros.numeroCreditoSifco);
 	const filtroSifcoOportunidad = numeroCreditoSifcoEsperado
 		? eq(opportunities.numeroSifco, numeroCreditoSifcoEsperado)
-		: and(
-				isNotNull(opportunities.numeroSifco),
-				notLike(opportunities.numeroSifco, "CRM-%"),
-			);
+		: isNotNull(opportunities.numeroSifco);
 
 	const [porContrato, porOportunidad] = await Promise.all([
 		db
@@ -205,14 +214,16 @@ export async function resolverVehiculoYCaso(
  * fresco posible — no vale la pena cachear 5 min algo que decide a quién
  * alertar de un vehículo posiblemente manipulado.
  *
- * Devuelve `null` si cartera-back está deshabilitado, falla, o el crédito no
- * tiene asesor mapeable: el aviso sale solo a supervisión (cuando el tipo
+ * `userId` es `null` si cartera-back está deshabilitado, falla, o el crédito
+ * no tiene asesor mapeable: el aviso sale solo a supervisión (cuando el tipo
  * escala). El caso del CRM ya no tiene un responsable al cual caer.
+ * `fallo` distingue el error transitorio (cartera-back/DB lanzó) de la
+ * ausencia permanente de asesor: solo el primero vale la pena reintentar.
  */
 async function resolverAsesorActual(
 	numeroCreditoSifco: string,
-): Promise<string | null> {
-	if (!isCarteraBackEnabled()) return null;
+): Promise<{ userId: string | null; fallo: boolean }> {
+	if (!isCarteraBackEnabled()) return { userId: null, fallo: false };
 	try {
 		const respuesta = await carteraBackClient.getCredito(
 			numeroCreditoSifco,
@@ -220,7 +231,7 @@ async function resolverAsesorActual(
 			false,
 		);
 		const emailAsesor = respuesta?.asesor?.emailCashIn?.trim().toLowerCase();
-		if (!emailAsesor) return null;
+		if (!emailAsesor) return { userId: null, fallo: false };
 
 		// Mismo puente de identidad que el resto de cobros:
 		// `asesores.email_cash_in` == `user.email`, ambos lados normalizados.
@@ -229,13 +240,13 @@ async function resolverAsesorActual(
 			.from(user)
 			.where(sql`lower(trim(${user.email})) = ${emailAsesor}`)
 			.limit(1);
-		return usuarioAsesor?.id ?? null;
+		return { userId: usuarioAsesor?.id ?? null, fallo: false };
 	} catch (error) {
 		console.error(
 			`[GpsEventos] No se pudo resolver el asesor actual de ${numeroCreditoSifco} (solo se avisa a supervisión si escala):`,
 			error,
 		);
-		return null;
+		return { userId: null, fallo: true };
 	}
 }
 
@@ -335,17 +346,16 @@ export async function registrarEventoGps(
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 
-	const asesorActualId = caso?.numeroCreditoSifco
+	const asesorActual = caso?.numeroCreditoSifco
 		? await resolverAsesorActual(caso.numeroCreditoSifco)
-		: null;
+		: { userId: null, fallo: false };
 	// Solo el dueño en cartera: el caso del CRM no dice de quién es el crédito.
 	// Si no se puede resolver, el aviso sale igual a supervisión (cuando escala).
-	const asesorUserId = asesorActualId;
+	const asesorUserId = asesorActual.userId;
 
+	const escala = input.escalarASupervisor ?? ESCALA_A_SUPERVISOR[input.tipo];
 	const [supervisores, usuarioSistema] = await Promise.all([
-		ESCALA_A_SUPERVISOR[input.tipo]
-			? obtenerSupervisoresCobros()
-			: Promise.resolve<string[]>([]),
+		escala ? obtenerSupervisoresCobros() : Promise.resolve<string[]>([]),
 		resolverUsuarioSistemaCobros(),
 	]);
 
@@ -380,18 +390,46 @@ export async function registrarEventoGps(
 		.orderBy(desc(gpsEventos.ocurridoAt))
 		.limit(1);
 
+	// El aviso previo de la ventana pudo ser solo-asesor (energía fuera de B4,
+	// cuando el crédito aún no escalaba) y este evento sí escala (el crédito
+	// ya llegó a B4): la ventana no debe taparle a supervisión un aviso que
+	// nunca recibió. Si el previo ya llegó a supervisores, o este evento no
+	// escala, se suprime como siempre; si no, se deja pasar SOLO a
+	// supervisores (el asesor ya fue avisado dentro de la ventana).
+	let soloSupervisores = false;
 	if (
 		ultimoNotificado &&
 		input.ocurridoAt.getTime() - ultimoNotificado.ocurridoAt.getTime() <
 			ventanaMs
 	) {
-		return {
-			eventoId,
-			duplicado,
-			vehicleId,
-			casoCobroId,
-			notificado: false,
-		};
+		const previoLlegoASupervisores = escala
+			? (
+					await db
+						.select({ id: notifications.id })
+						.from(notifications)
+						.where(
+							and(
+								eq(notifications.cobrosTipo, "gps_evento"),
+								eq(
+									notifications.cobrosDedupKey,
+									`gps:${input.tipo}:${input.wialonUnitId}:${casoCobroId}:${ultimoNotificado.ocurridoAt.toISOString()}`,
+								),
+								eq(notifications.assignedToRole, "cobros_supervisor"),
+							),
+						)
+						.limit(1)
+				).length > 0
+			: true;
+		if (previoLlegoASupervisores) {
+			return {
+				eventoId,
+				duplicado,
+				vehicleId,
+				casoCobroId,
+				notificado: false,
+			};
+		}
+		soloSupervisores = true;
 	}
 
 	// dedupKey único por evento (no por bucket): la ventana deslizante de
@@ -404,7 +442,7 @@ export async function registrarEventoGps(
 		cobrosTipo: "gps_evento",
 		titulo: TITULO_POR_TIPO[input.tipo],
 		descripcion: descripcionEvento(input),
-		asesorUserId,
+		asesorUserId: soloSupervisores ? null : asesorUserId,
 		supervisores,
 		usuarioSistema,
 		dedupKey: dedupNotifKey,
@@ -433,6 +471,9 @@ export async function registrarEventoGps(
 		vehicleId,
 		casoCobroId,
 		notificado,
+		// Sin filas = nadie a quién avisar; si además el asesor falló por un
+		// error transitorio (no por no existir), el job debe reintentar.
+		reintentar: filas.length === 0 && !soloSupervisores && asesorActual.fallo,
 	};
 }
 

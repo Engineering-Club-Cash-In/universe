@@ -203,3 +203,32 @@ describe("CB-119 — detectarTransiciones: varios eventos a la vez", () => {
 		expect(tipos).toEqual(["desconexion_energia", "ignicion"]);
 	});
 });
+
+describe("detectarTransiciones: fuera de B4", () => {
+	const previo = { pwrExt: 12.5, ignicionOn: false, sinReportarDesde: null };
+
+	test("desconexión de energía SÍ se detecta", () => {
+		const eventos = detectarTransiciones(
+			telemetria({ pwrExt: 1.0 }),
+			previo,
+			ahora,
+			"123",
+			false,
+		);
+		expect(eventos.map((e) => e.tipo)).toEqual(["desconexion_energia"]);
+	});
+
+	test("ignición y sin reportar NO se detectan", () => {
+		const eventos = detectarTransiciones(
+			telemetria({
+				ignicionOn: true,
+				ultimoMensajeAt: new Date(ahora.getTime() - 3 * 60 * 60 * 1000),
+			}),
+			previo,
+			ahora,
+			"123",
+			false,
+		);
+		expect(eventos).toEqual([]);
+	});
+});

@@ -4,6 +4,10 @@
  * — "Como Asesor B4 y Supervisor, quiero recibir alertas...", ticket
  * CB-119).
  *
+ * Alcance: la desconexión de energía se vigila en TODOS los buckets (al
+ * asesor del crédito; en B4 además escala a supervisión). Ignición y GPS sin
+ * reportar siguen siendo solo B4.
+ *
  * Corre cada 5 minutos. No depende de que Wialon/La Legión configure nada
  * de su lado (webhook, notificación de recurso): primero le pregunta a
  * cartera-back qué SIFCOs están en B4 ahora mismo (`sifcosEnB4`), después
@@ -22,7 +26,7 @@
  * anterior, solo se genera evento en la TRANSICIÓN.
  */
 
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
@@ -164,9 +168,9 @@ export async function sifcosEnB4(): Promise<string[] | null> {
  *     `contratos_financiamiento`. Es el camino que usa
  *     `getDetallesCreditoCarteraBack` (routers/cobros.ts) para pintar la
  *     Ficha 360, y en la práctica es el que casi todos los casos usan.
- * `sifcosB4` ya viene sin prefijo `CRM-` (cartera-back nunca conoce esos
- * placeholders internos). Sin `sifcosB4` no se filtra por bucket: devuelve
- * todos los casos activos con GPS (lo usa el cálculo de ubicaciones clave).
+ * Sin `sifcosB4` no se filtra por bucket: devuelve todos los casos activos
+ * con GPS (lo usa el cálculo de ubicaciones clave y la desconexión de
+ * energía).
  *
  * Devuelve UNA FILA POR (unidad, SIFCO), no una por unidad: `wialonUnitId`
  * no es UNIQUE en `vehicles` (D-10), así que una misma unidad Wialon puede
@@ -199,6 +203,8 @@ export async function unidadesConCasoActivo(
 			.where(
 				and(
 					eq(casosCobros.activo, true),
+					isNotNull(vehicles.wialonUnitId),
+					isNotNull(casosCobros.numeroCreditoSifco),
 					sifcosB4 && inArray(casosCobros.numeroCreditoSifco, sifcosB4),
 				),
 			),
@@ -216,6 +222,8 @@ export async function unidadesConCasoActivo(
 			.where(
 				and(
 					eq(casosCobros.activo, true),
+					isNotNull(vehicles.wialonUnitId),
+					isNotNull(casosCobros.numeroCreditoSifco),
 					sifcosB4 && inArray(opportunities.numeroSifco, sifcosB4),
 				),
 			),
@@ -296,6 +304,10 @@ export function detectarTransiciones(
 	// función pura, que no ejercitan la resolución de caso; el caller real
 	// (ejecutarDeteccionEventosGps) siempre lo pasa.
 	numeroCreditoSifco = "",
+	// Desconexión de energía aplica a TODOS los buckets; ignición y sin
+	// reportar solo a B4 (ver ejecutarDeteccionEventosGps). Default true para
+	// no cambiar el comportamiento de los llamadores/tests existentes.
+	esB4 = true,
 ): EventoDetectado[] {
 	const eventos: EventoDetectado[] = [];
 	const base = {
@@ -319,6 +331,9 @@ export function detectarTransiciones(
 			ocurridoAt: telemetria.ultimoMensajeAt ?? ahora,
 		});
 	}
+
+	// Fuera de B4 solo se alerta desconexión de energía.
+	if (!esB4) return eventos;
 
 	// Ignición: transición de apagado/desconocido a encendido.
 	if (telemetria.ignicionOn === true && anterior?.ignicionOn !== true) {
@@ -370,7 +385,11 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 		};
 	}
 
-	const unidades = await unidadesConCasoActivo(sifcosB4);
+	// Universo: TODOS los casos activos con GPS (cualquier bucket) para la
+	// desconexión de energía. El bucket B4 solo decide qué eventos extra se
+	// detectan y si se escala a supervisión.
+	const b4 = new Set(sifcosB4);
+	const unidades = await unidadesConCasoActivo();
 	if (unidades.length === 0) {
 		return {
 			unidadesConsultadas: 0,
@@ -445,6 +464,7 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 				MAX_GAP_MONITOREO_MS;
 		const anterior = monitoreoContinuo ? snapshotPrevio : null;
 
+		const esB4 = b4.has(sifcoActual);
 		const eventos = detectarTransiciones(
 			telemetria,
 			anterior
@@ -456,6 +476,7 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 				: null,
 			ahora,
 			sifcoActual,
+			esB4,
 		);
 
 		// Si algún evento de esta unidad falla al registrarse, el snapshot de
@@ -476,8 +497,17 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 					velocidadKmh: evento.velocidadKmh,
 					payloadCrudo: sanitizarPayloadWialon(evento.telemetria),
 					numeroCreditoSifcoEsperado: evento.numeroCreditoSifco || undefined,
+					// Fuera de B4 la desconexión de energía avisa solo al asesor. En B4
+					// se deja undefined para que rija la regla por tipo
+					// (ESCALA_A_SUPERVISOR: ignición no escala).
+					escalarASupervisor: esB4 ? undefined : false,
 				});
 				if (resultado.notificado) eventosNotificados++;
+				// Sin destinatario por un fallo transitorio al resolver el asesor
+				// (p. ej. energía fuera de B4, que no escala): se trata como fallo
+				// de la unidad para no avanzar el snapshot y reintentar la
+				// transición en el siguiente tick.
+				if (resultado.reintentar) huboFalloEnUnidad = true;
 			} catch (error) {
 				huboFalloEnUnidad = true;
 				console.error(
@@ -494,15 +524,17 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 			!ultimaSenal ||
 			ahora.getTime() - ultimaSenal.getTime() >= UMBRAL_SIN_REPORTAR_MS;
 
+		// Fuera de B4 no se monitorea ignición ni sin-reportar: se guardan en
+		// null para que, si el crédito sube a B4, la primera corrida los trate
+		// como "primera vez vista" y no herede un estado que nadie vigiló.
 		snapshotsParaGuardar.push({
 			wialonUnitId: telemetria.unitId,
 			numeroCreditoSifco: sifcoActual,
 			pwrExt: telemetria.pwrExt,
-			ignicionOn: telemetria.ignicionOn,
+			ignicionOn: esB4 ? telemetria.ignicionOn : null,
 			ultimaSenalWialon: ultimaSenal,
-			sinReportarDesde: sinReportarAhora
-				? (anterior?.sinReportarDesde ?? ahora)
-				: null,
+			sinReportarDesde:
+				esB4 && sinReportarAhora ? (anterior?.sinReportarDesde ?? ahora) : null,
 			actualizadoAt: ahora,
 		});
 	}

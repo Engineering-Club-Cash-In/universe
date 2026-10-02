@@ -21,7 +21,7 @@ import { formatFechaSenal, googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
 
 const DESCRIPCION_EVENTOS =
-	"Eventos detectados automáticamente (desconexión de energía, ignición, GPS sin reportar) para créditos en B4.";
+	"Eventos detectados automáticamente. Desconexión de energía en todos los buckets; ignición y GPS sin reportar solo para créditos en B4.";
 
 type GpsEventoTipo = "desconexion_energia" | "ignicion" | "sin_reportar";
 
@@ -70,8 +70,8 @@ const EVENTO_CONFIG_FALLBACK = {
 
 /**
  * Historial de eventos GPS (CB-119) en el tab Vehículo de la Ficha 360:
- * desconexión de energía, ignición y sin reportar, detectados por el job de
- * polling para créditos en B4.
+ * desconexión de energía (todos los buckets), ignición y sin reportar (solo
+ * B4), detectados por el job de polling.
  *
  * A diferencia de GpsVehiculoCard (CB-118), esto NO consulta Wialon en vivo
  * ni exige motivo auditado — lee eventos ya guardados en gps_eventos, y el

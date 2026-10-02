@@ -14,7 +14,7 @@
  * guarda el evento.
  */
 
-import { and, desc, eq, isNotNull, notLike, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { user } from "../../db/schema/auth";
 import { casosCobros, contratosFinanciamiento } from "../../db/schema/cobros";
@@ -81,6 +81,12 @@ export interface RegistrarEventoGpsInput {
 	 * en un caso no relacionado solo por ser el más reciente.
 	 */
 	numeroCreditoSifcoEsperado?: string;
+	/**
+	 * Sobrescribe `ESCALA_A_SUPERVISOR` del tipo. El job pasa `false` para la
+	 * desconexión de energía de créditos fuera de B4 (solo avisa al asesor).
+	 * Omitido = regla por defecto del tipo.
+	 */
+	escalarASupervisor?: boolean;
 }
 
 export interface RegistrarEventoGpsResultado {
@@ -127,16 +133,10 @@ export async function resolverVehiculoYCaso(
 	// desempatar por fecha: el filtro deja como mucho un caso por rama.
 	const filtroSifcoContrato = numeroCreditoSifcoEsperado
 		? eq(casosCobros.numeroCreditoSifco, numeroCreditoSifcoEsperado)
-		: and(
-				isNotNull(casosCobros.numeroCreditoSifco),
-				notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
-			);
+		: isNotNull(casosCobros.numeroCreditoSifco);
 	const filtroSifcoOportunidad = numeroCreditoSifcoEsperado
 		? eq(opportunities.numeroSifco, numeroCreditoSifcoEsperado)
-		: and(
-				isNotNull(opportunities.numeroSifco),
-				notLike(opportunities.numeroSifco, "CRM-%"),
-			);
+		: isNotNull(opportunities.numeroSifco);
 
 	const [porContrato, porOportunidad] = await Promise.all([
 		db
@@ -343,7 +343,7 @@ export async function registrarEventoGps(
 	const asesorUserId = asesorActualId;
 
 	const [supervisores, usuarioSistema] = await Promise.all([
-		ESCALA_A_SUPERVISOR[input.tipo]
+		(input.escalarASupervisor ?? ESCALA_A_SUPERVISOR[input.tipo])
 			? obtenerSupervisoresCobros()
 			: Promise.resolve<string[]>([]),
 		resolverUsuarioSistemaCobros(),

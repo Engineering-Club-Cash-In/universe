@@ -326,6 +326,18 @@ describe("CB-119 — registrarEventoGps", () => {
 		).toBe(true);
 	});
 
+	test("desconexión de energía con escalarASupervisor=false: solo al asesor", async () => {
+		await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(notificacionesInsertadas).toHaveLength(1);
+		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
+	});
+
 	test("sin reportar: también escala a supervisores", async () => {
 		await registrarEventoGps({
 			tipo: "sin_reportar",
@@ -336,6 +348,18 @@ describe("CB-119 — registrarEventoGps", () => {
 		expect(
 			notificacionesInsertadas.some((f) => f.assignedTo === "supervisor-1"),
 		).toBe(true);
+	});
+
+	test("ignición con escalarASupervisor undefined (B4): sigue sin escalar", async () => {
+		await registrarEventoGps({
+			tipo: "ignicion",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: undefined,
+		});
+
+		expect(notificacionesInsertadas).toHaveLength(1);
+		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
 	});
 
 	test("ignición: solo notifica al asesor, no a supervisores", async () => {

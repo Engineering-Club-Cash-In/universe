@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { vencimientoDelSnapshot } from "./vencimiento-del-contrato";
+import {
+	conVencimientoDelContrato,
+	vencimientoDelSnapshot,
+	vencimientoGuardado,
+} from "./vencimiento-del-contrato";
 
 const conFecha = (dia: string, mes: string, ano: string) => ({
 	contractType: "reconocimiento_deuda_feb_2025",
@@ -36,5 +40,81 @@ describe("vencimientoDelSnapshot", () => {
 		expect(vencimientoDelSnapshot([])).toBeNull();
 		expect(vencimientoDelSnapshot(null)).toBeNull();
 		expect(vencimientoDelSnapshot([conFecha("", "08", "29")])).toBeNull();
+	});
+});
+
+describe("vencimientoDelSnapshot con varias entradas", () => {
+	test("prefiere la del reconocimiento de deuda", () => {
+		expect(
+			vencimientoDelSnapshot([
+				{
+					contractType: "garantia_mobiliaria",
+					data: {
+						diaVencimiento: "30",
+						mesVencimiento: "07",
+						anoVencimiento: "29",
+					},
+				},
+				conFecha("31", "08", "29"),
+			]),
+		).toBe("2029-08-31");
+	});
+});
+
+describe("vencimientoGuardado", () => {
+	test("lee el que se guarda al enlazar o regenerar", () => {
+		expect(
+			vencimientoGuardado({ data: [], vencimientoDelContrato: "2029-08-31" }),
+		).toBe("2029-08-31");
+	});
+
+	test("lee los campos de los contratos de la época de Documenso", () => {
+		expect(
+			vencimientoGuardado({
+				data: [
+					{
+						role: "SIGNER",
+						values: [
+							{ field: "diaVencimiento", value: "15" },
+							{ field: "mesVencimiento", value: "10" },
+							{ field: "anoVencimiento", value: "31" },
+						],
+					},
+				],
+			}),
+		).toBe("2031-10-15");
+	});
+
+	test("sin fecha devuelve null", () => {
+		expect(vencimientoGuardado({ data: [] })).toBeNull();
+		expect(vencimientoGuardado(null)).toBeNull();
+		expect(
+			vencimientoGuardado({ vencimientoDelContrato: "31/08/2029" }),
+		).toBeNull();
+	});
+});
+
+describe("conVencimientoDelContrato", () => {
+	test("agrega la fecha con que se generó", () => {
+		expect(
+			conVencimientoDelContrato(
+				{ success: true },
+				{ diaVencimiento: "31", mesVencimiento: "08", anoVencimiento: "29" },
+			),
+		).toEqual({ success: true, vencimientoDelContrato: "2029-08-31" });
+	});
+
+	test("sin fecha o sin respuesta deja todo como estaba", () => {
+		const respuesta = { success: true };
+		expect(conVencimientoDelContrato(respuesta, { nombre: "X" })).toBe(
+			respuesta,
+		);
+		expect(
+			conVencimientoDelContrato(undefined, {
+				diaVencimiento: "31",
+				mesVencimiento: "08",
+				anoVencimiento: "29",
+			}),
+		).toBeUndefined();
 	});
 });

@@ -784,6 +784,12 @@ const ubicacionClaveShape = {
 	diasDistintos: z.number(),
 	visitas: z.number(),
 	patron: z.unknown(),
+	// Contra el domicilio declarado que ubicó el asesor. Opcionales: los
+	// snapshots anteriores no los tienen y null = no hay domicilio ubicado.
+	distanciaDomicilioM: z.number().nullish(),
+	confirmadaDomicilio: z.boolean().nullish(),
+	// La dirección del cliente cambió desde que se ubicó el punto: no confirma.
+	domicilioDesactualizado: z.boolean().nullish(),
 };
 
 export const ubicacionesClaveCasoOutputSchema = z.object({

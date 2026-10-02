@@ -14,10 +14,15 @@ import {
 } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { user } from "../db/schema/auth";
+import { creditApplications } from "../db/schema/client-forms";
 import { casosCobros } from "../db/schema/cobros";
-import { opportunities } from "../db/schema/crm";
+import { leads, opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
-import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import {
+	gpsDomicilioDeclarado,
+	gpsEventos,
+	gpsUbicacionesClave,
+} from "../db/schema/gps-eventos";
 import { vehicles } from "../db/schema/vehicles";
 import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
@@ -27,6 +32,32 @@ let responsableCasoMock = "user-test";
 let eventosFilasMock: Record<string, unknown>[] = [];
 let ubicacionesFilasMock: Record<string, unknown>[] = [];
 let numeroCreditoSifcoMock: string | null = "01010214100000";
+let domicilioDeclaradoMock: {
+	tipo: "casa" | "trabajo";
+	lat: number;
+	lon: number;
+	direccionTexto?: string | null;
+	registradoAt?: Date;
+	registradoPorNombre?: string | null;
+}[] = [];
+// Contexto y direcciones que resuelve direccionesDeclaradasDelCaso.
+const DIRECCION_CASA = "29 Avenida 02-107, Zona 13, Petapa";
+const DIRECCION_TRABAJO = "29 Av. 2-107, Colonia Cañadas del Río";
+let contextoCasoMock: { leadId: string | null; opportunityId: string | null } =
+	{
+		leadId: "lead-1",
+		opportunityId: "opp-1",
+	};
+let leadDireccionMock: string | null = DIRECCION_CASA;
+let solicitudMock: {
+	residencia: string | null;
+	trabajo: string | null;
+} | null = { residencia: null, trabajo: DIRECCION_TRABAJO };
+let domicilioUpserts: {
+	valores: Record<string, unknown>;
+	config: Record<string, unknown>;
+}[] = [];
+let domicilioBorrados = 0;
 
 const VEHICLE_ID = "22222222-2222-2222-2222-222222222222";
 
@@ -126,6 +157,32 @@ function mockDb() {
 					};
 				}
 
+				if (tabla === gpsDomicilioDeclarado) {
+					return {
+						where: async () => domicilioDeclaradoMock,
+						leftJoin: () => ({ where: async () => domicilioDeclaradoMock }),
+					};
+				}
+
+				if (tabla === leads) {
+					return {
+						where: () => ({
+							limit: async () =>
+								leadDireccionMock ? [{ direccion: leadDireccionMock }] : [],
+						}),
+					};
+				}
+
+				if (tabla === creditApplications) {
+					return {
+						where: () => ({
+							orderBy: () => ({
+								limit: async () => (solicitudMock ? [solicitudMock] : []),
+							}),
+						}),
+					};
+				}
+
 				if (tabla === gpsUbicacionesClave) {
 					return {
 						where: (cond?: unknown) => {
@@ -141,6 +198,15 @@ function mockDb() {
 			},
 		}),
 		insert: (tabla: unknown) => {
+			if (tabla === gpsDomicilioDeclarado) {
+				return {
+					values: (valores: Record<string, unknown>) => ({
+						onConflictDoUpdate: async (config: Record<string, unknown>) => {
+							domicilioUpserts.push({ valores, config });
+						},
+					}),
+				};
+			}
 			if (tabla === gpsConsultaLogs) {
 				return {
 					values: (fila: Record<string, unknown>) => {
@@ -169,6 +235,13 @@ function mockDb() {
 			throw new Error(`update en tabla no mockeada: ${String(tabla)}`);
 		},
 		delete: (tabla: unknown) => {
+			if (tabla === gpsDomicilioDeclarado) {
+				return {
+					where: async () => {
+						domicilioBorrados++;
+					},
+				};
+			}
 			if (tabla === gpsUbicacionesClave) {
 				return {
 					where: async () => {
@@ -182,6 +255,13 @@ function mockDb() {
 }
 
 mock.module("../db", () => ({ db: mockDb() }));
+// El contexto del caso (lead y oportunidad) sale de otras tablas que estos
+// tests no mockean: se resuelve con una bandera, y el resto del módulo es el real.
+const datosCasoReal = await import("../services/referencias-cobros-datos");
+mock.module("../services/referencias-cobros-datos", () => ({
+	...datosCasoReal,
+	resolverContextoCaso: async () => contextoCasoMock,
+}));
 // El permiso de la ficha lo da cartera (lib/acceso-caso-cobro); acá se simula
 // con la misma bandera de siempre: `responsableCasoMock === "user-test"` =
 // el usuario trabaja el crédito.
@@ -528,6 +608,113 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(gpsConsultaLogsActualizados).not.toContainEqual({ snapshot: null });
 	});
 
+	it("domicilio declarado: confirma la probable casa cercana, no la lejana, y lo deja en el snapshot", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		const casa = {
+			id: "ub-1",
+			lat: 14.5951,
+			lon: -90.5069,
+			radioM: 50,
+			tipo: "probable_casa",
+			horasTotales: 480,
+			diasDistintos: 55,
+			visitas: 55,
+			patron: {},
+			primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+			ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+			calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+		};
+		const trabajo = { ...casa, id: "ub-2", tipo: "probable_trabajo" };
+		ubicacionesFilasMock = [casa, trabajo];
+
+		// ~55 m al norte: dentro de radio (50) + margen (150).
+		domicilioDeclaradoMock = [
+			{
+				tipo: "casa",
+				lat: 14.5956,
+				lon: -90.5069,
+				direccionTexto: DIRECCION_CASA,
+			},
+		];
+		let res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBe(true);
+		expect(res.ubicaciones[0].distanciaDomicilioM).toBeLessThan(100);
+		// El probable trabajo no se compara con el punto de la casa.
+		expect(res.ubicaciones[1].confirmadaDomicilio).toBeNull();
+		expect(gpsConsultaLogsActualizados.at(-1)).toMatchObject({
+			snapshot: {
+				ubicaciones: [
+					{ confirmadaDomicilio: true },
+					{ confirmadaDomicilio: null },
+				],
+			},
+		});
+
+		// ~2 km: no confirma.
+		domicilioDeclaradoMock = [
+			{
+				tipo: "casa",
+				lat: 14.6131,
+				lon: -90.5069,
+				direccionTexto: DIRECCION_CASA,
+			},
+		];
+		res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBe(false);
+		expect(res.ubicaciones[0].distanciaDomicilioM).toBeGreaterThan(1500);
+
+		// Casa y trabajo ubicados: cada uno se compara con su propio punto.
+		domicilioDeclaradoMock = [
+			{
+				tipo: "casa",
+				lat: 14.6131,
+				lon: -90.5069,
+				direccionTexto: DIRECCION_CASA,
+			},
+			{
+				tipo: "trabajo",
+				lat: 14.5956,
+				lon: -90.5069,
+				direccionTexto: DIRECCION_TRABAJO,
+			},
+		];
+		res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBe(false);
+		expect(res.ubicaciones[1].confirmadaDomicilio).toBe(true);
+
+		// La dirección del cliente cambió desde que se ubicó el punto: aunque
+		// esté a 50 m, ya no confirma.
+		domicilioDeclaradoMock = [
+			{
+				tipo: "casa",
+				lat: 14.5956,
+				lon: -90.5069,
+				direccionTexto: "Otra dirección vieja",
+			},
+		];
+		res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBe(false);
+		expect(res.ubicaciones[0].domicilioDesactualizado).toBe(true);
+
+		// Sin domicilio ubicado: null, no false.
+		domicilioDeclaradoMock = [];
+		res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBeNull();
+		expect(res.ubicaciones[0].distanciaDomicilioM).toBeNull();
+	});
+
 	it("caso sin numeroCreditoSifco: no expone ubicaciones", async () => {
 		casoGpsMock = {
 			casoSifco: null,
@@ -750,6 +937,7 @@ describe("getUbicacionesConsultasCaso (historial de ubicaciones clave)", () => {
 		rolUsuarioMock = "cobros";
 		responsableCasoMock = "user-test";
 		numeroCreditoSifcoMock = "01010214100000";
+		domicilioDeclaradoMock = [];
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
 		} as never);
@@ -944,5 +1132,194 @@ describe("calcularUbicacionesClaveCaso — botón «Calcular ahora»", () => {
 			}),
 		).rejects.toThrow();
 		expect(calcular).not.toHaveBeenCalled();
+	});
+});
+
+describe("Domicilio declarado — leer, guardar y quitar", () => {
+	beforeEach(() => {
+		rolUsuarioMock = "cobros";
+		responsableCasoMock = "user-test";
+		domicilioDeclaradoMock = [];
+		domicilioUpserts = [];
+		domicilioBorrados = 0;
+		contextoCasoMock = { leadId: "lead-1", opportunityId: "opp-1" };
+		leadDireccionMock = DIRECCION_CASA;
+		solicitudMock = { residencia: null, trabajo: DIRECCION_TRABAJO };
+	});
+
+	afterEach(() => {
+		mock.restore();
+	});
+
+	it("get: devuelve la dirección de casa (lead) y de trabajo (solicitud), sin puntos ubicados", async () => {
+		const res = await call(
+			gpsEventosRouter.getDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.casa).toEqual({ direccion: DIRECCION_CASA, ubicado: null });
+		expect(res.trabajo).toEqual({
+			direccion: DIRECCION_TRABAJO,
+			ubicado: null,
+		});
+	});
+
+	it("get: sin dirección en el lead usa la residencia de la solicitud; sin solicitud, el trabajo es null", async () => {
+		leadDireccionMock = null;
+		solicitudMock = { residencia: "Residencia de la solicitud", trabajo: null };
+		let res = await call(
+			gpsEventosRouter.getDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.casa.direccion).toBe("Residencia de la solicitud");
+		expect(res.trabajo.direccion).toBeNull();
+
+		solicitudMock = null;
+		contextoCasoMock = { leadId: "lead-1", opportunityId: null };
+		leadDireccionMock = DIRECCION_CASA;
+		res = await call(
+			gpsEventosRouter.getDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.casa.direccion).toBe(DIRECCION_CASA);
+		expect(res.trabajo.direccion).toBeNull();
+	});
+
+	it("get: marca el punto como desactualizado solo si la dirección cambió", async () => {
+		const registradoAt = new Date("2026-10-02T15:51:00.000Z");
+		domicilioDeclaradoMock = [
+			// Misma dirección con otras mayúsculas y espacios: no cambió.
+			{
+				tipo: "casa",
+				lat: 14.5,
+				lon: -90.5,
+				direccionTexto: `  ${DIRECCION_CASA.toUpperCase()}  `,
+				registradoAt,
+				registradoPorNombre: "Jose",
+			},
+			{
+				tipo: "trabajo",
+				lat: 14.6,
+				lon: -90.6,
+				direccionTexto: "Dirección de trabajo anterior",
+				registradoAt,
+				registradoPorNombre: null,
+			},
+		];
+		const res = await call(
+			gpsEventosRouter.getDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.casa.ubicado).toMatchObject({
+			lat: 14.5,
+			lon: -90.5,
+			registradoPorNombre: "Jose",
+			desactualizado: false,
+		});
+		expect(res.trabajo.ubicado).toMatchObject({ desactualizado: true });
+	});
+
+	it("get: asesor sin acceso al caso: NOT_FOUND", async () => {
+		responsableCasoMock = "otro-usuario";
+		await expect(
+			call(
+				gpsEventosRouter.getDomicilioDeclaradoCaso,
+				{ casoCobroId: CASO_ID },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toBeInstanceOf(ORPCError);
+	});
+
+	it("set: lee el link de Maps, guarda el punto con la dirección actual y quien lo ubicó", async () => {
+		const res = await call(
+			gpsEventosRouter.setDomicilioDeclaradoCaso,
+			{
+				casoCobroId: CASO_ID,
+				tipo: "casa",
+				entrada:
+					"https://www.google.com/maps/place/X/@14.6,-90.5,17z/data=!3d14.5951!4d-90.5069",
+			},
+			{ context: ctx("cobros") },
+		);
+		expect(res).toEqual({ lat: 14.5951, lon: -90.5069 });
+		expect(domicilioUpserts).toHaveLength(1);
+		expect(domicilioUpserts[0].valores).toMatchObject({
+			casoCobroId: CASO_ID,
+			tipo: "casa",
+			lat: 14.5951,
+			lon: -90.5069,
+			direccionTexto: DIRECCION_CASA,
+			registradoPor: "user-test",
+		});
+		// Volver a guardar actualiza el punto (upsert por caso + tipo).
+		expect(domicilioUpserts[0].config.set).toMatchObject({
+			lat: 14.5951,
+			lon: -90.5069,
+			direccionTexto: DIRECCION_CASA,
+		});
+	});
+
+	it("set: el trabajo guarda la dirección del trabajo, no la de la casa", async () => {
+		await call(
+			gpsEventosRouter.setDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID, tipo: "trabajo", entrada: "14.64, -90.51" },
+			{ context: ctx("cobros") },
+		);
+		expect(domicilioUpserts[0].valores).toMatchObject({
+			tipo: "trabajo",
+			direccionTexto: DIRECCION_TRABAJO,
+		});
+	});
+
+	it("set: entrada sin coordenadas válidas: BAD_REQUEST y no guarda nada", async () => {
+		for (const entrada of [
+			"zona 10 ciudad",
+			"https://maps.app.goo.gl/abc123",
+			"95, -90",
+			"0, 0",
+		]) {
+			await expect(
+				call(
+					gpsEventosRouter.setDomicilioDeclaradoCaso,
+					{ casoCobroId: CASO_ID, tipo: "casa", entrada },
+					{ context: ctx("cobros") },
+				),
+			).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		}
+		expect(domicilioUpserts).toHaveLength(0);
+	});
+
+	it("set: asesor sin acceso al caso: no guarda nada", async () => {
+		responsableCasoMock = "otro-usuario";
+		await expect(
+			call(
+				gpsEventosRouter.setDomicilioDeclaradoCaso,
+				{ casoCobroId: CASO_ID, tipo: "casa", entrada: "14.5951, -90.5069" },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toBeInstanceOf(ORPCError);
+		expect(domicilioUpserts).toHaveLength(0);
+	});
+
+	it("borrar: quita el punto; sin acceso al caso no borra", async () => {
+		await call(
+			gpsEventosRouter.borrarDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID, tipo: "casa" },
+			{ context: ctx("cobros") },
+		);
+		expect(domicilioBorrados).toBe(1);
+
+		responsableCasoMock = "otro-usuario";
+		await expect(
+			call(
+				gpsEventosRouter.borrarDomicilioDeclaradoCaso,
+				{ casoCobroId: CASO_ID, tipo: "casa" },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toBeInstanceOf(ORPCError);
+		expect(domicilioBorrados).toBe(1);
 	});
 });

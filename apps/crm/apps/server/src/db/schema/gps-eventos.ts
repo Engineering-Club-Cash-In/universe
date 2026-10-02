@@ -9,9 +9,11 @@ import {
 	primaryKey,
 	text,
 	timestamp,
+	unique,
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
+import { user } from "./auth";
 import { casosCobros } from "./cobros";
 import { vehicles } from "./vehicles";
 
@@ -268,3 +270,50 @@ export const gpsEstanciasCursor = pgTable("gps_estancias_cursor", {
 	pendienteHasta: timestamp("pendiente_hasta"),
 	actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
 });
+
+/**
+ * Qué dirección declarada se ubicó: la de residencia (se compara con la
+ * "probable casa") o la del trabajo (con el "probable trabajo").
+ */
+export const gpsDomicilioTipoEnum = pgEnum("gps_domicilio_tipo", [
+	"casa",
+	"trabajo",
+]);
+
+/**
+ * Dirección declarada por el cliente (residencia o trabajo), ubicada en el
+ * mapa por el asesor: busca la dirección de la solicitud en Google Maps y pega
+ * las coordenadas. Sirve para confirmar una "probable casa" o un "probable
+ * trabajo" del GPS: si queda a menos de radio + margen del punto declarado, se
+ * marca como confirmado.
+ *
+ * Una fila por caso y tipo. Tabla aparte de `gps_ubicaciones_clave` porque el
+ * job nocturno REEMPLAZA esas filas en cada corrida; la coincidencia se calcula
+ * al leer.
+ */
+export const gpsDomicilioDeclarado = pgTable(
+	"gps_domicilio_declarado",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		tipo: gpsDomicilioTipoEnum("tipo").notNull(),
+		lat: doublePrecision("lat").notNull(),
+		lon: doublePrecision("lon").notNull(),
+		// Dirección declarada al momento de registrar: para saber contra qué texto
+		// se ubicó el punto si la solicitud cambia después.
+		direccionTexto: text("direccion_texto"),
+		registradoPor: text("registrado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		registradoAt: timestamp("registrado_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at").defaultNow().notNull(),
+	},
+	(t) => [
+		unique("gps_domicilio_declarado_caso_tipo_unique").on(
+			t.casoCobroId,
+			t.tipo,
+		),
+	],
+);

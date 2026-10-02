@@ -8,16 +8,30 @@
  * a un router ya grande.
  */
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { creditApplications } from "../db/schema/client-forms";
 import { casosCobros } from "../db/schema/cobros";
+import { leads } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
-import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import {
+	gpsDomicilioDeclarado,
+	gpsEventos,
+	gpsUbicacionesClave,
+} from "../db/schema/gps-eventos";
 import { vehicles } from "../db/schema/vehicles";
 import { calcularUbicacionesUnidadBajoDemanda } from "../jobs/gps-ubicaciones-clave";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
+import { resolverContextoCaso } from "../services/referencias-cobros-datos";
+import {
+	confirmaDomicilio,
+	distanciaMetros,
+	parsearCoordenadas,
+} from "../services/wialon/geo";
 import { agruparConsultasGps } from "../services/wialon/gps-consultas-agrupar";
 import {
 	calcularUbicacionesClaveCasoInputSchema,
@@ -69,6 +83,71 @@ function leerSnapshotGps(valor: unknown) {
 function leerSnapshotUbicaciones(valor: unknown) {
 	const parsed = ubicacionesClaveSnapshotSchema.safeParse(valor);
 	return parsed.success ? parsed.data : null;
+}
+
+type TipoDomicilio = "casa" | "trabajo";
+
+const UBICACION_A_DOMICILIO: Record<string, TipoDomicilio | undefined> = {
+	probable_casa: "casa",
+	probable_trabajo: "trabajo",
+};
+
+type DireccionesDeclaradas = Record<TipoDomicilio, string | null>;
+
+/**
+ * Direcciones que el cliente declaró, las mismas que muestra el Resumen de la
+ * ficha, para que lo que el asesor busca en Maps sea lo que ve en pantalla.
+ * - casa: la del lead; si no la tiene, la residencia de la última solicitud.
+ * - trabajo: la del trabajo de la última solicitud (solo viene de ahí).
+ * Resuelve el contexto del caso una sola vez para las dos.
+ */
+async function direccionesDeclaradasDelCaso(
+	casoCobroId: string,
+): Promise<DireccionesDeclaradas> {
+	const ctx = await resolverContextoCaso(casoCobroId);
+	const limpio = (v: string | null | undefined) => v?.trim() || null;
+
+	let casa: string | null = null;
+	if (ctx.leadId) {
+		const [lead] = await db
+			.select({ direccion: leads.direccion })
+			.from(leads)
+			.where(eq(leads.id, ctx.leadId))
+			.limit(1);
+		casa = limpio(lead?.direccion);
+	}
+	if (!ctx.opportunityId) return { casa, trabajo: null };
+
+	const [solicitud] = await db
+		.select({
+			residencia: creditApplications.direccionResidencia,
+			trabajo: creditApplications.direccionTrabajo,
+		})
+		.from(creditApplications)
+		.where(
+			and(
+				eq(creditApplications.opportunityId, ctx.opportunityId),
+				// La del titular; NULL = solicitud anterior a la 0015.
+				or(
+					eq(creditApplications.personType, "lead"),
+					isNull(creditApplications.personType),
+				),
+			),
+		)
+		.orderBy(desc(creditApplications.updatedAt))
+		.limit(1);
+	return {
+		casa: casa ?? limpio(solicitud?.residencia),
+		trabajo: limpio(solicitud?.trabajo),
+	};
+}
+
+// Misma dirección ignorando mayúsculas y espacios de más: sirve para saber si
+// la del cliente cambió desde que el asesor ubicó el punto en el mapa.
+function mismaDireccion(a: string | null, b: string | null): boolean {
+	const norm = (v: string | null) =>
+		(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+	return norm(a) === norm(b);
 }
 
 export const gpsEventosRouter = {
@@ -270,12 +349,60 @@ export const gpsEventosRouter = {
 				)
 				.orderBy(desc(gpsUbicacionesClave.horasTotales));
 
+			// Direcciones declaradas ubicadas por el asesor: la probable casa se
+			// compara con la residencia y el probable trabajo con el trabajo. Se
+			// calcula al leer porque el job nocturno reemplaza las filas.
+			const puntos = await db
+				.select({
+					tipo: gpsDomicilioDeclarado.tipo,
+					lat: gpsDomicilioDeclarado.lat,
+					lon: gpsDomicilioDeclarado.lon,
+					direccionTexto: gpsDomicilioDeclarado.direccionTexto,
+				})
+				.from(gpsDomicilioDeclarado)
+				.where(eq(gpsDomicilioDeclarado.casoCobroId, input.casoCobroId));
+			// Solo si hay puntos ubicados: si la dirección del cliente cambió desde
+			// entonces, el punto ya no confirma nada.
+			const direccionesActuales =
+				puntos.length > 0
+					? await direccionesDeclaradasDelCaso(input.casoCobroId)
+					: null;
+			const ubicacionesConDomicilio = ubicaciones.map((u) => {
+				const tipoDomicilio = UBICACION_A_DOMICILIO[u.tipo];
+				const punto = puntos.find((p) => p.tipo === tipoDomicilio);
+				if (!punto || !tipoDomicilio) {
+					return {
+						...u,
+						distanciaDomicilioM: null,
+						confirmadaDomicilio: null,
+						domicilioDesactualizado: null,
+					};
+				}
+				const distanciaDomicilioM = distanciaMetros(
+					u.lat,
+					u.lon,
+					punto.lat,
+					punto.lon,
+				);
+				const desactualizado = !mismaDireccion(
+					punto.direccionTexto,
+					direccionesActuales?.[tipoDomicilio] ?? null,
+				);
+				return {
+					...u,
+					distanciaDomicilioM,
+					confirmadaDomicilio:
+						!desactualizado && confirmaDomicilio(distanciaDomicilioM, u.radioM),
+					domicilioDesactualizado: desactualizado,
+				};
+			});
+
 			// Se guarda lo que se muestra para poder verlo después desde el
 			// historial sin repetir la consulta. Best-effort: la auditoría ya
 			// quedó registrada, y sin snapshot el historial solo muestra el motivo.
 			await db
 				.update(gpsConsultaLogs)
-				.set({ snapshot: { ubicaciones } })
+				.set({ snapshot: { ubicaciones: ubicacionesConDomicilio } })
 				.where(eq(gpsConsultaLogs.id, consultaLogId))
 				.catch((error) => {
 					console.error("GPS_CONSULTA_SNAPSHOT_FALLIDO", {
@@ -285,7 +412,7 @@ export const gpsEventosRouter = {
 					});
 				});
 
-			return { auditada: true, ubicaciones };
+			return { auditada: true, ubicaciones: ubicacionesConDomicilio };
 		}),
 
 	/**
@@ -377,5 +504,139 @@ export const gpsEventosRouter = {
 				createdAt: f.createdAt,
 				snapshot: leerSnapshotUbicaciones(f.snapshot),
 			}));
+		}),
+
+	/**
+	 * Direcciones declaradas del cliente (residencia y trabajo, tal como las
+	 * muestra la ficha) y, si el asesor ya las ubicó en el mapa, sus
+	 * coordenadas. No audita: no expone la posición del vehículo, solo datos del
+	 * cliente que la ficha ya muestra.
+	 */
+	getDomicilioDeclaradoCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [direcciones, filas] = await Promise.all([
+				direccionesDeclaradasDelCaso(input.casoCobroId),
+				db
+					.select({
+						tipo: gpsDomicilioDeclarado.tipo,
+						lat: gpsDomicilioDeclarado.lat,
+						lon: gpsDomicilioDeclarado.lon,
+						direccionTexto: gpsDomicilioDeclarado.direccionTexto,
+						registradoAt: gpsDomicilioDeclarado.registradoAt,
+						registradoPorNombre: user.name,
+					})
+					.from(gpsDomicilioDeclarado)
+					.leftJoin(user, eq(user.id, gpsDomicilioDeclarado.registradoPor))
+					.where(eq(gpsDomicilioDeclarado.casoCobroId, input.casoCobroId)),
+			]);
+			const ubicado = (tipo: TipoDomicilio) => {
+				const fila = filas.find((f) => f.tipo === tipo);
+				return fila
+					? {
+							lat: fila.lat,
+							lon: fila.lon,
+							registradoAt: fila.registradoAt,
+							registradoPorNombre: fila.registradoPorNombre ?? null,
+							// La dirección del cliente cambió desde que se ubicó el punto.
+							desactualizado: !mismaDireccion(
+								fila.direccionTexto,
+								direcciones[tipo],
+							),
+						}
+					: null;
+			};
+			return {
+				casa: { direccion: direcciones.casa, ubicado: ubicado("casa") },
+				trabajo: {
+					direccion: direcciones.trabajo,
+					ubicado: ubicado("trabajo"),
+				},
+			};
+		}),
+
+	/**
+	 * Guarda las coordenadas de la dirección declarada (casa o trabajo). Acepta
+	 * lo que el asesor pega desde Google Maps ("lat, lon" o un link).
+	 */
+	setDomicilioDeclaradoCaso: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				tipo: z.enum(["casa", "trabajo"]),
+				entrada: z.string().trim().min(3).max(2000),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const coords = parsearCoordenadas(input.entrada);
+			if (!coords) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se encontraron coordenadas. Pegue «latitud, longitud» o el link de Google Maps.",
+				});
+			}
+			const userId = context.userId ?? context.user?.id ?? null;
+			const direccionTexto = (
+				await direccionesDeclaradasDelCaso(input.casoCobroId)
+			)[input.tipo];
+			await db
+				.insert(gpsDomicilioDeclarado)
+				.values({
+					casoCobroId: input.casoCobroId,
+					tipo: input.tipo,
+					lat: coords.lat,
+					lon: coords.lon,
+					direccionTexto,
+					registradoPor: userId,
+				})
+				.onConflictDoUpdate({
+					target: [
+						gpsDomicilioDeclarado.casoCobroId,
+						gpsDomicilioDeclarado.tipo,
+					],
+					set: {
+						lat: coords.lat,
+						lon: coords.lon,
+						direccionTexto,
+						registradoPor: userId,
+						registradoAt: new Date(),
+						updatedAt: new Date(),
+					},
+				});
+			return coords;
+		}),
+
+	borrarDomicilioDeclaradoCaso: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				tipo: z.enum(["casa", "trabajo"]),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			await db
+				.delete(gpsDomicilioDeclarado)
+				.where(
+					and(
+						eq(gpsDomicilioDeclarado.casoCobroId, input.casoCobroId),
+						eq(gpsDomicilioDeclarado.tipo, input.tipo),
+					),
+				);
+			return { ok: true };
 		}),
 };

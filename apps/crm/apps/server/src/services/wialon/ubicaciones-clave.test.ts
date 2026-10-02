@@ -6,8 +6,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	agruparEstancias,
 	calcularUbicacionesClave,
+	calcularUbicacionesClaveDeEstancias,
 	detectarEstancias,
 	detectarEstanciasConPendiente,
+	diasCubiertos,
+	nochesCubiertas,
 } from "./ubicaciones-clave";
 import type { WialonMensajePosicion } from "./wialon-types";
 
@@ -343,5 +346,231 @@ describe("calcularUbicacionesClave — ponderación por duración", () => {
 
 		expect(lugar).toBeDefined();
 		expect(lugar?.tipo).toBe("recurrente");
+	});
+});
+
+// Fecha/hora de Guatemala relativa al 2026-07-01 00:00 GT.
+function gt(diaOffset: number, horaGt: number): Date {
+	return new Date(horaGtAEpoch(diaOffset, horaGt) * 1000);
+}
+
+function estancia(
+	punto: { lat: number; lon: number },
+	desde: Date,
+	hasta: Date,
+) {
+	return { lat: punto.lat, lon: punto.lon, desde, hasta };
+}
+
+describe("nochesCubiertas", () => {
+	test("una estancia de la tarde a la mañana siguiente cubre la noche que empezó esa tarde", () => {
+		expect(nochesCubiertas(gt(0, 20), gt(1, 7))).toEqual(["2026-07-01"]);
+	});
+
+	test("una parada de 18:00 a 23:00 solo toca 1 h de la noche: no cuenta", () => {
+		expect(nochesCubiertas(gt(0, 18), gt(0, 23))).toEqual([]);
+	});
+
+	test("el mínimo son 4 h dentro de 22:00–06:00", () => {
+		expect(nochesCubiertas(gt(0, 22), gt(1, 1))).toEqual([]); // 3 h
+		expect(nochesCubiertas(gt(0, 23), gt(1, 3))).toEqual(["2026-07-01"]); // 4 h
+	});
+
+	test("una estancia de varios días aporta todas sus noches", () => {
+		expect(nochesCubiertas(gt(0, 12), gt(5, 12))).toEqual([
+			"2026-07-01",
+			"2026-07-02",
+			"2026-07-03",
+			"2026-07-04",
+			"2026-07-05",
+		]);
+	});
+
+	test("una estancia que empieza de madrugada cuenta la noche del día anterior", () => {
+		expect(nochesCubiertas(gt(3, 1), gt(3, 9))).toEqual(["2026-07-03"]);
+	});
+});
+
+describe("probable_casa por noches — carros que casi no se mueven", () => {
+	const noEs = (tipo: string) => tipo !== "probable_casa";
+
+	test("carro parado días seguidos en el mismo lugar: es probable_casa aunque solo el 33 % de sus horas sea nocturno", () => {
+		// 10 estancias de ~46 h con huecos de 2 h entre ellas: ~20 noches.
+		const estancias = Array.from({ length: 10 }, (_, i) =>
+			estancia(CASA, gt(i * 2, 1), gt(i * 2 + 1, 23)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(ubicaciones).toHaveLength(1);
+		const casa = ubicaciones[0];
+		expect(casa?.tipo).toBe("probable_casa");
+		expect(casa?.patron.nocturna / (casa?.horasTotales ?? 1)).toBeLessThan(0.5);
+		expect(casa?.patron.noches).toBeGreaterThanOrEqual(18);
+	});
+
+	test("paradas de día en otro lugar no le quitan la casa", () => {
+		const casa = Array.from({ length: 10 }, (_, i) =>
+			estancia(CASA, gt(i * 2, 1), gt(i * 2 + 1, 23)),
+		);
+		const trabajo = [1, 3, 5].map((d) =>
+			estancia(TRABAJO, gt(d, 10), gt(d, 11)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			...casa,
+			...trabajo,
+		]);
+		const tipoCasa = ubicaciones.find((u) => u.lat === CASA.lat);
+		expect(tipoCasa?.tipo).toBe("probable_casa");
+		const tipoTrabajo = ubicaciones.find((u) => u.lat === TRABAJO.lat);
+		expect(tipoTrabajo?.tipo).toBeDefined();
+		expect(noEs(tipoTrabajo?.tipo ?? "")).toBe(true);
+	});
+
+	test("dormir mitad y mitad en dos lugares: ninguno tiene la mayoría, no hay casa por noches", () => {
+		const enCasa = Array.from({ length: 4 }, (_, i) =>
+			estancia(CASA, gt(i * 2, 12), gt(i * 2 + 2, 11)),
+		);
+		const enOtro = Array.from({ length: 4 }, (_, i) =>
+			estancia(SABADOS, gt(10 + i * 2, 12), gt(10 + i * 2 + 2, 11)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			...enCasa,
+			...enOtro,
+		]);
+		expect(ubicaciones.length).toBe(2);
+		expect(ubicaciones.every((u) => noEs(u.tipo))).toBe(true);
+	});
+
+	test("menos de 5 noches no alcanza para casa", () => {
+		// 3 estancias de un día completo: 3 noches en total.
+		const estancias = [0, 2, 4].map((d) =>
+			estancia(CASA, gt(d, 12), gt(d + 1, 12)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(ubicaciones).toHaveLength(1);
+		expect(ubicaciones[0]?.tipo).not.toBe("probable_casa");
+	});
+
+	test("una ubicación que solo se visita de tarde (18:00–23:00) sigue sin ser casa", () => {
+		const estancias = Array.from({ length: 12 }, (_, d) =>
+			estancia(CASA, gt(d, 18), gt(d, 23)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(ubicaciones.every((u) => noEs(u.tipo))).toBe(true);
+	});
+
+	test("lo guarda en el patrón para poder mostrarlo", () => {
+		const estancias = Array.from({ length: 10 }, (_, i) =>
+			estancia(CASA, gt(i * 2, 1), gt(i * 2 + 1, 23)),
+		);
+		const [casa] = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(typeof casa?.patron.noches).toBe("number");
+	});
+});
+
+describe("diasCubiertos y diasDistintos en estancias largas", () => {
+	test("una estancia de varios días cubre cada fecha, no solo la del punto medio", () => {
+		expect(diasCubiertos(gt(0, 12), gt(3, 12))).toEqual([
+			"2026-07-01",
+			"2026-07-02",
+			"2026-07-03",
+			"2026-07-04",
+		]);
+	});
+
+	test("una estancia dentro de un mismo día cubre una sola fecha", () => {
+		expect(diasCubiertos(gt(2, 9), gt(2, 17))).toEqual(["2026-07-03"]);
+	});
+
+	test("un carro parado seis días seguidos no cuenta como un solo día", () => {
+		const estancias = [0, 6, 12].map((d) =>
+			estancia(CASA, gt(d, 12), gt(d + 5, 12)),
+		);
+		const [casa] = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(casa?.diasDistintos).toBe(18);
+	});
+});
+
+describe("una sola casa por unidad", () => {
+	test("si dos lugares cumplen, gana el de más noches y el otro deja de ser casa", () => {
+		// Los dos se visitan solo de noche (22:00–06:00): ambos son casa por la
+		// regla del porcentaje nocturno.
+		const principal = Array.from({ length: 10 }, (_, d) =>
+			estancia(CASA, gt(d, 22), gt(d + 1, 6)),
+		);
+		const secundaria = Array.from({ length: 6 }, (_, d) =>
+			estancia(SABADOS, gt(20 + d, 22), gt(21 + d, 6)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			...principal,
+			...secundaria,
+		]);
+		const casas = ubicaciones.filter((u) => u.tipo === "probable_casa");
+		expect(casas).toHaveLength(1);
+		expect(casas[0]?.lat).toBe(CASA.lat);
+		const otra = ubicaciones.find((u) => u.lat === SABADOS.lat);
+		expect(otra).toBeDefined();
+		expect(otra?.tipo).not.toBe("probable_casa");
+	});
+
+	test("guarda cuántas noches hay en total para medir qué tan segura es la casa", () => {
+		const estancias = Array.from({ length: 10 }, (_, i) =>
+			estancia(CASA, gt(i * 2, 1), gt(i * 2 + 1, 23)),
+		);
+		const [casa] = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(casa?.patron.nochesTotales).toBe(casa?.patron.noches);
+		expect(casa?.patron.nochesTotales).toBeGreaterThanOrEqual(18);
+	});
+});
+
+describe("carros que casi no se mueven: pocas estancias muy largas", () => {
+	test("una sola estancia de 45 días: es probable_casa aunque tenga 1 visita", () => {
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			estancia(CASA, gt(0, 12), gt(45, 12)),
+		]);
+		expect(ubicaciones).toHaveLength(1);
+		expect(ubicaciones[0]?.tipo).toBe("probable_casa");
+		expect(ubicaciones[0]?.visitas).toBe(1);
+		expect(ubicaciones[0]?.patron.noches).toBe(45);
+	});
+
+	test("dos estancias largas (salió una vez y volvió): también es casa", () => {
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			estancia(CASA, gt(0, 12), gt(20, 9)),
+			estancia(CASA, gt(20, 15), gt(40, 12)),
+		]);
+		expect(ubicaciones).toHaveLength(1);
+		expect(ubicaciones[0]?.tipo).toBe("probable_casa");
+	});
+
+	test("una visita de pocas noches sigue siendo ruido: no aparece como ubicación", () => {
+		// 8 noches en un solo lugar, pero hay otro con claramente más: el de
+		// pocas visitas no es casa y no se lista como "frecuente".
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([
+			estancia(CASA, gt(0, 12), gt(30, 12)),
+			estancia(SABADOS, gt(31, 12), gt(39, 12)),
+		]);
+		expect(ubicaciones).toHaveLength(1);
+		expect(ubicaciones[0]?.lat).toBe(CASA.lat);
+	});
+
+	test("un cluster de ruido con más noches y una sola visita no le quita la casa a la real si no la supera en noches", () => {
+		// La casa duerme 20 noches en 5 visitas; el taller, 6 noches en 1 visita.
+		const casa = Array.from({ length: 5 }, (_, i) =>
+			estancia(CASA, gt(i * 5, 12), gt(i * 5 + 4, 12)),
+		);
+		const taller = estancia(SABADOS, gt(30, 12), gt(36, 12));
+		const ubicaciones = calcularUbicacionesClaveDeEstancias([...casa, taller]);
+		const tipos = Object.fromEntries(ubicaciones.map((u) => [u.lat, u.tipo]));
+		expect(tipos[CASA.lat]).toBe("probable_casa");
+		expect(tipos[SABADOS.lat]).toBeUndefined();
+	});
+
+	test("lo normal (3 o más visitas) no cambia: sigue entrando sin necesitar noches", () => {
+		const estancias = [0, 2, 4].map((d) =>
+			estancia(CASA, gt(d, 12), gt(d, 15)),
+		);
+		const ubicaciones = calcularUbicacionesClaveDeEstancias(estancias);
+		expect(ubicaciones).toHaveLength(1);
+		expect(ubicaciones[0]?.tipo).not.toBe("probable_casa");
 	});
 });

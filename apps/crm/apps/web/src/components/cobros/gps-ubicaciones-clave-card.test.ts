@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { describirPatron } from "./gps-ubicaciones-clave-card";
+import { describirNoches, describirPatron } from "./gps-ubicaciones-clave-card";
 
 describe("CB-119 (D-15) — describirPatron", () => {
 	it("devuelve null ante patron nulo o inválido", () => {
@@ -59,5 +59,46 @@ describe("CB-119 (D-15) — describirPatron", () => {
 			visitasPorDiaSemana: [0, 0, 0, 0, 0, 0, 10],
 		};
 		expect(describirPatron(patronSabados, 10)).toBe("Sobre todo los sáb");
+	});
+});
+
+describe("describirNoches", () => {
+	it("probable casa: cuántas noches de cuántas durmió ahí", () => {
+		expect(
+			describirNoches({ noches: 51, nochesTotales: 56 }, "probable_casa"),
+		).toBe("Pasó la noche aquí 51 de 56 noches");
+	});
+
+	it("sin el total (filas anteriores): solo las noches", () => {
+		expect(describirNoches({ noches: 20 }, "probable_casa")).toBe(
+			"Pasó la noche aquí 20 noches",
+		);
+	});
+
+	it("singular cuando es una sola noche", () => {
+		expect(
+			describirNoches({ noches: 1, nochesTotales: 1 }, "probable_casa"),
+		).toBe("Pasó la noche aquí 1 de 1 noche");
+		expect(describirNoches({ noches: 1 }, "probable_casa")).toBe(
+			"Pasó la noche aquí 1 noche",
+		);
+		expect(
+			describirNoches({ noches: 1, nochesTotales: 4 }, "probable_casa"),
+		).toBe("Pasó la noche aquí 1 de 4 noches");
+	});
+
+	it("solo aplica a la probable casa", () => {
+		expect(
+			describirNoches({ noches: 51, nochesTotales: 56 }, "frecuente"),
+		).toBeNull();
+		expect(
+			describirNoches({ noches: 9, nochesTotales: 9 }, "probable_trabajo"),
+		).toBeNull();
+	});
+
+	it("sin datos de noches: nada", () => {
+		expect(describirNoches(null, "probable_casa")).toBeNull();
+		expect(describirNoches({}, "probable_casa")).toBeNull();
+		expect(describirNoches({ noches: 0 }, "probable_casa")).toBeNull();
 	});
 });

@@ -144,6 +144,24 @@ export function describirPatron(
 }
 
 /**
+ * Qué tan segura es una "probable casa": en cuántas de las noches en que el
+ * carro estuvo en algún lugar conocido durmió ahí. Con carros muy quietos el
+ * porcentaje de horas nocturnas no dice nada (ronda el 33 %), las noches sí.
+ */
+export function describirNoches(patron: unknown, tipo: string): string | null {
+	if (tipo !== "probable_casa" || !patron || typeof patron !== "object") {
+		return null;
+	}
+	const p = patron as { noches?: number; nochesTotales?: number };
+	if (typeof p.noches !== "number" || p.noches <= 0) return null;
+	const noches = (n: number) => (n === 1 ? "noche" : "noches");
+	if (typeof p.nochesTotales === "number" && p.nochesTotales >= p.noches) {
+		return `Pasó la noche aquí ${p.noches} de ${p.nochesTotales} ${noches(p.nochesTotales)}`;
+	}
+	return `Pasó la noche aquí ${p.noches} ${noches(p.noches)}`;
+}
+
+/**
  * Consulta de ubicaciones clave (CB-119, D-15): casa, trabajo y lugares
  * recurrentes del vehículo, calculados por el job nocturno contra el historial
  * de Wialon de los últimos 60 días.
@@ -244,6 +262,7 @@ export function UbicacionesClaveLista({
 				const mapsUrl = googleMapsUrl(u.lat, u.lon);
 				const mapaAbierto = mapaAbiertoId === u.id;
 				const patronTexto = describirPatron(u.patron, u.horasTotales);
+				const nochesTexto = describirNoches(u.patron, u.tipo);
 				let distanciaDomicilioM = u.distanciaDomicilioM ?? null;
 				let confirmada = u.confirmadaDomicilio ?? null;
 				const tipoDomicilio = TIPO_DOMICILIO[u.tipo];
@@ -286,6 +305,11 @@ export function UbicacionesClaveLista({
 										visitas en {u.diasDistintos} días
 										{patronTexto ? ` · ${patronTexto}` : ""}
 									</p>
+									{nochesTexto && (
+										<p className="text-muted-foreground text-xs">
+											{nochesTexto}
+										</p>
+									)}
 									<p className="text-muted-foreground text-xs">
 										Última vez: {formatFechaSenal(u.ultimaVisita)}
 									</p>

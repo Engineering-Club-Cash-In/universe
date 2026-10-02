@@ -353,10 +353,9 @@ export async function registrarEventoGps(
 	// Si no se puede resolver, el aviso sale igual a supervisión (cuando escala).
 	const asesorUserId = asesorActual.userId;
 
+	const escala = input.escalarASupervisor ?? ESCALA_A_SUPERVISOR[input.tipo];
 	const [supervisores, usuarioSistema] = await Promise.all([
-		(input.escalarASupervisor ?? ESCALA_A_SUPERVISOR[input.tipo])
-			? obtenerSupervisoresCobros()
-			: Promise.resolve<string[]>([]),
+		escala ? obtenerSupervisoresCobros() : Promise.resolve<string[]>([]),
 		resolverUsuarioSistemaCobros(),
 	]);
 
@@ -391,18 +390,46 @@ export async function registrarEventoGps(
 		.orderBy(desc(gpsEventos.ocurridoAt))
 		.limit(1);
 
+	// El aviso previo de la ventana pudo ser solo-asesor (energía fuera de B4,
+	// cuando el crédito aún no escalaba) y este evento sí escala (el crédito
+	// ya llegó a B4): la ventana no debe taparle a supervisión un aviso que
+	// nunca recibió. Si el previo ya llegó a supervisores, o este evento no
+	// escala, se suprime como siempre; si no, se deja pasar SOLO a
+	// supervisores (el asesor ya fue avisado dentro de la ventana).
+	let soloSupervisores = false;
 	if (
 		ultimoNotificado &&
 		input.ocurridoAt.getTime() - ultimoNotificado.ocurridoAt.getTime() <
 			ventanaMs
 	) {
-		return {
-			eventoId,
-			duplicado,
-			vehicleId,
-			casoCobroId,
-			notificado: false,
-		};
+		const previoLlegoASupervisores = escala
+			? (
+					await db
+						.select({ id: notifications.id })
+						.from(notifications)
+						.where(
+							and(
+								eq(notifications.cobrosTipo, "gps_evento"),
+								eq(
+									notifications.cobrosDedupKey,
+									`gps:${input.tipo}:${input.wialonUnitId}:${casoCobroId}:${ultimoNotificado.ocurridoAt.toISOString()}`,
+								),
+								eq(notifications.assignedToRole, "cobros_supervisor"),
+							),
+						)
+						.limit(1)
+				).length > 0
+			: true;
+		if (previoLlegoASupervisores) {
+			return {
+				eventoId,
+				duplicado,
+				vehicleId,
+				casoCobroId,
+				notificado: false,
+			};
+		}
+		soloSupervisores = true;
 	}
 
 	// dedupKey único por evento (no por bucket): la ventana deslizante de
@@ -415,7 +442,7 @@ export async function registrarEventoGps(
 		cobrosTipo: "gps_evento",
 		titulo: TITULO_POR_TIPO[input.tipo],
 		descripcion: descripcionEvento(input),
-		asesorUserId,
+		asesorUserId: soloSupervisores ? null : asesorUserId,
 		supervisores,
 		usuarioSistema,
 		dedupKey: dedupNotifKey,
@@ -446,7 +473,7 @@ export async function registrarEventoGps(
 		notificado,
 		// Sin filas = nadie a quién avisar; si además el asesor falló por un
 		// error transitorio (no por no existir), el job debe reintentar.
-		reintentar: filas.length === 0 && asesorActual.fallo,
+		reintentar: filas.length === 0 && !soloSupervisores && asesorActual.fallo,
 	};
 }
 

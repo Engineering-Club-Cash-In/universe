@@ -813,8 +813,10 @@ function parseRawPdfObjects(text: string) {
 	const objects = new Map<string, RawPdfObject>();
 	const records: RawPdfObject[] = [];
 	const headers = text.matchAll(
+		// Sin `+` dentro del grupo repetido: anidarlo hace backtracking exponencial
+		// con corridas largas de espacios, y JSC aborta la búsqueda sin coincidencia.
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
-		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
+		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
 	);
 	for (const match of headers) {
 		const key = `${match[1]}:${match[2]}`;
@@ -965,7 +967,7 @@ function checkPdfSafeToParse(
 
 	for (const match of text.matchAll(
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
-		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
+		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
 	)) {
 		if (Number(match[1]) > MAX_DECLARED_PDF_OBJECTS) return false;
 	}

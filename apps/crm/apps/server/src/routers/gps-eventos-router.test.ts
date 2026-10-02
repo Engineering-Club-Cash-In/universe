@@ -1292,6 +1292,76 @@ describe("Domicilio declarado — leer, guardar y quitar", () => {
 		expect(domicilioUpserts).toHaveLength(0);
 	});
 
+	it("set: sin dirección declarada no guarda el punto (casa ni trabajo)", async () => {
+		leadDireccionMock = null;
+		solicitudMock = { residencia: null, trabajo: null };
+		for (const tipo of ["casa", "trabajo"] as const) {
+			await expect(
+				call(
+					gpsEventosRouter.setDomicilioDeclaradoCaso,
+					{ casoCobroId: CASO_ID, tipo, entrada: "14.5951, -90.5069" },
+					{ context: ctx("cobros") },
+				),
+			).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		}
+		expect(domicilioUpserts).toHaveLength(0);
+	});
+
+	it("get: un punto guardado sin dirección actual queda desactualizado, no vigente", async () => {
+		leadDireccionMock = null;
+		solicitudMock = null;
+		domicilioDeclaradoMock = [
+			{ tipo: "casa", lat: 14.5, lon: -90.5, direccionTexto: null },
+		];
+		const res = await call(
+			gpsEventosRouter.getDomicilioDeclaradoCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.casa.direccion).toBeNull();
+		expect(res.casa.ubicado?.desactualizado).toBe(true);
+	});
+
+	it("ubicaciones: un punto sin dirección declarada nunca sale Confirmado, aunque esté pegado al cluster", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		leadDireccionMock = null;
+		solicitudMock = null;
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: {},
+				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+			},
+		];
+		// Mismas coordenadas que el cluster y sin texto de dirección: el caso del
+		// asesor que pega el punto del GPS para "confirmarlo".
+		domicilioDeclaradoMock = [
+			{ tipo: "casa", lat: 14.5951, lon: -90.5069, direccionTexto: null },
+		];
+		const res = await call(
+			gpsEventosRouter.getUbicacionesClaveCaso,
+			{
+				casoCobroId: CASO_ID,
+				vehicleId: VEHICLE_ID,
+				motivo: "motivo de prueba",
+			},
+			{ context: ctx("cobros") },
+		);
+		expect(res.ubicaciones[0].confirmadaDomicilio).toBe(false);
+		expect(res.ubicaciones[0].domicilioDesactualizado).toBe(true);
+	});
+
 	it("set: asesor sin acceso al caso: no guarda nada", async () => {
 		responsableCasoMock = "otro-usuario";
 		await expect(

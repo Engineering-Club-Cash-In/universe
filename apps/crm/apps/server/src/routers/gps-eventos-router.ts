@@ -142,12 +142,17 @@ async function direccionesDeclaradasDelCaso(
 	};
 }
 
-// Misma dirección ignorando mayúsculas y espacios de más: sirve para saber si
-// la del cliente cambió desde que el asesor ubicó el punto en el mapa.
-function mismaDireccion(a: string | null, b: string | null): boolean {
+// ¿El punto que ubicó el asesor sigue valiendo contra la dirección actual del
+// cliente? Compara ignorando mayúsculas y espacios de más. Sin dirección actual
+// no vale: no hay contra qué verificar, y dos direcciones vacías no son "la
+// misma" (si no, un punto pegado sin dirección declarada saldría confirmado).
+function direccionVigente(
+	guardada: string | null,
+	actual: string | null,
+): boolean {
 	const norm = (v: string | null) =>
 		(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-	return norm(a) === norm(b);
+	return norm(actual) !== "" && norm(guardada) === norm(actual);
 }
 
 export const gpsEventosRouter = {
@@ -384,7 +389,7 @@ export const gpsEventosRouter = {
 					punto.lat,
 					punto.lon,
 				);
-				const desactualizado = !mismaDireccion(
+				const desactualizado = !direccionVigente(
 					punto.direccionTexto,
 					direccionesActuales?.[tipoDomicilio] ?? null,
 				);
@@ -543,8 +548,9 @@ export const gpsEventosRouter = {
 							lon: fila.lon,
 							registradoAt: fila.registradoAt,
 							registradoPorNombre: fila.registradoPorNombre ?? null,
-							// La dirección del cliente cambió desde que se ubicó el punto.
-							desactualizado: !mismaDireccion(
+							// La dirección del cliente cambió (o ya no hay) desde que se
+							// ubicó el punto.
+							desactualizado: !direccionVigente(
 								fila.direccionTexto,
 								direcciones[tipo],
 							),
@@ -589,6 +595,16 @@ export const gpsEventosRouter = {
 			const direccionTexto = (
 				await direccionesDeclaradasDelCaso(input.casoCobroId)
 			)[input.tipo];
+			// Sin dirección declarada no hay contra qué verificar el punto: se
+			// rechaza en vez de guardar uno que luego saldría "Confirmado".
+			if (!direccionTexto) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						input.tipo === "casa"
+							? "El cliente no tiene dirección de residencia registrada: no hay contra qué verificar este punto."
+							: "El cliente no tiene dirección de trabajo registrada: no hay contra qué verificar este punto.",
+				});
+			}
 			await db
 				.insert(gpsDomicilioDeclarado)
 				.values({

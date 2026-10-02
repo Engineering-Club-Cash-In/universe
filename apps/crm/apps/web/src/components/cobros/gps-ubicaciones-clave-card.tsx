@@ -345,17 +345,26 @@ const TIPO_DOMICILIO: Record<string, TipoDomicilio | undefined> = {
 
 const TEXTO_DOMICILIO: Record<
 	TipoDomicilio,
-	{ pregunta: string; direccion: string; declarado: string }
+	{
+		pregunta: string;
+		direccion: string;
+		declarado: string;
+		sinDireccion: string;
+	}
 > = {
 	casa: {
 		pregunta: "es su casa",
 		direccion: "Dirección de residencia",
 		declarado: "domicilio declarado",
+		sinDireccion:
+			"El cliente no tiene dirección de residencia registrada: no hay contra qué verificar este punto.",
 	},
 	trabajo: {
 		pregunta: "es su trabajo",
 		direccion: "Dirección del trabajo",
 		declarado: "trabajo declarado",
+		sinDireccion:
+			"El cliente no tiene dirección de trabajo registrada: no hay contra qué verificar este punto.",
 	},
 };
 
@@ -429,6 +438,36 @@ function VerificarDomicilio({
 		distanciaM != null &&
 		distanciaM <= lugar.radioM + UMBRAL_CONFIRMACION_DOMICILIO_M;
 	const desactualizado = ubicado?.desactualizado === true;
+
+	// Sin dirección declarada no hay contra qué comparar: no se ofrece el
+	// formulario (el servidor también lo rechaza). Si había un punto de antes,
+	// solo se puede quitar.
+	if (!direccion) {
+		return (
+			<div className="mt-3 space-y-2 border-t pt-3">
+				<p className="text-muted-foreground text-xs italic">
+					{textos.sinDireccion}
+				</p>
+				{ubicado && (
+					<Button
+						disabled={quitar.isPending}
+						onClick={() => quitar.mutate({ casoCobroId, tipo })}
+						size="sm"
+						type="button"
+						variant="ghost"
+					>
+						{quitar.isPending ? (
+							<Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+						) : (
+							<Trash2 className="mr-1.5 h-3.5 w-3.5" />
+						)}
+						Quitar el punto anterior
+					</Button>
+				)}
+			</div>
+		);
+	}
+
 	const mostrarFormulario = !ubicado || cambiando || desactualizado;
 
 	return (
@@ -502,18 +541,10 @@ function VerificarDomicilio({
 						el link completo del navegador: los links cortos del botón
 						«Compartir» del celular no traen coordenadas.
 					</p>
-					{direccion ? (
-						<p className="break-words text-xs">
-							<span className="text-muted-foreground">
-								{textos.direccion}:{" "}
-							</span>
-							{direccion}
-						</p>
-					) : (
-						<p className="text-muted-foreground text-xs italic">
-							El cliente no tiene esta dirección registrada.
-						</p>
-					)}
+					<p className="break-words text-xs">
+						<span className="text-muted-foreground">{textos.direccion}: </span>
+						{direccion}
+					</p>
 					<div className="flex flex-wrap items-center gap-1.5">
 						{buscarUrl && (
 							<Button asChild size="sm" type="button" variant="outline">

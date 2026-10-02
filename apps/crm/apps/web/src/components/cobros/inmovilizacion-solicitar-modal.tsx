@@ -174,6 +174,7 @@ function FormularioApagado({
 					</Label>
 					<Textarea
 						id="motivo-apagado-detalle"
+						maxLength={2000}
 						onChange={(e) => setDetalle(e.target.value)}
 						placeholder="Ej.: Tercera promesa incumplida este mes y ya no contesta"
 						rows={2}

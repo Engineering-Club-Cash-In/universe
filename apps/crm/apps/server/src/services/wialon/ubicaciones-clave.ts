@@ -46,6 +46,17 @@ const MIN_HORAS_TOTALES = 2;
 // que ya usa services/wialon/gps-eventos.ts para la ventana de dedup.
 const OFFSET_GUATEMALA_MS = 6 * 60 * 60 * 1000;
 
+// "Una noche" en un lugar: el carro estuvo ahí al menos MIN_HORAS_NOCHE dentro
+// de la ventana 22:00–06:00 (hora de Guatemala). Una parada de 18:00 a 23:00
+// solo toca 1 h de esa ventana, así que no cuenta como noche.
+const NOCHE_INICIO_H = 22;
+const NOCHE_DURACION_H = 8;
+const MIN_HORAS_NOCHE = 4;
+// Para ser casa por noches: dormir ahí al menos estas noches y en más de la
+// mitad de las noches en que el carro estuvo en algún lugar conocido.
+const MIN_NOCHES_CASA = 5;
+const MIN_PROPORCION_NOCHES_CASA = 0.5;
+
 const MS_POR_HORA = 60 * 60 * 1000;
 
 export interface Estancia {
@@ -169,12 +180,25 @@ export interface ClusterUbicacion {
 	// Semanas distintas con visitas para cada día de la semana (0=domingo..6=sábado),
 	// para exigir evidencia de al menos 3 semanas distintas antes de marcar como recurrente.
 	semanasPorDiaSemana: number[];
+	// Noches distintas (fecha de la tarde en que empieza la noche, hora GT) en que
+	// el carro durmió acá. Opcional: los clusters armados a mano en tests o
+	// guardados antes de esta regla no la traen.
+	noches?: number;
+}
+
+/** Lo que clasificar() necesita saber de TODOS los clusters para juzgar uno. */
+export interface ContextoNoches {
+	// Noches distintas en que el carro estuvo en cualquier lugar.
+	nochesTotales: number;
+	// Las noches del cluster con más noches.
+	nochesMaximas: number;
 }
 
 // Estado interno del cluster mientras se acumulan estancias — diasUnicos y
 // diasPorDiaSemana no forman parte del resultado público, solo existen para no
 // recorrer las estancias dos veces.
 interface ClusterEnConstruccion extends ClusterUbicacion {
+	nochesUnicas: Set<string>;
 	diasUnicos: Set<string>;
 	diasPorDiaSemana: [
 		Set<string>,
@@ -237,6 +261,58 @@ function desglosarHorasPorFranja(
 }
 
 /**
+ * Noches (por la fecha de la tarde en que empiezan, hora de Guatemala) que una
+ * estancia cubre: aquellas en que estuvo al menos MIN_HORAS_NOCHE dentro de
+ * 22:00–06:00. A diferencia del día del punto medio, una estancia de varios días
+ * seguidos aporta TODAS sus noches, que es lo que mide "dónde duerme el carro".
+ */
+export function nochesCubiertas(desde: Date, hasta: Date): string[] {
+	const noches: string[] = [];
+	const dia = 24 * MS_POR_HORA;
+	// Se trabaja en "hora local" (UTC desplazado) para que los getters UTC den
+	// fecha y hora de Guatemala.
+	const desdeL = desde.getTime() - OFFSET_GUATEMALA_MS;
+	const hastaL = hasta.getTime() - OFFSET_GUATEMALA_MS;
+	// La primera noche posible empezó la tarde del día de (desde - 6 h).
+	const primerDia = new Date(desdeL - 6 * MS_POR_HORA);
+	let inicioDia = Date.UTC(
+		primerDia.getUTCFullYear(),
+		primerDia.getUTCMonth(),
+		primerDia.getUTCDate(),
+	);
+	for (; inicioDia <= hastaL; inicioDia += dia) {
+		const inicioNoche = inicioDia + NOCHE_INICIO_H * MS_POR_HORA;
+		const finNoche = inicioNoche + NOCHE_DURACION_H * MS_POR_HORA;
+		const traslape = Math.min(hastaL, finNoche) - Math.max(desdeL, inicioNoche);
+		if (traslape >= MIN_HORAS_NOCHE * MS_POR_HORA) {
+			noches.push(new Date(inicioDia).toISOString().slice(0, 10));
+		}
+	}
+	return noches;
+}
+
+/**
+ * Fechas (hora de Guatemala) que toca una estancia, de la de su inicio a la de
+ * su fin. Una estancia de varios días seguidos cubre todas, no solo la del
+ * punto medio: si no, un carro parado seis días contaría como un solo día.
+ */
+export function diasCubiertos(desde: Date, hasta: Date): string[] {
+	const dias: string[] = [];
+	const dia = 24 * MS_POR_HORA;
+	const desdeL = new Date(desde.getTime() - OFFSET_GUATEMALA_MS);
+	const hastaL = hasta.getTime() - OFFSET_GUATEMALA_MS;
+	let inicioDia = Date.UTC(
+		desdeL.getUTCFullYear(),
+		desdeL.getUTCMonth(),
+		desdeL.getUTCDate(),
+	);
+	for (; inicioDia <= hastaL; inicioDia += dia) {
+		dias.push(new Date(inicioDia).toISOString().slice(0, 10));
+	}
+	return dias;
+}
+
+/**
  * Agrupa estancias cuyos centros están cerca entre sí (RADIO_CLUSTER_M) en
  * una sola ubicación clave, acumulando horas/días/visitas y la distribución
  * horaria que usa clasificar() para decidir el tipo.
@@ -264,6 +340,7 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 				franjas: { nocturna: 0, laboral: 0, finDeSemana: 0 },
 				visitasPorDiaSemana: [0, 0, 0, 0, 0, 0, 0],
 				semanasPorDiaSemana: [0, 0, 0, 0, 0, 0, 0],
+				nochesUnicas: new Set(),
 				diasUnicos: new Set(),
 				diasPorDiaSemana: [
 					new Set(),
@@ -298,7 +375,12 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 
 		cluster.visitasPorDiaSemana[diaSemana] += 1;
 		cluster.diasPorDiaSemana[diaSemana].add(fechaIso);
-		cluster.diasUnicos.add(fechaIso);
+		for (const dia of diasCubiertos(estancia.desde, estancia.hasta)) {
+			cluster.diasUnicos.add(dia);
+		}
+		for (const noche of nochesCubiertas(estancia.desde, estancia.hasta)) {
+			cluster.nochesUnicas.add(noche);
+		}
 
 		// Se acumulan horasEstancia distribuidas por franja real para que visitas
 		// cortas no distorsionen la clasificación de casa o trabajo frente a
@@ -309,11 +391,14 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 		cluster.franjas.finDeSemana += franjas.finDeSemana;
 	}
 
-	return clusters.map(({ diasUnicos, diasPorDiaSemana, ...cluster }) => ({
-		...cluster,
-		diasDistintos: diasUnicos.size,
-		semanasPorDiaSemana: diasPorDiaSemana.map((s) => s.size),
-	}));
+	return clusters.map(
+		({ diasUnicos, diasPorDiaSemana, nochesUnicas, ...cluster }) => ({
+			...cluster,
+			noches: nochesUnicas.size,
+			diasDistintos: diasUnicos.size,
+			semanasPorDiaSemana: diasPorDiaSemana.map((s) => s.size),
+		}),
+	);
 }
 
 export type TipoUbicacionClave =
@@ -333,6 +418,8 @@ export interface UbicacionClaveClasificada {
 	patron: FranjaHoraria & {
 		visitasPorDiaSemana: number[];
 		semanasPorDiaSemana: number[];
+		noches?: number;
+		nochesTotales?: number;
 	};
 	primeraVisita: Date;
 	ultimaVisita: Date;
@@ -341,23 +428,50 @@ export interface UbicacionClaveClasificada {
 /**
  * Clasifica un cluster ya agrupado según su distribución horaria:
  *  - probable_casa: mayoría nocturna (>= 50% de las horas totales de estancia),
- *    en al menos 5 días distintos.
+ *    en al menos 5 días distintos; O, si se conoce el contexto de noches, el
+ *    lugar donde el carro duerme la mayoría de las noches (ver abajo).
  *  - probable_trabajo: mayoría en horario laboral L-V (>= 50% de las horas totales),
  *    en al menos 5 días distintos.
  *  - recurrente: concentrado en un mismo día de la semana (>= 60% de visitas),
  *    con al menos 3 semanas distintas de evidencia.
  *  - frecuente: visitado seguido pero sin un patrón horario/día claro.
  */
-export function clasificar(cluster: ClusterUbicacion): TipoUbicacionClave {
+export function clasificar(
+	cluster: ClusterUbicacion,
+	contexto?: ContextoNoches,
+	// Para reclasificar un cluster que perdió la casa frente a otro de la misma
+	// unidad: no puede ser casa, pero sí trabajo, recurrente o frecuente.
+	opciones?: { sinCasa?: boolean },
+): TipoUbicacionClave {
 	// Se incluye todo el tiempo de estancia (horasTotales) en el denominador,
 	// evitando que ubicaciones visitadas en la tarde/noche temprana (ej. 18:00–23:00)
 	// omitan horas intermedias y se clasifiquen como casa por la sola hora nocturna.
 	const totalHoras = cluster.horasTotales;
 	if (totalHoras <= 0) return "frecuente";
 
+	const puedeSerCasa = !opciones?.sinCasa;
+
 	if (
+		puedeSerCasa &&
 		cluster.franjas.nocturna / totalHoras >= 0.5 &&
 		cluster.diasDistintos >= 5
+	) {
+		return "probable_casa";
+	}
+
+	// Un carro que casi no se mueve pasa días seguidos en el mismo lugar: sus
+	// horas se reparten como las del reloj (8 de 24 h son de noche, o sea 33 %) y
+	// la regla de arriba nunca se cumple, aunque ese sea claramente su casa. Lo
+	// que sí lo delata es dónde amanece: casa = el lugar con más noches, con
+	// al menos MIN_NOCHES_CASA y más de la mitad de las noches conocidas.
+	if (
+		puedeSerCasa &&
+		contexto &&
+		cluster.noches != null &&
+		contexto.nochesTotales > 0 &&
+		cluster.noches >= MIN_NOCHES_CASA &&
+		cluster.noches === contexto.nochesMaximas &&
+		cluster.noches / contexto.nochesTotales > MIN_PROPORCION_NOCHES_CASA
 	) {
 		return "probable_casa";
 	}
@@ -419,16 +533,62 @@ export function calcularUbicacionesClaveDeEstancias(
 	estancias: Estancia[],
 ): UbicacionClaveClasificada[] {
 	const clusters = agruparEstancias(estancias);
+	const todasLasNoches = new Set<string>();
+	for (const e of estancias) {
+		for (const noche of nochesCubiertas(e.desde, e.hasta)) {
+			todasLasNoches.add(noche);
+		}
+	}
 
-	return clusters
+	// Candidatos: lo normal es MIN_VISITAS, pero un carro que casi no se mueve
+	// deja una o dos estancias larguísimas (56 noches en 2 visitas) y quedaría
+	// fuera justo siendo el caso más claro de casa. Esos pasan también si
+	// acumulan noches suficientes; abajo solo se conservan si resultan ser casa,
+	// para no llenar la lista de "frecuentes" de una sola visita.
+	const candidatos = clusters
 		.filter(
-			(c) => c.visitas >= MIN_VISITAS && c.horasTotales >= MIN_HORAS_TOTALES,
+			(c) =>
+				(c.visitas >= MIN_VISITAS || (c.noches ?? 0) >= MIN_NOCHES_CASA) &&
+				c.horasTotales >= MIN_HORAS_TOTALES,
 		)
 		.map((cluster) => ({
+			cluster,
+			tipo: "frecuente" as TipoUbicacionClave,
+		}));
+	const contexto: ContextoNoches = {
+		nochesTotales: todasLasNoches.size,
+		// Solo entre los candidatos: un cluster de ruido que ya se descartó no
+		// puede quitarle el primer lugar a la casa real.
+		nochesMaximas: Math.max(0, ...candidatos.map((c) => c.cluster.noches ?? 0)),
+	};
+	for (const c of candidatos) c.tipo = clasificar(c.cluster, contexto);
+
+	// Un carro tiene una sola casa: si dos lugares cumplen, gana el de más
+	// noches (a igualdad, el de más horas) y el otro se reclasifica sin casa.
+	const casas = candidatos.filter((c) => c.tipo === "probable_casa");
+	if (casas.length > 1) {
+		const [ganadora] = [...casas].sort(
+			(a, b) =>
+				(b.cluster.noches ?? 0) - (a.cluster.noches ?? 0) ||
+				b.cluster.horasTotales - a.cluster.horasTotales,
+		);
+		for (const c of casas) {
+			if (c !== ganadora) {
+				c.tipo = clasificar(c.cluster, contexto, { sinCasa: true });
+			}
+		}
+	}
+
+	return candidatos
+		.filter(
+			({ cluster, tipo }) =>
+				cluster.visitas >= MIN_VISITAS || tipo === "probable_casa",
+		)
+		.map(({ cluster, tipo }) => ({
 			lat: cluster.lat,
 			lon: cluster.lon,
 			radioM: RADIO_CLUSTER_M,
-			tipo: clasificar(cluster),
+			tipo,
 			horasTotales: cluster.horasTotales,
 			diasDistintos: cluster.diasDistintos,
 			visitas: cluster.visitas,
@@ -436,6 +596,10 @@ export function calcularUbicacionesClaveDeEstancias(
 				...cluster.franjas,
 				visitasPorDiaSemana: cluster.visitasPorDiaSemana,
 				semanasPorDiaSemana: cluster.semanasPorDiaSemana,
+				noches: cluster.noches ?? 0,
+				// Noches en que el carro estuvo en algún lugar conocido: con
+				// `noches` dice qué tan seguro es que esto sea la casa.
+				nochesTotales: contexto.nochesTotales,
 			},
 			primeraVisita: cluster.primeraVisita,
 			ultimaVisita: cluster.ultimaVisita,

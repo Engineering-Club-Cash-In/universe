@@ -890,7 +890,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			),
@@ -981,7 +981,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
 				motivoDetalle: "Detalle de prueba",
-				quePaso: "promesa",
+				quePaso: "convenio",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1338,7 +1338,7 @@ describe("CB-041 — ejecución del apagado (ejecutarApagado)", () => {
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
 				motivoDetalle: "Detalle de prueba",
-				quePaso: "promesa",
+				quePaso: "convenio",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1611,7 +1611,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
-				quePaso: "promesa",
+				quePaso: "convenio",
 				motivoDetalle: "Entró en convenio",
 			},
 			{ context: ctx("cobros") },
@@ -2832,7 +2832,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 
 	it("'Convenio' con un convenio vigente en cartera: lo guarda con plazo y cuota", async () => {
 		conApagadoVigente();
-		await solicitar({ quePaso: "promesa" });
+		await solicitar({ quePaso: "convenio" });
 		expect(inmovilizacionesInsertadas[0]?.respaldoReactivacion).toEqual({
 			convenio: {
 				activo: true,
@@ -2847,7 +2847,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 		conApagadoVigente();
 		convenioVigenteMock = null;
 		statusCreditMock = "EN_CONVENIO";
-		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+		await expect(solicitar({ quePaso: "convenio" })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 			message: expect.stringContaining("todavía no está activo"),
 		});
@@ -2858,7 +2858,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 		conApagadoVigente();
 		convenioVigenteMock = null;
 		statusCreditMock = "MOROSO";
-		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+		await expect(solicitar({ quePaso: "convenio" })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 		});
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
@@ -2867,7 +2867,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 	it("'Convenio' con cartera caída: SERVICE_UNAVAILABLE, no se aprueba a ciegas", async () => {
 		conApagadoVigente();
 		convenioCarteraFalla = true;
-		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+		await expect(solicitar({ quePaso: "convenio" })).rejects.toMatchObject({
 			code: "SERVICE_UNAVAILABLE",
 		});
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
@@ -2876,7 +2876,7 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 	it("'Convenio' no consulta pagos: sirve aunque cartera no los dé", async () => {
 		conApagadoVigente();
 		pagosCarteraFalla = true;
-		await solicitar({ quePaso: "promesa" });
+		await solicitar({ quePaso: "convenio" });
 		expect(inmovilizacionesInsertadas).toHaveLength(1);
 	});
 
@@ -2901,6 +2901,14 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 		};
 		expect(respaldo.pago).toBeDefined();
 		expect(respaldo.promesa?.monto).toBeNull();
+	});
+
+	it("la opción anterior 'promesa' ya no se acepta como motivo nuevo", async () => {
+		conApagadoVigente();
+		await expect(solicitar({ quePaso: "promesa" })).rejects.toBeInstanceOf(
+			ORPCError,
+		);
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
 	it("'Entrega voluntaria' y 'Sin contacto' no son opciones de reactivación: BAD_REQUEST", async () => {
@@ -3233,7 +3241,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			);
@@ -3300,7 +3308,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			);
@@ -3323,7 +3331,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			);
@@ -3344,7 +3352,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			);
@@ -3443,7 +3451,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
 					motivoDetalle: "Detalle de prueba",
-					quePaso: "promesa",
+					quePaso: "convenio",
 				},
 				{ context: ctx("cobros") },
 			);
@@ -3463,7 +3471,7 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 						casoCobroId: CASO_ID,
 						accion: "reactivacion",
 						motivoDetalle: "Detalle de prueba",
-						quePaso: "promesa",
+						quePaso: "convenio",
 					},
 					{ context: ctx("cobros") },
 				),

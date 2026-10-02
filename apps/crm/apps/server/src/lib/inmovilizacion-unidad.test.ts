@@ -3,6 +3,7 @@ import {
 	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
+	CLAVES_QUE_PASO_REACTIVACION,
 	componerMotivoApagado,
 	componerMotivoReactivacion,
 	errorDetalleReactivacion,
@@ -11,6 +12,7 @@ import {
 	erroresRespaldoReactivacion,
 	erroresUbicacionSolicitud,
 	estadoUnidad,
+	labelQuePasoReactivacion,
 	MOTIVOS_INMOVILIZACION,
 	pagosPosterioresAlApagado,
 	puedeSolicitar,
@@ -281,10 +283,10 @@ describe("ubicación y evidencia del apagado", () => {
 });
 
 describe("reactivación: qué pasó y respaldo", () => {
-	it("son tres opciones: pago, convenio (clave promesa) y pago parcial + promesa", () => {
+	it("son tres opciones: pago, convenio y pago parcial + promesa", () => {
 		expect(Object.keys(QUE_PASO_REACTIVACION)).toEqual([
 			"pago",
-			"promesa",
+			"convenio",
 			"pago_parcial_promesa",
 		]);
 		expect(QUE_PASO_REACTIVACION.pago_parcial_promesa.label).toBe(
@@ -295,9 +297,9 @@ describe("reactivación: qué pasó y respaldo", () => {
 	it("qué respaldo pide cada opción", () => {
 		expect(quePasoRequierePago("pago")).toBe(true);
 		expect(quePasoRequierePromesa("pago")).toBe(false);
-		expect(quePasoRequierePago("promesa")).toBe(false);
-		expect(quePasoRequiereConvenio("promesa")).toBe(true);
-		expect(quePasoRequierePromesa("promesa")).toBe(false);
+		expect(quePasoRequierePago("convenio")).toBe(false);
+		expect(quePasoRequiereConvenio("convenio")).toBe(true);
+		expect(quePasoRequierePromesa("convenio")).toBe(false);
 		expect(quePasoRequiereConvenio("pago_parcial_promesa")).toBe(false);
 		expect(quePasoRequierePago("pago_parcial_promesa")).toBe(true);
 		expect(quePasoRequierePromesa("pago_parcial_promesa")).toBe(true);
@@ -306,17 +308,19 @@ describe("reactivación: qué pasó y respaldo", () => {
 	it("valida el respaldo según la opción", () => {
 		expect(erroresRespaldoReactivacion("pago", {})).not.toBeNull();
 		expect(erroresRespaldoReactivacion("pago", { pago: {} })).toBeNull();
-		expect(erroresRespaldoReactivacion("promesa", {})).not.toBeNull();
+		expect(erroresRespaldoReactivacion("convenio", {})).not.toBeNull();
 		expect(
-			erroresRespaldoReactivacion("promesa", { promesa: {} }),
+			erroresRespaldoReactivacion("convenio", { promesa: {} }),
 		).not.toBeNull();
-		expect(erroresRespaldoReactivacion("promesa", { convenio: {} })).toBeNull();
 		expect(
-			erroresRespaldoReactivacion("promesa", { convenio: { activo: true } }),
+			erroresRespaldoReactivacion("convenio", { convenio: {} }),
+		).toBeNull();
+		expect(
+			erroresRespaldoReactivacion("convenio", { convenio: { activo: true } }),
 		).toBeNull();
 		// Existe pero sin activar: se ve en pantalla, no alcanza para solicitar.
 		expect(
-			erroresRespaldoReactivacion("promesa", { convenio: { activo: false } }),
+			erroresRespaldoReactivacion("convenio", { convenio: { activo: false } }),
 		).toContain("todavía no está activo");
 		expect(
 			erroresRespaldoReactivacion("pago_parcial_promesa", { pago: {} }),
@@ -332,8 +336,17 @@ describe("reactivación: qué pasó y respaldo", () => {
 		).toBeNull();
 	});
 
+	it("las solicitudes guardadas con la opción anterior ('promesa') conservan su etiqueta y ya no se pueden elegir", () => {
+		expect(labelQuePasoReactivacion("promesa")).toBe("Promesa de pago");
+		expect(labelQuePasoReactivacion("convenio")).toBe("Convenio");
+		expect(labelQuePasoReactivacion("pago")).toBe("Pago");
+		expect(labelQuePasoReactivacion("otra")).toBeNull();
+		expect(labelQuePasoReactivacion(null)).toBeNull();
+		expect(CLAVES_QUE_PASO_REACTIVACION).not.toContain("promesa");
+	});
+
 	it("compone el motivo con la opción y el detalle", () => {
-		expect(componerMotivoReactivacion("promesa", null)).toBe("Convenio");
+		expect(componerMotivoReactivacion("convenio", null)).toBe("Convenio");
 		expect(componerMotivoReactivacion("pago", " Depositó ")).toBe(
 			"Pago — Depositó",
 		);

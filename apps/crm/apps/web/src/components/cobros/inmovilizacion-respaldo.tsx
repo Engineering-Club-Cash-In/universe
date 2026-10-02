@@ -1,8 +1,7 @@
 import { CalendarClock, Handshake, Wallet } from "lucide-react";
 import {
+	labelQuePasoReactivacion,
 	type PagoRespaldo,
-	QUE_PASO_REACTIVACION,
-	type QuePasoReactivacion,
 	type RespaldoReactivacion,
 } from "server/src/lib/inmovilizacion-unidad";
 
@@ -47,11 +46,7 @@ export function PagoPendienteBadge({
 	);
 }
 
-export function labelQuePaso(quePaso: string | null | undefined) {
-	return quePaso && quePaso in QUE_PASO_REACTIVACION
-		? QUE_PASO_REACTIVACION[quePaso as QuePasoReactivacion].label
-		: null;
-}
+export const labelQuePaso = labelQuePasoReactivacion;
 
 /**
  * Lo que respalda una solicitud de reactivación, tal como lo vio el server al

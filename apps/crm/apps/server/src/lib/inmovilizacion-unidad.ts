@@ -294,7 +294,7 @@ export const QUE_PASO_REACTIVACION = {
 		label: "Pago",
 		descripcion: "Pagó lo vencido. El pago tiene que estar registrado.",
 	},
-	promesa: {
+	convenio: {
 		label: "Convenio",
 		descripcion:
 			"Se formalizó un convenio de pago. El convenio tiene que estar creado en cartera.",
@@ -305,6 +305,31 @@ export const QUE_PASO_REACTIVACION = {
 			"Pagó una parte ahora y promete el resto en una fecha. Pago y promesa registrados.",
 	},
 } as const;
+/**
+ * Valor que se guardaba cuando esta opción era "Promesa de pago" (respaldada
+ * por una promesa del CRM). Ya no se puede elegir, pero hay solicitudes
+ * pendientes e históricas con él: se siguen mostrando con su etiqueta original.
+ */
+const QUE_PASO_REACTIVACION_LEGACY = {
+	promesa: { label: "Promesa de pago" },
+} as const;
+
+/** Etiqueta de lo guardado en `que_paso`, incluidos los valores anteriores; null si no se conoce. */
+export function labelQuePasoReactivacion(
+	quePaso: string | null | undefined,
+): string | null {
+	if (!quePaso) return null;
+	if (quePaso in QUE_PASO_REACTIVACION) {
+		return QUE_PASO_REACTIVACION[quePaso as QuePasoReactivacion].label;
+	}
+	if (quePaso in QUE_PASO_REACTIVACION_LEGACY) {
+		return QUE_PASO_REACTIVACION_LEGACY[
+			quePaso as keyof typeof QUE_PASO_REACTIVACION_LEGACY
+		].label;
+	}
+	return null;
+}
+
 export type QuePasoReactivacion = keyof typeof QUE_PASO_REACTIVACION;
 export const CLAVES_QUE_PASO_REACTIVACION = Object.keys(
 	QUE_PASO_REACTIVACION,
@@ -312,9 +337,8 @@ export const CLAVES_QUE_PASO_REACTIVACION = Object.keys(
 
 export const quePasoRequierePago = (q: QuePasoReactivacion) =>
 	q === "pago" || q === "pago_parcial_promesa";
-/** La clave `promesa` se conserva por las filas guardadas; hoy es la opción "Convenio". */
 export const quePasoRequiereConvenio = (q: QuePasoReactivacion) =>
-	q === "promesa";
+	q === "convenio";
 export const quePasoRequierePromesa = (q: QuePasoReactivacion) =>
 	q === "pago_parcial_promesa";
 

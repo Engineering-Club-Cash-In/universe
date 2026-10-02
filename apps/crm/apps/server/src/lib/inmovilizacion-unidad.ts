@@ -210,8 +210,8 @@ export function advertenciaEnMarcha(
 }
 
 /**
- * Primer problema de los motivos marcados (catálogo, repetidos, "Otro" sin
- * detalle) o null si están completos. Mismas reglas que la recuperación
+ * Primer problema de los motivos marcados (catálogo, repetidos, detalle vacío)
+ * o null si están completos. Mismas reglas que la recuperación
  * forzosa (`erroresDetalleRecuperacion`).
  */
 export function erroresMotivosInmovilizacion(
@@ -222,10 +222,15 @@ export function erroresMotivosInmovilizacion(
 	const invalido = motivos.find((m) => !(m in MOTIVOS_INMOVILIZACION));
 	if (invalido) return `Motivo no válido para un apagado: ${invalido}`;
 	if (new Set(motivos).size !== motivos.length) return "Hay motivos repetidos.";
-	if (motivos.includes("otro") && !detalle?.trim()) {
-		return "Seleccionó «Otro»: indique el motivo en el detalle.";
-	}
+	if (!detalle?.trim()) return "Indique el detalle del apagado.";
 	return null;
+}
+
+/** El detalle de la reactivación es obligatorio: queda en la bitácora del caso. */
+export function errorDetalleReactivacion(
+	detalle: string | null | undefined,
+): string | null {
+	return detalle?.trim() ? null : "Indique el detalle de la reactivación.";
 }
 
 /**

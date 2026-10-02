@@ -5,6 +5,7 @@ import {
 	bucketsInmovilizacionTexto,
 	componerMotivoApagado,
 	componerMotivoReactivacion,
+	errorDetalleReactivacion,
 	erroresEvidenciaEjecucion,
 	erroresMotivosInmovilizacion,
 	erroresRespaldoReactivacion,
@@ -198,23 +199,28 @@ describe("motivos del apagado", () => {
 	});
 
 	it("exige al menos un motivo válido y sin repetir", () => {
-		expect(erroresMotivosInmovilizacion([], null)).not.toBeNull();
-		expect(erroresMotivosInmovilizacion(["no_existe"], null)).not.toBeNull();
+		expect(erroresMotivosInmovilizacion([], "x")).not.toBeNull();
+		expect(erroresMotivosInmovilizacion(["no_existe"], "x")).not.toBeNull();
 		expect(
-			erroresMotivosInmovilizacion(["inmovilizada_sin_pago"], null),
+			erroresMotivosInmovilizacion(["inmovilizada_sin_pago"], "x"),
 		).not.toBeNull();
 		expect(
 			erroresMotivosInmovilizacion(
 				["se_niega_a_pagar", "se_niega_a_pagar"],
-				null,
+				"x",
 			),
 		).not.toBeNull();
-		expect(erroresMotivosInmovilizacion(["se_niega_a_pagar"], null)).toBeNull();
+		expect(erroresMotivosInmovilizacion(["se_niega_a_pagar"], "x")).toBeNull();
 	});
 
-	it("'Otro' pide detalle", () => {
+	it("el detalle es obligatorio", () => {
 		expect(erroresMotivosInmovilizacion(["otro"], "  ")).not.toBeNull();
+		expect(
+			erroresMotivosInmovilizacion(["se_niega_a_pagar"], null),
+		).not.toBeNull();
 		expect(erroresMotivosInmovilizacion(["otro"], "No contesta")).toBeNull();
+		expect(errorDetalleReactivacion("  ")).not.toBeNull();
+		expect(errorDetalleReactivacion("Pagó en banco")).toBeNull();
 	});
 
 	it("compone el texto de la columna `motivo` con etiquetas y detalle", () => {

@@ -570,6 +570,7 @@ const carteraBackClient = carteraBackClientMock;
 // ubicación (acá la escribió el asesor; la consulta GPS se prueba aparte).
 const FORMULARIO_APAGADO = {
 	motivos: ["se_niega_a_pagar"],
+	motivoDetalle: "Tercera promesa incumplida este mes",
 	ubicacion: { direccion: "Zona 1, Ciudad de Guatemala" },
 };
 const NOTA_LEGION = "LEGION confirmó el apagado por WhatsApp";
@@ -844,6 +845,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 				{
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
 					quePaso: "promesa",
 				},
 				{ context: ctx("cobros") },
@@ -928,6 +930,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
+				motivoDetalle: "Detalle de prueba",
 				quePaso: "promesa",
 			},
 			{ context: ctx("cobros") },
@@ -1280,6 +1283,7 @@ describe("CB-041 — ejecución del apagado (ejecutarApagado)", () => {
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
+				motivoDetalle: "Detalle de prueba",
 				quePaso: "promesa",
 			},
 			{ context: ctx("cobros") },
@@ -2303,6 +2307,7 @@ describe("CB-041 — solicitarInmovilizacion de un apagado: motivos y ubicación
 		};
 		await solicitar({
 			motivos: ["se_niega_a_pagar"],
+			motivoDetalle: "Tercera promesa incumplida",
 			ubicacion: { consultaLogId: CONSULTA_ID },
 		});
 		const ubicacion = inmovilizacionesInsertadas[0]?.ubicacionSolicitud as {
@@ -2340,6 +2345,7 @@ describe("CB-041 — solicitarInmovilizacion de un apagado: motivos y ubicación
 		};
 		await solicitar({
 			motivos: ["se_niega_a_pagar"],
+			motivoDetalle: "Tercera promesa incumplida",
 			ubicacion: { consultaLogId: CONSULTA_ID, direccion: "Zona 10" },
 		});
 		expect(inmovilizacionesInsertadas[0]?.ubicacionSolicitud).toMatchObject({
@@ -2659,7 +2665,12 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 	const solicitar = (extra: Record<string, unknown>) =>
 		call(
 			inmovilizacionUnidadRouter.solicitarInmovilizacion,
-			{ casoCobroId: CASO_ID, accion: "reactivacion", ...extra },
+			{
+				casoCobroId: CASO_ID,
+				accion: "reactivacion",
+				motivoDetalle: "Detalle de prueba",
+				...extra,
+			},
 			{ context: ctx("cobros") },
 		);
 
@@ -3122,7 +3133,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			historialCasoMock = [apagadoEjecutado()];
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
-				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{
+					casoCobroId: CASO_ID,
+					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
+					quePaso: "promesa",
+				},
 				{ context: ctx("cobros") },
 			);
 			expect(inmovilizacionesInsertadas[0]).toMatchObject({
@@ -3184,7 +3200,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
-				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{
+					casoCobroId: CASO_ID,
+					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
+					quePaso: "promesa",
+				},
 				{ context: ctx("cobros") },
 			);
 			expect(inmovilizacionesInsertadas[0]).toMatchObject({
@@ -3202,7 +3223,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			historialCasoMock = [apagadoEjecutado()];
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
-				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{
+					casoCobroId: CASO_ID,
+					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
+					quePaso: "promesa",
+				},
 				{ context: ctx("cobros") },
 			);
 			expect(inmovilizacionesInsertadas[0]).toMatchObject({
@@ -3218,7 +3244,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			historialCasoMock = [apagadoEjecutado()];
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
-				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{
+					casoCobroId: CASO_ID,
+					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
+					quePaso: "promesa",
+				},
 				{ context: ctx("cobros") },
 			);
 			expect(inmovilizacionesInsertadas[0]).toMatchObject({
@@ -3312,7 +3343,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
-				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{
+					casoCobroId: CASO_ID,
+					accion: "reactivacion",
+					motivoDetalle: "Detalle de prueba",
+					quePaso: "promesa",
+				},
 				{ context: ctx("cobros") },
 			);
 			expect(inmovilizacionesInsertadas[0]).toMatchObject({
@@ -3327,7 +3363,12 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			await expect(
 				call(
 					inmovilizacionUnidadRouter.solicitarInmovilizacion,
-					{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+					{
+						casoCobroId: CASO_ID,
+						accion: "reactivacion",
+						motivoDetalle: "Detalle de prueba",
+						quePaso: "promesa",
+					},
 					{ context: ctx("cobros") },
 				),
 			).rejects.toMatchObject({ code: "BAD_REQUEST" });

@@ -20,6 +20,7 @@ export function VehiculoGpsTabs({
 	casoCobroId,
 	esSupervisor,
 	onRegistrarLlamada,
+	pestanaInicial,
 	vehicleId,
 }: {
 	bucketNumero: number | null;
@@ -29,6 +30,8 @@ export function VehiculoGpsTabs({
 		inmovilizacionId: string,
 		accion: "apagado" | "reactivacion",
 	) => void;
+	/** Pestaña con la que abre (deep link de una notificación). */
+	pestanaInicial?: "inmovilizacion";
 	// GPS y ubicaciones requieren vehículo; notificaciones e inmovilización
 	// solo el caso (el servidor resuelve la unidad, CB-041).
 	vehicleId: string | null;
@@ -38,7 +41,11 @@ export function VehiculoGpsTabs({
 	return (
 		<Card>
 			<CardContent>
-				<Tabs defaultValue={vehicleId ? "gps" : "notificaciones"}>
+				<Tabs
+					defaultValue={
+						pestanaInicial ?? (vehicleId ? "gps" : "notificaciones")
+					}
+				>
 					<TabsList className="h-auto max-w-full flex-wrap justify-start">
 						{vehicleId && (
 							<TabsTrigger value="gps">

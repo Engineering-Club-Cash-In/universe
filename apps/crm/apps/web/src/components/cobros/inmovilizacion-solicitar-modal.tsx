@@ -3,6 +3,7 @@ import { CalendarClock, Loader2 } from "lucide-react";
 import { useState } from "react";
 import {
 	CLAVES_QUE_PASO_REACTIVACION,
+	errorDetalleReactivacion,
 	erroresMotivosInmovilizacion,
 	erroresRespaldoReactivacion,
 	MOTIVOS_INMOVILIZACION,
@@ -169,12 +170,7 @@ function FormularioApagado({
 						className="pt-1 font-normal text-sm"
 						htmlFor="motivo-apagado-detalle"
 					>
-						Detalle{" "}
-						{motivos.includes("otro") ? (
-							<span className="text-red-600">*</span>
-						) : (
-							<span className="text-muted-foreground">(opcional)</span>
-						)}
+						Detalle <span className="text-red-600">*</span>
 					</Label>
 					<Textarea
 						id="motivo-apagado-detalle"
@@ -282,10 +278,10 @@ function FormularioReactivacion({
 	// Mismas reglas que el server: el botón se habilita con lo que va a aceptar.
 	const error = !quePaso
 		? "Seleccione el motivo de la reactivación."
-		: erroresRespaldoReactivacion(quePaso, {
+		: (erroresRespaldoReactivacion(quePaso, {
 				pago: quePasoRequierePago(quePaso) ? pagoElegido : undefined,
 				promesa: quePasoRequierePromesa(quePaso) ? promesa : undefined,
-			});
+			}) ?? errorDetalleReactivacion(detalle));
 
 	return (
 		<>
@@ -410,7 +406,7 @@ function FormularioReactivacion({
 
 				<section className="space-y-1.5">
 					<Label className="font-normal text-sm" htmlFor="detalle-reactivacion">
-						Detalle <span className="text-muted-foreground">(opcional)</span>
+						Detalle <span className="text-red-600">*</span>
 					</Label>
 					<Textarea
 						id="detalle-reactivacion"

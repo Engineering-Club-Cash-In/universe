@@ -42,6 +42,22 @@ const CATEGORIES: ReadonlyArray<{
   },
 ];
 
+/**
+ * Categorías que ya no se generan acá sino en el CRM. Jurídico seguía armando
+ * los contratos de ventas e inversiones en esta plataforma y no en el CRM, que
+ * es donde salen a firma; se ocultan para que no haya dos caminos. Para volver
+ * a mostrar una, sacarla de esta lista.
+ */
+const CATEGORIAS_EN_EL_CRM: ReadonlySet<DocumentCategoria> = new Set([
+  "ventas",
+  "inversiones",
+  "inversiones_sociedad",
+]);
+
+const CATEGORIAS_VISIBLES = CATEGORIES.filter(
+  (cat) => !CATEGORIAS_EN_EL_CRM.has(cat.value)
+);
+
 export function StepCategory({ data, onChange }: StepCategoryProps) {
   const selected = data.category;
 
@@ -51,8 +67,12 @@ export function StepCategory({ data, onChange }: StepCategoryProps) {
         Selecciona la categoría del documento que deseas generar.
       </p>
 
+      <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        Los contratos de ventas e inversiones se generan desde el CRM.
+      </p>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {CATEGORIES.map((cat) => {
+        {CATEGORIAS_VISIBLES.map((cat) => {
           const isSelected = selected === cat.value;
           const Icon = cat.icon;
 

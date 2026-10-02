@@ -1,7 +1,7 @@
-import { CalendarClock, Wallet } from "lucide-react";
+import { CalendarClock, Handshake, Wallet } from "lucide-react";
 import {
-	QUE_PASO_REACTIVACION,
-	type QuePasoReactivacion,
+	labelQuePasoReactivacion,
+	type PagoRespaldo,
 	type RespaldoReactivacion,
 } from "server/src/lib/inmovilizacion-unidad";
 
@@ -22,6 +22,16 @@ export function formatFechaPrometida(iso: string) {
 	});
 }
 
+/** "Cuota 3 · Capital Q500.00 · Mora Q50.00": a dónde se fue el pago. Null si no hay datos (respaldos viejos). */
+export function resumenAplicacionPago(pago: PagoRespaldo): string | null {
+	const partes: string[] = [];
+	if (pago.numeroCuota != null) partes.push(`Cuota ${pago.numeroCuota}`);
+	for (const r of pago.aplicacion ?? []) {
+		partes.push(`${r.rubro} ${formatQuetzales(r.monto)}`);
+	}
+	return partes.length > 0 ? partes.join(" · ") : null;
+}
+
 /** Aviso cuando contabilidad todavía no validó el pago en cartera-back. */
 export function PagoPendienteBadge({
 	validacion,
@@ -36,11 +46,7 @@ export function PagoPendienteBadge({
 	);
 }
 
-export function labelQuePaso(quePaso: string | null | undefined) {
-	return quePaso && quePaso in QUE_PASO_REACTIVACION
-		? QUE_PASO_REACTIVACION[quePaso as QuePasoReactivacion].label
-		: null;
-}
+export const labelQuePaso = labelQuePasoReactivacion;
 
 /**
  * Lo que respalda una solicitud de reactivación, tal como lo vio el server al
@@ -77,6 +83,25 @@ export function RespaldoReactivacionResumen({
 						? ` · ref. ${respaldo.pago.referencia}`
 						: ""}
 					<PagoPendienteBadge validacion={respaldo.pago.validacion} />
+				</p>
+			)}
+			{respaldo?.pago && resumenAplicacionPago(respaldo.pago) && (
+				<p className="pl-5 text-muted-foreground">
+					Aplicado a: {resumenAplicacionPago(respaldo.pago)}
+				</p>
+			)}
+			{respaldo?.convenio && (
+				<p className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+					<Handshake className="h-3.5 w-3.5 text-blue-700" />
+					{respaldo.convenio.activo
+						? "Convenio vigente"
+						: "Convenio pendiente de activación"}
+					{respaldo.convenio.numeroMeses
+						? ` · ${respaldo.convenio.numeroMeses} ${respaldo.convenio.numeroMeses === 1 ? "mes" : "meses"}`
+						: ""}
+					{respaldo.convenio.cuotaMensual
+						? ` · ${formatQuetzales(respaldo.convenio.cuotaMensual)} al mes`
+						: ""}
 				</p>
 			)}
 			{respaldo?.promesa && (

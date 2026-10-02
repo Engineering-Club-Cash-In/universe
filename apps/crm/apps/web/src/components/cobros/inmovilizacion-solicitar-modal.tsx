@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CalendarClock, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { CalendarClock, HandCoins, Handshake, Loader2 } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
 	CLAVES_QUE_PASO_REACTIVACION,
 	errorDetalleReactivacion,
@@ -9,6 +9,7 @@ import {
 	MOTIVOS_INMOVILIZACION,
 	QUE_PASO_REACTIVACION,
 	type QuePasoReactivacion,
+	quePasoRequiereConvenio,
 	quePasoRequierePago,
 	quePasoRequierePromesa,
 } from "server/src/lib/inmovilizacion-unidad";
@@ -33,6 +34,7 @@ import {
 	formatFechaPrometida,
 	formatQuetzales,
 	PagoPendienteBadge,
+	resumenAplicacionPago,
 } from "./inmovilizacion-respaldo";
 import {
 	UbicacionGpsBloque,
@@ -54,12 +56,26 @@ export function SolicitarInmovilizacionModal({
 	open,
 	onOpenChange,
 	onSolicitado,
+	onRegistrarPromesa,
+	onCrearConvenio,
+	convenioBloqueo = null,
+	borrador = null,
+	onBorradorChange,
 }: {
 	accion: "apagado" | "reactivacion";
 	casoCobroId: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSolicitado: () => void;
+	/** Abre el formulario de promesa de la Ficha 360 (el padre cierra este modal). */
+	onRegistrarPromesa?: () => void;
+	/** Abre el modal de crear convenio de la Ficha 360 (el padre cierra este modal). */
+	onCrearConvenio?: () => void;
+	/** Por qué hoy no se puede crear un convenio (bucket, ya hay uno…); null si se puede. */
+	convenioBloqueo?: string | null;
+	/** Lo ya escrito, para que ir a crear la promesa/convenio no lo pierda. */
+	borrador?: BorradorReactivacion | null;
+	onBorradorChange?: (borrador: BorradorReactivacion) => void;
 }) {
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
@@ -73,7 +89,12 @@ export function SolicitarInmovilizacionModal({
 				) : (
 					<FormularioReactivacion
 						casoCobroId={casoCobroId}
+						borrador={borrador}
+						convenioBloqueo={convenioBloqueo}
+						onBorradorChange={onBorradorChange}
 						onCerrar={() => onOpenChange(false)}
+						onCrearConvenio={onCrearConvenio}
+						onRegistrarPromesa={onRegistrarPromesa}
 						onSolicitado={onSolicitado}
 					/>
 				)}
@@ -81,6 +102,13 @@ export function SolicitarInmovilizacionModal({
 		</Dialog>
 	);
 }
+
+/** Lo que el asesor ya eligió/escribió en la solicitud de reactivación. */
+export type BorradorReactivacion = {
+	quePaso: QuePasoReactivacion | null;
+	pagoId: number | null;
+	detalle: string;
+};
 
 type PropsFormulario = {
 	casoCobroId: string;
@@ -180,6 +208,7 @@ function FormularioApagado({
 						rows={2}
 						value={detalle}
 					/>
+					<ContadorCaracteres largo={detalle.length} />
 				</section>
 
 				<section className="space-y-2">
@@ -245,10 +274,26 @@ function FormularioReactivacion({
 	casoCobroId,
 	onCerrar,
 	onSolicitado,
-}: PropsFormulario) {
-	const [quePaso, setQuePaso] = useState<QuePasoReactivacion | null>(null);
-	const [pagoId, setPagoId] = useState<number | null>(null);
-	const [detalle, setDetalle] = useState("");
+	onRegistrarPromesa,
+	onCrearConvenio,
+	convenioBloqueo,
+	borrador,
+	onBorradorChange,
+}: PropsFormulario & {
+	onRegistrarPromesa?: () => void;
+	onCrearConvenio?: () => void;
+	convenioBloqueo?: string | null;
+	borrador?: BorradorReactivacion | null;
+	onBorradorChange?: (borrador: BorradorReactivacion) => void;
+}) {
+	const [quePaso, setQuePaso] = useState<QuePasoReactivacion | null>(
+		borrador?.quePaso ?? null,
+	);
+	const [pagoId, setPagoId] = useState<number | null>(borrador?.pagoId ?? null);
+	const [detalle, setDetalle] = useState(borrador?.detalle ?? "");
+	useEffect(() => {
+		onBorradorChange?.({ quePaso, pagoId, detalle });
+	}, [quePaso, pagoId, detalle, onBorradorChange]);
 
 	// Pagos de cartera desde el apagado y promesa activa: lo único que puede
 	// respaldar la reactivación. El server lo vuelve a verificar al enviar.
@@ -275,6 +320,7 @@ function FormularioReactivacion({
 
 	const pagos = respaldo.data?.pagos ?? [];
 	const promesa = respaldo.data?.promesa ?? null;
+	const convenio = respaldo.data?.convenio ?? null;
 	const pagoElegido = pagos.find((p) => p.pagoId === pagoId) ?? null;
 	// Mismas reglas que el server: el botón se habilita con lo que va a aceptar.
 	const error = !quePaso
@@ -282,6 +328,7 @@ function FormularioReactivacion({
 		: (erroresRespaldoReactivacion(quePaso, {
 				pago: quePasoRequierePago(quePaso) ? pagoElegido : undefined,
 				promesa: quePasoRequierePromesa(quePaso) ? promesa : undefined,
+				convenio: quePasoRequiereConvenio(quePaso) ? convenio : undefined,
 			}) ?? errorDetalleReactivacion(detalle));
 
 	return (
@@ -351,7 +398,7 @@ function FormularioReactivacion({
 							{pagos.map((p) => (
 								<label
 									className={cn(
-										"flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm",
+										"flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-sm",
 										pagoId === p.pagoId
 											? "border-primary bg-primary/5"
 											: "hover:bg-muted/50",
@@ -374,9 +421,76 @@ function FormularioReactivacion({
 										{p.referencia ? ` · ref. ${p.referencia}` : ""}
 									</span>
 									<PagoPendienteBadge validacion={p.validacion} />
+									{resumenAplicacionPago(p) && (
+										<span className="basis-full pl-6 text-muted-foreground text-xs">
+											Aplicado a: {resumenAplicacionPago(p)}
+										</span>
+									)}
 								</label>
 							))}
 						</div>
+					</section>
+				)}
+
+				{quePaso && quePasoRequiereConvenio(quePaso) && (
+					<section className="space-y-2">
+						<Label>
+							Convenio <span className="text-red-600">*</span>
+						</Label>
+						{respaldo.isLoading ? (
+							<p className="flex items-center gap-2 text-muted-foreground text-xs">
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								Buscando el convenio del crédito…
+							</p>
+						) : respaldo.data?.errorConvenio ? (
+							<p className="text-destructive text-xs">
+								{respaldo.data.errorConvenio}
+							</p>
+						) : convenio ? (
+							<div
+								className={cn(
+									"flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+									!convenio.activo &&
+										"border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950",
+								)}
+							>
+								<Handshake className="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300" />
+								<div className="space-y-0.5">
+									<p className="font-medium">
+										{convenio.activo
+											? "Convenio vigente"
+											: "Convenio creado, pendiente de activación"}
+									</p>
+									{(convenio.numeroMeses || convenio.cuotaMensual) && (
+										<p className="text-muted-foreground text-xs">
+											{convenio.numeroMeses
+												? `${convenio.numeroMeses} ${convenio.numeroMeses === 1 ? "mes" : "meses"}`
+												: ""}
+											{convenio.numeroMeses && convenio.cuotaMensual
+												? " · "
+												: ""}
+											{convenio.cuotaMensual
+												? `${formatQuetzales(convenio.cuotaMensual)} al mes`
+												: ""}
+										</p>
+									)}
+									{!convenio.activo && (
+										<p className="text-amber-900 text-xs dark:text-amber-200">
+											Cartera todavía no lo activa. Cuando esté activo podrá
+											solicitar la reactivación.
+										</p>
+									)}
+								</div>
+							</div>
+						) : (
+							<AvisoCrearRespaldo
+								boton="Crear convenio"
+								bloqueo={convenioBloqueo ?? null}
+								icono={<Handshake className="mr-1.5 h-4 w-4" />}
+								onClick={onCrearConvenio}
+								texto="El crédito no tiene un convenio de pago vigente. Créelo y vuelva a solicitar la reactivación."
+							/>
+						)}
 					</section>
 				)}
 
@@ -397,10 +511,13 @@ function FormularioReactivacion({
 								{promesa.monto ? ` · ${formatQuetzales(promesa.monto)}` : ""}
 							</p>
 						) : (
-							<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-								El caso no tiene una promesa de pago activa. Registre primero la
-								promesa con «Promesa / Convenio» y vuelva aquí.
-							</p>
+							<AvisoCrearRespaldo
+								boton="Registrar promesa"
+								bloqueo={null}
+								icono={<HandCoins className="mr-1.5 h-4 w-4" />}
+								onClick={onRegistrarPromesa}
+								texto="El caso no tiene una promesa de pago activa. Regístrela y vuelva a solicitar la reactivación."
+							/>
 						)}
 					</section>
 				)}
@@ -417,6 +534,7 @@ function FormularioReactivacion({
 						rows={2}
 						value={detalle}
 					/>
+					<ContadorCaracteres largo={detalle.length} />
 				</section>
 			</div>
 
@@ -452,5 +570,59 @@ function FormularioReactivacion({
 				</div>
 			</DialogFooter>
 		</>
+	);
+}
+
+function ContadorCaracteres({ largo }: { largo: number }) {
+	return (
+		<p
+			className={cn(
+				"text-right text-muted-foreground text-xs",
+				largo >= 2000 && "text-destructive",
+			)}
+		>
+			{largo} / 2000
+		</p>
+	);
+}
+
+/**
+ * Aviso ámbar de "falta el respaldo" con el botón que lleva a crearlo. Con
+ * `bloqueo` (p. ej. el convenio solo aplica desde B2) el botón queda
+ * deshabilitado y se explica por qué.
+ */
+function AvisoCrearRespaldo({
+	texto,
+	boton,
+	icono,
+	onClick,
+	bloqueo,
+}: {
+	texto: string;
+	boton: string;
+	icono: ReactNode;
+	onClick?: () => void;
+	bloqueo: string | null;
+}) {
+	return (
+		<div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900 dark:bg-amber-950">
+			<div className="space-y-1 text-amber-900 text-xs dark:text-amber-200">
+				<p>{texto}</p>
+				{bloqueo && <p className="font-medium">{bloqueo}</p>}
+			</div>
+			{onClick && (
+				<Button
+					className="shrink-0 border-amber-300 bg-white text-amber-900 hover:bg-amber-100 dark:bg-transparent dark:text-amber-200"
+					disabled={!!bloqueo}
+					onClick={onClick}
+					size="sm"
+					type="button"
+					variant="outline"
+				>
+					{icono}
+					{boton}
+				</Button>
+			)}
+		</div>
 	);
 }

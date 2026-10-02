@@ -3,6 +3,7 @@ import {
 	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
+	CLAVES_QUE_PASO_REACTIVACION,
 	componerMotivoApagado,
 	componerMotivoReactivacion,
 	errorDetalleReactivacion,
@@ -11,10 +12,12 @@ import {
 	erroresRespaldoReactivacion,
 	erroresUbicacionSolicitud,
 	estadoUnidad,
+	labelQuePasoReactivacion,
 	MOTIVOS_INMOVILIZACION,
 	pagosPosterioresAlApagado,
 	puedeSolicitar,
 	QUE_PASO_REACTIVACION,
+	quePasoRequiereConvenio,
 	quePasoRequierePago,
 	quePasoRequierePromesa,
 	reactivacionSinRespaldo,
@@ -280,10 +283,10 @@ describe("ubicación y evidencia del apagado", () => {
 });
 
 describe("reactivación: qué pasó y respaldo", () => {
-	it("son tres opciones: pago, promesa de pago y pago parcial + promesa", () => {
+	it("son tres opciones: pago, convenio y pago parcial + promesa", () => {
 		expect(Object.keys(QUE_PASO_REACTIVACION)).toEqual([
 			"pago",
-			"promesa",
+			"convenio",
 			"pago_parcial_promesa",
 		]);
 		expect(QUE_PASO_REACTIVACION.pago_parcial_promesa.label).toBe(
@@ -294,8 +297,10 @@ describe("reactivación: qué pasó y respaldo", () => {
 	it("qué respaldo pide cada opción", () => {
 		expect(quePasoRequierePago("pago")).toBe(true);
 		expect(quePasoRequierePromesa("pago")).toBe(false);
-		expect(quePasoRequierePago("promesa")).toBe(false);
-		expect(quePasoRequierePromesa("promesa")).toBe(true);
+		expect(quePasoRequierePago("convenio")).toBe(false);
+		expect(quePasoRequiereConvenio("convenio")).toBe(true);
+		expect(quePasoRequierePromesa("convenio")).toBe(false);
+		expect(quePasoRequiereConvenio("pago_parcial_promesa")).toBe(false);
 		expect(quePasoRequierePago("pago_parcial_promesa")).toBe(true);
 		expect(quePasoRequierePromesa("pago_parcial_promesa")).toBe(true);
 	});
@@ -303,8 +308,20 @@ describe("reactivación: qué pasó y respaldo", () => {
 	it("valida el respaldo según la opción", () => {
 		expect(erroresRespaldoReactivacion("pago", {})).not.toBeNull();
 		expect(erroresRespaldoReactivacion("pago", { pago: {} })).toBeNull();
-		expect(erroresRespaldoReactivacion("promesa", {})).not.toBeNull();
-		expect(erroresRespaldoReactivacion("promesa", { promesa: {} })).toBeNull();
+		expect(erroresRespaldoReactivacion("convenio", {})).not.toBeNull();
+		expect(
+			erroresRespaldoReactivacion("convenio", { promesa: {} }),
+		).not.toBeNull();
+		expect(
+			erroresRespaldoReactivacion("convenio", { convenio: {} }),
+		).toBeNull();
+		expect(
+			erroresRespaldoReactivacion("convenio", { convenio: { activo: true } }),
+		).toBeNull();
+		// Existe pero sin activar: se ve en pantalla, no alcanza para solicitar.
+		expect(
+			erroresRespaldoReactivacion("convenio", { convenio: { activo: false } }),
+		).toContain("todavía no está activo");
 		expect(
 			erroresRespaldoReactivacion("pago_parcial_promesa", { pago: {} }),
 		).not.toBeNull();
@@ -319,8 +336,17 @@ describe("reactivación: qué pasó y respaldo", () => {
 		).toBeNull();
 	});
 
+	it("las solicitudes guardadas con la opción anterior ('promesa') conservan su etiqueta y ya no se pueden elegir", () => {
+		expect(labelQuePasoReactivacion("promesa")).toBe("Promesa de pago");
+		expect(labelQuePasoReactivacion("convenio")).toBe("Convenio");
+		expect(labelQuePasoReactivacion("pago")).toBe("Pago");
+		expect(labelQuePasoReactivacion("otra")).toBeNull();
+		expect(labelQuePasoReactivacion(null)).toBeNull();
+		expect(CLAVES_QUE_PASO_REACTIVACION).not.toContain("promesa");
+	});
+
 	it("compone el motivo con la opción y el detalle", () => {
-		expect(componerMotivoReactivacion("promesa", null)).toBe("Promesa de pago");
+		expect(componerMotivoReactivacion("convenio", null)).toBe("Convenio");
 		expect(componerMotivoReactivacion("pago", " Depositó ")).toBe(
 			"Pago — Depositó",
 		);
@@ -349,6 +375,39 @@ describe("reactivación: qué pasó y respaldo", () => {
 		);
 		expect(res.map((p) => p.pagoId)).toEqual([4, 2]);
 		expect(res[0]?.fechaPago).toBe("2026-09-22");
+	});
+
+	it("a dónde se aplicó el pago: cuota y solo los rubros con monto", () => {
+		const [res] = pagosPosterioresAlApagado(
+			[
+				pago(30, "2026-09-25", {
+					numero_cuota: 13,
+					abono_capital: "699.68",
+					abono_interes: "1107.82",
+					abono_iva_12: "0.00",
+					abono_seguro: null,
+					abono_gps: "279.45",
+					mora: "50",
+				}),
+			],
+			new Date("2026-09-20T15:00:00.000Z"),
+		);
+		expect(res?.numeroCuota).toBe(13);
+		expect(res?.aplicacion).toEqual([
+			{ rubro: "Capital", monto: "699.68" },
+			{ rubro: "Interés", monto: "1107.82" },
+			{ rubro: "GPS", monto: "279.45" },
+			{ rubro: "Mora", monto: "50" },
+		]);
+	});
+
+	it("sin datos de aplicación (cartera vieja): cuota nula y sin rubros", () => {
+		const [res] = pagosPosterioresAlApagado(
+			[pago(31, "2026-09-25")],
+			new Date("2026-09-20T15:00:00.000Z"),
+		);
+		expect(res?.numeroCuota).toBeNull();
+		expect(res?.aplicacion).toEqual([]);
 	});
 
 	it("ignora las filas de cartera sin fecha o con monto 0 (cuotas sin pagar), sin romperse", () => {

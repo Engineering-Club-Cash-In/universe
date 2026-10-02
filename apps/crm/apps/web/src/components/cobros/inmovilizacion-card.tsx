@@ -11,7 +11,7 @@ import {
 	PhoneCall,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MOTIVOS_INMOVILIZACION } from "server/src/lib/inmovilizacion-unidad";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +42,10 @@ import {
 } from "./inmovilizacion-decision-modal";
 import { EjecutarInmovilizacionModal } from "./inmovilizacion-ejecutar-modal";
 import { RespaldoReactivacionResumen } from "./inmovilizacion-respaldo";
-import { SolicitarInmovilizacionModal } from "./inmovilizacion-solicitar-modal";
+import {
+	type BorradorReactivacion,
+	SolicitarInmovilizacionModal,
+} from "./inmovilizacion-solicitar-modal";
 import { UbicacionGuardada } from "./inmovilizacion-ubicacion";
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -88,6 +91,11 @@ export function InmovilizacionCard({
 	casoCobroId,
 	esSupervisor,
 	onRegistrarLlamada,
+	onRegistrarPromesa,
+	onCrearConvenio,
+	convenioBloqueo = null,
+	reabrirReactivacion = false,
+	onReactivacionReabierta,
 	embedded = false,
 }: {
 	bucketNumero: number | null;
@@ -103,6 +111,15 @@ export function InmovilizacionCard({
 		inmovilizacionId: string,
 		accion: "apagado" | "reactivacion",
 	) => void;
+	/** Abre el formulario de promesa de la Ficha 360 (para respaldar una reactivación). */
+	onRegistrarPromesa: () => void;
+	/** Abre el modal de crear convenio de la Ficha 360. */
+	onCrearConvenio: () => void;
+	/** Por qué hoy no se puede crear un convenio; null si se puede. */
+	convenioBloqueo?: string | null;
+	/** Tras crear la promesa pedida desde el modal, vuelve a abrirlo. */
+	reabrirReactivacion?: boolean;
+	onReactivacionReabierta?: () => void;
 	/**
 	 * Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título,
 	 * y con aviso de vacío en vez de desaparecer (la pestaña ya existe).
@@ -114,6 +131,20 @@ export function InmovilizacionCard({
 	const [modalAbierto, setModalAbierto] = useState<
 		"apagado" | "reactivacion" | null
 	>(null);
+	// Lo que el asesor ya escribió en la reactivación: se conserva mientras va a
+	// crear la promesa/convenio y vuelve; se descarta al cancelar o al abrirla de nuevo.
+	const borradorRef = useRef<BorradorReactivacion | null>(null);
+	const onReabiertaRef = useRef(onReactivacionReabierta);
+	onReabiertaRef.current = onReactivacionReabierta;
+	useEffect(() => {
+		if (!reabrirReactivacion) return;
+		// El respaldo recién creado (promesa/convenio) no está en la caché.
+		queryClient.invalidateQueries({
+			queryKey: orpc.getRespaldoReactivacion.key(),
+		});
+		setModalAbierto("reactivacion");
+		onReabiertaRef.current?.();
+	}, [reabrirReactivacion, queryClient]);
 	const [ejecutando, setEjecutando] = useState<{
 		id: string;
 		accion: "apagado" | "reactivacion";
@@ -418,7 +449,10 @@ export function InmovilizacionCard({
 						)}
 						{puedeReactivar && (
 							<Button
-								onClick={() => setModalAbierto("reactivacion")}
+								onClick={() => {
+									borradorRef.current = null;
+									setModalAbierto("reactivacion");
+								}}
 								size="sm"
 								variant="outline"
 							>
@@ -471,7 +505,25 @@ export function InmovilizacionCard({
 				<SolicitarInmovilizacionModal
 					accion={modalAbierto}
 					casoCobroId={casoCobroId}
-					onOpenChange={(open) => !open && setModalAbierto(null)}
+					borrador={borradorRef.current}
+					convenioBloqueo={convenioBloqueo}
+					onBorradorChange={(b) => {
+						borradorRef.current = b;
+					}}
+					onCrearConvenio={() => {
+						setModalAbierto(null);
+						onCrearConvenio();
+					}}
+					onOpenChange={(open) => {
+						if (!open) {
+							borradorRef.current = null;
+							setModalAbierto(null);
+						}
+					}}
+					onRegistrarPromesa={() => {
+						setModalAbierto(null);
+						onRegistrarPromesa();
+					}}
 					onSolicitado={invalidar}
 					open={!!modalAbierto}
 				/>
@@ -711,6 +763,15 @@ function HistorialInmovilizacion({
 									</span>
 								</summary>
 								<dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 border-t px-3 py-2.5 text-xs">
+									{h.accion === "reactivacion" &&
+										(h.quePaso || h.respaldoReactivacion) && (
+											<FilaDetalle etiqueta="Respaldo">
+												<RespaldoReactivacionResumen
+													quePaso={h.quePaso}
+													respaldo={h.respaldoReactivacion}
+												/>
+											</FilaDetalle>
+										)}
 									{h.motivos?.length ? (
 										<FilaDetalle etiqueta="Motivos">
 											<ul className="list-disc pl-4 font-semibold">
@@ -740,15 +801,6 @@ function HistorialInmovilizacion({
 											{h.motivoRechazo}
 										</FilaDetalle>
 									)}
-									{h.accion === "reactivacion" &&
-										(h.quePaso || h.respaldoReactivacion) && (
-											<FilaDetalle etiqueta="Respaldo">
-												<RespaldoReactivacionResumen
-													quePaso={h.quePaso}
-													respaldo={h.respaldoReactivacion}
-												/>
-											</FilaDetalle>
-										)}
 									{ejecutada && h.ejecutadoPorNombre && (
 										<FilaDetalle etiqueta="Registrado por">
 											{h.ejecutadoPorNombre}

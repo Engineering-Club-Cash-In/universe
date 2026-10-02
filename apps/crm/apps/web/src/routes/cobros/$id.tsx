@@ -239,6 +239,11 @@ export const Route = createFileRoute("/cobros/$id")({
 	component: RouteComponent,
 	validateSearch: (search: Record<string, unknown>) => ({
 		tipo: (search.tipo as "caso" | "contrato") || "caso",
+		// Deep link desde las notificaciones de inmovilización: abre la pestaña
+		// "Vehículo / GPS" ya parada en "Inmovilizar / Reactivar".
+		...(search.seccion === "inmovilizacion"
+			? { seccion: "inmovilizacion" as const }
+			: {}),
 	}),
 });
 
@@ -507,7 +512,7 @@ function GestionTempranaCard({
 
 function RouteComponent() {
 	const { id } = Route.useParams();
-	const { tipo } = Route.useSearch();
+	const { tipo, seccion } = Route.useSearch();
 	const { data: session } = authClient.useSession();
 
 	// Estados de paginación
@@ -619,7 +624,9 @@ function RouteComponent() {
 	const [isEditingContact, setIsEditingContact] = useState(false);
 	// Controlada para que "Más números para localizarlo" (tarjeta de contacto)
 	// pueda llevar a la pestaña Referencias.
-	const [tabActiva, setTabActiva] = useState("resumen");
+	const [tabActiva, setTabActiva] = useState(
+		seccion === "inmovilizacion" ? "vehiculo" : "resumen",
+	);
 	const [contactForm, setContactForm] = useState({
 		telefonoPrincipal: [] as string[],
 		telefonoAlternativo: [] as string[],
@@ -5072,6 +5079,7 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
+								pestanaInicial={seccion}
 								onRegistrarLlamada={(inmovilizacionId, accion) => {
 									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
 									setCanalContacto("llamada");

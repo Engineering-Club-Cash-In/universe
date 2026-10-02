@@ -12,6 +12,7 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import { MOTIVOS_INMOVILIZACION } from "server/src/lib/inmovilizacion-unidad";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -259,9 +260,9 @@ export function InmovilizacionCard({
 							—{" "}
 							{ESTADO_LABEL[solicitudAbierta.estado] ?? solicitudAbierta.estado}
 						</p>
-						<p className="mt-1 text-muted-foreground">
-							Motivo: {solicitudAbierta.motivo}
-						</p>
+						{solicitudAbierta.accion === "apagado" && (
+							<MotivoSolicitud fila={solicitudAbierta} />
+						)}
 						{solicitudAbierta.accion === "reactivacion" && (
 							<div className="mt-2">
 								<RespaldoReactivacionResumen
@@ -276,6 +277,9 @@ export function InmovilizacionCard({
 									respaldo={solicitudAbierta.respaldoReactivacion}
 								/>
 							</div>
+						)}
+						{solicitudAbierta.accion === "reactivacion" && (
+							<MotivoSolicitud fila={solicitudAbierta} />
 						)}
 						<div className="mt-2">
 							<UbicacionGuardada
@@ -598,6 +602,49 @@ const ESTADO_BADGE: Record<
 };
 
 /** Una fila rotulada del detalle; no se pinta si no hay nada que mostrar. */
+/**
+ * Motivo de una solicitud con estructura: los motivos marcados como lista y
+ * el detalle aparte. Filas viejas sin `motivos`/`motivoDetalle` caen al texto
+ * compuesto de `motivo`.
+ */
+function MotivoSolicitud({
+	fila,
+}: {
+	fila: {
+		motivo: string;
+		motivos?: string[] | null;
+		motivoDetalle?: string | null;
+	};
+}) {
+	const motivos = fila.motivos ?? [];
+	const detalle = fila.motivoDetalle?.trim();
+	if (motivos.length === 0 && !detalle) {
+		return <p className="mt-1 text-muted-foreground">Motivo: {fila.motivo}</p>;
+	}
+	return (
+		<div className="mt-2 space-y-2">
+			{motivos.length > 0 && (
+				<div>
+					<p className="font-semibold">
+						{motivos.length === 1 ? "Motivo" : "Motivos"}
+					</p>
+					<ul className="mt-0.5 list-disc space-y-0.5 pl-5 font-semibold">
+						{motivos.map((m) => (
+							<li key={m}>{MOTIVOS_INMOVILIZACION[m] ?? m}</li>
+						))}
+					</ul>
+				</div>
+			)}
+			{detalle && (
+				<div>
+					<p className="font-semibold">Detalle</p>
+					<p className="mt-0.5 whitespace-pre-wrap break-words">{detalle}</p>
+				</div>
+			)}
+		</div>
+	);
+}
+
 function FilaDetalle({
 	etiqueta,
 	children,
@@ -664,8 +711,29 @@ function HistorialInmovilizacion({
 									</span>
 								</summary>
 								<dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 border-t px-3 py-2.5 text-xs">
-									{h.motivo && (
-										<FilaDetalle etiqueta="Motivo">{h.motivo}</FilaDetalle>
+									{h.motivos?.length ? (
+										<FilaDetalle etiqueta="Motivos">
+											<ul className="list-disc pl-4 font-semibold">
+												{h.motivos.map((m) => (
+													<li key={m}>{MOTIVOS_INMOVILIZACION[m] ?? m}</li>
+												))}
+											</ul>
+										</FilaDetalle>
+									) : (
+										// En una reactivación `motivo` es "opción — detalle": ambos ya
+										// salen abajo (Respaldo y Detalle). Solo filas viejas sin ellos.
+										h.motivo &&
+										!h.motivoDetalle?.trim() &&
+										!(h.accion === "reactivacion" && h.quePaso) && (
+											<FilaDetalle etiqueta="Motivo">{h.motivo}</FilaDetalle>
+										)
+									)}
+									{h.motivoDetalle?.trim() && (
+										<FilaDetalle etiqueta="Detalle">
+											<span className="whitespace-pre-wrap">
+												{h.motivoDetalle}
+											</span>
+										</FilaDetalle>
 									)}
 									{h.estado === "rechazada" && h.motivoRechazo && (
 										<FilaDetalle etiqueta="Rechazo">

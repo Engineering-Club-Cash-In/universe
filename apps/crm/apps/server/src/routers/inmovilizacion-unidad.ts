@@ -45,6 +45,7 @@ import {
 	CLAVES_QUE_PASO_REACTIVACION,
 	componerMotivoApagado,
 	componerMotivoReactivacion,
+	errorDetalleReactivacion,
 	erroresEvidenciaEjecucion,
 	erroresMotivosInmovilizacion,
 	erroresRespaldoReactivacion,
@@ -1724,6 +1725,10 @@ export const inmovilizacionUnidadRouter = {
 						message:
 							"Seleccione una opción: pago, promesa de pago o pago parcial + promesa.",
 					});
+				}
+				const errorDetalle = errorDetalleReactivacion(input.motivoDetalle);
+				if (errorDetalle) {
+					throw new ORPCError("BAD_REQUEST", { message: errorDetalle });
 				}
 				motivoTexto = componerMotivoReactivacion(
 					input.quePaso,

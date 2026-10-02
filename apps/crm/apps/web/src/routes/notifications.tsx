@@ -1146,7 +1146,16 @@ function NotificationCard({
 		)
 			return null;
 
-		const route = config.getRoute(notification.relatedEntityId ?? "");
+		// Las de inmovilización/reactivación caen directo en su pestaña del caso.
+		const route =
+			notification.redirectPage === "cobros_detail" &&
+			notification.cobrosTipo?.startsWith("inmovilizacion_")
+				? {
+						to: "/cobros/$id",
+						params: { id: notification.relatedEntityId ?? "" },
+						search: { tipo: "caso", seccion: "inmovilizacion" },
+					}
+				: config.getRoute(notification.relatedEntityId ?? "");
 		return {
 			label: config.label,
 			action: () => navigate(route as any),

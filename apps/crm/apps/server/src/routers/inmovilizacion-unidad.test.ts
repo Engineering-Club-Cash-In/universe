@@ -97,6 +97,17 @@ let ejecucionNotificadaASupervisores: {
 let pagosCarteraMock: Record<string, unknown>[] = [];
 let pagosCarteraFalla = false;
 let promesaActivaMock: Record<string, unknown> | null = null;
+// Convenio de cartera del crédito (`convenioActivo` de getCredito) y su estado.
+const CONVENIO_VIGENTE = {
+	convenio_id: 9,
+	numero_meses: 3,
+	cuota_mensual: "1000.00",
+	monto_total_convenio: "3000.00",
+	activo: true,
+};
+let convenioVigenteMock: Record<string, unknown> | null = CONVENIO_VIGENTE;
+let statusCreditMock = "EN_CONVENIO";
+let convenioCarteraFalla = false;
 // Gestiones enlazadas (la llamada de cada inmovilización) y nombres de usuario
 // que lee `getInmovilizacionesCaso` para el historial de la carta.
 let llamadasEnlazadasMock: Record<string, unknown>[] = [];
@@ -537,8 +548,21 @@ mock.module("../services/inmovilizacion-notif", () => ({
 // archivos de test lo reemplazan con `mock.module` (global en bun), y en el
 // suite completo `carteraBackClient.getCredito` dejaba de ser una función.
 // Cada test sigue ajustándolo con spyOn sobre ESTE objeto.
+// La primera lectura del crédito es la del dueño (assertCreditoAsignadoEnCartera);
+// con `convenioCarteraFalla` falla la siguiente: la verificación del convenio.
+let creditoLlamadas = 0;
+const getCreditoPorDefecto = async () => {
+	creditoLlamadas++;
+	if (convenioCarteraFalla && creditoLlamadas > 1)
+		throw new Error("cartera-back caído");
+	return {
+		asesor: { emailCashIn: "u@example.com" },
+		credito: { statusCredit: statusCreditMock },
+		convenioActivo: convenioVigenteMock,
+	};
+};
 const carteraBackClientMock = {
-	getCredito: async () => ({ asesor: { emailCashIn: "u@example.com" } }),
+	getCredito: getCreditoPorDefecto,
 	getBucketActualCredito: async () => ({ bucket: 2 }),
 	getPagosByCredito: async () => {
 		if (pagosCarteraFalla) throw new Error("cartera-back caído");
@@ -618,6 +642,10 @@ function reset() {
 		fechaProximoContacto: new Date("2099-02-01T00:00:00.000Z"),
 		montoComprometido: "800.00",
 	};
+	convenioVigenteMock = CONVENIO_VIGENTE;
+	statusCreditMock = "EN_CONVENIO";
+	convenioCarteraFalla = false;
+	creditoLlamadas = 0;
 	insertError = null;
 	transactionError = null;
 	inmovilizacionesInsertadas = [];
@@ -642,6 +670,10 @@ function reset() {
 	onNotificarLlamarCliente = null;
 	reconciliarAvisosLlamadas = [];
 	executeLlamadas = [];
+	// Los tests que hacen spyOn(getCredito) lo dejaban puesto para los siguientes.
+	spyOn(carteraBackClient, "getCredito").mockImplementation(
+		getCreditoPorDefecto as never,
+	);
 	spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 		bucket: 2,
 	});
@@ -653,6 +685,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("asesor dueño del caso, bucket B2: crea la solicitud y notifica", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -676,6 +710,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("bucket B1 (fuera de rango): rechaza con BAD_REQUEST", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 1,
@@ -698,6 +734,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("bucket B5 (fuera de rango): rechaza", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 5,
@@ -719,6 +757,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("no se pudo resolver el bucket (fail closed): rechaza", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockRejectedValue(
 			new Error("timeout"),
@@ -811,6 +851,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("ya hay una solicitud abierta (índice único): CONFLICT", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -833,6 +875,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("reactivación sin apagado previo ejecutado: rechaza (unidad ya activa)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -856,6 +900,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("toma el advisory lock por unidad antes de insertar en solicitarInmovilizacion (review de Codex)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -877,6 +923,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("unidad apagada por otro caso concurrente durante la solicitud: detecta el cambio bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -905,6 +953,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("reactivación re-calcula origenId bajo lock si otro caso ejecutó un apagado más reciente (review de Codex)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -945,6 +995,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("unidad GPS reasignada a otro vehículo antes de adquirir el lock: detecta el cambio en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -974,6 +1026,8 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 	it("unidad GPS desvinculada del vehículo antes de adquirir el lock: detecta wialonUnitId null en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket: 2,
@@ -1517,6 +1571,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 	function asesorAsignadoEnBucket(bucket: number | null) {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
+			credito: { statusCredit: "EN_CONVENIO" },
+			convenioActivo: CONVENIO_VIGENTE,
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 			bucket,
@@ -2696,6 +2752,8 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 				fechaPago: "2099-01-10",
 				monto: "1500.00",
 				referencia: "REF-1",
+				numeroCuota: null,
+				aplicacion: [],
 				validacion: null,
 			},
 		});
@@ -2772,28 +2830,50 @@ describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", ()
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("'Promesa de pago' con una promesa activa: la guarda con su fecha y monto", async () => {
+	it("'Convenio' con un convenio vigente en cartera: lo guarda con plazo y cuota", async () => {
 		conApagadoVigente();
 		await solicitar({ quePaso: "promesa" });
 		expect(inmovilizacionesInsertadas[0]?.respaldoReactivacion).toEqual({
-			promesa: {
-				contactoId: "77777777-7777-7777-7777-777777777777",
-				fechaPrometida: "2099-02-01T00:00:00.000Z",
-				monto: "800.00",
+			convenio: {
+				activo: true,
+				numeroMeses: 3,
+				cuotaMensual: "1000.00",
+				montoTotal: "3000.00",
 			},
 		});
 	});
 
-	it("'Promesa de pago' sin promesa activa en el caso: BAD_REQUEST", async () => {
+	it("'Convenio' recién creado y pendiente de activación: BAD_REQUEST, hay que esperar a que se active", async () => {
 		conApagadoVigente();
-		promesaActivaMock = null;
+		convenioVigenteMock = null;
+		statusCreditMock = "EN_CONVENIO";
+		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: expect.stringContaining("todavía no está activo"),
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("'Convenio' sin convenio en el crédito: BAD_REQUEST", async () => {
+		conApagadoVigente();
+		convenioVigenteMock = null;
+		statusCreditMock = "MOROSO";
 		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
 			code: "BAD_REQUEST",
 		});
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("'Promesa de pago' no consulta pagos: sirve aunque cartera no los dé", async () => {
+	it("'Convenio' con cartera caída: SERVICE_UNAVAILABLE, no se aprueba a ciegas", async () => {
+		conApagadoVigente();
+		convenioCarteraFalla = true;
+		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("'Convenio' no consulta pagos: sirve aunque cartera no los dé", async () => {
 		conApagadoVigente();
 		pagosCarteraFalla = true;
 		await solicitar({ quePaso: "promesa" });
@@ -2895,6 +2975,22 @@ describe("CB-041 — getRespaldoReactivacion", () => {
 		expect(res.pagos).toEqual([]);
 		expect(res.errorPagos).toContain("pagos");
 		expect(res.promesa).not.toBeNull();
+	});
+
+	it("devuelve el convenio vigente del crédito; si cartera no responde, el motivo", async () => {
+		conApagadoVigente();
+		const ok = await leer();
+		expect(ok.convenio).toMatchObject({ activo: true, numeroMeses: 3 });
+		// Pendiente de activación: se informa (la pantalla lo muestra) aunque no alcance.
+		convenioVigenteMock = null;
+		const pendiente = await leer();
+		expect(pendiente.convenio).toMatchObject({ activo: false });
+		convenioVigenteMock = CONVENIO_VIGENTE;
+		expect(ok.errorConvenio).toBeNull();
+		convenioCarteraFalla = true;
+		const caido = await leer();
+		expect(caido.convenio).toBeNull();
+		expect(caido.errorConvenio).toContain("convenio");
 	});
 
 	it("unidad que no está apagada: sin fecha de apagado y sin pagos", async () => {

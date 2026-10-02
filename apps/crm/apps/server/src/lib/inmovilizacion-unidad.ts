@@ -295,9 +295,9 @@ export const QUE_PASO_REACTIVACION = {
 		descripcion: "Pagó lo vencido. El pago tiene que estar registrado.",
 	},
 	promesa: {
-		label: "Promesa de pago",
+		label: "Convenio",
 		descripcion:
-			"Se comprometió a pagar en una fecha. La promesa tiene que estar registrada.",
+			"Se formalizó un convenio de pago. El convenio tiene que estar creado en cartera.",
 	},
 	pago_parcial_promesa: {
 		label: "Pago parcial + promesa",
@@ -312,8 +312,11 @@ export const CLAVES_QUE_PASO_REACTIVACION = Object.keys(
 
 export const quePasoRequierePago = (q: QuePasoReactivacion) =>
 	q === "pago" || q === "pago_parcial_promesa";
+/** La clave `promesa` se conserva por las filas guardadas; hoy es la opción "Convenio". */
+export const quePasoRequiereConvenio = (q: QuePasoReactivacion) =>
+	q === "promesa";
 export const quePasoRequierePromesa = (q: QuePasoReactivacion) =>
-	q === "promesa" || q === "pago_parcial_promesa";
+	q === "pago_parcial_promesa";
 
 /** Un pago de cartera-back ofrecido como respaldo (ya posterior al apagado). */
 export type PagoRespaldo = {
@@ -322,6 +325,10 @@ export type PagoRespaldo = {
 	fechaPago: string;
 	monto: string;
 	referencia: string | null;
+	/** Cuota a la que cartera-back aplicó el pago (puede diferir de la pedida). */
+	numeroCuota?: number | null;
+	/** A qué se fue el pago, por rubro. Solo los rubros con monto > 0. */
+	aplicacion?: { rubro: string; monto: string }[];
 	/**
 	 * Estado de validación en cartera-back: `pending` = contabilidad todavía no lo
 	 * validó. Es solo informativo (no bloquea la reactivación): el supervisor lo ve
@@ -338,10 +345,20 @@ export type PromesaRespaldo = {
 	monto: string | null;
 };
 
+/** El convenio de cartera que respalda la reactivación. */
+export type ConvenioRespaldo = {
+	/** false = creado pero todavía pendiente de activación en cartera. */
+	activo: boolean;
+	numeroMeses: number | null;
+	cuotaMensual: string | null;
+	montoTotal: string | null;
+};
+
 /** Lo que se guarda con la solicitud: qué vio el supervisor al decidir. */
 export type RespaldoReactivacion = {
 	pago?: PagoRespaldo;
 	promesa?: PromesaRespaldo;
+	convenio?: ConvenioRespaldo;
 };
 
 /**
@@ -360,6 +377,30 @@ function diaDelPago(fechaPago: string | null | undefined): string | null {
 	return Number.isNaN(d.getTime()) ? f.slice(0, 10) : toDateStrGT(d);
 }
 
+const RUBROS_APLICACION = [
+	["abono_capital", "Capital"],
+	["abono_interes", "Interés"],
+	["abono_iva_12", "IVA"],
+	["abono_interes_ci", "Interés CI"],
+	["abono_iva_ci", "IVA CI"],
+	["abono_seguro", "Seguro"],
+	["abono_gps", "GPS"],
+	["membresias_pago", "Membresía"],
+	["mora", "Mora"],
+] as const;
+
+/** Rubros a los que cartera-back aplicó el pago (solo los que recibieron algo). */
+function aplicacionDelPago(
+	p: Partial<Record<(typeof RUBROS_APLICACION)[number][0], string | null>>,
+): { rubro: string; monto: string }[] {
+	const out: { rubro: string; monto: string }[] = [];
+	for (const [campo, rubro] of RUBROS_APLICACION) {
+		const monto = p[campo];
+		if (monto && Number(monto) > 0) out.push({ rubro, monto });
+	}
+	return out;
+}
+
 /**
  * Pagos de cartera que pueden respaldar una reactivación: los registrados el
  * día del apagado o después, con monto y sin anular. Cartera-back también
@@ -374,6 +415,16 @@ export function pagosPosterioresAlApagado(
 		numeroAutorizacion: string | null;
 		paymentFalse?: boolean;
 		validationStatus?: string | null;
+		numero_cuota?: number | null;
+		abono_capital?: string | null;
+		abono_interes?: string | null;
+		abono_iva_12?: string | null;
+		abono_interes_ci?: string | null;
+		abono_iva_ci?: string | null;
+		abono_seguro?: string | null;
+		abono_gps?: string | null;
+		membresias_pago?: string | null;
+		mora?: string | null;
 	}[],
 	apagadoEjecutadoAt: Date,
 ): PagoRespaldo[] {
@@ -389,6 +440,8 @@ export function pagosPosterioresAlApagado(
 			fechaPago: dia,
 			monto: p.monto_boleta as string,
 			referencia: p.numeroAutorizacion,
+			numeroCuota: p.numero_cuota ?? null,
+			aplicacion: aplicacionDelPago(p),
 			validacion:
 				p.validationStatus === "validated" ||
 				p.validationStatus === "pending" ||
@@ -404,14 +457,27 @@ export function pagosPosterioresAlApagado(
 
 /**
  * Primer problema del respaldo para esa opción, o null si alcanza. "Pago" pide
- * un pago elegido; "Promesa", una promesa activa; "50% + promesa", las dos.
+ * un pago elegido; "Convenio", un convenio vigente; "Pago parcial + promesa",
+ * el pago y una promesa activa.
  */
 export function erroresRespaldoReactivacion(
 	quePaso: QuePasoReactivacion,
-	respaldo: { pago?: unknown; promesa?: unknown },
+	respaldo: {
+		pago?: unknown;
+		promesa?: unknown;
+		convenio?: { activo?: boolean } | null;
+	},
 ): string | null {
 	if (quePasoRequierePago(quePaso) && !respaldo.pago) {
 		return "Seleccione el pago que respalda la reactivación (debe estar registrado después del apagado).";
+	}
+	if (quePasoRequiereConvenio(quePaso) && !respaldo.convenio) {
+		return "El crédito no tiene un convenio de pago vigente: créelo primero en «Promesa / Convenio».";
+	}
+	// Creado pero sin activar: si cartera lo rechaza, la reactivación quedaría
+	// respaldada por un convenio caído. Se muestra, pero no alcanza todavía.
+	if (quePasoRequiereConvenio(quePaso) && respaldo.convenio?.activo === false) {
+		return "El convenio todavía no está activo en cartera: espere a que se active para solicitar la reactivación.";
 	}
 	if (quePasoRequierePromesa(quePaso) && !respaldo.promesa) {
 		return "El caso no tiene una promesa de pago activa: regístrela primero en «Promesa / Convenio».";
@@ -437,7 +503,7 @@ export function reactivacionSinRespaldo(fila: {
 }
 
 export const MENSAJE_REACTIVACION_SIN_RESPALDO =
-	"Esta reactivación se solicitó sin el respaldo de pago o promesa de pago que ahora se exige. Solicítela de nuevo y seleccione el respaldo.";
+	"Esta reactivación se solicitó sin el respaldo de pago, convenio o promesa de pago que ahora se exige. Solicítela de nuevo y seleccione el respaldo.";
 
 /** Texto de la columna `motivo` de una reactivación: opción elegida y detalle. */
 export function componerMotivoReactivacion(

@@ -43,6 +43,7 @@ import {
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
 	CLAVES_QUE_PASO_REACTIVACION,
+	type ConvenioRespaldo,
 	componerMotivoApagado,
 	componerMotivoReactivacion,
 	errorDetalleReactivacion,
@@ -59,6 +60,7 @@ import {
 	pagosPosterioresAlApagado,
 	puedeSolicitar,
 	type QuePasoReactivacion,
+	quePasoRequiereConvenio,
 	quePasoRequierePago,
 	quePasoRequierePromesa,
 	type RespaldoReactivacion,
@@ -825,6 +827,45 @@ async function leerPromesaActivaCaso(
 }
 
 /**
+ * El convenio de pago vigente del crédito en cartera, o null. Cuenta también el
+ * recién creado que espera activación (`EN_CONVENIO` sin `convenioActivo`): es
+ * la misma señal que usa la Ficha 360. Lanza si cartera no responde: sin ella
+ * no se puede verificar.
+ */
+async function leerConvenioVigenteCaso(
+	numeroCreditoSifco: string,
+): Promise<ConvenioRespaldo | null> {
+	if (!isCarteraBackEnabled()) {
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"La integración con cartera no está habilitada: no se puede verificar el convenio.",
+		});
+	}
+	try {
+		const credito = await carteraBackClient.getCredito(
+			numeroCreditoSifco,
+			false,
+		);
+		const convenio = credito.convenioActivo ?? null;
+		if (!convenio && credito.credito?.statusCredit !== "EN_CONVENIO") {
+			return null;
+		}
+		return {
+			activo: !!convenio,
+			numeroMeses: convenio?.numero_meses ?? null,
+			cuotaMensual: convenio?.cuota_mensual ?? null,
+			montoTotal: convenio?.monto_total_convenio ?? null,
+		};
+	} catch (error) {
+		console.error("[inmovilizacion] No se pudo leer el convenio:", error);
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"No se pudo consultar el convenio en cartera. Intente de nuevo en un momento.",
+		});
+	}
+}
+
+/**
  * Arma el respaldo de una reactivación desde los datos REALES (no los que
  * mande el navegador): el pago elegido tiene que estar en cartera y ser
  * posterior al apagado; la promesa, la activa del caso. Lanza BAD_REQUEST con
@@ -845,6 +886,10 @@ async function resolverRespaldoReactivacion(params: {
 		);
 		const elegido = pagos.find((p) => p.pagoId === params.pagoId);
 		if (elegido) respaldo.pago = elegido;
+	}
+	if (quePasoRequiereConvenio(params.quePaso)) {
+		const convenio = await leerConvenioVigenteCaso(params.numeroCreditoSifco);
+		if (convenio) respaldo.convenio = convenio;
 	}
 	if (quePasoRequierePromesa(params.quePaso)) {
 		const promesa = await leerPromesaActivaCaso(params.casoCobroId);
@@ -1723,7 +1768,7 @@ export const inmovilizacionUnidadRouter = {
 				if (!input.quePaso) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Seleccione una opción: pago, promesa de pago o pago parcial + promesa.",
+							"Seleccione una opción: pago, convenio o pago parcial + promesa.",
 					});
 				}
 				const errorDetalle = errorDetalleReactivacion(input.motivoDetalle);
@@ -2646,8 +2691,11 @@ export const getRespaldoReactivacion = cobrosProcedure
 			apagadoEjecutadoAt: Date | null;
 			pagos: PagoRespaldo[];
 			promesa: PromesaRespaldo | null;
+			convenio: ConvenioRespaldo | null;
 			/** Por qué no se pudieron leer los pagos (cartera caída o deshabilitada). */
 			errorPagos: string | null;
+			/** Por qué no se pudo leer el convenio (cartera caída o deshabilitada). */
+			errorConvenio: string | null;
 		}> => {
 			await assertAccesoCasoCobro(
 				input.casoCobroId,
@@ -2666,12 +2714,24 @@ export const getRespaldoReactivacion = cobrosProcedure
 			);
 			const apagado = ultimaEjecutada(historial, "apagado");
 			const promesa = await leerPromesaActivaCaso(input.casoCobroId);
+			let convenio: ConvenioRespaldo | null = null;
+			let errorConvenio: string | null = null;
+			try {
+				convenio = await leerConvenioVigenteCaso(caso.numeroCreditoSifco);
+			} catch (error) {
+				errorConvenio =
+					error instanceof ORPCError
+						? error.message
+						: "No se pudo consultar el convenio en cartera.";
+			}
 			if (!apagado?.ejecutadoAt) {
 				return {
 					apagadoEjecutadoAt: null,
 					pagos: [],
 					promesa,
+					convenio,
 					errorPagos: null,
+					errorConvenio,
 				};
 			}
 			let pagos: PagoRespaldo[] = [];
@@ -2696,7 +2756,9 @@ export const getRespaldoReactivacion = cobrosProcedure
 				apagadoEjecutadoAt: apagado.ejecutadoAt,
 				pagos,
 				promesa,
+				convenio,
 				errorPagos,
+				errorConvenio,
 			};
 		},
 	);

@@ -35,7 +35,7 @@ import {
 	Users,
 	X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
@@ -545,6 +545,14 @@ function RouteComponent() {
 	// solo trigger (el dropdown) decida cuál.
 	const [promesaAbierta, setPromesaAbierta] = useState(false);
 	const [convenioAbierto, setConvenioAbierto] = useState(false);
+	// La promesa se abrió desde "Solicitar reactivación" (no hay convenio activo):
+	// al crearla se vuelve a abrir ese modal. `reabrirReactivacion` es la señal
+	// que consume la pestaña de inmovilización.
+	const [promesaDesdeReactivacion, setPromesaDesdeReactivacion] =
+		useState(false);
+	const [convenioDesdeReactivacion, setConvenioDesdeReactivacion] =
+		useState(false);
+	const [reabrirReactivacion, setReabrirReactivacion] = useState(false);
 	// Generar links dejó de ser un botón suelto: ahora es una de las dos formas
 	// de registrar un pago, así que el diálogo lo abre el dropdown principal.
 	const [pagaloAbierto, setPagaloAbierto] = useState(false);
@@ -627,6 +635,10 @@ function RouteComponent() {
 	const [tabActiva, setTabActiva] = useState(
 		seccion === "inmovilizacion" ? "vehiculo" : "resumen",
 	);
+	// Un deep link a la inmovilización con el caso ya abierto no remonta la ruta.
+	useEffect(() => {
+		if (seccion === "inmovilizacion") setTabActiva("vehiculo");
+	}, [seccion]);
 	const [contactForm, setContactForm] = useState({
 		telefonoPrincipal: [] as string[],
 		telefonoAlternativo: [] as string[],
@@ -2044,9 +2056,16 @@ function RouteComponent() {
 										}
 										variante="promesa"
 										open={promesaAbierta || !!promesaDesdeVisita}
+										onCreado={() => {
+											if (promesaDesdeReactivacion)
+												setReabrirReactivacion(true);
+										}}
 										onOpenChange={(abierto) => {
 											setPromesaAbierta(abierto);
-											if (!abierto) setPromesaDesdeVisita(null);
+											if (!abierto) {
+												setPromesaDesdeVisita(null);
+												setPromesaDesdeReactivacion(false);
+											}
 										}}
 										montoSugerido={Math.max(
 											0,
@@ -2085,7 +2104,10 @@ function RouteComponent() {
 									    cartera considera elegible y el server lo re-valida. */}
 									<ConvenioModal
 										open={convenioAbierto}
-										onOpenChange={setConvenioAbierto}
+										onOpenChange={(abierto) => {
+											setConvenioAbierto(abierto);
+											if (!abierto) setConvenioDesdeReactivacion(false);
+										}}
 										casoCobroId={caso.id ?? ""}
 										clienteNombre={caso.clienteNombre || ""}
 										// La regla de elegibilidad vive en un módulo aparte
@@ -2100,6 +2122,8 @@ function RouteComponent() {
 										montoMora={Number(caso.montoEnMora || 0)}
 										maxMeses={maxMesesConvenio}
 										onCreado={() => {
+											if (convenioDesdeReactivacion)
+												setReabrirReactivacion(true);
 											// El convenio cambia status, mora, bucket y cuotas del
 											// crédito: todo lo que la ficha lee de cartera.
 											queryClient.invalidateQueries(
@@ -5080,6 +5104,17 @@ function RouteComponent() {
 								esSupervisor={esSupervisorCobros}
 								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
 								pestanaInicial={seccion}
+								convenioBloqueo={convenioMotivoBloqueo}
+								onCrearConvenio={() => {
+									setConvenioDesdeReactivacion(true);
+									setConvenioAbierto(true);
+								}}
+								onReactivacionReabierta={() => setReabrirReactivacion(false)}
+								onRegistrarPromesa={() => {
+									setPromesaDesdeReactivacion(true);
+									setPromesaAbierta(true);
+								}}
+								reabrirReactivacion={reabrirReactivacion}
 								onRegistrarLlamada={(inmovilizacionId, accion) => {
 									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
 									setCanalContacto("llamada");

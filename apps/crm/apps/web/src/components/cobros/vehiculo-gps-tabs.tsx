@@ -1,4 +1,5 @@
 import { Bell, LockOpen, MapPin, MapPinned } from "lucide-react";
+import { useEffect, useState } from "react";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
 import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
@@ -20,7 +21,12 @@ export function VehiculoGpsTabs({
 	casoCobroId,
 	esSupervisor,
 	onRegistrarLlamada,
+	convenioBloqueo,
+	onCrearConvenio,
+	onReactivacionReabierta,
+	onRegistrarPromesa,
 	pestanaInicial,
+	reabrirReactivacion,
 	vehicleId,
 }: {
 	bucketNumero: number | null;
@@ -30,6 +36,13 @@ export function VehiculoGpsTabs({
 		inmovilizacionId: string,
 		accion: "apagado" | "reactivacion",
 	) => void;
+	onRegistrarPromesa: () => void;
+	onCrearConvenio: () => void;
+	/** Por qué hoy no se puede crear un convenio; null si se puede. */
+	convenioBloqueo: string | null;
+	/** Señal para volver a abrir "Solicitar reactivación" tras crear la promesa. */
+	reabrirReactivacion: boolean;
+	onReactivacionReabierta: () => void;
 	/** Pestaña con la que abre (deep link de una notificación). */
 	pestanaInicial?: "inmovilizacion";
 	// GPS y ubicaciones requieren vehículo; notificaciones e inmovilización
@@ -37,15 +50,18 @@ export function VehiculoGpsTabs({
 	vehicleId: string | null;
 }) {
 	const contenido = "mt-4 data-[state=inactive]:hidden";
+	// Controlada: un deep link que llega con el caso ya abierto también cambia de pestaña.
+	const [pestana, setPestana] = useState(
+		pestanaInicial ?? (vehicleId ? "gps" : "notificaciones"),
+	);
+	useEffect(() => {
+		if (pestanaInicial) setPestana(pestanaInicial);
+	}, [pestanaInicial]);
 
 	return (
 		<Card>
 			<CardContent>
-				<Tabs
-					defaultValue={
-						pestanaInicial ?? (vehicleId ? "gps" : "notificaciones")
-					}
-				>
+				<Tabs onValueChange={setPestana} value={pestana}>
 					<TabsList className="h-auto max-w-full flex-wrap justify-start">
 						{vehicleId && (
 							<TabsTrigger value="gps">
@@ -98,6 +114,11 @@ export function VehiculoGpsTabs({
 							embedded
 							esSupervisor={esSupervisor}
 							onRegistrarLlamada={onRegistrarLlamada}
+							convenioBloqueo={convenioBloqueo}
+							onCrearConvenio={onCrearConvenio}
+							onReactivacionReabierta={onReactivacionReabierta}
+							onRegistrarPromesa={onRegistrarPromesa}
+							reabrirReactivacion={reabrirReactivacion}
 						/>
 					</TabsContent>
 				</Tabs>

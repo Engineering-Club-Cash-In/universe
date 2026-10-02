@@ -503,6 +503,11 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 					escalarASupervisor: esB4 ? undefined : false,
 				});
 				if (resultado.notificado) eventosNotificados++;
+				// Sin destinatario por un fallo transitorio al resolver el asesor
+				// (p. ej. energía fuera de B4, que no escala): se trata como fallo
+				// de la unidad para no avanzar el snapshot y reintentar la
+				// transición en el siguiente tick.
+				if (resultado.reintentar) huboFalloEnUnidad = true;
 			} catch (error) {
 				huboFalloEnUnidad = true;
 				console.error(

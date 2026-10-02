@@ -95,6 +95,15 @@ export interface RegistrarEventoGpsResultado {
 	vehicleId: string | null;
 	casoCobroId: string | null;
 	notificado: boolean;
+	/**
+	 * `true` cuando NO se pudo avisar a nadie porque falló (transitoriamente)
+	 * la resolución del asesor y no había supervisión a la cual caer — el
+	 * evento quedó guardado con `notificado=false`. El caller no debe dar la
+	 * transición por vista (no avanzar su snapshot) para que el siguiente
+	 * tick la reintente. Ausente/false = nada que reintentar (ya se avisó, se
+	 * suprimió por ventana de dedup, o no hay destinatario resoluble).
+	 */
+	reintentar?: boolean;
 }
 
 /**
@@ -205,14 +214,16 @@ export async function resolverVehiculoYCaso(
  * fresco posible — no vale la pena cachear 5 min algo que decide a quién
  * alertar de un vehículo posiblemente manipulado.
  *
- * Devuelve `null` si cartera-back está deshabilitado, falla, o el crédito no
- * tiene asesor mapeable: el aviso sale solo a supervisión (cuando el tipo
+ * `userId` es `null` si cartera-back está deshabilitado, falla, o el crédito
+ * no tiene asesor mapeable: el aviso sale solo a supervisión (cuando el tipo
  * escala). El caso del CRM ya no tiene un responsable al cual caer.
+ * `fallo` distingue el error transitorio (cartera-back/DB lanzó) de la
+ * ausencia permanente de asesor: solo el primero vale la pena reintentar.
  */
 async function resolverAsesorActual(
 	numeroCreditoSifco: string,
-): Promise<string | null> {
-	if (!isCarteraBackEnabled()) return null;
+): Promise<{ userId: string | null; fallo: boolean }> {
+	if (!isCarteraBackEnabled()) return { userId: null, fallo: false };
 	try {
 		const respuesta = await carteraBackClient.getCredito(
 			numeroCreditoSifco,
@@ -220,7 +231,7 @@ async function resolverAsesorActual(
 			false,
 		);
 		const emailAsesor = respuesta?.asesor?.emailCashIn?.trim().toLowerCase();
-		if (!emailAsesor) return null;
+		if (!emailAsesor) return { userId: null, fallo: false };
 
 		// Mismo puente de identidad que el resto de cobros:
 		// `asesores.email_cash_in` == `user.email`, ambos lados normalizados.
@@ -229,13 +240,13 @@ async function resolverAsesorActual(
 			.from(user)
 			.where(sql`lower(trim(${user.email})) = ${emailAsesor}`)
 			.limit(1);
-		return usuarioAsesor?.id ?? null;
+		return { userId: usuarioAsesor?.id ?? null, fallo: false };
 	} catch (error) {
 		console.error(
 			`[GpsEventos] No se pudo resolver el asesor actual de ${numeroCreditoSifco} (solo se avisa a supervisión si escala):`,
 			error,
 		);
-		return null;
+		return { userId: null, fallo: true };
 	}
 }
 
@@ -335,12 +346,12 @@ export async function registrarEventoGps(
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 
-	const asesorActualId = caso?.numeroCreditoSifco
+	const asesorActual = caso?.numeroCreditoSifco
 		? await resolverAsesorActual(caso.numeroCreditoSifco)
-		: null;
+		: { userId: null, fallo: false };
 	// Solo el dueño en cartera: el caso del CRM no dice de quién es el crédito.
 	// Si no se puede resolver, el aviso sale igual a supervisión (cuando escala).
-	const asesorUserId = asesorActualId;
+	const asesorUserId = asesorActual.userId;
 
 	const [supervisores, usuarioSistema] = await Promise.all([
 		(input.escalarASupervisor ?? ESCALA_A_SUPERVISOR[input.tipo])
@@ -433,6 +444,9 @@ export async function registrarEventoGps(
 		vehicleId,
 		casoCobroId,
 		notificado,
+		// Sin filas = nadie a quién avisar; si además el asesor falló por un
+		// error transitorio (no por no existir), el job debe reintentar.
+		reintentar: filas.length === 0 && asesorActual.fallo,
 	};
 }
 

@@ -531,6 +531,52 @@ describe("CB-119 — resolución del asesor: solo cartera-back decide quién lo 
 
 		expect(resultado.eventoId).toBeTruthy();
 		expect(notificacionesInsertadas).toHaveLength(0);
+		expect(resultado.reintentar).toBe(true);
+	});
+
+	test("cartera-back lanza en un evento solo-asesor (energía fuera de B4): pide reintentar", async () => {
+		getCreditoSpy.mockImplementation(async () => {
+			throw new Error("cartera-back caído");
+		});
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(resultado.reintentar).toBe(true);
+	});
+
+	test("cartera-back lanza pero hay supervisión: se avisa y NO se reintenta", async () => {
+		getCreditoSpy.mockImplementation(async () => {
+			throw new Error("cartera-back caído");
+		});
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+		});
+
+		expect(resultado.notificado).toBe(true);
+		expect(resultado.reintentar).toBe(false);
+	});
+
+	test("dueño sin usuario en el CRM en un evento solo-asesor: no es transitorio, no reintenta", async () => {
+		asesorActualUserIdMock = null;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			escalarASupervisor: false,
+		});
+
+		expect(resultado.notificado).toBe(false);
+		expect(resultado.reintentar).toBe(false);
 	});
 
 	test("caso sin numeroCreditoSifco: no llama a cartera-back ni avisa a un asesor", async () => {

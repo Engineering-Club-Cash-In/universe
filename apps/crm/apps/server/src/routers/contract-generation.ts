@@ -73,6 +73,7 @@ import {
 	tiposQueReemplaza,
 } from "../lib/paquete-cartas";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
+import { conVencimientoDelContrato } from "../lib/vencimiento-del-contrato";
 import {
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
@@ -1291,7 +1292,10 @@ export const contractGenerationRouter = {
 								observerUrl: apiResult.observerUrl ?? null,
 								signatureMode: getSignatureMode(contractType),
 								templateId: apiResult.templateId,
-								apiResponse: apiResult.rawResponse,
+								apiResponse: conVencimientoDelContrato(
+									apiResult.rawResponse,
+									contractData,
+								),
 								pdfLink: apiResult.pdfUrl || null,
 								status: "pending",
 								generatedBy: context.userId,
@@ -1818,7 +1822,14 @@ export const contractGenerationRouter = {
 								observerUrl: generado.observerUrl ?? null,
 								signatureMode: getSignatureMode(contract.contractType),
 								templateId: contract.templateId,
-								apiResponse: contract.apiResponse,
+								// Con la fecha de vencimiento con que se generó: los contratos de
+								// inversión la leen de acá (ver `vencimiento-del-contrato`).
+								apiResponse: conVencimientoDelContrato(
+									contract.apiResponse,
+									input.generationData?.find(
+										(g) => g.contractType === contract.contractType,
+									)?.data,
+								),
 								// La key de R2, no la URL firmada que se muestra (vence en una
 								// hora): regenerar baja el PDF de R2 con esta key.
 								pdfLink: generado.r2Key || contract.documentLink || null,
@@ -2255,7 +2266,12 @@ export const contractGenerationRouter = {
 										originalContract.contractType,
 									),
 									templateId: contractResult.templateId,
-									apiResponse: contractResult,
+									// La fecha nueva queda en el contrato regenerado: no se guarda
+									// snapshot al regenerar, y el viejo diría la de antes.
+									apiResponse: conVencimientoDelContrato(
+										contractResult,
+										originalContract.data,
+									),
 									pdfLink:
 										contractResult.r2Key || contractResult.linkDocument || null,
 									status: "pending",

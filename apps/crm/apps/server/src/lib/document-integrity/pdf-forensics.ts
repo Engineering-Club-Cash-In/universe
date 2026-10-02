@@ -17,11 +17,11 @@ export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_PAGES = 200;
 // Cooperativo: se consulta entre etapas. PDFDocument.load() corre antes del
 // primer chequeo y puede excederlo.
-export const PARSE_BUDGET_MS = 8_000;
+export const PARSE_BUDGET_MS = 12_000;
 
 // Techo pesimista por documento para dimensionar esperas. inspectPdf no lo
 // impone.
-export const MAX_PDF_PARSE_LEASE_MS = 15_000;
+export const MAX_PDF_PARSE_LEASE_MS = 20_000;
 export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 16 * 1024 * 1024;
 // Techo de objetos declarados en el trailer. Un /Size disparatado hace que
 // pdf-lib reserve estructuras enormes durante load().
@@ -813,8 +813,10 @@ function parseRawPdfObjects(text: string) {
 	const objects = new Map<string, RawPdfObject>();
 	const records: RawPdfObject[] = [];
 	const headers = text.matchAll(
+		// Sin `+` dentro del grupo repetido: anidarlo hace backtracking exponencial
+		// con corridas largas de espacios, y JSC aborta la búsqueda sin coincidencia.
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
-		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
+		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
 	);
 	for (const match of headers) {
 		const key = `${match[1]}:${match[2]}`;
@@ -965,7 +967,7 @@ function checkPdfSafeToParse(
 
 	for (const match of text.matchAll(
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
-		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
+		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
 	)) {
 		if (Number(match[1]) > MAX_DECLARED_PDF_OBJECTS) return false;
 	}

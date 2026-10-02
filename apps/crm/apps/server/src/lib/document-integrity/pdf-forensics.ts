@@ -17,11 +17,11 @@ export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_PAGES = 200;
 // Cooperativo: se consulta entre etapas. PDFDocument.load() corre antes del
 // primer chequeo y puede excederlo.
-export const PARSE_BUDGET_MS = 8_000;
+export const PARSE_BUDGET_MS = 12_000;
 
 // Techo pesimista por documento para dimensionar esperas. inspectPdf no lo
 // impone.
-export const MAX_PDF_PARSE_LEASE_MS = 15_000;
+export const MAX_PDF_PARSE_LEASE_MS = 20_000;
 export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 16 * 1024 * 1024;
 // Techo de objetos declarados en el trailer. Un /Size disparatado hace que
 // pdf-lib reserve estructuras enormes durante load().

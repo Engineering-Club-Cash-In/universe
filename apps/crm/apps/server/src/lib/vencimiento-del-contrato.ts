@@ -5,6 +5,7 @@ import {
 	contractGenerationSnapshots,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
+import { fueSubidoAMano } from "./contrato-subido-a-mano";
 
 /**
  * La fecha de vencimiento que dice el contrato del crédito (el reconocimiento
@@ -125,19 +126,47 @@ export function conVencimientoDelContrato<T>(
 	return { ...apiResponse, vencimientoDelContrato: fecha };
 }
 
-/** Margen entre el snapshot y el contrato de la misma generación. */
-const MISMA_GENERACION_MS = 10 * 60 * 1000;
+/**
+ * Cuánto antes y después del contrato puede estar el snapshot de su misma
+ * generación.
+ *
+ * Después: el enlace guarda los contratos y enseguida el snapshot. Antes: el
+ * reconocimiento a veces se sube aparte, con el PDF que salió de esa
+ * generación, minutos después de enlazar el resto. En prod, los que se subieron
+ * así están entre 0 y 55 minutos del snapshot; los siguientes saltan a 18 horas
+ * o más, y ahí ya no hay forma de saber que el PDF es de esa generación.
+ */
+const ANTES_DEL_CONTRATO_MS = 60 * 60 * 1000;
+const DESPUES_DEL_CONTRATO_MS = 10 * 60 * 1000;
+
+/**
+ * El snapshot de la misma generación que el contrato: el más reciente dentro de
+ * la ventana. Uno de después puede ser de una generación en la que el
+ * reconocimiento falló; uno de mucho antes, de una generación que no es la del
+ * PDF que quedó.
+ */
+export function snapshotDeLaMismaGeneracion<T extends { createdAt: Date }>(
+	contratoCreadoEn: Date,
+	snapshotsDelMasNuevo: T[],
+): T | undefined {
+	const desde = contratoCreadoEn.getTime() - ANTES_DEL_CONTRATO_MS;
+	const hasta = contratoCreadoEn.getTime() + DESPUES_DEL_CONTRATO_MS;
+	return snapshotsDelMasNuevo.find((s) => {
+		const t = s.createdAt.getTime();
+		return t >= desde && t <= hasta;
+	});
+}
 
 /**
  * Número de crédito (el de cartera, `CRM-…`) → vencimiento del contrato.
  *
  * Sale del reconocimiento de deuda vigente de la oportunidad:
  * 1. Lo guardado en el propio contrato.
- * 2. Si no tiene, el snapshot de la generación que lo produjo: el último hecho
- *    hasta unos minutos después del contrato. Uno posterior puede ser de una
- *    generación en la que el reconocimiento falló, y su fecha nunca llegó a un
- *    contrato. Si el reconocimiento reemplazó a otro (regenerado o subido a
- *    mano) no se usa ningún snapshot: no se guardaba uno al regenerar.
+ * 2. Si no tiene, el snapshot de su misma generación (ver
+ *    `snapshotDeLaMismaGeneracion`). Nunca si el reconocimiento reemplazó a otro
+ *    (regenerado o subido a mano: no se guardaba snapshot al regenerar) ni si
+ *    tiene la marca de subido a mano: de un PDF armado por fuera no se sabe la
+ *    fecha.
  *
  * Los créditos sin dato confiable no aparecen, y quien llame se queda con lo de
  * cartera.
@@ -195,7 +224,13 @@ export async function vencimientosDeContrato(
 	for (const [numero, r] of vigentes) {
 		const fecha = vencimientoGuardado(r.apiResponse);
 		if (fecha) vencimientos.set(numero, fecha);
-		else if (!reemplazos.has(r.id) && r.opportunityId) sinDatoPropio.push(r);
+		else if (
+			!reemplazos.has(r.id) &&
+			!fueSubidoAMano(r.apiResponse) &&
+			r.opportunityId
+		) {
+			sinDatoPropio.push(r);
+		}
 	}
 	if (sinDatoPropio.length === 0) return vencimientos;
 
@@ -215,10 +250,9 @@ export async function vencimientosDeContrato(
 		.orderBy(desc(contractGenerationSnapshots.createdAt));
 
 	for (const r of sinDatoPropio) {
-		const limite = r.createdAt.getTime() + MISMA_GENERACION_MS;
-		const snapshot = snapshots.find(
-			(s) =>
-				s.opportunityId === r.opportunityId && s.createdAt.getTime() <= limite,
+		const snapshot = snapshotDeLaMismaGeneracion(
+			r.createdAt,
+			snapshots.filter((s) => s.opportunityId === r.opportunityId),
 		);
 		const fecha = snapshot ? vencimientoDelSnapshot(snapshot.data) : null;
 		if (fecha && r.numeroSifco) vencimientos.set(r.numeroSifco, fecha);

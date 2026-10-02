@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	conVencimientoDelContrato,
+	snapshotDeLaMismaGeneracion,
 	vencimientoDelSnapshot,
 	vencimientoGuardado,
 } from "./vencimiento-del-contrato";
@@ -116,5 +117,38 @@ describe("conVencimientoDelContrato", () => {
 				anoVencimiento: "29",
 			}),
 		).toBeUndefined();
+	});
+});
+
+describe("snapshotDeLaMismaGeneracion", () => {
+	const contrato = new Date("2026-07-30T22:31:18Z");
+	const a = (iso: string) => ({ createdAt: new Date(iso) });
+
+	test("acepta el de minutos antes (PDF de esa generación subido aparte)", () => {
+		expect(
+			snapshotDeLaMismaGeneracion(contrato, [a("2026-07-30T22:27:05Z")]),
+		).toEqual(a("2026-07-30T22:27:05Z"));
+	});
+
+	test("no acepta uno de horas o días antes", () => {
+		expect(
+			snapshotDeLaMismaGeneracion(contrato, [a("2026-07-29T10:00:00Z")]),
+		).toBeUndefined();
+	});
+
+	test("no acepta uno de una generación posterior", () => {
+		expect(
+			snapshotDeLaMismaGeneracion(contrato, [a("2026-07-31T09:00:00Z")]),
+		).toBeUndefined();
+	});
+
+	test("de los que entran, el más nuevo", () => {
+		expect(
+			snapshotDeLaMismaGeneracion(contrato, [
+				a("2026-07-31T09:00:00Z"),
+				a("2026-07-30T22:35:00Z"),
+				a("2026-07-30T22:00:00Z"),
+			]),
+		).toEqual(a("2026-07-30T22:35:00Z"));
 	});
 });

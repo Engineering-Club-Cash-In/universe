@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, TrendingUp, Building2, FileSignature, CheckCircle } from "lucide-react";
 import type { DocumentCategoria } from "@/services/documents";
+import { categoriaDisponible } from "../categorias";
 
 interface StepCategoryProps {
   readonly data: {
@@ -42,20 +43,9 @@ const CATEGORIES: ReadonlyArray<{
   },
 ];
 
-/**
- * Categorías que ya no se generan acá sino en el CRM. Jurídico seguía armando
- * los contratos de ventas e inversiones en esta plataforma y no en el CRM, que
- * es donde salen a firma; se ocultan para que no haya dos caminos. Para volver
- * a mostrar una, sacarla de esta lista.
- */
-const CATEGORIAS_EN_EL_CRM: ReadonlySet<DocumentCategoria> = new Set([
-  "ventas",
-  "inversiones",
-  "inversiones_sociedad",
-]);
-
-const CATEGORIAS_VISIBLES = CATEGORIES.filter(
-  (cat) => !CATEGORIAS_EN_EL_CRM.has(cat.value)
+// Las de ventas e inversiones se generan en el CRM: ver `categorias.ts`.
+const CATEGORIAS_VISIBLES = CATEGORIES.filter((cat) =>
+  categoriaDisponible(cat.value)
 );
 
 export function StepCategory({ data, onChange }: StepCategoryProps) {

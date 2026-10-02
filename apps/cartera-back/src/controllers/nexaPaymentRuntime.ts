@@ -81,6 +81,7 @@ const deferredBilling = createDeferredNexaBilling({
       const response = await facturarPagoCompleto({
         body: { pago_id: paymentId },
         set,
+        useNexaPersistedDistribution: true,
       });
       const status = typeof set.status === "number" ? set.status : Number(set.status ?? 200);
       return { status: Number.isFinite(status) ? status : 500, response };

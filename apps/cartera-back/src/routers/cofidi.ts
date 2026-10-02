@@ -11,6 +11,10 @@ import {
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
+import {
+  nexaPersistedInvoiceAmounts,
+  oldestActivatedPendingPurchaseAtCutoff,
+} from "../cofidi/nexaPersistedInvoiceAmounts";
 import { db } from "../database";
 import {
   audit_logs,
@@ -91,6 +95,7 @@ function generarIdInternoRandom(): string {
 type FacturarPagoCompletoContext = {
   body: { pago_id: number; created_by?: number };
   set: { status?: number | string };
+  useNexaPersistedDistribution?: boolean;
 };
 
   // 🔥 POST - Certificar DTE
@@ -110,7 +115,7 @@ type FacturarPagoCompletoContext = {
   //  6️⃣  FACTURAS DE INTERESES         (1 por cada inversionista no-Cube + 1 para Cube por residuo)
   //  7️⃣  RESPUESTA FINAL
   // ========================================================================
-export const facturarPagoCompleto = async ({ body, set }: FacturarPagoCompletoContext) => {
+export const facturarPagoCompleto = async ({ body, set, useNexaPersistedDistribution = false }: FacturarPagoCompletoContext) => {
     try {
       const { pago_id, created_by } = body;
 
@@ -169,6 +174,8 @@ if (facturasExistentes.length > 0) {
           cuota_id: pagos_credito.cuota_id,
           monto_boleta: pagos_credito.monto_boleta,
           fecha_pago: pagos_credito.fecha_pago,
+          fecha_aplicado: pagos_credito.fecha_aplicado,
+          createdAt: pagos_credito.createdAt,
           fecha_vencimiento: pagos_credito.fecha_vencimiento,
           validationStatus: pagos_credito.validationStatus,
 
@@ -327,6 +334,7 @@ if (facturasExistentes.length > 0) {
           status: compras_credito_inversionista.status,
           fecha: compras_credito_inversionista.fecha,
           fecha_completada: compras_credito_inversionista.fecha_completada,
+          updated_at: compras_credito_inversionista.updated_at,
         })
         .from(compras_credito_inversionista)
         .where(
@@ -354,11 +362,54 @@ if (facturasExistentes.length > 0) {
         }
       }
 
+      // Nexa has already applied validated payments. Their persisted split and
+      // roster are authoritative; validate both before any provider side effect.
+      // Legitimate partials without PCI retain the existing frozen-split path.
+      let nexaInvoiceAmounts: ReturnType<typeof nexaPersistedInvoiceAmounts> | undefined;
+      let nexaInvoiceRecipients: Map<number, {
+        inversionista_id: number;
+        nombre: string;
+        emite_factura: boolean;
+      }> | undefined;
+      if (useNexaPersistedDistribution && pagoData.validationStatus === "validated") {
+        const rows = await db.select({
+          inversionista_id: pagos_credito_inversionistas.inversionista_id,
+          abono_interes: pagos_credito_inversionistas.abono_interes,
+          abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
+        }).from(pagos_credito_inversionistas)
+          .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+        const cuotaInfo = rows.length === 0 && pagoData.cuota_id !== null
+          ? (await db.select({ pagado: cuotas_credito.pagado })
+              .from(cuotas_credito)
+              .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
+          : undefined;
+        if (cuotaInfo?.pagado !== false) {
+          const rowInvestorIds = rows.map(row => row.inversionista_id);
+          const recipients = rows.length === 0 ? [] : await db.select({
+            inversionista_id: inversionistas.inversionista_id,
+            nombre: inversionistas.nombre,
+            emite_factura: inversionistas.emite_factura,
+          }).from(inversionistas)
+            .where(inArray(inversionistas.inversionista_id, [...new Set([...rowInvestorIds, 86])]));
+          const persistedRecipients = recipients.filter(inv => rowInvestorIds.includes(inv.inversionista_id));
+          nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
+            ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
+          })), {
+            interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
+            recipients: persistedRecipients,
+            canonicalCube: recipients.find(inv => inv.inversionista_id === 86),
+          });
+          nexaInvoiceRecipients = new Map(recipients
+            .filter(inv => nexaInvoiceAmounts?.has(inv.inversionista_id))
+            .map(inv => [inv.inversionista_id, inv]));
+        }
+      }
+
       // 🔥 VALIDACIÓN: porcentaje_participacion + porcentaje_cash_in debe sumar 100% por inversionista.
       //    Si no suma 100, el remanente NO se factura a nadie (cashInAcumulado solo captura pct_cash_in,
       //    y totalInteresesNoCube resta el interes_proporcional completo del residuo CUBE).
       //    Tolerancia de 0.01% por redondeos al crear el crédito.
-      const inversionistasMalConfigurados = inversionistasDelCredito
+      const inversionistasMalConfigurados = nexaInvoiceAmounts ? [] : inversionistasDelCredito
         .map((inv) => {
           const pctInv = new BigJs(inv.porcentaje_participacion || "0");
           const pctCashIn = new BigJs(inv.porcentaje_cash_in || "0");
@@ -953,6 +1004,7 @@ if (facturasExistentes.length > 0) {
       //    Se setea dentro de cada flujo (estándar/prorrateado) y se usa al
       //    final para guardar el rubro INTERES en facturacion_desglose.
       let interesCubeConIva = new Big(0);
+      let interesCubeIvaPersistido: number | undefined;
       // Marca que el flujo de interés realmente se calculó (NO abortó). Si
       // queda en false con interés > 0 (p. ej. abort por espejo sin fecha de
       // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
@@ -967,10 +1019,11 @@ if (facturasExistentes.length > 0) {
       //    que el renglón cuadre exacto con lo emitido.
       let invNoEmiteFacturadoConIva = new Big(0);
       let invNoEmiteIva = new Big(0);
+      const facturasAntesIntereses = facturasGeneradas.length;
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
-      } else if (tieneOperacionesPendientesFacturar) {
+      } else if (!nexaInvoiceAmounts && tieneOperacionesPendientesFacturar) {
         // ============================================
         // 🆕 NUEVO FLUJO DE INTERESES — PRORRATEO POR FECHA DE COMPRA/REINVERSIÓN
         //
@@ -1319,7 +1372,12 @@ if (facturasExistentes.length > 0) {
           console.log("\n   🧾 Sumando parte1 + parte2 y emitiendo facturas...");
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
-          const totalCubeFinal = repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
+          const persistedCubeId = nexaInvoiceAmounts ? 86 : cubeId;
+          const persistedCube = nexaInvoiceAmounts?.get(86);
+          interesCubeIvaPersistido = persistedCube?.montoImpuesto;
+          const totalCubeFinal = nexaInvoiceAmounts
+            ? new Big(persistedCube?.total ?? 0)
+            : repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
 
           // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
           interesCubeConIva = totalCubeFinal;
@@ -1327,10 +1385,12 @@ if (facturasExistentes.length > 0) {
 
           // Set con todos los IDs de inversionistas que aparecieron en cualquier
           // ventana (algunos podrían tener parte solo en una de las dos).
-          const idsInv = new Set<number>([
-            ...repartoAntes.parteInvPorId.keys(),
-            ...repartoDespues.parteInvPorId.keys(),
-          ]);
+          const idsInv = nexaInvoiceAmounts
+            ? new Set([...nexaInvoiceAmounts.keys()].filter(id => id !== persistedCubeId))
+            : new Set<number>([
+                ...repartoAntes.parteInvPorId.keys(),
+                ...repartoDespues.parteInvPorId.keys(),
+              ]);
 
           // Fecha de vencimiento para el complemento cambiario de la factura.
           // Cascada: usa fecha_vencimiento del pago, sino fecha_pago, sino HOY.
@@ -1344,7 +1404,8 @@ if (facturasExistentes.length > 0) {
           for (const invId of idsInv) {
             // Buscar los datos completos del inv en la lista del pago
             // (nombre, emite_factura, etc.).
-            const inv = inversionistasDelPago.find((i) => i.inversionista_id === invId);
+            const liveInv = inversionistasDelPago.find((i) => i.inversionista_id === invId);
+            const inv = nexaInvoiceRecipients?.get(invId) ?? liveInv;
             if (!inv) continue; // Defensa: no debería pasar, pero por si acaso.
 
             // Las dos partes que se SUMAN para obtener el monto a facturar.
@@ -1352,7 +1413,10 @@ if (facturasExistentes.length > 0) {
             const parteDespues = repartoDespues.parteInvPorId.get(invId) ?? new Big(0);
 
             // Total a facturar al inversionista, redondeado a 2 decimales.
-            const totalInv = parteAntes.plus(parteDespues).round(2);
+            const persistedAmounts = nexaInvoiceAmounts?.get(invId);
+            const totalInv = persistedAmounts
+              ? new Big(persistedAmounts.total)
+              : parteAntes.plus(parteDespues).round(2);
 
             // Si por redondeo o porque no le tocaba nada da Q0 → no facturamos.
             if (totalInv.lte(0)) {
@@ -1372,7 +1436,7 @@ if (facturasExistentes.length > 0) {
               continue;
             }
 
-            const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
+            const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
             console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
 
             const itemsInv = [
@@ -1434,8 +1498,8 @@ if (facturasExistentes.length > 0) {
                 inversionista_id: inv.inversionista_id,
                 emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
                 // 🆕 Desglose para el modal del front: % participación y cash_in del inv
-                porcentaje_participacion: inv.porcentaje_participacion ?? null,
-                porcentaje_cash_in: inv.porcentaje_cash_in ?? null,
+                porcentaje_participacion: liveInv?.porcentaje_participacion ?? null,
+                porcentaje_cash_in: liveInv?.porcentaje_cash_in ?? null,
                 flujo: "NUEVO_PRORRATEADO",
                 parte_antes: parteAntes.toFixed(2),
                 parte_despues: parteDespues.toFixed(2),
@@ -1470,7 +1534,7 @@ if (facturasExistentes.length > 0) {
             // Redondeo a 2 decimales antes de calcular IVA.
             const totalCubeRounded = totalCubeFinal.round(2);
             console.log(`\n      💼 Factura CUBE: Q${totalCubeRounded.toFixed(2)} (antes Q${repartoAntes.totalCubeParcial.toFixed(2)} + después Q${repartoDespues.totalCubeParcial.toFixed(2)})`);
-            const calcCube = calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)));
+            const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)));
 
             const itemsCube = [
               {
@@ -1649,13 +1713,18 @@ if (facturasExistentes.length > 0) {
         let totalInteresesNoCube = new Big(0);
 
         // -------- PASO 1: Facturas individuales para inversionistas NO-CUBE --------
-        for (const inv of inversionistasDelPago) {
+        const idsInversionistas = nexaInvoiceRecipients
+          ? [...nexaInvoiceRecipients.keys()].filter(id => id !== 86)
+          : inversionistasDelPago.map(inv => inv.inversionista_id);
+        for (const invId of idsInversionistas) {
+          const liveInv = inversionistasDelPago.find(inv => inv.inversionista_id === invId);
+          const inv = nexaInvoiceRecipients?.get(invId) ?? liveInv;
+          if (!inv) continue;
           console.log(`\n   🔍 Procesando: "${inv.nombre}" (emite_factura: ${inv.emite_factura})`);
 
-          const esCube = inv.nombre
-            .trim()
-            .toUpperCase()
-            .includes("CUBE INVESTMENTS");
+          const esCube = nexaInvoiceAmounts
+            ? invId === 86
+            : inv.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS");
 
           // 🔥 SI ES CUBE → se acumula al final
           if (esCube) {
@@ -1663,18 +1732,19 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
-          const interesProporcional = new Big(inv.interes_proporcional || "0");
+          const interesProporcional = new Big(liveInv?.interes_proporcional || "0");
 
           // 🔥 REDIRIGIR A CUBE: si bandera_reinversion del crédito activa
           // y status del espejo = pendiente_reinversion o pendiente_compra_cartera
           const redirigirACube =
+            !nexaInvoiceAmounts &&
             pagoData.bandera_reinversion === true &&
-            (inv.status_espejo === "pendiente_reinversion" ||
-              inv.status_espejo === "pendiente_compra_cartera");
+            (liveInv?.status_espejo === "pendiente_reinversion" ||
+              liveInv?.status_espejo === "pendiente_compra_cartera");
 
           if (redirigirACube) {
             console.log(
-              `   🔁 ${inv.nombre} → REDIRIGIDO A CUBE (bandera_reinversion=true, status_espejo=${inv.status_espejo}) | Q${interesProporcional.toFixed(2)}`
+              `   🔁 ${inv.nombre} → REDIRIGIDO A CUBE (bandera_reinversion=true, status_espejo=${liveInv?.status_espejo}) | Q${interesProporcional.toFixed(2)}`
             );
             // NO sumar a totalInteresesNoCube ni a cashInAcumulado:
             // CUBE absorbe todo (parteInversionista + parteCashIn) por RESIDUO.
@@ -1682,21 +1752,24 @@ if (facturasExistentes.length > 0) {
           }
 
           totalInteresesNoCube = totalInteresesNoCube.plus(interesProporcional);
-          if (interesProporcional.lte(0)) {
+          if (!nexaInvoiceAmounts && interesProporcional.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Sin intereses`);
             continue;
           }
 
           // 🔥 Separar parte del inversionista y parte cash_in
-          const pctInversion = new Big(inv.porcentaje_participacion || "0").div(100);
-          const pctCashIn = new Big(inv.porcentaje_cash_in || "0").div(100);
+          const pctInversion = new Big(liveInv?.porcentaje_participacion || "0").div(100);
+          const pctCashIn = new Big(liveInv?.porcentaje_cash_in || "0").div(100);
 
-          const parteInversionista = interesProporcional.times(pctInversion).round(2);
+          const persistedAmounts = nexaInvoiceAmounts?.get(invId);
+          const parteInversionista = persistedAmounts
+            ? new Big(persistedAmounts.total)
+            : interesProporcional.times(pctInversion).round(2);
           const parteCashIn = interesProporcional.times(pctCashIn).round(2);
 
           console.log(`   📊 Interés proporcional: Q${interesProporcional.toFixed(2)}`);
-          console.log(`      → Parte inversionista (${inv.porcentaje_participacion}%): Q${parteInversionista.toFixed(2)}`);
-          console.log(`      → Parte cash_in (${inv.porcentaje_cash_in}%): Q${parteCashIn.toFixed(2)}`);
+          console.log(`      → Parte inversionista (${liveInv?.porcentaje_participacion}%): Q${parteInversionista.toFixed(2)}`);
+          console.log(`      → Parte cash_in (${liveInv?.porcentaje_cash_in}%): Q${parteCashIn.toFixed(2)}`);
 
           // 🔥 Acumular cash_in para Cube
           cashInAcumulado = cashInAcumulado.plus(parteCashIn);
@@ -1717,7 +1790,7 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
-          const calc = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
+          const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
           console.log(`   💼 Factura ${inv.nombre}: Q${parteInversionista.toFixed(2)} (Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`);
 
           const itemsIntereses = [
@@ -1791,8 +1864,8 @@ if (facturasExistentes.length > 0) {
               inversionista_id: inv.inversionista_id,
               emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
               // 🆕 Desglose para el modal del front: % participación y cash_in del inv
-              porcentaje_participacion: inv.porcentaje_participacion ?? null,
-              porcentaje_cash_in: inv.porcentaje_cash_in ?? null,
+              porcentaje_participacion: liveInv?.porcentaje_participacion ?? null,
+              porcentaje_cash_in: liveInv?.porcentaje_cash_in ?? null,
               ...facturaIntereses,
             });
 
@@ -1813,7 +1886,11 @@ if (facturasExistentes.length > 0) {
         const cubePropio = totalInteresesConIvaPago.minus(totalInteresesNoCube);
         console.log(`\n   📊 CUBE propio (residuo): Q${cubePropio.toFixed(2)} (total Q${totalInteresesConIvaPago.toFixed(2)} - otros Q${totalInteresesNoCube.toFixed(2)})`);
 
-        const totalCube = cubePropio.plus(cashInAcumulado);
+        const persistedCube = nexaInvoiceAmounts?.get(86);
+        interesCubeIvaPersistido = persistedCube?.montoImpuesto;
+        const totalCube = nexaInvoiceAmounts
+          ? new Big(persistedCube?.total ?? 0)
+          : cubePropio.plus(cashInAcumulado);
 
         // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
         interesCubeConIva = totalCube;
@@ -1826,7 +1903,7 @@ if (facturasExistentes.length > 0) {
         if (totalCube.gt(0)) {
           console.log(`   💼 Generando factura CUBE...`);
 
-          const calcCube = calcularIvaExacto(parseFloat(totalCube.toFixed(2)));
+          const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCube.toFixed(2)));
 
           const itemsCube = [
             {
@@ -1899,6 +1976,41 @@ if (facturasExistentes.length > 0) {
         }
       } // 🔚 cierre del else (flujo actual de intereses)
 
+      const cutoffNexa = pagoData.fecha_aplicado ?? pagoData.createdAt;
+      const huboErroresInteresNexa = facturasGeneradas
+        .slice(facturasAntesIntereses)
+        .some(factura => factura.tipo === "ERROR");
+      if (
+        nexaInvoiceAmounts &&
+        hayInteresEnPago &&
+        interesFlujoOk &&
+        pagoData.cuota_id &&
+        cutoffNexa &&
+        process.env.SIMULAR_FACTURAS !== "true"
+      ) {
+        const operacionPendienteNexa = oldestActivatedPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa);
+        if (operacionPendienteNexa) {
+          const [cuotaInfo] = await db
+            .select({ pagado: cuotas_credito.pagado })
+            .from(cuotas_credito)
+            .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id));
+          if (cuotaInfo?.pagado === true && !huboErroresInteresNexa) {
+            try {
+              await db
+                .update(compras_credito_inversionista)
+                .set({ pendiente_facturar: false, updated_at: new Date() })
+                .where(eq(compras_credito_inversionista.id, operacionPendienteNexa.id));
+            } catch (error: any) {
+              facturasGeneradas.push({
+                tipo: "ERROR",
+                concepto: "MARCAR_PENDIENTE_FACTURAR",
+                error: error.message,
+              });
+            }
+          }
+        }
+      }
+
       // ============================================
       // 7️⃣ RESPUESTA FINAL
       //    - Separa facturasGeneradas en exitosas vs con error
@@ -1949,13 +2061,16 @@ if (facturasExistentes.length > 0) {
         const pushRubro = (
           rubro: string,
           totalConIva: any,
-          gravadoIva: boolean
+          gravadoIva: boolean,
+          ivaPersistido?: number
         ) => {
           const t = new Big(totalConIva || 0);
           if (t.lte(0)) return;
-          const iva = gravadoIva
-            ? new Big(calcularIvaExacto(parseFloat(t.toFixed(2))).montoImpuesto)
-            : new Big(0);
+          const iva = ivaPersistido === undefined
+            ? gravadoIva
+              ? new Big(calcularIvaExacto(parseFloat(t.toFixed(2))).montoImpuesto)
+              : new Big(0)
+            : new Big(ivaPersistido);
           rubrosDesglose.push({
             rubro,
             monto_total: t.toFixed(2),
@@ -1997,7 +2112,7 @@ if (facturasExistentes.length > 0) {
             --    duplicaría en el snapshot. Misma condición que el redirigirACube.
             --    NOT EXISTS (no JOIN) para no multiplicar filas ni romper con NULL.
             AND NOT (
-              ${pagoData.bandera_reinversion === true}
+              ${!nexaInvoiceAmounts && pagoData.bandera_reinversion === true}
               AND EXISTS (
                 SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
                 WHERE esp.credito_id = ${pagoData.credito_id}
@@ -2018,7 +2133,7 @@ if (facturasExistentes.length > 0) {
         // interesCubeConIva quedó en 0 y NO debemos volcar todo el interés a
         // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
         if (interesFlujoOk) {
-          pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
+          pushRubro("INTERES", interesCubeConIva, true, interesCubeIvaPersistido); // residuo CUBE, ya con IVA
         }
         // INTERES_INVERSIONISTAS: pci manda cuando ya tiene reparto (no se
         // recalcula el IVA); si pci está en 0 porque el pago es PARCIAL, se usa

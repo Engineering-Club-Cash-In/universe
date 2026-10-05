@@ -20,12 +20,13 @@ import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
 /** Tope que cartera-back acepta por llamada (`/buckets/bucket-por-sifco`). */
 const SIFCOS_POR_LLAMADA = 1000;
-/** Tope por solicitud del web: holgado para toda la flota, no ilimitado. */
-const MAX_SIFCOS = 5000;
 
 export const gpsCatalogoBucketRouter = {
 	getEstadoMoraPorSifco: adminProcedure
-		.input(z.object({ sifcos: z.array(z.string().min(1)).max(MAX_SIFCOS) }))
+		// Sin tope: la página manda los SIFCOs de todo el catálogo de Wialon en una
+		// sola solicitud y este procedimiento ya los parte en tandas de
+		// SIFCOS_POR_LLAMADA; un máximo acá dejaría sin filtro a una flota grande.
+		.input(z.object({ sifcos: z.array(z.string().min(1)) }))
 		.handler(
 			async ({
 				input,

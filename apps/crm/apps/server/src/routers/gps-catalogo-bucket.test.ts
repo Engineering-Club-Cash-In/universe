@@ -118,6 +118,18 @@ describe("getEstadoMoraPorSifco (bucket desde cartera-back)", () => {
 		expect(Object.keys(res.estadoMoraPorSifco)).toHaveLength(1300);
 	});
 
+	it("no hay tope por solicitud: una flota grande se parte en tandas", async () => {
+		const sifcos = Array.from({ length: 6001 }, (_, i) => `S${i}`);
+		respuesta = async (lote) => ({
+			data: lote.map((s) => fila(s, 1, "mora_30")),
+		});
+		const res = await pedir(sifcos);
+		expect(llamadas.map((l) => l.length)).toEqual([
+			1000, 1000, 1000, 1000, 1000, 1000, 1,
+		]);
+		expect(Object.keys(res.estadoMoraPorSifco)).toHaveLength(6001);
+	});
+
 	it("deduplica los SIFCOs", async () => {
 		await pedir(["A", "A", "A"]);
 		expect(llamadas).toEqual([["A"]]);

@@ -291,13 +291,29 @@ function LiquidacionesInversionistas() {
 			// creyendo que todo salió y el inversionista quedaría con una cuenta
 			// que no sabe que tiene: nadie se enteraría hasta el resumen del día
 			// siguiente. Con el aviso aquí se entera con la persona al teléfono.
+			//
+			// Y el `null` del traductor NO es "salió bien": es "no sé qué pasó".
+			// Vuelve en `null` cuando cartera no devolvió la fila de este
+			// inversionista, cuando el estado es `omitida` con un motivo que no
+			// está en la lista, y ante cualquier estado fuera de los conocidos
+			// —`candidata`, por ejemplo—. En verde eso es el mismo bug que este
+			// traductor existe para cerrar: conta cierra el modal y le promete al
+			// inversionista una contraseña que quizá nunca salió.
 			const aviso = avisoAccesoPortal(data.accesoPortal);
-			const msg = aviso ? `${base}. ${aviso.texto}` : base;
-			if (aviso?.tono === "advertencia") {
+			if (!aviso) {
+				// El alta SÍ salió —el backend ya habría tirado error si no—, así
+				// que lo primero es decirlo: sin eso, quien lee vuelve a crearlo y
+				// se estrella contra el guard de duplicados. Lo que no se sabe es
+				// solo el acceso al portal.
+				toast.warning(
+					`${base}, pero no se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.`,
+					{ duration: 15000 },
+				);
+			} else if (aviso.tono === "advertencia") {
 				// Dura más que el toast normal: es lo que hay que leer y actuar.
-				toast.warning(msg, { duration: 15000 });
+				toast.warning(`${base}. ${aviso.texto}`, { duration: 15000 });
 			} else {
-				toast.success(msg);
+				toast.success(`${base}. ${aviso.texto}`);
 			}
 			setCrearOpen(false);
 			resetForm();

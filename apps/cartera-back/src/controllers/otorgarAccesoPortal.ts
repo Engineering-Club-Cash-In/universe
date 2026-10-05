@@ -6,6 +6,8 @@ import {
   type ResultadoProvisionamientoCartera,
 } from "../services/portalProvisioning";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
+import { normalizeEmail } from "../utils/functions/email";
+import { esEmpresaRepresentada } from "../utils/functions/provisionamientoPortal";
 
 /**
  * Abre el acceso al portal de uno o varios inversionistas. Lo dispara UNA
@@ -38,12 +40,101 @@ import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresent
  *     solo: todo lo que viene de auth-google entra a cartera con el mismo
  *     token de servicio ADMIN. NO agregar esta ruta a ese proxy.
  */
+
+/**
+ * SE APRUEBA UN CORREO, NO UN ID.
+ *
+ * El único control real de este botón es el vistazo humano de arriba: el
+ * diálogo del CRM le enseña a una persona EL CORREO al que va a caer la
+ * contraseña y ella responde por él. Pero hasta ahora el clic mandaba solo el
+ * `inversionista_id`, y cartera volvía a LEER la tabla para saber a dónde
+ * escribir. O sea que lo aprobado y lo usado eran dos lecturas distintas de una
+ * fila que se puede reescribir entre una y otra, y quien aprueba no tiene forma
+ * de notarlo: el diálogo ya está pintado.
+ *
+ * La ventana no es teórica ni hace falta ganarle una carrera de milisegundos:
+ * dura lo que la persona tarde en leer el diálogo y decidir. Y quien puede
+ * moverla NO es quien aprueba — `editarInversionista` del CRM lo alcanzan once
+ * familias de rol, este botón solo cuatro—, así que el atacante y el aprobador
+ * son áreas distintas. Sumado al upsert legacy por DPI que REESCRIBE el correo
+ * de una fila existente (investor.ts:672-678), envenenar el destino de una
+ * contraseña ya aprobada no pedía más que capturar un correo en el momento
+ * justo.
+ *
+ * Así que el cuerpo trae el correo que se APROBÓ y aquí se revalida contra la
+ * fila antes de provisionar. Si ya no coincide NO SE PROVISIONA NADA: se
+ * devuelve `correo_aprobado_no_coincide` y quien apretó vuelve a mirar. No se
+ * provisiona "al correo aprobado" ignorando la fila —eso convertiría el cuerpo
+ * de la petición en la fuente de verdad del destinatario, que es un agujero más
+ * grande que el que cierra—: la fila sigue mandando, el correo aprobado solo
+ * tiene poder de VETO.
+ *
+ * La comparación se hace contra el MISMO objeto `fila` que después viaja a
+ * `provisionarInversionista`, nunca contra una segunda lectura: si hubiera dos
+ * lecturas volvería a existir la ventana, solo que más corta.
+ *
+ * OPCIONAL EN EL CUERPO, OBLIGATORIO PARA LA PERSONA
+ * -------------------------------------------------
+ * El schema lo deja opcional porque hay un camino donde no hay nada que
+ * aprobar: la EMPRESA. Su diálogo no enseña ningún correo —la cuenta es del
+ * REPRESENTANTE, no de ella— y ese camino corta con
+ * `es_empresa_el_acceso_es_del_representante` sin crear cuenta ni mandar
+ * correo (portalProvisioning.ts, rama `soloAsegurarCuenta`).
+ *
+ * Pero QUIÉN es empresa no lo puede decidir el llamador. El front lo decide al
+ * PINTAR el diálogo; aquí se decide con la fila del CLIC (`esEmpresaRepresentada`,
+ * `dpi_rep_legal` vs `dpi`). `editarInversionista` del CRM cambia
+ * `dpi_rep_legal` y `email` de un solo golpe, así que el diálogo abre sobre una
+ * empresa —sin correo que aprobar—, alguien borra el representante y pone su
+ * correo, y al clic la fila ya es una PERSONA sin veto: la contraseña sale a un
+ * buzón que nadie miró. Por eso, si la fila del clic es persona y tiene correo,
+ * sin `correo_aprobado` NO se provisiona (`correo_aprobado_requerido`). Se
+ * exige aquí y no se confía en que el llamador lo mande.
+ *
+ * La persona SIN correo en la fila queda exenta: termina en `omitida/sin_correo`
+ * sin crear cuenta, así que no sale ninguna contraseña ni hay buzón que robar.
+ * Contra un cuerpo hostil el candado sigue siendo ADMIN + no estar en el proxy:
+ * esto cierra la carrera, no a un ADMIN que aprueba lo que quiere.
+ */
+
+/** El correo de la fila ya no es el que se aprobó. NO se provisionó nada. */
+const MOTIVO_CORREO_CAMBIADO = "correo_aprobado_no_coincide";
+
+/**
+ * La fila del clic es una PERSONA con correo y nadie aprobó ese correo (el
+ * diálogo pudo verla como empresa). NO se provisionó nada.
+ */
+const MOTIVO_CORREO_REQUERIDO = "correo_aprobado_requerido";
+
+/**
+ * Un desenlace de "no pasó nada, y por esto". Mismo molde que usa
+ * `portalProvisioning` para sus propios fallos: quien lee la respuesta no tiene
+ * que distinguir de dónde salió cada resultado del arreglo.
+ */
+const fallo = (
+  inversionistaId: number,
+  motivo: string,
+): ResultadoProvisionamientoCartera => ({
+  inversionistaId,
+  estado: "fallo",
+  usuarioEmail: null,
+  resueltoPor: null,
+  correo: {
+    enviado: false,
+    plantilla: null,
+    redirigido: false,
+    destinatarioReal: null,
+  },
+  advertencias: [],
+  motivo,
+});
+
 export const otorgarAccesoPortal = async ({
   body,
   user,
   set,
 }: {
-  body: { inversionista_ids?: unknown };
+  body: { inversionista_ids?: unknown; correo_aprobado?: unknown };
   user?: { role?: string };
   set: { status?: number };
 }) => {
@@ -71,6 +162,45 @@ export const otorgarAccesoPortal = async ({
     };
   }
 
+  // El MISMO criterio con el que se guarda el correo (investor.ts:1253, y el
+  // `.trim().toLowerCase()` de `decidirProvisionamiento`): recortar y minúsculas.
+  // Se reusa `normalizeEmail` en vez de escribirlo otra vez a propósito — dos
+  // definiciones del mismo normalizador es exactamente cómo aparece una
+  // asimetría silenciosa, y comparar `Ana@Example.com` contra `ana@example.com`
+  // daría un "cambió" falso que bloquearía a gente legítima.
+  const correoAprobado = normalizeEmail(body?.correo_aprobado);
+
+  // Mandar la llave vacía (`""`, espacios, `null` explícito junto a un string
+  // que se quedó sin valor) NO es lo mismo que no mandarla: es un llamador roto.
+  // Tratarlo como "no se aprobó nada" saltaría el control justo cuando el front
+  // se equivoca, que es cuando más falta hace. Se rechaza en voz alta.
+  const mandoLaLlave =
+    body?.correo_aprobado !== undefined && body?.correo_aprobado !== null;
+
+  if (mandoLaLlave && !correoAprobado) {
+    set.status = 400;
+    return {
+      message: "El correo aprobado viene vacío",
+      error: "correo_aprobado_invalido",
+    };
+  }
+
+  // Un correo aprobado es de UN inversionista: quien confirmó vio UNA dirección.
+  // Con varios ids el campo es ambiguo, y las dos salidas son malas: aplicarlo a
+  // todos rechazaría a los que legítimamente tienen otro correo
+  // (`inversionistas.email` no es UNIQUE ni NOT NULL en el schema, así que N
+  // filas no comparten dirección por regla ninguna), y aplicarlo solo a uno
+  // dejaría pasar a los otros N-1 SIN aprobación. Se rechaza la combinación
+  // entera: es la única lectura que no inventa una aprobación que nadie dio.
+  if (correoAprobado && ids.length > 1) {
+    set.status = 400;
+    return {
+      message:
+        "El correo aprobado es de un solo inversionista: mandá un id a la vez",
+      error: "correo_aprobado_con_varios_inversionistas",
+    };
+  }
+
   const filas = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
@@ -94,15 +224,44 @@ export const otorgarAccesoPortal = async ({
     if (!fila) {
       // Un id que no existe se NOMBRA. Callarlo dejaría a quien apretó el botón
       // creyendo que esa persona quedó con acceso.
-      resultados.push({
-        inversionistaId: id,
-        estado: "fallo",
-        usuarioEmail: null,
-        resueltoPor: null,
-        correo: { enviado: false, plantilla: null, redirigido: false, destinatarioReal: null },
-        advertencias: [],
-        motivo: "inversionista_no_encontrado",
-      });
+      resultados.push(fallo(id, "inversionista_no_encontrado"));
+      continue;
+    }
+
+    // LA APROBACIÓN ES OBLIGATORIA PARA LA PERSONA. Empresa o persona se decide
+    // con ESTA `fila` —la misma que viaja a provisionar—, no con lo que el
+    // diálogo pintó: entre uno y otro se puede borrar `dpi_rep_legal` y cambiar
+    // el correo a la vez. `esEmpresaRepresentada` es la misma regla que usa
+    // `decidirProvisionamiento`, con la excepción del autorrepresentado. Sin
+    // correo en la fila no hay a dónde mandar contraseña: sigue y sale
+    // `sin_correo` como siempre.
+    if (
+      !correoAprobado &&
+      !esEmpresaRepresentada(fila) &&
+      normalizeEmail(fila.email)
+    ) {
+      resultados.push(fallo(id, MOTIVO_CORREO_REQUERIDO));
+      continue;
+    }
+
+    // EL VETO. Va ANTES de provisionar y antes de cualquier decisión que pueda
+    // terminar en provisionar: lo que está en juego es una contraseña saliendo
+    // hacia un buzón, y el orden que falla cerrado es "primero comprobar,
+    // después actuar".
+    //
+    // `fila.email` es el MISMO valor que `decidirProvisionamiento` va a
+    // normalizar y mandar a auth-google (mismo objeto, misma lectura), así que
+    // esto compara contra el destinatario real y no contra un parecido.
+    //
+    // Una fila que se quedó SIN correo (`null`) tampoco coincide, y así debe ser:
+    // se aprobó una dirección y ahora no hay ninguna. Ese es un cambio, no un
+    // caso aparte.
+    //
+    // No se devuelve el correo de la fila en la respuesta: el motivo dice QUÉ
+    // pasó, y a quién apunta ahora la fila se ve en la pantalla del CRM, que es
+    // donde hay que ir a mirar de todas formas.
+    if (correoAprobado && correoAprobado !== normalizeEmail(fila.email)) {
+      resultados.push(fallo(id, MOTIVO_CORREO_CAMBIADO));
       continue;
     }
 

@@ -278,7 +278,14 @@
 		{
 			"idx": 38,
 			"version": "7",
-			"when": 1790799299433,
+			"when": 1791229780674,
+			"tag": "0046_add_acceso_portal_activity_action",
+			"breakpoints": true
+		},
+		{
+			"idx": 39,
+			"version": "7",
+			"when": 1791237160995,
 			"tag": "0046_add_agency_sellers",
 			"breakpoints": true
 		}

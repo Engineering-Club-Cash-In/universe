@@ -452,14 +452,52 @@ export function TableInvestors() {
 
   const handleConfirmarAccesoPortal = async () => {
     if (!accesoPortalTarget) return;
+    // El correo que se manda a aprobar es EL QUE ESTE DIÁLOGO PINTÓ, no uno
+    // releído al apretar: `accesoPortalTarget` es el mismo objeto que se
+    // renderiza abajo (`accesoPortalTarget?.email`), congelado al elegir "Dar
+    // acceso al portal" en el menú de la fila. Volver a leerlo de `data` o de
+    // la fila expandida acá reabriría la ventana que este campo cierra: entre
+    // lo que la persona miró y lo que se manda no puede haber una segunda
+    // lectura.
+    const aprobado = accesoPortalTarget;
     setAccesoPortalPending(true);
     try {
-      const respuesta = await otorgarAccesoPortalService([accesoPortalTarget.id]);
+      const respuesta = await otorgarAccesoPortalService(
+        [aprobado.id],
+        // La EMPRESA no manda la llave: su diálogo no enseña ningún correo
+        // —la cuenta es del representante— así que no hay nada aprobado que
+        // mandar, y cartera corta antes con `es_empresa_el_acceso_es_del_
+        // representante`. Mandar el correo de la empresa sería mandar como
+        // "aprobado" algo que nadie aprobó para ese envío.
+        aprobado.esEmpresa ? null : aprobado.email,
+      );
       // Se reusa el mismo traductor del alta: los códigos son los mismos y las
       // advertencias que importan —contraseña no entregada, correo desviado—
       // tienen que leerse igual vengan de donde vengan.
-      const aviso = avisoAccesoPortal(respuesta?.resultados?.[0]);
-      if (!aviso) toast.success("Listo.");
+      //
+      // `"boton"`: quien lee ya tiene abierto el menú de esta fila y acaba de
+      // usar esta opción. Sin ese dato el traductor le diría "el inversionista
+      // sí quedó creado: no lo vuelvas a crear" —acá no se creó nada— y la
+      // mandaría al mismo menú en el que está.
+      const aviso = avisoAccesoPortal(respuesta?.resultados?.[0], "boton");
+      // El `null` del traductor NO es "salió bien": es "no sé qué pasó". Vuelve
+      // en `null` cuando `resultados` viene vacío o con algo que no es un
+      // objeto, cuando el estado es `omitida` con un motivo que no está en la
+      // lista, y ante cualquier estado fuera de los cinco conocidos. En verde
+      // eso es el mismo bug que este traductor existe para cerrar: quien lee
+      // cuelga el teléfono prometiendo una contraseña que no salió.
+      //
+      // Y `null` es lo PEOR que devuelve: ante un objeto al que le faltan
+      // campos —`{estado, motivo}` sin `advertencias`, que el back puede
+      // mandar— ya no tira. Antes ese `TypeError` caía en el `catch` de abajo y
+      // pintaba el rojo de "No se pudo abrir el acceso al portal" sobre un
+      // envío que SÍ salió, y quien lo leía apretaba otra vez. Ese `catch`
+      // queda solo para lo que de verdad falla: la llamada HTTP.
+      if (!aviso)
+        toast.warning(
+          "No se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.",
+          { duration: 15000 },
+        );
       else if (aviso.tono === "advertencia") toast.warning(aviso.texto, { duration: 15000 });
       else toast.success(aviso.texto);
       setAccesoPortalTarget(null);

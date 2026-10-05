@@ -6,7 +6,6 @@
 
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
 import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
@@ -56,6 +55,11 @@ export const misPendientesInmovilizacionRouter = {
 				>`COALESCE(${notifications.assignedTo}, ${inmovilizacionesUnidad.solicitadoPor})`,
 			};
 
+			// Ni acá ni en las llamadas se filtra por `casos_cobros.activo`: el sync
+			// cierra el caso cuando el cliente paga, y justo entonces puede haber una
+			// reactivación aprobada sin ejecutar o una llamada por registrar, que los
+			// endpoints permiten terminar (no miran `activo`). Ocultarlas dejaría la
+			// unidad apagada sin tarea visible.
 			// Aprobadas y rechazadas recientes. El aviso de decisión solo aporta el
 			// destinatario de respaldo (LEFT JOIN: si el aviso no se creó o se
 			// descartó, el trámite no deja de existir).
@@ -69,13 +73,8 @@ export const misPendientesInmovilizacionRouter = {
 						eq(notifications.cobrosTipo, "inmovilizacion_resuelta"),
 					),
 				)
-				.innerJoin(
-					casosCobros,
-					eq(casosCobros.id, inmovilizacionesUnidad.casoCobroId),
-				)
 				.where(
 					and(
-						eq(casosCobros.activo, true),
 						sql`(${inmovilizacionesUnidad.estado} = 'aprobada' OR (
 						${inmovilizacionesUnidad.estado} = 'rechazada'
 						AND ${inmovilizacionesUnidad.decididoAt} > now() - make_interval(days => ${DIAS_RECHAZADA_VISIBLE})
@@ -106,13 +105,8 @@ export const misPendientesInmovilizacionRouter = {
 						inArray(notifications.status, [...ESTADOS_ABIERTOS]),
 					),
 				)
-				.innerJoin(
-					casosCobros,
-					eq(casosCobros.id, inmovilizacionesUnidad.casoCobroId),
-				)
 				.where(
 					and(
-						eq(casosCobros.activo, true),
 						eq(inmovilizacionesUnidad.estado, "ejecutada"),
 						isNull(inmovilizacionesUnidad.llamadaContactoId),
 					),

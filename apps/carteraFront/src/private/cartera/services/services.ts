@@ -130,7 +130,8 @@ export async function insertInvestorService(
  * devuelve 400 (`correo_aprobado_invalido`) a propósito, porque una llave vacía
  * es un front roto y tratarla como "no se aprobó nada" saltaría el control justo
  * cuando más falta hace. Cuando no hay correo que aprobar —la EMPRESA, cuyo
- * diálogo no enseña ninguno— la llave se OMITE.
+ * diálogo no enseña ninguno— la llave se OMITE. Si para entonces la fila ya
+ * es persona con correo, cartera veta con `correo_aprobado_requerido`.
  *
  * Y con `correoAprobado` va UN solo id: cartera rechaza la combinación con
  * varios (`correo_aprobado_con_varios_inversionistas`), porque quien confirmó

@@ -656,3 +656,75 @@ describe("avisoAccesoPortal — el correo cambió mientras lo revisaba", () => {
     expect(aviso.texto.startsWith("No se le abrió acceso:")).toBe(true);
   });
 });
+
+/**
+ * El hermano del veto: el diálogo se abrió con la fila como EMPRESA —sin
+ * correo que aprobar— y antes del clic la fila pasó a persona con correo.
+ * Cartera corta antes de provisionar con `correo_aprobado_requerido`. Mismo
+ * desenlace —nadie recibió nada— y mismo círculo si no se actualiza la lista.
+ */
+describe("avisoAccesoPortal — la fila pasó a persona con correo mientras lo revisaba", () => {
+  const veto = (origen: "alta" | "boton" = "boton") =>
+    avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_requerido",
+        advertencias: [],
+      }),
+      origen,
+    )!;
+
+  it("no sale el código crudo", () => {
+    const aviso = veto();
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).not.toContain("correo_aprobado_requerido");
+    expect(aviso.texto).not.toContain("_");
+  });
+
+  it("dice que los datos cambiaron MIENTRAS lo revisaba y que ahora es persona con correo", () => {
+    const texto = veto().texto;
+    expect(texto).toContain("cambiaron mientras lo revisabas");
+    expect(texto).toContain("persona con correo");
+  });
+
+  it("dice que NO salió ninguna contraseña", () => {
+    const texto = veto().texto;
+    expect(texto).toContain("NO salió ninguna contraseña");
+    expect(texto).toContain("no se creó ninguna cuenta");
+  });
+
+  it("NO aconseja reintentar con lo mismo", () => {
+    // El diálogo congelado sigue creyendo que es empresa: reintentar desde
+    // ahí vuelve a mandar el pedido sin correo aprobado y falla idéntico.
+    const texto = veto().texto;
+    expect(texto).not.toContain("volvé a intentarlo");
+    expect(texto).toContain("vuelve a fallar");
+  });
+
+  it("manda a ACTUALIZAR la lista y revisar el correo antes de volver a intentar", () => {
+    const texto = veto().texto;
+    expect(texto).toContain("actualizá la lista");
+    expect(texto).toContain("revisá a qué correo apunta");
+  });
+
+  it("manda a avisar a sistemas si nadie debía cambiarlo", () => {
+    expect(veto().texto).toContain("avisa a sistemas");
+  });
+
+  it("dice lo mismo leído desde el alta: no inventa un alta que sí salió", () => {
+    expect(veto("alta").texto).toBe(veto("boton").texto);
+    expect(veto("alta").texto).not.toContain("no lo vuelvas a crear");
+  });
+
+  it("las advertencias que vengan pegadas no tapan el veto", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_requerido",
+        advertencias: ["correo_no_enviado"],
+      }),
+      "boton",
+    )!;
+    expect(aviso.texto.startsWith("No se le abrió acceso:")).toBe(true);
+  });
+});

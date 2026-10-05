@@ -29,14 +29,12 @@
  * `inversionista_no_encontrado`, que sí manda a mirar dónde está parado quien
  * lee —y acá eso es una FILA, no la ficha del gemelo—.
  *
- * Y ahora hay un código que este archivo traduce y el gemelo NO:
- * `correo_aprobado_no_coincide`. No es un descuido ni una deuda que haya que
- * "sincronizar": ese motivo solo lo devuelve `POST /investor/portal-access`
- * cuando el cuerpo trae `correo_aprobado`, y ese botón vive únicamente acá
- * (`tableInvestors.tsx`). El gemelo del CRM solo lee el bloque del alta, que no
- * manda correo aprobado, así que allá ese código no puede llegar. Si algún día
- * el CRM gana su propio botón, ahí sí habrá que darle su texto —y el consejo
- * volverá a diverger, porque "actualizá la lista" nombra ESTA pantalla—.
+ * `correo_aprobado_no_coincide` y su hermano `correo_aprobado_requerido` (la
+ * fila pasó a persona con correo y el pedido no traía ninguno aprobado) solo
+ * los devuelve `POST /investor/portal-access`, nunca el alta. Los dos botones
+ * —este y el de la ficha del CRM— los traducen, y es justo donde el consejo
+ * diverge: acá dice "actualizá la lista", porque nombra ESTA pantalla; allá,
+ * "recargá la ficha".
  */
 
 export interface AccesoPortal {
@@ -310,6 +308,22 @@ const mensajeDeFallo = (
       tono: "advertencia",
       texto:
         "No se le abrió acceso: el correo de este inversionista cambió mientras lo revisabas, así que el que aprobaste ya no es el que tiene cartera. NO salió ninguna contraseña y no se creó ninguna cuenta. Volver a aprobar el mismo correo vuelve a fallar: actualizá la lista, mirá el correo que tiene ahora y aprobalo solo si es de esta persona. Si nadie debería haberlo cambiado, avisa a sistemas antes de mandarle nada.",
+    };
+  }
+
+  // El hermano del veto: el diálogo se abrió con la fila como EMPRESA —sin
+  // correo que aprobar, así que no se mandó ninguno— y antes del clic la fila
+  // pasó a persona con correo. Cartera corta igual, antes de provisionar.
+  //
+  // Mismo tratamiento y por las mismas razones: hay que decir que NO salió
+  // nada, y el reintento sin actualizar la lista vuelve a fallar, porque el
+  // diálogo congelado al abrir el menú sigue creyendo que es empresa y vuelve
+  // a mandar el pedido sin correo aprobado.
+  if (acceso.motivo === "correo_aprobado_requerido") {
+    return {
+      tono: "advertencia",
+      texto:
+        "No se le abrió acceso: los datos de este inversionista cambiaron mientras lo revisabas, y ahora figura como persona con correo, un correo que nadie aprobó. NO salió ninguna contraseña y no se creó ninguna cuenta. Volver a confirmar lo mismo vuelve a fallar: cerrá esto, actualizá la lista, revisá a qué correo apunta ahora y volvé a intentar solo si es de esta persona. Si nadie debería haberlo cambiado, avisa a sistemas antes de mandarle nada.",
     };
   }
 

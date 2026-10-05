@@ -72,6 +72,7 @@ import { createNotification } from "../lib/notificaciones";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
 import { PERMISSIONS, ROLES } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
+import { vencimientosDeContrato } from "../lib/vencimiento-del-contrato";
 import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import {
 	exigirQueElActualNoEsteFirmado,
@@ -1024,7 +1025,21 @@ export const investorContractsRouter = {
 				});
 			}
 
-			return fila;
+			// El vencimiento de cada crédito, el del contrato del crédito y no el
+			// de la última cuota de cartera, que cae un mes antes. Si el crédito no
+			// tiene datos del contrato, queda lo de cartera.
+			const creditos = fila.creditos;
+			const delContrato = await vencimientosDeContrato(
+				creditos.map((c) => c.numeroCreditoSifco),
+			);
+			return {
+				...fila,
+				creditos: creditos.map((c) => ({
+					...c,
+					fechaVencimiento:
+						delContrato.get(c.numeroCreditoSifco) ?? c.fechaVencimiento,
+				})),
+			};
 		}),
 
 	/**

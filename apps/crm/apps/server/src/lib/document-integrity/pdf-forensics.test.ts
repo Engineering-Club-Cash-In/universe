@@ -159,6 +159,16 @@ describe("PDF forensics", () => {
 		expect(isPdfSafeToParse(pdf)).toBe(false);
 	});
 
+	test("una corrida larga de espacios no oculta un object stream ni frena la guarda", () => {
+		const pdf = Buffer.from(
+			`%PDF-1.7\n1${" ".repeat(1300)}x\n5 0 obj\n<< /Type /ObjStm /N 999999999 /First 1 /Length 1 >>\nstream\nx\nendstream\nendobj\n%%EOF`,
+			"latin1",
+		);
+		const startedAt = performance.now();
+		expect(isPdfSafeToParse(pdf)).toBe(false);
+		expect(performance.now() - startedAt).toBeLessThan(500);
+	});
+
 	test("un PDF normal pasa la guarda", () => {
 		const pdf = Buffer.from(
 			"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Size 12 >>\n%%EOF",

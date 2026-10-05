@@ -52,6 +52,17 @@ export interface SignaturePatternConfig {
    */
   anclasExactas?: string[];
   /**
+   * Cuántos puntos subir el cuadro de firma cuando lo que se encuentra es una
+   * **etiqueta impresa debajo de la línea** ("EL INVERSIONISTA", "Firma del
+   * Inversionista"), no la línea misma.
+   *
+   * El cuadro se apoya en la línea de base del texto encontrado. Con una línea
+   * de guiones eso queda bien; con una etiqueta, el cuadro baja hasta ella y
+   * tapa la línea y la etiqueta. Se mide en el PDF: la distancia entre la línea
+   * dibujada y la base de la etiqueta. Sin esto no se sube nada.
+   */
+  subirSobreLaEtiqueta?: number;
+  /**
    * Cómo se firma este contrato. Por defecto `electronica`.
    *
    * Un contrato `fisica` no se sube a WeeTrust: se genera, se guarda en R2 y
@@ -358,6 +369,9 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA]: {
     pattern: 'EL INVERSIONISTA___________________________________',
     anclasExactas: ['CUBE INVESTMENTS, S.A.', 'EL INVERSIONISTA'],
+    // Las etiquetas van debajo de la línea: medido en el PDF real (hoja de
+    // 612x1008), la línea está en y≈310.5 y la base de la etiqueta en 326.1.
+    subirSobreLaEtiqueta: 16,
     bloques: ['REP_LEGAL', 'DEUDORES'],
     // Único contrato de inversión con rúbrica por hoja: es el que arma la
     // relación entera, así que gerencia pide lo mismo que en los de ventas.
@@ -380,6 +394,9 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
     pattern: 'Firma del Inversionista',
     anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    // Las etiquetas van debajo de la línea: medido en el PDF real (carta), la
+    // línea está 12.2 puntos arriba de la base de la etiqueta en las dos hojas.
+    subirSobreLaEtiqueta: 13,
     bloques: ['DEUDORES', 'REP_LEGAL'],
     repeticiones: 2,
     // A veces se manda un solo anexo unificado: cada persona firma una vez.

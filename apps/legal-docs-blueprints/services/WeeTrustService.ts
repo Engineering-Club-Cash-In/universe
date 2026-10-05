@@ -1188,9 +1188,15 @@ export class WeeTrustService {
 		const SIGNATURE_HEIGHT = 50;
 		const posiciones: WeeTrustSignaturePosition[] = lineas.map((linea, i) => {
 			// WeeTrust mide Y desde arriba y el PDF desde abajo. Restamos la altura
-			// de la firma para que quede SOBRE la línea y no a partir de ella.
+			// de la firma para que quede SOBRE la línea y no a partir de ella, y
+			// en los que se ubican por una etiqueta impresa debajo de la línea,
+			// lo que hay entre las dos: si no, el cuadro tapa la etiqueta.
 			const x = linea.pdfX;
-			const y = linea.pageHeight - linea.pdfY - SIGNATURE_HEIGHT;
+			const y =
+				linea.pageHeight -
+				linea.pdfY -
+				SIGNATURE_HEIGHT -
+				(config.subirSobreLaEtiqueta ?? 0);
 
 			console.log(
 				`[WeeTrust]   firma ${i + 1}: ${esperados[i].role} -> pág. ${linea.pageNum} (${x.toFixed(0)}, ${y.toFixed(0)})`,
@@ -1521,7 +1527,11 @@ export class WeeTrustService {
 		return elegidas.map((linea, i) => {
 			const email = signerEmails[Math.min(i, signerEmails.length - 1)];
 			const x = linea.pdfX;
-			const y = linea.pageHeight - linea.pdfY - SIGNATURE_HEIGHT;
+			const y =
+				linea.pageHeight -
+				linea.pdfY -
+				SIGNATURE_HEIGHT -
+				(config.subirSobreLaEtiqueta ?? 0);
 			return {
 				user: { email },
 				coordinates: { x, y },

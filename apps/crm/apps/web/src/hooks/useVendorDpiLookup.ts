@@ -9,7 +9,10 @@ export type VendorDpiLookupResult = Awaited<
 	ReturnType<typeof client.lookupVendorByDpi>
 >;
 
-export const soloDigitosDpi = (dpi: string) => dpi.replace(/\D/g, "");
+// Acepta vacío: en la base de dev hay vendedores sin DPI (en prod la columna es
+// obligatoria), y uno solo tumbaba la asignación de inversión al compararlo.
+export const soloDigitosDpi = (dpi: string | null | undefined) =>
+	(dpi ?? "").replace(/\D/g, "");
 
 /**
  * Busca los datos del dueño por DPI (vendedor registrado → copia local de

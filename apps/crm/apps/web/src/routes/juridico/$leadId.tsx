@@ -3,18 +3,24 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
 	CheckCircle,
+	FileUp,
 	Loader2,
-	Plus,
 	RefreshCw,
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	ETAPA_EN_FIRMA,
+	etapaPermite,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { z } from "zod";
+import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
+import { ReenviarWhatsappDialog } from "@/components/contracts/ReenviarWhatsappDialog";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
-import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import { RegenerateContractsModal } from "@/components/juridico/RegenerateContractsModal";
+import { UploadContractModal } from "@/components/juridico/UploadContractModal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -28,6 +34,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
@@ -51,27 +58,22 @@ function RouteComponent() {
 		isLoading: isLoadingPermissions,
 	} = useJuridicoPermissions();
 
-	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
 	const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
+	const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 	const [deletingContractId, setDeletingContractId] = useState<string | null>(
 		null,
 	);
-	const [contractToEdit, setContractToEdit] = useState<{
+	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Lo que se acaba de rehacer o subir: sólo eso se reenvía, no la batería.
+	const [contratosAReenviar, setContratosAReenviar] = useState<
+		Array<{ id: string; nombre: string }> | undefined
+	>(undefined);
+	const [contratoAReemplazar, setContratoAReemplazar] = useState<{
 		id: string;
 		contractType: string;
 		contractName: string;
-		clientSigningLink: string | null;
-		representativeSigningLink: string | null;
-		additionalSigningLinks: string[] | null;
-		pdfLink?: string | null;
-		opportunityId: string | null;
-	} | null>(null);
-	const [opportunityInfo, setOpportunityInfo] = useState<{
-		id: string;
-		title: string;
-		value: string | null;
 	} | null>(null);
 
 	const opportunityId = searchParams?.opportunityId;
@@ -100,8 +102,9 @@ function RouteComponent() {
 		mutationFn: async (contractId: string) => {
 			return await client.deleteLegalContract({ contractId });
 		},
-		onSuccess: () => {
-			toast.success("Contrato eliminado correctamente");
+		// Si estaba en WeeTrust no desaparece: queda anulado, y el mensaje lo dice.
+		onSuccess: (data) => {
+			toast.success(data.message);
 			refetch();
 		},
 		onError: (error: Error) => {
@@ -171,6 +174,7 @@ function RouteComponent() {
 				generationData: generationSnapshot.data as Array<{
 					contractType: string;
 					data: Record<string, string>;
+					signers?: ContractSigner[];
 					emails?: string[];
 					options: {
 						gender: "male" | "female";
@@ -186,6 +190,24 @@ function RouteComponent() {
 			queryClient.invalidateQueries({
 				queryKey: ["getGenerationSnapshot"],
 			});
+			// En 85% los enlaces ya le llegaron al cliente por WhatsApp al aprobar,
+			// y regenerar acaba de borrar esos documentos: si nadie le manda los
+			// nuevos, se queda firmando sobre links muertos. En 80% todavía no
+			// salió nada; los manda la aprobación.
+			// La etapa con la que regeneró el servidor: la de la pantalla puede ser
+			// vieja si la aprobaron mientras estaba abierta.
+			if (
+				data.regeneratedCount > 0 &&
+				data.porcentajeEtapa === ETAPA_EN_FIRMA
+			) {
+				setContratosAReenviar(
+					data.contracts.map((c) => ({
+						id: c.id,
+						nombre: getContractTypeLabel(c.contractType),
+					})),
+				);
+				setPreguntarReenvio(true);
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al regenerar contratos");
@@ -200,30 +222,26 @@ function RouteComponent() {
 
 	const isLoading = isLoadingLead || isLoadingContracts;
 
-	const handleEdit = (
-		contract: {
-			id: string;
-			contractType: string;
-			contractName: string;
-			clientSigningLink: string | null;
-			representativeSigningLink: string | null;
-			additionalSigningLinks: string[] | null;
-			pdfLink?: string | null;
-			opportunityId: string | null;
-		},
-		opportunity?: { id: string; title: string; value: string | null } | null,
-	) => {
-		setContractToEdit(contract);
-		setOpportunityInfo(opportunity || null);
-		setIsCreateModalOpen(true);
-	};
-
-	const handleCloseModal = (open: boolean) => {
-		setIsCreateModalOpen(open);
-		if (!open) {
-			setContractToEdit(null);
-			setOpportunityInfo(null);
-		}
+	/**
+	 * Reemplazar el documento de un contrato ya registrado.
+	 *
+	 * Antes esto abría un formulario donde se pegaban los links de firma a mano.
+	 * Eso venía de cuando los contratos se armaban por fuera; hoy el link lo
+	 * emite WeeTrust con el rol de cada quien, y pegarlo a mano es la forma de
+	 * volver a cruzarlos. Lo que de verdad se quiere corregir es el documento,
+	 * así que "Editar" pasó a ser subir el PDF bueno.
+	 */
+	const handleReplace = (contract: {
+		id: string;
+		contractType: string;
+		contractName: string;
+	}) => {
+		setContratoAReemplazar({
+			id: contract.id,
+			contractType: contract.contractType,
+			contractName: contract.contractName,
+		});
+		setIsUploadModalOpen(true);
 	};
 
 	const handleOpenOpportunityModal = () => {
@@ -239,6 +257,17 @@ function RouteComponent() {
 		opportunitiesData && opportunitiesData.length > 0
 			? opportunitiesData[0]
 			: null;
+
+	/**
+	 * Jurídico maneja los contratos en 80% y sigue en 85%, mientras están en
+	 * firma: rehacer la batería con otra fecha cuando venció, o subir uno a
+	 * mano, es parte de su operación. Del 90% en adelante los botones ni
+	 * aparecen, para no ofrecer algo que el servidor va a rechazar.
+	 */
+	const enEtapaDeJuridico = etapaPermite(
+		"reemplazar",
+		opportunityData?.stage?.closurePercentage,
+	);
 
 	// Transformar datos de oportunidad para el modal
 	const selectedOpportunity: OpportunityForModal | null = opportunityData
@@ -327,6 +356,7 @@ function RouteComponent() {
 
 					<div className="flex gap-2">
 						{canCreateLegal &&
+							enEtapaDeJuridico &&
 							generationSnapshot &&
 							contracts &&
 							contracts.length > 0 && (
@@ -338,10 +368,15 @@ function RouteComponent() {
 									Regenerar con nueva fecha
 								</Button>
 							)}
-						{canCreateLegal && (
-							<Button onClick={() => setIsCreateModalOpen(true)}>
-								<Plus className="mr-2 h-4 w-4" />
-								Registrar Contrato
+						{/* "Registrar Contrato" se fue: pedía pegar los links de firma a
+						    mano, de cuando los contratos se generaban por fuera. Hoy los
+						    genera el wizard o se suben acá, y en los dos casos el link
+						    sale de WeeTrust con su rol. El modal sigue montado para
+						    editar un contrato ya registrado. */}
+						{canCreateLegal && enEtapaDeJuridico && opportunityId && (
+							<Button onClick={() => setIsUploadModalOpen(true)}>
+								<FileUp className="mr-2 h-4 w-4" />
+								Subir contrato
 							</Button>
 						)}
 					</div>
@@ -429,23 +464,24 @@ function RouteComponent() {
 					<ContractsList
 						contracts={contracts || []}
 						onUpdate={refetch}
-						onEdit={canCreateLegal ? handleEdit : undefined}
-						onDelete={canCreateLegal ? handleDeleteContract : undefined}
+						onReplace={
+							canCreateLegal && enEtapaDeJuridico ? handleReplace : undefined
+						}
+						// Eliminar va en 80% y 85%, como reemplazar, pero con su propia
+						// regla para que el servidor y el botón no se separen si cambia.
+						onDelete={
+							canCreateLegal &&
+							etapaPermite(
+								"eliminar",
+								opportunityData?.stage?.closurePercentage,
+							)
+								? handleDeleteContract
+								: undefined
+						}
 						deletingContractId={deletingContractId}
 					/>
 				</CardContent>
 			</Card>
-
-			{/* Modal para crear contrato */}
-			<CreateContractModal
-				leadId={leadId}
-				open={isCreateModalOpen}
-				onOpenChange={handleCloseModal}
-				onSuccess={refetch}
-				preselectedOpportunityId={opportunityId}
-				contractToEdit={contractToEdit || undefined}
-				opportunityInfo={opportunityInfo}
-			/>
 
 			{/* Modal de detalle de oportunidad */}
 			<OpportunityDetailModal
@@ -468,6 +504,41 @@ function RouteComponent() {
 				isLoading={approveMutation.isPending}
 				opportunityTitle={opportunityData?.title}
 			/>
+
+			{/* Subida manual: el contrato lo arma una persona, la firma va igual */}
+			{opportunityId && (
+				<UploadContractModal
+					opportunityId={opportunityId}
+					open={isUploadModalOpen}
+					onOpenChange={(abierto) => {
+						setIsUploadModalOpen(abierto);
+						if (!abierto) setContratoAReemplazar(null);
+					}}
+					onUploaded={({ porcentajeEtapa, contractId, contractType }) => {
+						refetch();
+						// Sólo en 85%, sea subida nueva o reemplazo: ahí el envío de la
+						// aprobación ya pasó, y el cliente se quedaría con un enlace muerto
+						// o sin el del contrato nuevo. En 80% todavía no le llegó nada: lo
+						// que se suba o reemplace sale con el envío al aprobar.
+						if (porcentajeEtapa === ETAPA_EN_FIRMA) {
+							setContratosAReenviar([
+								{ id: contractId, nombre: getContractTypeLabel(contractType) },
+							]);
+							setPreguntarReenvio(true);
+						}
+					}}
+					reemplaza={contratoAReemplazar}
+				/>
+			)}
+
+			{opportunityId && (
+				<ReenviarWhatsappDialog
+					opportunityId={opportunityId}
+					contratos={contratosAReenviar}
+					open={preguntarReenvio}
+					onOpenChange={setPreguntarReenvio}
+				/>
+			)}
 
 			{/* Modal para regenerar contratos */}
 			{contracts && (

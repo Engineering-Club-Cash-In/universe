@@ -52,6 +52,7 @@ import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -115,6 +116,12 @@ import {
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
+import {
+	COFIRMANTE_BANK_STATEMENT_HELP,
+	COFIRMANTE_BANK_STATEMENT_OPTION,
+	getManualOpportunityDocumentFields,
+	type ManualOpportunityDocumentType,
+} from "@/lib/manual-opportunity-document";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
@@ -122,6 +129,7 @@ import {
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
 import {
 	formatMissingAssignmentsMessage,
 	getMissingOpportunityAssignments,
@@ -2780,95 +2788,36 @@ function RouteComponent() {
 									PERMISSIONS.canViewOpportunityContracts(
 										userProfile.data.role,
 									) && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<div className="flex items-center gap-2">
-												<FileSignature className="h-5 w-5 text-muted-foreground" />
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Contratos Legales
-												</Label>
-											</div>
-											{opportunityContractsQuery.isLoading ? (
-												<p className="text-muted-foreground text-sm">
-													Cargando contratos...
-												</p>
-											) : opportunityContractsQuery.data &&
-												opportunityContractsQuery.data.length > 0 ? (
-												<div className="space-y-2">
-													{opportunityContractsQuery.data.map(
-														({ contract }) => (
-															<div
-																key={contract.id}
-																className="flex items-center justify-between rounded-md border bg-background p-3"
-															>
-																<div className="flex flex-col gap-1">
-																	<span className="font-medium text-sm">
-																		{contract.contractName}
-																	</span>
-																	<span className="text-muted-foreground text-xs">
-																		{getContractTypeLabel(
-																			contract.contractType,
-																		)}{" "}
-																		•{" "}
-																		{contract.status === "pending"
-																			? "Pendiente"
-																			: contract.status === "signed"
-																				? "Firmado"
-																				: "Cancelado"}
-																	</span>
-																</div>
-																<div className="flex gap-2">
-																	{contract.pdfLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.pdfLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<FileText className="h-3 w-3" />
-																				PDF
-																			</a>
-																		</Button>
-																	)}
-																	{contract.clientSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.clientSigningLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Cliente
-																			</a>
-																		</Button>
-																	)}
-																	{contract.representativeSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={
-																					contract.representativeSigningLink
-																				}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Rep. Legal
-																			</a>
-																		</Button>
-																	)}
-																</div>
-															</div>
-														),
-													)}
-												</div>
-											) : (
-												<p className="text-muted-foreground text-sm">
-													No hay contratos asociados a esta oportunidad
-												</p>
+										<OpportunityContractsCard
+											contracts={opportunityContractsQuery.data}
+											isLoading={opportunityContractsQuery.isLoading}
+											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
+												userProfile.data.role,
 											)}
-										</div>
+											// El rol no alcanza: fuera de 80% y 85% el servidor lo
+											// rechaza, y no hay que ofrecerlo.
+											puedeAnular={
+												PERMISSIONS.canAnnulContracts(userProfile.data.role) &&
+												etapaPermite(
+													"anular",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
+											puedeVincular={
+												PERMISSIONS.canLinkWeetrustDocument(
+													userProfile.data.role,
+												) &&
+												etapaPermite(
+													"regenerar",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
+											enEtapaDeFirma={etapaPermite(
+												"regenerar",
+												selectedOpportunity.stage?.closurePercentage,
+											)}
+											onUpdate={() => opportunityContractsQuery.refetch()}
+										/>
 									)}
 
 								{/* Quotations Section */}
@@ -4190,7 +4139,9 @@ function DocumentsManager({
 }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
-	const [documentType, setDocumentType] = useState<string>("");
+	const [documentType, setDocumentType] = useState<
+		ManualOpportunityDocumentType | ""
+	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
@@ -4260,8 +4211,10 @@ function DocumentsManager({
 	].includes(userProfile.data?.role ?? "");
 
 	// Upload a single document with a specific type
-	const uploadSingleDocument = async (docType: string) => {
-		if (!selectedFile) return;
+	const uploadSingleDocument = async (
+		docType: ManualOpportunityDocumentType | "",
+	) => {
+		if (!selectedFile || !docType) return;
 
 		const { key } = await uploadFileToR2WithRetry(selectedFile, {
 			resourceType: "opportunity_document",
@@ -4270,8 +4223,7 @@ function DocumentsManager({
 
 		return await client.uploadOpportunityDocument({
 			opportunityId,
-			documentType: docType as any,
-			description: description || undefined,
+			...getManualOpportunityDocumentFields(docType, description),
 			file: {
 				name: selectedFile.name,
 				type: selectedFile.type,
@@ -4408,6 +4360,7 @@ function DocumentsManager({
 		{ value: "estados_cuenta_1", label: "Estado de cuenta mes 1" },
 		{ value: "estados_cuenta_2", label: "Estado de cuenta mes 2" },
 		{ value: "estados_cuenta_3", label: "Estado de cuenta mes 3" },
+		COFIRMANTE_BANK_STATEMENT_OPTION,
 		// Documentos comerciales
 		{ value: "patente_comercio", label: "Patente de comercio" },
 		{ value: "patente_mercantil", label: "Patente mercantil" },
@@ -4789,7 +4742,9 @@ function DocumentsManager({
 						<Combobox
 							options={documentTypeOptions}
 							value={documentType}
-							onChange={setDocumentType}
+							onChange={(value) =>
+								setDocumentType(value as ManualOpportunityDocumentType | "")
+							}
 							placeholder="Buscar tipo de documento..."
 							width="full"
 							isInModal={true}
@@ -4817,6 +4772,12 @@ function DocumentsManager({
 								Este PDF incluye los 3 meses de estados de cuenta
 							</Label>
 						</div>
+					)}
+
+					{documentType === COFIRMANTE_BANK_STATEMENT_OPTION.value && (
+						<p className="text-muted-foreground text-sm">
+							{COFIRMANTE_BANK_STATEMENT_HELP}
+						</p>
 					)}
 
 					<div className="space-y-2">

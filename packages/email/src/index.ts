@@ -6,10 +6,7 @@ import NewCreditEmail from "./templates/NewCreditTemplate";
 import PortalWelcomeEmail from "./templates/PortalWelcomeTemplate";
 import PortalCompanyAddedEmail from "./templates/PortalCompanyAddedTemplate";
 import * as React from "react";
-import {
-  DEFAULT_DEV_RECIPIENT,
-  EMAIL_DELIVERY_MODE,
-} from "./deliveryMode";
+import { EMAIL_DELIVERY_MODE } from "./deliveryMode";
 import { asuntoDeLiquidacion } from "./asuntoLiquidacion";
 
 import { z } from "zod";
@@ -35,8 +32,9 @@ const resend = new Resend(apiKey);
 // ================================================================
 // DEV MODE: redirige TODOS los correos a un solo destinatario.
 // Controlado por la env SERVER (default: "DEV"):
-//   - SERVER=DEV   → todos los correos van solo a EMAIL_DEV_RECIPIENT
-//                    (default: jalvarado@clubcashin.com).
+//   - SERVER=DEV   → todos los correos van solo a EMAIL_DEV_RECIPIENT, que
+//                    acepta varias separadas por coma (default: jalvarado@ y
+//                    daniel.r@clubcashin.com).
 //   - SERVER=PROD  → envío normal con destinatarios originales.
 // Por seguridad, el default es DEV: si la env no está seteada, NO se
 // mandan correos a destinatarios reales.
@@ -44,9 +42,11 @@ const resend = new Resend(apiKey);
 // El modo lo resuelve `deliveryMode.ts` y se exporta: quien manda un correo
 // necesita poder saber si de verdad llegó a su destinatario. Una sola lectura
 // del entorno alimenta el interceptor y el reporte, para que no se contradigan.
-const { server: SERVER, redirige: REDIRIGE, destinatarioUnico } =
-  EMAIL_DELIVERY_MODE;
-const EMAIL_DEV_RECIPIENT = destinatarioUnico ?? DEFAULT_DEV_RECIPIENT;
+const {
+  server: SERVER,
+  redirige: REDIRIGE,
+  destinatarios: EMAIL_DEV_RECIPIENTS,
+} = EMAIL_DELIVERY_MODE;
 
 if (REDIRIGE) {
   const originalSend = resend.emails.send.bind(resend.emails);
@@ -54,12 +54,12 @@ if (REDIRIGE) {
     const original = { to: payload?.to, cc: payload?.cc, bcc: payload?.bcc };
     const overridden = {
       ...payload,
-      to: [EMAIL_DEV_RECIPIENT],
+      to: EMAIL_DEV_RECIPIENTS,
       cc: undefined,
       bcc: undefined,
     };
     console.log(
-      `[Email ${SERVER}] Redirigiendo correo a ${EMAIL_DEV_RECIPIENT}. Originales:`,
+      `[Email ${SERVER}] Redirigiendo correo a ${EMAIL_DEV_RECIPIENTS.join(", ")}. Originales:`,
       original,
     );
     return originalSend(overridden, options);
@@ -71,6 +71,7 @@ export {
   resolveEmailDeliveryMode,
   type EmailDeliveryMode,
 } from "./deliveryMode";
+export { COMPRA_CARTERA_RECIPIENTS } from "./destinatariosCompraCartera";
 
 // Schema para validación de correo
 const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });
@@ -1176,6 +1177,98 @@ export const sendSimpleEmail = async (to: string, subject: string, message: stri
     return { success: true, data };
   } catch (err) {
     console.error("[sendSimpleEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+// ================================================================
+// Contestar dentro del hilo de un correo que ya mandamos
+// ================================================================
+
+export interface HiloDeCorreo {
+  /** El Message-ID real con el que llegó: el de Amazon SES. */
+  messageId: string;
+  asunto: string;
+  to: string[];
+  cc: string[];
+}
+
+/**
+ * Lo que hace falta para contestar dentro del hilo de un correo que mandamos.
+ *
+ * Resend no respeta un Message-ID propio: lo reemplaza por el de Amazon SES, y
+ * ése sólo se conoce preguntándole a Resend después, con el id que devolvió al
+ * mandarlo. Con el Message-ID, el asunto y los destinatarios, una respuesta cae
+ * en el mismo hilo en la bandeja de cada uno (probado en Gmail: apuntando a un
+ * Message-ID inventado, la respuesta queda aparte).
+ *
+ * Devuelve `null` si Resend no lo encuentra o no contesta: quien llame decide
+ * si manda igual, fuera del hilo.
+ */
+export const obtenerHiloDeCorreo = async (
+  resendId: string,
+): Promise<HiloDeCorreo | null> => {
+  try {
+    const { data, error } = await resend.emails.get(resendId);
+    if (error || !data) {
+      console.error("[obtenerHiloDeCorreo] Resend API Error:", error);
+      return null;
+    }
+
+    // El SDK no lo declara, pero la API lo devuelve.
+    const messageId = (data as unknown as { message_id?: string | null })
+      .message_id;
+    if (!messageId) return null;
+
+    return {
+      messageId,
+      asunto: data.subject,
+      to: data.to ?? [],
+      cc: data.cc ?? [],
+    };
+  } catch (err) {
+    console.error("[obtenerHiloDeCorreo] Unexpected Error:", err);
+    return null;
+  }
+};
+
+/**
+ * Manda un correo como respuesta dentro de un hilo, con adjuntos.
+ *
+ * Sin `enRespuestaA` sale como un correo nuevo: es lo que pasa cuando el
+ * original no se puede ubicar.
+ */
+export const enviarCorreoEnHilo = async (params: {
+  to: string[];
+  cc?: string[];
+  asunto: string;
+  html: string;
+  /** El Message-ID del correo al que contesta. */
+  enRespuestaA?: string;
+  /** `path` es una URL que Resend baja al mandar (una firmada de R2 sirve). */
+  adjuntos?: Array<{ filename: string; path: string }>;
+}): Promise<{ success: true; id: string } | { success: false; error: unknown }> => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: params.to,
+      cc: params.cc && params.cc.length > 0 ? params.cc : undefined,
+      subject: params.asunto,
+      html: params.html,
+      headers: params.enRespuestaA
+        ? { "In-Reply-To": params.enRespuestaA, References: params.enRespuestaA }
+        : undefined,
+      attachments: params.adjuntos,
+    });
+
+    if (error || !data) {
+      console.error("[enviarCorreoEnHilo] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    return { success: true, id: data.id };
+  } catch (err) {
+    console.error("[enviarCorreoEnHilo] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

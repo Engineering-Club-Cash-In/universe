@@ -2,8 +2,8 @@ import { ORPCError, os } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { type AuditMeta, auditMiddleware } from "./audit";
 import { partnerAccounts } from "../db/schema/partners";
+import { type AuditMeta, auditMiddleware } from "./audit";
 import type { Context } from "./context";
 import { resolvePartnerScope } from "./partner-scope";
 import { PERMISSIONS, ROLES } from "./roles";
@@ -616,6 +616,34 @@ const requireVehicleAccess = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireViewInvestorContracts = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canViewInvestorContracts(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No se pueden ver los contratos de inversionistas",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -671,7 +699,6 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 		},
 	});
 });
-
 
 // Socios externos (predios/agencias). Exige una sesión emitida por la instancia
 // de partner-auth: una sesión del CRM nunca sirve aquí, ni al revés.
@@ -763,7 +790,9 @@ export const cobrosSupervisorProcedure = publicProcedure.use(
 export const closedCreditsReportProcedure = publicProcedure.use(
 	requireClosedCreditsReport,
 );
-export const cobranzaReportProcedure = publicProcedure.use(requireCobranzaReport);
+export const cobranzaReportProcedure = publicProcedure.use(
+	requireCobranzaReport,
+);
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,
 );
@@ -780,6 +809,9 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,
 );
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
+export const viewInvestorContractsProcedure = publicProcedure.use(
+	requireViewInvestorContracts,
+);
 export const tallerProcedure = publicProcedure.use(requireTallerAccess);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
 export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);

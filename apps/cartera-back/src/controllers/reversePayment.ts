@@ -18,7 +18,14 @@ import {
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
+import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
+import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
+import {
+  estadoMoraTrasElPago,
+  marcarDecrementoAnulado,
+} from "./moraDecrementoDePago";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
@@ -110,6 +117,13 @@ export interface ReversePaymentDependencies {
   readonly withCreditLock: typeof withPaymentAdvisoryLock;
   /** Refresca la proyección de las cuotas pendientes tras la reversión. */
   readonly refrescarProyeccion: typeof refrescarProyeccionTrasReversa;
+  /**
+   * El ajuste de mora del paso 6️⃣. Entra por acá —y no como import directo—
+   * porque tres archivos de la suite registran `mock.module("./latefee")` y la
+   * prueba que ejerce la restitución no puede quedar a merced de cuál gane la
+   * corrida.
+   */
+  readonly restituirMora: typeof updateMora;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -118,6 +132,7 @@ const defaultDependencies: ReversePaymentDependencies = {
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
   withCreditLock: withPaymentAdvisoryLock,
   refrescarProyeccion: refrescarProyeccionTrasReversa,
+  restituirMora: updateMora,
 };
 
 export function createReversePayment(
@@ -334,20 +349,112 @@ export function createReversePayment(
       // ======================================================================
       // 6️⃣ REVERSAR MORA SI EXISTÍA
       // ======================================================================
+      // Orden fijo: primero la restitución de `moras_credito` (si toca), que
+      // corre en OTRA conexión y pide el crédito FOR UPDATE; DESPUÉS la
+      // compensación del ledger, cuyo FK deja el crédito en FOR KEY SHARE hasta
+      // el commit. Al revés, las dos conexiones se esperan entre sí para siempre.
       if (pago.mora && Number(pago.mora) > 0) {
-        mayHaveGlobalPersistence = true;
-        const reverseMoraResult = await updateMora({
-          credito_id,
-          monto_cambio: Number(pago.mora),
-          tipo: "INCREMENTO",
-          activa: true,
-          motivo: `Reversa de pago #${pago_id}: se restituye la mora que ese pago había cubierto`,
-        });
+        // ── ¿HAY ALGO QUE RESTITUIR? ──────────────────────────────────────
+        // Esto sumaba `pago.mora` A CIEGAS, y por eso sobrecobraba: registrar
+        // un pago baja la mora EN EL ACTO, pero el criterio de cobertura del
+        // cron solo cuenta pagos `validated`/`no_required` (y `pending` de hasta
+        // 7 días), así que un pago que sigue `pending` pasado ese plazo deja su cuota contada como vencida y `procesarMoras`
+        // vuelve a FIJAR la mora completa desde la fórmula —REEMPLAZA, no
+        // acumula—. Para cuando alguien revierte, la bajada del pago YA está
+        // deshecha y sumarla otra vez deja el doble. Medido sobre el dump: 32 de
+        // 33 pagos `pending` con mora > 0 sobrevivieron una corrida (crédito
+        // 980, pago 152172: DECREMENTO 333.95 → 0.00 el 05-ago 20:09 y CREACION
+        // 0.00 → 333.95 el 06-ago 05:59; revertirlo dejaba Q667.90).
+        //
+        // El cargo dura hasta la corrida siguiente —el cron reemplaza— pero en
+        // esa ventana el cliente lo ve y se lo cobran.
+        //
+        // La regla y el criterio son los MISMOS que usa la anulación por boleta
+        // falsa (`anularPagoYRestituirMora`): una sola definición en
+        // `restitucionMoraDePago` + `elCronYaRepusoLaMora`. Solo cambia la
+        // causa, que es lo único que de verdad distingue los dos hechos en el
+        // historial.
+        //
+        // La lectura va por `tx` (es una lectura, no toma candados: no
+        // participa del orden `creditos` → `moras_credito` del módulo).
+        const { estado: estadoMora, decremento } = await estadoMoraTrasElPago(
+          tx,
+          { credito_id, pago_id, createdAt: pago.createdAt },
+        );
 
-        if (!reverseMoraResult.success) {
-          throw new Error("Error al reversar mora: " + reverseMoraResult.message);
+        const restitucion = restitucionMoraDePago(
+          pago,
+          pago_id,
+          "REVERSA",
+          estadoMora,
+        );
+
+        // La marca del decremento va SIEMPRE que se lo haya podido identificar,
+        // restituya o no: aunque el cron ya hubiera repuesto la mora —y por eso
+        // el monto sea 0— el reporte de recuperación necesita saber que esa
+        // bajada dejó de valer, o cuenta la reposición del cron como mora
+        // NUEVA. Y va por `tx`, no por el `db` global como la restitución: es
+        // una anotación que solo tiene sentido si la reversa commitea.
+        if (decremento) {
+          await marcarDecrementoAnulado(tx, decremento.historial_id);
+        }
+
+        // ⚠️ La compensación del ledger va DENTRO de esta tx; la restitución de
+        // `moras_credito` (el `updateMora` de abajo) va FUERA. Si la tx confirma
+        // y `updateMora` falla después, el ledger ya devolvió lo pagado pero la
+        // mora del día NO se restituye: el cliente ve MENOS mora de la que debe
+        // hasta que el cron de la noche la recalcula desde el ledger. Se
+        // auto-repara; unirlas exige tocar el orden de candados del módulo.
+
+        if (restitucion) {
+          mayHaveGlobalPersistence = true;
+          // 🔒 SIN `dbClient`, A PROPÓSITO: el ajuste sigue yendo por el `db`
+          // global, FUERA de esta transacción, exactamente como antes de este
+          // arreglo. No es descuido: la reversa está construida alrededor de
+          // eso —el portero del paso 4️⃣.5️⃣ se adelanta justamente porque acá se
+          // escribe fuera de la tx, y `mayHaveGlobalPersistence` es lo que hace
+          // que un fallo posterior se reporte como `manual_action_required`—.
+          // Como corre en OTRA conexión, esta transacción no puede tener
+          // candada todavía la fila del crédito: `updateMora` pide `creditos`
+          // FOR UPDATE y se quedaría esperando a esta tx, que a su vez lo
+          // espera a él (Postgres no ve ese ciclo: pasa por Node). Por eso la
+          // compensación del ledger —cuyo FK sí toma FOR KEY SHARE sobre el
+          // crédito— va DESPUÉS de este bloque. Meter el ajuste adentro
+          // cambiaría la semántica de rollback de toda la reversa: es otra
+          // tarea, con sus propias pruebas.
+          const reverseMoraResult = await dependencies.restituirMora({
+            credito_id,
+            tipo: "INCREMENTO",
+            activa: true,
+            // El texto NO es decorativo: el reporte de recuperación lo lee para
+            // distinguir esta RESTITUCIÓN de una mora genuinamente nueva.
+            ...restitucion,
+          });
+
+          if (!reverseMoraResult.success) {
+            throw new Error(
+              "Error al reversar mora: " + reverseMoraResult.message,
+            );
+          }
         }
       }
+
+      // Compensar lo que este pago anotó en el ledger, SIEMPRE, sin mirar la
+      // columna `pago.mora`: el ledger es la fuente de verdad y esa columna
+      // puede estar en 0 aunque haya anotaciones vivas (el reset y el paso a
+      // INCOBRABLE la ponen en 0 en pagos que siguen valiendo). Cero filas
+      // compensadas es legítimo. Va DENTRO de tx: si falla, la reversa no pasa.
+      //
+      // 🔒 Va DESPUÉS de la restitución, no antes: insertar en
+      // `mora_pagada_cuota` hace que el FK tome FOR KEY SHARE sobre la fila del
+      // crédito hasta el commit, y `updateMora` (arriba, por el `db` global =
+      // otra conexión) pide esa misma fila FOR UPDATE, que choca con KEY SHARE.
+      // En el orden inverso la reversa se colgaba esperándose a sí misma. Nada
+      // de lo de arriba lee el ledger, así que el orden no cambia los montos.
+      // Costo: si esto falla después de restituir, el error sale como
+      // `manual_action_required` (`mayHaveGlobalPersistence`), no como un
+      // rollback limpio.
+      await revertirMoraPagadaDePago({ pago_id, tipo: "REVERSA" }, tx);
 
       // ======================================================================
       // 6️⃣.5️⃣ REVERSAR PAGO DE CONVENIO SI EXISTÍA
@@ -359,6 +466,24 @@ export function createReversePayment(
           monto_pago: Number(pago.pagoConvenio),
         });
       }
+
+      // ======================================================================
+      // 6️⃣.7️⃣ REVERSAR LOS RUBROS QUE ESTE PAGO COBRÓ
+      // ======================================================================
+      // Los dos casos no son simétricos porque las dos etapas del pago no lo
+      // son: un reclamo YA APLICADO descontó saldo de verdad y hay que
+      // devolvérselo al rubro (con su evento `reversa` en el historial); uno
+      // SIN APLICAR nunca movió nada, así que sólo se suelta lo apartado.
+      //
+      // En ambos casos el reclamo se BORRA, y eso ES el guard de doble reversa:
+      // la segunda pasada no encuentra filas y no devuelve nada — mismo
+      // criterio con el que el convenio se protege dejando `pagoConvenio = 0`.
+      //
+      // 🔴 VA ACÁ Y NO MÁS ABAJO: la rama de pago parcial hace `DELETE FROM
+      // pagos_credito`, y el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE.
+      // Después de ese borrado los reclamos ya no existen y el saldo del rubro
+      // se quedaría descontado para siempre por un pago que se revirtió.
+      await revertirRubrosDelPago(pago_id, tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]);
 
       // ======================================================================
       // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
@@ -529,6 +654,24 @@ export function createReversePayment(
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
+
+            /**
+             * Y se limpia lo ACREDITADO, no sólo los montos.
+             *
+             * Sin esto la fila reseteada conserva el crédito de saldo a favor que
+             * ya se devolvió, y el endpoint acepta revertirla otra vez: la segunda
+             * reversa relee el mismo valor y se lo vuelve a restar al cliente.
+             *
+             * Medido contra una copia de producción: un pago que acreditó
+             * Q4,635,531.32 se revierte bien la primera vez, y la SEGUNDA se lleva
+             * los Q5,000 que el cliente ya tenía de antes. El piso en cero evita el
+             * negativo, pero no evita que le vacíe el saldo legítimo.
+             *
+             * Va en CERO y no en NULL a propósito: NULL significa "fila anterior a
+             * la 0039, no se sabe" y haría caer la reversa en la conducta vieja.
+             * Cero es el dato real — esta fila, ya revertida, no acredita nada.
+             */
+            saldo_a_favor_acreditado: "0",
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -609,6 +752,9 @@ export function createReversePayment(
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
+              // Misma limpieza que la rama de arriba: sin esto una segunda
+              // reversa le vuelve a restar al cliente lo que este pago acreditó.
+              saldo_a_favor_acreditado: "0",
             })
             .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -655,8 +801,50 @@ export function createReversePayment(
       // ======================================================================
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
-      const montoBoleta = new Big(pago.monto_boleta ?? 0);
-      let nuevoSaldoAFavor = saldoActual.minus(montoBoleta);
+
+      /**
+       * Se devuelve lo que el pago ACREDITÓ, no el `monto_boleta`.
+       *
+       * Medido contra una copia de producción: un abono directo a capital de
+       * Q1,100 con Q100 de `otros` acredita CERO a saldo a favor —la boleta se
+       * reparte entera— y esta resta le quitaba Q1,000 al cliente. Plata que ese
+       * pago nunca le dio.
+       *
+       * La columna la escribe el registro (migración 0039) en vez de derivarse,
+       * porque no se puede derivar: en un pago mixto el disponible inicial se
+       * consume después en mora, rubros y cuotas, así que
+       * `boleta − otros − abono_capital` es el disponible de ARRANQUE. Calcularlo
+       * así borraría saldo ajeno — es exactamente el error que tuvo el primer
+       * intento de arreglar esto.
+       *
+       * NULL significa "fila anterior a la 0039, no se sabe": ahí se conserva la
+       * conducta vieja. Cambiarla a ciegas para las filas históricas sería
+       * inventar un dato que nadie registró.
+       *
+       * Y una vez aplicada la 0040 —que le pone `DEFAULT 0` a la columna— NULL es
+       * SÓLO eso: las filas que ya existían quedaron en NULL y toda fila nueva
+       * nace diciendo "acreditó cero". Hizo falta porque el NULL de una fila nueva
+       * era indistinguible del de una histórica, y había dos formas de llegar a
+       * él: que la transacción que acredita falle después de insertar la fila, y
+       * el camino NORMAL de pagos, que acredita saldo sin estampar esta columna.
+       *
+       * 🔴 Por eso el default vive en la 0040 y NO en la 0039: si se adelantara al
+       * despliegue, una instancia vieja —que no conoce la columna— acreditaría el
+       * sobrante y dejaría la fila en 0, y revertirla después devolvería CERO. Con
+       * la 0039 sola esas filas quedan en NULL, que es lo que de verdad son.
+       *
+       * ⚠️ Lo que eso NO resuelve: el camino normal sigue sin devolver lo que
+       * acreditó, porque su crédito es uno por boleta y las filas son por cuota —
+       * falta decidir cuál la carga. Pero dejar de sacarle al cliente plata que el
+       * pago nunca le dio es el lado seguro del error.
+       */
+      const acreditado = pago.saldo_a_favor_acreditado;
+      const aDevolver =
+        acreditado === null || acreditado === undefined
+          ? new Big(pago.monto_boleta ?? 0)
+          : new Big(acreditado);
+
+      let nuevoSaldoAFavor = saldoActual.minus(aDevolver);
 
       // Si el saldo queda negativo, ponerlo en cero
       if (nuevoSaldoAFavor.lt(0)) {

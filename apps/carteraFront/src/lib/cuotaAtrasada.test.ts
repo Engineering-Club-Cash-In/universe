@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   cuotasEnAtraso,
+  DIAS_PAGO_PENDIENTE_FRENA_MORA,
   devengaMora,
   pagoCubreCuota,
   STATUS_EXCLUIDOS_MORA,
@@ -77,14 +78,14 @@ describe("pagoCubreCuota", () => {
     ).toBe(false);
   });
 
-  it("un pago pendiente o anulado no cubre", () => {
+  it("un pago pendiente sin fecha de pago, o anulado, no cubre", () => {
     expect(
       pagoCubreCuota({
         paymentFalse: false,
         pagado: true,
         validationStatus: "pending",
         monto_aplicado: 1500,
-      })
+      }, HOY)
     ).toBe(false);
     expect(
       pagoCubreCuota({
@@ -94,6 +95,64 @@ describe("pagoCubreCuota", () => {
         monto_aplicado: 1500,
       })
     ).toBe(false);
+  });
+});
+
+// Contabilidad valida días después del cobro: un pendiente frena la mora de su
+// cuota hasta 7 días (por fecha_pago, calendario de Guatemala), igual que el cron.
+describe("pagoCubreCuota — pago pendiente de validación", () => {
+  const pendiente = (fecha_pago: PagoParaAtraso["fecha_pago"], over: Partial<PagoParaAtraso> = {}) => ({
+    paymentFalse: false,
+    pagado: true,
+    validationStatus: "pending",
+    monto_aplicado: 1500,
+    fecha_pago,
+    ...over,
+  });
+
+  it("el tope es 7 días, como el backend", () => {
+    expect(DIAS_PAGO_PENDIENTE_FRENA_MORA).toBe(7);
+  });
+
+  it("cubre de hoy hasta hace exactamente 7 días, y deja de cubrir el día 8", () => {
+    expect(pagoCubreCuota(pendiente("2026-09-09"), HOY)).toBe(true);
+    expect(pagoCubreCuota(pendiente("2026-09-07T00:00:00.000Z"), HOY)).toBe(true);
+    expect(pagoCubreCuota(pendiente("2026-09-02"), HOY)).toBe(true);
+    expect(pagoCubreCuota(pendiente("2026-09-01"), HOY)).toBe(false);
+    expect(pagoCubreCuota(pendiente("2025-12-01"), HOY)).toBe(false);
+  });
+
+  it("el día de fecha_pago se lee como el ::date del timestamp (componentes UTC)", () => {
+    // 2026-09-02 23:30 sin zona llega como "…T23:30:00.000Z": sigue siendo el 2.
+    expect(pagoCubreCuota(pendiente(new Date("2026-09-02T23:30:00.000Z")), HOY)).toBe(true);
+    expect(pagoCubreCuota(pendiente(new Date("2026-09-01T23:30:00.000Z")), HOY)).toBe(false);
+  });
+
+  it("una fecha futura no alarga el freno: mañana cubre (filas en UTC), pasado mañana no", () => {
+    expect(pagoCubreCuota(pendiente("2026-09-10"), HOY)).toBe(true);
+    expect(pagoCubreCuota(pendiente("2026-09-11"), HOY)).toBe(false);
+    expect(pagoCubreCuota(pendiente("2026-12-31"), HOY)).toBe(false);
+  });
+
+  it("el cruce de mes cuenta días de calendario", () => {
+    expect(pagoCubreCuota(pendiente("2026-02-24"), "2026-03-03")).toBe(true);
+    expect(pagoCubreCuota(pendiente("2026-02-23"), "2026-03-03")).toBe(false);
+  });
+
+  it("pendiente reciente pero anulado, sin monto aplicado o parcial: no cubre", () => {
+    expect(pagoCubreCuota(pendiente("2026-09-08", { paymentFalse: true }), HOY)).toBe(false);
+    expect(pagoCubreCuota(pendiente("2026-09-08", { monto_aplicado: 0 }), HOY)).toBe(false);
+    expect(pagoCubreCuota(pendiente("2026-09-08", { pagado: false }), HOY)).toBe(false);
+  });
+
+  it("cuotasEnAtraso: un pendiente reciente la saca del atraso; uno viejo no", () => {
+    const con = (fecha_pago: string) =>
+      cuotasEnAtraso(
+        [pagoBase(), pagoBase({ pagado: true, validationStatus: "pending", monto_aplicado: 1000, fecha_pago })],
+        HOY
+      );
+    expect(con("2026-09-05").size).toBe(0);
+    expect(con("2026-08-20").size).toBe(1);
   });
 });
 

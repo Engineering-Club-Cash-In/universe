@@ -12,6 +12,9 @@ const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
+import type { SignatureMode } from "../lib/contract-signature-mode";
+import type { IdentificacionDelInversionista } from "../lib/identidad-inversionista";
+
 // ============ TIPOS ============
 
 export interface DocumentType {
@@ -59,6 +62,21 @@ export interface Document {
 	count_doble_line: number;
 }
 
+/**
+ * Qué clase de campo es, para saber con qué pintarlo.
+ *
+ * Los contratos de inversiones traen los tres: listas repetibles (los créditos
+ * cedidos, los beneficiarios designados) y opciones cerradas (la modalidad de
+ * retorno, la figura fiscal). Los de ventas son todos `text`, y por eso esto no
+ * estaba declarado.
+ */
+export type FieldType = "text" | "select" | "list";
+
+export interface FieldOption {
+	value: string;
+	label: string;
+}
+
 export interface Field {
 	name: string;
 	key: string;
@@ -69,6 +87,9 @@ export interface Field {
 	description: string | null;
 	default: string | null;
 	is_double_line: boolean;
+	type?: FieldType;
+	/** En un `select`, las opciones; en una `list`, las columnas de cada item. */
+	options?: FieldOption[] | null;
 }
 
 export interface DocumentByDpiResponse {
@@ -93,18 +114,76 @@ export interface DeudorAdicional {
 	nacionalidad?: string;
 }
 
+/**
+ * Rol de un firmante. Define en qué línea de firma del documento cae cada
+ * persona: el generador conoce el layout de cada template y reparte por rol,
+ * porque el orden no es el mismo en todos (en la garantía mobiliaria y el
+ * reconocimiento de deuda el representante legal firma primero).
+ */
+export type SignerRole =
+	| "TITULAR"
+	| "COFIRMANTE"
+	| "REP_LEGAL"
+	/**
+	 * La segunda entidad. El contrato de servicios de inversiones lleva una
+	 * línea para CUBE y otra para RDBE, y con un solo rol de representante las
+	 * dos le tocaban a la misma persona: WeeTrust junta a los firmantes por
+	 * correo y una de las dos firmas desaparecía.
+	 */
+	| "REP_LEGAL_RDBE"
+	| "VENDEDOR";
+
+export interface ContractSigner {
+	role: SignerRole;
+	email: string;
+	/** Nombre real de la persona, tal como debe verse en el documento. */
+	name: string;
+	dpi?: string;
+	phone?: string;
+	/**
+	 * Qué verificación de identidad pedirle. Sólo la usan los contratos de
+	 * inversiones (ver `lib/identidad-inversionista.ts`); sin el campo, el
+	 * generador pide lo de siempre para ese tipo de contrato.
+	 */
+	identification?: IdentificacionDelInversionista;
+}
+
 export interface GenerateContractPayload {
 	contractType: string;
 	data: Record<string, unknown> & {
 		deudoresAdicionales?: DeudorAdicional[];
 	};
+	/** Firmantes con su rol. Es la forma preferida sobre `emails`. */
+	signers?: ContractSigner[];
+	/**
+	 * Emails en orden posicional.
+	 * @deprecated Usar `signers`: una lista plana se reparte por índice y con
+	 * cofirmantes termina cruzando los links.
+	 */
 	emails?: string[];
+	/** Reciben copia del flujo de firma sin firmar. */
+	observers?: string[];
 	options: {
 		gender: "male" | "female";
 		generatePdf: boolean;
 		isPlural?: boolean;
 		filenamePrefix: string;
+		/**
+		 * Nombre con el que el documento se ve en WeeTrust y en el correo de
+		 * firma. Es lo que lee el cliente, así que va sin timestamp y sin el
+		 * identificador técnico del tipo.
+		 */
+		documentName?: string;
 	};
+	/**
+	 * Sólo en un `paquete_cartas`: las cartas que lo forman, en orden, cada una
+	 * con sus datos. Lo arma `agruparCartas`.
+	 */
+	cartas?: Array<{
+		contractType: string;
+		data: Record<string, unknown>;
+		options: Record<string, unknown>;
+	}>;
 }
 
 export interface BatchGeneratePayload {
@@ -119,6 +198,45 @@ export interface DocumentResult {
 	linkDocument: string;
 	r2Key?: string;
 	signing_links?: string[];
+	/**
+	 * Cómo se firma el documento. Los `fisica` (hoy sólo la declaración de
+	 * vendedor) vuelven sin `signing_links` a propósito: se firman en papel.
+	 */
+	signatureMode?: SignatureMode;
+	/** Proveedor de firma usado ("weetrust" | "documenso"). */
+	signingProvider?: string;
+	/**
+	 * ID del documento en WeeTrust. Sin esto no se puede consultar el estado de
+	 * firma ni reintentarle a un firmante sin regenerar todo.
+	 */
+	documentID?: string;
+	/**
+	 * Enlace de observador: muestra el documento y cómo va la firma sin dejar
+	 * firmar. Es el único que se le puede pasar a alguien para que mire.
+	 */
+	observerUrl?: string;
+	/**
+	 * Sólo en un `paquete_cartas`: qué cartas quedaron en el PDF y cuántas
+	 * páginas ocupa cada una, en orden.
+	 */
+	cartas?: Array<{ contractType: string; label: string; paginas: number }>;
+	/**
+	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
+	 * Es lo que reemplaza al reparto por posición de `signing_links`.
+	 */
+	signatories?: Array<{
+		role: SignerRole;
+		email: string;
+		name: string;
+		signatoryID?: string;
+		signingUrl?: string;
+	}>;
+	/**
+	 * El PDF quedó guardado pero NO salió a firma: no se encontraron las líneas
+	 * de firma. Trae el motivo. Sólo en una subida a mano que lo pidió con
+	 * `guardarSiNoHayLineas` (ver `lib/contrato-falta-vincular.ts`).
+	 */
+	sinLineasDeFirma?: string;
 	error?: string;
 }
 
@@ -137,6 +255,18 @@ export function motivoDeFalla(result: DocumentResult): string | null {
 	if (!result.r2Key && !result.linkDocument) {
 		return "El documento se generó pero no quedó el PDF (falló la conversión). Reintenta este documento.";
 	}
+	// Subido a mano sin líneas de firma: no salió a firma a propósito, y el PDF
+	// está guardado. Sigue por el camino de "falta vincular", no es una falla.
+	if (result.sinLineasDeFirma && result.r2Key) return null;
+	// Un contrato electrónico sin links no está listo, por más que el PDF exista:
+	// nadie lo puede firmar. Volvía marcado como éxito y jurídico se enteraba
+	// recién al buscar el link que no estaba.
+	if (
+		result.signatureMode === "electronica" &&
+		(!result.signing_links || result.signing_links.length === 0)
+	) {
+		return "El contrato se generó pero no salió a firma: no quedó ningún enlace. Revisa que el cliente y los cofirmantes tengan correo registrado.";
+	}
 	return null;
 }
 
@@ -151,8 +281,20 @@ export interface BatchGenerateResponse {
 /**
  * Obtiene los tipos de documentos disponibles desde la API
  */
-export async function getDocumentTypes(): Promise<DocumentsResponse> {
-	const response = await fetch(`${LEGAL_API_URL}/docuSeal/documents`, {
+/**
+ * El catálogo de documentos disponibles.
+ *
+ * **Sin categoría devuelve sólo los de ventas**, que son los 14 que usa
+ * jurídico desde la oportunidad. Los de inversiones y sociedad sólo vuelven
+ * pidiéndolos por su categoría.
+ */
+export async function getDocumentTypes(
+	categoria?: string,
+): Promise<DocumentsResponse> {
+	const ruta = categoria
+		? `/docuSeal/documents?categoria=${encodeURIComponent(categoria)}`
+		: "/docuSeal/documents";
+	const response = await fetch(`${LEGAL_API_URL}${ruta}`, {
 		method: "GET",
 		headers: {
 			"Content-Type": "application/json",
@@ -206,6 +348,7 @@ export async function generateContractsBatch(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_GENERACION_MS),
 	});
 
 	if (!response.ok) {
@@ -293,4 +436,339 @@ export function formatFullNameFromRenap(renapData: RenapData): string {
 	].filter((part) => part && part.trim() !== "");
 
 	return parts.join(" ");
+}
+
+// ============ ESTADO Y REINTENTOS DE FIRMA ============
+
+export interface EstadoFirmante {
+	emailID: string;
+	name: string;
+	signatoryID: string;
+	isSigned: boolean;
+	signingUrl: string | null;
+	/** Epoch en milisegundos, o null si el link no vence. */
+	expiry: number | null;
+	/**
+	 * Cómo le fue a la verificación facial, en quien la lleva (el inversionista
+	 * en los contratos de inversión, el deudor en el reconocimiento de deuda).
+	 *
+	 * Es lo que explica un documento con todas las firmas que WeeTrust no cierra:
+	 * si la verificación terminó (`finished`) y salió inválida (`valid: false`),
+	 * el documento se queda en PENDING y no avanza solo. `null` en quien firma
+	 * sin verificación facial.
+	 */
+	biometric?: {
+		logID: string | null;
+		finished: boolean;
+		valid: boolean;
+		resultUrl: string | null;
+	} | null;
+}
+
+export interface EstadoDocumentoFirma {
+	success: boolean;
+	documentID: string;
+	status: "DRAFT" | "PENDING" | "COMPLETED" | string;
+	signatories: EstadoFirmante[];
+	/**
+	 * Enlace de observador del documento, si tiene alguno. Se usa al vincular un
+	 * documento armado a mano en WeeTrust; un generador de antes no lo manda.
+	 */
+	observerUrl?: string | null;
+	error?: string;
+}
+
+/**
+ * Cabecera que exige el generador en los endpoints que mandan a firmar, borran
+ * o reemiten documentos en WeeTrust. Es el mismo secreto que usa el generador
+ * para avisarnos el estado de firma (`WEETRUST_RELAY_SECRET`).
+ */
+/**
+ * Topes de las llamadas al generador.
+ *
+ * Quien regenera o manda enlaces las hace con el candado de la oportunidad
+ * tomado, y ese candado sólo sirve si la tarea termina: una petición sin tope
+ * lo dejaría tomado hasta que Postgres corte la transacción, que lo suelta sin
+ * detener nada. Subir y reemitir mueven un PDF, así que van más holgados.
+ */
+const TOPE_CONSULTA_MS = 30_000;
+const TOPE_CON_PDF_MS = 120_000;
+/** Generar convierte a PDF varios documentos; es lo más lento que hace. */
+const TOPE_GENERACION_MS = 180_000;
+
+function secretoParaElGenerador(): Record<string, string> {
+	return {
+		"x-weetrust-relay-secret": process.env.WEETRUST_RELAY_SECRET || "",
+	};
+}
+
+async function pedirAlGenerador<T>(
+	ruta: string,
+	method: "GET" | "PUT",
+	queHace: string,
+): Promise<T> {
+	const response = await fetch(`${LEGAL_DOCS_API_URL}${ruta}`, {
+		method,
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
+		},
+		signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
+	});
+
+	const cuerpo = await response.text();
+	if (!response.ok) {
+		// El generador devuelve el mensaje de WeeTrust en el cuerpo; perderlo deja
+		// a jurídico con un "falló" sin nada que hacer al respecto.
+		throw new Error(`${queHace}: ${response.status} - ${cuerpo}`);
+	}
+
+	return JSON.parse(cuerpo) as T;
+}
+
+/**
+ * Estado de firma de un documento, firmante por firmante.
+ *
+ * Se consulta a demanda contra WeeTrust en vez de esperar un webhook: hoy no
+ * hay webhooks registrados, así que el estado guardado nunca se movía solo.
+ */
+export async function consultarEstadoFirma(
+	documentID: string,
+): Promise<EstadoDocumentoFirma> {
+	return pedirAlGenerador<EstadoDocumentoFirma>(
+		`/contracts/signing-status/${encodeURIComponent(documentID)}`,
+		"GET",
+		"No se pudo consultar el estado de firma",
+	);
+}
+
+/** Reenvía el correo de invitación a los firmantes pendientes. */
+/**
+ * Renueva los enlaces de firma **sobre el mismo documento**: WeeTrust emite
+ * direcciones nuevas para quien todavía no firmó y no toca a los demás.
+ *
+ * Es la salida para un documento armado a mano en WeeTrust: reemitirlo desde
+ * acá volvería a buscar las líneas de firma, que es justo lo que no tiene.
+ */
+export async function renovarEnlacesEnElMismoDocumento(
+	documentID: string,
+): Promise<EstadoDocumentoFirma> {
+	return pedirAlGenerador<EstadoDocumentoFirma>(
+		`/contracts/refresh-signing-links/${encodeURIComponent(documentID)}`,
+		"PUT",
+		"No se pudieron renovar los enlaces de firma",
+	);
+}
+
+export async function reenviarCorreoDeFirma(
+	documentID: string,
+): Promise<{ success: boolean; documentID: string }> {
+	return pedirAlGenerador<{ success: boolean; documentID: string }>(
+		`/contracts/resend-email/${encodeURIComponent(documentID)}`,
+		"PUT",
+		"No se pudo reenviar el correo de firma",
+	);
+}
+
+/**
+ * Manda a firmar un PDF que jurídico subió a mano.
+ *
+ * El tipo de contrato tiene que ser uno de los mapeados: el generador ubica las
+ * líneas de firma por el layout de ese tipo y, si el PDF no las trae, no manda
+ * nada a firmar y devuelve el error.
+ */
+export async function subirContratoParaFirma(payload: {
+	contractType: string;
+	pdfBase64: string;
+	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
+	signers?: ContractSigner[];
+	observers?: string[];
+	/**
+	 * Si el PDF no trae las líneas de firma, guardarlo igual sin mandarlo a
+	 * firmar (vuelve con `sinLineasDeFirma`). Sin esto, se rechaza.
+	 */
+	guardarSiNoHayLineas?: boolean;
+}): Promise<DocumentResult & { message?: string }> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/upload-for-signing`,
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
+			},
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
+		},
+	);
+
+	const cuerpo = await response.text();
+	let parsed: (DocumentResult & { message?: string }) | null = null;
+	try {
+		parsed = JSON.parse(cuerpo);
+	} catch {
+		parsed = null;
+	}
+
+	// El generador devuelve 400 con el motivo adentro (p. ej. que el PDF no trae
+	// las líneas de firma del contrato). Ese motivo es justo lo que jurídico
+	// necesita leer, así que se devuelve en vez de reventar con el status.
+	if (!parsed) {
+		throw new Error(
+			`No se pudo subir el contrato a firma: ${response.status} - ${cuerpo}`,
+		);
+	}
+
+	return parsed;
+}
+
+/**
+ * Borra el documento en WeeTrust.
+ *
+ * Sólo se puede con documentos que nadie terminó de firmar. Uno completado
+ * queda en su blockchain y no hay forma de eliminarlo ni anularlo.
+ */
+/**
+ * Baja el PDF **firmado** de un documento ya completado.
+ *
+ * El que se guardó al generarlo es el borrador: no tiene las firmas. Éste es el
+ * que vale como contrato: el que ventas y jurídico bajan sin salir del CRM, y
+ * el que termina en la papelería del inversionista.
+ *
+ * Pasa por el generador porque las credenciales de WeeTrust las tiene él.
+ */
+/** WeeTrust todavía no cerró el documento: no hay PDF firmado que bajar. */
+export class DocumentoSinCerrarError extends Error {}
+
+export async function descargarPdfFirmado(documentID: string): Promise<Blob> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/signed-pdf/${encodeURIComponent(documentID)}`,
+		{
+			method: "GET",
+			headers: secretoParaElGenerador(),
+			// Un PDF firmado pesa poco, pero viaja desde WeeTrust: se le da aire.
+			signal: AbortSignal.timeout(120_000),
+		},
+	);
+
+	// El generador contesta 409 mientras WeeTrust no lo dé por COMPLETED.
+	if (response.status === 409) {
+		throw new DocumentoSinCerrarError(
+			`WeeTrust todavía no cerró el documento ${documentID}`,
+		);
+	}
+
+	if (!response.ok) {
+		const detalle = await response.text().catch(() => "");
+		throw new Error(
+			`No se pudo bajar el PDF firmado de ${documentID}: ${response.status} ${detalle}`,
+		);
+	}
+
+	return response.blob();
+}
+
+/**
+ * Repite o salta la verificación facial de un firmante que no la pasó.
+ *
+ * Es la salida del documento que se queda abierto con todas las firmas puestas:
+ * la persona firmó, WeeTrust no le validó la identidad y así no cierra. Con
+ * `biometricRetry` se le vuelve a pedir sobre el MISMO documento —los enlaces
+ * que ya tiene siguen sirviendo, no hay que reemitir nada— y con
+ * `biometricSkipped` el documento cierra con la firma tal como está, sin
+ * validación de identidad.
+ */
+export async function reintentarBiometria(payload: {
+	documentID: string;
+	/** El del intento fallido: viene en el `biometric` del firmante. */
+	biometricLogID: string;
+	action: "biometricRetry" | "biometricSkipped";
+}): Promise<void> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/retry-biometric/${encodeURIComponent(payload.documentID)}`,
+		{
+			method: "PUT",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
+			},
+			body: JSON.stringify({
+				biometricLogID: payload.biometricLogID,
+				action: payload.action,
+			}),
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
+		},
+	);
+
+	if (!response.ok) {
+		throw new Error(
+			`No se pudo ${payload.action === "biometricRetry" ? "pedir de nuevo la verificación facial" : "omitir la verificación facial"}: ${response.status} - ${await response.text()}`,
+		);
+	}
+}
+
+export async function borrarDocumentoDeWeeTrust(
+	documentID: string,
+): Promise<void> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/document/${encodeURIComponent(documentID)}`,
+		{
+			method: "DELETE",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
+			},
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
+		},
+	);
+
+	if (!response.ok) {
+		throw new Error(
+			`No se pudo borrar el documento en WeeTrust: ${response.status} - ${await response.text()}`,
+		);
+	}
+}
+
+/**
+ * Vuelve a emitir un contrato en WeeTrust con el PDF que ya está en R2.
+ *
+ * Es lo que hace "Regenerar": no cambia el documento, crea uno nuevo con el
+ * mismo PDF y enlaces nuevos para todos. A diferencia de `update-signatures` de
+ * WeeTrust —que sólo renueva las URL de quienes no firmaron y falla si ya
+ * firmaron todos— esto sirve también cuando la firma existe pero no vale.
+ */
+export async function reemitirContratoEnWeeTrust(payload: {
+	r2Key: string;
+	contractType: string;
+	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
+	signers?: ContractSigner[];
+	observers?: string[];
+}): Promise<DocumentResult & { message?: string }> {
+	const response = await fetch(`${LEGAL_DOCS_API_URL}/contracts/reissue`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
+		},
+		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
+	});
+
+	const cuerpo = await response.text();
+	try {
+		return JSON.parse(cuerpo);
+	} catch {
+		throw new Error(
+			`No se pudo reemitir el contrato: ${response.status} - ${cuerpo}`,
+		);
+	}
 }

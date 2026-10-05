@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { type Context as HonoContext, Hono } from "hono";
+import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import {
@@ -37,6 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { iniciarSchedulerVerificacionSat } from "./jobs/sat-verificacion-scheduler";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -56,7 +57,9 @@ import {
 	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
+import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
 import externalContractsRouter from "./routes/external-contracts";
+import weetrustStatusRouter from "./routes/weetrust-status";
 
 const app = new Hono();
 
@@ -205,6 +208,12 @@ app.on(["POST", "GET"], `${PARTNER_AUTH_BASE_PATH}/**`, async (c) => {
 
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
+// El generador nos relaya lo que WeeTrust le avisa por webhook: quién firmó y
+// cómo va el documento. La base es de acá, así que el estado se escribe acá.
+app.route("/api/contracts/weetrust-status", weetrustStatusRouter);
+// Cartera avisa que una compra de cartera fue aceptada y abre la batería de
+// contratos del inversionista.
+app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter);
 
 const handler = new RPCHandler(
 	Object.assign(
@@ -911,7 +920,10 @@ app.get("/api/accounting/resumen-transferencias-excel", async (c) => {
 		const moneda = c.req.query("moneda");
 
 		if (!mes || !anio) {
-			return c.json({ error: "Los parámetros 'mes' y 'anio' son obligatorios" }, 400);
+			return c.json(
+				{ error: "Los parámetros 'mes' y 'anio' son obligatorios" },
+				400,
+			);
 		}
 
 		const monedaParam: "quetzales" | "dolar" | undefined =
@@ -1202,6 +1214,7 @@ setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
+	iniciarSchedulerVerificacionSat();
 }, 10_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
@@ -1217,8 +1230,12 @@ function scheduleAtMidnightGT() {
 }
 scheduleAtMidnightGT();
 
-
 export default {
 	port: process.env.PORT || 3000,
 	fetch: app.fetch,
+	// Bun cierra por defecto la conexión a los 10s sin actividad, aunque el
+	// handler siga trabajando: el análisis de capacidad de pago (p50 ~33s) le
+	// llegaba al front como error. 255s es el máximo que admite Bun y cubre el
+	// timeout de 3 minutos de la IA.
+	idleTimeout: 255,
 };

@@ -13,6 +13,7 @@ import type {
 	CarteraBackError,
 	CarteraBackValidationError,
 	CarteraCredito,
+	CarteraCreditoOperativoSat,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraStatsResponse,
@@ -26,6 +27,7 @@ import type {
 	CreditActionInput,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	ProyeccionMoraMesResponse,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -1542,6 +1544,22 @@ export class CarteraBackClient {
 		return response.data || [];
 	}
 
+	async getCreditosOperativosParaSat(): Promise<CarteraCreditoOperativoSat[]> {
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraCreditoOperativoSat[]>
+		>(
+			"/internal/sat/creditos-operativos",
+			{ method: "GET" },
+			false,
+		);
+		if (!response.success) {
+			throw new Error(
+				response.message ?? "Cartera no devolvió los créditos operativos.",
+			);
+		}
+		return response.data ?? [];
+	}
+
 	// ========================================================================
 	// CRÉDITOS (LOANS)
 	// ========================================================================
@@ -1583,6 +1601,31 @@ export class CarteraBackClient {
 		);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
+	}
+
+	/**
+	 * Proyección de mora del mes en curso, día por día (días pasados reales,
+	 * de hoy en adelante proyectados). Sin caché, a diferencia de `getCredito`:
+	 * un pago registrado hace un minuto tiene que verse en la tarjeta.
+	 */
+	async getProyeccionMora(
+		numeroSifco: string,
+	): Promise<ProyeccionMoraMesResponse> {
+		return this.request<ProyeccionMoraMesResponse>(
+			`/credito/mora/proyeccion?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+			{ method: "GET" },
+			false,
+			undefined,
+			undefined,
+			// DENTRO del breaker (como `consultarMoraPorDpi`): un 200 sin días es
+			// el endpoint enfermo. Validado después de `request()`, el breaker ya
+			// lo había contado como éxito y el GET no se reintentaba.
+			(crudo) => {
+				if (!Array.isArray((crudo as { dias?: unknown } | null)?.dias)) {
+					throw new Error(`Proyección de mora inválida para ${numeroSifco}`);
+				}
+			},
+		);
 	}
 
 	async getAllCreditos(
@@ -2425,6 +2468,119 @@ export class CarteraBackClient {
 
 		this.cache.invalidate("investor-documents");
 		return response.json();
+	}
+
+	/**
+	 * Copia en cartera el contrato de inversión que emitió el CRM.
+	 *
+	 * Es la MISMA tabla de documentos del inversionista, con las columnas de
+	 * contrato llenas: así la ficha y el portal lo ven como un documento más, sin
+	 * pantallas nuevas del lado de cartera. Entra oculto, como el resto de la
+	 * papelería.
+	 *
+	 * Vuelve a llamarse cada vez que se reemite el documento: cartera lo reconoce
+	 * por `contrato_id` y reemplaza la fila en vez de dejar copias.
+	 */
+	async upsertInvestorContractDocument(input: {
+		file: Blob;
+		inversionista_id: number;
+		contrato_id: string;
+		nombre: string;
+		tipo_contrato: string;
+		weetrust_document_id?: string | null;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+		created_by?: string;
+		/** Si el inversionista lo ve en su portal. */
+		visible?: boolean;
+	}): Promise<{ success: boolean; message?: string }> {
+		const url = `${this.config.baseUrl}/investor-documents/contrato`;
+		const formData = new FormData();
+		formData.append("file", input.file, `${input.nombre}.pdf`);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("contrato_id", input.contrato_id);
+		formData.append("nombre", input.nombre);
+		formData.append("tipo_contrato", input.tipo_contrato);
+		if (input.weetrust_document_id) {
+			formData.append("weetrust_document_id", input.weetrust_document_id);
+		}
+		if (input.observer_url) formData.append("observer_url", input.observer_url);
+		if (input.firmantes) {
+			formData.append("firmantes", JSON.stringify(input.firmantes));
+		}
+		if (input.estado_firma) {
+			formData.append("estado_firma", input.estado_firma);
+		}
+		if (input.created_by) formData.append("created_by", input.created_by);
+		// Se manda sólo cuando hay una decisión que tomar: encenderlo al firmarse
+		// o apagarlo al anularse. Sin el campo, cartera deja como está lo que
+		// alguien haya decidido desde la ficha.
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
+
+		const token = await getCarteraAccessToken();
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			headers: {
+				Authorization: `Bearer ${token}`,
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+			},
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			throw new Error(
+				`Error al copiar el contrato en cartera: ${response.status} ${await response.text()}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Actualiza en cartera cómo va la firma de un contrato ya copiado.
+	 *
+	 * Sin mover el PDF: es lo que se manda cada vez que alguien firma o se
+	 * renuevan los enlaces. Si el contrato todavía no está copiado, cartera
+	 * responde `espejado: false` y no es un error.
+	 */
+	async updateInvestorContractDocumentState(input: {
+		contrato_id: string;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+		/**
+		 * Si el inversionista lo ve en su portal: `true` lo enciende (firmado),
+		 * `false` lo apaga (anulado). Sin el campo, cartera deja lo que había.
+		 */
+		visible?: boolean;
+	}): Promise<{
+		success: boolean;
+		espejado?: boolean;
+		/** Cómo estaba el estado de firma ANTES de este cambio. */
+		estadoAnterior?: string | null;
+	}> {
+		return this.request(
+			`/investor-documents/contrato/${encodeURIComponent(input.contrato_id)}`,
+			{
+				method: "PATCH",
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				headers: {
+					"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+				},
+				body: JSON.stringify({
+					observer_url: input.observer_url ?? undefined,
+					firmantes: input.firmantes ?? undefined,
+					estado_firma: input.estado_firma ?? undefined,
+					// Tal cual: `false` tiene que llegar para apagarlo al anularse.
+					// `undefined` se cae del JSON, que es el "no opino".
+					visible: input.visible,
+				}),
+			},
+		);
 	}
 
 	async getInvestorDocumentsAdmin(

@@ -133,6 +133,15 @@ const REDIRECT_CONFIG: Record<
 			params: { opportunityId: id },
 		}),
 	},
+	// Los contratos de un inversionista no salen de una oportunidad sino de la
+	// batería que abre cada compra de cartera aceptada.
+	investor_contracts: {
+		label: "Ver contratos pendientes",
+		getRoute: (id) => ({
+			to: "/juridico/inversionista/$batchId",
+			params: { batchId: id },
+		}),
+	},
 	analysis_details: {
 		label: "Ver análisis",
 		getRoute: (id) => ({

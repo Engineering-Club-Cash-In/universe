@@ -1,6 +1,6 @@
-import { and, count, desc, eq, gte, ilike, inArray, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, exists, gt, gte, ilike, inArray, notInArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
+import { MORAS_CREDITO_UQ_ACTIVA, asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -9,7 +9,18 @@ import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
 import { clampPagination, contienePatron } from "../utils/functions/pagination";
 import { stat } from "fs";
 import { emitCreditLateFee } from "../utils/structuredLogger";
+import { STATUS_EXCLUIDOS_MORA } from "../constants/creditStatus";
 import type { PoolClient } from "pg";
+
+// Importar para uso interno en este archivo
+import { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
+import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
+import { moraPendientePorCuota, repartirPagoDeMora, type CuotaParaPendiente } from "../utils/moraPendiente";
+import { moraPagadaPorCuota } from "../utils/moraPagadaPorCuota";
+import { anotarMoraPagada, type AnotacionMoraPagada } from "../utils/anotarMoraPagada";
+import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
+// Re-exportar para mantener compatibilidad con importadores existentes
+export { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
 
 function safeNow(): number {
   try {
@@ -41,34 +52,616 @@ type MoraEventoOrigen =
   | "CONDONACION_INDIVIDUAL"
   | "CONDONACION_MASIVA";
 
-export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+// La lista vive en constants/creditStatus.ts para que un módulo de reglas
+// puras pueda reusarla sin arrastrar la conexión a la base que importa este
+// archivo. Se re-exporta acá porque varios módulos ya la importaban de latefee.
+export { STATUS_EXCLUIDOS_MORA };
 
-export function isOverdueInstallmentForMora(
-  cuota: {
-    fecha_vencimiento: Date | string;
-    pagado: boolean | null;
-    hasPaidPayment?: boolean | null;
-    statusCredit?: string | null;
-  },
-  hoy: Date,
-) {
-  const zona = "America/Guatemala";
-  const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
-  fechaVenc.setHours(0, 0, 0, 0);
+/**
+ * La MISMA lista, tipada como la columna, para poder usarla dentro de una
+ * condición SQL (`notInArray`). Se declara acá al lado y no se duplica: si
+ * alguien agrega un estado arriba, la condición de los UPDATE lo hereda sola.
+ */
+/**
+ * 🔒🔒 ORDEN DE CANDADOS DEL MÓDULO DE MORA — REGLA, NO ESTILO 🔒🔒
+ *
+ *      Dentro de UNA MISMA TRANSACCIÓN, primero se toma la fila de
+ *      `creditos` y DESPUÉS la de `moras_credito`. NUNCA al revés.
+ *
+ * Por qué: las dos filas se tocan juntas en casi todos los caminos del módulo
+ * (convenio, cron, limpieza al validar un pago, /mora/update, condonación). Si
+ * una transacción toma `creditos` → `moras_credito` y otra toma
+ * `moras_credito` → `creditos`, cada una queda esperando el candado que tiene
+ * la otra: eso es un ciclo de deadlock y Postgres lo corta matando una con
+ * 40P01. Nadie maneja el 40P01 acá, así que el precio es o un convenio que
+ * falla, o —peor— la corrida nocturna entera de `procesarMoras` abortada antes
+ * de procesar el resto de los créditos.
+ *
+ * El orden elegido es el que ya usaban el convenio (`createPaymentAgreement`
+ * marca EN_CONVENIO y recién después llama a `desactivarMoraPorConvenio`) y la
+ * rama CREACION del cron; el resto se alineó a ellos.
+ *
+ * Cómo se respeta en la práctica:
+ *  - si la transacción ESCRIBE `creditos`, ese UPDATE va primero y de paso
+ *    toma el candado (no hace falta un SELECT … FOR UPDATE aparte);
+ *  - si el UPDATE de `creditos` no puede ir primero porque depende de leer la
+ *    mora (condonación, /mora/update), se toma el candado con un
+ *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción;
+ *  - un UPDATE condicional de `creditos` que no matchea filas no deja candado,
+ *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
+ *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
+ *
+ * `createMora` sin `dbClient` autocommitea cada statement y no puede sostener
+ * un ciclo. CON `dbClient` corre dentro de la transacción de quien la llama
+ * (la ruptura de convenio), que por eso bloquea `creditos` PRIMERO. La
+ * condonación masiva es transaccional y también bloquea `creditos` primero.
+ *
+ * Los tests de `moraOrdenDeCandados.test.ts` fallan si alguna de estas
+ * transacciones vuelve a pedir `moras_credito` antes que `creditos`.
+ */
 
-  const fechaHoy = toZonedTime(hoy, zona);
-  fechaHoy.setHours(0, 0, 0, 0);
-
-  const isOverdue = fechaVenc < fechaHoy;
-  const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
-  const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
-
-  return isOverdue && isUnpaid && isEligible;
+/**
+ * Señal interna para abortar la transacción de un crédito que dejó de ser
+ * elegible para mora a media corrida. No es un error del cron: se usa para
+ * forzar el ROLLBACK (la única forma de deshacer un write ya hecho dentro de
+ * la transacción) y se absorbe en el `catch` de la rama que la tira.
+ */
+class CreditoYaNoElegible extends Error {
+  constructor() {
+    super("El crédito dejó de ser elegible para mora a media corrida");
+    this.name = "CreditoYaNoElegible";
+  }
 }
 
 /**
- * Inserta un evento en moras_historial. No lanza si falla — el historial
- * no debe romper la operación principal, solo loguea.
+ * Señal interna para abortar la transacción cuando el UPDATE condicional sobre
+ * `moras_credito` (`activa = true` + `.returning()`) no afecta filas: otra ruta
+ * ya apagó esa mora.
+ *
+ * Antes alcanzaba con un `return`, porque el candado de la mora era el PRIMER
+ * write de la transacción y no había nada escrito que deshacer. Al invertir el
+ * orden (ver la regla de arriba) el UPDATE de `creditos` ya corrió, así que un
+ * `return` COMMITEARÍA ese cambio de estado sin haber apagado la mora — por
+ * ejemplo bajando a ACTIVO un crédito cuya mora la apagó un convenio, que a
+ * continuación lo deja EN_CONVENIO. Tirar revierte todo y el crédito cae en el
+ * balde de omitidos, exactamente como antes.
+ */
+class MoraYaApagada extends Error {
+  constructor() {
+    super("La mora ya fue apagada por otra ruta");
+    this.name = "MoraYaApagada";
+  }
+}
+
+const STATUS_EXCLUIDOS_MORA_SQL = STATUS_EXCLUIDOS_MORA as Array<
+  (typeof creditos.$inferSelect)["statusCredit"]
+>;
+
+/**
+ * Fecha de CALENDARIO (año/mes/día) de un vencimiento, como número comparable
+ * — `Date.UTC(y, m, d)`, o sea la medianoche UTC de ese día.
+ *
+ * `cuotas_credito.fecha_vencimiento` es un `timestamp` SIN zona que guarda la
+ * fecha de calendario tal cual (siempre 00:00:00); NO es un instante. `pg` la
+ * entrega como un Date cuyos campos LOCALES ya son esa fecha, así que se leen
+ * tal cual. Pasarla por `toZonedTime` —que sirve para instantes reales, como
+ * `moras_historial.fecha`— le resta 6 h y en un proceso UTC (producción: el
+ * Dockerfile arranca de oven/bun y no fija TZ) la tira al DÍA ANTERIOR: la
+ * cuota cobraría mora el mismo día que vence, y el cron (TS) quedaría peleado
+ * con el guard de createMora/paymentAgreement (SQL, que usa
+ * `fecha_vencimiento::date` y sí acierta).
+ *
+ * Con los dos extremos en `Date.UTC(...)` la resta es exacta en múltiplos de
+ * 86_400_000: no hay residuos que redondear.
+ *
+ * El `hoy` que reciben los helpers de abajo es el canónico `hoyGuatemala()`,
+ * cuyos campos locales YA son la hora de pared de Guatemala: por eso también
+ * se le leen tal cual y no se lo vuelve a pasar por `toZonedTime` (hacerlo lo
+ * correría un día más).
+ */
+export function fechaCalendarioGT(valor: Date | string): number {
+  if (typeof valor === "string") {
+    // "2026-09-20", "2026-09-20 00:00:00", "2026-09-20T00:00:00.000Z": los
+    // primeros 10 caracteres son la fecha. Nunca `new Date(str)`, que
+    // reintroduce la zona del proceso.
+    // Se valida la FORMA antes de parsear: `Number("")` es 0, así que un string
+    // truncado como "2026-09" pasaba el chequeo de Number.isFinite (día 0) y
+    // devolvía en silencio el 31-ago-2026. Exigir YYYY-MM-DD en los primeros 10
+    // caracteres es lo único que distingue "fecha" de "basura"; lo que venga
+    // después ("T00:00:00Z", " 00:00:00") no importa y se ignora igual que antes.
+    const fecha = valor.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return NaN;
+    const anio = Number(fecha.slice(0, 4));
+    const mes = Number(fecha.slice(5, 7));
+    const dia = Number(fecha.slice(8, 10));
+    return Date.UTC(anio, mes - 1, dia);
+  }
+  return Date.UTC(valor.getFullYear(), valor.getMonth(), valor.getDate());
+}
+
+export type CuotaParaMora = {
+  fecha_vencimiento: Date | string;
+  pagado: boolean | null;
+  hasPaidPayment?: boolean | null;
+  statusCredit?: string | null;
+};
+
+/**
+ * La mitad del criterio de mora que NO habla de fechas: la cuota está impaga,
+ * no tiene un pago aplicado encima, y el crédito no está en un estado que el
+ * cron excluye.
+ *
+ * Existe separada porque hay DOS preguntas sobre la misma cuota: "¿el cron le
+ * cobra mora hoy?" (vencida) y "¿le va a cobrar dentro del horizonte que se le
+ * anuncia al cliente?" (vence pronto). Si cada una repitiera los mismos tres
+ * chequeos, podrían divergir y el aviso hablaría de cuotas que el cron nunca
+ * va a tocar.
+ */
+export function esCuotaElegibleParaMora(cuota: CuotaParaMora): boolean {
+  const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
+  const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
+
+  return isUnpaid && isEligible;
+}
+
+export function isOverdueInstallmentForMora(cuota: CuotaParaMora, hoy: Date) {
+  const fechaVenc = fechaCalendarioGT(cuota.fecha_vencimiento);
+  const fechaHoy = fechaCalendarioGT(hoy);
+
+  return esCuotaElegibleParaMora(cuota) && fechaVenc < fechaHoy;
+}
+
+/**
+ * Cuántas cuotas sin pagar vencen HOY: hoy no devengan mora (el cron exige
+ * vencimiento < hoy), mañana sí. Mismo criterio de elegibilidad que el cron,
+ * para que la proyección de «mañana sube» no se aparte de lo que va a cobrar.
+ */
+export function contarCuotasQueVencenHoy(
+  cuotas: Omit<CuotaParaMora, "statusCredit">[],
+  hoy: Date,
+  statusCredit: CuotaParaMora["statusCredit"],
+): number {
+  return cuotas.filter(
+    (c) =>
+      diasAtrasoMoraConSigno(c.fecha_vencimiento, hoy) === 0 &&
+      esCuotaElegibleParaMora({ ...c, statusCredit }),
+  ).length;
+}
+
+/**
+ * Las cuotas que entran en la PROYECCIÓN de la mora: las elegibles cuyo
+ * vencimiento cae dentro del horizonte que se le anuncia al cliente (por
+ * defecto los próximos 30 días), estén ya vencidas o no.
+ *
+ * Por qué incluye las que todavía no vencen: lo que se le dice al cliente es
+ * cuánto va a subir su saldo mañana y de aquí a un mes. Una cuota que vence
+ * HOY mañana lleva 1 día de atraso y el cron ya le cobra 1/30 — dejarla fuera
+ * anuncia un ritmo MENOR al real, que es la dirección peligrosa: el cliente
+ * paga lo que se le dijo y queda corto. Con los días en negativo (una cuota
+ * que vence en 10 días entra con −10), `calcularMoraProporcional` las recoge
+ * solas el día que les toca, porque sube a 0 todo día negativo.
+ */
+export function isInstallmentWithinMoraHorizon(
+  cuota: CuotaParaMora,
+  hoy: Date,
+  horizonteDias: number = BASE_DIAS_MORA,
+) {
+  return (
+    esCuotaElegibleParaMora(cuota) &&
+    diasAtrasoMoraConSigno(cuota.fecha_vencimiento, hoy) >= -horizonteDias
+  );
+}
+
+/**
+ * Días enteros de atraso de una cuota: diferencia de fechas de CALENDARIO en
+ * los dos extremos (mismo helper que isOverdueInstallmentForMora, para que
+ * nunca cuente un día que el filtro de vencidas no reconoce, ni al revés).
+ * Como ambos lados son `Date.UTC(y,m,d)`, la resta cae siempre en múltiplos
+ * exactos de 86_400_000 y el `Math.trunc` es solo blindaje.
+ */
+export function diasAtrasoMora(fechaVencimiento: Date | string, hoy: Date): number {
+  return Math.max(0, diasAtrasoMoraConSigno(fechaVencimiento, hoy));
+}
+
+/**
+ * Los mismos días, pero CON signo: negativo cuando la cuota todavía no vence
+ * (vence en 10 días → −10). Lo necesita la proyección de la mora, que desplaza
+ * los días hacia adelante y necesita saber cuánto le falta a cada cuota para
+ * empezar a cobrar; `diasAtrasoMora` los aplasta a 0 y ahí se pierde esa
+ * distancia. Para el cron y para el monto de hoy se sigue usando la versión
+ * aplastada, que es la que corresponde a `calcularMoraProporcional`.
+ */
+export function diasAtrasoMoraConSigno(
+  fechaVencimiento: Date | string,
+  hoy: Date,
+): number {
+  const fechaVenc = fechaCalendarioGT(fechaVencimiento);
+  const fechaHoy = fechaCalendarioGT(hoy);
+
+  return Math.trunc((fechaHoy - fechaVenc) / 86_400_000);
+}
+
+/**
+ * Las cuotas que HOY devengan mora de un conjunto de créditos, cada una con lo
+ * que ya pagó — con el criterio EXACTO de `procesarMoras`.
+ *
+ * ── Por qué existe ──────────────────────────────────────────────────────────
+ * Cada camino que anota lo pagado —el pago, la condonación individual, la
+ * masiva, la ruptura de convenio— tiene que repartir el monto entre las MISMAS
+ * cuotas y con los MISMOS días que después usa el cron para cobrar. Si uno de
+ * ellos decide por su cuenta qué cuota está vencida (sin `hasPaidPayment`, con
+ * `deudatotal` en vez de capital, con días en UTC en vez de calendario de
+ * Guatemala), le abona a cuotas que el cron no mira: el cron ve esas cuotas con
+ * lo pagado en cero y vuelve a cobrar la mora que el cliente ya pagó.
+ *
+ * Una revisión de código encontró exactamente eso en dos lugares distintos. Es
+ * la misma lección que la fórmula (`utils/moraFormula.ts`): el criterio se
+ * escribe UNA vez y todos lo usan.
+ *
+ * ── Qué reusa, sin reescribir ───────────────────────────────────────────────
+ * La subconsulta `hasPaidPayment` es copia literal de la del cron (una fila de
+ * pago "vouchea" la cuota solo si aplicó plata REAL, `monto_aplicado > 0`), y
+ * el filtro es `isOverdueInstallmentForMora` — la misma función, no otra igual.
+ * Los días salen de `diasAtrasoMora`, en fechas de calendario de Guatemala.
+ *
+ * Las cuotas vuelven ordenadas de la MÁS VIEJA a la más nueva, que es el orden
+ * en que se reparte un pago de mora. Quien llame no tiene que reordenar.
+ *
+ * Devuelve un Map por crédito con su capital y sus cuotas. Un crédito sin
+ * cuotas vencidas elegibles no aparece.
+ */
+export async function cuotasParaPendienteDeCreditos(
+  creditoIds: number[],
+  ejecutor: typeof db,
+  hoy: Date,
+  /**
+   * `excluirPagoId`: el pago que se está anotando no cubre su propia cuota
+   * (ver `hasPaidPaymentSql`). Solo lo pasa el pago normal; el cron, la
+   * condonación y el desglose miran la cobertura completa.
+   */
+  opciones: { excluirPagoId?: number } = {},
+): Promise<Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>> {
+  const resultado = new Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>();
+  if (creditoIds.length === 0) return resultado;
+
+  const filas = await ejecutor
+    .select({
+      cuota_id: cuotas_credito.cuota_id,
+      credito_id: cuotas_credito.credito_id,
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pagado: cuotas_credito.pagado,
+      statusCredit: creditos.statusCredit,
+      capital: creditos.capital,
+      // La subconsulta está centralizada en utils/cuotaYaPagadaSql
+      // para evitar copias desincronizadas.
+      hasPaidPayment: hasPaidPaymentSql(opciones),
+    })
+    .from(cuotas_credito)
+    .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
+    // Solo impagas: `isOverdueInstallmentForMora` ya lo exige en JS, así que no
+    // cambia el resultado, pero ahorra el EXISTS de cada cuota ya pagada.
+    .where(and(inArray(cuotas_credito.credito_id, creditoIds), eq(cuotas_credito.pagado, false)))
+    .orderBy(cuotas_credito.fecha_vencimiento, cuotas_credito.cuota_id);
+
+  const vencidas = filas.filter((c) => isOverdueInstallmentForMora(c, hoy));
+  if (vencidas.length === 0) return resultado;
+
+  const pagadoPorCuota = await moraPagadaPorCuota(
+    vencidas.map((c) => c.cuota_id),
+    ejecutor as any,
+  );
+
+  for (const c of vencidas) {
+    const credito = c.credito_id as number;
+    if (!resultado.has(credito)) {
+      resultado.set(credito, { capital: String(c.capital ?? "0"), cuotas: [] });
+    }
+    resultado.get(credito)!.cuotas.push({
+      cuota_id: c.cuota_id,
+      diasAtraso: diasAtrasoMora(c.fecha_vencimiento, hoy),
+      pagado: pagadoPorCuota.get(c.cuota_id) ?? 0,
+    });
+  }
+  return resultado;
+}
+
+/**
+ * Genera las anotaciones de condonación para un crédito.
+ *
+ * Calcula qué parte de la mora condonada corresponde a cada cuota,
+ * respetando el pendiente (devengado − pagado) por cuota. El sobrante
+ * se descarta (no tiene cuota donde anotarse).
+ */
+export function anotacionesDeCondonacion(params: {
+  credito_id: number;
+  monto: Big | string | number;
+  capital: Big | string | number;
+  cuotas: CuotaParaPendiente[];
+  usuario_id: number;
+  motivo: string;
+}): AnotacionMoraPagada[] {
+  // La misma regla de reparto que el pago normal (`anotarMoraPagoNormal`).
+  return anotacionesDeMoraAbonada({ ...params, tipo: "CONDONACION" });
+}
+
+/**
+ * La mora que este crédito va a tener DENTRO DE `dias` días, con la fórmula
+ * real: los mismos días de atraso de cada cuota, desplazados hacia adelante.
+ *
+ * Es la única pieza que sabe proyectar. Las dos cifras que se le anuncian al
+ * cliente —el ritmo diario y su techo mensual— salen de restar dos
+ * proyecciones, no de contar cuotas: contar obliga a repetir la fórmula en
+ * otras palabras ("1/30 por cada cuota bajo el techo") y esa paráfrasis se
+ * desincroniza sola en cuanto la fórmula tiene un borde (el techo por cuota,
+ * las cuotas que aún no vencen). Restar dos corridas de la MISMA función no
+ * puede desincronizarse.
+ *
+ * Los días desplazados que sigan negativos (una cuota que aún no vence)
+ * cuentan como 0: es lo que ya hace `calcularMoraProporcional`, y es lo
+ * correcto — esa cuota todavía no cobra nada, pero empieza a cobrar sola en la
+ * proyección del día en que vence.
+ *
+ * Devuelve un Big SIN redondear, igual que `calcularMoraProporcional`.
+ */
+export function proyectarMoraEnDias(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+  dias: number;
+}): Big {
+  return calcularMoraProporcional({
+    capital: params.capital,
+    diasAtrasadosPorCuota: params.diasAtrasadosPorCuota.map(
+      (dias) => dias + params.dias,
+    ),
+  });
+}
+
+/**
+ * La mora tal como el cliente la LEE: a dos decimales.
+ *
+ * Por qué redondear antes de restar y no al final: al cliente se le dice "hoy
+ * debés Q108.27 y aumenta Q3.73 por día". Él suma esos dos números, no los
+ * Big crudos. Si la resta se hiciera entre valores sin redondear, el
+ * incremento anunciado no cerraría con la mora anunciada y le faltaría un
+ * centavo para cubrir la cuota.
+ */
+function moraComoLaVeElCliente(mora: Big): Big {
+  return new Big(mora.toFixed(2));
+}
+
+/**
+ * Cuánto va a CRECER la mora de este crédito en la próxima corrida del cron:
+ * la mora proyectada a mañana menos la de hoy, las dos ya redondeadas.
+ *
+ * Por qué existe: con la mora proporcional el monto adeudado ya no es el mismo
+ * del día 5 al día 25 del mes — sube todos los días. Cuando al cliente se le
+ * dice "debés Q4,318.20" ese número es correcto hoy y está corto pasado
+ * mañana: paga lo que se le dijo, queda un residuo y la cuota no se cubre. En
+ * vez de un "al día de hoy" sin más, se le dice cuánto sube por día para que
+ * pueda calcular lo que debe el día que pague.
+ *
+ * Sale de la proyección y no de un conteo de cuotas porque el conteo se
+ * equivocaba en los bordes: una cuota que VENCE HOY todavía no cobra nada,
+ * pero mañana lleva 1 día y el cron le cobra 1/30 — contando solo las ya
+ * vencidas, el ritmo anunciado se quedaba corto justo el día en que el cliente
+ * más lo necesita. Las cuotas ya topadas por el min(1,·) aportan lo mismo en
+ * las dos proyecciones y se cancelan solas, sin tener que reconocerlas.
+ *
+ * Devuelve un Big que YA es una diferencia de montos redondeados: el
+ * `.toFixed(2)` del caller no lo mueve.
+ */
+export function incrementoDiarioMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  return crecimientoDeLaMoraEn(params, 1);
+}
+
+/**
+ * El TECHO de ese crecimiento: lo MÁXIMO que la mora de este crédito puede
+ * subir en un mes, contado desde hoy — la misma resta, pero contra la mora
+ * proyectada a 30 días.
+ *
+ * Por qué existe: `incrementoDiarioMora` sola promete un ritmo que no dura
+ * para siempre — "aumenta Q16.80 por cada día que pase" es cierto hoy, pero
+ * cada cuota deja de crecer al llegar a su cargo mensual. Decir el techo junto
+ * al ritmo —el mismo estándar de la plantilla del día de pago, "Q… por cada
+ * día de atraso, hasta un máximo de Q… al mes"— evita prometer un crecimiento
+ * infinito.
+ *
+ * Por qué 30 días es un techo de verdad: toda cuota elegible que entra en la
+ * lista llega a su tope dentro de esa ventana (le faltan como mucho 30 días
+ * desde que vence), así que la mora proyectada a 30 días ya no puede subir más
+ * por esas cuotas.
+ *
+ * NO puede dar negativo: la mora proyectada crece con los días (cada cuota
+ * aporta `cargoMensual × min(1, días/30)`, que es monótono), así que restarle
+ * la de hoy nunca da menos que 0 — por eso no hay clamp, que sería código
+ * muerto (ver el test que fija la invariante).
+ */
+export function incrementoMaximoMensualMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  return crecimientoDeLaMoraEn(params, BASE_DIAS_MORA);
+}
+
+/** Lo que la mora sube de hoy a `dias` días, entre los montos que el cliente ve. */
+function crecimientoDeLaMoraEn(
+  params: { capital: Big | string | number; diasAtrasadosPorCuota: number[] },
+  dias: number,
+): Big {
+  const hoy = moraComoLaVeElCliente(proyectarMoraEnDias({ ...params, dias: 0 }));
+  const futura = moraComoLaVeElCliente(proyectarMoraEnDias({ ...params, dias }));
+
+  return futura.minus(hoy);
+}
+
+/**
+ * Decisión pura de qué hacer con la mora al ROMPER un convenio de pago
+ * (paymentAgreement.updateConvenioStatus con status=false).
+ *
+ * El orden de operaciones de esa función es: borra el convenio, pone el
+ * crédito MOROSO y recrea la mora — sin rollback. Si el monto de mora redondea
+ * a Q0.00, `createMora` lo rechaza ("Monto de mora debe ser mayor a 0") y el
+ * crédito queda en tierra de nadie: sin convenio, sin mora y nunca MOROSO. Con
+ * la mora proporcional eso pasa de verdad: un capital chico con 1 solo día de
+ * atraso (capital ≲ Q13.40 → 13.40 × 1.12% × 1/30 ≈ Q0.005) redondea a 0.
+ *
+ * Con monto 0 no hay mora que cobrar, así que se toma el MISMO camino que "no
+ * hay cuotas atrasadas": crédito ACTIVO y coherente.
+ */
+export function decidirMoraTrasRomperConvenio(params: {
+  capital: Big | string | number | null;
+  cuotasParaPendiente: CuotaParaPendiente[];
+}): { accion: "CREAR_MORA"; montoMora: number } | { accion: "ACTIVAR"; motivo: string } {
+  const capital = new Big(params.capital || 0);
+
+  if (params.cuotasParaPendiente.length <= 0) {
+    return { accion: "ACTIVAR", motivo: "sin cuotas atrasadas" };
+  }
+
+  if (capital.lte(0)) {
+    return { accion: "ACTIVAR", motivo: "Crédito sin capital — no aplica mora" };
+  }
+
+  const resultado = moraPendientePorCuota({
+    capital,
+    cuotas: params.cuotasParaPendiente,
+  });
+
+  const montoRedondeado = Number(resultado.total.toFixed(2));
+
+  if (!(montoRedondeado > 0)) {
+    // El factor sale de lo que `moraPendientePorCuota` ya calculó: sin una
+    // segunda pasada por la fórmula.
+    const devengado = resultado.porCuota.reduce((a, c) => a.plus(c.devengado), new Big(0));
+    const cargoMensual = capital.times(TASA_MORA_MENSUAL);
+    const factorDias = cargoMensual.gt(0) ? devengado.div(cargoMensual) : new Big(0);
+
+    return {
+      accion: "ACTIVAR",
+      motivo: `mora proporcional de ${params.cuotasParaPendiente.length} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factorDias.toFixed(4)})`,
+    };
+  }
+  return { accion: "CREAR_MORA", montoMora: montoRedondeado };
+}
+
+export const MOTIVO_MORA_SIN_CAPITAL = "Crédito sin capital — no aplica mora";
+export const MOTIVO_MORA_MENOR_A_UN_CENTAVO = "Mora proporcional menor a un centavo";
+
+/**
+ * Decisión pura del paso 5 del cron (`procesarMoras`) para UN crédito con
+ * cuotas vencidas: ¿hay mora que cobrar, o hay que apagar la que tuviera?
+ *
+ * Dos casos caen en "no hay mora que cobrar":
+ *  - capital ≤ 0 (el caso viejo: sin capital no hay base sobre la cual cobrar);
+ *  - la mora proporcional redondea a Q0.00 (capital positivo pero chico + pocos
+ *    días de atraso, p. ej. Q10 con 1 día → 10 × 1.12% × 1/30 ≈ Q0.0037).
+ *
+ * El segundo caso NO se puede insertar: `createMora` rechaza explícitamente los
+ * montos ≤ 0 ("Monto de mora debe ser mayor a 0"), y
+ * `decidirMoraTrasRomperConvenio` ya decide dejar ACTIVO ese mismo crédito — si
+ * el cron lo marcara MOROSO con una mora de Q0.00 el crédito se mecería entre
+ * MOROSO y ACTIVO noche tras noche, y el cliente aparecería moroso por cero.
+ *
+ * El monto va como string ya redondeado porque es exactamente lo que se
+ * escribe en `moras_credito.monto_mora`: decidir sobre el número redondeado es
+ * lo único que garantiza que nunca se guarde un "0.00" activo.
+ */
+export function decidirMoraDelCron(params: {
+  capital: Big | string | number | null;
+  cuotasParaPendiente: CuotaParaPendiente[];
+}): { accion: "APLICAR"; montoStr: string } | { accion: "DESACTIVAR"; motivo: string } {
+  let capital: Big;
+  try {
+    capital = new Big(params.capital || 0);
+  } catch {
+    capital = new Big(0);
+  }
+
+  if (capital.lte(0)) {
+    return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_SIN_CAPITAL };
+  }
+
+  // Calcular pendiente (devengado - pagado) en una sola llamada
+  const pendienteResultado = moraPendientePorCuota({
+    capital,
+    cuotas: params.cuotasParaPendiente,
+  });
+
+  // Calcular el devengado total sumando el devengado por cuota
+  const devengadoStr = pendienteResultado.porCuota
+    .reduce((acc, c) => acc.plus(c.devengado), new Big(0))
+    .toFixed(2);
+
+  // Si el devengado redondea a Q0.00, no hay mora que cobrar (caso viejo, comportamiento intacto)
+  if (!(Number(devengadoStr) > 0)) {
+    return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_MENOR_A_UN_CENTAVO };
+  }
+
+  const montoStr = pendienteResultado.total.toFixed(2);
+
+  // Si el devengado > 0 pero el pendiente ≤ 0, el crédito ya tuvo mora que se pagó completamente,
+  // pero sigue con cuotas vencidas: se mantiene MOROSO con monto 0 y vuelve a subir cuando
+  // la cuota que no topó devengue más mora
+  if (!(Number(montoStr) > 0)) {
+    return { accion: "APLICAR", montoStr: "0.00" };
+  }
+
+  return { accion: "APLICAR", montoStr };
+}
+
+/**
+ * Techo del guard de cordura de montos de mora MANUALES: 10× la COTA SUPERIOR
+ * de la mora de ese crédito, `capital × 1.12% × cuotas vencidas` (un cargo
+ * mensual completo por cuota, la fórmula vieja).
+ *
+ * Se ancla a la cota superior y NO a la fórmula proporcional a propósito: la
+ * proporcional siempre es ≤ cota superior, así que usarla como base encogía el
+ * umbral hasta ~30× con 1 día de atraso (10× de 1/30 de cargo = 1/3 de cargo)
+ * y rechazaba sin override una mora manual por el cargo mensual normal. El
+ * guard existe para atrapar montos ABSURDOS (Q27,953.44 sobre un capital de
+ * Q40k/1 cuota), no para clavar el monto exacto.
+ *
+ * Devuelve 0 cuando no hay base creíble (capital ≤ 0 o cero cuotas vencidas):
+ * ahí cualquier monto exige override.
+ */
+export function maximoMoraSinOverride(
+  capital: Big | string | number,
+  cuotasVencidas: number,
+): Big {
+  const cap = new Big(capital || 0);
+  if (cap.lte(0) || !(cuotasVencidas > 0)) return new Big(0);
+  return cap.times(TASA_MORA_MENSUAL).times(cuotasVencidas).times(10);
+}
+
+/**
+ * Inserta un evento en moras_historial.
+ *
+ * Adentro de una transacción el swallow sería MENTIROSO: Postgres ya abortó la
+ * tx, el COMMIT posterior es un rollback silencioso (devuelve el tag ROLLBACK
+ * sin levantar error), así que tragarse el fallo devolvería `success: true`
+ * con NADA escrito. Por eso todos los callers transaccionales pasan
+ * `propagarError: true`.
+ *
+ * Quedan TRES sitios que todavía se lo tragan, y no son todos iguales:
+ *
+ *  - `createMora` y `condonarTodasLasMoras` escriben SUELTOS, fuera de toda
+ *    transacción: cada statement autocommitea, así que el swallow no miente
+ *    sobre una mutación perdida. Solo deja el evento sin escribir.
+ *  - `condonarMora` (individual) es OTRA cosa y es el que conviene mirar: su
+ *    mutación SÍ va en `db.transaction`, y el INSERT del historial queda
+ *    afuera, después del COMMIT. Es exactamente el patrón que esta función
+ *    dejó de tener en `updateMora` — mismo hueco sin candado, por el que la
+ *    misma carrera del convenio se puede colar. No se arregló acá para no
+ *    arrastrar alcance; queda señalado a propósito.
+ *
+ * Devuelve el `historial_id` del evento escrito, o `null` si no se pudo
+ * escribir. Quien lo necesita es `registerPayment`: para poder ligar el
+ * `DECREMENTO` de mora con el pago que lo causó tiene que volver sobre ESE
+ * evento una vez que la fila del pago existe, y sin el id tendría que volver a
+ * adivinar cuál era (ver `marcaPagoDelDecremento`).
  */
 async function registrarHistorialMora(params: {
   credito_id: number;
@@ -83,6 +676,9 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
+  // Qué pago causó este movimiento de mora. Opcional: habrá movimientos que no
+  // vienen de ningún pago (recálculo automático, condonación, ajuste manual).
+  pago_id?: number | null;
   dbClient?: typeof db;
   // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
   // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
@@ -92,7 +688,7 @@ async function registrarHistorialMora(params: {
 }) {
   const startedAt = safeNow();
   try {
-    await (params.dbClient ?? db).insert(moras_historial).values({
+    const [evento] = await (params.dbClient ?? db).insert(moras_historial).values({
       credito_id: params.credito_id,
       mora_id: params.mora_id,
       tipo_evento: params.tipo_evento,
@@ -111,16 +707,62 @@ async function registrarHistorialMora(params: {
           : null,
       usuario_id: params.usuario_id ?? null,
       motivo: params.motivo ?? null,
-    });
+      pago_id: params.pago_id ?? null,
+      // 🕐 La hora REAL de esta escritura, no la del BEGIN.
+      //
+      // La columna tiene `DEFAULT now()`, y en Postgres `now()` es
+      // `transaction_timestamp()`: la hora en que arrancó la transacción. Con
+      // las transacciones cortas de antes daba lo mismo, pero el convenio
+      // ahora abre una transacción larga (valida, arma cuotas, mueve pagos) y
+      // recién al final escribe su DESACTIVACION. Si en el medio otra mutación
+      // de mora (/mora/update, por ejemplo) COMMITEA, su evento lleva una
+      // `fecha` POSTERIOR a la del convenio aunque haya ocurrido ANTES de que
+      // el convenio escribiera el suyo. Y como `snapCte` elige el último
+      // evento con `ORDER BY fecha DESC, historial_id DESC`, ese ajuste previo
+      // gana y el reporte histórico muestra mora activa después de que el
+      // convenio la desactivó.
+      //
+      // `clock_timestamp()` es la hora de pared del momento del INSERT, así
+      // que el orden de las `fecha` vuelve a ser el orden real de las
+      // escrituras. Se prefirió esto a "ordenar solo por historial_id" porque
+      // el `historial_id` de un serial se asigna al ejecutar el INSERT pero
+      // NADA garantiza que ese orden sea el de los commits, y sobre todo
+      // porque `fecha` no es solo un desempate: es la columna con la que el
+      // reporte corta por día de Guatemala y la que el usuario ve. Una fecha
+      // que miente sobre cuándo pasó el evento seguiría mintiendo aunque el
+      // orden se arreglara por otro lado.
+      //
+      // El `::timestamp` es el mismo cast implícito que ya aplicaba el
+      // `DEFAULT now()` sobre esta columna `timestamp` sin zona (la sesión
+      // corre en UTC), así que las filas nuevas son homogéneas con las viejas
+      // y el filtro por día de `snapCte` —que compara contra la columna
+      // CRUDA, para no perder `moras_historial_fecha_idx`— sigue igual.
+      //
+      // El desempate por `historial_id DESC` sigue haciendo falta: dos eventos
+      // pueden caer en la misma marca.
+      fecha: sql`clock_timestamp()::timestamp`,
+    }).returning({ historial_id: moras_historial.historial_id });
+    return evento?.historial_id ?? null;
   } catch (err) {
     emitCreditLateFee({ outcome: "degraded", operation: "history", durationMs: elapsedMilliseconds(startedAt), errorCode: "persistence_failed" });
     if (params.propagarError) throw err;
+    return null;
   }
 }
 
-/** Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora. */
-function hoyGuatemala(): Date {
-  const hoy = toZonedTime(new Date(), "America/Guatemala");
+/**
+ * Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora.
+ *
+ * Acá `toZonedTime` SÍ corresponde: `ahora` es un INSTANTE real y lo que se
+ * quiere es su hora de pared en Guatemala. El Date que devuelve tiene esa hora
+ * de pared en sus campos LOCALES, que es justo lo que leen `fechaCalendarioGT`
+ * y sus dos consumidores — por eso ellos NO lo vuelven a pasar por
+ * `toZonedTime` (hacerlo lo correría otro día hacia atrás).
+ *
+ * `ahora` es parámetro solo para poder fijarlo en pruebas.
+ */
+export function hoyGuatemala(ahora: Date = new Date()): Date {
+  const hoy = toZonedTime(ahora, "America/Guatemala");
   hoy.setHours(0, 0, 0, 0);
   return hoy;
 }
@@ -159,7 +801,8 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  *
  * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
  * valida; si esa ventana cruza la corrida nocturna de procesarMoras, el cron
- * crea una mora (correcta bajo la regla "solo cuenta lo validado") que nadie
+ * crea una mora (correcta bajo la regla de cobertura; un pending solo cubre
+ * hasta 7 días, ver `hasPaidPaymentSql`) que nadie
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
@@ -171,7 +814,7 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  */
 export async function desactivarMoraSiCreditoAlDia(
   credito_id: number,
-  opts: { motivo?: string; dbClient?: typeof db } = {},
+  opts: { motivo?: string; pago_id?: number; dbClient?: typeof db } = {},
 ): Promise<{ desactivada: boolean; error?: string }> {
   const startedAt = safeNow();
   const dbi = opts.dbClient ?? db;
@@ -209,7 +852,7 @@ export async function desactivarMoraSiCreditoAlDia(
     const hoy = hoyGuatemala();
 
     // Mismo universo y criterio que procesarMoras, acotado a este crédito.
-    // El EXISTS replica el del cron, incluido COALESCE(monto_aplicado,0)>0:
+    // El EXISTS es el MISMO helper del cron, incluido COALESCE(monto_aplicado,0)>0:
     // los pagos especiales (solo mora/otros/convenio) se cuelgan de la cuota
     // con pagado=true y monto_aplicado=0 sin cubrirla de verdad.
     const cuotas = await dbi
@@ -217,15 +860,7 @@ export async function desactivarMoraSiCreditoAlDia(
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
-        hasPaidPayment: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
-            AND pc."paymentFalse" = false
-            AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0
-        )`,
+        hasPaidPayment: hasPaidPaymentSql(),
       })
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
@@ -254,6 +889,22 @@ export async function desactivarMoraSiCreditoAlDia(
     // duplica historial y no se toca el status.
     let apagada = false;
     await dbi.transaction(async (txm) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). El convenio toma el crédito y después
+      // la mora; si acá lo hiciéramos al revés, las dos transacciones se
+      // esperarían en cruz y Postgres mataría una con 40P01.
+      if (decision.bajarStatusAActivo) {
+        await txm
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(
+            and(
+              eq(creditos.credito_id, credito_id),
+              eq(creditos.statusCredit, "MOROSO"),
+            ),
+          );
+      }
+
       const apagadas = await txm
         .update(moras_credito)
         .set({
@@ -270,20 +921,12 @@ export async function desactivarMoraSiCreditoAlDia(
         )
         .returning({ mora_id: moras_credito.mora_id });
 
-      if (apagadas.length === 0) return;
+      // 🔒 El candado sigue vivo: cero filas = otra ruta la apagó primero. Pero
+      // ya NO alcanza con `return`, porque el cambio de estado de arriba se
+      // commitearía: se aborta la transacción para que el crédito quede como
+      // estaba (ver `MoraYaApagada`).
+      if (apagadas.length === 0) throw new MoraYaApagada();
       apagada = true;
-
-      if (decision.bajarStatusAActivo) {
-        await txm
-          .update(creditos)
-          .set({ statusCredit: "ACTIVO" })
-          .where(
-            and(
-              eq(creditos.credito_id, credito_id),
-              eq(creditos.statusCredit, "MOROSO"),
-            ),
-          );
-      }
 
       await registrarHistorialMora({
         credito_id,
@@ -300,9 +943,18 @@ export async function desactivarMoraSiCreditoAlDia(
         motivo: decision.sinCapital && cuotasVencidas > 0
           ? "Crédito sin capital — no aplica mora"
           : (opts.motivo ?? "Crédito se puso al día al validar pago"),
+        // Qué pago causó esta desactivación (si aplica). Si no viene, el
+        // evento se registra sin trazabilidad al pago.
+        pago_id: opts.pago_id ?? null,
         dbClient: txm as unknown as typeof db,
         propagarError: true,
       });
+    }).catch((e) => {
+      // La carrera perdida es una omisión esperada, no un fallo: la
+      // transacción ya revirtió todo. Cualquier otro error sí se propaga al
+      // catch de afuera, como antes.
+      if (!(e instanceof MoraYaApagada)) throw e;
+      apagada = false;
     });
 
     if (apagada) {
@@ -335,6 +987,7 @@ export async function createMora({
   usuario_id,
   usuario_email,
   override = false,
+  dbClient,
 }: {
   credito_id: number;
   monto_mora?: number;
@@ -344,7 +997,15 @@ export async function createMora({
   usuario_id?: number;
   usuario_email?: string;
   override?: boolean;
+  /**
+   * La transacción del llamador, si la hay. Con ella, TODAS las escrituras de
+   * esta función van por esa transacción: el llamador ve sus propios cambios
+   * sin commitear (p. ej. el crédito ya puesto en MOROSO al romper un convenio)
+   * y no hay dos conexiones peleando por el candado de la misma fila.
+   */
+  dbClient?: typeof db;
 }) {
+  const ejecutor = dbClient ?? db;
   const startedAt = safeNow();
   const requestId = `${credito_id}-${Date.now()}`;
 
@@ -372,7 +1033,7 @@ export async function createMora({
     }
 
     // Traer el crédito una sola vez: capital (para validar + fotografiar) y status (para no des-castigar).
-    const [credito] = await db
+    const [credito] = await ejecutor
       .select({ capital: creditos.capital, statusCredit: creditos.statusCredit })
       .from(creditos)
       .where(eq(creditos.credito_id, credito_id));
@@ -388,18 +1049,24 @@ export async function createMora({
     // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
     // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
     // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
-    const ovRes = await db.execute<any>(sql`
-      SELECT COUNT(*)::int AS n
-      FROM cartera.cuotas_credito cu
-      WHERE cu.credito_id = ${credito_id}
-        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-        AND cu.pagado = false
-        AND NOT EXISTS (
-          SELECT 1 FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
+    // El `factor` es la suma de min(1, días/30) de esas mismas cuotas: la mora ya
+    // no es un bloque por cuota sino proporcional a los días de atraso (con techo
+    // de un cargo mensual). Va en el MISMO query para no pagar un segundo viaje ni
+    // arriesgar que los dos vean fotos distintas de las cuotas.
+    // El «ya pagada» es el MISMO helper del cron (con el pago pendiente de
+    // hasta 7 días): una copia a mano que se quedara atrás contaría una cuota
+    // que el cron no cobra y rechazaría con overdue_count_mismatch. Sin alias
+    // en la tabla: el helper la nombra completa ("cartera"."cuotas_credito").
+    const ovRes = await ejecutor.execute<any>(sql`
+      SELECT COUNT(*)::int AS n,
+             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cartera.cuotas_credito.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
+      FROM cartera.cuotas_credito
+      WHERE cartera.cuotas_credito.credito_id = ${credito_id}
+        AND cartera.cuotas_credito.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+        AND cartera.cuotas_credito.pagado = false
+        AND NOT ${hasPaidPaymentSql()}`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+    const factorDias = new Big(ovRes.rows?.[0]?.factor ?? 0);
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
@@ -412,7 +1079,9 @@ export async function createMora({
     }
 
     // La fórmula y el guard usan SIEMPRE las cuotas reales (no el valor no confiable del request).
-    const esperado = capitalBig.times(0.0112).times(cuotasReales); // capital × 1.12% × cuotas reales
+    // `esperado` es lo que da HOY la fórmula proporcional (capital × 1.12% × Σ min(1, días/30)):
+    // sirve de referencia informativa en el mensaje, pero NO como base del umbral.
+    const esperado = capitalBig.times(TASA_MORA_MENSUAL).times(factorDias);
 
     // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
     // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
@@ -428,19 +1097,19 @@ export async function createMora({
       };
     }
 
-    // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = mayor al capital total o
-    // más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
+    // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = más de 10× la COTA SUPERIOR
+    // (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
     const montoBig = new Big(monto_mora);
-    // Absurdo = más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre Q453.55 esperado).
-    // No se compara contra el capital directo: la fórmula correcta de un crédito con 90+ cuotas
-    // vencidas ya supera el capital y sería un falso positivo. Si la fórmula da 0 (capital 0),
-    // cualquier monto exige override.
-    const esAbsurdo = esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true;
+    // No se compara contra el capital directo: la mora correcta de un crédito con 90+ cuotas
+    // vencidas ya supera el capital y sería un falso positivo. Si la cota superior da 0
+    // (capital 0 o cero cuotas vencidas), cualquier monto exige override.
+    const maximoSinOverride = maximoMoraSinOverride(capitalBig, cuotasReales);
+    const esAbsurdo = maximoSinOverride.gt(0) ? montoBig.gt(maximoSinOverride) : true;
     if (esAbsurdo && !override) {
       emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
       return {
         success: false,
-        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotasReales} cuotas reales). Envía override:true + motivo si es intencional.`,
+        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula proporcional da hoy Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × factor de días ${factorDias.toFixed(4)}, sobre ${cuotasReales} cuotas vencidas reales con techo de 1 cargo mensual por cuota) y el máximo que se acepta sin override es Q${maximoSinOverride.toFixed(2)} (10× la cota superior capital × 1.12% × ${cuotasReales} cuotas). Envía override:true + motivo si es intencional.`,
       };
     }
 
@@ -454,7 +1123,7 @@ export async function createMora({
     // se resuelve por email. Best-effort: la atribución no debe bloquear la operación.
     let usuarioId: number | undefined = usuario_id ?? undefined;
     if (!usuarioId && usuario_email) {
-      const [u] = await db
+      const [u] = await ejecutor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -464,7 +1133,7 @@ export async function createMora({
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
 
 
-    const [moraExistente] = await db
+    const [moraExistente] = await ejecutor
       .select({
         mora_id: moras_credito.mora_id,
         monto_mora: moras_credito.monto_mora,
@@ -491,7 +1160,7 @@ export async function createMora({
       cuotas_anteriores = moraExistente.cuotas_atrasadas;
       tipo_evento = "RECALCULO";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .update(moras_credito)
         .set({
           monto_mora: monto_mora.toString(),
@@ -508,7 +1177,7 @@ export async function createMora({
 
       tipo_evento = "CREACION";
 
-      [newMora] = await db
+      [newMora] = await ejecutor
         .insert(moras_credito)
         .values({
           credito_id,
@@ -524,8 +1193,15 @@ export async function createMora({
 
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
+    //
+    // 🔒 Sin `dbClient`, cada statement autocommitea y suelta su candado antes
+    // del siguiente: no hay ciclo posible aunque el status quede después del
+    // write de la mora. CON `dbClient` corre dentro de la transacción de quien
+    // llama, que TIENE que haber bloqueado `creditos` antes (la ruptura de
+    // convenio lo hace como primera sentencia); si no, este UPDATE escalaría el
+    // candado después de tocar `moras_credito` y podría trabarse (40P01).
 
-    await db
+    await ejecutor
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
@@ -544,6 +1220,20 @@ export async function createMora({
       porcentaje_mora: newMora.porcentaje_mora,
       usuario_id: usuarioId,
       motivo,
+      dbClient: ejecutor,
+      // Propagar el error SOLO si corre dentro de la transacción del llamador.
+      //
+      // Adentro de una transacción, tragarse el error MIENTE: un statement
+      // fallido aborta la transacción entera y el COMMIT posterior devuelve
+      // ROLLBACK sin levantar excepción, así que la función reportaría éxito con
+      // nada escrito. Ahí hay que propagar, para que el llamador revierta todo.
+      //
+      // Suelta —llamada desde la API, sin transacción— es OTRA cosa: la mora y
+      // el MOROSO ya están commiteados cuando se intenta la bitácora. Propagar
+      // ahí devolvería `success: false` sobre una mora que SÍ existe, y los
+      // llamadores la tratarían como si no, dejando el estado inconsistente. Por
+      // eso sin transacción se conserva el comportamiento de siempre.
+      propagarError: dbClient != null,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "create", durationMs: elapsedMilliseconds(startedAt) });
@@ -593,6 +1283,8 @@ export async function updateMora({
   activa,
   usuario_email,
   motivo,
+  pago_id,
+  dbClient,
 }: {
   credito_id?: number;
   numero_credito_sifco?: string;
@@ -607,8 +1299,32 @@ export async function updateMora({
    * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
    */
   motivo?: string;
+  /**
+   * El pago que causó este ajuste de mora (para restituciones). Opcional: habrá
+   * ajustes que no vienen de ningún pago (recálculo automático, condonación, etc.).
+   */
+  pago_id?: number | string | null;
+  /**
+   * Transacción del CALLER. Sin esto, `updateMora` abre la suya y commitea
+   * sola: el ajuste de mora quedaba firme aunque el caller fallara un paso
+   * después (o al revés). Quien necesita que su cambio de estado y el ajuste
+   * de mora vivan o mueran juntos —`falsePayment`— pasa su `tx` acá y todo
+   * —el UPDATE de la mora, el del crédito y el evento de `moras_historial`—
+   * corre adentro de ella.
+   *
+   * 🔒 El orden de candados NO cambia por venir de afuera: este cuerpo sigue
+   * tomando `creditos` (SELECT … FOR UPDATE) antes que `moras_credito`. El
+   * caller que ya tenga `creditos` candado no paga nada por re-pedirlo; el
+   * que traiga `moras_credito` candado ANTES de llamar acá rompería la regla,
+   * y por eso no hay ninguno.
+   */
+  dbClient?: typeof db;
 }) {
   const startedAt = safeNow();
+  // Ejecutor de las lecturas previas a la transacción: si el caller trajo la
+  // suya, van por ahí (leer con OTRA conexión mientras su tx tiene filas
+  // candadas es pedir un bloqueo contra uno mismo).
+  const executor = dbClient ?? db;
   try {
     if (monto_cambio < 0) {
     emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
@@ -618,7 +1334,7 @@ export async function updateMora({
   // Resolver credito_id desde numero_credito_sifco si solo vino ese
   let targetCreditoId = credito_id;
   if (!targetCreditoId && numero_credito_sifco) {
-    const [credito] = await db
+    const [credito] = await executor
       .select({ credito_id: creditos.credito_id })
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
@@ -640,7 +1356,7 @@ export async function updateMora({
     // Resolver usuario que ejecuta la acción (si vino email)
     let usuarioId: number | undefined;
     if (usuario_email) {
-      const [user] = await db
+      const [user] = await executor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -651,8 +1367,27 @@ export async function updateMora({
       usuarioId = user.id;
     }
 
-    // Toda la operación dentro de una transacción con row lock para evitar races
-    const result = await db.transaction(async (tx) => {
+    // Toda la operación dentro de una transacción con row lock para evitar races.
+    // Si el caller trajo la suya (`dbClient`), se corre ADENTRO de esa —no se
+    // abre una segunda que commitearía por su cuenta: es lo que permite que
+    // anular el pago y restituir su mora sean un solo hecho.
+    const cuerpo = async (tx: typeof db) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Acá el UPDATE de `creditos` no puede
+      // ir primero —el estado a escribir depende del monto que resulte de la
+      // mora—, así que el candado se toma con este `SELECT … FOR UPDATE`, que
+      // además es la lectura de `statusCredit` que esta transacción ya
+      // necesitaba más abajo: no agrega un viaje a la base, solo lo adelanta.
+      // Con el orden viejo (mora FOR UPDATE y después el UPDATE del crédito)
+      // esta ruta y la del convenio se pedían los candados en cruz: ciclo de
+      // deadlock y 40P01 sin manejar.
+      const [creditoActual] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, targetCreditoId))
+        .limit(1)
+        .for("update");
+
       const shouldReactivateMora = tipo === "INCREMENTO" && activa === true;
       const moraWhere = shouldReactivateMora
         ? eq(moras_credito.credito_id, targetCreditoId)
@@ -710,12 +1445,9 @@ export async function updateMora({
       // crédito NO está en STATUS_EXCLUIDOS_MORA.
       const newStatus = (newMonto.gt(0) && newActiva) ? "MOROSO" : "ACTIVO";
 
-      const [creditoActual] = await tx
-        .select({ statusCredit: creditos.statusCredit })
-        .from(creditos)
-        .where(eq(creditos.credito_id, targetCreditoId))
-        .limit(1);
-
+      // `creditoActual` se leyó al abrir la transacción, con FOR UPDATE: la
+      // fila está candada desde entonces, así que este estado no puede haber
+      // cambiado bajo nuestros pies.
       const estadoProtegido = STATUS_EXCLUIDOS_MORA.includes(
         creditoActual?.statusCredit ?? "",
       );
@@ -729,38 +1461,80 @@ export async function updateMora({
 
       }
 
+      // 🧾 El evento de la bitácora va ADENTRO de esta transacción, escrito por
+      // el MISMO ejecutor que acaba de mover la plata.
+      //
+      // Antes se escribía DESPUÉS de que `cuerpo` terminara. Cuando el caller no
+      // trae su `dbClient` —el camino de los pagos: `registerPayment` y
+      // `payments`, el más ancho de todos— eso significaba salir por OTRA
+      // conexión del pool con la mutación ya commiteada. Entre ese COMMIT y el
+      // INSERT no queda ningún candado: si en ese hueco entra un convenio y
+      // desactiva la mora, el convenio anota su DESACTIVACION primero y nuestro
+      // evento —más viejo— cae DESPUÉS. Como `snapCte` reconstruye el saldo con
+      // el ÚLTIMO evento por crédito (`ORDER BY h.fecha DESC, h.historial_id
+      // DESC`), Mora Histórica mostraba mora viva sobre un crédito cuyo convenio
+      // ya la había apagado. El desempate por `historial_id` no salva: el serial
+      // se asigna al EJECUTAR el INSERT, así que el evento tardío gana por las
+      // dos columnas. Adentro de la transacción el orden de los eventos vuelve a
+      // ser el orden de las mutaciones, que es lo único que el reporte sabe leer.
+      //
+      // ⚖️ Y por eso el fallo del INSERT ya NO se traga —`propagarError` SIEMPRE,
+      // no solo con la tx del caller—. La decisión no es "auditoría por encima
+      // del pago": es que adentro de una transacción el swallow es MENTIROSO. En
+      // Postgres un statement fallido aborta la transacción entera, así que el
+      // UPDATE de la mora se pierde igual; tragarse el error devolvería
+      // `success: true` con NADA escrito y `registerPayment` daría por cobrada
+      // una mora que sigue viva — un error de plata, silencioso. Las opciones
+      // reales eran propagar o dejar el INSERT fuera de la tx (la carrera de
+      // arriba), y entre las dos se eligió propagar.
+      //
+      // El precio, dicho: un pago que antes salía bien con la auditoría faltante
+      // ahora falla. Se acepta porque falla RUIDOSO y reintentable
+      // (`registerPayment` tira sobre `success: false`), mientras que lo otro
+      // desaparece sin rastro; y porque los modos de fallo realistas de este
+      // INSERT de una fila —conexión caída, disco, esquema— se llevaban puesta la
+      // transacción de todas formas. Tampoco se usó un SAVEPOINT (el patrón de la
+      // rama CREACION): ahí existe para distinguir un 23505 ESPERADO y benigno de
+      // un fallo real, y acá no hay ningún fallo benigno que aislar — dejar la
+      // mutación sin evento es justo el agujero que Mora Histórica no puede ver.
+      const historial_id = await registrarHistorialMora({
+        credito_id: targetCreditoId,
+        mora_id: updated.mora_id,
+        tipo_evento: tipo,
+        origen: "API_MANUAL",
+        monto_anterior: moraActual.monto,
+        monto_nuevo: newMonto.toString(),
+        cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
+        // Si el llamador NO mandó cuotas_atrasadas (los flujos de pago y de
+        // reversa solo ajustan el monto), la fila conservó su valor: registrar 0
+        // inventaba un "3 → 0" que el modal de Historial de mora mostraba en cada
+        // pago como si las cuotas atrasadas se hubieran limpiado.
+        cuotas_atrasadas_nuevas: cuotas_atrasadas ?? updated.cuotas_atrasadas ?? moraActual.cuotas_atrasadas,
+        porcentaje_mora: updated.porcentaje_mora,
+        usuario_id: usuarioId,
+        motivo,
+        pago_id: pago_id !== null && pago_id !== undefined ? Number(pago_id) : null,
+        dbClient: tx,
+        propagarError: true,
+      });
+
       return {
         kind: "ok" as const,
         updated,
         newStatus,
-        montoAnterior: moraActual.monto,
-        montoNuevo: newMonto.toString(),
-        cuotasAnteriores: moraActual.cuotas_atrasadas,
+        historial_id,
       };
-    });
+    };
+
+    const result = dbClient
+      ? await cuerpo(dbClient)
+      : await db.transaction((tx) => cuerpo(tx as unknown as typeof db));
 
     if (result.kind === "not_found") {
       emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
       return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
     }
 
-    await registrarHistorialMora({
-      credito_id: targetCreditoId,
-      mora_id: result.updated.mora_id,
-      tipo_evento: tipo,
-      origen: "API_MANUAL",
-      monto_anterior: result.montoAnterior,
-      monto_nuevo: result.montoNuevo,
-      cuotas_atrasadas_anterior: result.cuotasAnteriores,
-      // Si el llamador NO mandó cuotas_atrasadas (los flujos de pago y de
-      // reversa solo ajustan el monto), la fila conservó su valor: registrar 0
-      // inventaba un "3 → 0" que el modal de Historial de mora mostraba en cada
-      // pago como si las cuotas atrasadas se hubieran limpiado.
-      cuotas_atrasadas_nuevas: cuotas_atrasadas ?? result.updated.cuotas_atrasadas ?? result.cuotasAnteriores,
-      porcentaje_mora: result.updated.porcentaje_mora,
-      usuario_id: usuarioId,
-      motivo,
-    });
 
     emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
 
@@ -768,6 +1542,13 @@ export async function updateMora({
       success: true,
       mora: result.updated,
       newStatus: result.newStatus,
+      /**
+       * El evento que este ajuste dejó en `moras_historial`. `registerPayment`
+       * lo guarda para volver sobre el `DECREMENTO` y estamparle el `pago_id`
+       * en cuanto la fila del pago exista: cuando el decremento se escribe, el
+       * pago todavía no tiene id.
+       */
+      historial_id: result.historial_id,
     };
 
   } catch (error) {
@@ -795,6 +1576,250 @@ export async function updateMora({
  *    - Update the credit status to "MOROSO".
  * 5. Log every step for debugging and monitoring.
  */
+/**
+ * Apaga la mora activa de un crédito dentro de la corrida del cron y deja el
+ * rastro en `moras_historial`. Lo usan los tres caminos del cron que llegan al
+ * mismo final —sin capital, mora que redondea a Q0.00 y crédito al día—, que
+ * solo se diferencian en el `motivo`.
+ *
+ * El UPDATE del crédito es CONDICIONAL sobre MOROSO a propósito: bajar a
+ * ACTIVO sin esa condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE.
+ *
+ * El UPDATE de la mora es CONDICIONAL sobre `activa=true` y usa `.returning()`,
+ * igual que `desactivarMoraPorConvenio` y `desactivarMoraSiCreditoAlDia`: el
+ * cron lee las moras activas al arrancar y las apaga al final de la corrida, y
+ * el advisory lock de `procesarMoras` solo lo protege de OTRA corrida del cron
+ * — no de un convenio (u otra ruta) que apague la misma fila en el medio. Sin
+ * el filtro, el cron la apagaría "otra vez" y escribiría un segundo evento
+ * DESACTIVACION por el mismo monto, duplicando justo la cifra que sirve para
+ * auditar cuánta mora se perdona. Cero filas = alguien más ya la apagó: no se
+ * escribe historial, no se toca el status y se devuelve `false` para que el
+ * caller no cuente una desactivación que no hizo.
+ */
+async function desactivarMoraDelCron(
+  creditoId: number,
+  moraPrevia: {
+    mora_id: number;
+    monto_mora: string;
+    cuotas_atrasadas: number;
+    porcentaje_mora: string | null;
+  },
+  motivo: string,
+): Promise<boolean> {
+  // 🧾 Los tres writes van JUNTOS en una transacción, igual que las ramas
+  // CREACION y RECALCULO del cron. Sueltos y autocommiteados, un corte entre
+  // el primero y el último dejaba el crédito ACTIVO con la mora todavía viva,
+  // o la mora apagada sin su evento en `moras_historial`. Y la transacción es
+  // además lo que hace exigible el orden de candados: sin ella cada statement
+  // soltaba su candado antes del siguiente.
+  return await db
+    .transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Este UPDATE es además la escritura
+      // que igual había que hacer, así que toma el candado sin costo.
+      //
+      // Es CONDICIONAL sobre MOROSO a propósito: bajar a ACTIVO sin esa
+      // condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE. Que no
+      // matchee filas es un desenlace legítimo (el crédito no estaba MOROSO),
+      // no un error: no aborta nada. Tampoco rompe la regla del orden —
+      // después de acá esta transacción ya no vuelve a pedir `creditos`.
+      await tx
+        .update(creditos)
+        .set({ statusCredit: "ACTIVO" })
+        .where(
+          and(
+            eq(creditos.credito_id, creditoId),
+            eq(creditos.statusCredit, "MOROSO")
+          )
+        );
+
+      const apagadas = await tx
+        .update(moras_credito)
+        .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+        .where(
+          and(
+            eq(moras_credito.mora_id, moraPrevia.mora_id),
+            // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
+            // que el cron "gane" también y duplique el evento DESACTIVACION.
+            eq(moras_credito.activa, true),
+          ),
+        )
+        .returning({ mora_id: moras_credito.mora_id });
+
+      // Cero filas = otra ruta la apagó primero. No hay nada que auditar: el
+      // evento lo escribió ella. Se ABORTA (no `return`) porque el UPDATE de
+      // `creditos` de arriba ya corrió y commitearlo bajaría a ACTIVO un
+      // crédito cuya mora apagó, por ejemplo, un convenio que enseguida lo
+      // deja EN_CONVENIO.
+      if (apagadas.length === 0) throw new MoraYaApagada();
+
+      await registrarHistorialMora({
+        credito_id: creditoId,
+        mora_id: moraPrevia.mora_id,
+        tipo_evento: "DESACTIVACION",
+        origen: "PROCESO_AUTO",
+        monto_anterior: moraPrevia.monto_mora,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
+        cuotas_atrasadas_nuevas: 0,
+        porcentaje_mora: moraPrevia.porcentaje_mora,
+        motivo,
+        dbClient: tx as unknown as typeof db,
+        // Dentro de la tx el swallow es mentiroso: un historial fallido deja la
+        // tx abortada y el COMMIT es un rollback silencioso, mientras el cron
+        // contaría una desactivación que no quedó.
+        propagarError: true,
+      });
+
+      return true;
+    })
+    .catch((e) => {
+      // La carrera perdida es una omisión esperada, no un fallo del cron.
+      if (e instanceof MoraYaApagada) return false;
+      throw e;
+    });
+}
+
+/**
+ * Apaga la mora activa de un crédito al abrirle un convenio de pago, DEJANDO
+ * RASTRO en `moras_historial`.
+ *
+ * Existe porque el convenio era la ÚNICA ruta del módulo que hacía desaparecer
+ * un monto de mora con un DELETE duro: la fila se iba y con ella la respuesta a
+ * "cuánta mora perdonamos vía convenios". La regla del módulo es que
+ * `moras_credito` es el monto de HOY y `moras_historial` la auditoría, que solo
+ * se inserta — así que acá se desactiva, igual que hacen el cron
+ * (`desactivarMoraDelCron`) y la limpieza tras aplicar un pago.
+ *
+ * NO toca `creditos.statusCredit`: el caller lo deja en EN_CONVENIO justo
+ * después, y bajarlo a ACTIVO acá lo des-castigaría.
+ *
+ * 🔒 ORDEN DE CANDADOS (ver la regla al inicio del archivo): esta función solo
+ * toca `moras_credito`, pero corre DENTRO de la transacción del convenio, que
+ * ya tomó la fila de `creditos` con su UPDATE a EN_CONVENIO. O sea que el orden
+ * compuesto es `creditos` → `moras_credito`, el canónico del módulo. Mover el
+ * UPDATE del crédito para después de esta llamada lo invertiría.
+ *
+ * El UPDATE es CONDICIONAL sobre `activa=true` y usa `.returning()`, igual que
+ * `desactivarMoraSiCreditoAlDia`: dos solicitudes de convenio del mismo crédito
+ * que se solapen leen la MISMA fila activa, y sin ese filtro las dos apagarían
+ * "con éxito" y las dos insertarían un DESACTIVACION por el mismo monto —
+ * duplicando justo la cifra que sirve para auditar cuánta mora perdonan los
+ * convenios. Si el update no devuelve fila, otra ejecución ganó la carrera: no
+ * se escribe historial y se reporta `desactivada: false`.
+ *
+ * La LECTURA de la mora también va adentro de la transacción, con FOR UPDATE:
+ * los montos que se leen son los que se escriben al historial, así que leerlos
+ * fuera del candado dejaba que /mora/update o el cron cambiaran la fila en el
+ * medio y el evento auditara una cifra que ya no era la que se apagó.
+ *
+ * Las dos escrituras van SIEMPRE juntas y atómicas: si el caller no trae
+ * `dbClient`, acá se abre una transacción propia. Con `propagarError: true` el
+ * fallo del historial revierte la desactivación, en vez de dejar el convenio
+ * "exitoso" con la mora fuera del saldo y sin constancia — que es exactamente
+ * el defecto que este helper vino a cerrar.
+ */
+export async function desactivarMoraPorConvenio(
+  credito_id: number,
+  opts: {
+    convenio_id?: number | null;
+    usuario_id?: number | null;
+    dbClient?: typeof db;
+  } = {},
+): Promise<{ desactivada: boolean; mora_id?: number; monto_anterior?: string }> {
+  const apagarYRegistrar = async (
+    tx: typeof db,
+  ): Promise<{ desactivada: boolean; mora_id?: number; monto_anterior?: string }> => {
+    // 🔒 La lectura va DENTRO de la transacción y con FOR UPDATE: los valores
+    // que se leen acá son los que después se escriben al historial, y entre el
+    // SELECT y el UPDATE otra ruta (/mora/update, el cron) puede recalcular la
+    // fila. Sin el candado el UPDATE apagaba el monto NUEVO mientras el evento
+    // DESACTIVACION anotaba el VIEJO: el rastro mentía sobre cuánta mora se
+    // soltó, que es justo la cifra por la que existe este helper.
+    //
+    // Se eligió `SELECT … FOR UPDATE` y no un CTE con el UPDATE adentro porque
+    // así todo sigue en el query builder de drizzle (una sola definición de las
+    // condiciones, sin SQL crudo que repita el filtro `activa`) y porque el
+    // camino ya necesitaba transacción para que la desactivación y el historial
+    // confirmen juntos: el candado no agrega nada que no estuviera.
+    //
+    // El índice único parcial moras_credito_uq_activa garantiza a lo sumo una
+    // mora activa por crédito, así que basta con la primera fila.
+    const [moraActiva] = await tx
+      .select({
+        mora_id: moras_credito.mora_id,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+      })
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true),
+        ),
+      )
+      .for("update");
+
+    if (!moraActiva) return { desactivada: false };
+
+    const apagadas = await tx
+      .update(moras_credito)
+      .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+      .where(
+        and(
+          eq(moras_credito.mora_id, moraActiva.mora_id),
+          // 🔒 Sin este filtro, un convenio concurrente que ya la apagó no
+          // impide que esta corrida "gane" también y duplique el evento.
+          // (Con el FOR UPDATE de arriba es redundante en el camino normal;
+          // se queda como respaldo duro por si la lectura se relaja.)
+          eq(moras_credito.activa, true),
+        ),
+      )
+      .returning({ mora_id: moras_credito.mora_id });
+
+    // Cero filas = otra ejecución la apagó primero. No hay nada que auditar:
+    // el evento lo escribió ella.
+    if (apagadas.length === 0) return { desactivada: false };
+
+    await registrarHistorialMora({
+      credito_id,
+      mora_id: moraActiva.mora_id,
+      tipo_evento: "DESACTIVACION",
+      origen: "API_MANUAL",
+      monto_anterior: moraActiva.monto_mora,
+      monto_nuevo: "0",
+      cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
+      cuotas_atrasadas_nuevas: 0,
+      porcentaje_mora: moraActiva.porcentaje_mora,
+      usuario_id: opts.usuario_id ?? null,
+      motivo:
+        opts.convenio_id != null
+          ? `Mora desactivada por convenio de pago (convenio ${opts.convenio_id})`
+          : "Mora desactivada por convenio de pago",
+      dbClient: tx,
+      // Nunca se traga: apagar la mora sin dejar el evento es el defecto original.
+      propagarError: true,
+    });
+
+    return {
+      desactivada: true,
+      mora_id: moraActiva.mora_id,
+      monto_anterior: moraActiva.monto_mora,
+    };
+  };
+
+  return opts.dbClient
+    ? // El caller ya corre dentro de su propia transacción: se usa la suya, y
+      // el FOR UPDATE queda cubierto por ESA transacción (es la de
+      // createPaymentAgreement, que así confirma convenio + mora + historial
+      // juntos o no confirma nada).
+      await apagarYRegistrar(opts.dbClient)
+    : await db.transaction(async (txm) =>
+        apagarYRegistrar(txm as unknown as typeof db),
+      );
+}
+
 // Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
@@ -813,7 +1838,7 @@ export async function procesarMoras() {
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
       emitCreditLateFee({ outcome: "skipped", operation: "process", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
-      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
+      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0 };
     }
 
     const hoy = hoyGuatemala();
@@ -839,15 +1864,8 @@ export async function procesarMoras() {
         // ese `pagado` significa "fila completa", NO "cuota cubierta" — sin
         // este AND, pagar SOLO la mora sacaba la cuota del conteo al validar
         // (cuotas_atrasadas 2→1 → mora recalculada de menos y etapa incorrecta).
-        hasPaidPayment: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
-            AND pc."paymentFalse" = false
-            AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0
-        )`,
+        // La subconsulta está centralizada en utils/cuotaYaPagadaSql.
+        hasPaidPayment: hasPaidPaymentSql(),
       })
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id));
@@ -863,14 +1881,26 @@ export async function procesarMoras() {
     //    ya traído en el JOIN para evitar un SELECT por crédito dentro del loop).
     const moraPorCredito: Record<number, number> = {};
     const capitalPorCredito = new Map<number, string>();
+    // Los días de atraso van POR CUOTA: la mora ya no es un bloque fijo por cuota
+    // sino proporcional al tiempo real de atraso de cada una (con techo mensual).
+    // Una entrada por cuota vencida, con su cuota y sus días juntos: lo pagado
+    // se completa después, con una sola consulta para todas.
+    const cuotasPorCredito = new Map<number, { cuota_id: number; diasAtraso: number }[]>();
     for (const cuota of cuotasVencidas) {
       moraPorCredito[cuota.credito_id] = (moraPorCredito[cuota.credito_id] ?? 0) + 1;
       capitalPorCredito.set(cuota.credito_id, cuota.capital);
+      const lista = cuotasPorCredito.get(cuota.credito_id) ?? [];
+      lista.push({ cuota_id: cuota.cuota_id, diasAtraso: diasAtrasoMora(cuota.fecha_vencimiento, hoy) });
+      cuotasPorCredito.set(cuota.credito_id, lista);
     }
 
 
 
-    // 4. Cargar moras activas existentes para comparar (UPSERT real)
+    // 4. Cargar mora pagada POR CUOTA (una sola consulta para todas)
+    const todasLasCuotaIds = Array.from(cuotasPorCredito.values()).flat().map((c) => c.cuota_id);
+    const moraPagadaPorCuotaMap = await moraPagadaPorCuota(todasLasCuotaIds, db);
+
+    // 4b. Cargar moras activas existentes para comparar (UPSERT real)
     const morasActivas = await db
       .select({
         mora_id: moras_credito.mora_id,
@@ -893,6 +1923,10 @@ export async function procesarMoras() {
     let desactivadas = 0;
     let sinCapital = 0;
     let desactivadasSinCapital = 0;
+    // Créditos con capital positivo cuya mora proporcional redondea a Q0.00:
+    // no se les crea mora (createMora prohíbe montos ≤ 0) ni se los marca MOROSO.
+    let moraCero = 0;
+    let desactivadasMoraCero = 0;
     let skippedInternally = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
@@ -905,95 +1939,173 @@ export async function procesarMoras() {
         continue;
       }
 
-      const capital = new Big(capitalStr);
+      // ¿Hay mora que cobrar? Dos casos dicen que no: capital ≤ 0 (nunca hubo
+      // base) y mora proporcional que redondea a Q0.00 (capital chico + pocos
+      // días). Ambos terminan igual: no se crea mora, se apaga la que hubiera y
+      // el crédito NO se marca MOROSO.
+      const cuotasParaPendiente: CuotaParaPendiente[] = (cuotasPorCredito.get(creditoId) ?? []).map((c) => ({
+        ...c,
+        pagado: moraPagadaPorCuotaMap.get(c.cuota_id) ?? 0,
+      }));
 
-      // Sin capital no aplica mora. Si tenía una mora activa, se le quita (desactiva).
-      if (capital.lte(0)) {
-        sinCapital++;
+      const decision = decidirMoraDelCron({
+        capital: capitalStr,
+        cuotasParaPendiente,
+      });
+
+      if (decision.accion === "DESACTIVAR") {
+        const esSinCapital = decision.motivo === MOTIVO_MORA_SIN_CAPITAL;
+        if (esSinCapital) sinCapital++;
+        else moraCero++;
+
         const moraPrevia = morasActivasPorCredito.get(creditoId);
         if (moraPrevia) {
-          await db
-            .update(moras_credito)
-            .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
-            .where(eq(moras_credito.mora_id, moraPrevia.mora_id));
-
-          // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
-          await db
-            .update(creditos)
-            .set({ statusCredit: "ACTIVO" })
-            .where(
-              and(
-                eq(creditos.credito_id, creditoId),
-                eq(creditos.statusCredit, "MOROSO")
-              )
-            );
-
-          await registrarHistorialMora({
-            credito_id: creditoId,
-            mora_id: moraPrevia.mora_id,
-            tipo_evento: "DESACTIVACION",
-            origen: "PROCESO_AUTO",
-            monto_anterior: moraPrevia.monto_mora,
-            monto_nuevo: "0",
-            cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
-            cuotas_atrasadas_nuevas: 0,
-            porcentaje_mora: moraPrevia.porcentaje_mora,
-            motivo: "Crédito sin capital — no aplica mora",
-          });
-          desactivadas++;
-          desactivadasSinCapital++;
+          // Si otra ruta la apagó a media corrida no hubo desactivación NUESTRA:
+          // el crédito ya viene contado en sinCapital/moraCero y, al no sumarse
+          // acá, cae solo en `skippedCount` — sin inflar `desactivadas`.
+          const desactivo = await desactivarMoraDelCron(creditoId, moraPrevia, decision.motivo);
+          if (desactivo) {
+            desactivadas++;
+            if (esSinCapital) desactivadasSinCapital++;
+            else desactivadasMoraCero++;
+          }
         }
 
         continue;
       }
 
-      const porcentaje = new Big("0.0112");
-      const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
-      const moraNuevaStr = moraNueva.toFixed(2);
+      const moraNuevaStr = decision.montoStr;
 
       const moraActual = morasActivasPorCredito.get(creditoId);
 
       if (!moraActual) {
         // CREACION
-        let insertada;
-        try {
-          [insertada] = await db
-            .insert(moras_credito)
-            .values({
-              credito_id: creditoId,
-              monto_mora: moraNuevaStr,
-              cuotas_atrasadas: cuotasAtrasadas,
-              activa: true,
-              porcentaje_mora: "1.12",
-            })
-            .returning();
-        } catch (e: any) {
-          // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
-          // ya creó la mora activa de este crédito → omitir (no duplicar).
-          if (e?.code === "23505") {
-            skippedInternally++;
-            continue;
+        //
+        // 🔒 El cambio de status va PRIMERO y es CONDICIONAL: hace de candado y
+        // de escritura a la vez. El cron leyó el estado del crédito al arrancar
+        // (paso 1) y escribe acá, al final del recorrido; si en el medio se
+        // confirmó un convenio, la foto vieja decía "moroso sin mora" y el cron
+        // le insertaba una mora NUEVA a un crédito EN_CONVENIO y lo marcaba
+        // MOROSO. El índice único parcial no lo frena: justamente NO hay mora
+        // activa que chocar. Con `notInArray` el UPDATE no matchea ningún
+        // estado de STATUS_EXCLUIDOS_MORA (EN_CONVENIO, INCOBRABLE, CANCELADO,
+        // PENDIENTE_CANCELACION, CAIDO) y `.returning()` nos dice si el crédito
+        // sigue siendo elegible: cero filas = ya no lo es → no se inserta mora,
+        // no se escribe historial y el crédito cae en los omitidos.
+        //
+        // Se eligió el UPDATE condicional y no un SELECT de re-verificación
+        // porque el SELECT deja abierto el hueco entre leer y escribir — que es
+        // exactamente el defecto que se está cerrando — mientras que acá la
+        // condición se evalúa dentro del mismo write. (`statusCredit` es NOT
+        // NULL en el esquema, así que el `NOT IN` nunca cae en el NULL de SQL.)
+        //
+        // 🧾 Y los tres writes van JUNTOS en una transacción (el mismo patrón
+        // de `desactivarMoraPorConvenio` y `desactivarMoraDelCron`): con el
+        // update suelto, autocommiteado, si el INSERT de la mora fallaba por
+        // cualquier motivo distinto del 23505 ya contemplado, `procesarMoras`
+        // salía con error y el crédito quedaba MOROSO sin mora activa ni evento
+        // de CREACION — un estado que ni el cron ni una segunda pasada
+        // corrigen, porque ambos parten de "hay mora activa". Adentro de la
+        // transacción ese fallo revierte también el cambio de estado.
+        // Beneficio extra: el UPDATE deja el row lock del crédito tomado hasta
+        // el commit, así que el candado ya no es solo lógico.
+        let creacionOk = false;
+        await db.transaction(async (txm) => {
+          const marcadoMoroso = await txm
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+              ),
+            )
+            .returning({ credito_id: creditos.credito_id });
+
+          if (marcadoMoroso.length === 0) {
+            // Convenio (u otra ruta) cambió el estado a media corrida: este
+            // crédito ya no lleva mora. No se crea nada (el update no afectó
+            // filas, así que la tx commitea vacía).
+            return;
           }
-          throw e;
-        }
 
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
+          let insertada;
+          try {
+            // 💾 SAVEPOINT (transacción anidada de drizzle) alrededor del
+            // insert. En Postgres un error de statement aborta la transacción
+            // entera: sin el savepoint, el 23505 se llevaría puesto el MOROSO
+            // que SÍ queremos conservar. El savepoint es justo lo que separa
+            // los dos casos, y la distinción es de fondo, no de forma:
+            //   - 23505 → existe una mora ACTIVA de este crédito (la creó otra
+            //     corrida) y el UPDATE ya probó que el crédito no está en un
+            //     estado excluido: MOROSO es el estado correcto → rollback
+            //     solo hasta el savepoint y la tx commitea el status.
+            //   - cualquier otro error → NO quedó mora: MOROSO sería mentira →
+            //     se propaga y la tx entera revierte el status.
+            insertada = await txm.transaction(async (sp) => {
+              const [fila] = await sp
+                .insert(moras_credito)
+                .values({
+                  credito_id: creditoId,
+                  monto_mora: moraNuevaStr,
+                  cuotas_atrasadas: cuotasAtrasadas,
+                  activa: true,
+                  porcentaje_mora: "1.12",
+                })
+                .returning();
+              return fila;
+            });
+          } catch (e: any) {
+            // Se absorbe SOLO la violación del índice único parcial
+            // `moras_credito_uq_activa`: otra corrida concurrente ya creó la
+            // mora activa de este crédito → omitir (no duplicar). El MOROSO
+            // que acabamos de dejar sigue siendo el estado correcto: hay una
+            // mora activa sobre un crédito que no estaba excluido.
+            //
+            // ⚠️ El código 23505 SOLO no alcanza para afirmar eso. `moras_credito`
+            // tiene además la llave primaria `moras_credito_pkey`, y una secuencia
+            // desincronizada —lo que deja una restauración de respaldo, que en esta
+            // base ha pasado— la hace chocar con el mismo 23505. Ahí NO hay mora
+            // activa, así que un `return` dejaría el UPDATE a MOROSO ya escrito sin
+            // mora que lo respalde y sin evento de CREACION: exactamente el estado
+            // a medias que la transacción existe para impedir, y que ni el cron ni
+            // una segunda pasada corrigen porque ambos parten de "hay mora activa".
+            // Por eso la discriminación es por NOMBRE de restricción: `pg` publica
+            // el nombre del índice violado en `error.constraint` (campo `n` del
+            // mensaje de error de Postgres), y el nombre sale de la misma constante
+            // con la que se define el índice en el esquema.
+            if (e?.code === "23505" && e?.constraint === MORAS_CREDITO_UQ_ACTIVA) return;
+            throw e;
+          }
 
-        await registrarHistorialMora({
-          credito_id: creditoId,
-          mora_id: insertada.mora_id,
-          tipo_evento: "CREACION",
-          origen: "PROCESO_AUTO",
-          monto_anterior: "0",
-          monto_nuevo: moraNuevaStr,
-          cuotas_atrasadas_anterior: 0,
-          cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: capitalStr,
-          porcentaje_mora: insertada.porcentaje_mora,
+          await registrarHistorialMora({
+            credito_id: creditoId,
+            mora_id: insertada.mora_id,
+            tipo_evento: "CREACION",
+            origen: "PROCESO_AUTO",
+            monto_anterior: "0",
+            monto_nuevo: moraNuevaStr,
+            cuotas_atrasadas_anterior: 0,
+            cuotas_atrasadas_nuevas: cuotasAtrasadas,
+            capital_credito: capitalStr,
+            porcentaje_mora: insertada.porcentaje_mora,
+            dbClient: txm as unknown as typeof db,
+            // Dentro de la tx el swallow es mentiroso: sin esto, un historial
+            // fallido dejaría la tx abortada y el COMMIT sería un rollback
+            // silencioso mientras el contador dice "creada".
+            propagarError: true,
+          });
+
+          creacionOk = true;
         });
+
+        // Los dos caminos que no crearon nada (candado con cero filas y 23505)
+        // caen en el mismo balde de omitidos que antes: los contadores siguen
+        // diciendo lo que de verdad pasó.
+        if (!creacionOk) {
+          skippedInternally++;
+          continue;
+        }
 
         creadas++;
 
@@ -1007,32 +2119,136 @@ export async function procesarMoras() {
         }
 
         // RECALCULO
-        await db
-          .update(moras_credito)
-          .set({
-            monto_mora: moraNuevaStr,
-            cuotas_atrasadas: cuotasAtrasadas,
-            updated_at: new Date(),
-          })
-          .where(eq(moras_credito.mora_id, moraActual.mora_id));
+        //
+        // 🔒 CONDICIONAL sobre `activa=true` + `.returning()`, igual que las
+        // tres rutas de desactivación del módulo. El cron leyó esta mora activa
+        // al arrancar; si un convenio la apagó en el medio, la fila sigue ahí
+        // con activa=false y un update por `mora_id` solo la REVIVIRÍA con el
+        // monto recalculado — deshaciendo el perdón del convenio y anotando un
+        // RECALCULO después del DESACTIVACION. (Antes esto no se veía porque el
+        // convenio BORRABA la fila y el update no encontraba nada que pisar.)
+        // Lo mismo si le cambió el monto (un pago o una condonación a media
+        // corrida): el update también exige el monto leído al arrancar.
+        // Cero filas = otra ruta ya la apagó o la cambió: no se toca el status,
+        // no se escribe historial y el crédito cae en los omitidos — no se
+        // cuenta un recálculo que no ocurrió.
+        //
+        // 🧾 Los tres writes van JUNTOS en una transacción, por lo mismo que la
+        // rama CREACION de acá arriba: sueltos y autocommiteados, un fallo en
+        // el update de status o en el historial dejaba el monto de la mora ya
+        // cambiado sin el estado que le corresponde y, peor, SIN RASTRO en
+        // moras_historial — y el rastro es justo lo que esta rama vino a
+        // garantizar. Además el saldo de la mora y su evento son lo que le
+        // cobramos al cliente: no pueden discrepar. Adentro de la transacción
+        // cualquier fallo revierte también el recálculo.
+        // (Acá no hace falta el SAVEPOINT de la CREACION: no hay ninguna
+        // violación de restricción esperada que haya que absorber. Cualquier
+        // error revierte todo, que es lo correcto.)
+        let recalculoOk = false;
+        await db.transaction(async (txm) => {
+          // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después
+          // (ver la regla al inicio del archivo). Esta rama tomaba la mora
+          // primero mientras el convenio tomaba el crédito primero: órdenes
+          // opuestos sobre las mismas dos filas = ciclo de deadlock. El 40P01
+          // no está manejado, así que se llevaba puesta la corrida entera.
+          //
+          // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
+          // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
+          // MOROSO para no des-castigar), en el sentido contrario. Sin la
+          // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
+          // corrida volvía a MOROSO por la foto vieja del paso 1.
+          //
+          // 🔒 Y el `.returning()` no es decorativo: es la ÚNICA señal de que
+          // el crédito sigue siendo elegible. El candado de la mora de acá
+          // abajo solo detecta a quien toca `moras_credito`; una transición de
+          // estado que no la toca —`marcarCreditoComoCaido`, por ejemplo— pasa
+          // por debajo de él, y sin mirar las filas afectadas la transacción
+          // confirmaba una mora recalculada y un evento RECALCULO sobre un
+          // crédito CAIDO. El paso 6 tampoco lo recoge después: su mapa
+          // `moraPorCredito` viene de la foto vieja y todavía lo contiene.
+          //
+          // Cero filas ⇒ se aborta la transacción. Acá todavía no hay nada
+          // escrito, pero se tira igual (y no `return`) para no tener dos
+          // formas de salir de esta transacción: el `catch` de abajo cuenta el
+          // omitido en un solo lugar.
+          const sigueElegible = await txm
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+              ),
+            )
+            .returning({ credito_id: creditos.credito_id });
 
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
+          if (sigueElegible.length === 0) throw new CreditoYaNoElegible();
 
-        await registrarHistorialMora({
-          credito_id: creditoId,
-          mora_id: moraActual.mora_id,
-          tipo_evento: "RECALCULO",
-          origen: "PROCESO_AUTO",
-          monto_anterior: moraActual.monto_mora,
-          monto_nuevo: moraNuevaStr,
-          cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
-          cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: capitalStr,
-          porcentaje_mora: moraActual.porcentaje_mora,
+          const recalculadasFilas = await txm
+            .update(moras_credito)
+            .set({
+              monto_mora: moraNuevaStr,
+              cuotas_atrasadas: cuotasAtrasadas,
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(moras_credito.mora_id, moraActual.mora_id),
+                eq(moras_credito.activa, true),
+                // 🔒 Y con el MISMO monto que se leyó al arrancar: el monto nuevo
+                // sale del ledger y de esta foto, ambos leídos una sola vez al
+                // principio de la corrida. Un pago o una condonación que
+                // commiteó en el medio ya bajó la mora (y anotó en el ledger que
+                // este cálculo no vio); sin esta condición el cron la pisaba con
+                // el monto viejo y le volvía a cobrar lo pagado hasta la noche
+                // siguiente.
+                eq(moras_credito.monto_mora, moraActual.monto_mora),
+              ),
+            )
+            .returning({ mora_id: moras_credito.mora_id });
+
+          // 🔒 Cero filas = otra ruta ya apagó la mora o le cambió el monto
+          // durante la corrida. Se ABORTA (no `return`): el UPDATE de
+          // `creditos` de arriba ya corrió y commitearlo dejaría MOROSO a un
+          // crédito al que el convenio le acaba de perdonar la mora. Si solo
+          // cambió el monto, la corrida de mañana lo recalcula con el ledger al
+          // día; hoy queda lo que escribió esa otra ruta.
+          if (recalculadasFilas.length === 0) throw new MoraYaApagada();
+
+          await registrarHistorialMora({
+            credito_id: creditoId,
+            mora_id: moraActual.mora_id,
+            tipo_evento: "RECALCULO",
+            origen: "PROCESO_AUTO",
+            monto_anterior: moraActual.monto_mora,
+            monto_nuevo: moraNuevaStr,
+            cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
+            cuotas_atrasadas_nuevas: cuotasAtrasadas,
+            capital_credito: capitalStr,
+            porcentaje_mora: moraActual.porcentaje_mora,
+            dbClient: txm as unknown as typeof db,
+            // Dentro de la tx el swallow es mentiroso: sin esto, un historial
+            // fallido dejaría la tx abortada y el COMMIT sería un rollback
+            // silencioso mientras el contador dice "recalculada".
+            propagarError: true,
+          });
+
+          recalculoOk = true;
+        }).catch((e) => {
+          // Los dos abortos —crédito no elegible y mora ya apagada por otra
+          // ruta— son omisiones esperadas, no fallos del cron: la transacción
+          // ya revirtió TODO (monto de la mora y status incluidos) y la corrida
+          // sigue con el resto de los créditos. Cualquier otro error sí se
+          // propaga, como antes.
+          if (!(e instanceof CreditoYaNoElegible) && !(e instanceof MoraYaApagada)) throw e;
         });
+
+        // El candado con cero filas sigue cayendo en el mismo balde de omitidos
+        // que antes: los contadores dicen lo que de verdad pasó.
+        if (!recalculoOk) {
+          skippedInternally++;
+          continue;
+        }
 
         recalculadas++;
 
@@ -1041,44 +2257,32 @@ export async function procesarMoras() {
 
     // 6. Procesar créditos que tenían mora activa pero YA NO tienen cuotas vencidas
     //    → se pusieron al día: desactivar mora y bajar status a ACTIVO
+    //
+    // 🕸️ RED DE SEGURIDAD DEL CONVENIO — no romper sin saber qué sostiene.
+    // Si `createPaymentAgreement` no alcanzó a apagar la mora (su transacción
+    // revirtió la desactivación, o el crédito llegó a EN_CONVENIO por otra
+    // vía), el crédito queda EN_CONVENIO y ese status está en
+    // STATUS_EXCLUIDOS_MORA: sus cuotas se caen de
+    // `isOverdueInstallmentForMora`, no entran a `moraPorCredito` y su mora
+    // activa aterriza EN ESTE PASO, que la apaga y escribe su propio evento
+    // DESACTIVACION en moras_historial. O sea que la garantía de auditoría del
+    // convenio se sostiene aunque el camino del convenio falle. Sacar
+    // EN_CONVENIO de STATUS_EXCLUIDOS_MORA, o dejar de escribir historial acá,
+    // quita esa red.
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 
-      await db
-        .update(moras_credito)
-        .set({
-          monto_mora: "0",
-          cuotas_atrasadas: 0,
-          activa: false,
-          updated_at: new Date(),
-        })
-        .where(eq(moras_credito.mora_id, mora.mora_id));
+      const desactivo = await desactivarMoraDelCron(
+        mora.credito_id,
+        mora,
+        "Crédito se puso al día (sin cuotas vencidas)",
+      );
 
-      // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
-      await db
-        .update(creditos)
-        .set({ statusCredit: "ACTIVO" })
-        .where(
-          and(
-            eq(creditos.credito_id, mora.credito_id),
-            eq(creditos.statusCredit, "MOROSO")
-          )
-        );
-
-      await registrarHistorialMora({
-        credito_id: mora.credito_id,
-        mora_id: mora.mora_id,
-        tipo_evento: "DESACTIVACION",
-        origen: "PROCESO_AUTO",
-        monto_anterior: mora.monto_mora,
-        monto_nuevo: "0",
-        cuotas_atrasadas_anterior: mora.cuotas_atrasadas,
-        cuotas_atrasadas_nuevas: 0,
-        porcentaje_mora: mora.porcentaje_mora,
-        motivo: "Crédito se puso al día (sin cuotas vencidas)",
-      });
-
-      desactivadas++;
+      // Acá no hay contador sinCapital/moraCero que lo recoja: si otra ruta
+      // ganó la carrera, el crédito va a `skippedInternally` (el mismo balde de
+      // los omitidos por concurrencia) para que processedCount no lo pierda.
+      if (desactivo) desactivadas++;
+      else skippedInternally++;
 
     }
 
@@ -1092,7 +2296,13 @@ export async function procesarMoras() {
 
 
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
-    const skippedCount = (sinCapital - desactivadasSinCapital) + skippedInternally;
+    // Un crédito "omitido" es el que no terminó en creación/recálculo/sin-cambios/
+    // desactivación: los sin capital y los de mora Q0.00 que NO tenían mora previa
+    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded).
+    const skippedCount =
+      (sinCapital - desactivadasSinCapital) +
+      (moraCero - desactivadasMoraCero) +
+      skippedInternally;
     emitCreditLateFee({
       outcome: "completed",
       operation: "process",
@@ -1102,7 +2312,7 @@ export async function procesarMoras() {
       failedCount: 0,
       skippedCount,
     });
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero };
 
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
@@ -1154,6 +2364,23 @@ export async function condonarMora({
     // 2-5. Toda la operación en una sola transacción con row lock para evitar
     //      condonaciones duplicadas si dos requests llegan en paralelo.
     const result = await db.transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). El UPDATE del crédito no puede ir
+      // primero —si no hay mora activa esta ruta se va sin tocar el status—,
+      // así que el candado se toma con un `SELECT … FOR UPDATE`. Con el orden
+      // viejo (mora FOR UPDATE y después el UPDATE del crédito) esta ruta y la
+      // del convenio se pedían los candados en cruz: ciclo de deadlock.
+      const [creditoLocked] = await tx
+        .select({ credito_id: creditos.credito_id, capital: creditos.capital })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1)
+        .for("update");
+
+      if (!creditoLocked) {
+        return { kind: "not_found" as const };
+      }
+
       const [moraActual] = await tx
         .select({
           id: moras_credito.mora_id,
@@ -1175,7 +2402,12 @@ export async function condonarMora({
 
       const monto = moraActual.monto ?? "0";
 
-
+      // Una mora activa en Q0 es la que el cron deja a propósito cuando todo lo
+      // devengado ya se abonó pero quedan cuotas vencidas. No hay nada que
+      // condonar, y desactivarla pasaría a ACTIVO un crédito con atraso.
+      if (new Big(monto).lte(0)) {
+        return { kind: "mora_en_cero" as const };
+      }
 
       // Re-check activa=true en el UPDATE como defensa extra: si dos tx
       // pasaran el SELECT FOR UPDATE en algún edge case raro, solo la primera
@@ -1209,6 +2441,50 @@ export async function condonarMora({
         })
         .returning();
 
+      // Anotar la condonación como si fuera un pago, para que el pendiente
+      // baje igual y no vuelva a cobrarse mañana.
+      //
+      // Usar cuotasParaPendienteDeCreditos para obtener las cuotas con el criterio
+      // EXACTO del cron: incluye hasPaidPayment, ordena de vieja a nueva.
+      const hoy = hoyGuatemala();
+      const cuotasPorCredito = await cuotasParaPendienteDeCreditos([credito_id], tx as unknown as typeof db, hoy);
+      const creditoData = cuotasPorCredito.get(credito_id);
+      const cuotasParaPendiente = creditoData?.cuotas ?? [];
+
+      const anotaciones = anotacionesDeCondonacion({
+        credito_id,
+        monto,
+        capital: creditoLocked.capital ?? 0,
+        cuotas: cuotasParaPendiente,
+        usuario_id: user.id,
+        motivo,
+      });
+      if (anotaciones.length > 0) {
+        await anotarMoraPagada(anotaciones, tx as unknown as typeof db);
+      }
+
+      // 🔒 El historial se registra ADENTRO de la transacción para que si el
+      // INSERT falla, la condonación (el write de arriba) sea abortada y no quede
+      // mora condonada sin rastro auditable. Adentro de una tx un INSERT fallido
+      // deja la tx abortada: el COMMIT se vuelve silencioso ROLLBACK, así que sin
+      // propagarError aquí el caller creyera que la condonación fue éxito cuando en
+      // realidad no quedó escrita. Por eso se exige propagarError: true y se deja
+      // que la excepción revierte toda la tx.
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: moraActual.id,
+        tipo_evento: "CONDONACION",
+        origen: "CONDONACION_INDIVIDUAL",
+        monto_anterior: monto,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas ?? 0,
+        cuotas_atrasadas_nuevas: updatedMora?.cuotas_atrasadas ?? moraActual.cuotas_atrasadas ?? 0,
+        usuario_id: user.id,
+        motivo,
+        dbClient: tx as unknown as typeof db,
+        propagarError: true,
+      });
+
       return {
         kind: "ok" as const,
         moraId: moraActual.id,
@@ -1219,25 +2495,18 @@ export async function condonarMora({
       };
     });
 
-    if (result.kind === "not_found") {
+    if (result.kind === "not_found" || result.kind === "mora_en_cero") {
+      // Mismo código de telemetría (el catálogo es compartido); el mensaje para
+      // el asesor sí distingue la mora activa en Q0.
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
-      return { success: false, message: "[ERROR] No hay mora activa para este crédito" };
+      return {
+        success: false,
+        message:
+          result.kind === "mora_en_cero"
+            ? "[INFO] La mora activa ya está en Q0.00: el cliente abonó todo lo devengado y sigue con cuotas vencidas. No hay nada que condonar."
+            : "[ERROR] No hay mora activa para este crédito",
+      };
     }
-
-    await registrarHistorialMora({
-      credito_id,
-      mora_id: result.moraId,
-      tipo_evento: "CONDONACION",
-      origen: "CONDONACION_INDIVIDUAL",
-      monto_anterior: result.monto,
-      monto_nuevo: "0",
-      // Condonar pone el MONTO en 0; las cuotas atrasadas de la fila no se
-      // tocan. Registrar el valor real evita el "N → 0" falso en el historial.
-      cuotas_atrasadas_anterior: result.cuotas ?? 0,
-      cuotas_atrasadas_nuevas: result.updatedMora?.cuotas_atrasadas ?? result.cuotas ?? 0,
-      usuario_id: user.id,
-      motivo,
-    });
 
     emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
     return {
@@ -1734,24 +3003,13 @@ export async function condonarTodasLasMoras({
       return { success: false, message: "[ERROR] Usuario no encontrado" };
     }
 
-    // 2. Obtener todos los créditos MOROSOS con sus moras activas
+    // 2. Obtener todos los créditos MOROSOS (sin moras aún)
     const creditosMorosos = await db
       .select({
         credito_id: creditos.credito_id,
-        mora_id: moras_credito.mora_id,
-        monto_mora: moras_credito.monto_mora,
-        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
       })
       .from(creditos)
-      .leftJoin(
-        moras_credito,
-        and(
-          eq(creditos.credito_id, moras_credito.credito_id),
-          eq(moras_credito.activa, true)
-        )
-      )
       .where(eq(creditos.statusCredit, "MOROSO"));
-
 
     if (creditosMorosos.length === 0) {
       emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: 0, succeededCount: 0, failedCount: 0, skippedCount: 0 });
@@ -1762,14 +3020,167 @@ export async function condonarTodasLasMoras({
       };
     }
 
-    // El leftJoin trae también los créditos MOROSO SIN mora activa (mora_id
-    // null): esos no se actualizan, no generan condonación y no deben contarse.
-    // Contarlos inflaba el "Se condonaron N moras" y el `condonados`.
-    const conMoraActiva = creditosMorosos.filter(
-      (c): c is typeof c & { mora_id: number } => c.mora_id !== null
-    );
+    // Todo debe ir en una transacción porque una mora puesta en cero sin su anotación vuelve entera con el cron de la noche.
+    const condonaciones = await db.transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Sin esto, una condonación masiva que toma
+      // moras_credito primero puede trabarse contra una condonación individual que
+      // toma creditos primero: deadlock 40P01 que aborta la transacción.
+      // Solo se bloquean los créditos que se van a tocar (mora activa > 0): el
+      // resto de los MOROSO sigue libre para pagos y reversas durante la masiva.
+      const creditoIds = creditosMorosos.map((c) => c.credito_id);
+      // La mora activa va en un EXISTS y no en un JOIN: con JOIN hay que decir
+      // `FOR UPDATE OF creditos`, y drizzle lo escribe calificado
+      // (`of "cartera"."creditos"`), que Postgres rechaza siempre ("must specify
+      // unqualified relation names"). Sin JOIN, el FOR UPDATE simple solo toma
+      // `creditos`; `moras_credito` se bloquea abajo, en su orden.
+      const bloqueados = await tx
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        // El estado se vuelve a mirar CON el candado: un crédito que pasó a
+        // CANCELADO entre la lectura inicial y acá conserva la mora activa,
+        // pero el ledger no le anotaría la condonación (sus cuotas ya no son
+        // elegibles) y, si se reactivara, el cron la volvería a cobrar.
+        .where(
+          and(
+            inArray(creditos.credito_id, creditoIds),
+            eq(creditos.statusCredit, "MOROSO"),
+            exists(
+              tx
+                .select({ uno: sql`1` })
+                .from(moras_credito)
+                .where(
+                  and(
+                    eq(moras_credito.credito_id, creditos.credito_id),
+                    eq(moras_credito.activa, true),
+                    gt(moras_credito.monto_mora, "0"),
+                  ),
+                ),
+            ),
+          ),
+        )
+        .orderBy(creditos.credito_id)
+        .for("update");
+      const idsBloqueados = bloqueados.map((b) => b.credito_id);
 
-    if (conMoraActiva.length === 0) {
+      // Re-leer las moras ACTIVAS de estos créditos DESPUÉS de adquirir el candado.
+      // Esto evita usar datos viejos si entre la lectura inicial y el lock hubo
+      // un pago que bajó la mora o un convenio que la apagó.
+      const vigentes = await tx
+        .select({
+          credito_id: moras_credito.credito_id,
+          mora_id: moras_credito.mora_id,
+          monto_mora: moras_credito.monto_mora,
+          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        })
+        .from(moras_credito)
+        // `monto > 0`: una mora activa en Q0 (todo ya abonado, cuotas aún
+        // vencidas) no se pone en cero, no se anota ni se cuenta como condonada.
+        // Solo créditos bloqueados arriba: uno que ganó mora después del candado
+        // se queda para la próxima masiva.
+        .where(and(inArray(moras_credito.credito_id, idsBloqueados.length ? idsBloqueados : [-1]), eq(moras_credito.activa, true), gt(moras_credito.monto_mora, "0")))
+        // FOR UPDATE: un `/mora` manual no toma el candado del crédito; sin
+        // bloquear la fila, podría cambiar el monto entre esta lectura y el
+        // UPDATE, y el ledger anotaría como condonado un monto viejo. Va
+        // después del candado de `creditos` (mismo orden que el resto).
+        .for("update");
+
+      // Si entre el SELECT inicial y el lock no hay moras activas, devuelve vacío.
+      if (vigentes.length === 0) {
+        return [];
+      }
+
+      const conMoraActiva = vigentes;
+
+      // 3. Actualizar todas las moras activas a 0 (mantener activas y estado MOROSO)
+      const moraIds = conMoraActiva.map((c) => c.mora_id);
+      await tx
+        .update(moras_credito)
+        .set({
+          monto_mora: "0",
+          updated_at: new Date(),
+        })
+        .where(and(inArray(moras_credito.mora_id, moraIds), eq(moras_credito.activa, true)));
+
+      // 3.5. Cargar cuotas de TODOS los créditos en UNA sola llamada
+      const hoy = hoyGuatemala();
+      // Solo los créditos con mora vigente: los demás no se anotan y cargarlos
+      // solo alarga el tiempo que la masiva tiene bloqueados los créditos.
+      const cuotasPorCredito = await cuotasParaPendienteDeCreditos(
+        vigentes.map((v) => v.credito_id),
+        tx as unknown as typeof db,
+        hoy,
+      );
+
+      // 3.6. Preparar anotaciones: repartir la mora condonada de cada crédito
+      const anotacionesParaLedger: Parameters<typeof anotarMoraPagada>[0] = [];
+      for (const c of conMoraActiva) {
+        const creditoData = cuotasPorCredito.get(c.credito_id);
+        if (!creditoData) continue;
+
+        const anotaciones = anotacionesDeCondonacion({
+          credito_id: c.credito_id,
+          monto: c.monto_mora ?? "0",
+          capital: creditoData.capital,
+          cuotas: creditoData.cuotas,
+          usuario_id: user.id,
+          motivo,
+        });
+
+        anotacionesParaLedger.push(...anotaciones);
+      }
+
+      // 3.7. Anotar todas las líneas en UNA sola llamada
+      if (anotacionesParaLedger.length > 0) {
+        await anotarMoraPagada(anotacionesParaLedger, tx as unknown as typeof db);
+      }
+
+      // 5. Insertar registros masivos en moras_condonaciones
+      const condonacionesData = conMoraActiva.map((credito) => ({
+        credito_id: credito.credito_id,
+        mora_id: credito.mora_id,
+        motivo,
+        usuario_id: user.id,
+        montoCondonacion: credito.monto_mora ?? "0",
+      }));
+
+      const condonacionesResult = await tx
+        .insert(moras_condonaciones)
+        .values(condonacionesData)
+        .returning();
+
+      // Registrar histórico para cada condonación masiva
+      await Promise.all(
+        conMoraActiva.map((c) =>
+          registrarHistorialMora({
+            credito_id: c.credito_id,
+            mora_id: c.mora_id,
+            tipo_evento: "CONDONACION",
+            origen: "CONDONACION_MASIVA",
+            monto_anterior: c.monto_mora ?? "0",
+            monto_nuevo: "0",
+            // La condonación masiva NO toca cuotas_atrasadas de la fila: se
+            // registra el valor real (antes y después) en vez de un "→ 0" falso.
+            cuotas_atrasadas_anterior: c.cuotas_atrasadas ?? 0,
+            cuotas_atrasadas_nuevas: c.cuotas_atrasadas ?? 0,
+            usuario_id: user.id,
+            motivo,
+            // Si un historial falla, la condonación masiva no debe reportar éxito
+            // cuando en realidad quedaron moras sin rastro auditable. Acá se
+            // propaga el error para que la tx sea abortada y se reviertan todos
+            // los cambios: mora, anotaciones, condonaciones.
+            dbClient: tx as unknown as typeof db,
+            propagarError: true,
+          })
+        )
+      );
+
+      return condonacionesResult;
+    });
+
+    // Si la transacción devolvió vacío, significa que vigentes estaba vacío
+    // (no había moras activas al momento del lock).
+    if (condonaciones.length === 0 && creditosMorosos.length > 0) {
       emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: creditosMorosos.length, succeededCount: 0, failedCount: 0, skippedCount: creditosMorosos.length });
       return {
         success: true,
@@ -1780,66 +3191,20 @@ export async function condonarTodasLasMoras({
       };
     }
 
-    // 3. Actualizar todas las moras a 0 (mantener activas y estado MOROSO)
-    const moraIds = conMoraActiva.map((c) => c.mora_id);
-    await db
-      .update(moras_credito)
-      .set({
-        monto_mora: "0",
-        updated_at: new Date(),
-      })
-      .where(inArray(moras_credito.mora_id, moraIds));
-
-
-
-    // 5. Insertar registros masivos en moras_condonaciones
-    const condonacionesData = conMoraActiva.map((credito) => ({
-      credito_id: credito.credito_id,
-      mora_id: credito.mora_id,
-      motivo,
-      usuario_id: user.id,
-      montoCondonacion: credito.monto_mora ?? "0",
-    }));
-
-    const condonaciones = await db
-      .insert(moras_condonaciones)
-      .values(condonacionesData)
-      .returning();
-
-    // Registrar histórico para cada condonación masiva
-    await Promise.all(
-      conMoraActiva.map((c) =>
-        registrarHistorialMora({
-          credito_id: c.credito_id,
-          mora_id: c.mora_id,
-          tipo_evento: "CONDONACION",
-          origen: "CONDONACION_MASIVA",
-          monto_anterior: c.monto_mora ?? "0",
-          monto_nuevo: "0",
-          // La condonación masiva NO toca cuotas_atrasadas de la fila: se
-          // registra el valor real (antes y después) en vez de un "→ 0" falso.
-          cuotas_atrasadas_anterior: c.cuotas_atrasadas ?? 0,
-          cuotas_atrasadas_nuevas: c.cuotas_atrasadas ?? 0,
-          usuario_id: user.id,
-          motivo,
-        })
-      )
-    );
-
     emitCreditLateFee({
       outcome: "completed",
       operation: "bulk_condone",
       durationMs: elapsedMilliseconds(startedAt),
       processedCount: creditosMorosos.length,
-      succeededCount: condonacionesData.length,
+      succeededCount: condonaciones.length,
       failedCount: 0,
-      skippedCount: creditosMorosos.length - condonacionesData.length,
+      skippedCount: creditosMorosos.length - condonaciones.length,
     });
     return {
       success: true,
-      message: `[SUCCESS] Se condonaron ${condonacionesData.length} moras`,
-      condonados: condonacionesData.length,
-      creditos_afectados: condonacionesData.length,
+      message: `[SUCCESS] Se condonaron ${condonaciones.length} moras`,
+      condonados: condonaciones.length,
+      creditos_afectados: condonaciones.length,
       condonaciones,
     };
   } catch (error) {

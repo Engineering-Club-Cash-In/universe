@@ -13,8 +13,42 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import FormData from "form-data";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import { ContractType } from "../types/contract";
-import { getSignaturePattern } from "./signaturePatterns";
+import {
+	CONTRATOS_DE_INVERSION,
+	ContractType,
+	SignerRole,
+	type ContractSigner,
+	type IdentificationMode,
+} from "../types/contract";
+import {
+	SignatureLayoutError,
+	getRubrica,
+	getSignaturePattern,
+	firmantesEnOrdenDeFirma,
+	resolveSignerOrder,
+} from "./signaturePatterns";
+
+/**
+ * País bajo el que se emiten los documentos. WeeTrust lo toma como header al
+ * subir el PDF y, si falta, asume México.
+ */
+export const WEETRUST_COUNTRY = process.env.WEETRUST_COUNTRY || "Guatemala";
+
+/**
+ * Verificación de identidad por defecto para los firmantes: validación del
+ * documento de identidad (DPI).
+ */
+export const WEETRUST_DEFAULT_IDENTIFICATION: IdentificationMode =
+	(process.env.WEETRUST_IDENTIFICATION as IdentificationMode) || "id";
+
+/**
+ * Observadores fijos: reciben copia del flujo de firma pero no firman.
+ * Se configuran por entorno para poder cambiarlos sin tocar código.
+ */
+export const WEETRUST_OBSERVERS: string[] = (process.env.WEETRUST_OBSERVERS || "")
+	.split(",")
+	.map((e) => e.trim())
+	.filter(Boolean);
 
 // ============================================================================
 // INTERFACES
@@ -85,7 +119,12 @@ export interface WeeTrustDocumentResponse {
 			size: string;
 		};
 		signatory: WeeTrustSignatoryResponse[];
-		sharedWith: string[];
+		/** Observadores, con su propio link de sólo lectura al flujo de firma. */
+		sharedWith: Array<{
+			emailID: string;
+			url?: string;
+			sharedWithID?: string;
+		}>;
 		pscCertificate: string;
 		blockchainCertificate: string;
 	};
@@ -105,6 +144,21 @@ export interface WeeTrustSignatoryResponse {
 	};
 	imageURL: string;
 	emailTracking: unknown[];
+	/**
+	 * Cómo le fue a la verificación facial, en los firmantes que la llevan.
+	 *
+	 * `isValid: false` con `hasFinished: true` es el caso que deja documentos a
+	 * medias: la persona firmó (`isSigned: 1`) pero WeeTrust no cierra el
+	 * documento, así que se queda en PENDING para siempre hasta que alguien
+	 * repita o salte la verificación.
+	 */
+	biometricResultInfo?: {
+		biometricLogID: string;
+		biometricResultUrl?: string;
+		hasFinished: boolean;
+		isValid: boolean;
+		uuid?: string;
+	};
 }
 
 export interface WeeTrustWebhookResponse {
@@ -156,6 +210,19 @@ export class WeeTrustService {
 		this.httpClient = axios.create({
 			baseURL: this.config.apiUrl,
 			timeout: 30000,
+		});
+
+		// axios resume los errores HTTP como "Request failed with status code 400"
+		// y se traga el cuerpo, que es donde WeeTrust explica qué campo rechazó.
+		// Sin esto, un contrato que no se puede firmar no dice por qué.
+		this.httpClient.interceptors.response.use(undefined, (error) => {
+			const data = error?.response?.data;
+			const detalle =
+				typeof data === "string" ? data : data?.message ?? JSON.stringify(data);
+			if (detalle) {
+				error.message = `${error.message} — ${detalle}`;
+			}
+			return Promise.reject(error);
 		});
 
 		console.log(`[WeeTrust] Inicializado con API: ${this.config.apiUrl}`);
@@ -260,14 +327,22 @@ export class WeeTrustService {
 
 	/**
 	 * Sube un documento desde un Buffer
+	 *
+	 * `country` define el marco legal bajo el que WeeTrust emite el documento y
+	 * viaja como header. Si no se manda, WeeTrust asume México — que es lo que
+	 * veníamos haciendo sin querer en todos los contratos guatemaltecos. Ojo:
+	 * la API no valida el valor, guarda tal cual lo que reciba.
 	 */
 	async uploadDocumentFromBuffer(
 		pdfBuffer: Buffer,
 		fileName: string,
+		country: string = WEETRUST_COUNTRY,
 	): Promise<WeeTrustDocumentResponse["responseData"]> {
 		// Asegurar que el filename tenga extensión .pdf
 		const pdfFileName = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
-		console.log(`[WeeTrust] Subiendo documento desde buffer: ${pdfFileName}`);
+		console.log(
+			`[WeeTrust] Subiendo documento desde buffer: ${pdfFileName} (país: ${country})`,
+		);
 
 		const headers = await this.getAuthHeaders();
 		const formData = new FormData();
@@ -283,6 +358,7 @@ export class WeeTrustService {
 			{
 				headers: {
 					...headers,
+					country,
 					...formData.getHeaders(),
 				},
 			},
@@ -348,10 +424,20 @@ export class WeeTrustService {
 			signatory: WeeTrustSignatory[];
 			hasOrder?: boolean;
 			disableMailing?: boolean;
+			/**
+			 * Observadores: ven el flujo de firma sin firmar. Se reciben como
+			 * correos y se mandan como objetos, que es lo único que acepta
+			 * WeeTrust (una lista de strings devuelve "Some emails has invalid
+			 * format or are empty").
+			 */
+			sharedWith?: string[];
 		},
 	): Promise<WeeTrustDocumentResponse["responseData"]> {
 		console.log(
-			`[WeeTrust] Enviando documento ${documentID} a ${options.signatory.length} firmante(s)`,
+			`[WeeTrust] Enviando documento ${documentID} a ${options.signatory.length} firmante(s)` +
+				(options.sharedWith?.length
+					? ` y ${options.sharedWith.length} observador(es)`
+					: ""),
 		);
 
 		const headers = await this.getAuthHeaders();
@@ -365,6 +451,9 @@ export class WeeTrustService {
 				signatory: options.signatory,
 				hasOrder: options.hasOrder ?? false,
 				disableMailing: options.disableMailing ?? false,
+				...(options.sharedWith?.length
+					? { sharedWith: options.sharedWith.map((emailID) => ({ emailID })) }
+					: {}),
 			},
 			{
 				headers: {
@@ -451,6 +540,119 @@ export class WeeTrustService {
 		}
 
 		console.log(`[WeeTrust] Documento ${documentID} eliminado`);
+	}
+
+	// ==========================================================================
+	// REINTENTOS
+	// ==========================================================================
+
+	/**
+	 * Regenera los enlaces de firma de un documento.
+	 *
+	 * Es la salida cuando un link venció o cuando alguien necesita volver a
+	 * entrar (por ejemplo, tecleó mal el DPI y quiere reintentar la
+	 * verificación): WeeTrust emite URLs nuevas para los firmantes que todavía
+	 * no firmaron. Los que ya firmaron no se tocan.
+	 *
+	 * `PUT /documents/update-signatures`, body `{ documentID }`.
+	 */
+	async refreshSignatureUrls(
+		documentID: string,
+	): Promise<WeeTrustSignatoryResponse[]> {
+		console.log(`[WeeTrust] Regenerando enlaces de firma de ${documentID}`);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			responseData: WeeTrustSignatoryResponse[] | WeeTrustSignatoryResponse;
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			"/documents/update-signatures",
+			{ documentID },
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Refresh Signatures Error: ${response.data.message}`,
+			);
+		}
+
+		// La doc muestra un objeto, pero un documento tiene varios firmantes y la
+		// API devuelve el arreglo. Se aceptan las dos formas.
+		const data = response.data.responseData;
+		const firmantes = Array.isArray(data) ? data : data ? [data] : [];
+
+		console.log(
+			`[WeeTrust] ${firmantes.length} enlace(s) regenerado(s) para ${documentID}`,
+		);
+		return firmantes;
+	}
+
+	/**
+	 * Reenvía el correo de invitación a los firmantes que aún no firman.
+	 *
+	 * `PUT /documents/resend-email?documentID=...`, sin body.
+	 */
+	async resendEmailToSignatories(documentID: string): Promise<void> {
+		console.log(`[WeeTrust] Reenviando correo del documento ${documentID}`);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			`/documents/resend-email?documentID=${encodeURIComponent(documentID)}`,
+			undefined,
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Resend Email Error: ${response.data.message}`,
+			);
+		}
+	}
+
+	/**
+	 * Repite (o salta) la verificación facial de un intento fallido.
+	 *
+	 * El `biometricLogID` del intento viene en `GET /documents/{id}`, dentro del
+	 * `biometricResultInfo` de ese firmante: no hace falta esperar el webhook
+	 * `pendingBiometric` / `failedBiometric`, que hoy no está registrado.
+	 *
+	 * `PUT /documents/retry-biometric`.
+	 */
+	async retryBiometric(
+		documentID: string,
+		biometricLogID: string,
+		action: "biometricRetry" | "biometricSkipped" = "biometricRetry",
+	): Promise<void> {
+		console.log(
+			`[WeeTrust] ${action} para el intento ${biometricLogID} del documento ${documentID}`,
+		);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			"/documents/retry-biometric",
+			{ documentID, biometricLogID, action },
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Retry Biometric Error: ${response.data.message}`,
+			);
+		}
 	}
 
 	// ==========================================================================
@@ -548,10 +750,18 @@ export class WeeTrustService {
 			title: string;
 			message: string;
 			signatory: WeeTrustSignatory[];
+			/**
+			 * Firmantes ya ordenados según las líneas de firma del PDF. Cuando se
+			 * pasa, el posicionamiento "auto" asigna cada widget a su dueño.
+			 */
+			signers?: ContractSigner[];
+			/** false = reparto por orden de llegada, como antes de los roles. */
+			repartoPorRol?: boolean;
 			signaturePositions?: WeeTrustSignaturePosition[];
 			hasOrder?: boolean;
 			page?: number;
 			contractType?: ContractType;
+			sharedWith?: string[];
 			/**
 			 * Modo de posicionamiento de firma:
 			 * - "auto": Detecta automáticamente las líneas de firma en el PDF (requiere contractType)
@@ -563,6 +773,7 @@ export class WeeTrustService {
 	): Promise<{
 		documentID: string;
 		signingLinks: string[];
+		signatoryIDs: string[];
 		documentUrl: string;
 		status: string;
 	}> {
@@ -572,59 +783,115 @@ export class WeeTrustService {
 		const uploadResult = await this.uploadDocumentFromBuffer(pdfBuffer, fileName);
 		const documentID = uploadResult.documentID;
 
-		// 2. Manejar posiciones según el modo
-		if (positioningMode === "free") {
-			// Modo libre: el firmante elige dónde firmar
-			console.log("[WeeTrust] Modo libre: el firmante elegirá dónde colocar su firma");
-		} else {
-			// Modos "auto" o "fixed": fijar posiciones
-			let positions = options.signaturePositions;
+		// Si algo falla después de subirlo (el layout no calza, WeeTrust rechaza
+		// el envío), el documento queda como borrador huérfano en la cuenta, uno
+		// por cada reintento. Se borra antes de propagar el error.
+		try {
 
-			if (positioningMode === "auto" && options.contractType) {
-				// Detectar automáticamente las líneas de firma en el PDF
-				const signerEmails = options.signatory.map((s) => s.emailID);
-				positions = await WeeTrustService.findSignatureLinesInPDF(
-					pdfBuffer,
-					options.contractType,
-					signerEmails,
-				);
-			} else if (!positions || positions.length === 0) {
-				// Generar posiciones por defecto
-				const page = options.page ?? 1;
-				const positionTypes: Array<"left" | "right" | "center"> = ["left", "right", "center", "left"];
+			// 2. Manejar posiciones según el modo
+			if (positioningMode === "free") {
+				// Modo libre: el firmante elige dónde firmar
+				console.log("[WeeTrust] Modo libre: el firmante elegirá dónde colocar su firma");
+			} else {
+				// Modos "auto" o "fixed": fijar posiciones
+				let positions = options.signaturePositions;
 
-				positions = options.signatory.map((signer, index) =>
-					WeeTrustService.generateDefaultSignaturePosition(
-						signer.emailID,
-						page,
-						positionTypes[index % positionTypes.length],
-					)
-				);
-				console.log(`[WeeTrust] Generando ${positions.length} posiciones por defecto`);
+				if (
+					positioningMode === "auto" &&
+					options.contractType &&
+					options.repartoPorRol === false
+				) {
+					positions = await WeeTrustService.locateSignatureWidgetsLegacy(
+						pdfBuffer,
+						options.contractType,
+						options.signatory.map((s) => s.emailID),
+					);
+				} else if (positioningMode === "auto" && options.contractType) {
+					// Detectar las líneas de firma del PDF y repartirlas por rol
+					positions = await WeeTrustService.locateSignatureWidgets(
+						pdfBuffer,
+						options.contractType,
+						options.signers ??
+							options.signatory.map((s) => ({
+								role: SignerRole.TITULAR,
+								email: s.emailID,
+								name: s.name ?? s.emailID,
+							})),
+					);
+				} else if (!positions || positions.length === 0) {
+					// Generar posiciones por defecto
+					const page = options.page ?? 1;
+					const positionTypes: Array<"left" | "right" | "center"> = ["left", "right", "center", "left"];
+
+					positions = options.signatory.map((signer, index) =>
+						WeeTrustService.generateDefaultSignaturePosition(
+							signer.emailID,
+							page,
+							positionTypes[index % positionTypes.length],
+						)
+					);
+					console.log(`[WeeTrust] Generando ${positions.length} posiciones por defecto`);
+				}
+
+				await this.setSignaturePositions(documentID, positions);
 			}
 
-			await this.setSignaturePositions(documentID, positions);
+			// 3. Enviar a firma
+			const signResult = await this.sendToSign(documentID, {
+				title: options.title,
+				message: options.message,
+				signatory: options.signatory,
+				hasOrder: options.hasOrder,
+				sharedWith: options.sharedWith,
+			});
+
+			// 4. Extraer signing links respetando el orden en que mandamos los
+			//    firmantes: WeeTrust devuelve su propio arreglo y los links se
+			//    persisten por posición, así que reordenamos por email para no
+			//    entregarle a cada quien el link de otro.
+			const porEmail = new Map(
+				signResult.signatory.map((s) => [s.emailID.toLowerCase(), s]),
+			);
+			const enOrden = options.signatory.map((s) =>
+				porEmail.get(s.emailID.toLowerCase()),
+			);
+
+			const faltantes = options.signatory
+				.filter((s) => !porEmail.has(s.emailID.toLowerCase()))
+				.map((s) => s.emailID);
+			if (faltantes.length > 0) {
+				throw new Error(
+					`WeeTrust no devolvió firmante para: ${faltantes.join(", ")}`,
+				);
+			}
+
+			// Un firmante sin URL deja un contrato "exitoso" con un link vacío que
+			// nadie puede usar. Se trata como envío incompleto.
+			const sinUrl = options.signatory
+				.filter((_, i) => !enOrden[i]?.signing?.url)
+				.map((s) => s.emailID);
+			if (sinUrl.length > 0) {
+				throw new Error(
+					`WeeTrust no devolvió enlace de firma para: ${sinUrl.join(", ")}`,
+				);
+			}
+
+			return {
+				documentID,
+				signingLinks: enOrden.map((s) => s?.signing?.url ?? ""),
+				signatoryIDs: enOrden.map((s) => s?.signatoryID ?? ""),
+				documentUrl: signResult.documentFileObj.url,
+				status: signResult.status,
+			};
+		} catch (error) {
+			await this.deleteDocument(documentID).catch((e) =>
+				console.warn(
+					`[WeeTrust] No se pudo borrar el borrador ${documentID} tras el error:`,
+					e,
+				),
+			);
+			throw error;
 		}
-
-		// 3. Enviar a firma
-		const signResult = await this.sendToSign(documentID, {
-			title: options.title,
-			message: options.message,
-			signatory: options.signatory,
-			hasOrder: options.hasOrder,
-		});
-
-		// 4. Extraer signing links
-		const signingLinks = signResult.signatory
-			.filter((s) => s.signing?.url)
-			.map((s) => s.signing!.url);
-
-		return {
-			documentID,
-			signingLinks,
-			documentUrl: signResult.documentFileObj.url,
-			status: signResult.status,
-		};
 	}
 
 	// ==========================================================================
@@ -638,49 +905,127 @@ export class WeeTrustService {
 	 * @param title - Nombre del documento
 	 * @param pdfBuffer - Buffer del PDF
 	 * @param contractType - Tipo de contrato (para auto-detección de firmas)
-	 * @param emails - Lista de emails de los firmantes
-	 * @returns { signs: string[], linkDocument: string }
+	 * @param signers - Firmantes con su rol, en cualquier orden
+	 * @param observers - Correos que reciben copia del flujo sin firmar
+	 * @returns { signs, linkDocument, documentID, signatories }
 	 */
 	async createDocumentForSigning(
 		title: string,
 		pdfBuffer: Buffer,
 		contractType: ContractType,
-		emails: string[],
+		signers: ContractSigner[],
+		observers: string[] = WEETRUST_OBSERVERS,
+		/**
+		 * `legado` es para quien sólo manda `emails`, sin rol (hoy la app
+		 * legal-documents). Se comporta como antes de la firma por rol: los
+		 * firmantes van en el orden en que llegaron, los widgets se reparten por
+		 * orden de llegada y no se pide verificación de identidad. Sin esto, un
+		 * contrato con línea de rep legal fallaba porque ese caller nunca lo manda.
+		 */
+		modo: "rol" | "legado" = "rol",
+		/**
+		 * Dónde va cada firma, ya calculado. Lo manda el paquete de cartas: cada
+		 * carta tiene su propio patrón de línea, así que no se puede buscar uno
+		 * solo en el PDF unido (ver `posicionesDelPaquete`). Sin esto, las
+		 * posiciones se detectan en el PDF por el layout del tipo.
+		 */
+		posiciones?: WeeTrustSignaturePosition[],
 	): Promise<{
 		signs: string[];
 		linkDocument: string;
+		documentID: string;
+		/**
+		 * Enlace de observador: muestra el documento y cómo va la firma sin dejar
+		 * firmar. Es el único que se le puede pasar a alguien para que mire.
+		 */
+		observerUrl?: string;
+		/** Un registro por firmante, en el mismo orden que `signs`. */
+		signatories: Array<{
+			role: SignerRole;
+			email: string;
+			name: string;
+			signatoryID?: string;
+			signingUrl?: string;
+		}>;
 	}> {
 		console.log(`\n🔄 [WeeTrust] Iniciando flujo completo para: ${title}`);
 
-		// Construir lista de firmantes
-		// WeeTrust requiere nombres de 4-100 caracteres
-		const signatory: WeeTrustSignatory[] = emails.map((email, index) => {
-			let name = email.split("@")[0];
-			// Asegurar mínimo 4 caracteres
-			if (name.length < 4) {
-				name = `Firmante ${index + 1}`;
-			}
-			return {
-				emailID: email,
-				name,
-			};
-		});
+		// Quiénes firman ESTE documento: no todo el roster aparece en todos los
+		// contratos (la cobertura, por ejemplo, no lleva representante legal).
+		// Mandar a alguien sin línea de firma asignada hace que WeeTrust rechace
+		// el envío entero con "<email> undefined".
+		const porEmail = new Map<string, ContractSigner>();
+		const ordenados =
+			modo === "rol" ? firmantesEnOrdenDeFirma(contractType, signers) : signers;
+		for (const s of ordenados) {
+			if (!porEmail.has(s.email)) porEmail.set(s.email, s);
+		}
 
-		// Llamar al método principal con auto-detección
+		const signatory: WeeTrustSignatory[] = [...porEmail.values()].map(
+			(s, index) => ({
+				emailID: s.email,
+				name: nombreParaWeeTrust(s.name, index),
+				...(modo === "rol" ? identificacionDe(s, contractType) : {}),
+				...(s.phone ? { phone: s.phone } : {}),
+			}),
+		);
+
+		// El paquete no tiene un patrón propio que buscar: sin las posiciones
+		// calculadas carta por carta, "auto" buscaría una línea que no existe y
+		// las firmas caerían en cualquier lado.
+		if (contractType === ContractType.PAQUETE_CARTAS && !posiciones?.length) {
+			throw new SignatureLayoutError(
+				"Las cartas unidas necesitan las posiciones calculadas carta por carta.",
+			);
+		}
+
 		const result = await this.createDocumentAndGetSigningLinks(pdfBuffer, title, {
 			title,
 			message: `Por favor firme el documento: ${title}`,
 			signatory,
+			signers,
 			contractType,
-			positioningMode: "auto",
+			positioningMode: posiciones?.length ? "fixed" : "auto",
+			signaturePositions: posiciones,
+			sharedWith: observers,
+			repartoPorRol: modo === "rol",
 		});
 
 		console.log(`✓ [WeeTrust] ${result.signingLinks.length} link(s) de firma generados`);
 
-		// Retornar en formato compatible con Documenso
+		const signatories = [...porEmail.values()].map((s, i) => ({
+			role: s.role,
+			email: s.email,
+			name: s.name,
+			signatoryID: result.signatoryIDs[i],
+			signingUrl: result.signingLinks[i],
+		}));
+
+		// Retornar en formato compatible con Documenso, más lo que hace falta
+		// para consultar estado y reintentar después (documentID/signatoryID).
+		// El link de observador sólo existe si se mandaron observadores. Se lee del
+		// documento porque `sendToSign` no lo devuelve.
+		let observerUrl: string | undefined;
+		if (observers.length > 0) {
+			try {
+				const documento = await this.getDocument(result.documentID);
+				observerUrl = documento.sharedWith?.find((o) => o.url)?.url;
+			} catch (error) {
+				// Que no se pueda leer el link de observador no invalida el documento,
+				// que ya quedó creado y enviado a firmar.
+				console.warn(
+					"[WeeTrust] No se pudo leer el enlace de observador:",
+					error,
+				);
+			}
+		}
+
 		return {
 			signs: result.signingLinks,
 			linkDocument: result.documentUrl,
+			documentID: result.documentID,
+			observerUrl,
+			signatories,
 		};
 	}
 
@@ -742,131 +1087,675 @@ export class WeeTrustService {
 	}
 
 	/**
-	 * Detecta las líneas de firma en un PDF buscando patrones como "f)___"
-	 * y genera las posiciones para WeeTrust
+	 * Ubica TODAS las líneas de firma del PDF y le asigna a cada una su firmante.
+	 *
+	 * El número de líneas no se puede sacar de la configuración: los templates
+	 * plural generan la fila de deudores con un loop, así que un mismo contrato
+	 * rinde 2, 3 o más widgets según cuántos cofirmantes haya. Por eso se leen
+	 * todas y se contrastan contra el layout declarado del template.
+	 *
+	 * Si la cuenta no calza, se lanza `SignatureLayoutError` en lugar de recortar
+	 * o de inventar coordenadas: una firma puesta en el lugar equivocado produce
+	 * un contrato inválido que nadie nota hasta que es tarde.
 	 */
-	static async findSignatureLinesInPDF(
+	static async locateSignatureWidgets(
+		pdfBuffer: Buffer,
+		contractType: ContractType,
+		signers: ContractSigner[],
+	): Promise<WeeTrustSignaturePosition[]> {
+		const config = getSignaturePattern(contractType);
+		const { pattern } = config;
+
+		// Los contratos que todavía no fueron auditados (inversiones, cartas
+		// poder) siguen por el camino de siempre: reparto por orden de llegada.
+		// Sólo los de venta tienen su layout verificado contra el PDF.
+		if (!config.bloques || config.bloques.length === 0) {
+			return WeeTrustService.locateSignatureWidgetsLegacy(
+				pdfBuffer,
+				contractType,
+				signers.map((s) => s.email),
+			);
+		}
+
+		const esperados = resolveSignerOrder(contractType, signers);
+
+		console.log(
+			`[WeeTrust] ${contractType}: se esperan ${esperados.length} firma(s) -> ` +
+				esperados.map((s) => s.role).join(", "),
+		);
+
+		const lineas = await WeeTrustService.readSignatureLines(
+			pdfBuffer,
+			pattern,
+			config.anclasExactas,
+		);
+
+		// Un documento puede traer menos repeticiones de las declaradas y estar
+		// bien, pero sólo donde el tipo lo declara (`repeticionesOpcionales`): los
+		// anexos de inversiones son dos, y a veces se manda uno solo unificado.
+		// Mientras lo que llegue sean repeticiones COMPLETAS de la secuencia, se
+		// firman las que haya; media repetición sí es un layout que no
+		// entendemos. En los demás (la cobertura lleva siempre sus dos secciones)
+		// la cuenta tiene que ser exacta.
+		const porRepeticion = esperados.length / (config.repeticiones ?? 1);
+		const repeticionesEnElPdf =
+			porRepeticion > 0 ? lineas.length / porRepeticion : 0;
+		const esRepeticionCompleta =
+			Number.isInteger(repeticionesEnElPdf) && repeticionesEnElPdf >= 1;
+		const cuentaAceptable = config.repeticionesOpcionales
+			? lineas.length <= esperados.length && esRepeticionCompleta
+			: lineas.length === esperados.length;
+
+		if (!cuentaAceptable) {
+			throw new SignatureLayoutError(
+				`El contrato "${contractType}" tiene ${lineas.length} línea(s) de firma en el PDF ` +
+					`pero se esperaban ${esperados.length} (${esperados.map((s) => s.role).join(", ")}). ` +
+					`Revisar el layout declarado en signaturePatterns.ts con scripts/inventario-firmas.ts.`,
+			);
+		}
+
+		if (lineas.length < esperados.length) {
+			console.log(
+				`[WeeTrust] ${contractType}: el PDF trae ${repeticionesEnElPdf} de las ` +
+					`${config.repeticiones} repeticiones declaradas; se firman las que hay.`,
+			);
+			esperados.length = lineas.length;
+		}
+
+		// Donde el template imprime el DPI debajo de la línea, lo usamos para
+		// confirmar que el widget le tocó a quien corresponde. No todos los
+		// templates lo imprimen, así que es una verificación oportunista.
+		lineas.forEach((linea, i) => {
+			const esperado = esperados[i];
+			const dpiEsperado = soloDigitos(esperado.dpi);
+			if (!dpiEsperado) return;
+
+			const dpisEnPdf = linea.debajo
+				.flatMap((t) => t.match(/\d[\d\s-]{10,}/g) ?? [])
+				.map(soloDigitos)
+				.filter(Boolean);
+			if (dpisEnPdf.length === 0) return;
+
+			if (!dpisEnPdf.includes(dpiEsperado)) {
+				throw new SignatureLayoutError(
+					`En "${contractType}", la firma ${i + 1} corresponde al DPI ${dpisEnPdf.join("/")} ` +
+						`según el documento, pero se le iba a asignar a ${esperado.name} (DPI ${dpiEsperado}). ` +
+						`El orden declarado del template no calza con el PDF.`,
+				);
+			}
+		});
+
+		const SIGNATURE_HEIGHT = 50;
+		const posiciones: WeeTrustSignaturePosition[] = lineas.map((linea, i) => {
+			// WeeTrust mide Y desde arriba y el PDF desde abajo. Restamos la altura
+			// de la firma para que quede SOBRE la línea y no a partir de ella, y
+			// en los que se ubican por una etiqueta impresa debajo de la línea,
+			// lo que hay entre las dos: si no, el cuadro tapa la etiqueta.
+			const x = linea.pdfX;
+			const y =
+				linea.pageHeight -
+				linea.pdfY -
+				SIGNATURE_HEIGHT -
+				(config.subirSobreLaEtiqueta ?? 0);
+
+			console.log(
+				`[WeeTrust]   firma ${i + 1}: ${esperados[i].role} -> pág. ${linea.pageNum} (${x.toFixed(0)}, ${y.toFixed(0)})`,
+			);
+
+			return {
+				user: { email: esperados[i].email },
+				coordinates: { x, y },
+				page: linea.pageNum,
+				pageY: y,
+				pageYv2: y,
+				color: "#FFD247",
+				imageSize: { width: 100, height: 50 },
+				parentImageSize: { width: linea.pageWidth, height: linea.pageHeight },
+				viewport: { width: linea.pageWidth, height: linea.pageHeight },
+			};
+		});
+
+		// Las rúbricas van DESPUÉS del conteo de líneas: son widgets que se
+		// agregan, no líneas que haya que encontrar en el PDF, así que no pueden
+		// desbalancear la verificación de arriba.
+		posiciones.push(
+			...(await WeeTrustService.rubricasDePaginasImpares(
+				pdfBuffer,
+				contractType,
+				esperados,
+				posiciones,
+			)),
+		);
+
+		return posiciones;
+	}
+
+	/**
+	 * Una rúbrica de cada firmante en cada página impar.
+	 *
+	 * Gerencia lo pidió para los contratos: que ninguna hoja pueda cambiarse sin
+	 * que se note. Las cartas no llevan (no declaran `rubrica`), que es lo
+	 * correcto para un documento de una hoja cuyo final ya va firmado.
+	 *
+	 * Tres cosas que decide esta función:
+	 *
+	 * - **Quiénes.** Los mismos que firman el documento, una vez cada uno. Si el
+	 *   bloque de deudores se expande a titular + dos codeudores, las tres
+	 *   personas rubrican cada hoja impar.
+	 * - **Dónde.** En fila, repartidas a lo ancho de la franja que declara el
+	 *   tipo (el aire de abajo de la hoja, entre el pie y el texto). Cada
+	 *   firmante tiene su parte del ancho y su rúbrica va centrada en ella: con
+	 *   pocos firmantes quedan grandes y separadas, y con muchos se achican
+	 *   hasta un mínimo legible; de ahí en más pasan a otra fila. Si las filas
+	 *   no entran en el alto de la franja, se achican un poco más antes que
+	 *   salirse de ella; si ni así, el layout corta con error.
+	 * - **Cuándo no.** En la hoja donde una persona firma, esa persona no
+	 *   rubrica: su firma ya marca la hoja. Así la hoja de las firmas finales no
+	 *   lleva rúbricas, y un documento de una sola hoja (el pagaré) tampoco.
+	 *   Quien no firma en esa hoja sí rubrica, aunque otros firmen ahí.
+	 */
+	private static async rubricasDePaginasImpares(
+		pdfBuffer: Buffer,
+		contractType: ContractType,
+		firmantes: ContractSigner[],
+		yaPuestas: WeeTrustSignaturePosition[],
+	): Promise<WeeTrustSignaturePosition[]> {
+		const rubrica = getRubrica(contractType);
+		if (!rubrica) return [];
+
+		// Una vez cada uno: el bloque de deudores repetido (cobertura) trae a la
+		// misma persona varias veces, y no tiene que rubricar dos veces por hoja.
+		const porEmail = new Map<string, ContractSigner>();
+		for (const f of firmantes) if (!porEmail.has(f.email)) porEmail.set(f.email, f);
+		const unicos = [...porEmail.values()];
+		if (unicos.length === 0) return [];
+
+		const { franja } = rubrica;
+		const anchoDeLaFranja = franja.derecha - franja.izquierda;
+
+		// Tamaño de cada rúbrica. Por debajo de 100×50, que es una firma, para
+		// que se distingan; y de preferencia no más chica que 60 de ancho, que ya
+		// cuesta firmar ahí. El alto sigue al ancho para que la proporción sea
+		// siempre la misma.
+		const ANCHO_MAXIMO = 90;
+		const ANCHO_MINIMO = 60;
+		// Sólo cuando con 60 no entran en el alto de la franja: antes de salirse
+		// se achican hasta acá. Más chico ya no se puede firmar.
+		const ANCHO_MINIMO_APRETADO = 40;
+		const PROPORCION = 0.4;
+		const separacion = 12;
+		const altoDeLaFranja = franja.arriba - franja.abajo;
+
+		/**
+		 * Tamaño y filas para `cuantos` rúbricas. Depende de la hoja: en la que
+		 * firma alguien, él no rubrica, y las demás se reparten el ancho entero en
+		 * vez de dejarle el hueco.
+		 */
+		const disposicion = (cuantos: number) => {
+			const medidas = (filas: number) => {
+				const porFila = Math.ceil(cuantos / filas);
+				const porAncho =
+					(anchoDeLaFranja - (porFila - 1) * separacion) / porFila;
+				const porAlto =
+					(altoDeLaFranja - (filas - 1) * separacion) / filas / PROPORCION;
+				return { porFila, porAncho, porAlto };
+			};
+
+			// Lo de siempre: tantas por fila como entren a 60, y las demás a otra.
+			let porFila = Math.max(
+				1,
+				Math.floor((anchoDeLaFranja + separacion) / (ANCHO_MINIMO + separacion)),
+			);
+			let filas = Math.ceil(cuantos / porFila);
+			const enLaFilaMasLlena = Math.min(cuantos, porFila);
+			let ancho = Math.floor(
+				Math.min(
+					ANCHO_MAXIMO,
+					(anchoDeLaFranja - (enLaFilaMasLlena - 1) * separacion) /
+						enLaFilaMasLlena,
+				),
+			);
+
+			// Si esas filas no entran en el alto de la franja, se busca cuántas
+			// filas dejan las rúbricas más grandes sin salirse de ella. La franja es
+			// el aire entre el pie y el texto: abajo está el pie de página (en el
+			// reconocimiento de deuda llega casi hasta su borde), arriba el
+			// contrato, y una rúbrica obligatoria encima de cualquiera de los dos lo
+			// tapa.
+			if (
+				filas * Math.round(ancho * PROPORCION) + (filas - 1) * separacion >
+				altoDeLaFranja
+			) {
+				let mejor: { filas: number; porFila: number; ancho: number } | null =
+					null;
+				for (let f = 1; f <= cuantos; f++) {
+					const m = medidas(f);
+					const a = Math.floor(Math.min(ANCHO_MAXIMO, m.porAncho, m.porAlto));
+					if (!mejor || a > mejor.ancho)
+						mejor = { filas: f, porFila: m.porFila, ancho: a };
+				}
+				if (!mejor || mejor.ancho < ANCHO_MINIMO_APRETADO) {
+					throw new SignatureLayoutError(
+						`${contractType}: las rúbricas de ${cuantos} firmantes no caben en la franja de la página sin tapar el pie ni el texto.`,
+					);
+				}
+				({ filas, porFila, ancho } = mejor);
+			}
+
+			// La franja manda sobre la proporción: el contrato de participación
+			// deja muy poco aire, y una rúbrica más alta que su franja se sale
+			// hacia el texto o hacia el borde de la hoja. El achique de arriba ya
+			// la deja entrar; esto es la red por si el redondeo se pasa.
+			const alto = Math.min(
+				Math.round(ancho * PROPORCION),
+				Math.floor(altoDeLaFranja),
+			);
+			// Las filas van centradas en el alto de la franja: ya se sabe que entran.
+			const altoDelBloque = filas * alto + (filas - 1) * separacion;
+			const baseDelBloque =
+				franja.abajo + (altoDeLaFranja - altoDelBloque) / 2;
+			return {
+				ancho,
+				alto,
+				pasoY: alto + separacion,
+				filas,
+				porFila,
+				baseDelBloque,
+			};
+		};
+
+		const paginas = await WeeTrustService.dimensionesDePaginas(pdfBuffer);
+		const extra: WeeTrustSignaturePosition[] = [];
+
+		for (const { pageNum, width, height } of paginas) {
+			if (pageNum % 2 === 0) continue;
+
+			const firmasDeLaHoja = yaPuestas.filter((p) => p.page === pageNum);
+			const quienes = unicos.filter(
+				(f) => !firmasDeLaHoja.some((p) => p.user.email === f.email),
+			);
+			if (quienes.length === 0) continue;
+
+			const { ancho, alto, pasoY, filas, porFila, baseDelBloque } =
+				disposicion(quienes.length);
+
+			// Dónde va cada rúbrica, con el grupo corrido `hacia` puntos para arriba.
+			// Se leen en el orden declarado: de izquierda a derecha, y de la fila
+			// de arriba a la de abajo.
+			const ubicar = (hacia: number) =>
+				quienes.map((firmante, i) => {
+					const fila = Math.floor(i / porFila);
+					const enLaFila = i % porFila;
+					const cuantosEnLaFila = Math.min(
+						porFila,
+						quienes.length - fila * porFila,
+					);
+					const lugar = anchoDeLaFranja / cuantosEnLaFila;
+
+					const x = franja.izquierda + enLaFila * lugar + (lugar - ancho) / 2;
+					// Base de la fila en el PDF (origen abajo), pasada al sistema de
+					// WeeTrust (origen arriba, y la posición es la del borde de arriba).
+					const baseEnPdf = baseDelBloque + (filas - 1 - fila) * pasoY;
+					const y = height - baseEnPdf - alto;
+					return { firmante, x, y: y - hacia };
+				});
+
+			// Si una rúbrica cae sobre la firma real de otra persona (quien firma
+			// en esta hoja no rubrica, así que todas son de otros), el grupo entero
+			// sube de a una fila hasta no pisar ninguna: saltearla dejaría esa hoja
+			// sin la rúbrica de alguien, y encimarla deja dos widgets obligatorios
+			// uno arriba del otro.
+			let hacia = 0;
+			let ubicadas = ubicar(hacia);
+			while (
+				ubicadas.some(({ x, y }) =>
+					firmasDeLaHoja.some((p) => seSolapan({ x, y, ancho, alto }, p)),
+				)
+			) {
+				hacia += pasoY;
+				ubicadas = ubicar(hacia);
+				if (ubicadas.some(({ y }) => y < 0)) {
+					throw new SignatureLayoutError(
+						`${contractType}: no hay lugar en la página ${pageNum} para las rúbricas sin pisar las firmas.`,
+					);
+				}
+			}
+
+			for (const { firmante, x, y } of ubicadas) {
+				// Si aun así no entra (tantos firmantes que las filas se comen la
+				// hoja, o una franja que no es de este tamaño de hoja), se corta:
+				// mejor un error a la vista que una rúbrica obligatoria fuera de la
+				// página.
+				if (x < 0 || y < 0 || x + ancho > width || y + alto > height) {
+					throw new SignatureLayoutError(
+						`${contractType}: las rúbricas de ${quienes.length} firmantes no caben en la página ${pageNum} (${width}x${height}).`,
+					);
+				}
+
+				extra.push({
+					user: { email: firmante.email },
+					coordinates: { x, y },
+					page: pageNum,
+					pageY: y,
+					pageYv2: y,
+					color: "#FFD247",
+					imageSize: { width: ancho, height: alto },
+					parentImageSize: { width, height },
+					viewport: { width, height },
+				});
+			}
+		}
+
+		if (extra.length > 0) {
+			console.log(
+				`[WeeTrust] ${contractType}: ${extra.length} rúbrica(s) en páginas impares ` +
+					`(${unicos.length} firmante(s))`,
+			);
+		}
+		return extra;
+	}
+
+	/**
+	 * Tamaño de cada página del PDF, en puntos.
+	 *
+	 * `readSignatureLines` sólo devuelve el tamaño de las páginas donde encontró
+	 * una línea de firma, y las rúbricas van en todas las impares, tengan línea
+	 * o no.
+	 */
+	static async dimensionesDePaginas(
+		pdfBuffer: Buffer,
+	): Promise<Array<{ pageNum: number; width: number; height: number }>> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+
+		const paginas: Array<{ pageNum: number; width: number; height: number }> = [];
+		for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+			const page = await pdfDocument.getPage(pageNum);
+			const viewport = page.getViewport({ scale: 1.0 });
+			paginas.push({
+				pageNum,
+				width: viewport.width,
+				height: viewport.height,
+			});
+		}
+		return paginas;
+	}
+
+	/**
+	 * Reparto histórico de firmas: toma hasta `signatureFieldCount` líneas
+	 * empezando por el final del documento y las asigna por posición.
+	 *
+	 * Se conserva para los contratos que todavía no tienen su layout auditado
+	 * (inversiones, sociedad, cartas poder). No es confiable cuando hay
+	 * cofirmantes —por eso existe `locateSignatureWidgets`—, pero es el
+	 * comportamiento con el que esos contratos vienen funcionando y cambiarlo
+	 * sin verificar el PDF sería peor.
+	 */
+	private static async locateSignatureWidgetsLegacy(
 		pdfBuffer: Buffer,
 		contractType: ContractType,
 		signerEmails: string[],
 	): Promise<WeeTrustSignaturePosition[]> {
-		try {
-			console.log(`[WeeTrust] Detectando líneas de firma para: ${contractType}`);
+		const config = getSignaturePattern(contractType);
+		const fieldCount = config.signatureFieldCount ?? config.signerCount;
 
-			const patternConfig = getSignaturePattern(contractType);
-			// Cantidad de widgets de firma a colocar. Por defecto = signerCount, pero
-			// puede ser mayor si el mismo firmante firma en varios lugares (ej. 2 anexos).
-			const fieldCount = patternConfig.signatureFieldCount ?? patternConfig.signerCount;
-			console.log(`[WeeTrust] Patrón: "${patternConfig.pattern}" (${patternConfig.signerCount} firmante(s), ${fieldCount} firma(s))`);
+		const lineas = await WeeTrustService.readSignatureLines(
+			pdfBuffer,
+			config.pattern,
+			config.anclasExactas,
+		);
 
-			const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
-			const pdfDocument = await loadingTask.promise;
-			const pageCount = pdfDocument.numPages;
-
-			const pattern = patternConfig.pattern;
-			const foundPositions: Array<{
-				pageNum: number;
-				pdfX: number;
-				pdfY: number;
-				pageWidth: number;
-				pageHeight: number;
-			}> = [];
-
-			// Buscar el patrón en cada página (de atrás hacia adelante)
-			for (let pageNum = pageCount; pageNum >= 1; pageNum--) {
-				const page = await pdfDocument.getPage(pageNum);
-				const textContent = await page.getTextContent();
-				const viewport = page.getViewport({ scale: 1.0 });
-
-				for (const item of textContent.items) {
-					const textItem = item as { str: string; transform: number[] };
-					const itemText = textItem.str;
-
-					const patternStart = pattern.split("_")[0];
-					// Verificar que sea una línea de firma real (debe tener guiones bajos)
-					const hasUnderscores = itemText.includes("_") || itemText.includes("__");
-					const matchesPattern =
-						itemText.includes(pattern) ||
-						itemText.trim() === pattern.trim() ||
-						(patternStart.length >= 2 && itemText.trim().startsWith(patternStart) && hasUnderscores);
-
-					if (matchesPattern) {
-						foundPositions.push({
-							pageNum,
-							pdfX: textItem.transform[4],
-							pdfY: textItem.transform[5],
-							pageWidth: viewport.width,
-							pageHeight: viewport.height,
-						});
-
-						console.log(`[WeeTrust] Patrón encontrado en página ${pageNum} - (${textItem.transform[4].toFixed(1)}, ${textItem.transform[5].toFixed(1)})`);
-
-						if (foundPositions.length >= fieldCount) break;
-					}
-				}
-
-				if (foundPositions.length >= fieldCount) break;
-			}
-
-			if (foundPositions.length === 0) {
-				console.warn(`[WeeTrust] No se encontró el patrón "${pattern}", usando posiciones por defecto`);
-				return signerEmails.map((email, i) =>
-					WeeTrustService.generateDefaultSignaturePosition(
-						email,
-						pageCount,
-						i === 0 ? "left" : "right",
-					)
-				);
-			}
-
-			// Invertir orden: último encontrado = primer firmante
-			foundPositions.reverse();
-
-			// Convertir coordenadas PDF a coordenadas WeeTrust
-			const positions: WeeTrustSignaturePosition[] = [];
-
-			// Colocamos un widget por cada posición encontrada (hasta fieldCount).
-			// Si hay más widgets que firmantes (mismo firmante en varios anexos),
-			// los widgets extra se asignan al último email disponible.
-			for (let i = 0; i < foundPositions.length && signerEmails.length > 0; i++) {
-				const pos = foundPositions[i];
-				const email = signerEmails[Math.min(i, signerEmails.length - 1)];
-
-				// WeeTrust usa coordenadas donde Y=0 está arriba
-				// PDF usa coordenadas donde Y=0 está abajo
-				// Convertir: weeTrustY = pageHeight - pdfY - alturaFirma
-				// (restamos altura para que la firma quede SOBRE la línea, no a partir de ella)
-				const SIGNATURE_HEIGHT = 50;
-				const x = pos.pdfX;
-				const y = pos.pageHeight - pos.pdfY - SIGNATURE_HEIGHT;
-
-				// NOTA: Los yOffset/xOffset de signaturePatterns.ts eran calibrados para Documenso
-				// y no aplican a WeeTrust. Solo usamos SIGNATURE_HEIGHT global.
-
-				positions.push({
-					user: { email },
-					coordinates: { x, y },
-					page: pos.pageNum,
-					pageY: y,
-					pageYv2: y,
-					color: "#FFD247",
-					imageSize: { width: 100, height: 50 },
-					parentImageSize: { width: pos.pageWidth, height: pos.pageHeight },
-					viewport: { width: pos.pageWidth, height: pos.pageHeight },
-				});
-
-				console.log(`[WeeTrust] Posición ${i + 1}: página ${pos.pageNum}, (${x.toFixed(1)}, ${y.toFixed(1)})`);
-			}
-
-			return positions;
-		} catch (error) {
-			console.error("[WeeTrust] Error detectando firmas:", error);
-			// Fallback a posiciones por defecto
+		if (lineas.length === 0) {
+			console.warn(
+				`[WeeTrust] No se encontró el patrón "${config.pattern}" en ${contractType}, usando posiciones por defecto`,
+			);
 			return signerEmails.map((email, i) =>
-				WeeTrustService.generateDefaultSignaturePosition(email, 1, i === 0 ? "left" : "right")
+				WeeTrustService.generateDefaultSignaturePosition(
+					email,
+					1,
+					i === 0 ? "left" : "right",
+				),
 			);
 		}
+
+		// Se toman las últimas `fieldCount` líneas del documento, que es donde
+		// viven los bloques de firma.
+		const elegidas = lineas.slice(-fieldCount);
+		const SIGNATURE_HEIGHT = 50;
+
+		return elegidas.map((linea, i) => {
+			const email = signerEmails[Math.min(i, signerEmails.length - 1)];
+			const x = linea.pdfX;
+			const y =
+				linea.pageHeight -
+				linea.pdfY -
+				SIGNATURE_HEIGHT -
+				(config.subirSobreLaEtiqueta ?? 0);
+			return {
+				user: { email },
+				coordinates: { x, y },
+				page: linea.pageNum,
+				pageY: y,
+				pageYv2: y,
+				color: "#FFD247",
+				imageSize: { width: 100, height: 50 },
+				parentImageSize: { width: linea.pageWidth, height: linea.pageHeight },
+				viewport: { width: linea.pageWidth, height: linea.pageHeight },
+			};
+		});
 	}
+
+	/**
+	 * Cuántas páginas tiene el PDF. Lanza si el archivo no se puede abrir.
+	 *
+	 * Sirve para rechazar un archivo roto aunque no haya líneas de firma que
+	 * revisar, como en los contratos que se firman en papel.
+	 */
+	static async contarPaginas(pdfBuffer: Buffer): Promise<number> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+		return pdfDocument.numPages;
+	}
+
+	/**
+	 * Lee las líneas de firma de un PDF en orden de lectura: página, luego de
+	 * arriba hacia abajo, luego de izquierda a derecha. Junta además el texto
+	 * inmediatamente debajo de cada una, que es donde los templates imprimen el
+	 * nombre y el DPI del firmante cuando los imprimen.
+	 */
+	// Pública para que los scripts de auditoría (inventario-firmas.ts) lean las
+	// líneas con el mismo criterio que producción.
+	static async readSignatureLines(
+		pdfBuffer: Buffer,
+		pattern: string,
+		anclasExactas?: string[],
+	): Promise<
+		Array<{
+			pageNum: number;
+			pdfX: number;
+			pdfY: number;
+			pageWidth: number;
+			pageHeight: number;
+			debajo: string[];
+		}>
+	> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+
+		// El patrón declarado se calibró con los templates singulares, pero la
+		// variante plural dibuja la misma línea con otra caja y otro largo
+		// ("F)_____...___" vs "f)______"). Comparar el literal dejaba fuera todas
+		// las firmas de los contratos con cofirmante, así que reconocemos el
+		// prefijo (F), f., Firma:) seguido de la línea, sin distinguir mayúsculas.
+		// Además del largo y la caja, los templates alternan el separador: el
+		// pagaré singular escribe "f." y el plural "f)". Los tratamos como
+		// equivalentes para no depender de la variante que se haya renderizado.
+		const prefijo = pattern.split("_")[0].trim();
+		const escapado = prefijo
+			.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+			.replace(/\\[).]/g, "[).]")
+			.replace(/\s+/g, "\\s*");
+		const reLineaDeFirma = new RegExp(`^${escapado}\\s*_{3,}`, "i");
+		// Hay patrones que son sólo una etiqueta, sin línea (el anexo de
+		// inversiones dice "Firma del Inversionista"). Esos se reconocen por el
+		// texto, como antes: exigirles guiones bajos los dejaba sin ninguna firma.
+		const soloEtiqueta = !pattern.includes("_");
+		// Anclas de texto exacto, para los bloques de firma que no traen línea
+		// dibujada (el espacio queda en blanco y lo único que lo marca es el
+		// nombre impreso debajo, o una "f)" suelta porque la línea es un borde de
+		// tabla). El calce es exacto a propósito: "EL INVERSIONISTA" aparece
+		// decenas de veces en el cuerpo del contrato y un "contiene" habría puesto
+		// un widget de firma en cada párrafo.
+		const anclas = new Set((anclasExactas ?? []).map((a) => a.trim()));
+		const esLineaDeFirma = (texto: string): boolean =>
+			reLineaDeFirma.test(texto.trim()) ||
+			(soloEtiqueta && texto.includes(pattern.trim())) ||
+			anclas.has(texto.trim());
+
+		const encontradas: Array<{
+			pageNum: number;
+			pdfX: number;
+			pdfY: number;
+			pageWidth: number;
+			pageHeight: number;
+			debajo: string[];
+		}> = [];
+
+		for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+			const page = await pdfDocument.getPage(pageNum);
+			const textContent = await page.getTextContent();
+			const viewport = page.getViewport({ scale: 1.0 });
+
+			const items = (textContent.items as Array<{ str: string; transform: number[] }>)
+				.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
+				.filter((it) => it.str.trim());
+
+			for (const item of items) {
+				if (!esLineaDeFirma(item.str)) continue;
+
+				const debajo = items
+					.filter(
+						(otro) =>
+							otro.y < item.y &&
+							otro.y > item.y - 42 &&
+							Math.abs(otro.x - item.x) < 130 &&
+							!esLineaDeFirma(otro.str),
+					)
+					.sort((a, b) => b.y - a.y)
+					.slice(0, 3)
+					.map((otro) => otro.str.trim());
+
+				encontradas.push({
+					pageNum,
+					pdfX: item.x,
+					pdfY: item.y,
+					pageWidth: viewport.width,
+					pageHeight: viewport.height,
+					debajo,
+				});
+			}
+		}
+
+		return encontradas.sort(
+			(a, b) => a.pageNum - b.pageNum || b.pdfY - a.pdfY || a.pdfX - b.pdfX,
+		);
+	}
+}
+
+/** Deja sólo los dígitos de un DPI para poder compararlo. */
+function soloDigitos(valor?: string): string {
+	return (valor ?? "").replace(/\D/g, "");
+}
+
+/**
+ * WeeTrust exige nombres de firmante de 4 a 100 caracteres. Antes se derivaba
+ * del email ("Roseldacoc1999"), que quedaba a la vista en el documento legal.
+ */
+function nombreParaWeeTrust(nombre: string, index: number): string {
+	const limpio = (nombre ?? "").trim().replace(/\s+/g, " ");
+	if (limpio.length < 4) return `Firmante ${index + 1}`;
+	return limpio.slice(0, 100);
+}
+
+/**
+ * Si un recuadro se solapa con un widget ya puesto (en el sistema de WeeTrust,
+ * origen arriba a la izquierda). Tocarse en el borde no cuenta.
+ */
+function seSolapan(
+	r: { x: number; y: number; ancho: number; alto: number },
+	w: WeeTrustSignaturePosition,
+): boolean {
+	return (
+		r.x < w.coordinates.x + w.imageSize.width &&
+		w.coordinates.x < r.x + r.ancho &&
+		r.y < w.coordinates.y + w.imageSize.height &&
+		w.coordinates.y < r.y + r.alto
+	);
+}
+
+/** Los valores que WeeTrust acepta en `identification`. */
+const MODOS_DE_IDENTIFICACION: ReadonlySet<string> = new Set<IdentificationMode>([
+	"id",
+	"face",
+	"ocr",
+	"face_login",
+]);
+
+/**
+ * Verificación de identidad que le toca a cada firmante.
+ *
+ * Al cliente y a los codeudores se les valida el DPI, y en el reconocimiento de
+ * deuda además se les pide biometría facial con prueba de vida.
+ *
+ * En los contratos de **inversiones** la decide el CRM por compra y viene en el
+ * firmante (`signer.identification`): selfie y DPI en la primera compra del
+ * inversionista, sólo firma en las siguientes. Para cambiar qué se pide, se
+ * toca `apps/crm/apps/server/src/lib/identidad-inversionista.ts`, no esto. Si
+ * no viene (un CRM de antes), se le pide selfie como siempre.
+ *
+ * Al **representante legal no se le pide nada**: firma por la entidad, es
+ * personal nuestro y su nombre y cargo ya vienen impresos en el template.
+ * Pedirle DPI o selfie no agrega ninguna garantía y le pone un trámite encima a
+ * alguien que firma decenas de contratos al día.
+ *
+ * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
+ * sin verificación de identidad.
+ */
+export function identificacionDe(
+	signer: Pick<ContractSigner, "role" | "identification">,
+	contractType: ContractType,
+): { identification?: IdentificationMode } {
+	if (
+		signer.role === SignerRole.REP_LEGAL ||
+		signer.role === SignerRole.REP_LEGAL_RDBE
+	) {
+		return {};
+	}
+
+	const deInversion = CONTRATOS_DE_INVERSION.has(contractType);
+
+	// Lo que decidió el CRM para esta compra. Sólo en inversiones: ventas no lo
+	// manda y, si llegara, no le toca cambiar lo que se le pide a un deudor.
+	if (deInversion && signer.identification) {
+		if (signer.identification === "none") return {};
+		if (MODOS_DE_IDENTIFICACION.has(signer.identification)) {
+			return { identification: signer.identification };
+		}
+	}
+
+	// Biometría facial además del documento: en el reconocimiento de deuda
+	// porque es el título que se ejecuta, y en los de inversión (cuando el CRM
+	// no dijo otra cosa) porque el inversionista entrega dinero y la relación se
+	// arma por correo, sin nadie de la empresa enfrente.
+	const conSelfie =
+		contractType === ContractType.RECONOCIMIENTO_DEUDA || deInversion;
+
+	return {
+		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,
+	};
 }
 
 // Singleton para uso global

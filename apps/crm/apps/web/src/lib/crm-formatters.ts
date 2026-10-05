@@ -289,6 +289,8 @@ export const getContractTypeLabel = (contractType: string) => {
 		contrato_privado_uso_carro_usado: "Contrato Privado Uso Carro Usado",
 		contrato_privado_uso_carro_nuevo: "Contrato Privado Uso Carro Nuevo",
 		pagare: "Pagaré",
+		// Las cartas de la venta unidas en un solo documento.
+		paquete_cartas: "Cartas",
 		carta_notarial: "Carta Notarial",
 		contrato_compraventa: "Contrato Compraventa",
 		contrato_financiamiento: "Contrato Financiamiento",

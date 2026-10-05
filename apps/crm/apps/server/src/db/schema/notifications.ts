@@ -50,6 +50,8 @@ export const notificationRedirectPageEnum = pgEnum(
 		"pay_investors",
 		"cobros_detail",
 		"client_details_disbursement",
+		// Bandeja de baterías de contratos de inversionistas, en jurídico.
+		"investor_contracts",
 	],
 );
 

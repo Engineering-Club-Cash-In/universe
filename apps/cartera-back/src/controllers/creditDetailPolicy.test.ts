@@ -666,3 +666,100 @@ describe("reset credit atomic closing payment wiring", () => {
 		);
 	});
 });
+
+describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns", () => {
+	// El CRM le dice al cliente "aumenta Q X por cada día de atraso, hasta un
+	// máximo de Q Y al mes". Las dos cifras salen de getCreditoByNumero, que
+	// tiene DOS returns (con cuota actual y sin ella): si una rama se queda sin
+	// el techo, la frase pierde el tope justo en los créditos más atrasados y
+	// vuelve a prometer un crecimiento infinito. Es un test de contrato sobre el
+	// fuente porque esa función depende de la base.
+	const leerFuente = () =>
+		Bun.file(resolve(import.meta.dir, "credits.ts")).text();
+
+	it("la rama sin cuota actual devuelve las dos", async () => {
+		const branch = (await leerFuente()).match(
+			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+		)?.[0];
+
+		expect(branch).toContain(
+			"incrementoDiarioMora: incrementoDiarioMoraStr,",
+		);
+		expect(branch).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("el return normal devuelve las dos", async () => {
+		const source = await leerFuente();
+		const ramaSinCuota =
+			source.match(
+				/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+			)?.[0] ?? "";
+		const resto = source.slice(
+			source.indexOf(ramaSinCuota) + ramaSinCuota.length,
+		);
+
+		expect(resto).toContain("incrementoDiarioMora: incrementoDiarioMoraStr,");
+		expect(resto).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("la proyección mira hasta hoy + 30 días, no solo lo ya vencido", async () => {
+		// El defecto que esto fija: con el filtro en "vencidas" la cuota que vence
+		// HOY quedaba fuera, y mañana el cron ya le cobra 1/30 — el ritmo
+		// anunciado salía por DEBAJO del real y el cliente pagaba de menos.
+		//
+		// El cálculo ya no vive inline en getCreditoByNumero: lo comparte con el
+		// LISTADO en `incrementosMoraPorCredito`, que lo hace para toda una página
+		// en una sola consulta. Las garantías son las mismas, en el nuevo lugar.
+		const source = await leerFuente();
+		const desde = source.indexOf(
+			"export async function incrementosMoraPorCredito",
+		);
+		// Acotado a ESA función: lo que sigue (la interfaz y el resto del archivo)
+		// no es parte del cálculo y ensuciaría los conteos.
+		const helper = source.slice(desde, source.indexOf("\nexport ", desde + 1));
+		const query = helper.slice(
+			helper.indexOf("const cuotasParaMora = await db"),
+			helper.indexOf("const cuotasPorCredito ="),
+		);
+
+		// La ventana de la query es el horizonte, no "hoy".
+		expect(query).toContain(
+			"lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora(hoyGT))",
+		);
+		expect(source).toContain("hoyGT.getDate() + BASE_DIAS_MORA");
+
+		// Y el filtro en memoria usa el MISMO horizonte, con días CON SIGNO: con
+		// `diasAtrasoMora` (que aplasta a 0) una cuota futura cobraría desde hoy.
+		const filtro = helper.slice(
+			helper.indexOf("const diasAtrasadosPorCuota ="),
+			helper.indexOf("resultado.set("),
+		);
+		expect(filtro).toContain("isInstallmentWithinMoraHorizon(");
+		expect(filtro).toContain("diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT)");
+	});
+
+	it("las dos cifras salen de las MISMAS cuotas, sin una query extra", async () => {
+		const source = await leerFuente();
+		const desde = source.indexOf(
+			"export async function incrementosMoraPorCredito",
+		);
+		// Acotado a ESA función: lo que sigue (la interfaz y el resto del archivo)
+		// no es parte del cálculo y ensuciaría los conteos.
+		const helper = source.slice(desde, source.indexOf("\nexport ", desde + 1));
+
+		// Un solo cálculo de días de atraso alimenta a las dos.
+		expect(helper.match(/const diasAtrasadosPorCuota =/g)).toHaveLength(1);
+		expect(helper).toContain("incrementoDiarioMora: incrementoDiarioMora(params)");
+		expect(helper).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMora(params)",
+		);
+
+		// Y UNA sola consulta en todo el helper: si alguien la metiera adentro del
+		// `for (const credito ...)` volvería a ser una por crédito.
+		expect(helper.match(/await db\s*\n\s*\.select\(/g)).toHaveLength(1);
+	});
+});

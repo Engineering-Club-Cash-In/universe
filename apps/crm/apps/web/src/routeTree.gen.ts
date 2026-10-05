@@ -17,6 +17,7 @@ import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
 import { Route as JuridicoIndexRouteImport } from './routes/juridico/index'
 import { Route as InversionesIndexRouteImport } from './routes/inversiones/index'
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
+import { Route as VehiclesSatVerificacionRouteImport } from './routes/vehicles/sat-verificacion'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as JuridicoDashboardDataRouteImport } from './routes/juridico/dashboard-data'
@@ -44,6 +45,7 @@ import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/inde
 import { Route as CrmDocumentacionIndexRouteImport } from './routes/crm/documentacion/index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
+import { Route as JuridicoInversionistaBatchIdRouteImport } from './routes/juridico/inversionista.$batchId'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
 import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmReportesTiempoCierreRouteImport } from './routes/crm/reportes/tiempo-cierre'
@@ -93,6 +95,11 @@ const InversionesIndexRoute = InversionesIndexRouteImport.update({
 const CobrosIndexRoute = CobrosIndexRouteImport.update({
   id: '/cobros/',
   path: '/cobros/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehiclesSatVerificacionRoute = VehiclesSatVerificacionRouteImport.update({
+  id: '/vehicles/sat-verificacion',
+  path: '/vehicles/sat-verificacion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
@@ -232,6 +239,12 @@ const AdminReportsIndexRoute = AdminReportsIndexRouteImport.update({
   path: '/admin/reports/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JuridicoInversionistaBatchIdRoute =
+  JuridicoInversionistaBatchIdRouteImport.update({
+    id: '/juridico/inversionista/$batchId',
+    path: '/juridico/inversionista/$batchId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const JuridicoGenerateOpportunityIdRoute =
   JuridicoGenerateOpportunityIdRouteImport.update({
     id: '/juridico/generate/$opportunityId',
@@ -318,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -332,6 +346,7 @@ export interface FileRoutesByFullPath {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
   '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
@@ -365,6 +380,7 @@ export interface FileRoutesByTo {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros': typeof CobrosIndexRoute
   '/inversiones': typeof InversionesIndexRoute
   '/juridico': typeof JuridicoIndexRoute
@@ -379,6 +395,7 @@ export interface FileRoutesByTo {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
   '/crm/documentacion': typeof CrmDocumentacionIndexRoute
@@ -413,6 +430,7 @@ export interface FileRoutesById {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -427,6 +445,7 @@ export interface FileRoutesById {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
   '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
@@ -462,6 +481,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -476,6 +496,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
     | '/crm/documentacion/'
@@ -509,6 +530,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros'
     | '/inversiones'
     | '/juridico'
@@ -523,6 +545,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports'
     | '/crm/analysis'
     | '/crm/documentacion'
@@ -556,6 +579,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -570,6 +594,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
     | '/crm/documentacion/'
@@ -604,6 +629,7 @@ export interface RootRouteChildren {
   JuridicoDashboardDataRoute: typeof JuridicoDashboardDataRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
+  VehiclesSatVerificacionRoute: typeof VehiclesSatVerificacionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
   InversionesIndexRoute: typeof InversionesIndexRoute
   JuridicoIndexRoute: typeof JuridicoIndexRoute
@@ -618,6 +644,7 @@ export interface RootRouteChildren {
   CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
+  JuridicoInversionistaBatchIdRoute: typeof JuridicoInversionistaBatchIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
   CrmDocumentacionIndexRoute: typeof CrmDocumentacionIndexRoute
@@ -681,6 +708,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros'
       fullPath: '/cobros/'
       preLoaderRoute: typeof CobrosIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicles/sat-verificacion': {
+      id: '/vehicles/sat-verificacion'
+      path: '/vehicles/sat-verificacion'
+      fullPath: '/vehicles/sat-verificacion'
+      preLoaderRoute: typeof VehiclesSatVerificacionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicles/inspection': {
@@ -872,6 +906,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/juridico/inversionista/$batchId': {
+      id: '/juridico/inversionista/$batchId'
+      path: '/juridico/inversionista/$batchId'
+      fullPath: '/juridico/inversionista/$batchId'
+      preLoaderRoute: typeof JuridicoInversionistaBatchIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/juridico/generate/$opportunityId': {
       id: '/juridico/generate/$opportunityId'
       path: '/juridico/generate/$opportunityId'
@@ -972,6 +1013,7 @@ const rootRouteChildren: RootRouteChildren = {
   JuridicoDashboardDataRoute: JuridicoDashboardDataRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
+  VehiclesSatVerificacionRoute: VehiclesSatVerificacionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
   InversionesIndexRoute: InversionesIndexRoute,
   JuridicoIndexRoute: JuridicoIndexRoute,
@@ -987,6 +1029,7 @@ const rootRouteChildren: RootRouteChildren = {
   InversionesLiquidacionesInversionistaIdRoute:
     InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
+  JuridicoInversionistaBatchIdRoute: JuridicoInversionistaBatchIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
   CrmDocumentacionIndexRoute: CrmDocumentacionIndexRoute,

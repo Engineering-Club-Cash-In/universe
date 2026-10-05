@@ -56,6 +56,13 @@ export interface CarteraUsuario {
 	saldo_a_favor: string; // decimal(18,2) comes as string
 }
 
+export interface CarteraCreditoOperativoSat {
+	numeroCreditoSifco: string;
+	nombreCliente: string;
+	estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+	fechaCreacion: string;
+}
+
 export interface CreateUsuarioInput {
 	nombre: string;
 	nit?: string;
@@ -204,6 +211,17 @@ export interface CreditoDetailResponse {
 	mora: CarteraMoraCredito | null;
 	deuda_total_con_mora: string;
 	proxima_cuota?: CarteraCuotaCredito | null;
+	/**
+	 * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+	 * entre las que mueven la mora. cartera-back los calcula junto con el monto
+	 * proporcional (`incrementosMoraPorCredito`), así que cuadran con él.
+	 * Ausente si la proyección de mora falló (cartera-back responde igual).
+	 */
+	diasAtrasoMoraMaximo?: number;
+	/** Mora ya pagada en efectivo sobre las cuotas que SIGUEN atrasadas (lo que baja la mora de hoy). No es el histórico: lo abonado a cuotas ya cubiertas sale de la cuenta. */
+	moraPagada?: string;
+	/** Mora condonada sobre las cuotas que SIGUEN atrasadas. Baja la mora igual que un pago, pero no es plata que entró. */
+	moraCondonada?: string;
 }
 
 /**
@@ -299,6 +317,33 @@ export interface CreditoDirectoResponse {
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
+	/**
+	 * Cuánto sube la mora de ESTE crédito por cada día que pase (lo que sumará
+	 * la próxima corrida del cron): 1/30 del cargo mensual por cada cuota
+	 * vencida que todavía no llegó a su techo de 30 días. Lo calcula
+	 * `incrementoDiarioMora` en cartera-back/latefee.ts. Opcional porque un
+	 * cartera-back anterior a ese cambio no lo manda.
+	 */
+	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora de este crédito puede
+	 * subir en un mes — el cargo mensual de cada cuota vencida menos la mora
+	 * que ya corre. Lo calcula `incrementoMaximoMensualMora` en
+	 * cartera-back/latefee.ts, de las MISMAS cuotas que el diario. Opcional
+	 * porque un cartera-back anterior a ese cambio no lo manda.
+	 */
+	incrementoMaximoMensualMora?: string;
+	/**
+	 * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+	 * entre las que mueven la mora. cartera-back los calcula junto con el monto
+	 * proporcional (`incrementosMoraPorCredito`), así que cuadran con él.
+	 * Ausente si la proyección de mora falló (cartera-back responde igual).
+	 */
+	diasAtrasoMoraMaximo?: number;
+	/** Mora ya pagada en efectivo sobre las cuotas que SIGUEN atrasadas (lo que baja la mora de hoy). No es el histórico: lo abonado a cuotas ya cubiertas sale de la cuenta. */
+	moraPagada?: string;
+	/** Mora condonada sobre las cuotas que SIGUEN atrasadas. Baja la mora igual que un pago, pero no es plata que entró. */
+	moraCondonada?: string;
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
 	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;
@@ -942,4 +987,36 @@ export class CarteraBackValidationError extends CarteraBackError {
 		super(message, 400);
 		this.name = "CarteraBackValidationError";
 	}
+}
+
+/**
+ * Un día de la proyección de mora del mes (GET /credito/mora/proyeccion).
+ *
+ * `mora` es la mora con la que el crédito termina ese día (lo que el cron
+ * escribió a las 00:05 más lo que cambió durante el día): en los días `real`
+ * es lo que el sistema anotó; en `hoy` y `proyeccion`, lo que el cron escribe
+ * ese día si no entra ningún pago más.
+ */
+export interface ProyeccionMoraDia {
+	fecha: string; // YYYY-MM-DD (calendario de Guatemala)
+	mora: string; // decimal viene como string
+	/** Cambio contra el día anterior; negativo si ese día pagó. */
+	incremento: string;
+	/** `mora` menos la mora con la que arrancó el mes. */
+	acumuladoMes: string;
+	/** Cuotas que al día siguiente deben más. `null` en días ya pasados. */
+	cuotasSumando: number | null;
+	tipo: "real" | "hoy" | "proyeccion";
+}
+
+export interface ProyeccionMoraMesResponse {
+	mes: string; // YYYY-MM, siempre el mes en curso
+	hoy: string;
+	/** Lo que suma UNA cuota por día (capital × 1.12% ÷ 30). */
+	cargoDiario: string;
+	moraInicioMes: string;
+	/** Lo que el crédito debe de mora en este momento. */
+	moraHoy: string;
+	moraFinMes: string;
+	dias: ProyeccionMoraDia[];
 }

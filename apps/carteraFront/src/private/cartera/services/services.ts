@@ -400,12 +400,58 @@ export interface ConvenioPagosResume {
   pago_id: number;
   created_at: string;
 }
+// Un rubro pendiente de cobro (tarjeta de circulación, placas, traspaso, etc).
+// El back ya lo entrega ORDENADO en el orden en que se cobra: otros → mora →
+// rubros → convenio → cuotas.
+export interface RubroPendiente {
+  rubro_id: number;
+  tipo_nombre: string;
+  descripcion: string;
+  // Strings porque vienen de una columna numeric/decimal en la BD (igual que
+  // los montos de Cuota); convertir con Number() antes de sumar.
+  saldo_pendiente: string;
+  // Lo que ESTA boleta puede cobrar: el saldo menos lo que otras boletas ya
+  // apartaron y esperan a contabilidad. Puede ser "0.00" con saldo_pendiente > 0.
+  disponible: string;
+  obligatorio: boolean;
+}
+
+/**
+ * El «por qué» de la mora, cuota por cuota (lo arma el back con el mismo
+ * cálculo del cron). Montos como string con 2 decimales.
+ */
+export interface DesgloseMora {
+  cargoMensual: string;
+  cargoDiario: string;
+  cuotas: {
+    numero_cuota: number;
+    fecha_vencimiento: string;
+    dias_atraso: number;
+    topada: boolean;
+    en_validacion: boolean;
+    generado: string;
+    abonado: string;
+    pendiente: string;
+  }[];
+  total: string;
+  /** total − Σ pendiente de las filas (puede ser negativo). */
+  ajusteRedondeo?: string;
+  /** El total de mañana si no paga hoy (incluye las cuotas que vencen hoy). */
+  totalManana?: string;
+  /** Cuántas cuotas suben mañana (vencidas sin tope + las que vencen hoy). */
+  cuotasQueSubenManana?: number;
+}
+
 export interface GetCreditoByNumeroActivoResponse {
   flujo: "ACTIVO";
   credito: Credito;
   usuario: Usuario;
   cuotaActual: number;
   moraActual: number;
+  // Suma de los `disponible` de rubros (NO de los saldo_pendiente); 0 si no hay.
+  rubrosActual: number;
+  // Detalle de rubros, ya en el orden real de cobro.
+  rubros: RubroPendiente[];
   cuotaActualPagada: boolean;
   cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
 
@@ -413,6 +459,9 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
+
+  // El porqué de la mora para el asesor (ausente en respuestas viejas).
+  desgloseMora?: DesgloseMora;
 
   // 🔥 CONVENIO (puede ser null)
   convenioActivo: ConvenioActivo | null;

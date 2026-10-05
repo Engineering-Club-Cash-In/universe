@@ -34,11 +34,20 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { InvestorContractsCard } from "@/components/inversiones/InvestorContractsCard";
 import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CurrencyInput } from "@/components/ui/currency-input";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -64,15 +73,15 @@ import {
 import { avisoAccesoPortal, valorDeTabla } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
 import {
+	MODALIDAD_FACTURACION_LABELS,
+	type ModalidadFacturacion,
+} from "@/lib/modalidad-facturacion";
+import {
 	errorRepLegal,
 	esEmpresaInicial,
 	requiereConfirmacionBorrado,
 	valorRepLegalAlGuardar,
 } from "@/lib/rep-legal-empresa";
-import {
-	MODALIDAD_FACTURACION_LABELS,
-	type ModalidadFacturacion,
-} from "@/lib/modalidad-facturacion";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -99,7 +108,10 @@ const MESES = [
 	{ value: 12, label: "Diciembre" },
 ] as const;
 
-function formatCurrency(value: number | string | null | undefined, symbol = "Q"): string {
+function formatCurrency(
+	value: number | string | null | undefined,
+	symbol = "Q",
+): string {
 	const num = Number(value ?? 0);
 	return `${symbol}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -587,95 +599,96 @@ function InvestorActivityLogSection({
 					)}
 
 					{logs.length > 0 && (
-				<div className="space-y-2">
-					{logs.map((log: any) => {
-						const details = log.details as Record<string, any> | null;
-						return (
-							<div
-								key={log.id}
-								className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2"
-							>
-								<div className="min-w-0 flex-1">
-									<div className="flex flex-wrap items-center gap-2">
-										<Badge
-											variant="outline"
-											className={`text-[10px] ${valorDeTabla(ACTION_COLORS, log.action) ?? ""}`}
-										>
-											{valorDeTabla(ACTION_LABELS, log.action) ?? log.action}
-										</Badge>
-										{details?.nombre || details?.documentoNombre ? (
-											<span className="truncate font-medium text-xs">
-												{details.nombre ?? details.documentoNombre}
-											</span>
-										) : null}
-										{log.action === "document_visibility_toggled" &&
-											details?.visible !== undefined && (
-												<Badge variant="outline" className="text-[10px]">
-													{details.visible ? "Visible" : "Oculto"}
+						<div className="space-y-2">
+							{logs.map((log: any) => {
+								const details = log.details as Record<string, any> | null;
+								return (
+									<div
+										key={log.id}
+										className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2"
+									>
+										<div className="min-w-0 flex-1">
+											<div className="flex flex-wrap items-center gap-2">
+												<Badge
+													variant="outline"
+													className={`text-[10px] ${valorDeTabla(ACTION_COLORS, log.action) ?? ""}`}
+												>
+													{valorDeTabla(ACTION_LABELS, log.action) ??
+														log.action}
 												</Badge>
-											)}
-										{/* El registro de acceso al portal guarda `estado`,
-											`usuarioEmail`, `advertencias` y `motivo`. Sin esto la
-											fila decía solo quién y cuándo: no si la persona quedó
-											con acceso. El `motivo` y las `advertencias` NO se
-											imprimen —son códigos del backend— pero que hubo
-											advertencias sí se dice, porque es lo que manda a
-											mirar. */}
-										{log.action === "acceso_portal" && (
-											<>
-												{(() => {
-													// Con `valorDeTabla` y no `TABLA[clave]`: `details`
-													// es JSON que escribió el servidor, y un
-													// `estado: "constructor"` devolvería la función
-													// heredada de `Object.prototype` —truthy— para
-													// terminar pintando `undefined` en la insignia.
-													const estado =
-														valorDeTabla(
-															ESTADOS_ACCESO_PORTAL,
-															details?.estado,
-														) ?? ESTADO_ACCESO_DESCONOCIDO;
-													return (
-														<Badge
-															variant="outline"
-															className={`text-[10px] ${estado.clase}`}
-														>
-															{estado.etiqueta}
-														</Badge>
-													);
-												})()}
-												{details?.usuarioEmail ? (
-													<span className="truncate text-muted-foreground text-xs">
-														{details.usuarioEmail}
+												{details?.nombre || details?.documentoNombre ? (
+													<span className="truncate font-medium text-xs">
+														{details.nombre ?? details.documentoNombre}
 													</span>
 												) : null}
-												{Array.isArray(details?.advertencias) &&
-												details.advertencias.length > 0 ? (
-													<Badge
-														variant="outline"
-														className="border-amber-300 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
-													>
-														Con advertencias
-													</Badge>
-												) : null}
-											</>
-										)}
+												{log.action === "document_visibility_toggled" &&
+													details?.visible !== undefined && (
+														<Badge variant="outline" className="text-[10px]">
+															{details.visible ? "Visible" : "Oculto"}
+														</Badge>
+													)}
+												{/* El registro de acceso al portal guarda `estado`,
+													`usuarioEmail`, `advertencias` y `motivo`. Sin esto la
+													fila decía solo quién y cuándo: no si la persona quedó
+													con acceso. El `motivo` y las `advertencias` NO se
+													imprimen —son códigos del backend— pero que hubo
+													advertencias sí se dice, porque es lo que manda a
+													mirar. */}
+												{log.action === "acceso_portal" && (
+													<>
+														{(() => {
+															// Con `valorDeTabla` y no `TABLA[clave]`: `details`
+															// es JSON que escribió el servidor, y un
+															// `estado: "constructor"` devolvería la función
+															// heredada de `Object.prototype` —truthy— para
+															// terminar pintando `undefined` en la insignia.
+															const estado =
+																valorDeTabla(
+																	ESTADOS_ACCESO_PORTAL,
+																	details?.estado,
+																) ?? ESTADO_ACCESO_DESCONOCIDO;
+															return (
+																<Badge
+																	variant="outline"
+																	className={`text-[10px] ${estado.clase}`}
+																>
+																	{estado.etiqueta}
+																</Badge>
+															);
+														})()}
+														{details?.usuarioEmail ? (
+															<span className="truncate text-muted-foreground text-xs">
+																{details.usuarioEmail}
+															</span>
+														) : null}
+														{Array.isArray(details?.advertencias) &&
+														details.advertencias.length > 0 ? (
+															<Badge
+																variant="outline"
+																className="border-amber-300 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
+															>
+																Con advertencias
+															</Badge>
+														) : null}
+													</>
+												)}
+											</div>
+											<p className="mt-0.5 text-[10px] text-muted-foreground">
+												{log.performedByName} ·{" "}
+												{new Date(log.createdAt).toLocaleString("es-GT", {
+													day: "2-digit",
+													month: "short",
+													year: "numeric",
+													hour: "2-digit",
+													minute: "2-digit",
+												})}
+											</p>
+										</div>
 									</div>
-									<p className="mt-0.5 text-[10px] text-muted-foreground">
-										{log.performedByName} ·{" "}
-										{new Date(log.createdAt).toLocaleString("es-GT", {
-											day: "2-digit",
-											month: "short",
-											year: "numeric",
-											hour: "2-digit",
-											minute: "2-digit",
-										})}
-									</p>
-								</div>
-							</div>
-						);
-					})}
-				</div>
-			)}
+								);
+							})}
+						</div>
+					)}
 				</div>
 			)}
 		</div>
@@ -999,7 +1012,9 @@ function InvestorLiquidacionesPage() {
 		? Number(compraCarteraSpreadRow.spread)
 		: undefined;
 	const compraCarteraPctCashInCalc =
-		compraCarteraPctInvCalc !== undefined ? 100 - compraCarteraPctInvCalc : undefined;
+		compraCarteraPctInvCalc !== undefined
+			? 100 - compraCarteraPctInvCalc
+			: undefined;
 	// Con monto ingresado pero sin bracket válido (ej. < Q1,000) y SIN
 	// anulación manual activa, el backend responde sin filas: bloqueamos el
 	// confirmar. Con override activo no aplica (el operador ya eligió una
@@ -1139,7 +1154,8 @@ function InvestorLiquidacionesPage() {
 	const [editDpiRepLegal, setEditDpiRepLegal] = useState("");
 	const [editMoneda, setEditMoneda] = useState("quetzales");
 	const [editEmiteFactura, setEditEmiteFactura] = useState(false);
-	const [editTipoReinversion, setEditTipoReinversion] = useState("sin_reinversion");
+	const [editTipoReinversion, setEditTipoReinversion] =
+		useState("sin_reinversion");
 	const [editMontoReinversion, setEditMontoReinversion] = useState("");
 	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
 	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
@@ -1215,8 +1231,12 @@ function InvestorLiquidacionesPage() {
 		setConfirmarQuitarRepOpen(false);
 		setEditMoneda(inv.moneda ?? "quetzales");
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
-		setEditTipoReinversion(inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion");
-		setEditMontoReinversion(inv.monto_reinversion ? String(inv.monto_reinversion) : "");
+		setEditTipoReinversion(
+			inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion",
+		);
+		setEditMontoReinversion(
+			inv.monto_reinversion ? String(inv.monto_reinversion) : "",
+		);
 		setCampoConError(null);
 		setEditOpen(true);
 	};
@@ -1335,7 +1355,9 @@ function InvestorLiquidacionesPage() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al cambiar el status del inversionista");
+			toast.error(
+				err?.message ?? "Error al cambiar el status del inversionista",
+			);
 		},
 	});
 
@@ -1349,7 +1371,7 @@ function InvestorLiquidacionesPage() {
 		const raw = investorsQuery.data?.inversionistas;
 		if (!raw) return null;
 		// Con id cartera devuelve objeto directo, sin id devuelve array
-		return Array.isArray(raw) ? raw[0] ?? null : raw;
+		return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 	}, [investorsQuery.data]);
 
 	// 🔴 EL CORREO DEL DIÁLOGO NO PUEDE SALIR DE `investorsQuery`.
@@ -1947,7 +1969,10 @@ function InvestorLiquidacionesPage() {
 												Capital aportado
 											</p>
 											<p className="truncate font-medium text-xs">
-												{formatCurrency(stats.capital_total_aportado, investor?.moneda === "dolares" ? "$" : "Q")}
+												{formatCurrency(
+													stats.capital_total_aportado,
+													investor?.moneda === "dolares" ? "$" : "Q",
+												)}
 											</p>
 										</div>
 									</div>
@@ -1976,21 +2001,22 @@ function InvestorLiquidacionesPage() {
 									Factura
 								</Badge>
 							)}
-							{investor.tipoReinversion && investor.tipoReinversion !== "sin_reinversion" && (
-								<Badge
-									variant="outline"
-									className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
-								>
-									{/* Mismo criterio que las demás tablas de este archivo: la
-										clave la manda cartera y un objeto literal contesta a
-										`constructor` o `toString` con algo truthy que se pinta en
-										la insignia. */}
-									{valorDeTabla(
-										ETIQUETAS_REINVERSION,
-										investor.tipoReinversion,
-									) ?? "Reinversión"}
-								</Badge>
-							)}
+							{investor.tipoReinversion &&
+								investor.tipoReinversion !== "sin_reinversion" && (
+									<Badge
+										variant="outline"
+										className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
+									>
+										{/* Mismo criterio que las demás tablas de este archivo: la
+											clave la manda cartera y un objeto literal contesta a
+											`constructor` o `toString` con algo truthy que se pinta en
+											la insignia. */}
+										{valorDeTabla(
+											ETIQUETAS_REINVERSION,
+											investor.tipoReinversion,
+										) ?? "Reinversión"}
+									</Badge>
+								)}
 						</div>
 					</div>
 				)}
@@ -2000,13 +2026,20 @@ function InvestorLiquidacionesPage() {
 					<InvestorActivityLogSection inversionistaId={investorIdNum} />
 				)}
 
+				{/* Contratos de inversión, con sus enlaces de firma */}
+				<InvestorContractsCard
+					inversionistaId={investorIdNum}
+					puedeRenovar={PERMISSIONS.canRegenerateInvestorContractLinks(
+						userRole,
+					)}
+					puedeVincular={PERMISSIONS.canLinkInvestorWeetrustDocument(userRole)}
+				/>
+
 				{/* Documentos */}
 				<InvestorDocumentsSection
 					inversionistaId={investorIdNum}
 					isManager={isManager}
 				/>
-
-				
 
 				{/* Filtro por mes */}
 				<div>
@@ -2251,9 +2284,7 @@ function InvestorLiquidacionesPage() {
 									limpiarError("nombre");
 								}}
 								aria-invalid={errorEn("nombre")}
-								className={
-									errorEn("nombre") ? "border-destructive" : undefined
-								}
+								className={errorEn("nombre") ? "border-destructive" : undefined}
 							/>
 							<MensajeCampo campo="nombre" />
 						</div>
@@ -2269,9 +2300,7 @@ function InvestorLiquidacionesPage() {
 										limpiarError("dpi");
 									}}
 									aria-invalid={errorEn("dpi")}
-									className={
-										errorEn("dpi") ? "border-destructive" : undefined
-									}
+									className={errorEn("dpi") ? "border-destructive" : undefined}
 								/>
 								<MensajeCampo campo="dpi" />
 							</div>
@@ -2303,10 +2332,7 @@ function InvestorLiquidacionesPage() {
 									</SelectTrigger>
 									<SelectContent>
 										{bancos.map((b: any) => (
-											<SelectItem
-												key={b.banco_id}
-												value={String(b.banco_id)}
-											>
+											<SelectItem key={b.banco_id} value={String(b.banco_id)}>
 												{b.nombre}
 											</SelectItem>
 										))}
@@ -2372,7 +2398,9 @@ function InvestorLiquidacionesPage() {
 										inputMode="numeric"
 										aria-invalid={errorEn("dpi_rep_legal")}
 										className={
-											errorEn("dpi_rep_legal") ? "border-destructive" : undefined
+											errorEn("dpi_rep_legal")
+												? "border-destructive"
+												: undefined
 										}
 									/>
 									<MensajeCampo campo="dpi_rep_legal" />
@@ -2415,13 +2443,15 @@ function InvestorLiquidacionesPage() {
 									<SelectTrigger id="edit-reinversion">
 										<SelectValue />
 									</SelectTrigger>
-									
+
 									<SelectContent>
-										<SelectItem value="sin_reinversion">
-											Tradicional
+										<SelectItem value="sin_reinversion">Tradicional</SelectItem>
+										<SelectItem value="reinversion_capital">
+											Reinversión Capital
 										</SelectItem>
-										<SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
-										<SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
+										<SelectItem value="reinversion_total">
+											Interés Compuesto
+										</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>
@@ -2444,10 +2474,7 @@ function InvestorLiquidacionesPage() {
 					</div>
 
 					<DialogFooter className="gap-2 sm:justify-between">
-						<Button
-							variant="outline"
-							onClick={() => setEditOpen(false)}
-						>
+						<Button variant="outline" onClick={() => setEditOpen(false)}>
 							Cancelar
 						</Button>
 						<Button
@@ -2583,16 +2610,16 @@ function InvestorLiquidacionesPage() {
 								pendiente de devolución
 							</span>
 							{". "}
-							En la próxima corrida de liquidación se le entregará la
-							totalidad de su monto aportado.
+							En la próxima corrida de liquidación se le entregará la totalidad
+							de su monto aportado.
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="rounded-md border border-orange-300/60 bg-orange-50 p-3 text-sm text-orange-900 dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-200">
+					<div className="rounded-md border border-orange-300/60 bg-orange-50 p-3 text-orange-900 text-sm dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-200">
 						<p className="font-semibold">Esta acción no se puede revertir.</p>
 						<p className="mt-1 text-xs">
-							Una vez confirmada, el inversionista quedará bloqueado para
-							nuevas operaciones hasta completarse la devolución.
+							Una vez confirmada, el inversionista quedará bloqueado para nuevas
+							operaciones hasta completarse la devolución.
 						</p>
 					</div>
 
@@ -2963,9 +2990,9 @@ function InvestorLiquidacionesPage() {
 						    brackets), sin importar si corresponde al monto. % CCI y
 						    Tasa se derivan del spread elegido. */}
 						{compraCarteraBracketFaltante ? (
-							<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-								El monto ingresado no cae en ningún rango del catálogo
-								(mínimo Q1,000). Ajusta el monto.
+							<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 text-xs">
+								El monto ingresado no cae en ningún rango del catálogo (mínimo
+								Q1,000). Ajusta el monto.
 							</p>
 						) : (
 							<>
@@ -3001,7 +3028,7 @@ function InvestorLiquidacionesPage() {
 									</div>
 									<div className="space-y-1.5">
 										<Label>% CCI</Label>
-										<div className="rounded-md border bg-muted px-3 py-2 text-sm font-semibold tabular-nums">
+										<div className="rounded-md border bg-muted px-3 py-2 font-semibold text-sm tabular-nums">
 											{compraCarteraPctCashInCalc !== undefined
 												? `${compraCarteraPctCashInCalc.toFixed(4)}%`
 												: "—"}
@@ -3010,10 +3037,10 @@ function InvestorLiquidacionesPage() {
 								</div>
 								{compraCarteraSpreadRow && (
 									<div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
-										<span className="text-xs font-medium text-emerald-700">
+										<span className="font-medium text-emerald-700 text-xs">
 											Tasa del inversionista
 										</span>
-										<span className="text-sm font-bold text-emerald-800 tabular-nums">
+										<span className="font-bold text-emerald-800 text-sm tabular-nums">
 											{Number(compraCarteraSpreadRow.tasa).toFixed(4)}%
 										</span>
 									</div>

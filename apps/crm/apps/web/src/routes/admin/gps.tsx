@@ -53,11 +53,12 @@ import {
 import { orpc, orpcAparte } from "@/utils/orpc";
 import {
 	ESTADOS_FILTRO_BUCKET,
+	estadoBuckets,
 	estadosDeUnidad,
 	FILTRO_BUCKET_SIN_BUCKET,
 	FILTRO_BUCKET_SIN_CREDITO,
 	FILTRO_BUCKET_TODOS,
-	pasaFiltroBucket,
+	filtrarUnidadesPorBucket,
 } from "./-gps-catalogo-filtro";
 import {
 	ESTADO_CONEXION_CONFIG,
@@ -394,9 +395,19 @@ function RouteComponent() {
 			})) ?? [],
 		[units.data, estadoMoraPorSifco],
 	);
+	// Solo se clasifica con el bucket de ESTA búsqueda. Si la consulta falló, o
+	// el mapa es el de la búsqueda anterior, no se filtra: un mapa vacío haría
+	// pasar a todas las unidades con crédito por "sin bucket" y dejaría vacíos
+	// los demás buckets.
+	const estadoDeBuckets = estadoBuckets({
+		cantidadSifcos: sifcosCatalogo.length,
+		tieneMapa: !!estadoMoraPorSifco,
+		esDeBusquedaAnterior: estadosMora.isPlaceholderData,
+		hayError: estadosMora.isError,
+	});
 	const unitRowsFiltradas = useMemo(
-		() => unitRows.filter((u) => pasaFiltroBucket(u, filtroBucket)),
-		[unitRows, filtroBucket],
+		() => filtrarUnidadesPorBucket(unitRows, filtroBucket, estadoDeBuckets),
+		[unitRows, filtroBucket, estadoDeBuckets],
 	);
 	const unitColumns = useMemo<ColumnDef<UnidadCatalogo>[]>(
 		() => [
@@ -432,9 +443,7 @@ function RouteComponent() {
 	// Con un bucket elegido, mientras no llegue el bucket de los créditos las
 	// filas no se pueden clasificar: se muestra la carga en vez de una lista vacía.
 	const esperandoBuckets =
-		filtroBucket !== FILTRO_BUCKET_TODOS &&
-		sifcosCatalogo.length > 0 &&
-		estadosMora.isPending;
+		filtroBucket !== FILTRO_BUCKET_TODOS && estadoDeBuckets === "cargando";
 
 	const [bitacoraPage, setBitacoraPage] = useState(1);
 	const [bitacoraPageSize, setBitacoraPageSize] = useState(25);
@@ -763,7 +772,11 @@ function RouteComponent() {
 									onChange={(e) => setFilterName(e.target.value)}
 									className="max-w-sm"
 								/>
-								<Select value={filtroBucket} onValueChange={setFiltroBucket}>
+								<Select
+									disabled={estadoDeBuckets === "error"}
+									onValueChange={setFiltroBucket}
+									value={filtroBucket}
+								>
 									<SelectTrigger
 										aria-label="Filtrar por bucket"
 										className="w-56"
@@ -797,6 +810,8 @@ function RouteComponent() {
 										? `: ${estadosMora.error.message}`
 										: ""}
 									.
+									{estadoDeBuckets === "error" &&
+										" El filtro por bucket no se aplica hasta que cargue."}
 								</p>
 							)}
 							{units.isError ? (

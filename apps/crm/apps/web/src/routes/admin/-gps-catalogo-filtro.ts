@@ -46,3 +46,36 @@ export function pasaFiltroBucket(u: UnidadFiltrable, filtro: string): boolean {
 	}
 	return estados.includes(filtro);
 }
+
+/**
+ * ¿Se puede clasificar el catálogo por bucket?
+ * - `listos`: hay un bucket para cada crédito visible (o no hay créditos).
+ * - `cargando`: la consulta está en vuelo, o el mapa que hay es de la búsqueda
+ *   anterior (`keepPreviousData`) y le faltan los SIFCOs de la actual.
+ * - `error`: la consulta falló y no hay mapa utilizable.
+ *
+ * Sin `listos` no se filtra: un mapa vacío o ajeno haría pasar a todas las
+ * unidades con crédito por "sin bucket" y dejaría vacíos los demás buckets.
+ */
+export type EstadoBuckets = "listos" | "cargando" | "error";
+
+export function estadoBuckets(p: {
+	cantidadSifcos: number;
+	tieneMapa: boolean;
+	esDeBusquedaAnterior: boolean;
+	hayError: boolean;
+}): EstadoBuckets {
+	if (p.cantidadSifcos === 0) return "listos";
+	if (p.tieneMapa && !p.esDeBusquedaAnterior) return "listos";
+	return p.hayError ? "error" : "cargando";
+}
+
+/** Aplica el filtro solo cuando los buckets están `listos`; si no, deja todo. */
+export function filtrarUnidadesPorBucket<T extends UnidadFiltrable>(
+	unidades: T[],
+	filtro: string,
+	estado: EstadoBuckets,
+): T[] {
+	if (estado !== "listos") return unidades;
+	return unidades.filter((u) => pasaFiltroBucket(u, filtro));
+}

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import {
+	estadoBuckets,
 	estadosDeUnidad,
 	FILTRO_BUCKET_SIN_BUCKET,
 	FILTRO_BUCKET_SIN_CREDITO,
 	FILTRO_BUCKET_TODOS,
+	filtrarUnidadesPorBucket,
 	pasaFiltroBucket,
 } from "./-gps-catalogo-filtro";
 
@@ -65,5 +67,72 @@ describe("estadosDeUnidad", () => {
 				estadoMoraPorSifco: { "1": "mora_60", "2": "mora_60" },
 			}),
 		).toEqual(["mora_60"]);
+	});
+});
+
+describe("estadoBuckets", () => {
+	const base = {
+		cantidadSifcos: 3,
+		tieneMapa: true,
+		esDeBusquedaAnterior: false,
+		hayError: false,
+	};
+
+	it("con mapa propio de esta búsqueda: listos", () => {
+		expect(estadoBuckets(base)).toBe("listos");
+	});
+
+	it("sin créditos no hay nada que consultar: listos", () => {
+		expect(
+			estadoBuckets({ ...base, cantidadSifcos: 0, tieneMapa: false }),
+		).toBe("listos");
+	});
+
+	it("consulta en vuelo: cargando", () => {
+		expect(estadoBuckets({ ...base, tieneMapa: false })).toBe("cargando");
+	});
+
+	it("mapa de la búsqueda anterior: cargando, no se usa para clasificar", () => {
+		expect(estadoBuckets({ ...base, esDeBusquedaAnterior: true })).toBe(
+			"cargando",
+		);
+	});
+
+	it("falló y no hay mapa: error", () => {
+		expect(estadoBuckets({ ...base, tieneMapa: false, hayError: true })).toBe(
+			"error",
+		);
+	});
+
+	it("falló una actualización pero hay mapa de esta búsqueda: sigue usable", () => {
+		expect(estadoBuckets({ ...base, hayError: true })).toBe("listos");
+	});
+});
+
+describe("filtrarUnidadesPorBucket", () => {
+	const unidades = [enB2, sinCredito, sinCaso];
+
+	it("listos: aplica el filtro", () => {
+		expect(filtrarUnidadesPorBucket(unidades, "mora_60", "listos")).toEqual([
+			enB2,
+		]);
+	});
+
+	it("con la consulta fallida, 'sin bucket' no se traga todas las unidades con crédito", () => {
+		expect(
+			filtrarUnidadesPorBucket(unidades, FILTRO_BUCKET_SIN_BUCKET, "error"),
+		).toEqual(unidades);
+	});
+
+	it("con la consulta fallida los buckets no dejan la lista vacía", () => {
+		expect(filtrarUnidadesPorBucket(unidades, "mora_60", "error")).toEqual(
+			unidades,
+		);
+	});
+
+	it("mientras carga tampoco filtra con datos incompletos", () => {
+		expect(filtrarUnidadesPorBucket(unidades, "mora_60", "cargando")).toEqual(
+			unidades,
+		);
 	});
 });

@@ -16,25 +16,25 @@ function splitTemplateParams(message: string): string[] {
 		return [message.trim()];
 	}
 
-	if (parts.length <= 4) {
+	if (parts.length <= 5) {
 		return parts;
 	}
 
-	// SimpleTech solo soporta hasta 4 parámetros por template.
-	// Concatenamos cualquier exceso en el 4to parámetro para no perder texto.
-	return [...parts.slice(0, 3), parts.slice(3).join("\n\n")];
+	// SimpleTech solo soporta hasta 5 parámetros por template.
+	// Concatenamos cualquier exceso en el 5to parámetro para no perder texto.
+	return [...parts.slice(0, 4), parts.slice(4).join("\n\n")];
 }
 
 /**
  * Resuelve el nombre del template según la cantidad de parámetros.
  *
  * Las plantillas aprobadas siguen la convención `mensaje{N}parametro`
- * (`mensaje1parametro`, `mensaje2parametro`, …, `mensaje4parametro`).
+ * (`mensaje1parametro`, `mensaje2parametro`, …, `mensaje5parametro`).
  *
  * Esta función toma el primer dígito del nombre base
  * (`SIMPLETECH_TEMPLATE_NAME`) y lo REEMPLAZA por `paramCount`. SimpleTech
- * solo soporta hasta 4 parámetros, así que `splitTemplateParams` ya colapsa
- * a 4 cualquier mensaje con más; aquí también clampeamos por seguridad.
+ * solo soporta hasta 5 parámetros, así que `splitTemplateParams` ya colapsa
+ * a 5 cualquier mensaje con más; aquí también clampeamos por seguridad.
  */
 function resolveTemplateNameByParamCount(
 	baseTemplateName: string,
@@ -43,7 +43,7 @@ function resolveTemplateNameByParamCount(
 	const match = /\d+/.exec(baseTemplateName);
 	if (!match) return baseTemplateName;
 
-	const target = Math.min(4, Math.max(1, paramCount));
+	const target = Math.min(5, Math.max(1, paramCount));
 	return baseTemplateName.replace(match[0], String(target));
 }
 
@@ -69,7 +69,15 @@ function normalizeParamsForTemplate(
 	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
-export function getSimpletechClient(): SimpleTechClient | null {
+export function getSimpletechClient(opciones?: {
+	/**
+	 * Cuánto espera cada petición antes de abortarla. El cliente ya trae 30s por
+	 * defecto; se pasa cuando quien llama necesita que el tope sea explícito
+	 * porque está esperando el resultado con algo tomado (por ejemplo, el
+	 * candado de firma de una oportunidad).
+	 */
+	timeoutMs?: number;
+}): SimpleTechClient | null {
 	if (
 		!process.env.SIMPLETECH_BASE_URL ||
 		!process.env.SIMPLETECH_USERNAME ||
@@ -84,6 +92,7 @@ export function getSimpletechClient(): SimpleTechClient | null {
 			password: process.env.SIMPLETECH_PASSWORD,
 		},
 		baseUrl: process.env.SIMPLETECH_BASE_URL,
+		...(opciones?.timeoutMs ? { timeout: opciones.timeoutMs } : {}),
 	});
 }
 
@@ -191,9 +200,17 @@ export async function sendWhatsappTemplate(params: {
 	 * párrafos (comportamiento por defecto del envío de cobros).
 	 */
 	bodyParams?: string[];
+	/**
+	 * No escribir las URL del mensaje en el log. Los enlaces de firma de
+	 * contratos firman en nombre de la persona: quien tenga acceso a los logs
+	 * no debería poder usarlos.
+	 */
+	ocultarEnlacesEnLog?: boolean;
+	/** Tope de la petición; sin esto rige el del cliente (30s). */
+	timeoutMs?: number;
 }): Promise<WhatsappSendResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech]";
-	const client = getSimpletechClient();
+	const client = getSimpletechClient({ timeoutMs: params.timeoutMs });
 	if (!client) {
 		return { success: false, error: "Servicio de mensajería no configurado" };
 	}
@@ -230,7 +247,13 @@ export async function sendWhatsappTemplate(params: {
 	};
 
 	console.log(`${prefix} Enviando template a:`, phoneNormalized);
-	console.log(`${prefix} Request:`, JSON.stringify(templateRequest, null, 2));
+	const requestParaLog = JSON.stringify(templateRequest, null, 2);
+	console.log(
+		`${prefix} Request:`,
+		params.ocultarEnlacesEnLog
+			? requestParaLog.replace(/https?:\/\/[^\s"\\]+/g, "[enlace]")
+			: requestParaLog,
+	);
 
 	try {
 		const result = await client.sendTemplate(templateRequest);

@@ -1,52 +1,117 @@
-type SplitValido = {
-	valido: true;
-	capitalInv: number;
-	capitalCube: number;
-	interesIvaInv: number;
-	interesIvaCube: number;
+import Big from "big.js";
+import {
+	calcularPropiedadesPorMonto,
+} from "../cofidi/splitInteresPci";
+
+export type ParticipacionReporteInversionista = {
+	montoAportado: string | Big;
+	esExterno: boolean;
+	spreadHistorico: string | Big;
 };
 
-type SplitInvalido = {
-	valido: false;
-	capitalInv: 0;
-	capitalCube: 0;
-	interesIvaInv: 0;
-	interesIvaCube: 0;
+export type SplitParticipacionReporte = {
+	capitalInv: Big;
+	capitalCube: Big;
+	interesInv: Big;
+	interesCube: Big;
+	ivaInv: Big;
+	ivaCube: Big;
+	interesIvaInv: Big;
+	interesIvaCube: Big;
 };
 
-const redondearMoneda = (monto: number) => Number(monto.toFixed(2));
+const cero = new Big(0);
+const aCentavos = (monto: Big) => monto.round(2, Big.roundHalfUp);
 
-export function agregarParticipacionExterna(porcentajes: number[]): number {
-	return porcentajes.reduce((total, porcentaje) => total + porcentaje / 100, 0);
+export function seleccionarSpreadHistorico({
+	porcentajeParticipacionInversionista,
+	modalidadFacturacionSpreadId,
+	spreadCatalogo,
+}: {
+	porcentajeParticipacionInversionista: string | Big;
+	modalidadFacturacionSpreadId: number | null;
+	spreadCatalogo: string | Big | null;
+}): Big {
+	return modalidadFacturacionSpreadId !== null && spreadCatalogo !== null
+		? new Big(spreadCatalogo)
+		: new Big(porcentajeParticipacionInversionista);
 }
 
-export function splitMontoSegunParticipacionActual(
-	capital: number,
-	interesIva: number,
-	participacionExternaActual: number,
-): SplitValido | SplitInvalido {
-	if (
-		participacionExternaActual < 0 ||
-		participacionExternaActual > 1
-	) {
-		return {
-			valido: false,
-			capitalInv: 0,
-			capitalCube: 0,
-			interesIvaInv: 0,
-			interesIvaCube: 0,
-		};
-	}
-
-	const capitalInv = redondearMoneda(capital * participacionExternaActual);
-	const interesIvaInv = redondearMoneda(
-		interesIva * participacionExternaActual,
+/**
+ * Misma semántica de interés PCI: monto_aportado / total_aportado × spread.
+ * Para el reporte, CUBE absorbe el residuo de cada rubro después de redondear.
+ */
+export function calcularSplitParticipacionReporte({
+	capital,
+	interes,
+	iva,
+	inversionistas,
+}: {
+	capital: string | Big;
+	interes: string | Big;
+	iva: string | Big;
+	inversionistas: ParticipacionReporteInversionista[];
+}): SplitParticipacionReporte {
+	const ownerships = calcularPropiedadesPorMonto(
+		inversionistas.map((inversionista) => ({
+			montoAportado: inversionista.montoAportado,
+		})),
 	);
+	const factorCapital = ownerships.reduce(
+		(total, ownership, index) =>
+			inversionistas[index]?.esExterno ? total.plus(ownership) : total,
+		cero,
+	);
+	const totalAportado = inversionistas.reduce(
+		(total, inversionista) => total.plus(inversionista.montoAportado),
+		cero,
+	);
+	const capitalTotal = new Big(capital);
+	const interesTotal = new Big(interes);
+	const ivaTotal = new Big(iva);
+	const capitalInv = aCentavos(capitalTotal.times(factorCapital));
+	const interesInv = inversionistas.reduce(
+		(total, inversionista) =>
+			inversionista.esExterno
+				? total.plus(
+					aCentavos(
+						totalAportado.gt(0)
+							? interesTotal
+								.times(new Big(inversionista.spreadHistorico).div(100))
+								.times(inversionista.montoAportado)
+								.div(totalAportado)
+							: cero,
+					),
+				)
+				: total,
+		cero,
+	);
+	const ivaInv = inversionistas.reduce(
+		(total, inversionista) =>
+			inversionista.esExterno
+				? total.plus(
+					aCentavos(
+						totalAportado.gt(0)
+							? ivaTotal
+								.times(new Big(inversionista.spreadHistorico).div(100))
+								.times(inversionista.montoAportado)
+								.div(totalAportado)
+							: cero,
+					),
+				)
+				: total,
+		cero,
+	);
+	const interesIvaInv = interesInv.plus(ivaInv);
+
 	return {
-		valido: true,
 		capitalInv,
-		capitalCube: capital - capitalInv,
+		capitalCube: capitalTotal.minus(capitalInv),
+		interesInv,
+		interesCube: interesTotal.minus(interesInv),
+		ivaInv,
+		ivaCube: ivaTotal.minus(ivaInv),
 		interesIvaInv,
-		interesIvaCube: interesIva - interesIvaInv,
+		interesIvaCube: interesTotal.plus(ivaTotal).minus(interesIvaInv),
 	};
 }

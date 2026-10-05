@@ -13,6 +13,7 @@ import {
 	ChevronDown,
 	Database,
 	FileText,
+	Files,
 	Gauge,
 	Gavel,
 	HandCoins,
@@ -29,6 +30,8 @@ import {
 	Scale,
 	ScrollText,
 	Settings,
+	ShieldBan,
+	ShieldCheck,
 	Sunrise,
 	Target,
 	TrendingUp,
@@ -40,7 +43,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
-import { PERMISSIONS } from "@/lib/roles";
+import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 import { ModeToggle } from "./mode-toggle";
@@ -66,6 +69,17 @@ import UserMenu from "./user-menu";
 // Encabezado de grupo dentro de un menú (desktop y mobile comparten estilo).
 const MENU_GROUP_LABEL_CLASS =
 	"px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wider";
+
+/** Tabs de la página de Análisis, en el mismo orden y con los mismos nombres. */
+const ANALYSIS_TABS = [
+	{ stage: "analysis", label: "Análisis (30% → 40%)", icon: FileText },
+	{
+		stage: "investment",
+		label: "Asignación de Inversión (50% → 80%)",
+		icon: TrendingUp,
+	},
+	{ stage: "disbursement", label: "Desembolso (90% → 100%)", icon: Wallet },
+] as const;
 
 export default function Header() {
 	const { data: session } = authClient.useSession();
@@ -162,6 +176,12 @@ export default function Header() {
 											Vendedores
 										</Link>
 									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/documentacion" className="cursor-pointer">
+											<Files className="mr-2 h-4 w-4" />
+											Documentación
+										</Link>
+									</DropdownMenuItem>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem asChild>
 										<Link to="/crm/quoter" className="cursor-pointer">
@@ -252,6 +272,17 @@ export default function Header() {
 											Carros en Remate
 										</Link>
 									</DropdownMenuItem>
+									{userRole === ROLES.ADMIN && (
+										<DropdownMenuItem asChild>
+											<Link
+												to="/vehicles/sat-verificacion"
+												className="cursor-pointer"
+											>
+												<ShieldCheck className="mr-2 h-4 w-4" />
+												Verificación en SAT
+											</Link>
+										</DropdownMenuItem>
+									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
@@ -349,6 +380,19 @@ export default function Header() {
 												Supervisión Págalo
 											</Link>
 										</DropdownMenuItem>
+										{/* Buró interno (develop): lo consulta también el asesor
+												(canAccessBuroInterno), por eso va en este grupo. */}
+										{PERMISSIONS.canAccessBuroInterno(userRole) && (
+											<DropdownMenuItem asChild>
+												<Link
+													to="/cobros/buro-interno"
+													className="cursor-pointer"
+												>
+													<ShieldBan className="mr-2 h-4 w-4" />
+													Buró interno
+												</Link>
+											</DropdownMenuItem>
+										)}
 									</DropdownMenuGroup>
 									{PERMISSIONS.canAssignCobros(userRole) && (
 										<>
@@ -456,18 +500,35 @@ export default function Header() {
 							</DropdownMenu>
 						)}
 
-						{/* Análisis */}
+						{/* Análisis: cada tab de la página como acceso directo */}
 						{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
-							<Button
-								variant={isActive("/crm/analysis") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/crm/analysis">
-									<BarChart3 className="mr-2 h-4 w-4" />
-									Análisis
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/crm/analysis") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<BarChart3 className="h-4 w-4" />
+										Análisis
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-64">
+									{ANALYSIS_TABS.map(({ stage, label, icon: Icon }) => (
+										<DropdownMenuItem key={stage} asChild>
+											<Link
+												to="/crm/analysis"
+												search={{ stage }}
+												className="cursor-pointer"
+											>
+												<Icon className="mr-2 h-4 w-4" />
+												{label}
+											</Link>
+										</DropdownMenuItem>
+									))}
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Jurídico */}
@@ -741,6 +802,10 @@ function MobileNav({
 											<UserCircle />
 											Vendedores
 										</Link>
+										<Link to="/crm/documentacion" className={MOBILE_LINK_CLASS}>
+											<Files />
+											Documentación
+										</Link>
 										<Link to="/crm/quoter" className={MOBILE_LINK_CLASS}>
 											<Calculator />
 											Cotizador
@@ -788,6 +853,15 @@ function MobileNav({
 											<Gavel />
 											Carros en Remate
 										</Link>
+										{userRole === ROLES.ADMIN && (
+											<Link
+												to="/vehicles/sat-verificacion"
+												className={MOBILE_LINK_CLASS}
+											>
+												<ShieldCheck />
+												Verificación en SAT
+											</Link>
+										)}
 									</MobileSection>
 								)}
 
@@ -837,6 +911,15 @@ function MobileNav({
 											<Wallet />
 											Supervisión Págalo
 										</Link>
+										{PERMISSIONS.canAccessBuroInterno(userRole) && (
+											<Link
+												to="/cobros/buro-interno"
+												className={MOBILE_LINK_CLASS}
+											>
+												<ShieldBan />
+												Buró interno
+											</Link>
+										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
 												<MobileGroupLabel>Supervisión</MobileGroupLabel>
@@ -911,10 +994,19 @@ function MobileNav({
 								)}
 
 								{userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
-									<Link to="/crm/analysis" className={MOBILE_LINK_CLASS}>
-										<BarChart3 />
-										Análisis
-									</Link>
+									<MobileSection label="Análisis">
+										{ANALYSIS_TABS.map(({ stage, label, icon: Icon }) => (
+											<Link
+												key={stage}
+												to="/crm/analysis"
+												search={{ stage }}
+												className={MOBILE_LINK_CLASS}
+											>
+												<Icon />
+												{label}
+											</Link>
+										))}
+									</MobileSection>
 								)}
 
 								{userRole && PERMISSIONS.canAccessJuridico(userRole) && (

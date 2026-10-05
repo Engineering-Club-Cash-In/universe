@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { montoParaAbonoDirectoACapital, motivoAbonoACapitalNoPosible } from "../components/abonoDirectoACapital";
 import { z } from "zod";
 import { useFormik } from "formik";
 import {
@@ -17,12 +18,14 @@ import {
   type CancelacionCredito,
   type Credito,
   type Usuario,
+  type RubroPendiente,
 } from "../services/services";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { canEnterCancellationPaymentFlow } from "./cancellationPaymentFlow";
 import { useResetCredit } from "./resetCredit";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { zodToFormikValidate } from "@/lib/formErrors";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
@@ -50,17 +53,7 @@ export const pagoSchema = z.object({
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
  
-function zodToFormikValidate(schema: z.ZodSchema<any>) {
-  return (values: any) => {
-    const result = schema.safeParse(values);
-    if (result.success) return {};
-    const errors: Record<string, string> = {};
-    for (const issue of result.error.issues) {
-      errors[issue.path[0]] = issue.message;
-    }
-    return errors;
-  };
-}
+
 
 export function usePagoForm() {
   const queryClient = useQueryClient();
@@ -79,10 +72,21 @@ const [resetBuscador, setResetBuscador] = useState(false);
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
+  // Rubros pendientes de cobro (tarjeta de circulación, placas, etc). A
+  // diferencia de `mora`, `rubrosActual` SIEMPRE viaja como number desde el
+  // back (no hace falta el `Number(x || 0)` defensivo que exige moraActual).
+  const [rubros, setRubros] = useState<RubroPendiente[]>([]);
+  const [rubrosActual, setRubrosActual] = useState<number>(0);
   const [cuotasAtrasadasInfo, setCuotasAtrasadasInfo] = useState<{
     total: number;
     cuotas: any[];
     cuotaMasAntigua?: number;
+  } | null>(null);
+  // Cuotas vencidas ya cubiertas por boletas pendientes de validar por
+  // contabilidad: no son atraso, pero el asesor debe saber que existen.
+  const [cuotasEnValidacionInfo, setCuotasEnValidacionInfo] = useState<{
+    total: number;
+    cuotas: any[];
   } | null>(null);
   const [permiteAbonoCapital, setPermiteAbonoCapital] = useState<boolean>(false);
 const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
@@ -203,6 +207,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false); // Cerrar modal de exceso
@@ -243,6 +248,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setCreditoCanceladoInfo(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setCuotasPendientesInfo(null);
         setConvenioActivoInfo(null);
         setPermiteAbonoCapital(false);
@@ -269,6 +275,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(result);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setCuotaSeleccionada(0);
@@ -301,16 +308,24 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         : cuotaActualObj;
 
       const siguienteCuotaPagable = [
+        // Las atrasadas ya vienen filtradas por COBERTURA desde el back: si
+        // están aquí, la cuota sigue debiendo y es pagable aunque su fila sea
+        // un pago validated parcial (filtrarla por status la escondía y el
+        // selector saltaba a la cuota siguiente sin cobrar el faltante).
         ...(result.cuotasAtrasadas ?? []),
-        ...(result.cuotasPendientes ?? []),
-      ]
-        // Los pagos `pending` también son seleccionables para poder reportar
-        // abonos complementarios antes de que contabilidad valide el anterior.
-        .filter((c: any) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
-        .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
+        // En pendientes sí se ocultan las validadas/cerradas; los `pending`
+        // siguen seleccionables para reportar abonos complementarios.
+        ...(result.cuotasPendientes ?? []).filter(
+          (c: any) =>
+            c.validationStatus !== "validated" &&
+            c.validationStatus !== "capital_validated",
+        ),
+      ].sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);
+      setRubros(result.rubros || []);
+      setRubrosActual(result.rubrosActual || 0);
 
       // 👇 AGREGA INFO DE CONVENIO
       if (result.convenioActivo) {
@@ -337,12 +352,23 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       });
 
       setCuotasAtrasadasInfo({
-        total: result.cuotasAtrasadas.length,
+        // Únicas por numero_cuota: el endpoint devuelve una fila por pago y
+        // una cuota con varios abonos parciales inflaría el contador.
+        total: new Set(
+          result.cuotasAtrasadas.map((c: any) => c.numero_cuota),
+        ).size,
         cuotas: result.cuotasAtrasadas,
         cuotaMasAntigua:
           result.cuotasAtrasadas.length > 0
             ? result.cuotasAtrasadas[0].numero_cuota
             : undefined,
+      });
+
+      const filasEnValidacion = result.cuotasEnValidacion ?? [];
+      setCuotasEnValidacionInfo({
+        // Únicas por numero_cuota: el endpoint devuelve una fila por pago
+        total: new Set(filasEnValidacion.map((c: any) => c.numero_cuota)).size,
+        cuotas: filasEnValidacion,
       });
 
       setPermiteAbonoCapital(!!result.credito?.permite_abono_capital);
@@ -377,6 +403,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       setDataCredito(null);
       setCuotaActualInfo(null);
       setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
       setCuotasPendientesInfo(null);
       setCuotaSeleccionada(0);
       setSaldoAFavorUser(0);
@@ -431,12 +458,15 @@ const handleFormSubmit = (e: React.FormEvent) => {
 
   // ===== CRÉDITO ACTIVO =====
 const { monto_boleta, otros } = formik.values;
-const  cuota = Number(dataCredito?.credito?.cuota || 0);
+const  cuota = Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.cuota ?? 0);
 const otrosNum = Number(otros || 0);
 const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor || 0);
 const montoBoleta = Number(monto_boleta || 0);
 const moraNum = Number(mora || 0);
 const cuotaConvenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar || 0);
+// `rubrosActual` ya viaja como number desde el back, pero el Number() se deja
+// por consistencia defensiva con el resto de montos de este bloque.
+const rubrosNum = Number(rubrosActual || 0);
 
 console.log("=== DEBUG VALORES ===");
 console.log("Saldo a Favor:", saldoAFavor);
@@ -459,7 +489,12 @@ const convenioAplicado = getConvenioAplicado(
   montoDisponibleTotal,
   otrosNum,
   moraNum,
-  cuotaConvenioNum
+  cuotaConvenioNum,
+  // Los rubros se cobran ANTES que el convenio en la cascada del back, así que
+  // la proyección tiene que partir de lo que queda después de ellos. Sin esto,
+  // una boleta con rubros y convenio infla el umbral de excedente y se envía
+  // sin ofrecer las opciones que correspondían.
+  rubrosNum
 );
 const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum;
 const montoBoletaSinMora = montoDisponibleTotal - otrosNum;
@@ -493,7 +528,15 @@ const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 // de excedente (el modal re-asignaría a capital/otros dinero que el back ya
 // registra como convenio). Mismo umbral efectivo que cuando el front restaba
 // el convenio del disponible.
-const cuotaComparar = Math.max(0, cuota - abonosRealizados) + convenioAplicado;
+// Los rubros se suman con el mismo criterio: el back los cobra ANTES que la
+// cuota (otros → mora → rubros → convenio → cuotas), así que ese monto
+// también es esperado, no excedente. Igual que el convenio, van SUMADOS
+// AFUERA del Math.max(0, ...) porque son independientes del abono parcial de
+// la cuota — si no se suman acá, una boleta que cubre exactamente cuota +
+// rubros dispara el modal de excedente y ese modal reasigna a capital plata
+// que en realidad debía ir a los rubros.
+const cuotaComparar =
+  Math.max(0, cuota - abonosRealizados) + convenioAplicado + rubrosNum;
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);
@@ -570,12 +613,40 @@ const handleAbonoCapitalDirecto = () => {
   }
 
   const montoBoleta = Number(formik.values.monto_boleta) || 0;
+  const otrosTipeado = Number(formik.values.otros) || 0;
+
+  /**
+   * A capital va la boleta MENOS `otros`, no la boleta entera.
+   *
+   * `otros` es una columna de la fila del pago y se guarda tal como vino, así
+   * que mandando la boleta completa una boleta de Q1,100 con Q100 de otros
+   * quedaba con Q1,100 de capital MÁS Q100 de otros: Q1,200 asignados contra un
+   * comprobante de Q1,100, sin compensación por ningún lado. Ver el docstring
+   * de `montoParaAbonoDirectoACapital`.
+   *
+   * Es lo que el hermano `handleAbonoCapital` ya hacía: su excedente sale de
+   * `boleta − otros − mora`.
+   */
+  const aCapital = montoParaAbonoDirectoACapital({
+    boleta: montoBoleta,
+    otros: otrosTipeado,
+  });
+
+  // Y si no queda nada, NO se manda. El piso en cero evita el descuadre, pero
+  // mandar el cero igual es peor que un error: el backend lo acepta con 200 y
+  // guarda una fila de sólo `otros`, así que el asesor ve "registrado" y el
+  // capital no bajó. Verificado contra una copia de producción.
+  const motivo = motivoAbonoACapitalNoPosible({ boleta: montoBoleta, otros: otrosTipeado });
+  if (motivo) {
+    toast.error(motivo);
+    return;
+  }
 
   console.log("=== ABONO DIRECTO A CAPITAL ===");
-  console.log("Monto boleta completo:", montoBoleta);
+  console.log("Boleta:", montoBoleta, "| otros:", otrosTipeado, "| a capital:", aCapital);
   console.log("Cuota seleccionada:", cuotaSeleccionada);
 
-  formik.values.abono_directo_capital = montoBoleta;
+  formik.values.abono_directo_capital = aCapital;
   formik.values.cuotaApagar = cuotaSeleccionada;
 
   setModalExcesoOpen(false);
@@ -830,6 +901,7 @@ async function handleResetCredito(montoIncobrable = 0) {
         setDataCredito(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false);
@@ -857,6 +929,7 @@ async function handleResetCredito(montoIncobrable = 0) {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    cuotasEnValidacionInfo,
     permiteAbonoCapital,
     cuotasPendientesInfo,
     useReversePagosInversionistas,
@@ -899,6 +972,8 @@ async function handleResetCredito(montoIncobrable = 0) {
     resetBuscador,
     setResetBuscador,
     mora,
+    rubros,
+    rubrosActual,
     convenioActivoInfo,
     cuotaSeleccionada,
     abonosCuota

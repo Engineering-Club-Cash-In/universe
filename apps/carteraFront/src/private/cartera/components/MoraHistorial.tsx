@@ -16,12 +16,12 @@ import {
   getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, descargarMoraExcel,
   type MoraEvento,
 } from "../services/moraHistorial.services";
+import { fmtQ } from "@/lib/moneda";
 
 const fechaGT = () => new Date(new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" }));
 const isoDe = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const hoyISO = () => isoDe(fechaGT());
 const menosDias = (iso: string, n: number) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() - n); return isoDe(d); };
-const fmtQ = (v: any) => `Q ${Number(v ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const etapaBadge = (etapa: string) => {
   const map: Record<string, string> = {

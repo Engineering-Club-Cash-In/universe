@@ -1,10 +1,58 @@
 export const DISBURSEMENT_SALE_LABEL = "Desembolso por venta";
 
-export function formatQuotationClientName(input: object & {
-	leadFirstName?: string | null;
-	leadLastName?: string | null;
-	companyName?: string | null;
+export function formatInsuranceProviderLabel(
+	provider: "universales" | "gyt",
+): string {
+	return provider === "gyt" ? "Seguro: GyT" : "Seguro: Universales";
+}
+
+export function formatFinancedInsuranceLabel(
+	provider: "universales" | "gyt",
+	membershipCost: number,
+): string {
+	return provider === "gyt" && membershipCost > 0
+		? "Seguro + membresía: GyT"
+		: formatInsuranceProviderLabel(provider);
+}
+
+export function getQuotationInsuranceFieldName(
+	_provider: "universales" | "gyt",
+): "insuranceCost" {
+	return "insuranceCost";
+}
+
+export function isQuotationInsuranceBreakdownLocked(
+	provider: "universales" | "gyt",
+): boolean {
+	return provider === "gyt";
+}
+
+export function getQuotationInsuranceDisplay(input: {
+	insuranceProvider?: string | null;
+	insuranceCost?: number | string | null;
+	membershipCost?: number | string | null;
+	extraInsuranceCost?: number | string | null;
+	extraMembershipCost?: number | string | null;
 }) {
+	const insuranceProvider: "gyt" | "universales" =
+		input.insuranceProvider === "gyt" ? "gyt" : "universales";
+	const isGyt = insuranceProvider === "gyt";
+
+	return {
+		insuranceProvider,
+		insuranceCost: Number(input.insuranceCost) || 0,
+		membershipCost:
+			Number(isGyt ? input.extraMembershipCost : input.membershipCost) || 0,
+	};
+}
+
+export function formatQuotationClientName(
+	input: object & {
+		leadFirstName?: string | null;
+		leadLastName?: string | null;
+		companyName?: string | null;
+	},
+) {
 	return (
 		[input.leadFirstName, input.leadLastName]
 			.filter((part): part is string => Boolean(part?.trim()))

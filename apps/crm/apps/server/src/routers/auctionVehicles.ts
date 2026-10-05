@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import {
 	auctionExpenses,
 	auctionVehicles,
@@ -21,6 +22,7 @@ export const auctionRouter = {
 	 * - Updates vehicle.status to "auction"
 	 */
 	createAuction: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "auction_open" } })
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),
@@ -81,6 +83,12 @@ export const auctionRouter = {
 				.update(vehicles)
 				.set({ status: "auction" })
 				.where(eq(vehicles.id, vehicleId));
+			auditRecord({
+				entity: "vehicle",
+				id: vehicleId,
+				action: "auction_open",
+				data: { auctionId: newAuction.id },
+			});
 
 			await db
 				.update(vehicleInspections)
@@ -125,6 +133,7 @@ export const auctionRouter = {
 	 * - Updates vehicles.status = "sold"
 	 */
 	closeAuction: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "auction_close" } })
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),
@@ -194,6 +203,11 @@ export const auctionRouter = {
 				.update(vehicles)
 				.set({ status: "sold" })
 				.where(eq(vehicles.id, vehicleId));
+			auditRecord({
+				entity: "vehicle",
+				id: vehicleId,
+				action: "auction_close",
+			});
 
 			return updatedAuction;
 		}) /**
@@ -447,6 +461,7 @@ export const auctionRouter = {
 	 * - Updates inspections.status = "pending"
 	 */
 	cancelAuction: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "auction_cancel" } })
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),
@@ -489,6 +504,11 @@ export const auctionRouter = {
 				.update(vehicles)
 				.set({ status: "pending" })
 				.where(eq(vehicles.id, vehicleId));
+			auditRecord({
+				entity: "vehicle",
+				id: vehicleId,
+				action: "auction_cancel",
+			});
 
 			// 5. Reset inspections -> pending
 			await db

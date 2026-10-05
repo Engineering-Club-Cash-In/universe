@@ -52,6 +52,7 @@ import {
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { getHistorialCapital } from "../controllers/historialCapital";
+import { getProyeccionMoraMes } from "../controllers/moraProyeccion";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -208,6 +209,28 @@ export const creditRouter = new Elysia()
       result.error
     )
       set.status = 500;
+    return result;
+  })
+  // Proyección de mora del mes EN CURSO, día por día, para el caso de cobros
+  // del CRM. Mismo router (y mismo authMiddleware) que /credito. No recibe mes:
+  // los días pasados salen del historial y los futuros son proyección desde
+  // hoy, así que otro mes no tiene sentido; si llega uno distinto se rechaza en
+  // vez de contestar el actual como si fuera el pedido.
+  .get("/credito/mora/proyeccion", async ({ query, set }) => {
+    const { numero_credito_sifco, mes } = query;
+    if (!numero_credito_sifco) {
+      set.status = 400;
+      return { message: "Falta el parámetro 'numero_credito_sifco'" };
+    }
+    const result = await getProyeccionMoraMes(numero_credito_sifco);
+    if ("message" in result) {
+      set.status = 404;
+      return result;
+    }
+    if (mes && mes !== result.mes) {
+      set.status = 400;
+      return { message: `Solo se proyecta el mes en curso (${result.mes})` };
+    }
     return result;
   })
 .get("/getAllCredits", async ({ query, set }) => {
@@ -1476,8 +1499,8 @@ export const creditRouter = new Elysia()
       numero_cuota: t.Optional(t.Number()),
     }),
     detail: {
-      summary: "Recalcular pagos desde una cuota",
-      description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      summary: "Recalcular pagos de las cuotas no pagadas",
+      description: "Re-siembra abonos y restantes de las cuotas NO pagadas y de los pagos registrados pendientes de validar, amortizando desde el capital actual del crédito. numero_cuota se acepta por compatibilidad pero SE IGNORA: nunca se reescriben pagos validados/pagados (para reparar historial usar /reparar-total-restante).",
       tags: ["Créditos", "Cuotas"],
     },
   })

@@ -44,7 +44,10 @@ export const useGetBoletas = (filters?: GetBoletasFilters) => {
 // ============================================
 // 📖 READ - Hook para boletas pendientes
 // ============================================
-export const useGetBoletasPendientes = (inversionista_id?: number) => {
+export const useGetBoletasPendientes = (
+  inversionista_id?: number,
+  refrescarMientrasAbierto = false,
+) => {
   return useQuery({
     queryKey: ["boletas-pendientes", inversionista_id],
     queryFn: () => getBoletas({ 
@@ -53,6 +56,7 @@ export const useGetBoletasPendientes = (inversionista_id?: number) => {
     }),
     staleTime: 5 * 60 * 1000,
     retry: 2,
+    refetchInterval: refrescarMientrasAbierto ? 3000 : false,
   });
 };
 

@@ -19,6 +19,7 @@ function chain() {
 
 mock.module("../database/index", () => ({
   db: { select: () => chain() },
+  client: {},
   // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
   // aunque estos tests no lo usen. Ver testMocks.ts.
   lockPool: lockPoolMock,

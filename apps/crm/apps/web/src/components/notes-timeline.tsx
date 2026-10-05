@@ -23,6 +23,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatGuatemalaDateTime } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 type EntityType =
@@ -355,10 +356,7 @@ export function NotesTimeline({
 							)}
 
 							<div className="text-muted-foreground text-xs">
-								{new Date(note.createdAt).toLocaleString("es-GT", {
-									dateStyle: "medium",
-									timeStyle: "short",
-								})}
+								{formatGuatemalaDateTime(note.createdAt)}
 								{note.editedBy && note.updatedAt !== note.createdAt && (
 									<span className="ml-2">(editada)</span>
 								)}

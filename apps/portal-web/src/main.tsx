@@ -1,7 +1,15 @@
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import {
+  CLAVE_ENTIDADES,
+  hayQueRefrescarEntidades,
+} from "@/features/Profile/services/entidadRevocada";
 import { AuthProvider } from "@/lib";
 import "./index.css";
 
@@ -20,7 +28,24 @@ router.subscribe('onLoad', () => {
 });
 
 // Create a client for React Query
+//
+// El `queryCache` con `onError` está por una razón concreta: un 403 en
+// cualquier consulta con alcance de entidad significa que la lista de entidades
+// que tiene el navegador ya no es cierta —al equipo le quitaron una sociedad a
+// esta persona— y esa lista se cachea cinco minutos. Sin refrescarla,
+// `useEntidades` sigue eligiendo el id que ya no es suyo y la persona ve
+// pantallas vacías hasta que expire, sin que nada se lo diga ni se corrija.
+// Ver `entidadRevocada.ts`.
+const queryCache = new QueryCache({
+  onError: (error, query) => {
+    if (!hayQueRefrescarEntidades(error, query.queryKey)) return;
+
+    queryClient.invalidateQueries({ queryKey: [CLAVE_ENTIDADES] });
+  },
+});
+
 const queryClient = new QueryClient({
+  queryCache,
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,

@@ -1,5 +1,48 @@
 // src/utils/factura-html-generator.ts
 
+import {
+  AMJK_CONFIG,
+  AUTOCASH_CONFIG,
+  CLUB_CASHIN_CONFIG,
+  CREACION_IMAGEN_CONFIG,
+  GRUPO_BATRO_CONFIG,
+  SE_PRESTA_CONFIG,
+} from "../utils/functions/const";
+
+const FACTURADORES = [
+  CLUB_CASHIN_CONFIG,
+  SE_PRESTA_CONFIG,
+  AMJK_CONFIG,
+  CREACION_IMAGEN_CONFIG,
+  GRUPO_BATRO_CONFIG,
+  AUTOCASH_CONFIG,
+];
+
+const leyendaPagoDirecto = (frases: ReadonlyArray<{
+  tipoFrase: number;
+  codigoEscenario: string;
+  numeroResolucion?: string;
+  fechaResolucion?: string;
+}>) => {
+  const frase = frases.find(
+    (f) => f.tipoFrase === 1 && f.codigoEscenario === "3" && f.numeroResolucion && f.fechaResolucion
+  );
+  if (!frase) return null;
+  const [anio, mes, dia] = frase.fechaResolucion!.split("-");
+  return `Sujeto a pago directo ISR. Resolución No. ${frase.numeroResolucion} ${dia}/${mes}/${anio}`;
+};
+
+// La leyenda del pie sale de la MISMA frase que va en el XML: cuando SAT le
+// cambia la resolución a un emisor, se cambia en su config y el PDF la sigue.
+// Un emisor sin resolución de pago directo cae en la de CUBE (lo de siempre).
+export function leyendaISREmisor(nitEmisor: string): string {
+  const config = FACTURADORES.find((c) => c.emisor.nit === String(nitEmisor));
+  return (
+    (config && leyendaPagoDirecto(config.frases)) ??
+    leyendaPagoDirecto(CLUB_CASHIN_CONFIG.frases)!
+  );
+}
+
 interface DatosFactura {
   tipo: string;
   serie: string;
@@ -558,7 +601,7 @@ export function generarHTMLFacturaPro(
             </div>
 
             <p class="legal-notice">
-                Sujeto a pago directo ISR. Resolución No. 6130294202615373132 29/04/2026
+                ${leyendaISREmisor(datos.emisor.nit)}
             </p>
         </footer>
     </div>

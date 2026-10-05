@@ -2,12 +2,19 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { matchesSearch } from "@/lib/utils";
 import { Plus, Trash2, BookCopy, Wallet, ChevronsUpDown, Check, Calculator, Loader2 } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
 import { Combobox, Transition } from "@headlessui/react";
 import { DatePickerMUI } from "./calendar";
 import { toast } from "sonner";
-import { calculateInvestorQuotasService, type InversionistaPayload } from "../services/services";
+import {
+  calculateInvestorQuotasService,
+  MODALIDAD_FACTURACION_LABELS,
+  type InversionistaPayload,
+  type ModalidadFacturacion,
+} from "../services/services";
+import { useModalidadFacturacionSpreadByModalidad } from "../hooks/useModalidadFacturacion";
 
 type TipoInversion = "compra_cartera" | "reinversion";
 
@@ -49,6 +56,101 @@ interface InvestorsListProps {
    * nueva). Los que ya salieron del crédito sí pueden volver a entrar.
    */
   blockedInvestorIds?: Set<number>;
+}
+
+function NewInvestorMetadataFields({
+  index,
+  investor,
+  onChange,
+}: {
+  index: number;
+  investor: InversionistaPayload;
+  onChange: (metadata: Partial<InversionistaPayload>) => void;
+}) {
+  const modalidad = investor.modalidad_facturacion;
+  const spreadQuery = useModalidadFacturacionSpreadByModalidad(
+    modalidad ?? "p2p_directa",
+    Boolean(modalidad),
+  );
+  const tipoReinversionField = (
+    <div className="w-56">
+      <Label htmlFor={`tipo-reinversion-${index}`} className="text-blue-900 font-semibold">
+        Tipo de reinversión
+      </Label>
+      <select
+        id={`tipo-reinversion-${index}`}
+        value={investor.tipo_reinversion ?? ""}
+        onChange={(event) => onChange({ tipo_reinversion: event.target.value as InversionistaPayload["tipo_reinversion"] })}
+        className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+      >
+        <option value="">Seleccione tipo</option>
+        <option value="sin_reinversion">Tradicional</option>
+        <option value="reinversion_capital">Reinversión capital</option>
+        <option value="reinversion_interes">Reinversión interés</option>
+        <option value="reinversion_total">Interés compuesto</option>
+        <option value="reinversion_variable">Reinversión variable</option>
+        <option value="reinversion_excedente">Reinversión excedente</option>
+      </select>
+    </div>
+  );
+
+  if (investor.tipo_operacion === "reinversion") {
+    return tipoReinversionField;
+  }
+
+  return (
+    <>
+      {tipoReinversionField}
+      <div className="w-64">
+        <Label htmlFor={`modalidad-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Modalidad de facturación
+        </Label>
+        <select
+          id={`modalidad-facturacion-${index}`}
+          value={modalidad ?? ""}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion: event.target.value as ModalidadFacturacion,
+              modalidad_facturacion_spread_id: undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+        >
+          <option value="">Seleccione modalidad</option>
+          {Object.entries(MODALIDAD_FACTURACION_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="w-64">
+        <Label htmlFor={`rango-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Rango de facturación
+        </Label>
+        <select
+          id={`rango-facturacion-${index}`}
+          value={investor.modalidad_facturacion_spread_id ?? ""}
+          disabled={!modalidad || spreadQuery.isLoading}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion_spread_id: event.target.value
+                ? Number(event.target.value)
+                : undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm disabled:bg-gray-100"
+        >
+          <option value="">
+            {spreadQuery.isLoading ? "Cargando rangos..." : "Seleccione rango"}
+          </option>
+          {spreadQuery.data?.map((spread) => (
+            <option key={spread.id} value={spread.id}>
+              {`Q${spread.monto_desde} - ${spread.monto_hasta ? `Q${spread.monto_hasta}` : "sin límite"} (${spread.spread}%)`}
+            </option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
 }
 
 export function InvestorsList({
@@ -94,6 +196,8 @@ export function InvestorsList({
   };
 
   const handleMontoAportadoChange = (index: number, newValue: number) => {
+    if (!Number.isFinite(newValue) || newValue < 0) return;
+
     const invId = Number(investors[index]?.inversionista_id);
 
     // Guardar el monto original solo la primera vez que se edita
@@ -155,6 +259,10 @@ export function InvestorsList({
   };
 
   const removeInvestor = (indexToRemove: number) => {
+    // El backend rechaza una lista vacía: sacar al único inversionista se hace
+    // por el flujo de liquidación o reemplazo, no vaciando la lista acá.
+    if (investors.length <= 1) return;
+
     // 1. Actualizar estado de expansión (Shift Logic)
     const newExpandedSet = new Set<number>();
 
@@ -191,7 +299,10 @@ export function InvestorsList({
         espejo?.porcentaje_cash_in !== padre.porcentaje_cash_in ||
         espejo?.porcentaje_inversion !== padre.porcentaje_inversion ||
         espejo?.fecha_inicio_participacion !== padre.fecha_inicio_participacion ||
-        espejo?.tipo_operacion !== padre.tipo_operacion
+        espejo?.tipo_operacion !== padre.tipo_operacion ||
+        espejo?.tipo_reinversion !== padre.tipo_reinversion ||
+        espejo?.modalidad_facturacion !== padre.modalidad_facturacion ||
+        espejo?.modalidad_facturacion_spread_id !== padre.modalidad_facturacion_spread_id
       ) {
         formik.setFieldValue(`investorsMirror.${idx}`, { ...padre });
       }
@@ -201,11 +312,25 @@ export function InvestorsList({
 
   const handleTipoInversionChange = (index: number, tipo: TipoInversion) => {
     const fecha = getDefaultFechaInicio(tipo);
-    formik.setFieldValue(`${fieldName}.${index}.tipo_operacion`, tipo);
-    formik.setFieldValue(`${fieldName}.${index}.fecha_inicio_participacion`, fecha);
-    // Sync espejo
-    formik.setFieldValue(`investorsMirror.${index}.tipo_operacion`, tipo);
-    formik.setFieldValue(`investorsMirror.${index}.fecha_inicio_participacion`, fecha);
+    const updated = {
+      ...investors[index],
+      tipo_operacion: tipo,
+      fecha_inicio_participacion: fecha,
+      tipo_reinversion: undefined,
+      modalidad_facturacion: undefined,
+      modalidad_facturacion_spread_id: undefined,
+    };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
+  };
+
+  const handleNewMetadataChange = (
+    index: number,
+    metadata: Partial<InversionistaPayload>,
+  ) => {
+    const updated = { ...investors[index], ...metadata };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
   };
 
   const handleCalculateQuotas = async () => {
@@ -315,6 +440,9 @@ export function InvestorsList({
         const invMirror = listMirror[index] || {}; // Fallback safe
         const isNew = inv.es_nuevo === true;
         const tipoInversion = inv.tipo_operacion;
+        // El backend rechaza una lista vacía (400): no se puede quitar al
+        // último inversionista desde acá.
+        const esUltimoInversionista = listToRender.length <= 1;
 
         // Para filas nuevas: no ofrecer a quienes participan HOY en el crédito
         // (blockedInvestorIds) ni a los ya elegidos en otra fila del
@@ -340,7 +468,7 @@ export function InvestorsList({
           >
             {/* Radio: Compra de Cartera / Reinversión (solo nuevos) */}
             {isNew && (
-              <div className="flex items-center gap-6 pb-2 border-b border-blue-200">
+              <div className="flex flex-wrap items-end gap-4 pb-2 border-b border-blue-200">
                 <span className="text-sm font-semibold text-blue-900">Tipo:</span>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -364,6 +492,11 @@ export function InvestorsList({
                   />
                   <span className="text-sm text-purple-800">Reinversión</span>
                 </label>
+                <NewInvestorMetadataFields
+                  index={index}
+                  investor={inv}
+                  onChange={(metadata) => handleNewMetadataChange(index, metadata)}
+                />
               </div>
             )}
 
@@ -404,10 +537,10 @@ export function InvestorsList({
                     >
                       <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
                         {(() => {
-                          const q = (investorQueries[index] || "").toLowerCase();
+                          const q = investorQueries[index] || "";
                           const filtered = q === ""
                             ? opcionesFila
-                            : opcionesFila.filter((o) => o.nombre.toLowerCase().includes(q));
+                            : opcionesFila.filter((o) => matchesSearch(o.nombre, q));
                           if (filtered.length === 0) {
                             return (
                               <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
@@ -456,11 +589,25 @@ export function InvestorsList({
                 <Input
                   className="mt-1"
                   type="number"
+                  min={0}
+                  step="0.01"
                   name={`${fieldName}.${index}.monto_aportado`}
                   value={inv.monto_aportado}
                   onFocus={(e) => e.target.select()}
-                  onChange={(e) => handleMontoAportadoChange(index, Number(e.target.value))}
+                  onChange={(e) => {
+                    // Campo vacío: no interpretarlo como 0, eso bajaría el monto
+                    // en silencio mientras el usuario está tipeando.
+                    if (e.target.value.trim() === "") return;
+                    handleMontoAportadoChange(index, Number(e.target.value));
+                  }}
                   onBlur={(e) => {
+                    if (e.target.value.trim() === "") {
+                      handleMontoAportadoChange(
+                        index,
+                        Number(inv.monto_aportado ?? 0),
+                      );
+                      return;
+                    }
                     const val = Number(e.target.value);
                     handleMontoAportadoChange(index, Number(val.toFixed(2)));
                   }}
@@ -589,8 +736,18 @@ export function InvestorsList({
                 <Button
                     type="button"
                     variant="outline"
-                    className="h-10 w-10 border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 p-0"
+                    className={`h-10 w-10 p-0 ${
+                      esUltimoInversionista
+                        ? "border-gray-200 text-gray-300 cursor-not-allowed"
+                        : "border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
+                    }`}
                     onClick={() => removeInvestor(index)}
+                    disabled={esUltimoInversionista}
+                    title={
+                      esUltimoInversionista
+                        ? "Un crédito no puede quedarse sin inversionistas: usá el flujo de liquidación o reemplazo"
+                        : undefined
+                    }
                 >
                     <Trash2 className="w-4 h-4" />
                 </Button>
@@ -678,10 +835,10 @@ export function InvestorsList({
                             >
                               <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-purple-200 focus:outline-none">
                                 {(() => {
-                                  const q = (mirrorQueries[index] || "").toLowerCase();
+                                  const q = mirrorQueries[index] || "";
                                   const filtered = q === ""
                                     ? investorsOptions
-                                    : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                                    : investorsOptions.filter((o) => matchesSearch(o.nombre, q));
                                   if (filtered.length === 0) {
                                     return (
                                       <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
@@ -730,13 +887,35 @@ export function InvestorsList({
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
+                        min={0}
+                        step="0.01"
                         name={`investorsMirror.${index}.monto_aportado`}
                         value={invMirror.monto_aportado}
                         onFocus={(e) => e.target.select()}
-                        onChange={formik.handleChange}
+                        onChange={(e) => {
+                          if (e.target.value.trim() === "") return;
+                          const value = Number(e.target.value);
+                          if (Number.isFinite(value) && value >= 0) {
+                            formik.setFieldValue(
+                              `investorsMirror.${index}.monto_aportado`,
+                              value,
+                            );
+                          }
+                        }}
                         onBlur={(e) => {
+                          // Vaciar el campo restaura el valor actual en vez de
+                          // dejarlo en 0 sin que el usuario lo note.
+                          if (e.target.value.trim() === "") {
+                            formik.setFieldValue(
+                              `investorsMirror.${index}.monto_aportado`,
+                              Number(invMirror.monto_aportado ?? 0),
+                            );
+                            return;
+                          }
                           const val = Number(e.target.value);
-                          formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          if (Number.isFinite(val) && val >= 0) {
+                            formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          }
                         }}
                         disabled={isNew}
                         />

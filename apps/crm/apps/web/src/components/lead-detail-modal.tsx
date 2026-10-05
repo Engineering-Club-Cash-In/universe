@@ -791,6 +791,14 @@ export function LeadDetailModal({
 									</div>
 								)}
 							</div>
+
+							{/* Analysis Date */}
+							{creditAnalysisQuery.data.analyzedAt && (
+								<div className="text-right text-muted-foreground text-sm">
+									Análisis realizado:{" "}
+									{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
+								</div>
+							)}
 						</div>
 					)}
 

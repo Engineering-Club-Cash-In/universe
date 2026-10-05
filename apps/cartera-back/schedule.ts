@@ -9,6 +9,13 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { verificarCuadreLiquidaciones } from './src/controllers/verificarCuadreLiquidaciones';
+import {
+  enviarResumenProvisionamiento,
+  provisionarCuentasPortal,
+} from './src/controllers/provisionarCuentasPortal';
+import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
+import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -37,7 +44,8 @@ function getFechaGuatemalaISO(offsetDays = 0) {
  * Qué tareas registrar. Se pasa desde `index.ts` para poder prender un
  * subconjunto: en la fase de pruebas de COBROS-02 solo corren las dos que
  * alimentan el módulo de cobros (mora y buckets de convenio), y las que
- * escriben histórico o le pegan a SAT se quedan fuera.
+ * escriben histórico, le pegan a SAT o mandan correos se quedan fuera.
+ * Sin argumento corren TODAS (comportamiento de producción).
  */
 export type TareaProgramada =
 	| 'moras'
@@ -47,7 +55,10 @@ export type TareaProgramada =
 	| 'cierre_mensual'
 	| 'facturas_sat'
 	| 'reporte_facturas_fallidas'
-	| 'snapshot_facturacion';
+	| 'snapshot_facturacion'
+	| 'cuadre_liquidaciones'
+	| 'cuentas_portal'
+	| 'baterias_crm';
 
 export const TODAS_LAS_TAREAS: TareaProgramada[] = [
   'moras',
@@ -58,6 +69,9 @@ export const TODAS_LAS_TAREAS: TareaProgramada[] = [
   'facturas_sat',
   'reporte_facturas_fallidas',
   'snapshot_facturacion',
+  'cuadre_liquidaciones',
+  'cuentas_portal',
+  'baterias_crm',
 ];
 
 export function iniciarTareasProgramadas(
@@ -65,18 +79,20 @@ export function iniciarTareasProgramadas(
 ) {
   const activa = (t: TareaProgramada) => tareas.includes(t);
 
-  // 🌙 procesarMoras - 11:59 PM hora Guatemala (sin importar dónde esté el server)
-  if (activa('moras')) schedule.scheduleJob({ rule: '59 23 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🕐 Ejecutando procesarMoras a las 11:59 PM Guatemala...');
-    try {
-      await procesarMoras();
-      console.log('✅ procesarMoras ejecutado correctamente');
-    } catch (error) {
-      console.error('❌ Error al ejecutar procesarMoras:', error);
-    }
+  // 🌙 procesarMoras - 00:05 hora Guatemala (sin importar dónde esté el server).
+  //    Corría a las 23:59, y eso dejaba la mora un día por detrás: la cuota que
+  //    vencía el día D recién recibía su primer día de atraso a las 23:59 del
+  //    D+1, así que quien pagaba durante todo el D+1 no pagaba mora. Con la mora
+  //    proporcional eso además volvía mentiroso el aviso del CRM ("si no pagas
+  //    hoy, mañana se agrega el recargo"): el recargo aparecía 24 h después.
+  //    Al correr apenas pasada la medianoche, la mora del día anterior ya está
+  //    escrita cuando amanece. Sigue antes del cierre mensual de las 02:00, que
+  //    depende de que procesarMoras haya corrido.
+  if (activa('moras')) schedule.scheduleJob({ rule: '5 0 * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob('process_late_fees', () => procesarMoras());
   });
 
-  // 🧊 Vigilante de convenios - 00:30 hora Guatemala (después de procesarMoras 23:59).
+  // 🧊 Vigilante de convenios - 00:30 hora Guatemala (después de procesarMoras 00:05).
   //    El motor de mora EXCLUYE EN_CONVENIO. Desde la Fase 2 este job NO mueve
   //    buckets: el convenio los congela al firmarse. Acá quedan la red de
   //    seguridad (congelar a los que no tengan fila de su régimen) y la medición
@@ -96,13 +112,13 @@ export function iniciarTareasProgramadas(
   // 📊 Efectividad asesores - 11:00 PM hora Guatemala
   if (activa('efectividad_asesores')) schedule.scheduleJob({ rule: '0 23 * * *', tz: TZ_GUATEMALA }, async () => {
     const { dia, mes, anio } = getFechaGuatemala();
-    console.log(`📊 Ejecutando upsertEfectividadAsesores para ${dia}/${mes}/${anio}...`);
-    try {
-      const result = await upsertEfectividadAsesores(dia, mes, anio);
-      console.log('✅ upsertEfectividadAsesores:', result.ok ? 'OK' : result.error);
-    } catch (error) {
-      console.error('❌ Error al ejecutar upsertEfectividadAsesores:', error);
-    }
+    await runScheduledJob(
+      'upsert_advisor_effectiveness',
+      async () => {
+        const result = await upsertEfectividadAsesores(dia, mes, anio);
+        if (!result.ok) throw new Error("scheduled job reported failure");
+      },
+    );
   });
 
   // ⏰ Expira compras de cartera aceptadas vencidas - 00:00 hora Guatemala.
@@ -110,15 +126,10 @@ export function iniciarTareasProgramadas(
   //    con status="pendiente_revision" cuya fecha de baja (expira + 1 hábil)
   //    sea <= hoy en GT se devuelve a CUBE.
   if (activa('expirar_compras')) schedule.scheduleJob({ rule: '0 0 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🕛 Ejecutando expirarCompraCarteraVencidas a las 00:00 Guatemala...');
-    try {
-      const res = await expirarCompraCarteraVencidas();
-      console.log(
-        `✅ expirarCompraCartera: escaneados=${res.escaneados}, vencidos=${res.vencidos}, creditosProcesados=${res.creditosProcesados}`,
-      );
-    } catch (error) {
-      console.error('❌ Error al ejecutar expirarCompraCarteraVencidas:', error);
-    }
+    await runScheduledJob(
+      'expire_portfolio_purchases',
+      () => expirarCompraCarteraVencidas(),
+    );
   });
 
   // 📊 Cierre mensual de cartera - DIARIO a las 02:00 hora Guatemala (después de procesarMoras).
@@ -126,26 +137,17 @@ export function iniciarTareasProgramadas(
   //    (gracia para que asiente la data), del 6 en adelante refresca el mes actual.
   //    Genera conteo/capital por estado + el aging de mora (buckets por cuotas atrasadas).
   if (activa('cierre_mensual')) schedule.scheduleJob({ rule: '0 2 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🗓️ Ejecutando generarCierreMensual (diario, 02:00 Guatemala)...');
-    try {
-      const res = await generarCierreMensual(periodoObjetivo(new Date()));
-      console.log(`✅ cierreMensual: periodo=${res.periodo}, filas=${res.filas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar generarCierreMensual:', error);
-    }
+    await runScheduledJob(
+      'generate_monthly_close',
+      () => generarCierreMensual(periodoObjetivo(new Date())),
+    );
   });
 
   // 🧾 Verificación de facturas en SAT - cada 15 min, 8:00–19:00 hora Guatemala.
   //    Revisa las facturas ACTIVA nuevas (desde el último cursor) y registra en
   //    cartera.facturas_fallidas_sat las que NO se encuentran en SAT.
   if (activa('facturas_sat')) schedule.scheduleJob({ rule: '*/15 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🧾 Ejecutando verificarFacturasSat...');
-    try {
-      const res = await verificarFacturasSat();
-      console.log(`✅ verificarFacturasSat: revisadas=${res.revisadas}, fallidas=${res.fallidas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar verificarFacturasSat:', error);
-    }
+    await runScheduledJob('verify_sat_invoices', () => verificarFacturasSat());
   });
 
   // 💳 El barrido de facturas Págalo huérfanas se quitó (2026-09-01, Daniel):
@@ -164,13 +166,10 @@ export function iniciarTareasProgramadas(
   // 📧 Reporte por correo de facturas fallidas - cada hora, 8:00–19:00 hora Guatemala.
   //    Envía todas las fallidas PENDIENTE; si no hay, no envía correo.
   if (activa('reporte_facturas_fallidas')) schedule.scheduleJob({ rule: '0 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('📧 Ejecutando reportarFacturasFallidasSat...');
-    try {
-      const res = await reportarFacturasFallidasSat();
-      console.log(`✅ reportarFacturasFallidasSat: enviadas=${res.enviadas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar reportarFacturasFallidasSat:', error);
-    }
+    await runScheduledJob(
+      'report_failed_sat_invoices',
+      () => reportarFacturasFallidasSat(),
+    );
   });
 
   // 📸 Snapshot diario de facturación - 01:00 hora Guatemala.
@@ -179,17 +178,63 @@ export function iniciarTareasProgramadas(
   //    (p. ej. del import del Excel hasta 2026-12-31) que de otro modo
   //    quedarían congeladas en su valor viejo/0.
   if (activa('snapshot_facturacion')) schedule.scheduleJob({ rule: '0 1 * * *', tz: TZ_GUATEMALA }, async () => {
-    for (const off of [-1, -2, -3]) {
-      const fecha = getFechaGuatemalaISO(off); // ayer, antier, trasantier (GT)
-      console.log(`📸 Regenerando snapshot diario ${fecha} (01:00 Guatemala)...`);
-      try {
-        await generarSnapshotDiario(fecha);
-        console.log(`✅ snapshotDiario ${fecha}: regenerado`);
-      } catch (error) {
-        console.error(`❌ Error regenerando snapshot ${fecha}:`, error);
+    function* snapshotAttempts() {
+      for (const offset of [-1, -2, -3]) {
+        const fecha = getFechaGuatemalaISO(offset); // ayer, antier, trasantier (GT)
+        yield async () => generarSnapshotDiario(fecha);
       }
     }
+    await runScheduledJobAttempts('generate_daily_invoice_snapshot', snapshotAttempts());
   });
 
-  console.log('✅ Tareas programadas iniciadas (horario Guatemala)');
+  // 🔍 Cuadre de las liquidaciones del mes - 11, 12 y 13 a las 08:00 hora Guatemala.
+  //    El 10 queda fuera a propósito: ese día se está liquidando y todo estaría
+  //    a medio camino. Verifica que el monto aportado del espejo, descontadas
+  //    las compras que la liquidación no absorbió, sea igual al histórico que
+  //    dejó esa liquidación más su reinversión. Solo notifica por correo; no
+  //    corrige nada. De cada liquidación se avisa UNA sola vez: el 12 y el 13
+  //    sirven para cerrar las que ya cuadraron solas y para agarrar las que
+  //    aparecieron después, no para repetir el mismo correo.
+  if (activa('cuadre_liquidaciones')) schedule.scheduleJob({ rule: '0 8 11-13 * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'verify_liquidation_balance',
+      () => verificarCuadreLiquidaciones(),
+    );
+  });
+
+  // 🔑 Acceso al Portal del Inversionista - 07:00 hora Guatemala, todos los días.
+  //    DETECTA, no ejecuta. Recorre a todos los inversionistas, PREGUNTA quién
+  //    debería tener cuenta y no la tiene, y lo manda en el resumen. No crea
+  //    nada y no manda ninguna contraseña: sale de aquí en solo lectura.
+  //
+  //    Es la red que recoge lo que el alta no pudo: si auth-google estaba caído
+  //    cuando se creó el inversionista, el operador no tiene forma de
+  //    reintentarlo —el segundo POST muere en el guard de duplicados— y sin
+  //    este job esa persona se quedaba sin acceso para siempre. Eso se sigue
+  //    detectando y reportando solo; lo que cambió es que abrir la cuenta lo
+  //    dispara una persona desde POST /investor/portal-access.
+  //
+  //    Por qué no la abre él: su universo es la tabla entera y no puede saber
+  //    quién escribió cada fila —`cartera.inversionistas` se escribe desde
+  //    caminos que no prueban identidad—, así que "esta fila debería tener
+  //    cuenta" no puede significar "mandale la contraseña a ese correo".
+  //    Ver el encabezado de provisionarCuentasPortal.ts.
+  if (activa('cuentas_portal')) schedule.scheduleJob({ rule: '0 7 * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'provision_portal_accounts',
+      () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
+    );
+  });
+
+  // 📨 Avisos de compra aceptada que el CRM no recibió - cada 10 minutos.
+  //    Si el CRM no contestó al aceptar la compra, jurídico se quedaba sin su
+  //    batería de contratos para siempre. Ver bateriasCrmPendientes.ts.
+  if (activa('baterias_crm')) schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'retry_crm_contract_batches',
+      async () => {
+        await reintentarBateriasPendientes();
+      },
+    );
+  });
 }

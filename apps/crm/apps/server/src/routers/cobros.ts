@@ -69,6 +69,7 @@ import {
 	duenosEnCarteraPorSifco,
 	sifcosQueTrabaja,
 } from "../lib/acceso-caso-cobro";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	payloadEdicionManual,
 	registrarAuditContacto,
@@ -87,9 +88,21 @@ import {
 	resolveOperationalInstallment,
 } from "../lib/cobros-credit-detail";
 import {
+	calcularExpectativaMora,
+	calcularExpectativaMoraDiaria,
+	calcularMontoAdeudadoDesdeCuotas,
+	contarCuotasAtrasadasUnicas,
+	cuerpoUsaFechaLimiteImpuesto,
+	fechaLimiteImpuestoCirculacion,
+	fechaLimiteImpuestoVencida,
+	formatearIncrementoMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
+	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
+	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
+	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import {
@@ -118,7 +131,12 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import { buildCasoFromCartera } from "../lib/build-caso-from-cartera";
+import {
+	calcularDiasMoraExactos,
+	diasMoraDeListado,
+	diasMoraDelDetalle,
+} from "../lib/mora-utils";
 import {
 	ESTADOS_AGING_VALIDOS,
 	esperarCatalogoBuckets,
@@ -441,7 +459,7 @@ async function autoCrearDatosMigrate({
 		: ("sobre_vehiculo" as const);
 
 	// Transacción atómica: si algo falla, se revierte todo
-	const result = await db.transaction(async (tx) => {
+	const result = await auditedTransaction(async (tx) => {
 		// 1. Crear Lead con solo el nombre, status "migrate"
 		const [nuevoLead] = await tx
 			.insert(leads)
@@ -458,7 +476,12 @@ async function autoCrearDatosMigrate({
 				notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
 			})
 			.returning({ id: leads.id });
-
+		auditRecord({
+			entity: "lead",
+			id: nuevoLead.id,
+			action: "create",
+			data: { numeroSifco },
+		});
 		// 2. Crear Vehículo con datos nulos, status "sold"
 		const [nuevoVehiculo] = await tx
 			.insert(vehicles)
@@ -471,22 +494,36 @@ async function autoCrearDatosMigrate({
 				status: "sold",
 			})
 			.returning({ id: vehicles.id });
-
+		auditRecord({
+			entity: "vehicle",
+			id: nuevoVehiculo.id,
+			action: "create",
+			data: { numeroSifco },
+		});
 		// 3. Crear Oportunidad enlazando lead y vehículo
-		await tx.insert(opportunities).values({
-			title: `Crédito ${numeroSifco}`,
-			leadId: nuevoLead.id,
-			vehicleId: nuevoVehiculo.id,
-			creditType,
-			stageId: defaultStage.id,
-			assignedTo: userId,
-			createdBy: userId,
-			status: "migrate",
-			numeroSifco,
-			diaPagoMensual: diaPagoMensual,
-			cuotaMensual: cuotaMensual,
-			value: deudaTotal,
-			notes: "Crédito migrado automáticamente desde Cartera-Back.",
+		const [nuevaOportunidad] = await tx
+			.insert(opportunities)
+			.values({
+				title: `Crédito ${numeroSifco}`,
+				leadId: nuevoLead.id,
+				vehicleId: nuevoVehiculo.id,
+				creditType,
+				stageId: defaultStage.id,
+				assignedTo: userId,
+				createdBy: userId,
+				status: "migrate",
+				numeroSifco,
+				diaPagoMensual: diaPagoMensual,
+				cuotaMensual: cuotaMensual,
+				value: deudaTotal,
+				notes: "Crédito migrado automáticamente desde Cartera-Back.",
+			})
+			.returning({ id: opportunities.id });
+		auditRecord({
+			entity: "opportunity",
+			id: nuevaOportunidad.id,
+			action: "create",
+			data: { numeroSifco, leadId: nuevoLead.id },
 		});
 
 		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };
@@ -1628,10 +1665,12 @@ export const cobrosRouter = {
 							const statusCredit = credito.creditos.statusCredit;
 							const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
 
-							// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
-							// NO retorna las fechas de vencimiento de las cuotas individuales.
-							// Solo /credito retorna el array completo con fechas para cálculo exacto.
-							const diasMora = cuotasAtrasadas * 30;
+							// Días REALES de atraso: los de la cuota vencida más antigua.
+							// Los manda cartera-back en `diasAtrasoMoraMaximo`, calculados en
+							// el mismo paso y con el mismo filtro de elegibilidad que el monto
+							// proporcional, así que el número y la plata no se contradicen.
+							// Este es además el que ordena la lista de cobranza.
+							const diasMora = diasMoraDeListado(credito.diasAtrasoMoraMaximo);
 
 							// Monto en mora REAL: usamos moras_credito.monto_mora (capital × 1.12% ×
 							// cuotas) que /getAllCredits ya trae en `mora`, para que coincida con el
@@ -1643,7 +1682,8 @@ export const cobrosRouter = {
 							// el mismo que muestra la Ficha 360: un crédito mandado a
 							// recuperación está en B4 aunque tenga 2 cuotas atrasadas. Las
 							// cuotas solo cuentan si cartera no mandó bucket (crédito que el
-							// motor nunca vio).
+							// motor nunca vio). Nunca sale de los días: `diasMora` (arriba)
+							// es el atraso real y no mueve el bucket.
 							let estadoMora: string | null = null;
 							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
 							else
@@ -4583,8 +4623,15 @@ export const cobrosRouter = {
 							// COMPLETO como el ABONO PARCIAL pending (una cuota futura con
 							// Q450 abonados no estaba en ninguna lista); el mapper distingue
 							// por `pago_pagado`. Una cartera vieja no manda la lista y todo
-							// sigue.
-							...(creditoCompleto.cuotasEnValidacion || []).map((c: any) => ({
+							// sigue. Merge con develop: la lista de COBROS-02 viaja como
+							// `cuotasConPagoEnValidacion` (develop ocupó `cuotasEnValidacion`
+							// para otra cosa, que lee carteraFront); la vieja queda de respaldo
+							// para un cartera que todavía no se redesplegó.
+							...(
+								creditoCompleto.cuotasConPagoEnValidacion ??
+								creditoCompleto.cuotasEnValidacion ??
+								[]
+							).map((c: any) => ({
 								...c,
 								en_validacion: true,
 							})),
@@ -4823,9 +4870,25 @@ export const cobrosRouter = {
 			return contrato[0] || null;
 		}),
 
+	// Proyección de mora del mes en curso de un crédito (tarjeta del caso de
+	// cobros). Mismo acceso que el detalle de abajo: cualquiera que pueda ver el
+	// caso puede ver cuánto va a deber. El número llega tal cual lo devuelve el
+	// detalle (`numeroCreditoSifco`), así que acá no hay UUID que resolver.
+	getProyeccionMoraCarteraBack: cobrosProcedure
+		.input(z.object({ numeroSifco: z.string().min(1) }))
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con Cartera-Back no está habilitada",
+				});
+			}
+			return carteraBackClient.getProyeccionMora(input.numeroSifco);
+		}),
+
 	// Obtener detalles de un crédito desde Cartera-Back
 	// Usa el endpoint directo /credito y combina con datos del CRM (vehículo, caso de cobros)
 	getDetallesCreditoCarteraBack: cobrosProcedure
+		.meta({ audit: { entity: "opportunity", action: "create" } })
 		.input(
 			z.object({
 				creditoId: z.string(), // credito_id como string numérico
@@ -4992,6 +5055,7 @@ export const cobrosRouter = {
 						oportunidadCuotaMensual: opportunities.cuotaMensual,
 						oportunidadDiaPago: opportunities.diaPagoMensual,
 						oportunidadCreditType: opportunities.creditType,
+						oportunidadInsuranceProvider: opportunities.insuranceProvider,
 						// Datos del vehículo
 						vehiculoMarca: vehicles.make,
 						vehiculoModelo: vehicles.model,
@@ -5028,10 +5092,12 @@ export const cobrosRouter = {
 				} | null = null;
 
 				let vehicleId: string | null = null;
+				let insuranceProvider: string | null = null;
 
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
 					vehicleId = opp.vehicleId;
+					insuranceProvider = opp.oportunidadInsuranceProvider;
 					vehiculo = {
 						make: opp.vehiculoMarca,
 						model: opp.vehiculoModelo,
@@ -5109,9 +5175,9 @@ export const cobrosRouter = {
 					}
 
 					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
-					const diasMora = calcularDiasMoraExactos(
+					const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
 						creditoCompleto.cuotasAtrasadas || [],
-					);
+					));
 					const montoEnMora = creditoCompleto.moraActual
 						? Number(creditoCompleto.moraActual)
 						: 0;
@@ -5160,12 +5226,17 @@ export const cobrosRouter = {
 				);
 
 				// 6. Mapear datos correctamente
-				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
+				// `cuotasAtrasadas` viene de cartera como filas del leftJoin cuota-pago
+				// (una cuota con dos filas de pago aparece dos veces): contar por
+				// numero_cuota único, no por filas.
+				const cuotasAtrasadas = contarCuotasAtrasadasUnicas(
+					creditoCompleto.cuotasAtrasadas ?? [],
+				);
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
-				const diasMora = calcularDiasMoraExactos(
+				const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
 					creditoCompleto.cuotasAtrasadas || [],
-				);
+				));
 				const montoEnMora = Number(creditoCompleto.moraActual ?? 0);
 
 				const tieneMoraActiva = creditoCompleto.mora != null;
@@ -5224,6 +5295,53 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
+					// Lo abonado a la mora de las cuotas atrasadas, separado por origen:
+					// condonar baja la mora igual que pagar, pero no es plata que entró.
+					moraPagada: creditoCompleto.moraPagada,
+					moraCondonada: creditoCompleto.moraCondonada,
+					// Mora proporcional (misma fórmula que procesarMoras en cartera-back)
+					// para el recordatorio del día de pago: {expectativaMoraDiaria} es lo
+					// que suma cada día de atraso (1/30 del cargo mensual) y
+					// {expectativaMora} el tope de la cuota (el cargo mensual completo,
+					// capital × 1.12%). Vacíos si el estado está excluido de mora
+					// (EN_CONVENIO, INCOBRABLE, etc.) o no hay capital, igual que el job.
+					expectativaMora: calcularExpectativaMora(
+						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
+					),
+					expectativaMoraDiaria: calcularExpectativaMoraDiaria(
+						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
+					),
+					// {incrementoDiarioMora} de las plantillas de mora: lo que crece
+					// este crédito por día — 1/30 del cargo mensual por CADA cuota
+					// vencida que aún no llegó a su techo de 30 días. No es
+					// expectativaMoraDiaria (esa es una sola cuota): lo calcula
+					// cartera-back, que es el único que conoce los días de cada cuota.
+					// "" cuando ya no crece (todas topadas) o el estado está excluido.
+					incrementoDiarioMora: formatearIncrementoMora(
+						creditoCompleto.incrementoDiarioMora,
+					),
+					// Y su techo: lo máximo que esa mora puede subir en un mes. El
+					// ritmo sin tope promete un crecimiento infinito; las dos
+					// cifras juntas son el estándar de la plantilla del día de pago.
+					incrementoMaximoMensualMora: formatearIncrementoMora(
+						creditoCompleto.incrementoMaximoMensualMora,
+					),
+					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
+					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
+					// abonado, misma regla de cobertura que cartera — + mora. "" si no
+					// hay cuotas vencidas. En INCOBRABLE solo cuenta el recibo base del
+					// castigo (las cuotas históricas quedan anuladas).
+					montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
+						creditoCompleto.cuotasAtrasadas ?? [],
+						cuotaMensual,
+						montoEnMora,
+						statusCredit,
+					),
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad (Universales o G&T).
+					...seguroPorAseguradora(insuranceProvider),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: convenioActivoData
@@ -6461,65 +6579,7 @@ export const cobrosRouter = {
 					input.numeroSifco,
 				);
 
-				// Combinar todas las cuotas
-				const todasCuotas = [
-					...(creditoData.cuotasPagadas || []),
-					...(creditoData.cuotasPendientes || []),
-					...(creditoData.cuotasAtrasadas || []),
-				];
-
-				return {
-					creditoId: creditoData.credito.credito_id,
-					numeroSifco: creditoData.credito.numero_credito_sifco,
-					fechaCreacion: creditoData.credito.fecha_creacion,
-					capital: creditoData.credito.capital,
-					porcentajeInteres: creditoData.credito.porcentaje_interes,
-					deudaTotal: creditoData.credito.deudatotal,
-					cuota: creditoData.credito.cuota,
-					plazo: creditoData.credito.plazo,
-					statusCredit: creditoData.credito.statusCredit,
-					observaciones: creditoData.credito.observaciones,
-					// Cliente
-					usuario: {
-						usuarioId: creditoData.usuario.usuario_id,
-						nombre: creditoData.usuario.nombre,
-						nit: creditoData.usuario.nit,
-						categoria: creditoData.usuario.categoria,
-						saldoAFavor: creditoData.usuario.saldo_a_favor,
-					},
-					// Asesor (devuelto por endpoint /credito)
-					asesor: creditoData.asesor
-						? {
-								asesor_id: creditoData.asesor.asesor_id,
-								nombre: creditoData.asesor.nombre,
-								telefono: creditoData.asesor.telefono,
-								activo: creditoData.asesor.activo,
-								emailCashIn: creditoData.asesor.emailCashIn,
-							}
-						: null,
-					// Cuotas
-					cuotas: todasCuotas.map((cuota) => ({
-						cuotaId: cuota.cuota_id,
-						numeroCuota: cuota.numero_cuota,
-						fechaVencimiento: cuota.fecha_vencimiento,
-						pagado: cuota.pagado,
-					})),
-					// Moras (no disponible en endpoint /credito)
-					moras: [],
-					// Inversionistas (no disponible en endpoint /credito)
-					inversionistas: [],
-					// Calculated fields
-					cuotasPagadas: creditoData.cuotasPagadas?.length || 0,
-					cuotasPendientes: creditoData.cuotasPendientes?.length || 0,
-					capitalRestante: null, // No disponible en endpoint /credito
-					interesRestante: null, // No disponible en endpoint /credito
-					totalRestante: null, // No disponible en endpoint /credito
-					diasMora: creditoData.cuotasAtrasadas?.length
-						? creditoData.cuotasAtrasadas.length * 30
-						: 0,
-					montoMora: creditoData.moraActual, // ya es string
-					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
-				};
+				return buildCasoFromCartera(creditoData);
 			} catch (error) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,
@@ -6633,6 +6693,7 @@ export const cobrosRouter = {
 							: (inv.banco ?? null),
 						tipoCuenta: inv.tipo_cuenta ?? null,
 						numeroCuenta: inv.numero_cuenta ?? null,
+						dpiRepLegal: inv.dpi_rep_legal ?? null,
 						moneda: inv.moneda ?? "quetzales",
 						celular: inv.celular ?? null,
 						status: inv.status ?? null,
@@ -7176,6 +7237,23 @@ export const cobrosRouter = {
 				});
 			}
 
+			const cuerpoBase = input.cuerpoEditado?.trim()
+				? input.cuerpoEditado
+				: plantilla.cuerpo;
+
+			// La plantilla del impuesto no se envía después del 31/07: pediría el
+			// comprobante antes de una fecha ya vencida. Pasado el corte los
+			// asesores editan el mensaje (sin las variables del impuesto) o
+			// contactan personalmente.
+			if (
+				cuerpoUsaFechaLimiteImpuesto(cuerpoBase) &&
+				fechaLimiteImpuestoVencida()
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La fecha límite del impuesto de circulación (${fechaLimiteImpuestoCirculacion()}) ya venció; edite el mensaje o contacte a los clientes directamente.`,
+				});
+			}
+
 			// Scope server-side: solo supervisores/admins pueden ver toda la
 			// cartera; el resto queda restringido a sus propios créditos.
 			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
@@ -7391,6 +7469,7 @@ export const cobrosRouter = {
 				marca: string | null;
 				modelo: string | null;
 				year: number | null;
+				insuranceProvider: string | null;
 			};
 			const locales = new Map<string, LocalInfo>();
 			const casoIdPorSifco = new Map<string, string>();
@@ -7404,6 +7483,7 @@ export const cobrosRouter = {
 						marca: vehicles.make,
 						modelo: vehicles.model,
 						year: vehicles.year,
+						insuranceProvider: opportunities.insuranceProvider,
 					})
 					.from(opportunities)
 					.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -7418,6 +7498,7 @@ export const cobrosRouter = {
 						marca: row.marca,
 						modelo: row.modelo,
 						year: row.year,
+						insuranceProvider: row.insuranceProvider,
 					});
 				}
 
@@ -7442,6 +7523,7 @@ export const cobrosRouter = {
 						marca: prev?.marca ?? null,
 						modelo: prev?.modelo ?? null,
 						year: prev?.year ?? null,
+						insuranceProvider: prev?.insuranceProvider ?? null,
 					});
 					casoIdPorSifco.set(row.numeroSifco, row.id);
 				}
@@ -7477,6 +7559,87 @@ export const cobrosRouter = {
 				clienteNombre: string | null;
 				motivo: string;
 			}> = [];
+
+			// 4.b Monto adeudado real por crédito, SOLO si la plantilla lo usa
+			// ({montoAdeudado}: notificaciones de 1 y de 2-3 cuotas, aviso
+			// jurídico). Ni mora + cuota ni el conteo del job × cuota sirven: la
+			// cuota puede tener abonos parciales (registerPayment deja esas filas
+			// con pagado=false y el job solo excluye cuotas con un pago
+			// pagado=true) o ser un recibo recortado menor a la cuota. Se trae el
+			// detalle de cada crédito elegible y se calcula igual que el modal
+			// individual (calcularMontoAdeudadoDesdeCuotas). null = detalle no
+			// disponible.
+			// Guarda monto y conteo de cuotas del MISMO detalle: el conteo del job
+			// (`mora.cuotas_atrasadas`) puede diferir — una cuota cubierta por una
+			// boleta aún sin validar sale de `cuotasAtrasadas` pero el job la sigue
+			// contando — y el mensaje diría "2 cuotas" con el monto de una.
+			const detallePorSifco = new Map<
+				string,
+				{
+					montoAdeudado: string;
+					cuotasAtraso: number;
+					incrementoDiarioMora: string;
+					incrementoMaximoMensualMora: string;
+				} | null
+			>();
+			// Las tres variables salen del MISMO detalle de cartera-back, así que
+			// la carga se dispara con cualquiera de ellas. El incremento diario y
+			// su techo se ofrecen como variables insertables por su cuenta en el
+			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
+			// plantilla editada que use únicamente una de ellas se quedaría sin
+			// detalle y la cláusula desaparecería en silencio.
+			if (
+				cuerpoBase.includes("{montoAdeudado}") ||
+				cuerpoBase.includes("{incrementoDiarioMora}") ||
+				cuerpoBase.includes("{incrementoMaximoMensualMora}")
+			) {
+				const sifcosElegibles = creditosFiltrados
+					.filter(
+						(c) =>
+							c.creditos.cuota &&
+							Number(c.creditos.cuota) !== 0 &&
+							c.asesores &&
+							locales.get(c.creditos.numero_credito_sifco ?? "")?.telefono,
+					)
+					.map((c) => c.creditos.numero_credito_sifco)
+					.filter((s): s is string => !!s);
+				const CONCURRENCIA_DETALLE = 5;
+				for (let i = 0; i < sifcosElegibles.length; i += CONCURRENCIA_DETALLE) {
+					await Promise.all(
+						sifcosElegibles
+							.slice(i, i + CONCURRENCIA_DETALLE)
+							.map(async (s) => {
+								try {
+									const detalle = await carteraBackClient.getCredito(s);
+									const cuotasDetalle = detalle.cuotasAtrasadas ?? [];
+									detallePorSifco.set(s, {
+										montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
+											cuotasDetalle,
+											detalle.credito.cuota,
+											detalle.moraActual ?? 0,
+											detalle.credito.statusCredit,
+										),
+										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+										// Del MISMO detalle que el monto: lo que ese saldo
+										// crece por día (ver {incrementoDiarioMora}).
+										incrementoDiarioMora: formatearIncrementoMora(
+											detalle.incrementoDiarioMora,
+										),
+										incrementoMaximoMensualMora: formatearIncrementoMora(
+											detalle.incrementoMaximoMensualMora,
+										),
+									});
+								} catch (err) {
+									console.error(
+										`[cobros-masivo] sin detalle de cartera para ${s}:`,
+										err,
+									);
+									detallePorSifco.set(s, null);
+								}
+							}),
+					);
+				}
+			}
 
 			for (const credito of creditosFiltrados) {
 				const sifco = credito.creditos.numero_credito_sifco;
@@ -7520,14 +7683,6 @@ export const cobrosRouter = {
 					.join(" ")
 					.trim();
 
-				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
-				// que se muestra en la pantalla de detalle del caso).
-				const montoMora = Number(credito.mora?.monto_mora ?? 0);
-				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
-
-				const cuerpoBase = input.cuerpoEditado?.trim()
-					? input.cuerpoEditado
-					: plantilla.cuerpo;
 				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
 					cuerpoBase,
 					asesor.telefono,
@@ -7538,6 +7693,63 @@ export const cobrosRouter = {
 						numeroSifco: sifco,
 						clienteNombre,
 						motivo: telefonoAsesor.motivo,
+					});
+					continue;
+				}
+
+				// Si el cuerpo usa {expectativaMoraDiaria} o {expectativaMora} y el
+				// crédito no genera mora (sin capital válido, o en estado que el job
+				// excluye: EN_CONVENIO, INCOBRABLE, etc.), se descarta en vez de
+				// anunciar un recargo que jamás se va a asignar.
+				const expectativaMora = prepararExpectativaMoraParaEnvio(
+					cuerpoBase,
+					credito.creditos.capital,
+					credito.creditos.statusCredit,
+				);
+
+				if (!expectativaMora.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: expectativaMora.motivo,
+					});
+					continue;
+				}
+
+				// Si el cuerpo usa {montoAdeudado}, el monto viene del detalle de
+				// cartera (ver 4.b); sin él se descarta antes que mandar "Q." o un
+				// monto inflado.
+				const detalleCartera = detallePorSifco.get(sifco ?? "");
+				const adeudado = prepararMontoAdeudadoParaEnvio(
+					cuerpoBase,
+					detalleCartera?.montoAdeudado,
+				);
+				if (!adeudado.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: adeudado.motivo,
+					});
+					continue;
+				}
+
+				// La cláusula incorporada del aumento desaparece sola al interpolar
+				// cuando no hay nada que anunciar, pero el modal ofrece
+				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
+				// variables SUELTAS: una plantilla editada a mano ("El saldo aumenta
+				// Q{incrementoDiarioMora} diario") sobrevive al borrado y, sin el
+				// dato, le llegaría al cliente "El saldo aumenta Q diario". Un
+				// mensaje roto es peor que no mandarlo.
+				const incremento = prepararIncrementoMoraParaEnvio(
+					cuerpoBase,
+					detalleCartera?.incrementoDiarioMora,
+					detalleCartera?.incrementoMaximoMensualMora,
+				);
+				if (!incremento.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: incremento.motivo,
 					});
 					continue;
 				}
@@ -7554,29 +7766,47 @@ export const cobrosRouter = {
 						) || null
 					: null;
 
+				// {montoMora}: recargo por mora que ya trae /getAllCredits.
+				const montoMoraJob = Number(credito.mora?.monto_mora ?? 0);
+
 				const mensaje = interpolarPlantilla(cuerpoBase, {
 					clienteNombre: credito.usuarios.nombre ?? "",
 					fechaPago: diaPago ? String(diaPago) : "",
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,
-					montoAdeudado:
-						totalACobrar > 0
-							? totalACobrar.toLocaleString("es-GT", {
-									minimumFractionDigits: 2,
-									maximumFractionDigits: 2,
-								})
-							: "",
+					// Saldo real de las cuotas vencidas + mora (detalle de cartera, ver
+					// 4.b); "" cuando la plantilla no lo usa.
+					montoAdeudado: adeudado.montoAdeudado,
+					// SOLO el recargo por mora (COBROS-02, {montoMora}): el del job.
 					montoMora:
-						montoMora > 0
-							? montoMora.toLocaleString("es-GT", {
+						montoMoraJob > 0
+							? montoMoraJob.toLocaleString("es-GT", {
 									minimumFractionDigits: 2,
 									maximumFractionDigits: 2,
 								})
 							: "",
-					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
+					// Del mismo detalle que el monto (ver 4.b) para que el conteo y el
+					// monto hablen de las mismas cuotas; sin detalle, el del job.
+					cuotasAtraso:
+						detalleCartera?.cuotasAtraso ?? credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
+					expectativaMora: expectativaMora.expectativaMora,
+					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
+					// Cuánto crece por día el saldo que el mensaje acaba de anunciar
+					// (mismo detalle, ver 4.b), ya pasado por el gate de arriba.
+					// Vacío es legítimo cuando el crédito no crece (todas sus cuotas
+					// en el techo de 30 días): la cláusula incorporada se borra sola
+					// al interpolar. Lo que el gate no deja pasar es un placeholder
+					// suelto sin dato, que dejaría el hueco a la vista.
+					incrementoDiarioMora: incremento.incrementoDiarioMora,
+					// Su techo, del mismo detalle. Vacío = la frase se queda solo
+					// con el ritmo, corta pero sana.
+					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad de cada crédito (Universales o G&T).
+					...seguroPorAseguradora(info?.insuranceProvider),
 				});
 
 				candidatos.push({
@@ -7972,6 +8202,22 @@ export const cobrosRouter = {
 				fecha: input?.fecha,
 				asesores: input?.asesores,
 			});
+		}),
+
+	getCierreMoraOficial: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				periodo: z.string().regex(/^\d{4}-\d{2}-01$/),
+				asesores: z.array(z.number()).optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			return carteraBackClient.getCierreMoraOficial(input);
 		}),
 
 	getMoraCobradaPorAsesor: cobrosSupervisorProcedure

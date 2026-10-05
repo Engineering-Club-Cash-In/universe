@@ -51,7 +51,12 @@ function archivosTs(dir: string): string[] {
 	return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
 		const ruta = join(dir, e.name);
 		if (e.isDirectory()) return archivosTs(ruta);
-		return /\.tsx?$/.test(e.name) ? [ruta] : [];
+		// Las pruebas no entran al bundle (Vite sale de main.tsx y el Dockerfile
+		// solo corre `build`): una prueba de la web puede importar del servidor
+		// lo que no se copia sin romper la imagen.
+		return /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)
+			? [ruta]
+			: [];
 	});
 }
 

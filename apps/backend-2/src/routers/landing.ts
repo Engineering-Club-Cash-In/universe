@@ -135,7 +135,9 @@ const landingRouter = new Elysia({
     }
   )
   .get("/poll-credit-records", async () => {
-    pollCreditRecords();
+    pollCreditRecords().catch((error) => {
+      console.error("Error polling credit records:", error);
+    });
     return {
       success: true,
       message: "Started polling credit records",

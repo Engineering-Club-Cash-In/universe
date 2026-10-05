@@ -20,6 +20,7 @@
     uuid,
     jsonb,
     smallint,
+    type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -55,6 +56,12 @@
     "reinversion_variable",
     "reinversion_excedente",
     "reinversion_combinada"
+  ]);
+
+  export const tipoCompraEnum = customSchema.enum("tipo_compra", [
+    "nueva_posicion",
+    "ampliacion_posicion",
+    "sin_clasificar",
   ]);
 
   export const statusInversionistaEnum = customSchema.enum("status_inversionista", [
@@ -255,6 +262,13 @@
     // true = crédito solo-interés: la cuota cubre interés + IVA + seguro + GPS +
     // membresía, sin amortizar capital. El capital se paga vía abonos/pago final.
     no_amortiza_capital: boolean("no_amortiza_capital").notNull().default(false),
+    // true = el crédito no se ofrece en el buscador de asignación de capital:
+    // getCreditCandidates lo descarta y el modo manual de addInvestorToCredit lo
+    // rechaza indicando el motivo.
+    // OJO: no es un bloqueo total de entrada de inversionistas. replaceInvestorCredit,
+    // migrateInvestor y mirrorInvestor NO consultan este flag (igual que tampoco
+    // consultan estado_devolucion), así que por esas rutas sí puede entrar capital.
+    excluir_compras: boolean("excluir_compras").notNull().default(false),
     // FK opcional a la aseguradora que cubre este crédito.
     // Se resuelve con LEFT JOIN en getAllCredits → campo `aseguradora` en la respuesta.
     aseguradora_id: integer("aseguradora_id").references(() => aseguradoras.id, {
@@ -283,6 +297,49 @@
   }, (table) => ({
     idxCreditoCreated: index("idx_historial_credito_created").on(table.credito_id, table.created_at),
   }));
+
+  // 🧾 Ingreso adicional (sin capital) por elegir un día de pago recomendado
+  // por IA que cae después del día que el sistema hubiera asignado por
+  // default (día≤20→15, día>20→30). Se calcula una vez en el CRM al cerrar la
+  // oportunidad (ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).
+  // 1 fila por crédito, solo cuando el ajuste realmente aplica.
+  //
+  // Solo insertPayment (registerPayment.ts) sabe leer y marcar esta tabla —
+  // si la cuota 1 se liquida por un flujo alterno (carga masiva Excel,
+  // convenio de pago) el ajuste queda fecha_cobro=NULL sin alerta. Pendiente:
+  // reporte de "ajustes NULL con cuota 1 ya pagada" para detectarlos.
+  export const ajuste_fecha_ideal_pago = customSchema.table(
+    "ajuste_fecha_ideal_pago",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      dia_pago_original_sistema: integer("dia_pago_original_sistema").notNull(),
+      dia_pago_mensual_elegido: integer("dia_pago_mensual_elegido").notNull(),
+      dias_diferencia: integer("dias_diferencia").notNull(),
+      dias_del_mes: integer("dias_del_mes").notNull(),
+      monto_interes: numeric("monto_interes", { precision: 18, scale: 2 }).notNull(),
+      monto_membresia: numeric("monto_membresia", { precision: 18, scale: 2 }).notNull(),
+      monto_servicios: numeric("monto_servicios", { precision: 18, scale: 2 }).notNull(),
+      monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
+      // NULL = pendiente de cobrar. Se llena cuando registerPayment lo aplica
+      // de verdad como "otros" en el pago de la cuota 1 (ver insertPayment en
+      // controllers/registerPayment.ts). Evita cobrarlo dos veces.
+      fecha_cobro: timestamp("fecha_cobro", { withTimezone: true }),
+      // Qué fila de pagos_credito llevó el "otros" con el ajuste — permite que
+      // reversePayment.ts sepa con precisión si el pago que se está revirtiendo
+      // es el que lo cobró, y en ese caso resetear fecha_cobro/pago_id a NULL.
+      // Se llena junto con fecha_cobro; NULL mientras esté pendiente.
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      uqCredito: uniqueIndex("uq_ajuste_fecha_ideal_pago_credito").on(table.credito_id),
+    }),
+  );
 
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
@@ -362,6 +419,66 @@
     })
   );
 
+  // Cierre financiero oficial e inmutable. El Excel aprobado se consolida
+  // antes de persistir: una fila por asesor y período.
+  export const cierre_mora_oficial = customSchema.table(
+    "cierre_mora_oficial",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(),
+      asesor_id: integer("asesor_id")
+        .notNull()
+        .references(() => asesores.asesor_id),
+      asesor_nombre: text("asesor_nombre").notNull(),
+      capital_cierre: numeric("capital_cierre", { precision: 18, scale: 2 }).notNull(),
+      capital_mora_30: numeric("capital_mora_30", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_60: numeric("capital_mora_60", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_90: numeric("capital_mora_90", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_120: numeric("capital_mora_120", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      cantidad_mora_30: integer("cantidad_mora_30").notNull().default(0),
+      cantidad_mora_60: integer("cantidad_mora_60").notNull().default(0),
+      cantidad_mora_90: integer("cantidad_mora_90").notNull().default(0),
+      cantidad_mora_120: integer("cantidad_mora_120").notNull().default(0),
+      fecha_corte: timestamp("fecha_corte", { withTimezone: true }).notNull(),
+      regla_version: text("regla_version").notNull(),
+      porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+        .notNull()
+        .default("1.12"),
+      fuente: text("fuente").notNull(),
+      fuente_hash: text("fuente_hash").notNull(),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoAsesor: uniqueIndex("cierre_mora_oficial_periodo_asesor_unique").on(
+        table.periodo,
+        table.asesor_id,
+      ),
+    }),
+  );
+
+  /**
+   * Nombre del índice único parcial que garantiza UNA sola mora activa por
+   * crédito.
+   *
+   * Vive como constante y no como literal suelto porque el código que atrapa
+   * el 23505 de este índice (ver `procesarMoras` en `controllers/latefee.ts`)
+   * tiene que comparar contra el MISMO nombre: `pg` expone el nombre del
+   * índice violado en `error.constraint`, y si el literal del `catch` y el de
+   * la definición se separaran, el `catch` dejaría de reconocer la carrera
+   * benigna —o, peor, absorbería la violación de otra restricción—.
+   */
+  export const MORAS_CREDITO_UQ_ACTIVA = "moras_credito_uq_activa";
+
   export const moras_credito = customSchema.table(
     "moras_credito",
     {
@@ -385,7 +502,7 @@
       // Garantiza UNA sola mora activa por crédito. Bloquea a nivel BD la
       // condición de carrera de procesarMoras corriendo en paralelo (varias
       // réplicas) que insertaba filas activa=true duplicadas e inflaba el total.
-      uniqueIndex("moras_credito_uq_activa")
+      uniqueIndex(MORAS_CREDITO_UQ_ACTIVA)
         .on(t.credito_id)
         .where(sql`${t.activa} = true`),
     ]
@@ -451,6 +568,64 @@
     fecha: timestamp("fecha").defaultNow().notNull(),
   });
 
+  // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
+  export type MoraPagadaTipo = "PAGO" | "CONDONACION" | "REVERSA" | "ANULACION";
+
+  export const MORA_PAGADA_CUOTA_UQ_PAGO = "mora_pagada_cuota_uq_pago";
+  export const MORA_PAGADA_CUOTA_UQ_REVIERTE = "mora_pagada_cuota_uq_revierte";
+
+  export const mora_pagada_cuota = customSchema.table(
+    "mora_pagada_cuota",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      cuota_id: integer("cuota_id")
+        .notNull()
+        .references(() => cuotas_credito.cuota_id, { onDelete: "cascade" }),
+      // SIN llave foránea, igual que en la migración 0043: el registro tiene
+      // que sobrevivir al pago revertido (ver la nota de la migración).
+      pago_id: integer("pago_id"),
+      // 6 decimales: ver la nota de 0043 (restos de redondeo por cuota).
+      monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
+      tipo: text("tipo").notNull(),
+      // FK a la misma tabla, igual que en 0043: una compensatoria siempre
+      // apunta a una fila real.
+      revierte_a: integer("revierte_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      // reemplaza_a apunta a la fila PAGO anterior (compensada por revierte_a) cuando
+      // reversePayment reutiliza pago_id del mismo (pago_id, cuota_id). Ver migración 0043.
+      reemplaza_a: integer("reemplaza_a").references((): AnyPgColumn => mora_pagada_cuota.id),
+      usuario_id: integer("usuario_id"),
+      motivo: text("motivo"),
+      fecha: timestamp("fecha")
+        .default(sql`clock_timestamp()`)
+        .notNull(),
+    },
+    (table) => [
+      // Impide doble clic: el mismo pago no puede registrar mora dos veces en la misma cuota.
+      // Sin este índice un race condition genera dos filas duplicadas y el saldo de mora se dobla.
+      // El COALESCE(reemplaza_a, 0) permite que filas compensadas (reemplaza_a = id anterior)
+      // y filas nuevas (reemplaza_a = NULL → 0) tengan claves distintas. Ver migración 0043.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_PAGO)
+        .on(table.pago_id, table.cuota_id, sql`COALESCE(${table.reemplaza_a}, 0)`)
+        .where(sql`${table.tipo} = 'PAGO'`),
+
+      // Impide revertir dos veces: una fila compensatoria puede apuntar a UNA sola original.
+      uniqueIndex(MORA_PAGADA_CUOTA_UQ_REVIERTE)
+        .on(table.revierte_a)
+        .where(sql`${table.revierte_a} IS NOT NULL`),
+
+      // Buscar por cuota: snapshot de mora por crédito y cuota.
+      index("mora_pagada_cuota_idx_cuota").on(table.credito_id, table.cuota_id),
+
+      // Buscar por pago: listar qué mora registró un pago específico.
+      index("mora_pagada_cuota_idx_pago").on(table.pago_id).where(
+        sql`${table.pago_id} IS NOT NULL`
+      ),
+    ]
+  );
+
   export const moraEventoTipoEnum = customSchema.enum("mora_evento_tipo", [
     "CREACION",
     "RECALCULO",
@@ -489,10 +664,16 @@
     usuario_id: integer("usuario_id")
       .references(() => platform_users.id, { onDelete: "set null" }),
     motivo: text("motivo"),
+    // Qué pago causó este movimiento de mora. Anulable: hay movimientos que no
+    // vienen de ningún pago (recálculo del cron, condonación, ajuste manual).
+    // SIN FK a propósito: la reversa borra filas de pagos_credito; con FK el SET NULL
+    // borraría el vínculo justo cuando se necesita para auditar.
+    pago_id: integer("pago_id"),
     fecha: timestamp("fecha").defaultNow().notNull(),
   }, (table) => [
     index("moras_historial_credito_idx").on(table.credito_id),
     index("moras_historial_fecha_idx").on(table.fecha),
+    index("moras_historial_idx_pago").on(table.pago_id).where(sql`${table.pago_id} IS NOT NULL`),
   ]);
 
   // ============================================================
@@ -1078,6 +1259,15 @@
     seguro_facturado: numeric("seguro_facturado", { precision: 18, scale: 2 }), //viene del credito
     gps_facturado: numeric("gps_facturado", { precision: 18, scale: 2 }), //viene del credito
     reserva: numeric("reserva", { precision: 18, scale: 2 }), //seguro + 600
+  /**
+   * Cuánto acreditó ESTA fila a `usuarios.saldo_a_favor`.
+   *
+   * NULL = fila anterior a la migración 0039; la reversa cae en su conducta
+   * vieja para ésas. No se deriva de las otras columnas: en un pago mixto el
+   * disponible inicial se consume después en mora, rubros y cuotas, y sólo se
+   * acredita el remanente final.
+   */
+  saldo_a_favor_acreditado: numeric("saldo_a_favor_acreditado", { precision: 18, scale: 2 }).default("0"),
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
@@ -1095,6 +1285,7 @@
       banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
     numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }),
     registerBy:varchar("registerby",{length:150}).notNull(),
+    nexaPaymentEventId: integer("nexa_payment_event_id"),
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
@@ -1117,7 +1308,48 @@
     ),
   }, (t) => [
     index("pagos_credito_pagalo_import_idx").on(t.pagalo_import_id),
+    index("idx_pagos_credito_cuota").on(t.cuota_id),
   ]);
+  export const nexa_credit_bindings = customSchema.table("nexa_credit_bindings", {
+    credito_id: integer("credito_id")
+      .primaryKey()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    activo: boolean("activo").notNull().default(true),
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+    max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  });
+  export const nexa_payment_nonces = customSchema.table("nexa_payment_nonces", {
+    nonce: varchar("nonce", { length: 150 }).primaryKey(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  });
+  export const nexa_payment_events = customSchema.table(
+    "nexa_payment_events",
+    {
+      id: serial("id").primaryKey(),
+      provider: varchar("provider", { length: 20 }).notNull().default("NEXA"),
+      external_reference: varchar("external_reference", { length: 150 }).notNull(),
+      nonce: varchar("nonce", { length: 150 }).notNull(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+      amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+      currency: varchar("currency", { length: 3 }).notNull(),
+      payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
+      status: varchar("status", { length: 20 }).notNull().default("processing"),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id),
+      error: text("error"),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(
+        table.provider,
+        table.external_reference,
+      ),
+      uqNonce: uniqueIndex("uq_nexa_payment_events_nonce").on(table.nonce),
+    }),
+  );
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")
@@ -1222,6 +1454,25 @@
   // monto_aportado del espejo (que ya incluye lo que el inversionista
   // tenía antes en el crédito).
   // ====================================================================
+  /**
+   * Avisos al CRM de "compra aceptada" que no llegaron: se reintentan solos
+   * (ver src/controllers/bateriasCrmPendientes.ts).
+   */
+  export const baterias_crm_pendientes = customSchema.table(
+    "baterias_crm_pendientes",
+    {
+      id: serial("id").primaryKey(),
+      inversionista_id: integer("inversionista_id").notNull(),
+      payload: jsonb("payload").notNull(),
+      intentos: integer("intentos").notNull().default(0),
+      ultimo_error: text("ultimo_error"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+      enviado_at: timestamp("enviado_at", { withTimezone: true }),
+    },
+  );
+
   export const compras_credito_inversionista = customSchema.table(
     "compras_credito_inversionista",
     {
@@ -1242,6 +1493,27 @@
       modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
       modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
         .references(() => modalidad_facturacion_spread.id),
+      // Liquidación que originó esta fila, cuando la creó la reinversión
+      // automática del paso 6. Es la única señal de procedencia: por tipo_operacion
+      // no se distingue una reinversión automática de una reubicación manual
+      // (manualReassignInvestor usa "reinversion" por defecto), y por fecha
+      // tampoco, porque las reubicaciones ocurren al día siguiente del corte.
+      // Marca de intento revertido. revertirComprasUltimaLiquidacion deja la
+      // fila como "completado" para que no figure pendiente, así que sin esto
+      // un intento revertido y su reemplazo se suman los dos y una reinversión
+      // de Q100 bien colocada se lee como Q200.
+      revertida_at: timestamp("revertida_at", { withTimezone: true }),
+      liquidacion_id: integer("liquidacion_id").references(
+        () => liquidaciones.liquidacion_id,
+        { onDelete: "set null" },
+      ),
+      tipo_compra: tipoCompraEnum("tipo_compra")
+        .notNull()
+        .default("sin_clasificar"),
+      // Cargada en el modo manual: así se vuelve a meter una compra que se cayó
+      // porque el inversionista tardó en pagar. Sus contratos jurídico ya los
+      // hizo, así que al aceptarla no se le abre batería en el CRM.
+      origen_manual: boolean("origen_manual").notNull().default(false),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),
@@ -1358,7 +1630,6 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
@@ -1371,6 +1642,74 @@
       ),
       // 🆕 Índice para búsquedas por liquidación
       liquidacionIdx: index("idx_pagos_liquidacion").on(table.liquidacion_id),
+    })
+  );
+
+  /**
+   * 🔒 Reparto de interés CONGELADO en el momento de facturar.
+   *
+   * Un pago PARCIAL no crea filas en `pagos_credito_inversionistas` (el reparto
+   * real se escribe hasta que la cuota se completa), así que tanto el reporte
+   * como el cierre lo derivan del roster VIVO de `creditos_inversionistas`. Si el
+   * roster cambia después de facturar (reinversión, compra de cartera), el mismo
+   * pago se reparte distinto — pero la factura ya emitida no cambia.
+   *
+   * Esta tabla guarda el reparto tal como se calculó el día de la facturación: el
+   * reporte lo muestra en vez de re-simular, y `insertPagosCreditoInversionistasV2`
+   * lo usa al cerrar la cuota en vez de recalcular. Incluye a CUBE para poder
+   * congelar el reparto completo.
+   */
+  export const pagos_credito_inversionistas_facturado = customSchema.table(
+    "pagos_credito_inversionistas_facturado",
+    {
+      id: serial("id").primaryKey(),
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id),
+
+      // Reparto congelado (lo que se facturó ese día)
+      abono_interes: numeric("abono_interes", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      abono_iva_12: numeric("abono_iva_12", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+
+      // Roster con el que se calculó, para auditar la fila sin adivinar
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 })
+        .notNull()
+        .default("0"),
+      porcentaje_participacion: numeric("porcentaje_participacion", {
+        precision: 18,
+        scale: 10,
+      })
+        .notNull()
+        .default("0"),
+      porcentaje_cash_in: numeric("porcentaje_cash_in", {
+        precision: 18,
+        scale: 10,
+      })
+        .notNull()
+        .default("0"),
+
+      // Su interés se redirigió a CUBE al facturar (bandera_reinversion + espejo
+      // pendiente) → el reporte NO debe mostrar su fila.
+      redirigido_a_cube: boolean("redirigido_a_cube").notNull().default(false),
+
+      created_at: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+      uniquePagoInversionista: unique("uq_pcif_pago_inversionista").on(
+        table.pago_id,
+        table.inversionista_id
+      ),
+      pagoIdx: index("ix_pcif_pago_id").on(table.pago_id),
     })
   );
 
@@ -1440,7 +1779,6 @@
         { onDelete: "set null" }
       ),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
@@ -1453,6 +1791,18 @@
       liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
         table.liquidacion_id
       ),
+      // draftPaymentsGuard.ts (checkCreditHasUnliquidatedDrafts /
+      // checkInvestorHasUnliquidatedDrafts) y getAllCredits (credits.ts,
+      // tiene_pagos_sin_liquidar) filtran por credito_id/inversionista_id +
+      // estado_liquidacion != 'LIQUIDADO'. Parcial: las filas LIQUIDADO
+      // crecen sin límite y nunca las consulta este patrón.
+      // Migración manual: drizzle/0035_idx_pagos_espejo_credito_no_liquidado.sql
+      creditoNoLiquidadoIdx: index("ix_pcie_credito_no_liquidado")
+        .on(table.credito_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
+      inversionistaNoLiquidadoIdx: index("ix_pcie_inversionista_no_liquidado")
+        .on(table.inversionista_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
     })
   );
   export const bancos = customSchema.table('bancos', {
@@ -1515,6 +1865,12 @@
     dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
     celular: varchar("celular", { length: 100 }),
     status: statusInversionistaEnum("status").notNull().default("activo"),
+    // Id de la cuenta de auth-google que creó esta fila desde el registro del
+    // portal (migración 0034). NULL en todo lo demás: carteraFront, el CRM y
+    // las importaciones no la escriben, y las filas anteriores a la columna se
+    // quedan así a propósito. Es la única prueba de que un registro del portal
+    // creó la fila, y por tanto de que puede reclamarla al reintentar.
+    creado_por_usuario_portal: text("creado_por_usuario_portal"),
   });
 
   export const cuentas_extra_inversionista = customSchema.table(
@@ -2317,14 +2673,26 @@
       // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.93, solo ISR).
       // Las liquidaciones viejas quedan en false = fórmula bruta original.
       descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
 
       // Reinversión
       reinversion_capital: numeric("reinversion_capital", { precision: 18, scale: 2 }).notNull().default("0"),
       reinversion_interes: numeric("reinversion_interes", { precision: 18, scale: 2 }).notNull().default("0"),
       reinversion_total: numeric("reinversion_total", { precision: 18, scale: 2 }).notNull().default("0"),
 
-      // Reporte de liquidación (Excel/PDF)
+      // Reporte de liquidación (Excel/PDF) en la moneda del inversionista
       reporte_liquidacion_url: text("reporte_liquidacion_url"),
+
+      // Mismo reporte expresado en quetzales. Solo se llena para inversionistas
+      // en dólares: es la copia que contabilidad usa para cuadrar contra la DB
+      // (que guarda todos los totales de esta tabla en Q). Los inversionistas en
+      // quetzales lo dejan nulo — su reporte principal ya está en Q.
+      reporte_liquidacion_url_gtq: text("reporte_liquidacion_url_gtq"),
+
+      // Tipo de cambio con el que se generó el reporte en dólares. Se guarda
+      // para que el reporte siga siendo reproducible cuando la tasa cambie.
+      tipo_cambio_reporte: numeric("tipo_cambio_reporte", { precision: 10, scale: 4 }),
 
       // Fecha
       fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })
@@ -2417,8 +2785,43 @@
     visible: boolean("visible").notNull().default(false),
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: varchar("created_by", { length: 250 }),
+
+    // ── Contratos de inversión emitidos desde el CRM ──
+    // Nulas en toda la papelería que se sube a mano, que es casi todo lo que hay
+    // acá. Sólo las llena el CRM cuando la fila ES un contrato: así el portal y
+    // la ficha siguen leyendo la misma tabla de siempre, y la pantalla de
+    // contratos filtra por `contrato_id`.
+
+    /** Id del contrato en el CRM. Sin FK: es otra base. */
+    contrato_id: varchar("contrato_id", { length: 64 }),
+    tipo_contrato: varchar("tipo_contrato", { length: 120 }),
+    weetrust_document_id: varchar("weetrust_document_id", { length: 120 }),
+    /**
+     * Enlace de observador: muestra el documento y cómo va la firma, sin dejar
+     * firmar. Es el único que se le puede pasar a alguien para que mire.
+     */
+    observer_url: text("observer_url"),
+    /**
+     * Quién firma, con su rol, su enlace y su estado.
+     *
+     * Va como JSON y no en columnas fijas (cliente / representante) porque el
+     * reparto por posición ya falló: en cuanto hay un firmante más, el enlace
+     * rotulado "representante" es el de otra persona.
+     */
+    firmantes: jsonb("firmantes"),
+    /** "pending" | "signed" | "cancelled", como lo dice el CRM. */
+    estado_firma: varchar("estado_firma", { length: 20 }),
+    /** Cuándo el CRM actualizó por última vez el estado de firma. */
+    actualizado_at: timestamp("actualizado_at"),
   }, (table) => ({
     inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
+    // Un contrato del CRM ocupa una sola fila: el espejo se vuelve a mandar cada
+    // vez que alguien firma y no puede ir dejando copias.
+    contratoUx: uniqueIndex("ux_docs_inversionista_contrato")
+      .on(table.contrato_id)
+      // Parcial: la papelería que se sube a mano no tiene contrato, y sin esto
+      // sólo podría haber una fila sin contrato en toda la tabla.
+      .where(sql`${table.contrato_id} is not null`),
   }));
 
   // ========================================
@@ -2497,7 +2900,16 @@
     {
       id: serial("id").primaryKey(),
       monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      // Fecha DECLARADA del período: la liquidación puede recibirla explícita y
+      // ser retroactiva, así que no dice cuándo se tomó realmente la foto.
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+      // Cuándo se insertó esta fila de verdad. Lo pone el default de la base, no
+      // la aplicación, así que no se puede pasar retroactivo ni reescribir. Es
+      // el único anclaje fiable al instante en que la foto se tomó: sin él hay
+      // que inferirlo buscando movimientos del espejo cuyo saldo coincida, y esa
+      // búsqueda puede acertarle a una transacción anterior que dejó los mismos
+      // montos. NULL en las filas anteriores a la migración 0033.
+      registrado_at: timestamp("registrado_at", { withTimezone: true }).defaultNow(),
       inversionista_id: integer("inversionista_id")
         .notNull()
         .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
@@ -2506,6 +2918,10 @@
         .references(() => creditos.credito_id, { onDelete: "cascade" }),
       liquidacion_id: integer("liquidacion_id")
         .references(() => liquidaciones.liquidacion_id, { onDelete: "set null" }),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
+      capital_liquidado: numeric("capital_liquidado", { precision: 18, scale: 8 }),
+      capital_restante: numeric("capital_restante", { precision: 18, scale: 8 }),
     },
     (t) => ({
       ixInvCred: index("ix_historico_liq_inv_cred").on(t.inversionista_id, t.credito_id),
@@ -2536,7 +2952,7 @@
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   });
 
-  // ── Historial de cambios de monto_aportado en creditos_inversionistas_espejo ──
+  // ── Historial compartido de monto_aportado (filtrar siempre por origen) ──
   export const historico_monto_aportado_espejo = customSchema.table(
     "historico_monto_aportado_espejo",
     {
@@ -2550,12 +2966,20 @@
       platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
       user_email: varchar("user_email", { length: 200 }),
       source: text("source").notNull().default("unknown"),
+      motivo: text("motivo"),
+      origen: text("origen").notNull().default("ESPEJO"),
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
     },
     (t) => ({
       ixTxid:   index("ix_hist_mont_txid").on(t.txid),
       ixCred:   index("ix_hist_mont_cred").on(t.credito_id, t.inversionista_id),
       ixFecha:  index("ix_hist_mont_fecha").on(t.fecha),
+      ixOrigenCredFecha: index("ix_hist_mont_origen_cred_fecha").on(
+        t.origen,
+        t.credito_id,
+        t.inversionista_id,
+        t.fecha,
+      ),
     })
   );
 
@@ -2597,3 +3021,237 @@
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
+
+  // ============================================================
+  // verificacion_liquidacion
+  // ------------------------------------------------------------
+  // Snapshot del cuadre de cada liquidación del mes. El job corre el 11, 12 y
+  // 13 a las 08:00 GT y solo toma las liquidaciones que todavía no cuadran:
+  // una fila por liquidación (UNIQUE), que se reescribe en cada reintento.
+  //
+  // Ecuación verificada (montos, no créditos — mover capital entre créditos es
+  // una operación válida y no debe alertar):
+  //
+  //   espejo − compras_no_absorbidas == historico + reinversion_total
+  //
+  // `detalle` guarda cómo estaban los créditos, las compras y el histórico en
+  // el momento de la verificación, para poder reconstruir el caso después.
+  // ============================================================
+  export const verificacion_liquidacion = customSchema.table(
+    "verificacion_liquidacion",
+    {
+      id: serial("id").primaryKey(),
+
+      // Una fila por liquidación: el reintento del 12 y 13 actualiza la misma.
+      liquidacion_id: integer("liquidacion_id")
+        .notNull()
+        .unique()
+        .references(() => liquidaciones.liquidacion_id, { onDelete: "cascade" }),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id),
+
+      // Período liquidado, "YYYY-MM" en hora Guatemala.
+      periodo: varchar("periodo", { length: 7 }).notNull(),
+
+      // Lados de la ecuación, tal como se leyeron en la verificación.
+      espejo: numeric("espejo", { precision: 18, scale: 8 }).notNull(),
+      historico: numeric("historico", { precision: 18, scale: 8 }).notNull(),
+      reinversion_total: numeric("reinversion_total", { precision: 18, scale: 2 }).notNull(),
+      compras_no_absorbidas: numeric("compras_no_absorbidas", { precision: 18, scale: 8 })
+        .notNull()
+        .default("0"),
+      descuadre: numeric("descuadre", { precision: 18, scale: 8 }).notNull(),
+
+      cuadra: boolean("cuadra").notNull(),
+      intentos: integer("intentos").notNull().default(1),
+
+      // Foto de créditos, compras e histórico al momento de verificar.
+      detalle: jsonb("detalle"),
+
+      primera_verificacion_at: timestamp("primera_verificacion_at", { withTimezone: true })
+        .defaultNow()
+        .notNull(),
+      verificado_at: timestamp("verificado_at", { withTimezone: true })
+        .defaultNow()
+        .notNull(),
+      notificado_at: timestamp("notificado_at", { withTimezone: true }),
+    },
+    (t) => ({
+      idx_verif_periodo: index("idx_verif_liquidacion_periodo").on(t.periodo, t.cuadra),
+      idx_verif_inv: index("idx_verif_liquidacion_inv").on(t.inversionista_id),
+    })
+  );
+
+  // ---------------------------------------------------------------------
+  // Rubros: cobros adicionales por crédito (ej. tarjeta de circulación) que
+  // se consumen del disponible de cada pago.
+  //
+  // El TIPO define la naturaleza del cobro —si es obligatorio o no—; el rubro
+  // sólo guarda el caso concreto (a qué crédito, por cuánto, con qué saldo).
+  // No hay periodicidad ni activación programada: un rubro se cobra desde que
+  // se crea, y cuando se salda se puede volver a crear el mismo concepto.
+  // ---------------------------------------------------------------------
+
+  // `customSchema.enum` y no `pgEnum`: la migración los crea como
+  // `cartera.rubro_evento` / `cartera.rubro_origen`, y `pgEnum` los declararía
+  // en `public`. No cambia el runtime (el INSERT que emite drizzle no lleva
+  // cast), pero dejaba a schema.ts describiendo objetos distintos a los que la
+  // base tiene — y `drizzle-kit generate` emitiendo un CREATE TYPE en el schema
+  // equivocado. Mismo patrón que el resto de enums de `cartera` del archivo.
+  export const rubroEventoEnum = customSchema.enum("rubro_evento", [
+    "creacion",
+    "edicion_monto",
+    "edicion",
+    "abono",
+    "activacion",
+    "desactivacion",
+    "reversa",
+    // Un rubro cargado por error no se borra ni se edita a 0 (un rubro de Q0 no
+    // es un rubro): se ANULA. La fila sobrevive con su `monto_original` intacto
+    // —el rastro de cuánto se había llegado a cobrar— y este evento es el que
+    // explica por qué dejó de cobrarse y quién lo decidió.
+    "anulacion",
+  ]);
+
+  // `asesor` está separado de `admin` porque el alta de rubros dejó de ser
+  // ADMIN-only: sin ese valor, el historial —que existe para responder "¿quién
+  // le cobró esto al cliente?"— marcaba "admin" todo lo que daba de alta un
+  // asesor, y la pregunta se volvía irrespondible desde la tabla.
+  export const rubroOrigenEnum = customSchema.enum("rubro_origen", [
+    "admin",
+    "asesor",
+    "job",
+    "pago",
+    "reversa",
+  ]);
+
+  export const rubros_tipos = customSchema.table(
+    "rubros_tipos",
+    {
+      tipo_id: serial("tipo_id").primaryKey(),
+      nombre: text("nombre").notNull(),
+      descripcion: text("descripcion"),
+      // La naturaleza del cobro vive acá, no en cada rubro: "tarjeta de
+      // circulación" ES obligatoria siempre, y quien da de alta el rubro elige
+      // el concepto, no si ese concepto puede saltarse los frenos de mora.
+      obligatorio: boolean("obligatorio").notNull().default(false),
+      activo: boolean("activo").notNull().default(true),
+      created_by: integer("created_by").references(() => platform_users.id),
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("rubros_tipos_uq_nombre_activo")
+        .on(sql`lower(${t.nombre})`)
+        .where(sql`${t.activo} = true`),
+    ]
+  );
+
+  export const rubros = customSchema.table(
+    "rubros",
+    {
+      rubro_id: serial("rubro_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      tipo_id: integer("tipo_id")
+        .notNull()
+        .references(() => rubros_tipos.tipo_id),
+      // NOT NULL: el tipo dice QUÉ se cobra, la descripción dice POR QUÉ este
+      // crédito en particular. Sin ella el historial no explica el cobro.
+      descripcion: text("descripcion").notNull(),
+      monto_original: numeric("monto_original", { precision: 18, scale: 2 }).notNull(),
+      saldo_pendiente: numeric("saldo_pendiente", { precision: 18, scale: 2 }).notNull(),
+      activo: boolean("activo").notNull().default(true),
+      completado: boolean("completado").notNull().default(false),
+      // Anulado NO se deduce del saldo: anulado y pagado quedan los dos en cero
+      // y son hechos distintos. Es el único flag de esta tabla no derivable.
+      anulado: boolean("anulado").notNull().default(false),
+      created_by: integer("created_by").references(() => platform_users.id),
+      // created_at define el orden de consumo.
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_credito_activo_idx").on(t.credito_id, t.activo),
+      // Acá vivía `rubros_uq_credito_tipo_vivo`, un índice único parcial sobre
+      // (credito_id, tipo_id) con `completado = false AND anulado = false`. La 0038 lo
+      // borra, y esta declaración se va CON ella: dejarla sería peor que no
+      // haber migrado, porque cualquier entorno aprovisionado o sincronizado
+      // desde este esquema volvería a crear el índice y a reventar la reversa
+      // —que es exactamente el escenario que la 0038 viene a arreglar—, sin que
+      // la migración diera ninguna señal de que el problema volvió.
+      //
+      // El motivo de fondo está en la 0038: la exclusividad de "un solo cobro
+      // vivo por concepto" sigue existiendo, pero como regla de ALTA
+      // (`crearRubro`, y al revivir por edición), no como invariante permanente
+      // de la base. Tras una reversa legítima hay DE VERDAD dos deudas del
+      // mismo tipo —la del año pasado que volvió y la de este año—, y ninguna
+      // restricción de base puede distinguir ese caso de un duplicado.
+    ]
+  );
+
+  export const rubros_historial = customSchema.table(
+    "rubros_historial",
+    {
+      historial_id: serial("historial_id").primaryKey(),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id, { onDelete: "cascade" }),
+      tipo_evento: rubroEventoEnum("tipo_evento").notNull(),
+      monto_anterior: numeric("monto_anterior", { precision: 18, scale: 2 }),
+      monto_nuevo: numeric("monto_nuevo", { precision: 18, scale: 2 }),
+      saldo_anterior: numeric("saldo_anterior", { precision: 18, scale: 2 }),
+      saldo_nuevo: numeric("saldo_nuevo", { precision: 18, scale: 2 }),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      usuario_id: integer("usuario_id").references(() => platform_users.id),
+      origen: rubroOrigenEnum("origen").notNull(),
+      motivo: text("motivo"),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_historial_rubro_idx").on(t.rubro_id, t.created_at),
+      index("rubros_historial_pago_idx").on(t.pago_id),
+    ]
+  );
+
+  /**
+   * El vínculo boleta ↔ rubro (migración 0037).
+   *
+   * El pago corre en dos etapas: `POST /newPayment` sólo APARTA (escribe el
+   * reclamo con `aplicado = false` y NO toca `rubros.saldo_pendiente`) y
+   * `/aplicar-pago` es el que baja el saldo cuando contabilidad valida. Esta
+   * tabla es donde vive lo apartado mientras tanto, y por lo mismo es la que
+   * contesta "¿este rubro tiene reclamos vivos?" — la pregunta que congela su
+   * edición y que hace imposible que al aplicar el saldo ya no alcance.
+   */
+  export const rubros_pagos = customSchema.table(
+    "rubros_pagos",
+    {
+      id: serial("id").primaryKey(),
+      // CASCADE: la reversa de un parcial BORRA la fila de pagos_credito, y un
+      // reclamo huérfano congelaría el rubro para siempre. La reversa procesa
+      // los reclamos antes de ese borrado; la cascada es la red, no el camino.
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id),
+      // Lo APARTADO al registrar la boleta.
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      // Lo REALMENTE descontado al aplicar. Nullable a propósito: un 0 sería
+      // indistinguible de "se aplicó y no descontó nada".
+      monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }),
+      aplicado: boolean("aplicado").notNull().default(false),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_pagos_pago_idx").on(t.pago_id),
+      // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
+      index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
+    ]
+  );

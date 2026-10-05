@@ -8,7 +8,9 @@ import {
   eliminarCreditos,
   actualizarCuotasInversionistas,
 } from "../controllers/recalculateFromJson";
+import { wasJsonTerminalEmitted } from "../controllers/recalculateFromJsonTelemetry";
 import { authMiddleware } from "./midleware";
+import { emitRouterFailure } from "./recalculateFromJsonTelemetry";
 
 // ========================================
 // SCHEMA PARA VALIDACIÓN
@@ -66,7 +68,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
     "/from-json",
     async ({ body, set }) => {
       try {
-        console.log(`\n📥 Recibiendo ${body.creditos.length} créditos agrupados...`);
 
         const resultado = await recalcularCreditosDesdeJson(body.creditos);
 
@@ -76,7 +77,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/from-json:", error);
+        emitRouterFailure("recalculate");
         set.status = 500;
         return {
           success: false,
@@ -107,11 +108,9 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
     "/from-flat-json",
     async ({ body, set }) => {
       try {
-        console.log(`\n📥 Recibiendo ${body.creditos.length} créditos (plano)...`);
 
         // Agrupar por número base
         const creditosAgrupados = agruparCreditosPorNumeroBase(body.creditos);
-        console.log(`📊 Agrupados en ${creditosAgrupados.length} créditos únicos`);
 
         const resultado = await recalcularCreditosDesdeJson(creditosAgrupados);
 
@@ -121,7 +120,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/from-flat-json:", error);
+        emitRouterFailure("recalculate");
         set.status = 500;
         return {
           success: false,
@@ -160,7 +159,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
           };
         }
 
-        console.log(`\n📂 Leyendo archivo: ${filePath}`);
 
         // Leer el archivo JSON
         const contenido = fs.readFileSync(filePath, "utf-8");
@@ -193,7 +191,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
           };
         }
 
-        console.log(`📊 Créditos a procesar: ${creditosAgrupados.length}`);
 
         const resultado = await recalcularCreditosDesdeJson(creditosAgrupados);
 
@@ -203,7 +200,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/from-file:", error);
+        emitRouterFailure("recalculate");
         set.status = 500;
         return {
           success: false,
@@ -233,8 +230,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
       try {
         const { numeroCredito, inversionistas } = body;
 
-        console.log(`\n📋 Recalculando crédito: ${numeroCredito}`);
-        console.log(`   Inversionistas: ${inversionistas.length}`);
 
         // Construir el formato esperado
         const creditoAgrupado = {
@@ -261,7 +256,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/single:", error);
+        emitRouterFailure("recalculate");
         set.status = 500;
         return {
           success: false,
@@ -313,11 +308,9 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
           return { success: false, error: `Archivo no encontrado: ${rutaArchivo}` };
         }
 
-        console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
         const contenido = fs.readFileSync(rutaArchivo, "utf-8");
         const pools = JSON.parse(contenido);
 
-        console.log(`📥 ${pools.length} pools raros encontrados`);
         const resultado = await processPoolsRaros(pools);
 
         if (!resultado.success) {
@@ -326,7 +319,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/pools-raros-file:", error);
+        if (!wasJsonTerminalEmitted(error)) emitRouterFailure("process_pools");
         set.status = 500;
         return {
           success: false,
@@ -348,7 +341,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
     "/pools-raros",
     async ({ body, set }) => {
       try {
-        console.log(`\n📥 Recibiendo ${body.pools.length} pools raros...`);
 
         const resultado = await processPoolsRaros(body.pools);
 
@@ -358,7 +350,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/pools-raros:", error);
+        if (!wasJsonTerminalEmitted(error)) emitRouterFailure("process_pools");
         set.status = 500;
         return {
           success: false,
@@ -387,7 +379,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
     "/eliminar-creditos",
     async ({ body, set }) => {
       try {
-        console.log(`\n📥 Eliminando ${body.creditos.length} créditos...`);
 
         const resultado = await eliminarCreditos(body.creditos);
 
@@ -397,7 +388,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/eliminar-creditos:", error);
+        emitRouterFailure("delete_credits");
         set.status = 500;
         return {
           success: false,
@@ -433,7 +424,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
           return { success: false, error: `Archivo no encontrado: ${rutaArchivo}` };
         }
 
-        console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
         const contenido = fs.readFileSync(rutaArchivo, "utf-8");
         const data = JSON.parse(contenido);
 
@@ -442,7 +432,6 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
           (g: any) => g.inversionistasActuales?.some((inv: any) => inv.cuota)
         );
 
-        console.log(`📥 ${data.length} créditos en archivo, ${creditosConCuotas.length} con cuotas en inversionistasActuales`);
 
         const resultado = await actualizarCuotasInversionistas(creditosConCuotas);
 
@@ -452,7 +441,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
 
         return resultado;
       } catch (error: any) {
-        console.error("❌ Error en /recalculate/actualizar-cuotas:", error);
+        emitRouterFailure("update_investor_installments");
         set.status = 500;
         return {
           success: false,

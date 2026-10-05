@@ -20,7 +20,7 @@ const mockCreditSchema = z.object({
 });
 
 export function createAdminRouter(deps: {
-  internalApiKey: string;
+  adminApiKey: string;
   nexa: NexaClient;
   cartera: CarteraPaymentClient;
   paymentTokens: PaymentTokenRepository;
@@ -38,7 +38,7 @@ export function createAdminRouter(deps: {
 
   router.use("/*", async (c, next) => {
     const token = c.req.header("Authorization")?.replace("Bearer ", "").trim();
-    if (token !== deps.internalApiKey) {
+    if (token !== deps.adminApiKey) {
       return c.json({ error: "Unauthorized" }, 401);
     }
     await next();
@@ -85,7 +85,20 @@ export function createAdminRouter(deps: {
   });
 
   router.get("/transactions", async (c) => {
-    return c.json({ transactions: await deps.transactions.list() });
+    return c.json({ transactions: await deps.transactions.listReconciliation() });
+  });
+
+  router.get("/reconciliation", async (c) => {
+    const transactions = await deps.transactions.listReconciliation();
+    if (c.req.query("format") !== "csv") return c.json({ transactions });
+    const columns = [
+      "reference", "token", "creditoId", "carteraPaymentId", "amount", "processingStatus", "attemptCount",
+      "reviewAttemptCount", "failureReason", "createdAt", "updatedAt", "nextAttemptAt", "reviewNextAttemptAt",
+    ] as const;
+    const csv = [columns.join(","), ...transactions.map((row) => columns.map((column) => csvCell(row[column])).join(","))].join("\r\n");
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", 'attachment; filename="nexa-reconciliation.csv"');
+    return c.body(csv);
   });
 
   router.get("/mock-credits", async (c) => {
@@ -111,4 +124,9 @@ export function createAdminRouter(deps: {
   });
 
   return router;
+}
+
+function csvCell(value: unknown) {
+  const text = value instanceof Date ? value.toISOString() : value == null ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }

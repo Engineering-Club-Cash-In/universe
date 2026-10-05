@@ -2,12 +2,17 @@ import { ORPCError, os } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { partnerAccounts } from "../db/schema/partners";
+import { type AuditMeta, auditMiddleware } from "./audit";
 import type { Context } from "./context";
-import { PERMISSIONS } from "./roles";
+import { resolvePartnerScope } from "./partner-scope";
+import { PERMISSIONS, ROLES } from "./roles";
 
-export const o = os.$context<Context>();
+export const o = os.$context<Context>().$meta<AuditMeta>({});
 
-export const publicProcedure = o;
+// Todo procedure pasa por acá; el middleware solo actúa en los que declaran
+// `.meta({ audit })` (ver lib/audit.ts).
+export const publicProcedure = o.use(auditMiddleware);
 
 const requireAuth = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
@@ -60,6 +65,34 @@ const requireCrmAccess = o.middleware(async ({ context, next }) => {
 
 	if (!PERMISSIONS.canAccessClients(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+// control de acceso — el backend tiene que exigir lo mismo que la UI.
+const requireCrmOnlyAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessCRM(userRole)) {
+		throw new ORPCError("FORBIDDEN", { message: "CRM role required" });
 	}
 
 	return next({
@@ -583,6 +616,34 @@ const requireVehicleAccess = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireViewInvestorContracts = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canViewInvestorContracts(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No se pueden ver los contratos de inversionistas",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -639,9 +700,83 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 	});
 });
 
+// Socios externos (predios/agencias). Exige una sesión emitida por la instancia
+// de partner-auth: una sesión del CRM nunca sirve aquí, ni al revés.
+async function contextoDeSocio(context: Context) {
+	if (!context.partnerSession?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.partnerSession.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (userRole !== ROLES.PARTNER) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere rol de predio/agencia",
+		});
+	}
+
+	// Suspender a un socio no revoca sus sesiones, y esta instancia no lleva el
+	// plugin admin que lo verificaría: sin este chequeo seguiría leyendo hasta
+	// que la sesión expire.
+	if (userData[0]?.banned) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Esta cuenta está suspendida",
+		});
+	}
+
+	// No se rechaza aquí por companyIds vacío: getPartnerAgencies/
+	// getPartnerPasswordStatus/changePartnerPassword (identity) deben seguir
+	// funcionando para que el socio pueda ver su estado y cambiar su contraseña
+	// aunque nadie le haya asignado una agencia todavía. Solo requirePartnerAccess
+	// (los datos del tracker) exige companyIds no vacío.
+	const companyIds = await resolvePartnerScope(userId);
+
+	const [partnerAccount] = await db
+		.select({ passwordChangedAt: partnerAccounts.passwordChangedAt })
+		.from(partnerAccounts)
+		.where(eq(partnerAccounts.userId, userId))
+		.limit(1);
+
+	return {
+		partnerSession: context.partnerSession,
+		user: userData[0],
+		userId,
+		userRole,
+		companyIds,
+		partnerAccount,
+	};
+}
+
+const requirePartnerIdentity = o.middleware(async ({ context, next }) => {
+	return next({ context: await contextoDeSocio(context) });
+});
+
+const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+	const partnerContext = await contextoDeSocio(context);
+	if (partnerContext.companyIds.length === 0) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "El usuario no tiene ninguna agencia asignada",
+		});
+	}
+	if (!partnerContext.partnerAccount?.passwordChangedAt) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Debes cambiar tu contrasena antes de continuar",
+		});
+	}
+
+	return next({ context: partnerContext });
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
+export const crmOnlyProcedure = publicProcedure.use(requireCrmOnlyAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
 export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
 export const crmCobrosOrInvestmentsProcedure = publicProcedure.use(
@@ -655,7 +790,9 @@ export const cobrosSupervisorProcedure = publicProcedure.use(
 export const closedCreditsReportProcedure = publicProcedure.use(
 	requireClosedCreditsReport,
 );
-export const cobranzaReportProcedure = publicProcedure.use(requireCobranzaReport);
+export const cobranzaReportProcedure = publicProcedure.use(
+	requireCobranzaReport,
+);
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,
 );
@@ -672,6 +809,9 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,
 );
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
+export const viewInvestorContractsProcedure = publicProcedure.use(
+	requireViewInvestorContracts,
+);
 export const tallerProcedure = publicProcedure.use(requireTallerAccess);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
 export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);
@@ -679,3 +819,7 @@ export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,
 );
+export const partnerIdentityProcedure = publicProcedure.use(
+	requirePartnerIdentity,
+);
+export const partnerProcedure = publicProcedure.use(requirePartnerAccess);

@@ -42,7 +42,8 @@ type ParticipacionTotals = {
 	cuotasInvalidas: number;
 };
 
-type MontoACobrarViewRow = {
+export type MontoACobrarViewRow = {
+	cuotas: number;
 	capital: number;
 	interesIva: number;
 	servicios: number;
@@ -52,9 +53,18 @@ type MontoACobrarViewRow = {
 	capitalCube: number;
 	interesIvaInv: number;
 	interesIvaCube: number;
+	facturacion: number;
 	totalMora: number;
 	total: number;
 };
+
+export function dateRangeIncludesMonth(
+	fechaInicio: string,
+	fechaFin: string,
+	month: string,
+): boolean {
+	return fechaInicio <= `${month}-31` && fechaFin >= `${month}-01`;
+}
 
 const emptyRow = (bucket: string): MontoACobrarParticipacionRow => ({
 	bucket,
@@ -115,6 +125,19 @@ export function fillMissingMontoACobrarPeriods(
 	return dates.map((date) => rows.get(toKey(date)) ?? emptyRow(toKey(date)));
 }
 
+export function applyOfficialMonthlyMora(
+	rows: MontoACobrarParticipacionRow[],
+	operationalMonth: string,
+	expected: string | undefined,
+) {
+	if (expected === undefined) return rows;
+	return rows.map((row) =>
+		row.bucket.slice(0, 7) === operationalMonth
+			? { ...row, total_mora: expected }
+			: row,
+	);
+}
+
 export function getMontoACobrarViewRow(
 	row: MontoACobrarParticipacionRow,
 	acumulado: boolean,
@@ -130,8 +153,13 @@ export function getMontoACobrarViewRow(
 		value(row.total_seguro, row.acum_total_seguro) +
 		value(row.total_gps, row.acum_total_gps);
 	const membresias = value(row.total_membresias, row.acum_total_membresias);
+	const interesIvaCube = value(
+		row.interes_iva_cube_participacion_actual,
+		row.acum_interes_iva_cube_participacion_actual,
+	);
 
 	return {
+		cuotas: acumulado ? row.mora_count : row.cuotas_count,
 		capital,
 		interesIva,
 		servicios,
@@ -152,10 +180,8 @@ export function getMontoACobrarViewRow(
 			row.interes_iva_inv_participacion_actual,
 			row.acum_interes_iva_inv_participacion_actual,
 		),
-		interesIvaCube: value(
-			row.interes_iva_cube_participacion_actual,
-			row.acum_interes_iva_cube_participacion_actual,
-		),
+		interesIvaCube,
+		facturacion: interesIvaCube + membresias + servicios,
 		totalMora: numeric(row.total_mora),
 		total: capital + interesIva + servicios + membresias,
 	};
@@ -177,7 +203,9 @@ export function getMontoACobrarParticipacionTotals(
 	>,
 	acumulado: boolean,
 ): ParticipacionTotals {
-	const last = rows.findLast((row) => row.cuotas_count > 0);
+	const last = acumulado
+		? rows.at(-1)
+		: rows.findLast((row) => row.cuotas_count > 0);
 	const numeric = (value: string) => Number.parseFloat(value) || 0;
 	const creditosInvalidosRango = rows.find(
 		(row) => row.creditos_participacion_invalida_rango !== undefined,

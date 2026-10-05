@@ -33,12 +33,15 @@ import type {
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
 	CarteraDecidirConvenioResultado,
+	CarteraCreditoOperativoSat,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
 	CarteraSifcosPoolAutoritativosResponse,
 	CarteraStatsResponse,
 	CarteraUsuario,
+	ConsultaMoraRequest,
+	ConsultaMoraResponse,
 	CreateBoletaInput,
 	CreateConvenioInput,
 	CreateCreditoInput,
@@ -50,6 +53,7 @@ import type {
 	CreditoDirectoResponse,
 	DecidirConvenioInput,
 	EstadoPagoCartera,
+	ProyeccionMoraMesResponse,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -85,6 +89,7 @@ import type {
 	ResultadoTraslado,
 	SolicitudTraslado,
 } from "../types/traslados-cobros";
+import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	getCarteraAccessToken,
 	invalidateAndReauth,
@@ -291,11 +296,249 @@ export class CarteraBackHttpError extends Error {
 	}
 }
 
+/**
+ * Corte de la consulta de mora.
+ *
+ * El gate corre delante de seis puntos donde alguien está esperando en una
+ * pantalla, así que el corte lo manda esa espera y no la suma de los timeouts
+ * de la cadena: cartera-back ya acota a 20s sus llamadas a SIFCO, y si el core
+ * tarda más que esto, para el asesor es una caída — que es exactamente lo que
+ * el fail-closed responde.
+ */
+const CONSULTA_MORA_TIMEOUT_DEFAULT_MS = 12000;
+
+/**
+ * Techo del valor configurable: 10 minutos.
+ *
+ * 🔴 No es una preferencia de producto sino una cota técnica.
+ * `AbortSignal.timeout` acepta como máximo un entero sin signo de 64 bits
+ * (`2^64 - 1` ms); pasado eso lanza `TypeError`. Un `1e30` en la variable de
+ * entorno atraviesa "finito y positivo" y hace estallar TODAS las llamadas del
+ * gate en runtime, antes de cualquier fail-closed. Y un presupuesto de minutos
+ * ya no es un timeout para alguien esperando en pantalla: cualquier cosa por
+ * encima de este techo es una errata, no una intención.
+ */
+const CONSULTA_MORA_TIMEOUT_MAX_MS = 600000;
+
+/**
+ * 🔴 Se valida que sea finito y positivo, no solo `parseInt`. Un valor no
+ * numérico en la variable de entorno daba `NaN`, y `AbortSignal.timeout(NaN)`
+ * lanza: una errata en la configuración tumbaba los ocho puntos del gate a la
+ * vez, y lo hacía en el arranque de cada llamada, sin pasar por el fail-closed.
+ *
+ * Por la misma razón se valida el techo (ver `CONSULTA_MORA_TIMEOUT_MAX_MS`):
+ * un número absurdamente grande pasaba la validación de arriba y llegaba igual
+ * de lejos.
+ */
+export function leerTimeoutConsultaMora(crudo: string | undefined): number {
+	if (crudo === undefined || crudo.trim() === "") {
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	const valor = Number(crudo);
+	if (!Number.isFinite(valor) || valor <= 0) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT inválido (${crudo}); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	if (valor > CONSULTA_MORA_TIMEOUT_MAX_MS) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT fuera de rango (${crudo}; máximo ${CONSULTA_MORA_TIMEOUT_MAX_MS}ms); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	return valor;
+}
+
+/**
+ * Corre `tarea` con un presupuesto que cubre TODO lo que hay entre la llamada y
+ * la respuesta, autenticación incluida.
+ *
+ * 🔴 El `AbortSignal.timeout` de `request()` NO alcanza: se arma DESPUÉS de
+ * esperar el token, y `getCarteraAccessToken()` no recibe señal alguna. Con el
+ * auth de cartera colgado, la promesa de la consulta quedaba pendiente para
+ * siempre —el reloj del fetch nunca llegaba a arrancar— y el asesor se quedaba
+ * con la pantalla girando sin fail-closed que lo rescatara. Este presupuesto
+ * envuelve la llamada completa, así que el techo se respeta pase lo que pase.
+ *
+ * El `clearTimeout` en el `finally` es lo que evita dejar el temporizador vivo
+ * cuando la tarea gana la carrera. La tarea perdedora sigue su curso en
+ * segundo plano (no hay cómo cancelar el auth); lo que no sigue es la espera.
+ */
+export async function conPresupuestoConsultaMora<T>(
+	presupuestoMs: number,
+	tarea: (
+		senalVencimiento: AbortSignal,
+		restanteMs: () => number,
+	) => Promise<T>,
+): Promise<T> {
+	const arranque = Date.now();
+	// Cuánto le queda al presupuesto AHORA. Se expone porque los pasos de
+	// adentro (el fetch) arrancan su propio reloj más tarde y necesitan caber en
+	// lo que sobra, no volver a pedir el presupuesto entero. Ver
+	// `cotaFetchConsultaMora`.
+	const restanteMs = () => presupuestoMs - (Date.now() - arranque);
+	let temporizador: ReturnType<typeof setTimeout> | undefined;
+	// La señal viaja hasta el fetch de `request()`: al vencerse el presupuesto
+	// no solo se suelta la espera — la tarea perdedora que siga corriendo (el
+	// auth no es cancelable) encuentra la señal ya abortada y NO dispara el
+	// viaje a cartera cuando el token por fin llegue. Sin esto, cada intento
+	// vencido durante una caída del auth quedaba en cola y descargaba una
+	// ráfaga de consultas inútiles sobre el core al recuperarse.
+	const control = new AbortController();
+
+	const vencimiento = new Promise<never>((_, rechazar) => {
+		temporizador = setTimeout(() => {
+			control.abort();
+			rechazar(
+				new ConsultaMoraNoDisponibleError(
+					`La consulta de mora no respondió en ${presupuestoMs}ms`,
+					// No hay fallo original que guardar: nadie falló, se acabó el
+					// tiempo. El mensaje ya dice todo lo que el log necesita.
+					null,
+				),
+			);
+		}, presupuestoMs);
+	});
+
+	try {
+		return await Promise.race([tarea(control.signal, restanteMs), vencimiento]);
+	} finally {
+		clearTimeout(temporizador);
+	}
+}
+
+/**
+ * Lo que el fetch le cede al presupuesto externo para llegar primero. Medio
+ * segundo alcanza de sobra para que el `AbortSignal.timeout` del fetch dispare,
+ * se propague el `TimeoutError` y el breaker lo cuente, antes de que el
+ * `setTimeout` del presupuesto gane la carrera.
+ */
+export const MARGEN_FETCH_CONSULTA_MORA_MS = 500;
+
+/**
+ * Piso del deadline del fetch: por debajo de un segundo ya no es un intento, es
+ * un aborto con viaje de ida. Si al presupuesto le queda menos que esto, el
+ * corte lo va a dar el presupuesto externo — y está bien: ese tiempo se lo
+ * comió la autenticación, no un transporte colgado, que es justo lo que el
+ * breaker NO tiene que contar.
+ */
+export const PISO_FETCH_CONSULTA_MORA_MS = 1000;
+
+/**
+ * Deadline propio del fetch, calculado con lo que QUEDA del presupuesto.
+ *
+ * 🔴 Antes el fetch usaba el MISMO número que el presupuesto global, y el
+ * presupuesto arranca antes —cubre la autenticación, que corre delante—. O sea
+ * que el externo ganaba la carrera SIEMPRE: un transporte colgado nunca
+ * levantaba el `TimeoutError` propio del fetch, salía por la puerta de la
+ * cancelación del llamador (`esCancelacionDelLlamador`) y el breaker no lo
+ * contaba. Con cartera colgada de verdad, el breaker no abría NUNCA y cada
+ * consulta volvía a pagar el presupuesto entero.
+ *
+ * Restando el margen, el reloj del fetch vence primero y el cuelgue se cuenta
+ * como lo que es: un fallo de cartera.
+ */
+export function cotaFetchConsultaMora(restanteMs: number): number {
+	const cota = restanteMs - MARGEN_FETCH_CONSULTA_MORA_MS;
+	return cota < PISO_FETCH_CONSULTA_MORA_MS
+		? PISO_FETCH_CONSULTA_MORA_MS
+		: cota;
+}
+
+const CONSULTA_MORA_TIMEOUT_MS = leerTimeoutConsultaMora(
+	process.env.CARTERA_BACK_CONSULTA_MORA_TIMEOUT,
+);
+
+/**
+ * Forma exacta de `POST /clientes/consulta-mora`. Se valida en vez de castear
+ * porque un cuerpo incompleto se leería como "sin mora" (ver la nota 3 en
+ * `consultarMoraPorDpi`).
+ */
+const consultaMoraResponseSchema = z.object({
+	encontrado: z.boolean(),
+	tieneMoraActiva: z.boolean(),
+	puedeContinuar: z.boolean(),
+	motivo: z.enum([
+		"SIN_MORA",
+		"MORA_ACTIVA",
+		"EN_CONVENIO",
+		"CREDITO_INSOLUTO",
+		"CLIENTE_NO_ENCONTRADO",
+		"SERVICIO_NO_DISPONIBLE",
+	]),
+	cliente: z
+		.object({ codigoClienteSifco: z.string(), nombre: z.string() })
+		.nullable(),
+	creditos: z.array(
+		z.object({
+			numeroCreditoSifco: z.string(),
+			estado: z.string(),
+			moraActiva: z
+				.object({ monto: z.string(), cuotasAtrasadas: z.number() })
+				.nullable(),
+		}),
+	),
+	historialMora: z.array(
+		z.object({
+			fecha: z.string(),
+			monto: z.string(),
+			numeroCreditoSifco: z.string(),
+			evento: z.string(),
+		}),
+	),
+	consultadoEn: z.string(),
+});
+
 // ============================================================================
 // CIRCUIT BREAKER
 // ============================================================================
 
-class CircuitBreaker {
+/**
+ * ¿El error vino de que el LLAMADOR se cansó, y no de que cartera fallara?
+ *
+ * 🔴 El breaker es COMPARTIDO por todas las integraciones con cartera (pagos,
+ * inversionistas, reportes). La señal de presupuesto de la consulta de mora
+ * podía abrirlo sola: con el auth colgado, cada intento vencido dejaba su tarea
+ * tardía viva dentro de `execute`, y al revivir el auth todas esas tareas
+ * encontraban la señal ya abortada y rechazaban de una. Cinco rechazos así
+ * —que no son cartera fallando, es el CRM cancelando— abrían el breaker 60s
+ * para todo el mundo.
+ *
+ * Por eso la cancelación se relanza sin contar `onFailure` ni `onSuccess`: de
+ * un viaje que nunca salió no se aprende nada sobre la salud de cartera.
+ *
+ * ⚠️ El timeout PROPIO del fetch SÍ sigue contando como fallo: `AbortSignal.timeout`
+ * aborta sin tocar la señal externa, así que cartera no contestó a tiempo con el
+ * CRM todavía esperando — eso es un síntoma real de su salud.
+ *
+ * 🔴 Lo único que se mira es SI LA SEÑAL EXTERNA YA ESTÁ ABORTADA al momento del
+ * catch; el nombre del error no se exige. Antes se pedía `AbortError` y eso
+ * dejaba afuera al caso más común de todos: `getCarteraAccessToken()` lanza un
+ * `Error` PELADO cuando el login de cartera contesta non-OK, así que un auth
+ * colgado más allá del presupuesto y caído después rechazaba con un error sin
+ * nombre especial y contaba como fallo igual — cinco de esos abrían el breaker
+ * compartido justo cuando el auth se estaba recuperando, que es exactamente el
+ * agujero que esta función existe para tapar.
+ *
+ * El criterio ahora es temporal, no de forma: si el presupuesto ya venció, nada
+ * de lo que esa tarea haga después puede contar —ni fallo ni éxito—, porque
+ * nadie está esperando esa respuesta y lo que le pase ya no describe la salud de
+ * cartera. Se acepta el costo: una caída REAL de cartera que llegue después del
+ * vencimiento tampoco se cuenta. No se pierde la señal, solo se pierde ESA
+ * muestra: la consulta siguiente, con su señal viva, la vuelve a ver.
+ */
+export function esCancelacionDelLlamador(
+	senalExterna: AbortSignal | null | undefined,
+): boolean {
+	return senalExterna?.aborted === true;
+}
+
+/** Exportado para poder verificar en tests cuándo se abre y cuándo no. */
+export class CircuitBreaker {
 	private failureCount = 0;
 	private lastFailureTime: number | null = null;
 	private state: "CLOSED" | "OPEN" | "HALF_OPEN" = "CLOSED";
@@ -305,7 +548,15 @@ class CircuitBreaker {
 		private timeout: number,
 	) {}
 
-	async execute<T>(fn: () => Promise<T>): Promise<T> {
+	/**
+	 * `esCancelacion` marca los errores que NO son un fallo de cartera: los que
+	 * pasan por ahí se relanzan sin contar ni éxito ni fallo. Ver
+	 * `esCancelacionDelLlamador`.
+	 */
+	async execute<T>(
+		fn: () => Promise<T>,
+		esCancelacion?: (error: unknown) => boolean,
+	): Promise<T> {
 		if (this.state === "OPEN") {
 			if (Date.now() - (this.lastFailureTime || 0) > this.timeout) {
 				this.state = "HALF_OPEN";
@@ -320,6 +571,9 @@ class CircuitBreaker {
 			return result;
 		} catch (error) {
 			if (error instanceof CarteraBackHttpError && error.status < 500) {
+				throw error;
+			}
+			if (esCancelacion?.(error)) {
 				throw error;
 			}
 			this.onFailure();
@@ -519,9 +773,9 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
-export type ReinversionLiquidacionesResponse = {
+type ReinversionLiquidacionesResponseV4 = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
-	contrato_version: 2;
+	contrato_version: 4;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el capital que permanece colocado.
@@ -541,6 +795,7 @@ export type ReinversionLiquidacionesResponse = {
 			iva_facturado: string;
 			total_distribuido: string;
 			cantidad_liquidaciones: number;
+			composicion: LiquidationComposition;
 		}
 	>;
 	interesNeto: {
@@ -559,9 +814,20 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion: string;
 		a_recibir: string;
 		capital_activo: string;
+		composicion: LiquidationComposition;
 	}[];
-	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
-	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	/** Movimientos completados del mes agrupados por origen del dinero. */
+	comprasMes: {
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		origen_dinero: FundingOrigin;
+		cantidad: number;
+		monto: string;
+	}[];
+	ticketInversion: {
+		actual: PurchaseTicketMonth & { variacion_porcentual: string | null };
+		historico: PurchaseTicketMonth[];
+	};
 	detalleInteresNeto: (
 		| {
 				inversionista_id: number;
@@ -592,7 +858,9 @@ export type ReinversionLiquidacionesResponse = {
 	detalleComprasMes: {
 		fecha: string;
 		inversionista: string;
-		modalidad: string;
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		origen_dinero: FundingOrigin;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -600,6 +868,50 @@ export type ReinversionLiquidacionesResponse = {
 		error: string | null;
 	};
 	cantidad_liquidaciones: number;
+};
+
+type FundingOrigin = "compra_nueva" | "reinversion";
+
+type PurchaseClassification =
+	| "nueva_posicion"
+	| "ampliacion_posicion"
+	| "sin_clasificar";
+
+type PurchaseTicketMonth = {
+	periodo: string;
+	cantidad: number;
+	monto_total: string;
+	ticket_promedio: string;
+};
+
+export type ReinversionLiquidacionesResponse =
+	| ReinversionLiquidacionesResponseV4
+	| (Omit<
+			ReinversionLiquidacionesResponseV4,
+			"contrato_version" | "comprasMes" | "detalleComprasMes"
+	  > & {
+			contrato_version: 3;
+			comprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["comprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+			detalleComprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["detalleComprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+	  });
+
+type CompositionDestination = {
+	capital: string;
+	resto: string;
+	total: string;
+};
+
+type LiquidationComposition = {
+	pagado: CompositionDestination & { sin_clasificar: string };
+	reinvertido: CompositionDestination & { sin_clasificar: string };
+	flujo: CompositionDestination;
+	estado: "exacto" | "sin_clasificar";
 };
 
 const reinversionModes = [
@@ -610,10 +922,37 @@ const reinversionModes = [
 	"reinversion_variable",
 	"reinversion_excedente",
 	"reinversion_combinada",
+	"sin_clasificar",
+] as const;
+const billingModes = [
+	"p2p_directa",
+	"factura_cube",
+	"factura_cube_pequeno",
+	"sin_modalidad",
+] as const;
+const fundingOrigins = ["compra_nueva", "reinversion"] as const;
+const purchaseClassifications = [
+	"nueva_posicion",
+	"ampliacion_posicion",
+	"sin_clasificar",
 ] as const;
 const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
+const signedDecimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/);
 const countSchema = z.number().int().nonnegative();
 const idSchema = z.number().int().nonnegative();
+const compositionDestinationSchema = z.object({
+	capital: moneySchema,
+	resto: moneySchema,
+	total: moneySchema,
+});
+const liquidationCompositionSchema = z.object({
+	pagado: compositionDestinationSchema.extend({ sin_clasificar: moneySchema }),
+	reinvertido: compositionDestinationSchema.extend({
+		sin_clasificar: moneySchema,
+	}),
+	flujo: compositionDestinationSchema,
+	estado: z.enum(["exacto", "sin_clasificar"]),
+});
 const modeSummarySchema = z.object({
 	reinversion_capital: moneySchema,
 	reinversion_interes: moneySchema,
@@ -626,9 +965,10 @@ const modeSummarySchema = z.object({
 	iva_facturado: moneySchema,
 	total_distribuido: moneySchema,
 	cantidad_liquidaciones: countSchema,
+	composicion: liquidationCompositionSchema,
 });
-const reinversionLiquidacionesSchema = z.object({
-	contrato_version: z.literal(2),
+const reinversionLiquidacionesV4Schema = z.object({
+	contrato_version: z.literal(4),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
 		noVerificado: z.object({ interes: moneySchema }),
@@ -652,15 +992,35 @@ const reinversionLiquidacionesSchema = z.object({
 			reinversion: moneySchema,
 			a_recibir: moneySchema,
 			capital_activo: moneySchema,
+			composicion: liquidationCompositionSchema,
 		}),
 	),
 	comprasMes: z.array(
 		z.object({
-			tipo: z.enum(reinversionModes),
+			modalidad_facturacion: z.enum(billingModes),
+			tipo_reinversion: z.enum(reinversionModes),
+			origen_dinero: z.enum(fundingOrigins),
 			cantidad: countSchema,
 			monto: moneySchema,
 		}),
 	),
+	ticketInversion: z.object({
+		actual: z.object({
+			periodo: z.string().regex(/^\d{4}-\d{2}$/),
+			cantidad: countSchema,
+			monto_total: moneySchema,
+			ticket_promedio: moneySchema,
+			variacion_porcentual: signedDecimalSchema.nullable(),
+		}),
+		historico: z.array(
+			z.object({
+				periodo: z.string().regex(/^\d{4}-\d{2}$/),
+				cantidad: countSchema,
+				monto_total: moneySchema,
+				ticket_promedio: moneySchema,
+			}),
+		),
+	}),
 	detalleInteresNeto: z.array(
 		z.discriminatedUnion("tratamiento_fiscal", [
 			z.object({
@@ -696,7 +1056,9 @@ const reinversionLiquidacionesSchema = z.object({
 		z.object({
 			fecha: z.string().trim().min(1),
 			inversionista: z.string().trim().min(1),
-			modalidad: z.enum(reinversionModes),
+			modalidad_facturacion: z.enum(billingModes),
+			tipo_reinversion: z.enum(reinversionModes),
+			origen_dinero: z.enum(fundingOrigins),
 			monto: moneySchema,
 		}),
 	),
@@ -706,6 +1068,33 @@ const reinversionLiquidacionesSchema = z.object({
 	]),
 	cantidad_liquidaciones: countSchema,
 });
+const reinversionLiquidacionesV3Schema =
+	reinversionLiquidacionesV4Schema.extend({
+		contrato_version: z.literal(3),
+		comprasMes: z.array(
+			z.object({
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				cantidad: countSchema,
+				monto: moneySchema,
+			}),
+		),
+		detalleComprasMes: z.array(
+			z.object({
+				fecha: z.string().trim().min(1),
+				inversionista: z.string().trim().min(1),
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				monto: moneySchema,
+			}),
+		),
+	});
+const reinversionLiquidacionesSchema = z.discriminatedUnion(
+	"contrato_version",
+	[reinversionLiquidacionesV3Schema, reinversionLiquidacionesV4Schema],
+);
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;
@@ -716,6 +1105,9 @@ export type FlujoPorInversionistaRow = {
 	cash_capital: string;
 	cash_interes: string;
 	cash_total: string;
+	interes_bruto: string;
+	iva: string;
+	isr: string;
 	total: string;
 };
 
@@ -724,9 +1116,81 @@ export type FlujoCuotasPorInversionistaResponse = {
 	totales: {
 		reinversion_total: string;
 		cash_total: string;
+		interes_bruto: string;
+		iva: string;
+		isr: string;
 		total: string;
+		externos: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+		cube: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+	};
+	contexto: {
+		cancelaciones_pendientes: {
+			cantidad_creditos: number;
+			monto_bruto: string;
+			capital_externo_asociado: string;
+		};
+		cierres_naturales_periodo: {
+			cantidad_creditos: number;
+			capital_externo_asociado: string;
+		};
 	};
 };
+
+const flujoCuotasPorInversionistaSchema = z.object({
+	porInversionista: z.array(
+		z.object({
+			inversionista_id: idSchema,
+			nombre: z.string().min(1),
+			reinversion_capital: moneySchema,
+			reinversion_interes: moneySchema,
+			reinversion_total: moneySchema,
+			cash_capital: moneySchema,
+			cash_interes: moneySchema,
+			cash_total: moneySchema,
+			interes_bruto: moneySchema,
+			iva: moneySchema,
+			isr: moneySchema,
+			total: moneySchema,
+		}),
+	),
+	totales: z.object({
+		reinversion_total: moneySchema,
+		cash_total: moneySchema,
+		interes_bruto: moneySchema,
+		iva: moneySchema,
+		isr: moneySchema,
+		total: moneySchema,
+		externos: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+		cube: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+	}),
+	contexto: z.object({
+		cancelaciones_pendientes: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			monto_bruto: moneySchema,
+			capital_externo_asociado: moneySchema,
+		}),
+		cierres_naturales_periodo: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			capital_externo_asociado: moneySchema,
+		}),
+	}),
+});
 
 export type ColocacionPeriodoRow = {
 	bucket: string;
@@ -757,6 +1221,8 @@ export type MoraTotales = {
 	mora_30: MoraBucketResult;
 	mora_60: MoraBucketResult;
 	mora_90: MoraBucketResult;
+	// COBROS-02: B4 aparte de B5 (cartera-back reportes.ts ya lo devuelve).
+	mora_120: MoraBucketResult;
 	mora_120_plus: MoraBucketResult;
 	totalEnMora: { cantidad: number; sumaMora: string };
 };
@@ -768,9 +1234,52 @@ export type MoraByEtapaYAsesorResponse = {
 		nombre: string;
 		email: string;
 	} & MoraTotales)[];
+	capitalCartera: {
+		total: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			email: string;
+			capital: string;
+		}[];
+	};
+	metadata: {
+		capitalCartera: "actual";
+		atribucionAsesor: "actual";
+	};
 	fecha?: string;
 	alcance?: "live" | "historico";
 	dataDisponibleDesde?: string;
+};
+
+export type MoraOfficialClosureResponse = {
+	periodo: string;
+	totales: Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>;
+	porAsesor: ({ asesorId: number; nombre: string } & Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>)[];
+	capitalCartera: {
+		total: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			capital: string;
+		}[];
+	};
+	moraMensual: {
+		porcentaje: string;
+		esperado: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			esperado: string;
+		}[];
+	};
+	metadata: { fuente: "oficial"; inmutable: true };
 };
 
 export type MoraCobradaPorAsesorResponse = {
@@ -804,6 +1313,15 @@ export type MoraRecoveryMetric = {
 // HTTP CLIENT
 // ============================================================================
 
+export interface IdentidadInversionista {
+	inversionista_id: number;
+	nombre: string;
+	email: string | null;
+	dpi: string;
+	via: "directo" | "representante_de_la_sociedad";
+	sociedad: string | null;
+}
+
 export class CarteraBackClient {
 	private config: CarteraBackClientConfig;
 	private circuitBreaker: CircuitBreaker;
@@ -827,12 +1345,16 @@ export class CarteraBackClient {
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
 	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 * @param timeoutMs deadline del fetch. Puede ser una FUNCIÓN para que se
+	 *   evalúe al despachar y no al encolar: el reloj del fetch arranca después
+	 *   de la autenticación, así que un número fijo calculado antes se pasa de
+	 *   lo que queda del presupuesto del llamador. Ver `cotaFetchConsultaMora`.
 	 */
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
-		timeoutMs?: number,
+		timeoutMs?: number | (() => number),
 		retryOnFailure?: boolean,
 		/**
 		 * `false` = esta llamada ni abre ni consulta el circuit breaker
@@ -841,6 +1363,11 @@ export class CarteraBackClient {
 		 * cartera a las llamadas que sí importan.
 		 */
 		usarCircuitBreaker = true,
+		// Corre DENTRO del execute del breaker: un 200 con cuerpo que viola el
+		// contrato (p. ej. {}) tiene que contar como fallo, no como éxito que
+		// resetea el conteo. Debe LANZAR si el crudo no cumple. Con
+		// `usarCircuitBreaker = false` corre igual, sólo que sin breaker.
+		validarDentroDelBreaker?: (crudo: unknown) => void,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -860,6 +1387,12 @@ export class CarteraBackClient {
 			const token = forceRefresh
 				? await invalidateAndReauth()
 				: await this.config.accessTokenProvider();
+			// Se resuelve ACÁ, con el token ya en mano: es el instante en que el
+			// reloj del fetch arranca de verdad.
+			const deadlineMs =
+				typeof timeoutMs === "function"
+					? timeoutMs()
+					: (timeoutMs ?? this.config.timeout);
 			return {
 				...options,
 				headers: {
@@ -867,7 +1400,13 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
+				// Si el llamador trae su propia señal (p. ej. el presupuesto de la
+				// consulta de mora, que corre desde ANTES de la autenticación), se
+				// combina con el timeout del fetch en vez de pisarla: una señal ya
+				// abortada frena el fetch aunque el token haya llegado tarde.
+				signal: options.signal
+					? AbortSignal.any([options.signal, AbortSignal.timeout(deadlineMs)])
+					: AbortSignal.timeout(deadlineMs),
 			};
 		};
 
@@ -883,86 +1422,103 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
+				// 🔴 El PARSE del cuerpo vive DENTRO del execute: un servidor que manda
+				// headers y cuelga (o trunca) el JSON resolvía el fetch, el breaker
+				// anotaba éxito, y el fallo real ocurría después — cuelgues de cuerpo
+				// repetidos RESETEABAN el breaker en vez de abrirlo.
+				//
+				// Con `usarCircuitBreaker = false` el mismo cuerpo corre sin breaker.
+				// La señal del llamador no es cartera fallando: ver
+				// `esCancelacionDelLlamador`.
 				const ejecutar = usarCircuitBreaker
-					? <R>(fn: () => Promise<R>) => this.circuitBreaker.execute(fn)
+					? <R>(fn: () => Promise<R>) =>
+							this.circuitBreaker.execute<R>(fn, () =>
+								esCancelacionDelLlamador(options.signal),
+							)
 					: <R>(fn: () => Promise<R>) => fn();
-				const response = await ejecutar(async () => {
-					const requestOptions = await buildRequestOptions();
-					const res = await this.config.fetchTransport(url, requestOptions);
+				const data = await ejecutar<T>(
+					async () => {
+						const requestOptions = await buildRequestOptions();
+						const res = await this.config.fetchTransport(url, requestOptions);
 
-					if (!res.ok) {
-						const errorText = await res.text();
-						let errorData: { error?: string; message?: string } = {};
+						if (!res.ok) {
+							const errorText = await res.text();
+							let errorData: { error?: string; message?: string } = {};
 
-						try {
-							errorData = JSON.parse(errorText);
-						} catch {
-							errorData = { error: errorText };
-						}
+							try {
+								errorData = JSON.parse(errorText);
+							} catch {
+								errorData = { error: errorText };
+							}
 
-						if (res.status === 401 || res.status === 403) {
-							if (!didReauth) {
-								didReauth = true;
-								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await this.config.fetchTransport(
-									url,
-									retryOptions,
-								);
-								if (retryRes.ok) return retryRes;
-								const retryText = await retryRes.text();
-								let retryData: { error?: string; message?: string } = {};
-								try {
-									retryData = JSON.parse(retryText);
-								} catch {
-									retryData = { error: retryText };
+							if (res.status === 401 || res.status === 403) {
+								if (!didReauth) {
+									didReauth = true;
+									const retryOptions = await buildRequestOptions(true);
+									const retryRes = await this.config.fetchTransport(
+										url,
+										retryOptions,
+									);
+									if (retryRes.ok) {
+										const crudoRetry = await retryRes.json();
+										validarDentroDelBreaker?.(crudoRetry);
+										return crudoRetry as T;
+									}
+									const retryText = await retryRes.text();
+									let retryData: { error?: string; message?: string } = {};
+									try {
+										retryData = JSON.parse(retryText);
+									} catch {
+										retryData = { error: retryText };
+									}
+									throw new CarteraBackHttpError(
+										`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+										retryRes.status,
+										retryData,
+									);
 								}
 								throw new CarteraBackHttpError(
-									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
-									retryRes.status,
-									retryData,
+									`Authentication failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
 								);
 							}
+
+							if (res.status === 400) {
+								throw new CarteraBackHttpError(
+									`Validation failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
+								);
+							}
+
+							// ⚠️ Un 404 SIN `codigo` y con `error: "NOT_FOUND"` no es un dato
+							// que no existe: es **la ruta** que no existe.
+							//
+							// Es el 404 por defecto de Elysia (`NotFoundError`), así que
+							// significa que la instancia de cartera-back del otro lado no
+							// tiene ese endpoint — típicamente porque está construida desde
+							// una rama que no lo trae. Sin este mensaje, el error que llega
+							// es `HTTP 404: NOT_FOUND` sin decir siquiera qué se pidió, y
+							// diagnosticarlo cuesta media hora de leer logs.
+							if (rutaInexistente(res.status, errorData)) {
+								const detalle = `cartera-back no tiene la ruta ${endpoint.split("?")[0]} (404 NOT_FOUND de Elysia). La instancia en ${this.config.baseUrl} está construida desde una rama que no incluye ese endpoint.`;
+								console.error(`[CarteraBackClient] ${detalle}`);
+								throw new CarteraBackHttpError(detalle, res.status, errorData);
+							}
+
 							throw new CarteraBackHttpError(
-								`Authentication failed: ${errorData.error || errorData.message}`,
+								`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
 								res.status,
 								errorData,
 							);
 						}
 
-						if (res.status === 400) {
-							throw new CarteraBackHttpError(
-								`Validation failed: ${errorData.error || errorData.message}`,
-								res.status,
-								errorData,
-							);
-						}
-
-						// ⚠️ Un 404 SIN `codigo` y con `error: "NOT_FOUND"` no es un dato
-						// que no existe: es **la ruta** que no existe.
-						//
-						// Es el 404 por defecto de Elysia (`NotFoundError`), así que
-						// significa que la instancia de cartera-back del otro lado no
-						// tiene ese endpoint — típicamente porque está construida desde
-						// una rama que no lo trae. Sin este mensaje, el error que llega
-						// es `HTTP 404: NOT_FOUND` sin decir siquiera qué se pidió, y
-						// diagnosticarlo cuesta media hora de leer logs.
-						if (rutaInexistente(res.status, errorData)) {
-							const detalle = `cartera-back no tiene la ruta ${endpoint.split("?")[0]} (404 NOT_FOUND de Elysia). La instancia en ${this.config.baseUrl} está construida desde una rama que no incluye ese endpoint.`;
-							console.error(`[CarteraBackClient] ${detalle}`);
-							throw new CarteraBackHttpError(detalle, res.status, errorData);
-						}
-
-						throw new CarteraBackHttpError(
-							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
-							res.status,
-							errorData,
-						);
-					}
-
-					return res;
-				});
-
-				const data = (await response.json()) as T;
+						const crudo = await res.json();
+						validarDentroDelBreaker?.(crudo);
+						return crudo as T;
+					},
+				);
 
 				// Cache successful GET requests
 				if (useCache && this.config.enableCache && options.method === "GET") {
@@ -972,6 +1528,12 @@ export class CarteraBackClient {
 				return data;
 			} catch (error) {
 				lastError = error as Error;
+
+				// El llamador ya se cansó: reintentar es mandar viajes que nadie
+				// va a esperar, y cada uno vuelve a rechazar por la misma señal.
+				if (esCancelacionDelLlamador(options.signal)) {
+					break;
+				}
 
 				// Don't retry on authentication/validation errors, nor on 4xx
 				// (esos son respuestas definitivas del servidor, no fallas
@@ -1093,6 +1655,22 @@ export class CarteraBackClient {
 			true, // use cache
 		);
 		return response.data || [];
+	}
+
+	async getCreditosOperativosParaSat(): Promise<CarteraCreditoOperativoSat[]> {
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraCreditoOperativoSat[]>
+		>(
+			"/internal/sat/creditos-operativos",
+			{ method: "GET" },
+			false,
+		);
+		if (!response.success) {
+			throw new Error(
+				response.message ?? "Cartera no devolvió los créditos operativos.",
+			);
+		}
+		return response.data ?? [];
 	}
 
 	// ========================================================================
@@ -1456,6 +2034,32 @@ export class CarteraBackClient {
 		console.log(`[CarteraBackClient] getCredito OK: ${numeroSifco}`);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
+	}
+
+	/**
+	 * Proyección de mora del mes en curso, día por día (días pasados reales,
+	 * de hoy en adelante proyectados). Sin caché, a diferencia de `getCredito`:
+	 * un pago registrado hace un minuto tiene que verse en la tarjeta.
+	 */
+	async getProyeccionMora(
+		numeroSifco: string,
+	): Promise<ProyeccionMoraMesResponse> {
+		return this.request<ProyeccionMoraMesResponse>(
+			`/credito/mora/proyeccion?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+			{ method: "GET" },
+			false,
+			undefined,
+			undefined,
+			true, // usa el circuit breaker compartido
+			// DENTRO del breaker (como `consultarMoraPorDpi`): un 200 sin días es
+			// el endpoint enfermo. Validado después de `request()`, el breaker ya
+			// lo había contado como éxito y el GET no se reintentaba.
+			(crudo) => {
+				if (!Array.isArray((crudo as { dias?: unknown } | null)?.dias)) {
+					throw new Error(`Proyección de mora inválida para ${numeroSifco}`);
+				}
+			},
+		);
 	}
 
 	async getAllCreditos(
@@ -1838,6 +2442,134 @@ export class CarteraBackClient {
 			undefined,
 			true,
 		);
+	}
+
+	// ========================================================================
+	// CONSULTA DE MORA POR DPI
+	// ========================================================================
+
+	/**
+	 * ¿Esta persona ya es cliente y está en mora?
+	 *
+	 * Fail-closed: **nunca** devuelve un veredicto que no venga de cartera. Si
+	 * cartera o SIFCO no contestan, lanza `ConsultaMoraNoDisponibleError` en vez
+	 * de inventar un "sin mora". El llamador (`crm.validarMoraPorDpi`) traduce
+	 * esa excepción a `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`.
+	 *
+	 * Tres decisiones que no son obvias:
+	 *
+	 * 1. **Sin caché.** Cachear alivia al core legacy de SIFCO (20s de timeout),
+	 *    pero acá el dato caduca en el peor sentido posible: quien acaba de caer
+	 *    en mora pasaría el filtro durante los cinco minutos del TTL, y ese es
+	 *    justo el caso que el filtro existe para atajar. La caché es en memoria y
+	 *    por proceso, así que ni siquiera hay dónde invalidarla cuando la mora la
+	 *    genera el cron de cartera. Además el volumen no lo pide: es un DPI
+	 *    tecleado por un humano llenando una solicitud, no un barrido. (De hecho
+	 *    `request()` solo cachea GET, así que esto es explícito, no incidental.)
+	 * 2. **Un solo intento.** Es un POST de solo lectura —se podría reintentar
+	 *    sin duplicar nada—, pero cada intento puede tardar los 20s de SIFCO: con
+	 *    reintentos el asesor se queda mirando la pantalla más de un minuto y se
+	 *    le carga la mano al core justo cuando está sufriendo. Bajo fail-closed
+	 *    el costo de no reintentar es un "no se pudo consultar" que se puede
+	 *    volver a pedir, no una respuesta equivocada. Del rebote repetido se
+	 *    encarga el circuit breaker.
+	 * 3. **Se valida la forma.** Un 200 con un cuerpo que no es el contrato es un
+	 *    fallo, no un "sin mora": sin este parseo, un `{}` se leería como
+	 *    `tieneMoraActiva: undefined` y dejaría pasar a cualquiera.
+	 *
+	 * `numerosCreditoConocidos` son los números de crédito que el CRM asocia a
+	 * ese DPI y que SIFCO no sabe devolver (`CRM-<uuid>` de las oportunidades
+	 * ganadas acá, `insoluto-N`). Cartera los suma a los del core antes de
+	 * buscar; sin ellos, el cliente cuyos créditos nacieron todos en el CRM no
+	 * tiene ficha en SIFCO y salía como CLIENTE_NO_ENCONTRADO. Se omiten cuando
+	 * la lista viene vacía: el contrato los tiene como opcionales.
+	 *
+	 * 🔴 `numerosCreditoGarantizados` viaja APARTE y no mezclado con los
+	 * anteriores: son los créditos que este DPI AFIANZÓ (figura como co-deudor).
+	 * Cartera los mira uno por uno —si lo garantizado está en mora, bloquea—
+	 * pero no expande por dueño con ellos. Mandarlos por el otro campo bloqueaba
+	 * al fiador de un crédito SANO porque el titular tenía otra deuda, y traía
+	 * de vuelta la historia crediticia completa de ese tercero. Ver
+	 * `ConsultaMoraRequest`.
+	 */
+	async consultarMoraPorDpi(
+		dpi: string,
+		numerosCreditoConocidos?: string[],
+		numerosCreditoGarantizados?: string[],
+	): Promise<ConsultaMoraResponse> {
+		// Los arreglos vacíos no se mandan: el contrato los tiene como opcionales
+		// y un `[]` solo agranda el cuerpo.
+		const cuerpo: ConsultaMoraRequest = { dpi };
+		if (numerosCreditoConocidos?.length) {
+			cuerpo.numerosCreditoConocidos = numerosCreditoConocidos;
+		}
+		if (numerosCreditoGarantizados?.length) {
+			cuerpo.numerosCreditoGarantizados = numerosCreditoGarantizados;
+		}
+
+		let crudo: unknown;
+		try {
+			// El presupuesto envuelve la llamada COMPLETA y no solo el fetch: la
+			// autenticación corre antes de que `request()` arme su AbortSignal y no
+			// tiene señal propia. Ver `conPresupuestoConsultaMora`.
+			crudo = await conPresupuestoConsultaMora(
+				CONSULTA_MORA_TIMEOUT_MS,
+				(senalVencimiento, restanteMs) =>
+					this.request<unknown>(
+						"/clientes/consulta-mora",
+						{
+							method: "POST",
+							body: JSON.stringify(cuerpo),
+							signal: senalVencimiento,
+						},
+						false, // sin caché (ver arriba)
+						// Función, no número: el deadline se calcula al despachar
+						// —con la autenticación ya pagada— para caber DENTRO del
+						// presupuesto y vencer antes que él. Ver
+						// `cotaFetchConsultaMora`.
+						() => cotaFetchConsultaMora(restanteMs()),
+						false, // un solo intento (ver arriba)
+						true, // usa el circuit breaker compartido
+						// El contrato se valida DENTRO del breaker: un 200 con cuerpo
+						// que no cumple el schema (p. ej. `{}`) es el endpoint
+						// enfermo, y contarlo como éxito reseteaba el breaker en cada
+						// llamada mientras el gate seguía viajando al servicio roto.
+						(crudoSinValidar) => {
+							const previo =
+								consultaMoraResponseSchema.safeParse(crudoSinValidar);
+							if (!previo.success) {
+								throw new ConsultaMoraNoDisponibleError(
+									`Cartera respondió la consulta de mora con una forma inesperada: ${previo.error.message}`,
+									previo.error,
+								);
+							}
+						},
+					),
+			);
+		} catch (error) {
+			// El vencimiento del presupuesto ya llega con el motivo correcto; no se
+			// vuelve a envolver para no anidar el mismo mensaje dos veces.
+			if (error instanceof ConsultaMoraNoDisponibleError) {
+				throw error;
+			}
+
+			throw new ConsultaMoraNoDisponibleError(
+				`No se pudo consultar la mora en cartera: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				error,
+			);
+		}
+
+		const parseado = consultaMoraResponseSchema.safeParse(crudo);
+		if (!parseado.success) {
+			throw new ConsultaMoraNoDisponibleError(
+				`Cartera respondió la consulta de mora con una forma inesperada: ${parseado.error.message}`,
+				parseado.error,
+			);
+		}
+
+		return parseado.data;
 	}
 
 	// ========================================================================
@@ -2790,6 +3522,34 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Persona dueña de un DPI o de un correo. `data: null` = no existe.
+	 *
+	 * La usa el alta del CRM para detectar que conta no está duplicando por
+	 * error, sino dando de alta la empresa de alguien que ya es inversionista.
+	 */
+	async buscarIdentidadInversionista(params: {
+		dpi?: string;
+		email?: string;
+	}): Promise<{ success: boolean; data: IdentidadInversionista | null }> {
+		const queryParams = new URLSearchParams();
+		if (params.dpi) queryParams.set("dpi", params.dpi);
+		if (params.email) queryParams.set("email", params.email);
+
+		// Sin cache: el `data: null` de "no es de nadie" es un 200 y se guardaría
+		// cinco minutos. Con cache en memoria + varias instancias, el invalidate
+		// de `createInvestor` no llega a las demás —y el alta puede venir de
+		// cartera, donde no hay invalidate ninguno—, así que el negativo viejo
+		// sobrevive: la detección no ve a la persona recién creada y, sin el
+		// interruptor "¿Es empresa?", su sociedad rebota como duplicada.
+		// Es una consulta por DPI tecleado, disparada por un humano llenando un
+		// formulario: no hay volumen que justifique cachearla.
+		return this.request<{
+			success: boolean;
+			data: IdentidadInversionista | null;
+		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, false);
+	}
+
 	async getInvestorReport(
 		params: GetInvestorReportParams,
 	): Promise<InversionistaReporte> {
@@ -3189,6 +3949,119 @@ export class CarteraBackClient {
 		return response.json();
 	}
 
+	/**
+	 * Copia en cartera el contrato de inversión que emitió el CRM.
+	 *
+	 * Es la MISMA tabla de documentos del inversionista, con las columnas de
+	 * contrato llenas: así la ficha y el portal lo ven como un documento más, sin
+	 * pantallas nuevas del lado de cartera. Entra oculto, como el resto de la
+	 * papelería.
+	 *
+	 * Vuelve a llamarse cada vez que se reemite el documento: cartera lo reconoce
+	 * por `contrato_id` y reemplaza la fila en vez de dejar copias.
+	 */
+	async upsertInvestorContractDocument(input: {
+		file: Blob;
+		inversionista_id: number;
+		contrato_id: string;
+		nombre: string;
+		tipo_contrato: string;
+		weetrust_document_id?: string | null;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+		created_by?: string;
+		/** Si el inversionista lo ve en su portal. */
+		visible?: boolean;
+	}): Promise<{ success: boolean; message?: string }> {
+		const url = `${this.config.baseUrl}/investor-documents/contrato`;
+		const formData = new FormData();
+		formData.append("file", input.file, `${input.nombre}.pdf`);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("contrato_id", input.contrato_id);
+		formData.append("nombre", input.nombre);
+		formData.append("tipo_contrato", input.tipo_contrato);
+		if (input.weetrust_document_id) {
+			formData.append("weetrust_document_id", input.weetrust_document_id);
+		}
+		if (input.observer_url) formData.append("observer_url", input.observer_url);
+		if (input.firmantes) {
+			formData.append("firmantes", JSON.stringify(input.firmantes));
+		}
+		if (input.estado_firma) {
+			formData.append("estado_firma", input.estado_firma);
+		}
+		if (input.created_by) formData.append("created_by", input.created_by);
+		// Se manda sólo cuando hay una decisión que tomar: encenderlo al firmarse
+		// o apagarlo al anularse. Sin el campo, cartera deja como está lo que
+		// alguien haya decidido desde la ficha.
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
+
+		const token = await getCarteraAccessToken();
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			headers: {
+				Authorization: `Bearer ${token}`,
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+			},
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			throw new Error(
+				`Error al copiar el contrato en cartera: ${response.status} ${await response.text()}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Actualiza en cartera cómo va la firma de un contrato ya copiado.
+	 *
+	 * Sin mover el PDF: es lo que se manda cada vez que alguien firma o se
+	 * renuevan los enlaces. Si el contrato todavía no está copiado, cartera
+	 * responde `espejado: false` y no es un error.
+	 */
+	async updateInvestorContractDocumentState(input: {
+		contrato_id: string;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+		/**
+		 * Si el inversionista lo ve en su portal: `true` lo enciende (firmado),
+		 * `false` lo apaga (anulado). Sin el campo, cartera deja lo que había.
+		 */
+		visible?: boolean;
+	}): Promise<{
+		success: boolean;
+		espejado?: boolean;
+		/** Cómo estaba el estado de firma ANTES de este cambio. */
+		estadoAnterior?: string | null;
+	}> {
+		return this.request(
+			`/investor-documents/contrato/${encodeURIComponent(input.contrato_id)}`,
+			{
+				method: "PATCH",
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				headers: {
+					"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+				},
+				body: JSON.stringify({
+					observer_url: input.observer_url ?? undefined,
+					firmantes: input.firmantes ?? undefined,
+					estado_firma: input.estado_firma ?? undefined,
+					// Tal cual: `false` tiene que llegar para apagarlo al anularse.
+					// `undefined` se cae del JSON, que es el "no opino".
+					visible: input.visible,
+				}),
+			},
+		);
+	}
+
 	async getInvestorDocumentsAdmin(
 		inversionistaId: number,
 	): Promise<{ success: boolean; data: Record<string, any>[] }> {
@@ -3252,13 +4125,47 @@ export class CarteraBackClient {
 		tipo_reinversion?: string | null;
 		monto_reinversion?: number | null;
 		moneda?: string;
+		dpi_rep_legal?: string | null;
 	}): Promise<{
 		message: string;
 		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		/**
+		 * Qué pasó con el acceso al portal de cada inversionista recién creado.
+		 *
+		 * Viaja aparte de `data` porque el alta puede haber salido perfecta y el
+		 * acceso no: son dos desenlaces distintos y el operador tiene que poder
+		 * distinguirlos. Cartera nunca falla el alta por esto.
+		 */
+		provisioning?: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
 	}> {
 		const response = await this.request<{
 			message: string;
 			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+			provisioning?: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
@@ -3276,6 +4183,20 @@ export class CarteraBackClient {
 				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
 				monto_reinversion: input.monto_reinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
+				// El alta de back office SÍ pide acceso al portal. La llave es el
+				// permiso: cartera no provisiona sin ella, para que el registro
+				// público de auth-google no pueda fabricarse una cuenta con la
+				// contraseña en su propio correo. Va explícita porque no hay
+				// forma de distinguir por identidad quién llama (todo entra con
+				// el mismo token de servicio ADMIN).
+				provisionar_portal: true,
+				// A propósito NO usamos `?? null`: cartera distingue "la llave no
+				// viene" (no tocar) de "viene vacía" (borrar). Mandar null siempre
+				// borraría el DPI del representante en cada edición que no lo
+				// incluya — y con él, el acceso de esa persona al portal.
+				...(input.dpi_rep_legal !== undefined
+					? { dpi_rep_legal: input.dpi_rep_legal }
+					: {}),
 			}),
 		});
 		this.cache.invalidate("investor");
@@ -3528,11 +4449,14 @@ export class CarteraBackClient {
 			fechaInicio: params.fechaInicio,
 			fechaFin: params.fechaFin,
 		});
-		return this.request<FlujoCuotasPorInversionistaResponse>(
+		const data = await this.request<unknown>(
 			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
+		const parsed = flujoCuotasPorInversionistaSchema.safeParse(data);
+		if (!parsed.success) throw new Error("Contrato de proyección inválido");
+		return parsed.data;
 	}
 
 	// ========================================================================
@@ -3553,6 +4477,20 @@ export class CarteraBackClient {
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getCierreMoraOficial(params: {
+		periodo: string;
+		asesores?: number[];
+	}) {
+		const queryParams = new URLSearchParams({ periodo: params.periodo });
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		return this.request<MoraOfficialClosureResponse | null>(
+			`/reportes/cierre-mora-oficial?${queryParams}`,
 			{ method: "GET" },
 			true,
 		);

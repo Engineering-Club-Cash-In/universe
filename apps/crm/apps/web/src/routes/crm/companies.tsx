@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { z } from "zod";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,13 +63,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
-import { PERMISSIONS } from "@/lib/roles";
+import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/companies")({
 	component: RouteComponent,
 });
+
+type Company = Awaited<ReturnType<typeof client.getCompanies>>[number];
 
 function RouteComponent() {
 	const {
@@ -83,7 +84,7 @@ function RouteComponent() {
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [selectedCompany, setSelectedCompany] = useState<any>(null);
+	const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/companies/searchTerm", "");
 	const [industryFilter, setIndustryFilter] = usePersistedState<string>("crm/companies/industryFilter", "all");
 	const [sizeFilter, setSizeFilter] = usePersistedState<string>("crm/companies/sizeFilter", "all");
@@ -104,34 +105,17 @@ function RouteComponent() {
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
-	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions({ input: { limit: 100 } }),
+	const relationshipStatsQuery = useQuery({
+		...orpc.getCompanyRelationshipStats.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: [
-			"getLeads",
-			"dropdown",
+			"getCompanyRelationshipStats",
 			session?.user?.id,
 			userProfile.data?.role,
 		],
-	});
-	const opportunitiesQuery = useQuery({
-		...orpc.getOpportunities.queryOptions({ input: {} }),
-		enabled:
-			!!userProfile.data?.role &&
-			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
-			!!session?.user?.id,
-		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
-	});
-	const clientsQuery = useQuery({
-		...orpc.getClients.queryOptions({ input: { limit: 1000, offset: 0 } }),
-		enabled:
-			!!userProfile.data?.role &&
-			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
-			!!session?.user?.id,
-		queryKey: ["getClients", "all", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createCompanyForm = useForm({
@@ -234,7 +218,7 @@ function RouteComponent() {
 			setIsCreateDialogOpen(false);
 			createCompanyForm.reset();
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Error al crear la empresa");
 		},
 	});
@@ -258,17 +242,17 @@ function RouteComponent() {
 			toast.success("Empresa actualizada exitosamente");
 			setIsEditDialogOpen(false);
 		},
-		onError: (error: any) => {
+		onError: (error) => {
 			toast.error(error.message || "Error al actualizar la empresa");
 		},
 	});
 
-	const handleViewDetails = (company: any) => {
+	const handleViewDetails = (company: Company) => {
 		setSelectedCompany(company);
 		setIsDetailsDialogOpen(true);
 	};
 
-	const handleEditCompany = (company: any) => {
+	const handleEditCompany = (company: Company) => {
 		setSelectedCompany(company);
 		// Populate form with company data
 		editCompanyForm.setFieldValue("name", company.name || "");
@@ -345,18 +329,20 @@ function RouteComponent() {
 	};
 
 	// Get company statistics
+	const relationshipStatsByCompany = new Map(
+		relationshipStatsQuery.data?.map(
+			(stats) => [stats.companyId, stats] as const,
+		),
+	);
 	const getCompanyStats = (companyId: string) => {
-		const leads =
-			leadsQuery.data?.data?.filter((l: any) => l.company?.id === companyId)
-				.length || 0;
-		const opportunities =
-			opportunitiesQuery.data?.filter((o) => o.company?.id === companyId)
-				.length || 0;
-		const clients =
-			clientsQuery.data?.data?.filter((c) => c.company?.id === companyId)
-				.length || 0;
-
-		return { leads, opportunities, clients };
+		return (
+			relationshipStatsByCompany.get(companyId) ?? {
+				companyId,
+				leads: 0,
+				opportunities: 0,
+				clients: 0,
+			}
+		);
 	};
 
 	// Filter companies based on search, industry, and size
@@ -386,10 +372,9 @@ function RouteComponent() {
 
 	// Companies with active relationships
 	const companiesWithClients =
-		companiesQuery.data?.filter((company) =>
-			clientsQuery.data?.data?.some(
-				(client) => client.company?.id === company.id,
-			),
+		companiesQuery.data?.filter(
+			(company) =>
+				(relationshipStatsByCompany.get(company.id)?.clients ?? 0) > 0,
 		).length || 0;
 
 	return (
@@ -962,7 +947,8 @@ function RouteComponent() {
 														>
 															Crear Oportunidad
 														</DropdownMenuItem>
-														{userProfile.data?.role === "admin" && (
+														{(userProfile.data.role === ROLES.ADMIN ||
+															userProfile.data.role === ROLES.SALES_SUPERVISOR) && (
 															<>
 																<DropdownMenuSeparator />
 																<DropdownMenuItem

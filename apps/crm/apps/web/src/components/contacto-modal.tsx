@@ -4,15 +4,18 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	CalendarIcon,
+	Eye,
 	Loader2,
 	Mail,
 	MessageCircle,
 	MessageSquare,
+	Pencil,
 	Phone,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { WhatsappPreview } from "@/components/cobros/whatsapp-preview";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,9 +53,13 @@ import {
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	interpolar,
+	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaIncrementoMoraSinDato,
+	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
@@ -185,6 +192,14 @@ interface ContactoModalProps {
 	 * enlazarla a algo más (p. ej. la llamada posterior a un apagado de unidad).
 	 */
 	onCreado?: (contacto: { id: string }) => void;
+	expectativaMora?: string;
+	expectativaMoraDiaria?: string;
+	/** Cuánto crece por día el crédito que ya está en mora (ver VariablesPlantilla). */
+	incrementoDiarioMora?: string;
+	/** El techo mensual de ese crecimiento (ver VariablesPlantilla). */
+	incrementoMaximoMensualMora?: string;
+	aseguradora?: string;
+	cabinaSeguro?: string;
 }
 
 /** Etiqueta del canal — el método ya no se elige dentro de la modal. */
@@ -228,6 +243,12 @@ export function ContactoModal({
 	nombreAsesor = "",
 	telefonoAsesor = "",
 	onCreado,
+	expectativaMora = "",
+	expectativaMoraDiaria = "",
+	incrementoDiarioMora = "",
+	incrementoMaximoMensualMora = "",
+	aseguradora = "",
+	cabinaSeguro = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -268,6 +289,9 @@ export function ContactoModal({
 	const [mensajeEditado, setMensajeEditado] = useState("");
 	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
+	// El WhatsApp arranca en vista previa (sin asteriscos a la vista);
+	// "Editar mensaje" abre el textarea.
+	const [editandoWhatsapp, setEditandoWhatsapp] = useState(false);
 
 	const telefonoAsesorLimpio = telefonoAsesor.trim();
 
@@ -282,6 +306,14 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
+			expectativaMoraDiaria,
+			incrementoDiarioMora,
+			incrementoMaximoMensualMora,
+			// Vacíos caen al default de interpolar (Seguros Universales); con
+			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
+			aseguradora: aseguradora || undefined,
+			cabinaSeguro: cabinaSeguro || undefined,
 		}),
 		[
 			clienteNombre,
@@ -293,6 +325,12 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
+			expectativaMoraDiaria,
+			incrementoDiarioMora,
+			incrementoMaximoMensualMora,
+			aseguradora,
+			cabinaSeguro,
 		],
 	);
 
@@ -300,6 +338,7 @@ export function ContactoModal({
 	useEffect(() => {
 		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
 		setPlantillaId(sugerida);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -312,6 +351,7 @@ export function ContactoModal({
 
 	const handlePlantillaChange = (id: string) => {
 		setPlantillaId(id);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -811,6 +851,71 @@ export function ContactoModal({
 			);
 			return;
 		}
+		// Los dos guards siguientes se evalúan sobre el mensaje REAL del canal
+		// (ya interpolado y editado por el asesor), no sobre la plantilla
+		// original: si el asesor borra la oración de mora o corrige la fecha del
+		// impuesto en "Editar mensaje", el envío se habilita.
+		//
+		// Si el server no pudo calcular la expectativa (crédito sin capital o en
+		// estado excluido de mora) y la oración sigue en el texto, saldría
+		// "recargo por mora de Q." roto.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaExpectativaMora(cuerpoNoReply) &&
+			// La oración dice los dos montos juntos: el recargo por día y su tope.
+			(!expectativaMora.trim() || !expectativaMoraDiaria.trim())
+		) {
+			toast.error(
+				'El crédito no genera mora (estado excluido o sin capital suficiente). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// El monto adeudado lo calcula el server desde el detalle de cartera y
+		// puede venir vacío: crédito sin cuotas vencidas (p. ej. al día y el
+		// asesor eligió a mano una plantilla de mora), INCOBRABLE el mismo día
+		// del castigo, o el fallback por datos corruptos de cartera, que arma el
+		// detalle desde el listado y no trae cuotas. Sin este guard el mensaje
+		// sale con el hueco: "por un monto de Q.". Mismo criterio que el masivo,
+		// que en ese caso descarta el crédito con motivo.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaMontoAdeudado(cuerpoNoReply) &&
+			!montoAdeudado.trim()
+		) {
+			toast.error(
+				'No se pudo calcular el monto adeudado de este crédito. Quitá la oración del monto en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// El aumento de la mora: la oración incorporada se borra sola al
+		// interpolar, pero si el asesor escribió {incrementoDiarioMora} suelto y
+		// cartera no mandó el dato, el mensaje sale con el hueco ("El saldo
+		// aumenta Q diario"). Mismo criterio que el masivo, que en ese caso
+		// descarta el crédito con motivo.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaIncrementoMoraSinDato(
+				cuerpoNoReply,
+				incrementoDiarioMora,
+				incrementoMaximoMensualMora,
+			)
+		) {
+			toast.error(
+				'No se pudo calcular cuánto aumenta la mora de este crédito. Quitá la oración del aumento en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// Pasado el 31/07, el mensaje no puede seguir pidiendo el comprobante
+		// "antes de la hora límite" de una fecha vencida.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeTieneFechaLimiteImpuestoVencida(cuerpoNoReply)
+		) {
+			toast.error(
+				'La fecha límite del impuesto de circulación ya venció. Cambiá la fecha en "Editar mensaje" o contactá al cliente directamente.',
+			);
+			return;
+		}
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);
@@ -986,7 +1091,57 @@ export function ContactoModal({
 										</div>
 									)}
 
-									{plantillaId && (
+									{plantillaId && metodoInicial === "whatsapp" && (
+										<div className="space-y-2">
+											<div className="flex items-center justify-between gap-2">
+												<Label>Mensaje</Label>
+												<Button
+													type="button"
+													size="sm"
+													variant={editandoWhatsapp ? "outline" : "default"}
+													className="gap-1.5"
+													onClick={() => setEditandoWhatsapp((v) => !v)}
+												>
+													{editandoWhatsapp ? (
+														<>
+															<Eye className="h-3.5 w-3.5" />
+															Ver como lo verá el cliente
+														</>
+													) : (
+														<>
+															<Pencil className="h-3.5 w-3.5" />
+															Editar mensaje
+														</>
+													)}
+												</Button>
+											</div>
+											{editandoWhatsapp ? (
+												<>
+													<Textarea
+														className="min-h-[150px] text-sm"
+														value={mensajeEditable}
+														onChange={(e) =>
+															handleMensajeEditableChange(e.target.value)
+														}
+													/>
+													<p className="text-muted-foreground text-xs">
+														El texto entre asteriscos (<code>*así*</code>) sale
+														en <strong>negrita</strong> en WhatsApp; los
+														asteriscos no se ven en el mensaje final.
+													</p>
+												</>
+											) : (
+												<>
+													<WhatsappPreview mensaje={mensajeEditable} />
+													<p className="text-muted-foreground text-xs">
+														Así lo verá el cliente en WhatsApp.
+													</p>
+												</>
+											)}
+										</div>
+									)}
+
+									{plantillaId && metodoInicial !== "whatsapp" && (
 										<div className="space-y-2">
 											<Label>Mensaje (editable)</Label>
 											<Textarea

@@ -21,8 +21,10 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { DisbursementView } from "@/components/disbursement/DisbursementView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
@@ -39,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getContractTypeLabel,
 	getDocumentTypeLabel,
 	getLoanPurposeLabel,
@@ -48,7 +51,6 @@ import {
 } from "@/lib/crm-formatters";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
-
 
 // Type for the opportunity data
 export type OpportunityForModal = {
@@ -109,7 +111,6 @@ export type OpportunityForModal = {
 		isOwned?: boolean;
 	} | null;
 };
-
 
 function formatLeadFullName(lead: {
 	firstName?: string | null;
@@ -185,6 +186,12 @@ export function OpportunityDetailModal({
 			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listQuotationsByOpportunity", opportunity?.id, userRole],
 	});
+	const contractualQuotation =
+		opportunityQuotationsQuery.data?.find(
+			(quotation) => quotation.status === "accepted",
+		) ??
+		opportunityQuotationsQuery.data?.[0] ??
+		null;
 
 	// Query for documents associated with the opportunity
 	const opportunityDocumentsQuery = useQuery({
@@ -251,7 +258,7 @@ export function OpportunityDetailModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
+			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] max-w-[95vw] overflow-y-auto overflow-x-hidden md:min-w-[850px]">
 				<DialogHeader>
 					<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 				</DialogHeader>
@@ -264,7 +271,7 @@ export function OpportunityDetailModal({
 						}
 					}}
 				>
-					<TabsList className="flex w-full overflow-x-auto gap-2 p-1 mb-4">
+					<TabsList className="mb-4 flex w-full gap-2 overflow-x-auto p-1">
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
@@ -400,7 +407,9 @@ export function OpportunityDetailModal({
 									<div className="flex items-center gap-3">
 										<Calendar className="h-5 w-5 text-muted-foreground" />
 										<span className="font-medium">
-											{formatGuatemalaCalendarDate(opportunity.expectedCloseDate)}
+											{formatGuatemalaCalendarDate(
+												opportunity.expectedCloseDate,
+											)}
 										</span>
 									</div>
 								</div>
@@ -499,89 +508,31 @@ export function OpportunityDetailModal({
 
 						{/* Contracts Section */}
 						{canViewContracts && (
-							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-								<div className="flex items-center gap-2">
-									<FileSignature className="h-5 w-5 text-muted-foreground" />
-									<Label className="font-semibold text-muted-foreground text-sm">
-										Contratos Legales
-									</Label>
-								</div>
-								{opportunityContractsQuery.isLoading ? (
-									<p className="text-muted-foreground text-sm">
-										Cargando contratos...
-									</p>
-								) : opportunityContractsQuery.data &&
-									opportunityContractsQuery.data.length > 0 ? (
-									<div className="space-y-2">
-										{opportunityContractsQuery.data.map(({ contract }) => (
-											<div
-												key={contract.id}
-												className="flex items-center justify-between rounded-md border bg-background p-3"
-											>
-												<div className="flex flex-col gap-1">
-													<span className="font-medium text-sm">
-														{contract.contractName}
-													</span>
-													<span className="text-muted-foreground text-xs">
-														{getContractTypeLabel(contract.contractType)} •{" "}
-														{contract.status === "pending"
-															? "Pendiente"
-															: contract.status === "signed"
-																? "Firmado"
-																: "Cancelado"}
-													</span>
-												</div>
-
-												<div className="flex gap-2">
-													{contract.pdfLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.pdfLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
-															>
-																<FileText className="h-3 w-3" />
-																PDF
-															</a>
-														</Button>
-													)}
-													{contract.clientSigningLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.clientSigningLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
-															>
-																<ExternalLink className="h-3 w-3" />
-																Cliente
-															</a>
-														</Button>
-													)}
-													{contract.representativeSigningLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.representativeSigningLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
-															>
-																<ExternalLink className="h-3 w-3" />
-																Rep. Legal
-															</a>
-														</Button>
-													)}
-												</div>
-											</div>
-										))}
-									</div>
-								) : (
-									<p className="text-muted-foreground text-sm">
-										No hay contratos asociados a esta oportunidad
-									</p>
+							<OpportunityContractsCard
+								contracts={opportunityContractsQuery.data}
+								isLoading={opportunityContractsQuery.isLoading}
+								puedeRegenerar={
+									!!userRole &&
+									PERMISSIONS.canRegenerateContractLinks(userRole)
+								}
+								// El rol no alcanza: fuera de 80% y 85% el servidor lo
+								// rechaza, y no hay que ofrecerlo.
+								puedeAnular={
+									!!userRole &&
+									PERMISSIONS.canAnnulContracts(userRole) &&
+									etapaPermite("anular", opportunity.stage?.closurePercentage)
+								}
+								puedeVincular={
+									!!userRole &&
+									PERMISSIONS.canLinkWeetrustDocument(userRole) &&
+									etapaPermite("regenerar", opportunity.stage?.closurePercentage)
+								}
+								enEtapaDeFirma={etapaPermite(
+									"regenerar",
+									opportunity.stage?.closurePercentage,
 								)}
-							</div>
+								onUpdate={() => opportunityContractsQuery.refetch()}
+							/>
 						)}
 
 						{/* Quotations Section */}
@@ -627,8 +578,15 @@ export function OpportunityDetailModal({
 														</span>
 													)}
 													<span className="text-muted-foreground text-xs">
-														Q{Number(quotation.vehicleValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} •{" "}
-														{quotation.termMonths} meses •{" "}
+														Q
+														{Number(quotation.vehicleValue).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}{" "}
+														• {quotation.termMonths} meses •{" "}
 														{quotation.status === "draft"
 															? "Borrador"
 															: quotation.status === "sent"
@@ -640,7 +598,14 @@ export function OpportunityDetailModal({
 												</div>
 												<div className="text-right">
 													<p className="font-bold text-green-600">
-														Q{Number(quotation.monthlyPayment).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+														Q
+														{Number(quotation.monthlyPayment).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</p>
 													<p className="text-muted-foreground text-xs">
 														cuota mensual
@@ -772,10 +737,7 @@ export function OpportunityDetailModal({
 								);
 							}
 
-							const latestQuotation =
-								opportunityQuotationsQuery.data?.[0] || null;
-
-							if (!latestQuotation) {
+							if (!contractualQuotation) {
 								return (
 									<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 										<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
@@ -803,7 +765,7 @@ export function OpportunityDetailModal({
 									opportunityId={opportunity.id}
 									userRole={userRole ?? undefined}
 									opportunity={opportunity as any}
-									quotation={latestQuotation}
+									quotation={contractualQuotation}
 								/>
 							);
 						})()}
@@ -817,14 +779,11 @@ export function OpportunityDetailModal({
 								assignedUserId={opportunity.assignedUser?.id}
 								userRole={userRole}
 								quotation={
-									opportunityQuotationsQuery.data?.[0]
+									contractualQuotation
 										? {
-												amountToFinance: (
-													opportunityQuotationsQuery.data[0] as any
-												).amountToFinance,
-												totalFinanced: (
-													opportunityQuotationsQuery.data[0] as any
-												).totalFinanced,
+												amountToFinance:
+													contractualQuotation.amountToFinance,
+												totalFinanced: contractualQuotation.totalFinanced,
 											}
 										: null
 								}
@@ -891,7 +850,7 @@ export function OpportunityDetailModal({
 														<div className="flex items-center gap-4 text-muted-foreground text-xs">
 															<div className="flex items-center gap-1">
 																<Clock className="h-3 w-3" />
-																{new Date(change.changedAt).toLocaleString()}
+																{formatGuatemalaDateTime(change.changedAt)}
 															</div>
 															<div className="flex items-center gap-1">
 																<Users className="h-3 w-3" />

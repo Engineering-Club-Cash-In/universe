@@ -1,5 +1,4 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
-import Big from "big.js";
 import { db } from "../database";
 import {
   convenios_pago,
@@ -9,9 +8,12 @@ import {
 } from "../database/db/schema";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { cerrarMoraPagadaDeCredito } from "../utils/cerrarMoraPagadaDeCredito";
 import {
-  contarCuotasVencidasReales,
   createMora,
+  cuotasParaPendienteDeCreditos,
+  decidirMoraTrasRomperConvenio,
+  hoyGuatemalaDeLaBase,
   STATUS_EN_RECUPERACION,
 } from "./latefee";
 
@@ -216,24 +218,57 @@ export async function anularConvenio(params: {
       const volverARecuperacion =
         anulado.status_credito_previo === STATUS_EN_RECUPERACION;
 
-      // ¿Cuánto debe el crédito ahora que el convenio no cuenta? Mismo recuento
-      // que usa el rechazo — la pregunta es idéntica. Se necesita igual aunque
-      // vuelva a recuperación: la mora hay que recrearla en los dos casos.
-      const cuotasAtrasadas = await contarCuotasVencidasReales(
-        anulado.credito_id,
-        "MOROSO",
-        tx,
+      // ¿Cuánto debe el crédito ahora que el convenio no cuenta? Merge con
+      // develop: el MISMO criterio que la ruptura de un convenio
+      // (`romperConvenioRecalculandoMora`), que es lo que está en producción —
+      // se cierra el ledger de mora pagada y la mora se recalcula DESDE HOY con
+      // la fórmula proporcional del cron (capital × 1.12% × días/30 por cuota,
+      // con techo mensual). Antes acá se recreaba un bloque fijo
+      // (capital × 1.12% × cuotas). Se necesita aunque vuelva a recuperación:
+      // EN_RECUPERACION sí devenga mora.
+      //
+      // 🔒 Crédito antes que la mora (regla de candados de latefee.ts): el
+      // insert al ledger toma KEY SHARE sobre el crédito por la FK.
+      await tx
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        .where(eq(creditos.credito_id, anulado.credito_id))
+        .for("update");
+
+      await cerrarMoraPagadaDeCredito(
+        { credito_id: anulado.credito_id },
+        tx as unknown as typeof db,
       );
 
-      if (cuotasAtrasadas > 0) {
-        const [{ capital } = { capital: "0" }] = await tx
-          .select({ capital: creditos.capital })
-          .from(creditos)
-          .where(eq(creditos.credito_id, anulado.credito_id));
+      const [{ capital } = { capital: "0" }] = await tx
+        .select({ capital: creditos.capital })
+        .from(creditos)
+        .where(eq(creditos.credito_id, anulado.credito_id));
 
-        // Misma fórmula que el motor: capital × 1.12% × cuotas atrasadas.
-        const montoMora = new Big(capital).times("0.0112").times(cuotasAtrasadas);
+      // El cargador de cuotas aplica la exclusión de estados del cron y
+      // EN_CONVENIO está excluido: el crédito sale de ahí ANTES de cargar.
+      await tx
+        .update(creditos)
+        .set({ statusCredit: "ACTIVO" })
+        .where(eq(creditos.credito_id, anulado.credito_id));
 
+      const cuotasParaPendiente =
+        (
+          await cuotasParaPendienteDeCreditos(
+            [anulado.credito_id],
+            tx as unknown as typeof db,
+            // «Hoy» de la base, el mismo reloj del recuento de createMora.
+            await hoyGuatemalaDeLaBase(tx as unknown as typeof db),
+          )
+        ).get(anulado.credito_id)?.cuotas ?? [];
+      const cuotasAtrasadas = cuotasParaPendiente.length;
+
+      const decision = decidirMoraTrasRomperConvenio({
+        capital,
+        cuotasParaPendiente,
+      });
+
+      if (decision.accion === "CREAR_MORA") {
         await tx
           .update(creditos)
           .set({
@@ -241,22 +276,20 @@ export async function anularConvenio(params: {
           })
           .where(eq(creditos.credito_id, anulado.credito_id));
 
-        const resultMora = await createMora(
-          {
-            credito_id: anulado.credito_id,
-            monto_mora: Number(montoMora.toFixed(2)),
-            cuotas_atrasadas: cuotasAtrasadas,
-            origen: "API_MANUAL",
-            motivo: `Convenio deshecho: ${motivo}`,
-            usuario_id: usuarioId ?? undefined,
-          },
-          tx,
-        );
+        const resultMora = await createMora({
+          credito_id: anulado.credito_id,
+          monto_mora: decision.montoMora,
+          cuotas_atrasadas: cuotasAtrasadas,
+          origen: "API_MANUAL",
+          motivo: `Convenio deshecho: ${motivo}`,
+          usuario_id: usuarioId ?? undefined,
+          dbClient: tx as unknown as typeof db,
+        });
 
         // `createMora` devuelve {success:false} en vez de lanzar. Drizzle solo
         // revierte si la callback LANZA: sin este throw quedaría comiteado el
         // convenio anulado sin la mora recreada — un crédito que no le debe
-        // nada a nadie (mismo criterio que convenioDecision.ts).
+        // nada a nadie (mismo criterio que la ruptura).
         if (!resultMora.success) {
           throw new Error(
             `No se pudo recrear la mora del crédito ${anulado.credito_id} al deshacer el convenio: ${resultMora.message}`,

@@ -11,7 +11,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
         classNames: {
           toast:
             "group toast group-[.toaster]:bg-white group-[.toaster]:text-gray-900 group-[.toaster]:border-gray-200 group-[.toaster]:shadow-lg",
-          description: "group-[.toast]:text-gray-600",
+          // Los mensajes de varios campos vienen en varias lineas.
+          title: "group-[.toast]:whitespace-pre-line",
+          description: "group-[.toast]:text-gray-600 group-[.toast]:whitespace-pre-line",
           actionButton:
             "group-[.toast]:bg-blue-600 group-[.toast]:text-white",
           cancelButton:

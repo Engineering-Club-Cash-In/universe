@@ -122,6 +122,8 @@ interface ResumenInversionista {
 	boleta_liquidacion?: BoletaPendiente | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 	reporte_liquidacion_url?: string | null;
+	/** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+	reporte_liquidacion_url_gtq?: string | null;
 }
 
 type EstadoBoletaFilter = "all" | "pending" | "liquidated";
@@ -672,6 +674,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const tieneBoleta = inv.boleta_pendiente != null;
 	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
 	const reporteLiquidacionUrl = inv.reporte_liquidacion_url ?? null;
+	const reporteLiquidacionUrlGtq = inv.reporte_liquidacion_url_gtq ?? null;
 	const estadoResumen =
 		inv.estado_liquidacion_resumen ?? (tieneBoleta ? "uploaded" : "pending");
 	const montoPrincipal = inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
@@ -821,7 +824,9 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				{/* Acción */}
 				<div className="flex flex-col gap-2 px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
-						tieneBoletaLiquidacion || reporteLiquidacionUrl ? (
+						tieneBoletaLiquidacion ||
+						reporteLiquidacionUrl ||
+						reporteLiquidacionUrlGtq ? (
 							<div className="flex gap-2">
 								{tieneBoletaLiquidacion && (
 									<Button
@@ -844,7 +849,21 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 										onClick={() => window.open(reporteLiquidacionUrl, "_blank")}
 									>
 										<FileText className="h-3.5 w-3.5" />
-										Reporte
+										{/* Solo se rotula la moneda cuando hay dos reportes que distinguir. */}
+										{reporteLiquidacionUrlGtq ? "Reporte $" : "Reporte"}
+									</Button>
+								)}
+								{reporteLiquidacionUrlGtq && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-8 flex-1 gap-1.5 text-xs"
+										onClick={() =>
+											window.open(reporteLiquidacionUrlGtq, "_blank")
+										}
+									>
+										<FileText className="h-3.5 w-3.5" />
+										Reporte Q
 									</Button>
 								)}
 							</div>

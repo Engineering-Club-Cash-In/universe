@@ -69,6 +69,7 @@ export function generateAmortizationTable(
 // Define an interface for the quotation data
 interface QuotationData {
 	creditType: QuotationCreditType;
+	insuranceProvider: "universales" | "gyt";
 	clientName?: string | null;
 	vehicleBrand: string | null;
 	vehicleLine: string | null;
@@ -239,7 +240,13 @@ export function generateQuotationPdf(
 		doc.setFont("helvetica", "normal");
 
 		y += 7;
-		doc.text("Seguro:", leftCol, y);
+		doc.text(
+			quotation.insuranceProvider === "gyt"
+				? "Seguro GyT:"
+				: "Seguro Universales:",
+			leftCol,
+			y,
+		);
 		doc.text(formatCurrency(quotation.insuranceCost), leftValueCol, y);
 
 		y += 7;

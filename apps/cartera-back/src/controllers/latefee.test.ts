@@ -33,6 +33,11 @@ function crearBuilderSelect() {
     orderBy() { return b; },
     limit() { return b; },
     offset() { return b; },
+    // Lo que agregó el cron de develop (mora proporcional + ledger de mora
+    // pagada): agrupación por cuota y candados de fila.
+    groupBy() { return b; },
+    having() { return b; },
+    for() { return b; },
     then(res: any, rej: any) {
       return Promise.resolve(estado.selects.get(tabla) ?? []).then(res, rej);
     },
@@ -60,11 +65,30 @@ function crearMutadores() {
       return {
         set(s: Fila) {
           estado.updates.push({ tabla, set: s });
-          return { where: () => Promise.resolve([]) };
+          return {
+            where: () => {
+              const p: any = Promise.resolve([]);
+              // El cron de develop usa el `.returning()` del UPDATE condicional
+              // como señal de que el crédito sigue elegible: la fila matchea.
+              p.returning = () => Promise.resolve([{ credito_id: 0, mora_id: 0 }]);
+              return p;
+            },
+          };
         },
       };
     },
   };
+}
+
+/** Ejecutor de una transacción (y de sus savepoints): mismo fake que `db`. */
+function crearEjecutorTx(): any {
+  const ejecutor: any = {
+    select: () => crearBuilderSelect(),
+    ...crearMutadores(),
+    execute: async () => ({ rows: [] }),
+  };
+  ejecutor.transaction = async (cb: any) => cb(ejecutor);
+  return ejecutor;
 }
 
 let transactionCalls = 0;
@@ -73,9 +97,10 @@ let transactionExecutorOverride: any = null;
 const fakeDb: any = {
   select: () => crearBuilderSelect(),
   ...crearMutadores(),
+  execute: async () => ({ rows: [] }),
   transaction: async (cb: any) => {
     transactionCalls++;
-    return cb(transactionExecutorOverride ?? crearMutadores());
+    return cb(transactionExecutorOverride ?? crearEjecutorTx());
   },
 };
 
@@ -96,6 +121,8 @@ mock.module("../database", () => ({ db: fakeDb, client: fakeClient }));
 const {
   procesarMoras,
   isOverdueInstallmentForMora,
+  decidirLimpiezaMoraTrasAplicar,
+  hoyGuatemala,
   elegirAsesorParaBucket,
   updateMora,
   updateMoraEnTx,
@@ -255,7 +282,10 @@ function crearTxUpdateMora() {
       return {
         values(value: Fila | Fila[]) {
           inserts.push({ tabla, filas: Array.isArray(value) ? value : [value] });
-          return Promise.resolve([]);
+          const p: any = Promise.resolve([]);
+          // registrarHistorialMora (develop) devuelve el historial_id del evento.
+          p.returning = () => Promise.resolve([{ historial_id: 1 }]);
+          return p;
         },
       };
     },
@@ -286,7 +316,10 @@ describe("updateMoraEnTx", () => {
     expect(fake.updates.map((entry) => entry.tabla)).toEqual([moras_credito, creditos]);
   });
 
-  it("propaga errores inesperados para que la transacción exterior haga rollback", async () => {
+  // Desde el merge con develop, updateMoraEnTx es updateMora con la tx del
+  // llamador: un error no se lanza, vuelve como `success: false`, y quien llama
+  // (pagaloPaymentImport) tira sobre eso y su transacción hace rollback.
+  it("un error inesperado vuelve como success:false para que el llamador revierta", async () => {
     const expected = new Error("db unavailable");
     const tx: any = {
       select: () => ({
@@ -296,25 +329,31 @@ describe("updateMoraEnTx", () => {
       }),
     };
 
-    expect(updateMoraEnTx({
+    const result = await updateMoraEnTx({
       numero_credito_sifco: "01010214103710",
       monto_cambio: 25,
       tipo: "INCREMENTO",
-    }, tx)).rejects.toBe(expected);
+    }, tx);
+    expect(result).toMatchObject({ success: false, error: String(expected) });
   });
 
-  it("por defecto propaga un fallo de historial para abortar la transacción exterior", async () => {
+  it("un fallo del historial NO se traga: el ajuste devuelve success:false", async () => {
     const expected = new Error("history insert failed");
     const fake = crearTxUpdateMora();
     fake.tx.insert = () => ({
-      values: () => Promise.reject(expected),
+      values: () => {
+        const p: any = Promise.reject(expected);
+        p.returning = () => p;
+        return p;
+      },
     });
 
-    expect(updateMoraEnTx({
+    const result = await updateMoraEnTx({
       credito_id: 8818,
       monto_cambio: 25,
       tipo: "INCREMENTO",
-    }, fake.tx)).rejects.toBe(expected);
+    }, fake.tx);
+    expect(result).toMatchObject({ success: false, error: String(expected) });
   });
 });
 
@@ -334,23 +373,20 @@ describe("updateMora", () => {
     expect(fake.inserts.filter((entry) => entry.tabla === moras_historial)).toHaveLength(1);
   });
 
-  it("conserva historial best-effort para callers legados", async () => {
+  // develop (en prod): el evento de moras_historial va DENTRO de la transacción
+  // y su fallo ya no se traga — el ajuste falla ruidoso y reintentable en vez de
+  // dejar una mutación de mora sin rastro. Reemplaza el "historial best-effort
+  // para callers legados" de COBROS-02 (y el log con requestId, que develop
+  // cambió por la telemetría `credit.late_fee`).
+  it("un fallo del historial revierte el ajuste completo (sin savepoint)", async () => {
     const fake = crearTxUpdateMora();
-    let outerTransactionAborted = false;
     fake.tx.insert = () => ({
       values: () => {
-        outerTransactionAborted = true;
-        return Promise.reject(new Error("same-level history insert failed"));
+        const p: any = Promise.reject(new Error("history insert failed"));
+        p.returning = () => p;
+        return p;
       },
     });
-    fake.tx.transaction = async (callback: (savepoint: any) => Promise<unknown>) => {
-      fake.savepoints.calls++;
-      const savepoint = Object.create(fake.tx);
-      savepoint.insert = () => ({
-        values: () => Promise.reject(new Error("savepoint history insert failed")),
-      });
-      return callback(savepoint);
-    };
     transactionExecutorOverride = fake.tx;
 
     const result = await updateMora({
@@ -359,63 +395,9 @@ describe("updateMora", () => {
       tipo: "INCREMENTO",
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(transactionCalls).toBe(1);
-    expect(fake.savepoints.calls).toBe(1);
-    expect(outerTransactionAborted).toBe(false);
-    expect(fake.updates.map((entry) => entry.tabla)).toEqual([moras_credito, creditos]);
-  });
-
-  it("con SIFCO conserva el mismo requestId entre inicio y error", async () => {
-    const expected = new Error("mora select failed");
-    transactionExecutorOverride = {
-      select() {
-        let tabla: any;
-        const builder: any = {
-          from(value: any) { tabla = value; return builder; },
-          where() { return builder; },
-          orderBy() { return builder; },
-          limit() { return builder; },
-          for() { return builder; },
-          then(resolve: any, reject: any) {
-            const result = tabla === creditos
-              ? Promise.resolve([{ credito_id: 8818 }])
-              : Promise.reject(expected);
-            return result.then(resolve, reject);
-          },
-        };
-        return builder;
-      },
-    };
-
-    const originalNow = Date.now;
-    const originalLog = console.log;
-    const originalError = console.error;
-    let instant = 1_000;
-    const output: string[] = [];
-    Date.now = () => instant++;
-    console.log = (...args: unknown[]) => output.push(args.map(String).join(" "));
-    console.error = (...args: unknown[]) => output.push(args.map(String).join(" "));
-
-    try {
-      const result = await updateMora({
-        numero_credito_sifco: "01010214103710",
-        monto_cambio: 25,
-        tipo: "INCREMENTO",
-      });
-
-      expect(result).toMatchObject({ success: false, error: String(expected) });
-    } finally {
-      Date.now = originalNow;
-      console.log = originalLog;
-      console.error = originalError;
-    }
-
-    const requestIds = output.flatMap((line) =>
-      [...line.matchAll(/Request ID: ([^\n]+)/g)].map((match) => match[1]),
-    );
-    expect(requestIds).toHaveLength(2);
-    expect(new Set(requestIds).size).toBe(1);
+    expect(fake.savepoints.calls).toBe(0);
   });
 });
 
@@ -622,6 +604,138 @@ describe("isOverdueInstallmentForMora", () => {
     );
 
     expect(result).toBe(false);
+  });
+
+  it("no cuenta como vencida la cuota que vence exactamente hoy", () => {
+    const result = isOverdueInstallmentForMora(
+      {
+        fecha_vencimiento: new Date("2026-08-15T06:00:00.000Z"),
+        pagado: false,
+        hasPaidPayment: false,
+        statusCredit: "ACTIVO",
+      },
+      new Date("2026-08-15T06:00:00.000Z"),
+    );
+
+    expect(result).toBe(false);
+  });
+
+  // Caso crédito 8685 (CRM-0f8a04b7): una boleta registrada pero aún pendiente
+  // de validación por contabilidad NO protege la cuota. La mora que el cron
+  // crea esa noche es correcta bajo la regla "solo cuenta lo validado"; el fix
+  // va en la validación (desactivar al aplicar), no en este criterio.
+  it("sigue contando como vencida una cuota con boleta registrada pero sin validar", () => {
+    const result = isOverdueInstallmentForMora(
+      {
+        fecha_vencimiento: new Date("2026-07-15T06:00:00.000Z"),
+        pagado: false,
+        hasPaidPayment: false, // el EXISTS exige validated/no_required
+        statusCredit: "ACTIVO",
+      },
+      new Date("2026-08-15T06:00:00.000Z"),
+    );
+
+    expect(result).toBe(true);
+  });
+});
+
+describe("decidirLimpiezaMoraTrasAplicar", () => {
+  it("desactiva la mora y baja a ACTIVO cuando el crédito MOROSO queda al día", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 0,
+        capitalCredito: "114160.35",
+        statusCredit: "MOROSO",
+      }),
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: true,
+      sinCapital: false,
+    });
+  });
+
+  it("desactiva la mora sin tocar el status si el crédito no está MOROSO", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 0,
+        capitalCredito: "114160.35",
+        statusCredit: "ACTIVO",
+      }),
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
+  });
+
+  it("no des-castiga un crédito INCOBRABLE aunque le apague la mora", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 0,
+        capitalCredito: "114160.35",
+        statusCredit: "INCOBRABLE",
+      }),
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
+  });
+
+  it("no toca nada si aún quedan cuotas vencidas sin validar", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 1,
+        capitalCredito: "114160.35",
+        statusCredit: "MOROSO",
+      }),
+    ).toEqual({
+      desactivarMora: false,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
+  });
+
+  it("desactiva aunque queden vencidas si el capital llegó a 0 (espejo sinCapital del cron)", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 2,
+        capitalCredito: "0.00",
+        statusCredit: "MOROSO",
+      }),
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: true,
+      sinCapital: true,
+    });
+  });
+
+  it("capital desconocido (null) no cuenta como sinCapital", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 1,
+        capitalCredito: null,
+        statusCredit: "MOROSO",
+      }),
+    ).toEqual({
+      desactivarMora: false,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
+  });
+
+  it("desactiva sin bajar status cuando el status es null", () => {
+    expect(
+      decidirLimpiezaMoraTrasAplicar({
+        cuotasVencidasRestantes: 0,
+        capitalCredito: "500.00",
+        statusCredit: null,
+      }),
+    ).toEqual({
+      desactivarMora: true,
+      bajarStatusAActivo: false,
+      sinCapital: false,
+    });
   });
 });
 
@@ -848,11 +962,15 @@ describe("día calendario GT — independiente del TZ del proceso (CB-030)", () 
     expect(hoyGtISO(new Date("2026-08-04T06:00:00.000Z"))).toBe("2026-08-04");
   });
 
+  // Desde el merge con develop, el `hoy` del módulo de mora es el canónico
+  // `hoyGuatemala(instante)` (medianoche GT en campos locales), no el instante
+  // crudo: así lo pasan el cron, createMora y el reparto de pagos.
   it("fecha_vencimiento date-only: string y Date dan el MISMO veredicto que el SQL (venc < hoy_gt)", () => {
     const discrepancias: string[] = [];
     for (let h = 0; h < 48; h++) {
-      const hoy = new Date(Date.UTC(2026, 7, 4, h, 30));
-      const diaGt = diaGtRef(hoy);
+      const instante = new Date(Date.UTC(2026, 7, 4, h, 30));
+      const hoy = hoyGuatemala(instante);
+      const diaGt = diaGtRef(instante);
       for (const venc of ["2026-08-03", "2026-08-04", "2026-08-05"]) {
         const esperado = venc < diaGt; // semántica de `cu.fecha_vencimiento::date < hoy_gt`
         const comoString = isOverdueInstallmentForMora(
@@ -864,7 +982,7 @@ describe("día calendario GT — independiente del TZ del proceso (CB-030)", () 
           hoy,
         );
         if (comoString !== esperado || comoDate !== esperado) {
-          discrepancias.push(`${hoy.toISOString()} venc=${venc} str=${comoString} date=${comoDate} esperado=${esperado}`);
+          discrepancias.push(`${instante.toISOString()} venc=${venc} str=${comoString} date=${comoDate} esperado=${esperado}`);
         }
       }
     }

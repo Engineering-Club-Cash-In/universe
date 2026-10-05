@@ -70,6 +70,7 @@ import {
 	wialonUnitsCatalogOutputSchema,
 } from "../services/wialon/wialon-types";
 import { assertAccesoCasoCobro } from "./cobros";
+import { auditRecord } from "../lib/audit";
 
 // CB-121: conecta la bitácora técnica de cada intento HTTP a Wialon al
 // cargar este router (una sola vez por proceso). Va acá y no en
@@ -369,6 +370,13 @@ async function liberarVinculoAuto(
 					eq(vehicles.wialonVinculadoPor, WIALON_VINCULO_AUTO_PLACA),
 				),
 			);
+		// Bitácora de entidades (develop): toda escritura sobre `vehicles` se anota.
+		auditRecord({
+			entity: "vehicle",
+			id: vehicleId,
+			action: "wialon_desvincular",
+			data: { unitId, automatico: true },
+		});
 		console.info("WIALON_VINCULO_AUTO_LIBERADO", { vehicleId, unitId });
 		return true;
 	} catch (error) {
@@ -438,6 +446,14 @@ export async function fijarVinculoPorPlaca(
 				})
 				.where(and(eq(vehicles.id, vehicleId), isNull(vehicles.wialonUnitId)))
 				.returning({ id: vehicles.id });
+			if (guardados.length > 0) {
+				auditRecord({
+					entity: "vehicle",
+					id: vehicleId,
+					action: "wialon_vincular",
+					data: { unitId, unitName, automatico: true },
+				});
+			}
 			return guardados.length > 0
 				? ("guardado" as const)
 				: ("ya_vinculado" as const);
@@ -1470,6 +1486,20 @@ export const wialonRouter = o.use(contextoGpsPorEndpoint).router({
 						message: "No se encontró el vehículo a vincular",
 					});
 				}
+				for (const liberado of liberados) {
+					auditRecord({
+						entity: "vehicle",
+						id: liberado.id,
+						action: "wialon_desvincular",
+						data: { unitId: input.unitId, reasignadaA: input.vehicleId },
+					});
+				}
+				auditRecord({
+					entity: "vehicle",
+					id: input.vehicleId,
+					action: "wialon_vincular",
+					data: { unitId: input.unitId, unitName },
+				});
 				return { liberados };
 			});
 

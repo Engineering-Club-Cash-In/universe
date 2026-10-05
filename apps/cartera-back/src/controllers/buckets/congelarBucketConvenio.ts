@@ -33,7 +33,7 @@ import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../../lib/buckets-job-locks";
 // No hay evento de salida, y es a propósito (review de Codex, P2). Cuando el
 // convenio se completa, se rechaza o se deshace, el crédito vuelve a
 // ACTIVO/MOROSO y la fila `CONGELADO` sigue siendo la última del historial
-// hasta que el motor de las 23:59 deriva el bucket real y escribe la
+// hasta que el motor de las 00:05 deriva el bucket real y escribe la
 // transición contra ella. La ventana es de horas, no permanente: el motor
 // recorre TODOS los créditos con cuotas —no solo los que tienen mora—, así que
 // un crédito que salió del convenio sin deber nada igual se visita y baja
@@ -73,7 +73,7 @@ export async function bucketAntesDelConvenio(
   // fila `CONGELADO` de un convenio ANTERIOR.
   //
   // El escenario: se rechaza un convenio y se firma otro antes de que corra el
-  // motor de las 23:59. El rechazo devuelve el crédito a MOROSO/ACTIVO pero no
+  // motor de las 00:05. El rechazo devuelve el crédito a MOROSO/ACTIVO pero no
   // escribe historial de bucket, así que la última fila sigue siendo el
   // congelamiento viejo — y el convenio nuevo se congelaba en el bucket del
   // anterior en vez del que le toca por su mora de HOY.

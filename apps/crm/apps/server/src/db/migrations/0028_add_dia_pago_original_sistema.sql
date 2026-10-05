@@ -1,0 +1,12 @@
+-- Día que el sistema hubiera asignado por default (día≤20→15, día>20→30) en el
+-- momento de la asignación de inversión (50%), ANTES de que el analista
+-- eligiera un día recomendado por IA. Se captura una sola vez ahí porque
+-- depende de qué día era "hoy" en ese instante — no se puede recalcular
+-- después sin cambiar su significado ("fecha prevista originalmente por el
+-- sistema"). Se usa junto con dia_pago_mensual para calcular el ingreso
+-- adicional por días de diferencia
+-- (feat/fecha_ideal_de_pago_calcular_cobro_extra_por_días_adicionales).
+-- Solo se llena cuando se elige un día recomendado por IA (nunca con 15/30
+-- manual). Aditiva y retrocompatible: columna nullable, oportunidades viejas
+-- quedan en NULL.
+ALTER TABLE "opportunities" ADD COLUMN IF NOT EXISTS "dia_pago_original_sistema" integer;

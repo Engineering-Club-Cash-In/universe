@@ -1,27 +1,54 @@
 import { sql } from "drizzle-orm";
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
+import Big from "big.js";
 import { db } from "../database";
 import {
-	type MoraRecoverySourceRow,
+  buildProjectedInvestorFlow,
+  type ProjectionSourceRow,
+} from "./investmentProjection";
+import {
+	type MoraRecoveryFilaCruda,
+	acumularMoraRecoveryRows,
+	buildMoraRecoveryCreditosQuery,
 	buildMoraRecoveryQuery,
-	buildMoraRecoveryReport,
+	finalizarMoraRecoveryReport,
 	getMoraRecoveryPeriod,
+	nuevoMoraRecoveryAccumulator,
+	partirEnLotes,
+	traducirFilaMoraRecovery,
 } from "./moraRecuperacion";
+import {
+  buildCapitalCarteraQuery,
+  creditosElegiblesMoraSql,
+} from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
+import {
+  buildAtrasadoOnlySql,
+  buildInteresIvaInversionistaSql,
+  participacionExternaActualCteSql,
+} from "./monto-a-cobrar-participacion-sql";
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
-  canonicalizePurchaseSummaries,
+	aggregateInvestorLiquidationRows,
+	assertLiquidationRowsReinvestmentIntegrity,
+	canonicalizeLiquidationModeRows,
+	buildLiquidationComposition,
+	buildPurchaseTicketHistory,
 	calculateActiveCapital,
 	assertModeReconciliation,
 	assertReportReconciliation,
   buildCubeNetInterest,
   buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
+	normalizeReinvestmentComponents,
+	summarizePurchaseDetails,
 	shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
 
 type Periodo = "anio" | "trimestre" | "mes" | "semana" | "dia";
+
+const numericMoney = (value: unknown) => new Big(String(value ?? 0)).toFixed(2);
 
 const toPostgresPeriod: Record<Periodo, string> = {
   anio: "'year'",
@@ -87,7 +114,7 @@ export async function getMontoACobrar({
   return result.rows;
 }
 
-export async function getMontoACobrarPeriodo({
+export function buildMontoACobrarPeriodoQuery({
   periodo,
   fechaInicio,
   fechaFin,
@@ -105,10 +132,34 @@ export async function getMontoACobrarPeriodo({
     dia: "1 day",
   };
   const pgInterval = sql.raw(`interval '${pgIntervalMap[periodo]}'`);
+  const atrasadoCapital = buildAtrasadoOnlySql("acum_capital", "cap_ant");
+  const atrasadoInteres = buildAtrasadoOnlySql("acum_interes");
+  const atrasadoIva = buildAtrasadoOnlySql("acum_iva");
+  const atrasadoSeguro = buildAtrasadoOnlySql("acum_seguro");
+  const atrasadoGps = buildAtrasadoOnlySql("acum_gps");
+  const atrasadoMembresias = buildAtrasadoOnlySql("acum_mem");
+  const atrasadoInteresIvaInversionista = buildInteresIvaInversionistaSql(
+    atrasadoInteres,
+    atrasadoIva,
+    "pbc.credito_id",
+  );
 
-  const result = await db.execute(sql`
+  return sql`
     WITH
-    pagos_en_rango AS (
+    buckets AS (
+      SELECT generate_series(
+        DATE_TRUNC(${pg}, ${fechaInicio}::date),
+        DATE_TRUNC(${pg}, ${fechaFin}::date),
+        ${pgInterval}
+      ) AS bucket
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (q.credito_id, q.numero_cuota)
+        q.cuota_id, q.credito_id, q.numero_cuota, q.fecha_vencimiento
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q
+      ORDER BY q.credito_id, q.numero_cuota, q.cuota_id DESC
+    ),
+    pagos_en_rango_base AS (
       SELECT
         pc.credito_id,
         pc.cuota_id,
@@ -145,25 +196,93 @@ export async function getMontoACobrarPeriodo({
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
     ),
-    participacion_externa_actual AS (
+    pagos_en_rango AS (
+      SELECT base.*, false AS solo_atrasado
+      FROM pagos_en_rango_base base
+
+      UNION ALL
+
       SELECT
-        ci.credito_id,
-        COALESCE(SUM(ci.porcentaje_participacion_inversionista::numeric / 100) FILTER (WHERE i.permite_distribucion = false), 0) AS participacion_externa_actual
-      FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
-      INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
-      GROUP BY ci.credito_id
+        c.credito_id,
+        NULL::integer AS cuota_id,
+        b.bucket::date AS fecha_venc,
+        0::numeric AS capital_restante,
+        0::numeric AS interes_restante,
+        0::numeric AS iva_12_restante,
+        0::numeric AS seguro_restante,
+        0::numeric AS gps_restante,
+        0::numeric AS membresias,
+        0::numeric AS monto_boleta,
+        true AS solo_atrasado
+      FROM buckets b
+      JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON EXISTS (
+        SELECT 1
+        FROM cuotas_autoritativas q_atrasada
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito pc_atrasada
+          ON pc_atrasada.cuota_id = q_atrasada.cuota_id
+          AND pc_atrasada."paymentFalse" = false
+          AND (
+            COALESCE(pc_atrasada.fecha_boleta::date, pc_atrasada.fecha_pago::date) IS NULL
+            OR COALESCE(pc_atrasada.fecha_boleta::date, pc_atrasada.fecha_pago::date) <= GREATEST(b.bucket::date, ${fechaInicio}::date)
+          )
+        WHERE q_atrasada.credito_id = c.credito_id
+          AND q_atrasada.fecha_vencimiento::date < GREATEST(b.bucket::date, ${fechaInicio}::date)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_pagada
+            WHERE pc_pagada.cuota_id = q_atrasada.cuota_id
+              AND pc_pagada."paymentFalse" = false
+              AND pc_pagada.pagado = true
+              AND pc_pagada.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc_pagada.fecha_boleta::date, pc_pagada.fecha_pago::date) <= GREATEST(b.bucket::date, ${fechaInicio}::date)
+          )
+        GROUP BY q_atrasada.cuota_id
+        HAVING (
+            COALESCE(MIN(pc_atrasada.capital_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.interes_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.iva_12_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.seguro_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.gps_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.membresias::numeric), 0)
+        ) > 0
+        OR COUNT(pc_atrasada.pago_id) = 0
+        OR MIN(pc_atrasada.capital_restante) IS NULL
+      )
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM pagos_en_rango_base actual
+        WHERE actual.credito_id = c.credito_id
+          AND DATE_TRUNC(${pg}, actual.fecha_venc::timestamp) = b.bucket
+          AND (
+              COALESCE(actual.capital_restante, 0)
+            + COALESCE(actual.interes_restante, 0)
+            + COALESCE(actual.iva_12_restante, 0)
+            + COALESCE(actual.seguro_restante, 0)
+            + COALESCE(actual.gps_restante, 0)
+            + COALESCE(actual.membresias, 0)
+            + COALESCE(actual.monto_boleta, 0)
+          ) <> 0
+      )
     ),
+    ${sql.raw(participacionExternaActualCteSql)},
     per_credito AS (
       SELECT
         p.fecha_venc::date                                             AS bucket,
+        GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date) AS period_start,
         c.credito_id,
         c."statusCredit"                                               AS status,
         c.porcentaje_interes::numeric / 100                            AS tasa,
         c.cuota::numeric                                               AS cuota_c,
-        COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro,
-        COALESCE(c.gps::numeric, 0)                                    AS gps,
-        COALESCE(c.membresias_pago::numeric, 0)                        AS mem,
-        COALESCE(MAX(pea.participacion_externa_actual), 0)             AS participacion_externa_actual,
+        COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro_contractual,
+        COALESCE(c.gps::numeric, 0)                                    AS gps_contractual,
+        COALESCE(c.membresias_pago::numeric, 0)                        AS mem_contractual,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.seguro_10_cuotas::numeric, 0) ELSE 0 END AS seguro,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.gps::numeric, 0) ELSE 0 END AS gps,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.membresias_pago::numeric, 0) ELSE 0 END AS mem,
+        BOOL_OR(NOT p.solo_atrasado)                                    AS tiene_cuota_periodo,
+        COALESCE(MAX(pea.factor_capital_inversionista), 0)              AS factor_capital_inversionista,
+        COALESCE(MAX(pea.factor_interes_iva_inversionista), 0)          AS factor_interes_iva_inversionista,
+        COALESCE(BOOL_OR(pea.participacion_invalida), false)            AS participacion_invalida,
         COALESCE(cap_anterior.total_restante, c.capital::numeric)       AS cap_ant,
         MAX(mora_real.cuotas_atrasadas)                                 AS cuotas_atrasadas,
         CASE WHEN MAX(mora_real.cuotas_atrasadas) > 0
@@ -190,34 +309,31 @@ export async function getMontoACobrarPeriodo({
           AND pc_a."paymentFalse" = false
           AND pc_a.total_restante IS NOT NULL
           AND pc_a.total_restante::numeric > 0
-          AND COALESCE(
-            qcc_a.fecha_vencimiento::date,
-            GREATEST(
-              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-              COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+          AND (
+            (
+              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) IS NULL
+              AND qcc_a.fecha_vencimiento::date < GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
             )
-          ) < DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date
-        ORDER BY COALESCE(
-          qcc_a.fecha_vencimiento::date,
-          GREATEST(
-            COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-            COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+            OR COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) <= GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           )
+        ORDER BY COALESCE(
+          COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date),
+          qcc_a.fecha_vencimiento::date
         ) DESC, pc_a.pago_id DESC
         LIMIT 1
       ) cap_anterior ON true
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS cuotas_atrasadas
-        FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito qc_mora
+        FROM cuotas_autoritativas qc_mora
         WHERE qc_mora.credito_id = c.credito_id
-          AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
+          AND qc_mora.fecha_vencimiento::date < GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           AND NOT EXISTS (
             SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc_mora
             WHERE pc_mora.cuota_id = qc_mora.cuota_id
               AND pc_mora."paymentFalse" = false
               AND pc_mora.pagado = true
               AND pc_mora.validation_status IN ('validated', 'no_required')
-              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= p.fecha_venc::date
+              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           )
       ) mora_real ON true
       GROUP BY
@@ -225,7 +341,7 @@ export async function getMontoACobrarPeriodo({
         c.credito_id, c."statusCredit", c.capital, c.porcentaje_interes, c.cuota,
         c.seguro_10_cuotas, c.gps, c.membresias_pago,
         cap_anterior.total_restante, mora_real.cuotas_atrasadas
-      HAVING (
+      HAVING BOOL_OR(p.solo_atrasado) OR (
         SUM(COALESCE(p.capital_restante, 0)) +
         SUM(COALESCE(p.interes_restante, 0)) +
         SUM(COALESCE(p.iva_12_restante, 0))  +
@@ -237,8 +353,10 @@ export async function getMontoACobrarPeriodo({
     ),
     calc AS (
       SELECT *,
-        ROUND(cap_ant * tasa, 2)                   AS interes,
-        ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2)  AS iva
+        ROUND(cap_ant * tasa, 2) AS interes_contractual,
+        ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) AS iva_contractual,
+        CASE WHEN tiene_cuota_periodo THEN ROUND(cap_ant * tasa, 2) ELSE 0 END AS interes,
+        CASE WHEN tiene_cuota_periodo THEN ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) ELSE 0 END AS iva
       FROM per_credito
     ),
     calc_acum AS (
@@ -246,7 +364,9 @@ export async function getMontoACobrarPeriodo({
         calc.*,
         (calc.status IN ('EN_CONVENIO', 'INCOBRABLE', 'CANCELADO', 'PENDIENTE_CANCELACION', 'CAIDO')) AS excluido_mora,
         (calc.status IN ('CANCELADO', 'INCOBRABLE', 'PENDIENTE_CANCELACION'))                          AS excluido_factura,
-        LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)             AS exp_capital,
+        CASE WHEN tiene_cuota_periodo
+             THEN LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)
+             ELSE 0 END AS exp_capital,
         COALESCE(acum.acum_capital, 0) AS acum_capital,
         COALESCE(acum.acum_interes, 0) AS acum_interes,
         COALESCE(acum.acum_iva,     0) AS acum_iva,
@@ -268,25 +388,33 @@ export async function getMontoACobrarPeriodo({
           COALESCE(SUM(a.membresias),       0) AS acum_mem
         FROM (
           SELECT
-            COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
-            COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
-            COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
-            COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
-            COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
-            COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
-          FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito q_a
+            COALESCE(
+              MIN(pc_a.capital_restante::numeric),
+              LEAST(GREATEST(calc.cuota_c - calc.interes_contractual - calc.iva_contractual
+                - calc.seguro_contractual - calc.gps_contractual - calc.mem_contractual, 0::numeric), calc.cap_ant)
+            ) AS capital_restante,
+            COALESCE(MIN(pc_a.interes_restante::numeric), calc.interes_contractual) AS interes_restante,
+            COALESCE(MIN(pc_a.iva_12_restante::numeric), calc.iva_contractual) AS iva_12_restante,
+            COALESCE(MIN(pc_a.seguro_restante::numeric), calc.seguro_contractual) AS seguro_restante,
+            COALESCE(MIN(pc_a.gps_restante::numeric), calc.gps_contractual) AS gps_restante,
+            COALESCE(MIN(pc_a.membresias::numeric), calc.mem_contractual) AS membresias
+          FROM cuotas_autoritativas q_a
           LEFT JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito pc_a
             ON pc_a.cuota_id = q_a.cuota_id
             AND pc_a."paymentFalse" = false
+            AND (
+              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) IS NULL
+              OR COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) <= calc.period_start
+            )
           WHERE q_a.credito_id = calc.credito_id
-            AND q_a.fecha_vencimiento::date < calc.bucket
+            AND q_a.fecha_vencimiento::date < calc.period_start
             AND NOT EXISTS (
               SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc2
               WHERE pc2.cuota_id = q_a.cuota_id
                 AND pc2."paymentFalse" = false
                 AND pc2.pagado = true
                 AND pc2.validation_status IN ('validated', 'no_required')
-                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.bucket
+                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.period_start
             )
           GROUP BY q_a.cuota_id
           HAVING (
@@ -323,23 +451,24 @@ export async function getMontoACobrarPeriodo({
         MAX(acum_seguro)                        AS acum_seguro,
         MAX(acum_gps)                           AS acum_gps,
         MAX(acum_mem)                           AS acum_mem,
-        MAX(participacion_externa_actual)       AS participacion_externa_actual,
-        COUNT(*)::int                           AS cuotas_count
+        MAX(factor_capital_inversionista)        AS factor_capital_inversionista,
+        MAX(factor_interes_iva_inversionista)    AS factor_interes_iva_inversionista,
+        BOOL_OR(participacion_invalida)          AS participacion_invalida,
+        COUNT(*) FILTER (WHERE tiene_cuota_periodo)::int AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
     ),
     split_participacion_actual AS (
       SELECT
         pbc.*,
-        (participacion_externa_actual < 0 OR participacion_externa_actual > 1) AS participacion_invalida,
-        ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * participacion_externa_actual, 2) AS capital_inv_participacion_actual,
-        (CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * participacion_externa_actual, 2) AS capital_cube_participacion_actual,
-        ROUND((CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) * participacion_externa_actual, 2) AS interes_iva_inv_participacion_actual,
-        (CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN interes + iva ELSE 0 END) * participacion_externa_actual, 2) AS interes_iva_cube_participacion_actual,
-        ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * participacion_externa_actual, 2) AS acum_capital_inv_participacion_actual,
-        (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * participacion_externa_actual, 2) AS acum_capital_cube_participacion_actual,
-        ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) * participacion_externa_actual, 2) AS acum_interes_iva_inv_participacion_actual,
-        (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) * participacion_externa_actual, 2) AS acum_interes_iva_cube_participacion_actual
+        CASE WHEN participacion_invalida THEN 0 ELSE ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * factor_capital_inversionista, 2) END AS capital_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * factor_capital_inversionista, 2) END AS capital_cube_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE CASE WHEN NOT excluido_factura THEN ${sql.raw(buildInteresIvaInversionistaSql("interes", "iva", "pbc.credito_id"))} ELSE 0 END END AS interes_iva_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE CASE WHEN NOT excluido_factura THEN interes + iva - ${sql.raw(buildInteresIvaInversionistaSql("interes", "iva", "pbc.credito_id"))} ELSE 0 END END AS interes_iva_cube_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE ROUND((${sql.raw(atrasadoCapital)}) * factor_capital_inversionista, 2) END AS acum_capital_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE (${sql.raw(atrasadoCapital)}) - ROUND((${sql.raw(atrasadoCapital)}) * factor_capital_inversionista, 2) END AS acum_capital_cube_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE ${sql.raw(atrasadoInteresIvaInversionista)} END AS acum_interes_iva_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE (${sql.raw(atrasadoInteres)}) + (${sql.raw(atrasadoIva)}) - ${sql.raw(atrasadoInteresIvaInversionista)} END AS acum_interes_iva_cube_participacion_actual
       FROM per_bucket_credit pbc
     ),
     participacion_invalida_rango AS (
@@ -375,30 +504,12 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
       COUNT(credito_id)::int                                                                    AS total_credits,
       COUNT(credito_id) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora)::int          AS credits_con_mora,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)
-        ELSE exp_capital END), 0)                                                                 AS acum_total_cuota,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_interes
-        ELSE interes END), 0)                                                                     AS acum_total_interes,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_iva
-        ELSE iva END), 0)                                                                         AS acum_total_iva,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_seguro
-        ELSE seguro END), 0)                                                                      AS acum_total_seguro,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_gps
-        ELSE gps END), 0)                                                                         AS acum_total_gps,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_mem
-        ELSE mem END), 0)                                                                         AS acum_total_membresias,
+      COALESCE(SUM(${sql.raw(atrasadoCapital)}), 0)       AS acum_total_cuota,
+      COALESCE(SUM(${sql.raw(atrasadoInteres)}), 0)       AS acum_total_interes,
+      COALESCE(SUM(${sql.raw(atrasadoIva)}), 0)           AS acum_total_iva,
+      COALESCE(SUM(${sql.raw(atrasadoSeguro)}), 0)        AS acum_total_seguro,
+      COALESCE(SUM(${sql.raw(atrasadoGps)}), 0)           AS acum_total_gps,
+      COALESCE(SUM(${sql.raw(atrasadoMembresias)}), 0)    AS acum_total_membresias,
       -- Interés a inversionistas (lo distribuido a externos). Por período: lo pagado en ese
       -- bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran total).
       COALESCE(MAX(ip.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
@@ -406,14 +517,14 @@ export async function getMontoACobrarPeriodo({
     -- FULL JOIN: el resultado se arma desde la unión de buckets de ambas fuentes, para que un
     -- período con pagos a inversionistas pero SIN cuotas pendientes (posible en vista
     -- día/semana) no se pierda ni subestime la columna.
-      COALESCE(SUM(capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_inv_participacion_actual,
-      COALESCE(SUM(capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_cube_participacion_actual,
-      COALESCE(SUM(interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_inv_participacion_actual,
-      COALESCE(SUM(interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_cube_participacion_actual,
-      COALESCE(SUM(acum_capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_inv_participacion_actual,
-      COALESCE(SUM(acum_capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_cube_participacion_actual,
-      COALESCE(SUM(acum_interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_inv_participacion_actual,
-      COALESCE(SUM(acum_interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_cube_participacion_actual,
+      COALESCE(SUM(capital_inv_participacion_actual), 0) AS capital_inv_participacion_actual,
+      COALESCE(SUM(capital_cube_participacion_actual), 0) AS capital_cube_participacion_actual,
+      COALESCE(SUM(interes_iva_inv_participacion_actual), 0) AS interes_iva_inv_participacion_actual,
+      COALESCE(SUM(interes_iva_cube_participacion_actual), 0) AS interes_iva_cube_participacion_actual,
+      COALESCE(SUM(acum_capital_inv_participacion_actual), 0) AS acum_capital_inv_participacion_actual,
+      COALESCE(SUM(acum_capital_cube_participacion_actual), 0) AS acum_capital_cube_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_inv_participacion_actual), 0) AS acum_interes_iva_inv_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_cube_participacion_actual), 0) AS acum_interes_iva_cube_participacion_actual,
       COUNT(credito_id) FILTER (WHERE participacion_invalida)::int AS creditos_participacion_invalida,
       COALESCE(MAX(pir.creditos_participacion_invalida_rango), 0)::int AS creditos_participacion_invalida_rango,
       COALESCE(SUM(cuotas_count) FILTER (WHERE participacion_invalida), 0)::int AS cuotas_participacion_invalida,
@@ -423,8 +534,15 @@ export async function getMontoACobrarPeriodo({
     CROSS JOIN participacion_invalida_rango pir
     GROUP BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket)
     ORDER BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket) ASC
-  `);
+  `;
+}
 
+export async function getMontoACobrarPeriodo(input: {
+  periodo: Periodo;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const result = await db.execute(buildMontoACobrarPeriodoQuery(input));
   return result.rows;
 }
 
@@ -658,7 +776,86 @@ export async function getFlujoCuotasInversiones({
     },
   };
 }
+export async function getInvestmentProjectionContext({
+  fechaInicio,
+  fechaFin,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const contextRows = await db.execute(sql`
+    WITH latest_cancelation AS (
+      SELECT DISTINCT ON (cc.credit_id)
+        cc.credit_id,
+        cc.monto_cancelacion::numeric AS monto_cancelacion
+      FROM ${SQL_CARTERA_SCHEMA}.credit_cancelations cc
+      ORDER BY cc.credit_id, cc.id DESC
+    ),
+    external_positions AS (
+      SELECT
+        ce.credito_id,
+        COALESCE(SUM(ce.monto_aportado::numeric) FILTER (
+          WHERE ce.inversionista_id <> 86
+            AND ce.status::text IS DISTINCT FROM 'cancelado'
+        ), 0) AS capital_externo
+      FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
+      GROUP BY ce.credito_id
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento::date AS fecha_vencimiento
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+      ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC
+    ),
+    cierres_naturales AS (
+      SELECT ca.credito_id
+      FROM cuotas_autoritativas ca
+      JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = ca.credito_id
+      WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      GROUP BY ca.credito_id
+      HAVING MAX(ca.fecha_vencimiento) >= ${fechaInicio}::date
+        AND MAX(ca.fecha_vencimiento) <= ${fechaFin}::date
+    )
+    SELECT
+      COUNT(DISTINCT lc.credit_id) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      )::integer AS cancelaciones_pendientes,
+      COALESCE(SUM(lc.monto_cancelacion) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS monto_cancelaciones_pendientes,
+      COALESCE(SUM(ep.capital_externo) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS capital_externo_cancelaciones,
+      (SELECT COUNT(*)::integer FROM cierres_naturales) AS cierres_naturales,
+      COALESCE((
+        SELECT SUM(epc.capital_externo)
+        FROM cierres_naturales cn
+        LEFT JOIN external_positions epc ON epc.credito_id = cn.credito_id
+      ), 0)::numeric(18, 2)::text AS capital_externo_cierres
+    FROM latest_cancelation lc
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = lc.credit_id
+    LEFT JOIN external_positions ep ON ep.credito_id = lc.credit_id
+  `);
+  const context = contextRows.rows[0] as Record<string, unknown> | undefined;
 
+  return {
+    cancelaciones_pendientes: {
+      cantidad_creditos: Number(context?.cancelaciones_pendientes ?? 0),
+      monto_bruto: String(context?.monto_cancelaciones_pendientes ?? "0.00"),
+      capital_externo_asociado: String(
+        context?.capital_externo_cancelaciones ?? "0.00",
+      ),
+    },
+    cierres_naturales_periodo: {
+      cantidad_creditos: Number(context?.cierres_naturales ?? 0),
+      capital_externo_asociado: String(
+        context?.capital_externo_cierres ?? "0.00",
+      ),
+    },
+  };
+}
 
 export async function getFlujoCuotasPorInversionista({
   fechaInicio,
@@ -668,6 +865,53 @@ export async function getFlujoCuotasPorInversionista({
   fechaFin: string;
 }) {
   const rows = await db.execute(sql`
+    WITH parametros AS (
+      SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Guatemala')::date AS fecha_corte
+    ),
+    compras_pendientes AS (
+      SELECT
+        compra.credito_id,
+        compra.inversionista_id,
+        SUM(compra.monto_aportado::numeric) AS monto_pendiente
+      FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista compra
+      WHERE compra.tipo_operacion IN ('compra_cartera', 'reinversion')
+        AND compra.status IN (
+          'pendiente_revision',
+          'pendiente_compra_cartera',
+          'pendiente_reinversion'
+        )
+        AND compra.revertida_at IS NULL
+      GROUP BY compra.credito_id, compra.inversionista_id
+    ),
+    capital_pagado_pendiente AS (
+      SELECT
+        pci.credito_id,
+        pci.inversionista_id,
+        SUM(pci.abono_capital::numeric) AS capital
+      FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci
+      WHERE pci.estado_liquidacion = 'NO_LIQUIDADO'
+      GROUP BY pci.credito_id, pci.inversionista_id
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento,
+        c.pagado
+      FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+      ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC
+    ),
+    cuotas_hasta_periodo AS (
+      SELECT
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento
+      FROM cuotas_autoritativas c
+      CROSS JOIN parametros p
+      WHERE c.pagado = false
+        AND c.fecha_vencimiento >= p.fecha_corte
+        AND c.fecha_vencimiento <= ${fechaFin}::date
+    )
     SELECT
       CASE
         WHEN i.tipo_reinversion = 'reinversion_combinada'
@@ -676,108 +920,154 @@ export async function getFlujoCuotasPorInversionista({
       END AS tipo_reinv_efectivo,
       i.inversionista_id,
       i.nombre,
-      COALESCE(SUM(ci.cuota_inversionista::numeric), 0) AS total_capital,
-      COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
-      COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
-      MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
-    FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+      i.monto_reinversion,
+      i.descuenta_impuestos,
+      i.emite_factura,
+      cube_i.nombre AS cube_nombre,
+      CASE
+        WHEN cube_i.tipo_reinversion = 'reinversion_combinada'
+        THEN COALESCE(cube_ce.tipo_reinversion::text, 'sin_reinversion')
+        ELSE cube_i.tipo_reinversion::text
+      END AS cube_tipo_reinv_efectivo,
+      cube_i.monto_reinversion AS cube_monto_reinversion,
+      cube_i.descuenta_impuestos AS cube_descuenta_impuestos,
+      cube_i.emite_factura AS cube_emite_factura,
+      ce.cuota_inversionista AS cuota,
+      ce.monto_inversionista AS interes_inversionista,
+      ce.monto_cash_in AS interes_cube,
+      ce.iva_inversionista,
+      ce.iva_cash_in AS iva_cube,
+      ce.monto_aportado,
+      cr."statusCredit" AS status_credito,
+      ce.status::text AS status_posicion,
+      ce.fecha_inicio_participacion,
+      p.fecha_corte::text AS fecha_corte,
+      c.credito_id,
+      c.numero_cuota,
+      c.fecha_vencimiento::text,
+      c.fecha_vencimiento >= ${fechaInicio}::date AS en_periodo,
+      cr.capital AS capital_credito,
+      cr.cuota AS cuota_credito,
+      cr.porcentaje_interes,
+      ce.porcentaje_participacion_inversionista AS porcentaje_inversionista,
+      ce.porcentaje_cash_in AS porcentaje_cube,
+      COALESCE(cp.monto_pendiente, 0) AS monto_pendiente,
+      COALESCE(cpp.capital, 0) AS capital_pagado_pendiente_liquidar,
+      COALESCE((
+        SELECT SUM(compra.monto_aportado::numeric)
+        FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista compra
+        WHERE compra.credito_id = ce.credito_id
+          AND compra.inversionista_id = ce.inversionista_id
+          AND compra.tipo_operacion = 'compra_cartera'
+          AND compra.status = 'completado'
+          AND compra.revertida_at IS NULL
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') >=
+            date_trunc('month', c.fecha_vencimiento::date - INTERVAL '1 month')
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') <
+            date_trunc('month', c.fecha_vencimiento::date)
+      ), 0) AS monto_compras_mes_anterior,
+      COALESCE((
+        SELECT SUM(compra.monto_aportado::numeric)
+        FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista compra
+        WHERE compra.credito_id = ce.credito_id
+          AND compra.inversionista_id = ce.inversionista_id
+          AND compra.tipo_operacion = 'compra_cartera'
+          AND compra.status = 'completado'
+          AND compra.revertida_at IS NULL
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') >=
+            date_trunc('month', c.fecha_vencimiento::date)
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') <
+            date_trunc('month', c.fecha_vencimiento::date + INTERVAL '1 month')
+      ), 0) AS monto_compras_mes_actual,
+      COALESCE(cr.membresias_pago::numeric, 0)
+        + COALESCE(cr.gps::numeric, 0)
+        + COALESCE(cr.seguro_10_cuotas::numeric, 0) AS cargos,
+      false AS es_mayor_participacion
+    FROM cuotas_hasta_periodo c
+    CROSS JOIN parametros p
     JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
-    JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
-    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON ci.inversionista_id = i.inversionista_id
-    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
-      ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
-    WHERE c.pagado = false
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
-      AND c.fecha_vencimiento >= ${fechaInicio}::date
-      AND c.fecha_vencimiento <= ${fechaFin}::date
-    GROUP BY tipo_reinv_efectivo, i.inversionista_id, i.nombre
-    ORDER BY i.nombre
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
+      ON cr.credito_id = ce.credito_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo cube_ce
+      ON cube_ce.credito_id = ce.credito_id
+      AND cube_ce.inversionista_id = 86
+    LEFT JOIN compras_pendientes cp
+      ON cp.credito_id = ce.credito_id
+      AND cp.inversionista_id = ce.inversionista_id
+    LEFT JOIN capital_pagado_pendiente cpp
+      ON cpp.credito_id = ce.credito_id
+      AND cpp.inversionista_id = ce.inversionista_id
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON ce.inversionista_id = i.inversionista_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.inversionistas cube_i ON cube_i.inversionista_id = 86
+    WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND ce.status::text IS DISTINCT FROM 'cancelado'
+      AND ce.fecha_inicio_participacion <= p.fecha_corte
+      AND ce.monto_aportado::numeric
+        - COALESCE(cp.monto_pendiente, 0)
+        - COALESCE(cpp.capital, 0) > 0
+    ORDER BY c.fecha_vencimiento, ce.credito_id, c.numero_cuota, i.nombre
   `);
 
-  const fmt = (n: number) => n.toFixed(2);
+  const sourceRows: ProjectionSourceRow[] = (
+    rows.rows as Record<string, unknown>[]
+  ).map((row) => ({
+    inversionista_id: Number(row.inversionista_id),
+    nombre: String(row.nombre),
+    tipo_reinv_efectivo: String(row.tipo_reinv_efectivo),
+    monto_reinversion:
+      row.monto_reinversion === null ? null : String(row.monto_reinversion),
+    descuenta_impuestos: row.descuenta_impuestos === true,
+    emite_factura: row.emite_factura === true,
+    cube_nombre:
+      row.cube_nombre === null ? undefined : String(row.cube_nombre),
+    cube_tipo_reinv_efectivo:
+      row.cube_tipo_reinv_efectivo === null
+        ? undefined
+        : String(row.cube_tipo_reinv_efectivo),
+    cube_monto_reinversion:
+      row.cube_monto_reinversion === null
+        ? null
+        : String(row.cube_monto_reinversion),
+    cube_descuenta_impuestos: row.cube_descuenta_impuestos === true,
+    cube_emite_factura: row.cube_emite_factura === true,
+    cuota: String(row.cuota),
+    interes_inversionista: String(row.interes_inversionista),
+    interes_cube: String(row.interes_cube),
+    iva_inversionista: String(row.iva_inversionista),
+    iva_cube: String(row.iva_cube),
+    cargos: String(row.cargos),
+    es_mayor_participacion: row.es_mayor_participacion === true,
+    monto_aportado: String(row.monto_aportado),
+    status_credito: String(row.status_credito),
+    status_posicion: String(row.status_posicion),
+    fecha_inicio_participacion: String(row.fecha_inicio_participacion),
+    fecha_corte: String(row.fecha_corte),
+    credito_id: Number(row.credito_id),
+    numero_cuota: Number(row.numero_cuota),
+    fecha_vencimiento: String(row.fecha_vencimiento),
+    en_periodo: row.en_periodo === true,
+    capital_credito: String(row.capital_credito),
+    cuota_credito: String(row.cuota_credito),
+    porcentaje_interes: String(row.porcentaje_interes),
+    porcentaje_inversionista: String(row.porcentaje_inversionista),
+    porcentaje_cube: String(row.porcentaje_cube),
+    monto_pendiente: String(row.monto_pendiente),
+    capital_pagado_pendiente_liquidar: String(
+      row.capital_pagado_pendiente_liquidar,
+    ),
+    monto_compras_mes_anterior: String(row.monto_compras_mes_anterior),
+    monto_compras_mes_actual: String(row.monto_compras_mes_actual),
+  }));
 
-  type InvRow = {
-    inversionista_id: number;
-    nombre: string;
-    reinv_capital: number;
-    reinv_interes: number;
-    cash_capital: number;
-    cash_interes: number;
-  };
-
-  const porInv: Record<number, InvRow> = {};
-
-  for (const row of rows.rows as Record<string, unknown>[]) {
-    const id = Number(row.inversionista_id);
-    const nombre = String(row.nombre);
-    const capital = Number(row.total_capital);
-    const interes = Number(row.total_interes);
-    const iva = Number(row.total_iva);
-    const tipo = String(row.tipo_reinv_efectivo);
-    const montoReinvInv = Number(row.monto_reinversion_inv ?? 0);
-    const totalCuota = capital + interes + iva;
-
-    if (!porInv[id]) {
-      porInv[id] = { inversionista_id: id, nombre, reinv_capital: 0, reinv_interes: 0, cash_capital: 0, cash_interes: 0 };
-    }
-
-    const inv = porInv[id];
-
-    if (tipo === "sin_reinversion") {
-      inv.cash_capital += capital;
-      inv.cash_interes += interes + iva;
-    } else if (tipo === "reinversion_capital") {
-      inv.reinv_capital += capital;
-      inv.cash_interes += interes + iva;
-    } else if (tipo === "reinversion_interes") {
-      inv.reinv_interes += interes + iva;
-      inv.cash_capital += capital;
-    } else if (tipo === "reinversion_total") {
-      inv.reinv_capital += capital;
-      inv.reinv_interes += interes + iva;
-    } else if (tipo === "reinversion_variable") {
-      const reinvertido = Math.min(montoReinvInv, totalCuota);
-      const cash = Math.max(0, totalCuota - reinvertido);
-      inv.reinv_capital += reinvertido;
-      inv.cash_capital += cash;
-    } else if (tipo === "reinversion_excedente") {
-      const recibe = Math.min(montoReinvInv, totalCuota);
-      inv.cash_capital += recibe;
-      inv.reinv_capital += Math.max(0, totalCuota - recibe);
-    }
-  }
-
-  const lista = Object.values(porInv).sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-  let totalReinv = 0;
-  let totalCash = 0;
-
-  for (const inv of lista) {
-    totalReinv += inv.reinv_capital + inv.reinv_interes;
-    totalCash += inv.cash_capital + inv.cash_interes;
-  }
+  const projection = buildProjectedInvestorFlow(sourceRows);
 
   return {
-    porInversionista: lista.map((inv) => {
-      const reinvTotal = inv.reinv_capital + inv.reinv_interes;
-      const cashTotal = inv.cash_capital + inv.cash_interes;
-      return {
-        inversionista_id: inv.inversionista_id,
-        nombre: inv.nombre,
-        reinversion_capital: fmt(inv.reinv_capital),
-        reinversion_interes: fmt(inv.reinv_interes),
-        reinversion_total: fmt(reinvTotal),
-        cash_capital: fmt(inv.cash_capital),
-        cash_interes: fmt(inv.cash_interes),
-        cash_total: fmt(cashTotal),
-        total: fmt(reinvTotal + cashTotal),
-      };
-    }),
-    totales: {
-      reinversion_total: fmt(totalReinv),
-      cash_total: fmt(totalCash),
-      total: fmt(totalReinv + totalCash),
-    },
+    ...projection,
+    contexto: await getInvestmentProjectionContext({ fechaInicio, fechaFin }),
   };
 }
 
@@ -803,27 +1093,210 @@ export async function getReinversionLiquidaciones({
   const nextYear = mes === 12 ? anio + 1 : anio;
   const inicioMesSiguiente = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 
+  // Valida cada liquidación antes de cualquier GROUP BY o asignación residual:
+  // una sobreasignación material no puede compensarse con otra fila y parecer
+  // una deriva agregada de un centavo.
+  const integrityRows = await db.execute(sql`
+    SELECT reinversion_capital, reinversion_interes, reinversion_total
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones
+    WHERE (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+  `);
+  assertLiquidationRowsReinvestmentIntegrity(
+    (integrityRows.rows as Record<string, unknown>[]).map((row) => ({
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion_total ?? 0),
+    })),
+  );
+
   const result = await db.execute(sql`
+    WITH liquidaciones_mes AS (
+      SELECT
+        l.*,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) > 0
+            THEN ROUND(l.reinversion_interes::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_interes::numeric, 2)
+        END AS reinversion_interes_report,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) = 0
+            AND ROUND(l.reinversion_capital::numeric, 2) > 0
+            THEN ROUND(l.reinversion_capital::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_capital::numeric, 2)
+        END AS reinversion_capital_report,
+        ROUND(l.reinversion_total::numeric, 2) AS reinversion_total_report
+      FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+      WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+        AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+    ),
+    snapshots AS (
+      SELECT
+        h.liquidacion_id,
+        h.credito_id,
+        MIN(h.tipo_reinversion_snapshot::text) AS tipo
+      FROM ${SQL_CARTERA_SCHEMA}.historico_liquidaciones_espejo h
+      JOIN liquidaciones_mes l ON l.liquidacion_id = h.liquidacion_id
+      GROUP BY h.liquidacion_id, h.credito_id
+    ),
+    pesos_mixtos AS (
+      SELECT
+        l.liquidacion_id,
+        COALESCE(s.tipo, 'sin_clasificar') AS tipo,
+        COALESCE(SUM(pe.abono_capital::numeric), 0) AS peso_capital,
+        COALESCE(SUM(pe.abono_interes::numeric), 0) AS peso_interes,
+        COALESCE(SUM(
+          pe.abono_capital::numeric
+          + pe.abono_interes::numeric
+          + CASE
+              WHEN l.descuenta_impuestos = true OR l.total_isr::numeric > 0
+                THEN -(pe.abono_interes::numeric * 0.07)
+              ELSE pe.abono_iva_12::numeric
+            END
+        ), 0) AS peso_flujo
+      FROM liquidaciones_mes l
+      JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
+        ON pe.liquidacion_id = l.liquidacion_id
+      LEFT JOIN snapshots s
+        ON s.liquidacion_id = pe.liquidacion_id
+       AND s.credito_id = pe.credito_id
+      WHERE l.tipo_reinversion_snapshot IS NULL
+      GROUP BY l.liquidacion_id, COALESCE(s.tipo, 'sin_clasificar')
+    ),
+    pesos AS (
+      SELECT
+        l.*,
+        l.tipo_reinversion_snapshot::text AS tipo,
+        l.total_capital::numeric AS peso_capital,
+        l.total_interes::numeric AS peso_interes,
+        (l.total_cuota::numeric + l.reinversion_total::numeric) AS peso_flujo
+      FROM liquidaciones_mes l
+      WHERE l.tipo_reinversion_snapshot IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        l.*,
+        p.tipo,
+        p.peso_capital,
+        p.peso_interes,
+        p.peso_flujo
+      FROM liquidaciones_mes l
+      JOIN pesos_mixtos p ON p.liquidacion_id = l.liquidacion_id
+      WHERE l.tipo_reinversion_snapshot IS NULL
+    ),
+    denominadores AS (
+      SELECT
+        p.*,
+        COUNT(*) OVER liquidacion AS cantidad_modos,
+        SUM(p.peso_capital) OVER liquidacion AS peso_capital_total,
+        SUM(p.peso_interes) OVER liquidacion AS peso_interes_total,
+        SUM(p.peso_flujo) OVER liquidacion AS peso_flujo_total,
+        SUM(p.peso_capital) FILTER (
+          WHERE p.tipo IN ('reinversion_capital', 'reinversion_total')
+        ) OVER liquidacion AS peso_reinv_capital,
+        SUM(p.peso_interes) FILTER (
+          WHERE p.tipo IN ('reinversion_interes', 'reinversion_total')
+        ) OVER liquidacion AS peso_reinv_interes,
+        COUNT(*) FILTER (
+          WHERE p.tipo IN ('reinversion_variable', 'reinversion_excedente')
+        ) OVER liquidacion AS cantidad_modos_variables
+      FROM pesos p
+      WINDOW liquidacion AS (PARTITION BY p.liquidacion_id)
+    ),
+    asignacion_base AS (
+      SELECT
+        d.*,
+        CASE
+          WHEN d.cantidad_modos = 1 THEN d.total_capital::numeric
+          WHEN d.peso_capital_total = 0 THEN d.total_capital::numeric / d.cantidad_modos
+          ELSE d.total_capital::numeric * d.peso_capital / d.peso_capital_total
+        END AS total_capital_modo,
+        CASE
+          WHEN d.cantidad_modos = 1 THEN d.total_interes::numeric
+          WHEN d.peso_interes_total = 0 THEN d.total_interes::numeric / d.cantidad_modos
+          ELSE d.total_interes::numeric * d.peso_interes / d.peso_interes_total
+        END AS total_interes_modo,
+        CASE
+          WHEN d.cantidad_modos = 1 THEN d.total_iva::numeric
+          WHEN d.peso_interes_total = 0 THEN d.total_iva::numeric / d.cantidad_modos
+          ELSE d.total_iva::numeric * d.peso_interes / d.peso_interes_total
+        END AS total_iva_modo,
+        CASE
+          WHEN d.cantidad_modos = 1 THEN d.total_isr::numeric
+          WHEN d.peso_interes_total = 0 THEN d.total_isr::numeric / d.cantidad_modos
+          ELSE d.total_isr::numeric * d.peso_interes / d.peso_interes_total
+        END AS total_isr_modo,
+        CASE
+          WHEN d.cantidad_modos = 1 THEN d.total_cuota::numeric + d.reinversion_total::numeric
+          WHEN d.peso_flujo_total = 0
+            THEN (d.total_cuota::numeric + d.reinversion_total::numeric) / d.cantidad_modos
+          ELSE (d.total_cuota::numeric + d.reinversion_total::numeric)
+            * d.peso_flujo / d.peso_flujo_total
+        END AS total_distribuido_modo,
+        CASE
+          WHEN d.tipo IN ('reinversion_capital', 'reinversion_total')
+            AND d.peso_reinv_capital > 0
+            THEN d.reinversion_capital_report * d.peso_capital / d.peso_reinv_capital
+          ELSE 0
+        END AS reinversion_capital_modo,
+        CASE
+          WHEN d.tipo IN ('reinversion_interes', 'reinversion_total')
+            AND d.peso_reinv_interes > 0
+            THEN d.reinversion_interes_report * d.peso_interes / d.peso_reinv_interes
+          ELSE 0
+        END AS reinversion_interes_modo
+      FROM denominadores d
+    ),
+    asignacion_residual AS (
+      SELECT
+        a.*,
+        a.reinversion_total_report - SUM(
+          a.reinversion_capital_modo + a.reinversion_interes_modo
+        ) OVER (PARTITION BY a.liquidacion_id) AS reinversion_residual,
+        CASE
+          WHEN a.tipo IN ('reinversion_variable', 'reinversion_excedente') THEN a.peso_flujo
+          WHEN a.cantidad_modos_variables = 0 AND a.tipo = 'sin_clasificar' THEN a.peso_flujo
+          ELSE 0
+        END AS peso_residual,
+        ROW_NUMBER() OVER (PARTITION BY a.liquidacion_id ORDER BY a.tipo) AS numero_modo
+      FROM asignacion_base a
+    ),
+    asignacion_final AS (
+      SELECT
+        r.*,
+        r.reinversion_capital_modo + r.reinversion_interes_modo
+          + CASE
+              WHEN SUM(r.peso_residual) OVER (PARTITION BY r.liquidacion_id) > 0
+                THEN r.reinversion_residual * r.peso_residual
+                  / SUM(r.peso_residual) OVER (PARTITION BY r.liquidacion_id)
+              WHEN r.numero_modo = 1 THEN r.reinversion_residual
+              ELSE 0
+            END AS reinversion_total_modo
+      FROM asignacion_residual r
+    )
     SELECT
-      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo,
-      COALESCE(SUM(l.reinversion_capital::numeric), 0)      AS reinversion_capital,
-      COALESCE(SUM(l.reinversion_interes::numeric), 0)      AS reinversion_interes,
-      COALESCE(SUM(l.reinversion_total::numeric), 0)        AS reinversion_total,
-      COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
-      COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
-      COALESCE(SUM(l.total_iva::numeric), 0)                AS total_iva,
-      0                                                     AS iva_facturado,
-      COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
-      COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
-      COALESCE(SUM(
-        l.total_cuota::numeric + l.reinversion_total::numeric
-      ), 0)                                                 AS total_distribuido,
-      COUNT(*)::int                                          AS cantidad
-    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
-    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
-    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY i.tipo_reinversion
+      f.tipo,
+      COALESCE(SUM(f.reinversion_capital_modo), 0) AS reinversion_capital,
+      COALESCE(SUM(f.reinversion_interes_modo), 0) AS reinversion_interes,
+      COALESCE(SUM(f.reinversion_total_modo), 0) AS reinversion_total,
+      COALESCE(SUM(f.total_capital_modo), 0) AS total_capital,
+      COALESCE(SUM(f.total_interes_modo), 0) AS total_interes,
+      COALESCE(SUM(f.total_iva_modo), 0) AS total_iva,
+      0 AS iva_facturado,
+      COALESCE(SUM(f.total_isr_modo), 0) AS total_isr,
+      COALESCE(SUM(f.total_distribuido_modo - f.reinversion_total_modo), 0) AS total_cuota,
+      COALESCE(SUM(f.total_distribuido_modo), 0) AS total_distribuido,
+      COUNT(DISTINCT f.liquidacion_id)::int AS cantidad,
+      (SELECT COUNT(*)::int FROM liquidaciones_mes) AS cantidad_total
+    FROM asignacion_final f
+    GROUP BY f.tipo
   `);
 
   const porTipo: Record<
@@ -840,26 +1313,62 @@ export async function getReinversionLiquidaciones({
       total_cuota: string;
       total_distribuido: string;
       cantidad_liquidaciones: number;
+      composicion: ReturnType<typeof buildLiquidationComposition>;
     }
   > = {};
   let cantidad = 0;
 
-  for (const r of result.rows as Record<string, unknown>[]) {
-    const tipo = String(r.tipo ?? "sin_reinversion");
+  const modeRows = canonicalizeLiquidationModeRows(
+    (result.rows as Record<string, unknown>[]).map((row) => ({
+      ...row,
+      tipo: String(row.tipo ?? "sin_clasificar"),
+      iva_facturado: String(row.iva_facturado ?? 0),
+      cantidad: Number(row.cantidad ?? 0),
+      cantidad_total: Number(row.cantidad_total ?? 0),
+      reinversion_capital: String(row.reinversion_capital ?? 0),
+      reinversion_interes: String(row.reinversion_interes ?? 0),
+      reinversion_total: String(row.reinversion_total ?? 0),
+      total_capital: String(row.total_capital ?? 0),
+      total_interes: String(row.total_interes ?? 0),
+      total_iva: String(row.total_iva ?? 0),
+      total_isr: String(row.total_isr ?? 0),
+      total_distribuido: String(row.total_distribuido ?? 0),
+    })),
+  );
+
+  for (const r of modeRows) {
+    const tipo = String(r.tipo ?? "sin_clasificar");
+    const totalCapital = numericMoney(r.total_capital);
+    const reinversionNormalizada = normalizeReinvestmentComponents({
+      reinvestedCapital: numericMoney(r.reinversion_capital),
+      reinvestedRest: numericMoney(r.reinversion_interes),
+      reinvestedTotal: numericMoney(r.reinversion_total),
+    });
+    const reinversionCapital = reinversionNormalizada.capital;
+    const reinversionInteres = reinversionNormalizada.rest;
+    const reinversionTotal = reinversionNormalizada.total;
+    const totalCuota = numericMoney(r.total_cuota);
     porTipo[tipo] = {
-      reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
-      reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
-      reinversion_total: Number(r.reinversion_total ?? 0).toFixed(2),
-      total_capital: Number(r.total_capital ?? 0).toFixed(2),
-      total_interes: Number(r.total_interes ?? 0).toFixed(2),
-      total_iva: Number(r.total_iva ?? 0).toFixed(2),
-      iva_facturado: Number(r.iva_facturado ?? 0).toFixed(2),
-      total_isr: Number(r.total_isr ?? 0).toFixed(2),
-      total_cuota: Number(r.total_cuota ?? 0).toFixed(2),
-      total_distribuido: Number(r.total_distribuido ?? 0).toFixed(2),
+      reinversion_capital: reinversionCapital,
+      reinversion_interes: reinversionInteres,
+      reinversion_total: reinversionTotal,
+      total_capital: totalCapital,
+      total_interes: numericMoney(r.total_interes),
+      total_iva: numericMoney(r.total_iva),
+      iva_facturado: numericMoney(r.iva_facturado),
+      total_isr: numericMoney(r.total_isr),
+      total_cuota: totalCuota,
+      total_distribuido: numericMoney(r.total_distribuido),
       cantidad_liquidaciones: Number(r.cantidad ?? 0),
+      composicion: buildLiquidationComposition({
+        totalCapital,
+        paidTotal: totalCuota,
+        reinvestedCapital: reinversionCapital,
+        reinvestedRest: reinversionInteres,
+        reinvestedTotal: reinversionTotal,
+      }),
     };
-    cantidad += Number(r.cantidad ?? 0);
+    cantidad = Number(r.cantidad_total ?? 0);
   }
 
   // No hay una marca fiscal inmutable en las liquidaciones. ISR/IVA no bastan
@@ -872,10 +1381,9 @@ export async function getReinversionLiquidaciones({
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
   `);
 
-  let interesNoVerificado = 0;
-  for (const r of facturaRows.rows as Record<string, unknown>[]) {
-    interesNoVerificado += Number(r.total_interes ?? 0);
-  }
+  const interesNoVerificado = numericMoney(
+    (facturaRows.rows[0] as Record<string, unknown> | undefined)?.total_interes,
+  );
 
   // Interés de CUBE: no se almacena como tal sino que se deriva de las filas de
   // los inversionistas no-CUBE en pagos_credito_inversionistas_espejo. Para una
@@ -904,8 +1412,8 @@ export async function getReinversionLiquidaciones({
       AND pe.porcentaje_participacion::numeric > 0
       AND pe.porcentaje_participacion::numeric < 100
   `);
-  const interesCube = Number(
-    (cubeRows.rows[0] as Record<string, unknown>)?.interes_cube ?? 0
+  const interesCube = numericMoney(
+    (cubeRows.rows[0] as Record<string, unknown> | undefined)?.interes_cube,
   );
   const interesNetoCube = buildCubeNetInterest(interesCube);
 
@@ -927,11 +1435,11 @@ export async function getReinversionLiquidaciones({
     GROUP BY a.tipo
   `);
 
-  let abonosCapital = 0;
-  let cancelaciones = 0;
+  let abonosCapital = new Big(0);
+  let cancelaciones = new Big(0);
   for (const r of extrasRows.rows as Record<string, unknown>[]) {
-    if (r.tipo === "CAPITAL") abonosCapital = Number(r.total ?? 0);
-    if (r.tipo === "CANCELACION") cancelaciones = Number(r.total ?? 0);
+    if (r.tipo === "CAPITAL") abonosCapital = new Big(String(r.total ?? 0));
+    if (r.tipo === "CANCELACION") cancelaciones = new Big(String(r.total ?? 0));
   }
 
   // Cancelaciones manuales: pagos del espejo (>= Q2,000) liquidados en el mes que
@@ -962,8 +1470,8 @@ export async function getReinversionLiquidaciones({
     ) t
     WHERE t.monto_aportado = 0 OR t.sin_fila
   `);
-  cancelaciones += Number(
-    (cancelExtraRows.rows[0] as Record<string, unknown>)?.total ?? 0
+  cancelaciones = cancelaciones.plus(
+    String((cancelExtraRows.rows[0] as Record<string, unknown> | undefined)?.total ?? 0),
   );
 
   // Desglose por inversionista (desde las liquidaciones del mes):
@@ -974,18 +1482,31 @@ export async function getReinversionLiquidaciones({
     SELECT
       l.inversionista_id,
       i.nombre,
-      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
-      COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
-      COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
-      COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
-      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir
+      COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar') AS tipo_reinversion,
+      l.reinversion_capital,
+      l.reinversion_interes,
+      l.reinversion_total AS reinversion,
+      l.total_cuota AS a_recibir,
+      l.total_capital
     FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
     JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY l.inversionista_id, i.nombre, i.tipo_reinversion
-    ORDER BY i.nombre
+    ORDER BY i.nombre, l.liquidacion_id
   `);
+
+  const investorTotals = aggregateInvestorLiquidationRows(
+    (porInvRows.rows as Record<string, unknown>[]).map((row) => ({
+      inversionistaId: Number(row.inversionista_id),
+      nombre: String(row.nombre),
+      tipoReinversion: String(row.tipo_reinversion ?? "sin_clasificar"),
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion ?? 0),
+      paidTotal: String(row.a_recibir ?? 0),
+      totalCapital: String(row.total_capital ?? 0),
+    })),
+  );
 
   // Capital operativo actual desde el espejo canónico. La reinversión ya está
   // reflejada aquí, por lo que no se suma nuevamente desde la liquidación. Las
@@ -1019,69 +1540,121 @@ export async function getReinversionLiquidaciones({
       AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
     GROUP BY ce.inversionista_id
   `);
-  const capitalActivoPorInv = new Map<number, number>();
+  const capitalActivoPorInv = new Map<number, string>();
   for (const r of capitalActivoRows.rows as Record<string, unknown>[]) {
     capitalActivoPorInv.set(
       Number(r.inversionista_id),
       calculateActiveCapital(
-        Number(r.monto_espejo ?? 0),
-        Number(r.monto_compra_pendiente ?? 0),
+        String(r.monto_espejo ?? 0),
+        String(r.monto_compra_pendiente ?? 0),
       )
     );
   }
 
-  const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
+  const porInversionista = investorTotals.map(
     (r) => {
       const id = Number(r.inversionista_id);
+      const reinversionCapital = r.reinversion_capital;
+      const reinversionInteres = r.reinversion_interes;
+      const reinversion = r.reinversion;
+      const aRecibir = numericMoney(r.a_recibir);
       return {
         inversionista_id: id,
         nombre: String(r.nombre),
-        tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
-        reinversion_capital: Number(r.reinversion_capital ?? 0).toFixed(2),
-        reinversion_interes: Number(r.reinversion_interes ?? 0).toFixed(2),
-        reinversion: Number(r.reinversion ?? 0).toFixed(2),
-        a_recibir: Number(r.a_recibir ?? 0).toFixed(2),
-        capital_activo: Number(capitalActivoPorInv.get(id) ?? 0).toFixed(2),
+        tipo_reinversion: String(r.tipo_reinversion ?? "sin_clasificar"),
+        reinversion_capital: reinversionCapital,
+        reinversion_interes: reinversionInteres,
+        reinversion,
+        a_recibir: aRecibir,
+        capital_activo: capitalActivoPorInv.get(id) ?? "0.00",
+        composicion: buildLiquidationComposition({
+          totalCapital: numericMoney(r.total_capital),
+          paidTotal: aRecibir,
+          reinvestedCapital: reinversionCapital,
+          reinvestedRest: reinversionInteres,
+          reinvestedTotal: reinversion,
+        }),
       };
     }
   ).filter(shouldIncludeInvestorPosition);
 
-  // Compras del mes: solo operación de compra (no reinversión) y solo las
-  // COMPLETADAS (status = 'completado'); las pendientes no se cuentan. La fecha
+  // Movimientos de inversión del mes: distingue dinero nuevo de dinero que ya
+  // estaba dentro y fue reinvertido. Solo incluye operaciones COMPLETADAS; las
+  // pendientes no se cuentan. La fecha
   // efectiva prioriza fecha_completada y cae a updated_at cuando es NULL
   // (columna nueva, registros viejos) — mismo criterio que utils/comprasAjuste.ts.
   const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
-  const comprasMesPredicate = sql`
-    c.tipo_operacion = 'compra_cartera'
+  const comprasCompletadasPredicate = sql`
+    c.tipo_operacion IN ('compra_cartera', 'reinversion')
     AND c.status = 'completado'
+    AND c.revertida_at IS NULL
+  `;
+  const comprasMesPredicate = sql`
+    ${comprasCompletadasPredicate}
     AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
     AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
   `;
+  const origenFondos = sql`
+    CASE c.tipo_operacion
+      WHEN 'compra_cartera' THEN 'compra_nueva'
+      WHEN 'reinversion' THEN 'reinversion'
+    END
+  `;
   const comprasRows = await db.execute(sql`
     SELECT
-      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo,
+      COALESCE(c.modalidad_facturacion::text, 'sin_modalidad') AS modalidad_facturacion,
+      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
+      ${origenFondos} AS origen_dinero,
+      c.monto_aportado AS monto
+    FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
+    WHERE ${comprasMesPredicate}
+    ORDER BY ${fechaCompra}, c.id
+  `);
+  const comprasMes = summarizePurchaseDetails(
+    (comprasRows.rows as Record<string, unknown>[]).map((r) => ({
+      modalidad_facturacion: String(r.modalidad_facturacion ?? "sin_modalidad"),
+      tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
+      origen_dinero: String(r.origen_dinero) as "compra_nueva" | "reinversion",
+      monto: String(r.monto ?? 0),
+    })),
+  );
+  const ticketRows = await db.execute(sql`
+    SELECT
+      TO_CHAR(
+        DATE_TRUNC('month', ${fechaCompra} AT TIME ZONE 'America/Guatemala'),
+        'YYYY-MM'
+      ) AS periodo,
+      ${origenFondos} AS origen_dinero,
       COUNT(*)::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
     FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
-    WHERE ${comprasMesPredicate}
-    GROUP BY COALESCE(c.tipo_reinversion::text, 'sin_reinversion')
-    ORDER BY monto DESC
+    WHERE ${comprasCompletadasPredicate}
+    GROUP BY periodo, ${origenFondos}
+    ORDER BY periodo
   `);
-  const comprasMes = canonicalizePurchaseSummaries(
-    (comprasRows.rows as Record<string, unknown>[]).map((r) => ({
-      tipo: String(r.tipo ?? "sin_reinversion"),
+  const ticketInversion = buildPurchaseTicketHistory(
+    (ticketRows.rows as Record<string, unknown>[]).map((r) => ({
+      periodo: String(r.periodo),
+      origen_dinero: String(r.origen_dinero) as "compra_nueva" | "reinversion",
       cantidad: Number(r.cantidad ?? 0),
-      monto: Number(r.monto ?? 0).toFixed(2),
+      monto: String(r.monto ?? 0),
     })),
+    `${anio}-${String(mes).padStart(2, "0")}`,
   );
 
-  let detalleInteresNeto: (
+  let detalleInteresNeto: Array<
     | ReturnType<typeof buildNetInterestDetail>
-    | (Omit<ReturnType<typeof buildNetInterestDetail>, "tratamiento_fiscal"> & {
+    | {
+        inversionista_id: number;
+        inversionista: string;
+        referencia: string;
         tratamiento_fiscal: "cube";
+        interes: string;
+        iva: string;
+        isr: string;
         neto: string;
-      })
-  )[] = [];
+      }
+  > = [];
   let detallePagosExtras: {
     fecha: string;
     credito: string;
@@ -1091,7 +1664,9 @@ export async function getReinversionLiquidaciones({
   let detalleComprasMes: {
     fecha: string;
     inversionista: string;
-    modalidad: string;
+    modalidad_facturacion: string;
+    tipo_reinversion: string;
+    origen_dinero: "compra_nueva" | "reinversion";
     monto: string;
   }[] = [];
   let detalleEstado: { disponible: boolean; error: string | null } = {
@@ -1108,8 +1683,8 @@ export async function getReinversionLiquidaciones({
       l.total_interes AS interes,
       l.total_iva AS iva,
       l.total_isr AS isr
-    FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON i.inversionista_id = l.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = l.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     ORDER BY i.nombre, l.liquidacion_id
@@ -1121,12 +1696,12 @@ export async function getReinversionLiquidaciones({
         inversionista_id: Number(r.inversionista_id),
         inversionista: String(r.inversionista),
         referencia: String(r.referencia),
-        interes: Number(r.interes ?? 0),
-        iva: Number(r.iva ?? 0),
-        isr: Number(r.isr ?? 0),
+        interes: String(r.interes ?? 0),
+        iva: String(r.iva ?? 0),
+        isr: String(r.isr ?? 0),
       })
     );
-    if (interesCube !== 0) {
+    if (!new Big(interesCube).eq(0)) {
       detalleInteresNeto.push({
         inversionista_id: 86,
         inversionista: "CUBE",
@@ -1145,9 +1720,9 @@ export async function getReinversionLiquidaciones({
       cr.numero_credito_sifco AS credito,
       CASE WHEN a.tipo = 'CAPITAL' THEN 'abono_capital' ELSE 'cancelacion' END AS tipo,
       a.monto
-    FROM cartera.abonos_capital a
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
-    JOIN cartera.creditos cr ON cr.credito_id = a.credito_id
+    FROM ${SQL_CARTERA_SCHEMA}.abonos_capital a
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = a.credito_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     ORDER BY l.fecha_liquidacion, cr.numero_credito_sifco
@@ -1167,10 +1742,10 @@ export async function getReinversionLiquidaciones({
       SUM(pe.abono_capital::numeric) AS monto,
       COALESCE(MAX(ce.monto_aportado::numeric), 0) AS monto_aportado,
       bool_and(ce.id IS NULL) AS sin_fila
-    FROM cartera.pagos_credito_inversionistas_espejo pe
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
-    JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
-    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = pe.credito_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
       ON ce.credito_id = pe.credito_id
      AND ce.inversionista_id = pe.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
@@ -1202,21 +1777,35 @@ export async function getReinversionLiquidaciones({
     SELECT
       (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date::text AS fecha,
       i.nombre AS inversionista,
-      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS modalidad,
+      COALESCE(c.modalidad_facturacion::text, 'sin_modalidad') AS modalidad_facturacion,
+      COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
+      ${origenFondos} AS origen_dinero,
       c.monto_aportado AS monto
-    FROM cartera.compras_credito_inversionista c
-    JOIN cartera.inversionistas i ON i.inversionista_id = c.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = c.inversionista_id
     WHERE ${comprasMesPredicate}
     ORDER BY ${fechaCompra}, i.nombre
   `);
     detalleComprasMes = allocateRoundedPurchaseAmounts(
-      (comprasDetalleRows.rows as Record<string, unknown>[]).map((r) => ({
+      (comprasDetalleRows.rows as Record<string, unknown>[]).map((r) => {
+        const modalidadFacturacion = String(
+          r.modalidad_facturacion ?? "sin_modalidad",
+        );
+        const tipoReinversion = String(r.tipo_reinversion ?? "sin_reinversion");
+        const origenDinero = String(r.origen_dinero) as
+          | "compra_nueva"
+          | "reinversion";
+        return {
         fecha: String(r.fecha),
         inversionista: String(r.inversionista),
-        modalidad: String(r.modalidad),
+        modalidad_facturacion: modalidadFacturacion,
+        tipo_reinversion: tipoReinversion,
+        origen_dinero: origenDinero,
+        modalidad: `${modalidadFacturacion}\u0000${tipoReinversion}\u0000${origenDinero}`,
         monto: String(r.monto ?? 0),
-      }))
-    );
+        };
+      }),
+    ).map(({ modalidad: _modalidad, ...row }) => row);
   } catch (error) {
     console.error(
       "No fue posible recuperar el detalle del reporte de reinversión",
@@ -1233,7 +1822,7 @@ export async function getReinversionLiquidaciones({
 
   const interesNeto = {
     noVerificado: {
-      interes: interesNoVerificado.toFixed(2),
+      interes: interesNoVerificado,
     },
     cube: interesNetoCube,
   };
@@ -1257,10 +1846,11 @@ export async function getReinversionLiquidaciones({
   }
 
   return {
-    contrato_version: 2 as const,
+    contrato_version: 4 as const,
     porTipo,
     porInversionista,
     comprasMes,
+    ticketInversion,
     detalleInteresNeto,
     detallePagosExtras,
     detalleComprasMes,
@@ -1440,6 +2030,13 @@ type MoraRow = {
   suma_mora: string;
 };
 
+type CapitalCarteraRow = {
+  asesor_id: number;
+  nombre: string;
+  email_asesor: string | null;
+  capital: string;
+};
+
 function acumularBuckets(rows: MoraRow[]) {
   const totalAcc = emptyBuckets();
   const asesorMap = new Map<number, { asesorId: number; nombre: string; email: string; acc: BucketsAcc }>();
@@ -1486,11 +2083,36 @@ export const bucketCaseSql = (col: ReturnType<typeof sql>) => sql`CASE
   ELSE                  'mora_30'
 END`;
 
+function serializeCapitalCartera(rows: CapitalCarteraRow[]) {
+  const porAsesor = rows.map((row) => ({
+    asesorId: row.asesor_id,
+    nombre: row.nombre,
+    email: row.email_asesor ?? "",
+    capital: Number(row.capital).toFixed(2),
+  }));
+  const total = porAsesor.reduce(
+    (sum, asesor) => sum + Number(asesor.capital),
+    0,
+  );
+  return { total: total.toFixed(2), porAsesor };
+}
+
+type MoraByEtapaYAsesorResult = ReturnType<typeof acumularBuckets> & {
+  capitalCartera: ReturnType<typeof serializeCapitalCartera>;
+  metadata: {
+    capitalCartera: "actual";
+    atribucionAsesor: "actual";
+  };
+  fecha: string;
+  alcance: "live" | "historico";
+  dataDisponibleDesde?: string;
+};
+
 export async function getMoraByEtapaYAsesor({
   emailCobrador,
   fecha,
   asesores,
-}: { emailCobrador?: string; fecha?: string; asesores?: number[] } = {}) {
+}: { emailCobrador?: string; fecha?: string; asesores?: number[] } = {}): Promise<MoraByEtapaYAsesorResult> {
   const hoy = hoyGTStr();
   const usarHistorico = !!fecha && fecha < hoy;
 
@@ -1500,9 +2122,10 @@ export async function getMoraByEtapaYAsesor({
   const asesoresFilter = asesores && asesores.length
     ? sql`AND a.asesor_id IN (${sql.join(asesores.map((id) => sql`${id}`), sql`, `)})`
     : sql``;
-
-  if (!usarHistorico) {
-    const rows = await db.execute<MoraRow>(sql`
+  return db.transaction(
+    async (tx) => {
+      if (!usarHistorico) {
+        const rows = await tx.execute<MoraRow>(sql`
       WITH mora_activa AS (
         SELECT DISTINCT ON (credito_id)
           credito_id, cuotas_atrasadas, monto_mora
@@ -1519,15 +2142,27 @@ export async function getMoraByEtapaYAsesor({
       FROM mora_activa m
       INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = m.credito_id
       INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id  = c.asesor_id
-      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
       GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
     `);
-    return { ...acumularBuckets(rows.rows), fecha: hoy, alcance: "live" as const };
-  }
+        const capitalRows = await tx.execute<CapitalCarteraRow>(
+          buildCapitalCarteraQuery(emailCobrador, asesores),
+        );
+        return {
+          ...acumularBuckets(rows.rows),
+          capitalCartera: serializeCapitalCartera(capitalRows.rows),
+          metadata: {
+            capitalCartera: "actual" as const,
+            atribucionAsesor: "actual" as const,
+          },
+          fecha: hoy,
+          alcance: "live" as const,
+        };
+      }
 
-  const rows = await db.execute<MoraRow>(sql`
+      const rows = await tx.execute<MoraRow>(sql`
     WITH ${snapCte(fecha!)}
     SELECT
       a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
@@ -1539,23 +2174,50 @@ export async function getMoraByEtapaYAsesor({
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = s.credito_id
     INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id  = c.asesor_id
     WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
+      AND c."statusCredit" IN (${creditosElegiblesMoraSql})
       ${emailFilter}
       ${asesoresFilter}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
   `);
-
-  const result = acumularBuckets(rows.rows);
-  if (!result.porAsesor.length) {
-    const minRes = await db.execute<{ min_fecha: string | null }>(sql`
+      const capitalRows = await tx.execute<CapitalCarteraRow>(
+        buildCapitalCarteraQuery(emailCobrador, asesores),
+      );
+      const result = acumularBuckets(rows.rows);
+      const capitalCartera = serializeCapitalCartera(capitalRows.rows);
+      const metadata = {
+        capitalCartera: "actual" as const,
+        atribucionAsesor: "actual" as const,
+      };
+      if (!result.porAsesor.length) {
+        const minRes = await tx.execute<{ min_fecha: string | null }>(sql`
       SELECT MIN((fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date)::text AS min_fecha
       FROM ${SQL_CARTERA_SCHEMA}.moras_historial
     `);
-    const minFecha = minRes.rows[0]?.min_fecha ?? null;
-    if (minFecha && fecha! < minFecha) {
-      return { ...result, fecha, alcance: "historico" as const, dataDisponibleDesde: minFecha };
-    }
-  }
-  return { ...result, fecha, alcance: "historico" as const };
+        const minFecha = minRes.rows[0]?.min_fecha ?? null;
+        if (minFecha && fecha! < minFecha) {
+          return {
+            ...result,
+            capitalCartera,
+            metadata,
+            fecha,
+            alcance: "historico" as const,
+            dataDisponibleDesde: minFecha,
+          };
+        }
+      }
+      return {
+        ...result,
+        capitalCartera,
+        metadata,
+        fecha,
+        alcance: "historico" as const,
+      };
+    },
+    {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    },
+  );
 }
 
 // Mora COBRADA por asesor en el período de cierre de un mes.
@@ -1624,23 +2286,52 @@ export async function getMoraRecuperacionPorAsesor({
 }) {
   const period = getMoraRecoveryPeriod({ mes, anio, hoy: hoyGTStr() });
 
-  const result = await db.execute<{
-    asesor_id: number | null;
-    nombre: string | null;
-    esperado: string;
-    cobrado_en_snapshot: string;
-    cobrado_fuera_snapshot: string;
-  }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
+  // Por LOTES de créditos. El plegado del nivel de referencia necesita los
+  // eventos crudos del ciclo, y con el RECALCULO diario de la mora proporcional
+  // eso pasa de ~8.000 a ~45.000 objetos por consulta y sigue creciendo con la
+  // cartera. Partir por crédito no cambia el agregado —el plegado es por
+  // crédito— y cada lote suelta sus eventos antes de pedir el siguiente.
+  //
+  // Todo eso —la enumeración del universo Y todos los lotes— va dentro de UNA
+  // transacción REPEATABLE READ, que es lo que le devuelve al reporte la
+  // garantía que la única sentencia SQL de antes tenía gratis: un solo
+  // instante para todo. En READ COMMITTED cada consulta abre su propio
+  // snapshot, así que mientras corre el cron nocturno de mora —o entran pagos,
+  // o cambian asesores y estados— los lotes tempranos reflejaban un instante y
+  // los tardíos otro, y un crédito elegible al enumerar podía dejar de serlo
+  // cuando le tocaba su lote: el total terminaba dependiendo de dónde cayeron
+  // los cortes. `read only` deja escrito que el reporte solo lee.
+  return await db.transaction(
+    async (tx) => {
+      const creditos = await tx.execute<{ credito_id: number }>(
+        buildMoraRecoveryCreditosQuery({ asesores, emailCobrador }),
+      );
+      const acumulador = nuevoMoraRecoveryAccumulator();
 
-  return buildMoraRecoveryReport(
-    result.rows.map((row): MoraRecoverySourceRow => ({
-      asesorId: row.asesor_id,
-      nombre: row.nombre ?? "Sin asignar",
-      esperado: row.esperado,
-      cobradoEnSnapshot: row.cobrado_en_snapshot,
-      cobradoFueraSnapshot: row.cobrado_fuera_snapshot,
-    })),
-    period,
+      for (const lote of partirEnLotes(creditos.rows.map((c) => c.credito_id))) {
+        // La forma de la fila NO se escribe acá: se importa de donde vive la
+        // consulta (`MoraRecoveryFilaCruda`), y la traducción a lo que consume
+        // el plegado la hace `traducirFilaMoraRecovery`, que el compilador
+        // obliga a cubrir TODAS las columnas. Copiar campo por campo acá fue lo
+        // que perdió en silencio `nivel_sembrado`, `reverso` y `anulado`.
+        const result = await tx.execute<MoraRecoveryFilaCruda>(
+          buildMoraRecoveryQuery({
+            ...period,
+            asesores,
+            emailCobrador,
+            creditos: lote,
+          }),
+        );
+
+        acumularMoraRecoveryRows(
+          acumulador,
+          result.rows.map(traducirFilaMoraRecovery),
+        );
+      }
+
+      return finalizarMoraRecoveryReport(acumulador, period);
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
   );
 }
 

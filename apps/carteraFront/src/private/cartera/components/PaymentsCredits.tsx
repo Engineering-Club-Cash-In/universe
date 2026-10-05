@@ -16,6 +16,7 @@ import { useState } from "react";
 import React from "react";
 import { Label } from "@/components/ui/label";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Calendar,
@@ -48,6 +49,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
+import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
+import { PaymentStatusBadges } from "./PaymentStatusBadges";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -319,6 +322,7 @@ const FIELD_LABELS: Record<string, string> = {
   seguro_restante: "Seguro", gps_restante: "GPS", total_restante: "Total",
   membresias: "Membresías", membresias_pago: "Membresías Pago", membresias_mes: "Membresías Mes",
   mora: "Mora", otros: "Otros", reserva: "Reserva", observaciones: "Observaciones",
+  ajusteFechaIdealMonto: "Cobro Extra por Fecha de Pago",
 };
 
 const DETAIL_SECTIONS = [
@@ -335,7 +339,7 @@ const DETAIL_SECTIONS = [
   { title: "Membresías", icon: <Percent className="w-4 h-4" />, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200",
     fields: ["membresias", "membresias_pago", "membresias_mes"] },
   { title: "Mora, Otros y Observaciones", icon: <FileText className="w-4 h-4" />, color: "text-red-700", bg: "bg-red-50", border: "border-red-200",
-    fields: ["mora", "otros", "reserva", "observaciones"] },
+    fields: ["mora", "otros", "ajusteFechaIdealMonto", "reserva", "observaciones"] },
 ];
 
 function formatFieldValue(key: string, value: any): string {
@@ -343,17 +347,29 @@ function formatFieldValue(key: string, value: any): string {
   if (key === "pagado" || key === "liquidacion_inversionistas" || key === "cuota_pagada")
     return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
   if (typeof value === "boolean") return value ? "Sí" : "No";
-  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes" || key === "mora" || key === "otros" || key === "reserva")
+  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes" || key === "mora" || key === "otros" || key === "reserva" || key === "ajusteFechaIdealMonto")
     return formatCurrency(value);
   if (key.startsWith("fecha") && typeof value === "string" && value.includes("-"))
     return key === "fecha_aplicado" ? formatDateTime(value) : formatDate(value);
   return String(value);
 }
 
-const DetailSections = ({ pago }: { pago: any }) => (
+const DetailSections = ({ pago }: { pago: any }) => {
+  // El ajuste por fecha ideal de pago se suma al campo "otros" de la cuota 1
+  // (ver registerPayment.ts). Acá se muestra en su propia fila y se resta de
+  // "Otros" para no duplicar el monto visualmente.
+  const ajusteMonto = Number(pago.ajusteFechaIdealMonto ?? 0);
+  const displayPago =
+    ajusteMonto > 0
+      ? { ...pago, otros: (Number(pago.otros ?? 0) - ajusteMonto).toFixed(2) }
+      : pago;
+
+  return (
   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
     {DETAIL_SECTIONS.map((section) => {
-      const hasData = section.fields.some((f) => pago[f] !== undefined);
+      const hasData = section.fields.some(
+        (f) => f !== "ajusteFechaIdealMonto" && displayPago[f] !== undefined
+      );
       if (!hasData) return null;
       return (
         <div key={section.title} className={`rounded-xl border ${section.border} ${section.bg} overflow-hidden`}>
@@ -363,7 +379,8 @@ const DetailSections = ({ pago }: { pago: any }) => (
           </div>
           <div className="px-3 py-2 space-y-1.5">
             {section.fields.map((field) => {
-              if (pago[field] === undefined) return null;
+              if (field === "ajusteFechaIdealMonto" && ajusteMonto <= 0) return null;
+              if (displayPago[field] === undefined) return null;
               return (
                 <div key={field} className="flex items-center justify-between text-sm gap-1">
                   <span className="text-gray-500 font-medium flex items-center gap-1">
@@ -379,7 +396,7 @@ const DetailSections = ({ pago }: { pago: any }) => (
                       </>
                     )}
                   </span>
-                  <span className="font-bold text-gray-900 text-right">{formatFieldValue(field, pago[field])}</span>
+                  <span className="font-bold text-gray-900 text-right">{formatFieldValue(field, displayPago[field])}</span>
                 </div>
               );
             })}
@@ -388,7 +405,8 @@ const DetailSections = ({ pago }: { pago: any }) => (
       );
     })}
   </div>
-);
+  );
+};
 
 function colorEstado(estado: string) {
   if (estado === "LIQUIDADO")
@@ -543,6 +561,16 @@ const handleDownloadExcel = async () => {
     }
     return new Set([...porCuota.values()].map((v) => v.pago_id));
   }, [pagosFiltrados]);
+
+  // 🔶 Cuotas en atraso. El criterio (espejo de `isOverdueInstallmentForMora`
+  // del backend, con su exclusión por estado y su `monto_aplicado > 0`) vive en
+  // `@/lib/cuotaAtrasada`, donde está probado contra la regla de la mora.
+  // Se calcula sobre TODOS los pagos del crédito (`data`) y no sobre `pagosFiltrados`,
+  // para que el filtro de mes/año no esconda el pago que sí cubre la cuota.
+  const cuotasAtrasadas = React.useMemo(
+    () => cuotasEnAtraso(Array.isArray(data) ? (data as any[]) : []),
+    [data]
+  );
 
   return (
     <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
@@ -716,6 +744,23 @@ const handleDownloadExcel = async () => {
           </div>
         ) : (
           <div className="bg-white rounded-3xl shadow-xl p-6 w-full overflow-x-auto">
+            {/* Leyenda del resaltado de cuotas en atraso */}
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+              <p>
+                <span className="font-bold">Cuota en atraso:</span> las filas con
+                fondo ámbar y la etiqueta{" "}
+                <span className="font-semibold">“Atrasada”</span> corresponden a
+                cuotas ya vencidas (fecha de vencimiento anterior a hoy, hora de
+                Guatemala) que siguen sin marcarse como pagadas y sin ningún pago
+                con monto aplicado que las cubra. Es el mismo criterio con el que
+                el sistema calcula la mora: por eso los créditos en{" "}
+                <span className="font-semibold">
+                  convenio, incobrables, caídos o cancelados
+                </span>{" "}
+                no muestran cuotas atrasadas — por política no devengan mora.
+              </p>
+            </div>
             <Table className="w-full text-lg text-gray-900">
               <TableHeader>
                 <TableRow className="bg-blue-100 border-b-2 border-blue-200">
@@ -739,7 +784,7 @@ const handleDownloadExcel = async () => {
                     Cuota
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
-                    Pagado
+                    Estados
                   </TableHead>
                   <TableHead className="w-16 text-center font-bold text-blue-700">
                     Acciones
@@ -750,22 +795,53 @@ const handleDownloadExcel = async () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagosFiltrados.map((item, idx) => (
+                {pagosFiltrados.map((item, idx) => {
+                  const vencimientoAtrasado = cuotasAtrasadas.get(
+                    (item.pago as any).cuota_id
+                  );
+                  const enAtraso = vencimientoAtrasado !== undefined;
+                  return (
                   <React.Fragment key={item.pago.pago_id}>
                     <TableRow
-                      className={idx % 2 === 0 ? "bg-blue-50" : "bg-white"}
+                      className={
+                        enAtraso
+                          ? "bg-amber-100/70 hover:bg-amber-100"
+                          : idx % 2 === 0
+                          ? "bg-blue-50"
+                          : "bg-white"
+                      }
                       style={{ cursor: "pointer" }}
+                      title={
+                        vencimientoAtrasado
+                          ? `Cuota en atraso: venció el ${formatDate(
+                              vencimientoAtrasado
+                            )} y no tiene pago aplicado que la cubra`
+                          : undefined
+                      }
                       onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
                     >
                       <TableCell className="text-center">
-                        {openIdx === idx ? (
-                          <ChevronUp className="mx-auto text-blue-500" />
-                        ) : (
-                          <ChevronDown className="mx-auto text-blue-400" />
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {enAtraso && (
+                            <AlertTriangle
+                              className="w-5 h-5 shrink-0 text-amber-600"
+                              aria-label="Cuota en atraso"
+                            />
+                          )}
+                          {openIdx === idx ? (
+                            <ChevronUp className="text-blue-500" />
+                          ) : (
+                            <ChevronDown className="text-blue-400" />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-center font-bold text-blue-700">
                         {item.pago.numero_cuota ?? idx + 1}
+                        {enAtraso && (
+                          <span className="block mx-auto mt-1 w-fit px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-xs font-bold whitespace-nowrap">
+                            Atrasada
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center text-blue-900 font-bold">
                         {formatCurrency(item.pago.monto_boleta)}
@@ -787,16 +863,8 @@ const handleDownloadExcel = async () => {
                       <TableCell className="text-center text-blue-700 font-semibold">
                         {formatCurrency(item.pago.cuota)}
                       </TableCell>
-                      <TableCell className="text-center">
-                        {item.pago.pagado ? (
-                          <span className="px-2 py-1 rounded bg-green-100 text-green-700 font-bold">
-                            Sí
-                          </span>
-                        ) : (
-                          <span className="px-2 py-1 rounded bg-red-100 text-red-600 font-bold">
-                            No
-                          </span>
-                        )}
+                      <TableCell>
+                        <PaymentStatusBadges payment={item.pago} />
                       </TableCell>
              <TableCell className="text-center">
               {user?.role === "ADMIN" ? (
@@ -1258,7 +1326,8 @@ const handleDownloadExcel = async () => {
                       </TableRow>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

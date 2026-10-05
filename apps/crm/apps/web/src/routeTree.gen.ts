@@ -17,6 +17,7 @@ import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
 import { Route as JuridicoIndexRouteImport } from './routes/juridico/index'
 import { Route as InversionesIndexRouteImport } from './routes/inversiones/index'
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
+import { Route as VehiclesSatVerificacionRouteImport } from './routes/vehicles/sat-verificacion'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as JuridicoDashboardDataRouteImport } from './routes/juridico/dashboard-data'
@@ -45,6 +46,7 @@ import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCierreRouteImport } from './routes/cobros/cierre'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
+import { Route as CobrosBuroInternoRouteImport } from './routes/cobros/buro-interno'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
 import { Route as CobrosAperturaRouteImport } from './routes/cobros/apertura'
 import { Route as CobrosAlertasConveniosRouteImport } from './routes/cobros/alertas-convenios'
@@ -57,14 +59,18 @@ import { Route as AdminGpsRouteImport } from './routes/admin/gps'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
 import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
 import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/index'
+import { Route as CrmDocumentacionIndexRouteImport } from './routes/crm/documentacion/index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
+import { Route as JuridicoInversionistaBatchIdRouteImport } from './routes/juridico/inversionista.$batchId'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
 import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmReportesTiempoCierreRouteImport } from './routes/crm/reportes/tiempo-cierre'
 import { Route as CrmReportesPorcentajeEfectividadRouteImport } from './routes/crm/reportes/porcentaje-efectividad'
 import { Route as CrmReportesMetaColocacionRouteImport } from './routes/crm/reportes/meta-colocacion'
 import { Route as CrmReportesEfectividadPorEtapaRouteImport } from './routes/crm/reportes/efectividad-por-etapa'
+import { Route as CrmDocumentacionLicenciasRouteImport } from './routes/crm/documentacion/licencias'
+import { Route as CrmDocumentacionEstadosCuentaRouteImport } from './routes/crm/documentacion/estados-cuenta'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 import { Route as CobrosRegistrarPagoIdRouteImport } from './routes/cobros/registrar-pago.$id'
@@ -107,6 +113,11 @@ const InversionesIndexRoute = InversionesIndexRouteImport.update({
 const CobrosIndexRoute = CobrosIndexRouteImport.update({
   id: '/cobros/',
   path: '/cobros/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehiclesSatVerificacionRoute = VehiclesSatVerificacionRouteImport.update({
+  id: '/vehicles/sat-verificacion',
+  path: '/vehicles/sat-verificacion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
@@ -250,6 +261,11 @@ const CobrosCargaRoute = CobrosCargaRouteImport.update({
   path: '/cobros/carga',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosBuroInternoRoute = CobrosBuroInternoRouteImport.update({
+  id: '/cobros/buro-interno',
+  path: '/cobros/buro-interno',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosBucketsRoute = CobrosBucketsRouteImport.update({
   id: '/cobros/buckets',
   path: '/cobros/buckets',
@@ -311,6 +327,11 @@ const CrmReportesIndexRoute = CrmReportesIndexRouteImport.update({
   path: '/crm/reportes/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CrmDocumentacionIndexRoute = CrmDocumentacionIndexRouteImport.update({
+  id: '/crm/documentacion/',
+  path: '/crm/documentacion/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -321,6 +342,12 @@ const AdminReportsIndexRoute = AdminReportsIndexRouteImport.update({
   path: '/admin/reports/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JuridicoInversionistaBatchIdRoute =
+  JuridicoInversionistaBatchIdRouteImport.update({
+    id: '/juridico/inversionista/$batchId',
+    path: '/juridico/inversionista/$batchId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const JuridicoGenerateOpportunityIdRoute =
   JuridicoGenerateOpportunityIdRouteImport.update({
     id: '/juridico/generate/$opportunityId',
@@ -356,6 +383,18 @@ const CrmReportesEfectividadPorEtapaRoute =
     path: '/crm/reportes/efectividad-por-etapa',
     getParentRoute: () => rootRouteImport,
   } as any)
+const CrmDocumentacionLicenciasRoute =
+  CrmDocumentacionLicenciasRouteImport.update({
+    id: '/crm/documentacion/licencias',
+    path: '/crm/documentacion/licencias',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const CrmDocumentacionEstadosCuentaRoute =
+  CrmDocumentacionEstadosCuentaRouteImport.update({
+    id: '/crm/documentacion/estados-cuenta',
+    path: '/crm/documentacion/estados-cuenta',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CrmAnalysisOpportunityIdRoute =
   CrmAnalysisOpportunityIdRouteImport.update({
     id: '/crm/analysis/$opportunityId',
@@ -388,6 +427,7 @@ export interface FileRoutesByFullPath {
   '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -416,6 +456,7 @@ export interface FileRoutesByFullPath {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -423,14 +464,18 @@ export interface FileRoutesByFullPath {
   '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/estados-cuenta': typeof CrmDocumentacionEstadosCuentaRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
   '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
@@ -449,6 +494,7 @@ export interface FileRoutesByTo {
   '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -477,6 +523,7 @@ export interface FileRoutesByTo {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros': typeof CobrosIndexRoute
   '/inversiones': typeof InversionesIndexRoute
   '/juridico': typeof JuridicoIndexRoute
@@ -484,14 +531,18 @@ export interface FileRoutesByTo {
   '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/estados-cuenta': typeof CrmDocumentacionEstadosCuentaRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion': typeof CrmDocumentacionIndexRoute
   '/crm/reportes': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones': typeof InversionesLiquidacionesIndexRoute
 }
@@ -511,6 +562,7 @@ export interface FileRoutesById {
   '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
@@ -539,6 +591,7 @@ export interface FileRoutesById {
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/sat-verificacion': typeof VehiclesSatVerificacionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
@@ -546,14 +599,18 @@ export interface FileRoutesById {
   '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/crm/documentacion/estados-cuenta': typeof CrmDocumentacionEstadosCuentaRoute
+  '/crm/documentacion/licencias': typeof CrmDocumentacionLicenciasRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
   '/crm/reportes/meta-colocacion': typeof CrmReportesMetaColocacionRoute
   '/crm/reportes/porcentaje-efectividad': typeof CrmReportesPorcentajeEfectividadRoute
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
   '/crm/reportes/': typeof CrmReportesIndexRoute
   '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
@@ -574,6 +631,7 @@ export interface FileRouteTypes {
     | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
+    | '/cobros/buro-interno'
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
@@ -602,6 +660,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -609,14 +668,18 @@ export interface FileRouteTypes {
     | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/estados-cuenta'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/documentacion/'
     | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesByTo: FileRoutesByTo
@@ -635,6 +698,7 @@ export interface FileRouteTypes {
     | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
+    | '/cobros/buro-interno'
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
@@ -663,6 +727,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros'
     | '/inversiones'
     | '/juridico'
@@ -670,14 +735,18 @@ export interface FileRouteTypes {
     | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/estados-cuenta'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports'
     | '/crm/analysis'
+    | '/crm/documentacion'
     | '/crm/reportes'
     | '/inversiones/liquidaciones'
   id:
@@ -696,6 +765,7 @@ export interface FileRouteTypes {
     | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
+    | '/cobros/buro-interno'
     | '/cobros/carga'
     | '/cobros/cierre'
     | '/cobros/cola'
@@ -724,6 +794,7 @@ export interface FileRouteTypes {
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
+    | '/vehicles/sat-verificacion'
     | '/cobros/'
     | '/inversiones/'
     | '/juridico/'
@@ -731,14 +802,18 @@ export interface FileRouteTypes {
     | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/crm/documentacion/estados-cuenta'
+    | '/crm/documentacion/licencias'
     | '/crm/reportes/efectividad-por-etapa'
     | '/crm/reportes/meta-colocacion'
     | '/crm/reportes/porcentaje-efectividad'
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/crm/documentacion/'
     | '/crm/reportes/'
     | '/inversiones/liquidaciones/'
   fileRoutesById: FileRoutesById
@@ -758,6 +833,7 @@ export interface RootRouteChildren {
   CobrosAlertasConveniosRoute: typeof CobrosAlertasConveniosRoute
   CobrosAperturaRoute: typeof CobrosAperturaRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
+  CobrosBuroInternoRoute: typeof CobrosBuroInternoRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
   CobrosCierreRoute: typeof CobrosCierreRoute
   CobrosColaRoute: typeof CobrosColaRoute
@@ -786,6 +862,7 @@ export interface RootRouteChildren {
   JuridicoDashboardDataRoute: typeof JuridicoDashboardDataRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
+  VehiclesSatVerificacionRoute: typeof VehiclesSatVerificacionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
   InversionesIndexRoute: typeof InversionesIndexRoute
   JuridicoIndexRoute: typeof JuridicoIndexRoute
@@ -793,14 +870,18 @@ export interface RootRouteChildren {
   CobrosRegistrarPagoIdRoute: typeof CobrosRegistrarPagoIdRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
+  CrmDocumentacionEstadosCuentaRoute: typeof CrmDocumentacionEstadosCuentaRoute
+  CrmDocumentacionLicenciasRoute: typeof CrmDocumentacionLicenciasRoute
   CrmReportesEfectividadPorEtapaRoute: typeof CrmReportesEfectividadPorEtapaRoute
   CrmReportesMetaColocacionRoute: typeof CrmReportesMetaColocacionRoute
   CrmReportesPorcentajeEfectividadRoute: typeof CrmReportesPorcentajeEfectividadRoute
   CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
+  JuridicoInversionistaBatchIdRoute: typeof JuridicoInversionistaBatchIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
+  CrmDocumentacionIndexRoute: typeof CrmDocumentacionIndexRoute
   CrmReportesIndexRoute: typeof CrmReportesIndexRoute
   InversionesLiquidacionesIndexRoute: typeof InversionesLiquidacionesIndexRoute
 }
@@ -861,6 +942,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros'
       fullPath: '/cobros/'
       preLoaderRoute: typeof CobrosIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicles/sat-verificacion': {
+      id: '/vehicles/sat-verificacion'
+      path: '/vehicles/sat-verificacion'
+      fullPath: '/vehicles/sat-verificacion'
+      preLoaderRoute: typeof VehiclesSatVerificacionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicles/inspection': {
@@ -1059,6 +1147,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosCargaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/buro-interno': {
+      id: '/cobros/buro-interno'
+      path: '/cobros/buro-interno'
+      fullPath: '/cobros/buro-interno'
+      preLoaderRoute: typeof CobrosBuroInternoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/buckets': {
       id: '/cobros/buckets'
       path: '/cobros/buckets'
@@ -1143,6 +1238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmReportesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/documentacion/': {
+      id: '/crm/documentacion/'
+      path: '/crm/documentacion'
+      fullPath: '/crm/documentacion/'
+      preLoaderRoute: typeof CrmDocumentacionIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
@@ -1155,6 +1257,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/reports'
       fullPath: '/admin/reports/'
       preLoaderRoute: typeof AdminReportsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/juridico/inversionista/$batchId': {
+      id: '/juridico/inversionista/$batchId'
+      path: '/juridico/inversionista/$batchId'
+      fullPath: '/juridico/inversionista/$batchId'
+      preLoaderRoute: typeof JuridicoInversionistaBatchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/generate/$opportunityId': {
@@ -1199,6 +1308,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmReportesEfectividadPorEtapaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/documentacion/licencias': {
+      id: '/crm/documentacion/licencias'
+      path: '/crm/documentacion/licencias'
+      fullPath: '/crm/documentacion/licencias'
+      preLoaderRoute: typeof CrmDocumentacionLicenciasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/crm/documentacion/estados-cuenta': {
+      id: '/crm/documentacion/estados-cuenta'
+      path: '/crm/documentacion/estados-cuenta'
+      fullPath: '/crm/documentacion/estados-cuenta'
+      preLoaderRoute: typeof CrmDocumentacionEstadosCuentaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/$opportunityId': {
       id: '/crm/analysis/$opportunityId'
       path: '/crm/analysis/$opportunityId'
@@ -1238,6 +1361,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosAlertasConveniosRoute: CobrosAlertasConveniosRoute,
   CobrosAperturaRoute: CobrosAperturaRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
+  CobrosBuroInternoRoute: CobrosBuroInternoRoute,
   CobrosCargaRoute: CobrosCargaRoute,
   CobrosCierreRoute: CobrosCierreRoute,
   CobrosColaRoute: CobrosColaRoute,
@@ -1266,6 +1390,7 @@ const rootRouteChildren: RootRouteChildren = {
   JuridicoDashboardDataRoute: JuridicoDashboardDataRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
+  VehiclesSatVerificacionRoute: VehiclesSatVerificacionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
   InversionesIndexRoute: InversionesIndexRoute,
   JuridicoIndexRoute: JuridicoIndexRoute,
@@ -1273,6 +1398,8 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosRegistrarPagoIdRoute: CobrosRegistrarPagoIdRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
+  CrmDocumentacionEstadosCuentaRoute: CrmDocumentacionEstadosCuentaRoute,
+  CrmDocumentacionLicenciasRoute: CrmDocumentacionLicenciasRoute,
   CrmReportesEfectividadPorEtapaRoute: CrmReportesEfectividadPorEtapaRoute,
   CrmReportesMetaColocacionRoute: CrmReportesMetaColocacionRoute,
   CrmReportesPorcentajeEfectividadRoute: CrmReportesPorcentajeEfectividadRoute,
@@ -1280,8 +1407,10 @@ const rootRouteChildren: RootRouteChildren = {
   InversionesLiquidacionesInversionistaIdRoute:
     InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
+  JuridicoInversionistaBatchIdRoute: JuridicoInversionistaBatchIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
+  CrmDocumentacionIndexRoute: CrmDocumentacionIndexRoute,
   CrmReportesIndexRoute: CrmReportesIndexRoute,
   InversionesLiquidacionesIndexRoute: InversionesLiquidacionesIndexRoute,
 }

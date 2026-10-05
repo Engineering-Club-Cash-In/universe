@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { lockPool } from "../database";
+import { CARTERA_SCHEMA } from "../database/db/schema";
 
 export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
 
@@ -10,13 +11,60 @@ export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
  * otra conexión del lockPool y esperaría para siempre al primero (deadlock).
  * Otra request del mismo proceso tiene su propio contexto, así que sigue
  * bloqueándose como debe.
+ *
+ * Guarda, por crédito, el handle `PaymentAdvisoryLock` que tomó la cadena: la
+ * reentrada le pasa a `fn` ESE mismo handle, así `holdsPaymentAdvisoryLock` /
+ * `withPaymentBindingLock` (Nexa) siguen reconociendo el lock sostenido.
  */
-const locksDeLaCadena = new AsyncLocalStorage<ReadonlySet<number>>();
+const locksDeLaCadena = new AsyncLocalStorage<
+  ReadonlyMap<number, PaymentAdvisoryLock>
+>();
 
 export type PaymentAdvisoryLockConnection = {
   query: (text: string, values?: unknown[]) => Promise<unknown>;
   release: () => void;
 };
+
+declare const paymentLockBrand: unique symbol;
+export type PaymentAdvisoryLock = { readonly [paymentLockBrand]: true };
+const heldPaymentLocks = new WeakMap<PaymentAdvisoryLock, {
+  creditoId: number;
+  connection: PaymentAdvisoryLockConnection;
+}>();
+
+export const holdsPaymentAdvisoryLock = (
+  lock: PaymentAdvisoryLock | undefined,
+  creditoId: number,
+) => heldPaymentLocks.get(lock as PaymentAdvisoryLock)?.creditoId === creditoId;
+
+export async function withPaymentBindingLock<T>(
+  lock: PaymentAdvisoryLock,
+  creditoId: number,
+  work: (bindingExists: boolean) => Promise<T>,
+): Promise<T> {
+  const held = heldPaymentLocks.get(lock);
+  if (!held || held.creditoId !== creditoId) {
+    throw new Error("Canonical payment lock is not held for this credit");
+  }
+
+  await held.connection.query("BEGIN");
+  try {
+    await held.connection.query(
+      `SELECT credito_id FROM ${CARTERA_SCHEMA}.creditos WHERE credito_id = $1 FOR KEY SHARE`,
+      [creditoId],
+    );
+    const binding = await held.connection.query(
+      `SELECT credito_id FROM ${CARTERA_SCHEMA}.nexa_credit_bindings WHERE credito_id = $1 FOR UPDATE`,
+      [creditoId],
+    ) as { rows?: unknown[] };
+    const result = await work((binding.rows?.length ?? 0) > 0);
+    await held.connection.query("COMMIT");
+    return result;
+  } catch (error) {
+    await held.connection.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  }
+}
 
 /**
  * Corre `fn` sosteniendo el advisory lock por crédito, con la conexión del
@@ -28,23 +76,27 @@ export type PaymentAdvisoryLockConnection = {
  */
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
-  fn: () => Promise<T>
+  fn: (lock: PaymentAdvisoryLock) => Promise<T>
 ): Promise<T> {
   const yaSostenidos = locksDeLaCadena.getStore();
-  if (yaSostenidos?.has(credito_id)) {
+  const lockHeredado = yaSostenidos?.get(credito_id);
+  if (lockHeredado) {
     // Reentrada: esta misma cadena ya tiene el lock del crédito.
-    return fn();
+    return fn(lockHeredado);
   }
   const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  const lock = {} as PaymentAdvisoryLock;
   try {
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
-    const sostenidos = new Set(yaSostenidos ?? []);
-    sostenidos.add(credito_id);
-    return await locksDeLaCadena.run(sostenidos, fn);
+    heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });
+    const sostenidos = new Map(yaSostenidos ?? []);
+    sostenidos.set(credito_id, lock);
+    return await locksDeLaCadena.run(sostenidos, () => fn(lock));
   } finally {
+    heldPaymentLocks.delete(lock);
     try {
       await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
         PAYMENT_ADVISORY_LOCK_NAMESPACE,

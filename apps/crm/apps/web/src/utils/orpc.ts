@@ -11,6 +11,7 @@ import type { gpsEventosRouter } from "../../../server/src/routers/gps-eventos-r
 import type { gpsIntegracionRouter } from "../../../server/src/routers/gps-integracion";
 import type {
 	AppRouter,
+	buroInternoProcedures,
 	disbursementRouter,
 	manualVehicleRouter,
 	proyeccionRouter,
@@ -30,6 +31,8 @@ import type { wialonRouter } from "../../../server/src/routers/wialon";
 
 type InvestmentsRouter =
 	typeof import("../../../server/src/routers/investments").investmentsRouter;
+type SatVehiculosRouter =
+	typeof import("../../../server/src/routers/sat-vehiculos").satVehiculosRouter;
 
 // Detectar si es un error de sesión/autenticación
 const isSessionError = (error: Error): boolean => {
@@ -98,6 +101,7 @@ export const link = new RPCLink({
 type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	InvestmentsRouter &
+	SatVehiculosRouter &
 	typeof disbursementRouter &
 	typeof proyeccionRouter &
 	typeof bucketCapacidadRouter &
@@ -115,7 +119,8 @@ type MergedRouter = AppRouter &
 	typeof referenciasCobrosRouter &
 	typeof visitasCobrosRouter &
 	typeof investigacionesRedesCobrosRouter &
-	typeof tareasCobrosRouter;
+	typeof tareasCobrosRouter &
+	typeof buroInternoProcedures;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

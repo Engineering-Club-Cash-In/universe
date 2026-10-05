@@ -15,6 +15,7 @@ export const ROLES = {
 	INVESTMENT_MANAGER: "investment_manager",
 	SERVICE_CENTER_MANAGER: "service_center_manager",
 	VEHICLE_VERIFIER: "vehicle_verifier",
+	PARTNER: "partner",
 } as const;
 
 export const USER_ROLE_VALUES = [
@@ -31,6 +32,7 @@ export const USER_ROLE_VALUES = [
 	ROLES.INVESTMENT_MANAGER,
 	ROLES.SERVICE_CENTER_MANAGER,
 	ROLES.VEHICLE_VERIFIER,
+	ROLES.PARTNER,
 ] as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -102,6 +104,11 @@ export const ROLE_CONFIG = {
 		color: "bg-lime-100 text-lime-800",
 		icon: "ClipboardCheck" as const,
 	},
+	[ROLES.PARTNER]: {
+		label: "Predio / Agencia",
+		color: "bg-rose-100 text-rose-800",
+		icon: "Store" as const,
+	},
 } as const;
 
 // Permission definitions - these match the server-side access control
@@ -124,10 +131,17 @@ export const PERMISSIONS = {
 	canAccessAdmin: (role: UserRole | string): boolean => role === ROLES.ADMIN,
 
 	// Entity Permissions
+	// El analista entra aquí porque en la asignación de inversión (50%) es
+	// quien captura la agencia del vehículo para los contratos, y muchas
+	// agencias todavía no están en el catálogo.
 	canCreateCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
-		role === ROLES.SALES_SUPERVISOR,
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
+
+	canManageAllCompanies: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
 	canCreateLeads: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
@@ -149,6 +163,10 @@ export const PERMISSIONS = {
 		role === ROLES.SALES_SUPERVISOR,
 
 	canApproveOpportunities: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
+	// Override manual de Buró/RENAP (fuente externa caída, verificación manual del analista)
+	canOverrideValidacionManual: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
 	canDeleteOpportunities: (role: UserRole | string): boolean =>
@@ -204,6 +222,17 @@ export const PERMISSIONS = {
 	canViewAllCasosCobros: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	// Buró interno (lista negra propia). Cobros registra y consulta; dar de
+	// baja a alguien y cambiar las reglas de coincidencia queda en supervisión.
+	// Análisis ve las coincidencias desde la oportunidad (canAccessAnalysis).
+	canAccessBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
+
+	canManageBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
@@ -229,6 +258,46 @@ export const PERMISSIONS = {
 		role === ROLES.COBROS ||
 		role === ROLES.COBROS_SUPERVISOR,
 
+	/**
+	 * Ver los contratos de un inversionista y sus enlaces de firma.
+	 *
+	 * Los emite jurídico, pero quien los usa es inversiones: son los que le pasan
+	 * los enlaces al cliente y miran si ya firmó. Ventas no entra: sus contratos
+	 * son los de la oportunidad.
+	 */
+	canViewInvestorContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	/**
+	 * Regenerar los enlaces de firma de un contrato de inversionista.
+	 *
+	 * Más restringido que verlos: emite otro documento en WeeTrust y deja
+	 * muertos los enlaces que el inversionista ya tenía. Los asesores ven y
+	 * copian; regenerar es de la gerencia de inversiones o de jurídico.
+	 */
+	canRegenerateInvestorContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	/**
+	 * Resolver una verificación facial que WeeTrust no validó: pedirle a la
+	 * persona que se identifique de nuevo, u omitirla para que el contrato cierre.
+	 *
+	 * Es de inversiones, que le da seguimiento a la firma con el inversionista.
+	 * Jurídico no: entrega los contratos —los emite, reemplaza y anula—, pero el
+	 * seguimiento ya no es suyo.
+	 */
+	canResolveInvestorIdentity: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
@@ -242,6 +311,40 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	// Confirm contracts have been signed (85% → 90%)
+	// Regenerar los enlaces de firma crea otro documento en WeeTrust y deja sin
+	// efecto los enlaces anteriores. Es de análisis, no de quien sólo los mira.
+	canRegenerateContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
+	// Reenviar enlaces (WhatsApp o correo de WeeTrust) le escribe al cliente.
+	// Lo hacen análisis, después de regenerar, y jurídico, después de reemplazar.
+	canResendContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
+	// Vincular con un contrato de la oportunidad un documento armado a mano en
+	// WeeTrust: el que no salió a firma porque no se encontraron los espacios,
+	// o uno que sí salió y se cambia por otro (eso le deja muertos al cliente
+	// los enlaces que tenía). Lo hacen análisis, que lleva la firma, y jurídico,
+	// que es quien subió el documento.
+	canLinkWeetrustDocument: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
+	// Lo mismo con los contratos de un inversionista. Es de quien le da
+	// seguimiento a su firma —inversiones— y de jurídico.
+	canLinkInvestorWeetrustDocument: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	// Anular un contrato lo descarta sin reemplazarlo: la oportunidad se queda
+	// sin ese documento hasta que se genere o suba otro. Lo deciden los dos que
+	// trabajan la papelería —jurídico en 80% y análisis en 85%—, no quien sólo
+	// la mira.
+	canAnnulContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

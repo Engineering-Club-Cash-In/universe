@@ -26,7 +26,6 @@
 		"@aws-sdk/client-rekognition": "3.983.0",
 		"@aws-sdk/client-s3": "3.983.0",
 		"@aws-sdk/s3-request-presigner": "3.983.0",
-		"@better-auth/drizzle-adapter": "^1.2.10",
 		"@cci/email": "file:../../../../packages/email",
 		"@modelcontextprotocol/sdk": "^1.0.0",
 		"@orpc/client": "^1.5.0",
@@ -38,16 +37,20 @@
 		"ai": "^5.0.48",
 		"bcryptjs": "^3.0.2",
 		"better-auth": "1.4.18",
+		"big.js": "7.0.1",
 		"csv-parse": "^6.1.0",
 		"dotenv": "^16.4.7",
 		"drizzle-orm": "^0.44.2",
 		"hono": "^4.8.2",
-		"pdf-lib": "^1.17.1",
 		"pg": "^8.14.1",
+		"pdf-lib": "^1.17.1",
+		"puppeteer": "^24.14.0",
 		"xlsx": "^0.18.5",
-		"zod": "^3.23.8"
+		"zod": "^3.23.8",
+		"zxing-wasm": "^3.1.2"
 	},
 	"devDependencies": {
+		"@types/big.js": "^7.0.0",
 		"@types/bun": "^1.2.6",
 		"@types/csv-parse": "^1.2.5",
 		"@types/pg": "^8.11.11",
@@ -56,6 +59,7 @@
 		"typescript": "^5.8.2"
 	},
 	"overrides": {
-		"@aws-sdk/credential-provider-node": "3.972.79"
+		"@aws-sdk/credential-provider-node": "3.972.79",
+		"kysely": "0.28.11"
 	}
 }

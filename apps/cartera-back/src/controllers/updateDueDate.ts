@@ -3,6 +3,26 @@ import { CARTERA_SCHEMA } from "../database/db/schema";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito, historial_cambio_fecha } from "../database/db";
 import z from "zod";
+import { emitCreditDueDate, type CarteraStructuredLogger } from "../utils/structuredLogger";
+
+const MAX_TELEMETRY_DURATION_MS = 86_400_000;
+
+function safeNow(): number {
+  try {
+    const value = Date.now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  try {
+    return Math.min(MAX_TELEMETRY_DURATION_MS, Math.max(0, safeNow() - startedAt));
+  } catch {
+    return 0;
+  }
+}
 
 // ============================================
 // SCHEMAS
@@ -32,7 +52,7 @@ type CreditoDiaPago = z.infer<typeof creditoDiaPagoSchema>;
  * - Cuota 17 = Enero 2026 (12 meses después)
  * - Cuota 18 = Febrero 2026
  */
-function calcularFechaPorNumeroCuota(
+export function calcularFechaPorNumeroCuota(
   fechaReferencia: { anio: number; mes: number },
   numeroCuotaReferencia: number,
   numeroCuotaActual: number,
@@ -101,18 +121,83 @@ interface UpdateDueDatesResult {
   }[];
 }
 
+type DelegatedDueDateOperation = "batch_update" | "repair_missing_february" | "single_update";
+
+export function classifyDueDateBatchTerminal({
+  operation,
+  processedCount,
+  succeededCount,
+  failedCount,
+  skippedCount,
+}: {
+  operation: DelegatedDueDateOperation;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+}) {
+  const counts = { operation, processedCount, succeededCount, failedCount, skippedCount };
+  if (processedCount > 0 && skippedCount === processedCount && succeededCount === 0 && failedCount === 0) {
+    return { outcome: "skipped" as const, ...counts, reasonCode: "missing_payment_reference" as const };
+  }
+  return failedCount > 0
+    ? { outcome: "partially_completed" as const, ...counts, reasonCode: "item_failures" as const }
+    : { outcome: "completed" as const, ...counts };
+}
+
+export function classifyDueDatePersistenceFailure(
+  operation: "change_start_date" | "json_bulk_update",
+  hasPersistedChanges: boolean,
+) {
+  return {
+    outcome: hasPersistedChanges ? "partially_persisted" as const : "failed" as const,
+    operation,
+    errorCode: "unknown" as const,
+  };
+}
+
 export const updateDueDates = async ({
   body,
   set,
+  telemetryOperation = "batch_update",
+  telemetryProcessedCount,
+  telemetrySkippedCount = 0,
+  telemetryStartedAt,
+  telemetryLogger,
 }: {
   body: unknown;
   set: { status: number };
+  telemetryOperation?: "batch_update" | "repair_missing_february" | "single_update";
+  telemetryProcessedCount?: number;
+  telemetrySkippedCount?: number;
+  telemetryStartedAt?: number;
+  telemetryLogger?: CarteraStructuredLogger;
 }): Promise<UpdateDueDatesResult | { message: string; errors?: unknown }> => {
+  const startedAt = telemetryStartedAt ?? safeNow();
   try {
     // 1. Validar body
     const parseResult = updateDueDatesBodySchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
+      if (
+        telemetryOperation === "repair_missing_february"
+        && telemetryProcessedCount !== undefined
+        && telemetryProcessedCount > 0
+        && telemetrySkippedCount === telemetryProcessedCount
+      ) {
+        emitCreditDueDate({
+          outcome: "skipped",
+          operation: telemetryOperation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: telemetryProcessedCount,
+          succeededCount: 0,
+          failedCount: 0,
+          skippedCount: telemetrySkippedCount,
+          reasonCode: "missing_payment_reference",
+        }, telemetryLogger);
+      } else {
+        emitCreditDueDate({ outcome: "rejected", operation: telemetryOperation, durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" }, telemetryLogger);
+      }
       return {
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
@@ -121,20 +206,17 @@ export const updateDueDates = async ({
 
     const { creditos: creditosInput } = parseResult.data;
 
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`ACTUALIZANDO FECHAS DE VENCIMIENTO`);
-    console.log(`${"=".repeat(60)}`);
-    console.log(`Total creditos a procesar: ${creditosInput.length}\n`);
 
     const resultados: UpdateDueDatesResult["detalle"] = [];
     let exitosos = 0;
     let fallidos = 0;
+    let hasPersistedChanges = false;
 
     // 2. Procesar cada credito
     for (const creditoInput of creditosInput) {
       const { numero_credito_sifco, dia_pago } = creditoInput;
 
-      console.log(`\n--- Procesando: ${numero_credito_sifco} (dia ${dia_pago}) ---`);
+
 
       try {
         // 2.1 Buscar el credito
@@ -145,7 +227,6 @@ export const updateDueDates = async ({
           .limit(1);
 
         if (!creditoDb) {
-          console.log(`   Credito NO encontrado`);
           resultados.push({
             numero_credito_sifco,
             status: "no_encontrado",
@@ -167,7 +248,6 @@ export const updateDueDates = async ({
           .orderBy(asc(cuotas_credito.numero_cuota));
 
         if (todasLasCuotas.length === 0) {
-          console.log(`   Sin cuotas`);
           resultados.push({
             numero_credito_sifco,
             status: "sin_cuotas",
@@ -189,10 +269,8 @@ export const updateDueDates = async ({
         const fechaReferencia = extraerAnioMes(cuotaReferencia.fecha_vencimiento);
         const numeroCuotaReferencia = cuotaReferencia.numero_cuota;
 
-        console.log(`   Referencia: Cuota #${numeroCuotaReferencia} (${cuotasPagadas.length > 0 ? 'última pagada' : 'primera'}) = ${fechaReferencia.anio}-${fechaReferencia.mes.toString().padStart(2, "0")}`);
 
         if (cuotasNoPagadas.length === 0) {
-          console.log(`   Sin cuotas pendientes`);
           resultados.push({
             numero_credito_sifco,
             status: "sin_cuotas",
@@ -202,7 +280,6 @@ export const updateDueDates = async ({
           continue;
         }
 
-        console.log(`   Cuotas pendientes: ${cuotasNoPagadas.length}`);
 
         // 2.5 Actualizar cada cuota basándose en el número de cuota
         let cuotasActualizadas = 0;
@@ -227,6 +304,7 @@ export const updateDueDates = async ({
               .update(cuotas_credito)
               .set({ fecha_vencimiento: nuevaFecha })
               .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+            hasPersistedChanges = true;
 
             // También actualizar pagos_credito que tengan este cuota_id
             await db
@@ -234,14 +312,11 @@ export const updateDueDates = async ({
               .set({ fecha_vencimiento: nuevaFecha })
               .where(eq(pagos_credito.cuota_id, cuota.cuota_id));
 
-            console.log(
-              `   Cuota #${cuota.numero_cuota}: ${fechaOriginalStr} -> ${nuevaFecha} (cuotas + pagos)`
-            );
+
             cuotasActualizadas++;
           }
         }
 
-        console.log(`   Cuotas actualizadas: ${cuotasActualizadas}`);
 
         resultados.push({
           numero_credito_sifco,
@@ -250,8 +325,8 @@ export const updateDueDates = async ({
         });
         exitosos++;
       } catch (error) {
+
         const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error(`   ERROR: ${errorMsg}`);
 
         resultados.push({
           numero_credito_sifco,
@@ -263,14 +338,58 @@ export const updateDueDates = async ({
     }
 
     // 3. Resumen
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`RESUMEN`);
-    console.log(`${"=".repeat(60)}`);
-    console.log(`Exitosos: ${exitosos}`);
-    console.log(`Fallidos: ${fallidos}`);
-    console.log(`Total: ${creditosInput.length}`);
 
     set.status = 200;
+    const processedCount = telemetryProcessedCount ?? creditosInput.length;
+    if (fallidos > 0 && hasPersistedChanges) {
+      emitCreditDueDate({
+        outcome: "partially_persisted",
+        operation: telemetryOperation,
+        durationMs: elapsedMilliseconds(startedAt),
+        errorCode: "unknown",
+      }, telemetryLogger);
+    } else {
+      const terminal = classifyDueDateBatchTerminal({
+        operation: telemetryOperation,
+        processedCount,
+        succeededCount: exitosos,
+        failedCount: fallidos,
+        skippedCount: telemetrySkippedCount,
+      });
+      if (terminal.outcome === "skipped") {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+          reasonCode: terminal.reasonCode,
+        }, telemetryLogger);
+      } else if (terminal.outcome === "partially_completed") {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+          reasonCode: terminal.reasonCode,
+        }, telemetryLogger);
+      } else {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+        }, telemetryLogger);
+      }
+    }
     return {
       success: fallidos === 0,
       total_procesados: creditosInput.length,
@@ -279,7 +398,7 @@ export const updateDueDates = async ({
       detalle: resultados,
     };
   } catch (error) {
-    console.error("Error en updateDueDates:", error);
+    emitCreditDueDate({ outcome: "failed", operation: telemetryOperation, durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" }, telemetryLogger);
     set.status = 500;
     return {
       message: "Error interno del servidor",
@@ -303,10 +422,8 @@ export const fixCreditosWithoutFebruary = async ({
   anio?: number;
   set: { status: number };
 }) => {
+  const startedAt = safeNow();
   try {
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`ARREGLANDO CRÉDITOS SIN FEBRERO ${anio}`);
-    console.log(`${"=".repeat(60)}\n`);
 
     // 1. Obtener créditos sin cuota en febrero del año especificado
     const creditosSinFebrero = await db.execute<{
@@ -330,10 +447,10 @@ export const fixCreditosWithoutFebruary = async ({
          )`
     );
 
-    console.log(`Créditos sin febrero ${anio}: ${creditosSinFebrero.rows.length}`);
 
     if (creditosSinFebrero.rows.length === 0) {
       set.status = 200;
+      emitCreditDueDate({ outcome: "completed", operation: "repair_missing_february", durationMs: elapsedMilliseconds(startedAt), processedCount: 0, succeededCount: 0, failedCount: 0, skippedCount: 0 });
       return {
         success: true,
         message: `No hay créditos sin cuota en febrero ${anio}`,
@@ -372,21 +489,23 @@ export const fixCreditosWithoutFebruary = async ({
           dia_pago: diaPago,
         });
 
-        console.log(`  ${credito.numero_credito_sifco}: día ${diaPago}`);
       }
     }
 
-    console.log(`\nProcesando ${creditosConDiaPago.length} créditos...`);
 
     // 3. Llamar a updateDueDates con todos los créditos
     const resultado = await updateDueDates({
       body: { creditos: creditosConDiaPago },
       set,
+      telemetryOperation: "repair_missing_february",
+      telemetryProcessedCount: creditosSinFebrero.rows.length,
+      telemetrySkippedCount: creditosSinFebrero.rows.length - creditosConDiaPago.length,
+      telemetryStartedAt: startedAt,
     });
 
     return resultado;
   } catch (error) {
-    console.error("Error en fixCreditosWithoutFebruary:", error);
+    emitCreditDueDate({ outcome: "failed", operation: "repair_missing_february", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     set.status = 500;
     return {
       message: "Error interno del servidor",
@@ -422,10 +541,13 @@ export const cambiarFechaInicio = async ({
   body: unknown;
   set: { status: number };
 }) => {
+  const startedAt = safeNow();
+  let hasPersistedChanges = false;
   try {
     const parseResult = cambiarFechaInicioSchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
+      emitCreditDueDate({ outcome: "rejected", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" });
       return {
         success: false,
         message: "Validation failed",
@@ -440,11 +562,6 @@ export const cambiarFechaInicio = async ({
     //     1 = solo permite si únicamente cuota 0 está pagada.
     const CUOTA_MINIMA_BLOQUEO = 2;
 
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`CAMBIAR FECHA DE INICIO: ${numero_credito_sifco}`);
-    console.log(`Nueva fecha inicio: ${nueva_fecha_inicio}`);
-    console.log(`Cambiado por: ${changed_by} | Razón: ${razon}`);
-    console.log(`${"=".repeat(60)}`);
 
     // 1. Buscar el crédito
     const [creditoDb] = await db
@@ -455,6 +572,7 @@ export const cambiarFechaInicio = async ({
 
     if (!creditoDb) {
       set.status = 404;
+      emitCreditDueDate({ outcome: "rejected", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt), reasonCode: "credit_not_found" });
       return { success: false, message: "Crédito no encontrado" };
     }
 
@@ -472,6 +590,7 @@ export const cambiarFechaInicio = async ({
 
     if (todasLasCuotas.length === 0) {
       set.status = 400;
+      emitCreditDueDate({ outcome: "rejected", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt), reasonCode: "installments_not_found" });
       return { success: false, message: "El crédito no tiene cuotas" };
     }
 
@@ -481,6 +600,7 @@ export const cambiarFechaInicio = async ({
     );
     if (cuotaPagadaMayor) {
       set.status = 400;
+      emitCreditDueDate({ outcome: "rejected", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt), reasonCode: "paid_installment_conflict" });
       return {
         success: false,
         message: `No se puede cambiar la fecha de inicio porque la cuota ${cuotaPagadaMayor.numero_cuota} ya está pagada. Solo se permite el cambio si únicamente las cuotas menores a ${CUOTA_MINIMA_BLOQUEO} están pagadas.`,
@@ -491,6 +611,7 @@ export const cambiarFechaInicio = async ({
     const cuotaUno = todasLasCuotas.find((c) => c.numero_cuota === 1);
     if (!cuotaUno) {
       set.status = 400;
+      emitCreditDueDate({ outcome: "rejected", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt), reasonCode: "installments_not_found" });
       return { success: false, message: "El crédito no tiene cuota 1" };
     }
 
@@ -503,6 +624,7 @@ export const cambiarFechaInicio = async ({
       razon,
       changed_by,
     });
+    hasPersistedChanges = true;
 
     // 4. Extraer día de pago de la nueva fecha inicio
     const partesFecha = nueva_fecha_inicio.split("-");
@@ -538,14 +660,13 @@ export const cambiarFechaInicio = async ({
           .set({ fecha_vencimiento: nuevaFecha })
           .where(eq(pagos_credito.cuota_id, cuota.cuota_id));
 
-        console.log(`   Cuota #${cuota.numero_cuota}: ${fechaOriginalStr} -> ${nuevaFecha}`);
         cuotasActualizadas++;
       }
     }
 
-    console.log(`\nTotal cuotas actualizadas: ${cuotasActualizadas}`);
 
     set.status = 200;
+    emitCreditDueDate({ outcome: "completed", operation: "change_start_date", durationMs: elapsedMilliseconds(startedAt) });
     return {
       success: true,
       message: `Fecha de inicio cambiada a ${nueva_fecha_inicio}`,
@@ -553,7 +674,8 @@ export const cambiarFechaInicio = async ({
       total_cuotas: todasLasCuotas.length,
     };
   } catch (error) {
-    console.error("Error en cambiarFechaInicio:", error);
+    const terminal = classifyDueDatePersistenceFailure("change_start_date", hasPersistedChanges);
+    emitCreditDueDate({ outcome: terminal.outcome, operation: terminal.operation, durationMs: elapsedMilliseconds(startedAt), errorCode: terminal.errorCode });
     set.status = 500;
     return {
       success: false,
@@ -574,6 +696,7 @@ export const getHistorialCambioFecha = async ({
   numero_credito_sifco: string;
   set: { status: number };
 }) => {
+  const startedAt = safeNow();
   try {
     const [creditoDb] = await db
       .select({ credito_id: creditos.credito_id })
@@ -583,6 +706,7 @@ export const getHistorialCambioFecha = async ({
 
     if (!creditoDb) {
       set.status = 404;
+      emitCreditDueDate({ outcome: "rejected", operation: "list_change_history", durationMs: elapsedMilliseconds(startedAt), reasonCode: "credit_not_found" });
       return { success: false, message: "Crédito no encontrado" };
     }
 
@@ -592,12 +716,13 @@ export const getHistorialCambioFecha = async ({
       .where(eq(historial_cambio_fecha.credito_id, creditoDb.credito_id))
       .orderBy(desc(historial_cambio_fecha.created_at));
 
+    emitCreditDueDate({ outcome: "completed", operation: "list_change_history", durationMs: elapsedMilliseconds(startedAt) });
     return {
       success: true,
       historial,
     };
   } catch (error) {
-    console.error("Error en getHistorialCambioFecha:", error);
+    emitCreditDueDate({ outcome: "failed", operation: "list_change_history", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     set.status = 500;
     return {
       success: false,
@@ -623,9 +748,11 @@ export const updateSingleDueDate = async ({
   body: unknown;
   set: { status: number };
 }) => {
+  const startedAt = safeNow();
   const parseResult = singleUpdateSchema.safeParse(body);
   if (!parseResult.success) {
     set.status = 400;
+    emitCreditDueDate({ outcome: "rejected", operation: "single_update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" });
     return {
       message: "Validation failed",
       errors: parseResult.error.flatten().fieldErrors,
@@ -636,6 +763,8 @@ export const updateSingleDueDate = async ({
   return updateDueDates({
     body: { creditos: [parseResult.data] },
     set,
+    telemetryOperation: "single_update",
+    telemetryStartedAt: startedAt,
   });
 };
 
@@ -653,19 +782,17 @@ export const updateDueDatesFromJson = async ({
 }: {
   set: { status: number };
 }) => {
+  const startedAt = safeNow();
+  let hasPersistedChanges = false;
   const { promises: fs } = await import("fs");
   const rutaArchivoPagos =
     "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
 
   try {
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`ACTUALIZANDO FECHAS DESDE JSON (OPTIMIZADO)`);
-    console.log(`${"=".repeat(60)}`);
 
     // 1. Leer JSON
     const contenido = await fs.readFile(rutaArchivoPagos, "utf-8");
     const jsonPagos = JSON.parse(contenido);
-    console.log(`Total registros en JSON: ${jsonPagos.length}\n`);
 
     // 2. Agrupar créditos por diaPago
     const gruposPorDia: Map<number, string[]> = new Map();
@@ -682,12 +809,6 @@ export const updateDueDatesFromJson = async ({
       gruposPorDia.get(diaPago)!.push(registro.numeroCredito);
     }
 
-    console.log(`Grupos por día: ${gruposPorDia.size}`);
-    for (const [dia, creds] of gruposPorDia) {
-      console.log(`  Día ${dia}: ${creds.length} créditos`);
-    }
-    console.log(`Sin campo pago: ${sinPago}\n`);
-
     // Helper SQL: último día del mes = EXTRACT(DAY FROM (DATE_TRUNC('month', fecha) + INTERVAL '1 month' - INTERVAL '1 day'))
     const ultimoDia = (col: string) =>
       `EXTRACT(DAY FROM (DATE_TRUNC('month', ${col}) + INTERVAL '1 month' - INTERVAL '1 day'))::int`;
@@ -697,7 +818,6 @@ export const updateDueDatesFromJson = async ({
 
     for (const [diaPago, creditNumbers] of gruposPorDia) {
       const inClause = creditNumbers.map((n) => `'${n}'`).join(", ");
-      console.log(`Procesando día ${diaPago} (${creditNumbers.length} créditos)...`);
 
       // 3a. UPDATE cuotas_credito: solo cambiar el día de fecha_vencimiento
       const cuotasResult = await db.execute(
@@ -713,6 +833,8 @@ export const updateDueDatesFromJson = async ({
          )
          AND cc.numero_cuota > 0`
       );
+      const cuotasCount = (cuotasResult as unknown as { rowCount?: number }).rowCount ?? 0;
+      if (cuotasCount > 0) hasPersistedChanges = true;
 
       // 3b. UPDATE pagos_credito: fecha_vencimiento siempre,
       //     fecha_pago + fecha_boleta SOLO donde fecha_pago ya tiene valor
@@ -746,21 +868,23 @@ export const updateDueDatesFromJson = async ({
          )`
       );
 
-      const cuotasCount = (cuotasResult as any).rowCount ?? 0;
-      const pagosCount = (pagosResult as any).rowCount ?? 0;
+      const pagosCount = (pagosResult as unknown as { rowCount?: number }).rowCount ?? 0;
+      if (pagosCount > 0) hasPersistedChanges = true;
 
-      console.log(`  Día ${diaPago}: ${cuotasCount} cuotas, ${pagosCount} pagos actualizados`);
       resultados.push({ dia: diaPago, creditos: creditNumbers.length, cuotas: cuotasCount, pagos: pagosCount });
     }
 
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`RESUMEN`);
-    console.log(`${"=".repeat(60)}`);
-    console.log(`Total créditos procesados: ${jsonPagos.length - sinPago}`);
-    console.log(`Sin campo pago: ${sinPago}`);
-    console.log(`Queries ejecutados: ${gruposPorDia.size * 2}`);
 
     set.status = 200;
+    emitCreditDueDate({
+      outcome: "completed",
+      operation: "json_bulk_update",
+      durationMs: elapsedMilliseconds(startedAt),
+      processedCount: jsonPagos.length,
+      succeededCount: jsonPagos.length - sinPago,
+      failedCount: 0,
+      skippedCount: sinPago,
+    });
     return {
       success: true,
       total_json: jsonPagos.length,
@@ -770,7 +894,8 @@ export const updateDueDatesFromJson = async ({
       resultados,
     };
   } catch (error: any) {
-    console.error("Error en updateDueDatesFromJson:", error);
+    const terminal = classifyDueDatePersistenceFailure("json_bulk_update", hasPersistedChanges);
+    emitCreditDueDate({ outcome: terminal.outcome, operation: terminal.operation, durationMs: elapsedMilliseconds(startedAt), errorCode: terminal.errorCode });
     set.status = 500;
     return {
       message: "Error interno del servidor",

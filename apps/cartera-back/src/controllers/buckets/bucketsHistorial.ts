@@ -39,7 +39,7 @@ function buildWhere(a: BucketsHistorialArgs) {
   const filters: any[] = [];
 
   // Rango de fecha por DÍA Guatemala (fecha es timestamp UTC; el motor corre
-  // ~23:59 GT ≈ 06:00 UTC del día siguiente → comparar en GT evita el corrimiento).
+  // ~00:05 GT ≈ 06:05 UTC: comparar en GT evita el corrimiento de día).
   const fechaGT = sql`(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date`;
   if (a.desde) filters.push(sql`${fechaGT} >= ${a.desde}::date`);
   if (a.hasta) filters.push(sql`${fechaGT} <= ${a.hasta}::date`);

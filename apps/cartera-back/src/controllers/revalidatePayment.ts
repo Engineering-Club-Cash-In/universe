@@ -13,6 +13,56 @@ import {
   shouldRejectZeroAppliedNormalValidation,
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { desactivarMoraSiCreditoAlDia } from "./latefee";
+import { aplicarRubrosDelPago, RubroError } from "./rubros";
+import {
+  carteraStructuredLogger,
+  type CarteraStructuredLogger,
+} from "../utils/structuredLogger";
+
+type RevalidatePaymentContext = Readonly<Record<string, unknown>>;
+
+interface ResponseSetter {
+  status?: number | string;
+}
+
+interface RevalidatePaymentDependencies {
+  readonly logger?: CarteraStructuredLogger;
+  readonly clock?: () => number;
+}
+
+type RevalidationReasonCode =
+  | "payment_not_found"
+  | "payment_already_applied"
+  | "state_conflict";
+
+type RevalidationPublicError =
+  | "No se encontró el pago"
+  | "El pago ya está validado"
+  | "El pago no está pendiente de revalidación"
+  | "El pago cambió durante la revalidación";
+
+class RevalidationRejection extends Error {
+  constructor(
+    readonly reasonCode: RevalidationReasonCode,
+    readonly status: 404 | 409,
+    readonly publicError: RevalidationPublicError,
+  ) {
+    super(reasonCode);
+  }
+}
+
+class RevalidationIntegrityFailure extends Error {
+  readonly errorCode = "integrity_violation" as const;
+}
+
+function elapsedMilliseconds(clock: () => number, startedAt: number): number {
+  return Math.max(0, Math.min(86_400_000, Math.round(clock() - startedAt)));
+}
+
+function isResponseSetter(value: unknown): value is ResponseSetter {
+  return typeof value === "object" && value !== null;
+}
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -24,6 +74,11 @@ export const revalidatePaymentSchema = z.object({
 
 type RevalidateTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+/**
+ * Cuerpo transaccional de la revalidación (COBROS-02: extraído para reusarlo
+ * con un `tx` inyectado, sin lock ni transacción anidada). Corre DENTRO de la
+ * transacción del llamador; el lock por crédito lo toma el llamador.
+ */
 export async function validarPagoRegistrado({
   credito_id,
   pago_id,
@@ -46,14 +101,26 @@ export async function validarPagoRegistrado({
     .limit(1);
 
   if (!pago) {
-    throw new Error(`Payment ${pago_id} not found`);
+    throw new RevalidationRejection(
+      "payment_not_found",
+      404,
+      "No se encontró el pago",
+    );
   }
 
   if (esPagoAplicado(pago.validationStatus)) {
-    throw new Error(`Payment ${pago_id} is already validated`);
+    throw new RevalidationRejection(
+      "payment_already_applied",
+      409,
+      "El pago ya está validado",
+    );
   }
   if (pago.validationStatus !== "pending" || pago.paymentFalse !== false) {
-    throw new Error(`Payment ${pago_id} is not pending revalidation`);
+    throw new RevalidationRejection(
+      "state_conflict",
+      409,
+      "El pago no está pendiente de revalidación",
+    );
   }
 
   if (
@@ -72,11 +139,9 @@ export async function validarPagoRegistrado({
     };
   }
 
-  console.log(`✅ Pago encontrado (Pendiente)`);
-
   // 3️⃣ OBTENER DATOS DEL CRÉDITO
   if (pago.credito_id === null) {
-    throw new Error(`El pago ${pago_id} no tiene un crédito asociado`);
+    throw new RevalidationIntegrityFailure();
   }
 
   const [credito] = await tx
@@ -86,10 +151,8 @@ export async function validarPagoRegistrado({
     .limit(1);
 
   if (!credito) {
-    throw new Error(`Crédito ${pago.credito_id} no encontrado`);
+    throw new RevalidationIntegrityFailure();
   }
-
-  console.log("✅ Crédito encontrado");
 
   // 4️⃣ CALCULAR NUEVO CAPITAL (restar el abono_capital del pago)
   const capital_actual = new Big(credito.capital ?? 0);
@@ -128,10 +191,6 @@ export async function validarPagoRegistrado({
     pagoIdEnValidacion: pago_id,
   });
 
-  console.log(`💰 Capital actual: ${capital_actual.toString()}`);
-  console.log(`💰 Abono capital del pago actual: ${abono_capital_actual.toString()}`);
-  console.log(`💰 Nuevo capital: ${nuevo_capital.toString()}`);
-
   // 5️⃣ CALCULAR NUEVA DEUDA TOTAL
   const cuota_interes = new Big(nuevo_capital)
     .times(new Big(credito.porcentaje_interes ?? 0).div(100))
@@ -149,9 +208,23 @@ export async function validarPagoRegistrado({
     .plus(membresias_pago)
     .round(2);
 
-  console.log(`🔢 Nueva cuota interés: ${cuota_interes.toString()}`);
-  console.log(`🔢 Nuevo IVA 12%: ${iva_12.toString()}`);
-  console.log(`📊 Nueva deuda total: ${nueva_deuda_total.toString()}`);
+  // 🧾 RUBROS: acá es donde el saldo del rubro vuelve a BAJAR.
+  //
+  // El pago llega con sus reclamos en `aplicado = false` —así los dejó el
+  // registro de la boleta, o `desaplicarRubrosDelPago` si vino por
+  // "Revertir Especial"—, y revalidar es la misma transición que
+  // `/aplicar-pago`: contabilidad se pronunció, el saldo se descuenta. Sin
+  // esto el ciclo validated → pending → validated devolvía el saldo y no lo
+  // volvía a cobrar nunca, o sea el rubro se perdonaba solo.
+  //
+  // Va ANTES de tocar el crédito, en el mismo punto en que lo hace
+  // `aplicarPagoAlCredito`: el cobro del rubro no depende de que la cuota
+  // cierre. Y si el saldo ya no alcanza, LANZA y la transacción entera se
+  // revierte — preferimos ver el agujero a cobrar de menos.
+  await aplicarRubrosDelPago(
+    pago_id,
+    tx as unknown as Parameters<typeof aplicarRubrosDelPago>[1]
+  );
 
   // 6️⃣ ACTUALIZAR EL CRÉDITO
   if (pago.credito_id !== null) {
@@ -165,7 +238,6 @@ export async function validarPagoRegistrado({
         cuota_interes: cuota_interes.toString(),
       })
       .where(eq(creditos.credito_id, pago.credito_id));
-    console.log("✅ Crédito actualizado con nuevos valores");
   }
 
   // 7️⃣ VALIDAR EL PAGO y registrar fecha de aplicación
@@ -181,18 +253,23 @@ export async function validarPagoRegistrado({
     )
     .returning({ pago_id: pagos_credito.pago_id });
   if (!validatedPayment) {
-    throw new Error(`Payment ${pago_id} changed during revalidation`);
+    throw new RevalidationRejection(
+      "state_conflict",
+      409,
+      "El pago cambió durante la revalidación",
+    );
   }
-  console.log("✅ Pago marcado como validado con fecha de aplicación");
 
   // Mismo criterio que aplicarPagoNormalEnTx: queda a la espera de su factura.
   await marcarFacturacionPendiente(tx, pago_id, pago);
 
+  let installmentClosed = false;
   if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
     await tx
       .update(cuotas_credito)
       .set({ pagado: true })
       .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+    installmentClosed = true;
   }
 
   await insertPagosCreditoInversionistasV2(
@@ -206,7 +283,8 @@ export async function validarPagoRegistrado({
   // (decisión 5: al VALIDARSE el pago, no al registrarlo). Va dentro de la
   // misma transacción: si la validación se revierte, el levantamiento también.
   // No hace nada si el crédito no está en ese estado.
-  const levantamiento = await levantarRecuperacionSiPagoTodo(
+  // (Sin console.log: este slice solo emite `payment.revalidation`.)
+  await levantarRecuperacionSiPagoTodo(
     credito_id,
     tx,
     // El `pago_id` es lo que hace REVERSIBLE el levantamiento: sin él se guarda
@@ -214,31 +292,44 @@ export async function validarPagoRegistrado({
     // Codex, P1 — el camino normal sí lo pasaba, este se me quedó atrás).
     pago_id,
   );
-  if (levantamiento.levantado) {
-    console.log(
-      `🚗 Crédito ${credito_id} sale de EN_RECUPERACION: ya no debe cuotas ni mora`,
-    );
-  }
 
   return {
     pago_id,
     credito_id,
     nuevoCapital: nuevo_capital.toString(),
     numero_credito_sifco: credito.numero_credito_sifco,
-    cuota: credito.cuota
+    cuota: credito.cuota,
+    installmentClosed,
   };
 }
 
 // ============================================================================
 // FUNCIÓN PRINCIPAL: REVALIDAR PAGO
 // ============================================================================
-export const revalidatePayment = async ({ body, set }: any) => {
+async function handleRevalidatePayment(
+  context: RevalidatePaymentContext,
+  dependencies: RevalidatePaymentDependencies,
+) {
+  if (!isResponseSetter(context.set)) {
+    throw new Error("invalid revalidation handler context");
+  }
+  const body = context.body;
+  const set = context.set;
+  const logger = dependencies.logger ?? carteraStructuredLogger;
+  const clock = dependencies.clock ?? Date.now;
+  const startedAt = clock();
+  let creditUpdated = false;
+  let installmentClosed = false;
   try {
-    console.log("\n✅ ========== INICIO REVALIDACIÓN DE PAGO ==========");
-
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revalidatePaymentSchema.safeParse(body);
     if (!parseResult.success) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: "schema_invalid",
+      });
       set.status = 400;
       return {
         message: "Validation failed",
@@ -246,8 +337,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
       };
     }
     const { credito_id, pago_id } = parseResult.data;
-    console.log(`📋 Crédito ID: ${credito_id}`);
-    console.log(`🧾 Pago ID: ${pago_id}`);
 
     // 🔥 TRANSACCIÓN ATÓMICA bajo el lock por crédito. El lock se espera en
     // el pool DEDICADO (withPaymentAdvisoryLock), NO dentro de la tx: antes,
@@ -261,34 +350,114 @@ export const revalidatePayment = async ({ body, set }: any) => {
     );
 
     if ("success" in result && result.success === false) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: "state_conflict",
+      });
       set.status = 400;
       return result;
     }
 
+    creditUpdated = true;
+    installmentClosed = result.installmentClosed ?? false;
+
+    // Igual que en aplicarPagoAlCredito: si la revalidación dejó el crédito
+    // al día, apagar la mora nacida durante la ventana de validación. Va
+    // FUERA de la transacción: el helper lee con otra conexión y necesita
+    // ver la cuota ya commiteada como pagada.
+    // Se liga el evento de desactivación al pago que la causó.
+    await desactivarMoraSiCreditoAlDia(credito_id, {
+      motivo: "Crédito se puso al día al revalidar pago",
+      pago_id,
+    });
+
+    logger.emit("payment.revalidation", "completed", {
+      credit_updated: creditUpdated,
+      installment_closed: installmentClosed,
+      duration_ms: elapsedMilliseconds(clock, startedAt),
+    });
+
+    const { installmentClosed: _installmentClosed, ...responseData } = result;
+
     set.status = 200;
     return {
       message: "Payment revalidated successfully",
-      data: result,
+      data: responseData,
     };
-  } catch (error: any) {
-    console.error("\n❌ ========== ERROR EN REVALIDACIÓN ==========");
-    console.error(error);
-    
-    if (error.message.includes("not found")) {
-      set.status = 404;
-    } else if (
-      error.message.includes("already validated") ||
-      error.message.includes("not pending revalidation") ||
-      error.message.includes("changed during revalidation")
-    ) {
-      set.status = 409;
-    } else {
-      set.status = 500;
+  } catch (error: unknown) {
+    if (error instanceof RevalidationRejection) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: error.reasonCode,
+      });
+      set.status = error.status;
+      return {
+        message: "Internal server error",
+        error: error.publicError,
+      };
     }
+
+    // 🧾 RUBROS: `aplicarRubrosDelPago` (paso 5️⃣) lanza `RubroError`, que es un
+    // rechazo de NEGOCIO —con su propio `status`, casi siempre 409, y un texto
+    // redactado para que el operador entienda qué hacer— y NO una falla del
+    // servidor. Sin esta rama caía al catch genérico de abajo y salía como un
+    // 500 mudo, además de loguearse como `failed` con `error_code: "unknown"`:
+    // un incidente inventado en el tablero por un conflicto previsto.
+    //
+    // No es un caso remoto: el camino validado → pendiente → revalidar sobre un
+    // rubro editado o anulado es uno que el módulo soporta a propósito, y es
+    // exactamente el que deja al operador sin saber por qué no pudo revalidar.
+    //
+    // Se responde con la MISMA forma que `responderError` en `routers/rubros.ts`
+    // (`{ success: false, message }`) para no inventar un formato nuevo: el
+    // front prioriza `message` al extraer el detalle (`extraerDetalle` en
+    // `lib/apiError.ts`), así que el texto de la policy llega tal cual al toast.
+    if (error instanceof RubroError) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        // `credit_updated: false` sin mirar la bandera de afuera: el rubro se
+        // cobra DENTRO de la transacción, así que si lanza, revierte todo.
+        //
+        // `state_conflict` y no un código propio: el catálogo de `reason_code`
+        // es un enum CERRADO y compartido (`packages/structured-logger`), y
+        // meterle un valor nuevo es un cambio de contrato de todo el monorepo,
+        // no parte de este arreglo. Además describe bien el caso: lo que falló
+        // es que el estado del rubro cambió (se editó o se anuló) mientras la
+        // boleta esperaba a contabilidad. El `message` de la respuesta es el que
+        // lleva el detalle.
+        reason_code: "state_conflict",
+      });
+      set.status = error.status;
+      return { success: false, message: error.message };
+    }
+
+    logger.emit("payment.revalidation", "failed", {
+      credit_updated: creditUpdated,
+      installment_closed: installmentClosed,
+      duration_ms: elapsedMilliseconds(clock, startedAt),
+      error_code: error instanceof RevalidationIntegrityFailure
+        ? error.errorCode
+        : "unknown",
+    });
+    set.status = 500;
 
     return {
       message: "Internal server error",
-      error: error instanceof Error ? error.message : String(error),
     };
   }
-};
+}
+
+export function createRevalidatePayment(
+  dependencies: RevalidatePaymentDependencies = {},
+) {
+  return (context: RevalidatePaymentContext) =>
+    handleRevalidatePayment(context, dependencies);
+}
+
+export const revalidatePayment = createRevalidatePayment();

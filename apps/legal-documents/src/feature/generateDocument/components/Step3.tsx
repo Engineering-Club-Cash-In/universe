@@ -2,7 +2,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle, AlertCircle, User, Calendar, Sparkles } from "lucide-react";
+import { CheckCircle, AlertCircle, User, UserX, Calendar, Sparkles, TriangleAlert } from "lucide-react";
 import { type Document, type Field, type RenapData } from "../hooks/useStep2";
 import { useStep3 } from "../hooks/useStep3";
 import { FieldRenderer } from "./FieldRenderer";
@@ -10,7 +10,9 @@ import { FieldRenderer } from "./FieldRenderer";
 interface Step3Props {
   readonly data: {
     documentTypes?: string[];
+    dpi?: string;
     renapData?: RenapData;
+    manualGender?: "M" | "F";
     documents?: Document[];
     fields?: Field[];
     fieldValues?: Record<string, string>;
@@ -93,6 +95,40 @@ export function Step3({
                 <p className="text-muted-foreground flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
                   {renapData.birthDate} • {renapData.gender === 'F' ? 'Femenino' : 'Masculino'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* RENAP no tuvo el DPI: los campos no vienen pre-llenados */}
+      {!renapData && data.manualGender && (
+        <Card className="border-amber-300 bg-amber-50/70">
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2 text-amber-900">
+              <UserX className="h-5 w-5 shrink-0" />
+              Información del Firmante (sin RENAP)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-start gap-3">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div className="space-y-1">
+                <p className="text-sm text-amber-800">
+                  <strong>
+                    No se encontró el DPI {data.dpi} en RENAP, así que ningún
+                    campo se pre-llenó con datos oficiales.
+                  </strong>{" "}
+                  Completá nombre, edad, nacionalidad y estado civil a mano y
+                  revisalos antes de generar.
+                </p>
+                <p className="text-sm text-amber-800">
+                  Las plantillas se eligieron con el género{" "}
+                  <strong>
+                    {data.manualGender === "F" ? "femenino" : "masculino"}
+                  </strong>{" "}
+                  que seleccionaste en el paso anterior.
                 </p>
               </div>
             </div>

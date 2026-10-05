@@ -120,7 +120,9 @@ export const AMJK_CONFIG = {
   frases: [
     {
       tipoFrase: 1 as const,
-      codigoEscenario: "2",
+      codigoEscenario: "3",
+      numeroResolucion: "6155219202612561719",
+      fechaResolucion: "2026-09-21",
     },
   ],
   portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",
@@ -249,7 +251,9 @@ export const AUTOCASH_CONFIG = {
   frases: [
     {
       tipoFrase: 1 as const,
-      codigoEscenario: "2",
+      codigoEscenario: "3",
+      numeroResolucion: "6135219202612505635",
+      fechaResolucion: "2026-09-21",
     },
   ],
   portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",

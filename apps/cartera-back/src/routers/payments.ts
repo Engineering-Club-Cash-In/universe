@@ -12,6 +12,12 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
+// La constante se IMPORTA, no se repite: un literal duplicado entre el guard y
+// este router se desincroniza en silencio —el router deja de reconocer el error
+// y lo degrada a un 400 genérico— y no hay nada que lo delate.
+// ⚠️ El hermano de más abajo, `CREDIT_PENDING_RETURN_AUTHORIZATION`, sigue con
+// el literal duplicado; arreglarlo es alcance de otra rebanada.
+import { CREDIT_WITHOUT_INVESTOR_MIRROR_CODE } from "../utils/espejoInversionistasGuard";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, SinMovimientosParaEstadoCuenta, CreditoNoEstaEnCartera, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
@@ -29,6 +35,7 @@ import { updateInstallments, updateAllInstallments } from "../controllers/update
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
 import { importPagaloPayment } from "../controllers/pagaloPaymentImport";
+import { RubroError } from "../controllers/rubros";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -266,6 +273,34 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+        set.status = 422;
+        return {
+          success: false,
+          warning: true,
+          code: error.code,
+          message: error.message,
+          creditos_bloqueados: error.creditos_bloqueados,
+        };
+      }
+      // Mismo trato que el de arriba, y por la misma razón: la petición está
+      // bien formada y el sistema está sano — lo que no admite la operación es
+      // el estado del dato. Un 400 con "Failed to mark payment as false" haría
+      // que el operador reintentara para siempre una anulación que nunca va a
+      // salir, en vez de ir a cargarle los inversionistas al crédito.
+      //
+      // Lo importante es que este error se levanta ANTES de escribir nada: el
+      // "no se anuló nada" del mensaje es literal.
+      if (error?.code === CREDIT_WITHOUT_INVESTOR_MIRROR_CODE) {
+        set.status = 422;
+        return {
+          success: false,
+          warning: true,
+          code: error.code,
+          message: error.message,
+          credito_id: error.credito_id,
+        };
+      }
       set.status = 400;
       return {
         message: "Failed to mark payment as false",
@@ -623,6 +658,23 @@ export const paymentRouter = new Elysia()
       return resultado;
 
     } catch (error) {
+      // 🧾 RUBROS: `aplicarRubrosDelPago` (dentro de `aplicarPagoNormalEnTx` y
+      // de la rama de abono a capital) lanza `RubroError` cuando el rubro que
+      // la boleta había apartado ya no admite el cobro —lo anularon, o el saldo
+      // no alcanza—. Es un choque de NEGOCIO con su propio `status` (casi
+      // siempre 409) y un texto redactado por la policy, no una falla del
+      // servidor: sin esta rama se respondía 500 y se logueaba como error de
+      // servidor un conflicto previsto, así que toda alerta o reintento
+      // cableado a 5xx lo trataba como caída del sistema.
+      //
+      // Va ANTES del `console.error` por lo mismo: el 409 se explica solo en la
+      // respuesta y no merece una línea de error en el log del servidor. Misma
+      // forma que en `revalidatePayment.ts` (`{ success: false, message }`), que
+      // es la que este catch ya usaba.
+      if (error instanceof RubroError) {
+        set.status = error.status;
+        return { success: false, message: error.message };
+      }
       console.error("Error en el endpoint aplicar-pago:", error);
       set.status = 500;
       return {

@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { db } from "../database";
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
+import { buildReporteCashInWorkbook, sanitizarSheetName } from "../utils/functions/excelCashInReport";
+import { clampPagination, contienePatron } from "../utils/functions/pagination";
 import { snapCte } from "./moraSnapshotSql";
 
 export { snapCte } from "./moraSnapshotSql";
@@ -37,11 +39,13 @@ function buildSnapshotWhere(a: SnapshotArgs) {
   else if (a.etapa === "31-60") filters.push(sql`s.cuotas = 2`);
   else if (a.etapa === "61-90") filters.push(sql`s.cuotas = 3`);
   else if (a.etapa === "+90") filters.push(sql`s.cuotas >= 4`);
-  if (a.numero_credito_sifco) filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + a.numero_credito_sifco + "%"}`);
-  if (a.nombre_usuario) filters.push(sql`u.nombre ILIKE ${"%" + a.nombre_usuario + "%"}`);
+  // `contienePatron` escapa % _ \ del término: son comodines de ILIKE y sin
+  // escapar, buscar "_" matchea a TODOS.
+  if (a.numero_credito_sifco) filters.push(sql`c.numero_credito_sifco ILIKE ${contienePatron(a.numero_credito_sifco)}`);
+  if (a.nombre_usuario) filters.push(sql`u.nombre ILIKE ${contienePatron(a.nombre_usuario)}`);
   if (a.asesor) {
     const names = a.asesor.split(",").map((n) => n.trim()).filter(Boolean);
-    if (names.length) filters.push(sql`(${sql.join(names.map((n) => sql`a.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`);
+    if (names.length) filters.push(sql`(${sql.join(names.map((n) => sql`a.nombre ILIKE ${contienePatron(n)}`), sql` OR `)})`);
   }
   return sql.join(filters, sql` AND `);
 }
@@ -55,10 +59,8 @@ const snapFromJoins = sql`
 // Snapshot por crédito de la mora a una fecha, con totales y filtros.
 export async function getMoraHistorialSnapshot(a: SnapshotArgs) {
   const fecha = a.fecha;
-  // Clamp defensivo: evita OFFSET negativo / NaN si llega page/pageSize inválido.
-  const page = Number.isFinite(a.page) && (a.page as number) > 0 ? Math.floor(a.page as number) : 1;
-  const pageSize = Number.isFinite(a.pageSize) && (a.pageSize as number) > 0 ? Math.min(Math.floor(a.pageSize as number), 500) : 20;
-  const offset = (page - 1) * pageSize;
+  // Clamp defensivo compartido con los listados de latefee.ts.
+  const { page, pageSize, offset } = clampPagination(a.page, a.pageSize);
   const where = buildSnapshotWhere(a);
 
   const [totRes, dataRes] = await Promise.all([
@@ -123,7 +125,7 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
       asesorFilter = sql` AND h.credito_id IN (
         SELECT c.credito_id FROM ${SQL_CARTERA_SCHEMA}.creditos c
         INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
-        WHERE (${sql.join(names.map((n) => sql`a.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})
+        WHERE (${sql.join(names.map((n) => sql`a.nombre ILIKE ${contienePatron(n)}`), sql` OR `)})
       )`;
     }
   }
@@ -136,23 +138,40 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
 
   const res = await db.execute<any>(sql`
     SELECT d::date AS fecha, (
+      -- Estado as-of por crédito al día \`d\`: monto/tipo del último evento, cuotas con
+      -- carry-forward (último evento con cuotas>0) para clasificar la etapa igual que
+      -- el snapshot. Misma forma que \`snapCte\` —dos DISTINCT ON contra los índices
+      -- ix_moras_historial_snapshot*— y no window functions: acá el sort NO era uno
+      -- sino UNO POR DÍA del rango, porque la subconsulta está correlacionada con \`d\`.
+      --
+      -- El corte también va contra la columna CRUDA. \`d\` es una fecha de Guatemala;
+      -- su medianoche siguiente como instante UTC es
+      -- \`(d + 1) AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC'\`. Eso envuelve a
+      -- \`d\` (constante en cada fila del generate_series), no a \`h.fecha\`.
       SELECT COALESCE(SUM(s.monto), 0)
       FROM (
-        -- estado as-of por crédito: monto/tipo del último evento, cuotas con carry-forward
-        -- (último evento con cuotas>0) para clasificar la etapa igual que el snapshot.
-        SELECT credito_id, monto, tipo_evento, cuotas,
-          ROW_NUMBER() OVER (PARTITION BY credito_id ORDER BY fecha DESC, historial_id DESC) AS rn
+        SELECT u.credito_id, u.monto, u.tipo_evento,
+               COALESCE(k.cuotas, u.cuotas_ultimo) AS cuotas
         FROM (
-          SELECT h.credito_id, h.monto_nuevo::numeric AS monto, h.tipo_evento, h.fecha, h.historial_id,
-            FIRST_VALUE(h.cuotas_atrasadas_nuevas) OVER (
-              PARTITION BY h.credito_id
-              ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
-            ) AS cuotas
+          SELECT DISTINCT ON (h.credito_id)
+            h.credito_id, h.monto_nuevo::numeric AS monto, h.tipo_evento,
+            h.cuotas_atrasadas_nuevas AS cuotas_ultimo
           FROM ${SQL_CARTERA_SCHEMA}.moras_historial h
-          WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
-        ) hh
+          WHERE h.fecha < ((d::date + 1)::timestamp AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC')
+            ${asesorFilter}
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        ) u
+        LEFT JOIN (
+          SELECT DISTINCT ON (h.credito_id)
+            h.credito_id, h.cuotas_atrasadas_nuevas AS cuotas
+          FROM ${SQL_CARTERA_SCHEMA}.moras_historial h
+          WHERE h.fecha < ((d::date + 1)::timestamp AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC')
+            AND h.cuotas_atrasadas_nuevas > 0
+            ${asesorFilter}
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        ) k ON k.credito_id = u.credito_id
       ) s
-      WHERE s.rn = 1 AND s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 ${etapaFilter}
+      WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 ${etapaFilter}
     ) AS mora_total
     FROM generate_series(${desde}::date, ${hasta}::date, INTERVAL '1 day') d
     ORDER BY d
@@ -185,6 +204,56 @@ export async function getMoraHistorialCredito({ credito_id }: { credito_id: numb
   return { success: true, data: res.rows };
 }
 
+// Cabecera del crédito para titular el Excel del drill-down (número SIFCO y
+// cliente). Va aparte para poder lanzarla en paralelo con el historial.
+// `async` a propósito: dentro del Promise.all, si `db.execute` llegara a tirar
+// de forma síncrona, sin async la promesa hermana queda sin handler y se
+// convierte en una unhandled rejection del proceso en vez de un 500 limpio.
+async function datosDelCredito(credito_id: number) {
+  return db.execute<any>(sql`
+    SELECT c.numero_credito_sifco, u.nombre AS cliente
+    FROM ${SQL_CARTERA_SCHEMA}.creditos c
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+    WHERE c.credito_id = ${credito_id}
+    LIMIT 1
+  `);
+}
+
+// Excel del historial de mora de un crédito (drill-down), mismo conjunto de filas
+// que getMoraHistorialCredito.
+export async function getMoraHistorialCreditoExcel({ credito_id }: { credito_id: number }): Promise<Buffer> {
+  // Mismas filas que el JSON: se reusa la función en vez de repetir el SELECT
+  // (eran dos copias palabra por palabra). Las dos consultas no dependen entre
+  // sí, así que van en paralelo.
+  const [historial, credRes] = await Promise.all([
+    getMoraHistorialCredito({ credito_id }),
+    datosDelCredito(credito_id),
+  ]);
+  const cred = credRes.rows[0] ?? {};
+  const numeroSifco = cred.numero_credito_sifco ?? credito_id;
+  const cliente = cred.cliente ?? "";
+
+  // Mismo lenguaje visual que el Excel de inversionistas (helper compartido).
+  return buildReporteCashInWorkbook({
+    sheetName: `Historial ${numeroSifco}`,
+    titulo: `Historial de mora del crédito ${numeroSifco}`,
+    subtitulo: cliente ? String(cliente) : undefined,
+    filas: historial.data,
+    columnas: [
+      { header: "Historial ID", key: "historial_id", width: 14, type: "number" },
+      { header: "Fecha (GT)", key: "fecha", width: 20, type: "datetime" },
+      { header: "Evento", key: "tipo_evento", width: 18 },
+      { header: "Origen", key: "origen", width: 16 },
+      { header: "Monto anterior", key: "monto_anterior", width: 16, type: "money" },
+      { header: "Monto nuevo", key: "monto_nuevo", width: 16, type: "money" },
+      { header: "Cuotas atrasadas antes", key: "cuotas_atrasadas_anterior", width: 20, type: "number" },
+      { header: "Cuotas atrasadas después", key: "cuotas_atrasadas_nuevas", width: 22, type: "number" },
+      { header: "Motivo", key: "motivo", width: 32 },
+      { header: "Usuario", key: "usuario", width: 26 },
+    ],
+  });
+}
+
 // Excel del snapshot (todas las filas, sin paginar).
 export async function getMoraHistorialExcel(a: SnapshotArgs): Promise<Buffer> {
   const where = buildSnapshotWhere(a);
@@ -197,7 +266,8 @@ export async function getMoraHistorialExcel(a: SnapshotArgs): Promise<Buffer> {
     ORDER BY s.monto DESC
   `);
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(`Mora al ${a.fecha}`);
+  // `a.fecha` llega del query string: sin sanitizar, un "/" tumba addWorksheet.
+  const ws = wb.addWorksheet(sanitizarSheetName(`Mora al ${a.fecha}`));
   ws.columns = [
     { header: "No. SIFCO", key: "numero_credito_sifco", width: 18 },
     { header: "Cliente", key: "cliente", width: 32 },

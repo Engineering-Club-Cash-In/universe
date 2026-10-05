@@ -1,7 +1,8 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { z } from "zod";
-import { formatToUSD } from "../utils/functions/currencyConverter";
+import { formatToUSD, getTipoCambioUSD } from "../utils/functions/currencyConverter";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
 import { descuentoImpuestos } from "../utils/functions/taxes";
 import {
@@ -9,7 +10,9 @@ import {
   generarPDFBuffer,
   generarYSubirExcelInversionista
 } from "../utils/functions/generalFunctions";
-import { db } from "../database/index";
+import { db, lockPool } from "../database/index";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "../database/db/schema";
 import {
   bancos,
   boletasPagoInversionista,
@@ -34,6 +37,22 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
+import { normalizarDpiParaComparar } from "../utils/functions/provisionamientoPortal";
+import {
+  provisionarInversionista,
+  resultadoNoSolicitado,
+  resultadoOrigenNoAutorizado,
+  type ResultadoProvisionamientoCartera,
+} from "../services/portalProvisioning";
+import {
+  permisoParaProvisionar,
+  type PermisoProvisionamiento,
+} from "../utils/functions/provisionamientoPortal";
+import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
+import {
+  destinatarioDeLiquidacion,
+  type RepresentanteLiquidacion,
+} from "../utils/functions/destinatarioLiquidacion";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -53,7 +72,20 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
+import { resolverModosEfectivosLiquidacion } from "./purchaseClassification";
+import type { ModalidadFacturacion } from "./modalidadFacturacion";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import {
+  checkInvestorHasUnliquidatedDrafts,
+  UnliquidatedDraftPaymentsError,
+} from "../utils/draftPaymentsGuard";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+  type PendingReturnBlockedCredit,
+} from "../utils/pendingReturnGuard";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -81,6 +113,8 @@ interface TablaConfig {
   origen: OrigenDatos;
 }
 
+type InvestorDatabase = typeof db;
+
 // Función helper para obtener configuración de tablas
 function getTablaConfig(tipo: OrigenDatos): TablaConfig {
   if (tipo === "espejo") {
@@ -104,12 +138,13 @@ function getTablaConfig(tipo: OrigenDatos): TablaConfig {
 // Función genérica para consultar créditos de inversionista
 async function consultarCreditosInversionista(
   inversionistaIds: number[],
-  config: TablaConfig
+  config: TablaConfig,
+  database: InvestorDatabase = db,
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
 
-  return await db
+  return await database
     .select({
       credito_id: tabla.credito_id,
       inversionista_id: tabla.inversionista_id,
@@ -214,13 +249,16 @@ async function consultarPagosInversionista(
 }
 
 // Función para combinar resultados de ambas fuentes (originales + espejos)
-async function consultarCreditosAmbos(inversionistaIds: number[]) {
+async function consultarCreditosAmbos(
+  inversionistaIds: number[],
+  database: InvestorDatabase = db,
+) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [creditosOriginales, creditosEspejos] = await Promise.all([
-    consultarCreditosInversionista(inversionistaIds, configOriginal),
-    consultarCreditosInversionista(inversionistaIds, configEspejo),
+    consultarCreditosInversionista(inversionistaIds, configOriginal, database),
+    consultarCreditosInversionista(inversionistaIds, configEspejo, database),
   ]);
 
   return [...creditosOriginales, ...creditosEspejos];
@@ -256,7 +294,9 @@ async function consultarPagosBulk(
   config: TablaConfig,
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -287,7 +327,11 @@ async function consultarPagosBulk(
     pagosConditions.push(eq(cuotas_credito.numero_cuota, numeroCuota));
   }
 
-  return await db
+  if (limitarPagosIds) {
+    pagosConditions.push(inArray(tabla.id, [...limitarPagosIds]));
+  }
+
+  return await database
     .select({
       credito_id: tabla.credito_id,
       abono_capital: tabla.abono_capital,
@@ -311,11 +355,13 @@ async function consultarPagosBulkAmbos(
   numeroCuota: number | undefined,
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion, limitarPagosIds, database),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion, limitarPagosIds, database),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -324,7 +370,453 @@ async function consultarPagosBulkAmbos(
 // FIN DE CONFIGURACIÓN ORIGINALES/ESPEJO
 // ============================================
 
-export const insertInvestor = async ({ body, set }: any) => {
+// `dpi_rep_legal` guarda el DPI de la persona que representa a un inversionista
+// jurídico (en las sociedades el `dpi` propio va vacío y este campo lleva el del
+// humano; es lo que le permite al representante entrar al portal). También se
+// usa para DPIs con cero a la izquierda, que la columna numérica `dpi` no puede
+// conservar — por eso se guarda TAL CUAL, sin normalizar ni recortar ceros.
+// No es único: un mismo representante puede figurar en varias sociedades.
+const DPI_REP_LEGAL_MAX = 20; // varchar(20) en cartera.inversionistas
+
+export const normalizarDpiRepLegal = (valor: unknown): string | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).trim();
+  return limpio === "" ? null : limpio;
+};
+
+export const validarDpiRepLegal = (valor: unknown): string | null => {
+  const limpio = normalizarDpiRepLegal(valor);
+  if (limpio === null) return null;
+  if (!/^\d+$/.test(limpio) || limpio.length > DPI_REP_LEGAL_MAX) {
+    return `DPI de representante legal inválido (solo dígitos, máximo ${DPI_REP_LEGAL_MAX})`;
+  }
+  return null;
+};
+
+// El DPI del representante debe corresponder a un inversionista que ya exista:
+// desde que este campo concede acceso al portal, un dedazo se lo daría a un
+// tercero. Comparación NUMÉRICA a propósito: "04036613" tiene que encontrar al
+// inversionista con dpi = 4036613 (la columna `dpi` es bigint y no puede
+// guardar el cero a la izquierda, por eso ese caso vive en dpi_rep_legal).
+// Drizzle mapea `dpi` a `number` (mode: "number"), así que arriba de
+// MAX_SAFE_INTEGER la comparación dejaría de ser exacta; `dpi_rep_legal` admite
+// hasta 20 dígitos, y fuera de ese rango no puede existir ningún inversionista.
+const DPI_MAX_COMPARABLE = BigInt(Number.MAX_SAFE_INTEGER);
+
+export const repLegalExiste = async (valor: string): Promise<boolean> => {
+  let comoNumero: bigint;
+  try {
+    comoNumero = BigInt(valor);
+  } catch {
+    return false;
+  }
+  if (comoNumero > DPI_MAX_COMPARABLE) return false;
+
+  const filas = await db
+    .select({ inversionista_id: inversionistas.inversionista_id })
+    .from(inversionistas)
+    .where(eq(inversionistas.dpi, Number(comoNumero)))
+    .limit(1);
+
+  return filas.length > 0;
+};
+
+/**
+ * ¿El representante que se manda es la PROPIA fila?
+ *
+ * Es la excepción del autorrepresentado (el inversionista 187: `dpi = 4036613`,
+ * `dpi_rep_legal = '04036613'`), y sin ella su DPI no se puede corregir. La
+ * comprobación de existencia mira `inversionistas.dpi` en la base, o sea el DPI
+ * VIEJO de esa fila; el nuevo llega en este mismo payload y todavía no está
+ * escrito en ninguna parte, así que corregirlo devolvía `rep_legal_inexistente`
+ * por un representante que sí existe: él mismo, un renglón más abajo.
+ *
+ * Saltarse la comprobación aquí no abre nada. Lo que esa comprobación protege es
+ * que un dedazo le dé el acceso al portal de esta fila a un TERCERO, y con
+ * `dpi_rep_legal === dpi` no hay tercero: `esEmpresaRepresentada` lee esa
+ * igualdad como "no es empresa", la fila sigue siendo una persona y el acceso
+ * sigue siendo el suyo.
+ *
+ * Comparación numérica, igual que `repLegalExiste`: "04036613" y 4036613 son el
+ * mismo DPI, y esa diferencia de un cero es justo el caso que existe.
+ */
+export const esAutorrepresentacion = (
+  repLegalNormalizado: string,
+  dpiDelPayload: unknown,
+): boolean => {
+  if (dpiDelPayload === undefined || dpiDelPayload === null) return false;
+
+  const dpi = String(dpiDelPayload).trim();
+  if (!/^\d+$/.test(dpi) || !/^\d+$/.test(repLegalNormalizado)) return false;
+
+  return BigInt(repLegalNormalizado) === BigInt(dpi);
+};
+
+/**
+ * El acceso al portal de las filas que ACABAN de insertarse.
+ *
+ * Vive fuera de `insertInvestor` porque hay que llamarlo desde más de un sitio:
+ * el alta con un ARREGLO puede insertar los dos primeros y morir en el tercero,
+ * y si esto solo corriera al final del camino feliz, esas dos filas quedaban
+ * escritas y sin cuenta, con el llamador viendo únicamente el 409. El reintento
+ * del lote tampoco las arreglaba: ahora chocan con ellas mismas.
+ */
+const resolverAccesosDeLosNuevos = (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+): Promise<ResultadoProvisionamientoCartera[]> =>
+  Promise.all(
+    recienCreados.map(({ fila, permiso }) => {
+      // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
+      // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
+      // Cierra el camino del registro del portal. Ese camino ya no es
+      // anónimo —la ruta pública POST /api/unified/register-external se retiró
+      // al integrar el PR #1545 y hoy solo queda /register-external-auth, con
+      // `requireAuth`—, pero el guard sigue siendo lo que lo cierra: el
+      // registro arma un objeto FIJO {nombre, dpi, email,
+      // creado_por_usuario_portal} y no puede colar la llave. Contra
+      // auth-google el rol no sirve de nada —todo entra con el mismo token de
+      // servicio ADMIN—, así que este guard es el único que cubre ese camino.
+      if (permiso === "no_solicitado") {
+        return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
+      }
+
+      // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
+      // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
+      // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
+      // salir una cuenta del portal con la contraseña al correo del payload,
+      // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
+      // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
+      // un agujero preexistente y ajeno a este archivo.
+      if (permiso === "origen_no_autorizado") {
+        return Promise.resolve(
+          resultadoOrigenNoAutorizado(fila.inversionista_id),
+        );
+      }
+
+      return provisionarInversionista(fila, {
+        buscarRepresentante: buscarRepresentanteEnCartera,
+      });
+    }),
+  );
+
+/**
+ * Lo que ya quedó escrito cuando el alta se corta a medias.
+ *
+ * `POST /investor` acepta un ARREGLO y escribe fila por fila, fuera de
+ * transacción: un id que no existe en el elemento 2, o un choque de creación
+ * estricta en el tercero, corta con 404/409 cuando los anteriores YA están
+ * insertados. Antes esos returns salían secos, así que esas filas quedaban en la
+ * base sin cuenta del portal, sin aviso a ningún representante y sin nada en la
+ * respuesta que dijera que existían; y el reintento del lote, que es lo que
+ * cualquiera hace ante un 409, ya chocaba contra ellas mismas.
+ *
+ * No las deshace —no hay rollback que valga— pero las termina y las cuenta, que
+ * es el mismo trato que reciben en el camino feliz. Con un solo inversionista
+ * (todos los llamadores de hoy) no hay nada escrito y esto devuelve `{}`.
+ */
+const loQueYaSeEscribio = async (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+  resultados: any[],
+): Promise<{ provisioning?: ResultadoProvisionamientoCartera[]; data?: any[] }> => {
+  if (resultados.length === 0) return {};
+
+  return {
+    provisioning: await resolverAccesosDeLosNuevos(recienCreados),
+    data: resultados,
+  };
+};
+
+/**
+ * Condición para encontrar al inversionista dueño de un correo.
+ *
+ * Tiene que ignorar mayúsculas: los INSERT guardan el correo en minúsculas,
+ * pero quien pregunta manda el de la sesión de auth-google tal cual lo escribió
+ * la persona, así que con una igualdad sensible a mayúsculas un correo con una
+ * sola letra en mayúscula no encontraba la fila y el titular se quedaba sin
+ * poder ver ni editar sus propios datos de cobro.
+ *
+ * Y tiene que ser una IGUALDAD, no un `ilike`. `ilike` lee `_` y `%` del correo
+ * que llega como comodines aunque la consulta vaya parametrizada —el parámetro
+ * evita la inyección, no que el patrón se interprete—, así que la cuenta
+ * `john_smith@ejemplo.com` casaba con el inversionista guardado como
+ * `john.smith@ejemplo.com`. Cuando esa era la única fila que coincidía, el
+ * portal la daba por la del titular y `POST /api/cartera/investor` le mandaba
+ * ahí los datos bancarios. `lower(...) = ...` compara el texto completo y no
+ * interpreta nada.
+ *
+ * Es el mismo criterio con el que este controller resuelve el correo al
+ * insertar y al actualizar, y por eso esos dos sitios también pasan por aquí:
+ * la búsqueda del dueño de un correo es una sola regla.
+ */
+export const condicionInversionistaPorEmail = (email: string): SQL =>
+  sql`lower(${inversionistas.email}) = ${email.trim().toLowerCase()}`;
+
+/**
+ * Fila del portal reclamable por un reintento, o `null` si no se puede afirmar.
+ *
+ * El registro del portal toca dos sistemas y no es atómico: cartera puede haber
+ * insertado la fila y auth-google caerse antes de escribir el DPI y el rol de
+ * la cuenta. Con la creación estricta a secas, TODO reintento choca contra la
+ * fila que él mismo creó y la cuenta queda incompleta para siempre.
+ *
+ * La decisión se toma aquí, y no en auth-google, porque aquí están las
+ * restricciones de unicidad: resolver el choque y devolver la fila es una sola
+ * operación. Reconstruir esa exclusión desde fuera obligaba a reservar el DPI,
+ * liberarlo y comparar-y-fijar, y esa maquinaria nunca llegó a ser correcta.
+ *
+ * Las dos preguntas son distintas y hacen falta las dos:
+ *
+ * 1. ¿De quién es la fila? Lo responde SOLO `creado_por_usuario_portal`, una
+ *    marca que `insertInvestor` escribe únicamente en el INSERT —esta función
+ *    no escribe nada: recibe las filas en conflicto y devuelve una o `null`—.
+ *    Ningún dato de la fila sirve para esto: coincidir en correo, DPI y nombre
+ *    prueba que una fila TIENE los valores pedidos, no que este registro la
+ *    haya creado.
+ * 2. ¿Se está pidiendo lo mismo que ya se creó? Lo responde el DPI, como
+ *    comprobación SECUNDARIA sobre una fila cuya propiedad ya quedó probada.
+ *
+ * Se falla cerrado en todo lo demás. En particular, los choques tienen que
+ * apuntar todos a la MISMA fila: si el correo casa con la fila propia y el DPI
+ * con la de otro inversionista, devolver la propia daría por bueno un alta que
+ * deja auth-google y cartera con identidades distintas.
+ */
+export const filaReclamablePorElPortal = <
+  T extends {
+    inversionista_id: number;
+    dpi: number | null;
+    creado_por_usuario_portal: string | null;
+  },
+>(
+  filasEnConflicto: T[],
+  creadoPorUsuarioPortal: string | null,
+  dpiSolicitado: unknown,
+): T | null => {
+  // Sin marca no hay nada que reclamar: el alta no viene del registro del
+  // portal (carteraFront, el CRM y las importaciones la dejan en NULL) y su
+  // choque se contesta 409 y ya.
+  if (!creadoPorUsuarioPortal) return null;
+
+  if (filasEnConflicto.length === 0) return null;
+
+  const ids = new Set(filasEnConflicto.map((f) => f.inversionista_id));
+  if (ids.size !== 1) return null;
+
+  const fila = filasEnConflicto[0]!;
+
+  if (fila.creado_por_usuario_portal !== creadoPorUsuarioPortal) return null;
+
+  // El DPI del reintento es el que auth-google escribe en la cuenta del portal.
+  // Aceptar una fila con otro DPI dejaría cartera con el viejo y el portal con
+  // el nuevo, y ese nuevo puede pertenecer a un inversionista antiguo. Cambiar
+  // el DPI de una fila de cartera es una operación de back office, no un efecto
+  // colateral de reintentar un registro.
+  if (typeof dpiSolicitado !== "number" || fila.dpi !== dpiSolicitado) {
+    return null;
+  }
+
+  return fila;
+};
+
+// ============================================================
+// 🪪 ENTIDADES DEL PORTAL
+// ============================================================
+// Una persona puede operar varios inversionistas: el suyo y el de cada sociedad
+// que representa. El portal solo conoce el correo de la sesión, así que acá se
+// traduce ese correo al conjunto de filas que esa persona puede ver.
+//
+//   set₀ = filas cuyo email es el de la sesión
+//   dpis = { fila.dpi } ∪ { fila.dpi_rep_legal }  para cada fila de set₀
+//   set₁ = set₀ ∪ filas con dpi ∈ dpis OR dpi_rep_legal ∈ dpis
+//
+// El ancla es SIEMPRE el correo guardado en cartera, que solo escribe el staff.
+// Nunca el DPI que el usuario declaró al registrarse en el portal: ese campo no
+// lo verifica nadie, y tomarlo como llave dejaría entrar a las sociedades de
+// cualquiera cuyo DPI se adivine.
+export type EntidadPortal = {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  /** true si esta fila es la que matcheó por correo (la puerta de entrada). */
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+};
+
+// `dpi` es bigint y `dpi_rep_legal` varchar guardado tal cual ("04036613").
+// Compararlos como número es lo único que los hace casar — mismo criterio que
+// repLegalExiste.
+const dpiComparable = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).replace(/\D/g, "");
+  if (limpio === "") return null;
+  const numero = Number(limpio);
+  return Number.isSafeInteger(numero) ? numero : null;
+};
+
+// La misma normalización, pero del lado de Postgres, para poder comparar la
+// columna varchar contra la lista de DPIs numéricos.
+//
+// El CASE no es adorno: la columna es varchar(20) y el CRM deja escribir 20
+// dígitos, pero bigint aguanta 19. Sin el guard, un dedazo en UNA fila haría
+// reventar la consulta para todos ("bigint out of range").
+const REP_LEGAL_NUMERICO = sql<number>`CASE
+  WHEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g') ~ '^[0-9]{1,18}$'
+  THEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g')::bigint
+END`;
+
+export async function getEntidadesPorCorreo(
+  correo: string
+): Promise<EntidadPortal[]> {
+  const email = correo?.trim().toLowerCase() ?? "";
+  if (!email) return [];
+
+  const ancla = await db
+    .select()
+    .from(inversionistas)
+    .where(condicionInversionistaPorEmail(email));
+
+  if (ancla.length === 0) return [];
+
+  // De qué DPIs se puede tirar para ampliar el grupo. NO de los que la propia
+  // persona se puso.
+  //
+  // El registro del portal escribe una fila con el DPI que TECLEA quien se
+  // registra y con su correo, y la marca con `creado_por_usuario_portal`. Ese
+  // DPI no lo verificó nadie: el sign-up de Better Auth está abierto y no
+  // comprueba el correo, así que cualquiera se fabrica una sesión, se registra
+  // como inversionista con el DPI del representante legal de una sociedad
+  // ajena —un dato que se adivina o se consigue— y su fila queda con ese DPI y
+  // con su propio correo. Sin este filtro, la expansión de abajo casaba ese DPI
+  // contra `dpi_rep_legal` y le metía en la lista la sociedad de la víctima:
+  // ficha, documentos, inversiones y la escritura de cuenta bancaria.
+  //
+  // El choque de creación estricta no lo frena, porque el DPI del representante
+  // vive en `dpi_rep_legal` y no en `inversionistas.dpi`: no hay contra qué
+  // chocar. Y `users.dpi` tampoco, si ese representante todavía no tiene cuenta.
+  //
+  // Su propia fila SÍ sigue apareciendo: entró por el correo, que es lo único
+  // que esa persona puede probar. Lo que no puede es traerse a nadie más.
+  //
+  // Es el mismo listón que ya aplican el CRM (`decidirLeadDelPortal`: la ficha
+  // tiene que colgar del correo de la sesión) y el provisionamiento
+  // (`cuenta_anclada_solo_por_correo`, que se reporta y no se escribe). Aquí
+  // faltaba.
+  //
+  // El precio: quien se registró solo por el portal y DESPUÉS resulta ser el
+  // representante de una sociedad no la verá hasta que back office le escriba el
+  // DPI desde el módulo de inversionistas o el CRM. Esa escritura limpia la
+  // marca (ver el UPDATE de `insertInvestor`) y es el acto de verificación que
+  // convierte la identidad en confiable: es la única que el portal no puede
+  // hacerse a sí mismo. Hasta entonces el caso es indistinguible del ataque.
+  const dpis = new Set<number>();
+  for (const fila of ancla) {
+    if (fila.creado_por_usuario_portal !== null) continue;
+
+    const propio = dpiComparable(fila.dpi);
+    if (propio !== null) dpis.add(propio);
+    const rep = dpiComparable(fila.dpi_rep_legal);
+    if (rep !== null) dpis.add(rep);
+  }
+
+  const porId = new Map<number, (typeof ancla)[number]>();
+  for (const fila of ancla) porId.set(fila.inversionista_id, fila);
+  const idsAncla = new Set(porId.keys());
+
+  if (dpis.size > 0) {
+    const lista = [...dpis];
+    const expandidas = await db
+      .select()
+      .from(inversionistas)
+      .where(
+        or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
+      );
+    for (const fila of expandidas) {
+      // Y tampoco entran POR expansión las filas que se hizo el portal a sí
+      // mismo. Es la otra mitad de lo mismo: con un DPI ajeno tecleado, esa
+      // fila aparecía en la lista de su dueño legítimo —con el nombre y el
+      // correo del que la creó— sin que él hubiera hecho nada. Las suyas
+      // propias no se pierden: entran por el correo, como anclas.
+      if (
+        fila.creado_por_usuario_portal !== null &&
+        !idsAncla.has(fila.inversionista_id)
+      ) {
+        continue;
+      }
+
+      porId.set(fila.inversionista_id, fila);
+    }
+  }
+
+  return [...porId.values()]
+    .map((fila) => ({
+      inversionista_id: fila.inversionista_id,
+      nombre: fila.nombre,
+      // Sin columna que distinga jurídicas: en las sociedades el `dpi` propio
+      // va vacío y el del humano vive en dpi_rep_legal.
+      tipo: (fila.dpi !== null ? "persona" : "empresa") as "persona" | "empresa",
+      es_ancla: idsAncla.has(fila.inversionista_id),
+      dpi: fila.dpi === null ? null : String(fila.dpi),
+      dpi_rep_legal: fila.dpi_rep_legal ?? null,
+      email: fila.email ?? null,
+      moneda: fila.moneda,
+      status: fila.status,
+    }))
+    .sort((a, b) => {
+      // La persona primero: es la entidad con la que el inversionista se
+      // identifica, y suele ser la que quiere ver al entrar.
+      if (a.tipo !== b.tipo) return a.tipo === "persona" ? -1 : 1;
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+}
+
+/**
+ * ¿Esta empresa nueva está reusando el correo de su propio representante?
+ *
+ * Una sociedad no tiene correo propio: quien lee es el humano que la
+ * representa, y es el mismo que ya recibe los correos de su ficha personal y de
+ * sus otras sociedades. Exigirle uno distinto es lo que llenó producción de
+ * correos inventados —cuatro para Richard Kachler, tres para Escondrillas— y lo
+ * que rompía el portal cuando alguien se negaba a dar más.
+ *
+ * Con el selector de entidades, compartir correo dejó de ser un problema: la
+ * resolución devuelve el grupo entero y el inversionista elige. Así que el
+ * choque se perdona, PERO solo dentro del mismo grupo: la fila que choca tiene
+ * que ser la del representante o la de otra sociedad suya. Un alta cualquiera
+ * sigue sin poder quedarse con el correo de un tercero.
+ */
+export const correoCompartidoConSuGrupo = (
+  nueva: { dpi?: number | null; dpi_rep_legal?: unknown },
+  filaQueChoca: typeof inversionistas.$inferSelect,
+): boolean => {
+  const representante = normalizarDpiParaComparar(nueva.dpi_rep_legal);
+  if (representante === null) return false;
+
+  // Con DPI propio no es una sociedad, es una persona; y dos personas no
+  // comparten correo.
+  if (normalizarDpiParaComparar(nueva.dpi) !== null) return false;
+
+  return (
+    normalizarDpiParaComparar(filaQueChoca.dpi) === representante ||
+    normalizarDpiParaComparar(filaQueChoca.dpi_rep_legal) === representante
+  );
+};
+
+export const insertInvestor = async ({ body, set, user }: any) => {
+  // Fuera del `try` a propósito: el `catch` también tiene que poder resolverles
+  // el acceso a las filas que YA se insertaron antes del error (ver
+  // `resolverAccesosDeLosNuevos`).
+  const resultados: any[] = [];
+  // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
+  // necesitar una cuenta nueva o disparar el aviso a un representante.
+  // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
+  // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
+  // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
+  // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
+  const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
+
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
@@ -333,14 +825,33 @@ export const insertInvestor = async ({ body, set }: any) => {
       return { message: "No se proporcionaron inversionistas para procesar." };
     }
 
+    // El lookup por inversionista_id se hace UNA sola vez y se reusa: la
+    // validación del representante legal necesita el valor ya guardado, y el
+    // bucle de escritura necesita la fila completa.
+    const existentesPorId = new Map<number, any>();
+    const buscarExistentePorId = async (id: number) => {
+      if (existentesPorId.has(id)) return existentesPorId.get(id);
+      const result = await db
+        .select()
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, id))
+        .limit(1);
+      const fila = result[0] || null;
+      existentesPorId.set(id, fila);
+      return fila;
+    };
+
     // 🔥 Validación flexible
     const errores: string[] = [];
 
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
 
-      // 🔥 Debe venir DPI o nombre (al menos uno)
-      if (!inv.dpi && !inv.nombre?.trim()) {
+      // 🔥 Debe venir DPI o nombre (al menos uno) para poder ubicar o crear la
+      // fila. No aplica cuando el body trae `inversionista_id`: ahí la fila ya
+      // está señalada y el resto de campos son opcionales (es lo que manda el
+      // portal cuando el inversionista cambia solo su cuenta bancaria).
+      if (!inv.inversionista_id && !inv.dpi && !inv.nombre?.trim()) {
         errores.push(
           `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
         );
@@ -352,6 +863,34 @@ export const insertInvestor = async ({ body, set }: any) => {
       // 🔥 Validar email si viene
       if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
         errores.push(`Inversionista #${index + 1}: email inválido`);
+      }
+
+      // 🔥 Validar DPI del representante legal si viene
+      const errorDpiRepLegal = validarDpiRepLegal(inv.dpi_rep_legal);
+      if (errorDpiRepLegal) {
+        errores.push(`Inversionista #${index + 1}: ${errorDpiRepLegal}`);
+      } else {
+        // Solo se verifica contra la BD cuando el valor CAMBIA. Si no viene la
+        // llave, o viene igual al guardado, no se toca: hay filas históricas
+        // (ej. el inversionista 187, "04036613") que no cumplirían la regla y
+        // deben poder seguir editándose.
+        const nuevoRepLegal = normalizarDpiRepLegal(inv.dpi_rep_legal);
+        if (typeof inv.dpi_rep_legal !== "undefined" && nuevoRepLegal !== null) {
+          const existente = inv.inversionista_id
+            ? await buscarExistentePorId(Number(inv.inversionista_id))
+            : null;
+          const guardado = existente?.dpi_rep_legal ?? null;
+
+          if (
+            guardado !== nuevoRepLegal &&
+            !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
+            !(await repLegalExiste(nuevoRepLegal))
+          ) {
+            errores.push(
+              `Inversionista #${index + 1}: el DPI de representante legal ${nuevoRepLegal} no existe como inversionista`
+            );
+          }
+        }
       }
 
       // Si viene banco_id directamente, validar que exista
@@ -425,49 +964,100 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     if (errores.length > 0) {
       set.status = 400;
-      return { message: "Errores de validación", errores };
+      // El código de máquina deja que el CRM marque el input culpable en vez de
+      // mostrar el texto suelto (ver ERRORES_POR_CAMPO en el CRM).
+      const esRepLegal = errores.some((e) =>
+        e.includes("no existe como inversionista")
+      );
+      return {
+        message: "Errores de validación",
+        errores,
+        ...(esRepLegal ? { error: "rep_legal_inexistente" } : {}),
+      };
     }
-
-    const resultados: any[] = [];
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
+
+      // Marca de procedencia del registro del portal (migración 0034). Se
+      // resuelve arriba porque la usan dos cosas: reconocer el reintento de un
+      // alta que esta misma cuenta ya completó, y sellar la fila nueva en el
+      // INSERT de más abajo.
+      //
+      // Nunca se escribe en el UPDATE, y eso es deliberado: si una edición
+      // pudiera sellar una fila existente, cualquiera capaz de editarla podría
+      // ponerla a su nombre y reclamarla después. La marca solo prueba algo
+      // mientras sea exclusiva de la creación.
+      const creadoPorUsuarioPortal =
+        typeof inv.creado_por_usuario_portal === "string" &&
+        inv.creado_por_usuario_portal.trim()
+          ? inv.creado_por_usuario_portal.trim()
+          : null;
+
       let existente = null;
+      // Con qué criterio se resolvió la fila destino. El correo es la
+      // identidad del inversionista en el portal y el destino de sus avisos,
+      // así que solo se reescribe cuando la petición apuntó a esa fila de
+      // forma explícita (por id) o cuando fue el propio correo el que la
+      // encontró. Ver el UPDATE más abajo.
+      let resueltoPor: "id" | "dpi" | "email" | "nombre" | null = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
       if (inv.inversionista_id) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
-          .limit(1);
-        existente = result[0] || null;
+        existente = await buscarExistentePorId(Number(inv.inversionista_id));
+        if (existente) resueltoPor = "id";
 
         if (!existente) {
           set.status = 404;
           return {
             message: "Inversionista no encontrado",
             error: "investor_not_found",
+            // Con un arreglo, este id malo puede venir DESPUÉS de filas que ya
+            // se insertaron. Se les resuelve el acceso igual y viajan en la
+            // respuesta: son filas escritas, y quedarse callado las dejaba sin
+            // cuenta y sin rastro.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
           };
         }
       }
 
       if (!existente && isStrictCreate) {
+        // Se recogen TODOS los choques antes de decidir, en vez de contestar al
+        // primero: la idempotencia del registro del portal necesita saber si
+        // apuntan todos a la misma fila. El ORDEN de esta lista es el del
+        // mensaje que se devuelve cuando no hay nada que reclamar, y es el
+        // mismo de siempre: email, DPI, nombre.
+        const conflictos: {
+          error: "duplicate_email" | "duplicate_dpi" | "duplicate_nombre";
+          message: string;
+          fila: typeof inversionistas.$inferSelect;
+        }[] = [];
+
         if (inv.email?.trim()) {
           const email = inv.email.trim().toLowerCase();
+          // TODAS las filas de ese correo, no la primera: un correo puede ser de
+          // varias (Autocash y Blokfund comparten uno en producción) y basta con
+          // que UNA sea del grupo para que no haya duplicado. Con `limit(1)` la
+          // misma alta se aceptaba o se rechazaba según qué fila devolviera
+          // Postgres. El orden por id es para que el mensaje tampoco cambie.
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
-            .limit(1);
+            .where(condicionInversionistaPorEmail(email))
+            .orderBy(asc(inversionistas.inversionista_id));
 
-          if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese email",
+          // La empresa de un inversionista comparte su correo a propósito.
+          const esDeSuGrupo = result.some((fila) =>
+            correoCompartidoConSuGrupo(inv, fila),
+          );
+
+          if (result[0] && !esDeSuGrupo) {
+            conflictos.push({
               error: "duplicate_email",
-            };
+              message: "Ya existe un inversionista con ese email",
+              fila: result[0],
+            });
           }
         }
 
@@ -479,11 +1069,11 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese DPI",
+            conflictos.push({
               error: "duplicate_dpi",
-            };
+              message: "Ya existe un inversionista con ese DPI",
+              fila: result[0],
+            });
           }
         }
 
@@ -495,12 +1085,48 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese nombre",
+            conflictos.push({
               error: "duplicate_nombre",
-            };
+              message: "Ya existe un inversionista con ese nombre",
+              fila: result[0],
+            });
           }
+        }
+
+        if (conflictos.length > 0) {
+          const propia = filaReclamablePorElPortal(
+            conflictos.map((c) => c.fila),
+            creadoPorUsuarioPortal,
+            inv.dpi,
+          );
+
+          // Reintento del MISMO registro del portal: se devuelve la fila que ese
+          // registro creó, SIN tocarla. Es lo que vuelve idempotente la única
+          // escritura externa del portal, y por tanto lo que hace que un fallo
+          // posterior en auth-google deje de ser un callejón sin salida.
+          //
+          // Solo el alta que trae `creado_por_usuario_portal` —la del flujo
+          // autenticado— llega hasta aquí. El registro público sigue creando la
+          // fila con la marca en NULL, y para él un choque es un 409 como
+          // siempre: sin marca no hay nada que reconocer.
+          //
+          // Que no se escriba nada es la propiedad de seguridad: reconocer no
+          // puede pisarle los datos a nadie. Y devolver la fila solo cuando la
+          // marca es la de la cuenta que pide el alta significa que no se afirma
+          // nada sobre filas ajenas: no hay oráculo nuevo.
+          if (propia) {
+            resultados.push(propia);
+            continue;
+          }
+
+          set.status = 409;
+          return {
+            message: conflictos[0].message,
+            error: conflictos[0].error,
+            // Ídem: el choque puede ser del tercer elemento del arreglo y los
+            // dos primeros ya están escritos.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
+          };
         }
       }
 
@@ -513,6 +1139,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.dpi, inv.dpi))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "dpi";
         }
 
         if (!existente && inv.email?.trim()) {
@@ -521,9 +1148,10 @@ export const insertInvestor = async ({ body, set }: any) => {
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
+            .where(condicionInversionistaPorEmail(email))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "email";
         }
 
         if (!existente && inv.nombre?.trim()) {
@@ -534,6 +1162,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.nombre, inv.nombre.trim()))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "nombre";
         }
       }
 
@@ -542,7 +1171,16 @@ export const insertInvestor = async ({ body, set }: any) => {
         const updateData: any = {};
 
         if (inv.nombre?.trim()) updateData.nombre = inv.nombre.trim();
-        if (inv.email?.trim())
+
+        // El correo solo se escribe si la fila se resolvió por id (edición
+        // dirigida) o por ese mismo correo. Cuando la fila apareció por DPI o
+        // por nombre, un correo equivocado en el payload dejaría a dos
+        // inversionistas compartiendo correo: las búsquedas por correo pasan a
+        // devolver una fila no determinista y los avisos del portal terminan
+        // en el buzón de otra persona.
+        const puedeEscribirEmail =
+          resueltoPor === "id" || resueltoPor === "email";
+        if (puedeEscribirEmail && inv.email?.trim())
           updateData.email = inv.email.trim().toLowerCase();
         if (inv.emite_factura !== undefined)
           updateData.emite_factura = inv.emite_factura;
@@ -555,7 +1193,34 @@ export const insertInvestor = async ({ body, set }: any) => {
           updateData.tipo_cuenta = inv.tipo_cuenta.trim();
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
-        if (inv.dpi) updateData.dpi = inv.dpi;
+        if (inv.dpi) {
+          updateData.dpi = inv.dpi;
+          // Y con eso la fila deja de ser "identidad que se puso uno mismo".
+          //
+          // `creado_por_usuario_portal` marca las filas que creó el registro del
+          // portal con un DPI que nadie verificó, y por eso `getEntidadesPorCorreo`
+          // no las deja ampliar el grupo. Sin una forma de quitar esa marca, la
+          // exclusión era para siempre: quien se registró por el portal y DESPUÉS
+          // resulta ser el representante de una sociedad no la vería nunca, ni
+          // aunque back office capturara la relación. Prometerlo en un comentario
+          // sin implementarlo es peor que no prometerlo.
+          //
+          // Escribir el DPI desde back office ES el acto de verificación que
+          // faltaba, y es el único que el portal no puede hacerse a sí mismo: su
+          // proxy (`buildPortalInvestorUpdate`) lleva una whitelist de tres campos
+          // bancarios, y el registro arma un objeto fijo que solo INSERTA. Para
+          // llegar a esta línea hace falta una edición dirigida desde el módulo de
+          // inversionistas o desde el CRM, o sea un humano mirando la ficha.
+          //
+          // Lo que se pierde: esa fila deja de ser reclamable como reintento del
+          // registro (`filaReclamablePorElPortal`). No importa — eso vive los
+          // minutos siguientes al alta, y esto pasa cuando alguien la edita.
+          updateData.creado_por_usuario_portal = null;
+        }
+        // Solo se toca si el body trae la llave: mandar "" es borrarlo a
+        // propósito, no mandarla es dejarlo como está.
+        if (typeof inv.dpi_rep_legal !== "undefined")
+          updateData.dpi_rep_legal = normalizarDpiRepLegal(inv.dpi_rep_legal);
         if (inv.moneda?.trim()) updateData.moneda = inv.moneda.trim();
         if (inv.monto_reinversion !== undefined)
           updateData.monto_reinversion = inv.monto_reinversion;
@@ -579,8 +1244,12 @@ export const insertInvestor = async ({ body, set }: any) => {
           continue;
         }
 
+        // La marca viaja en el MISMO INSERT que crea la fila. Sellarla en una
+        // escritura posterior que se cayera a medias dejaría la fila sin dueño
+        // reconocible y devolvería el problema que la columna resuelve.
         const insertData = {
           nombre,
+          creado_por_usuario_portal: creadoPorUsuarioPortal,
           dpi: inv.dpi || null,
           email: inv.email?.trim().toLowerCase() || null,
           emite_factura: inv.emite_factura ?? false,
@@ -591,6 +1260,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           numero_cuenta: inv.numero_cuenta?.trim() || null,
           moneda: inv.moneda?.trim() || "quetzales",
           monto_reinversion: inv.monto_reinversion || null,
+          dpi_rep_legal: normalizarDpiRepLegal(inv.dpi_rep_legal),
         };
 
         const [inserted] = await db
@@ -599,12 +1269,29 @@ export const insertInvestor = async ({ body, set }: any) => {
           .returning();
 
         resultados.push(inserted);
+        // Solo los INSERT provisionan. Un update no da acceso nuevo a nadie, y
+        // hacerlo aquí mandaría el aviso de empresa agregada en cada edición.
+        recienCreados.push({
+          fila: inserted,
+          permiso: permisoParaProvisionar(inv, user),
+        });
       }
     }
+
+    // El acceso al portal se resuelve DESPUÉS de escribir, y no puede tumbar el
+    // alta: las filas ya están insertadas (fuera de transacción, sin rollback
+    // posible) y un error acá se vería como "falló, reintentá" — pero el
+    // reintento muere en el guard de duplicados sin volver a pasar por aquí.
+    // El resultado viaja en la respuesta; el job diario recoge lo que falló.
+    const provisioning = await resolverAccesosDeLosNuevos(recienCreados);
 
     set.status = 201;
     return {
       message: `Procesados exitosamente ${resultados.length} inversionista(s)`,
+      // ANTES de `data` a propósito: auditLog trunca la respuesta a 4000
+      // caracteres, y un alta con muchos inversionistas se comería justo la
+      // cola. Este bloque es el único registro durable de si el correo salió.
+      provisioning,
       data: resultados,
     };
   } catch (error: any) {
@@ -617,6 +1304,7 @@ export const insertInvestor = async ({ body, set }: any) => {
         return {
           message: "Ya existe un inversionista con ese email",
           error: "duplicate_email",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("dpi")) {
@@ -624,6 +1312,7 @@ export const insertInvestor = async ({ body, set }: any) => {
         return {
           message: "Ya existe un inversionista con ese DPI",
           error: "duplicate_dpi",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("nombre")) {
@@ -631,6 +1320,7 @@ export const insertInvestor = async ({ body, set }: any) => {
         return {
           message: "Ya existe un inversionista con ese nombre",
           error: "duplicate_nombre",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
     }
@@ -639,6 +1329,7 @@ export const insertInvestor = async ({ body, set }: any) => {
     return {
       message: "Error al procesar inversionistas",
       error: error.message || String(error),
+      ...(await loQueYaSeEscribio(recienCreados, resultados)),
     };
   }
 };
@@ -684,14 +1375,18 @@ export const getInvestors = async ({ query, set }: any) => {
         .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
         .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
-        .where(eq(inversionistas.email, query.email));
+        .where(condicionInversionistaPorEmail(query.email));
 
       const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       if (!result.length) {
         return { message: "Inversionista no encontrado con ese email" };
       }
-      const investor = result[0];
+      // El correo NO es único en la tabla: hay inversionistas distintos que lo
+      // comparten. Devolver `result[0]` es elegir uno según el plan de
+      // ejecución, así que se informa cuántos coincidieron para que quien use
+      // esto para escribir pueda negarse en vez de acertar por casualidad.
+      const investor = { ...result[0], coincidencias_email: result.length };
       if (investor.dpi_rep_legal) {
         return { ...investor, dpi: investor.dpi_rep_legal };
       }
@@ -1010,7 +1705,8 @@ export async function processAndReplaceCreditInvestors(
 }
 export async function processAndReplaceCreditInvestorsReverse(
   credito_id: number,
-  pago_id: number
+  pago_id: number,
+  onPersisted?: () => void,
 ) {
   // 1. Obtener crédito
   const credit = await db.query.creditos.findFirst({
@@ -1085,7 +1781,7 @@ export async function processAndReplaceCreditInvestorsReverse(
       ? montoCashIn.times(0.12).round(2)
       : new Big(0);
 
-    await db
+    const updatedInvestors = await db
       .update(creditos_inversionistas)
       .set({
         monto_aportado: montoAportado.toFixed(2),
@@ -1094,7 +1790,9 @@ export async function processAndReplaceCreditInvestorsReverse(
         iva_inversionista: ivaInversionista.toFixed(2),
         iva_cash_in: ivaCashIn.toFixed(2),
       })
-      .where(eq(creditos_inversionistas.id, inv.id));
+      .where(eq(creditos_inversionistas.id, inv.id))
+      .returning({ id: creditos_inversionistas.id });
+    if (updatedInvestors.length > 0) onPersisted?.();
   }
 }
 
@@ -1241,7 +1939,8 @@ export async function resumeInvestor(
   tipo: TipoConsulta = "originales",
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  rawValues = false
 ) {
   console.log(
     "resumeInvestor for",
@@ -1285,6 +1984,7 @@ export async function resumeInvestor(
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
+      dpi_rep_legal: inversionistas.dpi_rep_legal,
       moneda: inversionistas.moneda,
       email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
@@ -1421,8 +2121,14 @@ export async function resumeInvestor(
         total_cuota_variable_combinada: new Big(0),
       };
 
+      // `rawValues` devuelve los montos tal como están en la base (quetzales),
+      // sin convertir a la moneda del inversionista. Lo usa la liquidación para
+      // pedir el reporte UNA sola vez y derivar la versión en dólares en memoria
+      // (ver convertirReporteAUSD), en lugar de repetir toda la consulta.
       const formatValue = (val: string | number | null | undefined) =>
-        inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
+        !rawValues && inv.moneda === "dolares"
+          ? formatToUSD(val, inv.inversionista_id)
+          : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1820,9 +2526,15 @@ export async function resumeInvestor(
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
-        moneda: inv.moneda,
+        dpi_rep_legal: inv.dpi_rep_legal,
+        // Con `rawValues` los montos quedaron en quetzales, así que la moneda
+        // declarada tiene que acompañarlos: si no, el Excel rotularía con "$"
+        // cifras que están en Q. La moneda real del inversionista viaja aparte
+        // en `moneda_inversionista`.
+        moneda: rawValues ? "quetzales" : inv.moneda,
+        moneda_inversionista: inv.moneda,
         email: inv.email,
-        currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
+        currencySymbol: !rawValues && inv.moneda === "dolares" ? "$" : "Q.",
         creditos: creditosData,
         subtotal: {
           total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
@@ -1885,7 +2597,10 @@ export async function getInvestorTotalsGlobales(
   soloLiquidados = false,
   liquidacionId?: number,
   fechaLiquidacion?: string,
-  rawValues = false
+  rawValues = false,
+  limitarCreditosIds?: readonly number[],
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1911,7 +2626,7 @@ export async function getInvestorTotalsGlobales(
     throw new Error("Debe proporcionar al menos 'id' o 'dpi'");
   }
 
-  const listaInversionistas = await db
+  const listaInversionistas = await database
     .select({
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
@@ -1937,7 +2652,7 @@ export async function getInvestorTotalsGlobales(
   // inversionista activó descuenta_impuestos después. Sin liquidacionId (totales
   // vivos / pre-liquidación) se conserva el flag actual.
   if (liquidacionId != null) {
-    const [liqSnap] = await db
+    const [liqSnap] = await database
       .select({ descuenta_impuestos: liquidaciones.descuenta_impuestos })
       .from(liquidaciones)
       .where(eq(liquidaciones.liquidacion_id, liquidacionId))
@@ -1953,13 +2668,18 @@ export async function getInvestorTotalsGlobales(
   let creditosParticipa;
 
   if (tipo === "ambas") {
-    creditosParticipa = await consultarCreditosAmbos(inversionistaIds);
+    creditosParticipa = await consultarCreditosAmbos(inversionistaIds, database);
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
-    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config);
+    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config, database);
   }
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
+  if (limitarCreditosIds) {
+    const creditosPermitidos = new Set(limitarCreditosIds);
+    creditosParticipa = creditosParticipa.filter((credito) => creditosPermitidos.has(credito.credito_id));
+    creditosIds = creditosIds.filter((creditoId) => limitarCreditosIds.includes(creditoId));
+  }
 
   const formatValue = (val: string | number) =>
     rawValues ? Number(val) : (inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val));
@@ -1988,7 +2708,7 @@ export async function getInvestorTotalsGlobales(
   // 3. Info de créditos con filtros (igual que resumeInvestor)
   let conditions = [inArray(creditos.credito_id, creditosIds)];
 
-  const creditosInfo = await db
+  const creditosInfo = await database
     .select({
       credito_id: creditos.credito_id,
       capital: creditos.capital,
@@ -2036,7 +2756,9 @@ export async function getInvestorTotalsGlobales(
       numeroCuota,
       soloLiquidados,
       liquidacionId,
-      fechaLiquidacion
+      fechaLiquidacion,
+      limitarPagosIds,
+      database,
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -2048,7 +2770,9 @@ export async function getInvestorTotalsGlobales(
       config,
       soloLiquidados,
       liquidacionId,
-      fechaLiquidacion
+      fechaLiquidacion,
+      limitarPagosIds,
+      database,
     );
   }
 
@@ -2262,12 +2986,12 @@ export async function getInvestorTotalsGlobales(
   }
 
   // 7. Upsert en reinversiones
-  const existeReinversion = await db.query.reinversiones.findFirst({
+  const existeReinversion = await database.query.reinversiones.findFirst({
     where: (r, { eq }) => eq(r.inversionista_id, inv.inversionista_id),
   });
 
   if (existeReinversion) {
-    await db.update(reinversiones)
+    await database.update(reinversiones)
       .set({
         monto_capital: subtotal.total_reinversion_capital.toFixed(2),
         monto_interes: subtotal.total_reinversion_interes.toFixed(2),
@@ -2276,7 +3000,7 @@ export async function getInvestorTotalsGlobales(
       })
       .where(eq(reinversiones.inversionista_id, inv.inversionista_id));
   } else {
-    await db.insert(reinversiones).values({
+    await database.insert(reinversiones).values({
       inversionista_id: inv.inversionista_id,
       monto_capital: subtotal.total_reinversion_capital.toFixed(2),
       monto_interes: subtotal.total_reinversion_interes.toFixed(2),
@@ -2331,12 +3055,33 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
-export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: string) {
+/**
+ * Repunta el reporte de una liquidación ya hecha.
+ *
+ * `urlGtq` acompaña a `url`: quien regenera el reporte principal de un
+ * inversionista en dólares regenera también su copia en quetzales y pasa las
+ * dos, de modo que el par siempre queda coherente.
+ *
+ *   - `urlGtq` string  → se guarda (junto con el tipo de cambio usado).
+ *   - `urlGtq` null    → se limpia. Para inversionistas en quetzales, que no
+ *                        tienen copia, y para un reporte que se regeneró sin
+ *                        poder rehacerla.
+ *   - `urlGtq` omitido → la columna NO se toca y conserva lo que tenía. Es lo
+ *                        que necesita un backfill hecho a mano: repuntar el
+ *                        original sin perder la copia en Q cargada aparte.
+ */
+export async function updateLiquidacionReporteUrl(
+  liquidacion_id: number,
+  url: string,
+  urlGtq?: string | null,
+  tipoCambio?: number | null,
+) {
   const [liquidacion] = await db
     .select({
       liquidacion_id: liquidaciones.liquidacion_id,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
+      reporte_liquidacion_url_gtq: liquidaciones.reporte_liquidacion_url_gtq,
     })
     .from(liquidaciones)
     .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
@@ -2344,9 +3089,18 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
     .limit(1);
 
   if (liquidacion) {
+    const cambios: Record<string, unknown> = { reporte_liquidacion_url: url };
+
+    // `undefined` = no se tocan las columnas de la copia en quetzales.
+    if (urlGtq !== undefined) {
+      cambios.reporte_liquidacion_url_gtq = urlGtq;
+      cambios.tipo_cambio_reporte =
+        urlGtq && tipoCambio ? String(tipoCambio) : null;
+    }
+
     await db
       .update(liquidaciones)
-      .set({ reporte_liquidacion_url: url })
+      .set(cambios)
       .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
     return {
@@ -2354,6 +3108,9 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
       fecha_liquidacion: liquidacion.fecha_liquidacion,
       url_anterior: liquidacion.reporte_liquidacion_url,
       url_nueva: url,
+      url_gtq_anterior: liquidacion.reporte_liquidacion_url_gtq,
+      url_gtq_nueva:
+        urlGtq === undefined ? liquidacion.reporte_liquidacion_url_gtq : urlGtq,
     };
   }
 
@@ -3104,11 +3861,16 @@ export async function revertirComprasUltimaLiquidacion(
 
       // Marcamos las compras como completado para que no aparezcan como
       // pendientes; quedan en el log para borrarlas después si se decide.
+      //
+      // `revertida_at` las deja identificables: el monto volvió a CUBE, así que
+      // esta fila ya no representa capital colocado. Sin la marca, un intento
+      // revertido y el que lo reemplaza se suman los dos y una reinversión de
+      // Q100 efectivamente colocada se contaría como Q200.
       const compraIds = compras.map((c) => c.id);
       if (compraIds.length > 0) {
         await tx
           .update(compras_credito_inversionista)
-          .set({ status: "completado", updated_at: new Date() })
+          .set({ status: "completado", revertida_at: new Date(), updated_at: new Date() })
           .where(inArray(compras_credito_inversionista.id, compraIds));
       }
 
@@ -3226,6 +3988,7 @@ export async function revertirComprasUltimaLiquidacion(
 export async function ejecutarReinversionAutomatica(
   inv_id: number,
   montoReinvertido: number,
+  liquidacion_id?: number,
 ) {
   if (!Number.isFinite(montoReinvertido) || montoReinvertido <= 0) {
     return { skipped: true, reason: "Monto a reinvertir = 0" };
@@ -3277,6 +4040,7 @@ export async function ejecutarReinversionAutomatica(
       porcentaje_inversion: modaInversion,
       porcentaje_cash_in: modaCashIn,
       tipo_operacion: "reinversion",
+      ...(liquidacion_id ? { liquidacion_id } : {}),
     },
     set: { status: 200 },
   })) as any;
@@ -3341,7 +4105,7 @@ export async function reinvertirDesdeLiquidacionId(liquidacion_id: number) {
     };
   }
 
-  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto);
+  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto, liq.liquidacion_id);
   return {
     liquidacion_id,
     inversionista_id: liq.inversionista_id,
@@ -3863,6 +4627,23 @@ export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(),
   fecha_liquidacion: z.string().datetime().optional(),
 });
+
+// El cierre de la devolución vive en utils/devolucionCompletada.ts: son
+// funciones puras respecto de la conexión y así se pueden probar sin
+// arrastrar el grafo de imports de este archivo. Se re-exportan para no
+// romper a quien ya las importaba desde acá.
+export {
+  filtrarCreditosTotalmenteDevueltos,
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+  orderUniqueCreditIds,
+} from "../utils/devolucionCompletada";
+
+import {
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+} from "../utils/devolucionCompletada";
+
 export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
   const lockExistente = await db
@@ -3949,6 +4730,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
   const errores: Array<{
     inversionista_id: number;
     razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
   }> = [];
 
   for (const inv_id of inversionistasALiquidar) {
@@ -3987,8 +4770,14 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           credito_id: pagos_credito_inversionistas_espejo.credito_id,
           abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
           abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          estado_devolucion: creditos.estado_devolucion,
         })
         .from(pagos_credito_inversionistas_espejo)
+        .innerJoin(
+          creditos,
+          eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id),
+        )
         .where(
           and(
             eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
@@ -4003,22 +4792,122 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         continue;
       }
 
-      // Totales pre-liquidación (espejos, no liquidados)
-      // rawValues=true para que los totales vengan siempre en Q (sin convertir a USD)
-      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true);
-      const totales = totalesResult.totales;
-      const cantidadPagos = pagosNoLiquidados.length;
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        pagosNoLiquidados.map((pago) => ({
+          creditoId: pago.credito_id,
+          numeroCreditoSifco: pago.numero_credito_sifco,
+          estadoDevolucion: pago.estado_devolucion,
+        })),
+      );
 
-      console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
-
-      const reinvCapital = totales.total_reinversion_capital ?? 0;
-      const reinvInteres = totales.total_reinversion_interes ?? 0;
-      const reinvTotal = totales.total_reinversion ?? 0;
+      if (pendingReturnWarning) {
+        // Deliberado: liquidación es todo-o-nada por inversionista. Un crédito
+        // bloqueado detiene sus demás pagos para no producir una liquidación
+        // parcial ni dejar totales/boleta representando solo parte del período.
+        console.warn(
+          `  ⚠️ Inversionista ${inv_id} no liquidado: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        errores.push({
+          inversionista_id: inv_id,
+          razon: pendingReturnWarning.message,
+          code: pendingReturnWarning.code,
+          creditos_bloqueados: pendingReturnWarning.creditos_bloqueados,
+        });
+        inversionistasSaltados++;
+        continue;
+      }
 
       // Paso 4: Se abre una transacción de base de datos. Todo lo que ocurra aquí
       // es atómico: si algo falla en el medio, se revierten todos los cambios y
       // el estado queda exactamente como estaba antes de empezar.
-      const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
+      const resultadoLiquidacion = await withCreditoEspejoLocks(async (locks) =>
+        db.transaction(async (tx) => {
+        const creditoIdsPagos = pagosNoLiquidados.map((pago) => pago.credito_id);
+        const creditosDistintos = [...new Set(creditoIdsPagos)].sort((a, b) => a - b);
+        for (const creditoId of creditosDistintos) {
+          if (!(await locks.tryLock(creditoId))) {
+            throw new Error(`Crédito ${creditoId} está siendo operado por otro proceso`);
+          }
+        }
+        // El preflight solo descubre los locks. La liquidación consume esta foto
+        // fresca, tomada con todos los locks adquiridos, para no doble-reducir.
+        const pagosNoLiquidadosBajoLock = await tx
+          .select({
+            id: pagos_credito_inversionistas_espejo.id,
+            pago_id: pagos_credito_inversionistas_espejo.pago_id,
+            credito_id: pagos_credito_inversionistas_espejo.credito_id,
+            abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+            abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+            estado_devolucion: creditos.estado_devolucion,
+          })
+          .from(pagos_credito_inversionistas_espejo)
+          .innerJoin(creditos, eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id))
+          .where(and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
+            inArray(pagos_credito_inversionistas_espejo.credito_id, creditosDistintos),
+          ));
+        if (pagosNoLiquidadosBajoLock.length === 0) return { skip: true as const };
+        const cantidadPagos = pagosNoLiquidadosBajoLock.length;
+        const creditoIdsPagosBajoLock = pagosNoLiquidadosBajoLock.map((pago) => pago.credito_id);
+        const creditosDistintosBajoLock = [...new Set(creditoIdsPagosBajoLock)];
+        const pagosIds = pagosNoLiquidadosBajoLock.map((pago) => pago.id);
+        const [inversionistaBloqueado] = await tx
+          .select({ tipo_reinversion: inversionistas.tipo_reinversion })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inv_id))
+          .for("update");
+        const totalesResult = await getInvestorTotalsGlobales(
+          inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true,
+          creditosDistintosBajoLock, pagosIds, tx as unknown as typeof db,
+        );
+        const totales = totalesResult.totales;
+        const reinvCapital = totales.total_reinversion_capital ?? 0;
+        const reinvInteres = totales.total_reinversion_interes ?? 0;
+        const reinvTotal = totales.total_reinversion ?? 0;
+        console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
+        // Revalida bajo lock dentro de misma transacción que liquida. Esto evita
+        // cambio a PENDIENTE_AUTORIZACION después del pre-chequeo.
+        const creditosBloqueados = await lockPendingReturnCreditsForLiquidation(
+          tx,
+          creditoIdsPagosBajoLock,
+        );
+
+        const warningActualizado = buildPendingReturnAuthorizationWarning(creditosBloqueados);
+        if (warningActualizado) {
+          throw new PendingReturnAuthorizationError(warningActualizado);
+        }
+
+        // Foto tomada antes de reducir posiciones. Solo el modo común y conocido
+        // representa honestamente una liquidación multi-crédito.
+        const modosPorCredito = await tx
+          .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(
+            and(
+              eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
+              inArray(creditos_inversionistas_espejo.credito_id, creditosDistintosBajoLock),
+            ),
+          );
+        const modosEfectivos = resolverModosEfectivosLiquidacion(
+          inversionistaBloqueado?.tipo_reinversion,
+            creditosDistintosBajoLock,
+          modosPorCredito,
+        );
+        const modalidadesEfectivas = resolverModosEfectivosLiquidacion<ModalidadFacturacion>(
+          undefined,
+          creditosDistintosBajoLock,
+          modosPorCredito.map((modo) => ({
+            credito_id: modo.credito_id,
+            tipo_reinversion: modo.modalidad_facturacion,
+          })),
+        );
+
 
         // Paso 4a: Se crea el registro formal de liquidación con los totales calculados
         // (capital, interés, IVA, reinversión). Este registro es el comprobante oficial.
@@ -4036,6 +4925,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             // Snapshot: si total_interes viene neteado, la liquidación se marca
             // para que los reportes no la recalculen con el flag futuro.
             descuenta_impuestos: totales.total_neto_impuestos != null,
+            tipo_reinversion_snapshot: modosEfectivos.agregado,
+            modalidad_facturacion_snapshot: modalidadesEfectivas.agregado,
             reinversion_capital: reinvCapital.toString(),
             reinversion_interes: reinvInteres.toString(),
             reinversion_total: reinvTotal.toString(),
@@ -4080,15 +4971,13 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // el capital abonado del monto que el inversionista tiene en ese crédito,
         // y se guarda una foto del nuevo balance como punto de referencia para la
         // próxima liquidación.
-        const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
-        for (const pago of pagosNoLiquidados) {
+        const creditosConPagos = new Map<number, typeof pagosNoLiquidadosBajoLock>();
+        for (const pago of pagosNoLiquidadosBajoLock) {
           if (!creditosConPagos.has(pago.credito_id)) {
             creditosConPagos.set(pago.credito_id, []);
           }
           creditosConPagos.get(pago.credito_id)!.push(pago);
         }
-
-        const pagosIds = pagosNoLiquidados.map((p) => p.id);
 
         for (const [creditoId, pagosCred] of creditosConPagos) {
           const sumaCapitalBig = pagosCred.reduce(
@@ -4099,7 +4988,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
           // Snapshot monto_aportado BEFORE reduction
           const [espejoRow] = await tx
-            .select({ monto_aportado: creditos_inversionistas_espejo.monto_aportado })
+            .select({
+              monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+              tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+              modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
+            })
             .from(creditos_inversionistas_espejo)
             .where(
               and(
@@ -4146,6 +5039,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               creditoId,
               inv_id,
               new Date(lastHistorico.fecha),
+              undefined,
+              undefined,
+              tx as unknown as typeof db,
             );
             const montoAjustado = new Big(currentMonto).minus(montoRestarValidacion);
             if (!montoAjustado.eq(new Big(lastHistorico.monto_aportado))) {
@@ -4186,6 +5082,12 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               credito_id: creditoId,
               liquidacion_id: liquidacion.liquidacion_id,
               fecha: fechaLiquidacion ?? new Date(),
+              tipo_reinversion_snapshot: modosEfectivos.porCredito.get(creditoId) ?? null,
+              modalidad_facturacion_snapshot: modalidadesEfectivas.porCredito.get(creditoId) ?? null,
+              capital_liquidado: sumaCapitalBig.toFixed(8),
+              capital_restante: ["reinversion_variable", "reinversion_excedente"].includes(
+                modosEfectivos.porCredito.get(creditoId) ?? "",
+              ) ? null : montoPostReduccion,
             });
         }
 
@@ -4242,7 +5144,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // Marcar cuotas como liquidado_inversionistas
         const allPagoIds = [
           ...new Set(
-            pagosNoLiquidados
+            pagosNoLiquidadosBajoLock
               .map((p) => p.pago_id)
               .filter((id): id is number => id !== null)
           ),
@@ -4275,14 +5177,42 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           }
         }
 
-        return { liquidacion, updateResult, debeReinvertir, montoReinvertido };
-      });
+        return {
+          liquidacion,
+          updateResult,
+          debeReinvertir,
+          montoReinvertido,
+          reinversion: totalesResult.reinversion,
+          totales,
+          creditoIdsConPagos: creditoIdsPagosBajoLock,
+        };
+      }),
+      );
+      if (resultadoLiquidacion.skip) {
+        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar bajo lock`);
+        errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
+        inversionistasSaltados++;
+        continue;
+      }
+      const {
+        liquidacion,
+        updateResult,
+        debeReinvertir,
+        montoReinvertido,
+        reinversion,
+        totales,
+        creditoIdsConPagos: creditoIdsLiquidados,
+      } = resultadoLiquidacion;
 
       // Paso 5: Con la liquidación ya guardada, se genera el reporte Excel con el
       // detalle de lo liquidado y se envía por correo al inversionista. Si este
       // paso falla (por ejemplo, error de correo), no afecta los datos financieros
       // ya guardados — la liquidación sigue siendo válida.
       try {
+        // Se pide el resumen en quetzales (`rawValues`), tal como está en la base.
+        // Para un inversionista en dólares la versión en USD se deriva de este
+        // mismo objeto en memoria (convertirReporteAUSD), sin repetir la consulta:
+        // la liquidación no hace ni un query más que antes.
         const resumen = await resumeInvestor(
           inv_id,
           1,
@@ -4294,13 +5224,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           undefined,
           "espejos",
           true,
-          liquidacion.liquidacion_id
+          liquidacion.liquidacion_id,
+          undefined,
+          true // rawValues: montos en quetzales
         );
 
-        const inversionista = resumen.inversionistas?.[0];
+        const inversionistaQ = resumen.inversionistas?.[0];
 
-        if (inversionista) {
-          // Recalcular totales específicamente para esta liquidación (ya persistida)
+        if (inversionistaQ) {
+          // Recalcular totales específicamente para esta liquidación (ya persistida).
+          // También en crudo, para que el subtotal quede en la misma moneda que el resto.
           const postTotales = await getInvestorTotalsGlobales(
             inv_id,
             undefined,
@@ -4308,39 +5241,145 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             false,
             undefined,
             true, // soloLiquidados
-            liquidacion.liquidacion_id
+            liquidacion.liquidacion_id,
+            undefined,
+            true // rawValues: montos en quetzales
           );
-          inversionista.subtotal = postTotales.totales as any;
+          inversionistaQ.subtotal = postTotales.totales as any;
 
-          console.log(`  📄 Generando Excel...`);
-          const logoUrl = process.env.LOGO_URL || "";
-          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
-          const excelResult = await generarYSubirExcelInversionista(
-            inversionista as any,
-            filename,
-            logoUrl
-          );
+          // El reporte principal (el que se guarda como `reporte_liquidacion_url`
+          // y viaja por correo) siempre va en la moneda del inversionista.
+          const esDolares = (inversionistaQ as any).moneda_inversionista === "dolares";
+          const inversionista: any = esDolares
+            ? convertirReporteAUSD(inversionistaQ as any)
+            : inversionistaQ;
+
+          console.log(`  📄 Generando Excel${esDolares ? " (USD + GTQ)" : ""}...`);
+          const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+          const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (process.env.LOGO_URL || "");
+          const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
+          const stamp = Date.now();
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${stamp}.xlsx`;
+
+          // Para inversionistas en dólares se emite además el mismo reporte en
+          // quetzales, que es la moneda en la que esta tabla guarda sus totales.
+          // Los dos Excel se arman y suben en paralelo.
+          const filenameGtq = esDolares
+            ? `liquidacion_${liquidacion.liquidacion_id}_${stamp}_GTQ.xlsx`
+            : null;
+
+          const [excelResult, excelResultGtq] = await Promise.all([
+            generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
+            filenameGtq
+              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl, false, redesUrl)
+              : Promise.resolve(null),
+          ]);
+
           const url = excelResult.url;
+          const urlGtq = excelResultGtq?.url ?? null;
           const excelBuffer = Buffer.from(excelResult.excelBuffer);
 
           console.log(`  ✅ Excel generado: ${filename}`);
+          if (urlGtq) console.log(`  ✅ Excel en quetzales generado: ${filenameGtq}`);
 
-          // Actualizar liquidación con URL del reporte
+          // Actualizar liquidación con URL(s) del reporte
           await db
             .update(liquidaciones)
-            .set({ reporte_liquidacion_url: url })
+            .set({
+              reporte_liquidacion_url: url,
+              reporte_liquidacion_url_gtq: urlGtq,
+              tipo_cambio_reporte: esDolares ? String(getTipoCambioUSD(inv_id)) : null,
+            })
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
+          // A quién le toca este correo.
+          //
+          // Si la fila es una sociedad, su `email` puede no ser el de quien la
+          // representa: en producción, 10 de las 11 filas con `dpi_rep_legal`
+          // tienen un correo que no es el del representante. El representante
+          // recibe entonces un correo por cada entidad —incluida la suya— pero
+          // todos en SU buzón, en vez de repartidos por buzones que no mira.
+          //
+          // Todo el bloque falla abierto hacia el comportamiento anterior: la
+          // liquidación YA está escrita en base en este punto, así que ni una
+          // consulta caída ni un representante inexistente pueden costar el
+          // correo. Cualquier tropiezo termina en el `email` de la fila.
+          let representanteLiquidacion: RepresentanteLiquidacion | null = null;
+          // El `dpi` de la entidad liquidada: es lo que distingue a una
+          // sociedad de verdad del que se representa a sí mismo. Vive fuera del
+          // try porque la decisión de más abajo lo necesita.
+          let dpiEntidadLiquidada: number | string | null = null;
+          try {
+            const [filaCartera] = await db
+              .select({
+                dpi: inversionistas.dpi,
+                dpi_rep_legal: inversionistas.dpi_rep_legal,
+              })
+              .from(inversionistas)
+              .where(eq(inversionistas.inversionista_id, inv_id))
+              .limit(1);
+
+            dpiEntidadLiquidada = filaCartera?.dpi ?? null;
+
+            const dpiRepresentante = normalizarDpiParaComparar(filaCartera?.dpi_rep_legal);
+            if (dpiRepresentante) {
+              // No se filtra al autorrepresentado (id 187: dpi 4036613 con
+              // dpi_rep_legal '04036613'): el resolutor normaliza los ceros a
+              // la izquierda y devuelve su propia fila, así que el correo cae
+              // en su buzón de siempre. Lo que sí cambia para él es el CUERPO:
+              // `destinatarioDeLiquidacion` lo reconoce por el DPI y no le
+              // manda el texto de empresa.
+              representanteLiquidacion = await buscarRepresentanteEnCartera(dpiRepresentante);
+            }
+          } catch (errorRepresentante) {
+            console.error(
+              `  ⚠️ No se pudo resolver al representante legal del inversionista ${inv_id}; el correo va al de la ficha:`,
+              errorRepresentante,
+            );
+            representanteLiquidacion = null;
+          }
+
+          const destinoCorreo = destinatarioDeLiquidacion(
+            {
+              nombre: inversionista.nombre_inversionista,
+              email: inversionista.email,
+              dpi: dpiEntidadLiquidada,
+            },
+            representanteLiquidacion,
+          );
+
           // Enviar correo (best-effort)
-          if (inversionista.email && excelBuffer) {
-            console.log(`  📧 Preparando envío de correo para ${inversionista.email}...`);
+          //
+          // El guard se ENSANCHÓ a propósito: antes era
+          // `if (inversionista.email && excelBuffer)`, así que una fila sin
+          // correo capturado no le llegaba a nadie. Ahora, si su representante
+          // tiene buzón, sale por ahí. Está fijado en
+          // destinatarioLiquidacion.test.ts ("una fila sin correo propio SÍ se
+          // envía...") para que el aumento de volumen no vuelva a ser
+          // accidental, y se registra aparte para que se vea en los logs.
+          if (destinoCorreo.email && excelBuffer) {
+            if (!inversionista.email && destinoCorreo.via === "representante") {
+              console.log(
+                `  ➕ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene correo propio: esta liquidación antes no se enviaba y ahora sale al buzón de su representante legal.`
+              );
+            }
+            console.log(
+              `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista}${destinoCorreo.emailCopia ? `, copia: ${destinoCorreo.emailCopia}` : ""})...`
+            );
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
 
               const emailResult = await sendLiquidationEmail({
-                to: inversionista.email,
+                to: destinoCorreo.email,
                 investorName: inversionista.nombre_inversionista,
+                // Solo va cuando el buzón NO es el de la entidad: es lo que
+                // hace que el cuerpo salude al representante sin dejar de
+                // decir de qué entidad es esta liquidación.
+                representativeName: destinoCorreo.nombreRepresentante ?? undefined,
+                // La entidad conserva su copia cuando el correo se desvía: su
+                // buzón lo lee gente que hoy recibe esta liquidación.
+                cc: destinoCorreo.emailCopia ?? undefined,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
                 date: dayjs(fechaLiquidacion ?? new Date()).format("MMMM YYYY"),
@@ -4353,16 +5392,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               });
 
               if (emailResult.success) {
-                console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
+                console.log(`  ✅ Correo enviado exitosamente a ${destinoCorreo.email} (vía: ${destinoCorreo.via})`);
               } else {
-                console.error(`  ❌ Error devuelto por el servicio de correo para ${inversionista.email}:`, emailResult.error);
+                console.error(`  ❌ Error devuelto por el servicio de correo para ${destinoCorreo.email}:`, emailResult.error);
               }
             } catch (emailError) {
-              console.error(`  ❌ Error inesperado al intentar enviar correo a ${inversionista.email}:`, emailError);
+              console.error(`  ❌ Error inesperado al intentar enviar correo a ${destinoCorreo.email}:`, emailError);
             }
           } else {
-            if (!inversionista.email) {
-              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha. Se omitió la notificación.`);
+            if (!destinoCorreo.email) {
+              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha, ni un representante legal con correo. Se omitió la notificación.`);
             }
             if (!excelBuffer) {
               console.error(`  ❌ No se pudo adjuntar el reporte Excel porque el generador devolvió un buffer vacío para el inversionista ${inv_id}.`);
@@ -4436,7 +5475,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               | "reinversion_variable";
             const llamadasReinversion: { monto: number; tipo_reinversion?: Modalidad; etiqueta: string }[] = [];
 
-            if (totalesResult.reinversion === "reinversion_combinada") {
+            if (reinversion === "reinversion_combinada") {
               const montoCapital = Number(totales.total_reinv_tipo_capital ?? 0);
               const montoInteres = Number(totales.total_reinv_tipo_interes ?? 0);
               const montoTotal = Number(totales.total_reinv_tipo_total ?? 0);
@@ -4460,6 +5499,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                   porcentaje_inversion: modaInversion,
                   porcentaje_cash_in: modaCashIn,
                   tipo_operacion: "reinversion",
+                  // Sella la compra con la liquidación que la produjo. Sin esto
+                  // no hay forma de distinguirla de una reubicación manual, que
+                  // también se guarda como "reinversion".
+                  liquidacion_id: liquidacion.liquidacion_id,
                   ...(r.tipo_reinversion ? { tipo_reinversion: r.tipo_reinversion } : {}),
                 },
                 set: { status: 200 },
@@ -4496,10 +5539,17 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         //    exitInvestor con skipStatusAndEmail (sin correo, no inactiva) y
         //    validación de monto_aportado==0 en espejo antes de mover a CUBE.
         // Al ser excluyentes, ningún crédito pasa por exitInvestor dos veces.
+        //
+        // En ambas ramas el cierre de la devolución (COMPLETADO) lo decide
+        // `marcarDevolucionCompletadaSiCorresponde`: un crédito solo se cierra
+        // cuando su tabla padre ya no tiene inversionistas fuera de CUBE. Un
+        // crédito compartido se devuelve de a un inversionista por vez —cada uno
+        // en su propia liquidación— y cerrarlo con el primero dejaba a los demás
+        // fuera del flujo.
         // ========================================
         try {
           const creditoIdsConPagos = [
-            ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+            ...new Set(creditoIdsLiquidados),
           ];
 
           if (creditoIdsConPagos.length > 0) {
@@ -4544,27 +5594,17 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
                 console.log(`  ✅ Inversionista ${inv_id} marcado como inactivo`);
 
-                // Solo los créditos realmente transferidos por exitInvestor y que
-                // estaban VERIFICADO pasan a COMPLETADO (no la lista de entrada).
+                // Solo los créditos realmente transferidos por exitInvestor son
+                // candidatos a COMPLETADO (no la lista de entrada), y de esos
+                // solo cierran los que ya no le quedan inversionistas al padre.
                 const creditoIdsProcesados: number[] = (exitResult.creditos_procesados ?? []).map(
                   (r: any) => r.credito_id
                 );
 
-                if (creditoIdsProcesados.length > 0) {
-                  await db
-                    .update(creditos)
-                    .set({ estado_devolucion: "COMPLETADO" })
-                    .where(
-                      and(
-                        inArray(creditos.credito_id, creditoIdsProcesados),
-                        eq(creditos.estado_devolucion, "VERIFICADO")
-                      )
-                    );
-
-                  console.log(
-                    `  ✅ Créditos VERIFICADO reseteados a COMPLETADO tras salida total del inversionista ${inv_id}`
-                  );
-                }
+                await marcarDevolucionCompletadaSiCorresponde(
+                  creditoIdsProcesados,
+                  `salida total inv ${inv_id}`
+                );
 
                 if (Array.isArray(exitResult.errores) && exitResult.errores.length > 0) {
                   console.warn(
@@ -4668,20 +5708,23 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                       exitResultDevolucion?.message ?? exitResultDevolucion
                     );
                   } else {
-                    // Solo los créditos realmente transferidos por exitInvestor pasan
-                    // a COMPLETADO (no la lista de entrada).
+                    // Solo los créditos realmente transferidos por exitInvestor son
+                    // candidatos (no la lista de entrada), y de esos solo cierran
+                    // los que ya no le quedan inversionistas al padre: este
+                    // inversionista puede ser uno de varios en el mismo crédito.
                     const creditoIdsProcesados: number[] = (exitResultDevolucion.creditos_procesados ?? []).map(
                       (r: any) => r.credito_id
                     );
 
-                    if (creditoIdsProcesados.length > 0) {
-                      await db
-                        .update(creditos)
-                        .set({ estado_devolucion: "COMPLETADO" })
-                        .where(inArray(creditos.credito_id, creditoIdsProcesados));
+                    console.log(
+                      `  ✅ Salida por estado_devolucion=VERIFICADO ejecutada para inversionista ${inv_id}:`,
+                      exitResultDevolucion
+                    );
 
-                      console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
-                    }
+                    await marcarDevolucionCompletadaSiCorresponde(
+                      creditoIdsProcesados,
+                      `devolución VERIFICADO inv ${inv_id}`
+                    );
 
                     if (Array.isArray(exitResultDevolucion.errores) && exitResultDevolucion.errores.length > 0) {
                       console.warn(
@@ -4700,16 +5743,61 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             exitError
           );
         }
+
+        // ── Barrido de rezagados ──
+        // Un crédito puede quedar en VERIFICADO con su último inversionista ya
+        // devuelto: si dos liquidaciones del mismo crédito corren en paralelo,
+        // cada una puede ver a la otra todavía presente y ninguna cerrarlo.
+        //
+        // Va al FINAL y en su propio try/catch: es una limpieza oportunista y
+        // no puede tumbar la salida automática (antes corría primero, y un
+        // fallo suyo dejaba al inversionista sin inactivar y sin correo).
+        //
+        // Se filtra por VERIFICADO antes de llamar al helper: sin eso se toma
+        // FOR NO KEY UPDATE sobre todos los créditos liquidados en CADA
+        // corrida —incluida la masiva— para un caso que casi nunca aplica.
+        try {
+          const creditoIdsRezagados = await db
+            .select({ credito_id: creditos.credito_id })
+            .from(creditos)
+            .where(
+              and(
+                inArray(creditos.credito_id, creditoIdsLiquidados),
+                eq(creditos.estado_devolucion, "VERIFICADO")
+              )
+            );
+
+          if (creditoIdsRezagados.length > 0) {
+            await marcarDevolucionCompletadaSiCorresponde(
+              creditoIdsRezagados.map((c) => c.credito_id),
+              `barrido inv ${inv_id}`
+            );
+          }
+        } catch (barridoError) {
+          console.error(
+            `  ⚠️  Error en barrido de rezagados (no afecta la liquidación ni la salida):`,
+            barridoError
+          );
+        }
       } catch (excelError) {
         console.error(`  ❌ Error generando Excel (datos financieros ya guardados):`, excelError);
       }
 
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
       const msg = error instanceof Error ? error.message : "Error desconocido";
-      errores.push({ inversionista_id: inv_id, razon: msg });
+      errores.push(
+        error?.code === PENDING_RETURN_AUTHORIZATION_CODE
+          ? {
+              inversionista_id: inv_id,
+              razon: msg,
+              code: error.code,
+              creditos_bloqueados: error.creditos_bloqueados,
+            }
+          : { inversionista_id: inv_id, razon: msg },
+      );
       inversionistasSaltados++;
     }
   }
@@ -4733,6 +5821,26 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     errores.forEach(e => {
       console.log(`   - ID ${e.inversionista_id}: ${e.razon}`);
     });
+
+    // La liquidación en background (POST /boletas) no le devuelve estos errores a
+    // nadie: sin guardarlos acá la razón solo quedaba en la consola del servidor,
+    // el lock se cerraba COMPLETADO y la boleta seguía PENDIENTE sin explicación.
+    // Si no se creó ninguna liquidación, el lock queda FALLIDO.
+    try {
+      await db.update(liquidacion_locks)
+        .set({
+          error: errores.map((e) => `Inv ${e.inversionista_id}: ${e.razon}`).join("\n"),
+          ...(totalLiquidaciones === 0 ? { estado: "FALLIDO", finished_at: new Date() } : {}),
+        })
+        .where(
+          and(
+            eq(liquidacion_locks.id, lock.id),
+            eq(liquidacion_locks.estado, "EN_PROCESO")
+          )
+        );
+    } catch (lockError) {
+      console.error(`⚠️ No se pudo guardar el error en liquidacion_locks ${lock.id}:`, lockError);
+    }
   }
 
   return {
@@ -5368,6 +6476,43 @@ export const updateInvestor = async ({ body, set }: any) => {
       };
     }
 
+    // Se valida ANTES de escribir nada: con un arreglo, un DPI de representante
+    // malo en el elemento 3 no debe dejar aplicados los dos primeros.
+    for (const inv of inversionistasToUpdate) {
+      const errorDpiRepLegal = validarDpiRepLegal(inv.dpi_rep_legal);
+      if (errorDpiRepLegal) {
+        set.status = 400;
+        return { message: errorDpiRepLegal };
+      }
+
+      // Igual que en insertInvestor: el representante debe existir, y solo se
+      // verifica cuando el valor CAMBIA, para no trabar la edición de las filas
+      // históricas que no cumplirían la regla.
+      const nuevoRepLegal = normalizarDpiRepLegal(inv.dpi_rep_legal);
+      if (typeof inv.dpi_rep_legal !== "undefined" && nuevoRepLegal !== null) {
+        const [existente] = await db
+          .select()
+          .from(inversionistas)
+          .where(
+            eq(inversionistas.inversionista_id, Number(inv.inversionista_id))
+          )
+          .limit(1);
+        const guardado = existente?.dpi_rep_legal ?? null;
+
+        if (
+          guardado !== nuevoRepLegal &&
+          !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
+          !(await repLegalExiste(nuevoRepLegal))
+        ) {
+          set.status = 400;
+          return {
+            message: `El DPI de representante legal ${nuevoRepLegal} no existe como inversionista`,
+            error: "rep_legal_inexistente",
+          };
+        }
+      }
+    }
+
     const updatedResults = [];
     for (const inv of inversionistasToUpdate) {
       const {
@@ -5382,6 +6527,7 @@ export const updateInvestor = async ({ body, set }: any) => {
         tipo_cuenta,
         numero_cuenta,
         dpi,
+        dpi_rep_legal,
         moneda,
       } = inv;
 
@@ -5403,7 +6549,15 @@ export const updateInvestor = async ({ body, set }: any) => {
         updateData.tipo_cuenta = tipo_cuenta;
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
-      if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof dpi !== "undefined") {
+        updateData.dpi = dpi;
+        // Misma transición que en `insertInvestor`: escribir el DPI desde back
+        // office es lo que vuelve confiable una identidad que se puso uno mismo.
+        // El porqué, largo, está allá.
+        updateData.creado_por_usuario_portal = null;
+      }
+      if (typeof dpi_rep_legal !== "undefined")
+        updateData.dpi_rep_legal = normalizarDpiRepLegal(dpi_rep_legal);
       if (typeof moneda !== "undefined") updateData.moneda = moneda;
 
       // Si no hay nada que actualizar, saltar
@@ -5487,11 +6641,64 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       updateData.tipo_reinversion = "sin_reinversion";
     }
 
-    const [updated] = await db
-      .update(inversionistas)
-      .set(updateData)
-      .where(eq(inversionistas.inversionista_id, inversionista_id))
-      .returning();
+    // Solo se bloquea la ENTRADA a pendiente_devolucion. Salir (activo/
+    // inactivo) sigue libre para no dejar a nadie atrapado. Un borrador
+    // NO_LIQUIDADO es plata que todavía no se repartió: si el inversionista
+    // entra a devolución con borradores vivos, la próxima liquidación le
+    // devuelve el monto_aportado completo (payments.ts) saltándose esos
+    // abonos pendientes, y quedan colgados.
+    //
+    // Guard + update van en UNA transacción que toma FOR NO KEY UPDATE sobre
+    // los créditos del inversionista antes de consultar. La generación de
+    // pagos (payments.ts, withPendingReturnCreditLocks) toma el mismo lock
+    // de fila sobre creditos antes de insertar un borrador — sin lockear acá
+    // también, el guard puede leer "sin borradores" justo antes de que
+    // generación inserte uno, y este UPDATE de todos modos deja al
+    // inversionista en pendiente_devolucion con el borrador recién creado.
+    // Con el lock, quien llegue primero bloquea al otro hasta su
+    // commit/rollback, así el guard siempre ve el estado final.
+    const [updated] = await db.transaction(async (tx) => {
+      if (status === "pendiente_devolucion") {
+        const creditosDelInversionista = await tx
+          .select({ credito_id: creditos_inversionistas_espejo.credito_id })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+
+        const creditoIds = [
+          ...new Set(creditosDelInversionista.map((c) => c.credito_id)),
+        ].sort((a, b) => a - b);
+
+        if (creditoIds.length > 0) {
+          // ORDER BY explícito: un IN no preserva el orden de entrada, así
+          // que sin esto dos transacciones con créditos superpuestos pueden
+          // lockear en órdenes distintos y producir deadlock (40P01 -> 500
+          // en el catch general). Mismo criterio que withPendingReturnCreditLocks
+          // (payments.ts), que ya ordena por credito_id antes de lockear.
+          await tx
+            .select({ credito_id: creditos.credito_id })
+            .from(creditos)
+            .where(inArray(creditos.credito_id, creditoIds))
+            .orderBy(asc(creditos.credito_id))
+            .for("no key update");
+        }
+
+        const bloqueo = await checkInvestorHasUnliquidatedDrafts(
+          inversionista_id,
+          tx as unknown as typeof db,
+        );
+        if (bloqueo) {
+          // Se captura en el catch general de la función (más abajo), que
+          // ya existe para todo error de este handler.
+          throw new UnliquidatedDraftPaymentsError(bloqueo);
+        }
+      }
+
+      return tx
+        .update(inversionistas)
+        .set(updateData)
+        .where(eq(inversionistas.inversionista_id, inversionista_id))
+        .returning();
+    });
 
     let usuarioEmail: string | undefined;
     let usuarioNombre: string | undefined;
@@ -5592,6 +6799,15 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
     };
   } catch (error) {
+    if (error instanceof UnliquidatedDraftPaymentsError) {
+      set.status = 400;
+      return {
+        success: false,
+        code: error.code,
+        message: error.message,
+        creditos_bloqueantes: error.creditos_bloqueantes,
+      };
+    }
     console.error("[updateInvestorStatus] Error:", error);
     set.status = 500;
     return {
@@ -5684,9 +6900,42 @@ const CUBE_INVESTMENT_ID = 86;
 // las llamadas internas (ver liquidateByInvestorId). El router pasa únicamente
 // el contexto de Elysia, así que un caller HTTP nunca puede setear
 // skipStatusAndEmail, sin importar props extra en el body.
+export type RevalidarGuardResult = {
+  ok: boolean;
+  message?: string;
+  creditos_invalidos?: number[];
+};
+
+export class GuardRechazadoError extends Error {
+  creditosInvalidos: number[];
+  constructor(message: string, creditosInvalidos: number[] = []) {
+    super(message);
+    this.name = "GuardRechazadoError";
+    this.creditosInvalidos = creditosInvalidos;
+  }
+}
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+let lockDbInstance: typeof db | null = null;
+function getLockDbRunner(): typeof db {
+  if (!lockDbInstance) {
+    const isRealLockPool =
+      Boolean(lockPool) &&
+      typeof (lockPool as any).connect === "function" &&
+      typeof (lockPool as any).totalCount === "number";
+    lockDbInstance = isRealLockPool ? (drizzle(lockPool, { schema }) as unknown as typeof db) : db;
+  }
+  return lockDbInstance;
+}
+
 export const exitInvestor = async (
   { body, set, request }: any,
-  opts: { skipStatusAndEmail?: boolean } = {}
+  opts: {
+    skipStatusAndEmail?: boolean;
+    revalidarGuard?: (tx: DbTransaction) => Promise<RevalidarGuardResult>;
+    dbRunner?: typeof db;
+  } = {}
 ) => {
   const skipStatusAndEmail = opts.skipStatusAndEmail === true;
   // ── Helper de logging con prefijo único por request ──
@@ -5777,8 +7026,48 @@ export const exitInvestor = async (
     // Todo el trabajo (padre + espejo + bandera + status final) va en una
     // sola transacción. Si algo falla, ROLLBACK total: ni cambia el status
     // del inversionista, ni queda nada a medias en los créditos.
+    //
+    // ⚠️ P1 (pool starvation): La transacción se ejecuta sobre `lockPool`
+    // (el pool dedicado a locks). Quien espera el `FOR NO KEY UPDATE` lo
+    // hace ocupando una conexión de `lockPool`, NUNCA del pool de trabajo
+    // `db`/`client`. Esto evita que N exits esperando un crédito bloqueado
+    // por `withPendingReturnCreditLocks` agoten el pool de trabajo,
+    // garantizando que el callback de pagos siempre encuentre conexiones en
+    // `db` para completar su trabajo y liberar el row lock.
     log("🔒 Abriendo transacción...");
-    await db.transaction(async (tx) => {
+    const dbRunner: typeof db = opts.dbRunner ?? getLockDbRunner();
+    await dbRunner.transaction(async (tx: DbTransaction) => {
+      // ── Paso 4.0: Lock ordenado de créditos (P1: serialización con pagos) ──
+      // Mismo patrón que `withPendingReturnCreditLocks` (payments.ts) y
+      // status → pendiente_devolucion (investor.ts:6649). Toma FOR NO KEY UPDATE,
+      // ordenado por credito_id ascendente, sobre TODOS los créditos pedidos.
+      // Quien llegue primero entre exitInvestor y la generación de pagos bloquea
+      // al otro hasta commit/rollback, evitando que se creen abonos/pagos mientras
+      // se transfiere el inversionista a CUBE.
+      const idsValidos = (Array.isArray(creditoIds) ? creditoIds : []).filter(
+        (id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0
+      );
+      const idsOrdenados = [...new Set(idsValidos)].sort((a, b) => a - b);
+      if (idsOrdenados.length > 0) {
+        await tx
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(inArray(creditos.credito_id, idsOrdenados))
+          .orderBy(asc(creditos.credito_id))
+          .for("no key update");
+      }
+
+      // ── Paso 4.0.1: Revalidar guard bajo el lock dentro de la transacción ──
+      if (opts.revalidarGuard) {
+        const guardRes = await opts.revalidarGuard(tx);
+        if (!guardRes.ok) {
+          throw new GuardRechazadoError(
+            guardRes.message ?? "Guard de devolución rechazó la operación",
+            guardRes.creditos_invalidos ?? []
+          );
+        }
+      }
+
       for (const [idx, credito_id] of creditoIds.entries()) {
         log(`─────────────────────────────────────────────────────────`);
         log(`📂 [${idx + 1}/${creditoIds.length}] Procesando crédito_id=${credito_id}`);
@@ -6408,6 +7697,15 @@ export const exitInvestor = async (
       total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
     };
   } catch (error) {
+    if (error instanceof GuardRechazadoError) {
+      warn("⚠️  Guard de devolución rechazó la operación dentro de la transacción:", error.message);
+      set.status = 400;
+      return {
+        success: false,
+        message: error.message,
+        creditos_invalidos: error.creditosInvalidos,
+      };
+    }
     err("💥 Error fatal:", error);
     err(`⏱️  Duración hasta el error: ${Date.now() - t0}ms`);
     err("═══════════════════════════════════════════════════════════");
@@ -6800,6 +8098,8 @@ interface InversionistaResumen {
   boleta_pendiente: BoletaPendiente | null;
   boleta_liquidacion: BoletaPendiente | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+  reporte_liquidacion_url_gtq: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
 }
@@ -6841,6 +8141,7 @@ interface InversionistaResumenRow {
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   reporte_liquidacion_url?: string | null;
+  reporte_liquidacion_url_gtq?: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
   boleta_id?: number | null;
@@ -7444,6 +8745,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+    // Mismo reporte en quetzales (solo inversionistas en dólares lo tienen).
+    reporte_liquidacion_url_gtq: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url_gtq})`,
     boleta_id: liquidaciones.boleta_id,
   };
 
@@ -7561,6 +8864,7 @@ function mapResumenRow(
     boleta_pendiente,
     boleta_liquidacion,
     reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
+    reporte_liquidacion_url_gtq: inv.reporte_liquidacion_url_gtq ?? null,
     ...(inv.mes_liquidacion != null ? { mes_liquidacion: inv.mes_liquidacion } : {}),
     ...(inv.anio_liquidacion != null ? { anio_liquidacion: inv.anio_liquidacion } : {}),
   };
@@ -8142,6 +9446,7 @@ export async function resumenGlobalLiquidaciones(
         total_a_recibir_con_reinversion: 0,
         total_cuota: 0,
         reporte_liquidacion_url: null,
+        reporte_liquidacion_url_gtq: null,
       };
 
       result.push({
@@ -8594,10 +9899,15 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-   if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  } else if (!isNullorEmpty(dpi)) {
-    conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  // El id es EXCLUYENTE, no se suma: si se acumulara con el correo, un
+  // inversionista que comparte correo con otra de sus entidades pediría una y
+  // recibiría vacío (las dos condiciones van con AND).
+  if (!inversionista_id) {
+    if (!isNullorEmpty(email)) {
+      conditions.push(eq(inversionistas.email, email));
+    } else if (!isNullorEmpty(dpi)) {
+      conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+    }
   }
 
 
@@ -8618,6 +9928,10 @@ export async function getLiquidaciones({
       reinversion_interes: liquidaciones.reinversion_interes,
       reinversion_total: liquidaciones.reinversion_total,
       reporte_liquidacion: liquidaciones.reporte_liquidacion_url,
+      // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+      // dólares; en los de quetzales es null porque el principal ya está en Q.
+      reporte_liquidacion_gtq: liquidaciones.reporte_liquidacion_url_gtq,
+      tipo_cambio_reporte: liquidaciones.tipo_cambio_reporte,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       // Datos del inversionista
       nombre_inversionista: inversionistas.nombre,
@@ -8801,6 +10115,10 @@ export async function getLiquidaciones({
           reinversion_total: formatValue(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
+        // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+        // dólares; en los de quetzales es null porque el principal ya está en Q.
+        reporte_liquidacion_gtq: liq.reporte_liquidacion_gtq,
+        tipo_cambio_reporte: liq.tipo_cambio_reporte,
         fecha_liquidacion: liq.fecha_liquidacion,
         pagos: pagosConISR,
       };
@@ -8819,13 +10137,21 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi?: string, email?: string) {
-  if (!dpi && !email) {
-    throw new Error("Se requiere al menos 'dpi' o 'email'");
+export async function getInvestorPerformance(
+  dpi?: string,
+  email?: string,
+  inversionistaId?: number
+) {
+  if (!dpi && !email && !inversionistaId) {
+    throw new Error("Se requiere al menos 'inversionista_id', 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
-  const whereClause = email
+  // 1️⃣ Buscar inversionista (Prioridad: id > Email > DPI)
+  // El id manda porque es el único que identifica una fila sola: por correo hay
+  // personas con varias entidades y el .limit(1) de abajo elegiría una al azar.
+  const whereClause = inversionistaId
+    ? eq(inversionistas.inversionista_id, inversionistaId)
+    : email
     ? eq(inversionistas.email, email)
     : eq(inversionistas.dpi, parseInt(dpi!));
 
@@ -8840,7 +10166,12 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
+    const buscadoPor = inversionistaId
+      ? `id: ${inversionistaId}`
+      : email
+      ? `email: ${email}`
+      : `DPI: ${dpi}`;
+    throw new Error(`No se encontró inversionista con ${buscadoPor}`);
   }
 
   // 2️⃣ Obtener totales de inversiones de forma agregada
@@ -8952,19 +10283,35 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
   console.log(`\n🔄 DELETE Pagos Espejo NO_LIQUIDADO (inversionista: ${inversionistaId})`);
 
   try {
-    // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
-    const deleted = await db
-      .delete(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
-          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+    return await db.transaction(async (tx) => {
+      // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
+      const deleted = await tx
+        .delete(pagos_credito_inversionistas_espejo)
+        .where(
+          and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    console.log(`✅ ${deleted.length} pagos eliminados.`);
-    return { success: true, deletedCount: deleted.length };
+      // 2. Desvincular atómicamente abonos a capital que apuntaban a los pagos eliminados
+      if (deleted.length > 0) {
+        const deletedIds = deleted.map((p: { id: number }) => p.id);
+        await tx
+          .update(abonos_capital)
+          .set({ pago_espejo_id: null, updated_at: new Date() })
+          .where(
+            and(
+              inArray(abonos_capital.pago_espejo_id, deletedIds),
+              eq(abonos_capital.liquidado, false)
+            )
+          );
+      }
+
+      console.log(`✅ ${deleted.length} pagos eliminados y abonos desvinculados.`);
+      return { success: true, deletedCount: deleted.length };
+    });
   } catch (error) {
     console.error("Error eliminando pagos no liquidados:", error);
     throw error;
@@ -9673,7 +11020,7 @@ export async function simularInversionista(
       // 1. Interés (FIJO sobre monto_aportado, igual que el espejo) = montoInvFijo
       // Prorrateo de primera cuota: si el inversionista entró via compra_cartera en el mes
       // actual (mes anterior al ancla), el espejo solo le paga los días restantes del mes.
-      // fraccionDespues = (diasDelMes - diaCorte) / diasDelMes
+      // fraccionDespues = max(1, diasDelMes - diaCorte) / diasDelMes
       let abono_interes = montoInvFijo;
       if (idx === 0 && ci.fecha_inicio_participacion) {
         const fechaCorte = new Date(ci.fecha_inicio_participacion + "T00:00:00Z");
@@ -9685,7 +11032,15 @@ export async function simularInversionista(
         if (mesCorte === mesActual && anioCorte === anioActual) {
           const diaCorte = fechaCorte.getUTCDate();
           const diasDelMes = new Date(Date.UTC(anioCorte, mesCorte, 0)).getUTCDate();
-          const fraccionDespues = new Big(diasDelMes - diaCorte).div(diasDelMes);
+          // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes la resta da 0 y la
+          //    proyección mostraría Q0 de interés en la primera cuota, mientras el pago
+          //    real y el DTE sí pagan 1/diasDelMes (mismo piso en
+          //    cofidi/prorrateoPciInteres.ts, routers/cofidi.ts y
+          //    utils/functions/diasParticipacion.ts). Sin esto el reporte contradice al pago.
+          //    OJO: acá la fecha se parsea en UTC, por eso NO se reusa el helper de
+          //    diasParticipacion.ts (ese usa getters locales). Solo se comparte el piso.
+          const diasDespues = Math.max(1, diasDelMes - diaCorte);
+          const fraccionDespues = new Big(diasDespues).div(diasDelMes);
           abono_interes = montoInvFijo.times(fraccionDespues).round(2);
         }
       }

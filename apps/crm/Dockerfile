@@ -27,6 +27,9 @@ ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
 COPY apps/crm/apps/server/tsconfig.json ./apps/server/
 COPY apps/crm/apps/server/src/lib ./apps/server/src/lib
 COPY apps/crm/apps/server/src/db/schema ./apps/server/src/db/schema
+# El front reusa la validación del DPI (apps/web/src/lib/dpi.ts) para aplicar
+# la misma regla que el servidor
+COPY apps/crm/apps/server/src/utils/cui-validation.ts ./apps/server/src/utils/cui-validation.ts
 
 # Copy web source and config
 COPY apps/crm/apps/web/src ./apps/web/src

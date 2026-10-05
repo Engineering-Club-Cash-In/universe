@@ -1,13 +1,42 @@
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
+import { downloadPdfFromR2 } from './services/R2Service';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
+import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
+import { getSignatureMode, getSignaturePattern } from './services/signaturePatterns';
 
 // Inicializar WeeTrust
 const weeTrustService = new WeeTrustService();
 
 const PORT = Number(process.env.PORT) || 4000;
+
+/**
+ * Los endpoints que mandan a firmar, borran o reemiten documentos en WeeTrust
+ * sólo los puede llamar el CRM. El generador está en una URL pública y el
+ * `documentID` viaja dentro de cada link de firma: sin esto, cualquier firmante
+ * podía borrar el documento o leer los links de los demás.
+ *
+ * Usa el mismo secreto que el relay del webhook (WEETRUST_RELAY_SECRET), que ya
+ * es compartido entre los dos servicios. Sin configurar, se rechaza todo.
+ */
+function rechazoSinSecretoDelCrm(
+  headers: Record<string, string | undefined>,
+  set: { status?: number | string },
+): { success: false; error: string } | null {
+  const esperado = process.env.WEETRUST_RELAY_SECRET;
+  if (!esperado) {
+    console.error('[auth] WEETRUST_RELAY_SECRET no configurado: se rechaza la llamada');
+    set.status = 503;
+    return { success: false, error: 'No configurado' };
+  }
+  if (headers['x-weetrust-relay-secret'] !== esperado) {
+    set.status = 401;
+    return { success: false, error: 'No autorizado' };
+  }
+  return null;
+}
 
 // ===== ENDPOINTS =====
 
@@ -35,6 +64,8 @@ const app = new Elysia()
       service: 'Contract Generator API',
       timestamp: new Date().toISOString(),
       gotenberg: gotenbergHealth ? 'available' : 'unavailable',
+      // Si queued > 0 y active == max de forma sostenida, la cola de PDF está trabada
+      pdfQueue: contractGenerator.getPdfQueueStats(),
       memory: {
         heapUsedMB,
         heapTotalMB,
@@ -75,6 +106,7 @@ const app = new Elysia()
         latencyMs: gotenbergLatency,
         timedOut: gotenbergLatency >= 5000
       },
+      pdfQueue: contractGenerator.getPdfQueueStats(),
       process: {
         pid: process.pid,
         nodeVersion: process.version
@@ -129,6 +161,16 @@ const app = new Elysia()
       };
     }
 
+    // El paquete de cartas no tiene plantilla propia: se arma con las cartas
+    // que trae, y sólo por /contracts/batch. Acá daba un 500.
+    if (requestBody.contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Validar que se enviaron datos
     if (!requestBody.data || Object.keys(requestBody.data).length === 0) {
       set.status = 400;
@@ -140,10 +182,19 @@ const app = new Elysia()
 
     // Generar el contrato
     console.log(`\n🚀 Generando contrato tipo: ${requestBody.contractType}`);
+    // `signers`, `observers` y `emails` viajan arriba en el request pero el
+    // generador los lee de las opciones. Sin pasarlos, este endpoint generaba
+    // el PDF sin ningún link de firma (el mismo agujero que tenía el batch).
     const result = await contractGenerator.generateContract(
       requestBody.contractType,
       requestBody.data,
-      requestBody.options
+      {
+        ...requestBody.options,
+        // Sin pisar lo que ya viniera dentro de `options`.
+        signers: requestBody.signers ?? requestBody.options?.signers,
+        observers: requestBody.observers ?? requestBody.options?.observers,
+        emails: requestBody.emails ?? requestBody.options?.emails,
+      }
     );
 
     // Responder según el resultado
@@ -231,6 +282,18 @@ const app = new Elysia()
         };
       }
 
+      // Las cartas unidas no traen datos propios: cada carta trae los suyos.
+      if (contract.contractType === ContractType.PAQUETE_CARTAS) {
+        if (!Array.isArray(contract.cartas) || contract.cartas.length === 0) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Contrato en posición ${i}: las cartas unidas no traen ninguna carta`
+          };
+        }
+        continue;
+      }
+
       if (!contract.data || Object.keys(contract.data).length === 0) {
         set.status = 400;
         return {
@@ -292,6 +355,14 @@ const app = new Elysia()
       };
     }
 
+    if (contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Generar
     const result = await contractGenerator.generateContract(
       contractType,
@@ -319,6 +390,405 @@ const app = new Elysia()
 })
 
   /**
+   * POST /contracts/upload-for-signing
+   *
+   * Manda a firmar un PDF que jurídico subió a mano, en vez de generarlo desde
+   * el template. El tipo de contrato tiene que ser uno de los mapeados: así las
+   * líneas de firma están donde el layout dice y se reparten por rol igual que
+   * en el camino automático.
+   *
+   * Si el PDF no trae esas líneas, no se manda nada a firmar y se devuelve el
+   * error: un documento que no es el contrato que dice ser se detecta acá y no
+   * cuando alguien vaya a firmarlo.
+   *
+   * Con `guardarSiNoHayLineas: true` tampoco se manda a firmar, pero el PDF
+   * queda guardado y la respuesta es exitosa con `sinLineasDeFirma`: alguien lo
+   * sube a WeeTrust, acomoda las firmas a mano y vincula ese documento.
+   *
+   * Body: { contractType, pdfBase64, filenamePrefix?, signers?, observers?,
+   *         guardarSiNoHayLineas? }
+   */
+  .post('/contracts/upload-for-signing', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      const {
+        contractType,
+        pdfBase64,
+        filenamePrefix,
+        documentName,
+        signers,
+        observers,
+        guardarSiNoHayLineas,
+      } = body as {
+        contractType?: ContractType;
+        pdfBase64?: string;
+        filenamePrefix?: string;
+        documentName?: string;
+        signers?: GenerateContractRequest['signers'];
+        observers?: string[];
+        guardarSiNoHayLineas?: boolean;
+      };
+
+      if (!contractType || !Object.values(ContractType).includes(contractType)) {
+        set.status = 400;
+        return {
+          success: false,
+          error: `Tipo de contrato inválido: ${contractType}`,
+          availableTypes: Object.values(ContractType)
+        };
+      }
+
+      // Las cartas unidas no se suben a mano: sus firmas se ubican carta por
+      // carta, y eso sólo se puede con un paquete que armó este servicio y que
+      // dice en sus metadatos qué cartas trae. Un PDF unido por fuera no lo dice.
+      if (contractType === ContractType.PAQUETE_CARTAS) {
+        set.status = 400;
+        return {
+          success: false,
+          error:
+            'Las cartas unidas no se pueden subir a mano: se generan desde el CRM. Para cambiar una, regenerá las cartas.',
+        };
+      }
+
+      // Sólo los contratos con layout de firmas auditado (o que se firman en
+      // papel). Uno sin layout caería al reparto por orden de llegada y las
+      // firmas de un PDF armado por fuera quedarían donde caigan.
+      if (
+        getSignatureMode(contractType) !== 'fisica' &&
+        !(getSignaturePattern(contractType).bloques?.length)
+      ) {
+        set.status = 400;
+        return {
+          success: false,
+          error: `El contrato "${contractType}" no tiene layout de firmas auditado: no se puede subir a mano`,
+        };
+      }
+
+      if (!pdfBase64) {
+        set.status = 400;
+        return { success: false, error: 'El campo "pdfBase64" es requerido' };
+      }
+
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+
+      // Un base64 que no era un PDF llegaba hasta WeeTrust y fallaba allá con un
+      // mensaje que no dice nada.
+      if (pdfBuffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+        set.status = 400;
+        return { success: false, error: 'El archivo subido no es un PDF' };
+      }
+
+      const result = await contractGenerator.signExistingPdf(
+        contractType,
+        pdfBuffer,
+        {
+          filenamePrefix,
+          documentName,
+          signers,
+          observers,
+          guardarSiNoHayLineas: guardarSiNoHayLineas === true,
+        }
+      );
+
+      set.status = result.success ? 200 : 400;
+      return result;
+
+    } catch (error: any) {
+      console.error('Error en /contracts/upload-for-signing:', error);
+      set.status = 500;
+      return {
+        success: false,
+        error: 'Error interno del servidor',
+        message: error.message
+      };
+    }
+  })
+
+  /**
+   * DELETE /contracts/document/:documentID
+   *
+   * Borra el documento en WeeTrust. Sólo funciona con documentos en `draft` o
+   * `pending`: uno completado queda registrado en su blockchain y la API no
+   * permite eliminarlo ni anularlo. Para esos, lo único posible es dejarlos sin
+   * efecto del lado del CRM.
+   */
+  .delete('/contracts/document/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      await weeTrustService.deleteDocument(params.documentID);
+      return { success: true, documentID: params.documentID };
+    } catch (error: any) {
+      console.error('[delete-document] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * POST /contracts/reissue
+   *
+   * Vuelve a emitir un contrato en WeeTrust usando el PDF que ya está en R2.
+   *
+   * No es lo mismo que `update-signatures`, que sólo renueva las URL de quienes
+   * todavía no firmaron y falla con un documento completado ("There are no url
+   * of signatures to update"). Acá se crea un documento NUEVO con el mismo PDF,
+   * así que sirve también cuando ya firmaron todos pero la firma no vale (por
+   * ejemplo, una identificación que no era la del cliente).
+   *
+   * Body: { r2Key, contractType, filenamePrefix?, signers, observers? }
+   */
+  .post('/contracts/reissue', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      const { r2Key, contractType, filenamePrefix, documentName, signers, observers } =
+        body as {
+          r2Key?: string;
+          contractType?: ContractType;
+          filenamePrefix?: string;
+          documentName?: string;
+          signers?: GenerateContractRequest['signers'];
+          observers?: string[];
+        };
+
+      if (!contractType || !Object.values(ContractType).includes(contractType)) {
+        set.status = 400;
+        return { success: false, error: `Tipo de contrato inválido: ${contractType}` };
+      }
+
+      if (!r2Key) {
+        set.status = 400;
+        return { success: false, error: 'El campo "r2Key" es requerido' };
+      }
+
+      const pdfBuffer = await downloadPdfFromR2(r2Key);
+
+      // Es el mismo PDF que ya está en R2: se firma sin volver a subirlo.
+      const result = await contractGenerator.signExistingPdf(
+        contractType,
+        pdfBuffer,
+        { filenamePrefix, documentName, signers, observers, r2KeyExistente: r2Key }
+      );
+
+      set.status = result.success ? 200 : 400;
+      return result;
+
+    } catch (error: any) {
+      console.error('Error en /contracts/reissue:', error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
+  // ===== ESTADO Y REINTENTOS DE FIRMA =====
+
+  /**
+   * GET /contracts/signing-status/:documentID
+   *
+   * Estado de firma de un documento, firmante por firmante. Es un pull: no
+   * depende de que los webhooks estén registrados, que hoy no lo están.
+   */
+  .get('/contracts/signing-status/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      return {
+        success: true,
+        documentID: documento.documentID,
+        status: documento.status,
+        // Para quien vincula un documento armado a mano en WeeTrust: es el
+        // único enlace que se le puede pasar a alguien para que mire.
+        observerUrl: documento.sharedWith?.find((o) => o.url)?.url ?? null,
+        signatories: (documento.signatory ?? []).map((s) => ({
+          emailID: s.emailID,
+          name: s.name,
+          signatoryID: s.signatoryID,
+          // WeeTrust manda 0/1; se normaliza para no pasear el número.
+          isSigned: Boolean(Number(s.isSigned)),
+          signingUrl: s.signing?.url ?? null,
+          // Epoch en milisegundos, o null si nunca vence.
+          expiry: s.signing?.expiry ?? null,
+          // Sólo en quien lleva verificación facial. Es lo que explica el
+          // documento que se queda en PENDING con todos firmados: si la
+          // verificación terminó y salió inválida, WeeTrust no lo cierra.
+          biometric: s.biometricResultInfo
+            ? {
+                logID: s.biometricResultInfo.biometricLogID ?? null,
+                finished: Boolean(s.biometricResultInfo.hasFinished),
+                valid: Boolean(s.biometricResultInfo.isValid),
+                resultUrl: s.biometricResultInfo.biometricResultUrl ?? null,
+              }
+            : null,
+        })),
+      };
+    } catch (error: any) {
+      console.error('[signing-status] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * GET /contracts/signed-pdf/:documentID
+   *
+   * Devuelve el PDF **firmado** de un documento ya completado.
+   *
+   * El CRM lo usa para dos cosas: que ventas y jurídico se bajen el contrato de
+   * verdad, y reemplazar en la ficha del inversionista el borrador que se
+   * generó, que no tiene firmas. Va por acá y no directo a WeeTrust
+   * porque las credenciales las tiene este servicio.
+   *
+   * Sólo con el documento COMPLETED: antes de eso el archivo que WeeTrust
+   * guarda es el mismo que le subimos, y publicarlo como "firmado" sería decir
+   * que alguien firmó cuando no.
+   */
+  .get('/contracts/signed-pdf/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      if (documento.status !== 'COMPLETED') {
+        set.status = 409;
+        return {
+          success: false,
+          error: `El documento está en ${documento.status}: todavía no hay PDF firmado`,
+        };
+      }
+
+      const url = documento.documentFileObj?.url;
+      if (!url) {
+        set.status = 502;
+        return { success: false, error: 'WeeTrust no devolvió el archivo del documento' };
+      }
+
+      const archivo = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!archivo.ok) {
+        set.status = 502;
+        return {
+          success: false,
+          error: `No se pudo bajar el PDF firmado (${archivo.status})`,
+        };
+      }
+
+      set.headers['content-type'] = 'application/pdf';
+      return new Response(await archivo.arrayBuffer(), {
+        headers: { 'content-type': 'application/pdf' },
+      });
+    } catch (error: any) {
+      console.error('[signed-pdf] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * PUT /contracts/refresh-signing-links/:documentID
+   *
+   * Regenera los enlaces de firma. Es lo que se usa cuando un link venció o
+   * cuando alguien necesita volver a entrar a verificarse; los firmantes que ya
+   * firmaron no se tocan.
+   */
+  .put('/contracts/refresh-signing-links/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      await weeTrustService.refreshSignatureUrls(params.documentID);
+
+      // La respuesta de update-signatures no siempre trae a todos los
+      // firmantes, así que el estado se vuelve a leer del documento: es la
+      // única fuente que devuelve el juego completo de links vigentes.
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      return {
+        success: true,
+        documentID: documento.documentID,
+        status: documento.status,
+        signatories: (documento.signatory ?? []).map((s) => ({
+          emailID: s.emailID,
+          name: s.name,
+          signatoryID: s.signatoryID,
+          isSigned: Boolean(Number(s.isSigned)),
+          signingUrl: s.signing?.url ?? null,
+          expiry: s.signing?.expiry ?? null,
+        })),
+      };
+    } catch (error: any) {
+      console.error('[refresh-signing-links] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * PUT /contracts/resend-email/:documentID
+   *
+   * Reenvía el correo de invitación a los firmantes pendientes.
+   */
+  .put('/contracts/resend-email/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      await weeTrustService.resendEmailToSignatories(params.documentID);
+      return { success: true, documentID: params.documentID };
+    } catch (error: any) {
+      console.error('[resend-email] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * PUT /contracts/retry-biometric/:documentID
+   *
+   * Repite o salta la verificación facial de un firmante que no la pasó.
+   *
+   * Es el caso del documento que se queda en PENDING con todas las firmas: la
+   * persona firmó, pero WeeTrust no le validó la identidad y no cierra el
+   * documento. Con `biometricRetry` vuelve a pedírsela sobre el MISMO documento
+   * —los enlaces de firma siguen sirviendo, no hay que reemitir nada— y con
+   * `biometricSkipped` el documento cierra con la firma tal como está.
+   *
+   * El `biometricLogID` es el del intento fallido y viene en la consulta de
+   * estado, dentro del `biometric` de ese firmante.
+   */
+  .put('/contracts/retry-biometric/:documentID', async ({ params, body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+
+    const { biometricLogID, action } = (body ?? {}) as {
+      biometricLogID?: string;
+      action?: string;
+    };
+
+    if (!biometricLogID) {
+      set.status = 400;
+      return { success: false, error: 'Falta biometricLogID' };
+    }
+
+    if (action !== 'biometricRetry' && action !== 'biometricSkipped') {
+      set.status = 400;
+      return {
+        success: false,
+        error: "action tiene que ser 'biometricRetry' o 'biometricSkipped'",
+      };
+    }
+
+    try {
+      await weeTrustService.retryBiometric(params.documentID, biometricLogID, action);
+      return { success: true, documentID: params.documentID, action };
+    } catch (error: any) {
+      console.error('[retry-biometric] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
    * GET / - Documentación básica de la API
    */
   .get('/', () => {
@@ -332,6 +802,14 @@ const app = new Elysia()
       generateContract: 'POST /generatecontrato',
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
+      uploadForSigning: 'POST /contracts/upload-for-signing',
+      reissue: 'POST /contracts/reissue',
+      deleteDocument: 'DELETE /contracts/document/:documentID',
+      signingStatus: 'GET /contracts/signing-status/:documentID',
+      signedPdf: 'GET /contracts/signed-pdf/:documentID',
+      refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
+      resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
+      retryBiometric: 'PUT /contracts/retry-biometric/:documentID',
       webhooks: {
         receive: 'POST /webhooks/weetrust/:secret',
         status: 'GET /webhooks/weetrust/status',
@@ -427,25 +905,43 @@ const app = new Elysia()
         return { success: false, error: 'Missing documentID' };
       }
 
-      // Procesar según tipo de evento
-      switch (eventType) {
-        case 'sendDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} enviado a firma`);
-          break;
+      // Eventos que cambian quién firmó. El payload trae el documento, pero se
+      // vuelve a leer de WeeTrust: es la única fuente que devuelve el juego
+      // completo de firmantes con su link vigente, y así el CRM recibe siempre
+      // la misma forma venga de donde venga.
+      const EVENTOS_DE_FIRMA = ['sendDocument', 'signDocument', 'completedDocument'];
 
-        case 'signDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - Firmante firmó:`, payload.signatory?.emailID);
-          // TODO: Notificar a CRM que un firmante firmó
-          break;
+      if (EVENTOS_DE_FIRMA.includes(eventType)) {
+        console.log(`[WeeTrust Webhook] ${eventType} en ${documentId}`);
 
-        case 'completedDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - COMPLETADO (todos firmaron)`);
-          // TODO: Notificar a CRM que el documento está completo
-          // await notifyCrmDocumentCompleted(documentId);
-          break;
+        try {
+          const documento = await weeTrustService.getDocument(documentId);
 
-        default:
-          console.log(`[WeeTrust Webhook] Evento desconocido: ${eventType}`);
+          await notificarEstadoDeFirmaAlCrm({
+            documentID: documento.documentID,
+            status: documento.status,
+            signatories: (documento.signatory ?? []).map((s) => ({
+              emailID: s.emailID,
+              name: s.name,
+              signatoryID: s.signatoryID,
+              isSigned: Boolean(Number(s.isSigned)),
+              signingUrl: s.signing?.url ?? null,
+              expiry: s.signing?.expiry ?? null,
+            })),
+          });
+
+          console.log(`[WeeTrust Webhook] Estado de ${documentId} avisado al CRM`);
+        } catch (relayError: any) {
+          // No se le devuelve error a WeeTrust: si respondemos mal, reintenta, y
+          // el problema casi siempre es nuestro (el CRM caído, el secreto mal).
+          // El estado se puede recuperar con el botón "Actualizar estado".
+          console.error(
+            `[WeeTrust Webhook] No se pudo avisar el estado de ${documentId}:`,
+            relayError?.message ?? relayError,
+          );
+        }
+      } else {
+        console.log(`[WeeTrust Webhook] Evento sin manejar: ${eventType}`);
       }
 
       // Responder éxito a WeeTrust
@@ -466,8 +962,14 @@ const app = new Elysia()
 
   /**
    * GET /webhooks/weetrust/status - Ver webhooks registrados
+   *
+   * Pide el secreto del CRM: las URLs registradas llevan adentro el
+   * WEETRUST_WEBHOOK_SECRET, y con él cualquiera podría hacerse pasar por
+   * WeeTrust.
    */
-  .get('/webhooks/weetrust/status', async ({ set }) => {
+  .get('/webhooks/weetrust/status', async ({ set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const webhooks = await weeTrustService.listWebhooks();
       return {
@@ -484,8 +986,15 @@ const app = new Elysia()
   /**
    * POST /webhooks/weetrust/register - Registrar webhook en WeeTrust
    * Body: { url: string, type: 'sendDocument' | 'signDocument' | 'completedDocument' }
+   *
+   * Pide el secreto del CRM. Los webhooks son de la cuenta entera de WeeTrust:
+   * abierto, cualquiera que conozca esta URL podía registrar el suyo y recibir
+   * el aviso de cada contrato que se firma, con los correos y nombres de quien
+   * firma.
    */
-  .post('/webhooks/weetrust/register', async ({ body, set }) => {
+  .post('/webhooks/weetrust/register', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const { url, type } = body as { url: string; type: string };
 

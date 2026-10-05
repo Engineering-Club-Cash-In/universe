@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/**/*",
+    "__tests__/types.loose-optional.test.ts"
+  ],
+  "exclude": []
+}

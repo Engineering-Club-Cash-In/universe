@@ -123,6 +123,7 @@ export const UPLOAD_RESOURCE_TYPES = [
 	// CB-039: capturas de una investigación en redes sociales. Igual que las
 	// visitas, el id es el del CASO: se suben antes de guardar el registro.
 	"cobros_investigacion_evidencia",
+	"license_verification",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -167,6 +168,8 @@ export function buildUploadPrefix(
 			return `cobros/inmovilizaciones/${resourceId}`;
 		case "cobros_investigacion_evidencia":
 			return `cobros/investigaciones/${resourceId}`;
+		case "license_verification":
+			return `license-verifications/${resourceId}`;
 	}
 }
 
@@ -300,6 +303,21 @@ export async function getFileBuffer(key: string): Promise<Buffer> {
 	return Buffer.from(arrayBuffer);
 }
 
+export async function uploadBufferToR2(
+	key: string,
+	buffer: Buffer,
+	contentType = "application/pdf",
+): Promise<void> {
+	await r2Client.send(
+		new PutObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+			Body: buffer,
+			ContentType: contentType,
+		}),
+	);
+}
+
 // Subir archivo a R2 (para oportunidades)
 export async function uploadFileToR2(
 	file: File | Blob,
@@ -398,6 +416,23 @@ function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
 	}
 
 	return { bucket, key };
+}
+
+/**
+ * Sube un PDF y devuelve la key **con el bucket al inicio**, que es la forma en
+ * la que se guardan las keys de los contratos.
+ *
+ * Los PDF de contratos los sube el generador a su propio bucket y guarda la key
+ * completa, para que `getFileUrlWithBucketInKey` sepa dónde buscarlos. Lo que
+ * sube el CRM va a otro bucket, así que sin el prefijo la URL firmada apuntaría
+ * al bucket equivocado.
+ */
+export async function uploadPdfWithBucketInKey(
+	key: string,
+	buffer: Buffer,
+): Promise<string> {
+	await uploadBufferToR2(key, buffer);
+	return `${R2_BUCKET_NAME}/${key}`;
 }
 
 // obtener URL firmada para un archivo que tiene el bucket al inicio de la key (con cache)

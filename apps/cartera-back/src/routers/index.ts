@@ -41,6 +41,9 @@ import { aseguradorasRouter } from "./aseguradoras";
 import { bucketsRouter } from "./buckets";
 import { cuotasRouter } from "./cuotas";
 import { modalidadFacturacionRouter } from "./modalidadFacturacion";
+import { healthRouter } from "./health";
+import { consultaMoraRouter } from "./consultaMora";
+import { rubrosRouter } from "./rubros";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,devolucionRouter,creditosNuevosConAbonosRouter,cuentasExtraInversionistaRouter,cierreMensualRouter,actualizarPagosExcelRouter,reportesRouter,gastosAdministrativosRouter,metasFacturacionRouter,facturacionSnapshotRouter,ingresosCarrosRouter,aseguradorasRouter,bucketsRouter,cuotasRouter,modalidadFacturacionRouter,pagaloSupervisionRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,devolucionRouter,creditosNuevosConAbonosRouter,cuentasExtraInversionistaRouter,cierreMensualRouter,actualizarPagosExcelRouter,reportesRouter,gastosAdministrativosRouter,metasFacturacionRouter,facturacionSnapshotRouter,ingresosCarrosRouter,aseguradorasRouter,bucketsRouter,cuotasRouter,modalidadFacturacionRouter,pagaloSupervisionRouter,healthRouter,consultaMoraRouter,rubrosRouter
 }

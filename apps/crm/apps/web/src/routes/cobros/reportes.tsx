@@ -14,6 +14,7 @@ import {
 import { useMemo, useState } from "react";
 import { AsesorMultiSelect } from "@/components/cobros/asesor-multi-select";
 import { DataTable } from "@/components/data-table";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
@@ -42,8 +51,13 @@ import {
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 import {
+	buildCapitalAging,
 	buildMoraDisplayRows,
+	getCurrentOperationalMonth,
 	getMoraSnapshotDate,
+	getOfficialClosurePeriod,
+	getPreviousMonth,
+	normalizeMonthInput,
 	type MoraBucket,
 	type MoraDisplayAsesor,
 } from "./-mora-display";
@@ -67,6 +81,14 @@ function fmtTime(d: Date) {
 	});
 }
 
+function fmtMonth(value: string) {
+	return new Intl.DateTimeFormat("es-GT", {
+		month: "long",
+		year: "numeric",
+		timeZone: "UTC",
+	}).format(new Date(`${value}-01T00:00:00Z`));
+}
+
 // ─── Mora ──────────────────────────────────────────────────────────────────
 
 const ETAPAS_MORA_KEYS = [
@@ -76,6 +98,13 @@ const ETAPAS_MORA_KEYS = [
 	"mora_120",
 	"mora_120_plus",
 ] as const;
+
+const AGING_BANDAS = [
+	{ key: "mora_30" as const, label: "30" },
+	{ key: "mora_60" as const, label: "60" },
+	{ key: "mora_90" as const, label: "90" },
+	{ key: "mora_120_plus" as const, label: "120+" },
+];
 
 type MoraSnapshotAsesor = {
 	asesorId: number;
@@ -88,10 +117,6 @@ function todayGTISO() {
 		timeZone: "America/Guatemala",
 	});
 }
-function currentMonthGT() {
-	return todayGTISO().slice(0, 7); // YYYY-MM
-}
-
 function TabMora({
 	session,
 	canSeeAll,
@@ -112,7 +137,19 @@ function TabMora({
 	);
 	const [mesAnio, setMesAnio] = usePersistedState<string>(
 		"cobros.mora.mes",
-		currentMonthGT(),
+		getCurrentOperationalMonth(),
+	);
+	const [mesComparacion, setMesComparacion] = usePersistedState<string>(
+		"cobros.mora.mesComparacion",
+		getPreviousMonth(getCurrentOperationalMonth()),
+	);
+	const mesAnioValido = normalizeMonthInput(
+		mesAnio,
+		getCurrentOperationalMonth(),
+	);
+	const mesComparacionValido = normalizeMonthInput(
+		mesComparacion,
+		getPreviousMonth(getCurrentOperationalMonth()),
 	);
 	const [asesoresSel, setAsesoresSel] = usePersistedState<number[] | null>(
 		"cobros.mora.asesores",
@@ -120,17 +157,23 @@ function TabMora({
 	);
 
 	// Avanza/retrocede el mes seleccionado (sin pasar del mes actual).
-	const esMesActual = mesAnio >= currentMonthGT();
+	const esMesActual = mesAnioValido >= getCurrentOperationalMonth();
 	const shiftMes = (delta: number) => {
-		const [y, m] = mesAnio.split("-").map(Number);
+		const [y, m] = mesAnioValido.split("-").map(Number);
 		const d = new Date(y, m - 1 + delta, 1);
 		const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-		if (next > currentMonthGT()) return;
+		if (next > getCurrentOperationalMonth()) return;
 		setMesAnio(next);
 	};
 
 	const hoy = todayGTISO();
-	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnio, hoy);
+	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnioValido, hoy);
+	const usaCorteAbierto =
+		modo === "mes" && mesAnioValido === getCurrentOperationalMonth();
+	const periodoOficial = usaCorteAbierto
+		? getOfficialClosurePeriod(mesAnioValido)
+		: `${mesAnioValido}-01`;
+	const periodoComparacion = `${mesComparacionValido}-01`;
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
@@ -153,10 +196,37 @@ function TabMora({
 		refetchInterval: modo === "hoy" ? 60_000 : false,
 		refetchIntervalInBackground: false,
 	});
+	const {
+		data: dataCierreOficial,
+		isLoading: isLoadingCierreOficial,
+		isFetching: isFetchingCierreOficial,
+		refetch: refetchCierreOficial,
+	} = useQuery({
+		...orpc.getCierreMoraOficial.queryOptions({
+			input: {
+				periodo: periodoOficial,
+				asesores: asesoresSel ?? undefined,
+			},
+		}),
+		enabled: !!session && modo === "mes",
+	});
+	const {
+		data: dataComparacion,
+		isLoading: isLoadingComparacion,
+		isFetching: isFetchingComparacion,
+		refetch: refetchComparacion,
+	} = useQuery({
+		...orpc.getCierreMoraOficial.queryOptions({
+			input: {
+				periodo: periodoComparacion,
+				asesores: asesoresSel ?? undefined,
+			},
+		}),
+		enabled: !!session && modo === "mes",
+	});
 
 	// Totales con / sin Gerencia (cliente, sobre porAsesor).
-	const porAsesor = ((data as { porAsesor?: MoraSnapshotAsesor[] } | undefined)
-		?.porAsesor ?? []) as MoraSnapshotAsesor[];
+	const porAsesor: MoraSnapshotAsesor[] = data?.porAsesor ?? [];
 	const totalConGerencia = porAsesor.reduce(
 		(s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0),
 		0,
@@ -172,16 +242,33 @@ function TabMora({
 		.filter((a) => a.nombre !== "Gerencia")
 		.reduce((s, a) => s + Number(a.totalEnMora?.cantidad ?? 0), 0);
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const dataDisponibleDesde = (data as any)?.dataDisponibleDesde as
-		| string
-		| undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const alcance = (data as any)?.alcance as "live" | "historico" | undefined;
+	const dataDisponibleDesde =
+		modo === "hoy" ? data?.dataDisponibleDesde : undefined;
+	const alcance = data?.alcance;
+	const capitalSource =
+		modo === "mes" && !usaCorteAbierto ? dataCierreOficial : data;
+	const capitalAging = buildCapitalAging({
+		totales: capitalSource?.totales ?? {},
+		porAsesor: capitalSource?.porAsesor ?? [],
+		capitalCartera: capitalSource?.capitalCartera,
+		moraMensual: modo === "mes" ? dataCierreOficial?.moraMensual : undefined,
+		dataDisponibleDesde,
+	});
+	const capitalAgingComparacion = buildCapitalAging({
+		totales: dataComparacion?.totales ?? {},
+		porAsesor: dataComparacion?.porAsesor ?? [],
+		capitalCartera: dataComparacion?.capitalCartera,
+		moraMensual: dataComparacion?.moraMensual,
+	});
+	const isLoadingCapital =
+		modo === "mes" && !usaCorteAbierto ? isLoadingCierreOficial : isLoading;
+	const isRefreshing =
+		isFetching ||
+		(modo === "mes" && (isFetchingCierreOficial || isFetchingComparacion));
 
 	// Recuperación de mora para el mismo ciclo [día 6, día 6 siguiente).
-	const anioNum = Number(mesAnio.slice(0, 4));
-	const mesNum = Number(mesAnio.slice(5, 7));
+	const anioNum = Number(mesAnioValido.slice(0, 4));
+	const mesNum = Number(mesAnioValido.slice(5, 7));
 	const { data: recuperacion, refetch: refetchRecuperacion } = useQuery({
 		...orpc.getMoraRecuperacionPorAsesor.queryOptions({
 			input: {
@@ -194,21 +281,52 @@ function TabMora({
 		enabled: !!session && modo === "mes",
 	});
 	const verCobrado = modo === "mes";
-	const esperadoSnapshot = Number(
-		verCobrado
-			? (recuperacion?.totales.esperado ?? totalConGerencia)
-			: totalConGerencia,
-	);
+	const esperadoSnapshot = verCobrado
+		? capitalAging.disponible
+			? capitalAging.resumen.moraMensualEstimada
+			: null
+		: totalConGerencia;
 
 	const filasAsesor = useMemo<MoraDisplayAsesor[]>(
-		() => buildMoraDisplayRows(porAsesor, recuperacion?.porAsesor, verCobrado),
-		[porAsesor, recuperacion, verCobrado],
+		() =>
+			buildMoraDisplayRows(
+				porAsesor,
+				recuperacion?.porAsesor,
+				verCobrado,
+				dataCierreOficial?.moraMensual.porAsesor,
+			),
+		[porAsesor, recuperacion, verCobrado, dataCierreOficial],
+	);
+	const recuperacionMostrada = useMemo(
+		() =>
+			filasAsesor.reduce(
+				(total, asesor) => ({
+					cobradoEnSnapshot:
+						total.cobradoEnSnapshot + Number(asesor.cobradoEnSnapshot),
+					cobradoFueraSnapshot:
+						total.cobradoFueraSnapshot + Number(asesor.cobradoFueraSnapshot),
+					excedenteEnSnapshot:
+						total.excedenteEnSnapshot + Number(asesor.excedenteEnSnapshot),
+					pendiente: total.pendiente + Number(asesor.pendiente),
+				}),
+				{
+					cobradoEnSnapshot: 0,
+					cobradoFueraSnapshot: 0,
+					excedenteEnSnapshot: 0,
+					pendiente: 0,
+				},
+			),
+		[filasAsesor],
 	);
 
 	const ultimaAct = dataUpdatedAt ? fmtTime(new Date(dataUpdatedAt)) : null;
+	const cierresComparados = [
+		{ key: "comparacion", aging: capitalAgingComparacion },
+		{ key: "principal", aging: capitalAging },
+	] as const;
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-6">
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<TrendingDown className="h-5 w-5 text-red-600" />
@@ -225,12 +343,16 @@ function TabMora({
 						size="sm"
 						onClick={() => {
 							refetch();
+							if (modo === "mes") {
+								refetchCierreOficial();
+								refetchComparacion();
+							}
 							if (verCobrado) refetchRecuperacion();
 						}}
-						disabled={isFetching}
+						disabled={isRefreshing}
 					>
 						<RefreshCw
-							className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+							className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
 						/>
 						Actualizar
 					</Button>
@@ -274,11 +396,14 @@ function TabMora({
 						</Button>
 						<Input
 							type="month"
+							aria-label="Mes"
 							className="w-40"
-							value={mesAnio}
-							max={currentMonthGT()}
+							value={mesAnioValido}
+							max={getCurrentOperationalMonth()}
 							disabled={modo !== "mes"}
-							onChange={(e) => setMesAnio(e.target.value)}
+							onChange={(e) =>
+								setMesAnio(normalizeMonthInput(e.target.value, mesAnioValido))
+							}
 						/>
 						<Button
 							variant="outline"
@@ -292,6 +417,23 @@ function TabMora({
 						</Button>
 					</div>
 				</div>
+
+				{modo === "mes" && (
+					<div className="flex flex-col gap-1">
+						<Label className="text-muted-foreground text-xs">
+							Comparar con
+						</Label>
+						<Input
+							type="month"
+							className="w-40"
+							value={mesComparacionValido}
+							max={getCurrentOperationalMonth()}
+							onChange={(event) => {
+								if (event.target.value) setMesComparacion(event.target.value);
+							}}
+						/>
+					</div>
+				)}
 
 				{canSeeAll && asesores.length > 0 && (
 					<div className="flex flex-col gap-1">
@@ -307,7 +449,11 @@ function TabMora({
 				<p className="pb-2 text-muted-foreground text-xs">
 					{modo === "hoy"
 						? "Mora actual en vivo"
-						: `Mora al ${fechaSnapshot ?? hoy}${alcance === "historico" ? " (histórico)" : ""}`}
+						: usaCorteAbierto
+							? `Corte al ${hoy} para ${fmtMonth(mesAnioValido)}`
+							: dataCierreOficial
+							? `Cierre oficial importado de ${fmtMonth(mesAnioValido)}`
+							: `Cierre oficial pendiente para ${fmtMonth(mesAnioValido)}`}
 				</p>
 			</div>
 
@@ -325,7 +471,7 @@ function TabMora({
 			)}
 
 			{isLoading ? (
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+				<div className="order-3 grid grid-cols-2 gap-4 md:grid-cols-4">
 					{ETAPAS.map((e) => (
 						<Card key={e.key}>
 							<CardContent className="pt-6">
@@ -335,13 +481,22 @@ function TabMora({
 					))}
 				</div>
 			) : (
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+				<div className="order-3 grid grid-cols-2 gap-4 md:grid-cols-4">
 					{ETAPAS.map((etapa) => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const bucket = (data as any)?.totales?.[etapa.key];
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+						// `etapa.key` viene del catálogo dinámico (string): se indexa como
+						// mapa de bandas, que es lo que devuelve cartera.
+						const bucket = (
+							data?.totales as
+								| Partial<
+										Record<
+											string,
+											{ cantidad: number; sumaCapital: string; sumaMora: string }
+										>
+								  >
+								| undefined
+						)?.[etapa.key];
 						const totalMora = Number.parseFloat(
-							(data as any)?.totales?.totalEnMora?.sumaMora ?? "0",
+							data?.totales?.totalEnMora?.sumaMora ?? "0",
 						);
 						const pct =
 							totalMora > 0
@@ -374,23 +529,25 @@ function TabMora({
 				</div>
 			)}
 
-			{(porAsesor.length > 0 || (verCobrado && recuperacion)) && (
+			{(verCobrado || porAsesor.length > 0) && (
 				<div
-					className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${verCobrado ? "lg:grid-cols-3" : ""}`}
+					className={`order-3 grid grid-cols-1 gap-4 md:grid-cols-2 ${verCobrado ? "lg:grid-cols-3" : ""}`}
 				>
-					{porAsesor.length > 0 && (
+					{(verCobrado || porAsesor.length > 0) && (
 						<Card className="border-red-200 bg-red-50">
 							<CardContent className="pt-4">
 								<p className="font-semibold text-red-700 text-sm">
 									{verCobrado
-										? "Mora esperada del snapshot"
+										? "Mora esperada del mes"
 										: "Total en Mora (con Gerencia)"}
 								</p>
 								<p className="font-bold text-3xl text-red-800">
-									{fmtQ(esperadoSnapshot)}
+									{esperadoSnapshot === null ? "N/D" : fmtQ(esperadoSnapshot)}
 								</p>
 								<p className="text-muted-foreground text-xs">
-									{credConGerencia} créditos
+									{verCobrado && dataCierreOficial
+										? `${dataCierreOficial.moraMensual.porcentaje}% sobre capital moroso del cierre oficial`
+										: `${credConGerencia} créditos`}
 								</p>
 							</CardContent>
 						</Card>
@@ -410,18 +567,18 @@ function TabMora({
 							</CardContent>
 						</Card>
 					)}
-					{verCobrado && recuperacion && (
+					{verCobrado && (
 						<Card className="border-green-200 bg-green-50">
 							<CardContent className="pt-4">
 								<p className="font-semibold text-green-700 text-sm">
 									Cobrado en créditos del snapshot
 								</p>
 								<p className="font-bold text-3xl text-green-800">
-									{fmtQ(recuperacion.totales.cobradoEnSnapshot)}
+									{fmtQ(recuperacionMostrada.cobradoEnSnapshot)}
 								</p>
 								<p className="text-muted-foreground text-xs">
-									Pendiente: {fmtQ(recuperacion.totales.pendiente)} · Excedente:{" "}
-									{fmtQ(recuperacion.totales.excedenteEnSnapshot)}
+									Pendiente: {fmtQ(recuperacionMostrada.pendiente)} · Excedente:{" "}
+									{fmtQ(recuperacionMostrada.excedenteEnSnapshot)}
 								</p>
 							</CardContent>
 						</Card>
@@ -429,8 +586,250 @@ function TabMora({
 				</div>
 			)}
 
-			<div>
-				<h3 className="mb-3 font-semibold text-base">Desglose por Asesor</h3>
+			<section
+				aria-labelledby="capital-mora-title"
+				className="order-1 flex flex-col gap-4"
+			>
+				<div>
+					<h3 id="capital-mora-title" className="font-semibold text-lg">
+						Cierre de capital en mora
+					</h3>
+					<p className="text-muted-foreground text-sm">
+						Qué porcentaje del capital total está en mora y cómo se reparte
+						entre 30, 60, 90 y 120+ días.
+					</p>
+				</div>
+
+				{modo === "mes" && (
+					<Card>
+						<CardHeader>
+							<CardTitle className="text-base">Comparar cierres</CardTitle>
+						</CardHeader>
+						<CardContent className="overflow-x-auto">
+							{isLoadingComparacion || isLoadingCapital ? (
+								<div className="h-28 animate-pulse rounded bg-muted" />
+							) : (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Indicador</TableHead>
+											<TableHead className="text-right capitalize">
+												{fmtMonth(mesComparacionValido)}
+											</TableHead>
+											<TableHead className="text-right capitalize">
+												{fmtMonth(mesAnioValido)}
+											</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										<TableRow className="font-semibold">
+											<TableCell>Capital total en mora</TableCell>
+											{cierresComparados.map(({ key, aging }) => (
+												<TableCell
+													key={key}
+													className="text-right tabular-nums"
+												>
+													{aging.disponible &&
+													aging.resumen.porcentajeCapitalMoroso !== null
+														? `${aging.resumen.porcentajeCapitalMoroso.toFixed(2)}%`
+														: "N/D"}
+												</TableCell>
+											))}
+										</TableRow>
+										{AGING_BANDAS.map((banda, index) => (
+											<TableRow key={banda.key}>
+												<TableCell>{banda.label} días</TableCell>
+												{cierresComparados.map(({ key, aging }) => {
+													const porcentaje = aging.bandas[index]?.porcentaje;
+													return (
+														<TableCell
+															key={key}
+															className="text-right tabular-nums"
+														>
+															{aging.disponible && porcentaje !== null
+																? `${porcentaje.toFixed(2)}%`
+																: "N/D"}
+														</TableCell>
+													);
+												})}
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							)}
+						</CardContent>
+					</Card>
+				)}
+
+				{modo === "mes" && !usaCorteAbierto && dataCierreOficial && (
+					<Alert>
+						<AlertDescription>
+							Este bloque usa el cierre oficial importado y conserva los montos
+							por asesor del período.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{isLoadingCapital ? (
+					<output
+						className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+						aria-busy="true"
+						aria-label="Cargando cierre de capital en mora"
+					>
+						{AGING_BANDAS.map((banda) => (
+							<Card key={banda.key}>
+								<CardContent className="pt-6">
+									<div className="h-20 animate-pulse rounded bg-muted" />
+								</CardContent>
+							</Card>
+						))}
+					</output>
+				) : !capitalAging.disponible ? (
+					<Card>
+						<CardContent className="py-8 text-center text-muted-foreground text-sm">
+							{modo === "mes" && !usaCorteAbierto
+								? "Este período todavía no tiene un cierre oficial importado."
+								: capitalAging.sinCoberturaHistorica
+									? `No hay datos de capital en mora antes del ${dataDisponibleDesde}.`
+									: "La base de capital no está disponible para este corte."}
+						</CardContent>
+					</Card>
+				) : capitalAging.capitalTotal === 0 &&
+					capitalAging.porAsesor.length === 0 ? (
+					<Card>
+						<CardContent className="py-8 text-center text-muted-foreground text-sm">
+							No hay capital de cartera disponible para los filtros
+							seleccionados.
+						</CardContent>
+					</Card>
+				) : (
+					<>
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+							<Card className="border-red-200 bg-red-50">
+								<CardHeader className="pb-2">
+									<CardTitle className="font-medium text-red-700 text-sm">
+										Capital total en mora
+									</CardTitle>
+								</CardHeader>
+								<CardContent className="flex flex-col gap-1">
+									<div className="font-bold text-2xl text-red-800 tabular-nums">
+										{capitalAging.resumen.porcentajeCapitalMoroso === null
+											? "N/D"
+											: `${capitalAging.resumen.porcentajeCapitalMoroso.toFixed(2)}%`}
+									</div>
+									<p className="font-medium text-sm tabular-nums">
+										{fmtQ(capitalAging.resumen.capitalMoroso)}
+									</p>
+									{modo === "hoy" && (
+										<p className="text-muted-foreground text-xs">
+											Mora estimada del mes:{" "}
+											{fmtQ(capitalAging.resumen.moraMensualEstimada)}
+										</p>
+									)}
+								</CardContent>
+							</Card>
+							{capitalAging.bandas.map((item, index) => (
+								<Card key={item.etapa}>
+									<CardHeader className="pb-2">
+										<CardTitle className="font-medium text-sm">
+											{AGING_BANDAS[index]?.label} días
+										</CardTitle>
+									</CardHeader>
+									<CardContent className="flex flex-col gap-1">
+										<div className="font-bold text-2xl tabular-nums">
+											{item.porcentaje === null
+												? "N/D"
+												: `${item.porcentaje.toFixed(2)}%`}
+										</div>
+										<p className="font-medium text-sm tabular-nums">
+											{fmtQ(item.capital)}
+										</p>
+										<p className="text-muted-foreground text-xs">
+											{item.cantidad} créditos
+										</p>
+									</CardContent>
+								</Card>
+							))}
+						</div>
+
+						<Card>
+							<CardHeader>
+								<CardTitle className="text-base">Detalle por asesor</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Asesor</TableHead>
+											<TableHead className="text-right">
+												Capital asignado
+											</TableHead>
+											{AGING_BANDAS.map((banda) => (
+												<TableHead key={banda.key} className="text-right">
+													{banda.label}
+												</TableHead>
+											))}
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{capitalAging.porAsesor.map((asesor) => (
+											<TableRow key={asesor.asesorId}>
+												<TableCell className="sticky left-0 z-10 bg-card font-medium">
+													{asesor.nombre}
+												</TableCell>
+												<TableCell className="text-right font-medium tabular-nums">
+													{fmtQ(asesor.capitalCartera)}
+												</TableCell>
+												{AGING_BANDAS.map((banda) => {
+													const metric = asesor[banda.key];
+													return (
+														<TableCell
+															key={banda.key}
+															className="min-w-36 text-right"
+														>
+															<div className="relative overflow-hidden rounded-md border px-2 py-1.5">
+																<span className="sr-only">
+																	{asesor.nombre}, banda {banda.label}:{" "}
+																	{metric.porcentaje === null
+																		? "porcentaje no disponible"
+																		: `${metric.porcentaje.toFixed(1)}%`}
+																	, {fmtQ(metric.capital)}, {metric.cantidad}{" "}
+																	créditos
+																</span>
+																<div
+																	aria-hidden="true"
+																	className="absolute inset-y-0 left-0 bg-primary/10"
+																	style={{
+																		width: `${Math.min(metric.porcentaje ?? 0, 100)}%`,
+																	}}
+																/>
+																<div className="relative font-semibold tabular-nums">
+																	{metric.porcentaje === null
+																		? "N/D"
+																		: `${metric.porcentaje.toFixed(1)}%`}
+																</div>
+																<div className="relative text-muted-foreground text-xs tabular-nums">
+																	{fmtQ(metric.capital)} · {metric.cantidad}{" "}
+																	créd.
+																</div>
+															</div>
+														</TableCell>
+													);
+												})}
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							</CardContent>
+						</Card>
+					</>
+				)}
+			</section>
+
+			<div className="order-2">
+				<h3 className="mb-3 font-semibold text-base">
+					Seguimiento de cobro por asesor
+				</h3>
 				{isLoading ? (
 					<div className="h-32 animate-pulse rounded bg-muted" />
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -583,12 +982,11 @@ function TabMora({
 										<td className="px-4 py-3 text-right text-red-700">
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											<div>
-												{fmtQ(
-													verCobrado
-														? (recuperacion?.totales.esperado ?? "0")
-														: ((data as any).totales.totalEnMora?.sumaMora ??
-																"0"),
-												)}
+												{verCobrado
+													? esperadoSnapshot === null
+														? "N/D"
+														: fmtQ(esperadoSnapshot)
+													: fmtQ(totalConGerencia)}
 											</div>
 											{/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
 											<div className="font-normal text-muted-foreground text-xs">
@@ -597,7 +995,7 @@ function TabMora({
 										</td>
 										{verCobrado &&
 											(() => {
-												const totales = recuperacion?.totales;
+												const totales = recuperacionMostrada;
 												return (
 													<>
 														<td className="px-4 py-3 text-right text-green-700">

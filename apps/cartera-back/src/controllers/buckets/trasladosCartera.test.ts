@@ -151,10 +151,11 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   expect(lockConvenio).toBeLessThan(escritura);
   expect(lockCreditos).toBeGreaterThan(lockConvenio);
   expect(lockCreditos).toBeLessThan(escritura);
-  expect(lockFilasMora).toBeGreaterThan(lockCreditos);
-  expect(lockFilasMora).toBeLessThan(lockFilasCredito);
+  // Merge con develop: regla de candados del módulo de mora, `creditos`
+  // antes que `moras_credito` (ver latefee.ts).
   expect(lockFilasCredito).toBeGreaterThan(lockCreditos);
-  expect(lockFilasCredito).toBeLessThan(escritura);
+  expect(lockFilasCredito).toBeLessThan(lockFilasMora);
+  expect(lockFilasMora).toBeLessThan(escritura);
   expect(lockDestinos).toBeGreaterThan(lockCreditos);
   expect(lockDestinos).toBeLessThan(escritura);
   expect(queries.slice(lockCreditos + 1).some((q) => q.includes("SELECT c.credito_id"))).toBe(true);

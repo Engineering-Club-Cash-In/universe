@@ -1,73 +1,194 @@
 import { describe, expect, test } from "bun:test";
+import Big from "big.js";
 import {
-	agregarParticipacionExterna,
-	splitMontoSegunParticipacionActual,
+	calcularSplitParticipacionReporte,
+	seleccionarSpreadHistorico,
 } from "./monto-a-cobrar-participacion";
 
-describe("splitMontoSegunParticipacionActual", () => {
-	test("asigna 0% externo completamente a CUBE", () => {
-		expect(splitMontoSegunParticipacionActual(100, 12, 0)).toEqual({
-			valido: true,
-			capitalInv: 0,
-			capitalCube: 100,
-			interesIvaInv: 0,
-			interesIvaCube: 12,
+const split = (
+	capital: string,
+	interesIva: string,
+	inversionistas: Array<{
+		montoAportado: string;
+		esExterno: boolean;
+		spreadHistorico: string;
+	}>,
+	) =>
+		calcularSplitParticipacionReporte({
+			capital,
+			interes: interesIva,
+			iva: "0",
+			inversionistas,
 		});
+
+const monto = (value: { toFixed: (dp: number) => string }) => value.toFixed(2);
+
+describe("calcularSplitParticipacionReporte", () => {
+	test("asigna una lista vacía 100% a CUBE", () => {
+		const result = split("100.01", "10.01", []);
+
+		expect(monto(result.capitalInv)).toBe("0.00");
+		expect(monto(result.capitalCube)).toBe("100.01");
+		expect(monto(result.interesIvaInv)).toBe("0.00");
+		expect(monto(result.interesIvaCube)).toBe("10.01");
 	});
 
-	test("asigna 100% externo completamente a Inv.", () => {
-		expect(splitMontoSegunParticipacionActual(100, 12, 1)).toEqual({
-			valido: true,
-			capitalInv: 100,
-			capitalCube: 0,
-			interesIvaInv: 12,
-			interesIvaCube: 0,
-		});
+	test("asigna todo a CUBE sin inversionistas externos", () => {
+		const result = split("100.01", "10.01", [
+			{ montoAportado: "100", esExterno: false, spreadHistorico: "0" },
+		]);
+
+		expect(monto(result.capitalInv)).toBe("0.00");
+		expect(monto(result.capitalCube)).toBe("100.01");
+		expect(monto(result.interesIvaInv)).toBe("0.00");
+		expect(monto(result.interesIvaCube)).toBe("10.01");
 	});
 
-	test("redondea Inv. por crédito y conserva CUBE por diferencia", () => {
-		const split = splitMontoSegunParticipacionActual(100.01, 10.01, 0.3333);
+	test("pondera un inversionista por monto y spread", () => {
+		const result = split("100.00", "20.00", [
+			{ montoAportado: "20", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "80", esExterno: false, spreadHistorico: "0" },
+		]);
 
-		expect(split).toEqual({
-			valido: true,
-			capitalInv: 33.33,
-			capitalCube: 66.68,
-			interesIvaInv: 3.34,
-			interesIvaCube: 6.67,
-		});
-		if (split.valido) {
-			expect(split.capitalInv + split.capitalCube).toBe(100.01);
-			expect(split.interesIvaInv + split.interesIvaCube).toBe(10.01);
-		}
+		expect(monto(result.capitalInv)).toBe("20.00");
+		expect(monto(result.interesIvaInv)).toBe("3.20");
+		expect(monto(result.capitalCube)).toBe("80.00");
+		expect(monto(result.interesIvaCube)).toBe("16.80");
 	});
 
-	test("calcula CUBE como diferencia exacta sin redondearlo de nuevo", () => {
-		const split = splitMontoSegunParticipacionActual(100.019, 10.019, 0.5);
+	test("pondera dos inversionistas con spreads distintos", () => {
+		const result = split("100.00", "100.00", [
+			{ montoAportado: "20", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "30", esExterno: true, spreadHistorico: "60" },
+			{ montoAportado: "50", esExterno: false, spreadHistorico: "0" },
+		]);
 
-		expect(split).toMatchObject({ valido: true, capitalInv: 50.01, interesIvaInv: 5.01 });
-		if (split.valido) {
-			expect(split.capitalCube).toBeCloseTo(50.009, 10);
-			expect(split.interesIvaCube).toBeCloseTo(5.009, 10);
-		}
+		expect(monto(result.capitalInv)).toBe("50.00");
+		expect(monto(result.interesIvaInv)).toBe("34.00");
 	});
 
-	test("excluye del split una participación agregada inválida", () => {
-		expect(splitMontoSegunParticipacionActual(100, 12, 1.01)).toEqual({
-			valido: false,
-			capitalInv: 0,
-			capitalCube: 0,
-			interesIvaInv: 0,
-			interesIvaCube: 0,
+	test("pondera tres inversionistas con spreads distintos", () => {
+		const result = split("100.00", "100.00", [
+			{ montoAportado: "10", esExterno: true, spreadHistorico: "50" },
+			{ montoAportado: "20", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "30", esExterno: true, spreadHistorico: "25" },
+			{ montoAportado: "40", esExterno: false, spreadHistorico: "0" },
+		]);
+
+		expect(monto(result.capitalInv)).toBe("60.00");
+		expect(monto(result.interesIvaInv)).toBe("28.50");
+	});
+
+	test("conserva el spread almacenado de una fila legacy", () => {
+		const result = split("100.00", "100.00", [
+			{ montoAportado: "40", esExterno: true, spreadHistorico: "75" },
+			{ montoAportado: "60", esExterno: false, spreadHistorico: "0" },
+		]);
+
+		expect(monto(result.interesIvaInv)).toBe("30.00");
+	});
+
+	test("no excluye varios spreads de 80% aunque su suma simple exceda 100%", () => {
+		const inversionistas = [
+			{ montoAportado: "50", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "50", esExterno: true, spreadHistorico: "80" },
+		];
+		const result = split("100.00", "100.00", inversionistas);
+		const formulaAnteriorSaboteada = inversionistas.reduce(
+			(total, inversionista) => total + Number(inversionista.spreadHistorico),
+			0,
+		);
+
+		expect(formulaAnteriorSaboteada).toBe(160);
+		expect(monto(result.interesIvaInv)).toBe("80.00");
+		expect(monto(result.interesIvaCube)).toBe("20.00");
+	});
+
+	test("redondea una vez y deja el residuo exacto en CUBE", () => {
+		const result = split("100.01", "10.01", [
+			{ montoAportado: "1", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "2", esExterno: false, spreadHistorico: "0" },
+		]);
+
+		expect(monto(result.capitalInv)).toBe("33.34");
+		expect(monto(result.capitalCube)).toBe("66.67");
+		expect(monto(result.interesIvaInv)).toBe("2.67");
+		expect(monto(result.interesIvaCube)).toBe("7.34");
+		expect(result.capitalInv.plus(result.capitalCube).eq("100.01")).toBe(true);
+		expect(result.interesIvaInv.plus(result.interesIvaCube).eq("10.01")).toBe(true);
+	});
+
+	test("conserva cero interés", () => {
+		const result = split("100.00", "0.00", [
+			{ montoAportado: "50", esExterno: true, spreadHistorico: "80" },
+			{ montoAportado: "50", esExterno: false, spreadHistorico: "0" },
+		]);
+
+		expect(monto(result.interesIvaInv)).toBe("0.00");
+		expect(monto(result.interesIvaCube)).toBe("0.00");
+	});
+
+	test("redondea interés e IVA por separado antes de sumarlos", () => {
+		const result = calcularSplitParticipacionReporte({
+			capital: "100.00",
+			interes: "0.01",
+			iva: "0.01",
+			inversionistas: [
+				{ montoAportado: "1", esExterno: true, spreadHistorico: "100" },
+				{ montoAportado: "1", esExterno: false, spreadHistorico: "0" },
+			],
 		});
+
+		expect(monto(result.interesInv)).toBe("0.01");
+		expect(monto(result.ivaInv)).toBe("0.01");
+		expect(monto(result.interesIvaInv)).toBe("0.02");
+		expect(monto(result.interesIvaCube)).toBe("0.00");
+	});
+
+	test("suma el redondeo por inversionista y no redondea el agregado", () => {
+		const result = calcularSplitParticipacionReporte({
+			capital: "100.00",
+			interes: "0.03",
+			iva: "0.00",
+			inversionistas: [
+				{ montoAportado: "1", esExterno: true, spreadHistorico: "50" },
+				{ montoAportado: "1", esExterno: true, spreadHistorico: "50" },
+				{ montoAportado: "1", esExterno: false, spreadHistorico: "0" },
+			],
+		});
+
+		expect(monto(result.interesInv)).toBe("0.02");
+		expect(monto(result.interesCube)).toBe("0.01");
+		expect(monto(result.interesIvaInv)).toBe("0.02");
+		expect(monto(result.interesIvaCube)).toBe("0.01");
 	});
 });
 
-test("agrega múltiples participaciones externas sin duplicar la base", () => {
-	expect(agregarParticipacionExterna([25, 25, 50])).toBe(1);
-	const split = splitMontoSegunParticipacionActual(
-		200,
-		20,
-		agregarParticipacionExterna([25, 25]),
-	);
-	expect(split).toMatchObject({ capitalInv: 100, capitalCube: 100 });
+describe("seleccionarSpreadHistorico", () => {
+	test("usa el porcentaje almacenado si no hay id o el catálogo tiene NULL", () => {
+		expect(
+			seleccionarSpreadHistorico({
+				porcentajeParticipacionInversionista: "75",
+				modalidadFacturacionSpreadId: null,
+				spreadCatalogo: null,
+			}).eq("75"),
+		).toBe(true);
+		expect(
+			seleccionarSpreadHistorico({
+				porcentajeParticipacionInversionista: new Big("75"),
+				modalidadFacturacionSpreadId: 4,
+				spreadCatalogo: null,
+			}).eq("75"),
+		).toBe(true);
+	});
+
+	test("usa el spread de catálogo cuando existe", () => {
+		expect(
+			seleccionarSpreadHistorico({
+				porcentajeParticipacionInversionista: "75",
+				modalidadFacturacionSpreadId: 4,
+				spreadCatalogo: "80.0099206300",
+			}).eq("80.0099206300"),
+		).toBe(true);
+	});
 });

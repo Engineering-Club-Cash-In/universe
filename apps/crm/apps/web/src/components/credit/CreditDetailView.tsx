@@ -60,7 +60,10 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
-import { DISBURSEMENT_SALE_LABEL } from "@/lib/quotation-display";
+import {
+	DISBURSEMENT_SALE_LABEL,
+	getQuotationInsuranceDisplay,
+} from "@/lib/quotation-display";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -154,6 +157,8 @@ interface CreditDetailViewProps {
 		extraInsuranceCost?: string | null;
 		extraMembershipCost?: string | null;
 		extraAdminCost?: string | null;
+		idealPaymentDateAdjustment?: string | null;
+		idealPaymentDateAdjustmentDays?: number | null;
 		interestCost?: string | null;
 		rcdpCost?: string | null;
 		vehicleTransferCost?: string | null;
@@ -227,6 +232,10 @@ export function CreditDetailView({
 		SelectedInversionista[]
 	>([]);
 	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<PaymentDay>(15);
+	// true solo si se eligió la opción "recomendado" del select, aunque el día
+	// coincida con 15/30 — el server la revalida contra el análisis.
+	const [elegidoDesdeRecomendacionIA, setElegidoDesdeRecomendacionIA] =
+		useState(false);
 
 	// Inicializar valores desde opportunity
 	useEffect(() => {
@@ -244,6 +253,9 @@ export function CreditDetailView({
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
 		setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
+		// Refleja el estado guardado (diaPagoOriginalSistema != null = fue IA),
+		// para que un guardado que no toca el día no cambie su intención.
+		setElegidoDesdeRecomendacionIA(opportunity.diaPagoOriginalSistema != null);
 
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
@@ -293,6 +305,14 @@ export function CreditDetailView({
 	// Datos de inspección y análisis de crédito
 	const vehicleInspection = vehicleInspectionQuery.data;
 	const creditAnalysis = consolidatedCreditQuery.data?.consolidated;
+
+	// Ingreso adicional por día de pago IA (si el crédito ya existe en cartera-back y aplicó el ajuste)
+	const ajusteFechaIdealQuery = useQuery({
+		queryKey: ["getAjusteFechaIdealPago", opportunityId],
+		queryFn: () => client.getAjusteFechaIdealPago({ opportunityId }),
+		enabled: !!opportunityId,
+	});
+	const ajusteFechaIdeal = ajusteFechaIdealQuery.data?.ajuste;
 
 	// Query para obtener el vendor del vehículo (solo para Autocompras)
 	const vendorQuery = useQuery({
@@ -493,6 +513,7 @@ export function CreditDetailView({
 				nit: editNit,
 				inversionistas: JSON.stringify(editInversionistas),
 				diaPagoMensual: editDiaPagoMensual,
+				elegidoDesdeRecomendacionIA,
 				// Campos de la cotización
 				numeroCuotas: numeroCuotasValue,
 				tasaInteres: tasaMensualValue,
@@ -577,6 +598,10 @@ export function CreditDetailView({
 	// Verificar si el usuario puede aprobar
 	const canApprove = userRole === "admin" || userRole === "sales_supervisor";
 
+	// Una oportunidad ganada ya tiene el crédito creado en cartera: cancelar la
+	// aprobación la devolvería al 40% y dejaría el detalle editable otra vez.
+	const isWon = opportunity?.status === "won";
+
 	// Verificar si el usuario puede editar (ventas, análisis, admin - NO jurídico)
 	const canEdit =
 		userRole === "admin" ||
@@ -659,10 +684,26 @@ export function CreditDetailView({
 	// Usar los campos extra* que se guardaron desde el cotizador
 	const gps = Number.parseFloat(quotation?.extraGpsCost || "0");
 	const seguro = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+	const insuranceDisplay = getQuotationInsuranceDisplay({
+		insuranceProvider: quotation?.insuranceProvider,
+		insuranceCost: quotation?.insuranceCost,
+		membershipCost: quotation?.membershipCost,
+		extraInsuranceCost: quotation?.extraInsuranceCost,
+		extraMembershipCost: quotation?.extraMembershipCost,
+	});
 	const insuranceProviderLabel =
-		quotation?.insuranceProvider === "gyt" ? "GyT" : "Universales";
+		insuranceDisplay.insuranceProvider === "gyt" ? "GyT" : "Universales";
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
-	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
+	const gastosAdminTotal = Number.parseFloat(
+		quotation?.extraAdminCost || "600",
+	);
+	const ajusteFechaIdealFinanciado = Number.parseFloat(
+		quotation?.idealPaymentDateAdjustment || "0",
+	);
+	const gastosAdminBase = Math.max(
+		0,
+		gastosAdminTotal - ajusteFechaIdealFinanciado,
+	);
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
 	const rcdpTrimestre = Number.parseFloat(quotation?.rcdpCost || "0");
 
@@ -709,6 +750,7 @@ export function CreditDetailView({
 		seguro +
 		membresia +
 		gastosAdminBase +
+		ajusteFechaIdealFinanciado +
 		interesAnticipado +
 		rcdpTrimestre;
 
@@ -898,20 +940,25 @@ export function CreditDetailView({
 												<CheckCircle className="mr-1 h-3 w-3" />
 												Aprobado
 											</Badge>
-											{canApprove && (
-												<Button
-													size="sm"
-													variant="ghost"
-													className="text-muted-foreground hover:text-destructive"
-													onClick={() => revokeCreditDetailMutation.mutate()}
-													disabled={revokeCreditDetailMutation.isPending}
-												>
-													<X className="mr-1 h-3 w-3" />
-													{revokeCreditDetailMutation.isPending
-														? "Cancelando..."
-														: "Cancelar"}
-												</Button>
-											)}
+											{canApprove &&
+												(isWon ? (
+													<span className="text-muted-foreground text-xs">
+														El crédito ya existe en cartera
+													</span>
+												) : (
+													<Button
+														size="sm"
+														variant="ghost"
+														className="text-muted-foreground hover:text-destructive"
+														onClick={() => revokeCreditDetailMutation.mutate()}
+														disabled={revokeCreditDetailMutation.isPending}
+													>
+														<X className="mr-1 h-3 w-3" />
+														{revokeCreditDetailMutation.isPending
+															? "Cancelando..."
+															: "Cancelar"}
+													</Button>
+												))}
 										</div>
 									) : (
 										<>
@@ -1047,10 +1094,22 @@ export function CreditDetailView({
 										</Label>
 										{isEditing ? (
 											<Select
-												value={String(editDiaPagoMensual)}
-												onValueChange={(value) =>
-													setEditDiaPagoMensual(Number(value) as PaymentDay)
+												value={
+													elegidoDesdeRecomendacionIA
+														? `ia-${editDiaPagoMensual}`
+														: String(editDiaPagoMensual)
 												}
+												onValueChange={(value) => {
+													if (value.startsWith("ia-")) {
+														setEditDiaPagoMensual(
+															Number(value.slice(3)) as PaymentDay,
+														);
+														setElegidoDesdeRecomendacionIA(true);
+													} else {
+														setEditDiaPagoMensual(Number(value) as PaymentDay);
+														setElegidoDesdeRecomendacionIA(false);
+													}
+												}}
 											>
 												<SelectTrigger className="mt-1">
 													<SelectValue placeholder="Seleccionar día" />
@@ -1058,17 +1117,15 @@ export function CreditDetailView({
 												<SelectContent>
 													<SelectItem value="15">Día 15</SelectItem>
 													<SelectItem value="30">Día 30</SelectItem>
+													{/* No se excluyen 15/30: si la IA los recomienda, deben
+													verse como opción aparte aunque el número se repita. */}
 													{consolidatedCreditQuery.data?.lead?.suggestedPaymentDays
 														?.filter(
-															(d: { dia: number; porcentaje: number }) =>
-																d.dia !== 15 && d.dia !== 30,
-														)
-														.filter(
 															(d, i, arr) =>
 																arr.findIndex((x) => x.dia === d.dia) === i,
 														)
 														.map((d: { dia: number; porcentaje: number }) => (
-															<SelectItem key={d.dia} value={String(d.dia)}>
+															<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
 																Día {d.dia} ({d.porcentaje}% recomendado)
 															</SelectItem>
 														))}
@@ -1083,6 +1140,59 @@ export function CreditDetailView({
 									</div>
 								</div>
 							</div>
+							{/* Sección: Ingreso Adicional por Fecha Ideal de Pago (solo si aplicó al crear el crédito) */}
+							{ajusteFechaIdeal && (
+								<div className="space-y-3">
+									<h3 className="flex items-center gap-2 font-semibold text-sm">
+										<Calculator className="h-4 w-4" />
+										Ingreso Adicional por Fecha Ideal de Pago
+									</h3>
+									<div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+										<p className="text-muted-foreground text-xs">
+											Se eligió el día {ajusteFechaIdeal.dia_pago_mensual_elegido}{" "}
+											en vez del día {ajusteFechaIdeal.dia_pago_original_sistema}{" "}
+											que el sistema hubiera asignado por default (
+											{ajusteFechaIdeal.dias_diferencia}{" "}
+											{ajusteFechaIdeal.dias_diferencia === 1 ? "día" : "días"} de
+											diferencia, sobre {ajusteFechaIdeal.dias_del_mes} días del mes).
+										</p>
+										<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Interés
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_interes))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Membresía
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_membresia))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Servicios
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_servicios))}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Total
+												</Label>
+												<p className="font-semibold">
+													{formatCurrency(Number(ajusteFechaIdeal.monto_total))}
+												</p>
+											</div>
+										</div>
+									</div>
+								</div>
+							)}
 
 							{/* Sección: Datos del Vehículo */}
 							<div className="space-y-3">
@@ -1676,6 +1786,25 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
+											{ajusteFechaIdealFinanciado > 0 && (
+												<TableRow>
+													<TableCell>
+														Ajuste por fecha ideal
+														{quotation?.idealPaymentDateAdjustmentDays
+															? ` (${quotation.idealPaymentDateAdjustmentDays} días)`
+															: ""}
+													</TableCell>
+													<TableCell className="text-center">
+														<Badge variant="default" className="text-xs">
+															SI
+														</Badge>
+													</TableCell>
+													<TableCell className="text-right">-</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(ajusteFechaIdealFinanciado)}
+													</TableCell>
+												</TableRow>
+											)}
 											<TableRow>
 												<TableCell>Intereses</TableCell>
 												<TableCell className="text-center">
@@ -2235,6 +2364,20 @@ export function CreditDetailView({
 											</TableCell>
 											<TableCell />
 										</TableRow>
+										{ajusteFechaIdealFinanciado > 0 && (
+											<TableRow>
+												<TableCell className="py-2">
+													Ajuste por fecha ideal
+													{quotation?.idealPaymentDateAdjustmentDays
+														? ` (${quotation.idealPaymentDateAdjustmentDays} días)`
+														: ""}
+												</TableCell>
+												<TableCell className="py-2 text-right">
+													{formatCurrency(ajusteFechaIdealFinanciado)}
+												</TableCell>
+												<TableCell />
+											</TableRow>
+										)}
 										<TableRow>
 											<TableCell className="py-2">
 												<div className="flex items-center gap-2">
@@ -2280,6 +2423,7 @@ export function CreditDetailView({
 														rcdpTrimestre +
 														royalty +
 														gastosCombinados +
+														ajusteFechaIdealFinanciado +
 														seguro +
 														gps +
 														subtotalGastosAbogado,
@@ -2300,6 +2444,7 @@ export function CreditDetailView({
 												rcdpTrimestre +
 												royalty +
 												gastosCombinados +
+												ajusteFechaIdealFinanciado +
 												seguro +
 												gps +
 												subtotalGastosAbogado),
@@ -2796,6 +2941,7 @@ export function CreditDetailView({
 													);
 													generateQuotationPdf({
 														creditType: quotation.creditType,
+														insuranceProvider: insuranceDisplay.insuranceProvider,
 														vehicleBrand: quotation.vehicleBrand,
 														vehicleLine: quotation.vehicleLine,
 														vehicleModel: quotation.vehicleModel,
@@ -2809,11 +2955,11 @@ export function CreditDetailView({
 														monthlyPayment: Number(quotation.monthlyPayment),
 														termMonths: quotation.termMonths,
 														interestRate: Number(quotation.interestRate),
-														insuranceCost: Number(quotation.insuranceCost),
+														insuranceCost: insuranceDisplay.insuranceCost,
 														gpsCost: Number(quotation.gpsCost),
 														transferCost: Number(quotation.transferCost),
 														adminCost: Number(quotation.adminCost),
-														membershipCost: Number(quotation.membershipCost),
+														membershipCost: insuranceDisplay.membershipCost,
 														extraCosts: quotation,
 														amortizationTable,
 													});
@@ -2971,10 +3117,13 @@ export function CreditDetailView({
 										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Seguro
+													{insuranceDisplay.insuranceProvider === "gyt" &&
+													insuranceDisplay.membershipCost > 0
+														? "Seguro + membresía GyT (GPS aparte)"
+														: `Seguro ${insuranceProviderLabel}`}
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.insuranceCost)}
+													{formatCurrency(insuranceDisplay.insuranceCost)}
 												</p>
 											</div>
 											<div>
@@ -3003,10 +3152,13 @@ export function CreditDetailView({
 											</div>
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Membresía
+													{insuranceDisplay.insuranceProvider === "gyt" &&
+													insuranceDisplay.membershipCost > 0
+														? "Membresía (incluida en seguro)"
+														: "Membresía"}
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.membershipCost)}
+													{formatCurrency(insuranceDisplay.membershipCost)}
 												</p>
 											</div>
 										</div>
@@ -3183,7 +3335,7 @@ export function CreditDetailView({
 															0 && (
 															<div>
 																<Label className="text-muted-foreground text-xs">
-																	Seguro (Inicial)
+																	Seguro {insuranceProviderLabel} (Inicial)
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.extraInsuranceCost)}

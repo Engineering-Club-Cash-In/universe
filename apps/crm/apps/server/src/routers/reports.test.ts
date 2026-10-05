@@ -3,6 +3,7 @@ import { getLeadSourceChannelType } from "../lib/lead-sources";
 import {
 	aggregateEfectividadPorTipoCanal,
 	aggregateTiempoCierrePorTipoCanal,
+	buildColocacionPorEmpresaRows,
 	buildPorcentajeEfectividadFuenteRows,
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
@@ -76,6 +77,38 @@ describe("isPorcentajeEfectividadPeriodCloseIncluded", () => {
 	});
 });
 
+describe("buildColocacionPorEmpresaRows", () => {
+	test("excludes unassigned companies and sorts placements by amount", () => {
+		expect(
+			buildColocacionPorEmpresaRows([
+				{ companyName: "Predio Norte", monto: "125000.50", cantidad: 2 },
+				{ companyName: null, monto: "90000", cantidad: 1 },
+				{ companyName: "  ", monto: "75000", cantidad: 1 },
+				{ companyName: "Agencia Centro", monto: "200000", cantidad: 3 },
+			]),
+		).toEqual([
+			{ name: "Agencia Centro", monto: 200000, cantidad: 3 },
+			{ name: "Predio Norte", monto: 125000.5, cantidad: 2 },
+		]);
+	});
+
+	test("sources the company from the opportunity and excludes unassigned placements", async () => {
+		const source = await Bun.file(
+			new URL("./reports.ts", import.meta.url),
+		).text();
+		const query = source.slice(
+			source.indexOf("companyName: companies.name"),
+			source.indexOf("registrosRaw.map"),
+		);
+
+		expect(query).toContain(
+			".innerJoin(companies, eq(opportunities.companyId, companies.id))",
+		);
+		expect(query).toContain("isNotNull(opportunities.companyId)");
+		expect(query).not.toContain("vehicles.companyId");
+	});
+});
+
 describe("buildPorcentajeEfectividadFuenteRows", () => {
 	test("keeps cohort closes and period closes as separate per-source metrics", () => {
 		const rows = buildPorcentajeEfectividadFuenteRows(
@@ -143,6 +176,58 @@ describe("enforceClosedCreditReportLimit", () => {
 			"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
 		);
 	});
+});
+
+test("closed credits query and export expose vehicle, assigned advisor, credit type, and lead source", async () => {
+	const server = await Bun.file(
+		new URL("./reports.ts", import.meta.url),
+	).text();
+	const report = server.slice(
+		server.indexOf("export const getReporteCreditosCerrados"),
+		server.indexOf("/**\n * Reporte de Cobranza"),
+	);
+	for (const field of [
+		"marca: vehicles.make",
+		"modelo: vehicles.model",
+		"asesor: user.name",
+		"canalVenta: opportunities.creditType",
+		"fuenteLead: leads.source",
+	])
+		expect(report).toContain(field);
+	expect(report).toContain(
+		".leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))",
+	);
+	expect(report).toContain(
+		".leftJoin(user, eq(opportunities.assignedTo, user.id))",
+	);
+	const web = await Bun.file(
+		new URL("../../../web/src/routes/admin/reports/index.tsx", import.meta.url),
+	).text();
+	const exportBlock = web.slice(
+		web.indexOf("const exportClosedCreditsExcel"),
+		web.indexOf("const closedCreditsRows"),
+	);
+	const tableBlock = web.slice(
+		web.indexOf("const creditosCerradosCard"),
+		web.indexOf("closedCreditsRows.map"),
+	);
+	expect(exportBlock).toContain(
+		"buildClosedCreditsWorksheet(res.rows, formatFechaCorta)",
+	);
+	for (const label of [
+		"Marca del Vehículo",
+		"Modelo",
+		"Asesor",
+		"Canal de Venta",
+		"Fuente del Lead",
+	])
+		expect(tableBlock).toContain(label);
+	const renderedRows = web.slice(
+		web.indexOf("closedCreditsRows.map"),
+		web.indexOf("closedCreditsTotal}{"),
+	);
+	for (const field of ["marca", "modelo", "asesor", "canalVenta", "fuenteLead"])
+		expect(renderedRows).toContain(`row.${field}`);
 });
 
 describe("getLeadSourceChannelType", () => {

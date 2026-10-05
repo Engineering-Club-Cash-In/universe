@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-mock.module("../database", () => ({ db: {} }));
+mock.module("../database", () => ({ db: {}, client: {} }));
 const { getCobranzaDiaria } = await import("./cobranzaDiariaReporte");
 
 // Cola: 1ª execute = query A (créditos), 2ª = query B (inversionistas)

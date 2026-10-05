@@ -1,17 +1,32 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
-import { lockPoolMock } from "../utils/testMocks";
 
 // Let's create simple test flags/mocks we can dynamically adjust per test case
 let mockCreditosInversionistaEspejo: any[] = [];
 let mockCuotasCreditoWithPagos: any[] = [];
 let mockPagosPendientesEspejo: any[] = [];
 let mockHistoricoLiquidacionesEspejo: any[] = [];
+let mockLockedCreditRows: any[] | null = null;
+let mockCreditLockCalls = 0;
+let mockLockPoolConnectCalls = 0;
+let mockLockReleaseCalls = 0;
+let mockDbTransactionCalls = 0;
+let mockLockQueries: string[] = [];
+let mockInsertCalls = 0;
+let mockInsertError: Error | null = null;
 
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
 
-mock.module("../database/index", () => {
+// Se registra en AMBAS rutas ("../database" y "../database/index"): resuelven
+// al mismo módulo, y otros archivos de la suite (aseguradoras, abonosCapital,
+// devolucion, latefee...) mockean la corta SIN exportar `lockPool`. El que
+// corra primero en una corrida completa gana el registro global, y como
+// payments.ts importa `lockPool` de "../database/index", ese mock ajeno deja
+// el link roto para todo este archivo — los 37 tests de acá pasan aislados y
+// caían en bloque en `bun test src/controllers/` (mismo síntoma que ya se
+// documentó en utils/testMocks.ts).
+const databaseMockFactory = () => {
   const mockDrizzleSelectChain = (tableName: string, isMainQuery: boolean, isSelectNoFields: boolean) => {
     const limit = (limitNum: number) => {
       return Promise.resolve(mockHistoricoLiquidacionesEspejo);
@@ -39,8 +54,12 @@ mock.module("../database/index", () => {
         return Promise.resolve(mockComprasCreditoInversionista);
       }
 
-      const promise = Promise.resolve(mockHistoricoLiquidacionesEspejo);
-      Object.assign(promise, { orderBy });
+      const rows = tableName.includes("creditos")
+        ? (mockLockedCreditRows ?? mockCreditosInversionistaEspejo)
+        : mockHistoricoLiquidacionesEspejo;
+      const promise = Promise.resolve(rows);
+      const forUpdate = () => Promise.resolve(rows);
+      Object.assign(promise, { orderBy, for: forUpdate });
       return promise;
     };
 
@@ -71,10 +90,9 @@ mock.module("../database/index", () => {
       select: mock((fields: any) => {
         const isSelectNoFields = !fields || Object.keys(fields).length === 0;
         let isMainQuery = false;
-        if (fields && typeof fields === "object" && "creditoId" in fields) {
+        if (fields && typeof fields === "object" && "inversionistaId" in fields) {
           isMainQuery = true;
         }
-
         // Check if query selects fields from compras_credito_inversionista
         let detectedTableName = "";
         if (fields) {
@@ -103,11 +121,16 @@ mock.module("../database/index", () => {
           }
         };
       }),
-      insert: mock(() => ({
-        values: () => ({
-          returning: () => Promise.resolve([{ id: 801 }])
-        })
-      })),
+      insert: mock(() => {
+        mockInsertCalls++;
+        return {
+          values: () => ({
+            returning: () => mockInsertError
+              ? Promise.reject(mockInsertError)
+              : Promise.resolve([{ id: 801 }])
+          })
+        };
+      }),
       update: mock(() => ({
         set: () => ({
           where: () => Promise.resolve()
@@ -117,7 +140,10 @@ mock.module("../database/index", () => {
       // de los abonos en una transacción, para que no puedan quedar sueltos.
       // El mock corre el callback con el mismo `db`: acá no se prueba el
       // rollback, solo que el flujo siga funcionando.
-      transaction: mock(async (cb: any) => cb(mockDbInstance)),
+      transaction: mock(async (cb: any) => {
+        mockDbTransactionCalls++;
+        return cb(mockDbInstance);
+      }),
       query: {
         creditos_inversionistas_espejo: {
           findMany: mock(() => Promise.resolve(
@@ -154,13 +180,40 @@ mock.module("../database/index", () => {
       }
   };
 
-  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
-  // aunque estos tests no lo usen. Ver testMocks.ts.
-  return {
-    db: mockDbInstance,
-    lockPool: lockPoolMock,
+  const mockLockConnection = {
+    query: mock(async (queryText: string) => {
+      mockLockQueries.push(queryText);
+      if (/FOR (?:NO KEY )?UPDATE|FOR SHARE/.test(queryText)) {
+        mockCreditLockCalls++;
+        return {
+          rows: mockLockedCreditRows ?? mockCreditosInversionistaEspejo.map((credito) => ({
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            estadoDevolucion: credito.estadoDevolucion,
+          })),
+        };
+      }
+      return { rows: [] };
+    }),
+    release: mock(() => {
+      mockLockReleaseCalls++;
+    }),
   };
-});
+
+  return {
+    client: {},
+    db: mockDbInstance,
+    lockPool: {
+      connect: mock(async () => {
+        mockLockPoolConnectCalls++;
+        return mockLockConnection;
+      }),
+    },
+  };
+};
+
+mock.module("../database", databaseMockFactory);
+mock.module("../database/index", databaseMockFactory);
 
 // Mock @cci/email
 mock.module("@cci/email", () => ({
@@ -199,7 +252,13 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo, armarInversionistasPago } = await import("./payments");
+const {
+  calcularYRegistrarPagosEspejo,
+  armarInversionistasPago,
+  aplicarRepartoCongelado,
+  insertPagosCreditoInversionistas,
+} = await import("./payments");
+const { resolverAbonosNoLiquidados } = await import("../utils/abonosNoLiquidados");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -212,6 +271,187 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockMontoRestarCalculo = new Big(0);
     mockSumaComprasPendientes = new Big(0);
     mockSumaComprasCompletadasMesActual = new Big(0);
+    mockLockedCreditRows = null;
+    mockCreditLockCalls = 0;
+    mockLockPoolConnectCalls = 0;
+    mockLockReleaseCalls = 0;
+    mockDbTransactionCalls = 0;
+    mockLockQueries = [];
+    mockInsertCalls = 0;
+    mockInsertError = null;
+  });
+
+  it("bloquea toda la generación si un crédito está pendiente de autorización para devolución", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        statusCredit: "ACTIVO",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        cuota: "1000.00",
+      },
+      {
+        creditoId: 102,
+        inversionistaId: 99,
+        montoAportado: "8000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-102",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+        statusCredit: "MOROSO",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        cuota: "1000.00",
+      },
+    ];
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      warning: true,
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      message:
+        "No se puede continuar porque hay créditos pendientes de autorización para devolución a CUBE.",
+      creditos_bloqueados: [
+        {
+          credito_id: 102,
+          numero_credito_sifco: "CRED-102",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+      data: [],
+    });
+    expect(mockInsertCalls).toBe(0);
+  });
+
+  it("revalida bajo lock antes de insertar si estado cambia durante generación", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+      {
+        creditoId: 102,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-102",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockLockedCreditRows = [
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+      },
+    ];
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+      },
+    ];
+    mockHistoricoLiquidacionesEspejo = [
+      { monto_aportado: "10000.00000000", fecha: new Date("2026-05-15") },
+    ];
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      warning: true,
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      message:
+        "No se puede continuar porque hay créditos pendientes de autorización para devolución a CUBE.",
+      creditos_bloqueados: [
+        {
+          credito_id: 101,
+          numero_credito_sifco: "CRED-101",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+      data: [],
+    });
+    expect(mockCreditLockCalls).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockDbTransactionCalls).toBe(0);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
+      "ROLLBACK",
+    ]);
+    expect(mockInsertCalls).toBe(0);
+  });
+
+  it("no aplica guard tardío al flujo legacy que actualiza balances", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockLockedCreditRows = [
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+      },
+    ];
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, true, 99);
+
+    expect(mockCreditLockCalls).toBe(0);
+    expect(mockLockPoolConnectCalls).toBe(0);
+    expect(mockDbTransactionCalls).toBe(1);
+    expect(mockInsertCalls).toBe(1);
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {
@@ -239,6 +479,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+    expect(result.pagosGenerados).toBeFalse();
   });
 
   it("2. Inversionista existente con compra en mes anterior (ej. mayo) → genera pagos", async () => {
@@ -290,6 +531,63 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
+      "COMMIT",
+    ]);
+  });
+
+  it("reporta success=false cuando todos los créditos del lote fallan", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+      },
+    ];
+    mockHistoricoLiquidacionesEspejo = [
+      { monto_aportado: "10000.00000000", fecha: new Date("2026-05-15") },
+    ];
+    mockInsertError = new Error("insert espejo falló");
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      totalCreditosProcesados: 0,
+      totalCreditosFallidos: 1,
+      pagosGenerados: false,
+      fallidos: [expect.objectContaining({ creditoId: 101 })],
+    });
   });
 
   it("3. Self-compra (compras pendientes) → paga sobre monto ajustado", async () => {
@@ -906,5 +1204,436 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
 
     expect(out).toHaveLength(1);
     expect(out[0].inversionistaId).toBe(86);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 🔒 Reparto CONGELADO al facturar (pagos_credito_inversionistas_facturado).
+  // Caso real: crédito 01010214118190, pago 152741 (parcial del 7-ago-2026).
+  // Se facturó Q6.42 al inversionista con monto_aportado 7,727.14. El 10-ago
+  // entró una reinversión de Q3,396.05 que lo subió a 11,123.19 → simular con el
+  // roster de hoy da Q9.24 para ese mismo pago ya facturado.
+  // ──────────────────────────────────────────────────────────────────────────
+  const creditoInvsRogelim = [
+    {
+      inversionista_id: 6,
+      nombre: "Andres Alejandro Salvatierra",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "80",
+      porcentaje_cash_in: "20",
+      monto_aportado: "11123.19439416", // roster de HOY (post-reinversión)
+    },
+    {
+      inversionista_id: 86,
+      nombre: "Cube Investments S.A.",
+      emite_factura: false,
+      porcentaje_participacion_inversionista: "0",
+      porcentaje_cash_in: "100",
+      monto_aportado: "41328.59560584",
+    },
+  ];
+
+  it("caso 12: sin congelado, el parcial se simula con el roster de HOY (deriva)", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("48.05"), iva: new Big("5.15") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      cuota: "6105.81",
+    });
+
+    const inv = out.find((r) => r.inversionistaId === 6)!;
+    // 54.47 × 0.80 × (11123.19 / 52451.79) = 9.24 — pero se facturó 6.42.
+    expect(Number(inv.abonoInteres)).toBe(9.24);
+  });
+
+  it("caso 13: con congelado, se muestra lo FACTURADO y no lo simulado", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("48.05"), iva: new Big("5.15") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      cuota: "6105.81",
+      congelado: [
+        {
+          inversionista_id: 6,
+          nombre: "Andres Alejandro Salvatierra",
+          emite_factura: false,
+          abono_interes: "6.42",
+          abono_iva_12: "0.00",
+          monto_aportado: "7727.14439400", // roster del día de la factura
+          porcentaje_participacion: "80",
+          redirigido_a_cube: false,
+        },
+        {
+          // CUBE viene en el congelado (para que el cierre lo use) pero el
+          // reporte arma su fila desde el desglose, no desde acá.
+          inversionista_id: 86,
+          nombre: "Cube Investments S.A.",
+          emite_factura: false,
+          abono_interes: "42.90",
+          abono_iva_12: "0.00",
+          monto_aportado: "44724.64560600",
+          porcentaje_participacion: "0",
+          redirigido_a_cube: false,
+        },
+      ],
+    });
+
+    const inv = out.find((r) => r.inversionistaId === 6)!;
+    expect(Number(inv.abonoInteres)).toBe(6.42); // lo facturado, no 9.24
+    expect(Number(inv.montoAportado)).toBe(7727.144394); // el aporte de ese día
+    expect(Number(inv.abonoCapital)).toBe(0); // el capital se reparte al cerrar
+
+    // CUBE sale del desglose (48.05 - 5.15 = 42.90), no del congelado duplicado.
+    const cube = out.find((r) => r.inversionistaId === 86)!;
+    expect(Number(cube.abonoInteres)).toBe(42.9);
+    expect(out).toHaveLength(2);
+  });
+
+  it("caso 14: congelado de un inversionista redirigido a CUBE → no se muestra", () => {
+    const out = armarInversionistasPago({
+      pciRows: null,
+      cubeId: 86,
+      desgloseCubeInteres: { total: new Big("54.47"), iva: new Big("5.84") },
+      creditoInvs: creditoInvsRogelim,
+      abonoInteresPago: "54.47",
+      abonoIvaPago: "0",
+      simularSinPci: true,
+      congelado: [
+        {
+          inversionista_id: 6,
+          nombre: "Andres Alejandro Salvatierra",
+          emite_factura: false,
+          abono_interes: "6.42",
+          abono_iva_12: "0.00",
+          monto_aportado: "7727.14439400",
+          porcentaje_participacion: "80",
+          redirigido_a_cube: true, // su interés viajó dentro del rubro INTERES
+        },
+      ],
+    });
+
+    // Solo CUBE: la parte del redirigido ya está dentro del desglose de CUBE.
+    expect(out).toHaveLength(1);
+    expect(out[0].inversionistaId).toBe(86);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔒 aplicarRepartoCongelado: quién cobra el interés de un pago ya facturado
+// cuando el roster del crédito cambió entre el parcial y el cierre de la cuota.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("aplicarRepartoCongelado (reparto de interés de un pago ya facturado)", () => {
+  const splitVivo = (entradas: [number, string, string][]) =>
+    new Map(
+      entradas.map(([id, interes, iva]) => [
+        id,
+        {
+          inversionista_id: id,
+          abono_interes: new Big(interes),
+          abono_iva_12: new Big(iva),
+        },
+      ])
+    );
+
+  it("sin congelado: devuelve el reparto vivo intacto (pagos anteriores al sellado)", () => {
+    const vivo = splitVivo([[6, "9.24", "0"], [86, "42.90", "0"]]);
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [],
+      splitVivo: vivo,
+      idsEnElCredito: new Set([6, 86]),
+    });
+
+    expect(split).toBe(vivo); // misma referencia: no se toca nada
+    expect(salidos).toHaveLength(0);
+  });
+
+  it("mismo roster: el congelado pisa el cálculo vivo (6.42 facturado, no 9.24)", () => {
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 6, abono_interes: "6.42", abono_iva_12: "0.00", porcentaje_participacion: "80" },
+        { inversionista_id: 86, abono_interes: "42.90", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[6, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([6, 86]),
+    });
+
+    expect(split.get(6)!.abono_interes.toFixed(2)).toBe("6.42");
+    expect(split.get(86)!.abono_interes.toFixed(2)).toBe("42.90");
+    expect(salidos).toHaveLength(0);
+  });
+
+  it("inversionista que SALIÓ del crédito: conserva su parte facturada, con capital 0", () => {
+    // A (id 6) estaba al facturar; después una compra de cartera lo sacó y entró B (id 7).
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 6, abono_interes: "6.42", abono_iva_12: "0.00", porcentaje_participacion: "80" },
+        { inversionista_id: 86, abono_interes: "42.90", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[7, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([7, 86]),
+    });
+
+    // El que salió no se pierde: sale en `salidos` para que se le escriba su pci.
+    expect(salidos).toHaveLength(1);
+    expect(salidos[0].inversionista_id).toBe(6);
+    expect(salidos[0].abono_interes.toFixed(2)).toBe("6.42");
+    expect(salidos[0].porcentaje_participacion).toBe("80");
+
+    // Y el que ENTRÓ después no cobra interés de este pago: si cobrara, esa misma
+    // parte se pagaría dos veces (a él por el roster vivo y a A por el congelado).
+    expect(split.has(7)).toBe(false);
+  });
+
+  it("inversionista que ENTRÓ después de la factura: interés 0, no hereda la parte del que salió", () => {
+    const { split } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 86, abono_interes: "48.05", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[7, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([7, 86]),
+    });
+
+    expect(split.has(7)).toBe(false); // el caller lo resuelve como Big(0)
+    expect(split.get(86)!.abono_interes.toFixed(2)).toBe("48.05");
+    // Suma total = exactamente lo facturado, sin fugas ni duplicados.
+    const total = [...split.values()].reduce((a, r) => a.plus(r.abono_interes), new Big(0));
+    expect(total.toFixed(2)).toBe("48.05");
+  });
+});
+
+describe("resolverAbonosNoLiquidados", () => {
+  it("sin abonos pendientes, no hace nada", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("100");
+    expect(res.abonoCapitalId).toBeNull();
+    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.saltado).toBe(false);
+  });
+
+  it("devolución completa: un CAPITAL pendiente se consume sin sumarse (el pago devuelve el capital completo y evita filas huérfanas)", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([1]);
+    expect(res.saltado).toBe(true);
+  });
+
+  it("devolución completa: la CANCELACION se consume sin sumarse (es el mismo monto_aportado que ya se paga)", () => {
+    // Sin esto la liquidación —que cierra solo por `pago_espejo_id`— dejaba la
+    // fila en liquidado=false para siempre pese a haberse pagado.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 9, tipo: "CANCELACION", monto: "5000" }],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    // El monto NO cambia: consumir no es sumar.
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([9]);
+    expect(res.saltado).toBe(true);
+    // Sigue sin linkearse: `abono_capital_id` es una sola casilla y el monto
+    // pagado no sale de esta fila sino del monto_aportado completo.
+    expect(res.abonoCapitalId).toBeNull();
+  });
+
+  it("devolución completa con CANCELACION + CAPITAL: consume ambos abonos para no dejar filas huérfanas", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 9, tipo: "CANCELACION", monto: "5000" },
+        { abono_id: 10, tipo: "CAPITAL", monto: "700" },
+      ],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([9, 10]);
+    expect(res.saltado).toBe(true);
+  });
+
+  it("inversionista normal (no-CUBE) con varias filas: abonoCapitalId sigue siendo el primer id crudo, sin cambio de comportamiento", () => {
+    // El fix de abonoCapitalId solo cambia el caso isCube=true (ver describe
+    // "esCube" más abajo). Para el caso normal, isCube=false hace que el
+    // filtro `!(isCube && ...)` sea siempre true, así que abonoIdsConsumidos
+    // es el array completo en el mismo orden — este test fija ese contrato.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 5, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 6, tipo: "CANCELACION", monto: "9999" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([5, 6]);
+    expect(res.abonoCapitalId).toBe(5);
+    // Point 5 fix: CANCELACION fija abonoCapital en montoAportado (no suma CAPITAL encima)
+    expect(res.abonoCapital.toString()).toBe("9999");
+  });
+
+  it("CAPITAL se suma normal, para CUBE también", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    // Un abono CAPITAL es plata real (pago normal), nada que ver con el bug
+    // de devolución: a CUBE le suma igual que a cualquier inversionista.
+    expect(res.abonoCapital.toString()).toBe("600");
+    expect(res.abonoIdsConsumidos).toEqual([1]);
+  });
+
+  it("CANCELACION de un inversionista normal: devuelve el monto_aportado completo", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 7, tipo: "CANCELACION", monto: "999" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([7]);
+  });
+
+  it("CANCELACION de CUBE: no se suma NI se marca consumida", () => {
+    // Caso real de producción: CUBE nunca sale del crédito, así que una
+    // CANCELACION a su nombre es basura del bug de payments.ts (antes del
+    // guard de !isCube en la línea de aplicarDevolucionCube). Si se marcara
+    // consumida, quedaría liquidado=true sin que su monto haya entrado en
+    // ningún cálculo — un registro contable falso.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 66, tipo: "CANCELACION", monto: "50000" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "50000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("100"); // sin cambios
+    expect(res.abonoIdsConsumidos).toEqual([]); // no se cierra sola
+    expect(res.saltado).toBe(false);
+  });
+
+  it("CUBE con CAPITAL y CANCELACION mezclados (caso real: 54 CAPITAL + 66 CANCELACION en prod)", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 1, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 2, tipo: "CANCELACION", monto: "9999" },
+        { abono_id: 3, tipo: "CAPITAL", monto: "200" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    // Solo los CAPITAL entran a la suma (300 + 200); la CANCELACION se
+    // ignora del todo.
+    expect(res.abonoCapital.toString()).toBe("500");
+    // Solo los CAPITAL quedan "consumidos" (se cerrarán al liquidar); la
+    // CANCELACION queda afuera y sigue abierta para revisión manual.
+    expect(res.abonoIdsConsumidos.sort()).toEqual([1, 3]);
+  });
+
+  it("CANCELACION de CUBE mezclada con otro inversionista en el mismo lote no lo afecta (no-CUBE sigue igual)", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 9, tipo: "CANCELACION", monto: "1234" }],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "1234",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("1234");
+    expect(res.abonoIdsConsumidos).toEqual([9]);
+  });
+});
+
+describe("esCube (implícito vía resolverAbonosNoLiquidados)", () => {
+  // esCube ahora se importa de devolucionCompletada.ts (exportado, no
+  // privado de este módulo), pero el escenario de regresión sigue siendo el
+  // mismo: CUBE detectado SOLO por nombre exacto. Si alguien renombra el
+  // inversionista en la base, `isCube` daba false para todas sus filas y el
+  // guard de devolución dejaba de aplicar — silenciosamente, sin error. El
+  // fix agrega `inversionista_id === CUBE_ID (86)` como chequeo primario.
+  it("regla de negocio: aunque cambie el nombre, el guard de resolverAbonosNoLiquidados debe evaluarse por isCube pasado explícito", () => {
+    // Esto prueba el contrato del helper (que sí es público): si isCube=true
+    // (como resolvería esCube por ID, sin importar el nombre), una
+    // CANCELACION no se suma ni se consume.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CANCELACION", monto: "5000" }],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: true, // simula esCube(inv) devolviendo true por ID aunque el nombre cambiara
+    });
+
+    expect(res.abonoCapital.toString()).toBe("0");
+    expect(res.abonoIdsConsumidos).toEqual([]);
+  });
+
+  it("abonoCapitalId no apunta a una CANCELACION de CUBE ignorada cuando es la única fila pendiente", () => {
+    // Regresión del comment de review: antes abonoCapitalId era siempre
+    // abonosNoLiquidados[0].abono_id, sin filtrar. Si esa primera fila era
+    // justo la CANCELACION de CUBE que abonoIdsConsumidos excluye, el pago
+    // quedaba enlazado (vía abono_capital_id) a una fila que ni se sumó ni
+    // se consumió — resumeInvestor la expone luego como
+    // abono_capital_detalle, generando metadata de auditoría falsa.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 66, tipo: "CANCELACION", monto: "50000" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "50000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.abonoCapitalId).toBeNull();
+  });
+
+  it("abonoCapitalId sí referencia una fila consumida cuando hay CAPITAL mezclado con la CANCELACION de CUBE", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 1, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 2, tipo: "CANCELACION", monto: "9999" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([1]);
+    expect(res.abonoCapitalId).toBe(1);
   });
 });

@@ -23,6 +23,11 @@ if (!hasDb) {
       const porAsesor = r.porAsesor.reduce(
         (s: number, a: any) => s + Number(a.totalEnMora.sumaMora), 0);
       expect(porAsesor).toBeCloseTo(sumaTotal(r), 2);
+      const capitalPorAsesor = r.capitalCartera.porAsesor.reduce(
+        (s, a) => s + Number(a.capital),
+        0,
+      );
+      expect(capitalPorAsesor).toBeCloseTo(Number(r.capitalCartera.total), 2);
     });
 
     it("histórico(hoy-1) devuelve alcance historico y forma válida", async () => {
@@ -34,6 +39,11 @@ if (!hasDb) {
       expect(r.fecha).toBe(ayer);
       const porBuckets = buckets.reduce((s, b) => s + Number(r.totales[b].sumaMora), 0);
       expect(porBuckets).toBeCloseTo(sumaTotal(r), 2);
+      const capitalPorAsesor = r.capitalCartera.porAsesor.reduce(
+        (s, a) => s + Number(a.capital),
+        0,
+      );
+      expect(capitalPorAsesor).toBeCloseTo(Number(r.capitalCartera.total), 2);
     });
 
     it("fecha anterior a la cobertura → vacío + dataDisponibleDesde", async () => {

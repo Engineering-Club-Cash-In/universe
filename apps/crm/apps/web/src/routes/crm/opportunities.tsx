@@ -4,23 +4,28 @@ import {
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	AlertCircle,
 	AlertTriangle,
+	Ban,
 	Banknote,
 	Building,
 	Calculator,
 	Calendar,
 	Car,
+	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
 	Download,
 	ExternalLink,
+	FileCheck2,
 	FileSignature,
 	FileSpreadsheet,
 	FileText,
 	Filter,
+	HelpCircle,
 	History,
 	Kanban,
 	List,
@@ -28,6 +33,7 @@ import {
 	Mail,
 	Phone,
 	Plus,
+	QrCode,
 	RefreshCw,
 	Search,
 	StickyNote,
@@ -46,6 +52,7 @@ import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -63,6 +70,9 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { OpportunityContractPartyCard } from "@/components/contract-parties/OpportunityContractPartyCard";
+import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -100,11 +110,18 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
+import { buildOpportunityRelationshipPatch } from "@/lib/opportunity-relationship-patch";
 import {
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
+import {
+	COFIRMANTE_BANK_STATEMENT_HELP,
+	COFIRMANTE_BANK_STATEMENT_OPTION,
+	getManualOpportunityDocumentFields,
+	type ManualOpportunityDocumentType,
+} from "@/lib/manual-opportunity-document";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
@@ -112,6 +129,11 @@ import {
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
+import {
+	formatMissingAssignmentsMessage,
+	getMissingOpportunityAssignments,
+} from "server/src/lib/opportunity-assignment-notice";
 import { client, orpc } from "@/utils/orpc";
 
 function formatLeadFullName(lead: {
@@ -222,6 +244,24 @@ function DraggableOpportunityCard({
 						);
 					}
 					return null;
+				})()}
+				{(() => {
+					// Aviso informativo del 30%: nunca bloquea, solo marca la tarjeta.
+					const faltan = getMissingOpportunityAssignments({
+						closurePercentage: opportunity.stage?.closurePercentage,
+						status: opportunity.status,
+						vehicleId: opportunity.vehicleId,
+						vehicleIsNew: opportunity.vehicle?.isNew,
+						companyId: opportunity.company?.id,
+						vendorId: opportunity.vendorId,
+					});
+					const mensaje = formatMissingAssignmentsMessage(faltan);
+					if (!mensaje) return null;
+					return (
+						<Badge variant="secondary" className="text-xs">
+							⚠️ {mensaje}
+						</Badge>
+					);
 				})()}
 				{opportunity.analysisStatus === "rejected" && (
 					<Badge variant="destructive" className="text-xs">
@@ -377,6 +417,8 @@ export const Route = createFileRoute("/crm/opportunities")({
 	validateSearch: z.object({
 		companyId: z.string().optional(),
 		opportunityId: z.string().optional(),
+		// "1" abre directo la edición, no solo el detalle
+		edit: z.string().optional(),
 	}).parse,
 });
 
@@ -401,6 +443,11 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
+	// Alta rápida de vendedor o empresa desde los modales de la oportunidad
+	const [quickCreate, setQuickCreate] = useState<{
+		tipo: "vendedor" | "empresa";
+		form: "create" | "edit";
+	} | null>(null);
 	const [stageFilter, setStageFilter] = usePersistedState<string>("crm/opportunities/stageFilter", "all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -426,6 +473,8 @@ function RouteComponent() {
 	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>("crm/opportunities/stageIdFilter", "all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
+	const processedEditRef = useRef<string | null>(null);
+	const prevEditOpenRef = useRef(false);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
 
@@ -748,6 +797,10 @@ function RouteComponent() {
 					: "",
 			);
 			editOpportunityForm.setFieldValue(
+				"vendorId",
+				selectedOpportunity.vendorId || "none",
+			);
+			editOpportunityForm.setFieldValue(
 				"notes",
 				selectedOpportunity.notes || "",
 			);
@@ -846,13 +899,26 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	// Campos congelados de una oportunidad ganada (misma regla que el backend en
+	// updateOpportunity): lo que viajó a los contratos y a cartera. La etapa y el
+	// resto siguen editables porque la opp es "won" desde el 90% y todavía va al
+	// 100%.
+	const isWonLocked =
+		selectedOpportunity?.status === "won" &&
+		userProfile.data?.role !== ROLES.ADMIN;
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				createdMonth: month,
-				createdYear: year,
-				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
+				...(search.opportunityId
+					? { opportunityId: search.opportunityId }
+					: {
+							createdMonth: month,
+							createdYear: year,
+							...(sourceFilter !== "all"
+								? { source: sourceFilter as any }
+								: {}),
+						}),
 			},
 		}),
 		enabled:
@@ -866,6 +932,7 @@ function RouteComponent() {
 			month,
 			year,
 			sourceFilter,
+			search.opportunityId,
 		],
 	});
 	// Stats filtradas por mes (usa el backend que filtra por opportunityStageHistory.changedAt)
@@ -946,6 +1013,17 @@ function RouteComponent() {
 			!!session?.user?.id,
 	});
 
+	// Catálogo completo de agencias para la ficha del contrato: getCompanies
+	// filtra por creador, así que ahí no aparecerían las demás empresas ya
+	// registradas y la agencia no se podría corregir.
+	const companiesForContractsQuery = useQuery({
+		...orpc.getCompaniesForContracts.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
 	// Query for inversionistas
 	const inversionistasQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -999,6 +1077,12 @@ function RouteComponent() {
 			userProfile.data?.role,
 		],
 	});
+	const contractualQuotation =
+		opportunityQuotationsQuery.data?.find(
+			(quotation) => quotation.status === "accepted",
+		) ??
+		opportunityQuotationsQuery.data?.[0] ??
+		null;
 
 	const createOpportunityForm = useForm({
 		defaultValues: {
@@ -1059,6 +1143,7 @@ function RouteComponent() {
 			stageId: "",
 			probability: undefined as number | undefined,
 			expectedCloseDate: "",
+			vendorId: "none",
 			notes: "",
 			numeroCuotas: "",
 			tasaInteres: "",
@@ -1120,17 +1205,20 @@ function RouteComponent() {
 		},
 		onSubmit: async ({ value }) => {
 			if (selectedOpportunity) {
+				const { leadId, companyId, vehicleId, ...opportunityValues } = value;
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
-					...value,
+					...opportunityValues,
+					...buildOpportunityRelationshipPatch({
+						values: { leadId, companyId, vehicleId },
+						opportunity: selectedOpportunity,
+					}),
 					creditType: value.creditType,
-					leadId:
-						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
-					companyId:
-						value.companyId && value.companyId !== "none"
-							? value.companyId
-							: undefined,
-					vehicleId: value.vehicleId || null,
+					// null y no undefined: en edición "Sin vendedor asignado" tiene
+					// que poder quitar un vendedor puesto antes. El patch de arriba no
+					// cubre vendorId.
+					vendorId:
+						value.vendorId && value.vendorId !== "none" ? value.vendorId : null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
@@ -1144,6 +1232,15 @@ function RouteComponent() {
 					diaPagoMensual: value.diaPagoMensual
 						? (Number.parseInt(value.diaPagoMensual, 10) as 15 | 30)
 						: undefined,
+					// Este form solo ofrece 15/30, nunca un día IA nuevo: si el día
+					// cambió acá es elección manual (false). Si se reenvía sin cambios,
+					// refleja el estado actual.
+					elegidoDesdeRecomendacionIA:
+						(value.diaPagoMensual
+							? Number.parseInt(value.diaPagoMensual, 10)
+							: undefined) === selectedOpportunity.diaPagoMensual
+							? selectedOpportunity.diaPagoOriginalSistema != null
+							: false,
 					seguro: value.seguro ? Number.parseFloat(value.seguro) : undefined,
 					gps: value.gps ? Number.parseFloat(value.gps) : undefined,
 					categoria: value.categoria || undefined,
@@ -1205,9 +1302,11 @@ function RouteComponent() {
 		mutationFn: (input: {
 			id: string;
 			title?: string;
-			leadId?: string;
-			companyId?: string;
+			leadId?: string | null;
+			companyId?: string | null;
 			vehicleId?: string | null;
+			// null desasigna al vendedor; sigue siendo opcional
+			vendorId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
 			status?: "open" | "won" | "lost" | "on_hold";
 			value?: string;
@@ -1221,6 +1320,7 @@ function RouteComponent() {
 			cuotaMensual?: string;
 			fechaInicio?: string;
 			diaPagoMensual?: 15 | 30;
+			elegidoDesdeRecomendacionIA?: boolean;
 			seguro?: number;
 			gps?: number;
 			categoria?:
@@ -1352,6 +1452,103 @@ function RouteComponent() {
 		},
 	});
 
+	// La razón social vive en la empresa: al guardarla queda para las próximas
+	// oportunidades de esa agencia, y {agencia} deja de salir vacío.
+	const saveRazonSocialMutation = useMutation({
+		mutationFn: (input: { id: string; razonSocial: string }) =>
+			client.setCompanyRazonSocial(input),
+		onSuccess: async (_data, variables) => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCompaniesForContracts.key(),
+			});
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+			toast.success("Razón social guardada");
+			return variables;
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar la razón social");
+		},
+	});
+
+	// Las partes del contrato se guardan con su propio endpoint:
+	// updateOpportunity limita la edición al asesor asignado y quien prepara
+	// los datos para jurídico suele ser el analista.
+	const saveContractPartyMutation = useMutation({
+		mutationFn: (input: {
+			opportunityId: string;
+			vendorId?: string | null;
+			companyId?: string | null;
+		}) => client.setOpportunityContractParty(input),
+		onSuccess: async () => {
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar el dato del contrato");
+		},
+	});
+
+	// Quien no puede guardar tampoco debería poder tocar los selectores
+	const puedeEditarPartesContrato =
+		!!userProfile.data?.role &&
+		(PERMISSIONS.canAccessAnalysis(userProfile.data.role) ||
+			selectedOpportunity?.assignedTo === session?.user?.id);
+
+	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
+	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor sale solo
+	// de la oportunidad, igual que en la generación de contratos.
+	const contractPartyCard = selectedOpportunity?.vehicle ? (
+		<OpportunityContractPartyCard
+			vehicleIsNew={selectedOpportunity.vehicle.isNew}
+			vendorId={selectedOpportunity.vendorId}
+			company={selectedOpportunity.company}
+			vendors={vendorsQuery.data ?? []}
+			companies={companiesForContractsQuery.data ?? []}
+			cargandoCatalogo={
+				vendorsQuery.isLoading || companiesForContractsQuery.isLoading
+			}
+			puedeGestionarEmpresa={
+				!!userProfile.data?.role &&
+				PERMISSIONS.canCreateCompanies(userProfile.data.role)
+			}
+			disabled={isWonLocked || !puedeEditarPartesContrato}
+			isSaving={
+				saveContractPartyMutation.isPending ||
+				saveRazonSocialMutation.isPending
+			}
+			onAssignVendor={(vendorId) =>
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
+					vendorId,
+				})
+			}
+			onAssignCompany={(companyId) =>
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
+					companyId,
+				})
+			}
+			onSaveRazonSocial={(companyId, razonSocial) =>
+				saveRazonSocialMutation.mutate({ id: companyId, razonSocial })
+			}
+		/>
+	) : null;
+
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
@@ -1424,11 +1621,45 @@ function RouteComponent() {
 			);
 			if (opportunity) {
 				setSelectedOpportunity(opportunity);
-				setIsDetailsDialogOpen(true);
+				// Con ?edit=1 se salta el detalle: abrirlo aquí lo cerraría enseguida,
+				// y el efecto que limpia el search param al cerrarlo dispara un
+				// navigate que descarta el estado y te deja fuera del editor.
+				if (search.edit !== "1") setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
 			}
 		}
 	}, [search.opportunityId, opportunitiesQuery.data]);
+
+	// Al llegar con ?edit=1 se salta el detalle y se abre la edición. Va en su
+	// propio efecto porque handleEditOpportunity lee `selectedOpportunity`,
+	// que el efecto de arriba acaba de setear y todavía no está en el closure.
+	useEffect(() => {
+		if (search.edit !== "1") {
+			processedEditRef.current = null;
+			return;
+		}
+		if (
+			!selectedOpportunity ||
+			search.opportunityId !== selectedOpportunity.id ||
+			processedEditRef.current === selectedOpportunity.id
+		)
+			return;
+		processedEditRef.current = selectedOpportunity.id;
+		handleEditOpportunity(true);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [search.edit, selectedOpportunity]);
+
+	// La edición abierta por ?edit=1 limpia la URL al cerrarse, igual que hace
+	// el detalle aquí abajo, para no dejar el parámetro pegado.
+	useEffect(() => {
+		const wasOpen = prevEditOpenRef.current;
+		prevEditOpenRef.current = isEditDialogOpen;
+
+		if (wasOpen && !isEditDialogOpen && search.edit === "1") {
+			processedOpportunityIdRef.current = null;
+			navigate({ to: "/crm/opportunities", search: {}, replace: true });
+		}
+	}, [isEditDialogOpen, navigate, search.edit]);
 
 	// Clear search param when details modal closes
 	useEffect(() => {
@@ -2143,6 +2374,12 @@ function RouteComponent() {
 											placeholder="Seleccionar vendedor"
 											width="full"
 										/>
+										<QuickCreateLink
+											label="Crear vendedor"
+											onClick={() =>
+												setQuickCreate({ tipo: "vendedor", form: "create" })
+											}
+										/>
 									</div>
 								)}
 							</createOpportunityForm.Field>
@@ -2347,8 +2584,13 @@ function RouteComponent() {
 										</div>
 									)}
 
+									{/* Carro nuevo: la empresa es la agencia, se asigna aquí mismo */}
+									{selectedOpportunity.vehicle?.isNew === true &&
+										contractPartyCard}
+
 									{/* Company Information */}
-									{selectedOpportunity.company && (
+									{selectedOpportunity.company &&
+										selectedOpportunity.vehicle?.isNew !== true && (
 										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 											<Label className="font-semibold text-muted-foreground text-sm">
 												Empresa
@@ -2529,6 +2771,11 @@ function RouteComponent() {
 												)}
 										</div>
 									)}
+
+									{/* Carro usado: el vendedor (dueño) va junto al vehículo */}
+									{selectedOpportunity.vehicle &&
+										selectedOpportunity.vehicle.isNew !== true &&
+										contractPartyCard}
 								</div>
 
 								{/* Consolidated Credit Analysis Summary */}
@@ -2541,95 +2788,36 @@ function RouteComponent() {
 									PERMISSIONS.canViewOpportunityContracts(
 										userProfile.data.role,
 									) && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<div className="flex items-center gap-2">
-												<FileSignature className="h-5 w-5 text-muted-foreground" />
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Contratos Legales
-												</Label>
-											</div>
-											{opportunityContractsQuery.isLoading ? (
-												<p className="text-muted-foreground text-sm">
-													Cargando contratos...
-												</p>
-											) : opportunityContractsQuery.data &&
-												opportunityContractsQuery.data.length > 0 ? (
-												<div className="space-y-2">
-													{opportunityContractsQuery.data.map(
-														({ contract }) => (
-															<div
-																key={contract.id}
-																className="flex items-center justify-between rounded-md border bg-background p-3"
-															>
-																<div className="flex flex-col gap-1">
-																	<span className="font-medium text-sm">
-																		{contract.contractName}
-																	</span>
-																	<span className="text-muted-foreground text-xs">
-																		{getContractTypeLabel(
-																			contract.contractType,
-																		)}{" "}
-																		•{" "}
-																		{contract.status === "pending"
-																			? "Pendiente"
-																			: contract.status === "signed"
-																				? "Firmado"
-																				: "Cancelado"}
-																	</span>
-																</div>
-																<div className="flex gap-2">
-																	{contract.pdfLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.pdfLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<FileText className="h-3 w-3" />
-																				PDF
-																			</a>
-																		</Button>
-																	)}
-																	{contract.clientSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.clientSigningLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Cliente
-																			</a>
-																		</Button>
-																	)}
-																	{contract.representativeSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={
-																					contract.representativeSigningLink
-																				}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Rep. Legal
-																			</a>
-																		</Button>
-																	)}
-																</div>
-															</div>
-														),
-													)}
-												</div>
-											) : (
-												<p className="text-muted-foreground text-sm">
-													No hay contratos asociados a esta oportunidad
-												</p>
+										<OpportunityContractsCard
+											contracts={opportunityContractsQuery.data}
+											isLoading={opportunityContractsQuery.isLoading}
+											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
+												userProfile.data.role,
 											)}
-										</div>
+											// El rol no alcanza: fuera de 80% y 85% el servidor lo
+											// rechaza, y no hay que ofrecerlo.
+											puedeAnular={
+												PERMISSIONS.canAnnulContracts(userProfile.data.role) &&
+												etapaPermite(
+													"anular",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
+											puedeVincular={
+												PERMISSIONS.canLinkWeetrustDocument(
+													userProfile.data.role,
+												) &&
+												etapaPermite(
+													"regenerar",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
+											enEtapaDeFirma={etapaPermite(
+												"regenerar",
+												selectedOpportunity.stage?.closurePercentage,
+											)}
+											onUpdate={() => opportunityContractsQuery.refetch()}
+										/>
 									)}
 
 								{/* Quotations Section */}
@@ -2830,7 +3018,7 @@ function RouteComponent() {
 															<div className="flex items-center gap-4 text-muted-foreground text-xs">
 																<div className="flex items-center gap-1">
 																	<Clock className="h-3 w-3" />
-																	{new Date(change.changedAt).toLocaleString()}
+																	{formatGuatemalaDateTime(change.changedAt)}
 																</div>
 																<div className="flex items-center gap-1">
 																	<Users className="h-3 w-3" />
@@ -2859,6 +3047,7 @@ function RouteComponent() {
 								<DocumentsManager
 									opportunityId={selectedOpportunity.id}
 									opportunityStatus={selectedOpportunity.status}
+									leadId={selectedOpportunity.lead?.id}
 								/>
 							</TabsContent>
 
@@ -2895,12 +3084,8 @@ function RouteComponent() {
 										);
 									}
 
-									// Obtener la cotización más reciente
-									const latestQuotation =
-										opportunityQuotationsQuery.data?.[0] || null;
-
 									// Si no hay cotización, mostrar mensaje para crear una
-									if (!latestQuotation) {
+									if (!contractualQuotation) {
 										return (
 											<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 												<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
@@ -2934,7 +3119,7 @@ function RouteComponent() {
 											opportunityId={selectedOpportunity.id}
 											userRole={userProfile.data?.role}
 											opportunity={selectedOpportunity}
-											quotation={latestQuotation}
+											quotation={contractualQuotation}
 										/>
 									);
 								})()}
@@ -2958,6 +3143,15 @@ function RouteComponent() {
 				<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Oportunidad</DialogTitle>
+						{isWonLocked && (
+							<p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-300">
+								Esta oportunidad ya está ganada: el cliente, la empresa, el
+								vehículo, el tipo de crédito y los términos del financiamiento
+								(monto, plazo, tasa, cuota y día de pago) quedaron fijados al
+								generar los contratos, y solo un administrador puede
+								corregirlos. La etapa, las notas y el resto siguen editables.
+							</p>
+						)}
 					</DialogHeader>
 					<form
 						onSubmit={(e) => {
@@ -3045,34 +3239,45 @@ function RouteComponent() {
 													isLoading={leadsQuery.isFetching}
 													placeholder="Buscar lead..."
 													width="full"
+													disabled={isWonLocked}
 												/>
 											</div>
 										);
 									}}
 								</editOpportunityForm.Field>
 							</div>
+							{/* La empresa representa la agencia para nuevos o el predio para usados. */}
 							<div>
-								<editOpportunityForm.Field name="companyId">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Empresa</Label>
-											<Combobox
-												options={[
-													{ value: "none", label: "Sin empresa" },
-													...(companiesQuery.data?.map((company) => ({
-														value: company.id,
-														label: company.name,
-													})) || []),
-												]}
-												value={field.state.value ?? "none"}
-												onChange={(value) =>
-													field.handleChange(value || "none")
-												}
-												placeholder="Seleccionar empresa"
-												width="full"
-											/>
-										</div>
-									)}
+									<editOpportunityForm.Field name="companyId">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Empresa</Label>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin empresa" },
+														...(companiesQuery.data?.map((company) => ({
+															value: company.id,
+															label: company.name,
+														})) || []),
+													]}
+													value={field.state.value ?? "none"}
+													onChange={(value) =>
+														field.handleChange(value || "none")
+													}
+													placeholder="Seleccionar empresa"
+													width="full"
+													disabled={isWonLocked}
+												/>
+												{!isWonLocked && (
+													<QuickCreateLink
+														label="Crear empresa"
+														onClick={() =>
+															setQuickCreate({ tipo: "empresa", form: "edit" })
+														}
+													/>
+												)}
+											</div>
+										)}
 								</editOpportunityForm.Field>
 							</div>
 						</div>
@@ -3091,6 +3296,7 @@ function RouteComponent() {
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="0.00"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -3106,6 +3312,7 @@ function RouteComponent() {
 											<Label htmlFor={field.name}>Tipo de Crédito</Label>
 											<Select
 												value={field.state.value}
+												disabled={isWonLocked}
 												onValueChange={(value) =>
 													field.handleChange(
 														value as "autocompra" | "sobre_vehiculo",
@@ -3181,7 +3388,42 @@ function RouteComponent() {
 												isLoading={vehiclesQuery.isFetching}
 												placeholder="Buscar vehículo..."
 												width="full"
+												disabled={isWonLocked}
 											/>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+
+							<div>
+								<editOpportunityForm.Field name="vendorId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>
+												Vendedor del Vehículo (opcional)
+											</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin vendedor asignado" },
+													...(vendorsQuery.data?.map((vendor: any) => ({
+														value: vendor.id,
+														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
+													})) || []),
+												]}
+												value={field.state.value ?? "none"}
+												onChange={(value) => field.handleChange(value)}
+												placeholder="Seleccionar vendedor"
+												width="full"
+												disabled={isWonLocked}
+											/>
+											{!isWonLocked && (
+												<QuickCreateLink
+													label="Crear vendedor"
+													onClick={() =>
+														setQuickCreate({ tipo: "vendedor", form: "edit" })
+													}
+												/>
+											)}
 										</div>
 									)}
 								</editOpportunityForm.Field>
@@ -3764,21 +4006,142 @@ function RouteComponent() {
 					vehicleLabel={`${selectedOpportunity.vehicle.year} ${selectedOpportunity.vehicle.make} ${selectedOpportunity.vehicle.model}${selectedOpportunity.vehicle.licensePlate ? ` • ${selectedOpportunity.vehicle.licensePlate}` : ""}`}
 				/>
 			)}
+
+			<VendorQuickCreateDialog
+				open={quickCreate?.tipo === "vendedor"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(vendor) => {
+					if (quickCreate?.form === "edit") {
+						editOpportunityForm.setFieldValue("vendorId", vendor.id);
+					} else {
+						createOpportunityForm.setFieldValue("vendorId", vendor.id);
+					}
+				}}
+			/>
+			<CompanyQuickCreateDialog
+				open={quickCreate?.tipo === "empresa"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(company) =>
+					editOpportunityForm.setFieldValue("companyId", company.id)
+				}
+			/>
 		</div>
 	);
 }
 
+/** Acceso directo bajo un selector para crear el registro sin salir del modal. */
+function QuickCreateLink({
+	label,
+	onClick,
+}: {
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
+		>
+			<Plus className="h-3 w-3" />
+			{label}
+		</button>
+	);
+}
+
 // Documents Manager Component
+// Mismos 4 resultados que RESULT_META en documentacion/licencias.tsx —
+// duplicado a propósito (colores/textos pensados para la barra compacta de
+// esta página, no para el badge de esa), no se comparte entre ambas.
+const LICENSE_STATUS_META: Record<
+	"valida" | "invalida" | "ilegible" | "revision_manual",
+	{ label: string; rowClassName: string; Icon: typeof CheckCircle2 }
+> = {
+	valida: {
+		label: "Licencia válida",
+		rowClassName: "border-green-200 bg-green-50 text-green-800",
+		Icon: CheckCircle2,
+	},
+	invalida: {
+		label: "Licencia inválida",
+		rowClassName: "border-red-200 bg-red-50 text-red-800",
+		Icon: XCircle,
+	},
+	ilegible: {
+		label: "Licencia ilegible",
+		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
+		Icon: AlertCircle,
+	},
+	revision_manual: {
+		label: "Licencia: requiere revisión manual",
+		rowClassName: "border-blue-200 bg-blue-50 text-blue-800",
+		Icon: HelpCircle,
+	},
+};
+
+const DOCUMENT_INTEGRITY_STATUS_META: Record<
+	"valido" | "observacion" | "revision_manual" | "rechazado" | "error",
+	{ label: string; rowClassName: string; Icon: typeof CheckCircle2 }
+> = {
+	valido: {
+		label: "Válido",
+		rowClassName: "border-green-200 bg-green-50 text-green-800",
+		Icon: CheckCircle2,
+	},
+	observacion: {
+		label: "Observación",
+		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
+		Icon: AlertCircle,
+	},
+	revision_manual: {
+		label: "Revisión manual",
+		rowClassName: "border-blue-200 bg-blue-50 text-blue-800",
+		Icon: HelpCircle,
+	},
+	rechazado: {
+		label: "Rechazado",
+		rowClassName: "border-red-200 bg-red-50 text-red-800",
+		Icon: XCircle,
+	},
+	error: {
+		label: "Error de validación",
+		rowClassName: "border-gray-200 bg-gray-50 text-gray-800",
+		Icon: Ban,
+	},
+};
+
+const BANK_STATEMENT_DOCUMENT_TYPES = new Set([
+	"estados_cuenta_1",
+	"estados_cuenta_2",
+	"estados_cuenta_3",
+	"bank_statement",
+]);
+
+function isBankStatementDocument(document: {
+	documentType: string;
+	description?: string | null;
+}) {
+	return (
+		BANK_STATEMENT_DOCUMENT_TYPES.has(document.documentType) ||
+		(document.documentType === "other" &&
+			document.description?.startsWith("Estado de cuenta"))
+	);
+}
+
 function DocumentsManager({
 	opportunityId,
 	opportunityStatus,
+	leadId,
 }: {
 	opportunityId: string;
 	opportunityStatus: string;
+	leadId?: string;
 }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
-	const [documentType, setDocumentType] = useState<string>("");
+	const [documentType, setDocumentType] = useState<
+		ManualOpportunityDocumentType | ""
+	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
@@ -3805,9 +4168,53 @@ function DocumentsManager({
 		disbursementQuery.data &&
 		disbursementQuery.data.documents.length > 0;
 
+	
+	const licenseVerificationQuery = useQuery({
+		...orpc.listLicenseVerifications.queryOptions({
+			input: { leadId: leadId ?? "", opportunityId, limit: 1 },
+		}),
+		enabled: !!leadId,
+	});
+	const latestLicenseVerification = licenseVerificationQuery.data?.[0] ?? null;
+	// Mismo alcance que canViewDocumentIntegrityValidationDetail en el servidor:
+	// juridico, contabilidad y cobros reciben FORBIDDEN, así que no se consulta.
+	const canViewDocumentIntegrity = [
+		"admin",
+		"analyst",
+		"sales_supervisor",
+		"sales",
+	].includes(userProfile.data?.role ?? "");
+	const integrityStatusQuery = useQuery({
+		...orpc.getDocumentIntegrityStatus.queryOptions({
+			input: { opportunityId },
+		}),
+		enabled: !!opportunityId && canViewDocumentIntegrity,
+	});
+	const integrityStatusByDocument = useMemo(
+		() =>
+			new Map(
+				(integrityStatusQuery.data ?? []).map((status) => [
+					status.opportunityDocumentId,
+					status,
+				]),
+			),
+		[integrityStatusQuery.data],
+	);
+	// Solo isSuccess: mientras carga, falla o no se consulta, el mapa está vacío
+	// y no se puede afirmar que un documento esté sin validar. Un fallo
+	// transitorio no debe invitar a gastar otro intento de validación.
+	const integrityStatusResolved = integrityStatusQuery.isSuccess;
+	const canReviewDocumentIntegrity = [
+		"admin",
+		"analyst",
+		"sales_supervisor",
+	].includes(userProfile.data?.role ?? "");
+
 	// Upload a single document with a specific type
-	const uploadSingleDocument = async (docType: string) => {
-		if (!selectedFile) return;
+	const uploadSingleDocument = async (
+		docType: ManualOpportunityDocumentType | "",
+	) => {
+		if (!selectedFile || !docType) return;
 
 		const { key } = await uploadFileToR2WithRetry(selectedFile, {
 			resourceType: "opportunity_document",
@@ -3816,8 +4223,7 @@ function DocumentsManager({
 
 		return await client.uploadOpportunityDocument({
 			opportunityId,
-			documentType: docType as any,
-			description: description || undefined,
+			...getManualOpportunityDocumentFields(docType, description),
 			file: {
 				name: selectedFile.name,
 				type: selectedFile.type,
@@ -3954,6 +4360,7 @@ function DocumentsManager({
 		{ value: "estados_cuenta_1", label: "Estado de cuenta mes 1" },
 		{ value: "estados_cuenta_2", label: "Estado de cuenta mes 2" },
 		{ value: "estados_cuenta_3", label: "Estado de cuenta mes 3" },
+		COFIRMANTE_BANK_STATEMENT_OPTION,
 		// Documentos comerciales
 		{ value: "patente_comercio", label: "Patente de comercio" },
 		{ value: "patente_mercantil", label: "Patente mercantil" },
@@ -4069,6 +4476,13 @@ function DocumentsManager({
 	const otherDocuments = documentsQuery.data?.filter(
 		(doc) => (doc.documentType as string) !== "detalle_analisis",
 	);
+	const bankDocuments = (otherDocuments ?? []).filter(isBankStatementDocument);
+	const staleIntegrityCount = bankDocuments.filter(
+		(document) => integrityStatusByDocument.get(document.id)?.isStale,
+	).length;
+	const unvalidatedIntegrityCount = bankDocuments.filter(
+		(document) => !integrityStatusByDocument.has(document.id),
+	).length;
 
 	return (
 		<div className="space-y-6">
@@ -4159,9 +4573,7 @@ function DocumentsManager({
 											</p>
 											<p className="text-muted-foreground text-xs">
 												Subido el{" "}
-												{new Date(detalleDoc.uploadedAt).toLocaleString(
-													"es-GT",
-												)}{" "}
+												{formatGuatemalaDateTime(detalleDoc.uploadedAt)}{" "}
 												• {(detalleDoc.size / 1024 / 1024).toFixed(2)} MB
 											</p>
 										</div>
@@ -4203,6 +4615,119 @@ function DocumentsManager({
 				</CardContent>
 			</Card>
 
+			{bankDocuments.length > 0 &&
+				canViewDocumentIntegrity &&
+				integrityStatusQuery.isError && (
+				<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-destructive text-sm">
+					<div className="flex items-center gap-2">
+						<AlertCircle className="h-4 w-4 shrink-0" />
+						No se pudo cargar el estado de integridad de los estados de cuenta.
+					</div>
+					<Button
+						size="sm"
+						variant="outline"
+						className="h-6 px-2 text-xs"
+						disabled={integrityStatusQuery.isFetching}
+						onClick={() => void integrityStatusQuery.refetch()}
+					>
+						{integrityStatusQuery.isFetching
+							? "Consultando…"
+							: "Reintentar consulta"}
+					</Button>
+				</div>
+			)}
+
+			{bankDocuments.length > 0 && integrityStatusResolved && (
+				<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-800 text-sm">
+					<div className="flex items-center gap-2">
+						<FileCheck2 className="h-4 w-4 shrink-0" />
+						<span className="font-medium">Integridad de estados de cuenta</span>
+						<Badge variant="outline">
+							{bankDocuments.length} documento
+							{bankDocuments.length === 1 ? "" : "s"}
+						</Badge>
+						{unvalidatedIntegrityCount > 0 && (
+							<Badge className="bg-amber-100 text-amber-800">
+								{unvalidatedIntegrityCount} sin validar
+							</Badge>
+						)}
+						{staleIntegrityCount > 0 && (
+							<Badge className="bg-orange-100 text-orange-800">
+								{staleIntegrityCount} desactualizada
+								{staleIntegrityCount === 1 ? "" : "s"}
+							</Badge>
+						)}
+					</div>
+					{canReviewDocumentIntegrity && (
+						<Button asChild size="sm" variant="ghost" className="h-6 px-2 text-xs">
+							<Link
+								to="/crm/documentacion/estados-cuenta"
+								search={{ opportunityId }}
+							>
+								Abrir validaciones
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						</Button>
+					)}
+				</div>
+			)}
+
+			{leadId && !licenseVerificationQuery.isLoading && licenseVerificationQuery.isError && (
+				<div className="flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-destructive text-sm">
+					<AlertCircle className="h-4 w-4 shrink-0" />
+					No se pudo cargar el estado de la licencia.
+				</div>
+			)}
+
+			{leadId && !licenseVerificationQuery.isLoading && !licenseVerificationQuery.isError && (
+				<div
+					className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-1.5 text-sm ${
+						latestLicenseVerification
+							? (LICENSE_STATUS_META[
+									latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+								]?.rowClassName ?? "")
+							: "border-amber-200 bg-amber-50 text-amber-800"
+					}`}
+				>
+					<div className="flex items-center gap-2">
+						{latestLicenseVerification ? (
+							(() => {
+								const Icon =
+									LICENSE_STATUS_META[
+										latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+									]?.Icon ?? QrCode;
+								return <Icon className="h-4 w-4 shrink-0" />;
+							})()
+						) : (
+							<QrCode className="h-4 w-4 shrink-0" />
+						)}
+						<span className="font-medium">
+							{latestLicenseVerification
+								? (LICENSE_STATUS_META[
+										latestLicenseVerification.result as keyof typeof LICENSE_STATUS_META
+									]?.label ?? "Licencia verificada")
+								: "Licencia sin verificar"}
+						</span>
+					</div>
+					<Button asChild size="sm" variant="ghost" className="h-6 px-2 text-xs">
+						{latestLicenseVerification ? (
+							<Link
+								to="/crm/documentacion/licencias"
+								search={{ verificationId: latestLicenseVerification.id }}
+							>
+								Ver detalle
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						) : (
+							<Link to="/crm/documentacion/licencias" search={{ leadId, opportunityId }}>
+								Verificar ahora
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						)}
+					</Button>
+				</div>
+			)}
+
 			{/* Upload Section */}
 			<Card>
 				<CardHeader>
@@ -4217,7 +4742,9 @@ function DocumentsManager({
 						<Combobox
 							options={documentTypeOptions}
 							value={documentType}
-							onChange={setDocumentType}
+							onChange={(value) =>
+								setDocumentType(value as ManualOpportunityDocumentType | "")
+							}
 							placeholder="Buscar tipo de documento..."
 							width="full"
 							isInModal={true}
@@ -4245,6 +4772,12 @@ function DocumentsManager({
 								Este PDF incluye los 3 meses de estados de cuenta
 							</Label>
 						</div>
+					)}
+
+					{documentType === COFIRMANTE_BANK_STATEMENT_OPTION.value && (
+						<p className="text-muted-foreground text-sm">
+							{COFIRMANTE_BANK_STATEMENT_HELP}
+						</p>
 					)}
 
 					<div className="space-y-2">
@@ -4366,14 +4899,42 @@ function DocumentsManager({
 													{doc.originalName}
 												</span>
 												<Badge
-													variant="outline"
-													className="flex-shrink-0 text-xs"
-												>
-													{documentTypeOptions.find(
-														(t) => t.value === doc.documentType,
-													)?.label || doc.documentType}
-												</Badge>
-											</div>
+											variant="outline"
+											className="flex-shrink-0 text-xs"
+										>
+											{documentTypeOptions.find(
+												(t) => t.value === doc.documentType,
+											)?.label || doc.documentType}
+										</Badge>
+										{isBankStatementDocument(doc) &&
+											integrityStatusResolved &&
+											(() => {
+												const status = integrityStatusByDocument.get(doc.id);
+								if (status?.isStale)
+													return (
+														<Badge className="bg-orange-100 text-orange-800">
+															Desactualizada
+														</Badge>
+													);
+								if (!status)
+									return <Badge variant="outline">Sin validar</Badge>;
+								if (status.manuallyApproved)
+									return (
+										<Badge className="bg-green-100 text-green-800">
+											<CheckCircle2 className="mr-1 h-3 w-3" />
+											Aprobado manualmente
+										</Badge>
+									);
+								const meta = DOCUMENT_INTEGRITY_STATUS_META[status.result];
+												const Icon = meta?.Icon ?? HelpCircle;
+												return (
+													<Badge className={meta?.rowClassName}>
+														<Icon className="mr-1 h-3 w-3" />
+														{meta?.label ?? status.result}
+													</Badge>
+												);
+											})()}
+									</div>
 											{doc.description && (
 												<p className="mt-1 text-muted-foreground text-xs">
 													{doc.description}
@@ -4385,12 +4946,27 @@ function DocumentsManager({
 													Subido por{" "}
 													{doc.uploadedBy?.name || "Usuario desconocido"}
 												</span>
-												<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
 											</div>
 										</div>
 									</div>
-									<div className="flex flex-shrink-0 items-center gap-2">
-										<Button
+								<div className="flex flex-shrink-0 items-center gap-2">
+									{isBankStatementDocument(doc) &&
+										canReviewDocumentIntegrity &&
+										integrityStatusResolved &&
+										(!integrityStatusByDocument.has(doc.id) ||
+											integrityStatusByDocument.get(doc.id)?.isStale) && (
+											<Button asChild size="sm" variant="outline">
+												<Link
+													to="/crm/documentacion/estados-cuenta"
+													search={{ opportunityId }}
+												>
+													<FileCheck2 className="mr-1 h-3 w-3" />
+													Validar lote
+												</Link>
+											</Button>
+										)}
+									<Button
 											size="sm"
 											variant="outline"
 											onClick={() => window.open(doc.url, "_blank")}

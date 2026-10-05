@@ -78,6 +78,8 @@ import {
 	correrRecordatorioPagalo,
 	msHastaProximoRecordatorio,
 } from "./jobs/pagalo-reminder";
+import { iniciarSchedulerVerificacionSat } from "./jobs/sat-verificacion-scheduler";
+import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import {
 	autenticarBotCobros,
@@ -94,6 +96,12 @@ import {
 	consultarSupervisionPagalo,
 	MAX_GRUPOS_POR_PAGINA,
 } from "./lib/pagalo-supervision-consulta";
+import {
+	PARTNER_AUTH_BASE_PATH,
+	PARTNER_CHANGE_PASSWORD_PATH,
+	partnerAuth,
+} from "./lib/partner-auth";
+import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
@@ -101,8 +109,10 @@ import { gpsEventosRouter } from "./routers/gps-eventos-router";
 import { gpsIntegracionRouter } from "./routers/gps-integracion";
 import {
 	appRouter,
+	buroInternoProcedures,
 	disbursementRouter,
 	manualVehicleRouter,
+	partnerTrackerRouter,
 	proyeccionRouter,
 } from "./routers/index";
 import { inmovilizacionReactivacionLlamadaRouter } from "./routers/inmovilizacion-reactivacion-llamada";
@@ -121,7 +131,9 @@ import { referenciasCobrosRouter } from "./routers/referencias-cobros";
 import { tareasCobrosRouter } from "./routers/tareas-cobros";
 import { visitasCobrosRouter } from "./routers/visitas-cobros";
 import { wialonRouter } from "./routers/wialon";
+import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
 import externalContractsRouter from "./routes/external-contracts";
+import weetrustStatusRouter from "./routes/weetrust-status";
 import { carteraBackClient } from "./services/cartera-back-client";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import { checkConveniosIncumplidos } from "./services/check-convenios-incumplidos";
@@ -140,6 +152,7 @@ import { sincronizarPromesasCarteraBack } from "./services/sync-promesas-cartera
 import { avisarVisitasDelDia } from "./services/visitas-cobros";
 
 const app = new Hono();
+
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
 
 function logAuthDiagnostic(reason: string, detail: Record<string, unknown>) {
@@ -166,6 +179,9 @@ function getRequestDiagnostic(c: HonoContext) {
 }
 
 app.use(logger());
+// Contexto de auditoría para todo lo que no pasa por ORPC (bot, portal,
+// formulario público, imports). Ver lib/audit.ts.
+app.use(auditRequest());
 app.use(
 	"/*",
 	cors({
@@ -192,6 +208,7 @@ app.use(
 				process.env.CORS_ORIGIN,
 				process.env.FRONT_URL,
 				process.env.TALLER_URL,
+				process.env.TRACKER_URL,
 			].filter((o): o is string => Boolean(o && o !== "*"));
 
 			if (origin && allowedOrigins.includes(origin)) {
@@ -256,8 +273,37 @@ app.on(["POST", "GET"], "/api/auth/**", async (c) => {
 	return response;
 });
 
+// Auth de socios (predios/agencias): instancia aparte, cookie aparte.
+app.on(["POST", "GET"], `${PARTNER_AUTH_BASE_PATH}/**`, async (c) => {
+	// Rate limit solo en sign-in y change-password: sin esto quedan abiertos a
+	// fuerza bruta contra la cuenta de otro socio (suelen arrancar con
+	// contraseña temporal). Se aplica adentro del mismo handler, no como
+	// `app.use()` en un patrón aparte, para no registrar dos rutas que se
+	// superponen con este mismo prefijo. El procedure oRPC
+	// `changePartnerPassword` (tracker.ts) es el camino real de la pantalla de
+	// cambio de contraseña y nunca pasa por acá — usa el mismo `partnerAuthLimiter`
+	// con la misma clave, así comparten cupo en vez de tener uno cada uno.
+	const rutaConLimite =
+		c.req.method === "POST" &&
+		(c.req.path === `${PARTNER_AUTH_BASE_PATH}/sign-in/email` ||
+			c.req.path === PARTNER_CHANGE_PASSWORD_PATH);
+
+	if (rutaConLimite) {
+		const bloqueo = await partnerAuthLimiter.middleware(c, async () => {});
+		if (bloqueo) return bloqueo;
+	}
+
+	return partnerAuth.handler(c.req.raw);
+});
+
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
+// El generador nos relaya lo que WeeTrust le avisa por webhook: quién firmó y
+// cómo va el documento. La base es de acá, así que el estado se escribe acá.
+app.route("/api/contracts/weetrust-status", weetrustStatusRouter);
+// Cartera avisa que una compra de cartera fue aceptada y abre la batería de
+// contratos del inversionista.
+app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter);
 
 const handler = new RPCHandler(
 	Object.assign(
@@ -283,6 +329,8 @@ const handler = new RPCHandler(
 		visitasCobrosRouter,
 		investigacionesRedesCobrosRouter,
 		tareasCobrosRouter,
+		partnerTrackerRouter,
+		buroInternoProcedures,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -745,6 +793,12 @@ app.post("/info/renap", async (c) => {
 
 		const result = await getRenapInfoController(dpi, phone);
 
+		// El controller reporta el rechazo en el valor y responde 200: sin esto,
+		// un DPI inválido o una caída de RENAP no dejarían rastro del intento.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("RENAP_RECHAZADO");
+		}
+
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ERROR] /info/renap:", err);
@@ -781,6 +835,12 @@ app.post("/info/lead-opportunity", async (c) => {
 		}
 
 		const result = await updateLeadAndCreateOpportunity(body.dpi, body);
+
+		// Mismo caso que /info/renap: el controller reporta el rechazo en el valor
+		// y la ruta responde 200.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("LEAD_OPPORTUNITY_RECHAZADO");
+		}
 
 		return c.json(result);
 	} catch (err: any) {
@@ -2124,6 +2184,15 @@ console.warn(
 	}. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción y el resto de jobs NO está corriendo.`,
 );
 
+
+// Verificación SAT automática diaria (22:00 GT). No es un job de cobros ni le
+// escribe a clientes, así que no va detrás de JOBS_PROGRAMADOS: se gobierna
+// con su propia variable (`SAT_JOB_ENABLED=true`; sin ella se autodeshabilita).
+// Arranca a los 10 s, igual que en develop, para que la DB esté lista.
+setTimeout(() => {
+	iniciarSchedulerVerificacionSat();
+}, 10_000);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // La purga de boletas del bot va FUERA del bloque de arriba, a propósito.
 //
@@ -2493,7 +2562,7 @@ if (HAY_JOBS_ACTIVOS) {
 		await checkConveniosIncumplidos().catch((error) =>
 			console.error("Error en el aviso de convenios incumplidos:", error),
 		);
-		// El motor de cartera reasigna créditos a las 23:59: los avisos de
+		// El motor de cartera reasigna créditos a las 00:05 GT: los avisos de
 		// "llamar al cliente" de una inmovilización pasan al asesor de hoy antes
 		// de que arranque el día (review de Codex, PR #1765).
 		await reconciliarAvisosLlamarCliente().catch((error) =>
@@ -2559,18 +2628,21 @@ if (HAY_JOBS_ACTIVOS) {
 	// capturando bien antes de las 00:05 GT documentadas. `procesarMoras`
 	// (recalcula mora, buckets y reasignaciones) corre en cartera-back —
 	// proceso EXTERNO, sin endpoint de estado que este CRM pueda consultar —
-	// a las 23:59 GT (docs/features/cobros-02/02-motor-y-asignacion.md).
+	// a las 00:05 GT desde el merge con develop (antes 23:59; ver schedule.ts de
+	// cartera-back), y el vigilante de convenios a las 00:30 GT.
 	// Capturar mientras sigue corriendo congela una mezcla de datos viejos y
 	// nuevos, y el índice único (fecha_gt, asesor_id) con ON CONFLICT DO
 	// NOTHING deja ese snapshot corrupto sin forma de corregirlo después
 	// (Codex PR #1331). Sin handshake posible, se agrega un piso mínimo
-	// explícito hasta las 00:05 GT, ADEMÁS de esperar checkPromesasPago —
+	// explícito hasta las 00:40 GT (después de procesarMoras y del vigilante de
+	// convenios), ADEMÁS de esperar checkPromesasPago —
 	// no elimina el riesgo (sigue siendo heurístico), pero dejar de confiar
 	// en que el encadenado por sí solo tarde lo suficiente.
-	function esperarHasta0005GT(): Promise<void> {
+	function esperarDespuesDeProcesarMorasGT(): Promise<void> {
 		const ahora = new Date();
 		const barrera = new Date();
-		barrera.setUTCHours(6, 5, 0, 0);
+		barrera.setUTCHours(6, 40, 0, 0); // 00:40 GT
+
 		const faltante = barrera.getTime() - ahora.getTime();
 		if (faltante <= 0) return Promise.resolve();
 		return new Promise((resolve) => setTimeout(resolve, faltante));
@@ -2584,7 +2656,7 @@ if (HAY_JOBS_ACTIVOS) {
 			await procesarSeguimientosRecurrentes().catch(console.error);
 			const resumenPromesas = await checkPromesasPago().catch(console.error);
 			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
-			await esperarHasta0005GT();
+			await esperarDespuesDeProcesarMorasGT();
 			await ejecutarAgendaCobrosDiariaConReintentos().catch(console.error);
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
@@ -2592,13 +2664,13 @@ if (HAY_JOBS_ACTIVOS) {
 	if (JOBS_PROGRAMADOS.promesasYSnapshots) scheduleAtMidnightGT();
 
 	// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
-	// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
-	// procesarMoras corra en cartera-back a las 23:59 GT (ver el comentario de
+	// (promesas_pago_espejo), a las 23:30 GT — 35 minutos ANTES de que
+	// procesarMoras corra en cartera-back a las 00:05 GT (ver el comentario de
 	// schedule.ts en ese repo, citado también en check-cobros-alertas.ts). El
 	// push por evento (lib/push-promesa-cartera-back.ts) ya mantiene el espejo
 	// fresco en el caso normal; esto es la red de seguridad que corrige drift
 	// silencioso ANTES del cálculo que importa. Margen de ~30 min: suficiente
-	// para absorber latencia sin arriesgar correr después de las 23:59 GT.
+	// para absorber latencia sin arriesgar correr después de las 00:05 GT.
 	function scheduleAtSyncPromesasGT() {
 		const now = new Date();
 		const next = new Date();
@@ -2611,10 +2683,10 @@ if (HAY_JOBS_ACTIVOS) {
 	}
 	if (JOBS_PROGRAMADOS.syncPromesasCartera) scheduleAtSyncPromesasGT();
 
-	// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
+	// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–00:05
 	// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
 	// el timer a mañana y la reconciliación de ESTA noche nunca correría — pero
-	// procesarMoras sí va a correr a las 23:59 con lo que haya en el espejo. Es
+	// procesarMoras sí va a correr a las 00:05 con lo que haya en el espejo. Es
 	// justo el peor momento para saltarla: un deploy en esa franja es lo que hace
 	// más probable que se hayan perdido pushes por evento (Codex PR #1237).
 	// Fuera de la ventana no se hace nada: correr el job en cualquier arranque lo
@@ -2624,17 +2696,17 @@ if (HAY_JOBS_ACTIVOS) {
 		const ahora = new Date();
 		const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
 		const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
-		const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
+		const FIN_VENTANA = 6 * 60 + 5; // 00:05 GT (cuando arranca procesarMoras desde el merge con develop)
 		// El flag va TAMBIÉN acá: sin esto, apagar syncPromesasCartera solo
 		// apagaba el timer y este catch-up seguía escribiendo el espejo en
-		// cualquier arranque entre 23:30 y 23:59 (hallazgo Codex).
+		// cualquier arranque entre 23:30 y 00:05 (hallazgo Codex).
 		if (
 			JOBS_PROGRAMADOS.syncPromesasCartera &&
 			minutosUtc >= INICIO_VENTANA &&
 			minutosUtc < FIN_VENTANA
 		) {
 			console.log(
-				"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
+				"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–00:05 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
 			);
 			sincronizarPromesasCarteraBack().catch(console.error);
 		}
@@ -2645,7 +2717,9 @@ if (HAY_JOBS_ACTIVOS) {
 	// (= 06:15 UTC) todos los días, del día que ACABA DE TERMINAR (ayer GT).
 	//
 	// NO a las 22:00 GT: los movimientos de bucket los genera `procesarMoras` en
-	// cartera-back a las 23:59 GT (schedule.ts:37 de ese repo) — correr antes
+	// cartera-back (a las 00:05 GT desde el merge con develop; antes 23:59, ver
+	// schedule.ts de ese repo). Con 00:05 los movimientos quedan fechados en el
+	// día NUEVO y entran en el cierre del día siguiente, sin perderse — correr antes
 	// significa preguntar por el día de hoy ANTES de que esas filas existan, y
 	// como el job nunca vuelve a visitar un día ya cerrado, esos movimientos se
 	// pierden para siempre, todos los días (hallado por Codex en PR #1183).
@@ -2707,17 +2781,17 @@ if (HAY_JOBS_ACTIVOS) {
 	// Si el boot cae EXACTO entre 00:00 y 00:04:59 GT, scheduleAtMidnightGT ya
 	// movió su timer a mañana (next <= now) y este catch-up, sin más, se
 	// hubiera quedado callado hasta el próximo boot — perdiendo cierre de ayer
-	// Y captura de hoy por un día entero. Reusa esperarHasta0005GT() (mismo
+	// Y captura de hoy por un día entero. Reusa esperarDespuesDeProcesarMorasGT() (mismo
 	// piso que el timer normal) en vez de una condición de hora manual: un
 	// boot en cualquier otro momento del día (p. ej. 23:00 GT, mientras
 	// procesarMoras todavía no corrió) NO debe capturar de inmediato — debe
-	// esperar a la próxima barrera de 00:05 GT como cualquier otra corrida.
+	// esperar a la próxima barrera de 00:40 GT como cualquier otra corrida.
 	//
 	// Si el boot ocurrió ANTES de medianoche GT, checkPromesasPagoBoot quedó
 	// resuelta horas antes del cierre (p. ej. boot 20:00 GT → promesa resuelta
 	// 20:00:10) y scheduleAtMidnightGT SÍ va a correr su propio
 	// checkPromesasPago() fresco a las 00:00 GT — pero ambos callbacks
-	// convergen cerca de las 00:05 GT y compiten por el mismo advisory lock en
+	// convergen cerca de las 00:40 GT y compiten por el mismo advisory lock en
 	// ejecutarAgendaCobrosDiaria; si este catch-up ganara el lock, cerraría el
 	// snapshot con la reconciliación stale del boot, perdiendo pagos/promesas
 	// resueltos entre el boot y medianoche (Codex PR #1331). Por eso, si el
@@ -2732,7 +2806,7 @@ if (HAY_JOBS_ACTIVOS) {
 	setTimeout(async () => {
 		if (!JOBS_PROGRAMADOS.promesasYSnapshots) return;
 		await checkPromesasPagoBoot;
-		await esperarHasta0005GT();
+		await esperarDespuesDeProcesarMorasGT();
 		const resumenPromesas = bootAntesDeMedianocheGT
 			? await checkPromesasPago().catch(console.error)
 			: await checkPromesasPagoBoot;
@@ -2744,4 +2818,9 @@ if (HAY_JOBS_ACTIVOS) {
 export default {
 	port: process.env.PORT || 3000,
 	fetch: app.fetch,
+	// Bun cierra por defecto la conexión a los 10s sin actividad, aunque el
+	// handler siga trabajando: el análisis de capacidad de pago (p50 ~33s) le
+	// llegaba al front como error. 255s es el máximo que admite Bun y cubre el
+	// timeout de 3 minutos de la IA.
+	idleTimeout: 255,
 };

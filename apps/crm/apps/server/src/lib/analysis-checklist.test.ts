@@ -4,6 +4,10 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "./analysis-checklist";
+import {
+	type ChecklistData,
+	rebuildClientDocumentChecklistData,
+} from "./checklist";
 
 describe("analysis checklist helpers", () => {
 	test("detects stale checklist vehicle ids", () => {
@@ -204,5 +208,46 @@ describe("analysis checklist helpers", () => {
 			verifiedBy: "analyst-2",
 			verifiedAt: "2026-05-26T17:05:00.000Z",
 		});
+	});
+
+	test("automatic and manual cleanup-debt rows never satisfy uploaded or canApprove", () => {
+		const checklist: ChecklistData = {
+			sections: {
+				documentos: {
+					items: [
+						{
+							documentType: "estados_cuenta_1",
+							required: true,
+							uploaded: false,
+						},
+					],
+					completed: false,
+				},
+				verificaciones: { items: [], completed: true },
+			},
+			overallProgress: 0,
+			canApprove: false,
+		};
+		rebuildClientDocumentChecklistData(
+			checklist,
+			[
+				{
+					id: "debt-row",
+					documentType: "estados_cuenta_1",
+					description:
+						"[bank-coverage-debt:batch-1:artifact:debt-row:file:0]",
+				},
+				{
+					id: "manual-debt-row",
+					documentType: "estados_cuenta_1",
+					description:
+						"[manual-bank-debt:delete_cleanup:actor:user-1:type:estados_cuenta_1]",
+				},
+			],
+			false,
+		);
+		expect(checklist.sections.documentos.items[0].uploaded).toBe(false);
+		expect(checklist.sections.documentos.completed).toBe(false);
+		expect(checklist.canApprove).toBe(false);
 	});
 });

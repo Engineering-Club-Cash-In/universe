@@ -1,0 +1,256 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * Inventario de escrituras sobre las entidades auditadas.
+ *
+ * No prueba que la bitácora funcione — eso lo hacen los tests de `audit.ts`.
+ * Prueba que ninguna escritura se quede afuera sin que alguien lo decida:
+ *
+ * 1. todo archivo que escriba las tres entidades está declarado acá;
+ * 2. su cantidad de escrituras y de anotaciones sigue siendo la declarada;
+ * 3. en los archivos marcados `listo`, cada escritura tiene un `auditRecord`
+ *    cerca — que es lo que detecta que alguien saque una anotación o la mueva
+ *    fuera de la rama que hace la escritura;
+ * 4. los exentos no anotan y explican por qué.
+ *
+ * Es la red que faltó la vez pasada, cuando tres rondas de review encontraron
+ * caminos de escritura que se habían quedado afuera en silencio.
+ */
+
+type Estado = "listo" | "exento";
+
+const INVENTARIO: Record<
+	string,
+	{ escrituras: number; anotaciones: number; estado: Estado; nota?: string }
+> = {
+	// Anota más de lo que escribe: además de la fila por escritura hay tres que
+	// registran decisiones sin escritura propia —el override del gate de mora, el
+	// del candado al borrar un co-deudor, y la revalidación al reabrir una
+	// oportunidad perdida que ya había cruzado el 30%—.
+	//
+	// +1 escritura y +1 anotación al volver atómico el borrado del co-deudor: el
+	// delete de `coDebtors` pasó a hacerse dentro de una transacción y con el
+	// candado en el WHERE, y el override del admin sobre ese borrado ahora
+	// también revalida la oportunidad (antes solo dejaba la fila de bitácora).
+	//
+	// +2 anotaciones (20 → 22) sin escrituras nuevas: el override de admin del
+	// gate de mora dejó de anotarse dentro de `resolverEdicionConMora` —que lo
+	// escribía ANTES del UPDATE, dejando en la bitácora overrides que nunca
+	// ocurrían— y ahora lo anota cada llamador después de confirmar sus filas.
+	// Son los mismos dos sitios de siempre (`updateLead` y `updateCoDebtor`),
+	// solo que el literal `auditRecord(` ahora vive acá y el escáner lo ve.
+	//
+	// +1 anotación (22 → 23) sin escritura nueva: cambiar el `leadId` de una
+	// oportunidad invalida la validación de identidad que había (ver
+	// `parcheDeIdentidadInvalidada`), y esa invalidación viaja DENTRO del UPDATE
+	// que ya existía. Es una decisión sin escritura propia, como las otras tres.
+	"routers/crm.ts": { escrituras: 17, anotaciones: 23, estado: "listo" },
+	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
+	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
+	// candado del DPI.
+	//
+	// `exento` de la regla de proximidad, NO de anotar: SÍ deja bitácora por cada
+	// oportunidad —también por las que las salvaguardas dejan intactas, con
+	// `ok: false`—, pero la escribe a través de `anotar`, que entra por
+	// parámetro. Es la misma convención de `gate-mora-dpi.ts`: en bun,
+	// reemplazar un módulo con `mock.module` es global al proceso, así que las
+	// dependencias viajan por parámetro y quedan testeables. El escáner busca el
+	// literal `auditRecord(` y por eso no las ve; los dos llamadores
+	// (`updateLead` y `updateCoDebtor`, en `routers/crm.ts`) le pasan
+	// `auditRecord` de verdad.
+	"lib/revalidacion-oportunidad.ts": {
+		escrituras: 1,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "anota por `anotar` inyectado, no con el literal `auditRecord(`; ver comentario arriba",
+	},
+	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
+	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
+	// de la transacción revertida y deja en su lugar el intento fallido.
+	"controllers/migrate-creditos.ts": {
+		escrituras: 8,
+		anotaciones: 9,
+		estado: "listo",
+	},
+	"controllers/public-lead.ts": {
+		escrituras: 8,
+		anotaciones: 8,
+		estado: "listo",
+	},
+	"controllers/bot.ts": { escrituras: 6, anotaciones: 6, estado: "listo" },
+	"controllers/portal-lead.ts": {
+		escrituras: 2,
+		anotaciones: 2,
+		estado: "listo",
+	},
+	"routers/auctionVehicles.ts": {
+		escrituras: 3,
+		anotaciones: 3,
+		estado: "listo",
+	},
+	"routers/cobros.ts": { escrituras: 3, anotaciones: 3, estado: "listo" },
+	"services/close-opportunity.ts": {
+		escrituras: 4,
+		anotaciones: 4,
+		estado: "listo",
+	},
+	"routers/legal-contracts.ts": {
+		escrituras: 2,
+		anotaciones: 2,
+		estado: "listo",
+	},
+	"controllers/liveness.ts": { escrituras: 1, anotaciones: 1, estado: "listo" },
+	// COBROS-02 (CB-118): vincular/desvincular la unidad Wialon de un vehículo —
+	// el vínculo automático por placa, su liberación, y el manual del supervisor
+	// (que libera a quien la tuviera y vincula al destino). Cada escritura con
+	// su anotación (la liberación del manual anota cada vehículo, en un loop).
+	"routers/wialon.ts": { escrituras: 4, anotaciones: 4, estado: "listo" },
+	"controllers/load-cars.ts": {
+		escrituras: 1,
+		anotaciones: 1,
+		estado: "listo",
+	},
+	"routers/messaging.ts": { escrituras: 1, anotaciones: 1, estado: "listo" },
+	// Anota más de lo que escribe: los fallos de RENAP se devuelven como valor
+	// en vez de lanzarse, así que cada uno deja su propia fila `ok = false`.
+	"services/contract-data-mapper.ts": {
+		escrituras: 1,
+		anotaciones: 4,
+		estado: "listo",
+	},
+	"services/lead-scoring.ts": {
+		escrituras: 1,
+		anotaciones: 1,
+		estado: "listo",
+	},
+
+	"db/seed.ts": {
+		escrituras: 3,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "script de desarrollo, no es un endpoint",
+	},
+	"db/clear.ts": {
+		escrituras: 3,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "script de desarrollo, no es un endpoint",
+	},
+};
+
+const TABLAS = ["leads", "opportunities", "vehicles"];
+const ESCRITURA = new RegExp(
+	`\\.(insert|update|delete)\\(\\s*(${TABLAS.join("|")})\\s*\\)`,
+);
+const ANOTACION = /auditRecord\(/;
+
+/**
+ * Margen entre una escritura y su anotación. Hoy la distancia real máxima es
+ * de 91 líneas, en `crm.updateOpportunity`: la anotación va después del
+ * chequeo de cero filas —que además relee el estado para distinguir la carrera
+ * con el cierre—, porque con cero filas no hubo escritura que anotar.
+ *
+ * Subió de 75 a 100 al meter la reapertura en una transacción: entre el UPDATE
+ * y su anotación ahora viven también la fila de `opportunityStageHistory` del
+ * retroceso a análisis y el cierre de la transacción. El margen es una heurística
+ * de proximidad, no un límite de diseño; lo que protege es que no desaparezca la
+ * anotación, y eso se sigue cumpliendo.
+ */
+const LINEAS_DE_MARGEN = 100;
+
+function archivosFuente(dir: string, out: string[] = []): string[] {
+	for (const entrada of readdirSync(dir)) {
+		const ruta = join(dir, entrada);
+		if (statSync(ruta).isDirectory()) archivosFuente(ruta, out);
+		else if (ruta.endsWith(".ts") && !ruta.includes(".test.")) out.push(ruta);
+	}
+	return out;
+}
+
+type Hallazgo = {
+	escrituras: number;
+	anotaciones: number;
+	huerfanas: number[];
+};
+
+function escaneo(): Record<string, Hallazgo> {
+	const encontrado: Record<string, Hallazgo> = {};
+	for (const ruta of archivosFuente("src")) {
+		const lineas = readFileSync(ruta, "utf8").split("\n");
+		const escrituras: number[] = [];
+		let anotaciones = 0;
+		lineas.forEach((linea, i) => {
+			if (ESCRITURA.test(linea)) escrituras.push(i);
+			if (ANOTACION.test(linea)) anotaciones++;
+		});
+		if (escrituras.length === 0) continue;
+
+		const huerfanas = escrituras.filter(
+			(i) =>
+				!lineas
+					.slice(i, i + LINEAS_DE_MARGEN)
+					.some((linea) => ANOTACION.test(linea)),
+		);
+		encontrado[ruta.replace(/^src\//, "")] = {
+			escrituras: escrituras.length,
+			anotaciones,
+			huerfanas: huerfanas.map((i) => i + 1),
+		};
+	}
+	return encontrado;
+}
+
+describe("inventario de escrituras auditadas", () => {
+	const encontrado = escaneo();
+
+	test("todo archivo que escribe entidades auditadas está declarado", () => {
+		expect(
+			Object.keys(encontrado).filter((archivo) => !(archivo in INVENTARIO)),
+		).toEqual([]);
+	});
+
+	test("no quedan declaraciones de archivos que ya no escriben", () => {
+		expect(
+			Object.keys(INVENTARIO).filter((archivo) => !(archivo in encontrado)),
+		).toEqual([]);
+	});
+
+	test("las cantidades declaradas siguen siendo las reales", () => {
+		const desfasados = Object.entries(encontrado)
+			.filter(([archivo]) => archivo in INVENTARIO)
+			.filter(
+				([archivo, real]) =>
+					INVENTARIO[archivo].escrituras !== real.escrituras ||
+					INVENTARIO[archivo].anotaciones !== real.anotaciones,
+			)
+			.map(([archivo, real]) => ({
+				archivo,
+				declarado: {
+					escrituras: INVENTARIO[archivo].escrituras,
+					anotaciones: INVENTARIO[archivo].anotaciones,
+				},
+				real: { escrituras: real.escrituras, anotaciones: real.anotaciones },
+			}));
+		expect(desfasados).toEqual([]);
+	});
+
+	test("en los archivos listos, ninguna escritura quedó sin anotar", () => {
+		// Detecta la regresión directa: sacar un `auditRecord` o moverlo fuera de
+		// la rama que hace la escritura.
+		const huerfanas = Object.entries(encontrado)
+			.filter(([archivo]) => INVENTARIO[archivo]?.estado === "listo")
+			.filter(([, real]) => real.huerfanas.length > 0)
+			.map(([archivo, real]) => ({ archivo, lineas: real.huerfanas }));
+		expect(huerfanas).toEqual([]);
+	});
+
+	test("los exentos no anotan y explican por qué", () => {
+		const mal = Object.entries(INVENTARIO)
+			.filter(([, v]) => v.estado === "exento")
+			.filter(([, v]) => !v.nota || v.anotaciones !== 0)
+			.map(([archivo]) => archivo);
+		expect(mal).toEqual([]);
+	});
+});

@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { updateLead } from "../services";
-import { createInvestor, getBancos } from "../services/investorService";
+import { updateLead, updateOwnDpi } from "../services";
+import { aplicarCambioDeDpi } from "../cambioDeDpi";
+import { updateInvestorAccount, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
+import { useEntidades } from "../hooks/useEntidades";
+import { CACHE_CATALOGO } from "../constants/cache";
+import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 
 type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
 
@@ -14,7 +17,6 @@ interface ModalConfirmChangeProps {
   initialValue: string;
   onClose: () => void;
   onSuccess: () => void;
-  profileData?: any;
 }
 
 export const ModalConfirmChange = ({
@@ -23,11 +25,11 @@ export const ModalConfirmChange = ({
   initialValue,
   onClose,
   onSuccess,
-  profileData
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
   const [serverError, setServerError] = useState<string>("");
   const { user } = useAuth();
+  const { inversionistaId } = useEntidades();
 
   const isInvestorField = field && ['banco_id', 'tipo_cuenta', 'numero_cuenta'].includes(field);
 
@@ -36,6 +38,7 @@ export const ModalConfirmChange = ({
     queryKey: ["bancos"],
     queryFn: getBancos,
     enabled: isOpen && field === 'banco_id',
+    ...CACHE_CATALOGO,
   });
 
   // Actualizar tempValue cuando cambia initialValue
@@ -48,23 +51,29 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
-      const dpi = user?.dpi ?? profileData?.dpi;
 
-      // Si es campo de inversionista, actualizar en Cartera
+      // Si es campo de inversionista, actualizar en Cartera.
+      // Se identifica la ficha por id: mandando dpi/email, el upsert de cartera
+      // resolvía primero por DPI y terminaba editando la ficha personal aunque
+      // el inversionista estuviera parado en una de sus sociedades.
       if (isInvestorField || user?.role === "INVESTOR") {
-       // if (!dpi) throw new Error("DPI no disponible");
+        if (!inversionistaId) {
+          throw new Error("No se pudo identificar la entidad a actualizar");
+        }
 
-        const payload: any = {
-          dpi: dpi ? parseInt(dpi) : undefined,
-          email,
-        };
+        const payload: {
+          inversionista_id: number;
+          banco_id?: number;
+          tipo_cuenta?: string;
+          numero_cuenta?: string;
+        } = { inversionista_id: inversionistaId };
 
         // Solo enviar el campo que se está actualizando
         if (field === 'banco_id') payload.banco_id = Number(value);
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return createInvestor({ ...payload });
+        return updateInvestorAccount(payload);
       }
 
       // Si es campo de cliente, actualizar en CRM
@@ -75,19 +84,35 @@ export const ModalConfirmChange = ({
         dpi?: string;
         phone?: string;
         address?: string;
+        // Simulacro: el CRM corre candado, mora y duplicados y devuelve el
+        // veredicto SIN escribir nada. Es lo que permite saber si el DPI nuevo
+        // pasa antes de tocar la cuenta (ver `aplicarCambioDeDpi`).
+        soloValidar?: boolean;
       }
 
       const payload: UpdateLeadPayload = { email };
-      if (field === 'dpi') {
-        // eslint-disable-next-line
-        // @ts-ignore
-        await authClient.updateUser({ dpi: value });
-        payload.dpi = value;
-      }
       if (field === 'phone') payload.phone = value;
       if (field === 'address') payload.address = value;
 
-      return updateLead(payload);
+      if (field !== 'dpi') return updateLead(payload);
+
+      // El DPI de la cuenta lo escribe el servidor sobre la sesión actual:
+      // `dpi` está declarado `input: false` en Better Auth, así que
+      // `authClient.updateUser({ dpi })` ya no puede escribirlo. Y la cuenta va
+      // ANTES que el lead porque el CRM toma el DPI de la cuenta; si el CRM
+      // rechaza el cambio, esa escritura se deshace. Ver `aplicarCambioDeDpi`.
+      payload.dpi = value;
+
+      return aplicarCambioDeDpi({
+        dpiNuevo: value,
+        dpiPrevioEnLaCuenta: user?.dpi?.trim() ?? "",
+        fijarDpiDeLaCuenta: updateOwnDpi,
+        actualizarElLead: () => updateLead(payload),
+        // El rechazo del CRM llega ANTES de escribir la cuenta: candado, mora y
+        // duplicados corren en seco. Sin esto, el primer DPI de una cuenta
+        // podía quedar escrito aunque el CRM lo rechazara.
+        validarEnElCrm: () => updateLead({ ...payload, soloValidar: true }),
+      });
     },
     onSuccess: () => {
       setServerError("");
@@ -210,10 +235,7 @@ export const ModalConfirmChange = ({
                 setTempValue(value);
                 if (serverError) setServerError("");
               }}
-              options={[
-                { value: "MONETARIA", label: "Monetaria" },
-                { value: "AHORRO", label: "Ahorro" },
-              ]}
+              options={[...OPCIONES_TIPO_CUENTA]}
               placeholder={getFieldPlaceholder()}
             />
           )}

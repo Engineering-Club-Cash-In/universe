@@ -60,8 +60,10 @@ export const vehicleVendors = pgTable("vehicle_vendors", {
 
 	// Basic vendor info
 	name: text("name").notNull(),
-	phone: text("phone").notNull(),
+	// Opcional: el vendedor que se registra desde el DPI del dueño no trae teléfono.
+	phone: text("phone"),
 	dpi: text("dpi").notNull().unique(),
+	gender: text("gender"), // 'male' | 'female', lo usa la Declaración de Vendedor
 
 	// Vendor type
 	vendorType: text("vendor_type").notNull(), // 'individual' or 'empresa'

@@ -44,6 +44,9 @@ export interface Liquidacion {
   currencySymbol: string;
   totales: LiquidacionTotales;
   reporte_liquidacion: string;
+  /** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+  reporte_liquidacion_gtq: string | null;
+  tipo_cambio_reporte: string | null;
   fecha_liquidacion: string;
   pagos: LiquidacionPago[];
 }
@@ -126,8 +129,7 @@ export interface AsesorResponse {
  * Obtener liquidaciones del inversionista por DPI con paginación
  */
 export const getLiquidaciones = async (
-  dpi: string,
-  email: string,
+  inversionistaId: number,
   page: number = 1,
   perPage: number = 10,
 ): Promise<LiquidacionesResponse> => {
@@ -136,7 +138,7 @@ export const getLiquidaciones = async (
     const token = await ensureCarteraAuth();
 
     const response = await fetch(
-      `${env.CARTERA_API_URL}/liquidaciones?dpi=${dpi}&email=${email}&page=${page}&perPage=${perPage}`,
+      `${env.CARTERA_API_URL}/liquidaciones?inversionista_id=${inversionistaId}&page=${page}&perPage=${perPage}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -160,15 +162,14 @@ export const getLiquidaciones = async (
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
 export const getInvestmentsStats = async (
-  dpi: string,
-  email: string,
+  inversionistaId: number,
 ): Promise<InvestmentsStats> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
 
     const response = await fetch(
-      `${env.CARTERA_API_URL}/inversionistas/rendimiento?dpi=${dpi}&email=${email}`,
+      `${env.CARTERA_API_URL}/inversionistas/rendimiento?inversionista_id=${inversionistaId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

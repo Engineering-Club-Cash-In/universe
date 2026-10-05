@@ -61,6 +61,10 @@ import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
+import {
+	debeMostrarProyeccionMora,
+	ProyeccionMoraCard,
+} from "@/components/cobros/proyeccion-mora-card";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { RecuperacionVehiculoCard } from "@/components/cobros/recuperacion-vehiculo-card";
 import { RecuperacionVehiculoDialog } from "@/components/cobros/recuperacion-vehiculo-dialog";
@@ -133,6 +137,10 @@ import {
 import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
 import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
 import {
+	debeAnunciarCrecimientoMora,
+	hayIncrementoMora,
+} from "@/lib/cobros/plantillas-mensajes";
+import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
 	tienePromesaActiva,
@@ -167,6 +175,18 @@ interface CasoDetalle {
 	montoEnMora?: string | number | null;
 	diasMoraMaximo?: number | null;
 	cuotasVencidas?: number | null;
+	/** Mora ya pagada / condonada de las cuotas en atraso (ledger de mora). */
+	moraPagada?: string | null;
+	moraCondonada?: string | null;
+	/** Saldo real de las cuotas vencidas + mora, ya formateado por el server. */
+	montoAdeudado?: string | null;
+	/** Mora proporcional (ver VariablesPlantilla en plantillas-mensajes). */
+	expectativaMora?: string | null;
+	expectativaMoraDiaria?: string | null;
+	incrementoDiarioMora?: string | null;
+	incrementoMaximoMensualMora?: string | null;
+	aseguradora?: string | null;
+	cabinaSeguro?: string | null;
 	cuotaConvenio?: string | number | null;
 	convenioActivo?: {
 		convenioId?: string | number | null;
@@ -687,6 +707,18 @@ function RouteComponent() {
 			input: { creditoId: id },
 		}),
 		enabled: !!session && !!id,
+	});
+
+	// Proyección de mora del mes. Solo se pide si el crédito debe mora o tiene
+	// cuotas vencidas: en un crédito al día la tarjeta no se muestra.
+	const proyeccionMora = useQuery({
+		...orpc.getProyeccionMoraCarteraBack.queryOptions({
+			input: { numeroSifco: casoDetails.data?.numeroCreditoSifco || "" },
+		}),
+		enabled:
+			!!session &&
+			!!casoDetails.data?.numeroCreditoSifco &&
+			debeMostrarProyeccionMora(casoDetails.data),
 	});
 
 	// La lista que PINTA la tarjeta "Historial de Contactos": paginada de
@@ -1428,18 +1460,21 @@ function RouteComponent() {
 		placa: caso.vehiculoPlaca || "",
 		marcaLineaModelo:
 			`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim(),
-		montoAdeudado: (
-			Number(caso.montoEnMora || 0) +
-			Number(caso.cuotasVencidas || 0) * Number(caso.cuotaMensual || 0)
-		).toLocaleString("es-GT", {
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2,
-		}),
+		// Saldo real de las cuotas vencidas (parciales y recibos recortados) +
+		// mora, calculado en el server (getDetallesCreditoCarteraBack). Vacío =
+		// el modal bloquea las plantillas que lo anuncian.
+		montoAdeudado: caso.montoAdeudado || "",
 		cuotasAtraso: caso.cuotasVencidas ?? 0,
 		estadoMora: caso.estadoMora || undefined,
 		fechaInicio: caso.fechaInicio || null,
 		nombreAsesor: caso.asesor?.nombre || "",
 		telefonoAsesor: caso.asesor?.telefono || "",
+		expectativaMora: caso.expectativaMora || "",
+		expectativaMoraDiaria: caso.expectativaMoraDiaria || "",
+		incrementoDiarioMora: caso.incrementoDiarioMora || "",
+		incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora || "",
+		aseguradora: caso.aseguradora || "",
+		cabinaSeguro: caso.cabinaSeguro || "",
 	};
 
 	// Detectar si es vehículo migrado (todo N/A)
@@ -1664,11 +1699,21 @@ function RouteComponent() {
 				: motivoBloqueoVisita(bucketNumero, bucketPrefijo);
 	// Lo vencido (cuotas vencidas × cuota + mora): el «Pago total» de una
 	// visita, y la base del porcentaje del «Pago parcial + promesa».
-	const deudaVencidaCaso = deudaVencida({
-		cuotasVencidas: caso.cuotasVencidas,
-		cuota: caso.cuotaMensual,
-		mora: caso.montoEnMora,
-	});
+	// Merge con develop: el saldo real del server (`montoAdeudado`: recibos de
+	// las cuotas vencidas, con los abonos parciales descontados, + la mora de
+	// hoy) es lo que paga un «Pago total». La fórmula cuotas × cuota + mora
+	// queda de respaldo si el server no lo pudo calcular.
+	const montoAdeudadoReal = Number(
+		String(caso.montoAdeudado ?? "").replace(/,/g, ""),
+	);
+	const deudaVencidaCaso =
+		Number.isFinite(montoAdeudadoReal) && montoAdeudadoReal > 0
+			? montoAdeudadoReal
+			: deudaVencida({
+					cuotasVencidas: caso.cuotasVencidas,
+					cuota: caso.cuotaMensual,
+					mora: caso.montoEnMora,
+				});
 	const direccionesCliente = {
 		residencia: caso.direccionContacto?.trim() || null,
 		trabajo: datosLaborales.data
@@ -2473,6 +2518,17 @@ function RouteComponent() {
 										programada={visitaAbierta.programada ?? null}
 										direcciones={direccionesCliente}
 										deudaVencida={deudaVencidaCaso}
+										incrementoDiarioMora={
+											caso.cuotaConvenio == null &&
+											debeAnunciarCrecimientoMora({
+												montoEnMora: caso.montoEnMora,
+												incrementoDiarioMora: caso.incrementoDiarioMora,
+												incrementoMaximoMensualMora:
+													caso.incrementoMaximoMensualMora,
+											})
+												? (caso.incrementoDiarioMora ?? null)
+												: null
+										}
 										convenioBloqueo={convenioMotivoBloqueo}
 										bucketNumero={bucketNumero}
 										vehicleId={caso.vehicleId ?? null}
@@ -2750,6 +2806,40 @@ function RouteComponent() {
 												})}
 											</p>
 										</div>
+										{caso.moraPagada && caso.moraPagada !== "0.00" && (
+											<div className="space-y-2">
+												<div className="flex items-center gap-2 text-sm">
+													<Banknote className="h-4 w-4 text-muted-foreground" />
+													<span className="font-medium">
+														Mora ya pagada (cuotas en atraso):
+													</span>
+												</div>
+												<p className="text-green-600">
+													Q
+													{Number(caso.moraPagada).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</p>
+											</div>
+										)}
+										{caso.moraCondonada && caso.moraCondonada !== "0.00" && (
+											<div className="space-y-2">
+												<div className="flex items-center gap-2 text-sm">
+													<Banknote className="h-4 w-4 text-muted-foreground" />
+													<span className="font-medium">
+														Mora condonada (cuotas en atraso):
+													</span>
+												</div>
+												<p className="text-slate-600">
+													Q
+													{Number(caso.moraCondonada).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
+												</p>
+											</div>
+										)}
 										{caso.cuotaConvenio != null && (
 											<div className="space-y-2">
 												<div className="flex items-center gap-2 text-sm">
@@ -2981,10 +3071,46 @@ function RouteComponent() {
 													).toLocaleString()}
 												</p>
 											</div>
+											{/* La mora ya no es un bloque fijo del mes: sube todos los
+											    días. Sin este dato el asesor cotiza por teléfono el
+											    total de HOY, el cliente paga dos días después y queda
+											    un residuo que no cubre la cuota.
+											    Manda el TECHO, no el ritmo: el ritmo es el delta de UN
+											    día y la víspera del próximo vencimiento da 0 (la cuota
+											    vieja ya topó y la nueva todavía no vence) aunque la
+											    mora sí vaya a crecer. Y exige mora HOY: un crédito
+											    AL DÍA con su próxima cuota dentro de 30 días devuelve techo
+											    > 0, y sin ese chequeo la ficha le anunciaba un aumento a
+											    quien no debe nada. */}
+											{caso.cuotaConvenio == null &&
+												debeAnunciarCrecimientoMora({
+													montoEnMora: caso.montoEnMora,
+													incrementoDiarioMora: caso.incrementoDiarioMora,
+													incrementoMaximoMensualMora:
+														caso.incrementoMaximoMensualMora,
+												}) && (
+													<p className="mt-2 text-orange-700 text-xs">
+														{hayIncrementoMora(caso.incrementoDiarioMora)
+															? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`
+															: "Va a seguir subiendo"}
+														{hayIncrementoMora(
+															caso.incrementoMaximoMensualMora,
+														) &&
+															`, y puede aumentar hasta Q${caso.incrementoMaximoMensualMora} más en los próximos 30 días`}
+													</p>
+												)}
 										</div>
 									)}
 								</CardContent>
 							</Card>
+							{/* Proyección de mora del mes (se oculta sola si no hay mora ni atraso) */}
+							<ProyeccionMoraCard
+								montoEnMora={caso.montoEnMora}
+								cuotasVencidas={caso.cuotasVencidas}
+								proyeccion={proyeccionMora.data}
+								isLoading={proyeccionMora.isLoading}
+								isError={proyeccionMora.isError}
+							/>
 							{/* CB-026: Gestión temprana B1 — 3 intentos en 3 canales distintos.
 					    No se renderiza si el crédito no es B1, si no hay fecha de
 					    entrada al bucket, mientras cargan las queries que la

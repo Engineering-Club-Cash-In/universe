@@ -266,7 +266,7 @@ export const moraDelSnapshot = (command: PagaloImportCommand): string =>
  *
  * El motor de `procesarRegistroPago` consume PRIMERO la mora viva de
  * `moras_credito`. Si esa mora creció (o nació) después de generar los links
- * — corrió el job de las 23:59 — se tragaría parte del dinero de la cuota y
+ * — corrió el job de las 00:05 — se tragaría parte del dinero de la cuota y
  * el cliente, que pagó exactamente lo que le dijimos, quedaría con la cuota
  * abierta. Lo justo: el pago cubre la mora que el cliente vio; la diferencia
  * sigue debiéndose como mora.
@@ -288,13 +288,13 @@ export function calcularAjusteMoraPagalo(
 /**
  * Deja la mora viva igual al snapshot ANTES de registrar el pago, y devuelve
  * el callback que la repone DESPUÉS. La reposición existe para que el crédito
- * no amanezca ACTIVO unas horas: `procesarMoras` (23:59) recalcula la mora
+ * no amanezca ACTIVO unas horas: `procesarMoras` (00:05) recalcula la mora
  * desde cero (capital × 1.12% × cuotas vencidas), así que a la noche queda
  * la mora justa según las cuotas que sigan abiertas tras este pago.
  *
  * DEPENDE de que el pago quede VALIDADO en esta misma transacción: el cron
  * solo cuenta una cuota como cubierta con pago `validated`/`no_required`, así
- * que un pago `pending` que cruce las 23:59 hace que reponga la mora completa
+ * que un pago `pending` que cruce las 00:05 hace que reponga la mora completa
  * (la misma ventana que hoy tiene cualquier boleta manual con mora entre
  * registrar y validar). Hasta que el import valide de una vez (siguiente
  * slice, decisión de Daniel), el ajuste solo es exacto si conta valida antes

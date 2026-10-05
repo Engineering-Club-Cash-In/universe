@@ -42,7 +42,7 @@ import {
 // creditos.asesor_id / INSERT credito_asesor_historial.
 //
 // ✅ COBROS-02 Fase 4 — el traslado YA ES PERMANENTE. Antes no lo era: el motor
-// de las 23:59 volvía a derivar el bucket de las cuotas atrasadas y un crédito
+// de las 00:05 volvía a derivar el bucket de las cuotas atrasadas y un crédito
 // con 2 cuotas mandado a B4 hoy amanecía en B2. Ahora el traslado además pone el
 // estado `EN_RECUPERACION`, que el catálogo declara como PISO de B4
 // (`buckets.estados_piso`): el crédito nunca baja de ahí, pero SÍ sube a B5 si
@@ -280,7 +280,7 @@ export async function enviarARecuperacionVehiculo(params: {
       if (!tomados?.moras || !tomados?.convenio || !tomados?.credito) {
         throw new RecuperacionAbortada(
           409,
-          "[ERROR] Hay un proceso de buckets trabajando sobre la cartera en este momento (moras 23:59 / convenios 00:30). Intentá de nuevo en unos minutos.",
+          "[ERROR] Hay un proceso de buckets trabajando sobre la cartera en este momento (moras 00:05 / convenios 00:30). Intente de nuevo en unos minutos.",
         );
       }
 
@@ -508,7 +508,7 @@ export async function enviarARecuperacionVehiculo(params: {
         success: false,
         status: 409,
         message:
-          "[ERROR] El job de buckets está corriendo sobre este crédito. Esperá a que termine (23:59 moras / 00:30 convenios) e intentá de nuevo.",
+          "[ERROR] El proceso de buckets está corriendo sobre este crédito. Espere a que termine (moras 00:05 / convenios 00:30) e intente de nuevo.",
       };
     }
     throw err;

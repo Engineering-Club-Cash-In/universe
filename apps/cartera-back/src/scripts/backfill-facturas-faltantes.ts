@@ -3,8 +3,12 @@
 // Fuente de verdad: SAT (GET_DOCUMENT por UUID vía COFIDI).
 //
 // USO:
-//   bun run src/scripts/backfill-facturas-faltantes.ts            (dry-run: consulta + parsea + matchea, NO inserta)
-//   bun run src/scripts/backfill-facturas-faltantes.ts --insert   (inserta en facturas_electronicas)
+//   TZ=UTC bun run src/scripts/backfill-facturas-faltantes.ts <UUID> [<UUID>...]          (dry-run)
+//   TZ=UTC bun run src/scripts/backfill-facturas-faltantes.ts <UUID> --insert [--pdf]
+//
+// TZ=UTC es OBLIGATORIO (el script aborta si no): convertirAGuatemala resta 6h
+// fijas asumiendo un proceso en UTC como el server de prod. Desde una laptop en
+// America/Guatemala la fecha_certificacion queda 6h antes, cruzando días y meses.
 //
 // Requiere env CUBE_COFIDI_URL + credenciales por emisor.
 // SUPABASE_DB_URL debe apuntar a la BD destino (LOCAL para probar).
@@ -29,11 +33,34 @@ import {
 const INSERT = process.argv.includes("--insert");
 const PDF = process.argv.includes("--pdf");
 
-// UUIDs reportados por conta (en SAT, faltan en la BD).
-const UUIDS: string[] = [
-  "5086B80E-15C8-4C50-B8BB-D207F448F8FC",
-  "C86DAB89-6341-4D13-B916-C3A7990265A2",
-];
+// El offset del proceso decide dónde cae fecha_certificacion. Abortar es mejor
+// que escribir en prod una fecha corrida 6h.
+if (new Date().getTimezoneOffset() !== 0) {
+  console.error(
+    `❌ Este script debe correr en UTC (offset actual: ${-new Date().getTimezoneOffset() / 60}h).\n` +
+      `   Reintentar con: TZ=UTC bun run src/scripts/backfill-facturas-faltantes.ts ...`
+  );
+  process.exit(1);
+}
+
+// UUIDs reportados por conta (en SAT, faltan en la BD), por CLI.
+const UUID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+const UUIDS: string[] = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+
+if (UUIDS.length === 0) {
+  console.error(
+    `❌ Falta al menos un UUID.\n` +
+      `   Uso: TZ=UTC bun run src/scripts/backfill-facturas-faltantes.ts <UUID> [<UUID>...] [--insert] [--pdf]`
+  );
+  process.exit(1);
+}
+
+// Un typo se reportaría como "no encontrada en SAT" y enmascararía el error.
+const invalidos = UUIDS.filter((u) => !UUID_RE.test(u));
+if (invalidos.length > 0) {
+  console.error(`❌ UUID con formato inválido: ${invalidos.join(", ")}`);
+  process.exit(1);
+}
 
 // Overrides de pago_id verificados a mano (cuando hay >1 candidato por venc).
 // El script exige que el override esté entre los candidatos antes de usarlo.
@@ -283,9 +310,15 @@ async function main() {
   console.log(`   Emisores a probar: ${SAT_CONFIGS.map(([n]) => n).join(", ")}`);
   console.log(`   BD destino: ${process.env.SUPABASE_DB_URL?.replace(/:[^:@]+@/, ":****@")}\n`);
 
+  const fallidos: string[] = [];
+
   for (const uuid of UUIDS) {
     console.log(`\n========== UUID ${uuid} ==========`);
-
+    // Aislado por UUID: un documento no parseable (p.ej. exento, sin
+    // dte:TotalImpuestos) tiraba TypeError y abortaba main(), dejando el resto
+    // del lote sin backfillear y sin mensaje — el estado huérfano que este
+    // script existe para arreglar.
+    try {
     const yaExiste = await db
       .select({ id: facturas_electronicas.factura_id })
       .from(facturas_electronicas)
@@ -377,9 +410,17 @@ async function main() {
 
     const [ins] = await db.insert(facturas_electronicas).values(fila).returning();
     console.log(`      💾 INSERTADA -> factura_id=${ins.factura_id}, pago_id=${ins.pago_id}, ${ins.serie}-${ins.numero}, Q${ins.monto_total}`);
+    } catch (e) {
+      fallidos.push(uuid);
+      console.error(`   💥 Falló este UUID (sigo con el resto): ${(e as Error).message}`);
+    }
   }
 
   console.log(`\n✅ Fin (${INSERT ? "INSERT" : "DRY-RUN"}).`);
+  if (fallidos.length > 0) {
+    console.error(`⚠️ ${fallidos.length} UUID con error: ${fallidos.join(", ")}`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 

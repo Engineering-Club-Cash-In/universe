@@ -1,4 +1,4 @@
-import { db } from "../database/index";
+import { db, lockPool } from "../database/index";
 import { CARTERA_SCHEMA, SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   creditos,
@@ -14,22 +14,39 @@ import {
   abonos_capital,
   historico_liquidaciones_espejo,
   compras_credito_inversionista,
+  ajuste_fecha_ideal_pago,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { anularPagoYRestituirMoraSerializado } from "./anularPagoMora";
+import { CreditWithoutInvestorMirrorError } from "../utils/espejoInversionistasGuard";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
-import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
+import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
+import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+} from "../utils/pendingReturnGuard";
+import { esCube } from "../utils/devolucionCompletada";
+import {
+  resolverAbonosNoLiquidados,
+  type AbonoNoLiquidado,
+} from "../utils/abonosNoLiquidados";
+
+export { resolverAbonosNoLiquidados, type AbonoNoLiquidado };
 
 export const crearResumenAbonosCuota = (input: Parameters<
   typeof calcularResumenAbonosCuota
@@ -47,6 +64,89 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
+
+// `esCube` se importa de devolucionCompletada.ts (no se redefine acá): debe
+// ser EXACTAMENTE el mismo criterio que usa abonosCapital.ts al decidir si
+// generar una CANCELACION, o una fila histórica de CUBE con ID distinto
+// pasaría el filtro de creación allá y quedaría igual excluida de todo
+// cálculo acá — el mismo dato fantasma que este guard evita.
+
+/**
+ * ¿A este inversionista le toca la devolución COMPLETA de su capital en este
+ * pago (crédito en VERIFICADO, o el inversionista saliendo del todo)?
+ *
+ * Único punto que decide esta regla — antes vivía repetida en tres lugares
+ * de insertPagosCreditoInversionistas (el cálculo de abono_capital, el `if`
+ * que lo aplica, y lo que se le pasa a resolverAbonosNoLiquidados), lo que
+ * dejaba abierta la posibilidad de que un cambio futuro actualizara uno y se
+ * olvidara de los otros dos.
+ *
+ * NUNCA es true para CUBE: CUBE es quien absorbe la cartera cuando los demás
+ * inversionistas salen, jamás "sale" él mismo. Tratarlo como saliente le
+ * devolvería su propio capital como si estuviera abandonando el crédito —
+ * exactamente el bug que dejó ~Q1.9M en filas CANCELACION a nombre de CUBE
+ * en producción, ninguna liquidada porque CUBE no pasa por ese flujo.
+ */
+const esDevolucionCompleta = (
+  inv: { inversionista_id: number; nombre: string; status_inversionista?: string | null },
+  estadoDevolucionCredito: string | null | undefined,
+): boolean =>
+  !esCube(inv) &&
+  (estadoDevolucionCredito === "VERIFICADO" || inv.status_inversionista === "pendiente_devolucion");
+
+type PendingReturnLockRow = {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  estadoDevolucion: string | null;
+};
+
+async function withPendingReturnCreditLocks<T>(
+  creditoIds: number[],
+  callback: () => Promise<T>,
+): Promise<T> {
+  if (creditoIds.length === 0) return callback();
+
+  const connection = await lockPool.connect();
+  let transactionStarted = false;
+
+  try {
+    await connection.query("BEGIN");
+    transactionStarted = true;
+
+    const { rows: creditosRevalidados } = await connection.query<PendingReturnLockRow>(
+      `SELECT
+        credito_id AS "creditoId",
+        numero_credito_sifco AS "numeroCreditoSifco",
+        estado_devolucion AS "estadoDevolucion"
+      FROM ${CARTERA_SCHEMA}.creditos
+      WHERE credito_id = ANY($1::int[])
+      ORDER BY credito_id
+      FOR NO KEY UPDATE`,
+      [creditoIds],
+    );
+
+    const warningRevalidado = buildPendingReturnAuthorizationWarning(creditosRevalidados);
+    if (warningRevalidado) {
+      throw new PendingReturnAuthorizationError(warningRevalidado);
+    }
+
+    const result = await callback();
+    await connection.query("COMMIT");
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("❌ Error revirtiendo locks de devolución:", rollbackError);
+      }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
 
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -117,6 +217,12 @@ export async function getAllPagosWithCreditAndInversionistas(
         observaciones: pagos_credito.observaciones,
         usuario_id: creditos.usuario_id,
         numero_credito_sifco: creditos.numero_credito_sifco,
+        // Estado del crédito: la pantalla de pagos resalta las cuotas en atraso
+        // con el MISMO criterio que la mora (isOverdueInstallmentForMora), que
+        // excluye EN_CONVENIO / INCOBRABLE / CANCELADO / PENDIENTE_CANCELACION
+        // / CAIDO. Sin este campo el front pintaba "Atrasada" en créditos que
+        // por política no devengan mora.
+        statusCredit: creditos.statusCredit,
         usuario_nombre: usuarios.nombre,
         usuario_categoria: usuarios.categoria,
         usuario_nit: usuarios.nit,
@@ -209,6 +315,25 @@ export async function getAllPagosWithCreditAndInversionistas(
           })
         : [];
 
+    // 4.5 Ingreso adicional por fecha ideal de pago: a lo sumo 1 fila por
+    // crédito, y solo aparece acá si su pago_id coincide con alguno de esta
+    // lista (o sea, si este pago fue el que lo cobró).
+    const ajustesFechaIdealArr =
+      pagoIds.length > 0
+        ? await db
+            .select({
+              pago_id: ajuste_fecha_ideal_pago.pago_id,
+              monto_total: ajuste_fecha_ideal_pago.monto_total,
+            })
+            .from(ajuste_fecha_ideal_pago)
+            .where(inArray(ajuste_fecha_ideal_pago.pago_id, pagoIds))
+        : [];
+    const ajusteFechaIdealPorPagoId = Object.fromEntries(
+      ajustesFechaIdealArr
+        .filter((a): a is typeof a & { pago_id: number } => a.pago_id !== null)
+        .map((a) => [a.pago_id, a.monto_total])
+    );
+
     // 5. Mapear por cada pago
     const result = pagos.map((pago) => {
       // Todos los inversionistas del crédito (siempre array, aunque esté vacío)
@@ -232,7 +357,10 @@ export async function getAllPagosWithCreditAndInversionistas(
         }));
 
       return {
-        pago,
+        pago: {
+          ...pago,
+          ajusteFechaIdealMonto: ajusteFechaIdealPorPagoId[pago.pago_id] ?? null,
+        },
         inversionistasData, // SIEMPRE array (puede ser vacío)
         pagosInversionistas, // SIEMPRE array (puede ser vacío)
       };
@@ -342,6 +470,7 @@ export async function getPayments(
     totalPages: Math.ceil(Number(count) / perPage),
   };
 }
+
 /**
  * Inserta los registros en pagos_credito_inversionistas para cada inversionista,
  * repartiendo los abonos según el porcentaje de participación (Big.js).
@@ -550,8 +679,7 @@ export async function insertPagosCreditoInversionistas(
     console.log(`   Nombre: ${inv.nombre}`);
     console.log(`   inversionista_id: ${inv.inversionista_id}`);
 
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
@@ -691,14 +819,14 @@ export async function insertPagosCreditoInversionistas(
     let ivaConCompras: Big | null = null;
 
     if (esMesAnterior) {
-      // Días totales del mes de la fecha de inicio (ej: enero = 31)
-      const diasDelMes = new Date(
-        fechaInicio!.getFullYear(),
-        fechaInicio!.getMonth() + 1,
-        0
-      ).getDate();
-      const diaInicio = fechaInicio!.getDate(); // ej: 7
-      const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
+      // Días totales del mes de la fecha de inicio (ej: enero = 31) y días que le
+      // tocan al inversionista. El piso de 1 día vive en el helper (ver
+      // utils/functions/diasParticipacion.ts): si la fecha cae el ÚLTIMO día del
+      // mes, la resta daría 0 y cobraría cero interés pese a haber participado.
+      // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo.
+      const { diasDelMes, diasProporcionales } = calcularVentanaProporcional(
+        fechaInicio!
+      );
 
       // ¿El inversionista ya era partícipe y además hizo compras este mes?
       // Buscamos compras de tipo 'compra_cartera' completadas en el mes anterior.
@@ -825,9 +953,13 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    const aplicarDevolucionCube = currentCredit?.estado_devolucion === 'VERIFICADO';
+    // Ver esDevolucionCompleta (arriba del archivo) para la regla completa y
+    // por qué nunca aplica a CUBE. `aplicarDevolucionCube` se conserva aparte
+    // solo para distinguir en el log si el motivo fue el crédito en
+    // VERIFICADO o el inversionista en pendiente_devolucion.
+    const aplicarDevolucionCube = !isCube && currentCredit?.estado_devolucion === 'VERIFICADO';
 
-    if (aplicarDevolucionCube || inv.status_inversionista === "pendiente_devolucion") {
+    if (esDevolucionCompleta(inv, currentCredit?.estado_devolucion)) {
       // 🆕 CASO ESPECIAL:
       // - crédito con devolucion_cube=true, o
       // - inversionista en pendiente_devolucion.
@@ -880,24 +1012,6 @@ export async function insertPagosCreditoInversionistas(
       );
     }
 
-    if (updateCredito) {
-      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
-      console.log(`      credito_id: ${credito_id}`);
-      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
-      console.log(`      addition: false (RESTA)`);
-      console.log(`      inversionista_id: ${inv.inversionista_id}`);
-
-      await processAndReplaceCreditInvestors(
-        credito_id,
-        abono_capital.toNumber(),
-        false,
-        inv.inversionista_id,
-        true
-      );
-    } else {
-      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
-    }
-
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
     console.log(
@@ -916,41 +1030,38 @@ export async function insertPagosCreditoInversionistas(
         )
       );
 
-    let abonoCapitalId: number | null = null;
     // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
     // Se marcan con el id de la fila después del insert: son "los que entraron en
     // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
-    let abonoIdsConsumidos: number[] = [];
-    if (abonosNoLiquidados.length > 0) {
-      if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
-        // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
-        // su abono_capital ya es el monto_aportado completo del espejo.
-        // Sumar abonos pendientes provocaría doble conteo.
-        console.log(
-          `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
-            `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
-            `ni se linkea abono_capital_id)`
-        );
-      } else {
-        let montoAbono = new Big(0);
-        for (const abono of abonosNoLiquidados) {
-          if (abono.tipo === "CAPITAL") {
-            montoAbono = montoAbono.plus(abono.monto);
-          } else if (abono.tipo === "CANCELACION") {
-            // colocar el monto aportado del espejo como abono a capital, para que se liquide aunque el abono sea de cancelación
-            abono_capital = new Big(inv.monto_aportado || 0);
-          }
-        }
-        if (!montoAbono.eq(0)) {
-          abono_capital = abono_capital.plus(montoAbono);
-        }
-        abonoCapitalId = abonosNoLiquidados[0].abono_id;
-        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
-        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
+    //
+    // La decisión de qué sumar y qué marcar como consumido vive en
+    // resolverAbonosNoLiquidados (arriba de esta función): CUBE nunca sale
+    // del crédito, así que una CANCELACION a su nombre (basura de una
+    // corrida anterior del bug de la línea de aplicarDevolucionCube) no se
+    // suma ni se marca consumida — si se marcara, quedaría `liquidado=true`
+    // sin que su monto haya entrado en ningún cálculo real.
+    const resuelto = resolverAbonosNoLiquidados({
+      abonosNoLiquidados,
+      abonoCapitalBase: abono_capital,
+      montoAportado: inv.monto_aportado,
+      devolucionCompleta: esDevolucionCompleta(inv, currentCredit?.estado_devolucion),
+      isCube,
+    });
+    abono_capital = resuelto.abonoCapital;
+    const abonoCapitalId = resuelto.abonoCapitalId;
+    const abonoIdsConsumidos = resuelto.abonoIdsConsumidos;
 
-        console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
-        console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
-      }
+    if (resuelto.saltado) {
+      // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
+      // su abono_capital ya es el monto_aportado completo del espejo.
+      // Sumar abonos pendientes provocaría doble conteo.
+      console.log(
+        `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
+          `abono(s) a capital pendiente(s) (no se suman al abono_capital; ` +
+          `marcados ${abonoIdsConsumidos.length} para liquidar)`
+      );
+    } else if (abonosNoLiquidados.length > 0) {
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): abono_capital ahora ${abono_capital.toString()} (tipo: ${abonosNoLiquidados[0].tipo})`);
     }
 
     // Validation 2: abono_capital must not exceed monto_aportado (prevents negative balance)
@@ -971,6 +1082,11 @@ export async function insertPagosCreditoInversionistas(
       }
     }
 
+    // Se actualiza en la transacción atómica de abajo (Codex P1 fix):
+    // Descontar el espejo dentro de db.transaction(tx) garantiza que si falla
+    // la inserción de las fotos o el marcado de abonos, el débito al saldo del
+    // espejo también hace rollback y no se descuenta capital sin foto de pago.
+
     const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
@@ -989,8 +1105,9 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
-      // No es columna del espejo: se separa antes del insert (ver abajo).
+      // No son columnas del espejo: se separan antes del insert (ver abajo).
       _abonoIdsConsumidos: abonoIdsConsumidos,
+      _updateCredito: updateCredito,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -1010,25 +1127,42 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  // `_abonoIdsConsumidos` y `_updateCredito` son internos, no son columnas: se separan antes del insert.
   const filas = resolvedInserts.map(
-    ({ _abonoIdsConsumidos, ...fila }) => fila
+    ({ _abonoIdsConsumidos, _updateCredito, ...fila }) => fila
   );
 
-  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
-  //    transacción: o se guardan los dos o ninguno.
+  // 5. Descontar del espejo, insertar la foto de pagos y marcar los abonos consumidos,
+  //    TODO ATADO en una sola transacción: o se aplican todos o ninguno hace commit.
   //
-  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
-  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
-  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
-  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
-  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
-  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
-  //    mismo capital al inversionista.
-  //
-  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
-  //    rehace limpio la próxima vez.
+  //    🔴 Atomicidad garantizada (Codex P1 fix): el débito a creditos_inversionistas_espejo
+  //    (processAndReplaceCreditInvestors) corre dentro de la misma transacción usando `tx`.
+  //    Si el insert del espejo o el update de abonos_capital falla, el descuento al saldo
+  //    se revierte automáticamente (rollback) en vez de quedar descontado sin foto de pago.
   await db.transaction(async (tx) => {
+    // 5a. Descontar del espejo atómicamente con el abono_capital YA final
+    for (const origen of resolvedInserts) {
+      if (origen._updateCredito) {
+        console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors (en transacción):`);
+        console.log(`      credito_id: ${credito_id}`);
+        console.log(`      abono_capital: ${Number(origen.abono_capital)}`);
+        console.log(`      addition: false (RESTA)`);
+        console.log(`      inversionista_id: ${origen.inversionista_id}`);
+
+        await processAndReplaceCreditInvestors(
+          credito_id,
+          Number(origen.abono_capital),
+          false,
+          origen.inversionista_id,
+          true,
+          tx as any
+        );
+      } else {
+        console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo para inv ${origen.inversionista_id}`);
+      }
+    }
+
+    // 5b. Insertar fotos en pagos_credito_inversionistas_espejo
     const filasInsertadas = await tx
       .insert(pagos_credito_inversionistas_espejo)
       .values(filas)
@@ -1037,8 +1171,7 @@ export async function insertPagosCreditoInversionistas(
         inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
       });
 
-    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
-    // índice, para no depender del orden que devuelve el INSERT.
+    // 5c. Vincular abonos consumidos con pago_espejo_id
     for (const insertada of filasInsertadas) {
       const origen = resolvedInserts.find(
         (r) => r.inversionista_id === insertada.inversionista_id
@@ -1060,9 +1193,78 @@ export async function insertPagosCreditoInversionistas(
   return filas;
 }
 
+// Fila del reparto congelado al facturar (pagos_credito_inversionistas_facturado).
+export type FilaRepartoCongelado = {
+  inversionista_id: number | string;
+  abono_interes: string | number;
+  abono_iva_12: string | number;
+  porcentaje_participacion?: string | number | null;
+};
+
+/**
+ * 🔒 Aplica el reparto de interés CONGELADO al facturar sobre el que se acaba de
+ * calcular con el roster vivo.
+ *
+ * Es reemplazo TOTAL, no fila por fila. Si solo se pisaran los inversionistas que
+ * siguen en el crédito:
+ *   - al que entró en lugar de uno que se fue ya se le calculó esa misma parte
+ *     con el roster de hoy → el interés se pagaría dos veces;
+ *   - al que se fue no le quedaría fila de pci → nunca se le liquidaría lo que
+ *     sí se le facturó.
+ *
+ * Regla: quien no estaba el día de la factura no recibe interés de ese pago
+ * (aunque hoy esté en el crédito), y quien estaba lo recibe aunque ya se haya
+ * ido. El CAPITAL no se toca acá: ese sí va con el roster vivo.
+ *
+ * Sin congelado devuelve el reparto vivo tal cual (pagos anteriores al sellado).
+ */
+export function aplicarRepartoCongelado(args: {
+  congelado: FilaRepartoCongelado[];
+  splitVivo: Map<number, InvSplitRow>;
+  idsEnElCredito: Set<number>;
+}): {
+  split: Map<number, InvSplitRow>;
+  salidos: {
+    inversionista_id: number;
+    abono_interes: Big;
+    abono_iva_12: Big;
+    porcentaje_participacion: string;
+  }[];
+} {
+  if (args.congelado.length === 0) {
+    return { split: args.splitVivo, salidos: [] };
+  }
+
+  const split = new Map<number, InvSplitRow>();
+  const salidos: {
+    inversionista_id: number;
+    abono_interes: Big;
+    abono_iva_12: Big;
+    porcentaje_participacion: string;
+  }[] = [];
+
+  for (const row of args.congelado) {
+    const invId = Number(row.inversionista_id);
+    const abono_interes = new Big(row.abono_interes ?? 0);
+    const abono_iva_12 = new Big(row.abono_iva_12 ?? 0);
+    split.set(invId, { inversionista_id: invId, abono_interes, abono_iva_12 });
+
+    if (!args.idsEnElCredito.has(invId)) {
+      salidos.push({
+        inversionista_id: invId,
+        abono_interes,
+        abono_iva_12,
+        porcentaje_participacion: String(row.porcentaje_participacion ?? "0"),
+      });
+    }
+  }
+
+  return { split, salidos };
+}
+
 type InvestorPaymentDb = Pick<
   typeof db,
-  "query" | "select" | "insert" | "update"
+  "query" | "select" | "insert" | "update" | "execute"
 >;
 
 export async function insertPagosCreditoInversionistasV2(
@@ -1240,10 +1442,37 @@ export async function insertPagosCreditoInversionistasV2(
   });
   const splitPorInv = new Map(splitInteres.map((s) => [s.inversionista_id, s]));
 
+  // 6b. 🔒 Reparto CONGELADO: si el pago ya se facturó siendo PARCIAL, su reparto
+  //     de interés quedó sellado ese día (cofidi → pagos_credito_inversionistas_facturado).
+  //     No se recalcula con el roster de hoy: entre el parcial y este cierre pudo
+  //     entrar una reinversión o una compra de cartera y el pci quedaría distinto
+  //     de los DTEs ya emitidos. El CAPITAL sí sigue repartiéndose con el roster
+  //     vivo (es lo correcto: se abona sobre la posición actual).
+  const congeladoRes = await txOrDb.execute(sql`
+    SELECT inversionista_id, abono_interes, abono_iva_12, porcentaje_participacion
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado
+    WHERE pago_id = ${pago_id}
+  `);
+  const congeladoRows = ((congeladoRes as any).rows ?? []) as FilaRepartoCongelado[];
+
+  const { split: repartoInteres, salidos: congeladosSalidos } =
+    aplicarRepartoCongelado({
+      congelado: congeladoRows,
+      splitVivo: splitPorInv,
+      idsEnElCredito: new Set(
+        inversionistasWithName.map((inv) => inv.inversionista_id)
+      ),
+    });
+
+  if (congeladoRows.length > 0) {
+    console.log(
+      `🔒 Pago ${pago_id}: interés tomado del reparto congelado al facturar (${congeladoRows.length} inversionista(s)), no del roster actual.`
+    );
+  }
+
   const inserts = [];
   for (const inv of inversionistasWithName) {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     const montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
 
@@ -1253,10 +1482,12 @@ export async function insertPagosCreditoInversionistasV2(
     // Capital: SIEMPRE por porcentaje general (sin cambios respecto al flujo original).
     const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
 
-    // Interés / IVA: resultado de la función pura.
-    const split = splitPorInv.get(inv.inversionista_id)!;
-    const abonoInteresInv = split.abono_interes;
-    const abonoIvaInv = split.abono_iva_12;
+    // Interés / IVA: resultado de la función pura, o del congelado si lo hay.
+    // Puede faltar: con reparto congelado, quien entró al crédito DESPUÉS de la
+    // factura no recibe interés de este pago (sí capital, que es del roster vivo).
+    const split = repartoInteres.get(inv.inversionista_id);
+    const abonoInteresInv = split?.abono_interes ?? new Big(0);
+    const abonoIvaInv = split?.abono_iva_12 ?? new Big(0);
 
     // Solo actualizar monto_aportado si hubo abono a capital
     if (abonoCapitalInv.gt(0)) {
@@ -1283,6 +1514,28 @@ export async function insertPagosCreditoInversionistasV2(
       cuota: currentPago.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
     });
+  }
+
+  // 6c. 🔒 Inversionistas que estaban el día de la factura y ya NO están en el
+  //     crédito (compra de cartera, reemplazo). Sin esto su parte facturada se
+  //     perdería: el loop de arriba solo recorre el roster vivo, así que no
+  //     tendrían fila de pci y nunca se les liquidaría lo que se les facturó.
+  //     Capital 0 — ya no tienen posición sobre la cual abonar.
+  for (const salido of congeladosSalidos) {
+    inserts.push({
+      pago_id,
+      inversionista_id: salido.inversionista_id,
+      credito_id,
+      abono_capital: "0",
+      abono_interes: salido.abono_interes.toString(),
+      abono_iva_12: salido.abono_iva_12.toString(),
+      porcentaje_participacion: salido.porcentaje_participacion,
+      cuota: currentPago.cuota ?? "0",
+      estado_liquidacion: "NO_LIQUIDADO" as const,
+    });
+    console.log(
+      `🔒 Pago ${pago_id}: inversionista ${salido.inversionista_id} ya no está en el crédito pero se le facturó — se conserva su fila de pci con capital 0.`
+    );
   }
 
   // 7. Insertar/upsert en pagos_credito_inversionistas
@@ -1568,6 +1821,7 @@ export async function insertarPago({
       credito_id: creditData.credito_id,
       monto_cambio: Number(mora),
       tipo: "DECREMENTO", // 👈 bajamos la mora porque el cliente ya pagó
+      motivo: `Registro de pago #${nuevoPago?.pago_id} (crédito ${numero_credito_sifco}, cuota ${numero_cuota}): mora cobrada en la boleta`,
     });
   }
 
@@ -1637,8 +1891,7 @@ export async function insertPagosCreditoInversionistasSpecial(
   );
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = inversionistasWithName.map(async (inv, idx) => {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     let abono_universo = new Big(0);
     let porcentaje = new Big(0);
@@ -1696,33 +1949,339 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
-  // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
-  // Falsear un pago no debe descontar el aporte del crédito/espejo.
-  insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
-  // Actualizar el estado del pago a falso
-  const result = await db
-    .update(pagos_credito)
-    .set({
-      pagado: false,
-      paymentFalse: true,
-    })
+
+  /**
+   * Si el pago YA está declarado falso, salir ANTES de tocar nada.
+   *
+   * No es el guard de integridad —ese es el `paymentFalse = false` del UPDATE
+   * de `anularPagoYRestituirMora`, que es atómico y sí decide—. Este de acá
+   * hace dos cosas que aquél no puede:
+   *
+   *   * convierte el reintento inocente en un `updatedCount: 0` honesto en vez
+   *     del 400 que tira el UPDATE cuando no encuentra fila, que suena a "no
+   *     pasó nada" e invita a otro clic;
+   *   * corre la red de seguridad del ajuste por fecha ideal (abajo).
+   *
+   * OJO al leer esto contra la versión anterior: el argumento que justificaba
+   * esta salida temprana era que `insertPagosCreditoInversionistas` corría
+   * PRIMERO, no es idempotente, y una segunda llamada duplicaba el espejo
+   * antes de chocar con el guard. Ese orden se invirtió (ver el bloque de
+   * abajo): hoy la anulación va primero y su throw ya impide que los espejos
+   * se escriban una segunda vez. La salida temprana queda por las dos razones
+   * de arriba, no por aquélla.
+   */
+  const [yaFalso] = await db
+    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .from(pagos_credito)
     .where(
       and(
         eq(pagos_credito.pago_id, pago_id),
         eq(pagos_credito.credito_id, credito_id)
       )
-    );
+    )
+    .limit(1);
 
-  // 🚨 Si no se actualizó ningún registro, lanza error controlado
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      "No payment found to mark as false with the given criteria"
-    );
+  if (!yaFalso) {
+    throw new Error("No payment found to mark as false with the given criteria");
   }
+  if (yaFalso.paymentFalse) {
+    // Antes de salir, limpiar el ajuste por fecha ideal — sí, otra vez.
+    //
+    // Es la red de seguridad de las filas que quedaron a medias: el reset vivía
+    // DESPUÉS del commit de la transacción de abajo, así que si esa consulta
+    // fallaba la boleta quedaba commiteada como falsa con el ajuste todavía
+    // marcado como cobrado, y el reintento entraba justo por acá y se iba sin
+    // limpiar nada. El ajuste quedaba cobrado para siempre apuntando a un pago
+    // que nunca entró, y ningún pago futuro se lo volvía a cobrar al cliente.
+    //
+    // Correrlo de más no cuesta nada: el UPDATE filtra por el `pago_id` de ESTE
+    // pago invalidado, así que en el caso normal no encuentra filas, y nunca
+    // puede pisar un ajuste que un pago posterior ya reclamó (ese apunta a otro
+    // `pago_id`). Va fuera de transacción a propósito: es una sola sentencia
+    // sobre a lo sumo una fila, toma y suelta su candado sola y no puede entrar
+    // en un ciclo de deadlock.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+
+    // Y la SEGUNDA red de seguridad, por el mismo motivo y con la misma forma:
+    // si la boleta ya está falsa pero NO tiene pagos espejo, escribirlos ahora.
+    //
+    // Es el agujero que abrió invertir el orden. La anulación commitea primero;
+    // si el paso de espejos falla después —un error transitorio de base—, el
+    // router devuelve 400, el operador reintenta, y el reintento entraba justo
+    // por acá y se iba con un 200 `updatedCount: 0`. Éxito aparente sobre un
+    // estado a medias: boleta falsa, mora restituida, rubros devueltos… y el
+    // espejo del inversionista sin escribir, para siempre, porque ninguna otra
+    // ruta lo repara. Con el orden viejo esto no podía pasar (los espejos iban
+    // primero y su fallo dejaba el pago sin marcar), así que la salida temprana
+    // tiene que hacerse cargo de lo que el orden nuevo dejó de garantizar.
+    //
+    // Correrlo de más no cuesta nada, y acá está el porqué: el guard es sobre
+    // ESTE `pago_id`, así que en el caso normal encuentra sus filas y no hace
+    // nada. Y tiene que ser un guard de existencia y no un `ON CONFLICT`:
+    // `pagos_credito_inversionistas_espejo` NO tiene unicidad por
+    // `(pago_id, inversionista_id)` —el espejo se regenera por período y ya hay
+    // pares repetidos legítimos en la base—, así que lo único que impide
+    // duplicar es no volver a entrar cuando ya hay filas.
+    //
+    // «Cero filas» es un test válido aunque haya un caso que legítimamente
+    // escribe cero: el crédito cuyo único inversionista es CUBE. Ahí
+    // `insertPagosCreditoInversionistas` filtra con `excludeCube = true`, se
+    // queda sin nadie a quien repartirle y hace `return` limpio ANTES de
+    // escribir. O sea: re-ejecutarlo sobre ese crédito vuelve a no escribir
+    // nada y es inofensivo — cuesta tres consultas de lectura por reintento, no
+    // una fila duplicada.
+    // El chequeo de afuera es SOLO un atajo: si ya hay filas, no vale la pena
+    // ni pedir el candado. No decide nada —el que decide es el de adentro—,
+    // pero se queda por dos razones: ahorra el connect + BEGIN + FOR NO KEY
+    // UPDATE en el caso normal (que es el 99%: el reintento del operador sobre
+    // un pago que ya tiene su espejo), y sobre todo preserva el
+    // comportamiento de esta salida: un crédito en PENDIENTE_AUTORIZACION cuyo
+    // espejo YA está escrito sigue devolviendo su 200 `updatedCount: 0` en vez
+    // de tirar `PendingReturnAuthorizationError`, que es lo que pasaría si
+    // pidiéramos el candado siempre.
+    const [espejoYaEscrito] = await db
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+      .limit(1);
+
+    // ⚠️ EL CHEQUEO QUE DECIDE VA ADENTRO DEL CANDADO, NO AFUERA. No es cosmético.
+    //
+    // Con la lectura afuera, dos llamadas solapadas —un doble clic normal, sin
+    // ningún fallo transitorio de por medio— leían las dos «no hay filas»,
+    // hacían fila en el candado, y las dos escribían: filas de espejo
+    // DUPLICADAS, que aguas abajo duplican montos en liquidaciones y en la
+    // facturación de inversionistas. La ventana no es teórica: va desde el
+    // COMMIT de la anulación hasta el COMMIT del insert de espejos, y adentro
+    // corren un connect + BEGIN + SELECT FOR NO KEY UPDATE más las ~5-8
+    // consultas de `insertPagosCreditoInversionistas`. Son decenas o cientos
+    // de milisegundos.
+    //
+    // Por qué leer adentro del callback SÍ ve lo que escribió la llamada
+    // anterior, aunque el candado y la escritura vayan por conexiones
+    // distintas: `withPendingReturnCreditLocks` cande por su propia conexión
+    // (`lockPool`, BEGIN + FOR NO KEY UPDATE) y el callback escribe por `db`,
+    // que es OTRA conexión en autocommit. Justamente por eso funciona: cada
+    // sentencia de `db` es su propia transacción read-committed, así que toma
+    // una foto NUEVA al ejecutarse — no arrastra el snapshot de nada abierto
+    // antes. Y la escritura de la primera llamada commitea (el
+    // `db.transaction` de `insertPagosCreditoInversionistas` termina) ANTES de
+    // que su callback devuelva y el candado haga COMMIT, así que cuando la
+    // segunda llamada por fin toma el candado, las filas ya están visibles.
+    // Si el callback leyera por una conexión con una transacción ya abierta,
+    // esto no valdría.
+    //
+    // Lo que NO se puede hacer acá es abrir una transacción nuestra alrededor:
+    // el candado ya tiene `FOR NO KEY UPDATE` sobre esta fila de `creditos` y
+    // un `FOR UPDATE` nuestro sobre la misma fila se bloquearía contra él.
+    //
+    // El `withPendingReturnCreditLocks` es además el MISMO portero que el
+    // camino normal, y por la misma razón: un crédito en
+    // PENDIENTE_AUTORIZACION no debe generar pagos espejo ni siquiera
+    // "falsos".
+    if (!espejoYaEscrito) {
+      await withPendingReturnCreditLocks([credito_id], async () => {
+        const [espejoDelPago] = await db
+          .select({ id: pagos_credito_inversionistas_espejo.id })
+          .from(pagos_credito_inversionistas_espejo)
+          .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+          .limit(1);
+
+        if (espejoDelPago) return;
+
+        await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+      });
+    }
+
+    return {
+      message: "Payment was already marked as false",
+      updatedCount: 0,
+    };
+  }
+
+  // ── PRECONDICIÓN: el crédito tiene que poder generar sus pagos espejo ──────
+  //
+  // Se chequea ACÁ, antes de que la anulación commitee nada, porque el orden
+  // nuevo dejó al paso de espejos DESPUÉS del punto de no retorno. Si el
+  // crédito no tiene ni una fila en `creditos_inversionistas_espejo`,
+  // `insertPagosCreditoInversionistas` tira —es su primer guard— y para
+  // entonces la boleta ya está falsa, la mora restituida y los rubros
+  // devueltos. El operador ve un 400 y reintenta, y el reintento vuelve a
+  // fallar en el mismo lugar: queda un estado a medias que nadie repara.
+  //
+  // Por qué se PUEDE preguntar antes: la precondición es determinística y no
+  // depende de nada que la anulación cambie. La anulación toca `pagos_credito`,
+  // `rubros`/`rubros_pagos`, `moras_credito`/`moras_historial` y el ajuste por
+  // fecha ideal. Ninguna de esas escrituras crea ni borra filas de
+  // `creditos_inversionistas_espejo`: la participación de los inversionistas en
+  // un crédito no cambia porque se invalide una boleta. Así que lo que se lee
+  // acá vale igual un instante después, y adelantarlo no es una carrera: es
+  // preguntar lo mismo más temprano. (Que ESTA llamada además pase por
+  // `excludeCube` y pueda terminar escribiendo cero filas no cambia nada: el
+  // guard que puede TIRAR es el de "cero inversionistas en el espejo", que es
+  // exactamente lo que se pregunta acá.)
+  const [espejoDelCredito] = await db
+    .select({ credito_id: creditos_inversionistas_espejo.credito_id })
+    .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.credito_id, credito_id))
+    .limit(1);
+
+  if (!espejoDelCredito) {
+    throw new CreditWithoutInvestorMirrorError(credito_id);
+  }
+
+  // ── MARCA DE AGUA DEL ESPEJO, para que el camino normal tampoco duplique ───
+  //
+  // El camino normal NO puede duplicarse contra otro camino normal: el
+  // `paymentFalse = false` del WHERE de la anulación deja un solo ganador y al
+  // otro lo tira. Pero SÍ puede duplicarse contra la red de seguridad de la
+  // salida temprana de arriba: la anulación de A commitea, B entra, lee
+  // `paymentFalse = true`, se va por la salida temprana, y si B llega al
+  // candado ANTES que A, B escribe los espejos y después A los escribe otra
+  // vez. Es una ventana angosta —B tiene que hacer tres consultas mientras A
+  // no hace ninguna— pero es la misma familia de defecto y no cuesta nada
+  // cerrarla.
+  //
+  // Lo que NO se puede usar acá es el mismo guard de "¿hay filas de este
+  // pago?" que usa la salida temprana: en el camino normal el pago todavía era
+  // válido hasta hace un instante, así que puede tener filas de espejo
+  // LEGÍTIMAS y viejas, escritas por la regeneración por período
+  // (`obtenerCreditosConPagosPendientes` y `calcularYRegistrarPagosEspejo`,
+  // que llaman a esta misma función sobre pagos vivos). Con ese guard, anular
+  // un pago ya espejado se saltearía su propia escritura: plata que falta, no
+  // plata duplicada. Por eso lo que se guarda es una MARCA DE AGUA: solo se
+  // saltea si aparecieron filas DESPUÉS de este punto, que es justo lo que
+  // haría la red de seguridad de un B concurrente.
+  const [espejoPrevio] = await db
+    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .from(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+    .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+    .limit(1);
+  const marcaDeAguaEspejo = espejoPrevio?.id ?? 0;
+
+  // ── EL ORDEN ES LO QUE HACE ESTO REINTENTABLE ──────────────────────────────
+  //
+  // La anulación va PRIMERO y los espejos de inversionistas DESPUÉS. Al revés
+  // —como estaba— si la anulación fallaba (la restitución de mora tira a
+  // propósito para abortar su transacción) el caller reintentaba `falsePayment`
+  // entera y los espejos se volvían a escribir:
+  // `pagos_credito_inversionistas_espejo` NO tiene restricción de unicidad por
+  // pago e inversionista (verificado contra el esquema: solo la PK por `id`,
+  // `idx_pagos_liquidacion_espejo` y los dos parciales por `no liquidado`; la
+  // que sí existe, `uk_pago_inversionista`, es de la tabla vieja
+  // `pagos_credito_inversionistas`), así que quedaban filas DUPLICADAS sin
+  // liquidar, que aguas abajo duplican montos.
+  //
+  // Y no se puede juntar todo en UNA transacción, que sería lo natural:
+  // `withPendingReturnCreditLocks` abre su PROPIA conexión (`lockPool`) y toma
+  // `FOR NO KEY UPDATE` sobre la fila de `cartera.creditos` mientras corre su
+  // callback. `anularPagoYRestituirMoraSerializado` pide `FOR UPDATE` sobre esa
+  // MISMA fila —el candado que abre el orden del módulo de mora— desde la
+  // conexión de la transacción: los dos modos entran en conflicto, así que
+  // meter la anulación adentro del callback la dejaría esperando un candado que
+  // solo se suelta cuando el callback termine. Bloqueo contra uno mismo.
+  //
+  // Por eso el guard de devolución pendiente NO se movió acá adentro sino que
+  // se DUPLICÓ donde sí puede decidir a tiempo: la anulación lo revalida ella
+  // misma, sobre la fila del crédito que ya tiene candada, y aborta su
+  // transacción antes de escribir nada. El `withPendingReturnCreditLocks` de
+  // abajo sigue siendo el portero de los espejos.
+  //
+  // Invertir el orden resuelve las dos cosas sin tocar esa arquitectura, PERO
+  // se lleva puesta una garantía que hay que reponer a mano:
+  //
+  //   * si la ANULACIÓN falla, su transacción no dejó nada y los espejos ni
+  //     siquiera se intentaron: el reintento arranca limpio. Esto sale gratis.
+  //
+  //   * si fallan los ESPEJOS, la anulación YA COMMITEÓ. El reintento entra por
+  //     la salida temprana de `yaFalso` de arriba y —ojo— NO llega hasta acá
+  //     abajo: hace `return` mucho antes. Con el orden viejo esto se recuperaba
+  //     solo (los espejos iban primero y su fallo dejaba el pago sin marcar);
+  //     con el orden nuevo no, y por eso la salida temprana tiene su propia red
+  //     de seguridad que escribe los espejos faltantes antes de devolver. Sin
+  //     esa red, el operador recibía un 200 `updatedCount: 0` sobre un crédito
+  //     con la boleta anulada y el espejo del inversionista en blanco.
+  //
+  //   * y el caso que NO es transitorio —un crédito sin filas en
+  //     `creditos_inversionistas_espejo`, donde el paso de espejos falla
+  //     SIEMPRE— se ataja antes de empezar, con la precondición de más arriba.
+  //     Reintentar no lo arreglaría nunca.
+  //
+  // El resultado del espejo no depende del orden: solo lee la cuota del pago,
+  // el espejo del crédito y los abonos no liquidados; nada de eso lo toca la
+  // anulación.
+
+  // Marcar la boleta como falsa, DEVOLVER LOS RUBROS QUE COBRÓ y RESTITUIR SU
+  // MORA son UN SOLO HECHO, así que van en UNA transacción.
+  //
+  // 🧾 RUBROS: declarar falsa una boleta la invalida, así que lo que cobró de
+  // los rubros tiene que irse con ella. Un reclamo SIN APLICAR se soltaba solo
+  // (el neteo de `reclamosVivosDeRubros` filtra `paymentFalse = false`), pero
+  // uno YA APLICADO dejaba el saldo descontado: si el abono había dejado el
+  // rubro en cero, quedaba `completado` y `activo = false` —o sea, la deuda
+  // desaparecía por una boleta que se declaró falsa— y no había ninguna ruta
+  // que la devolviera. Sin transacción compartida existiría el estado
+  // intermedio "boleta falsa con el rubro todavía cobrado".
+  //
+  // 💸 MORA: si la restitución falla, el pago NO queda marcado y el reintento
+  // vuelve a intentar las dos cosas. Sueltos, una restitución fallida dejaba la
+  // anulación firme y el reintento la SALTEABA para siempre (leía
+  // `paymentFalse = true` y la regla devolvía `null`).
+  //
+  // BAJO EL CANDADO DEL CRÉDITO, como todos los demás que escriben
+  // `rubros.saldo_pendiente`, y además porque la reversa de un pago
+  // (`reversePayment`) restituye exactamente la misma mora y devuelve los mismos
+  // rubros que esta anulación: sin cola compartida las dos lo devolvían por
+  // separado y el cliente quedaba debiendo el doble. Sin el advisory lock, esta
+  // ruta quedaba como la única de la familia sin serializar — justo lo que se
+  // acababa de cerrar en `revertPaymentToPending`.
+  // `withPendingReturnCreditLocks` NO sirve para esto: es un `FOR NO KEY UPDATE`
+  // sobre `creditos` que hace COMMIT y suelta antes de que la transacción abra.
+  //
+  // ⚠️ EL CANDADO NO SE TOMA ACÁ: no se perdió, se mudó. El sufijo
+  // `…Serializado` es justamente eso — esa función compone
+  // `withPaymentAdvisoryLock(credito_id, () => db.transaction(…))` y recién
+  // adentro llama al cuerpo. Es el MISMO helper y la MISMA llave que tomaba
+  // esta función antes; lo único que cambió es dónde se escribe, y cambió
+  // porque allá una prueba puede inyectar las tres piezas y verificar la traza
+  // real `lock → begin → anular → commit → unlock`, cosa que acá es imposible.
+  // Tomarlo también acá lo ANIDARÍA: no lo agregues.
+  //
+  // El cuerpo vive en `anularPagoMora.ts` —no acá— para poder ejercerse en una
+  // prueba: varios tests registran un `mock.module("./payments")` global y este
+  // módulo desaparece en la corrida completa.
+  const updatedCount = await anularPagoYRestituirMoraSerializado({
+    pago_id,
+    credito_id,
+  });
+
+  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
+  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
+  // "falsos", mientras la devolución a CUBE sigue sin resolver.
+  await withPendingReturnCreditLocks([credito_id], async () => {
+    // Adentro del candado, y contra la marca de agua de arriba: si mientras
+    // tanto alguien más escribió el espejo de ESTA anulación (la red de
+    // seguridad de la salida temprana, ver arriba), no lo escribimos de nuevo.
+    const [espejoActual] = await db
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+      .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+      .limit(1);
+
+    // Ojo: `>` contra la marca, NO "¿hay filas?". Las filas viejas y legítimas
+    // no cuentan; solo cuentan las que aparecieron después de este punto.
+    if ((espejoActual?.id ?? 0) > marcaDeAguaEspejo) return;
+
+    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
+    // Falsear un pago no debe descontar el aporte del crédito/espejo.
+    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+  });
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result.rowCount ?? 0,
+    updatedCount,
   };
 }
 
@@ -1886,6 +2445,62 @@ function simularInversionistasSinPci(args: {
     });
 }
 
+// Reparto congelado al facturar (pagos_credito_inversionistas_facturado). Existe
+// solo para pagos que se facturaron siendo PARCIAL; es la foto del reparto del día
+// de los DTEs, inmune a reinversiones/compras posteriores.
+export type ReportInvCongelado = {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura?: boolean | null;
+  abono_interes: string | number;
+  abono_iva_12: string | number;
+  monto_aportado: string | number | null;
+  porcentaje_participacion: string | number | null;
+  redirigido_a_cube?: boolean | null;
+};
+
+/**
+ * 🔒 Arma las filas no-CUBE de un pago PARCIAL desde el reparto CONGELADO al
+ * facturar, en vez de re-simularlo con el roster de hoy.
+ *
+ * Por qué: `simularInversionistasSinPci` reparte con `creditos_inversionistas`
+ * VIVO, así que una reinversión posterior cambia retroactivamente lo que el
+ * reporte muestra de un pago ya facturado (crédito 01010214118190: Q6.42
+ * facturado → Q9.24 en el reporte tres días después). El congelado no se mueve.
+ *
+ * Los redirigidos a CUBE se excluyen con la bandera sellada ese día, no con el
+ * estado actual del espejo — que también pudo cambiar.
+ */
+function filasDesdeCongelado(args: {
+  congelado: ReportInvCongelado[];
+  cubeId: number;
+  cuota?: string | number | null;
+}): ReportInvRow[] {
+  // ⚠️ NUMBERS (no strings): el modal del front les hace .toFixed().
+  return args.congelado
+    .filter(
+      (c) => c.inversionista_id !== args.cubeId && c.redirigido_a_cube !== true
+    )
+    .map((c) => {
+      const interes = new Big(c.abono_interes ?? 0);
+      return {
+        inversionistaId: c.inversionista_id,
+        nombreInversionista: c.nombre,
+        emiteFactura: c.emite_factura ?? false,
+        abonoCapital: 0,
+        abonoInteres: Number(interes.toFixed(2)),
+        abonoIva: Number(new Big(c.abono_iva_12 ?? 0).toFixed(2)),
+        isr: Number(interes.times("0.05").round(2).toFixed(2)),
+        cuotaPago: args.cuota != null ? Number(args.cuota) : 0,
+        montoAportado: c.monto_aportado != null ? Number(c.monto_aportado) : null,
+        porcentajeParticipacion:
+          c.porcentaje_participacion != null
+            ? Number(c.porcentaje_participacion)
+            : null,
+      };
+    });
+}
+
 /**
  * 🧮 Arma el array `inversionistas` de UN pago para el reporte JSON, reflejando
  * el interés facturado de CUBE leído del desglose:
@@ -1920,6 +2535,9 @@ export function armarInversionistasPago(args: {
   abonoIvaPago?: string | number | null;                // pagos_credito.abono_iva_12
   simularSinPci?: boolean;                              // el caller gatea: validated + !pendienteFacturar
   banderaReinversion?: boolean;                         // excluye SOLO a los redirigidos a CUBE (espejo pendiente)
+  // 🔒 Reparto congelado al facturar. Si existe, MANDA sobre la simulación: es el
+  //    reparto real del día de los DTEs y no se mueve con el roster.
+  congelado?: ReportInvCongelado[] | null;
 }): ReportInvRow[] {
   const rows = Array.isArray(args.pciRows) ? args.pciRows : [];
   let noCube = rows.filter((r) => r.inversionistaId !== args.cubeId);
@@ -1928,9 +2546,21 @@ export function armarInversionistasPago(args: {
   // Sin desglose → fallback: conservar el pci tal cual.
   if (!args.desgloseCubeInteres) return rows;
 
-  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: simular los no-CUBE.
-  // Solo cuando NO hay filas pci — si el reparto real ya existe, ese manda.
-  if (
+  // 🆕 PARCIAL sin reparto (cuota aún abierta) ya facturado: los no-CUBE salen del
+  // congelado si existe, y si no se simulan. Solo cuando NO hay filas pci — si el
+  // reparto real ya existe, ese manda.
+  //
+  // Orden a propósito: congelado > simulación. El congelado es lo que se facturó;
+  // la simulación es una reconstrucción con el roster de hoy, que es justamente lo
+  // que se movía. Los pagos anteriores a este congelado no tienen filas → siguen
+  // simulándose igual que antes (sin regresión).
+  if (rows.length === 0 && (args.congelado?.length ?? 0) > 0) {
+    noCube = filasDesdeCongelado({
+      congelado: args.congelado!,
+      cubeId: args.cubeId,
+      cuota: args.cuota,
+    });
+  } else if (
     rows.length === 0 &&
     args.simularSinPci === true &&
     (args.creditoInvs?.length ?? 0) > 0
@@ -2009,6 +2639,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
   try {
     const offset = (page - 1) * pageSize;
 
+    // Nexa stores the bank's calendar date, not a UTC instant. Keep the
+    // same date expression for display and filters; legacy payments retain UTC→GT.
+    const fechaPagoLocalSQL = `CASE WHEN p.nexa_payment_event_id IS NOT NULL
+      THEN p.fecha_pago
+      ELSE p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'
+    END`;
+
     // 🔹 Construcción dinámica de filtros
     const whereClauses: string[] = [];
 
@@ -2019,19 +2656,19 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 📅 Rango de fechas (zona Guatemala UTC-6)
     if (fechaInicio) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
+        `(${fechaPagoLocalSQL})::date >= '${fechaInicio}'::date`
       );
     }
     if (fechaFin) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
+        `(${fechaPagoLocalSQL})::date <= '${fechaFin}'::date`
       );
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
-    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${anio}`);
-    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
-    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM ${fechaPagoLocalSQL}) = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM ${fechaPagoLocalSQL}) = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM ${fechaPagoLocalSQL}) = ${dia}`);
 
     if (facturaStatus) {
       // Bandeja de conta: "pagos con factura pendiente". Lista blanca — el
@@ -2061,13 +2698,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // inversionista (membresía en el crédito y no-redirigido a CUBE) se agrega
     // donde se usa. Mantener en sync con los gates del detalle.
     const pagoSimulableSQL = `
-      NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci_sim
+      NOT EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci_sim
                   WHERE pci_sim.pago_id = p.pago_id)
       AND p.validation_status = 'validated'
       AND p.abono_interes > 0
-      AND EXISTS (SELECT 1 FROM cartera.facturacion_desglose fd_sim
+      AND EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.facturacion_desglose fd_sim
                   WHERE fd_sim.pago_id = p.pago_id AND fd_sim.rubro::text = 'INTERES')
-      AND NOT EXISTS (SELECT 1 FROM cartera.compras_credito_inversionista cci_sim
+      AND NOT EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.compras_credito_inversionista cci_sim
                       WHERE cci_sim.credito_id = p.credito_id
                         AND cci_sim.pendiente_facturar = true
                         AND cci_sim.tipo_operacion = 'compra_cartera')`;
@@ -2092,9 +2729,10 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
         )`);
       } else {
-        // Con reparto real (pci) O parcial simulable donde este inversionista
-        // participa y NO está redirigido a CUBE — así el filtro ve los mismos
-        // pagos cuyo detalle ya muestra la fila simulada (Codex P2, PR #1137).
+        // Con reparto real (pci), O congelado al facturar, O parcial simulable
+        // donde este inversionista participa y NO está redirigido a CUBE — así el
+        // filtro ve los mismos pagos cuyo detalle ya muestra su fila
+        // (Codex P2, PR #1137; Codex P2, PR #1335).
         whereClauses.push(`
           (
             EXISTS (
@@ -2102,6 +2740,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci2
               WHERE pci2.pago_id = p.pago_id
               AND pci2.inversionista_id = '${inversionistaId}'
+            )
+            OR (
+              -- Congelado: se mira el roster del día de la factura, no el de hoy.
+              -- Si el inversionista salió del crédito después, el detalle igual
+              -- muestra su fila (viene del congelado) y el filtro tiene que
+              -- encontrar el pago. Mismas condiciones que usa el detalle:
+              -- validated y sin reparto real todavía.
+              p.validation_status = 'validated'
+              AND NOT EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas pci3
+                              WHERE pci3.pago_id = p.pago_id)
+              AND EXISTS (SELECT 1 FROM ${CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado f_flt
+                          WHERE f_flt.pago_id = p.pago_id
+                            AND f_flt.inversionista_id = '${inversionistaId}'
+                            AND f_flt.redirigido_a_cube = false)
             )
             OR (
               ${pagoSimulableSQL}
@@ -2188,7 +2840,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.credito_id AS "creditoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
+        TO_CHAR(${sql.raw(fechaPagoLocalSQL)}, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",
@@ -2446,6 +3098,43 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       }
     }
 
+    // 4) 🔒 Reparto CONGELADO al facturar, para los pagos de la página. Solo
+    //    existe en pagos que se facturaron siendo PARCIAL; cuando está, el reporte
+    //    lo muestra tal cual en vez de re-simular con el roster de hoy (que cambia
+    //    con cada reinversión y movía retroactivamente pagos ya facturados).
+    const congeladoByPago = new Map<number, ReportInvCongelado[]>();
+    if (pagoIds.length > 0) {
+      const cq = await db.execute(sql`
+        SELECT f.pago_id                 AS "pagoId",
+               f.inversionista_id        AS "inversionistaId",
+               i.nombre                  AS "nombre",
+               i.emite_factura           AS "emiteFactura",
+               f.abono_interes           AS "abonoInteres",
+               f.abono_iva_12            AS "abonoIva",
+               f.monto_aportado          AS "montoAportado",
+               f.porcentaje_participacion AS "porcentajeParticipacion",
+               f.redirigido_a_cube       AS "redirigidoACube"
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado f
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = f.inversionista_id
+        WHERE f.pago_id = ANY(${"{" + pagoIds.join(",") + "}"}::bigint[])
+      `);
+      for (const row of cq.rows as any[]) {
+        const pid = Number(row.pagoId);
+        const arr = congeladoByPago.get(pid) ?? [];
+        arr.push({
+          inversionista_id: Number(row.inversionistaId),
+          nombre: row.nombre ?? "",
+          emite_factura: row.emiteFactura ?? false,
+          abono_interes: row.abonoInteres ?? 0,
+          abono_iva_12: row.abonoIva ?? 0,
+          monto_aportado: row.montoAportado ?? null,
+          porcentaje_participacion: row.porcentajeParticipacion ?? null,
+          redirigido_a_cube: row.redirigidoACube ?? false,
+        });
+        congeladoByPago.set(pid, arr);
+      }
+    }
+
     // Parser robusto del array de inversionistas (json_agg → array | string).
     const parseInvs = (raw: any): ReportInvRow[] =>
       Array.isArray(raw)
@@ -2496,6 +3185,15 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               (r as any).validation_status === "validated" &&
               !((r as any).pendienteFacturar ?? false),
             banderaReinversion: (r as any).banderaReinversion ?? false,
+            // 🔒 Si el pago se facturó siendo parcial, su reparto quedó sellado
+            //    ese día: manda sobre la simulación. Se exige 'validated' igual
+            //    que la simulación — un pago reseteado se revirtió y mostrar lo
+            //    que se le facturó sería volver a contarlo. NO se le aplica el
+            //    gate de compra de cartera pendiente: el congelado es de antes.
+            congelado:
+              (r as any).validation_status === "validated"
+                ? congeladoByPago.get(Number(r.pagoId)) ?? null
+                : null,
           })
         : pciRows;
 
@@ -2680,38 +3378,88 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         SELECT p.pago_id, p.credito_id, c.bandera_reinversion,
                p.abono_interes::numeric AS interes,
                COALESCE(p.abono_iva_12, 0)::numeric AS iva
-        FROM cartera.pagos_credito p
-        LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
-        LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
         ${sql.raw(whereSQL)}
         AND ${sql.raw(pagoSimulableSQL)}
       ),
+      -- Base de los pagos YA congelados. NO usa pagoSimulableSQL a propósito: ese
+      -- gate excluye créditos con compra de cartera pendiente, y la compra pudo
+      -- abrirse DESPUÉS de facturar. El detalle igual muestra el congelado (es lo
+      -- que se facturó), así que el resumen tiene que verlo o se despega de las
+      -- filas listadas (Codex P2, PR #1335). Se conservan las condiciones que el
+      -- detalle sí aplica: validated y sin reparto real todavía.
+      pfc AS (
+        SELECT p.pago_id
+        FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
+        LEFT JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
+        ${sql.raw(whereSQL)}
+        AND p.validation_status = 'validated'
+        AND NOT EXISTS (SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas pci_c
+                        WHERE pci_c.pago_id = p.pago_id)
+        AND EXISTS (SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado f_c
+                    WHERE f_c.pago_id = p.pago_id)
+      ),
       aportes AS (
         SELECT ci.credito_id, SUM(ci.monto_aportado::numeric) AS total
-        FROM cartera.creditos_inversionistas ci
+        FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
         WHERE ci.credito_id IN (SELECT DISTINCT credito_id FROM pf)
         GROUP BY ci.credito_id
+      ),
+      -- 🔒 Pagos que YA tienen su reparto congelado: el total sale de la tabla,
+      --    no de la fórmula. Es lo mismo que muestra el detalle (filasDesdeCongelado),
+      --    así el resumen no se despega de las filas listadas.
+      cong AS (
+        SELECT f.inversionista_id AS inv_id,
+               i.nombre AS nombre,
+               i.emite_factura AS emite_factura,
+               SUM(f.abono_interes::numeric) AS interes,
+               SUM(f.abono_iva_12::numeric) AS iva,
+               SUM(f.monto_aportado::numeric) AS aporte
+        FROM pfc
+        JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado f ON f.pago_id = pfc.pago_id
+        JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = f.inversionista_id
+        WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+          AND f.redirigido_a_cube = false
+          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND f.inversionista_id = '${inversionistaId}'` : "")}
+        GROUP BY f.inversionista_id, i.nombre, i.emite_factura
+      ),
+      -- Pagos SIN congelado (anteriores al sellado): fórmula de siempre.
+      sim AS (
+        SELECT ci.inversionista_id AS inv_id,
+               i.nombre AS nombre,
+               i.emite_factura AS emite_factura,
+               SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
+                   * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS interes,
+               SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
+                   * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS iva,
+               SUM(ci.monto_aportado::numeric) AS aporte
+        FROM pf
+        JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
+        JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
+        JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
+        WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
+          AND NOT EXISTS (
+                SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado f2
+                WHERE f2.pago_id = pf.pago_id)
+          AND NOT (pf.bandera_reinversion = true AND EXISTS (
+                SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo esp
+                WHERE esp.credito_id = pf.credito_id
+                  AND esp.inversionista_id = ci.inversionista_id
+                  AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
+          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
+        GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
       )
-      SELECT ci.inversionista_id AS "inversionistaId",
-             i.nombre AS "nombreInversionista",
-             i.emite_factura AS "emiteFactura",
-             SUM(ROUND(pf.interes * (ci.monto_aportado::numeric / a.total)
-                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "interesSim",
-             SUM(ROUND(pf.iva * (ci.monto_aportado::numeric / a.total)
-                 * (ci.porcentaje_participacion_inversionista::numeric / 100), 2)) AS "ivaSim",
-             SUM(ci.monto_aportado::numeric) AS "aporteSim"
-      FROM pf
-      JOIN aportes a ON a.credito_id = pf.credito_id AND a.total > 0
-      JOIN cartera.creditos_inversionistas ci ON ci.credito_id = pf.credito_id
-      JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
-      WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
-        AND NOT (pf.bandera_reinversion = true AND EXISTS (
-              SELECT 1 FROM cartera.creditos_inversionistas_espejo esp
-              WHERE esp.credito_id = pf.credito_id
-                AND esp.inversionista_id = ci.inversionista_id
-                AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
-        ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
-      GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
+      SELECT t.inv_id AS "inversionistaId",
+             t.nombre AS "nombreInversionista",
+             t.emite_factura AS "emiteFactura",
+             SUM(t.interes) AS "interesSim",
+             SUM(t.iva) AS "ivaSim",
+             SUM(t.aporte) AS "aporteSim"
+      FROM (SELECT * FROM cong UNION ALL SELECT * FROM sim) t
+      GROUP BY t.inv_id, t.nombre, t.emite_factura
     `;
 
     const totalesSimResult = esFiltroCube
@@ -2906,6 +3654,7 @@ export async function obtenerCreditosConPagosPendientes(
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         usuarioId: creditos.usuario_id,
         cuota: creditos.cuota,
         interes: creditos.cuota_interes,
@@ -2932,8 +3681,32 @@ export async function obtenerCreditosConPagosPendientes(
       creditosInversionista.length
     );
 
+    // Igual que calcularYRegistrarPagosEspejo: si vamos a generar pagos, un crédito
+    // con devolución a CUBE pendiente de autorización bloquea todo el lote. Sin esto,
+    // este endpoint podía generar pagos y descontar capital al inversionista mientras
+    // la devolución seguía sin resolver (bypass del guard agregado en el flujo normal).
+    if (generateFalsePayment) {
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        creditosInversionista.map((credito) => ({
+          creditoId: credito.creditoId,
+          numeroCreditoSifco: credito.numeroCreditoSifco,
+          estadoDevolucion: credito.estadoDevolucion,
+        })),
+      );
+
+      if (pendingReturnWarning) {
+        console.warn(
+          `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        return { success: false as const, ...pendingReturnWarning, data: [] };
+      }
+    }
+
     // 2️⃣ PASO 2: Por cada crédito, buscar la PRIMERA cuota NO LIQUIDADA
-    const creditosConPagos = await Promise.all(
+    const creditoIds = [
+      ...new Set(creditosInversionista.map((credito) => credito.creditoId)),
+    ].sort((a, b) => a - b);
+    const procesarCreditos = () => Promise.all(
       creditosInversionista.map(async (credito) => {
 
         // 🆕 PASO 0: Verificar si ESTE CRÉDITO tiene pagos pendientes de liquidar
@@ -3177,6 +3950,14 @@ export async function obtenerCreditosConPagosPendientes(
       })
     );
 
+    // La generación real (generateFalsePayment=true) revalida bajo lock transaccional,
+    // igual que calcularYRegistrarPagosEspejo: si la devolución cambió entre la lectura
+    // de arriba y este punto, se bloquea todo antes de crear el primer pago. La lectura
+    // simple (generateFalsePayment=false) no necesita el lock.
+    const creditosConPagos = generateFalsePayment
+      ? await withPendingReturnCreditLocks(creditoIds, procesarCreditos)
+      : await procesarCreditos();
+
     // 6️⃣ PASO 6: Filtrar nulls
     const creditosConCuotasPendientes = creditosConPagos.filter(
       (c) => c !== null
@@ -3196,6 +3977,16 @@ export async function obtenerCreditosConPagosPendientes(
     };
   } catch (error: any) {
     console.error("❌ Error en obtenerCreditosConPagosPendientes:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
       success: false,
       error: error.message,
@@ -3281,6 +4072,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         cuota: creditos.cuota,
       })
       .from(creditos_inversionistas_espejo)
@@ -3307,14 +4099,42 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `📊 Créditos encontrados: ${creditosInversionista.length}`
     );
 
+    const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+      creditosInversionista.map((credito) => ({
+        creditoId: credito.creditoId,
+        numeroCreditoSifco: credito.numeroCreditoSifco,
+        estadoDevolucion: credito.estadoDevolucion,
+      })),
+    );
+
+    if (pendingReturnWarning) {
+      console.warn(
+        `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+      );
+      return { success: false as const, ...pendingReturnWarning, data: [] };
+    }
+
     // Paso 2: Por cada crédito encontrado, se busca la primera cuota que aún no
     // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
     // registrar pagos duplicados o fuera de orden.
-    const resultados = await Promise.all(
-      creditosInversionista.map(async (credito) => {
-        console.log(
-          `\n🔍 Verificando crédito ${credito.creditoId}...`
-        );
+    //
+    // El lock es del LOTE completo, no de cada insert. FOR NO KEY UPDATE bloquea
+    // cambios concurrentes al estado y serializa generaciones solapadas, pero es
+    // compatible con el KEY SHARE que toman los FK al insertar pagos espejo desde
+    // otra conexión. Si la devolución cambió antes del lock, esta revalidación
+    // bloquea todo antes de crear el primer pago.
+    const creditoIds = [
+      ...new Set(
+        creditosInversionista.map((credito) => credito.creditoId),
+      ),
+    ].sort((a, b) => a - b);
+    const resultados = await withPendingReturnCreditLocks(
+      creditoIds,
+      () => Promise.all(
+        creditosInversionista.map(async (credito) => {
+          console.log(
+            `\n🔍 Verificando crédito ${credito.creditoId}...`
+          );
 
         // Si ya existe un pago generado y pendiente de liquidar para este crédito,
         // se omite para no duplicarlo. Hay que liquidar primero antes de generar otro.
@@ -3513,7 +4333,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             mensaje: err?.message ?? "Error desconocido",
           };
         }
-      })
+        }),
+      ),
     );
 
     const procesados = resultados.filter((r) => r !== null && !("error" in r));
@@ -3523,19 +4344,43 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
     );
 
+    const falloTotal = fallidos.length > 0 && procesados.length === 0;
+    if (falloTotal) {
+      return {
+        success: false as const,
+        error: "No se pudo generar ningún pago espejo del lote.",
+        inversionistaId,
+        totalCreditosProcesados: procesados.length,
+        totalCreditosFallidos: fallidos.length,
+        pagosGenerados: false,
+        data: procesados,
+        fallidos,
+      };
+    }
+
     return {
-      success: true,
+      success: true as const,
       inversionistaId,
       totalCreditosProcesados: procesados.length,
       totalCreditosFallidos: fallidos.length,
-      pagosGenerados: true,
+      pagosGenerados: procesados.length > 0,
       data: procesados,
       fallidos,
     };
   } catch (error: any) {
     console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
-      success: false,
+      success: false as const,
       error: error.message,
       data: [],
     };

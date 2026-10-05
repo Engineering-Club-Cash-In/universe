@@ -33,9 +33,13 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import {
+	InvestmentProjection,
+	type InvestmentProjectionData,
+} from "@/components/reports/investment-projection";
 import { PeriodDatePicker } from "@/components/reports/period-date-picker";
-import { ReportCard } from "@/components/reports/report-card";
 import { ReinvestmentReport } from "@/components/reports/reinvestment-report";
+import { ReportCard } from "@/components/reports/report-card";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +49,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -69,18 +74,23 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
-import { buildInvestorExportRows } from "@/lib/reports/reinvestment-report";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { getLeadSourceLabel } from "@/lib/crm-formatters";
+import { buildClosedCreditsWorksheet } from "@/lib/reports/closed-credits-export";
+import { getInvestmentProjectionMonthBounds } from "@/lib/reports/investment-projection-period";
 import {
+	applyOfficialMonthlyMora,
+	dateRangeIncludesMonth,
+	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
 } from "@/lib/reports/monto-a-cobrar";
+import { buildAdminReportsWorkbook } from "@/lib/reports/report-workbook";
 import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
 	FacturacionMesRubro,
 	MontoACobrarPeriodoRow,
-	MontoACobrarRow,
 	PuntoEquilibrioRow,
 	ReinversionLiquidacionesResponse,
 } from "@/lib/reports/scenario";
@@ -91,9 +101,13 @@ import {
 	montoACobrarConfig,
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
-import { Combobox } from "@/components/ui/combobox";
-import { getReportTabs } from "./-tabs";
 import { client, orpc, queryClient } from "@/utils/orpc";
+import {
+	getCurrentOperationalMonth,
+	getOfficialClosurePeriod,
+} from "../../cobros/-mora-display";
+import { getReportTabs } from "./-tabs";
+
 type SimulacionInversionistaResult = {
 	success: boolean;
 	data: {
@@ -283,82 +297,6 @@ function formatBucket(bucket: string, periodo: string): string {
 	}).format(date);
 }
 
-function fillMissingPeriods(
-	data: MontoACobrarPeriodoRow[],
-	periodo: "anio" | "trimestre" | "mes" | "semana" | "dia",
-	fechaInicio: string,
-	fechaFin: string,
-): MontoACobrarPeriodoRow[] {
-	if (periodo !== "semana" && periodo !== "dia") return data;
-
-	const toKey = (d: Date) =>
-		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-			d.getDate(),
-		).padStart(2, "0")}`;
-
-	const dataMap = new Map(data.map((row) => [row.bucket.slice(0, 10), row]));
-
-	const dates: Date[] = [];
-	const start = new Date(`${fechaInicio}T12:00:00`);
-	const end = new Date(`${fechaFin}T12:00:00`);
-
-	if (periodo === "dia") {
-		const cur = new Date(start);
-		while (cur <= end) {
-			dates.push(new Date(cur));
-			cur.setDate(cur.getDate() + 1);
-		}
-	} else {
-		// ISO week: Monday start (matches PostgreSQL DATE_TRUNC('week'))
-		const cur = new Date(start);
-		const dow = cur.getDay();
-		cur.setDate(cur.getDate() + (dow === 0 ? -6 : 1 - dow));
-		while (cur <= end) {
-			dates.push(new Date(cur));
-			cur.setDate(cur.getDate() + 7);
-		}
-	}
-
-	return dates.map((d) => {
-		const key = toKey(d);
-		return (
-			dataMap.get(key) ?? {
-				bucket: key,
-				cuotas_count: 0,
-				total_cuota: "0",
-				total_interes: "0",
-				total_iva: "0",
-				total_seguro: "0",
-				total_gps: "0",
-				total_membresias: "0",
-				total_mora: "0",
-				mora_count: 0,
-				total_credits: 0,
-				credits_con_mora: 0,
-				acum_total_cuota: "0",
-				acum_total_interes: "0",
-				acum_total_iva: "0",
-				acum_total_seguro: "0",
-				acum_total_gps: "0",
-				acum_total_membresias: "0",
-				total_interes_inversionista: "0",
-				acum_total_interes_inversionista: "0",
-				capital_inv_participacion_actual: "0",
-				capital_cube_participacion_actual: "0",
-				interes_iva_inv_participacion_actual: "0",
-				interes_iva_cube_participacion_actual: "0",
-				acum_capital_inv_participacion_actual: "0",
-				acum_capital_cube_participacion_actual: "0",
-				acum_interes_iva_inv_participacion_actual: "0",
-				acum_interes_iva_cube_participacion_actual: "0",
-				creditos_participacion_invalida: 0,
-				cuotas_participacion_invalida: 0,
-				participacion_actual: true,
-			}
-		);
-	});
-}
-
 // Filas por página del reporte "Créditos cerrados" (paginado del lado servidor).
 const CLOSED_CREDITS_PAGE_SIZE = 25;
 
@@ -433,6 +371,15 @@ function RouteComponent() {
 		anio: new Date().getFullYear(),
 	}));
 	const [flujoMes, setFlujoMes] = useState(getDefaultFlujoMes);
+	const [investmentView, setInvestmentView] = useState<
+		"realizado" | "proyeccion"
+	>("realizado");
+	const [projectionMonthBounds] = useState(() =>
+		getInvestmentProjectionMonthBounds(new Date()),
+	);
+	const [projectionMonth, setProjectionMonth] = useState(
+		projectionMonthBounds.defaultMonth,
+	);
 	const [flujoAnioStr, flujoMesStr] = flujoMes.split("-");
 	const flujoMesNum = Number(flujoMesStr);
 	const flujoAnioNum = Number(flujoAnioStr);
@@ -440,6 +387,22 @@ function RouteComponent() {
 	const flujoHoy = new Date();
 	const flujoAnioActual = flujoHoy.getFullYear();
 	const flujoMesActual = flujoHoy.getMonth() + 1;
+	const [projectionYearString, projectionMonthString] =
+		projectionMonth.split("-");
+	const projectionYear = Number(projectionYearString);
+	const projectionMonthNumber = Number(projectionMonthString);
+	const projectionLastDay = new Date(
+		Date.UTC(projectionYear, projectionMonthNumber, 0),
+	).getUTCDate();
+	const projectionRange = {
+		fechaInicio: `${projectionMonth}-01`,
+		fechaFin: `${projectionMonth}-${String(projectionLastDay).padStart(2, "0")}`,
+	};
+	const projectionPeriodLabel = `${MESES[projectionMonthNumber - 1]} de ${projectionYear}`;
+	const projectionAsOfLabel = new Intl.DateTimeFormat("es-GT", {
+		dateStyle: "long",
+		timeZone: "America/Guatemala",
+	}).format(flujoHoy);
 	const aniosDisponibles = [
 		flujoAnioActual,
 		flujoAnioActual - 1,
@@ -540,9 +503,45 @@ function RouteComponent() {
 		}),
 		enabled: canAccessCobranzaReport,
 	});
+	const officialMoraOperationalMonth = getCurrentOperationalMonth();
+	const officialMoraPeriod = getOfficialClosurePeriod(
+		officialMoraOperationalMonth,
+	);
+	const officialMoraRequired =
+		montoCobrarPeriodo === "mes" &&
+		dateRangeIncludesMonth(
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+			officialMoraOperationalMonth,
+		);
+	const officialMoraQuery = useQuery({
+		...orpc.getCierreMoraOficial.queryOptions({
+			input: { periodo: officialMoraPeriod },
+		}),
+		enabled: canAccessCobranzaReport && officialMoraRequired,
+	});
+	const officialMoraReady =
+		!officialMoraRequired ||
+		(officialMoraQuery.isSuccess && officialMoraQuery.data !== null);
+	const officialMoraFailed =
+		officialMoraRequired &&
+		(officialMoraQuery.isError ||
+			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
+	const montoCobrarRows = applyOfficialMonthlyMora(
+		fillMissingMontoACobrarPeriods(
+			montoCobrarData?.data ?? [],
+			montoCobrarPeriodo,
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+		),
+		officialMoraOperationalMonth,
+		montoCobrarPeriodo === "mes"
+			? officialMoraQuery.data?.moraMensual.esperado
+			: undefined,
+	);
 
 	const facturacionMesQuery = useQuery({
 		...orpc.getFacturacionMes.queryOptions({
@@ -559,10 +558,19 @@ function RouteComponent() {
 		...orpc.getReinversionLiquidaciones.queryOptions({
 			input: { mes: flujoMesNum, anio: flujoAnioNum },
 		}),
-		enabled: isAdmin,
+		enabled: isAdmin && investmentView === "realizado",
 	});
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
+		| undefined;
+	const investmentProjectionQuery = useQuery({
+		...orpc.getFlujoCuotasPorInversionista.queryOptions({
+			input: projectionRange,
+		}),
+		enabled: isAdmin && investmentView === "proyeccion",
+	});
+	const investmentProjectionData = investmentProjectionQuery.data as
+		| InvestmentProjectionData
 		| undefined;
 
 	const investorsCarteraQuery = useQuery({
@@ -776,25 +784,7 @@ function RouteComponent() {
 				anio: closedCreditsMes.anio,
 				mes: closedCreditsMes.mes,
 			});
-			const headers = [
-				"Fecha de Cierre",
-				"Nombre del Cliente",
-				"SIFCO",
-				"Cuota de Seguro",
-				"Monto del Crédito",
-				"Cuota del Crédito",
-				"Día de Pago",
-			];
-			const data = res.rows.map((row) => [
-				row.fechaCierre ? formatFechaCorta(row.fechaCierre) : "",
-				row.clienteNombre || "",
-				row.numeroSifco || "",
-				Number(row.cuotaSeguro ?? 0),
-				Number(row.montoCredito ?? 0),
-				Number(row.cuotaCredito ?? 0),
-				row.diaPago ?? "",
-			]);
-			const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+			const worksheet = buildClosedCreditsWorksheet(res.rows, formatFechaCorta);
 			const workbook = XLSX.utils.book_new();
 			XLSX.utils.book_append_sheet(workbook, worksheet, "Créditos cerrados");
 			XLSX.writeFile(
@@ -811,26 +801,37 @@ function RouteComponent() {
 			setIsExportingCerrados(false);
 		}
 	};
-	const exportReinvestmentInvestorsExcel = () => {
-		const rows = buildInvestorExportRows(reinversionData);
-		if (rows.length === 0) {
-			toast.error("No hay detalle compatible para exportar.");
+	const exportAdminReportsExcel = () => {
+		if (!officialMoraReady) {
+			toast.error("Espera a que la mora oficial del mes termine de cargar.");
 			return;
 		}
-		const worksheet = XLSX.utils.json_to_sheet(rows);
-		worksheet["!cols"] = [
-			{ wch: 30 },
-			{ wch: 24 },
-			{ wch: 18 },
-			{ wch: 18 },
-			{ wch: 18 },
-		];
-		const workbook = XLSX.utils.book_new();
-		XLSX.utils.book_append_sheet(workbook, worksheet, "Por Inversionista");
-		XLSX.writeFile(
-			workbook,
-			`flujo-inversionistas-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
-		);
+		if (!montoCobrarData || !reinversionData) {
+			toast.error("Espera a que Cobranza e Inversión terminen de cargar.");
+			return;
+		}
+		try {
+			const workbook = buildAdminReportsWorkbook({
+				cobranza: {
+					rows: montoCobrarRows,
+					acumulado: montoCobrarAcumulado,
+				},
+				reinvestment: reinversionData,
+				metadata: {
+					cobranzaPeriodo: `${montoCobrarRange.fechaInicio} a ${montoCobrarRange.fechaFin}`,
+					inversionPeriodo: `${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`,
+					generatedAt: new Date().toISOString(),
+				},
+			});
+			XLSX.writeFile(
+				workbook,
+				`reportes-admin-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "No fue posible exportar.",
+			);
+		}
 	};
 
 	const closedCreditsRows = closedCreditsReport.data?.rows ?? [];
@@ -925,6 +926,11 @@ function RouteComponent() {
 											Cuota del Crédito
 										</TableHead>
 										<TableHead className="text-right">Día de Pago</TableHead>
+										<TableHead>Marca del Vehículo</TableHead>
+										<TableHead>Modelo</TableHead>
+										<TableHead>Asesor</TableHead>
+										<TableHead>Canal de Venta</TableHead>
+										<TableHead>Fuente del Lead</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -953,6 +959,15 @@ function RouteComponent() {
 											<TableCell className="text-right">
 												{row.diaPago ?? "-"}
 											</TableCell>
+											<TableCell>{row.marca || "-"}</TableCell>
+											<TableCell>{row.modelo || "-"}</TableCell>
+											<TableCell>{row.asesor || "-"}</TableCell>
+											<TableCell>
+												{row.canalVenta === "sobre_vehiculo"
+													? "Sobre vehículo"
+													: "Autocompra"}
+											</TableCell>
+											<TableCell>{getLeadSourceLabel(row.fuenteLead)}</TableCell>
 										</TableRow>
 									))}
 								</TableBody>
@@ -1301,8 +1316,20 @@ function RouteComponent() {
 												</CardDescription>
 											</div>
 										</div>
+									<div className="flex flex-wrap gap-2">
+										{isAdmin && (
+											<Button
+												variant="outline"
+												onClick={exportAdminReportsExcel}
+												disabled={!officialMoraReady}
+											>
+												<Download className="mr-2 h-4 w-4" />
+												Exportar Excel
+											</Button>
+										)}
 										<SimularButton onClick={() => setScenarioOpen("monto")} />
 									</div>
+								</div>
 
 									<div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border bg-muted/30 px-4 py-3">
 										<FilterField label="Período">
@@ -1362,39 +1389,47 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{montoCobrarQuery.isPending && <p>Cargando...</p>}
+									{(montoCobrarQuery.isPending ||
+										(officialMoraRequired && officialMoraQuery.isPending)) && (
+										<p>Cargando...</p>
+									)}
 									{montoCobrarQuery.isError && (
 										<p className="text-destructive">
 											Error al cargar el reporte de monto a cobrarse.
 										</p>
 									)}
-									{montoCobrarData && montoCobrarData.data.length === 0 && (
+									{officialMoraFailed && (
+										<p className="text-destructive">
+											No fue posible cargar la mora oficial del mes. Intenta de nuevo.
+										</p>
+									)}
+									{officialMoraReady &&
+										montoCobrarData &&
+										montoCobrarData.data.length === 0 && (
 										<p className="text-muted-foreground">
 											No hay cuotas pendientes para el rango seleccionado.
 										</p>
 									)}
-									{!!montoCobrarData?.data.length && (
+									{officialMoraReady && !!montoCobrarData?.data.length && (
 										<>
 											{(() => {
-												const totals = getMontoACobrarParticipacionTotals(
-													montoCobrarData.data,
+											const totals = getMontoACobrarParticipacionTotals(
+												montoCobrarRows,
 													false,
 												);
 												return totals.creditosInvalidos > 0 ? (
 													<p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
-														Participación actual inválida en {totals.creditosInvalidos} crédito(s) y {totals.cuotasInvalidas} cuota(s); sus montos no se incluyen en el desglose Inv./CUBE.
+													Participación actual inválida en{" "}
+													{totals.creditosInvalidos} crédito(s) y{" "}
+													{totals.cuotasInvalidas} cuota(s); sus montos no se
+													incluyen en el desglose Inv./CUBE.
 													</p>
 												) : null;
 											})()}
 											{/* Gráfica de barras apiladas */}
 											<ResponsiveContainer width="100%" height={350}>
 												<BarChart
-													data={fillMissingPeriods(
-														montoCobrarData.data,
-														montoCobrarPeriodo,
-														montoCobrarRange.fechaInicio,
-														montoCobrarRange.fechaFin,
-													).map((row: MontoACobrarPeriodoRow) => {
+											data={montoCobrarRows.map((row) => {
 														const view = getMontoACobrarViewRow(
 															row,
 															montoCobrarAcumulado,
@@ -1454,79 +1489,56 @@ function RouteComponent() {
 											</ResponsiveContainer>
 
 											{/* Tabla detallada */}
-											<div className="overflow-x-auto">
-												<Table>
-													<TableHeader>
+										<div className="overflow-x-auto rounded-md border">
+											<Table className="min-w-[1320px] border-collapse tabular-nums [&_td]:border [&_td]:text-center [&_th]:border [&_th]:text-center">
+												<TableHeader className="sticky top-0 z-10 bg-background">
 														<TableRow>
-															<TableHead>Período</TableHead>
-															<TableHead className="text-right">
-																Cantidad de Cuotas
+														<TableHead className="sticky left-0 z-20 bg-background">
+															Período
 															</TableHead>
-															<TableHead className="text-right">
-																Capital
+														<TableHead>Cantidad de Cuotas</TableHead>
+														<TableHead>Capital</TableHead>
+														<TableHead>Interés + IVA</TableHead>
+														<TableHead>Servicios (Seguro + GPS)</TableHead>
+														<TableHead>Membresías</TableHead>
+														<TableHead>Total Mora</TableHead>
+														<TableHead className="font-bold">Total</TableHead>
+														<TableHead className="bg-muted/30">
+															Capital CUBE
 															</TableHead>
-													<TableHead className="text-right">
-														Interés + IVA
+														<TableHead className="bg-muted/30">
+															Interés + IVA CUBE
 													</TableHead>
-													<TableHead className="text-right">
-														Servicios (Seguro + GPS)
+														<TableHead className="bg-muted/30 font-bold">
+															Facturación
 													</TableHead>
-													<TableHead className="text-right">
-														Membresías
-													</TableHead>
-													<TableHead className="text-right">
-														Total Mora
-													</TableHead>
-													<TableHead className="text-right font-bold">
-														Total
-													</TableHead>
-													<TableHead className="border-l bg-muted/30 text-right">
-														<div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-															Detalle complementario
-														</div>
-														Interés Inv. pagado (referencia)
-													</TableHead>
-													<TableHead className="bg-muted/30 text-right">Capital Inv.</TableHead>
-													<TableHead className="bg-muted/30 text-right">Capital CUBE</TableHead>
-													<TableHead className="bg-muted/30 text-right">Interés + IVA Inv.</TableHead>
-													<TableHead className="bg-muted/30 text-right">Interés + IVA CUBE</TableHead>
 														</TableRow>
 													</TableHeader>
 													<TableBody>
-														{fillMissingPeriods(
-															montoCobrarData.data,
-															montoCobrarPeriodo,
-															montoCobrarRange.fechaInicio,
-															montoCobrarRange.fechaFin,
-													).map((row: MontoACobrarPeriodoRow) => {
+												{montoCobrarRows.map((row) => {
 														const view = getMontoACobrarViewRow(
 															row,
 															montoCobrarAcumulado,
 														);
 															return (
 																<TableRow key={row.bucket}>
-																	<TableCell>
-																		{formatBucket(
-																			row.bucket,
-																			montoCobrarPeriodo,
-																		)}
+																<TableCell className="sticky left-0 z-[1] bg-background">
+																	{formatBucket(row.bucket, montoCobrarPeriodo)}
 																	</TableCell>
-																	<TableCell className="text-right">
-																		{row.cuotas_count}
-																	</TableCell>
-															<TableCell className="text-right">
+																<TableCell>{view.cuotas}</TableCell>
+																<TableCell>
 																{formatCurrency(view.capital)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(view.interesIva)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(view.servicios)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(view.membresias)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																<div>{formatCurrency(view.totalMora)}</div>
 																		<div
 																			className="text-muted-foreground text-xs"
@@ -1542,44 +1554,33 @@ function RouteComponent() {
 																			%
 																		</div>
 																	</TableCell>
-															<TableCell className="text-right font-bold">
+																<TableCell className="font-bold">
 																{formatCurrency(view.total)}
 															</TableCell>
-															<TableCell className="border-l bg-muted/10 text-right">
-																{formatCurrency(view.interesInversionista)}
-															</TableCell>
-															<TableCell className="bg-muted/10 text-right">
-																{formatCurrency(view.capitalInv)}
-															</TableCell>
-															<TableCell className="bg-muted/10 text-right">
+																<TableCell className="bg-muted/10">
 																{formatCurrency(view.capitalCube)}
 															</TableCell>
-															<TableCell className="bg-muted/10 text-right">
-																{formatCurrency(view.interesIvaInv)}
-															</TableCell>
-															<TableCell className="bg-muted/10 text-right">
+																<TableCell className="bg-muted/10">
 																{formatCurrency(view.interesIvaCube)}
 															</TableCell>
+																<TableCell className="bg-muted/10 font-bold">
+																	{formatCurrency(view.facturacion)}
+																</TableCell>
 																</TableRow>
 															);
 														})}
 														{(() => {
-															const rows =
-																montoCobrarData.data as MontoACobrarPeriodoRow[];
-															const a = montoCobrarAcumulado;
-															const lastRow = rows[rows.length - 1];
+													const rows = montoCobrarRows;
+													const a = montoCobrarAcumulado;
+													const lastRow = a ? rows.at(-1) : undefined;
 															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
 																	(acc: number, r: MontoACobrarPeriodoRow) =>
 																		acc +
-																		Number.parseFloat(
-																			(r[key] as string) || "0",
-																		),
+																	Number.parseFloat((r[key] as string) || "0"),
 																	0,
 																);
-															const val = (
-																key: keyof MontoACobrarPeriodoRow,
-															) =>
+														const val = (key: keyof MontoACobrarPeriodoRow) =>
 																a && lastRow
 																	? Number.parseFloat(
 																			(lastRow[key] as string) || "0",
@@ -1604,61 +1605,73 @@ function RouteComponent() {
 															membresiasTotal;
 																	const totalCred =
 																		a && lastRow
-																			? lastRow.cuotas_count
+																			? lastRow.mora_count
 																			: rows.reduce(
 																					(acc, r) => acc + r.cuotas_count,
 																					0,
 																				);
-																	const splitTotals = getMontoACobrarParticipacionTotals(
+														const splitTotals =
+															getMontoACobrarParticipacionTotals(
 																		rows.map((row) => ({
 																			cuotas_count: row.cuotas_count,
-																			capital_inv_participacion_actual: a ? row.acum_capital_inv_participacion_actual : row.capital_inv_participacion_actual,
-																			capital_cube_participacion_actual: a ? row.acum_capital_cube_participacion_actual : row.capital_cube_participacion_actual,
-																			interes_iva_inv_participacion_actual: a ? row.acum_interes_iva_inv_participacion_actual : row.interes_iva_inv_participacion_actual,
-																			interes_iva_cube_participacion_actual: a ? row.acum_interes_iva_cube_participacion_actual : row.interes_iva_cube_participacion_actual,
-																			creditos_participacion_invalida: row.creditos_participacion_invalida,
-																			creditos_participacion_invalida_rango: row.creditos_participacion_invalida_rango,
-																			cuotas_participacion_invalida: row.cuotas_participacion_invalida,
+																	capital_inv_participacion_actual: a
+																		? row.acum_capital_inv_participacion_actual
+																		: row.capital_inv_participacion_actual,
+																	capital_cube_participacion_actual: a
+																		? row.acum_capital_cube_participacion_actual
+																		: row.capital_cube_participacion_actual,
+																	interes_iva_inv_participacion_actual: a
+																		? row.acum_interes_iva_inv_participacion_actual
+																		: row.interes_iva_inv_participacion_actual,
+																	interes_iva_cube_participacion_actual: a
+																		? row.acum_interes_iva_cube_participacion_actual
+																		: row.interes_iva_cube_participacion_actual,
+																	creditos_participacion_invalida:
+																		row.creditos_participacion_invalida,
+																	creditos_participacion_invalida_rango:
+																		row.creditos_participacion_invalida_rango,
+																	cuotas_participacion_invalida:
+																		row.cuotas_participacion_invalida,
 																		})),
 																		a,
 																	);
+														const facturacionTotal =
+															splitTotals.interesIvaCube +
+															membresiasTotal +
+															serviciosTotal;
 															return (
 																<TableRow className="border-t-2 bg-muted/50 font-bold">
-																	<TableCell>Total</TableCell>
-																	<TableCell className="text-right">
-																		{totalCred}
+																<TableCell className="sticky left-0 z-[1] bg-muted">
+																	Total
 																	</TableCell>
-															<TableCell className="text-right">
+																<TableCell>{totalCred}</TableCell>
+																<TableCell>
 																{formatCurrency(capitalTotal)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(interesIvaTotal)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(serviciosTotal)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(membresiasTotal)}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(val("total_mora"))}
 															</TableCell>
-															<TableCell className="text-right">
+																<TableCell>
 																{formatCurrency(grandTotal)}
 															</TableCell>
-															<TableCell className="border-l bg-muted/10 text-right">
-																		{formatCurrency(
-																			val(
-																				a
-																					? "acum_total_interes_inversionista"
-																							: "total_interes_inversionista",
-																						),
-																					)}
+																<TableCell className="bg-muted/10">
+																	{formatCurrency(splitTotals.capitalCube)}
+																</TableCell>
+																<TableCell className="bg-muted/10">
+																	{formatCurrency(splitTotals.interesIvaCube)}
+																</TableCell>
+																<TableCell className="bg-muted/10">
+																	{formatCurrency(facturacionTotal)}
 																				</TableCell>
-																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.capitalInv)}</TableCell>
-																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.capitalCube)}</TableCell>
-																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.interesIvaInv)}</TableCell>
-																	<TableCell className="bg-muted/10 text-right">{formatCurrency(splitTotals.interesIvaCube)}</TableCell>
 																</TableRow>
 															);
 														})()}
@@ -1823,9 +1836,7 @@ function RouteComponent() {
 																			{label}
 																		</TableCell>
 																		<TableCell className="text-right font-medium">
-																			{formatCurrency(
-																				Number(cobrado[key] || 0),
-																			)}
+																		{formatCurrency(Number(cobrado[key] || 0))}
 																		</TableCell>
 																	</TableRow>
 																))}
@@ -1844,63 +1855,106 @@ function RouteComponent() {
 						<TabsContent value="inversiones" className="space-y-6">
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-										<div>
-											<CardTitle>Inversión y reinversión</CardTitle>
-											<CardDescription>
-												Capital liquidado, distribución y posición activa.
-											</CardDescription>
-										</div>
-										<div className="flex items-center gap-2">
-											<Select
-												value={String(flujoMesNum)}
-												onValueChange={(value) =>
-													setFlujoMesAnio(flujoAnioNum, Number(value))
+									<div className="flex flex-col gap-4">
+										<Tabs
+											value={investmentView}
+											onValueChange={(value) => {
+												if (value === "realizado" || value === "proyeccion") {
+													setInvestmentView(value);
 												}
-											>
-												<SelectTrigger className="w-36" aria-label="Mes">
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													{mesesDisponibles.map((month) => (
-														<SelectItem
-															key={month.num}
-															value={String(month.num)}
-														>
-															{month.nombre}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
-											<Select
-												value={String(flujoAnioNum)}
-												onValueChange={(value) =>
-													setFlujoMesAnio(Number(value), flujoMesNum)
-												}
-											>
-												<SelectTrigger className="w-24" aria-label="Año">
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													{aniosDisponibles.map((year) => (
-														<SelectItem key={year} value={String(year)}>
-															{year}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
+											}}
+										>
+											<TabsList aria-label="Vista del reporte de inversiones">
+												<TabsTrigger value="realizado">Realizado</TabsTrigger>
+												<TabsTrigger value="proyeccion">Proyección</TabsTrigger>
+											</TabsList>
+										</Tabs>
+										<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+											<div>
+												<CardTitle>Inversión y reinversión</CardTitle>
+												<CardDescription>
+													{investmentView === "realizado"
+														? "Capital liquidado, distribución y posición activa."
+														: "Estimación de pago y reinversión con la posición vigente al corte."}
+												</CardDescription>
+											</div>
+											{investmentView === "realizado" ? (
+												<div className="flex items-center gap-2">
+													<Select
+														value={String(flujoMesNum)}
+														onValueChange={(value) =>
+															setFlujoMesAnio(flujoAnioNum, Number(value))
+														}
+													>
+														<SelectTrigger className="w-36" aria-label="Mes">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															{mesesDisponibles.map((month) => (
+																<SelectItem
+																	key={month.num}
+																	value={String(month.num)}
+																>
+																	{month.nombre}
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+													<Select
+														value={String(flujoAnioNum)}
+														onValueChange={(value) =>
+															setFlujoMesAnio(Number(value), flujoMesNum)
+														}
+													>
+														<SelectTrigger className="w-24" aria-label="Año">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															{aniosDisponibles.map((year) => (
+																<SelectItem key={year} value={String(year)}>
+																	{year}
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+												</div>
+											) : (
+												<Input
+													type="month"
+													aria-label="Mes proyectado"
+													className="w-44"
+													min={projectionMonthBounds.firstMonth}
+													max={projectionMonthBounds.lastMonth}
+													value={projectionMonth}
+													onChange={(event) => {
+														if (event.target.value)
+															setProjectionMonth(event.target.value);
+													}}
+												/>
+											)}
 										</div>
 									</div>
 								</CardHeader>
 								<CardContent className="pt-6">
-									<ReinvestmentReport
-										data={reinversionData}
-										isPending={reinversionLiquidacionesQuery.isPending}
-										isError={reinversionLiquidacionesQuery.isError}
-										periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
-										onRetry={() => reinversionLiquidacionesQuery.refetch()}
-										onExportInvestors={exportReinvestmentInvestorsExcel}
-									/>
+									{investmentView === "realizado" ? (
+										<ReinvestmentReport
+											data={reinversionData}
+											isPending={reinversionLiquidacionesQuery.isPending}
+											isError={reinversionLiquidacionesQuery.isError}
+											periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
+											onRetry={() => reinversionLiquidacionesQuery.refetch()}
+											onExportInvestors={exportAdminReportsExcel}
+										/>
+									) : (
+										<InvestmentProjection
+											data={investmentProjectionData}
+											isPending={investmentProjectionQuery.isPending}
+											isError={investmentProjectionQuery.isError}
+											periodLabel={projectionPeriodLabel}
+											asOfLabel={projectionAsOfLabel}
+											onRetry={() => investmentProjectionQuery.refetch()}
+										/>
+									)}
 								</CardContent>
 							</Card>
 						</TabsContent>
@@ -1956,7 +2010,7 @@ function RouteComponent() {
 															placeholder="0"
 															value={
 																focusedMes === mes
-																	? editMetas[mes] ?? ""
+																	? (editMetas[mes] ?? "")
 																	: editMetas[mes] && Number(editMetas[mes]) > 0
 																		? Number(editMetas[mes]).toLocaleString(
 																				"es-GT",
@@ -2555,12 +2609,12 @@ function RouteComponent() {
 										width="288px"
 										placeholder="Buscar inversionista..."
 										value={proyeccionInvId ? String(proyeccionInvId) : null}
-										options={((investorsCarteraQuery.data ?? []) as InversionistaItem[]).map(
-											(inv) => ({
+										options={(
+											(investorsCarteraQuery.data ?? []) as InversionistaItem[]
+										).map((inv) => ({
 												value: String(inv.inversionista_id),
 												label: inv.nombre,
-											}),
-										)}
+										}))}
 										onChange={(v) => {
 											setProyeccionInvId(v ? Number(v) : null);
 											setProyeccionEnabled(false);
@@ -2607,7 +2661,10 @@ function RouteComponent() {
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											{Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => (
+											{Array.from(
+												{ length: 7 },
+												(_, i) => new Date().getFullYear() - 1 + i,
+											).map((y) => (
 												<SelectItem key={y} value={String(y)}>
 													{y}
 												</SelectItem>
@@ -2625,7 +2682,9 @@ function RouteComponent() {
 									}}
 									disabled={!proyeccionInvId || simulacionQuery.isFetching}
 								>
-									{simulacionQuery.isFetching ? "Generando..." : "Generar proyección"}
+									{simulacionQuery.isFetching
+										? "Generando..."
+										: "Generar proyección"}
 								</Button>
 							</div>
 
@@ -2635,8 +2694,15 @@ function RouteComponent() {
 								</p>
 							)}
 
-							{(simulacionQuery.data as SimulacionInversionistaResult | undefined)?.data && (() => {
-								const sim = (simulacionQuery.data as SimulacionInversionistaResult).data;
+							{(
+								simulacionQuery.data as
+									| SimulacionInversionistaResult
+									| undefined
+							)?.data &&
+								(() => {
+									const sim = (
+										simulacionQuery.data as SimulacionInversionistaResult
+									).data;
 								const fmtProyeccion = (v: number) =>
 									new Intl.NumberFormat("es-GT", {
 										style: "currency",
@@ -2662,9 +2728,12 @@ function RouteComponent() {
 								const ultimoMes = meses.at(-1);
 								const totales = meses.reduce(
 									(acc, m) => ({
-										sin_reinversion: acc.sin_reinversion + Number(m.total_sin_reinversion),
-										con_reinversion: acc.con_reinversion + Number(m.total_con_reinversion),
-										reinversion: acc.reinversion + Number(m.total_reinversion),
+											sin_reinversion:
+												acc.sin_reinversion + Number(m.total_sin_reinversion),
+											con_reinversion:
+												acc.con_reinversion + Number(m.total_con_reinversion),
+											reinversion:
+												acc.reinversion + Number(m.total_reinversion),
 									}),
 									{ sin_reinversion: 0, con_reinversion: 0, reinversion: 0 },
 								);
@@ -2717,7 +2786,9 @@ function RouteComponent() {
 												</CardHeader>
 												<CardContent>
 													<p className="text-xl font-bold font-mono">
-														{fmtProyeccion(ultimoMes?.total_capital_restante ?? 0)}
+															{fmtProyeccion(
+																ultimoMes?.total_capital_restante ?? 0,
+															)}
 													</p>
 												</CardContent>
 											</Card>
@@ -2726,30 +2797,48 @@ function RouteComponent() {
 										{/* Tabla por mes */}
 										<Card>
 											<CardHeader>
-												<CardTitle className="text-sm">Desglose mensual</CardTitle>
+													<CardTitle className="text-sm">
+														Desglose mensual
+													</CardTitle>
 											</CardHeader>
 											<CardContent className="p-0">
 												<table className="w-full text-sm">
 													<thead>
 														<tr className="border-b bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
 															<th className="px-4 py-2 text-left">Mes</th>
-															<th className="px-4 py-2 text-right">Sin reinversión</th>
-															<th className="px-4 py-2 text-right text-amber-600">Reinversión</th>
-															<th className="px-4 py-2 text-right">Con reinversión</th>
-															<th className="px-4 py-2 text-right">Capital restante</th>
+																<th className="px-4 py-2 text-right">
+																	Sin reinversión
+																</th>
+																<th className="px-4 py-2 text-right text-amber-600">
+																	Reinversión
+																</th>
+																<th className="px-4 py-2 text-right">
+																	Con reinversión
+																</th>
+																<th className="px-4 py-2 text-right">
+																	Capital restante
+																</th>
 														</tr>
 													</thead>
 													<tbody>
 														{meses.map((m) => {
 															const fecha = new Date(`${m.mes}-01T00:00:00Z`);
-															const label = fecha.toLocaleDateString("es-GT", {
+																const label = fecha.toLocaleDateString(
+																	"es-GT",
+																	{
 																month: "long",
 																year: "numeric",
 																timeZone: "UTC",
-															});
+																	},
+																);
 															return (
-																<tr key={m.mes} className="border-b last:border-0 hover:bg-muted/30">
-																	<td className="px-4 py-2 capitalize">{label}</td>
+																	<tr
+																		key={m.mes}
+																		className="border-b last:border-0 hover:bg-muted/30"
+																	>
+																		<td className="px-4 py-2 capitalize">
+																			{label}
+																		</td>
 																	<td className="px-4 py-2 text-right font-mono">
 																		{fmtProyeccion(m.total_sin_reinversion)}
 																	</td>

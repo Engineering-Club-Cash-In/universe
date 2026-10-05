@@ -3,6 +3,7 @@
 import React, { useState, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { matchesSearch } from "@/lib/utils";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -291,7 +292,7 @@ export function PaymentsTable() {
   const [queryInv, setQueryInv] = usePersistedState<string>("cartera/pagos/queryInv", "");
   const filteredInvestors = queryInv === ""
     ? investors
-    : investors.filter((inv) => inv.nombre.toLowerCase().includes(queryInv.toLowerCase()));
+    : investors.filter((inv) => matchesSearch(inv.nombre, queryInv));
 
   const [page, setPage] = usePersistedState<number>("cartera/pagos/page", 1);
   const [pageSize, setPageSize] = usePersistedState<number>("cartera/pagos/pageSize", 10);

@@ -80,7 +80,14 @@ function FormularioPage() {
 				"[FormularioPage] Error al enviar solicitud de crédito:",
 				error,
 			);
-			toast.error("Error al guardar la solicitud");
+			// El servidor rechaza datos concretos (p. ej. un DPI que no es un CUI
+			// válido). Sin mostrar su mensaje, el cliente solo ve un error opaco y
+			// no tiene forma de saber qué corregir.
+			toast.error(
+				error instanceof Error && error.message
+					? error.message
+					: "Error al guardar la solicitud",
+			);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -136,7 +143,14 @@ function FormularioPage() {
 				"[FormularioPage] Error al enviar estado patrimonial:",
 				error,
 			);
-			toast.error("Error al enviar el formulario");
+			// Este paso corre DESPUÉS de que el cliente firmó: si el servidor rechaza
+			// un dato y solo mostramos un error genérico, queda firmado y trabado sin
+			// saber qué arreglar.
+			toast.error(
+				error instanceof Error && error.message
+					? error.message
+					: "Error al enviar el formulario",
+			);
 		} finally {
 			setIsSubmitting(false);
 		}

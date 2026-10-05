@@ -132,9 +132,44 @@ export class ClientesService extends BaseService {
     );
 
     if (response.success && response.data) {
+      // Un Result distinto de "OK" es un fallo LÓGICO del core, no un "DPI
+      // desconocido": devolverlo como success con lista vacía los hacía
+      // indistinguibles y el consumidor (la consulta de mora de cartera) leía
+      // el fallo como "no es cliente" — fail-open. El DPI desconocido legítimo
+      // viene como Result OK con ConsultaResultados vacío.
+      // Se exige OK explícito, no "cualquier cosa que no sea un no-OK": un
+      // cuerpo 200 sin `Result` —schema corrido, respuesta truncada— volvía a
+      // publicarse como éxito con lista vacía, que es el mismo fail-open.
+      const resultado = response.data.Result;
+      if (resultado !== "OK") {
+        return {
+          success: false,
+          error:
+            response.data.Messages?.[0]?.Description ||
+            `SIFCO respondió Result=${resultado ?? "(ausente)"} al buscar por identificación`,
+          statusCode: response.statusCode,
+        } as any;
+      }
+
+      // La lista tiene que venir COMO LISTA. Con `|| []`, un OK cuyo
+      // `ConsultaResultados` viene ausente —respuesta truncada, schema
+      // corrido— se publicaba como "DPI desconocido", que es justo el
+      // fail-open que el chequeo de Result acaba de cerrar: el core tiene el
+      // dato pero nosotros dejamos pasar al moroso. Un DPI de verdad
+      // desconocido SÍ trae la lista, vacía (ver arriba).
+      const encontrados = response.data.ConsultaResultados;
+      if (!Array.isArray(encontrados)) {
+        return {
+          success: false,
+          error:
+            "SIFCO respondió OK sin la lista ConsultaResultados al buscar por identificación",
+          statusCode: response.statusCode,
+        } as any;
+      }
+
       return {
         success: true,
-        data: response.data.ConsultaResultados || [],
+        data: encontrados,
         statusCode: response.statusCode,
       };
     }

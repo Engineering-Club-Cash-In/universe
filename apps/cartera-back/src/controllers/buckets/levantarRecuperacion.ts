@@ -121,7 +121,7 @@ export async function levantarRecuperacionSiPagoTodo(
     );
 
   // El bucket NO se toca acá. Sin el estado ya no hay piso, así que la corrida
-  // de las 23:59 lo devuelve a donde le corresponde por cuotas —B0, porque no
+  // de las 00:05 lo devuelve a donde le corresponde por cuotas —B0, porque no
   // debe nada— y deja su BAJADA en la bitácora. Escribirla desde acá duplicaría
   // el evento y competiría con el motor por la misma fila.
   return { levantado: true };

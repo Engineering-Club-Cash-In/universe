@@ -7,13 +7,21 @@ name: Deploy producción
 # buildea desde el repo (docker-compose con Gotenberg); solo se dispara el
 # redeploy vía webhook.
 on:
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "apps/cartera-back/**"
+      - "packages/email/**"
+      - ".github/workflows/deploy-prod.yaml"
   push:
     branches: ["main"]
     paths:
+      - ".dockerignore"
       - "apps/cartera-back/**"
       - "apps/carteraFront/**"
       - "apps/crm/**"
       - "apps/portal-web/**"
+      - "apps/tracker/**"
       - "apps/auth-google/**"
       - "apps/backend-2/**"
       - "apps/legal-documents/**"
@@ -41,15 +49,40 @@ on:
           - legal-documents
           - legal-docs-blueprints
           - investment
+          - tracker
 
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: public.ecr.aws/a6w8m2u2
+  COOLIFY_API_BASE: https://coolify.devteamatcci.site/api/v1
+  COOLIFY_APP_UUID_CARTERA_BACK_PROD: qk4sw4kc4c088c8csos400wc
 
 permissions:
   contents: read
 
 jobs:
+  safeguards:
+    name: Cartera deployment safeguards
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Test health endpoint and Coolify env validator
+        run: |
+          bun test apps/cartera-back/src/routers/health.test.ts
+          node --test apps/cartera-back/scripts/validate-coolify-envs.test.mjs
+          # El catalogo del logger y su lista canonica tienen que declarar los
+          # MISMOS job_name: si se desincronizan, createStructuredLogger tira al
+          # inicializarse y cartera-back no arranca. Estas pruebas ya cazaban el
+          # desfase; lo que faltaba era que alguien las corriera.
+          bun test packages/structured-logger/__tests__/catalog.test.ts \
+                   packages/structured-logger/__tests__/logger.test.ts
+
   # 1) Decide qué apps construir: por diff en pushes, por input en dispatch
   changes:
     name: Detectar cambios
@@ -74,12 +107,15 @@ jobs:
             cartera-back:
               - 'apps/cartera-back/**'
               - 'packages/email/**'
+              - 'packages/structured-logger/**'
               - 'package.json'
               - 'bun.lock'
             cartera-front:
               - 'apps/carteraFront/**'
             crm-api:
+              - '.dockerignore'
               - 'apps/crm/apps/server/**'
+              - 'apps/crm/apps/web/package.json'
               - 'apps/crm/package.json'
               - 'apps/crm/bun.lock'
               - 'packages/infornet/**'
@@ -87,6 +123,7 @@ jobs:
               - 'packages/simpletech/**'
               - 'packages/email/**'
             crm-web:
+              - '.dockerignore'
               - 'apps/crm/**'
               - 'packages/infornet/**'
               - 'packages/sms/**'
@@ -94,6 +131,15 @@ jobs:
               - 'packages/email/**'
             portal-web:
               - 'apps/portal-web/**'
+            tracker:
+              - 'apps/tracker/**'
+              - 'package.json'
+              - 'bun.lock'
+              # El Dockerfile copia estas 3 carpetas del server del CRM para
+              # resolver los tipos que el tracker consume (COPY en Dockerfile).
+              - 'apps/crm/apps/server/src/routers/**'
+              - 'apps/crm/apps/server/src/lib/**'
+              - 'apps/crm/apps/server/src/db/**'
             auth-google:
               - 'apps/auth-google/**'
               - 'packages/email/**'
@@ -110,7 +156,7 @@ jobs:
               - 'apps/investment-calculator/**'
       - id: pick
         run: |
-          ALL='["cartera-back","cartera-front","crm-api","crm-web","portal-web","auth-google","backend-2","legal-documents","legal-docs-blueprints","investment"]'
+          ALL='["cartera-back","cartera-front","crm-api","crm-web","portal-web","auth-google","backend-2","legal-documents","legal-docs-blueprints","investment","tracker"]'
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ "${{ inputs.app }}" = "all" ]; then
               echo "apps=$ALL" >> "$GITHUB_OUTPUT"
@@ -139,6 +185,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validar variables de Cartera en Coolify
+        if: matrix.app == 'cartera-back'
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::error::Falta el secret COOLIFY_TOKEN"
+            exit 1
+          fi
+
+          curl --silent --show-error --fail \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --retry 2 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            --retry-all-errors \
+            "$COOLIFY_API_BASE/applications/$COOLIFY_APP_UUID_CARTERA_BACK_PROD/envs" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN" \
+            | node apps/cartera-back/scripts/validate-coolify-envs.mjs \
+                --manifest apps/cartera-back/required-env.production.json
+
       - name: Configure AWS credentials
         # legal-docs-blueprints no pushea imagen: Coolify buildea del repo
         if: matrix.app != 'legal-docs-blueprints'
@@ -158,8 +226,9 @@ jobs:
         if: matrix.app != 'legal-docs-blueprints'
         run: |
           # Contexto, Dockerfile e imagen por app (espejo de los deploy.sh)
+          BUILD_ARGS=()
           case "${{ matrix.app }}" in
-            cartera-back)    CTX=.                    FILE=apps/cartera-back/Dockerfile        IMAGE=cartera-back ;;
+            cartera-back)    CTX=.                    FILE=apps/cartera-back/Dockerfile        IMAGE=cartera-back ; BUILD_ARGS=(--build-arg CARTERA_LOG_ENVIRONMENT=production) ;;
             cartera-front)   CTX=apps/carteraFront    FILE=apps/carteraFront/Dockerfile        IMAGE=cartera-front ;;
             crm-api)         CTX=.                    FILE=apps/crm/apps/server/Dockerfile     IMAGE=cci/crm-api ;;
             crm-web)         CTX=.                    FILE=apps/crm/Dockerfile                 IMAGE=cci/crm-web ;;
@@ -168,9 +237,10 @@ jobs:
             backend-2)       CTX=.                    FILE=apps/backend-2/Dockerfile           IMAGE=cci/backend ;;
             legal-documents) CTX=apps/legal-documents FILE=apps/legal-documents/Dockerfile     IMAGE=cci/legal-documents ;;
             investment)      CTX=apps/investment-calculator FILE=apps/investment-calculator/Dockerfile IMAGE=cci/investment ;;
+            tracker)         CTX=.                    FILE=apps/tracker/Dockerfile             IMAGE=cci/tracker ;;
             *) echo "App desconocida"; exit 1 ;;
           esac
-          podman build -f "$FILE" "$CTX" \
+          podman build "${BUILD_ARGS[@]}" -f "$FILE" "$CTX" \
             -t "$ECR_REGISTRY/$IMAGE:latest" \
             -t "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
 
@@ -194,6 +264,7 @@ jobs:
           WH_LEGAL_DOCUMENTS: ${{ secrets.COOLIFY_WEBHOOK_LEGAL_DOCUMENTS_PROD }}
           WH_LEGAL_DOCS_BLUEPRINTS: ${{ secrets.COOLIFY_WEBHOOK_LEGAL_DOCS_BLUEPRINTS_PROD }}
           WH_INVESTMENT: ${{ secrets.COOLIFY_WEBHOOK_INVESTMENT_PROD }}
+          WH_TRACKER: ${{ secrets.COOLIFY_WEBHOOK_TRACKER_PROD }}
         run: |
           case "${{ matrix.app }}" in
             cartera-back)    WEBHOOK="$WH_CARTERA_BACK" ;;
@@ -206,6 +277,7 @@ jobs:
             legal-documents) WEBHOOK="$WH_LEGAL_DOCUMENTS" ;;
             legal-docs-blueprints) WEBHOOK="$WH_LEGAL_DOCS_BLUEPRINTS" ;;
             investment)      WEBHOOK="$WH_INVESTMENT" ;;
+            tracker)         WEBHOOK="$WH_TRACKER" ;;
           esac
           if [ -z "$WEBHOOK" ]; then
             echo "::notice::Sin webhook configurado para ${{ matrix.app }}; imagen pusheada pero sin redeploy automático."

@@ -9,6 +9,8 @@ import { vehicles } from "../db/schema/vehicles";
 import { assertAccesoCasoCobro } from "../lib/acceso-caso-cobro";
 import { MIME_EVIDENCIA_INMOVILIZACION } from "../lib/inmovilizacion-unidad";
 import { MIME_EVIDENCIA_INVESTIGACION } from "../lib/investigaciones-redes-cobros";
+import { canWriteOpportunityCreditAnalysis } from "../lib/credit-analysis-ownership";
+import { canRunDocumentIntegrityValidation } from "../lib/document-integrity/workflow-policy";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -150,12 +152,6 @@ async function assertCanUploadToResource(params: {
 		}
 
 		case "bank_statement": {
-			if (!PERMISSIONS.canAccessClients(userRole)) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "CRM access role required",
-				});
-			}
-
 			const [opportunity] = await db
 				.select({
 					id: opportunities.id,
@@ -166,12 +162,27 @@ async function assertCanUploadToResource(params: {
 				.limit(1);
 
 			if (opportunity) {
-				if (userRole === "sales" && opportunity.assignedTo !== userId) {
+				if (
+					!canRunDocumentIntegrityValidation(userRole) ||
+					!canWriteOpportunityCreditAnalysis(
+						userRole,
+						userId,
+						opportunity.assignedTo,
+					)
+				) {
 					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para analizar esta oportunidad",
+						message: "No tienes permiso para subir estados de cuenta",
 					});
 				}
 				return;
+			}
+
+			// Los codeudores conservan el permiso previo del análisis de capacidad;
+			// la validación documental nueva aplica únicamente a oportunidades.
+			if (!PERMISSIONS.canAccessClients(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "CRM access role required",
+				});
 			}
 
 			const [coDebtor] = await db
@@ -263,6 +274,60 @@ async function assertCanUploadToResource(params: {
 			await assertAccesoCasoCobro(resourceId, userId, userRole);
 			return;
 		}
+
+		case "license_verification": {
+			// El recurso se organiza por oportunidad (leads) o por co-deudor,
+			// igual que "bank_statement" — una licencia se verifica por cada
+			// expediente de crédito, no una vez por persona.
+			// canAccessCRM (no canAccessClients): mismo scoping que crmOnlyProcedure
+			// en license-verification.ts — cobros/cobros_supervisor/accounting no
+			// deben poder pedir URLs de subida para este recurso.
+			if (!PERMISSIONS.canAccessCRM(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "CRM access role required",
+				});
+			}
+
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, resourceId))
+				.limit(1);
+
+			if (opportunity) {
+				if (userRole === "sales" && opportunity.assignedTo !== userId) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para verificar esta oportunidad",
+					});
+				}
+				return;
+			}
+
+			const [coDebtor] = await db
+				.select({
+					id: coDebtors.id,
+					opportunityAssignedTo: opportunities.assignedTo,
+				})
+				.from(coDebtors)
+				.leftJoin(opportunities, eq(coDebtors.opportunityId, opportunities.id))
+				.where(eq(coDebtors.id, resourceId))
+				.limit(1);
+
+			if (!coDebtor) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad o co-deudor no encontrado",
+				});
+			}
+			if (userRole === "sales" && coDebtor.opportunityAssignedTo !== userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para verificar este co-deudor",
+				});
+			}
+			return;
+		}
 	}
 }
 
@@ -349,6 +414,19 @@ export const uploadRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"La evidencia de la investigación va en JPG, PNG, WebP o PDF.",
+				});
+			}
+
+			if (
+				input.resourceType === "license_verification" &&
+				!["image/jpeg", "image/png"].includes(resolvedMime.mimeType)
+			) {
+				// No cualquier "image/*": el decodificador de QR/barcode
+				// (zxing-wasm, vía stb_image) no soporta WebP ni AVIF aunque
+				// ALLOWED_DOCUMENT_TYPES sí los acepte para otros documentos.
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El reverso de la licencia debe subirse en formato JPEG o PNG.",
 				});
 			}
 

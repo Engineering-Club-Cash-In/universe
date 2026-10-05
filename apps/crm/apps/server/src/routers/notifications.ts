@@ -16,12 +16,12 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { opportunities } from "../db/schema/crm";
-import type { NewNotification } from "../db/schema/notifications";
 import {
 	notificationDocuments,
 	notifications,
 } from "../db/schema/notifications";
 import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
+import { createNotification } from "../lib/notificaciones";
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
@@ -54,20 +54,10 @@ const notificationWithCreator = {
 	updatedAt: notifications.updatedAt,
 };
 
-// Función interna para crear notificaciones (no es endpoint ORPC)
-export async function createNotification(
-	data: Omit<NewNotification, "id" | "createdAt" | "updatedAt" | "status">,
-) {
-	const [notification] = await db
-		.insert(notifications)
-		.values({
-			...data,
-			status: "pending",
-		})
-		.returning();
-
-	return notification;
-}
+// Crear notificaciones vive en `lib/notificaciones.ts`: este módulo arrastra el
+// router entero y hay avisos que salen desde sitios que no lo necesitan. Se
+// re-exporta para no tocar a quienes ya lo importaban de acá.
+export { createNotification } from "../lib/notificaciones";
 
 export const notificationsRouter = {
 	// Conteo de notificaciones pendientes para el usuario autenticado

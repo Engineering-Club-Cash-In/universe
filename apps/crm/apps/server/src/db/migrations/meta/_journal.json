@@ -113,6 +113,167 @@
 			"when": 1786579200000,
 			"tag": "0028_normalize_dpi_format",
 			"breakpoints": true
+		},
+		{
+			"idx": 16,
+			"version": "7",
+			"when": 1786735924142,
+			"tag": "0029_add_license_qr_verifications",
+			"breakpoints": true
+		},
+		{
+			"idx": 17,
+			"version": "7",
+			"when": 1787097600000,
+			"tag": "0030_create_opportunity_validations",
+			"breakpoints": true
+		},
+		{
+			"idx": 18,
+			"version": "7",
+			"when": 1787788800000,
+			"tag": "0031_create_crm_entity_audit",
+			"breakpoints": true
+		},
+		{
+			"idx": 19,
+			"version": "7",
+			"when": 1788393600000,
+			"tag": "0032_create_opportunity_validation_override_logs",
+			"breakpoints": true
+		},
+		{
+			"idx": 20,
+			"version": "7",
+			"when": 1788476400000,
+			"tag": "0033_create_document_integrity_validation",
+			"breakpoints": true
+		},
+		{
+			"idx": 21,
+			"version": "7",
+			"when": 1788480000000,
+			"tag": "0033_add_partner_tracker",
+			"breakpoints": true
+		},
+		{
+			"idx": 22,
+			"version": "7",
+			"when": 1789603971870,
+			"tag": "0034_finance_ideal_payment_date_adjustment",
+			"breakpoints": true
+		},
+		{
+			"idx": 23,
+			"version": "7",
+			"when": 1789604000000,
+			"tag": "0034_add_contract_parties",
+			"breakpoints": true
+		},
+		{
+			"idx": 24,
+			"version": "7",
+			"when": 1790089286602,
+			"tag": "0035_create_buro_interno",
+			"breakpoints": true
+		},
+		{
+			"idx": 25,
+			"version": "7",
+			"when": 1789776000000,
+			"tag": "0035_add_identity_revalidated_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 26,
+			"version": "7",
+			"when": 1790265214957,
+			"tag": "0036_buro_interno_autorizaciones",
+			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "7",
+			"when": 1790089386602,
+			"tag": "0034_create_contract_signatories",
+			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "7",
+			"when": 1790089486602,
+			"tag": "0035_add_signing_status_tracking",
+			"breakpoints": true
+		},
+		{
+			"idx": 28,
+			"version": "7",
+			"when": 1790089586602,
+			"tag": "0036_add_contract_observer_url",
+			"breakpoints": true
+		},
+		{
+			"idx": 29,
+			"version": "7",
+			"when": 1790089686602,
+			"tag": "0037_add_contract_cancellation",
+			"breakpoints": true
+		},
+		{
+			"idx": 30,
+			"version": "7",
+			"when": 1790089786602,
+			"tag": "0038_add_contract_regeneration_reason",
+			"breakpoints": true
+		},
+		{
+			"idx": 31,
+			"version": "7",
+			"when": 1790089886602,
+			"tag": "0039_create_investor_contract_batches",
+			"breakpoints": true
+		},
+		{
+			"idx": 32,
+			"version": "7",
+			"when": 1790089986602,
+			"tag": "0040_link_contracts_to_investors",
+			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "7",
+			"when": 1790090086602,
+			"tag": "0041_add_investor_rep_legal_dpi",
+			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "7",
+			"when": 1790090186602,
+			"tag": "0042_add_signed_pdf_link",
+			"breakpoints": true
+		},
+		{
+			"idx": 35,
+			"version": "7",
+			"when": 1790090286602,
+			"tag": "0043_add_batch_email_thread",
+			"breakpoints": true
+		},
+		{
+			"idx": 36,
+			"version": "7",
+			"when": 1790373775351,
+			"tag": "0044_add_batch_monto_aportado_previo",
+			"breakpoints": true
+		},
+		{
+			"idx": 37,
+			"version": "7",
+			"when": 1790799299432,
+			"tag": "0045_add_sat_verificacion_vehiculos",
+			"breakpoints": true
 		}
 	]
 }

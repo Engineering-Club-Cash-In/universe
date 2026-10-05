@@ -61,6 +61,29 @@ type AuditClient = {
 	status: string | null;
 };
 
+// Verificaciones de QR de licencia (lead o co-deudor de esta oportunidad) que
+// se archivan acá antes de borrarlas — si no, el borrado de la oportunidad
+// destruye el rastro de auditoría que ese feature existe para conservar.
+type AuditLicenseVerification = {
+	id: string;
+	subjectType: "lead" | "coDebtor";
+	subjectId: string;
+	result: string;
+	qrRawUrl: string | null;
+	qrDomainValid: boolean;
+	cardCode: string | null;
+	apiResponseCode: number | null;
+	licenseHolderName: string | null;
+	licenseNumber: string | null;
+	licenseExpiresAt: string | null;
+	identityMatchScore: string | null;
+	failureReason: string | null;
+	documentKey: string | null;
+	rawResponse: unknown;
+	createdAt: Date;
+	createdBy: string;
+};
+
 export type DeletedOpportunitySnapshot = {
 	opportunity: {
 		id: string;
@@ -99,7 +122,11 @@ export type DeletedOpportunitySnapshot = {
 		coDebtors: number;
 		forms: number;
 		stageHistory: number;
+		licenseVerifications: number;
 	};
+	licenseVerifications: Array<
+		Omit<AuditLicenseVerification, "createdAt"> & { createdAt: string }
+	>;
 };
 
 function serializeDate(value: Date | null): string | null {
@@ -121,6 +148,7 @@ export function buildDeletedOpportunitySnapshot({
 	assignedUser,
 	client,
 	relatedCounts,
+	licenseVerifications = [],
 }: {
 	opportunity: AuditOpportunity;
 	stage: AuditStage;
@@ -129,7 +157,11 @@ export function buildDeletedOpportunitySnapshot({
 	vehicle: AuditVehicle | null;
 	assignedUser: AuditUser | null;
 	client: AuditClient | null;
-	relatedCounts: DeletedOpportunitySnapshot["relatedCounts"];
+	relatedCounts: Omit<
+		DeletedOpportunitySnapshot["relatedCounts"],
+		"licenseVerifications"
+	>;
+	licenseVerifications?: AuditLicenseVerification[];
 }): DeletedOpportunitySnapshot {
 	return {
 		opportunity: {
@@ -164,6 +196,13 @@ export function buildDeletedOpportunitySnapshot({
 		vehicle,
 		assignedUser,
 		client,
-		relatedCounts,
+		relatedCounts: {
+			...relatedCounts,
+			licenseVerifications: licenseVerifications.length,
+		},
+		licenseVerifications: licenseVerifications.map((verification) => ({
+			...verification,
+			createdAt: verification.createdAt.toISOString(),
+		})),
 	};
 }

@@ -3,6 +3,7 @@
  */
 
 import { env } from "../../config/env";
+import { portalAuthHeaders } from "./portalAuth";
 
 // ============================================
 // INTERFACES
@@ -66,6 +67,19 @@ export interface UpdateLeadPayload {
   dpi?: string;
   phone?: string;
   address?: string;
+  /**
+   * Simulacro: el CRM corre candado, gate de mora y duplicados y contesta
+   * `{ success: true, validado: true }` SIN escribir nada
+   * (`updateLeadByEmail`, controllers/portal-lead.ts).
+   *
+   * Lo necesita el cambio de DPI del portal, que está obligado a escribir la
+   * cuenta ANTES que el lead: sin esta pasada previa, un rechazo del CRM deja
+   * la identidad partida entre los dos servicios.
+   *
+   * Sin la bandera el CRM ESCRIBE, así que omitirla no es "validar de más":
+   * es el modo real.
+   */
+  soloValidar?: boolean;
 }
 
 export interface SendLeadPayload {
@@ -78,6 +92,33 @@ export interface SendLeadPayload {
 }
 
 // ============================================
+// ERRORES
+// ============================================
+
+/**
+ * Rechazo del CRM al dar de alta un lead, con el status y el motivo que dio.
+ *
+ * Es el espejo de `CarteraInvestorError` en el camino de INVESTOR. `sendLead`
+ * convertía CUALQUIER respuesta no-OK en un `Error` pelado, así que el 409 con
+ * el que el CRM rechaza un reintento que trae otro DPI llegaba a la ruta
+ * indistinguible de una caída y salía como 500. El formulario no podía
+ * reconocerlo como conflicto corregible y dejaba a la persona en el paso 2,
+ * con el campo del DPI —lo único que se le pedía corregir— en el paso 1.
+ *
+ * Conservar el status es lo que permite que la ruta lo conteste como 409 con
+ * un código, igual que ya hace el conflicto de DPI del camino de inversionista.
+ */
+export class CrmLeadError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CrmLeadError";
+  }
+}
+
+// ============================================
 // FUNCIONES
 // ============================================
 
@@ -86,14 +127,13 @@ export interface SendLeadPayload {
  */
 export const getProfile = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<ProfileData> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );
@@ -111,14 +151,13 @@ export const getProfile = async (
  * Actualizar información del lead (DPI, teléfono o dirección)
  */
 export const updateLead = async (
-  payload: UpdateLeadPayload,
-  token?: string
+  payload: UpdateLeadPayload
 ): Promise<UpdateFieldResponse> => {
   const response = await fetch(`${env.CRM_API_URL}/api/portal/lead/update`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
+      ...portalAuthHeaders(),
     },
     body: JSON.stringify(payload),
   });
@@ -137,14 +176,13 @@ export const updateLead = async (
  */
 export const getNumbersSifco = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<Opportunity[]> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead/sifco?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );
@@ -160,24 +198,48 @@ export const getNumbersSifco = async (
 
 /**
  * Enviar/Crear un lead en el CRM
+ *
+ * `dpiRegistradoEnLead` viaja como campo HERMANO de `data`, no dentro de él, y
+ * tiene que quedar declarado aquí: es el único aviso de que el CRM autorizó el
+ * acceso PERO no se quedó con el DPI del registro (le pasa a los leads que
+ * ventas creó sin DPI, donde solo un humano puede ponérselo). Perderlo deja que
+ * el DPI se escriba igual en Better Auth y la persona queda clavada: el
+ * formulario ya no se lo pide —porque la cuenta ya lo tiene— y el CRM sigue
+ * diciendo que su ficha está incompleta.
+ *
+ * Ausente NO es `false`: el alta nueva no emite la bandera y ahí el DPI SÍ es el
+ * que quedó en el lead.
  */
 export const sendLead = async (
-  payload: SendLeadPayload,
-  token?: string
-): Promise<{ success: boolean; data?: any }> => {
+  payload: SendLeadPayload
+): Promise<{
+  success: boolean;
+  data?: any;
+  dpiRegistradoEnLead?: boolean;
+}> => {
   const response = await fetch(`${env.CRM_API_URL}/api/portal/lead`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
+      ...portalAuthHeaders(),
     },
     body: JSON.stringify(payload),
   });
 
-  const result = (await response.json()) as { success: boolean; data?: any; error?: string };
+  const result = (await response.json()) as {
+    success: boolean;
+    data?: any;
+    dpiRegistradoEnLead?: boolean;
+    error?: string;
+  };
 
   if (!response.ok) {
-    throw new Error(result.error || "Error al crear el lead");
+    // El status viaja con el error: sin él, el 409 del reintento con otro DPI
+    // —lo único que la persona puede corregir sola— se vuelve un 500 mudo.
+    throw new CrmLeadError(
+      response.status,
+      result.error || "Error al crear el lead",
+    );
   }
 
   return result;

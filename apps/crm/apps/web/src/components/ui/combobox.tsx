@@ -34,6 +34,7 @@ interface ComboboxDemoProps {
 	isLoading?: boolean;
 	isInModal?: boolean;
 	maxListHeight?: string;
+	disabled?: boolean;
 }
 
 export function Combobox({
@@ -47,6 +48,7 @@ export function Combobox({
 	isLoading,
 	isInModal = false,
 	maxListHeight,
+	disabled = false,
 }: ComboboxDemoProps) {
 	const [open, setOpen] = React.useState(false);
 	const [searchValue, setSearchValue] = React.useState("");
@@ -87,6 +89,7 @@ export function Combobox({
 					role="combobox"
 					aria-expanded={open}
 					aria-controls={listboxId}
+					disabled={disabled}
 					className={`${
 						width === "min" || width === "full" ? `w-${width}` : `w-[${width}]`
 					} justify-between overflow-hidden`}

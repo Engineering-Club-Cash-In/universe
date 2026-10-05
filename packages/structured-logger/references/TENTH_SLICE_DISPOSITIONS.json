@@ -1,0 +1,395 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 23,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 24,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 25,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 53,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 69,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 75,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 106,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 107,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 108,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 117,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 131,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 142,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 143,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 144,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 145,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 148,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 160,
+      "method": "console.warn",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 196,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 198,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 201,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 218,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 239,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 240,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 263,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 266,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.sifco_migration",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 267,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 268,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 287,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 288,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 300,
+      "method": "console.warn",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 305,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 306,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 314,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 317,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 321,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.sifco_migration",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 322,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 323,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 587,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/migratePayments.ts",
+      "line": 594,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    }
+  ]
+}

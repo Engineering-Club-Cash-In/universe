@@ -5,6 +5,8 @@ import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas, type TareaProgramada } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
 import { validationErrorMiddleware } from "./middleware/validationError";
+import { nexaPaymentHandler } from "./controllers/nexaPaymentRuntime";
+import { createNexaInternalRouter } from "./routers/nexa";
 
 const app = new Elysia()
   .use(validationErrorMiddleware)
@@ -14,6 +16,8 @@ const app = new Elysia()
     allowedHeaders: ["Content-Type", "Authorization"],
   }))
   .use(auditLogMiddleware)
+  .use(createNexaInternalRouter(config.environment, config.nexaInternalPaymentsEnabled, nexaPaymentHandler))
+  .use(routers.healthRouter)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)
   .use(routers.advisorRouter)
@@ -56,7 +60,9 @@ const app = new Elysia()
   .use(routers.bucketsRouter)
   .use(routers.cuotasRouter)
   .use(routers.modalidadFacturacionRouter)
-  .use(routers.pagaloSupervisionRouter);
+  .use(routers.pagaloSupervisionRouter)
+  .use(routers.consultaMoraRouter)
+  .use(routers.rubrosRouter);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //   🚨 FIXME(COBROS-02): REVERTIR ESTA LÍNEA ANTES DE MERGEAR A DEVELOP 🚨
@@ -70,7 +76,8 @@ const app = new Elysia()
 //   Si esta rama se mergea así, cartera de producción se queda SIN NINGUNA
 //   tarea programada: procesarMoras, buckets de convenio, efectividad de
 //   asesores, expiración de compras de cartera, cierre mensual, verificación
-//   de facturas en SAT y snapshot diario de facturación. No se nota al
+//   de facturas en SAT, snapshot diario de facturación, cuadre de
+//   liquidaciones, cuentas del portal y reintento de baterías al CRM. No se nota al
 //   desplegar: se nota cuando la mora deja de calcularse y el cierre del mes
 //   sale vacío.
 //
@@ -90,7 +97,9 @@ const app = new Elysia()
 // Quedan fuera a propósito: efectividad de asesores, expiración de compras,
 // cierre mensual y snapshot de facturación (escriben histórico que no se está
 // probando), y sobre todo verificación de facturas en SAT y su reporte por
-// correo, que le pegan a SAT de verdad y mandan correos reales.
+// correo, que le pegan a SAT de verdad y mandan correos reales. Lo mismo los
+// tres jobs que trajo develop (cuadre de liquidaciones, cuentas del portal y
+// reintento de baterías al CRM): mandan correos o le pegan al CRM.
 const TAREAS_PROGRAMADAS: TareaProgramada[] = ['moras', 'buckets_convenio'];
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor

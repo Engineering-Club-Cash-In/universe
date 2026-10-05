@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth";
 import { useAuth } from "@/lib";
+import { EntidadSwitcher } from "./SelectorEntidad";
 
 export const Menu = () => {
   const navigate = useNavigate();
@@ -72,7 +73,11 @@ export const Menu = () => {
           "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
       }}
     >
-      <div className="py-12 px-4 space-y-6">
+      <div className="py-8 px-4 w-64 flex flex-col gap-6">
+        {/* Contexto: en qué entidad está parado. Va en el rail y no sobre el
+            contenido para que siga visible al moverse entre pantallas. */}
+        <EntidadSwitcher />
+
         {/* Items del menú */}
         {displayItems.map((item) => {
           const isActive = location.pathname === item.id;
@@ -100,7 +105,7 @@ export const Menu = () => {
         })}
 
         {/* Separador */}
-        <div className="h-px bg-white/20 my-4"></div>
+        <div className="h-px bg-white/20"></div>
 
         {/* Cerrar sesión */}
         <motion.button

@@ -68,9 +68,11 @@ describe("getClientCreditSifcosFromCartera", () => {
 		});
 
 		expect(sifcos).toEqual(["A-1", "DUP", "M-1", "C-1"]);
+		// COBROS-02 Fase 4: EN_RECUPERACION también es un crédito vigente del cliente.
 		expect(calls.map((call) => call.estado)).toEqual([
 			"ACTIVO",
 			"MOROSO",
+			"EN_RECUPERACION",
 			"EN_CONVENIO",
 		]);
 	});
@@ -99,9 +101,11 @@ describe("getCurrentClientCreditsFromCartera", () => {
 		expect(credits.map((row) => row.creditos?.numero_credito_sifco)).toEqual([
 			"ACTIVO-1",
 			"MOROSO-1",
+			"EN_RECUPERACION-1",
 			"EN_CONVENIO-1",
 		]);
 		expect(calls.map(({ mes, anio }) => ({ mes, anio }))).toEqual([
+			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },

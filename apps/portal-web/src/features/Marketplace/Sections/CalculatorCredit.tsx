@@ -7,13 +7,24 @@ type CalculatorCreditProps = {
   standalone?: boolean;
 };
 
+type VehicleCondition = "new" | "used";
+
 export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) => {
   const IMAGE = import.meta.env.VITE_IMAGE_URL + "/calculator.jpg";
 
   const [monto, setMonto] = useState<string>("");
-  const [enganche, setEnganche] = useState<string>("10");
+  const [enganche, setEnganche] = useState<string>("20");
+  const [vehicleCondition, setVehicleCondition] =
+    useState<VehicleCondition>("used");
+  const [hasChangedVehicleCondition, setHasChangedVehicleCondition] =
+    useState(false);
   const [tiempo, setTiempo] = useState<string>("60");
   const isMobile = useIsMobile();
+
+  const conditionOptions = [
+    { value: "used", label: "Usado" },
+    { value: "new", label: "Nuevo" },
+  ];
 
   // Opciones de enganche (porcentajes)
   const engancheOptions = [
@@ -24,14 +35,14 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
     { value: "30", label: "30%" },
   ];
 
-  // Opciones de tiempo (meses)
-  const tiempoOptions = [
-    { value: "12", label: "12 meses" },
-    { value: "24", label: "24 meses" },
-    { value: "36", label: "36 meses" },
-    { value: "48", label: "48 meses" },
-    { value: "60", label: "60 meses" },
-  ];
+  const tiempoOptions =
+    vehicleCondition === "used"
+      ? [{ value: "60", label: "60 meses" }]
+      : [
+          { value: "60", label: "60 meses" },
+          { value: "72", label: "72 meses" },
+          { value: "84", label: "84 meses" },
+        ];
 
   const calcularCredito = () => {
     const montoNumero = Number.parseFloat(monto);
@@ -46,6 +57,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
       vehicleAmount: montoNumero,
       downPaymentPct: engancheNumero,
       termMonths: tiempoNumero,
+      vehicleCondition,
     });
 
     return {
@@ -59,7 +71,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
   return (
     <section
-      className={`relative w-full ${topMargin} mb-16 lg:mb-30 flex px-8 lg:px-20`}
+      className={`relative w-full ${topMargin} mb-16 lg:mb-30 flex gap-12 px-8 lg:px-20`}
     >
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
@@ -80,7 +92,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
       {/* Container de la calculadora a la derecha */}
       <div className="flex-1 flex justify-center">
-        <div className="relative lg:max-w-3/4 w-full">
+        <div className="relative w-full lg:max-w-[960px]">
           {/* Div decorativo izquierdo */}
           <div
             className="absolute left-0 top-0 bottom-0 w-64 rounded-l-xl"
@@ -123,10 +135,33 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
               </p>
 
               <div className="space-y-6">
-                {/* Campo Monto */}
-
-                {/* Campo Enganche */}
-                <div className="flex xl:flex-row w-full flex-col gap-6">
+                {/* Campos de la solicitud */}
+                <div className="grid w-full grid-cols-1 gap-6 2xl:grid-cols-2">
+                  <div className="w-full">
+                    <label
+                      htmlFor="vehicleCondition"
+                      className="flex items-center justify-between gap-2 text-xs lg:text-sm font-medium mb-2"
+                    >
+                      <span>Condición del vehículo</span>
+                      <span className="text-[10px] font-normal text-primary/80">
+                        Define el plazo
+                      </span>
+                    </label>
+                    <Select
+                      id="vehicleCondition"
+                      value={vehicleCondition}
+                      onChange={(value) => {
+                        const nextCondition = value as VehicleCondition;
+                        setVehicleCondition(nextCondition);
+                        setHasChangedVehicleCondition(true);
+                        if (nextCondition === "used") {
+                          setTiempo("60");
+                        }
+                      }}
+                      options={conditionOptions}
+                      color="primary"
+                    />
+                  </div>
                   <div className="w-full">
                     <label
                       htmlFor="monto"
@@ -160,12 +195,22 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
                     />
                   </div>
                   {/* Campo Tiempo */}
-                  <div className="w-full">
+                  <div
+                    key={hasChangedVehicleCondition ? vehicleCondition : "initial"}
+                    className={
+                      hasChangedVehicleCondition
+                        ? "w-full credit-term-attention"
+                        : "w-full"
+                    }
+                  >
                     <label
                       htmlFor="tiempo"
-                      className="block text-xs lg:text-sm font-medium mb-2"
+                      className="flex items-center justify-between gap-2 text-xs lg:text-sm font-medium mb-2"
                     >
-                      Tiempo de crédito
+                      <span>Tiempo de crédito</span>
+                      <span className="text-[10px] font-normal text-primary/80">
+                        Según condición
+                      </span>
                     </label>
                     <Select
                       value={tiempo}
@@ -200,7 +245,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
                   <Button
                     onClick={() => {
                       const msg = monto
-                        ? `Hola, estoy interesado en un crédito vehicular. Monto: Q${Number(monto).toLocaleString()}, Enganche: ${enganche}%, Plazo: ${tiempo} meses.`
+                        ? `Hola, estoy interesado en un crédito vehicular. Condición: ${vehicleCondition === "new" ? "Nuevo" : "Usado"}, Monto: Q${Number(monto).toLocaleString()}, Enganche: ${enganche}%, Plazo: ${tiempo} meses.`
                         : "Hola, estoy interesado en obtener más información sobre el crédito vehicular.";
                       openWhatsApp(msg);
                     }}

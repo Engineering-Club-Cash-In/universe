@@ -81,3 +81,15 @@ export const descargarMoraExcel = async (params: Omit<SnapshotParams, "page" | "
   const res = await api.get(`${API_URL}/moras/historial/excel`, { params, responseType: "blob" });
   return res.data as Blob;
 };
+
+/**
+ * Excel del historial de mora de UN crédito (drill-down).
+ * A diferencia de los listados de /moras/creditos y /moras/condonaciones,
+ * este endpoint responde el archivo directamente (blob), no un excelUrl.
+ */
+export const descargarMoraHistorialCreditoExcel = async (credito_id: number): Promise<Blob> => {
+  const res = await api.get(`${API_URL}/moras/historial/credito/${credito_id}/excel`, {
+    responseType: "blob",
+  });
+  return res.data as Blob;
+};

@@ -1,10 +1,11 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import Big from "big.js";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 // Evita que database/index.ts abra la conexión (y truene por falta de
 // SUPABASE_DB_URL) al importar el controller. registrarCancelacionEspejo no usa
 // el `db` del módulo: opera sobre el handle `tx` que recibe por parámetro.
-mock.module("../database", () => ({ db: {} }));
+mock.module("../database", () => ({ db: {}, client: {} }));
 
 // Compras pendientes por inversionista (config mutable por test). Simula el
 // helper canónico que resta del monto_aportado el capital aún no real.
@@ -14,24 +15,64 @@ mock.module("../utils/comprasAjuste", () => ({
     Promise.resolve(new Big(pendientesPorInv[invId] ?? 0)),
 }));
 
-const { registrarCancelacionEspejo, revertirAbonoCapitalEspejo } = await import(
+const {
+  createAbonoCapital,
+  registrarCancelacionEspejo,
+  revertirAbonoCapitalEspejo,
+  updateAbonoCapital,
+} = await import(
   "./abonosCapital"
 );
+type CreateDependencies = NonNullable<Parameters<typeof createAbonoCapital>[1]>;
+type UpdateDependencies = NonNullable<Parameters<typeof updateAbonoCapital>[2]>;
+
+import { pagos_credito_inversionistas_espejo } from "../database/db";
+
+const dialect = new PgDialect();
+const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
 
 // Mock del handle de transacción (tx) de drizzle. Simula:
 //   tx.select().from().innerJoin().where()  -> filas del espejo
+//   tx.select().from().where()              -> filas de cancelacionesAbiertas o pagosEspejo
 //   tx.delete().where()                     -> borrado idempotente (contado)
 //   tx.insert().values(vals).returning()    -> eco de lo insertado
-// y captura en `inserted` cada values() para poder afirmar sobre él.
-function makeTx(espejoRows: any[]) {
+// y captura en `inserted` cada values() para poder afirmar sobre él, y en
+// `selectWhereSql` la condición del SELECT ya renderizada a SQL (para
+// verificar el filtro de CUBE sin depender de que el mock lo aplique de
+// verdad — acá se ignora la condición y siempre se devuelve `espejoRows`).
+function makeTx(
+  espejoRows: any[],
+  cancelacionesAbiertasRows: any[] = [],
+  pagosEspejoRows?: any[]
+) {
   const inserted: any[] = [];
-  const state = { deleteCalls: 0 };
+  const state = { deleteCalls: 0, selectWhereSql: undefined as string | undefined };
+  const effectivePagosEspejo =
+    pagosEspejoRows !== undefined
+      ? pagosEspejoRows
+      : cancelacionesAbiertasRows
+          .filter((f: any) => f.pago_espejo_id != null)
+          .map((f: any) => ({ id: f.pago_espejo_id, estado_liquidacion: "NO_LIQUIDADO" }));
+
   const tx: any = {
     select: () => ({
-      from: () => ({
+      from: (table: any) => ({
         innerJoin: () => ({
-          where: () => Promise.resolve(espejoRows),
+          where: (condicion: unknown) => {
+            state.selectWhereSql = sqlDe(condicion);
+            return Promise.resolve(espejoRows);
+          },
         }),
+        where: () => {
+          if (table === pagos_credito_inversionistas_espejo) {
+            return Promise.resolve(
+              effectivePagosEspejo.filter(
+                (p: any) => p.estado_liquidacion !== "LIQUIDADO"
+              )
+            );
+          }
+          return Promise.resolve(cancelacionesAbiertasRows);
+        },
       }),
     }),
     delete: () => ({
@@ -52,6 +93,179 @@ function makeTx(espejoRows: any[]) {
 
 beforeEach(() => {
   pendientesPorInv = {};
+});
+
+describe("structured persistence failures", () => {
+  it("preserves the failure response when the telemetry emitter throws", async () => {
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: () => { throw new Error("synthetic telemetry failure"); },
+        now: () => 100,
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+  });
+
+  it("preserves the failure response when the injected clock throws", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => { throw new Error("synthetic clock failure"); },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "create", durationMs: 0 }]);
+  });
+
+  it("does not widen the historical error field for non-Error rejections", async () => {
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject("synthetic raw rejection"),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: () => undefined,
+        now: () => 100,
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: undefined,
+      data: null,
+    });
+  });
+
+  it("classifies create failures without passing business data or raw errors", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    let now = 100;
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => {
+          const current = now;
+          now += 25;
+          return current;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "create", durationMs: 25 }]);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(["durationMs", "operation"]);
+  });
+
+  it("classifies update failures without passing the abono id, fields or raw error", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    let now = 200;
+    const executor = {
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () => Promise.reject(new Error("synthetic update detail")),
+          }),
+        }),
+      }),
+    };
+
+    const result = await updateAbonoCapital(
+      404,
+      { liquidado: true },
+      {
+        executor: executor as unknown as UpdateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => {
+          const current = now;
+          now += 30;
+          return current;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al actualizar el abono a capital",
+      error: "synthetic update detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "update", durationMs: 30 }]);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(["durationMs", "operation"]);
+  });
 });
 
 describe("registrarCancelacionEspejo", () => {
@@ -135,6 +349,110 @@ describe("registrarCancelacionEspejo", () => {
     await registrarCancelacionEspejo(tx, 1);
 
     expect(inserted[0].monto).toBe("1000.5");
+  });
+
+  it("excluye a CUBE por id (86) aunque no tenga el nombre esperado", async () => {
+    // CUBE nunca sale del crédito: una CANCELACION a su nombre no
+    // corresponde a nada real y nunca se liquida (CUBE no pasa por el flujo
+    // de liquidación — confirmado en producción: decenas de filas
+    // CANCELACION a inversionista_id=86, todas con liquidado=false).
+    const { tx, inserted } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+      { inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+    ]);
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+  });
+
+  it("reconoce a CUBE estrictamente por ID (86), no por nombre (un inversionista 999 no es CUBE)", async () => {
+    const { tx, inserted } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+      { inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+      { inversionista_id: 999, monto_aportado: "2000", nombre: "Cube Investments S.A." },
+    ]);
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res.insertados).toBe(2);
+    expect(inserted).toHaveLength(2);
+    expect(inserted.map((i) => i.inversionista_id)).toEqual([10, 999]);
+  });
+
+  it("TIRA ERROR si alguna cancelación abierta ya entró en un cálculo de pagos (pago_espejo_id != null)", async () => {
+    const { tx } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }]
+    );
+
+    await expect(registrarCancelacionEspejo(tx, 1)).rejects.toThrow(
+      /\[CANCELACION_EN_CALCULO_PENDIENTE\]/
+    );
+  });
+
+  it("permite re-aceptar si la cancelación apunta a un snapshot descartado/eliminado (pago_espejo_id huérfano)", async () => {
+    const { tx, inserted } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }],
+      [] // El snapshot 888 fue eliminado (p. ej. descartado con /deletePagosEspejoNoLiquidados)
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+    expect(inserted[0].monto).toBe("1000");
+  });
+
+  it("permite re-aceptar si el snapshot referenciado ya fue LIQUIDADO", async () => {
+    const { tx, inserted } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }],
+      [{ id: 888, estado_liquidacion: "LIQUIDADO" }] // No está pendiente
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+  });
+
+  it("reconcilia cancelaciones previas y borra abiertas si solo queda CUBE en el espejo", async () => {
+    const { tx, inserted, state } = makeTx(
+      [{ inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." }],
+      [{ abono_id: 42, pago_espejo_id: null }]
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res).toEqual({ insertados: 0, detalle: [] });
+    expect(inserted).toHaveLength(0);
+    expect(state.deleteCalls).toBe(1);
+  });
+
+  it("TIRA ERROR si solo queda CUBE en el espejo pero hay una cancelación previa en cálculo de pagos", async () => {
+    const { tx } = makeTx(
+      [{ inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." }],
+      [{ abono_id: 42, pago_espejo_id: 888 }]
+    );
+
+    await expect(registrarCancelacionEspejo(tx, 1)).rejects.toThrow(
+      /\[CANCELACION_EN_CALCULO_PENDIENTE\]/
+    );
+  });
+
+  it("la query del espejo solo filtra por credito_id (el filtro de CUBE es en JS)", async () => {
+    const { tx, state } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+    ]);
+
+    await registrarCancelacionEspejo(tx, 1);
+
+    expect(state.selectWhereSql).toContain("credito_id");
+    expect(state.selectWhereSql).not.toContain("inversionista_id");
   });
 });
 

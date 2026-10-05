@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -6,14 +6,55 @@ import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
+import { auditRecord } from "../lib/audit";
 import { eqDpi } from "../lib/dpi-lookup";
+import { eqEmail } from "../lib/email-lookup";
+import {
+	esDpiEnBlanco,
+	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
+	requiereConsultaDeMora,
+} from "../lib/gate-mora-dpi";
+import {
+	dpiCambia,
+	evaluarCandadoDpi,
+	noExisteOportunidadCandanteDelLead,
+} from "../lib/lead-dpi-lock";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
+import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
+import {
+	decidirLeadDelPortal,
+	elegirLeadDelPortal,
+	normalizarCorreoParaComparar,
+} from "./portalLeadIdempotencia";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
 } from "./public-lead";
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 /**
  * Función auxiliar para encontrar un lead por email o DPI
@@ -25,10 +66,16 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		return { error: "Se debe proporcionar email o DPI", status: 400 as const };
 	}
 
-	// Construir condiciones de búsqueda
+	// Construir condiciones de búsqueda.
+	// El correo se compara normalizado en AMBOS lados (`eqEmail`), igual que el
+	// DPI con `eqDpi` y igual que el registro con `normalizarCorreoParaComparar`.
+	// Con un `=` exacto, la cuenta que se acaba de registrar como
+	// "Ana@Ejemplo.com" —el registro sí la aceptó, porque allá se normaliza—
+	// dejaba de encontrar su propio lead "ana@ejemplo.com", y con ella se caían
+	// perfil, documentos, contratos, créditos y actualizaciones.
 	const conditions = [];
 	if (email && email.trim() !== "") {
-		conditions.push(eq(leads.email, email));
+		conditions.push(eqEmail(leads.email, email));
 	}
 	if (dpi && dpi.trim() !== "") {
 		conditions.push(eqDpi(leads.dpi, dpi));
@@ -44,55 +91,67 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		.where(or(...conditions))
 		.orderBy(asc(leads.createdAt));
 
-	// El email es la identidad exacta con la que entra el usuario al portal, así
-	// que esa fila manda sobre cualquier empate por DPI. Si no vino email, o
-	// ninguna coincide, se usa la más antigua, que es la que arrastra historial.
-	const leadPorEmail =
-		email && email.trim() !== ""
-			? matches.find((candidate) => candidate.email === email)
-			: undefined;
+	// El email es la identidad con la que entra el usuario al portal, así que esa
+	// fila manda sobre cualquier empate por DPI. La regla entera —incluido qué
+	// hacer cuando DOS fichas cuelgan del mismo correo— vive en
+	// `elegirLeadDelPortal`, que es donde se puede probar.
+	const eleccion = elegirLeadDelPortal(matches, { correo: email, dpi });
 
-	const lead = leadPorEmail ?? matches[0];
-
-	if (!lead) {
+	if (eleccion.tipo === "ninguno") {
 		return { error: "Lead no encontrado", status: 404 as const };
 	}
 
-	return { lead };
+	if (eleccion.tipo === "ambiguo") {
+		// No se elige ninguna. Los ids van al log del servidor y no a la
+		// respuesta: quien la lee es el titular, y los ids de fichas ajenas no
+		// son suyos. Lo que hay que hacer con esto es unificar los duplicados en
+		// el CRM, y eso no lo hace él.
+		console.error(
+			"[ERROR] findLeadByEmailOrDpi: más de un lead cuelga del mismo correo normalizado; no se elige ninguno. Unificar en el CRM:",
+			eleccion.ids,
+		);
+
+		return {
+			error:
+				"Hay más de una ficha registrada con este correo y no podemos saber cuál es la tuya. Escríbenos para unificarlas.",
+			status: 409 as const,
+		};
+	}
+
+	return { lead: eleccion.lead };
 }
 
 /**
- * Middleware to validate portal token (Better Auth session token)
+ * Middleware de los endpoints `/api/portal/*`.
+ *
+ * Estos endpoints exponen datos personales de clientes y no los llama un
+ * usuario final: los llama auth-google en nombre del portal. La autorización
+ * es el secreto compartido `BETTER_SECRET_PORTAL_WEB`, que debe traer el mismo
+ * valor en ambos servicios.
+ *
+ * La comparación es en tiempo constante y sin secreto configurado se rechaza
+ * (fail closed). Todos los rechazos responden 401 con el mismo cuerpo: la
+ * causa concreta queda en el log del servidor.
  */
 export async function validatePortalToken(
 	c: Context,
 	next: () => Promise<void>,
 ) {
 	try {
-		const authHeader = c.req.header("Authorization");
-
-		if (!authHeader || !authHeader.startsWith("Bearer ")) {
-			return c.json(
-				{
-					success: false,
-					error: "Token de autorización no proporcionado",
-				},
-				401,
-			);
-		}
-
-		const token = authHeader.replace("Bearer ", "");
 		const secret = process.env.BETTER_SECRET_PORTAL_WEB;
 
-		if (!secret) {
-			console.error("[ERROR] BETTER_SECRET_PORTAL_WEB not configured");
-			return c.json(
-				{
-					success: false,
-					error: "Configuración de autorización no disponible",
-				},
-				500,
+		if (!secret?.trim()) {
+			console.error(
+				"[ERROR] BETTER_SECRET_PORTAL_WEB no está configurado; se rechaza la petición al portal.",
 			);
+			return c.json({ success: false, error: "No autorizado" }, 401);
+		}
+
+		const token = extractBearerToken(c.req.header("Authorization"));
+
+		if (!secretsMatch(token, secret)) {
+			console.warn("[WARN] validatePortalToken: token de portal inválido.");
+			return c.json({ success: false, error: "No autorizado" }, 401);
 		}
 
 		await next();
@@ -178,7 +237,7 @@ export async function getLeadByEmail(c: Context) {
 export async function updateLeadByEmail(c: Context) {
 	try {
 		const body = await c.req.json();
-		const { email, dpi: dpiRaw, address, phone } = body;
+		const { email, dpi: dpiRaw, address, phone, soloValidar } = body;
 		// Se guarda siempre normalizado; si no, el mismo DPI escrito con espacios
 		// queda como un registro distinto y deja de detectarse como duplicado.
 		let dpi: string | undefined = dpiRaw;
@@ -199,16 +258,62 @@ export async function updateLeadByEmail(c: Context) {
 
 		const existingLead = result.lead;
 
+		// 🔴 El DPI en blanco se rechaza, no se guarda. Sin esto, `dpi: ""` se
+		// saltaba la validación y el gate por el `trim() !== ""` de abajo y el
+		// `.set` lo escribía igual: blanquear el DPI de un moroso lo volvía
+		// invisible para siempre. Ver `MENSAJE_DPI_EN_BLANCO`.
+		if (esDpiEnBlanco(dpi)) {
+			return c.json({ success: false, error: MENSAJE_DPI_EN_BLANCO }, 400);
+		}
+
 		// Validar DPI si se envía
 		if (dpi !== undefined && dpi.trim() !== "") {
 			const resultadoDpi = validarDpi(dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			dpi = resultadoDpi.dpiLimpio;
+		}
+
+		// El candado va ANTES que el gate de mora a propósito: es una consulta
+		// local barata, y si el DPI ya no se puede cambiar no tiene sentido pagar
+		// el viaje a SIFCO para un cambio que igual se rechaza. Y va fuera de la
+		// validación de formato: un `dpi: ""` no se valida pero SÍ se escribe más
+		// abajo, y sin el candado acá borraba el DPI del expediente y dejaba la
+		// puerta abierta para escribir otro en la llamada siguiente.
+		if (dpi !== undefined) {
+			const candado = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
+			});
+			if (candado.bloqueado) {
+				return c.json({ success: false, error: candado.message }, 400);
+			}
+		}
+
+		// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
+		// completa en cada guardado, así que con el mismo DPI de siempre esto
+		// es una edición común —dirección, teléfono— y no puede quedar trabada
+		// porque la persona esté en mora.
+		if (
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			requiereConsultaDeMora(dpi, existingLead.dpi)
+		) {
+			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
+			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
+			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
+			// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
+			const gate = await evaluarGateMoraDpi(dpi, {
+				...depsGateMora,
+				numerosCreditoConocidos: (dpiConsultado) =>
+					numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
+			});
+			if (gate.rechazado) {
+				return c.json({ success: false, error: gate.mensaje }, 400);
+			}
 		}
 
 		// Check if new DPI or phone already exists in another lead
@@ -256,6 +361,15 @@ export async function updateLeadByEmail(c: Context) {
 			}
 		}
 
+		// 🔴 Modo solo-validar: el portal necesita saber si el cambio de DPI va a
+		// pasar ANTES de escribirlo en la cuenta (auth-google), porque el contrato
+		// obliga a escribir la cuenta primero y un rechazo del CRM dejaba la
+		// identidad partida entre servicios. Acá ya corrieron candado, gate y
+		// duplicados: si llegó hasta esta línea, el cambio real va a entrar.
+		if (soloValidar === true) {
+			return c.json({ success: true, validado: true });
+		}
+
 		// Build update object with only provided fields
 		const updateData: any = {
 			updatedAt: new Date(),
@@ -273,21 +387,72 @@ export async function updateLeadByEmail(c: Context) {
 			updateData.phone = phone;
 		}
 
-		// Update the lead
-		const [updatedLead] = await db
-			.update(leads)
-			.set(updateData)
-			.where(eq(leads.id, existingLead.id))
-			.returning({
-				id: leads.id,
-				firstName: leads.firstName,
-				lastName: leads.lastName,
-				email: leads.email,
-				phone: leads.phone,
-				dpi: leads.dpi,
-				direccion: leads.direccion,
-				updatedAt: leads.updatedAt,
+		// 🔴 Misma carrera que en el CRM: entre el candado de arriba y esta
+		// sentencia, otra transacción puede aprobar el análisis (30 → 40) y el DPI
+		// se escribiría igual sobre un expediente ya atado a la identidad vieja.
+		// Postgres re-evalúa el predicado tras esperar a la escritura rival, así
+		// que la condición viaja DENTRO del UPDATE.
+		//
+		// Solo cuando el DPI cambia de verdad: este update escribe también
+		// dirección y teléfono, y esas ediciones no tienen por qué trabarse. Acá
+		// no hay válvula de admin que valga: el portal es público.
+		const candadoEnElPredicado = dpiCambia(existingLead.dpi, dpi);
+		const whereDelUpdate = candadoEnElPredicado
+			? and(
+					eq(leads.id, existingLead.id),
+					noExisteOportunidadCandanteDelLead(existingLead.id),
+				)
+			: eq(leads.id, existingLead.id);
+
+		// Update the lead.
+		// 🔴 En transacción y con lock de las oportunidades: el NOT EXISTS del
+		// candado lee bajo snapshot MVCC y no bloquea la fila — una aprobación
+		// 30→40 en vuelo podía commitear después de esta escritura. El FOR UPDATE
+		// serializa las dos.
+		const [updatedLead] = await db.transaction(async (tx) => {
+			if (candadoEnElPredicado) {
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.leadId, existingLead.id))
+					.for("update");
+			}
+			return tx
+				.update(leads)
+				.set(updateData)
+				.where(whereDelUpdate)
+				.returning({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					direccion: leads.direccion,
+					updatedAt: leads.updatedAt,
+				});
+		});
+		if (!updatedLead && candadoEnElPredicado) {
+			// Cero filas con la condición puesta: el candado se cerró en el medio.
+			// Se contesta como el candado, con su mismo mensaje.
+			const candadoAhora = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
 			});
+			if (candadoAhora.bloqueado) {
+				return c.json({ success: false, error: candadoAhora.message }, 400);
+			}
+		}
+
+		// Después del chequeo: con cero filas no hubo escritura que anotar.
+		auditRecord({
+			entity: "lead",
+			id: existingLead.id,
+			action: "update",
+			data: updateData,
+		});
 
 		// If address was updated, also update the lead direccion
 		if (address !== undefined && updatedLead) {
@@ -463,7 +628,18 @@ export async function getLeadLegalContracts(c: Context) {
 				opportunities,
 				eq(generatedLegalContracts.opportunityId, opportunities.id),
 			)
-			.where(eq(generatedLegalContracts.leadId, lead.id))
+			.where(
+				and(
+					eq(generatedLegalContracts.leadId, lead.id),
+					// Un contrato anulado, o reclamado por un reemplazo que todavía no
+					// terminó de anularlo, no es el vigente: si se muestra, el cliente
+					// puede firmar un documento descartado. Anulado incluye los que se
+					// eliminaron desde jurídico: si su borrado en WeeTrust falló, la
+					// fila conserva enlaces que todavía firman.
+					ne(generatedLegalContracts.status, "cancelled"),
+					isNull(generatedLegalContracts.replacedByContractId),
+				),
+			)
 			.orderBy(generatedLegalContracts.generatedAt);
 
 		// Generar URLs firmadas temporales para los PDFs
@@ -652,51 +828,175 @@ export async function createPortalRegisterLead(c: Context) {
 		// Validar DPI
 		const resultadoDpi = validarDpi(dpiRaw);
 		if (!resultadoDpi.valid) {
-			return c.json(
-				{ success: false, error: resultadoDpi.error },
-				400,
-			);
+			return c.json({ success: false, error: resultadoDpi.error }, 400);
 		}
 		const dpi = resultadoDpi.dpiLimpio;
 
-		// Verificar si ya existe un lead con ese DPI (o email)
-		const [existingLead] = await db
+		// Verificar si ya existe un lead con ese DPI (o email).
+		//
+		// Se traen TODOS los candidatos en orden estable en vez de un `limit(1)`
+		// suelto: la búsqueda es `correo O DPI`, así que puede empatar a la vez con
+		// la ficha de quien llama y con una ficha vieja que comparte el DPI, y sin
+		// orden Postgres devuelve cualquiera de las dos. Se prefiere siempre la que
+		// cuelga del correo de la sesión, que es la única que se puede probar que es
+		// suya; si no, un homónimo de DPI convertiría el registro legítimo en un 409
+		// que además cambia de resultado entre intentos.
+		const candidatos = await db
 			.select()
 			.from(leads)
-			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
-			.limit(1);
+			.where(or(eqEmail(leads.email, email), eqDpi(leads.dpi, dpi)))
+			.orderBy(asc(leads.createdAt));
+
+		// La misma regla que usa el resto del portal (`elegirLeadDelPortal`), y no
+		// una copia: dos fichas pueden colgar del mismo correo —`leads.email` no
+		// tiene índice único— y aquí eso se resolvía tomando la más antigua. Con
+		// el DPI de la petición desempatando, quien es el titular de la segunda
+		// ficha puede registrarse; antes su DPI chocaba contra el de la primera y
+		// se llevaba un 409 del que no había salida.
+		const eleccion = elegirLeadDelPortal(candidatos, { correo: email, dpi });
+
+		if (eleccion.tipo === "ambiguo") {
+			// Ni se elige ni se crea: crear sería un tercer duplicado sobre el
+			// mismo correo. Los ids se quedan en el log por lo mismo que en
+			// `conflicto_correo`: son de fichas que pueden no ser suyas.
+			console.error(
+				"[portal] más de un lead cuelga de este correo y el DPI no desempata; registro detenido. Unificar en el CRM:",
+				eleccion.ids,
+			);
+
+			return c.json(
+				{
+					success: false,
+					error:
+						"Hay más de una ficha registrada con este correo y no podemos saber cuál es la tuya. Contacta a soporte para unificarlas.",
+				},
+				409,
+			);
+		}
+
+		const existingLead = eleccion.tipo === "uno" ? eleccion.lead : undefined;
 
 		if (existingLead) {
-			// Lead ya existe → solo retornar sin crear oportunidad
-			const isEmptyEmail =
-				!existingLead.email || existingLead.email.trim() === "";
+			// Lead ya existe → solo retornar sin crear oportunidad.
+			//
+			// Devolverlo es la idempotencia que necesita el registro del portal:
+			// el alta toca dos sistemas y no es atómica, así que un intento que
+			// creó el lead y se cayó después en auth-google tiene que poder
+			// reintentar y terminar.
+			//
+			// Pero solo si el reintento es del MISMO dueño y pide LO MISMO, y eso
+			// son dos comprobaciones, no una:
+			//
+			// - De quién es la ficha lo dice el correo, que aquí es SIEMPRE el de la
+			//   sesión de auth-google (`register-external-auth` lo saca de la cuenta,
+			//   no del cuerpo). Como la búsqueda es `correo O DPI`, sin este chequeo
+			//   bastaba con mandar el DPI de un lead ajeno —que auth-google deja
+			//   pasar mientras no esté en `users.dpi`— para que el CRM lo devolviera
+			//   entero y auth-google grabara ese DPI en la cuenta de quien preguntó.
+			// - Qué se pide escribir lo dice el DPI: con uno distinto, este endpoint
+			//   devolvía el lead como éxito sin actualizarlo mientras auth-google
+			//   escribía el DPI nuevo, y los dos sistemas quedaban asociados a
+			//   identidades diferentes.
+			//
+			// Ni el DPI ni el correo de una ficha existente se reescriben aquí:
+			// cambiarlos es una operación de back office, no un efecto colateral de
+			// reintentar un registro. Lo que se hace con lo que trae la petición
+			// depende de lo que la ficha ya tenga:
+			//
+			// - Otro correo, o ningún correo: se rechaza con 409. La ficha sin correo
+			//   no está ligada a nadie, así que rellenársela a quien acierte el DPI
+			//   sería regalar la ficha —y eso es justo lo que hacía—.
+			// - Mismo correo y mismo DPI: se acepta, es el reintento del mismo
+			//   registro.
+			// - Mismo correo y otro DPI: se rechaza con 409.
+			// - Mismo correo y lead SIN DPI: se acepta —bloquearlo dejaría fuera del
+			//   portal a todas las fichas que ventas creó sin DPI— pero el DPI
+			//   tampoco se escribe: mientras el correo no esté verificado, rellenarlo
+			//   dejaría estampar el propio en la ficha de otra persona. Como la ficha
+			//   se queda sin DPI, el caso viaja explícito en la respuesta en vez de
+			//   pasar por un alta completa.
+			const decision = decidirLeadDelPortal(
+				existingLead.dpi,
+				dpi,
+				existingLead.email,
+				email,
+			);
 
-			if (
-				existingLead.dpi &&
-				normalizarDpi(existingLead.dpi) === dpi &&
-				isEmptyEmail
-			) {
-				const [updatedLead] = await db
-					.update(leads)
-					.set({ email, updatedAt: new Date() })
-					.where(eq(leads.id, existingLead.id))
-					.returning();
+			if (decision.tipo === "conflicto_correo") {
+				// El motivo concreto se queda en el log: decirle a quien llama que ese
+				// DPI tiene ficha y no es la suya convertiría el endpoint en un oráculo
+				// de DPIs ajenos, que es lo que se acaba de cerrar.
+				console.warn(
+					`[portal] lead ${existingLead.id} casó por DPI pero no cuelga del correo de la sesión; registro rechazado`,
+				);
+
+				return c.json(
+					{
+						success: false,
+						error:
+							"El DPI no corresponde al registro de este correo. Verifica el DPI o contacta a soporte.",
+					},
+					409,
+				);
+			}
+
+			if (decision.tipo === "conflicto_dpi") {
+				return c.json(
+					{
+						success: false,
+						error:
+							"Ya existe un registro con este correo y otro DPI. Reintenta con el DPI del registro original o contacta a soporte.",
+					},
+					409,
+				);
+			}
+
+			if (decision.tipo === "aceptar_sin_dpi") {
+				// No es un alta completa: el lead sigue sin DPI y solo un humano
+				// puede ponérselo. Se dice en la respuesta para que quien llame no
+				// dé por hecho que el CRM quedó con la misma identidad que la
+				// cuenta del portal.
+				console.warn(
+					`[portal] lead ${existingLead.id} reconocido SIN DPI; no se escribe el DPI del registro`,
+				);
 
 				return c.json({
 					success: true,
-					data: updatedLead,
-					message: "Lead encontrado por DPI, email actualizado",
+					data: existingLead,
+					dpiRegistradoEnLead: false,
+					message:
+						"Lead ya existe sin DPI: acceso autorizado, pero el DPI no se registró en la ficha",
 				});
 			}
 
 			return c.json({
 				success: true,
 				data: existingLead,
+				dpiRegistradoEnLead: true,
 				message: "Lead ya existe, acceso autorizado sin nueva oportunidad",
 			});
 		}
 
 		// Lead no existe → registro nuevo: crear lead + oportunidad
+
+		// 🔴 El gate de mora va ACÁ y no arriba, aunque arriba se vea "antes de
+		// tocar la base": este endpoint hace dos cosas distintas según si la ficha
+		// existe. Si existe, la persona solo está entrando al portal —no se crea
+		// nada— y ese es justamente el lugar donde un cliente en mora tiene que
+		// poder entrar a ver y pagar su saldo. Con el gate arriba se llevaba un
+		// 400 y quedaba fuera del portal por estar atrasado, que es al revés de lo
+		// que queremos. El corte solo aplica al alta de verdad, que es lo de abajo.
+		//
+		// La idempotencia del reintento tampoco se rompe: el camino que devuelve
+		// la ficha existente ya retornó más arriba sin pasar por acá, así que un
+		// reintento de un alta que sí se completó nunca vuelve a consultar mora.
+		//
+		// Fail-closed: si cartera no contesta, el alta no sigue.
+		const gate = await evaluarGateMoraDpi(dpi, depsGateMora);
+		if (gate.rechazado) {
+			return c.json({ success: false, error: gate.mensaje }, 400);
+		}
+
 		const salesUserForLead = await getSalesUserWithLeastLeads();
 		if (!salesUserForLead) {
 			return c.json(
@@ -730,6 +1030,12 @@ export async function createPortalRegisterLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		auditRecord({
+			entity: "lead",
+			id: newLead.id,
+			action: "create",
+			data: { email, phone, dpi, assignedTo: salesUserForLead.id },
+		});
 
 		let renapInfo = null;
 		if (dpi) {

@@ -14,7 +14,7 @@ import {
   facturas_fallidas_sat,
   job_checkpoints,
 } from "../database/db";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, gt, gte, sql } from "drizzle-orm";
 import { SATClientService } from "../cofidi/satClientService";
 import {
   SAT_CONFIG,
@@ -28,10 +28,23 @@ import { sendPlainEmail } from "@cci/email";
 
 const JOB_NAME = "verificar_facturas_sat";
 // Grace para evitar falsos negativos por propagación SAT (la factura recién
-// certificada puede tardar unos segundos en ser consultable).
-const GRACE_MINUTES = 2;
+// certificada puede tardar un rato en ser consultable). En días pesados (cierre
+// de mes) COFIDI se satura y responde "El documento no ha sido emitido" para
+// DTEs que ya certificó, así que el grace se mide en minutos, no en segundos.
+const GRACE_MINUTES = 10;
 // Reintento corto antes de marcar una factura como fallida.
 const REINTENTO_MS = 2000;
+// Cuarentena del correo: una fallida recién detectada NO se reporta todavía.
+// Tiene que seguir sin aparecer en SAT después de varias corridas del job y
+// llevar horas detectada. El 31/08 se midió el peor caso: SAT tardó más de una
+// hora en procesar un lote de 73 facturas y las fue soltando de a poco, así que
+// media hora de espera no alcanza. Tres horas sí, y una factura fantasma real
+// sigue siendo fantasma a las tres horas: se reporta igual, solo más tarde.
+const MIN_INTENTOS_PARA_REPORTAR = 4;
+const MIN_MINUTOS_PARA_REPORTAR = 180;
+// Los dos jobs (el de 15 min y el del correo) revalidan. Sin esta guarda, una
+// misma ventana mala de COFIDI contaría como dos intentos independientes.
+const MIN_MINUTOS_ENTRE_INTENTOS = 5;
 
 // Destinatarios del correo (configurable por env, con default).
 const DEFAULT_EMAILS = [
@@ -144,6 +157,23 @@ async function revalidarPendientes(): Promise<number> {
           mensaje_sat: `Apareció en SAT al revalidar (${mensaje})`,
         })
         .where(eq(facturas_fallidas_sat.factura_id, p.factura_id));
+    } else if (estado === "not_found") {
+      // Sigue sin aparecer: cuenta como un intento más, pero solo si ya pasó un
+      // rato desde el anterior. El correo se guía por estos intentos para no
+      // alarmar por una sola lectura de COFIDI.
+      await db
+        .update(facturas_fallidas_sat)
+        .set({
+          intentos: sql`${facturas_fallidas_sat.intentos} + 1`,
+          mensaje_sat: mensaje,
+          updated_at: sql`now()`,
+        })
+        .where(
+          and(
+            eq(facturas_fallidas_sat.factura_id, p.factura_id),
+            sql`${facturas_fallidas_sat.updated_at} <= now() - make_interval(mins => ${MIN_MINUTOS_ENTRE_INTENTOS}::int)`
+          )
+        );
     }
   }
   if (resueltas > 0)
@@ -181,6 +211,12 @@ export async function verificarFacturasSat() {
       receptor_nombre: facturas_electronicas.receptor_nombre,
       monto_total: facturas_electronicas.monto_total,
       fecha_certificacion: facturas_electronicas.fecha_certificacion,
+      // El grace se evalúa en SQL, contra la hora de pared de Guatemala.
+      // certificarFacturaHelper persiste fecha_certificacion YA en hora GT (le
+      // resta 6h antes de guardar), así que leerla con `new Date()` en un
+      // proceso que corre en UTC la desplazaba 6 horas al pasado: toda factura
+      // se veía vieja y pasaba el grace de inmediato, sin importar su valor.
+      elegible: sql<boolean>`coalesce(${facturas_electronicas.fecha_certificacion} <= (now() AT TIME ZONE 'America/Guatemala') - make_interval(mins => ${GRACE_MINUTES}::int), false)`,
     })
     .from(facturas_electronicas)
     .where(
@@ -205,13 +241,11 @@ export async function verificarFacturasSat() {
   // esa factura: se reintentará en la próxima corrida. Así una caída de SAT no
   // hace que se salten facturas para siempre.
   let congelado = false;
-  const fechaLimite = Date.now() - GRACE_MINUTES * 60 * 1000;
 
   for (const f of candidatos) {
-    const fechaCertificacion = f.fecha_certificacion
-      ? new Date(f.fecha_certificacion).getTime()
-      : Number.NaN;
-    if (!Number.isFinite(fechaCertificacion) || fechaCertificacion > fechaLimite) {
+    // Sin fecha de certificación tampoco se concluye nada (elegible viene en
+    // false), igual que antes: se corta acá y se reintenta en la próxima corrida.
+    if (!f.elegible) {
       console.log(
         `🧾 [verificarFacturasSat] Factura ${f.serie}-${f.numero} (${f.factura_id}) aún no es elegible por grace. Cursor detenido en ${maxId}.`
       );
@@ -294,13 +328,29 @@ export async function reportarFacturasFallidasSat() {
   await revalidarPendientes();
 
   const pendientes = await db
-    .select()
+    .select({
+      ...getTableColumns(facturas_fallidas_sat),
+      // fecha_certificacion ya se guarda en hora de Guatemala. Formatearla en
+      // SQL evita que el correo la vuelva a convertir a GT (le restaba 6 horas
+      // y descuadraba el cruce con el verificador de SAT).
+      fecha_certificacion_txt: sql<
+        string | null
+      >`to_char(${facturas_fallidas_sat.fecha_certificacion}, 'DD/MM/YYYY HH24:MI:SS')`,
+    })
     .from(facturas_fallidas_sat)
-    .where(eq(facturas_fallidas_sat.status, "PENDIENTE"))
+    .where(
+      and(
+        eq(facturas_fallidas_sat.status, "PENDIENTE"),
+        gte(facturas_fallidas_sat.intentos, MIN_INTENTOS_PARA_REPORTAR),
+        sql`${facturas_fallidas_sat.detectada_at} <= now() - make_interval(mins => ${MIN_MINUTOS_PARA_REPORTAR}::int)`
+      )
+    )
     .orderBy(facturas_fallidas_sat.fecha_certificacion);
 
   if (pendientes.length === 0) {
-    console.log("📧 [reportarFacturasFallidasSat] Sin pendientes, no se envía correo");
+    console.log(
+      "📧 [reportarFacturasFallidasSat] Sin pendientes reportables (las recién detectadas esperan la cuarentena), no se envía correo"
+    );
     return { enviadas: 0 };
   }
 
@@ -310,11 +360,7 @@ export async function reportarFacturasFallidasSat() {
 
   const filas = pendientes
     .map((f) => {
-      const fecha = f.fecha_certificacion
-        ? new Date(f.fecha_certificacion).toLocaleString("es-GT", {
-            timeZone: "America/Guatemala",
-          })
-        : "";
+      const fecha = f.fecha_certificacion_txt ?? "";
       return `<tr>
         <td style="padding:6px 10px;border:1px solid #ddd;">${f.serie}-${f.numero}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;font-family:monospace;font-size:12px;">${f.uuid}</td>

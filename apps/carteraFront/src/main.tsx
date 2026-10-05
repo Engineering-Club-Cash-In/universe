@@ -7,6 +7,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './Provider/authProvider.tsx'
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from './components/ui/sonner.tsx'
+import { z } from 'zod'
+import { zodErrorMapEspanol } from './lib/zodErrorMap.ts'
+
+// Mensajes de validación en español para todos los schemas de la app.
+z.setErrorMap(zodErrorMapEspanol)
 
 const queryClient = new QueryClient();
 

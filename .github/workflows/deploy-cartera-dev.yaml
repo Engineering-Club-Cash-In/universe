@@ -9,6 +9,7 @@ on:
       - "apps/cartera-back/**"
       - "apps/carteraFront/**"
       - "packages/email/**"
+      - "packages/structured-logger/**"
       - "package.json"
       - "bun.lock"
   workflow_dispatch: {} # permite dispararlo a mano desde la pestaña Actions
@@ -41,6 +42,7 @@ jobs:
             back:
               - 'apps/cartera-back/**'
               - 'packages/email/**'
+              - 'packages/structured-logger/**'
               - 'package.json'
               - 'bun.lock'
             front:
@@ -77,7 +79,8 @@ jobs:
 
       - name: Build & push
         run: |
-          podman build -f apps/cartera-back/Dockerfile . \
+          podman build --build-arg CARTERA_LOG_ENVIRONMENT=development \
+            -f apps/cartera-back/Dockerfile . \
             -t $ECR_REGISTRY/cartera-back-dev:latest \
             -t $ECR_REGISTRY/cartera-back-dev:${{ github.sha }}
           echo "Running cartera-back Puppeteer smoke test inside the built image"

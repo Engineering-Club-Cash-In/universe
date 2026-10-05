@@ -12,7 +12,6 @@ import {
   creditos_inversionistas,
   boletas,
   convenio_cuotas,
-  moras_credito,
   asesores,
 } from "../database/db";
 import Big from "big.js";
@@ -20,6 +19,14 @@ import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
+import {
+  createMora,
+  cuotasParaPendienteDeCreditos,
+  decidirMoraTrasRomperConvenio,
+  desactivarMoraPorConvenio,
+  STATUS_EN_RECUPERACION,
+} from "./latefee";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
@@ -29,7 +36,7 @@ import {
   congelarBucketPorConvenio,
 } from "./buckets/congelarBucketConvenio";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
-import { STATUS_EN_RECUPERACION } from "./latefee";
+import { cerrarMoraPagadaDeCredito } from "../utils/cerrarMoraPagadaDeCredito";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -268,167 +275,34 @@ export async function createPaymentAgreement(
     console.log("💵 Cuota mensual calculada:", monthly_installment);
 
     // ============================================
-    // 📝 CREAR EL CONVENIO DE PAGO
+    // 🔐 UNA SOLA TRANSACCIÓN PARA TODO LO QUE ESCRIBE
     // ============================================
-    console.log("✅ Paso 10: Creando el convenio de pago...");
-    
-    const [agreement] = await db
-      .insert(convenios_pago)
-      .values({
-        credito_id: credit_id,
-        monto_total_convenio: total_agreement_amount.toString(),
-        numero_meses: number_of_months,
-        cuota_mensual: monthly_installment.toString(),
-        fecha_convenio: new Date(),
-        monto_pagado: "0",
-        monto_pendiente: total_agreement_amount.toString(),
-        pagos_realizados: 0,
-        pagos_pendientes: number_of_months,
-        activo: false,
-        completado: false,
-        motivo: reason,
-        observaciones: observations,
-        // Snapshot de las cuotas reestructuradas por el convenio. Data ya disponible
-        // en `pagos`. Se usa después para excluirlas del conteo de bucket (el job de
-        // convenios) y marcarlas pagadas al completar. Se EXCLUYE el pago solo-mora
-        // (pagado=true, monto_aplicado=0) — mismo filtro que agreementPaymentsData
-        // (pivot): esa cuota no es una cuota del convenio; si entrara, se saltaría
-        // del atraso y se marcaría pagada aunque solo se pagó la mora. Dedup por si
-        // dos pagos apuntan a la misma cuota.
-        cuotas_convenio: [
-          ...new Set(
-            pagos
-              .filter((item) => item.pago.pagado !== true)
-              .map((item) => item.cuota.cuota_id),
-          ),
-        ],
-        created_by,
-      })
-      .returning();
-
-    if (!agreement) {
-      throw new Error("Error al crear el convenio de pago");
-    }
-
-    console.log("✅ Convenio creado exitosamente!");
-    console.log("🆔 Convenio ID:", agreement.convenio_id);
-    console.log("📋 Convenio completo:", JSON.stringify(agreement, null, 2));
-
-    // ============================================
-    // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
-    // ============================================
-    console.log("✅ Paso 11: Asociando pagos al convenio...");
-
-    // NO asociar al convenio los pagos SOLO DE MORA (pagado=true, monto_aplicado=0).
-    // Ya están cobrados y no representan una cuota del convenio. Tras los Pasos 5 y 6
-    // el único pago con pagado=true que puede quedar es justamente el mora-only, así
-    // que lo excluimos del pivot. Si entrara, getPaymentAgreements lo contaría como
-    // pago completado (summary.paid_payments) y el convenio recién creado se mostraría
-    // como parcialmente pagado en el front ("X de Y completados").
-    const agreementPaymentsData = pagos
-      .filter((item) => item.pago.pagado !== true)
-      .map((item) => ({
-        convenio_id: agreement.convenio_id,
-        pago_id: item.pago.pago_id,
-      }));
-
-    console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
-
-    if (agreementPaymentsData.length > 0) {
-      await db.insert(convenios_pagos_resume).values(agreementPaymentsData);
-    }
-
-    console.log("✅ Pagos asociados al convenio correctamente");
-
-    // ============================================
-    // 📅 CREAR LAS CUOTAS DEL CONVENIO
-    // ============================================
-    console.log("✅ Paso 12: Creando las cuotas del convenio...");
-
-    // Obtener las cuotas pendientes del crédito para usar sus fechas de vencimiento
-    const cuotasPendientesCredito = await db
-      .select({
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-      })
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credit_id),
-          eq(cuotas_credito.pagado, false)
-        )
-      )
-      .orderBy(cuotas_credito.numero_cuota)
-      .limit(number_of_months);
-
-    console.log(`📅 Cuotas pendientes del crédito encontradas: ${cuotasPendientesCredito.length}`);
-
-    const cuotasConvenio = [];
-
-    for (let i = 0; i < number_of_months; i++) {
-      // Usar la fecha de vencimiento de la cuota del crédito si existe
-      const fechaVencimiento = cuotasPendientesCredito[i]
-        ? cuotasPendientesCredito[i].fecha_vencimiento
-        : null;
-
-      if (!fechaVencimiento) {
-        console.log(`⚠️ No hay cuota pendiente #${i + 1} en el crédito, se omite`);
-        continue;
-      }
-
-      cuotasConvenio.push({
-        convenio_id: agreement.convenio_id,
-        numero_cuota: i + 1,
-        fecha_vencimiento: fechaVencimiento,
-        fecha_pago: null, // NULL = no pagada
-      });
-
-      console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento}`);
-    }
-
-    await db.insert(convenio_cuotas).values(cuotasConvenio);
-    
-    console.log("✅ Cuotas del convenio creadas exitosamente!");
-
-    // ============================================
-    // 🔄 ACTUALIZAR ESTADO DEL CRÉDITO
-    // ============================================
-    console.log("🔥 ========== ACTUALIZANDO ESTADO DEL CRÉDITO ==========");
-    console.log("🔥 Crédito ID:", credit_id);
-    console.log("🔥 Estado actual:", creditExists.statusCredit);
-    console.log("🔥 Estado nuevo: EN_CONVENIO");
-    console.log("🔥 Convenio ID:", agreement.convenio_id);
-    // ============================================
-
-    // ============================================
-    // 🚪 SALIDA DEL RÉGIMEN NORMAL — UNA SOLA TRANSACCIÓN
-    // ============================================
-    // Tres pasos que hasta acá corrían sueltos: borrar la mora activa, pasar
-    // el crédito a EN_CONVENIO y congelar su bucket.
+    // Antes acá se escribía con `db` suelto, paso por paso: el convenio, su
+    // pivot de pagos y sus cuotas quedaban COMMITEADOS antes de tocar la mora.
+    // Cuando la desactivación de la mora empezó a propagar el error del
+    // historial (apagarla sin dejar rastro es el defecto que se vino a cerrar),
+    // ese orden dejaba el peor escenario posible: el endpoint respondía fallo
+    // con el convenio YA escrito, y el reintento pasaba el chequeo de convenio
+    // activo —porque el primero quedó `activo: false`— y creaba una segunda
+    // copia. Ahora el convenio, sus cuotas, sus vínculos de pago, la
+    // desactivación de la mora con su historial y el cambio de status del
+    // crédito confirman juntos o no queda nada: un fallo no deja convenio
+    // escrito y el reintento vuelve a arrancar limpio.
     //
-    // EL ORDEN ERA EL PROBLEMA (review de Codex, P2). La lectura del bucket
-    // iba al final, después de las dos mutaciones que destruyen la información
-    // con la que se deriva: sin mora activa y con el status ya cambiado,
-    // `bucketAntesDelConvenio` se queda sin sus dos primeras fuentes y cae al
-    // COALESCE por cuotas atrasadas, que sin mora da 0 → B0. Para todo crédito
-    // sin historial previo el convenio se congelaba en B0 — exactamente el
-    // "borrón y cuenta nueva" que esta fase existe para impedir. El comentario
-    // de abajo decía "la lectura tiene que ir ANTES de borrar la mora y de
-    // cambiar el status"; el código la tenía después.
+    // Adentro solo va base de datos. Nada de HTTP, notificaciones ni efectos
+    // irreversibles: si mañana hay que avisarle a alguien, va DESPUÉS del
+    // commit — la tx puede revertirse y el aviso no.
     //
-    // Ahora el lock se toma UNA vez y adentro va, en este orden: leer →
-    // borrar mora → cambiar status → congelar. De paso las dos mutaciones
-    // quedan atómicas: el crédito ya no puede quedarse sin mora y con el
-    // status viejo si el UPDATE falla.
-    //
-    // Los dos pasos FALIBLES van cada uno en su SAVEPOINT (`tx.transaction`):
-    // en Postgres un statement que falla aborta la transacción entera, y ni la
-    // lectura del bucket ni el congelamiento pueden tumbar la creación de un
-    // convenio —hay plata de por medio—. Con el savepoint su fallo se descarta
-    // solo, el resto commitea y el vigilante repara lo que falte.
-    console.log("✅ Paso 13: Cerrando el régimen normal del crédito...");
-    let morasEliminadasCount = 0;
+    // COBROS-02 (Fase 2/4) entra en ESTA misma transacción, con su orden:
+    // el lock por crédito y la lectura del bucket van PRIMERO (antes de
+    // apagar la mora y de cambiar el status, que son las dos fuentes con las
+    // que se deriva el bucket), el estado previo se captura en el mismo
+    // UPDATE que lo reemplaza, y el congelamiento cierra. Los dos pasos
+    // FALIBLES de COBROS-02 (leer y congelar el bucket) van en SAVEPOINT: no
+    // pueden tumbar la creación de un convenio, el vigilante repara lo que
+    // falte.
     let bucketCongelado: number | null = null;
-    const resultadoUpdate = await db.transaction(async (tx) => {
+    const { agreement, resultadoUpdate } = await db.transaction(async (tx) => {
       // La llave es la misma que usa la reasignación de asesor
       // (CREDITO_ASESOR_LOCK_NAMESPACE, credito_id): el congelamiento fija
       // bucket y dueño, así que pertenece a esa familia de operaciones por
@@ -441,7 +315,10 @@ export async function createPaymentAgreement(
         sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credit_id})`,
       );
 
-      // 1. EL BUCKET, ANTES DE TOCAR NADA.
+      // EL BUCKET, ANTES DE TOCAR NADA (review de Codex, P2). Sin mora activa
+      // y con el status ya cambiado, `bucketAntesDelConvenio` se queda sin sus
+      // dos primeras fuentes y cae al COALESCE por cuotas atrasadas, que sin
+      // mora da 0 → B0: el "borrón y cuenta nueva" que la Fase 2 impide.
       let bucketAlFirmar: number | null = null;
       try {
         bucketAlFirmar = await tx.transaction((sp) =>
@@ -454,24 +331,167 @@ export async function createPaymentAgreement(
         );
       }
 
-      // 2. La mora activa se va: el convenio la absorbe.
-      const morasEliminadas = await tx
-        .delete(moras_credito)
+      // ============================================
+      // 📝 CREAR EL CONVENIO DE PAGO
+      // ============================================
+      console.log("✅ Paso 10: Creando el convenio de pago...");
+
+      const [agreement] = await tx
+        .insert(convenios_pago)
+        .values({
+          credito_id: credit_id,
+          monto_total_convenio: total_agreement_amount.toString(),
+          numero_meses: number_of_months,
+          cuota_mensual: monthly_installment.toString(),
+          fecha_convenio: new Date(),
+          monto_pagado: "0",
+          monto_pendiente: total_agreement_amount.toString(),
+          pagos_realizados: 0,
+          pagos_pendientes: number_of_months,
+          activo: false,
+          completado: false,
+          motivo: reason,
+          observaciones: observations,
+          // Snapshot de las cuotas reestructuradas por el convenio. Data ya disponible
+          // en `pagos`. Se usa después para excluirlas del conteo de bucket (el job de
+          // convenios) y marcarlas pagadas al completar. Se EXCLUYE el pago solo-mora
+          // (pagado=true, monto_aplicado=0) — mismo filtro que agreementPaymentsData
+          // (pivot): esa cuota no es una cuota del convenio; si entrara, se saltaría
+          // del atraso y se marcaría pagada aunque solo se pagó la mora. Dedup por si
+          // dos pagos apuntan a la misma cuota.
+          cuotas_convenio: [
+            ...new Set(
+              pagos
+                .filter((item) => item.pago.pagado !== true)
+                .map((item) => item.cuota.cuota_id),
+            ),
+          ],
+          created_by,
+        })
+        .returning();
+
+      if (!agreement) {
+        throw new Error("Error al crear el convenio de pago");
+      }
+
+      console.log("✅ Convenio creado exitosamente!");
+      console.log("🆔 Convenio ID:", agreement.convenio_id);
+      console.log("📋 Convenio completo:", JSON.stringify(agreement, null, 2));
+
+      // ============================================
+      // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
+      // ============================================
+      console.log("✅ Paso 11: Asociando pagos al convenio...");
+
+      // NO asociar al convenio los pagos SOLO DE MORA (pagado=true, monto_aplicado=0).
+      // Ya están cobrados y no representan una cuota del convenio. Tras los Pasos 5 y 6
+      // el único pago con pagado=true que puede quedar es justamente el mora-only, así
+      // que lo excluimos del pivot. Si entrara, getPaymentAgreements lo contaría como
+      // pago completado (summary.paid_payments) y el convenio recién creado se mostraría
+      // como parcialmente pagado en el front ("X de Y completados").
+      const agreementPaymentsData = pagos
+        .filter((item) => item.pago.pagado !== true)
+        .map((item) => ({
+          convenio_id: agreement.convenio_id,
+          pago_id: item.pago.pago_id,
+        }));
+
+      console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
+
+      if (agreementPaymentsData.length > 0) {
+        await tx.insert(convenios_pagos_resume).values(agreementPaymentsData);
+      }
+
+      console.log("✅ Pagos asociados al convenio correctamente");
+
+      // ============================================
+      // 📅 CREAR LAS CUOTAS DEL CONVENIO
+      // ============================================
+      console.log("✅ Paso 12: Creando las cuotas del convenio...");
+
+      // Obtener las cuotas pendientes del crédito para usar sus fechas de vencimiento
+      const cuotasPendientesCredito = await tx
+        .select({
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        })
+        .from(cuotas_credito)
         .where(
           and(
-            eq(moras_credito.credito_id, credit_id),
-            eq(moras_credito.activa, true)
+            eq(cuotas_credito.credito_id, credit_id),
+            eq(cuotas_credito.pagado, false)
           )
         )
-        .returning();
-      morasEliminadasCount = morasEliminadas.length;
+        .orderBy(cuotas_credito.numero_cuota)
+        .limit(number_of_months);
 
-      // 3. El crédito sale del funnel normal — y se guarda con qué estado ENTRÓ.
+      console.log(`📅 Cuotas pendientes del crédito encontradas: ${cuotasPendientesCredito.length}`);
+
+      const cuotasConvenio = [];
+
+      for (let i = 0; i < number_of_months; i++) {
+        // Usar la fecha de vencimiento de la cuota del crédito si existe
+        const fechaVencimiento = cuotasPendientesCredito[i]
+          ? cuotasPendientesCredito[i].fecha_vencimiento
+          : null;
+
+        if (!fechaVencimiento) {
+          console.log(`⚠️ No hay cuota pendiente #${i + 1} en el crédito, se omite`);
+          continue;
+        }
+
+        cuotasConvenio.push({
+          convenio_id: agreement.convenio_id,
+          numero_cuota: i + 1,
+          fecha_vencimiento: fechaVencimiento,
+          fecha_pago: null, // NULL = no pagada
+        });
+
+        console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento}`);
+      }
+
+      await tx.insert(convenio_cuotas).values(cuotasConvenio);
+
+      console.log("✅ Cuotas del convenio creadas exitosamente!");
+
+      // ============================================
+      // 🔄 ACTUALIZAR ESTADO DEL CRÉDITO
+      // ============================================
+      console.log("🔥 ========== ACTUALIZANDO ESTADO DEL CRÉDITO ==========");
+      console.log("🔥 Crédito ID:", credit_id);
+      console.log("🔥 Estado actual:", creditExists.statusCredit);
+      console.log("🔥 Estado nuevo: EN_CONVENIO");
+      console.log("🔥 Convenio ID:", agreement.convenio_id);
+
+      // 🔒 El cambio de estado va ANTES de mirar la mora, y no es solo
+      // prolijidad: es el candado. Postgres toma el row lock del crédito en
+      // este UPDATE y no lo suelta hasta el commit, así que a partir de acá el
+      // cron no puede colarse.
       //
-      // COBROS-02 Fase 4: `statusCredit` es una sola columna. Al pasar a
-      // EN_CONVENIO un EN_RECUPERACION se perdería, y al completar el convenio
-      // el crédito quedaría ACTIVO — o sea que pagar el convenio levantaría la
-      // recuperación por la puerta de atrás, justo lo que la decisión 4 prohíbe.
+      // Con el orden viejo (mora primero, estado después) quedaba una ventana
+      // con la fila del crédito LIBRE: si el crédito no tenía mora activa, el
+      // `SELECT … FOR UPDATE` de `desactivarMoraPorConvenio` no bloqueaba
+      // ninguna fila —no hay nada que bloquear— y el cron entraba en el medio
+      // por su rama CREACION: tomaba el crédito, le insertaba una mora activa,
+      // commiteaba y soltaba; después este convenio lo marcaba EN_CONVENIO.
+      // Resultado: un crédito excluido de la mora con un cargo activo encima.
+      //
+      // Es el MISMO patrón que usa el cron (la condición se evalúa dentro del
+      // write, que de paso hace de candado): el UPDATE ya hay que hacerlo
+      // igual, así que tomar el lock con él no agrega una segunda forma de
+      // candar la misma fila.
+      //
+      // Nada entre medio depende de que el crédito TODAVÍA no esté
+      // EN_CONVENIO: las validaciones (pasos 1 a 9, incluido el chequeo de
+      // convenio activo) ya corrieron antes de abrir la transacción, y lo que
+      // queda adentro —el pivot de pagos, las cuotas del convenio y la
+      // desactivación de la mora— no lee `statusCredit` (la lectura del
+      // bucket, que sí lo lee, ya corrió arriba).
+      //
+      // COBROS-02 Fase 4 — y se guarda con qué estado ENTRÓ. `statusCredit`
+      // es una sola columna: al pasar a EN_CONVENIO un EN_RECUPERACION se
+      // perdería, y al completar el convenio el crédito quedaría ACTIVO — o
+      // sea que pagar el convenio levantaría la recuperación por la puerta de
+      // atrás, justo lo que la decisión 4 prohíbe.
       //
       // Se captura EN EL MISMO ACTO que lo reemplaza, y no de la foto que esta
       // función leyó hace varios pasos (review de Codex, P1): entre aquella
@@ -498,16 +518,56 @@ export async function createPaymentAgreement(
          WHERE c.credito_id = ${credit_id}
         RETURNING anterior.previo, c."statusCredit"
       `);
-      const statusAlFirmar = cambio.rows?.[0]?.previo ?? null;
+      const resultadoUpdate = cambio.rows ?? [];
+      const statusAlFirmar = resultadoUpdate[0]?.previo ?? null;
 
       await tx
         .update(convenios_pago)
         .set({ status_credito_previo: statusAlFirmar })
         .where(eq(convenios_pago.convenio_id, agreement.convenio_id));
 
-      // 4. CONGELAR EL BUCKET (COBROS-02 Fase 2). El crédito se queda en el
-      //    bucket que tenía al firmar, con su asesor, hasta que pague completo
-      //    o alguien deshaga el convenio (decisión 9).
+      // ============================================
+      // 💸 DESACTIVAR MORA ACTIVA (si existe)
+      // ============================================
+      // Antes acá había un DELETE duro sobre moras_credito: era la única ruta del
+      // módulo que hacía desaparecer un monto de mora sin dejar constancia, y por
+      // eso no se podía responder cuánta mora se perdona vía convenios. Ahora se
+      // desactiva y se anota el evento en moras_historial, igual que el cron.
+      //
+      // 🕸️ Si esto igual no llegara a correr, hay red: el crédito queda
+      // EN_CONVENIO (status excluido de la mora), así que sus cuotas se caen
+      // de `isOverdueInstallmentForMora` y esa misma noche el paso 6 de
+      // `procesarMoras` apaga la mora con SU propio DESACTIVACION en el
+      // historial. Es red, no permiso: el camino bueno es este, y el rastro de
+      // la mora del convenio no puede depender de que corra el cron.
+      console.log("✅ Paso 13: Desactivando mora activa del crédito (si existe)...");
+
+      const moraDesactivada = await desactivarMoraPorConvenio(credit_id, {
+        convenio_id: agreement.convenio_id,
+        usuario_id: created_by,
+        // La MISMA transacción del convenio: la desactivación, su evento en
+        // moras_historial y el convenio confirman o se revierten juntos.
+        dbClient: tx as unknown as typeof db,
+      });
+
+      if (moraDesactivada.desactivada) {
+        console.log(
+          `✅ Se desactivó la mora ${moraDesactivada.mora_id} (Q${moraDesactivada.monto_anterior}) y quedó registrada en el historial`
+        );
+      } else {
+        // Ojo: `desactivada: false` NO prueba que no hubiera mora. También pasa
+        // cuando otra ejecución concurrente la apagó primero (y anotó ella el
+        // evento). El log no puede afirmar una causa que no verificó.
+        console.log(
+          "ℹ️ No se desactivó ninguna mora en este convenio (no había activa, o ya la había apagado otra ejecución)"
+        );
+      }
+
+      // ============================================
+      // 🧊 CONGELAR EL BUCKET (COBROS-02 Fase 2)
+      // ============================================
+      // El crédito se queda en el bucket que tenía al firmar, con su asesor,
+      // hasta que pague completo o alguien deshaga el convenio (decisión 9).
       if (bucketAlFirmar === null) {
         console.warn(
           "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
@@ -538,14 +598,9 @@ export async function createPaymentAgreement(
         }
       }
 
-      return cambio.rows ?? [];
+      return { agreement, resultadoUpdate };
     });
 
-    if (morasEliminadasCount > 0) {
-      console.log(`✅ Se eliminaron ${morasEliminadasCount} mora(s) activa(s)`);
-    } else {
-      console.log("ℹ️ No había moras activas para eliminar");
-    }
     if (bucketCongelado !== null) {
       console.log(`🧊 Bucket congelado en B${bucketCongelado} por el convenio`);
     }
@@ -993,108 +1048,18 @@ export async function processConvenioPaymentEnTx(
       );
     }
 
-    // 9.b COBROS-02 — SALIDA POR COMPLETADO: si el convenio quedó saldado, sacar
-    // el crédito de EN_CONVENIO (antes quedaba atrapado ahí = gap). Las cuotas que
-    // el convenio reestructuró (cuotas_convenio) quedaron pagadas POR el convenio
-    // pero NUNCA se marcaron en cuotas_credito (la creación no las toca). Al salir
-    // de EN_CONVENIO el motor de mora las vuelve a mirar: con pagado=false las
-    // contaría como atraso viejo y resucitaría una mora que el convenio ya saldó.
-    // Por eso se marcan pagadas AQUÍ, en el mismo momento en que el crédito deja
-    // el convenio — sin esto la salida sería dañina. (Solo aplica a convenios con
-    // cuotas_convenio poblada: los nuevos siempre, los viejos tras el backfill.)
+    // 9.b COBROS-02 — SALIDA POR COMPLETADO (ver `salirDeConvenioCompletado`).
     if (convenioCompletado) {
-      const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
-      if (cuotasReestructuradas.length > 0) {
-        await tx
-          .update(cuotas_credito)
-          .set({ pagado: true })
-          .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
-      }
-      // COBROS-02 Fase 4 — se le devuelve el estado con el que ENTRÓ, no un
-      // ACTIVO fijo. Si venía EN_RECUPERACION, ahí vuelve: ningún pago del
-      // convenio levanta ese estado (decisión 4). Lo levanta únicamente pagar
-      // el total SIN convenio, al validarse ese pago (decisión 5).
-      // Los convenios anteriores a la migración 0020 no tienen el dato: para
-      // ellos se conserva el comportamiento de siempre (ACTIVO).
-      const statusAlSalir =
-        convenio.status_credito_previo === STATUS_EN_RECUPERACION
-          ? STATUS_EN_RECUPERACION
-          : "ACTIVO";
-      await tx
-        .update(creditos)
-        .set({ statusCredit: statusAlSalir })
-        .where(
-          and(
-            eq(creditos.credito_id, convenio.credito_id),
-            eq(creditos.statusCredit, "EN_CONVENIO"),
-          ),
-        );
-      console.log(
-        `✅ Convenio ${convenio.convenio_id} COMPLETADO → crédito ${convenio.credito_id} sale de EN_CONVENIO (${statusAlSalir}); ${cuotasReestructuradas.length} cuota(s) reestructurada(s) marcadas pagadas.`,
-      );
+      await salirDeConvenioCompletado({ convenio, dbc: tx });
     }
 
     // 10. 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
-    if (nuevasCuotasCompletadas > 0) {
-      console.log(
-        `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
-      );
-
-      // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
-      const cuotasPendientesConvenio = await tx
-        .select()
-        .from(convenio_cuotas)
-        .where(
-          and(
-            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
-            isNull(convenio_cuotas.fecha_pago)
-          )
-        )
-        .orderBy(convenio_cuotas.numero_cuota)
-        .limit(nuevasCuotasCompletadas);
-
-      if (cuotasPendientesConvenio.length > 0) {
-        // 🔥 Obtener fecha y hora de Guatemala
-        const guatemalaTimeString = new Date().toLocaleString("en-US", {
-          timeZone: "America/Guatemala",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
-
-        const [datePart, timePart] = guatemalaTimeString.split(", ");
-        const [month, day, year] = datePart.split("/");
-        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
-
-        await tx
-          .update(convenio_cuotas)
-          .set({
-            fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
-          })
-          .where(
-            inArray(
-              convenio_cuotas.cuota_convenio_id,
-              cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
-            )
-          );
-
-        console.log(
-          `✅ Cuotas marcadas: ${cuotasPendientesConvenio
-            .map((c) => `#${c.numero_cuota}`)
-            .join(", ")}`
-        );
-      } else {
-        console.log("⚠️ No se encontraron cuotas pendientes para marcar");
-      }
-    } else {
-      console.log(
-        "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
-      );
-    }
+    // Mismo helper que el commit diferido de `prepararConvenioPayment`.
+    await marcarCuotasConvenioCompletadas({
+      convenio_id: convenio.convenio_id,
+      nuevasCuotasCompletadas,
+      dbc: tx,
+    });
 
     // 12. Retornar resultado
     return {
@@ -1121,17 +1086,389 @@ export async function processConvenioPaymentEnTx(
     };
 }
 
-export async function processConvenioPayment(
+interface ConvenioPaymentPreparado {
+  /**
+   * Preview del resultado con los montos ya topados: refleja el estado en que
+   * quedará el convenio DESPUÉS de ejecutar `commit`. Nada está persistido
+   * todavía.
+   */
+  resultado: ProcessConvenioPaymentResult;
+  /**
+   * Persiste la acreditación (update de `convenios_pago` + marcado de
+   * `convenio_cuotas`). `null` cuando no hay convenio activo que acreditar.
+   * El caller decide CUÁNDO: debe llamarse solo cuando la boleta ya quedó
+   * escrita en `pagos_credito` — acreditar antes deja el convenio inflado si
+   * una validación posterior rechaza el pago (caso convenio 102 / crédito 72,
+   * 26-ago-2026: cada reintento rechazado por el guard anti-sobreaplicación
+   * sumaba una cuota fantasma).
+   */
+  commit: ((pagoId?: number) => Promise<boolean>) | null;
+}
+
+/**
+ * Calcula la aplicación de una boleta al convenio activo SIN escribir nada.
+ * `processConvenioPayment` es el wrapper calcular+commitear inmediato; el flujo
+ * de `insertPayment` usa esta versión para diferir el commit al éxito.
+ */
+export async function prepararConvenioPayment(
   params: ProcessConvenioPaymentParams
-): Promise<ProcessConvenioPaymentResult> {
+): Promise<ConvenioPaymentPreparado> {
   try {
-    return await db.transaction((tx) => processConvenioPaymentEnTx(params, tx));
+    const { credito_id, numero_credito_sifco, monto_pago } = params;
+
+    // 1. Validar que se haya proporcionado credito_id o numero_credito_sifco
+    if (!credito_id && !numero_credito_sifco) {
+      throw new Error("Debe proporcionar credito_id o numero_credito_sifco");
+    }
+
+    // 2. Buscar el convenio activo del crédito
+    const [convenio] = await db
+      .select()
+      .from(convenios_pago)
+      .where(
+        and(
+          eq(convenios_pago.credito_id, credito_id!),
+          eq(convenios_pago.activo, true),
+          eq(convenios_pago.completado, false)
+        )
+      )
+      .limit(1);
+
+    if (!convenio) {
+      return {
+        resultado: {
+          success: false,
+          message: "No active payment agreement found for this credit",
+          convenio: null,
+          pago_completo: false,
+          monto_aplicado: "0",
+          monto_restante: "0",
+        },
+        commit: null,
+      };
+    }
+
+    // 3. Convertir valores a Big.js para cálculos precisos
+    const montoPagoBig = new Big(monto_pago);
+    const cuotaMensualBig = new Big(convenio.cuota_mensual);
+    const montoPagadoActualBig = new Big(convenio.monto_pagado);
+    const montoPendienteActualBig = new Big(convenio.monto_pendiente);
+
+    // 4. Determinar el monto a aplicar — topado al MENOR entre la cuota
+    // mensual y el monto_pendiente REAL: tras un abono parcial previo el
+    // pendiente puede ser menor que la cuota mensual; sin el tope el ledger
+    // acreditaría más que el pendiente real y se iba a negativo.
+    const { montoAplicar: montoAplicarBig } = calcularAplicacionConvenio({
+      montoPago: montoPagoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: montoPendienteActualBig,
+    });
+
+    // 5. Calcular nuevo monto pagado
+    const nuevoMontoPagadoBig = montoPagadoActualBig.plus(montoAplicarBig);
+
+    // 6. Calcular nuevo monto pendiente
+    const nuevoMontoPendienteBig = montoPendienteActualBig.minus(montoAplicarBig);
+
+    // 7. Cuotas completadas por monto ACUMULADO, no por pago individual: con
+    // parciales habilitados, dos abonos de Q600 contra una cuota de Q1,000
+    // deben completarla al llegar el segundo. El delta contra el contador
+    // persistido también repone marcados que quedaron atrás por parciales
+    // previos a este fix.
+    const cuotasCompletadasAcumuladas = calcularCuotasConvenioCompletadas({
+      montoPagado: nuevoMontoPagadoBig,
+      cuotaMensual: cuotaMensualBig,
+      montoPendiente: nuevoMontoPendienteBig,
+      numeroMeses: convenio.numero_meses,
+    });
+    const nuevasCuotasCompletadas = Math.min(
+      Math.max(0, cuotasCompletadasAcumuladas - convenio.pagos_realizados),
+      Math.max(0, convenio.pagos_pendientes)
+    );
+    const pagoCompleto = nuevasCuotasCompletadas > 0;
+    const nuevosPagosRealizados =
+      convenio.pagos_realizados + nuevasCuotasCompletadas;
+    const nuevosPagosPendientes =
+      convenio.pagos_pendientes - nuevasCuotasCompletadas;
+
+    // 8. Verificar si se completó el convenio
+    const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
+
+    // 9-10. El commit persiste todo lo calculado arriba: update de
+    // convenios_pago + marcado de convenio_cuotas. Se entrega como closure
+    // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
+    const commit = async (pagoId?: number): Promise<boolean> => {
+      try {
+        // Transacción CHICA (P1 de Codex en #1482, 3ª ronda): acreditación y
+        // marcado de cuotas caen o persisten JUNTOS — sin esto, un fallo
+        // entre ambos statements dejaba convenios_pago acreditado con
+        // convenio_cuotas sin marcar, y un reintento prepararía una segunda
+        // acreditación sobre ese estado a medias.
+        const acreditado = await db.transaction(async (tx) => {
+          // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
+          // convenio pudo cambiar entre prepare y commit por un escritor que
+          // no pasa por el advisory lock del pago. Se exige el MISMO estado
+          // que leyó el prepare (activo, no completado y mismo acumulado); si
+          // no matchea, el update afecta 0 filas y NO se marcan cuotas —
+          // pisar con los absolutos del closure acreditaría de más o
+          // resucitaría un convenio desactivado.
+          const [convenioAcreditado] = await tx
+            .update(convenios_pago)
+            .set({
+              monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+              monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+              pagos_realizados: nuevosPagosRealizados,
+              pagos_pendientes: nuevosPagosPendientes,
+              completado: convenioCompletado,
+              activo: !convenioCompletado, // Si se completó, ya no está activo
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(convenios_pago.convenio_id, convenio.convenio_id),
+                eq(convenios_pago.activo, true),
+                eq(convenios_pago.completado, false),
+                eq(convenios_pago.monto_pagado, convenio.monto_pagado),
+                // COBROS-02 (review de Codex, P1): un convenio deshecho
+                // (Fase 3) no se resucita ni recibe pagos.
+                isNull(convenios_pago.anulado_at)
+              )
+            )
+            .returning({ convenio_id: convenios_pago.convenio_id });
+
+          if (!convenioAcreditado) {
+            console.error(
+              `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
+                `se desactivó entre prepare y commit (esperaba activo, no ` +
+                `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
+                `acreditó, no se marcó ninguna cuota ni se estampó el pago.`
+            );
+            return false;
+          }
+
+          // El sello que usa reversePayment se persiste en la MISMA tx que
+          // acredita el convenio. Así jamás existe una fila que parezca
+          // acreditada cuando el CAS anterior perdió contra otro escritor.
+          // COBROS-02: el sello es el monto Y el convenio que lo recibió
+          // (`pagos_credito.convenio_id`), en el mismo acto — la reversa
+          // descuenta al convenio DEL PAGO (`convenioQueRecibioElPago`).
+          if (pagoId !== undefined) {
+            const [pagoEstampado] = await tx
+              .update(pagos_credito)
+              .set({
+                pagoConvenio: montoAplicarBig.toFixed(2),
+                convenioId: convenio.convenio_id,
+              })
+              .where(eq(pagos_credito.pago_id, pagoId))
+              .returning({ pago_id: pagos_credito.pago_id });
+            if (!pagoEstampado) {
+              throw new Error(
+                `No se pudo estampar el convenio en el pago ${pagoId}`
+              );
+            }
+          }
+
+          // COBROS-02 — SALIDA POR COMPLETADO, en la misma tx chica que la
+          // acreditación (ver `salirDeConvenioCompletado`).
+          if (convenioCompletado) {
+            await salirDeConvenioCompletado({ convenio, dbc: tx });
+          }
+
+          await marcarCuotasConvenioCompletadas({
+            convenio_id: convenio.convenio_id,
+            nuevasCuotasCompletadas,
+            dbc: tx,
+          });
+          return true;
+        });
+        return acreditado;
+      } catch (error) {
+        console.error("Error procesando pago de convenio:", error);
+        throw new Error(
+          `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+        );
+      }
+    };
+
+    // Preview del resultado: los mismos valores que quedarán persistidos al
+    // ejecutar `commit`.
+    return {
+      resultado: {
+        success: true,
+        message: convenioCompletado
+          ? "¡Convenio completado exitosamente!"
+          : pagoCompleto
+            ? "Pago de cuota completa registrado exitosamente"
+            : "Pago parcial registrado exitosamente",
+        convenio: {
+          convenio_id: convenio.convenio_id,
+          monto_total_convenio: convenio.monto_total_convenio,
+          monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+          monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+          cuota_mensual: convenio.cuota_mensual,
+          pagos_realizados: nuevosPagosRealizados,
+          pagos_pendientes: nuevosPagosPendientes,
+          completado: convenioCompletado,
+          activo: !convenioCompletado,
+        },
+        pago_completo: pagoCompleto,
+        monto_aplicado: montoAplicarBig.toFixed(2),
+        monto_restante: nuevoMontoPendienteBig.toFixed(2),
+      },
+      commit,
+    };
   } catch (error) {
-    console.error("Error procesando pago de convenio:", error);
+    console.error("Error preparando pago de convenio:", error);
     throw new Error(
       `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
     );
   }
+}
+
+/**
+ * Calcular + commitear en un solo paso (comportamiento histórico). Los flujos
+ * que necesitan validar la boleta ANTES de acreditar el convenio deben usar
+ * `prepararConvenioPayment` y llamar su `commit` solo tras persistir el pago.
+ */
+export async function processConvenioPayment(
+  params: ProcessConvenioPaymentParams
+): Promise<ProcessConvenioPaymentResult> {
+  const preparado = await prepararConvenioPayment(params);
+  if (preparado.commit) {
+    await preparado.commit();
+  }
+  return preparado.resultado;
+}
+
+/**
+ * Marca como pagadas las N cuotas pendientes más viejas del convenio
+ * (fecha_pago = NULL). Extraído del cuerpo de processConvenioPayment para que
+ * el commit diferido lo reutilice sin duplicar lógica.
+ */
+async function marcarCuotasConvenioCompletadas({
+  convenio_id,
+  nuevasCuotasCompletadas,
+  dbc = db,
+}: {
+  convenio_id: number;
+  nuevasCuotasCompletadas: number;
+  /** Conexión sobre la que escribir: la tx del commit del convenio. */
+  dbc?: Pick<typeof db, "select" | "update">;
+}): Promise<void> {
+  // 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
+  if (nuevasCuotasCompletadas > 0) {
+    console.log(
+      `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
+    );
+
+    // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
+    const cuotasPendientesConvenio = await dbc
+      .select()
+      .from(convenio_cuotas)
+      .where(
+        and(
+          eq(convenio_cuotas.convenio_id, convenio_id),
+          isNull(convenio_cuotas.fecha_pago)
+        )
+      )
+      .orderBy(convenio_cuotas.numero_cuota)
+      .limit(nuevasCuotasCompletadas);
+
+    if (cuotasPendientesConvenio.length > 0) {
+      // 🔥 Obtener fecha y hora de Guatemala
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
+      await dbc
+        .update(convenio_cuotas)
+        .set({
+          fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
+        })
+        .where(
+          inArray(
+            convenio_cuotas.cuota_convenio_id,
+            cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
+          )
+        );
+
+      console.log(
+        `✅ Cuotas marcadas: ${cuotasPendientesConvenio
+          .map((c) => `#${c.numero_cuota}`)
+          .join(", ")}`
+      );
+    } else {
+      console.log("⚠️ No se encontraron cuotas pendientes para marcar");
+    }
+  } else {
+    console.log(
+      "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
+    );
+  }
+}
+
+/**
+ * 9.b COBROS-02 — SALIDA POR COMPLETADO: si el convenio quedó saldado, sacar
+ * el crédito de EN_CONVENIO (antes quedaba atrapado ahí = gap). Las cuotas que
+ * el convenio reestructuró (cuotas_convenio) quedaron pagadas POR el convenio
+ * pero NUNCA se marcaron en cuotas_credito (la creación no las toca). Al salir
+ * de EN_CONVENIO el motor de mora las vuelve a mirar: con pagado=false las
+ * contaría como atraso viejo y resucitaría una mora que el convenio ya saldó.
+ * Por eso se marcan pagadas en el mismo momento en que el crédito deja el
+ * convenio — sin esto la salida sería dañina. (Solo aplica a convenios con
+ * cuotas_convenio poblada: los nuevos siempre, los viejos tras el backfill.)
+ *
+ * Una sola copia para los dos caminos de acreditación
+ * (`processConvenioPaymentEnTx` y el commit de `prepararConvenioPayment`).
+ */
+async function salirDeConvenioCompletado({
+  convenio,
+  dbc,
+}: {
+  convenio: typeof convenios_pago.$inferSelect;
+  /** La tx que acredita el convenio. */
+  dbc: Pick<typeof db, "update">;
+}): Promise<void> {
+  const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
+  if (cuotasReestructuradas.length > 0) {
+    await dbc
+      .update(cuotas_credito)
+      .set({ pagado: true })
+      .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
+  }
+  // COBROS-02 Fase 4 — se le devuelve el estado con el que ENTRÓ, no un
+  // ACTIVO fijo. Si venía EN_RECUPERACION, ahí vuelve: ningún pago del
+  // convenio levanta ese estado (decisión 4). Lo levanta únicamente pagar
+  // el total SIN convenio, al validarse ese pago (decisión 5).
+  // Los convenios anteriores a la migración 0020 no tienen el dato: para
+  // ellos se conserva el comportamiento de siempre (ACTIVO).
+  const statusAlSalir =
+    convenio.status_credito_previo === STATUS_EN_RECUPERACION
+      ? STATUS_EN_RECUPERACION
+      : "ACTIVO";
+  await dbc
+    .update(creditos)
+    .set({ statusCredit: statusAlSalir })
+    .where(
+      and(
+        eq(creditos.credito_id, convenio.credito_id),
+        eq(creditos.statusCredit, "EN_CONVENIO"),
+      ),
+    );
+  console.log(
+    `✅ Convenio ${convenio.convenio_id} COMPLETADO → crédito ${convenio.credito_id} sale de EN_CONVENIO (${statusAlSalir}); ${cuotasReestructuradas.length} cuota(s) reestructurada(s) marcadas pagadas.`,
+  );
 }
 
 interface ProcessConvenioCuotasParams {
@@ -1664,12 +2001,218 @@ export async function processConvenioCuotas(
 }
 
 
+type RupturaConvenioTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Romper un convenio (rechazarlo / eliminarlo) y recalcular la mora DESDE ESE
+ * MOMENTO — decisión de negocio reconfirmada el 30-sep: la mora se vuelve a
+ * calcular sobre las cuotas atrasadas con el criterio proporcional del cron;
+ * lo abonado antes del convenio se compensa en el ledger y no se arrastra.
+ *
+ * Corre en UNA transacción: bloquea el crédito primero (orden CRÉDITO → mora),
+ * borra el convenio, cierra el ledger, saca al crédito de EN_CONVENIO antes de
+ * cargar las cuotas (el cargador del cron excluye ese estado), carga con el
+ * mismo criterio del cron y recrea la mora con `createMora` dentro de la misma
+ * tx (dbClient).
+ *
+ * Sin `txExterna` abre su propia transacción. Con ella corre adentro de la del
+ * llamador: así la puede usar `decidirConvenio` (CB-033, convenioDecision.ts)
+ * dentro de SU transacción auditada, para que el rechazo por el CRM y por
+ * carteraFront recalcule la mora igual.
+ *
+ * COBROS-02 Fase 4: si el crédito entró al convenio EN_RECUPERACION
+ * (`statusCreditoPrevio`), romper el convenio lo devuelve ahí en vez de a
+ * MOROSO/ACTIVO.
+ */
+export async function romperConvenioRecalculandoMora(
+  params: {
+    convenio_id: number;
+    creditoId: number;
+    /** `convenios_pago.status_credito_previo` (migración 0020; null en los viejos). */
+    statusCreditoPrevio?: string | null;
+    /** Rastro de la mora recreada (CB-033). Sin ellos, createMora usa sus defaults. */
+    origen?: Parameters<typeof createMora>[0]["origen"];
+    motivo?: string;
+    usuario_id?: number;
+  },
+  txExterna?: RupturaConvenioTransaction,
+): Promise<{ success: true; message: string }> {
+  if (!txExterna) {
+    // 🔥 Toda la ruptura del convenio y el cierre de la mora van en una
+    // MISMA transacción: si algo falla (cierre de mora, recreación de mora,
+    // cualquier cosa), TODA la ruptura se revierte. Un fallo NO deja el
+    // convenio a medias borrado.
+    return await db.transaction(async (tx) => {
+      return romperConvenioRecalculandoMora(params, tx);
+    });
+  }
+  const tx = txExterna;
+  const { convenio_id, creditoId } = params;
+  const volverARecuperacion =
+    params.statusCreditoPrevio === STATUS_EN_RECUPERACION;
+
+  // 🔒 CRÉDITO PRIMERO, igual que condonarMora y la masiva: el insert al
+  // ledger de abajo toma KEY SHARE sobre este crédito por la FK, y el
+  // UPDATE posterior escalaría el candado y podría trabarse (40P01).
+  await tx
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId))
+    .for("update");
+
+  // Eliminar cuotas del convenio
+  await tx
+    .delete(convenio_cuotas)
+    .where(eq(convenio_cuotas.convenio_id, convenio_id));
+  console.log("✅ Cuotas del convenio eliminadas");
+
+  // Eliminar pagos asociados al convenio (pivot)
+  await tx
+    .delete(convenios_pagos_resume)
+    .where(eq(convenios_pagos_resume.convenio_id, convenio_id));
+  console.log("✅ Relación pagos-convenio eliminada");
+
+  // Eliminar el convenio
+  await tx
+    .delete(convenios_pago)
+    .where(eq(convenios_pago.convenio_id, convenio_id));
+  console.log("✅ Convenio eliminado");
+
+  // 🔥 CIERRE DE MORA: compensar todas las anotaciones vivas del crédito
+  // DENTRO de la transacción. Si esto falla, la ruptura no pasa.
+  console.log("✅ Paso: Cerrando contador de mora del crédito...");
+  const compensadas = await cerrarMoraPagadaDeCredito(
+    { credito_id: creditoId },
+    tx as unknown as typeof db
+  );
+  console.log(`✅ Mora cerrada: ${compensadas} anotación(es) compensada(s)`);
+
+  // Obtener el capital del crédito para calcular mora
+  const [credito] = await tx
+    .select({ capital: creditos.capital })
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId));
+
+  if (!credito) {
+    throw new Error("Crédito no encontrado durante ruptura de convenio");
+  }
+
+  // Cargar cuotas con el MISMO criterio que el cron: usa cuotasParaPendienteDeCreditos
+  // que ya filtra por vencidas elegibles (< hoy GT, impaga, sin pago cubriente,
+  // estado no excluido) y ordena por fecha_vencimiento + cuota_id. Reusa la misma
+  // subconsulta hasPaidPayment que procesarMoras, la misma función isOverdueInstallmentForMora,
+  // y calcula diasAtrasoMora en calendario de Guatemala — así coincide exactamente
+  // con lo que luego procesarMoras verá, y el criterio de elegibilidad no puede divergir.
+  //
+  // La lectura de lo pagado (moraPagadaPorCuota) va por `tx`, no por `db`: la
+  // compensación que acabamos de insertar en cerrarMoraPagadaDeCredito solo es
+  // visible DENTRO de esta transacción. Otra conexión vería la mora VIEJA, sin
+  // el cierre. Es aislamiento de Postgres — la tx que escribió no commiteó todavía,
+  // así que otros observadores no ven sus cambios. Leer por `db` haría que
+  // recreemos la mora MENOS de lo que corresponde (saldría más baja al no restar
+  // los montos compensados).
+  //
+  // ⚠️ El cargador aplica la exclusión de estados del cron, y EN_CONVENIO
+  // está excluido: con el crédito todavía en EN_CONVENIO devolvería cero
+  // cuotas y el convenio roto terminaría ACTIVO sin mora. El convenio ya
+  // no existe, así que el crédito sale de EN_CONVENIO ANTES de cargar;
+  // abajo la decisión lo deja MOROSO o ACTIVO.
+  await tx
+    .update(creditos)
+    .set({ statusCredit: "ACTIVO" })
+    .where(eq(creditos.credito_id, creditoId));
+
+  // «Hoy» de la BASE, no del reloj de la app: `createMora` recuenta las
+  // cuotas atrasadas con `now()`, que dentro de la tx queda fijo en su
+  // inicio. Si la tx cruza la medianoche de Guatemala (o los relojes
+  // difieren), con `hoyGuatemala` el conteo no coincidiría y
+  // `overdue_count_mismatch` tumbaría el rompimiento entero.
+  // Como texto: un `::date` crudo puede volver corrido de huso.
+  const { rows: [{ d: hoyBase }] } = await tx.execute<{ d: string }>(
+    sql`SELECT to_char((now() AT TIME ZONE 'America/Guatemala')::date, 'YYYY-MM-DD') AS d`,
+  );
+  const [anio, mes, dia] = hoyBase.split("-").map(Number);
+  const hoy = new Date(anio, mes - 1, dia);
+  const cargado = (
+    await cuotasParaPendienteDeCreditos(
+      [creditoId],
+      tx as unknown as typeof db,
+      hoy,
+    )
+  ).get(creditoId);
+
+  const cuotasParaPendiente = cargado?.cuotas ?? [];
+  const numCuotasAtrasadas = cuotasParaPendiente.length;
+
+  console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
+
+  const decision = decidirMoraTrasRomperConvenio({
+    capital: credito.capital,
+    cuotasParaPendiente,
+  });
+
+  if (decision.accion === "CREAR_MORA") {
+    console.log(`💰 Monto mora calculado: Q${decision.montoMora.toFixed(2)}`);
+    // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
+    // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
+    // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
+    // sin mora, nunca MOROSO).
+    //
+    // COBROS-02 Fase 4: si el crédito venía EN_RECUPERACION, ahí vuelve —
+    // romper el convenio no puede levantar un estado que puso una persona
+    // (mismo criterio que deshacerlo). EN_RECUPERACION sí devenga mora.
+    await tx
+      .update(creditos)
+      .set({ statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "MOROSO" })
+      .where(eq(creditos.credito_id, creditoId));
+
+    // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
+    const resultMora = await createMora({
+      credito_id: creditoId,
+      monto_mora: decision.montoMora,
+      cuotas_atrasadas: numCuotasAtrasadas,
+      // CB-033: quién rompió el convenio y por qué, en el rastro de la mora.
+      origen: params.origen,
+      motivo: params.motivo,
+      usuario_id: params.usuario_id,
+      dbClient: tx as unknown as typeof db,
+    });
+    if (!resultMora.success) {
+      // No tragar el fallo: si createMora falla, la transacción entero se revierte.
+      console.error("⚠️ createMora falló al recrear mora tras eliminar convenio:", resultMora.message);
+      throw new Error(
+        `No se pudo recrear la mora del crédito ${creditoId}: ${resultMora.message}`
+      );
+    }
+
+    console.log("✅ Resultado createMora:", resultMora);
+  } else {
+    // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
+    // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO (o
+    // devolverlo a EN_RECUPERACION, COBROS-02 Fase 4).
+    const statusSinMora = volverARecuperacion ? STATUS_EN_RECUPERACION : "ACTIVO";
+    await tx
+      .update(creditos)
+      .set({ statusCredit: statusSinMora })
+      .where(eq(creditos.credito_id, creditoId));
+
+    console.log(`✅ Crédito actualizado a ${statusSinMora} (${decision.motivo})`);
+  }
+
+  return { success: true, message: "Convenio eliminado exitosamente" };
+}
+
 /**
  * CB-033 — `updateConvenioStatus` YA NO tiene lógica propia: delega en
  * `decidirConvenio` (convenioDecision.ts), el mismo servicio transaccional
  * que usa el endpoint nuevo `/decidir`. Cero lógica financiera duplicada —
  * ver la cabecera de convenioDecision.ts para el detalle de la transacción,
- * la idempotencia y por qué el rollback es real.
+ * la idempotencia y por qué el rollback es real. Lo único que agrega acá es
+ * el advisory lock por crédito de los pagos (develop, #1482).
+ *
+ * Merge develop→COBROS-02: el rechazo de `decidirConvenio` delega en
+ * `romperConvenioRecalculandoMora(…, tx)` (arriba), el criterio de develop en
+ * producción (ledger cerrado + mora proporcional desde hoy).
  *
  * ── Ventana de compatibilidad (paso 1 del despliegue, ver 06-ficha-360.md §3.5) ──
  * carteraFront desplegado hoy llama a este endpoint SIN `motivo` ni
@@ -1701,21 +2244,45 @@ export const updateConvenioStatus = async (
       opciones.motivo ??
       (status ? undefined : "[compat] Rechazado desde carteraFront sin motivo registrado");
 
-    const resultado = await decidirConvenio({
-      convenioId: convenio_id,
-      decision: status ? "aprobado" : "rechazado",
-      motivo,
-      operacionId,
-      origen: "cartera_front",
-      // carteraFront: actor y ejecutor son la misma persona. Sin identidad
-      // real del JWT en este punto de compatibilidad (el caller original no
-      // la pasaba), se atribuye a la cuenta admin de servicio — deuda de la
-      // misma ventana de compatibilidad, cerrada en el paso 3 cuando el
-      // router extraiga la identidad real del JWT y la pase acá.
-      actuadoPor: opciones.actuadoPor ?? 1,
-      actuadoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
-      decididoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
-    });
+    // 1. El credito_id del convenio, para tomar el lock por crédito.
+    const [convenio] = await db
+      .select({ credito_id: convenios_pago.credito_id })
+      .from(convenios_pago)
+      .where(eq(convenios_pago.convenio_id, convenio_id));
+
+    const decidir = () =>
+      decidirConvenio({
+        convenioId: convenio_id,
+        decision: status ? "aprobado" : "rechazado",
+        motivo,
+        operacionId,
+        origen: "cartera_front",
+        // carteraFront: actor y ejecutor son la misma persona. Sin identidad
+        // real del JWT en este punto de compatibilidad (el caller original no
+        // la pasaba), se atribuye a la cuenta admin de servicio — deuda de la
+        // misma ventana de compatibilidad, cerrada en el paso 3 cuando el
+        // router extraiga la identidad real del JWT y la pase acá.
+        actuadoPor: opciones.actuadoPor ?? 1,
+        actuadoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
+        decididoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
+      });
+
+    // 🔒 Mismo advisory lock por crédito que insertPayment y reversePayment
+    // (P2 de Codex en #1482, 2ª ronda): el borrado del rechazo es
+    // multi-statement (convenio_cuotas → resume → convenios_pago) y podía
+    // interlevarse con el commit diferido de un pago en vuelo — el guard
+    // optimista del commit matchea sobre el parent todavía vivo, el marcado
+    // ya no encuentra cuotas hijas y el borrado termina llevándose el
+    // convenio recién acreditado mientras el pago responde éxito.
+    // Serializada, la mutación espera a que el pago termine (o corre entera
+    // antes del prepare, y entonces el guard optimista sí la detecta).
+    //
+    // Sin fila de convenio (un rechazo ya la borró) no hay crédito que trabar:
+    // `decidirConvenio` responde igual — el resultado idempotente si el
+    // operacion_id ya se usó, o 409 si no.
+    const resultado = convenio
+      ? await withPaymentAdvisoryLock(convenio.credito_id, decidir)
+      : await decidir();
 
     return {
       success: true,

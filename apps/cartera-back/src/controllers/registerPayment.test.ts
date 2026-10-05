@@ -1,11 +1,14 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import Big from "big.js";
+import * as ts from "typescript";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
   capitalSuprimidoPorConvenio,
   calcularSaldoNetoCuota,
+  cuentaComoHermanoVivo,
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
@@ -14,12 +17,15 @@ import {
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
+  pagoSchema,
+  internalNexaPagoSchema,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   calcularCoberturaCuota,
   getCreditPaymentBlock,
+  getInternalNexaPaymentDate,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -35,9 +41,16 @@ describe("register payment", () => {
     expect(source).toContain("origen_pago: pagoData.origen_pago");
     expect(source).toContain("pagalo_import_id: pagoData.pagalo_import_id");
     expect(source.match(/pagalo_import_id: pagoData\.pagalo_import_id/g) ?? []).toHaveLength(2);
+    // Merge develop → COBROS-02: la fila-rastro también se escribe cuando
+    // quedan rubros sin estampar (condición de develop), así que el `if` es
+    // multilínea y se ancla en su primera condición.
+    const inicioFallback = source.indexOf(
+      "new Big(estamparPagoConvenio.pendiente()).gt(0) ||",
+    );
+    expect(inicioFallback).toBeGreaterThan(-1);
     const convenioFallback = source.slice(
-      source.indexOf("if (new Big(estamparPagoConvenio.pendiente()).gt(0))"),
-      source.indexOf("const newSaldoAFavor"),
+      inicioFallback,
+      source.indexOf("const newSaldoAFavor", inicioFallback),
     );
     expect(convenioFallback).toContain("origen_pago,");
     expect(convenioFallback).toContain("pagalo_import_id,");
@@ -61,17 +74,21 @@ describe("register payment", () => {
     const source = await Bun.file(
       new URL("./registerPayment.ts", import.meta.url)
     ).text();
-    const engineStart = source.indexOf(
-      "export async function procesarRegistroPago("
-    );
+    // Merge develop → COBROS-02: el wrapper va ANTES del motor (los guards de
+    // develop leen el cuerpo del registro como parte de `insertPayment`), y el
+    // motor se exporta al final del módulo.
     const wrapperStart = source.indexOf("export const insertPayment =");
+    const engineStart = source.indexOf(
+      "async function procesarRegistroPago("
+    );
 
-    expect(engineStart).toBeGreaterThan(-1);
-    expect(wrapperStart).toBeGreaterThan(engineStart);
+    expect(wrapperStart).toBeGreaterThan(-1);
+    expect(engineStart).toBeGreaterThan(wrapperStart);
+    expect(source).toContain("export { procesarRegistroPago };");
 
-    const engine = source.slice(engineStart, wrapperStart);
-    const wrapper = source.slice(
-      wrapperStart,
+    const wrapper = source.slice(wrapperStart, engineStart);
+    const engine = source.slice(
+      engineStart,
       source.indexOf("export async function getPagosDelMesActual")
     );
     const moraHelper = source.slice(
@@ -80,6 +97,10 @@ describe("register payment", () => {
     );
 
     expect(engine).not.toContain("await db.");
+    // Ni transacciones propias: el ledger de mora, el ajuste por fecha ideal y
+    // los rubros escriben por la tx del registro (los rubros, en un savepoint
+    // de ella).
+    expect(engine).not.toContain("db.transaction(");
     expect(engine).toContain("procesarPagoMora({");
     expect(moraHelper).toContain("await updateMoraEnTx(");
     expect(moraHelper).not.toContain("historyRequired: false");
@@ -88,6 +109,72 @@ describe("register payment", () => {
     expect(wrapper).toContain("withPaymentAdvisoryLock(");
     expect(wrapper).toContain("db.transaction(async (tx)");
     expect(wrapper.match(/db\.transaction/g) ?? []).toHaveLength(1);
+  });
+
+  it("acepta monto_boleta decimal como string sin perder centavos", () => {
+    expect(
+      pagoSchema.safeParse({
+        credito_id: 10,
+        usuario_id: 5,
+        monto_boleta: "90071992547409.91",
+        fecha_pago: "2026-09-08",
+        cuotaApagar: 1,
+        url_boletas: [],
+        registerBy: "test@clubcashin.com",
+        fecha_boleta: "2026-09-08",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("reserva registerBy NEXA para el flujo interno", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+    };
+
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa  " }).success).toBe(false);
+    expect(pagoSchema.safeParse({ ...body, registerBy: "NEXA:7" }).success).toBe(false);
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa:forged" }).success).toBe(false);
+  });
+
+  it("el registro interno Nexa exige fecha de transferencia ISO y fecha de boleta", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08T23:30:00-06:00",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+      registerBy: "NEXA",
+    };
+
+    expect(internalNexaPagoSchema.safeParse(body).success).toBe(true);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_pago: "not-a-date" }).success).toBe(false);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_boleta: "not-a-date" }).success).toBe(false);
+    expect(getInternalNexaPaymentDate(body.fecha_pago, 7)?.toISOString())
+      .toBe("2026-09-08T23:30:00.000Z");
+    expect(getInternalNexaPaymentDate(body.fecha_pago)).toBeNull();
+  });
+
+  it("preserva el día bancario Nexa al preparar fecha_pago para persistencia", () => {
+    for (const input of [
+      "2026-09-25T00:00:00.000Z",
+      "2026-10-01T00:00:00+09:00",
+      "2026-10-01T00:00:00+0900",
+      "2026-09-30T23:30:00-0600",
+      "2026-09-30T23:30:00-06:00",
+    ]) {
+      expect(getInternalNexaPaymentDate(input, 7)?.toISOString().slice(0, 10))
+        .toBe(input.slice(0, 10));
+    }
+    expect(getInternalNexaPaymentDate("2026-09-25T00:00:00.000Z", 7)?.toISOString())
+      .toBe("2026-09-25T00:00:00.000Z");
   });
 
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
@@ -248,6 +335,92 @@ describe("register payment", () => {
       montoAplicado: 0,
       pagado: true,
     });
+  });
+});
+
+describe("QA-03: sobrantes pequeños entre cuotas", () => {
+  const distribuir = async (
+    monto: string,
+    mora: string,
+    cuotas: Array<string | null>,
+  ) => {
+    const policy = await import("./registerPaymentPolicy");
+    const usarComoOtros = Reflect.get(policy, "shouldApplyFinalSmallRemainderAsOther");
+    expect(usarComoOtros).toBeFunction();
+    if (typeof usarComoOtros !== "function") {
+      return { aplicado: [], otros: new Big(0), restante: new Big(monto) };
+    }
+
+    let restante = new Big(monto).minus(mora);
+    let otros = new Big(0);
+    const aplicado: Big[] = [];
+    for (const cuota of cuotas) {
+      if (cuota === null) continue;
+      const pendiente = new Big(cuota);
+      const abono = restante.lt(pendiente) ? restante : pendiente;
+      aplicado.push(abono);
+      restante = restante.minus(abono);
+      if (restante.lte(0)) break;
+    }
+    if (usarComoOtros({
+      availableRemaining: restante,
+      hasInsertedPayment: aplicado.length > 0,
+    })) {
+      otros = otros.plus(restante);
+      restante = new Big(0);
+    }
+    return { aplicado, otros, restante };
+  };
+
+  it("distribuye Q35.38 en mora Q5.38 y dos cuotas Q15 sin otros", async () => {
+    const result = await distribuir("35.38", "5.38", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00", "15.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+    expect(new Big("5.38").plus(result.aplicado[0]!).plus(result.aplicado[1]!).toFixed(2))
+      .toBe("35.38");
+  });
+
+  it("continúa un sobrante de hasta Q25 cuando queda otra cuota pagable", async () => {
+    const result = await distribuir("30.00", "0", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00", "15.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+  });
+
+  it("conserva otros para el sobrante final legítimo", async () => {
+    const result = await distribuir("40.00", "0", ["15.00"]);
+    expect(result.aplicado[0]?.toFixed(2)).toBe("15.00");
+    expect(result.otros.toFixed(2)).toBe("25.00");
+  });
+
+  it("trata como final el sobrante si las cuotas posteriores no son pagables", async () => {
+    const result = await distribuir("35.00", "0", ["15.00", null]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00"]);
+    expect(result.otros.toFixed(2)).toBe("20.00");
+  });
+
+  it("mantiene parcial un monto menor que la cuota", async () => {
+    const result = await distribuir("10.00", "0", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["10.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+  });
+
+  it("aplica la regla final fuera del loop real de cuotas", () => {
+    const source = readFileSync(new URL("./registerPayment.ts", import.meta.url), "utf8");
+    const file = ts.createSourceFile("registerPayment.ts", source, ts.ScriptTarget.Latest, true);
+    let call: ts.CallExpression | undefined;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(file) === "shouldApplyFinalSmallRemainderAsOther"
+      ) call = node;
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+
+    expect(call).toBeDefined();
+    let parent = call?.parent;
+    while (parent && !ts.isForOfStatement(parent)) parent = parent.parent;
+    expect(parent).toBeUndefined();
   });
 });
 
@@ -475,8 +648,79 @@ describe("regresión: mora/otros no debe colapsar el saldo de la cuota", () => {
 // `allExistingPagos[0]` = la fila REAL más vieja. El cierre hacía UPDATE sobre
 // esa fila, BORRANDO un pago de interés validado/facturado. El fix: el cierre
 // solo puede UPDATE-ar un destino realmente desechable; si no, INSERTA fila nueva.
+// Contraparte del guard: si el cierre se niega a pisar una fila porque lleva
+// plata, esa plata TIENE que entrar al neteo de la cuota. La query de hermanos
+// solo miraba validated/pending, así que una `no_required` protegida quedaba
+// invisible y el pago nuevo re-aplicaba la cuota completa encima (sobre-cobro).
+describe("cuentaComoHermanoVivo", () => {
+  it("cuenta un pago validated", () => {
+    expect(
+      cuentaComoHermanoVivo({ validationStatus: "validated", monto_aplicado: "1000" })
+    ).toBe(true);
+  });
+
+  it("cuenta un pago pending", () => {
+    expect(
+      cuentaComoHermanoVivo({ validationStatus: "pending", monto_aplicado: "500" })
+    ).toBe(true);
+  });
+
+  it("cuenta un no_required CON plata (crédito 890 / cuota 12)", () => {
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "705.88",
+        abono_interes: "705.88",
+      })
+    ).toBe(true);
+  });
+
+  it("NO cuenta la semilla VACÍA de SIFCO", () => {
+    // El placeholder solo porta los `*_restante`; contarlo no aporta nada y su
+    // única razón de existir es ser el destino del cierre.
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("SÍ cuenta una fila no_required con membresías: ya no se asume que sean sembradas", () => {
+    // Tras arreglar el importador, un `membresias_pago` en una fila
+    // `no_required` es un cobro real y tiene que entrar al neteo.
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "506.41",
+        membresias_pago: "506.41",
+      })
+    ).toBe(true);
+  });
+
+  it("es el reverso exacto de esDestinoSobrescribible en las filas no_required", () => {
+    const filas = [
+      { validationStatus: "no_required", monto_aplicado: "0", membresias_pago: "461.63" },
+      { validationStatus: "no_required", monto_aplicado: "705.88", abono_interes: "705.88" },
+      { validationStatus: "no_required", monto_aplicado: "0", abono_interes: "0" },
+      { validationStatus: "no_required", monto_aplicado: "0", mora: "150.00" },
+    ];
+    for (const fila of filas) {
+      expect(cuentaComoHermanoVivo(fila)).toBe(!esDestinoSobrescribible(fila));
+    }
+  });
+});
+
+// Codex P1 (PR #1519): la fila MIXTA — semilla de SIFCO que después absorbió
+// plata real — entraba al neteo arrastrando su `membresias_pago` sembrado, y
+// `sumarAplicadoACuota`/`membresiasPrevioCuota` lo contaban como cobrado.
 describe("esDestinoSobrescribible", () => {
-  it("el placeholder no_required SIEMPRE es sobrescribible (aunque trajera saldos)", () => {
+  it("el placeholder no_required VACÍO sigue siendo sobrescribible", () => {
+    // Es el caso normal: la fila sembrada desde SIFCO solo porta los
+    // `*_restante` (que esta función ni mira) y no tiene plata en ningún bucket.
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
@@ -485,6 +729,86 @@ describe("esDestinoSobrescribible", () => {
         abono_interes: "0",
       })
     ).toBe(true);
+  });
+
+  it("un no_required CON plata aplicada NO es sobrescribible (crédito 890 / cuota 12)", () => {
+    // 01-sep-2026: la fila 136221 seguía en `no_required` porque nadie vuelve a
+    // tocar ese status, pero Caja la había llenado con /editPayment y aplicado:
+    // Q705.88 de interés, ya facturados en 2 DTEs. El atajo por status la daba
+    // por desechable, así que el registro de otra boleta contra la cuota 12 la
+    // sobrescribió — se perdió el pago y las facturas quedaron sin respaldo.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "705.88",
+        abono_capital: "0",
+        abono_interes: "705.88",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("una fila con membresias_pago NO es sobrescribible, ni siendo no_required", () => {
+    // Hubo una excepción para el `membresias_pago` que sembraba el importador,
+    // pero ese dato es indistinguible de un cobro real en cuanto alguien toca
+    // la fila (`editarPago` lo escribe sin estampar `fecha_pago`), y
+    // equivocarse hacia "es semilla" BORRA un pago. Se arregló en la fuente:
+    // el importador ya no siembra el campo. Codex P1, rondas 2-4 del PR #1519.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
+  it("pero si además del monto derivado hay un remanente real, NO es sobrescribible", () => {
+    // monto_aplicado 561.63 = 461.63 sembrados + 100 de interés real.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "561.63",
+        abono_capital: "0",
+        abono_interes: "100.00",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
+  it("un pago REAL de solo membresías vía /aplicar-monto-pago NO es sobrescribible", () => {
+    // Codex P1 (3.ª ronda): esa vía deja `monto_aplicado === membresias_pago` y
+    // el status en `no_required`, pero SÍ estampa `fecha_pago`. Sin la
+    // procedencia se leía como semilla y el cierre siguiente lo borraba.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "506.41",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "506.41",
+      })
+    ).toBe(false);
+  });
+
+  it("un no_required con plata SOLO en mora tampoco es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        mora: "795.48",
+      })
+    ).toBe(false);
   });
 
   it("una fila vacía (monto_aplicado≈0 y todos los abono_* ≈0) es sobrescribible", () => {
@@ -1165,5 +1489,157 @@ describe("aplicar-pago: levantamiento de EN_RECUPERACION", () => {
     expect(ramaB).toBeGreaterThan(ramaA);
     const tramoB = source.slice(ramaB, source.indexOf("export ", ramaB));
     expect(tramoB).toContain("await levantarRecuperacionSiCorresponde();");
+  });
+});
+
+describe("pagoSchema — observaciones", () => {
+  const base = {
+    credito_id: 1,
+    usuario_id: 1,
+    monto_boleta: 100,
+    fecha_pago: "2026-08-14",
+    cuotaApagar: 1,
+    url_boletas: ["boleta1.jpg"],
+    registerBy: "test@clubcashin.com",
+    fecha_boleta: "2026-08-14",
+  };
+
+  it("conserva las observaciones del pago tras el parse", () => {
+    const parsed = pagoSchema.parse({
+      ...base,
+      observaciones: "pago solo de mora, cliente avisado en llamada",
+    });
+    expect(parsed.observaciones).toBe(
+      "pago solo de mora, cliente avisado en llamada"
+    );
+  });
+
+  it("permite omitir observaciones (campo opcional)", () => {
+    const parsed = pagoSchema.parse(base);
+    expect(parsed.observaciones).toBeUndefined();
+  });
+
+  it("rechaza observaciones de más de 500 caracteres (mismo tope que el front)", () => {
+    expect(
+      pagoSchema.safeParse({ ...base, observaciones: "x".repeat(501) }).success
+    ).toBe(false);
+    expect(
+      pagoSchema.safeParse({ ...base, observaciones: "x".repeat(500) }).success
+    ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contrato de `fecha_aplicado` en el pago PENDIENTE
+// ---------------------------------------------------------------------------
+// `pagoData` se arma inline dentro de `insertPayment` (no hay helper puro que
+// exponerle a un test de unidad), así que se verifica sobre la fuente, igual
+// que creditMonetaryAdjustments.contract.test.ts. Lo que importa acá es que el
+// MISMO objeto que se spreadea en el UPDATE de una fila ya existente traiga la
+// columna: sin ella el UPDATE no la toca y la fila reescrita conserva la
+// `fecha_aplicado` de su vida anterior (los placeholders `no_required` de la
+// importación SIFCO suelen traerla), dejando un pago pendiente con fecha de
+// aplicación heredada.
+const registerPaymentSource = readFileSync(
+  new URL("./registerPayment.ts", import.meta.url),
+  "utf8",
+);
+
+function extraerObjetoPagoDataPendiente(source: string): string {
+  const inicio = source.indexOf("        const pagoData = {");
+  if (inicio === -1) {
+    throw new Error("No se encontró el objeto pagoData del pago pendiente");
+  }
+  const fin = source.indexOf("\n        };", inicio);
+  if (fin === -1) {
+    throw new Error("No se encontró el cierre del objeto pagoData");
+  }
+  return source.slice(inicio, fin);
+}
+
+describe("fecha del pago interno Nexa", () => {
+  it("estampa la fecha transferida en escritores normales y especiales", () => {
+    const specialWriters = [...registerPaymentSource.matchAll(
+      /await insertarPago\(\{([\s\S]*?)\n\s*\}\);/g,
+    )];
+    expect(specialWriters).toHaveLength(5);
+    for (const [, body] of specialWriters) {
+      expect(body).toContain("fecha_pago: paymentRegistrationDate()");
+    }
+    expect(registerPaymentSource).toContain("const fechaGuatemala = paymentRegistrationDate()");
+    // La sangría no importa (insertarPago escribe ahora dentro de su tx): sí
+    // que `renuevo_o_nuevo` siga inmediatamente después de `fecha_pago`.
+    expect(registerPaymentSource).toMatch(/fecha_pago,\n\n\s+renuevo_o_nuevo/);
+  });
+});
+
+describe("fecha_aplicado del pago pendiente", () => {
+  it("el payload del pago pendiente limpia fecha_aplicado", () => {
+    const pagoData = extraerObjetoPagoDataPendiente(registerPaymentSource);
+
+    expect(pagoData).toContain('validationStatus: "pending" as const');
+    expect(pagoData).toContain("fecha_aplicado: null");
+  });
+
+  it("el UPDATE sobre una fila existente sigue spreadeando ese payload", () => {
+    // Si esta rama deja de usar el spread, el test de arriba deja de proteger
+    // nada y hay que revisar la nueva escritura a mano.
+    // Merge develop → COBROS-02: el sello del convenio (monto + convenio) se
+    // escribe en el mismo UPDATE (`campos()`), ya no en un commit diferido.
+    expect(registerPaymentSource).toContain(
+      ".set({ ...pagoData, ...selloConvenioFila })",
+    );
+  });
+
+  it("los writers de aplicación siguen estampando la fecha", () => {
+    // El fix es solo para pagos NO aplicados: validar/aplicar tiene que seguir
+    // poniendo fecha.
+    expect(registerPaymentSource).toContain(
+      '.set({ validationStatus: "validated", fecha_aplicado: new Date() })',
+    );
+    expect(
+      registerPaymentSource.match(/fecha_aplicado: new Date\(\)/g)?.length ?? 0,
+    ).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// El reparto del `otros` se decide dentro del loop de cuotas, que no es
+// testeable en aislado; se ancla acá sobre el fuente, igual que el pagoData del
+// pago pendiente. Sin esto, revertir el cableado a "la primera cuota recorrida"
+// deja la suite verde (los helpers puros siguen pasando) y vuelve el caso del
+// crédito 8674: los Q10.32 colgados de una cuota que no cobró nada.
+describe("otros: se estampa en la fila que la boleta escribe, no en la primera cuota", () => {
+  const bloqueOtros = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const otrosParaPago =",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el cálculo de otrosParaPago en el loop");
+    }
+    return registerPaymentSource.slice(inicio, inicio + 400);
+  })();
+
+  it("resuelve el otros con el sello, no con esPrimeraCuota", () => {
+    expect(bloqueOtros).toContain("resolverOtrosDeLaFila");
+    // Shorthand a propósito: pasarle otra cosa (p. ej. `esPrimeraCuota`) es
+    // exactamente la regresión que este test ataja.
+    expect(bloqueOtros).toMatch(
+      /resolverOtrosDeLaFila\(\{\s*\n\s*filaSeEscribeSinOtrosManual,/,
+    );
+    expect(bloqueOtros).not.toContain("esPrimeraCuota ? otrosBig");
+  });
+
+  it("pregunta si la fila se escribe SIN contar el otros", () => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const filaSeEscribeSinOtrosManual = debeInsertarFilaParcialCuota({",
+    );
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = registerPaymentSource.slice(inicio, inicio + 320);
+    // Si acá entrara el `otros` tipeado, la pregunta se respondería sola y la
+    // fila fantasma vuelve. Solo el ajuste de la cuota 1 puede forzarla: su
+    // monto ya salió del disponible y necesita fila que lo registre.
+    expect(bloque).toContain("otros: ajusteFechaIdealParaFila,");
+    expect(bloque).not.toContain("otros: otrosBig");
+    expect(bloque).toContain("estamparPagoConvenio.pendiente()");
   });
 });

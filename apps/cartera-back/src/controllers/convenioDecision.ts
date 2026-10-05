@@ -32,21 +32,14 @@
 
 import { randomUUID, createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
-import Big from "big.js";
 import { db } from "../database";
 import {
   convenioDecisiones,
   convenioOperaciones,
   convenio_cuotas,
   convenios_pago,
-  convenios_pagos_resume,
   creditos,
 } from "../database/db/schema";
-import {
-  contarCuotasVencidasReales,
-  createMora,
-  STATUS_EN_RECUPERACION,
-} from "./latefee";
 
 export type ConvenioDecisionTipo = "aprobado" | "rechazado";
 export type ConvenioDecisionOrigen = "crm" | "cartera_front";
@@ -302,70 +295,24 @@ export async function decidirConvenio(
 
     // ── Paso 4: efecto financiero ─────────────────────────────────────────
     if (input.decision === "rechazado") {
-      await tx.delete(convenio_cuotas).where(eq(convenio_cuotas.convenio_id, input.convenioId));
-      await tx
-        .delete(convenios_pagos_resume)
-        .where(eq(convenios_pagos_resume.convenio_id, input.convenioId));
-      await tx.delete(convenios_pago).where(eq(convenios_pago.convenio_id, input.convenioId));
-
-      const numCuotasAtrasadas = await contarCuotasVencidasReales(
-        convenioActualizado.credito_id,
-        "MOROSO",
+      // Merge develop→COBROS-02: la ruptura sigue el criterio de develop (en
+      // producción): crédito bloqueado primero, ledger de mora cerrado y mora
+      // recalculada DESDE HOY con el criterio proporcional del cron — dentro
+      // de ESTA transacción auditada. Devuelve el crédito a EN_RECUPERACION si
+      // de ahí venía (Fase 4). Import dinámico: paymentAgreement.ts importa
+      // este módulo.
+      const { romperConvenioRecalculandoMora } = await import("./paymentAgreement");
+      await romperConvenioRecalculandoMora(
+        {
+          convenio_id: input.convenioId,
+          creditoId: convenioActualizado.credito_id,
+          statusCreditoPrevio: convenioActualizado.status_credito_previo,
+          origen: "API_MANUAL",
+          motivo: motivoNormalizado ?? undefined,
+          usuario_id: input.actuadoPor,
+        },
         tx,
       );
-
-      if (numCuotasAtrasadas > 0) {
-        const [{ capital } = { capital: "0" }] = await tx
-          .select({ capital: creditos.capital })
-          .from(creditos)
-          .where(eq(creditos.credito_id, convenioActualizado.credito_id));
-
-        const montoMora = new Big(capital).times("0.0112").times(numCuotasAtrasadas);
-
-        // COBROS-02 Fase 4: si el crédito venía EN_RECUPERACION, ahí vuelve —
-        // rechazar el convenio no puede levantar un estado que puso una
-        // persona (mismo criterio que deshacerlo). Los convenios anteriores a
-        // la migración 0020 no tienen el dato y siguen el camino de siempre.
-        await tx
-          .update(creditos)
-          .set({
-            statusCredit:
-              convenioActualizado.status_credito_previo === STATUS_EN_RECUPERACION
-                ? STATUS_EN_RECUPERACION
-                : "MOROSO",
-          })
-          .where(eq(creditos.credito_id, convenioActualizado.credito_id));
-
-        const resultMora = await createMora(
-          {
-            credito_id: convenioActualizado.credito_id,
-            monto_mora: Number(montoMora.toFixed(2)),
-            cuotas_atrasadas: numCuotasAtrasadas,
-            origen: "API_MANUAL",
-            motivo: motivoNormalizado ?? undefined,
-            usuario_id: input.actuadoPor,
-          },
-          tx,
-        );
-
-        // createMora devuelve {success:false} en vez de lanzar — acá SÍ
-        // tiene que abortar la transacción completa (ver cabecera).
-        if (!resultMora.success) {
-          throw new Error(
-            `No se pudo recrear la mora del crédito ${convenioActualizado.credito_id} al rechazar el convenio: ${resultMora.message}`,
-          );
-        }
-      } else {
-        await tx
-          .update(creditos)
-          .set({
-            statusCredit:
-              convenioActualizado.status_credito_previo === STATUS_EN_RECUPERACION
-                ? STATUS_EN_RECUPERACION
-                : "ACTIVO",
-          })
-          .where(eq(creditos.credito_id, convenioActualizado.credito_id));
-      }
     }
     // aprobado: el UPDATE del paso 2 ya dejó activo=true. Nada más que hacer.
 

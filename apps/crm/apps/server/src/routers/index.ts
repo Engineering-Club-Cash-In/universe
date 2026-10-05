@@ -7,16 +7,20 @@ import { agendaCobrosRouter } from "./agenda-cobros";
 import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
+import { buroInternoRouter } from "./buro-interno";
 import { checksRouter } from "./checks";
 import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { historialAgendasRouter } from "./historial-agendas";
+import { documentIntegrityProcedures } from "./document-integrity";
 import { insuranceRouter } from "./insurance";
+import { investorContractsRouter } from "./investor-contracts";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
+import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
@@ -26,9 +30,12 @@ import { premoraReduccionRouter } from "./premora-reduccion";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
+import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
 import { trasladosCobrosRouter } from "./traslados-cobros";
+import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
+import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
 
@@ -40,8 +47,12 @@ export const crmAppRouter = {
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
 	getCompanies: crmRouter.getCompanies,
+	getCompaniesForContracts: crmRouter.getCompaniesForContracts,
+	getCompanyRelationshipStats: crmRouter.getCompanyRelationshipStats,
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
+	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
+	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,
@@ -60,6 +71,7 @@ export const crmAppRouter = {
 	approveCreditDetail: crmRouter.approveCreditDetail,
 	revokeCreditDetailApproval: crmRouter.revokeCreditDetailApproval,
 	getCreditDetailApprovalStatus: crmRouter.getCreditDetailApprovalStatus,
+	getAjusteFechaIdealPago: crmRouter.getAjusteFechaIdealPago,
 	getOpportunityHistory: crmRouter.getOpportunityHistory,
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
@@ -99,6 +111,21 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Consulta de mora por DPI contra cartera (fail-closed). Es la versión
+	// informativa para la pantalla: el gate que bloquea es `evaluarGateMoraDpi`
+	// y se aplica en los puntos de alta/cambio de DPI, no acá.
+	validarMoraPorDpi: crmRouter.validarMoraPorDpi,
+	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
+	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
+	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
+	getLicenseVerificationById:
+		licenseVerificationRouter.getLicenseVerificationById,
+
+	// Validaciones RENAP/Buró para oportunidades fuera del bot de WhatsApp
+	ejecutarValidacionesRenapBuro:
+		validationsRouter.ejecutarValidacionesRenapBuro,
+	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
+	marcarValidacionManual: validationsRouter.marcarValidacionManual,
 };
 
 /**
@@ -184,6 +211,7 @@ export const cobrosAppRouter = {
 	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
 	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,
+	getProyeccionMoraCarteraBack: cobrosRouter.getProyeccionMoraCarteraBack,
 	// Cartera-back integration endpoints
 	registrarPago: cobrosRouter.registrarPago,
 	registrarPagoCompleto: cobrosRouter.registrarPagoCompleto,
@@ -216,6 +244,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getCierreMoraOficial: cobrosRouter.getCierreMoraOficial,
 	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getMoraRecuperacionPorAsesor: cobrosRouter.getMoraRecuperacionPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
@@ -266,6 +295,7 @@ export const adminAppRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+	setPartnerCompanies: adminRouter.setPartnerCompanies,
 
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
@@ -287,6 +317,9 @@ export const formsAppRouter = {
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+	retryBankStatementCoverageSave:
+		bankAnalysisRouter.retryBankStatementCoverageSave,
+	confirmBankStatementCoverage: bankAnalysisRouter.confirmBankStatementCoverage,
 };
 
 /**
@@ -312,6 +345,19 @@ export const legalAppRouter = {
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
 
+	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
+	getMessagingMode: legalContractsRouter.getMessagingMode,
+	getWeetrustLinkGuide: legalContractsRouter.getWeetrustLinkGuide,
+	linkWeetrustDocument: legalContractsRouter.linkWeetrustDocument,
+	resendContractLinksWhatsapp: legalContractsRouter.resendContractLinksWhatsapp,
+	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
+	retryContractBiometric: legalContractsRouter.retryContractBiometric,
+	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
+	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,
+	// Anular sin reemplazar, y bajar el PDF ya firmado sin entrar a WeeTrust
+	anularContrato: legalContractsRouter.anularContrato,
+	getSignedContractPdf: legalContractsRouter.getSignedContractPdf,
+
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,
 	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,
@@ -323,9 +369,48 @@ export const legalAppRouter = {
 	generateContractsDirect: contractGenerationRouter.generateContractsDirect,
 	linkContractsToOpportunity:
 		contractGenerationRouter.linkContractsToOpportunity,
+	// Borrar lo que el wizard generó y nunca se enlazó
+	descartarContratosSinEnlazar:
+		contractGenerationRouter.descartarContratosSinEnlazar,
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
+	// Subida manual de jurídico: el PDF lo arma una persona, la firma va igual
+	uploadContractForSigning: contractGenerationRouter.uploadContractForSigning,
+
+	// Baterías de contratos de inversionistas: el trabajo que abre cada compra
+	// de cartera aceptada.
+	listInvestorContractBatches:
+		investorContractsRouter.listInvestorContractBatches,
+	getInvestorContractBatch: investorContractsRouter.getInvestorContractBatch,
+	listInvestorContractBatchesByInvestor:
+		investorContractsRouter.listInvestorContractBatchesByInvestor,
+	startInvestorContractBatch:
+		investorContractsRouter.startInvestorContractBatch,
+	closeInvestorContractBatch:
+		investorContractsRouter.closeInvestorContractBatch,
+	countOpenInvestorContractBatches:
+		investorContractsRouter.countOpenInvestorContractBatches,
+	generateInvestorContracts: investorContractsRouter.generateInvestorContracts,
+	listInvestorContracts: investorContractsRouter.listInvestorContracts,
+	getInvestmentContractTypes:
+		investorContractsRouter.getInvestmentContractTypes,
+	getInvestorContractSigningStatus:
+		investorContractsRouter.getInvestorContractSigningStatus,
+	retryInvestorContractBiometric:
+		investorContractsRouter.retryInvestorContractBiometric,
+	resendInvestorContractSigningEmails:
+		investorContractsRouter.resendInvestorContractSigningEmails,
+	refreshInvestorContractSigningLinks:
+		investorContractsRouter.refreshInvestorContractSigningLinks,
+	uploadInvestorContract: investorContractsRouter.uploadInvestorContract,
+	getInvestorWeetrustLinkGuide:
+		investorContractsRouter.getInvestorWeetrustLinkGuide,
+	linkInvestorWeetrustDocument:
+		investorContractsRouter.linkInvestorWeetrustDocument,
+	cancelInvestorContract: investorContractsRouter.cancelInvestorContract,
+	marcarBateriaLista: investorContractsRouter.marcarBateriaLista,
+	descartarVistaPrevia: investorContractsRouter.descartarVistaPrevia,
 };
 
 /**
@@ -340,6 +425,7 @@ export const miscAppRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
+	lookupVendorByDpi: vendorsRouter.lookupByDpi,
 
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,
@@ -431,6 +517,14 @@ export const reportsAppRouter = {
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
 
+	// Verificación de vehículos en SAT
+	ejecutarVerificacionSat: satVehiculosRouter.ejecutarVerificacionSat,
+	obtenerEstadoVerificacionSat:
+		satVehiculosRouter.obtenerEstadoVerificacionSat,
+	obtenerUltimaVerificacionSat: satVehiculosRouter.obtenerUltimaVerificacionSat,
+	obtenerConflictosCreditosSat:
+		satVehiculosRouter.obtenerConflictosCreditosSat,
+
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
@@ -439,6 +533,7 @@ export const reportsAppRouter = {
 
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	identidadInversionista: investorDocumentsRouter.identidadInversionista,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
 	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
 	toggleInvestorDocumentVisibility:
@@ -487,6 +582,7 @@ export const appRouter = Object.assign(
 	legalAppRouter,
 	miscAppRouter,
 	reportsAppRouter,
+	documentIntegrityProcedures,
 );
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
@@ -509,6 +605,33 @@ export const disbursementRouter = {
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
 	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
+};
+
+// Tracker de predios/agencias. Aparte del appRouter para no empujar TS7056.
+export const partnerTrackerRouter = {
+	getCasos: trackerRouter.getCasos,
+	getCasoById: trackerRouter.getCasoById,
+	getPartnerAgencies: trackerRouter.getPartnerAgencies,
+	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
+	changePartnerPassword: trackerRouter.changePartnerPassword,
+};
+
+// Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.
+export const buroInternoProcedures = {
+	listBuroInterno: buroInternoRouter.listBuroInterno,
+	buscarCandidatosBuroInterno: buroInternoRouter.buscarCandidatosBuroInterno,
+	crearRegistroBuroInterno: buroInternoRouter.crearRegistroBuroInterno,
+	actualizarRegistroBuroInterno:
+		buroInternoRouter.actualizarRegistroBuroInterno,
+	desactivarRegistroBuroInterno:
+		buroInternoRouter.desactivarRegistroBuroInterno,
+	getHistorialBuroInterno: buroInternoRouter.getHistorialBuroInterno,
+	consultarBuroInterno: buroInternoRouter.consultarBuroInterno,
+	getReglasBuroInterno: buroInternoRouter.getReglasBuroInterno,
+	actualizarReglaBuroInterno: buroInternoRouter.actualizarReglaBuroInterno,
+	getBuroInternoOportunidad: buroInternoRouter.getBuroInternoOportunidad,
+	autorizarBuroInternoOportunidad:
+		buroInternoRouter.autorizarBuroInternoOportunidad,
 };
 
 export const manualVehicleRouter = {
@@ -535,4 +658,5 @@ export type AppRouter = typeof healthRouter &
 	typeof formsAppRouter &
 	typeof legalAppRouter &
 	typeof miscAppRouter &
-	typeof reportsAppRouter;
+	typeof reportsAppRouter &
+	typeof documentIntegrityProcedures;

@@ -18,6 +18,7 @@ import {
 	opportunities,
 	salesStages,
 } from "./schema/crm";
+import { licenseQrVerifications } from "./schema/license-verification";
 import {
 	inspectionChecklistItems,
 	vehicleInspections,
@@ -50,6 +51,9 @@ async function clearAllCRMData() {
 
 		await db.delete(contratosFinanciamiento);
 		console.log("✅ Contratos de financiamiento cleared");
+
+		await db.delete(licenseQrVerifications);
+		console.log("✅ License QR verifications cleared");
 
 		// Delete in reverse order of dependencies
 		await db.delete(clients);

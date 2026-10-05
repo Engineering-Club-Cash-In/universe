@@ -173,8 +173,8 @@ async function bloquearFilasMora(
 ) {
   const ids = [...new Set(creditoIds)].sort((a, b) => a - b);
   if (!ids.length) return;
-  // updateMoraEnTx toma primero esta fila y después creditos. El traslado
-  // respeta orden mora → crédito: si una edición ya cambió cuotas_atrasadas,
+  // Se toma DESPUÉS de la fila de `creditos` (regla de candados del módulo
+  // de mora: crédito → mora). Si una edición ya cambió cuotas_atrasadas,
   // termina antes y la foto final invalida el preview; si no, espera al lote.
   await tx.execute(sql`
     WITH creditos_ordenados AS MATERIALIZED (
@@ -309,8 +309,11 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
     await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
-    await bloquearFilasMora(tx, plan.asignaciones.map((a) => a.creditoId));
+    // Orden del módulo de mora (develop, latefee.ts): `creditos` PRIMERO y
+    // `moras_credito` después. Al revés, un traslado y un pago/convenio/cron
+    // concurrentes se pedían los candados en cruz (40P01).
     await bloquearFilasCredito(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearFilasMora(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import api from "@/Provider/interceptor";
+import { esDetalleTecnicoCrudo } from "@/lib/apiError";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 import type { InstallmentContributionSummary } from "./installmentContribution";
@@ -13,12 +14,19 @@ export const getInvestors = async () => {
 };
 export interface InvestorPayload {
   inversionista_id?: number;
+  /**
+   * "CREATE" activa la creación estricta en cartera: una colisión de
+   * nombre/DPI/email devuelve 409 en vez de convertir el alta en un UPDATE
+   * sobre el inversionista existente (upsert legacy).
+   */
+  operation?: "CREATE";
   nombre: string;
   emite_factura: boolean;
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -26,6 +34,15 @@ export interface InvestorPayload {
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
   email?: string | null;
+  /**
+   * Pide que el alta le abra cuenta en el Portal del Inversionista.
+   *
+   * Cartera NO provisiona sin esta llave: es el permiso explícito que separa un
+   * alta de back office del registro público de auth-google, que llega a
+   * cartera con el mismo token de servicio ADMIN y sería indistinguible por
+   * identidad. Solo tiene efecto en las filas que se INSERTAN.
+   */
+  provisionar_portal?: boolean;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -34,6 +51,7 @@ export interface InvestorResponse {
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   moneda?: string;
@@ -44,10 +62,60 @@ export interface InvestorResponse {
 }
 
 // Crear inversionista(s)
+/**
+ * Respuesta real de `POST /investor`: un objeto, no el array de filas.
+ *
+ * Estaba tipado `InvestorResponse[]` y no lo es — por eso el bloque
+ * `provisioning`, que dice qué pasó con el acceso al portal de cada
+ * inversionista recién creado, no se podía leer sin castear. Va aparte de
+ * `data` a propósito: el alta puede haber salido perfecta y el acceso no.
+ */
+export interface AccesoPortalRespuesta {
+  inversionistaId: number;
+  estado: string;
+  usuarioEmail: string | null;
+  correo: {
+    enviado: boolean;
+    plantilla: string | null;
+    redirigido: boolean;
+    destinatarioReal: string | null;
+  };
+  advertencias: string[];
+  motivo: string | null;
+}
+
+export interface InsertInvestorRespuesta {
+  message: string;
+  data: InvestorResponse[];
+  provisioning?: AccesoPortalRespuesta[];
+}
+
 export async function insertInvestorService(
   data: InvestorPayload | InvestorPayload[]
-): Promise<InvestorResponse[]> {
+): Promise<InsertInvestorRespuesta> {
   const res = await api.post(`${API_URL}/investor`, data);
+  return res.data;
+}
+
+/**
+ * Abre el acceso al Portal del Inversionista. Es un ACTO HUMANO.
+ *
+ * La reconciliación diaria de cartera detecta a quién le falta acceso y lo
+ * manda en el resumen de las 07:00, pero ya NO le crea la cuenta: crearla
+ * significa mandar una contraseña por correo, y el correo de una fila de
+ * `inversionistas` puede no ser de su dueño (esa tabla se escribe desde
+ * caminos que no prueban identidad). Quien apriete este botón es quien
+ * responde por que ese correo sea el correcto: verificalo antes.
+ *
+ * Esta ruta NO está en el proxy `/api/cartera` de auth-google, así que no es
+ * alcanzable desde el portal: solo desde aquí, con un ADMIN de cartera.
+ */
+export async function otorgarAccesoPortalService(
+  inversionistaIds: number[]
+): Promise<{ message: string; resultados: AccesoPortalRespuesta[] }> {
+  const res = await api.post(`${API_URL}/investor/portal-access`, {
+    inversionista_ids: inversionistaIds,
+  });
   return res.data;
 }
 
@@ -185,6 +253,8 @@ export interface Credito {
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -304,12 +374,58 @@ export interface ConvenioPagosResume {
   pago_id: number;
   created_at: string;
 }
+// Un rubro pendiente de cobro (tarjeta de circulación, placas, traspaso, etc).
+// El back ya lo entrega ORDENADO en el orden en que se cobra: otros → mora →
+// rubros → convenio → cuotas.
+export interface RubroPendiente {
+  rubro_id: number;
+  tipo_nombre: string;
+  descripcion: string;
+  // Strings porque vienen de una columna numeric/decimal en la BD (igual que
+  // los montos de Cuota); convertir con Number() antes de sumar.
+  saldo_pendiente: string;
+  // Lo que ESTA boleta puede cobrar: el saldo menos lo que otras boletas ya
+  // apartaron y esperan a contabilidad. Puede ser "0.00" con saldo_pendiente > 0.
+  disponible: string;
+  obligatorio: boolean;
+}
+
+/**
+ * El «por qué» de la mora, cuota por cuota (lo arma el back con el mismo
+ * cálculo del cron). Montos como string con 2 decimales.
+ */
+export interface DesgloseMora {
+  cargoMensual: string;
+  cargoDiario: string;
+  cuotas: {
+    numero_cuota: number;
+    fecha_vencimiento: string;
+    dias_atraso: number;
+    topada: boolean;
+    en_validacion: boolean;
+    generado: string;
+    abonado: string;
+    pendiente: string;
+  }[];
+  total: string;
+  /** total − Σ pendiente de las filas (puede ser negativo). */
+  ajusteRedondeo?: string;
+  /** El total de mañana si no paga hoy (incluye las cuotas que vencen hoy). */
+  totalManana?: string;
+  /** Cuántas cuotas suben mañana (vencidas sin tope + las que vencen hoy). */
+  cuotasQueSubenManana?: number;
+}
+
 export interface GetCreditoByNumeroActivoResponse {
   flujo: "ACTIVO";
   credito: Credito;
   usuario: Usuario;
   cuotaActual: number;
   moraActual: number;
+  // Suma de los `disponible` de rubros (NO de los saldo_pendiente); 0 si no hay.
+  rubrosActual: number;
+  // Detalle de rubros, ya en el orden real de cobro.
+  rubros: RubroPendiente[];
   cuotaActualPagada: boolean;
   cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
 
@@ -317,6 +433,9 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
+
+  // El porqué de la mora para el asesor (ausente en respuestas viejas).
+  desgloseMora?: DesgloseMora;
 
   // 🔥 CONVENIO (puede ser null)
   convenioActivo: ConvenioActivo | null;
@@ -413,6 +532,8 @@ export interface CreditoUsuarioPago {
   usuarios: Usuario;
   /** Aseguradora vinculada al crédito (nombre, null si no tiene). */
   aseguradora?: string | null;
+  /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
+  tiene_pagos_sin_liquidar?: boolean;
   inversionistas: AporteInversionista[];
   creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;
@@ -470,6 +591,8 @@ export interface Credito {
   mora: string;
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -745,6 +868,15 @@ export interface InversionistaPayload {
    */
   es_nuevo?: boolean;
   tipo_operacion?: "compra_cartera" | "reinversion";
+  tipo_reinversion?:
+    | "sin_reinversion"
+     | "reinversion_capital"
+     | "reinversion_interes"
+     | "reinversion_total"
+     | "reinversion_variable"
+     | "reinversion_excedente";
+  modalidad_facturacion?: ModalidadFacturacion;
+  modalidad_facturacion_spread_id?: number;
 }
 
 export interface UpdateCreditBody {
@@ -783,11 +915,16 @@ export interface UpdateCreditBody {
   // Abono capital
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
   motivo_devolucion?: string;
 
   // Motivo del ajuste manual de capital (se registra en el historial de capital)
   motivo_ajuste_capital?: string;
+  // Motivos separados según tabla fiscal o espejo.
+  motivo_ajuste_monto_aportado_padre?: string;
+  motivo_ajuste_monto_aportado_espejo?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -1051,6 +1188,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1097,7 +1240,11 @@ export function formatMensajeFallido(mensaje: string): string {
   if (match) {
     return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
   }
-  return mensaje;
+  const trimmed = mensaje.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error al procesar el crédito. Contacta soporte.";
+  }
+  return trimmed;
 }
 
 // ============================================================
@@ -1255,9 +1402,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
@@ -1713,6 +1869,8 @@ export interface UpdateMoraPayload {
   tipo: "INCREMENTO" | "DECREMENTO";
   cuotas_atrasadas?: number;
   activa?: boolean;
+  /** Obligatorio: el backend responde 400 si viene vacío. */
+  motivo: string;
 }
 
 export interface CondonarMoraPayload {
@@ -1750,33 +1908,80 @@ export async function condonarMoraService(payload: CondonarMoraPayload) {
   return data;
 }
 
-// Listar créditos con mora
-export async function getCreditosWithMorasService(params?: {
+// ---------- Paginación / totales de moras ----------
+export interface MoraPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface CreditosConMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
   numero_credito_sifco?: string;
   cuotas_atrasadas?: number;
   estado?: EstadoCredito;
   excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: CreditoConMora[]; excelUrl?: string }>(
-    `/moras/creditos`,
-    { params }
-  );
+}
+
+// Con excel=true el backend responde solo { success, excelUrl, count }: por eso
+// pagination y totales son opcionales, para que nadie los lea sin comprobarlos.
+export interface CreditosConMoraResponse {
+  success: boolean;
+  data?: CreditoConMora[];
+  pagination?: MoraPagination;
+  totales?: { mora_total: string; creditos: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+export interface CondonacionesMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
+  numero_credito_sifco?: string;
+  usuario_email?: string;
+  /**
+   * Día de GUATEMALA `YYYY-MM-DD` (inclusive). `moras_condonaciones.fecha` es un
+   * timestamp sin zona con el instante en UTC: el backend convierte estos días
+   * a los instantes UTC del día GT, así el filtro coincide con la fecha que se
+   * ve en pantalla. Los dos son independientes: se puede mandar solo uno.
+   */
+  fecha_desde?: string;
+  /** Día de GUATEMALA `YYYY-MM-DD` (inclusive, entra el día completo). */
+  fecha_hasta?: string;
+  excel?: boolean;
+}
+
+export interface CondonacionesMoraResponse {
+  success: boolean;
+  data?: Condonacion[];
+  pagination?: MoraPagination;
+  totales?: { monto_total: string; condonaciones: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+// Listar créditos con mora (paginado)
+export async function getCreditosWithMorasService(params?: CreditosConMoraParams) {
+  const { data } = await api.get<CreditosConMoraResponse>(`/moras/creditos`, { params });
   return data;
 }
 
-// Listar condonaciones
-export async function getCondonacionesMoraService(params?: {
-  numero_credito_sifco?: string;
-  usuario_email?: string;
-  fecha_desde?: string;
-  fecha_hasta?: string;
-  excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: Condonacion[]; excelUrl?: string }>(
-    `/moras/condonaciones`,
-    { params }
-  );
-  return data;}
+// Listar condonaciones (paginado)
+export async function getCondonacionesMoraService(params?: CondonacionesMoraParams) {
+  const { data } = await api.get<CondonacionesMoraResponse>(`/moras/condonaciones`, { params });
+  return data;
+}
+
+// Historial de eventos de mora de un crédito (ADMIN, CONTA, ASESOR)
+export type { MoraEvento } from "./moraHistorial.services";
+export {
+  getMoraHistorialCredito,
+  descargarMoraHistorialCreditoExcel,
+} from "./moraHistorial.services";
 
 
 export interface CuotaPago {
@@ -2247,6 +2452,8 @@ export interface LiquidacionResumen {
   boleta_pendiente: string | null;
   boleta_liquidacion: BoletaLiquidacion | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte expresado en quetzales. Solo lo tienen los inversionistas en dólares. */
+  reporte_liquidacion_url_gtq?: string | null;
   estado_liquidacion_resumen:
     | "pending"
     | "uploaded"
@@ -4339,7 +4546,16 @@ export type EstadoDevolucion =
   | "NO_APLICA"
   | "PENDIENTE_AUTORIZACION"
   | "VERIFICADO"
-  | "RECHAZADO";
+  | "RECHAZADO"
+  | "COMPLETADO";
+
+// Solo viene poblado cuando se consulta con status=HISTORIAL y el crédito
+// está en VERIFICADO: por qué todavía no cerró (ver
+// utils/devolucionCompletada.ts::MotivoDiferido en el backend).
+export type PendienteCierre =
+  | { motivo: "inversionistas_en_padre"; restantes: number }
+  | { motivo: "saldo_en_espejo" }
+  | null;
 
 export interface DevolucionCreditoItem {
   credito_id: number;
@@ -4350,6 +4566,7 @@ export interface DevolucionCreditoItem {
   fecha_creacion: string;
   estado_devolucion: EstadoDevolucion;
   motivo_contextual?: string | null;
+  pendiente_cierre?: PendienteCierre;
 }
 
 export interface DevolucionHistorialItem {

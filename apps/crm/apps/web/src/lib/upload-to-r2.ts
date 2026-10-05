@@ -15,7 +15,8 @@ type UploadResourceType =
 	| "investment_document"
 	| "cobros_visita_evidencia"
 	| "cobros_inmovilizacion_evidencia"
-	| "cobros_investigacion_evidencia";
+	| "cobros_investigacion_evidencia"
+	| "license_verification";
 
 interface UploadTarget {
 	resourceType: UploadResourceType;

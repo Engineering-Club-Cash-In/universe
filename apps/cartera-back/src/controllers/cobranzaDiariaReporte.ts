@@ -6,6 +6,7 @@ import {
 	agruparPorAsesor, interesCubeResidual,
 	type CobranzaAsesorRow, type CobranzaCreditoRow,
 } from "./cobranzaDiaria";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 
 type Exec = Pick<typeof db, "execute">;
 
@@ -36,15 +37,15 @@ export async function construirFilasCredito(
 			COALESCE(pag.abono_iva,0) AS iva_cob, COALESCE(pag.abono_seguro,0) AS seg_cob,
 			COALESCE(pag.abono_gps,0) AS gps_cob, COALESCE(pag.membresias_pagada,0) AS mem_cob,
 			COALESCE(pag.mora,0) AS mora_cob
-		FROM cartera.cuotas_credito c
-		JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-		JOIN cartera.usuarios u ON cr.usuario_id = u.usuario_id
-		LEFT JOIN cartera.asesores a ON cr.asesor_id = a.asesor_id
+		FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+		JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
+		JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON cr.usuario_id = u.usuario_id
+		LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON cr.asesor_id = a.asesor_id
 		LEFT JOIN LATERAL (
 			SELECT pc.capital_restante::numeric AS capital_restante, pc.interes_restante::numeric AS interes_restante,
 				pc.iva_12_restante::numeric AS iva_12_restante, pc.seguro_restante::numeric AS seguro_restante,
 				pc.gps_restante::numeric AS gps_restante, pc.membresias::numeric AS membresias
-			FROM cartera.pagos_credito pc
+			FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
 			WHERE pc.cuota_id = c.cuota_id AND pc."paymentFalse" = false
 			ORDER BY pc.total_restante::numeric DESC NULLS LAST, pc.pago_id ASC LIMIT 1
 		) prog ON true
@@ -53,7 +54,7 @@ export async function construirFilasCredito(
 				SUM(pc.abono_iva_12::numeric) AS abono_iva, SUM(pc.abono_seguro::numeric) AS abono_seguro,
 				SUM(pc.abono_gps::numeric) AS abono_gps, SUM(pc.membresias_pago::numeric) AS membresias_pagada,
 				SUM(pc.mora::numeric) AS mora
-			FROM cartera.pagos_credito pc
+			FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
 			WHERE pc.cuota_id = c.cuota_id AND pc."paymentFalse" = false
 		) pag ON true
 		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
@@ -70,8 +71,8 @@ export async function construirFilasCredito(
 	const qB = await exec.execute(sql`
 		SELECT ci.credito_id, ci.inversionista_id, i.nombre,
 			ci.porcentaje_participacion_inversionista, ci.porcentaje_cash_in, ci.monto_aportado
-		FROM cartera.creditos_inversionistas ci
-		JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+		FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
+		JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
 		WHERE ci.credito_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
 	`);
 	const invPorCredito = new Map<number, InvSplitInput[]>();
@@ -145,9 +146,9 @@ export async function getCobranzaDiariaDetalle(p: {
 	const creditos = await construirFilasCredito({ ...p, limit, offset }, exec);
 	const countRes = await exec.execute(sql`
 		SELECT COUNT(*)::int AS total
-		FROM cartera.cuotas_credito c
-		JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-		JOIN cartera.usuarios u ON cr.usuario_id = u.usuario_id
+		FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
+		JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
+		JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON cr.usuario_id = u.usuario_id
 		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
 			AND c.numero_cuota > 0
 			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_RECUPERACION','EN_CONVENIO')

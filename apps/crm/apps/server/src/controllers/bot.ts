@@ -21,6 +21,7 @@ import {
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
 
@@ -367,6 +368,25 @@ function findLeadWithActiveOpportunityByPhone(phone: string) {
 /**
  * @param dpi - The DPI (unique identifier for the person).
  * @returns An object with the RENAP data and the operation status.
+ *
+ * 🔴 Acá NO va el gate de mora por DPI, y no es un olvido.
+ *
+ * Este controller cuelga de `POST /info/renap`, que es anónimo a propósito: lo
+ * llama el bot de WhatsApp y no pide credenciales. Consultar la mora acá
+ * convertiría la ruta en un oráculo público de situación crediticia —
+ * cualquiera manda el DPI de un tercero y la respuesta le dice si esa persona
+ * es cliente y si está en mora o en convenio.
+ *
+ * ⚠️ Y que no lleve gate NO significa que el filtro corra después. Los leads
+ * que crea el bot nacen con el DPI ya puesto, así que `createLead` nunca corre
+ * para ellos y `updateLead` solo consulta cuando el DPI cambia (ver
+ * `requiereConsultaDeMora`): si nadie se lo toca, no se consulta nunca.
+ *
+ * Lo que sí los alcanza es indirecto y parcial: cuando el gate corre para ese
+ * DPI en cualquiera de los seis puntos, el CRM aporta los `numeroSifco` de las
+ * oportunidades de sus leads (`lib/numeros-sifco-por-dpi.ts`), y eso hace
+ * visibles los créditos que SIFCO no sabe devolver. El corte en el avance de la
+ * oportunidad es una decisión aparte y todavía no está construido.
  */
 export const getRenapInfoController = async (
 	dpiRecibido: string,
@@ -508,6 +528,12 @@ export const getRenapInfoController = async (
 				assignmentType: "auto",
 			})
 			.returning({ id: leads.id });
+		auditRecord({
+			entity: "lead",
+			id: newLead[0].id,
+			action: "create",
+			data: { dpi, phone },
+		});
 		leadId = newLead[0].id;
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
@@ -538,6 +564,12 @@ export const getRenapInfoController = async (
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, existingLead.id));
+			auditRecord({
+				entity: "lead",
+				id: existingLead.id,
+				action: "update",
+				data: { dpi, motivo: "refresco_renap" },
+			});
 		} else {
 			console.log(
 				`[DEBUG] Lead ${leadId} sin proceso activo; se reasigna por ruleta.`,
@@ -567,6 +599,13 @@ export const getRenapInfoController = async (
 					livenessValidated: false,
 				})
 				.where(eq(leads.id, existingLead.id));
+			// Reasignación por ruleta: es de lo que más se reclama.
+			auditRecord({
+				entity: "lead",
+				id: existingLead.id,
+				action: "reassign",
+				data: { dpi, assignedTo: reassignment.assignedTo },
+			});
 		}
 	}
 
@@ -621,6 +660,12 @@ export const getRenapInfoController = async (
 				.update(opportunities)
 				.set({ assignedTo: assignedUserId, updatedAt: new Date() })
 				.where(eq(opportunities.id, existingOpportunity.id));
+			auditRecord({
+				entity: "opportunity",
+				id: existingOpportunity.id,
+				action: "reassign",
+				data: { dpi, assignedTo: assignedUserId },
+			});
 		}
 		opportunityId = existingOpportunity.id;
 	} else {
@@ -651,6 +696,12 @@ export const getRenapInfoController = async (
 				source: "Whatsapp",
 			})
 			.returning();
+		auditRecord({
+			entity: "opportunity",
+			id: newOpportunity.id,
+			action: "create",
+			data: { dpi, leadId, assignedTo: assignedUserId },
+		});
 
 		opportunityId = newOpportunity.id;
 	}
@@ -795,6 +846,12 @@ export const updateLeadAndCreateOpportunity = async (
 			.update(leads)
 			.set(leadUpdates)
 			.where(eq(leads.id, existingLead.id));
+		auditRecord({
+			entity: "lead",
+			id: existingLead.id,
+			action: "update",
+			data: leadUpdates,
+		});
 	}
 
 	// 3. Agregar documentos a las oportunidades abiertas usando la función genérica

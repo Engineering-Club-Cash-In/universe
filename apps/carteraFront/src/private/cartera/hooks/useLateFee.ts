@@ -7,60 +7,99 @@ import {
   createMoraService,
   getCondonacionesMoraService,
   getCreditosWithMorasService,
+  getMoraHistorialCredito,
   morasService,
   procesarMorasService,
   updateMoraService,
+  type CondonacionesMoraParams,
   type CondonarMoraPayload,
   type CreateMoraPayload,
+  type CreditosConMoraParams,
   type UpdateMoraPayload,
 } from "../services/services";
 
-// 👇 importá el tipo correcto de estado
-import type { CondonarMasivaRequest, EstadoCredito } from "../services/services";  
-export function useMoras(filters?: {
-  numero_credito_sifco?: string;
-  estado?: EstadoCredito; // 👈 corregido
-  cuotas_atrasadas?: number;
-}) {
+import type { CondonarMasivaRequest } from "../services/services";
+
+export interface UseMorasOptions {
+  /** Filtros + paginación de la pestaña "Créditos con Mora" */
+  creditos?: CreditosConMoraParams;
+  /** Filtros + paginación de la pestaña "Condonaciones" */
+  condonaciones?: CondonacionesMoraParams;
+  /** false para usar el hook solo por sus mutaciones (sin disparar los listados) */
+  enabled?: boolean;
+  /**
+   * Cada listado son 2 consultas a la base (filas + totales). Solo se pide el
+   * de la pestaña que se está viendo; el otro queda dormido hasta que se
+   * cambia de pestaña. Ambos por defecto en true para no romper otros usos.
+   */
+  enabledCreditos?: boolean;
+  enabledCondonaciones?: boolean;
+}
+
+export function useMoras(options?: UseMorasOptions) {
   const queryClient = useQueryClient();
+  const creditosParams = options?.creditos ?? {};
+  const condonacionesParams = options?.condonaciones ?? {};
+  const enabled = options?.enabled ?? true;
 
   const {
     data: creditosMora,
     isLoading: loadingCreditos,
+    isFetching: fetchingCreditos,
+    isPlaceholderData: creditosDesactualizados,
+    isError: errorCreditos,
     refetch: refetchCreditosMora,
   } = useQuery({
-    queryKey: ["creditosMora", filters],
-    queryFn: () => getCreditosWithMorasService(filters),
+    // los filtros y la paginación van en la key para que refresque al cambiarlos
+    queryKey: ["creditosMora", creditosParams],
+    queryFn: () => getCreditosWithMorasService(creditosParams),
+    enabled: enabled && (options?.enabledCreditos ?? true),
+    placeholderData: (prev) => prev,
   });
 
   const {
     data: condonaciones,
     isLoading: loadingCondonaciones,
+    isFetching: fetchingCondonaciones,
+    isPlaceholderData: condonacionesDesactualizadas,
+    isError: errorCondonaciones,
     refetch: refetchCondonaciones,
   } = useQuery({
-    queryKey: ["condonacionesMora"],
-    queryFn: () => getCondonacionesMoraService(),
+    queryKey: ["condonacionesMora", condonacionesParams],
+    queryFn: () => getCondonacionesMoraService(condonacionesParams),
+    enabled: enabled && (options?.enabledCondonaciones ?? true),
+    placeholderData: (prev) => prev,
   });
+
+  /**
+   * Toda mutación que escribe en `moras_historial` tiene que refrescar el
+   * historial del crédito, o el modal sigue mostrando la lista previa (sin el
+   * evento —y el motivo— que se acaba de registrar).
+   */
+  const invalidarMoraYHistorial = () => {
+    queryClient.invalidateQueries({ queryKey: ["creditosMora"] });
+    queryClient.invalidateQueries({ queryKey: ["moraHistorialCredito"] });
+  };
 
   const createMora = useMutation({
     mutationFn: (payload: CreateMoraPayload) => createMoraService(payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["creditosMora"] }),
+    onSuccess: invalidarMoraYHistorial,
   });
 
   const updateMora = useMutation({
     mutationFn: (payload: UpdateMoraPayload) => updateMoraService(payload),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["creditosMora"] }),
+    onSuccess: invalidarMoraYHistorial,
   });
 
   const procesarMoras = useMutation({
     mutationFn: () => procesarMorasService(),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["creditosMora"] }),
+    onSuccess: invalidarMoraYHistorial,
   });
 
   const condonarMora = useMutation({
     mutationFn: (payload: CondonarMoraPayload) => condonarMoraService(payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["creditosMora"] });
+      invalidarMoraYHistorial();
       queryClient.invalidateQueries({ queryKey: ["condonacionesMora"] });
     },
   });
@@ -70,6 +109,16 @@ export function useMoras(filters?: {
     condonaciones,
     loadingCreditos,
     loadingCondonaciones,
+    // `isLoading` solo es true en la PRIMERA carga: con `placeholderData` un
+    // refetch por cambio de filtro/página deja datos viejos en pantalla sin
+    // ninguna señal. Estas dos banderas son las que la pantalla usa para
+    // marcar el contenido como desactualizado.
+    fetchingCreditos,
+    fetchingCondonaciones,
+    creditosDesactualizados,
+    condonacionesDesactualizadas,
+    errorCreditos,
+    errorCondonaciones,
     createMora,
     updateMora,
     procesarMoras,
@@ -77,6 +126,19 @@ export function useMoras(filters?: {
     refetchCreditosMora,
     refetchCondonaciones,
   };
+}
+
+/**
+ * Historial de eventos de mora de un crédito (incluye condonaciones).
+ * Se usa desde el diálogo "Historial de mora" de la ficha del crédito.
+ */
+export function useMoraHistorialCredito(creditoId?: number | null, enabled = true) {
+  return useQuery({
+    queryKey: ["moraHistorialCredito", creditoId],
+    queryFn: () => getMoraHistorialCredito(creditoId as number),
+    enabled: enabled && !!creditoId,
+    refetchOnWindowFocus: false,
+  });
 }
 
 export const useMorasMasivo = () => {
@@ -94,8 +156,9 @@ export const useMorasMasivo = () => {
         });
         // Invalida queries relacionadas para refetch automático
         queryClient.invalidateQueries({ queryKey: ['creditos'] });
-        queryClient.invalidateQueries({ queryKey: ['moras'] });
-        queryClient.invalidateQueries({ queryKey: ['condonaciones'] });
+        queryClient.invalidateQueries({ queryKey: ['creditosMora'] });
+        queryClient.invalidateQueries({ queryKey: ['condonacionesMora'] });
+        queryClient.invalidateQueries({ queryKey: ['moraHistorialCredito'] });
       } else {
         toast.error(data.message);
       }

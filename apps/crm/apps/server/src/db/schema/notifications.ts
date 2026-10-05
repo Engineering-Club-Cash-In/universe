@@ -57,6 +57,8 @@ export const notificationRedirectPageEnum = pgEnum(
 		// dirigida a admin. No lleva relatedEntityId (no es una entidad del
 		// CRM), igual que pay_investors.
 		"admin_gps",
+		// Bandeja de baterías de contratos de inversionistas, en jurídico.
+		"investor_contracts",
 	],
 );
 

@@ -15,6 +15,7 @@ import {
   generarCierreMensual,
   type CierreMensualItem,
 } from "../services/services";
+import { estadoCreditoStyle } from "@/lib/estadoCredito";
 
 function formatQ(val: string | number | null | undefined): string {
   const n = Number(val ?? 0);
@@ -48,16 +49,6 @@ const ORDEN_ESTADOS = [
   "PENDIENTE_CANCELACION",
   "CANCELADO",
 ];
-
-const ESTADO_STYLE: Record<string, string> = {
-  ACTIVO: "bg-green-100 text-green-700",
-  MOROSO: "bg-red-100 text-red-700",
-  EN_CONVENIO: "bg-amber-100 text-amber-700",
-  CAIDO: "bg-orange-100 text-orange-700",
-  INCOBRABLE: "bg-rose-100 text-rose-700",
-  PENDIENTE_CANCELACION: "bg-blue-100 text-blue-700",
-  CANCELADO: "bg-gray-100 text-gray-600",
-};
 
 export function CierreCartera() {
   const [rows, setRows] = useState<CierreMensualItem[]>([]);
@@ -230,7 +221,7 @@ export function CierreCartera() {
                 {filasPeriodo.map((r) => (
                   <TableRow key={r.id} className="hover:bg-[#f3f8ff] transition-colors">
                     <TableCell className="border-r border-b border-blue-100">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${ESTADO_STYLE[r.status_credit] ?? "bg-gray-100 text-gray-600"}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${estadoCreditoStyle(r.status_credit)}`}>
                         {r.status_credit}
                       </span>
                     </TableCell>

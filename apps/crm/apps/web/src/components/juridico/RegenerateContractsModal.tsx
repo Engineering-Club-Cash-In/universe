@@ -2,6 +2,11 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import {
+	ETIQUETA_PAQUETE_CARTAS,
+	esCartaOPaquete,
+	PAQUETE_CARTAS,
+} from "server/src/lib/paquete-cartas";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,10 +49,27 @@ export function RegenerateContractsModal({
 	const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
 	const [newDate, setNewDate] = useState<Date | undefined>(new Date());
 
-	// Obtener tipos únicos de contratos
+	// Tipos únicos de contratos. Las cartas —el paquete o, en oportunidades de
+	// antes de unirlas, cada carta suelta— son una sola opción: se regeneran
+	// todas juntas en un documento. Ofrecerlas por separado haría creer que se
+	// puede rehacer una sola, y el paquete nuevo reemplazaría entero al anterior.
 	const uniqueContractTypes = Array.from(
-		new Map(contracts.map((c) => [c.contractType, c])).values(),
+		new Map(
+			contracts.map((c) =>
+				esCartaOPaquete(c.contractType)
+					? [
+							PAQUETE_CARTAS,
+							{
+								...c,
+								contractType: PAQUETE_CARTAS,
+								contractName: ETIQUETA_PAQUETE_CARTAS,
+							},
+						]
+					: [c.contractType, c],
+			),
+		).values(),
 	);
+	const incluyeCartas = selectedTypes.includes(PAQUETE_CARTAS);
 
 	const handleToggleType = (contractType: string) => {
 		setSelectedTypes((prev) =>
@@ -165,6 +187,14 @@ export function RegenerateContractsModal({
 						{selectedTypes.length > 0 && (
 							<p className="text-muted-foreground text-xs">
 								{selectedTypes.length} tipo(s) seleccionado(s)
+							</p>
+						)}
+
+						{incluyeCartas && (
+							<p className="rounded-md border border-blue-200 bg-blue-50 p-2 text-blue-900 text-xs dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300">
+								Las cartas se regeneran todas juntas, en un solo documento con
+								un enlace por firmante. Reemplazan a las cartas anteriores de
+								esta oportunidad.
 							</p>
 						)}
 					</div>

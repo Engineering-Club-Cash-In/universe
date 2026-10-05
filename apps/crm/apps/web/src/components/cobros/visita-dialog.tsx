@@ -138,8 +138,16 @@ interface VisitaDialogProps {
 	/** Si viene, se registra el resultado de esa visita (no se programa otra). */
 	programada?: VisitaProgramadaParaCompletar | null;
 	direcciones: DireccionesCliente;
-	/** Cuotas vencidas × cuota + mora: lo que paga un «Pago total». */
+	/**
+	 * Lo vencido (saldo real de las cuotas vencidas + la mora de hoy): lo que
+	 * paga un «Pago total».
+	 */
 	deudaVencida: number;
+	/**
+	 * Mora proporcional: cuánto sube por día (null = no se anuncia). El monto
+	 * de hoy cambia mañana, y el asesor lo tiene que saber al cobrar.
+	 */
+	incrementoDiarioMora?: string | null;
 	/** Por qué no se puede registrar un convenio (null = sí se puede). */
 	convenioBloqueo?: string | null;
 	/** En B4 se puede comparar con las ubicaciones clave del GPS (CB-119). */
@@ -184,6 +192,7 @@ function FormularioVisita({
 	programada,
 	direcciones,
 	deudaVencida,
+	incrementoDiarioMora = null,
 	convenioBloqueo = null,
 	bucketNumero,
 	vehicleId,
@@ -554,6 +563,13 @@ function FormularioVisita({
 		else registrar.mutate();
 	};
 
+	const notaMoraDiaria = incrementoDiarioMora ? (
+		<p className="text-orange-700 text-xs dark:text-orange-400">
+			La mora sube alrededor de Q{incrementoDiarioMora} por día: si el pago se
+			hace otro día, el monto cambia.
+		</p>
+	) : null;
+
 	// Respaldo: si el caso no trae cuotas o mora no hay de dónde calcular el
 	// monto, y se teclea.
 	const campoMontoManual = (
@@ -892,8 +908,9 @@ function FormularioVisita({
 												</span>
 											</div>
 											<p className="text-muted-foreground text-xs">
-												Total de lo vencido: cuotas vencidas más mora.
+												Total de lo vencido: cuotas vencidas más la mora de hoy.
 											</p>
+											{notaMoraDiaria}
 										</>
 									) : (
 										campoMontoManual
@@ -943,6 +960,7 @@ function FormularioVisita({
 											))}
 										</div>
 									</div>
+									{hayDeuda && notaMoraDiaria}
 									{hayDeuda ? (
 										<dl className="space-y-1 text-sm">
 											<div className="flex justify-between gap-2">

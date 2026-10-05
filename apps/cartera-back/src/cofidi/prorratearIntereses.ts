@@ -53,8 +53,16 @@ export function prorratearIntereses(input: ProrratearInput): ProrratearOutput {
   const ultimoDiaMes = new Date(
     Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth() + 1, 0)
   ).getUTCDate();
-  const fraccionAntes = new Big(diaCorte).div(ultimoDiaMes);
-  const fraccionDespues = new Big(1).minus(fraccionAntes);
+  // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes, `ultimoDiaMes - diaCorte`
+  //    da 0 y la ventana "después" pesaría cero — el comprador se quedaría sin interés
+  //    del mes y el vendedor (CUBE) se lo llevaría completo. Le garantizamos 1 día.
+  //    Mismo piso que routers/cofidi.ts, cofidi/prorrateoPciInteres.ts,
+  //    controllers/investor.ts y utils/functions/diasParticipacion.ts.
+  //    Fuera de ese borde el resultado es idéntico al cálculo anterior
+  //    ((u−d)/u ≡ 1 − d/u), y las dos fracciones siguen sumando exactamente 1.
+  const diasDespues = Math.max(1, ultimoDiaMes - diaCorte);
+  const fraccionDespues = new Big(diasDespues).div(ultimoDiaMes);
+  const fraccionAntes = new Big(1).minus(fraccionDespues);
 
   const invCube = inversionistas.find((i) =>
     i.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")

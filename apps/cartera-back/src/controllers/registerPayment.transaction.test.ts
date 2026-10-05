@@ -167,7 +167,16 @@ mock.module("../utils/withAuditContext", () => ({
   withCapitalContext: mock(),
   setCapitalSource: mock(),
 }));
-mock.module("./latefee", () => ({ updateMoraEnTx }));
+// Merge con develop: el registro (y levantarRecuperacion) importan más cosas
+// de latefee; las que no son el foco de esta prueba quedan como dobles inertes.
+mock.module("./latefee", () => ({
+  updateMoraEnTx,
+  desactivarMoraSiCreditoAlDia: mock(async () => ({ desactivada: false })),
+  cuotasParaPendienteDeCreditos: mock(async () => new Map()),
+  hoyGuatemala: () => new Date(2026, 9, 5),
+  contarCuotasVencidasReales: mock(async () => 0),
+  STATUS_EN_RECUPERACION: "EN_RECUPERACION",
+}));
 mock.module("./payments", () => ({
   insertPagosCreditoInversionistas: mock(),
   insertPagosCreditoInversionistasV2: mock(),

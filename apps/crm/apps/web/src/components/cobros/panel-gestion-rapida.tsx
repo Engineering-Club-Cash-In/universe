@@ -14,6 +14,10 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { ContactoModal } from "@/components/contacto-modal";
+import {
+	debeAnunciarCrecimientoMora,
+	hayIncrementoMora,
+} from "@/lib/cobros/plantillas-mensajes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -72,6 +76,15 @@ interface CasoPanel {
 	asesor?: { nombre?: string | null; telefono?: string | null } | null;
 	montoFinanciado?: string | number | null;
 	creditType?: string | null;
+	// Mora proporcional (develop): el saldo real y cuánto sube por día, como los
+	// usa la ficha. Sin estos datos las plantillas que los anuncian se bloquean.
+	montoAdeudado?: string | null;
+	expectativaMora?: string | null;
+	expectativaMoraDiaria?: string | null;
+	incrementoDiarioMora?: string | null;
+	incrementoMaximoMensualMora?: string | null;
+	aseguradora?: string | null;
+	cabinaSeguro?: string | null;
 }
 
 interface ContactoPanel {
@@ -287,6 +300,20 @@ export function PanelGestionRapida({
 			: Number(caso?.montoEnMora ?? 0) +
 				Number(caso?.cuotasVencidas ?? 0) * Number(caso?.cuotaMensual ?? 0);
 
+	// Los mismos datos de mora que la ficha le pasa a ContactoModal: el saldo
+	// real del server (parciales y recibos recortados + mora) y el crecimiento
+	// diario de la mora proporcional. Vacío = la modal bloquea las plantillas
+	// que los anuncian, en vez de mandar un monto inventado.
+	const datosMoraPlantillas = {
+		montoAdeudado: caso?.montoAdeudado || "",
+		expectativaMora: caso?.expectativaMora || "",
+		expectativaMoraDiaria: caso?.expectativaMoraDiaria || "",
+		incrementoDiarioMora: caso?.incrementoDiarioMora || "",
+		incrementoMaximoMensualMora: caso?.incrementoMaximoMensualMora || "",
+		aseguradora: caso?.aseguradora || "",
+		cabinaSeguro: caso?.cabinaSeguro || "",
+	};
+
 	const telefonos = String(caso?.telefonoPrincipal ?? "")
 		.split(",")
 		.map((t) => t.trim())
@@ -374,6 +401,22 @@ export function PanelGestionRapida({
 								</div>
 								<p className="text-muted-foreground text-xs">Total a pagar</p>
 								<p className="font-bold text-2xl">{money(totalMes)}</p>
+								{/* Mora proporcional: el monto de hoy sube cada día (mismo
+								    criterio y texto que la ficha). */}
+								{Number(caso.cuotaConvenio ?? 0) <= 0 &&
+									debeAnunciarCrecimientoMora({
+										montoEnMora: caso.montoEnMora,
+										incrementoDiarioMora: caso.incrementoDiarioMora,
+										incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora,
+									}) && (
+										<p className="mt-1 text-orange-700 text-xs dark:text-orange-400">
+											{hayIncrementoMora(caso.incrementoDiarioMora)
+												? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`
+												: "Va a seguir subiendo"}
+											{hayIncrementoMora(caso.incrementoMaximoMensualMora) &&
+												`, y puede aumentar hasta Q${caso.incrementoMaximoMensualMora} más en los próximos 30 días`}
+										</p>
+									)}
 								<div className="mt-2 grid grid-cols-2 gap-3">
 									<Dato
 										label="Monto en mora"
@@ -476,7 +519,7 @@ export function PanelGestionRapida({
 												).toLocaleString()}
 												cuotasAtraso={caso.cuotasVencidas ?? 0}
 												estadoMora={caso.estadoMora || undefined}
-												montoAdeudado={money(totalMes).replace("Q", "")}
+												{...datosMoraPlantillas}
 												fechaPago={String(caso.diaPagoMensual || 15)}
 												fechaInicio={caso.fechaInicio || null}
 												nombreAsesor={caso.asesor?.nombre || ""}
@@ -521,7 +564,7 @@ export function PanelGestionRapida({
 												).toLocaleString()}
 												cuotasAtraso={caso.cuotasVencidas ?? 0}
 												estadoMora={caso.estadoMora || undefined}
-												montoAdeudado={money(totalMes).replace("Q", "")}
+												{...datosMoraPlantillas}
 												fechaPago={String(caso.diaPagoMensual || 15)}
 												fechaInicio={caso.fechaInicio || null}
 												nombreAsesor={caso.asesor?.nombre || ""}

@@ -16,6 +16,12 @@ import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
+import {
+	COFIRMANTE_BANK_STATEMENT_HELP,
+	COFIRMANTE_BANK_STATEMENT_OPTION,
+	getManualOpportunityDocumentFields,
+	type ManualOpportunityDocumentType,
+} from "@/lib/manual-opportunity-document";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -105,7 +111,7 @@ export function OpportunityDocumentUpload({
 }: OpportunityDocumentUploadProps) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [documentType, setDocumentType] = useState<
-		OpportunityDocumentType | ""
+		ManualOpportunityDocumentType | ""
 	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 
@@ -131,7 +137,8 @@ export function OpportunityDocumentUpload({
 
 	// Crear opciones para el combobox
 	const documentOptions = useMemo(() => {
-		const options: { value: OpportunityDocumentType; label: string }[] = [];
+		const options: { value: ManualOpportunityDocumentType; label: string }[] =
+			[];
 		for (const [_category, types] of Object.entries(documentCategories)) {
 			for (const type of types) {
 				const typedType = type as OpportunityDocumentType;
@@ -142,13 +149,14 @@ export function OpportunityDocumentUpload({
 				});
 			}
 		}
+		options.push(COFIRMANTE_BANK_STATEMENT_OPTION);
 		return options;
 	}, [uploadedTypes]);
 
 	const uploadMutation = useMutation({
 		mutationFn: async (data: {
 			file: File;
-			documentType: OpportunityDocumentType;
+			documentType: ManualOpportunityDocumentType;
 		}) => {
 			const { key } = await uploadFileToR2WithRetry(data.file, {
 				resourceType: "opportunity_document",
@@ -157,7 +165,7 @@ export function OpportunityDocumentUpload({
 
 			return await client.uploadOpportunityDocument({
 				opportunityId,
-				documentType: data.documentType,
+				...getManualOpportunityDocumentFields(data.documentType),
 				file: {
 					name: data.file.name,
 					type: data.file.type,
@@ -266,7 +274,9 @@ export function OpportunityDocumentUpload({
 								options={documentOptions}
 								value={documentType}
 								onChange={(value) =>
-									setDocumentType((value as OpportunityDocumentType | "") ?? "")
+									setDocumentType(
+										(value as ManualOpportunityDocumentType | "") ?? "",
+									)
 								}
 								placeholder="Buscar tipo de documento..."
 								width="full"
@@ -308,6 +318,12 @@ export function OpportunityDocumentUpload({
 								Este PDF incluye los 3 meses de estados de cuenta
 							</Label>
 						</div>
+					)}
+
+					{documentType === COFIRMANTE_BANK_STATEMENT_OPTION.value && (
+						<p className="text-muted-foreground text-sm">
+							{COFIRMANTE_BANK_STATEMENT_HELP}
+						</p>
 					)}
 
 					{isVehicleDocWithoutVehicle && (
@@ -381,6 +397,14 @@ export function OpportunityDocumentUpload({
 										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
 										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
+									{doc.documentType === "other" &&
+										doc.description?.startsWith(
+											"Estados de cuenta del cofirmante",
+										) && (
+											<p className="text-muted-foreground text-xs">
+												{doc.description}
+											</p>
+										)}
 								</div>
 								<div className="flex items-center gap-2">
 									{doc.url && (

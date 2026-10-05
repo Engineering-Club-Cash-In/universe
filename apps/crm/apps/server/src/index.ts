@@ -105,6 +105,7 @@ import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { gpsCatalogoBucketRouter } from "./routers/gps-catalogo-bucket";
 import { gpsEventosRouter } from "./routers/gps-eventos-router";
 import { gpsIntegracionRouter } from "./routers/gps-integracion";
 import {
@@ -119,6 +120,7 @@ import { inmovilizacionReactivacionLlamadaRouter } from "./routers/inmovilizacio
 import { inmovilizacionUnidadRouter } from "./routers/inmovilizacion-unidad";
 import { investigacionesRedesCobrosRouter } from "./routers/investigaciones-redes-cobros";
 import { investmentsRouter } from "./routers/investments";
+import { misPendientesInmovilizacionRouter } from "./routers/mis-pendientes-inmovilizacion";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
 import {
@@ -331,6 +333,8 @@ const handler = new RPCHandler(
 		tareasCobrosRouter,
 		partnerTrackerRouter,
 		buroInternoProcedures,
+		misPendientesInmovilizacionRouter,
+		gpsCatalogoBucketRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

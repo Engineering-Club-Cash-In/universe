@@ -32,6 +32,39 @@ export function resumenAplicacionPago(pago: PagoRespaldo): string | null {
 	return partes.length > 0 ? partes.join(" · ") : null;
 }
 
+/** Aplicación del pago en forma de cuadrícula (rubro a la izquierda, monto a la derecha). Null si no hay datos. */
+export function AplicacionPagoDetalle({ pago }: { pago: PagoRespaldo }) {
+	const rubros = pago.aplicacion ?? [];
+	if (pago.numeroCuota == null && rubros.length === 0) return null;
+	return (
+		<div className="basis-full space-y-1.5 pl-6 text-xs">
+			<p className="font-medium text-muted-foreground uppercase tracking-wide">
+				Aplicado a
+				{pago.numeroCuota != null && (
+					<span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-foreground normal-case tracking-normal">
+						Cuota {pago.numeroCuota}
+					</span>
+				)}
+			</p>
+			{rubros.length > 0 && (
+				<dl className="grid grid-cols-1 gap-x-6 gap-y-0.5 sm:grid-cols-2">
+					{rubros.map((r) => (
+						<div
+							className="flex items-baseline justify-between gap-2 border-b border-dashed py-0.5"
+							key={r.rubro}
+						>
+							<dt className="text-muted-foreground">{r.rubro}</dt>
+							<dd className="font-medium tabular-nums">
+								{formatQuetzales(r.monto)}
+							</dd>
+						</div>
+					))}
+				</dl>
+			)}
+		</div>
+	);
+}
+
 /** Aviso cuando contabilidad todavía no validó el pago en cartera-back. */
 export function PagoPendienteBadge({
 	validacion,

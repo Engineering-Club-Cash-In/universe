@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
 import type { convenioDecisionRouter } from "../../../server/src/routers/convenio-decision";
+import type { gpsCatalogoBucketRouter } from "../../../server/src/routers/gps-catalogo-bucket";
 import type { gpsEventosRouter } from "../../../server/src/routers/gps-eventos-router";
 import type { gpsIntegracionRouter } from "../../../server/src/routers/gps-integracion";
 import type {
@@ -19,6 +20,7 @@ import type {
 import type { inmovilizacionReactivacionLlamadaRouter } from "../../../server/src/routers/inmovilizacion-reactivacion-llamada";
 import type { inmovilizacionUnidadRouter } from "../../../server/src/routers/inmovilizacion-unidad";
 import type { investigacionesRedesCobrosRouter } from "../../../server/src/routers/investigaciones-redes-cobros";
+import type { misPendientesInmovilizacionRouter } from "../../../server/src/routers/mis-pendientes-inmovilizacion";
 import type { pagaloGrupoActivoRouter } from "../../../server/src/routers/pagalo-grupo-activo";
 import type { pagaloLinkActionsRouter } from "../../../server/src/routers/pagalo-link-actions";
 import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo-supervision";
@@ -125,3 +127,13 @@ type MergedRouter = AppRouter &
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 
 export const orpc = createTanstackQueryUtils(client);
+
+// Aparte de MergedRouter: ese tipo está en el límite donde TS7056 trunca lo
+// inferido, y un miembro más rompe otros archivos. Mismo link, tipo propio.
+export const orpcAparte = createTanstackQueryUtils(
+	createORPCClient<
+		RouterClient<
+			typeof misPendientesInmovilizacionRouter & typeof gpsCatalogoBucketRouter
+		>
+	>(link),
+);

@@ -15,6 +15,7 @@ import {
 	UserCheck,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { MisPendientesInmovilizacion } from "@/components/cobros/mis-pendientes-inmovilizacion";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -651,6 +652,17 @@ function MiDiaPage() {
 					proteja su recuperación.
 				</p>
 			</div>
+
+			{/* Trámites de apagado/reactivación que esperan al asesor. */}
+			<MisPendientesInmovilizacion
+				onVerCaso={(sifco) =>
+					navigate({
+						to: "/cobros/$id",
+						params: { id: sifco },
+						search: { tipo: "caso", seccion: "inmovilizacion" },
+					})
+				}
+			/>
 
 			{/* Agenda de hoy — resumen en vivo; click en un chip filtra y lleva a
 			    la tabla "Casos que requieren atención hoy" más abajo. */}

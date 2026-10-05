@@ -30,11 +30,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { orpc } from "@/utils/orpc";
 import {
+	AplicacionPagoDetalle,
 	formatFechaPago,
 	formatFechaPrometida,
 	formatQuetzales,
 	PagoPendienteBadge,
-	resumenAplicacionPago,
 } from "./inmovilizacion-respaldo";
 import {
 	UbicacionGpsBloque,
@@ -61,6 +61,7 @@ export function SolicitarInmovilizacionModal({
 	convenioBloqueo = null,
 	borrador = null,
 	onBorradorChange,
+	precargaApagado = null,
 }: {
 	accion: "apagado" | "reactivacion";
 	casoCobroId: string;
@@ -76,6 +77,8 @@ export function SolicitarInmovilizacionModal({
 	/** Lo ya escrito, para que ir a crear la promesa/convenio no lo pierda. */
 	borrador?: BorradorReactivacion | null;
 	onBorradorChange?: (borrador: BorradorReactivacion) => void;
+	/** Apagado: motivos y detalle de la solicitud rechazada, para corregirla. */
+	precargaApagado?: PrecargaApagado | null;
 }) {
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
@@ -83,6 +86,7 @@ export function SolicitarInmovilizacionModal({
 				{accion === "apagado" ? (
 					<FormularioApagado
 						casoCobroId={casoCobroId}
+						precarga={precargaApagado}
 						onCerrar={() => onOpenChange(false)}
 						onSolicitado={onSolicitado}
 					/>
@@ -110,6 +114,8 @@ export type BorradorReactivacion = {
 	detalle: string;
 };
 
+export type PrecargaApagado = { motivos: string[]; detalle: string };
+
 type PropsFormulario = {
 	casoCobroId: string;
 	onCerrar: () => void;
@@ -120,9 +126,10 @@ function FormularioApagado({
 	casoCobroId,
 	onCerrar,
 	onSolicitado,
-}: PropsFormulario) {
-	const [motivos, setMotivos] = useState<string[]>([]);
-	const [detalle, setDetalle] = useState("");
+	precarga,
+}: PropsFormulario & { precarga?: PrecargaApagado | null }) {
+	const [motivos, setMotivos] = useState<string[]>(precarga?.motivos ?? []);
+	const [detalle, setDetalle] = useState(precarga?.detalle ?? "");
 	const [direccion, setDireccion] = useState("");
 	const [enlace, setEnlace] = useState("");
 	const gps = useUbicacionInmovilizacion(casoCobroId, "solicitud");
@@ -396,37 +403,40 @@ function FormularioReactivacion({
 							)}
 						<div className="space-y-1.5">
 							{pagos.map((p) => (
-								<label
+								// El <label> envuelve solo el radio y el resumen (contenido
+								// de frase); el desglose va fuera: un <dl> dentro de un
+								// <label> no es HTML válido y copiar un monto marcaba el pago.
+								<div
 									className={cn(
-										"flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-sm",
+										"space-y-1 rounded-md border px-3 py-2 text-sm",
 										pagoId === p.pagoId
 											? "border-primary bg-primary/5"
 											: "hover:bg-muted/50",
 									)}
-									htmlFor={`pago-respaldo-${p.pagoId}`}
 									key={p.pagoId}
 								>
-									<input
-										checked={pagoId === p.pagoId}
-										id={`pago-respaldo-${p.pagoId}`}
-										name="pago-respaldo"
-										onChange={() => setPagoId(p.pagoId)}
-										type="radio"
-									/>
-									<span className="font-medium">
-										{formatQuetzales(p.monto)}
-									</span>
-									<span className="text-muted-foreground text-xs">
-										{formatFechaPago(p.fechaPago)}
-										{p.referencia ? ` · ref. ${p.referencia}` : ""}
-									</span>
-									<PagoPendienteBadge validacion={p.validacion} />
-									{resumenAplicacionPago(p) && (
-										<span className="basis-full pl-6 text-muted-foreground text-xs">
-											Aplicado a: {resumenAplicacionPago(p)}
+									<label
+										className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1"
+										htmlFor={`pago-respaldo-${p.pagoId}`}
+									>
+										<input
+											checked={pagoId === p.pagoId}
+											id={`pago-respaldo-${p.pagoId}`}
+											name="pago-respaldo"
+											onChange={() => setPagoId(p.pagoId)}
+											type="radio"
+										/>
+										<span className="font-medium">
+											{formatQuetzales(p.monto)}
 										</span>
-									)}
-								</label>
+										<span className="text-muted-foreground text-xs">
+											{formatFechaPago(p.fechaPago)}
+											{p.referencia ? ` · ref. ${p.referencia}` : ""}
+										</span>
+										<PagoPendienteBadge validacion={p.validacion} />
+									</label>
+									<AplicacionPagoDetalle pago={p} />
+								</div>
 							))}
 						</div>
 					</section>

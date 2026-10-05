@@ -2095,8 +2095,8 @@ export const inmovilizacionUnidadRouter = {
 
 	/**
 	 * Cancela una solicitud abierta. Mientras está `pendiente_aprobacion` solo
-	 * la retira quien la pidió. Un APAGADO ya aprobado lo retira quien puede
-	 * ejecutarlo (mismo acceso que `ejecutarApagado`): si LEGION no lo aplica o
+	 * la retira quien la pidió. Un apagado o una reactivación ya aprobados los
+	 * retira quien puede ejecutarlos (mismo acceso que `ejecutarApagado`): si LEGION no lo aplica o
 	 * ya no corresponde, sin esto la solicitud quedaba `aprobada` para siempre,
 	 * bloqueando nuevas solicitudes del caso y con un recordatorio diario que
 	 * nadie podía cerrar (review de Codex, PR #1807).
@@ -2115,9 +2115,10 @@ export const inmovilizacionUnidadRouter = {
 				.where(eq(inmovilizacionesUnidad.id, input.id))
 				.limit(1);
 
-			const cancelaApagadoAprobado =
-				previa?.accion === "apagado" && previa.estado === "aprobada";
-			if (cancelaApagadoAprobado) {
+			// Apagado o reactivación ya aprobados: si LEGION no lo aplica o ya no
+			// corresponde, sin esto la solicitud quedaba trabada (y bloqueaba otras).
+			const cancelaAprobada = previa?.estado === "aprobada";
+			if (previa && cancelaAprobada) {
 				await assertAccesoCasoCobro(
 					previa.casoCobroId,
 					context.userId,
@@ -2127,10 +2128,13 @@ export const inmovilizacionUnidadRouter = {
 					numeroSifco: previa.numeroCreditoSifco,
 					emailUsuario: context.session.user.email,
 					userRole: context.userRole,
-					accion: "cancelar el apagado aprobado de la unidad",
+					accion:
+						previa.accion === "apagado"
+							? "cancelar el apagado aprobado de la unidad"
+							: "cancelar la reactivación aprobada de la unidad",
 				});
 			}
-			const estadoAnterior = cancelaApagadoAprobado
+			const estadoAnterior = cancelaAprobada
 				? ("aprobada" as const)
 				: ("pendiente_aprobacion" as const);
 
@@ -2142,8 +2146,8 @@ export const inmovilizacionUnidadRouter = {
 						and(
 							eq(inmovilizacionesUnidad.id, input.id),
 							eq(inmovilizacionesUnidad.estado, estadoAnterior),
-							cancelaApagadoAprobado
-								? eq(inmovilizacionesUnidad.accion, "apagado")
+							cancelaAprobada
+								? undefined
 								: eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
 						),
 					)

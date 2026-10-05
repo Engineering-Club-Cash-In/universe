@@ -27,6 +27,7 @@ import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,10 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 								<FileText className="mr-1 h-4 w-4" />
 								Ver Documento
 							</Button>
+							<ReintentoFacturaSeguro
+								opportunityId={opportunityId}
+								disponible={doc.envioAseguradora?.reintentoDisponible}
+							/>
 						</div>
 					</CardContent>
 				</Card>

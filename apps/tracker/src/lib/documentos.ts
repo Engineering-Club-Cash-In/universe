@@ -5,10 +5,9 @@ type CasoConDocumentos = Pick<Caso, "facturaSeguro" | "porcentaje" | "estado">;
 
 /**
  * - `pendiente`: falta subirlo.
- * - `atencion`: se subió pero el envío falló o quedó sin confirmar.
  * - `subido`: no requiere nada del socio.
  */
-export type EstadoDocumento = "pendiente" | "atencion" | "subido";
+export type EstadoDocumento = "pendiente" | "subido";
 
 export interface DocumentoCaso {
 	clave: "factura_seguro";
@@ -24,12 +23,7 @@ export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 		documentos.push({
 			clave: "factura_seguro",
 			nombre: "Factura del seguro",
-			estado:
-				caso.facturaSeguro.envio === null
-					? "pendiente"
-					: factura.tono === "error" || caso.facturaSeguro.sinConfirmar
-						? "atencion"
-						: "subido",
+			estado: caso.facturaSeguro.envio === null ? "pendiente" : "subido",
 		});
 	}
 	return documentos;
@@ -39,7 +33,7 @@ export function tieneDocumentosPendientes(caso: CasoConDocumentos): boolean {
 	return documentosDelCaso(caso).some((d) => d.estado === "pendiente");
 }
 
-export type TonoResumen = "ok" | "pendiente" | "atencion";
+export type TonoResumen = "ok" | "pendiente";
 
 /** Estado general de la tarjeta "Documentos"; `null` si el caso no pide ninguno. */
 export function resumenDocumentos(
@@ -48,9 +42,6 @@ export function resumenDocumentos(
 	if (documentos.length === 0) return null;
 	if (documentos.some((d) => d.estado === "pendiente")) {
 		return { tono: "pendiente", texto: "Documentos pendientes" };
-	}
-	if (documentos.some((d) => d.estado === "atencion")) {
-		return { tono: "atencion", texto: "Revisar envío" };
 	}
 	return { tono: "ok", texto: "Sin documentos pendientes" };
 }

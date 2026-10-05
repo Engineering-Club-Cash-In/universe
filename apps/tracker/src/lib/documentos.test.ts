@@ -11,8 +11,6 @@ const base: Caso["facturaSeguro"] = {
 	motivo: null,
 	subidaAt: null,
 	envio: null,
-	reenviable: false,
-	sinConfirmar: false,
 };
 
 function caso(
@@ -24,80 +22,41 @@ function caso(
 }
 
 describe("documentosDelCaso", () => {
-	test("al 90% sin factura, la factura está pendiente (vendedor o gerente)", () => {
-		for (const c of [caso({ habilitada: true }), caso({ motivo: "La sube el vendedor asignado" })]) {
-			expect(documentosDelCaso(c)).toEqual([
-				{
-					clave: "factura_seguro",
-					nombre: "Factura del seguro",
-					estado: "pendiente",
-				},
-			]);
+	test("al 90% sin factura queda pendiente para vendedor y gerente", () => {
+		for (const c of [caso({ habilitada: true }), caso({ motivo: "La sube el vendedor" })]) {
+			expect(documentosDelCaso(c)[0]?.estado).toBe("pendiente");
 			expect(tieneDocumentosPendientes(c)).toBe(true);
 		}
 	});
 
-	test("subida: enviada, en proceso o sin destinatario no piden nada", () => {
-		for (const envio of ["enviado", "pendiente", "sin_destinatario"] as const) {
-			expect(documentosDelCaso(caso({ envio }))[0]?.estado).toBe("subido");
-		}
-	});
-
-	test("envío sin confirmar: hay que revisarlo, para el vendedor y para el gerente", () => {
-		for (const reenviable of [true, false]) {
-			const c = caso({ envio: "pendiente", sinConfirmar: true, reenviable });
-			expect(documentosDelCaso(c)[0]?.estado).toBe("atencion");
+	test("una factura subida ya no exige acciones en el tracker, incluso si el correo falló", () => {
+		for (const envio of ["enviado", "pendiente", "fallido", "sin_destinatario"] as const) {
+			const c = caso({ envio });
+			expect(documentosDelCaso(c)[0]?.estado).toBe("subido");
 			expect(tieneDocumentosPendientes(c)).toBe(false);
 		}
 	});
 
-	test("subida pero el envío falló: hay que revisarla, no está pendiente", () => {
-		const c = caso({ envio: "fallido", reenviable: true });
-		expect(documentosDelCaso(c)[0]?.estado).toBe("atencion");
-		expect(tieneDocumentosPendientes(c)).toBe(false);
-	});
-
-	test("al 90% ya ganado (flujo normal) sin factura: está pendiente y entra al filtro", () => {
-		expect(tieneDocumentosPendientes(caso({ habilitada: true }, 90, "aprobado"))).toBe(true);
+	test("el caso ganado al 90% conserva el pendiente; fuera de la etapa no pide factura", () => {
 		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
-	});
-
-	test("antes del 90%, perdido o desembolsado sin factura: no pide documentos", () => {
 		expect(documentosDelCaso(caso({}, 85))).toEqual([]);
-		expect(documentosDelCaso(caso({}, 90, "rechazado"))).toEqual([]);
 		expect(documentosDelCaso(caso({}, 100, "aprobado"))).toEqual([]);
-		expect(tieneDocumentosPendientes(caso({}, 85))).toBe(false);
-	});
-
-	test("desembolsado con la factura enviada: se sigue viendo como subida", () => {
-		expect(documentosDelCaso(caso({ envio: "enviado" }, 100, "aprobado"))[0]?.estado).toBe(
-			"subido",
-		);
+		expect(documentosDelCaso(caso({}, 90, "rechazado"))).toEqual([]);
 	});
 });
 
 describe("resumenDocumentos", () => {
-	const doc = (estado: "pendiente" | "atencion" | "subido") => ({
+	const doc = (estado: "pendiente" | "subido") => ({
 		clave: "factura_seguro" as const,
 		nombre: "Factura del seguro",
 		estado,
 	});
 
-	test("un pendiente manda sobre todo lo demás", () => {
-		expect(resumenDocumentos([doc("subido"), doc("atencion"), doc("pendiente")])).toEqual({
+	test("muestra pendientes solo cuando falta un documento", () => {
+		expect(resumenDocumentos([doc("subido"), doc("pendiente")])).toEqual({
 			tono: "pendiente",
 			texto: "Documentos pendientes",
 		});
-	});
-
-	test("sin pendientes pero con un envío fallido: revisar envío", () => {
-		expect(resumenDocumentos([doc("subido"), doc("atencion")])).toEqual({
-			tono: "atencion",
-			texto: "Revisar envío",
-		});
-	});
-
-	test("todo subido: sin documentos pendientes; sin documentos: no hay tarjeta", () => {
 		expect(resumenDocumentos([doc("subido")])).toEqual({
 			tono: "ok",
 			texto: "Sin documentos pendientes",

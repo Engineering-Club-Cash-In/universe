@@ -19,10 +19,6 @@ const ESTILO_RESUMEN: Record<TonoResumen, { clase: string; punto: string }> = {
 		clase: "bg-amber-50 text-amber-700 ring-amber-600/20",
 		punto: "bg-amber-500",
 	},
-	atencion: {
-		clase: "bg-amber-50 text-amber-700 ring-amber-600/20",
-		punto: "bg-amber-500",
-	},
 };
 
 function EstadoResumen({ tono, texto }: { tono: TonoResumen; texto: string }) {

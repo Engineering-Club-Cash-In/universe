@@ -30,8 +30,6 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 		motivo: null,
 		subidaAt: null,
 		envio: null,
-		reenviable: false,
-		sinConfirmar: false,
 	},
 	...parcial,
 });

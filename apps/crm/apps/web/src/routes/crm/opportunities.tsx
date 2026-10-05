@@ -53,6 +53,7 @@ import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -4981,6 +4982,10 @@ function DocumentsManager({
 										</div>
 									</div>
 								<div className="flex flex-shrink-0 items-center gap-2">
+									<ReintentoFacturaSeguro
+										opportunityId={opportunityId}
+										disponible={doc.envioAseguradora?.reintentoDisponible}
+									/>
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&
 										integrityStatusResolved &&

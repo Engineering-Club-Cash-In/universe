@@ -9,20 +9,18 @@ export const MIME_FACTURA = [
 export const EXTENSIONES_FACTURA = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
 export const TAMANO_MAXIMO_FACTURA = 10 * 1024 * 1024;
 
-export type TonoFactura = "accion" | "ok" | "proceso" | "error" | "info";
+export type TonoFactura = "accion" | "ok" | "info";
 
 export interface VistaFactura {
 	tono: TonoFactura;
 	titulo: string;
 	texto: string;
-	accion: "subir" | "reenviar" | null;
-	/** Texto del botón de reenvío, según por qué no salió. */
-	etiquetaReenvio: string | null;
+	accion: "subir" | null;
 }
 
 /**
  * Qué muestra la sección "Factura del seguro" del caso. La decisión de fondo
- * (quién puede subir o reenviar) la toma el servidor; aquí solo se traduce.
+ * (quién puede subir) la toma el servidor; aquí solo se traduce.
  * `null` = el caso todavía no llega a esa etapa y la sección no se muestra.
  */
 export function vistaFacturaSeguro(
@@ -34,67 +32,25 @@ export function vistaFacturaSeguro(
 	if (f.envio === "enviado") {
 		return {
 			tono: "ok",
-			titulo: "Factura enviada a la aseguradora",
-			texto: `El correo con la factura fue enviado a la aseguradora para iniciar la póliza.${subida}`,
+			titulo: "Factura enviada",
+			texto: `La factura fue enviada.${subida}`,
 			accion: null,
-			etiquetaReenvio: null,
-		};
-	}
-	if (f.envio === "pendiente" && !f.sinConfirmar) {
-		return {
-			tono: "proceso",
-			titulo: "Enviando la factura a la aseguradora",
-			texto: `El envío está en proceso.${subida}`,
-			accion: null,
-			etiquetaReenvio: null,
-		};
-	}
-	// Un envío que quedó a medias pudo haber salido: no se afirma que falló.
-	// Tampoco se promete que el reintento no duplique: Resend solo lo evita
-	// durante 24 h. El gerente también lo ve, aunque no pueda reintentarlo.
-	if (f.envio === "pendiente") {
-		return {
-			tono: "info",
-			titulo: "No pudimos confirmar el envío",
-			texto: f.reenviable
-				? `La factura está guardada, pero no pudimos confirmar si el correo llegó a la aseguradora. Puedes reintentar el envío.${subida}`
-				: `La factura está guardada, pero no pudimos confirmar si el correo llegó a la aseguradora. El vendedor asignado puede reintentar el envío.${subida}`,
-			accion: f.reenviable ? "reenviar" : null,
-			etiquetaReenvio: "Reintentar envío",
-		};
-	}
-	// Sin destinatarios configurados no es un fallo del envío: falta que Club
-	// Cash In configure el correo de la aseguradora.
-	if (f.envio === "sin_destinatario") {
-		return {
-			tono: "info",
-			titulo: "Factura recibida",
-			texto: f.reenviable
-				? `El envío a la aseguradora está pendiente de configuración por parte de Club Cash In. Cuando esté listo, reintenta el envío.${subida}`
-				: `El envío a la aseguradora está pendiente de configuración por parte de Club Cash In.${subida}`,
-			accion: f.reenviable ? "reenviar" : null,
-			etiquetaReenvio: "Reintentar envío",
 		};
 	}
 	if (f.envio !== null) {
 		return {
-			tono: "error",
-			titulo: "La factura no se pudo enviar a la aseguradora",
-			texto: f.reenviable
-				? `La factura está guardada; reenvíala para que llegue a la aseguradora.${subida}`
-				: `La factura está guardada; el vendedor asignado puede reenviarla.${subida}`,
-			accion: f.reenviable ? "reenviar" : null,
-			etiquetaReenvio: "Reenviar a la aseguradora",
+			tono: "info",
+			titulo: "Factura recibida",
+			texto: `La factura fue recibida.${subida}`,
+			accion: null,
 		};
 	}
 	if (f.habilitada) {
 		return {
 			tono: "accion",
 			titulo: "Sube la factura del seguro",
-			texto:
-				"Se enviará automáticamente a la aseguradora para iniciar la póliza. Una vez enviada no se puede reemplazar.",
+			texto: "Revisa que sea la factura correcta: después de subirla no se puede reemplazar.",
 			accion: "subir",
-			etiquetaReenvio: null,
 		};
 	}
 	// En formalización final sin factura: quien no puede subirla (el gerente)
@@ -110,7 +66,6 @@ export function vistaFacturaSeguro(
 			titulo: "Factura del seguro pendiente",
 			texto: f.motivo ?? "La sube el vendedor asignado.",
 			accion: null,
-			etiquetaReenvio: null,
 		};
 	}
 	return null;

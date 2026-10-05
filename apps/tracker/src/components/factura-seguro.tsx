@@ -6,7 +6,6 @@ import {
 	FileUp,
 	Info,
 	Loader2,
-	RotateCw,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -27,14 +26,6 @@ const ESTILO: Record<TonoFactura, { caja: string; icono: typeof Info }> = {
 		caja: "border-emerald-200 bg-emerald-50 text-emerald-900",
 		icono: CheckCircle2,
 	},
-	proceso: {
-		caja: "border-slate-200 bg-slate-50 text-slate-800",
-		icono: Loader2,
-	},
-	error: {
-		caja: "border-amber-200 bg-amber-50 text-amber-900",
-		icono: AlertTriangle,
-	},
 	info: { caja: "border-slate-200 bg-slate-50 text-slate-800", icono: Info },
 };
 
@@ -42,17 +33,9 @@ type Envio = Awaited<ReturnType<typeof client.subirFacturaSeguro>>["envio"];
 
 function avisarResultado(envio: Envio) {
 	if (envio === "enviado") {
-		toast.success("Factura enviada a la aseguradora");
-	} else if (envio === "pendiente") {
-		toast.info("Factura guardada; el envío a la aseguradora está en proceso");
-	} else if (envio === "sin_destinatario") {
-		toast.info(
-			"Recibimos la factura. El envío a la aseguradora está pendiente de configuración por parte de Club Cash In.",
-		);
+		toast.success("Factura enviada");
 	} else {
-		toast.warning(
-			"La factura quedó guardada, pero no se pudo enviar a la aseguradora. Puedes reenviarla.",
-		);
+		toast.info("Factura recibida");
 	}
 }
 
@@ -83,23 +66,11 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 		},
 	});
 
-	const reenviar = useMutation({
-		mutationFn: () => client.reenviarFacturaSeguro({ opportunityId: caso.id }),
-		onSuccess: ({ envio }) => {
-			avisarResultado(envio);
-			refrescar();
-		},
-		onError: (error) => {
-			toast.error(error.message || "No se pudo reenviar la factura");
-			refrescar();
-		},
-	});
-
 	const vista = vistaFacturaSeguro(caso);
 	if (!vista) return null;
 
 	const { caja, icono: Icono } = ESTILO[vista.tono];
-	const ocupado = subir.isPending || reenviar.isPending;
+	const ocupado = subir.isPending;
 
 	const verFactura = async () => {
 		// La pestaña se abre antes de pedir el link: abierta después de esperar
@@ -150,7 +121,6 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 							<Icono
 								className={cn(
 									"h-3.5 w-3.5 shrink-0",
-									vista.tono === "proceso" && "animate-spin",
 								)}
 							/>
 							<p className="font-medium text-xs">{vista.titulo}</p>
@@ -202,7 +172,7 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 							</p>
 							<p className="flex items-start gap-2 text-amber-800 text-xs">
 								<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-								Una vez enviada a la aseguradora no se puede reemplazar. Revisa
+								Una vez subida no se puede reemplazar. Revisa
 								que sea la factura correcta.
 							</p>
 							<div className="flex flex-wrap gap-2">
@@ -217,9 +187,7 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 									) : (
 										<FileUp className="h-4 w-4" />
 									)}
-									{subir.isPending
-										? "Subiendo y enviando..."
-										: "Subir y enviar"}
+									{subir.isPending ? "Subiendo..." : "Subir factura"}
 								</button>
 								<button
 									type="button"
@@ -235,21 +203,6 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 				</div>
 			)}
 
-			{vista.accion === "reenviar" && (
-				<button
-					type="button"
-					disabled={ocupado}
-					onClick={() => reenviar.mutate()}
-					className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 font-medium text-sm text-white transition hover:bg-slate-800 disabled:opacity-60"
-				>
-					{reenviar.isPending ? (
-						<Loader2 className="h-4 w-4 animate-spin" />
-					) : (
-						<RotateCw className="h-4 w-4" />
-					)}
-					{reenviar.isPending ? "Enviando..." : vista.etiquetaReenvio}
-				</button>
-			)}
 		</div>
 	);
 }

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
 import {
@@ -426,7 +427,11 @@ export function OpportunityDocumentUpload({
 										);
 									})()}
 								</div>
-								<div className="flex items-center gap-2">
+								<div className="flex flex-wrap items-center gap-2">
+									<ReintentoFacturaSeguro
+										opportunityId={opportunityId}
+										disponible={doc.envioAseguradora?.reintentoDisponible}
+									/>
 									{doc.url && (
 										<Button variant="outline" size="sm" asChild>
 											<a

@@ -88,7 +88,6 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
-import { envioSinConfirmar } from "../lib/factura-seguro";
 import {
 	envioSinConfirmar,
 	puedeReenviarFacturaSeguro,
@@ -6362,17 +6361,6 @@ export const crmRouter = {
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
-						// Un `pendiente` pasado el plazo no está "en proceso": quedó sin
-						// confirmar (misma regla que el tracker).
-						envioAseguradora: envioAseguradora && {
-							estado: envioAseguradora.estado,
-							aseguradora: envioAseguradora.aseguradora,
-							enviadoAt: envioAseguradora.enviadoAt,
-							sinConfirmar: envioSinConfirmar({
-								envio: envioAseguradora.estado,
-								envioActualizadoAt: envioAseguradora.actualizadoAt,
-							}),
-						},
 						url,
 					};
 				}),

@@ -141,6 +141,11 @@ export interface AccesoPortalOtorgado {
  * O sea que "no se provisionó nada" acá es el ÉXITO del control, no un apretón
  * intrascendente. Agregarlo a esta lista no ahorraría ruido: apagaría la única
  * alarma que avisa que alguien intentó desviar una contraseña ya aprobada.
+ *
+ * Tampoco está su hermano `correo_aprobado_requerido`, por la misma razón: la
+ * fila pasó a ser PERSONA con correo (p. ej. era empresa y le borraron el
+ * representante) entre que el diálogo se pintó —sin correo que aprobar— y el
+ * clic. Es la misma carrera, contra el mismo control, movida por otra forma.
  */
 export const MOTIVOS_SIN_EFECTO: readonly string[] = [
 	"inversionista_no_encontrado",

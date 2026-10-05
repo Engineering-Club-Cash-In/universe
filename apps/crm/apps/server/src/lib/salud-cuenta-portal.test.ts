@@ -263,6 +263,23 @@ describe("exigeConstancia", () => {
 		).toBe(true);
 	});
 
+	// El hermano del veto: la fila pasó a ser persona con correo (era empresa)
+	// entre que el diálogo se pintó —sin correo que aprobar— y el clic. Misma
+	// carrera, mismo control: no es un no-op repetible como la empresa, así que
+	// también deja fila.
+	test("el veto por fila que pasó a persona con correo DEJA fila, aunque no provisione nada", () => {
+		expect(
+			exigeConstancia(
+				otorgado({
+					estado: "fallo",
+					usuarioEmail: null,
+					correo: sinCorreo,
+					motivo: "correo_aprobado_requerido",
+				}),
+			),
+		).toBe(true);
+	});
+
 	// El candado explícito: fija la lista entera. Agregar el motivo del veto
 	// —que es como se apagaría la alarma— pone esto en rojo con el nombre a la
 	// vista, en vez de pasar en verde por ser "un motivo más sin efecto".
@@ -274,6 +291,7 @@ describe("exigeConstancia", () => {
 			"representante_no_encontrado_en_cartera",
 		]);
 		expect(MOTIVOS_SIN_EFECTO).not.toContain("correo_aprobado_no_coincide");
+		expect(MOTIVOS_SIN_EFECTO).not.toContain("correo_aprobado_requerido");
 	});
 
 	// El timeout NO es un "no pasó nada": abortamos la espera, pero auth-google

@@ -824,6 +824,10 @@ export const investorDocumentsRouter = {
 			// empresa: la empresa contesta igual en cada apretón para siempre, y un
 			// veto solo ocurre si de verdad cambió el destinatario.
 			//
+			// Lo mismo su hermano `fallo/correo_aprobado_requerido`: la fila pasó
+			// a ser persona con correo (era empresa) y el diálogo no había enseñado
+			// ninguno. Ahí `correoAprobado` queda en null, y ese null ES el dato.
+			//
 			// Cae del lado correcto SOLO porque `MOTIVOS_SIN_EFECTO` es una lista
 			// blanca y el motivo del veto no está en ella. Es deliberado y está
 			// anotado allá: agregarlo apagaría la única alarma de la carrera.

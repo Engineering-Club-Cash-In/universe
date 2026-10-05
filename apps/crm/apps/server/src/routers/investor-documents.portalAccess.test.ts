@@ -689,6 +689,39 @@ describe("darAccesoPortal", () => {
 		);
 	});
 
+	// El hermano del veto: el diálogo se pintó con la fila como EMPRESA —sin
+	// correo que aprobar, así que la llave viaja ausente— y antes del clic la
+	// fila pasó a persona con correo. Cartera no provisiona nada y contesta
+	// `correo_aprobado_requerido`. Misma carrera: tiene que dejar fila.
+	test("el VETO por fila que pasó a persona con correo DEJA fila en la bitácora", async () => {
+		responderCartera = async () =>
+			desenlace({ estado: "fallo", motivo: "correo_aprobado_requerido" });
+
+		const actual = await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores).toMatchObject({
+			inversionistaId: 7,
+			action: "acceso_portal",
+			performedBy: "usr_operador",
+		});
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "fallo",
+			motivo: "correo_aprobado_requerido",
+			// No se aprobó ningún correo, y eso es justamente lo que el diálogo
+			// enseñaba: la fila como empresa.
+			correoAprobado: null,
+		});
+
+		expect((actual as any).resultados[0].motivo).toBe(
+			"correo_aprobado_requerido",
+		);
+	});
+
 	test("el correo aprobado queda escrito también cuando el acto SÍ ocurrió", async () => {
 		await call(
 			investorDocumentsRouter.darAccesoPortal,

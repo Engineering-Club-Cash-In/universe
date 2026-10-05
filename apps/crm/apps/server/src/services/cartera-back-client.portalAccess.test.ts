@@ -367,3 +367,35 @@ test("el veto vuelve como resultado normal, no como excepción", async () => {
 		vetada,
 	);
 });
+
+// El hermano: sin correo aprobado (el diálogo enseñaba una empresa) y la fila
+// ya es persona con correo. También es un 200 con `fallo` adentro, y por la
+// misma razón tiene que volver tal cual y no como excepción: no salió nada.
+test("el veto por correo aprobado requerido vuelve como resultado normal, no como excepción", async () => {
+	const vetada = {
+		message: "Procesados 1 inversionista(s)",
+		resultados: [
+			{
+				inversionistaId: 7,
+				estado: "fallo" as const,
+				usuarioEmail: null,
+				correo: {
+					enviado: false,
+					plantilla: null,
+					redirigido: false,
+					destinatarioReal: null,
+				},
+				advertencias: [],
+				motivo: "correo_aprobado_requerido",
+			},
+		],
+	};
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => Response.json(vetada)),
+	});
+
+	expect(await client.otorgarAccesoPortal([7])).toEqual(vetada);
+});

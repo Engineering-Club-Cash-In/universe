@@ -2649,7 +2649,8 @@ export class CarteraBackClient {
 	 * router) cambia el `email` bajo once familias de rol y este botón cuelga
 	 * de cuatro. Cartera lo revalida contra la fila y VETA con
 	 * `correo_aprobado_no_coincide` sin provisionar nada
-	 * (controllers/otorgarAccesoPortal.ts).
+	 * (controllers/otorgarAccesoPortal.ts). Y si la fila es persona con correo
+	 * y la llave no viene, VETA igual con `correo_aprobado_requerido`.
 	 *
 	 * Se manda RECORTADO, y no crudo, por dos razones que apuntan al mismo
 	 * lado: el `maxLength: 255` de Elysia mide el string que RECIBE —un correo
@@ -2661,8 +2662,10 @@ export class CarteraBackClient {
 	 * equivalentes para cartera, pero `""` o espacios son un 400
 	 * (`correo_aprobado_invalido`): mandar la llave vacía es un llamador roto,
 	 * no un "no se aprobó nada". Por eso acá se TIRA en vez de omitirla en
-	 * silencio — omitirla convertiría el error del llamador en un
-	 * provisionamiento SIN aprobación, que es justo el agujero que esto cierra.
+	 * silencio: omitirla escondería el error del llamador. Cartera ya no
+	 * provisiona a una persona con correo sin aprobación (la veta con
+	 * `correo_aprobado_requerido`), pero el error tiene que verse acá, no
+	 * llegar disfrazado de veto.
 	 *
 	 * El único caso legítimo sin correo es la EMPRESA: su diálogo no enseña
 	 * ninguno —la cuenta es del representante— y cartera ya corta antes con

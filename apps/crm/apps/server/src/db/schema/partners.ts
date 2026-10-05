@@ -157,8 +157,10 @@ export const insuranceInvoiceSubmissions = pgTable(
 			.notNull()
 			.default("pendiente"),
 		error: text("error"),
-		// Forma la llave de idempotencia de Resend (ver 0046).
+		// Forma la llave de idempotencia de Resend (ver 0047).
 		intento: integer("intento").notNull().default(1),
+		// Un único reintento desde el CRM, aunque vuelva a fallar.
+		retryCount: integer("retry_count").notNull().default(0),
 		// Correo exacto del intento, para reintentarlo idéntico.
 		correoAsunto: text("correo_asunto"),
 		correoHtml: text("correo_html"),

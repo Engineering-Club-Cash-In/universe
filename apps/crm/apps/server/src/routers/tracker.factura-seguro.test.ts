@@ -25,6 +25,7 @@ import { ROLES } from "../lib/roles";
 const ID = "11111111-1111-4111-8111-111111111111";
 
 let membresias: Array<{ companyId: string; sellerId: string | null }> = [];
+let userRole: string = ROLES.PARTNER;
 let caso: Record<string, unknown> = {};
 let cotizacion: Array<Record<string, unknown>> = [];
 let facturaPrevia: Array<Record<string, unknown>> = [];
@@ -82,7 +83,7 @@ const dbFalsa = {
 					{
 						id: "socio-1",
 						email: "s@x.com",
-						role: ROLES.PARTNER,
+						role: userRole,
 						banned: false,
 					},
 				]);
@@ -206,6 +207,12 @@ const ctx = {
 	},
 } as never;
 
+const crmCtx = {
+	context: {
+		session: { user: { id: "crm-1" }, session: { id: "sesion-crm" } },
+	},
+} as never;
+
 function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 	return {
 		id: ID,
@@ -243,6 +250,7 @@ const pdf = (nombre = "factura.pdf", tipo = "application/pdf", bytes = 2048) =>
 	new File([conContenido(ENCABEZADO_PDF, bytes)], nombre, { type: tipo });
 
 beforeEach(() => {
+	userRole = ROLES.PARTNER;
 	membresias = [{ companyId: "agencia-1", sellerId: "v1" }];
 	caso = casoAl(90);
 	cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
@@ -272,8 +280,6 @@ describe("facturaSeguro en el caso", () => {
 			motivo: null,
 			subidaAt: null,
 			envio: null,
-			reenviable: false,
-			sinConfirmar: false,
 		});
 	});
 
@@ -282,51 +288,6 @@ describe("facturaSeguro en el caso", () => {
 		const [c] = await call(trackerRouter.getCasos, {}, ctx);
 		expect(c.facturaSeguro.habilitada).toBe(true);
 		expect(c.cerrado).toBe(true);
-	});
-
-	test("reenviable solo si el envío quedó fallido", async () => {
-		caso = casoAl(90, { facturaEnvio: "fallido", facturaSubidaAt: new Date() });
-		let [c] = await call(trackerRouter.getCasos, {}, ctx);
-		expect(c.facturaSeguro.reenviable).toBe(true);
-
-		caso = casoAl(90, { facturaEnvio: "enviado", facturaSubidaAt: new Date() });
-		[c] = await call(trackerRouter.getCasos, {}, ctx);
-		expect(c.facturaSeguro.reenviable).toBe(false);
-	});
-
-	test("un envío pendiente pasado el plazo sale sin confirmar también para el gerente, que no puede reintentarlo", async () => {
-		const viejo = new Date(Date.now() - 11 * 60 * 1000);
-		caso = casoAl(90, {
-			facturaEnvio: "pendiente",
-			facturaSubidaAt: viejo,
-			facturaActualizadaAt: viejo,
-		});
-		let [c] = await call(trackerRouter.getCasos, {}, ctx);
-		expect(c.facturaSeguro).toMatchObject({
-			sinConfirmar: true,
-			reenviable: true,
-		});
-
-		membresias = [{ companyId: "agencia-1", sellerId: null }];
-		[c] = await call(trackerRouter.getCasos, {}, ctx);
-		expect(c.facturaSeguro).toMatchObject({
-			sinConfirmar: true,
-			reenviable: false,
-		});
-	});
-
-	test("un envío pendiente reciente sigue en curso para todos", async () => {
-		const reciente = new Date();
-		caso = casoAl(90, {
-			facturaEnvio: "pendiente",
-			facturaSubidaAt: reciente,
-			facturaActualizadaAt: reciente,
-		});
-		const [c] = await call(trackerRouter.getCasos, {}, ctx);
-		expect(c.facturaSeguro).toMatchObject({
-			sinConfirmar: false,
-			reenviable: false,
-		});
 	});
 
 	test("el gerente ve el caso pero no puede subir la factura", async () => {
@@ -624,11 +585,15 @@ describe("subirFacturaSeguro", () => {
 });
 
 describe("reenviarFacturaSeguro", () => {
+	beforeEach(() => {
+		userRole = ROLES.ADMIN;
+	});
 	const creado = new Date("2026-09-29T18:00:00Z");
 	const registro = (status: string, actualizadoAt: Date | null = null) => ({
 		id: "envio-1",
 		status,
 		intento: 1,
+		retryCount: 0,
 		recipients: ["antes@gyt.test"],
 		correoAsunto: "Asunto guardado",
 		correoHtml: "<p>Correo guardado del intento</p>",
@@ -643,7 +608,7 @@ describe("reenviarFacturaSeguro", () => {
 		facturaPrevia = [registro("fallido")];
 		casoBajoBloqueo = { ...caso, status: "won" };
 		await expect(
-			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
 		).rejects.toMatchObject({
 			code: "CONFLICT",
 			message:
@@ -658,12 +623,13 @@ describe("reenviarFacturaSeguro", () => {
 		const r = await call(
 			trackerRouter.reenviarFacturaSeguro,
 			{ opportunityId: ID },
-			ctx,
+			crmCtx,
 		);
 		expect(r).toEqual({ envio: "enviado", aseguradora: "gyt" });
 		expect(actualizados[0]).toMatchObject({
 			status: "pendiente",
 			intento: 2,
+			retryCount: 1,
 			recipients: ["polizas@gyt.test"],
 		});
 		const nuevoHtml = actualizados[0].correoHtml as string;
@@ -679,9 +645,10 @@ describe("reenviarFacturaSeguro", () => {
 
 	test("pendiente abandonado: repite el MISMO intento, destinatarios y correo guardado", async () => {
 		facturaPrevia = [registro("pendiente", new Date("2026-01-01T00:00:00Z"))];
-		await call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx);
+		await call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx);
 		expect(actualizados[0]).toMatchObject({
 			intento: 1,
+			retryCount: 1,
 			recipients: ["antes@gyt.test"],
 		});
 		// Aunque los datos del caso cambiaron, se reenvía el contenido guardado:
@@ -696,11 +663,12 @@ describe("reenviarFacturaSeguro", () => {
 		});
 	});
 
-	test("si reasignaron el vendedor, el anterior ya no puede reenviar", async () => {
+	test("un asesor comercial no puede reenviar una oportunidad ajena", async () => {
 		facturaPrevia = [registro("fallido")];
-		vendedorVigente = "v2";
+		userRole = ROLES.SALES;
+		caso = { ...caso, assignedTo: "otro-asesor" };
 		await expect(
-			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
 		).rejects.toMatchObject({ code: "FORBIDDEN" });
 		expect(correos).toHaveLength(0);
 		expect(actualizados).toHaveLength(0);
@@ -710,23 +678,43 @@ describe("reenviarFacturaSeguro", () => {
 		for (const status of ["enviado", "pendiente"]) {
 			facturaPrevia = [registro(status)];
 			await expect(
-				call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
+				call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
 			).rejects.toMatchObject({ code: "CONFLICT" });
 		}
 		expect(correos).toHaveLength(0);
 	});
 
-	test("sin factura subida → NOT_FOUND; gerente → FORBIDDEN", async () => {
+	test("sin factura subida → NOT_FOUND; socio del tracker → UNAUTHORIZED", async () => {
 		facturaPrevia = [];
 		await expect(
-			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
 
 		facturaPrevia = [registro("fallido")];
-		membresias = [{ companyId: "agencia-1", sellerId: null }];
 		await expect(
 			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
-		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+	});
+
+	test("el CRM solo puede reintentar una vez, aunque vuelva a fallar", async () => {
+		facturaPrevia = [registro("fallido")];
+		resultadoCorreo = { ok: false, error: "rechazado", resultado: "rechazado" };
+		await call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx);
+		expect(actualizados[0].retryCount).toBe(1);
+		facturaPrevia = [{ ...registro("fallido"), retryCount: 1, intento: 2 }];
+		await expect(
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
+		).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(correos).toHaveLength(1);
+	});
+
+	test("sin destinatarios no consume el único reintento", async () => {
+		facturaPrevia = [registro("sin_destinatario")];
+		correosPolizas = { gyt: [], universales: [] };
+		await expect(
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
+		).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(actualizados).toHaveLength(0);
 	});
 });
 

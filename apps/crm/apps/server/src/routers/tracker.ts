@@ -32,7 +32,6 @@ import {
 import {
 	type Aseguradora,
 	destinatariosDe,
-	envioSinConfirmar,
 	MENSAJE_MOTIVO,
 	MENSAJE_SIN_REENVIO,
 	MIME_FACTURA_SEGURO,
@@ -42,7 +41,7 @@ import {
 	resolverAseguradora,
 	tipoRealDeFactura,
 } from "../lib/factura-seguro";
-import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
+import { crmProcedure, partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
 import { PARTNER_CHANGE_PASSWORD_PATH, partnerAuth } from "../lib/partner-auth";
 import {
 	casoDentroDeAlcance,
@@ -97,9 +96,6 @@ export type CasoTracker = {
 		motivo: string | null;
 		subidaAt: string | null;
 		envio: EstadoEnvioFactura | null;
-		reenviable: boolean;
-		/** `pendiente` pasado el plazo, para cualquier rol (ver envioSinConfirmar). */
-		sinConfirmar: boolean;
 	};
 };
 
@@ -140,6 +136,7 @@ const ultimaCotizacion = db
 const filaSelect = {
 	id: opportunities.id,
 	status: opportunities.status,
+	assignedTo: opportunities.assignedTo,
 	createdAt: opportunities.createdAt,
 	updatedAt: opportunities.updatedAt,
 	closurePercentage: salesStages.closurePercentage,
@@ -160,12 +157,12 @@ const filaSelect = {
 	vehicleValue: ultimaCotizacion.vehicleValue,
 	facturaEnvio: insuranceInvoiceSubmissions.status,
 	facturaSubidaAt: insuranceInvoiceSubmissions.createdAt,
-	facturaActualizadaAt: insuranceInvoiceSubmissions.updatedAt,
 };
 
 type Fila = {
 	id: string;
 	status: string;
+	assignedTo: string | null;
 	createdAt: Date;
 	updatedAt: Date;
 	closurePercentage: number;
@@ -186,7 +183,6 @@ type Fila = {
 	vehicleValue: string | null;
 	facturaEnvio: EstadoEnvioFactura | null;
 	facturaSubidaAt: Date | null;
-	facturaActualizadaAt: Date | null;
 };
 
 export function nombreCliente(
@@ -318,17 +314,6 @@ function aCaso(
 			motivo: factura.ok ? null : MENSAJE_MOTIVO[factura.motivo],
 			subidaAt: fila.facturaSubidaAt?.toISOString() ?? null,
 			envio: fila.facturaEnvio ?? null,
-			reenviable: puedeReenviarFacturaSeguro({
-				envio: fila.facturaEnvio ?? null,
-				envioActualizadoAt: fila.facturaActualizadaAt ?? null,
-				companyId: fila.companyId,
-				sellerId: fila.sellerId,
-				membresias,
-			}).ok,
-			sinConfirmar: envioSinConfirmar({
-				envio: fila.facturaEnvio ?? null,
-				envioActualizadoAt: fila.facturaActualizadaAt ?? null,
-			}),
 		},
 	};
 }
@@ -381,6 +366,22 @@ async function casoDelSocio(id: string, membresias: MembresiaSocio[]) {
 			message: esDeSuAgencia
 				? "Este caso no está asignado a ti"
 				: "Este caso no pertenece a tu agencia",
+		});
+	}
+	return fila;
+}
+
+async function casoDelCrm(
+	id: string,
+	context: { userId: string; userRole: string | null | undefined },
+) {
+	const [fila] = await consultaBase().where(eq(opportunities.id, id)).limit(1);
+	if (!fila) {
+		throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
+	}
+	if (context.userRole === "sales" && fila.assignedTo !== context.userId) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No tienes permiso para reenviar esta factura",
 		});
 	}
 	return fila;
@@ -886,38 +887,42 @@ export const trackerRouter = {
 			return { envio, aseguradora };
 		}),
 
-	// Solo si el primer envío no salió (fallido o sin destinatarios): usa la
-	// factura ya guardada, no se vuelve a subir.
-	reenviarFacturaSeguro: partnerProcedure
+	// Reintento único desde el CRM: usa la factura ya guardada.
+	reenviarFacturaSeguro: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const fila = await casoDelSocio(input.opportunityId, context.membresias);
+			const fila = await casoDelCrm(input.opportunityId, context);
 			// Solo se usan si hay que abrir un intento nuevo (ver abajo).
 			const { datos } = await datosDelCorreo(fila);
 
 			// Se reserva el registro (pasa a `pendiente` bajo bloqueo) antes de
 			// mandar: dos clics seguidos no envían dos correos.
 			const reservado = await db.transaction(async (tx) => {
-				// Oportunidad FOR UPDATE y vendedor releído bajo el bloqueo: si lo
-				// reasignaron, el vendedor anterior ya no puede reenviar.
+				// La oportunidad se relee bajo bloqueo para respetar los cambios
+				// de estado y de asesor comercial.
 				const [vigente] = await tx
 					.select({
-						companyId: opportunities.companyId,
 						status: opportunities.status,
+						assignedTo: opportunities.assignedTo,
 					})
 					.from(opportunities)
 					.where(eq(opportunities.id, fila.id))
 					.for("update");
 				exigirMismoEstado(vigente?.status, fila.status);
-				const [asignado] = await tx
-					.select({ sellerId: opportunityAgencySellers.sellerId })
-					.from(opportunityAgencySellers)
-					.where(eq(opportunityAgencySellers.opportunityId, fila.id));
+				if (
+					context.userRole === "sales" &&
+					vigente?.assignedTo !== context.userId
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para reenviar esta factura",
+					});
+				}
 				const [registro] = await tx
 					.select({
 						id: insuranceInvoiceSubmissions.id,
 						status: insuranceInvoiceSubmissions.status,
 						intento: insuranceInvoiceSubmissions.intento,
+						retryCount: insuranceInvoiceSubmissions.retryCount,
 						recipients: insuranceInvoiceSubmissions.recipients,
 						correoAsunto: insuranceInvoiceSubmissions.correoAsunto,
 						correoHtml: insuranceInvoiceSubmissions.correoHtml,
@@ -938,15 +943,11 @@ export const trackerRouter = {
 				const regla = puedeReenviarFacturaSeguro({
 					envio: registro?.status ?? null,
 					envioActualizadoAt: registro?.actualizadoAt ?? null,
-					companyId: vigente?.companyId ?? null,
-					sellerId: asignado?.sellerId ?? null,
-					membresias: context.membresias,
+					retryCount: registro?.retryCount ?? 0,
 				});
 				if (!regla.ok) {
 					const codigo =
-						regla.motivo === "no_es_el_vendedor"
-							? "FORBIDDEN"
-							: regla.motivo === "sin_factura"
+						regla.motivo === "sin_factura"
 								? "NOT_FOUND"
 								: "CONFLICT";
 					throw new ORPCError(codigo, {
@@ -977,6 +978,11 @@ export const trackerRouter = {
 				const destinatarios = repetirIntento
 					? registro.recipients
 					: destinatariosDe(aseguradora);
+				if (destinatarios.length === 0) {
+					throw new ORPCError("CONFLICT", {
+						message: "Aún no hay destinatarios configurados para esta aseguradora",
+					});
+				}
 				const correo =
 					repetirIntento && correoGuardado
 						? correoGuardado
@@ -987,9 +993,10 @@ export const trackerRouter = {
 				await tx
 					.update(insuranceInvoiceSubmissions)
 					.set({
-						status: destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
+						status: "pendiente",
 						recipients: destinatarios,
 						intento,
+						retryCount: 1,
 						correoAsunto: correo.asunto,
 						correoHtml: correo.html,
 						error: null,

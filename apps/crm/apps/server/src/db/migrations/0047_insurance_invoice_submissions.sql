@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
 	"status" text DEFAULT 'pendiente' NOT NULL,
 	"error" text,
 	"intento" integer DEFAULT 1 NOT NULL,
+	"retry_count" integer DEFAULT 0 NOT NULL,
 	"correo_asunto" text,
 	"correo_html" text,
 	"sent_at" timestamp,
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
 	CONSTRAINT "insurance_invoice_submissions_opportunity_id_unique" UNIQUE("opportunity_id"),
 	CONSTRAINT "insurance_invoice_submissions_status_check" CHECK ("status" IN ('pendiente', 'enviado', 'fallido', 'sin_destinatario'))
 );--> statement-breakpoint
+
+-- La tabla ya existe en desarrollo: añadir el contador sin tocar los envíos.
+ALTER TABLE "public"."insurance_invoice_submissions"
+	ADD COLUMN IF NOT EXISTS "retry_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 
 DO $$ BEGIN
 	ALTER TABLE "public"."insurance_invoice_submissions" ADD CONSTRAINT "insurance_invoice_submissions_opportunity_id_opportunities_id_fk" FOREIGN KEY ("opportunity_id") REFERENCES "public"."opportunities"("id") ON DELETE cascade ON UPDATE no action;

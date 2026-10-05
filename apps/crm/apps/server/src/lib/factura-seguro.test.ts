@@ -141,12 +141,10 @@ describe("envioSinConfirmar", () => {
 });
 
 describe("puedeReenviarFacturaSeguro", () => {
-	const reenvio = (envio: string | null, membresias = vendedor) =>
+	const reenvio = (envio: string | null, retryCount = 0) =>
 		puedeReenviarFacturaSeguro({
 			envio,
-			companyId: "agencia-1",
-			sellerId: "v1",
-			membresias,
+			retryCount,
 		});
 
 	test("solo si el primer envío no salió", () => {
@@ -162,9 +160,7 @@ describe("puedeReenviarFacturaSeguro", () => {
 		const base = {
 			envio: "pendiente",
 			ahora,
-			companyId: "agencia-1",
-			sellerId: "v1",
-			membresias: vendedor,
+			retryCount: 0,
 		};
 		expect(
 			puedeReenviarFacturaSeguro({
@@ -180,10 +176,14 @@ describe("puedeReenviarFacturaSeguro", () => {
 		).toEqual({ ok: true });
 	});
 
-	test("solo el vendedor asignado", () => {
-		expect(reenvio("fallido", gerente)).toEqual({
+	test("solo hay un reintento por factura", () => {
+		expect(reenvio("fallido", 1)).toEqual({
 			ok: false,
-			motivo: "no_es_el_vendedor",
+			motivo: "sin_reintentos",
+		});
+		expect(reenvio("sin_destinatario", 1)).toEqual({
+			ok: false,
+			motivo: "sin_reintentos",
 		});
 	});
 });

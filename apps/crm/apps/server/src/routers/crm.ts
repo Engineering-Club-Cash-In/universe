@@ -89,6 +89,10 @@ import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audi
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
+	envioSinConfirmar,
+	puedeReenviarFacturaSeguro,
+} from "../lib/factura-seguro";
+import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
@@ -6316,6 +6320,8 @@ export const crmRouter = {
 						estado: insuranceInvoiceSubmissions.status,
 						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
 						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+						actualizadoAt: insuranceInvoiceSubmissions.updatedAt,
+						retryCount: insuranceInvoiceSubmissions.retryCount,
 					},
 				})
 				.from(opportunityDocuments)
@@ -6335,8 +6341,23 @@ export const crmRouter = {
 			const documentsWithUrls = await Promise.all(
 				documents.map(async (doc) => {
 					const url = await getFileUrl(doc.filePath);
+					const { envioAseguradora } = doc;
 					return {
 						...doc,
+						envioAseguradora: envioAseguradora && {
+							estado: envioAseguradora.estado,
+							aseguradora: envioAseguradora.aseguradora,
+							enviadoAt: envioAseguradora.enviadoAt,
+							sinConfirmar: envioSinConfirmar({
+								envio: envioAseguradora.estado,
+								envioActualizadoAt: envioAseguradora.actualizadoAt,
+							}),
+							reintentoDisponible: puedeReenviarFacturaSeguro({
+								envio: envioAseguradora.estado,
+								envioActualizadoAt: envioAseguradora.actualizadoAt,
+								retryCount: envioAseguradora.retryCount ?? 0,
+							}).ok,
+						},
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,

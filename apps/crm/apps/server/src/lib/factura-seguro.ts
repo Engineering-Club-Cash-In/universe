@@ -123,14 +123,13 @@ export type MotivoSinReenvio =
 	| "sin_factura"
 	| "ya_enviada"
 	| "en_curso"
-	| "no_es_el_vendedor";
+	| "sin_reintentos";
 
 export const MENSAJE_SIN_REENVIO: Record<MotivoSinReenvio, string> = {
 	sin_factura: "Este crédito todavía no tiene la factura del seguro",
 	ya_enviada: "La factura del seguro ya fue enviada a la aseguradora",
 	en_curso: "El envío de la factura del seguro está en curso",
-	no_es_el_vendedor:
-		"Solo el vendedor asignado puede reenviar la factura del seguro",
+	sin_reintentos: "Esta factura ya usó su único reintento de envío",
 };
 
 // Un envío `pendiente` más viejo que esto se da por caído (el proceso murió
@@ -155,19 +154,16 @@ export function envioSinConfirmar(caso: {
 	);
 }
 
-/** El reenvío existe solo para cuando el primer envío no salió. */
+/** El CRM permite un único reintento por factura, si el envío no se confirmó. */
 export function puedeReenviarFacturaSeguro(caso: {
 	envio: string | null;
 	envioActualizadoAt?: Date | null;
 	ahora?: Date;
-	companyId: string | null;
-	sellerId: string | null;
-	membresias: MembresiaSocio[];
+	retryCount: number;
 }): { ok: true } | { ok: false; motivo: MotivoSinReenvio } {
-	if (!esVendedorAsignado(caso))
-		return { ok: false, motivo: "no_es_el_vendedor" };
 	if (caso.envio === null) return { ok: false, motivo: "sin_factura" };
 	if (caso.envio === "enviado") return { ok: false, motivo: "ya_enviada" };
+	if (caso.retryCount >= 1) return { ok: false, motivo: "sin_reintentos" };
 	if (caso.envio === "pendiente" && !envioSinConfirmar(caso)) {
 		return { ok: false, motivo: "en_curso" };
 	}

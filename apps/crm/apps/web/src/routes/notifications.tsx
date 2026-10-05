@@ -206,6 +206,16 @@ const REDIRECT_CONFIG: Record<
 	},
 };
 
+/** Botón de los avisos de apagado/reactivación: dice qué hacer, no solo "ver el caso". */
+const ETIQUETA_ACCION_INMOVILIZACION: Record<string, string> = {
+	inmovilizacion_pendiente_aprobacion: "Revisar solicitud",
+	inmovilizacion_resuelta: "Ver estado de la solicitud",
+	inmovilizacion_llamar_cliente: "Registrar llamada",
+	inmovilizacion_ejecutar_pendiente: "Registrar confirmación de LEGION",
+	inmovilizacion_apagado_ejecutado: "Revisar confirmación",
+	inmovilizacion_reactivacion_ejecutada: "Revisar confirmación",
+};
+
 // Labels legibles para el filtro por tipo (redirect_page). Son sustantivos
 // (categoría), a diferencia de REDIRECT_CONFIG que usa verbos de navegación.
 const REDIRECT_PAGE_FILTER_LABEL: Record<string, string> = {
@@ -1166,7 +1176,9 @@ function NotificationCard({
 					}
 				: config.getRoute(notification.relatedEntityId ?? "");
 		return {
-			label: config.label,
+			label:
+				ETIQUETA_ACCION_INMOVILIZACION[notification.cobrosTipo ?? ""] ??
+				config.label,
 			action: () => navigate(route as any),
 		};
 	};

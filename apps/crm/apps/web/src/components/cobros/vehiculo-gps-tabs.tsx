@@ -26,6 +26,8 @@ export function VehiculoGpsTabs({
 	onReactivacionReabierta,
 	onRegistrarPromesa,
 	pestanaInicial,
+	abrirInmovilizacion = false,
+	onInmovilizacionAbierta,
 	reabrirReactivacion,
 	vehicleId,
 }: {
@@ -45,6 +47,13 @@ export function VehiculoGpsTabs({
 	onReactivacionReabierta: () => void;
 	/** Pestaña con la que abre (deep link de una notificación). */
 	pestanaInicial?: "inmovilizacion";
+	/**
+	 * Señal de un solo uso: abre la pestaña de apagado/reactivación y avisa con
+	 * `onInmovilizacionAbierta` para que el padre la apague. Es una señal y no un
+	 * `key` para no desmontar las pestañas de GPS (perderían el motivo auditado).
+	 */
+	abrirInmovilizacion?: boolean;
+	onInmovilizacionAbierta?: () => void;
 	// GPS y ubicaciones requieren vehículo; notificaciones e inmovilización
 	// solo el caso (el servidor resuelve la unidad, CB-041).
 	vehicleId: string | null;
@@ -57,6 +66,11 @@ export function VehiculoGpsTabs({
 	useEffect(() => {
 		if (pestanaInicial) setPestana(pestanaInicial);
 	}, [pestanaInicial]);
+	useEffect(() => {
+		if (!abrirInmovilizacion) return;
+		setPestana("inmovilizacion");
+		onInmovilizacionAbierta?.();
+	}, [abrirInmovilizacion, onInmovilizacionAbierta]);
 
 	return (
 		<Card>
@@ -81,7 +95,7 @@ export function VehiculoGpsTabs({
 						</TabsTrigger>
 						<TabsTrigger value="inmovilizacion">
 							<LockOpen />
-							Inmovilizar / Reactivar
+							Apagado y reactivación
 						</TabsTrigger>
 					</TabsList>
 

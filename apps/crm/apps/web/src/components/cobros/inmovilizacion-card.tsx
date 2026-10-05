@@ -2,18 +2,33 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
 	Check,
+	CheckCircle2,
 	ChevronDown,
+	CircleDashed,
+	CircleDot,
 	ClipboardList,
 	FileText,
 	Loader2,
 	Lock,
 	LockOpen,
 	PhoneCall,
+	RotateCcw,
 	X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { MOTIVOS_INMOVILIZACION } from "server/src/lib/inmovilizacion-unidad";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +50,14 @@ import {
 	BUCKETS_CON_CARD_INMOVILIZACION,
 	debeMostrarCardInmovilizacion,
 } from "@/lib/inmovilizacion-card-gate";
+import {
+	rechazadaReciente as buscarRechazadaReciente,
+	estadoPasos,
+	motivoSinSolicitud,
+	type SiguientePaso,
+	siguientePaso,
+} from "@/lib/inmovilizacion-siguiente-paso";
+import { cn } from "@/lib/utils";
 import { type client, orpc } from "@/utils/orpc";
 import {
 	type DecisionInmovilizacion,
@@ -44,6 +67,7 @@ import { EjecutarInmovilizacionModal } from "./inmovilizacion-ejecutar-modal";
 import { RespaldoReactivacionResumen } from "./inmovilizacion-respaldo";
 import {
 	type BorradorReactivacion,
+	type PrecargaApagado,
 	SolicitarInmovilizacionModal,
 } from "./inmovilizacion-solicitar-modal";
 import { UbicacionGuardada } from "./inmovilizacion-ubicacion";
@@ -134,6 +158,9 @@ export function InmovilizacionCard({
 	// Lo que el asesor ya escribió en la reactivación: se conserva mientras va a
 	// crear la promesa/convenio y vuelve; se descarta al cancelar o al abrirla de nuevo.
 	const borradorRef = useRef<BorradorReactivacion | null>(null);
+	// Motivos y detalle de un apagado rechazado, para corregirlo y volver a pedirlo.
+	const [precargaApagado, setPrecargaApagado] =
+		useState<PrecargaApagado | null>(null);
 	const onReabiertaRef = useRef(onReactivacionReabierta);
 	onReabiertaRef.current = onReactivacionReabierta;
 	useEffect(() => {
@@ -218,6 +245,52 @@ export function InmovilizacionCard({
 		BUCKETS_CON_CARD_INMOVILIZACION.includes(bucketNumero);
 	const puedeReactivar =
 		tieneGps && estadoUnidad === "inmovilizada" && !solicitudAbierta;
+	const rechazada = buscarRechazadaReciente(
+		inmov.data.historial,
+		!!solicitudAbierta,
+	);
+	const paso = siguientePaso({
+		solicitudAbierta,
+		pendienteLlamar: !!pendienteLlamar,
+		pendienteLlamarReactivacion: !!pendienteLlamarReactivacion,
+		rechazadaReciente: rechazada,
+		esSupervisor,
+	});
+	const motivoNoSolicita =
+		puedeApagar || puedeReactivar
+			? null
+			: motivoSinSolicitud({
+					tieneGps,
+					estadoUnidad,
+					hayAbierta: !!solicitudAbierta,
+					bucketNumero,
+					bucketsApagado: BUCKETS_CON_CARD_INMOVILIZACION,
+				});
+	// El rechazo no habilita lo que el crédito ya no permite (bucket, GPS, estado
+	// de la unidad): el botón normal tampoco se mostraría.
+	const volverASolicitarDeshabilitado = rechazada
+		? rechazada.accion === "apagado"
+			? !puedeApagar
+			: !puedeReactivar
+		: false;
+	const volverASolicitar = () => {
+		if (!rechazada) return;
+		if (rechazada.accion === "apagado") {
+			setPrecargaApagado({
+				motivos: rechazada.motivos ?? [],
+				detalle: rechazada.motivoDetalle ?? "",
+			});
+			setModalAbierto("apagado");
+			return;
+		}
+		// El pago elegido pudo quedar desactualizado: se vuelve a elegir.
+		borradorRef.current = {
+			quePaso: (rechazada.quePaso ?? null) as BorradorReactivacion["quePaso"],
+			pagoId: null,
+			detalle: rechazada.motivoDetalle ?? "",
+		};
+		setModalAbierto("reactivacion");
+	};
 
 	if (
 		!debeMostrarCardInmovilizacion({
@@ -250,7 +323,7 @@ export function InmovilizacionCard({
 							) : (
 								<LockOpen className="h-4 w-4 text-muted-foreground" />
 							)}
-							Inmovilización de unidad
+							Apagado y reactivación de la unidad
 						</CardTitle>
 					)}
 					<div className="flex items-center gap-2">
@@ -282,6 +355,20 @@ export function InmovilizacionCard({
 				</Descripcion>
 			</Cabecera>
 			<Cuerpo className="space-y-4">
+				{paso && (
+					<GuiaPaso
+						motivoRechazo={rechazada?.motivoRechazo ?? null}
+						onVolverASolicitar={volverASolicitar}
+						volverDeshabilitado={volverASolicitarDeshabilitado}
+						motivoNoSolicita={motivoNoSolicita}
+						paso={paso}
+						solicitadoAt={
+							solicitudAbierta?.estado === "pendiente_aprobacion"
+								? solicitudAbierta.solicitadoAt
+								: null
+						}
+					/>
+				)}
 				{solicitudAbierta && (
 					<div className="rounded-md border bg-muted/40 p-3 text-sm">
 						<p className="font-medium">
@@ -342,14 +429,6 @@ export function InmovilizacionCard({
 						    aplica y acá se deja constancia con su confirmación. */}
 						{solicitudAbierta.estado === "aprobada" && (
 							<div className="mt-3 space-y-2">
-								<p className="text-muted-foreground">
-									Aprobada. Solicite a LEGION que{" "}
-									{solicitudAbierta.accion === "apagado"
-										? "apague"
-										: "reactive"}{" "}
-									la unidad y, cuando lo confirme, registre aquí su
-									confirmación.
-								</p>
 								<div className="flex flex-wrap gap-2">
 									<Button
 										onClick={() =>
@@ -374,26 +453,22 @@ export function InmovilizacionCard({
 											? "Registrar apagado ejecutado"
 											: "Registrar reactivación ejecutada"}
 									</Button>
-									{/* Si LEGION no lo aplica o ya no corresponde: sin esto la
-									    solicitud quedaba aprobada para siempre. El server exige el
-									    mismo acceso que para ejecutarlo. Solo para el apagado: la
-									    cancelación de una reactivación aprobada no existe en el
-									    server. */}
-									{solicitudAbierta.accion === "apagado" && (
-										<Button
-											disabled={cancelar.isPending}
-											onClick={() =>
-												cancelar.mutate({ id: solicitudAbierta.id })
-											}
-											size="sm"
-											variant="outline"
-										>
-											{cancelar.isPending && (
-												<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-											)}
-											Cancelar apagado
-										</Button>
-									)}
+									<BotonCancelarConfirmado
+										descripcion={
+											solicitudAbierta.accion === "apagado"
+												? "La solicitud de apagado ya está aprobada. Si la cancela, tendrá que solicitarla de nuevo y volver a esperar la aprobación del supervisor."
+												: "La solicitud de reactivación ya está aprobada. Si la cancela, tendrá que solicitarla de nuevo y volver a esperar la aprobación del supervisor."
+										}
+										etiqueta={
+											solicitudAbierta.accion === "apagado"
+												? "Cancelar apagado"
+												: "Cancelar reactivación"
+										}
+										onConfirmar={() =>
+											cancelar.mutate({ id: solicitudAbierta.id })
+										}
+										pendiente={cancelar.isPending}
+									/>
 								</div>
 							</div>
 						)}
@@ -401,18 +476,15 @@ export function InmovilizacionCard({
 						    la misma regla en cancelarSolicitud). */}
 						{solicitudAbierta.estado === "pendiente_aprobacion" &&
 							solicitudAbierta.solicitadoPor === session?.user?.id && (
-								<Button
+								<BotonCancelarConfirmado
 									className="mt-2"
-									disabled={cancelar.isPending}
-									onClick={() => cancelar.mutate({ id: solicitudAbierta.id })}
-									size="sm"
-									variant="outline"
-								>
-									{cancelar.isPending && (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									)}
-									Cancelar solicitud
-								</Button>
+									descripcion="Se retira la solicitud y el supervisor ya no tendrá que decidirla. Podrá solicitarla de nuevo cuando quiera."
+									etiqueta="Cancelar solicitud"
+									onConfirmar={() =>
+										cancelar.mutate({ id: solicitudAbierta.id })
+									}
+									pendiente={cancelar.isPending}
+								/>
 							)}
 					</div>
 				)}
@@ -433,6 +505,10 @@ export function InmovilizacionCard({
 							onRegistrarLlamada(pendienteLlamarReactivacion.id, "reactivacion")
 						}
 					/>
+				)}
+
+				{motivoNoSolicita && paso?.accionSugerida !== "volver_a_solicitar" && (
+					<p className="text-muted-foreground text-sm">{motivoNoSolicita}</p>
 				)}
 
 				{!solicitudAbierta && (
@@ -506,6 +582,7 @@ export function InmovilizacionCard({
 					accion={modalAbierto}
 					casoCobroId={casoCobroId}
 					borrador={borradorRef.current}
+					precargaApagado={precargaApagado}
 					convenioBloqueo={convenioBloqueo}
 					onBorradorChange={(b) => {
 						borradorRef.current = b;
@@ -517,6 +594,7 @@ export function InmovilizacionCard({
 					onOpenChange={(open) => {
 						if (!open) {
 							borradorRef.current = null;
+							setPrecargaApagado(null);
 							setModalAbierto(null);
 						}
 					}}
@@ -524,11 +602,142 @@ export function InmovilizacionCard({
 						setModalAbierto(null);
 						onRegistrarPromesa();
 					}}
-					onSolicitado={invalidar}
+					onSolicitado={() => {
+						setPrecargaApagado(null);
+						invalidar();
+					}}
 					open={!!modalAbierto}
 				/>
 			)}
 		</Raiz>
+	);
+}
+
+/** Cancelar una solicitud pide confirmación: deshace un trámite ya aprobado o en curso. */
+function BotonCancelarConfirmado({
+	etiqueta,
+	descripcion,
+	pendiente,
+	onConfirmar,
+	className,
+}: {
+	etiqueta: string;
+	descripcion: string;
+	pendiente: boolean;
+	onConfirmar: () => void;
+	className?: string;
+}) {
+	return (
+		<AlertDialog>
+			<AlertDialogTrigger asChild>
+				<Button
+					className={className}
+					disabled={pendiente}
+					size="sm"
+					variant="outline"
+				>
+					{pendiente && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+					{etiqueta}
+				</Button>
+			</AlertDialogTrigger>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>¿{etiqueta}?</AlertDialogTitle>
+					<AlertDialogDescription>{descripcion}</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Volver</AlertDialogCancel>
+					<AlertDialogAction onClick={onConfirmar}>
+						Sí, {etiqueta.toLowerCase()}
+					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	);
+}
+
+/** Panel "qué sigue": paso actual del ciclo, instrucción y línea de pasos. */
+function GuiaPaso({
+	paso,
+	motivoRechazo,
+	solicitadoAt,
+	onVolverASolicitar,
+	volverDeshabilitado,
+	motivoNoSolicita,
+}: {
+	paso: SiguientePaso;
+	motivoRechazo: string | null;
+	solicitadoAt: Date | string | null;
+	onVolverASolicitar: () => void;
+	/** Hoy el crédito no permite volver a solicitar (bucket, GPS, estado de la unidad). */
+	volverDeshabilitado: boolean;
+	motivoNoSolicita: string | null;
+}) {
+	const rechazo = paso.accionSugerida === "volver_a_solicitar";
+	return (
+		<div
+			className={cn(
+				"rounded-md border p-3 text-sm",
+				rechazo
+					? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+					: "border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/30",
+			)}
+		>
+			<ol className="mb-3 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
+				{estadoPasos(paso.pasoActual).map((p, i) => (
+					<li className="flex items-center gap-1" key={p.id}>
+						{i > 0 && <span className="mx-1 text-muted-foreground">›</span>}
+						{p.estado === "hecho" ? (
+							<CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+						) : p.estado === "actual" ? (
+							<CircleDot
+								className={cn(
+									"h-3.5 w-3.5",
+									rechazo ? "text-red-600" : "text-sky-600",
+								)}
+							/>
+						) : (
+							<CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
+						)}
+						<span
+							className={cn(
+								p.estado === "actual" && "font-semibold",
+								p.estado === "pendiente" && "text-muted-foreground",
+							)}
+						>
+							{p.etiqueta}
+						</span>
+					</li>
+				))}
+			</ol>
+			<p className="font-medium">{paso.titulo}</p>
+			<p className="mt-0.5 text-muted-foreground">{paso.instruccion}</p>
+			{solicitadoAt && (
+				<p className="mt-1 text-muted-foreground text-xs">
+					Enviada el {formatFechaHoraGT(solicitadoAt)}.
+				</p>
+			)}
+			{rechazo && motivoRechazo && (
+				<p className="mt-2">
+					<span className="font-semibold">Motivo del rechazo:</span>{" "}
+					{motivoRechazo}
+				</p>
+			)}
+			{rechazo && (
+				<Button
+					className="mt-3"
+					disabled={volverDeshabilitado}
+					onClick={onVolverASolicitar}
+					size="sm"
+				>
+					<RotateCcw className="mr-2 h-4 w-4" />
+					Volver a solicitar
+				</Button>
+			)}
+			{rechazo && volverDeshabilitado && motivoNoSolicita && (
+				<p className="mt-2 text-muted-foreground text-xs">{motivoNoSolicita}</p>
+			)}
+		</div>
 	);
 }
 

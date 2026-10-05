@@ -451,7 +451,7 @@ export default function Header() {
 														className="cursor-pointer"
 													>
 														<Lock className="mr-2 h-4 w-4" />
-														Apagado de unidades (GPS)
+														Apagado y reactivación de unidades
 													</Link>
 												</DropdownMenuItem>
 												<DropdownMenuItem asChild>
@@ -955,7 +955,7 @@ function MobileNav({
 													className={MOBILE_LINK_CLASS}
 												>
 													<Lock />
-													Apagado de unidades (GPS)
+													Apagado y reactivación de unidades
 												</Link>
 												<Link
 													to="/cobros/recuperaciones"

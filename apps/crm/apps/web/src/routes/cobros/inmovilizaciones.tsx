@@ -87,7 +87,9 @@ function InmovilizacionesPage() {
 	return (
 		<div className="space-y-4 p-4 md:p-6">
 			<div>
-				<h1 className="font-semibold text-2xl">Inmovilización de unidades</h1>
+				<h1 className="font-semibold text-2xl">
+					Apagado y reactivación de unidades
+				</h1>
 				<p className="text-muted-foreground text-sm">
 					Solicitudes de apagado/reactivación pendientes de aprobación o de
 					ejecución manual por LEGION.

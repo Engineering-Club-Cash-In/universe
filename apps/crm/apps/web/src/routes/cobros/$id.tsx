@@ -56,6 +56,10 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import {
+	InmovilizacionAlertaFicha,
+	PuntoPendienteInmovilizacion,
+} from "@/components/cobros/inmovilizacion-alerta-ficha";
 import { InvestigacionRedesCard } from "@/components/cobros/investigacion-redes-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -260,7 +264,7 @@ export const Route = createFileRoute("/cobros/$id")({
 	validateSearch: (search: Record<string, unknown>) => ({
 		tipo: (search.tipo as "caso" | "contrato") || "caso",
 		// Deep link desde las notificaciones de inmovilización: abre la pestaña
-		// "Vehículo / GPS" ya parada en "Inmovilizar / Reactivar".
+		// "Vehículo / GPS" ya parada en "Apagado y reactivación".
 		...(search.seccion === "inmovilizacion"
 			? { seccion: "inmovilizacion" as const }
 			: {}),
@@ -655,6 +659,9 @@ function RouteComponent() {
 	const [tabActiva, setTabActiva] = useState(
 		seccion === "inmovilizacion" ? "vehiculo" : "resumen",
 	);
+	// El aviso del Resumen lleva directo a la sub-pestaña de apagado/reactivación;
+	// la señal le avisa a VehiculoGpsTabs (sin desmontarlo) aunque ya esté en otra.
+	const [irAInmovilizacion, setIrAInmovilizacion] = useState(false);
 	// Un deep link a la inmovilización con el caso ya abierto no remonta la ruta.
 	useEffect(() => {
 		if (seccion === "inmovilizacion") setTabActiva("vehiculo");
@@ -2671,7 +2678,15 @@ function RouteComponent() {
 						)}
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
-					<TabsTrigger value="vehiculo">Vehículo / GPS</TabsTrigger>
+					<TabsTrigger value="vehiculo">
+						Vehículo / GPS
+						{caso.id && (
+							<PuntoPendienteInmovilizacion
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+							/>
+						)}
+					</TabsTrigger>
 					<TabsTrigger value="referencias">
 						Referencias
 						{totalReferencias > 0 && (
@@ -2687,6 +2702,18 @@ function RouteComponent() {
 
 				{/* RESUMEN — lo que se necesita para gestionar AHORA. */}
 				<TabsContent value="resumen" className="mt-4">
+					{caso.id && (
+						<div className="mb-6">
+							<InmovilizacionAlertaFicha
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+								onVer={() => {
+									setIrAInmovilizacion(true);
+									setTabActiva("vehiculo");
+								}}
+							/>
+						</div>
+					)}
 					<div className="grid gap-6 lg:grid-cols-3">
 						<div className="space-y-6 lg:col-span-2">
 							{/* CB-042 · Si el crédito llegó a recuperación, es lo primero
@@ -5230,6 +5257,8 @@ function RouteComponent() {
 								esSupervisor={esSupervisorCobros}
 								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
 								pestanaInicial={seccion}
+								abrirInmovilizacion={irAInmovilizacion}
+								onInmovilizacionAbierta={() => setIrAInmovilizacion(false)}
 								convenioBloqueo={convenioMotivoBloqueo}
 								onCrearConvenio={() => {
 									setConvenioDesdeReactivacion(true);

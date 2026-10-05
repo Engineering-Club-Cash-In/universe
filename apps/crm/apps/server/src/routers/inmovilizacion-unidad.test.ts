@@ -1695,21 +1695,25 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(resolverPendientesLlamadas).toHaveLength(0);
 	});
 
-	it("cancelarSolicitud de una reactivación aprobada sigue sin permitirse (solo pendientes)", async () => {
+	it("cancelarSolicitud de una reactivación aprobada: la cancela el que la puede ejecutar y cierra sus recordatorios", async () => {
 		solicitudACancelarMock = {
 			accion: "reactivacion",
 			estado: "aprobada",
 			casoCobroId: CASO_ID,
 			numeroCreditoSifco: "01010214100000",
 		};
-		updateDevuelveFila = false; // el UPDATE exige estado pendiente: no hay fila
-		await expect(
-			call(
-				inmovilizacionUnidadRouter.cancelarSolicitud,
-				{ id: INMOV_ID },
-				{ context: ctx("cobros") },
-			),
-		).rejects.toMatchObject({ code: "CONFLICT" });
+		const res = await call(
+			inmovilizacionUnidadRouter.cancelarSolicitud,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res).toEqual({ ok: true });
+		expect(eventosInsertados[0]).toMatchObject({
+			evento: "cancelar",
+			estadoAnterior: "aprobada",
+			estadoNuevo: "cancelada",
+		});
+		expect(recordatoriosEjecucionResueltos).toEqual([INMOV_ID]);
 	});
 
 	it("cancelarSolicitud que ya no está pendiente: CONFLICT y no toca avisos", async () => {

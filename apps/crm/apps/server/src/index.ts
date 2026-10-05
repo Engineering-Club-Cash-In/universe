@@ -119,6 +119,7 @@ import { inmovilizacionReactivacionLlamadaRouter } from "./routers/inmovilizacio
 import { inmovilizacionUnidadRouter } from "./routers/inmovilizacion-unidad";
 import { investigacionesRedesCobrosRouter } from "./routers/investigaciones-redes-cobros";
 import { investmentsRouter } from "./routers/investments";
+import { misPendientesInmovilizacionRouter } from "./routers/mis-pendientes-inmovilizacion";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
 import {
@@ -331,6 +332,7 @@ const handler = new RPCHandler(
 		tareasCobrosRouter,
 		partnerTrackerRouter,
 		buroInternoProcedures,
+		misPendientesInmovilizacionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

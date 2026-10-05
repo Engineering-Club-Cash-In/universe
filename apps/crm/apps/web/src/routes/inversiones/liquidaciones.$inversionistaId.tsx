@@ -2816,7 +2816,9 @@ function InvestorLiquidacionesPage() {
 								// haya nada que aprobar: desde esta fila no sale ninguna
 								// contraseña —cartera contesta a qué fila ir— y por eso el
 								// diálogo no enseñó ningún correo. Mandar el de la sociedad
-								// sería aprobar una dirección que nadie miró.
+								// sería aprobar una dirección que nadie miró. Si antes del
+								// clic la fila pasó a persona con correo, cartera corta sin
+								// provisionar (`fallo/correo_aprobado_requerido`).
 								if (accesoPortalEsEmpresa) {
 									darAccesoPortalMutation.mutate({
 										inversionistaId: investorIdNum,

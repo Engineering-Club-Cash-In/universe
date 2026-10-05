@@ -275,6 +275,7 @@ describe("los motivos que reintentar NO arregla", () => {
 		"cuenta_anclada_solo_por_correo",
 		"inversionista_no_encontrado",
 		"correo_aprobado_no_coincide",
+		"correo_aprobado_requerido",
 	])("%s no manda a apretar el botón otra vez, desde ningún lado", (motivo) => {
 		const desdeElBoton = avisoAccesoPortal(
 			acceso({ estado: "fallo", motivo, advertencias: [] }),
@@ -391,6 +392,40 @@ describe("los motivos que reintentar NO arregla", () => {
 		// 4. Y no se promete un reintento que vuelve a fallar.
 		expect(aviso.texto).toContain("Volver a confirmar el mismo no sirve");
 		expect(aviso.texto).not.toContain("Si querés");
+	});
+
+	/**
+	 * El hermano del veto: el diálogo enseñó la fila como EMPRESA —sin correo
+	 * que aprobar— y al apretar ya era persona con correo. Cartera cortó antes
+	 * de provisionar con `correo_aprobado_requerido`. Sin estas dos entradas
+	 * salía pelado y mandando a reintentar desde el mismo diálogo, que vuelve
+	 * a mandar "sin correo aprobado" y cae en el mismo corte.
+	 */
+	it("la fila que pasó a persona con correo se explica y NO manda a reintentar", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "correo_aprobado_requerido",
+				advertencias: [],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		// 1. QUÉ pasó: la fila cambió entre que se enseñó y que se confirmó.
+		expect(aviso.texto).toContain(
+			"los datos del inversionista cambiaron mientras lo revisabas",
+		);
+		expect(aviso.texto).toContain("persona con correo");
+		// 2. NO salió ninguna contraseña ni se abrió nada.
+		expect(aviso.texto).toContain("No salió ninguna contraseña");
+		// 3. QUÉ hacer: cerrar, recargar la ficha y mirar a qué correo apunta.
+		expect(aviso.texto).toContain("recargá la ficha");
+		expect(aviso.texto).toContain("revisá a qué correo apunta");
+		// 4. Y no se promete un reintento que vuelve a fallar.
+		expect(aviso.texto).toContain("Volver a confirmar lo mismo no sirve");
+		expect(aviso.texto).not.toContain("Si querés");
+		expect(aviso.texto).not.toContain("correo_aprobado_requerido");
 	});
 
 	/**

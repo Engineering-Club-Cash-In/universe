@@ -155,10 +155,16 @@ const CAUSA_EN_PALABRAS: Record<string, string> = {
 		"cartera no encuentra a este inversionista",
 	// `otorgarAccesoPortal.ts` (MOTIVO_CORREO_CAMBIADO): el correo que el
 	// diálogo enseñó y el que tenía la fila al momento de escribir no son el
-	// mismo, así que cartera cortó ANTES de provisionar. Es el único motivo de
-	// esta lista que describe al control funcionando, no a una falla.
+	// mismo, así que cartera cortó ANTES de provisionar. Con su hermano de
+	// abajo, son los únicos motivos de esta lista que describen al control
+	// funcionando, no a una falla.
 	correo_aprobado_no_coincide:
 		"el correo cambió mientras lo revisabas",
+	// El hermano (`otorgarAccesoPortal.ts`): el diálogo se pintó con la fila
+	// como empresa —sin correo que aprobar— y al apretar ya era persona con
+	// correo. Cartera cortó ANTES de provisionar, igual que arriba.
+	correo_aprobado_requerido:
+		"los datos del inversionista cambiaron mientras lo revisabas",
 	// `ensureInvestorAccount.ts`: la cuenta se creó y no se le pudo marcar la
 	// contraseña. Cuando NO se pudo deshacer viene además la advertencia
 	// `cuenta_creada_sin_marca_de_password`, que es la que corta el consejo de
@@ -269,6 +275,12 @@ const EN_VEZ_DE_REINTENTAR: Record<string, string> = {
 	// vuelve a caer en el mismo corte. Lo que arregla es volver a MIRAR.
 	correo_aprobado_no_coincide:
 		"No salió ninguna contraseña: el sistema se detuvo al ver que ya no era el correo que aprobaste. Volver a confirmar el mismo no sirve; abrí de nuevo el acceso, mirá el correo NUEVO y aprobá ese si es el que corresponde.",
+	// El hermano: la fila pasó a ser persona con correo después de que el
+	// diálogo la enseñó como empresa. Reintentar desde el MISMO diálogo vuelve
+	// a mandar "sin correo aprobado" y cae en el mismo corte; lo que arregla es
+	// recargar la ficha para que el diálogo enseñe el correo que tiene ahora.
+	correo_aprobado_requerido:
+		"No salió ninguna contraseña ni se abrió el acceso: desde que abriste el diálogo, este inversionista pasó a figurar como persona con correo, y ese correo nadie lo aprobó. Volver a confirmar lo mismo no sirve; cerrá, recargá la ficha, revisá a qué correo apunta y volvé a intentar solo si es el que corresponde.",
 	// La fila no está. Ningún reintento la va a encontrar.
 	inversionista_no_encontrado:
 		"Abrir el acceso otra vez no lo arregla: revisá que estés en la ficha correcta y, si la fila debería existir, avisa a sistemas.",

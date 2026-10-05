@@ -53,8 +53,8 @@ const VERBO: Record<AccionInmovilizacion, string> = {
 	reactivacion: "la reactivación",
 };
 
-/** Devuelve el paso actual, o null si no hay nada en curso (unidad sin trámite). */
-export function siguientePaso(e: EntradaSiguientePaso): SiguientePaso | null {
+/** El trámite en curso (decidir, ejecutar o llamar), o null si no hay. */
+function pasoPrincipal(e: EntradaSiguientePaso): SiguientePaso | null {
 	const s = e.solicitudAbierta;
 
 	if (s?.estado === "pendiente_aprobacion") {
@@ -105,19 +105,40 @@ export function siguientePaso(e: EntradaSiguientePaso): SiguientePaso | null {
 		};
 	}
 
-	if (e.rechazadaReciente) {
-		return {
-			accion: e.rechazadaReciente.accion,
-			pasoActual: "solicitud",
-			titulo: "Solicitud rechazada",
-			instruccion:
-				"Revise el motivo del rechazo, corrija lo que haga falta y vuelva a solicitar.",
-			accionSugerida: "volver_a_solicitar",
-			actua: "asesor",
-		};
-	}
-
 	return null;
+}
+
+/**
+ * El rechazo reciente es un trámite aparte, no un paso más del ciclo: puede
+ * convivir con otro pendiente (p. ej. se pidió y se rechazó una reactivación
+ * mientras falta llamar por el apagado), así que se calcula por separado.
+ */
+function pasoDeRechazo(e: EntradaSiguientePaso): SiguientePaso | null {
+	if (!e.rechazadaReciente) return null;
+	return {
+		accion: e.rechazadaReciente.accion,
+		pasoActual: "solicitud",
+		titulo: "Solicitud rechazada",
+		instruccion:
+			"Revise el motivo del rechazo, corrija lo que haga falta y vuelva a solicitar.",
+		accionSugerida: "volver_a_solicitar",
+		actua: "asesor",
+	};
+}
+
+/**
+ * Todo lo que está pendiente, en orden de importancia: primero el trámite en
+ * curso (decidir, ejecutar, llamar) y después el rechazo reciente, si lo hay.
+ */
+export function pasosPendientes(e: EntradaSiguientePaso): SiguientePaso[] {
+	return [pasoPrincipal(e), pasoDeRechazo(e)].filter(
+		(p): p is SiguientePaso => p !== null,
+	);
+}
+
+/** El pendiente más importante, o null si no hay nada en curso. */
+export function siguientePaso(e: EntradaSiguientePaso): SiguientePaso | null {
+	return pasosPendientes(e)[0] ?? null;
 }
 
 /** Estado de cada paso para pintar el stepper: hecho, actual o pendiente. */

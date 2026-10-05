@@ -3,8 +3,8 @@ import { ArrowRight, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	leTocaAlUsuario,
+	pasosPendientes,
 	rechazadaReciente,
-	siguientePaso,
 } from "@/lib/inmovilizacion-siguiente-paso";
 import { orpc } from "@/utils/orpc";
 
@@ -23,7 +23,7 @@ function usePasoPendiente(casoCobroId: string, esSupervisor: boolean) {
 		enabled: !!casoCobroId,
 	});
 	if (!data) return null;
-	const paso = siguientePaso({
+	const pasos = pasosPendientes({
 		solicitudAbierta: data.solicitudAbierta,
 		pendienteLlamar: !!data.pendienteLlamar,
 		pendienteLlamarReactivacion: !!data.pendienteLlamarReactivacion,
@@ -35,7 +35,7 @@ function usePasoPendiente(casoCobroId: string, esSupervisor: boolean) {
 	});
 	// Solo lo que le toca a ESTE usuario: esperar a otro, o lo que debe hacer el
 	// asesor cuando mira un supervisor, no es un aviso.
-	return leTocaAlUsuario(paso, esSupervisor) ? paso : null;
+	return pasos.find((p) => leTocaAlUsuario(p, esSupervisor)) ?? null;
 }
 
 /** Punto en la pestaña "Vehículo / GPS" cuando hay un trámite que espera al usuario. */

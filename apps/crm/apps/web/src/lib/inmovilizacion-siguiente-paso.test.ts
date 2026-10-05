@@ -4,6 +4,7 @@ import {
 	estadoPasos,
 	leTocaAlUsuario,
 	motivoSinSolicitud,
+	pasosPendientes,
 	rechazadaReciente,
 	siguientePaso,
 } from "./inmovilizacion-siguiente-paso";
@@ -72,6 +73,58 @@ describe("siguientePaso", () => {
 			solicitudAbierta: { accion: "reactivacion", estado: "aprobada" },
 		});
 		expect(r?.pasoActual).toBe("legion");
+	});
+});
+
+describe("pasosPendientes", () => {
+	it("sin nada pendiente: vacío", () => {
+		expect(pasosPendientes(base)).toEqual([]);
+	});
+
+	it("un rechazo reciente convive con la llamada pendiente del apagado", () => {
+		const r = pasosPendientes({
+			...base,
+			pendienteLlamar: true,
+			rechazadaReciente: { accion: "reactivacion" },
+		});
+
+		expect(r.map((p) => p.accionSugerida)).toEqual([
+			"registrar_llamada",
+			"volver_a_solicitar",
+		]);
+		expect(r[1]?.accion).toBe("reactivacion");
+	});
+
+	it("un rechazo reciente convive con la llamada de la reactivación", () => {
+		const r = pasosPendientes({
+			...base,
+			pendienteLlamarReactivacion: true,
+			rechazadaReciente: { accion: "apagado" },
+		});
+
+		expect(r.map((p) => p.accionSugerida)).toEqual([
+			"registrar_llamada",
+			"volver_a_solicitar",
+		]);
+	});
+
+	it("solo el rechazo: un único pendiente", () => {
+		const r = pasosPendientes({
+			...base,
+			rechazadaReciente: { accion: "apagado" },
+		});
+
+		expect(r.map((p) => p.accionSugerida)).toEqual(["volver_a_solicitar"]);
+	});
+
+	it("siguientePaso sigue devolviendo el más importante", () => {
+		expect(
+			siguientePaso({
+				...base,
+				pendienteLlamar: true,
+				rechazadaReciente: { accion: "reactivacion" },
+			})?.accionSugerida,
+		).toBe("registrar_llamada");
 	});
 });
 

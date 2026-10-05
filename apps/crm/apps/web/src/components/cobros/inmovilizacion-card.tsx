@@ -54,8 +54,8 @@ import {
 	rechazadaReciente as buscarRechazadaReciente,
 	estadoPasos,
 	motivoSinSolicitud,
+	pasosPendientes,
 	type SiguientePaso,
-	siguientePaso,
 } from "@/lib/inmovilizacion-siguiente-paso";
 import { cn } from "@/lib/utils";
 import { type client, orpc } from "@/utils/orpc";
@@ -249,7 +249,7 @@ export function InmovilizacionCard({
 		inmov.data.historial,
 		!!solicitudAbierta,
 	);
-	const paso = siguientePaso({
+	const pasos = pasosPendientes({
 		solicitudAbierta,
 		pendienteLlamar: !!pendienteLlamar,
 		pendienteLlamarReactivacion: !!pendienteLlamarReactivacion,
@@ -355,20 +355,24 @@ export function InmovilizacionCard({
 				</Descripcion>
 			</Cabecera>
 			<Cuerpo className="space-y-4">
-				{paso && (
+				{/* Un panel por pendiente: el rechazo reciente convive con otro trámite
+				    en curso (p. ej. la llamada del apagado) en vez de quedar tapado. */}
+				{pasos.map((paso, i) => (
 					<GuiaPaso
-						motivoRechazo={rechazada?.motivoRechazo ?? null}
-						onVolverASolicitar={volverASolicitar}
-						volverDeshabilitado={volverASolicitarDeshabilitado}
+						key={`${paso.accion}:${paso.accionSugerida}`}
 						motivoNoSolicita={motivoNoSolicita}
+						motivoRechazo={rechazada?.motivoRechazo ?? null}
+						mostrarPasos={i === 0}
+						onVolverASolicitar={volverASolicitar}
 						paso={paso}
 						solicitadoAt={
 							solicitudAbierta?.estado === "pendiente_aprobacion"
 								? solicitudAbierta.solicitadoAt
 								: null
 						}
+						volverDeshabilitado={volverASolicitarDeshabilitado}
 					/>
-				)}
+				))}
 				{solicitudAbierta && (
 					<div className="rounded-md border bg-muted/40 p-3 text-sm">
 						<p className="font-medium">
@@ -507,9 +511,10 @@ export function InmovilizacionCard({
 					/>
 				)}
 
-				{motivoNoSolicita && paso?.accionSugerida !== "volver_a_solicitar" && (
-					<p className="text-muted-foreground text-sm">{motivoNoSolicita}</p>
-				)}
+				{motivoNoSolicita &&
+					!pasos.some((p) => p.accionSugerida === "volver_a_solicitar") && (
+						<p className="text-muted-foreground text-sm">{motivoNoSolicita}</p>
+					)}
 
 				{!solicitudAbierta && (
 					<div className="flex gap-2">
@@ -664,8 +669,11 @@ function GuiaPaso({
 	onVolverASolicitar,
 	volverDeshabilitado,
 	motivoNoSolicita,
+	mostrarPasos,
 }: {
 	paso: SiguientePaso;
+	/** La línea de pasos solo en el primer panel: el rechazo no repite el ciclo. */
+	mostrarPasos: boolean;
 	motivoRechazo: string | null;
 	solicitadoAt: Date | string | null;
 	onVolverASolicitar: () => void;
@@ -683,33 +691,35 @@ function GuiaPaso({
 					: "border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/30",
 			)}
 		>
-			<ol className="mb-3 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
-				{estadoPasos(paso.pasoActual).map((p, i) => (
-					<li className="flex items-center gap-1" key={p.id}>
-						{i > 0 && <span className="mx-1 text-muted-foreground">›</span>}
-						{p.estado === "hecho" ? (
-							<CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-						) : p.estado === "actual" ? (
-							<CircleDot
-								className={cn(
-									"h-3.5 w-3.5",
-									rechazo ? "text-red-600" : "text-sky-600",
-								)}
-							/>
-						) : (
-							<CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
-						)}
-						<span
-							className={cn(
-								p.estado === "actual" && "font-semibold",
-								p.estado === "pendiente" && "text-muted-foreground",
+			{mostrarPasos && (
+				<ol className="mb-3 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
+					{estadoPasos(paso.pasoActual).map((p, i) => (
+						<li className="flex items-center gap-1" key={p.id}>
+							{i > 0 && <span className="mx-1 text-muted-foreground">›</span>}
+							{p.estado === "hecho" ? (
+								<CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+							) : p.estado === "actual" ? (
+								<CircleDot
+									className={cn(
+										"h-3.5 w-3.5",
+										rechazo ? "text-red-600" : "text-sky-600",
+									)}
+								/>
+							) : (
+								<CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
 							)}
-						>
-							{p.etiqueta}
-						</span>
-					</li>
-				))}
-			</ol>
+							<span
+								className={cn(
+									p.estado === "actual" && "font-semibold",
+									p.estado === "pendiente" && "text-muted-foreground",
+								)}
+							>
+								{p.etiqueta}
+							</span>
+						</li>
+					))}
+				</ol>
+			)}
 			<p className="font-medium">{paso.titulo}</p>
 			<p className="mt-0.5 text-muted-foreground">{paso.instruccion}</p>
 			{solicitadoAt && (

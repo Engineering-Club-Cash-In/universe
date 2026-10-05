@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
 import type { convenioDecisionRouter } from "../../../server/src/routers/convenio-decision";
+import type { gpsCatalogoBucketRouter } from "../../../server/src/routers/gps-catalogo-bucket";
 import type { gpsEventosRouter } from "../../../server/src/routers/gps-eventos-router";
 import type { gpsIntegracionRouter } from "../../../server/src/routers/gps-integracion";
 import type {
@@ -130,5 +131,9 @@ export const orpc = createTanstackQueryUtils(client);
 // Aparte de MergedRouter: ese tipo está en el límite donde TS7056 trunca lo
 // inferido, y un miembro más rompe otros archivos. Mismo link, tipo propio.
 export const orpcAparte = createTanstackQueryUtils(
-	createORPCClient<RouterClient<typeof misPendientesInmovilizacionRouter>>(link),
+	createORPCClient<
+		RouterClient<
+			typeof misPendientesInmovilizacionRouter & typeof gpsCatalogoBucketRouter
+		>
+	>(link),
 );

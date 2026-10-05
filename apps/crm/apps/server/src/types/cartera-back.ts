@@ -274,6 +274,23 @@ export interface CarteraAsesorPorSifcoResponse {
 	}>;
 }
 
+export interface GetBucketPorSifcoParams {
+	sifcos: string[];
+}
+
+/** Bucket ACTUAL de cada crédito (`/buckets/bucket-por-sifco`), uno por SIFCO. */
+export interface CarteraBucketPorSifcoResponse {
+	data: Array<{
+		numero_credito_sifco: string;
+		/** null = fuera del funnel o sin bucket resoluble. */
+		bucket: number | null;
+		prefijo: string | null;
+		nombre: string | null;
+		estado_mora: string | null;
+		fuera_funnel: boolean;
+	}>;
+}
+
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */
 export interface CreditoBucketResponse extends CreditoDetailResponse {
 	bucket?: {

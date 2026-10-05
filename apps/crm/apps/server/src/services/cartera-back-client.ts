@@ -21,6 +21,7 @@ import type {
 	CarteraBucketActualCredito,
 	CarteraBucketCatalogo,
 	CarteraBucketHistorialEvento,
+	CarteraBucketPorSifcoResponse,
 	CarteraBucketsHistorialResponse,
 	CarteraColaDiaResponse,
 	CarteraComportamientoPagoResponse,
@@ -61,6 +62,7 @@ import type {
 	GetAsesorHistorialParams,
 	GetAsesorPorSifcoParams,
 	GetAsignacionesPoolPorSifcoParams,
+	GetBucketPorSifcoParams,
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
 	GetColaDiaSLAParams,
@@ -2865,6 +2867,38 @@ export class CarteraBackClient {
 		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
 		return this.request<CarteraAsesorPorSifcoResponse>(
 			`/buckets/asesor-por-sifco?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	/**
+	 * Bucket ACTUAL de cada crédito, en bulk: misma derivación del motor que
+	 * `getBucketActualCredito` (un crédito) y que la Ficha 360, para listas largas
+	 * donde pedirlos de a uno no escala. Sin cache a propósito, igual que
+	 * `getBucketActualCredito`: debe reflejar el motor al instante.
+	 */
+	async getBucketPorSifco(
+		params: GetBucketPorSifcoParams,
+	): Promise<CarteraBucketPorSifcoResponse> {
+		const sifcos = [...new Set(params.sifcos)];
+		if (sifcos.length > 1000) {
+			throw new Error("getBucketPorSifco admite máximo 1000 SIFCOs");
+		}
+		if (sifcos.length === 0) return { data: [] };
+
+		// Mismo criterio que getAsesorPorSifco: la lista larga va por POST.
+		if (sifcos.length > SIFCO_LIST_POST_THRESHOLD) {
+			return this.request<CarteraBucketPorSifcoResponse>(
+				"/buckets/bucket-por-sifco",
+				{ method: "POST", body: JSON.stringify({ sifcos }) },
+				false,
+			);
+		}
+
+		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
+		return this.request<CarteraBucketPorSifcoResponse>(
+			`/buckets/bucket-por-sifco?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

@@ -33,11 +33,32 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
-import { orpc } from "@/utils/orpc";
+import {
+	bucketDeEstado,
+	estiloBucket,
+	labelBucketConCodigo,
+	useBucketsCatalogo,
+} from "@/lib/cobros/buckets-catalogo";
+import { orpc, orpcAparte } from "@/utils/orpc";
+import {
+	ESTADOS_FILTRO_BUCKET,
+	estadosDeUnidad,
+	FILTRO_BUCKET_SIN_BUCKET,
+	FILTRO_BUCKET_SIN_CREDITO,
+	FILTRO_BUCKET_TODOS,
+	pasaFiltroBucket,
+} from "./-gps-catalogo-filtro";
 import {
 	ESTADO_CONEXION_CONFIG,
 	formatDuracion,
@@ -59,6 +80,8 @@ interface UnidadCatalogo {
 	id: number;
 	nm: string;
 	creditos: { numeroSifco: string; origen: "vinculado" | "placa" }[];
+	/** Estado de mora (bucket) de cada crédito, por SIFCO; falta si no hay caso de cobros. */
+	estadoMoraPorSifco: Record<string, string>;
 }
 
 const UNIT_COLUMNS: ColumnDef<UnidadCatalogo>[] = [
@@ -266,6 +289,7 @@ function RouteComponent() {
 	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const [filterName, setFilterName] = useState("");
+	const [filtroBucket, setFiltroBucket] = useState(FILTRO_BUCKET_TODOS);
 	const [debouncedFilterName, setDebouncedFilterName] = useState("");
 
 	// Evita disparar una consulta a Wialon (core/search_items) por cada tecla —
@@ -338,15 +362,79 @@ function RouteComponent() {
 		},
 	});
 
+	const bucketsCatalogo = useBucketsCatalogo(!!session && isAdmin);
+	const sifcosCatalogo = useMemo(
+		() => [
+			...new Set(
+				units.data?.items.flatMap((u) =>
+					u.creditos.map((c) => c.numeroSifco).filter(Boolean),
+				) ?? [],
+			),
+		],
+		[units.data],
+	);
+	// Bucket de los créditos del catálogo: del motor de cartera-back (en bulk), el
+	// mismo que el badge de la Ficha 360.
+	const estadosMora = useQuery({
+		...orpcAparte.getEstadoMoraPorSifco.queryOptions({
+			input: { sifcos: sifcosCatalogo },
+		}),
+		enabled: !!session && isAdmin && sifcosCatalogo.length > 0,
+		placeholderData: keepPreviousData,
+	});
+	const estadoMoraPorSifco = estadosMora.data?.estadoMoraPorSifco;
+
 	const unitRows: UnidadCatalogo[] = useMemo(
 		() =>
 			units.data?.items.map((u) => ({
 				id: u.id,
 				nm: u.nm,
 				creditos: u.creditos,
+				estadoMoraPorSifco: estadoMoraPorSifco ?? {},
 			})) ?? [],
-		[units.data],
+		[units.data, estadoMoraPorSifco],
 	);
+	const unitRowsFiltradas = useMemo(
+		() => unitRows.filter((u) => pasaFiltroBucket(u, filtroBucket)),
+		[unitRows, filtroBucket],
+	);
+	const unitColumns = useMemo<ColumnDef<UnidadCatalogo>[]>(
+		() => [
+			...UNIT_COLUMNS,
+			{
+				id: "bucket",
+				header: "Bucket",
+				cell: ({ row }) => {
+					const estados = estadosDeUnidad(row.original);
+					if (estados.length === 0) return "—";
+					return (
+						<div className="flex flex-wrap gap-1">
+							{estados.map((e) => {
+								const b = bucketDeEstado(e, bucketsCatalogo.data);
+								return (
+									<Badge
+										className="font-normal"
+										key={e}
+										style={estiloBucket(b.colorHex)}
+										variant="outline"
+									>
+										{labelBucketConCodigo(b)}
+									</Badge>
+								);
+							})}
+						</div>
+					);
+				},
+			},
+		],
+		[bucketsCatalogo.data],
+	);
+	// Con un bucket elegido, mientras no llegue el bucket de los créditos las
+	// filas no se pueden clasificar: se muestra la carga en vez de una lista vacía.
+	const esperandoBuckets =
+		filtroBucket !== FILTRO_BUCKET_TODOS &&
+		sifcosCatalogo.length > 0 &&
+		estadosMora.isPending;
 
 	const [bitacoraPage, setBitacoraPage] = useState(1);
 	const [bitacoraPageSize, setBitacoraPageSize] = useState(25);
@@ -668,12 +756,49 @@ function RouteComponent() {
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="space-y-4">
-							<Input
-								placeholder="Buscar por nombre de unidad..."
-								value={filterName}
-								onChange={(e) => setFilterName(e.target.value)}
-								className="max-w-sm"
-							/>
+							<div className="flex flex-wrap items-center gap-2">
+								<Input
+									placeholder="Buscar por nombre de unidad..."
+									value={filterName}
+									onChange={(e) => setFilterName(e.target.value)}
+									className="max-w-sm"
+								/>
+								<Select value={filtroBucket} onValueChange={setFiltroBucket}>
+									<SelectTrigger
+										aria-label="Filtrar por bucket"
+										className="w-56"
+									>
+										<SelectValue placeholder="Bucket" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value={FILTRO_BUCKET_TODOS}>
+											Todos los buckets
+										</SelectItem>
+										{ESTADOS_FILTRO_BUCKET.map((e) => (
+											<SelectItem key={e} value={e}>
+												{labelBucketConCodigo(
+													bucketDeEstado(e, bucketsCatalogo.data),
+												)}
+											</SelectItem>
+										))}
+										<SelectItem value={FILTRO_BUCKET_SIN_BUCKET}>
+											Con crédito, sin bucket
+										</SelectItem>
+										<SelectItem value={FILTRO_BUCKET_SIN_CREDITO}>
+											Sin crédito
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							{estadosMora.isError && (
+								<p className="text-destructive text-xs">
+									No se pudo cargar el bucket de los créditos
+									{estadosMora.error?.message
+										? `: ${estadosMora.error.message}`
+										: ""}
+									.
+								</p>
+							)}
 							{units.isError ? (
 								// Igual que con diagnostics: sin esto, un fallo del catálogo
 								// (token faltante, Wialon caído) se ve idéntico a una flota
@@ -697,9 +822,9 @@ function RouteComponent() {
 								</div>
 							) : (
 								<DataTable
-									columns={UNIT_COLUMNS}
-									data={unitRows}
-									isLoading={units.isPending}
+									columns={unitColumns}
+									data={unitRowsFiltradas}
+									isLoading={units.isPending || esperandoBuckets}
 									hideSearch
 								/>
 							)}

@@ -105,6 +105,7 @@ import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { gpsCatalogoBucketRouter } from "./routers/gps-catalogo-bucket";
 import { gpsEventosRouter } from "./routers/gps-eventos-router";
 import { gpsIntegracionRouter } from "./routers/gps-integracion";
 import {
@@ -333,6 +334,7 @@ const handler = new RPCHandler(
 		partnerTrackerRouter,
 		buroInternoProcedures,
 		misPendientesInmovilizacionRouter,
+		gpsCatalogoBucketRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

@@ -30,12 +30,19 @@ export type FilaPendiente = {
 };
 
 /**
- * Deja las filas que le tocan AL USUARIO según quién lleva el crédito en
- * cartera HOY, no según a quién se le mandó el aviso: cartera puede reasignar el
- * crédito después de la decisión o de la ejecución, y entonces el aviso sigue
- * apuntando al dueño anterior. `ejecutarPorAsesor` y `solicitar` revalidan el
- * dueño vigente, así que el anterior vería un pendiente que no puede completar
- * y el nuevo no vería nada.
+ * Deja las filas que le tocan AL USUARIO.
+ *
+ * Lo que hay que ejecutar o llamar (aprobadas por ejecutar, llamadas
+ * pendientes) es de quien lleva el crédito en cartera HOY, no de a quién se le
+ * mandó el aviso: cartera puede reasignar el crédito después de la decisión o de
+ * la ejecución, y entonces el aviso sigue apuntando al dueño anterior.
+ * `ejecutarPorAsesor` revalida el dueño vigente, así que el anterior vería un
+ * pendiente que no puede completar y el nuevo no vería nada.
+ *
+ * Un RECHAZO, en cambio, es respuesta a lo que alguien pidió: se queda con
+ * quien solicitó (su aviso, o el pedido si no hay aviso), igual que lo asigna
+ * `notificarInmovilizacionResuelta`, aunque después cambie el dueño del crédito.
+ * Así también lo conserva quien pidió como suplente por una cobertura.
  *
  * `duenos` es SIFCO → usuario del CRM (`usuariosDuenosPorSifco`, best-effort).
  * Si el SIFCO no está —cartera no respondió, o el dueño no tiene usuario en el
@@ -47,9 +54,10 @@ export function filasDelUsuario(
 	duenos: ReadonlyMap<string, string>,
 	userId: string,
 ): FilaPendiente[] {
-	return filas.filter(
-		(f) => (duenos.get(f.numeroCreditoSifco) ?? f.destinatario) === userId,
-	);
+	return filas.filter((f) => {
+		if (f.estado === "rechazada") return f.destinatario === userId;
+		return (duenos.get(f.numeroCreditoSifco) ?? f.destinatario) === userId;
+	});
 }
 
 /**

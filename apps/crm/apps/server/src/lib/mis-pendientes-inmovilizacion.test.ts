@@ -95,6 +95,43 @@ describe("filasDelUsuario", () => {
 		expect(filasDelUsuario(filas, new Map(), "asesor-viejo")).toHaveLength(0);
 	});
 
+	it("un rechazo se queda con quien lo pidió aunque cartera reasigne el crédito", () => {
+		const duenos = new Map([["01010214100000", "asesor-nuevo"]]);
+		const filas = [fila({ estado: "rechazada", destinatario: "asesor-viejo" })];
+
+		expect(filasDelUsuario(filas, duenos, "asesor-viejo")).toHaveLength(1);
+		expect(filasDelUsuario(filas, duenos, "asesor-nuevo")).toHaveLength(0);
+	});
+
+	it("en una misma lista, lo rechazado y lo aprobado siguen reglas distintas", () => {
+		const duenos = new Map([["S-A", "asesor-nuevo"]]);
+		const filas = [
+			fila({
+				inmovilizacionId: "rech",
+				numeroCreditoSifco: "S-A",
+				estado: "rechazada",
+				destinatario: "asesor-viejo",
+			}),
+			fila({
+				inmovilizacionId: "aprob",
+				numeroCreditoSifco: "S-A",
+				estado: "aprobada",
+				destinatario: "asesor-viejo",
+			}),
+		];
+
+		expect(
+			filasDelUsuario(filas, duenos, "asesor-viejo").map(
+				(f) => f.inmovilizacionId,
+			),
+		).toEqual(["rech"]);
+		expect(
+			filasDelUsuario(filas, duenos, "asesor-nuevo").map(
+				(f) => f.inmovilizacionId,
+			),
+		).toEqual(["aprob"]);
+	});
+
 	it("resuelve cada crédito por separado", () => {
 		const duenos = new Map([
 			["S-A", "ana"],

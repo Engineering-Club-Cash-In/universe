@@ -27,8 +27,9 @@ export const misPendientesInmovilizacionRouter = {
 	 * Pendientes de apagado/reactivación del asesor, para Mi día: aprobadas que
 	 * faltan por ejecutar, llamadas al cliente pendientes y rechazadas recientes.
 	 *
-	 * De quién es cada trámite se decide por quién lleva el crédito en cartera
-	 * HOY (`usuariosDuenosPorSifco`), no por a quién se le mandó el aviso: cartera
+	 * De quién es cada trámite por ejecutar o llamar se decide por quién lleva el
+	 * crédito en cartera HOY (`usuariosDuenosPorSifco`), no por a quién se le mandó
+	 * el aviso; los rechazos se quedan con quien los pidió. Cartera
 	 * puede reasignar el crédito después de la decisión y entonces el aviso sigue
 	 * apuntando al dueño anterior (que ya no puede ejecutar) mientras el nuevo no
 	 * vería nada. Las filas candidatas salen de tablas locales; si cartera no
@@ -121,8 +122,12 @@ export const misPendientesInmovilizacionRouter = {
 			const candidatas = [...decididas, ...llamadas];
 			if (candidatas.length === 0) return { pendientes: [] };
 
+			// Los rechazos no dependen del dueño actual (se quedan con quien los
+			// pidió): no hace falta consultar cartera por ellos.
 			const duenos = await usuariosDuenosPorSifco(
-				candidatas.map((f) => f.numeroCreditoSifco),
+				candidatas
+					.filter((f) => f.estado !== "rechazada")
+					.map((f) => f.numeroCreditoSifco),
 			);
 			const pendientes = armarPendientes(
 				filasDelUsuario(decididas, duenos, userId),

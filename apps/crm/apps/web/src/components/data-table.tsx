@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * DataTable (TanStack Table) con el aspecto de la "Tabla de Cartera" de Figma
+ * (03 · Componentes CRM › Tabla de Cartera, 131:1355): el estilo de encabezado, filas y
+ * hover sale de ui/table.tsx; acá solo el marco (radio lg 20, borde subtle, bg/surface)
+ * y los textos de la paginación con tokens. La API no cambia.
+ */
+
 import {
 	type ColumnDef,
 	type ColumnFiltersState,
@@ -24,6 +31,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface DataTableProps<TData, TValue> {
 	columns: ColumnDef<TData, TValue>[];
@@ -138,7 +146,13 @@ export function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className={`w-full overflow-x-auto rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
+			{/* Marco de la Tabla de Cartera de Figma (radio lg 20, borde subtle, bg/surface). */}
+			<div
+				className={cn(
+					"w-full overflow-x-auto rounded-2xl border border-line-subtle bg-surface",
+					tableContainerClass,
+				)}
+			>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map((headerGroup) => (
@@ -147,7 +161,11 @@ export function DataTable<TData, TValue>({
 									return (
 										<TableHead
 											key={header.id}
-											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-20 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+											className={
+												stickyFirstColumn && idx === 0
+													? "sticky left-0 z-20 shadow-[1px_0_0_0_var(--color-divider)]"
+													: ""
+											}
 										>
 											{header.isPlaceholder
 												? null
@@ -169,10 +187,8 @@ export function DataTable<TData, TValue>({
 									className="h-24 text-center"
 								>
 									<div className="flex items-center justify-center gap-2">
-										<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-										<span className="text-muted-foreground">
-											Cargando datos...
-										</span>
+										<Loader2 className="size-5 animate-spin text-fg-tertiary" />
+										<span className="text-fg-secondary">Cargando datos...</span>
 									</div>
 								</TableCell>
 							</TableRow>
@@ -181,15 +197,17 @@ export function DataTable<TData, TValue>({
 								<TableRow
 									key={row.id}
 									data-state={row.getIsSelected() && "selected"}
-									className={
-										onRowClick ? "cursor-pointer hover:bg-muted/50" : ""
-									}
+									className={onRowClick ? "cursor-pointer" : ""}
 									onClick={() => onRowClick?.(row.original)}
 								>
 									{row.getVisibleCells().map((cell, idx) => (
 										<TableCell
 											key={cell.id}
-											className={stickyFirstColumn && idx === 0 ? "sticky left-0 z-10 bg-background shadow-[1px_0_0_0_hsl(var(--border))]" : ""}
+											className={
+												stickyFirstColumn && idx === 0
+													? "sticky left-0 z-10 bg-surface shadow-[1px_0_0_0_var(--color-divider)]"
+													: ""
+											}
 										>
 											{flexRender(
 												cell.column.columnDef.cell,
@@ -203,7 +221,7 @@ export function DataTable<TData, TValue>({
 							<TableRow>
 								<TableCell
 									colSpan={columns.length}
-									className="h-24 text-center"
+									className="h-24 text-center text-fg-secondary"
 								>
 									No se encontraron resultados.
 								</TableCell>
@@ -214,7 +232,7 @@ export function DataTable<TData, TValue>({
 			</div>
 
 			<div className="flex items-center justify-between px-2">
-				<div className="flex-1 text-muted-foreground text-sm">
+				<div className="type-body-sm flex-1 text-fg-secondary">
 					{isServerPagination ? (
 						<span>
 							Mostrando{" "}
@@ -241,7 +259,7 @@ export function DataTable<TData, TValue>({
 				</div>
 				<div className="flex items-center space-x-6 lg:space-x-8">
 					<div className="flex items-center space-x-2">
-						<p className="font-medium text-sm">Filas por página</p>
+						<p className="type-label-sm text-fg-secondary">Filas por página</p>
 						<select
 							value={
 								isServerPagination
@@ -256,7 +274,7 @@ export function DataTable<TData, TValue>({
 									table.setPageSize(size);
 								}
 							}}
-							className="h-8 w-[70px] rounded-md border border-input bg-background px-2 py-1 text-sm"
+							className="h-8 w-[70px] cursor-pointer rounded-md border border-line bg-surface px-2 py-1 text-[13px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							{pageSizeOptions.map((pageSize) => (
 								<option key={pageSize} value={pageSize}>
@@ -265,7 +283,7 @@ export function DataTable<TData, TValue>({
 							))}
 						</select>
 					</div>
-					<div className="flex w-[100px] items-center justify-center font-medium text-sm">
+					<div className="type-label-sm flex w-[100px] items-center justify-center text-fg-secondary">
 						Página{" "}
 						{isServerPagination
 							? serverPagination.page

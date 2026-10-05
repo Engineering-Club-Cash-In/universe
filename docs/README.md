@@ -22,6 +22,7 @@ a construir y *por qué*, **antes** de escribir código.
 | Feature | Estado | Doc |
 | --- | --- | --- |
 | **COBROS-02 — Rediseño de cobros** | 🔵 En desarrollo (rama `COBROS-02`, sale en meses) | [`features/cobros-02/`](./features/cobros-02/README.md) |
+| **Design System del CRM** (Figma «CRM Ventas» → código) | 🔵 Base y componentes CRM en `feat/crm-design-system`; pantallas en fase 2 | [`design-system/`](./design-system/README.md) |
 | Bot de WhatsApp — Flujo de cobros | 🔵 Paso 1 desplegado en dev; pasos 2-4 pendientes | [`features/bot-whatsapp-cobros/`](./features/bot-whatsapp-cobros/README.md) |
 
 > El bot de WhatsApp es **parte de COBROS-02**, pero tiene carpeta propia porque su

@@ -12,8 +12,8 @@ import {
 	Car,
 	ChevronDown,
 	Database,
-	FileText,
 	Files,
+	FileText,
 	Gauge,
 	Gavel,
 	HandCoins,
@@ -27,6 +27,7 @@ import {
 	Menu,
 	MessageSquare,
 	Moon,
+	Palette,
 	Scale,
 	ScrollText,
 	Settings,
@@ -93,6 +94,10 @@ export default function Header() {
 	const userRole = userProfile.data?.role;
 
 	const isActive = (path: string) => currentPath.startsWith(path);
+	// Clientes y Análisis viven bajo /crm pero tienen su propio botón en la barra:
+	// "Ventas" no debe encenderse junto con ellos.
+	const isVentasActive =
+		isActive("/crm") && !isActive("/crm/clients") && !isActive("/crm/analysis");
 
 	return (
 		<div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -141,7 +146,7 @@ export default function Header() {
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
-										variant={isActive("/crm") ? "secondary" : "ghost"}
+										variant={isVentasActive ? "secondary" : "ghost"}
 										size="sm"
 										className="gap-1"
 									>
@@ -683,6 +688,12 @@ export default function Header() {
 												Reportes
 											</Link>
 										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link to="/design-system" className="cursor-pointer">
+												<Palette className="mr-2 h-4 w-4" />
+												Design System
+											</Link>
+										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
 							)}
@@ -1079,6 +1090,10 @@ function MobileNav({
 											<Link to="/admin/reports" className={MOBILE_LINK_CLASS}>
 												<FileText />
 												Reportes
+											</Link>
+											<Link to="/design-system" className={MOBILE_LINK_CLASS}>
+												<Palette />
+												Design System
 											</Link>
 										</MobileSection>
 									)}

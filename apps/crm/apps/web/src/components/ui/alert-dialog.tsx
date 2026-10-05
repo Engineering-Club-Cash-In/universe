@@ -1,7 +1,32 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import type { VariantProps } from "class-variance-authority";
 import type * as React from "react";
 import { buttonVariants } from "@/components/ui/button";
+import {
+	DialogIcon,
+	dialogDescriptionClassName,
+	dialogFooterClassName,
+	dialogHeaderClassName,
+	dialogOverlayClassName,
+	dialogPanelClassName,
+	dialogPositionClassName,
+	dialogTitleClassName,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+
+/**
+ * AlertDialog — Figma "02 · Componentes › Modal" (component set `122:921`), el Modal de
+ * confirmación tal cual: panel de 420px, sin botón de cerrar, botones Small (32px).
+ *
+ * Tipo (variante de Figma) → piezas:
+ *   Confirmación → <AlertDialogIcon />                        + <AlertDialogAction>
+ *   Advertencia  → <AlertDialogIcon variant="warning" />      + <AlertDialogAction>
+ *   Eliminación  → <AlertDialogIcon variant="destructive" />  + <AlertDialogAction variant="destructive">
+ *   Información  → <AlertDialogIcon variant="info" />         + <AlertDialogAction>
+ * Botones: "Etiqueta cancelar" → AlertDialogCancel (Ghost = `outline`), "Etiqueta principal"
+ * → AlertDialogAction (Primary = `default`). Ambos aceptan `variant`/`size` de Button;
+ * por defecto `size="sm"` como en Figma.
+ */
 
 function AlertDialog({
 	...props
@@ -32,10 +57,7 @@ function AlertDialogOverlay({
 	return (
 		<AlertDialogPrimitive.Overlay
 			data-slot="alert-dialog-overlay"
-			className={cn(
-				"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=open]:animate-in",
-				className,
-			)}
+			className={cn(dialogOverlayClassName, className)}
 			{...props}
 		/>
 	);
@@ -51,7 +73,9 @@ function AlertDialogContent({
 			<AlertDialogPrimitive.Content
 				data-slot="alert-dialog-content"
 				className={cn(
-					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in sm:max-w-lg",
+					dialogPanelClassName,
+					dialogPositionClassName,
+					"sm:max-w-105",
 					className,
 				)}
 				{...props}
@@ -60,6 +84,9 @@ function AlertDialogContent({
 	);
 }
 
+/** Ícono en píldora del Modal (Figma "Frame" 44×28). Ver DialogIcon. */
+const AlertDialogIcon = DialogIcon;
+
 function AlertDialogHeader({
 	className,
 	...props
@@ -67,7 +94,7 @@ function AlertDialogHeader({
 	return (
 		<div
 			data-slot="alert-dialog-header"
-			className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+			className={cn(dialogHeaderClassName, className)}
 			{...props}
 		/>
 	);
@@ -80,10 +107,7 @@ function AlertDialogFooter({
 	return (
 		<div
 			data-slot="alert-dialog-footer"
-			className={cn(
-				"flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
-				className,
-			)}
+			className={cn(dialogFooterClassName, className)}
 			{...props}
 		/>
 	);
@@ -96,7 +120,7 @@ function AlertDialogTitle({
 	return (
 		<AlertDialogPrimitive.Title
 			data-slot="alert-dialog-title"
-			className={cn("font-semibold text-lg", className)}
+			className={cn(dialogTitleClassName, className)}
 			{...props}
 		/>
 	);
@@ -109,19 +133,28 @@ function AlertDialogDescription({
 	return (
 		<AlertDialogPrimitive.Description
 			data-slot="alert-dialog-description"
-			className={cn("text-muted-foreground text-sm", className)}
+			className={cn(dialogDescriptionClassName, className)}
 			{...props}
 		/>
 	);
 }
 
+type AlertDialogButtonProps = Pick<
+	VariantProps<typeof buttonVariants>,
+	"variant" | "size"
+>;
+
 function AlertDialogAction({
 	className,
+	variant = "default",
+	size = "sm",
 	...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
+	AlertDialogButtonProps) {
 	return (
 		<AlertDialogPrimitive.Action
-			className={cn(buttonVariants(), className)}
+			data-slot="alert-dialog-action"
+			className={cn(buttonVariants({ variant, size }), className)}
 			{...props}
 		/>
 	);
@@ -129,11 +162,15 @@ function AlertDialogAction({
 
 function AlertDialogCancel({
 	className,
+	variant = "outline",
+	size = "sm",
 	...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel> &
+	AlertDialogButtonProps) {
 	return (
 		<AlertDialogPrimitive.Cancel
-			className={cn(buttonVariants({ variant: "outline" }), className)}
+			data-slot="alert-dialog-cancel"
+			className={cn(buttonVariants({ variant, size }), className)}
 			{...props}
 		/>
 	);
@@ -145,6 +182,9 @@ export {
 	AlertDialogContent,
 	AlertDialogHeader,
 	AlertDialogFooter,
+	AlertDialogIcon,
+	AlertDialogOverlay,
+	AlertDialogPortal,
 	AlertDialogTitle,
 	AlertDialogDescription,
 	AlertDialogAction,

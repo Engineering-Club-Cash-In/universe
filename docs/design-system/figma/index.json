@@ -1,0 +1,3494 @@
+[
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Botones",
+  "name": "Button",
+  "id": "173:1583",
+  "type": "COMPONENT_SET",
+  "variants": 60,
+  "props": {
+   "Etiqueta": "text",
+   "MostrarIcono": "boolean",
+   "Tipo": [
+    "Primary",
+    "Secondary",
+    "Ghost",
+    "Text",
+    "Danger"
+   ],
+   "Tamaño": [
+    "Medium",
+    "Small"
+   ],
+   "Estado": [
+    "Default",
+    "Hover",
+    "Pressed",
+    "Focus",
+    "Disabled",
+    "Loading"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Inputs",
+  "name": "Input/Text",
+  "id": "79:914",
+  "type": "COMPONENT_SET",
+  "variants": 8,
+  "props": {
+   "Estado": [
+    "Empty",
+    "Filled",
+    "Hover",
+    "Focus",
+    "Disabled",
+    "ReadOnly",
+    "Success",
+    "Error"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Inputs",
+  "name": "Input/Variants",
+  "id": "80:906",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Tipo": [
+    "Search",
+    "Password",
+    "Date",
+    "Number",
+    "Textarea"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Checkbox",
+  "name": "Checkbox",
+  "id": "83:891",
+  "type": "COMPONENT_SET",
+  "variants": 8,
+  "props": {
+   "Estado": [
+    "Default",
+    "Checked",
+    "Indeterminate",
+    "Disabled"
+   ],
+   "Etiqueta": [
+    "Visible",
+    "Oculta"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Radio Button",
+  "name": "Radio",
+  "id": "83:910",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Estado": [
+    "Default",
+    "Selected",
+    "Disabled",
+    "DisabledSelected"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Toggle",
+  "name": "Toggle",
+  "id": "83:929",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Estado": [
+    "Off",
+    "On",
+    "OffDisabled",
+    "OnDisabled"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Dropdown",
+  "name": "Dropdown",
+  "id": "120:975",
+  "type": "COMPONENT_SET",
+  "variants": 12,
+  "props": {
+   "Tipo": [
+    "Single",
+    "Multi",
+    "Searchable"
+   ],
+   "Estado": [
+    "Cerrado",
+    "Abierto",
+    "Hover",
+    "Disabled"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Tabs",
+  "name": "Tabs/Item",
+  "id": "121:895",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Etiqueta": "text",
+   "Contador": "boolean",
+   "Estado": [
+    "Activa",
+    "Hover",
+    "Inactiva"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Tabs",
+  "name": "Tabs",
+  "id": "423:1583",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Pestaña 4": "boolean",
+   "Pestaña 5": "boolean",
+   "Pestaña 6": "boolean",
+   "Pestaña 7": "boolean",
+   "Pestaña 8": "boolean"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Breadcrumb",
+  "name": "Breadcrumb",
+  "id": "121:917",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Tooltip",
+  "name": "Tooltip",
+  "id": "121:934",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Posición": [
+    "Arriba",
+    "Abajo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Modal",
+  "name": "Modal",
+  "id": "122:921",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Título": "text",
+   "Descripción": "text",
+   "Etiqueta principal": "text",
+   "Etiqueta cancelar": "text",
+   "Tipo": [
+    "Confirmación",
+    "Advertencia",
+    "Eliminación",
+    "Información"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Toast",
+  "name": "Toast",
+  "id": "122:957",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Título": "text",
+   "Descripción": "text",
+   "Tipo": [
+    "Success",
+    "Error",
+    "Warning",
+    "Info"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Loader",
+  "name": "Loader",
+  "id": "125:889",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Tipo": [
+    "Spinner",
+    "Inline",
+    "Página"
+   ],
+   "Tamaño": [
+    "Small",
+    "Medium",
+    "Large"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Skeleton",
+  "name": "Skeleton",
+  "id": "125:943",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Tipo": [
+    "Texto",
+    "Card",
+    "Fila"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Calendar",
+  "name": "Calendar",
+  "id": "126:1151",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Modo": [
+    "Simple",
+    "Rango"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Date Picker",
+  "name": "Date Picker",
+  "id": "127:1171",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Modo": [
+    "Simple",
+    "Rango"
+   ],
+   "Estado": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Pagination",
+  "name": "Pagination",
+  "id": "127:1175",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Filter Bar",
+  "name": "Filter Bar",
+  "id": "128:1201",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "SinFiltros",
+    "ConFiltros"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Botones de Tabla",
+  "name": "Button/Toolbar",
+  "id": "130:1209",
+  "type": "COMPONENT_SET",
+  "variants": 12,
+  "props": {
+   "Acción": [
+    "Buscar",
+    "Filtros",
+    "Ordenar",
+    "Columnas"
+   ],
+   "Estado": [
+    "Default",
+    "Hover",
+    "Activo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Botones de Tabla",
+  "name": "Button/QuickAction",
+  "id": "130:1234",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Acción": [
+    "Llamar",
+    "Ver",
+    "Más"
+   ],
+   "Estado": [
+    "Default",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Avatar",
+  "name": "Avatar",
+  "id": "134:1225",
+  "type": "COMPONENT_SET",
+  "variants": 24,
+  "props": {
+   "Iniciales": "text",
+   "Tipo": [
+    "Foto",
+    "Iniciales",
+    "Vacío"
+   ],
+   "Tamaño": [
+    "XS",
+    "S",
+    "M",
+    "L"
+   ],
+   "Estado": [
+    "Sin",
+    "Activo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Chip",
+  "name": "Chip",
+  "id": "134:1261",
+  "type": "COMPONENT_SET",
+  "variants": 12,
+  "props": {
+   "Etiqueta": "text",
+   "Tipo": [
+    "Neutro",
+    "Marca",
+    "Info",
+    "Éxito",
+    "Alerta",
+    "Peligro"
+   ],
+   "Removible": [
+    "No",
+    "Sí"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Progress",
+  "name": "Progress",
+  "id": "135:1223",
+  "type": "COMPONENT_SET",
+  "variants": 12,
+  "props": {
+   "Etiqueta": "text",
+   "Porcentaje": "text",
+   "Detalle": "text",
+   "Tipo": [
+    "Barra",
+    "Compacta",
+    "Circular"
+   ],
+   "Estado": [
+    "Normal",
+    "Éxito",
+    "Alerta",
+    "Riesgo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Divider",
+  "name": "Divider",
+  "id": "135:1234",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Título": "text",
+   "Tipo": [
+    "Horizontal",
+    "Vertical",
+    "ConTítulo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: DataField",
+  "name": "DataField",
+  "id": "149:3001",
+  "type": "COMPONENT_SET",
+  "variants": 8,
+  "props": {
+   "Etiqueta": "text",
+   "Valor": "text",
+   "Orientación": [
+    "Vertical",
+    "Horizontal"
+   ],
+   "Énfasis": [
+    "Normal",
+    "Fuerte",
+    "Positivo",
+    "Negativo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Icon",
+  "name": "Icon",
+  "id": "161:1442",
+  "type": "COMPONENT_SET",
+  "variants": 40,
+  "props": {
+   "Icono": "instance_swap",
+   "Tamaño": [
+    "XS",
+    "S",
+    "M",
+    "L",
+    "XL"
+   ],
+   "Color": [
+    "Default",
+    "Secundario",
+    "Terciario",
+    "Marca",
+    "Éxito",
+    "Alerta",
+    "Peligro",
+    "Inverso"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/arrow-up-down",
+  "id": "161:1200",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/banknote",
+  "id": "161:1190",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/bell",
+  "id": "161:1176",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/calculator",
+  "id": "161:1167",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/calendar",
+  "id": "161:1210",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/calendar-x",
+  "id": "161:1197",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/car",
+  "id": "161:1163",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/chart-column",
+  "id": "161:1164",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/chevron-down",
+  "id": "161:1208",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/chevron-right",
+  "id": "161:1209",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/circle-alert",
+  "id": "161:1191",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/circle-check",
+  "id": "161:1194",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/circle-check-big",
+  "id": "161:1180",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/circle-x",
+  "id": "161:1195",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/clipboard-check",
+  "id": "161:1182",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/clock",
+  "id": "161:1196",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/columns-3",
+  "id": "161:1201",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/download",
+  "id": "161:1206",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/ellipsis-vertical",
+  "id": "161:1202",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/eye",
+  "id": "161:1203",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/file",
+  "id": "161:1186",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/file-pen-line",
+  "id": "161:1178",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/file-text",
+  "id": "161:1168",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/gavel",
+  "id": "161:1165",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/hand-coins",
+  "id": "161:1160",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/handshake",
+  "id": "161:1177",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/info",
+  "id": "161:1193",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/layout-dashboard",
+  "id": "161:1159",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/list-filter",
+  "id": "161:1199",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/mail",
+  "id": "161:1174",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/map-pin",
+  "id": "161:1175",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/message-circle",
+  "id": "161:1172",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/message-square",
+  "id": "161:1173",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/paperclip",
+  "id": "161:1211",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/pencil",
+  "id": "161:1204",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/phone",
+  "id": "161:1171",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/power-off",
+  "id": "161:1181",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/refresh-cw",
+  "id": "161:1179",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/satellite-dish",
+  "id": "161:1188",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/search",
+  "id": "161:1198",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/settings",
+  "id": "161:1169",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/shield",
+  "id": "161:1170",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/shield-check",
+  "id": "161:1189",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/trash-2",
+  "id": "161:1205",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/trending-up",
+  "id": "161:1166",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/triangle-alert",
+  "id": "161:1192",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/user-round",
+  "id": "161:1184",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/user-round-check",
+  "id": "161:1185",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/user-round-cog",
+  "id": "161:1183",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/users",
+  "id": "161:1162",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/users-round",
+  "id": "161:1187",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/wallet",
+  "id": "161:1161",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Iconos Lucide",
+  "name": "lucide/x",
+  "id": "161:1207",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Operational Summary",
+  "name": "Operational Summary Item",
+  "id": "300:1347",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Value": "text",
+   "Label": "text",
+   "Estado": [
+    "Normal",
+    "Éxito",
+    "Alerta",
+    "Peligro",
+    "Info"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Operational Summary",
+  "name": "Operational Summary Bar",
+  "id": "301:1307",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Item 3": "boolean",
+   "Item 4": "boolean",
+   "Item 5": "boolean",
+   "Item 6": "boolean"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Navegación de bloques (Section Header · Agenda)",
+  "name": "Section Header",
+  "id": "335:1373",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Descripción": "text",
+   "Mostrar descripción": "boolean",
+   "Mostrar icono": "boolean",
+   "Mostrar acción": "boolean",
+   "Acción": "instance_swap"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Navegación de bloques (Section Header · Agenda)",
+  "name": "Agenda",
+  "id": "338:4259",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Colapsada",
+    "Expandida"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Navegación de bloques (Section Header · Agenda)",
+  "name": "Agenda / Item",
+  "id": "336:1451",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Hora": "text",
+   "Título": "text",
+   "Descripción": "text",
+   "Mostrar descripción": "boolean",
+   "Mostrar acción": "boolean",
+   "Acción": "instance_swap",
+   "Estado": [
+    "Pendiente",
+    "En progreso",
+    "Completada"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Callout & Checklist",
+  "name": "Callout",
+  "id": "365:1588",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Título": "text",
+   "Cuerpo": "text",
+   "Tono": [
+    "Neutro",
+    "Marca",
+    "Éxito",
+    "Alerta",
+    "Peligro"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Callout & Checklist",
+  "name": "Checklist / Item",
+  "id": "366:1569",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Etiqueta": "text",
+   "Estado": [
+    "Pendiente",
+    "Completado"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Callout & Checklist",
+  "name": "Checklist",
+  "id": "367:1561",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Paso 3": "boolean",
+   "Paso 4": "boolean",
+   "Paso 5": "boolean"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Empty State",
+  "name": "Empty State",
+  "id": "439:1676",
+  "type": "COMPONENT_SET",
+  "variants": 15,
+  "props": {
+   "Título": "text",
+   "Descripción": "text",
+   "Mostrar acción": "boolean",
+   "Acción": "instance_swap",
+   "Tipo": [
+    "Vacío",
+    "Error",
+    "SinPermisos",
+    "SinConexión",
+    "SinDatos"
+   ],
+   "Size": [
+    "Medium",
+    "Small",
+    "Large"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Mensaje inline",
+  "name": "Input/Mensaje",
+  "id": "479:914",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Mensaje": "text",
+   "Tipo": [
+    "Error",
+    "Advertencia",
+    "Ayuda",
+    "Éxito"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Context Menu",
+  "name": "Context Menu",
+  "id": "497:8482",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Context Menu",
+  "name": "Context Menu / Item",
+  "id": "497:8411",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Etiqueta": "text",
+   "Tono": [
+    "Default",
+    "Peligro"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Period Selector",
+  "name": "Period Selector",
+  "id": "708:1869",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Período": [
+    "Día",
+    "Semana",
+    "Mes"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "Componentes — CCI CRM › Sección: Info Tooltip",
+  "name": "Info Tooltip",
+  "id": "749:1866",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Reposo",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/SectionLabel",
+  "id": "1068:881",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Texto": "text",
+   "Estilo": [
+    "Mayúscula",
+    "Columna"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/StatRow",
+  "id": "1068:901",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Etiqueta": "text",
+   "Valor": "text",
+   "MostrarÍcono": "boolean",
+   "Ícono": "instance_swap",
+   "Tono": [
+    "Default",
+    "Peligro",
+    "Éxito"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/CardHeader",
+  "id": "1069:877",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Ícono": "instance_swap",
+   "MostrarÍcono": "boolean",
+   "MostrarChip": "boolean"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Banner",
+  "id": "1069:932",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Eyebrow": "text",
+   "Título": "text",
+   "MostrarEyebrow": "boolean",
+   "Tono": [
+    "Éxito",
+    "Alerta",
+    "Neutral",
+    "Peligro",
+    "Info",
+    "Acento"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Field",
+  "id": "1071:895",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Etiqueta": "text",
+   "Valor": "text",
+   "MostrarÍcono": "boolean",
+   "Ícono": "instance_swap",
+   "MostrarChevron": "boolean"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Field-Textarea",
+  "id": "1071:908",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Etiqueta": "text",
+   "Placeholder": "text"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/OptionCard",
+  "id": "1072:944",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Título": "text",
+   "Subtítulo": "text",
+   "MostrarSubtítulo": "boolean",
+   "Ícono": "instance_swap",
+   "Seleccionado": [
+    "No",
+    "Sí"
+   ],
+   "Trailing": [
+    "Radio",
+    "Chevron"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/SegmentedToggle",
+  "id": "1073:918",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "LabelIzquierda": "text",
+   "LabelDerecha": "text",
+   "Seleccion": [
+    "No",
+    "Sí"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/TimelineItem",
+  "id": "1086:1222",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Fecha": "text",
+   "Título": "text",
+   "Meta": "text",
+   "MostrarMeta": "boolean",
+   "MostrarConector": "boolean",
+   "MostrarBadge": "boolean",
+   "Tono": [
+    "Default",
+    "Éxito",
+    "Peligro",
+    "Alerta"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/MovementRow",
+  "id": "1088:1352",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Concepto": "text",
+   "Fecha": "text",
+   "Monto": "text",
+   "Estado": [
+    "Pagada",
+    "Vencida",
+    "Pendiente"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/DocumentRow",
+  "id": "1092:1516",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Nombre": "text",
+   "Meta": "text",
+   "MostrarEstado": "boolean",
+   "Tipo": [
+    "PDF",
+    "Imagen",
+    "Documento"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/ReferenceCard",
+  "id": "1114:1698",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Nombre": "text",
+   "Iniciales": "text",
+   "Meta": "text",
+   "Estado": [
+    "Verificada",
+    "Pendiente",
+    "NoContactada"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/NoteCard",
+  "id": "1114:1715",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Autor": "text",
+   "Iniciales": "text",
+   "Fecha": "text",
+   "Nota": "text",
+   "Destacada": [
+    "No",
+    "Sí"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Card",
+  "id": "1075:1057",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Tipo": [
+    "EstadoCobro",
+    "CobroMes",
+    "Contacto",
+    "Promesa",
+    "Alertas"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/IdentityHeader",
+  "id": "1079:1001",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Nombre": "text",
+   "Iniciales": "text",
+   "Subtítulo": "text"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/ParticipantSelector",
+  "id": "1079:984",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/WorkspaceTabs",
+  "id": "1081:1047",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Activa": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/ActionBar",
+  "id": "1080:1017",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Config": [
+    "SoloPrimario",
+    "SecundarioPrimario"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/CriticalZone",
+  "id": "1080:1018",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Subtítulo": "text"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/StartPrompt",
+  "id": "1094:1629",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Subtítulo": "text"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/SuccessState",
+  "id": "1127:2167",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Subtítulo": "text"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/ConfirmDialog",
+  "id": "1128:2212",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Título": "text",
+   "Mensaje": "text",
+   "Tono": [
+    "Peligro",
+    "Marca"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Shell",
+  "id": "1126:1984",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "TítuloHeader": "text",
+   "ContenidoConsulta": "instance_swap",
+   "ContenidoGestión": "instance_swap"
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Form/CrearPromesa",
+  "id": "1138:25727",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Form/SinAcuerdo",
+  "id": "1138:25769",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Form/SinAcuerdoReagenda",
+  "id": "1138:29767",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Resultado/Promesa",
+  "id": "1138:29812",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Resultado/SinContacto",
+  "id": "1138:29846",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Resultado/SinAcuerdo",
+  "id": "1138:29880",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Form/WhatsApp",
+  "id": "1420:12",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion·Form/WhatsApp·Editar",
+  "id": "1443:61",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Consulta",
+  "id": "1264:12",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Vista": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Notas"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Gestion",
+  "id": "1265:12",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Estado": [
+    "Reposo",
+    "ConQuien",
+    "Conectando",
+    "EnLlamada",
+    "Guardando"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Selector/PersonasCredito",
+  "id": "1228:3521",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/Participantes·Selector",
+  "id": "2389:3506",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace/ResultadoGestion",
+  "id": "2398:3477",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace · Librería — CCI CRM",
+  "name": "Workspace",
+  "id": "2401:39912",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Propiedad 1": [
+    "BackNav",
+    "Variante 2"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/SelectorResultado",
+  "name": "Workspace/SelectorResultado",
+  "id": "2628:12254",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Sel": [
+    "Acuerdo",
+    "NoAcuerdo",
+    "NoContacto"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/NotasGestion",
+  "name": "Workspace/NotasGestion",
+  "id": "2629:12249",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Colapsado",
+    "Expandido"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/CallStatusBar",
+  "name": "Workspace/CallStatusBar",
+  "id": "2650:12676",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/SelectorCanal",
+  "name": "Workspace/SelectorCanal",
+  "id": "2768:13679",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Canal": [
+    "WhatsApp",
+    "SMS",
+    "Correo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/CanalStatusBar",
+  "name": "Workspace/CanalStatusBar",
+  "id": "2768:13683",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/SelectorResultado·Entrante",
+  "name": "Workspace/SelectorResultado·Entrante",
+  "id": "2802:14905",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Sel": [
+    "Acuerdo",
+    "NoAcuerdo"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Ficha360/HistoricoEvent",
+  "name": "Ficha360/HistoricoEvent",
+  "id": "2532:12079",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Colapsado",
+    "Expandido"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/NotaHistorial",
+  "name": "Workspace/NotaHistorial",
+  "id": "2976:19654",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "nota": "text",
+   "Estado": [
+    "Colapsado",
+    "Expandido"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/ResumenIA·Card",
+  "name": "Workspace/ResumenIA·Card",
+  "id": "3004:19458",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Expandido",
+    "Colapsado"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Card/DeudaCuota",
+  "name": "Workspace/Card/DeudaCuota",
+  "id": "1912:19",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/AccionRescate",
+  "name": "Workspace/AccionRescate",
+  "id": "2305:3450",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Estado": [
+    "Disponible",
+    "RequiereSupervisor",
+    "Crítica"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › SolicitudAccion",
+  "name": "SolicitudAccion",
+  "id": "2228:3447",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Estado": [
+    "Requiere Supervisor",
+    "Pendiente",
+    "Aprobada",
+    "Rechazada",
+    "Cancelada",
+    "Cerrada"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·Referencias",
+  "name": "Workspace/Rescate·Referencias",
+  "id": "3146:29",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·Visita",
+  "name": "Workspace/Rescate·Visita",
+  "id": "3146:82",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·Redes",
+  "name": "Workspace/Rescate·Redes",
+  "id": "3146:123",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·Apagado",
+  "name": "Workspace/Rescate·Apagado",
+  "id": "3146:156",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·ApagadoConfirmar",
+  "name": "Workspace/Rescate·ApagadoConfirmar",
+  "id": "3146:189",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🧩 Componentes del Workspace › Workspace/Rescate·ApagadoEjecutado",
+  "name": "Workspace/Rescate·ApagadoEjecutado",
+  "id": "3146:208",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🟠 Componentes · Supervisor › Rep/BucketRow v2",
+  "name": "Rep/BucketRow v2",
+  "id": "3772:8087",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Colapsado",
+    "Expandido"
+   ]
+  }
+ },
+ {
+  "page": "🧩 02 · Componentes",
+  "pageFile": "components/02-componentes.md",
+  "section": "🟠 Componentes · Supervisor › Bitácora/Registro",
+  "name": "Bitácora/Registro",
+  "id": "3615:5449",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Colapsado",
+    "Expandido"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Badges · Estado de Promesa",
+  "name": "Badge/Promesa",
+  "id": "85:905",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Promesa": [
+    "Pendiente",
+    "Cumplida",
+    "Incumplida",
+    "Vigente",
+    "Cancelada"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Badges · Estado de Convenio",
+  "name": "Badge/Convenio",
+  "id": "85:917",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Convenio": [
+    "Activo",
+    "Finalizado",
+    "Incumplido"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Badges · Tipo de Acción",
+  "name": "Badge/Accion",
+  "id": "85:930",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Acción": [
+    "Llamada",
+    "WhatsApp",
+    "SMS",
+    "Correo",
+    "Visita"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Badges · Tipo de Gestión",
+  "name": "Badge/Gestion",
+  "id": "85:944",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Gestión": [
+    "Promesa",
+    "Convenio",
+    "Reestructura",
+    "Apagado",
+    "Recuperacion"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Crédito",
+  "name": "Card/Crédito",
+  "id": "87:1000",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Prioridad": [
+    "Alta",
+    "Media",
+    "Baja"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Cliente",
+  "name": "Card/Cliente",
+  "id": "88:877",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Vehículo",
+  "name": "Card/Vehículo",
+  "id": "88:902",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Referencia",
+  "name": "Card/Referencia",
+  "id": "88:933",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Promesa de Pago",
+  "name": "Card/Promesa",
+  "id": "88:956",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Opciones": "boolean"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Convenio",
+  "name": "Card/Convenio",
+  "id": "88:976",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Timeline Item",
+  "name": "Timeline/Item",
+  "id": "91:967",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Tipo": [
+    "Llamada",
+    "WhatsApp",
+    "Promesa",
+    "Convenio",
+    "Visita",
+    "Sistema"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Timeline",
+  "name": "Timeline",
+  "id": "131:1885",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Tabla de Cartera",
+  "name": "Table/Cartera",
+  "id": "131:1355",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Prioridad": "boolean"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Botones de Acción CRM",
+  "name": "Action/CRM",
+  "id": "94:1065",
+  "type": "COMPONENT_SET",
+  "variants": 40,
+  "props": {
+   "Acción": [
+    "RegistrarGestion",
+    "CrearPromesa",
+    "CrearConvenio",
+    "Reasignar",
+    "Reestructurar",
+    "EscalarBucket",
+    "RegistrarVisita",
+    "RecuperarVehiculo"
+   ],
+   "Estado": [
+    "Default",
+    "Hover",
+    "Pressed",
+    "Disabled",
+    "Loading"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Próxima Acción",
+  "name": "Cell/PróximaAcción",
+  "id": "95:909",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Acción": [
+    "Llamar",
+    "SeguirPromesa",
+    "Referencias",
+    "Juridico",
+    "Visita",
+    "Ninguna"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Bottom Action Bar",
+  "name": "Bottom Action Bar",
+  "id": "98:984",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Reasignar": "boolean",
+   "Escalar Bucket": "boolean",
+   "Registrar gestión": "boolean",
+   "Crear promesa": "boolean",
+   "Selección": [
+    "Ninguno",
+    "Uno",
+    "Varios",
+    "Deshabilitado"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Simple",
+  "id": "109:990",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Título": "text",
+   "Valor": "text",
+   "ValorTendencia": "text",
+   "Comparación": "text",
+   "Icono": "boolean",
+   "MostrarTendencia": "boolean",
+   "Tipo": [
+    "Simple"
+   ],
+   "Tendencia": [
+    "Positiva",
+    "Negativa",
+    "Neutra"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Meta",
+  "id": "110:957",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Valor": "text",
+   "ValorMeta": "text",
+   "Progreso": "text",
+   "Tendencia": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Desglose",
+  "id": "110:969",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text",
+   "Valor": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Distribución",
+  "id": "110:989",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Ranking",
+  "id": "110:1022",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Título": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "KPI/Trend",
+  "id": "137:1506",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Título": "text",
+   "Valor": "text",
+   "Tendencia": [
+    "Positiva",
+    "Negativa",
+    "Neutra"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Componentes Fuente (Masters)",
+  "name": "Dashboard/RoleHeader",
+  "id": "111:1098",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Rol": [
+    "Asesor",
+    "Supervisor",
+    "Gerencia"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cells de Tabla",
+  "name": "Cell/Avatar",
+  "id": "136:1771",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Nombre": "text",
+   "Subtítulo": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cells de Tabla",
+  "name": "Cell/Dinero",
+  "id": "136:1777",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Monto": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cells de Tabla",
+  "name": "Cell/Fecha",
+  "id": "136:1779",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Fecha": "text",
+   "Relativo": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cells de Tabla",
+  "name": "Cell/Badge",
+  "id": "136:1782",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cells de Tabla",
+  "name": "Cell/Estado",
+  "id": "136:1786",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Panel · Resumen del Crédito",
+  "name": "Panel/ResumenCrédito",
+  "id": "138:1780",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Asesor",
+  "name": "Card/Asesor",
+  "id": "2058:3376",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Default",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Asesor",
+  "name": "Card/Asesor Ausente",
+  "id": "3380:4324",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Default",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Panel de Alertas",
+  "name": "Alert/Item",
+  "id": "148:1994",
+  "type": "COMPONENT_SET",
+  "variants": 24,
+  "props": {
+   "Tipo": [
+    "PromesaVencida",
+    "PagoRecibido",
+    "CambioBucket",
+    "VehiculoApagado",
+    "GPSDesconectado",
+    "CasoCritico"
+   ],
+   "Prioridad": [
+    "Crítica",
+    "Alta",
+    "Media",
+    "Informativa"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Panel de Alertas",
+  "name": "Panel/Alertas",
+  "id": "148:1995",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Mostrar acción": "boolean"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Side Panel / Drawer",
+  "name": "Side Panel",
+  "id": "139:2016",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Tamaño": [
+    "Small",
+    "Medium",
+    "Large"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Header · Crédito",
+  "name": "Header/Crédito",
+  "id": "144:2469",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Cliente": "text",
+   "NúmeroCrédito": "text",
+   "ÚltimaActualización": "text",
+   "Estado": [
+    "Activo",
+    "EnRiesgo",
+    "Jurídico"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Card · Próxima Acción",
+  "name": "Card/PróximaAcción",
+  "id": "145:2468",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Acción": "text",
+   "Prioridad": [
+    "Alta",
+    "Media",
+    "Baja"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Item / Historial de Promesas",
+  "name": "Item/HistorialPromesa",
+  "id": "462:877",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Card/Seguro",
+  "name": "Card/Seguro",
+  "id": "732:2369",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ficha · Edición",
+  "name": "Ficha/EditableRow",
+  "id": "1165:887",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Etiqueta": "text",
+   "Valor": "text",
+   "Modo": [
+    "Vista",
+    "Edición"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ficha · Edición",
+  "name": "Ficha/SaveBar",
+  "id": "1166:917",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Mensaje": "text",
+   "Estado": [
+    "ConCambios",
+    "Guardando"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ficha · Edición",
+  "name": "Ficha/AuditRow",
+  "id": "1166:918",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Campo": "text",
+   "Categoría": "text",
+   "Antes": "text",
+   "Después": "text",
+   "Autor": "text",
+   "FechaOrigen": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "MapView",
+  "id": "1205:3525",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "LocationRow",
+  "id": "1205:3533",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "PhotoStrip",
+  "id": "1205:3543",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "GPS/EstadoVehiculo",
+  "id": "1205:3558",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Detenido",
+    "EnMovimiento"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "SegmentedNav",
+  "id": "1205:3549",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Ubicaciones",
+  "name": "Nav/VolverButton",
+  "id": "1219:15",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cards · Cobranza",
+  "name": "Card/Cobro",
+  "id": "820:1051",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cards · Cobranza",
+  "name": "Card/EstadoCuenta",
+  "id": "825:1036",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Cards · Cobranza",
+  "name": "Card/ModuleEntry",
+  "id": "1368:4056",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Seguimiento de contacto",
+  "name": "Info/ProximoContacto",
+  "id": "1394:3368",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Estado": [
+    "Programado",
+    "Hoy",
+    "SinProgramar"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Componentes CRM — CCI Cobros › Sección: Barra de acciones · Gestión",
+  "name": "ActionBar/Gestión",
+  "id": "861:3268",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Estado": [
+    "Inicial",
+    "Formulario",
+    "Completado"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "🏦 CRM · Rescate & Supervisor (B3/B4) › Card/Aprobación",
+  "name": "Card/Aprobación",
+  "id": "2132:3432",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Tipo": [
+    "Convenio",
+    "Entrega",
+    "Acción crítica"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "🏦 CRM · Rescate & Supervisor (B3/B4) › Distribución/Bucket",
+  "name": "Distribución/Bucket",
+  "id": "2282:3400",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Mostrar segmento 3": "boolean",
+   "Mostrar segmento 4": "boolean",
+   "Mostrar segmento 5": "boolean"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Badge/Bucket",
+  "name": "Badge/Bucket",
+  "id": "86:919",
+  "type": "COMPONENT_SET",
+  "variants": 12,
+  "props": {
+   "Bucket": [
+    "B0",
+    "B1",
+    "B2",
+    "B3",
+    "B4",
+    "B5"
+   ],
+   "Formato": [
+    "Compacta",
+    "Completa"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Indicador/SinContacto",
+  "name": "Indicador/SinContacto",
+  "id": "1406:3179",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Intentos": [
+    "2Mas",
+    "Cero",
+    "Uno"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Info/AccionPendiente",
+  "name": "Info/AccionPendiente",
+  "id": "2195:3402",
+  "type": "COMPONENT_SET",
+  "variants": 6,
+  "props": {
+   "Tipo": [
+    "Llamar",
+    "Promesa por vencer",
+    "Promesa vencida",
+    "Confirmar pago",
+    "Contactar referencia",
+    "Sin intento"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Badge/Mora",
+  "name": "Badge/Mora",
+  "id": "85:892",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Mora": [
+    "AlDia",
+    "Mora30",
+    "Mora60",
+    "Mora90",
+    "Mora120"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/EstadoGestión",
+  "name": "Cartera/EstadoGestión",
+  "id": "3411:1431",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Estado": [
+    "Sin acuerdo",
+    "Convenio vigente",
+    "Promesa incumplida"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/Asesor",
+  "name": "Cartera/Asesor",
+  "id": "3434:1423",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {
+   "Iniciales": "text",
+   "Nombre": "text"
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/FilaCrédito",
+  "name": "Cartera/FilaCrédito",
+  "id": "3442:1510",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Asesor visible": "boolean",
+   "Estado": [
+    "Default",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/FilterChip",
+  "name": "Cartera/FilterChip",
+  "id": "3465:1481",
+  "type": "COMPONENT_SET",
+  "variants": 3,
+  "props": {
+   "Etiqueta": "text",
+   "Estado": [
+    "Default",
+    "Hover",
+    "Seleccionado"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Search Bar",
+  "name": "Search Bar",
+  "id": "127:1210",
+  "type": "COMPONENT_SET",
+  "variants": 4,
+  "props": {
+   "Estado": [
+    "Default",
+    "Focus",
+    "ConTexto",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/Tipo",
+  "name": "Cartera/Tipo",
+  "id": "3480:1481",
+  "type": "COMPONENT_SET",
+  "variants": 5,
+  "props": {
+   "Etiqueta": "text",
+   "Tipo": [
+    "Documentos",
+    "Entrega",
+    "Rebaja",
+    "Convenio",
+    "Crítica"
+   ]
+  }
+ },
+ {
+  "page": "🏦 03 · Componentes CRM",
+  "pageFile": "components/03-componentes-crm.md",
+  "section": "Cartera › Cartera/FilaAprobaciones",
+  "name": "Cartera/FilaAprobaciones",
+  "id": "3483:6133",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Default",
+    "Hover"
+   ]
+  }
+ },
+ {
+  "page": "🟣 01 · Asesor Junior",
+  "pageFile": "components/rol-asesor-junior.md",
+  "section": "🟣 03 · Workspace v3 (2 paneles) › Workspace/GestionPanel",
+  "name": "Workspace/GestionPanel",
+  "id": "2881:18518",
+  "type": "COMPONENT_SET",
+  "variants": 45,
+  "props": {
+   "State": [
+    "HubReposo",
+    "CallAcuerdo",
+    "CallCompCargado",
+    "CallCompNoLegible",
+    "CallCompVacio",
+    "CallNoAcuerdo",
+    "CallNoContacto",
+    "CallPago",
+    "CallPromesa",
+    "CallReagenda",
+    "EntLlamAcuerdo",
+    "EntLlamCompCargado",
+    "EntLlamCompNoLegible",
+    "EntLlamCompVacio",
+    "EntLlamNoAcuerdo",
+    "EntLlamPago",
+    "EntLlamPromesa",
+    "EntLlamReagenda",
+    "EntWAAcuerdo",
+    "EntWACompCargado",
+    "EntWACompNoLegible",
+    "EntWACompVacio",
+    "EntWANoAcuerdo",
+    "EntWAPago",
+    "EntWAPromesa",
+    "EntWAReagenda",
+    "HubPending",
+    "MsgConQuien",
+    "MsgCorreoCompose",
+    "MsgCorreoEnviado",
+    "MsgSMScompose",
+    "MsgSMSenviado",
+    "MsgWAcompose",
+    "MsgWAenviado",
+    "GuardandoNA",
+    "GuardandoNC",
+    "GuardandoPromesa",
+    "RegistradaNA",
+    "RegistradaNC",
+    "RegistradaPromesa",
+    "CallConQuien",
+    "RegistradaPagoWA",
+    "RegistradaComprobante",
+    "RebajaMora",
+    "RegistradaRebaja"
+   ]
+  }
+ },
+ {
+  "page": "🟣 01 · Asesor Junior",
+  "pageFile": "components/rol-asesor-junior.md",
+  "section": "🟣 03 · Workspace v3 (2 paneles) › Workspace/ContextoCaso",
+  "name": "Workspace/ContextoCaso",
+  "id": "2855:17155",
+  "type": "COMPONENT_SET",
+  "variants": 14,
+  "props": {
+   "Tab": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Historico",
+    "AsistenteIA"
+   ],
+   "Menu": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🟣 01 · Asesor Junior",
+  "pageFile": "components/rol-asesor-junior.md",
+  "section": "🟣 03 · Workspace v3 (2 paneles) › Workspace/Gestion·Form/RegistrarPago",
+  "name": "Workspace/Gestion·Form/RegistrarPago",
+  "id": "1897:54",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🟣 01 · Asesor Junior",
+  "pageFile": "components/rol-asesor-junior.md",
+  "section": "🟣 03 · Workspace v3 (2 paneles) › Workspace/Gestion·Resultado/Comprobante",
+  "name": "Workspace/Gestion·Resultado/Comprobante",
+  "id": "1895:88",
+  "type": "COMPONENT",
+  "variants": 1,
+  "props": {}
+ },
+ {
+  "page": "🟣 01 · Asesor Junior",
+  "pageFile": "components/rol-asesor-junior.md",
+  "section": "🟣 03 · Workspace v3 (2 paneles) › Workspace/Gestion·Form/RegistrarComprobante",
+  "name": "Workspace/Gestion·Form/RegistrarComprobante",
+  "id": "1898:90",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "Estado": [
+    "Detectado",
+    "No legible"
+   ]
+  }
+ },
+ {
+  "page": "🟢 02 · Asesor Senior",
+  "pageFile": "components/rol-asesor-senior.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Senior › Workspace/GestionPanel · Senior",
+  "name": "Workspace/GestionPanel · Senior",
+  "id": "3126:13",
+  "type": "COMPONENT_SET",
+  "variants": 53,
+  "props": {
+   "State": [
+    "HubReposo",
+    "CallAcuerdo",
+    "CallCompCargado",
+    "CallCompNoLegible",
+    "CallCompVacio",
+    "CallNoAcuerdo",
+    "CallNoContacto",
+    "CallPago",
+    "CallPromesa",
+    "CallReagenda",
+    "EntLlamAcuerdo",
+    "EntLlamCompCargado",
+    "EntLlamCompNoLegible",
+    "EntLlamCompVacio",
+    "EntLlamNoAcuerdo",
+    "EntLlamPago",
+    "EntLlamPromesa",
+    "EntLlamReagenda",
+    "EntWAAcuerdo",
+    "EntWACompCargado",
+    "EntWACompNoLegible",
+    "EntWACompVacio",
+    "EntWANoAcuerdo",
+    "EntWAPago",
+    "EntWAPromesa",
+    "EntWAReagenda",
+    "HubPending",
+    "MsgConQuien",
+    "MsgCorreoCompose",
+    "MsgCorreoEnviado",
+    "MsgSMScompose",
+    "MsgSMSenviado",
+    "MsgWAcompose",
+    "MsgWAenviado",
+    "GuardandoNA",
+    "GuardandoNC",
+    "GuardandoPromesa",
+    "RegistradaNA",
+    "RegistradaNC",
+    "RegistradaPromesa",
+    "CallConQuien",
+    "RegistradaPagoWA",
+    "RegistradaComprobante",
+    "RebajaMora",
+    "RegistradaRebaja",
+    "CallRescate",
+    "RescateReferencias",
+    "RescateVisita",
+    "RescateRedes",
+    "RescateApagado",
+    "RescateApagadoConfirmar",
+    "RescateApagadoEjecutado",
+    "RegistradaRescate"
+   ]
+  }
+ },
+ {
+  "page": "🟢 02 · Asesor Senior",
+  "pageFile": "components/rol-asesor-senior.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Senior › Workspace/ContextoCaso · Senior",
+  "name": "Workspace/ContextoCaso · Senior",
+  "id": "3126:1190",
+  "type": "COMPONENT_SET",
+  "variants": 14,
+  "props": {
+   "Tab": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Historico",
+    "AsistenteIA"
+   ],
+   "Menu": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🟢 02 · Asesor Senior",
+  "pageFile": "components/rol-asesor-senior.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Senior › Workspace/ContextoCaso · Senior B3",
+  "name": "Workspace/ContextoCaso · Senior B3",
+  "id": "3149:12",
+  "type": "COMPONENT_SET",
+  "variants": 14,
+  "props": {
+   "Tab": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Historico",
+    "AsistenteIA"
+   ],
+   "Menu": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🚗 Asesor Especial",
+  "pageFile": "components/rol-asesor-especial.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Especial › Workspace/GestionPanel · Especial",
+  "name": "Workspace/GestionPanel · Especial",
+  "id": "3785:7977",
+  "type": "COMPONENT_SET",
+  "variants": 64,
+  "props": {
+   "State": [
+    "HubReposo",
+    "CallAcuerdo",
+    "CallCompCargado",
+    "CallCompNoLegible",
+    "CallCompVacio",
+    "CallNoAcuerdo",
+    "CallNoContacto",
+    "CallPago",
+    "CallPromesa",
+    "CallReagenda",
+    "EntLlamAcuerdo",
+    "EntLlamCompCargado",
+    "EntLlamCompNoLegible",
+    "EntLlamCompVacio",
+    "EntLlamNoAcuerdo",
+    "EntLlamPago",
+    "EntLlamPromesa",
+    "EntLlamReagenda",
+    "EntWAAcuerdo",
+    "EntWACompCargado",
+    "EntWACompNoLegible",
+    "EntWACompVacio",
+    "EntWANoAcuerdo",
+    "EntWAPago",
+    "EntWAPromesa",
+    "EntWAReagenda",
+    "HubPending",
+    "MsgConQuien",
+    "MsgCorreoCompose",
+    "MsgCorreoEnviado",
+    "MsgSMScompose",
+    "MsgSMSenviado",
+    "MsgWAcompose",
+    "MsgWAenviado",
+    "GuardandoNA",
+    "GuardandoNC",
+    "GuardandoPromesa",
+    "RegistradaNA",
+    "RegistradaNC",
+    "RegistradaPromesa",
+    "CallConQuien",
+    "RegistradaPagoWA",
+    "RegistradaComprobante",
+    "RebajaMora",
+    "RegistradaRebaja",
+    "CallRescate",
+    "RescateReferencias",
+    "RescateVisita",
+    "RescateRedes",
+    "RescateApagado",
+    "RescateApagadoConfirmar",
+    "RescateApagadoEjecutado",
+    "RegistradaRescate",
+    "ConvenioFlexible",
+    "RecuperacionVehiculo",
+    "EntregaVoluntaria",
+    "EscalarJuridico",
+    "HubEnVisita",
+    "ContactoEspecial",
+    "RegistradaContacto",
+    "RegistradaConvenio",
+    "RegistradaRecuperacion",
+    "RegistradaEntrega",
+    "DerivadoJuridico"
+   ]
+  }
+ },
+ {
+  "page": "🚗 Asesor Especial",
+  "pageFile": "components/rol-asesor-especial.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Especial › Workspace/ContextoCaso · Especial",
+  "name": "Workspace/ContextoCaso · Especial",
+  "id": "3785:9209",
+  "type": "COMPONENT_SET",
+  "variants": 14,
+  "props": {
+   "Tab": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Historico",
+    "AsistenteIA"
+   ],
+   "Menu": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🚗 Asesor Especial",
+  "pageFile": "components/rol-asesor-especial.md",
+  "section": "🟢 03 · Workspace v3 · Asesor Especial › Workspace/ContextoCaso · Especial B3",
+  "name": "Workspace/ContextoCaso · Especial B3",
+  "id": "3785:9749",
+  "type": "COMPONENT_SET",
+  "variants": 14,
+  "props": {
+   "Tab": [
+    "Resumen",
+    "Historial",
+    "EstadoCuenta",
+    "Documentos",
+    "Referencias",
+    "Historico",
+    "AsistenteIA"
+   ],
+   "Menu": [
+    "Cerrado",
+    "Abierto"
+   ]
+  }
+ },
+ {
+  "page": "🟠 03 · Supervisor",
+  "pageFile": "components/rol-supervisor.md",
+  "section": "🟠 08 · Workspace v3 · Aprobación › Workspace/AprobacionPanel · Supervisor",
+  "name": "Workspace/AprobacionPanel · Supervisor",
+  "id": "3345:4274",
+  "type": "COMPONENT_SET",
+  "variants": 10,
+  "props": {
+   "Estado": [
+    "Revisión",
+    "Aprobada"
+   ],
+   "Tipo": [
+    "Rebaja de mora",
+    "Documentos",
+    "Convenio",
+    "Entrega voluntaria",
+    "Acción crítica"
+   ]
+  }
+ },
+ {
+  "page": "🔵 04 · Gerencia",
+  "pageFile": "components/rol-gerencia.md",
+  "section": "🟠 08 · Workspace v3 · Aprobación › Workspace/AprobacionPanel · Supervisor",
+  "name": "Workspace/AprobacionPanel · Supervisor",
+  "id": "3879:2106",
+  "type": "COMPONENT_SET",
+  "variants": 10,
+  "props": {
+   "Estado": [
+    "Revisión",
+    "Aprobada"
+   ],
+   "Tipo": [
+    "Rebaja de mora",
+    "Documentos",
+    "Convenio",
+    "Entrega voluntaria",
+    "Acción crítica"
+   ]
+  }
+ },
+ {
+  "page": "🔵 04 · Gerencia",
+  "pageFile": "components/rol-gerencia.md",
+  "section": "Dashboard/EquipoResumen · Gerencia",
+  "name": "Dashboard/EquipoResumen · Gerencia",
+  "id": "3946:8250",
+  "type": "COMPONENT_SET",
+  "variants": 2,
+  "props": {
+   "State": [
+    "Supervisores",
+    "Asesores"
+   ]
+  }
+ }
+]

@@ -5,13 +5,18 @@
  *
  * La hora va en pasos de 5 minutos: alcanza para una visita y es cómodo de
  * elegir con el dedo en el celular.
+ *
+ * Aspecto: Figma "02 · Componentes › Date Picker" (127:1171). El campo es
+ * <DatePickerTrigger> y el popover toma el marco del Calendar (radio 20,
+ * bg/surface, Elevation/Dropdown); la fila de la hora va debajo, separada por un
+ * divisor.
  */
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
+import { Calendar, calendarCardClassName } from "@/components/ui/calendar";
+import { DatePickerTrigger } from "@/components/ui/date-picker";
 import {
 	Popover,
 	PopoverContent,
@@ -83,26 +88,21 @@ export function FechaHoraPicker({
 		? format(value, conHora ? "EEE dd/MM/yyyy · HH:mm" : "EEE dd/MM/yyyy", {
 				locale: es,
 			})
-		: (placeholder ?? (conHora ? "Elegí día y hora" : "Elegí el día"));
+		: (placeholder ??
+			(conHora ? "Seleccione el día y la hora" : "Seleccione el día"));
 
 	return (
 		<Popover open={abierto} onOpenChange={setAbierto}>
 			<PopoverTrigger asChild>
-				<Button
-					id={id}
-					type="button"
-					variant="outline"
-					className={cn(
-						"h-10 w-full justify-start text-left font-normal",
-						!value && "text-muted-foreground",
-						className,
-					)}
-				>
-					<CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-					<span className="truncate">{texto}</span>
-				</Button>
+				<DatePickerTrigger id={id} placeholder={texto} className={className}>
+					{value ? texto : undefined}
+				</DatePickerTrigger>
 			</PopoverTrigger>
-			<PopoverContent className="w-auto p-0" align="start">
+			<PopoverContent
+				className={cn("w-auto p-0", calendarCardClassName)}
+				align="start"
+				sideOffset={8}
+			>
 				<Calendar
 					mode="single"
 					selected={value}
@@ -117,8 +117,8 @@ export function FechaHoraPicker({
 					locale={es}
 				/>
 				{conHora && (
-					<div className="flex items-center gap-2 border-t p-3">
-						<span className="text-muted-foreground text-sm">Hora</span>
+					<div className="flex items-center gap-2 border-divider border-t px-4 py-3">
+						<span className="type-label-sm text-fg-secondary">Hora</span>
 						<Select
 							value={value ? String(value.getHours()) : undefined}
 							onValueChange={(h) =>
@@ -137,7 +137,7 @@ export function FechaHoraPicker({
 								))}
 							</SelectContent>
 						</Select>
-						<span>:</span>
+						<span className="text-fg-tertiary">:</span>
 						<Select
 							value={
 								value

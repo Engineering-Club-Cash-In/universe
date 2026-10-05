@@ -12,8 +12,27 @@ import {
 	useFormContext,
 	useFormState,
 } from "react-hook-form";
+import {
+	FieldDescription,
+	FieldMessage,
+	type FieldMessageVariant,
+} from "@/components/ui/field-message";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+
+/**
+ * Form (react-hook-form) — anatomía de Figma "02 · Componentes › Inputs" › Input/Text
+ * (79:914) y "Mensaje inline" › Input/Mensaje (479:914):
+ *   FormItem        → columna con gap 6 (label · campo · mensaje)
+ *   FormLabel       → Label (13px 500 text/secondary). En error NO se pinta de rojo: en
+ *                     Figma "Estado=Error" la etiqueta sigue en text/secondary (queda
+ *                     `data-error` para quien lo necesite).
+ *   FormControl     → pasa id, aria-describedby y aria-invalid al campo (Input, Textarea,
+ *                     InputGroupInput… toman el estado Error de Figma con aria-invalid)
+ *   FormDescription → FieldDescription (12px text/tertiary, sin ícono)
+ *   FormMessage     → FieldMessage (Input/Mensaje). Con error de validación usa Tipo=Error;
+ *                     sin error muestra `children` con el `variant` que se le pase.
+ */
 
 const Form = FormProvider;
 
@@ -79,7 +98,7 @@ function FormItem({ className, ...props }: React.ComponentProps<"div">) {
 		<FormItemContext.Provider value={{ id }}>
 			<div
 				data-slot="form-item"
-				className={cn("grid gap-2", className)}
+				className={cn("grid gap-1.5", className)}
 				{...props}
 			/>
 		</FormItemContext.Provider>
@@ -96,7 +115,7 @@ function FormLabel({
 		<Label
 			data-slot="form-label"
 			data-error={!!error}
-			className={cn("data-[error=true]:text-destructive", className)}
+			className={className}
 			htmlFor={formItemId}
 			{...props}
 		/>
@@ -126,16 +145,23 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 	const { formDescriptionId } = useFormField();
 
 	return (
-		<p
+		<FieldDescription
 			data-slot="form-description"
 			id={formDescriptionId}
-			className={cn("text-muted-foreground text-sm", className)}
+			className={className}
 			{...props}
 		/>
 	);
 }
 
-function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
+function FormMessage({
+	className,
+	variant,
+	...props
+}: React.ComponentProps<"p"> & {
+	/** Tipo de Input/Mensaje cuando no hay error de validación (por defecto "error"). */
+	variant?: FieldMessageVariant;
+}) {
 	const { error, formMessageId } = useFormField();
 	const body = error ? String(error?.message ?? "") : props.children;
 
@@ -144,14 +170,15 @@ function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
 	}
 
 	return (
-		<p
+		<FieldMessage
 			data-slot="form-message"
 			id={formMessageId}
-			className={cn("text-destructive text-sm", className)}
+			variant={error ? "error" : variant}
+			className={className}
 			{...props}
 		>
 			{body}
-		</p>
+		</FieldMessage>
 	);
 }
 

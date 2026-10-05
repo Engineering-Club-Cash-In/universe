@@ -3,15 +3,132 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Design System CCI — tokens del Figma "CRM Ventas" (página 01 · Fundamentos).
+ * Fuente de verdad: docs/design-system/figma/tokens.json. Guía de uso y mapeo
+ * Figma → clases de Tailwind: docs/design-system/README.md.
+ *
+ * Capas:
+ *  1. Primitivos (Color/Primitives): --color-cci-*  → clases bg-cci-primary-600, etc.
+ *     Sin modo: el mismo valor en claro y oscuro. Úsenlos solo cuando Figma liga un
+ *     primitivo directo (p. ej. el hover del botón primario = primary/600).
+ *  2. Semánticos (Color/Semantic, Light/Dark): --ds-*  → expuestos como bg-surface,
+ *     text-fg-secondary, border-line, bg-success-subtle, etc. (ver @theme inline).
+ *  3. Variables de shadcn (--background, --primary, …) apuntando a los semánticos,
+ *     para que todo lo que ya usa bg-primary / text-muted-foreground tome la paleta.
+ */
+
 @theme {
 	--font-sans:
-		"Inter", "Geist", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
-		"Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+		"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif,
+		"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+	/* Color/Primitives
+	 * primary/* NO es el de Figma (teal #1fa79b): el 2026-10-05 se eligió como
+	 * color de marca el violeta del logo CCI (tono 235°, principal #5260ff).
+	 * Ver docs/design-system/README.md › Decisiones. */
+	--color-cci-neutral-0: #ffffff;
+	--color-cci-neutral-50: #fafaf9;
+	--color-cci-neutral-100: #f5f4f2;
+	--color-cci-neutral-200: #ebe9e6;
+	--color-cci-neutral-300: #d9d6d1;
+	--color-cci-neutral-400: #b8b3ac;
+	--color-cci-neutral-500: #8f887f;
+	--color-cci-neutral-600: #6b6459;
+	--color-cci-neutral-700: #504a42;
+	--color-cci-neutral-800: #38332d;
+	--color-cci-neutral-900: #24211d;
+	--color-cci-neutral-950: #17150f;
+	--color-cci-primary-50: #eef0ff;
+	--color-cci-primary-100: #dfe2ff;
+	--color-cci-primary-200: #c2c7ff;
+	--color-cci-primary-300: #a1a9ff;
+	--color-cci-primary-400: #7d88ff;
+	--color-cci-primary-500: #5260ff;
+	--color-cci-primary-600: #3f4ce6;
+	--color-cci-primary-700: #333dbf;
+	--color-cci-primary-800: #2a3299;
+	--color-cci-primary-900: #212773;
+	--color-cci-accent-50: #fff3ed;
+	--color-cci-accent-100: #ffe4d6;
+	--color-cci-accent-200: #ffc5a8;
+	--color-cci-accent-300: #ff9f70;
+	--color-cci-accent-400: #ff7a3d;
+	--color-cci-accent-500: #f9611e;
+	--color-cci-accent-600: #db4a0f;
+	--color-cci-accent-700: #b23a0c;
+	--color-cci-accent-bg: #ffe9d6;
+	--color-cci-accent-900: #382618;
+	--color-cci-success-100: #d9f5e3;
+	--color-cci-success-500: #22b267;
+	--color-cci-success-700: #157a45;
+	--color-cci-success-600: #0f7a3d;
+	--color-cci-success-bg: #dff5e6;
+	--color-cci-success-300: #5cc98d;
+	--color-cci-success-900: #1a3228;
+	--color-cci-warning-100: #fcefc7;
+	--color-cci-warning-500: #e8a927;
+	--color-cci-warning-700: #b37d0f;
+	--color-cci-warning-900: #322a16;
+	--color-cci-danger-100: #fbdfdb;
+	--color-cci-danger-500: #e5493a;
+	--color-cci-danger-700: #b32e22;
+	--color-cci-danger-300: #f0796b;
+	--color-cci-danger-900: #3a2220;
+	--color-cci-info-100: #dce9ff;
+	--color-cci-info-500: #3f7fe0;
+	--color-cci-info-700: #2857a8;
+	--color-cci-info-bg: #ede8ff;
+	--color-cci-info-fg: #4832b8;
+	--color-cci-info-900: #1c2c3e;
+	--color-cci-bucket-b0: #22b267;
+	--color-cci-bucket-b0-bg: #e4f7ee;
+	--color-cci-bucket-b0-fg: #12603c;
+	--color-cci-bucket-b1: #7ca327;
+	--color-cci-bucket-b1-bg: #e8f3e0;
+	--color-cci-bucket-b1-fg: #4a6212;
+	--color-cci-bucket-b2: #e8a927;
+	--color-cci-bucket-b2-bg: #fcefc7;
+	--color-cci-bucket-b2-fg: #8a5a0f;
+	--color-cci-bucket-b3: #f9611e;
+	--color-cci-bucket-b3-bg: #ffe4d6;
+	--color-cci-bucket-b3-fg: #b23a0c;
+	--color-cci-bucket-b4: #e5493a;
+	--color-cci-bucket-b4-bg: #fbdfdb;
+	--color-cci-bucket-b4-fg: #b32e22;
+	--color-cci-bucket-b5: #9e2420;
+	--color-cci-bucket-b5-bg: #f3d6d6;
+	--color-cci-bucket-b5-fg: #7a1b14;
+	--color-cci-carbon-975: #0d0d0c;
+	--color-cci-carbon-950: #131312;
+	--color-cci-carbon-900: #1b1b1a;
+	--color-cci-carbon-800: #2a2a29;
+	--color-cci-carbon-750: #30302f;
+	--color-cci-carbon-700: #424240;
+
+	/* Elevation (sin modo) */
+	--shadow-dropdown: 0 4px 12px #0000001f;
+	--shadow-tooltip: 0 2px 8px #0000002e;
+	--shadow-sidepanel: -4px 0 24px #00000024;
+	--shadow-modal: 0 12px 40px #00000038;
+	/* Estado "Pressed" de botones y controles */
+	--shadow-pressed: inset 0 2px 4px #0000002e;
+
+	/* Shimmer del Skeleton: el degradado (background-size 200%) se desplaza. */
+	--animate-shimmer: shimmer 1.5s linear infinite;
+	@keyframes shimmer {
+		0% {
+			background-position: 100% 0;
+		}
+		100% {
+			background-position: -100% 0;
+		}
+	}
 }
 
 html,
 body {
-	@apply bg-white dark:bg-gray-950;
+	@apply bg-background;
 
 	@media (prefers-color-scheme: dark) {
 		color-scheme: dark;
@@ -19,79 +136,196 @@ body {
 }
 
 :root {
+	/* Color/Semantic — Light */
+	--ds-bg-canvas: var(--color-cci-neutral-50);
+	--ds-bg-surface: var(--color-cci-neutral-0);
+	--ds-bg-surface-raised: var(--color-cci-neutral-0);
+	--ds-bg-overlay: var(--color-cci-neutral-900);
+	--ds-text-primary: var(--color-cci-neutral-900);
+	--ds-text-secondary: var(--color-cci-neutral-600);
+	--ds-text-tertiary: var(--color-cci-neutral-500);
+	--ds-text-inverse: var(--color-cci-neutral-0);
+	--ds-border-subtle: var(--color-cci-neutral-200);
+	--ds-border-default: var(--color-cci-neutral-300);
+	--ds-brand-primary: var(--color-cci-primary-500);
+	--ds-brand-primary-hover: var(--color-cci-primary-600);
+	--ds-brand-primary-subtle: var(--color-cci-primary-50);
+	--ds-brand-on-primary: var(--color-cci-neutral-0);
+	--ds-accent-default: var(--color-cci-accent-500);
+	--ds-accent-subtle: var(--color-cci-accent-50);
+	--ds-status-success-subtle: var(--color-cci-success-100);
+	--ds-status-success-text: var(--color-cci-success-700);
+	--ds-status-success-solid: var(--color-cci-success-500);
+	--ds-status-warning-subtle: var(--color-cci-warning-100);
+	--ds-status-warning-text: var(--color-cci-warning-700);
+	--ds-status-warning-solid: var(--color-cci-warning-500);
+	--ds-status-danger-subtle: var(--color-cci-danger-100);
+	--ds-status-danger-text: var(--color-cci-danger-700);
+	--ds-status-danger-solid: var(--color-cci-danger-500);
+	--ds-status-info-subtle: var(--color-cci-info-100);
+	--ds-status-info-text: var(--color-cci-info-700);
+	--ds-status-info-solid: var(--color-cci-info-500);
+	--ds-border-divider: var(--color-cci-neutral-200);
+	--ds-bucket-b0-solid: var(--color-cci-bucket-b0);
+	--ds-bucket-b0-bg: var(--color-cci-bucket-b0-bg);
+	--ds-bucket-b0-fg: var(--color-cci-bucket-b0-fg);
+	--ds-bucket-b1-solid: var(--color-cci-bucket-b1);
+	--ds-bucket-b1-bg: var(--color-cci-bucket-b1-bg);
+	--ds-bucket-b1-fg: var(--color-cci-bucket-b1-fg);
+	--ds-bucket-b2-solid: var(--color-cci-bucket-b2);
+	--ds-bucket-b2-bg: var(--color-cci-bucket-b2-bg);
+	--ds-bucket-b2-fg: var(--color-cci-bucket-b2-fg);
+	--ds-bucket-b3-solid: var(--color-cci-bucket-b3);
+	--ds-bucket-b3-bg: var(--color-cci-bucket-b3-bg);
+	--ds-bucket-b3-fg: var(--color-cci-bucket-b3-fg);
+	--ds-bucket-b4-solid: var(--color-cci-bucket-b4);
+	--ds-bucket-b4-bg: var(--color-cci-bucket-b4-bg);
+	--ds-bucket-b4-fg: var(--color-cci-bucket-b4-fg);
+	--ds-bucket-b5-solid: var(--color-cci-bucket-b5);
+	--ds-bucket-b5-bg: var(--color-cci-bucket-b5-bg);
+	--ds-bucket-b5-fg: var(--color-cci-bucket-b5-fg);
+	--ds-status-success-alt-bg: var(--color-cci-success-bg);
+	--ds-status-success-alt-fg: var(--color-cci-success-600);
+	--ds-status-violet-bg: var(--color-cci-info-bg);
+	--ds-status-violet-fg: var(--color-cci-info-fg);
+	--ds-accent-alt-bg: var(--color-cci-accent-bg);
+	--ds-text-on-solid: var(--color-cci-neutral-0);
+	--ds-shadow-ambient: #24211c1f;
+	--ds-shadow-highlight: #ffffffd9;
+
+	/* Shadow/Clay-* — Light */
+	--ds-shadow-clay-subtle: 3px 3px 8px #24211c1a, -2px -2px 6px #ffffffb2;
+	--ds-shadow-clay-raised: 7px 7px 18px #24211c1f, -5px -5px 14px #ffffffd9;
+
+	/* shadcn → Design System */
 	--radius: 0.625rem;
-	--background: oklch(1 0 0);
-	--foreground: oklch(0.145 0 0);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.145 0 0);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.145 0 0);
-	--primary: oklch(0.205 0 0);
-	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.97 0 0);
-	--secondary-foreground: oklch(0.205 0 0);
-	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
-	--accent: oklch(0.97 0 0);
-	--accent-foreground: oklch(0.205 0 0);
-	--destructive: oklch(0.577 0.245 27.325);
-	--border: oklch(0.922 0 0);
-	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
-	--chart-1: oklch(0.646 0.222 41.116);
-	--chart-2: oklch(0.6 0.118 184.704);
-	--chart-3: oklch(0.398 0.07 227.392);
-	--chart-4: oklch(0.828 0.189 84.429);
-	--chart-5: oklch(0.769 0.188 70.08);
-	--sidebar: oklch(0.985 0 0);
-	--sidebar-foreground: oklch(0.145 0 0);
-	--sidebar-primary: oklch(0.205 0 0);
-	--sidebar-primary-foreground: oklch(0.985 0 0);
-	--sidebar-accent: oklch(0.97 0 0);
-	--sidebar-accent-foreground: oklch(0.205 0 0);
-	--sidebar-border: oklch(0.922 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--background: var(--ds-bg-canvas);
+	--foreground: var(--ds-text-primary);
+	--card: var(--ds-bg-surface);
+	--card-foreground: var(--ds-text-primary);
+	--popover: var(--ds-bg-surface-raised);
+	--popover-foreground: var(--ds-text-primary);
+	--primary: var(--ds-brand-primary);
+	--primary-foreground: var(--ds-brand-on-primary);
+	--secondary: var(--ds-brand-primary-subtle);
+	--secondary-foreground: var(--ds-brand-primary);
+	--muted: var(--color-cci-neutral-100);
+	--muted-foreground: var(--ds-text-secondary);
+	--accent: var(--color-cci-neutral-100);
+	--accent-foreground: var(--ds-text-primary);
+	--destructive: var(--ds-status-danger-solid);
+	--border: var(--ds-border-subtle);
+	--input: var(--ds-border-default);
+	--ring: var(--ds-brand-primary);
+	--chart-1: var(--ds-brand-primary);
+	--chart-2: var(--ds-accent-default);
+	--chart-3: var(--ds-status-info-solid);
+	--chart-4: var(--ds-status-warning-solid);
+	--chart-5: var(--ds-status-success-solid);
+	--sidebar: var(--ds-bg-surface);
+	--sidebar-foreground: var(--ds-text-primary);
+	--sidebar-primary: var(--ds-brand-primary);
+	--sidebar-primary-foreground: var(--ds-brand-on-primary);
+	--sidebar-accent: var(--ds-brand-primary-subtle);
+	--sidebar-accent-foreground: var(--ds-brand-primary);
+	--sidebar-border: var(--ds-border-subtle);
+	--sidebar-ring: var(--ds-brand-primary);
 }
 
 .dark {
-	--background: oklch(0.145 0 0);
-	--foreground: oklch(0.985 0 0);
-	--card: oklch(0.205 0 0);
-	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.205 0 0);
-	--popover-foreground: oklch(0.985 0 0);
-	--primary: oklch(0.922 0 0);
-	--primary-foreground: oklch(0.205 0 0);
-	--secondary: oklch(0.269 0 0);
-	--secondary-foreground: oklch(0.985 0 0);
-	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
-	--accent: oklch(0.269 0 0);
-	--accent-foreground: oklch(0.985 0 0);
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: oklch(1 0 0 / 10%);
-	--input: oklch(1 0 0 / 15%);
-	--ring: oklch(0.556 0 0);
-	--chart-1: oklch(0.488 0.243 264.376);
-	--chart-2: oklch(0.696 0.17 162.48);
-	--chart-3: oklch(0.769 0.188 70.08);
-	--chart-4: oklch(0.627 0.265 303.9);
-	--chart-5: oklch(0.645 0.246 16.439);
-	--sidebar: oklch(0.205 0 0);
-	--sidebar-foreground: oklch(0.985 0 0);
-	--sidebar-primary: oklch(0.488 0.243 264.376);
-	--sidebar-primary-foreground: oklch(0.985 0 0);
-	--sidebar-accent: oklch(0.269 0 0);
-	--sidebar-accent-foreground: oklch(0.985 0 0);
-	--sidebar-border: oklch(1 0 0 / 10%);
-	--sidebar-ring: oklch(0.556 0 0);
+	/* Color/Semantic — Dark */
+	--ds-bg-canvas: var(--color-cci-carbon-950);
+	--ds-bg-surface: var(--color-cci-carbon-900);
+	--ds-bg-surface-raised: var(--color-cci-carbon-800);
+	--ds-bg-overlay: var(--color-cci-carbon-975);
+	--ds-text-primary: var(--color-cci-neutral-50);
+	--ds-text-secondary: var(--color-cci-neutral-300);
+	--ds-text-tertiary: var(--color-cci-neutral-400);
+	--ds-text-inverse: var(--color-cci-neutral-900);
+	--ds-border-subtle: var(--color-cci-carbon-750);
+	--ds-border-default: var(--color-cci-carbon-700);
+	--ds-brand-primary: var(--color-cci-primary-400);
+	--ds-brand-primary-hover: var(--color-cci-primary-300);
+	--ds-brand-primary-subtle: var(--color-cci-primary-900);
+	--ds-brand-on-primary: var(--color-cci-neutral-950);
+	--ds-accent-default: var(--color-cci-accent-400);
+	--ds-accent-subtle: var(--color-cci-accent-900);
+	--ds-status-success-subtle: var(--color-cci-success-900);
+	--ds-status-success-text: var(--color-cci-success-300);
+	--ds-status-success-solid: var(--color-cci-success-500);
+	--ds-status-warning-subtle: var(--color-cci-warning-900);
+	--ds-status-warning-text: var(--color-cci-warning-100);
+	--ds-status-warning-solid: var(--color-cci-warning-500);
+	--ds-status-danger-subtle: var(--color-cci-danger-900);
+	--ds-status-danger-text: var(--color-cci-danger-300);
+	--ds-status-danger-solid: var(--color-cci-danger-500);
+	--ds-status-info-subtle: var(--color-cci-info-900);
+	--ds-status-info-text: var(--color-cci-info-100);
+	--ds-status-info-solid: var(--color-cci-info-500);
+	--ds-border-divider: var(--color-cci-carbon-750);
+	--ds-bucket-b0-solid: var(--color-cci-bucket-b0);
+	--ds-bucket-b0-bg: var(--color-cci-success-900);
+	--ds-bucket-b0-fg: var(--color-cci-success-100);
+	--ds-bucket-b1-solid: var(--color-cci-bucket-b1);
+	--ds-bucket-b1-bg: var(--color-cci-success-900);
+	--ds-bucket-b1-fg: var(--color-cci-success-100);
+	--ds-bucket-b2-solid: var(--color-cci-bucket-b2);
+	--ds-bucket-b2-bg: var(--color-cci-warning-900);
+	--ds-bucket-b2-fg: var(--color-cci-warning-100);
+	--ds-bucket-b3-solid: var(--color-cci-bucket-b3);
+	--ds-bucket-b3-bg: var(--color-cci-accent-900);
+	--ds-bucket-b3-fg: var(--color-cci-accent-100);
+	--ds-bucket-b4-solid: var(--color-cci-bucket-b4);
+	--ds-bucket-b4-bg: var(--color-cci-danger-900);
+	--ds-bucket-b4-fg: var(--color-cci-danger-100);
+	--ds-bucket-b5-solid: var(--color-cci-bucket-b5);
+	--ds-bucket-b5-bg: var(--color-cci-danger-900);
+	--ds-bucket-b5-fg: var(--color-cci-danger-100);
+	--ds-status-success-alt-bg: var(--color-cci-success-900);
+	--ds-status-success-alt-fg: var(--color-cci-success-100);
+	--ds-status-violet-bg: var(--color-cci-primary-900);
+	--ds-status-violet-fg: var(--color-cci-primary-200);
+	--ds-accent-alt-bg: var(--color-cci-accent-900);
+	--ds-text-on-solid: var(--color-cci-neutral-0);
+	--ds-shadow-ambient: #0000004d;
+	--ds-shadow-highlight: #ffffff00;
+
+	/* Shadow/Clay-* — Dark */
+	--ds-shadow-clay-subtle: 3px 3px 8px #00000059, -2px -2px 6px #4f4a4226;
+	--ds-shadow-clay-raised: 8px 8px 22px #00000073, -5px -5px 14px #4f4a4238;
+
+	--muted: var(--color-cci-carbon-800);
+	--accent: var(--color-cci-carbon-800);
+}
+
+/*
+ * Solo para presentaciones: /design-system permite ver el teal original de Figma
+ * poniendo <html data-brand="teal"> mientras se está en esa página.
+ * El resto del CRM usa siempre el violeta.
+ */
+:root[data-brand="teal"] {
+	--color-cci-primary-50: #edfbfa;
+	--color-cci-primary-100: #d3f5f1;
+	--color-cci-primary-200: #a8ece3;
+	--color-cci-primary-300: #74ddd1;
+	--color-cci-primary-400: #3ec5b7;
+	--color-cci-primary-500: #1fa79b;
+	--color-cci-primary-600: #158b82;
+	--color-cci-primary-700: #106f68;
+	--color-cci-primary-800: #0d5852;
+	--color-cci-primary-900: #0a423e;
 }
 
 @theme inline {
-	--radius-sm: calc(var(--radius) - 4px);
-	--radius-md: calc(var(--radius) - 2px);
-	--radius-lg: var(--radius);
-	--radius-xl: calc(var(--radius) + 4px);
+	/* Radios: Figma xs=6 sm=8 sm-plus=10 md=14 lg=20 xl=28 */
+	--radius-sm: 6px;
+	--radius-md: 8px;
+	--radius-lg: 10px;
+	--radius-xl: 14px;
+	--radius-2xl: 20px;
+	--radius-3xl: 28px;
+
+	/* shadcn */
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
@@ -123,7 +357,86 @@ body {
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-ring: var(--sidebar-ring);
+
+	/* Design System — superficies */
+	--color-canvas: var(--ds-bg-canvas);
+	--color-surface: var(--ds-bg-surface);
+	--color-surface-raised: var(--ds-bg-surface-raised);
+	--color-overlay: var(--ds-bg-overlay);
+	/* texto */
+	--color-fg: var(--ds-text-primary);
+	--color-fg-secondary: var(--ds-text-secondary);
+	--color-fg-tertiary: var(--ds-text-tertiary);
+	--color-fg-inverse: var(--ds-text-inverse);
+	--color-on-solid: var(--ds-text-on-solid);
+	/* bordes */
+	--color-line: var(--ds-border-default);
+	--color-line-subtle: var(--ds-border-subtle);
+	--color-divider: var(--ds-border-divider);
+	/* marca y acento */
+	--color-brand: var(--ds-brand-primary);
+	--color-brand-hover: var(--ds-brand-primary-hover);
+	--color-brand-subtle: var(--ds-brand-primary-subtle);
+	--color-on-brand: var(--ds-brand-on-primary);
+	--color-accent-default: var(--ds-accent-default);
+	--color-accent-subtle: var(--ds-accent-subtle);
+	--color-accent-alt: var(--ds-accent-alt-bg);
+	/* estados */
+	--color-success-solid: var(--ds-status-success-solid);
+	--color-success-subtle: var(--ds-status-success-subtle);
+	--color-success-text: var(--ds-status-success-text);
+	--color-success-alt-bg: var(--ds-status-success-alt-bg);
+	--color-success-alt-fg: var(--ds-status-success-alt-fg);
+	--color-warning-solid: var(--ds-status-warning-solid);
+	--color-warning-subtle: var(--ds-status-warning-subtle);
+	--color-warning-text: var(--ds-status-warning-text);
+	--color-danger-solid: var(--ds-status-danger-solid);
+	--color-danger-subtle: var(--ds-status-danger-subtle);
+	--color-danger-text: var(--ds-status-danger-text);
+	--color-info-solid: var(--ds-status-info-solid);
+	--color-info-subtle: var(--ds-status-info-subtle);
+	--color-info-text: var(--ds-status-info-text);
+	--color-violet-bg: var(--ds-status-violet-bg);
+	--color-violet-fg: var(--ds-status-violet-fg);
+	/* buckets de mora B0–B5 */
+	--color-bucket-b0: var(--ds-bucket-b0-solid);
+	--color-bucket-b0-bg: var(--ds-bucket-b0-bg);
+	--color-bucket-b0-fg: var(--ds-bucket-b0-fg);
+	--color-bucket-b1: var(--ds-bucket-b1-solid);
+	--color-bucket-b1-bg: var(--ds-bucket-b1-bg);
+	--color-bucket-b1-fg: var(--ds-bucket-b1-fg);
+	--color-bucket-b2: var(--ds-bucket-b2-solid);
+	--color-bucket-b2-bg: var(--ds-bucket-b2-bg);
+	--color-bucket-b2-fg: var(--ds-bucket-b2-fg);
+	--color-bucket-b3: var(--ds-bucket-b3-solid);
+	--color-bucket-b3-bg: var(--ds-bucket-b3-bg);
+	--color-bucket-b3-fg: var(--ds-bucket-b3-fg);
+	--color-bucket-b4: var(--ds-bucket-b4-solid);
+	--color-bucket-b4-bg: var(--ds-bucket-b4-bg);
+	--color-bucket-b4-fg: var(--ds-bucket-b4-fg);
+	--color-bucket-b5: var(--ds-bucket-b5-solid);
+	--color-bucket-b5-bg: var(--ds-bucket-b5-bg);
+	--color-bucket-b5-fg: var(--ds-bucket-b5-fg);
+
+	/* sombras con modo */
+	--shadow-clay-subtle: var(--ds-shadow-clay-subtle);
+	--shadow-clay-raised: var(--ds-shadow-clay-raised);
 }
+
+/* Tipografía (text styles de Figma): tamaño + interlineado + peso en una clase. */
+@utility type-display-lg { font-size: 40px; line-height: 48px; font-weight: 700; }
+@utility type-display-md { font-size: 32px; line-height: 40px; font-weight: 700; }
+@utility type-heading-lg { font-size: 24px; line-height: 32px; font-weight: 700; }
+@utility type-heading-md { font-size: 20px; line-height: 28px; font-weight: 600; }
+@utility type-heading-sm { font-size: 16px; line-height: 24px; font-weight: 600; }
+@utility type-body-lg { font-size: 16px; line-height: 24px; font-weight: 400; }
+@utility type-body-base { font-size: 14px; line-height: 20px; font-weight: 400; }
+@utility type-body-sm { font-size: 13px; line-height: 18px; font-weight: 400; }
+@utility type-label-base { font-size: 14px; line-height: 20px; font-weight: 500; }
+@utility type-label-sm { font-size: 12px; line-height: 16px; font-weight: 500; }
+@utility type-number-lg { font-size: 28px; line-height: 34px; font-weight: 700; }
+@utility type-number-md { font-size: 20px; line-height: 26px; font-weight: 600; }
+@utility type-caption { font-size: 12px; line-height: 16px; font-weight: 400; }
 
 @layer base {
 	* {
@@ -131,6 +444,39 @@ body {
 	}
 	body {
 		@apply bg-background text-foreground;
+	}
+
+	/*
+	 * Scrollbar del Design System (Figma: paneles del Workspace, nodo "scrollbar"):
+	 * carril 5px border/subtle, thumb neutral/500, radio 3.
+	 * Chrome/Edge/Safari usan ::-webkit-scrollbar (ancho exacto); Firefox solo
+	 * admite scrollbar-color/width, así que se le aplica aparte.
+	 */
+	::-webkit-scrollbar {
+		width: 5px;
+		height: 5px;
+	}
+	::-webkit-scrollbar-track {
+		background: var(--ds-border-subtle);
+		border-radius: 3px;
+	}
+	::-webkit-scrollbar-thumb {
+		background: var(--color-cci-neutral-500);
+		border-radius: 3px;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background: var(--color-cci-neutral-600);
+	}
+	::-webkit-scrollbar-button,
+	::-webkit-scrollbar-corner {
+		display: none;
+		background: transparent;
+	}
+	@supports (-moz-appearance: none) {
+		* {
+			scrollbar-width: thin;
+			scrollbar-color: var(--color-cci-neutral-500) var(--ds-border-subtle);
+		}
 	}
 
 	/* Remove number input spinners */

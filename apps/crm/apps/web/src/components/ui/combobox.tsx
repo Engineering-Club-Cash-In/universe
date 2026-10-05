@@ -2,7 +2,6 @@
 
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import * as React from "react";
-import { Button } from "@/components/ui/button";
 import {
 	Command,
 	CommandEmpty,
@@ -16,7 +15,21 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { selectTriggerClassName } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+
+/**
+ * Combobox — Figma "02 · Componentes › Dropdown" (120:975), Tipo=Searchable.
+ *
+ * Estados de Figma → cómo se ven en código:
+ *   Cerrado/Hover/Disabled → el mismo disparador del Select (`selectTriggerClassName`): 42px,
+ *     radius/md, placeholder en text-fg-tertiary, chevron 16px terciario.
+ *   Abierto → borde brand de 2px (data-state=open del PopoverTrigger) y el menú: Popover
+ *     (bg-surface-raised, border-line-subtle, Elevation/Dropdown) + Command con la caja
+ *     "Buscar…" (bg/canvas) y opciones de 32px; la resaltada va en brand/primary-subtle.
+ * Desvío: la opción elegida además lleva ✓ a la derecha, como el Tipo=Single.
+ * Props sin cambios: `placeholder` sirve para el disparador y para la caja de búsqueda.
+ */
 
 export interface ComboboxOption {
 	value: string;
@@ -83,24 +96,27 @@ export function Combobox({
 	return (
 		<Popover open={open} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>
-				<Button
+				<button
 					ref={triggerRef}
-					variant="outline"
+					type="button"
 					role="combobox"
 					aria-expanded={open}
 					aria-controls={listboxId}
 					disabled={disabled}
-					className={`${
-						width === "min" || width === "full" ? `w-${width}` : `w-[${width}]`
-					} justify-between overflow-hidden`}
+					data-placeholder={value ? undefined : ""}
+					className={cn(
+						selectTriggerClassName,
+						"overflow-hidden",
+						width === "min" || width === "full" ? `w-${width}` : `w-[${width}]`,
+					)}
 				>
 					<span className="truncate">
 						{value
 							? options.find((option) => option.value === value)?.label
 							: placeholder}
 					</span>
-					<ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-				</Button>
+					<ChevronDown className="size-4 text-fg-tertiary transition-transform duration-150 group-data-[state=open]/select:rotate-180" />
+				</button>
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
@@ -128,10 +144,16 @@ export function Combobox({
 							onSearchChange?.(value);
 						}}
 					/>
-					<CommandList style={maxListHeight ? { maxHeight: maxListHeight, overflowY: "auto" } : undefined}>
+					<CommandList
+						style={
+							maxListHeight
+								? { maxHeight: maxListHeight, overflowY: "auto" }
+								: undefined
+						}
+					>
 						{isLoading ? (
-							<div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							<div className="type-body-sm flex items-center justify-center gap-2 py-6 text-fg-tertiary">
+								<Loader2 className="size-4 animate-spin" />
 								Buscando...
 							</div>
 						) : (
@@ -148,13 +170,14 @@ export function Combobox({
 												setOpen(false);
 											}}
 										>
+											<span className="truncate">{option.label}</span>
 											<Check
+												strokeWidth={3}
 												className={cn(
-													"mr-2 h-4 w-4",
+													"ml-auto size-3.5 text-brand",
 													value === option.value ? "opacity-100" : "opacity-0",
 												)}
 											/>
-											{option.label}
 										</CommandItem>
 									))}
 								</CommandGroup>

@@ -1,16 +1,36 @@
 import type * as React from "react";
 import { useEffect, useState } from "react";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import {
+	InputGroup,
+	InputGroupAddon,
+	InputGroupInput,
+	type InputStatus,
+	InputStepper,
+} from "@/components/ui/input";
 
+/**
+ * CurrencyInput — monto en quetzales. Figma "02 · Componentes › Inputs" ›
+ * Input/Variants › Tipo=Number (80:906): misma caja que Input/Text, valor con
+ * separadores ("15,000.00") y el stepper ▲▼ a la derecha (prop `step`).
+ *
+ * Props (además de las de un <input>; `className` va al <input>):
+ *   value / onChange → string normalizado ("15000.50"); el input muestra "15,000.50".
+ *   symbol           → prefijo en text/secondary (default "Q"; "" lo quita, como en Figma).
+ *   step             → muestra el stepper de Figma y activa ↑/↓ del teclado (suma/resta `step`).
+ *   status           → Success/Error de Figma; error también con `aria-invalid`.
+ *   containerClassName → la caja (ancho, márgenes).
+ */
 type CurrencyInputProps = Omit<
 	React.ComponentProps<"input">,
-	"value" | "onChange" | "type" | "inputMode"
+	"value" | "onChange" | "type" | "inputMode" | "step"
 > & {
 	value: string;
 	onChange: (value: string) => void;
 	symbol?: string;
 	locale?: string;
+	step?: number;
+	status?: InputStatus;
+	containerClassName?: string;
 };
 
 function formatWithSeparators(raw: string, locale: string) {
@@ -55,7 +75,10 @@ export function CurrencyInput({
 	onChange,
 	symbol = "Q",
 	locale = "es-GT",
-	className,
+	step,
+	status,
+	containerClassName,
+	onKeyDown,
 	...props
 }: CurrencyInputProps) {
 	const [display, setDisplay] = useState(() =>
@@ -78,17 +101,46 @@ export function CurrencyInput({
 		}
 	}, [value, locale, display]);
 
+	// Stepper de Figma: suma/resta `step` al monto (nunca por debajo de 0) y lo
+	// deja formateado con dos decimales, igual que al salir del campo.
+	const stepBy = (direction: 1 | -1) => {
+		if (!step || props.disabled || props.readOnly) return;
+		const current = Number(normalizeForSubmit(value) || "0");
+		if (Number.isNaN(current)) return;
+		const next = Math.max(
+			0,
+			Math.round((current + direction * step) * 100) / 100,
+		);
+		const nextValue = next.toFixed(2);
+		onChange(nextValue);
+		setDisplay(
+			new Intl.NumberFormat(locale, {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			}).format(next),
+		);
+	};
+
 	return (
-		<div className="relative">
-			<span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-				{symbol}
-			</span>
-			<Input
+		<InputGroup status={status} className={containerClassName}>
+			{symbol ? (
+				<InputGroupAddon className="text-base text-fg-secondary md:text-sm">
+					{symbol}
+				</InputGroupAddon>
+			) : null}
+			<InputGroupInput
 				type="text"
 				inputMode="decimal"
 				placeholder="0.00"
-				className={cn("pl-7", className)}
 				value={display}
+				onKeyDown={(e) => {
+					onKeyDown?.(e);
+					if (!step || e.defaultPrevented) return;
+					if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+						e.preventDefault();
+						stepBy(e.key === "ArrowUp" ? 1 : -1);
+					}
+				}}
 				onChange={(e) => {
 					const { normalized, intPart, decPart } = sanitize(e.target.value);
 					onChange(normalized);
@@ -121,6 +173,13 @@ export function CurrencyInput({
 				}}
 				{...props}
 			/>
-		</div>
+			{step ? (
+				<InputStepper
+					onIncrement={() => stepBy(1)}
+					onDecrement={() => stepBy(-1)}
+					disabled={props.disabled || props.readOnly}
+				/>
+			) : null}
+		</InputGroup>
 	);
 }

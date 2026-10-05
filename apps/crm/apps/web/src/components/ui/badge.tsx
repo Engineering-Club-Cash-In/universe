@@ -4,19 +4,42 @@ import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Badge — derivado de los badges de Figma: "03 · Componentes CRM › Badge/Promesa"
+ * (85:905), "Badge/Convenio" (85:917), "Badge/Gestion" (85:944) y "02 · Componentes ›
+ * Chip" (134:1261). En Figma no hay un Badge genérico: todos comparten la píldora
+ * p 4/12 · gap 6 · radius/full · 12px semibold, con punto opcional de 7px.
+ *
+ * Variantes semánticas nuevas (fondo `*-subtle` + texto `*-text`, como los Badge/* de 03):
+ *   success  → Cumplida / Finalizado / Recuperación
+ *   warning  → Pendiente / Promesa
+ *   danger   → Incumplida / Incumplido
+ *   info     → Activo (convenio) / SMS
+ *   brand    → Vigente
+ *   neutral  → Cancelada
+ * Variantes existentes (se conservan los nombres):
+ *   default     → marca sólido (bg-brand) — el único badge "lleno"; sirve como "activo".
+ *   secondary   → igual que neutral.
+ *   destructive → igual que danger (antes era rojo sólido; ahora sigue el estilo suave de Figma).
+ *   outline     → borde border/default + texto secundario, sin relleno.
+ * `dot` agrega el punto de 7px del color del texto (Badge/Promesa, Badge/Convenio).
+ */
 const badgeVariants = cva(
-	"inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-md border px-2 py-0.5 font-medium text-xs transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+	"type-label-sm inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-transparent px-2.75 py-0.75 font-semibold outline-none transition-[color,background-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-ring aria-invalid:ring-2 aria-invalid:ring-danger-solid [&>svg]:pointer-events-none [&>svg]:size-3",
 	{
 		variants: {
 			variant: {
-				default:
-					"border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
-				secondary:
-					"border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
-				destructive:
-					"border-transparent bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90",
+				default: "bg-brand text-on-brand [a&]:hover:bg-brand-hover",
+				brand: "bg-brand-subtle text-brand",
+				secondary: "bg-muted text-fg-secondary",
+				neutral: "bg-muted text-fg-secondary",
+				success: "bg-success-subtle text-success-text",
+				warning: "bg-warning-subtle text-warning-text",
+				destructive: "bg-danger-subtle text-danger-text",
+				danger: "bg-danger-subtle text-danger-text",
+				info: "bg-info-subtle text-info-text",
 				outline:
-					"text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+					"border-line bg-transparent text-fg-secondary [a&]:hover:bg-muted",
 			},
 		},
 		defaultVariants: {
@@ -29,9 +52,15 @@ function Badge({
 	className,
 	variant,
 	asChild = false,
+	dot = false,
+	children,
 	...props
 }: React.ComponentProps<"span"> &
-	VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+	VariantProps<typeof badgeVariants> & {
+		asChild?: boolean;
+		/** Punto de 7px antes del texto, del mismo color del texto. No aplica con `asChild`. */
+		dot?: boolean;
+	}) {
 	const Comp = asChild ? Slot : "span";
 
 	return (
@@ -39,8 +68,21 @@ function Badge({
 			data-slot="badge"
 			className={cn(badgeVariants({ variant }), className)}
 			{...props}
-		/>
+		>
+			{dot && !asChild ? (
+				<>
+					<span
+						aria-hidden
+						data-slot="badge-dot"
+						className="size-1.75 shrink-0 rounded-full bg-current"
+					/>
+					{children}
+				</>
+			) : (
+				children
+			)}
+		</Comp>
 	);
 }
 
-export { Badge };
+export { Badge, badgeVariants };

@@ -12,8 +12,8 @@ import {
 	Car,
 	ChevronDown,
 	Database,
-	FileText,
 	Files,
+	FileText,
 	Gauge,
 	Gavel,
 	HandCoins,
@@ -27,6 +27,7 @@ import {
 	Menu,
 	MessageSquare,
 	Moon,
+	Palette,
 	Scale,
 	ScrollText,
 	Settings,
@@ -683,6 +684,12 @@ export default function Header() {
 												Reportes
 											</Link>
 										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link to="/design-system" className="cursor-pointer">
+												<Palette className="mr-2 h-4 w-4" />
+												Design System
+											</Link>
+										</DropdownMenuItem>
 									</DropdownMenuContent>
 								</DropdownMenu>
 							)}
@@ -1079,6 +1086,10 @@ function MobileNav({
 											<Link to="/admin/reports" className={MOBILE_LINK_CLASS}>
 												<FileText />
 												Reportes
+											</Link>
+											<Link to="/design-system" className={MOBILE_LINK_CLASS}>
+												<Palette />
+												Design System
 											</Link>
 										</MobileSection>
 									)}

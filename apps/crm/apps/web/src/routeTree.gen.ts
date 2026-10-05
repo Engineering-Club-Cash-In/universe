@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DesignSystemRouteImport } from './routes/design-system'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
@@ -83,6 +84,11 @@ const NotificationsRoute = NotificationsRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignSystemRoute = DesignSystemRouteImport.update({
+  id: '/design-system',
+  path: '/design-system',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -415,6 +421,7 @@ const CobrosRegistrarPagoIdRoute = CobrosRegistrarPagoIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/design-system': typeof DesignSystemRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
@@ -482,6 +489,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/design-system': typeof DesignSystemRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
@@ -550,6 +558,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/design-system': typeof DesignSystemRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
@@ -619,6 +628,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/design-system'
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
@@ -686,6 +696,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/design-system'
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
@@ -753,6 +764,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/design-system'
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
@@ -821,6 +833,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  DesignSystemRoute: typeof DesignSystemRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   AccountingPayInvestorsRoute: typeof AccountingPayInvestorsRoute
@@ -900,6 +913,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design-system': {
+      id: '/design-system'
+      path: '/design-system'
+      fullPath: '/design-system'
+      preLoaderRoute: typeof DesignSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -1349,6 +1369,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  DesignSystemRoute: DesignSystemRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   AccountingPayInvestorsRoute: AccountingPayInvestorsRoute,

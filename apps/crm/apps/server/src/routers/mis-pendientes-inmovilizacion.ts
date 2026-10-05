@@ -9,8 +9,10 @@ import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
+import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
 import {
 	armarPendientes,
+	filasDelUsuario,
 	type PendienteInmovilizacion,
 } from "../lib/mis-pendientes-inmovilizacion";
 import { cobrosProcedure } from "../lib/orpc";
@@ -24,9 +26,14 @@ export const misPendientesInmovilizacionRouter = {
 	/**
 	 * Pendientes de apagado/reactivación del asesor, para Mi día: aprobadas que
 	 * faltan por ejecutar, llamadas al cliente pendientes y rechazadas recientes.
-	 * Lee solo tablas locales: el destinatario de cada trámite es quien recibió el
-	 * aviso (el dueño en cartera, con la reconciliación de `inmovilizacion-notif`),
-	 * así que no depende de cartera-back.
+	 *
+	 * De quién es cada trámite se decide por quién lleva el crédito en cartera
+	 * HOY (`usuariosDuenosPorSifco`), no por a quién se le mandó el aviso: cartera
+	 * puede reasignar el crédito después de la decisión y entonces el aviso sigue
+	 * apuntando al dueño anterior (que ya no puede ejecutar) mientras el nuevo no
+	 * vería nada. Las filas candidatas salen de tablas locales; si cartera no
+	 * responde, cada una cae a su destinatario original (el comportamiento de los
+	 * avisos), así que Mi día no falla por cartera.
 	 */
 	getMisPendientesInmovilizacion: cobrosProcedure.handler(
 		async ({ context }): Promise<{ pendientes: PendienteInmovilizacion[] }> => {
@@ -41,19 +48,24 @@ export const misPendientesInmovilizacionRouter = {
 				estado: inmovilizacionesUnidad.estado,
 				decididoAt: inmovilizacionesUnidad.decididoAt,
 				ejecutadoAt: inmovilizacionesUnidad.ejecutadoAt,
+				// Respaldo si no se sabe quién lleva el crédito hoy: el destinatario
+				// del aviso, o quien pidió el trámite si no hay aviso.
+				destinatario: sql<
+					string | null
+				>`COALESCE(${notifications.assignedTo}, ${inmovilizacionesUnidad.solicitadoPor})`,
 			};
 
-			// Aprobadas y rechazadas: el aviso de decisión se le asignó a este
-			// usuario (aunque lo haya descartado, el trámite sigue siendo suyo).
+			// Aprobadas y rechazadas recientes. El aviso de decisión solo aporta el
+			// destinatario de respaldo (LEFT JOIN: si el aviso no se creó o se
+			// descartó, el trámite no deja de existir).
 			const decididas = await db
 				.select(base)
 				.from(inmovilizacionesUnidad)
-				.innerJoin(
+				.leftJoin(
 					notifications,
 					and(
 						eq(notifications.inmovilizacionId, inmovilizacionesUnidad.id),
 						eq(notifications.cobrosTipo, "inmovilizacion_resuelta"),
-						eq(notifications.assignedTo, userId),
 					),
 				)
 				.innerJoin(
@@ -80,7 +92,8 @@ export const misPendientesInmovilizacionRouter = {
 			// estado del aviso a propósito: ese tipo no se puede resolver ni reabrir a
 			// mano (COBROS_TIPO_RESOLUCION_BLOQUEADA en routers/notifications.ts), solo
 			// el sistema lo cierra al registrar la llamada, así que "abierto" coincide
-			// con `llamada_contacto_id IS NULL`. El join también dice de QUIÉN es.
+			// con `llamada_contacto_id IS NULL`. El aviso aporta el destinatario de
+			// respaldo (de quién es hoy se resuelve abajo, como en las decididas).
 			const llamadas = await db
 				.select(base)
 				.from(inmovilizacionesUnidad)
@@ -89,7 +102,6 @@ export const misPendientesInmovilizacionRouter = {
 					and(
 						eq(notifications.inmovilizacionId, inmovilizacionesUnidad.id),
 						eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
-						eq(notifications.assignedTo, userId),
 						inArray(notifications.status, [...ESTADOS_ABIERTOS]),
 					),
 				)
@@ -106,7 +118,16 @@ export const misPendientesInmovilizacionRouter = {
 				)
 				.orderBy(asc(inmovilizacionesUnidad.ejecutadoAt));
 
-			const pendientes = armarPendientes(decididas, llamadas);
+			const candidatas = [...decididas, ...llamadas];
+			if (candidatas.length === 0) return { pendientes: [] };
+
+			const duenos = await usuariosDuenosPorSifco(
+				candidatas.map((f) => f.numeroCreditoSifco),
+			);
+			const pendientes = armarPendientes(
+				filasDelUsuario(decididas, duenos, userId),
+				filasDelUsuario(llamadas, duenos, userId),
+			);
 			return { pendientes };
 		},
 	),

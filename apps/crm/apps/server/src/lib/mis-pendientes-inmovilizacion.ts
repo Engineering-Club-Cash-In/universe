@@ -22,7 +22,35 @@ export type FilaPendiente = {
 	estado: string;
 	decididoAt: Date | null;
 	ejecutadoAt: Date | null;
+	/**
+	 * A quién iba dirigido el aviso del trámite (o, si no hay, quien lo pidió):
+	 * solo sirve de respaldo cuando no se puede saber quién lleva el crédito hoy.
+	 */
+	destinatario: string | null;
 };
+
+/**
+ * Deja las filas que le tocan AL USUARIO según quién lleva el crédito en
+ * cartera HOY, no según a quién se le mandó el aviso: cartera puede reasignar el
+ * crédito después de la decisión o de la ejecución, y entonces el aviso sigue
+ * apuntando al dueño anterior. `ejecutarPorAsesor` y `solicitar` revalidan el
+ * dueño vigente, así que el anterior vería un pendiente que no puede completar
+ * y el nuevo no vería nada.
+ *
+ * `duenos` es SIFCO → usuario del CRM (`usuariosDuenosPorSifco`, best-effort).
+ * Si el SIFCO no está —cartera no respondió, o el dueño no tiene usuario en el
+ * CRM— no se sabe de quién es y se cae al destinatario del aviso, igual que el
+ * resto de los avisos de inmovilización.
+ */
+export function filasDelUsuario(
+	filas: FilaPendiente[],
+	duenos: ReadonlyMap<string, string>,
+	userId: string,
+): FilaPendiente[] {
+	return filas.filter(
+		(f) => (duenos.get(f.numeroCreditoSifco) ?? f.destinatario) === userId,
+	);
+}
 
 /**
  * `decididas`: aprobadas (por ejecutar) y rechazadas recientes. `llamadas`:

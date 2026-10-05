@@ -17,6 +17,7 @@ import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacion
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
 import { getAsesorPorSifco } from "../controllers/buckets/asesorPorSifco";
+import { getBucketPorSifco } from "../controllers/buckets/bucketPorSifco";
 import { getAsignacionesPoolPorSifco } from "../controllers/buckets/asignacionesPoolPorSifco";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
@@ -95,6 +96,29 @@ async function resolverAsesorPorSifco(crudos: string[], set: { status: number })
     return {
       success: false,
       message: "[ERROR] No se pudo obtener el asesor de los créditos",
+      error: String(err),
+    };
+  }
+}
+
+/** Cuerpo compartido por el GET y el POST de /buckets/bucket-por-sifco. */
+const MAX_SIFCOS_BUCKET = 1000;
+async function resolverBucketPorSifco(crudos: string[], set: { status: number }) {
+  const sifcos = [...new Set(crudos.map((s) => String(s).trim()).filter(Boolean))];
+  if (sifcos.length === 0 || sifcos.length > MAX_SIFCOS_BUCKET) {
+    set.status = 400;
+    return {
+      success: false,
+      message: `[ERROR] sifcos debe contener entre 1 y ${MAX_SIFCOS_BUCKET} valores`,
+    };
+  }
+  try {
+    return await getBucketPorSifco({ sifcos });
+  } catch (err) {
+    set.status = 500;
+    return {
+      success: false,
+      message: "[ERROR] No se pudo obtener el bucket de los créditos",
       error: String(err),
     };
   }
@@ -376,6 +400,31 @@ export const bucketsRouter = new Elysia()
     async ({ body, set, user }: any) => {
       if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
       return resolverAsesorPorSifco(body?.sifcos ?? [], set);
+    },
+    {
+      body: t.Object({ sifcos: t.Array(t.String()) }),
+    },
+  )
+
+  // Bucket ACTUAL de cada crédito, en bulk (mismo cálculo que /buckets/credito/:sifco
+  // y el listado /buckets/creditos). Dos verbos por lo mismo que
+  // /buckets/asesor-por-sifco: listas largas no entran en la query string.
+  .get(
+    "/buckets/bucket-por-sifco",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      return resolverBucketPorSifco(String(query.sifcos ?? "").split(","), set);
+    },
+    {
+      query: t.Object({ sifcos: t.String() }),
+    },
+  )
+
+  .post(
+    "/buckets/bucket-por-sifco",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      return resolverBucketPorSifco(body?.sifcos ?? [], set);
     },
     {
       body: t.Object({ sifcos: t.Array(t.String()) }),

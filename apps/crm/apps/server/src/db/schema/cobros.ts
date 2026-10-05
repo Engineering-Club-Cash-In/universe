@@ -611,7 +611,7 @@ export const conveniosPago = pgTable("convenios_pago", {
 // CB-042: cada envío a recuperación desde la Ficha 360 deja una fila acá, con
 // el formulario que ve el asesor de B4. Dos tipos de envío:
 //   · 'tomado'             → recuperación forzosa (el asesor decide quitarla)
-//   · 'entrega_voluntaria' → el cliente la entrega (fecha, lugar, documentos)
+//   · 'entrega_voluntaria' → el cliente la entrega (fecha, lugar, quién)
 // 'orden_secuestro' queda para el proceso legal, que no se registra desde acá.
 //
 // La tabla ya existía y nadie la llenaba; las columnas viejas conservan su
@@ -670,6 +670,8 @@ export const recuperacionesVehiculo = pgTable(
 		lugarEntrega: text("lugar_entrega"),
 		entregaPersona: text("entrega_persona"),
 		entregaRelacion: text("entrega_relacion"),
+		// Ya no se piden (2026-10-05): el formulario dejó de preguntar por los
+		// documentos. Las columnas quedan para no migrar; no se escriben.
 		documentos: text("documentos").array().notNull().default(sql`'{}'::text[]`),
 		documentosOtros: text("documentos_otros"),
 
@@ -693,6 +695,7 @@ export const recuperacionesVehiculo = pgTable(
 		recepcionEstadoVehiculo: text("recepcion_estado_vehiculo"),
 		recepcionEstadoDetalle: text("recepcion_estado_detalle"),
 		recepcionKilometraje: integer("recepcion_kilometraje"),
+		// Igual que `documentos`: sin uso desde 2026-10-05.
 		recepcionDocumentos: text("recepcion_documentos").array(),
 		recepcionDocumentosOtros: text("recepcion_documentos_otros"),
 		recepcionNotas: text("recepcion_notas"),

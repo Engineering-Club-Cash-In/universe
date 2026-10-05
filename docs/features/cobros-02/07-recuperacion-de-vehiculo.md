@@ -39,7 +39,7 @@ cliente colaborando.
 | Opción | `tipo_recuperacion` | Cuándo | Buckets | Qué se llena |
 | --- | --- | --- | --- | --- |
 | **Recuperar vehículo** | `tomado` | El cliente no paga y hay que quitarle la unidad | B2–B3 (traslada **al aprobarse**, CB-043) | Motivos, **justificación**, **checklist**, dónde está el vehículo, estado, observaciones |
-| **Entrega voluntaria** | `entrega_voluntaria` | El cliente entrega la unidad por su cuenta | B2–B3 (traslada) · **B4 (solo registra)** | Motivos, fecha y hora, lugar, quién entrega, documentos, estado |
+| **Entrega voluntaria** | `entrega_voluntaria` | El cliente entrega la unidad por su cuenta | B2–B3 (traslada) · **B4 (solo registra)** | Motivos, fecha y hora, lugar, quién entrega, estado |
 
 > **Rango (2026-09-30):** los dos envíos salen de **B2 o B3**. El plan 08 los tenía de B1 a
 > B3; con CB-043 se sacó B1. El CRM lo exige en el servidor antes de guardar nada (el
@@ -78,6 +78,11 @@ migración `0065`: las columnas viejas conservan su sentido (`fecha_recuperacion
 agregan las del formulario, la foto del saldo y la recepción. El reporte de cartera que
 ya contaba esa tabla (`reportes-cartera.ts`) empieza a mostrar datos reales.
 
+> **2026-10-05:** el formulario dejó de pedir los documentos que entrega el cliente
+> (llaves, tarjeta de circulación, título, póliza) en la entrega voluntaria y en la
+> recepción. Las columnas `documentos`, `documentos_otros`, `recepcion_documentos` y
+> `recepcion_documentos_otros` siguen en la tabla, pero ya no se escriben ni se muestran.
+
 Una fila por envío; el **vigente** es el más reciente del caso.
 
 ### Guardar antes de trasladar
@@ -97,8 +102,7 @@ explicación no se explica solo.
 
 - **La tarjeta "Recuperación de vehículo"**, arriba del Resumen y en la pestaña
   Vehículo: el tipo, quién lo mandó y desde qué bucket, los motivos, los datos de la
-  entrega (con "en 2 días" / "hace 3 horas"), los documentos que trae y los que no,
-  dónde está (con enlace al mapa y la antigüedad de la señal del GPS), el estado, el
+  entrega (con "en 2 días" / "hace 3 horas"), dónde está (con enlace al mapa y la antigüedad de la señal del GPS), el estado, el
   saldo al registrar y las observaciones. Desde el Resumen lleva a la pestaña Vehículo,
   donde están el GPS en vivo y las ubicaciones clave. Reemplaza la tarjeta vieja, que
   solo salía para incobrables.
@@ -107,8 +111,8 @@ explicación no se explica solo.
   entrega. Quien registró no se avisa a sí mismo. Dedup por registro.
 - **Confirmar recepción de la unidad**, **solo con el crédito en B4** (el servidor lo
   exige y falla cerrado si cartera no responde). Arranca con lo reportado al enviar y
-  guarda aparte lo que de verdad llegó (`recepcion_*`): la diferencia entre lo que el
-  cliente dijo que entregaba y lo que entregó es justo lo que interesa ver. No toca
+  guarda aparte lo que de verdad llegó (`recepcion_*`): la diferencia entre el estado
+  reportado y el de la unidad recibida es justo lo que interesa ver. No toca
   cartera: lo que sigue (jurídico, contabilidad) queda como está (decisión 6 del plan 08).
 
 ### Compatibilidad

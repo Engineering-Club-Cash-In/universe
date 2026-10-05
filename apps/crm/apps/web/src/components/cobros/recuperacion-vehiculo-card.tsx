@@ -1,6 +1,6 @@
 /**
  * CB-042 · Lo que ve el asesor de B4 cuando le llega un crédito a recuperación:
- * por qué llegó, si el cliente entrega la unidad (cuándo, dónde, qué trae),
+ * por qué llegó, si el cliente entrega la unidad (cuándo, dónde y quién),
  * dónde está el vehículo, en qué estado y cuánto debía al momento del envío.
  *
  * Va arriba del Resumen de la Ficha 360 y en la pestaña Vehículo. Sin
@@ -36,7 +36,6 @@ import {
 	resumenChecklist,
 } from "server/src/lib/recuperacion-solicitud";
 import {
-	DOCUMENTOS_VEHICULO,
 	ESTADOS_VEHICULO,
 	etiquetaMotivo,
 	TIPO_RECUPERACION_LABEL,
@@ -51,7 +50,6 @@ import { AvisoFaltante } from "@/components/cobros/recuperacion-vehiculo-dialog"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -116,9 +114,6 @@ const quetzales = (v: string | number | null | undefined) =>
 
 const etiquetaEstado = (clave: string | null) =>
 	clave ? ((ESTADOS_VEHICULO as Record<string, string>)[clave] ?? clave) : null;
-
-const etiquetaDocumento = (clave: string) =>
-	(DOCUMENTOS_VEHICULO as Record<string, string>)[clave] ?? clave;
 
 /** "en 2 días" / "hace 3 horas", para que la fecha de entrega se lea de un vistazo. */
 function relativo(v: Date | string | null | undefined): string | null {
@@ -484,9 +479,6 @@ function DetalleRegistro({ registro: r }: { registro: Registro }) {
 	const lng = r.ubicacionLng != null ? Number(r.ubicacionLng) : undefined;
 	const mapa = r.ubicacionEnlace ?? googleMapsUrl(lat, lng);
 	const motivos = r.motivos.filter((m) => m !== "otro").map(etiquetaMotivo);
-	const noEntrega = Object.keys(DOCUMENTOS_VEHICULO).filter(
-		(d) => !r.documentos.includes(d),
-	);
 	const hayUbicacion = r.ubicacionDireccion || mapa;
 
 	return (
@@ -521,17 +513,6 @@ function DetalleRegistro({ registro: r }: { registro: Registro }) {
 						{r.entregaPersona
 							? `${r.entregaPersona}${r.entregaRelacion ? ` (${r.entregaRelacion})` : ""}`
 							: "El cliente"}
-					</Dato>
-					<Dato label="Documentos">
-						{r.documentos.length > 0
-							? r.documentos.map(etiquetaDocumento).join(", ")
-							: "Ninguno"}
-						{r.documentosOtros ? `, ${r.documentosOtros}` : ""}
-						{noEntrega.length > 0 && r.documentos.length > 0 && (
-							<p className="font-normal text-muted-foreground text-xs">
-								No trae: {noEntrega.map(etiquetaDocumento).join(", ")}
-							</p>
-						)}
 					</Dato>
 				</div>
 			)}
@@ -637,12 +618,6 @@ function Recepcion({ registro: r }: { registro: Registro }) {
 						<p className="font-normal">{r.recepcionEstadoDetalle}</p>
 					)}
 				</Dato>
-				<Dato label="Documentos recibidos">
-					{r.recepcionDocumentos && r.recepcionDocumentos.length > 0
-						? r.recepcionDocumentos.map(etiquetaDocumento).join(", ")
-						: "Ninguno"}
-					{r.recepcionDocumentosOtros ? `, ${r.recepcionDocumentosOtros}` : ""}
-				</Dato>
 			</div>
 			{r.recepcionNotas && <p className="text-sm">{r.recepcionNotas}</p>}
 			<p className="text-muted-foreground text-xs">
@@ -684,10 +659,6 @@ function ConfirmarRecepcionDialog({
 	);
 	const [kilometraje, setKilometraje] = useState(
 		registro.kilometraje != null ? String(registro.kilometraje) : "",
-	);
-	const [documentos, setDocumentos] = useState<string[]>(registro.documentos);
-	const [documentosOtros, setDocumentosOtros] = useState(
-		registro.documentosOtros ?? "",
 	);
 	const [notas, setNotas] = useState("");
 	const [intentoEnviar, setIntentoEnviar] = useState(false);
@@ -784,37 +755,6 @@ function ConfirmarRecepcionDialog({
 						placeholder="Daños, faltantes u otras observaciones al recibir"
 						rows={2}
 					/>
-					<div className="space-y-2">
-						<Label>Documentos recibidos</Label>
-						<div className="grid gap-2 sm:grid-cols-3">
-							{Object.entries(DOCUMENTOS_VEHICULO).map(([clave, label]) => (
-								<label
-									key={clave}
-									htmlFor={`rec-doc-${clave}`}
-									className="flex cursor-pointer items-center gap-2 text-sm"
-								>
-									<Checkbox
-										id={`rec-doc-${clave}`}
-										checked={documentos.includes(clave)}
-										onCheckedChange={() =>
-											setDocumentos((d) =>
-												d.includes(clave)
-													? d.filter((x) => x !== clave)
-													: [...d, clave],
-											)
-										}
-									/>
-									{label}
-								</label>
-							))}
-						</div>
-						<Input
-							aria-label="Otros documentos"
-							value={documentosOtros}
-							onChange={(e) => setDocumentosOtros(e.target.value)}
-							placeholder="Otros documentos (opcional)"
-						/>
-					</div>
 					<Textarea
 						aria-label="Notas"
 						value={notas}
@@ -845,8 +785,6 @@ function ConfirmarRecepcionDialog({
 									kilometraje: kilometraje.trim()
 										? Number(kilometraje)
 										: undefined,
-									documentos: documentos as DatosRecepcion["documentos"],
-									documentosOtros,
 									notas,
 								});
 							}}

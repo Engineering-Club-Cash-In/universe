@@ -3,8 +3,8 @@
  *
  *  · Recuperación forzosa: el asesor decide quitar la unidad. Motivos, dónde
  *    está y en qué estado — lo que el asesor de B4 necesita para ir a buscarla.
- *  · Entrega voluntaria: el cliente la entrega. Además fecha, lugar, quién la
- *    entrega y qué documentos trae.
+ *  · Entrega voluntaria: el cliente la entrega. Además fecha, lugar y quién
+ *    la entrega.
  *
  * De B2 a B3 el envío traslada el crédito a B4 (`enviarCreditoARecuperacion`).
  * La entrega voluntaria también se registra con el crédito ya en B4: ahí solo
@@ -27,7 +27,6 @@ import {
 } from "server/src/lib/recuperacion-solicitud";
 import {
 	type DetalleRecuperacionInput,
-	DOCUMENTOS_VEHICULO,
 	detalleRecuperacionSchema,
 	ESTADOS_VEHICULO,
 	erroresDetalleRecuperacion,
@@ -72,10 +71,6 @@ import { client, orpc } from "@/utils/orpc";
 
 /** El motivo de la consulta de GPS queda en la bitácora de CB-118. */
 const MOTIVO_CONSULTA_GPS = "Registro de recuperación de vehículo (CB-042)";
-
-type DocumentosEntrega = NonNullable<
-	DetalleRecuperacionInput["entrega"]
->["documentos"];
 
 type UbicacionGps = {
 	lat: number;
@@ -202,8 +197,6 @@ function FormularioRecuperacion({
 	const [lugarEntrega, setLugarEntrega] = useState(desdeVisita?.lugar ?? "");
 	const [persona, setPersona] = useState("");
 	const [relacion, setRelacion] = useState("");
-	const [documentos, setDocumentos] = useState<string[]>([]);
-	const [documentosOtros, setDocumentosOtros] = useState("");
 	const [observaciones, setObservaciones] = useState("");
 	const [intentoEnviar, setIntentoEnviar] = useState(false);
 
@@ -237,8 +230,6 @@ function FormularioRecuperacion({
 					lugar: lugarEntrega,
 					persona,
 					relacion,
-					documentos: documentos as DocumentosEntrega,
-					documentosOtros,
 				}
 			: undefined,
 		observaciones,
@@ -572,33 +563,6 @@ function FormularioRecuperacion({
 									placeholder="Ej.: hermano, esposa"
 								/>
 							</div>
-						</div>
-						<div className="space-y-2">
-							<Label>Documentos que entrega</Label>
-							<div className="grid gap-2 sm:grid-cols-3">
-								{Object.entries(DOCUMENTOS_VEHICULO).map(([clave, label]) => (
-									<label
-										key={clave}
-										htmlFor={`doc-${clave}`}
-										className="flex cursor-pointer items-center gap-2 text-sm"
-									>
-										<Checkbox
-											id={`doc-${clave}`}
-											checked={documentos.includes(clave)}
-											onCheckedChange={() =>
-												setDocumentos((d) => alternar(d, clave))
-											}
-										/>
-										{label}
-									</label>
-								))}
-							</div>
-							<Input
-								aria-label="Otros documentos"
-								value={documentosOtros}
-								onChange={(e) => setDocumentosOtros(e.target.value)}
-								placeholder="Otros documentos (opcional)"
-							/>
 						</div>
 					</section>
 				)}

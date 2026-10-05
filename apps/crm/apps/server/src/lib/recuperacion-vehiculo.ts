@@ -7,7 +7,7 @@
  * | Tipo (`tipo_recuperacion`) | Qué pasó                                  | Qué se pide                     |
  * | -------------------------- | ----------------------------------------- | ------------------------------- |
  * | `tomado`                   | El asesor decide quitarle la unidad       | Motivos, dónde está, estado     |
- * | `entrega_voluntaria`       | El cliente la entrega por su cuenta       | + fecha, lugar, quién, documentos |
+ * | `entrega_voluntaria`       | El cliente la entrega por su cuenta       | + fecha, lugar, quién           |
  *
  * Los dos terminan igual en cartera (B4 + `EN_RECUPERACION`); la diferencia
  * vive en el registro del CRM (`recuperaciones_vehiculo`), que es lo que ve el
@@ -145,19 +145,6 @@ const CLAVES_ESTADO_VEHICULO = Object.keys(ESTADOS_VEHICULO) as [
 	...EstadoVehiculo[],
 ];
 
-export const DOCUMENTOS_VEHICULO = {
-	llaves: "Llaves",
-	llave_duplicada: "Duplicado de llaves",
-	tarjeta_circulacion: "Tarjeta de circulación",
-	titulo_propiedad: "Título de propiedad",
-	poliza_seguro: "Póliza de seguro",
-} as const;
-export type DocumentoVehiculo = keyof typeof DOCUMENTOS_VEHICULO;
-const CLAVES_DOCUMENTO = Object.keys(DOCUMENTOS_VEHICULO) as [
-	DocumentoVehiculo,
-	...DocumentoVehiculo[],
-];
-
 // ── Formulario ──────────────────────────────────────────────────────────────
 
 const textoOpcional = (max: number) =>
@@ -194,11 +181,6 @@ export const entregaVoluntariaSchema = z.object({
 	lugar: z.string().trim().min(3, "Falta el lugar de la entrega").max(500),
 	persona: textoOpcional(200),
 	relacion: textoOpcional(100),
-	documentos: z
-		.array(z.enum(CLAVES_DOCUMENTO))
-		.max(CLAVES_DOCUMENTO.length)
-		.default([]),
-	documentosOtros: textoOpcional(500),
 });
 
 /**
@@ -264,7 +246,7 @@ export function erroresDetalleRecuperacion(
 		return null;
 	}
 
-	// Entrega voluntaria: la historia pide fecha, lugar, estado y documentos.
+	// Entrega voluntaria: la historia pide fecha, lugar y estado.
 	if (!detalle.entrega)
 		return "Faltan los datos de la entrega (fecha y lugar).";
 	if (!detalle.estadoVehiculo) return "Falta el estado del vehículo.";
@@ -298,8 +280,8 @@ export function validarDetalleRecuperacion(
 /**
  * Lo que registra el asesor de B4 cuando la unidad ya está en manos de Club
  * Cash-In. Se guarda aparte de lo reportado al enviar (`recepcion_*`): el
- * estado y los documentos que el cliente dijo que iba a entregar pueden no ser
- * los que llegaron, y esa diferencia es justo lo que interesa ver.
+ * estado que se reportó puede no ser el de la unidad que llegó, y esa
+ * diferencia es justo lo que interesa ver.
  */
 export const recepcionUnidadSchema = z.object({
 	fechaRecepcion: z.coerce.date(),
@@ -307,11 +289,6 @@ export const recepcionUnidadSchema = z.object({
 	estadoVehiculo: z.enum(CLAVES_ESTADO_VEHICULO),
 	estadoVehiculoDetalle: textoOpcional(1000),
 	kilometraje: z.number().int().min(0).max(5_000_000).optional(),
-	documentos: z
-		.array(z.enum(CLAVES_DOCUMENTO))
-		.max(CLAVES_DOCUMENTO.length)
-		.default([]),
-	documentosOtros: textoOpcional(500),
 	notas: textoOpcional(2000),
 });
 export type RecepcionUnidad = z.infer<typeof recepcionUnidadSchema>;

@@ -193,8 +193,6 @@ export function valoresRegistro(params: {
 		lugarEntrega: e?.lugar ?? null,
 		entregaPersona: e?.persona ?? null,
 		entregaRelacion: e?.relacion ?? null,
-		documentos: e?.documentos ?? [],
-		documentosOtros: e?.documentosOtros ?? null,
 		saldoPendiente: foto ? foto.saldoPendiente.toFixed(2) : null,
 		cuotasVencidas: foto ? foto.cuotasVencidas : null,
 		montoVencido: foto ? foto.montoVencido.toFixed(2) : null,

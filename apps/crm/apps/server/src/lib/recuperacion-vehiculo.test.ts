@@ -32,7 +32,6 @@ function voluntaria(extra: Record<string, unknown> = {}): DetalleRecuperacion {
 		entrega: {
 			fecha: "2026-09-30T16:00:00Z",
 			lugar: "Agencia zona 9",
-			documentos: ["llaves", "tarjeta_circulacion"],
 		},
 		...extra,
 	});
@@ -179,17 +178,20 @@ describe("detalleRecuperacionSchema", () => {
 		expect(r.success).toBe(false);
 	});
 
-	it("un documento fuera del catálogo no pasa", () => {
+	it("los documentos ya no se piden: si un cliente viejo los manda, se descartan", () => {
 		const r = detalleRecuperacionSchema.safeParse({
 			motivos: ["no_puede_pagar"],
 			motivoDetalle: "Detalle suficiente",
 			entrega: {
 				fecha: "2026-09-30",
 				lugar: "Agencia",
-				documentos: ["pasaporte"],
+				documentos: ["llaves"],
+				documentosOtros: "Factura",
 			},
 		});
-		expect(r.success).toBe(false);
+		expect(r.success).toBe(true);
+		expect(r.data?.entrega).not.toHaveProperty("documentos");
+		expect(r.data?.entrega).not.toHaveProperty("documentosOtros");
 	});
 });
 

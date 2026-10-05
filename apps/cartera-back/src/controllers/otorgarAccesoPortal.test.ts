@@ -69,7 +69,11 @@ describe("otorgarAccesoPortal", () => {
     ];
     provisionarSpy.mockClear();
 
-    const c = ctx();
+    // Persona con correo: sin `correo_aprobado` no se provisiona
+    // (`correo_aprobado_requerido`, ver el bloque de abajo).
+    const c = ctx({
+      body: { inversionista_ids: [7], correo_aprobado: "ana@example.com" },
+    });
     const r: any = await otorgarAccesoPortal(c as any);
 
     // La consulta va ACOTADA a los ids pedidos: nunca se recorre la tabla.
@@ -256,8 +260,10 @@ describe("otorgarAccesoPortal — el correo aprobado se revalida contra la fila"
   it("`correo_aprobado: null` se lee como 'no se aprobó ninguno', no como error", async () => {
     // El schema de la ruta lo admite (t.Nullable) porque un front que arma
     // `correo_aprobado: inv.email ?? null` es normal; devolverle 422 ahí solo
-    // rompería el camino de empresa sin cerrar nada.
-    filas = [persona()];
+    // rompería el camino de empresa sin cerrar nada. Ese `?? null` es justo la
+    // fila SIN correo, que no tiene nada que aprobar: con correo en la fila,
+    // `null` es "no se aprobó" y corta con `correo_aprobado_requerido` (abajo).
+    filas = [persona({ email: null })];
     provisionarSpy.mockClear();
 
     const c = ctx({
@@ -361,5 +367,199 @@ describe("otorgarAccesoPortal — el correo aprobado se revalida contra la fila"
     expect(bloque).toContain("correo_aprobado");
     // Opcional: el camino de la EMPRESA no manda ninguno.
     expect(bloque).toContain("t.Optional(");
+  });
+});
+
+/**
+ * EL CORREO APROBADO ES OBLIGATORIO PARA LA PERSONA.
+ *
+ * El front decide "es empresa → no mando correo" al PINTAR el diálogo; cartera
+ * decide empresa/persona con la fila del CLIC (`esEmpresaRepresentada`). Como
+ * `editarInversionista` del CRM cambia `dpi_rep_legal` y `email` a la vez, el
+ * diálogo podía abrir sobre una empresa y el clic llegar sobre una persona con
+ * el correo de otro, sin nada que vetar. Por eso el control se EXIGE aquí: una
+ * persona con correo y sin `correo_aprobado` no se provisiona.
+ */
+describe("otorgarAccesoPortal — la persona con correo necesita correo aprobado", () => {
+  it("persona con correo y SIN correo aprobado: no provisiona y lo nombra", async () => {
+    filas = [persona()];
+    provisionarSpy.mockClear();
+
+    const c = ctx({ body: { inversionista_ids: [7] } });
+    const r: any = await otorgarAccesoPortal(c as any);
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(0);
+    // No es un 400: el cuerpo es válido, lo que falta es la aprobación de ESTA
+    // fila, y se reporta por id como el resto de los desenlaces.
+    expect(c.set.status).toBeUndefined();
+    expect(r.resultados).toHaveLength(1);
+    expect(r.resultados[0]).toMatchObject({
+      inversionistaId: 7,
+      estado: "fallo",
+      usuarioEmail: null,
+      // Código ESTABLE: lo traduce el front.
+      motivo: "correo_aprobado_requerido",
+    });
+    expect(r.resultados[0].correo.enviado).toBe(false);
+  });
+
+  it("la carrera: el diálogo la vio EMPRESA, al clic es PERSONA con otro correo", async () => {
+    // El diálogo se pintó con `dpi_rep_legal` lleno —empresa, sin correo que
+    // aprobar— y por eso el cuerpo no trae `correo_aprobado`. Entre el diálogo
+    // y el clic alguien borró el representante y puso su correo: la fila que
+    // se lee AHORA es una persona. Sin este control la contraseña salía a ese
+    // buzón sin que nadie lo mirara.
+    filas = [persona({ email: "atacante@evil.com", dpi_rep_legal: null })];
+    provisionarSpy.mockClear();
+
+    const c = ctx({ body: { inversionista_ids: [7] } });
+    const r: any = await otorgarAccesoPortal(c as any);
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(0);
+    expect(r.resultados[0]).toMatchObject({
+      inversionistaId: 7,
+      estado: "fallo",
+      motivo: "correo_aprobado_requerido",
+    });
+    // Y no se filtra el correo nuevo en la respuesta.
+    expect(JSON.stringify(r)).not.toContain("atacante@evil.com");
+  });
+
+  it("`correo_aprobado: null` sobre una persona CON correo tampoco alcanza", async () => {
+    filas = [persona()];
+    provisionarSpy.mockClear();
+
+    const c = ctx({
+      body: { inversionista_ids: [7], correo_aprobado: null },
+    });
+    const r: any = await otorgarAccesoPortal(c as any);
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(0);
+    expect(r.resultados[0]).toMatchObject({ motivo: "correo_aprobado_requerido" });
+  });
+
+  it("persona SIN correo en la fila queda exenta: sigue al camino de siempre", async () => {
+    // No hay buzón al que mandar contraseña: `decidirProvisionamiento` la deja
+    // en `omitida/sin_correo` sin crear cuenta. Exigirle aprobación sería
+    // pedir que se apruebe un correo que no existe.
+    for (const email of [null, "", "   "]) {
+      filas = [persona({ email })];
+      provisionarSpy.mockClear();
+
+      const c = ctx({ body: { inversionista_ids: [7] } });
+      const r: any = await otorgarAccesoPortal(c as any);
+
+      expect(provisionarSpy).toHaveBeenCalledTimes(1);
+      expect(r.resultados[0].motivo).not.toBe("correo_aprobado_requerido");
+    }
+  });
+
+  it("EMPRESA sin correo aprobado: sigue a `es_empresa_el_acceso_es_del_representante`", async () => {
+    // `dpi_rep_legal` distinto del propio `dpi`: empresa representada. Su
+    // diálogo no enseña correo y no hay nada que aprobar; el corte lo hace
+    // `provisionarInversionista` (portalProvisioning.test.ts lo prueba con la
+    // implementación real). Aquí: que el requerido no se le adelante, tenga o
+    // no correo la fila, y que lo que devuelve el servicio llegue tal cual.
+    // NO `mockImplementationOnce`: si el controller no llamara al servicio, esa
+    // respuesta quedaría encolada y se la comería la prueba siguiente. Se
+    // cambia la implementación y se restaura en el `finally`, pase lo que pase.
+    const original = provisionarSpy.getMockImplementation();
+    // `as any`: el doble de arriba se tipó con la forma de "creada".
+    provisionarSpy.mockImplementation((async (fila: any) => ({
+      inversionistaId: fila.inversionista_id,
+      estado: "fallo",
+      usuarioEmail: null,
+      resueltoPor: null,
+      correo: { enviado: false, plantilla: null, redirigido: false, destinatarioReal: null },
+      advertencias: [],
+      motivo: "es_empresa_el_acceso_es_del_representante",
+    })) as any);
+
+    try {
+      for (const email of ["empresa@example.com", null]) {
+        filas = [persona({ email, dpi: 9876543210101, dpi_rep_legal: "04036613" })];
+        provisionarSpy.mockClear();
+
+        const c = ctx({ body: { inversionista_ids: [7] } });
+        const r: any = await otorgarAccesoPortal(c as any);
+
+        expect(provisionarSpy).toHaveBeenCalledTimes(1);
+        expect(provisionarSpy.mock.calls[0][1]).toMatchObject({ soloAsegurarCuenta: true });
+        expect(r.resultados[0]).toMatchObject({
+          motivo: "es_empresa_el_acceso_es_del_representante",
+        });
+      }
+    } finally {
+      provisionarSpy.mockImplementation(original as any);
+    }
+  });
+
+  it("quien se representa a SÍ MISMO (cero a la izquierda) es PERSONA: requiere aprobación", async () => {
+    // El inversionista 187: `dpi=4036613`, `dpi_rep_legal='04036613'`. Leer
+    // "tiene dpi_rep_legal ⇒ empresa" lo dejaría pasar sin aprobación.
+    filas = [
+      persona({ email: "javier@example.com", dpi: 4036613, dpi_rep_legal: "04036613" }),
+    ];
+    provisionarSpy.mockClear();
+
+    const r: any = await otorgarAccesoPortal(
+      ctx({ body: { inversionista_ids: [7] } }) as any,
+    );
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(0);
+    expect(r.resultados[0]).toMatchObject({ motivo: "correo_aprobado_requerido" });
+
+    // Y con su correo aprobado, provisiona.
+    provisionarSpy.mockClear();
+    const r2: any = await otorgarAccesoPortal(
+      ctx({
+        body: { inversionista_ids: [7], correo_aprobado: "javier@example.com" },
+      }) as any,
+    );
+    expect(provisionarSpy).toHaveBeenCalledTimes(1);
+    expect(r2.resultados[0]).toMatchObject({ estado: "creada" });
+  });
+
+  it("persona con su correo aprobado: provisiona como antes", async () => {
+    filas = [persona()];
+    provisionarSpy.mockClear();
+
+    const r: any = await otorgarAccesoPortal(
+      ctx({
+        body: { inversionista_ids: [7], correo_aprobado: "ana@example.com" },
+      }) as any,
+    );
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(1);
+    expect(provisionarSpy.mock.calls[0][0]).toMatchObject({
+      inversionista_id: 7,
+      email: "ana@example.com",
+    });
+    expect(r.resultados[0]).toMatchObject({ estado: "creada", motivo: null });
+  });
+
+  it("con varios ids sin correo aprobado, se decide por fila: la persona se corta, la empresa sigue", async () => {
+    filas = [
+      persona({ inversionista_id: 7 }),
+      persona({
+        inversionista_id: 8,
+        email: "empresa@example.com",
+        dpi: 9876543210101,
+        dpi_rep_legal: "04036613",
+      }),
+    ];
+    provisionarSpy.mockClear();
+
+    const r: any = await otorgarAccesoPortal(
+      ctx({ body: { inversionista_ids: [7, 8] } }) as any,
+    );
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(1);
+    expect(provisionarSpy.mock.calls[0][0]).toMatchObject({ inversionista_id: 8 });
+    expect(r.resultados[0]).toMatchObject({
+      inversionistaId: 7,
+      motivo: "correo_aprobado_requerido",
+    });
+    expect(r.resultados[1]).toMatchObject({ inversionistaId: 8 });
   });
 });

@@ -443,10 +443,14 @@ export const inversionistasRouter = new Elysia()
         // diálogo se pinta y el clic llega, el correo se puede haber cambiado
         // desde el CRM, y quien aprueba no tiene forma de notarlo.
         //
-        // Opcional porque hay un camino sin nada que aprobar: la EMPRESA, cuyo
-        // diálogo no enseña correo —la cuenta es del representante— y que ya
-        // corta antes sin provisionar. Con correo aprobado va UN id a la vez;
-        // la combinación con varios se rechaza en el controller.
+        // Opcional EN EL CUERPO porque hay un camino sin nada que aprobar: la
+        // EMPRESA, cuyo diálogo no enseña correo —la cuenta es del
+        // representante— y que corta sin provisionar. Pero para una PERSONA con
+        // correo es obligatorio, y lo exige el controller con la fila del clic
+        // (`correo_aprobado_requerido`): el front decide "empresa" al pintar, y
+        // entre el diálogo y el clic la fila puede pasar a persona con otro
+        // correo. Con correo aprobado va UN id a la vez; la combinación con
+        // varios se rechaza en el controller.
         //
         // `maxLength` 255 = el largo de `inversionistas.email` (varchar(255)):
         // más corto rechazaría con 422 un correo que la fila SÍ puede tener, y
@@ -464,7 +468,9 @@ export const inversionistasRouter = new Elysia()
           "estar envenenado. Por eso acepta `correo_aprobado`: el correo que se le " +
           "enseñó a quien confirmó, que se revalida contra la fila y VETA el " +
           "provisionamiento con `correo_aprobado_no_coincide` si cambió en el " +
-          "camino. NO agregar esta ruta al proxy de auth-google " +
+          "camino. Es opcional en el cuerpo (la empresa no tiene correo que " +
+          "aprobar), pero si la fila es una PERSONA con correo y no viene, no se " +
+          "provisiona: `correo_aprobado_requerido`. NO agregar esta ruta al proxy de auth-google " +
           "(cartera.routes.ts): ahí queda alcanzable desde el portal.",
         tags: ["Inversionistas"],
       },

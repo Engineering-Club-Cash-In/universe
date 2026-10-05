@@ -7,6 +7,7 @@ import {
 } from "../services/portalProvisioning";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { normalizeEmail } from "../utils/functions/email";
+import { esEmpresaRepresentada } from "../utils/functions/provisionamientoPortal";
 
 /**
  * Abre el acceso al portal de uno o varios inversionistas. Lo dispara UNA
@@ -72,23 +73,38 @@ import { normalizeEmail } from "../utils/functions/email";
  * `provisionarInversionista`, nunca contra una segunda lectura: si hubiera dos
  * lecturas volvería a existir la ventana, solo que más corta.
  *
- * POR QUÉ ES OPCIONAL
- * -------------------
- * Porque hay un camino donde no hay nada que aprobar: la EMPRESA. Su diálogo no
- * enseña ningún correo —la cuenta es del REPRESENTANTE, no de ella— así que no
- * puede mandar uno aprobado, y ese camino ya corta antes con
+ * OPCIONAL EN EL CUERPO, OBLIGATORIO PARA LA PERSONA
+ * -------------------------------------------------
+ * El schema lo deja opcional porque hay un camino donde no hay nada que
+ * aprobar: la EMPRESA. Su diálogo no enseña ningún correo —la cuenta es del
+ * REPRESENTANTE, no de ella— y ese camino corta con
  * `es_empresa_el_acceso_es_del_representante` sin crear cuenta ni mandar
- * correo (portalProvisioning.ts, rama `soloAsegurarCuenta`). Exigirlo siempre
- * rompería el único caso que hoy está bien resuelto.
+ * correo (portalProvisioning.ts, rama `soloAsegurarCuenta`).
  *
- * Que sea opcional NO deja el agujero abierto: el que provisiona sin aprobación
- * sería un llamador que decide no mandar el campo, y el único llamador es el
- * diálogo del CRM. Lo que esto cierra es la carrera, no un cuerpo hostil —contra
- * un cuerpo hostil el candado sigue siendo ADMIN + no estar en el proxy—.
+ * Pero QUIÉN es empresa no lo puede decidir el llamador. El front lo decide al
+ * PINTAR el diálogo; aquí se decide con la fila del CLIC (`esEmpresaRepresentada`,
+ * `dpi_rep_legal` vs `dpi`). `editarInversionista` del CRM cambia
+ * `dpi_rep_legal` y `email` de un solo golpe, así que el diálogo abre sobre una
+ * empresa —sin correo que aprobar—, alguien borra el representante y pone su
+ * correo, y al clic la fila ya es una PERSONA sin veto: la contraseña sale a un
+ * buzón que nadie miró. Por eso, si la fila del clic es persona y tiene correo,
+ * sin `correo_aprobado` NO se provisiona (`correo_aprobado_requerido`). Se
+ * exige aquí y no se confía en que el llamador lo mande.
+ *
+ * La persona SIN correo en la fila queda exenta: termina en `omitida/sin_correo`
+ * sin crear cuenta, así que no sale ninguna contraseña ni hay buzón que robar.
+ * Contra un cuerpo hostil el candado sigue siendo ADMIN + no estar en el proxy:
+ * esto cierra la carrera, no a un ADMIN que aprueba lo que quiere.
  */
 
 /** El correo de la fila ya no es el que se aprobó. NO se provisionó nada. */
 const MOTIVO_CORREO_CAMBIADO = "correo_aprobado_no_coincide";
+
+/**
+ * La fila del clic es una PERSONA con correo y nadie aprobó ese correo (el
+ * diálogo pudo verla como empresa). NO se provisionó nada.
+ */
+const MOTIVO_CORREO_REQUERIDO = "correo_aprobado_requerido";
 
 /**
  * Un desenlace de "no pasó nada, y por esto". Mismo molde que usa
@@ -212,9 +228,26 @@ export const otorgarAccesoPortal = async ({
       continue;
     }
 
-    // EL VETO. Va ANTES de provisionar y antes de cualquier otra decisión sobre
-    // la fila: lo que está en juego es una contraseña saliendo hacia un buzón, y
-    // el orden que falla cerrado es "primero comprobar, después actuar".
+    // LA APROBACIÓN ES OBLIGATORIA PARA LA PERSONA. Empresa o persona se decide
+    // con ESTA `fila` —la misma que viaja a provisionar—, no con lo que el
+    // diálogo pintó: entre uno y otro se puede borrar `dpi_rep_legal` y cambiar
+    // el correo a la vez. `esEmpresaRepresentada` es la misma regla que usa
+    // `decidirProvisionamiento`, con la excepción del autorrepresentado. Sin
+    // correo en la fila no hay a dónde mandar contraseña: sigue y sale
+    // `sin_correo` como siempre.
+    if (
+      !correoAprobado &&
+      !esEmpresaRepresentada(fila) &&
+      normalizeEmail(fila.email)
+    ) {
+      resultados.push(fallo(id, MOTIVO_CORREO_REQUERIDO));
+      continue;
+    }
+
+    // EL VETO. Va ANTES de provisionar y antes de cualquier decisión que pueda
+    // terminar en provisionar: lo que está en juego es una contraseña saliendo
+    // hacia un buzón, y el orden que falla cerrado es "primero comprobar,
+    // después actuar".
     //
     // `fila.email` es el MISMO valor que `decidirProvisionamiento` va a
     // normalizar y mandar a auth-google (mismo objeto, misma lectura), así que

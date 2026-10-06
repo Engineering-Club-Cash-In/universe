@@ -1,5 +1,6 @@
 import {
 	index,
+	integer,
 	jsonb,
 	pgEnum,
 	pgTable,
@@ -52,7 +53,8 @@ export const cobrosSendLogs = pgTable(
 		// y respuesta cruda completa del proveedor para poder auditar/depurar
 		// sin tener que reconstruir nada desde los logs de stdout.
 		providerRequest: jsonb("provider_request").$type<Record<string, unknown>>(),
-		providerResponse: jsonb("provider_response").$type<Record<string, unknown>>(),
+		providerResponse:
+			jsonb("provider_response").$type<Record<string, unknown>>(),
 
 		// Resultado
 		status: cobrosSendStatusEnum("status").notNull(),
@@ -71,3 +73,21 @@ export const cobrosSendLogs = pgTable(
 		index("idx_cobros_send_logs_batch").on(t.batchId),
 	],
 );
+
+/**
+ * Idempotencia del recibo de pago por WhatsApp (migración 0047): el CRM
+ * reserva el `pago_id` antes de llamar a WhatsApp, así un reintento de cartera
+ * (respuesta cortada, reinicio) no manda el mismo recibo dos veces.
+ */
+export const recibosPagoWhatsapp = pgTable("recibos_pago_whatsapp", {
+	pagoId: integer("pago_id").primaryKey(),
+	numeroCreditoSifco: text("numero_credito_sifco"),
+	estado: text("estado").notNull(), // enviando | enviado | fallido
+	intentos: integer("intentos").notNull().default(1),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+	actualizadoAt: timestamp("actualizado_at", { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+});

@@ -89,6 +89,8 @@ function buildDeps(overrides: Partial<ReciboPagoDeps> = {}): {
 		guardarLog: mock(async (_params: any) => {
 			calls.guardarLog++;
 		}),
+		reservarEnvio: mock(async () => "nueva" as const),
+		cerrarEnvio: mock(async () => {}),
 		...overrides,
 	};
 
@@ -485,5 +487,33 @@ describe("construirMensajeReciboPago", () => {
 			SIFCO,
 		);
 		expect(msg).toContain("comuníquese con su asesor.");
+	});
+});
+
+describe("idempotencia por pago", () => {
+	test("un recibo ya enviado no se vuelve a mandar", async () => {
+		const { deps, calls } = buildDeps({ reservarEnvio: mock(async () => "ya_enviado" as const) });
+		const r = await sendReciboPagoWhatsapp(baseParams(), deps);
+		expect(r).toMatchObject({ sent: true, yaEnviado: true });
+		expect(calls.enviar).toBe(0);
+	});
+
+	test("con otro envío en curso responde EN_CURSO sin llamar a WhatsApp", async () => {
+		const { deps, calls } = buildDeps({ reservarEnvio: mock(async () => "en_curso" as const) });
+		const r = await sendReciboPagoWhatsapp(baseParams(), deps);
+		expect(r).toMatchObject({ sent: false, codigo: "EN_CURSO" });
+		expect(calls.enviar).toBe(0);
+	});
+
+	test("cierra la reserva como enviado o fallido según WhatsApp", async () => {
+		const cierres: string[] = [];
+		const ok = buildDeps({ cerrarEnvio: mock(async (_p: number, e: "enviado" | "fallido") => { cierres.push(e); }) });
+		await sendReciboPagoWhatsapp(baseParams(), ok.deps);
+		const mal = buildDeps({
+			cerrarEnvio: mock(async (_p: number, e: "enviado" | "fallido") => { cierres.push(e); }),
+			enviar: mock(async () => ({ success: false, error: "x" })) as any,
+		});
+		await sendReciboPagoWhatsapp(baseParams(), mal.deps);
+		expect(cierres).toEqual(["enviado", "fallido"]);
 	});
 });

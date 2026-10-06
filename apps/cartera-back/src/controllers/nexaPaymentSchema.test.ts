@@ -52,6 +52,11 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     "error",
     "created_at",
     "updated_at",
+    // Bandeja del recibo por WhatsApp (migraciones 0046 y 0047).
+    "recibo_status",
+    "recibo_intentos",
+    "recibo_actualizado_at",
+    "recibo_pagos_ok",
   ]);
   expect(nonceConfig.columns.map((column) => column.name)).toEqual(["nonce", "created_at"]);
   expect(eventConfig.uniqueConstraints).toHaveLength(1);

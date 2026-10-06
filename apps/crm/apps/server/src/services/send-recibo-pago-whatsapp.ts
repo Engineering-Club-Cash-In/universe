@@ -21,6 +21,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import { recibosPagoWhatsapp } from "../db/schema/cobros-send-logs";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
@@ -44,6 +45,7 @@ export type ReciboPagoErrorCodigo =
 	| "SIN_TELEFONO"
 	| "SIN_USUARIO_SISTEMA"
 	| "ERROR_ENVIO"
+	| "EN_CURSO"
 	| "ERROR_INTERNO";
 
 const MENSAJES_ERROR: Record<ReciboPagoErrorCodigo, string> = {
@@ -52,6 +54,7 @@ const MENSAJES_ERROR: Record<ReciboPagoErrorCodigo, string> = {
 	SIN_USUARIO_SISTEMA:
 		"No se encontró un usuario cobros_supervisor para registrar el envío.",
 	ERROR_ENVIO: "No se pudo enviar el mensaje de WhatsApp.",
+	EN_CURSO: "El recibo de este pago ya se está enviando.",
 	ERROR_INTERNO: "No se pudo preparar el envío. Intente de nuevo.",
 };
 
@@ -66,7 +69,13 @@ export interface SendReciboPagoWhatsappParams {
 }
 
 export type SendReciboPagoWhatsappResult =
-	| { sent: true; templateMessageId?: string; telefono: string }
+	| {
+			sent: true;
+			templateMessageId?: string;
+			telefono: string;
+			/** true si el recibo ya se había mandado y no se volvió a enviar. */
+			yaEnviado?: boolean;
+	  }
 	| { sent: false; codigo: ReciboPagoErrorCodigo; mensaje: string };
 
 interface DatosCaso {
@@ -193,8 +202,71 @@ export function construirMensajeReciboPago(
 	return `${saludo} compartimos el recibo del pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
 }
 
+type ReservaEnvio = "nueva" | "ya_enviado" | "en_curso";
+
+/** Un "enviando" de más de 30 min no se reenvía: no se sabe si llegó. */
+const MINUTOS_ENVIO_TRABADO = 30;
+
+/**
+ * Reserva el pago antes de llamar a WhatsApp. Solo un pago nuevo o con un
+ * envío fallido se puede mandar; uno enviado o con un envío en curso no.
+ */
+async function reservarEnvioRecibo(
+	pagoId: number,
+	numeroSifco: string,
+): Promise<ReservaEnvio> {
+	const [tomada] = await db
+		.insert(recibosPagoWhatsapp)
+		.values({ pagoId, numeroCreditoSifco: numeroSifco, estado: "enviando" })
+		.onConflictDoUpdate({
+			target: recibosPagoWhatsapp.pagoId,
+			set: {
+				estado: "enviando",
+				intentos: sql`${recibosPagoWhatsapp.intentos} + 1`,
+				actualizadoAt: new Date(),
+			},
+			setWhere: eq(recibosPagoWhatsapp.estado, "fallido"),
+		})
+		.returning({ pagoId: recibosPagoWhatsapp.pagoId });
+	if (tomada) return "nueva";
+
+	const [actual] = await db
+		.select({
+			estado: recibosPagoWhatsapp.estado,
+			trabado: sql<boolean>`${recibosPagoWhatsapp.actualizadoAt} < now() - make_interval(mins => ${MINUTOS_ENVIO_TRABADO}::int)`,
+		})
+		.from(recibosPagoWhatsapp)
+		.where(eq(recibosPagoWhatsapp.pagoId, pagoId))
+		.limit(1);
+	if (actual?.estado === "enviando" && !actual.trabado) return "en_curso";
+	if (actual?.estado === "enviando") {
+		console.warn(
+			`${LOG_PREFIX} Pago ${pagoId}: envío anterior sin cerrar (más de ${MINUTOS_ENVIO_TRABADO} min); no se reenvía para no duplicar`,
+		);
+	}
+	return "ya_enviado";
+}
+
+async function cerrarEnvioRecibo(
+	pagoId: number,
+	estado: "enviado" | "fallido",
+): Promise<void> {
+	await db
+		.update(recibosPagoWhatsapp)
+		.set({ estado, actualizadoAt: new Date() })
+		.where(eq(recibosPagoWhatsapp.pagoId, pagoId));
+}
+
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
 export interface ReciboPagoDeps {
+	reservarEnvio?: (
+		pagoId: number,
+		numeroSifco: string,
+	) => Promise<ReservaEnvio>;
+	cerrarEnvio?: (
+		pagoId: number,
+		estado: "enviado" | "fallido",
+	) => Promise<void>;
 	cargarCaso?: (numeroSifco: string) => Promise<DatosCaso | null>;
 	obtenerUsuarioSistema?: () => Promise<string | null>;
 	obtenerAsesor?: ObtenerAsesor;
@@ -220,6 +292,8 @@ export async function sendReciboPagoWhatsapp(
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
 	const obtenerAsesor = deps.obtenerAsesor ?? obtenerAsesorCartera;
+	const reservarEnvio = deps.reservarEnvio ?? reservarEnvioRecibo;
+	const cerrarEnvio = deps.cerrarEnvio ?? cerrarEnvioRecibo;
 
 	const fallo = (
 		codigo: ReciboPagoErrorCodigo,
@@ -297,7 +371,27 @@ export async function sendReciboPagoWhatsapp(
 		{ numeroCuota, asesor },
 	);
 
-	// 4. Enviar por WhatsApp.
+	// 4. Reservar el pago (idempotencia): si cartera reintenta porque la
+	//    respuesta anterior se cortó, el recibo ya enviado no sale dos veces.
+	let reserva: ReservaEnvio;
+	try {
+		reserva = await reservarEnvio(pagoId, numeroSifco);
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error(
+			`${LOG_PREFIX} Error reservando el envío del pago ${pagoId}: ${msg}`,
+		);
+		return fallo("ERROR_INTERNO");
+	}
+	if (reserva === "ya_enviado") {
+		console.log(
+			`${LOG_PREFIX} Recibo del pago ${pagoId} ya enviado; no se repite`,
+		);
+		return { sent: true, telefono: telefonoDestino, yaEnviado: true };
+	}
+	if (reserva === "en_curso") return fallo("EN_CURSO");
+
+	// 5. Enviar por WhatsApp.
 	const result = await enviar({
 		phone: telefonoDestino,
 		message: mensaje,
@@ -311,7 +405,16 @@ export async function sendReciboPagoWhatsapp(
 		logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 	});
 
-	// 5. Log de traza en cobros_send_logs.
+	try {
+		await cerrarEnvio(pagoId, result.success ? "enviado" : "fallido");
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error(
+			`${LOG_PREFIX} No se pudo cerrar el envío del pago ${pagoId}: ${msg}`,
+		);
+	}
+
+	// 6. Log de traza en cobros_send_logs.
 	await guardarLog({
 		numeroCreditoSifco: numeroSifco,
 		plantillaId: "recibo_pago",

@@ -100,7 +100,7 @@ Esta es la etapa 1 del rediseño de las pantallas del asesor con el Figma «CRM 
 
 ## Etapa 3 · Workspace
 
-**Estado:** rama `feat/cobros-workspace` → `COBROS-02`. El backend pendiente está en [16-workspace-backend.md](./16-workspace-backend.md), tareas W1–W5.
+**Estado:** PR #1872 → `COBROS-02`. El backend pendiente está en el issue #1873 (José) y en [16-workspace-backend.md](./16-workspace-backend.md), tareas W1–W5.
 
 **Qué es:** el «Espacio de trabajo», un modal de dos paneles que se abre al hacer clic en un caso del Dashboard del asesor (tabla de atención y agenda) o de Mi Cartera. Sirve para gestionar los casos uno tras otro («‹ Caso N de M ›», Alt+←/→, «Siguiente caso») sin salir de la tabla. La lista navegable es la página visible de la tabla, copiada al abrir el modal.
 

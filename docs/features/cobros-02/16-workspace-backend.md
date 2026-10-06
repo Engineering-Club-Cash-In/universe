@@ -10,6 +10,9 @@ Se diseñó a partir del Figma «CRM Ventas»:
 - 🚗 Asesor Especial › 03 · Workspace v3 (`3785:7976`).
 - 🟠 Supervisor › 06 · Workspace B3 (`2338:4147`).
 
+- **PR:** #1872 → `COBROS-02`.
+- **Issue:** #1873, asignado a José.
+
 El front ya está **conectado**: lo que el Figma pide y el sistema todavía no tiene se muestra deshabilitado con «Pronto», o se envía al server y el server lo ignora por ahora.
 
 **Para cerrar una tarea:**

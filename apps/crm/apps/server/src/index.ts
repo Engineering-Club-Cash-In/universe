@@ -58,6 +58,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
+import carteraEstadoCuentaRouter from "./routes/cartera-estado-cuenta";
 import externalContractsRouter from "./routes/external-contracts";
 import weetrustStatusRouter from "./routes/weetrust-status";
 
@@ -214,6 +215,9 @@ app.route("/api/contracts/weetrust-status", weetrustStatusRouter);
 // Cartera avisa que una compra de cartera fue aceptada y abre la batería de
 // contratos del inversionista.
 app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter);
+// Cartera pide los teléfonos del cliente y el envío por WhatsApp del estado de
+// cuenta que emite al solicitar la cancelación de un crédito.
+app.route("/api/cartera/estado-cuenta", carteraEstadoCuentaRouter);
 
 const handler = new RPCHandler(
 	Object.assign(

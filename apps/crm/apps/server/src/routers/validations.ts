@@ -3,6 +3,8 @@ import { z } from "zod";
 import { analystProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	CofirmanteNoEncontradoError,
+	ejecutarBuroCofirmantes,
 	ejecutarValidaciones,
 	getValidaciones,
 	marcarValidacionBuroManual,
@@ -15,6 +17,7 @@ import {
 /**
  * Validaciones de RENAP y Buró (Infornet) para oportunidades cuyo origen
  * NO es el bot de WhatsApp. Las oportunidades del bot quedan exentas.
+ * Los cofirmantes pasan solo por Buró, con las mismas reglas que el titular.
  *
  * Ambos procedimientos exigen rol de análisis: la respuesta incluye score,
  * nivel de riesgo y motivos de rechazo del buró (antecedentes penales,
@@ -29,11 +32,18 @@ export const validationsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			return ejecutarValidaciones({
+			const parametros = {
 				opportunityId: input.opportunityId,
 				userId: context.userId,
 				reusarVigente: input.reusarVigente,
-			});
+			};
+
+			const [titular, cofirmantes] = await Promise.all([
+				ejecutarValidaciones(parametros),
+				ejecutarBuroCofirmantes(parametros),
+			]);
+
+			return { ...titular, cofirmantes };
 		}),
 
 	getValidacionesOportunidad: analystProcedure
@@ -60,6 +70,8 @@ export const validationsRouter = {
 			z.object({
 				opportunityId: z.string().uuid(),
 				tipo: z.enum(["buro", "renap"]),
+				/** Ausente = titular */
+				coDebtorId: z.string().uuid().optional(),
 				motivo: z
 					.string()
 					.trim()
@@ -73,12 +85,13 @@ export const validationsRouter = {
 				});
 			}
 
-			try {
-				const marcar =
-					input.tipo === "buro"
-						? marcarValidacionBuroManual
-						: marcarValidacionRenapManual;
+			if (input.coDebtorId && input.tipo === "renap") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Los cofirmantes solo se validan en Buró, no en RENAP",
+				});
+			}
 
+			try {
 				// Bajo suplantación, `context.userId` es el analista suplantado, no
 				// el admin que la inició (Better Auth deja a este último en la
 				// sesión, no en el usuario) — mismo criterio que ya usa
@@ -87,13 +100,23 @@ export const validationsRouter = {
 				const actorId =
 					context.session?.session?.impersonatedBy ?? context.userId;
 
-				return await marcar({
+				const parametros = {
 					opportunityId: input.opportunityId,
 					userId: actorId,
 					motivo: input.motivo,
-				});
+				};
+
+				return input.tipo === "buro"
+					? await marcarValidacionBuroManual({
+							...parametros,
+							coDebtorId: input.coDebtorId,
+						})
+					: await marcarValidacionRenapManual(parametros);
 			} catch (error) {
-				if (error instanceof OportunidadNoEncontradaError) {
+				if (
+					error instanceof OportunidadNoEncontradaError ||
+					error instanceof CofirmanteNoEncontradoError
+				) {
 					throw new ORPCError("NOT_FOUND", { message: error.message });
 				}
 				if (error instanceof OverrideNoAplicaError) {

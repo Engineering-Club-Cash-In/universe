@@ -64,8 +64,14 @@ export class InfornetController {
 	 * 1. Valida que existe en renapInfo
 	 * 2. Busca en caché de infornet
 	 * 3. Si no existe o expiró, consulta a la API de Infornet
+	 *
+	 * `exigirRenap: false` es para los cofirmantes: no pasan por RENAP, así que
+	 * nadie les sincroniza `renapinfo` y exigirlo los dejaría siempre en error.
 	 */
-	async obtenerEstudioPorDPI(dpiRecibido: string): Promise<{
+	async obtenerEstudioPorDPI(
+		dpiRecibido: string,
+		{ exigirRenap = true }: { exigirRenap?: boolean } = {},
+	): Promise<{
 		success: boolean;
 		data?: EstudioPersonaJSON;
 		fromCache?: boolean;
@@ -92,16 +98,14 @@ export class InfornetController {
 
 			if (personaRenap.length === 0) {
 				// Con RENAP deshabilitado nadie llena renapinfo: Infornet solo necesita el DPI
-				if (CONSULTAR_RENAP) {
+				if (CONSULTAR_RENAP && exigirRenap) {
 					console.log("   ❌ DPI no encontrado en RENAP");
 					return {
 						success: false,
 						error: "DPI no encontrado en RENAP",
 					};
 				}
-				console.log(
-					"   ⚠️ Sin RENAP local (consulta deshabilitada), se continúa",
-				);
+				console.log("   ⚠️ Sin RENAP local (no se exige), se continúa");
 			} else {
 				console.log(
 					`   ✅ DPI encontrado en RENAP: ${personaRenap[0].firstName} ${personaRenap[0].firstLastName}`,
@@ -333,7 +337,10 @@ export class InfornetController {
 	/**
 	 * Análisis rápido de riesgo basado en el estudio
 	 */
-	async analizarRiesgo(dpi: string): Promise<{
+	async analizarRiesgo(
+		dpi: string,
+		opciones: { exigirRenap?: boolean } = {},
+	): Promise<{
 		scoreRiesgo: number;
 		nivelRiesgo: "BAJO" | "MEDIO" | "ALTO" | "CRITICO";
 		alertas: string[];
@@ -348,7 +355,7 @@ export class InfornetController {
 			`\n📊 ========== ANÁLISIS DE RIESGO PARA DPI: ${dpi} ==========`,
 		);
 
-		const resultado = await this.obtenerEstudioPorDPI(dpi);
+		const resultado = await this.obtenerEstudioPorDPI(dpi, opciones);
 
 		if (!resultado.success || !resultado.data) {
 			console.log("   ❌ No se pudo obtener el estudio para análisis");

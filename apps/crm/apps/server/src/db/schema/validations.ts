@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+	check,
 	index,
 	integer,
 	pgEnum,
@@ -9,7 +10,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { opportunities } from "./crm";
+import { coDebtors, opportunities } from "./crm";
 
 /**
  * Tipos de validación externa ejecutables para una oportunidad.
@@ -30,11 +31,23 @@ export const validationEstadoEnum = pgEnum("validation_estado", [
 ]);
 
 /**
+ * A quién se validó dentro de la oportunidad: el cliente (lead) o uno de sus
+ * cofirmantes (`co_debtors`).
+ */
+export const validationSujetoEnum = pgEnum("validation_sujeto", [
+	"titular",
+	"cofirmante",
+]);
+
+/**
  * Bitácora de validaciones RENAP / Buró por oportunidad.
  *
  * Registra cada ejecución (resultado, fecha, fuente y estado) para las
  * oportunidades cuyo origen NO es el bot de WhatsApp; las oportunidades del
  * bot quedan exentas y no generan registros.
+ *
+ * Los cofirmantes solo pasan por Buró. Sus filas nunca deben mezclarse con las
+ * del titular: toda lectura del titular filtra `sujeto = 'titular'`.
  *
  * El estudio completo del buró NO vive aquí: se guarda en
  * `infornet_persona_cache` (compartido por DPI, TTL de 30 días).
@@ -48,6 +61,17 @@ export const opportunityValidations = pgTable(
 		opportunityId: uuid("opportunity_id")
 			.notNull()
 			.references(() => opportunities.id, { onDelete: "cascade" }),
+
+		sujeto: validationSujetoEnum("sujeto").notNull().default("titular"),
+
+		/**
+		 * Cofirmante validado. Si se borra el co-deudor queda en null pero la fila
+		 * sigue siendo de cofirmante: la bitácora no se borra y nunca debe pasar
+		 * por una del titular.
+		 */
+		coDebtorId: uuid("co_debtor_id").references(() => coDebtors.id, {
+			onDelete: "set null",
+		}),
 
 		/** DPI normalizado con el que se ejecutó la validación */
 		dpi: text("dpi").notNull(),
@@ -91,6 +115,15 @@ export const opportunityValidations = pgTable(
 			table.opportunityId,
 			table.tipo,
 			table.ejecutadoAt.desc(),
+		),
+		index("opportunity_validations_co_debtor_idx").on(
+			table.coDebtorId,
+			table.tipo,
+			table.ejecutadoAt.desc(),
+		),
+		check(
+			"opportunity_validations_titular_sin_co_debtor",
+			sql`${table.sujeto} = 'cofirmante' OR ${table.coDebtorId} IS NULL`,
 		),
 	],
 );

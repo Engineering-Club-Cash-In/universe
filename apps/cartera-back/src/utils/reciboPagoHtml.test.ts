@@ -66,6 +66,8 @@ describe("estado del pago en el recibo", () => {
     expect(estadoReciboPago("validated", false)).toBe("aplicado");
     expect(estadoReciboPago("capital_validated", false)).toBe("aplicado");
     expect(estadoReciboPago("pending", false)).toBe("en_validacion");
+    // Cierre de una cancelación (system_reset): definitivo, no "en validación".
+    expect(estadoReciboPago("reset", false)).toBe("aplicado");
     expect(estadoReciboPago("validated", true)).toBe("anulado");
     expect(estadoReciboPago("no_required", false)).toBe("registrado");
     // Pago automático o importado: no pasa por validación pero cubrió la cuota.

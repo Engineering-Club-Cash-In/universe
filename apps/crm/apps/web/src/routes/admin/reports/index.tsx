@@ -534,9 +534,19 @@ function RouteComponent() {
 		officialMoraRequired &&
 		(officialMoraQuery.isError ||
 			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
+	const officialMoraPending =
+		officialMoraRequired && officialMoraQuery.isPending;
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
+	const officialMoraEsperado =
+		montoCobrarPeriodo === "mes"
+			? officialMoraQuery.data?.moraMensual.esperado
+			: undefined;
+	// Sale del mismo valor que se aplica a las filas: si una recarga falla con el
+	// oficial ya en caché, el Excel lleva el oficial y no debe avisar lo contrario.
+	const officialMoraMissing =
+		officialMoraRequired && officialMoraEsperado === undefined;
 	const montoCobrarRows = applyOfficialMonthlyMora(
 		fillMissingMontoACobrarPeriods(
 			montoCobrarData?.data ?? [],
@@ -545,9 +555,7 @@ function RouteComponent() {
 			montoCobrarRange.fechaFin,
 		),
 		officialMoraOperationalMonth,
-		montoCobrarPeriodo === "mes"
-			? officialMoraQuery.data?.moraMensual.esperado
-			: undefined,
+		officialMoraEsperado,
 	);
 
 	const facturacionMesQuery = useQuery({
@@ -810,7 +818,7 @@ function RouteComponent() {
 		}
 	};
 	const exportAdminReportsExcel = () => {
-		if (!officialMoraReady) {
+		if (officialMoraPending) {
 			toast.error("Espera a que la mora oficial del mes termine de cargar.");
 			return;
 		}
@@ -829,12 +837,21 @@ function RouteComponent() {
 					cobranzaPeriodo: `${montoCobrarRange.fechaInicio} a ${montoCobrarRange.fechaFin}`,
 					inversionPeriodo: `${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`,
 					generatedAt: new Date().toISOString(),
+					...(officialMoraMissing && {
+						avisoMoraMes:
+							"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera.",
+					}),
 				},
 			});
 			XLSX.writeFile(
 				workbook,
 				`reportes-admin-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
 			);
+			if (officialMoraMissing) {
+				toast.warning(
+					"Se exportó sin la mora oficial del mes; la mora del mes actual es la calculada por cartera.",
+				);
+			}
 		} catch (error) {
 			toast.error(
 				error instanceof Error ? error.message : "No fue posible exportar.",
@@ -1334,7 +1351,7 @@ function RouteComponent() {
 											<Button
 												variant="outline"
 												onClick={exportAdminReportsExcel}
-												disabled={!officialMoraReady}
+												disabled={officialMoraPending}
 											>
 												<Download className="mr-2 h-4 w-4" />
 												Exportar Excel
@@ -1402,8 +1419,7 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{(montoCobrarQuery.isPending ||
-										(officialMoraRequired && officialMoraQuery.isPending)) && (
+									{(montoCobrarQuery.isPending || officialMoraPending) && (
 										<p>Cargando...</p>
 									)}
 									{montoCobrarQuery.isError && (

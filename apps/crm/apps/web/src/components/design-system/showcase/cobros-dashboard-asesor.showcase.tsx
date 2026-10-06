@@ -347,8 +347,6 @@ const BASE: DashboardAsesorVistaProps = {
 	encabezado: {
 		saludo: "Buen día",
 		primerNombre: "Carlos",
-		noLeidas: 4,
-		onCampana: nada,
 	},
 	agenda: AGENDA_BASE,
 	desempeno: DESEMPENO_BASE,
@@ -459,7 +457,7 @@ export default function CobrosDashboardAsesorShowcase() {
 				<Marco>
 					<DashboardAsesorVista
 						{...BASE}
-						encabezado={{ ...BASE.encabezado, noLeidas: undefined }}
+						encabezado={BASE.encabezado}
 						agenda={{
 							...AGENDA_BASE,
 							progreso: undefined,

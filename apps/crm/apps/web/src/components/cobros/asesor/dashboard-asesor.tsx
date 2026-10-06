@@ -218,12 +218,6 @@ export function DashboardAsesor() {
 		enabled: conSesion,
 	});
 
-	const noLeidasQuery = useQuery({
-		...orpc.getUnreadNotificationCount.queryOptions(),
-		enabled: conSesion,
-		refetchInterval: 40_000,
-	});
-
 	// Progreso "X de Y tareas realizadas hoy": todas las páginas de la agenda.
 	const agendaHoyQuery = useQuery({
 		...orpc.getMiAgendaHoy.queryOptions({
@@ -406,8 +400,6 @@ export function DashboardAsesor() {
 			encabezado={{
 				saludo: saludoPorHora(),
 				primerNombre,
-				noLeidas: noLeidasQuery.data?.count,
-				onCampana: () => navigate({ to: "/notifications" }),
 				datosParciales:
 					statsQuery.data?.fuente != null &&
 					statsQuery.data.fuente !== "cartera-back",

@@ -1,4 +1,4 @@
-import { Bell, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import type * as React from "react";
 import { useRef } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -24,9 +24,6 @@ export type EncabezadoAsesorProps = {
 	/** "Buen día" | "Buenas tardes" | "Buenas noches". */
 	saludo: string;
 	primerNombre: string;
-	/** Notificaciones sin leer; `undefined` mientras carga. */
-	noLeidas?: number;
-	onCampana: () => void;
 	/** El tablero no pudo leer todo de cartera (badge de "Datos parciales"). */
 	datosParciales?: boolean;
 };
@@ -41,11 +38,8 @@ export function saludoPorHora(fecha: Date = new Date()) {
 function EncabezadoAsesor({
 	saludo,
 	primerNombre,
-	noLeidas,
-	onCampana,
 	datosParciales,
 }: EncabezadoAsesorProps) {
-	const n = noLeidas ?? 0;
 	return (
 		<header className="flex items-start justify-between gap-4">
 			<div className="flex min-w-0 flex-col gap-1">
@@ -61,6 +55,7 @@ function EncabezadoAsesor({
 					proteja su recuperación.
 				</p>
 			</div>
+			{/* La campana de notificaciones de Figma ya está en la barra del CRM. */}
 			<div className="flex shrink-0 items-center gap-2">
 				{datosParciales ? (
 					<Badge variant="warning" className="gap-1.5">
@@ -68,27 +63,6 @@ function EncabezadoAsesor({
 						Datos parciales
 					</Badge>
 				) : null}
-				<button
-					type="button"
-					onClick={onCampana}
-					aria-label={
-						n > 0
-							? `Notificaciones: ${n} sin leer`
-							: "Notificaciones: ninguna sin leer"
-					}
-					className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-line-subtle bg-surface px-3 text-fg-secondary shadow-clay-subtle outline-none transition-colors hover:bg-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-ring"
-				>
-					<Bell aria-hidden className="size-4" />
-					{n > 0 ? (
-						<span className="inline-flex items-center gap-1 rounded-full bg-danger-subtle px-2 py-0.5 font-semibold text-[11px] text-danger-text tabular-nums leading-[1.26]">
-							<span
-								aria-hidden
-								className="size-1.5 rounded-full bg-danger-solid"
-							/>
-							{n > 99 ? "99+" : n}
-						</span>
-					) : null}
-				</button>
 			</div>
 		</header>
 	);

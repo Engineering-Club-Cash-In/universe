@@ -646,7 +646,10 @@ export const paymentRouter = new Elysia()
       // respuesta de validar-pago. El helper nunca lanza (lookup, PDF y envío
       // quedan solo en el log) y no hace nada con RECIBO_PAGO_WHATSAPP_ENABLED
       // apagado — mismo helper que usa el pago de Nexa.
-      if ((resultado as { success?: boolean }).success && pagoExiste.credito_id) {
+      // `applied: false` con success (la cancelación "reset") no movió el pago
+      // y se puede repetir: mandar recibo ahí lo duplicaría en cada clic.
+      const aplicado = resultado as { success?: boolean; applied?: boolean };
+      if (aplicado.success && aplicado.applied !== false && pagoExiste.credito_id) {
         void enviarRecibosPagoDeCreditoBestEffort({
           creditoId: pagoExiste.credito_id,
           pagoIds: [pagoId],

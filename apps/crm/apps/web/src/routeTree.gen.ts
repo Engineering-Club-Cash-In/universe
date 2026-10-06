@@ -46,6 +46,7 @@ import { Route as CobrosHistorialAgendasRouteImport } from './routes/cobros/hist
 import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
 import { Route as CobrosCierreRouteImport } from './routes/cobros/cierre'
+import { Route as CobrosCarteraRouteImport } from './routes/cobros/cartera'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBuroInternoRouteImport } from './routes/cobros/buro-interno'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
@@ -262,6 +263,11 @@ const CobrosCierreRoute = CobrosCierreRouteImport.update({
   path: '/cobros/cierre',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosCarteraRoute = CobrosCarteraRouteImport.update({
+  id: '/cobros/cartera',
+  path: '/cobros/cartera',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosCargaRoute = CobrosCargaRouteImport.update({
   id: '/cobros/carga',
   path: '/cobros/carga',
@@ -436,6 +442,7 @@ export interface FileRoutesByFullPath {
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cartera': typeof CobrosCarteraRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
@@ -504,6 +511,7 @@ export interface FileRoutesByTo {
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cartera': typeof CobrosCarteraRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
@@ -573,6 +581,7 @@ export interface FileRoutesById {
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/carga': typeof CobrosCargaRoute
+  '/cobros/cartera': typeof CobrosCarteraRoute
   '/cobros/cierre': typeof CobrosCierreRoute
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
@@ -643,6 +652,7 @@ export interface FileRouteTypes {
     | '/cobros/buckets'
     | '/cobros/buro-interno'
     | '/cobros/carga'
+    | '/cobros/cartera'
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
@@ -711,6 +721,7 @@ export interface FileRouteTypes {
     | '/cobros/buckets'
     | '/cobros/buro-interno'
     | '/cobros/carga'
+    | '/cobros/cartera'
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
@@ -779,6 +790,7 @@ export interface FileRouteTypes {
     | '/cobros/buckets'
     | '/cobros/buro-interno'
     | '/cobros/carga'
+    | '/cobros/cartera'
     | '/cobros/cierre'
     | '/cobros/cola'
     | '/cobros/convenios'
@@ -848,6 +860,7 @@ export interface RootRouteChildren {
   CobrosBucketsRoute: typeof CobrosBucketsRoute
   CobrosBuroInternoRoute: typeof CobrosBuroInternoRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
+  CobrosCarteraRoute: typeof CobrosCarteraRoute
   CobrosCierreRoute: typeof CobrosCierreRoute
   CobrosColaRoute: typeof CobrosColaRoute
   CobrosConveniosRoute: typeof CobrosConveniosRoute
@@ -1160,6 +1173,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosCierreRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/cartera': {
+      id: '/cobros/cartera'
+      path: '/cobros/cartera'
+      fullPath: '/cobros/cartera'
+      preLoaderRoute: typeof CobrosCarteraRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/carga': {
       id: '/cobros/carga'
       path: '/cobros/carga'
@@ -1384,6 +1404,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosBucketsRoute: CobrosBucketsRoute,
   CobrosBuroInternoRoute: CobrosBuroInternoRoute,
   CobrosCargaRoute: CobrosCargaRoute,
+  CobrosCarteraRoute: CobrosCarteraRoute,
   CobrosCierreRoute: CobrosCierreRoute,
   CobrosColaRoute: CobrosColaRoute,
   CobrosConveniosRoute: CobrosConveniosRoute,

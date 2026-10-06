@@ -11,10 +11,11 @@ import { buroInternoRouter } from "./buro-interno";
 import { checksRouter } from "./checks";
 import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
+import { cobrosAsesorRouter } from "./cobros-asesor";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
-import { historialAgendasRouter } from "./historial-agendas";
 import { documentIntegrityProcedures } from "./document-integrity";
+import { historialAgendasRouter } from "./historial-agendas";
 import { insuranceRouter } from "./insurance";
 import { investorContractsRouter } from "./investor-contracts";
 import { investorDocumentsRouter } from "./investor-documents";
@@ -32,8 +33,8 @@ import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
-import { trasladosCobrosRouter } from "./traslados-cobros";
 import { trackerRouter } from "./tracker";
+import { trasladosCobrosRouter } from "./traslados-cobros";
 import { uploadRouter } from "./upload";
 import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
@@ -168,6 +169,11 @@ export const cobrosAppRouter = {
 	crearCobertura: trasladosCobrosRouter.crearCobertura,
 	listarCoberturas: trasladosCobrosRouter.listarCoberturas,
 	cancelarCobertura: trasladosCobrosRouter.cancelarCobertura,
+	// Rediseño COBROS-02: Dashboard del asesor y Mi Cartera
+	getMiPerfilCobros: cobrosAsesorRouter.getMiPerfilCobros,
+	getMiDesempeno: cobrosAsesorRouter.getMiDesempeno,
+	getMiAgendaContadoresPendientes:
+		cobrosAsesorRouter.getMiAgendaContadoresPendientes,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,
@@ -519,11 +525,9 @@ export const reportsAppRouter = {
 
 	// Verificación de vehículos en SAT
 	ejecutarVerificacionSat: satVehiculosRouter.ejecutarVerificacionSat,
-	obtenerEstadoVerificacionSat:
-		satVehiculosRouter.obtenerEstadoVerificacionSat,
+	obtenerEstadoVerificacionSat: satVehiculosRouter.obtenerEstadoVerificacionSat,
 	obtenerUltimaVerificacionSat: satVehiculosRouter.obtenerUltimaVerificacionSat,
-	obtenerConflictosCreditosSat:
-		satVehiculosRouter.obtenerConflictosCreditosSat,
+	obtenerConflictosCreditosSat: satVehiculosRouter.obtenerConflictosCreditosSat,
 
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,

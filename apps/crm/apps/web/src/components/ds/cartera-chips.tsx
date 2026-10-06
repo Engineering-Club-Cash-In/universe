@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 
 export type EstadoGestionValor =
 	| "Sin acuerdo"
+	| "Promesa vigente"
 	| "Convenio vigente"
 	| "Promesa incumplida";
 
@@ -38,6 +39,12 @@ const estadoGestionTone: Record<
 	{ chip: string; punto: string }
 > = {
 	"Sin acuerdo": { chip: "text-fg-secondary", punto: "bg-fg-tertiary" },
+	// No está en Cartera/EstadoGestión de Figma pero sí en la tabla del
+	// Dashboard del asesor ("Promesa vigente"): tono info.
+	"Promesa vigente": {
+		chip: "bg-info-subtle text-info-text",
+		punto: "bg-info-solid",
+	},
 	"Convenio vigente": {
 		chip: "bg-success-subtle text-success-text",
 		punto: "bg-success-solid",

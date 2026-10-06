@@ -80,6 +80,9 @@ const col = {
 	},
 } satisfies Record<string, ColumnaCartera>;
 
+/** Columnas de Figma sueltas, para armar tablas con columnas visibles a elección. */
+export const columnasCartera = col;
+
 /** Table/Cartera (sin asesor). */
 export const COLUMNAS_CARTERA: ColumnaCartera[] = [
 	col.cliente,
@@ -123,7 +126,11 @@ function anchoColumna(columnas: ColumnaCartera[], i: number) {
 	return i === columnas.length - 1 ? ancho + PADDING_FILA : ancho;
 }
 
-type TablaContexto = { prioridad: boolean; ids: Set<string> };
+type TablaContexto = {
+	prioridad: boolean;
+	ids: Set<string>;
+	columnas: ColumnaCartera[];
+};
 const TablaCarteraContext = React.createContext<TablaContexto | null>(null);
 
 /* ── Piezas de celda ────────────────────────────────────────────────────────── */
@@ -208,7 +215,7 @@ function TablaCartera({
 	...props
 }: TablaCarteraProps) {
 	const ctx = React.useMemo<TablaContexto>(
-		() => ({ prioridad, ids: new Set(columnas.map((c) => c.id)) }),
+		() => ({ prioridad, ids: new Set(columnas.map((c) => c.id)), columnas }),
 		[prioridad, columnas],
 	);
 	const sinFilas = React.Children.count(children) === 0;
@@ -320,6 +327,12 @@ type FilaCreditoProps = React.ComponentProps<"tr"> & {
 	estadoGestion?: React.ReactNode;
 	/** AccionPendiente. */
 	accionPendiente?: React.ReactNode;
+	/**
+	 * Celdas de columnas que no son de Figma (p. ej. "Límite SLA", "Teléfono",
+	 * acciones de la fila), por `id` de columna. Se pintan donde la tabla ponga
+	 * esa columna.
+	 */
+	extras?: Record<string, React.ReactNode>;
 	/** Fija el fondo del estado Hover (fila seleccionada o abierta). */
 	activa?: boolean;
 };
@@ -337,13 +350,38 @@ function FilaCredito({
 	seguimiento,
 	estadoGestion,
 	accionPendiente,
+	extras,
 	activa = false,
 	className,
 	...props
 }: FilaCreditoProps) {
 	const ctx = React.useContext(TablaCarteraContext);
 	const conPrioridad = ctx ? ctx.prioridad : prioridad !== undefined;
-	const conAsesor = ctx ? ctx.ids.has("asesor") : asesor !== undefined;
+	// Fuera de una TablaCartera: las columnas de Figma (con asesor si se pasa).
+	const columnas =
+		ctx?.columnas ??
+		(asesor !== undefined ? COLUMNAS_CARTERA_CON_ASESOR : COLUMNAS_CARTERA);
+
+	const celdas: Record<string, React.ReactNode> = {
+		cliente: <Identidad titulo={cliente} detalle={detalle} />,
+		asesor,
+		bucket,
+		mora,
+		deuda: <Valor>{deudaVencida}</Valor>,
+		cuota: <Valor>{cuotaNormal}</Valor>,
+		fecha: <Valor>{fechaPago}</Valor>,
+		seguimiento,
+		estado:
+			typeof estadoGestion === "string" ? (
+				<span className="font-semibold text-[13px] text-fg-secondary leading-[1.26]">
+					{estadoGestion}
+				</span>
+			) : (
+				estadoGestion
+			),
+		accion: accionPendiente,
+		...extras,
+	};
 
 	return (
 		<TableRow
@@ -353,32 +391,11 @@ function FilaCredito({
 			{...props}
 		>
 			{conPrioridad ? <Prioridad numero={prioridad} /> : null}
-			<TableCell className={celdaBase}>
-				<Identidad titulo={cliente} detalle={detalle} />
-			</TableCell>
-			{conAsesor ? <TableCell className={celdaBase}>{asesor}</TableCell> : null}
-			<TableCell className={celdaBase}>{bucket}</TableCell>
-			<TableCell className={celdaBase}>{mora}</TableCell>
-			<TableCell className={celdaBase}>
-				<Valor>{deudaVencida}</Valor>
-			</TableCell>
-			<TableCell className={celdaBase}>
-				<Valor>{cuotaNormal}</Valor>
-			</TableCell>
-			<TableCell className={celdaBase}>
-				<Valor>{fechaPago}</Valor>
-			</TableCell>
-			<TableCell className={cn(celdaBase, "pl-6")}>{seguimiento}</TableCell>
-			<TableCell className={cn(celdaBase, "pl-6")}>
-				{typeof estadoGestion === "string" ? (
-					<span className="font-semibold text-[13px] text-fg-secondary leading-[1.26]">
-						{estadoGestion}
-					</span>
-				) : (
-					estadoGestion
-				)}
-			</TableCell>
-			<TableCell className={cn(celdaBase, "pl-6")}>{accionPendiente}</TableCell>
+			{columnas.map((c) => (
+				<TableCell key={c.id} className={cn(celdaBase, c.celda)}>
+					{celdas[c.id]}
+				</TableCell>
+			))}
 		</TableRow>
 	);
 }

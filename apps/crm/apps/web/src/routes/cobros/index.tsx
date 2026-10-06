@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
+import { DashboardAsesor } from "@/components/cobros/asesor/dashboard-asesor";
 import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
@@ -299,6 +300,27 @@ export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
 });
 
+/**
+ * Supervisión/admin ven el Dashboard de Cobros de siempre; el asesor (rol
+ * `cobros`) ve su Dashboard (rediseño Figma, unifica "Mi día"). Este envoltorio
+ * solo lee la sesión, así cada pantalla mantiene sus propios hooks.
+ */
+function RouteComponent() {
+	const { data: session, isPending } = authClient.useSession();
+	const userRole = session?.user.role;
+	if (isPending && !session) {
+		return (
+			<div className="flex min-h-[50vh] items-center justify-center">
+				<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+			</div>
+		);
+	}
+	if (userRole === ROLES.COBROS && !PERMISSIONS.canAssignCobros(userRole)) {
+		return <DashboardAsesor />;
+	}
+	return <DashboardSupervision />;
+}
+
 const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	juridico: "Jurídico",
 	convenio: "Convenio",
@@ -312,7 +334,7 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	reclamo: "Reclamo",
 };
 
-function RouteComponent() {
+function DashboardSupervision() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
 	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>(

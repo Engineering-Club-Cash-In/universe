@@ -83,6 +83,19 @@ export interface VariablesPlantilla {
 	aseguradora?: string;
 	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
 	cabinaSeguro?: string;
+	/**
+	 * Token de la cuenta Nexa del crédito (el número con el que el cliente
+	 * paga desde su banco). Solo lo llena la bienvenida automática; vacío, la
+	 * línea `{lineaCuentaNexa}` desaparece sin dejar renglón en blanco.
+	 */
+	cuentaNexa?: string;
+}
+
+/** Línea de la cuenta Nexa dentro del bloque de cuentas de la bienvenida. */
+export function lineaCuentaNexa(token: string | null | undefined): string {
+	return token
+		? `Además, puede pagar su cuota desde su banco con su código de pago Nexa: *${token}*`
+		: "";
 }
 
 /**
@@ -772,7 +785,12 @@ export function interpolar(
 		incrementoMaximoMensualMora,
 	);
 
+	const lineaNexa = lineaCuentaNexa(variables.cuentaNexa);
+
 	return base
+		// Va primero y se lleva el salto de línea: sin cuenta no queda un
+		// renglón vacío que parta el bloque en dos (cambiaría el template).
+		.replace(/\n?{lineaCuentaNexa}/g, lineaNexa ? `\n${lineaNexa}` : "")
 		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
 		.replace(/{incrementoMaximoMensualMora}/g, v(incrementoMaximoMensualMora))
 		.replace(/{clienteNombre}/g, v(nombre))
@@ -828,6 +846,7 @@ A nombre de: *CUBE INVESTMENTS, S.A.*
 * BAM: 3020123033
 * GyT: 01300039945
 * Banrural: 3394002346
+{lineaCuentaNexa}
 
 🚗 *Tu vehículo cuenta con seguro completo a través de {aseguradora}.*
 *En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}*, identificándote únicamente con el número de placa.

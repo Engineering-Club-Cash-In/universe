@@ -50,6 +50,7 @@ const CANONICAL_JOB_NAMES = new Set([
   'generate_daily_invoice_snapshot', 'verify_liquidation_balance',
   'provision_portal_accounts', 'retry_crm_contract_batches', 'deliver_nexa_events',
   'retry_nexa_receipts',
+  'retry_nexa_accounts',
 ]);
 const CONTEXT_FIELDS = new Set(['request_id', 'operation_id', 'run_id']);
 const RESERVED_EVENT_FIELDS = new Set([

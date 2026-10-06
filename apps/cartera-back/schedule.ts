@@ -18,6 +18,7 @@ import { enviarEventosNexaPendientes } from './src/controllers/nexaCarteraEvents
 import { client } from './src/database';
 import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPago';
 import config from './src/config';
+import { reintentarCuentasNexaPendientes } from './src/controllers/nexaCuentaReintentos';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -203,6 +204,20 @@ export function iniciarTareasProgramadas() {
       'retry_nexa_receipts',
       async () => {
         await reintentarRecibosNexaPendientes();
+      },
+    );
+  });
+
+  // 💳 Cuentas Nexa pendientes - cada 15 minutos.
+  //    Reintenta las cuentas que nexa-server no pudo crear al cerrar el
+  //    crédito y le avisa al cliente las que no llegaron en la bienvenida.
+  //    Con NEXA_CUENTA_AUTOMATICA_ENABLED apagado no hace nada (los recibos
+  //    de Nexa los barre retry_nexa_receipts). Ver nexaCuentaReintentos.ts.
+  schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'retry_nexa_accounts',
+      async () => {
+        await reintentarCuentasNexaPendientes();
       },
     );
   });

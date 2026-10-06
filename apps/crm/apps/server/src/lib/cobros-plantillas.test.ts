@@ -124,6 +124,30 @@ describe("plantillas masivas de cobros", () => {
 		expect(bienvenida?.cuerpo).toMatch(/confirmar la recepción/i);
 	});
 
+	test("la línea de la cuenta Nexa entra en el bloque de cuentas sin cambiar los 5 bloques", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find((p) => p.id === "bienvenida");
+		const variables = {
+			clienteNombre: "ana lópez",
+			fechaPago: "5",
+			cuotaMensual: "1,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "",
+			nombreAsesor: "Carlos",
+			expectativaMora: "",
+		};
+		const conCuenta = interpolar(bienvenida?.cuerpo ?? "", { ...variables, cuentaNexa: "32200100000002" });
+		const sinCuenta = interpolar(bienvenida?.cuerpo ?? "", variables);
+
+		expect(bloques(conCuenta)).toHaveLength(5);
+		expect(bloques(sinCuenta)).toHaveLength(5);
+		expect(conCuenta).toContain("* Banrural: 3394002346\nAdemás, puede pagar su cuota desde su banco con su código de pago Nexa: *32200100000002*");
+		expect(sinCuenta).not.toContain("Nexa");
+		expect(sinCuenta).not.toContain("{lineaCuentaNexa}");
+	});
+
 	test("el bloque del seguro de la bienvenida se resuelve por aseguradora", () => {
 		// opportunities.insurance_provider: "universales" | "gyt"; desconocidos y
 		// vacíos caen al default Universales (el default de la columna).

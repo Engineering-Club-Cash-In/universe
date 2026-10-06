@@ -94,6 +94,7 @@ export const carteraCatalog = {
         'generate_daily_invoice_snapshot', 'verify_liquidation_balance',
         'provision_portal_accounts', 'retry_crm_contract_batches', 'deliver_nexa_events',
         'retry_nexa_receipts',
+        'retry_nexa_accounts',
       ],
     },
     provider: {

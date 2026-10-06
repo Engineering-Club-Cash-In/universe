@@ -1028,6 +1028,57 @@ app.post(
 	},
 );
 
+// Endpoint para que cartera-back le mande al cliente su cuenta Nexa en un
+// mensaje aparte, cuando la cuenta se creó después de la bienvenida (su
+// barrido de reintentos). Servidor-a-servidor con la API key de cartera.
+app.post(
+	"/api/notifications/cuenta-nexa-whatsapp",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		try {
+			const body = await c.req.json<{
+				numeroSifco?: string;
+				token?: string;
+				clienteNombre?: string | null;
+				asesorNombre?: string | null;
+				asesorTelefono?: string | null;
+			}>();
+
+			if (!body.numeroSifco || !body.token || !/^\d+$/.test(body.token)) {
+				return c.json(
+					{
+						success: false,
+						error: "Los campos 'numeroSifco' y 'token' (solo dígitos) son requeridos",
+					},
+					400,
+				);
+			}
+
+			const { sendCuentaNexaWhatsapp } = await import(
+				"./services/send-cuenta-nexa-whatsapp"
+			);
+			const resultado = await sendCuentaNexaWhatsapp({
+				numeroSifco: body.numeroSifco,
+				token: body.token,
+				clienteNombre: body.clienteNombre ?? null,
+				asesorNombre: body.asesorNombre ?? null,
+				asesorTelefono: body.asesorTelefono ?? null,
+			});
+
+			return c.json(
+				{ success: resultado.sent, ...resultado },
+				resultado.sent ? 200 : 502,
+			);
+		} catch (err: any) {
+			console.error("[CuentaNexaWhatsapp] Error:", err);
+			return c.json(
+				{ success: false, error: err.message || "Error al enviar la cuenta Nexa" },
+				500,
+			);
+		}
+	},
+);
+
 // Endpoint para que cartera-back cree notificaciones de pago de inversionistas
 app.post("/api/notifications/pay-investors", async (c) => {
 	try {

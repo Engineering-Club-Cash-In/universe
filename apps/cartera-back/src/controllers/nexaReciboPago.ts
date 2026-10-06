@@ -8,7 +8,11 @@
  * forma atómica (PENDIENTE → ENVIANDO), así que dos disparos a la vez o un
  * reintento de Nexa no mandan el recibo dos veces. Un ENVIANDO o FALLIDO de
  * más de 30 minutos se vuelve a tomar, hasta 5 intentos;
- * `reintentarRecibosNexaPendientes` los barre.
+ * `reintentarRecibosNexaPendientes` los barre (job `retry_nexa_receipts`).
+ *
+ * Un evento puede tener varios pagos y el recibo va uno por pago:
+ * `recibo_pagos_ok` (migración 0047) guarda los que ya salieron, así que un
+ * reintento manda solo los que faltan.
  */
 
 import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
@@ -20,10 +24,12 @@ export const MAX_INTENTOS_RECIBO_NEXA = 5;
 const MINUTOS_PARA_RETOMAR = 30;
 
 export type ReciboNexaDeps = {
-  /** Toma el evento si se puede enviar; devuelve el crédito o null. */
-  tomar: (eventId: number) => Promise<{ creditoId: number } | null>;
+  /** Toma el evento si se puede enviar; devuelve el crédito y los pagos ya enviados, o null. */
+  tomar: (eventId: number) => Promise<{ creditoId: number; enviados: number[] } | null>;
   pagosDelEvento: (eventId: number) => Promise<number[]>;
   enviar: (params: { creditoId: number; pagoIds: number[] }) => Promise<{ success: boolean }[]>;
+  /** Anota los pagos cuyo recibo ya salió. */
+  registrarEnviados: (eventId: number, pagoIds: number[]) => Promise<void>;
   cerrar: (eventId: number, estado: "ENVIADO" | "FALLIDO") => Promise<void>;
 };
 
@@ -36,13 +42,17 @@ export async function intentarReciboNexa(
     if (!tomado) return "OMITIDO";
 
     const pagoIds = await deps.pagosDelEvento(eventId);
-    const resultados = pagoIds.length > 0
-      ? await deps.enviar({ creditoId: tomado.creditoId, pagoIds })
+    const yaEnviados = new Set(tomado.enviados);
+    const pendientes = pagoIds.filter((id) => !yaEnviados.has(id));
+    const resultados = pendientes.length > 0
+      ? await deps.enviar({ creditoId: tomado.creditoId, pagoIds: pendientes })
       : [];
-    const enviado =
-      pagoIds.length > 0 &&
-      resultados.length === pagoIds.length &&
-      resultados.every((r) => r.success);
+    // `enviar` devuelve un resultado por pago, en el mismo orden.
+    const okIds = pendientes.filter((_, i) => resultados[i]?.success === true);
+    if (okIds.length > 0) await deps.registrarEnviados(eventId, okIds);
+    for (const id of okIds) yaEnviados.add(id);
+
+    const enviado = pagoIds.length > 0 && pagoIds.every((id) => yaEnviados.has(id));
 
     const estado = enviado ? "ENVIADO" : "FALLIDO";
     await deps.cerrar(eventId, estado);
@@ -107,8 +117,11 @@ export const reciboNexaDeps: ReciboNexaDeps = {
           ),
         ),
       ))
-      .returning({ creditoId: nexa_payment_events.credito_id });
-    return tomado ?? null;
+      .returning({
+        creditoId: nexa_payment_events.credito_id,
+        enviados: nexa_payment_events.recibo_pagos_ok,
+      });
+    return tomado ? { creditoId: tomado.creditoId, enviados: tomado.enviados ?? [] } : null;
   },
   pagosDelEvento: async (eventId) => {
     const pagos = await db
@@ -119,6 +132,14 @@ export const reciboNexaDeps: ReciboNexaDeps = {
     return pagos.map((p) => p.pagoId);
   },
   enviar: (params) => enviarRecibosPagoDeCreditoBestEffort(params),
+  registrarEnviados: async (eventId, pagoIds) => {
+    await db
+      .update(nexa_payment_events)
+      .set({
+        recibo_pagos_ok: sql`ARRAY(SELECT DISTINCT unnest(${nexa_payment_events.recibo_pagos_ok} || ${sql.raw(`ARRAY[${pagoIds.map((id) => Number(id)).filter(Number.isInteger).join(",")}]::integer[]`)}))`,
+      })
+      .where(eq(nexa_payment_events.id, eventId));
+  },
   cerrar: async (eventId, estado) => {
     await db
       .update(nexa_payment_events)

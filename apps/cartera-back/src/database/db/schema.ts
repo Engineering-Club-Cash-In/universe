@@ -789,6 +789,8 @@
       recibo_status: varchar("recibo_status", { length: 20 }),
       recibo_intentos: integer("recibo_intentos").notNull().default(0),
       recibo_actualizado_at: timestamp("recibo_actualizado_at", { withTimezone: true }),
+      // pago_id que ya recibieron su recibo (migración 0047).
+      recibo_pagos_ok: integer("recibo_pagos_ok").array().notNull().default(sql`'{}'::integer[]`),
     },
     (table) => ({
       uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(

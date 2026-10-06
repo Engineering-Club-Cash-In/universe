@@ -11,8 +11,9 @@ type Deps = NonNullable<Parameters<typeof intentarReciboNexa>[1]>;
 function deps(over: Partial<Deps> = {}) {
   const cierres: string[] = [];
   const envios: unknown[] = [];
+  const registrados: number[] = [];
   const d: Deps = {
-    tomar: async () => ({ creditoId: 55 }),
+    tomar: async () => ({ creditoId: 55, enviados: [] }),
     pagosDelEvento: async () => [17],
     enviar: async (params) => {
       envios.push(params);
@@ -21,9 +22,12 @@ function deps(over: Partial<Deps> = {}) {
     cerrar: async (_id, estado) => {
       cierres.push(estado);
     },
+    registrarEnviados: async (_id, ids) => {
+      registrados.push(...ids);
+    },
     ...over,
   };
-  return { d, cierres, envios };
+  return { d, cierres, envios, registrados };
 }
 
 describe("intentarReciboNexa", () => {
@@ -56,5 +60,21 @@ describe("intentarReciboNexa", () => {
       },
     });
     expect(await intentarReciboNexa(7, roto.d)).toBe("FALLIDO");
+  });
+
+  test("con varios pagos, un fallo parcial deja anotados los que salieron y el reintento manda solo el resto", async () => {
+    const primero = deps({
+      pagosDelEvento: async () => [17, 18],
+      enviar: async (params) => params.pagoIds.map((id) => ({ success: id === 17 })),
+    });
+    expect(await intentarReciboNexa(7, primero.d)).toBe("FALLIDO");
+    expect(primero.registrados).toEqual([17]);
+
+    const reintento = deps({
+      tomar: async () => ({ creditoId: 55, enviados: [17] }),
+      pagosDelEvento: async () => [17, 18],
+    });
+    expect(await intentarReciboNexa(7, reintento.d)).toBe("ENVIADO");
+    expect(reintento.envios).toEqual([{ creditoId: 55, pagoIds: [18] }]);
   });
 });

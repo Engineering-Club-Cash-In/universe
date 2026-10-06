@@ -8,6 +8,7 @@ import {
   assertReportReconciliation,
   assertLiquidationRowsReinvestmentIntegrity,
   buildLiquidationComposition,
+  ReinvestmentDataError,
   buildPurchaseTicketHistory,
   calculateActiveCapital,
   buildCubeNetInterest,
@@ -1116,4 +1117,18 @@ test("el contrato parcial no devuelve mensajes técnicos del error", () => {
   );
   expect(message).not.toContain("cartera.liquidaciones");
   expect(message).not.toContain("10.0.0.8");
+});
+
+test("liquidación que pagó + reinvirtió menos que el capital liquidado es error de datos", () => {
+  const input = {
+    totalCapital: "4574.49",
+    paidTotal: "4438.27",
+    reinvestedCapital: "0",
+    reinvestedRest: "0",
+    reinvestedTotal: "0",
+  };
+  expect(() => buildLiquidationComposition(input)).toThrow(ReinvestmentDataError);
+  expect(() => buildLiquidationComposition(input)).toThrow(
+    "Composición de liquidación inválida",
+  );
 });

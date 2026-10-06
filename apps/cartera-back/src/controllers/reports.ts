@@ -1710,6 +1710,7 @@ export async function generateReciboPagoPDF(pagoId: number) {
       TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
       p.origen_pago,
       c.numero_credito_sifco,
+      c."statusCredit" AS status_credito,
       c.plazo,
       c.cuota AS cuota_credito,
       u.nombre AS usuario_nombre,
@@ -1732,28 +1733,41 @@ export async function generateReciboPagoPDF(pagoId: number) {
   const pago = result.rows[0] as any;
 
   // Próxima cuota sin pagar del crédito, para el bloque "Estado del crédito".
-  // Por número de cuota y no por fila: un calendario regenerado puede tener
-  // dos filas del mismo número y quedar una en pagado=false aunque la cuota
-  // ya se pagó; si cualquier fila de ese número está pagada, la cuota lo está.
-  // La fecha sale de la copia VIGENTE de esa cuota (la de mayor cuota_id, la
-  // misma que toma el registro de pagos tras una regeneración), no de la más
-  // vieja.
-  const proximaResult = await db.execute(sql`
-    WITH proxima AS (
-      SELECT cq.numero_cuota
+  // - Un crédito cancelado no tiene próximo pago: el reset conserva sus cuotas
+  //   viejas sin pagar solo como histórico.
+  // - Solo cuentan las cuotas con un pago VIVO (paymentFalse = false): el
+  //   reset anula los pagos de las cuotas archivadas, así que un castigo con
+  //   calendario nuevo toma el vigente y no el viejo.
+  // - Por número de cuota y no por fila: si cualquier fila de ese número está
+  //   pagada, la cuota lo está (calendarios regenerados con duplicados).
+  // - La fecha sale de la copia vigente (mayor cuota_id, la misma que toma el
+  //   registro de pagos tras una regeneración).
+  const creditoCancelado = ["CANCELADO", "PENDIENTE_CANCELACION"].includes(String(pago.status_credito));
+  const proximaResult = creditoCancelado
+    ? { rows: [] as unknown[] }
+    : await db.execute(sql`
+    WITH vivas AS (
+      SELECT cq.cuota_id, cq.numero_cuota, cq.pagado, cq.fecha_vencimiento
       FROM cartera.cuotas_credito cq
       WHERE cq.credito_id = ${pago.credito_id}
         AND cq.numero_cuota > 0
-      GROUP BY cq.numero_cuota
-      HAVING NOT bool_or(COALESCE(cq.pagado, false))
-      ORDER BY cq.numero_cuota
+        AND EXISTS (
+          SELECT 1 FROM cartera.pagos_credito pv
+          WHERE pv.cuota_id = cq.cuota_id AND pv."paymentFalse" = false
+        )
+    ),
+    proxima AS (
+      SELECT numero_cuota
+      FROM vivas
+      GROUP BY numero_cuota
+      HAVING NOT bool_or(COALESCE(pagado, false))
+      ORDER BY numero_cuota
       LIMIT 1
     )
-    SELECT cq.numero_cuota, TO_CHAR(cq.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento
-    FROM cartera.cuotas_credito cq
-    JOIN proxima ON proxima.numero_cuota = cq.numero_cuota
-    WHERE cq.credito_id = ${pago.credito_id}
-    ORDER BY cq.cuota_id DESC
+    SELECT v.numero_cuota, TO_CHAR(v.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento
+    FROM vivas v
+    JOIN proxima ON proxima.numero_cuota = v.numero_cuota
+    ORDER BY v.cuota_id DESC
     LIMIT 1
   `);
   const proxima = proximaResult.rows[0] as any | undefined;

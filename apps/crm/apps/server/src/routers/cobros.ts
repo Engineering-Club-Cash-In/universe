@@ -12,9 +12,11 @@ import {
 	inArray,
 	isNotNull,
 	isNull,
+	lt,
 	lte,
 	max,
 	ne,
+	not,
 	notInArray,
 	or,
 	sql,
@@ -75,6 +77,7 @@ import {
 	registrarAuditContacto,
 } from "../lib/audit-contactos";
 import { hashPersona } from "../lib/bot-cobros/historial";
+import { buildCasoFromCartera } from "../lib/build-caso-from-cartera";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import {
 	deriveHasCapitalData,
@@ -126,12 +129,12 @@ import {
 import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
+import { esGestionAutomatica } from "../lib/historial-agendas";
 import {
 	getTestPhone,
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
-import { buildCasoFromCartera } from "../lib/build-caso-from-cartera";
 import {
 	calcularDiasMoraExactos,
 	diasMoraDeListado,
@@ -183,6 +186,13 @@ import {
 } from "../lib/recuperacion-vehiculo";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	accionPendienteDe,
+	cargarSeguimientoPorCaso,
+	DIAS_PROMESA_POR_VENCER,
+	estadoGestionDe,
+	seguimientoVacio,
+} from "../lib/seguimiento-cobros";
 import {
 	sendWhatsappTemplate,
 	sendWhatsappTemplateBatch,
@@ -941,6 +951,137 @@ async function resolverConvenioVigenteDelCaso(casoCobroId: string) {
 	return convenios.find((c) => c.activo && !c.completado) ?? null;
 }
 
+/** SIFCOs de los créditos cuyo cliente tiene ese DPI (13 dígitos, sin espacios ni guiones). */
+async function sifcosPorDpi(dpi: string): Promise<string[]> {
+	const filas = await db
+		.select({ numeroSifco: opportunities.numeroSifco })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(
+			and(
+				sql`REPLACE(REPLACE(${leads.dpi}, ' ', ''), '-', '') = ${dpi}`,
+				isNotNull(opportunities.numeroSifco),
+			),
+		);
+	return [
+		...new Set(filas.flatMap((f) => (f.numeroSifco ? [f.numeroSifco] : []))),
+	];
+}
+
+export const FILTROS_GESTION_CARTERA = [
+	"sin_gestion_48h",
+	"sin_contactar_hoy",
+	"promesa_por_vencer",
+	"convenio_pendiente",
+] as const;
+type FiltroGestionCartera = (typeof FILTROS_GESTION_CARTERA)[number];
+
+/**
+ * Chips de Mi Cartera que dependen de las gestiones del CRM (cartera no las
+ * conoce). Devuelve la lista de SIFCOs que cumplen, para mandarla a cartera
+ * como `numeros_credito_sifco`. Los dos "negativos" (sin gestión / sin
+ * contactar) necesitan el universo de la consulta: se resta lo gestionado.
+ */
+async function sifcosPorFiltroGestion(
+	filtro: FiltroGestionCartera,
+	opts: {
+		universo: () => Promise<string[]>;
+		emailCobrador: string | undefined;
+	},
+): Promise<string[]> {
+	const ahora = new Date();
+	const inicioHoy = gtDateStrToDate(toDateStrGT(ahora));
+	if (filtro === "promesa_por_vencer") {
+		// Vigente (pendiente o legacy NULL) y vence entre hoy y +3 días.
+		const hasta = new Date(
+			inicioHoy.getTime() + (DIAS_PROMESA_POR_VENCER + 1) * 24 * 60 * 60 * 1000,
+		);
+		const filas = await db
+			.selectDistinct({ numeroSifco: casosCobros.numeroCreditoSifco })
+			.from(contactosCobros)
+			.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+			.where(
+				and(
+					eq(contactosCobros.estadoContacto, "promesa_pago"),
+					or(
+						eq(contactosCobros.estadoPromesa, "pendiente"),
+						isNull(contactosCobros.estadoPromesa),
+					),
+					gte(contactosCobros.fechaProximoContacto, inicioHoy),
+					lt(contactosCobros.fechaProximoContacto, hasta),
+				),
+			);
+		return filas.flatMap((f) => (f.numeroSifco ? [f.numeroSifco] : []));
+	}
+	if (filtro === "convenio_pendiente") {
+		// Pendiente de aprobación del supervisor (CB-033), del asesor si aplica.
+		let asesorId: number | undefined;
+		if (opts.emailCobrador) {
+			const email = opts.emailCobrador.trim().toLowerCase();
+			const pool = await carteraBackClient.getPoolPorAsesor();
+			const propio = pool.find(
+				(a) => a.email_cash_in?.trim().toLowerCase() === email,
+			);
+			if (!propio) return [];
+			asesorId = propio.asesor_id;
+		}
+		const convenios = await fetchAllPages(
+			async (page) => {
+				const resp = await carteraBackClient.getConveniosListado({
+					estado: "pending",
+					asesorId,
+					page,
+					perPage: 100,
+				});
+				return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+			},
+			{ maxPages: 50 },
+		);
+		return [...new Set(convenios.map((c) => c.numero_credito_sifco))];
+	}
+	// sin_gestion_48h / sin_contactar_hoy: universo menos lo gestionado.
+	const universo = await opts.universo();
+	if (universo.length === 0) return [];
+	const desde =
+		filtro === "sin_contactar_hoy"
+			? inicioHoy
+			: new Date(ahora.getTime() - 48 * 60 * 60 * 1000);
+	const gestionados = await db
+		.selectDistinct({ numeroSifco: casosCobros.numeroCreditoSifco })
+		.from(contactosCobros)
+		.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+		.where(
+			and(
+				inArray(casosCobros.numeroCreditoSifco, universo),
+				gte(contactosCobros.fechaContacto, desde),
+				ne(contactosCobros.estadoContacto, "link_pago_generado"),
+				not(esGestionAutomatica()),
+			),
+		);
+	const yaGestionados = new Set(gestionados.map((g) => g.numeroSifco));
+	return universo.filter((s) => !yaGestionados.has(s));
+}
+
+/**
+ * Correo del cobrador cuya cartera se consulta. Un asesor solo ve la SUYA: se
+ * toma de la sesión e ignora lo que mande el front (antes `getTodosLosCreditos`
+ * y `getDashboardStats` confiaban en el `emailCobrador` del cliente, y un
+ * asesor que lo omitía veía toda la cartera). Supervisor y admin pueden pedir
+ * la de cualquiera, o toda (undefined).
+ */
+function emailCobradorEfectivo(
+	context: {
+		userRole?: string | null;
+		user?: { email?: string | null } | null;
+	},
+	solicitado: string | undefined,
+): string | undefined {
+	if (PERMISSIONS.canAssignCobros(context.userRole ?? "")) return solicitado;
+	// Sin correo en la sesión no hay cartera que mostrar: un valor que no
+	// matchea a nadie, nunca undefined (que cartera leería como "todos").
+	return context.user?.email?.trim() || "__sin_sesion__";
+}
+
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -961,7 +1102,7 @@ export const cobrosRouter = {
 
 					// Usar el nuevo endpoint de stats de cartera-back
 					const statsResponse = await carteraBackClient.getStats({
-						email: input?.emailCobrador,
+						email: emailCobradorEfectivo(context, input?.emailCobrador),
 					});
 
 					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera.
@@ -1066,7 +1207,8 @@ export const cobrosRouter = {
 						estatusStats,
 					);
 
-					// Contactos realizados hoy
+					// Contactos realizados hoy (día GT). El asesor ve los SUYOS; antes
+					// era el conteo de todo el equipo con la medianoche del servidor.
 					const contactosHoy = await db
 						.select({ count: count() })
 						.from(contactosCobros)
@@ -1074,9 +1216,12 @@ export const cobrosRouter = {
 							and(
 								gte(
 									contactosCobros.fechaContacto,
-									new Date(new Date().setHours(0, 0, 0, 0)),
+									gtDateStrToDate(toDateStrGT(new Date())),
 								),
 								ne(contactosCobros.estadoContacto, "link_pago_generado"),
+								...(PERMISSIONS.canAssignCobros(context.userRole ?? "")
+									? []
+									: [eq(contactosCobros.realizadoPor, context.userId)]),
 							),
 						);
 
@@ -1263,9 +1408,15 @@ export const cobrosRouter = {
 				capitalMin: z.number().optional(),
 				capitalMax: z.number().optional(),
 				excluirPagadosMes: z.boolean().optional(),
+				/** Restringe a estos SIFCOs (p. ej. completar las filas de la Cola del día). */
+				numerosSifco: z.array(z.string()).max(200).optional(),
+				/** Chips de Mi Cartera que dependen de las gestiones del CRM. */
+				filtroGestion: z.enum(FILTROS_GESTION_CARTERA).optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// El asesor solo ve su cartera, mande lo que mande el front.
+			const emailCobrador = emailCobradorEfectivo(context, input.emailCobrador);
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
 				try {
@@ -1288,10 +1439,18 @@ export const cobrosRouter = {
 					const searchTerm = input.searchTerm?.trim() || "";
 					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 					const hasNumber = /\d/.test(searchTerm);
+					// DPI: 13 dígitos (con o sin espacios/guiones). Va antes que la placa:
+					// antes un DPI caía en la búsqueda por placa y no encontraba nada.
+					const soloDigitos = searchTerm.replace(/[\s-]/g, "");
+					const isDpiSearch =
+						!numeroSifcoExacto && /^\d{13}$/.test(soloDigitos);
 					// Si hay numeroSifco explícito, ignoramos cualquier búsqueda por
 					// cliente/placa: es un equals contra cartera-back y sólo retorna 0 ó 1.
 					const isPlateSearch =
-						!numeroSifcoExacto && searchTerm.length > 0 && hasNumber;
+						!numeroSifcoExacto &&
+						!isDpiSearch &&
+						searchTerm.length > 0 &&
+						hasNumber;
 					const isNameSearch =
 						!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
@@ -1329,7 +1488,7 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasMin=${cuotasMin}, cuotasMax=${cuotasMax}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasMin=${cuotasMin}, cuotasMax=${cuotasMax}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
 					);
 
 					// Si hay filtro de etiquetas, primero resolver en CRM la lista de
@@ -1369,6 +1528,63 @@ export const cobrosRouter = {
 								totalPages: 0,
 							};
 						}
+					}
+
+					// Más restricciones por lista de SIFCOs: se intersectan con la de
+					// etiquetas y viajan a cartera por el mismo `numeros_credito_sifco`.
+					const restricciones: string[][] = [];
+					if (sifcosPorEtiquetas) restricciones.push(sifcosPorEtiquetas);
+					if (input.numerosSifco) restricciones.push(input.numerosSifco);
+					if (isDpiSearch) restricciones.push(await sifcosPorDpi(soloDigitos));
+					if (input.filtroGestion) {
+						restricciones.push(
+							await sifcosPorFiltroGestion(input.filtroGestion, {
+								emailCobrador,
+								universo: async () => {
+									const todos = await obtenerTodasLasPaginasCreditos({
+										mes,
+										anio,
+										cuotasMin,
+										cuotasMax,
+										estado: estadoCartera,
+										time: input.time,
+										email_cobrador: emailCobrador,
+										fecha_desde: input.fechaDesde,
+										fecha_hasta: input.fechaHasta,
+										numeros_credito_sifco: sifcosPorEtiquetas,
+										capital_min: input.capitalMin,
+										capital_max: input.capitalMax,
+										excluir_pagados_mes: input.excluirPagadosMes,
+									});
+									return todos.flatMap((c) =>
+										c.creditos.numero_credito_sifco
+											? [c.creditos.numero_credito_sifco]
+											: [],
+									);
+								},
+							}),
+						);
+					}
+					if (
+						restricciones.length > 1 ||
+						(restricciones.length === 1 && !sifcosPorEtiquetas)
+					) {
+						const [primera, ...resto] = restricciones;
+						const conjuntos = resto.map((r) => new Set(r));
+						sifcosPorEtiquetas = [...new Set(primera)].filter((sifco) =>
+							conjuntos.every((c) => c.has(sifco)),
+						);
+					}
+					if (sifcosPorEtiquetas && sifcosPorEtiquetas.length === 0) {
+						const limit = input.limit || 50;
+						const offset = input.offset || 0;
+						return {
+							data: [],
+							total: 0,
+							page: Math.floor(offset / limit) + 1,
+							perPage: limit,
+							totalPages: 0,
+						};
 					}
 
 					let creditosResponse;
@@ -1430,7 +1646,7 @@ export const cobrosRouter = {
 									cuotasMax,
 									estado: estadoCartera,
 									time: input.time,
-									email_cobrador: input.emailCobrador,
+									email_cobrador: emailCobrador,
 									numero_credito_sifco: numeroSifco,
 									fecha_desde: input.fechaDesde,
 									fecha_hasta: input.fechaHasta,
@@ -1477,7 +1693,7 @@ export const cobrosRouter = {
 									cuotasMax,
 									estado: estadoCartera,
 									time: input.time,
-									email_cobrador: input.emailCobrador,
+									email_cobrador: emailCobrador,
 									fecha_desde: input.fechaDesde,
 									fecha_hasta: input.fechaHasta,
 									numeros_credito_sifco: sifcosFiltro,
@@ -1498,7 +1714,7 @@ export const cobrosRouter = {
 										cuotasMax,
 										estado: estadoCartera,
 										time: input.time,
-										email_cobrador: input.emailCobrador,
+										email_cobrador: emailCobrador,
 										fecha_desde: input.fechaDesde,
 										fecha_hasta: input.fechaHasta,
 										numeros_credito_sifco: sifcosFiltro,
@@ -1544,7 +1760,7 @@ export const cobrosRouter = {
 								cuotasMax,
 								estado: estadoCartera,
 								time: input.time,
-								email_cobrador: input.emailCobrador,
+								email_cobrador: emailCobrador,
 								numero_credito_sifco: numeroSifcoExacto,
 								fecha_desde: input.fechaDesde,
 								fecha_hasta: input.fechaHasta,
@@ -1564,7 +1780,7 @@ export const cobrosRouter = {
 							cuotasMax,
 							estado: estadoCartera,
 							time: input.time,
-							email_cobrador: input.emailCobrador,
+							email_cobrador: emailCobrador,
 							nombre_usuario: isNameSearch ? searchTerm : undefined,
 							fecha_desde: input.fechaDesde,
 							fecha_hasta: input.fechaHasta,
@@ -1657,6 +1873,13 @@ export const cobrosRouter = {
 							promesaPorCaso.add(row.casoCobroId);
 						}
 					}
+
+					// Rediseño (Dashboard del asesor / Mi Cartera): seguimiento de cada
+					// caso de la página, en lote — columnas Seguimiento, Estado de
+					// gestión y Acción pendiente.
+					const seguimientoPorCaso =
+						await cargarSeguimientoPorCaso(casoIdsPagina);
+					const hoyStrListado = toDateStrGT(new Date());
 
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
@@ -1761,6 +1984,46 @@ export const cobrosRouter = {
 								promesaActiva: casoCobro
 									? promesaPorCaso.has(casoCobro.id)
 									: false,
+								// ── Rediseño COBROS-02 (Figma Asesor Junior/Senior) ──
+								bucketNumero: credito.bucket?.numero ?? null,
+								bucketPrefijo: credito.bucket?.prefijo ?? null,
+								bucketNombre: credito.bucket?.nombre ?? null,
+								// TODO(José): reemplazar por `monto_vencido` de cartera-back
+								// (saldo real de las cuotas atrasadas + mora; esto no descuenta
+								// abonos parciales). Ver docs/features/cobros-02/
+								// 13-dashboard-asesor-backend.md › B4.
+								deudaVencida: (
+									cuotasAtrasadas * Number(credito.creditos.cuota ?? 0) +
+									montoEnMora
+								).toFixed(2),
+								deudaVencidaAproximada: true,
+								...(() => {
+									const seguimiento = casoCobro
+										? (seguimientoPorCaso.get(casoCobro.id) ??
+											seguimientoVacio())
+										: seguimientoVacio();
+									const venceHoy =
+										(credito.proxima_cuota?.fecha_vencimiento ?? "").slice(
+											0,
+											10,
+										) === hoyStrListado;
+									return {
+										seguimiento: {
+											intentosSinContacto: seguimiento.intentosSinContacto,
+											ultimoIntentoEn: seguimiento.ultimoIntentoEn,
+											intentadoHoy: seguimiento.intentadoHoy,
+											contactadoHoy: seguimiento.contactadoHoy,
+											proximaLlamadaEn: seguimiento.proximaLlamadaEn,
+										},
+										estadoGestion: estadoGestionDe(
+											seguimiento,
+											statusCredit === "EN_CONVENIO",
+										),
+										accionPendiente: accionPendienteDe(seguimiento, {
+											venceHoy,
+										}),
+									};
+								})(),
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()
@@ -2501,28 +2764,76 @@ export const cobrosRouter = {
 	// clickeables hacia la Cola del Día. Sin scope por asesor (MVP simple).
 	getResumenPromesas: cobrosProcedure
 		.input(z.object({}).optional())
-		.handler(async () => {
+		.handler(async ({ context }) => {
 			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 			const finHoyGt = new Date(inicioHoyGt.getTime() + 24 * 60 * 60 * 1000);
-			const [row] = await db
+			const condiciones = and(
+				eq(contactosCobros.estadoContacto, "promesa_pago"),
+				eq(casosCobros.activo, true),
+			);
+			// Supervisor / admin: totales del equipo, como siempre.
+			if (PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				const [row] = await db
+					.select({
+						activas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt})`,
+						vencenHoy: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt} and ${contactosCobros.fechaProximoContacto} < ${finHoyGt})`,
+						incumplidas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'incumplida')`,
+					})
+					.from(contactosCobros)
+					.innerJoin(
+						casosCobros,
+						eq(contactosCobros.casoCobroId, casosCobros.id),
+					)
+					.where(condiciones);
+				return {
+					activas: Number(row?.activas ?? 0),
+					vencenHoy: Number(row?.vencenHoy ?? 0),
+					incumplidas: Number(row?.incumplidas ?? 0),
+				};
+			}
+			// Asesor: solo las promesas de los créditos que trabaja (mismo criterio
+			// que getAlertasPromesas). Antes veía los totales de todo el equipo.
+			const filas = await db
 				.select({
-					activas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt})`,
-					vencenHoy: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'pendiente' and ${contactosCobros.fechaProximoContacto} >= ${inicioHoyGt} and ${contactosCobros.fechaProximoContacto} < ${finHoyGt})`,
-					incumplidas: sql<string>`count(*) filter (where ${contactosCobros.estadoPromesa} = 'incumplida')`,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+					estadoPromesa: contactosCobros.estadoPromesa,
+					fecha: contactosCobros.fechaProximoContacto,
 				})
 				.from(contactosCobros)
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
 				.where(
 					and(
-						eq(contactosCobros.estadoContacto, "promesa_pago"),
-						eq(casosCobros.activo, true),
+						condiciones,
+						inArray(contactosCobros.estadoPromesa, ["pendiente", "incumplida"]),
 					),
 				);
-			return {
-				activas: Number(row?.activas ?? 0),
-				vencenHoy: Number(row?.vencenHoy ?? 0),
-				incumplidas: Number(row?.incumplidas ?? 0),
-			};
+			const sifcos = [
+				...new Set(
+					filas.flatMap((f) =>
+						f.numeroCreditoSifco ? [f.numeroCreditoSifco] : [],
+					),
+				),
+			];
+			const mios = await sifcosQueTrabaja({
+				userId: context.userId,
+				userRole: context.userRole,
+				sifcos,
+			});
+			let activas = 0;
+			let vencenHoy = 0;
+			let incumplidas = 0;
+			for (const f of filas) {
+				if (mios && (!f.numeroCreditoSifco || !mios.has(f.numeroCreditoSifco)))
+					continue;
+				if (f.estadoPromesa === "incumplida") {
+					incumplidas++;
+					continue;
+				}
+				if (!f.fecha || f.fecha < inicioHoyGt) continue;
+				activas++;
+				if (f.fecha < finHoyGt) vencenHoy++;
+			}
+			return { activas, vencenHoy, incumplidas };
 		}),
 
 	// CB-031: apartado "Alertas de Promesas" (/cobros/promesas). Lista las
@@ -4019,6 +4330,14 @@ export const cobrosRouter = {
 		.input(
 			z.object({
 				filtro: z.enum(CATEGORIAS_COLA_DIA).optional(),
+				/**
+				 * Dashboard del asesor (rediseño): filtros que NO son categorías de la
+				 * cola —no cambian qué entra a "Prioritarios" ni su orden— y se
+				 * aplican sobre todo el universo del asesor (como `filtro`).
+				 *  · llamada_hoy: tiene una llamada agendada para hoy.
+				 *  · sin_intento_hoy: nadie lo intentó contactar hoy.
+				 */
+				filtroExtra: z.enum(["llamada_hoy", "sin_intento_hoy"]).optional(),
 				asesorId: z.number().int().positive().optional(),
 				buckets: z.array(z.number().int().min(0).max(5)).optional(),
 				page: z.number().int().positive().optional(),
@@ -4389,6 +4708,29 @@ export const cobrosRouter = {
 					diasSinContactoPorCaso.set(c.casoCobroId, dias);
 				}
 
+				// Rediseño: seguimiento por caso (intentos, último intento, llamada
+				// agendada, estado de gestión). En lote sobre todo el universo porque
+				// alimenta los conteos extra y `filtroExtra`.
+				const seguimientoPorCaso = await cargarSeguimientoPorCaso(casoIds);
+				const seguimientoDe = (sifco: string) => {
+					const caso = casoPorSifco.get(sifco);
+					return caso
+						? (seguimientoPorCaso.get(caso.id) ?? seguimientoVacio())
+						: seguimientoVacio();
+				};
+				const cumpleExtra = (
+					sifco: string,
+					extra: "llamada_hoy" | "sin_intento_hoy",
+				) => {
+					const seg = seguimientoDe(sifco);
+					if (extra === "sin_intento_hoy") return !seg.intentadoHoy;
+					return (
+						!!seg.proximaLlamadaEn &&
+						toDateStrGT(seg.proximaLlamadaEn) === hoyStr &&
+						!seg.intentadoHoy
+					);
+				};
+
 				const hoy = new Date();
 				const items = universo.data
 					.map((credito) => {
@@ -4417,11 +4759,18 @@ export const cobrosRouter = {
 							diasSinContacto,
 						};
 					})
-					.filter(({ clasificacion }) =>
-						input.filtro
+					.filter(({ clasificacion, credito }) => {
+						if (input.filtroExtra) {
+							if (!cumpleExtra(credito.numero_credito_sifco, input.filtroExtra))
+								return false;
+							return input.filtro
+								? calificaParaFiltro(clasificacion, input.filtro)
+								: true;
+						}
+						return input.filtro
 							? calificaParaFiltro(clasificacion, input.filtro)
-							: calificaParaColaDia(clasificacion),
-					)
+							: calificaParaColaDia(clasificacion);
+					})
 					.sort(
 						(a, b) =>
 							ordenColaDia(a.clasificacion) - ordenColaDia(b.clasificacion),
@@ -4479,6 +4828,32 @@ export const cobrosRouter = {
 							promesaActiva: clasificacion.promesaActiva,
 							sinContacto: clasificacion.sinContacto,
 							diasSinContacto,
+							// ── Rediseño COBROS-02: columnas Seguimiento / Estado de gestión /
+							// Acción pendiente (Figma Asesor Junior/Senior).
+							...(() => {
+								const seg = seguimientoDe(credito.numero_credito_sifco);
+								return {
+									seguimiento: {
+										intentosSinContacto: seg.intentosSinContacto,
+										ultimoIntentoEn: seg.ultimoIntentoEn,
+										intentadoHoy: seg.intentadoHoy,
+										contactadoHoy: seg.contactadoHoy,
+										proximaLlamadaEn: seg.proximaLlamadaEn,
+									},
+									estadoGestion: estadoGestionDe(seg, false),
+									accionPendiente: accionPendienteDe(
+										seg,
+										{
+											slaHoy: clasificacion.slaHoy,
+											fechaLimiteSla: credito.fecha_limite_sla
+												? gtDateStrToDate(credito.fecha_limite_sla)
+												: null,
+											venceHoy: clasificacion.venceHoy,
+										},
+										hoy,
+									),
+								};
+							})(),
 						}),
 					);
 
@@ -4510,6 +4885,17 @@ export const cobrosRouter = {
 					) as Record<(typeof CATEGORIAS_COLA_DIA)[number], number>;
 				})();
 
+				// Contadores de la "Agenda de hoy" del rediseño que no son categorías
+				// de la cola (mismo universo que `conteos`).
+				const conteosExtra = {
+					llamada_hoy: universo.data.filter((c) =>
+						cumpleExtra(c.numero_credito_sifco, "llamada_hoy"),
+					).length,
+					sin_intento_hoy: universo.data.filter((c) =>
+						cumpleExtra(c.numero_credito_sifco, "sin_intento_hoy"),
+					).length,
+				};
+
 				const total = items.length;
 				const totalPages = Math.max(1, Math.ceil(total / perPage));
 				const offset = (page - 1) * perPage;
@@ -4521,6 +4907,7 @@ export const cobrosRouter = {
 					items: items.slice(offset, offset + perPage),
 					total,
 					conteos,
+					conteosExtra,
 					page,
 					perPage,
 					totalPages,
@@ -5175,9 +5562,11 @@ export const cobrosRouter = {
 					}
 
 					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
-					const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
-						creditoCompleto.cuotasAtrasadas || [],
-					));
+					const diasMora = diasMoraDelDetalle(
+						creditoCompleto.diasAtrasoMoraMaximo,
+						() =>
+							calcularDiasMoraExactos(creditoCompleto.cuotasAtrasadas || []),
+					);
 					const montoEnMora = creditoCompleto.moraActual
 						? Number(creditoCompleto.moraActual)
 						: 0;
@@ -5234,9 +5623,10 @@ export const cobrosRouter = {
 				);
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
-				const diasMora = diasMoraDelDetalle(creditoCompleto.diasAtrasoMoraMaximo, () => calcularDiasMoraExactos(
-					creditoCompleto.cuotasAtrasadas || [],
-				));
+				const diasMora = diasMoraDelDetalle(
+					creditoCompleto.diasAtrasoMoraMaximo,
+					() => calcularDiasMoraExactos(creditoCompleto.cuotasAtrasadas || []),
+				);
 				const montoEnMora = Number(creditoCompleto.moraActual ?? 0);
 
 				const tieneMoraActiva = creditoCompleto.mora != null;

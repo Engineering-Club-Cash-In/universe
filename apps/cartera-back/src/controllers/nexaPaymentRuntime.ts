@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import config from "../config";
 import { client, db } from "../database";
 import {
@@ -23,16 +23,33 @@ import {
   type NexaPaymentDependencies,
 } from "./nexaPayments";
 
-export async function startNexaBilling(eventId: number) {
+/**
+ * Pasa el evento a billing_running. Devuelve "payment_deleted" cuando no arrancó porque el crédito
+ * se marcó CAIDO y su pago se borró (pago_id NULL, pago_id_eliminado puesto): no se emitió nada,
+ * así que no es un conflicto que mande el evento a billing_unknown.
+ */
+export async function startNexaBilling(eventId: number): Promise<boolean | "payment_deleted"> {
   const [started] = await db
     .update(nexa_payment_events)
     .set({ status: "billing_running", error: null, updated_at: new Date() })
     .where(and(
       eq(nexa_payment_events.id, eventId),
       inArray(nexa_payment_events.status, ["billing_pending", "billing_failed"]),
+      // Nunca se factura un evento cuyo pago se borró (crédito marcado CAIDO).
+      isNotNull(nexa_payment_events.pago_id),
     ))
     .returning({ id: nexa_payment_events.id });
-  return Boolean(started);
+  if (started) return true;
+  const [borrado] = await db
+    .select({ id: nexa_payment_events.id })
+    .from(nexa_payment_events)
+    .where(and(
+      eq(nexa_payment_events.id, eventId),
+      isNull(nexa_payment_events.pago_id),
+      isNotNull(nexa_payment_events.pago_id_eliminado),
+    ))
+    .limit(1);
+  return borrado ? "payment_deleted" : false;
 }
 
 export async function completeNexaBilling(eventId: number, paymentId: number) {
@@ -164,6 +181,11 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     .where(and(
       eq(pagos_credito.credito_id, creditoId),
       eq(pagos_credito.nexaPaymentEventId, eventId),
+      // Una fila anulada (paymentFalse) no es un pago: p.ej. la de un evento failed que se anuló
+      // antes de que la anulación la desligara. Si contara, el reintento la reaplicaría en vez de
+      // registrar limpio. Un evento applied/billed no depende de esto: classifyNexaClaim lo
+      // contesta por el status y su pago_id, y estas filas solo completan la lista de ids.
+      eq(pagos_credito.paymentFalse, false),
     ))
     .orderBy(asc(pagos_credito.pago_id)),
   registerPayment: async (body, eventId, usuarioId, validateAfterLock, paymentLock) => {

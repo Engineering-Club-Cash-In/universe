@@ -194,6 +194,21 @@ integrationTest("filtro de rango: un pago fuera del rango no aparece", async () 
   expect(fuera.r.creditos).toHaveLength(0);
 });
 
+integrationTest("pagos-nexa: una boleta Nexa con 3 filas cuenta 1 y suma su monto una vez; sin pagos Nexa da 0", async () => {
+  const c = await nuevoCredito();
+  const { mod } = await setup();
+  expect(await mod.contarPagosNexaCredito(c.id)).toEqual({ cantidad: 0, montoTotal: "0" });
+  await c.pago(1, "2026-09-10 10:00:00", { monto: 600 });
+  expect(await mod.contarPagosNexaCredito(c.id)).toEqual({ cantidad: 0, montoTotal: "0" });
+  const ev1 = await c.evento("applied", 300);
+  for (const cuota of [1, 2, 3]) await c.pago(cuota, "2026-09-11 10:00:00", { monto: 300, evento: ev1 });
+  const ev2 = await c.evento("applied", 150);
+  await c.pago(4, "2026-09-12 10:00:00", { monto: 150, evento: ev2 });
+  const ev3 = await c.evento("applied", 80);
+  await c.pago(5, "2026-09-13 10:00:00", { monto: 80, evento: ev3, falso: true });
+  expect(await mod.contarPagosNexaCredito(c.id)).toEqual({ cantidad: 2, montoTotal: "450.00" });
+});
+
 integrationTest("filtro de rango: un crédito con solo pagos rechazados en el período sigue apareciendo", async () => {
   const c = await nuevoCredito();
   const ev = await c.evento("failed", 70);

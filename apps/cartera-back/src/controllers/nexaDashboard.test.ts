@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 // El controlador importa la base; con una URL inalcanzable el pool se crea sin conectarse.
 process.env.SUPABASE_DB_URL ??= "postgresql://test@127.0.0.1:1/test";
-const { mapNexaDashboardRows, parseNexaDashboardParams, mapNexaCreditPayments } = await import("./nexaDashboard");
+const { mapNexaDashboardRows, parseNexaDashboardParams, mapNexaCreditPayments, mapPagosNexaCredito } = await import("./nexaDashboard");
 
 describe("parseNexaDashboardParams", () => {
   test.each([
@@ -98,5 +98,14 @@ describe("mapNexaCreditPayments", () => {
   test("listas vacías retorna respuesta vacía", () => {
     const result = mapNexaCreditPayments(7, [], []);
     expect(result).toEqual({ creditoId: 7, pagos: [], eventosSinPago: [] });
+  });
+});
+
+describe("mapPagosNexaCredito", () => {
+  test("convierte la fila", () => {
+    expect(mapPagosNexaCredito({ cantidad: "2", monto_total: "450.00" })).toEqual({ cantidad: 2, montoTotal: "450.00" });
+  });
+  test("sin fila: cero", () => {
+    expect(mapPagosNexaCredito(undefined)).toEqual({ cantidad: 0, montoTotal: "0" });
   });
 });

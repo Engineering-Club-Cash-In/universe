@@ -633,6 +633,56 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
   )).toEqual({ kind: "conflict" });
 });
 
+test("un reintento de Nexa después de marcar CAÍDO se contesta como aplicado con el pago borrado", async () => {
+  const { classifyNexaClaim, processNexaPayment } = await import("./nexaPayments");
+  const requested = { creditoId: 10, amount: "10.00", currency: "GTQ", payloadHash: "a".repeat(64) };
+  const caido = {
+    id: 7,
+    credito_id: 10,
+    amount: "10.00",
+    currency: "GTQ",
+    payload_hash: "a".repeat(64),
+    status: "applied",
+    pago_id: null,
+    pago_id_eliminado: 17,
+  };
+  for (const status of ["applied", "billed", "billing_pending", "billing_running", "billing_unknown", "billing_failed", "processing", "manual_review"]) {
+    expect(classifyNexaClaim({ ...caido, status }, false, requested))
+      .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
+  }
+  // Un `failed` (Nexa rechazó la transferencia y devolvió el dinero) nunca se contesta como
+  // aplicado, aunque traiga la marca: sigue el camino de failed.
+  expect(classifyNexaClaim({ ...caido, status: "failed" }, false, requested))
+    .toEqual({ kind: "retry", eventId: 7 });
+  // El conflicto y el replay siguen ganando.
+  expect(classifyNexaClaim(caido, true, requested)).toEqual({ kind: "replay" });
+  expect(classifyNexaClaim(caido, false, { ...requested, amount: "11.00" })).toEqual({ kind: "conflict" });
+  // Sin pago borrado, sigue como antes.
+  expect(classifyNexaClaim({ ...caido, pago_id_eliminado: null }, false, requested))
+    .toEqual({ kind: "manual_review" });
+
+  let mutated = false;
+  const result = await processNexaPayment(
+    paymentBody("qa-payment-caido"),
+    { nonce: "nonce-nuevo", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => classifyNexaClaim({ ...caido, status: "billing_pending" }, false, requested),
+      loadCredit: async () => ({ usuarioId: 5, statusCredit: "CAIDO", binding: null }),
+      findPayments: async () => [],
+      registerPayment: async () => { mutated = true; return { success: true }; },
+      applyPayment: async () => { mutated = true; return { success: true }; },
+      complete: async () => { mutated = true; },
+      fail: async () => { mutated = true; },
+      billPayments: async () => { mutated = true; return { kind: "billed" }; },
+      completeBilling: async () => { mutated = true; },
+      failBilling: async () => { mutated = true; },
+    },
+  );
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: true });
+  expect(mutated).toBe(false);
+});
+
 test("el handler verifica el body exacto antes de procesar", async () => {
   const module = await import("./nexaPayments");
   const createHandler = Reflect.get(module, "createNexaPaymentHandler");

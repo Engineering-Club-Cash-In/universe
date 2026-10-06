@@ -41,6 +41,10 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
     await sql`INSERT INTO cartera.creditos VALUES (10)`;
     await sql.unsafe(migration).simple();
     await sql.unsafe(migration).simple();
+    // startNexaBilling lee pago_id_eliminado para distinguir un pago borrado por CAIDO.
+    await sql.unsafe(await Bun.file(
+      new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url),
+    ).text()).simple();
 
     await sql`INSERT INTO cartera.nexa_payment_nonces (nonce) VALUES ('nonce-persisted')`;
     await expectRejected(
@@ -174,6 +178,9 @@ integrationTest("un evento legado en crash-window acepta el cliente nuevo y qued
     await sql`CREATE TABLE cartera.pagos_credito (pago_id integer PRIMARY KEY)`;
     await sql`INSERT INTO cartera.creditos (credito_id) VALUES (10)`;
     await sql.unsafe(migration).simple();
+    await sql.unsafe(await Bun.file(
+      new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url),
+    ).text()).simple();
 
     const queryClient = {
       query: async (text: string, values: unknown[] = []) => ({
@@ -520,7 +527,8 @@ integrationTest("la reconciliación Nexa cuenta mora y otros una sola vez", asyn
         abono_iva_12 numeric(18, 2) NOT NULL DEFAULT 0,
         abono_seguro numeric(18, 2) NOT NULL DEFAULT 0,
         abono_gps numeric(18, 2) NOT NULL DEFAULT 0,
-        membresias_pago numeric(18, 2) NOT NULL DEFAULT 0
+        membresias_pago numeric(18, 2) NOT NULL DEFAULT 0,
+        "paymentFalse" boolean NOT NULL DEFAULT false
       )
     `;
     await sql`
@@ -532,6 +540,12 @@ integrationTest("la reconciliación Nexa cuenta mora y otros una sola vez", asyn
         (9488, 702, 30.00, 0.00, '15.00', 15.00),
         (9488, 703, 15.00, 5.38, '0', 15.00),
         (9488, 703, 15.00, 0.00, '0', 15.00)
+    `;
+    // Una fila anulada del mismo evento no cuenta: ni su id ni su monto.
+    await sql`
+      INSERT INTO cartera.pagos_credito
+        (credito_id, nexa_payment_event_id, monto_aplicado, abono_capital, "paymentFalse")
+      VALUES (9488, 703, 99.00, 99.00, true)
     `;
 
     const { nexaPaymentDependencies } = await import("./nexaPaymentRuntime");
@@ -637,6 +651,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, validated boolean NOT NULL DEFAULT false);
       INSERT INTO cartera.creditos VALUES (10);`);
     await query.query(await Bun.file(new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url)).text());
+    await query.query(await Bun.file(new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url)).text());
     for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending", "0005_cartera_payment_ids"]) {
       await query.query(await Bun.file(new URL(`../../../nexa-server/drizzle/${file}.sql`, import.meta.url)).text());
     }

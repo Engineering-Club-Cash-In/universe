@@ -68,6 +68,7 @@ import { useActualizarCuentaPago, useCuentasEmpresa } from "../hooks/account";
 import { useFacturarPagoCompleto } from "../hooks/cofidi";
 import { ModalFacturasPago } from "./modalFacts";
 import { ModalDesgloseFacturas } from "./ModalDesgloseFacturas";
+import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 import { DatePickerMUI } from "./calendar";
 
 // --- utilidades ---
@@ -1421,7 +1422,8 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           false,
                         )
                       }
-                      disabled={reversePago.isPending || user?.role !== "ADMIN"}
+                      disabled={reversePago.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)}
+                      title={motivoNoAnularPago(pago)}
                     >
                       {reversePago.isPending ? (
                         <>
@@ -1442,7 +1444,8 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       onClick={() => {
                         handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
                       }}
-                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN"}
+                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)}
+                      title={motivoNoAnularPago(pago)}
                     >
                       {revertPaymentToPending.isPending ? (
                         <>
@@ -2051,8 +2054,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 }
                               }}
                               disabled={
-                                reversePago.isPending || user?.role !== "ADMIN"
+                                reversePago.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)
                               }
+                              title={motivoNoAnularPago(pago)}
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
                                 user?.role !== "ADMIN"
                                   ? "opacity-50 text-gray-400 bg-gray-50"
@@ -2080,8 +2084,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 }
                               }}
                               disabled={
-                                revertPaymentToPending.isPending || user?.role !== "ADMIN"
+                                revertPaymentToPending.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)
                               }
+                              title={motivoNoAnularPago(pago)}
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
                                 user?.role !== "ADMIN"
                                   ? "opacity-50 text-gray-400 bg-gray-50"

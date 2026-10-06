@@ -319,3 +319,28 @@ ORDER BY id DESC
 LIMIT 20`);
   return mapNexaCreditPayments(creditoId, pagos.rows, eventos.rows);
 };
+
+export type PagosNexaCredito = { cantidad: number; montoTotal: string };
+
+export const mapPagosNexaCredito = (row: Record<string, unknown> | undefined): PagosNexaCredito => ({
+  cantidad: Number(row?.cantidad ?? 0),
+  montoTotal: String(row?.monto_total ?? "0"),
+});
+
+/**
+ * Pagos de un crédito que entraron por Nexa y siguen vigentes, para advertir antes de una
+ * operación que borra o rehace todos los pagos del crédito. Se cuenta por evento (boleta), no
+ * por fila: un evento puede tener varias filas y todas repiten el monto_boleta.
+ */
+export const contarPagosNexaCredito = async (creditoId: number): Promise<PagosNexaCredito> => {
+  const result = await db.execute(sql`
+SELECT COUNT(*) AS cantidad, COALESCE(SUM(monto), 0) AS monto_total
+FROM (
+  SELECT MAX(pc.monto_boleta) AS monto
+  FROM cartera.pagos_credito pc
+  WHERE pc.credito_id = ${creditoId} AND pc.nexa_payment_event_id IS NOT NULL
+    AND pc."paymentFalse" IS NOT TRUE AND pc.monto_boleta > 0
+  GROUP BY pc.nexa_payment_event_id
+) por_evento`);
+  return mapPagosNexaCredito(result.rows[0]);
+};

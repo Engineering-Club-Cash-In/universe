@@ -20,6 +20,11 @@ import {
 } from "../utils/pendingReturnGuard";
 import type { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
+  desligarFilaDeEventoNexaFallido,
+  NexaPaymentNotReversibleError,
+  pagoNexaBloqueaAnular,
+} from "./nexaPagoNoReversibleError";
+import {
   estadoMoraTrasElPago,
   marcarDecrementoAnulado,
 } from "./moraDecrementoDePago";
@@ -147,6 +152,7 @@ export async function anularPagoYRestituirMora(
       mora: pagos_credito.mora,
       paymentFalse: pagos_credito.paymentFalse,
       created_at: pagos_credito.createdAt,
+      nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
     })
     .from(pagos_credito)
     .where(
@@ -157,6 +163,13 @@ export async function anularPagoYRestituirMora(
     )
     .limit(1)
     .for("update");
+
+  // Un pago que entró por Nexa no se anula. `falsePayment` ya lo mira antes,
+  // pero suelto: un callback Nexa en vuelo pudo tomar la fila después. Acá
+  // decide sobre la fila candada, antes de escribir nada (la ruta da 409).
+  if (await pagoNexaBloqueaAnular(tx, pagoPrevio?.nexaPaymentEventId)) {
+    throw new NexaPaymentNotReversibleError();
+  }
 
   // ¿Qué queda por restituir de la mora que este pago bajó? La pregunta —y su
   // ancla— viven en `moraDecrementoDePago.ts`, compartidas con la reversa de
@@ -203,6 +216,10 @@ export async function anularPagoYRestituirMora(
   if (!actualizado.rowCount || actualizado.rowCount === 0) {
     throw new Error("No payment found to mark as false with the given criteria");
   }
+
+  // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento
+  // de esa transferencia registre limpio en vez de reaplicar esta fila anulada.
+  await desligarFilaDeEventoNexaFallido(tx, pago_id, pagoPrevio?.nexaPaymentEventId);
 
   // 🧾 RUBROS: declarar falsa una boleta la invalida, así que lo que cobró de
   // los rubros tiene que irse con ella. Un reclamo SIN APLICAR se soltaba solo

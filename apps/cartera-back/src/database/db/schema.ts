@@ -742,6 +742,9 @@
       payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
       status: varchar("status", { length: 20 }).notNull().default("processing"),
       pago_id: integer("pago_id").references(() => pagos_credito.pago_id),
+      // El pago_id que tenía el evento cuando marcar CAÍDO borró el pago (sin FK).
+      // Ver drizzle/0050_nexa_evento_pago_eliminado.sql.
+      pago_id_eliminado: integer("pago_id_eliminado"),
       error: text("error"),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
       updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -25,6 +25,10 @@ import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
 import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import {
+  esNexaPaymentNotReversibleError,
+  respuestaNexaNoReversible,
+} from "../controllers/nexaPagoNoReversible";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
@@ -218,6 +222,10 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      if (esNexaPaymentNotReversibleError(error)) {
+        set.status = 409;
+        return respuestaNexaNoReversible();
+      }
       if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
         set.status = 422;
         return {

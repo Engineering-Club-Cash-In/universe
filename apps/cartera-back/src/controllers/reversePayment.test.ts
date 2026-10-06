@@ -223,6 +223,8 @@ function createPersistenceHarness(
     reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
     // Lock identidad: acá no hay concurrencia que serializar y el real
     // abriría conexión al lockPool.
+    // Pago manual: el portero Nexa no lo frena (la rama Nexa se prueba en nexaPagoNoReversible.test.ts).
+    rechazarSiPagoEsNexa: (async () => undefined) as unknown as ReversePaymentDependencies["rechazarSiPagoEsNexa"],
     withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
       fn()) as ReversePaymentDependencies["withCreditLock"],
     // El refresco de proyección corre DESPUÉS del commit; en este harness la
@@ -660,5 +662,57 @@ describe("reversePayment cuenta SÓLO las filas vivas de la cuota", () => {
     const { columnas, valores } = describirWhere(recordedCountWheres[0]);
     expect(columnas).toEqual(["cuota_id", "credito_id", "paymentFalse"]);
     expect(valores).toEqual([55, 10, false]);
+  });
+});
+
+describe("reversePayment de una fila Nexa cuyo evento quedó failed", () => {
+  // Nexa rechazó la transferencia y devolvió el dinero: la fila se revierte y, en la MISMA
+  // transacción, se desliga del evento para que un reintento de Nexa registre limpio.
+  test("pasa la guarda, desliga la fila del evento y la resetea", async () => {
+    const recordedUpdates: RecordedUpdate[] = [];
+    const tx = createTransactionTx({ ...pendingPayment, nexaPaymentEventId: 77 }, recordedUpdates);
+    const sentencias: string[] = [];
+    const texto = (q: any): string =>
+      (q?.queryChunks ?? []).map((c: any) => (Array.isArray(c?.value) ? c.value.join("") : "")).join("?");
+    tx.execute = mock((q: unknown) => {
+      const t = texto(q).replace(/\s+/g, " ").trim();
+      sentencias.push(t);
+      if (t.startsWith("SELECT status FROM cartera.nexa_payment_events")) {
+        return Promise.resolve({ rows: [{ status: "failed" }], rowCount: 1 });
+      }
+      if (t.startsWith("UPDATE cartera.pagos_credito SET nexa_payment_event_id = NULL")) {
+        return Promise.resolve({ rows: [], rowCount: 1 });
+      }
+      return Promise.resolve([]);
+    }) as any;
+    let enTransaccion = false;
+    const handler = createReversePayment({
+      runTransaction: (async (callback: (value: typeof tx) => Promise<unknown>) => {
+        enTransaccion = true;
+        await callback(tx);
+        throw new Error("synthetic later transaction failure");
+      }) as unknown as ReversePaymentDependencies["runTransaction"],
+      reverseInvestors: mock(async () => []) as unknown as ReversePaymentDependencies["reverseInvestors"],
+      reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+      rechazarSiPagoEsNexa: (async () => undefined) as unknown as ReversePaymentDependencies["rechazarSiPagoEsNexa"],
+      withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) => fn()) as ReversePaymentDependencies["withCreditLock"],
+      refrescarProyeccion: mock(() => Promise.resolve({ corrio: true as const })) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
+      restituirMora: (async () => ({ success: true })) as unknown as ReversePaymentDependencies["restituirMora"],
+    });
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
+    });
+
+    expect(enTransaccion).toBe(true);
+    const desligue = sentencias.findIndex((s) => s.startsWith("UPDATE cartera.pagos_credito SET nexa_payment_event_id = NULL"));
+    expect(desligue).toBeGreaterThan(sentencias.findIndex((s) => s.startsWith("SELECT status FROM cartera.nexa_payment_events")));
+    expect(desligue).toBeGreaterThan(-1);
+    const resets = recordedUpdates.filter(
+      (u) => u.table === pagos_credito && u.payload.validationStatus === "no_required",
+    );
+    expect(resets).toHaveLength(1);
   });
 });

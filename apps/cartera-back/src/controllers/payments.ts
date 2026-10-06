@@ -41,6 +41,11 @@ import {
 } from "../utils/pendingReturnGuard";
 import { esCube } from "../utils/devolucionCompletada";
 import {
+  desligarFilaDeEventoNexaFallido,
+  NexaPaymentNotReversibleError,
+  pagoNexaBloqueaAnular,
+} from "./nexaPagoNoReversible";
+import {
   resolverAbonosNoLiquidados,
   type AbonoNoLiquidado,
 } from "../utils/abonosNoLiquidados";
@@ -233,6 +238,9 @@ export async function getAllPagosWithCreditAndInversionistas(
         origen_pago: pagos_credito.origen_pago,
         // Canal por el que entró el pago: NEXA si lo registró el endpoint de Nexa.
         canal: sql<"NEXA" | "MANUAL">`CASE WHEN ${pagos_credito.nexaPaymentEventId} IS NOT NULL THEN 'NEXA' ELSE 'MANUAL' END`,
+        // Nexa rechazó la transferencia y devolvió el dinero: esta fila sí se anula (ver pagoNexaBloqueaAnular).
+        nexaEventoFallido: sql<boolean>`EXISTS (SELECT 1 FROM cartera.nexa_payment_events e
+          WHERE e.id = ${pagos_credito.nexaPaymentEventId} AND e.status = 'failed')`,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -1971,7 +1979,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
    * de arriba, no por aquélla.
    */
   const [yaFalso] = await db
-    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .select({
+      paymentFalse: pagos_credito.paymentFalse,
+      nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
+    })
     .from(pagos_credito)
     .where(
       and(
@@ -1984,7 +1995,22 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   if (!yaFalso) {
     throw new Error("No payment found to mark as false with the given criteria");
   }
+  // Un pago que entró por Nexa no se anula (Nexa ya aprobó la transferencia y
+  // no hay forma de deshacerla). Antes de escribir cualquier cosa, y antes de
+  // la salida temprana de abajo: tampoco corre las "redes de seguridad".
+  if (await pagoNexaBloqueaAnular(db, yaFalso.nexaPaymentEventId)) {
+    throw new NexaPaymentNotReversibleError();
+  }
   if (yaFalso.paymentFalse) {
+    // Fila ya anulada de un evento Nexa `failed` que sigue ligada (anulada antes de que la
+    // anulación desligara): se desliga ahora, para que un reintento de Nexa no la encuentre y
+    // registre limpio. Sin candado a propósito (falsePayment no lo toma por su cuenta: ver
+    // anularPagoMoraCarrera.test.ts): es UNA sentencia que solo desliga si el evento sigue `failed`.
+    // Si un reintento de Nexa ya movió el evento (claim → processing), no desliga y queda como
+    // antes; si desliga primero, el reintento ve 0 filas y registra limpio. Nunca deja un estado
+    // intermedio.
+    await desligarFilaDeEventoNexaFallido(db, pago_id, yaFalso.nexaPaymentEventId);
+
     // Antes de salir, limpiar el ajuste por fecha ideal — sí, otra vez.
     //
     // Es la red de seguridad de las filas que quedaron a medias: el reset vivía
@@ -2862,6 +2888,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.validation_status AS "validation_status",
         p.monto_aplicado AS "monto_aplicado",
         p.origen_pago AS "origenPago",
+        (p.nexa_payment_event_id IS NOT NULL) AS "entroPorNexa",
+        EXISTS (SELECT 1 FROM cartera.nexa_payment_events ne
+          WHERE ne.id = p.nexa_payment_event_id AND ne.status = 'failed') AS "nexaEventoFallido",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -3208,6 +3237,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
       origenPago: r.origenPago,
+      entroPorNexa: r.entroPorNexa === true,
+      nexaEventoFallido: r.nexaEventoFallido === true,
       credito: r.credito,
       banderaReinversion: r.banderaReinversion ?? false,
       pendienteFacturar: r.pendienteFacturar ?? false,

@@ -21,7 +21,7 @@ const get = (path: string, role: string) =>
     headers: { Authorization: `Bearer ${jwt.sign({ id: 1, email: "a@b.c", role }, JWT_SECRET)}` },
   }));
 
-const RUTAS = ["/nexa/dashboard", "/nexa/dashboard/10/pagos"];
+const RUTAS = ["/nexa/dashboard", "/nexa/dashboard/10/pagos", "/nexa/credito/10/pagos-nexa"];
 
 describe("dashboard Nexa: gate de rol", () => {
   for (const ruta of RUTAS) {

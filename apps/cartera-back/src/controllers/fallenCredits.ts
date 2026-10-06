@@ -11,6 +11,87 @@ import {
 } from "../database/db/schema";
 import { and, eq, sql, ne, desc, gte, lte } from "drizzle-orm";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { contarPagosNexaCredito } from "./nexaDashboard";
+
+/**
+ * Borra los pagos del crédito (menos los de la cuota 0, si existe). Antes desvincula los eventos
+ * de Nexa que apuntan a esos pagos: `nexa_payment_events.pago_id` referencia `pagos_credito` sin
+ * ON DELETE, y sin esto el DELETE revienta y toda la transacción hace rollback. El evento queda
+ * (con su status) como constancia de lo que Nexa aprobó, y guarda el pago borrado en
+ * `pago_id_eliminado` para que un reintento de Nexa de la misma transferencia se conteste como ya
+ * aplicado (ver classifyNexaClaim). Devuelve cuántos eventos se desvincularon.
+ * También marca los eventos que NO apuntan al pago pero sí tienen filas registradas
+ * (`pagos_credito.nexa_payment_event_id`): un evento processing/manual_review con pago_id NULL
+ * porque el registro reventó después de insertPayment o el proceso murió. Sin la marca, tras borrar
+ * las filas el reintento vería 0 filas y trataría como no registrado un pago que sí entró. Se usa
+ * la menor fila borrada del evento, la misma convención que pago_id (el primero de la boleta).
+ * Un evento `failed` nunca recibe la marca: Nexa rechazó esa transferencia y devolvió el dinero, y
+ * con la marca el reintento se contestaría como aplicado (classifyNexaClaim). En el primer UPDATE
+ * solo se le suelta el pago_id (lo exige la FK), sin marcarlo.
+ * Mismo filtro en los UPDATE y en el DELETE.
+ */
+export async function borrarPagosDelCredito(
+  tx: Pick<typeof db, "execute" | "delete">,
+  creditoId: number,
+  cuota0Id: number | undefined,
+): Promise<number> {
+  const filtroPagos = cuota0Id
+    ? sql`credito_id = ${creditoId} AND cuota_id <> ${cuota0Id}`
+    : sql`credito_id = ${creditoId}`;
+  const desvinculados = await tx.execute(sql`
+    UPDATE cartera.nexa_payment_events
+       SET pago_id_eliminado = CASE WHEN status = 'failed' THEN pago_id_eliminado ELSE pago_id END,
+           pago_id = NULL, updated_at = now()
+    WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito WHERE ${filtroPagos})`);
+  const vinculados = await tx.execute(sql`
+    UPDATE cartera.nexa_payment_events e
+       SET pago_id_eliminado = v.primer_pago, updated_at = now()
+      FROM (SELECT nexa_payment_event_id AS evento_id, MIN(pago_id) AS primer_pago
+              FROM cartera.pagos_credito
+             WHERE ${filtroPagos} AND nexa_payment_event_id IS NOT NULL
+             GROUP BY nexa_payment_event_id) v
+    WHERE e.id = v.evento_id AND e.pago_id IS NULL AND e.pago_id_eliminado IS NULL
+      AND e.status <> 'failed'`);
+  if (cuota0Id) {
+    await tx
+      .delete(pagos_credito)
+      .where(and(eq(pagos_credito.credito_id, creditoId), ne(pagos_credito.cuota_id, cuota0Id)));
+  } else {
+    await tx.delete(pagos_credito).where(eq(pagos_credito.credito_id, creditoId));
+  }
+  return Number(desvinculados.rowCount ?? 0) + Number(vinculados.rowCount ?? 0);
+}
+
+/**
+ * Eventos Nexa del crédito cuya factura puede estar emitiéndose o ya emitida sin confirmar. La
+ * facturación diferida corre FUERA del candado del crédito (nexaBilling.ts), así que borrar el pago
+ * en ese momento deja una factura sin pago y el evento en billing_unknown. El FOR UPDATE frena a
+ * startNexaBilling/completeNexaBilling sobre esas filas hasta que cierre la transacción.
+ *
+ * Devuelve solo billing_running/billing_unknown, que son los que bloquean. billing_pending se
+ * BLOQUEA pero no se devuelve: todavía no emitió nada y, con NEXA_AUTOMATIC_INVOICING_ENABLED
+ * apagado (el default), todo pago Nexa aceptado se queda ahí para siempre, así que bloquear por él
+ * impediría marcar CAIDO sin salida. Es seguro dejarlo pasar porque el candado obliga a un
+ * startNexaBilling concurrente a esperar el commit, y después ve pago_id NULL (borrarPagosDelCredito)
+ * y no arranca: devuelve "payment_deleted", runNexaBilling contesta pending/billing_payment_deleted
+ * y el evento se queda en billing_pending con pago_id NULL y pago_id_eliminado puesto (el reintento
+ * de Nexa se contesta como aplicado). billing_failed se trata igual que billing_pending (se bloquea
+ * y no se devuelve): startNexaBilling también lo deja pasar a billing_running, así que un reintento
+ * de facturación concurrente espera el commit, ve pago_id NULL y devuelve "payment_deleted".
+ */
+export async function eventosNexaFacturando(
+  tx: Pick<typeof db, "execute">,
+  creditoId: number,
+): Promise<Array<{ id: number; status: string }>> {
+  const result = await tx.execute(sql`
+    SELECT id, status FROM cartera.nexa_payment_events
+    WHERE credito_id = ${creditoId}
+      AND status IN ('billing_pending', 'billing_failed', 'billing_running', 'billing_unknown')
+    FOR UPDATE`);
+  return (result.rows as Array<{ id: number | string; status: string }>)
+    .filter((r) => r.status !== "billing_pending" && r.status !== "billing_failed")
+    .map((r) => ({ id: Number(r.id), status: r.status }));
+}
 
 /**
  * Marca un crédito como CAIDO:
@@ -163,23 +244,31 @@ export async function marcarCreditoComoCaido({
 
     const cuota0Id = cuota0?.cuota_id;
 
-    return await db.transaction(async (tx) => {
-      // 1. Eliminar pagos (excepto los de cuota 0)
-      if (cuota0Id) {
-        await tx
-          .delete(pagos_credito)
-          .where(
-            and(
-              eq(pagos_credito.credito_id, credito_id),
-              ne(pagos_credito.cuota_id, cuota0Id)
-            )
-          );
-      } else {
-        // Si no hay cuota 0, eliminar todos los pagos
-        await tx
-          .delete(pagos_credito)
-          .where(eq(pagos_credito.credito_id, credito_id));
+    // Nexa ya aprobó esas transferencias y no se deshacen allá: queda constancia de cuántas se borran.
+    // Solo cuenta para el log; una falla de la consulta no frena la operación.
+    let pagosNexa: Awaited<ReturnType<typeof contarPagosNexaCredito>> | null = null;
+    try {
+      pagosNexa = await contarPagosNexaCredito(credito_id);
+    } catch (error) {
+      console.error("No se pudo contar los pagos Nexa antes de marcar CAIDO:", error);
+    }
+
+    let eventosDesvinculados = 0;
+    const resultado = await db.transaction(async (tx) => {
+      // 0. Ningún pago Nexa con la factura en curso o sin confirmar: se niega sin escribir nada.
+      const facturando = await eventosNexaFacturando(tx, credito_id);
+      if (facturando.length > 0) {
+        const ids = facturando.map((e) => `${e.id} ${e.status}`).join(", ");
+        return {
+          success: false,
+          message:
+            `El crédito tiene ${facturando.length} pago(s) Nexa con facturación en curso o sin confirmar ` +
+            `(eventos ${ids}). Esperá a que termine o resolvé la factura en revisión manual antes de marcarlo CAIDO.`,
+        };
       }
+
+      // 1. Eliminar pagos (excepto los de cuota 0), desvinculando antes los eventos Nexa
+      eventosDesvinculados = await borrarPagosDelCredito(tx, credito_id, cuota0Id);
 
       // 2. Eliminar cuotas (excepto cuota 0)
       await tx
@@ -213,6 +302,20 @@ export async function marcarCreditoComoCaido({
         data: registro,
       };
     });
+
+    if (resultado.success && (eventosDesvinculados > 0 || (pagosNexa?.cantidad ?? 0) > 0)) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          event: "credito.caido.pagos_nexa_borrados",
+          credito_id,
+          pagos_nexa: pagosNexa?.cantidad ?? null,
+          monto_total: pagosNexa?.montoTotal ?? null,
+          eventos_desvinculados: eventosDesvinculados,
+        }),
+      );
+    }
+    return resultado;
   });
 }
 

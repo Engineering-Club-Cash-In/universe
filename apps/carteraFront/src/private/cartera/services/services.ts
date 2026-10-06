@@ -782,6 +782,8 @@ export interface PagoData {
     usuario_nit: string;
     url_boleta: string | null; // URL del PDF de la boleta
     paymentFalse:boolean
+    canal?: "NEXA" | "MANUAL"; // NEXA = entró por Nexa: no se puede anular
+    nexaEventoFallido?: boolean; // Nexa rechazó y devolvió el dinero: la fila sí se anula
     boletas:string[]
     monto_aplicado: string | null;
     abono_capital_id?: number | null;
@@ -2103,6 +2105,11 @@ export interface PagoDataInvestor {
   inversionistas: InversionistaPago[];
   boletas: BoletaPago[];
   monto_aplicado: number | null;
+
+  // true si el pago entró por Nexa (nexa_payment_event_id): no se puede anular.
+  entroPorNexa?: boolean;
+  // true si ese evento Nexa quedó failed (Nexa devolvió el dinero): la fila sí se anula.
+  nexaEventoFallido?: boolean;
 
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;

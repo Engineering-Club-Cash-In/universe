@@ -112,3 +112,12 @@ export const cuotasTexto = (cuotas: number[]) => {
   const seguidas = cuotas.every((c, i) => i === 0 || c === cuotas[i - 1] + 1);
   return `Cuotas ${seguidas ? `${cuotas[0]}–${cuotas[cuotas.length - 1]}` : cuotas.join(", ")}`;
 };
+
+// Pagos del crédito que entraron por Nexa y siguen vigentes (por boleta, no por fila).
+export interface PagosNexaCredito {
+  cantidad: number;
+  montoTotal: string;
+}
+
+export const getPagosNexaCredito = async (creditoId: number): Promise<PagosNexaCredito> =>
+  (await api.get(`${API_URL}/nexa/credito/${creditoId}/pagos-nexa`)).data;

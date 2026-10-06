@@ -81,6 +81,8 @@ export type StoredNexaEvent = {
   payload_hash: string;
   status: string;
   pago_id: number | null;
+  /** Pago que tenía el evento antes de que marcar CAÍDO lo borrara. */
+  pago_id_eliminado?: number | null;
 };
 
 export const classifyNexaClaim = (
@@ -104,6 +106,12 @@ export const classifyNexaClaim = (
     ![requested.payloadHash, ...(requested.compatiblePayloadHashes ?? [])].includes(event.payload_hash)
   ) {
     return { kind: "conflict" };
+  }
+  // Marcar CAÍDO borró el pago de una transferencia que cartera ya aceptó: el reintento de Nexa
+  // se contesta como ya aplicado con el pago original. Nunca para un `failed`: esa transferencia
+  // se rechazó y Nexa devolvió el dinero; sigue el camino de failed de abajo.
+  if (event.pago_id === null && event.pago_id_eliminado != null && event.status !== "failed") {
+    return { kind: "applied", paymentId: event.pago_id_eliminado, eventId: event.id };
   }
   if (["applied", "billed"].includes(event.status) && event.pago_id !== null) {
     return { kind: "applied", paymentId: event.pago_id, eventId: event.id };

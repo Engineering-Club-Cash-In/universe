@@ -51,6 +51,7 @@ import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
 import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
 import { PaymentStatusBadges } from "./PaymentStatusBadges";
+import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -879,14 +880,16 @@ const handleDownloadExcel = async () => {
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-50 text-yellow-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleReverse(item.pago.pago_id, item.pago.credito_id, true); }}
-                        disabled={item.pago.paymentFalse === true}>
+                        title={motivoNoAnularPago(item.pago)}
+                        disabled={item.pago.paymentFalse === true || !puedeAnularPago(item.pago)}>
                         {reversePago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Pago
                       </button>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-orange-50 text-orange-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleRevertToPending(item.pago.pago_id, item.pago.credito_id); }}
-                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending}>
+                        title={motivoNoAnularPago(item.pago)}
+                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending || !puedeAnularPago(item.pago)}>
                         {revertPaymentToPending.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Especial
                       </button>
                     </DropdownMenuItem>

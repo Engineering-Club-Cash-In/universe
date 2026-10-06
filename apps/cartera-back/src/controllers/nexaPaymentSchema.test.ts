@@ -40,6 +40,7 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     "payload_hash",
     "status",
     "pago_id",
+    "pago_id_eliminado",
     "error",
     "created_at",
     "updated_at",
@@ -64,6 +65,10 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     new URL("../../drizzle/0049_nexa_outbox.sql", import.meta.url),
   );
   expect(await outboxMigration.exists()).toBe(true);
+  const pagoEliminadoMigration = Bun.file(
+    new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url),
+  );
+  expect(await pagoEliminadoMigration.text()).toContain("ADD COLUMN IF NOT EXISTS pago_id_eliminado integer");
 });
 
 test("define la cola nexa_outbox con evento único e índice de pendientes", () => {

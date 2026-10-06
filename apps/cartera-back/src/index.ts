@@ -59,7 +59,9 @@ const app = new Elysia()
   .use(routers.aseguradorasRouter)
   .use(routers.modalidadFacturacionRouter)
   .use(routers.consultaMoraRouter)
-  .use(routers.rubrosRouter);
+  .use(routers.rubrosRouter)
+  .use(routers.estadoCuentaCancelacionRouter)
+  .use(routers.enlacePublicoEstadoCuentaRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

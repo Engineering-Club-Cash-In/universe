@@ -16,6 +16,8 @@
     bigint,
     index,
     jsonb,
+    uuid,
+    char,
     type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
@@ -2568,5 +2570,110 @@
       index("rubros_pagos_pago_idx").on(t.pago_id),
       // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
       index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
+    ]
+  );
+
+  // ================================================================
+  // Estado de cuenta al solicitar la cancelación de un crédito.
+  // Migración: drizzle/0045_estados_cuenta_cancelacion.sql (se aplica a mano).
+  // ================================================================
+
+  /**
+   * Una fila por PDF emitido al pulsar «Cancelar Crédito». Guarda la clave
+   * privada del archivo en R2 y su SHA-256: así se recupera el MISMO archivo
+   * aunque el saldo cambie, y se detecta si el objeto se corrompió.
+   * `monto_cancelacion` sin CHECK >= 0: el modal permite descuentos.
+   */
+  export const estados_cuenta_cancelacion = customSchema.table(
+    "estados_cuenta_cancelacion",
+    {
+      id: uuid("id").primaryKey().defaultRandom(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "restrict" }),
+      numero_credito_sifco: varchar("numero_credito_sifco", { length: 40 }).notNull(),
+      cliente_nombre: varchar("cliente_nombre", { length: 200 }).notNull(),
+      fecha_corte_gt: date("fecha_corte_gt").notNull(),
+      generado_at: timestamp("generado_at", { withTimezone: true }).notNull().defaultNow(),
+      generado_por_id: integer("generado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      monto_cancelacion: numeric("monto_cancelacion", { precision: 18, scale: 2 }).notNull(),
+      entrada_json: jsonb("entrada_json").notNull(),
+      desglose_json: jsonb("desglose_json").notNull(),
+      pdf_key: text("pdf_key").notNull().unique("estados_cuenta_cancelacion_pdf_key_unique"),
+      pdf_sha256: char("pdf_sha256", { length: 64 }).notNull(),
+    },
+    (t) => [
+      index("estados_cuenta_cancelacion_idx_credito_generado").on(
+        t.credito_id,
+        t.generado_at.desc()
+      ),
+    ]
+  );
+
+  /**
+   * Enlace público `/ec/<código>` a un documento, uno por envío. Se guarda la
+   * huella SHA-256 del código, nunca el código. Vence, se puede anular y cuenta
+   * aperturas.
+   */
+  export const estados_cuenta_cancelacion_enlaces = customSchema.table(
+    "estados_cuenta_cancelacion_enlaces",
+    {
+      id: uuid("id").primaryKey().defaultRandom(),
+      documento_id: uuid("documento_id")
+        .notNull()
+        .references(() => estados_cuenta_cancelacion.id, { onDelete: "restrict" }),
+      codigo_sha256: char("codigo_sha256", { length: 64 })
+        .notNull()
+        .unique("estados_cuenta_cancelacion_enlaces_codigo_unique"),
+      creado_por_id: integer("creado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      creado_at: timestamp("creado_at", { withTimezone: true }).notNull().defaultNow(),
+      vence_at: timestamp("vence_at", { withTimezone: true }).notNull(),
+      revocado_at: timestamp("revocado_at", { withTimezone: true }),
+      aperturas: integer("aperturas").notNull().default(0),
+      primera_apertura_at: timestamp("primera_apertura_at", { withTimezone: true }),
+      ultima_apertura_at: timestamp("ultima_apertura_at", { withTimezone: true }),
+    },
+    (t) => [index("estados_cuenta_cancelacion_enlaces_idx_documento").on(t.documento_id)]
+  );
+
+  /**
+   * Una fila por intento real de WhatsApp. `id` = `intentoId` del front: repetir
+   * el mismo ID devuelve el resultado existente en vez de mandar otro mensaje.
+   * `estado` ∈ EN_PROCESO | ENVIADO | ERROR; `destinatario_fuente` ∈
+   * CASO_COBROS | LEAD | SOLICITUD (CHECK en la migración).
+   */
+  export const estados_cuenta_cancelacion_envios = customSchema.table(
+    "estados_cuenta_cancelacion_envios",
+    {
+      id: uuid("id").primaryKey(),
+      documento_id: uuid("documento_id")
+        .notNull()
+        .references(() => estados_cuenta_cancelacion.id, { onDelete: "restrict" }),
+      enlace_id: uuid("enlace_id").references(() => estados_cuenta_cancelacion_enlaces.id, {
+        onDelete: "restrict",
+      }),
+      canal: varchar("canal", { length: 20 }).notNull().default("WHATSAPP"),
+      destinatario_telefono: varchar("destinatario_telefono", { length: 20 }).notNull(),
+      destinatario_fuente: varchar("destinatario_fuente", { length: 30 }).notNull(),
+      solicitado_por_id: integer("solicitado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      estado: text("estado").notNull(),
+      proveedor: varchar("proveedor", { length: 40 }),
+      proveedor_mensaje_id: text("proveedor_mensaje_id"),
+      error_resumen: text("error_resumen"),
+      solicitado_at: timestamp("solicitado_at", { withTimezone: true }).notNull().defaultNow(),
+      finalizado_at: timestamp("finalizado_at", { withTimezone: true }),
+    },
+    (t) => [
+      index("estados_cuenta_cancelacion_envios_idx_documento").on(
+        t.documento_id,
+        t.solicitado_at.desc()
+      ),
+      index("estados_cuenta_cancelacion_envios_idx_estado").on(t.estado),
     ]
   );

@@ -96,4 +96,24 @@ describe("enviarMensajesDeCreditoNuevo", () => {
 		await enviarMensajesDeCreditoNuevo(params, d);
 		expect(orden).toEqual(["bienvenida", "cobertura"]);
 	});
+
+	test("si cartera ya avisó la cuenta aparte, la bienvenida no repite el código ni la vuelve a marcar", async () => {
+		const { d, orden, bienvenidas } = deps({
+			solicitarCuentaNexa: async () => ({
+				estado: "lista",
+				creditoId: 55,
+				cuenta: {
+					token: "32200100000002",
+					identifier: "100000002",
+					nexaUserId: 99,
+				},
+				nueva: false,
+				notificada: true,
+			}),
+		});
+		const r = await enviarMensajesDeCreditoNuevo(params, d);
+		expect(r.cuentaNexa).toBeNull();
+		expect(bienvenidas).toEqual([{ ...params, cuentaNexa: null }]);
+		expect(orden).not.toContain("marcar");
+	});
 });

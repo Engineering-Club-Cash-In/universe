@@ -85,7 +85,11 @@ export async function enviarMensajesDeCreditoNuevo(
 			try {
 				const dpi = await dpiDelCliente(params.opportunityId);
 				const resultado = await solicitar(params.numeroSifco, dpi);
-				if (resultado.estado === "lista") {
+				if (resultado.estado === "lista" && resultado.notificada) {
+					// Cartera ya le mandó el código aparte (p. ej. una bienvenida
+					// recuperada después de que falló la primera): no se repite.
+					cuentaNexa = null;
+				} else if (resultado.estado === "lista") {
 					cuentaNexa = resultado.cuenta.token;
 				} else if (resultado.estado !== "deshabilitada") {
 					console.warn(

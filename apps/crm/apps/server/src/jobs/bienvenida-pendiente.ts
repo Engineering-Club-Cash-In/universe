@@ -44,7 +44,7 @@ export interface CandidatoBienvenida {
 
 export interface BienvenidaPendienteDeps {
 	habilitada?: () => boolean;
-	candidatos?: () => Promise<CandidatoBienvenida[]>;
+	candidatos?: (modoPrueba: boolean) => Promise<CandidatoBienvenida[]>;
 	enviados?: (
 		sifcos: string[],
 	) => Promise<Map<string, { enviada: boolean; fallidos: number }>>;
@@ -52,7 +52,16 @@ export interface BienvenidaPendienteDeps {
 	modoPrueba?: () => boolean;
 }
 
-async function candidatosEnCrm(): Promise<CandidatoBienvenida[]> {
+async function candidatosEnCrm(
+	modoPrueba: boolean,
+): Promise<CandidatoBienvenida[]> {
+	// Los que ya tienen bienvenida enviada, los que agotaron intentos y (fuera
+	// del modo prueba) los que no tienen teléfono se descartan EN SQL, antes
+	// del límite: si no, los mismos 50 ya resueltos taparían a los pendientes
+	// más viejos hasta que salieran de la ventana de 3 días.
+	const sinTelefono = modoPrueba
+		? sql`true`
+		: sql`length(regexp_replace(split_part(translate(coalesce(${leads.phone}, ''), ',', '/'), '/', 1), '[^0-9]', '', 'g')) >= 8`;
 	const filas = await db
 		.select({
 			opportunityId: opportunityStageHistory.opportunityId,
@@ -75,6 +84,21 @@ async function candidatosEnCrm(): Promise<CandidatoBienvenida[]> {
 					sql`now() - interval '15 minutes'`,
 				),
 				isNotNull(opportunities.numeroSifco),
+				// Nombres calificados a mano: dentro de sql`` drizzle no califica la
+				// columna de afuera y el EXISTS quedaría siempre verdadero.
+				sql`NOT EXISTS (
+					SELECT 1 FROM cobros_send_logs l
+					WHERE l.numero_credito_sifco = "opportunities"."numero_sifco"
+						AND l.plantilla_id = 'bienvenida'
+						AND l.status = 'sent'
+				)`,
+				sql`(
+					SELECT count(*) FROM cobros_send_logs l
+					WHERE l.numero_credito_sifco = "opportunities"."numero_sifco"
+						AND l.plantilla_id = 'bienvenida'
+						AND l.status = 'failed'
+				) < ${MAX_FALLIDOS}`,
+				sinTelefono,
 			),
 		)
 		.orderBy(desc(opportunityStageHistory.changedAt))
@@ -139,7 +163,7 @@ export async function recuperarBienvenidasPendientes(
 	if (!habilitada() || corriendo) return resumen;
 	corriendo = true;
 	try {
-		const candidatos = await buscar();
+		const candidatos = await buscar(modoPrueba());
 		// Una oportunidad puede aparecer más de una vez en el historial.
 		const unicos = [
 			...new Map(candidatos.map((c) => [c.numeroSifco, c])).values(),

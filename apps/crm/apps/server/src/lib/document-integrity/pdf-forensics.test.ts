@@ -212,6 +212,7 @@ describe("PDF forensics", () => {
 
 		expect(inspected.bytes.isEncrypted).toBe(false);
 		expect(inspected.protectedPdf).toBe(false);
+		expect(inspected.restrictedPdf).toBe(false);
 	});
 
 	test("solo reconoce Linearized en el diccionario del primer objeto", () => {

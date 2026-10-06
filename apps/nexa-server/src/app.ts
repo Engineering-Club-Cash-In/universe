@@ -20,6 +20,7 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
           to_regclass('public.nexa_payment_transactions') IS NOT NULL
           AND to_regclass('public.nexa_payment_tokens') IS NOT NULL
           AND to_regclass('public.nexa_token_users') IS NOT NULL
+          AND to_regclass('public.nexa_token_user_reservations') IS NOT NULL
           AND to_regclass('public.nexa_reviews') IS NOT NULL
           AND to_regclass('public.mock_cartera_credits') IS NOT NULL
           AND (

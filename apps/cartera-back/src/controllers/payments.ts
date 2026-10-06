@@ -231,6 +231,8 @@ export async function getAllPagosWithCreditAndInversionistas(
         monto_aplicado: pagos_credito.monto_aplicado,
         fecha_aplicado: pagos_credito.fecha_aplicado,
         origen_pago: pagos_credito.origen_pago,
+        // Canal por el que entró el pago: NEXA si lo registró el endpoint de Nexa.
+        canal: sql<"NEXA" | "MANUAL">`CASE WHEN ${pagos_credito.nexaPaymentEventId} IS NOT NULL THEN 'NEXA' ELSE 'MANUAL' END`,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))

@@ -20,6 +20,7 @@ import {
   Wallet,
   PiggyBank,
   Shield,
+  Smartphone,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -125,6 +126,20 @@ const menuSections: MenuSection[] = [
         icon: <Shield className="h-4 w-4" />,
         path: "/seguros",
         roles: ["ADMIN"],
+      },
+    ],
+  },
+  {
+    key: "nexa",
+    label: "Nexa",
+    icon: <Smartphone className="h-4 w-4" />,
+    items: [
+      {
+        key: "nexa-dashboard",
+        label: "Pagos Nexa",
+        icon: <Smartphone className="h-4 w-4" />,
+        path: "/nexa",
+        roles: ["ADMIN", "ASESOR", "CONTA"],
       },
     ],
   },

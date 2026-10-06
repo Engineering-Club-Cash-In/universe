@@ -312,7 +312,7 @@ function EditPaymentModal({
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  pago_id: "ID Pago", numero_cuota: "# Cuota", pagado: "Estado",
+  pago_id: "ID Pago", canal: "Canal", numero_cuota: "# Cuota", pagado: "Estado",
   cuota_pagada: "Cuota pagada",
   liquidacion_inversionistas: "Liquidación", validationStatus: "Estado Validación",
   monto_boleta: "Monto Boleta", monto_aplicado: "Monto Aplicado", cuota: "Cuota",
@@ -327,7 +327,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 const DETAIL_SECTIONS = [
   { title: "Información General", icon: <Info className="w-4 h-4" />, color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200",
-    fields: ["pago_id", "numero_cuota", "pagado", "cuota_pagada", "liquidacion_inversionistas", "validationStatus"] },
+    fields: ["pago_id", "canal", "numero_cuota", "pagado", "cuota_pagada", "liquidacion_inversionistas", "validationStatus"] },
   { title: "Montos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-green-700", bg: "bg-green-50", border: "border-green-200",
     fields: ["monto_boleta", "monto_aplicado", "cuota"] },
   { title: "Fechas", icon: <CalendarDays className="w-4 h-4" />, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200",
@@ -344,6 +344,7 @@ const DETAIL_SECTIONS = [
 
 function formatFieldValue(key: string, value: any): string {
   if (value === null || value === undefined) return "--";
+  if (key === "canal") return value === "NEXA" ? "Nexa" : "Manual";
   if (key === "pagado" || key === "liquidacion_inversionistas" || key === "cuota_pagada")
     return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
   if (typeof value === "boolean") return value ? "Sí" : "No";

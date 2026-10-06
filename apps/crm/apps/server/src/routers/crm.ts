@@ -190,6 +190,7 @@ import {
 } from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
+	ejecutarBuroCofirmantes,
 	ejecutarValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
@@ -4480,6 +4481,43 @@ export const crmRouter = {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
 								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+						});
+					}
+
+					// Los cofirmantes pesan igual que el titular: solo bloquea un
+					// fallo técnico, nunca el rechazo ni la falta de registro
+					const buroCofirmantes = await ejecutarBuroCofirmantes({
+						opportunityId: input.opportunityId,
+						userId: context.userId,
+						reusarVigente: true,
+					});
+
+					if (buroCofirmantes.errorTecnico) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo completar la validación de Buró: ${buroCofirmantes.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// Mismo resguardo que con el DPI del cliente: un cofirmante
+					// agregado o con DPI corregido a media validación no tiene veredicto
+					const cofirmantesActuales = await db
+						.select({ id: coDebtors.id, dpi: coDebtors.dpi })
+						.from(coDebtors)
+						.where(eq(coDebtors.opportunityId, input.opportunityId));
+					const dpiValidadoPorCofirmante = new Map(
+						buroCofirmantes.cofirmantes.map((c) => [c.coDebtorId, c.dpi]),
+					);
+
+					if (
+						cofirmantesActuales.length !== dpiValidadoPorCofirmante.size ||
+						cofirmantesActuales.some(
+							(c) =>
+								dpiValidadoPorCofirmante.get(c.id) !== normalizarDpi(c.dpi),
+						)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Los cofirmantes cambiaron mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
 						});
 					}
 

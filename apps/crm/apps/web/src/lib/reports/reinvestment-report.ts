@@ -717,13 +717,15 @@ export function getReconciliationPresentation(
 	state: ReportState,
 	reconciled: boolean,
 	model?: ReturnType<typeof buildReinvestmentReportModel>,
-): "verified" | "tolerance" | "unavailable" | "failed" {
+): "verified" | "unclassified" | "tolerance" | "unavailable" | "failed" {
 	if (state === "partial") return "unavailable";
+	// Los totales ya conciliaron (state ready); lo que falta es solo el reparto
+	// capital/resto de montos sin clasificar, que se declara en el banner.
 	if (
 		state === "ready" &&
 		model?.rows.some((row) => row.compositionStatus === "unavailable")
 	)
-		return "unavailable";
+		return reconciled ? "unclassified" : "unavailable";
 	if (
 		state === "ready" &&
 		reconciled &&
@@ -733,6 +735,16 @@ export function getReconciliationPresentation(
 	)
 		return "tolerance";
 	return state === "ready" && reconciled ? "verified" : "failed";
+}
+
+export function getUnclassifiedReconciliationNote(
+	model: ReturnType<typeof buildReinvestmentReportModel>,
+) {
+	return model.rows
+		.filter((row) => row.compositionStatus === "unavailable")
+		.map((row) =>
+			row.type === "sin_clasificar" ? "Sin modalidad histórica" : row.label,
+		);
 }
 
 export function canRenderSecondaryDetails(state: ReportState) {

@@ -116,7 +116,7 @@ test("Cobranza e Inversión usan el mismo workbook multihoja", async () => {
 	expect(exportBlock).toContain("reinvestment: reinversionData");
 	expect(exportBlock).toContain("metadata:");
 	expect(source).not.toContain("buildInvestorExportRows");
-	expect(source).toContain("onExportInvestors={exportAdminReportsExcel}");
+	expect(source).toContain("canAccessCobranzaReport ? exportAdminReportsExcel : undefined");
 	expect(source).toContain("onClick={exportAdminReportsExcel}");
 	expect(source).toMatch(
 		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{!officialMoraReady\}\s*>/,

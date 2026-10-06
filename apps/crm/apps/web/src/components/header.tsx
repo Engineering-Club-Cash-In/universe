@@ -464,7 +464,8 @@ export default function Header() {
 						{session &&
 							userRole &&
 							(PERMISSIONS.canAccessAdmin(userRole) ||
-								PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+								PERMISSIONS.canAccessClosedCreditsReport(userRole) ||
+								PERMISSIONS.canAccessInvestmentRealizedReport(userRole)) && (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -771,7 +772,10 @@ function MobileNav({
 
 								{userRole &&
 									(PERMISSIONS.canAccessAdmin(userRole) ||
-										PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+										PERMISSIONS.canAccessClosedCreditsReport(userRole) ||
+										PERMISSIONS.canAccessInvestmentRealizedReport(
+											userRole,
+										)) && (
 										<MobileSection label="Admin">
 											{PERMISSIONS.canAccessAdmin(userRole) && (
 												<Link to="/admin/users" className={MOBILE_LINK_CLASS}>

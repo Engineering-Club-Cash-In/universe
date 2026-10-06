@@ -33,6 +33,7 @@ import {
 	getReconciliationPresentation,
 	getReinvestmentModeLabel,
 	getReportState,
+	getUnclassifiedReconciliationNote,
 	REGISTERED_ZERO_ACTIVITY_COPY,
 } from "@/lib/reports/reinvestment-report";
 import type { ReinversionLiquidacionesResponse } from "@/lib/reports/scenario";
@@ -123,6 +124,7 @@ export function ReinvestmentReport({
 		model.reconciled,
 		model,
 	);
+	const unclassifiedNote = getUnclassifiedReconciliationNote(model);
 	const showSecondaryDetails = canRenderSecondaryDetails(state);
 	const currency = (value: number | string) =>
 		new Intl.NumberFormat("es-GT", {
@@ -183,6 +185,19 @@ export function ReinvestmentReport({
 							{currency(model.totals.reinvested)} reinvertido ={" "}
 							{currency(model.totals.distributed)} flujo liquidado
 						</span>
+					</div>
+				) : reconciliation === "unclassified" ? (
+					<div className="mt-3 space-y-1 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-emerald-900 text-sm">
+						<div className="flex flex-wrap items-center gap-2">
+							<CheckCircle2 className="h-4 w-4" />
+							<strong>Conciliación verificada:</strong>
+							<span>
+								{currency(model.totals.paid)} pagado +{" "}
+								{currency(model.totals.reinvested)} reinvertido ={" "}
+								{currency(model.totals.distributed)} flujo liquidado
+							</span>
+						</div>
+						<p>Incluye: {unclassifiedNote.join(", ")}.</p>
 					</div>
 				) : (
 					<output className="mt-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm">

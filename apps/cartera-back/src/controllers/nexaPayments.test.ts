@@ -1145,3 +1145,138 @@ test("solo clasifica como billed una respuesta fiscal completamente persistida",
     data: { total_facturas: 1, facturas: [{}] },
   })).toEqual({ kind: "unknown", code: "invalid_billing_response" });
 });
+
+test("rechaza token Nexa no coincidente en el binding", async () => {
+  const module = await import("./nexaPayments");
+  const rejectBinding = Reflect.get(module, "getNexaBindingRejection");
+  expect(rejectBinding).toBeFunction();
+  if (typeof rejectBinding !== "function") return;
+
+  const now = new Date("2026-09-08T12:00:00.000Z");
+  const binding = { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" };
+
+  expect(rejectBinding(binding, "10.00", now, "1111222233334444")).toBeNull();
+  expect(rejectBinding(binding, "10.00", now, "9999888877776666")).toBe("token_mismatch");
+  expect(rejectBinding(binding, "10.00", now)).toBeNull();
+  expect(rejectBinding(
+    { activo: true, expires_at: null, max_payment_amount: null, nexa_token: null },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBeNull();
+  expect(rejectBinding(
+    { activo: false, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBe("binding_inactive");
+  expect(rejectBinding(
+    { activo: true, expires_at: null, max_payment_amount: "1.00", nexa_token: "1111222233334444" },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBe("token_mismatch");
+});
+
+test("processNexaPayment rechaza un pago con token no coincidente en el binding", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+  let failedWith: string | undefined;
+
+  await expect(processNexaPayment(
+    { ...paymentBody("qa-token-mismatch"), token: "9999888877776666" },
+    { nonce: "nonce-token-mismatch", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("token_mismatch", 403));
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "token_mismatch" });
+});
+
+test("processNexaPayment acepta un pago con token correcto y sigue el camino feliz", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  let registered = 0;
+  let applied = 0;
+  let completed = 0;
+
+  const result = await processNexaPayment(
+    { ...paymentBody("qa-token-correct"), token: "1111222233334444" },
+    { nonce: "nonce-token-correct", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => registered
+        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
+        : [],
+      registerPayment: async () => { registered += 1; return { success: true }; },
+      applyPayment: async () => { applied += 1; return { success: true }; },
+      complete: async () => { completed += 1; },
+      fail: async () => undefined,
+      ...successfulBilling,
+    },
+  );
+
+  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
+});
+
+test("nexaPaymentSchema valida tokens de 10 a 32 dígitos", async () => {
+  const { nexaPaymentSchema } = await import("./nexaPayments");
+  const base = { creditoId: 10, amount: "10.00", currency: "GTQ" as const, tokenDate };
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-digits",
+    token: "1111222233334444",
+  }).success).toBe(true);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-14",
+    token: "12345100000001",
+  }).success).toBe(true);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-short",
+    token: "123456789",
+  }).success).toBe(false);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-letters",
+    token: "aaaa222233334444",
+  }).success).toBe(false);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-optional",
+  }).success).toBe(true);
+});
+
+test("getNexaEventFingerprint es invariante al token", async () => {
+  const { getNexaEventFingerprint } = await import("./nexaPayments");
+  const bodyWithoutToken = paymentBody("fingerprint-invariant");
+  const bodyWithToken = { ...bodyWithoutToken, token: "1111222233334444" };
+
+  const fingerprintWithout = getNexaEventFingerprint(bodyWithoutToken);
+  const fingerprintWith = getNexaEventFingerprint(bodyWithToken);
+
+  expect(fingerprintWithout).toBe(fingerprintWith);
+});

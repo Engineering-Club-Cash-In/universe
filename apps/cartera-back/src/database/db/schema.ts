@@ -700,15 +700,27 @@
   }, (table) => ({
     cuotaIdx: index("idx_pagos_credito_cuota").on(table.cuota_id),
   }));
-  export const nexa_credit_bindings = customSchema.table("nexa_credit_bindings", {
-    credito_id: integer("credito_id")
-      .primaryKey()
-      .references(() => creditos.credito_id, { onDelete: "cascade" }),
-    activo: boolean("activo").notNull().default(true),
-    expires_at: timestamp("expires_at", { withTimezone: true }),
-    max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
-    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  });
+  export const nexa_credit_bindings = customSchema.table(
+    "nexa_credit_bindings",
+    {
+      credito_id: integer("credito_id")
+        .primaryKey()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      activo: boolean("activo").notNull().default(true),
+      expires_at: timestamp("expires_at", { withTimezone: true }),
+      max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      nexa_token: varchar("nexa_token", { length: 32 }),
+      nexa_identifier: varchar("nexa_identifier", { length: 9 }),
+      nexa_user_id: integer("nexa_user_id"),
+      token_registrado_at: timestamp("token_registrado_at", { withTimezone: true }),
+    },
+    (table) => ({
+      uqNexaToken: uniqueIndex("uq_nexa_credit_bindings_token")
+        .on(table.nexa_token)
+        .where(sql`${table.nexa_token} IS NOT NULL`),
+    }),
+  );
   export const nexa_payment_nonces = customSchema.table("nexa_payment_nonces", {
     nonce: varchar("nonce", { length: 150 }).primaryKey(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

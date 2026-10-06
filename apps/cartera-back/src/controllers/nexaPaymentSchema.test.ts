@@ -21,7 +21,14 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     "expires_at",
     "max_payment_amount",
     "created_at",
+    "nexa_token",
+    "nexa_identifier",
+    "nexa_user_id",
+    "token_registrado_at",
   ]);
+  const tokenIndex = bindingConfig.indexes.find((index) => index.config.name === "uq_nexa_credit_bindings_token");
+  expect(tokenIndex?.config.unique).toBe(true);
+  expect(tokenIndex?.config.columns.map((column) => "name" in column ? column.name : "")).toEqual(["nexa_token"]);
   expect(eventConfig.columns.map((column) => column.name)).toEqual([
     "id",
     "provider",
@@ -50,4 +57,8 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url),
   );
   expect(await migration.exists()).toBe(true);
+  const tokenMigration = Bun.file(
+    new URL("../../drizzle/0048_nexa_token_binding.sql", import.meta.url),
+  );
+  expect(await tokenMigration.exists()).toBe(true);
 });

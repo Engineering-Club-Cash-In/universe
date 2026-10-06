@@ -121,6 +121,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         activo: nexa_credit_bindings.activo,
         expires_at: nexa_credit_bindings.expires_at,
         max_payment_amount: nexa_credit_bindings.max_payment_amount,
+        nexaToken: nexa_credit_bindings.nexa_token,
       })
       .from(creditos)
       .leftJoin(
@@ -139,6 +140,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
             activo: row.activo ?? false,
             expires_at: row.expires_at,
             max_payment_amount: row.max_payment_amount,
+            nexa_token: row.nexaToken,
           },
     };
   },

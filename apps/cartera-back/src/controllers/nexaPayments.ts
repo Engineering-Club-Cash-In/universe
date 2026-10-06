@@ -14,6 +14,8 @@ export const nexaPaymentSchema = z
       .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid tokenDate")
       .optional(),
     transactionId: z.string().trim().max(100).transform((value) => value || undefined).optional(),
+    // Mismo formato que acepta el registro del token: prefijo variable + 9 dígitos.
+    token: z.string().regex(/^\d{10,32}$/).optional(),
   })
   .strict();
 
@@ -21,16 +23,21 @@ type NexaCreditBinding = {
   activo: boolean;
   expires_at: Date | null;
   max_payment_amount: string | null;
+  nexa_token?: string | null;
 };
 
 export const getNexaBindingRejection = (
   binding: NexaCreditBinding | null,
   amount: string,
   now: Date,
+  token?: string,
 ) => {
   if (!binding) return "binding_missing" as const;
   if (!binding.activo) return "binding_inactive" as const;
   if (binding.expires_at && binding.expires_at <= now) return "binding_expired" as const;
+  if (token && binding.nexa_token && token !== binding.nexa_token) {
+    return "token_mismatch" as const;
+  }
   if (binding.max_payment_amount && new Big(amount).gt(binding.max_payment_amount)) {
     return "amount_exceeds_binding" as const;
   }
@@ -263,6 +270,7 @@ export const processNexaPayment = (
         credit.binding,
         body.amount,
         dependencies.now?.() ?? new Date(),
+        body.token,
       );
       if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
       if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
@@ -284,6 +292,7 @@ export const processNexaPayment = (
                 currentCredit.binding,
                 body.amount,
                 dependencies.now?.() ?? new Date(),
+                body.token,
               );
               if (rejection) throw new NexaPaymentError(rejection, 403);
             },

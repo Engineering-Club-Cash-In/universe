@@ -38,3 +38,9 @@ describe("dashboard Nexa: gate de rol", () => {
     expect((await app.handle(new Request("http://localhost/nexa/dashboard"))).status).toBe(401);
   });
 });
+
+describe("dashboard Nexa: id de crédito", () => {
+  it("un id decimal se rechaza con 422 antes de llegar a la BD", async () => {
+    expect((await get("/nexa/dashboard/1.5/pagos", "ADMIN")).status).toBe(422);
+  });
+});

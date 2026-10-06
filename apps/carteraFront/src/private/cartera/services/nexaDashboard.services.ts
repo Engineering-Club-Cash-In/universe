@@ -24,6 +24,8 @@ export interface NexaDashboardCredito {
   pagosNexa: number;
   montoNexa: string;
   rechazosNexa: number;
+  // Canal de los últimos 12 pagos, del más viejo al más nuevo: "N" Nexa, "M" manual.
+  ultimosCanales: string;
 }
 
 export interface NexaDashboardResponse {
@@ -34,7 +36,13 @@ export interface NexaDashboardResponse {
   pageSize: number;
 }
 
-export interface NexaDashboardParams {
+// Rango de fecha de pago en formato YYYY-MM-DD; "" = sin límite.
+export interface RangoFechas {
+  desde: string;
+  hasta: string;
+}
+
+export interface NexaDashboardParams extends RangoFechas {
   q: string;
   page: number;
   pageSize: number;
@@ -56,6 +64,7 @@ export interface NexaPagoCredito {
   validado: boolean;
   filas: number;
   eventoEstado: string | null;
+  cuotas: number[];
 }
 
 export interface NexaEventoSinPago {
@@ -64,6 +73,8 @@ export interface NexaEventoSinPago {
   estado: string;
   error: string | null;
   creado: string | null;
+  /** failed con filas de pago vivas: Nexa devolvió el dinero; esas filas se anulan, no se validan. */
+  tieneFilasVivas: boolean;
 }
 
 export interface NexaPagosCreditoResponse {
@@ -73,9 +84,10 @@ export interface NexaPagosCreditoResponse {
 }
 
 export const getNexaPagosCredito = async (
-  creditoId: number
+  creditoId: number,
+  rango: RangoFechas
 ): Promise<NexaPagosCreditoResponse> =>
-  (await api.get(`${API_URL}/nexa/dashboard/${creditoId}/pagos`)).data;
+  (await api.get(`${API_URL}/nexa/dashboard/${creditoId}/pagos`, { params: rango })).data;
 
 // Las fechas de Nexa llegan sin zona horaria (hora de Guatemala): se formatean como texto, sin Date.
 export const fmtFechaNexa = (v: string | null) => {
@@ -83,4 +95,20 @@ export const fmtFechaNexa = (v: string | null) => {
   const [f, h] = v.split("T");
   const [y, m, d] = f.split("-");
   return `${d}/${m}/${y} ${h?.slice(0, 5) ?? "--:--"}`;
+};
+
+const fmtDia = (v: string) => v.split("-").reverse().join("/");
+// " · pagos del 01/09/2026 al 30/09/2026" (o solo desde / hasta); "" si no hay rango.
+export const describirRango = ({ desde, hasta }: RangoFechas) =>
+  desde && hasta ? ` · pagos del ${fmtDia(desde)} al ${fmtDia(hasta)}`
+  : desde ? ` · pagos desde el ${fmtDia(desde)}`
+  : hasta ? ` · pagos hasta el ${fmtDia(hasta)}`
+  : "";
+
+// "Cuota 20", "Cuotas 18–20" (seguidas) o "Cuotas 16, 18"; "" si el pago no tocó cuotas.
+export const cuotasTexto = (cuotas: number[]) => {
+  if (cuotas.length === 0) return "";
+  if (cuotas.length === 1) return `Cuota ${cuotas[0]}`;
+  const seguidas = cuotas.every((c, i) => i === 0 || c === cuotas[i - 1] + 1);
+  return `Cuotas ${seguidas ? `${cuotas[0]}–${cuotas[cuotas.length - 1]}` : cuotas.join(", ")}`;
 };

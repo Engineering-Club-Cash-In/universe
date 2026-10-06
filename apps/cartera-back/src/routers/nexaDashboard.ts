@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { getNexaDashboard, parseNexaDashboardParams, getNexaCreditPayments } from "../controllers/nexaDashboard";
+import { getNexaDashboard, parseNexaDashboardParams, getNexaCreditPayments, parseRangoFechas } from "../controllers/nexaDashboard";
 import { authMiddleware } from "./midleware";
 
 // `authMiddleware` solo valida la firma del JWT. El dashboard expone tokens
@@ -25,14 +25,14 @@ export const nexaDashboardRouter = new Elysia()
   })
   .get(
     "/nexa/dashboard/:creditoId/pagos",
-    async ({ params, set }) => {
+    async ({ params, query, set }) => {
       try {
-        return await getNexaCreditPayments(params.creditoId);
+        return await getNexaCreditPayments(params.creditoId, parseRangoFechas(query as Record<string, unknown>));
       } catch (error) {
         console.error("Error consultando los pagos Nexa del crédito:", error);
         set.status = 500;
         return { message: "Error consultando los pagos del crédito" };
       }
     },
-    { params: t.Object({ creditoId: t.Numeric({ minimum: 1 }) }) },
+    { params: t.Object({ creditoId: t.Numeric({ minimum: 1, maximum: 2_147_483_647, multipleOf: 1 }) }) },
   );

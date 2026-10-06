@@ -434,7 +434,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
         },
         paymentLock,
       );
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     }).finally(() => { settled = true; });
 
     await Bun.sleep(50);
@@ -444,7 +444,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
     await sql`UPDATE cartera.nexa_credit_bindings SET activo = false WHERE credito_id = ${creditoId}`;
     await sql`SELECT pg_advisory_unlock(8765, ${creditoId})`;
     blockerHeld = false;
-    await expect(resultPromise).resolves.toEqual({ paymentId: 0, idempotent: false });
+    await expect(resultPromise).resolves.toEqual({ paymentId: 0, paymentIds: [0], idempotent: false });
     expect(registrationResult).toEqual({
       success: false,
       code: "binding_inactive",
@@ -463,7 +463,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
     const holding = nexaPaymentDependencies.withCreditLock(creditoId, async () => {
       entered?.();
       await workBlocked;
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     });
     await workEntered;
     let updateSettled = false;
@@ -479,7 +479,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
 
     const creditUpdate = nexaPaymentDependencies.withCreditLock(creditoId, async () => {
       await updater`UPDATE cartera.creditos SET saldo = saldo + 1 WHERE credito_id = ${creditoId}`;
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     });
     const creditUpdateResult = await Promise.race([
       creditUpdate.then(() => "settled"),
@@ -637,7 +637,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, validated boolean NOT NULL DEFAULT false);
       INSERT INTO cartera.creditos VALUES (10);`);
     await query.query(await Bun.file(new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url)).text());
-    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending"]) {
+    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending", "0005_cartera_payment_ids"]) {
       await query.query(await Bun.file(new URL(`../../../nexa-server/drizzle/${file}.sql`, import.meta.url)).text());
     }
     await query.query(`INSERT INTO nexa_payment_tokens (nexa_token_id, prefix, account, name) VALUES (1, '1234567', 'local', 'local');

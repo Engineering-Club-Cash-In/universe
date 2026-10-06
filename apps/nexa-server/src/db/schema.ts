@@ -66,6 +66,8 @@ export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   transactionId: varchar("transaction_id", { length: 120 }).notNull().default(""),
   processingStatus: processingStatus("processing_status").notNull().default("RECEIVED"),
   carteraPaymentId: integer("cartera_payment_id"),
+  // Todas las filas de pagos_credito de la boleta (carteraPaymentId es la primera).
+  carteraPaymentIds: integer("cartera_payment_ids").array(),
   failureReason: text("failure_reason"),
   rawPayload: jsonb("raw_payload").notNull(),
   payloadFingerprint: varchar("payload_fingerprint", { length: 64 }),

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ApplicationClaim, ApplicationWorkerRepository } from "./application-worker";
 import { runApplicationWorkerOnce } from "./application-worker";
+import { HttpCarteraPaymentClient } from "./cartera-client";
 
 const baseClaim: ApplicationClaim = {
   id: 7,
@@ -90,6 +91,51 @@ test("applied payment keeps billing pending durable while queuing bank approval"
     new Date("2026-09-08T12:00:00Z"),
     1,
   ]);
+});
+
+test("applied payment forwards every cartera paymentId to the repository", async () => {
+  const finalized: unknown[] = [];
+  await runApplicationWorkerOnce({
+    repository: repository(baseClaim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("applied payment must not retry"); },
+    }),
+    cartera: { applyNexaPayment: async () => ({ status: "APPLIED", paymentId: 701, paymentIds: [701, 702] }) },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect((finalized[0] as unknown[])[1]).toMatchObject({ paymentId: 701, paymentIds: [701, 702] });
+});
+
+test("billing retry against an old cartera replica (no paymentIds) does not send a list that would overwrite the stored one", async () => {
+  const finalized: unknown[] = [];
+  const legacy = new HttpCarteraPaymentClient({
+    baseUrl: "https://cartera.example.com",
+    secret: "c".repeat(32),
+    fetch: async () => Response.json({ status: "APPLIED", paymentId: 701, billingStatus: "PENDING" }),
+  });
+  await runApplicationWorkerOnce({
+    repository: repository({ ...baseClaim, carteraPaymentId: 701 }, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("billing retry must not fail"); },
+    }),
+    cartera: legacy,
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  const outcome = (finalized[0] as unknown[])[1] as { paymentId: number; paymentIds?: number[] };
+  expect(outcome.paymentId).toBe(701);
+  expect(outcome.paymentIds).toBeUndefined();
 });
 
 test.each(["rejected", "different_payment", "missing_token"])("billing retry %s cannot reject or replace applied money", async (scenario) => {

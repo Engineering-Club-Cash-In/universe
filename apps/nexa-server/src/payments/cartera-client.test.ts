@@ -91,6 +91,29 @@ describe("HttpCarteraPaymentClient", () => {
       });
   });
 
+  test("una respuesta vieja sin paymentIds no lo inventa", async () => {
+    const { client } = capturingClient(Response.json({ status: "APPLIED", paymentId: 77 }));
+    const result = await client.applyNexaPayment({ creditoId: 123, transaction: transaction() });
+    expect(result).toEqual({ status: "APPLIED", paymentId: 77 });
+    expect(result).not.toHaveProperty("paymentIds");
+  });
+
+  test("conserva todos los paymentIds que devuelve cartera", async () => {
+    const { client } = capturingClient(Response.json({ status: "APPLIED", paymentId: 77, paymentIds: [77, 78, 79], idempotent: true }));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .resolves.toEqual({ status: "APPLIED", paymentId: 77, paymentIds: [77, 78, 79], idempotent: true });
+  });
+
+  test.each([
+    { paymentIds: [78, 79] },
+    { paymentIds: [] },
+    { paymentIds: [77, 0] },
+    { paymentIds: [77, 1.5] },
+  ])("rechaza paymentIds inválidos o que no incluyen paymentId (%j)", async (extra) => {
+    const { client } = capturingClient(Response.json({ status: "APPLIED", paymentId: 77, ...extra }));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() })).rejects.toThrow();
+  });
+
   test("omite transactionId vacío", async () => {
     const { client, getRequest } = capturingClient();
     await client.applyNexaPayment({ creditoId: 123, transaction: transaction({ transactionId: "" }) });

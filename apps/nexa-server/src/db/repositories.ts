@@ -212,7 +212,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 
   async markApplied(id: number, paymentId: number) {
-    await this.db.update(nexaPaymentTransactions).set({ processingStatus: "APPLIED", carteraPaymentId: paymentId, updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
+    await this.db.update(nexaPaymentTransactions).set({ processingStatus: "APPLIED", carteraPaymentId: paymentId, carteraPaymentIds: [paymentId], updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
   }
 
   async markRejected(id: number, reason: string) {
@@ -320,6 +320,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async finalizeApplication(id: number, outcome: {
     paymentId: number | null;
+    paymentIds?: number[];
     reviewStatus: "APPROVED" | "REJECTED";
     failureReason: string | null;
     nextAttemptAt?: Date | null;
@@ -332,6 +333,9 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       // Billing owns only the application lease/schedule, never the bank review state.
       const [billed] = await tx.update(nexaPaymentTransactions).set({
         rawPayload,
+        // A billing retry may be the first time Cartera reports every linked id (rows backfilled
+        // by migration 0005 hold only [cartera_payment_id]); keep the stored list when it sends none.
+        carteraPaymentIds: outcome.paymentIds ?? sql`${nexaPaymentTransactions.carteraPaymentIds}`,
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,
@@ -349,6 +353,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         processingStatus: "REVIEW_PENDING",
         rawPayload,
         carteraPaymentId: outcome.paymentId,
+        carteraPaymentIds: outcome.paymentId === null ? null : (outcome.paymentIds ?? [outcome.paymentId]),
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,

@@ -40,7 +40,7 @@ test("claim usa el evento persistente para devolver el paymentId aplicado", asyn
       { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z" },
       { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
     ),
-  ).resolves.toEqual({ kind: "applied", paymentId: 17 });
+  ).resolves.toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
 });
 
 test("new client replays a legacy-body applied event by stable compatibility fingerprint", async () => {
@@ -78,7 +78,7 @@ test("new client replays a legacy-body applied event by stable compatibility fin
       legacyPayloadHash: legacyHash,
       now: new Date(),
     },
-  )).resolves.toEqual({ kind: "applied", paymentId: 17 });
+  )).resolves.toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(insertedFingerprints).toEqual([semanticFingerprint]);
 });
 

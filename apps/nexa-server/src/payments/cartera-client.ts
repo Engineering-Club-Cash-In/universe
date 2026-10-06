@@ -2,7 +2,7 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { tokenDateSchema } from "../nexa/schemas";
 export type CarteraApplyPaymentResult =
-  | { status: "APPLIED"; paymentId: number; idempotent?: boolean; billingStatus?: "PENDING" }
+  | { status: "APPLIED"; paymentId: number; paymentIds?: number[]; idempotent?: boolean; billingStatus?: "PENDING" }
   | { status: "REJECTED"; reason: string };
 
 export type CarteraRegisterTokenInput = {
@@ -33,11 +33,23 @@ export interface CarteraTokenClient {
   registerNexaToken(input: CarteraRegisterTokenInput): Promise<CarteraRegisterTokenResult>;
 }
 
+const paymentIdSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const applyPaymentResponseSchema = z.object({
   status: z.literal("APPLIED"),
-  paymentId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  paymentId: paymentIdSchema,
+  // Cartera antigua no lo envía: la ausencia se conserva (undefined). Rellenar [paymentId] aquí
+  // pisaría la lista múltiple ya guardada en un reintento de billing; el repositorio pone
+  // [paymentId] solo al aplicar un pago nuevo.
+  paymentIds: z.array(paymentIdSchema).min(1).optional(),
   idempotent: z.boolean().optional(),
   billingStatus: z.literal("PENDING").optional(),
+}).transform((value, ctx) => {
+  const { paymentIds } = value;
+  if (paymentIds && !paymentIds.includes(value.paymentId)) {
+    ctx.addIssue({ code: "custom", path: ["paymentIds"], message: "paymentIds must include paymentId" });
+    return z.NEVER;
+  }
+  return value;
 });
 const safeErrorResponseSchema = z.object({ error: z.string().regex(/^[a-z0-9_]{1,64}$/) });
 

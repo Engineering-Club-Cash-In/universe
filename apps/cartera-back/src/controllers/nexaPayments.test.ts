@@ -219,7 +219,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
 });
 
@@ -399,7 +399,7 @@ test("continúa un pago parcial de mora legado cuando dejó la fila exacta vincu
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed, failed }).toEqual({
     registered: 1,
     applied: 1,
@@ -497,6 +497,31 @@ test("un evento manual_review bloquea reintentos antes de mutar pagos", async ()
   expect(mutated).toBe(false);
 });
 
+test("el reintento idempotente devuelve todas las filas del evento aun si el evento solo guarda la primera", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  const result = await processNexaPayment(
+    paymentBody("qa-payment-multi"),
+    { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "applied", paymentId: 17, eventId: 7 }),
+      loadCredit: async () => ({ usuarioId: 5, statusCredit: "ACTIVO", binding: null }),
+      findPayments: async (eventId) => eventId === 7
+        ? [
+            { paymentId: 17, validationStatus: "validated", amount: "10.00" },
+            { paymentId: 18, validationStatus: "validated", amount: "5.00" },
+          ]
+        : [],
+      registerPayment: async () => ({ success: true }),
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  );
+
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17, 18], idempotent: true });
+});
+
 test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
   const { processNexaPayment } = await import("./nexaPayments");
   let mutated = false;
@@ -519,7 +544,7 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: true });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: true });
   expect(mutated).toBe(false);
 });
 
@@ -577,9 +602,9 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
   expect(classify({ ...event, status: "manual_review" }, false, requested))
     .toEqual({ kind: "manual_review" });
   expect(classify({ ...event, status: "applied", pago_id: 17 }, false, requested))
-    .toEqual({ kind: "applied", paymentId: 17 });
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(classify({ ...event, status: "billed", pago_id: 17 }, false, requested))
-    .toEqual({ kind: "applied", paymentId: 17 });
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(classify({ ...event, status: "billing_pending", pago_id: 17 }, false, requested))
     .toEqual({ kind: "billing", eventId: 7 });
   expect(classify({ ...event, status: "billing_failed", pago_id: 17 }, false, requested))
@@ -671,7 +696,7 @@ test("el handler verifica el body exacto antes de procesar", async () => {
   });
 
   expect(set.status).toBe(200);
-  expect(result).toEqual({ status: "APPLIED", paymentId: 17, idempotent: true });
+  expect(result).toEqual({ status: "APPLIED", paymentId: 17, paymentIds: [17], idempotent: true });
   expect(claimContext).toMatchObject({
     payloadHash: createHash("sha256").update(rawBody).digest("hex"),
     legacyPayloadHash: createHash("sha256").update(JSON.stringify({
@@ -693,7 +718,7 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
   let applyAttempts = 0;
   let paymentStatus = "pending";
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => eventStatus === "new"
       ? { kind: "new" as const, eventId: 7 }
       : { kind: "retry" as const, eventId: 7 },
@@ -722,7 +747,7 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
   ).rejects.toThrow("synthetic failure");
   await expect(
     processNexaPayment(body, { nonce: "nonce-retry-2", payloadHash: "a".repeat(64), now: new Date() }, dependencies),
-  ).resolves.toEqual({ paymentId: 17, idempotent: false });
+  ).resolves.toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applyAttempts, eventStatus }).toEqual({ registered: 1, applyAttempts: 2, eventStatus: "applied" });
 });
 
@@ -734,7 +759,7 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
   let registered = 0;
   let applied = 0;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => {
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => {
       const previous = tail;
       let release: () => void = () => undefined;
       tail = new Promise<void>((resolve) => { release = resolve; });
@@ -765,8 +790,8 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
   ]);
 
   expect(results).toEqual([
-    { paymentId: 17, idempotent: false },
-    { paymentId: 17, idempotent: true },
+    { paymentId: 17, paymentIds: [17], idempotent: false },
+    { paymentId: 17, paymentIds: [17], idempotent: true },
   ]);
   expect({ registered, applied }).toEqual({ registered: 1, applied: 1 });
 });
@@ -776,7 +801,7 @@ test("serializa referencias distintas del mismo crédito", async () => {
   const locks = new Map<string | number, Promise<void>>();
   const lock = async (
     key: string | number,
-    work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>,
+    work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>,
   ) => {
     const previous = locks.get(key) ?? Promise.resolve();
     let release: () => void = () => undefined;
@@ -890,7 +915,11 @@ test.each([
       completeBilling: async (_eventId, paymentId) => { completedBilling.push(paymentId); },
       failBilling: async () => undefined,
     },
-  )).resolves.toEqual({ paymentId: 17, idempotent: false });
+  )).resolves.toEqual({
+    paymentId: 17,
+    paymentIds: payments.map((payment) => payment.paymentId),
+    idempotent: false,
+  });
 
   expect(billed).toEqual([payments.map((payment) => payment.paymentId)]);
   expect(completedBilling).toEqual([17]);
@@ -921,7 +950,7 @@ test("un billing pendiente no vuelve a autorizar ni aplicar el pago ya persistid
       completeBilling: async () => undefined,
       failBilling: async () => undefined,
     },
-  )).resolves.toEqual({ paymentId: 17, idempotent: false });
+  )).resolves.toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
 
   expect({ paymentMutation, billed }).toEqual({ paymentMutation: false, billed: true });
 });
@@ -932,7 +961,7 @@ test("un proveedor que pudo aceptar queda billing_unknown y nunca se invoca otra
   let claim: { kind: "new"; eventId: number } | { kind: "manual_review"; phase: "billing" } = { kind: "new", eventId: 7 };
   const billingFailures: Array<{ status: string; code: string }> = [];
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => claim,
     loadCredit: async () => ({
       usuarioId: 5,
@@ -977,7 +1006,7 @@ test("éxito del proveedor seguido por fallo local queda desconocido y no reinte
   let providerCalls = 0;
   let manualReview = false;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => manualReview
       ? { kind: "manual_review" as const, phase: "billing" as const }
       : { kind: "new" as const, eventId: 7 },
@@ -1026,7 +1055,7 @@ test("un rechazo fiscal definitivo queda billing_failed y no vuelve a emitir ni 
   let billingAttempts = 0;
   let paymentMutations = 0;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => claim === "new"
       ? { kind: "new" as const, eventId: 7 }
       : { kind: "billing_failed" as const },
@@ -1093,6 +1122,7 @@ test("facturación automática deshabilitada deja el pago aplicado y la factura 
     },
   )).resolves.toEqual({
     paymentId: 17,
+    paymentIds: [17],
     idempotent: false,
     billingStatus: "PENDING",
   });
@@ -1237,7 +1267,7 @@ test("processNexaPayment acepta un pago con token correcto y sigue el camino fel
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
 });
 

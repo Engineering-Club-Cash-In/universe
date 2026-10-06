@@ -65,7 +65,7 @@ export type NexaPaymentContext = {
 
 export type NexaClaim =
   | { kind: "new" | "retry" | "billing"; eventId: number }
-  | { kind: "applied"; paymentId: number; billingStatus?: "PENDING" }
+  | { kind: "applied"; paymentId: number; eventId?: number; billingStatus?: "PENDING" }
   | { kind: "manual_review"; phase?: "payment" | "billing" }
   | { kind: "conflict" | "replay" | "billing_failed" };
 
@@ -106,7 +106,7 @@ export const classifyNexaClaim = (
     return { kind: "conflict" };
   }
   if (["applied", "billed"].includes(event.status) && event.pago_id !== null) {
-    return { kind: "applied", paymentId: event.pago_id };
+    return { kind: "applied", paymentId: event.pago_id, eventId: event.id };
   }
   if (event.status === "failed") return { kind: "retry", eventId: event.id };
   // Preserve a durable rejection across polls instead of resetting Nexa's retry budget with PENDING.
@@ -115,7 +115,7 @@ export const classifyNexaClaim = (
     return { kind: "billing", eventId: event.id };
   }
   if (event.status === "billing_running" && billingIsRunning && event.pago_id !== null) {
-    return { kind: "applied", paymentId: event.pago_id, billingStatus: "PENDING" };
+    return { kind: "applied", paymentId: event.pago_id, eventId: event.id, billingStatus: "PENDING" };
   }
   if (["billing_running", "billing_unknown"].includes(event.status)) {
     return { kind: "manual_review", phase: "billing" };
@@ -125,6 +125,8 @@ export const classifyNexaClaim = (
 
 type NexaPaymentResult = {
   paymentId: number;
+  /** Todos los pago_id del evento (ascendente); paymentId es el primero. */
+  paymentIds: number[];
   idempotent: boolean;
   billingStatus?: "PENDING";
 };
@@ -244,7 +246,13 @@ export const processNexaPayment = (
   if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
   if ("paymentId" in claim) {
-    return { paymentId: claim.paymentId, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
+    // Buscar por nexa_payment_event_id: nexa_payment_events.pago_id solo guarda el primero y puede ser NULL.
+    const linked = claim.eventId === undefined
+      ? []
+      : (await dependencies.findPayments?.(claim.eventId, body.creditoId)) ?? [];
+    const paymentIds = [...new Set([claim.paymentId, ...linked.map((payment) => payment.paymentId)])]
+      .sort((a, b) => a - b);
+    return { paymentId: claim.paymentId, paymentIds, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
   }
   if (claim.kind === "billing_failed") throw new NexaPaymentError("billing_failed", 503);
   if (claim.kind === "manual_review") {
@@ -340,6 +348,7 @@ export const processNexaPayment = (
   }
 
   const paymentId = payments[0]!.paymentId;
+  const paymentIds = payments.map((payment) => payment.paymentId);
   if (!dependencies.billPayments || !dependencies.completeBilling || !dependencies.failBilling) {
     throw new NexaPaymentError("billing_not_configured", 503);
   }
@@ -351,10 +360,10 @@ export const processNexaPayment = (
     );
     if (billing.kind === "billed") {
       await dependencies.completeBilling(eventId, paymentId);
-      return { paymentId, idempotent: false };
+      return { paymentId, paymentIds, idempotent: false };
     }
     if (billing.kind === "pending") {
-      return { paymentId, idempotent: false, billingStatus: "PENDING" };
+      return { paymentId, paymentIds, idempotent: false, billingStatus: "PENDING" };
     }
     await dependencies.failBilling(
       eventId,

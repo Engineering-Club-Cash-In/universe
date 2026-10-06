@@ -21,6 +21,7 @@ export type ApplicationWorkerRepository = {
   resolveCreditoId(tokenIdentifier: string, tokenPrefix: string): Promise<number | null>;
   finalizeApplication(id: number, outcome: {
     paymentId: number | null;
+    paymentIds?: number[];
     reviewStatus: ReviewTransferStatus;
     failureReason: string | null;
     nextAttemptAt?: Date | null;
@@ -153,6 +154,7 @@ export async function runApplicationWorkerOnce(options: {
     }
     await options.repository.finalizeApplication(claim.id, result.status === "APPLIED" ? {
       paymentId: result.paymentId,
+      paymentIds: result.paymentIds,
       reviewStatus: "APPROVED",
       failureReason: result.billingStatus === "PENDING" ? "billing_pending" : null,
       // A disabled fiscal feature is a successful wait, not an exhausted retry.

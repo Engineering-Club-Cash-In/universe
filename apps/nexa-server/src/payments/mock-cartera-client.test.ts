@@ -14,6 +14,6 @@ describe("MockCarteraPaymentClient", () => {
       },
     });
 
-    expect(result).toEqual({ status: "APPLIED", paymentId: 4617308 });
+    expect(result).toEqual({ status: "APPLIED", paymentId: 4617308, paymentIds: [4617308] });
   });
 });

@@ -214,9 +214,9 @@ test("una solicitud firmada usa el handler real y la idempotencia en producción
   const duplicate = await router.handle(signedRequest("nonce-production-2"));
 
   expect(first.status).toBe(200);
-  expect(await first.json()).toEqual({ status: "APPLIED", paymentId: 17, idempotent: false });
+  expect(await first.json()).toEqual({ status: "APPLIED", paymentId: 17, paymentIds: [17], idempotent: false });
   expect(duplicate.status).toBe(200);
-  expect(await duplicate.json()).toEqual({ status: "APPLIED", paymentId: 17, idempotent: true });
+  expect(await duplicate.json()).toEqual({ status: "APPLIED", paymentId: 17, paymentIds: [17], idempotent: true });
   expect({ registered, applied }).toEqual({ registered: 1, applied: 1 });
 });
 

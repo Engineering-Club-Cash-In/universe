@@ -129,8 +129,11 @@ export async function sendWelcomeMessage(
 			return { sent: false, error: "Crédito sin numeroSifco" };
 		}
 
+		// El modo prueba se resuelve ANTES de exigir teléfono: con TEST_MESSAGE
+		// todo va al número de prueba, aunque la oportunidad no tenga uno válido.
 		const telefono = primerTelefono(row.leadPhone);
-		if (!telefono) {
+		const testMode = isTestModeEnabled();
+		if (!telefono && !testMode) {
 			console.log(
 				`${LOG_PREFIX} Crédito ${numeroSifco} sin teléfono válido; se omite`,
 			);
@@ -173,8 +176,7 @@ export async function sendWelcomeMessage(
 		const mensaje = interpolar(plantilla.cuerpo, variables);
 
 		// 4. Test-mode + envío con la MISMA función que usa "Enviar Directo".
-		const testMode = isTestModeEnabled();
-		const telefonoDestino = testMode ? getTestPhone() : telefono;
+		const telefonoDestino = testMode ? getTestPhone() : (telefono as string);
 
 		const result = await sendWhatsappTemplate({
 			phone: telefonoDestino,
@@ -197,7 +199,7 @@ export async function sendWelcomeMessage(
 							...(result.providerResponse ?? {}),
 							templateMessageId: result.templateMessageId,
 							testMode,
-							realTarget: testMode ? telefono : undefined,
+							realTarget: testMode ? (telefono ?? undefined) : undefined,
 						},
 					}
 				: {
@@ -205,7 +207,9 @@ export async function sendWelcomeMessage(
 						errorMessage: result.error,
 						providerResponse: {
 							...(result.providerResponse ?? {}),
-							...(testMode ? { testMode, realTarget: telefono } : {}),
+							...(testMode
+								? { testMode, realTarget: telefono ?? undefined }
+								: {}),
 						},
 					},
 		});

@@ -45,6 +45,14 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
     return created;
   }
 
+  // Un crédito tiene a lo sumo un token user (credito_id UNIQUE). Lo usa
+  // POST /admin/token-users para devolver el existente en vez de pedirle a
+  // Nexa un usuario nuevo que después no se podría guardar.
+  async findByCreditoId(creditoId: number) {
+    const [user] = await this.db.select().from(nexaTokenUsers).where(eq(nexaTokenUsers.creditoId, creditoId)).limit(1);
+    return user ?? null;
+  }
+
   async findByToken(token: string) {
     const [user] = await this.db.select().from(nexaTokenUsers).where(eq(nexaTokenUsers.token, token)).limit(1);
     return user ? { creditoId: user.creditoId } : null;

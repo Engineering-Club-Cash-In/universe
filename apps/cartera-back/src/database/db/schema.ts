@@ -736,13 +736,26 @@
       expires_at: timestamp("expires_at", { withTimezone: true }),
       max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-      nexa_token: varchar("nexa_token", { length: 32 }),
-      nexa_identifier: varchar("nexa_identifier", { length: 9 }),
+      // Cuenta Nexa del cliente (migración 0045): el token que el cliente usa
+      // como cuenta destino en su banco y el seguimiento de su creación.
+      // Tipos de la 0045 (text): es la que corre primero en producción y la
+      // 0048 no cambia el tipo de una columna que ya existe.
       nexa_user_id: integer("nexa_user_id"),
+      nexa_identifier: text("nexa_identifier"),
+      nexa_token: text("nexa_token"),
+      nexa_national_id: text("nexa_national_id"),
+      cuenta_solicitada_at: timestamp("cuenta_solicitada_at", { withTimezone: true }),
+      cuenta_intentos: integer("cuenta_intentos").notNull().default(0),
+      cuenta_error: text("cuenta_error"),
+      cuenta_notificada_at: timestamp("cuenta_notificada_at", { withTimezone: true }),
+      updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      // Migración 0048: cuándo nexa-server registró el token en cartera.
       token_registrado_at: timestamp("token_registrado_at", { withTimezone: true }),
     },
     (table) => ({
-      uqNexaToken: uniqueIndex("uq_nexa_credit_bindings_token")
+      // Nombre de la 0045 (el que existe en producción); la 0048 no crea el
+      // suyo si ya hay un índice único sobre nexa_token.
+      uqNexaToken: uniqueIndex("nexa_credit_bindings_uq_token")
         .on(table.nexa_token)
         .where(sql`${table.nexa_token} IS NOT NULL`),
     }),

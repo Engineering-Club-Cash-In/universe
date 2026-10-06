@@ -3,6 +3,11 @@ export default {
     environment: (process.env.LOG_ENVIRONMENT ?? process.env.NODE_ENV ?? "").toLowerCase(),
     nexaInternalPaymentsEnabled: process.env.NEXA_INTERNAL_PAYMENTS_ENABLED === "true",
     nexaAutomaticInvoicingEnabled: process.env.NEXA_AUTOMATIC_INVOICING_ENABLED === "true",
+    // Cuenta Nexa automática por crédito: cartera le pide el token a nexa-server
+    // (POST /admin/token-users) cuando el CRM cierra el crédito al 90%.
+    nexaCuentaAutomaticaEnabled: process.env.NEXA_CUENTA_AUTOMATICA_ENABLED === "true",
+    nexaServerUrl: (process.env.NEXA_SERVER_URL ?? "").replace(/\/+$/, ""),
+    nexaAdminApiKey: process.env.NEXA_ADMIN_API_KEY ?? "",
     
     postgres: {
         host: process.env.POSTGRES_HOST || 'localhost', // Hostname or IP address of the PostgreSQL server

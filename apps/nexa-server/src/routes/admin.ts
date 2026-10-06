@@ -64,6 +64,21 @@ export function createAdminRouter(deps: {
 
   router.post("/token-users", async (c) => {
     const body = createTokenUserSchema.parse(await c.req.json());
+    // Idempotente por crédito: cartera reintenta la creación (si Nexa o la red
+    // fallan a medias) y un segundo usuario en Nexa para el mismo crédito no
+    // se podría guardar (credito_id es UNIQUE) y quedaría huérfano allá.
+    const existing = await deps.tokenUsers.findByCreditoId(body.creditoId);
+    if (existing) {
+      return c.json({
+        paymentTokenId: existing.paymentTokenId,
+        creditoId: existing.creditoId,
+        identifier: existing.identifier,
+        description: existing.description,
+        nationalId: existing.nationalId,
+        nexaUserId: existing.nexaUserId,
+        token: existing.token,
+      }, 200);
+    }
     const paymentToken = await deps.paymentTokens.findActive();
     if (!paymentToken) return c.json({ error: "No active Nexa payment token. Run /tokens/bootstrap first." }, 409);
 

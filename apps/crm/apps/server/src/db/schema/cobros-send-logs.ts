@@ -91,3 +91,21 @@ export const recibosPagoWhatsapp = pgTable("recibos_pago_whatsapp", {
 		.notNull()
 		.defaultNow(),
 });
+
+/**
+ * Reserva de la bienvenida AUTOMÁTICA por crédito (migración 0048): el
+ * disparo del cierre al 90% y el barrido de recuperación la toman antes de
+ * llamar a WhatsApp, así dos procesos no la mandan dos veces. El envío manual
+ * de la plantilla no la usa.
+ */
+export const bienvenidasCredito = pgTable("bienvenidas_credito", {
+	numeroCreditoSifco: text("numero_credito_sifco").primaryKey(),
+	estado: text("estado").notNull(), // enviando | enviada | fallida
+	intentos: integer("intentos").notNull().default(1),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+	actualizadoAt: timestamp("actualizado_at", { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+});

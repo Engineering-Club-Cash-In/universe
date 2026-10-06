@@ -87,6 +87,11 @@ async function candidatosEnCrm(
 				// Nombres calificados a mano: dentro de sql`` drizzle no califica la
 				// columna de afuera y el EXISTS quedaría siempre verdadero.
 				sql`NOT EXISTS (
+					SELECT 1 FROM bienvenidas_credito b
+					WHERE b.numero_credito_sifco = "opportunities"."numero_sifco"
+						AND b.estado <> 'fallida'
+				)`,
+				sql`NOT EXISTS (
 					SELECT 1 FROM cobros_send_logs l
 					WHERE l.numero_credito_sifco = "opportunities"."numero_sifco"
 						AND l.plantilla_id = 'bienvenida'

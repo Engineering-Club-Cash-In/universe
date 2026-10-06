@@ -36,9 +36,20 @@ mock.module("../lib/simpletech", () => ({
 const { sendWelcomeMessage } = await import("./send-welcome-message");
 const { getTestPhone } = await import("../lib/messaging-test-mode");
 
+let reserva: "nueva" | "ya_enviada" | "en_curso" = "nueva";
+const cierres: string[] = [];
+const depsReserva = {
+	reservar: async () => reserva,
+	cerrar: async (_sifco: string, estado: "enviada" | "fallida") => {
+		cierres.push(estado);
+	},
+};
+
 const entorno = { ...process.env };
 beforeEach(() => {
 	enviados.length = 0;
+	cierres.length = 0;
+	reserva = "nueva";
 	process.env.BIENVENIDA_WHATSAPP_ENABLED = "true";
 	fila = {
 		leadPhone: null,
@@ -54,12 +65,16 @@ afterEach(() => {
 describe("sendWelcomeMessage", () => {
 	test("con TEST_MESSAGE sale al número de prueba aunque el lead no tenga teléfono", async () => {
 		process.env.TEST_MESSAGE = "true";
-		const r = await sendWelcomeMessage({
-			opportunityId: "op-1",
-			userId: "u-1",
-			cuentaNexa: "32200100000002",
-		});
+		const r = await sendWelcomeMessage(
+			{
+				opportunityId: "op-1",
+				userId: "u-1",
+				cuentaNexa: "32200100000002",
+			},
+			depsReserva,
+		);
 		expect(r.sent).toBe(true);
+		expect(cierres).toEqual(["enviada"]);
 		expect(enviados[0]?.phone).toBe(getTestPhone());
 		expect(enviados[0]?.message).toContain("Seguro GYT");
 		expect(enviados[0]?.message).toContain("*32200100000002*");
@@ -67,15 +82,29 @@ describe("sendWelcomeMessage", () => {
 
 	test("sin TEST_MESSAGE y sin teléfono se omite", async () => {
 		process.env.TEST_MESSAGE = "false";
-		const r = await sendWelcomeMessage({
-			opportunityId: "op-1",
-			userId: "u-1",
-		});
+		const r = await sendWelcomeMessage(
+			{ opportunityId: "op-1", userId: "u-1" },
+			depsReserva,
+		);
 		expect(r).toMatchObject({
 			sent: false,
 			skipped: true,
 			reason: "sin_telefono",
 		});
 		expect(enviados).toHaveLength(0);
+	});
+
+	test("si otro proceso ya la tomó o ya salió, no se manda de nuevo", async () => {
+		process.env.TEST_MESSAGE = "true";
+		for (const estado of ["ya_enviada", "en_curso"] as const) {
+			reserva = estado;
+			const r = await sendWelcomeMessage(
+				{ opportunityId: "op-1", userId: "u-1" },
+				depsReserva,
+			);
+			expect(r).toMatchObject({ sent: false, skipped: true, reason: estado });
+		}
+		expect(enviados).toHaveLength(0);
+		expect(cierres).toEqual([]);
 	});
 });

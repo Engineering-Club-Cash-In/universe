@@ -17,8 +17,9 @@
  *    WhatsApp jamás debe romper el flujo de cierre de la oportunidad.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
+import { bienvenidasCredito } from "../db/schema/cobros-send-logs";
 import { leads, opportunities } from "../db/schema/crm";
 import {
 	agregarCuentaNexaABienvenida,
@@ -77,6 +78,60 @@ function resolverDiaPago(
 	return fallbackDia ? String(fallbackDia) : "";
 }
 
+type ReservaBienvenida = "nueva" | "ya_enviada" | "en_curso";
+
+/**
+ * Reserva la bienvenida automática del crédito antes de llamar a WhatsApp
+ * (tabla `bienvenidas_credito`, migración 0048). Solo una nueva o una fallida
+ * se manda; una enviada o en curso no, así dos procesos del CRM (disparo y
+ * barrido, o dos instancias) no la mandan dos veces.
+ */
+async function reservarBienvenida(
+	numeroSifco: string,
+): Promise<ReservaBienvenida> {
+	const [tomada] = await db
+		.insert(bienvenidasCredito)
+		.values({ numeroCreditoSifco: numeroSifco, estado: "enviando" })
+		.onConflictDoUpdate({
+			target: bienvenidasCredito.numeroCreditoSifco,
+			set: {
+				estado: "enviando",
+				intentos: sql`${bienvenidasCredito.intentos} + 1`,
+				actualizadoAt: new Date(),
+			},
+			setWhere: eq(bienvenidasCredito.estado, "fallida"),
+		})
+		.returning({ sifco: bienvenidasCredito.numeroCreditoSifco });
+	if (tomada) return "nueva";
+	const [actual] = await db
+		.select({ estado: bienvenidasCredito.estado })
+		.from(bienvenidasCredito)
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco))
+		.limit(1);
+	// Un "enviando" que quedó sin cerrar (proceso caído) no se reenvía: no se
+	// sabe si llegó, y una bienvenida repetida es peor que una perdida.
+	return actual?.estado === "enviada" ? "ya_enviada" : "en_curso";
+}
+
+async function cerrarBienvenida(
+	numeroSifco: string,
+	estado: "enviada" | "fallida",
+): Promise<void> {
+	await db
+		.update(bienvenidasCredito)
+		.set({ estado, actualizadoAt: new Date() })
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco));
+}
+
+/** Deps inyectables solo para tests — en producción no se pasa nada. */
+export interface SendWelcomeMessageDeps {
+	reservar?: (numeroSifco: string) => Promise<ReservaBienvenida>;
+	cerrar?: (
+		numeroSifco: string,
+		estado: "enviada" | "fallida",
+	) => Promise<void>;
+}
+
 /**
  * Envía el mensaje de bienvenida del crédito recién creado.
  * Idempotencia: NO se aplica guarda — el crédito se cierra una sola vez. El log
@@ -84,8 +139,11 @@ function resolverDiaPago(
  */
 export async function sendWelcomeMessage(
 	params: SendWelcomeMessageParams,
+	deps: SendWelcomeMessageDeps = {},
 ): Promise<SendWelcomeMessageResult> {
 	const { opportunityId, userId } = params;
+	const reservar = deps.reservar ?? reservarBienvenida;
+	const cerrar = deps.cerrar ?? cerrarBienvenida;
 
 	try {
 		// 0. Habilitado por env: solo se envía si BIENVENIDA_WHATSAPP_ENABLED="true".
@@ -183,11 +241,29 @@ export async function sendWelcomeMessage(
 		// 4. Test-mode + envío con la MISMA función que usa "Enviar Directo".
 		const telefonoDestino = testMode ? getTestPhone() : (telefono as string);
 
+		// Reserva atómica del crédito: con dos procesos del CRM a la vez, solo
+		// uno manda la bienvenida.
+		const reserva = await reservar(numeroSifco);
+		if (reserva !== "nueva") {
+			console.log(
+				`${LOG_PREFIX} Bienvenida de ${numeroSifco} ${reserva === "ya_enviada" ? "ya enviada" : "en curso en otro proceso"}; no se repite`,
+			);
+			return { sent: false, skipped: true, reason: reserva };
+		}
+
 		const result = await sendWhatsappTemplate({
 			phone: telefonoDestino,
 			message: mensaje,
 			logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 		});
+		try {
+			await cerrar(numeroSifco, result.success ? "enviada" : "fallida");
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.error(
+				`${LOG_PREFIX} No se pudo cerrar la reserva de ${numeroSifco}: ${msg}`,
+			);
+		}
 
 		// 5. Log de traza en cobros_send_logs.
 		await persistCobrosSendLog({

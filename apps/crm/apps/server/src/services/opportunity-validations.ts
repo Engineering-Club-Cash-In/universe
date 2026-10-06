@@ -1,5 +1,5 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, type SQL, sql } from "drizzle-orm";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
@@ -1055,6 +1055,30 @@ export async function ejecutarBuroCofirmantes({
 			: undefined,
 		cofirmantes: resultados,
 	};
+}
+
+/** Cofirmantes con el DPI con que se validaron, como `id:dpi` en orden de id: lo que compara `firmaCofirmantesSql` */
+export function firmaCofirmantes(
+	cofirmantes: { coDebtorId: string; dpi: string }[],
+): string {
+	return cofirmantes
+		.map((c) => `${c.coDebtorId}:${c.dpi}`)
+		.sort()
+		.join(",");
+}
+
+/**
+ * La misma firma sobre los cofirmantes ACTUALES de la oportunidad, para el
+ * WHERE del UPDATE que aprueba el análisis: así un cofirmante agregado o con
+ * DPI corregido después de validar no puede quedar aprobado sin buró. El DPI se
+ * limpia de espacios igual que `normalizarDpi`.
+ */
+export function firmaCofirmantesSql(opportunityIdExpr: SQL): SQL {
+	return sql`(SELECT coalesce(string_agg(
+			cd.id::text || ':' || regexp_replace(cd.dpi, '\\s', '', 'g'),
+			',' ORDER BY cd.id), '')
+		FROM public.co_debtors cd
+		WHERE cd.opportunity_id = ${opportunityIdExpr})`;
 }
 
 /** Mismo patrón que `ejecutarValidaciones`: el DPI se relee en cada vuelta para que la llave refleje el actual */

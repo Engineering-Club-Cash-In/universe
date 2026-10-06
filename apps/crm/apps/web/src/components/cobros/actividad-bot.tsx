@@ -11,18 +11,13 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { AlertCircle, Bot, UserRound, UsersRound } from "lucide-react";
 import {
-	AlertCircle,
-	Bot,
-	ChevronDown,
-	ChevronRight,
-	UserRound,
-	UsersRound,
-} from "lucide-react";
-import { useState } from "react";
+	HistorialGestiones,
+	type ItemGestion,
+	SeccionHistorial,
+} from "@/components/cobros/ficha/ficha-pestanas";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { orpc } from "@/utils/orpc";
 
 type InteraccionBot = {
@@ -208,9 +203,6 @@ export function ActividadBot({
 	casoCobroId: string;
 	numeroSifcoCaso: string | null;
 }) {
-	const [abiertas, setAbiertas] = useState<Set<number>>(new Set());
-	const [fallidosAbiertos, setFallidosAbiertos] = useState(false);
-
 	const actividad = useQuery({
 		...orpc.getActividadBot.queryOptions({ input: { casoCobroId } }),
 		enabled: !!casoCobroId,
@@ -219,152 +211,94 @@ export function ActividadBot({
 	const sesiones = actividad.data?.sesiones ?? [];
 	const accesosFallidos = actividad.data?.accesosFallidos ?? [];
 
-	const alternar = (numero: number) => {
-		setAbiertas((previas) => {
-			const siguientes = new Set(previas);
-			if (siguientes.has(numero)) siguientes.delete(numero);
-			else siguientes.add(numero);
-			return siguientes;
+	const items: ItemGestion[] = sesiones.map((sesion) => {
+		const fallidas = sesion.interacciones.filter((i) => !i.exito).length;
+		return {
+			id: `${sesion.numero}-${sesion.referenciaSufijo}`,
+			cuando: fechaHora(sesion.inicio),
+			titulo: (
+				<span
+					className="inline-flex items-center gap-1.5"
+					title={`Referencia …${sesion.referenciaSufijo}`}
+				>
+					<Bot className="h-3.5 w-3.5" />
+					Referencia {sesion.numero}
+				</span>
+			),
+			badge: (
+				<Badge variant="outline" className="gap-1 text-[10px]">
+					{sesion.operadoPor === "codeudor" ? (
+						<UsersRound className="h-3 w-3" />
+					) : (
+						<UserRound className="h-3 w-3" />
+					)}
+					{sesion.operadoPor === "codeudor"
+						? `Codeudor${sesion.codeudorNombre ? `: ${sesion.codeudorNombre}` : ""}`
+						: "Titular"}
+				</Badge>
+			),
+			subtitulo: `${sesion.interacciones.length} ${sesion.interacciones.length === 1 ? "interacción" : "interacciones"}${fallidas > 0 ? ` · ${fallidas} con error` : ""}`,
+			tono: fallidas > 0 ? "sin-contacto" : "logrado",
+			detalleEtiqueta: "Ver lo que hizo en el bot",
+			detalleNodo: (
+				<div>
+					{sesion.interacciones.map((interaccion) => (
+						<FilaInteraccion
+							key={interaccion.id}
+							interaccion={interaccion}
+							numeroSifcoCaso={numeroSifcoCaso}
+						/>
+					))}
+				</div>
+			),
+		};
+	});
+	if (accesosFallidos.length > 0) {
+		items.push({
+			id: "accesos-fallidos",
+			cuando: fechaHora(accesosFallidos[0].creadoEn),
+			titulo: "Intentos de acceso sin sesión",
+			subtitulo: `${accesosFallidos.length} ${accesosFallidos.length === 1 ? "intento" : "intentos"}`,
+			tono: "fallido",
+			detalleEtiqueta: "Ver los intentos",
+			detalleNodo: (
+				<div>
+					{accesosFallidos.map((interaccion) => (
+						<div key={interaccion.id} className="flex items-start gap-3 py-1.5">
+							<span className="w-32 shrink-0 pt-0.5 text-muted-foreground text-xs tabular-nums">
+								{fechaHora(interaccion.creadoEn)}
+							</span>
+							<p className="text-amber-700 text-sm dark:text-amber-400">
+								<AlertCircle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+								{describir(interaccion)}
+							</p>
+						</div>
+					))}
+				</div>
+			),
 		});
-	};
+	}
 
 	return (
-		<Card>
-			<CardHeader className="flex flex-row items-center justify-between">
-				<CardTitle className="flex items-center gap-2">
-					<Bot className="h-5 w-5" />
-					Actividad en el bot de WhatsApp
-				</CardTitle>
-				{sesiones.length > 0 && (
-					<span className="text-muted-foreground text-sm">
-						{sesiones.length === 1 ? "1 sesión" : `${sesiones.length} sesiones`}
-					</span>
-				)}
-			</CardHeader>
-			<CardContent>
-				{actividad.isLoading ? (
-					<p className="py-6 text-center text-muted-foreground text-sm">
-						Cargando actividad del bot…
-					</p>
-				) : actividad.isError ? (
-					// Codex (PR #1411): un fallo de red/permiso NO es "nunca usó el
-					// bot" — decir eso convertiría un error nuestro en historial falso.
-					<div className="flex flex-col items-center gap-2 py-6">
-						<p className="text-center text-muted-foreground text-sm">
-							No se pudo cargar la actividad del bot.
-						</p>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => actividad.refetch()}
-						>
-							Reintentar
-						</Button>
-					</div>
-				) : sesiones.length === 0 && accesosFallidos.length === 0 ? (
-					<p className="py-6 text-center text-muted-foreground text-sm">
-						Este cliente todavía no ha usado el bot de WhatsApp.
-					</p>
-				) : (
-					<div className="space-y-2">
-						{sesiones.map((sesion) => {
-							const abierta = abiertas.has(sesion.numero);
-							return (
-								<div
-									key={`${sesion.numero}-${sesion.referenciaSufijo}`}
-									className="rounded-md border"
-								>
-									<button
-										type="button"
-										onClick={() => alternar(sesion.numero)}
-										className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
-										title={`Referencia …${sesion.referenciaSufijo}`}
-									>
-										{abierta ? (
-											<ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-										) : (
-											<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-										)}
-										<span className="font-medium text-sm">
-											Referencia {sesion.numero}
-										</span>
-										<span className="text-muted-foreground text-xs">
-											{fechaHora(sesion.inicio)}
-										</span>
-										<Badge
-											variant="outline"
-											className="ml-auto shrink-0 gap-1 text-[10px]"
-										>
-											{sesion.operadoPor === "codeudor" ? (
-												<UsersRound className="h-3 w-3" />
-											) : (
-												<UserRound className="h-3 w-3" />
-											)}
-											{sesion.operadoPor === "codeudor"
-												? `Codeudor${sesion.codeudorNombre ? `: ${sesion.codeudorNombre}` : ""}`
-												: "Titular"}
-										</Badge>
-										<span className="shrink-0 text-muted-foreground text-xs">
-											{sesion.interacciones.length}
-										</span>
-									</button>
-									{abierta && (
-										<div className="border-t px-3 py-2">
-											{sesion.interacciones.map((interaccion) => (
-												<FilaInteraccion
-													key={interaccion.id}
-													interaccion={interaccion}
-													numeroSifcoCaso={numeroSifcoCaso}
-												/>
-											))}
-										</div>
-									)}
-								</div>
-							);
-						})}
-
-						{accesosFallidos.length > 0 && (
-							<div className="rounded-md border border-dashed">
-								<button
-									type="button"
-									onClick={() => setFallidosAbiertos((previo) => !previo)}
-									className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
-								>
-									{fallidosAbiertos ? (
-										<ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-									) : (
-										<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-									)}
-									<span className="font-medium text-muted-foreground text-sm">
-										Intentos de acceso sin sesión
-									</span>
-									<span className="ml-auto shrink-0 text-muted-foreground text-xs">
-										{accesosFallidos.length}
-									</span>
-								</button>
-								{fallidosAbiertos && (
-									<div className="border-t px-3 py-2">
-										{accesosFallidos.map((interaccion) => (
-											<div
-												key={interaccion.id}
-												className="flex items-start gap-3 py-1.5"
-											>
-												<span className="w-32 shrink-0 pt-0.5 text-muted-foreground text-xs tabular-nums">
-													{fechaHora(interaccion.creadoEn)}
-												</span>
-												<p className="text-amber-700 text-sm dark:text-amber-400">
-													<AlertCircle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-													{describir(interaccion)}
-												</p>
-											</div>
-										))}
-									</div>
-								)}
-							</div>
-						)}
-					</div>
-				)}
-			</CardContent>
-		</Card>
+		<SeccionHistorial
+			titulo="Actividad en el bot de WhatsApp"
+			conteo={actividad.isLoading ? "…" : sesiones.length}
+			icono={<Bot />}
+			// Codex (PR #1411): un fallo de red/permiso NO es "nunca usó el bot" —
+			// decir eso convertiría un error nuestro en historial falso.
+			estado={
+				actividad.isLoading
+					? "cargando"
+					: actividad.isError
+						? "error"
+						: items.length === 0
+							? "vacio"
+							: "ok"
+			}
+			onReintentar={() => actividad.refetch()}
+			vacio="Este cliente todavía no ha usado el bot de WhatsApp."
+		>
+			<HistorialGestiones items={items} />
+		</SeccionHistorial>
 	);
 }

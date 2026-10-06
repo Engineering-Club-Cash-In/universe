@@ -42,6 +42,8 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 11 | [Investigación en redes sociales](./11-investigacion-redes-sociales.md) | CB-039: registrar fuente, hallazgos y capturas de lo que se encuentra del cliente en redes; solo B2 y B3 (configurable) |
 | 12 | [Guía de redacción](./12-guia-de-redaccion.md) | Cómo se escriben los textos del CRM de cobros: trato de usted, etiquetas con sustantivos, términos del negocio. Revisarla antes de agregar pantallas o mensajes |
 | 13 | [Dashboard del asesor y Mi Cartera · backend pendiente](./13-dashboard-asesor-backend.md) | Rediseño del Figma (Asesor Junior/Senior): qué quedó conectado y las tareas de backend para José (recuperación y metas por asesor, deuda vencida, orden por bucket del motor, pagos por confirmar, referencias, hora del próximo contacto) |
+| 14 | [Rediseño del asesor · Dashboard y Mi Cartera (front)](./14-rediseno-dashboard-asesor.md) | Etapa 1 del rediseño Figma Asesor Junior/Senior (PR #1861): reglas de producto, qué quedó, cómo está armado, pendientes y la etapa 2 (Workspace y Ficha 360) |
+| 15 | [Ficha 360 rediseñada · backend pendiente](./15-ficha-360-backend.md) | Etapa 2 del rediseño Figma: Ficha 360 conectada; tareas F1–F8 para José (RENAP, codeudores, historial de cambios, histórico del crédito, seguro, documentos, asistente IA, editar direcciones) |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

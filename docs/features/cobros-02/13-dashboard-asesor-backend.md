@@ -4,7 +4,9 @@
 >
 > **Contexto:** el front del rediseño (Figma «CRM Ventas» › Asesor Junior / Senior) ya está hecho y conectado. Lo que todavía no tiene dato llega como `null` y la pantalla muestra "—" o "pronto". **No hay que tocar el front:** en cada tarea se dice qué procedimiento llenar y con qué forma. En cuanto devuelva datos, la card se pinta sola.
 >
-> **Rama/PR:** `feat/cobros-dashboard-asesor` → `COBROS-02`.
+> **PR:** #1861 (mergeado en `COBROS-02` el 2026-10-06).
+>
+> **Seguimiento:** issue #1862, asignado a José. Lo que se hizo en el front está en [14-rediseno-dashboard-asesor.md](./14-rediseno-dashboard-asesor.md).
 
 ## Las pantallas
 

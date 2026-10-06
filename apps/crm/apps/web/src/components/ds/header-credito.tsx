@@ -24,6 +24,9 @@ import { CrmAvatar, CrmDivider, CrmPill, inicialesDe } from "./cards-credito";
  *  - En "EnRiesgo" Figma deja las acciones pegadas a la identidad (sin space-between);
  *    se alinean a la derecha como en las otras dos variantes.
  *  - Ancho fluido (Figma: 1512); la fila superior y los datos hacen wrap si no caben.
+ *  - `esquina`: control arriba a la derecha (Ver detalle completo); las acciones bajan.
+ *  - `datosExtra`: datos que la Ficha 360 ya mostraba y Figma no trae (capital activo,
+ *    cuotas, vehículo). Van después de "Días en mora", con el mismo estilo.
  */
 
 export type EstadoCredito = "activo" | "en-riesgo" | "juridico";
@@ -61,6 +64,13 @@ export type HeaderCreditoProps = Omit<
 	diasMora: number;
 	/** "11 jul 2026 · 14:32". */
 	ultimaActualizacion?: React.ReactNode;
+	/**
+	 * Control en la esquina superior derecha, a la altura del nombre (p. ej.
+	 * "Ver detalle completo"). Si se pasa, `acciones` baja a su propia fila.
+	 */
+	esquina?: React.ReactNode;
+	/** Datos adicionales (no están en Figma) tras "Días en mora". */
+	datosExtra?: Array<{ label: React.ReactNode; valor: React.ReactNode }>;
 };
 
 function Dato({
@@ -101,6 +111,8 @@ export function HeaderCredito({
 	fechaPago,
 	diasMora,
 	ultimaActualizacion,
+	datosExtra,
+	esquina,
 	className,
 	...props
 }: HeaderCreditoProps) {
@@ -138,10 +150,18 @@ export function HeaderCredito({
 						</div>
 					</div>
 				</div>
-				{acciones ? (
+				{esquina ? (
+					<div className="flex shrink-0 items-center gap-2 self-start">
+						{esquina}
+					</div>
+				) : acciones ? (
 					<div className="flex flex-wrap items-center gap-2.5">{acciones}</div>
 				) : null}
 			</div>
+			{/* Con `esquina`, las acciones bajan a su propia fila. */}
+			{esquina && acciones ? (
+				<div className="flex flex-wrap items-center gap-2.5">{acciones}</div>
+			) : null}
 
 			<CrmDivider />
 
@@ -156,6 +176,12 @@ export function HeaderCredito({
 					>
 						{diasMora}
 					</Dato>
+					{datosExtra?.map((d, i) => (
+						// biome-ignore lint/suspicious/noArrayIndexKey: lista fija de datos
+						<Dato key={i} label={d.label}>
+							{d.valor}
+						</Dato>
+					))}
 				</dl>
 				{ultimaActualizacion ? (
 					<div className="flex flex-col items-end gap-0.5 text-right">

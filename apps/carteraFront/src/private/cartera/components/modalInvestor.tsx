@@ -226,14 +226,36 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         // verde de siempre, quien captura cerraría el modal creyendo que todo
         // salió y el inversionista quedaría con una cuenta que no sabe que
         // tiene —o sin cuenta— y nadie se enteraría hasta el resumen del día
-        // siguiente. Editar no provisiona, así que aquí solo habla el alta.
-        const aviso = avisoAccesoPortal(respuesta?.provisioning?.[0]);
-        const mensaje = aviso ? `${base}. ${aviso.texto}` : base;
-        if (aviso?.tono === "advertencia") {
+        // siguiente.
+        //
+        // TODO ESTO ES SOLO DEL ALTA, y la condición es obligatoria: este
+        // `onSuccess` lo comparten crear y editar, y cartera solo llena
+        // `provisioning` con los INSERT (`recienCreados`, investor.ts:522). Sin
+        // el `mode === "create"`, cada edición —cambiar un banco, corregir un
+        // teléfono— caería en la rama de "no se pudo confirmar" y mandaría a
+        // avisar a sistemas por una cuenta de portal que nadie tocó.
+        const aviso =
+          mode === "create"
+            ? avisoAccesoPortal(respuesta?.provisioning?.[0])
+            : undefined;
+        if (mode === "create" && !aviso) {
+          // Un desenlace que el traductor NO reconoce no es un éxito. Pasa
+          // cuando `provisioning` viene vacío o con un estado/motivo fuera de
+          // las listas conocidas. En verde, quien captura cierra el modal y le
+          // dice al inversionista que ya le llega su contraseña —y puede que no
+          // exista ni la cuenta—. El alta sí quedó hecha, y eso se dice
+          // primero: callarlo mandaría a recrearlo contra el guard de duplicados.
+          toast.warning(
+            `${base}, pero no se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.`,
+            { duration: 15000 }
+          );
+        } else if (aviso?.tono === "advertencia") {
           // Dura más que el toast normal: es lo que hay que leer y actuar.
-          toast.warning(mensaje, { duration: 15000 });
+          toast.warning(`${base}. ${aviso.texto}`, { duration: 15000 });
         } else {
-          toast.success(mensaje);
+          // Editar cae siempre acá, con el verde de toda la vida: `aviso` es
+          // `undefined` y no se dice nada del portal, que es lo correcto.
+          toast.success(aviso ? `${base}. ${aviso.texto}` : base);
         }
         queryClient.invalidateQueries({ queryKey: ["investors"] });
         queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });

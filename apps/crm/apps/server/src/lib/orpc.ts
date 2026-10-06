@@ -350,6 +350,37 @@ const requireCobranzaReport = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireInvestmentRealizedReport = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canAccessInvestmentRealizedReport(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Investment realized report access required",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
 const requireTiempoCierreReport = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -792,6 +823,9 @@ export const closedCreditsReportProcedure = publicProcedure.use(
 );
 export const cobranzaReportProcedure = publicProcedure.use(
 	requireCobranzaReport,
+);
+export const investmentRealizedReportProcedure = publicProcedure.use(
+	requireInvestmentRealizedReport,
 );
 export const tiempoCierreReportProcedure = publicProcedure.use(
 	requireTiempoCierreReport,

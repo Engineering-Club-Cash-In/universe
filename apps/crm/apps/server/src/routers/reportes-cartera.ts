@@ -15,7 +15,11 @@ import {
 	gtDateStrToDate,
 } from "../lib/guatemala-month-window";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
-import { adminProcedure, cobranzaReportProcedure } from "../lib/orpc";
+import {
+	adminProcedure,
+	cobranzaReportProcedure,
+	investmentRealizedReportProcedure,
+} from "../lib/orpc";
 import {
 	carteraBackClient,
 	type FacturacionMesResponse,
@@ -526,7 +530,7 @@ export const reportesCarteraRouter = {
 			});
 		}),
 
-	getReinversionLiquidaciones: adminProcedure
+	getReinversionLiquidaciones: investmentRealizedReportProcedure
 		.input(
 			z.object({
 				mes: z.number().min(1).max(12),

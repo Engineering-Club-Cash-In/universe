@@ -60,13 +60,14 @@ export const paymentRouter = new Elysia()
   .post("/processInvestors", processInvestors)
 
   // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
-  .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
+  .patch("/editPayment/:pagoId", async ({ params, body, set, user }: any) => {
     const pagoId = Number(params.pagoId);
     if (!pagoId || isNaN(pagoId)) {
       set.status = 400;
       return { success: false, message: "pago_id inválido" };
     }
-    const result = await editarPago(pagoId, body);
+    const usuario = user?.email ?? user?.id ?? null;
+    const result = await editarPago(pagoId, body, usuario);
     if (!result.success) {
       set.status = result.message.includes("no encontrado") ? 404 : 400;
     }

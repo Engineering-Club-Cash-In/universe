@@ -30,6 +30,7 @@ export const carteraCatalog = {
     affected_installment_count: { type: 'integer', min: 0, max: MAX_COUNT },
     investor_count: { type: 'integer', min: 0, max: MAX_COUNT },
     rubric_count: { type: 'integer', min: 0, max: MAX_COUNT },
+    changed_field_count: { type: 'integer', min: 1, max: 64 },
     retryable: { type: 'boolean' },
     recovery_applied: { type: 'boolean' },
     installment_closed: { type: 'boolean' },
@@ -37,6 +38,7 @@ export const carteraCatalog = {
     manual_action_required: { type: 'boolean' },
     fallback_applied: { type: 'boolean' },
     credit_updated: { type: 'boolean' },
+    audit_persisted: { type: 'boolean' },
     investments_reversed: { type: 'boolean' },
     notification_attempted: { type: 'boolean' },
     audit_operation: { type: 'enum', values: ['query', 'diagnostic'] },
@@ -173,6 +175,9 @@ export const carteraCatalog = {
       completed: { level: 'info', required: ['credit_updated', 'installment_closed', 'duration_ms'], optional: [] },
       rejected: { level: 'warn', required: ['credit_updated', 'installment_closed', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['credit_updated', 'installment_closed', 'duration_ms', 'error_code'], optional: [] },
+    } },
+    'payment.nexa_edit': { outcomes: {
+      recorded: { level: 'warn', required: ['changed_field_count', 'audit_persisted'], optional: [] },
     } },
     'payment.reversal_to_pending': { outcomes: {
       completed: { level: 'info', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },

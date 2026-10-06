@@ -26,8 +26,10 @@ Schema version: **1**
 | `assignment_mode` | enum: add, replace, process |
 | `attempt` | integer 1..10 |
 | `audit_operation` | enum: query, diagnostic |
+| `audit_persisted` | boolean |
 | `auth_reason` | enum: missing, invalid, expired |
 | `change_set` | enum: terms, schedule, investors, status, mixed |
+| `changed_field_count` | integer 1..64 |
 | `commit_ref` | string max=40 pattern=^[0-9a-f]{7,40}$ |
 | `contribution_operation` | enum: create, update |
 | `credit_closed` | boolean |
@@ -249,6 +251,12 @@ Schema version: **1**
 | `completed` | `info` | `distribution_mode`, `fallback_applied`, `duration_ms` | — | — |
 | `failed` | `error` | `distribution_mode`, `fallback_applied`, `duration_ms`, `error_code` | — | — |
 | `fallback` | `warn` | `distribution_mode`, `fallback_applied`, `duration_ms`, `reason_code` | — | — |
+
+### `payment.nexa_edit`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `recorded` | `warn` | `changed_field_count`, `audit_persisted` | — | — |
 
 ### `payment.registration`
 

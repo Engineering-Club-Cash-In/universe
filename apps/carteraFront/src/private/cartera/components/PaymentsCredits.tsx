@@ -51,6 +51,17 @@ import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
 import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
 import { PaymentStatusBadges } from "./PaymentStatusBadges";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { textoAdvertenciaEditarPagoNexa } from "./advertenciaEditarPagoNexa";
 import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
@@ -214,6 +225,10 @@ function EditPaymentModal({
     setFormValues((prev) => ({ ...prev, [key]: value }));
   };
 
+  const pendingPayload = React.useRef<Record<string, string>>({});
+  const [confirmarNexa, setConfirmarNexa] = React.useState(false);
+  const textoNexa = textoAdvertenciaEditarPagoNexa(pago);
+
   const handleSave = () => {
     // Mandar todos los campos que tengan valor (el backend acepta parcial)
     const payload: Record<string, string> = {};
@@ -229,6 +244,15 @@ function EditPaymentModal({
       return;
     }
 
+    if (textoNexa) {
+      pendingPayload.current = payload;
+      setConfirmarNexa(true);
+      return;
+    }
+    guardar(payload);
+  };
+
+  const guardar = (payload: Record<string, string>) => {
     editPayment.mutate(
       { pagoId: pago.pago_id, params: payload },
       {
@@ -308,6 +332,25 @@ function EditPaymentModal({
           </Button>
         </div>
       </DialogContent>
+      <AlertDialog open={confirmarNexa} onOpenChange={(o) => !o && setConfirmarNexa(false)}>
+        <AlertDialogContent className="bg-white text-slate-900">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-900">Pago de Nexa</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600">{textoNexa}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmarNexa(false);
+                guardar(pendingPayload.current);
+              }}
+            >
+              Sí, guardar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

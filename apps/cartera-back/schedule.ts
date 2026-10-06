@@ -16,6 +16,8 @@ import {
 import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
 import { enviarEventosNexaPendientes } from './src/controllers/nexaCarteraEvents';
 import { client } from './src/database';
+import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPago';
+import config from './src/config';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -187,6 +189,20 @@ export function iniciarTareasProgramadas() {
             secret: process.env.NEXA_CARTERA_EVENTS_SECRET,
           },
         });
+      },
+    );
+  });
+
+  // 🧾 Recibos por WhatsApp de pagos de Nexa que no salieron - cada 15 minutos.
+  //    Retoma los PENDIENTE/ENVIANDO/FALLIDO atascados (hasta 5 intentos) de la
+  //    bandeja de salida de nexa_payment_events. Con
+  //    RECIBO_PAGO_WHATSAPP_ENABLED apagado no hace nada. Ver nexaReciboPago.ts.
+  schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    if (!config.reciboPagoWhatsappEnabled) return;
+    await runScheduledJob(
+      'retry_nexa_receipts',
+      async () => {
+        await reintentarRecibosNexaPendientes();
       },
     );
   });

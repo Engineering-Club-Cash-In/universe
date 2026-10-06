@@ -76,6 +76,23 @@ describe("consultaTelefonosCompartidos", () => {
 		expect(sql).toContain("count(distinct clave)");
 		expect(params).toEqual(["54673367", "35219722"]);
 	});
+
+	test("la solicitud solo cuenta la del titular (sin codeudores)", async () => {
+		const { PgDialect } = await import("drizzle-orm/pg-core");
+		const { consultaTelefonosCompartidos } = await import("./cartera-estado-cuenta");
+		const { sql } = new PgDialect().sqlToQuery(consultaTelefonosCompartidos(["54673367"]));
+		expect(sql).toContain("a.person_type = 'lead' or a.person_type is null");
+	});
+});
+
+describe("consultaCelularSolicitudTitular", () => {
+	test("toma solo la solicitud del titular: personType lead o vacío (formularios antiguos)", async () => {
+		const { consultaCelularSolicitudTitular } = await import("./cartera-estado-cuenta");
+		const { sql, params } = consultaCelularSolicitudTitular("01020304").toSQL();
+		expect(sql).toContain('"credit_applications"."person_type" = $');
+		expect(sql).toContain('"credit_applications"."person_type" is null');
+		expect(params).toEqual(["01020304", "lead"]);
+	});
 });
 
 describe("destinoModoPrueba (con la lista real de CRM)", () => {

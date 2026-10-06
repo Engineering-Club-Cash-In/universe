@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
@@ -165,7 +165,7 @@ export function crearCarteraEstadoCuentaRouter(deps: CarteraEstadoCuentaDeps) {
 /**
  * Cuántos créditos distintos comparten cada número, sumando las cuatro fuentes
  * de teléfono (las mismas de `telefonosDelCredito`): lead, caso de cobros
- * (principal y alternativo) y solicitud. Se cuenta por crédito —o por lead u
+ * (principal y alternativo) y solicitud del titular (sin codeudores). Se cuenta por crédito —o por lead u
  * oportunidad cuando aún no hay crédito— para que el mismo cliente, que
  * aparece en varias fuentes de un mismo crédito, cuente una sola vez.
  * Los dígitos se comparan como en `celularGuatemala`: últimos 8 del primer
@@ -187,6 +187,7 @@ export function consultaTelefonosCompartidos(digitos: string[]) {
 			union all
 			select coalesce(o.numero_sifco, 'lead:' || o.lead_id::text, 'opp:' || o.id::text), a.tel_movil
 			from credit_applications a join opportunities o on o.id = a.opportunity_id
+			where a.person_type = 'lead' or a.person_type is null
 		)
 		select d, count(distinct clave)::int as n
 		from (
@@ -196,6 +197,32 @@ export function consultaTelefonosCompartidos(digitos: string[]) {
 		) x
 		where d in (${lista})
 		group by d`;
+}
+
+/**
+ * Solo la solicitud del TITULAR: una oportunidad puede tener también la de un
+ * codeudor (`personType = 'coDebtor'`), y el estado de cuenta del titular no
+ * se le puede mandar a otra persona. Las solicitudes antiguas, de antes de
+ * los codeudores, no traen `personType` y son del titular.
+ */
+export function consultaCelularSolicitudTitular(numeroSifco: string) {
+	return db
+		.select({ telefono: creditApplications.telMovil })
+		.from(opportunities)
+		.innerJoin(
+			creditApplications,
+			eq(creditApplications.opportunityId, opportunities.id),
+		)
+		.where(
+			and(
+				eq(opportunities.numeroSifco, numeroSifco),
+				or(
+					eq(creditApplications.personType, "lead"),
+					isNull(creditApplications.personType),
+				),
+			),
+		)
+		.orderBy(desc(creditApplications.updatedAt));
 }
 
 const dependenciasReales: CarteraEstadoCuentaDeps = {
@@ -216,15 +243,7 @@ const dependenciasReales: CarteraEstadoCuentaDeps = {
 			.where(eq(opportunities.numeroSifco, numeroSifco))
 			.orderBy(desc(opportunities.updatedAt));
 
-		const solicitudes = await db
-			.select({ telefono: creditApplications.telMovil })
-			.from(opportunities)
-			.innerJoin(
-				creditApplications,
-				eq(creditApplications.opportunityId, opportunities.id),
-			)
-			.where(eq(opportunities.numeroSifco, numeroSifco))
-			.orderBy(desc(creditApplications.updatedAt));
+		const solicitudes = await consultaCelularSolicitudTitular(numeroSifco);
 
 		return [
 			...casos.flatMap((c) => [

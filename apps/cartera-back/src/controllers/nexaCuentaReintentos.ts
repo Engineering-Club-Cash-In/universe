@@ -7,9 +7,10 @@
  *      pedir con el DPI guardado, hasta 10 intentos.
  *   2. Cuentas sin avisar: ya tienen token pero el cliente no la recibió en la
  *      bienvenida (la cuenta llegó tarde, la bienvenida falló o está apagada).
- *      Se le pide al CRM el mensaje aparte y, si salió, se marca avisada. Se
- *      espera 15 minutos desde el último cambio para no pisarse con la
- *      bienvenida que la está mandando.
+ *      Cada fila se toma con un UPDATE condicional antes de pedirle al CRM el
+ *      mensaje aparte (dos corridas encimadas no la mandan dos veces) y, si
+ *      salió, se marca avisada. Se espera 15 minutos desde el último cambio
+ *      para no pisarse con la bienvenida que la está mandando.
  *
  * Las filas del piloto (insertadas a mano, sin `cuenta_solicitada_at`) no se
  * tocan. Nunca lanza.
@@ -81,6 +82,21 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
         .limit(LIMITE);
       for (const fila of sinAviso) {
         if (!fila.token) continue;
+        // Toma la fila antes de llamar al CRM: correr el reloj con un UPDATE
+        // condicional hace que otra corrida (una que se encimó con esta o
+        // una segunda instancia) ya no la vea elegible, así que el cliente no
+        // recibe el código dos veces.
+        const [tomada] = await db
+          .update(nexa_credit_bindings)
+          .set({ updated_at: new Date() })
+          .where(and(
+            eq(nexa_credit_bindings.credito_id, fila.creditoId),
+            isNull(nexa_credit_bindings.cuenta_notificada_at),
+            lt(nexa_credit_bindings.updated_at, sql`now() - interval '15 minutes'`),
+          ))
+          .returning({ creditoId: nexa_credit_bindings.credito_id });
+        if (!tomada) continue;
+
         const aviso = await notifyCuentaNexaWhatsapp({
           numeroSifco: fila.numeroSifco,
           token: fila.token,
@@ -94,13 +110,8 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
             .update(nexa_credit_bindings)
             .set({ cuenta_notificada_at: new Date(), updated_at: new Date() })
             .where(eq(nexa_credit_bindings.credito_id, fila.creditoId));
-        } else {
-          // Corre el reloj para no reintentar el mismo aviso en cada vuelta.
-          await db
-            .update(nexa_credit_bindings)
-            .set({ updated_at: new Date() })
-            .where(eq(nexa_credit_bindings.credito_id, fila.creditoId));
         }
+        // Si falló, la toma ya corrió el reloj: se reintenta en 15 minutos.
       }
     } catch (error) {
       console.error(

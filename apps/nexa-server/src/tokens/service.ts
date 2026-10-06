@@ -2,6 +2,8 @@ import { formatTokenIdentifierForPrefix } from "./identifier";
 
 export interface TokenUserCreationRepository {
   nextIdentifierSequence(): Promise<number>;
+  /** Devuelve el identificador reservado del crédito (lo crea si no existe). */
+  reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>): Promise<{ identifier: string }>;
   createTokenUser(user: {
     paymentTokenId: number;
     creditoId: number;
@@ -46,10 +48,15 @@ export async function createTokenUserForCredit(options: {
   repository: TokenUserCreationRepository;
   nexa: TokenUserCreationNexaClient;
 }) {
-  const identifier = formatTokenIdentifierForPrefix({
-    prefix: options.paymentToken.prefix,
-    sequence: await options.repository.nextIdentifierSequence(),
-  });
+  // Reserva durable ANTES de la llamada a Nexa: si Nexa crea el usuario y el
+  // guardado de abajo falla, el reintento manda este mismo identificador y
+  // Nexa lo rechaza como repetido en vez de crear un segundo usuario huérfano.
+  const { identifier } = await options.repository.reserveIdentifier(options.creditoId, async () =>
+    formatTokenIdentifierForPrefix({
+      prefix: options.paymentToken.prefix,
+      sequence: await options.repository.nextIdentifierSequence(),
+    }),
+  );
   const response = await options.nexa.createTokenUsers({
     tokenId: options.paymentToken.nexaTokenId,
     users: [{ identifier: Number(identifier), description: options.description, nationalId: Number(options.nationalId) }],

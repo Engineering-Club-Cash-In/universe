@@ -49,6 +49,15 @@ export const nexaTokenUsers = pgTable("nexa_token_users", {
   creditoIdx: uniqueIndex("nexa_token_users_credito_idx").on(table.creditoId),
 }));
 
+// Reserva durable del identificador de un crédito antes de pedirle a Nexa el
+// token user (migración 0005): un reintento reusa el mismo identificador y
+// Nexa lo rechaza como repetido en vez de crear un segundo usuario huérfano.
+export const nexaTokenUserReservations = pgTable("nexa_token_user_reservations", {
+  creditoId: integer("credito_id").primaryKey(),
+  identifier: varchar("identifier", { length: 9 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   id: serial("id").primaryKey(),
   reference: varchar("reference", { length: 80 }).notNull().unique(),

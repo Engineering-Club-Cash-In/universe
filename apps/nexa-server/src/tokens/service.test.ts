@@ -10,6 +10,7 @@ describe("createTokenUserForCredit", () => {
       paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
       repository: {
         nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         createTokenUser: async (user) => ({ id: 11, ...user }),
       },
       nexa: {
@@ -39,6 +40,7 @@ describe("createTokenUserForCredit", () => {
       paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
       repository: {
         nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         createTokenUser: async (user) => ({ id: 11, ...user }),
       },
       nexa: {
@@ -87,6 +89,7 @@ describe("createTokenUserForCredit", () => {
       paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
       repository: {
         nextIdentifierSequence: async () => 100_000_003,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         // onConflictDoNothing → el repositorio devuelve la fila que ya estaba.
         createTokenUser: async () => ({
           id: 10,
@@ -105,5 +108,35 @@ describe("createTokenUserForCredit", () => {
     });
 
     expect(created).toMatchObject({ creditoId: 42, identifier: "100000002", nexaUserId: 98, token: "32200100000002" });
+  });
+
+  test("a retry reuses the reserved identifier instead of asking Nexa for a new user", async () => {
+    let sequenceCalls = 0;
+    let sentIdentifier = 0;
+    const created = await createTokenUserForCredit({
+      creditoId: 42,
+      description: "Credito 42",
+      nationalId: "1234567890101",
+      paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
+      repository: {
+        nextIdentifierSequence: async () => {
+          sequenceCalls += 1;
+          return 100_000_009;
+        },
+        // El primer intento ya reservó 100000002 y se cayó al guardar.
+        reserveIdentifier: async () => ({ identifier: "100000002" }),
+        createTokenUser: async (user) => ({ id: 11, ...user }),
+      },
+      nexa: {
+        createTokenUsers: async (payload) => {
+          sentIdentifier = payload.users[0]!.identifier;
+          return { users: [{ id: 99, token: "32200100000002" }], errorUsers: [] };
+        },
+      },
+    });
+
+    expect(sentIdentifier).toBe(100_000_002);
+    expect(sequenceCalls).toBe(0);
+    expect(created).toMatchObject({ identifier: "100000002", token: "32200100000002" });
   });
 });

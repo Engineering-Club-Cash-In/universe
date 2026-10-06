@@ -55,6 +55,7 @@ describe("admin router", () => {
       } as never,
       tokenUsers: {
         nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         createTokenUser: async () => ({ id: 1 }),
         findByToken: async () => null,
         findByCreditoId: async () => null,

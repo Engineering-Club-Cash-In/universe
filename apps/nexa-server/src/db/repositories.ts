@@ -8,7 +8,7 @@ import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-wor
 import type { PaymentTransactionRepository, TokenUserRepository } from "../payments/repositories";
 import type { TokenUserCreationRepository } from "../tokens/service";
 import type { NexaDb } from "./index";
-import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUsers } from "./schema";
+import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUserReservations, nexaTokenUsers } from "./schema";
 
 export class PaymentTokenRepository {
   constructor(private readonly db: NexaDb) {}
@@ -49,6 +49,24 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
       .onConflictDoNothing({ target: nexaTokenUsers.creditoId })
       .returning();
     return created ?? (await this.findByCreditoId(user.creditoId));
+  }
+
+  // Identificador reservado del crédito: el existente o uno nuevo. Se guarda
+  // ANTES de llamar a Nexa, así un reintento tras una caída manda el mismo.
+  async reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>) {
+    const [existing] = await this.db.select().from(nexaTokenUserReservations)
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
+    if (existing) return { identifier: existing.identifier };
+    const identifier = await nextIdentifier();
+    const [created] = await this.db.insert(nexaTokenUserReservations)
+      .values({ creditoId, identifier })
+      .onConflictDoNothing({ target: nexaTokenUserReservations.creditoId })
+      .returning();
+    if (created) return { identifier: created.identifier };
+    const [winner] = await this.db.select().from(nexaTokenUserReservations)
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
+    if (!winner) throw new Error(`No se pudo reservar el identificador del crédito ${creditoId}`);
+    return { identifier: winner.identifier };
   }
 
   // Un crédito tiene a lo sumo un token user (credito_id UNIQUE). Lo usa

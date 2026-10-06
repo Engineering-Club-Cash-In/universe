@@ -93,6 +93,39 @@ function SectionError({ message }: { message: string }) {
 	);
 }
 
+/**
+ * Baja (solo en vertical) hasta la sección dentro del primer contenedor con
+ * scroll. `scrollIntoView` también corría la página de lado cuando alguna
+ * sección es más ancha que la ventana.
+ */
+function bajarASeccion(id: string, behavior: ScrollBehavior) {
+	const seccion = document.getElementById(id);
+	if (!seccion) return;
+	let contenedor: HTMLElement | null = seccion.parentElement;
+	while (contenedor) {
+		const { overflowY } = getComputedStyle(contenedor);
+		if (
+			(overflowY === "auto" || overflowY === "scroll") &&
+			contenedor.scrollHeight > contenedor.clientHeight
+		) {
+			break;
+		}
+		contenedor = contenedor.parentElement;
+	}
+	const margen = 24;
+	if (contenedor) {
+		const top =
+			seccion.getBoundingClientRect().top -
+			contenedor.getBoundingClientRect().top +
+			contenedor.scrollTop -
+			margen;
+		contenedor.scrollTo({ top, behavior });
+	} else {
+		const top = seccion.getBoundingClientRect().top + window.scrollY - margen;
+		window.scrollTo({ top, behavior });
+	}
+}
+
 function DesignSystemPage() {
 	const { theme, setTheme } = useTheme();
 	const { theme: forcedTheme, only, brand: initialBrand } = Route.useSearch();
@@ -129,6 +162,20 @@ function DesignSystemPage() {
 		};
 	}, [only]);
 
+	// El router trata el cambio de `#` como navegación y regresa el scroll al
+	// inicio: se baja a la sección a mano. Al abrir con `#id` se espera a que
+	// carguen las secciones (son diferidas).
+	const irASeccion = React.useCallback((id: string) => {
+		bajarASeccion(id, "smooth");
+		window.history.replaceState(window.history.state, "", `#${id}`);
+	}, []);
+
+	React.useEffect(() => {
+		const id = window.location.hash.slice(1);
+		if (!sections || !id) return;
+		requestAnimationFrame(() => bajarASeccion(id, "instant"));
+	}, [sections]);
+
 	const isDark =
 		theme === "dark" ||
 		(theme === "system" &&
@@ -145,6 +192,10 @@ function DesignSystemPage() {
 						<a
 							key={s.id}
 							href={`#${s.id}`}
+							onClick={(e) => {
+								e.preventDefault();
+								irASeccion(s.id);
+							}}
 							className="type-body-sm block rounded-md px-2 py-1 text-fg-secondary hover:bg-muted hover:text-fg"
 						>
 							{s.ok ? s.meta.title : `⚠ ${s.id}`}

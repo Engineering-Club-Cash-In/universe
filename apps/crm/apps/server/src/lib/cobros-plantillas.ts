@@ -83,19 +83,35 @@ export interface VariablesPlantilla {
 	aseguradora?: string;
 	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
 	cabinaSeguro?: string;
-	/**
-	 * Token de la cuenta Nexa del crédito (el número con el que el cliente
-	 * paga desde su banco). Solo lo llena la bienvenida automática; vacío, la
-	 * línea `{lineaCuentaNexa}` desaparece sin dejar renglón en blanco.
-	 */
-	cuentaNexa?: string;
 }
 
-/** Línea de la cuenta Nexa dentro del bloque de cuentas de la bienvenida. */
+/** Línea de la cuenta Nexa que la bienvenida automática agrega a las cuentas. */
 export function lineaCuentaNexa(token: string | null | undefined): string {
 	return token
 		? `Además, puede pagar su cuota desde su banco con su código de pago Nexa: *${token}*`
 		: "";
+}
+
+/**
+ * Agrega la cuenta Nexa al final del bloque de cuentas (el que empieza con 💳)
+ * de una bienvenida ya interpolada. Va en el mismo bloque, así que el mensaje
+ * sigue con 5 bloques (template `mensaje5parametro`).
+ *
+ * Solo lo usa la bienvenida AUTOMÁTICA (`send-welcome-message.ts`): la
+ * plantilla compartida no lleva marcador, así que el envío manual (masivo o
+ * desde la ficha) nunca muestra ni manda nada de Nexa.
+ */
+export function agregarCuentaNexaABienvenida(
+	mensaje: string,
+	token: string | null | undefined,
+): string {
+	const linea = lineaCuentaNexa(token);
+	if (!linea) return mensaje;
+	const bloques = mensaje.split("\n\n");
+	const i = bloques.findIndex((b) => b.trimStart().startsWith("💳"));
+	if (i === -1) return mensaje;
+	bloques[i] = `${bloques[i]}\n${linea}`;
+	return bloques.join("\n\n");
 }
 
 /**
@@ -785,12 +801,7 @@ export function interpolar(
 		incrementoMaximoMensualMora,
 	);
 
-	const lineaNexa = lineaCuentaNexa(variables.cuentaNexa);
-
 	return base
-		// Va primero y se lleva el salto de línea: sin cuenta no queda un
-		// renglón vacío que parta el bloque en dos (cambiaría el template).
-		.replace(/\n?{lineaCuentaNexa}/g, lineaNexa ? `\n${lineaNexa}` : "")
 		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
 		.replace(/{incrementoMaximoMensualMora}/g, v(incrementoMaximoMensualMora))
 		.replace(/{clienteNombre}/g, v(nombre))
@@ -846,7 +857,6 @@ A nombre de: *CUBE INVESTMENTS, S.A.*
 * BAM: 3020123033
 * GyT: 01300039945
 * Banrural: 3394002346
-{lineaCuentaNexa}
 
 🚗 *Tu vehículo cuenta con seguro completo a través de {aseguradora}.*
 *En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}*, identificándote únicamente con el número de placa.

@@ -21,6 +21,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
 import {
+	agregarCuentaNexaABienvenida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	seguroPorAseguradora,
@@ -160,7 +161,6 @@ export async function sendWelcomeMessage(
 			nombreAsesor: credito.asesor?.nombre ?? "",
 			expectativaMora: "",
 			...seguroPorAseguradora(row.insuranceProvider),
-			cuentaNexa: params.cuentaNexa ?? undefined,
 		};
 
 		const plantilla = PLANTILLAS_MENSAJES.find(
@@ -173,7 +173,12 @@ export async function sendWelcomeMessage(
 			return { sent: false, error: "Plantilla de bienvenida no encontrada" };
 		}
 
-		const mensaje = interpolar(plantilla.cuerpo, variables);
+		// La cuenta Nexa la agrega solo este envío automático; la plantilla
+		// compartida (envío manual) no la lleva.
+		const mensaje = agregarCuentaNexaABienvenida(
+			interpolar(plantilla.cuerpo, variables),
+			params.cuentaNexa,
+		);
 
 		// 4. Test-mode + envío con la MISMA función que usa "Enviar Directo".
 		const telefonoDestino = testMode ? getTestPhone() : (telefono as string);

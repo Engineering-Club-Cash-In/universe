@@ -20,6 +20,7 @@ import {
 	fechaLimiteImpuestoVencida,
 	formatearIncrementoMora,
 	hayIncrementoMora,
+	agregarCuentaNexaABienvenida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
@@ -124,9 +125,11 @@ describe("plantillas masivas de cobros", () => {
 		expect(bienvenida?.cuerpo).toMatch(/confirmar la recepción/i);
 	});
 
-	test("la línea de la cuenta Nexa entra en el bloque de cuentas sin cambiar los 5 bloques", () => {
+	test("la plantilla compartida no lleva Nexa: solo la bienvenida automática la agrega", () => {
 		const bienvenida = PLANTILLAS_MENSAJES.find((p) => p.id === "bienvenida");
-		const variables = {
+		// El envío manual (masivo o ficha) usa la plantilla tal cual: nada de Nexa.
+		expect(bienvenida?.cuerpo).not.toMatch(/nexa/i);
+		const interpolada = interpolar(bienvenida?.cuerpo ?? "", {
 			clienteNombre: "ana lópez",
 			fechaPago: "5",
 			cuotaMensual: "1,500.00",
@@ -137,15 +140,12 @@ describe("plantillas masivas de cobros", () => {
 			telefonoAsesor: "",
 			nombreAsesor: "Carlos",
 			expectativaMora: "",
-		};
-		const conCuenta = interpolar(bienvenida?.cuerpo ?? "", { ...variables, cuentaNexa: "32200100000002" });
-		const sinCuenta = interpolar(bienvenida?.cuerpo ?? "", variables);
+		});
+		const conCuenta = agregarCuentaNexaABienvenida(interpolada, "32200100000002");
 
 		expect(bloques(conCuenta)).toHaveLength(5);
-		expect(bloques(sinCuenta)).toHaveLength(5);
 		expect(conCuenta).toContain("* Banrural: 3394002346\nAdemás, puede pagar su cuota desde su banco con su código de pago Nexa: *32200100000002*");
-		expect(sinCuenta).not.toContain("Nexa");
-		expect(sinCuenta).not.toContain("{lineaCuentaNexa}");
+		expect(agregarCuentaNexaABienvenida(interpolada, null)).toBe(interpolada);
 	});
 
 	test("el bloque del seguro de la bienvenida se resuelve por aseguradora", () => {

@@ -455,11 +455,18 @@ function RouteComponent() {
 	const canAccessCobranzaReport = userRole
 		? PERMISSIONS.canAccessCobranzaReport(userRole)
 		: false;
+	const canAccessInvestmentRealizedReport = userRole
+		? PERMISSIONS.canAccessInvestmentRealizedReport(userRole)
+		: false;
 	const canAccessReports =
-		isAdmin || canAccessClosedCreditsReport || canAccessCobranzaReport;
+		isAdmin ||
+		canAccessClosedCreditsReport ||
+		canAccessCobranzaReport ||
+		canAccessInvestmentRealizedReport;
 	const reportTabs = getReportTabs({
 		canAccessClosedCreditsReport,
 		canAccessCobranzaReport,
+		canAccessInvestmentRealizedReport,
 		isAdmin,
 	});
 
@@ -558,7 +565,8 @@ function RouteComponent() {
 		...orpc.getReinversionLiquidaciones.queryOptions({
 			input: { mes: flujoMesNum, anio: flujoAnioNum },
 		}),
-		enabled: isAdmin && investmentView === "realizado",
+		enabled:
+			canAccessInvestmentRealizedReport && investmentView === "realizado",
 	});
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
@@ -1022,7 +1030,10 @@ function RouteComponent() {
 					<p className="text-muted-foreground">
 						{isAdmin
 							? "Vista general del negocio y métricas clave"
-							: "Reportes disponibles para el área de cobros"}
+							: canAccessInvestmentRealizedReport &&
+									!canAccessCobranzaReport
+								? "Reporte de inversión realizado"
+								: "Reportes disponibles para el área de cobros"}
 					</p>
 				</div>
 			</div>
@@ -1039,9 +1050,11 @@ function RouteComponent() {
 							{canAccessCobranzaReport && (
 								<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							)}
+							{canAccessInvestmentRealizedReport && (
+								<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
+							)}
 							{isAdmin && (
 								<>
-									<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 									<TabsTrigger value="colocacion">Colocación</TabsTrigger>
 									<TabsTrigger value="proyeccion-liquidaciones">
 										Proyección Liquidaciones
@@ -1850,12 +1863,12 @@ function RouteComponent() {
 							</Card>
 						</TabsContent>
 						)}
-						{isAdmin && (
-							<>
+						{canAccessInvestmentRealizedReport && (
 						<TabsContent value="inversiones" className="space-y-6">
 							<Card>
 								<CardHeader>
 									<div className="flex flex-col gap-4">
+										{isAdmin && (
 										<Tabs
 											value={investmentView}
 											onValueChange={(value) => {
@@ -1869,6 +1882,7 @@ function RouteComponent() {
 												<TabsTrigger value="proyeccion">Proyección</TabsTrigger>
 											</TabsList>
 										</Tabs>
+										)}
 										<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 											<div>
 												<CardTitle>Inversión y reinversión</CardTitle>
@@ -1943,7 +1957,9 @@ function RouteComponent() {
 											isError={reinversionLiquidacionesQuery.isError}
 											periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
 											onRetry={() => reinversionLiquidacionesQuery.refetch()}
-											onExportInvestors={exportAdminReportsExcel}
+											onExportInvestors={
+												canAccessCobranzaReport ? exportAdminReportsExcel : undefined
+											}
 										/>
 									) : (
 										<InvestmentProjection
@@ -1958,6 +1974,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+						)}
+						{isAdmin && (
+							<>
 						{/* Modal: Metas Mensuales */}
 						<Dialog open={metasModalOpen} onOpenChange={setMetasModalOpen}>
 							<DialogContent className="sm:max-w-[860px]">

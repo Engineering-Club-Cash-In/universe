@@ -165,9 +165,12 @@ export function crearCarteraEstadoCuentaRouter(deps: CarteraEstadoCuentaDeps) {
 /**
  * Cuántos créditos distintos comparten cada número, sumando las cuatro fuentes
  * de teléfono (las mismas de `telefonosDelCredito`): lead, caso de cobros
- * (principal y alternativo) y solicitud del titular (sin codeudores). Se cuenta por crédito —o por lead u
- * oportunidad cuando aún no hay crédito— para que el mismo cliente, que
- * aparece en varias fuentes de un mismo crédito, cuente una sola vez.
+ * (principal y alternativo) y solicitud del titular (sin codeudores). Se
+ * cuenta por crédito —o por lead, caso u oportunidad cuando no hay número de
+ * crédito— para que el mismo cliente, que aparece en varias fuentes de un
+ * mismo crédito, cuente una sola vez. Un número de crédito vacío o con solo
+ * espacios cuenta como ausente: si no, todos esos registros compartirían la
+ * clave '' y contarían como uno.
  * Los dígitos se comparan como en `celularGuatemala`: últimos 8 del primer
  * número del registro.
  */
@@ -178,14 +181,14 @@ export function consultaTelefonosCompartidos(digitos: string[]) {
 	);
 	return sql`
 		with registros as (
-			select coalesce(o.numero_sifco, 'lead:' || l.id::text) as clave, l.phone as tel
+			select coalesce(nullif(trim(o.numero_sifco), ''), 'lead:' || l.id::text) as clave, l.phone as tel
 			from leads l left join opportunities o on o.lead_id = l.id
 			union all
-			select coalesce(c.numero_credito_sifco, 'caso:' || c.id::text), c.telefono_principal from casos_cobros c
+			select coalesce(nullif(trim(c.numero_credito_sifco), ''), 'caso:' || c.id::text), c.telefono_principal from casos_cobros c
 			union all
-			select coalesce(c.numero_credito_sifco, 'caso:' || c.id::text), c.telefono_alternativo from casos_cobros c
+			select coalesce(nullif(trim(c.numero_credito_sifco), ''), 'caso:' || c.id::text), c.telefono_alternativo from casos_cobros c
 			union all
-			select coalesce(o.numero_sifco, 'lead:' || o.lead_id::text, 'opp:' || o.id::text), a.tel_movil
+			select coalesce(nullif(trim(o.numero_sifco), ''), 'lead:' || o.lead_id::text, 'opp:' || o.id::text), a.tel_movil
 			from credit_applications a join opportunities o on o.id = a.opportunity_id
 			where a.person_type = 'lead' or a.person_type is null
 		)

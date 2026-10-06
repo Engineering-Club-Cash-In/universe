@@ -77,6 +77,15 @@ describe("consultaTelefonosCompartidos", () => {
 		expect(params).toEqual(["54673367", "35219722"]);
 	});
 
+	test("un número de crédito vacío o con espacios cuenta como ausente en las tres fuentes", async () => {
+		const { PgDialect } = await import("drizzle-orm/pg-core");
+		const { consultaTelefonosCompartidos } = await import("./cartera-estado-cuenta");
+		const { sql } = new PgDialect().sqlToQuery(consultaTelefonosCompartidos(["54673367"]));
+		expect(sql.match(/coalesce\(nullif\(trim\(o\.numero_sifco\), ''\)/g)?.length).toBe(2); // lead y solicitud
+		expect(sql.match(/coalesce\(nullif\(trim\(c\.numero_credito_sifco\), ''\)/g)?.length).toBe(2); // principal y alternativo
+		expect(sql).not.toMatch(/coalesce\((o\.numero_sifco|c\.numero_credito_sifco),/);
+	});
+
 	test("la solicitud solo cuenta la del titular (sin codeudores)", async () => {
 		const { PgDialect } = await import("drizzle-orm/pg-core");
 		const { consultaTelefonosCompartidos } = await import("./cartera-estado-cuenta");

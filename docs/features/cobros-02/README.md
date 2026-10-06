@@ -44,6 +44,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 13 | [Dashboard del asesor y Mi Cartera · backend pendiente](./13-dashboard-asesor-backend.md) | Rediseño del Figma (Asesor Junior/Senior): qué quedó conectado y las tareas de backend para José (recuperación y metas por asesor, deuda vencida, orden por bucket del motor, pagos por confirmar, referencias, hora del próximo contacto) |
 | 14 | [Rediseño del asesor · Dashboard y Mi Cartera (front)](./14-rediseno-dashboard-asesor.md) | Etapa 1 del rediseño Figma Asesor Junior/Senior (PR #1861): reglas de producto, qué quedó, cómo está armado, pendientes y la etapa 2 (Workspace y Ficha 360) |
 | 15 | [Ficha 360 rediseñada · backend pendiente](./15-ficha-360-backend.md) | Etapa 2 del rediseño Figma: Ficha 360 conectada; tareas F1–F8 para José (RENAP, codeudores, historial de cambios, histórico del crédito, seguro, documentos, asistente IA, editar direcciones) |
+| 16 | [Workspace de cobros · backend pendiente](./16-workspace-backend.md) | Etapa 3 del rediseño Figma: el «Espacio de trabajo» de dos paneles conectado; tareas W1–W5 para José (dirección y participante de la gestión, rebaja de mora, escalar a Jurídico, abono en el convenio, alertas leídas con job de 30 días) |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

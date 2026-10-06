@@ -96,7 +96,7 @@ interface ReferenciasViewProps {
 type Hallazgo = DatosReferencias["hallazgos"][number];
 
 /** Etiqueta de origen; la de cobros muestra el parentesco que se capturó. */
-function etiquetaOrigen(
+export function etiquetaOrigen(
 	referencia: ReferenciaCaso,
 	origen: ReferenciaCaso["origen"],
 ): string {
@@ -122,7 +122,7 @@ function IconoHallazgo({ tipo }: { tipo: string }) {
  * Estado de la referencia como en Figma (Verificada / Pendiente / No
  * contactada) a partir del resultado de su última gestión.
  */
-function estadoReferencia(resultado: string | null | undefined): {
+export function estadoReferencia(resultado: string | null | undefined): {
 	etiqueta: string;
 	tone: CrmTone;
 	tono: TonoGestion;

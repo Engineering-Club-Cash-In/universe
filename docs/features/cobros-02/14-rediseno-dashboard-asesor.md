@@ -98,4 +98,77 @@ Esta es la etapa 1 del rediseño de las pantallas del asesor con el Figma «CRM 
 - Presentación: `apps/crm/apps/web/src/components/cobros/ficha/` (`ficha-resumen`, `ficha-modulos`, `ficha-pestanas`), con la vista de ejemplo `/design-system?only=cobros-ficha-360`.
 - Ruta: `routes/cobros/$id.tsx`. La lógica, las consultas y los modales no cambiaron.
 
-**Pendiente:** Workspace v3 (`2866:17459`) y la página del senior (`1644:79`).
+## Etapa 3 · Workspace
+
+**Estado:** rama `feat/cobros-workspace` → `COBROS-02`. El backend pendiente está en [16-workspace-backend.md](./16-workspace-backend.md), tareas W1–W5.
+
+**Qué es:** el «Espacio de trabajo», un modal de dos paneles que se abre al hacer clic en un caso del Dashboard del asesor (tabla de atención y agenda) o de Mi Cartera. Sirve para gestionar los casos uno tras otro («‹ Caso N de M ›», Alt+←/→, «Siguiente caso») sin salir de la tabla. La lista navegable es la página visible de la tabla, copiada al abrir el modal.
+
+**Figma** (cuatro versiones del mismo diseño):
+- Asesor Junior › 03 · Workspace v3 (`2866:17459`)
+- Asesor Senior (`3126:12`)
+- Asesor Especial (`3785:7976`, la más completa: 64 estados del panel de gestión)
+- Supervisor › 06 · Workspace B3 (`2338:4147`)
+
+**Reglas:**
+- **No se quitó nada del sistema:** los formularios del panel de gestión son los mismos de la Ficha 360, en modo `embebido` (mismos campos, validaciones y procedimientos). En la ficha se siguen viendo como diálogo, igual que antes.
+- **Lo del Figma que el sistema no tiene** va «conectado»: deshabilitado con «Pronto» o enviado al server, que lo ignora hasta que José lo implemente (W1–W5).
+- **No hay llamada por PBX:** el asesor registra la llamada que hizo por fuera. Puede marcar con el enlace `tel:`, pero no hay cronómetro.
+
+**Decisiones de producto (2026-10-06):**
+- **Contacto como gestión:** Llamada, Mensaje, Llamada entrante y WhatsApp entrante son el primer grupo de «Otras gestiones», con el mismo formato que las demás. En el Figma eran botones al pie.
+- **Alertas del caso:** van en un desplegable cerrado («Alertas del caso · N»), porque no están en el Figma. Quedan a la vista solo los avisos operativos (B5, convenio incumplido, recuperación, apagado).
+- **Orden de los grupos:**
+  - En B3, «Campo y rescate» va después de Contacto.
+  - En B4 o en recuperación, va «Vehículo».
+
+**Panel izquierdo («Contexto del caso»):** encabezado (nombre, crédito, vehículo, intentos sin contacto, bucket y mora) y pestañas:
+- Resumen
+- Historial actual / Histórico
+- Estado de cuenta, con «Enviar por WhatsApp»
+- Asistente IA
+- «Más»: Documentos, Referencias y Ubicaciones
+
+Abajo, «Abrir Ficha 360».
+
+**Panel derecho («Gestión»):** un flujo dentro del mismo panel.
+
+*Inicio:* tarjeta de visita programada o «En visita de campo hoy», banda de rescate (B3), última gestión y acción pendiente, y «Otras gestiones» por grupos:
+- Contacto
+- Pagos
+- Acuerdos
+- Campo y rescate
+- Vehículo
+- Documentos
+- Seguimiento
+
+*Llamada:* «¿Con quién está hablando?» y luego el resultado: se llegó a un acuerdo / no hubo acuerdo / no hubo contacto. El acuerdo abre promesa, link de pago, comprobante, convenio o entrega voluntaria. La nota es una sola para los tres resultados.
+
+*Mensaje:* WhatsApp, SMS o correo, con las plantillas del sistema, y la pantalla «Mensaje enviado».
+
+*Formularios:*
+- Comprobante de pago, links de Págalo, promesa y convenio
+- Deshacer convenio
+- Visita (programar, registrar o completar la programada)
+- Referencias, investigación en redes y apagado de la unidad
+- Recuperación del vehículo, entrega voluntaria y recepción en B4
+- Seguimiento programado y carta notarial
+
+Al terminar, «Gestión registrada» con el resumen y «Siguiente caso». En B3 o más, si no hubo acuerdo, ofrece las acciones de rescate.
+
+*Guardián:* si hay una gestión a medias, pide confirmación antes de cerrar o cambiar de caso.
+
+**Código:**
+- **Modal y conexión:** `components/cobros/workspace/` (`workspace-modal.tsx`, `use-caso-workspace.ts`, `contexto-caso.tsx`, `gestion-panel.tsx` y `gestion/*`).
+- **Reglas puras compartidas con la ficha:** `lib/cobros/reglas-caso.ts`. Salieron de `routes/cobros/$id.tsx`, que ahora las importa.
+- **Formularios embebibles:** contrato `embebido` / `onCancelar` / `onExito`. En modo diálogo conservan las clases responsivas originales.
+- **Vista de ejemplo:** `/design-system?only=cobros-workspace`.
+
+**De paso:**
+- La cuota 0 ya no cuenta como «pagada» en el resumen de cuotas, en la ficha y en el Workspace.
+- La agenda del dashboard abre por SIFCO (`getCasosCobros` devuelve `numeroCreditoSifco`).
+- Los avisos de `contacto-modal` pasaron de voseo a usted.
+
+**Pendiente:**
+- Probarlo con una asesora que tenga casos de B2 a B4 (en DEV, Caren solo tiene B0).
+- La siguiente tanda (pedida): reemplazar la tabla «Casos de Cobranza» del dashboard de supervisión por la de Mi Cartera, y quitar «Cola del día» reubicando «Configurar SLA» y «Tareas B3».

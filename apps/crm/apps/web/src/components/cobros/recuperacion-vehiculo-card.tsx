@@ -73,12 +73,30 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { formatUltimaSenal, googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { client, orpc } from "@/utils/orpc";
 
 type Registro = Awaited<
 	ReturnType<typeof client.getRecuperacionesVehiculoCaso>
 >[number];
+
+/** Un registro de `getRecuperacionesVehiculoCaso` (envío o solicitud). */
+export type RegistroRecuperacion = Registro;
+
+/**
+ * El envío vigente al que le falta confirmar la recepción de la unidad (o
+ * null). Misma regla que la tarjeta: el vigente es el envío efectivo más
+ * reciente (CB-043), y solo se confirma si no está completado. El bucket (B4)
+ * y el permiso los decide quien llama.
+ */
+export function recuperacionPorRecibir(
+	lista: readonly Registro[],
+): Registro | null {
+	const vigente =
+		lista.find((r) => esRecuperacionEfectiva(r.estadoSolicitud)) ?? null;
+	return vigente && !vigente.completada ? vigente : null;
+}
 
 const TIPO_BADGE: Record<string, string> = {
 	entrega_voluntaria:
@@ -637,13 +655,73 @@ type DatosRecepcion = Parameters<
 	typeof client.confirmarRecepcionUnidad
 >[0]["recepcion"];
 
-function ConfirmarRecepcionDialog({
+/** Lo que el Workspace muestra en «Gestión registrada» tras confirmar. */
+export type RecepcionConfirmada = {
+	recuperacionId: Registro["id"];
+	fechaRecepcion: Date;
+	lugar: string;
+	estadoVehiculo: string;
+	kilometraje: number | null;
+};
+
+export interface ConfirmarRecepcionDialogProps {
+	/** El envío vigente (ver `recuperacionPorRecibir`). */
+	registro: Registro;
+	/** Obligatorio sin `embebido`; con `embebido` no se llama. */
+	onOpenChange?: (abierto: boolean) => void;
+	/** Se llama tras confirmar con éxito (después de cerrar, sin `embebido`). */
+	onExito?: (r: RecepcionConfirmada) => void;
+	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
+	embebido?: boolean;
+	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
+	onCancelar?: () => void;
+}
+
+/**
+ * Para el Workspace: resuelve el envío vigente del caso y monta el
+ * formulario. Usa la misma query que la tarjeta (queda en caché).
+ */
+export function ConfirmarRecepcionDelCaso({
+	casoCobroId,
+	...props
+}: Omit<ConfirmarRecepcionDialogProps, "registro"> & { casoCobroId: string }) {
+	const registros = useQuery(
+		orpc.getRecuperacionesVehiculoCaso.queryOptions({ input: { casoCobroId } }),
+	);
+	if (registros.isPending) {
+		return (
+			<p className="flex items-center gap-2 text-muted-foreground text-sm">
+				<Loader2 className="h-4 w-4 animate-spin" />
+				Cargando la recuperación del vehículo…
+			</p>
+		);
+	}
+	if (registros.isError) {
+		return (
+			<p className="text-destructive text-sm">
+				{registros.error.message ||
+					"No se pudo cargar la recuperación del vehículo."}
+			</p>
+		);
+	}
+	const registro = recuperacionPorRecibir(registros.data ?? []);
+	if (!registro) {
+		return (
+			<p className="text-muted-foreground text-sm">
+				Este caso no tiene una recuperación vigente pendiente de recepción.
+			</p>
+		);
+	}
+	return <ConfirmarRecepcionDialog registro={registro} {...props} />;
+}
+
+export function ConfirmarRecepcionDialog({
 	registro,
 	onOpenChange,
-}: {
-	registro: Registro;
-	onOpenChange: (abierto: boolean) => void;
-}) {
+	onExito,
+	embebido = false,
+	onCancelar,
+}: ConfirmarRecepcionDialogProps) {
 	const queryClient = useQueryClient();
 	// Arranca con lo que se reportó al enviar: el asesor de B4 solo corrige lo
 	// que no coincide con lo que llegó.
@@ -681,121 +759,173 @@ function ConfirmarRecepcionDialog({
 				recuperacionId: registro.id,
 				recepcion,
 			}),
-		onSuccess: () => {
+		onSuccess: (_r, recepcion) => {
 			toast.success("Recepción de la unidad registrada.");
 			queryClient.invalidateQueries({
 				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
 			});
-			onOpenChange(false);
+			// Embebido no hay Dialog que cerrar: el Workspace pasa a «Gestión
+			// registrada» con onExito.
+			if (!embebido) onOpenChange?.(false);
+			onExito?.({
+				recuperacionId: registro.id,
+				fechaRecepcion: recepcion.fechaRecepcion,
+				lugar: recepcion.lugar,
+				estadoVehiculo: recepcion.estadoVehiculo,
+				kilometraje: recepcion.kilometraje ?? null,
+			});
 		},
 		onError: (e: Error) => {
 			toast.error(e.message || "No se pudo registrar la recepción");
 		},
 	});
 
+	const descripcion =
+		"Registre el estado en que llegó la unidad. El formulario muestra lo reportado al enviarla: corrija lo que no coincida.";
+
+	// Embebido, las rejillas responden al ancho del panel (`@container` en la
+	// raíz embebida); en el Dialog quedan los breakpoints de viewport.
+	const cuerpo = (
+		<>
+			<div
+				className={cn(
+					"grid gap-3",
+					embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+				)}
+			>
+				<div className="space-y-1.5">
+					<Label htmlFor="fecha-recepcion">
+						Fecha y hora <span className="text-red-600">*</span>
+					</Label>
+					<Input
+						id="fecha-recepcion"
+						type="datetime-local"
+						value={fechaRecepcion}
+						onChange={(e) => setFechaRecepcion(e.target.value)}
+					/>
+				</div>
+				<div className="space-y-1.5">
+					<Label htmlFor="lugar-recepcion">
+						Lugar de recepción <span className="text-red-600">*</span>
+					</Label>
+					<Input
+						id="lugar-recepcion"
+						value={lugar}
+						onChange={(e) => setLugar(e.target.value)}
+					/>
+				</div>
+			</div>
+			<div
+				className={cn(
+					"grid gap-3",
+					embebido ? "@md:grid-cols-[1fr_10rem]" : "sm:grid-cols-[1fr_10rem]",
+				)}
+			>
+				<Select value={estado} onValueChange={setEstado}>
+					<SelectTrigger aria-label="Estado al recibir">
+						<SelectValue placeholder="Seleccionar estado al recibir" />
+					</SelectTrigger>
+					<SelectContent>
+						{Object.entries(ESTADOS_VEHICULO).map(([clave, label]) => (
+							<SelectItem key={clave} value={clave}>
+								{label}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<Input
+					aria-label="Kilometraje"
+					inputMode="numeric"
+					value={kilometraje}
+					onChange={(e) => setKilometraje(e.target.value)}
+					placeholder="Kilometraje"
+				/>
+			</div>
+			<Textarea
+				aria-label="Detalle del estado"
+				value={estadoDetalle}
+				onChange={(e) => setEstadoDetalle(e.target.value)}
+				placeholder="Daños, faltantes u otras observaciones al recibir"
+				rows={2}
+			/>
+			<Textarea
+				aria-label="Notas"
+				value={notas}
+				onChange={(e) => setNotas(e.target.value)}
+				placeholder="Notas (opcional): persona que la recibió, lugar de resguardo…"
+				rows={2}
+			/>
+		</>
+	);
+
+	const botonConfirmar = (
+		<Button
+			disabled={confirmar.isPending}
+			className={embebido ? "flex-1" : undefined}
+			onClick={() => {
+				if (faltante) {
+					setIntentoEnviar(true);
+					toast.warning(faltante);
+					return;
+				}
+				confirmar.mutate({
+					fechaRecepcion: new Date(fechaRecepcion),
+					lugar,
+					estadoVehiculo: estado as DatosRecepcion["estadoVehiculo"],
+					estadoVehiculoDetalle: estadoDetalle,
+					kilometraje: kilometraje.trim() ? Number(kilometraje) : undefined,
+					notas,
+				});
+			}}
+		>
+			{confirmar.isPending ? (
+				<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+			) : (
+				<PackageCheck className="mr-2 h-4 w-4" />
+			)}
+			Confirmar recepción
+		</Button>
+	);
+
+	if (embebido) {
+		return (
+			<div className="@container flex min-h-0 flex-1 flex-col">
+				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+					<p className="text-muted-foreground text-sm">{descripcion}</p>
+					{cuerpo}
+				</div>
+				<div className="mt-auto flex flex-col gap-2 border-line-subtle border-t pt-3">
+					<AvisoFaltante faltante={faltante} visible={intentoEnviar} />
+					<div className="flex gap-2">
+						<Button
+							variant="outline"
+							disabled={confirmar.isPending}
+							onClick={() => onCancelar?.()}
+						>
+							Cancelar
+						</Button>
+						{botonConfirmar}
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
 			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
 				<DialogHeader>
 					<DialogTitle>Confirmar recepción de la unidad</DialogTitle>
-					<DialogDescription>
-						Registre el estado en que llegó la unidad. El formulario muestra lo
-						reportado al enviarla: corrija lo que no coincida.
-					</DialogDescription>
+					<DialogDescription>{descripcion}</DialogDescription>
 				</DialogHeader>
-				<div className="space-y-4">
-					<div className="grid gap-3 sm:grid-cols-2">
-						<div className="space-y-1.5">
-							<Label htmlFor="fecha-recepcion">
-								Fecha y hora <span className="text-red-600">*</span>
-							</Label>
-							<Input
-								id="fecha-recepcion"
-								type="datetime-local"
-								value={fechaRecepcion}
-								onChange={(e) => setFechaRecepcion(e.target.value)}
-							/>
-						</div>
-						<div className="space-y-1.5">
-							<Label htmlFor="lugar-recepcion">
-								Lugar de recepción <span className="text-red-600">*</span>
-							</Label>
-							<Input
-								id="lugar-recepcion"
-								value={lugar}
-								onChange={(e) => setLugar(e.target.value)}
-							/>
-						</div>
-					</div>
-					<div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
-						<Select value={estado} onValueChange={setEstado}>
-							<SelectTrigger aria-label="Estado al recibir">
-								<SelectValue placeholder="Seleccionar estado al recibir" />
-							</SelectTrigger>
-							<SelectContent>
-								{Object.entries(ESTADOS_VEHICULO).map(([clave, label]) => (
-									<SelectItem key={clave} value={clave}>
-										{label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						<Input
-							aria-label="Kilometraje"
-							inputMode="numeric"
-							value={kilometraje}
-							onChange={(e) => setKilometraje(e.target.value)}
-							placeholder="Kilometraje"
-						/>
-					</div>
-					<Textarea
-						aria-label="Detalle del estado"
-						value={estadoDetalle}
-						onChange={(e) => setEstadoDetalle(e.target.value)}
-						placeholder="Daños, faltantes u otras observaciones al recibir"
-						rows={2}
-					/>
-					<Textarea
-						aria-label="Notas"
-						value={notas}
-						onChange={(e) => setNotas(e.target.value)}
-						placeholder="Notas (opcional): persona que la recibió, lugar de resguardo…"
-						rows={2}
-					/>
-				</div>
+				<div className="space-y-4">{cuerpo}</div>
 				<DialogFooter className="items-center gap-2 sm:justify-between">
 					<AvisoFaltante faltante={faltante} visible={intentoEnviar} />
 					<div className="flex gap-2">
-						<Button variant="outline" onClick={() => onOpenChange(false)}>
+						<Button variant="outline" onClick={() => onOpenChange?.(false)}>
 							Cancelar
 						</Button>
-						<Button
-							disabled={confirmar.isPending}
-							onClick={() => {
-								if (faltante) {
-									setIntentoEnviar(true);
-									toast.warning(faltante);
-									return;
-								}
-								confirmar.mutate({
-									fechaRecepcion: new Date(fechaRecepcion),
-									lugar,
-									estadoVehiculo: estado as DatosRecepcion["estadoVehiculo"],
-									estadoVehiculoDetalle: estadoDetalle,
-									kilometraje: kilometraje.trim()
-										? Number(kilometraje)
-										: undefined,
-									notas,
-								});
-							}}
-						>
-							{confirmar.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-							) : (
-								<PackageCheck className="mr-2 h-4 w-4" />
-							)}
-							Confirmar recepción
-						</Button>
+						{botonConfirmar}
 					</div>
 				</DialogFooter>
 			</DialogContent>

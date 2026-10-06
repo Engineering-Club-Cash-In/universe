@@ -648,6 +648,31 @@ export const createContactoCobrosSchema = z
 			.string()
 			.regex(/^\d+(\.\d{1,2})?$/, "Formato de monto inválido")
 			.optional(),
+		// TODO(José) · tarea W1: persistir dirección, participante, teléfono
+		// contactado y hora/medio del próximo contacto (hoy se aceptan y se
+		// ignoran). Ver docs/features/cobros-02/16-workspace-backend.md
+		// Los manda el Workspace de cobros (ContactoModal embebido). No son
+		// columnas de contactos_cobros: el handler los separa antes del insert.
+		// `.catch(undefined)`: un stub inválido se descarta en vez de rechazar
+		// la gestión entera (p. ej. cuando el WhatsApp ya salió).
+		direccion: z.enum(["saliente", "entrante"]).optional().catch(undefined),
+		participante: z
+			.object({
+				tipo: z.enum(["titular", "codeudor", "referencia"]),
+				nombre: z.string().max(200),
+			})
+			.optional()
+			.catch(undefined),
+		telefonoContactado: z.string().max(40).optional().catch(undefined),
+		horaProximoContacto: z
+			.string()
+			.regex(/^\d{2}:\d{2}$/)
+			.optional()
+			.catch(undefined),
+		medioProximoContacto: z
+			.enum(["llamada", "whatsapp"])
+			.optional()
+			.catch(undefined),
 	})
 	// CB-020: promesa_pago exige rango de cuotas y/o mora — una
 	// promesa vacía de ambos no verifica nada real. El web (PR
@@ -2126,6 +2151,8 @@ export const cobrosRouter = {
 				.select({
 					id: casosCobros.id,
 					contratoId: casosCobros.contratoId,
+					// La Ficha 360 y el Workspace abren el caso por SIFCO.
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 					estadoMora: casosCobros.estadoMora,
 					montoEnMora: casosCobros.montoEnMora,
 					diasMoraMaximo: casosCobros.diasMoraMaximo,
@@ -2214,7 +2241,20 @@ export const cobrosRouter = {
 		.input(createContactoCobrosSchema)
 		.handler(async ({ input, context }) => {
 			// promesaContactoId y visitaId no son columnas: se separan del payload.
-			const { promesaContactoId, visitaId, ...datos } = input;
+			// Los stubs W1 del Workspace (dirección, participante, teléfono
+			// contactado, hora/medio del próximo contacto) tampoco: se separan para
+			// que el spread de `datos` no los lleve al insert/update.
+			// TODO(José) · tarea W1: persistirlos.
+			const {
+				promesaContactoId,
+				visitaId,
+				direccion: _direccion,
+				participante: _participante,
+				telefonoContactado: _telefonoContactado,
+				horaProximoContacto: _horaProximoContacto,
+				medioProximoContacto: _medioProximoContacto,
+				...datos
+			} = input;
 			const esPromesa = datos.estadoContacto === "promesa_pago";
 			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
 

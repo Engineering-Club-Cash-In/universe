@@ -128,6 +128,11 @@ export type MiCarteraVistaProps = {
 	/** Botón de WhatsApp masivo (MassWhatsappModal); se oculta sin resultados. */
 	accionMasiva?: React.ReactNode;
 	onVistaRapida: (creditoId: string) => void;
+	/**
+	 * Clic en una fila: abre el Workspace en esa posición de `filas` (la página
+	 * visible, en su orden). Sin él, la fila navega a la Ficha 360.
+	 */
+	onAbrir?: (indice: number) => void;
 };
 
 export const TAMANOS_PAGINA = [25, 50, 75, 100, 200];
@@ -659,12 +664,13 @@ function TablaMiCartera({
 						))
 					: props.error
 						? null
-						: props.filas.map((fila) => (
+						: props.filas.map((fila, i) => (
 								<FilaCreditoAsesor
 									key={fila.contratoId}
 									fila={fila}
 									extras={celdasExtra(fila, props.etapas)}
 									onVistaRapida={props.onVistaRapida}
+									onAbrir={props.onAbrir ? () => props.onAbrir?.(i) : undefined}
 								/>
 							))}
 			</TablaCartera>

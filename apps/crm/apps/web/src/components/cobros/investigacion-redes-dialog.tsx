@@ -67,13 +67,34 @@ type Archivo = {
 	error?: string;
 };
 
+/** Lo que el Workspace necesita para «Gestión registrada». */
+export type ResumenInvestigacionRedes = {
+	investigacionId: string;
+	fuente: FuenteInvestigacion;
+	/** Nombre legible de la fuente (o el que escribió el asesor si es «otra»). */
+	fuenteEtiqueta: string;
+	resultado: ResultadoInvestigacion;
+	fechaInvestigacion: Date;
+	cantidadEvidencias: number;
+};
+
 interface InvestigacionRedesDialogProps {
-	open: boolean;
-	onOpenChange: (abierto: boolean) => void;
+	/** Obligatorio sin `embebido`; con `embebido` se ignora (siempre abierto). */
+	open?: boolean;
+	/** Obligatorio sin `embebido`. */
+	onOpenChange?: (abierto: boolean) => void;
 	casoCobroId: string;
+	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
+	embebido?: boolean;
+	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
+	onCancelar?: () => void;
+	/** Investigación guardada. Con `embebido` reemplaza al cierre del diálogo. */
+	onExito?: (resumen: ResumenInvestigacionRedes) => void;
 }
 
 export function InvestigacionRedesDialog(props: InvestigacionRedesDialogProps) {
+	// Embebido: el Workspace lo monta (y remonta con `key`) sin Dialog.
+	if (props.embebido) return <Formulario {...props} />;
 	// El formulario se remonta en cada apertura: arranca limpio sin tener que
 	// resetear campo por campo.
 	return (
@@ -86,6 +107,9 @@ export function InvestigacionRedesDialog(props: InvestigacionRedesDialogProps) {
 function Formulario({
 	onOpenChange,
 	casoCobroId,
+	embebido = false,
+	onCancelar,
+	onExito,
 }: InvestigacionRedesDialogProps) {
 	const queryClient = useQueryClient();
 	const [fuente, setFuente] = useState<FuenteInvestigacion | "">("");
@@ -240,12 +264,23 @@ function Formulario({
 			client.registrarInvestigacionRedes(
 				registrarInvestigacionSchema.parse(payload),
 			),
-		onSuccess: () => {
+		onSuccess: (resultadoServidor) => {
 			toast.success("Investigación registrada.");
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestigacionesRedesCaso.key(),
 			});
-			onOpenChange(false);
+			onExito?.({
+				investigacionId: resultadoServidor.investigacionId,
+				fuente: payload.fuente,
+				fuenteEtiqueta:
+					payload.fuente === "otra" && payload.fuenteOtra?.trim()
+						? payload.fuenteOtra.trim()
+						: FUENTES_INVESTIGACION[payload.fuente],
+				resultado: payload.resultado,
+				fechaInvestigacion: payload.fechaInvestigacion,
+				cantidadEvidencias: payload.evidencias?.length ?? 0,
+			});
+			if (!embebido) onOpenChange?.(false);
 		},
 		onError: (e: Error) =>
 			toast.error(e.message || "No se pudo registrar la investigación"),
@@ -258,6 +293,261 @@ function Formulario({
 		if (faltante || registrar.isPending) return;
 		registrar.mutate();
 	};
+
+	const aviso = (intentoEnviar || subiendo) && faltante && (
+		<p className="text-destructive text-sm">{faltante}</p>
+	);
+	const botonGuardar = (
+		<Button
+			type="button"
+			className={embebido ? "flex-1" : undefined}
+			onClick={enviar}
+			disabled={registrar.isPending || subiendo}
+		>
+			{registrar.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+			Guardar investigación
+		</Button>
+	);
+	// Mismos campos en el Dialog y embebido en el Workspace.
+	const campos = (
+		<>
+			<p className="rounded-md bg-amber-50 p-3 text-amber-900 text-sm dark:bg-amber-950/40 dark:text-amber-200">
+				Solo información pública. No use cuentas falsas, no pida contraseñas ni
+				contacte al cliente por esta vía. El registro queda con su nombre y la
+				fecha, y no se puede editar ni borrar.
+			</p>
+
+			<section
+				className={cn(
+					"grid gap-3",
+					embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+				)}
+			>
+				<div className="space-y-1.5">
+					<Label htmlFor="inv-fuente">Fuente consultada</Label>
+					<Select
+						value={fuente}
+						onValueChange={(v) => {
+							setFuente(v as FuenteInvestigacion);
+							if (v !== "otra") setFuenteOtra("");
+						}}
+					>
+						<SelectTrigger id="inv-fuente">
+							<SelectValue placeholder="Seleccionar fuente" />
+						</SelectTrigger>
+						<SelectContent>
+							{CLAVES_FUENTE_INVESTIGACION.map((clave) => (
+								<SelectItem key={clave} value={clave}>
+									{FUENTES_INVESTIGACION[clave]}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+				{fuente === "otra" && (
+					<div className="space-y-1.5">
+						<Label htmlFor="inv-fuente-otra">Nombre de la fuente</Label>
+						<Input
+							id="inv-fuente-otra"
+							value={fuenteOtra}
+							maxLength={100}
+							onChange={(e) => setFuenteOtra(e.target.value)}
+							placeholder="Ej.: Threads"
+						/>
+					</div>
+				)}
+				<div
+					className={cn(
+						"space-y-1.5",
+						fuente === "otra"
+							? embebido
+								? "@md:col-span-2"
+								: "sm:col-span-2"
+							: "",
+					)}
+				>
+					<Label htmlFor="inv-enlace">Enlace del perfil (opcional)</Label>
+					<Input
+						id="inv-enlace"
+						value={enlacePerfil}
+						maxLength={500}
+						onChange={(e) => setEnlacePerfil(e.target.value)}
+						placeholder="https://"
+						inputMode="url"
+					/>
+				</div>
+			</section>
+
+			<section className="space-y-2">
+				<Label>Resultado de la investigación</Label>
+				<div className="grid grid-cols-2 gap-2">
+					{CLAVES_RESULTADO_INVESTIGACION.map((clave) => (
+						<button
+							key={clave}
+							type="button"
+							onClick={() => setResultado(clave)}
+							className={cn(
+								"h-11 rounded-md border px-3 font-medium text-sm transition-colors",
+								resultado === clave
+									? "border-primary bg-primary/10"
+									: "text-muted-foreground hover:bg-muted",
+							)}
+						>
+							{RESULTADOS_INVESTIGACION[clave]}
+						</button>
+					))}
+				</div>
+			</section>
+
+			<section className="space-y-1.5">
+				<Label htmlFor="inv-hallazgos">
+					{resultado === "sin_hallazgos"
+						? "Búsqueda realizada"
+						: "Hallazgos relevantes"}
+				</Label>
+				<Textarea
+					id="inv-hallazgos"
+					value={hallazgos}
+					maxLength={4000}
+					rows={5}
+					onChange={(e) => setHallazgos(e.target.value)}
+					placeholder={
+						resultado === "sin_hallazgos"
+							? "Ej.: búsqueda por nombre y por teléfono, sin perfiles públicos."
+							: "Ej.: perfil público con fotos del vehículo y del lugar de trabajo."
+					}
+				/>
+			</section>
+
+			<section className="space-y-1.5">
+				<Label htmlFor="inv-fecha">Fecha y hora de la investigación</Label>
+				<FechaHoraPicker
+					id="inv-fecha"
+					value={fecha}
+					onChange={setFecha}
+					deshabilitar={(dia) => dia > new Date()}
+				/>
+			</section>
+
+			<section className="space-y-2">
+				<Label>Evidencia (opcional)</Label>
+				<p className="text-muted-foreground text-xs">
+					Capturas de pantalla (JPG, PNG, WebP) o un PDF. Hasta{" "}
+					{MAX_EVIDENCIAS_INVESTIGACION} archivos.
+				</p>
+				<Button
+					type="button"
+					variant="outline"
+					className="h-11"
+					disabled={archivos.length >= MAX_EVIDENCIAS_INVESTIGACION}
+					onClick={() => inputArchivos.current?.click()}
+				>
+					<Upload className="mr-2 h-4 w-4" />
+					Agregar archivos
+				</Button>
+				<input
+					ref={inputArchivos}
+					type="file"
+					accept="image/jpeg,image/png,image/webp,application/pdf"
+					multiple
+					className="hidden"
+					onChange={(e) => {
+						agregar(e.target.files);
+						e.target.value = "";
+					}}
+				/>
+				{archivos.length > 0 && (
+					<div
+						className={cn(
+							"grid grid-cols-3 gap-2",
+							embebido ? "@md:grid-cols-5" : "sm:grid-cols-5",
+						)}
+					>
+						{archivos.map((a) => (
+							<div
+								key={a.id}
+								className="relative aspect-square overflow-hidden rounded-md border bg-muted"
+							>
+								{a.preview ? (
+									<img
+										src={a.preview}
+										alt={a.nombre}
+										className={cn(
+											"h-full w-full object-cover",
+											a.estado !== "lista" && "opacity-50",
+										)}
+									/>
+								) : (
+									<div
+										className={cn(
+											"flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center",
+											a.estado !== "lista" && "opacity-50",
+										)}
+									>
+										<FileText className="h-6 w-6" />
+										<span className="line-clamp-2 break-all text-[11px]">
+											{a.nombre}
+										</span>
+									</div>
+								)}
+								{a.estado === "subiendo" && (
+									<Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin" />
+								)}
+								{a.estado === "error" && (
+									<button
+										type="button"
+										title={a.error}
+										className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-destructive/90 px-1 py-1 text-[11px] text-white"
+										onClick={() => void subir(a.id)}
+									>
+										<RotateCw className="h-3 w-3" />
+										Error al subir · Reintentar
+									</button>
+								)}
+								<button
+									type="button"
+									aria-label={`Quitar ${a.nombre}`}
+									className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow"
+									onClick={() => quitar(a.id)}
+								>
+									<X className="h-3.5 w-3.5" />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+			</section>
+		</>
+	);
+
+	if (embebido) {
+		// Workspace: sin Dialog; el título lo pinta el Workspace.
+		return (
+			<div className="@container flex min-h-0 flex-1 flex-col">
+				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+					<p className="text-muted-foreground text-sm">
+						Información encontrada sobre el cliente, con las capturas que la
+						respaldan.
+					</p>
+					{campos}
+				</div>
+				<div className="mt-auto space-y-2 border-line-subtle border-t pt-3">
+					{aviso}
+					<div className="flex gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							onClick={onCancelar}
+							disabled={registrar.isPending}
+						>
+							Cancelar
+						</Button>
+						{botonGuardar}
+					</div>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<DialogContent className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-0 p-0">
@@ -272,223 +562,21 @@ function Formulario({
 			</DialogHeader>
 
 			<div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6">
-				<p className="rounded-md bg-amber-50 p-3 text-amber-900 text-sm dark:bg-amber-950/40 dark:text-amber-200">
-					Solo información pública. No use cuentas falsas, no pida contraseñas
-					ni contacte al cliente por esta vía. El registro queda con su nombre y
-					la fecha, y no se puede editar ni borrar.
-				</p>
-
-				<section className="grid gap-3 sm:grid-cols-2">
-					<div className="space-y-1.5">
-						<Label htmlFor="inv-fuente">Fuente consultada</Label>
-						<Select
-							value={fuente}
-							onValueChange={(v) => {
-								setFuente(v as FuenteInvestigacion);
-								if (v !== "otra") setFuenteOtra("");
-							}}
-						>
-							<SelectTrigger id="inv-fuente">
-								<SelectValue placeholder="Seleccionar fuente" />
-							</SelectTrigger>
-							<SelectContent>
-								{CLAVES_FUENTE_INVESTIGACION.map((clave) => (
-									<SelectItem key={clave} value={clave}>
-										{FUENTES_INVESTIGACION[clave]}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-					{fuente === "otra" && (
-						<div className="space-y-1.5">
-							<Label htmlFor="inv-fuente-otra">Nombre de la fuente</Label>
-							<Input
-								id="inv-fuente-otra"
-								value={fuenteOtra}
-								maxLength={100}
-								onChange={(e) => setFuenteOtra(e.target.value)}
-								placeholder="Ej.: Threads"
-							/>
-						</div>
-					)}
-					<div
-						className={cn(
-							"space-y-1.5",
-							fuente === "otra" ? "sm:col-span-2" : "",
-						)}
-					>
-						<Label htmlFor="inv-enlace">Enlace del perfil (opcional)</Label>
-						<Input
-							id="inv-enlace"
-							value={enlacePerfil}
-							maxLength={500}
-							onChange={(e) => setEnlacePerfil(e.target.value)}
-							placeholder="https://"
-							inputMode="url"
-						/>
-					</div>
-				</section>
-
-				<section className="space-y-2">
-					<Label>Resultado de la investigación</Label>
-					<div className="grid grid-cols-2 gap-2">
-						{CLAVES_RESULTADO_INVESTIGACION.map((clave) => (
-							<button
-								key={clave}
-								type="button"
-								onClick={() => setResultado(clave)}
-								className={cn(
-									"h-11 rounded-md border px-3 font-medium text-sm transition-colors",
-									resultado === clave
-										? "border-primary bg-primary/10"
-										: "text-muted-foreground hover:bg-muted",
-								)}
-							>
-								{RESULTADOS_INVESTIGACION[clave]}
-							</button>
-						))}
-					</div>
-				</section>
-
-				<section className="space-y-1.5">
-					<Label htmlFor="inv-hallazgos">
-						{resultado === "sin_hallazgos"
-							? "Búsqueda realizada"
-							: "Hallazgos relevantes"}
-					</Label>
-					<Textarea
-						id="inv-hallazgos"
-						value={hallazgos}
-						maxLength={4000}
-						rows={5}
-						onChange={(e) => setHallazgos(e.target.value)}
-						placeholder={
-							resultado === "sin_hallazgos"
-								? "Ej.: búsqueda por nombre y por teléfono, sin perfiles públicos."
-								: "Ej.: perfil público con fotos del vehículo y del lugar de trabajo."
-						}
-					/>
-				</section>
-
-				<section className="space-y-1.5">
-					<Label htmlFor="inv-fecha">Fecha y hora de la investigación</Label>
-					<FechaHoraPicker
-						id="inv-fecha"
-						value={fecha}
-						onChange={setFecha}
-						deshabilitar={(dia) => dia > new Date()}
-					/>
-				</section>
-
-				<section className="space-y-2">
-					<Label>Evidencia (opcional)</Label>
-					<p className="text-muted-foreground text-xs">
-						Capturas de pantalla (JPG, PNG, WebP) o un PDF. Hasta{" "}
-						{MAX_EVIDENCIAS_INVESTIGACION} archivos.
-					</p>
-					<Button
-						type="button"
-						variant="outline"
-						className="h-11"
-						disabled={archivos.length >= MAX_EVIDENCIAS_INVESTIGACION}
-						onClick={() => inputArchivos.current?.click()}
-					>
-						<Upload className="mr-2 h-4 w-4" />
-						Agregar archivos
-					</Button>
-					<input
-						ref={inputArchivos}
-						type="file"
-						accept="image/jpeg,image/png,image/webp,application/pdf"
-						multiple
-						className="hidden"
-						onChange={(e) => {
-							agregar(e.target.files);
-							e.target.value = "";
-						}}
-					/>
-					{archivos.length > 0 && (
-						<div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-							{archivos.map((a) => (
-								<div
-									key={a.id}
-									className="relative aspect-square overflow-hidden rounded-md border bg-muted"
-								>
-									{a.preview ? (
-										<img
-											src={a.preview}
-											alt={a.nombre}
-											className={cn(
-												"h-full w-full object-cover",
-												a.estado !== "lista" && "opacity-50",
-											)}
-										/>
-									) : (
-										<div
-											className={cn(
-												"flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center",
-												a.estado !== "lista" && "opacity-50",
-											)}
-										>
-											<FileText className="h-6 w-6" />
-											<span className="line-clamp-2 break-all text-[11px]">
-												{a.nombre}
-											</span>
-										</div>
-									)}
-									{a.estado === "subiendo" && (
-										<Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin" />
-									)}
-									{a.estado === "error" && (
-										<button
-											type="button"
-											title={a.error}
-											className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-destructive/90 px-1 py-1 text-[11px] text-white"
-											onClick={() => void subir(a.id)}
-										>
-											<RotateCw className="h-3 w-3" />
-											Error al subir · Reintentar
-										</button>
-									)}
-									<button
-										type="button"
-										aria-label={`Quitar ${a.nombre}`}
-										className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow"
-										onClick={() => quitar(a.id)}
-									>
-										<X className="h-3.5 w-3.5" />
-									</button>
-								</div>
-							))}
-						</div>
-					)}
-				</section>
+				{campos}
 			</div>
 
 			<DialogFooter className="flex-col gap-2 border-t px-4 py-3 sm:flex-col sm:px-6">
-				{(intentoEnviar || subiendo) && faltante && (
-					<p className="text-destructive text-sm">{faltante}</p>
-				)}
+				{aviso}
 				<div className="flex justify-end gap-2">
 					<Button
 						type="button"
 						variant="outline"
-						onClick={() => onOpenChange(false)}
+						onClick={() => onOpenChange?.(false)}
 						disabled={registrar.isPending}
 					>
 						Cancelar
 					</Button>
-					<Button
-						type="button"
-						onClick={enviar}
-						disabled={registrar.isPending || subiendo}
-					>
-						{registrar.isPending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-						)}
-						Guardar investigación
-					</Button>
+					{botonGuardar}
 				</div>
 			</DialogFooter>
 		</DialogContent>

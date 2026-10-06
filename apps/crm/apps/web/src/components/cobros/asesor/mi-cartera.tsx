@@ -1,9 +1,17 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { MessageCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
+import {
+	useWorkspaceCasos,
+	WorkspaceModal,
+} from "@/components/cobros/workspace/workspace-modal";
 import type { Bucket } from "@/components/ds/badges";
 import { ToolbarButton } from "@/components/ui/toolbar-button";
 import {
@@ -21,6 +29,7 @@ import {
 } from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
+import { destinoFicha } from "./fila-cartera";
 import {
 	BUCKETS_CARTERA,
 	bucketDeEstadoMora,
@@ -164,6 +173,17 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		ORDEN_INICIAL,
 	);
 	const [panel, setPanel] = useState<string | null>(null);
+
+	// Workspace: al cerrarlo se refresca la página de la cartera (y la cola del
+	// resumen) para que la tabla refleje las gestiones nuevas.
+	const queryClient = useQueryClient();
+	const refrescarCartera = useCallback(() => {
+		void queryClient.invalidateQueries({
+			queryKey: orpc.getTodosLosCreditos.key(),
+		});
+		void queryClient.invalidateQueries({ queryKey: orpc.getColaDia.key() });
+	}, [queryClient]);
+	const workspace = useWorkspaceCasos({ alCerrar: refrescarCartera });
 
 	const irAPrimera = useMemo(() => () => setPage(1), [setPage]);
 	// Debounce de 1 s (como antes). La página vuelve a 1 solo si el texto cambió.
@@ -420,12 +440,23 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				onOrden={setOrden}
 				accionMasiva={accionMasiva}
 				onVistaRapida={setPanel}
+				// El Workspace navega la página visible, en el orden de la tabla.
+				onAbrir={(i) =>
+					workspace.abrir(
+						filas.map((f) => ({
+							...destinoFicha(f),
+							nombre: f.clienteNombre ?? undefined,
+						})),
+						i,
+					)
+				}
 			/>
 			<PanelGestionRapida
 				creditoId={panel}
 				open={!!panel}
 				onClose={() => setPanel(null)}
 			/>
+			<WorkspaceModal {...workspace.modal} />
 		</>
 	);
 }

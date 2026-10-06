@@ -740,25 +740,11 @@ export function getReconciliationPresentation(
 export function getUnclassifiedReconciliationNote(
 	model: ReturnType<typeof buildReinvestmentReportModel>,
 ) {
-	const rows = model.rows.filter(
-		(row) => row.compositionStatus === "unavailable",
-	);
-	const reinvested = sumCents(
-		rows.map((row) => row.destinationComposition.reinvested.unclassified),
-	);
-	const paid = sumCents(
-		rows.map((row) => row.destinationComposition.paid.unclassified),
-	);
-	return {
-		total: (reinvested + paid) / 100,
-		reinvested: reinvested / 100,
-		paid: paid / 100,
-		reasons: rows.map((row) =>
-			row.type === "sin_clasificar"
-				? "liquidaciones sin modalidad histórica guardada"
-				: `modalidad ${row.label}`,
-		),
-	};
+	return model.rows
+		.filter((row) => row.compositionStatus === "unavailable")
+		.map((row) =>
+			row.type === "sin_clasificar" ? "Sin modalidad histórica" : row.label,
+		);
 }
 
 export function canRenderSecondaryDetails(state: ReportState) {

@@ -346,12 +346,7 @@ test("composición legacy explícita queda sin clasificar", () => {
 	expect(getReconciliationPresentation("ready", false, model)).toBe(
 		"unavailable",
 	);
-	expect(getUnclassifiedReconciliationNote(model)).toEqual({
-		total: 111.2,
-		reinvested: 0,
-		paid: 111.2,
-		reasons: ["modalidad Tradicional"],
-	});
+	expect(getUnclassifiedReconciliationNote(model)).toEqual(["Tradicional"]);
 });
 
 test("distingue una conciliación exacta de una descuadrada", () => {

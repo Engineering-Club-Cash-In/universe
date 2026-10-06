@@ -197,12 +197,7 @@ export function ReinvestmentReport({
 								{currency(model.totals.distributed)} flujo liquidado
 							</span>
 						</div>
-						<p>
-							Incluye {currency(unclassifiedNote.total)} sin desglose
-							capital/resto ({currency(unclassifiedNote.reinvested)}{" "}
-							reinvertidos y {currency(unclassifiedNote.paid)} pagados) por{" "}
-							{unclassifiedNote.reasons.join(", ")}.
-						</p>
+						<p>Incluye: {unclassifiedNote.join(", ")}.</p>
 					</div>
 				) : (
 					<output className="mt-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm">

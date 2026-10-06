@@ -86,7 +86,9 @@ export { STATUS_EXCLUIDOS_MORA };
  *    toma el candado (no hace falta un SELECT … FOR UPDATE aparte);
  *  - si el UPDATE de `creditos` no puede ir primero porque depende de leer la
  *    mora (condonación, /mora/update), se toma el candado con un
- *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción;
+ *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción
+ *    (`FOR NO KEY UPDATE` en `updateMora`, que corre adentro del pago Nexa:
+ *    ver el comentario ahí);
  *  - un UPDATE condicional de `creditos` que no matchea filas no deja candado,
  *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
  *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
@@ -1313,7 +1315,7 @@ export async function updateMora({
    * corre adentro de ella.
    *
    * 🔒 El orden de candados NO cambia por venir de afuera: este cuerpo sigue
-   * tomando `creditos` (SELECT … FOR UPDATE) antes que `moras_credito`. El
+   * tomando `creditos` (SELECT … FOR NO KEY UPDATE) antes que `moras_credito`. El
    * caller que ya tenga `creditos` candado no paga nada por re-pedirlo; el
    * que traiga `moras_credito` candado ANTES de llamar acá rompería la regla,
    * y por eso no hay ninguno.
@@ -1375,18 +1377,31 @@ export async function updateMora({
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). Acá el UPDATE de `creditos` no puede
       // ir primero —el estado a escribir depende del monto que resulte de la
-      // mora—, así que el candado se toma con este `SELECT … FOR UPDATE`, que
-      // además es la lectura de `statusCredit` que esta transacción ya
+      // mora—, así que el candado se toma con este `SELECT … FOR NO KEY UPDATE`,
+      // que además es la lectura de `statusCredit` que esta transacción ya
       // necesitaba más abajo: no agrega un viaje a la base, solo lo adelanta.
       // Con el orden viejo (mora FOR UPDATE y después el UPDATE del crédito)
       // esta ruta y la del convenio se pedían los candados en cruz: ciclo de
       // deadlock y 40P01 sin manejar.
+      //
+      // `NO KEY UPDATE` y no `UPDATE`: es el mismo candado que toma el UPDATE
+      // de `statusCredit` de más abajo, así que sigue serializando contra el
+      // convenio, el cron, la condonación y cualquier otro escritor del
+      // crédito (todos piden NO KEY UPDATE o más). Lo único que deja de
+      // excluir es `FOR KEY SHARE` —"no me borres la fila ni le cambies la
+      // llave"—, que esta ruta no hace. Y eso es justo lo que sostiene el pago
+      // Nexa: `withPaymentBindingLock` toma `FOR KEY SHARE` sobre este crédito
+      // en la conexión del advisory lock y llama acá por el pool global. Con
+      // `FOR UPDATE` esta lectura esperaba a esa transacción, que esperaba a
+      // que el trabajo terminara: un pago Nexa con mora activa se colgaba para
+      // siempre (Postgres no lo ve como deadlock: el ciclo pasa por la app).
+      // Ver `nexaPagoConMora.integration.test.ts`.
       const [creditoActual] = await tx
         .select({ statusCredit: creditos.statusCredit })
         .from(creditos)
         .where(eq(creditos.credito_id, targetCreditoId))
         .limit(1)
-        .for("update");
+        .for("no key update");
 
       const shouldReactivateMora = tipo === "INCREMENTO" && activa === true;
       const moraWhere = shouldReactivateMora
@@ -1445,7 +1460,7 @@ export async function updateMora({
       // crédito NO está en STATUS_EXCLUIDOS_MORA.
       const newStatus = (newMonto.gt(0) && newActiva) ? "MOROSO" : "ACTIVO";
 
-      // `creditoActual` se leyó al abrir la transacción, con FOR UPDATE: la
+      // `creditoActual` se leyó al abrir la transacción, con FOR NO KEY UPDATE: la
       // fila está candada desde entonces, así que este estado no puede haber
       // cambiado bajo nuestros pies.
       const estadoProtegido = STATUS_EXCLUIDOS_MORA.includes(

@@ -12,6 +12,7 @@ import {
 	getPublicPartialDetailMessage,
 	getReconciliationPresentation,
 	getReportState,
+	getUnclassifiedReconciliationNote,
 	REGISTERED_ZERO_ACTIVITY_COPY,
 } from "./reinvestment-report";
 import { buildAdminReportsWorkbook } from "./report-workbook";
@@ -340,8 +341,17 @@ test("composición legacy explícita queda sin clasificar", () => {
 	expect(model.rows[0]?.compositionStatus).toBe("unavailable");
 	expect(model.reconciliations.composition).toBe("unavailable");
 	expect(getReconciliationPresentation("ready", model.reconciled, model)).toBe(
+		"unclassified",
+	);
+	expect(getReconciliationPresentation("ready", false, model)).toBe(
 		"unavailable",
 	);
+	expect(getUnclassifiedReconciliationNote(model)).toEqual({
+		total: 111.2,
+		reinvested: 0,
+		paid: 111.2,
+		reasons: ["modalidad Tradicional"],
+	});
 });
 
 test("distingue una conciliación exacta de una descuadrada", () => {

@@ -25,7 +25,7 @@ import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhat
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
-import { revalidatePayment } from "../controllers/revalidatePayment";
+import { revalidatePayment, revalidatePaymentSchema } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
 import {
   esNexaPaymentNotReversibleError,
@@ -58,7 +58,22 @@ export const paymentRouter = new Elysia()
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
   .post("/revertPaymentToPending", revertPaymentToPending)
-  .post("/revalidatePayment", revalidatePayment)
+  .post("/revalidatePayment", async (context) => {
+    const respuesta = await revalidatePayment(
+      context as unknown as Parameters<typeof revalidatePayment>[0],
+    );
+    // Una revalidación exitosa (200, ya con su transacción cerrada) también
+    // deja el pago aplicado: mismo recibo por WhatsApp que /aplicar-pago,
+    // fire-and-forget y apagado con RECIBO_PAGO_WHATSAPP_ENABLED.
+    const body = revalidatePaymentSchema.safeParse(context.body);
+    if (context.set.status === 200 && body.success && respuesta && "data" in respuesta) {
+      void enviarRecibosPagoDeCreditoBestEffort({
+        creditoId: body.data.credito_id,
+        pagoIds: [body.data.pago_id],
+      });
+    }
+    return respuesta;
+  })
   .post("/processInvestors", processInvestors)
 
   // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)

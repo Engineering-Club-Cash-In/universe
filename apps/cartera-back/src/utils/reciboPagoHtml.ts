@@ -16,13 +16,19 @@ export type EstadoReciboPago = "aplicado" | "en_validacion" | "anulado" | "regis
 /**
  * `paymentFalse` = pago anulado (la reversa conserva la fila). `validated` y
  * `capital_validated` = aplicado. `pending`/`capital` = falta que conta lo
- * valide. `reset` = devuelto a revisión. `no_required` = fila sembrada que no
- * pasa por validación.
+ * valide. `reset` = devuelto a revisión. `no_required` = no pasa por
+ * validación: es aplicado si cubrió su cuota con dinero (pago automático o
+ * importado) y "registrado" si es una fila sembrada vacía.
  */
-export function estadoReciboPago(validationStatus: string | null | undefined, paymentFalse: boolean | null | undefined): EstadoReciboPago {
+export function estadoReciboPago(
+  validationStatus: string | null | undefined,
+  paymentFalse: boolean | null | undefined,
+  cobertura: { cuotaPagada?: boolean | null; montoAplicado?: number } = {},
+): EstadoReciboPago {
   if (paymentFalse) return "anulado";
   if (validationStatus === "validated" || validationStatus === "capital_validated") return "aplicado";
   if (validationStatus === "pending" || validationStatus === "capital" || validationStatus === "reset") return "en_validacion";
+  if (validationStatus === "no_required" && cobertura.cuotaPagada && (cobertura.montoAplicado ?? 0) > 0) return "aplicado";
   return "registrado";
 }
 

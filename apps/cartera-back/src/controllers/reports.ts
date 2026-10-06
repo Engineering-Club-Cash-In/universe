@@ -1706,6 +1706,7 @@ export async function generateReciboPagoPDF(pagoId: number) {
       p.numeroautorizacion,
       p.validation_status,
       p."paymentFalse" AS payment_false,
+      cq.pagado AS cuota_pagada,
       TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
       p.origen_pago,
       c.numero_credito_sifco,
@@ -1734,14 +1735,25 @@ export async function generateReciboPagoPDF(pagoId: number) {
   // Por número de cuota y no por fila: un calendario regenerado puede tener
   // dos filas del mismo número y quedar una en pagado=false aunque la cuota
   // ya se pagó; si cualquier fila de ese número está pagada, la cuota lo está.
+  // La fecha sale de la copia VIGENTE de esa cuota (la de mayor cuota_id, la
+  // misma que toma el registro de pagos tras una regeneración), no de la más
+  // vieja.
   const proximaResult = await db.execute(sql`
-    SELECT cq.numero_cuota, TO_CHAR(MIN(cq.fecha_vencimiento), 'YYYY-MM-DD') AS fecha_vencimiento
+    WITH proxima AS (
+      SELECT cq.numero_cuota
+      FROM cartera.cuotas_credito cq
+      WHERE cq.credito_id = ${pago.credito_id}
+        AND cq.numero_cuota > 0
+      GROUP BY cq.numero_cuota
+      HAVING NOT bool_or(COALESCE(cq.pagado, false))
+      ORDER BY cq.numero_cuota
+      LIMIT 1
+    )
+    SELECT cq.numero_cuota, TO_CHAR(cq.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento
     FROM cartera.cuotas_credito cq
+    JOIN proxima ON proxima.numero_cuota = cq.numero_cuota
     WHERE cq.credito_id = ${pago.credito_id}
-      AND cq.numero_cuota > 0
-    GROUP BY cq.numero_cuota
-    HAVING NOT bool_or(COALESCE(cq.pagado, false))
-    ORDER BY cq.numero_cuota
+    ORDER BY cq.cuota_id DESC
     LIMIT 1
   `);
   const proxima = proximaResult.rows[0] as any | undefined;
@@ -1749,7 +1761,10 @@ export async function generateReciboPagoPDF(pagoId: number) {
   // 2️⃣ Generar HTML del recibo
   const html = htmlReciboPago({
     pagoId: Number(pago.pago_id),
-    estado: estadoReciboPago(pago.validation_status, pago.payment_false),
+    estado: estadoReciboPago(pago.validation_status, pago.payment_false, {
+      cuotaPagada: pago.cuota_pagada,
+      montoAplicado: Number(pago.monto_aplicado || 0),
+    }),
     montoBoleta: Number(pago.monto_boleta || 0),
     montoAplicado: Number(pago.monto_aplicado || 0),
     mora: Number(pago.mora || 0),

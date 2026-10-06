@@ -68,6 +68,10 @@ describe("estado del pago en el recibo", () => {
     expect(estadoReciboPago("pending", false)).toBe("en_validacion");
     expect(estadoReciboPago("validated", true)).toBe("anulado");
     expect(estadoReciboPago("no_required", false)).toBe("registrado");
+    // Pago automático o importado: no pasa por validación pero cubrió la cuota.
+    expect(estadoReciboPago("no_required", false, { cuotaPagada: true, montoAplicado: 600 })).toBe("aplicado");
+    expect(estadoReciboPago("no_required", false, { cuotaPagada: true, montoAplicado: 0 })).toBe("registrado");
+    expect(estadoReciboPago("no_required", false, { cuotaPagada: false, montoAplicado: 600 })).toBe("registrado");
   });
 
   test("un pago pendiente o anulado no se presenta como aplicado", () => {

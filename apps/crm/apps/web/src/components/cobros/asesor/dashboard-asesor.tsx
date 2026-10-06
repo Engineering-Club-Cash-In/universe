@@ -144,10 +144,15 @@ export function calcularDistribucion(
 	stats: EstatusStat[],
 ): BucketDistribucion[] {
 	const porEstado = new Map(stats.map((s) => [s.estadoMora, s]));
-	const visibles = BUCKETS.filter(
-		(b, i) =>
-			buckets.includes(i) ||
-			(porEstado.get(ESTADO_POR_BUCKET[b])?.totalCases ?? 0) > 0,
+	// Solo los buckets del pool del asesor (junior B0–B1, senior B2–B4): un
+	// senior no debe ver "B0". Ojo: /stats agrupa por CUOTAS atrasadas, no por
+	// el bucket del motor, así que un crédito de su pool sin cuotas atrasadas
+	// cae en "al_dia" y no aparece acá (se alinea con la tarea B5 de backend).
+	// Sin pool conocido (perfil no cargó), se muestran los que tienen créditos.
+	const visibles = BUCKETS.filter((b, i) =>
+		buckets.length > 0
+			? buckets.includes(i)
+			: (porEstado.get(ESTADO_POR_BUCKET[b])?.totalCases ?? 0) > 0,
 	);
 	const filas = visibles.map((bucket) => {
 		const s = porEstado.get(ESTADO_POR_BUCKET[bucket]);

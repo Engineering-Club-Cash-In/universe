@@ -15,6 +15,7 @@ import { cobrosAsesorRouter } from "./cobros-asesor";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { documentIntegrityProcedures } from "./document-integrity";
+import { fichaCobrosRouter } from "./ficha-cobros";
 import { historialAgendasRouter } from "./historial-agendas";
 import { insuranceRouter } from "./insurance";
 import { investorContractsRouter } from "./investor-contracts";
@@ -174,6 +175,9 @@ export const cobrosAppRouter = {
 	getMiDesempeno: cobrosAsesorRouter.getMiDesempeno,
 	getMiAgendaContadoresPendientes:
 		cobrosAsesorRouter.getMiAgendaContadoresPendientes,
+	// Rediseño COBROS-02: Ficha 360
+	getSeguimientoFicha: fichaCobrosRouter.getSeguimientoFicha,
+	getFichaComplementos: fichaCobrosRouter.getFichaComplementos,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,

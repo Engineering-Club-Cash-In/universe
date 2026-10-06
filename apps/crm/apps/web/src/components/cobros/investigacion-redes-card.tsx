@@ -14,7 +14,6 @@ import {
 	ExternalLink,
 	FileText,
 	Link2,
-	Loader2,
 	Search,
 } from "lucide-react";
 import { useState } from "react";
@@ -23,10 +22,13 @@ import {
 	etiquetaResultadoInvestigacion,
 	textoBucketsInvestigacion,
 } from "server/src/lib/investigaciones-redes-cobros";
+import {
+	HistorialGestiones,
+	SeccionHistorial,
+} from "@/components/cobros/ficha/ficha-pestanas";
 import { InvestigacionRedesDialog } from "@/components/cobros/investigacion-redes-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -256,25 +258,10 @@ function Hallazgos({ texto }: { texto: string }) {
 	);
 }
 
-function FilaInvestigacion({ i }: { i: Investigacion }) {
-	const conHallazgos = i.resultado === "con_hallazgos";
+/** Lo que se encontró, plegado bajo la fila de la línea de tiempo. */
+function DetalleInvestigacion({ i }: { i: Investigacion }) {
 	return (
-		<li className="space-y-2 rounded-md border p-3">
-			<div className="flex flex-wrap items-center gap-2">
-				<span className="font-semibold text-sm">
-					{etiquetaFuenteInvestigacion(i.fuente, i.fuenteOtra)}
-				</span>
-				<Badge
-					variant="secondary"
-					className={cn(
-						conHallazgos
-							? "bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
-							: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-					)}
-				>
-					{etiquetaResultadoInvestigacion(i.resultado)}
-				</Badge>
-			</div>
+		<div className="space-y-2">
 			<Hallazgos texto={i.hallazgos} />
 			{i.enlacePerfil && (
 				<a
@@ -289,12 +276,7 @@ function FilaInvestigacion({ i }: { i: Investigacion }) {
 				</a>
 			)}
 			<Capturas evidencias={i.evidencias} />
-			<p className="text-muted-foreground text-xs">
-				{i.registradaPor ?? "Usuario desconocido"}
-				{i.bucketSnapshot !== null ? ` · B${i.bucketSnapshot}` : ""} ·{" "}
-				{fechaHora(i.fechaInvestigacion)}
-			</p>
-		</li>
+		</div>
 	);
 }
 
@@ -313,81 +295,92 @@ export function InvestigacionRedesCard({
 		}),
 	);
 	const datos = consulta.data;
+	const investigaciones = datos?.investigaciones ?? [];
 
 	return (
-		<Card>
-			<CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-				<CardTitle className="flex items-center gap-2 text-base">
-					<Search className="h-4 w-4" />
-					Investigación en redes sociales
-				</CardTitle>
-				<Button
-					size="sm"
-					onClick={() => setDialogoAbierto(true)}
-					disabled={!datos?.permiteRegistrar}
-				>
-					Registrar investigación
-				</Button>
-			</CardHeader>
-			<CardContent className="space-y-3">
-				{datos && !datos.permiteRegistrar && datos.motivoBloqueo && (
-					<p className="text-muted-foreground text-xs">{datos.motivoBloqueo}</p>
-				)}
-				{datos?.permiteRegistrar && (
-					<p className="text-muted-foreground text-xs">
-						Disponible en {textoBucketsInvestigacion()}. Solo información
-						pública del cliente.
-					</p>
-				)}
-
-				{consulta.isLoading ? (
-					<div className="flex justify-center py-3">
-						<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-					</div>
-				) : consulta.isError ? (
-					<p className="text-destructive text-sm">
-						No se pudo cargar el historial de investigaciones.
-					</p>
-				) : datos && datos.investigaciones.length > 0 ? (
-					<>
-						<ul className="space-y-2">
-							{datos.investigaciones.map((i) => (
-								<FilaInvestigacion i={i} key={i.id} />
-							))}
-						</ul>
-						{datos.hayMas && limite < MAX_INVESTIGACIONES && (
-							<Button
-								disabled={consulta.isPlaceholderData}
-								onClick={() =>
-									setLimite((l) =>
-										Math.min(l + POR_PAGINA, MAX_INVESTIGACIONES),
-									)
-								}
-								size="sm"
-								variant="outline"
+		<>
+			<SeccionHistorial
+				titulo="Investigación en redes sociales"
+				conteo={consulta.isLoading ? "…" : investigaciones.length}
+				icono={<Search />}
+				descripcion={
+					datos && !datos.permiteRegistrar && datos.motivoBloqueo
+						? datos.motivoBloqueo
+						: datos?.permiteRegistrar
+							? `Disponible en ${textoBucketsInvestigacion()}. Solo información pública del cliente.`
+							: undefined
+				}
+				derecha={
+					<Button
+						size="sm"
+						variant="secondary"
+						onClick={() => setDialogoAbierto(true)}
+						disabled={!datos?.permiteRegistrar}
+					>
+						<Search className="h-4 w-4" />
+						Registrar investigación
+					</Button>
+				}
+				estado={
+					consulta.isLoading
+						? "cargando"
+						: consulta.isError
+							? "error"
+							: investigaciones.length === 0
+								? "vacio"
+								: "ok"
+				}
+				onReintentar={() => consulta.refetch()}
+				vacio="Todavía no se registró ninguna investigación en este caso."
+			>
+				<HistorialGestiones
+					items={investigaciones.map((i) => ({
+						id: i.id,
+						cuando: fechaHora(i.fechaInvestigacion),
+						titulo: etiquetaFuenteInvestigacion(i.fuente, i.fuenteOtra),
+						badge: (
+							<Badge
+								variant="secondary"
+								className={cn(
+									i.resultado === "con_hallazgos"
+										? "bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
+										: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+								)}
 							>
-								Ver más investigaciones
-							</Button>
-						)}
-						{limite >= MAX_INVESTIGACIONES && datos.hayMas && (
-							<p className="text-muted-foreground text-xs">
-								Mostrando las {MAX_INVESTIGACIONES} investigaciones más
-								recientes.
-							</p>
-						)}
-					</>
-				) : (
-					<p className="text-muted-foreground text-sm italic">
-						Todavía no se registró ninguna investigación en este caso.
+								{etiquetaResultadoInvestigacion(i.resultado)}
+							</Badge>
+						),
+						subtitulo: `${i.registradaPor ?? "Usuario desconocido"}${i.bucketSnapshot !== null ? ` · B${i.bucketSnapshot}` : ""}`,
+						tono: i.resultado === "con_hallazgos" ? "logrado" : "neutro",
+						detalleEtiqueta:
+							i.hallazgos.split("\n")[0].slice(0, 140) || "Ver hallazgos",
+						detalleNodo: <DetalleInvestigacion i={i} />,
+					}))}
+				/>
+				{datos?.hayMas && limite < MAX_INVESTIGACIONES && (
+					<Button
+						disabled={consulta.isPlaceholderData}
+						onClick={() =>
+							setLimite((l) => Math.min(l + POR_PAGINA, MAX_INVESTIGACIONES))
+						}
+						size="sm"
+						variant="secondary"
+					>
+						Ver más investigaciones
+					</Button>
+				)}
+				{limite >= MAX_INVESTIGACIONES && datos?.hayMas && (
+					<p className="text-muted-foreground text-xs">
+						Mostrando las {MAX_INVESTIGACIONES} investigaciones más recientes.
 					</p>
 				)}
-			</CardContent>
+			</SeccionHistorial>
 
 			<InvestigacionRedesDialog
 				open={dialogoAbierto}
 				onOpenChange={setDialogoAbierto}
 				casoCobroId={casoCobroId}
 			/>
-		</Card>
+		</>
 	);
 }

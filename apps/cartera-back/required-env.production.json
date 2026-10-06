@@ -20,6 +20,7 @@
 		{ "key": "CUBE_USER", "runtime": true },
 		{ "key": "EMAIL_ASSETS_BASE_URL", "runtime": true },
 		{ "key": "EMAIL_DOMAIN", "runtime": true },
+		{ "key": "ESTADO_CUENTA_ENLACE_BASE_URL", "runtime": true },
 		{ "key": "JWT_REFRESH_SECRET", "runtime": true },
 		{ "key": "JWT_SECRET", "runtime": true },
 

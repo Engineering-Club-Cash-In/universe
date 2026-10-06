@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { fechaLarga, htmlReciboPago, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
+import { estadoReciboPago, fechaLarga, htmlReciboPago, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
 
 const base: DatosReciboPago = {
   pagoId: 151515,
+  estado: "aplicado",
   montoBoleta: 600,
   montoAplicado: 600,
   mora: 0,
@@ -57,5 +58,25 @@ describe("helpers", () => {
   test("medioDePago", () => {
     expect(medioDePago("boleta")).toBe("Depósito");
     expect(medioDePago(null)).toBe("—");
+  });
+});
+
+describe("estado del pago en el recibo", () => {
+  test("solo un pago validado dice aplicado y lleva el monto aplicado", () => {
+    expect(estadoReciboPago("validated", false)).toBe("aplicado");
+    expect(estadoReciboPago("capital_validated", false)).toBe("aplicado");
+    expect(estadoReciboPago("pending", false)).toBe("en_validacion");
+    expect(estadoReciboPago("validated", true)).toBe("anulado");
+    expect(estadoReciboPago("no_required", false)).toBe("registrado");
+  });
+
+  test("un pago pendiente o anulado no se presenta como aplicado", () => {
+    const pendiente = htmlReciboPago({ ...base, estado: "en_validacion" });
+    expect(pendiente).toContain("Pago en validación");
+    expect(pendiente).not.toContain("Pago aplicado");
+    expect(pendiente).not.toContain("Monto aplicado");
+    const anulado = htmlReciboPago({ ...base, estado: "anulado" });
+    expect(anulado).toContain("Pago anulado");
+    expect(anulado).not.toContain("Monto aplicado");
   });
 });

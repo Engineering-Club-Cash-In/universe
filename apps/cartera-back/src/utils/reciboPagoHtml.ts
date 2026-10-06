@@ -10,8 +10,32 @@
 
 import { LOGO_CASHIN_AZUL, LOGO_CASHIN_BLANCO } from "./logosCashin";
 
+/** En qué quedó el pago: el recibo no puede decir "aplicado" si no lo está. */
+export type EstadoReciboPago = "aplicado" | "en_validacion" | "anulado" | "registrado";
+
+/**
+ * `paymentFalse` = pago anulado (la reversa conserva la fila). `validated` y
+ * `capital_validated` = aplicado. `pending`/`capital` = falta que conta lo
+ * valide. `reset` = devuelto a revisión. `no_required` = fila sembrada que no
+ * pasa por validación.
+ */
+export function estadoReciboPago(validationStatus: string | null | undefined, paymentFalse: boolean | null | undefined): EstadoReciboPago {
+  if (paymentFalse) return "anulado";
+  if (validationStatus === "validated" || validationStatus === "capital_validated") return "aplicado";
+  if (validationStatus === "pending" || validationStatus === "capital" || validationStatus === "reset") return "en_validacion";
+  return "registrado";
+}
+
+const BADGES: Record<EstadoReciboPago, { texto: string; color: string }> = {
+  aplicado: { texto: "✓ Pago aplicado", color: "#22b55f" },
+  en_validacion: { texto: "Pago en validación", color: "#d97706" },
+  anulado: { texto: "Pago anulado", color: "#dc2626" },
+  registrado: { texto: "Pago registrado", color: "#6b6b80" },
+};
+
 export type DatosReciboPago = {
   pagoId: number;
+  estado: EstadoReciboPago;
   montoBoleta: number;
   montoAplicado: number;
   mora: number;
@@ -80,6 +104,9 @@ export function htmlReciboPago(d: DatosReciboPago): string {
   if (d.mora > 0) cargos.push(`<div class="fila"><span>Mora</span><span>Q${montoQ(d.mora)}</span></div>`);
   if (d.otros > 0) cargos.push(`<div class="fila"><span>Otros cargos</span><span>Q${montoQ(d.otros)}</span></div>`);
 
+  const badge = BADGES[d.estado];
+  const aplicado = d.estado === "aplicado";
+
   const proximo = d.proximoPago
     ? `<div class="label-sm">Su próximo pago</div>
        <div class="proximo-fecha">${fechaLarga(d.proximoPago.fecha)}</div>
@@ -107,7 +134,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
   .pill small { font-size: 8px; letter-spacing: 0.6px; text-transform: uppercase; opacity: 0.85; margin-right: 6px; }
   .franja { height: 4px; background: #b6e94b; }
   .cuerpo { padding: 24px 32px 28px; }
-  .badge { display: inline-block; background: #22b55f; color: #fff; font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+  .badge { display: inline-block; color: #fff; font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
   .label-sm { font-size: 9px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #6b6b80; }
   .monto { font-family: 'Poppins', 'Inter', sans-serif; font-size: 34px; font-weight: 700; margin-top: 4px; }
   .monto small { font-size: 16px; margin-right: 4px; }
@@ -144,7 +171,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
     </div>
     <div class="franja"></div>
     <div class="cuerpo">
-      <span class="badge">✓ Pago aplicado</span>
+      <span class="badge" style="background: ${badge.color};">${badge.texto}</span>
       <div class="label-sm" style="margin-top: 10px; text-transform: none; letter-spacing: 0; font-weight: 500;">Monto pagado</div>
       <div class="monto"><small>Q</small>${montoQ(d.montoBoleta)}</div>
       <div class="meta">${fechaLarga(d.fechaPago)} · ${e(medio)}</div>
@@ -158,10 +185,12 @@ export function htmlReciboPago(d: DatosReciboPago): string {
 
       ${cargos.length > 0 ? `<div class="cargos"><div class="label-sm" style="margin-bottom: 4px;">El pago incluye</div>${cargos.join("")}</div>` : ""}
 
-      <div class="aplicado">
+      ${aplicado
+        ? `<div class="aplicado">
         <span class="label-sm">Monto aplicado</span>
         <span class="valor"><small>Q</small>${montoQ(d.montoAplicado)}</span>
-      </div>
+      </div>`
+        : ""}
 
       <div class="estado">
         <div class="label-sm">Estado del crédito</div>

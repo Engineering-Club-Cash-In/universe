@@ -38,6 +38,7 @@ import {
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { iniciarSchedulerVerificacionSat } from "./jobs/sat-verificacion-scheduler";
+import { recuperarBienvenidasPendientes } from "./jobs/bienvenida-pendiente";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -1325,6 +1326,20 @@ setTimeout(() => {
 	procesarSeguimientosRecurrentes().catch(console.error);
 	iniciarSchedulerVerificacionSat();
 }, 10_000);
+
+// Bienvenidas al cliente que se perdieron (el CRM se reinició mientras el
+// disparo del cierre al 90% esperaba a cartera o WhatsApp) - cada 30 minutos.
+// Con BIENVENIDA_WHATSAPP_ENABLED apagado no hace nada. Ver
+// jobs/bienvenida-pendiente.ts.
+setInterval(
+	() => {
+		recuperarBienvenidasPendientes().catch(console.error);
+	},
+	30 * 60 * 1000,
+);
+setTimeout(() => {
+	recuperarBienvenidasPendientes().catch(console.error);
+}, 60_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
 function scheduleAtMidnightGT() {

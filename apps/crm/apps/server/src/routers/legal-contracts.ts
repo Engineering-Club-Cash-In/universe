@@ -72,6 +72,7 @@ import {
 	vincularEnLaFila,
 } from "../lib/vincular-documento-weetrust";
 import { closeOpportunity } from "../services/close-opportunity";
+import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { enviarMensajesDeCreditoNuevo } from "../services/bienvenida-credito";
 import {
 	borrarDocumentoDeWeeTrust,
@@ -1576,7 +1577,7 @@ export const legalContractsRouter = {
 						fromStageId: opportunity.stageId,
 						toStageId: targetStage.id,
 						changedBy: context.userId,
-						reason: "Contratos firmados confirmados - Avanza a formalización",
+						reason: MOTIVO_CONTRATOS_FIRMADOS,
 					});
 				});
 

@@ -785,6 +785,10 @@
       error: text("error"),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
       updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      // Bandeja de salida del recibo por WhatsApp (migración 0046).
+      recibo_status: varchar("recibo_status", { length: 20 }),
+      recibo_intentos: integer("recibo_intentos").notNull().default(0),
+      recibo_actualizado_at: timestamp("recibo_actualizado_at", { withTimezone: true }),
     },
     (table) => ({
       uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(

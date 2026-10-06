@@ -21,6 +21,7 @@ import { authMiddleware } from "./midleware";
 import { CREDIT_WITHOUT_INVESTOR_MIRROR_CODE } from "../utils/espejoInversionistasGuard";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
+import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhatsapp";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
@@ -625,6 +626,17 @@ export const paymentRouter = new Elysia()
       const resultado = await aplicarPagoAlCredito(pagoId);
 
       set.status = getApplyPaymentHttpStatus(resultado);
+
+      // Fire-and-forget: recibo de pago por WhatsApp (CB-113) sin bloquear la
+      // respuesta de validar-pago. El helper nunca lanza (lookup, PDF y envío
+      // quedan solo en el log) y no hace nada con RECIBO_PAGO_WHATSAPP_ENABLED
+      // apagado — mismo helper que usa el pago de Nexa.
+      if ((resultado as { success?: boolean }).success && pagoExiste.credito_id) {
+        void enviarRecibosPagoDeCreditoBestEffort({
+          creditoId: pagoExiste.credito_id,
+          pagoIds: [pagoId],
+        });
+      }
       return resultado;
 
     } catch (error) {

@@ -197,6 +197,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
   let registered = 0;
   let applied = 0;
   let completed = 0;
+  const avisos: { eventId: number; completedAntes: number }[] = [];
   const result = await processPayment(
     paymentBody("qa-payment-1"),
     { nonce: "nonce-1", payloadHash: "a".repeat(64), now: new Date() },
@@ -214,6 +215,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
       registerPayment: async () => { registered += 1; return { success: true }; },
       applyPayment: async () => { applied += 1; return { success: true }; },
       complete: async () => { completed += 1; },
+      onPaymentApplied: (eventId: number) => { avisos.push({ eventId, completedAntes: completed }); },
       fail: async () => undefined,
       ...successfulBilling,
     },
@@ -221,6 +223,8 @@ test("registra y aplica una vez por el flujo canónico", async () => {
 
   expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
+  // El aviso del recibo sale una vez y solo después de dejar el pago aplicado.
+  expect(avisos).toEqual([{ eventId: 7, completedAntes: 1 }]);
 });
 
 test("no consume claim cuando el crédito no existe", async () => {

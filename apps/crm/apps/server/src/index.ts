@@ -60,6 +60,7 @@ import { investmentsRouter } from "./routers/investments";
 import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
 import externalContractsRouter from "./routes/external-contracts";
 import weetrustStatusRouter from "./routes/weetrust-status";
+import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 
 const app = new Hono();
 
@@ -969,6 +970,63 @@ app.post("/api/accounting/upload-boleta", async (c) => {
 		return c.json({ error: err.message || "Error al subir archivo" }, 500);
 	}
 });
+
+// Endpoint para que cartera-back mande el recibo de un pago por WhatsApp
+// (CB-113), cuando el pago queda aplicado. Servidor-a-servidor: autenticado
+// con API key, no con sesión de usuario.
+app.post(
+	"/api/notifications/recibo-pago-whatsapp",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		try {
+			const body = await c.req.json<{
+				pagoId?: number;
+				numeroSifco?: string;
+				reciboUrl?: string;
+				clienteNombre?: string;
+				numeroCuota?: number | null;
+				asesorNombre?: string | null;
+				asesorTelefono?: string | null;
+			}>();
+
+			if (!body.pagoId || !body.numeroSifco || !body.reciboUrl) {
+				return c.json(
+					{
+						success: false,
+						error:
+							"Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
+					},
+					400,
+				);
+			}
+
+			const { sendReciboPagoWhatsapp } = await import(
+				"./services/send-recibo-pago-whatsapp"
+			);
+
+			const resultado = await sendReciboPagoWhatsapp({
+				pagoId: body.pagoId,
+				numeroSifco: body.numeroSifco,
+				reciboUrl: body.reciboUrl,
+				clienteNombre: body.clienteNombre ?? "",
+				numeroCuota: body.numeroCuota ?? null,
+				asesorNombre: body.asesorNombre ?? null,
+				asesorTelefono: body.asesorTelefono ?? null,
+			});
+
+			return c.json(
+				{ success: resultado.sent, ...resultado },
+				resultado.sent ? 200 : 502,
+			);
+		} catch (err: any) {
+			console.error("[ReciboPagoWhatsapp] Error:", err);
+			return c.json(
+				{ success: false, error: err.message || "Error al enviar el recibo" },
+				500,
+			);
+		}
+	},
+);
 
 // Endpoint para que cartera-back cree notificaciones de pago de inversionistas
 app.post("/api/notifications/pay-investors", async (c) => {

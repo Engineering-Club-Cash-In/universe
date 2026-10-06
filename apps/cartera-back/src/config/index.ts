@@ -8,6 +8,9 @@ export default {
     nexaCuentaAutomaticaEnabled: process.env.NEXA_CUENTA_AUTOMATICA_ENABLED === "true",
     nexaServerUrl: (process.env.NEXA_SERVER_URL ?? "").replace(/\/+$/, ""),
     nexaAdminApiKey: process.env.NEXA_ADMIN_API_KEY ?? "",
+    // Recibo de pago por WhatsApp (vía CRM) cuando un pago queda aplicado:
+    // conta lo valida o entra por Nexa. Apagado por defecto.
+    reciboPagoWhatsappEnabled: process.env.RECIBO_PAGO_WHATSAPP_ENABLED === "true",
     
     postgres: {
         host: process.env.POSTGRES_HOST || 'localhost', // Hostname or IP address of the PostgreSQL server

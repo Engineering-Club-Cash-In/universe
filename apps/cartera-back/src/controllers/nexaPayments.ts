@@ -222,6 +222,11 @@ export type NexaPaymentDependencies = {
     paymentLock: PaymentAdvisoryLock,
   ) => Promise<{ success?: boolean }>;
   complete: (eventId: number, paymentId: number) => Promise<void>;
+  /**
+   * Avisa que el dinero del evento ya quedó aplicado (después de `complete`).
+   * No se espera ni puede romper el pago: lo usa el recibo por WhatsApp.
+   */
+  onPaymentApplied?: (eventId: number) => void;
   fail: (eventId: number, code: string) => Promise<void>;
   billPayments?: (eventId: number, paymentIds: number[]) => Promise<NexaBillingOutcome>;
   completeBilling?: (eventId: number, paymentId: number) => Promise<void>;
@@ -521,6 +526,11 @@ const procesarPagoNexa = async (
         // La simulación pudo equivocarse: con el pago ya aplicado se revisa de
         // verdad. Un fallo acá no puede marcar como fallido un pago que entró.
         await dependencies.verificarCondonacionATiempo?.(body.creditoId, eventId).catch(() => undefined);
+      }
+      try {
+        dependencies.onPaymentApplied?.(eventId);
+      } catch {
+        // El aviso es best-effort: el pago ya está aplicado.
       }
     } catch (error) {
       const code = error instanceof NexaPaymentError ? error.code : "processing_failed";

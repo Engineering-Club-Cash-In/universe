@@ -39,6 +39,7 @@ import {
   withPaymentBindingLock,
 } from "../utils/paymentAdvisoryLock";
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
+import { intentarReciboNexa } from "./nexaReciboPago";
 import {
   canAutomaticallyInvoiceNexa,
   CondonacionConservadaError,
@@ -590,8 +591,20 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         pago_id: paymentId,
         error: null,
         updated_at: new Date(),
+        // Recibo por WhatsApp: queda en la bandeja de salida solo con el envío
+        // prendido; un reintento no pisa el estado que ya tenga.
+        ...(config.reciboPagoWhatsappEnabled
+          ? {
+              recibo_status: sql`COALESCE(${nexa_payment_events.recibo_status}, 'PENDIENTE')`,
+              recibo_actualizado_at: sql`COALESCE(${nexa_payment_events.recibo_actualizado_at}, now())`,
+            }
+          : {}),
       })
       .where(eq(nexa_payment_events.id, eventId));
+  },
+  onPaymentApplied: (eventId) => {
+    if (!config.reciboPagoWhatsappEnabled) return;
+    void intentarReciboNexa(eventId);
   },
   fail: async (eventId, code) => {
     await db

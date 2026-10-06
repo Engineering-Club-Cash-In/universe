@@ -6,6 +6,14 @@ import {
 } from "../controllers/nexaCuentaCliente";
 import { authMiddleware } from "./midleware";
 
+// `authMiddleware` solo valida la firma del JWT, no el rol: sin esto un token
+// de inversionista del portal podría crear o leer el token de pago de
+// cualquier crédito. El CRM entra con su cuenta de servicio (ADMIN).
+const ROLES_CUENTA_NEXA = ["ADMIN", "CONTA"];
+const NO_AUTORIZADO = { error: "No autorizado (requiere ADMIN o CONTA)." };
+const rolPermitido = (user: unknown) =>
+  ROLES_CUENTA_NEXA.includes(String((user as { role?: unknown } | undefined)?.role ?? ""));
+
 /**
  * Cuenta Nexa del cliente (token de pago por crédito). La usa el CRM al cerrar
  * el crédito al 90% para incluirla en la bienvenida.
@@ -24,7 +32,11 @@ export const nexaCuentaRouter = new Elysia()
    */
   .post(
     "/creditos/cuenta-nexa",
-    async ({ body, set }) => {
+    async ({ body, set, user }) => {
+      if (!rolPermitido(user)) {
+        set.status = 403;
+        return NO_AUTORIZADO;
+      }
       const resultado = await solicitarCuentaNexa(
         { numeroSifco: body.numero_credito_sifco, dpi: body.dpi ?? null },
         cuentaNexaDeps,
@@ -48,7 +60,11 @@ export const nexaCuentaRouter = new Elysia()
    */
   .post(
     "/creditos/cuenta-nexa/notificada",
-    async ({ body, set }) => {
+    async ({ body, set, user }) => {
+      if (!rolPermitido(user)) {
+        set.status = 403;
+        return NO_AUTORIZADO;
+      }
       const marcada = await marcarCuentaNexaNotificada(body.numero_credito_sifco);
       if (!marcada) set.status = 404;
       return { marcada };

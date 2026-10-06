@@ -831,8 +831,14 @@ async function consultarBuro({
 	coDebtorId: string | null;
 	userId?: string | null;
 }): Promise<ReusoBuro> {
+	// Los cofirmantes no pasan por RENAP: no se les puede exigir `renapinfo`
+	const opcionesInfornet = { exigirRenap: coDebtorId === null };
+
 	const consultaBuro = await enFilaPorDpi(dpi, async () => {
-		let resultado = await infornetController.obtenerEstudioPorDPI(dpi);
+		let resultado = await infornetController.obtenerEstudioPorDPI(
+			dpi,
+			opcionesInfornet,
+		);
 		let sinRegistro = false;
 		let expiraSinRegistro: Date | null = null;
 
@@ -851,7 +857,10 @@ async function consultarBuro({
 				intento++
 			) {
 				await esperar(ESPERA_ENTRE_REINTENTOS_MS);
-				resultado = await infornetController.obtenerEstudioPorDPI(dpi);
+				resultado = await infornetController.obtenerEstudioPorDPI(
+					dpi,
+					opcionesInfornet,
+				);
 			}
 		}
 
@@ -898,7 +907,10 @@ async function consultarBuro({
 	}
 
 	// `analizarRiesgo` repite la consulta pero pega en el caché recién escrito
-	const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
+	const analisisRiesgo = await infornetController.analizarRiesgo(
+		dpi,
+		opcionesInfornet,
+	);
 	const veredicto = evaluarBuro(analisisRiesgo);
 
 	if (veredicto.sinVeredicto) {

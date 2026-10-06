@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { rolCambio, rolDelToken } from "../lib/rolSesion";
 
 const BACK_URL = import.meta.env.VITE_BACK_URL;
 
@@ -49,6 +50,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         })
         .then((data) => {
           if (data.success) {
+            // Le cambiaron el rol: se vuelve a iniciar sesión con el vigente.
+            if (rolCambio(JSON.parse(savedUser)?.role, data.data?.role)) {
+              logout();
+              return;
+            }
             const newToken = data.accessToken || savedAccess;
             setAccessToken(newToken);
             setUser(JSON.parse(savedUser));
@@ -71,6 +77,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const data = await res.json();
 
             if (data.success) {
+              if (rolCambio(JSON.parse(savedUser)?.role, rolDelToken(data.accessToken))) {
+                logout();
+                return;
+              }
               setAccessToken(data.accessToken);
               setRefreshToken(data.refreshToken);
               setUser(JSON.parse(savedUser));
@@ -138,6 +148,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const data = await res.json();
 
       if (data.success) {
+        // El token rotado trae el rol vigente: si cambió, se vuelve a iniciar sesión.
+        const rolGuardado = user?.role ?? JSON.parse(localStorage.getItem("user") ?? "null")?.role;
+        if (rolCambio(rolGuardado, rolDelToken(data.accessToken))) {
+          logout();
+          return;
+        }
         setAccessToken(data.accessToken);
         setRefreshToken(data.refreshToken);
         localStorage.setItem("accessToken", data.accessToken);

@@ -8,13 +8,24 @@ import {
   insertAdvisor,
   updateAdvisor,
 } from "../controllers/advisor";
-import { authMiddleware } from "./midleware";
+import { authMiddleware, rechazoSiNoEsAdminActivo } from "./midleware";
 
 export const advisorRouter = new Elysia()
   .use(authMiddleware)
 
-  .post("/advisor", insertAdvisor)
-  .post("/updateAdvisor", updateAdvisor)
+  // Crear asesores (con su login) y editarlos —clave incluida— es de ADMIN:
+  // sólo con `authMiddleware` cualquier token vivo (un ASESOR, un CONTA) podía
+  // cambiarle la contraseña a otro asesor y entrar como él.
+  .post("/advisor", async (ctx: any) => {
+    const rechazo = await rechazoSiNoEsAdminActivo(ctx.user, ctx.set);
+    if (rechazo) return rechazo;
+    return insertAdvisor(ctx);
+  })
+  .post("/updateAdvisor", async (ctx: any) => {
+    const rechazo = await rechazoSiNoEsAdminActivo(ctx.user, ctx.set);
+    if (rechazo) return rechazo;
+    return updateAdvisor(ctx);
+  })
   .get("/advisor", getAdvisors)
   .get("/creditos-crm", getCreditosCRM)
   .post("/updateCreditAdvisor", updateCreditAdvisor, {

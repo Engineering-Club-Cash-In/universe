@@ -2,6 +2,9 @@
 
 La Ficha 360 (`/cobros/$id`) se rediseñó con el Figma «CRM Ventas» › 🟣 01 · Asesor Junior › **04 · Consulta · Ficha 360 · Ubicaciones** (`1887:4118`). Es la misma ficha para todos los créditos y todos los roles de cobros.
 
+- **PR:** #1863 → `COBROS-02`.
+- **Issue:** #1864, asignado a José.
+
 El front ya está **conectado**. Lo que todavía no tiene fuente sale de un solo procedimiento, `getFichaComplementos`, en `apps/crm/apps/server/src/routers/ficha-cobros.ts`. Hoy cada bloque devuelve `null` y la ficha lo muestra como pendiente («—», «Pronto» o un aviso punteado).
 
 **Para cerrar una tarea:**

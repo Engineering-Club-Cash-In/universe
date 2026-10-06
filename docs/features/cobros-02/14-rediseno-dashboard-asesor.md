@@ -77,7 +77,7 @@ Esta es la etapa 1 del rediseño de las pantallas del asesor con el Figma «CRM 
 
 ## Etapa 2 · Ficha 360
 
-**Estado:** en revisión de producto (rama `feat/cobros-ficha-360`, todavía sin PR). El backend pendiente está en [15-ficha-360-backend.md](./15-ficha-360-backend.md), tareas F1–F8.
+**Estado:** PR #1863 → `COBROS-02`. El backend pendiente está en el issue #1864 (José) y en [15-ficha-360-backend.md](./15-ficha-360-backend.md), tareas F1–F8.
 
 **Figma:** página Asesor Junior `271:877`, sección **🟦 04 · Consulta · Ficha 360 · Ubicaciones** (`1887:4118`). La ficha es la misma para todos los créditos y roles.
 

@@ -184,6 +184,45 @@ test("returned transfer rejection keeps precedence over unsupported values", asy
   ]);
 });
 
+test("manda a cartera el token completo: prefijo + identificador", async () => {
+  const finalized: unknown[] = [];
+  const receivedTransaction: unknown[] = [];
+  const claim: ApplicationClaim = {
+    ...baseClaim,
+    tokenPrefix: "32200",
+    tokenIdentifier: "100000002",
+  };
+
+  await runApplicationWorkerOnce({
+    repository: repository(claim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("token passing must not fail"); },
+    }),
+    cartera: {
+      applyNexaPayment: async (input) => {
+        receivedTransaction.push(input.transaction);
+        return { status: "APPLIED", paymentId: 701 };
+      },
+    },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(receivedTransaction[0]).toMatchObject({
+    token: "32200100000002",
+  });
+  expect(finalized[0]).toEqual([
+    7,
+    { paymentId: 701, reviewStatus: "APPROVED", failureReason: null, nextAttemptAt: null },
+    new Date("2026-09-08T12:00:00Z"),
+    1,
+  ]);
+});
+
 function repository(claim: ApplicationClaim, callbacks: {
   finalize: (...args: Parameters<ApplicationWorkerRepository["finalizeApplication"]>) => void;
   lookup: () => number | null;

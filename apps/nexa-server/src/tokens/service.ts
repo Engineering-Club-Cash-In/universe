@@ -23,6 +23,11 @@ interface TokenUserCreationNexaClient {
   }>;
 }
 
+// Misma forma que el resto del repo (`************5010`).
+function maskToken(token: string) {
+  return token.length <= 4 ? "*".repeat(token.length) : "*".repeat(token.length - 4) + token.slice(-4);
+}
+
 export async function createTokenUserForCredit(options: {
   creditoId: number;
   description: string;
@@ -50,6 +55,16 @@ export async function createTokenUserForCredit(options: {
     throw new Error(`Nexa did not return created token user ${identifier}`);
   }
 
+  // cartera guarda el token y lo compara con prefijo + identificador de cada
+  // pago: se registra siempre esa forma, no la que devuelva Nexa.
+  const token = `${options.paymentToken.prefix}${identifier}`;
+  if (created.token !== token) {
+    // Nunca el token completo en los logs: solo los últimos 4 dígitos.
+    console.error(
+      `Nexa token mismatch for credito ${options.creditoId}, identifier ${identifier}: Nexa returned ${maskToken(created.token)}, registering ${maskToken(token)}`,
+    );
+  }
+
   const tokenUser = {
     paymentTokenId: options.paymentToken.id,
     creditoId: options.creditoId,
@@ -57,7 +72,7 @@ export async function createTokenUserForCredit(options: {
     description: options.description,
     nationalId: options.nationalId,
     nexaUserId: created.id,
-    token: created.token,
+    token,
   };
 
   await options.repository.createTokenUser(tokenUser);

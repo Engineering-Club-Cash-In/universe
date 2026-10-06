@@ -316,6 +316,7 @@ integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el 
       amount: "10.00",
       currency: "GTQ",
       tokenDate: "2026-09-08T23:30:00-06:00",
+      token: "1111222233334444",
     });
     const timestamp = String(now / 1000);
     const nonce = "nonce-internal-schema-boundary";
@@ -339,7 +340,7 @@ integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el 
         loadCredit: async () => ({
           usuarioId: 5,
           statusCredit: "ACTIVO",
-          binding: { activo: true, expires_at: null, max_payment_amount: null },
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
         }),
         findPayments: async () => [],
         registerPayment: async (...args) => {
@@ -396,10 +397,11 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
         activo boolean NOT NULL,
         expires_at timestamptz,
         max_payment_amount numeric(18, 2),
+        nexa_token varchar(32),
         created_at timestamptz NOT NULL DEFAULT now()
       )
     `;
-    await sql`INSERT INTO cartera.nexa_credit_bindings (credito_id, activo) VALUES (${creditoId}, true)`;
+    await sql`INSERT INTO cartera.nexa_credit_bindings (credito_id, activo, nexa_token) VALUES (${creditoId}, true, '1111222233334444')`;
     await sql`SELECT pg_advisory_lock(8765, ${creditoId})`;
     blockerHeld = true;
 
@@ -419,6 +421,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
           currency: "GTQ",
           tokenDate: "2026-09-08T23:30:00-06:00",
           transactionId: "binding-race",
+          token: "1111222233334444",
         },
         7,
         5,
@@ -660,7 +663,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       ...nexaPaymentDependencies,
       withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(creditoId, work),
       claim: (body, context) => claimNexaPaymentEvent(query, body, context, deferred.isRunning),
-      loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null } }),
+      loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "123456710005010" } }),
       findPayments: async (eventId) => (await query.query<{ paymentId: number; validationStatus: string; amount: string }>(
         `SELECT pago_id AS "paymentId", CASE WHEN validated THEN 'validated' ELSE 'pending' END AS "validationStatus", '50.00' AS amount
          FROM cartera.pagos_credito WHERE nexa_payment_event_id = $1`, [eventId],

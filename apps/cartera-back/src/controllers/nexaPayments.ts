@@ -30,19 +30,28 @@ export const getNexaBindingRejection = (
   binding: NexaCreditBinding | null,
   amount: string,
   now: Date,
-  token?: string,
+  token: string | undefined,
 ) => {
   if (!binding) return "binding_missing" as const;
   if (!binding.activo) return "binding_inactive" as const;
   if (binding.expires_at && binding.expires_at <= now) return "binding_expired" as const;
-  if (token && binding.nexa_token && token !== binding.nexa_token) {
-    return "token_mismatch" as const;
-  }
+  if (!token) return "token_missing" as const;
+  if (!binding.nexa_token) return "binding_token_missing" as const;
+  if (token !== binding.nexa_token) return "token_mismatch" as const;
   if (binding.max_payment_amount && new Big(amount).gt(binding.max_payment_amount)) {
     return "amount_exceeds_binding" as const;
   }
   return null;
 };
+
+// Un pago SIN token no es un rechazo del banco: es un nexa-server que todavía
+// no manda el token (cartera desplegada antes) o que lo omitió. Se responde 503
+// porque nexa-server —la versión vieja y la nueva— reintenta todo >= 500 y
+// convierte un 403 con código en REJECTED, lo que le DEVUELVE el dinero al
+// cliente. binding_token_missing (auto-reparación) y token_mismatch siguen 403.
+const nexaBindingRejectionError = (
+  code: NonNullable<ReturnType<typeof getNexaBindingRejection>>,
+) => new NexaPaymentError(code, code === "token_missing" ? 503 : 403);
 
 export type NexaPaymentBody = z.infer<typeof nexaPaymentSchema>;
 
@@ -272,7 +281,7 @@ export const processNexaPayment = (
         dependencies.now?.() ?? new Date(),
         body.token,
       );
-      if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
+      if (bindingRejection) throw nexaBindingRejectionError(bindingRejection);
       if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
         throw new NexaPaymentError("credit_not_payable", 409);
       }
@@ -294,7 +303,7 @@ export const processNexaPayment = (
                 dependencies.now?.() ?? new Date(),
                 body.token,
               );
-              if (rejection) throw new NexaPaymentError(rejection, 403);
+              if (rejection) throw nexaBindingRejectionError(rejection);
             },
             paymentLock,
           );

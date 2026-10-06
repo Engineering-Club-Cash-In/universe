@@ -14,6 +14,7 @@ const body = {
   amount: "10.00",
   currency: "GTQ" as const,
   tokenDate: "2026-09-08T12:00:00Z",
+  token: "1111222233334444",
 };
 const tokenBody = {
   creditoId: 123,
@@ -189,7 +190,7 @@ test("una solicitud firmada usa el handler real y la idempotencia en producción
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => registered
       ? [{ paymentId: 17, validationStatus: applied ? "validated" : "pending", amount: "10.00" }]

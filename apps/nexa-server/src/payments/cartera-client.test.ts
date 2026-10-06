@@ -1,7 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import type { TokenTransaction } from "../nexa/schemas";
-import { HttpCarteraPaymentClient } from "./cartera-client";
+import { CarteraPaymentRequestError, HttpCarteraPaymentClient } from "./cartera-client";
 
 const transaction = (overrides: Partial<TokenTransaction> = {}): TokenTransaction => ({
   reference: 4617308,
@@ -147,6 +147,69 @@ describe("HttpCarteraPaymentClient", () => {
     }));
   });
 
+  test("envía token con 14 dígitos como último campo del body y la firma sigue siendo correcta", async () => {
+    const { client, getRequest } = capturingClient();
+    const result = await client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ token: "12345100000001" }),
+    });
+    const request = getRequest();
+    const body = request?.init?.body;
+
+    expect(body).toBe(JSON.stringify({
+      externalReference: "4617308",
+      creditoId: 123,
+      amount: "10.00",
+      currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
+      transactionId: "tx-123",
+      token: "12345100000001",
+    }));
+
+    const headers = request?.init?.headers as Record<string, string>;
+    const canonical = [
+      "POST",
+      "/internal/nexa/payments/apply",
+      headers["x-nexa-timestamp"],
+      headers["x-nexa-nonce"],
+      createHash("sha256").update(String(body)).digest("hex"),
+    ].join("\n");
+    expect(headers["x-nexa-signature"]).toBe(createHmac("sha256", "c".repeat(32)).update(canonical).digest("hex"));
+    expect(result).toEqual({ status: "APPLIED", paymentId: 77, idempotent: true });
+  });
+
+  test("omite token con formato inválido (synthetic-token)", async () => {
+    const { client, getRequest } = capturingClient();
+    await client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ token: "synthetic-token" }),
+    });
+    expect(getRequest()?.init?.body).toBe(JSON.stringify({
+      externalReference: "4617308",
+      creditoId: 123,
+      amount: "10.00",
+      currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
+      transactionId: "tx-123",
+    }));
+  });
+
+  test("omite token con menos de 10 dígitos", async () => {
+    const { client, getRequest } = capturingClient();
+    await client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ token: "123456789" }),
+    });
+    expect(getRequest()?.init?.body).toBe(JSON.stringify({
+      externalReference: "4617308",
+      creditoId: 123,
+      amount: "10.00",
+      currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
+      transactionId: "tx-123",
+    }));
+  });
+
   test("rechaza tokenDate malformado antes de enviar", async () => {
     const { client, getRequest } = capturingClient();
     await expect(client.applyNexaPayment({
@@ -202,6 +265,19 @@ describe("HttpCarteraPaymentClient", () => {
     ));
     await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
       .rejects.toThrow("HTTP 400 Bad Request");
+  });
+
+  test("un pago sin token (503 token_missing) se reintenta, no se rechaza", async () => {
+    // Cartera ya exige token y este nexa-server todavía no lo manda (o lo omitió):
+    // un REJECTED haría que Nexa devuelva la transferencia.
+    const { client } = capturingClient(Response.json(
+      { error: "token_missing" },
+      { status: 503, statusText: "Service Unavailable" },
+    ));
+    const error = await client.applyNexaPayment({ creditoId: 123, transaction: transaction() })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CarteraPaymentRequestError);
+    expect((error as CarteraPaymentRequestError).retryable).toBe(true);
   });
 
   test("mantiene payment_outcome_uncertain como fallo retryable", async () => {
@@ -263,5 +339,63 @@ describe("HttpCarteraPaymentClient", () => {
 
     await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() })).rejects.toThrow();
     expect(aborted).toBe(true);
+  });
+});
+
+describe("HttpCarteraPaymentClient.registerNexaToken", () => {
+  const input = { creditoId: 123, token: "12345100000001", identifier: "100000001", nexaUserId: 9 };
+
+  test("firma y envía el contrato exacto a /internal/nexa/tokens", async () => {
+    const { client, getRequest } = capturingClient(Response.json({ status: "CREATED", creditoId: 123 }, { status: 201 }));
+    expect(await client.registerNexaToken(input)).toEqual({ status: "CREATED" });
+    const request = getRequest();
+    const headers = request?.init?.headers as Record<string, string>;
+    const body = String(request?.init?.body);
+    expect(request?.url).toBe("https://cartera.example.com/internal/nexa/tokens");
+    expect(body).toBe('{"creditoId":123,"token":"12345100000001","identifier":"100000001","nexaUserId":9}');
+    const canonical = ["POST", "/internal/nexa/tokens", "1757332800", headers["x-nexa-nonce"],
+      createHash("sha256").update(body).digest("hex")].join("\n");
+    expect(headers["x-nexa-timestamp"]).toBe("1757332800");
+    expect(headers["x-nexa-signature"]).toBe(createHmac("sha256", "c".repeat(32)).update(canonical).digest("hex"));
+  });
+
+  test.each([
+    [200, { status: "UPDATED", creditoId: 123 }, { status: "UPDATED" }],
+    [200, { status: "UNCHANGED", creditoId: 123 }, { status: "UNCHANGED" }],
+    [409, { error: "token_conflict" }, { status: "REJECTED", reason: "token_conflict" }],
+    [409, { error: "token_in_use" }, { status: "REJECTED", reason: "token_in_use" }],
+    [404, { error: "credit_not_found" }, { status: "REJECTED", reason: "credit_not_found" }],
+    [400, { error: "invalid_body" }, { status: "REJECTED", reason: "invalid_body" }],
+    [422, "no es json", { status: "REJECTED", reason: "http_422" }],
+  ])("HTTP %s %j → %j", async (status, body, expected) => {
+    const response = typeof body === "string" ? new Response(body, { status }) : Response.json(body, { status });
+    const { client } = capturingClient(response);
+    expect(await client.registerNexaToken(input)).toEqual(expected as never);
+  });
+
+  test.each([
+    [500, {}],
+    [503, { error: "configuration_error" }],
+    [401, { error: "invalid_authentication" }],
+    [429, {}],
+  ])("HTTP %s es reintentable: lanza CarteraPaymentRequestError", async (status, body) => {
+    const { client } = capturingClient(Response.json(body, { status }));
+    await expect(client.registerNexaToken(input)).rejects.toBeInstanceOf(CarteraPaymentRequestError);
+  });
+
+  test.each([
+    ["token de 9 dígitos", { token: "123456789" }],
+    ["token de 33 dígitos", { token: "1".repeat(33) }],
+    ["token con letras", { token: "1234510000000a" }],
+    ["token que no termina en el identificador", { identifier: "999999999" }],
+    ["identifier de 8 dígitos", { identifier: "10000000" }],
+    ["identifier de 10 dígitos", { identifier: "1000000001" }],
+    ["creditoId 0", { creditoId: 0 }],
+    ["creditoId decimal", { creditoId: 1.5 }],
+    ["nexaUserId 0", { nexaUserId: 0 }],
+  ])("%s: lanza antes de llamar a cartera", async (_name, override) => {
+    const { client, getRequest } = capturingClient();
+    await expect(client.registerNexaToken({ ...input, ...override })).rejects.toThrow();
+    expect(getRequest()).toBeUndefined();
   });
 });

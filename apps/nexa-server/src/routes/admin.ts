@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { NexaClient } from "../nexa/client";
-import type { CarteraPaymentClient } from "../payments/cartera-client";
+import type { CarteraPaymentClient, CarteraTokenClient } from "../payments/cartera-client";
 import { pollPaymentTokenDate } from "../payments/poller";
 import { createTokenUserForCredit } from "../tokens/service";
 import type { DbPaymentTransactionRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "../db/repositories";
@@ -22,7 +22,7 @@ const mockCreditSchema = z.object({
 export function createAdminRouter(deps: {
   adminApiKey: string;
   nexa: NexaClient;
-  cartera: CarteraPaymentClient;
+  cartera: CarteraPaymentClient & CarteraTokenClient;
   paymentTokens: PaymentTokenRepository;
   tokenUsers: DbTokenUserRepository;
   transactions: DbPaymentTransactionRepository;
@@ -70,7 +70,23 @@ export function createAdminRouter(deps: {
         repository: deps.tokenUsers,
         nexa: deps.nexa,
       });
-      return c.json(created, 201);
+      let carteraRegistration: string;
+      try {
+        const registered = await deps.cartera.registerNexaToken({
+          creditoId: created.creditoId,
+          token: created.token,
+          identifier: created.identifier,
+          nexaUserId: created.nexaUserId,
+        });
+        carteraRegistration = registered.status === "REJECTED"
+          ? `REJECTED:${registered.reason}`
+          : registered.status;
+      } catch {
+        // El token ya existe en Nexa: no se deshace. Queda pendiente y lo repara
+        // el script tokens:sync-cartera, que es idempotente.
+        carteraRegistration = "PENDING";
+      }
+      return c.json({ ...created, carteraRegistration }, 201);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.startsWith("Nexa rejected token user")) {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { receivedTokenTransactionSchema, tokenTransactionSchema, type TokenTransaction, type ReceivedTokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
@@ -50,7 +50,10 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
   }
 
   async list() {
-    return this.db.select().from(nexaTokenUsers).orderBy(nexaTokenUsers.id);
+    return this.db.select({ ...getTableColumns(nexaTokenUsers), prefix: nexaPaymentTokens.prefix, paymentTokenActive: nexaPaymentTokens.active })
+      .from(nexaTokenUsers)
+      .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
+      .orderBy(nexaTokenUsers.id);
   }
 }
 
@@ -74,7 +77,12 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
     };
-    const canEnrich = sql`
+    // Como en enrichIncomingStatement: el crédito se resuelve por prefijo + identificador y a
+    // cartera va su concatenación, así que el token completo de Nexa tiene que cuadrar. Si no
+    // cuadra no se aplica ni se rechaza ante Nexa (un rechazo le devuelve la plata al cliente):
+    // queda en MANUAL_REVIEW para que lo concilie una persona.
+    const tokenMatches = transaction.token === transaction.tokenPrefix + transaction.tokenIdentifier;
+    const canEnrich = !tokenMatches ? sql`false` : sql`
       ${nexaPaymentTransactions.tokenDate} = ''
       AND excluded.token_date <> ''
       AND ${nexaPaymentTransactions.amount} = excluded.amount
@@ -98,8 +106,8 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       tokenPrefix: transaction.tokenPrefix,
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
-      processingStatus: tokenDate ? "RECEIVED" : "MANUAL_REVIEW",
-      failureReason: tokenDate ? null : "missing_token_date",
+      processingStatus: tokenMatches && tokenDate ? "RECEIVED" : "MANUAL_REVIEW",
+      failureReason: !tokenMatches ? "token_mismatch" : tokenDate ? null : "missing_token_date",
       rawPayload: sanitizedPayload,
       payloadFingerprint,
     }).onConflictDoUpdate({
@@ -289,6 +297,25 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       ))
       .limit(1);
     return user?.creditoId ?? null;
+  }
+
+  async findTokenUser(tokenIdentifier: string, tokenPrefix: string) {
+    const [user] = await this.db.select({
+      creditoId: nexaTokenUsers.creditoId,
+      token: nexaTokenUsers.token,
+      identifier: nexaTokenUsers.identifier,
+      nexaUserId: nexaTokenUsers.nexaUserId,
+    })
+      .from(nexaTokenUsers)
+      .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
+      .where(and(
+        eq(nexaTokenUsers.identifier, tokenIdentifier),
+        eq(nexaPaymentTokens.prefix, tokenPrefix),
+        eq(nexaTokenUsers.active, true),
+        eq(nexaPaymentTokens.active, true),
+      ))
+      .limit(1);
+    return user ?? null;
   }
 
   async finalizeApplication(id: number, outcome: {
@@ -592,12 +619,19 @@ function toSafeReconciliationRow<T extends {
     ...safeRow,
     reviewAttemptCount: reviewAttempts ?? storedReviewAttemptCount,
     reviewNextAttemptAt: reviewNextAttemptAt ?? storedReviewNextAttemptAt,
-    failureReason: row.failureReason && /^[a-z0-9_]{1,64}$/.test(row.failureReason)
-      ? row.failureReason
-      : row.failureReason
-        ? "processing_failed"
-        : null,
+    failureReason: safeFailureReason(row.failureReason),
   };
+}
+
+// Los motivos internos conocidos se ven tal cual en logs y admin: un código, o
+// un código con su detalle (token_repair_failed:<código>,
+// payment_outcome_uncertain:<detalle>). Cualquier otra cosa puede ser texto
+// libre de cartera y se oculta.
+const KNOWN_FAILURE_REASON = /^(?:[a-z0-9_]{1,64}|(?:token_repair_failed|payment_outcome_uncertain):[a-z0-9_]{1,64})$/;
+
+export function safeFailureReason(reason: string | null) {
+  if (!reason) return null;
+  return KNOWN_FAILURE_REASON.test(reason) ? reason : "processing_failed";
 }
 
 export class PollRunRepository {

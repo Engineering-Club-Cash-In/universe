@@ -5,16 +5,32 @@ export type CarteraApplyPaymentResult =
   | { status: "APPLIED"; paymentId: number; idempotent?: boolean; billingStatus?: "PENDING" }
   | { status: "REJECTED"; reason: string };
 
+export type CarteraRegisterTokenInput = {
+  creditoId: number;
+  token: string;
+  identifier: string;
+  nexaUserId: number;
+};
+
+export type CarteraRegisterTokenResult =
+  | { status: "CREATED" | "UPDATED" | "UNCHANGED" }
+  | { status: "REJECTED"; reason: string };
+
 type CarteraTransaction = {
   reference: string | number;
   amount: number;
   currency: "GTQ" | "USD";
   tokenDate: string;
   transactionId?: string | number | null;
+  token?: string;
 };
 
 export interface CarteraPaymentClient {
   applyNexaPayment(input: { creditoId: number; transaction: CarteraTransaction }): Promise<CarteraApplyPaymentResult>;
+}
+
+export interface CarteraTokenClient {
+  registerNexaToken(input: CarteraRegisterTokenInput): Promise<CarteraRegisterTokenResult>;
 }
 
 const applyPaymentResponseSchema = z.object({
@@ -29,6 +45,15 @@ type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Re
 
 export class CarteraPaymentRequestError extends Error {
   readonly retryable = true;
+
+  /**
+   * El código de cartera cuando el desenlace quedó incierto
+   * (payment_outcome_uncertain, payment_amount_mismatch): el worker lo guarda
+   * como failureReason en vez de un genérico, para que se vea en la revisión manual.
+   */
+  constructor(message: string, readonly reason?: string) {
+    super(message);
+  }
 }
 
 export function formatAmount(amount: number) {
@@ -44,8 +69,29 @@ export function formatAmount(amount: number) {
   return `${whole}.${paddedFraction}`;
 }
 
-export class HttpCarteraPaymentClient implements CarteraPaymentClient {
+export class HttpCarteraPaymentClient implements CarteraPaymentClient, CarteraTokenClient {
   constructor(private readonly options: { baseUrl: string; secret: string; timeoutMs?: number; fetch?: Fetcher; clock?: () => number }) {}
+
+  private signedRequest(path: string, body: string) {
+    const timestamp = String(Math.floor((this.options.clock?.() ?? Date.now()) / 1000));
+    const nonce = randomUUID();
+    const bodyHash = createHash("sha256").update(body).digest("hex");
+    const signature = createHmac("sha256", this.options.secret)
+      .update(["POST", path, timestamp, nonce, bodyHash].join("\n"))
+      .digest("hex");
+    const fetcher = this.options.fetch ?? fetch;
+    return fetcher(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-nexa-timestamp": timestamp,
+        "x-nexa-nonce": nonce,
+        "x-nexa-signature": signature,
+      },
+      body,
+      signal: AbortSignal.timeout(this.options.timeoutMs ?? 10_000),
+    });
+  }
 
   async applyNexaPayment(input: { creditoId: number; transaction: CarteraTransaction }): Promise<CarteraApplyPaymentResult> {
     if (!Number.isInteger(input.creditoId) || input.creditoId <= 0) {
@@ -65,7 +111,6 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       throw new Error("transactionId must contain at most 100 characters");
     }
 
-    const fetcher = this.options.fetch ?? fetch;
     const path = "/internal/nexa/payments/apply";
     const body = JSON.stringify({
       externalReference,
@@ -76,24 +121,9 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       ...(transactionId
         ? { transactionId }
         : {}),
+      ...(input.transaction.token && /^\d{10,32}$/.test(input.transaction.token) ? { token: input.transaction.token } : {}),
     });
-    const timestamp = String(Math.floor((this.options.clock?.() ?? Date.now()) / 1000));
-    const nonce = randomUUID();
-    const bodyHash = createHash("sha256").update(body).digest("hex");
-    const signature = createHmac("sha256", this.options.secret)
-      .update(["POST", path, timestamp, nonce, bodyHash].join("\n"))
-      .digest("hex");
-    const response = await fetcher(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-nexa-timestamp": timestamp,
-        "x-nexa-nonce": nonce,
-        "x-nexa-signature": signature,
-      },
-      body,
-      signal: AbortSignal.timeout(this.options.timeoutMs ?? 10_000),
-    });
+    const response = await this.signedRequest(path, body);
 
     if (!response.ok) {
       const status = response.statusText ? `${response.status} ${response.statusText}` : String(response.status);
@@ -103,7 +133,10 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       const retryableCode = error?.success && ["invalid_authentication", "configuration_error", "invalid_body"].includes(error.data.error);
       const uncertainCode = error?.success && ["payment_amount_mismatch", "payment_outcome_uncertain"].includes(error.data.error);
       if (uncertainCode || retryableCode || [401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && !error?.success)) {
-        throw new CarteraPaymentRequestError(`Cartera payment request failed: HTTP ${status}`);
+        throw new CarteraPaymentRequestError(
+          `Cartera payment request failed: HTTP ${status}`,
+          uncertainCode ? error.data.error : undefined,
+        );
       }
       return {
         status: "REJECTED",
@@ -112,5 +145,51 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
     }
 
     return applyPaymentResponseSchema.parse(await response.json());
+  }
+
+  async registerNexaToken(input: CarteraRegisterTokenInput): Promise<CarteraRegisterTokenResult> {
+    if (!Number.isInteger(input.creditoId) || input.creditoId <= 0) {
+      throw new Error("creditoId must be a positive integer");
+    }
+    if (!/^\d{10,32}$/.test(input.token)) {
+      throw new Error("token must be 10 to 32 digits");
+    }
+    if (!/^\d{9}$/.test(input.identifier)) {
+      throw new Error("identifier must be exactly 9 digits");
+    }
+    if (!input.token.endsWith(input.identifier)) {
+      throw new Error("token must end with identifier");
+    }
+    if (!Number.isInteger(input.nexaUserId) || input.nexaUserId <= 0) {
+      throw new Error("nexaUserId must be a positive integer");
+    }
+
+    const path = "/internal/nexa/tokens";
+    const body = JSON.stringify({
+      creditoId: input.creditoId,
+      token: input.token,
+      identifier: input.identifier,
+      nexaUserId: input.nexaUserId,
+    });
+    const response = await this.signedRequest(path, body);
+
+    if (!response.ok) {
+      const status = response.statusText ? `${response.status} ${response.statusText}` : String(response.status);
+      const error = await response.json()
+        .then((body: unknown) => safeErrorResponseSchema.safeParse(body))
+        .catch(() => undefined);
+      if ([401, 408, 429].includes(response.status) || response.status >= 500 || (error?.success && ["invalid_authentication", "configuration_error"].includes(error.data.error))) {
+        throw new CarteraPaymentRequestError(`Cartera token request failed: HTTP ${status}`);
+      }
+      return {
+        status: "REJECTED",
+        reason: error?.success ? error.data.error : `http_${response.status}`,
+      };
+    }
+
+    const registerTokenResponseSchema = z.object({
+      status: z.enum(["CREATED", "UPDATED", "UNCHANGED"]),
+    });
+    return registerTokenResponseSchema.parse(await response.json());
   }
 }

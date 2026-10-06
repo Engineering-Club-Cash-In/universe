@@ -1,7 +1,7 @@
-import type { CarteraPaymentClient } from "./cartera-client";
+import type { CarteraPaymentClient, CarteraRegisterTokenInput, CarteraTokenClient } from "./cartera-client";
 import type { MockCreditLedger } from "./mock-ledger";
 
-export class MockCarteraPaymentClient implements CarteraPaymentClient {
+export class MockCarteraPaymentClient implements CarteraPaymentClient, CarteraTokenClient {
   constructor(private readonly ledger?: MockCreditLedger) {}
 
   async applyNexaPayment(input: Parameters<CarteraPaymentClient["applyNexaPayment"]>[0]) {
@@ -19,5 +19,9 @@ export class MockCarteraPaymentClient implements CarteraPaymentClient {
       status: "APPLIED" as const,
       paymentId: Number.isFinite(numericReference) ? numericReference : Date.now(),
     };
+  }
+
+  async registerNexaToken(_input: CarteraRegisterTokenInput) {
+    return { status: "CREATED" as const };
   }
 }

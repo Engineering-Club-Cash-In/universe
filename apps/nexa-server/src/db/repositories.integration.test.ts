@@ -7,6 +7,7 @@ import { createApp } from "../app";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { HttpCarteraPaymentClient } from "../payments/cartera-client";
+import { pollPaymentTokenDate } from "../payments/poller";
 import { runReviewWorkerOnce } from "../payments/review-worker";
 import { createAdminRouter } from "../routes/admin";
 import { DbPaymentTransactionRepository, DbReviewRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "./repositories";
@@ -25,7 +26,7 @@ const transaction: TokenTransaction = {
   comments: "sensitive comment",
   currency: "GTQ",
   account: "19451958",
-  token: "1234567310005010",
+  token: "123456710005010",
   tokenDate: "2026-05-04T10:00:00-06:00",
   tokenIdentifier: "10005010",
   tokenName: "Sensitive account name",
@@ -278,6 +279,47 @@ integrationTest("statement enrichment cannot import unrelated funds or bypass co
     expect(await repository.enrichIncomingStatement({ ...incoming, transactionId: "", ...override })).toBe(false);
     expect(await db.select().from(nexaPaymentTransactions)).toEqual(before);
   }
+});
+
+integrationTest("polled statement whose token is not prefix + identifier waits in MANUAL_REVIEW instead of paying the credit its components name", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("000000042", "1234567", 42);
+  await associateToken("000000043", "1234567", 43);
+  const consistent = { ...transaction, reference: "token-ok", token: "1234567000000042", tokenIdentifier: "000000042", tokenPrefix: "1234567" };
+  // Nexa's full token names credit 42, but the split fields name credit 43.
+  const inconsistent = { ...consistent, reference: "token-mismatch", tokenIdentifier: "000000043" };
+  await pollPaymentTokenDate({
+    date: "2026-05-04",
+    nexa: { getPaymentTokenStatement: async () => ({ transactions: [inconsistent, consistent] }) },
+    cartera: { applyNexaPayment: async () => { throw new Error("Cartera must not run during ingestion"); } },
+    transactions: repository,
+    tokenUsers: new DbTokenUserRepository(db),
+  });
+
+  const applied: Array<{ creditoId: number; token?: string }> = [];
+  const apply = () => runApplicationWorkerOnce({
+    repository,
+    cartera: { applyNexaPayment: async ({ creditoId, transaction: payment }) => {
+      applied.push({ creditoId, token: payment.token });
+      return { status: "APPLIED", paymentId: 900 + applied.length };
+    } },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,
+  });
+  for (let attempt = 0; attempt < 3; attempt++) await apply();
+  expect(applied).toEqual([{ creditoId: 42, token: "1234567000000042" }]);
+
+  const [held] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.reference, "token-mismatch"));
+  expect(held).toMatchObject({ processingStatus: "MANUAL_REVIEW", failureReason: "token_mismatch", carteraPaymentId: null });
+  // Not rejected to Nexa (that would return the funds): no bank review is queued for it.
+  expect(await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, held!.id))).toEqual([]);
+  expect(await repository.listManualReviewAlerts(new Date("2000-01-01T00:00:00Z"))).toEqual([
+    expect.objectContaining({ reference: "token-mismatch", failureReason: "token_mismatch", alertType: "MANUAL_REVIEW" }),
+  ]);
+  // A replay of the same inconsistent row cannot promote it out of review.
+  expect(await repository.upsertReceived(inconsistent)).toMatchObject({ id: held!.id, created: false, processingStatus: "MANUAL_REVIEW" });
 });
 
 integrationTest("date-less webhook rows wait visibly for authoritative statement enrichment before application", async () => {
@@ -561,7 +603,9 @@ integrationTest("returned transfers queue a safe REJECTED review without calling
   expect(review).toMatchObject({ status: "REJECTED" });
 });
 
-integrationTest("terminal rejection and missing token association queue safe REJECTED reviews", async () => {
+// Un REJECTED hace que Nexa devuelva el dinero: un rechazo sin código de cartera
+// es dudoso y se reintenta; un token sin crédito asociado sí es definitivo.
+integrationTest("a rejection without a cartera code is retried while a missing token association queues a safe REJECTED review", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);
   await associateToken("10005010", "1234567", 42);
@@ -571,6 +615,7 @@ integrationTest("terminal rejection and missing token association queue safe REJ
     reference: "4617309",
     transactionId: "7295",
     tokenIdentifier: "10005011",
+    token: "123456710005011",
   });
   let carteraCalls = 0;
   const run = () => runApplicationWorkerOnce({
@@ -593,13 +638,19 @@ integrationTest("terminal rejection and missing token association queue safe REJ
   const payments = await db.select().from(nexaPaymentTransactions).orderBy(nexaPaymentTransactions.id);
   const reviews = await db.select().from(nexaReviews).orderBy(nexaReviews.id);
   expect(payments).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: unsafe.id, processingStatus: "REVIEW_PENDING", failureReason: "cartera_rejected" }),
+    expect.objectContaining({
+      id: unsafe.id,
+      processingStatus: "FAILED",
+      failureReason: "application_processing_failed",
+      nextAttemptAt: new Date("2026-09-08T14:00:02.000Z"),
+    }),
     expect.objectContaining({ id: missing.id, processingStatus: "REVIEW_PENDING", failureReason: "token_user_not_found" }),
   ]));
+  // Solo el definitivo va hacia Nexa; el texto crudo del rechazo no se guarda.
   expect(reviews.map((review) => [review.transactionId, review.status])).toEqual([
-    [unsafe.id, "REJECTED"],
     [missing.id, "REJECTED"],
   ]);
+  expect(JSON.stringify(payments)).not.toContain("unsafe token=");
   expect(carteraCalls).toBe(1);
 });
 

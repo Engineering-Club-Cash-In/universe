@@ -53,6 +53,10 @@ export function startPaymentLifecycle(
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
       cartera: deps.cartera,
+      tokenRepair: {
+        findTokenUser: (identifier, prefix) => deps.transactions.findTokenUser(identifier, prefix),
+        cartera: deps.cartera,
+      },
       ...workerOptions,
     }), scheduler, logError),
     startWorkerLoop("Review worker", config.workerIntervalSeconds, () => runReviewWorkerOnce({

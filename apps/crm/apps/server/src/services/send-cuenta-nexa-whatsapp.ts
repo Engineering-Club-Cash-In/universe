@@ -11,9 +11,10 @@
  * Nunca lanza: cualquier fallo vuelve como resultado tipado.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import { leads, opportunities } from "../db/schema/crm";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
@@ -39,7 +40,13 @@ export interface SendCuentaNexaWhatsappParams {
 }
 
 export type SendCuentaNexaWhatsappResult =
-	| { sent: true; templateMessageId?: string; telefono: string }
+	| {
+			sent: true;
+			templateMessageId?: string;
+			telefono?: string;
+			/** true si el código ya se le había mandado y no se repitió. */
+			yaEnviado?: boolean;
+	  }
 	| {
 			sent: false;
 			codigo:
@@ -78,6 +85,31 @@ async function clientePorSifco(
 	};
 }
 
+/**
+ * ¿El cliente ya recibió este código? Lo que salió por WhatsApp queda en
+ * `cobros_send_logs`: la bienvenida con la línea de Nexa o un aviso aparte
+ * anterior. Si la bienvenida salió pero no se alcanzó a avisar a cartera,
+ * esto evita mandarle el código dos veces.
+ */
+async function codigoYaEnviadoEnCrm(
+	numeroSifco: string,
+	token: string,
+): Promise<boolean> {
+	const [fila] = await db
+		.select({ id: cobrosSendLogs.id })
+		.from(cobrosSendLogs)
+		.where(
+			and(
+				eq(cobrosSendLogs.numeroCreditoSifco, numeroSifco),
+				eq(cobrosSendLogs.status, "sent"),
+				inArray(cobrosSendLogs.plantillaId, ["bienvenida", PLANTILLA_ID]),
+				like(cobrosSendLogs.mensaje, `%${token}%`),
+			),
+		)
+		.limit(1);
+	return Boolean(fila);
+}
+
 async function usuarioSistema(): Promise<string | null> {
 	const [supervisor] = await db
 		.select({ id: user.id })
@@ -105,6 +137,7 @@ ${cierreAsesor} Atentamente, Club Cash-In.`;
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
 export interface CuentaNexaWhatsappDeps {
+	codigoYaEnviado?: (numeroSifco: string, token: string) => Promise<boolean>;
 	buscarCliente?: typeof clientePorSifco;
 	obtenerUsuarioSistema?: () => Promise<string | null>;
 	obtenerAsesor?: ObtenerAsesor;
@@ -121,8 +154,16 @@ export async function sendCuentaNexaWhatsapp(
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
 	const obtenerAsesor = deps.obtenerAsesor ?? obtenerAsesorCartera;
+	const codigoYaEnviado = deps.codigoYaEnviado ?? codigoYaEnviadoEnCrm;
 
 	try {
+		if (await codigoYaEnviado(params.numeroSifco, params.token)) {
+			console.log(
+				`${LOG_PREFIX} El código Nexa de ${params.numeroSifco} ya se había enviado; no se repite`,
+			);
+			return { sent: true, yaEnviado: true };
+		}
+
 		const cliente = await buscarCliente(params.numeroSifco);
 		if (!cliente) {
 			return {

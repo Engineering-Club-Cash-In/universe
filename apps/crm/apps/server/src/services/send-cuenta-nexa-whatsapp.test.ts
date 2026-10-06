@@ -25,6 +25,7 @@ function deps(over: Partial<CuentaNexaWhatsappDeps> = {}) {
 	const enviados: { phone: string; message: string }[] = [];
 	const logs: { plantillaId: string }[] = [];
 	const d: CuentaNexaWhatsappDeps = {
+		codigoYaEnviado: async () => false,
 		buscarCliente: async () => ({
 			telefono: "30295849 / 41674626",
 			nombre: "Ana López",
@@ -71,6 +72,15 @@ describe("sendCuentaNexaWhatsapp", () => {
 		const r = await sendCuentaNexaWhatsapp(params, sinTel.d);
 		expect(r).toMatchObject({ sent: false, codigo: "SIN_TELEFONO" });
 		expect(sinTel.enviados).toHaveLength(0);
+	});
+
+	test("si el código ya salió (en la bienvenida o antes) no se repite", async () => {
+		const { d, enviados } = deps({ codigoYaEnviado: async () => true });
+		expect(await sendCuentaNexaWhatsapp(params, d)).toEqual({
+			sent: true,
+			yaEnviado: true,
+		});
+		expect(enviados).toHaveLength(0);
 	});
 
 	test("un fallo de WhatsApp vuelve como ERROR_ENVIO", async () => {

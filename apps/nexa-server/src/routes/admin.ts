@@ -4,6 +4,8 @@ import type { NexaClient } from "../nexa/client";
 import type { CarteraPaymentClient, CarteraTokenClient } from "../payments/cartera-client";
 import { pollPaymentTokenDate } from "../payments/poller";
 import { createTokenUserForCredit } from "../tokens/service";
+import { deactivateIfCreditCancelled } from "../tokens/credit-cancelled";
+import type { CarteraEventTokenUsers } from "./cartera-events";
 import type { DbPaymentTransactionRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "../db/repositories";
 
 const createTokenUserSchema = z.object({
@@ -25,6 +27,8 @@ export function createAdminRouter(deps: {
   cartera: CarteraPaymentClient & CarteraTokenClient;
   paymentTokens: PaymentTokenRepository;
   tokenUsers: DbTokenUserRepository;
+  // Desactiva el token user local si cartera responde credit_cancelled.
+  cancelledTokenUsers: CarteraEventTokenUsers;
   transactions: DbPaymentTransactionRepository;
   pollRuns: PollRunRepository;
   mockCredits?: {
@@ -81,6 +85,7 @@ export function createAdminRouter(deps: {
         carteraRegistration = registered.status === "REJECTED"
           ? `REJECTED:${registered.reason}`
           : registered.status;
+        await deactivateIfCreditCancelled(registered, created.creditoId, deps.cancelledTokenUsers);
       } catch {
         // El token ya existe en Nexa: no se deshace. Queda pendiente y lo repara
         // el script tokens:sync-cartera, que es idempotente.

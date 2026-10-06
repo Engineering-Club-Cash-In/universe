@@ -8,6 +8,7 @@ Before changing a production deployment from the DEV pilot to the production led
 - `CARTERA_TARGET_ENV=production`
 - `CARTERA_API_BASE_URL`: production Cartera HTTPS URL
 - `CARTERA_PRODUCTION_ALLOWED_ORIGINS`: comma-separated exact HTTPS origins, including that URL's origin
+- `NEXA_CARTERA_EVENTS_SECRET`: at least 32 bytes, distinct from `CARTERA_INTERNAL_API_SECRET` and `NEXA_ADMIN_API_KEY`, and identical to Cartera's value; startup fails without it, because otherwise credit cancellations from Cartera are answered with 503 and the token users stay active
 - Existing matching HMAC secrets and explicitly authorized credit bindings at the destination
 
 Do not copy DEV environment variables into PROD. Publishing this code does not change the current pilot destination or activate Cartera's receiver/fiscal flags.

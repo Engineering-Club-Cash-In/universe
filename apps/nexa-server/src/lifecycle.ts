@@ -2,6 +2,7 @@ import type { AppConfig } from "./config";
 import type { AppDependencies } from "./dependencies";
 import { defaultScheduler, type Scheduler } from "./jobs/scheduler";
 import { runApplicationWorkerOnce } from "./payments/application-worker";
+import { DbCarteraEventTokenUserRepository } from "./db/cartera-events-repository";
 import { runReviewWorkerOnce } from "./payments/review-worker";
 import { runStatementEnrichmentOnce } from "./payments/statement-enrichment";
 
@@ -56,6 +57,7 @@ export function startPaymentLifecycle(
       tokenRepair: {
         findTokenUser: (identifier, prefix) => deps.transactions.findTokenUser(identifier, prefix),
         cartera: deps.cartera,
+        cancelledTokenUsers: new DbCarteraEventTokenUserRepository(deps.db),
       },
       ...workerOptions,
     }), scheduler, logError),

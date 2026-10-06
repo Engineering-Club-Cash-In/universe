@@ -26,7 +26,7 @@ describe("syncTokensToCartera", () => {
       },
     };
 
-    const summary = await syncTokensToCartera({ tokenUsers, cartera });
+    const summary = await syncTokensToCartera({ tokenUsers, cartera, cancelledTokenUsers: { deactivateByCreditoId: async () => 0 } });
 
     expect(summary).toEqual({
       total: 5,
@@ -48,6 +48,7 @@ describe("syncTokensToCartera", () => {
         { creditoId: 2, token: "t2", identifier: "id2", nexaUserId: 2, active: true, paymentTokenActive: true },
       ] },
       cartera: { registerNexaToken: async (p: { creditoId: number }) => { llamados.push(p.creditoId); return { status: "CREATED" as const }; } },
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
     });
     expect(llamados).toEqual([2]);
     expect(summary.skippedInactive).toBe(1);
@@ -62,7 +63,7 @@ describe("syncTokensToCartera", () => {
       registerNexaToken: async () => ({ status: "CREATED" as const }),
     };
 
-    const summary = await syncTokensToCartera({ tokenUsers, cartera });
+    const summary = await syncTokensToCartera({ tokenUsers, cartera, cancelledTokenUsers: { deactivateByCreditoId: async () => 0 } });
 
     expect(summary).toEqual({
       total: 0,
@@ -80,7 +81,50 @@ describe("syncTokensToCartera", () => {
     await syncTokensToCartera({
       tokenUsers: { list: async () => [{ creditoId: 1, token: "OTRO", identifier: "100000002", nexaUserId: 1, active: true, prefix: "32200" }] },
       cartera: { registerNexaToken: async (p: { token: string }) => { sent.push(p.token); return { status: "CREATED" as const }; } },
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
     });
     expect(sent).toEqual(["32200100000002"]);
+  });
+
+  test("credit_cancelled desactiva el token user local; otros rechazos no", async () => {
+    const users = [
+      { creditoId: 1, token: "t1", identifier: "id1", nexaUserId: 1, active: true },
+      { creditoId: 2, token: "t2", identifier: "id2", nexaUserId: 2, active: true },
+    ];
+    const summary = await syncTokensToCartera({
+      tokenUsers: { list: async () => users },
+      cartera: {
+        registerNexaToken: async (p: { creditoId: number }) => ({
+          status: "REJECTED" as const,
+          reason: p.creditoId === 1 ? "credit_cancelled" : "token_conflict",
+        }),
+      },
+      cancelledTokenUsers: {
+        deactivateByCreditoId: async (creditoId: number) => {
+          users.filter((u) => u.creditoId === creditoId).forEach((u) => (u.active = false));
+          return 1;
+        },
+      },
+    });
+    expect(users.map((u) => u.active)).toEqual([false, true]);
+    // El resumen no cambia: sigue reportando el rechazo.
+    expect(summary.rejected).toEqual([{ creditoId: 1, reason: "credit_cancelled" }, { creditoId: 2, reason: "token_conflict" }]);
+    expect(summary.failed).toEqual([]);
+  });
+
+  test("si desactivar falla, el resumen queda igual", async () => {
+    const original = console.error;
+    console.error = () => {};
+    try {
+      const summary = await syncTokensToCartera({
+        tokenUsers: { list: async () => [{ creditoId: 1, token: "t1", identifier: "id1", nexaUserId: 1, active: true }] },
+        cartera: { registerNexaToken: async () => ({ status: "REJECTED" as const, reason: "credit_cancelled" }) },
+        cancelledTokenUsers: { deactivateByCreditoId: async () => { throw new Error("db down"); } },
+      });
+      expect(summary.rejected).toEqual([{ creditoId: 1, reason: "credit_cancelled" }]);
+      expect(summary.failed).toEqual([]);
+    } finally {
+      console.error = original;
+    }
   });
 });

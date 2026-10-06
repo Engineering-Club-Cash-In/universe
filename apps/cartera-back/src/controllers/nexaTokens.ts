@@ -22,11 +22,14 @@ export type NexaTokenUpsertResult =
   | "unchanged"
   | "token_conflict"
   | "token_in_use"
-  | "credit_not_found";
+  | "credit_not_found"
+  | "credit_cancelled";
 
 export type NexaTokenDependencies = {
   claimNonce: (nonce: string) => Promise<boolean>;
   creditExists: (creditoId: number) => Promise<boolean>;
+  // Un crédito CANCELADO nunca se reactiva: no admite registrar token.
+  creditCancelled: (creditoId: number) => Promise<boolean>;
   upsertToken: (body: NexaTokenBody) => Promise<NexaTokenUpsertResult>;
 };
 
@@ -65,9 +68,15 @@ export const processNexaTokenRegistration = async (
   if (!(await dependencies.creditExists(body.creditoId))) {
     throw new NexaTokenError("credit_not_found", 404);
   }
+  if (await dependencies.creditCancelled(body.creditoId)) {
+    throw new NexaTokenError("credit_cancelled", 409);
+  }
   const result = await dependencies.upsertToken(body);
   if (result === "credit_not_found") {
     throw new NexaTokenError("credit_not_found", 404);
+  }
+  if (result === "credit_cancelled") {
+    throw new NexaTokenError("credit_cancelled", 409);
   }
   if (result === "token_conflict" || result === "token_in_use") {
     throw new NexaTokenError(result, 409);

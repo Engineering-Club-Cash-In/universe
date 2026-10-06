@@ -16,6 +16,8 @@
     bigint,
     index,
     jsonb,
+    uuid,
+    bigserial,
     type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
@@ -750,6 +752,28 @@
         table.external_reference,
       ),
       uqNonce: uniqueIndex("uq_nexa_payment_events_nonce").on(table.nonce),
+    }),
+  );
+  // Cola de eventos hacia nexa-server (patrón outbox): se escribe en la misma
+  // transacción que el cambio de negocio y un worker la drena.
+  export const nexa_outbox = customSchema.table(
+    "nexa_outbox",
+    {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      event_id: uuid("event_id").notNull().defaultRandom().unique(),
+      tipo: varchar("tipo", { length: 40 }).notNull(),
+      credito_id: integer("credito_id").notNull(),
+      payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+      intentos: integer("intentos").notNull().default(0),
+      ultimo_error: text("ultimo_error"),
+      proximo_intento_at: timestamp("proximo_intento_at", { withTimezone: true }).notNull().defaultNow(),
+      enviado_at: timestamp("enviado_at", { withTimezone: true }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      pendientesIdx: index("idx_nexa_outbox_pendientes")
+        .on(table.proximo_intento_at)
+        .where(sql`${table.enviado_at} IS NULL`),
     }),
   );
   export const boletas = customSchema.table("boletas", {

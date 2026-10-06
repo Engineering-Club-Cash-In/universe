@@ -19,6 +19,7 @@ const fakeDeps = (
   overrides?: Partial<{
     claimNonce: boolean;
     creditExists: boolean;
+    creditCancelled: boolean;
     upsertToken: string;
   }>,
 ): { deps: NexaTokenDependencies; calls: string[] } => {
@@ -34,6 +35,10 @@ const fakeDeps = (
         calls.push("creditExists");
         return overrides?.creditExists ?? true;
       },
+      creditCancelled: async () => {
+        calls.push("creditCancelled");
+        return overrides?.creditCancelled ?? false;
+      },
       upsertToken: async () => {
         calls.push("upsertToken");
         return (overrides?.upsertToken ?? "created") as any;
@@ -43,12 +48,14 @@ const fakeDeps = (
 };
 
 const cases = [
-  { name: "created", upsert: "created", expectResult: "created", expectCalls: ["claimNonce", "creditExists", "upsertToken"] },
-  { name: "updated", upsert: "updated", expectResult: "updated", expectCalls: ["claimNonce", "creditExists", "upsertToken"] },
-  { name: "unchanged", upsert: "unchanged", expectResult: "unchanged", expectCalls: ["claimNonce", "creditExists", "upsertToken"] },
+  { name: "created", upsert: "created", expectResult: "created", expectCalls: ["claimNonce", "creditExists", "creditCancelled", "upsertToken"] },
+  { name: "updated", upsert: "updated", expectResult: "updated", expectCalls: ["claimNonce", "creditExists", "creditCancelled", "upsertToken"] },
+  { name: "unchanged", upsert: "unchanged", expectResult: "unchanged", expectCalls: ["claimNonce", "creditExists", "creditCancelled", "upsertToken"] },
   { name: "token_conflict", upsert: "token_conflict", expectError: "token_conflict", expectStatus: 409 },
   { name: "token_in_use", upsert: "token_in_use", expectError: "token_in_use", expectStatus: 409 },
   { name: "credit_not_found (upsert)", upsert: "credit_not_found", expectError: "credit_not_found", expectStatus: 404 },
+  { name: "credit_cancelled (upsert, carrera)", upsert: "credit_cancelled", expectError: "credit_cancelled", expectStatus: 409 },
+  { name: "crédito CANCELADO se rechaza sin llegar al upsert", creditCancelled: true, expectError: "credit_cancelled", expectStatus: 409, expectCalls: ["claimNonce", "creditExists", "creditCancelled"] },
   { name: "claimNonce false", claimNonce: false, expectError: "replay", expectStatus: 409, expectCalls: ["claimNonce"] },
   { name: "creditExists false", creditExists: false, expectError: "credit_not_found", expectStatus: 404, expectCalls: ["claimNonce", "creditExists"] },
 ];
@@ -58,6 +65,7 @@ for (const c of cases) {
     const { deps, calls } = fakeDeps({
       claimNonce: c.claimNonce,
       creditExists: c.creditExists,
+      creditCancelled: (c as any).creditCancelled,
       upsertToken: (c as any).upsert,
     });
 

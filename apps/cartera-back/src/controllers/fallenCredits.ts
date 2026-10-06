@@ -69,6 +69,12 @@ export async function marcarCreditoComoCaido({
       return { success: false, message: "El crédito ya está marcado como CAIDO." };
     }
 
+    // Un crédito CANCELADO nunca cambia de estado: marcarlo CAIDO además
+    // borraría sus pagos.
+    if (credito.statusCredit === StatusCredit.CANCELADO) {
+      return { success: false, message: "El crédito está CANCELADO y no puede marcarse como CAIDO." };
+    }
+
     /**
      * 🛡️ Un crédito con deuda viva por cobros adicionales no se marca CAIDO en
      * silencio.

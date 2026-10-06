@@ -37,7 +37,7 @@ test.each(["qa_real_payments", "production"])("%s lifecycle drains application a
     review: () => ++reviews < 2,
   });
 
-  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, NEXA_DEPLOYMENT_MODE: mode, ...(mode === "production" ? { CARTERA_TARGET_ENV: "production", CARTERA_PRODUCTION_ALLOWED_ORIGINS: baseEnv.CARTERA_API_BASE_URL } : {}) }), deps, { scheduler });
+  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, NEXA_DEPLOYMENT_MODE: mode, ...(mode === "production" ? { CARTERA_TARGET_ENV: "production", CARTERA_PRODUCTION_ALLOWED_ORIGINS: baseEnv.CARTERA_API_BASE_URL, NEXA_CARTERA_EVENTS_SECRET: "e".repeat(32) } : {}) }), deps, { scheduler });
   await waitFor(() => applications === 3 && reviews === 2);
   const scheduled = [...scheduler.callbacks];
   stop();

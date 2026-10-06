@@ -271,14 +271,30 @@ test("manda a cartera el token completo: prefijo + identificador", async () => {
 
 function repository(claim: ApplicationClaim, callbacks: {
   finalize: (...args: Parameters<ApplicationWorkerRepository["finalizeApplication"]>) => void;
-  lookup: () => number | null;
+  lookup: (options?: { includeInactive?: boolean }) => number | null;
   fail: () => void;
 }): ApplicationWorkerRepository {
   let claimed = false;
   return {
     claimNextApplication: async () => claimed ? null : (claimed = true, claim),
-    resolveCreditoId: async () => callbacks.lookup(),
+    resolveCreditoId: async (_id, _prefix, options) => callbacks.lookup(options),
     finalizeApplication: async (...args) => callbacks.finalize(...args),
     markApplicationFailed: async () => callbacks.fail(),
   };
 }
+
+test("un reintento de pago ya aplicado resuelve el crédito aunque esté inactivo; el primer intento no", async () => {
+  const seen: Array<boolean | undefined> = [];
+  for (const carteraPaymentId of [null, 701]) {
+    await runApplicationWorkerOnce({
+      repository: repository({ ...baseClaim, carteraPaymentId }, {
+        finalize: () => {},
+        lookup: (options) => { seen.push(options?.includeInactive); return 42; },
+        fail: () => {},
+      }),
+      cartera: { applyNexaPayment: async () => ({ status: "APPLIED", paymentId: 701 }) },
+      leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,
+    });
+  }
+  expect(seen).toEqual([false, true]);
+});

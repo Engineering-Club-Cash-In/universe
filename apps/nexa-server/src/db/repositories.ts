@@ -285,15 +285,14 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     } : null;
   }
 
-  async resolveCreditoId(tokenIdentifier: string, tokenPrefix: string) {
+  async resolveCreditoId(tokenIdentifier: string, tokenPrefix: string, options: { includeInactive?: boolean } = {}) {
     const [user] = await this.db.select({ creditoId: nexaTokenUsers.creditoId })
       .from(nexaTokenUsers)
       .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
       .where(and(
         eq(nexaTokenUsers.identifier, tokenIdentifier),
         eq(nexaPaymentTokens.prefix, tokenPrefix),
-        eq(nexaTokenUsers.active, true),
-        eq(nexaPaymentTokens.active, true),
+        ...(options.includeInactive ? [] : [eq(nexaTokenUsers.active, true), eq(nexaPaymentTokens.active, true)]),
       ))
       .limit(1);
     return user?.creditoId ?? null;

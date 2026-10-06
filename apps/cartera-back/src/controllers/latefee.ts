@@ -2425,10 +2425,16 @@ export async function condonarMora({
         return { kind: "not_found" as const };
       }
 
+      // Condicional sobre MOROSO (mismo criterio que la condonación masiva y el
+      // convenio): un CANCELADO/CAIDO/INCOBRABLE/EN_CONVENIO nunca cambia de
+      // estado por condonar su mora. La mora igual se condona.
       await tx
         .update(creditos)
         .set({ statusCredit: "ACTIVO" })
-        .where(eq(creditos.credito_id, credito_id));
+        .where(and(
+          eq(creditos.credito_id, credito_id),
+          eq(creditos.statusCredit, "MOROSO"),
+        ));
 
       const [condonacion] = await tx
         .insert(moras_condonaciones)

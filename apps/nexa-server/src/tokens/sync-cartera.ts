@@ -1,4 +1,6 @@
 import type { CarteraTokenClient } from "../payments/cartera-client";
+import type { CarteraEventTokenUsers } from "../routes/cartera-events";
+import { deactivateIfCreditCancelled } from "./credit-cancelled";
 
 type SyncableTokenUser = {
   creditoId: number;
@@ -25,6 +27,8 @@ export type TokenSyncSummary = {
 export async function syncTokensToCartera(options: {
   tokenUsers: { list(): Promise<SyncableTokenUser[]> };
   cartera: CarteraTokenClient;
+  // Desactiva el token user local si cartera responde credit_cancelled.
+  cancelledTokenUsers: CarteraEventTokenUsers;
 }): Promise<TokenSyncSummary> {
   const summary: TokenSyncSummary = {
     total: 0, created: 0, updated: 0, unchanged: 0, skippedInactive: 0, rejected: [], failed: [],
@@ -42,6 +46,7 @@ export async function syncTokensToCartera(options: {
         identifier: user.identifier,
         nexaUserId: user.nexaUserId,
       });
+      await deactivateIfCreditCancelled(result, user.creditoId, options.cancelledTokenUsers);
       if (result.status === "REJECTED") summary.rejected.push({ creditoId: user.creditoId, reason: result.reason });
       else if (result.status === "CREATED") summary.created += 1;
       else if (result.status === "UPDATED") summary.updated += 1;

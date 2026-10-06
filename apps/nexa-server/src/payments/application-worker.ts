@@ -1,5 +1,7 @@
 import { tokenDateSchema, type ReviewTransferStatus } from "../nexa/schemas";
 import { CarteraPaymentRequestError, formatAmount, type CarteraPaymentClient, type CarteraTokenClient } from "./cartera-client";
+import type { CarteraEventTokenUsers } from "../routes/cartera-events";
+import { deactivateIfCreditCancelled } from "../tokens/credit-cancelled";
 
 export type ApplicationClaim = {
   id: number;
@@ -18,7 +20,7 @@ export type ApplicationClaim = {
 
 export type ApplicationWorkerRepository = {
   claimNextApplication(now: Date, leaseSeconds: number): Promise<ApplicationClaim | null>;
-  resolveCreditoId(tokenIdentifier: string, tokenPrefix: string): Promise<number | null>;
+  resolveCreditoId(tokenIdentifier: string, tokenPrefix: string, options?: { includeInactive?: boolean }): Promise<number | null>;
   finalizeApplication(id: number, outcome: {
     paymentId: number | null;
     paymentIds?: number[];
@@ -37,6 +39,8 @@ export type TokenRepair = {
     nexaUserId: number;
   } | null>;
   cartera: CarteraTokenClient;
+  // Desactiva el token user local si cartera responde credit_cancelled.
+  cancelledTokenUsers: CarteraEventTokenUsers;
 };
 
 export async function runApplicationWorkerOnce(options: {
@@ -74,7 +78,11 @@ export async function runApplicationWorkerOnce(options: {
       return true;
     }
 
-    const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
+    // Un reintento de un pago ya aplicado debe llegar a cartera aunque el crédito
+    // se haya cancelado después: el binding inactivo no es "token desconocido".
+    const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix, {
+      includeInactive: Boolean(claim.carteraPaymentId),
+    });
     if (!creditoId) {
       if (claim.carteraPaymentId) throw new Error("Billing credit could not be resolved");
       await options.repository.finalizeApplication(claim.id, {
@@ -119,6 +127,7 @@ export async function runApplicationWorkerOnce(options: {
           identifier: tokenUser.identifier,
           nexaUserId: tokenUser.nexaUserId,
         });
+        await deactivateIfCreditCancelled(registered, tokenUser.creditoId, options.tokenRepair.cancelledTokenUsers);
         if (registered.status !== "REJECTED") {
           result = await options.cartera.applyNexaPayment(paymentInput);
         } else if (DEFINITIVE_REJECTIONS.has(registered.reason)) {

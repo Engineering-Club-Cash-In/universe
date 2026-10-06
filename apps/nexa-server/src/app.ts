@@ -2,7 +2,9 @@ import { Hono, type Context } from "hono";
 import { sql } from "drizzle-orm";
 import type { AppConfig } from "./config";
 import { createDependencies, type AppDependencies } from "./dependencies";
+import { DbCarteraEventTokenUserRepository } from "./db/cartera-events-repository";
 import { createAdminRouter } from "./routes/admin";
+import { createCarteraEventsRouter } from "./routes/cartera-events";
 import { renderTestConsole } from "./ui/test-console";
 import { appVersion } from "./version";
 import { createPaymentTokenWebhookRouter } from "./webhooks/payment-token";
@@ -69,6 +71,12 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
     transactions: deps.transactions,
     tokenUsers: deps.tokenUsers,
   }));
+  // Always mounted: without NEXA_CARTERA_EVENTS_SECRET it answers 503, which
+  // cartera retries (it also retries a 404; only 400/413/422 are terminal).
+  app.route("/", createCarteraEventsRouter({
+    secret: config.nexaCarteraEventsSecret,
+    tokenUsers: new DbCarteraEventTokenUserRepository(deps.db),
+  }));
   if (config.enableAdminApi) {
     app.route("/admin", createAdminRouter({
       adminApiKey: config.nexaAdminApiKey!,
@@ -76,6 +84,7 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
       cartera: deps.cartera,
       paymentTokens: deps.paymentTokens,
       tokenUsers: deps.tokenUsers,
+      cancelledTokenUsers: new DbCarteraEventTokenUserRepository(deps.db),
       transactions: deps.transactions,
       pollRuns: deps.pollRuns,
       mockCredits: deps.mockCredits,

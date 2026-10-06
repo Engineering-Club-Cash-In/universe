@@ -42,7 +42,7 @@ test.each([
   { name: "binding_missing: registra el token y aprueba", code: "binding_missing", outcome: "approved", applies: 2, registers: 1 },
   { name: "el registro falla: queda para reintento, no se rechaza", code: "binding_token_missing", register: "throw", outcome: "retry", applies: 1, registers: 1 },
   { name: "cartera rechaza el registro con token_conflict: revisión manual, no rechazo", code: "binding_token_missing", register: "token_conflict", outcome: "manual:token_repair_failed:token_conflict", applies: 1, registers: 1 },
-  { name: "cartera responde credit_cancelled al registrar: rechazo definitivo", code: "binding_token_missing", register: "credit_cancelled", outcome: "rejected:credit_cancelled", applies: 1, registers: 1 },
+  { name: "cartera responde credit_cancelled: desactiva el token user local y rechaza", code: "binding_token_missing", register: "credit_cancelled", outcome: "rejected:credit_cancelled", applies: 1, registers: 1, deactivated: [42] },
   { name: "cartera responde credit_not_found al registrar: revisión manual, no rechazo", code: "binding_token_missing", register: "credit_not_found", outcome: "manual:token_repair_failed:credit_not_found", applies: 1, registers: 1 },
   { name: "registrado pero cartera sigue sin binding: revisión manual", code: "binding_token_missing", secondApply: "binding_token_missing", outcome: "manual:binding_token_missing", applies: 2, registers: 1 },
   { name: "token_mismatch no se repara: revisión manual", code: "token_mismatch", outcome: "manual:token_mismatch", applies: 1, registers: 0, lookups: 0 },
@@ -55,6 +55,7 @@ test.each([
   const registered: unknown[] = [];
   let applies = 0;
   let lookups = 0;
+  const deactivated: number[] = [];
 
   await runApplicationWorkerOnce({
     repository: repository(baseClaim, { finalize: (...args) => { finalized.push(args); }, fail: (...args) => { failed.push(args); } }),
@@ -73,6 +74,7 @@ test.each([
             return "register" in c ? { status: "REJECTED", reason: c.register as string } : { status: "CREATED" };
           },
         },
+        cancelledTokenUsers: { deactivateByCreditoId: async (creditoId) => (deactivated.push(creditoId), 1) },
       },
     }),
     now: () => new Date("2026-09-08T12:00:00Z"),
@@ -81,6 +83,8 @@ test.each([
 
   expect({ applies, registers: registered.length }).toEqual({ applies: c.applies as number, registers: c.registers as number });
   if ("lookups" in c) expect(lookups).toBe(c.lookups as number);
+  // Solo credit_cancelled desactiva el token user local.
+  expect(deactivated).toEqual("deactivated" in c ? [...(c.deactivated as readonly number[])] : []);
   // Se registra prefijo + identificador del pago (lo que cartera compara), no el token de Nexa.
   if (c.registers) expect(registered[0]).toEqual({ ...tokenUser, token: "123456710005010" });
   expectOutcome(c.outcome, finalized, failed);
@@ -136,6 +140,7 @@ async function runWithHttpCartera(responses: { payment: Response[]; token?: Resp
     tokenRepair: {
       findTokenUser: async () => user,
       cartera,
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 1 },
     },
     now: () => new Date("2026-09-08T12:00:00Z"),
     leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,

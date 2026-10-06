@@ -60,5 +60,29 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
   const tokenMigration = Bun.file(
     new URL("../../drizzle/0048_nexa_token_binding.sql", import.meta.url),
   );
-  expect(await tokenMigration.exists()).toBe(true);
+  expect(await tokenMigration.exists()).toBe(true);  const outboxMigration = Bun.file(
+    new URL("../../drizzle/0049_nexa_outbox.sql", import.meta.url),
+  );
+  expect(await outboxMigration.exists()).toBe(true);
+});
+
+test("define la cola nexa_outbox con evento único e índice de pendientes", () => {
+  const outbox = Reflect.get(schema, "nexa_outbox");
+  expect(outbox).toBeDefined();
+  if (!outbox) return;
+  const config = getTableConfig(outbox);
+  expect(config.columns.map((column) => column.name)).toEqual([
+    "id",
+    "event_id",
+    "tipo",
+    "credito_id",
+    "payload",
+    "intentos",
+    "ultimo_error",
+    "proximo_intento_at",
+    "enviado_at",
+    "created_at",
+  ]);
+  expect(config.columns.find((column) => column.name === "event_id")?.isUnique).toBe(true);
+  expect(config.indexes.map((index) => index.config.name)).toEqual(["idx_nexa_outbox_pendientes"]);
 });

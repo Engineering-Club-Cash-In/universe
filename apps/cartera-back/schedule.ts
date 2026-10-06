@@ -14,6 +14,8 @@ import {
   provisionarCuentasPortal,
 } from './src/controllers/provisionarCuentasPortal';
 import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
+import { enviarEventosNexaPendientes } from './src/controllers/nexaCarteraEvents';
+import { client } from './src/database';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -165,6 +167,26 @@ export function iniciarTareasProgramadas() {
       'retry_crm_contract_batches',
       async () => {
         await reintentarBateriasPendientes();
+      },
+    );
+  });
+
+  // 📡 Eventos hacia nexa-server (cartera.nexa_outbox) - cada minuto.
+  //    Hoy: crédito CANCELADO → nexa-server desactiva el token. Sin
+  //    NEXA_SERVER_URL o NEXA_CARTERA_EVENTS_SECRET no hace nada y las filas
+  //    esperan. Varias instancias no chocan: el reclamo usa FOR UPDATE SKIP
+  //    LOCKED y un lease de 2 min. Ver nexaCarteraEvents.ts.
+  schedule.scheduleJob({ rule: '* * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'deliver_nexa_events',
+      async () => {
+        await enviarEventosNexaPendientes({
+          sql: client,
+          config: {
+            nexaServerUrl: process.env.NEXA_SERVER_URL,
+            secret: process.env.NEXA_CARTERA_EVENTS_SECRET,
+          },
+        });
       },
     );
   });

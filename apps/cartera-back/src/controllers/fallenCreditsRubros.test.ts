@@ -295,3 +295,19 @@ describe("marcarCreditoComoCaido — rubros con deuda viva", () => {
     expect(chequeo).toBeLessThan(unlock);
   });
 });
+
+describe("marcarCreditoComoCaido — estados que no se tocan", () => {
+  it("un crédito CANCELADO se rechaza y no se borra ni se cambia nada", async () => {
+    preparar([]);
+    filas.set(creditos, [{ credito_id: 9, statusCredit: "CANCELADO" }]);
+
+    const r = await marcar();
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("CANCELADO");
+    expect(eventos).not.toContain("delete:pagos_credito");
+    expect(eventos).not.toContain("delete:cuotas_credito");
+    expect(eventos).not.toContain("update:creditos");
+    expect(eventos).not.toContain("insert:creditos_caidos");
+  });
+});

@@ -11,6 +11,7 @@ import { pollPaymentTokenDate } from "../payments/poller";
 import { runReviewWorkerOnce } from "../payments/review-worker";
 import { createAdminRouter } from "../routes/admin";
 import { DbPaymentTransactionRepository, DbReviewRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "./repositories";
+import { DbCarteraEventTokenUserRepository } from "./cartera-events-repository";
 import * as schema from "./schema";
 import { nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUsers } from "./schema";
 
@@ -785,6 +786,7 @@ integrationTest("authenticated reconciliation routes join PostgreSQL rows and ne
     tokenUsers: new DbTokenUserRepository(db),
     transactions,
     pollRuns: new PollRunRepository(db),
+    cancelledTokenUsers: new DbCarteraEventTokenUserRepository(db),
     accumulatorAccount: 1,
     paymentTokenName: "test",
   });

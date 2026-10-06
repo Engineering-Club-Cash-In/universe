@@ -11,12 +11,14 @@ const body = { creditoId: 123, token: "1234567123456789", identifier: "123456789
 const fakeDeps = (over: {
   claimNonce?: boolean;
   creditExists?: boolean;
+  creditCancelled?: boolean;
   upsert?: NexaTokenUpsertResult | "throw";
 } = {}) => {
   const calls: string[] = [];
   const deps: NexaTokenDependencies = {
     claimNonce: async () => (calls.push("claimNonce"), over.claimNonce ?? true),
     creditExists: async () => (calls.push("creditExists"), over.creditExists ?? true),
+    creditCancelled: async () => (calls.push("creditCancelled"), over.creditCancelled ?? false),
     upsertToken: async () => {
       calls.push("upsertToken");
       if (over.upsert === "throw") throw new Error("x");
@@ -60,6 +62,7 @@ const cases: {
   { name: "unchanged → 200", deps: { upsert: "unchanged" }, status: 200, body: { status: "UNCHANGED", creditoId: 123 } },
   { name: "token_conflict → 409", deps: { upsert: "token_conflict" }, status: 409, body: { error: "token_conflict" } },
   { name: "nonce repetido → 409", deps: { claimNonce: false }, status: 409, body: { error: "replay" }, calls: ["claimNonce"] },
+  { name: "crédito cancelado → 409", deps: { creditCancelled: true }, status: 409, body: { error: "credit_cancelled" } },
   { name: "crédito inexistente → 404", deps: { creditExists: false }, status: 404, body: { error: "credit_not_found" } },
   {
     name: "firma incorrecta → 401 sin tocar dependencias",

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 
 // ── Mocks de infraestructura ────────────────────────────────────────────────
 // El módulo bajo prueba arrastra la base de datos, el router y otros
@@ -41,6 +43,8 @@ let lecturas: string[] = [];
 /** El nombre de la tabla que drizzle lleva adentro del objeto. */
 const tablaDe = (t: any) =>
   t?.[Symbol.for("drizzle:Name")] ?? t?._?.name ?? "?";
+/** El WHERE de cada update, en el mismo orden que `updates`. */
+const updateWheres: unknown[] = [];
 /** Simula el update guardado del commit: false = 0 filas afectadas. */
 let updateAffectsRows = true;
 let updateResultQueue: boolean[] = [];
@@ -96,8 +100,9 @@ const dbMock = {
   select: mock(() => makeSelect()),
   update: mock(() => ({
     set: (values: Record<string, unknown>) => ({
-      where: () => {
+      where: (condicion?: unknown) => {
         updates.push(values);
+        updateWheres.push(condicion);
         eventos.push({ tipo: "update", values });
         return Object.assign(Promise.resolve(), {
           returning: () =>
@@ -213,6 +218,7 @@ const paramsBase = {
 
 beforeEach(() => {
   updates.length = 0;
+  updateWheres.length = 0;
   eventos.length = 0;
   inserts.length = 0;
   selectQueue = [];
@@ -658,5 +664,41 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
     expect(salida).not.toContain("registrada en el historial");
     // Y tampoco puede afirmar la causa que no verificó.
     expect(salida).not.toContain("No había moras activas para desactivar");
+  });
+
+  // ── CANCELADO es terminal: no admite convenio ────────────────────────────
+  it("crédito CANCELADO: rechaza con mensaje claro sin abrir la transacción", async () => {
+    armarBase();
+    selectQueue[2] = [{ credito_id: 72, statusCredit: "CANCELADO" }];
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(false);
+    expect(res.message).toBe("Un crédito CANCELADO no admite convenio.");
+    expect(dbMock.transaction).not.toHaveBeenCalled();
+    expect(updates.some((values) => values.statusCredit === "EN_CONVENIO")).toBe(false);
+    expect(inserts.some(esConvenio)).toBe(false);
+  });
+
+  it("cancelado entre la lectura y la transacción: el UPDATE no toca filas y no queda convenio", async () => {
+    armarBase();
+    // El UPDATE a EN_CONVENIO filtra statusCredit <> CANCELADO: 0 filas.
+    updateResultQueue = [false];
+
+    const res = await createPaymentAgreement(input);
+
+    const iEstado = updates.findIndex((values) => values.statusCredit === "EN_CONVENIO");
+    const where = new PgDialect().sqlToQuery(updateWheres[iEstado] as SQL);
+    expect(where.sql).toContain(`"statusCredit" <> $`);
+    expect(where.params).toContain("CANCELADO");
+
+    expect(res.success).toBe(false);
+    expect(res.message).toBe("Un crédito CANCELADO no admite convenio.");
+    expect(rollbacks).toBe(1);
+    expect(commits).toBe(0);
+    expect(inserts.some(esConvenio)).toBe(true);
+    expect(insertsPersistidos.some(esConvenio)).toBe(false);
+    // No llega a tocar la mora.
+    expect(eventos.some((e) => e.tipo === "select-for-update")).toBe(false);
   });
 });

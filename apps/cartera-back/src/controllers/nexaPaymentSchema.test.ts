@@ -21,12 +21,20 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     "expires_at",
     "max_payment_amount",
     "created_at",
-    "nexa_token",
-    "nexa_identifier",
+    // Cuenta Nexa del cliente (migración 0045).
     "nexa_user_id",
+    "nexa_identifier",
+    "nexa_token",
+    "nexa_national_id",
+    "cuenta_solicitada_at",
+    "cuenta_intentos",
+    "cuenta_error",
+    "cuenta_notificada_at",
+    "updated_at",
+    // Migración 0048.
     "token_registrado_at",
   ]);
-  const tokenIndex = bindingConfig.indexes.find((index) => index.config.name === "uq_nexa_credit_bindings_token");
+  const tokenIndex = bindingConfig.indexes.find((index) => index.config.name === "nexa_credit_bindings_uq_token");
   expect(tokenIndex?.config.unique).toBe(true);
   expect(tokenIndex?.config.columns.map((column) => "name" in column ? column.name : "")).toEqual(["nexa_token"]);
   expect(eventConfig.columns.map((column) => column.name)).toEqual([

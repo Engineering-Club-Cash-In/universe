@@ -1870,6 +1870,10 @@ export interface Condonacion {
   fecha: string;
   usuario_email: string;
   montoCondonacion: string;
+  /** true = la condonó el sistema (pago Nexa a tiempo), no una persona. */
+  automatica?: boolean;
+  /** Motivo legible; para las automáticas traduce el código interno. */
+  motivo_texto?: string;
 }
 
 // ---------- Requests ----------
@@ -1978,7 +1982,12 @@ export interface CondonacionesMoraResponse {
   success: boolean;
   data?: Condonacion[];
   pagination?: MoraPagination;
-  totales?: { monto_total: string; condonaciones: number };
+  totales?: {
+    monto_total: string;
+    monto_total_manual?: string;
+    monto_total_automatica?: string;
+    condonaciones: number;
+  };
   excelUrl?: string;
   count?: number;
 }

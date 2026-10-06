@@ -484,7 +484,21 @@
       .notNull()
       .references(() => platform_users.id, { onDelete: "cascade" }),
     fecha: timestamp("fecha").defaultNow().notNull(),
-  });
+    // Evento Nexa que originó una condonación automática (pago ACH a tiempo).
+    // Único entre las vivas: el reintento del mismo evento no condona dos veces.
+    // Ver drizzle/0051_condonacion_nexa_a_tiempo.sql.
+    nexa_payment_event_id: integer("nexa_payment_event_id"),
+    // La condonación se anula (no se borra) si el pago Nexa se rechaza.
+    anulada_at: timestamp("anulada_at", { withTimezone: true }),
+    // Pagos pendientes que sostenían la condonación Nexa al decidirla: si uno
+    // se anula o se revierte sin validarse, la condonación se anula sola.
+    // Ver drizzle/0052_condonacion_nexa_pagos_pendientes.sql.
+    pagos_pendientes_ids: integer("pagos_pendientes_ids").array(),
+  }, (t) => [
+    uniqueIndex("uq_moras_condonaciones_nexa_evento_viva")
+      .on(t.nexa_payment_event_id)
+      .where(sql`${t.nexa_payment_event_id} IS NOT NULL AND ${t.anulada_at} IS NULL`),
+  ]);
 
   // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
   export type MoraPagadaTipo = "PAGO" | "CONDONACION" | "REVERSA" | "ANULACION";
@@ -519,6 +533,9 @@
       fecha: timestamp("fecha")
         .default(sql`clock_timestamp()`)
         .notNull(),
+      // La condonación (moras_condonaciones) que originó una fila CONDONACION.
+      // Sin FK, igual que pago_id. Ver drizzle/0051_condonacion_nexa_a_tiempo.sql.
+      condonacion_id: integer("condonacion_id"),
     },
     (table) => [
       // Impide doble clic: el mismo pago no puede registrar mora dos veces en la misma cuota.
@@ -541,6 +558,11 @@
       index("mora_pagada_cuota_idx_pago").on(table.pago_id).where(
         sql`${table.pago_id} IS NOT NULL`
       ),
+
+      // Buscar por condonación: compensar las filas de una condonación anulada.
+      index("mora_pagada_cuota_idx_condonacion").on(table.condonacion_id).where(
+        sql`${table.condonacion_id} IS NOT NULL`
+      ),
     ]
   );
 
@@ -558,6 +580,8 @@
     "API_MANUAL",
     "CONDONACION_INDIVIDUAL",
     "CONDONACION_MASIVA",
+    // Pago Nexa (ACH) que llegó a tiempo: ver drizzle/0051.
+    "CONDONACION_NEXA_A_TIEMPO",
   ]);
 
   export const moras_historial = customSchema.table("moras_historial", {

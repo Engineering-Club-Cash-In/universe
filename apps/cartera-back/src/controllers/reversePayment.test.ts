@@ -206,6 +206,7 @@ function createPersistenceHarness(
   recordedUpdates: RecordedUpdate[] = [],
   filasEnLaCuota = 1,
   recordedCountWheres: unknown[] = [],
+  extra: Partial<ReversePaymentDependencies> = {},
 ) {
   const tx = createTransactionTx(
     payment,
@@ -237,9 +238,43 @@ function createPersistenceHarness(
     restituirMora: (async () => ({
       success: true,
     })) as unknown as ReversePaymentDependencies["restituirMora"],
+    ...extra,
   });
   return { handler, runTransaction };
 }
+
+describe("reversePayment y las condonaciones Nexa sostenidas por un pendiente", () => {
+  const reversar = async (payment: Record<string, unknown>) => {
+    const llamadas: unknown[] = [];
+    const { handler } = createPersistenceHarness(
+      mock(async () => []) as unknown as ReversePaymentDependencies["reverseInvestors"],
+      payment,
+      [],
+      1,
+      [],
+      {
+        anularCondonacionesPorPagoPendiente: (async (params: { credito_id: number; pago_id: number; accion: string; dbClient: unknown }) => {
+          llamadas.push({ credito_id: params.credito_id, pago_id: params.pago_id, accion: params.accion, enLaTx: params.dbClient !== undefined });
+          return [];
+        }) as unknown as ReversePaymentDependencies["anularCondonacionesPorPagoPendiente"],
+      },
+    );
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
+    });
+    return llamadas;
+  };
+
+  test("revertir un pago PENDIENTE pide anular las condonaciones que se sostenían en él, dentro de la transacción", async () => {
+    expect(await reversar(pendingPayment)).toEqual([{ credito_id: 10, pago_id: 30, accion: "revirtio", enLaTx: true }]);
+  });
+
+  test("revertir un pago ya VALIDADO no toca las condonaciones", async () => {
+    expect(await reversar({ ...pendingPayment, pagado: true, validationStatus: "validated" })).toEqual([]);
+  });
+});
 
 describe("reversePayment global-persistence evidence", () => {
   let lines: string[];

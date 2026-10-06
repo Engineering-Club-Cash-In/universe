@@ -20,6 +20,7 @@ import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
+import type { anularCondonacionesNexaPorPagoPendiente } from "./condonacionNexaPagoPendiente";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 import {
@@ -138,6 +139,11 @@ export interface ReversePaymentDependencies {
    * transacción y de tomar el candado, y tira `NexaPaymentNotReversibleError`.
    */
   readonly rechazarSiPagoEsNexa: typeof rechazarSiPagoEsNexa;
+  /**
+   * Anula las condonaciones Nexa que se sostenían en el pago revertido si
+   * estaba pendiente (drizzle/0052). Opcional: quien no la pasa no la corre.
+   */
+  readonly anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -148,6 +154,11 @@ const defaultDependencies: ReversePaymentDependencies = {
   refrescarProyeccion: refrescarProyeccionTrasReversa,
   restituirMora: updateMora,
   rechazarSiPagoEsNexa,
+  // Por `import()`: arrastra `./latefee`, que varios archivos de la suite mockean.
+  anularCondonacionesPorPagoPendiente: async (params) => {
+    const { anularCondonacionesNexaPorPagoPendiente: anular } = await import("./condonacionNexaPagoPendiente");
+    return anular(params);
+  },
 };
 
 export function createReversePayment(
@@ -975,6 +986,21 @@ export function createReversePayment(
             .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
         }
 
+      }
+
+      // ======================================================================
+      // 🧾 CONDONACIONES NEXA SOSTENIDAS POR ESTE PENDIENTE
+      // ======================================================================
+      // Si el pago revertido estaba pendiente y una condonación Nexa a tiempo
+      // se apoyaba en él para dar el crédito por al día, se anula en esta misma
+      // transacción (la mora vuelve). Un pago ya validado no: quedó firme.
+      if (pago.validationStatus === "pending") {
+        await dependencies.anularCondonacionesPorPagoPendiente?.({
+          credito_id,
+          pago_id,
+          accion: "revirtio",
+          dbClient: tx as unknown as typeof db,
+        });
       }
 
       // ======================================================================

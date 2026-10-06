@@ -51,7 +51,12 @@ const applyPaymentResponseSchema = z.object({
   }
   return value;
 });
-const safeErrorResponseSchema = z.object({ error: z.string().regex(/^[a-z0-9_]{1,64}$/) });
+const safeErrorResponseSchema = z.object({
+  error: z.string().regex(/^[a-z0-9_]{1,64}$/),
+  // Qué pasó con la condonación a tiempo de la mora en un pago incierto. Un
+  // valor desconocido (cartera más nueva) se ignora: nunca texto libre.
+  condonacion: z.enum(["anulada", "conservada", "conservada_pago_posterior", "sin_verificar"]).optional().catch(undefined),
+});
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -147,7 +152,11 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient, CarteraTo
       if (uncertainCode || retryableCode || [401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && !error?.success)) {
         throw new CarteraPaymentRequestError(
           `Cartera payment request failed: HTTP ${status}`,
-          uncertainCode ? error.data.error : undefined,
+          uncertainCode
+            ? error.data.error === "payment_outcome_uncertain" && error.data.condonacion
+              ? `payment_outcome_uncertain:condonacion_${error.data.condonacion}`
+              : error.data.error
+            : undefined,
         );
       }
       return {

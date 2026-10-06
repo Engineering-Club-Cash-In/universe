@@ -72,3 +72,25 @@ test("un campo de más en el 503 (de una cartera más nueva) se tolera", async (
   expect(await runWorker(cartera({ error: "payment_outcome_uncertain", detalle: "lo que sea" }), 3))
     .toEqual([[7, "payment_outcome_uncertain", null]]);
 });
+
+test.each([
+  ["anulada", "payment_outcome_uncertain:condonacion_anulada"],
+  ["conservada", "payment_outcome_uncertain:condonacion_conservada"],
+  ["conservada_pago_posterior", "payment_outcome_uncertain:condonacion_conservada_pago_posterior"],
+  ["sin_verificar", "payment_outcome_uncertain:condonacion_sin_verificar"],
+])("el 503 incierto con condonacion=%s queda en el failureReason como %s", async (condonacion, reason) => {
+  expect(await runWorker(cartera({ error: "payment_outcome_uncertain", condonacion }), 3))
+    .toEqual([[7, reason, null]]);
+});
+
+test("una condonacion desconocida (o texto libre) se ignora: queda el código solo", async () => {
+  for (const condonacion of ["otra_cosa", "Texto Libre", 7]) {
+    expect(await runWorker(cartera({ error: "payment_outcome_uncertain", condonacion }), 3))
+      .toEqual([[7, "payment_outcome_uncertain", null]]);
+  }
+});
+
+test("condonacion solo acompaña a payment_outcome_uncertain", async () => {
+  expect(await runWorker(cartera({ error: "payment_amount_mismatch", condonacion: "anulada" }), 3))
+    .toEqual([[7, "payment_amount_mismatch", null]]);
+});

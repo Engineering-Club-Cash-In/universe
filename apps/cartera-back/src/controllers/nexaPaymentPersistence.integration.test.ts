@@ -126,6 +126,15 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
     `;
     expect(billed).toEqual({ status: "billed", pago_id: 17 });
 
+    // Un evento cuyo pago se borró (crédito marcado CAIDO) nunca arranca a facturar.
+    const [sinPago] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash, status)
+      VALUES ('qa-billing-sin-pago', 'nonce-billing-sin-pago', 10, 10.00, 'GTQ', ${"f".repeat(64)}, 'billing_failed')
+      RETURNING id
+    `;
+    expect(await runtime.startNexaBilling(sinPago!.id)).toBe(false);
+
     const [unknownEvent] = await sql<{ id: number }[]>`
       INSERT INTO cartera.nexa_payment_events
         (external_reference, nonce, credito_id, amount, currency, payload_hash, status, pago_id)

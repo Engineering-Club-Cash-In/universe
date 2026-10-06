@@ -14,6 +14,7 @@ import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // `../utils/paymentAdvisoryLock` en esta rebanada. Adentro de `DEPS_REALES`
 // solo se resuelve cuando alguien corre esto de verdad contra la base.
 import type { revertirRubrosDelPago } from "./rubros";
+import type { anularCondonacionesNexaPorPagoPendiente } from "./condonacionNexaPagoPendiente";
 import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
@@ -64,6 +65,11 @@ export type AnularPagoMoraDeps = {
   updateMora: typeof updateMora;
   resetAjusteFechaIdeal: typeof resetAjusteFechaIdealSiPagoInvalidado;
   revertirRubros: typeof revertirRubrosDelPago;
+  /**
+   * Anula las condonaciones Nexa que se sostenían en este pago si estaba
+   * pendiente (drizzle/0052). Opcional: quien no la pasa no la corre.
+   */
+  anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
 };
 
 const DEPS_REALES = (): AnularPagoMoraDeps => ({
@@ -73,6 +79,12 @@ const DEPS_REALES = (): AnularPagoMoraDeps => ({
     const { revertirRubrosDelPago } = await import("./rubros");
     return revertirRubrosDelPago(pago_id, ejecutor);
   }) as typeof revertirRubrosDelPago,
+  // Por `import()` y no arriba: arrastra `./latefee` y la base, que varios
+  // archivos de la suite mockean (mismo cuidado que con `revertirRubros`).
+  anularCondonacionesPorPagoPendiente: (async (params) => {
+    const { anularCondonacionesNexaPorPagoPendiente } = await import("./condonacionNexaPagoPendiente");
+    return anularCondonacionesNexaPorPagoPendiente(params);
+  }) as typeof anularCondonacionesNexaPorPagoPendiente,
 });
 
 export async function anularPagoYRestituirMora(
@@ -151,6 +163,7 @@ export async function anularPagoYRestituirMora(
     .select({
       mora: pagos_credito.mora,
       paymentFalse: pagos_credito.paymentFalse,
+      validationStatus: pagos_credito.validationStatus,
       created_at: pagos_credito.createdAt,
       nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
     })
@@ -300,6 +313,18 @@ export async function anularPagoYRestituirMora(
         "Error al restituir la mora del pago anulado: " + resultadoMora.message,
       );
     }
+  }
+
+  // Un pendiente que sostenía una condonación Nexa a tiempo (el crédito quedaba
+  // al día gracias a él) se anuló sin validarse: la condonación se cae con él,
+  // en esta misma transacción. Un pago ya validado no: la condonación quedó firme.
+  if (pagoPrevio?.validationStatus === "pending") {
+    await deps.anularCondonacionesPorPagoPendiente?.({
+      credito_id,
+      pago_id,
+      accion: "anulo",
+      dbClient: tx,
+    });
   }
 
   // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo

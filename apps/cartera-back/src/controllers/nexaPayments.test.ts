@@ -497,6 +497,87 @@ test("un evento manual_review bloquea reintentos antes de mutar pagos", async ()
   expect(mutated).toBe(false);
 });
 
+test("un evento que quedó processing (el proceso murió) con condonación viva y sin filas de pago: la nueva entrega anula la condonación", async () => {
+  const { NexaPaymentError, classifyNexaClaim, processNexaPayment } = await import("./nexaPayments");
+  const requested = { creditoId: 10, amount: "10.00", currency: "GTQ", payloadHash: "a".repeat(64) };
+  const huerfano = {
+    id: 7, credito_id: 10, amount: "10.00", currency: "GTQ",
+    payload_hash: "a".repeat(64), status: "processing", pago_id: null,
+  };
+  // Solo la transición processing → manual_review entrega el evento para reconciliar.
+  expect(classifyNexaClaim(huerfano, false, requested)).toEqual({ kind: "manual_review", processingEventId: 7 });
+  expect(classifyNexaClaim({ ...huerfano, status: "manual_review" }, false, requested))
+    .toEqual({ kind: "manual_review" });
+  // Filas borradas por CAÍDO (pago_id_eliminado): nunca se reconcilia.
+  expect(classifyNexaClaim({ ...huerfano, pago_id_eliminado: 17 }, false, requested))
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
+
+  const run = async (
+    filas: { paymentId: number; validationStatus: string; amount: string }[],
+    status = "processing",
+  ) => {
+    const claim = classifyNexaClaim({ ...huerfano, status }, false, requested);
+    const anuladas: number[] = [];
+    let mutated = false;
+    await expect(processNexaPayment(
+      paymentBody("murio-tras-condonar"),
+      { nonce: `nonce-murio-${status}-${filas.length}`, payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => claim,
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "MOROSO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+        }),
+        findPayments: async (eventId) => (eventId === 7 ? filas : []),
+        anularCondonacionATiempo: async (eventId) => { anuladas.push(eventId); },
+        condonarMoraATiempo: async () => { mutated = true; },
+        registerPayment: async () => { mutated = true; return { success: true }; },
+        applyPayment: async () => { mutated = true; return { success: true }; },
+        complete: async () => { mutated = true; },
+        fail: async () => { mutated = true; },
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+    expect(mutated).toBe(false);
+    return anuladas;
+  };
+  // 0 filas: el pago no entró → se anula (la respuesta a Nexa no cambia: 503 incierto).
+  expect(await run([])).toEqual([7]);
+  // Con filas: el pago entró → la condonación se conserva.
+  expect(await run([{ paymentId: 17, validationStatus: "pending", amount: "10.00" }])).toEqual([]);
+  // Ya estaba en manual_review: un operador pudo registrar la boleta a mano (fila
+  // sin nexaPaymentEventId); 0 filas vinculadas no prueba nada → no se anula.
+  expect(await run([], "manual_review")).toEqual([]);
+});
+
+test("la reconciliación de un evento incierto no cambia la respuesta a Nexa si la anulación falla", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  const errores: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { errores.push(args[0]); };
+  try {
+    await expect(processNexaPayment(
+      paymentBody("murio-anulacion-falla"),
+      { nonce: "nonce-murio-falla", payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => ({ kind: "manual_review", processingEventId: 7 }),
+        loadCredit: async () => ({ usuarioId: 5, statusCredit: "MOROSO", binding: null }),
+        findPayments: async () => [],
+        anularCondonacionATiempo: async () => { throw new Error("db caída"); },
+        registerPayment: async () => ({ success: true }),
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        fail: async () => undefined,
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+  } finally {
+    console.error = original;
+  }
+  expect(String(errores[0])).toContain("nexa.condonacion_a_tiempo.viva_sin_verificar");
+});
+
 test("el reintento idempotente devuelve todas las filas del evento aun si el evento solo guarda la primera", async () => {
   const { processNexaPayment } = await import("./nexaPayments");
   const result = await processNexaPayment(
@@ -596,7 +677,7 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
     pago_id: null,
   };
 
-  expect(classify(event, false, requested)).toEqual({ kind: "manual_review" });
+  expect(classify(event, false, requested)).toEqual({ kind: "manual_review", processingEventId: 7 });
   expect(classify({ ...event, status: "failed" }, false, requested))
     .toEqual({ kind: "retry", eventId: 7 });
   expect(classify({ ...event, status: "manual_review" }, false, requested))

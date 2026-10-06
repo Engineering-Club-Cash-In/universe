@@ -54,19 +54,32 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
   // Identificador reservado del crédito: el existente o uno nuevo. Se guarda
   // ANTES de llamar a Nexa, así un reintento tras una caída manda el mismo.
   async reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>) {
+    const fila = (r: typeof nexaTokenUserReservations.$inferSelect, reused: boolean) => ({
+      identifier: r.identifier,
+      reused,
+      nexaUserId: r.nexaUserId,
+      token: r.token,
+    });
     const [existing] = await this.db.select().from(nexaTokenUserReservations)
       .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
-    if (existing) return { identifier: existing.identifier };
+    if (existing) return fila(existing, true);
     const identifier = await nextIdentifier();
     const [created] = await this.db.insert(nexaTokenUserReservations)
       .values({ creditoId, identifier })
       .onConflictDoNothing({ target: nexaTokenUserReservations.creditoId })
       .returning();
-    if (created) return { identifier: created.identifier };
+    if (created) return fila(created, false);
     const [winner] = await this.db.select().from(nexaTokenUserReservations)
       .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
     if (!winner) throw new Error(`No se pudo reservar el identificador del crédito ${creditoId}`);
-    return { identifier: winner.identifier };
+    return fila(winner, true);
+  }
+
+  // Guarda la respuesta de Nexa en la reserva antes de escribir el token user.
+  async saveReservationResponse(creditoId: number, response: { nexaUserId: number; token: string }) {
+    await this.db.update(nexaTokenUserReservations)
+      .set({ nexaUserId: response.nexaUserId, token: response.token })
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId));
   }
 
   // Un crédito tiene a lo sumo un token user (credito_id UNIQUE). Lo usa

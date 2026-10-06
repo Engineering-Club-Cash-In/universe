@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { NexaClient } from "../nexa/client";
 import type { CarteraPaymentClient, CarteraTokenClient } from "../payments/cartera-client";
 import { pollPaymentTokenDate } from "../payments/poller";
-import { createTokenUserForCredit } from "../tokens/service";
+import { createTokenUserForCredit, TokenUserReconciliationRequiredError } from "../tokens/service";
 import { deactivateIfCreditCancelled } from "../tokens/credit-cancelled";
 import type { CarteraEventTokenUsers } from "./cartera-events";
 import type { DbPaymentTransactionRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "../db/repositories";
@@ -108,6 +108,9 @@ export function createAdminRouter(deps: {
       }
       return c.json({ ...created, carteraRegistration }, 201);
     } catch (error) {
+      if (error instanceof TokenUserReconciliationRequiredError) {
+        return c.json({ error: error.message, code: "token_user_requires_reconciliation" }, 409);
+      }
       const message = error instanceof Error ? error.message : String(error);
       if (message.startsWith("Nexa rejected token user")) {
         return c.json({ error: message }, 422);

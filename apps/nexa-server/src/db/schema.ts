@@ -55,6 +55,9 @@ export const nexaTokenUsers = pgTable("nexa_token_users", {
 export const nexaTokenUserReservations = pgTable("nexa_token_user_reservations", {
   creditoId: integer("credito_id").primaryKey(),
   identifier: varchar("identifier", { length: 9 }).notNull().unique(),
+  // Respuesta de Nexa guardada antes que nexa_token_users (ver migración 0005).
+  nexaUserId: integer("nexa_user_id"),
+  token: varchar("token", { length: 32 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

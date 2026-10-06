@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTokenUserForCredit } from "./service";
+import { createTokenUserForCredit, TokenUserReconciliationRequiredError } from "./service";
 
 describe("createTokenUserForCredit", () => {
   test("uses the next local sequence as a padded identifier and stores Nexa's token", async () => {
@@ -61,6 +61,7 @@ describe("createTokenUserForCredit", () => {
         paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
         repository: {
           nextIdentifierSequence: async () => 100_000_002,
+          reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
           createTokenUser: async (user) => ({ id: 11, ...user }),
         },
         nexa: {
@@ -138,5 +139,75 @@ describe("createTokenUserForCredit", () => {
     expect(sentIdentifier).toBe(100_000_002);
     expect(sequenceCalls).toBe(0);
     expect(created).toMatchObject({ identifier: "100000002", token: "32200100000002" });
+  });
+
+  test("finishes from the saved reservation response without calling Nexa again", async () => {
+    let nexaCalls = 0;
+    const stored: unknown[] = [];
+    const created = await createTokenUserForCredit({
+      creditoId: 42,
+      description: "Credito 42",
+      nationalId: "1234567890101",
+      paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
+      repository: {
+        nextIdentifierSequence: async () => 100_000_009,
+        // Intento anterior: Nexa respondió, se guardó en la reserva y falló el token user.
+        reserveIdentifier: async () => ({ identifier: "100000002", reused: true, nexaUserId: 99, token: "32200100000002" }),
+        createTokenUser: async (user) => {
+          stored.push(user);
+          return { id: 11, ...user };
+        },
+      },
+      nexa: {
+        createTokenUsers: async () => {
+          nexaCalls += 1;
+          return { users: [], errorUsers: [] };
+        },
+      },
+    });
+
+    expect(nexaCalls).toBe(0);
+    expect(stored).toHaveLength(1);
+    expect(created).toMatchObject({ identifier: "100000002", nexaUserId: 99, token: "32200100000002" });
+  });
+
+  test("saves Nexa's response in the reservation before the token user", async () => {
+    const orden: string[] = [];
+    await createTokenUserForCredit({
+      creditoId: 42,
+      description: "Credito 42",
+      nationalId: "1234567890101",
+      paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
+      repository: {
+        nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_c, next) => ({ identifier: await next(), reused: false }),
+        saveReservationResponse: async () => {
+          orden.push("reserva");
+        },
+        createTokenUser: async (user) => {
+          orden.push("token_user");
+          return { id: 11, ...user };
+        },
+      },
+      nexa: { createTokenUsers: async () => ({ users: [{ id: 99, token: "32200100000002" }], errorUsers: [] }) },
+    });
+    expect(orden).toEqual(["reserva", "token_user"]);
+  });
+
+  test("a reused identifier rejected by Nexa asks for manual reconciliation instead of a new user", async () => {
+    await expect(createTokenUserForCredit({
+      creditoId: 42,
+      description: "Credito 42",
+      nationalId: "1234567890101",
+      paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
+      repository: {
+        nextIdentifierSequence: async () => 100_000_009,
+        reserveIdentifier: async () => ({ identifier: "100000002", reused: true, nexaUserId: null, token: null }),
+        createTokenUser: async (user) => ({ id: 11, ...user }),
+      },
+      nexa: {
+        createTokenUsers: async () => ({ users: [], errorUsers: [{ identifier: 100_000_002, reason: "Identificador duplicado" }] }),
+      },
+    })).rejects.toBeInstanceOf(TokenUserReconciliationRequiredError);
   });
 });

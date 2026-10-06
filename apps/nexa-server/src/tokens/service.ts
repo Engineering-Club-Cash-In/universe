@@ -2,8 +2,19 @@ import { formatTokenIdentifierForPrefix } from "./identifier";
 
 export interface TokenUserCreationRepository {
   nextIdentifierSequence(): Promise<number>;
-  /** Devuelve el identificador reservado del crédito (lo crea si no existe). */
-  reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>): Promise<{ identifier: string }>;
+  /**
+   * Identificador reservado del crédito (lo crea si no existe). `reused` dice
+   * si la reserva venía de un intento anterior; `nexaUserId`/`token` traen la
+   * respuesta de Nexa si ese intento la alcanzó a guardar.
+   */
+  reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>): Promise<{
+    identifier: string;
+    reused?: boolean;
+    nexaUserId?: number | null;
+    token?: string | null;
+  }>;
+  /** Guarda la respuesta de Nexa en la reserva antes del token user. */
+  saveReservationResponse?(creditoId: number, response: { nexaUserId: number; token: string }): Promise<void>;
   createTokenUser(user: {
     paymentTokenId: number;
     creditoId: number;
@@ -40,6 +51,18 @@ function maskToken(token: string) {
   return token.length <= 4 ? "*".repeat(token.length) : "*".repeat(token.length - 4) + token.slice(-4);
 }
 
+/**
+ * El identificador reservado ya se usó en un intento anterior cuya respuesta
+ * no se alcanzó a guardar, y Nexa lo rechaza ahora (repetido). La API de Nexa
+ * no permite consultar el usuario existente, así que hay que conciliarlo a
+ * mano; no se crea otro usuario.
+ */
+export class TokenUserReconciliationRequiredError extends Error {
+  constructor(readonly identifier: string, readonly reason: string) {
+    super(`Token user ${identifier} requires manual reconciliation: ${reason}`);
+  }
+}
+
 export async function createTokenUserForCredit(options: {
   creditoId: number;
   description: string;
@@ -51,25 +74,39 @@ export async function createTokenUserForCredit(options: {
   // Reserva durable ANTES de la llamada a Nexa: si Nexa crea el usuario y el
   // guardado de abajo falla, el reintento manda este mismo identificador y
   // Nexa lo rechaza como repetido en vez de crear un segundo usuario huérfano.
-  const { identifier } = await options.repository.reserveIdentifier(options.creditoId, async () =>
+  const reservation = await options.repository.reserveIdentifier(options.creditoId, async () =>
     formatTokenIdentifierForPrefix({
       prefix: options.paymentToken.prefix,
       sequence: await options.repository.nextIdentifierSequence(),
     }),
   );
-  const response = await options.nexa.createTokenUsers({
-    tokenId: options.paymentToken.nexaTokenId,
-    users: [{ identifier: Number(identifier), description: options.description, nationalId: Number(options.nationalId) }],
-  });
+  const { identifier } = reservation;
 
-  const error = response.errorUsers.find((user) => String(user.identifier) === identifier);
-  if (error) {
-    throw new Error(`Nexa rejected token user ${identifier}: ${error.reason}`);
-  }
+  let created: { id: number; token: string };
+  if (reservation.nexaUserId != null && reservation.token) {
+    // Un intento anterior ya tenía la respuesta de Nexa y falló al guardar el
+    // token user: se termina desde la reserva, sin volver a llamar a Nexa.
+    created = { id: reservation.nexaUserId, token: reservation.token };
+  } else {
+    const response = await options.nexa.createTokenUsers({
+      tokenId: options.paymentToken.nexaTokenId,
+      users: [{ identifier: Number(identifier), description: options.description, nationalId: Number(options.nationalId) }],
+    });
 
-  const [created] = response.users;
-  if (!created) {
-    throw new Error(`Nexa did not return created token user ${identifier}`);
+    const error = response.errorUsers.find((user) => String(user.identifier) === identifier);
+    if (error) {
+      if (reservation.reused) throw new TokenUserReconciliationRequiredError(identifier, error.reason);
+      throw new Error(`Nexa rejected token user ${identifier}: ${error.reason}`);
+    }
+
+    const [first] = response.users;
+    if (!first) {
+      throw new Error(`Nexa did not return created token user ${identifier}`);
+    }
+    created = first;
+    // Primero la reserva (escritura chica): si lo de abajo falla, el
+    // reintento no vuelve a pedirle el usuario a Nexa.
+    await options.repository.saveReservationResponse?.(options.creditoId, { nexaUserId: created.id, token: created.token });
   }
 
   // cartera guarda el token y lo compara con prefijo + identificador de cada

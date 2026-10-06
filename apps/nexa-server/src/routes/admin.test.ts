@@ -97,6 +97,7 @@ describe("admin router", () => {
       paymentTokens: { findActive: async () => ({ id: 1, nexaTokenId: 455, prefix: "32200" }) } as never,
       tokenUsers: {
         nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         createTokenUser: async (user: { creditoId: number }) => (active.set(user.creditoId, true), { id: 1 }),
         findByCreditoId: async () => null,
       } as never,

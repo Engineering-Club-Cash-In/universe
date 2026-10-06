@@ -783,6 +783,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "nexa_user_id": {
+          "name": "nexa_user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "token": {
+          "name": "token",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",

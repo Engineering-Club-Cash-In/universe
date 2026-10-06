@@ -14,8 +14,9 @@
  *      guarda. Si falla, se anota el intento y queda pendiente: el barrido de
  *      reintentos la vuelve a pedir y le avisa al cliente por separado.
  *
- * El binding se crea activo y sin monto máximo ni vencimiento: es solo el
- * permiso para que cartera acepte pagos de Nexa en ese crédito.
+ * Un binding nuevo nace activo y sin monto máximo ni vencimiento: es solo el
+ * permiso para que cartera acepte pagos de Nexa en ese crédito. Uno que ya
+ * existía conserva su `activo` y sus límites (si alguien lo apagó, sigue así).
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -211,7 +212,8 @@ export const cuentaNexaDeps: CuentaNexaDeps = {
               nexa_user_id: user.nexaUserId,
               nexa_identifier: user.identifier,
               nexa_token: user.token,
-              activo: true,
+              // `activo` no se toca: un binding nuevo nace activo (default) y
+              // uno existente que alguien apagó a mano tiene que seguir apagado.
               cuenta_error: null,
               cuenta_intentos: sql`${nexa_credit_bindings.cuenta_intentos} + 1`,
               updated_at: new Date(),

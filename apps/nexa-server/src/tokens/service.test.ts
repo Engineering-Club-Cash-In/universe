@@ -78,4 +78,32 @@ describe("createTokenUserForCredit", () => {
       console.error = original;
     }
   });
+
+  test("returns the already stored token when another request saved one first", async () => {
+    const created = await createTokenUserForCredit({
+      creditoId: 42,
+      description: "Credito 42",
+      nationalId: "1234567890101",
+      paymentToken: { id: 7, nexaTokenId: 5, prefix: "32200" },
+      repository: {
+        nextIdentifierSequence: async () => 100_000_003,
+        // onConflictDoNothing → el repositorio devuelve la fila que ya estaba.
+        createTokenUser: async () => ({
+          id: 10,
+          paymentTokenId: 7,
+          creditoId: 42,
+          identifier: "100000002",
+          description: "Credito 42",
+          nationalId: "1234567890101",
+          nexaUserId: 98,
+          token: "32200100000002",
+        }),
+      },
+      nexa: {
+        createTokenUsers: async () => ({ users: [{ id: 99, token: "32200100000003" }], errorUsers: [] }),
+      },
+    });
+
+    expect(created).toMatchObject({ creditoId: 42, identifier: "100000002", nexaUserId: 98, token: "32200100000002" });
+  });
 });

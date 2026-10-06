@@ -13,6 +13,16 @@ export interface TokenUserCreationRepository {
   }): Promise<unknown>;
 }
 
+type StoredTokenUser = {
+  paymentTokenId?: number;
+  creditoId?: number;
+  identifier?: string;
+  description?: string;
+  nationalId?: string;
+  nexaUserId?: number;
+  token?: string;
+};
+
 interface TokenUserCreationNexaClient {
   createTokenUsers(payload: {
     tokenId: number;
@@ -75,6 +85,26 @@ export async function createTokenUserForCredit(options: {
     token,
   };
 
-  await options.repository.createTokenUser(tokenUser);
+  const stored = (await options.repository.createTokenUser(tokenUser)) as StoredTokenUser | null | undefined;
+  // El repositorio devuelve el token ya guardado si otro proceso se adelantó
+  // para este crédito: ese es el vigente (el recién creado en Nexa queda sin
+  // usar, pero el crédito no termina con dos tokens activos).
+  if (
+    stored?.creditoId === tokenUser.creditoId &&
+    stored.token &&
+    stored.token !== tokenUser.token &&
+    stored.identifier &&
+    stored.nexaUserId !== undefined
+  ) {
+    return {
+      paymentTokenId: stored.paymentTokenId ?? tokenUser.paymentTokenId,
+      creditoId: tokenUser.creditoId,
+      identifier: stored.identifier,
+      description: stored.description ?? tokenUser.description,
+      nationalId: stored.nationalId ?? tokenUser.nationalId,
+      nexaUserId: stored.nexaUserId,
+      token: stored.token,
+    };
+  }
   return tokenUser;
 }

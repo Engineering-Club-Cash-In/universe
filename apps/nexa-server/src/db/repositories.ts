@@ -41,8 +41,14 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
     nexaUserId: number;
     token: string;
   }) {
-    const [created] = await this.db.insert(nexaTokenUsers).values(user).returning();
-    return created;
+    // Si otro proceso ya guardó el token de este crédito (carrera o reintento),
+    // no se falla: se devuelve el guardado, que es el vigente.
+    const [created] = await this.db
+      .insert(nexaTokenUsers)
+      .values(user)
+      .onConflictDoNothing({ target: nexaTokenUsers.creditoId })
+      .returning();
+    return created ?? (await this.findByCreditoId(user.creditoId));
   }
 
   // Un crédito tiene a lo sumo un token user (credito_id UNIQUE). Lo usa

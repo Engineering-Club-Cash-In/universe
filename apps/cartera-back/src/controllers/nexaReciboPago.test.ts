@@ -5,7 +5,7 @@ mock.module("../services/reciboPagoWhatsapp", () => ({
   enviarRecibosPagoDeCreditoBestEffort: async () => [],
 }));
 
-const { intentarReciboNexa } = await import("./nexaReciboPago");
+const { columnasReciboNexaDisponibles, intentarReciboNexa, reiniciarVerificacionReciboNexa } = await import("./nexaReciboPago");
 type Deps = NonNullable<Parameters<typeof intentarReciboNexa>[1]>;
 
 function deps(over: Partial<Deps> = {}) {
@@ -78,3 +78,27 @@ describe("intentarReciboNexa", () => {
     expect(reintento.envios).toEqual([{ creditoId: 55, pagoIds: [18] }]);
   });
 });
+
+describe("columnas del recibo de Nexa", () => {
+  test("sin las migraciones el recibo queda apagado y se vuelve a revisar a los 5 minutos", async () => {
+    reiniciarVerificacionReciboNexa();
+    let revisiones = 0;
+    const faltan = async () => {
+      revisiones += 1;
+      return 2;
+    };
+    expect(await columnasReciboNexaDisponibles(faltan, 1_000_000)).toBe(false);
+    expect(await columnasReciboNexaDisponibles(faltan, 1_000_000 + 60_000)).toBe(false);
+    expect(revisiones).toBe(1);
+    expect(await columnasReciboNexaDisponibles(async () => 4, 1_000_000 + 6 * 60_000)).toBe(true);
+    // El "sí" se recuerda: ya no vuelve a consultar.
+    expect(await columnasReciboNexaDisponibles(faltan, 1_000_000 + 7 * 60_000)).toBe(true);
+    expect(revisiones).toBe(1);
+  });
+
+  test("si la consulta falla, el recibo queda apagado (no rompe el pago)", async () => {
+    reiniciarVerificacionReciboNexa();
+    expect(await columnasReciboNexaDisponibles(async () => { throw new Error("db"); }, 5_000_000)).toBe(false);
+  });
+});
+

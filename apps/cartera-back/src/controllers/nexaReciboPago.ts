@@ -16,11 +16,71 @@
  */
 
 import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import config from "../config";
 import { db } from "../database";
 import { nexa_payment_events, pagos_credito } from "../database/db";
 import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhatsapp";
 
 export const MAX_INTENTOS_RECIBO_NEXA = 5;
+
+/**
+ * Las migraciones SQL de cartera se corren a mano ANTES del despliegue (el
+ * deploy no las ejecuta). Si alguien prende RECIBO_PAGO_WHATSAPP_ENABLED sin
+ * haber corrido la 0046/0047, escribir o leer las columnas del recibo haría
+ * fallar el PAGO de Nexa con "column ... does not exist". Por eso el recibo de
+ * Nexa se usa solo si las columnas existen: si faltan, queda apagado (con un
+ * error en el log) y el pago sigue normal. El "sí" se recuerda; el "no" se
+ * vuelve a revisar cada 5 minutos, para que tome la migración apenas corra.
+ */
+const COLUMNAS_RECIBO_NEXA = ["recibo_status", "recibo_intentos", "recibo_actualizado_at", "recibo_pagos_ok"];
+let columnasReciboVerificadas = false;
+let ultimaRevisionFallida = 0;
+
+export async function columnasReciboNexaDisponibles(
+  contar: () => Promise<number> = contarColumnasReciboNexa,
+  ahora: number = Date.now(),
+): Promise<boolean> {
+  if (columnasReciboVerificadas) return true;
+  if (ahora - ultimaRevisionFallida < 5 * 60_000) return false;
+  try {
+    if ((await contar()) === COLUMNAS_RECIBO_NEXA.length) {
+      columnasReciboVerificadas = true;
+      return true;
+    }
+    console.error(
+      "❌ Recibo de Nexa apagado: faltan las columnas de las migraciones 0046/0047 en nexa_payment_events. Correrlas antes de prender RECIBO_PAGO_WHATSAPP_ENABLED.",
+    );
+  } catch (error) {
+    console.error(
+      "❌ No se pudieron verificar las columnas del recibo de Nexa:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  ultimaRevisionFallida = ahora;
+  return false;
+}
+
+/** Solo para pruebas. */
+export function reiniciarVerificacionReciboNexa() {
+  columnasReciboVerificadas = false;
+  ultimaRevisionFallida = 0;
+}
+
+async function contarColumnasReciboNexa(): Promise<number> {
+  const result = await db.execute(sql`
+    SELECT count(*)::int AS total
+    FROM information_schema.columns
+    WHERE table_schema = 'cartera'
+      AND table_name = 'nexa_payment_events'
+      AND column_name IN (${sql.join(COLUMNAS_RECIBO_NEXA.map((c) => sql`${c}`), sql`, `)})
+  `);
+  return Number((result.rows[0] as { total?: number } | undefined)?.total ?? 0);
+}
+
+/** El recibo de Nexa está prendido Y su bandeja existe en la base. */
+export async function reciboNexaHabilitado(): Promise<boolean> {
+  return config.reciboPagoWhatsappEnabled && (await columnasReciboNexaDisponibles());
+}
 const MINUTOS_PARA_RETOMAR = 30;
 
 export type ReciboNexaDeps = {
@@ -68,6 +128,7 @@ export async function intentarReciboNexa(
 
 /** Barre los recibos de Nexa pendientes o atascados. Nunca lanza. */
 export async function reintentarRecibosNexaPendientes(limite = 50): Promise<{ intentados: number; enviados: number }> {
+  if (!(await reciboNexaHabilitado())) return { intentados: 0, enviados: 0 };
   try {
     const candidatos = await db
       .select({ id: nexa_payment_events.id })

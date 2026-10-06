@@ -1244,6 +1244,44 @@ test("workbook acumulado conserva montos y cuotas del último corte atrasado", (
 	});
 });
 
+test("workbook avisa en Metadatos solo cuando la mora del mes no es la oficial", () => {
+	const build = (avisoMoraMes?: string) => {
+		const workbook = buildAdminReportsWorkbook({
+			cobranza: { acumulado: false, rows: [] },
+			reinvestment: response(),
+			metadata: {
+				cobranzaPeriodo: "Julio 2026",
+				inversionPeriodo: "Julio 2026",
+				generatedAt: "2026-08-27T12:00:00.000Z",
+				...(avisoMoraMes && { avisoMoraMes }),
+			},
+		});
+		const sheet = workbook.Sheets.Metadatos;
+		if (!sheet) throw new Error("Falta la hoja Metadatos");
+		return XLSX.utils.sheet_to_json<{ Campo: string; Valor: unknown }>(sheet);
+	};
+	const aviso =
+		"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera.";
+
+	const conAviso = build(aviso);
+	expect(conAviso.find((row) => row.Campo === "Mora del mes")).toEqual({
+		Campo: "Mora del mes",
+		Valor: aviso,
+	});
+	expect(conAviso.map((row) => row.Campo).indexOf("Mora del mes")).toBe(
+		conAviso.map((row) => row.Campo).indexOf("Generado") + 1,
+	);
+
+	const sinAviso = build();
+	expect(sinAviso.map((row) => row.Campo)).toEqual([
+		"Período Cobranza",
+		"Período Inversión",
+		"Generado",
+		"Contrato Inversión",
+		"Advertencia legacy",
+	]);
+});
+
 test("workbook falla cerrado sin contrato conciliado y completo", () => {
 	expect(() =>
 		buildAdminReportsWorkbook({

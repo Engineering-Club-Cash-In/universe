@@ -18,6 +18,7 @@ export function buildAdminReportsWorkbook(input: {
 		cobranzaPeriodo: string;
 		inversionPeriodo: string;
 		generatedAt: string;
+		avisoMoraMes?: string;
 	};
 }) {
 	const model = buildReinvestmentReportModel(input.reinvestment);
@@ -178,6 +179,9 @@ export function buildAdminReportsWorkbook(input: {
 		{ Campo: "Período Cobranza", Valor: input.metadata.cobranzaPeriodo },
 		{ Campo: "Período Inversión", Valor: input.metadata.inversionPeriodo },
 		{ Campo: "Generado", Valor: input.metadata.generatedAt },
+		...(input.metadata.avisoMoraMes
+			? [{ Campo: "Mora del mes", Valor: input.metadata.avisoMoraMes }]
+			: []),
 		{
 			Campo: "Contrato Inversión",
 			Valor: model.compatible ? model.data.contrato_version : "Incompatible",

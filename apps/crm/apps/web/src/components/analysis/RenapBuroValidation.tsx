@@ -174,6 +174,315 @@ function formatearFecha(fecha: string | Date | null | undefined): string {
 	});
 }
 
+type EstadoValidaciones = Awaited<
+	ReturnType<typeof client.getValidacionesOportunidad>
+>;
+type EstadoCofirmante = EstadoValidaciones["cofirmantes"][number];
+type CofirmanteOverride = { coDebtorId: string; nombre: string };
+
+/** Recuadro de Buró de un sujeto: el titular o, con `cofirmante`, uno de sus co-firmantes */
+function CajaBuro({
+	buro,
+	buroVigente,
+	detalleBuro,
+	cofirmante,
+	ejecutando,
+}: Pick<EstadoValidaciones, "buro" | "buroVigente" | "detalleBuro"> & {
+	cofirmante?: string;
+	ejecutando?: boolean;
+}) {
+	const [detalleAbierto, setDetalleAbierto] = useState(false);
+	const buroConVeredicto =
+		buro?.estado === "aprobado" || buro?.estado === "rechazado";
+
+	return (
+		<div className="rounded-lg border p-3">
+			<div className="flex items-center justify-between gap-3">
+				<div className="flex flex-wrap items-center gap-2">
+					<CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+					<span className="font-medium">Buró (Infornet)</span>
+					{cofirmante && (
+						<>
+							<Badge
+								variant="outline"
+								className="border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-100"
+							>
+								Co-firmante
+							</Badge>
+							<span className="text-muted-foreground text-sm">
+								{cofirmante}
+							</span>
+						</>
+					)}
+				</div>
+				<div className="flex items-center gap-3">
+					{buro?.expiraEn && !buroVigente && (
+						<Badge
+							variant="outline"
+							className="border-yellow-300 bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
+						>
+							Desactualizado
+						</Badge>
+					)}
+					{buro ? (
+						<>
+							<span className="text-muted-foreground text-xs">
+								{formatearFecha(buro.ejecutadoAt)}
+							</span>
+							{buro.fuenteDeDatos === "manual" ? (
+								<Badge
+									variant="outline"
+									className="border-purple-300 bg-purple-100 text-purple-800 hover:bg-purple-100"
+								>
+									Validado manualmente
+								</Badge>
+							) : (
+								<EstadoBadge estado={buro.estado} />
+							)}
+							{detalleBuro && (
+								<BotonDetalle
+									abierto={detalleAbierto}
+									onToggle={() => setDetalleAbierto((v) => !v)}
+								/>
+							)}
+						</>
+					) : ejecutando ? (
+						<span className="flex items-center gap-2 text-muted-foreground text-sm">
+							<Loader2 className="h-4 w-4 animate-spin" />
+							Consultando...
+						</span>
+					) : (
+						<span className="text-muted-foreground text-sm">Sin ejecutar</span>
+					)}
+				</div>
+			</div>
+
+			{detalleAbierto && detalleBuro && (
+				<div className="mt-3 border-t pt-3">
+					<FilasDetalle
+						filas={[
+							["Nombre en Infornet", detalleBuro.nombreCompleto],
+							["DPI consultado", buro?.dpi ?? null],
+							["Código de persona", String(detalleBuro.codigoPersona)],
+							[
+								"Referencias comerciales",
+								detalleBuro.tieneReferenciasComerciales
+									? "Sí tiene"
+									: "No tiene",
+							],
+							[
+								"Referencias judiciales",
+								detalleBuro.tieneReferenciasJudiciales
+									? "Sí tiene"
+									: "No tiene",
+							],
+							[
+								"Persona expuesta políticamente",
+								detalleBuro.esPEP ? "Sí" : "No",
+							],
+							["Inmuebles", String(detalleBuro.cantidadInmuebles ?? 0)],
+							["Vehículos", String(detalleBuro.cantidadVehiculos ?? 0)],
+							["Empresas", String(detalleBuro.cantidadEmpresas ?? 0)],
+							["Consultado el", formatearFecha(detalleBuro.consultadoEn)],
+							["Vigente hasta", formatearFecha(detalleBuro.expiraEn)],
+						]}
+					/>
+				</div>
+			)}
+
+			{buro && buroConVeredicto && (
+				<div className="mt-3 space-y-2 border-t pt-3">
+					<div className="flex flex-wrap items-center gap-4 text-sm">
+						{buro.scoreRiesgo !== null && (
+							<span>
+								Score:{" "}
+								<span className="font-medium">{buro.scoreRiesgo}/100</span>
+							</span>
+						)}
+						{buro.nivelRiesgo && (
+							<span>
+								Riesgo: <span className="font-medium">{buro.nivelRiesgo}</span>
+							</span>
+						)}
+						{buro.fuenteDeDatos && (
+							<span className="text-muted-foreground">
+								Fuente:{" "}
+								{buro.fuenteDeDatos === "cache"
+									? "Consulta Previa (guardado por 30 días)"
+									: "Infornet"}
+							</span>
+						)}
+					</div>
+					{buro.alertas && buro.alertas.length > 0 && (
+						<div className="flex flex-wrap gap-1">
+							{buro.alertas.map((alerta) => (
+								<Badge key={alerta} variant="secondary" className="text-xs">
+									{alertaLabels[alerta] || alerta}
+								</Badge>
+							))}
+						</div>
+					)}
+				</div>
+			)}
+
+			{buro?.estado === "error" && buro.mensaje && (
+				<p className="mt-2 text-muted-foreground text-sm">{buro.mensaje}</p>
+			)}
+		</div>
+	);
+}
+
+/** Avisos del veredicto de Buró; para el titular conservan su texto de siempre */
+function AlertasBuro({
+	buro,
+	overrideBuro,
+	cofirmante,
+}: Pick<EstadoValidaciones, "buro" | "overrideBuro"> & {
+	cofirmante?: string;
+}) {
+	const aQuien = cofirmante ? `al co-firmante ${cofirmante}` : "a este cliente";
+
+	return (
+		<>
+			{buro?.estado === "rechazado" && (
+				<Alert variant="destructive">
+					<XCircle className="h-4 w-4" />
+					<AlertTitle>El buró no aprobó {aQuien}</AlertTitle>
+					<AlertDescription>
+						{buro.mensaje}. Puede rechazar la oportunidad o continuar bajo el
+						riesgo.
+					</AlertDescription>
+				</Alert>
+			)}
+
+			{buro?.estado === "sin_registro" && buro.fuenteDeDatos !== "manual" && (
+				<Alert>
+					<Info className="h-4 w-4" />
+					<AlertTitle>
+						Sin registro en el buró de Infornet
+						{cofirmante ? ` (co-firmante ${cofirmante})` : ""}
+					</AlertTitle>
+					<AlertDescription>
+						Esta persona no tiene historial crediticio en Infornet. No bloquea
+						la aprobación del análisis.
+					</AlertDescription>
+				</Alert>
+			)}
+
+			{buro?.fuenteDeDatos === "manual" && overrideBuro && (
+				<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
+					<UserCog className="h-4 w-4" />
+					<AlertTitle>
+						{cofirmante
+							? "Buró del co-firmante validado manualmente"
+							: "Buró validado manualmente"}
+					</AlertTitle>
+					<AlertDescription>
+						{overrideBuro.marcadoPorNombre ?? "Un analista"} verificó {aQuien}{" "}
+						en Infornet
+						{overrideBuro.motivo ? `: "${overrideBuro.motivo}"` : ""}.
+					</AlertDescription>
+				</Alert>
+			)}
+		</>
+	);
+}
+
+/** Recuadro y avisos del Buró de un co-firmante, con la misma lógica que el del titular */
+function SeccionCofirmante({
+	cofirmante,
+	ejecutando,
+	puedeOverridear,
+	onReintentar,
+	onOverride,
+}: {
+	cofirmante: EstadoCofirmante;
+	ejecutando: boolean;
+	puedeOverridear: boolean;
+	onReintentar: () => void;
+	onOverride: () => void;
+}) {
+	const { buro, nombre } = cofirmante;
+	// Igual que en el titular: un error de una fila desactualizada no bloquea
+	const errorVigente =
+		buro?.estado === "error" && !cofirmante.buroDesactualizado;
+
+	return (
+		<div className="space-y-3">
+			<CajaBuro
+				buro={buro}
+				buroVigente={cofirmante.buroVigente}
+				detalleBuro={cofirmante.detalleBuro}
+				cofirmante={nombre}
+				ejecutando={ejecutando}
+			/>
+
+			{cofirmante.buroDesactualizado && (
+				<Alert className="border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30">
+					<UserCog className="h-4 w-4" />
+					<AlertTitle>
+						El DPI del co-firmante cambió después de validar
+					</AlertTitle>
+					<AlertDescription>
+						La ficha de {nombre} ahora tiene el DPI{" "}
+						<span className="font-medium">{cofirmante.dpi}</span>, distinto al
+						usado en <span className="font-medium">Buró ({buro?.dpi})</span>. Lo
+						que se muestra corresponde a la persona anterior. Se recomienda
+						re-ejecutar la validación.
+					</AlertDescription>
+				</Alert>
+			)}
+
+			<AlertasBuro
+				buro={buro}
+				overrideBuro={cofirmante.overrideBuro}
+				cofirmante={nombre}
+			/>
+
+			{errorVigente && (
+				<Alert variant="destructive">
+					<AlertTriangle className="h-4 w-4" />
+					<AlertTitle>
+						No se completó el Buró del co-firmante {nombre}
+					</AlertTitle>
+					<AlertDescription className="flex flex-col gap-2">
+						<span>
+							{buro?.mensaje}. La aprobación del análisis quedará bloqueada
+							hasta obtener un veredicto.
+						</span>
+						<div className="flex flex-wrap gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={onReintentar}
+								disabled={ejecutando}
+							>
+								{ejecutando ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<RefreshCw className="mr-2 h-4 w-4" />
+								)}
+								Reintentar
+							</Button>
+							{puedeOverridear && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={onOverride}
+									disabled={ejecutando}
+								>
+									<UserCog className="mr-2 h-4 w-4" />
+									Marcar Buró como validado manualmente
+								</Button>
+							)}
+						</div>
+					</AlertDescription>
+				</Alert>
+			)}
+		</div>
+	);
+}
+
 export function RenapBuroValidation({
 	opportunityId,
 	onEjecucionChange,
@@ -181,12 +490,14 @@ export function RenapBuroValidation({
 }: RenapBuroValidationProps) {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
-	const [detalleBuroAbierto, setDetalleBuroAbierto] = useState(false);
 	/** Qué oportunidad se auto-ejecutó: la ruta reusa el componente al navegar */
 	const autoEjecutadaPara = useRef<string | null>(null);
 
 	// Override manual: paso 1 captura el motivo, paso 2 confirma explícitamente
 	const [overrideTipo, setOverrideTipo] = useState<TipoValidacion | null>(null);
+	/** null = el override es del titular */
+	const [overrideCofirmante, setOverrideCofirmante] =
+		useState<CofirmanteOverride | null>(null);
 	const [overrideStep, setOverrideStep] = useState<
 		"motivo" | "confirmar" | null
 	>(null);
@@ -220,6 +531,11 @@ export function RenapBuroValidation({
 						`No se pudo completar la validación: ${resultado.mensaje ?? "error desconocido"}`,
 					);
 				}
+				if (resultado.cofirmantes.errorTecnico) {
+					toast.error(
+						`No se pudo completar la validación: ${resultado.cofirmantes.mensaje ?? "error desconocido"}`,
+					);
+				}
 				await refetch();
 			} catch (error: unknown) {
 				toast.error(
@@ -235,14 +551,19 @@ export function RenapBuroValidation({
 		[isExecuting, opportunityId, refetch, onEjecucionChange],
 	);
 
-	const abrirOverride = useCallback((tipo: TipoValidacion) => {
-		setOverrideTipo(tipo);
-		setOverrideStep("motivo");
-		setOverrideMotivo("");
-	}, []);
+	const abrirOverride = useCallback(
+		(tipo: TipoValidacion, cofirmante?: CofirmanteOverride) => {
+			setOverrideTipo(tipo);
+			setOverrideCofirmante(cofirmante ?? null);
+			setOverrideStep("motivo");
+			setOverrideMotivo("");
+		},
+		[],
+	);
 
 	const cerrarOverride = useCallback(() => {
 		setOverrideTipo(null);
+		setOverrideCofirmante(null);
 		setOverrideStep(null);
 		setOverrideMotivo("");
 	}, []);
@@ -258,10 +579,11 @@ export function RenapBuroValidation({
 			await client.marcarValidacionManual({
 				opportunityId,
 				tipo: overrideTipo,
+				coDebtorId: overrideCofirmante?.coDebtorId,
 				motivo: overrideMotivo.trim(),
 			});
 			toast.success(
-				`${NOMBRE_FUENTE[overrideTipo]} marcado como validado manualmente`,
+				`${NOMBRE_FUENTE[overrideTipo]} marcado como validado manualmente${overrideCofirmante ? ` para ${overrideCofirmante.nombre}` : ""}`,
 			);
 			cerrarOverride();
 			await ejecutarValidaciones(true);
@@ -276,6 +598,7 @@ export function RenapBuroValidation({
 		}
 	}, [
 		overrideTipo,
+		overrideCofirmante,
 		overrideMotivo,
 		opportunityId,
 		ejecutarValidaciones,
@@ -283,7 +606,8 @@ export function RenapBuroValidation({
 	]);
 
 	// Auto-ejecuta solo si la oportunidad espera análisis, hay consentimiento y
-	// nunca se validó. Con un resultado previo decide el analista con el botón.
+	// el titular o algún co-firmante nunca se validó. Con un resultado previo
+	// decide el analista con el botón.
 	useEffect(() => {
 		const data = validacionesQuery.data;
 		if (
@@ -292,7 +616,7 @@ export function RenapBuroValidation({
 			!data.faltaDpi &&
 			!data.faltaConsentimiento &&
 			data.enAnalisisPendiente &&
-			!data.buro &&
+			(!data.buro || data.cofirmantes.some((c) => !c.buro)) &&
 			autoEjecutadaPara.current !== opportunityId &&
 			!isExecuting
 		) {
@@ -354,11 +678,12 @@ export function RenapBuroValidation({
 	const renapErrorVigente =
 		CONSULTAR_RENAP && renap?.estado === "error" && !data.renapDesactualizado;
 	const hayError = buroErrorVigente || renapErrorVigente;
-	const buroConVeredicto =
-		buro?.estado === "aprobado" || buro?.estado === "rechazado";
 	const mensajeError =
-		(buroErrorVigente ? buro?.mensaje : renapErrorVigente ? renap?.mensaje : null) ??
-		null;
+		(buroErrorVigente
+			? buro?.mensaje
+			: renapErrorVigente
+				? renap?.mensaje
+				: null) ?? null;
 
 	return (
 		<Card>
@@ -440,8 +765,8 @@ export function RenapBuroValidation({
 									.filter(Boolean)
 									.join(" y ")}
 							</span>
-							. Lo que se muestra abajo para esa fuente corresponde a la
-							persona anterior. Se recomienda re-ejecutar la validación.
+							. Lo que se muestra abajo para esa fuente corresponde a la persona
+							anterior. Se recomienda re-ejecutar la validación.
 						</AlertDescription>
 					</Alert>
 				)}
@@ -536,190 +861,16 @@ export function RenapBuroValidation({
 							)}
 						</div>
 
-						{/* Buró */}
-						<div className="rounded-lg border p-3">
-							<div className="flex items-center justify-between">
-								<div className="flex items-center gap-2">
-									<CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-									<span className="font-medium">Buró (Infornet)</span>
-								</div>
-								<div className="flex items-center gap-3">
-									{buro?.expiraEn && !data.buroVigente && (
-										<Badge
-											variant="outline"
-											className="border-yellow-300 bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
-										>
-											Desactualizado
-										</Badge>
-									)}
-									{buro ? (
-										<>
-											<span className="text-muted-foreground text-xs">
-												{formatearFecha(buro.ejecutadoAt)}
-											</span>
-											{buro.fuenteDeDatos === "manual" ? (
-												<Badge
-													variant="outline"
-													className="border-purple-300 bg-purple-100 text-purple-800 hover:bg-purple-100"
-												>
-													Validado manualmente
-												</Badge>
-											) : (
-												<EstadoBadge estado={buro.estado} />
-											)}
-											{data.detalleBuro && (
-												<BotonDetalle
-													abierto={detalleBuroAbierto}
-													onToggle={() => setDetalleBuroAbierto((v) => !v)}
-												/>
-											)}
-										</>
-									) : (
-										<span className="text-muted-foreground text-sm">
-											Sin ejecutar
-										</span>
-									)}
-								</div>
-							</div>
-
-							{detalleBuroAbierto && data.detalleBuro && (
-								<div className="mt-3 border-t pt-3">
-									<FilasDetalle
-										filas={[
-											["Nombre en Infornet", data.detalleBuro.nombreCompleto],
-											["DPI consultado", buro?.dpi ?? null],
-											[
-												"Código de persona",
-												String(data.detalleBuro.codigoPersona),
-											],
-											[
-												"Referencias comerciales",
-												data.detalleBuro.tieneReferenciasComerciales
-													? "Sí tiene"
-													: "No tiene",
-											],
-											[
-												"Referencias judiciales",
-												data.detalleBuro.tieneReferenciasJudiciales
-													? "Sí tiene"
-													: "No tiene",
-											],
-											[
-												"Persona expuesta políticamente",
-												data.detalleBuro.esPEP ? "Sí" : "No",
-											],
-											[
-												"Inmuebles",
-												String(data.detalleBuro.cantidadInmuebles ?? 0),
-											],
-											[
-												"Vehículos",
-												String(data.detalleBuro.cantidadVehiculos ?? 0),
-											],
-											[
-												"Empresas",
-												String(data.detalleBuro.cantidadEmpresas ?? 0),
-											],
-											[
-												"Consultado el",
-												formatearFecha(data.detalleBuro.consultadoEn),
-											],
-											[
-												"Vigente hasta",
-												formatearFecha(data.detalleBuro.expiraEn),
-											],
-										]}
-									/>
-								</div>
-							)}
-
-							{buro && buroConVeredicto && (
-								<div className="mt-3 space-y-2 border-t pt-3">
-									<div className="flex flex-wrap items-center gap-4 text-sm">
-										{buro.scoreRiesgo !== null && (
-											<span>
-												Score:{" "}
-												<span className="font-medium">
-													{buro.scoreRiesgo}/100
-												</span>
-											</span>
-										)}
-										{buro.nivelRiesgo && (
-											<span>
-												Riesgo:{" "}
-												<span className="font-medium">{buro.nivelRiesgo}</span>
-											</span>
-										)}
-										{buro.fuenteDeDatos && (
-											<span className="text-muted-foreground">
-												Fuente:{" "}
-												{buro.fuenteDeDatos === "cache"
-													? "Consulta Previa (guardado por 30 días)"
-													: "Infornet"}
-											</span>
-										)}
-									</div>
-									{buro.alertas && buro.alertas.length > 0 && (
-										<div className="flex flex-wrap gap-1">
-											{buro.alertas.map((alerta) => (
-												<Badge
-													key={alerta}
-													variant="secondary"
-													className="text-xs"
-												>
-													{alertaLabels[alerta] || alerta}
-												</Badge>
-											))}
-										</div>
-									)}
-								</div>
-							)}
-
-							{buro?.estado === "error" && buro.mensaje && (
-								<p className="mt-2 text-muted-foreground text-sm">
-									{buro.mensaje}
-								</p>
-							)}
-						</div>
+						<CajaBuro
+							key={opportunityId}
+							buro={buro}
+							buroVigente={data.buroVigente}
+							detalleBuro={data.detalleBuro}
+						/>
 					</div>
 				)}
 
-				{buro?.estado === "rechazado" && (
-					<Alert variant="destructive">
-						<XCircle className="h-4 w-4" />
-						<AlertTitle>El buró no aprobó a este cliente</AlertTitle>
-						<AlertDescription>
-							{buro.mensaje}. Puede rechazar la oportunidad o continuar bajo el
-							riesgo.
-						</AlertDescription>
-					</Alert>
-				)}
-
-				{buro?.estado === "sin_registro" && buro.fuenteDeDatos !== "manual" && (
-					<Alert>
-						<Info className="h-4 w-4" />
-						<AlertTitle>Sin registro en el buró de Infornet</AlertTitle>
-						<AlertDescription>
-							Esta persona no tiene historial crediticio en Infornet. No bloquea
-							la aprobación del análisis.
-						</AlertDescription>
-					</Alert>
-				)}
-
-				{buro?.fuenteDeDatos === "manual" && data.overrideBuro && (
-					<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
-						<UserCog className="h-4 w-4" />
-						<AlertTitle>Buró validado manualmente</AlertTitle>
-						<AlertDescription>
-							{data.overrideBuro.marcadoPorNombre ?? "Un analista"} verificó a
-							este cliente en Infornet
-							{data.overrideBuro.motivo
-								? `: "${data.overrideBuro.motivo}"`
-								: ""}
-							.
-						</AlertDescription>
-					</Alert>
-				)}
+				<AlertasBuro buro={buro} overrideBuro={data.overrideBuro} />
 
 				{CONSULTAR_RENAP &&
 					renap?.fuenteDeDatos === "manual" &&
@@ -789,6 +940,22 @@ export function RenapBuroValidation({
 						</AlertDescription>
 					</Alert>
 				)}
+
+				{data.cofirmantes.map((cofirmante) => (
+					<SeccionCofirmante
+						key={cofirmante.coDebtorId}
+						cofirmante={cofirmante}
+						ejecutando={isExecuting}
+						puedeOverridear={puedeOverridear}
+						onReintentar={() => ejecutarValidaciones()}
+						onOverride={() =>
+							abrirOverride("buro", {
+								coDebtorId: cofirmante.coDebtorId,
+								nombre: cofirmante.nombre,
+							})
+						}
+					/>
+				))}
 			</CardContent>
 
 			{/* Override manual — paso 1: motivo obligatorio */}
@@ -801,10 +968,17 @@ export function RenapBuroValidation({
 						<DialogTitle>
 							Marcar {overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""} como
 							validado manualmente
+							{overrideCofirmante
+								? ` para el co-firmante ${overrideCofirmante.nombre}`
+								: ""}
 						</DialogTitle>
 						<DialogDescription>
-							Usa esto solo cuando verificaste al cliente directamente en el
-							portal de {overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}.
+							Usa esto solo cuando verificaste{" "}
+							{overrideCofirmante
+								? `al co-firmante ${overrideCofirmante.nombre}`
+								: "al cliente"}{" "}
+							directamente en el portal de{" "}
+							{overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}.
 						</DialogDescription>
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
@@ -844,7 +1018,11 @@ export function RenapBuroValidation({
 					<AlertDialogHeader>
 						<AlertDialogTitle>
 							¿Confirmas la validación manual de{" "}
-							{overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}?
+							{overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}
+							{overrideCofirmante
+								? ` del co-firmante ${overrideCofirmante.nombre}`
+								: ""}
+							?
 						</AlertDialogTitle>
 						<AlertDialogDescription>
 							Esto permitirá aprobar el análisis de{" "}

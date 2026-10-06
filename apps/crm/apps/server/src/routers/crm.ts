@@ -190,7 +190,10 @@ import {
 } from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
+	ejecutarBuroCofirmantes,
 	ejecutarValidaciones,
+	firmaCofirmantes,
+	firmaCofirmantesSql,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
 import {
@@ -4421,6 +4424,8 @@ export const crmRouter = {
 			// Foto de lo que se evaluó (catálogo, reglas, lead, codeudores y
 			// referencias) al momento de revisar el buró; viaja en el UPDATE
 			let huellaBuro: string | null = null;
+			// Cofirmantes con el DPI con que pasaron por el buró; también viaja en el UPDATE
+			let cofirmantesValidados: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
 				// La exención se resuelve en el servicio: `source` es editable por el
@@ -4482,6 +4487,26 @@ export const crmRouter = {
 								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
 						});
 					}
+
+					// Los cofirmantes pesan igual que el titular: solo bloquea un
+					// fallo técnico, nunca el rechazo ni la falta de registro
+					const buroCofirmantes = await ejecutarBuroCofirmantes({
+						opportunityId: input.opportunityId,
+						userId: context.userId,
+						reusarVigente: true,
+					});
+
+					if (buroCofirmantes.errorTecnico) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo completar la validación de Buró: ${buroCofirmantes.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// Mismo resguardo que con el DPI del cliente, y por la misma razón
+					// dentro del UPDATE y no como lectura previa: un cofirmante agregado
+					// o con DPI corregido entre la validación y la escritura no tiene
+					// veredicto
+					cofirmantesValidados = firmaCofirmantes(buroCofirmantes.cofirmantes);
 
 					// Ni el rechazo del buró ni la ausencia de registro bloquean:
 					// quedan en la bitácora y visibles en la página de análisis
@@ -4568,15 +4593,23 @@ export const crmRouter = {
 						)
 					: condicionesBase;
 
+				const condicionesConCofirmantes =
+					cofirmantesValidados !== null
+						? and(
+								condicionesConDpi,
+								sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${cofirmantesValidados}`,
+							)
+						: condicionesConDpi;
+
 				const whereClause = huellaBuro
 					? and(
-							condicionesConDpi,
+							condicionesConCofirmantes,
 							sql`${huellaEvaluacionSql(
 								sql`${opportunities.id}`,
 								sql`${opportunities.leadId}`,
 							)} = ${huellaBuro}`,
 						)
-					: condicionesConDpi;
+					: condicionesConCofirmantes;
 
 				// Update opportunity with analysisStatus.
 				// Cuando hay huella de buró, la escritura va dentro de una
@@ -4610,6 +4643,21 @@ export const crmRouter = {
 					: await escribirAprobacion(db);
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
+					// Va antes que la huella: agregar un cofirmante también la cambia,
+					// y este mensaje dice qué hacer
+					if (cofirmantesValidados !== null) {
+						const { rows } = await db.execute<{ firma: string }>(
+							sql`SELECT ${firmaCofirmantesSql(sql`${input.opportunityId}::uuid`)} AS firma`,
+						);
+
+						if (rows[0]?.firma !== cofirmantesValidados) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Los cofirmantes cambiaron mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+							});
+						}
+					}
+
 					// Con el chequeo atómico del buró interno, 0 filas también
 					// significa que cambió algo de lo evaluado mientras se aprobaba
 					if (
@@ -9099,23 +9147,30 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
 			}
 
-			const [newCoDebtor] = await db
-				.insert(coDebtors)
-				.values({
-					opportunityId: input.opportunityId,
-					fullName: input.fullName,
-					dpi: resultadoDpi.dpiLimpio,
-					age: input.age,
-					gender: input.gender,
-					maritalStatus: input.maritalStatus,
-					profession: input.profession,
-					nationality: input.nationality,
-					email: input.email,
-					phone: input.phone,
-					occupation: input.occupation,
-					notes: input.notes,
-				})
-				.returning();
+			// Mismo candado que el UPDATE que aprueba el análisis: su chequeo de
+			// cofirmantes validados es una foto en READ COMMITTED, y un alta que se
+			// confirma mientras corre quedaría aprobada sin buró
+			const [newCoDebtor] = await db.transaction(async (tx) => {
+				await tomarCandadoBuroInterno(tx);
+
+				return tx
+					.insert(coDebtors)
+					.values({
+						opportunityId: input.opportunityId,
+						fullName: input.fullName,
+						dpi: resultadoDpi.dpiLimpio,
+						age: input.age,
+						gender: input.gender,
+						maritalStatus: input.maritalStatus,
+						profession: input.profession,
+						nationality: input.nationality,
+						email: input.email,
+						phone: input.phone,
+						occupation: input.occupation,
+						notes: input.notes,
+					})
+					.returning();
+			});
 
 			return newCoDebtor;
 		}),

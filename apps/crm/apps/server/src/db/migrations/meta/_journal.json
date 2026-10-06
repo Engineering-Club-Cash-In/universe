@@ -281,6 +281,13 @@
 			"when": 1791229780674,
 			"tag": "0046_add_acceso_portal_activity_action",
 			"breakpoints": true
+		},
+		{
+			"idx": 39,
+			"version": "7",
+			"when": 1791305850608,
+			"tag": "0047_add_cofirmante_opportunity_validations",
+			"breakpoints": true
 		}
 	]
 }

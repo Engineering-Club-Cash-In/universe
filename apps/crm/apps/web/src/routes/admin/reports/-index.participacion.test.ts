@@ -119,7 +119,7 @@ test("Cobranza e Inversión usan el mismo workbook multihoja", async () => {
 	expect(source).toContain("canAccessCobranzaReport ? exportAdminReportsExcel : undefined");
 	expect(source).toContain("onClick={exportAdminReportsExcel}");
 	expect(source).toMatch(
-		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{!officialMoraReady\}\s*>/,
+		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{officialMoraPending\}\s*>/,
 	);
 });
 
@@ -147,15 +147,34 @@ test("integra la mora oficial en la tabla existente sin tarjeta adicional", asyn
 	expect(source).toContain("rows: montoCobrarRows");
 });
 
-test("bloquea tabla y exportación mensual hasta tener la mora oficial", async () => {
+test("bloquea la tabla sin mora oficial pero la exportación solo espera mientras carga", async () => {
 	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
 	expect(source).toContain(
 		"enabled: canAccessCobranzaReport && officialMoraRequired",
 	);
-	expect(source).toContain("if (!officialMoraReady)");
-	expect(source).toContain("disabled={!officialMoraReady}");
 	expect(source).toContain(
 		"{officialMoraReady && !!montoCobrarData?.data.length && (",
 	);
 	expect(source).toContain("{officialMoraFailed && (");
+
+	expect(source).not.toContain("if (!officialMoraReady)");
+	expect(source).not.toContain("disabled={!officialMoraReady}");
+	expect(source).toContain("disabled={officialMoraPending}");
+	const exportStart = source.indexOf("const exportAdminReportsExcel = () => {");
+	expect(exportStart).toBeGreaterThan(-1);
+	const exportBlock = source.slice(
+		exportStart,
+		source.indexOf("const closedCreditsRows", exportStart),
+	);
+	expect(exportBlock).toContain("if (officialMoraPending)");
+	expect(source).toMatch(
+		/const officialMoraMissing =\s*officialMoraRequired && officialMoraEsperado === undefined;/,
+	);
+	expect(source).toMatch(
+		/applyOfficialMonthlyMora\([\s\S]*?officialMoraOperationalMonth,\s*officialMoraEsperado,\s*\)/,
+	);
+	expect(exportBlock).toContain("...(officialMoraMissing && {");
+	expect(exportBlock).toContain("avisoMoraMes");
+	expect(exportBlock).toMatch(/if \(officialMoraMissing\) \{\s*toast\.warning\(/);
+	expect(exportBlock).not.toContain("officialMoraFailed");
 });

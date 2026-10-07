@@ -1146,7 +1146,9 @@ export function RegistrarPagoForm({
 
 						{pasoDatos}
 
-						<div className="flex justify-end gap-2">
+						{/* Fijos abajo mientras se llena la boleta: al final de la
+						    columna quedaban fuera de vista y había que bajar a buscarlos. */}
+						<div className="sticky bottom-0 z-10 flex justify-end gap-2 border-line-subtle border-t bg-surface py-3">
 							<Button onClick={volverAlCredito} variant="outline">
 								Cancelar
 							</Button>

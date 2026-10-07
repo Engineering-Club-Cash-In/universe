@@ -88,6 +88,18 @@ interface DestinatarioDeFirma {
 }
 
 /**
+ * Con qué roles puede aparecer una persona en los firmantes de un contrato.
+ *
+ * Un codeudor también firma como titular cuando el cliente es una sociedad y él
+ * es su representante: en lo que jurídico sube a mano firma por la sociedad
+ * (ver `armarFirmantes`). Como el cliente y los codeudores nunca comparten
+ * correo, una fila de titular con el correo del codeudor sólo puede ser ésa.
+ */
+export function rolesConLosQueFirma(role: string): string[] {
+	return role === "COFIRMANTE" ? ["COFIRMANTE", "TITULAR"] : [role];
+}
+
+/**
  * Los enlaces que le tocan HOY a una persona de una oportunidad.
  *
  * El reintento manual no puede confiar en los enlaces que trae la pantalla:
@@ -187,7 +199,10 @@ async function enlacesDeLaPersona(
 				eq(generatedLegalContracts.opportunityId, opportunityId),
 				ne(generatedLegalContracts.status, "cancelled"),
 				isNull(generatedLegalContracts.replacedByContractId),
-				eq(contractSignatories.role, destinatario.role),
+				inArray(
+					contractSignatories.role,
+					rolesConLosQueFirma(destinatario.role),
+				),
 				// WeeTrust puede devolver el correo en minúsculas.
 				sql`lower(${contractSignatories.email}) = lower(${destinatario.email})`,
 				ne(contractSignatories.status, "signed"),
@@ -448,19 +463,24 @@ async function enviarEnlacesDeFirma(params: {
 		// emitieron sin la verificación de identidad por rol de ahora, y su
 		// columna `clientSigningLink` no dice de quién es cada link. Sólo salen
 		// por WhatsApp los enlaces generados con el flujo nuevo.
-		const clave = destinatario.email
-			? claveDe(destinatario.role, destinatario.email)
-			: null;
+		const email = destinatario.email;
+		const claves = email
+			? rolesConLosQueFirma(destinatario.role).map((r) => claveDe(r, email))
+			: [];
+		const clave = claves[0] ?? null;
+		const suClaveEn = (contractId: string) =>
+			claves.find((k) => linksPorContrato.get(contractId)?.has(k));
 		const susContratos = contratosDeFirma
-			.filter((c) => Boolean(clave && linksPorContrato.get(c.id)?.has(clave)))
+			.filter((c) => Boolean(suClaveEn(c.id)))
 			.map((c) => ({
 				contractName: c.contractName,
-				link: linksPorContrato.get(c.id)?.get(clave as string) ?? null,
+				link:
+					linksPorContrato.get(c.id)?.get(suClaveEn(c.id) as string) ?? null,
 				pdfLink: pdfResueltos.get(c.id) ?? null,
 			}));
 
 		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
-		if (susContratos.length === 0 && clave && firmaronAlgo.has(clave)) {
+		if (susContratos.length === 0 && claves.some((k) => firmaronAlgo.has(k))) {
 			continue;
 		}
 

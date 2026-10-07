@@ -398,3 +398,20 @@ test("cliente HTTP rechaza categorías, ids, cantidades, montos y estados de det
 		).rejects.toThrow("Contrato de reinversión inválido");
 	}
 });
+
+test("un 422 de cartera se traduce a error oRPC sin ser 500", async () => {
+	const { CarteraBackHttpError } = await import("./cartera-back-client");
+	await expect(
+		fetchReinvestmentLiquidaciones(
+			{ mes: 5, anio: 2026 },
+			{
+				getReinversionLiquidaciones: async () => {
+					throw new CarteraBackHttpError("HTTP 422", 422, {});
+				},
+			},
+		),
+	).rejects.toMatchObject({
+		code: "UNPROCESSABLE_CONTENT",
+		message: "No se puede mostrar la conciliación de este período",
+	});
+});

@@ -152,7 +152,10 @@ export function buildMontoACobrarPeriodoQuery({
         ${pgInterval}
       ) AS bucket
     ),
-    cuotas_autoritativas AS (
+    -- NOT MATERIALIZED: se referencia 3 veces, así que Postgres lo materializaría
+    -- sin índices y cada subconsulta por crédito escanearía todas las cuotas.
+    -- Inlineado, el filtro por credito_id baja al DISTINCT ON y usa el índice.
+    cuotas_autoritativas AS NOT MATERIALIZED (
       SELECT DISTINCT ON (q.credito_id, q.numero_cuota)
         q.cuota_id, q.credito_id, q.numero_cuota, q.fecha_vencimiento
       FROM cartera.cuotas_credito q

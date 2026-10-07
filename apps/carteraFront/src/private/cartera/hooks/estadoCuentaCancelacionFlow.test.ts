@@ -300,4 +300,14 @@ describe("cableado del modal", () => {
     expect(panelError).toMatch(/flujo\.envioReintentable \? \([\s\S]*?selectorContactos\(/);
     expect(panelError).toMatch(/disabled=\{!destinatarioValido \|\| contactosQuery\.isFetching\}/);
   });
+
+  it("mientras se confirma o se envía, el modal no se cierra por ninguna vía", () => {
+    expect(fuente).toContain(
+      'const cierreBloqueado = flujo.fase === "CONFIRMANDO" || flujo.fase === "ENVIANDO";',
+    );
+    // X, Escape y clic afuera pasan por onOpenChange; la X además se oculta.
+    expect(fuente).toMatch(/onOpenChange=\{\(abierto\) => \{\s*if \(!abierto && cierreBloqueado\) return;/);
+    expect(fuente).toContain("showCloseButton={!cierreBloqueado}");
+    expect(fuente).not.toContain("onOpenChange={onClose}");
+  });
 });

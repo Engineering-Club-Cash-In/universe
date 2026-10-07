@@ -449,6 +449,10 @@ export function ModalCancelCredit({
   const solicitudConfirmada = FASES_CONFIRMADAS.includes(flujo.fase);
   // /creditAction pudo haber quedado registrada: solo se ofrece cerrar.
   const confirmacionIncierta = flujo.fase === "CONFIRMACION_INCIERTA";
+  // Mientras se confirma o se envía no se cierra por ninguna vía (X, Escape,
+  // clic afuera): el resultado del envío —y su reintento— solo existe en este
+  // modal, y un crédito ya pendiente no lo vuelve a abrir.
+  const cierreBloqueado = flujo.fase === "CONFIRMANDO" || flujo.fase === "ENVIANDO";
 
   // Teléfonos del CRM: en la vista previa (antes de confirmar) y, tras un
   // fallo reintentable, en el panel de error con la lista recién consultada.
@@ -519,8 +523,15 @@ export function ModalCancelCredit({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog
+      open={open}
+      onOpenChange={(abierto) => {
+        if (!abierto && cierreBloqueado) return;
+        onClose();
+      }}
+    >
       <DialogContent
+        showCloseButton={!cierreBloqueado}
         className={`
           bg-white
           shadow-xl
@@ -1175,7 +1186,7 @@ export function ModalCancelCredit({
                     variant="outline"
                     className="h-10 px-5 text-sm font-medium border-gray-300 text-gray-600 hover:bg-gray-50"
                     onClick={handleClose}
-                    disabled={flujo.fase === "ENVIANDO"}
+                    disabled={cierreBloqueado}
                   >
                     Cerrar
                   </Button>

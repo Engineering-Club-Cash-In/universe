@@ -364,6 +364,26 @@ describe("diagnosticar — vehículos duplicados que reclaman la misma unidad", 
 		expect(de(d, "viejo")?.detalle).toContain("nuevo");
 		expect(d.unidades[0]?.estado).toBe("propuesta");
 	});
+	test("PENDIENTE_CANCELACION no cuenta como vigente: gana el ACTIVO aunque sea más viejo", () => {
+		const d = diagnosticar(
+			[u(1, "P-123ABC")],
+			[
+				v("activo", {
+					placa: "P-123ABC",
+					conCredito: true,
+					creditos: [cr("01010214000001", "ACTIVO")],
+				}),
+				v("cerrando", {
+					placa: "P0-123ABC",
+					conCredito: true,
+					creditos: [cr("CRM-nuevo", "PENDIENTE_CANCELACION", "2026-05-01")],
+				}),
+			],
+		);
+		expect(de(d, "activo")?.estado).toBe("propuesto");
+		expect(de(d, "activo")?.confirmar).toBe(false);
+		expect(de(d, "cerrando")?.estado).toBe("duplicado_descartado");
+	});
 	test("MOROSO cuenta como vigente y le gana a un vehículo sin crédito", () => {
 		const d = diagnosticar(
 			[u(1, "P-287JZY CON APAGADO")],

@@ -115,13 +115,17 @@ export interface CreditoVehiculo {
 	fechaCreacion: string | null;
 }
 
-/** Estados de cartera en los que el crédito sigue vivo (se cobra o se gestiona). */
+/**
+ * Estados de cartera en los que el crédito sigue vivo (se cobra o se gestiona).
+ * PENDIENTE_CANCELACION no cuenta: COBROS-02 lo trata como terminado (ver
+ * docs/features/cobros-02/01-modelo-de-buckets.md), igual que CANCELADO y
+ * CAIDO. Un duplicado que está cerrando no le gana la unidad a uno activo.
+ */
 export const ESTADOS_CREDITO_VIGENTES = new Set([
 	"ACTIVO",
 	"MOROSO",
 	"EN_RECUPERACION",
 	"EN_CONVENIO",
-	"PENDIENTE_CANCELACION",
 ]);
 
 export type Metodo =

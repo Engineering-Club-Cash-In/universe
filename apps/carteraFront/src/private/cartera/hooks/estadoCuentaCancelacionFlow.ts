@@ -203,10 +203,10 @@ export function falloConfirmacionEsDefinitivo(status: number | undefined): boole
 /**
  * Un fallo HTTP de /enviar es reintentable solo cuando el servidor contestó
  * que NO lo intentó (validación, permisos, no existe, conflicto, número que no
- * está en el CRM, CRM inaccesible al verificar el número [424], deshabilitado).
- * Un 502/504 puede venir del proxy con el envío a medias: no es reintentable.
- * Sin respuesta o con otro 5xx el mensaje pudo haber salido: revisión manual.
+ * está en el CRM, CRM inaccesible al verificar el número [424]).
+ * Ningún 5xx es reintentable: un 502/503/504 también lo da el proxy con el
+ * envío a medias, y sin respuesta el mensaje pudo haber salido: revisión manual.
  */
 export function falloEnvioEsReintentable(status: number | undefined): boolean {
-  return status !== undefined && [400, 403, 404, 409, 422, 424, 503].includes(status);
+  return status !== undefined && [400, 403, 404, 409, 422, 424].includes(status);
 }

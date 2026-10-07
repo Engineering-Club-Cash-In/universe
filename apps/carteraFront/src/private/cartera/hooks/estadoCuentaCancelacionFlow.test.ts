@@ -225,9 +225,10 @@ describe("envío: solo después del ok de /creditAction", () => {
     expect(falloEnvioEsReintentable(400)).toBe(true);
     expect(falloEnvioEsReintentable(422)).toBe(true); // número que no está en el CRM
     expect(falloEnvioEsReintentable(424)).toBe(true); // CRM caído al verificar: no se envió
-    expect(falloEnvioEsReintentable(503)).toBe(true);
     expect(falloEnvioEsReintentable(500)).toBe(false);
-    expect(falloEnvioEsReintentable(502)).toBe(false); // puede ser el proxy a medias
+    // 502/503/504 también los da el proxy con el envío a medias.
+    expect(falloEnvioEsReintentable(502)).toBe(false);
+    expect(falloEnvioEsReintentable(503)).toBe(false);
     expect(falloEnvioEsReintentable(504)).toBe(false);
     expect(falloEnvioEsReintentable(undefined)).toBe(false);
   });

@@ -36,6 +36,27 @@
       "when": 1789665550727,
       "tag": "0004_classify_legacy_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791417600000,
+      "tag": "0005_cartera_payment_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791936000000,
+      "tag": "0006_alerta_correo",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792022400000,
+      "tag": "0007_token_user_reservations",
+      "breakpoints": true
     }
   ]
 }

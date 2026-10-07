@@ -32,7 +32,18 @@ const qaRealEnv = {
   ENABLE_TEST_UI: "false",
 };
 
+const productionEnv = {
+  ...qaRealEnv,
+  NEXA_DEPLOYMENT_MODE: "production",
+  CARTERA_TARGET_ENV: "production",
+  CARTERA_PRODUCTION_ALLOWED_ORIGINS: "https://cartera.example.com",
+  NEXA_CARTERA_EVENTS_SECRET: "e".repeat(32),
+};
+
 describe("loadConfig", () => {
+  it("acepta producción completa", () => {
+    expect(loadConfig(productionEnv).deploymentMode).toBe("production");
+  });
   it.each([
     { CARTERA_TARGET_ENV: "qa" },
     { NEXA_BASE_URL: "http://open-bank.example.com" },
@@ -41,7 +52,7 @@ describe("loadConfig", () => {
     { CARTERA_PRODUCTION_ALLOWED_ORIGINS: "https://other.example.com" },
     { CARTERA_API_BASE_URL: "http://cartera.example.com" },
   ])("production rejects unsafe target %j", (override) => {
-    expect(() => loadConfig({ ...qaRealEnv, NEXA_DEPLOYMENT_MODE: "production", CARTERA_TARGET_ENV: "production", CARTERA_PRODUCTION_ALLOWED_ORIGINS: "https://cartera.example.com", ...override })).toThrow();
+    expect(() => loadConfig({ ...productionEnv, ...override })).toThrow();
   });
   it("interpreta explícitamente MOCK_CARTERA=false como false", () => {
     expect(
@@ -55,6 +66,7 @@ describe("loadConfig", () => {
         NEXA_CLIENT_CERT_PATH: "/certs/client.crt",
         NEXA_CLIENT_KEY_PATH: "/certs/client.key",
         NEXA_CA_CERT_PATH: "/certs/ca.crt",
+        NEXA_CARTERA_EVENTS_SECRET: "e".repeat(32),
       }).mockCartera,
     ).toBe(false);
     expect(loadConfig({ ...baseEnv, MOCK_CARTERA: "true" }).mockCartera).toBe(true);
@@ -178,5 +190,24 @@ describe("loadConfig", () => {
     expect(loadConfig(baseEnv).workerIntervalSeconds).toBe(1);
     expect(loadConfig({ ...baseEnv, WORKER_INTERVAL_SECONDS: "3" }).workerIntervalSeconds).toBe(3);
     expect(() => loadConfig({ ...baseEnv, WORKER_INTERVAL_SECONDS: "0" })).toThrow();
+  });
+
+  it("NEXA_CARTERA_EVENTS_SECRET es opcional, pero si viene debe ser fuerte y propio", () => {
+    expect(loadConfig(baseEnv).nexaCarteraEventsSecret).toBeUndefined();
+    expect(loadConfig({ ...baseEnv, NEXA_CARTERA_EVENTS_SECRET: "e".repeat(32) }).nexaCarteraEventsSecret).toBe("e".repeat(32));
+    expect(() => loadConfig({ ...baseEnv, NEXA_CARTERA_EVENTS_SECRET: "short" })).toThrow("at least 32 bytes");
+    expect(() => loadConfig({ ...baseEnv, NEXA_CARTERA_EVENTS_SECRET: "c".repeat(32) })).toThrow("separate credential");
+    expect(() => loadConfig({ ...baseEnv, NEXA_CARTERA_EVENTS_SECRET: "a".repeat(32) })).toThrow("separate credential");
+  });
+
+  it("producción no arranca sin NEXA_CARTERA_EVENTS_SECRET; los demás modos siguen sin exigirlo", () => {
+    const { NEXA_CARTERA_EVENTS_SECRET: _secret, ...sinSecreto } = productionEnv;
+    expect(() => loadConfig(sinSecreto)).toThrow("Production requires NEXA_CARTERA_EVENTS_SECRET");
+    expect(() => loadConfig({ ...productionEnv, NEXA_CARTERA_EVENTS_SECRET: "" })).toThrow();
+    expect(() => loadConfig({ ...productionEnv, NEXA_CARTERA_EVENTS_SECRET: "   " })).toThrow();
+    expect(() => loadConfig({ ...productionEnv, NEXA_CARTERA_EVENTS_SECRET: "short" })).toThrow("at least 32 bytes");
+    expect(loadConfig(productionEnv).nexaCarteraEventsSecret).toBe("e".repeat(32));
+    expect(loadConfig(baseEnv).nexaCarteraEventsSecret).toBeUndefined();
+    expect(loadConfig(qaRealEnv).nexaCarteraEventsSecret).toBeUndefined();
   });
 });

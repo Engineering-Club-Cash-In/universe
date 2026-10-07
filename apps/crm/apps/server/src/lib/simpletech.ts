@@ -1,3 +1,4 @@
+import type { TemplateHeader, TemplateMessage } from "@repo/simpletech";
 import { SimpleTechClient } from "@repo/simpletech";
 
 export const SIMPLETECH_BOT_NUMBER = process.env.CCI_BOT_NUMBER!;
@@ -183,6 +184,22 @@ export async function sendWhatsappTemplate(params: {
 	message: string;
 	logPrefix?: string;
 	/**
+	 * Nombre de template explícito. Si se pasa, NO se auto-resuelve
+	 * `mensajeNparametro` por cantidad de párrafos — se usa este tal cual
+	 * (p. ej. `mensaje_adjunto`, que tiene header de documento + 1 param).
+	 */
+	templateName?: string;
+	/**
+	 * Header de media opcional (documento/imagen/video/texto). Requiere que el
+	 * template en WittyBots tenga declarado ese tipo de header.
+	 */
+	header?: TemplateHeader;
+	/**
+	 * Params del body explícitos. Si no se pasan, se parte `message` por
+	 * párrafos (comportamiento por defecto del envío de cobros).
+	 */
+	bodyParams?: string[];
+	/**
 	 * No escribir las URL del mensaje en el log. Los enlaces de firma de
 	 * contratos firman en nombre de la persona: quien tenga acceso a los logs
 	 * no debería poder usarlos.
@@ -198,20 +215,22 @@ export async function sendWhatsappTemplate(params: {
 	}
 
 	const phoneNormalized = normalizePhone(params.phone);
-	const bodyParams = splitTemplateParams(params.message);
-	const templateName = resolveTemplateNameByParamCount(
-		SIMPLETECH_TEMPLATE_NAME,
-		bodyParams.length,
-	);
+	const bodyParams = params.bodyParams ?? splitTemplateParams(params.message);
+	const templateName =
+		params.templateName ??
+		resolveTemplateNameByParamCount(
+			SIMPLETECH_TEMPLATE_NAME,
+			bodyParams.length,
+		);
+	const message: TemplateMessage = {
+		number: phoneNormalized,
+		body: bodyParams,
+		...(params.header ? { header: params.header } : {}),
+	};
 	const templateRequest = {
 		templateName,
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
-		messages: [
-			{
-				number: phoneNormalized,
-				body: bodyParams,
-			},
-		],
+		messages: [message],
 	};
 
 	console.log(`${prefix} Enviando template a:`, phoneNormalized);

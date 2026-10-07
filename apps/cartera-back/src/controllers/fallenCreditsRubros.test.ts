@@ -44,6 +44,13 @@ const NOMBRES = new Map<unknown, string>([
 
 let eventos: string[] = [];
 let filas = new Map<unknown, unknown[]>();
+let eventosNexaFacturando: Array<{ id: number; status: string }> = [];
+
+/** Texto literal de un `sql\`...\`` de drizzle, para reconocer la consulta cruda. */
+const textoSql = (q: any): string =>
+  (q?.queryChunks ?? [])
+    .map((c: any) => (Array.isArray(c?.value) ? c.value.join("") : ""))
+    .join("?");
 
 /**
  * Qué columnas menciona una condición de drizzle. Se camina el árbol juntando
@@ -124,6 +131,14 @@ const motor: any = {
   insert: (t: unknown) => cadena("insert", t),
   update: (t: unknown) => cadena("update", t),
   delete: (t: unknown) => cadena("delete", t),
+  // SQL crudo: conteo de pagos Nexa y desvinculación de eventos. Aquí no hay pagos Nexa.
+  execute: async (q: unknown) => {
+    if (/FOR UPDATE/.test(textoSql(q)) && /billing_running/.test(textoSql(q))) {
+      eventos.push("select:nexa_facturando");
+      return { rows: eventosNexaFacturando, rowCount: eventosNexaFacturando.length };
+    }
+    return { rows: [], rowCount: 0 };
+  },
 };
 motor.transaction = async (cb: any) => {
   eventos.push("tx:begin");
@@ -169,6 +184,7 @@ const unRubro = (over: Record<string, unknown> = {}) => ({
 /** Crédito VIGENTE con cuota 0, y los rubros que se le pasen. */
 const preparar = (rubrosDelCredito: unknown[]) => {
   eventos = [];
+  eventosNexaFacturando = [];
   filas = new Map<unknown, unknown[]>([
     [creditos, [{ credito_id: 9, statusCredit: "VIGENTE" }]],
     [cuotas_credito, [{ cuota_id: 100 }]],
@@ -293,5 +309,78 @@ describe("marcarCreditoComoCaido — rubros con deuda viva", () => {
 
     expect(chequeo).toBeGreaterThan(lock);
     expect(chequeo).toBeLessThan(unlock);
+  });
+});
+
+describe("marcarCreditoComoCaido — estados que no se tocan", () => {
+  it("un crédito CANCELADO se rechaza y no se borra ni se cambia nada", async () => {
+    preparar([]);
+    filas.set(creditos, [{ credito_id: 9, statusCredit: "CANCELADO" }]);
+
+    const r = await marcar();
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("CANCELADO");
+    expect(eventos).not.toContain("delete:pagos_credito");
+    expect(eventos).not.toContain("delete:cuotas_credito");
+    expect(eventos).not.toContain("update:creditos");
+    expect(eventos).not.toContain("insert:creditos_caidos");
+  });
+});
+
+describe("marcarCreditoComoCaido — pagos Nexa con facturación en curso", () => {
+  // La facturación diferida de Nexa corre fuera del candado del crédito: borrar el pago mientras
+  // la factura se emite deja una factura sin pago y el evento en billing_unknown.
+  it("con un evento billing_running se niega y no borra pagos ni cuotas", async () => {
+    preparar([]);
+    eventosNexaFacturando = [{ id: 77, status: "billing_running" }];
+
+    const r = await marcar();
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("77 billing_running");
+    expect(eventos).toContain("select:nexa_facturando");
+    expect(eventos).not.toContain("delete:pagos_credito");
+    expect(eventos).not.toContain("delete:cuotas_credito");
+    expect(eventos).not.toContain("update:creditos");
+    expect(eventos).not.toContain("insert:creditos_caidos");
+  });
+
+  // Con la facturación automática apagada (default) todo pago Nexa aceptado queda en billing_pending
+  // para siempre: si eso bloqueara, el crédito nunca podría marcarse CAIDO. billing_pending todavía
+  // no emitió nada y, una vez desvinculado el pago, startNexaBilling ya no puede arrancar.
+  it("un evento billing_pending (facturación apagada) no bloquea: se marca CAIDO", async () => {
+    preparar([]);
+    eventosNexaFacturando = [{ id: 78, status: "billing_pending" }];
+
+    const r = await marcar();
+
+    expect(r.success).toBe(true);
+    expect(eventos).toContain("select:nexa_facturando");
+    expect(eventos).toContain("delete:pagos_credito");
+    expect(eventos).toContain("update:creditos");
+  });
+
+  it("billing_unknown junto a billing_pending sigue bloqueando y nombra solo al que bloquea", async () => {
+    preparar([]);
+    eventosNexaFacturando = [{ id: 78, status: "billing_pending" }, { id: 79, status: "billing_unknown" }];
+
+    const r = await marcar();
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("79 billing_unknown");
+    expect(r.message).not.toContain("78");
+    expect(eventos).not.toContain("delete:pagos_credito");
+  });
+
+  it("el chequeo va dentro de la transacción, antes del borrado", async () => {
+    preparar([]);
+
+    const r = await marcar();
+
+    expect(r.success).toBe(true);
+    const chequeo = eventos.indexOf("select:nexa_facturando");
+    expect(chequeo).toBeGreaterThan(eventos.indexOf("tx:begin"));
+    expect(chequeo).toBeLessThan(eventos.indexOf("delete:pagos_credito"));
   });
 });

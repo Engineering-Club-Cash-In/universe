@@ -26,8 +26,10 @@ Schema version: **1**
 | `assignment_mode` | enum: add, replace, process |
 | `attempt` | integer 1..10 |
 | `audit_operation` | enum: query, diagnostic |
+| `audit_persisted` | boolean |
 | `auth_reason` | enum: missing, invalid, expired |
 | `change_set` | enum: terms, schedule, investors, status, mixed |
+| `changed_field_count` | integer 1..64 |
 | `commit_ref` | string max=40 pattern=^[0-9a-f]{7,40}$ |
 | `contribution_operation` | enum: create, update |
 | `credit_closed` | boolean |
@@ -44,7 +46,7 @@ Schema version: **1**
 | `installment_closed` | boolean |
 | `investments_reversed` | boolean |
 | `investor_count` | integer 0..1000000000 |
-| `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot, verify_liquidation_balance, provision_portal_accounts, retry_crm_contract_batches |
+| `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot, verify_liquidation_balance, provision_portal_accounts, retry_crm_contract_batches, deliver_nexa_events, retry_nexa_receipts, retry_nexa_accounts |
 | `late_fee_operation` | enum: history, deactivate, create, update, process, condone, list, bulk_condone |
 | `late_fee_recreation` | enum: not_required, completed, failed |
 | `liquidation_mode` | enum: single, batch, credit |
@@ -249,6 +251,12 @@ Schema version: **1**
 | `completed` | `info` | `distribution_mode`, `fallback_applied`, `duration_ms` | — | — |
 | `failed` | `error` | `distribution_mode`, `fallback_applied`, `duration_ms`, `error_code` | — | — |
 | `fallback` | `warn` | `distribution_mode`, `fallback_applied`, `duration_ms`, `reason_code` | — | — |
+
+### `payment.nexa_edit`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `recorded` | `warn` | `changed_field_count`, `audit_persisted` | — | — |
 
 ### `payment.registration`
 

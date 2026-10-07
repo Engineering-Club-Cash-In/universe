@@ -30,6 +30,7 @@ import { CapitalInversionistas } from "./private/cartera/components/CapitalInver
 import { Seguros } from "./private/cartera/components/Seguros";
 import { ProyeccionInversionistas } from "./private/cartera/components/ProyeccionInversionistas";
 import { ActivePortfolioReport } from "./private/cartera/components/ActivePortfolioReport";
+import { NexaDashboard } from "./private/cartera/components/NexaDashboard";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -327,6 +328,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <ProyeccionInversionistas />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="nexa"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "ASESOR", "CONTA"]}>
+              <NexaDashboard />
             </RoleRoute>
           }
         />

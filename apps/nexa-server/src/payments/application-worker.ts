@@ -1,5 +1,7 @@
 import { tokenDateSchema, type ReviewTransferStatus } from "../nexa/schemas";
-import { formatAmount, type CarteraPaymentClient } from "./cartera-client";
+import { CarteraPaymentRequestError, formatAmount, type CarteraPaymentClient, type CarteraTokenClient } from "./cartera-client";
+import type { CarteraEventTokenUsers } from "../routes/cartera-events";
+import { deactivateIfCreditCancelled } from "../tokens/credit-cancelled";
 
 export type ApplicationClaim = {
   id: number;
@@ -18,14 +20,27 @@ export type ApplicationClaim = {
 
 export type ApplicationWorkerRepository = {
   claimNextApplication(now: Date, leaseSeconds: number): Promise<ApplicationClaim | null>;
-  resolveCreditoId(tokenIdentifier: string, tokenPrefix: string): Promise<number | null>;
+  resolveCreditoId(tokenIdentifier: string, tokenPrefix: string, options?: { includeInactive?: boolean }): Promise<number | null>;
   finalizeApplication(id: number, outcome: {
     paymentId: number | null;
+    paymentIds?: number[];
     reviewStatus: ReviewTransferStatus;
     failureReason: string | null;
     nextAttemptAt?: Date | null;
   }, now: Date, attemptCount: number): Promise<void>;
   markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date, attemptCount: number): Promise<void>;
+};
+
+export type TokenRepair = {
+  findTokenUser(tokenIdentifier: string, tokenPrefix: string): Promise<{
+    creditoId: number;
+    token: string;
+    identifier: string;
+    nexaUserId: number;
+  } | null>;
+  cartera: CarteraTokenClient;
+  // Desactiva el token user local si cartera responde credit_cancelled.
+  cancelledTokenUsers: CarteraEventTokenUsers;
 };
 
 export async function runApplicationWorkerOnce(options: {
@@ -36,6 +51,7 @@ export async function runApplicationWorkerOnce(options: {
   maxAttempts: number;
   backoffSeconds: number;
   maxBackoffSeconds: number;
+  tokenRepair?: TokenRepair;
 }) {
   const now = options.now?.() ?? new Date();
   const claim = await options.repository.claimNextApplication(now, options.leaseSeconds);
@@ -62,7 +78,11 @@ export async function runApplicationWorkerOnce(options: {
       return true;
     }
 
-    const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
+    // Un reintento de un pago ya aplicado debe llegar a cartera aunque el crédito
+    // se haya cancelado después: el binding inactivo no es "token desconocido".
+    const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix, {
+      includeInactive: Boolean(claim.carteraPaymentId),
+    });
     if (!creditoId) {
       if (claim.carteraPaymentId) throw new Error("Billing credit could not be resolved");
       await options.repository.finalizeApplication(claim.id, {
@@ -73,7 +93,7 @@ export async function runApplicationWorkerOnce(options: {
       return true;
     }
 
-    const result = await options.cartera.applyNexaPayment({
+    const paymentInput = {
       creditoId,
       transaction: {
         reference: claim.reference,
@@ -81,13 +101,69 @@ export async function runApplicationWorkerOnce(options: {
         currency: claim.currency,
         tokenDate,
         transactionId: claim.transactionId,
+        // nexa-server no persiste el token completo: es prefijo + identificador,
+        // igual que lo parte el webhook (slice(0, -9) / slice(-9)).
+        token: `${claim.tokenPrefix}${claim.tokenIdentifier}`,
       },
-    });
+    };
+    let result = await options.cartera.applyNexaPayment(paymentInput);
+    let repairFailure: string | null = null;
+    if (
+      result.status === "REJECTED"
+      && options.tokenRepair
+      && ["binding_missing", "binding_token_missing"].includes(safeRejectionReason(result.reason))
+    ) {
+      // Cartera todavía no conoce el token de este crédito: se lo registramos y
+      // reintentamos una vez, en vez de que el banco rechace la transferencia.
+      const tokenUser = await options.tokenRepair.findTokenUser(claim.tokenIdentifier, claim.tokenPrefix);
+      if (!tokenUser || tokenUser.creditoId !== creditoId) {
+        // El crédito salió de este mismo token: si ahora no se encuentra (o es
+        // otro), son nuestros datos los que no cuadran, no el pago del cliente.
+        repairFailure = tokenUser ? "credit_mismatch" : "token_user_not_found";
+      } else {
+        const registered = await options.tokenRepair.cartera.registerNexaToken({
+          creditoId: tokenUser.creditoId,
+          token: paymentInput.transaction.token,
+          identifier: tokenUser.identifier,
+          nexaUserId: tokenUser.nexaUserId,
+        });
+        await deactivateIfCreditCancelled(registered, tokenUser.creditoId, options.tokenRepair.cancelledTokenUsers);
+        if (registered.status !== "REJECTED") {
+          result = await options.cartera.applyNexaPayment(paymentInput);
+        } else if (DEFINITIVE_REJECTIONS.has(registered.reason)) {
+          result = { status: "REJECTED", reason: registered.reason };
+        } else if (registered.reason === "replay" || /^http_\d{3}$/.test(registered.reason)) {
+          // Nonce repetido o una respuesta que no es de cartera (404 de una
+          // réplica vieja, HTML de un proxy): transitorio, se reintenta.
+          throw new Error(`Token repair failed transiently: ${registered.reason}`);
+        } else {
+          repairFailure = safeRejectionReason(registered.reason);
+        }
+      }
+    }
     if (claim.carteraPaymentId && (result.status !== "APPLIED" || result.paymentId !== claim.carteraPaymentId)) {
       throw new Error("Billing retry did not confirm the applied payment");
     }
+    if (repairFailure) {
+      await options.repository.markApplicationFailed(claim.id, `token_repair_failed:${repairFailure}`, null, now, claim.attemptCount);
+      return true;
+    }
+    if (result.status === "REJECTED") {
+      const reason = safeRejectionReason(result.reason);
+      if (reason === "replay" || reason === "cartera_rejected") {
+        // replay: la primera entrega pudo entrar; el reintento (nonce nuevo) lo
+        // confirma. cartera_rejected: la respuesta no trae un código de cartera.
+        throw new Error(`Cartera payment outcome not definitive: ${reason}`);
+      }
+      if (!DEFINITIVE_REJECTIONS.has(reason)) {
+        // Rechazar haría que Nexa devuelva el dinero: sin certeza, lo mira una persona.
+        await options.repository.markApplicationFailed(claim.id, reason, null, now, claim.attemptCount);
+        return true;
+      }
+    }
     await options.repository.finalizeApplication(claim.id, result.status === "APPLIED" ? {
       paymentId: result.paymentId,
+      paymentIds: result.paymentIds,
       reviewStatus: "APPROVED",
       failureReason: result.billingStatus === "PENDING" ? "billing_pending" : null,
       // A disabled fiscal feature is a successful wait, not an exhausted retry.
@@ -99,7 +175,7 @@ export async function runApplicationWorkerOnce(options: {
       reviewStatus: "REJECTED",
       failureReason: safeRejectionReason(result.reason),
     }, now, claim.attemptCount);
-  } catch {
+  } catch (error) {
     const nextAttemptAt = getNextAttemptAt(
       now,
       claim.retryAttemptCount ?? claim.attemptCount,
@@ -109,7 +185,9 @@ export async function runApplicationWorkerOnce(options: {
     );
     await options.repository.markApplicationFailed(
       claim.id,
-      "application_processing_failed",
+      // Un desenlace incierto de cartera conserva su código (y el detalle que
+      // traiga): es lo que la revisión manual necesita ver. Lo demás, genérico.
+      error instanceof CarteraPaymentRequestError && error.reason ? error.reason : "application_processing_failed",
       nextAttemptAt,
       now,
       claim.attemptCount,
@@ -118,6 +196,22 @@ export async function runApplicationWorkerOnce(options: {
   }
   return true;
 }
+
+// Un REJECTED hace que Nexa le devuelva el dinero al cliente: solo se rechaza
+// cuando cartera prueba que el pago no puede aplicarse nunca. Todo otro código
+// (token_mismatch, binding_*_missing, conflict, credit_not_payable,
+// payment_not_applied, uno desconocido...) va a revisión manual.
+// credit_not_found tampoco es definitivo: el crédito sale del token mismo, así
+// que si cartera no lo conoce el error es nuestro, no del cliente.
+const DEFINITIVE_REJECTIONS = new Set([
+  // Un CANCELADO nunca se reactiva (lo responde el registro del token).
+  "credit_cancelled",
+  // El binding solo se desactiva al cancelar el crédito.
+  "binding_inactive",
+  // Límites configurados a propósito en el binding.
+  "binding_expired",
+  "amount_exceeds_binding",
+]);
 
 function getUnsupportedTransactionReason(claim: ApplicationClaim) {
   if (claim.currency !== "GTQ") return "unsupported_currency";

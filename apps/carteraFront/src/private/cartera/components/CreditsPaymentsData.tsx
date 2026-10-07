@@ -30,6 +30,7 @@ import { Hash, Info, ListOrdered, RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { NexaTokenCredito } from "./NexaTokenCredito";
 import { ModalEditCredit } from "./ModalEditCredit";
 import { useCatalogs } from "../hooks/catalogs";
 import type { Investor, Aseguradora } from "../services/services";
@@ -1768,6 +1769,10 @@ function DetallesCredito({
           </div>
         ))}
       </div>
+
+      {item.creditos.numero_credito_sifco && (
+        <NexaTokenCredito numeroCreditoSifco={item.creditos.numero_credito_sifco} />
+      )}
 
       {/* Observaciones */}
       <div className={fullWidth ? "col-span-full" : "mt-4"}>

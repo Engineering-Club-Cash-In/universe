@@ -3,6 +3,7 @@ import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfo
 import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
 import { MoraRecoveryFuturePeriodError } from "../controllers/moraRecuperacion";
 import { getOfficialClosure } from "../controllers/cierreMoraOficial";
+import { ReinvestmentDataError } from "../controllers/reinvestmentReport";
 import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getReinversionLiquidaciones } from "../controllers/reportes";
 import { client, db } from "../database";
 import { getVehiclesBySifcoMap } from "../services/crm.service";
@@ -181,6 +182,14 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/reinversion-liquidaciones]", error);
+      if (error instanceof ReinvestmentDataError) {
+        set.status = 422;
+        return {
+          error:
+            "No se puede conciliar la reinversión de este período: datos de liquidación inconsistentes",
+          code: "REINVESTMENT_DATA_INCONSISTENT",
+        };
+      }
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

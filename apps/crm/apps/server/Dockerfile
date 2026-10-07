@@ -2,8 +2,6 @@
 FROM docker.io/oven/bun:1.3.14 AS base
 WORKDIR /usr/src/app
 
-ARG PUPPETEER_CHROME_VERSION=148.0.7778.97
-
 # =========================
 # Etapa: instalar dependencias determinísticamente
 # =========================
@@ -32,7 +30,8 @@ RUN ln -s apps/crm/node_modules node_modules
 # =========================
 FROM deps AS browser
 WORKDIR /usr/src/app/apps/crm
-ARG PUPPETEER_CHROME_VERSION
+# El default vive en esta etapa: podman no hereda un ARG declarado en otra.
+ARG PUPPETEER_CHROME_VERSION=148.0.7778.97
 ENV PUPPETEER_SKIP_DOWNLOAD=false \
     PUPPETEER_CACHE_DIR=/usr/src/app/.cache/puppeteer
 RUN mkdir -p "$PUPPETEER_CACHE_DIR" \

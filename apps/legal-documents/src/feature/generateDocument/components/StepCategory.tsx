@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, TrendingUp, Building2, FileSignature, CheckCircle } from "lucide-react";
 import type { DocumentCategoria } from "@/services/documents";
+import { categoriaDisponible } from "../categorias";
 
 interface StepCategoryProps {
   readonly data: {
@@ -42,6 +43,11 @@ const CATEGORIES: ReadonlyArray<{
   },
 ];
 
+// Las de ventas e inversiones se generan en el CRM: ver `categorias.ts`.
+const CATEGORIAS_VISIBLES = CATEGORIES.filter((cat) =>
+  categoriaDisponible(cat.value)
+);
+
 export function StepCategory({ data, onChange }: StepCategoryProps) {
   const selected = data.category;
 
@@ -51,8 +57,12 @@ export function StepCategory({ data, onChange }: StepCategoryProps) {
         Selecciona la categoría del documento que deseas generar.
       </p>
 
+      <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        Los contratos de ventas e inversiones se generan desde el CRM.
+      </p>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {CATEGORIES.map((cat) => {
+        {CATEGORIAS_VISIBLES.map((cat) => {
           const isSelected = selected === cat.value;
           const Icon = cat.icon;
 

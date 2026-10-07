@@ -7,6 +7,7 @@ import {
   getPagosConInversionistas,
   updatePagosEspejoPorCredito,
   getAbonosPorCuota,
+  HORA_HH_MM,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -20,11 +21,16 @@ import { authMiddleware } from "./midleware";
 import { CREDIT_WITHOUT_INVESTOR_MIRROR_CODE } from "../utils/espejoInversionistasGuard";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito, getAcumuladoPorCredito, getCapitalInversionistas } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
+import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhatsapp";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
-import { revalidatePayment } from "../controllers/revalidatePayment";
+import { revalidatePayment, revalidatePaymentSchema } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import {
+  esNexaPaymentNotReversibleError,
+  respuestaNexaNoReversible,
+} from "../controllers/nexaPagoNoReversible";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
@@ -52,17 +58,34 @@ export const paymentRouter = new Elysia()
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
   .post("/revertPaymentToPending", revertPaymentToPending)
-  .post("/revalidatePayment", revalidatePayment)
+  .post("/revalidatePayment", async (context) => {
+    const respuesta = await revalidatePayment(
+      context as unknown as Parameters<typeof revalidatePayment>[0],
+    );
+    // Una revalidación exitosa (200, ya con su transacción cerrada) también
+    // deja el pago aplicado: mismo recibo por WhatsApp que /aplicar-pago,
+    // fire-and-forget y apagado con RECIBO_PAGO_WHATSAPP_ENABLED.
+    const body = revalidatePaymentSchema.safeParse(context.body);
+    if (context.set.status === 200 && body.success && respuesta && "data" in respuesta) {
+      void enviarRecibosPagoDeCreditoBestEffort({
+        creditoId: body.data.credito_id,
+        pagoIds: [body.data.pago_id],
+        soloBoletasCompletas: true,
+      });
+    }
+    return respuesta;
+  })
   .post("/processInvestors", processInvestors)
 
   // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
-  .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
+  .patch("/editPayment/:pagoId", async ({ params, body, set, user }: any) => {
     const pagoId = Number(params.pagoId);
     if (!pagoId || isNaN(pagoId)) {
       set.status = 400;
       return { success: false, message: "pago_id inválido" };
     }
-    const result = await editarPago(pagoId, body);
+    const usuario = user?.email ?? user?.id ?? null;
+    const result = await editarPago(pagoId, body, usuario);
     if (!result.success) {
       set.status = result.message.includes("no encontrado") ? 404 : 400;
     }
@@ -218,6 +241,10 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      if (esNexaPaymentNotReversibleError(error)) {
+        set.status = 409;
+        return respuestaNexaNoReversible();
+      }
       if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
         set.status = 422;
         return {
@@ -281,7 +308,22 @@ export const paymentRouter = new Elysia()
           fechaBoleta,
           fechaBoletaInicio,
           fechaBoletaFin,
+          canal,
+          horaInicio,
+          horaFin,
         } = query;
+
+        // ⏰ Una hora sin su fecha no tiene a qué pegarse: se rechaza igual que
+        // un valor inválido del esquema, antes de tocar la base.
+        if ((horaInicio && !fechaInicio) || (horaFin && !fechaFin)) {
+          set.status = 422;
+          return {
+            success: false as const,
+            error: horaInicio && !fechaInicio
+              ? "La hora desde necesita la fecha desde."
+              : "La hora hasta necesita la fecha hasta.",
+          };
+        }
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
         if (query.reportAdvisor === true) {
@@ -307,6 +349,9 @@ export const paymentRouter = new Elysia()
             fechaBoleta,
             fechaBoletaInicio,
             fechaBoletaFin,
+            canal,
+            horaInicio,
+            horaFin,
           });
           set.status = 200;
           return {
@@ -339,6 +384,9 @@ export const paymentRouter = new Elysia()
             fechaBoleta,
             fechaBoletaInicio,
             fechaBoletaFin,
+            canal,
+            horaInicio,
+            horaFin,
           });
           set.status = 200;
           return {
@@ -370,6 +418,9 @@ export const paymentRouter = new Elysia()
           fechaBoleta,
           fechaBoletaInicio,
           fechaBoletaFin,
+          canal,
+          horaInicio,
+          horaFin,
         });
 
         set.status = 200;
@@ -426,6 +477,9 @@ export const paymentRouter = new Elysia()
         fechaBoleta: t.Optional(t.String({ format: "date" })),
         fechaBoletaInicio: t.Optional(t.String({ format: "date" })),
         fechaBoletaFin: t.Optional(t.String({ format: "date" })),
+        canal: t.Optional(t.Union([t.Literal("NEXA"), t.Literal("MANUAL")])),
+        horaInicio: t.Optional(t.String({ pattern: HORA_HH_MM.source })),
+        horaFin: t.Optional(t.String({ pattern: HORA_HH_MM.source })),
       }),
       response: {
         200: t.Object({
@@ -437,6 +491,10 @@ export const paymentRouter = new Elysia()
           totalPages: t.Optional(t.Number()),
           totales: t.Optional(t.Any()),
           totalesInversionistas: t.Optional(t.Array(t.Any())),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
         }),
         500: t.Object({
           success: t.Literal(false),
@@ -596,6 +654,29 @@ export const paymentRouter = new Elysia()
       const resultado = await aplicarPagoAlCredito(pagoId);
 
       set.status = getApplyPaymentHttpStatus(resultado);
+
+      // Fire-and-forget: recibo de pago por WhatsApp (CB-113) sin bloquear la
+      // respuesta de validar-pago. El helper nunca lanza (lookup, PDF y envío
+      // quedan solo en el log) y no hace nada con RECIBO_PAGO_WHATSAPP_ENABLED
+      // apagado — mismo helper que usa el pago de Nexa.
+      // La cancelación "reset" responde success sin mover el pago y se puede
+      // volver a enviar: mandar recibo ahí lo duplicaría en cada clic. Se
+      // distingue por el estado que tenía el pago ANTES de aplicarlo, no por
+      // `applied` (el abono directo a capital también responde applied:false
+      // y sí es un pago real que lleva recibo).
+      if (
+        (resultado as { success?: boolean }).success &&
+        pagoExiste.validationStatus !== "reset" &&
+        pagoExiste.credito_id
+      ) {
+        void enviarRecibosPagoDeCreditoBestEffort({
+          creditoId: pagoExiste.credito_id,
+          pagoIds: [pagoId],
+          // Conta valida fila por fila: una boleta de varias cuotas manda su
+          // único recibo cuando se valida la última.
+          soloBoletasCompletas: true,
+        });
+      }
       return resultado;
 
     } catch (error) {

@@ -41,6 +41,11 @@ import {
 } from "../utils/pendingReturnGuard";
 import { esCube } from "../utils/devolucionCompletada";
 import {
+  desligarFilaDeEventoNexaFallido,
+  NexaPaymentNotReversibleError,
+  pagoNexaBloqueaAnular,
+} from "./nexaPagoNoReversible";
+import {
   resolverAbonosNoLiquidados,
   type AbonoNoLiquidado,
 } from "../utils/abonosNoLiquidados";
@@ -231,6 +236,11 @@ export async function getAllPagosWithCreditAndInversionistas(
         monto_aplicado: pagos_credito.monto_aplicado,
         fecha_aplicado: pagos_credito.fecha_aplicado,
         origen_pago: pagos_credito.origen_pago,
+        // Canal por el que entró el pago: NEXA si lo registró el endpoint de Nexa.
+        canal: sql<"NEXA" | "MANUAL">`CASE WHEN ${pagos_credito.nexaPaymentEventId} IS NOT NULL THEN 'NEXA' ELSE 'MANUAL' END`,
+        // Nexa rechazó la transferencia y devolvió el dinero: esta fila sí se anula (ver pagoNexaBloqueaAnular).
+        nexaEventoFallido: sql<boolean>`EXISTS (SELECT 1 FROM cartera.nexa_payment_events e
+          WHERE e.id = ${pagos_credito.nexaPaymentEventId} AND e.status = 'failed')`,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -1969,7 +1979,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
    * de arriba, no por aquélla.
    */
   const [yaFalso] = await db
-    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .select({
+      paymentFalse: pagos_credito.paymentFalse,
+      nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
+    })
     .from(pagos_credito)
     .where(
       and(
@@ -1982,7 +1995,22 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   if (!yaFalso) {
     throw new Error("No payment found to mark as false with the given criteria");
   }
+  // Un pago que entró por Nexa no se anula (Nexa ya aprobó la transferencia y
+  // no hay forma de deshacerla). Antes de escribir cualquier cosa, y antes de
+  // la salida temprana de abajo: tampoco corre las "redes de seguridad".
+  if (await pagoNexaBloqueaAnular(db, yaFalso.nexaPaymentEventId)) {
+    throw new NexaPaymentNotReversibleError();
+  }
   if (yaFalso.paymentFalse) {
+    // Fila ya anulada de un evento Nexa `failed` que sigue ligada (anulada antes de que la
+    // anulación desligara): se desliga ahora, para que un reintento de Nexa no la encuentre y
+    // registre limpio. Sin candado a propósito (falsePayment no lo toma por su cuenta: ver
+    // anularPagoMoraCarrera.test.ts): es UNA sentencia que solo desliga si el evento sigue `failed`.
+    // Si un reintento de Nexa ya movió el evento (claim → processing), no desliga y queda como
+    // antes; si desliga primero, el reintento ve 0 filas y registra limpio. Nunca deja un estado
+    // intermedio.
+    await desligarFilaDeEventoNexaFallido(db, pago_id, yaFalso.nexaPaymentEventId);
+
     // Antes de salir, limpiar el ajuste por fecha ideal — sí, otra vez.
     //
     // Es la red de seguridad de las filas que quedaron a medias: el reset vivía
@@ -2339,7 +2367,29 @@ interface GetPagosOptions {
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
+  /** NEXA = entró por Nexa; MANUAL = el resto. Otro valor no filtra. */
+  canal?: string;
+  /** HH:MM. Con alguna de las dos, el rango de fecha de pago usa la hora de registro. */
+  horaInicio?: string;
+  horaFin?: string;
 }
+
+export const HORA_HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Momento en que el pago entró, en hora de Guatemala (timestamp sin tz), para
+// el filtro con hora (cierre de las 5 pm de Contabilidad):
+//  - Manual: fecha_pago ya es la hora de Guatemala del registro, tal cual
+//    (no se le aplica el UTC→GT del filtro por día, que le resta 6 h: #1780).
+//    Sin fecha_pago queda fuera, igual que en el filtro por día.
+//  - Nexa: fecha_pago es el día bancario a las 00:00 y no sirve para la hora.
+//    Tampoco sirve p.createdat: al cerrar cuota, registerPayment REUSA la fila
+//    vieja de la cuota y conserva su createdat de meses atrás. La hora real es
+//    nexa_payment_events.created_at (timestamptz, cuando cartera recibió el pago).
+export const momentoRegistroSQL = `CASE
+      WHEN p.nexa_payment_event_id IS NULL THEN p.fecha_pago
+      ELSE (SELECT ne_mom.created_at FROM cartera.nexa_payment_events ne_mom
+            WHERE ne_mom.id = p.nexa_payment_event_id) AT TIME ZONE 'America/Guatemala'
+    END`;
 // ── Tipos para el armado del array `inversionistas` del reporte ──────────────
 // Shape de cada fila pci tal como la trae la subconsulta SQL de
 // getPagosConInversionistas (json_build_object). Es también el shape de SALIDA.
@@ -2635,7 +2685,14 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     fechaBoleta,
     fechaBoletaInicio,
     fechaBoletaFin,
+    canal,
+    horaInicio,
+    horaFin,
   } = options;
+
+  for (const hora of [horaInicio, horaFin]) {
+    if (hora !== undefined && !HORA_HH_MM.test(hora)) throw new Error(`La hora "${hora}" no tiene el formato HH:MM`);
+  }
 
   try {
     const offset = (page - 1) * pageSize;
@@ -2660,16 +2717,39 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (usuarioNombre)
       whereClauses.push(sql`u.nombre ILIKE ${`%${escaparPatronLike(usuarioNombre)}%`}`);
 
-    // 📅 Rango de fechas (zona Guatemala UTC-6)
-    if (fechaInicio) {
-      whereClauses.push(
-        sql`(${fechaPagoLocal})::date >= ${fechaInicio}::date`
-      );
-    }
-    if (fechaFin) {
-      whereClauses.push(
-        sql`(${fechaPagoLocal})::date <= ${fechaFin}::date`
-      );
+    if (canal === "NEXA") whereClauses.push(sql`p.nexa_payment_event_id IS NOT NULL`);
+    if (canal === "MANUAL") whereClauses.push(sql`p.nexa_payment_event_id IS NULL`);
+
+    if (horaInicio || horaFin) {
+      // ⏰ Con hora: desde inclusivo, hasta exclusivo (un pago a las 17:00:00
+      // en punto cae en el cierre siguiente). Sin hora, la punta va al inicio
+      // del día (desde) o al fin del día (hasta).
+      // Constante del código (no viene del request): va como SQL, no como parámetro.
+      const momentoRegistro = sql.raw(momentoRegistroSQL);
+      if (fechaInicio) {
+        whereClauses.push(
+          sql`(${momentoRegistro}) >= (${fechaInicio}::date + ${horaInicio || "00:00"}::time)`
+        );
+      }
+      if (fechaFin) {
+        whereClauses.push(
+          horaFin
+            ? sql`(${momentoRegistro}) < (${fechaFin}::date + ${horaFin}::time)`
+            : sql`(${momentoRegistro}) < (${fechaFin}::date + 1)::timestamp`
+        );
+      }
+    } else {
+      // 📅 Rango de fechas (zona Guatemala UTC-6)
+      if (fechaInicio) {
+        whereClauses.push(
+          sql`(${fechaPagoLocal})::date >= ${fechaInicio}::date`
+        );
+      }
+      if (fechaFin) {
+        whereClauses.push(
+          sql`(${fechaPagoLocal})::date <= ${fechaFin}::date`
+        );
+      }
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
@@ -2872,6 +2952,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.validation_status AS "validation_status",
         p.monto_aplicado AS "monto_aplicado",
         p.origen_pago AS "origenPago",
+        (p.nexa_payment_event_id IS NOT NULL) AS "entroPorNexa",
+        EXISTS (SELECT 1 FROM cartera.nexa_payment_events ne
+          WHERE ne.id = p.nexa_payment_event_id AND ne.status = 'failed') AS "nexaEventoFallido",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -3218,6 +3301,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
       origenPago: r.origenPago,
+      entroPorNexa: r.entroPorNexa === true,
+      nexaEventoFallido: r.nexaEventoFallido === true,
       credito: r.credito,
       banderaReinversion: r.banderaReinversion ?? false,
       pendienteFacturar: r.pendienteFacturar ?? false,

@@ -14,6 +14,7 @@ import { lockPool } from "../database";
 // 📌 Namespaces de advisory locks en uso — revisar antes de agregar otro:
 //      8765 → pagos   (paymentAdvisoryLock.ts)
 //      8766 → espejo  (este archivo)
+//      8767 → creación de cuenta Nexa (controllers/nexaCuentaCliente.ts)
 export const ESPEJO_ADVISORY_LOCK_NAMESPACE = 8766;
 
 // ⚠️ COBERTURA PARCIAL: hoy este lock lo toma únicamente addInvestorToCredit.

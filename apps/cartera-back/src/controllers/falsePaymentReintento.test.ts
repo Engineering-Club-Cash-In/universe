@@ -42,6 +42,9 @@ const CREDITO_ID = 5;
 const estado = {
   /** Lo que la base dice hoy de la boleta. */
   paymentFalse: false,
+  nexaPaymentEventId: null as number | null,
+  /** Status del evento Nexa de la boleta (lo lee pagoNexaBloqueaAnular). */
+  nexaEventoStatus: "applied",
   /** Filas de `creditos_inversionistas_espejo` del crédito (la precondición). */
   espejoDelCredito: [] as unknown[],
   /** Filas de `pagos_credito_inversionistas_espejo` de ESTE pago (el guard). */
@@ -119,7 +122,7 @@ const crearMotor = () => {
     // pide `orderBy(desc(id)).limit(1)` para leer la marca de agua.
     if (nombre === "pagos_credito_inversionistas_espejo")
       return [...(estado.espejoDelPago as { id: number }[])].sort((a, b) => b.id - a.id);
-    if (nombre === "pagos_credito") return [{ paymentFalse: estado.paymentFalse }];
+    if (nombre === "pagos_credito") return [{ paymentFalse: estado.paymentFalse, nexaPaymentEventId: estado.nexaPaymentEventId }];
     // CUBE, para que el paso de espejos salga por su `return` limpio.
     if (nombre === "inversionistas")
       return [{ nombre: "Cube Investments S.A.", status: "ACTIVO" }];
@@ -131,7 +134,14 @@ const crearMotor = () => {
     update: (t: any) => cadena({ nombre: tablaDe(t) }),
     insert: (t: any) => cadena({ nombre: tablaDe(t) }),
     delete: (t: any) => cadena({ nombre: tablaDe(t) }),
-    execute: () => Promise.reject(new Error("sin BD en tests")),
+    // Única lectura cruda esperada: el status del evento Nexa (pagoNexaBloqueaAnular).
+    execute: (q: any) => {
+      const texto = (q?.queryChunks ?? []).map((c: any) => (Array.isArray(c?.value) ? c.value.join("") : "")).join("?");
+      if (/SELECT status FROM cartera\.nexa_payment_events/.test(texto)) {
+        return Promise.resolve({ rows: [{ status: estado.nexaEventoStatus }], rowCount: 1 });
+      }
+      return Promise.reject(new Error("sin BD en tests"));
+    },
     transaction: async (cb: any) => cb(motor),
     query: {
       // La PRIMERA consulta de `insertPagosCreditoInversionistas`. Contarla es
@@ -216,6 +226,8 @@ const { falsePayment } = await import("./payments");
 
 beforeEach(() => {
   estado.paymentFalse = false;
+  estado.nexaPaymentEventId = null;
+  estado.nexaEventoStatus = "applied";
   estado.espejoDelCredito = [{ credito_id: CREDITO_ID }];
   estado.espejoDelPago = [];
   estado.pasosDeEspejo = 0;
@@ -226,6 +238,39 @@ beforeEach(() => {
   estado.escribeAlPasar = false;
   lockPoolActual = lockPoolTrivial;
   motor = crearMotor();
+});
+
+describe("un pago que entró por Nexa no se anula", () => {
+  it("falsePayment rechaza con 409 sin anular ni tocar espejos", async () => {
+    estado.nexaPaymentEventId = 77;
+    await expect(falsePayment(PAGO_ID, CREDITO_ID)).rejects.toMatchObject({
+      code: "nexa_payment_not_reversible",
+      status: 409,
+      message: "Este pago entró por Nexa y no se puede anular.",
+    });
+    expect(estado.anulaciones).toBe(0);
+    expect(estado.pasosDeEspejo).toBe(0);
+    expect(estado.paymentFalse).toBe(false);
+  });
+
+  it("si Nexa rechazó la transferencia (evento failed) la fila SÍ se anula", async () => {
+    estado.nexaPaymentEventId = 77;
+    estado.nexaEventoStatus = "failed";
+    await falsePayment(PAGO_ID, CREDITO_ID);
+    expect(estado.anulaciones).toBe(1);
+  });
+
+  it("un evento incierto (manual_review) sigue bloqueando", async () => {
+    estado.nexaPaymentEventId = 77;
+    estado.nexaEventoStatus = "manual_review";
+    await expect(falsePayment(PAGO_ID, CREDITO_ID)).rejects.toMatchObject({ code: "nexa_payment_not_reversible" });
+    expect(estado.anulaciones).toBe(0);
+  });
+
+  it("un pago manual sigue anulándose igual", async () => {
+    await falsePayment(PAGO_ID, CREDITO_ID);
+    expect(estado.anulaciones).toBe(1);
+  });
 });
 
 describe("el reintento repara los espejos que el primer intento no llegó a escribir", () => {

@@ -668,3 +668,28 @@ describe("guarda estructural: lock de crédito ANTES de cerrar mora en ruptura",
 		expect(fuente).toMatch(patronComentario);
 	});
 });
+
+describe("updateConvenioStatus (romper convenio) — estado del crédito", () => {
+  const cuerpoRomper = () => {
+    const src = readFileSync(new URL("./paymentAgreement.ts", import.meta.url), "utf-8");
+    const ini = src.indexOf("export const updateConvenioStatus");
+    return src.slice(ini);
+  };
+
+  it("lee el estado bajo el candado del crédito y solo mueve un crédito EN_CONVENIO", () => {
+    const c = cuerpoRomper();
+    expect(c).toMatch(/statusCredit: creditos\.statusCredit \}\)[\s\S]*?\.for\("update"\)/);
+    expect(c).toContain('const eraEnConvenio = creditoBloqueado?.statusCredit === "EN_CONVENIO"');
+    expect(c).toContain('eq(creditos.statusCredit, "EN_CONVENIO")');
+  });
+
+  it("ningún UPDATE de estado del crédito queda sin la guarda eraEnConvenio", () => {
+    const c = cuerpoRomper();
+    const updates = [...c.matchAll(/\.update\(creditos\)/g)];
+    expect(updates.length).toBe(2);
+    for (const m of updates) {
+      const antes = c.slice(Math.max(0, m.index! - 120), m.index!);
+      expect(antes).toContain("if (eraEnConvenio)");
+    }
+  });
+});

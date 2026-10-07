@@ -215,6 +215,7 @@ import {
 	motivoBloqueoRecuperacionForzosa,
 	motivoBloqueoVisitaCaso,
 	operacionEnvioRecuperacion,
+	ordenarPlanDePagos,
 	permisosCobros,
 	promesaActivaDelCaso,
 	promesasDePago,
@@ -1785,6 +1786,12 @@ function RouteComponent() {
 		return f ? f.replace(/^\d+\s/, "") : "—";
 	};
 	const totalCuotas = planCuotas.total;
+	// Mismo orden que el Workspace: vencidas y la próxima arriba, sin cuota 0.
+	const planOrdenado = ordenarPlanDePagos(
+		cuotas as any[],
+		proximaCuota ? Number(proximaCuota.numeroCuota) : null,
+		hoyInicio,
+	);
 
 	// "Cobro de hoy" (mismas cuentas que el «Total a cobrar» de antes).
 	const { totalMoraCuotas, totalParcial, avisoCrecimientoMora } =
@@ -4321,15 +4328,14 @@ function RouteComponent() {
 					<div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)]">
 						<div className="min-w-0 space-y-2">
 							<RotuloSeccion>Plan de pagos</RotuloSeccion>
-							{cuotas.length === 0 ? (
+							{planOrdenado.length === 0 ? (
 								<div className="py-8 text-center text-muted-foreground">
 									No hay historial de cuotas disponible
 								</div>
 							) : (
 								<>
 									<div>
-										{[...cuotas]
-											.sort((a: any, b: any) => b.numeroCuota - a.numeroCuota)
+										{planOrdenado
 											.slice(
 												(cuotasPage - 1) * ITEMS_PER_PAGE,
 												cuotasPage * ITEMS_PER_PAGE,
@@ -4640,7 +4646,7 @@ function RouteComponent() {
 									</div>
 									<Pagination
 										currentPage={cuotasPage}
-										totalItems={cuotas.length}
+										totalItems={planOrdenado.length}
 										itemsPerPage={ITEMS_PER_PAGE}
 										onPageChange={setCuotasPage}
 									/>

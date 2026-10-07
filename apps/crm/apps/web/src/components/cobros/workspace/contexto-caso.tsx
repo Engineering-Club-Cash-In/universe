@@ -103,6 +103,7 @@ import {
 	fechaLargaGT,
 	formatoQuetzales as fmtQ,
 	hrefTelefono,
+	ordenarPlanDePagos,
 } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 import { client } from "@/utils/orpc";
@@ -1290,35 +1291,6 @@ function cuotaDelPlan(
 	};
 }
 
-/**
- * Plan de pagos del panel (sin la cuota 0), con lo relevante arriba porque
- * solo se ven 12 antes de «Ver más»:
- *  1. vencidas, en validación y la próxima, de la más vieja a la más nueva;
- *  2. pagadas, de la más reciente a la más vieja;
- *  3. futuras, en orden.
- * La Ficha 360 conserva su propio orden.
- */
-function ordenarPlanPanel(
-	plan: CuotaPlan[],
-	totalCuotas: number,
-	numeroProxima: number | null,
-	hoyInicio: Date,
-): CuotaContexto[] {
-	const grupo = (c: CuotaPlan, estado: EstadoCuota) =>
-		estado === "pagada"
-			? 1
-			: estado === "pendiente" && Number(c.numeroCuota) !== numeroProxima
-				? 2
-				: 0;
-	return plan
-		.map((c) => {
-			const fila = cuotaDelPlan(c, totalCuotas, hoyInicio);
-			return { n: Number(c.numeroCuota), g: grupo(c, fila.estado), fila };
-		})
-		.sort((a, b) => a.g - b.g || (a.g === 1 ? b.n - a.n : a.n - b.n))
-		.map((x) => x.fila);
-}
-
 /** Arma las props de la vista a partir del caso (puro). */
 export function propsContextoDeCaso(
 	caso: CasoWorkspace,
@@ -1595,12 +1567,11 @@ export function propsContextoDeCaso(
 					valor: fechaLargaGT(cuotas.proxima?.fechaVencimiento) || "—",
 				},
 			],
-			cuotas: ordenarPlanPanel(
-				cuotas.plan.filter(esCuotaDelPlan),
-				cuotas.total,
+			cuotas: ordenarPlanDePagos(
+				cuotas.plan,
 				cuotas.proxima?.numeroCuota ?? null,
 				hoyInicio,
-			),
+			).map((c) => cuotaDelPlan(c, cuotas.total, hoyInicio)),
 			estadoPlan: cuotas.cargandoPlan ? "cargando" : "ok",
 			onEnviar: identidad.casoCobroId
 				? acciones.onEnviarEstadoCuenta

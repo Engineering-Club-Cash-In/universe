@@ -417,6 +417,39 @@ export function esCuotaDelPlan(c: { numeroCuota?: unknown }): boolean {
 	return Number(c.numeroCuota) > 0;
 }
 
+/**
+ * Orden del plan de pagos (Ficha 360 y Workspace), sin la cuota 0, con lo
+ * relevante arriba:
+ *  1. vencidas, en validación y la próxima, de la más vieja a la más nueva;
+ *  2. pagadas, de la más reciente a la más vieja;
+ *  3. futuras, en orden.
+ */
+export function ordenarPlanDePagos<
+	T extends {
+		numeroCuota?: unknown;
+		estadoMora?: string | null;
+		fechaVencimiento?: string | null;
+	},
+>(
+	cuotas: readonly T[],
+	numeroProxima: number | null,
+	hoyInicio: Date = inicioDelDiaGT(),
+): T[] {
+	const grupo = (c: T) => {
+		if (c.estadoMora === "pagado") return 1;
+		if (c.estadoMora === "en_validacion") return 0;
+		const vencida =
+			!!c.fechaVencimiento && new Date(c.fechaVencimiento) < hoyInicio;
+		if (vencida || Number(c.numeroCuota) === numeroProxima) return 0;
+		return 2;
+	};
+	return cuotas
+		.filter(esCuotaDelPlan)
+		.map((c) => ({ c, n: Number(c.numeroCuota), g: grupo(c) }))
+		.sort((a, b) => a.g - b.g || (a.g === 1 ? b.n - a.n : a.n - b.n))
+		.map((x) => x.c);
+}
+
 /** Cuotas del plan: pagadas, último mes pagado y próximo pago. */
 export function resumenCuotas<T extends CuotaHistorialFila>(
 	todas: readonly T[],

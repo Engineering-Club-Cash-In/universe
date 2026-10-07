@@ -39,6 +39,7 @@ import {
 	overlayCloseButtonClassName,
 } from "@/components/ui/dialog";
 import { PeriodSelector } from "@/components/ui/period-selector";
+import { PopoverPortalContext } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { orpc } from "@/utils/orpc";
@@ -106,6 +107,9 @@ export function WorkspaceModal({
 	const [enCurso, setEnCurso] = React.useState(false);
 	// Acción que espera la confirmación del guardián.
 	const [pendiente, setPendiente] = React.useState<(() => void) | null>(null);
+	// Los popovers (combobox, calendarios) se montan en la caja del modal y no
+	// dentro de los formularios embebidos (ver PopoverPortalContext).
+	const [cajaModal, setCajaModal] = React.useState<HTMLDivElement | null>(null);
 
 	/** Ejecuta `accion`, o primero pregunta si hay una gestión a medias. */
 	const conGuardian = (accion: () => void) => {
@@ -152,6 +156,7 @@ export function WorkspaceModal({
 				}}
 			>
 				<DialogContent
+					ref={setCajaModal}
 					showCloseButton={false}
 					className="flex h-[min(840px,calc(100dvh-2rem))] w-[min(1200px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
 					// Con una gestión a medias, Esc y el clic fuera pasan por el guardián
@@ -176,17 +181,19 @@ export function WorkspaceModal({
 						if (esToast(e.target) || enCurso) e.preventDefault();
 					}}
 				>
-					{casos.length > 0 ? (
-						<ContenidoWorkspace
-							casos={casos}
-							posicion={posicion}
-							onAnterior={() => conGuardian(() => irA(posicion - 1))}
-							onSiguiente={() => conGuardian(() => irA(posicion + 1))}
-							onCerrar={() => conGuardian(cerrar)}
-							onAbrirFicha={abrirFicha}
-							onEnCursoChange={setEnCurso}
-						/>
-					) : null}
+					<PopoverPortalContext.Provider value={cajaModal}>
+						{casos.length > 0 ? (
+							<ContenidoWorkspace
+								casos={casos}
+								posicion={posicion}
+								onAnterior={() => conGuardian(() => irA(posicion - 1))}
+								onSiguiente={() => conGuardian(() => irA(posicion + 1))}
+								onCerrar={() => conGuardian(cerrar)}
+								onAbrirFicha={abrirFicha}
+								onEnCursoChange={setEnCurso}
+							/>
+						) : null}
+					</PopoverPortalContext.Provider>
 				</DialogContent>
 			</Dialog>
 

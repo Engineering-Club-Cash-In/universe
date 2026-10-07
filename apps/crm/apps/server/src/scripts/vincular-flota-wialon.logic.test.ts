@@ -168,6 +168,70 @@ describe("diagnosticar — vehículos sin vínculo", () => {
 			"en_revision",
 		);
 	});
+	test("una unidad que reclama un vehículo ambiguo no se propone a otro", () => {
+		const d = diagnosticar(
+			[
+				u(1, "P-123ABC - CON APAGADO", { vin: "3N6CD33B0ZL450292" }),
+				u(2, "C-123ABC - SIN APAGADO"),
+			],
+			[
+				// Su placa está en dos unidades: ambiguo.
+				v("ambiguo", { placa: "P-123ABC", conCredito: true }),
+				// Duplicado viejo cuyo VIN coincide con la unidad 1.
+				v("viejo", { vin: "3N6CD33B0ZL450292" }),
+			],
+		);
+		const de = (id: string) => d.vehiculos.find((r) => r.vehiculo.id === id);
+		expect(de("ambiguo")?.estado).toBe("ambiguo");
+		expect(de("viejo")?.estado).toBe("unidad_disputada");
+		expect(de("viejo")?.detalle).toContain("ambiguos");
+	});
+	test("un vehículo ambiguo sin crédito no le quita la unidad a uno con crédito vigente", () => {
+		// Datos basura en Wialon: el ambiguo reclama varias unidades.
+		const d = diagnosticar(
+			[
+				u(1, "3N6CD33B0ZL450292 - CON APAGADO", {
+					registration_plate: "P-124LKF",
+				}),
+				u(2, "P-124LKF - SIN APAGADO"),
+			],
+			[
+				v("ambiguo-sin-credito", { placa: "P0-124LKF" }),
+				v("con-credito", {
+					vin: "3N6CD33B0ZL450292",
+					conCredito: true,
+					creditos: [
+						{ sifco: "CRM-a", estado: "ACTIVO", fechaCreacion: "2026-05-01" },
+					],
+				}),
+			],
+		);
+		const de = (id: string) => d.vehiculos.find((r) => r.vehiculo.id === id);
+		expect(de("ambiguo-sin-credito")?.estado).toBe("ambiguo");
+		expect(de("con-credito")?.estado).toBe("propuesto");
+		expect(de("con-credito")?.confirmar).toBeFalsy();
+	});
+	test("un vehículo en conflicto sin crédito no le quita la unidad a uno con crédito vigente", () => {
+		const d = diagnosticar(
+			[u(1, "P-420CDP CON APAGADO"), u(2, "3N6CD33B0ZL450292 - CON APAGADO")],
+			[
+				v("conflicto-sin-credito", {
+					placa: "P0-420CDP",
+					vin: "3N6CD33B0ZL450292",
+				}),
+				v("con-credito", {
+					placa: "P-420CDP",
+					conCredito: true,
+					creditos: [
+						{ sifco: "0101-x", estado: "MOROSO", fechaCreacion: "2026-01-18" },
+					],
+				}),
+			],
+		);
+		const de = (id: string) => d.vehiculos.find((r) => r.vehiculo.id === id);
+		expect(de("conflicto-sin-credito")?.estado).toBe("conflicto_placa_vin");
+		expect(de("con-credito")?.estado).toBe("propuesto");
+	});
 	test("la placa en dos unidades → ambiguo", () => {
 		const r = estadoDe(
 			[u(1, "P-720GVH CON APAGADO"), u(2, "C-720GVH SIN APAGADO")],

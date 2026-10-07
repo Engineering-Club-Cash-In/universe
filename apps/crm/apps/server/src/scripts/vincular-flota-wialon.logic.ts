@@ -601,8 +601,12 @@ export function diagnosticar(
 
 	const resultados: ResultadoVehiculo[] = [];
 	const propuestas = new Map<number, ResultadoVehiculo[]>();
-	// Unidad → vehículos cuya placa y VIN apuntan a unidades distintas.
-	const enConflicto = new Map<number, string[]>();
+	// Unidad → vehículos con evidencia en duda que también la reclaman: placa y
+	// VIN que apuntan a unidades distintas, o varias unidades que coinciden.
+	const enDuda = new Map<number, ResultadoVehiculo[]>();
+	const marcarEnDuda = (ids: number[], r: ResultadoVehiculo) => {
+		for (const id of ids) enDuda.set(id, [...(enDuda.get(id) ?? []), r]);
+	};
 	const porSugerir: {
 		r: ResultadoVehiculo;
 		ev: ReturnType<typeof evidenciaVehiculo>;
@@ -685,28 +689,29 @@ export function diagnosticar(
 			continue;
 		}
 		if (decision.tipo === "conflicto") {
-			for (const id of [...decision.placa, ...decision.vin]) {
-				enConflicto.set(id, [...(enConflicto.get(id) ?? []), v.id]);
-			}
-			resultados.push({
+			const r: ResultadoVehiculo = {
 				...base,
 				estado: "conflicto_placa_vin",
 				metodo: null,
 				unidad: null,
 				otras: lista([...decision.placa, ...decision.vin]),
 				detalle: `Placa → ${decision.placa.join("/")}; VIN → ${decision.vin.join("/")}`,
-			});
+			};
+			resultados.push(r);
+			marcarEnDuda([...decision.placa, ...decision.vin], r);
 			continue;
 		}
 		if (decision.tipo === "ambiguo") {
-			resultados.push({
+			const r: ResultadoVehiculo = {
 				...base,
 				estado: "ambiguo",
 				metodo: null,
 				unidad: null,
 				otras: lista(decision.unidades),
 				detalle: `${decision.unidades.length} unidades coinciden`,
-			});
+			};
+			resultados.push(r);
+			marcarEnDuda(decision.unidades, r);
 			continue;
 		}
 
@@ -767,15 +772,36 @@ export function diagnosticar(
 		}
 	}
 
-	// Una unidad que también reclama un vehículo con placa y VIN en conflicto
-	// no se propone a nadie: ese vehículo podría ser el dueño (su placa o su
-	// VIN apunta ahí) y no sabemos cuál dato está mal. Decide una persona.
-	for (const [unitId, conflictivos] of enConflicto) {
-		for (const r of propuestas.get(unitId) ?? []) {
+	// Una unidad propuesta que también reclama un vehículo con evidencia en
+	// duda (placa y VIN en conflicto, o varias unidades) no puede saltarse el
+	// desempate por crédito: ese vehículo podría ser el dueño. El propuesto
+	// solo se la queda si le gana a los dudosos en resolverDisputa; si no (el
+	// dudoso tiene el crédito vigente, o nadie gana), decide una persona. Así
+	// un vehículo sin crédito con datos basura en Wialon no le quita la unidad
+	// a uno con crédito vigente, ni al revés.
+	for (const [unitId, dudosos] of enDuda) {
+		const grupo = propuestas.get(unitId) ?? [];
+		const propuesto = grupo.find((r) => r.estado === "propuesto");
+		if (!propuesto) continue;
+		const decision = resolverDisputa(
+			[propuesto, ...dudosos],
+			unidadPorId.get(unitId)?.nm ?? "",
+		);
+		const ids = dudosos.map((d) => d.vehiculo.id).join(", ");
+		if (decision.ganador === propuesto) {
+			if (decision.confirmar && !propuesto.confirmar) {
+				propuesto.confirmar = true;
+				propuesto.sugerencia = `Frente a un vehículo con placa/VIN en duda (${ids}): ${decision.motivo} (confirmar)`;
+			}
+			continue;
+		}
+		for (const r of grupo) {
+			if (r.estado !== "propuesto" && r.estado !== "duplicado_descartado")
+				continue;
 			r.estado = "unidad_disputada";
 			r.confirmar = undefined;
 			r.sugerencia = null;
-			r.detalle = `Un vehículo con placa y VIN en conflicto también apunta a esta unidad: ${conflictivos.join(", ")}`;
+			r.detalle = `Un vehículo con placa/VIN ambiguos o en conflicto también apunta a esta unidad (${ids}): ${decision.ganador ? "podría ser el dueño" : decision.motivo}`;
 		}
 	}
 

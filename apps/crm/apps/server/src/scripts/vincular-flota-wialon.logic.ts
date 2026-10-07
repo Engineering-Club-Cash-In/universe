@@ -422,9 +422,11 @@ function prefijoPlaca(placa: string | null): string | null {
 /**
  * Elige, entre vehículos que reclaman la misma unidad, cuál se queda con ella:
  * 1. El único con crédito vigente en cartera.
- * 2. Si varios tienen crédito vigente y es el MISMO crédito (vehículo
+ * 2. Si varios tienen crédito vigente y es el MISMO crédito vigente (vehículo
  *    duplicado con el mismo SIFCO), el que tiene el prefijo de placa de la
- *    unidad ("C-558CBP" → el vehículo con placa C-…).
+ *    unidad ("C-558CBP" → el vehículo con placa C-…). Compartir un crédito
+ *    viejo ya cancelado no cuenta: cada uno con su crédito vigente propio es
+ *    un refinanciamiento y decide el más nuevo.
  * 3. Si ninguno tiene crédito vigente: el único con crédito, o el del crédito
  *    más reciente. Se marca para confirmar.
  * Un vehículo sin crédito nunca le gana a uno con crédito. Lo que quede
@@ -440,9 +442,18 @@ export function resolverDisputa(
 		if (!prefijo) return [];
 		return candidatos.filter((r) => prefijoPlaca(r.vehiculo.placa) === prefijo);
 	};
-	const mismoCredito = (candidatos: ResultadoVehiculo[]) => {
+	// ¿Todos comparten un mismo crédito? Solo cuentan los que pasan `cuenta`.
+	const mismoCredito = (
+		candidatos: ResultadoVehiculo[],
+		cuenta: (c: CreditoVehiculo) => boolean = () => true,
+	) => {
 		const [primero, ...resto] = candidatos.map(
-			(r) => new Set(creditos(r).map((c) => c.sifco)),
+			(r) =>
+				new Set(
+					creditos(r)
+						.filter(cuenta)
+						.map((c) => c.sifco),
+				),
 		);
 		return [...(primero ?? [])].some((sifco) =>
 			resto.every((s) => s.has(sifco)),
@@ -459,7 +470,7 @@ export function resolverDisputa(
 		};
 	}
 	if (vigentes.length > 1) {
-		if (!mismoCredito(vigentes)) {
+		if (!mismoCredito(vigentes, esVigente)) {
 			// Refinanciamiento sin cerrar el crédito anterior: se queda el
 			// vehículo del crédito vigente más nuevo.
 			const masNuevo = (r: ResultadoVehiculo) =>

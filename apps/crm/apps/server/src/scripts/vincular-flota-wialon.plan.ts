@@ -173,6 +173,37 @@ export interface ResultadoAplicacion {
 }
 
 /**
+ * Envuelve un `Escritor` para registrar cada resultado apenas ocurre, antes de
+ * pasar al siguiente. Cada vínculo se confirma en su propia transacción: si el
+ * proceso se corta a la mitad, lo ya escrito tiene que quedar en los archivos
+ * de resultado y de reversa, no solo en memoria. Un error también se registra
+ * y se vuelve a lanzar para que `aplicarPlan` lo cuente.
+ */
+export function conRegistro(
+	escritor: Escritor,
+	registrar: (
+		item: ItemVinculo,
+		resultado: ResultadoEscritura | { error: string },
+	) => void,
+): Escritor {
+	return {
+		async vincular(item) {
+			let resultado: ResultadoEscritura;
+			try {
+				resultado = await escritor.vincular(item);
+			} catch (error) {
+				registrar(item, {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
+			registrar(item, resultado);
+			return resultado;
+		},
+	};
+}
+
+/**
  * Escribe de a uno y en orden. Un error de un vínculo no frena a los demás
  * (cada uno va en su propia transacción), pero `maxErrores` seguidos o en
  * total cortan la corrida: si algo está roto (base caída, permisos) no tiene

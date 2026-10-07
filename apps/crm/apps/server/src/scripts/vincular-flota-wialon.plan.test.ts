@@ -7,6 +7,7 @@ import {
 } from "./vincular-flota-wialon.logic";
 import {
 	aplicarPlan,
+	conRegistro,
 	destinoBd,
 	type ItemVinculo,
 	MARCADOR_PLACA,
@@ -167,6 +168,40 @@ describe("aplicarPlan", () => {
 		expect(res.errores).toHaveLength(2);
 		expect(res.abortado).toBe(true);
 		expect(res.pendientes).toBe(2);
+	});
+});
+
+describe("conRegistro", () => {
+	test("registra cada resultado antes de la siguiente escritura, también los errores", async () => {
+		const eventos: string[] = [];
+		const escritor = conRegistro(
+			{
+				vincular: async (i) => {
+					eventos.push(`escribe ${i.unitId}`);
+					if (i.unitId === 2) throw new Error("boom");
+					return i.unitId === 1 ? "guardado" : "unidad_ocupada";
+				},
+			},
+			(i, r) =>
+				eventos.push(
+					`registra ${i.unitId} ${typeof r === "string" ? r : `error:${r.error}`}`,
+				),
+		);
+		const res = await aplicarPlan(
+			[1, 2, 3].map((unitId) => item({ unitId })),
+			escritor,
+		);
+		expect(eventos).toEqual([
+			"escribe 1",
+			"registra 1 guardado",
+			"escribe 2",
+			"registra 2 error:boom",
+			"escribe 3",
+			"registra 3 unidad_ocupada",
+		]);
+		// El error sigue llegando a aplicarPlan.
+		expect(res.errores.map((e) => e.error)).toEqual(["boom"]);
+		expect(res.guardados.map((i) => i.unitId)).toEqual([1]);
 	});
 });
 

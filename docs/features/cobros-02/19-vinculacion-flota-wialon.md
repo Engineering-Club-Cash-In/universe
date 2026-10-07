@@ -70,10 +70,12 @@ unidad. Para decidir cuál se la queda se consulta el estado del crédito en car
 
 1. **Un solo vehículo con crédito vigente** (`ACTIVO`, `MOROSO`, `EN_RECUPERACION`,
    `EN_CONVENIO`, `PENDIENTE_CANCELACION`) → se queda ese.
-2. **Varios vigentes con el mismo crédito** → el que tenga el prefijo de placa que trae la
-   unidad (`C-…` contra `P-…`).
+2. **Varios vigentes con exactamente los mismos créditos vigentes** → el que tenga el
+   prefijo de placa que trae la unidad (`C-…` contra `P-…`).
 3. **Varios vigentes con créditos distintos** (refinanciamiento sin cerrar el crédito
-   anterior) → **el crédito más nuevo**. Un crédito originado en el CRM (`CRM-…`) siempre es
+   anterior) → **el crédito más nuevo**. Cuenta como distinto si uno tiene un crédito
+   vigente que el otro no, aunque compartan otro; compartir un crédito viejo ya cancelado
+   tampoco los hace el mismo. Un crédito originado en el CRM (`CRM-…`) siempre es
    más nuevo que uno migrado de SIFCO, porque la fecha de los migrados es la de la migración
    y no la del préstamo. Entre dos del mismo origen decide la fecha.
 4. **Ninguno vigente** → el único con crédito, o el del crédito más nuevo (misma regla que
@@ -148,8 +150,8 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 | `vehiculos.csv` | Un renglón por vehículo: estado, método, unidad, sugerencia, créditos y su estado |
 | `unidades.csv` | Un renglón por unidad de Wialon: si quedó vinculada, propuesta, en revisión o sin vehículo |
 | `plan.csv` | Lo que se escribiría (o se escribió) y lo excluido, con el motivo |
-| `resultado.csv` | Solo con `--aplicar`: qué pasó con cada vínculo |
-| `reversa.sql` | Solo con `--aplicar`: deshace exactamente lo escrito |
+| `resultado.csv` | Solo con `--aplicar`: qué pasó con cada vínculo. Se agrega un renglón después de cada escritura |
+| `reversa.sql` | Solo con `--aplicar`: deshace exactamente lo escrito. Se reescribe completo después de cada vínculo guardado: si el proceso se corta a la mitad, revierte todo lo que alcanzó a confirmarse |
 
 ### Garantías al escribir
 

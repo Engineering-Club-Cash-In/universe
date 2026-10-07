@@ -29,7 +29,7 @@
  * el carro aún no tenía placa cuando se instaló el GPS.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
@@ -53,6 +53,7 @@ import {
 } from "./vincular-flota-wialon.logic";
 import {
 	aplicarPlan,
+	conRegistro,
 	destinoBd,
 	type Escritor,
 	type ItemVinculo,
@@ -482,29 +483,32 @@ console.log(
 	`\nAPLICANDO ${plan.items.length} vínculos en ${destino?.host}/${destino?.bd}…`,
 );
 const inicio = new Date();
-const res = await aplicarPlan(plan.items, escritor, {
+// resultado.csv y reversa.sql se mantienen al día después de CADA escritura:
+// si el proceso se corta, todo lo ya confirmado se puede revertir.
+const rutaResultado = join(salida, "resultado.csv");
+const rutaReversa = join(salida, "reversa.sql");
+writeFileSync(
+	rutaResultado,
+	csv([...encabezadoPlan, "resultado", "error"], []),
+);
+const guardadosHastaAhora: ItemVinculo[] = [];
+const escritorRegistrado = conRegistro(escritor, (item, resultado) => {
+	const fila =
+		typeof resultado === "string"
+			? filaPlan(item, [resultado, ""])
+			: filaPlan(item, ["error", resultado.error]);
+	appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
+	if (resultado === "guardado") {
+		guardadosHastaAhora.push(item);
+		writeFileSync(rutaReversa, sqlReversa(guardadosHastaAhora, inicio));
+	}
+});
+const res = await aplicarPlan(plan.items, escritorRegistrado, {
 	alProgresar: (hechos, total) => {
 		if (hechos % 100 === 0 || hechos === total)
 			console.log(`  ${hechos}/${total}`);
 	},
 });
-
-writeFileSync(
-	join(salida, "resultado.csv"),
-	csv(
-		[...encabezadoPlan, "resultado", "error"],
-		[
-			...res.guardados.map((i) => filaPlan(i, ["guardado", ""])),
-			...res.omitidos.map(({ item, resultado }) =>
-				filaPlan(item, [resultado, ""]),
-			),
-			...res.errores.map(({ item, error }) => filaPlan(item, ["error", error])),
-		],
-	),
-);
-if (res.guardados.length > 0) {
-	writeFileSync(join(salida, "reversa.sql"), sqlReversa(res.guardados, inicio));
-}
 
 console.log("\nResultado:");
 console.log(`  guardados ${res.guardados.length}`);

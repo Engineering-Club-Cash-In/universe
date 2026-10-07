@@ -126,6 +126,21 @@ const INVENTARIO: Record<
 		estado: "listo",
 	},
 
+	// COBROS-02: vinculación masiva de la flota con Wialon.
+	//
+	// `exento` de la regla de proximidad, NO de anotar: SÍ deja una fila de
+	// bitácora por cada vínculo (`wialon_vincular`, origen `system`), pero la
+	// inserta en `crm_entity_audit` DENTRO de la misma transacción del UPDATE,
+	// armada con `buildAuditRows`. Así, si la bitácora no se puede escribir, el
+	// vínculo tampoco se guarda; `auditRecord` la escribe después del commit y
+	// solo avisa si falla. El escáner busca el literal `auditRecord(` y por eso
+	// no la ve.
+	"scripts/vincular-flota-wialon.ts": {
+		escrituras: 1,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "inserta la bitácora en la misma transacción con `buildAuditRows`, no con el literal `auditRecord(`; ver comentario arriba",
+	},
 	"db/seed.ts": {
 		escrituras: 3,
 		anotaciones: 0,

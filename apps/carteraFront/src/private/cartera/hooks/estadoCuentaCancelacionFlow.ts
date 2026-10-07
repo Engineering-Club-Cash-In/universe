@@ -34,6 +34,8 @@ export interface EstadoFlujoCancelacion {
   /** Lo que se mandó a preview (motivo/observaciones del documento). */
   entrada: PreviewEstadoCuentaBody | null;
   errorPreview: string | null;
+  /** «Continuar sin documento» solo tras una falla técnica del preview. */
+  previewPermiteSinDocumento: boolean;
   errorConfirmacion: string | null;
   envio: EnvioEstadoCuentaRespuesta | null;
   errorEnvio: string | null;
@@ -46,6 +48,7 @@ export const estadoInicialCancelacion: EstadoFlujoCancelacion = {
   documento: null,
   entrada: null,
   errorPreview: null,
+  previewPermiteSinDocumento: false,
   errorConfirmacion: null,
   envio: null,
   errorEnvio: null,
@@ -56,7 +59,7 @@ export type AccionFlujoCancelacion =
   | { type: "REINICIAR" }
   | { type: "GENERAR" }
   | { type: "PREVIEW_OK"; documento: PreviewEstadoCuentaRespuesta; entrada: PreviewEstadoCuentaBody }
-  | { type: "PREVIEW_ERROR"; mensaje: string }
+  | { type: "PREVIEW_ERROR"; mensaje: string; permiteSinDocumento: boolean }
   | { type: "VOLVER_A_EDITAR" }
   | { type: "CONFIRMAR" }
   | { type: "CONFIRMAR_OK" }
@@ -81,7 +84,14 @@ export function flujoCancelacionReducer(
 
     case "GENERAR":
       if (s.fase !== "FORMULARIO") return s; // doble clic
-      return { ...s, fase: "GENERANDO", documento: null, entrada: null, errorPreview: null };
+      return {
+        ...s,
+        fase: "GENERANDO",
+        documento: null,
+        entrada: null,
+        errorPreview: null,
+        previewPermiteSinDocumento: false,
+      };
 
     case "PREVIEW_OK":
       if (s.fase !== "GENERANDO") return s;
@@ -89,7 +99,12 @@ export function flujoCancelacionReducer(
 
     case "PREVIEW_ERROR":
       if (s.fase !== "GENERANDO") return s;
-      return { ...s, fase: "FORMULARIO", errorPreview: a.mensaje };
+      return {
+        ...s,
+        fase: "FORMULARIO",
+        errorPreview: a.mensaje,
+        previewPermiteSinDocumento: a.permiteSinDocumento,
+      };
 
     case "VOLVER_A_EDITAR":
       if (s.fase !== "VISTA_PREVIA") return s;
@@ -163,6 +178,17 @@ export function payloadConfirmacionDesdeDocumento(
       monto: Number(m.monto),
     })),
   };
+}
+
+/**
+ * «Continuar sin documento» existe para no frenar una cancelación cuando falla
+ * la generación (PDF, R2, servidor): sin respuesta o 5xx. Un 4xx es el backend
+ * rechazando la solicitud —crédito que ya no está ACTIVO/MOROSO (409), que no
+ * existe (404), sin permiso (403) o datos inválidos (400)— y seguir sin
+ * documento mandaría a /creditAction justo lo que se acaba de rechazar.
+ */
+export function falloPreviewPermiteSinDocumento(status: number | undefined): boolean {
+  return status === undefined || status >= 500;
 }
 
 /**

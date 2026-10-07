@@ -19,6 +19,7 @@ import {
   estadoInicialCancelacion,
   falloConfirmacionEsDefinitivo,
   falloEnvioEsReintentable,
+  falloPreviewPermiteSinDocumento,
   flujoCancelacionReducer,
   payloadConfirmacionDesdeDocumento,
   puedeEnviar,
@@ -112,6 +113,10 @@ export function ModalCancelCredit({
   // Candado síncrono contra doble clic (el estado del reducer llega en el
   // siguiente render; dos clics en el mismo tick verían la misma fase).
   const accionEnCurso = useRef(false);
+  // Sesión del modal: cambia con cada apertura, cambio de crédito o cierre. La
+  // respuesta de un preview de otra sesión se descarta: ese documento es de
+  // otro crédito, o de un formulario que ya se cerró.
+  const sesionModal = useRef(0);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   // Teléfono elegido de la lista del CRM (`+502XXXXXXXX`); no se escribe a mano.
@@ -126,12 +131,20 @@ export function ModalCancelCredit({
   );
   const contactos = useMemo(() => contactosQuery.data ?? [], [contactosQuery.data]);
 
-  // Preselecciona el sugerido (el primero en el orden de Cobros).
+  // Preselecciona el sugerido (el primero en el orden de Cobros), también
+  // cuando el elegido ya no aparece en la lista recién consultada.
   useEffect(() => {
-    if (!destinatario && contactos.length > 0) {
+    if (contactos.length > 0 && !contactos.some((c) => c.telefono === destinatario)) {
       setDestinatario((contactos.find((c) => c.sugerido) ?? contactos[0]).telefono);
     }
   }, [contactos, destinatario]);
+
+  // Tras un fallo reintentable se vuelven a consultar los teléfonos: si el
+  // número ya no está en el CRM (422), el reintento ofrece los vigentes.
+  const refetchContactos = contactosQuery.refetch;
+  useEffect(() => {
+    if (flujo.fase === "ERROR_ENVIO" && flujo.envioReintentable) void refetchContactos();
+  }, [flujo.fase, flujo.envioReintentable, refetchContactos]);
 
   const destinatarioValido = contactos.some((c) => c.telefono === destinatario);
   // Se envía al confirmar solo si la casilla está marcada y hay un número
@@ -152,6 +165,7 @@ export function ModalCancelCredit({
   useEffect(() => {
     dispatch({ type: "REINICIAR" });
     accionEnCurso.current = false;
+    sesionModal.current += 1;
     setDestinatario("");
     setEnviarPorWhatsapp(true);
   }, [open, creditId]);
@@ -231,6 +245,7 @@ export function ModalCancelCredit({
     setCuotasRestantes("");
     dispatch({ type: "REINICIAR" });
     accionEnCurso.current = false;
+    sesionModal.current += 1;
     setDestinatario("");
     setEnviarPorWhatsapp(true);
     onClose();
@@ -294,19 +309,25 @@ export function ModalCancelCredit({
       observaciones: observaciones?.trim() || undefined,
     };
 
+    const sesion = sesionModal.current;
     dispatch({ type: "GENERAR" });
     previewMutation.mutate(
       { creditId, body },
       {
         onSuccess: (documento) => {
+          if (sesion !== sesionModal.current) return;
           accionEnCurso.current = false;
           dispatch({ type: "PREVIEW_OK", documento, entrada: body });
         },
         onError: (err) => {
+          if (sesion !== sesionModal.current) return;
           accionEnCurso.current = false;
           dispatch({
             type: "PREVIEW_ERROR",
             mensaje: getApiErrorMessage(err, "No se pudo generar el estado de cuenta"),
+            permiteSinDocumento: falloPreviewPermiteSinDocumento(
+              err instanceof AxiosError ? err.response?.status : undefined
+            ),
           });
         },
       }
@@ -429,6 +450,52 @@ export function ModalCancelCredit({
   // /creditAction pudo haber quedado registrada: solo se ofrece cerrar.
   const confirmacionIncierta = flujo.fase === "CONFIRMACION_INCIERTA";
 
+  // Teléfonos del CRM: en la vista previa (antes de confirmar) y, tras un
+  // fallo reintentable, en el panel de error con la lista recién consultada.
+  const selectorContactos = (habilitado: boolean, sinContactos: string) =>
+    contactosQuery.isLoading ? (
+      <p className="flex items-center gap-2 text-xs text-gray-500">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando teléfono del cliente...
+      </p>
+    ) : contactosQuery.isError ? (
+      <div className="space-y-1">
+        <p className="text-xs text-red-600 whitespace-pre-line">
+          {getApiErrorMessage(
+            contactosQuery.error,
+            "No se pudo consultar el teléfono del cliente"
+          )}
+        </p>
+        <button
+          type="button"
+          className="text-xs font-medium text-green-700 underline"
+          onClick={() => contactosQuery.refetch()}
+        >
+          Reintentar
+        </button>
+      </div>
+    ) : contactos.length === 0 ? (
+      <p className="text-xs text-gray-600">{sinContactos}</p>
+    ) : contactos.length === 1 ? (
+      <p className="text-sm text-gray-800">
+        Al <strong>{formatearTelefonoGT(contactos[0].telefono)}</strong>
+      </p>
+    ) : (
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {contactos.map((c) => (
+          <label key={c.telefono} className="flex items-center gap-1.5 text-sm text-gray-800">
+            <input
+              type="radio"
+              name="destinatario-whatsapp"
+              checked={destinatario === c.telefono}
+              onChange={() => setDestinatario(c.telefono)}
+              disabled={!habilitado}
+            />
+            <strong>{formatearTelefonoGT(c.telefono)}</strong>
+          </label>
+        ))}
+      </div>
+    );
+
   const InfoRow = ({
     icon: Icon,
     iconColor,
@@ -496,11 +563,16 @@ export function ModalCancelCredit({
                 <p className="text-sm text-red-600 whitespace-pre-line">
                   {flujo.errorPreview}
                 </p>
-                <p className="text-xs text-gray-600">
-                  Puedes reintentar, o continuar sin documento:{" "}
-                  <strong>esta solicitud no tendrá PDF ni envío al cliente</strong>{" "}
-                  y se usará el total calculado en esta pantalla.
-                </p>
+                {/* Solo tras una falla técnica: si el backend rechazó la
+                    solicitud (p. ej. 409, el crédito ya no es elegible), no
+                    se ofrece mandarla igual por /creditAction. */}
+                {flujo.previewPermiteSinDocumento && (
+                  <p className="text-xs text-gray-600">
+                    Puedes reintentar, o continuar sin documento:{" "}
+                    <strong>esta solicitud no tendrá PDF ni envío al cliente</strong>{" "}
+                    y se usará el total calculado en esta pantalla.
+                  </p>
+                )}
                 <div className="flex gap-2 justify-end">
                   <Button
                     variant="outline"
@@ -514,20 +586,22 @@ export function ModalCancelCredit({
                   >
                     Reintentar
                   </Button>
-                  <Button
-                    size="sm"
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
-                    onClick={handleCancelCredit}
-                    disabled={
-                      flujo.fase !== "FORMULARIO" ||
-                      creditActionMutation.status === "pending" ||
-                      !motivoCancel.trim()
-                    }
-                  >
-                    {creditActionMutation.status === "pending"
-                      ? "Cancelando..."
-                      : "Continuar sin documento"}
-                  </Button>
+                  {flujo.previewPermiteSinDocumento && (
+                    <Button
+                      size="sm"
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                      onClick={handleCancelCredit}
+                      disabled={
+                        flujo.fase !== "FORMULARIO" ||
+                        creditActionMutation.status === "pending" ||
+                        !motivoCancel.trim()
+                      }
+                    >
+                      {creditActionMutation.status === "pending"
+                        ? "Cancelando..."
+                        : "Continuar sin documento"}
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -951,49 +1025,9 @@ export function ModalCancelCredit({
                         Enviar estado de cuenta por WhatsApp
                       </label>
 
-                      {contactosQuery.isLoading ? (
-                        <p className="flex items-center gap-2 text-xs text-gray-500">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Buscando teléfono del cliente...
-                        </p>
-                      ) : contactosQuery.isError ? (
-                        <div className="space-y-1">
-                          <p className="text-xs text-red-600 whitespace-pre-line">
-                            {getApiErrorMessage(
-                              contactosQuery.error,
-                              "No se pudo consultar el teléfono del cliente"
-                            )}
-                          </p>
-                          <button
-                            type="button"
-                            className="text-xs font-medium text-green-700 underline"
-                            onClick={() => contactosQuery.refetch()}
-                          >
-                            Reintentar
-                          </button>
-                        </div>
-                      ) : contactos.length === 0 ? (
-                        <p className="text-xs text-gray-600">
-                          El cliente no tiene un celular válido registrado; se confirmará sin enviar.
-                        </p>
-                      ) : contactos.length === 1 ? (
-                        <p className="text-sm text-gray-800">
-                          Al <strong>{formatearTelefonoGT(contactos[0].telefono)}</strong>
-                        </p>
-                      ) : (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          {contactos.map((c) => (
-                            <label key={c.telefono} className="flex items-center gap-1.5 text-sm text-gray-800">
-                              <input
-                                type="radio"
-                                name="destinatario-whatsapp"
-                                checked={destinatario === c.telefono}
-                                onChange={() => setDestinatario(c.telefono)}
-                                disabled={!enviarPorWhatsapp || flujo.fase !== "VISTA_PREVIA"}
-                              />
-                              <strong>{formatearTelefonoGT(c.telefono)}</strong>
-                            </label>
-                          ))}
-                        </div>
+                      {selectorContactos(
+                        enviarPorWhatsapp && flujo.fase === "VISTA_PREVIA",
+                        "El cliente no tiene un celular válido registrado; se confirmará sin enviar."
                       )}
                     </div>
 
@@ -1034,15 +1068,21 @@ export function ModalCancelCredit({
                       <p className="text-xs text-red-600 whitespace-pre-line">{flujo.errorEnvio}</p>
                     )}
                     {flujo.envioReintentable ? (
-                      <div className="flex justify-end">
-                        <Button
-                          size="sm"
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                          onClick={handleReintentarEnvio}
-                          disabled={!destinatarioValido}
-                        >
-                          Reintentar envío
-                        </Button>
+                      <div className="space-y-2">
+                        {selectorContactos(
+                          true,
+                          "El cliente ya no tiene un celular válido registrado en el CRM; no se puede reenviar."
+                        )}
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={handleReintentarEnvio}
+                            disabled={!destinatarioValido || contactosQuery.isFetching}
+                          >
+                            {contactosQuery.isFetching ? "Verificando teléfonos..." : "Reintentar envío"}
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <p className="text-xs text-red-700">

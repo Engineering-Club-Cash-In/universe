@@ -4,6 +4,7 @@ import {
   estadoInicialCancelacion,
   falloConfirmacionEsDefinitivo,
   falloEnvioEsReintentable,
+  falloPreviewPermiteSinDocumento,
   flujoCancelacionReducer as r,
   payloadConfirmacionDesdeDocumento,
   puedeEnviar,
@@ -88,10 +89,35 @@ describe("primer clic: solo vista previa", () => {
   });
 
   it("error de preview vuelve al formulario con el mensaje (reintento / sin documento)", () => {
-    const s = correr({ type: "GENERAR" }, { type: "PREVIEW_ERROR", mensaje: "falló" });
+    const s = correr(
+      { type: "GENERAR" },
+      { type: "PREVIEW_ERROR", mensaje: "falló", permiteSinDocumento: true },
+    );
     expect(s.fase).toBe("FORMULARIO");
     expect(s.errorPreview).toBe("falló");
+    expect(s.previewPermiteSinDocumento).toBe(true);
     expect(s.documento).toBeNull();
+  });
+
+  it("«sin documento» solo tras una falla técnica, nunca tras un rechazo del backend", () => {
+    expect(falloPreviewPermiteSinDocumento(undefined)).toBe(true); // sin respuesta
+    expect(falloPreviewPermiteSinDocumento(500)).toBe(true); // PDF / R2 / servidor
+    expect(falloPreviewPermiteSinDocumento(503)).toBe(true);
+    expect(falloPreviewPermiteSinDocumento(409)).toBe(false); // ya no es ACTIVO/MOROSO
+    expect(falloPreviewPermiteSinDocumento(404)).toBe(false);
+    expect(falloPreviewPermiteSinDocumento(403)).toBe(false);
+    expect(falloPreviewPermiteSinDocumento(400)).toBe(false);
+    const rechazado = correr(
+      { type: "GENERAR" },
+      { type: "PREVIEW_ERROR", mensaje: "no elegible", permiteSinDocumento: false },
+    );
+    expect(rechazado.previewPermiteSinDocumento).toBe(false);
+    // Un nuevo intento limpia el permiso del error anterior.
+    const tecnico = correr(
+      { type: "GENERAR" },
+      { type: "PREVIEW_ERROR", mensaje: "caído", permiteSinDocumento: true },
+    );
+    expect(r(tecnico, { type: "GENERAR" }).previewPermiteSinDocumento).toBe(false);
   });
 
   it("volver a editar invalida el documento", () => {
@@ -222,7 +248,7 @@ describe("cableado del modal", () => {
   });
 
   it("un solo clic: el WhatsApp sale DENTRO del ok de /creditAction, nunca antes", () => {
-    const confirmar = fuente.match(/const handleConfirmar = \(\) => \{([\s\S]*?)\n  \};/)?.[1] ?? "";
+    const confirmar = fuente.match(/const handleConfirmar = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] ?? "";
     expect(confirmar).not.toBe("");
     const iMutacion = confirmar.indexOf("creditActionMutation.mutate(");
     const iOk = confirmar.indexOf('dispatch({ type: "CONFIRMAR_OK" })');
@@ -231,13 +257,13 @@ describe("cableado del modal", () => {
     expect(iOk).toBeGreaterThan(iMutacion);
     expect(iEnvio).toBeGreaterThan(iOk);
     // El reintento del envío nunca vuelve a llamar a /creditAction.
-    const reintento = fuente.match(/const handleReintentarEnvio = \(\) => \{([\s\S]*?)\n  \};/)?.[1] ?? "";
+    const reintento = fuente.match(/const handleReintentarEnvio = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] ?? "";
     expect(reintento).toContain("enviarEstadoCuentaWhatsapp(");
     expect(reintento).not.toContain("creditActionMutation");
   });
 
   it("un error incierto de /creditAction no vuelve a VISTA_PREVIA", () => {
-    const confirmar = fuente.match(/const handleConfirmar = \(\) => \{([\s\S]*?)\n  \};/)?.[1] ?? "";
+    const confirmar = fuente.match(/const handleConfirmar = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] ?? "";
     const onError = confirmar.slice(confirmar.indexOf("onError:"));
     expect(onError).toContain("falloConfirmacionEsDefinitivo(status)");
     expect(onError).toContain('type: "CONFIRMAR_INCIERTO"');
@@ -251,5 +277,27 @@ describe("cableado del modal", () => {
     const usos = fuente.match(/onClick=\{handleCancelCredit\}/g) ?? [];
     expect(usos.length).toBe(1);
     expect(fuente).toMatch(/onClick=\{handleCancelCredit\}[\s\S]*?"Continuar sin documento"/);
+    // Y solo se muestra tras una falla técnica del preview.
+    expect(fuente).toMatch(
+      /\{flujo\.previewPermiteSinDocumento && \(\s*<Button[\s\S]*?onClick=\{handleCancelCredit\}/,
+    );
+  });
+
+  it("la respuesta de un preview de otra sesión del modal se descarta", () => {
+    const generar = fuente.match(/const handleGenerarPreview = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] ?? "";
+    expect(generar).toContain("const sesion = sesionModal.current;");
+    const guardas = generar.match(/if \(sesion !== sesionModal\.current\) return;/g) ?? [];
+    expect(guardas.length).toBe(2); // onSuccess y onError
+    // La sesión cambia al abrir, cambiar de crédito y cerrar.
+    expect(fuente.match(/sesionModal\.current \+= 1;/g)?.length).toBe(2);
+  });
+
+  it("tras un fallo reintentable se vuelven a consultar los teléfonos y se puede elegir otro", () => {
+    expect(fuente).toMatch(
+      /flujo\.fase === "ERROR_ENVIO" && flujo\.envioReintentable\) void refetchContactos\(\)/,
+    );
+    const panelError = fuente.slice(fuente.indexOf('{flujo.fase === "ERROR_ENVIO" && ('));
+    expect(panelError).toMatch(/flujo\.envioReintentable \? \([\s\S]*?selectorContactos\(/);
+    expect(panelError).toMatch(/disabled=\{!destinatarioValido \|\| contactosQuery\.isFetching\}/);
   });
 });

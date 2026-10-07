@@ -29,7 +29,13 @@
  * el carro aún no tenía placa cuando se instaló el GPS.
  */
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	mkdirSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
@@ -492,16 +498,31 @@ writeFileSync(
 	csv([...encabezadoPlan, "resultado", "error"], []),
 );
 const guardadosHastaAhora: ItemVinculo[] = [];
-const escritorRegistrado = conRegistro(escritor, (item, resultado) => {
-	const fila =
-		typeof resultado === "string"
-			? filaPlan(item, [resultado, ""])
-			: filaPlan(item, ["error", resultado.error]);
-	appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
-	if (resultado === "guardado") {
-		guardadosHastaAhora.push(item);
-		writeFileSync(rutaReversa, sqlReversa(guardadosHastaAhora, inicio));
-	}
+// Temporal + rename: si el proceso muere a mitad de la escritura del archivo
+// queda la reversa anterior completa, nunca un archivo truncado.
+const escribirReversa = (items: ItemVinculo[], nota = "") => {
+	writeFileSync(`${rutaReversa}.tmp`, nota + sqlReversa(items, inicio));
+	renameSync(`${rutaReversa}.tmp`, rutaReversa);
+};
+const escritorRegistrado = conRegistro(escritor, {
+	// La reversa incluye el vínculo en curso ANTES de escribirlo: si el proceso
+	// muere justo después del commit, igual queda cubierto. Si al final no se
+	// escribió, revertirlo no toca nada (exige la misma unidad y marcador).
+	antes: (item) =>
+		escribirReversa(
+			[...guardadosHastaAhora, item],
+			"-- Incluye el vínculo que se estaba escribiendo al cortarse: si no llegó a\n-- guardarse, el UPDATE dirá uno menos que lo esperado.\n",
+		),
+	despues: (item, resultado) => {
+		const fila =
+			typeof resultado === "string"
+				? filaPlan(item, [resultado, ""])
+				: filaPlan(item, ["error", resultado.error]);
+		appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
+		if (resultado === "guardado") guardadosHastaAhora.push(item);
+		if (guardadosHastaAhora.length > 0) escribirReversa(guardadosHastaAhora);
+		else rmSync(rutaReversa, { force: true });
+	},
 });
 const res = await aplicarPlan(plan.items, escritorRegistrado, {
 	alProgresar: (hechos, total) => {

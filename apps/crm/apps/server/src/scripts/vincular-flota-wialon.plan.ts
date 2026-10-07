@@ -173,31 +173,40 @@ export interface ResultadoAplicacion {
 }
 
 /**
- * Envuelve un `Escritor` para registrar cada resultado apenas ocurre, antes de
+ * Envuelve un `Escritor` para registrar cada vínculo apenas ocurre, antes de
  * pasar al siguiente. Cada vínculo se confirma en su propia transacción: si el
  * proceso se corta a la mitad, lo ya escrito tiene que quedar en los archivos
- * de resultado y de reversa, no solo en memoria. Un error también se registra
- * y se vuelve a lanzar para que `aplicarPlan` lo cuente.
+ * de resultado y de reversa, no solo en memoria.
+ *
+ * `antes` corre ANTES de escribir: entre que la transacción confirma y que
+ * `despues` registra hay una ventana en la que un corte dejaría un vínculo
+ * escrito sin registrar, así que la reversa se prepara incluyéndolo de
+ * antemano. `despues` corre con el resultado, o con el error, que se vuelve a
+ * lanzar para que `aplicarPlan` lo cuente.
  */
 export function conRegistro(
 	escritor: Escritor,
-	registrar: (
-		item: ItemVinculo,
-		resultado: ResultadoEscritura | { error: string },
-	) => void,
+	registro: {
+		antes?: (item: ItemVinculo) => void;
+		despues: (
+			item: ItemVinculo,
+			resultado: ResultadoEscritura | { error: string },
+		) => void;
+	},
 ): Escritor {
 	return {
 		async vincular(item) {
+			registro.antes?.(item);
 			let resultado: ResultadoEscritura;
 			try {
 				resultado = await escritor.vincular(item);
 			} catch (error) {
-				registrar(item, {
+				registro.despues(item, {
 					error: error instanceof Error ? error.message : String(error),
 				});
 				throw error;
 			}
-			registrar(item, resultado);
+			registro.despues(item, resultado);
 			return resultado;
 		},
 	};

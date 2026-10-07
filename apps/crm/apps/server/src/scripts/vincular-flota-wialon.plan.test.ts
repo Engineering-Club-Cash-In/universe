@@ -172,7 +172,7 @@ describe("aplicarPlan", () => {
 });
 
 describe("conRegistro", () => {
-	test("registra cada resultado antes de la siguiente escritura, también los errores", async () => {
+	test("prepara antes de escribir y registra cada resultado antes de la siguiente, también los errores", async () => {
 		const eventos: string[] = [];
 		const escritor = conRegistro(
 			{
@@ -182,20 +182,28 @@ describe("conRegistro", () => {
 					return i.unitId === 1 ? "guardado" : "unidad_ocupada";
 				},
 			},
-			(i, r) =>
-				eventos.push(
-					`registra ${i.unitId} ${typeof r === "string" ? r : `error:${r.error}`}`,
-				),
+			{
+				antes: (i) => eventos.push(`prepara ${i.unitId}`),
+				despues: (i, r) =>
+					eventos.push(
+						`registra ${i.unitId} ${typeof r === "string" ? r : `error:${r.error}`}`,
+					),
+			},
 		);
 		const res = await aplicarPlan(
 			[1, 2, 3].map((unitId) => item({ unitId })),
 			escritor,
 		);
+		// `prepara` va antes de escribir: un corte justo después del commit
+		// deja el vínculo ya cubierto por la reversa.
 		expect(eventos).toEqual([
+			"prepara 1",
 			"escribe 1",
 			"registra 1 guardado",
+			"prepara 2",
 			"escribe 2",
 			"registra 2 error:boom",
+			"prepara 3",
 			"escribe 3",
 			"registra 3 unidad_ocupada",
 		]);

@@ -51,7 +51,7 @@ de campo al carro equivocado, así que ante la duda no se vincula y decide una p
 | --- | --- |
 | Placa y VIN apuntan a la **misma** unidad | Se vincula (`placa+vin`) |
 | Solo una de las dos encuentra unidad, y es una sola | Se vincula (`placa` o `vin`) |
-| Placa y VIN apuntan a unidades **distintas** | `conflicto_placa_vin`: una de las dos está mal escrita |
+| Placa y VIN apuntan a unidades **distintas** | `conflicto_placa_vin`: una de las dos está mal escrita. Esas unidades tampoco se proponen a otro vehículo (quedan `unidad_disputada`): el del conflicto podría ser el dueño |
 | Varias unidades coinciden | `ambiguo` |
 | La unidad ya está guardada en otro vehículo | `unidad_ya_asignada`: no se toca |
 | Ninguna unidad coincide | `sin_coincidencia` |
@@ -151,7 +151,7 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 | `unidades.csv` | Un renglón por unidad de Wialon: si quedó vinculada, propuesta, en revisión o sin vehículo |
 | `plan.csv` | Lo que se escribiría (o se escribió) y lo excluido, con el motivo |
 | `resultado.csv` | Solo con `--aplicar`: qué pasó con cada vínculo. Se agrega un renglón después de cada escritura |
-| `reversa.sql` | Solo con `--aplicar`: deshace exactamente lo escrito. Se reescribe completo después de cada vínculo guardado: si el proceso se corta a la mitad, revierte todo lo que alcanzó a confirmarse |
+| `reversa.sql` | Solo con `--aplicar`: deshace exactamente lo escrito. Se reescribe completo (temporal + rename, nunca queda truncado) antes y después de cada vínculo: antes de escribir ya incluye el vínculo en curso, así que si el proceso se corta revierte todo lo que alcanzó a confirmarse. Si el corte fue antes del commit, el `UPDATE` dice uno menos y el archivo lo avisa |
 
 ### Garantías al escribir
 

@@ -357,8 +357,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * SQL que deshace exactamente lo escrito: solo suelta los vehículos que
- * siguen con la misma unidad y el mismo marcador, así no pisa un vínculo que
- * un supervisor corrigió después. Va con BEGIN/COMMIT y el conteo esperado.
+ * siguen con la misma unidad, el mismo marcador y la hora de ESTA corrida
+ * (`fecha`, que el script escribe como `wialon_vinculado_at`). Así no pisa un
+ * vínculo que un supervisor corrigió después, ni uno idéntico que escribió
+ * otra corrida posterior. Va con BEGIN/COMMIT y el conteo esperado.
  */
 export function sqlReversa(guardados: ItemVinculo[], fecha: Date): string {
 	// `FROM (VALUES )` no es SQL válido: sin vínculos no hay nada que revertir.
@@ -376,7 +378,7 @@ export function sqlReversa(guardados: ItemVinculo[], fecha: Date): string {
 	});
 	return [
 		`-- Revierte los ${guardados.length} vínculos escritos por vincular-flota-wialon.ts (${fecha.toISOString()}).`,
-		"-- Solo suelta un vehículo si sigue con la misma unidad y el mismo marcador.",
+		"-- Solo suelta un vehículo si sigue con la misma unidad, el mismo marcador y la hora de esta corrida.",
 		"BEGIN;",
 		"UPDATE vehicles v",
 		"SET wialon_unit_id = NULL, wialon_unit_name = NULL,",
@@ -386,7 +388,8 @@ export function sqlReversa(guardados: ItemVinculo[], fecha: Date): string {
 		") AS x(id, unit_id, marcador)",
 		"WHERE v.id = x.id::uuid",
 		"  AND v.wialon_unit_id = x.unit_id",
-		"  AND v.wialon_vinculado_por = x.marcador;",
+		"  AND v.wialon_vinculado_por = x.marcador",
+		`  AND v.wialon_vinculado_at = '${fecha.toISOString()}'::timestamp;`,
 		`-- Debe decir UPDATE ${guardados.length}. Si dice menos, alguien cambió esos vínculos después.`,
 		"COMMIT;",
 		"",

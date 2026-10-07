@@ -50,7 +50,6 @@ import { fetchAllPages } from "../lib/fetch-all-pages";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { getWialonClient } from "../services/wialon/wialon-client";
-import { WialonClientError } from "../services/wialon/wialon-types";
 import {
 	aplanarCamposUnidad,
 	type CreditoVehiculo,
@@ -419,44 +418,40 @@ if (!aplicar) {
  * placa y el VIN sigan siendo los del diagnóstico. Cada vínculo deja su fila
  * en la bitácora de vehículos.
  */
-/**
- * La unidad tal como está HOY en Wialon (nombre y campos del vehículo), o null
- * si ya no existe o no es visible para la cuenta (error 7, el mismo criterio
- * que la ficha). Cualquier otro error se propaga: no dice nada de la unidad.
- */
-async function unidadActual(unitId: number): Promise<UnidadWialon | null> {
-	try {
-		const { item } = await getWialonClient().getUnitDetail(unitId, 8388609);
-		return {
-			id: item.id,
-			nm: item.nm,
-			campos: aplanarCamposUnidad(
-				(item as { pflds?: Record<string, unknown> }).pflds,
-			),
-		};
-	} catch (error) {
-		if (
-			error instanceof WialonClientError &&
-			error.code === "WIALON_API_ERROR" &&
-			error.wialonErrorCode === 7
-		) {
-			return null;
-		}
-		throw error;
-	}
+// Hora de la corrida. Es también el `wialon_vinculado_at` de todos sus
+// vínculos: la reversa lo exige, así que solo suelta lo que escribió ESTA
+// corrida aunque otra posterior vuelva a vincular el mismo vehículo a la
+// misma unidad con el mismo marcador.
+const inicio = new Date();
+
+/** El catálogo de Wialon de este momento, con los campos del vehículo. */
+async function catalogoActual(): Promise<UnidadWialon[]> {
+	const { items } = await getWialonClient().searchUnits({ flags: 8388609 });
+	return items.map((u) => ({
+		id: u.id,
+		nm: u.nm,
+		campos: aplanarCamposUnidad(u.pflds),
+	}));
 }
 
 const escritor: Escritor = {
 	vincular: async (item) => {
 		// El catálogo se leyó una vez al empezar: antes de escribir se vuelve a
-		// leer ESTA unidad y se exige que la placa/VIN del vehículo sigan
-		// apuntando a ella con el mismo método. Importa sobre todo para
+		// leer COMPLETO (~300 ms, lo mismo que una sola unidad) y se exige que
+		// la placa/VIN del vehículo sigan apuntando a esta unidad, de forma
+		// única y con el mismo método. Cubre unidad renombrada, pasada a otro
+		// carro o ya no visible, y otra unidad que ahora trae la misma placa o
+		// el mismo VIN (también en sus campos). Importa sobre todo para
 		// auto:vin y auto:registro, que la ficha no revalida después.
-		const actual = await unidadActual(item.unitId);
+		const catalogo = await catalogoActual();
+		const actual = catalogo.find((u) => u.id === item.unitId);
 		if (
 			!actual ||
-			metodoVigente({ placa: item.placa, vin: item.vin }, actual) !==
-				item.metodo
+			metodoVigente(
+				{ placa: item.placa, vin: item.vin },
+				catalogo,
+				item.unitId,
+			) !== item.metodo
 		) {
 			return "evidencia_cambio" as const;
 		}
@@ -482,7 +477,7 @@ const escritor: Escritor = {
 				.set({
 					wialonUnitId: item.unitId,
 					wialonUnitName: actual.nm,
-					wialonVinculadoAt: new Date(),
+					wialonVinculadoAt: inicio,
 					wialonVinculadoPor: item.marcador,
 				})
 				.where(
@@ -542,7 +537,6 @@ const escritor: Escritor = {
 console.log(
 	`\nAPLICANDO ${plan.items.length} vínculos en ${destino?.host}/${destino?.bd}…`,
 );
-const inicio = new Date();
 // resultado y reversa se mantienen al día después de CADA escritura: si el
 // proceso se corta, todo lo ya confirmado se puede revertir. Llevan la hora
 // de la corrida en el nombre: una segunda corrida en la misma carpeta (p. ej.

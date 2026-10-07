@@ -834,55 +834,82 @@ describe("diagnosticar — vista por unidad", () => {
 	});
 });
 
-describe("metodoVigente (revalidar la unidad justo antes de escribir)", () => {
+describe("metodoVigente (revalidar contra el catálogo justo antes de escribir)", () => {
 	const VIN = "3N6CD33B0ZL450292";
 	test("la unidad sigue igual: mismo método", () => {
 		expect(
 			metodoVigente(
 				{ placa: "P0-420CDP", vin: null },
-				u(1, "P-420CDP CON APAGADO"),
+				[u(1, "P-420CDP CON APAGADO"), u(2, "P-555XYZ")],
+				1,
 			),
 		).toBe("placa");
 		expect(
-			metodoVigente({ placa: null, vin: VIN }, u(1, `${VIN} - CON APAGADO`)),
+			metodoVigente(
+				{ placa: null, vin: VIN },
+				[u(1, `${VIN} - CON APAGADO`)],
+				1,
+			),
 		).toBe("vin");
 	});
 	test("solo cambió el sufijo del nombre: sigue valiendo", () => {
 		expect(
 			metodoVigente(
 				{ placa: "P-420CDP", vin: null },
-				u(1, "P-420CDP - SIN APAGADO"),
+				[u(1, "P-420CDP - SIN APAGADO")],
+				1,
 			),
 		).toBe("placa");
 	});
-	test("la unidad se pasó a otro carro (otra placa u otro VIN): ya no coincide", () => {
+	test("la unidad se pasó a otro carro o ya no está en el catálogo: no", () => {
 		expect(
 			metodoVigente(
 				{ placa: "P-420CDP", vin: null },
-				u(1, "P-999XYZ CON APAGADO"),
+				[u(1, "P-999XYZ CON APAGADO")],
+				1,
 			),
 		).toBeNull();
+		expect(
+			metodoVigente({ placa: "P-420CDP", vin: null }, [u(2, "P-420CDP")], 1),
+		).toBeNull();
+	});
+	test("otra unidad trae ahora el mismo VIN o la misma placa (también en sus campos): ya no es único", () => {
 		expect(
 			metodoVigente(
 				{ placa: null, vin: VIN },
-				u(1, "1HGBH41JXMN109186 - CON APAGADO"),
+				[u(1, `${VIN} - CON APAGADO`), u(2, "Unidad nueva", { vin: VIN })],
+				1,
+			),
+		).toBeNull();
+		expect(
+			metodoVigente(
+				{ placa: "P-420CDP", vin: null },
+				[
+					u(1, "P-420CDP CON APAGADO"),
+					u(2, "Nueva", { registration_plate: "P-420CDP" }),
+				],
+				1,
 			),
 		).toBeNull();
 	});
-	test("el VIN que solo estaba en el campo vin de la unidad se borró: ya no coincide", () => {
+	test("el VIN que solo estaba en el campo vin de la unidad se borró: no", () => {
 		expect(
-			metodoVigente({ placa: null, vin: VIN }, u(1, "Unidad 1", { vin: VIN })),
+			metodoVigente(
+				{ placa: null, vin: VIN },
+				[u(1, "Unidad 1", { vin: VIN })],
+				1,
+			),
 		).toBe("vin_campo");
 		expect(
-			metodoVigente({ placa: null, vin: VIN }, u(1, "Unidad 1")),
+			metodoVigente({ placa: null, vin: VIN }, [u(1, "Unidad 1")], 1),
 		).toBeNull();
 	});
-	test("placa y VIN del vehículo ahora apuntan a cosas distintas en la unidad: el método cambia", () => {
-		// Antes coincidía solo por placa; ahora la unidad trae además el VIN.
+	test("la unidad trae ahora además el VIN: el método cambia", () => {
 		expect(
 			metodoVigente(
 				{ placa: "P-420CDP", vin: VIN },
-				u(1, `P-420CDP ${VIN} CON APAGADO`),
+				[u(1, `P-420CDP ${VIN} CON APAGADO`)],
+				1,
 			),
 		).toBe("placa+vin");
 	});

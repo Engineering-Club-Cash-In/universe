@@ -323,6 +323,10 @@ describe("sqlReversa", () => {
 		expect(sql).toContain(`('${ID1}', 7, 'auto:placa')`);
 		expect(sql).toContain(`('${ID2}', 8, 'auto:vin')`);
 		expect(sql).toContain("AND v.wialon_vinculado_por = x.marcador");
+		// Solo lo de ESTA corrida: un vínculo idéntico de otra corrida no cae.
+		expect(sql).toContain(
+			"AND v.wialon_vinculado_at = '2026-10-07T00:00:00.000Z'::timestamp;",
+		);
 		expect(sql).toContain("Debe decir UPDATE 2");
 	});
 

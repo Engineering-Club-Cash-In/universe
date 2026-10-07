@@ -161,19 +161,22 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 - **Producción se rechaza siempre**, aunque se confirme el host.
 - Cada vínculo va en su propia transacción, con el mismo **lock por unidad** que usa la ficha
   (`pg_advisory_xact_lock`): dos escrituras no pueden darle la misma unidad a dos vehículos.
-- **Revalida la unidad en Wialon antes de cada vínculo:** el catálogo se lee una vez al
-  empezar, así que justo antes de escribir se vuelve a leer esa unidad y se exige que la placa
-  o el VIN del vehículo sigan apuntando a ella con el mismo método. Si se renombró, se pasó a
-  otro carro o ya no es visible, se omite (`evidencia_cambio`). Suma una consulta a Wialon por
-  vínculo (sin costo por petición): una corrida completa tarda unos 5 minutos.
+- **Revalida contra Wialon antes de cada vínculo:** el catálogo se lee al empezar y puede
+  cambiar mientras corre el script. Justo antes de escribir se vuelve a leer el catálogo
+  completo (~300 ms) y se exige que la placa o el VIN del vehículo sigan apuntando a esa
+  unidad, de forma **única** y con el mismo método. Si se renombró, se pasó a otro carro, ya
+  no es visible u otra unidad trae ahora la misma placa o VIN (en el nombre o en sus campos),
+  se omite (`evidencia_cambio`). Una corrida completa tarda unos 6 minutos.
 - **No pisa nada:** si mientras corría alguien vinculó el vehículo, o la unidad ya está en
   otro, o la placa o el VIN cambiaron desde el diagnóstico, ese vínculo se omite y queda
   anotado en el `resultado-<hora>.csv` (`vehiculo_ya_vinculado`, `unidad_ocupada`, `datos_cambiaron`).
 - Si se acumulan 5 errores, **se detiene**: si la base está caída no tiene sentido seguir.
 - Si falla el registro de un vínculo (no se puede escribir el resultado o la reversa), **se detiene en el acto**: la reversa ya cubre lo confirmado, y seguir escribiendo la dejaría incompleta.
 - **Es idempotente:** una segunda corrida reconoce lo ya vinculado y no propone nada nuevo.
-- **La reversa** solo suelta los vehículos que siguen con la misma unidad y el mismo
-  marcador, así no deshace una corrección que un supervisor haya hecho después. Trae el
+- **La reversa** solo suelta los vehículos que siguen con la misma unidad, el mismo
+  marcador y la hora de esa corrida (todos los vínculos de una corrida llevan su hora de
+  inicio en `wialon_vinculado_at`): no deshace lo que escribió otra corrida aunque sea
+  idéntico, así no deshace una corrección que un supervisor haya hecho después. Trae el
   conteo esperado: si el `UPDATE` afecta menos filas, alguien cambió esos vínculos.
 
 ---

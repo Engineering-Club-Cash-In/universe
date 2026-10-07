@@ -883,15 +883,17 @@ export function diagnosticar(
 }
 
 /**
- * ¿La placa o el VIN del vehículo siguen apuntando a ESTA unidad, con el mismo
- * método? Se usa justo antes de escribir, con la unidad recién leída de
- * Wialon: el catálogo se lee una vez al empezar y una unidad puede renombrarse
- * o pasarse a otro carro mientras corre el script. Devuelve el método con el
- * que coincide hoy, o null si ya no coincide.
+ * ¿La placa o el VIN del vehículo siguen apuntando a ESA unidad, de forma
+ * ÚNICA y con el mismo método, en el catálogo de Wialon de este momento? Se
+ * usa justo antes de escribir con el catálogo recién leído: el del arranque
+ * puede haber cambiado mientras corre el script (unidad renombrada, pasada a
+ * otro carro, ya no visible, u otra unidad que ahora trae la misma placa o el
+ * mismo VIN). Devuelve el método con el que coincide hoy, o null.
  */
 export function metodoVigente(
 	vehiculo: { placa: string | null; vin: string | null },
-	unidad: UnidadWialon,
+	catalogo: UnidadWialon[],
+	unitId: number,
 ): Metodo | null {
 	const ev = evidenciaVehiculo(
 		{
@@ -902,10 +904,10 @@ export function metodoVigente(
 			vinculadoPor: null,
 			conCredito: false,
 		},
-		indexarCatalogo([unidad]),
+		indexarCatalogo(catalogo),
 	);
 	const decision = decidirPorEvidencia(ev);
-	return decision.tipo === "unica" && decision.unidadId === unidad.id
+	return decision.tipo === "unica" && decision.unidadId === unitId
 		? decision.metodo
 		: null;
 }

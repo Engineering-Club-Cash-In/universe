@@ -13,6 +13,16 @@ Before changing a production deployment from the DEV pilot to the production led
 
 Do not copy DEV environment variables into PROD. Publishing this code does not change the current pilot destination or activate Cartera's receiver/fiscal flags.
 
+## Alertas por correo de revisión manual
+
+Cada pasada del "Manual review scanner" (cada 5 minutos) junta los pagos en `MANUAL_REVIEW` (y los `billing_reconciliation_required`) que todavía no se avisaron y manda UN correo con el resumen: crédito, monto, referencia, transactionId, motivo, hora de Guatemala y el token enmascarado (solo los últimos 4 dígitos). Cada caso se avisa una sola vez (`nexa_payment_transactions.alerta_correo_enviada_at`); si el envío falla, no se marca, queda un log y se reintenta en la siguiente pasada. La migración 0006 da por avisados los casos que ya existían al desplegar: el primer correo trae solo los nuevos. Se manda por la API de Resend; en el modo `integration` no corre.
+
+- `NEXA_ALERTAS_CORREOS`: destinatarios separados por comas. Valor de producción: `jalvarado@clubcashin.com,l.ralda@clubcashin.com,daniel.r@clubcashin.com`
+- `RESEND_API_KEY`: la misma llave de Resend que usa cartera-back
+- `EMAIL_DOMAIN`: dominio verificado en Resend para el remitente `no-reply@` (el mismo que cartera-back, por ejemplo `servicioscashin.com`)
+
+Si falta cualquiera de las tres, el scanner sigue como antes (solo logs) y al arrancar deja un único log `manual_review_email_disabled` con las que faltan.
+
 ## Fiscal response and recovery
 
 Cartera persists application and `billing_pending` before returning the existing `APPLIED` / `billingStatus: PENDING` response. Its runtime continues the fiscal batch asynchronously, using the existing durable `billing_running` CAS fence and invoice handler. Nexa can approve the transfer without waiting for Cofidi/SAT and continues billing retries without reapplying money.

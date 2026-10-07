@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { and, eq, getTableColumns, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { receivedTokenTransactionSchema, tokenTransactionSchema, type TokenTransaction, type ReceivedTokenTransaction } from "../nexa/schemas";
+import type { ManualReviewEmailCase } from "../alerts/manual-review-email";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
@@ -426,14 +427,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 
   async listManualReviewAlerts(staleBefore: Date) {
-    const rows = await reconciliationQuery(this.db, or(
-      eq(nexaPaymentTransactions.failureReason, "billing_reconciliation_required"),
-      and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
-      and(
-        eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
-        or(isNull(nexaPaymentTransactions.failureReason), ne(nexaPaymentTransactions.failureReason, "missing_token_date")),
-      ),
-    ));
+    const rows = await reconciliationQuery(this.db, manualReviewAlertCondition(staleBefore));
     return rows.map((row) => ({
       ...toSafeReconciliationRow(row),
       alertType: row.failureReason === "missing_token_date"
@@ -441,6 +435,46 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         : "MANUAL_REVIEW" as const,
     }));
   }
+
+  // Los mismos casos que listManualReviewAlerts, solo los que todavía no salieron por correo.
+  async listUnsentManualReviewEmailAlerts(staleBefore: Date): Promise<ManualReviewEmailCase[]> {
+    return this.db.select({
+      id: nexaPaymentTransactions.id,
+      creditoId: sql<number | null>`CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.creditoId} END`,
+      amount: nexaPaymentTransactions.amount,
+      currency: nexaPaymentTransactions.currency,
+      reference: nexaPaymentTransactions.reference,
+      transactionId: nexaPaymentTransactions.transactionId,
+      failureReason: nexaPaymentTransactions.failureReason,
+      createdAt: nexaPaymentTransactions.createdAt,
+      maskedToken: maskedTokenSql,
+    }).from(nexaPaymentTransactions)
+      .leftJoin(nexaTokenUsers, eq(nexaTokenUsers.identifier, nexaPaymentTransactions.tokenIdentifier))
+      .leftJoin(nexaPaymentTokens, and(
+        eq(nexaPaymentTokens.id, nexaTokenUsers.paymentTokenId),
+        eq(nexaPaymentTokens.prefix, nexaPaymentTransactions.tokenPrefix),
+      ))
+      .where(and(manualReviewAlertCondition(staleBefore), isNull(nexaPaymentTransactions.alertaCorreoEnviadaAt)))
+      .orderBy(nexaPaymentTransactions.id);
+  }
+
+  async markManualReviewEmailAlertsSent(ids: number[], now: Date) {
+    if (!ids.length) return;
+    await this.db.update(nexaPaymentTransactions)
+      .set({ alertaCorreoEnviadaAt: now })
+      .where(and(inArray(nexaPaymentTransactions.id, ids), isNull(nexaPaymentTransactions.alertaCorreoEnviadaAt)));
+  }
+}
+
+function manualReviewAlertCondition(staleBefore: Date) {
+  return or(
+    eq(nexaPaymentTransactions.failureReason, "billing_reconciliation_required"),
+    and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
+    and(
+      eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+      or(isNull(nexaPaymentTransactions.failureReason), ne(nexaPaymentTransactions.failureReason, "missing_token_date")),
+    ),
+  );
 }
 
 export class DbReviewRepository implements ReviewWorkerRepository {
@@ -583,11 +617,14 @@ function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {
   return value;
 }
 
+// Solo los últimos 4 dígitos: ni el token ni el identificador completo salen de la base.
+const fullTokenSql = sql<string>`COALESCE(NULLIF(${nexaPaymentTransactions.token}, ''), CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.token} END, ${nexaPaymentTransactions.tokenPrefix} || ${nexaPaymentTransactions.tokenIdentifier})`;
+const maskedTokenSql = sql<string>`CASE WHEN length(${fullTokenSql}) <= 4 THEN repeat('*', length(${fullTokenSql})) ELSE repeat('*', length(${fullTokenSql}) - 4) || right(${fullTokenSql}, 4) END`;
+
 function reconciliationQuery(db: NexaDb, where?: ReturnType<typeof or>) {
-  const token = sql<string>`COALESCE(NULLIF(${nexaPaymentTransactions.token}, ''), CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.token} END, ${nexaPaymentTransactions.tokenPrefix} || ${nexaPaymentTransactions.tokenIdentifier})`;
   const query = db.select({
     reference: nexaPaymentTransactions.reference,
-    token: sql<string>`CASE WHEN length(${token}) <= 4 THEN repeat('*', length(${token})) ELSE repeat('*', length(${token}) - 4) || right(${token}, 4) END`,
+    token: maskedTokenSql,
     creditoId: sql<number | null>`CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.creditoId} END`,
     carteraPaymentId: nexaPaymentTransactions.carteraPaymentId,
     amount: nexaPaymentTransactions.amount,

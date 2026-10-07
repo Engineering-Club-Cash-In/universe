@@ -2,8 +2,12 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Pool } from "pg";
 import { createApp } from "../app";
+import { sendManualReviewEmailAlerts, type EmailMessage } from "../alerts/manual-review-email";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { HttpCarteraPaymentClient } from "../payments/cartera-client";
@@ -1298,6 +1302,105 @@ integrationTest("expired billing leases fence stale success and failure without 
   await repository.markApplicationFailed(paymentId, "application_processing_failed", null, later, fresh.attemptCount);
   expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ failureReason: null, leaseUntil: null, processingStatus: "REVIEW_PENDING" });
   expect(await db.select().from(nexaReviews)).toHaveLength(1);
+});
+
+integrationTest("manual review email: one summary per new case, masked token, marked only after a successful send", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("310005010", "1234567", 9234);
+  const fullToken = "1234567310005010";
+  await repository.upsertReceived({ ...transaction, reference: "manual-email", token: fullToken, tokenIdentifier: "310005010", amount: 1500 });
+  await repository.upsertReceived({ ...transaction, reference: "applied-ok", token: fullToken, tokenIdentifier: "310005010" });
+  await db.update(nexaPaymentTransactions)
+    .set({ processingStatus: "MANUAL_REVIEW", failureReason: "token_repair_failed:token_in_use", createdAt: new Date("2026-10-07T16:15:00Z") })
+    .where(eq(nexaPaymentTransactions.reference, "manual-email"));
+
+  const now = new Date("2026-10-07T18:00:00Z");
+  const messages: EmailMessage[] = [];
+  let fail = true;
+  const pass = () => sendManualReviewEmailAlerts({
+    repository,
+    send: async (message) => { if (fail) throw new Error("Resend responded HTTP 503"); messages.push(message); },
+    recipients: ["jalvarado@clubcashin.com"],
+    staleBefore: now,
+    now,
+    logError: () => {},
+  });
+
+  expect(await pass()).toBe(0);
+  const [unmarked] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.reference, "manual-email"));
+  expect(unmarked?.alertaCorreoEnviadaAt).toBeNull();
+
+  fail = false;
+  expect(await pass()).toBe(1);
+  expect(await pass()).toBe(0);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.text).toContain("1. Crédito 9234 · 1500.00 GTQ");
+  expect(messages[0]?.text).toContain("   Referencia: manual-email · transactionId: 7293");
+  expect(messages[0]?.text).toContain("   Motivo: token_repair_failed:token_in_use");
+  expect(messages[0]?.text).toContain("   Recibido: 2026-10-07 10:15 (hora de Guatemala)");
+  expect(messages[0]?.text).toContain("   Token: ************5010");
+  expect(messages[0]?.text).not.toContain(fullToken);
+  expect(messages[0]?.text).not.toContain("310005010");
+  expect(messages[0]?.text).not.toContain("applied-ok");
+  const [marked] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.reference, "manual-email"));
+  expect(marked?.alertaCorreoEnviadaAt).toEqual(now);
+});
+
+integrationTest("migration 0006 marks today's manual review cases as notified: the first email carries only new ones", async () => {
+  if (!db || !pool) throw new Error("TEST_DATABASE_URL is required");
+  const migrationsFolder = new URL("../../drizzle", import.meta.url).pathname;
+  // Carpeta de migraciones hasta la 0005: la base como estaba antes del deploy.
+  const before0006 = mkdtempSync(join(tmpdir(), "nexa-before-0006-"));
+  try {
+    cpSync(migrationsFolder, before0006, { recursive: true });
+    rmSync(join(before0006, "0006_alerta_correo.sql"));
+    const journalPath = join(before0006, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+    journal.entries = journal.entries.filter((entry: { tag: string }) => entry.tag !== "0006_alerta_correo");
+    writeFileSync(journalPath, JSON.stringify(journal));
+
+    await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public");
+    await migrate(db, { migrationsFolder: before0006 });
+    const insertRaw = (reference: string, status: string, failureReason: string | null, tokenDate = "2026-05-04T10:00:00-06:00") => pool.query(
+      `INSERT INTO nexa_payment_transactions (reference, amount, bank, currency, account, token, token_date, token_identifier, token_name, token_prefix, was_return, raw_payload, processing_status, failure_reason, updated_at)
+       VALUES ($1, 50, 'b', 'GTQ', 'a', '123456710005010', $2, '10005010', 'n', '1234567', 0, '{}', $3, $4, now() - interval '1 hour')`,
+      [reference, tokenDate, status, failureReason],
+    );
+    await insertRaw("existing-manual", "MANUAL_REVIEW", "token_mismatch");
+    await insertRaw("existing-billing", "COMPLETED", "billing_reconciliation_required");
+    await insertRaw("existing-dateless", "MANUAL_REVIEW", "missing_token_date", "");
+    await insertRaw("existing-received", "RECEIVED", null);
+
+    await migrate(db, { migrationsFolder });
+    await insertRaw("new-manual", "MANUAL_REVIEW", "token_repair_failed:token_in_use");
+
+    const marked = await pool.query<{ reference: string; notified: boolean }>(
+      "SELECT reference, alerta_correo_enviada_at IS NOT NULL AS notified FROM nexa_payment_transactions ORDER BY id",
+    );
+    expect(marked.rows).toEqual([
+      { reference: "existing-manual", notified: true },
+      { reference: "existing-billing", notified: true },
+      { reference: "existing-dateless", notified: true },
+      { reference: "existing-received", notified: false },
+      { reference: "new-manual", notified: false },
+    ]);
+
+    const messages: EmailMessage[] = [];
+    const now = new Date();
+    expect(await sendManualReviewEmailAlerts({
+      repository: new DbPaymentTransactionRepository(db),
+      send: async (message) => { messages.push(message); },
+      recipients: ["jalvarado@clubcashin.com"],
+      staleBefore: new Date(now.getTime() - 300_000),
+      now,
+      logError: () => {},
+    })).toBe(1);
+    expect(messages[0]?.text).toContain("Referencia: new-manual");
+    expect(messages[0]?.text).not.toContain("existing-");
+  } finally {
+    rmSync(before0006, { recursive: true, force: true });
+  }
 });
 
 async function associateToken(identifier: string, prefix: string, creditoId: number) {

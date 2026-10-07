@@ -77,6 +77,8 @@ export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   leaseUntil: timestamp("lease_until", { withTimezone: true }),
   reviewAttemptCount: integer("review_attempt_count").notNull().default(0),
   reviewNextAttemptAt: timestamp("review_next_attempt_at", { withTimezone: true }),
+  // Cuándo salió el correo de revisión manual de este pago; NULL = no se avisó.
+  alertaCorreoEnviadaAt: timestamp("alerta_correo_enviada_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({

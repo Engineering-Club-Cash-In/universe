@@ -7,6 +7,11 @@ const envOrigins = z.string().transform((value) =>
   value.split(",").map((origin) => origin.trim()).filter(Boolean),
 ).optional();
 const positiveFiniteInteger = z.coerce.number().int().finite().positive();
+const optionalText = z.string().trim().optional().transform((value) => value || undefined);
+// Lista separada por comas; vacía o ausente = alertas por correo apagadas.
+const envEmails = z.string().optional().transform((value) =>
+  (value ?? "").split(",").map((email) => email.trim()).filter(Boolean),
+).pipe(z.array(z.string().email()));
 
 const configSchema = z.object({
   port: z.coerce.number().int().positive().default(7010),
@@ -41,6 +46,9 @@ const configSchema = z.object({
   enableTestUi: envBoolean.default(false),
   nodeEnv: z.string().default("development"),
   deploymentMode: z.enum(["integration", "qa_real_payments", "production"]).default("integration"),
+  nexaAlertasCorreos: envEmails,
+  resendApiKey: optionalText,
+  emailDomain: optionalText,
 }).superRefine((config, context) => {
   const tlsPaths = [config.nexaClientCertPath, config.nexaClientKeyPath, config.nexaCaCertPath];
   if (config.nexaMtlsMode === "required" && tlsPaths.some((value) => !value)) {
@@ -202,6 +210,9 @@ export function loadConfig(env = process.env) {
     enableTestUi: env.ENABLE_TEST_UI,
     nodeEnv: env.NODE_ENV,
     deploymentMode: env.NEXA_DEPLOYMENT_MODE,
+    nexaAlertasCorreos: env.NEXA_ALERTAS_CORREOS,
+    resendApiKey: env.RESEND_API_KEY,
+    emailDomain: env.EMAIL_DOMAIN,
   });
 }
 

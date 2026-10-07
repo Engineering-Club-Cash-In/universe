@@ -178,12 +178,71 @@ test("qa lifecycle enriches the date automatically while preserving the bank rev
   } finally { stop(); }
 });
 
+const emailEnv = {
+  NEXA_ALERTAS_CORREOS: "jalvarado@clubcashin.com,l.ralda@clubcashin.com,daniel.r@clubcashin.com",
+  RESEND_API_KEY: "re_test_key",
+  EMAIL_DOMAIN: "servicioscashin.com",
+};
+const unsentCase = {
+  id: 5, creditoId: 42, amount: "50.00", currency: "GTQ", reference: "4617307", transactionId: "7293",
+  failureReason: "token_mismatch", createdAt: new Date("2026-10-07T16:15:00Z"), maskedToken: "**********5010",
+};
+
+test("the manual review scanner emails the new cases once when the email config is present", async () => {
+  const scheduler = controlledScheduler();
+  const sent: Array<{ to: string[]; subject: string }> = [];
+  const marked: number[][] = [];
+  const logs: string[] = [];
+  const deps = lifecycleDependencies({
+    unsentEmail: () => (marked.length ? [] : [unsentCase]),
+    markEmail: (ids) => { marked.push(ids); },
+  });
+  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, ...emailEnv }), deps, {
+    scheduler, logInfo: (line) => logs.push(line), sendEmail: async ({ to, subject }) => { sent.push({ to, subject }); },
+  });
+  try {
+    await waitFor(() => scheduler.scheduled.some(({ delay }) => delay === 300_000));
+    for (let pass = 0; pass < 2; pass++) {
+      const manual = scheduler.scheduled.filter(({ delay }) => delay === 300_000);
+      manual[manual.length - 1]?.callback();
+      await waitFor(() => scheduler.scheduled.filter(({ delay }) => delay === 300_000).length === manual.length + 1);
+    }
+  } finally { stop(); }
+
+  expect(sent).toEqual([{ to: emailEnv.NEXA_ALERTAS_CORREOS.split(","), subject: "Nexa: 1 pago en revisión manual" }]);
+  expect(marked).toEqual([[5]]);
+  expect(logs.some((line) => line.includes("manual_review_email_disabled"))).toBe(false);
+});
+
+test("without NEXA_ALERTAS_CORREOS the scanner only logs, sends nothing and warns once", async () => {
+  const scheduler = controlledScheduler();
+  const logs: string[] = [];
+  let sends = 0;
+  let unsentQueries = 0;
+  const deps = lifecycleDependencies({ unsentEmail: () => { unsentQueries++; return [unsentCase]; } });
+  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, ...emailEnv, NEXA_ALERTAS_CORREOS: "" }), deps, {
+    scheduler, logInfo: (line) => logs.push(line), sendEmail: async () => { sends++; },
+  });
+  try {
+    await waitFor(() => scheduler.scheduled.some(({ delay }) => delay === 300_000));
+    scheduler.scheduled.find(({ delay }) => delay === 300_000)?.callback();
+    await waitFor(() => scheduler.scheduled.filter(({ delay }) => delay === 300_000).length === 2);
+  } finally { stop(); }
+
+  expect({ sends, unsentQueries }).toEqual({ sends: 0, unsentQueries: 0 });
+  expect(logs.filter((line) => line.includes("manual_review_email_disabled")).map((line) => JSON.parse(line))).toEqual([
+    { scope: "nexa-reconciliation", event: "manual_review_email_disabled", missing: ["NEXA_ALERTAS_CORREOS"] },
+  ]);
+});
+
 function lifecycleDependencies(options: {
   poll?: () => void;
   application?: () => boolean;
   review?: () => boolean;
   reconciliation?: () => Array<Record<string, unknown>>;
   manualReconciliation?: () => Array<Record<string, unknown>>;
+  unsentEmail?: () => Array<typeof unsentCase>;
+  markEmail?: (ids: number[]) => void;
 }): AppDependencies {
   return {
     nexa: {
@@ -204,6 +263,8 @@ function lifecycleDependencies(options: {
       enrichIncomingStatement: async () => false,
       listReconciliationAlerts: async () => options.reconciliation?.() ?? [],
       listManualReviewAlerts: async () => options.manualReconciliation?.() ?? [],
+      listUnsentManualReviewEmailAlerts: async () => options.unsentEmail?.() ?? [],
+      markManualReviewEmailAlertsSent: async (ids: number[]) => options.markEmail?.(ids),
     },
     reviews: {
       claimNextReview: async () => options.review?.() ? reviewClaim : null,

@@ -661,7 +661,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       INSERT INTO cartera.creditos VALUES (10);`);
     await query.query(await Bun.file(new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url)).text());
     await query.query(await Bun.file(new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url)).text());
-    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending", "0005_cartera_payment_ids"]) {
+    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending", "0005_cartera_payment_ids", "0006_alerta_correo"]) {
       await query.query(await Bun.file(new URL(`../../../nexa-server/drizzle/${file}.sql`, import.meta.url)).text());
     }
     await query.query(`INSERT INTO nexa_payment_tokens (nexa_token_id, prefix, account, name) VALUES (1, '1234567', 'local', 'local');

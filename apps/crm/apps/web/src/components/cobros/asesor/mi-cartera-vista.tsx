@@ -1,10 +1,33 @@
 import { Link } from "@tanstack/react-router";
-import { CircleCheck, Info, TriangleAlert, Wallet } from "lucide-react";
+import {
+	ArrowLeftRight,
+	CircleCheck,
+	Info,
+	TriangleAlert,
+	Wallet,
+} from "lucide-react";
 import type * as React from "react";
+import { etiquetaSegmento } from "@/components/cobros/cartera-general/segmentos";
+import {
+	AvisoSegmento,
+	BarraSeleccion,
+	BotonSegmentos,
+	CasillaFila,
+	CasillaPagina,
+	CeldaSegmento,
+	ChipsRapidosSupervision,
+	ETIQUETA_COLUMNA_SEGMENTO,
+	SelectorAsesor,
+	type SupervisionCartera,
+	VacioSegmento,
+} from "@/components/cobros/cartera-general/vista-supervision";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import type { Bucket } from "@/components/ds/badges";
 import { AsesorChip, FilterChip } from "@/components/ds/cartera-chips";
-import { TablaCartera } from "@/components/ds/tabla-cartera";
+import {
+	type ColumnaCartera,
+	TablaCartera,
+} from "@/components/ds/tabla-cartera";
 import { formatearQuetzales } from "@/components/ds/table-cells";
 import {
 	Breadcrumb,
@@ -74,6 +97,13 @@ import {
  * buckets del perfil. Supervisión ve toda la cartera ("Cartera", B0–B5 y la
  * columna Asesor prendida por defecto).
  *
+ * Con `supervision` (y perfil de supervisión) es la «Cartera general» del
+ * supervisor (Figma 2262:12): migas «Dashboard / Cartera del equipo», filtro por
+ * asesor, chips rápidos de Figma, el selector de segmentos que reemplaza a la
+ * Cola del día y a las Alertas de promesas y de convenios, selección múltiple
+ * con «Reasignar en bloque» y estado vacío por segmento. Sin `supervision` la
+ * pantalla es la de siempre (el asesor no cambia).
+ *
  * Orden de Figma: breadcrumb → encabezado (overline, título, subtítulo) →
  * encabezado operativo → chips de bucket → búsqueda + chips de gestión → tabla.
  * Agregado para no perder lo que ya existía: popover "Filtros" con todos los
@@ -133,6 +163,8 @@ export type MiCarteraVistaProps = {
 	 * visible, en su orden). Sin él, la fila navega a la Ficha 360.
 	 */
 	onAbrir?: (indice: number) => void;
+	/** Cartera general del supervisor (ver arriba). */
+	supervision?: SupervisionCartera;
 };
 
 export const TAMANOS_PAGINA = [25, 50, 75, 100, 200];
@@ -170,9 +202,12 @@ function ValorResumen({
 function EncabezadoOperativo({
 	resumen,
 	perfil,
+	onAtencionHoy,
 }: {
 	resumen: ResumenCartera;
 	perfil: PerfilVista | undefined;
+	/** Supervisión: «Requieren atención hoy» abre la Cola del día en la tabla. */
+	onAtencionHoy?: () => void;
 }) {
 	const atencion = resumen.atencionHoy;
 	return (
@@ -185,7 +220,18 @@ function EncabezadoOperativo({
 				label="Créditos asignados"
 			/>
 			{atencion !== null || resumen.cargando ? (
-				perfil?.esSupervision ? (
+				perfil?.esSupervision && onAtencionHoy ? (
+					<OperationalSummaryItem
+						icon={TriangleAlert}
+						status={atencion ? "warning" : "normal"}
+						value={
+							<ValorResumen valor={atencion} cargando={resumen.cargando} />
+						}
+						label="Requieren atención hoy"
+						title="Ver la Cola del día"
+						onClick={onAtencionHoy}
+					/>
+				) : perfil?.esSupervision ? (
 					<OperationalSummaryItem
 						icon={TriangleAlert}
 						status={atencion ? "warning" : "normal"}
@@ -531,6 +577,32 @@ function EstadoEnTabla({ children }: { children: React.ReactNode }) {
 	);
 }
 
+/**
+ * Columnas de la Cartera general: casilla de selección al inicio y, con un
+ * segmento elegido, su columna («Cola del día», «Promesa de pago», «Convenio»)
+ * junto al asesor, con lo que mostraba la página vieja.
+ */
+function columnasSupervision(
+	base: ColumnaCartera[],
+	segmento: SupervisionCartera["segmento"],
+	casillaPagina: React.ReactNode,
+): ColumnaCartera[] {
+	const columnas: ColumnaCartera[] = [
+		{ id: "sel", etiqueta: casillaPagina, ancho: 40 },
+		...base.map((c) => (c.id === "cliente" ? { ...c, celda: "pl-2" } : c)),
+	];
+	if (segmento) {
+		const despues = columnas.findIndex((c) => c.id === "asesor");
+		columnas.splice(despues >= 0 ? despues + 1 : 2, 0, {
+			id: "segmento",
+			etiqueta: ETIQUETA_COLUMNA_SEGMENTO[segmento.tipo],
+			ancho: 260,
+			celda: "pr-4",
+		});
+	}
+	return columnas;
+}
+
 function TablaMiCartera({
 	props,
 	activos,
@@ -542,11 +614,32 @@ function TablaMiCartera({
 }) {
 	const esSupervision = !!props.perfil?.esSupervision;
 	// Se monta cuando ya se sabe el perfil: supervisión arranca con Asesor visible.
-	const { columnas, menu } = useColumnasVisibles(
+	const { columnas: columnasBase, menu } = useColumnasVisibles(
 		"cartera",
 		COLUMNAS_OPCIONALES,
 		esSupervision ? ["asesor"] : [],
 	);
+	const sup = esSupervision ? props.supervision : undefined;
+	const segmento = sup?.segmento ?? null;
+	const marcadas = sup
+		? props.filas.filter((f) => sup.seleccion.has(f.contratoId)).length
+		: 0;
+	const columnas = sup
+		? columnasSupervision(
+				columnasBase,
+				segmento,
+				<CasillaPagina
+					marcadas={marcadas}
+					total={props.filas.length}
+					onMarcar={(m) =>
+						sup.onSeleccionar(
+							props.filas.map((f) => f.contratoId),
+							m,
+						)
+					}
+				/>,
+			)
+		: columnasBase;
 
 	const sinResultados =
 		!props.cargando && !props.error && props.filas.length === 0;
@@ -555,6 +648,15 @@ function TablaMiCartera({
 		activos ===
 			(props.filtros.gestion ? 1 : 0) +
 				(bucketDeEstadoMora(props.filtros.etapa) ? 1 : 0);
+	// Cartera general: el segmento (o el chip de gestión) es lo único que filtra,
+	// aparte del asesor.
+	const soloSegmento =
+		!!sup &&
+		(!!segmento || !!props.filtros.gestion) &&
+		activos ===
+			(props.filtros.gestion ? 1 : 0) +
+				(segmento ? 1 : 0) +
+				(sup.asesorId !== null ? 1 : 0);
 
 	let vacio: React.ReactNode;
 	if (props.error) {
@@ -571,6 +673,18 @@ function TablaMiCartera({
 						</Button>
 					) : null
 				}
+			/>
+		);
+	} else if (sinResultados && soloSegmento && sup) {
+		// Figma 2010:4449: estado vacío del segmento («Sin casos sin contacto»…).
+		vacio = (
+			<VacioSegmento
+				segmento={segmento}
+				gestion={props.filtros.gestion}
+				onVerTodo={() => {
+					sup.onSegmento(null);
+					props.onCambiarFiltros({ gestion: null });
+				}}
 			/>
 		);
 	} else if (sinResultados && soloGestion) {
@@ -620,7 +734,7 @@ function TablaMiCartera({
 		// @container: el estado vacío mide el ancho visible, no el de la tabla.
 		<div className="@container">
 			<TablaCartera
-				titulo="Cartera"
+				titulo={segmento ? etiquetaSegmento(segmento) : "Cartera"}
 				contador={props.cargando ? null : props.total}
 				className={cn(
 					"transition-opacity duration-150",
@@ -641,6 +755,7 @@ function TablaMiCartera({
 						<MenuOrden orden={props.orden} onOrden={props.onOrden} />
 						{menu}
 						{props.total > 0 && !props.error ? props.accionMasiva : null}
+						{sup?.herramientas}
 					</>
 				}
 				pie={
@@ -668,7 +783,30 @@ function TablaMiCartera({
 								<FilaCreditoAsesor
 									key={fila.contratoId}
 									fila={fila}
-									extras={celdasExtra(fila, props.etapas)}
+									seleccionada={sup?.seleccion.has(fila.contratoId)}
+									extras={{
+										...celdasExtra(fila, props.etapas),
+										...(sup
+											? {
+													sel: (
+														<CasillaFila
+															marcada={sup.seleccion.has(fila.contratoId)}
+															onMarcar={(m) =>
+																sup.onSeleccionar([fila.contratoId], m)
+															}
+															etiqueta={`Seleccionar a ${fila.clienteNombre ?? "este cliente"}`}
+														/>
+													),
+													segmento: (
+														<CeldaSegmento
+															detalle={sup.detalles?.get(
+																fila.numeroCredito ?? "",
+															)}
+														/>
+													),
+												}
+											: {}),
+									}}
 									onVistaRapida={props.onVistaRapida}
 									onAbrir={props.onAbrir ? () => props.onAbrir?.(i) : undefined}
 								/>
@@ -683,7 +821,13 @@ function TablaMiCartera({
 export function MiCarteraVista(props: MiCarteraVistaProps) {
 	const { perfil, resumen, filtros, onCambiarFiltros } = props;
 	const esSupervision = !!perfil?.esSupervision;
-	const titulo = esSupervision ? "Cartera" : "Mi Cartera";
+	// Cartera general del supervisor (Figma 2262:12); sin la prop, la de siempre.
+	const sup = esSupervision ? props.supervision : undefined;
+	const titulo = sup
+		? "Cartera general"
+		: esSupervision
+			? "Cartera"
+			: "Mi Cartera";
 
 	const bucketsPerfil: Bucket[] = esSupervision
 		? BUCKETS_CARTERA
@@ -697,7 +841,11 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 			? [...bucketsPerfil, bucketElegido].sort()
 			: bucketsPerfil;
 
-	const activos = contarFiltrosActivos(filtros);
+	// En la Cartera general el asesor y el segmento también cuentan como filtros.
+	const activos =
+		contarFiltrosActivos(filtros) +
+		(sup?.segmento ? 1 : 0) +
+		(sup && sup.asesorId !== null ? 1 : 0);
 	const avanzados = contarFiltrosAvanzados(filtros, bucketsVisibles);
 
 	const sinAsesor = !!perfil && perfil.sinAsesor && !perfil.esSupervision;
@@ -710,6 +858,16 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 		props.total === 0 &&
 		activos === 0;
 
+	const asesorElegido =
+		sup && sup.asesorId !== null
+			? sup.asesores.find((a) => a.asesorId === sup.asesorId)
+			: undefined;
+	const alcance = sup
+		? sup.asesorId === null
+			? "cartera general"
+			: `cartera de ${asesorElegido?.nombre ?? "un asesor"}`
+		: null;
+
 	return (
 		<div className="flex flex-col gap-4 px-4 py-6 sm:px-8 sm:py-7">
 			<Breadcrumb>
@@ -721,13 +879,15 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 					</BreadcrumbItem>
 					<BreadcrumbSeparator />
 					<BreadcrumbItem>
-						<BreadcrumbPage>Cartera</BreadcrumbPage>
+						<BreadcrumbPage>
+							{sup ? "Cartera del equipo" : "Cartera"}
+						</BreadcrumbPage>
 					</BreadcrumbItem>
 				</BreadcrumbList>
 			</Breadcrumb>
 
 			<header className="flex flex-col gap-1">
-				{perfil ? (
+				{sup ? null : perfil ? (
 					<p className="font-semibold text-fg-secondary text-xs uppercase leading-4">
 						{overline(perfil)}
 					</p>
@@ -737,10 +897,20 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 				<h1 className="font-semibold text-[28px] text-fg leading-9">
 					{titulo}
 				</h1>
-				<p className="type-body-base text-fg-secondary">
-					Su cola de trabajo priorizada. Empiece por los casos que requieren
-					atención hoy.
-				</p>
+				{sup ? (
+					<p className="type-body-base text-fg-secondary">
+						<ValorResumen
+							valor={resumen.asignados}
+							cargando={resumen.cargando}
+						/>{" "}
+						créditos · {alcance} · B0–B5
+					</p>
+				) : (
+					<p className="type-body-base text-fg-secondary">
+						Su cola de trabajo priorizada. Empiece por los casos que requieren
+						atención hoy.
+					</p>
+				)}
 			</header>
 
 			{sinAsesor ? (
@@ -753,7 +923,11 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 				</div>
 			) : (
 				<>
-					<EncabezadoOperativo resumen={resumen} perfil={perfil} />
+					<EncabezadoOperativo
+						resumen={resumen}
+						perfil={perfil}
+						onAtencionHoy={sup?.onAtencionHoy}
+					/>
 
 					{sinCartera ? (
 						<div className="rounded-2xl border border-line-subtle bg-surface shadow-clay-raised">
@@ -813,32 +987,70 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 											onCambiarFiltros({ busqueda: e.target.value })
 										}
 									/>
-									<fieldset className="flex min-w-0 flex-wrap items-center gap-2">
-										<legend className="sr-only">Filtrar por gestión</legend>
-										{FILTROS_GESTION.map((g) => (
-											<FilterChip
-												key={g}
-												seleccionado={filtros.gestion === g}
-												onClick={() =>
-													onCambiarFiltros({
-														gestion: filtros.gestion === g ? null : g,
-													})
-												}
-											>
-												{GESTION_LABEL[g]}
-											</FilterChip>
-										))}
-									</fieldset>
-									{activos > 0 ? (
-										<div className="ml-auto flex items-center gap-2.5">
-											<span className="type-label-sm text-fg-tertiary">
-												{activos === 1
-													? "1 filtro activo"
-													: `${activos} filtros activos`}
-											</span>
-											<FilterBarButton onClick={props.onLimpiarFiltros}>
-												Limpiar filtros
-											</FilterBarButton>
+									{sup ? (
+										<>
+											<SelectorAsesor
+												asesores={sup.asesores}
+												asesorId={sup.asesorId}
+												onAsesor={sup.onAsesor}
+												cargando={sup.asesoresCargando}
+											/>
+											<ChipsRapidosSupervision
+												gestion={filtros.gestion}
+												onGestion={(g) => onCambiarFiltros({ gestion: g })}
+												segmento={sup.segmento}
+												onSegmento={sup.onSegmento}
+												conteos={sup.conteos}
+											/>
+											<BotonSegmentos
+												segmento={sup.segmento}
+												onSegmento={sup.onSegmento}
+												gestion={filtros.gestion}
+												onGestion={(g) => onCambiarFiltros({ gestion: g })}
+												conteos={sup.conteos}
+											/>
+										</>
+									) : (
+										<fieldset className="flex min-w-0 flex-wrap items-center gap-2">
+											<legend className="sr-only">Filtrar por gestión</legend>
+											{FILTROS_GESTION.map((g) => (
+												<FilterChip
+													key={g}
+													seleccionado={filtros.gestion === g}
+													onClick={() =>
+														onCambiarFiltros({
+															gestion: filtros.gestion === g ? null : g,
+														})
+													}
+												>
+													{GESTION_LABEL[g]}
+												</FilterChip>
+											))}
+										</fieldset>
+									)}
+									{activos > 0 || sup ? (
+										<div className="ml-auto flex flex-wrap items-center gap-2.5">
+											{activos > 0 ? (
+												<>
+													<span className="type-label-sm text-fg-tertiary">
+														{activos === 1
+															? "1 filtro activo"
+															: `${activos} filtros activos`}
+													</span>
+													<FilterBarButton onClick={props.onLimpiarFiltros}>
+														Limpiar filtros
+													</FilterBarButton>
+												</>
+											) : null}
+											{sup ? (
+												<Button size="sm" onClick={sup.onReasignar}>
+													<ArrowLeftRight aria-hidden />
+													Reasignar en bloque
+													{sup.seleccion.size > 0
+														? ` · ${formatoEntero.format(sup.seleccion.size)}`
+														: ""}
+												</Button>
+											) : null}
 										</div>
 									) : null}
 								</div>
@@ -849,6 +1061,22 @@ export function MiCarteraVista(props: MiCarteraVistaProps) {
 									bucketsVisibles={bucketsVisibles}
 									onCambiar={onCambiarFiltros}
 								/>
+
+								{sup ? (
+									<AvisoSegmento
+										segmento={sup.segmento}
+										gestion={filtros.gestion}
+										avisos={sup.avisos}
+										sinFila={sup.sinFila}
+										onQuitar={() => sup.onSegmento(null)}
+									/>
+								) : null}
+								{sup ? (
+									<BarraSeleccion
+										cantidad={sup.seleccion.size}
+										onLimpiar={sup.onLimpiarSeleccion}
+									/>
+								) : null}
 							</div>
 
 							{perfil ? (

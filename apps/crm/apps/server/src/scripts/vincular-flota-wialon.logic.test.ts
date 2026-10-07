@@ -396,6 +396,28 @@ describe("diagnosticar — vehículos duplicados que reclaman la misma unidad", 
 		expect(de(d, "nuevo")?.sugerencia).toContain("el más nuevo");
 		expect(de(d, "viejo")?.estado).toBe("duplicado_descartado");
 	});
+	test("comparten el crédito vigente pero uno tiene además un refinanciamiento: gana el más nuevo, no el prefijo", () => {
+		const d = diagnosticar(
+			[u(1, "C-123ABC - CON APAGADO")],
+			[
+				v("solo-viejo", {
+					placa: "C-123ABC",
+					conCredito: true,
+					creditos: [cr("01010214000001", "MOROSO")],
+				}),
+				v("con-refinanciamiento", {
+					placa: "P-123ABC",
+					conCredito: true,
+					creditos: [
+						cr("01010214000001", "MOROSO"),
+						cr("CRM-nuevo", "ACTIVO", "2026-05-01"),
+					],
+				}),
+			],
+		);
+		expect(de(d, "con-refinanciamiento")?.estado).toBe("propuesto");
+		expect(de(d, "solo-viejo")?.estado).toBe("duplicado_descartado");
+	});
 	test("dos créditos vigentes distintos del mismo origen: gana el de fecha más reciente", () => {
 		const d = diagnosticar(
 			[u(1, "P-111AAA")],

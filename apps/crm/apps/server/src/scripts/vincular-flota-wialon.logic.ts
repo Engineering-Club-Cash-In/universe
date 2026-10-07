@@ -422,11 +422,11 @@ function prefijoPlaca(placa: string | null): string | null {
 /**
  * Elige, entre vehículos que reclaman la misma unidad, cuál se queda con ella:
  * 1. El único con crédito vigente en cartera.
- * 2. Si varios tienen crédito vigente y es el MISMO crédito vigente (vehículo
- *    duplicado con el mismo SIFCO), el que tiene el prefijo de placa de la
- *    unidad ("C-558CBP" → el vehículo con placa C-…). Compartir un crédito
- *    viejo ya cancelado no cuenta: cada uno con su crédito vigente propio es
- *    un refinanciamiento y decide el más nuevo.
+ * 2. Si varios tienen crédito vigente y son EXACTAMENTE los mismos créditos
+ *    vigentes (vehículo duplicado con el mismo SIFCO), el que tiene el prefijo
+ *    de placa de la unidad ("C-558CBP" → el vehículo con placa C-…). Compartir
+ *    un crédito viejo ya cancelado no cuenta, y si uno tiene además un
+ *    refinanciamiento vigente que el otro no, tampoco: decide el más nuevo.
  * 3. Si ninguno tiene crédito vigente: el único con crédito, o el del crédito
  *    más reciente. Se marca para confirmar.
  * Un vehículo sin crédito nunca le gana a uno con crédito. Lo que quede
@@ -442,7 +442,9 @@ export function resolverDisputa(
 		if (!prefijo) return [];
 		return candidatos.filter((r) => prefijoPlaca(r.vehiculo.placa) === prefijo);
 	};
-	// ¿Todos comparten un mismo crédito? Solo cuentan los que pasan `cuenta`.
+	// ¿Es el mismo crédito en todos? Exige el MISMO conjunto de créditos (solo
+	// los que pasan `cuenta`): si uno además tiene un refinanciamiento que el
+	// otro no, no es el mismo crédito y decide el más nuevo, no el prefijo.
 	const mismoCredito = (
 		candidatos: ResultadoVehiculo[],
 		cuenta: (c: CreditoVehiculo) => boolean = () => true,
@@ -455,8 +457,12 @@ export function resolverDisputa(
 						.map((c) => c.sifco),
 				),
 		);
-		return [...(primero ?? [])].some((sifco) =>
-			resto.every((s) => s.has(sifco)),
+		return (
+			primero !== undefined &&
+			primero.size > 0 &&
+			resto.every(
+				(s) => s.size === primero.size && [...primero].every((x) => s.has(x)),
+			)
 		);
 	};
 

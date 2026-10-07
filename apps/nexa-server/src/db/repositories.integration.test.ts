@@ -1351,13 +1351,17 @@ integrationTest("migration 0006 marks today's manual review cases as notified: t
   if (!db || !pool) throw new Error("TEST_DATABASE_URL is required");
   const migrationsFolder = new URL("../../drizzle", import.meta.url).pathname;
   // Carpeta de migraciones hasta la 0005: la base como estaba antes del deploy.
+  // Se quitan la 0006 y las posteriores: drizzle solo aplica las que tienen un
+  // `when` mayor que la última aplicada, así que dejar la 0007 haría saltar la 0006.
   const before0006 = mkdtempSync(join(tmpdir(), "nexa-before-0006-"));
   try {
     cpSync(migrationsFolder, before0006, { recursive: true });
-    rmSync(join(before0006, "0006_alerta_correo.sql"));
     const journalPath = join(before0006, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-    journal.entries = journal.entries.filter((entry: { tag: string }) => entry.tag !== "0006_alerta_correo");
+    for (const entry of journal.entries as Array<{ idx: number; tag: string }>) {
+      if (entry.idx >= 6) rmSync(join(before0006, `${entry.tag}.sql`));
+    }
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 6);
     writeFileSync(journalPath, JSON.stringify(journal));
 
     await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public");

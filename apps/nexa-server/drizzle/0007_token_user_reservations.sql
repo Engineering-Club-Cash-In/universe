@@ -14,3 +14,11 @@ CREATE TABLE IF NOT EXISTS "nexa_token_user_reservations" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "nexa_token_user_reservations_identifier_unique" UNIQUE("identifier")
 );
+--> statement-breakpoint
+-- Renumerada de 0005 a 0007 al rebasear sobre el stack de pagos (0005 y 0006
+-- ya eran cartera_payment_ids y alerta_correo). Idempotente por si la versión
+-- anterior se aplicó a mano en algún ambiente: esa no traía `nexa_user_id` ni
+-- `token`, y el CREATE TABLE IF NOT EXISTS no los agrega a una tabla existente.
+ALTER TABLE "nexa_token_user_reservations" ADD COLUMN IF NOT EXISTS "nexa_user_id" integer;
+--> statement-breakpoint
+ALTER TABLE "nexa_token_user_reservations" ADD COLUMN IF NOT EXISTS "token" varchar(32);

@@ -1,6 +1,6 @@
 {
-  "id": "a5245cca-8f5b-4845-9002-7eb1f2a56d93",
-  "prevId": "0fe1ae2e-81a8-45a9-af1e-8535db99ee9e",
+  "id": "d523e474-caf3-4df5-b8e5-1e094e100d4b",
+  "prevId": "2aced5cb-0af9-4fa3-b2ca-2f6103d94cbd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -259,6 +259,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "cartera_payment_ids": {
+          "name": "cartera_payment_ids",
+          "type": "integer[]",
+          "primaryKey": false,
+          "notNull": false
+        },
         "failure_reason": {
           "name": "failure_reason",
           "type": "text",
@@ -311,6 +317,12 @@
         },
         "review_next_attempt_at": {
           "name": "review_next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alerta_correo_enviada_at": {
+          "name": "alerta_correo_enviada_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

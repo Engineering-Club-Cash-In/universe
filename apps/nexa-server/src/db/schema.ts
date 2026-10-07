@@ -50,12 +50,12 @@ export const nexaTokenUsers = pgTable("nexa_token_users", {
 }));
 
 // Reserva durable del identificador de un crédito antes de pedirle a Nexa el
-// token user (migración 0005): un reintento reusa el mismo identificador y
+// token user (migración 0007): un reintento reusa el mismo identificador y
 // Nexa lo rechaza como repetido en vez de crear un segundo usuario huérfano.
 export const nexaTokenUserReservations = pgTable("nexa_token_user_reservations", {
   creditoId: integer("credito_id").primaryKey(),
   identifier: varchar("identifier", { length: 9 }).notNull().unique(),
-  // Respuesta de Nexa guardada antes que nexa_token_users (ver migración 0005).
+  // Respuesta de Nexa guardada antes que nexa_token_users (ver migración 0007).
   nexaUserId: integer("nexa_user_id"),
   token: varchar("token", { length: 32 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

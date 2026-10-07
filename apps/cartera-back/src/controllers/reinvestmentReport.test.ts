@@ -8,6 +8,7 @@ import {
   assertReportReconciliation,
   assertLiquidationRowsReinvestmentIntegrity,
   buildLiquidationComposition,
+  ReinvestmentDataError,
   buildPurchaseTicketHistory,
   calculateActiveCapital,
   buildCubeNetInterest,
@@ -1128,4 +1129,18 @@ test("monto a cobrar no materializa cuotas_autoritativas (se referencia varias v
   );
 
   expect(query).toContain("cuotas_autoritativas AS NOT MATERIALIZED (");
+});
+
+test("liquidación que pagó + reinvirtió menos que el capital liquidado es error de datos", () => {
+  const input = {
+    totalCapital: "4574.49",
+    paidTotal: "4438.27",
+    reinvestedCapital: "0",
+    reinvestedRest: "0",
+    reinvestedTotal: "0",
+  };
+  expect(() => buildLiquidationComposition(input)).toThrow(ReinvestmentDataError);
+  expect(() => buildLiquidationComposition(input)).toThrow(
+    "Composición de liquidación inválida",
+  );
 });

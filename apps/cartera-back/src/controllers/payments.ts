@@ -18,7 +18,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray, type SQL } from "drizzle-orm";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
@@ -2600,6 +2600,12 @@ export function armarInversionistasPago(args: {
   return [...noCube, cubeRow];
 }
 
+// Escapa \, % y _ para que el texto del usuario se busque LITERAL dentro de un
+// LIKE/ILIKE (el escape por defecto de LIKE en Postgres es la barra invertida).
+export function escaparPatronLike(texto: string): string {
+  return texto.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
  * - Incluye los nuevos campos del pago: mora, otros, reserva, membresías, observaciones.
@@ -2640,36 +2646,42 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       THEN p.fecha_pago
       ELSE p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'
     END`;
+    // Constante del código (no viene del request): va como SQL, no como parámetro.
+    const fechaPagoLocal = sql.raw(fechaPagoLocalSQL);
 
-    // 🔹 Construcción dinámica de filtros
-    const whereClauses: string[] = [];
+    // 🔹 Construcción dinámica de filtros.
+    // 🔒 Todo valor que viene del request entra como PARÁMETRO (${valor} dentro
+    // de sql``), nunca pegado al texto del SQL: así no se puede inyectar.
+    const whereClauses: SQL[] = [];
 
     if (numeroCredito)
-      whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
-    if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
+      whereClauses.push(sql`c.numero_credito_sifco = ${numeroCredito}`);
+    // Búsqueda literal: %, _ y \ del usuario no actúan como comodines.
+    if (usuarioNombre)
+      whereClauses.push(sql`u.nombre ILIKE ${`%${escaparPatronLike(usuarioNombre)}%`}`);
 
     // 📅 Rango de fechas (zona Guatemala UTC-6)
     if (fechaInicio) {
       whereClauses.push(
-        `(${fechaPagoLocalSQL})::date >= '${fechaInicio}'::date`
+        sql`(${fechaPagoLocal})::date >= ${fechaInicio}::date`
       );
     }
     if (fechaFin) {
       whereClauses.push(
-        `(${fechaPagoLocalSQL})::date <= '${fechaFin}'::date`
+        sql`(${fechaPagoLocal})::date <= ${fechaFin}::date`
       );
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
-    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM ${fechaPagoLocalSQL}) = ${anio}`);
-    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM ${fechaPagoLocalSQL}) = ${mes}`);
-    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM ${fechaPagoLocalSQL}) = ${dia}`);
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(sql`EXTRACT(YEAR FROM ${fechaPagoLocal}) = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(sql`EXTRACT(MONTH FROM ${fechaPagoLocal}) = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(sql`EXTRACT(DAY FROM ${fechaPagoLocal}) = ${dia}`);
 
     if (validationStatus) {
-      whereClauses.push(`p.validation_status = '${validationStatus}'`);
+      whereClauses.push(sql`p.validation_status = ${validationStatus}`);
     } else {
       whereClauses.push(
-        `p.validation_status IN ('validated', 'pending' ,'reset', 'capital', 'capital_validated')`
+        sql`p.validation_status IN ('validated', 'pending' ,'reset', 'capital', 'capital_validated')`
       );
     }
 
@@ -2696,12 +2708,12 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         // Para CUBE, el rubro INTERES del desglose ES de CUBE aunque no haya fila pci
         // (pagos parciales en los que CUBE recibe 100% del interés vía desglose).
         // Incluir esos pagos con OR EXISTS sobre facturacion_desglose.
-        whereClauses.push(`(
+        whereClauses.push(sql`(
           EXISTS (
             SELECT 1
             FROM cartera.pagos_credito_inversionistas pci2
             WHERE pci2.pago_id = p.pago_id
-            AND pci2.inversionista_id = '${inversionistaId}'
+            AND pci2.inversionista_id = ${inversionistaId}
           )
           OR EXISTS (
             SELECT 1
@@ -2715,13 +2727,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         // donde este inversionista participa y NO está redirigido a CUBE — así el
         // filtro ve los mismos pagos cuyo detalle ya muestra su fila
         // (Codex P2, PR #1137; Codex P2, PR #1335).
-        whereClauses.push(`
+        whereClauses.push(sql`
           (
             EXISTS (
               SELECT 1
               FROM cartera.pagos_credito_inversionistas pci2
               WHERE pci2.pago_id = p.pago_id
-              AND pci2.inversionista_id = '${inversionistaId}'
+              AND pci2.inversionista_id = ${inversionistaId}
             )
             OR (
               -- Congelado: se mira el roster del día de la factura, no el de hoy.
@@ -2734,18 +2746,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
                               WHERE pci3.pago_id = p.pago_id)
               AND EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas_facturado f_flt
                           WHERE f_flt.pago_id = p.pago_id
-                            AND f_flt.inversionista_id = '${inversionistaId}'
+                            AND f_flt.inversionista_id = ${inversionistaId}
                             AND f_flt.redirigido_a_cube = false)
             )
             OR (
-              ${pagoSimulableSQL}
+              ${sql.raw(pagoSimulableSQL)}
               AND EXISTS (SELECT 1 FROM cartera.creditos_inversionistas ci_sim
                           WHERE ci_sim.credito_id = p.credito_id
-                            AND ci_sim.inversionista_id = '${inversionistaId}')
+                            AND ci_sim.inversionista_id = ${inversionistaId})
               AND NOT (c.bandera_reinversion = true AND EXISTS (
                     SELECT 1 FROM cartera.creditos_inversionistas_espejo esp_sim
                     WHERE esp_sim.credito_id = p.credito_id
-                      AND esp_sim.inversionista_id = '${inversionistaId}'
+                      AND esp_sim.inversionista_id = ${inversionistaId}
                       AND esp_sim.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
             )
           )
@@ -2754,53 +2766,53 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     }
 
     // 🏷️ Filtros de crédito
-    if (categoriaCredito) whereClauses.push(`u.categoria = '${categoriaCredito}'`);
-    if (tipoCredito) whereClauses.push(`c.tipo_credito = '${tipoCredito}'`);
-    if (formatoCredito) whereClauses.push(`c.formato_credito = '${formatoCredito}'`);
-    if (soloAplicados === true) whereClauses.push(`p.fecha_aplicado IS NOT NULL`);
-    if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
+    if (categoriaCredito) whereClauses.push(sql`u.categoria = ${categoriaCredito}`);
+    if (tipoCredito) whereClauses.push(sql`c.tipo_credito = ${tipoCredito}`);
+    if (formatoCredito) whereClauses.push(sql`c.formato_credito = ${formatoCredito}`);
+    if (soloAplicados === true) whereClauses.push(sql`p.fecha_aplicado IS NOT NULL`);
+    if (soloAplicados === false) whereClauses.push(sql`p.fecha_aplicado IS NULL`);
     if (fechaAplicado) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+        sql`(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fechaAplicado}::date`
       );
     }
     // 📅 Rango de fecha_aplicado (zona Guatemala). Inclusivo en ambos extremos.
     // Se puede usar combinado o por separado con fechaAplicado (exacta).
     if (fechaAplicadoInicio) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaAplicadoInicio}'::date`
+        sql`(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= ${fechaAplicadoInicio}::date`
       );
     }
     if (fechaAplicadoFin) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaAplicadoFin}'::date`
+        sql`(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= ${fechaAplicadoFin}::date`
       );
     }
     if (fechaBoleta) {
       whereClauses.push(
-        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = '${fechaBoleta}'::date`
+        sql`(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = ${fechaBoleta}::date`
       );
     }
     // 📅 Rango de fecha_boleta (zona Guatemala). Inclusivo en ambos extremos.
     // Se puede usar combinado o por separado con fechaBoleta (exacta).
     if (fechaBoletaInicio) {
       whereClauses.push(
-        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date >= '${fechaBoletaInicio}'::date`
+        sql`(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date >= ${fechaBoletaInicio}::date`
       );
     }
     if (fechaBoletaFin) {
       whereClauses.push(
-        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date <= '${fechaBoletaFin}'::date`
+        sql`(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date <= ${fechaBoletaFin}::date`
       );
     }
 
     // ✅ Créditos activos y cancelados
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')`
+      sql`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')`
     );
     const whereSQL = whereClauses.length
-      ? `WHERE ${whereClauses.join(" AND ")}`
-      : "";
+      ? sql`WHERE ${sql.join(whereClauses, sql` AND `)}`
+      : sql``;
 
     // 🔢 Query para contar el total de registros (SIN LIMIT)
     const countQuery = sql`
@@ -2808,7 +2820,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      ${sql.raw(whereSQL)}
+      ${whereSQL}
     `;
 
     const countResult = await db.execute(countQuery);
@@ -2980,7 +2992,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       LEFT JOIN cartera.bancos b ON b.banco_id = p.banco_id
       LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id
       LEFT JOIN cartera.asesores ase ON ase.asesor_id = c.asesor_id
-      ${sql.raw(whereSQL)}
+      ${whereSQL}
       ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
     `;
@@ -3321,8 +3333,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       LEFT JOIN cartera.creditos_inversionistas ci
         ON ci.credito_id = pci.credito_id
         AND ci.inversionista_id = pci.inversionista_id
-      ${sql.raw(whereSQL)}
-      ${sql.raw(inversionistaId ? `AND pci.inversionista_id = '${inversionistaId}'` : '')}
+      ${whereSQL}
+      ${inversionistaId ? sql`AND pci.inversionista_id = ${inversionistaId}` : sql``}
       GROUP BY i.inversionista_id, i.nombre, i.emite_factura
       ORDER BY i.nombre
     `;
@@ -3359,7 +3371,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         FROM cartera.pagos_credito p
         LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
         LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-        ${sql.raw(whereSQL)}
+        ${whereSQL}
         AND ${sql.raw(pagoSimulableSQL)}
       ),
       -- Base de los pagos YA congelados. NO usa pagoSimulableSQL a propósito: ese
@@ -3373,7 +3385,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         FROM cartera.pagos_credito p
         LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
         LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-        ${sql.raw(whereSQL)}
+        ${whereSQL}
         AND p.validation_status = 'validated'
         AND NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci_c
                         WHERE pci_c.pago_id = p.pago_id)
@@ -3401,7 +3413,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         JOIN cartera.inversionistas i ON i.inversionista_id = f.inversionista_id
         WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
           AND f.redirigido_a_cube = false
-          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND f.inversionista_id = '${inversionistaId}'` : "")}
+          ${inversionistaId && Number(inversionistaId) !== CUBE_ID ? sql`AND f.inversionista_id = ${inversionistaId}` : sql``}
         GROUP BY f.inversionista_id, i.nombre, i.emite_factura
       ),
       -- Pagos SIN congelado (anteriores al sellado): fórmula de siempre.
@@ -3427,7 +3439,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
                 WHERE esp.credito_id = pf.credito_id
                   AND esp.inversionista_id = ci.inversionista_id
                   AND esp.status IN ('pendiente_reinversion','pendiente_compra_cartera')))
-          ${sql.raw(inversionistaId && Number(inversionistaId) !== CUBE_ID ? `AND ci.inversionista_id = '${inversionistaId}'` : "")}
+          ${inversionistaId && Number(inversionistaId) !== CUBE_ID ? sql`AND ci.inversionista_id = ${inversionistaId}` : sql``}
         GROUP BY ci.inversionista_id, i.nombre, i.emite_factura
       )
       SELECT t.inv_id AS "inversionistaId",
@@ -3500,7 +3512,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           FROM cartera.pagos_credito p
           INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
           INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-          ${sql.raw(whereSQL)}
+          ${whereSQL}
         )
         SELECT
           COALESCE((SELECT SUM(fd.monto_total - fd.monto_iva)

@@ -1282,6 +1282,95 @@ test("workbook avisa en Metadatos solo cuando la mora del mes no es la oficial",
 	]);
 });
 
+test("workbook solo formatea como total y como Q lo que la hoja declara", () => {
+	const data = response();
+	const investor = (inversionista_id: number, nombre: string) => ({
+		inversionista_id,
+		nombre,
+		tipo_reinversion: "reinversion_capital" as const,
+		reinversion_capital: "0.00",
+		reinversion_interes: "0.00",
+		reinversion: "0.00",
+		a_recibir: "0.00",
+		capital_activo: "1000.00",
+		composicion: data.porTipo.reinversion_capital.composicion,
+	});
+	// Un inversionista que se llama "Total" y queda de último es un dato más.
+	data.porInversionista = [investor(1, "Ana"), investor(2, "Total")];
+	const [cobranzaRow] = fillMissingMontoACobrarPeriods(
+		[
+			{
+				bucket: "2026-07-01",
+				cuotas_count: 2,
+				total_cuota: "100.00",
+				total_interes: "10.00",
+				total_iva: "1.20",
+				total_seguro: "3.00",
+				total_gps: "4.00",
+				total_membresias: "5.00",
+				total_mora: "6.00",
+				mora_count: 1,
+				total_credits: 2,
+				credits_con_mora: 1,
+				acum_total_cuota: "100.00",
+				acum_total_interes: "10.00",
+				acum_total_iva: "1.20",
+				acum_total_seguro: "3.00",
+				acum_total_gps: "4.00",
+				acum_total_membresias: "5.00",
+				total_interes_inversionista: "7.00",
+				acum_total_interes_inversionista: "7.00",
+				capital_inv_participacion_actual: "40.00",
+				capital_cube_participacion_actual: "60.00",
+				interes_iva_inv_participacion_actual: "4.48",
+				interes_iva_cube_participacion_actual: "6.72",
+				acum_capital_inv_participacion_actual: "40.00",
+				acum_capital_cube_participacion_actual: "60.00",
+				acum_interes_iva_inv_participacion_actual: "4.48",
+				acum_interes_iva_cube_participacion_actual: "6.72",
+				creditos_participacion_invalida: 0,
+				cuotas_participacion_invalida: 0,
+				participacion_actual: true,
+			},
+		],
+		"dia",
+		"2026-07-01",
+		"2026-07-01",
+	);
+	if (!cobranzaRow) throw new Error("Falta el corte de Cobranza");
+	const workbook = buildAdminReportsWorkbook({
+		cobranza: { acumulado: false, rows: [cobranzaRow] },
+		reinvestment: data,
+		metadata: {
+			cobranzaPeriodo: "Julio 2026",
+			inversionPeriodo: "Julio 2026",
+			generatedAt: "2026-08-27T12:00:00.000Z",
+		},
+	});
+	type StyledCell = XLSX.CellObject & { s?: { font?: { bold?: boolean } } };
+	const cell = (sheet: string, ref: string) =>
+		workbook.Sheets[sheet]?.[ref] as StyledCell | undefined;
+
+	expect(workbook.Sheets.Inversionistas?.["!autofilter"]?.ref).toBe("A1:K3");
+	expect(cell("Inversionistas", "A3")?.v).toBe("Total");
+	expect(cell("Inversionistas", "A3")?.s?.font?.bold).toBe(false);
+	expect(cell("Inversionistas", "K3")?.z).toBe('"Q"#,##0.00;[Red]-"Q"#,##0.00');
+
+	// El total agregado de Cobranza sí: negrita y fuera del filtro.
+	expect(cell("Cobranza", "A3")?.v).toBe("Total");
+	expect(cell("Cobranza", "A3")?.s?.font?.bold).toBe(true);
+	expect(workbook.Sheets.Cobranza?.["!autofilter"]?.ref).toBe("A1:K2");
+
+	// Metadatos no es una hoja de montos: la versión de contrato no es Q.
+	const metadatos = workbook.Sheets.Metadatos;
+	if (!metadatos) throw new Error("Falta la hoja Metadatos");
+	const version = XLSX.utils
+		.sheet_to_json<{ Campo: string; Valor: unknown }>(metadatos)
+		.findIndex((row) => row.Campo === "Contrato Inversión");
+	expect(cell("Metadatos", `B${version + 2}`)?.v).toBe(4);
+	expect(cell("Metadatos", `B${version + 2}`)?.z).toBeUndefined();
+});
+
 test("workbook falla cerrado sin contrato conciliado y completo", () => {
 	expect(() =>
 		buildAdminReportsWorkbook({

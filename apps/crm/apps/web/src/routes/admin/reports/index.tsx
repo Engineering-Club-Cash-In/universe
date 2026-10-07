@@ -85,7 +85,10 @@ import {
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
 } from "@/lib/reports/monto-a-cobrar";
-import { buildAdminReportsWorkbook } from "@/lib/reports/report-workbook";
+import {
+	buildAdminReportsWorkbook,
+	writeAdminReportsWorkbook,
+} from "@/lib/reports/report-workbook";
 import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
@@ -359,6 +362,7 @@ function RouteComponent() {
 	}));
 	const [closedCreditsPage, setClosedCreditsPage] = useState(1);
 	const [isExportingCerrados, setIsExportingCerrados] = useState(false);
+	const [isExportingAdminReports, setIsExportingAdminReports] = useState(false);
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
@@ -817,15 +821,29 @@ function RouteComponent() {
 			setIsExportingCerrados(false);
 		}
 	};
-	const exportAdminReportsExcel = () => {
+	const exportAdminReportsExcel = async () => {
+		// Exportar espera el import de xlsx-js-style: sin esto, doble clic baja dos archivos.
+		if (isExportingAdminReports) return;
 		if (officialMoraPending) {
 			toast.error("Espera a que la mora oficial del mes termine de cargar.");
+			return;
+		}
+		// Sin esto, una query que ya falló se reportaba como "todavía cargando".
+		if (!montoCobrarData && montoCobrarQuery.isError) {
+			toast.error("No fue posible cargar Cobranza. Intenta de nuevo.");
+			void montoCobrarQuery.refetch();
+			return;
+		}
+		if (!reinversionData && reinversionLiquidacionesQuery.isError) {
+			toast.error("No fue posible cargar Inversión. Intenta de nuevo.");
+			void reinversionLiquidacionesQuery.refetch();
 			return;
 		}
 		if (!montoCobrarData || !reinversionData) {
 			toast.error("Espera a que Cobranza e Inversión terminen de cargar.");
 			return;
 		}
+		setIsExportingAdminReports(true);
 		try {
 			const workbook = buildAdminReportsWorkbook({
 				cobranza: {
@@ -843,7 +861,7 @@ function RouteComponent() {
 					}),
 				},
 			});
-			XLSX.writeFile(
+			await writeAdminReportsWorkbook(
 				workbook,
 				`reportes-admin-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
 			);
@@ -856,6 +874,8 @@ function RouteComponent() {
 			toast.error(
 				error instanceof Error ? error.message : "No fue posible exportar.",
 			);
+		} finally {
+			setIsExportingAdminReports(false);
 		}
 	};
 
@@ -1351,9 +1371,13 @@ function RouteComponent() {
 											<Button
 												variant="outline"
 												onClick={exportAdminReportsExcel}
-												disabled={officialMoraPending}
+												disabled={officialMoraPending || isExportingAdminReports}
 											>
-												<Download className="mr-2 h-4 w-4" />
+												{isExportingAdminReports ? (
+													<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+												) : (
+													<Download className="mr-2 h-4 w-4" />
+												)}
 												Exportar Excel
 											</Button>
 										)}
@@ -1976,6 +2000,7 @@ function RouteComponent() {
 											onExportInvestors={
 												canAccessCobranzaReport ? exportAdminReportsExcel : undefined
 											}
+											isExporting={isExportingAdminReports}
 										/>
 									) : (
 										<InvestmentProjection

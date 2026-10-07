@@ -518,9 +518,26 @@ writeFileSync(
 	csv([...encabezadoPlan, "resultado", "error"], []),
 );
 const guardadosHastaAhora: ItemVinculo[] = [];
+// Vínculos que terminaron en error: pudieron quedar escritos igual (la base
+// confirma y se cae la conexión antes de que llegue el OK), así que se quedan
+// en la reversa. Revertir uno que no se escribió no toca nada.
+const inciertos: ItemVinculo[] = [];
 // Temporal + rename: si el proceso muere a mitad de la escritura del archivo
 // queda la reversa anterior completa, nunca un archivo truncado.
-const escribirReversa = (items: ItemVinculo[], nota = "") => {
+const escribirReversa = (enCurso?: ItemVinculo) => {
+	const items = [
+		...guardadosHastaAhora,
+		...inciertos,
+		...(enCurso ? [enCurso] : []),
+	];
+	if (items.length === 0) {
+		rmSync(rutaReversa, { force: true });
+		return;
+	}
+	const dudosos = inciertos.length + (enCurso ? 1 : 0);
+	const nota = dudosos
+		? `-- Incluye ${dudosos} vínculo(s) que pudieron no guardarse (en curso al cortarse o\n-- terminados en error): el UPDATE puede decir hasta ${dudosos} menos de lo esperado.\n`
+		: "";
 	writeFileSync(`${rutaReversa}.tmp`, nota + sqlReversa(items, inicio));
 	renameSync(`${rutaReversa}.tmp`, rutaReversa);
 };
@@ -528,11 +545,7 @@ const escritorRegistrado = conRegistro(escritor, {
 	// La reversa incluye el vínculo en curso ANTES de escribirlo: si el proceso
 	// muere justo después del commit, igual queda cubierto. Si al final no se
 	// escribió, revertirlo no toca nada (exige la misma unidad y marcador).
-	antes: (item) =>
-		escribirReversa(
-			[...guardadosHastaAhora, item],
-			"-- Incluye el vínculo que se estaba escribiendo al cortarse: si no llegó a\n-- guardarse, el UPDATE dirá uno menos que lo esperado.\n",
-		),
+	antes: (item) => escribirReversa(item),
 	despues: (item, resultado) => {
 		const fila =
 			typeof resultado === "string"
@@ -541,8 +554,8 @@ const escritorRegistrado = conRegistro(escritor, {
 		// Primero la reversa (lo que protege la base), después el CSV: si el
 		// CSV falla, el vínculo ya quedó en la reversa y la corrida se detiene.
 		if (resultado === "guardado") guardadosHastaAhora.push(item);
-		if (guardadosHastaAhora.length > 0) escribirReversa(guardadosHastaAhora);
-		else rmSync(rutaReversa, { force: true });
+		else if (typeof resultado !== "string") inciertos.push(item);
+		escribirReversa();
 		appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
 	},
 });
@@ -560,11 +573,15 @@ for (const [r, n] of contar(res.omitidos.map((o) => o.resultado)))
 console.log(`  errores ${res.errores.length}`);
 for (const { item, error } of res.errores.slice(0, 5))
 	console.log(`    ${item.vehicleId} → ${item.unitId}: ${error}`);
+if (inciertos.length)
+	console.log(
+		`  ${inciertos.length} con error quedaron en la reversa por si alcanzaron a guardarse; un diagnóstico nuevo muestra si quedaron vinculados.`,
+	);
 if (res.abortado)
 	console.log(
 		`  ABORTADO: ${res.pendientes} sin intentar. la reversa cubre todo lo que alcanzó a confirmarse; corra de nuevo cuando se resuelva.`,
 	);
 console.log(
-	`\n${rutaResultado}${guardadosHastaAhora.length ? ` · reversa: ${rutaReversa}` : ""}`,
+	`\n${rutaResultado}${existsSync(rutaReversa) ? ` · reversa: ${rutaReversa}` : ""}`,
 );
 process.exit(res.errores.length > 0 ? 1 : 0);

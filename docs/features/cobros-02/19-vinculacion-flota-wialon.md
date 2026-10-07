@@ -154,7 +154,7 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 | `unidades.csv` | Un renglón por unidad de Wialon: si quedó vinculada, propuesta, en revisión o sin vehículo |
 | `plan.csv` | Lo que se escribiría (o se escribió) y lo excluido, con el motivo |
 | `resultado-<hora>.csv` | Solo con `--aplicar`, uno por corrida: qué pasó con cada vínculo. Se agrega un renglón después de cada escritura |
-| `reversa-<hora>.sql` | Solo con `--aplicar`, uno por corrida (una tanda de prueba con `--max` y después el resto dejan dos, sin pisarse): deshace exactamente lo escrito en esa corrida. Se reescribe completo (temporal + rename, nunca queda truncado) antes y después de cada vínculo: antes de escribir ya incluye el vínculo en curso, así que si el proceso se corta revierte todo lo que alcanzó a confirmarse. Si el corte fue antes del commit, el `UPDATE` dice uno menos y el archivo lo avisa |
+| `reversa-<hora>.sql` | Solo con `--aplicar`, uno por corrida (una tanda de prueba con `--max` y después el resto dejan dos, sin pisarse): deshace exactamente lo escrito en esa corrida. Se reescribe completo (temporal + rename, nunca queda truncado) antes y después de cada vínculo: antes de escribir ya incluye el vínculo en curso, así que si el proceso se corta revierte todo lo que alcanzó a confirmarse. Un vínculo que termina en error también se queda en la reversa, porque pudo guardarse igual (la base confirma y se cae la conexión antes de que llegue el OK). Revertir uno que no se guardó no toca nada; el archivo avisa cuántos son dudosos y que el `UPDATE` puede decir hasta esa cantidad menos |
 
 ### Garantías al escribir
 

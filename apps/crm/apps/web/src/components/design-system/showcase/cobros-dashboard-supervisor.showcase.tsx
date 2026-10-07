@@ -53,7 +53,7 @@ const APROBACIONES: FilaAprobacion[] = [
 		credito: "01010214147120",
 		asesor: "A. Díaz",
 		solicitadoEn: haceMin(60 * 50),
-		destino: { to: "/cobros/recuperaciones" },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "recuperacion" } },
 	},
 	{
 		id: "2",
@@ -62,7 +62,7 @@ const APROBACIONES: FilaAprobacion[] = [
 		credito: "01010214147730",
 		asesor: "C. Ramírez",
 		solicitadoEn: haceMin(60 * 26),
-		destino: { to: "/cobros/inmovilizaciones" },
+		destino: { to: "/cobros/solicitudes" },
 	},
 	{
 		id: "3",
@@ -71,7 +71,7 @@ const APROBACIONES: FilaAprobacion[] = [
 		credito: "01010214148972",
 		asesor: "L. Morales",
 		solicitadoEn: haceMin(60 * 5),
-		destino: { to: "/cobros/inmovilizaciones" },
+		destino: { to: "/cobros/solicitudes" },
 	},
 	{
 		id: "4",
@@ -80,7 +80,7 @@ const APROBACIONES: FilaAprobacion[] = [
 		credito: "01010214148215",
 		asesor: "J. Pérez",
 		solicitadoEn: haceMin(60 * 3),
-		destino: { to: "/cobros/convenios" },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "convenio" } },
 	},
 	{
 		id: "5",
@@ -89,7 +89,7 @@ const APROBACIONES: FilaAprobacion[] = [
 		credito: "01010214146980",
 		asesor: "M. Gómez",
 		solicitadoEn: haceMin(40),
-		destino: { to: "/cobros/convenios" },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "convenio" } },
 	},
 ];
 
@@ -98,19 +98,19 @@ const BANDEJAS = [
 		clave: "convenios",
 		etiqueta: "Convenios",
 		cantidad: 5,
-		destino: { to: "/cobros/convenios" },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "convenio" } },
 	},
 	{
 		clave: "recuperaciones",
 		etiqueta: "Recuperación del vehículo",
 		cantidad: 1,
-		destino: { to: "/cobros/recuperaciones" },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "recuperacion" } },
 	},
 	{
 		clave: "inmovilizaciones",
 		etiqueta: "Apagado y reactivación",
 		cantidad: 2,
-		destino: { to: "/cobros/inmovilizaciones" },
+		destino: { to: "/cobros/solicitudes" },
 	},
 ];
 
@@ -149,7 +149,7 @@ const EQUIPO: FilaEquipo[] = [
 			: (agenda as number) >= 60
 				? "atencion"
 				: "riesgo",
-	destino: cartera({ asesor: String(i + 1) }),
+	destino: { to: `/cobros/equipo/${i + 1}` },
 }));
 
 /** Lo mismo con S4 (contactos hoy, meta y rescate) como llegará del backend. */
@@ -210,7 +210,10 @@ const ITEMS_HOY = [
 		valor: 1,
 		etiqueta: "Asesores ausentes",
 		info: "Asesores con una cobertura vigente hoy (vacaciones o permiso).",
-		destino: { to: "/cobros/reasignaciones" },
+		destino: {
+			to: "/cobros/equipo",
+			search: { tab: "asignacion", seccion: "coberturas" },
+		},
 	},
 ];
 
@@ -280,7 +283,7 @@ const BASE: DashboardSupervisorVistaProps = {
 		cargando: false,
 		error: false,
 		onReintentar: nada,
-		verTodas: { to: "/cobros/convenios" },
+		verTodas: { to: "/cobros/solicitudes" },
 		bandejas: BANDEJAS,
 		ahora: AHORA,
 	},
@@ -297,7 +300,7 @@ const BASE: DashboardSupervisorVistaProps = {
 		cargando: false,
 		error: false,
 		onReintentar: nada,
-		verEquipo: { to: "/cobros/carga" },
+		verEquipo: { to: "/cobros/equipo" },
 		fechaAgenda: "06/10/2026",
 	},
 };

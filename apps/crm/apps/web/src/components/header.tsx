@@ -10,31 +10,26 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
+	ClipboardCheck,
 	Database,
 	Files,
 	FileText,
-	Gauge,
 	Gavel,
 	Handshake,
 	Landmark,
 	Layers,
 	LayoutDashboard,
-	Lock,
 	MapPin,
 	Menu,
 	MessageSquare,
-	Moon,
 	Palette,
 	Scale,
-	ScrollText,
 	Settings,
 	ShieldBan,
 	ShieldCheck,
-	Sunrise,
 	Target,
 	TrendingUp,
 	UserCircle,
-	UserCog,
 	Users,
 	Wallet,
 } from "lucide-react";
@@ -325,7 +320,12 @@ export default function Header() {
 										    que absorbió la Cola del día y las Alertas de promesas y de
 										    convenios como segmentos: esas páginas salieron del menú y
 										    sus rutas redirigen a la cartera con el filtro. "Agenda del
-										    día" sigue fuera del menú; su ruta vive (/cobros/agenda). */}
+										    día" sigue fuera del menú; su ruta vive (/cobros/agenda).
+										    Fase 2 del supervisor: «Mi equipo» une Apertura, Cierre,
+										    Carga, Traslados y coberturas e Historial de agendas;
+										    «Solicitudes» une Apagado y reactivación y Recuperación del
+										    vehículo. Sus rutas viejas redirigen a la pestaña que
+										    corresponde. */}
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/cartera" className="cursor-pointer">
 												<Wallet className="mr-2 h-4 w-4" />
@@ -337,21 +337,27 @@ export default function Header() {
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
 												<DropdownMenuItem asChild>
+													<Link to="/cobros/equipo" className="cursor-pointer">
+														<Users className="mr-2 h-4 w-4" />
+														Mi equipo
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/solicitudes"
+														className="cursor-pointer"
+													>
+														<ClipboardCheck className="mr-2 h-4 w-4" />
+														Solicitudes
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
 													<Link
 														to="/cobros/convenios"
 														className="cursor-pointer"
 													>
 														<Handshake className="mr-2 h-4 w-4" />
 														Convenios
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/historial-agendas"
-														className="cursor-pointer"
-													>
-														<ScrollText className="mr-2 h-4 w-4" />
-														Historial de agendas
 													</Link>
 												</DropdownMenuItem>
 											</>
@@ -380,77 +386,15 @@ export default function Header() {
 										<>
 											<DropdownMenuSeparator />
 											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
-												Supervisión
+												Configuración y análisis
 											</DropdownMenuLabel>
 											<DropdownMenuGroup>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/apertura"
-														className="cursor-pointer"
-													>
-														<Sunrise className="mr-2 h-4 w-4" />
-														Apertura del día
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link to="/cobros/cierre" className="cursor-pointer">
-														<Moon className="mr-2 h-4 w-4" />
-														Cierre Diario
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link to="/cobros/carga" className="cursor-pointer">
-														<Gauge className="mr-2 h-4 w-4" />
-														Carga de Cuentas
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/reasignaciones"
-														className="cursor-pointer"
-													>
-														<UserCog className="mr-2 h-4 w-4" />
-														Traslados y coberturas
-													</Link>
-												</DropdownMenuItem>
 												<DropdownMenuItem asChild>
 													<Link to="/cobros/metas" className="cursor-pointer">
 														<Target className="mr-2 h-4 w-4" />
 														Metas de Mora
 													</Link>
 												</DropdownMenuItem>
-											</DropdownMenuGroup>
-											{/* Lo que los asesores piden y el supervisor aprueba. Cada
-											    solicitud tiene su pantalla: son flujos distintos. */}
-											<DropdownMenuSeparator />
-											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
-												Solicitudes
-											</DropdownMenuLabel>
-											<DropdownMenuGroup>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/inmovilizaciones"
-														className="cursor-pointer"
-													>
-														<Lock className="mr-2 h-4 w-4" />
-														Apagado y reactivación de unidades
-													</Link>
-												</DropdownMenuItem>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/recuperaciones"
-														className="cursor-pointer"
-													>
-														<Car className="mr-2 h-4 w-4" />
-														Recuperación del vehículo
-													</Link>
-												</DropdownMenuItem>
-											</DropdownMenuGroup>
-											<DropdownMenuSeparator />
-											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
-												Configuración y análisis
-											</DropdownMenuLabel>
-											<DropdownMenuGroup>
 												<DropdownMenuItem asChild>
 													<Link
 														to="/cobros/reduccion"
@@ -870,19 +814,23 @@ function MobileNav({
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
+												<Link to="/cobros/equipo" className={MOBILE_LINK_CLASS}>
+													<Users />
+													Mi equipo
+												</Link>
+												<Link
+													to="/cobros/solicitudes"
+													className={MOBILE_LINK_CLASS}
+												>
+													<ClipboardCheck />
+													Solicitudes
+												</Link>
 												<Link
 													to="/cobros/convenios"
 													className={MOBILE_LINK_CLASS}
 												>
 													<Handshake />
 													Convenios
-												</Link>
-												<Link
-													to="/cobros/historial-agendas"
-													className={MOBILE_LINK_CLASS}
-												>
-													<ScrollText />
-													Historial de agendas
 												</Link>
 											</>
 										)}
@@ -901,51 +849,13 @@ function MobileNav({
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
-												<MobileGroupLabel>Supervisión</MobileGroupLabel>
-												<Link
-													to="/cobros/apertura"
-													className={MOBILE_LINK_CLASS}
-												>
-													<Sunrise />
-													Apertura del día
-												</Link>
-												<Link to="/cobros/cierre" className={MOBILE_LINK_CLASS}>
-													<Moon />
-													Cierre Diario
-												</Link>
-												<Link to="/cobros/carga" className={MOBILE_LINK_CLASS}>
-													<Gauge />
-													Carga de Cuentas
-												</Link>
-												<Link
-													to="/cobros/reasignaciones"
-													className={MOBILE_LINK_CLASS}
-												>
-													<UserCog />
-													Traslados y coberturas
-												</Link>
+												<MobileGroupLabel>
+													Configuración y análisis
+												</MobileGroupLabel>
 												<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
 													<Target />
 													Metas de Mora
 												</Link>
-												<MobileGroupLabel>Solicitudes</MobileGroupLabel>
-												<Link
-													to="/cobros/inmovilizaciones"
-													className={MOBILE_LINK_CLASS}
-												>
-													<Lock />
-													Apagado y reactivación de unidades
-												</Link>
-												<Link
-													to="/cobros/recuperaciones"
-													className={MOBILE_LINK_CLASS}
-												>
-													<Car />
-													Recuperación del vehículo
-												</Link>
-												<MobileGroupLabel>
-													Configuración y análisis
-												</MobileGroupLabel>
 												<Link
 													to="/cobros/reduccion"
 													className={MOBILE_LINK_CLASS}

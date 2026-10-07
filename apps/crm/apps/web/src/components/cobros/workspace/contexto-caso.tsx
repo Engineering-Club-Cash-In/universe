@@ -99,7 +99,6 @@ import { inicioDelDiaGT } from "@/lib/cobros/promesa-activa";
 import {
 	abreviarCreditosCrm,
 	creditoCorto,
-	esCuotaDelPlan,
 	fechaLargaGT,
 	formatoQuetzales as fmtQ,
 	hrefTelefono,
@@ -1669,6 +1668,7 @@ export function ContextoCaso({
 	onAbrirFicha,
 	onCartaNotarial,
 	tabInicial,
+	soloLectura = false,
 	className,
 }: {
 	caso: CasoWorkspace;
@@ -1676,6 +1676,11 @@ export function ContextoCaso({
 	/** Abre el registro de la carta notarial (lo maneja el Workspace). */
 	onCartaNotarial?: () => void;
 	tabInicial?: TabContexto;
+	/**
+	 * Solo consulta (Espacio de aprobación del supervisor): sin «Enviar por
+	 * WhatsApp» ni carta notarial. El Workspace no lo pasa.
+	 */
+	soloLectura?: boolean;
 	className?: string;
 }) {
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] =
@@ -1733,9 +1738,11 @@ export function ContextoCaso({
 	}
 
 	const props = propsContextoDeCaso(caso, {
-		onEnviarEstadoCuenta: () => setConfirmarEstadoCuenta(true),
+		onEnviarEstadoCuenta: soloLectura
+			? undefined
+			: () => setConfirmarEstadoCuenta(true),
 		enviandoEstadoCuenta: enviarEstadoCuenta.isPending,
-		onCartaNotarial,
+		onCartaNotarial: soloLectura ? undefined : onCartaNotarial,
 		onAbrirFicha,
 	});
 

@@ -11,15 +11,12 @@ import {
 import { useMemo, useState } from "react";
 import { saludoPorHora } from "@/components/cobros/asesor/dashboard-asesor-vista";
 import { MisTareasB3 } from "@/components/cobros/mis-tareas-b3";
+import { aprobacionesParaDashboard } from "@/components/cobros/solicitudes/normalizar";
 import type { Bucket } from "@/components/ds/badges";
 import { EmptyState } from "@/components/ui/empty-state";
 import { authClient } from "@/lib/auth-client";
-import { PERMISSIONS } from "@/lib/roles";
+import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc, orpcAparte } from "@/utils/orpc";
-import type {
-	BandejaAprobacion,
-	FilaAprobacion,
-} from "./aprobaciones-pendientes";
 import type { SegmentoBucketEquipo } from "./cartera-equipo-bucket";
 import { DashboardSupervisorVista } from "./dashboard-supervisor-vista";
 import type { Destino } from "./destino";
@@ -38,6 +35,7 @@ import type { ItemPendiente } from "./pendientes-hoy";
  */
 
 const CARTERA = "/cobros/cartera";
+const SOLICITUDES = "/cobros/solicitudes";
 const BUCKETS: Bucket[] = ["B0", "B1", "B2", "B3", "B4", "B5"];
 const PAGALO_PENDIENTES = [
 	"LINKS_PENDING",
@@ -54,32 +52,6 @@ type ResumenHistorial = { total: number; efectivos: number };
 
 type CierreFila = { bajaron: number; subieron: number };
 
-type ConvenioPendiente = {
-	convenio_id: number;
-	numero_credito_sifco: string;
-	cliente_nombre: string;
-	asesor_nombre: string | null;
-	fecha_convenio: string;
-};
-
-type Recuperacion = {
-	id: string;
-	numeroSifco: string | null;
-	cliente: string | null;
-	solicitante: string | null;
-	solicitadoAt: string | Date | null;
-};
-
-type Inmovilizacion = {
-	id: string;
-	numeroCreditoSifco: string;
-	accion: string;
-	estado: string;
-	solicitadoAt: string | Date | null;
-	solicitanteNombre: string | null;
-	clienteNombre: string | null;
-};
-
 type Cobertura = {
 	titularId: string;
 	motivo: string;
@@ -95,11 +67,6 @@ type AsesorPool = {
 };
 
 type AgendaItem = { asesorId: string; porcentaje: number };
-
-function aIso(v: string | Date | null | undefined) {
-	if (!v) return null;
-	return typeof v === "string" ? v : v.toISOString();
-}
 
 function estadoPorAgenda(pct: number | null): EstadoAsesor {
 	if (pct === null) return "sin_dato";
@@ -171,16 +138,19 @@ export function DashboardSupervisor() {
 	const orpcSinTipo = orpc as unknown as {
 		getHistorialAgendasResumen: typeof orpc.getCobrosDashboardStats;
 	};
+	// Solo gestiones de asesores (rol cobros): las que registran admins o
+	// supervisores no son del equipo y desalinearían el KPI con la tabla Equipo.
+	const ROLES_EQUIPO = [ROLES.COBROS];
 	const contactabilidadQuery = useQuery({
 		...orpcSinTipo.getHistorialAgendasResumen.queryOptions({
-			input: rangos.actual as never,
+			input: { ...rangos.actual, roles: ROLES_EQUIPO } as never,
 		}),
 		enabled: habilitado,
 		placeholderData: keepPreviousData,
 	});
 	const contactabilidadAntQuery = useQuery({
 		...orpcSinTipo.getHistorialAgendasResumen.queryOptions({
-			input: rangos.anterior as never,
+			input: { ...rangos.anterior, roles: ROLES_EQUIPO } as never,
 		}),
 		enabled: habilitado,
 		placeholderData: keepPreviousData,
@@ -237,88 +207,22 @@ export function DashboardSupervisor() {
 	// Si los complementos fallan, las cards quedan en «—» y no cargando.
 	const sinComplementos = complementosQuery.isError ? null : undefined;
 
-	const aprobaciones = useMemo(() => {
-		const convenios = (conveniosQuery.data?.items ??
-			[]) as unknown as ConvenioPendiente[];
-		const recuperaciones = (recuperacionesQuery.data?.pendientes ??
-			[]) as unknown as Recuperacion[];
-		const inmovilizaciones = (
-			(inmovilizacionesQuery.data ?? []) as unknown as Inmovilizacion[]
-		).filter((i) => i.estado === "pendiente_aprobacion");
-		const filas: FilaAprobacion[] = [
-			...convenios.map(
-				(c): FilaAprobacion => ({
-					id: `convenio-${c.convenio_id}`,
-					tipo: "convenio",
-					cliente: c.cliente_nombre,
-					credito: c.numero_credito_sifco,
-					asesor: nombreCorto(c.asesor_nombre) || null,
-					solicitadoEn: c.fecha_convenio,
-					destino: { to: "/cobros/convenios" },
-				}),
-			),
-			...recuperaciones.map(
-				(r): FilaAprobacion => ({
-					id: `recuperacion-${r.id}`,
-					tipo: "recuperacion",
-					cliente: r.cliente ?? "Sin nombre",
-					credito: r.numeroSifco,
-					asesor: nombreCorto(r.solicitante) || null,
-					solicitadoEn: aIso(r.solicitadoAt),
-					destino: { to: "/cobros/recuperaciones" },
-				}),
-			),
-			...inmovilizaciones.map(
-				(i): FilaAprobacion => ({
-					id: `inmovilizacion-${i.id}`,
-					tipo: i.accion === "reactivacion" ? "reactivacion" : "apagado",
-					cliente: i.clienteNombre ?? "Sin nombre",
-					credito: i.numeroCreditoSifco,
-					asesor: nombreCorto(i.solicitanteNombre) || null,
-					solicitadoEn: aIso(i.solicitadoAt),
-					destino: { to: "/cobros/inmovilizaciones" },
-				}),
-			),
-		];
-		// Las más antiguas primero; sin fecha, al final.
-		filas.sort((a, b) => {
-			if (!a.solicitadoEn) return 1;
-			if (!b.solicitadoEn) return -1;
-			return (
-				new Date(a.solicitadoEn).getTime() - new Date(b.solicitadoEn).getTime()
-			);
-		});
-		const totalConvenios = conveniosQuery.data?.total ?? convenios.length;
-		const bandejas: BandejaAprobacion[] = [
-			{
-				clave: "convenios",
-				etiqueta: "Convenios",
-				cantidad: conveniosQuery.data ? totalConvenios : null,
-				destino: { to: "/cobros/convenios" },
-			},
-			{
-				clave: "recuperaciones",
-				etiqueta: "Recuperación del vehículo",
-				cantidad: recuperacionesQuery.data ? recuperaciones.length : null,
-				destino: { to: "/cobros/recuperaciones" },
-			},
-			{
-				clave: "inmovilizaciones",
-				etiqueta: "Apagado y reactivación",
-				cantidad: inmovilizacionesQuery.data ? inmovilizaciones.length : null,
-				destino: { to: "/cobros/inmovilizaciones" },
-			},
-		];
-		return {
-			filas,
-			total: totalConvenios + recuperaciones.length + inmovilizaciones.length,
-			bandejas,
-		};
-	}, [
-		conveniosQuery.data,
-		recuperacionesQuery.data,
-		inmovilizacionesQuery.data,
-	]);
+	// Normalización compartida con /cobros/solicitudes (solicitudes/normalizar).
+	const aprobaciones = useMemo(
+		() =>
+			aprobacionesParaDashboard({
+				convenios: conveniosQuery.data,
+				recuperaciones: recuperacionesQuery.data,
+				inmovilizaciones: inmovilizacionesQuery.data,
+				destinos: {
+					convenio: { to: SOLICITUDES, search: { tipo: "convenio" } },
+					recuperacion: { to: SOLICITUDES, search: { tipo: "recuperacion" } },
+					// Apagados y reactivaciones comparten bandeja: sin chip de tipo.
+					inmovilizacion: { to: SOLICITUDES },
+				},
+			}),
+		[conveniosQuery.data, recuperacionesQuery.data, inmovilizacionesQuery.data],
+	);
 	const cargandoAprobaciones =
 		conveniosQuery.isLoading ||
 		recuperacionesQuery.isLoading ||
@@ -371,7 +275,9 @@ export function DashboardSupervisor() {
 					agenda: ag,
 					ausencia: a.userId ? (ausencias.get(a.userId) ?? null) : null,
 					estado: estadoPorAgenda(extra?.rescate ?? ag),
-					destino: cartera({ asesor: String(a.asesor_id) }),
+					// La fila abre el Detalle del asesor (Mi equipo); su cartera se
+					// abre desde ahí con «Ver sus casos».
+					destino: { to: `/cobros/equipo/${a.asesor_id}` },
 				};
 			})
 			.sort((x, y) => (y.casos ?? 0) - (x.casos ?? 0));
@@ -497,7 +403,10 @@ export function DashboardSupervisor() {
 			valor: coberturasQuery.data ? ausentesHoy : null,
 			etiqueta: "Asesores ausentes",
 			info: "Asesores con una cobertura vigente hoy (vacaciones o permiso).",
-			destino: { to: "/cobros/reasignaciones" },
+			destino: {
+				to: "/cobros/equipo",
+				search: { tab: "asignacion", seccion: "coberturas" },
+			},
 		},
 	];
 
@@ -573,8 +482,7 @@ export function DashboardSupervisor() {
 					void recuperacionesQuery.refetch();
 					void inmovilizacionesQuery.refetch();
 				},
-				// No hay bandeja única todavía (fase 2): convenios es la más grande.
-				verTodas: { to: "/cobros/convenios" },
+				verTodas: { to: SOLICITUDES },
 				bandejas: aprobaciones.bandejas,
 			}}
 			cartera={{
@@ -590,7 +498,7 @@ export function DashboardSupervisor() {
 				cargando: asesoresQuery.isLoading,
 				error: asesoresQuery.isError,
 				onReintentar: () => void asesoresQuery.refetch(),
-				verEquipo: { to: "/cobros/carga" },
+				verEquipo: { to: "/cobros/equipo" },
 				fechaAgenda: agendaQuery.data?.fecha
 					? new Date(`${agendaQuery.data.fecha}T12:00:00`).toLocaleDateString(
 							"es-GT",

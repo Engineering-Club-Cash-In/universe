@@ -4,6 +4,12 @@
 **Rama base:** `COBROS-02` (NO pasa por `develop`; las feature branches salen de ahí y su PR va de vuelta ahí)
 **Apps que toca:** `apps/crm` (server + web) · `apps/cartera-back` · el bot de WhatsApp de SimpleTech
 
+> [!IMPORTANT]
+> **COBROS-02 todavía NO va a PROD.** Es una versión paralela que sale en un pase masivo, a fin de año o en un mes, cuando se decida.
+> - Todo se corre y se prueba en **DEV**, migraciones incluidas.
+> - En los PR, issues y docs de COBROS-02 **no se piden pasos en PROD** (nada de «antes de desplegar, correr X en PROD»). Las migraciones pendientes para PROD se juntan para el pase masivo.
+> - Si una migración falta en DEV, se corre en DEV y se anota en el doc de la etapa.
+
 ---
 
 ## Qué es
@@ -46,6 +52,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 15 | [Ficha 360 rediseñada · backend pendiente](./15-ficha-360-backend.md) | Etapa 2 del rediseño Figma: Ficha 360 conectada; tareas F1–F8 para José (RENAP, codeudores, historial de cambios, histórico del crédito, seguro, documentos, asistente IA, editar direcciones) |
 | 16 | [Workspace de cobros · backend pendiente](./16-workspace-backend.md) | Etapa 3 del rediseño Figma: el «Espacio de trabajo» de dos paneles conectado; tareas W1–W5 para José (dirección y participante de la gestión, rebaja de mora, escalar a Jurídico, abono en el convenio, alertas leídas con job de 30 días) |
 | 17 | [Supervisión de cobros · backend pendiente](./17-supervision-backend.md) | Fase 1 del rediseño del supervisor (Figma Dashboard · Supervisor y Cartera general): qué quedó conectado y las tareas S1–S6 para José (pendientes sin fuente, sin contacto del equipo, KPIs del equipo por período, columnas de la tabla Equipo, filtros y paginación de la Cartera general, reasignación en bloque) |
+| 18 | [Mi equipo y Solicitudes · backend pendiente](./18-equipo-solicitudes-backend.md) | Fase 2 del rediseño del supervisor: Mi equipo (asesores, día, carga y asignación), Detalle del asesor y bandeja única de Solicitudes con el Espacio de aprobación; tareas M1–M7 para José (recuperación por asesor, próximos a subir de bucket, bitácora de decisiones, contrapropuesta de convenio, ausencia indefinida, nivel del asesor, contactabilidad en lote) |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

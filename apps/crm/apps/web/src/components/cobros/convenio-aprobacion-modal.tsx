@@ -46,6 +46,17 @@ interface ConvenioAprobacionModalProps {
 	userId: string;
 	resumen: ConvenioDecisionResumen;
 	onResuelto?: () => void;
+	/**
+	 * Motivo con el que arranca el formulario de una decisión NUEVA (el
+	 * Espacio de aprobación lo trae de «Notas del supervisor»). En un reenvío
+	 * manda el motivo guardado, como siempre.
+	 */
+	motivoInicial?: string;
+	/**
+	 * Solo cuando cartera CONFIRMÓ la decisión (éxito o respuesta idempotente).
+	 * `onResuelto`, en cambio, corre en todos los desenlaces.
+	 */
+	onDecidido?: (decision: "aprobado" | "rechazado") => void;
 }
 
 /**
@@ -81,6 +92,8 @@ export function ConvenioAprobacionModal({
 	userId,
 	resumen,
 	onResuelto,
+	motivoInicial,
+	onDecidido,
 }: ConvenioAprobacionModalProps) {
 	const queryClient = useQueryClient();
 	const [motivo, setMotivo] = useState("");
@@ -103,8 +116,8 @@ export function ConvenioAprobacionModal({
 	// En un reenvío el motivo es el que se mandó la primera vez (se muestra,
 	// no se edita). En una decisión nueva arranca vacío cada apertura.
 	useEffect(() => {
-		if (open) setMotivo(intentoPrevio?.motivo ?? "");
-	}, [open, intentoPrevio]);
+		if (open) setMotivo(intentoPrevio?.motivo ?? motivoInicial ?? "");
+	}, [open, intentoPrevio, motivoInicial]);
 
 	const mutation = useMutation({
 		mutationFn: async (): Promise<
@@ -172,6 +185,7 @@ export function ConvenioAprobacionModal({
 			queryClient.invalidateQueries({
 				queryKey: orpc.getConveniosListado.key(),
 			});
+			onDecidido?.(r.decision);
 			onResuelto?.();
 			onOpenChange(false);
 		},

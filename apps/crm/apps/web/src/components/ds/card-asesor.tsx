@@ -48,6 +48,7 @@ const bucketSolido: Record<BucketAsesor, string> = {
 };
 
 const tonoTexto = {
+	neutral: "text-fg",
 	success: "text-success-text",
 	warning: "text-warning-text",
 	danger: "text-danger-text",
@@ -79,9 +80,12 @@ export type CardAsesorProps = Omit<
 	/** "92%". */
 	contactabilidad: React.ReactNode;
 	contactabilidadTone?: keyof typeof tonoTexto;
-	/** Progress "Barra": porcentaje 0–100 y detalle ("Q 8.4M de Q 9.1M"). */
+	/**
+	 * Progress "Barra": porcentaje 0–100 y detalle ("Q 8.4M de Q 9.1M").
+	 * `null` = sin dato todavía: muestra «—» y la barra vacía.
+	 */
 	recuperacion: {
-		porcentaje: number;
+		porcentaje: number | null;
 		detalle?: React.ReactNode;
 		etiqueta?: React.ReactNode;
 		/** Estado del Progress de Figma: Normal (marca) · Éxito · Alerta · Riesgo. */
@@ -117,7 +121,8 @@ export function CardAsesor({
 }: CardAsesorProps) {
 	const ausente = ausencia != null;
 	const total = distribucion.reduce((s, d) => s + d.cantidad, 0);
-	const porcentaje = Math.min(100, Math.max(0, recuperacion.porcentaje));
+	const sinRecuperacion = recuperacion.porcentaje === null;
+	const porcentaje = Math.min(100, Math.max(0, recuperacion.porcentaje ?? 0));
 
 	return (
 		<article
@@ -222,7 +227,7 @@ export function CardAsesor({
 						{recuperacion.etiqueta ?? "Recuperación"}
 					</span>
 					<span className="font-semibold text-fg text-xs leading-[1.26]">
-						{Math.round(porcentaje)}%
+						{sinRecuperacion ? "—" : `${Math.round(porcentaje)}%`}
 					</span>
 				</div>
 				<div
@@ -230,7 +235,7 @@ export function CardAsesor({
 					aria-label="Recuperación"
 					aria-valuemin={0}
 					aria-valuemax={100}
-					aria-valuenow={Math.round(porcentaje)}
+					aria-valuenow={sinRecuperacion ? undefined : Math.round(porcentaje)}
 					className="h-2.5 w-full overflow-hidden rounded-full bg-line-subtle"
 				>
 					<div

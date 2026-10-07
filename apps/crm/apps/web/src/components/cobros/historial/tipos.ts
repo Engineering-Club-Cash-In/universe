@@ -78,3 +78,18 @@ export type EntradaAuditoria = {
 	editadoPorNombre: string | null;
 	editadoEn: string | Date;
 };
+
+/**
+ * Agregados de `getHistorialAgendasResumen` (KPIs y chips de bucket del
+ * Historial de gestiones). El resumen ignora la página y el filtro de bucket,
+ * pero respeta los demás filtros.
+ */
+export type ResumenHistorial = {
+	total: number;
+	efectivos: number;
+	promesas: number;
+	sinContacto: number;
+	conProximaAccion: number;
+	editadas: number;
+	porBucket: { bucket: number | null; cantidad: number }[];
+};

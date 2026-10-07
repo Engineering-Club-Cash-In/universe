@@ -29,6 +29,7 @@ export function DecisionInmovilizacionModal({
 	open,
 	onOpenChange,
 	onResuelto,
+	motivoInicial,
 }: {
 	id: string;
 	decision: DecisionInmovilizacion;
@@ -36,8 +37,10 @@ export function DecisionInmovilizacionModal({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onResuelto: () => void;
+	/** Motivo con el que arranca el rechazo (el Espacio de aprobación lo trae de «Notas del supervisor»). */
+	motivoInicial?: string;
 }) {
-	const [motivoRechazo, setMotivoRechazo] = useState("");
+	const [motivoRechazo, setMotivoRechazo] = useState(motivoInicial ?? "");
 	const motivoValido = motivoRechazo.trim().length >= 5;
 
 	const mutation = useMutation({

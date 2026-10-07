@@ -2,17 +2,22 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
 	CalendarCheck2,
+	ChevronLeft,
+	ChevronRight,
 	CircleCheck,
 	CircleDashed,
 	Loader2,
 	UserCheck,
 } from "lucide-react";
+import type * as React from "react";
 import { useEffect, useMemo, useState } from "react";
+import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
 import { aFechaISO_GT } from "@/components/cobros/historial/formato";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -33,7 +38,7 @@ import { etiquetaMotivoAgenda } from "@/lib/cobros/cumplimiento-agenda";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
-type ResumenFila = {
+export type ResumenFila = {
 	snapshotId: string;
 	asesorId: string;
 	asesorNombre: string;
@@ -56,7 +61,7 @@ type AsesorConAgenda = {
 	estado: "abierto" | "cerrado";
 };
 
-type DetalleItem = {
+export type DetalleItem = {
 	id: string;
 	numeroCreditoSifco: string;
 	casoCobroId: string | null;
@@ -77,7 +82,7 @@ type DetalleItem = {
 	cubiertoPor?: string | null;
 };
 
-type DetalleData = {
+export type DetalleData = {
 	fecha: string;
 	asesorId: string;
 	page: number;
@@ -123,9 +128,35 @@ function DetalleAgenda({
 			input: { fecha, asesorId, page, perPage: PER_PAGE_DETALLE },
 		}),
 	});
-	const datos = query.data as DetalleData | undefined;
+	return (
+		<DetalleAgendaVista
+			datos={query.data as DetalleData | undefined}
+			cargando={query.isPending}
+			error={query.isError}
+			page={page}
+			onPage={setPage}
+		/>
+	);
+}
 
-	if (query.isPending) {
+/**
+ * Detalle paginado de la agenda planificada (créditos, motivo, resultado y
+ * evidencia). Presentación pura: la usan `DetalleAgenda` y el showcase.
+ */
+export function DetalleAgendaVista({
+	datos,
+	cargando,
+	error,
+	page,
+	onPage,
+}: {
+	datos: DetalleData | undefined;
+	cargando: boolean;
+	error: boolean;
+	page: number;
+	onPage: (page: number) => void;
+}) {
+	if (cargando) {
 		return (
 			<div className="flex items-center gap-2 border-t px-4 py-6 text-gray-500 text-sm">
 				<Loader2 className="h-4 w-4 animate-spin" />
@@ -133,7 +164,7 @@ function DetalleAgenda({
 			</div>
 		);
 	}
-	if (query.isError) {
+	if (error) {
 		return (
 			<div className="border-t px-4 py-6 text-red-600 text-sm">
 				No se pudo cargar el detalle.
@@ -142,7 +173,7 @@ function DetalleAgenda({
 	}
 
 	return (
-		<div className="overflow-x-auto border-t">
+		<div className="overflow-x-auto border-t contain-inline-size">
 			<Table>
 				<TableHeader>
 					<TableRow>
@@ -247,7 +278,7 @@ function DetalleAgenda({
 						variant="outline"
 						size="sm"
 						disabled={page <= 1}
-						onClick={() => setPage((p) => Math.max(1, p - 1))}
+						onClick={() => onPage(Math.max(1, page - 1))}
 					>
 						Anterior
 					</Button>
@@ -258,7 +289,7 @@ function DetalleAgenda({
 						variant="outline"
 						size="sm"
 						disabled={page >= datos.totalPages}
-						onClick={() => setPage((p) => p + 1)}
+						onClick={() => onPage(page + 1)}
 					>
 						Siguiente
 					</Button>
@@ -412,10 +443,14 @@ export function CumplimientoAgendaPanel() {
 					</div>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
-					<input
-						className="rounded-md border px-2 py-1 text-sm dark:bg-gray-800"
-						onChange={(event) => setFecha(event.target.value)}
-						type="date"
+					<Label htmlFor="cumplimiento-fecha" className="sr-only">
+						Fecha de la agenda
+					</Label>
+					<CampoFecha
+						id="cumplimiento-fecha"
+						className="w-44"
+						onChange={setFecha}
+						placeholder="Último cierre"
 						value={fecha}
 					/>
 					<Select
@@ -470,71 +505,32 @@ export function CumplimientoAgendaPanel() {
 							Agenda planificada
 						</h2>
 						{asesorSeleccionado && (
-							<Card className="overflow-hidden">
-								{filaSeleccionada ? (
-									<>
-										<div className="grid w-full grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))] items-center gap-4 px-4 py-3 text-left">
-											<span className="font-medium">
-												{filaSeleccionada.asesorNombre}
-											</span>
-											<span className="text-center text-sm">
-												<b>{filaSeleccionada.planificados}</b> planificados
-											</span>
-											<span className="text-center text-emerald-600 text-sm">
-												<b>{filaSeleccionada.atendidos}</b> atendidos
-											</span>
-											<span className="text-center text-amber-600 text-sm">
-												<b>{filaSeleccionada.pendientes}</b> pendientes
-											</span>
-											<span className="text-center font-semibold">
-												{filaSeleccionada.porcentaje}%
-												<Badge className="ml-2" variant="outline">
-													{filaSeleccionada.estado}
-												</Badge>
-											</span>
-										</div>
-										{fecha && (
-											<DetalleAgenda
-												// Resetea la paginación interna al cambiar de fecha o
-												// asesor: sin esto, la tarjeta queda siempre montada
-												// (ya no hay toggle de expandir/colapsar) y el `page`
-												// de un asesor anterior se arrastraba al nuevo, pidiendo
-												// una página que puede no existir (hallazgo de code
-												// review, Codex).
-												key={`${fecha}:${filaSeleccionada.asesorId}`}
-												asesorId={filaSeleccionada.asesorId}
-												fecha={fecha}
-											/>
-										)}
-									</>
-								) : snapshotAbierto ? (
-									// Agenda de HOY: existe snapshot pero sigue `abierto` (el
-									// job de cierre corre a medianoche). `totalAtendidos`/% no
-									// están disponibles todavía — mostrarlos en 0 sería un
-									// dato engañoso, no incompleto — así que se avisa en vez
-									// de afirmar "no tenía agenda" (hallazgo de code review,
-									// Codex).
-									<div className="px-4 py-6 text-center text-gray-500 text-sm">
-										Agenda de {asesorSeleccionado.asesorNombre} en curso — los
-										planificados/atendidos se confirman al cierre de esta noche.
-									</div>
-								) : (
-									// Sin snapshot CERRADO y sin poder afirmar "en curso"
-									// (`snapshotAbierto` ya descartó ese caso arriba): puede ser
-									// un asesor sin agenda planificada, o un snapshot `abierto`
-									// de una fecha PASADA cuyo cierre falló para siempre (el
-									// job solo reintenta AYER, nunca revisita días viejos — ver
-									// la nota en `snapshotAbierto`), o directamente sin fila. En
-									// los tres casos no hay forma de afirmar "no tenía agenda"
-									// sin arriesgarse a mentir sobre un fallo de captura/cierre
-									// silencioso — mismo criterio que `enAgenda: null` en el
-									// bloque de abajo (hallazgo de code review, Codex).
-									<div className="px-4 py-6 text-center text-gray-500 text-sm">
-										No se pudo evaluar la agenda planificada de{" "}
-										{asesorSeleccionado.asesorNombre} para este día.
-									</div>
-								)}
-							</Card>
+							<TarjetaAgendaPlanificada
+								asesorNombre={asesorSeleccionado.asesorNombre}
+								agenda={
+									filaSeleccionada
+										? {
+												tipo: "metricas",
+												fila: filaSeleccionada,
+												detalle: fecha ? (
+													<DetalleAgenda
+														// Resetea la paginación interna al cambiar de fecha o
+														// asesor: sin esto, la tarjeta queda siempre montada
+														// (ya no hay toggle de expandir/colapsar) y el `page`
+														// de un asesor anterior se arrastraba al nuevo, pidiendo
+														// una página que puede no existir (hallazgo de code
+														// review, Codex).
+														key={`${fecha}:${filaSeleccionada.asesorId}`}
+														asesorId={filaSeleccionada.asesorId}
+														fecha={fecha}
+													/>
+												) : null,
+											}
+										: snapshotAbierto
+											? { tipo: "en_curso" }
+											: { tipo: "sin_evaluar" }
+								}
+							/>
 						)}
 					</div>
 
@@ -550,5 +546,348 @@ export function CumplimientoAgendaPanel() {
 				</div>
 			)}
 		</div>
+	);
+}
+
+/** Qué se puede afirmar de la agenda planificada de un asesor en un día. */
+export type AgendaPlanificada =
+	| { tipo: "metricas"; fila: ResumenFila; detalle?: React.ReactNode }
+	| { tipo: "en_curso" }
+	| { tipo: "sin_evaluar" };
+
+/**
+ * Tarjeta «Agenda planificada» de un asesor en un día: métricas del snapshot
+ * cerrado (planificados, atendidos, pendientes, % y estado) con su detalle, o
+ * por qué no se pueden mostrar. Presentación pura.
+ */
+export function TarjetaAgendaPlanificada({
+	asesorNombre,
+	agenda,
+}: {
+	asesorNombre: string;
+	agenda: AgendaPlanificada;
+}) {
+	return (
+		<Card className="overflow-hidden">
+			{agenda.tipo === "metricas" ? (
+				<>
+					<div className="grid w-full grid-cols-2 items-center gap-4 px-4 py-3 text-left sm:grid-cols-[minmax(180px,1fr)_repeat(4,minmax(80px,auto))]">
+						<span className="col-span-2 font-medium sm:col-span-1">
+							{agenda.fila.asesorNombre}
+						</span>
+						<span className="text-center text-sm">
+							<b>{agenda.fila.planificados}</b> planificados
+						</span>
+						<span className="text-center text-emerald-600 text-sm">
+							<b>{agenda.fila.atendidos}</b> atendidos
+						</span>
+						<span className="text-center text-amber-600 text-sm">
+							<b>{agenda.fila.pendientes}</b> pendientes
+						</span>
+						<span className="text-center font-semibold">
+							{agenda.fila.porcentaje}%
+							<Badge className="ml-2" variant="outline">
+								{agenda.fila.estado}
+							</Badge>
+						</span>
+					</div>
+					{agenda.detalle}
+				</>
+			) : agenda.tipo === "en_curso" ? (
+				// Agenda de HOY: existe snapshot pero sigue `abierto` (el
+				// job de cierre corre a medianoche). `totalAtendidos`/% no
+				// están disponibles todavía — mostrarlos en 0 sería un
+				// dato engañoso, no incompleto — así que se avisa en vez
+				// de afirmar "no tenía agenda" (hallazgo de code review,
+				// Codex).
+				<div className="px-4 py-6 text-center text-gray-500 text-sm">
+					Agenda de {asesorNombre} en curso — los planificados/atendidos se
+					confirman al cierre de esta noche.
+				</div>
+			) : (
+				// Sin snapshot CERRADO y sin poder afirmar "en curso": puede ser
+				// un asesor sin agenda planificada, o un snapshot `abierto`
+				// de una fecha PASADA cuyo cierre falló para siempre (el
+				// job solo reintenta AYER, nunca revisita días viejos — ver
+				// la nota en `snapshotAbierto`), o directamente sin fila. En
+				// los tres casos no hay forma de afirmar "no tenía agenda"
+				// sin arriesgarse a mentir sobre un fallo de captura/cierre
+				// silencioso — mismo criterio que `enAgenda: null` en el
+				// bloque de gestiones (hallazgo de code review, Codex).
+				<div className="px-4 py-6 text-center text-gray-500 text-sm">
+					No se pudo evaluar la agenda planificada de {asesorNombre} para este
+					día.
+				</div>
+			)}
+		</Card>
+	);
+}
+
+function sumarDiasISO(fecha: string, dias: number) {
+	const [y, m, d] = fecha.split("-").map(Number);
+	return new Date(Date.UTC(y, m - 1, d + dias)).toISOString().slice(0, 10);
+}
+
+const DIAS_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const MESES = [
+	"ene",
+	"feb",
+	"mar",
+	"abr",
+	"may",
+	"jun",
+	"jul",
+	"ago",
+	"sep",
+	"oct",
+	"nov",
+	"dic",
+];
+
+/** «2026-10-06» → «mar 6 oct 2026». */
+export function fechaLegible(fecha: string) {
+	const [y, m, d] = fecha.split("-").map(Number);
+	const dia = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+	return `${DIAS_SEMANA[dia]} ${d} ${MESES[m - 1] ?? ""} ${y}`;
+}
+
+/**
+ * Navegación por día (← fecha →, selector de fecha y «Hoy»): con ella el
+ * supervisor «se mueve entre agendas» de un asesor. No deja pasar de hoy.
+ */
+export function NavegacionDia({
+	fecha,
+	hoy,
+	onFecha,
+}: {
+	fecha: string;
+	/** Hoy en Guatemala (YYYY-MM-DD). */
+	hoy: string;
+	onFecha: (fecha: string) => void;
+}) {
+	return (
+		<div className="flex flex-wrap items-center gap-2">
+			<Button
+				variant="outline"
+				size="icon-sm"
+				aria-label="Día anterior"
+				onClick={() => onFecha(sumarDiasISO(fecha, -1))}
+			>
+				<ChevronLeft />
+			</Button>
+			<Label htmlFor="agenda-dia-fecha" className="sr-only">
+				Fecha de la agenda
+			</Label>
+			<CampoFecha
+				id="agenda-dia-fecha"
+				className="h-8 w-44 px-3 text-[13px]"
+				max={hoy}
+				onChange={onFecha}
+				value={fecha}
+			/>
+			<Button
+				variant="outline"
+				size="icon-sm"
+				aria-label="Día siguiente"
+				disabled={fecha >= hoy}
+				onClick={() => onFecha(sumarDiasISO(fecha, 1))}
+			>
+				<ChevronRight />
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={fecha === hoy}
+				onClick={() => onFecha(hoy)}
+			>
+				Hoy
+			</Button>
+		</div>
+	);
+}
+
+/**
+ * Cumplimiento de agenda de UN asesor en un día (pestaña Agenda del Detalle
+ * del asesor). Es lo mismo que «Cumplimiento de agenda» con el asesor ya
+ * elegido: navegación por día, tarjeta «Agenda planificada» con su detalle
+ * paginado y «Gestiones registradas por {asesor}». Presentación pura.
+ */
+export function CumplimientoAgendaAsesorVista({
+	nombre,
+	fecha,
+	hoy,
+	onFecha,
+	cargando,
+	error,
+	agenda,
+	gestiones,
+}: {
+	nombre: string;
+	/** Día elegido (YYYY-MM-DD) o `null` mientras se resuelve el último cierre. */
+	fecha: string | null;
+	hoy: string;
+	onFecha: (fecha: string) => void;
+	cargando: boolean;
+	error: string | null;
+	agenda: AgendaPlanificada | null;
+	/** «Gestiones registradas por {asesor}» (GestionesDelDiaPanel o su vista). */
+	gestiones: React.ReactNode;
+}) {
+	return (
+		<div className="flex min-w-0 flex-col gap-5">
+			<div className="flex flex-wrap items-start justify-between gap-3">
+				<div className="flex min-w-0 items-start gap-3">
+					<CalendarCheck2 aria-hidden className="mt-0.5 size-6 text-brand" />
+					<div className="flex min-w-0 flex-col gap-0.5">
+						<h2 className="type-heading-sm text-fg">
+							Cumplimiento de agenda
+							{fecha ? (
+								<span className="font-normal text-fg-secondary">
+									{" "}
+									· {fechaLegible(fecha)}
+								</span>
+							) : null}
+						</h2>
+						<p className="type-body-sm text-fg-secondary">
+							Agenda congelada a las 00:05 GT y evaluada al cierre del día.
+						</p>
+					</div>
+				</div>
+				{fecha ? (
+					<NavegacionDia fecha={fecha} hoy={hoy} onFecha={onFecha} />
+				) : null}
+			</div>
+
+			{cargando || !fecha ? (
+				<div className="flex justify-center py-16 text-fg-secondary">
+					<Loader2 className="mr-2 h-5 w-5 animate-spin" /> Cargando…
+				</div>
+			) : error ? (
+				<Card className="p-8 text-center text-danger-text">{error}</Card>
+			) : (
+				<>
+					<div>
+						<h3 className="mb-3 font-semibold text-fg-secondary text-sm uppercase tracking-wide">
+							Agenda planificada
+						</h3>
+						{agenda ? (
+							<TarjetaAgendaPlanificada asesorNombre={nombre} agenda={agenda} />
+						) : null}
+					</div>
+					{gestiones}
+				</>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Contenedor de la pestaña Agenda: el cumplimiento de agenda del asesor
+ * `userId` (`user.id` del CRM, el de `agenda_cobros_snapshots.asesor_id`) en
+ * la fecha `fecha`. Sin fecha, abre el último día con agenda cerrada (como
+ * «Cumplimiento de agenda»). Nunca consulta otro asesor: si no hay snapshot de
+ * él ese día, lo dice.
+ */
+export function CumplimientoAgendaAsesor({
+	userId,
+	nombre,
+	fecha,
+	onFecha,
+}: {
+	userId: string;
+	nombre: string;
+	fecha: string | undefined;
+	onFecha: (fecha: string) => void;
+}) {
+	const { data: session } = authClient.useSession();
+	const userRole = session?.user?.role;
+	const puedeConsultar = !!userRole && PERMISSIONS.canAssignCobros(userRole);
+	// biome-ignore lint/suspicious/noExplicitAny: contrato manual por TS7056 del router raíz.
+	const orpcAny = orpc as any;
+	const hoy = aFechaISO_GT(new Date());
+
+	// Último día con agenda cerrada (la misma consulta que usan el Dashboard y
+	// Mi equipo): solo para el default cuando la URL no trae `?fecha=`.
+	const ultimoQuery = useQuery({
+		...orpcAny.getCumplimientoAgendaResumen.queryOptions({ input: {} }),
+		enabled: !!session && puedeConsultar && !fecha,
+	});
+	const ultimo = ultimoQuery.data as ResumenData | undefined;
+	const fechaEfectiva =
+		fecha ??
+		(ultimo ? (ultimo.fecha ?? hoy) : ultimoQuery.isError ? hoy : null);
+
+	const resumenQuery = useQuery({
+		...orpcAny.getCumplimientoAgendaResumen.queryOptions({
+			input: { fecha: fechaEfectiva ?? undefined, asesorId: userId },
+		}),
+		enabled: !!session && puedeConsultar && !!fechaEfectiva,
+	});
+	const resumen = resumenQuery.data as ResumenData | undefined;
+	// Snapshot del día (abierto o cerrado): distingue «en curso» de «no se pudo
+	// evaluar», igual que en la vista del equipo.
+	const snapshotsQuery = useQuery({
+		...orpcAny.getAsesoresConAgenda.queryOptions({
+			input: { fecha: fechaEfectiva },
+		}),
+		enabled: !!session && puedeConsultar && !!fechaEfectiva,
+	});
+	const snapshots = (snapshotsQuery.data ?? []) as AsesorConAgenda[];
+
+	const fila = resumen?.items.find((a) => a.asesorId === userId) ?? null;
+	// Ver la nota de `snapshotAbierto` en CumplimientoAgendaPanel: solo HOY un
+	// snapshot abierto significa «en curso».
+	const enCurso =
+		!fila &&
+		fechaEfectiva === hoy &&
+		snapshots.some((a) => a.asesorId === userId && a.estado === "abierto");
+
+	const agenda: AgendaPlanificada | null = !fechaEfectiva
+		? null
+		: fila
+			? {
+					tipo: "metricas",
+					fila,
+					detalle: (
+						<DetalleAgenda
+							key={`${fechaEfectiva}:${userId}`}
+							asesorId={userId}
+							fecha={fechaEfectiva}
+						/>
+					),
+				}
+			: enCurso
+				? { tipo: "en_curso" }
+				: { tipo: "sin_evaluar" };
+
+	return (
+		<CumplimientoAgendaAsesorVista
+			nombre={nombre}
+			fecha={fechaEfectiva}
+			hoy={hoy}
+			onFecha={onFecha}
+			cargando={
+				!fechaEfectiva || resumenQuery.isPending || snapshotsQuery.isPending
+			}
+			error={
+				resumenQuery.isError
+					? "No se pudo cargar el cumplimiento de agenda. Intente de nuevo en unos segundos."
+					: snapshotsQuery.isError
+						? `No se pudo consultar la agenda de ${nombre} para este día. Intente de nuevo en unos segundos.`
+						: null
+			}
+			agenda={agenda}
+			gestiones={
+				fechaEfectiva ? (
+					<GestionesDelDiaPanel
+						key={`${fechaEfectiva}:${userId}`}
+						fecha={fechaEfectiva}
+						asesorId={userId}
+						asesorNombre={nombre}
+						esSupervisor={puedeConsultar}
+					/>
+				) : null
+			}
+		/>
 	);
 }

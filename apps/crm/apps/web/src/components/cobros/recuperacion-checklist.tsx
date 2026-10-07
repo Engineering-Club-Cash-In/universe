@@ -261,13 +261,19 @@ export function DecidirSolicitudDialog({
 	solicitud,
 	decision,
 	onOpenChange,
+	motivoInicial,
+	onDecidido,
 }: {
 	solicitud: { id: string; quien: string };
 	decision: "aprobar" | "rechazar";
 	onOpenChange: (abierto: boolean) => void;
+	/** Motivo con el que arranca el rechazo (el Espacio de aprobación lo trae de «Notas del supervisor»). */
+	motivoInicial?: string;
+	/** Solo cuando el servidor confirmó la decisión. */
+	onDecidido?: (decision: "aprobada" | "rechazada") => void;
 }) {
 	const queryClient = useQueryClient();
-	const [motivo, setMotivo] = useState("");
+	const [motivo, setMotivo] = useState(motivoInicial ?? "");
 	const aprobar = decision === "aprobar";
 	const motivoCorto = !aprobar && motivo.trim().length < MIN_MOTIVO_RECHAZO;
 
@@ -286,6 +292,7 @@ export function DecidirSolicitudDialog({
 						: `Solicitud aprobada: el crédito pasó a B${r.bucketNuevo} y se reasignó. Se enviaron las notificaciones.`
 					: "Solicitud rechazada. Se notificó al solicitante.",
 			);
+			onDecidido?.(r.decision === "aprobada" ? "aprobada" : "rechazada");
 			onOpenChange(false);
 		},
 		onError: (e: Error) => {

@@ -418,11 +418,14 @@ export function FilaCreditoAsesor({
 	fila,
 	prioridad,
 	extras,
+	seleccionada,
 	onVistaRapida,
 	onAbrir,
 }: {
 	fila: FilaCartera;
 	prioridad?: number;
+	/** Fila marcada en la selección múltiple (Cartera general). */
+	seleccionada?: boolean;
 	/** Celdas de las columnas opcionales, por id. */
 	extras?: Record<string, React.ReactNode>;
 	onVistaRapida: (creditoId: string) => void;
@@ -464,6 +467,7 @@ export function FilaCreditoAsesor({
 	return (
 		<FilaCredito
 			prioridad={prioridad}
+			activa={seleccionada}
 			className="cursor-pointer focus-visible:bg-muted focus-visible:outline-none"
 			onClick={abrir}
 			{...(onAbrir ? propsFilaEnfocable(abrir) : {})}

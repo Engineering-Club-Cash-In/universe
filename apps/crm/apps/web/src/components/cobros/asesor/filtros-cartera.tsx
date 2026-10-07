@@ -41,12 +41,19 @@ export const FILTROS_GESTION = [
 ] as const;
 export type FiltroGestion = (typeof FILTROS_GESTION)[number];
 
+/**
+ * Supervisión (Cartera general, Figma 2262:12) suma el chip «Sin acuerdo». El
+ * asesor no lo ve: sus chips siguen siendo `FILTROS_GESTION`.
+ */
+export type FiltroGestionCartera = FiltroGestion | "sin_acuerdo";
+
 /** Orden de Figma (QuickFilters). */
-export const GESTION_LABEL: Record<FiltroGestion, string> = {
+export const GESTION_LABEL: Record<FiltroGestionCartera, string> = {
 	sin_gestion_48h: "Sin gestión +48h",
 	promesa_por_vencer: "Promesas por vencer",
 	convenio_pendiente: "Convenios pendientes",
 	sin_contactar_hoy: "Sin contactar hoy",
+	sin_acuerdo: "Sin acuerdo",
 };
 
 export const BUCKETS_CARTERA: Bucket[] = ["B0", "B1", "B2", "B3", "B4", "B5"];
@@ -128,7 +135,7 @@ export type FiltrosCartera = {
 	excluirPagados: boolean;
 	/** No. SIFCO exacto (texto crudo; el contenedor lo debouncea). */
 	sifco: string;
-	gestion: FiltroGestion | null;
+	gestion: FiltroGestionCartera | null;
 	/** Búsqueda libre (texto crudo; el contenedor lo debouncea). */
 	busqueda: string;
 };

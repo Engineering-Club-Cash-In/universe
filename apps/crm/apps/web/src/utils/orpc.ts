@@ -27,6 +27,7 @@ import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo
 import type { recuperacionSolicitudesRouter } from "../../../server/src/routers/recuperacion-solicitudes";
 import type { recuperacionVehiculoRouter } from "../../../server/src/routers/recuperacion-vehiculo";
 import type { referenciasCobrosRouter } from "../../../server/src/routers/referencias-cobros";
+import type { supervisionCobrosRouter } from "../../../server/src/routers/supervision-cobros";
 import type { tareasCobrosRouter } from "../../../server/src/routers/tareas-cobros";
 import type { visitasCobrosRouter } from "../../../server/src/routers/visitas-cobros";
 import type { wialonRouter } from "../../../server/src/routers/wialon";
@@ -133,7 +134,9 @@ export const orpc = createTanstackQueryUtils(client);
 export const orpcAparte = createTanstackQueryUtils(
 	createORPCClient<
 		RouterClient<
-			typeof misPendientesInmovilizacionRouter & typeof gpsCatalogoBucketRouter
+			typeof misPendientesInmovilizacionRouter &
+				typeof gpsCatalogoBucketRouter &
+				typeof supervisionCobrosRouter
 		>
 	>(link),
 );

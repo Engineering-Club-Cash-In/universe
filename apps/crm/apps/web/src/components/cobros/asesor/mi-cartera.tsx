@@ -4,8 +4,24 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { MessageCircle } from "lucide-react";
+import { Clock, MessageCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { ReasignarBloqueDialog } from "@/components/cobros/cartera-general/reasignar-bloque";
+import {
+	etiquetaSegmento,
+	mismoSegmento,
+	type SearchSegmento,
+	type Segmento,
+	searchDeSegmento,
+	segmentoDeSearch,
+} from "@/components/cobros/cartera-general/segmentos";
+import {
+	useAsesoresCartera,
+	useCarteraGeneral,
+} from "@/components/cobros/cartera-general/use-cartera-general";
+import type { SupervisionCartera } from "@/components/cobros/cartera-general/vista-supervision";
+import { ConfigurarSlaModal } from "@/components/cobros/configurar-sla-modal";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import {
@@ -29,15 +45,16 @@ import {
 } from "@/lib/cobros/buckets-catalogo";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
-import { destinoFicha } from "./fila-cartera";
+import { destinoFicha, type FilaCartera } from "./fila-cartera";
 import {
 	BUCKETS_CARTERA,
 	bucketDeEstadoMora,
+	contarFiltrosActivos,
 	ESTADO_POR_BUCKET,
 	ETAPAS_MORA,
 	ETIQUETA_LABELS,
 	FILTROS_INICIALES,
-	type FiltroGestion,
+	type FiltroGestionCartera,
 	type FiltrosCartera,
 	fechasDelRango,
 	GESTION_LABEL,
@@ -63,13 +80,21 @@ import {
  * - `?bucket`, `?gestion` y `?q` (links del Dashboard) mandan sobre lo guardado
  *   cuando vienen en la URL; la URL se mantiene al día con lo elegido para que
  *   "atrás" del navegador vuelva al mismo filtro.
+ * - Supervisión y admin (`canAssignCobros`, los dos por igual) ven la «Cartera
+ *   general» (Figma 2262:12): además `?asesor=<asesor_id de cartera>` y un
+ *   segmento `?cola=` / `?promesa=` / `?convenio=` (la Cola del día y las Alertas
+ *   de promesas y de convenios, que dejaron de ser páginas sueltas), selección
+ *   múltiple con «Reasignar en bloque» y «Configurar SLA». Para el asesor esos
+ *   parámetros se ignoran y la pantalla no cambia.
  */
 
 export type CarteraSearch = {
 	bucket?: Bucket;
-	gestion?: FiltroGestion;
+	gestion?: FiltroGestionCartera;
 	q?: string;
-};
+	/** Solo supervisión: asesor_id de cartera. */
+	asesor?: number;
+} & SearchSegmento;
 
 const K = (k: string) => `cobros/cartera/${k}`;
 
@@ -78,10 +103,13 @@ const K = (k: string) => `cobros/cartera/${k}`;
  * filtros, se escriben ahí (así la primera consulta ya sale filtrada).
  */
 function aplicarUrl(search: CarteraSearch) {
+	const segmento = segmentoDeSearch(search);
 	if (
 		search.bucket === undefined &&
 		search.gestion === undefined &&
-		search.q === undefined
+		search.q === undefined &&
+		search.asesor === undefined &&
+		segmento === null
 	) {
 		return;
 	}
@@ -93,10 +121,13 @@ function aplicarUrl(search: CarteraSearch) {
 		const etapa = search.bucket ? ESTADO_POR_BUCKET[search.bucket] : null;
 		const gestion = search.gestion ?? null;
 		const busqueda = search.q ?? "";
+		const asesor = search.asesor ?? null;
 		const cambio =
 			leer("etapa") !== etapa ||
 			leer("gestion") !== gestion ||
-			(leer("busqueda") ?? "") !== busqueda;
+			(leer("busqueda") ?? "") !== busqueda ||
+			leer("asesor") !== asesor ||
+			!mismoSegmento(leer("segmento"), segmento);
 		if (!cambio) return;
 		const escribir = (k: string, v: unknown) =>
 			v === null
@@ -105,6 +136,8 @@ function aplicarUrl(search: CarteraSearch) {
 		escribir("etapa", etapa);
 		escribir("gestion", gestion);
 		escribir("busqueda", busqueda);
+		escribir("asesor", asesor);
+		escribir("segmento", segmento);
 		escribir("page", 1);
 	} catch {
 		// sessionStorage no disponible: se usan los valores por defecto.
@@ -133,9 +166,9 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	const navigate = useNavigate();
 	const { data: session } = authClient.useSession();
 	const userRole = session?.user.role ?? "";
-	const emailCobrador = !PERMISSIONS.canAssignCobros(userRole)
-		? session?.user?.email
-		: undefined;
+	// Supervisión y admin: Cartera general (los dos roles por igual).
+	const esSup = PERMISSIONS.canAssignCobros(userRole);
+	const emailCobrador = !esSup ? session?.user?.email : undefined;
 
 	/* ── Estado persistido ─────────────────────────────────────────────── */
 	const [periodo, setPeriodo] = usePersistedState<PeriodoCartera>(
@@ -161,10 +194,22 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		false,
 	);
 	const [sifco, setSifco] = usePersistedState<string>(K("sifco"), "");
-	const [gestion, setGestion] = usePersistedState<FiltroGestion | null>(
-		K("gestion"),
+	const [gestionGuardada, setGestion] =
+		usePersistedState<FiltroGestionCartera | null>(K("gestion"), null);
+	// «Sin acuerdo» es solo de supervisión: el asesor no lo tiene.
+	const gestion =
+		!esSup && gestionGuardada === "sin_acuerdo" ? null : gestionGuardada;
+	// Solo supervisión (para el asesor se ignoran).
+	const [asesorGuardado, setAsesorId] = usePersistedState<number | null>(
+		K("asesor"),
 		null,
 	);
+	const [segmentoGuardado, setSegmento] = usePersistedState<Segmento | null>(
+		K("segmento"),
+		null,
+	);
+	const asesorId = esSup ? asesorGuardado : null;
+	const segmento = esSup ? segmentoGuardado : null;
 	const [busqueda, setBusqueda] = usePersistedState<string>(K("busqueda"), "");
 	const [page, setPage] = usePersistedState<number>(K("page"), 1);
 	const [pageSize, setPageSize] = usePersistedState<number>(K("pageSize"), 25);
@@ -211,7 +256,11 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		if ("capitalMin" in c) setCapitalMin(c.capitalMin);
 		if ("capitalMax" in c) setCapitalMax(c.capitalMax);
 		if ("excluirPagados" in c) setExcluirPagados(!!c.excluirPagados);
-		if ("gestion" in c) setGestion(c.gestion ?? null);
+		if ("gestion" in c) {
+			setGestion(c.gestion ?? null);
+			// Gestión y segmento son excluyentes.
+			if (c.gestion) setSegmento(null);
+		}
 		// Búsqueda y SIFCO resetean la página al aplicarse (tras el debounce).
 		if ("busqueda" in c) setBusqueda(c.busqueda ?? "");
 		if ("sifco" in c) setSifco(c.sifco ?? "");
@@ -221,14 +270,41 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		if (!soloTexto) setPage(1);
 	};
 
-	const limpiar = () => cambiar(FILTROS_INICIALES);
+	const limpiar = () => {
+		cambiar(FILTROS_INICIALES);
+		setSegmento(null);
+		setAsesorId(null);
+	};
 
-	/* ── URL al día con bucket / gestión / búsqueda ────────────────────── */
+	const cambiarSegmento = (s: Segmento | null) => {
+		setSegmento(s);
+		if (s) setGestion(null);
+		setPage(1);
+	};
+	const cambiarAsesor = (id: number | null) => {
+		setAsesorId(id);
+		setPage(1);
+	};
+
+	/* ── URL al día con bucket / gestión / búsqueda (y asesor / segmento) ─ */
 	const bucketUrl = bucketDeEstadoMora(etapa) ?? undefined;
+	const conSesion = !!session;
 	useEffect(() => {
+		// Sin sesión todavía no se sabe el rol: no tocar ?asesor ni el segmento.
+		if (!conSesion) return;
 		const q = busquedaDeb || undefined;
 		const g = gestion ?? undefined;
-		if (search.bucket === bucketUrl && search.gestion === g && search.q === q) {
+		const a = asesorId ?? undefined;
+		const seg = searchDeSegmento(segmento);
+		if (
+			search.bucket === bucketUrl &&
+			search.gestion === g &&
+			search.q === q &&
+			search.asesor === a &&
+			search.cola === seg.cola &&
+			search.promesa === seg.promesa &&
+			search.convenio === seg.convenio
+		) {
 			return;
 		}
 		navigate({
@@ -237,10 +313,33 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				...(bucketUrl ? { bucket: bucketUrl } : {}),
 				...(g ? { gestion: g } : {}),
 				...(q ? { q } : {}),
+				...(a ? { asesor: a } : {}),
+				...seg,
 			},
 			replace: true,
 		});
-	}, [bucketUrl, gestion, busquedaDeb, search, navigate]);
+	}, [
+		conSesion,
+		bucketUrl,
+		gestion,
+		busquedaDeb,
+		asesorId,
+		segmento,
+		search,
+		navigate,
+	]);
+
+	/* ── Asesores (Cartera general) ────────────────────────────────────── */
+	const asesoresCartera = useAsesoresCartera(!!session && esSup);
+	const asesorElegido =
+		asesorId === null
+			? undefined
+			: asesoresCartera.todos.find((a) => a.asesorId === asesorId);
+	// Con ?asesor= se espera la lista para no traer primero todo el equipo.
+	const asesorResuelto = asesorId === null || asesoresCartera.listo;
+	const emailConsulta = esSup
+		? (asesorElegido?.email ?? undefined)
+		: emailCobrador;
 
 	/* ── Consultas ─────────────────────────────────────────────────────── */
 	const perfilQ = useQuery({
@@ -251,12 +350,18 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	const sinAsesor = !!perfil && perfil.sinAsesor && !perfil.esSupervision;
 
 	const statsQ = useQuery({
-		...orpc.getCobrosDashboardStats.queryOptions({ input: { emailCobrador } }),
-		enabled: !!session && !sinAsesor,
+		...orpc.getCobrosDashboardStats.queryOptions({
+			input: { emailCobrador: emailConsulta },
+		}),
+		enabled: !!session && !sinAsesor && asesorResuelto,
 	});
 
+	// Total de la cola (y, en supervisión, los conteos por categoría para el
+	// selector de segmentos, del asesor elegido si hay uno).
 	const colaQ = useQuery({
-		...orpc.getColaDia.queryOptions({ input: { page: 1, perPage: 1 } }),
+		...orpc.getColaDia.queryOptions({
+			input: { page: 1, perPage: 1, asesorId: asesorId ?? undefined },
+		}),
 		enabled: !!session && !!perfil && !sinAsesor,
 	});
 
@@ -290,45 +395,105 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	const time = fechaDesde || fechaHasta ? undefined : TIME_POR_PERIODO[periodo];
 	const etiquetasInput = etiquetas.length > 0 ? etiquetas : undefined;
 
+	const filtrosCreditos = {
+		estadoMora: etapa || undefined,
+		searchTerm: busquedaDeb || undefined,
+		numeroSifco: sifcoDeb || undefined,
+		time,
+		fechaDesde,
+		fechaHasta,
+		etiquetas: etiquetasInput,
+		capitalMin,
+		capitalMax,
+		excluirPagadosMes: excluirPagados || undefined,
+	};
+
+	// Cartera general con un segmento: la tabla sale de la fuente del segmento
+	// (ver use-cartera-general.ts). Sin segmento, la consulta de siempre.
+	const general = useCarteraGeneral({
+		habilitado: !!session && esSup && asesorResuelto,
+		asesorId,
+		asesor: asesorElegido,
+		segmento,
+		filtros: filtrosCreditos,
+		periodo,
+		etapa,
+		orden,
+		page,
+		pageSize,
+		hayOtrosFiltros:
+			contarFiltrosActivos({
+				periodo,
+				rango,
+				etapa,
+				etiquetas,
+				capitalMin,
+				capitalMax,
+				excluirPagados,
+				sifco,
+				gestion,
+				busqueda,
+			}) > 0,
+	});
+	const seg = general.resultado;
+
+	// «Sin acuerdo» (Figma) todavía no lo filtra el servidor (tarea S5): se
+	// pide la cartera sin él y se filtra la página.
+	const gestionServidor =
+		gestion && gestion !== "sin_acuerdo" ? gestion : undefined;
 	const creditosQ = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
+				...filtrosCreditos,
 				limit: pageSize,
 				offset: (page - 1) * pageSize,
-				estadoMora: etapa || undefined,
-				searchTerm: busquedaDeb || undefined,
-				numeroSifco: sifcoDeb || undefined,
-				time,
-				emailCobrador,
-				fechaDesde,
-				fechaHasta,
-				etiquetas: etiquetasInput,
-				capitalMin,
-				capitalMax,
-				excluirPagadosMes: excluirPagados || undefined,
-				filtroGestion: gestion ?? undefined,
+				emailCobrador: emailConsulta,
+				filtroGestion: gestionServidor,
 			},
 		}),
-		enabled: !!session && !sinAsesor,
+		enabled: !!session && !sinAsesor && !segmento && asesorResuelto,
 		placeholderData: keepPreviousData,
 	});
 
-	const total = creditosQ.data?.total ?? 0;
-	const totalPaginas = creditosQ.data?.totalPages || 1;
+	const total = seg ? seg.total : (creditosQ.data?.total ?? 0);
+	const totalPaginas = seg ? seg.totalPaginas : creditosQ.data?.totalPages || 1;
+	const datosListos = seg ? !seg.cargando : !!creditosQ.data;
 
 	// Si los filtros achican el total, no quedarse en una página que ya no existe.
 	useEffect(() => {
-		if (creditosQ.data && page > totalPaginas) setPage(totalPaginas);
-	}, [creditosQ.data, page, totalPaginas, setPage]);
+		if (datosListos && page > totalPaginas) setPage(totalPaginas);
+	}, [datosListos, page, totalPaginas, setPage]);
 
-	const filas = useMemo(
-		() =>
-			ordenarPagina(
-				refinarPagina(creditosQ.data?.data ?? [], { periodo, etapa }),
-				orden,
-			),
-		[creditosQ.data, periodo, etapa, orden],
+	const filasBase = useMemo(() => {
+		const refinadas = refinarPagina(creditosQ.data?.data ?? [], {
+			periodo,
+			etapa,
+		});
+		return ordenarPagina(
+			gestion === "sin_acuerdo"
+				? refinadas.filter((f) => f.estadoGestion === "sin_acuerdo")
+				: refinadas,
+			orden,
+		);
+	}, [creditosQ.data, periodo, etapa, orden, gestion]);
+	const filas = seg ? seg.filas : filasBase;
+
+	/* ── Selección múltiple y reasignación en bloque ───────────────────── */
+	const [seleccion, setSeleccion] = useState<Map<string, FilaCartera>>(
+		() => new Map(),
 	);
+	const [reasignarAbierto, setReasignarAbierto] = useState(false);
+	const [slaAbierto, setSlaAbierto] = useState(false);
+	const seleccionar = (ids: string[], marcar: boolean) =>
+		setSeleccion((previa) => {
+			const nueva = new Map(previa);
+			for (const id of ids) {
+				const fila = filas.find((f) => f.contratoId === id);
+				if (marcar && fila) nueva.set(id, fila);
+				else nueva.delete(id);
+			}
+			return nueva;
+		});
 
 	/* ── Resumen operativo ─────────────────────────────────────────────── */
 	const stats = statsQ.data;
@@ -357,11 +522,16 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	// conoce los chips de gestión ni el rango de capital: mandarlo así llegaría a
 	// más clientes de los que se ven. Se bloquea (el envío masivo va de salida;
 	// lo importante es que nunca escriba a quien no corresponde).
-	const filtroNoSoportado = gestion
-		? `«${GESTION_LABEL[gestion]}»`
-		: capitalMin !== undefined || capitalMax !== undefined
-			? "el rango de capital"
-			: null;
+	// Tampoco conoce el asesor elegido ni los segmentos de la Cartera general.
+	const filtroNoSoportado = segmento
+		? `«${etiquetaSegmento(segmento)}»`
+		: asesorId !== null
+			? "el filtro por asesor"
+			: gestion
+				? `«${GESTION_LABEL[gestion]}»`
+				: capitalMin !== undefined || capitalMax !== undefined
+					? "el rango de capital"
+					: null;
 	const accionMasiva = filtroNoSoportado ? (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -391,11 +561,74 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		</MassWhatsappModal>
 	);
 
-	const error = creditosQ.isError
-		? creditosQ.error instanceof Error && creditosQ.error.message
-			? creditosQ.error.message
-			: "Intente de nuevo en unos minutos."
-		: null;
+	const error = seg
+		? seg.error
+		: creditosQ.isError
+			? creditosQ.error instanceof Error && creditosQ.error.message
+				? creditosQ.error.message
+				: "Intente de nuevo en unos minutos."
+			: null;
+
+	/* ── Cartera general (supervisión y admin) ─────────────────────────── */
+	const datosCola = colaQ.data as
+		| {
+				total?: number;
+				conteos?: Record<string, number>;
+				conteosExtra?: Record<string, number>;
+		  }
+		| undefined;
+	const avisos = [...(seg?.avisos ?? [])];
+	if (!seg && gestion === "sin_acuerdo") {
+		avisos.push(
+			"«Sin acuerdo» se aplica sobre la página visible: el total y las demás páginas todavía no lo descuentan.",
+		);
+	}
+	if (!seg && asesorId !== null && asesoresCartera.listo && !emailConsulta) {
+		avisos.push(
+			"El asesor elegido no tiene correo de Cash-In en cartera: la tabla no se puede filtrar por él.",
+		);
+	}
+	const supervision: SupervisionCartera | undefined = esSup
+		? {
+				asesores: asesoresCartera.activos,
+				asesoresCargando: asesoresCartera.cargando,
+				asesorId,
+				onAsesor: cambiarAsesor,
+				segmento,
+				onSegmento: cambiarSegmento,
+				conteos: {
+					cola: datosCola
+						? {
+								todas: datosCola.total,
+								...datosCola.conteos,
+								...datosCola.conteosExtra,
+							}
+						: {},
+					...general.conteos,
+				},
+				detalles: seg?.detalles,
+				avisos,
+				sinFila: seg?.sinFila,
+				seleccion: new Set(seleccion.keys()),
+				onSeleccionar: seleccionar,
+				onLimpiarSeleccion: () => setSeleccion(new Map()),
+				onReasignar: () => {
+					if (seleccion.size === 0) {
+						toast.info(
+							"Seleccione en la tabla los créditos que desea reasignar.",
+						);
+						return;
+					}
+					setReasignarAbierto(true);
+				},
+				herramientas: (
+					<ToolbarButton icon={Clock} onClick={() => setSlaAbierto(true)}>
+						Configurar SLA
+					</ToolbarButton>
+				),
+				onAtencionHoy: () => cambiarSegmento({ tipo: "cola", valor: "todas" }),
+			}
+		: undefined;
 
 	return (
 		<>
@@ -424,10 +657,14 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				etapasFiltro={etapasFiltro}
 				filas={filas}
 				total={total}
-				cargando={creditosQ.isLoading}
-				actualizando={creditosQ.isPlaceholderData}
+				cargando={
+					seg
+						? seg.cargando
+						: creditosQ.isLoading || (!asesorResuelto && !creditosQ.data)
+				}
+				actualizando={seg ? seg.actualizando : creditosQ.isPlaceholderData}
 				error={error}
-				onReintentar={() => creditosQ.refetch()}
+				onReintentar={() => (seg ? seg.refetch() : creditosQ.refetch())}
 				pagina={Math.min(page, totalPaginas)}
 				totalPaginas={totalPaginas}
 				tamanoPagina={TAMANOS_PAGINA.includes(pageSize) ? pageSize : 25}
@@ -450,6 +687,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 						i,
 					)
 				}
+				supervision={supervision}
 			/>
 			<PanelGestionRapida
 				creditoId={panel}
@@ -457,6 +695,23 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				onClose={() => setPanel(null)}
 			/>
 			<WorkspaceModal {...workspace.modal} />
+			{esSup ? (
+				<>
+					<ReasignarBloqueDialog
+						open={reasignarAbierto}
+						onOpenChange={setReasignarAbierto}
+						filas={[...seleccion.values()]}
+						asesores={asesoresCartera.activos}
+						onTerminado={() => setSeleccion(new Map())}
+					/>
+					{/* Vivía en la Cola del día; ahora en la barra de la cartera. */}
+					<ConfigurarSlaModal
+						open={slaAbierto}
+						onOpenChange={setSlaAbierto}
+						catalogo={bucketsCatalogo.data}
+					/>
+				</>
+			) : null}
 		</>
 	);
 }

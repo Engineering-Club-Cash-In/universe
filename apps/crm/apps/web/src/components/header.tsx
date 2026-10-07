@@ -5,7 +5,6 @@ import {
 	BarChart3,
 	Bell,
 	BellOff,
-	BellRing,
 	Briefcase,
 	Building2,
 	Calculator,
@@ -16,12 +15,10 @@ import {
 	FileText,
 	Gauge,
 	Gavel,
-	HandCoins,
 	Handshake,
 	Landmark,
 	Layers,
 	LayoutDashboard,
-	ListChecks,
 	Lock,
 	MapPin,
 	Menu,
@@ -322,43 +319,23 @@ export default function Header() {
 												Dashboard
 											</Link>
 										</DropdownMenuItem>
-										{/* Supervisión trabaja la Cola del día de todo el equipo.
-												"Agenda del día" sigue fuera del menú; su ruta vive
-												(/cobros/agenda). */}
-										{PERMISSIONS.canAssignCobros(userRole) ? (
-											<DropdownMenuItem asChild>
-												<Link to="/cobros/cola" className="cursor-pointer">
-													<ListChecks className="mr-2 h-4 w-4" />
-													Cola del día
-												</Link>
-											</DropdownMenuItem>
-										) : null}
 										{/* Rediseño (Figma Asesor Junior/Senior): "Mi día" se unió al
-										    Dashboard; la cartera completa vive en Mi Cartera. */}
+										    Dashboard; la cartera completa vive en Mi Cartera. Para
+										    supervisión y admin es la «Cartera general» (Figma 2262:12),
+										    que absorbió la Cola del día y las Alertas de promesas y de
+										    convenios como segmentos: esas páginas salieron del menú y
+										    sus rutas redirigen a la cartera con el filtro. "Agenda del
+										    día" sigue fuera del menú; su ruta vive (/cobros/agenda). */}
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/cartera" className="cursor-pointer">
 												<Wallet className="mr-2 h-4 w-4" />
 												{PERMISSIONS.canAssignCobros(userRole)
-													? "Cartera"
+													? "Cartera general"
 													: "Mi Cartera"}
 											</Link>
 										</DropdownMenuItem>
-										{/* Rediseño (Figma Asesor Junior/Senior): para el asesor estas
-												páginas quedaron cubiertas por el Dashboard (agenda de hoy:
-												promesas que vencen, vencidas y próximas) y Mi Cartera
-												(chips de convenios, etapa "En convenio"). Solo supervisión
-												las ve en el menú; las rutas siguen vivas. */}
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/promesas"
-														className="cursor-pointer"
-													>
-														<BellRing className="mr-2 h-4 w-4" />
-														Alertas de Promesas de Pago
-													</Link>
-												</DropdownMenuItem>
 												<DropdownMenuItem asChild>
 													<Link
 														to="/cobros/convenios"
@@ -366,19 +343,6 @@ export default function Header() {
 													>
 														<Handshake className="mr-2 h-4 w-4" />
 														Convenios
-													</Link>
-												</DropdownMenuItem>
-												{/* COBROS-02 Fase 1: hermana de Alertas de Promesas —
-												convenios incumplidos y próximos a vencer. Va pegada a
-												"Convenios" (el listado) porque son la misma cuenta
-												vista desde dos lados: el catálogo y lo que urge. */}
-												<DropdownMenuItem asChild>
-													<Link
-														to="/cobros/alertas-convenios"
-														className="cursor-pointer"
-													>
-														<HandCoins className="mr-2 h-4 w-4" />
-														Alertas de Convenios
 													</Link>
 												</DropdownMenuItem>
 												<DropdownMenuItem asChild>
@@ -898,40 +862,20 @@ function MobileNav({
 											<Banknote />
 											Dashboard
 										</Link>
-										{PERMISSIONS.canAssignCobros(userRole) ? (
-											<Link to="/cobros/cola" className={MOBILE_LINK_CLASS}>
-												<ListChecks />
-												Cola del día
-											</Link>
-										) : null}
 										<Link to="/cobros/cartera" className={MOBILE_LINK_CLASS}>
 											<Wallet />
 											{PERMISSIONS.canAssignCobros(userRole)
-												? "Cartera"
+												? "Cartera general"
 												: "Mi Cartera"}
 										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
 											<>
-												<Link
-													to="/cobros/promesas"
-													className={MOBILE_LINK_CLASS}
-												>
-													<BellRing />
-													Alertas de Promesas de Pago
-												</Link>
 												<Link
 													to="/cobros/convenios"
 													className={MOBILE_LINK_CLASS}
 												>
 													<Handshake />
 													Convenios
-												</Link>
-												<Link
-													to="/cobros/alertas-convenios"
-													className={MOBILE_LINK_CLASS}
-												>
-													<HandCoins />
-													Alertas de Convenios
 												</Link>
 												<Link
 													to="/cobros/historial-agendas"

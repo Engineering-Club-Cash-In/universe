@@ -1,5 +1,6 @@
 import {
 	keepPreviousData,
+	useQueries,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
@@ -97,6 +98,9 @@ export type CarteraSearch = {
 } & SearchSegmento;
 
 const K = (k: string) => `cobros/cartera/${k}`;
+
+/** Buckets del motor que tienen chip (B0–B5). */
+const NUMEROS_BUCKET = [0, 1, 2, 3, 4, 5] as const;
 
 /**
  * Antes de que los `usePersistedState` lean sessionStorage: si la URL trae
@@ -360,6 +364,22 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		}),
 		enabled: !!session && !sinAsesor && asesorResuelto,
 	});
+	// Conteo de cada chip de bucket con el MISMO criterio del filtro: el bucket
+	// asignado por el motor (columna Bucket), no las cuotas atrasadas de /stats.
+	const conteosBucketQ = useQueries({
+		queries: NUMEROS_BUCKET.map((n) => ({
+			...orpc.getTodosLosCreditos.queryOptions({
+				input: {
+					buckets: [n],
+					emailCobrador: emailConsulta,
+					limit: 1,
+					offset: 0,
+				},
+			}),
+			enabled: !!session && !sinAsesor && asesorResuelto,
+			staleTime: 60_000,
+		})),
+	});
 
 	// Total de la cola (y, en supervisión, los conteos por categoría para el
 	// selector de segmentos, del asesor elegido si hay uno).
@@ -400,8 +420,17 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	const time = fechaDesde || fechaHasta ? undefined : TIME_POR_PERIODO[periodo];
 	const etiquetasInput = etiquetas.length > 0 ? etiquetas : undefined;
 
+	// El chip (o la etapa) de bucket filtra por el bucket ASIGNADO por el motor
+	// —lo que muestra la columna Bucket—, no por cuotas atrasadas: se manda
+	// `buckets` y no `estadoMora`. Las etapas que no son bucket (en convenio,
+	// incobrable, completado…) siguen por `estadoMora`.
+	const bucketEtapa = bucketDeEstadoMora(etapa);
+	const filtroEtapa = bucketEtapa
+		? { buckets: [Number(bucketEtapa.slice(1))] }
+		: { estadoMora: etapa || undefined };
+
 	const filtrosCreditos = {
-		estadoMora: etapa || undefined,
+		...filtroEtapa,
 		searchTerm: busquedaDeb || undefined,
 		numeroSifco: sifcoDeb || undefined,
 		time,
@@ -507,10 +536,10 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	/* ── Resumen operativo ─────────────────────────────────────────────── */
 	const stats = statsQ.data;
 	const porBucket: Partial<Record<Bucket, number>> = {};
-	for (const s of stats?.estatusStats ?? []) {
-		const b = bucketDeEstadoMora(s.estadoMora);
-		if (b) porBucket[b] = s.totalCases;
-	}
+	NUMEROS_BUCKET.forEach((n, i) => {
+		const total = conteosBucketQ[i]?.data?.total;
+		if (total !== undefined) porBucket[`B${n}` as Bucket] = total;
+	});
 	const efectividad = stats ? Number(stats.efectividad) : Number.NaN;
 	const resumen: ResumenCartera = {
 		asignados: stats ? stats.totalCasosAsignados : null,
@@ -554,7 +583,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	) : (
 		<MassWhatsappModal
 			filtros={{
-				estadoMora: etapa || undefined,
+				...filtroEtapa,
 				searchTerm: busquedaDeb || undefined,
 				numeroSifco: sifcoDeb || undefined,
 				time,

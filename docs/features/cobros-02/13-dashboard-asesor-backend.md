@@ -89,10 +89,13 @@ git grep -n "TODO(José)" -- apps/crm
 - **Hoy:**
   - `/getAllCredits` ordena por `fecha_creacion DESC` y pagina en el server, así que el front solo puede ordenar la página actual. Lo dice en la interfaz.
   - El filtro `estadoMora` y los conteos de `/stats` agrupan por **cuotas atrasadas**, no por el bucket del motor. Un crédito en recuperación o en convenio puede caer en otro chip.
-- **Qué hace falta:**
-  - En `/getAllCredits`, un parámetro `orden` (bucket del motor desc, después `diasAtrasoMoraMaximo` desc, después saldo) y un filtro `buckets` por bucket del motor.
-  - Opcional: que `/stats` agrupe por bucket del motor.
-  - En el CRM, pasarlos desde `getTodosLosCreditos`. El front ya manda `estadoMora` al elegir un chip; se puede agregar `buckets` sin romper nada.
+- **✅ Filtro por bucket del motor: hecho el 2026-10-07** (directo en COBROS-02, a pedido del usuario):
+  - `/getAllCredits` (GET y POST) acepta `buckets` (bucket del motor, 0–5), el mismo filtro de `/buckets/creditos`. Con él, cartera-back ignora `estado` y usa todo el funnel.
+  - `getTodosLosCreditos` y `enviarWhatsappMasivoCobros` aceptan `buckets`. El chip y la etapa de bucket de la cartera mandan `buckets` en lugar de `estadoMora`.
+  - Los conteos de los chips salen de `getTodosLosCreditos({buckets:[n], limit:1})`, con el mismo criterio que el filtro.
+- **Qué falta:**
+  - En `/getAllCredits`, un parámetro `orden`: bucket del motor desc, después `diasAtrasoMoraMaximo` desc, después saldo.
+  - Opcional: que `/stats` agrupe por bucket del motor. Así los chips se contarían en una sola llamada y no en seis.
 
 ### B6 · "Pagos por confirmar"
 

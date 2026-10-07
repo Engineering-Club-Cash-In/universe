@@ -100,6 +100,8 @@ function descargarCsv(items: DescartadoItem[]) {
 interface MassWhatsappModalProps {
 	filtros: {
 		estadoMora?: string;
+		/** Bucket del motor (0–5); con él no se manda `estadoMora`. */
+		buckets?: number[];
 		searchTerm?: string;
 		numeroSifco?: string;
 		time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
@@ -197,6 +199,7 @@ export function MassWhatsappModal({
 				plantillaId,
 				cuerpoEditado: cuerpoEditado || undefined,
 				estadoMora: filtros.estadoMora,
+				buckets: filtros.buckets,
 				searchTerm: filtros.searchTerm,
 				numeroSifco: filtros.numeroSifco,
 				time: filtros.time,
@@ -371,10 +374,12 @@ export function MassWhatsappModal({
 										<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
 											<li>
 												Estado de mora:{" "}
-												{filtros.estadoMora
-													? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
-														filtros.estadoMora)
-													: "Todos"}
+												{filtros.buckets && filtros.buckets.length > 0
+													? `${filtros.buckets.map((b) => `B${b}`).join(", ")} (bucket asignado)`
+													: filtros.estadoMora
+														? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
+															filtros.estadoMora)
+														: "Todos"}
 											</li>
 											<li>Rango temporal: {formatRangoTemporal(filtros)}</li>
 											<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>

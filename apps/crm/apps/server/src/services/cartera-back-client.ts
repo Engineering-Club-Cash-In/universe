@@ -32,9 +32,9 @@ import type {
 	CarteraConvenioListado,
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
+	CarteraCreditoOperativoSat,
 	CarteraCuotasProximasResponse,
 	CarteraDecidirConvenioResultado,
-	CarteraCreditoOperativoSat,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
@@ -54,7 +54,6 @@ import type {
 	CreditoDirectoResponse,
 	DecidirConvenioInput,
 	EstadoPagoCartera,
-	ProyeccionMoraMesResponse,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -78,6 +77,7 @@ import type {
 	PagosPorBoletaResponse,
 	PoolPorAsesorRow,
 	PromesaActivaCredito,
+	ProyeccionMoraMesResponse,
 	RegistrarPagoInput,
 	RegistrarPagoResultado,
 	ResumenCreditoResponse,
@@ -85,13 +85,13 @@ import type {
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
+import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import type {
 	HistorialTraslado,
 	PreviewTraslado,
 	ResultadoTraslado,
 	SolicitudTraslado,
 } from "../types/traslados-cobros";
-import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	getCarteraAccessToken,
 	invalidateAndReauth,
@@ -1438,89 +1438,87 @@ export class CarteraBackClient {
 								esCancelacionDelLlamador(options.signal),
 							)
 					: <R>(fn: () => Promise<R>) => fn();
-				const data = await ejecutar<T>(
-					async () => {
-						const requestOptions = await buildRequestOptions();
-						const res = await this.config.fetchTransport(url, requestOptions);
+				const data = await ejecutar<T>(async () => {
+					const requestOptions = await buildRequestOptions();
+					const res = await this.config.fetchTransport(url, requestOptions);
 
-						if (!res.ok) {
-							const errorText = await res.text();
-							let errorData: { error?: string; message?: string } = {};
+					if (!res.ok) {
+						const errorText = await res.text();
+						let errorData: { error?: string; message?: string } = {};
 
-							try {
-								errorData = JSON.parse(errorText);
-							} catch {
-								errorData = { error: errorText };
-							}
+						try {
+							errorData = JSON.parse(errorText);
+						} catch {
+							errorData = { error: errorText };
+						}
 
-							if (res.status === 401 || res.status === 403) {
-								if (!didReauth) {
-									didReauth = true;
-									const retryOptions = await buildRequestOptions(true);
-									const retryRes = await this.config.fetchTransport(
-										url,
-										retryOptions,
-									);
-									if (retryRes.ok) {
-										const crudoRetry = await retryRes.json();
-										validarDentroDelBreaker?.(crudoRetry);
-										return crudoRetry as T;
-									}
-									const retryText = await retryRes.text();
-									let retryData: { error?: string; message?: string } = {};
-									try {
-										retryData = JSON.parse(retryText);
-									} catch {
-										retryData = { error: retryText };
-									}
-									throw new CarteraBackHttpError(
-										`Authentication failed: ${retryData.error || retryData.message || retryText}`,
-										retryRes.status,
-										retryData,
-									);
+						if (res.status === 401 || res.status === 403) {
+							if (!didReauth) {
+								didReauth = true;
+								const retryOptions = await buildRequestOptions(true);
+								const retryRes = await this.config.fetchTransport(
+									url,
+									retryOptions,
+								);
+								if (retryRes.ok) {
+									const crudoRetry = await retryRes.json();
+									validarDentroDelBreaker?.(crudoRetry);
+									return crudoRetry as T;
+								}
+								const retryText = await retryRes.text();
+								let retryData: { error?: string; message?: string } = {};
+								try {
+									retryData = JSON.parse(retryText);
+								} catch {
+									retryData = { error: retryText };
 								}
 								throw new CarteraBackHttpError(
-									`Authentication failed: ${errorData.error || errorData.message}`,
-									res.status,
-									errorData,
+									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+									retryRes.status,
+									retryData,
 								);
 							}
-
-							if (res.status === 400) {
-								throw new CarteraBackHttpError(
-									`Validation failed: ${errorData.error || errorData.message}`,
-									res.status,
-									errorData,
-								);
-							}
-
-							// ⚠️ Un 404 SIN `codigo` y con `error: "NOT_FOUND"` no es un dato
-							// que no existe: es **la ruta** que no existe.
-							//
-							// Es el 404 por defecto de Elysia (`NotFoundError`), así que
-							// significa que la instancia de cartera-back del otro lado no
-							// tiene ese endpoint — típicamente porque está construida desde
-							// una rama que no lo trae. Sin este mensaje, el error que llega
-							// es `HTTP 404: NOT_FOUND` sin decir siquiera qué se pidió, y
-							// diagnosticarlo cuesta media hora de leer logs.
-							if (rutaInexistente(res.status, errorData)) {
-								const detalle = `cartera-back no tiene la ruta ${endpoint.split("?")[0]} (404 NOT_FOUND de Elysia). La instancia en ${this.config.baseUrl} está construida desde una rama que no incluye ese endpoint.`;
-								console.error(`[CarteraBackClient] ${detalle}`);
-								throw new CarteraBackHttpError(detalle, res.status, errorData);
-							}
-
 							throw new CarteraBackHttpError(
-								`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
+								`Authentication failed: ${errorData.error || errorData.message}`,
 								res.status,
 								errorData,
 							);
 						}
 
-						const crudo = await res.json();
-						validarDentroDelBreaker?.(crudo);
-						return crudo as T;
-					},
-				);
+						if (res.status === 400) {
+							throw new CarteraBackHttpError(
+								`Validation failed: ${errorData.error || errorData.message}`,
+								res.status,
+								errorData,
+							);
+						}
+
+						// ⚠️ Un 404 SIN `codigo` y con `error: "NOT_FOUND"` no es un dato
+						// que no existe: es **la ruta** que no existe.
+						//
+						// Es el 404 por defecto de Elysia (`NotFoundError`), así que
+						// significa que la instancia de cartera-back del otro lado no
+						// tiene ese endpoint — típicamente porque está construida desde
+						// una rama que no lo trae. Sin este mensaje, el error que llega
+						// es `HTTP 404: NOT_FOUND` sin decir siquiera qué se pidió, y
+						// diagnosticarlo cuesta media hora de leer logs.
+						if (rutaInexistente(res.status, errorData)) {
+							const detalle = `cartera-back no tiene la ruta ${endpoint.split("?")[0]} (404 NOT_FOUND de Elysia). La instancia en ${this.config.baseUrl} está construida desde una rama que no incluye ese endpoint.`;
+							console.error(`[CarteraBackClient] ${detalle}`);
+							throw new CarteraBackHttpError(detalle, res.status, errorData);
+						}
+
+						throw new CarteraBackHttpError(
+							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
+							res.status,
+							errorData,
+						);
+					}
+
+					const crudo = await res.json();
+					validarDentroDelBreaker?.(crudo);
+					return crudo as T;
+				});
 
 				// Cache successful GET requests
 				if (useCache && this.config.enableCache && options.method === "GET") {
@@ -1662,11 +1660,7 @@ export class CarteraBackClient {
 	async getCreditosOperativosParaSat(): Promise<CarteraCreditoOperativoSat[]> {
 		const response = await this.request<
 			CarteraBackApiResponse<CarteraCreditoOperativoSat[]>
-		>(
-			"/internal/sat/creditos-operativos",
-			{ method: "GET" },
-			false,
-		);
+		>("/internal/sat/creditos-operativos", { method: "GET" }, false);
 		if (!response.success) {
 			throw new Error(
 				response.message ?? "Cartera no devolvió los créditos operativos.",
@@ -2126,6 +2120,8 @@ export class CarteraBackClient {
 						...(params.excluir_pagados_mes && {
 							excluir_pagados_mes: true,
 						}),
+						...(params.buckets &&
+							params.buckets.length > 0 && { buckets: params.buckets }),
 						excel: false,
 					}),
 				},
@@ -2171,6 +2167,8 @@ export class CarteraBackClient {
 				...(params.capital_max !== undefined && {
 					capital_max: params.capital_max.toString(),
 				}),
+				...(params.buckets &&
+					params.buckets.length > 0 && { buckets: params.buckets.join(",") }),
 				...(params.excluir_pagados_mes && {
 					excluir_pagados_mes: "true",
 				}),
@@ -3093,10 +3091,13 @@ export class CarteraBackClient {
 			cuotas_atrasadas?: number;
 		};
 		try {
-			response = await this.request(`/payment-agreements/${convenioId}/anular`, {
-				method: "POST",
-				body: JSON.stringify(input),
-			});
+			response = await this.request(
+				`/payment-agreements/${convenioId}/anular`,
+				{
+					method: "POST",
+					body: JSON.stringify(input),
+				},
+			);
 		} finally {
 			this.cache.invalidate("/credito?");
 			this.cache.invalidate("payment-agreements");
@@ -4516,10 +4517,7 @@ export class CarteraBackClient {
 		);
 	}
 
-	async getCierreMoraOficial(params: {
-		periodo: string;
-		asesores?: number[];
-	}) {
+	async getCierreMoraOficial(params: { periodo: string; asesores?: number[] }) {
 		const queryParams = new URLSearchParams({ periodo: params.periodo });
 		if (params.asesores?.length)
 			queryParams.set("asesores", params.asesores.join(","));
@@ -4724,7 +4722,9 @@ export class CarteraBackClient {
 			buffer: Buffer.from(await res.arrayBuffer()),
 			contentType:
 				res.headers.get("content-type") || "application/octet-stream",
-			filename: filenameMatch?.[1] || `supervision-pagalo.${formato === "excel" ? "xlsx" : "pdf"}`,
+			filename:
+				filenameMatch?.[1] ||
+				`supervision-pagalo.${formato === "excel" ? "xlsx" : "pdf"}`,
 			truncado: res.headers.get("x-export-truncado") === "true",
 			total: Number(res.headers.get("x-export-total") ?? 0),
 			cantidad: Number(res.headers.get("x-export-cantidad") ?? 0),

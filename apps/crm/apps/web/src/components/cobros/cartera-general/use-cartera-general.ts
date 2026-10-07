@@ -152,6 +152,10 @@ export function useCarteraGeneral(opts: {
 	resultado: ResultadoSegmento | null;
 } {
 	const { habilitado, asesorId, segmento, page, pageSize } = opts;
+	// Con etapa (estadoMora) o bucket del motor, la consulta extra de los
+	// EN_CONVENIO sobra: el filtro ya define qué créditos entran.
+	const conEtapa =
+		!!opts.filtros.estadoMora || (opts.filtros.buckets?.length ?? 0) > 0;
 
 	/* ── Alertas (siempre, para los conteos de los chips) ─────────────────── */
 	const promesasQ = useQuery({
@@ -353,7 +357,7 @@ export function useCarteraGeneral(opts: {
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: { ...inputLista, estadoMora: "en_convenio" },
 		}),
-		enabled: conLista && !opts.filtros.estadoMora,
+		enabled: conLista && !conEtapa,
 		placeholderData: keepPreviousData,
 	});
 
@@ -363,9 +367,7 @@ export function useCarteraGeneral(opts: {
 		const juntas: FilaCartera[] = [];
 		const listas = [
 			conLista ? (listaQ.data?.data ?? []) : [],
-			conLista && !opts.filtros.estadoMora
-				? (enConvenioQ.data?.data ?? [])
-				: [],
+			conLista && !conEtapa ? (enConvenioQ.data?.data ?? []) : [],
 		];
 		for (const lista of listas) {
 			for (const f of lista) {
@@ -397,8 +399,7 @@ export function useCarteraGeneral(opts: {
 			: ordenadas.slice((page - 1) * pageSize, page * pageSize);
 
 		const cargandoLista =
-			conLista &&
-			(listaQ.isLoading || (!opts.filtros.estadoMora && enConvenioQ.isLoading));
+			conLista && (listaQ.isLoading || (!conEtapa && enConvenioQ.isLoading));
 		const cargando = fuente.cargando || cargandoLista;
 		const errorFuente = fuente.error ?? listaQ.error ?? enConvenioQ.error;
 
@@ -455,7 +456,7 @@ export function useCarteraGeneral(opts: {
 				fuente.refetch();
 				if (conLista) {
 					void listaQ.refetch();
-					if (!opts.filtros.estadoMora) void enConvenioQ.refetch();
+					if (!conEtapa) void enConvenioQ.refetch();
 				}
 			},
 			detalles: fuente.detalles,
@@ -468,7 +469,7 @@ export function useCarteraGeneral(opts: {
 		conLista,
 		listaQ,
 		enConvenioQ,
-		opts.filtros.estadoMora,
+		conEtapa,
 		opts.periodo,
 		opts.etapa,
 		opts.orden,

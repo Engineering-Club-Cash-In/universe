@@ -57,6 +57,32 @@ import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
 import { StatusCredit } from "../database/db/schema";
+import { STATUS_FUNNEL } from "./buckets";
+
+/**
+ * 🪣 COBROS-02: `buckets` de /getAllCredits = CSV de buckets del MOTOR (0-5),
+ * el mismo filtro de /buckets/creditos (último bucket de buckets_historial).
+ * `undefined` = sin filtro; "invalid" = token fuera de 0-5 (→ 400).
+ */
+function parseBucketsCsv(raw: string | undefined): number[] | undefined | "invalid" {
+  if (raw === undefined || String(raw).trim() === "") return undefined;
+  const tokens = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+  if (tokens.length === 0 || tokens.some((s) => !/^[0-5]$/.test(s))) return "invalid";
+  return [...new Set(tokens.map(Number))];
+}
+
+/**
+ * Con filtro de bucket el estado lo encapsula el bucket (B5 incluye INCOBRABLE,
+ * B4 EN_RECUPERACION): si no mandan `estados_credito`, se usa todo el funnel,
+ * igual que /buckets/creditos. Sin buckets, lo que venga.
+ */
+function estadosConBuckets(
+  estados: StatusCredit[] | undefined,
+  buckets: number[] | undefined,
+): StatusCredit[] | undefined {
+  if (!buckets || buckets.length === 0) return estados;
+  return estados && estados.length > 0 ? estados : STATUS_FUNNEL;
+}
 
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
@@ -260,6 +286,7 @@ export const creditRouter = new Elysia()
     cuotas_min,          // 🆕 rango de cuotas atrasadas (min inclusivo)
     cuotas_max,          // 🆕 rango de cuotas atrasadas (max inclusivo)
     excluir_pagados_mes, // 🆕 NUEVO
+    buckets,             // 🪣 COBROS-02: CSV de buckets del motor (0-5)
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -413,6 +440,13 @@ export const creditRouter = new Elysia()
   // 🆕 Excluir créditos con su cuota actual ya pagada (default false)
   const excluirPagadosMesParam = excluir_pagados_mes === "true" ? true : undefined;
 
+  // 🪣 COBROS-02: filtro por bucket del MOTOR (el mismo de /buckets/creditos).
+  const bucketsParsed = parseBucketsCsv(buckets);
+  if (bucketsParsed === "invalid") {
+    set.status = 400;
+    return { message: "Parámetro 'buckets' inválido (CSV de enteros 0-5)." };
+  }
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -448,7 +482,7 @@ export const creditRouter = new Elysia()
         pageNum,
         perPageNum,
         numeroCreditoSifco,
-        estadoParam,
+        bucketsParsed ? undefined : estadoParam, // con buckets, el estado lo da el bucket
         asesorIdNum,
         nombreUsuarioParam,
         emailAsesorParam,
@@ -461,11 +495,11 @@ export const creditRouter = new Elysia()
         numerosCreditoSifcoArray,
         capitalMinParam,
         capitalMaxParam,
-        estadosCreditoParsed?.values,
+        estadosConBuckets(estadosCreditoParsed?.values, bucketsParsed),
         aseguradoraIdNum,
         cuotasMinNum,
         cuotasMaxNum,
-        undefined, // buckets_numeros
+        bucketsParsed,
         excluirPagadosMesParam
       );
       set.status = 200;
@@ -514,6 +548,7 @@ export const creditRouter = new Elysia()
         cuotas_min,
         cuotas_max,
         excluir_pagados_mes,
+        buckets,
       } = body;
 
       // Mismos obligatorios que el GET (mes y anio): `estado` es un filtro
@@ -540,6 +575,8 @@ export const creditRouter = new Elysia()
         set.status = 400;
         return { message: `Estado de crédito inválido: ${estadosCreditoParsed.invalid}` };
       }
+      const bucketsPost =
+        buckets && buckets.length > 0 ? [...new Set(buckets as number[])] : undefined;
 
       try {
         if (excel) {
@@ -574,7 +611,7 @@ export const creditRouter = new Elysia()
           page,
           perPage,
           numero_credito_sifco,
-          estado,
+          bucketsPost ? undefined : estado, // con buckets, el estado lo da el bucket
           asesor_id,
           nombre_usuario,
           email_asesor,
@@ -587,11 +624,11 @@ export const creditRouter = new Elysia()
           sifcosLimpios,
           capital_min,
           capital_max,
-          estadosCreditoParsed?.values,
+          estadosConBuckets(estadosCreditoParsed?.values, bucketsPost),
           aseguradora_id,
           cuotas_min,
           cuotas_max,
-          undefined, // buckets_numeros
+          bucketsPost,
           excluir_pagados_mes
         );
         set.status = 200;
@@ -647,6 +684,8 @@ export const creditRouter = new Elysia()
         capital_min: t.Optional(t.Number()),
         capital_max: t.Optional(t.Number()),
         estados_credito: t.Optional(t.Array(t.String())),
+        // 🪣 COBROS-02: buckets del motor (0-5), como el CSV `buckets` del GET.
+        buckets: t.Optional(t.Array(t.Integer({ minimum: 0, maximum: 5 }))),
         aseguradora_id: t.Optional(t.Number()),
         cuotas_min: t.Optional(t.Number()),
         cuotas_max: t.Optional(t.Number()),

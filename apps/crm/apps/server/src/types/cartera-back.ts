@@ -1316,6 +1316,12 @@ export interface GetAllCreditsParams {
 	capital_min?: number;
 	capital_max?: number;
 	excluir_pagados_mes?: boolean;
+	/**
+	 * COBROS-02: buckets del MOTOR (0-5), el mismo filtro de /buckets/creditos.
+	 * Con él cartera-back ignora `estado` y usa todo el funnel (B5 incluye
+	 * INCOBRABLE).
+	 */
+	buckets?: number[];
 }
 
 export interface GetPaymentsParams {

@@ -39,7 +39,7 @@ import { StatusCredit } from "../database/db/schema";
 // que atenderlo, no dejarlo en el olvido. Se pasa como whitelist al listado para
 // que "sin filtro de bucket" = todo el funnel visible (nunca CANCELADO/
 // PENDIENTE_CANCELACION/CAIDO). Es SOLO listado: no cambia ninguna escritura.
-const STATUS_FUNNEL: StatusCredit[] = [
+export const STATUS_FUNNEL: StatusCredit[] = [
   StatusCredit.ACTIVO,
   StatusCredit.MOROSO,
   // COBROS-02 Fase 4 — sin esto, apretar "Recuperación de vehículo" hacía

@@ -279,6 +279,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	capital_min?: number;
 	capital_max?: number;
 	excluir_pagados_mes?: boolean;
+	/** COBROS-02: buckets del motor (0-5); ver GetAllCreditsParams.buckets. */
+	buckets?: number[];
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -331,6 +333,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		...(params.excluir_pagados_mes && {
 			excluir_pagados_mes: true,
 		}),
+		...(params.buckets &&
+			params.buckets.length > 0 && { buckets: params.buckets }),
 	});
 
 	return {
@@ -1437,6 +1441,9 @@ export const cobrosRouter = {
 				numerosSifco: z.array(z.string()).max(200).optional(),
 				/** Chips de Mi Cartera que dependen de las gestiones del CRM. */
 				filtroGestion: z.enum(FILTROS_GESTION_CARTERA).optional(),
+				// COBROS-02: chip de bucket = bucket ASIGNADO por el motor (0-5), no
+				// cuotas atrasadas. Con él se ignora `estadoMora`.
+				buckets: z.array(z.number().int().min(0).max(5)).max(6).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1479,7 +1486,14 @@ export const cobrosRouter = {
 					const isNameSearch =
 						!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
-					if (input.estadoMora) {
+					// Con `buckets` el filtro es el bucket del motor: cartera-back ignora
+					// el estado y usa todo el funnel, así que no se traduce `estadoMora`
+					// a rango de cuotas.
+					const buckets =
+						input.buckets && input.buckets.length > 0
+							? input.buckets
+							: undefined;
+					if (input.estadoMora && !buckets) {
 						switch (input.estadoMora) {
 							case "incobrable":
 								// Solo cambiar el estado, sin filtrar por cuotas
@@ -1567,6 +1581,7 @@ export const cobrosRouter = {
 								emailCobrador,
 								universo: async () => {
 									const todos = await obtenerTodasLasPaginasCreditos({
+										buckets,
 										mes,
 										anio,
 										cuotasMin,
@@ -1663,6 +1678,7 @@ export const cobrosRouter = {
 									`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
 								);
 								creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+									buckets,
 									mes,
 									anio,
 									page: 1,
@@ -1710,6 +1726,7 @@ export const cobrosRouter = {
 								);
 								const perPage = 200;
 								const firstPage = await obtenerTodosLosCreditosCarteraBack({
+									buckets,
 									mes,
 									anio,
 									page: 1,
@@ -1731,6 +1748,7 @@ export const cobrosRouter = {
 
 								for (let page = 2; page <= firstPage.totalPages; page++) {
 									const nextPage = await obtenerTodosLosCreditosCarteraBack({
+										buckets,
 										mes,
 										anio,
 										page,
@@ -1777,6 +1795,7 @@ export const cobrosRouter = {
 							};
 						} else {
 							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+								buckets,
 								mes,
 								anio,
 								page: 1,
@@ -1797,6 +1816,7 @@ export const cobrosRouter = {
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
 						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+							buckets,
 							mes,
 							anio,
 							page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
@@ -7649,6 +7669,8 @@ export const cobrosRouter = {
 				fechaDesde: z.string().optional(),
 				fechaHasta: z.string().optional(),
 				excluirPagadosMes: z.boolean().optional(),
+				// Bucket del motor, igual que getTodosLosCreditos.
+				buckets: z.array(z.number().int().min(0).max(5)).max(6).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -7700,7 +7722,10 @@ export const cobrosRouter = {
 				| "INCOBRABLE"
 				| "PENDIENTE_CANCELACION"
 				| undefined = "ACTIVO";
-			if (input.estadoMora) {
+			// Con `buckets` manda el bucket del motor (cartera-back ignora el estado).
+			const buckets =
+				input.buckets && input.buckets.length > 0 ? input.buckets : undefined;
+			if (input.estadoMora && !buckets) {
 				switch (input.estadoMora) {
 					case "incobrable":
 						estadoCartera = "INCOBRABLE";
@@ -7862,6 +7887,7 @@ export const cobrosRouter = {
 				let page = 1;
 				while (true) {
 					const resp = await obtenerTodosLosCreditosCarteraBack({
+						buckets,
 						mes: 0,
 						anio: new Date().getFullYear(),
 						estado: estadoCartera,

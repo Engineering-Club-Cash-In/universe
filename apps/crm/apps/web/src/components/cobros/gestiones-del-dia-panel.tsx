@@ -5,7 +5,10 @@ import {
 	EncabezadoHistorial,
 	FilaHistorial,
 } from "@/components/cobros/historial/fila-historial";
-import type { RespuestaHistorial } from "@/components/cobros/historial/tipos";
+import type {
+	FilaHistorialData,
+	RespuestaHistorial,
+} from "@/components/cobros/historial/tipos";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { BucketsCatalogoQueryData } from "@/lib/cobros/buckets-catalogo";
@@ -15,13 +18,115 @@ import { orpc } from "@/utils/orpc";
 const PAGE_SIZE = 50;
 
 /**
+ * Presentación de «Gestiones registradas por {asesor}»: recibe las filas ya
+ * cargadas (la usan el contenedor de abajo y el showcase del Detalle del
+ * asesor).
+ */
+export function GestionesDelDiaVista({
+	fecha,
+	asesorNombre,
+	items,
+	cargando,
+	error,
+	page,
+	totalPaginas,
+	onPage,
+	catalogo,
+	esSupervisor,
+}: {
+	fecha: string;
+	asesorNombre: string;
+	items: FilaHistorialData[];
+	cargando: boolean;
+	error: boolean;
+	page: number;
+	totalPaginas: number;
+	onPage: (page: number) => void;
+	catalogo: BucketsCatalogoQueryData | undefined;
+	esSupervisor: boolean;
+}) {
+	return (
+		<Card className="overflow-hidden">
+			<div className="border-b px-4 py-3">
+				<h2 className="font-semibold">
+					Gestiones registradas por {asesorNombre}
+				</h2>
+				<p className="text-gray-500 text-sm">
+					Todas las gestiones que registró ese día, estuvieran o no en su agenda
+					planificada.
+				</p>
+			</div>
+
+			{cargando ? (
+				<div className="flex items-center gap-2 px-4 py-6 text-gray-500 text-sm">
+					<Loader2 className="h-4 w-4 animate-spin" />
+					Cargando gestiones…
+				</div>
+			) : error ? (
+				<div className="px-4 py-6 text-red-600 text-sm">
+					No se pudieron cargar las gestiones.
+				</div>
+			) : items.length === 0 ? (
+				<div className="px-4 py-6 text-gray-500 text-sm">
+					{asesorNombre} no registró gestiones el {fecha}.
+				</div>
+			) : (
+				<>
+					<div className="overflow-x-auto contain-inline-size">
+						<table className="w-full text-sm">
+							<thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
+								<EncabezadoHistorial mostrarEnAgenda />
+							</thead>
+							<tbody>
+								{items.map((fila) => (
+									<FilaHistorial
+										key={fila.id}
+										fila={fila}
+										catalogo={catalogo}
+										esSupervisor={esSupervisor}
+										mostrarEnAgenda
+									/>
+								))}
+							</tbody>
+						</table>
+					</div>
+					{totalPaginas > 1 && (
+						<div className="flex items-center justify-end gap-3 border-t px-4 py-2 text-sm">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={page <= 1}
+								onClick={() => onPage(Math.max(1, page - 1))}
+							>
+								Anterior
+							</Button>
+							<span className="text-gray-500">
+								Página {page} de {totalPaginas}
+							</span>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={page >= totalPaginas}
+								onClick={() => onPage(page + 1)}
+							>
+								Siguiente
+							</Button>
+						</div>
+					)}
+				</>
+			)}
+		</Card>
+	);
+}
+
+/**
  * Todas las gestiones que un asesor registró en un día, estuvieran o no en su
  * agenda planificada — complemento de la tarjeta de agenda de
  * `CumplimientoAgendaPanel`, que solo muestra lo PLANIFICADO.
  *
- * Reusa `getHistorialAgendas` (el mismo endpoint del tab "Historial de
- * gestiones") con `marcarEnAgenda` para traer, además, si el crédito de cada
- * fila estaba en el snapshot de agenda de ese asesor ese día.
+ * Reusa `getHistorialAgendas` (el mismo endpoint del Historial de gestiones)
+ * con `marcarEnAgenda` para traer, además, si el crédito de cada fila estaba
+ * en el snapshot de agenda de ese asesor ese día.
  */
 export function GestionesDelDiaPanel({
 	fecha,
@@ -56,82 +161,22 @@ export function GestionesDelDiaPanel({
 		enabled: !!fecha && !!asesorId,
 	});
 	const datos = query.data as RespuestaHistorial | undefined;
-	const items = datos?.items ?? [];
-	const totalPaginas = datos?.totalPaginas ?? 1;
 
 	const catalogoQuery = useBucketsCatalogo(true);
 	const catalogo = catalogoQuery.data as BucketsCatalogoQueryData | undefined;
 
 	return (
-		<Card className="overflow-hidden">
-			<div className="border-b px-4 py-3">
-				<h2 className="font-semibold">
-					Gestiones registradas por {asesorNombre}
-				</h2>
-				<p className="text-gray-500 text-sm">
-					Todas las gestiones que registró ese día, estuvieran o no en su agenda
-					planificada.
-				</p>
-			</div>
-
-			{query.isPending ? (
-				<div className="flex items-center gap-2 px-4 py-6 text-gray-500 text-sm">
-					<Loader2 className="h-4 w-4 animate-spin" />
-					Cargando gestiones…
-				</div>
-			) : query.isError ? (
-				<div className="px-4 py-6 text-red-600 text-sm">
-					No se pudieron cargar las gestiones.
-				</div>
-			) : items.length === 0 ? (
-				<div className="px-4 py-6 text-gray-500 text-sm">
-					{asesorNombre} no registró gestiones el {fecha}.
-				</div>
-			) : (
-				<>
-					<div className="overflow-x-auto">
-						<table className="w-full text-sm">
-							<thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
-								<EncabezadoHistorial mostrarEnAgenda />
-							</thead>
-							<tbody>
-								{items.map((fila) => (
-									<FilaHistorial
-										key={fila.id}
-										fila={fila}
-										catalogo={catalogo}
-										esSupervisor={esSupervisor}
-										mostrarEnAgenda
-									/>
-								))}
-							</tbody>
-						</table>
-					</div>
-					{totalPaginas > 1 && (
-						<div className="flex items-center justify-end gap-3 border-t px-4 py-2 text-sm">
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={page <= 1}
-								onClick={() => setPage((p) => Math.max(1, p - 1))}
-							>
-								Anterior
-							</Button>
-							<span className="text-gray-500">
-								Página {page} de {totalPaginas}
-							</span>
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={page >= totalPaginas}
-								onClick={() => setPage((p) => p + 1)}
-							>
-								Siguiente
-							</Button>
-						</div>
-					)}
-				</>
-			)}
-		</Card>
+		<GestionesDelDiaVista
+			fecha={fecha}
+			asesorNombre={asesorNombre}
+			items={datos?.items ?? []}
+			cargando={query.isPending}
+			error={query.isError}
+			page={page}
+			totalPaginas={datos?.totalPaginas ?? 1}
+			onPage={setPage}
+			catalogo={catalogo}
+			esSupervisor={esSupervisor}
+		/>
 	);
 }

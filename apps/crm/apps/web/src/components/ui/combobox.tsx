@@ -13,6 +13,7 @@ import {
 import {
 	Popover,
 	PopoverContent,
+	PopoverPortalContext,
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { selectTriggerClassName } from "@/components/ui/select";
@@ -28,7 +29,8 @@ import { cn } from "@/lib/utils";
  *     (bg-surface-raised, border-line-subtle, Elevation/Dropdown) + Command con la caja
  *     "Buscar…" (bg/canvas) y opciones de 32px; la resaltada va en brand/primary-subtle.
  * Desvío: la opción elegida además lleva ✓ a la derecha, como el Tipo=Single.
- * Props sin cambios: `placeholder` sirve para el disparador y para la caja de búsqueda.
+ * Props sin cambios: `placeholder` sirve para el disparador y para la caja de búsqueda
+ * (o `searchPlaceholder`, si se pasa). `id` va al disparador, para enlazarlo con su <Label>.
  */
 
 export interface ComboboxOption {
@@ -37,8 +39,12 @@ export interface ComboboxOption {
 }
 
 interface ComboboxDemoProps {
+	/** Id del disparador (para `<Label htmlFor>`). */
+	id?: string;
 	options: ComboboxOption[];
 	placeholder?: string;
+	/** Texto de la caja de búsqueda; por defecto, `placeholder`. */
+	searchPlaceholder?: string;
 	width?: string;
 	popOverWidth?: string;
 	value: string | null;
@@ -51,8 +57,10 @@ interface ComboboxDemoProps {
 }
 
 export function Combobox({
+	id,
 	options,
 	placeholder = "Selecciona una opción...",
+	searchPlaceholder,
 	width = "min",
 	popOverWidth = "auto",
 	value,
@@ -65,6 +73,10 @@ export function Combobox({
 }: ComboboxDemoProps) {
 	const [open, setOpen] = React.useState(false);
 	const [searchValue, setSearchValue] = React.useState("");
+	// Dentro de la caja de un modal (PopoverPortalContext) el menú siempre evita
+	// colisiones contra esa caja, aunque el llamador no pase `isInModal`: si no,
+	// cerca del borde quedaba cortado por el overflow del modal.
+	const enCajaDeModal = React.useContext(PopoverPortalContext) !== null;
 	const triggerRef = React.useRef<HTMLButtonElement>(null);
 	const listboxId = React.useId();
 
@@ -98,6 +110,7 @@ export function Combobox({
 			<PopoverTrigger asChild>
 				<button
 					ref={triggerRef}
+					id={id}
 					type="button"
 					role="combobox"
 					aria-expanded={open}
@@ -123,7 +136,7 @@ export function Combobox({
 				onOpenAutoFocus={isInModal ? (e) => e.preventDefault() : undefined}
 				onCloseAutoFocus={isInModal ? (e) => e.preventDefault() : undefined}
 				sideOffset={4}
-				avoidCollisions={isInModal}
+				avoidCollisions={isInModal || enCajaDeModal}
 				className={cn(
 					"min-w-[300px] p-0",
 					popOverWidth === "full"
@@ -137,7 +150,7 @@ export function Combobox({
 			>
 				<Command shouldFilter={!onSearchChange} id={listboxId}>
 					<CommandInput
-						placeholder={placeholder}
+						placeholder={searchPlaceholder ?? placeholder}
 						value={searchValue}
 						onValueChange={(value) => {
 							setSearchValue(value);

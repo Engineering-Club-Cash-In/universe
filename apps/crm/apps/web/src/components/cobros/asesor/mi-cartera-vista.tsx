@@ -577,6 +577,21 @@ function EstadoEnTabla({ children }: { children: React.ReactNode }) {
 	);
 }
 
+const COLUMNA_ASESOR = COLUMNAS_OPCIONALES.find(
+	(c) => c.id === "asesor",
+) as ColumnaOpcional;
+const OPCIONALES_SUPERVISION = COLUMNAS_OPCIONALES.filter(
+	(c) => c.id !== "asesor",
+);
+
+/** Inserta la columna Asesor después del cliente (fija en supervisión). */
+function conColumnaAsesor(columnas: ColumnaCartera[]): ColumnaCartera[] {
+	const despues = columnas.findIndex((c) => c.id === COLUMNA_ASESOR.despuesDe);
+	const resultado = [...columnas];
+	resultado.splice(despues + 1, 0, COLUMNA_ASESOR);
+	return resultado;
+}
+
 /**
  * Columnas de la Cartera general: casilla de selección al inicio y, con un
  * segmento elegido, su columna («Cola del día», «Promesa de pago», «Convenio»)
@@ -613,12 +628,15 @@ function TablaMiCartera({
 	avanzados: number;
 }) {
 	const esSupervision = !!props.perfil?.esSupervision;
-	// Se monta cuando ya se sabe el perfil: supervisión arranca con Asesor visible.
-	const { columnas: columnasBase, menu } = useColumnasVisibles(
+	// Supervisión: la columna Asesor es fija (no sale en «Columnas» ni depende de
+	// lo guardado en el navegador). Para el asesor sigue siendo opcional.
+	const { columnas: columnasElegidas, menu } = useColumnasVisibles(
 		"cartera",
-		COLUMNAS_OPCIONALES,
-		esSupervision ? ["asesor"] : [],
+		esSupervision ? OPCIONALES_SUPERVISION : COLUMNAS_OPCIONALES,
 	);
+	const columnasBase = esSupervision
+		? conColumnaAsesor(columnasElegidas)
+		: columnasElegidas;
 	const sup = esSupervision ? props.supervision : undefined;
 	const segmento = sup?.segmento ?? null;
 	const marcadas = sup

@@ -92,6 +92,8 @@ export function useAsesoresCartera(habilitado: boolean) {
 		activos,
 		cargando: q.isLoading,
 		listo: q.isSuccess || q.isError,
+		fallo: q.isError,
+		refetch: q.refetch,
 	};
 }
 

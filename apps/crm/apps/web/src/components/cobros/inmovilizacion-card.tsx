@@ -332,7 +332,16 @@ export function InmovilizacionCard({
 						    (canAssignCobros). */}
 						{esSupervisor && (
 							<Button asChild size="sm" variant="outline">
-								<Link to="/cobros/inmovilizaciones">
+								<Link
+									to="/cobros/solicitudes"
+									search={{
+										// Con la unidad apagada, lo que se pide es reactivarla.
+										tipo:
+											estadoUnidad === "inmovilizada"
+												? "reactivacion"
+												: "apagado",
+									}}
+								>
 									<ClipboardList className="mr-2 h-4 w-4" />
 									Ver cola de aprobación
 								</Link>

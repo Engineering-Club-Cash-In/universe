@@ -284,12 +284,17 @@ cron de moras y los buckets dejaran de contar esa cuota como cubierta.
 
 ## Historial y auditoría
 
+> **Rediseño del supervisor (docs [17](./17-supervision-backend.md) y [18](./18-equipo-solicitudes-backend.md)).** Varias pantallas de este documento se movieron y sus rutas viejas redirigen:
+> - Cola del día, Alertas de promesas y Alertas de convenios son ahora filtros de la Cartera general (`/cobros/cartera`).
+> - Apertura, Cierre, Carga, Reasignaciones e Historial de agendas viven en Mi equipo (`/cobros/equipo`) y en el Detalle del asesor.
+> - Apagado y reactivación y Recuperación del vehículo están en Solicitudes (`/cobros/solicitudes`).
+
 | Pantalla | Qué muestra |
 | --- | --- |
 | `/cobros/buckets` | Historial de migraciones de bucket, con resumen (iniciales / subidas / **cuentas curadas**) y drill-down por crédito |
-| `/cobros/reasignaciones` | Cambios de asesor |
-| `/cobros/historial-agendas` | Agendas pasadas |
-| `/cobros/cierre` | Cierre del día |
+| `/cobros/equipo?tab=asignacion` | Cambios de asesor (reasignaciones, traslados masivos y coberturas) |
+| `/cobros/equipo?tab=dia&vista=gestiones` y Detalle del asesor › Agenda/Actividad | Agendas y gestiones pasadas |
+| `/cobros/equipo?tab=dia&vista=cierre` | Cierre del día |
 
 Todas leen del historial, no de un estado calculado — así lo que se ve siempre tiene un
 evento que lo respalda.

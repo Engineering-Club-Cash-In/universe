@@ -1,4 +1,9 @@
-import * as PopoverPrimitive from "@radix-ui/react-popover";
+// Desde el paquete `radix-ui` del web (como checkbox y dropdown-menu), no desde
+// `@radix-ui/react-popover`: ese no está declarado en package.json y resolvía a
+// otra copia de `react-dismissable-layer` que la del Dialog. Con dos copias, la
+// pila de capas no se compartía y un Escape en un calendario o combobox dentro
+// de un modal cerraba también el modal.
+import { Popover as PopoverPrimitive } from "radix-ui";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -29,9 +34,20 @@ export const PopoverPortalContext = React.createContext<HTMLElement | null>(
 const PopoverContent = React.forwardRef<
 	React.ElementRef<typeof PopoverPrimitive.Content>,
 	React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->((props, ref) => {
+>(({ collisionBoundary, collisionPadding, ...props }, ref) => {
 	const contenedor = React.useContext(PopoverPortalContext);
-	const contenido = <PopoverContentBase ref={ref} {...props} />;
+	// Montado en la caja de un modal, Radix igual calcula las colisiones contra
+	// el viewport: un calendario que sí cabe en la pantalla pero no en el modal
+	// quedaba cortado por el overflow del DialogContent. Con la caja como límite
+	// se corre o se voltea para quedar dentro (salvo que el llamador decida).
+	const contenido = (
+		<PopoverContentBase
+			ref={ref}
+			collisionBoundary={collisionBoundary ?? contenedor ?? undefined}
+			collisionPadding={collisionPadding ?? (contenedor ? 12 : undefined)}
+			{...props}
+		/>
+	);
 	return contenedor ? (
 		<PopoverPrimitive.Portal container={contenedor}>
 			{contenido}

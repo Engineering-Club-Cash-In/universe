@@ -335,8 +335,13 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		asesorId === null
 			? undefined
 			: asesoresCartera.todos.find((a) => a.asesorId === asesorId);
-	// Con ?asesor= se espera la lista para no traer primero todo el equipo.
-	const asesorResuelto = asesorId === null || asesoresCartera.listo;
+	// Con ?asesor= las consultas esperan a tener el correo de ese asesor, porque
+	// sin él `emailCobrador` queda vacío y el server devuelve todo el equipo.
+	// Si el catálogo falla o el asesor no aparece, se falla cerrado: sin
+	// consultas, sin filas y con error, nunca la cartera completa con el filtro.
+	const asesorResuelto = asesorId === null || !!asesorElegido?.email;
+	const asesorSinResolver =
+		asesorId !== null && asesoresCartera.listo && !asesorElegido?.email;
 	const emailConsulta = esSup
 		? (asesorElegido?.email ?? undefined)
 		: emailCobrador;
@@ -455,7 +460,11 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		placeholderData: keepPreviousData,
 	});
 
-	const total = seg ? seg.total : (creditosQ.data?.total ?? 0);
+	const total = asesorSinResolver
+		? 0
+		: seg
+			? seg.total
+			: (creditosQ.data?.total ?? 0);
 	const totalPaginas = seg ? seg.totalPaginas : creditosQ.data?.totalPages || 1;
 	const datosListos = seg ? !seg.cargando : !!creditosQ.data;
 
@@ -476,7 +485,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 			orden,
 		);
 	}, [creditosQ.data, periodo, etapa, orden, gestion]);
-	const filas = seg ? seg.filas : filasBase;
+	const filas = asesorSinResolver ? [] : seg ? seg.filas : filasBase;
 
 	/* ── Selección múltiple y reasignación en bloque ───────────────────── */
 	const [seleccion, setSeleccion] = useState<Map<string, FilaCartera>>(
@@ -561,13 +570,17 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		</MassWhatsappModal>
 	);
 
-	const error = seg
-		? seg.error
-		: creditosQ.isError
-			? creditosQ.error instanceof Error && creditosQ.error.message
-				? creditosQ.error.message
-				: "Intente de nuevo en unos minutos."
-			: null;
+	const error = asesorSinResolver
+		? asesoresCartera.fallo
+			? "No se pudo cargar la lista de asesores, así que la cartera no se puede filtrar por el asesor elegido."
+			: "El asesor elegido no aparece en cartera o no tiene correo de Cash-In: la cartera no se puede filtrar por él. Elija otro asesor o quite el filtro."
+		: seg
+			? seg.error
+			: creditosQ.isError
+				? creditosQ.error instanceof Error && creditosQ.error.message
+					? creditosQ.error.message
+					: "Intente de nuevo en unos minutos."
+				: null;
 
 	/* ── Cartera general (supervisión y admin) ─────────────────────────── */
 	const datosCola = colaQ.data as
@@ -581,11 +594,6 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	if (!seg && gestion === "sin_acuerdo") {
 		avisos.push(
 			"«Sin acuerdo» se aplica sobre la página visible: el total y las demás páginas todavía no lo descuentan.",
-		);
-	}
-	if (!seg && asesorId !== null && asesoresCartera.listo && !emailConsulta) {
-		avisos.push(
-			"El asesor elegido no tiene correo de Cash-In en cartera: la tabla no se puede filtrar por él.",
 		);
 	}
 	const supervision: SupervisionCartera | undefined = esSup
@@ -613,6 +621,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				onSeleccionar: seleccionar,
 				onLimpiarSeleccion: () => setSeleccion(new Map()),
 				onReasignar: () => {
+					if (asesorSinResolver) return;
 					if (seleccion.size === 0) {
 						toast.info(
 							"Seleccione en la tabla los créditos que desea reasignar.",
@@ -658,13 +667,21 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				filas={filas}
 				total={total}
 				cargando={
-					seg
-						? seg.cargando
-						: creditosQ.isLoading || (!asesorResuelto && !creditosQ.data)
+					asesorSinResolver
+						? false
+						: seg
+							? seg.cargando
+							: creditosQ.isLoading || !asesorResuelto
 				}
 				actualizando={seg ? seg.actualizando : creditosQ.isPlaceholderData}
 				error={error}
-				onReintentar={() => (seg ? seg.refetch() : creditosQ.refetch())}
+				onReintentar={() =>
+					asesorSinResolver
+						? asesoresCartera.refetch()
+						: seg
+							? seg.refetch()
+							: creditosQ.refetch()
+				}
 				pagina={Math.min(page, totalPaginas)}
 				totalPaginas={totalPaginas}
 				tamanoPagina={TAMANOS_PAGINA.includes(pageSize) ? pageSize : 25}

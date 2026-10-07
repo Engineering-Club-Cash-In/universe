@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createCipheriv, createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
 import {
 	PDFArray,
+	PDFBool,
 	PDFDict,
 	PDFDocument,
 	PDFHexString,
@@ -77,6 +78,8 @@ export interface PdfForensicsResult {
 	pages: PageContentClassification[];
 	parseError: string | null;
 	protectedPdf: boolean;
+	// Cifrado que abre con contraseña vacía: solo trae restricciones del emisor.
+	restrictedPdf: boolean;
 	budgetExceeded: boolean;
 	degradedToL0: boolean;
 }
@@ -606,6 +609,144 @@ function hasVerifiedAcroFormSignature(
 	}
 }
 
+const PDF_PASSWORD_PADDING = Buffer.from(
+	"28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a",
+	"hex",
+);
+
+function rc4(key: Uint8Array, data: Uint8Array): Buffer {
+	const state = Array.from({ length: 256 }, (_, index) => index);
+	let j = 0;
+	for (let i = 0; i < 256; i++) {
+		j = (j + state[i] + key[i % key.length]) & 0xff;
+		[state[i], state[j]] = [state[j], state[i]];
+	}
+	const output = Buffer.alloc(data.length);
+	let i = 0;
+	j = 0;
+	for (let index = 0; index < data.length; index++) {
+		i = (i + 1) & 0xff;
+		j = (j + state[i]) & 0xff;
+		[state[i], state[j]] = [state[j], state[i]];
+		output[index] = data[index] ^ state[(state[i] + state[j]) & 0xff];
+	}
+	return output;
+}
+
+function pdfStringBytes(value: unknown): Buffer | null {
+	return value instanceof PDFString || value instanceof PDFHexString
+		? Buffer.from(value.asBytes())
+		: null;
+}
+
+// ISO 32000-2, algoritmo 2.B (R6).
+function hardenedPasswordHash(salt: Buffer): Buffer {
+	let key = createHash("sha256").update(salt).digest();
+	for (let round = 0; ; ) {
+		const block = Buffer.concat(Array.from({ length: 64 }, () => key));
+		const cipher = createCipheriv(
+			"aes-128-cbc",
+			key.subarray(0, 16),
+			key.subarray(16, 32),
+		).setAutoPadding(false);
+		const encrypted = Buffer.concat([cipher.update(block), cipher.final()]);
+		const remainder =
+			encrypted.subarray(0, 16).reduce((sum, byte) => sum + byte, 0) % 3;
+		key = createHash(["sha256", "sha384", "sha512"][remainder])
+			.update(encrypted)
+			.digest();
+		round++;
+		if (round >= 64 && encrypted[encrypted.length - 1] <= round - 32)
+			return key.subarray(0, 32);
+	}
+}
+
+// Prueba la contraseña de usuario vacía del Security Handler estándar: si
+// coincide, el PDF abre sin pedir nada y el cifrado solo impone permisos.
+function opensWithEmptyUserPassword(document: PDFDocument): boolean {
+	try {
+		const { trailerInfo } = document.context;
+		const encrypt = document.context.lookup(trailerInfo.Encrypt);
+		if (!(encrypt instanceof PDFDict)) return false;
+		if (pdfName(encrypt.lookup(PDFName.of("Filter"))) !== "Standard")
+			return false;
+		const revision = encrypt.lookup(PDFName.of("R"));
+		const user = pdfStringBytes(encrypt.lookup(PDFName.of("U")));
+		if (!(revision instanceof PDFNumber) || !user) return false;
+		const r = revision.asNumber();
+
+		if (r === 5 || r === 6) {
+			if (user.length < 48) return false;
+			const salt = user.subarray(32, 40);
+			const hash =
+				r === 5
+					? createHash("sha256").update(salt).digest()
+					: hardenedPasswordHash(salt);
+			return hash.equals(user.subarray(0, 32));
+		}
+		if (r < 2 || r > 4) return false;
+
+		const owner = pdfStringBytes(encrypt.lookup(PDFName.of("O")));
+		const permissions = encrypt.lookup(PDFName.of("P"));
+		const id = document.context.lookup(trailerInfo.ID);
+		const firstId =
+			id instanceof PDFArray ? pdfStringBytes(id.lookup(0)) : null;
+		if (!owner || !(permissions instanceof PDFNumber) || !firstId) return false;
+
+		const length = encrypt.lookup(PDFName.of("Length"));
+		const keyLength =
+			r === 2
+				? 5
+				: (length instanceof PDFNumber
+						? length.asNumber()
+						: r === 4
+							? 128
+							: 40) / 8;
+		if (!Number.isInteger(keyLength) || keyLength < 5 || keyLength > 16)
+			return false;
+
+		const packedPermissions = Buffer.alloc(4);
+		packedPermissions.writeUInt32LE(permissions.asNumber() >>> 0);
+		const encryptMetadata = encrypt.lookup(PDFName.of("EncryptMetadata"));
+		let key = createHash("md5")
+			.update(
+				Buffer.concat([
+					PDF_PASSWORD_PADDING,
+					owner.subarray(0, 32),
+					packedPermissions,
+					firstId,
+					r === 4 &&
+					encryptMetadata instanceof PDFBool &&
+					!encryptMetadata.asBoolean()
+						? Buffer.from([0xff, 0xff, 0xff, 0xff])
+						: Buffer.alloc(0),
+				]),
+			)
+			.digest();
+		if (r >= 3)
+			for (let round = 0; round < 50; round++)
+				key = createHash("md5").update(key.subarray(0, keyLength)).digest();
+		key = key.subarray(0, keyLength);
+
+		if (r === 2)
+			return rc4(key, PDF_PASSWORD_PADDING).equals(user.subarray(0, 32));
+		let check = rc4(
+			key,
+			createHash("md5")
+				.update(Buffer.concat([PDF_PASSWORD_PADDING, firstId]))
+				.digest(),
+		);
+		for (let round = 1; round <= 19; round++)
+			check = rc4(
+				key.map((byte) => byte ^ round),
+				check,
+			);
+		return check.equals(user.subarray(0, 16));
+	} catch {
+		return false;
+	}
+}
+
 type RawPdfValue =
 	| { kind: "name"; value: string }
 	| { kind: "number"; value: number }
@@ -1103,6 +1244,7 @@ export async function inspectPdf(
 		pages: [],
 		parseError: null,
 		protectedPdf: false,
+		restrictedPdf: false,
 		budgetExceeded: false,
 		degradedToL0: Buffer.byteLength(buffer) > MAX_PDF_SIZE_BYTES,
 	};
@@ -1129,7 +1271,9 @@ export async function inspectPdf(
 			document,
 			Buffer.byteLength(buffer),
 		);
-		base.protectedPdf = document.isEncrypted;
+		base.restrictedPdf =
+			document.isEncrypted && opensWithEmptyUserPassword(document);
+		base.protectedPdf = document.isEncrypted && !base.restrictedPdf;
 	} catch (error) {
 		base.parseError = error instanceof Error ? error.message : String(error);
 		return base;

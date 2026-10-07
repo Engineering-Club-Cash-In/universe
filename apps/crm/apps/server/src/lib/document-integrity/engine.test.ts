@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PDFDocument, PDFName } from "pdf-lib";
+import { PDFDocument, PDFHexString, PDFName } from "pdf-lib";
 import { runDocumentIntegrityEngine } from "./engine";
 import type { DocumentIntegrityAiResult } from "./types";
 
@@ -180,6 +180,78 @@ describe("document integrity engine", () => {
 			eofCount: 1,
 		});
 		expect(result.result).toBe("rechazado");
+	});
+
+	// Vectores generados con pypdf: contraseña de usuario vacía o "secreta".
+	test.each([
+		[
+			"RC4 de 128 bits que abre sin contraseña",
+			2,
+			3,
+			"a80435d1f8a3b357677b267a8ba441c6e629b775a5afe41c0e033edde33fe513",
+			"b011b37341cad8ab338a6eab509153d328bf4e5e4e758a4164004e56fffa0108",
+			false,
+		],
+		[
+			"RC4 de 128 bits que pide contraseña",
+			2,
+			3,
+			"f3de18fdd3a2583ebc35366201d401aac849e13c8fc6d2b20f0f21f3ef520c46",
+			"82538ef8c23140159bcb21a593fe3c3428bf4e5e4e758a4164004e56fffa0108",
+			true,
+		],
+		[
+			"AES de 256 bits que abre sin contraseña",
+			5,
+			6,
+			"240e5f756786ca886e5cf4c8e7d9731956f44800b21651f69fe50d45c21cd64f23e76138806b6943c053a8dec6227702",
+			"dda3ee6e6366cbfed0043fef6daedfbfe7632340b9cbfe1a559f63d4035409fbecfa640123dd906678753a072f7a732f",
+			false,
+		],
+		[
+			"AES de 256 bits que pide contraseña",
+			5,
+			6,
+			"f725b4c0e11561b95ca3cf04785b97b500ff589fde4f7f36d49295522925d1d2d6448ea273bedede2b7c909b6c267a70",
+			"172a161dd05857145aafaba22dcbb2aafd82c5f75e3c9bc3cdf5408c467926acd695a8c5d382647b27ea450bf2520f1a",
+			true,
+		],
+	] as const)("un PDF cifrado con %s", async (_, version, revision, owner, user, requiresPassword) => {
+		const document = await PDFDocument.create();
+		document.addPage();
+		const { context } = document;
+		context.trailerInfo.Encrypt = context.register(
+			context.obj({
+				Filter: "Standard",
+				V: version,
+				R: revision,
+				Length: version === 2 ? 128 : 256,
+				P: -3904,
+				O: PDFHexString.of(owner),
+				U: PDFHexString.of(user),
+			}),
+		);
+		const id = PDFHexString.of(
+			"3539633230626261656338326531623563363363616265663561666165663131",
+		);
+		context.trailerInfo.ID = context.obj([id, id]);
+
+		const result = await runDocumentIntegrityEngine({
+			buffer: Buffer.from(await document.save({ useObjectStreams: false })),
+			llm: cleanAiResult,
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+		});
+
+		expect(result.forensics).toMatchObject({
+			protectedPdf: requiresPassword,
+			restrictedPdf: !requiresPassword,
+		});
+		expect(result.result).toBe(requiresPassword ? "rechazado" : "valido");
+		expect(result.signals.map((signal) => signal.code)).toContain(
+			requiresPassword
+				? "pdf_protegido_no_abre"
+				: "pdf_con_restricciones_del_emisor",
+		);
 	});
 
 	test("tokens estructurales en comentarios no limpian señales deterministas", async () => {

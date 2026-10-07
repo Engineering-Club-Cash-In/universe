@@ -8,6 +8,7 @@ import {
   assertReportReconciliation,
   assertLiquidationRowsReinvestmentIntegrity,
   buildLiquidationComposition,
+  ReinvestmentDataError,
   buildPurchaseTicketHistory,
   calculateActiveCapital,
   buildCubeNetInterest,
@@ -821,10 +822,12 @@ test("peso de flujo mixto usa capital más interés neto con IVA o ISR", async (
 
 test("la proyección filtra pagado después de elegir la versión autoritativa de la cuota", async () => {
   const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
-  const query = source.slice(
-    source.indexOf("cuotas_autoritativas AS"),
-    source.indexOf("SELECT\n      CASE", source.indexOf("cuotas_autoritativas AS")),
+  // Anclado a la función: el mismo CTE existe antes en la query de Cobranza.
+  const cteStart = source.indexOf(
+    "cuotas_autoritativas AS",
+    source.indexOf("export async function getFlujoCuotasPorInversionista"),
   );
+  const query = source.slice(cteStart, source.indexOf("SELECT\n      CASE", cteStart));
   const authoritativeRow = query.indexOf("ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC");
   const unpaidFilter = query.lastIndexOf("pagado = false");
 
@@ -1116,4 +1119,28 @@ test("el contrato parcial no devuelve mensajes técnicos del error", () => {
   );
   expect(message).not.toContain("cartera.liquidaciones");
   expect(message).not.toContain("10.0.0.8");
+});
+
+test("monto a cobrar no materializa cuotas_autoritativas (se referencia varias veces)", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("export function buildMontoACobrarPeriodoQuery"),
+    source.indexOf("export async function getMontoACobrarPeriodo"),
+  );
+
+  expect(query).toContain("cuotas_autoritativas AS NOT MATERIALIZED (");
+});
+
+test("liquidación que pagó + reinvirtió menos que el capital liquidado es error de datos", () => {
+  const input = {
+    totalCapital: "4574.49",
+    paidTotal: "4438.27",
+    reinvestedCapital: "0",
+    reinvestedRest: "0",
+    reinvestedTotal: "0",
+  };
+  expect(() => buildLiquidationComposition(input)).toThrow(ReinvestmentDataError);
+  expect(() => buildLiquidationComposition(input)).toThrow(
+    "Composición de liquidación inválida",
+  );
 });

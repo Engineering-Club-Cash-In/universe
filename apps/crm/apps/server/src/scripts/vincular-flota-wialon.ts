@@ -9,7 +9,8 @@
  *   <salida>/plan.csv       los vínculos que se escribirían (o se escribieron)
  *
  * Por defecto es SOLO LECTURA. Con --aplicar escribe el plan (ver
- * vincular-flota-wialon.plan.ts) y deja además resultado.csv y reversa.sql.
+ * vincular-flota-wialon.plan.ts) y deja además resultado-<hora>.csv y
+ * reversa-<hora>.sql, uno por corrida.
  *
  *   bun run src/scripts/vincular-flota-wialon.ts
  *   bun run src/scripts/vincular-flota-wialon.ts --solo-con-credito
@@ -31,6 +32,7 @@
 
 import {
 	appendFileSync,
+	existsSync,
 	mkdirSync,
 	renameSync,
 	rmSync,
@@ -41,8 +43,9 @@ import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
+import { crmEntityAudit } from "../db/schema/crm-entity-audit";
 import { vehicles } from "../db/schema/vehicles";
-import { auditRecord, runWithAudit } from "../lib/audit";
+import { buildAuditRows } from "../lib/audit";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -416,83 +419,100 @@ if (!aplicar) {
  */
 const escritor: Escritor = {
 	vincular: (item) =>
-		runWithAudit(
-			{
-				actorId: null,
-				actorRole: null,
-				source: "system",
-				operation: "script.vincular-flota-wialon",
-				input: { vehicleId: item.vehicleId, unitId: item.unitId },
-				fallback: null,
-			},
-			() =>
-				db.transaction(async (tx) => {
-					await tx.execute(
-						sql`select pg_advisory_xact_lock(hashtextextended(${`wialon_unit:${item.unitId}`}, 0))`,
-					);
-					const [otro] = await tx
-						.select({ id: vehicles.id })
-						.from(vehicles)
-						.where(
-							and(
-								eq(vehicles.wialonUnitId, item.unitId),
-								ne(vehicles.id, item.vehicleId),
-							),
-						)
-						.limit(1);
-					if (otro) return "unidad_ocupada" as const;
+		db.transaction(async (tx) => {
+			const empezo = Date.now();
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtextextended(${`wialon_unit:${item.unitId}`}, 0))`,
+			);
+			const [otro] = await tx
+				.select({ id: vehicles.id })
+				.from(vehicles)
+				.where(
+					and(
+						eq(vehicles.wialonUnitId, item.unitId),
+						ne(vehicles.id, item.vehicleId),
+					),
+				)
+				.limit(1);
+			if (otro) return "unidad_ocupada" as const;
 
-					const guardados = await tx
-						.update(vehicles)
-						.set({
-							wialonUnitId: item.unitId,
-							wialonUnitName: item.unitName,
-							wialonVinculadoAt: new Date(),
-							wialonVinculadoPor: item.marcador,
-						})
-						.where(
-							and(
-								eq(vehicles.id, item.vehicleId),
-								isNull(vehicles.wialonUnitId),
-								sql`${vehicles.licensePlate} is not distinct from ${item.placa}`,
-								sql`${vehicles.vinNumber} is not distinct from ${item.vin}`,
-							),
-						)
-						.returning({ id: vehicles.id });
-					if (guardados.length > 0) {
-						auditRecord({
-							entity: "vehicle",
-							id: item.vehicleId,
-							action: "wialon_vincular",
-							data: {
-								unitId: item.unitId,
-								unitName: item.unitName,
-								automatico: true,
-								marcador: item.marcador,
-							},
-						});
-						return "guardado" as const;
-					}
-					const [actual] = await tx
-						.select({ unitId: vehicles.wialonUnitId })
-						.from(vehicles)
-						.where(eq(vehicles.id, item.vehicleId))
-						.limit(1);
-					return actual?.unitId != null
-						? ("vehiculo_ya_vinculado" as const)
-						: ("datos_cambiaron" as const);
-				}),
-		),
+			const guardados = await tx
+				.update(vehicles)
+				.set({
+					wialonUnitId: item.unitId,
+					wialonUnitName: item.unitName,
+					wialonVinculadoAt: new Date(),
+					wialonVinculadoPor: item.marcador,
+				})
+				.where(
+					and(
+						eq(vehicles.id, item.vehicleId),
+						isNull(vehicles.wialonUnitId),
+						sql`${vehicles.licensePlate} is not distinct from ${item.placa}`,
+						sql`${vehicles.vinNumber} is not distinct from ${item.vin}`,
+					),
+				)
+				.returning({ id: vehicles.id });
+			if (guardados.length > 0) {
+				// La bitácora va en la MISMA transacción: si no se puede anotar,
+				// el vínculo tampoco se guarda. (runWithAudit la escribe después
+				// y solo avisa si falla, lo que dejaría vínculos sin rastro.)
+				await tx.insert(crmEntityAudit).values(
+					buildAuditRows(
+						{
+							actorId: null,
+							actorRole: null,
+							source: "system",
+							operation: "script.vincular-flota-wialon",
+							input: { vehicleId: item.vehicleId, unitId: item.unitId },
+							fallback: null,
+							startedAt: empezo,
+							entries: [
+								{
+									entity: "vehicle",
+									id: item.vehicleId,
+									action: "wialon_vincular",
+									data: {
+										unitId: item.unitId,
+										unitName: item.unitName,
+										automatico: true,
+										marcador: item.marcador,
+									},
+								},
+							],
+						},
+						{ ok: true, durationMs: Date.now() - empezo },
+					),
+				);
+				return "guardado" as const;
+			}
+			const [actual] = await tx
+				.select({ unitId: vehicles.wialonUnitId })
+				.from(vehicles)
+				.where(eq(vehicles.id, item.vehicleId))
+				.limit(1);
+			return actual?.unitId != null
+				? ("vehiculo_ya_vinculado" as const)
+				: ("datos_cambiaron" as const);
+		}),
 };
 
 console.log(
 	`\nAPLICANDO ${plan.items.length} vínculos en ${destino?.host}/${destino?.bd}…`,
 );
 const inicio = new Date();
-// resultado.csv y reversa.sql se mantienen al día después de CADA escritura:
-// si el proceso se corta, todo lo ya confirmado se puede revertir.
-const rutaResultado = join(salida, "resultado.csv");
-const rutaReversa = join(salida, "reversa.sql");
+// resultado y reversa se mantienen al día después de CADA escritura: si el
+// proceso se corta, todo lo ya confirmado se puede revertir. Llevan la hora
+// de la corrida en el nombre: una segunda corrida en la misma carpeta (p. ej.
+// una tanda de prueba con --max y después el resto) no pisa la reversa de la
+// primera.
+const sello = inicio.toISOString().replace(/[:.]/g, "-");
+const rutaResultado = join(salida, `resultado-${sello}.csv`);
+const rutaReversa = join(salida, `reversa-${sello}.sql`);
+if (existsSync(rutaResultado) || existsSync(rutaReversa)) {
+	console.error(`Ya existe una corrida con el sello ${sello} en ${salida}.`);
+	process.exit(1);
+}
 writeFileSync(
 	rutaResultado,
 	csv([...encabezadoPlan, "resultado", "error"], []),
@@ -542,7 +562,7 @@ for (const { item, error } of res.errores.slice(0, 5))
 	console.log(`    ${item.vehicleId} → ${item.unitId}: ${error}`);
 if (res.abortado)
 	console.log(
-		`  ABORTADO: ${res.pendientes} sin intentar. reversa.sql cubre todo lo que alcanzó a confirmarse; corra de nuevo cuando se resuelva.`,
+		`  ABORTADO: ${res.pendientes} sin intentar. la reversa cubre todo lo que alcanzó a confirmarse; corra de nuevo cuando se resuelva.`,
 	);
 console.log(
 	`\n${rutaResultado}${guardadosHastaAhora.length ? ` · reversa: ${rutaReversa}` : ""}`,

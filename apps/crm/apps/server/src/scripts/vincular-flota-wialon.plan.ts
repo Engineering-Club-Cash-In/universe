@@ -172,6 +172,19 @@ export interface ResultadoAplicacion {
 	pendientes: number;
 }
 
+/** El registro de un vínculo falló: `aplicarPlan` detiene la corrida. */
+export class RegistroFallido extends Error {
+	constructor(
+		readonly item: ItemVinculo,
+		causa: unknown,
+	) {
+		super(
+			`No se pudo registrar el vínculo ${item.vehicleId} → ${item.unitId}: ${causa instanceof Error ? causa.message : String(causa)}`,
+		);
+		this.name = "RegistroFallido";
+	}
+}
+
 /**
  * Envuelve un `Escritor` para registrar cada vínculo apenas ocurre, antes de
  * pasar al siguiente. Cada vínculo se confirma en su propia transacción: si el
@@ -188,18 +201,6 @@ export interface ResultadoAplicacion {
  * antemano. `despues` corre con el resultado, o con el error, que se vuelve a
  * lanzar para que `aplicarPlan` lo cuente.
  */
-export class RegistroFallido extends Error {
-	constructor(
-		readonly item: ItemVinculo,
-		causa: unknown,
-	) {
-		super(
-			`No se pudo registrar el vínculo ${item.vehicleId} → ${item.unitId}: ${causa instanceof Error ? causa.message : String(causa)}`,
-		);
-		this.name = "RegistroFallido";
-	}
-}
-
 export function conRegistro(
 	escritor: Escritor,
 	registro: {

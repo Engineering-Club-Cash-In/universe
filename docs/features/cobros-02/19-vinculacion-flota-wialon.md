@@ -70,7 +70,8 @@ creado de nuevo al refinanciarlo o revenderlo tras recuperarlo. Los dos reclaman
 unidad. Para decidir cuál se la queda se consulta el estado del crédito en cartera-back:
 
 1. **Un solo vehículo con crédito vigente** (`ACTIVO`, `MOROSO`, `EN_RECUPERACION`,
-   `EN_CONVENIO`, `PENDIENTE_CANCELACION`) → se queda ese.
+   `EN_CONVENIO`) → se queda ese. `PENDIENTE_CANCELACION` no cuenta como vigente: el
+   modelo de COBROS-02 lo trata como terminado ([1 · Modelo de buckets](./01-modelo-de-buckets.md)).
 2. **Varios vigentes con exactamente los mismos créditos vigentes** → el que tenga el
    prefijo de placa que trae la unidad (`C-…` contra `P-…`).
 3. **Varios vigentes con créditos distintos** (refinanciamiento sin cerrar el crédito
@@ -106,7 +107,8 @@ El marcador de `wialon_vinculado_por` dice cómo se dedujo:
 soltaría en la primera consulta y el trabajo se perdería.
 
 Cada vínculo escrito deja su fila en la bitácora de entidades (`crm_entity_audit`, acción
-`wialon_vincular`, origen `system`).
+`wialon_vincular`, origen `system`), insertada **en la misma transacción** que el vínculo: si
+la bitácora no se puede escribir, el vínculo tampoco se guarda.
 
 ---
 
@@ -151,8 +153,8 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 | `vehiculos.csv` | Un renglón por vehículo: estado, método, unidad, sugerencia, créditos y su estado |
 | `unidades.csv` | Un renglón por unidad de Wialon: si quedó vinculada, propuesta, en revisión o sin vehículo |
 | `plan.csv` | Lo que se escribiría (o se escribió) y lo excluido, con el motivo |
-| `resultado.csv` | Solo con `--aplicar`: qué pasó con cada vínculo. Se agrega un renglón después de cada escritura |
-| `reversa.sql` | Solo con `--aplicar`: deshace exactamente lo escrito. Se reescribe completo (temporal + rename, nunca queda truncado) antes y después de cada vínculo: antes de escribir ya incluye el vínculo en curso, así que si el proceso se corta revierte todo lo que alcanzó a confirmarse. Si el corte fue antes del commit, el `UPDATE` dice uno menos y el archivo lo avisa |
+| `resultado-<hora>.csv` | Solo con `--aplicar`, uno por corrida: qué pasó con cada vínculo. Se agrega un renglón después de cada escritura |
+| `reversa-<hora>.sql` | Solo con `--aplicar`, uno por corrida (una tanda de prueba con `--max` y después el resto dejan dos, sin pisarse): deshace exactamente lo escrito en esa corrida. Se reescribe completo (temporal + rename, nunca queda truncado) antes y después de cada vínculo: antes de escribir ya incluye el vínculo en curso, así que si el proceso se corta revierte todo lo que alcanzó a confirmarse. Si el corte fue antes del commit, el `UPDATE` dice uno menos y el archivo lo avisa |
 
 ### Garantías al escribir
 
@@ -161,9 +163,9 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
   (`pg_advisory_xact_lock`): dos escrituras no pueden darle la misma unidad a dos vehículos.
 - **No pisa nada:** si mientras corría alguien vinculó el vehículo, o la unidad ya está en
   otro, o la placa o el VIN cambiaron desde el diagnóstico, ese vínculo se omite y queda
-  anotado en `resultado.csv` (`vehiculo_ya_vinculado`, `unidad_ocupada`, `datos_cambiaron`).
+  anotado en el `resultado-<hora>.csv` (`vehiculo_ya_vinculado`, `unidad_ocupada`, `datos_cambiaron`).
 - Si se acumulan 5 errores, **se detiene**: si la base está caída no tiene sentido seguir.
-- Si falla el registro de un vínculo (no se puede escribir `resultado.csv` o `reversa.sql`), **se detiene en el acto**: la reversa ya cubre lo confirmado, y seguir escribiendo la dejaría incompleta.
+- Si falla el registro de un vínculo (no se puede escribir el resultado o la reversa), **se detiene en el acto**: la reversa ya cubre lo confirmado, y seguir escribiendo la dejaría incompleta.
 - **Es idempotente:** una segunda corrida reconoce lo ya vinculado y no propone nada nuevo.
 - **La reversa** solo suelta los vehículos que siguen con la misma unidad y el mismo
   marcador, así no deshace una corrección que un supervisor haya hecho después. Trae el
@@ -208,7 +210,7 @@ usa para desempatar duplicados), pero esos créditos no se están gestionando en
 ## Pendientes
 
 1. Correr el script en **dev**: primero sin `--aplicar` para revisar el plan, y con el visto
-   bueno del equipo, escribir. Guardar `reversa.sql`.
+   bueno del equipo, escribir. Guardar los `reversa-<hora>.sql`.
 2. Traer placa y chasis de SIFCO para los vehículos de relleno y volver a correr el script.
 3. Exigir placa o VIN al crear un vehículo en el CRM, para que no nazcan más vehículos de
    relleno.

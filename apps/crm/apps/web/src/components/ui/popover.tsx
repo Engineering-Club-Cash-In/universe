@@ -15,7 +15,34 @@ const PopoverTrigger = PopoverPrimitive.Trigger;
 
 const PopoverAnchor = PopoverPrimitive.Anchor;
 
+/**
+ * Dónde montar los popovers (opcional). Por defecto se pintan en su lugar, sin
+ * portal (así la rueda del mouse funciona dentro de un Dialog). El Workspace de
+ * cobros pasa su DialogContent: sus formularios embebidos usan `@container`,
+ * que vuelve al formulario el bloque contenedor de los elementos `fixed`, y el
+ * calendario o el combobox se pintaban corridos fuera del formulario.
+ */
+export const PopoverPortalContext = React.createContext<HTMLElement | null>(
+	null,
+);
+
 const PopoverContent = React.forwardRef<
+	React.ElementRef<typeof PopoverPrimitive.Content>,
+	React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
+>((props, ref) => {
+	const contenedor = React.useContext(PopoverPortalContext);
+	const contenido = <PopoverContentBase ref={ref} {...props} />;
+	return contenedor ? (
+		<PopoverPrimitive.Portal container={contenedor}>
+			{contenido}
+		</PopoverPrimitive.Portal>
+	) : (
+		contenido
+	);
+});
+PopoverContent.displayName = PopoverPrimitive.Content.displayName;
+
+const PopoverContentBase = React.forwardRef<
 	React.ElementRef<typeof PopoverPrimitive.Content>,
 	React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
 >(({ className, align = "center", sideOffset = 4, ...props }, ref) => (
@@ -31,6 +58,6 @@ const PopoverContent = React.forwardRef<
 		{...props}
 	/>
 ));
-PopoverContent.displayName = PopoverPrimitive.Content.displayName;
+PopoverContentBase.displayName = "PopoverContentBase";
 
 export { Popover, PopoverAnchor, PopoverTrigger, PopoverContent };

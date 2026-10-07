@@ -36,10 +36,8 @@ import {
 } from "@/components/ui/currency-input";
 import {
 	Dialog,
-	DialogClose,
 	DialogContent,
 	DialogDescription,
-	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
@@ -339,17 +337,6 @@ const HORA_VALIDA = /^\d{2}:\d{2}$/;
 const MENSAJE_DURACION_ILEGIBLE =
 	"Escriba la duración como minutos:segundos, por ejemplo 2:30.";
 
-/** Etiqueta del canal — el método ya no se elige dentro de la modal. */
-const CANAL_LABEL: Record<string, string> = {
-	llamada: "📞 Llamada",
-	whatsapp: "💬 WhatsApp",
-	sms: "📱 SMS",
-	email: "📧 Email",
-	visita_domicilio: "🏠 Visita a domicilio",
-	visita_trabajo: "💼 Visita al trabajo",
-	carta_notarial: "📋 Carta notarial",
-};
-
 export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
@@ -523,7 +510,7 @@ export function ContactoModal({
 			metodoInicial === "sms" ||
 			metodoInicial === "email") &&
 		direccion !== "entrante";
-	const layoutRegistro = embebido && !esPromesa && !esMensajeSaliente;
+	const layoutRegistro = !esPromesa && !esMensajeSaliente;
 
 	// Workspace: opciones del select de Resultado. Sin `estadosPermitidos`
 	// quedan todas (el modal de siempre).
@@ -541,8 +528,9 @@ export function ContactoModal({
 	// el colapsable cerrado no debe contar como contacto efectivo); el resto,
 	// "contactado". Si el default no está permitido (p. ej. «No hubo
 	// contacto»), el primero permitido.
-	const estadoPorDefecto: EstadoContacto =
-		embebido && esMensajeSaliente ? "mensaje_enviado" : "contactado";
+	const estadoPorDefecto: EstadoContacto = esMensajeSaliente
+		? "mensaje_enviado"
+		: "contactado";
 	const estadoArranque: EstadoContacto =
 		estadoInicialValido ??
 		(estadoPermitido(estadoPorDefecto)
@@ -1269,14 +1257,6 @@ export function ContactoModal({
 		}
 	};
 
-	// SMS también necesita la plantilla: antes solo se llegaba a SMS desde la
-	// modal de WhatsApp/Email (ya con el mensaje cargado) y reusaba ese texto.
-	// Con SMS como canal propio, sin esto el selector no aparecía y se enviaba
-	// un mensaje VACÍO.
-	const mostrarPlantillas =
-		metodoInicial === "whatsapp" ||
-		metodoInicial === "email" ||
-		metodoInicial === "sms";
 	const mensajeEditable = mensajePlantillaEditable(
 		metodoInicial,
 		mensajeEditado,
@@ -1296,10 +1276,10 @@ export function ContactoModal({
 	// modal las pinta igual que antes y el Workspace las acomoda a su layout.
 
 	/** Plantilla + asunto + mensaje (WhatsApp/SMS/Email). */
-	const renderPlantillas = (enPanel: boolean) => (
-		<div className={enPanel ? "space-y-3" : "space-y-3 rounded-md border p-3"}>
+	const renderPlantillas = () => (
+		<div className="space-y-3">
 			<div className="space-y-2">
-				<Label>{enPanel ? "Mensaje sugerido" : "Plantilla de mensaje"}</Label>
+				<Label>Mensaje sugerido</Label>
 				<Select value={plantillaId} onValueChange={handlePlantillaChange}>
 					<SelectTrigger>
 						<SelectValue placeholder="Seleccionar plantilla..." />
@@ -1408,21 +1388,17 @@ export function ContactoModal({
 	);
 
 	/** Comentarios (obligatorio). En el panel se llaman «Notas de la gestión». */
-	const renderComentarios = (enPanel: boolean) => (
+	const renderComentarios = () => (
 		<form.Field
 			name="comentarios"
 			validators={{
 				onChange: ({ value }) =>
-					!value
-						? enPanel
-							? "Escriba las notas de la gestión."
-							: "Los comentarios son requeridos"
-						: undefined,
+					!value ? "Escriba las notas de la gestión." : undefined,
 			}}
 		>
 			{(field) => (
 				<div className="space-y-2">
-					<Label>{enPanel ? "Notas de la gestión *" : "Comentarios *"}</Label>
+					<Label>Notas de la gestión *</Label>
 					<Textarea
 						placeholder={
 							esPromesa
@@ -1813,7 +1789,9 @@ export function ContactoModal({
 		</form.Field>
 	);
 
-	if (embebido) {
+	// El mismo diseño en el Workspace (embebido) y en el modal de la Ficha 360.
+	let panel: React.ReactNode;
+	{
 		const usaTelefono =
 			metodoInicial === "llamada" ||
 			metodoInicial === "whatsapp" ||
@@ -1978,7 +1956,7 @@ export function ContactoModal({
 							{campoFechaAlerta}
 						</div>
 					</div>
-					{renderComentarios(true)}
+					{renderComentarios()}
 					{campoProximoPaso}
 				</>
 			);
@@ -2008,10 +1986,10 @@ export function ContactoModal({
 							)}
 						</div>
 					)}
-					{renderComentarios(true)}
+					{renderComentarios()}
 					<div className="space-y-3">
 						<h3 className="font-semibold text-base">Redactar mensaje</h3>
-						{renderPlantillas(true)}
+						{renderPlantillas()}
 					</div>
 					{(metodoInicial === "whatsapp" || metodoInicial === "email") && (
 						<Button
@@ -2226,14 +2204,14 @@ export function ContactoModal({
 						)}
 					</div>
 
-					{renderComentarios(true)}
+					{renderComentarios()}
 					{campoProximoPaso}
 				</>
 			);
 			botonPrincipal = botonGuardar("Guardar gestión");
 		}
 
-		return (
+		panel = (
 			<div className="@container flex min-h-0 flex-1 flex-col">
 				<form
 					onSubmit={(e) => {
@@ -2257,7 +2235,9 @@ export function ContactoModal({
 							<Button
 								type="button"
 								variant="outline"
-								onClick={() => onCancelar?.()}
+								onClick={() =>
+									embebido ? onCancelar?.() : handleOpenChange(false)
+								}
 								disabled={envioEnCurso}
 							>
 								Cancelar
@@ -2269,11 +2249,12 @@ export function ContactoModal({
 			</div>
 		);
 	}
+	if (embebido) return panel;
 
 	return (
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
-			<DialogContent className="max-h-[90vh] overflow-y-auto md:min-w-3xl md:max-w-4xl">
+			<DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						{esPromesa ? (
@@ -2296,281 +2277,7 @@ export function ContactoModal({
 								: "Registre los detalles de la interacción con el cliente y programe el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
-
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						form.handleSubmit();
-					}}
-					className="space-y-4"
-				>
-					{/* Sección: Información del Contacto — oculta en variante "promesa":
-					    el método/estado/plantilla/envío no aplican, la promesa se
-					    registra sobre un contacto que ya ocurrió por otro medio. */}
-					{!esPromesa && (
-						<div className="space-y-3">
-							<h3 className="font-semibold text-base">
-								Información del Contacto
-							</h3>
-
-							{/* El canal lo define el botón que abrió la modal (Llamada / WhatsApp /
-							    Email): antes era un Select y se podía cambiar acá adentro, así que
-							    "Registrar Llamada" terminaba guardando un WhatsApp. Ahora es fijo. */}
-							<div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
-								<span className="text-muted-foreground text-xs">Canal</span>
-								<span className="font-medium text-sm">
-									{CANAL_LABEL[metodoInicial] ?? metodoInicial}
-								</span>
-							</div>
-
-							{/* Selector de plantilla para WhatsApp y Email */}
-							{mostrarPlantillas && renderPlantillas(false)}
-
-							{/* Selector de teléfono cuando hay múltiples */}
-							{telefonos.length > 1 && selectorTelefono}
-
-							{/* Solo la acción del canal por el que se abrió la modal. Antes se
-							    mostraban los 4 (Llamar / WhatsApp / Email / SMS) sin importar el
-							    botón que la abrió, así que la modal parecía un menú de canales en
-							    vez del registro de UNA gestión. */}
-							<div className="flex flex-wrap items-center gap-2">
-								{metodoInicial === "llamada" && (
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() => ejecutarAccion("llamada")}
-										disabled={envioEnCurso}
-										className="flex items-center gap-2"
-									>
-										<Phone className="h-4 w-4" />
-										Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
-									</Button>
-								)}
-
-								{metodoInicial === "whatsapp" && (
-									<>
-										<Button
-											type="button"
-											size="sm"
-											onClick={() => ejecutarAccion("whatsapp-api")}
-											disabled={envioEnCurso}
-											className="flex items-center gap-2"
-										>
-											{whatsappApiMutation.isPending ? (
-												<Loader2 className="h-4 w-4 animate-spin" />
-											) : (
-												<MessageCircle className="h-4 w-4" />
-											)}
-											{whatsappApiMutation.isPending
-												? "Enviando..."
-												: "Enviar WhatsApp"}
-										</Button>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											onClick={() => ejecutarAccion("whatsapp-link")}
-											disabled={envioEnCurso}
-											className="text-muted-foreground text-xs"
-										>
-											Abrir WhatsApp Web
-										</Button>
-									</>
-								)}
-
-								{metodoInicial === "email" && (
-									<>
-										<Button
-											type="button"
-											size="sm"
-											onClick={() => ejecutarAccion("email-api")}
-											disabled={envioEnCurso}
-											className="flex items-center gap-2"
-										>
-											{emailApiMutation.isPending ? (
-												<Loader2 className="h-4 w-4 animate-spin" />
-											) : (
-												<Mail className="h-4 w-4" />
-											)}
-											{emailApiMutation.isPending
-												? "Enviando..."
-												: "Enviar correo"}
-										</Button>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											onClick={() => ejecutarAccion("email-link")}
-											disabled={envioEnCurso}
-											className="text-muted-foreground text-xs"
-										>
-											Abrir cliente de correo
-										</Button>
-									</>
-								)}
-
-								{metodoInicial === "sms" && (
-									<Button
-										type="button"
-										size="sm"
-										onClick={() => ejecutarAccion("sms-api")}
-										disabled={envioEnCurso}
-										className="flex items-center gap-2"
-									>
-										{smsApiMutation.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<MessageSquare className="h-4 w-4" />
-										)}
-										{smsApiMutation.isPending
-											? "Enviando SMS..."
-											: "Enviar SMS"}
-									</Button>
-								)}
-							</div>
-
-							<form.Field name="metodoContacto">
-								{(metodoField) =>
-									metodoField.state.value === "llamada" && (
-										<form.Field name="duracionLlamada">
-											{(field) => (
-												<div className="space-y-2">
-													<Label>Duración de la Llamada (segundos)</Label>
-													<Input
-														type="number"
-														placeholder="Ej.: 180"
-														value={field.state.value}
-														onChange={(e) =>
-															field.handleChange(Number(e.target.value))
-														}
-													/>
-												</div>
-											)}
-										</form.Field>
-									)
-								}
-							</form.Field>
-						</div>
-					)}
-
-					{/* Sección: Detalles de la Conversación */}
-					<div className="space-y-3">
-						<h3 className="font-semibold text-base">
-							Detalles de la Conversación
-						</h3>
-
-						{renderComentarios(false)}
-
-						{/* Resultado del contacto — discreto y al final: el 95% de las veces
-						    es "Contactado" (default) y el asesor no debería detenerse acá. Los
-						    otros estados siguen disponibles porque Gestión Temprana B1 los usa
-						    para distinguir intento de contacto efectivo. Con un solo
-					    resultado permitido (Workspace) no hay nada que elegir. */}
-						{!esPromesa && opcionesResultado.length > 1 && (
-							<form.Field name="estadoContacto">
-								{(field) => (
-									<div className="flex flex-wrap items-center gap-2">
-										<Label className="text-muted-foreground text-xs">
-											Resultado
-										</Label>
-										<Select
-											onValueChange={(value) =>
-												form.setFieldValue(
-													field.name,
-													value as typeof field.state.value,
-												)
-											}
-											defaultValue={field.state.value}
-										>
-											<SelectTrigger className="h-8 w-56 text-sm">
-												<SelectValue />
-											</SelectTrigger>
-											<SelectContent>
-												{opcionesResultado.map((o) => (
-													<SelectItem key={o.value} value={o.value}>
-														{o.label}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									</div>
-								)}
-							</form.Field>
-						)}
-					</div>
-
-					{/* CB-025: "¿Qué prometió pagar?" — SOLO en promesa. Lista de checkboxes
-					    (fila por cuota atrasada + fila de Mora) con monto y vencimiento, y el
-					    total en vivo. Guía ui-ux-pro-max: multi-select = checkbox column (#91),
-					    no comunicar selección solo con color (#37), touch target >=44px (#22).
-					    La selección se guarda como rango cuotaInicio..cuotaFin (ver
-					    alternarCuotaPromesa); Mora es independiente. */}
-					{esPromesa && (
-						<div className="space-y-3">
-							<h3 className="font-semibold text-base">Conceptos a pagar</h3>
-							<p className="text-muted-foreground text-sm">
-								Se incluyen todas las cuotas atrasadas y la mora; desmarque lo
-								que no aplique.
-							</p>
-
-							{conceptosPromesa}
-						</div>
-					)}
-
-					{/* Sección: Próximo Seguimiento — en variante "promesa" la fecha ES
-					    la fecha prometida y es obligatoria: no hay checkbox que la
-					    haga opcional (requiereSeguimiento arranca en true y no se
-					    puede desmarcar). */}
-					<div className="space-y-3">
-						<h3 className="font-semibold text-base">
-							{esPromesa ? "Fecha Prometida" : "Próximo Seguimiento"}
-						</h3>
-
-						{renderFechaProximoContacto()}
-
-						{/* CB-029: "alerta programada" — SOLO en promesa. Default D-1 (se
-						    setea al elegir la fecha prometida); editable. El job diario
-						    avisa al asesor ese día antes de que la promesa venza. */}
-						{esPromesa && campoFechaAlerta}
-
-						{/* CB-025: qué hacer, no cuándo (la fecha de arriba). Texto libre,
-						    opcional, en ambas variantes — el AC del ticket aplica a
-						    cualquier gestión, no solo a promesas. */}
-						{campoProximoPaso}
-					</div>
-
-					<DialogFooter>
-						<DialogClose asChild>
-							<Button
-								type="button"
-								variant="outline"
-								disabled={createContactoMutation.isPending}
-							>
-								Cancelar
-							</Button>
-						</DialogClose>
-						<form.Subscribe
-							selector={(state) => [state.canSubmit, state.isSubmitting]}
-						>
-							{([canSubmit, _isSubmitting]) => (
-								<Button
-									type="submit"
-									disabled={!canSubmit || createContactoMutation.isPending}
-								>
-									{createContactoMutation.isPending
-										? "Guardando..."
-										: esEdicion
-											? "Guardar Promesa"
-											: esPromesa
-												? "Registrar Promesa"
-												: "Registrar Contacto"}
-								</Button>
-							)}
-						</form.Subscribe>
-					</DialogFooter>
-				</form>
+				<div className="flex min-h-0 flex-1 flex-col pt-4">{panel}</div>
 			</DialogContent>
 		</Dialog>
 	);

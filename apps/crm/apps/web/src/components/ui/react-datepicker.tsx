@@ -1,9 +1,12 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale/es";
 import { CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import * as React from "react";
 import ReactDatePicker, { registerLocale } from "react-datepicker";
+import { createPortal } from "react-dom";
 import { calendarNavButtonClassName } from "@/components/ui/calendar";
 import { datePickerFieldClassName } from "@/components/ui/date-picker";
+import { PopoverPortalContext } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 /**
@@ -65,9 +68,17 @@ export function DatePicker({
 	disabled = false,
 	className,
 }: DatePickerProps) {
+	// Mismo criterio que los popovers: dentro del Workspace el calendario se
+	// monta en la caja del modal (ver PopoverPortalContext).
+	const contenedor = React.useContext(PopoverPortalContext);
 	return (
 		<div className="relative w-full">
 			<ReactDatePicker
+				popperContainer={
+					contenedor
+						? ({ children }) => createPortal(children, contenedor)
+						: undefined
+				}
 				selected={date}
 				onChange={(date) => onDateChange?.(date || undefined)}
 				locale="es"

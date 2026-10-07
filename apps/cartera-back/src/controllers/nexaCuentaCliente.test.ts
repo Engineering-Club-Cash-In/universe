@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 
 // El módulo importa la base y la config; las pruebas solo usan el servicio
 // puro con dependencias falsas, así que basta con stubs vacíos.
-mock.module("../database", () => ({ db: {}, client: {} }));
+mock.module("../database", () => ({ db: {}, client: {}, lockPool: {} }));
 
 const { descripcionCuentaNexa, normalizarDpi, solicitarCuentaNexa } = await import("./nexaCuentaCliente");
 type Deps = Parameters<typeof solicitarCuentaNexa>[1];
@@ -34,7 +34,7 @@ function deps(over: Partial<Deps> & { fila?: Binding } = {}) {
   const d: Deps = {
     habilitada: true,
     buscarCredito: async (sifco) => (sifco === "01010214100000" ? { creditoId: 55, nombre: "Ana López" } : null),
-    conBindingBloqueado: async (_creditoId, dpi, work) => {
+    conTurnoDeCuenta: async (_creditoId, dpi, work) => {
       if (dpi) fila.nexa_national_id = dpi;
       return work(fila, {
         guardarToken: async (user) => {

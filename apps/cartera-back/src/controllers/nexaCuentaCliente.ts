@@ -6,13 +6,19 @@
  * `nexa_credit_bindings` junto con el permiso para recibir pagos de Nexa, y el
  * CRM no guarda copia (la pide acá cada vez que la necesita).
  *
- * Flujo, siempre bajo el candado de la fila del binding del crédito:
+ * Flujo, siempre en el turno del crédito (un advisory lock propio, no la fila):
  *   1. Se marca la fila como manejada por la automatización
  *      (`cuenta_solicitada_at`) y se guarda el DPI para poder reintentar.
  *   2. Si ya hay token, se devuelve tal cual (idempotente).
  *   3. Si no, se le pide a nexa-server (también idempotente por crédito) y se
  *      guarda. Si falla, se anota el intento y queda pendiente: el barrido de
  *      reintentos la vuelve a pedir y le avisa al cliente por separado.
+ *
+ * Mientras nexa-server crea la cuenta, la fila del binding NO queda bloqueada:
+ * nexa-server registra el token en cartera (`POST /internal/nexa/tokens`)
+ * antes de responder, y ese registro escribe la misma fila. Con la fila
+ * bloqueada, el registro esperaba hasta que nexa-server se rendía (10 s) y los
+ * pagos Nexa del crédito también esperaban.
  *
  * Un binding nuevo nace activo y sin monto máximo ni vencimiento: es solo el
  * permiso para que cartera acepte pagos de Nexa en ese crédito. Uno que ya
@@ -21,7 +27,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import config from "../config";
-import { db } from "../database";
+import { db, lockPool } from "../database";
 import { creditos, nexa_credit_bindings, usuarios } from "../database/db";
 import { crearTokenUserNexa, type TokenUserNexa } from "../services/nexaServerClient";
 
@@ -50,8 +56,11 @@ type BindingCuenta = {
 export type CuentaNexaDeps = {
   habilitada: boolean;
   buscarCredito: (numeroSifco: string) => Promise<{ creditoId: number; nombre: string } | null>;
-  /** Corre `work` con la fila del binding bloqueada (la crea si no existe). */
-  conBindingBloqueado: <T>(
+  /**
+   * Corre `work` en el turno del crédito, con la fila del binding ya creada.
+   * No bloquea la fila: nexa-server la escribe mientras `work` lo espera.
+   */
+  conTurnoDeCuenta: <T>(
     creditoId: number,
     dpi: string | null,
     work: (binding: BindingCuenta, ops: OperacionesBinding) => Promise<T>,
@@ -99,7 +108,7 @@ export async function solicitarCuentaNexa(
   const dpiNuevo = params.dpi == null || params.dpi === "" ? null : normalizarDpi(params.dpi);
   if (params.dpi && !dpiNuevo) return { estado: "dpi_invalido" };
 
-  return deps.conBindingBloqueado(credito.creditoId, dpiNuevo, async (binding, ops) => {
+  return deps.conTurnoDeCuenta(credito.creditoId, dpiNuevo, async (binding, ops) => {
     const existente = cuentaDe(binding);
     if (existente) {
       return {
@@ -159,6 +168,36 @@ export async function marcarCuentaNexaNotificada(numeroSifco: string): Promise<b
   return marcadas.length > 0;
 }
 
+/**
+ * Namespace del advisory lock de la creación de cuentas Nexa. Propio, para no
+ * esperar detrás de los pagos (8765) ni del espejo (8766): ver la lista en
+ * `utils/creditoEspejoLock.ts`.
+ */
+export const CUENTA_NEXA_ADVISORY_LOCK_NAMESPACE = 8767;
+
+/**
+ * Turno por crédito para pedir la cuenta: dos pedidos del mismo crédito (la
+ * bienvenida y el barrido) no llaman a nexa-server a la vez. Usa el pool
+ * DEDICADO de locks, igual que `withPaymentAdvisoryLock`: el que espera
+ * retiene su conexión, y en el pool de trabajo podría dejar sin conexiones al
+ * que tiene el turno.
+ */
+async function conCandadoDeCuenta<T>(creditoId: number, fn: () => Promise<T>): Promise<T> {
+  const conn = await lockPool.connect();
+  try {
+    await conn.query("SELECT pg_advisory_lock($1, $2)", [CUENTA_NEXA_ADVISORY_LOCK_NAMESPACE, creditoId]);
+    try {
+      return await fn();
+    } finally {
+      await conn
+        .query("SELECT pg_advisory_unlock($1, $2)", [CUENTA_NEXA_ADVISORY_LOCK_NAMESPACE, creditoId])
+        .catch((error) => console.error("⚠️ Error liberando el turno de la cuenta Nexa:", error));
+    }
+  } finally {
+    conn.release();
+  }
+}
+
 export const cuentaNexaDeps: CuentaNexaDeps = {
   get habilitada() {
     return config.nexaCuentaAutomaticaEnabled;
@@ -172,12 +211,12 @@ export const cuentaNexaDeps: CuentaNexaDeps = {
       .limit(1);
     return row ?? null;
   },
-  conBindingBloqueado: (creditoId, dpi, work) =>
-    db.transaction(async (tx) => {
+  conTurnoDeCuenta: (creditoId, dpi, work) =>
+    conCandadoDeCuenta(creditoId, async () => {
       // Crea la fila si no existe y la marca como de la automatización. No toca
       // `activo`, `expires_at` ni `max_payment_amount` de un binding que ya
       // existía (los del piloto se configuraron a mano).
-      await tx
+      await db
         .insert(nexa_credit_bindings)
         .values({
           credito_id: creditoId,
@@ -192,7 +231,7 @@ export const cuentaNexaDeps: CuentaNexaDeps = {
             updated_at: new Date(),
           },
         });
-      const [binding] = await tx
+      const [binding] = await db
         .select({
           nexa_token: nexa_credit_bindings.nexa_token,
           nexa_identifier: nexa_credit_bindings.nexa_identifier,
@@ -201,12 +240,13 @@ export const cuentaNexaDeps: CuentaNexaDeps = {
           cuenta_notificada_at: nexa_credit_bindings.cuenta_notificada_at,
         })
         .from(nexa_credit_bindings)
-        .where(eq(nexa_credit_bindings.credito_id, creditoId))
-        .for("update");
+        .where(eq(nexa_credit_bindings.credito_id, creditoId));
       if (!binding) throw new Error(`binding Nexa del crédito ${creditoId} no encontrado tras crearlo`);
       return work(binding, {
         guardarToken: async (user) => {
-          await tx
+          // Si el registro de nexa-server ya escribió el token, esto deja los
+          // mismos valores (nexa-server da un solo token por crédito).
+          await db
             .update(nexa_credit_bindings)
             .set({
               nexa_user_id: user.nexaUserId,
@@ -221,7 +261,7 @@ export const cuentaNexaDeps: CuentaNexaDeps = {
             .where(eq(nexa_credit_bindings.credito_id, creditoId));
         },
         anotarError: async (mensaje) => {
-          await tx
+          await db
             .update(nexa_credit_bindings)
             .set({
               cuenta_error: mensaje,

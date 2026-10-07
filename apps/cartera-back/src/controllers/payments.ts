@@ -2367,7 +2367,29 @@ interface GetPagosOptions {
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
+  /** NEXA = entró por Nexa; MANUAL = el resto. Otro valor no filtra. */
+  canal?: string;
+  /** HH:MM. Con alguna de las dos, el rango de fecha de pago usa la hora de registro. */
+  horaInicio?: string;
+  horaFin?: string;
 }
+
+export const HORA_HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Momento en que el pago entró, en hora de Guatemala (timestamp sin tz), para
+// el filtro con hora (cierre de las 5 pm de Contabilidad):
+//  - Manual: fecha_pago ya es la hora de Guatemala del registro, tal cual
+//    (no se le aplica el UTC→GT del filtro por día, que le resta 6 h: #1780).
+//    Sin fecha_pago queda fuera, igual que en el filtro por día.
+//  - Nexa: fecha_pago es el día bancario a las 00:00 y no sirve para la hora.
+//    Tampoco sirve p.createdat: al cerrar cuota, registerPayment REUSA la fila
+//    vieja de la cuota y conserva su createdat de meses atrás. La hora real es
+//    nexa_payment_events.created_at (timestamptz, cuando cartera recibió el pago).
+export const momentoRegistroSQL = `CASE
+      WHEN p.nexa_payment_event_id IS NULL THEN p.fecha_pago
+      ELSE (SELECT ne_mom.created_at FROM cartera.nexa_payment_events ne_mom
+            WHERE ne_mom.id = p.nexa_payment_event_id) AT TIME ZONE 'America/Guatemala'
+    END`;
 // ── Tipos para el armado del array `inversionistas` del reporte ──────────────
 // Shape de cada fila pci tal como la trae la subconsulta SQL de
 // getPagosConInversionistas (json_build_object). Es también el shape de SALIDA.
@@ -2657,7 +2679,14 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     fechaBoleta,
     fechaBoletaInicio,
     fechaBoletaFin,
+    canal,
+    horaInicio,
+    horaFin,
   } = options;
+
+  for (const hora of [horaInicio, horaFin]) {
+    if (hora !== undefined && !HORA_HH_MM.test(hora)) throw new Error(`La hora "${hora}" no tiene el formato HH:MM`);
+  }
 
   try {
     const offset = (page - 1) * pageSize;
@@ -2676,16 +2705,35 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
     if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
 
-    // 📅 Rango de fechas (zona Guatemala UTC-6)
-    if (fechaInicio) {
-      whereClauses.push(
-        `(${fechaPagoLocalSQL})::date >= '${fechaInicio}'::date`
-      );
-    }
-    if (fechaFin) {
-      whereClauses.push(
-        `(${fechaPagoLocalSQL})::date <= '${fechaFin}'::date`
-      );
+    if (canal === "NEXA") whereClauses.push(`p.nexa_payment_event_id IS NOT NULL`);
+    if (canal === "MANUAL") whereClauses.push(`p.nexa_payment_event_id IS NULL`);
+
+    if (horaInicio || horaFin) {
+      // ⏰ Con hora: desde inclusivo, hasta exclusivo (un pago a las 17:00:00
+      // en punto cae en el cierre siguiente). Sin hora, la punta va al inicio
+      // del día (desde) o al fin del día (hasta).
+      if (fechaInicio) {
+        whereClauses.push(`(${momentoRegistroSQL}) >= '${fechaInicio} ${horaInicio || "00:00"}'::timestamp`);
+      }
+      if (fechaFin) {
+        whereClauses.push(
+          horaFin
+            ? `(${momentoRegistroSQL}) < '${fechaFin} ${horaFin}'::timestamp`
+            : `(${momentoRegistroSQL}) < ('${fechaFin}'::date + 1)::timestamp`
+        );
+      }
+    } else {
+      // 📅 Rango de fechas (zona Guatemala UTC-6)
+      if (fechaInicio) {
+        whereClauses.push(
+          `(${fechaPagoLocalSQL})::date >= '${fechaInicio}'::date`
+        );
+      }
+      if (fechaFin) {
+        whereClauses.push(
+          `(${fechaPagoLocalSQL})::date <= '${fechaFin}'::date`
+        );
+      }
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)

@@ -7,6 +7,7 @@ import {
   getPagosConInversionistas,
   updatePagosEspejoPorCredito,
   getAbonosPorCuota,
+  HORA_HH_MM,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -290,7 +291,22 @@ export const paymentRouter = new Elysia()
           fechaBoleta,
           fechaBoletaInicio,
           fechaBoletaFin,
+          canal,
+          horaInicio,
+          horaFin,
         } = query;
+
+        // ⏰ Una hora sin su fecha no tiene a qué pegarse: se rechaza igual que
+        // un valor inválido del esquema, antes de tocar la base.
+        if ((horaInicio && !fechaInicio) || (horaFin && !fechaFin)) {
+          set.status = 422;
+          return {
+            success: false as const,
+            error: horaInicio && !fechaInicio
+              ? "La hora desde necesita la fecha desde."
+              : "La hora hasta necesita la fecha hasta.",
+          };
+        }
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
         if (query.reportAdvisor === true) {
@@ -316,6 +332,9 @@ export const paymentRouter = new Elysia()
             fechaBoleta,
             fechaBoletaInicio,
             fechaBoletaFin,
+            canal,
+            horaInicio,
+            horaFin,
           });
           set.status = 200;
           return {
@@ -348,6 +367,9 @@ export const paymentRouter = new Elysia()
             fechaBoleta,
             fechaBoletaInicio,
             fechaBoletaFin,
+            canal,
+            horaInicio,
+            horaFin,
           });
           set.status = 200;
           return {
@@ -379,6 +401,9 @@ export const paymentRouter = new Elysia()
           fechaBoleta,
           fechaBoletaInicio,
           fechaBoletaFin,
+          canal,
+          horaInicio,
+          horaFin,
         });
 
         set.status = 200;
@@ -423,6 +448,9 @@ export const paymentRouter = new Elysia()
         fechaBoleta: t.Optional(t.String({ format: "date" })),
         fechaBoletaInicio: t.Optional(t.String({ format: "date" })),
         fechaBoletaFin: t.Optional(t.String({ format: "date" })),
+        canal: t.Optional(t.Union([t.Literal("NEXA"), t.Literal("MANUAL")])),
+        horaInicio: t.Optional(t.String({ pattern: HORA_HH_MM.source })),
+        horaFin: t.Optional(t.String({ pattern: HORA_HH_MM.source })),
       }),
       response: {
         200: t.Object({
@@ -434,6 +462,10 @@ export const paymentRouter = new Elysia()
           totalPages: t.Optional(t.Number()),
           totales: t.Optional(t.Any()),
           totalesInversionistas: t.Optional(t.Array(t.Any())),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
         }),
         500: t.Object({
           success: t.Literal(false),

@@ -1120,6 +1120,9 @@ export async function exportPagosConInversionistasExcel(
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;
+    canal?: string;
+    horaInicio?: string;
+    horaFin?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -1183,6 +1186,7 @@ export async function exportPagosConInversionistasExcel(
     { header: "Tipo de Pago", key: "tipoPago", width: 18 },
     { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
     { header: "Origen Pago", key: "origenPago", width: 18 },
+    { header: "Canal", key: "canal", width: 18 },
     { header: "Boletas", key: "boletas", width: 50 },
     { header: "Banco", key: "bancoNombre", width: 20 },
     { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
@@ -1266,6 +1270,7 @@ export async function exportPagosConInversionistasExcel(
       tipoPago,
       fechaAplicado: item.fechaAplicado ?? "",
       origenPago: item.origenPago ?? "",
+      canal: item.entroPorNexa ? (item.nexaEventoFallido ? "Nexa · rechazado" : "Nexa") : "Manual",
       boletas: boletas.map((b: any) => b.urlBoleta).filter(Boolean).join("\n"),
       bancoNombre: item.bancoNombre ?? "",
       cuentaEmpresaNombre: item.cuentaEmpresaNombre ?? "",
@@ -1442,6 +1447,9 @@ export async function exportPagosAdvisorExcel(
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;
+    canal?: string;
+    horaInicio?: string;
+    horaFin?: string;
   }
 ) {
   const result = await getPagosConInversionistas({

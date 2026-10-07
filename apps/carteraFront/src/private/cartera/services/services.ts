@@ -2200,6 +2200,10 @@ export interface GetPagosParams {
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
+  canal?: "NEXA" | "MANUAL";
+  /** HH:MM; solo en el modo "Rango" de fecha de pago. */
+  horaInicio?: string;
+  horaFin?: string;
 }
 
 /**

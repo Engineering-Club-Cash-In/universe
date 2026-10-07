@@ -36,9 +36,9 @@ S5 y S6 los consume la Cartera general.
 - El WhatsApp masivo no acepta asesor ni categoría, así que se bloquea con un tooltip cuando hay alguno de esos filtros. Agregar `asesorId` (o `emailCobrador`) y la categoría a su filtro.
 - La Cola del día vieja filtraba varios buckets a la vez; la cartera elige uno por chip. Si producto lo pide, que `getTodosLosCreditos` acepte una lista de buckets.
 
-## Antes de desplegar
+## Migraciones
 
-- **Migración 0039 del CRM** (`0039_estado_contacto_mensaje_enviado.sql`) en PROD. Sin el valor `mensaje_enviado` en el enum `estado_contacto`, `getHistorialAgendasResumen` da 500: se rompe la contactabilidad del Dashboard y la página Historial de agendas. En DEV se corrió el 2026-10-07.
+- **Migración 0039 del CRM** (`0039_estado_contacto_mensaje_enviado.sql`): ya está corrida en DEV (2026-10-07). Sin el valor `mensaje_enviado` en el enum `estado_contacto`, `getHistorialAgendasResumen` da 500 y se rompen la contactabilidad del Dashboard y la página Historial de agendas. Si se restaura la base de DEV, hay que volver a correrla. Lo de PROD va en el pase masivo de fin de año (ver la regla de despliegue del [README](./README.md)).
 
 ## De dónde sale cada bloque del Dashboard
 

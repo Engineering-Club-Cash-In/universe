@@ -4,6 +4,12 @@
 **Rama base:** `COBROS-02` (NO pasa por `develop`; las feature branches salen de ahí y su PR va de vuelta ahí)
 **Apps que toca:** `apps/crm` (server + web) · `apps/cartera-back` · el bot de WhatsApp de SimpleTech
 
+> [!IMPORTANT]
+> **COBROS-02 todavía NO va a PROD.** Es una versión paralela que sale en un pase masivo, a fin de año o en un mes, cuando se decida.
+> - Todo se corre y se prueba en **DEV**, migraciones incluidas.
+> - En los PR, issues y docs de COBROS-02 **no se piden pasos en PROD** (nada de «antes de desplegar, correr X en PROD»). Las migraciones pendientes para PROD se juntan para el pase masivo.
+> - Si una migración falta en DEV, se corre en DEV y se anota en el doc de la etapa.
+
 ---
 
 ## Qué es

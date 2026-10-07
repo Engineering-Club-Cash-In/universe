@@ -37,20 +37,35 @@ const bordeFino = {
 	right: { style: "thin", color: { rgb: COLOR_BORDE } },
 };
 
-function formatoDeColumna(header: string) {
+// Cada hoja declara lo que es: así un número de una hoja que no es de montos
+// (p. ej. la versión de contrato en Metadatos) no sale como Q, y una fila
+// "Total" solo se trata como total en la hoja que de verdad lo agrega.
+type EstiloHoja = {
+	// Los números que no son porcentaje ni entero son montos (Q).
+	moneda?: boolean;
+	// La última fila con "Total" en la primera columna es el total agregado.
+	filaTotal?: boolean;
+};
+
+function formatoDeColumna(header: string, moneda: boolean) {
 	if (esColumnaPorcentaje(header)) return FORMATO_PORCENTAJE;
 	if (COLUMNAS_ENTERAS.has(header)) return FORMATO_ENTERO;
-	return FORMATO_MONEDA;
+	return moneda ? FORMATO_MONEDA : undefined;
 }
 
-function textoVisible(value: unknown, header: string) {
+function textoVisible(value: unknown, header: string, moneda: boolean) {
 	if (typeof value !== "number") return String(value ?? "");
 	if (esColumnaPorcentaje(header)) return `${value.toFixed(2)}%`;
 	if (COLUMNAS_ENTERAS.has(header)) return value.toLocaleString("en-US");
+	if (!moneda) return String(value);
 	return `Q${value.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 }
 
-function aplicarEstilo(sheet: XLSX.WorkSheet, rows: Record<string, unknown>[]) {
+function aplicarEstilo(
+	sheet: XLSX.WorkSheet,
+	rows: Record<string, unknown>[],
+	{ moneda = false, filaTotal = false }: EstiloHoja,
+) {
 	if (!sheet["!ref"] || rows.length === 0) return;
 	const range = XLSX.utils.decode_range(sheet["!ref"]);
 	// json_to_sheet ya dejó los encabezados en la fila 0.
@@ -58,12 +73,14 @@ function aplicarEstilo(sheet: XLSX.WorkSheet, rows: Record<string, unknown>[]) {
 		String(sheet[XLSX.utils.encode_cell({ r: 0, c })]?.v ?? ""),
 	);
 	const ultimaFila = range.e.r;
-	// Filas de total (Cobranza) y la columna de etiqueta (Métrica/Campo) van en
-	// negrita para que se lean como encabezado de fila.
-	const esTotal = (r: number) => {
-		const etiqueta = sheet[XLSX.utils.encode_cell({ r, c: 0 })]?.v;
-		return r > 0 && etiqueta === "Total";
-	};
+	// La fila de total y la columna de etiqueta (Métrica/Campo) van en negrita
+	// para que se lean como encabezado de fila. Solo la última fila puede ser el
+	// total agregado; una fila de datos que diga "Total" sigue siendo un dato.
+	const esTotal = (r: number) =>
+		filaTotal &&
+		r > 0 &&
+		r === ultimaFila &&
+		sheet[XLSX.utils.encode_cell({ r, c: 0 })]?.v === "Total";
 	const columnaEtiqueta = ["Métrica", "Campo"].includes(headers[0] ?? "");
 
 	for (let r = 0; r <= ultimaFila; r++) {
@@ -94,7 +111,9 @@ function aplicarEstilo(sheet: XLSX.WorkSheet, rows: Record<string, unknown>[]) {
 					: undefined;
 			const color =
 				cell.v === "No" ? "C00000" : cell.v === "Sí" ? "2E7D32" : undefined;
-			if (cell.t === "n") cell.z = formatoDeColumna(header);
+			const formato =
+				cell.t === "n" ? formatoDeColumna(header, moneda) : undefined;
+			if (formato) cell.z = formato;
 			cell.s = {
 				font: {
 					bold: total || (columnaEtiqueta && c === 0),
@@ -121,7 +140,7 @@ function aplicarEstilo(sheet: XLSX.WorkSheet, rows: Record<string, unknown>[]) {
 			50,
 			rows.reduce(
 				(max, row) =>
-					Math.max(max, textoVisible(row[header], header).length + 2),
+					Math.max(max, textoVisible(row[header], header, moneda).length + 2),
 				Math.max(12, header.length + 2),
 			),
 		),
@@ -146,6 +165,17 @@ export async function writeAdminReportsWorkbook(
 	XLSXStyle.writeFile(workbook as never, fileName);
 }
 
+// Hojas de montos: todo número que no sea porcentaje ni entero es Q. Las que
+// no están (Metadatos) quedan en formato General.
+const ESTILO_POR_HOJA: Record<string, EstiloHoja> = {
+	Resumen: { moneda: true },
+	Cobranza: { moneda: true, filaTotal: true },
+	Modalidades: { moneda: true },
+	Inversionistas: { moneda: true },
+	Movimientos: { moneda: true },
+	Interés: { moneda: true },
+};
+
 export function buildAdminReportsWorkbook(input: {
 	cobranza: { rows: MontoACobrarParticipacionRow[]; acumulado: boolean };
 	reinvestment: unknown;
@@ -169,7 +199,7 @@ export function buildAdminReportsWorkbook(input: {
 	const workbook = XLSX.utils.book_new();
 	const append = (name: string, rows: Record<string, unknown>[]) => {
 		const sheet = XLSX.utils.json_to_sheet(rows);
-		aplicarEstilo(sheet, rows);
+		aplicarEstilo(sheet, rows, ESTILO_POR_HOJA[name] ?? {});
 		XLSX.utils.book_append_sheet(workbook, sheet, name);
 	};
 	const cobranzaRows = input.cobranza.rows.map((row) => {

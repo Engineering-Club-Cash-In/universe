@@ -601,6 +601,8 @@ export function diagnosticar(
 
 	const resultados: ResultadoVehiculo[] = [];
 	const propuestas = new Map<number, ResultadoVehiculo[]>();
+	// Unidad → vehículos cuya placa y VIN apuntan a unidades distintas.
+	const enConflicto = new Map<number, string[]>();
 	const porSugerir: {
 		r: ResultadoVehiculo;
 		ev: ReturnType<typeof evidenciaVehiculo>;
@@ -683,6 +685,9 @@ export function diagnosticar(
 			continue;
 		}
 		if (decision.tipo === "conflicto") {
+			for (const id of [...decision.placa, ...decision.vin]) {
+				enConflicto.set(id, [...(enConflicto.get(id) ?? []), v.id]);
+			}
 			resultados.push({
 				...base,
 				estado: "conflicto_placa_vin",
@@ -759,6 +764,18 @@ export function diagnosticar(
 				r.estado = "duplicado_descartado";
 				r.detalle = `Duplicado de ${decision.ganador.vehiculo.id} (${decision.motivo})`;
 			}
+		}
+	}
+
+	// Una unidad que también reclama un vehículo con placa y VIN en conflicto
+	// no se propone a nadie: ese vehículo podría ser el dueño (su placa o su
+	// VIN apunta ahí) y no sabemos cuál dato está mal. Decide una persona.
+	for (const [unitId, conflictivos] of enConflicto) {
+		for (const r of propuestas.get(unitId) ?? []) {
+			r.estado = "unidad_disputada";
+			r.confirmar = undefined;
+			r.sugerencia = null;
+			r.detalle = `Un vehículo con placa y VIN en conflicto también apunta a esta unidad: ${conflictivos.join(", ")}`;
 		}
 	}
 

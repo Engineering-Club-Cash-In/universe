@@ -144,6 +144,30 @@ describe("diagnosticar — vehículos sin vínculo", () => {
 		expect(r?.estado).toBe("conflicto_placa_vin");
 		expect(r?.otras.map((x) => x.id).sort()).toEqual([1, 2]);
 	});
+	test("una unidad que reclama un vehículo en conflicto no se propone a otro", () => {
+		const d = diagnosticar(
+			[
+				u(1, "P-420CDP CON APAGADO"),
+				u(2, "3N6CD33B0ZL450292 - CON APAGADO"),
+				u(3, "P-555XYZ CON APAGADO"),
+			],
+			[
+				v("conflicto", { placa: "P-420CDP", vin: "3N6CD33B0ZL450292" }),
+				// Duplicado con la misma placa: antes se quedaba la unidad 1 solo.
+				v("duplicado", { placa: "P0-420CDP" }),
+				v("ajeno", { placa: "P-555XYZ" }),
+			],
+		);
+		const de = (id: string) => d.vehiculos.find((r) => r.vehiculo.id === id);
+		expect(de("conflicto")?.estado).toBe("conflicto_placa_vin");
+		expect(de("duplicado")?.estado).toBe("unidad_disputada");
+		expect(de("duplicado")?.detalle).toContain("conflicto");
+		// Lo que el conflicto no toca sigue igual.
+		expect(de("ajeno")?.estado).toBe("propuesto");
+		expect(d.unidades.find((x) => x.unidad.id === 1)?.estado).toBe(
+			"en_revision",
+		);
+	});
 	test("la placa en dos unidades → ambiguo", () => {
 		const r = estadoDe(
 			[u(1, "P-720GVH CON APAGADO"), u(2, "C-720GVH SIN APAGADO")],

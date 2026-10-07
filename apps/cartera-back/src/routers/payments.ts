@@ -70,6 +70,7 @@ export const paymentRouter = new Elysia()
       void enviarRecibosPagoDeCreditoBestEffort({
         creditoId: body.data.credito_id,
         pagoIds: [body.data.pago_id],
+        soloBoletasCompletas: true,
       });
     }
     return respuesta;
@@ -659,6 +660,9 @@ export const paymentRouter = new Elysia()
         void enviarRecibosPagoDeCreditoBestEffort({
           creditoId: pagoExiste.credito_id,
           pagoIds: [pagoId],
+          // Conta valida fila por fila: una boleta de varias cuotas manda su
+          // único recibo cuando se valida la última.
+          soloBoletasCompletas: true,
         });
       }
       return resultado;

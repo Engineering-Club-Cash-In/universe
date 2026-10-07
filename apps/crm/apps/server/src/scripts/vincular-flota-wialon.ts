@@ -50,6 +50,7 @@ import { fetchAllPages } from "../lib/fetch-all-pages";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { getWialonClient } from "../services/wialon/wialon-client";
+import { WialonClientError } from "../services/wialon/wialon-types";
 import {
 	aplanarCamposUnidad,
 	type CreditoVehiculo,
@@ -57,6 +58,7 @@ import {
 	diagnosticar,
 	type EstadoUnidad,
 	type EstadoVehiculo,
+	metodoVigente,
 	type UnidadWialon,
 	type VehiculoCrm,
 } from "./vincular-flota-wialon.logic";
@@ -417,9 +419,48 @@ if (!aplicar) {
  * placa y el VIN sigan siendo los del diagnóstico. Cada vínculo deja su fila
  * en la bitácora de vehículos.
  */
+/**
+ * La unidad tal como está HOY en Wialon (nombre y campos del vehículo), o null
+ * si ya no existe o no es visible para la cuenta (error 7, el mismo criterio
+ * que la ficha). Cualquier otro error se propaga: no dice nada de la unidad.
+ */
+async function unidadActual(unitId: number): Promise<UnidadWialon | null> {
+	try {
+		const { item } = await getWialonClient().getUnitDetail(unitId, 8388609);
+		return {
+			id: item.id,
+			nm: item.nm,
+			campos: aplanarCamposUnidad(
+				(item as { pflds?: Record<string, unknown> }).pflds,
+			),
+		};
+	} catch (error) {
+		if (
+			error instanceof WialonClientError &&
+			error.code === "WIALON_API_ERROR" &&
+			error.wialonErrorCode === 7
+		) {
+			return null;
+		}
+		throw error;
+	}
+}
+
 const escritor: Escritor = {
-	vincular: (item) =>
-		db.transaction(async (tx) => {
+	vincular: async (item) => {
+		// El catálogo se leyó una vez al empezar: antes de escribir se vuelve a
+		// leer ESTA unidad y se exige que la placa/VIN del vehículo sigan
+		// apuntando a ella con el mismo método. Importa sobre todo para
+		// auto:vin y auto:registro, que la ficha no revalida después.
+		const actual = await unidadActual(item.unitId);
+		if (
+			!actual ||
+			metodoVigente({ placa: item.placa, vin: item.vin }, actual) !==
+				item.metodo
+		) {
+			return "evidencia_cambio" as const;
+		}
+		return db.transaction(async (tx) => {
 			const empezo = Date.now();
 			await tx.execute(
 				sql`select pg_advisory_xact_lock(hashtextextended(${`wialon_unit:${item.unitId}`}, 0))`,
@@ -440,7 +481,7 @@ const escritor: Escritor = {
 				.update(vehicles)
 				.set({
 					wialonUnitId: item.unitId,
-					wialonUnitName: item.unitName,
+					wialonUnitName: actual.nm,
 					wialonVinculadoAt: new Date(),
 					wialonVinculadoPor: item.marcador,
 				})
@@ -474,7 +515,7 @@ const escritor: Escritor = {
 									action: "wialon_vincular",
 									data: {
 										unitId: item.unitId,
-										unitName: item.unitName,
+										unitName: actual.nm,
 										automatico: true,
 										marcador: item.marcador,
 									},
@@ -486,15 +527,16 @@ const escritor: Escritor = {
 				);
 				return "guardado" as const;
 			}
-			const [actual] = await tx
+			const [enBd] = await tx
 				.select({ unitId: vehicles.wialonUnitId })
 				.from(vehicles)
 				.where(eq(vehicles.id, item.vehicleId))
 				.limit(1);
-			return actual?.unitId != null
+			return enBd?.unitId != null
 				? ("vehiculo_ya_vinculado" as const)
 				: ("datos_cambiaron" as const);
-		}),
+		});
+	},
 };
 
 console.log(

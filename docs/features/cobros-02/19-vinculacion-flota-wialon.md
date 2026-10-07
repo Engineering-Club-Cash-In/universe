@@ -161,6 +161,11 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
 - **Producción se rechaza siempre**, aunque se confirme el host.
 - Cada vínculo va en su propia transacción, con el mismo **lock por unidad** que usa la ficha
   (`pg_advisory_xact_lock`): dos escrituras no pueden darle la misma unidad a dos vehículos.
+- **Revalida la unidad en Wialon antes de cada vínculo:** el catálogo se lee una vez al
+  empezar, así que justo antes de escribir se vuelve a leer esa unidad y se exige que la placa
+  o el VIN del vehículo sigan apuntando a ella con el mismo método. Si se renombró, se pasó a
+  otro carro o ya no es visible, se omite (`evidencia_cambio`). Suma una consulta a Wialon por
+  vínculo (sin costo por petición): una corrida completa tarda unos 5 minutos.
 - **No pisa nada:** si mientras corría alguien vinculó el vehículo, o la unidad ya está en
   otro, o la placa o el VIN cambiaron desde el diagnóstico, ese vínculo se omite y queda
   anotado en el `resultado-<hora>.csv` (`vehiculo_ya_vinculado`, `unidad_ocupada`, `datos_cambiaron`).

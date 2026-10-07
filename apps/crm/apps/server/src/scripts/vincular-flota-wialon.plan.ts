@@ -156,7 +156,13 @@ export type ResultadoEscritura =
 	/** El vehículo ya tiene un vínculo (alguien lo fijó mientras corría el script). */
 	| "vehiculo_ya_vinculado"
 	/** La placa o el VIN del vehículo cambiaron desde el diagnóstico. */
-	| "datos_cambiaron";
+	| "datos_cambiaron"
+	/**
+	 * La unidad en Wialon cambió desde el diagnóstico (renombrada, pasada a
+	 * otro carro, campos editados o ya no visible): su evidencia no respalda
+	 * el vínculo con el mismo método.
+	 */
+	| "evidencia_cambio";
 
 export interface Escritor {
 	vincular(item: ItemVinculo): Promise<ResultadoEscritura>;

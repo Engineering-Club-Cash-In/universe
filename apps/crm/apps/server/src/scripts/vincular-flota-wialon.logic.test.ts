@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	celdaCsv,
 	diagnosticar,
+	metodoVigente,
 	normalizarVin,
 	type UnidadWialon,
 	type VehiculoCrm,
@@ -830,6 +831,60 @@ describe("diagnosticar — vista por unidad", () => {
 		expect(d.unidades.find((r) => r.unidad.id === 5)?.detalle).toBe(
 			"Nombre sin placa ni VIN reconocible",
 		);
+	});
+});
+
+describe("metodoVigente (revalidar la unidad justo antes de escribir)", () => {
+	const VIN = "3N6CD33B0ZL450292";
+	test("la unidad sigue igual: mismo método", () => {
+		expect(
+			metodoVigente(
+				{ placa: "P0-420CDP", vin: null },
+				u(1, "P-420CDP CON APAGADO"),
+			),
+		).toBe("placa");
+		expect(
+			metodoVigente({ placa: null, vin: VIN }, u(1, `${VIN} - CON APAGADO`)),
+		).toBe("vin");
+	});
+	test("solo cambió el sufijo del nombre: sigue valiendo", () => {
+		expect(
+			metodoVigente(
+				{ placa: "P-420CDP", vin: null },
+				u(1, "P-420CDP - SIN APAGADO"),
+			),
+		).toBe("placa");
+	});
+	test("la unidad se pasó a otro carro (otra placa u otro VIN): ya no coincide", () => {
+		expect(
+			metodoVigente(
+				{ placa: "P-420CDP", vin: null },
+				u(1, "P-999XYZ CON APAGADO"),
+			),
+		).toBeNull();
+		expect(
+			metodoVigente(
+				{ placa: null, vin: VIN },
+				u(1, "1HGBH41JXMN109186 - CON APAGADO"),
+			),
+		).toBeNull();
+	});
+	test("el VIN que solo estaba en el campo vin de la unidad se borró: ya no coincide", () => {
+		expect(
+			metodoVigente({ placa: null, vin: VIN }, u(1, "Unidad 1", { vin: VIN })),
+		).toBe("vin_campo");
+		expect(
+			metodoVigente({ placa: null, vin: VIN }, u(1, "Unidad 1")),
+		).toBeNull();
+	});
+	test("placa y VIN del vehículo ahora apuntan a cosas distintas en la unidad: el método cambia", () => {
+		// Antes coincidía solo por placa; ahora la unidad trae además el VIN.
+		expect(
+			metodoVigente(
+				{ placa: "P-420CDP", vin: VIN },
+				u(1, `P-420CDP ${VIN} CON APAGADO`),
+			),
+		).toBe("placa+vin");
 	});
 });
 

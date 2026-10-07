@@ -48,6 +48,7 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 	encrypt_de_emisor_intacto: -2,
 	encrypt_ausente_pero_esperado: 3,
 	pdf_protegido_no_abre: 0,
+	pdf_con_restricciones_del_emisor: 0,
 	paginas_mixtas_texto_e_imagen: 0,
 	todas_las_paginas_rasterizadas: 0,
 	documento_fotografiado_o_escaneado: 0,
@@ -98,6 +99,8 @@ export const SIGNAL_LABELS: Record<string, string> = {
 		"El cifrado coincide con la huella conocida del emisor",
 	encrypt_ausente_pero_esperado: "Falta el cifrado esperado para el emisor",
 	pdf_protegido_no_abre: "El PDF está protegido y no se pudo inspeccionar",
+	pdf_con_restricciones_del_emisor:
+		"El PDF abre sin contraseña pero trae restricciones del emisor; la inspección técnica fue parcial",
 	paginas_mixtas_texto_e_imagen:
 		"El PDF mezcla páginas de texto y páginas rasterizadas",
 	todas_las_paginas_rasterizadas: "Todas las páginas están rasterizadas",

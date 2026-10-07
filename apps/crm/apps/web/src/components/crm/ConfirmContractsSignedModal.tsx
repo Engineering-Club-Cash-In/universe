@@ -43,12 +43,13 @@ export function ConfirmContractsSignedModal({
 							<div className="rounded-lg bg-blue-50 p-3">
 								<p className="font-medium text-blue-900 text-sm">
 									<FileSignature className="mr-1 inline h-4 w-4" />
-									Al confirmar, los contratos se marcarán como firmados y la
-									oportunidad avanzará al 90%
+									Al confirmar, la oportunidad avanzará al 90%
 								</p>
 								<p className="mt-1 text-blue-700 text-xs">
-									Asegúrate de que todos los contratos estén debidamente
-									firmados antes de confirmar.
+									Asegúrate de que el cliente y los codeudores hayan firmado.
+									Los contratos de WeeTrust siguen mostrando lo que pasa allá:
+									los que todavía esperan la firma del representante legal se
+									marcan firmados solos cuando firme.
 								</p>
 							</div>
 						</div>

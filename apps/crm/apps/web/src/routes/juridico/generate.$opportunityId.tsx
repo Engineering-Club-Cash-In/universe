@@ -14,6 +14,7 @@ import {
 	type ContractSigner,
 	type CRMData,
 	DynamicContractWizard,
+	type GeneroSinRenap,
 } from "@/components/contracts/DynamicContractWizard";
 import { ReenviarWhatsappDialog } from "@/components/contracts/ReenviarWhatsappDialog";
 import {
@@ -99,9 +100,11 @@ function RouteComponent() {
 		mutationFn: async ({
 			dpi,
 			documentNames,
+			genero,
 		}: {
 			dpi: string;
 			documentNames: string[];
+			genero?: GeneroSinRenap;
 		}) => {
 			return await client.getDocumentsByDpi({
 				dpi: dpi.replace(/\s/g, ""),
@@ -109,6 +112,7 @@ function RouteComponent() {
 				// Para resolver el género por el lead dueño de la oportunidad
 				// cuando RENAP no responde (hay DPI duplicados entre leads)
 				opportunityId,
+				genero,
 			});
 		},
 	});
@@ -343,10 +347,12 @@ function RouteComponent() {
 	const handleGetDocumentsByDpi = async (
 		dpi: string,
 		documentNames: string[],
+		genero?: GeneroSinRenap,
 	) => {
 		const result = await getDocsByDpiMutation.mutateAsync({
 			dpi,
 			documentNames,
+			genero,
 		});
 		return result;
 	};

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { estadoReciboPago, fechaLarga, htmlReciboPago, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
+import { estadoReciboPago, fechaLarga, htmlReciboPago, listaCuotas, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
 
 const base: DatosReciboPago = {
   pagoId: 151515,
@@ -14,7 +14,7 @@ const base: DatosReciboPago = {
   clienteNombre: "Omar Cardoza Estrada",
   clienteNit: "41933052",
   numeroCreditoSifco: "01010214100000",
-  numeroCuota: 12,
+  cuotas: [12],
   plazo: 36,
   proximoPago: { fecha: "2026-09-02", monto: 600, numeroCuota: 13 },
   observaciones: null,
@@ -86,3 +86,15 @@ describe("estado del pago en el recibo", () => {
     expect(anulado).not.toContain("Monto aplicado");
   });
 });
+
+describe("recibo de una boleta de varias cuotas", () => {
+  test("lista las cuotas que cubrió", () => {
+    expect(listaCuotas([18])).toBe("18");
+    expect(listaCuotas([18, 19])).toBe("18 y 19");
+    expect(listaCuotas([18, 19, 20])).toBe("18, 19 y 20");
+    const html = htmlReciboPago({ ...base, cuotas: [18, 19] });
+    expect(html).toContain("Cuotas");
+    expect(html).toContain("18 y 19 de 36");
+  });
+});
+

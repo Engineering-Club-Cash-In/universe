@@ -6,7 +6,8 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { launchBrowser } from "../utils/functions/browser";
-import { estadoReciboPago, htmlReciboPago } from "../utils/reciboPagoHtml";
+import { htmlReciboPago } from "../utils/reciboPagoHtml";
+import { filasDeLaBoleta, resumirBoleta } from "./reciboBoleta";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
 import Big from "big.js";
@@ -1707,7 +1708,10 @@ export async function generateReciboPagoPDF(pagoId: number) {
       p.validation_status,
       p."paymentFalse" AS payment_false,
       cq.pagado AS cuota_pagada,
-      TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+      -- fecha_pago se guarda en hora de Guatemala (manuales) o como día
+      -- bancario sin zona (Nexa): se lee tal cual. Convertirla desde UTC le
+      -- restaba 6 horas y un pago de Nexa del 30 salía como del 29.
+      TO_CHAR(p.fecha_pago, 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
       p.origen_pago,
       c.numero_credito_sifco,
       c."statusCredit" AS status_credito,
@@ -1731,6 +1735,10 @@ export async function generateReciboPagoPDF(pagoId: number) {
   }
 
   const pago = result.rows[0] as any;
+
+  // El recibo es de la BOLETA: una boleta de varias cuotas queda en varias
+  // filas, todas con el monto completo (ver reciboBoleta.ts).
+  const boleta = resumirBoleta(await filasDeLaBoleta(pagoId));
 
   // Próxima cuota sin pagar del crédito, para el bloque "Estado del crédito".
   // - Un crédito cancelado no tiene próximo pago: el reset conserva sus cuotas
@@ -1774,22 +1782,19 @@ export async function generateReciboPagoPDF(pagoId: number) {
 
   // 2️⃣ Generar HTML del recibo
   const html = htmlReciboPago({
-    pagoId: Number(pago.pago_id),
-    estado: estadoReciboPago(pago.validation_status, pago.payment_false, {
-      cuotaPagada: pago.cuota_pagada,
-      montoAplicado: Number(pago.monto_aplicado || 0),
-    }),
+    pagoId: boleta.representativo,
+    estado: boleta.estado,
     montoBoleta: Number(pago.monto_boleta || 0),
-    montoAplicado: Number(pago.monto_aplicado || 0),
-    mora: Number(pago.mora || 0),
-    otros: Number(pago.otros || 0),
+    montoAplicado: boleta.montoAplicado,
+    mora: boleta.mora,
+    otros: boleta.otros,
     fechaPago: pago.fecha_pago ?? null,
     origenPago: pago.origen_pago ?? null,
     referencia: pago.numeroautorizacion ?? null,
     clienteNombre: pago.usuario_nombre,
     clienteNit: pago.usuario_nit ?? null,
     numeroCreditoSifco: pago.numero_credito_sifco,
-    numeroCuota: pago.numero_cuota != null ? Number(pago.numero_cuota) : null,
+    cuotas: boleta.cuotas,
     plazo: pago.plazo != null ? Number(pago.plazo) : null,
     proximoPago: proxima?.fecha_vencimiento
       ? {
@@ -1824,7 +1829,7 @@ export async function generateReciboPagoPDF(pagoId: number) {
   }
   // 4️⃣ Subir a R2
   const fileBuffer = Buffer.from(pdfData);
-  const filename = `recibos/recibo_pago_${pagoId}_${Date.now()}.pdf`;
+  const filename = `recibos/recibo_pago_${boleta.representativo}_${Date.now()}.pdf`;
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -1847,7 +1852,11 @@ export async function generateReciboPagoPDF(pagoId: number) {
   // COBROS-02); la descarga desde cartera solo lee pdfUrl.
   return {
     pdfUrl: url,
-    numeroCuota: pago.numero_cuota != null ? Number(pago.numero_cuota) : null,
+    // Comprobante de la boleta (pago_id más bajo) y todas sus filas: el envío
+    // por WhatsApp usa el comprobante como llave para mandar UN recibo.
+    comprobante: boleta.representativo,
+    pagoIds: boleta.pagoIds,
+    numeroCuota: boleta.cuotas[0] ?? (pago.numero_cuota != null ? Number(pago.numero_cuota) : null),
     asesorNombre: (pago.asesor_nombre as string | null) ?? null,
     asesorTelefono: (pago.asesor_telefono as string | null) ?? null,
   };

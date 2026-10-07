@@ -54,7 +54,8 @@ export type DatosReciboPago = {
   clienteNombre: string;
   clienteNit: string | null;
   numeroCreditoSifco: string;
-  numeroCuota: number | null;
+  /** Cuotas que cubrió la boleta (una o varias). */
+  cuotas: number[];
   plazo: number | null;
   proximoPago: { fecha: string; monto: number; numeroCuota: number } | null;
   observaciones: string | null;
@@ -100,11 +101,18 @@ export function medioDePago(origen: string | null | undefined): string {
   return MEDIOS[origen] ?? origen.charAt(0).toUpperCase() + origen.slice(1);
 }
 
+/** [18] → "18"; [18, 19] → "18 y 19"; [18, 19, 20] → "18, 19 y 20". */
+export function listaCuotas(cuotas: number[]): string {
+  if (cuotas.length <= 1) return cuotas.map(String).join("");
+  return `${cuotas.slice(0, -1).join(", ")} y ${cuotas[cuotas.length - 1]}`;
+}
+
 export function htmlReciboPago(d: DatosReciboPago): string {
   const e = escaparHtml;
   const medio = medioDePago(d.origenPago);
   const cuota =
-    d.numeroCuota != null ? (d.plazo ? `${d.numeroCuota} de ${d.plazo}` : String(d.numeroCuota)) : "—";
+    d.cuotas.length > 0 ? (d.plazo ? `${listaCuotas(d.cuotas)} de ${d.plazo}` : listaCuotas(d.cuotas)) : "—";
+  const etiquetaCuota = d.cuotas.length > 1 ? "Cuotas" : "Cuota";
 
   // Solo lo que el cliente necesita ver además del monto aplicado.
   const cargos: string[] = [];
@@ -187,7 +195,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
         <div class="card full"><div class="label-sm">Cliente</div><div class="valor">${e(d.clienteNombre)}</div></div>
         <div class="card"><div class="label-sm">NIT</div><div class="valor">${e(d.clienteNit || "C/F")}</div></div>
         <div class="card"><div class="label-sm">Crédito</div><div class="valor">${e(d.numeroCreditoSifco)}</div></div>
-        <div class="card"><div class="label-sm">Cuota</div><div class="valor">${e(cuota)}</div></div>
+        <div class="card"><div class="label-sm">${etiquetaCuota}</div><div class="valor">${e(cuota)}</div></div>
       </div>
 
       ${cargos.length > 0 ? `<div class="cargos"><div class="label-sm" style="margin-bottom: 4px;">El pago incluye</div>${cargos.join("")}</div>` : ""}

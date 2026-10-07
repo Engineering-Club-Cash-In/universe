@@ -40,7 +40,9 @@ export function AvisoFaltaVincular({
 	if (!faltaVincular(apiResponse)) return null;
 	return (
 		<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-amber-900 text-xs dark:text-amber-300">
-			<p className="flex min-w-0 flex-1 items-start gap-1.5">
+			{/* Con base fija, el botón se queda a la derecha mientras entre y baja
+			    debajo del texto cuando no; nunca se sale de la tarjeta. */}
+			<p className="flex min-w-0 flex-1 basis-64 items-start gap-1.5">
 				<TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
 				<span>
 					No se encontraron los espacios de firma, así que no salió a firmar.

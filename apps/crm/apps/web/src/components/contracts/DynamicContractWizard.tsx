@@ -97,6 +97,15 @@ interface Document {
  */
 type FieldType = "text" | "select" | "list";
 
+/**
+ * Género de quien firma, elegido en pantalla cuando RENAP no responde.
+ *
+ * Sin RENAP y sin género en el CRM (inversiones no tiene lead) no se podía
+ * elegir la plantilla y el flujo se cortaba. Desde 2026-09 RENAP rechaza la
+ * llave, así que esto es lo que deja seguir.
+ */
+export type GeneroSinRenap = "hombre" | "mujer";
+
 interface FieldOption {
 	value: string;
 	label: string;
@@ -308,6 +317,8 @@ interface DynamicContractWizardProps {
 	onGetDocumentsByDpi: (
 		dpi: string,
 		documentNames: string[],
+		/** El que eligieron en pantalla cuando RENAP no responde. */
+		genero?: GeneroSinRenap,
 	) => Promise<{
 		success: boolean;
 		/** null cuando RENAP no tiene a la persona: se usan los datos del CRM */
@@ -963,6 +974,13 @@ export function DynamicContractWizard({
 	const [renapData, setRenapData] = useState<RenapData | null>(null);
 	// RENAP no encontró el DPI: los campos se llenaron solo con datos del CRM
 	const [renapUnavailable, setRenapUnavailable] = useState(false);
+	// RENAP no respondió y no hay género de dónde sacarlo: se pide en pantalla
+	const [pedirGenero, setPedirGenero] = useState(false);
+	const [generoSinRenap, setGeneroSinRenap] = useState<GeneroSinRenap | "">("");
+	// El género del cliente: el del CRM, y si no hay, el elegido en pantalla
+	const generoDelCliente =
+		crmData.cliente.genero ||
+		(generoSinRenap === "mujer" ? "F" : generoSinRenap === "hombre" ? "M" : "");
 	const [documents, setDocuments] = useState<Document[]>([]);
 	const [fields, setFields] = useState<Field[]>([]);
 	const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -1260,7 +1278,7 @@ export function DynamicContractWizard({
 				entidad,
 				agencia,
 			} = crmData;
-			const gender = cliente.genero || renapInfo?.gender || "M";
+			const gender = generoDelCliente || renapInfo?.gender || "M";
 
 			fieldsData.forEach((field) => {
 				const fieldKeyLower = field.key?.toLowerCase();
@@ -1701,7 +1719,7 @@ export function DynamicContractWizard({
 				return { ...initialValues, ...valoresIniciales, ...editadosAMano };
 			});
 		},
-		[crmData, numberToText, moneyToText, valoresIniciales],
+		[crmData, numberToText, moneyToText, valoresIniciales, generoDelCliente],
 	);
 
 	/**
@@ -1751,6 +1769,7 @@ export function DynamicContractWizard({
 			const response = await onGetDocumentsByDpi(
 				crmData.cliente.dpi,
 				selectedDocuments,
+				generoSinRenap || undefined,
 			);
 			if (response.success) {
 				trajoCampos = true;
@@ -1817,6 +1836,15 @@ export function DynamicContractWizard({
 			}
 		} catch (error: any) {
 			console.error("Error fetching documents data:", error);
+			// RENAP no respondió y no hay género en el CRM: en vez de cortar, se
+			// pide en pantalla y se vuelve a intentar con él.
+			if (error?.data?.pideGenero) {
+				setPedirGenero(true);
+				toast.warning(
+					"RENAP no respondió. Elegí el género de quien firma y dale Continuar.",
+				);
+				return false;
+			}
 			const message = error?.message || "Error al obtener datos de documentos";
 			toast.error(message);
 		} finally {
@@ -2048,7 +2076,9 @@ export function DynamicContractWizard({
 		documentTypes.length > 0 &&
 		selectedDocuments.length === documentTypes.length;
 
-	const canProceedStep1 = selectedDocuments.length > 0;
+	// Si RENAP no respondió, sin género no hay plantilla: se espera a que lo elijan
+	const canProceedStep1 =
+		selectedDocuments.length > 0 && (!pedirGenero || Boolean(generoSinRenap));
 	const vendorDeclarationSelected = selectedDocuments.includes(
 		"declaracion_vendedor",
 	);
@@ -2172,7 +2202,7 @@ export function DynamicContractWizard({
 
 				// Determine combined gender: if any male (lead or co-debtor), use "male"
 				// Only use "female" if ALL are female
-				const leadIsMale = crmData.cliente.genero !== "F";
+				const leadIsMale = generoDelCliente !== "F";
 				const anyCoDebtorIsMale = crmData.coDebtors?.some(
 					(cd) => cd.gender === "male" || !cd.gender,
 				);
@@ -2538,6 +2568,37 @@ export function DynamicContractWizard({
 									firmante. Si la oportunidad ya tiene cartas unidas, éstas las
 									reemplazan enteras: tienen que venir todas las que ya estaban.
 								</p>
+							)}
+							{/* RENAP no respondió y no hay género de dónde sacarlo: se elige
+							    acá para escoger la plantilla y redactar el contrato. */}
+							{pedirGenero && (
+								<div className="mt-4 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+									<p className="text-amber-900 text-sm dark:text-amber-300">
+										RENAP no respondió. Elegí el género de quien firma para
+										seguir sin RENAP; los demás datos los revisás en el paso
+										siguiente.
+									</p>
+									<div className="flex flex-wrap gap-2">
+										{(
+											[
+												["hombre", "Masculino"],
+												["mujer", "Femenino"],
+											] as const
+										).map(([valor, etiqueta]) => (
+											<Button
+												key={valor}
+												type="button"
+												size="sm"
+												variant={
+													generoSinRenap === valor ? "default" : "outline"
+												}
+												onClick={() => setGeneroSinRenap(valor)}
+											>
+												{etiqueta}
+											</Button>
+										))}
+									</div>
+								</div>
 							)}
 						</CardContent>
 					</Card>

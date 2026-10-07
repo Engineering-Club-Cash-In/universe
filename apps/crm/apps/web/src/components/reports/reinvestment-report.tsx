@@ -5,6 +5,7 @@ import {
 	ChevronsLeft,
 	ChevronsRight,
 	Download,
+	Loader2,
 } from "lucide-react";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function ReinvestmentReport({
 	periodLabel,
 	onRetry,
 	onExportInvestors,
+	isExporting = false,
 }: {
 	data?: unknown;
 	isPending: boolean;
@@ -58,6 +60,7 @@ export function ReinvestmentReport({
 	periodLabel: string;
 	onRetry: () => void;
 	onExportInvestors?: () => void;
+	isExporting?: boolean;
 }) {
 	const [showInvestors, setShowInvestors] = useState(false);
 	const [detail, setDetail] = useState<DetailKey | null>(null);
@@ -220,8 +223,16 @@ export function ReinvestmentReport({
 					</div>
 					<div className="flex flex-wrap gap-2">
 						{onExportInvestors ? (
-							<Button variant="outline" onClick={onExportInvestors}>
-								<Download className="mr-2 h-4 w-4" />
+							<Button
+								variant="outline"
+								onClick={onExportInvestors}
+								disabled={isExporting}
+							>
+								{isExporting ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<Download className="mr-2 h-4 w-4" />
+								)}
 								Exportar Excel
 							</Button>
 						) : null}

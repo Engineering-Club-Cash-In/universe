@@ -444,7 +444,8 @@ export const paymentRouter = new Elysia()
       query: t.Object({
         page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
         pageSize: t.Optional(t.Integer({ minimum: 1, maximum: 1000, default: 20 })),
-        numeroCredito: t.Optional(t.String()),
+        // 🔒 Defensa adicional: el controlador ya manda todo como parámetro SQL.
+        numeroCredito: t.Optional(t.String({ maxLength: 100 })),
         dia: t.Optional(t.Integer({ minimum: 1, maximum: 31 })),
         mes: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
         anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
@@ -453,11 +454,22 @@ export const paymentRouter = new Elysia()
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
         reportAdvisor: t.Optional(t.Boolean({ default: false })),
-        usuarioNombre: t.Optional(t.String()),
-        validationStatus: t.Optional(t.String()),
-        categoriaCredito: t.Optional(t.String()),
-        tipoCredito: t.Optional(t.String()),
-        formatoCredito: t.Optional(t.String()),
+        usuarioNombre: t.Optional(t.String({ maxLength: 200 })),
+        // Mismos valores que el enum payment_validation_status ("" = sin filtro).
+        validationStatus: t.Optional(
+          t.Union([
+            t.Literal(""),
+            t.Literal("no_required"),
+            t.Literal("pending"),
+            t.Literal("validated"),
+            t.Literal("capital"),
+            t.Literal("capital_validated"),
+            t.Literal("reset"),
+          ])
+        ),
+        categoriaCredito: t.Optional(t.String({ maxLength: 100 })),
+        tipoCredito: t.Optional(t.String({ maxLength: 100 })),
+        formatoCredito: t.Optional(t.String({ maxLength: 50 })),
         soloAplicados: t.Optional(t.Boolean()),
         fechaAplicado: t.Optional(t.String({ format: "date" })),
         fechaAplicadoInicio: t.Optional(t.String({ format: "date" })),

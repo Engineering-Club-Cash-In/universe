@@ -61,6 +61,7 @@ import {
 } from "../lib/contratos-rep-legal";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
+import { armarFirmantes } from "../lib/firmantes-de-la-oportunidad";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { createNotification } from "../lib/notificaciones";
 import { juridicoProcedure } from "../lib/orpc";
@@ -285,11 +286,12 @@ function firmaDelGenerador(apiResponse: unknown): {
  * para la subida manual se arma acá, porque lo único que manda jurídico es el
  * archivo y el tipo de contrato.
  *
- * Los cofirmantes sin correo se omiten: no hay a dónde mandarles el link, y
- * meterlos igual hace que WeeTrust rechace el envío entero.
+ * Con `subidaAMano`, si el cliente es una sociedad firma su representante (el
+ * primer codeudor) y no la sociedad: ver `armarFirmantes`.
  */
 export async function firmantesDeLaOportunidad(
 	opportunityId: string,
+	opciones: { subidaAMano?: boolean } = {},
 ): Promise<{ leadId: string; signers: ContractSigner[] }> {
 	const [datos] = await db
 		.select({ opportunity: opportunities, lead: leads })
@@ -312,35 +314,32 @@ export async function firmantesDeLaOportunidad(
 		.filter(Boolean)
 		.join(" ");
 
-	const signers: ContractSigner[] = [];
-	if (lead.email) {
-		signers.push({
-			role: "TITULAR",
-			email: lead.email,
-			name: nombreTitular || lead.email,
-			...(lead.dpi ? { dpi: lead.dpi } : {}),
-		});
-	}
-
 	// Orden estable: el reparto de correos de prueba es posicional, así que los
-	// dos lados tienen que recorrer los codeudores en el mismo orden.
+	// dos lados tienen que recorrer los codeudores en el mismo orden. Y en una
+	// sociedad, el primero registrado es su representante.
 	const cofirmantes = await db
 		.select()
 		.from(coDebtors)
 		.where(eq(coDebtors.opportunityId, opportunityId))
 		.orderBy(coDebtors.createdAt);
 
-	for (const cd of cofirmantes) {
-		if (!cd.email) continue;
-		signers.push({
-			role: "COFIRMANTE",
-			email: cd.email,
-			name: cd.fullName || cd.email,
-			...(cd.dpi ? { dpi: cd.dpi } : {}),
+	try {
+		const signers = armarFirmantes({
+			titular: { email: lead.email, name: nombreTitular, dpi: lead.dpi },
+			codeudores: cofirmantes.map((cd) => ({
+				email: cd.email,
+				name: cd.fullName,
+				dpi: cd.dpi,
+			})),
+			sociedadFirmaPorSuRepresentante:
+				Boolean(opciones.subidaAMano) && lead.clientType === "empresa",
+		});
+		return { leadId: lead.id, signers };
+	} catch (error) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: error instanceof Error ? error.message : String(error),
 		});
 	}
-
-	return { leadId: lead.id, signers };
 }
 
 /**
@@ -986,6 +985,11 @@ export const contractGenerationRouter = {
 				dpi: z.string().length(13),
 				documentNames: z.array(z.string()).min(1),
 				opportunityId: z.string().uuid().optional(),
+				/**
+				 * El que eligieron en pantalla porque RENAP no respondió. Manda sobre
+				 * el del CRM: es lo que la persona confirmó para este contrato.
+				 */
+				genero: z.enum(["hombre", "mujer"]).optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -1019,11 +1023,12 @@ export const contractGenerationRouter = {
 
 				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
 				const generoFallback =
-					gender === "female"
+					input.genero ??
+					(gender === "female"
 						? ("mujer" as const)
 						: gender === "male"
 							? ("hombre" as const)
-							: undefined;
+							: undefined);
 
 				const response = await getDocumentsByDpi(
 					input.dpi,
@@ -1033,6 +1038,11 @@ export const contractGenerationRouter = {
 				if (!response.success) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: response.message || "Error al obtener documentos",
+						// RENAP no respondió y no hubo género de dónde sacarlo (en
+						// inversiones no hay lead): la pantalla lo pide y reintenta.
+						data: {
+							pideGenero: !generoFallback && Boolean(response.renapError),
+						},
 					});
 				}
 				if (response.renapUnavailable) {
@@ -2413,6 +2423,7 @@ export const contractGenerationRouter = {
 
 			const { leadId, signers } = await firmantesDeLaOportunidad(
 				input.opportunityId,
+				{ subidaAMano: true },
 			);
 
 			const firmantes = firmantesDelContrato(input.contractType, signers);

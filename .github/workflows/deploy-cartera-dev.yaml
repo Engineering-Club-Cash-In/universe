@@ -2,8 +2,9 @@ name: Deploy cartera y nexa-server (dev)
 
 # Construye y empuja las imágenes -dev al ECR público y dispara el redeploy
 # en Coolify. Solo corre cuando hay push a develop que toque la app correspondiente.
-# nexa-server usa la misma imagen que producción (cci/nexa-server): cada
-# Coolify apunta a su cartera por variables de entorno, no por imagen.
+# nexa-server usa el mismo repo de imagen que producción (cci/nexa-server)
+# pero con el tag `develop`: `latest` es solo de producción, para que un push a
+# develop nunca quede listo para que producción lo levante en un reinicio.
 on:
   push:
     branches: ["develop"]
@@ -11,6 +12,7 @@ on:
       - "apps/cartera-back/**"
       - "apps/carteraFront/**"
       - "apps/nexa-server/**"
+      - ".dockerignore"
       - "packages/email/**"
       - "packages/structured-logger/**"
       - "package.json"
@@ -140,7 +142,7 @@ jobs:
             "${{ secrets.COOLIFY_WEBHOOK_FRONT_DEV }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
 
-  # 4) nexa-server → cci/nexa-server:latest (la misma imagen que producción)
+  # 4) nexa-server → cci/nexa-server:develop (`latest` es de producción)
   nexa-server:
     name: nexa-server (dev)
     needs: changes
@@ -167,9 +169,9 @@ jobs:
       - name: Build & push
         run: |
           podman build -f apps/nexa-server/Dockerfile . \
-            -t $ECR_REGISTRY/cci/nexa-server:latest \
+            -t $ECR_REGISTRY/cci/nexa-server:develop \
             -t $ECR_REGISTRY/cci/nexa-server:${{ github.sha }}
-          podman push $ECR_REGISTRY/cci/nexa-server:latest
+          podman push $ECR_REGISTRY/cci/nexa-server:develop
           podman push $ECR_REGISTRY/cci/nexa-server:${{ github.sha }}
 
       - name: Redeploy en Coolify

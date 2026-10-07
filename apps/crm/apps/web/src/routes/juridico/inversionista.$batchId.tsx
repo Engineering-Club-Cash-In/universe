@@ -20,6 +20,7 @@ import type { ContractResult } from "@/components/contracts/ContractResults";
 import {
 	type CRMData,
 	DynamicContractWizard,
+	type GeneroSinRenap,
 	moneyToWords,
 } from "@/components/contracts/DynamicContractWizard";
 import {
@@ -344,6 +345,7 @@ function RouteComponent() {
 	const traerCampos = async (
 		dpiConsultado: string,
 		documentNames: string[],
+		genero?: GeneroSinRenap,
 	) => {
 		const limpio = dpiConsultado.replace(/\D/g, "");
 		// El catálogo de campos se pide por DPI. Cartera no siempre lo tiene (y en
@@ -355,7 +357,7 @@ function RouteComponent() {
 			);
 		}
 
-		return client.getDocumentsByDpi({ dpi: limpio, documentNames });
+		return client.getDocumentsByDpi({ dpi: limpio, documentNames, genero });
 	};
 
 	if (cargandoPermisos || bateriaQuery.isLoading) {

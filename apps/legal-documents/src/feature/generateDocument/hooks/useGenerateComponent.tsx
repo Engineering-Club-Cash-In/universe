@@ -13,6 +13,7 @@ import {
   ServerError,
   TimeoutError,
 } from "@/services/errors";
+import { categoriaDisponible } from "../categorias";
 
 // Clave para guardar datos en localStorage
 const STORAGE_KEY = "legal-documents-wizard-state";
@@ -48,6 +49,15 @@ const loadStateFromStorage = (): { step: number; data: DocumentData } | null => 
     if (!stored) return null;
     
     const parsed = JSON.parse(stored);
+    // Un borrador de una categoría que ahora se genera en el CRM no se
+    // retoma: seguía hasta generar aunque su tarjeta ya no se viera. Se
+    // descarta y el wizard arranca de cero.
+    const categoria = parsed?.data?.category;
+    if (categoria && !categoriaDisponible(categoria)) {
+      localStorage.removeItem(STORAGE_KEY);
+      console.log("🗑️ Borrador descartado: su categoría se genera en el CRM");
+      return null;
+    }
     console.log("📂 Estado cargado desde localStorage:", parsed);
     return parsed;
   } catch (error) {
@@ -131,7 +141,7 @@ export function useGenerateComponent() {
       const result = (() => {
         switch (step) {
           case 1:
-            return !!formData.category;
+            return categoriaDisponible(formData.category);
           case 2:
             return !!(
               formData.documentTypes && formData.documentTypes.length > 0

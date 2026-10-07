@@ -41,6 +41,19 @@ const q = (value: unknown) =>
 		Number(value ?? 0),
 	);
 
+/** Lo que el Workspace necesita para «Gestión registrada» tras crear los links. */
+export type ResumenLinksPagalo = {
+	cantidadLinks: number;
+	montoTotal: number;
+	/** null: el grupo ya existía y no se intentó un envío nuevo. */
+	whatsappEnviado: boolean | null;
+	/** "ASESOR" o "BOT" (el cliente ya los había generado desde WhatsApp). */
+	origen: string | null;
+	revisionRequerida: boolean;
+	/** false: los links existen pero la gestión no quedó en el historial. */
+	gestionRegistrada: boolean;
+};
+
 export function PagaloLinkDialog({
 	casoCobroId,
 	numeroSifco,
@@ -48,6 +61,9 @@ export function PagaloLinkDialog({
 	open: openControlado,
 	onOpenChange,
 	mostrarTrigger = true,
+	embebido = false,
+	onCancelar,
+	onExito,
 }: {
 	casoCobroId: string;
 	numeroSifco: string;
@@ -60,10 +76,21 @@ export function PagaloLinkDialog({
 	open?: boolean;
 	onOpenChange?: (abierto: boolean) => void;
 	mostrarTrigger?: boolean;
+	/** Workspace: se pinta dentro del panel de gestión, sin Dialog ni trigger. */
+	embebido?: boolean;
+	/** Solo con `embebido`: el botón secundario del pie («Cancelar»/«Volver»). */
+	onCancelar?: () => void;
+	/**
+	 * Links creados. Sin `embebido` se llama apenas se crean; con `embebido`,
+	 * cuando el asesor pulsa «Listo» después de ver los links (y copiarlos),
+	 * porque el panel no se cierra solo.
+	 */
+	onExito?: (resumen: ResumenLinksPagalo) => void;
 }) {
 	const [openInterno, setOpenInterno] = useState(false);
 	const controlado = openControlado !== undefined;
-	const open = controlado ? openControlado : openInterno;
+	// Embebido se considera siempre abierto: el Workspace lo monta y desmonta.
+	const open = embebido || (controlado ? openControlado : openInterno);
 	const setOpen = (siguiente: boolean) => {
 		if (!controlado) setOpenInterno(siguiente);
 		onOpenChange?.(siguiente);
@@ -71,6 +98,10 @@ export function PagaloLinkDialog({
 	const [selected, setSelected] = useState<number[]>([]);
 	const [otrosActivo, setOtrosActivo] = useState(false);
 	const [otrosMonto, setOtrosMonto] = useState("");
+	// Embebido: el resumen de la creación queda guardado para «Listo», aunque
+	// el poll de supervisor resetee la mutación (mutation.reset()).
+	const [resumenCreacion, setResumenCreacion] =
+		useState<ResumenLinksPagalo | null>(null);
 	const grupoActivo = useQuery({
 		...orpc.getPagaloGrupoActivo.queryOptions({
 			input: { casoCobroId, creditoId },
@@ -211,6 +242,30 @@ export function PagaloLinkDialog({
 				toast.warning(
 					"Links creados, pero no se pudo registrar la gestión. Puede reintentar sin generar links duplicados.",
 				);
+			const linksCreados: any[] = result.links ?? [];
+			const resumen: ResumenLinksPagalo = {
+				cantidadLinks: linksCreados.length,
+				montoTotal: Number(
+					result.totalAmount ??
+						linksCreados.reduce(
+							(suma: number, link: any) => suma + Number(link.amount ?? 0),
+							0,
+						),
+				),
+				whatsappEnviado: result.whatsappEnviado ?? null,
+				origen: result.origen ?? null,
+				revisionRequerida: result.status === "REVIEW_REQUIRED",
+				gestionRegistrada: result.gestionRegistrada !== false,
+			};
+			// Grupo que ya existía (lo generó el cliente desde WhatsApp, o un
+			// reintento / otro asesor: `whatsappEnviado === null`): no se creó
+			// nada, así que embebido no hay éxito que avisar y el pie cae a
+			// «Volver». Solo una creación nueva guarda el resumen para «Listo».
+			const grupoExistente =
+				result.origen === "BOT" || result.whatsappEnviado === null;
+			if (embebido) {
+				if (!grupoExistente) setResumenCreacion(resumen);
+			} else onExito?.(resumen);
 		},
 		onError: (error: Error) => {
 			invalidarDatosPagalo();
@@ -226,9 +281,28 @@ export function PagaloLinkDialog({
 			}),
 		onSuccess: (result: { gestionRegistrada: boolean }) => {
 			invalidarDatosPagalo();
-			if (result.gestionRegistrada)
+			if (result.gestionRegistrada) {
 				toast.success("Gestión Págalo registrada en el historial del caso.");
-			else toast.error("No se pudo registrar la gestión. Intente más tarde.");
+				// Embebido: la gestión del grupo existente ya quedó en el
+				// historial, así que ahora sí hay éxito que avisar con «Listo».
+				if (embebido && grupoPendiente) {
+					const linksGrupo: any[] = grupoPendiente.links ?? [];
+					setResumenCreacion({
+						cantidadLinks: linksGrupo.length,
+						montoTotal: Number(
+							grupoPendiente.totalAmount ??
+								linksGrupo.reduce(
+									(suma: number, link: any) => suma + Number(link.amount ?? 0),
+									0,
+								),
+						),
+						whatsappEnviado: null,
+						origen: grupoPendiente.origen ?? null,
+						revisionRequerida: grupoPendiente.status === "REVIEW_REQUIRED",
+						gestionRegistrada: true,
+					});
+				}
+			} else toast.error("No se pudo registrar la gestión. Intente más tarde.");
 		},
 		onError: (error: Error) => {
 			invalidarDatosPagalo();
@@ -322,6 +396,527 @@ export function PagaloLinkDialog({
 	const { data: session } = authClient.useSession();
 	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
 
+	// Abrir el modal y encontrarse la lista en vez del selector se lee como un
+	// error: hay que decir por qué no se están eligiendo cuotas. Los recién
+	// creados ya se anuncian abajo.
+	const descripcion =
+		links.length > 0 && linksRecienCreados.length === 0
+			? "Este crédito ya tiene links de pago generados. Se muestran los existentes; no se pueden crear nuevos hasta que se paguen o se cancelen."
+			: "Sandbox. Capital y mora/intereses se generan en links separados. Los links no expiran.";
+	// El cuerpo es el mismo en el Dialog y embebido en el Workspace.
+	const contenido = (
+		<>
+			{grupoActivo.isError ? (
+				<div className="flex flex-col items-center gap-3 py-8 text-center">
+					<p className="text-muted-foreground text-sm">
+						No se pudo verificar si este crédito ya tiene links de pago.
+					</p>
+					<Button
+						type="button"
+						size="sm"
+						variant="outline"
+						onClick={() => grupoActivo.refetch()}
+					>
+						Reintentar
+					</Button>
+				</div>
+			) : grupoActivo.isLoading ||
+				(grupoActivo.isSuccess &&
+					!grupoActivo.data &&
+					(credit.isLoading || vehiculoCaso.isLoading)) ? (
+				<div className="flex justify-center py-8">
+					<Loader2 className="animate-spin" />
+				</div>
+			) : links.length > 0 ? (
+				<div className="space-y-5">
+					{/* Resumen del grupo. Antes las tres tarjetas pesaban igual y
+							    el total —el dato que el asesor busca primero— se perdía
+							    entre los links. Acá manda el monto y el avance del cobro. */}
+					<div className="rounded-xl border border-violet-200 bg-violet-50/60 p-5 dark:border-violet-900 dark:bg-violet-950/30">
+						<div className="flex items-start justify-between gap-4">
+							<div className="min-w-0">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+									{reviewRequired ? "Grupo en revisión" : "Total del grupo"}
+								</p>
+								<p className="mt-1 font-semibold text-3xl tabular-nums">
+									{q(totalGrupo)}
+								</p>
+								{fechaGrupo && (
+									<p className="mt-1 text-muted-foreground text-xs">
+										Creado el {fechaGrupo}
+									</p>
+								)}
+							</div>
+							{/* Temporal: fuerza el ciclo del poller sin esperar los 5
+									    min. Vive acá —discreto, junto al estado que refresca—
+									    en vez de encabezar el modal como si fuera la acción
+									    principal. Solo supervisores (CB-127): dispara el poller
+									    ENTERO, no solo los links de este caso. Borrar junto con
+									    probarPollPagalo. */}
+							{esSupervisor && (
+								<Button
+									className="shrink-0"
+									disabled={pollMutation.isPending}
+									onClick={() => pollMutation.mutate()}
+									size="sm"
+									type="button"
+									variant="outline"
+								>
+									{pollMutation.isPending ? (
+										<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+									) : (
+										<RefreshCw className="mr-2 h-3.5 w-3.5" />
+									)}
+									Actualizar estado
+								</Button>
+							)}
+						</div>
+						<div className="mt-4 space-y-1.5">
+							<div className="flex items-center justify-between text-xs">
+								<span className="font-medium">
+									{linksPagados} de {links.length} links pagados
+								</span>
+								<span className="text-muted-foreground tabular-nums">
+									{q(montoCobrado)} cobrado
+								</span>
+							</div>
+							<Progress
+								className="h-2"
+								value={
+									links.length > 0 ? (linksPagados / links.length) * 100 : 0
+								}
+							/>
+						</div>
+						{reviewRequired && (
+							<p className="mt-3 flex items-start gap-1.5 text-warning-text text-xs">
+								<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+								Este grupo quedó marcado para revisión: verifique el estado
+								antes de compartir los links.
+							</p>
+						)}
+					</div>
+					{linksRecienCreados.length > 0 && !reviewRequired && (
+						<div className="space-y-1">
+							<p className="font-medium text-sm">
+								{mutation.data?.origen === "BOT"
+									? "El cliente ya generó estos links desde WhatsApp; se muestran los mismos."
+									: mutation.data?.whatsappEnviado === null
+										? "Ya existían links de pago para este crédito."
+										: "Grupo creado. Comparta solo los links necesarios."}
+							</p>
+							{mutation.data?.origen !== "BOT" &&
+								mutation.data?.whatsappEnviado !== null &&
+								(mutation.data?.whatsappEnviado ? (
+									<p className="flex items-center gap-1.5 text-success-text text-xs">
+										<CheckCircle2 className="h-3.5 w-3.5" />
+										Se envió el mensaje por WhatsApp al cliente.
+									</p>
+								) : (
+									<p className="flex items-center gap-1.5 text-warning-text text-xs">
+										<AlertTriangle className="h-3.5 w-3.5" />
+										No se pudo enviar el WhatsApp al cliente; comparta el link
+										manualmente.
+									</p>
+								))}
+						</div>
+					)}
+					<div className="space-y-2">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+							Links generados
+						</p>
+						{links.map((link: any) => {
+							const estado = getPagaloLinkStatusInfo(link.status ?? "ACTIVE");
+							const copiar = async () => {
+								try {
+									await copyPagaloLink(link.paymentUrl);
+									toast.success("Link copiado");
+								} catch {
+									toast.error("No se pudo copiar el link. Intente de nuevo.");
+								}
+							};
+							return (
+								<div
+									className="rounded-lg border bg-card p-4"
+									key={link.linkType}
+								>
+									<div className="flex items-start justify-between gap-4">
+										<div className="min-w-0 space-y-1.5">
+											<p className="font-medium">
+												{link.linkType === "CAPITAL"
+													? "Capital"
+													: "Mora e intereses"}
+											</p>
+											<Badge className={estado.className}>{estado.label}</Badge>
+											{link.status === "PAID" && link.paidAt && (
+												<p className="flex items-center gap-1.5 text-success-text text-xs">
+													<CheckCircle2 className="h-3.5 w-3.5" />
+													Pagado el{" "}
+													{new Date(link.paidAt).toLocaleDateString("es-GT", {
+														day: "numeric",
+														month: "short",
+														year: "numeric",
+													})}
+												</p>
+											)}
+										</div>
+										<div className="flex shrink-0 flex-col items-end gap-2">
+											<p className="font-semibold text-lg tabular-nums">
+												{q(link.amount)}
+											</p>
+											{estado.canCopy && (
+												<Button
+													onClick={copiar}
+													size="sm"
+													type="button"
+													variant="outline"
+												>
+													<Copy className="mr-2 h-3.5 w-3.5" />
+													Copiar link
+												</Button>
+											)}
+										</div>
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				</div>
+			) : (
+				<div className="min-h-0 space-y-4">
+					{/* Jerarquía del selector: primero QUÉ se cobra (mora + cuotas),
+							    después el cargo manual, y al final el resumen con el total
+							    —que es el número con el que el asesor decide. */}
+					<div className="flex items-end justify-between gap-4">
+						<div>
+							<p className="font-semibold text-base">Conceptos a cobrar</p>
+							<p className="text-muted-foreground text-xs">
+								Cada cuota se cobra completa; la mora vigente siempre va
+								incluida.
+							</p>
+						</div>
+						<div className="flex shrink-0 items-center gap-3">
+							<span className="text-muted-foreground text-xs">
+								{selected.length + (tieneMora ? 1 : 0)} seleccionada(s)
+							</span>
+							{cuotas.length > 0 && (
+								<Button
+									className="h-auto p-0 text-xs"
+									onClick={toggleTodas}
+									type="button"
+									variant="link"
+								>
+									{todasSeleccionadas ? "Desmarcar todas" : "Marcar todas"}
+								</Button>
+							)}
+						</div>
+					</div>
+					{tieneMora && (
+						<div className="flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+							<span className="flex items-center gap-3">
+								<Checkbox checked disabled />
+								<span>
+									<span className="block font-medium">Mora actual</span>
+									<span className="block text-amber-800 text-xs dark:text-amber-200/80">
+										Se cobra completa y no se puede desmarcar
+									</span>
+								</span>
+							</span>
+							<span className="shrink-0 font-semibold text-base tabular-nums">
+								{q(data.moraActual)}
+							</span>
+						</div>
+					)}
+					{cuotas.length === 0 ? (
+						<p className="rounded-lg border border-dashed p-4 text-center text-muted-foreground text-sm">
+							No hay cuotas vencidas disponibles.
+						</p>
+					) : (
+						<div className="space-y-2">
+							{cuotas.map((cuota: any) => {
+								const facturableCuota =
+									Number(cuota.interes_restante ?? 0) +
+									Number(cuota.iva_12_restante ?? 0) +
+									Number(cuota.seguro_restante ?? 0) +
+									Number(cuota.gps_restante ?? 0) +
+									Number(cuota.membresias_restante ?? 0);
+								const saldoCuota =
+									Number(cuota.capital_restante ?? 0) + facturableCuota;
+								const nominalCuota = Number(cuota.cuota ?? 0);
+								// Cuota nominal vs saldo real: si hubo un abono parcial previo a
+								// esta misma cuota, el link solo cubre lo que falta (saldoCuota),
+								// no el monto nominal completo — mostrar ambos evita que parezca
+								// que el link está incompleto (caso crédito 752, cuota 28: abono
+								// previo de Q78.24 a interés dejó nominal Q1695.91 vs saldo real
+								// Q1617.67).
+								const yaAbonado = nominalCuota - saldoCuota;
+								const seleccionada = selected.includes(cuota.cuota_id);
+								return (
+									<Label
+										className={`flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4 transition-colors ${
+											seleccionada ? "border-primary/40 bg-primary/5" : ""
+										}`}
+										key={cuota.cuota_id}
+									>
+										<span className="flex min-w-0 items-start gap-3">
+											<Checkbox
+												checked={seleccionada}
+												className="mt-0.5"
+												onCheckedChange={() => toggle(cuota.cuota_id)}
+											/>
+											<span className="min-w-0">
+												<span className="flex flex-wrap items-center gap-2">
+													<span className="font-medium">
+														Cuota {cuota.numero_cuota}
+													</span>
+													{cuota.esProxima ? (
+														<Badge className="bg-info-subtle text-info-text">
+															Próxima cuota
+														</Badge>
+													) : cuota.esActual ? (
+														<Badge className="bg-info-subtle text-info-text">
+															Cuota actual
+														</Badge>
+													) : (
+														<Badge className="bg-danger-subtle text-danger-text">
+															Vencida
+														</Badge>
+													)}
+												</span>
+												<span className="mt-1 block text-muted-foreground text-xs">
+													Capital {q(cuota.capital_restante)} ·{" "}
+													{tieneMora ? "Mora e intereses" : "Intereses"}{" "}
+													{q(facturableCuota)}
+												</span>
+												{yaAbonado > 0.01 && (
+													<span className="mt-0.5 block text-muted-foreground text-xs">
+														Cuota nominal {q(nominalCuota)} − ya abonado{" "}
+														{q(yaAbonado)}
+													</span>
+												)}
+											</span>
+										</span>
+										<span className="shrink-0 text-right">
+											<span className="block font-semibold text-base tabular-nums">
+												{q(saldoCuota)}
+											</span>
+											{yaAbonado > 0.01 && (
+												<span className="block text-muted-foreground text-xs">
+													saldo real
+												</span>
+											)}
+										</span>
+									</Label>
+								);
+							})}
+						</div>
+					)}
+					<div className="space-y-3 rounded-lg border p-4">
+						<Label className="flex cursor-pointer items-center justify-between gap-4">
+							<span className="flex items-center gap-3">
+								<Checkbox
+									checked={otrosActivo}
+									onCheckedChange={(checked) => {
+										setOtrosActivo(checked === true);
+										if (checked !== true) setOtrosMonto("");
+									}}
+								/>
+								<span>
+									<span className="block font-medium">Otros</span>
+									<span className="block text-muted-foreground text-xs">
+										Cargo manual que se incluye en el link de mora e intereses
+									</span>
+								</span>
+							</span>
+							{otrosParseado?.valid && (
+								<span className="shrink-0 font-semibold text-base tabular-nums">
+									{q(otrosParseado.value)}
+								</span>
+							)}
+						</Label>
+						{otrosActivo && (
+							<div className="space-y-1 pl-8">
+								<Label htmlFor="pagalo-otros">Monto Otros (GTQ)</Label>
+								<Input
+									id="pagalo-otros"
+									inputMode="decimal"
+									onChange={(event) => setOtrosMonto(event.target.value)}
+									placeholder="0.00"
+									value={otrosMonto}
+								/>
+								{!otrosParseado?.valid && (
+									<p className="text-destructive text-xs">
+										Ingrese un monto mayor que Q0.00, con máximo dos decimales.
+									</p>
+								)}
+							</div>
+						)}
+					</div>
+					{(selected.length > 0 || tieneMora || otrosActivo) && (
+						<div className="rounded-xl border border-violet-200 bg-violet-50/60 p-5 dark:border-violet-900 dark:bg-violet-950/30">
+							<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+								Links a crear
+							</p>
+							<div className="mt-3 space-y-1.5 text-sm">
+								{preview.capital > 0 && (
+									<div className="flex items-center justify-between">
+										<span>Link Capital</span>
+										<span className="tabular-nums">{q(preview.capital)}</span>
+									</div>
+								)}
+								{preview.facturable > 0 && (
+									<div className="flex items-center justify-between">
+										<span>
+											{tieneMora ? "Link Mora e intereses" : "Link Intereses"}
+										</span>
+										<span className="tabular-nums">
+											{q(preview.facturable)}
+										</span>
+									</div>
+								)}
+								{preview.otros > 0 && (
+									<div className="flex items-center justify-between text-muted-foreground">
+										<span>Incluye Otros</span>
+										<span className="tabular-nums">{q(preview.otros)}</span>
+									</div>
+								)}
+							</div>
+							<div className="mt-3 flex items-end justify-between border-t pt-3">
+								<span className="font-medium text-sm">Total</span>
+								<span className="font-semibold text-2xl tabular-nums">
+									{q(preview.total)}
+								</span>
+							</div>
+						</div>
+					)}
+					{vehiculoCaso.isError && (
+						<div className="flex items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-4 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+							<span className="flex items-center gap-2">
+								<AlertTriangle className="h-4 w-4 shrink-0" />
+								No se pudo verificar el vehículo del caso. No se pueden crear
+								links hasta reintentar.
+							</span>
+							<Button
+								onClick={() => vehiculoCaso.refetch()}
+								size="sm"
+								type="button"
+								variant="outline"
+							>
+								Reintentar
+							</Button>
+						</div>
+					)}
+					{(preview.capital > 0 || preview.facturable > 0) && (
+						<div className="space-y-2 rounded-lg border p-4">
+							<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+								Mensaje que se enviará por WhatsApp
+							</p>
+							<p className="whitespace-pre-line rounded-md bg-muted/50 p-3 text-muted-foreground text-sm">
+								{previewMensajePagaloLinks(
+									data?.usuario?.nombre ?? "",
+									identificadorCredito,
+									[
+										...(preview.capital > 0 ? (["CAPITAL"] as const) : []),
+										...(preview.facturable > 0
+											? (["MORA_INTERES"] as const)
+											: []),
+									],
+								)}
+							</p>
+						</div>
+					)}
+					{gestionPendiente && (
+						<div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+							<span>La gestión todavía no aparece en el historial.</span>
+							<Button
+								disabled={reintentarGestionMutation.isPending}
+								onClick={() => reintentarGestionMutation.mutate()}
+								size="sm"
+								type="button"
+								variant="outline"
+							>
+								{reintentarGestionMutation.isPending && (
+									<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+								)}
+								Registrar en historial
+							</Button>
+						</div>
+					)}
+				</div>
+			)}
+		</>
+	);
+	const botonCrear = (
+		<Button
+			className={embebido ? "flex-1" : undefined}
+			disabled={
+				(!tieneMora && selected.length === 0) ||
+				(otrosActivo && selected.length === 0) ||
+				(otrosActivo && !otrosParseado?.valid) ||
+				mutation.isPending ||
+				!vehiculoCaso.isSuccess
+			}
+			onClick={() =>
+				mutation.mutate({
+					casoCobroId,
+					numeroSifco,
+					creditoId,
+					cuotaIds: selected,
+					...(otrosParseado?.valid ? { otros: otrosParseado.value } : {}),
+				})
+			}
+		>
+			{mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+			Crear links sandbox
+		</Button>
+	);
+
+	if (embebido) {
+		// Workspace: sin Dialog (sus partes necesitan el contexto de Radix). El
+		// título lo pinta el Workspace. Tras crear, el panel sigue mostrando el
+		// grupo para copiar los links; «Listo» avisa el éxito.
+		return (
+			<div className="@container flex min-h-0 flex-1 flex-col">
+				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+					<p className="text-muted-foreground text-sm">{descripcion}</p>
+					{contenido}
+				</div>
+				<div className="mt-auto flex gap-2 border-line-subtle border-t pt-3">
+					{resumenCreacion ? (
+						<Button
+							className="flex-1"
+							onClick={() => onExito?.(resumenCreacion)}
+							type="button"
+						>
+							Listo
+						</Button>
+					) : links.length === 0 ? (
+						<>
+							<Button
+								disabled={mutation.isPending}
+								onClick={onCancelar}
+								type="button"
+								variant="outline"
+							>
+								Cancelar
+							</Button>
+							{botonCrear}
+						</>
+					) : (
+						// Grupo que ya existía: no se creó nada, no hay éxito que avisar.
+						<Button
+							className="flex-1"
+							onClick={onCancelar}
+							type="button"
+							variant="outline"
+						>
+							Volver
+						</Button>
+					)}
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<Dialog
 			open={open}
@@ -346,498 +941,10 @@ export function PagaloLinkDialog({
 			<DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
 				<DialogHeader>
 					<DialogTitle>Links de pago Págalo</DialogTitle>
-					<DialogDescription>
-						{/* Abrir el modal y encontrarse la lista en vez del selector se
-						    lee como un error: hay que decir por qué no se está eligiendo
-						    cuotas. Los recién creados ya se anuncian abajo. */}
-						{links.length > 0 && linksRecienCreados.length === 0
-							? "Este crédito ya tiene links de pago generados. Se muestran los existentes; no se pueden crear nuevos hasta que se paguen o se cancelen."
-							: "Sandbox. Capital y mora/intereses se generan en links separados. Los links no expiran."}
-					</DialogDescription>
+					<DialogDescription>{descripcion}</DialogDescription>
 				</DialogHeader>
-				<div className="min-h-0 flex-1 overflow-y-auto pr-1">
-					{grupoActivo.isError ? (
-						<div className="flex flex-col items-center gap-3 py-8 text-center">
-							<p className="text-muted-foreground text-sm">
-								No se pudo verificar si este crédito ya tiene links de pago.
-							</p>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={() => grupoActivo.refetch()}
-							>
-								Reintentar
-							</Button>
-						</div>
-					) : grupoActivo.isLoading ||
-						(grupoActivo.isSuccess &&
-							!grupoActivo.data &&
-							(credit.isLoading || vehiculoCaso.isLoading)) ? (
-						<div className="flex justify-center py-8">
-							<Loader2 className="animate-spin" />
-						</div>
-					) : links.length > 0 ? (
-						<div className="space-y-5">
-							{/* Resumen del grupo. Antes las tres tarjetas pesaban igual y
-							    el total —el dato que el asesor busca primero— se perdía
-							    entre los links. Acá manda el monto y el avance del cobro. */}
-							<div className="rounded-xl border border-violet-200 bg-violet-50/60 p-5 dark:border-violet-900 dark:bg-violet-950/30">
-								<div className="flex items-start justify-between gap-4">
-									<div className="min-w-0">
-										<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-											{reviewRequired ? "Grupo en revisión" : "Total del grupo"}
-										</p>
-										<p className="mt-1 font-semibold text-3xl tabular-nums">
-											{q(totalGrupo)}
-										</p>
-										{fechaGrupo && (
-											<p className="mt-1 text-muted-foreground text-xs">
-												Creado el {fechaGrupo}
-											</p>
-										)}
-									</div>
-									{/* Temporal: fuerza el ciclo del poller sin esperar los 5
-									    min. Vive acá —discreto, junto al estado que refresca—
-									    en vez de encabezar el modal como si fuera la acción
-									    principal. Solo supervisores (CB-127): dispara el poller
-									    ENTERO, no solo los links de este caso. Borrar junto con
-									    probarPollPagalo. */}
-									{esSupervisor && (
-										<Button
-											className="shrink-0"
-											disabled={pollMutation.isPending}
-											onClick={() => pollMutation.mutate()}
-											size="sm"
-											type="button"
-											variant="outline"
-										>
-											{pollMutation.isPending ? (
-												<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-											) : (
-												<RefreshCw className="mr-2 h-3.5 w-3.5" />
-											)}
-											Actualizar estado
-										</Button>
-									)}
-								</div>
-								<div className="mt-4 space-y-1.5">
-									<div className="flex items-center justify-between text-xs">
-										<span className="font-medium">
-											{linksPagados} de {links.length} links pagados
-										</span>
-										<span className="text-muted-foreground tabular-nums">
-											{q(montoCobrado)} cobrado
-										</span>
-									</div>
-									<Progress
-										className="h-2"
-										value={
-											links.length > 0 ? (linksPagados / links.length) * 100 : 0
-										}
-									/>
-								</div>
-								{reviewRequired && (
-									<p className="mt-3 flex items-start gap-1.5 text-amber-700 text-xs dark:text-amber-500">
-										<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-										Este grupo quedó marcado para revisión: verifique el estado
-										antes de compartir los links.
-									</p>
-								)}
-							</div>
-							{linksRecienCreados.length > 0 && !reviewRequired && (
-								<div className="space-y-1">
-									<p className="font-medium text-sm">
-										{mutation.data?.origen === "BOT"
-											? "El cliente ya generó estos links desde WhatsApp; se muestran los mismos."
-											: mutation.data?.whatsappEnviado === null
-												? "Ya existían links de pago para este crédito."
-												: "Grupo creado. Comparta solo los links necesarios."}
-									</p>
-									{mutation.data?.origen !== "BOT" &&
-										mutation.data?.whatsappEnviado !== null &&
-										(mutation.data?.whatsappEnviado ? (
-											<p className="flex items-center gap-1.5 text-green-700 text-xs">
-												<CheckCircle2 className="h-3.5 w-3.5" />
-												Se envió el mensaje por WhatsApp al cliente.
-											</p>
-										) : (
-											<p className="flex items-center gap-1.5 text-amber-700 text-xs">
-												<AlertTriangle className="h-3.5 w-3.5" />
-												No se pudo enviar el WhatsApp al cliente; comparta el
-												link manualmente.
-											</p>
-										))}
-								</div>
-							)}
-							<div className="space-y-2">
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-									Links generados
-								</p>
-								{links.map((link: any) => {
-									const estado = getPagaloLinkStatusInfo(
-										link.status ?? "ACTIVE",
-									);
-									const copiar = async () => {
-										try {
-											await copyPagaloLink(link.paymentUrl);
-											toast.success("Link copiado");
-										} catch {
-											toast.error(
-												"No se pudo copiar el link. Intente de nuevo.",
-											);
-										}
-									};
-									return (
-										<div
-											className="rounded-lg border bg-card p-4"
-											key={link.linkType}
-										>
-											<div className="flex items-start justify-between gap-4">
-												<div className="min-w-0 space-y-1.5">
-													<p className="font-medium">
-														{link.linkType === "CAPITAL"
-															? "Capital"
-															: "Mora e intereses"}
-													</p>
-													<Badge className={estado.className}>
-														{estado.label}
-													</Badge>
-													{link.status === "PAID" && link.paidAt && (
-														<p className="flex items-center gap-1.5 text-green-700 text-xs">
-															<CheckCircle2 className="h-3.5 w-3.5" />
-															Pagado el{" "}
-															{new Date(link.paidAt).toLocaleDateString(
-																"es-GT",
-																{
-																	day: "numeric",
-																	month: "short",
-																	year: "numeric",
-																},
-															)}
-														</p>
-													)}
-												</div>
-												<div className="flex shrink-0 flex-col items-end gap-2">
-													<p className="font-semibold text-lg tabular-nums">
-														{q(link.amount)}
-													</p>
-													{estado.canCopy && (
-														<Button
-															onClick={copiar}
-															size="sm"
-															type="button"
-															variant="outline"
-														>
-															<Copy className="mr-2 h-3.5 w-3.5" />
-															Copiar link
-														</Button>
-													)}
-												</div>
-											</div>
-										</div>
-									);
-								})}
-							</div>
-						</div>
-					) : (
-						<div className="min-h-0 space-y-4">
-							{/* Jerarquía del selector: primero QUÉ se cobra (mora + cuotas),
-							    después el cargo manual, y al final el resumen con el total
-							    —que es el número con el que el asesor decide. */}
-							<div className="flex items-end justify-between gap-4">
-								<div>
-									<p className="font-semibold text-base">Conceptos a cobrar</p>
-									<p className="text-muted-foreground text-xs">
-										Cada cuota se cobra completa; la mora vigente siempre va
-										incluida.
-									</p>
-								</div>
-								<div className="flex shrink-0 items-center gap-3">
-									<span className="text-muted-foreground text-xs">
-										{selected.length + (tieneMora ? 1 : 0)} seleccionada(s)
-									</span>
-									{cuotas.length > 0 && (
-										<Button
-											className="h-auto p-0 text-xs"
-											onClick={toggleTodas}
-											type="button"
-											variant="link"
-										>
-											{todasSeleccionadas ? "Desmarcar todas" : "Marcar todas"}
-										</Button>
-									)}
-								</div>
-							</div>
-							{tieneMora && (
-								<div className="flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-									<span className="flex items-center gap-3">
-										<Checkbox checked disabled />
-										<span>
-											<span className="block font-medium">Mora actual</span>
-											<span className="block text-amber-800 text-xs dark:text-amber-200/80">
-												Se cobra completa y no se puede desmarcar
-											</span>
-										</span>
-									</span>
-									<span className="shrink-0 font-semibold text-base tabular-nums">
-										{q(data.moraActual)}
-									</span>
-								</div>
-							)}
-							{cuotas.length === 0 ? (
-								<p className="rounded-lg border border-dashed p-4 text-center text-muted-foreground text-sm">
-									No hay cuotas vencidas disponibles.
-								</p>
-							) : (
-								<div className="space-y-2">
-									{cuotas.map((cuota: any) => {
-										const facturableCuota =
-											Number(cuota.interes_restante ?? 0) +
-											Number(cuota.iva_12_restante ?? 0) +
-											Number(cuota.seguro_restante ?? 0) +
-											Number(cuota.gps_restante ?? 0) +
-											Number(cuota.membresias_restante ?? 0);
-										const saldoCuota =
-											Number(cuota.capital_restante ?? 0) + facturableCuota;
-										const nominalCuota = Number(cuota.cuota ?? 0);
-										// Cuota nominal vs saldo real: si hubo un abono parcial previo a
-										// esta misma cuota, el link solo cubre lo que falta (saldoCuota),
-										// no el monto nominal completo — mostrar ambos evita que parezca
-										// que el link está incompleto (caso crédito 752, cuota 28: abono
-										// previo de Q78.24 a interés dejó nominal Q1695.91 vs saldo real
-										// Q1617.67).
-										const yaAbonado = nominalCuota - saldoCuota;
-										const seleccionada = selected.includes(cuota.cuota_id);
-										return (
-											<Label
-												className={`flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4 transition-colors ${
-													seleccionada ? "border-primary/40 bg-primary/5" : ""
-												}`}
-												key={cuota.cuota_id}
-											>
-												<span className="flex min-w-0 items-start gap-3">
-													<Checkbox
-														checked={seleccionada}
-														className="mt-0.5"
-														onCheckedChange={() => toggle(cuota.cuota_id)}
-													/>
-													<span className="min-w-0">
-														<span className="flex flex-wrap items-center gap-2">
-															<span className="font-medium">
-																Cuota {cuota.numero_cuota}
-															</span>
-															{cuota.esProxima ? (
-																<Badge className="bg-blue-50 text-blue-700">
-																	Próxima cuota
-																</Badge>
-															) : cuota.esActual ? (
-																<Badge className="bg-blue-50 text-blue-700">
-																	Cuota actual
-																</Badge>
-															) : (
-																<Badge className="bg-red-50 text-red-700">
-																	Vencida
-																</Badge>
-															)}
-														</span>
-														<span className="mt-1 block text-muted-foreground text-xs">
-															Capital {q(cuota.capital_restante)} ·{" "}
-															{tieneMora ? "Mora e intereses" : "Intereses"}{" "}
-															{q(facturableCuota)}
-														</span>
-														{yaAbonado > 0.01 && (
-															<span className="mt-0.5 block text-muted-foreground text-xs">
-																Cuota nominal {q(nominalCuota)} − ya abonado{" "}
-																{q(yaAbonado)}
-															</span>
-														)}
-													</span>
-												</span>
-												<span className="shrink-0 text-right">
-													<span className="block font-semibold text-base tabular-nums">
-														{q(saldoCuota)}
-													</span>
-													{yaAbonado > 0.01 && (
-														<span className="block text-muted-foreground text-xs">
-															saldo real
-														</span>
-													)}
-												</span>
-											</Label>
-										);
-									})}
-								</div>
-							)}
-							<div className="space-y-3 rounded-lg border p-4">
-								<Label className="flex cursor-pointer items-center justify-between gap-4">
-									<span className="flex items-center gap-3">
-										<Checkbox
-											checked={otrosActivo}
-											onCheckedChange={(checked) => {
-												setOtrosActivo(checked === true);
-												if (checked !== true) setOtrosMonto("");
-											}}
-										/>
-										<span>
-											<span className="block font-medium">Otros</span>
-											<span className="block text-muted-foreground text-xs">
-												Cargo manual que se incluye en el link de mora e
-												intereses
-											</span>
-										</span>
-									</span>
-									{otrosParseado?.valid && (
-										<span className="shrink-0 font-semibold text-base tabular-nums">
-											{q(otrosParseado.value)}
-										</span>
-									)}
-								</Label>
-								{otrosActivo && (
-									<div className="space-y-1 pl-8">
-										<Label htmlFor="pagalo-otros">Monto Otros (GTQ)</Label>
-										<Input
-											id="pagalo-otros"
-											inputMode="decimal"
-											onChange={(event) => setOtrosMonto(event.target.value)}
-											placeholder="0.00"
-											value={otrosMonto}
-										/>
-										{!otrosParseado?.valid && (
-											<p className="text-destructive text-xs">
-												Ingrese un monto mayor que Q0.00, con máximo dos
-												decimales.
-											</p>
-										)}
-									</div>
-								)}
-							</div>
-							{(selected.length > 0 || tieneMora || otrosActivo) && (
-								<div className="rounded-xl border border-violet-200 bg-violet-50/60 p-5 dark:border-violet-900 dark:bg-violet-950/30">
-									<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-										Links a crear
-									</p>
-									<div className="mt-3 space-y-1.5 text-sm">
-										{preview.capital > 0 && (
-											<div className="flex items-center justify-between">
-												<span>Link Capital</span>
-												<span className="tabular-nums">
-													{q(preview.capital)}
-												</span>
-											</div>
-										)}
-										{preview.facturable > 0 && (
-											<div className="flex items-center justify-between">
-												<span>
-													{tieneMora
-														? "Link Mora e intereses"
-														: "Link Intereses"}
-												</span>
-												<span className="tabular-nums">
-													{q(preview.facturable)}
-												</span>
-											</div>
-										)}
-										{preview.otros > 0 && (
-											<div className="flex items-center justify-between text-muted-foreground">
-												<span>Incluye Otros</span>
-												<span className="tabular-nums">{q(preview.otros)}</span>
-											</div>
-										)}
-									</div>
-									<div className="mt-3 flex items-end justify-between border-t pt-3">
-										<span className="font-medium text-sm">Total</span>
-										<span className="font-semibold text-2xl tabular-nums">
-											{q(preview.total)}
-										</span>
-									</div>
-								</div>
-							)}
-							{vehiculoCaso.isError && (
-								<div className="flex items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-4 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
-									<span className="flex items-center gap-2">
-										<AlertTriangle className="h-4 w-4 shrink-0" />
-										No se pudo verificar el vehículo del caso. No se pueden
-										crear links hasta reintentar.
-									</span>
-									<Button
-										onClick={() => vehiculoCaso.refetch()}
-										size="sm"
-										type="button"
-										variant="outline"
-									>
-										Reintentar
-									</Button>
-								</div>
-							)}
-							{(preview.capital > 0 || preview.facturable > 0) && (
-								<div className="space-y-2 rounded-lg border p-4">
-									<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-										Mensaje que se enviará por WhatsApp
-									</p>
-									<p className="whitespace-pre-line rounded-md bg-muted/50 p-3 text-muted-foreground text-sm">
-										{previewMensajePagaloLinks(
-											data?.usuario?.nombre ?? "",
-											identificadorCredito,
-											[
-												...(preview.capital > 0 ? (["CAPITAL"] as const) : []),
-												...(preview.facturable > 0
-													? (["MORA_INTERES"] as const)
-													: []),
-											],
-										)}
-									</p>
-								</div>
-							)}
-							{gestionPendiente && (
-								<div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-									<span>La gestión todavía no aparece en el historial.</span>
-									<Button
-										disabled={reintentarGestionMutation.isPending}
-										onClick={() => reintentarGestionMutation.mutate()}
-										size="sm"
-										type="button"
-										variant="outline"
-									>
-										{reintentarGestionMutation.isPending && (
-											<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-										)}
-										Registrar en historial
-									</Button>
-								</div>
-							)}
-						</div>
-					)}
-				</div>
-				{links.length === 0 && (
-					<DialogFooter>
-						<Button
-							disabled={
-								(!tieneMora && selected.length === 0) ||
-								(otrosActivo && selected.length === 0) ||
-								(otrosActivo && !otrosParseado?.valid) ||
-								mutation.isPending ||
-								!vehiculoCaso.isSuccess
-							}
-							onClick={() =>
-								mutation.mutate({
-									casoCobroId,
-									numeroSifco,
-									creditoId,
-									cuotaIds: selected,
-									...(otrosParseado?.valid
-										? { otros: otrosParseado.value }
-										: {}),
-								})
-							}
-						>
-							{mutation.isPending && (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-							)}
-							Crear links sandbox
-						</Button>
-					</DialogFooter>
-				)}
+				<div className="min-h-0 flex-1 overflow-y-auto pr-1">{contenido}</div>
+				{links.length === 0 && <DialogFooter>{botonCrear}</DialogFooter>}
 			</DialogContent>
 		</Dialog>
 	);

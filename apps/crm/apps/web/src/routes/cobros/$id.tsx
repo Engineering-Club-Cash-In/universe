@@ -41,15 +41,9 @@ import {
 	evaluarGestionTempranaB1,
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
+import type { TipoEnvioRecuperacion } from "server/src/lib/recuperacion-vehiculo";
 import {
-	motivoBloqueoRecuperacion,
-	operacionRecuperacion,
-	type TipoEnvioRecuperacion,
-} from "server/src/lib/recuperacion-vehiculo";
-import {
-	deudaVencida,
 	metodoContactoDeVisita,
-	motivoBloqueoVisita,
 	RESULTADO_VISITA_LABEL,
 	type ResultadoVisita,
 	type TipoVisita,
@@ -126,10 +120,7 @@ import {
 	MoraBadge,
 	PromesaBadge,
 } from "@/components/ds/badges";
-import {
-	CardCobro,
-	CardPromesa,
-} from "@/components/ds/cards-cobranza";
+import { CardCobro, CardPromesa } from "@/components/ds/cards-cobranza";
 import { CrmCard } from "@/components/ds/cards-credito";
 import { FichaAuditRow, FichaSaveBar } from "@/components/ds/ficha-edicion";
 import { HeaderCredito } from "@/components/ds/header-credito";
@@ -193,25 +184,48 @@ import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketDeEstado,
-	bucketDeNumero,
-	catalogoDeNumero,
 	esBucketB2,
-	esBucketDesdeB2,
 	estiloBucket,
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
-import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
-import {
-	debeAnunciarCrecimientoMora,
-	hayIncrementoMora,
-} from "@/lib/cobros/plantillas-mensajes";
 import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
+import {
+	bucketDelCaso,
+	type CasoDetalle,
+	cobroDeHoy,
+	cuotasDisponiblesParaPromesa,
+	cuotasParaConvenio,
+	deudaVencidaDelCaso,
+	diasMoraDelCaso,
+	direccionesDelCliente,
+	haySolicitudRecuperacionPendiente,
+	hrefTelefono,
+	idsPromesasParaRecalcular,
+	incrementoDiarioMoraAnunciable,
+	maxMesesDeConvenio,
+	montoSugeridoPromesa,
+	motivoBloqueoConvenio,
+	motivoBloqueoEnvioRecuperacion,
+	motivoBloqueoRecuperacionForzosa,
+	motivoBloqueoVisitaCaso,
+	operacionEnvioRecuperacion,
+	permisosCobros,
+	promesaActivaDelCaso,
+	promesasDePago,
+	propsContactoDelCaso,
+	proximoContactoDelCaso,
+	resumenCuotas,
+	telefonosDe,
+	telefonosNuevosDelCliente,
+	textoReferenciasConTelefono,
+	ultimos8Digitos as ultimos8,
+} from "@/lib/cobros/reglas-caso";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -226,100 +240,6 @@ import { client, orpc } from "@/utils/orpc";
 // con la que se guardó, sin importar dónde esté físicamente el asesor.
 function formatFechaGT(date: Date): string {
 	return date.toLocaleDateString("es-GT", { timeZone: "America/Guatemala" });
-}
-
-/**
- * Forma real de `getDetallesCreditoCarteraBack` (ver routers/cobros.ts). El
- * cliente ORPC infiere `{}` para esta query — sin este tipo, cada `caso.campo`
- * de la ficha era un error de tsc (≈290 en este archivo). Mantener alineado con
- * el select del endpoint.
- */
-interface CasoDetalle {
-	id?: string | null;
-	carteraCreditoId?: number | null;
-	contratoId?: string | null;
-	estadoMora?: string | null;
-	montoEnMora?: string | number | null;
-	diasMoraMaximo?: number | null;
-	cuotasVencidas?: number | null;
-	/** Mora ya pagada / condonada de las cuotas en atraso (ledger de mora). */
-	moraPagada?: string | null;
-	moraCondonada?: string | null;
-	/** Saldo real de las cuotas vencidas + mora, ya formateado por el server. */
-	montoAdeudado?: string | null;
-	/** Mora proporcional (ver VariablesPlantilla en plantillas-mensajes). */
-	expectativaMora?: string | null;
-	expectativaMoraDiaria?: string | null;
-	incrementoDiarioMora?: string | null;
-	incrementoMaximoMensualMora?: string | null;
-	aseguradora?: string | null;
-	cabinaSeguro?: string | null;
-	cuotaConvenio?: string | number | null;
-	convenioActivo?: {
-		convenioId?: string | number | null;
-		montoTotalConvenio?: string | number | null;
-		cuotaMensual?: string | number | null;
-		numeroMeses?: number | null;
-		montoPagado?: string | number | null;
-		montoPendiente?: string | number | null;
-		pagosRealizados?: number | null;
-		pagosPendientes?: number | null;
-		activo?: boolean | null;
-		completado?: boolean | null;
-		fechaConvenio?: string | null;
-		motivo?: string | null;
-		observaciones?: string | null;
-	} | null;
-	convenioCuotas?: Array<{
-		numeroCuota: number;
-		fechaVencimiento: string | null;
-		fechaPago: string | null;
-	}> | null;
-	telefonoPrincipal?: string | null;
-	telefonoAlternativo?: string | null;
-	emailContacto?: string | null;
-	direccionContacto?: string | null;
-	proximoContacto?: string | null;
-	metodoContactoProximo?: string | null;
-	etiquetas?: string[] | null;
-	montoFinanciado?: string | number | null;
-	cuotaMensual?: string | number | null;
-	cuotaMensualHistorica?: string | number | null;
-	numeroCuotas?: number | null;
-	fechaInicio?: string | null;
-	diaPagoMensual?: number | null;
-	estadoContrato?: string | null;
-	/** statusCredit crudo de cartera (ACTIVO, MOROSO, EN_CONVENIO, …). */
-	statusCredit?: string | null;
-	clienteNombre?: string | null;
-	clienteNit?: string | null;
-	vehicleId?: string | null;
-	vehiculoMarca?: string | null;
-	vehiculoModelo?: string | null;
-	vehiculoYear?: number | null;
-	vehiculoPlaca?: string | null;
-	vehiculoTipo?: string | null;
-	vehiculoMotor?: string | null;
-	vehiculoChasis?: string | null;
-	vehiculoAsientos?: number | null;
-	vehiculoUso?: string | null;
-	vehiculoNumeroPoliza?: string | null;
-	vehiculoFechaInicioSeguro?: string | null;
-	vehiculoFechaVencimientoSeguro?: string | null;
-	vehiculoMontoAsegurado?: string | number | null;
-	numeroCreditoSifco?: string | null;
-	deudaTotal?: string | number | null;
-	asesor?: {
-		asesor_id?: number | null;
-		nombre?: string | null;
-		telefono?: string | null;
-		activo?: boolean | null;
-		emailCashIn?: string | null;
-	} | null;
-	oportunidadNotes?: string | null;
-	creditType?: string | null;
-	fechaInicioCuota0?: string | null;
-	cuotasRestantes?: number | null;
 }
 
 export const Route = createFileRoute("/cobros/$id")({
@@ -873,10 +793,7 @@ function RouteComponent() {
 	// disparar el efecto — un ciclo de refetch innecesario que se evita
 	// leyendo el resultado directo en vez de ir a buscarlo de nuevo a la DB.
 	const promesasPago = useMemo(
-		() =>
-			(historialContactos.data || []).filter(
-				(c: any) => c.estadoContacto === "promesa_pago",
-			),
+		() => promesasDePago(historialContactos.data as any[] | undefined),
 		[historialContactos.data],
 	);
 
@@ -909,15 +826,7 @@ function RouteComponent() {
 				// más viejas conservan su estadoPromesa ya persistido en DB (mismo
 				// fallback que usa la tarjeta cuando el id no viene en la
 				// respuesta), solo dejan de recalcularse en cada visita.
-				promesaIds: promesasPago
-					.filter((p: any) => p.fechaProximoContacto)
-					.sort(
-						(a: any, b: any) =>
-							new Date(b.fechaProximoContacto).getTime() -
-							new Date(a.fechaProximoContacto).getTime(),
-					)
-					.slice(0, 100)
-					.map((p: any) => p.id),
+				promesaIds: idsPromesasParaRecalcular(promesasPago),
 			},
 		}),
 		enabled:
@@ -929,47 +838,15 @@ function RouteComponent() {
 	// CB-029: promesa ACTIVA del caso = pendiente (estado recalculado) cuya fecha
 	// prometida no pasó. A lo sumo una; si abre el modal, se EDITA esa (no se crea
 	// otra que se sobreponga). El backend igual valida "una sola activa".
-	const promesaActiva = useMemo(() => {
-		const estados = estadoPromesasPago.data as
-			| Record<string, EstadoPromesaUI>
-			| undefined;
-		// Medianoche GT de hoy — mismo corte que el backend
-		// (condicionesPromesaVigente) y que el badge del header, vía el helper
-		// compartido. Codex PR #1232: una promesa VENCIDA (aún pendiente/null
-		// porque el recálculo no corrió) NO es activa; sin este chequeo, abrir
-		// el modal editaría/sobrescribiría una promesa histórica.
-		const inicioHoyGt = inicioDelDiaGT();
-		const candidatas = (promesasPago as any[])
-			.filter((p) => {
-				const estado = estados?.[p.id] ?? p.estadoPromesa ?? "pendiente";
-				return (
-					estado === "pendiente" &&
-					!!p.fechaProximoContacto &&
-					new Date(p.fechaProximoContacto) >= inicioHoyGt
-				);
-			})
-			.sort(
-				(a, b) =>
-					new Date(b.fechaProximoContacto).getTime() -
-					new Date(a.fechaProximoContacto).getTime(),
-			);
-		const p = candidatas[0];
-		if (!p) return null;
-		return {
-			id: p.id as string,
-			comentarios: p.comentarios,
-			acuerdosAlcanzados: p.acuerdosAlcanzados,
-			cuotaInicio: p.cuotaInicio,
-			cuotaFin: p.cuotaFin,
-			incluyeMora: p.incluyeMora,
-			montoComprometido: p.montoComprometido,
-			fechaProximoContacto: p.fechaProximoContacto,
-			fechaAlerta: p.fechaAlerta,
-			proximoPaso: p.proximoPaso,
-			// Quién la registró — lo pinta la card de Promesa en el Resumen.
-			realizadoPor: p.realizadoPor,
-		};
-	}, [promesasPago, estadoPromesasPago.data]);
+	// La regla vive en lib/cobros/reglas-caso (la comparte el Workspace).
+	const promesaActiva = useMemo(
+		() =>
+			promesaActivaDelCaso(
+				promesasPago,
+				estadoPromesasPago.data as Record<string, EstadoPromesaUI> | undefined,
+			),
+		[promesasPago, estadoPromesasPago.data],
+	);
 
 	// Obtener seguimientos activos
 	// CB-031: alertas de cobros de ESTE caso (ver getAlertasCaso).
@@ -1095,16 +972,12 @@ function RouteComponent() {
 	// La pide el asesor que lleva la cuenta, no solo el supervisor: es quien
 	// sabe que la unidad ya no se recupera por teléfono. Desde CB-043 la forzosa
 	// de un asesor es una solicitud que aprueba un supervisor.
-	const puedeRecuperarVehiculo = PERMISSIONS.canAccessCobros(
-		userProfile.data?.role ?? "",
-	);
-
 	// CB-118: generar enlaces públicos de rastreo y fijar qué unidad GPS
 	// corresponde al vehículo son decisiones de supervisor — un enlace mal
 	// emitido expone la ubicación del vehículo de un cliente, y un vínculo
 	// equivocado manda al gestor de campo al carro de otra persona.
-	const esSupervisorCobros = PERMISSIONS.canAssignCobros(
-		userProfile.data?.role ?? "",
+	const { puedeRecuperarVehiculo, esSupervisorCobros } = permisosCobros(
+		userProfile.data?.role,
 	);
 
 	// Obtener la oportunidad asociada por numeroSifco para ver detalles completos
@@ -1542,70 +1415,22 @@ function RouteComponent() {
 	// CB-036: acceso directo en la tarjeta de contacto. Teléfonos del cliente
 	// que se consiguieron (de una referencia o sueltos) y que todavía no están
 	// entre los del caso, y cuántas referencias tienen a quién llamar.
-	const ultimos8 = (t: string) => t.replace(/\D/g, "").slice(-8);
-	const telefonosDelCaso = new Set(
-		[caso.telefonoPrincipal, caso.telefonoAlternativo]
-			.flatMap((v) => String(v || "").split(","))
-			.map((t) => ultimos8(t))
-			.filter(Boolean),
+	const telefonosNuevosCliente = telefonosNuevosDelCliente(
+		caso,
+		referenciasCaso.data?.hallazgos ?? [],
 	);
-	const telefonosNuevosCliente = (referenciasCaso.data?.hallazgos ?? []).filter(
-		(h, i, lista) =>
-			h.tipo === "telefono" &&
-			!h.enTelefonosDelCaso &&
-			!telefonosDelCaso.has(ultimos8(h.valor)) &&
-			lista.findIndex(
-				(otro) =>
-					otro.tipo === "telefono" &&
-					ultimos8(otro.valor) === ultimos8(h.valor),
-			) === i,
+	const textoReferencias = textoReferenciasConTelefono(
+		referenciasCaso.data?.referencias ?? [],
 	);
-	const referenciasConTelefono = (
-		referenciasCaso.data?.referencias ?? []
-	).filter((r) => r.telefonos.length > 0).length;
-	const textoReferencias =
-		referenciasConTelefono === totalReferencias
-			? totalReferencias === 1
-				? "1 referencia con teléfono"
-				: `${totalReferencias} referencias con teléfono`
-			: `${totalReferencias === 1 ? "1 referencia" : `${totalReferencias} referencias`} (${referenciasConTelefono} con teléfono)`;
 	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 
 	// El bloque de props que comparten TODOS los modales de contacto: antes
 	// vivía copiado seis veces (uno por canal). El modal solo se monta cuando
 	// hay caso (caso.id), así que el `caso.id` de acá nunca viaja vacío.
-	const propsContacto = {
-		// Los modales solo se montan bajo `caso.id ? (...)`, así que el "" no
-		// viaja nunca — está solo para que el tipo cierre sin un cast.
-		casoCobroId: caso.id ?? "",
-		clienteNombre: caso.clienteNombre || "",
-		telefonoPrincipal: caso.telefonoPrincipal || "",
-		telefonoAlternativo: caso.telefonoAlternativo
-			? String(caso.telefonoAlternativo)
-			: undefined,
-		emailCliente: caso.emailContacto || "",
-		fechaPago: String(caso.diaPagoMensual || 15),
-		cuotaMensual: Number(caso.cuotaMensual || 0).toLocaleString(),
-		placa: caso.vehiculoPlaca || "",
-		marcaLineaModelo:
-			`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim(),
-		// Saldo real de las cuotas vencidas (parciales y recibos recortados) +
-		// mora, calculado en el server (getDetallesCreditoCarteraBack). Vacío =
-		// el modal bloquea las plantillas que lo anuncian.
-		montoAdeudado: caso.montoAdeudado || "",
-		cuotasAtraso: caso.cuotasVencidas ?? 0,
-		estadoMora: caso.estadoMora || undefined,
-		fechaInicio: caso.fechaInicio || null,
-		nombreAsesor: caso.asesor?.nombre || "",
-		telefonoAsesor: caso.asesor?.telefono || "",
-		expectativaMora: caso.expectativaMora || "",
-		expectativaMoraDiaria: caso.expectativaMoraDiaria || "",
-		incrementoDiarioMora: caso.incrementoDiarioMora || "",
-		incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora || "",
-		aseguradora: caso.aseguradora || "",
-		cabinaSeguro: caso.cabinaSeguro || "",
-	};
+	// Los modales solo se montan bajo `caso.id ? (...)`, así que el "" de
+	// casoCobroId no viaja nunca. Variables de plantilla incluidas.
+	const propsContacto = propsContactoDelCaso(caso);
 
 	// Detectar si es vehículo migrado (todo N/A)
 	const isVehiculoMigrado =
@@ -1669,19 +1494,11 @@ function RouteComponent() {
 	// respondió, o si falló, se cae al badge de estadoMora de siempre — nunca
 	// se muestra un bucket inventado (mismo criterio que BUCKET_DESCONOCIDO).
 	const motorBucket = bucketActual.data;
-	const bucketNumero = motorBucket?.bucket ?? null;
-	const bucketCatalogo =
-		bucketNumero !== null
-			? catalogoDeNumero(bucketNumero, bucketsCatalogo.data)
-			: undefined;
-	const bucketUI =
-		bucketNumero !== null
-			? bucketDeNumero(bucketNumero, bucketsCatalogo.data)
-			: null;
-	const bucketPrefijo =
-		motorBucket?.prefijo ||
-		bucketCatalogo?.prefijo ||
-		(bucketNumero !== null ? `B${bucketNumero}` : null);
+	const {
+		numero: bucketNumero,
+		ui: bucketUI,
+		prefijo: bucketPrefijo,
+	} = bucketDelCaso(motorBucket, bucketsCatalogo.data);
 	// Divergencia motor vs. estadoMora calculado en vivo: solo en el tooltip,
 	// el badge siempre muestra el MOTOR (es la fuente operativa: pool de
 	// asesores y SLA se derivan de ahí).
@@ -1737,19 +1554,14 @@ function RouteComponent() {
 	// tiene activo=true, y uno recién creado nace en false hasta que conta lo
 	// activa. Mirando solo `convenioActivo`, el convenio que acaba de crear
 	// este mismo flujo era invisible acá (hallazgo de Codex, PR #1570).
-	const convenioPendienteActivacion =
-		caso.statusCredit === "EN_CONVENIO" && !caso.convenioActivo;
-	const tieneConvenioVigente =
-		!!caso.convenioActivo || caso.statusCredit === "EN_CONVENIO";
-	const convenioMotivoBloqueo: string | null = convenioPendienteActivacion
-		? "Este crédito ya tiene un convenio pendiente de activación en cartera."
-		: tieneConvenioVigente
-			? "Este crédito ya tiene un convenio de pago vigente."
-			: bucketActual.isPending
-				? "Cargando el bucket del crédito…"
-				: !esBucketDesdeB2(bucketNumero, bucketsCatalogo.data)
-					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registre una promesa de pago.`
-					: null;
+	const convenioMotivoBloqueo: string | null = motivoBloqueoConvenio({
+		statusCredit: caso.statusCredit,
+		convenioActivo: caso.convenioActivo,
+		bucketCargando: bucketActual.isPending,
+		bucketNumero,
+		bucketPrefijo,
+		catalogo: bucketsCatalogo.data,
+	});
 	const convenioHabilitado = convenioMotivoBloqueo === null;
 
 	// ── COBROS-02 Fase 3 — resolución de la cuenta ──────────────────────────
@@ -1792,68 +1604,46 @@ function RouteComponent() {
 	// voluntaria, de B2 a B4: en B4 solo se registra. Las opciones NO se
 	// esconden — el asesor tiene que saber que existen y por qué hoy no
 	// aplican, mismo criterio que el convenio.
-	const recuperacionBloqueoBase: string | null = !puedeRecuperarVehiculo
-		? "Solo el equipo de cobros puede enviar una cuenta a recuperación."
-		: !caso.id || !caso.numeroCreditoSifco
-			? "Este caso todavía no tiene crédito de cartera asociado."
-			: bucketActual.isPending
-				? "Cargando el bucket del crédito…"
-				: null;
+	const reglasCtx = {
+		puedeRecuperarVehiculo,
+		casoCobroId: caso.id,
+		numeroCreditoSifco: caso.numeroCreditoSifco,
+		bucketCargando: bucketActual.isPending,
+		bucketNumero,
+		bucketPrefijo,
+	};
 	const bloqueoRecuperacion = (tipo: TipoEnvioRecuperacion) =>
-		recuperacionBloqueoBase ??
-		motivoBloqueoRecuperacion(tipo, bucketNumero, bucketPrefijo);
+		motivoBloqueoEnvioRecuperacion(tipo, reglasCtx);
 	// CB-043: una solicitud pendiente a la vez. Se decide (o se cancela) en la
 	// tarjeta de recuperación, no pidiendo otra.
-	const solicitudRecuperacionPendiente =
-		recuperacionesCaso.data?.some((r) => r.estadoSolicitud === "pendiente") ??
-		false;
-	const bloqueoForzosa =
-		bloqueoRecuperacion("tomado") ??
-		(solicitudRecuperacionPendiente
-			? "Ya hay una solicitud de recuperación pendiente de aprobación. Se resuelve en la tarjeta de recuperación del vehículo."
-			: null);
+	const solicitudRecuperacionPendiente = haySolicitudRecuperacionPendiente(
+		recuperacionesCaso.data,
+	);
+	const bloqueoForzosa = motivoBloqueoRecuperacionForzosa(
+		reglasCtx,
+		solicitudRecuperacionPendiente,
+	);
 	const bloqueoVoluntaria = bloqueoRecuperacion("entrega_voluntaria");
-	const operacionEnvio = envioRecuperacion
-		? operacionRecuperacion(envioRecuperacion, bucketNumero)
-		: null;
+	const operacionEnvio = operacionEnvioRecuperacion(
+		envioRecuperacion,
+		bucketNumero,
+	);
 
 	// CB-037/038: las visitas nuevas, de B2 a B4 (la regla vive en la librería
 	// compartida con el servidor). Registrar el resultado de una ya programada
 	// no pasa por acá: se hace desde su tarjeta, sin mirar el bucket.
-	const bloqueoVisita: string | null = !puedeRecuperarVehiculo
-		? "Solo el equipo de cobros puede registrar visitas."
-		: !caso.numeroCreditoSifco
-			? "Este caso todavía no tiene crédito de cartera asociado."
-			: bucketActual.isPending
-				? "Cargando el bucket del crédito…"
-				: motivoBloqueoVisita(bucketNumero, bucketPrefijo);
+	const bloqueoVisita: string | null = motivoBloqueoVisitaCaso(reglasCtx);
 	// Lo vencido (cuotas vencidas × cuota + mora): el «Pago total» de una
 	// visita, y la base del porcentaje del «Pago parcial + promesa».
 	// Merge con develop: el saldo real del server (`montoAdeudado`: recibos de
 	// las cuotas vencidas, con los abonos parciales descontados, + la mora de
 	// hoy) es lo que paga un «Pago total». La fórmula cuotas × cuota + mora
 	// queda de respaldo si el server no lo pudo calcular.
-	const montoAdeudadoReal = Number(
-		String(caso.montoAdeudado ?? "").replace(/,/g, ""),
+	const deudaVencidaCaso = deudaVencidaDelCaso(caso);
+	const direccionesCliente = direccionesDelCliente(
+		caso.direccionContacto,
+		datosLaborales.data,
 	);
-	const deudaVencidaCaso =
-		Number.isFinite(montoAdeudadoReal) && montoAdeudadoReal > 0
-			? montoAdeudadoReal
-			: deudaVencida({
-					cuotasVencidas: caso.cuotasVencidas,
-					cuota: caso.cuotaMensual,
-					mora: caso.montoEnMora,
-				});
-	const direccionesCliente = {
-		residencia: caso.direccionContacto?.trim() || null,
-		trabajo: datosLaborales.data
-			? {
-					direccion: datosLaborales.data.direccion,
-					empresa: datosLaborales.data.empresa,
-					horario: datosLaborales.data.horario,
-				}
-			: null,
-	};
 	const abrirEntregaDesdeVisita = (datos: {
 		visitaId: string;
 		lugar: string;
@@ -1892,9 +1682,7 @@ function RouteComponent() {
 			tipo: v.tipo,
 			montoRecibido: v.montoRecibido != null ? Number(v.montoRecibido) : null,
 		});
-	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
-	const maxMesesConvenio =
-		(convenioConfig.data as { maxMeses?: number } | undefined)?.maxMeses ?? 6;
+	const maxMesesConvenio = maxMesesDeConvenio(convenioConfig.data);
 
 	// CB-030: subestado "Promesa activa" — se muestra JUNTO al bucket, nunca
 	// en su lugar. El bucket YA viene congelado desde el servidor mientras la
@@ -1974,65 +1762,33 @@ function RouteComponent() {
 			minute: "2-digit",
 			hour12: false,
 		});
-	const diasMora =
-		caso.diasMoraMaximo && caso.diasMoraMaximo > 0 ? caso.diasMoraMaximo : 0;
+	const diasMora = diasMoraDelCaso(caso);
 	const enConvenioCartera = caso.statusCredit === "EN_CONVENIO";
 	const seguimiento = seguimientoFicha.data;
 	const comp = complementos.data;
-	const telefonosDe = (v: string | number | null | undefined) =>
-		String(v || "")
-			.split(",")
-			.map((t) => t.trim())
-			.filter(Boolean);
-	const telHref = (t: string) => `tel:${t.replace(/[^0-9+]/g, "")}`;
+	const telHref = hrefTelefono;
 	const principales = telefonosDe(caso.telefonoPrincipal);
 	const alternativos = telefonosDe(caso.telefonoAlternativo);
 
 	// Cuotas del plan: pagadas, último mes pagado y próximo pago.
 	const hoyInicio = inicioDelDiaGT();
-	const cuotasPagadas = cuotas.filter((c: any) => c.estadoMora === "pagado");
-	const ultimaPagada = [...cuotasPagadas].sort(
-		(a: any, b: any) => b.numeroCuota - a.numeroCuota,
-	)[0] as any;
-	const proximaCuota = [...cuotas]
-		.filter(
-			(c: any) =>
-				c.estadoMora !== "pagado" &&
-				c.fechaVencimiento &&
-				new Date(c.fechaVencimiento) >= hoyInicio,
-		)
-		.sort((a: any, b: any) => a.numeroCuota - b.numeroCuota)[0] as any;
+	const planCuotas = resumenCuotas(
+		cuotas as any[],
+		caso.numeroCuotas,
+		hoyInicio,
+	);
+	const cuotasPagadas = planCuotas.pagadas;
+	const ultimaPagada = planCuotas.ultimaPagada;
+	const proximaCuota = planCuotas.proxima;
 	const mesDe = (fecha: string | null | undefined) => {
 		const f = fecha ? fechaLarga(fecha) : "";
 		return f ? f.replace(/^\d+\s/, "") : "—";
 	};
-	const totalCuotas = caso.numeroCuotas ?? cuotas.length;
+	const totalCuotas = planCuotas.total;
 
 	// "Cobro de hoy" (mismas cuentas que el «Total a cobrar» de antes).
-	const totalMoraCuotas =
-		Number(caso.montoEnMora || 0) +
-		Number(caso.cuotasVencidas || 0) * Number(caso.cuotaMensual || 0);
-	const totalParcial =
-		caso.cuotaConvenio != null
-			? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
-			: Number(caso.montoEnMora || 0) + Number(caso.cuotaMensual || 0);
-	const avisoCrecimientoMora =
-		caso.cuotaConvenio == null &&
-		debeAnunciarCrecimientoMora({
-			montoEnMora: caso.montoEnMora,
-			incrementoDiarioMora: caso.incrementoDiarioMora,
-			incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora,
-		})
-			? `${
-					hayIncrementoMora(caso.incrementoDiarioMora)
-						? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`
-						: "Va a seguir subiendo"
-				}${
-					hayIncrementoMora(caso.incrementoMaximoMensualMora)
-						? `, y puede aumentar hasta Q${caso.incrementoMaximoMensualMora} más en los próximos 30 días`
-						: ""
-				}.`
-			: null;
+	const { totalMoraCuotas, totalParcial, avisoCrecimientoMora } =
+		cobroDeHoy(caso);
 
 	// Historial de Cobranza (Resumen): las 3 gestiones más recientes, promesas
 	// incluidas (la lista completa vive en la pestaña Historial).
@@ -2047,18 +1803,9 @@ function RouteComponent() {
 
 	const proximoContactoFecha =
 		seguimiento?.proximaLlamadaEn ?? caso.proximoContacto ?? null;
-	const proximoContacto: {
-		estado: "Programado" | "Hoy" | "SinProgramar";
-		valor?: string;
-	} = !proximoContactoFecha
-		? { estado: "SinProgramar" }
-		: formatFechaGT(new Date(proximoContactoFecha)) ===
-				formatFechaGT(new Date())
-			? { estado: "Hoy" }
-			: {
-					estado: "Programado",
-					valor: fechaLarga(new Date(proximoContactoFecha)),
-				};
+	const proximoContacto = proximoContactoDelCaso(proximoContactoFecha, (d) =>
+		fechaLarga(d),
+	);
 
 	// Ubicaciones verificadas: la última visita REALIZADA a cada dirección.
 	const visitaVerificada = (tipo: "residencia" | "trabajo") => {
@@ -3183,14 +2930,40 @@ function RouteComponent() {
 																{a.descripcion}
 															</p>
 														)}
-														<p className="mt-1 text-[11px] text-muted-foreground/70">
-															{formatFechaGT(new Date(a.createdAt))}
-															{a.repeticiones > 1 &&
-																` · ${a.repeticiones} avisos desde ${formatFechaGT(new Date(a.desde))}`}
-														</p>
+														<div className="mt-1 flex items-center justify-between gap-2">
+															<p className="text-[11px] text-muted-foreground/70">
+																{formatFechaGT(new Date(a.createdAt))}
+																{a.repeticiones > 1 &&
+																	` · ${a.repeticiones} avisos desde ${formatFechaGT(new Date(a.desde))}`}
+															</p>
+															{/* TODO(José) · tarea W5: marcar la alerta como leída. */}
+															<Button
+																type="button"
+																variant="text"
+																size="sm"
+																disabled
+																title="Pronto"
+																className="h-auto shrink-0 px-0 text-[11px]"
+															>
+																Marcar como leída
+															</Button>
+														</div>
 													</div>
 												);
 											})}
+											{/* TODO(José) · tarea W5: alertas leídas del caso. */}
+											<div className="flex items-center gap-2 pt-1">
+												<Button
+													type="button"
+													variant="text"
+													size="sm"
+													disabled
+													className="h-auto px-0"
+												>
+													Ver alertas leídas
+												</Button>
+												<Badge variant="secondary">Pronto</Badge>
+											</div>
 										</CardContent>
 									</Card>
 								)}
@@ -5308,27 +5081,14 @@ function RouteComponent() {
 								setPromesaDesdeReactivacion(false);
 							}
 						}}
-						montoSugerido={Math.max(
-							0,
-							(caso.cuotaConvenio != null
-								? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
-								: Number(caso.montoEnMora || 0) +
-									Number(caso.cuotasVencidas || 0) *
-										Number(caso.cuotaMensual || 0)) -
-								(promesaDesdeVisita?.montoRecibido ?? 0),
+						montoSugerido={montoSugeridoPromesa(
+							caso,
+							promesaDesdeVisita?.montoRecibido ?? 0,
 						)}
-						cuotasDisponibles={cuotas
-							.filter(
-								(c: any) =>
-									c.estadoMora !== "pagado" &&
-									c.fechaVencimiento &&
-									new Date(c.fechaVencimiento) < new Date(),
-							)
-							.map((c: any) => ({
-								numeroCuota: c.numeroCuota,
-								fechaVencimiento: c.fechaVencimiento,
-								monto: Number(c.montoCuota ?? caso.cuotaMensual ?? 0),
-							}))}
+						cuotasDisponibles={cuotasDisponiblesParaPromesa(
+							cuotas as any[],
+							caso.cuotaMensual,
+						)}
 						montoMora={Number(caso.montoEnMora || 0)}
 						esConvenio={caso.cuotaConvenio != null}
 						cuotaConvenio={
@@ -5353,10 +5113,7 @@ function RouteComponent() {
 						// (con tests) porque tiene que decir lo mismo que el
 						// server: qué cuota puede entrar y cuál ya está vencida
 						// según el día de Guatemala.
-						cuotas={cuotasElegiblesParaConvenio(
-							cuotas as any[],
-							Number(caso.cuotaMensual || 0),
-						)}
+						cuotas={cuotasParaConvenio(cuotas as any[], caso.cuotaMensual)}
 						cuotaMensual={Number(caso.cuotaMensual || 0)}
 						montoMora={Number(caso.montoEnMora || 0)}
 						maxMeses={maxMesesConvenio}
@@ -5480,16 +5237,7 @@ function RouteComponent() {
 							programada={visitaAbierta.programada ?? null}
 							direcciones={direccionesCliente}
 							deudaVencida={deudaVencidaCaso}
-							incrementoDiarioMora={
-								caso.cuotaConvenio == null &&
-								debeAnunciarCrecimientoMora({
-									montoEnMora: caso.montoEnMora,
-									incrementoDiarioMora: caso.incrementoDiarioMora,
-									incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora,
-								})
-									? (caso.incrementoDiarioMora ?? null)
-									: null
-							}
+							incrementoDiarioMora={incrementoDiarioMoraAnunciable(caso)}
 							convenioBloqueo={convenioMotivoBloqueo}
 							bucketNumero={bucketNumero}
 							vehicleId={caso.vehicleId ?? null}

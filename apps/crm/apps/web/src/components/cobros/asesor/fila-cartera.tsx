@@ -329,6 +329,23 @@ export function useColumnasVisibles(
 
 const detener = (e: React.SyntheticEvent) => e.stopPropagation();
 
+/**
+ * Fila que se abre con el teclado (Enter / Espacio) además del clic. Solo
+ * reacciona cuando el foco está en la fila misma, no en sus botones.
+ */
+export function propsFilaEnfocable(abrir: () => void) {
+	return {
+		tabIndex: 0,
+		onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+			if (e.target !== e.currentTarget) return;
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				abrir();
+			}
+		},
+	};
+}
+
 /** Id para /cobros/$id: SIFCO (o contrato) + si es caso o contrato. */
 export function destinoFicha(fila: {
 	numeroCredito: string | null;
@@ -402,12 +419,18 @@ export function FilaCreditoAsesor({
 	prioridad,
 	extras,
 	onVistaRapida,
+	onAbrir,
 }: {
 	fila: FilaCartera;
 	prioridad?: number;
 	/** Celdas de las columnas opcionales, por id. */
 	extras?: Record<string, React.ReactNode>;
 	onVistaRapida: (creditoId: string) => void;
+	/**
+	 * Clic (o Enter / Espacio) en la fila. Sin él, la fila navega a la Ficha
+	 * 360; con él, la pantalla decide (p. ej. abrir el Workspace).
+	 */
+	onAbrir?: (destino: ReturnType<typeof destinoFicha>) => void;
 }) {
 	const navigate = useNavigate();
 	const bucket = bucketDeFila(fila.bucketNumero, fila.estadoMora);
@@ -429,18 +452,21 @@ export function FilaCreditoAsesor({
 		.filter(conDato)
 		.join(" · ");
 	const destino = destinoFicha(fila);
+	const abrir = () =>
+		onAbrir
+			? onAbrir(destino)
+			: navigate({
+					to: "/cobros/$id",
+					params: { id: destino.id },
+					search: { tipo: destino.tipo },
+				});
 
 	return (
 		<FilaCredito
 			prioridad={prioridad}
-			className="cursor-pointer"
-			onClick={() =>
-				navigate({
-					to: "/cobros/$id",
-					params: { id: destino.id },
-					search: { tipo: destino.tipo },
-				})
-			}
+			className="cursor-pointer focus-visible:bg-muted focus-visible:outline-none"
+			onClick={abrir}
+			{...(onAbrir ? propsFilaEnfocable(abrir) : {})}
 			cliente={fila.clienteNombre}
 			detalle={detalle || undefined}
 			bucket={bucket ? <BucketBadge bucket={bucket} /> : "—"}

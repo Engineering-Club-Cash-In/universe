@@ -80,6 +80,7 @@ export function PersonaContacto({
 	filas,
 	onEditar,
 	children,
+	compacto = false,
 }: {
 	nombre: string;
 	/** "Titular", "Codeudor 1". */
@@ -88,9 +89,17 @@ export function PersonaContacto({
 	onEditar?: () => void;
 	/** Debajo de la tabla: trabajo, números nuevos, referencias… */
 	children?: React.ReactNode;
+	/**
+	 * Workspace (panel de 520–640px): container queries en vez de breakpoints
+	 * de viewport. Sin `compacto`, la ficha conserva sus `sm:` de siempre.
+	 */
+	compacto?: boolean;
 }) {
 	return (
-		<CrmCard superficie="outline" className="gap-4 p-4 sm:p-5">
+		<CrmCard
+			superficie="outline"
+			className={cn("gap-4 p-4", compacto ? "@container" : "sm:p-5")}
+		>
 			<div className="flex flex-wrap items-center gap-3">
 				<CrmAvatar
 					iniciales={inicialesDe(nombre)}
@@ -118,13 +127,23 @@ export function PersonaContacto({
 				{filas.map((f) => (
 					<div
 						key={f.label}
-						className="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]"
+						className={cn(
+							"grid grid-cols-1 gap-x-4 gap-y-0.5",
+							compacto
+								? "@lg:grid-cols-[minmax(0,180px)_minmax(0,1fr)]"
+								: "sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]",
+						)}
 					>
 						<dt className="flex items-center gap-2 text-[13px] text-fg-secondary leading-[1.26]">
 							<span className="flex shrink-0 [&_svg]:size-3.5">{f.icono}</span>
 							{f.label}
 						</dt>
-						<dd className="flex min-w-0 flex-wrap justify-start gap-x-3 gap-y-1 sm:justify-end">
+						<dd
+							className={cn(
+								"flex min-w-0 flex-wrap justify-start gap-x-3 gap-y-1",
+								compacto ? "@lg:justify-end" : "sm:justify-end",
+							)}
+						>
 							{f.valores.length === 0 ? (
 								<span className="text-[13px] text-fg-tertiary">—</span>
 							) : (
@@ -134,7 +153,10 @@ export function PersonaContacto({
 											key={v.texto}
 											href={v.href}
 											title={v.title}
-											className="min-w-0 break-all font-medium text-[13px] text-brand leading-[1.26] hover:underline sm:text-right"
+											className={cn(
+												"min-w-0 break-all font-medium text-[13px] text-brand leading-[1.26] hover:underline",
+												compacto ? "@lg:text-right" : "sm:text-right",
+											)}
 										>
 											{v.texto}
 										</a>
@@ -142,7 +164,10 @@ export function PersonaContacto({
 										<span
 											key={v.texto}
 											title={v.title}
-											className="wrap-break-word min-w-0 font-medium text-[13px] text-fg leading-[1.26] sm:text-right"
+											className={cn(
+												"wrap-break-word min-w-0 font-medium text-[13px] text-fg leading-[1.26]",
+												compacto ? "@lg:text-right" : "sm:text-right",
+											)}
 										>
 											{v.texto}
 										</span>
@@ -177,14 +202,20 @@ export function UbicacionVerificada({
 	rol = "Titular",
 	verificacion,
 	onFotoClick,
+	compacto = false,
 }: {
 	persona: string;
 	rol?: string;
 	verificacion: VerificacionUbicacion | null;
 	onFotoClick?: (indice: number) => void;
+	/**
+	 * Workspace: las dos tarjetas (fotos y comentarios) van lado a lado según
+	 * el ancho del panel (container query), no de la pantalla.
+	 */
+	compacto?: boolean;
 }) {
 	return (
-		<div className="flex flex-col gap-5">
+		<div className={cn("flex flex-col gap-5", compacto && "@container")}>
 			<div className="flex items-center gap-2.5 border-line-subtle border-b pb-5">
 				<span className="font-semibold text-[15px] text-fg">{persona}</span>
 				<CrmPill tone="neutral" dot={false} className="px-2.5 py-0.5">
@@ -213,7 +244,12 @@ export function UbicacionVerificada({
 							</div>
 						)}
 					</CrmCard>
-					<div className="grid gap-5 lg:grid-cols-2">
+					<div
+						className={cn(
+							"grid gap-5",
+							compacto ? "@2xl:grid-cols-2" : "lg:grid-cols-2",
+						)}
+					>
 						<CrmCard superficie="outline" className="gap-3 p-4">
 							<h3 className={crmText.title}>Fotografías de la visita</h3>
 							{verificacion.fotos.length > 0 ? (

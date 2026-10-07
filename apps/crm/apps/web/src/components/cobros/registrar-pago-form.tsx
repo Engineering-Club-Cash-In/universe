@@ -51,6 +51,11 @@ import {
 	getConvenioAplicado,
 	getDisplayedPartialContribution,
 } from "@/lib/cobros/registrar-pago";
+import {
+	type CasoDetalle,
+	deudaVencidaDelCaso,
+} from "@/lib/cobros/reglas-caso";
+import { formatCurrency } from "@/lib/crm-formatters";
 import { cn } from "@/lib/utils";
 import { orpc } from "@/utils/orpc";
 
@@ -84,6 +89,17 @@ const ETIQUETA_CAMPO: Record<string, string> = {
 	cuentaDestino: "cuenta destino",
 };
 
+/** Lo que el Workspace muestra en «Gestión registrada» tras registrar el pago. */
+export type PagoRegistrado = {
+	/** Mensaje de cartera (p. ej. «Pago parcial de mora aplicado…»). */
+	mensaje: string | null;
+	montoBoleta: number;
+	/** Número de la cuota a la que se aplicó. */
+	cuota: number | null;
+	/** false: el pago se aplicó, pero la gestión no quedó en el historial. */
+	gestionRegistrada: boolean;
+};
+
 /**
  * CB-128: registro de pago con boleta (réplica funcional de carteraFront
  * PagoForm.tsx + registerPayment.ts). Se usa en dos lugares:
@@ -96,12 +112,28 @@ const ETIQUETA_CAMPO: Record<string, string> = {
 export function RegistrarPagoForm({
 	creditoId: id,
 	onVolver,
+	onExito,
+	embebido = false,
 	className,
 }: {
 	/** Mismo id que la ruta de la Ficha 360 (SIFCO o caso). */
 	creditoId: string;
-	/** Volver a la ficha: al cancelar y después de registrar el pago. */
+	/**
+	 * Volver a la ficha: al cancelar y después de registrar el pago (si no
+	 * viene `onExito`).
+	 */
 	onVolver: () => void;
+	/**
+	 * Workspace: pago registrado. Si viene, reemplaza al `onVolver` posterior
+	 * al registro (el panel pasa a «Gestión registrada» con este resumen).
+	 */
+	onExito?: (resumen: PagoRegistrado) => void;
+	/**
+	 * Workspace: layout de panel (resumen compacto de deuda vencida y cuota
+	 * normal arriba, cuerpo con scroll y pie fijo con «Cancelar» y «Registrar
+	 * pago»). Sin esto, la página/modal de la ficha de siempre.
+	 */
+	embebido?: boolean;
 	className?: string;
 }) {
 	const queryClient = useQueryClient();
@@ -518,7 +550,16 @@ export function RegistrarPagoForm({
 					),
 			});
 			setConfirmacionAbierta(false);
-			volverAlCredito();
+			if (onExito) {
+				onExito({
+					mensaje: data?.message ?? null,
+					montoBoleta: montoBoletaNum,
+					cuota: cuotaSeleccionada ?? null,
+					gestionRegistrada: data?.gestionRegistrada !== false,
+				});
+			} else {
+				volverAlCredito();
+			}
 		},
 		onError: (error: unknown) => {
 			const mensaje = error instanceof Error ? error.message : undefined;
@@ -598,23 +639,502 @@ export function RegistrarPagoForm({
 		setConfirmacionAbierta(true);
 	}
 
+	// Bloques compartidos por las dos variantes (página/modal de la ficha y
+	// panel del Workspace): mismos campos, validaciones y textos.
+	const tarjetaCargando = (
+		<Card>
+			<CardContent className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
+				<Loader2 className="h-4 w-4 animate-spin" />
+				Cargando crédito...
+			</CardContent>
+		</Card>
+	);
+	const tarjetaBloqueado = credito ? (
+		<Card>
+			<CardContent className="py-12 text-center text-muted-foreground text-sm">
+				{credito.credito.statusCredit === "PENDIENTE_CANCELACION"
+					? "Este crédito está pendiente de cancelación y no admite nuevos pagos."
+					: "Este crédito está cancelado y no admite nuevos pagos."}
+			</CardContent>
+		</Card>
+	) : null;
+	const tarjetaError = (
+		<Card>
+			<CardContent className="py-12 text-center text-muted-foreground text-sm">
+				No se pudo cargar la información del crédito.
+			</CardContent>
+		</Card>
+	);
+	const pasoBoleta = (
+		<Card>
+			<CardHeader className="space-y-1">
+				<CardTitle className="flex items-center gap-2 text-base">
+					<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+						1
+					</span>
+					Boleta de pago
+				</CardTitle>
+				<p className="text-muted-foreground text-sm">
+					Suba el comprobante y el sistema leerá los datos automáticamente con
+					el mismo lector del bot de WhatsApp. Revíselos antes de registrar.
+				</p>
+			</CardHeader>
+			<CardContent className="space-y-4">
+				<input
+					accept="image/*,application/pdf"
+					className="hidden"
+					onChange={(e) => seleccionarArchivo(e.target.files?.[0] ?? null)}
+					ref={inputArchivoRef}
+					type="file"
+				/>
+				{archivo ? (
+					<div className="flex items-center gap-3 rounded-lg border p-3">
+						{previewUrl ? (
+							<img
+								alt="Boleta"
+								className="h-16 w-16 shrink-0 rounded-md border object-cover"
+								src={previewUrl}
+							/>
+						) : (
+							<span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+								<FileText className="h-6 w-6 text-muted-foreground" />
+							</span>
+						)}
+						<div className="min-w-0 flex-1">
+							<p className="truncate font-medium text-sm">{archivo.name}</p>
+							<p className="text-muted-foreground text-xs">
+								{(archivo.size / 1024).toFixed(0)} KB
+							</p>
+						</div>
+						<Button
+							onClick={() => inputArchivoRef.current?.click()}
+							size="sm"
+							type="button"
+							variant="outline"
+						>
+							Cambiar
+						</Button>
+					</div>
+				) : (
+					<button
+						className={cn(
+							"flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/30",
+							arrastrando && "border-primary bg-primary/5",
+						)}
+						onClick={() => inputArchivoRef.current?.click()}
+						onDragLeave={() => setArrastrando(false)}
+						onDragOver={(e) => {
+							e.preventDefault();
+							setArrastrando(true);
+						}}
+						onDrop={(e) => {
+							e.preventDefault();
+							setArrastrando(false);
+							seleccionarArchivo(e.dataTransfer.files?.[0] ?? null);
+						}}
+						type="button"
+					>
+						<span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+							<Upload className="h-5 w-5 text-muted-foreground" />
+						</span>
+						<span className="font-medium text-sm">
+							Arrastre la boleta aquí o haga clic para seleccionarla
+						</span>
+						<span className="text-muted-foreground text-xs">
+							JPG, PNG o PDF · hasta 10 MB
+						</span>
+					</button>
+				)}
+
+				{leerBoletaMutation.isPending && (
+					<div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/30">
+						<Loader2 className="h-4 w-4 animate-spin text-violet-600" />
+						Leyendo la boleta…
+					</div>
+				)}
+
+				{!leerBoletaMutation.isPending && errorLectura && (
+					<div className="flex items-start justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+						<span className="flex items-start gap-2">
+							<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+							{errorLectura}
+						</span>
+						<Button
+							className="shrink-0"
+							onClick={() => {
+								if (!archivo) return;
+								leerBoletaMutation.mutate({
+									file: archivo,
+									seq: ++lecturaSeq.current,
+								});
+							}}
+							size="sm"
+							type="button"
+							variant="outline"
+						>
+							Reintentar
+						</Button>
+					</div>
+				)}
+
+				{!leerBoletaMutation.isPending &&
+					lectura &&
+					!lectura.esBoletaDePago && (
+						<div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+							<ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
+							<span>
+								El archivo no parece un comprobante bancario. Verifique que sea
+								la boleta correcta; también puede registrar el pago ingresando
+								los datos manualmente.
+							</span>
+						</div>
+					)}
+
+				{!leerBoletaMutation.isPending && lectura?.esBoletaDePago && (
+					<div className="space-y-3 rounded-lg border border-green-300 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
+						<p className="flex items-center gap-2 font-medium text-green-800 text-sm dark:text-green-300">
+							<CheckCircle2 className="h-4 w-4" />
+							Datos leídos de la boleta
+						</p>
+						<div
+							className={cn(
+								"grid gap-2",
+								embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+							)}
+						>
+							{[
+								{
+									label: "Monto",
+									valor:
+										lectura.monto !== null
+											? `Q${lectura.monto.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+											: null,
+								},
+								{ label: "Banco", valor: lectura.bancoNombre },
+								{
+									label: "Fecha",
+									valor: lectura.fechaCorregida ? null : lectura.fechaBoleta,
+								},
+								{
+									label: "No. autorización",
+									valor: lectura.numeroAutorizacion,
+								},
+							].map((dato) => (
+								<div
+									className="rounded-md bg-background/70 px-3 py-2"
+									key={dato.label}
+								>
+									<p className="text-muted-foreground text-xs">{dato.label}</p>
+									<p
+										className={cn(
+											"truncate font-medium text-sm",
+											!dato.valor && "text-muted-foreground",
+										)}
+									>
+										{dato.valor ?? "No se leyó"}
+									</p>
+								</div>
+							))}
+						</div>
+						{(lectura.bancoId === null ||
+							lectura.fechaCorregida ||
+							lectura.monto === null ||
+							lectura.camposNoLeidos.length > 0) && (
+							<ul className="space-y-1 text-amber-800 text-xs dark:text-amber-300">
+								{lectura.monto === null && (
+									<li>• No se leyó el monto: ingréselo manualmente.</li>
+								)}
+								{lectura.bancoId === null && (
+									<li>
+										• No se reconoció el banco
+										{lectura.bancoLeido ? ` ("${lectura.bancoLeido}")` : ""}:
+										selecciónelo de la lista.
+									</li>
+								)}
+								{lectura.fechaCorregida && (
+									<li>
+										• No se leyó la fecha: se usó la de hoy. Corríjala si la
+										boleta es de otro día.
+									</li>
+								)}
+								{lectura.camposNoLeidos
+									.filter(
+										(campo) =>
+											campo !== "banco" &&
+											campo !== "monto" &&
+											campo !== "fechaBoleta",
+									)
+									.map((campo) => (
+										<li key={campo}>
+											• Sin {ETIQUETA_CAMPO[campo] ?? campo} en la boleta.
+										</li>
+									))}
+							</ul>
+						)}
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+	const pasoDatos = (
+		<Card>
+			<CardHeader className="space-y-1">
+				<CardTitle className="flex items-center gap-2 text-base">
+					<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+						2
+					</span>
+					Datos del pago
+				</CardTitle>
+				<p className="text-muted-foreground text-sm">
+					Se completan con los datos leídos del comprobante. Corrija lo que sea
+					necesario.
+				</p>
+			</CardHeader>
+			<CardContent className="space-y-4">
+				<div
+					className={cn(
+						"grid gap-4",
+						embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+					)}
+				>
+					<div className="space-y-1.5">
+						<Label>Monto boleta *</Label>
+						<CurrencyInput onChange={setMontoBoleta} value={montoBoleta} />
+					</div>
+
+					<div className="space-y-1.5">
+						<Label>Otros (opcional)</Label>
+						<CurrencyInput onChange={setOtros} value={otros} />
+					</div>
+
+					<div className="space-y-1.5">
+						<Label>Banco *</Label>
+						<Combobox
+							onChange={setBancoId}
+							options={bancoOptions}
+							placeholder="Seleccionar banco"
+							popOverWidth="full"
+							value={bancoId}
+							width="full"
+						/>
+					</div>
+
+					<div className="space-y-1.5">
+						<Label>Origen de pago *</Label>
+						<Select
+							onValueChange={(v) => setOrigenPago(v as typeof origenPago)}
+							value={origenPago}
+						>
+							<SelectTrigger className="w-full">
+								<SelectValue placeholder="Seleccionar origen" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="transferencia">Transferencia</SelectItem>
+								<SelectItem value="cheque">Cheque</SelectItem>
+								<SelectItem value="boleta">Boleta</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					<div className="space-y-1.5">
+						<Label>No. Autorización (opcional)</Label>
+						<Input
+							maxLength={100}
+							onChange={(e) => setNumeroAutorizacion(e.target.value)}
+							placeholder="Ej.: 123456789"
+							value={numeroAutorizacion}
+						/>
+					</div>
+
+					<div className="space-y-1.5">
+						<Label>Fecha de boleta *</Label>
+						<Popover>
+							<PopoverTrigger asChild>
+								<Button
+									className={cn(
+										"w-full justify-start text-left font-normal",
+										!fechaBoleta && "text-muted-foreground",
+									)}
+									type="button"
+									variant="outline"
+								>
+									<CalendarIcon className="mr-2 h-4 w-4" />
+									{fechaBoleta
+										? format(fechaBoleta, "dd MMM, yyyy", {
+												locale: es,
+											})
+										: "Seleccionar fecha"}
+								</Button>
+							</PopoverTrigger>
+							<PopoverContent align="start" className="w-auto p-0">
+								<Calendar
+									disabled={(dia) => aFechaISO(dia) > hoyGT}
+									mode="single"
+									onSelect={setFechaBoleta}
+									selected={fechaBoleta}
+								/>
+							</PopoverContent>
+						</Popover>
+					</div>
+				</div>
+
+				<div className="space-y-1.5">
+					<Label>Observaciones (opcional)</Label>
+					<Textarea
+						maxLength={2000}
+						onChange={(e) => setObservaciones(e.target.value)}
+						placeholder="Notas adicionales..."
+						rows={3}
+						value={observaciones}
+					/>
+				</div>
+			</CardContent>
+		</Card>
+	);
+	const tarjetaResumen = credito ? (
+		<Card>
+			<CardHeader>
+				<CardTitle className="text-base">Resumen del crédito</CardTitle>
+			</CardHeader>
+			<CardContent>
+				<ResumenCreditoPago
+					abonosTotal={abonosYaHechos}
+					credito={credito}
+					cuotaActualNumero={cuotaActualNumero}
+					cuotaActualPagada={!!credito.cuotaActualPagada}
+					cuotaActualStatus={credito.cuotaActualStatus}
+					cuotaAPagar={cuotaSeleccionada}
+					promesaActiva={promesaActivaQuery.data}
+				/>
+			</CardContent>
+		</Card>
+	) : null;
+	const tarjetaConvenio = convenioActivo ? (
+		<Card>
+			<CardHeader>
+				<CardTitle className="flex items-center gap-2 text-base">
+					Convenio de Pago
+					<span className="rounded-full bg-secondary px-2 py-0.5 font-medium text-secondary-foreground text-xs">
+						Activo
+					</span>
+				</CardTitle>
+			</CardHeader>
+			<CardContent>
+				<ConvenioActivoCard convenio={convenioActivo} />
+			</CardContent>
+		</Card>
+	) : null;
+	const dialogoConfirmacion = (
+		<Dialog open={confirmacionAbierta} onOpenChange={setConfirmacionAbierta}>
+			<DialogContent className="max-w-lg">
+				<DialogHeader>
+					<DialogTitle className="flex items-center gap-2">
+						<CheckCircle2 className="h-6 w-6 text-green-600" />
+						Confirmar registro de pago
+					</DialogTitle>
+				</DialogHeader>
+
+				<DistribucionPagoDetalle
+					distribucion={distribucion}
+					montoRestante={montoRestante}
+					montoBoleta={montoBoletaNum}
+					saldoAFavor={saldoAFavor}
+					otros={otrosNum}
+					mora={mora}
+					convenioAplicado={convenioAplicado}
+				/>
+
+				<DialogFooter>
+					<Button
+						variant="outline"
+						onClick={() => setConfirmacionAbierta(false)}
+					>
+						Volver
+					</Button>
+					<Button
+						onClick={() => registrarPagoMutation.mutate()}
+						disabled={registrarPagoMutation.isPending}
+					>
+						{registrarPagoMutation.isPending ? (
+							<Loader2 className="h-4 w-4 animate-spin" />
+						) : (
+							"Confirmar pago"
+						)}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+	const cargandoCredito = casoDetails.isLoading || creditoQuery.isLoading;
+	// Mismo número que muestra el contexto del Workspace (saldo real adeudado
+	// o, si no viene, vencidas × cuota + mora).
+	const deudaVencidaCaso = casoDetails.data
+		? deudaVencidaDelCaso(casoDetails.data as CasoDetalle)
+		: 0;
+
+	if (embebido) {
+		// Workspace (panel de 520–640px): resumen compacto arriba, cuerpo con
+		// scroll y pie fijo. Container queries: el panel es angosto aunque la
+		// pantalla sea ancha.
+		const listo = !cargandoCredito && !!credito && !statusBloqueado;
+		return (
+			<div className={cn("@container flex min-h-0 flex-1 flex-col", className)}>
+				{listo ? (
+					<div className="mb-3 grid shrink-0 grid-cols-2 gap-2">
+						<div className="rounded-lg border border-line-subtle px-3 py-2">
+							<p className="text-muted-foreground text-xs">Deuda vencida</p>
+							<p className="font-semibold text-sm tabular-nums">
+								{formatCurrency(deudaVencidaCaso)}
+							</p>
+						</div>
+						<div className="rounded-lg border border-line-subtle px-3 py-2">
+							<p className="text-muted-foreground text-xs">Cuota normal</p>
+							<p className="font-semibold text-sm tabular-nums">
+								{formatCurrency(cuotaBase)}
+							</p>
+						</div>
+					</div>
+				) : null}
+				<div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+					{cargandoCredito ? (
+						tarjetaCargando
+					) : credito && statusBloqueado ? (
+						tarjetaBloqueado
+					) : credito ? (
+						<>
+							{pasoBoleta}
+							{pasoDatos}
+							{tarjetaResumen}
+							{tarjetaConvenio}
+						</>
+					) : (
+						tarjetaError
+					)}
+				</div>
+				<div className="mt-auto flex gap-2 border-line-subtle border-t pt-3">
+					<Button onClick={volverAlCredito} type="button" variant="outline">
+						Cancelar
+					</Button>
+					<Button
+						className="flex-1"
+						disabled={!listo}
+						onClick={handleAbrirConfirmacion}
+						type="button"
+					>
+						Registrar pago
+					</Button>
+				</div>
+				{dialogoConfirmacion}
+			</div>
+		);
+	}
+
 	return (
 		<div className={cn("space-y-6", className)}>
-			{casoDetails.isLoading || creditoQuery.isLoading ? (
-				<Card>
-					<CardContent className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
-						<Loader2 className="h-4 w-4 animate-spin" />
-						Cargando crédito...
-					</CardContent>
-				</Card>
+			{cargandoCredito ? (
+				tarjetaCargando
 			) : credito && statusBloqueado ? (
-				<Card>
-					<CardContent className="py-12 text-center text-muted-foreground text-sm">
-						{credito.credito.statusCredit === "PENDIENTE_CANCELACION"
-							? "Este crédito está pendiente de cancelación y no admite nuevos pagos."
-							: "Este crédito está cancelado y no admite nuevos pagos."}
-					</CardContent>
-				</Card>
+				tarjetaBloqueado
 			) : credito ? (
 				// Dos columnas: a la izquierda lo que el asesor HACE (subir la
 				// boleta y revisar los datos), a la derecha el crédito como
@@ -622,338 +1142,9 @@ export function RegistrarPagoForm({
 				// debajo del pliegue, después de un resumen de media pantalla.
 				<div className="grid gap-6 lg:grid-cols-5 lg:items-start">
 					<div className="space-y-6 lg:col-span-3">
-						<Card>
-							<CardHeader className="space-y-1">
-								<CardTitle className="flex items-center gap-2 text-base">
-									<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
-										1
-									</span>
-									Boleta de pago
-								</CardTitle>
-								<p className="text-muted-foreground text-sm">
-									Suba el comprobante y el sistema leerá los datos
-									automáticamente con el mismo lector del bot de WhatsApp.
-									Revíselos antes de registrar.
-								</p>
-							</CardHeader>
-							<CardContent className="space-y-4">
-								<input
-									accept="image/*,application/pdf"
-									className="hidden"
-									onChange={(e) =>
-										seleccionarArchivo(e.target.files?.[0] ?? null)
-									}
-									ref={inputArchivoRef}
-									type="file"
-								/>
-								{archivo ? (
-									<div className="flex items-center gap-3 rounded-lg border p-3">
-										{previewUrl ? (
-											<img
-												alt="Boleta"
-												className="h-16 w-16 shrink-0 rounded-md border object-cover"
-												src={previewUrl}
-											/>
-										) : (
-											<span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border bg-muted/40">
-												<FileText className="h-6 w-6 text-muted-foreground" />
-											</span>
-										)}
-										<div className="min-w-0 flex-1">
-											<p className="truncate font-medium text-sm">
-												{archivo.name}
-											</p>
-											<p className="text-muted-foreground text-xs">
-												{(archivo.size / 1024).toFixed(0)} KB
-											</p>
-										</div>
-										<Button
-											onClick={() => inputArchivoRef.current?.click()}
-											size="sm"
-											type="button"
-											variant="outline"
-										>
-											Cambiar
-										</Button>
-									</div>
-								) : (
-									<button
-										className={cn(
-											"flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/30",
-											arrastrando && "border-primary bg-primary/5",
-										)}
-										onClick={() => inputArchivoRef.current?.click()}
-										onDragLeave={() => setArrastrando(false)}
-										onDragOver={(e) => {
-											e.preventDefault();
-											setArrastrando(true);
-										}}
-										onDrop={(e) => {
-											e.preventDefault();
-											setArrastrando(false);
-											seleccionarArchivo(e.dataTransfer.files?.[0] ?? null);
-										}}
-										type="button"
-									>
-										<span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
-											<Upload className="h-5 w-5 text-muted-foreground" />
-										</span>
-										<span className="font-medium text-sm">
-											Arrastre la boleta aquí o haga clic para seleccionarla
-										</span>
-										<span className="text-muted-foreground text-xs">
-											JPG, PNG o PDF · hasta 10 MB
-										</span>
-									</button>
-								)}
+						{pasoBoleta}
 
-								{leerBoletaMutation.isPending && (
-									<div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/30">
-										<Loader2 className="h-4 w-4 animate-spin text-violet-600" />
-										Leyendo la boleta…
-									</div>
-								)}
-
-								{!leerBoletaMutation.isPending && errorLectura && (
-									<div className="flex items-start justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-										<span className="flex items-start gap-2">
-											<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-											{errorLectura}
-										</span>
-										<Button
-											className="shrink-0"
-											onClick={() => {
-												if (!archivo) return;
-												leerBoletaMutation.mutate({
-													file: archivo,
-													seq: ++lecturaSeq.current,
-												});
-											}}
-											size="sm"
-											type="button"
-											variant="outline"
-										>
-											Reintentar
-										</Button>
-									</div>
-								)}
-
-								{!leerBoletaMutation.isPending &&
-									lectura &&
-									!lectura.esBoletaDePago && (
-										<div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
-											<ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
-											<span>
-												El archivo no parece un comprobante bancario. Verifique
-												que sea la boleta correcta; también puede registrar el
-												pago ingresando los datos manualmente.
-											</span>
-										</div>
-									)}
-
-								{!leerBoletaMutation.isPending && lectura?.esBoletaDePago && (
-									<div className="space-y-3 rounded-lg border border-green-300 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
-										<p className="flex items-center gap-2 font-medium text-green-800 text-sm dark:text-green-300">
-											<CheckCircle2 className="h-4 w-4" />
-											Datos leídos de la boleta
-										</p>
-										<div className="grid gap-2 sm:grid-cols-2">
-											{[
-												{
-													label: "Monto",
-													valor:
-														lectura.monto !== null
-															? `Q${lectura.monto.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-															: null,
-												},
-												{ label: "Banco", valor: lectura.bancoNombre },
-												{
-													label: "Fecha",
-													valor: lectura.fechaCorregida
-														? null
-														: lectura.fechaBoleta,
-												},
-												{
-													label: "No. autorización",
-													valor: lectura.numeroAutorizacion,
-												},
-											].map((dato) => (
-												<div
-													className="rounded-md bg-background/70 px-3 py-2"
-													key={dato.label}
-												>
-													<p className="text-muted-foreground text-xs">
-														{dato.label}
-													</p>
-													<p
-														className={cn(
-															"truncate font-medium text-sm",
-															!dato.valor && "text-muted-foreground",
-														)}
-													>
-														{dato.valor ?? "No se leyó"}
-													</p>
-												</div>
-											))}
-										</div>
-										{(lectura.bancoId === null ||
-											lectura.fechaCorregida ||
-											lectura.monto === null ||
-											lectura.camposNoLeidos.length > 0) && (
-											<ul className="space-y-1 text-amber-800 text-xs dark:text-amber-300">
-												{lectura.monto === null && (
-													<li>• No se leyó el monto: ingréselo manualmente.</li>
-												)}
-												{lectura.bancoId === null && (
-													<li>
-														• No se reconoció el banco
-														{lectura.bancoLeido
-															? ` ("${lectura.bancoLeido}")`
-															: ""}
-														: selecciónelo de la lista.
-													</li>
-												)}
-												{lectura.fechaCorregida && (
-													<li>
-														• No se leyó la fecha: se usó la de hoy. Corríjala
-														si la boleta es de otro día.
-													</li>
-												)}
-												{lectura.camposNoLeidos
-													.filter(
-														(campo) =>
-															campo !== "banco" &&
-															campo !== "monto" &&
-															campo !== "fechaBoleta",
-													)
-													.map((campo) => (
-														<li key={campo}>
-															• Sin {ETIQUETA_CAMPO[campo] ?? campo} en la
-															boleta.
-														</li>
-													))}
-											</ul>
-										)}
-									</div>
-								)}
-							</CardContent>
-						</Card>
-
-						<Card>
-							<CardHeader className="space-y-1">
-								<CardTitle className="flex items-center gap-2 text-base">
-									<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
-										2
-									</span>
-									Datos del pago
-								</CardTitle>
-								<p className="text-muted-foreground text-sm">
-									Se completan con los datos leídos del comprobante. Corrija lo
-									que sea necesario.
-								</p>
-							</CardHeader>
-							<CardContent className="space-y-4">
-								<div className="grid gap-4 sm:grid-cols-2">
-									<div className="space-y-1.5">
-										<Label>Monto boleta *</Label>
-										<CurrencyInput
-											onChange={setMontoBoleta}
-											value={montoBoleta}
-										/>
-									</div>
-
-									<div className="space-y-1.5">
-										<Label>Otros (opcional)</Label>
-										<CurrencyInput onChange={setOtros} value={otros} />
-									</div>
-
-									<div className="space-y-1.5">
-										<Label>Banco *</Label>
-										<Combobox
-											onChange={setBancoId}
-											options={bancoOptions}
-											placeholder="Seleccionar banco"
-											popOverWidth="full"
-											value={bancoId}
-											width="full"
-										/>
-									</div>
-
-									<div className="space-y-1.5">
-										<Label>Origen de pago *</Label>
-										<Select
-											onValueChange={(v) =>
-												setOrigenPago(v as typeof origenPago)
-											}
-											value={origenPago}
-										>
-											<SelectTrigger className="w-full">
-												<SelectValue placeholder="Seleccionar origen" />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="transferencia">
-													Transferencia
-												</SelectItem>
-												<SelectItem value="cheque">Cheque</SelectItem>
-												<SelectItem value="boleta">Boleta</SelectItem>
-											</SelectContent>
-										</Select>
-									</div>
-
-									<div className="space-y-1.5">
-										<Label>No. Autorización (opcional)</Label>
-										<Input
-											maxLength={100}
-											onChange={(e) => setNumeroAutorizacion(e.target.value)}
-											placeholder="Ej.: 123456789"
-											value={numeroAutorizacion}
-										/>
-									</div>
-
-									<div className="space-y-1.5">
-										<Label>Fecha de boleta *</Label>
-										<Popover>
-											<PopoverTrigger asChild>
-												<Button
-													className={cn(
-														"w-full justify-start text-left font-normal",
-														!fechaBoleta && "text-muted-foreground",
-													)}
-													type="button"
-													variant="outline"
-												>
-													<CalendarIcon className="mr-2 h-4 w-4" />
-													{fechaBoleta
-														? format(fechaBoleta, "dd MMM, yyyy", {
-																locale: es,
-															})
-														: "Seleccionar fecha"}
-												</Button>
-											</PopoverTrigger>
-											<PopoverContent align="start" className="w-auto p-0">
-												<Calendar
-													disabled={(dia) => aFechaISO(dia) > hoyGT}
-													mode="single"
-													onSelect={setFechaBoleta}
-													selected={fechaBoleta}
-												/>
-											</PopoverContent>
-										</Popover>
-									</div>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Observaciones (opcional)</Label>
-									<Textarea
-										maxLength={2000}
-										onChange={(e) => setObservaciones(e.target.value)}
-										placeholder="Notas adicionales..."
-										rows={3}
-										value={observaciones}
-									/>
-								</div>
-							</CardContent>
-						</Card>
+						{pasoDatos}
 
 						<div className="flex justify-end gap-2">
 							<Button onClick={volverAlCredito} variant="outline">
@@ -964,87 +1155,16 @@ export function RegistrarPagoForm({
 					</div>
 
 					<div className="space-y-6 lg:sticky lg:top-6 lg:col-span-2">
-						<Card>
-							<CardHeader>
-								<CardTitle className="text-base">Resumen del crédito</CardTitle>
-							</CardHeader>
-							<CardContent>
-								<ResumenCreditoPago
-									abonosTotal={abonosYaHechos}
-									credito={credito}
-									cuotaActualNumero={cuotaActualNumero}
-									cuotaActualPagada={!!credito.cuotaActualPagada}
-									cuotaActualStatus={credito.cuotaActualStatus}
-									cuotaAPagar={cuotaSeleccionada}
-									promesaActiva={promesaActivaQuery.data}
-								/>
-							</CardContent>
-						</Card>
+						{tarjetaResumen}
 
-						{convenioActivo && (
-							<Card>
-								<CardHeader>
-									<CardTitle className="flex items-center gap-2 text-base">
-										Convenio de Pago
-										<span className="rounded-full bg-secondary px-2 py-0.5 font-medium text-secondary-foreground text-xs">
-											Activo
-										</span>
-									</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<ConvenioActivoCard convenio={convenioActivo} />
-								</CardContent>
-							</Card>
-						)}
+						{tarjetaConvenio}
 					</div>
 				</div>
 			) : (
-				<Card>
-					<CardContent className="py-12 text-center text-muted-foreground text-sm">
-						No se pudo cargar la información del crédito.
-					</CardContent>
-				</Card>
+				tarjetaError
 			)}
 
-			<Dialog open={confirmacionAbierta} onOpenChange={setConfirmacionAbierta}>
-				<DialogContent className="max-w-lg">
-					<DialogHeader>
-						<DialogTitle className="flex items-center gap-2">
-							<CheckCircle2 className="h-6 w-6 text-green-600" />
-							Confirmar registro de pago
-						</DialogTitle>
-					</DialogHeader>
-
-					<DistribucionPagoDetalle
-						distribucion={distribucion}
-						montoRestante={montoRestante}
-						montoBoleta={montoBoletaNum}
-						saldoAFavor={saldoAFavor}
-						otros={otrosNum}
-						mora={mora}
-						convenioAplicado={convenioAplicado}
-					/>
-
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setConfirmacionAbierta(false)}
-						>
-							Volver
-						</Button>
-						<Button
-							onClick={() => registrarPagoMutation.mutate()}
-							disabled={registrarPagoMutation.isPending}
-						>
-							{registrarPagoMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" />
-							) : (
-								"Confirmar pago"
-							)}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+			{dialogoConfirmacion}
 		</div>
 	);
 }

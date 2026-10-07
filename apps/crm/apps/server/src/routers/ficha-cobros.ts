@@ -109,6 +109,19 @@ export interface ResumenIA {
 	generadoEn: string;
 }
 
+/** Tarea W5 · Una alerta del caso que el asesor ya marcó como leída. */
+export interface AlertaLeidaCaso {
+	id: string;
+	titulo: string;
+	descripcion: string | null;
+	cobrosTipo: string | null;
+	/** Fecha en que se generó la última repetición. */
+	createdAt: string;
+	leidaEn: string;
+	/** "Ana Gómez" o "Automático (más de 30 días)". */
+	leidaPor: string;
+}
+
 export const fichaCobrosRouter = {
 	getSeguimientoFicha: cobrosProcedure
 		.input(
@@ -238,5 +251,48 @@ export const fichaCobrosRouter = {
 				documentos,
 				resumenIA,
 			};
+		}),
+
+	/**
+	 * Tarea W5 · Alertas del caso marcadas como leídas. `null` = todavía no
+	 * existe (el front muestra «Ver alertas leídas · Pronto»).
+	 */
+	getAlertasLeidasCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			// TODO(José) · tarea W5: alertas leídas del caso (quién y cuándo),
+			// incluidas las que el job marca solas a los 30 días.
+			return null as AlertaLeidaCaso[] | null;
+		}),
+
+	/**
+	 * Tarea W5 · Marca como leída una alerta del caso para el usuario. Cierra el
+	 * GRUPO de ese tipo (getAlertasCaso agrupa por tipo las filas que los jobs
+	 * repiten cada día), no solo la fila; si el job la vuelve a generar,
+	 * reaparece. Hoy el front lo muestra deshabilitado («Pronto»).
+	 */
+	marcarAlertaCasoLeida: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				/** El `id` que devolvió getAlertasCaso (la fila más reciente del grupo). */
+				alertaId: z.string(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			// TODO(José) · tarea W5: marcar el grupo como leído para este usuario
+			// y sacarlo de getAlertasCaso. Ver
+			// docs/features/cobros-02/16-workspace-backend.md.
+			return { marcada: false as boolean };
 		}),
 };

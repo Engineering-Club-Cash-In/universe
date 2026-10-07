@@ -129,9 +129,21 @@ export type VisitaRegistrada = {
 	bucket: number | null;
 };
 
+/** Lo que el Workspace muestra en «Gestión registrada» tras programar. */
+export type VisitaProgramadaResumen = {
+	visitaId: string;
+	tipo: TipoVisita;
+	direccion: string;
+	fechaProgramada: Date;
+	responsableId: string;
+	responsableNombre: string | null;
+};
+
 interface VisitaDialogProps {
-	open: boolean;
-	onOpenChange: (abierto: boolean) => void;
+	/** Obligatorio sin `embebido`; con `embebido` se ignora (siempre abierto). */
+	open?: boolean;
+	/** Obligatorio sin `embebido`; con `embebido` no se llama. */
+	onOpenChange?: (abierto: boolean) => void;
 	casoCobroId: string;
 	tipoInicial: TipoVisita;
 	modoInicial?: "registrar" | "programar";
@@ -154,6 +166,12 @@ interface VisitaDialogProps {
 	bucketNumero: number | null;
 	vehicleId: string | null;
 	onRegistrada?: (r: VisitaRegistrada) => void;
+	/** Se llama tras programar con éxito (después de cerrar, sin `embebido`). */
+	onProgramada?: (r: VisitaProgramadaResumen) => void;
+	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
+	embebido?: boolean;
+	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
+	onCancelar?: () => void;
 }
 
 type Foto = {
@@ -175,6 +193,9 @@ const quetzales = (n: number) =>
 const inicioDeHoy = () => new Date(new Date().setHours(0, 0, 0, 0));
 
 export function VisitaDialog(props: VisitaDialogProps) {
+	// Embebido (Workspace) no hay Dialog: el formulario se monta directo y el
+	// Workspace lo remonta con `key` al cambiar de caso.
+	if (props.embebido) return <FormularioVisita {...props} />;
 	// El formulario se remonta en cada apertura: arranca limpio sin tener que
 	// resetear campo por campo.
 	return (
@@ -197,6 +218,9 @@ function FormularioVisita({
 	bucketNumero,
 	vehicleId,
 	onRegistrada,
+	onProgramada,
+	embebido = false,
+	onCancelar,
 }: VisitaDialogProps) {
 	const queryClient = useQueryClient();
 	const { data: session } = authClient.useSession();
@@ -498,15 +522,25 @@ function FormularioVisita({
 			client.programarVisitaCobro(
 				programarVisitaSchema.parse(payloadProgramacion),
 			),
-		onSuccess: () => {
-			const quien = responsables.data?.find((r) => r.id === responsableId);
+		onSuccess: (r) => {
+			const quien = responsables.data?.find((x) => x.id === responsableId);
 			toast.success(
 				quien && quien.id !== session?.user?.id
 					? `Visita programada. Se notificó a ${quien.nombre}.`
 					: "Visita programada. El día de la visita recibirá un aviso.",
 			);
 			queryClient.invalidateQueries({ queryKey: orpc.getVisitasCaso.key() });
-			onOpenChange(false);
+			// Embebido no hay Dialog que cerrar: el Workspace pasa a «Gestión
+			// registrada» con onProgramada.
+			if (!embebido) onOpenChange?.(false);
+			onProgramada?.({
+				visitaId: r.visitaId,
+				tipo,
+				direccion: direccion.trim(),
+				fechaProgramada: fechaProgramada ?? new Date(),
+				responsableId,
+				responsableNombre: quien?.nombre ?? null,
+			});
 		},
 		onError: (e: Error) =>
 			toast.error(e.message || "No se pudo programar la visita"),
@@ -535,7 +569,7 @@ function FormularioVisita({
 								? "Visita registrada. El pago se registra en «Registrar Pago»."
 								: "Visita registrada.",
 			);
-			onOpenChange(false);
+			if (!embebido) onOpenChange?.(false);
 			onRegistrada?.({
 				visitaId: r.visitaId,
 				tipo,
@@ -606,609 +640,678 @@ function FormularioVisita({
 	const direccionSolicitud = direccionDe(tipo);
 	const puedeCompararGps = bucketNumero === 4 && !!vehicleId;
 
-	return (
-		<DialogContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col gap-0 rounded-none p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
-			<DialogHeader className="border-b px-4 pt-4 pb-3 text-left sm:px-6">
-				<DialogTitle className="pr-8">
-					{completando
-						? `Resultado de la ${TIPO_VISITA_LABEL[tipo].toLowerCase()}`
-						: modo === "programar"
-							? "Programar visita"
-							: "Registrar visita"}
-				</DialogTitle>
-				<DialogDescription>
-					{modo === "programar"
-						? "La visita queda agendada con su responsable, quien recibirá un aviso ese día."
-						: "Registre el resultado de la visita, la evidencia y el siguiente paso."}
-				</DialogDescription>
-			</DialogHeader>
+	const titulo = completando
+		? `Resultado de la ${TIPO_VISITA_LABEL[tipo].toLowerCase()}`
+		: modo === "programar"
+			? "Programar visita"
+			: "Registrar visita";
+	const descripcion =
+		modo === "programar"
+			? "La visita queda agendada con su responsable, quien recibirá un aviso ese día."
+			: "Registre el resultado de la visita, la evidencia y el siguiente paso.";
 
-			<div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6">
-				{/* Visita realizada / por programar */}
+	const contenidoBotonPrincipal = (
+		<>
+			{(enviando || subiendoFotos) && (
+				<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+			)}
+			{textoBoton}
+		</>
+	);
+
+	// Cuerpo compartido por el Dialog y el modo embebido. Embebido, las
+	// rejillas responden al ancho del panel (`@container` en la raíz embebida),
+	// no al del viewport; en el Dialog quedan los breakpoints de siempre (sin
+	// `@container` aquí: recortaría el popover del calendario, que no usa
+	// Portal, dentro del cuerpo con scroll).
+	const cuerpo = (
+		<div
+			className={cn(
+				"flex-1 overflow-y-auto",
+				embebido ? "min-h-0 space-y-4 pr-1" : "space-y-5 px-4 py-4 sm:px-6",
+			)}
+		>
+			{embebido && (
+				<p className="text-muted-foreground text-sm">{descripcion}</p>
+			)}
+			{/* Visita realizada / por programar */}
+			{!completando && (
+				<div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+					{(
+						[
+							["registrar", "Visita realizada"],
+							["programar", "Programar visita"],
+						] as const
+					).map(([valor, texto]) => (
+						<button
+							key={valor}
+							type="button"
+							onClick={() => setModo(valor)}
+							className={cn(
+								"h-10 rounded-md font-medium text-sm transition-colors",
+								modo === valor
+									? "bg-background shadow-sm"
+									: "text-muted-foreground",
+							)}
+						>
+							{texto}
+						</button>
+					))}
+				</div>
+			)}
+
+			{/* 1 · Adónde */}
+			<section className="space-y-3">
 				{!completando && (
-					<div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+					<div className="grid grid-cols-2 gap-2">
 						{(
 							[
-								["registrar", "Visita realizada"],
-								["programar", "Programar visita"],
+								["residencia", "Residencia", Home],
+								["trabajo", "Lugar de trabajo", Briefcase],
 							] as const
-						).map(([valor, texto]) => (
+						).map(([valor, texto, Icono]) => (
 							<button
 								key={valor}
 								type="button"
-								onClick={() => setModo(valor)}
+								onClick={() => cambiarTipo(valor)}
 								className={cn(
-									"h-10 rounded-md font-medium text-sm transition-colors",
-									modo === valor
-										? "bg-background shadow-sm"
-										: "text-muted-foreground",
+									"flex h-11 items-center justify-center gap-2 rounded-md border font-medium text-sm transition-colors",
+									tipo === valor
+										? "border-primary bg-primary/5 text-primary"
+										: "hover:bg-muted/50",
 								)}
 							>
+								<Icono className="h-4 w-4" />
 								{texto}
 							</button>
 						))}
 					</div>
 				)}
 
-				{/* 1 · Adónde */}
-				<section className="space-y-3">
-					{!completando && (
-						<div className="grid grid-cols-2 gap-2">
-							{(
-								[
-									["residencia", "Residencia", Home],
-									["trabajo", "Lugar de trabajo", Briefcase],
-								] as const
-							).map(([valor, texto, Icono]) => (
-								<button
-									key={valor}
-									type="button"
-									onClick={() => cambiarTipo(valor)}
-									className={cn(
-										"flex h-11 items-center justify-center gap-2 rounded-md border font-medium text-sm transition-colors",
-										tipo === valor
-											? "border-primary bg-primary/5 text-primary"
-											: "hover:bg-muted/50",
-									)}
-								>
-									<Icono className="h-4 w-4" />
-									{texto}
-								</button>
-							))}
-						</div>
-					)}
-
-					{tipo === "trabajo" && (
-						<div className="space-y-1.5">
-							<Label htmlFor="visita-empresa">Empresa</Label>
-							<Input
-								id="visita-empresa"
-								value={empresa}
-								onChange={(e) => setEmpresa(e.target.value)}
-								placeholder="Nombre de la empresa"
-							/>
-						</div>
-					)}
+				{tipo === "trabajo" && (
 					<div className="space-y-1.5">
-						<Label htmlFor="visita-direccion">
-							Dirección <span className="text-red-600">*</span>
-						</Label>
-						<Textarea
-							id="visita-direccion"
-							value={direccion}
-							onChange={(e) => setDireccion(e.target.value)}
-							rows={2}
-							placeholder={
-								tipo === "trabajo"
-									? "Dirección del lugar de trabajo"
-									: "Dirección de residencia"
-							}
-						/>
-						{!direccionSolicitud ? (
-							<p className="text-muted-foreground text-xs">
-								{tipo === "trabajo"
-									? "La solicitud de crédito no tiene dirección de trabajo. Ingrésela manualmente."
-									: "El CRM no tiene la dirección de residencia. Ingrésela manualmente."}
-							</p>
-						) : (
-							direccion.trim() !== direccionSolicitud.trim() && (
-								<button
-									type="button"
-									className="text-primary text-xs hover:underline"
-									onClick={() => setDireccion(direccionSolicitud)}
-								>
-									Volver a la dirección de la solicitud
-								</button>
-							)
-						)}
-						{tipo === "trabajo" && direcciones.trabajo?.horario && (
-							<p className="text-muted-foreground text-xs">
-								Horario declarado: {direcciones.trabajo.horario}
-							</p>
-						)}
-					</div>
-					<div className="space-y-1.5">
-						<Label htmlFor="visita-referencia">
-							Puntos de referencia{" "}
-							<span className="text-muted-foreground">(opcional)</span>
-						</Label>
+						<Label htmlFor="visita-empresa">Empresa</Label>
 						<Input
-							id="visita-referencia"
-							value={referencia}
-							onChange={(e) => setReferencia(e.target.value)}
-							placeholder="Ej.: casa verde, portón negro, frente a la tienda"
+							id="visita-empresa"
+							value={empresa}
+							onChange={(e) => setEmpresa(e.target.value)}
+							placeholder="Nombre de la empresa"
 						/>
 					</div>
-					{puedeCompararGps && vehicleId && (
-						<Collapsible>
-							<CollapsibleTrigger className="flex items-center gap-1 text-primary text-sm hover:underline">
-								<ChevronDown className="h-4 w-4" />
-								Comparar con las ubicaciones del GPS
-							</CollapsibleTrigger>
-							<CollapsibleContent className="pt-2">
-								<GpsUbicacionesClaveCard
-									casoCobroId={casoCobroId}
-									vehicleId={vehicleId}
-								/>
-							</CollapsibleContent>
-						</Collapsible>
-					)}
-				</section>
-
-				{/* 2 · Quién y cuándo */}
-				<section className="grid gap-3 sm:grid-cols-2">
-					<div className="space-y-1.5">
-						<Label>
-							Responsable de la visita <span className="text-red-600">*</span>
-						</Label>
-						<Select
-							value={responsableId}
-							onValueChange={setResponsableId}
-							disabled={responsables.isLoading}
-						>
-							<SelectTrigger className="h-10 w-full">
-								<SelectValue
-									placeholder={
-										responsables.isLoading
-											? "Cargando…"
-											: "Seleccionar responsable"
-									}
-								/>
-							</SelectTrigger>
-							<SelectContent>
-								{(responsables.data ?? []).map((r) => (
-									<SelectItem key={r.id} value={r.id}>
-										{r.nombre}
-										{r.motivo && (
-											<span className="text-muted-foreground text-xs">
-												{" "}
-												· {r.motivo}
-											</span>
-										)}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						{responsables.isError && (
-							<p className="text-destructive text-xs">
-								{responsables.error?.message ??
-									"No se pudo cargar la lista de responsables."}
-							</p>
-						)}
-					</div>
-					{modo === "programar" ? (
-						<div className="space-y-1.5">
-							<Label htmlFor="visita-fecha-programada">
-								Fecha y hora <span className="text-red-600">*</span>
-							</Label>
-							<FechaHoraPicker
-								id="visita-fecha-programada"
-								value={fechaProgramada}
-								onChange={setFechaProgramada}
-								deshabilitar={(dia) => dia < inicioDeHoy()}
-							/>
-						</div>
+				)}
+				<div className="space-y-1.5">
+					<Label htmlFor="visita-direccion">
+						Dirección <span className="text-red-600">*</span>
+					</Label>
+					<Textarea
+						id="visita-direccion"
+						value={direccion}
+						onChange={(e) => setDireccion(e.target.value)}
+						rows={2}
+						placeholder={
+							tipo === "trabajo"
+								? "Dirección del lugar de trabajo"
+								: "Dirección de residencia"
+						}
+					/>
+					{!direccionSolicitud ? (
+						<p className="text-muted-foreground text-xs">
+							{tipo === "trabajo"
+								? "La solicitud de crédito no tiene dirección de trabajo. Ingrésela manualmente."
+								: "El CRM no tiene la dirección de residencia. Ingrésela manualmente."}
+						</p>
 					) : (
-						<div className="space-y-1.5">
-							<Label htmlFor="visita-fecha">
-								Fecha y hora de la visita{" "}
-								<span className="text-red-600">*</span>
-							</Label>
-							<FechaHoraPicker
-								id="visita-fecha"
-								value={fechaVisita}
-								onChange={setFechaVisita}
-								deshabilitar={(dia) => dia > new Date()}
-							/>
-						</div>
+						direccion.trim() !== direccionSolicitud.trim() && (
+							<button
+								type="button"
+								className="text-primary text-xs hover:underline"
+								onClick={() => setDireccion(direccionSolicitud)}
+							>
+								Volver a la dirección de la solicitud
+							</button>
+						)
 					)}
-				</section>
+					{tipo === "trabajo" && direcciones.trabajo?.horario && (
+						<p className="text-muted-foreground text-xs">
+							Horario declarado: {direcciones.trabajo.horario}
+						</p>
+					)}
+				</div>
+				<div className="space-y-1.5">
+					<Label htmlFor="visita-referencia">
+						Puntos de referencia{" "}
+						<span className="text-muted-foreground">(opcional)</span>
+					</Label>
+					<Input
+						id="visita-referencia"
+						value={referencia}
+						onChange={(e) => setReferencia(e.target.value)}
+						placeholder="Ej.: casa verde, portón negro, frente a la tienda"
+					/>
+				</div>
+				{puedeCompararGps && vehicleId && (
+					<Collapsible>
+						<CollapsibleTrigger className="flex items-center gap-1 text-primary text-sm hover:underline">
+							<ChevronDown className="h-4 w-4" />
+							Comparar con las ubicaciones del GPS
+						</CollapsibleTrigger>
+						<CollapsibleContent className="pt-2">
+							<GpsUbicacionesClaveCard
+								casoCobroId={casoCobroId}
+								vehicleId={vehicleId}
+							/>
+						</CollapsibleContent>
+					</Collapsible>
+				)}
+			</section>
 
+			{/* 2 · Quién y cuándo */}
+			<section
+				className={cn(
+					"grid gap-3",
+					embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+				)}
+			>
+				<div className="space-y-1.5">
+					<Label>
+						Responsable de la visita <span className="text-red-600">*</span>
+					</Label>
+					<Select
+						value={responsableId}
+						onValueChange={setResponsableId}
+						disabled={responsables.isLoading}
+					>
+						<SelectTrigger className="h-10 w-full">
+							<SelectValue
+								placeholder={
+									responsables.isLoading
+										? "Cargando…"
+										: "Seleccionar responsable"
+								}
+							/>
+						</SelectTrigger>
+						<SelectContent>
+							{(responsables.data ?? []).map((r) => (
+								<SelectItem key={r.id} value={r.id}>
+									{r.nombre}
+									{r.motivo && (
+										<span className="text-muted-foreground text-xs">
+											{" "}
+											· {r.motivo}
+										</span>
+									)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					{responsables.isError && (
+						<p className="text-destructive text-xs">
+							{responsables.error?.message ??
+								"No se pudo cargar la lista de responsables."}
+						</p>
+					)}
+				</div>
 				{modo === "programar" ? (
-					<section className="space-y-1.5">
-						<Label htmlFor="visita-notas">
-							Indicaciones para la visita{" "}
-							<span className="text-muted-foreground">(opcional)</span>
+					<div className="space-y-1.5">
+						<Label htmlFor="visita-fecha-programada">
+							Fecha y hora <span className="text-red-600">*</span>
 						</Label>
-						<Textarea
-							id="visita-notas"
-							value={notas}
-							onChange={(e) => setNotas(e.target.value)}
-							rows={2}
-							placeholder="Ej.: consultar por la entrega del vehículo; el cliente llega a las 6 p. m."
+						<FechaHoraPicker
+							id="visita-fecha-programada"
+							value={fechaProgramada}
+							onChange={setFechaProgramada}
+							deshabilitar={(dia) => dia < inicioDeHoy()}
 						/>
-					</section>
+					</div>
 				) : (
-					<>
-						{/* 3 · Resultado */}
-						<section className="space-y-2">
-							<Label>
-								Resultado de la visita <span className="text-red-600">*</span>
-							</Label>
-							<div className="grid gap-2 sm:grid-cols-2">
-								{RESULTADOS_VISITA.map((r) => {
-									const bloqueo = r === "convenio" ? convenioBloqueo : null;
-									return (
-										<button
-											key={r}
-											type="button"
-											disabled={!!bloqueo}
-											onClick={() => cambiarResultado(r)}
-											className={cn(
-												"rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-												resultado === r
-													? "border-primary bg-primary/5"
-													: "hover:bg-muted/50",
-											)}
-										>
-											<p className="font-medium text-sm">
-												{RESULTADO_VISITA_LABEL[r]}
-											</p>
-											<p className="text-muted-foreground text-xs">
-												{bloqueo ?? RESULTADO_VISITA_DESCRIPCION[r]}
-											</p>
-										</button>
-									);
-								})}
-							</div>
+					<div className="space-y-1.5">
+						<Label htmlFor="visita-fecha">
+							Fecha y hora de la visita <span className="text-red-600">*</span>
+						</Label>
+						<FechaHoraPicker
+							id="visita-fecha"
+							value={fechaVisita}
+							onChange={setFechaVisita}
+							deshabilitar={(dia) => dia > new Date()}
+						/>
+					</div>
+				)}
+			</section>
 
-							{resultado === "sin_contacto" && (
-								<div className="space-y-1.5 pt-1">
-									<Label>
-										Motivo <span className="text-red-600">*</span>
-									</Label>
-									<Select
-										value={motivoSinContacto}
-										onValueChange={setMotivoSinContacto}
+			{modo === "programar" ? (
+				<section className="space-y-1.5">
+					<Label htmlFor="visita-notas">
+						Indicaciones para la visita{" "}
+						<span className="text-muted-foreground">(opcional)</span>
+					</Label>
+					<Textarea
+						id="visita-notas"
+						value={notas}
+						onChange={(e) => setNotas(e.target.value)}
+						rows={2}
+						placeholder="Ej.: consultar por la entrega del vehículo; el cliente llega a las 6 p. m."
+					/>
+				</section>
+			) : (
+				<>
+					{/* 3 · Resultado */}
+					<section className="space-y-2">
+						<Label>
+							Resultado de la visita <span className="text-red-600">*</span>
+						</Label>
+						<div
+							className={cn(
+								"grid gap-2",
+								embebido ? "@md:grid-cols-2" : "sm:grid-cols-2",
+							)}
+						>
+							{RESULTADOS_VISITA.map((r) => {
+								const bloqueo = r === "convenio" ? convenioBloqueo : null;
+								return (
+									<button
+										key={r}
+										type="button"
+										disabled={!!bloqueo}
+										onClick={() => cambiarResultado(r)}
+										className={cn(
+											"rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+											resultado === r
+												? "border-primary bg-primary/5"
+												: "hover:bg-muted/50",
+										)}
 									>
-										<SelectTrigger className="h-10 w-full">
-											<SelectValue placeholder="Seleccionar motivo" />
-										</SelectTrigger>
-										<SelectContent>
-											{Object.entries(MOTIVOS_SIN_CONTACTO).map(
-												([clave, label]) => (
-													<SelectItem key={clave} value={clave}>
-														{label}
-													</SelectItem>
-												),
-											)}
-										</SelectContent>
-									</Select>
-								</div>
-							)}
+										<p className="font-medium text-sm">
+											{RESULTADO_VISITA_LABEL[r]}
+										</p>
+										<p className="text-muted-foreground text-xs">
+											{bloqueo ?? RESULTADO_VISITA_DESCRIPCION[r]}
+										</p>
+									</button>
+								);
+							})}
+						</div>
 
-							{resultado === "pago" && (
-								<div className="space-y-2 rounded-md border bg-muted/30 p-3">
-									{hayDeuda ? (
-										<>
-											<div className="flex items-center justify-between gap-2 text-sm">
-												<span className="font-medium">Monto pagado</span>
-												<span className="font-semibold tabular-nums">
-													{quetzales(deudaVencida)}
-												</span>
-											</div>
-											<p className="text-muted-foreground text-xs">
-												Total de lo vencido: cuotas vencidas más la mora de hoy.
-											</p>
-											{notaMoraDiaria}
-										</>
-									) : (
-										campoMontoManual
-									)}
-									<p className="text-muted-foreground text-xs">
-										El monto queda anotado en la visita; el pago se registra en
-										«Registrar Pago» (link o boleta).
-									</p>
-								</div>
-							)}
-
-							{resultado === "pago_parcial_promesa" && (
-								<div className="space-y-3 rounded-md border bg-muted/30 p-3">
-									<div className="space-y-1.5">
-										<Label htmlFor="visita-porcentaje">
-											Porcentaje pagado <span className="text-red-600">*</span>
-										</Label>
-										<div className="flex flex-wrap items-center gap-2">
-											<div className="relative w-24">
-												<Input
-													id="visita-porcentaje"
-													inputMode="numeric"
-													className="h-10 pr-7"
-													value={porcentaje}
-													onChange={(e) =>
-														setPorcentaje(
-															e.target.value.replace(/\D/g, "").slice(0, 2),
-														)
-													}
-													placeholder="50"
-												/>
-												<span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 text-muted-foreground text-sm">
-													%
-												</span>
-											</div>
-											{[25, 50, 75].map((n) => (
-												<Button
-													key={n}
-													type="button"
-													size="sm"
-													variant={porcentajeNum === n ? "default" : "outline"}
-													className="h-10 px-3"
-													onClick={() => setPorcentaje(String(n))}
-												>
-													{n}%
-												</Button>
-											))}
-										</div>
-									</div>
-									{hayDeuda && notaMoraDiaria}
-									{hayDeuda ? (
-										<dl className="space-y-1 text-sm">
-											<div className="flex justify-between gap-2">
-												<dt className="text-muted-foreground">
-													Total vencido (cuotas + mora)
-												</dt>
-												<dd className="tabular-nums">
-													{quetzales(deudaVencida)}
-												</dd>
-											</div>
-											<div className="flex justify-between gap-2">
-												<dt className="font-medium">Monto pagado</dt>
-												<dd className="font-semibold tabular-nums">
-													{montoPagado !== undefined
-														? quetzales(montoPagado)
-														: "—"}
-												</dd>
-											</div>
-											<div className="flex justify-between gap-2">
-												<dt className="font-medium">Saldo para la promesa</dt>
-												<dd className="font-semibold tabular-nums">
-													{saldoParaPromesa !== null
-														? quetzales(saldoParaPromesa)
-														: "—"}
-												</dd>
-											</div>
-										</dl>
-									) : (
-										campoMontoManual
-									)}
-									<p className="text-muted-foreground text-xs">
-										Al guardar se abre la promesa de pago por el saldo
-										pendiente. El pago se registra en «Registrar Pago» (link o
-										boleta).
-									</p>
-								</div>
-							)}
-						</section>
-
-						{/* 4 · Evidencia */}
-						<section className="space-y-2">
-							<Label>
-								Evidencia fotográfica{" "}
-								<span className="text-muted-foreground">
-									(opcional, hasta {MAX_EVIDENCIAS_VISITA} fotos)
-								</span>
-							</Label>
-							<p className="text-muted-foreground text-xs">
-								Fachada, número de casa o lugar visitado. No se deben tomar
-								fotos del cliente ni de otras personas.
-							</p>
-							<div className="grid grid-cols-2 gap-2">
-								<Button
-									type="button"
-									variant="outline"
-									className="h-11"
-									disabled={fotos.length >= MAX_EVIDENCIAS_VISITA}
-									onClick={() => inputCamara.current?.click()}
+						{resultado === "sin_contacto" && (
+							<div className="space-y-1.5 pt-1">
+								<Label>
+									Motivo <span className="text-red-600">*</span>
+								</Label>
+								<Select
+									value={motivoSinContacto}
+									onValueChange={setMotivoSinContacto}
 								>
-									<Camera className="mr-2 h-4 w-4" />
-									Tomar foto
-								</Button>
-								<Button
-									type="button"
-									variant="outline"
-									className="h-11"
-									disabled={fotos.length >= MAX_EVIDENCIAS_VISITA}
-									onClick={() => inputGaleria.current?.click()}
-								>
-									<ImagePlus className="mr-2 h-4 w-4" />
-									Elegir de la galería
-								</Button>
+									<SelectTrigger className="h-10 w-full">
+										<SelectValue placeholder="Seleccionar motivo" />
+									</SelectTrigger>
+									<SelectContent>
+										{Object.entries(MOTIVOS_SIN_CONTACTO).map(
+											([clave, label]) => (
+												<SelectItem key={clave} value={clave}>
+													{label}
+												</SelectItem>
+											),
+										)}
+									</SelectContent>
+								</Select>
 							</div>
-							{/* `capture` abre la cámara trasera directo en el celular; en la
-							    compu cae al selector de archivos. */}
-							<input
-								ref={inputCamara}
-								type="file"
-								accept="image/*"
-								capture="environment"
-								className="hidden"
-								onChange={(e) => {
-									agregarFotos(e.target.files);
-									e.target.value = "";
-								}}
-							/>
-							<input
-								ref={inputGaleria}
-								type="file"
-								accept="image/jpeg,image/png,image/webp"
-								multiple
-								className="hidden"
-								onChange={(e) => {
-									agregarFotos(e.target.files);
-									e.target.value = "";
-								}}
-							/>
-							{fotos.length > 0 && (
-								<div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-									{fotos.map((f) => (
-										<div
-											key={f.id}
-											className="relative aspect-square overflow-hidden rounded-md border bg-muted"
-										>
-											<img
-												src={f.preview}
-												alt={f.nombre}
-												className={cn(
-													"h-full w-full object-cover",
-													f.estado !== "lista" && "opacity-50",
-												)}
+						)}
+
+						{resultado === "pago" && (
+							<div className="space-y-2 rounded-md border bg-muted/30 p-3">
+								{hayDeuda ? (
+									<>
+										<div className="flex items-center justify-between gap-2 text-sm">
+											<span className="font-medium">Monto pagado</span>
+											<span className="font-semibold tabular-nums">
+												{quetzales(deudaVencida)}
+											</span>
+										</div>
+										<p className="text-muted-foreground text-xs">
+											Total de lo vencido: cuotas vencidas más la mora de hoy.
+										</p>
+										{notaMoraDiaria}
+									</>
+								) : (
+									campoMontoManual
+								)}
+								<p className="text-muted-foreground text-xs">
+									El monto queda anotado en la visita; el pago se registra en
+									«Registrar Pago» (link o boleta).
+								</p>
+							</div>
+						)}
+
+						{resultado === "pago_parcial_promesa" && (
+							<div className="space-y-3 rounded-md border bg-muted/30 p-3">
+								<div className="space-y-1.5">
+									<Label htmlFor="visita-porcentaje">
+										Porcentaje pagado <span className="text-red-600">*</span>
+									</Label>
+									<div className="flex flex-wrap items-center gap-2">
+										<div className="relative w-24">
+											<Input
+												id="visita-porcentaje"
+												inputMode="numeric"
+												className="h-10 pr-7"
+												value={porcentaje}
+												onChange={(e) =>
+													setPorcentaje(
+														e.target.value.replace(/\D/g, "").slice(0, 2),
+													)
+												}
+												placeholder="50"
 											/>
-											{f.estado === "subiendo" && (
-												<Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin" />
+											<span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground text-sm">
+												%
+											</span>
+										</div>
+										{[25, 50, 75].map((n) => (
+											<Button
+												key={n}
+												type="button"
+												size="sm"
+												variant={porcentajeNum === n ? "default" : "outline"}
+												className="h-10 px-3"
+												onClick={() => setPorcentaje(String(n))}
+											>
+												{n}%
+											</Button>
+										))}
+									</div>
+								</div>
+								{hayDeuda && notaMoraDiaria}
+								{hayDeuda ? (
+									<dl className="space-y-1 text-sm">
+										<div className="flex justify-between gap-2">
+											<dt className="text-muted-foreground">
+												Total vencido (cuotas + mora)
+											</dt>
+											<dd className="tabular-nums">
+												{quetzales(deudaVencida)}
+											</dd>
+										</div>
+										<div className="flex justify-between gap-2">
+											<dt className="font-medium">Monto pagado</dt>
+											<dd className="font-semibold tabular-nums">
+												{montoPagado !== undefined
+													? quetzales(montoPagado)
+													: "—"}
+											</dd>
+										</div>
+										<div className="flex justify-between gap-2">
+											<dt className="font-medium">Saldo para la promesa</dt>
+											<dd className="font-semibold tabular-nums">
+												{saldoParaPromesa !== null
+													? quetzales(saldoParaPromesa)
+													: "—"}
+											</dd>
+										</div>
+									</dl>
+								) : (
+									campoMontoManual
+								)}
+								<p className="text-muted-foreground text-xs">
+									Al guardar se abre la promesa de pago por el saldo pendiente.
+									El pago se registra en «Registrar Pago» (link o boleta).
+								</p>
+							</div>
+						)}
+					</section>
+
+					{/* 4 · Evidencia */}
+					<section className="space-y-2">
+						<Label>
+							Evidencia fotográfica{" "}
+							<span className="text-muted-foreground">
+								(opcional, hasta {MAX_EVIDENCIAS_VISITA} fotos)
+							</span>
+						</Label>
+						<p className="text-muted-foreground text-xs">
+							Fachada, número de casa o lugar visitado. No se deben tomar fotos
+							del cliente ni de otras personas.
+						</p>
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								className="h-11"
+								disabled={fotos.length >= MAX_EVIDENCIAS_VISITA}
+								onClick={() => inputCamara.current?.click()}
+							>
+								<Camera className="mr-2 h-4 w-4" />
+								Tomar foto
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								className="h-11"
+								disabled={fotos.length >= MAX_EVIDENCIAS_VISITA}
+								onClick={() => inputGaleria.current?.click()}
+							>
+								<ImagePlus className="mr-2 h-4 w-4" />
+								Elegir de la galería
+							</Button>
+						</div>
+						{/* `capture` abre la cámara trasera directo en el celular; en la
+						    compu cae al selector de archivos. */}
+						<input
+							ref={inputCamara}
+							type="file"
+							accept="image/*"
+							capture="environment"
+							className="hidden"
+							onChange={(e) => {
+								agregarFotos(e.target.files);
+								e.target.value = "";
+							}}
+						/>
+						<input
+							ref={inputGaleria}
+							type="file"
+							accept="image/jpeg,image/png,image/webp"
+							multiple
+							className="hidden"
+							onChange={(e) => {
+								agregarFotos(e.target.files);
+								e.target.value = "";
+							}}
+						/>
+						{fotos.length > 0 && (
+							<div
+								className={cn(
+									"grid grid-cols-3 gap-2",
+									embebido ? "@md:grid-cols-5" : "sm:grid-cols-5",
+								)}
+							>
+								{fotos.map((f) => (
+									<div
+										key={f.id}
+										className="relative aspect-square overflow-hidden rounded-md border bg-muted"
+									>
+										<img
+											src={f.preview}
+											alt={f.nombre}
+											className={cn(
+												"h-full w-full object-cover",
+												f.estado !== "lista" && "opacity-50",
 											)}
-											{f.estado === "error" && (
-												<button
-													type="button"
-													title={f.error}
-													className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-destructive/90 px-1 py-1 text-[11px] text-white"
-													onClick={() => void subirFoto(f.id)}
-												>
-													<RotateCw className="h-3 w-3" />
-													Error · Reintentar
-												</button>
-											)}
+										/>
+										{f.estado === "subiendo" && (
+											<Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin" />
+										)}
+										{f.estado === "error" && (
 											<button
 												type="button"
-												aria-label={`Quitar ${f.nombre}`}
-												className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow"
-												onClick={() => quitarFoto(f.id)}
+												title={f.error}
+												className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-destructive/90 px-1 py-1 text-[11px] text-white"
+												onClick={() => void subirFoto(f.id)}
 											>
-												<X className="h-3.5 w-3.5" />
+												<RotateCw className="h-3 w-3" />
+												Error · Reintentar
 											</button>
-										</div>
-									))}
-								</div>
-							)}
-						</section>
-
-						{/* 5 · Ubicación: un botón de verdad, no un enlace suelto (el PM no
-						    lo veía). Toma el punto donde está el teléfono AHORA: si el
-						    asesor ya se fue del lugar, mejor no registrarla. */}
-						<section className="space-y-2">
-							<Label>
-								Ubicación de la visita{" "}
-								<span className="text-muted-foreground">(opcional)</span>
-							</Label>
-							<p className="text-muted-foreground text-xs">
-								Este botón registra la ubicación actual del teléfono. Úselo solo
-								si se encuentra en el lugar de la visita.
-							</p>
-							{ubicacion ? (
-								<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 text-sm dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-									<span className="flex items-center gap-2 font-medium">
-										<CheckCircle2 className="h-4 w-4" />
-										Ubicación registrada
-										{ubicacion.precisionM != null
-											? ` (±${ubicacion.precisionM} m)`
-											: ""}
-									</span>
-									<div className="flex gap-2">
-										<Button
+										)}
+										<button
 											type="button"
-											variant="outline"
-											size="sm"
-											className="h-9 bg-background"
-											disabled={ubicandose}
-											onClick={tomarUbicacion}
+											aria-label={`Quitar ${f.nombre}`}
+											className="absolute top-1 right-1 rounded-full bg-background/90 p-1 shadow"
+											onClick={() => quitarFoto(f.id)}
 										>
-											{ubicandose ? (
-												<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-											) : (
-												<LocateFixed className="mr-1.5 h-4 w-4" />
-											)}
-											Actualizar
-										</Button>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											className="h-9"
-											onClick={() => setUbicacion(null)}
-										>
-											Quitar
-										</Button>
+											<X className="h-3.5 w-3.5" />
+										</button>
 									</div>
+								))}
+							</div>
+						)}
+					</section>
+
+					{/* 5 · Ubicación: un botón de verdad, no un enlace suelto (el PM no
+					    lo veía). Toma el punto donde está el teléfono AHORA: si el
+					    asesor ya se fue del lugar, mejor no registrarla. */}
+					<section className="space-y-2">
+						<Label>
+							Ubicación de la visita{" "}
+							<span className="text-muted-foreground">(opcional)</span>
+						</Label>
+						<p className="text-muted-foreground text-xs">
+							Este botón registra la ubicación actual del teléfono. Úselo solo
+							si se encuentra en el lugar de la visita.
+						</p>
+						{ubicacion ? (
+							<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 text-sm dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+								<span className="flex items-center gap-2 font-medium">
+									<CheckCircle2 className="h-4 w-4" />
+									Ubicación registrada
+									{ubicacion.precisionM != null
+										? ` (±${ubicacion.precisionM} m)`
+										: ""}
+								</span>
+								<div className="flex gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="h-9 bg-background"
+										disabled={ubicandose}
+										onClick={tomarUbicacion}
+									>
+										{ubicandose ? (
+											<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+										) : (
+											<LocateFixed className="mr-1.5 h-4 w-4" />
+										)}
+										Actualizar
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-9"
+										onClick={() => setUbicacion(null)}
+									>
+										Quitar
+									</Button>
 								</div>
-							) : (
-								<Button
-									type="button"
-									variant="outline"
-									className="h-11 w-full border-primary/50 text-primary hover:bg-primary/5 hover:text-primary"
-									disabled={ubicandose}
-									onClick={tomarUbicacion}
-								>
-									{ubicandose ? (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									) : (
-										<LocateFixed className="mr-2 h-4 w-4" />
-									)}
-									{ubicandose
-										? "Obteniendo ubicación…"
-										: "Registrar mi ubicación actual"}
-								</Button>
-							)}
-							{avisoUbicacion && (
+							</div>
+						) : (
+							<Button
+								type="button"
+								variant="outline"
+								className="h-11 w-full border-primary/50 text-primary hover:bg-primary/5 hover:text-primary"
+								disabled={ubicandose}
+								onClick={tomarUbicacion}
+							>
+								{ubicandose ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<LocateFixed className="mr-2 h-4 w-4" />
+								)}
+								{ubicandose
+									? "Obteniendo ubicación…"
+									: "Registrar mi ubicación actual"}
+							</Button>
+						)}
+						{avisoUbicacion && (
+							<p className="text-muted-foreground text-xs">{avisoUbicacion}</p>
+						)}
+					</section>
+
+					{/* 6 · Comentarios y próximo paso */}
+					<section className="space-y-3">
+						<div className="space-y-1.5">
+							<Label htmlFor="visita-comentarios">
+								Comentarios <span className="text-red-600">*</span>
+							</Label>
+							<Textarea
+								id="visita-comentarios"
+								value={comentarios}
+								onChange={(e) => setComentarios(e.target.value)}
+								rows={3}
+								placeholder="Persona con quien se habló, lo que indicó y lo acordado"
+							/>
+							{comentarios.trim().length < MIN_COMENTARIOS_VISITA && (
 								<p className="text-muted-foreground text-xs">
-									{avisoUbicacion}
+									Mínimo {MIN_COMENTARIOS_VISITA} caracteres.
 								</p>
 							)}
-						</section>
+						</div>
+						<div className="space-y-1.5">
+							<Label htmlFor="visita-proximo-paso">
+								Próximo paso{" "}
+								<span className="text-muted-foreground">(opcional)</span>
+							</Label>
+							<Input
+								id="visita-proximo-paso"
+								value={proximoPaso}
+								onChange={(e) => setProximoPaso(e.target.value)}
+								placeholder="Ej.: regresar el viernes por la tarde"
+							/>
+						</div>
+					</section>
+				</>
+			)}
+		</div>
+	);
 
-						{/* 6 · Comentarios y próximo paso */}
-						<section className="space-y-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="visita-comentarios">
-									Comentarios <span className="text-red-600">*</span>
-								</Label>
-								<Textarea
-									id="visita-comentarios"
-									value={comentarios}
-									onChange={(e) => setComentarios(e.target.value)}
-									rows={3}
-									placeholder="Persona con quien se habló, lo que indicó y lo acordado"
-								/>
-								{comentarios.trim().length < MIN_COMENTARIOS_VISITA && (
-									<p className="text-muted-foreground text-xs">
-										Mínimo {MIN_COMENTARIOS_VISITA} caracteres.
-									</p>
-								)}
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="visita-proximo-paso">
-									Próximo paso{" "}
-									<span className="text-muted-foreground">(opcional)</span>
-								</Label>
-								<Input
-									id="visita-proximo-paso"
-									value={proximoPaso}
-									onChange={(e) => setProximoPaso(e.target.value)}
-									placeholder="Ej.: regresar el viernes por la tarde"
-								/>
-							</div>
-						</section>
-					</>
-				)}
+	if (embebido) {
+		return (
+			<div className="@container flex min-h-0 flex-1 flex-col">
+				{cuerpo}
+				<div className="mt-auto flex flex-col gap-2 border-line-subtle border-t pt-3">
+					<AvisoFaltante
+						faltante={faltante}
+						visible={intentoEnviar || subiendoFotos}
+					/>
+					<div className="flex gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => onCancelar?.()}
+							disabled={enviando}
+						>
+							Cancelar
+						</Button>
+						<Button
+							type="button"
+							className="flex-1"
+							onClick={enviar}
+							disabled={enviando || subiendoFotos}
+						>
+							{contenidoBotonPrincipal}
+						</Button>
+					</div>
+				</div>
 			</div>
+		);
+	}
+
+	return (
+		<DialogContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col gap-0 rounded-none p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
+			<DialogHeader className="border-b px-4 pt-4 pb-3 text-left sm:px-6">
+				<DialogTitle className="pr-8">{titulo}</DialogTitle>
+				<DialogDescription>{descripcion}</DialogDescription>
+			</DialogHeader>
+
+			{cuerpo}
 
 			{/* El botón siempre a la vista, también en el celular con el teclado. */}
 			<div className="flex flex-col gap-2 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -1221,7 +1324,7 @@ function FormularioVisita({
 						type="button"
 						variant="outline"
 						className="h-11 flex-1 sm:h-9 sm:flex-none"
-						onClick={() => onOpenChange(false)}
+						onClick={() => onOpenChange?.(false)}
 						disabled={enviando}
 					>
 						Cancelar
@@ -1232,10 +1335,7 @@ function FormularioVisita({
 						onClick={enviar}
 						disabled={enviando || subiendoFotos}
 					>
-						{(enviando || subiendoFotos) && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-						)}
-						{textoBoton}
+						{contenidoBotonPrincipal}
 					</Button>
 				</div>
 			</div>

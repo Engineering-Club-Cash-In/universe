@@ -553,16 +553,30 @@ export function DocumentosFicha({
 
 export function AsistenteIA({
 	resumen,
+	compacto = false,
 }: {
 	resumen: { texto: string; etiquetas: string[]; generadoEn: string } | null;
+	/**
+	 * Workspace (panel de 520–640px): container query en vez de `lg:` y el
+	 * resumen arriba del chat cuando va en una columna. Sin `compacto`, la
+	 * ficha conserva su rejilla de siempre.
+	 */
+	compacto?: boolean;
 }) {
-	return (
-		<div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,480px)]">
+	const rejilla = (
+		<div
+			className={cn(
+				"grid gap-5",
+				compacto
+					? "@2xl:grid-cols-[minmax(0,1fr)_minmax(0,480px)]"
+					: "lg:grid-cols-[minmax(0,1fr)_minmax(0,480px)]",
+			)}
+		>
 			<div className="flex min-h-96 flex-col gap-3">
 				<div className="flex flex-1 flex-col gap-3 rounded-2xl border border-line-subtle bg-surface p-3">
 					<p className="max-w-80 rounded-xl border border-line-subtle px-3 py-2 text-fg-secondary text-xs leading-relaxed">
-						Hola, soy el asistente del caso. Podré resumir la situación o
-						responder dudas sobre este crédito.
+						Hola, soy el asistente del caso. Pronto podrá pedirme un resumen del
+						caso o resolver dudas sobre este crédito.
 					</p>
 				</div>
 				<div className="flex items-center gap-2 rounded-full border border-line-subtle bg-surface py-1.5 pr-1.5 pl-4">
@@ -581,7 +595,12 @@ export function AsistenteIA({
 					</Button>
 				</div>
 			</div>
-			<aside className="flex flex-col gap-2 rounded-2xl bg-brand-subtle/50 p-4">
+			<aside
+				className={cn(
+					"flex flex-col gap-2 rounded-2xl bg-brand-subtle/50 p-4",
+					compacto && "@2xl:order-none order-first",
+				)}
+			>
 				<span className="flex items-center gap-2 font-semibold text-brand text-sm">
 					<Sparkles aria-hidden className="size-4" />
 					Resumen del caso
@@ -618,4 +637,6 @@ export function AsistenteIA({
 			</aside>
 		</div>
 	);
+	// La container query necesita un contenedor por encima de la rejilla.
+	return compacto ? <div className="@container">{rejilla}</div> : rejilla;
 }

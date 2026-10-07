@@ -178,6 +178,8 @@ export const cobrosAppRouter = {
 	// Rediseño COBROS-02: Ficha 360
 	getSeguimientoFicha: fichaCobrosRouter.getSeguimientoFicha,
 	getFichaComplementos: fichaCobrosRouter.getFichaComplementos,
+	getAlertasLeidasCaso: fichaCobrosRouter.getAlertasLeidasCaso,
+	marcarAlertaCasoLeida: fichaCobrosRouter.marcarAlertaCasoLeida,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,

@@ -1,8 +1,18 @@
-import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useQueries,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MisPendientesInmovilizacion } from "@/components/cobros/mis-pendientes-inmovilizacion";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
+import {
+	type CasoNavegable,
+	useWorkspaceCasos,
+	WorkspaceModal,
+} from "@/components/cobros/workspace/workspace-modal";
 import type { Bucket } from "@/components/ds/badges";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
@@ -13,7 +23,7 @@ import {
 	etiquetaContador,
 	type SeguimientoProgramado,
 } from "./agenda-hoy";
-import type { FilaAtencion } from "./casos-atencion";
+import { casosNavegablesDeAtencion, type FilaAtencion } from "./casos-atencion";
 import { DashboardAsesorVista, saludoPorHora } from "./dashboard-asesor-vista";
 import type { BucketDistribucion } from "./dashboard-distribucion";
 import type { FilaCartera, FilaCola, PerfilCobros } from "./fila-cartera";
@@ -182,6 +192,22 @@ export function DashboardAsesor() {
 	const [agendaAbierta, setAgendaAbierta] = useState(false);
 	const [vistaRapida, setVistaRapida] = useState<string | null>(null);
 
+	// Workspace: al cerrarlo se refrescan la cola y la agenda para que la tabla
+	// muestre las gestiones recién registradas (el caso se refresca solo).
+	const queryClient = useQueryClient();
+	const refrescarTablas = useCallback(() => {
+		for (const queryKey of [
+			orpc.getColaDia.key(),
+			orpc.getTodosLosCreditos.key(),
+			orpc.getMiAgendaHoy.key(),
+			orpc.getAgendaDia.key(),
+			orpc.getCasosCobros.key(),
+		]) {
+			void queryClient.invalidateQueries({ queryKey });
+		}
+	}, [queryClient]);
+	const workspace = useWorkspaceCasos({ alCerrar: refrescarTablas });
+
 	/* ── Consultas ─────────────────────────────────────────────────────────── */
 
 	const perfilQuery = useQuery({
@@ -342,7 +368,10 @@ export function DashboardAsesor() {
 			.filter((c) => c.proximoContacto && new Date(c.proximoContacto) <= en7)
 			.map((c) => ({
 				id: c.id,
-				idFicha: c.contratoId || c.id,
+				// El SIFCO, como el resto de la agenda; un caso sin SIFCO cae al id
+				// del caso (la ficha lo resuelve). El contratoId no sirve: la ficha
+				// no lo encuentra con tipo "caso".
+				idFicha: c.numeroCreditoSifco || c.id,
 				cliente: c.clienteNombre || "Sin nombre",
 				vehiculo: [c.vehiculoMarca, c.vehiculoModelo, c.vehiculoYear]
 					.filter(Boolean)
@@ -397,8 +426,35 @@ export function DashboardAsesor() {
 	const irACartera = (search?: Record<string, string>) =>
 		navigate({ to: "/cobros/cartera", search });
 
-	const abrirFicha = (id: string, tipo: "caso" | "contrato") =>
-		navigate({ to: "/cobros/$id", params: { id }, search: { tipo } });
+	// La tabla de casos abre el Workspace sobre las filas visibles, en su orden.
+	const casosAtencion = casosNavegablesDeAtencion(filas);
+
+	// La agenda abre el Workspace sobre sus propias filas: los seguimientos y
+	// luego los próximos días, en el orden en que se ven (sin repetir créditos).
+	const abrirDesdeAgenda = (id: string, tipo: "caso" | "contrato") => {
+		const lista: CasoNavegable[] = [];
+		const vistos = new Set<string>();
+		const agregar = (c: CasoNavegable) => {
+			if (vistos.has(c.id)) return;
+			vistos.add(c.id);
+			lista.push(c);
+		};
+		for (const s of seguimientos) {
+			agregar({ id: s.idFicha, tipo: "caso", nombre: s.cliente });
+		}
+		for (const d of proximosDias) {
+			for (const item of d.items) {
+				agregar({
+					id: item.numeroCreditoSifco,
+					tipo: "caso",
+					nombre: item.cliente ?? undefined,
+				});
+			}
+		}
+		const i = lista.findIndex((c) => c.id === id);
+		if (i >= 0) workspace.abrir(lista, i);
+		else workspace.abrir([{ id, tipo }], 0);
+	};
 
 	return (
 		<DashboardAsesorVista
@@ -446,7 +502,7 @@ export function DashboardAsesor() {
 					cargando: seguimientosQuery.isPending,
 					items: seguimientos,
 				},
-				onAbrirFicha: abrirFicha,
+				onAbrirFicha: abrirDesdeAgenda,
 			}}
 			desempeno={{
 				periodo,
@@ -503,13 +559,17 @@ export function DashboardAsesor() {
 				onReintentar: () => colaQuery.refetch(),
 				onVerCartera: () => irACartera(),
 				onVistaRapida: setVistaRapida,
+				onAbrir: (i) => workspace.abrir(casosAtencion, i),
 			}}
 			panel={
-				<PanelGestionRapida
-					creditoId={vistaRapida}
-					open={!!vistaRapida}
-					onClose={() => setVistaRapida(null)}
-				/>
+				<>
+					<PanelGestionRapida
+						creditoId={vistaRapida}
+						open={!!vistaRapida}
+						onClose={() => setVistaRapida(null)}
+					/>
+					<WorkspaceModal {...workspace.modal} />
+				</>
 			}
 		/>
 	);

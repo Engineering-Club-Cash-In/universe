@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowRight, CircleCheck, Phone, UserCheck, X } from "lucide-react";
 import type * as React from "react";
+import type { CasoNavegable } from "@/components/cobros/workspace/workspace-modal";
 import { BucketBadge, MoraBadge } from "@/components/ds/badges";
 import { FilaCredito, TablaCartera } from "@/components/ds/tabla-cartera";
 import { Badge } from "@/components/ui/badge";
@@ -17,12 +18,14 @@ import {
 	AccionPendienteCelda,
 	bucketDeFila,
 	type ColumnaOpcional,
+	destinoFicha,
 	EstadoGestionCelda,
 	type FilaCartera,
 	type FilaCola,
 	FilaCreditoAsesor,
 	fechaCorta,
 	moraDeEstado,
+	propsFilaEnfocable,
 	SeguimientoCelda,
 	useColumnasVisibles,
 } from "./fila-cartera";
@@ -69,7 +72,31 @@ export type CasosAtencionProps = {
 	/** Abre Mi Cartera (la cola de trabajo completa). */
 	onVerCartera: () => void;
 	onVistaRapida: (creditoId: string) => void;
+	/**
+	 * Clic en una fila: abre el Workspace en esa posición de
+	 * `casosNavegablesDeAtencion(filas)`. Sin él, la fila navega a la Ficha 360.
+	 */
+	onAbrir?: (indice: number) => void;
 };
+
+/**
+ * La lista del Workspace, en el orden de la tabla: misma id y tipo con que
+ * cada fila abre la Ficha 360 (`destinoFicha`, o el SIFCO de la cola si
+ * cartera no devolvió la fila).
+ */
+export function casosNavegablesDeAtencion(
+	filas: FilaAtencion[],
+): CasoNavegable[] {
+	return filas.map(({ cola, credito }) =>
+		credito
+			? { ...destinoFicha(credito), nombre: credito.clienteNombre ?? undefined }
+			: {
+					id: cola.numeroCreditoSifco,
+					tipo: cola.casoId ? "caso" : "contrato",
+					nombre: cola.cliente ?? undefined,
+				},
+	);
+}
 
 const COLUMNAS_OPCIONALES: ColumnaOpcional[] = [
 	{ id: "limiteSla", etiqueta: "Límite SLA", ancho: 104, despuesDe: "fecha" },
@@ -200,11 +227,14 @@ function FilaSoloCola({
 	prioridad,
 	extras,
 	onVistaRapida,
+	onAbrir,
 }: {
 	item: FilaCola;
 	prioridad: number;
 	extras: Record<string, React.ReactNode>;
 	onVistaRapida: (creditoId: string) => void;
+	/** Clic en la fila (Workspace). Sin él, navega a la Ficha 360. */
+	onAbrir?: () => void;
 }) {
 	const navigate = useNavigate();
 	const bucket = bucketDeFila(item.bucket, null);
@@ -215,17 +245,20 @@ function FilaSoloCola({
 		contratoId: item.numeroCreditoSifco,
 		casoCobroId: item.casoId,
 	} as unknown as FilaCartera;
-	return (
-		<FilaCredito
-			prioridad={prioridad}
-			className="cursor-pointer"
-			onClick={() =>
-				navigate({
+	const abrir = () =>
+		onAbrir
+			? onAbrir()
+			: navigate({
 					to: "/cobros/$id",
 					params: { id: item.numeroCreditoSifco },
 					search: { tipo },
-				})
-			}
+				});
+	return (
+		<FilaCredito
+			prioridad={prioridad}
+			className="cursor-pointer focus-visible:bg-muted focus-visible:outline-none"
+			onClick={abrir}
+			{...(onAbrir ? propsFilaEnfocable(abrir) : {})}
 			cliente={item.cliente}
 			detalle={
 				detalleVehiculo(
@@ -286,6 +319,7 @@ export function CasosAtencion({
 	onReintentar,
 	onVerCartera,
 	onVistaRapida,
+	onAbrir,
 }: CasosAtencionProps) {
 	const { columnas, menu } = useColumnasVisibles(
 		"dashboard",
@@ -368,7 +402,11 @@ export function CasosAtencion({
 			<SectionHeader
 				titleAs="h2"
 				title="Casos que requieren atención hoy"
-				description="Ordenados por prioridad. Abra la Ficha 360 para gestionar."
+				description={
+					onAbrir
+						? "Ordenados por prioridad. Abra un caso para gestionarlo en el espacio de trabajo."
+						: "Ordenados por prioridad. Abra la Ficha 360 para gestionar."
+				}
 				action={
 					<Button variant="link" size="sm" onClick={onVerCartera}>
 						Ver cartera completa
@@ -464,6 +502,7 @@ export function CasosAtencion({
 											: extras
 									}
 									onVistaRapida={onVistaRapida}
+									onAbrir={onAbrir ? () => onAbrir(i) : undefined}
 								/>
 							);
 						}
@@ -473,6 +512,7 @@ export function CasosAtencion({
 								fila={credito}
 								prioridad={prioridad}
 								onVistaRapida={onVistaRapida}
+								onAbrir={onAbrir ? () => onAbrir(i) : undefined}
 								extras={
 									cola.cubierto
 										? {

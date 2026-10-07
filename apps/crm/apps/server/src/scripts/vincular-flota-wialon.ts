@@ -518,10 +518,12 @@ const escritorRegistrado = conRegistro(escritor, {
 			typeof resultado === "string"
 				? filaPlan(item, [resultado, ""])
 				: filaPlan(item, ["error", resultado.error]);
-		appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
+		// Primero la reversa (lo que protege la base), después el CSV: si el
+		// CSV falla, el vínculo ya quedó en la reversa y la corrida se detiene.
 		if (resultado === "guardado") guardadosHastaAhora.push(item);
 		if (guardadosHastaAhora.length > 0) escribirReversa(guardadosHastaAhora);
 		else rmSync(rutaReversa, { force: true });
+		appendFileSync(rutaResultado, `\n${fila.map(celdaCsv).join(",")}`);
 	},
 });
 const res = await aplicarPlan(plan.items, escritorRegistrado, {
@@ -540,9 +542,9 @@ for (const { item, error } of res.errores.slice(0, 5))
 	console.log(`    ${item.vehicleId} → ${item.unitId}: ${error}`);
 if (res.abortado)
 	console.log(
-		`  ABORTADO por errores: ${res.pendientes} sin intentar (corra de nuevo cuando se resuelva).`,
+		`  ABORTADO: ${res.pendientes} sin intentar. reversa.sql cubre todo lo que alcanzó a confirmarse; corra de nuevo cuando se resuelva.`,
 	);
 console.log(
-	`\n${join(salida, "resultado.csv")}${res.guardados.length ? ` · reversa: ${join(salida, "reversa.sql")}` : ""}`,
+	`\n${rutaResultado}${guardadosHastaAhora.length ? ` · reversa: ${rutaReversa}` : ""}`,
 );
 process.exit(res.errores.length > 0 ? 1 : 0);

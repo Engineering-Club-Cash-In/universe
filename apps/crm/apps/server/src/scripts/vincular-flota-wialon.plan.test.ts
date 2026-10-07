@@ -14,6 +14,7 @@ import {
 	MARCADOR_REGISTRO,
 	MARCADOR_VIN,
 	planificar,
+	RegistroFallido,
 	sqlReversa,
 	validarDestinoParaEscribir,
 } from "./vincular-flota-wialon.plan";
@@ -210,6 +211,79 @@ describe("conRegistro", () => {
 		// El error sigue llegando a aplicarPlan.
 		expect(res.errores.map((e) => e.error)).toEqual(["boom"]);
 		expect(res.guardados.map((i) => i.unitId)).toEqual([1]);
+	});
+});
+
+describe("conRegistro · si registrar falla, la corrida se detiene", () => {
+	test("falla al registrar DESPUÉS de un vínculo confirmado: no se escribe nada más", async () => {
+		const escritos: number[] = [];
+		const escritor = conRegistro(
+			{
+				vincular: async (i) => {
+					escritos.push(i.unitId);
+					return "guardado";
+				},
+			},
+			{
+				despues: (i) => {
+					if (i.unitId === 2) throw new Error("disco lleno");
+				},
+			},
+		);
+		const res = await aplicarPlan(
+			[1, 2, 3, 4].map((unitId) => item({ unitId })),
+			escritor,
+		);
+		expect(escritos).toEqual([1, 2]);
+		expect(res.abortado).toBe(true);
+		expect(res.pendientes).toBe(2);
+		expect(res.errores[0]?.error).toContain("disco lleno");
+	});
+
+	test("falla al preparar la reversa ANTES de escribir: ese vínculo no se escribe", async () => {
+		const escritos: number[] = [];
+		const escritor = conRegistro(
+			{
+				vincular: async (i) => {
+					escritos.push(i.unitId);
+					return "guardado";
+				},
+			},
+			{
+				antes: (i) => {
+					if (i.unitId === 2) throw new Error("sin permisos");
+				},
+				despues: () => {},
+			},
+		);
+		const res = await aplicarPlan(
+			[1, 2, 3].map((unitId) => item({ unitId })),
+			escritor,
+		);
+		expect(escritos).toEqual([1]);
+		expect(res.abortado).toBe(true);
+		expect(res.pendientes).toBe(1);
+	});
+
+	test("un error normal de escritura no detiene la corrida", async () => {
+		const res = await aplicarPlan(
+			[1, 2].map((unitId) => item({ unitId })),
+			conRegistro(
+				{
+					vincular: async (i) => {
+						if (i.unitId === 1) throw new Error("timeout");
+						return "guardado";
+					},
+				},
+				{ despues: () => {} },
+			),
+		);
+		expect(res.abortado).toBe(false);
+		expect(res.guardados.map((i) => i.unitId)).toEqual([2]);
+		expect(res.errores[0]?.error).toBe("timeout");
+		expect(new RegistroFallido(item(), new Error("x")).message).toContain(
+			"No se pudo registrar",
+		);
 	});
 });
 

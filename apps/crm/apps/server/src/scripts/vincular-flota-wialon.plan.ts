@@ -178,12 +178,28 @@ export interface ResultadoAplicacion {
  * proceso se corta a la mitad, lo ya escrito tiene que quedar en los archivos
  * de resultado y de reversa, no solo en memoria.
  *
+ * Si registrar falla (antes o después de escribir) se lanza `RegistroFallido`
+ * y `aplicarPlan` se detiene: seguir escribiendo con el registro roto dejaría
+ * vínculos confirmados fuera de la reversa.
+ *
  * `antes` corre ANTES de escribir: entre que la transacción confirma y que
  * `despues` registra hay una ventana en la que un corte dejaría un vínculo
  * escrito sin registrar, así que la reversa se prepara incluyéndolo de
  * antemano. `despues` corre con el resultado, o con el error, que se vuelve a
  * lanzar para que `aplicarPlan` lo cuente.
  */
+export class RegistroFallido extends Error {
+	constructor(
+		readonly item: ItemVinculo,
+		causa: unknown,
+	) {
+		super(
+			`No se pudo registrar el vínculo ${item.vehicleId} → ${item.unitId}: ${causa instanceof Error ? causa.message : String(causa)}`,
+		);
+		this.name = "RegistroFallido";
+	}
+}
+
 export function conRegistro(
 	escritor: Escritor,
 	registro: {
@@ -196,17 +212,26 @@ export function conRegistro(
 ): Escritor {
 	return {
 		async vincular(item) {
-			registro.antes?.(item);
+			const registrar = (fn: () => void) => {
+				try {
+					fn();
+				} catch (error) {
+					throw new RegistroFallido(item, error);
+				}
+			};
+			registrar(() => registro.antes?.(item));
 			let resultado: ResultadoEscritura;
 			try {
 				resultado = await escritor.vincular(item);
 			} catch (error) {
-				registro.despues(item, {
-					error: error instanceof Error ? error.message : String(error),
-				});
+				registrar(() =>
+					registro.despues(item, {
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				);
 				throw error;
 			}
-			registro.despues(item, resultado);
+			registrar(() => registro.despues(item, resultado));
 			return resultado;
 		},
 	};
@@ -249,6 +274,13 @@ export async function aplicarPlan(
 				item,
 				error: error instanceof Error ? error.message : String(error),
 			});
+			// Sin registro no se sigue: lo ya escrito quedó cubierto por la
+			// reversa preparada, y escribir más la dejaría incompleta.
+			if (error instanceof RegistroFallido) {
+				resultado.abortado = true;
+				resultado.pendientes = items.length - i - 1;
+				break;
+			}
 		}
 		opciones.alProgresar?.(i + 1, items.length);
 	}

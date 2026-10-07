@@ -51,8 +51,9 @@ de campo al carro equivocado, así que ante la duda no se vincula y decide una p
 | --- | --- |
 | Placa y VIN apuntan a la **misma** unidad | Se vincula (`placa+vin`) |
 | Solo una de las dos encuentra unidad, y es una sola | Se vincula (`placa` o `vin`) |
-| Placa y VIN apuntan a unidades **distintas** | `conflicto_placa_vin`: una de las dos está mal escrita. Esas unidades tampoco se proponen a otro vehículo (quedan `unidad_disputada`): el del conflicto podría ser el dueño |
+| Placa y VIN apuntan a unidades **distintas** | `conflicto_placa_vin`: una de las dos está mal escrita |
 | Varias unidades coinciden | `ambiguo` |
+| Otro vehículo coincide con una unidad que un vehículo `ambiguo` o en conflicto también reclama | Se la queda solo si le gana a ese vehículo en el desempate por crédito (ver abajo). Si no, `unidad_disputada`: el dudoso podría ser el dueño. Así un registro sin crédito con datos de Wialon mal cargados no le quita la unidad a uno con crédito vigente, ni al revés |
 | La unidad ya está guardada en otro vehículo | `unidad_ya_asignada`: no se toca |
 | Ninguna unidad coincide | `sin_coincidencia` |
 | El vehículo no tiene placa ni VIN válidos | `sin_placa_ni_vin` |
@@ -162,6 +163,7 @@ bun run src/scripts/vincular-flota-wialon.ts --salida=/tmp/diag-wialon \
   otro, o la placa o el VIN cambiaron desde el diagnóstico, ese vínculo se omite y queda
   anotado en `resultado.csv` (`vehiculo_ya_vinculado`, `unidad_ocupada`, `datos_cambiaron`).
 - Si se acumulan 5 errores, **se detiene**: si la base está caída no tiene sentido seguir.
+- Si falla el registro de un vínculo (no se puede escribir `resultado.csv` o `reversa.sql`), **se detiene en el acto**: la reversa ya cubre lo confirmado, y seguir escribiendo la dejaría incompleta.
 - **Es idempotente:** una segunda corrida reconoce lo ya vinculado y no propone nada nuevo.
 - **La reversa** solo suelta los vehículos que siguen con la misma unidad y el mismo
   marcador, así no deshace una corrección que un supervisor haya hecho después. Trae el

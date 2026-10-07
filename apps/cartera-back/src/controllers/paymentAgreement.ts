@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lte, sql, sum } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, ne, sql, sum } from "drizzle-orm";
 import { db } from "../database";
 import {
   pagos_credito,
@@ -27,6 +27,8 @@ import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
 import { cerrarMoraPagadaDeCredito } from "../utils/cerrarMoraPagadaDeCredito";
+
+const CREDITO_CANCELADO_SIN_CONVENIO = "Un crédito CANCELADO no admite convenio.";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -199,6 +201,12 @@ export async function createPaymentAgreement(
 
     if (!creditExists) {
       throw new Error("Crédito no encontrado");
+    }
+
+    // CANCELADO es terminal: no admite convenio. Se vuelve a mirar dentro de la
+    // transacción, en el UPDATE a EN_CONVENIO, por si lo cancelan entre medio.
+    if (creditExists.statusCredit === "CANCELADO") {
+      throw new Error(CREDITO_CANCELADO_SIN_CONVENIO);
     }
 
     console.log("✅ Crédito encontrado!");
@@ -405,8 +413,14 @@ export async function createPaymentAgreement(
         .set({
           statusCredit: "EN_CONVENIO",
         })
-        .where(eq(creditos.credito_id, credit_id))
+        // Bajo el row lock del UPDATE: si lo cancelaron después del Paso 7,
+        // no toca filas y la transacción entera se revierte (sin convenio).
+        .where(and(eq(creditos.credito_id, credit_id), ne(creditos.statusCredit, "CANCELADO")))
         .returning();
+
+      if (resultadoUpdate.length === 0) {
+        throw new Error(CREDITO_CANCELADO_SIN_CONVENIO);
+      }
 
     // ============================================
       // 💸 DESACTIVAR MORA ACTIVA (si existe)
@@ -1657,11 +1671,14 @@ export const updateConvenioStatus = async (
         // 🔒 CRÉDITO PRIMERO, igual que condonarMora y la masiva: el insert al
         // ledger de abajo toma KEY SHARE sobre este crédito por la FK, y el
         // UPDATE posterior escalaría el candado y podría trabarse (40P01).
-        await tx
-          .select({ credito_id: creditos.credito_id })
+        const [creditoBloqueado] = await tx
+          .select({ credito_id: creditos.credito_id, statusCredit: creditos.statusCredit })
           .from(creditos)
           .where(eq(creditos.credito_id, creditoId))
           .for("update");
+        // Solo un crédito EN_CONVENIO sale de ese estado al romper el convenio.
+        // Un CANCELADO (o CAIDO/INCOBRABLE/…) nunca cambia de estado por acá.
+        const eraEnConvenio = creditoBloqueado?.statusCredit === "EN_CONVENIO";
 
         // Eliminar cuotas del convenio
         await tx
@@ -1720,10 +1737,15 @@ export const updateConvenioStatus = async (
         // cuotas y el convenio roto terminaría ACTIVO sin mora. El convenio ya
         // no existe, así que el crédito sale de EN_CONVENIO ANTES de cargar;
         // abajo la decisión lo deja MOROSO o ACTIVO.
-        await tx
-          .update(creditos)
-          .set({ statusCredit: "ACTIVO" })
-          .where(eq(creditos.credito_id, creditoId));
+        if (eraEnConvenio) {
+          await tx
+            .update(creditos)
+            .set({ statusCredit: "ACTIVO" })
+            .where(and(
+              eq(creditos.credito_id, creditoId),
+              eq(creditos.statusCredit, "EN_CONVENIO"),
+            ));
+        }
 
         // «Hoy» de la BASE, no del reloj de la app: `createMora` recuenta las
         // cuotas atrasadas con `now()`, que dentro de la tx queda fijo en su
@@ -1760,10 +1782,15 @@ export const updateConvenioStatus = async (
           // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
           // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
           // sin mora, nunca MOROSO).
-          await tx
-            .update(creditos)
-            .set({ statusCredit: "MOROSO" })
-            .where(eq(creditos.credito_id, creditoId));
+          if (eraEnConvenio) {
+            await tx
+              .update(creditos)
+              .set({ statusCredit: "MOROSO" })
+              .where(and(
+                eq(creditos.credito_id, creditoId),
+                eq(creditos.statusCredit, "ACTIVO"),
+              ));
+          }
 
           // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
           const resultMora = await createMora({
@@ -1784,11 +1811,7 @@ export const updateConvenioStatus = async (
         } else {
           // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
           // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO.
-          await tx
-            .update(creditos)
-            .set({ statusCredit: "ACTIVO" })
-            .where(eq(creditos.credito_id, creditoId));
-
+          // Si era EN_CONVENIO ya quedó ACTIVO arriba; si no, no se toca.
           console.log(`✅ Crédito actualizado a ACTIVO (${decision.motivo})`);
         }
 

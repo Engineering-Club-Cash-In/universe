@@ -2,14 +2,20 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Pool } from "pg";
 import { createApp } from "../app";
+import { sendManualReviewEmailAlerts, type EmailMessage } from "../alerts/manual-review-email";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { HttpCarteraPaymentClient } from "../payments/cartera-client";
+import { pollPaymentTokenDate } from "../payments/poller";
 import { runReviewWorkerOnce } from "../payments/review-worker";
 import { createAdminRouter } from "../routes/admin";
 import { DbPaymentTransactionRepository, DbReviewRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "./repositories";
+import { DbCarteraEventTokenUserRepository } from "./cartera-events-repository";
 import * as schema from "./schema";
 import { nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUsers } from "./schema";
 
@@ -25,7 +31,7 @@ const transaction: TokenTransaction = {
   comments: "sensitive comment",
   currency: "GTQ",
   account: "19451958",
-  token: "1234567310005010",
+  token: "123456710005010",
   tokenDate: "2026-05-04T10:00:00-06:00",
   tokenIdentifier: "10005010",
   tokenName: "Sensitive account name",
@@ -278,6 +284,47 @@ integrationTest("statement enrichment cannot import unrelated funds or bypass co
     expect(await repository.enrichIncomingStatement({ ...incoming, transactionId: "", ...override })).toBe(false);
     expect(await db.select().from(nexaPaymentTransactions)).toEqual(before);
   }
+});
+
+integrationTest("polled statement whose token is not prefix + identifier waits in MANUAL_REVIEW instead of paying the credit its components name", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("000000042", "1234567", 42);
+  await associateToken("000000043", "1234567", 43);
+  const consistent = { ...transaction, reference: "token-ok", token: "1234567000000042", tokenIdentifier: "000000042", tokenPrefix: "1234567" };
+  // Nexa's full token names credit 42, but the split fields name credit 43.
+  const inconsistent = { ...consistent, reference: "token-mismatch", tokenIdentifier: "000000043" };
+  await pollPaymentTokenDate({
+    date: "2026-05-04",
+    nexa: { getPaymentTokenStatement: async () => ({ transactions: [inconsistent, consistent] }) },
+    cartera: { applyNexaPayment: async () => { throw new Error("Cartera must not run during ingestion"); } },
+    transactions: repository,
+    tokenUsers: new DbTokenUserRepository(db),
+  });
+
+  const applied: Array<{ creditoId: number; token?: string }> = [];
+  const apply = () => runApplicationWorkerOnce({
+    repository,
+    cartera: { applyNexaPayment: async ({ creditoId, transaction: payment }) => {
+      applied.push({ creditoId, token: payment.token });
+      return { status: "APPLIED", paymentId: 900 + applied.length };
+    } },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,
+  });
+  for (let attempt = 0; attempt < 3; attempt++) await apply();
+  expect(applied).toEqual([{ creditoId: 42, token: "1234567000000042" }]);
+
+  const [held] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.reference, "token-mismatch"));
+  expect(held).toMatchObject({ processingStatus: "MANUAL_REVIEW", failureReason: "token_mismatch", carteraPaymentId: null });
+  // Not rejected to Nexa (that would return the funds): no bank review is queued for it.
+  expect(await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, held!.id))).toEqual([]);
+  expect(await repository.listManualReviewAlerts(new Date("2000-01-01T00:00:00Z"))).toEqual([
+    expect.objectContaining({ reference: "token-mismatch", failureReason: "token_mismatch", alertType: "MANUAL_REVIEW" }),
+  ]);
+  // A replay of the same inconsistent row cannot promote it out of review.
+  expect(await repository.upsertReceived(inconsistent)).toMatchObject({ id: held!.id, created: false, processingStatus: "MANUAL_REVIEW" });
 });
 
 integrationTest("date-less webhook rows wait visibly for authoritative statement enrichment before application", async () => {
@@ -561,7 +608,9 @@ integrationTest("returned transfers queue a safe REJECTED review without calling
   expect(review).toMatchObject({ status: "REJECTED" });
 });
 
-integrationTest("terminal rejection and missing token association queue safe REJECTED reviews", async () => {
+// Un REJECTED hace que Nexa devuelva el dinero: un rechazo sin código de cartera
+// es dudoso y se reintenta; un token sin crédito asociado sí es definitivo.
+integrationTest("a rejection without a cartera code is retried while a missing token association queues a safe REJECTED review", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);
   await associateToken("10005010", "1234567", 42);
@@ -571,6 +620,7 @@ integrationTest("terminal rejection and missing token association queue safe REJ
     reference: "4617309",
     transactionId: "7295",
     tokenIdentifier: "10005011",
+    token: "123456710005011",
   });
   let carteraCalls = 0;
   const run = () => runApplicationWorkerOnce({
@@ -593,13 +643,19 @@ integrationTest("terminal rejection and missing token association queue safe REJ
   const payments = await db.select().from(nexaPaymentTransactions).orderBy(nexaPaymentTransactions.id);
   const reviews = await db.select().from(nexaReviews).orderBy(nexaReviews.id);
   expect(payments).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: unsafe.id, processingStatus: "REVIEW_PENDING", failureReason: "cartera_rejected" }),
+    expect.objectContaining({
+      id: unsafe.id,
+      processingStatus: "FAILED",
+      failureReason: "application_processing_failed",
+      nextAttemptAt: new Date("2026-09-08T14:00:02.000Z"),
+    }),
     expect.objectContaining({ id: missing.id, processingStatus: "REVIEW_PENDING", failureReason: "token_user_not_found" }),
   ]));
+  // Solo el definitivo va hacia Nexa; el texto crudo del rechazo no se guarda.
   expect(reviews.map((review) => [review.transactionId, review.status])).toEqual([
-    [unsafe.id, "REJECTED"],
     [missing.id, "REJECTED"],
   ]);
+  expect(JSON.stringify(payments)).not.toContain("unsafe token=");
   expect(carteraCalls).toBe(1);
 });
 
@@ -734,6 +790,7 @@ integrationTest("authenticated reconciliation routes join PostgreSQL rows and ne
     tokenUsers: new DbTokenUserRepository(db),
     transactions,
     pollRuns: new PollRunRepository(db),
+    cancelledTokenUsers: new DbCarteraEventTokenUserRepository(db),
     accumulatorAccount: 1,
     paymentTokenName: "test",
   });
@@ -1245,6 +1302,109 @@ integrationTest("expired billing leases fence stale success and failure without 
   await repository.markApplicationFailed(paymentId, "application_processing_failed", null, later, fresh.attemptCount);
   expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ failureReason: null, leaseUntil: null, processingStatus: "REVIEW_PENDING" });
   expect(await db.select().from(nexaReviews)).toHaveLength(1);
+});
+
+integrationTest("manual review email: one summary per new case, masked token, marked only after a successful send", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("310005010", "1234567", 9234);
+  const fullToken = "1234567310005010";
+  await repository.upsertReceived({ ...transaction, reference: "manual-email", token: fullToken, tokenIdentifier: "310005010", amount: 1500 });
+  await repository.upsertReceived({ ...transaction, reference: "applied-ok", token: fullToken, tokenIdentifier: "310005010" });
+  await db.update(nexaPaymentTransactions)
+    .set({ processingStatus: "MANUAL_REVIEW", failureReason: "token_repair_failed:token_in_use", createdAt: new Date("2026-10-07T16:15:00Z") })
+    .where(eq(nexaPaymentTransactions.reference, "manual-email"));
+
+  const now = new Date("2026-10-07T18:00:00Z");
+  const messages: EmailMessage[] = [];
+  let fail = true;
+  const pass = () => sendManualReviewEmailAlerts({
+    repository,
+    send: async (message) => { if (fail) throw new Error("Resend responded HTTP 503"); messages.push(message); },
+    recipients: ["jalvarado@clubcashin.com"],
+    staleBefore: now,
+    now,
+    logError: () => {},
+  });
+
+  expect(await pass()).toBe(0);
+  const [unmarked] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.reference, "manual-email"));
+  expect(unmarked?.alertaCorreoEnviadaAt).toBeNull();
+
+  fail = false;
+  expect(await pass()).toBe(1);
+  expect(await pass()).toBe(0);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.text).toContain("1. Crédito 9234 · 1500.00 GTQ");
+  expect(messages[0]?.text).toContain("   Referencia: manual-email · transactionId: 7293");
+  expect(messages[0]?.text).toContain("   Motivo: token_repair_failed:token_in_use");
+  expect(messages[0]?.text).toContain("   Recibido: 2026-10-07 10:15 (hora de Guatemala)");
+  expect(messages[0]?.text).toContain("   Token: ************5010");
+  expect(messages[0]?.text).not.toContain(fullToken);
+  expect(messages[0]?.text).not.toContain("310005010");
+  expect(messages[0]?.text).not.toContain("applied-ok");
+  const [marked] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.reference, "manual-email"));
+  expect(marked?.alertaCorreoEnviadaAt).toEqual(now);
+});
+
+integrationTest("migration 0006 marks today's manual review cases as notified: the first email carries only new ones", async () => {
+  if (!db || !pool) throw new Error("TEST_DATABASE_URL is required");
+  const migrationsFolder = new URL("../../drizzle", import.meta.url).pathname;
+  // Carpeta de migraciones hasta la 0005: la base como estaba antes del deploy.
+  // Se quitan la 0006 y las posteriores: drizzle solo aplica las que tienen un
+  // `when` mayor que la última aplicada, así que dejar la 0007 haría saltar la 0006.
+  const before0006 = mkdtempSync(join(tmpdir(), "nexa-before-0006-"));
+  try {
+    cpSync(migrationsFolder, before0006, { recursive: true });
+    const journalPath = join(before0006, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+    for (const entry of journal.entries as Array<{ idx: number; tag: string }>) {
+      if (entry.idx >= 6) rmSync(join(before0006, `${entry.tag}.sql`));
+    }
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx < 6);
+    writeFileSync(journalPath, JSON.stringify(journal));
+
+    await pool.query("DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public");
+    await migrate(db, { migrationsFolder: before0006 });
+    const insertRaw = (reference: string, status: string, failureReason: string | null, tokenDate = "2026-05-04T10:00:00-06:00") => pool.query(
+      `INSERT INTO nexa_payment_transactions (reference, amount, bank, currency, account, token, token_date, token_identifier, token_name, token_prefix, was_return, raw_payload, processing_status, failure_reason, updated_at)
+       VALUES ($1, 50, 'b', 'GTQ', 'a', '123456710005010', $2, '10005010', 'n', '1234567', 0, '{}', $3, $4, now() - interval '1 hour')`,
+      [reference, tokenDate, status, failureReason],
+    );
+    await insertRaw("existing-manual", "MANUAL_REVIEW", "token_mismatch");
+    await insertRaw("existing-billing", "COMPLETED", "billing_reconciliation_required");
+    await insertRaw("existing-dateless", "MANUAL_REVIEW", "missing_token_date", "");
+    await insertRaw("existing-received", "RECEIVED", null);
+
+    await migrate(db, { migrationsFolder });
+    await insertRaw("new-manual", "MANUAL_REVIEW", "token_repair_failed:token_in_use");
+
+    const marked = await pool.query<{ reference: string; notified: boolean }>(
+      "SELECT reference, alerta_correo_enviada_at IS NOT NULL AS notified FROM nexa_payment_transactions ORDER BY id",
+    );
+    expect(marked.rows).toEqual([
+      { reference: "existing-manual", notified: true },
+      { reference: "existing-billing", notified: true },
+      { reference: "existing-dateless", notified: true },
+      { reference: "existing-received", notified: false },
+      { reference: "new-manual", notified: false },
+    ]);
+
+    const messages: EmailMessage[] = [];
+    const now = new Date();
+    expect(await sendManualReviewEmailAlerts({
+      repository: new DbPaymentTransactionRepository(db),
+      send: async (message) => { messages.push(message); },
+      recipients: ["jalvarado@clubcashin.com"],
+      staleBefore: new Date(now.getTime() - 300_000),
+      now,
+      logError: () => {},
+    })).toBe(1);
+    expect(messages[0]?.text).toContain("Referencia: new-manual");
+    expect(messages[0]?.text).not.toContain("existing-");
+  } finally {
+    rmSync(before0006, { recursive: true, force: true });
+  }
 });
 
 async function associateToken(identifier: string, prefix: string, creditoId: number) {

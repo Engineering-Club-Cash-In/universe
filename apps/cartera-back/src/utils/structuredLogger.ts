@@ -730,4 +730,21 @@ export function emitRecoveredDuplicatePendingInstallment(
   });
 }
 
+/**
+ * Un operador editó un pago que entró por Nexa. El log operativo NO lleva qué
+ * cambió ni de quién: el catálogo prohíbe correos, ids de pago, montos y texto
+ * libre. Eso queda en `audit_logs`; acá solo cuántos campos y si la constancia
+ * durable se escribió (si no, es la señal de que hay que buscar a mano).
+ */
+export function emitNexaPaymentEdited(
+  changedFieldCount: number,
+  auditPersisted: boolean,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  logger.emit("payment.nexa_edit", "recorded", {
+    changed_field_count: Math.min(64, Math.max(1, changedFieldCount)),
+    audit_persisted: auditPersisted,
+  });
+}
+
 export const carteraStructuredLogger = createCarteraStructuredLogger();

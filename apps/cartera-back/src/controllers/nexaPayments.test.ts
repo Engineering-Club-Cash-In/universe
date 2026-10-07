@@ -10,6 +10,7 @@ const paymentBody = (externalReference: string) => ({
   amount: "10.00",
   currency: "GTQ" as const,
   tokenDate,
+  token: "1111222233334444",
 });
 const successfulBilling = {
   billPayments: async () => ({ kind: "billed" as const }),
@@ -76,7 +77,7 @@ test("un evento legado nuevo sin fecha falla retryable antes de cualquier efecto
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => { registered = true; return { success: true }; },
@@ -157,28 +158,32 @@ test("rechaza binding ausente, inactivo, expirado o con monto sobre el límite",
   if (typeof rejectBinding !== "function") return;
 
   const now = new Date("2026-09-08T12:00:00.000Z");
-  expect(rejectBinding(null, "10.00", now)).toBe("binding_missing");
-  expect(rejectBinding({ activo: false, expires_at: null, max_payment_amount: null }, "10.00", now))
+  const token = "1111222233334444";
+  expect(rejectBinding(null, "10.00", now, token)).toBe("binding_missing");
+  expect(rejectBinding({ activo: false, expires_at: null, max_payment_amount: null, nexa_token: token }, "10.00", now, token))
     .toBe("binding_inactive");
   expect(
     rejectBinding(
-      { activo: true, expires_at: new Date("2026-09-08T11:59:59.000Z"), max_payment_amount: null },
+      { activo: true, expires_at: new Date("2026-09-08T11:59:59.000Z"), max_payment_amount: null, nexa_token: token },
       "10.00",
       now,
+      token,
     ),
   ).toBe("binding_expired");
   expect(
     rejectBinding(
-      { activo: true, expires_at: null, max_payment_amount: "9.99" },
+      { activo: true, expires_at: null, max_payment_amount: "9.99", nexa_token: token },
       "10.00",
       now,
+      token,
     ),
   ).toBe("amount_exceeds_binding");
   expect(
     rejectBinding(
-      { activo: true, expires_at: null, max_payment_amount: "10.00" },
+      { activo: true, expires_at: null, max_payment_amount: "10.00", nexa_token: token },
       "10.00",
       now,
+      token,
     ),
   ).toBeNull();
 });
@@ -192,6 +197,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
   let registered = 0;
   let applied = 0;
   let completed = 0;
+  const avisos: { eventId: number; completedAntes: number }[] = [];
   const result = await processPayment(
     paymentBody("qa-payment-1"),
     { nonce: "nonce-1", payloadHash: "a".repeat(64), now: new Date() },
@@ -201,7 +207,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => registered
         ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
@@ -209,13 +215,16 @@ test("registra y aplica una vez por el flujo canónico", async () => {
       registerPayment: async () => { registered += 1; return { success: true }; },
       applyPayment: async () => { applied += 1; return { success: true }; },
       complete: async () => { completed += 1; },
+      onPaymentApplied: (eventId: number) => { avisos.push({ eventId, completedAntes: completed }); },
       fail: async () => undefined,
       ...successfulBilling,
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
+  // El aviso del recibo sale una vez y solo después de dejar el pago aplicado.
+  expect(avisos).toEqual([{ eventId: 7, completedAntes: 1 }]);
 });
 
 test("no consume claim cuando el crédito no existe", async () => {
@@ -253,7 +262,7 @@ test("revalida el binding con reloj fresco dentro del lock", async () => {
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null },
+        binding: { activo: true, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => { calls.push("mutate"); return { success: true }; },
@@ -284,7 +293,7 @@ test.each([
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: active, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null },
+        binding: { activo: active, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => mutated
         ? [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }]
@@ -319,7 +328,7 @@ test("un total vinculado distinto queda incierto sin aplicar ni completar", asyn
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [{ paymentId: 17, validationStatus: "pending", amount: "6.00" }],
       registerPayment: async () => ({ success: true }),
@@ -347,7 +356,7 @@ test("exige success true al aplicar cada fila", async () => {
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }],
       registerPayment: async () => ({ success: true }),
@@ -374,7 +383,7 @@ test("continúa un pago parcial de mora legado cuando dejó la fila exacta vincu
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "MOROSO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => registered
         ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
@@ -394,7 +403,7 @@ test("continúa un pago parcial de mora legado cuando dejó la fila exacta vincu
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applied, completed, failed }).toEqual({
     registered: 1,
     applied: 1,
@@ -416,7 +425,7 @@ test("mantiene un rechazo explícito sin efectos como rechazo normal", async () 
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => {
@@ -450,7 +459,7 @@ test("marca como incierto cualquier registro no rechazado sin fila vinculada", a
         loadCredit: async () => ({
           usuarioId: 5,
           statusCredit: "MOROSO",
-          binding: { activo: true, expires_at: null, max_payment_amount: null },
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
         }),
         findPayments: async () => [],
         registerPayment,
@@ -480,7 +489,7 @@ test("un evento manual_review bloquea reintentos antes de mutar pagos", async ()
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "MOROSO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => { mutated = true; return []; },
       registerPayment: async () => { mutated = true; return { success: true }; },
@@ -490,6 +499,112 @@ test("un evento manual_review bloquea reintentos antes de mutar pagos", async ()
     },
   )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
   expect(mutated).toBe(false);
+});
+
+test("un evento que quedó processing (el proceso murió) con condonación viva y sin filas de pago: la nueva entrega anula la condonación", async () => {
+  const { NexaPaymentError, classifyNexaClaim, processNexaPayment } = await import("./nexaPayments");
+  const requested = { creditoId: 10, amount: "10.00", currency: "GTQ", payloadHash: "a".repeat(64) };
+  const huerfano = {
+    id: 7, credito_id: 10, amount: "10.00", currency: "GTQ",
+    payload_hash: "a".repeat(64), status: "processing", pago_id: null,
+  };
+  // Solo la transición processing → manual_review entrega el evento para reconciliar.
+  expect(classifyNexaClaim(huerfano, false, requested)).toEqual({ kind: "manual_review", processingEventId: 7 });
+  expect(classifyNexaClaim({ ...huerfano, status: "manual_review" }, false, requested))
+    .toEqual({ kind: "manual_review" });
+  // Filas borradas por CAÍDO (pago_id_eliminado): nunca se reconcilia.
+  expect(classifyNexaClaim({ ...huerfano, pago_id_eliminado: 17 }, false, requested))
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
+
+  const run = async (
+    filas: { paymentId: number; validationStatus: string; amount: string }[],
+    status = "processing",
+  ) => {
+    const claim = classifyNexaClaim({ ...huerfano, status }, false, requested);
+    const anuladas: number[] = [];
+    let mutated = false;
+    await expect(processNexaPayment(
+      paymentBody("murio-tras-condonar"),
+      { nonce: `nonce-murio-${status}-${filas.length}`, payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => claim,
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "MOROSO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+        }),
+        findPayments: async (eventId) => (eventId === 7 ? filas : []),
+        anularCondonacionATiempo: async (eventId) => { anuladas.push(eventId); },
+        condonarMoraATiempo: async () => { mutated = true; },
+        registerPayment: async () => { mutated = true; return { success: true }; },
+        applyPayment: async () => { mutated = true; return { success: true }; },
+        complete: async () => { mutated = true; },
+        fail: async () => { mutated = true; },
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+    expect(mutated).toBe(false);
+    return anuladas;
+  };
+  // 0 filas: el pago no entró → se anula (la respuesta a Nexa no cambia: 503 incierto).
+  expect(await run([])).toEqual([7]);
+  // Con filas: el pago entró → la condonación se conserva.
+  expect(await run([{ paymentId: 17, validationStatus: "pending", amount: "10.00" }])).toEqual([]);
+  // Ya estaba en manual_review: un operador pudo registrar la boleta a mano (fila
+  // sin nexaPaymentEventId); 0 filas vinculadas no prueba nada → no se anula.
+  expect(await run([], "manual_review")).toEqual([]);
+});
+
+test("la reconciliación de un evento incierto no cambia la respuesta a Nexa si la anulación falla", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  const errores: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { errores.push(args[0]); };
+  try {
+    await expect(processNexaPayment(
+      paymentBody("murio-anulacion-falla"),
+      { nonce: "nonce-murio-falla", payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => ({ kind: "manual_review", processingEventId: 7 }),
+        loadCredit: async () => ({ usuarioId: 5, statusCredit: "MOROSO", binding: null }),
+        findPayments: async () => [],
+        anularCondonacionATiempo: async () => { throw new Error("db caída"); },
+        registerPayment: async () => ({ success: true }),
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        fail: async () => undefined,
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+  } finally {
+    console.error = original;
+  }
+  expect(String(errores[0])).toContain("nexa.condonacion_a_tiempo.viva_sin_verificar");
+});
+
+test("el reintento idempotente devuelve todas las filas del evento aun si el evento solo guarda la primera", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  const result = await processNexaPayment(
+    paymentBody("qa-payment-multi"),
+    { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "applied", paymentId: 17, eventId: 7 }),
+      loadCredit: async () => ({ usuarioId: 5, statusCredit: "ACTIVO", binding: null }),
+      findPayments: async (eventId) => eventId === 7
+        ? [
+            { paymentId: 17, validationStatus: "validated", amount: "10.00" },
+            { paymentId: 18, validationStatus: "validated", amount: "5.00" },
+          ]
+        : [],
+      registerPayment: async () => ({ success: true }),
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  );
+
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17, 18], idempotent: true });
 });
 
 test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
@@ -504,7 +619,7 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => { mutated = true; return { success: true }; },
@@ -514,7 +629,7 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
     },
   );
 
-  expect(result).toEqual({ paymentId: 17, idempotent: true });
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: true });
   expect(mutated).toBe(false);
 });
 
@@ -530,7 +645,7 @@ test.each(["conflict", "replay"] as const)("rechaza un claim %s sin mutar", asyn
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => { mutated = true; return { success: true }; },
@@ -566,15 +681,15 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
     pago_id: null,
   };
 
-  expect(classify(event, false, requested)).toEqual({ kind: "manual_review" });
+  expect(classify(event, false, requested)).toEqual({ kind: "manual_review", processingEventId: 7 });
   expect(classify({ ...event, status: "failed" }, false, requested))
     .toEqual({ kind: "retry", eventId: 7 });
   expect(classify({ ...event, status: "manual_review" }, false, requested))
     .toEqual({ kind: "manual_review" });
   expect(classify({ ...event, status: "applied", pago_id: 17 }, false, requested))
-    .toEqual({ kind: "applied", paymentId: 17 });
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(classify({ ...event, status: "billed", pago_id: 17 }, false, requested))
-    .toEqual({ kind: "applied", paymentId: 17 });
+    .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(classify({ ...event, status: "billing_pending", pago_id: 17 }, false, requested))
     .toEqual({ kind: "billing", eventId: 7 });
   expect(classify({ ...event, status: "billing_failed", pago_id: 17 }, false, requested))
@@ -601,6 +716,56 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
       compatiblePayloadHashes: [secondDate, "legacy-hash"],
     },
   )).toEqual({ kind: "conflict" });
+});
+
+test("un reintento de Nexa después de marcar CAÍDO se contesta como aplicado con el pago borrado", async () => {
+  const { classifyNexaClaim, processNexaPayment } = await import("./nexaPayments");
+  const requested = { creditoId: 10, amount: "10.00", currency: "GTQ", payloadHash: "a".repeat(64) };
+  const caido = {
+    id: 7,
+    credito_id: 10,
+    amount: "10.00",
+    currency: "GTQ",
+    payload_hash: "a".repeat(64),
+    status: "applied",
+    pago_id: null,
+    pago_id_eliminado: 17,
+  };
+  for (const status of ["applied", "billed", "billing_pending", "billing_running", "billing_unknown", "billing_failed", "processing", "manual_review"]) {
+    expect(classifyNexaClaim({ ...caido, status }, false, requested))
+      .toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
+  }
+  // Un `failed` (Nexa rechazó la transferencia y devolvió el dinero) nunca se contesta como
+  // aplicado, aunque traiga la marca: sigue el camino de failed.
+  expect(classifyNexaClaim({ ...caido, status: "failed" }, false, requested))
+    .toEqual({ kind: "retry", eventId: 7 });
+  // El conflicto y el replay siguen ganando.
+  expect(classifyNexaClaim(caido, true, requested)).toEqual({ kind: "replay" });
+  expect(classifyNexaClaim(caido, false, { ...requested, amount: "11.00" })).toEqual({ kind: "conflict" });
+  // Sin pago borrado, sigue como antes.
+  expect(classifyNexaClaim({ ...caido, pago_id_eliminado: null }, false, requested))
+    .toEqual({ kind: "manual_review" });
+
+  let mutated = false;
+  const result = await processNexaPayment(
+    paymentBody("qa-payment-caido"),
+    { nonce: "nonce-nuevo", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => classifyNexaClaim({ ...caido, status: "billing_pending" }, false, requested),
+      loadCredit: async () => ({ usuarioId: 5, statusCredit: "CAIDO", binding: null }),
+      findPayments: async () => [],
+      registerPayment: async () => { mutated = true; return { success: true }; },
+      applyPayment: async () => { mutated = true; return { success: true }; },
+      complete: async () => { mutated = true; },
+      fail: async () => { mutated = true; },
+      billPayments: async () => { mutated = true; return { kind: "billed" }; },
+      completeBilling: async () => { mutated = true; },
+      failBilling: async () => { mutated = true; },
+    },
+  );
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: true });
+  expect(mutated).toBe(false);
 });
 
 test("el handler verifica el body exacto antes de procesar", async () => {
@@ -641,7 +806,7 @@ test("el handler verifica el body exacto antes de procesar", async () => {
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [],
       registerPayment: async () => ({ success: true }),
@@ -666,7 +831,7 @@ test("el handler verifica el body exacto antes de procesar", async () => {
   });
 
   expect(set.status).toBe(200);
-  expect(result).toEqual({ status: "APPLIED", paymentId: 17, idempotent: true });
+  expect(result).toEqual({ status: "APPLIED", paymentId: 17, paymentIds: [17], idempotent: true });
   expect(claimContext).toMatchObject({
     payloadHash: createHash("sha256").update(rawBody).digest("hex"),
     legacyPayloadHash: createHash("sha256").update(JSON.stringify({
@@ -688,14 +853,14 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
   let applyAttempts = 0;
   let paymentStatus = "pending";
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => eventStatus === "new"
       ? { kind: "new" as const, eventId: 7 }
       : { kind: "retry" as const, eventId: 7 },
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => registered
       ? [{ paymentId: 17, validationStatus: paymentStatus, amount: "10.00" }]
@@ -717,7 +882,7 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
   ).rejects.toThrow("synthetic failure");
   await expect(
     processNexaPayment(body, { nonce: "nonce-retry-2", payloadHash: "a".repeat(64), now: new Date() }, dependencies),
-  ).resolves.toEqual({ paymentId: 17, idempotent: false });
+  ).resolves.toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
   expect({ registered, applyAttempts, eventStatus }).toEqual({ registered: 1, applyAttempts: 2, eventStatus: "applied" });
 });
 
@@ -729,7 +894,7 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
   let registered = 0;
   let applied = 0;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => {
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => {
       const previous = tail;
       let release: () => void = () => undefined;
       tail = new Promise<void>((resolve) => { release = resolve; });
@@ -742,7 +907,7 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => registered
       ? [{ paymentId: 17, validationStatus: applied ? "validated" : "pending", amount: "10.00" }]
@@ -760,8 +925,8 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
   ]);
 
   expect(results).toEqual([
-    { paymentId: 17, idempotent: false },
-    { paymentId: 17, idempotent: true },
+    { paymentId: 17, paymentIds: [17], idempotent: false },
+    { paymentId: 17, paymentIds: [17], idempotent: true },
   ]);
   expect({ registered, applied }).toEqual({ registered: 1, applied: 1 });
 });
@@ -771,7 +936,7 @@ test("serializa referencias distintas del mismo crédito", async () => {
   const locks = new Map<string | number, Promise<void>>();
   const lock = async (
     key: string | number,
-    work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>,
+    work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>,
   ) => {
     const previous = locks.get(key) ?? Promise.resolve();
     let release: () => void = () => undefined;
@@ -797,7 +962,7 @@ test("serializa referencias distintas del mismo crédito", async () => {
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async (eventId: number) => registered.has(eventId)
       ? [{ paymentId: eventId + 10, validationStatus: "pending", amount: "10.00" }]
@@ -871,7 +1036,7 @@ test.each([
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: _case === "convenio" ? "EN_CONVENIO" : "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [...payments],
       registerPayment: async () => ({ success: true }),
@@ -885,7 +1050,11 @@ test.each([
       completeBilling: async (_eventId, paymentId) => { completedBilling.push(paymentId); },
       failBilling: async () => undefined,
     },
-  )).resolves.toEqual({ paymentId: 17, idempotent: false });
+  )).resolves.toEqual({
+    paymentId: 17,
+    paymentIds: payments.map((payment) => payment.paymentId),
+    idempotent: false,
+  });
 
   expect(billed).toEqual([payments.map((payment) => payment.paymentId)]);
   expect(completedBilling).toEqual([17]);
@@ -916,7 +1085,7 @@ test("un billing pendiente no vuelve a autorizar ni aplicar el pago ya persistid
       completeBilling: async () => undefined,
       failBilling: async () => undefined,
     },
-  )).resolves.toEqual({ paymentId: 17, idempotent: false });
+  )).resolves.toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
 
   expect({ paymentMutation, billed }).toEqual({ paymentMutation: false, billed: true });
 });
@@ -927,12 +1096,12 @@ test("un proveedor que pudo aceptar queda billing_unknown y nunca se invoca otra
   let claim: { kind: "new"; eventId: number } | { kind: "manual_review"; phase: "billing" } = { kind: "new", eventId: 7 };
   const billingFailures: Array<{ status: string; code: string }> = [];
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => claim,
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }],
     registerPayment: async () => ({ success: true }),
@@ -972,14 +1141,14 @@ test("éxito del proveedor seguido por fallo local queda desconocido y no reinte
   let providerCalls = 0;
   let manualReview = false;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => manualReview
       ? { kind: "manual_review" as const, phase: "billing" as const }
       : { kind: "new" as const, eventId: 7 },
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }],
     registerPayment: async () => ({ success: true }),
@@ -1021,14 +1190,14 @@ test("un rechazo fiscal definitivo queda billing_failed y no vuelve a emitir ni 
   let billingAttempts = 0;
   let paymentMutations = 0;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; paymentIds: number[]; idempotent: boolean }>) => work(paymentLock),
     claim: async () => claim === "new"
       ? { kind: "new" as const, eventId: 7 }
       : { kind: "billing_failed" as const },
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
-      binding: { activo: true, expires_at: null, max_payment_amount: null },
+      binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
     }),
     findPayments: async () => [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }],
     registerPayment: async () => { paymentMutations += 1; return { success: true }; },
@@ -1075,7 +1244,7 @@ test("facturación automática deshabilitada deja el pago aplicado y la factura 
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
-        binding: { activo: true, expires_at: null, max_payment_amount: null },
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
       }),
       findPayments: async () => [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }],
       registerPayment: async () => ({ success: true }),
@@ -1088,6 +1257,7 @@ test("facturación automática deshabilitada deja el pago aplicado y la factura 
     },
   )).resolves.toEqual({
     paymentId: 17,
+    paymentIds: [17],
     idempotent: false,
     billingStatus: "PENDING",
   });
@@ -1144,4 +1314,267 @@ test("solo clasifica como billed una respuesta fiscal completamente persistida",
     success: true,
     data: { total_facturas: 1, facturas: [{}] },
   })).toEqual({ kind: "unknown", code: "invalid_billing_response" });
+});
+
+test("token obligatorio: rechaza falta de token en pago o binding", async () => {
+  const module = await import("./nexaPayments");
+  const rejectBinding = Reflect.get(module, "getNexaBindingRejection");
+  expect(rejectBinding).toBeFunction();
+  if (typeof rejectBinding !== "function") return;
+
+  const now = new Date("2026-09-08T12:00:00.000Z");
+  const binding = { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" };
+
+  expect(rejectBinding(binding, "10.00", now, "1111222233334444")).toBeNull();
+  expect(rejectBinding(binding, "10.00", now, "9999888877776666")).toBe("token_mismatch");
+  expect(rejectBinding(binding, "10.00", now, undefined)).toBe("token_missing");
+  expect(rejectBinding(
+    { activo: true, expires_at: null, max_payment_amount: null, nexa_token: null },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBe("binding_token_missing");
+  expect(rejectBinding(
+    { activo: false, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBe("binding_inactive");
+  expect(rejectBinding(
+    { activo: true, expires_at: null, max_payment_amount: "1.00", nexa_token: "1111222233334444" },
+    "10.00",
+    now,
+    "9999888877776666",
+  )).toBe("token_mismatch");
+});
+
+test("processNexaPayment rechaza un pago con token no coincidente en el binding", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+  let failedWith: string | undefined;
+
+  await expect(processNexaPayment(
+    { ...paymentBody("qa-token-mismatch"), token: "9999888877776666" },
+    { nonce: "nonce-token-mismatch", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("token_mismatch", 403));
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "token_mismatch" });
+});
+
+test("processNexaPayment acepta un pago con token correcto y sigue el camino feliz", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  let registered = 0;
+  let applied = 0;
+  let completed = 0;
+
+  const result = await processNexaPayment(
+    { ...paymentBody("qa-token-correct"), token: "1111222233334444" },
+    { nonce: "nonce-token-correct", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => registered
+        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
+        : [],
+      registerPayment: async () => { registered += 1; return { success: true }; },
+      applyPayment: async () => { applied += 1; return { success: true }; },
+      complete: async () => { completed += 1; },
+      fail: async () => undefined,
+      ...successfulBilling,
+    },
+  );
+
+  expect(result).toEqual({ paymentId: 17, paymentIds: [17], idempotent: false });
+  expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
+});
+
+test("processNexaPayment: pago sin token en el body es reintentable (503), no un rechazo", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+  let failedWith: string | undefined;
+
+  await expect(processNexaPayment(
+    { ...paymentBody("qa-token-missing"), token: undefined },
+    { nonce: "nonce-token-missing", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("token_missing", 503));
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "token_missing" });
+});
+
+test("el handler responde 503 a un pago sin token, como lo manda el nexa-server viejo", async () => {
+  const { createNexaPaymentHandler } = await import("./nexaPayments");
+  // Body exacto del cliente desplegado antes del token (e8379e73a): sin campo token.
+  const rawBody = JSON.stringify({
+    externalReference: "qa-old-nexa-server",
+    creditoId: 10,
+    amount: "10.00",
+    currency: "GTQ",
+    tokenDate,
+    transactionId: "tx-old",
+  });
+  const timestamp = "1800000000";
+  const nonce = "nonce-old-nexa-server";
+  const secret = "s".repeat(32);
+  const signature = createHmac("sha256", secret).update([
+    "POST",
+    "/internal/nexa/payments/apply",
+    timestamp,
+    nonce,
+    createHash("sha256").update(rawBody).digest("hex"),
+  ].join("\n")).digest("hex");
+  const set: { status?: number | string } = {};
+  let registered = false;
+  let failedWith: string | undefined;
+  const handler = createNexaPaymentHandler({
+    secret,
+    now: () => 1_800_000_000_000,
+    dependencies: {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  });
+
+  const result = await handler({
+    request: new Request("http://localhost/internal/nexa/payments/apply", {
+      method: "POST",
+      body: rawBody,
+      headers: { "x-nexa-timestamp": timestamp, "x-nexa-nonce": nonce, "x-nexa-signature": signature },
+    }),
+    body: undefined,
+    set,
+  });
+
+  // nexa-server (viejo y nuevo) reintenta todo HTTP >= 500; un 403 con código lo rechaza
+  // y Nexa devuelve la transferencia.
+  expect(set.status).toBe(503);
+  expect(result).toEqual({ error: "token_missing" });
+  // El evento queda "failed": el reintento (ya con token) lo reclama de nuevo.
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "token_missing" });
+});
+
+test("processNexaPayment rechaza pago cuando binding no tiene token", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+  let failedWith: string | undefined;
+
+  await expect(processNexaPayment(
+    paymentBody("qa-binding-token-missing"),
+    { nonce: "nonce-binding-token-missing", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: null },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("binding_token_missing", 403));
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "binding_token_missing" });
+});
+
+test("getNexaBindingRejection rechaza binding inactivo incluso con token", async () => {
+  const module = await import("./nexaPayments");
+  const rejectBinding = Reflect.get(module, "getNexaBindingRejection");
+  expect(rejectBinding).toBeFunction();
+  if (typeof rejectBinding !== "function") return;
+
+  const now = new Date("2026-09-08T12:00:00.000Z");
+  expect(rejectBinding(
+    { activo: false, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+    "10.00",
+    now,
+    undefined,
+  )).toBe("binding_inactive");
+});
+
+test("nexaPaymentSchema valida tokens de 10 a 32 dígitos", async () => {
+  const { nexaPaymentSchema } = await import("./nexaPayments");
+  const base = { creditoId: 10, amount: "10.00", currency: "GTQ" as const, tokenDate };
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-digits",
+    token: "1111222233334444",
+  }).success).toBe(true);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-14",
+    token: "12345100000001",
+  }).success).toBe(true);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-short",
+    token: "123456789",
+  }).success).toBe(false);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-letters",
+    token: "aaaa222233334444",
+  }).success).toBe(false);
+
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-token-optional",
+  }).success).toBe(true);
+});
+
+test("getNexaEventFingerprint es invariante al token", async () => {
+  const { getNexaEventFingerprint } = await import("./nexaPayments");
+  const bodyWithoutToken = paymentBody("fingerprint-invariant");
+  const bodyWithToken = { ...bodyWithoutToken, token: "1111222233334444" };
+
+  const fingerprintWithout = getNexaEventFingerprint(bodyWithoutToken);
+  const fingerprintWith = getNexaEventFingerprint(bodyWithToken);
+
+  expect(fingerprintWithout).toBe(fingerprintWith);
 });

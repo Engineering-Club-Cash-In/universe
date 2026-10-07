@@ -1204,6 +1204,20 @@ export interface IdentidadInversionista {
 	sociedad: string | null;
 }
 
+/** Respuesta de POST /creditos/cuenta-nexa en cartera. */
+export type CuentaNexaCredito =
+	| { estado: "deshabilitada" }
+	| { estado: "credito_no_encontrado" }
+	| { estado: "dpi_invalido" }
+	| {
+			estado: "lista";
+			creditoId: number;
+			cuenta: { token: string; identifier: string; nexaUserId: number };
+			nueva: boolean;
+			notificada: boolean;
+	  }
+	| { estado: "pendiente"; creditoId: number; error: string };
+
 export class CarteraBackClient {
 	private config: CarteraBackClientConfig;
 	private circuitBreaker: CircuitBreaker;
@@ -1572,6 +1586,42 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	/**
+	 * Cuenta Nexa del crédito (token de pago de Banco Nexa). Cartera la crea en
+	 * nexa-server si no existe y la guarda en el crédito; es idempotente. Si
+	 * Nexa no responde, cartera contesta 200 con `estado: "pendiente"` y la
+	 * reintenta por su cuenta (avisándole al cliente aparte).
+	 */
+	async solicitarCuentaNexa(
+		numeroSifco: string,
+		dpi: string | null,
+	): Promise<CuentaNexaCredito> {
+		return await this.request<CuentaNexaCredito>(
+			"/creditos/cuenta-nexa",
+			{
+				method: "POST",
+				body: JSON.stringify({ numero_credito_sifco: numeroSifco, dpi }),
+			},
+			false,
+			30_000,
+			false,
+		);
+	}
+
+	/** Marca que el cliente ya recibió su cuenta Nexa (en la bienvenida). */
+	async marcarCuentaNexaNotificada(numeroSifco: string): Promise<void> {
+		await this.request<{ marcada: boolean }>(
+			"/creditos/cuenta-nexa/notificada",
+			{
+				method: "POST",
+				body: JSON.stringify({ numero_credito_sifco: numeroSifco }),
+			},
+			false,
+			15_000,
+			false,
+		);
 	}
 
 	async updateCredito(input: UpdateCreditoInput): Promise<CarteraCredito> {

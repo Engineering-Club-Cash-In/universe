@@ -21,6 +21,7 @@ const storedEvent = (row: Record<string, unknown>): StoredNexaEvent => ({
   payload_hash: String(row.payload_hash),
   status: String(row.status),
   pago_id: row.pago_id === null ? null : Number(row.pago_id),
+  pago_id_eliminado: row.pago_id_eliminado == null ? null : Number(row.pago_id_eliminado),
 });
 
 export async function claimNexaPaymentEvent(
@@ -62,7 +63,7 @@ export async function claimNexaPaymentEvent(
   }
 
   const existing = await client.query(
-    `SELECT id, credito_id, amount, currency, payload_hash, status, pago_id
+    `SELECT id, credito_id, amount, currency, payload_hash, status, pago_id, pago_id_eliminado
        FROM cartera.nexa_payment_events
       WHERE provider = 'NEXA' AND external_reference = $1
       LIMIT 1`,

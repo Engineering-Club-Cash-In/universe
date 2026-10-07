@@ -14,6 +14,13 @@ import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
 import { desaplicarRubrosDelPago } from "./rubros";
 import { emitPaymentReversalToPending } from "../utils/structuredLogger";
+import {
+  esNexaPaymentNotReversibleError,
+  NexaPaymentNotReversibleError,
+  pagoNexaBloqueaAnular,
+  rechazarSiPagoEsNexa,
+  respuestaNexaNoReversible,
+} from "./nexaPagoNoReversible";
 
 function safeNow(): number {
   try {
@@ -126,6 +133,11 @@ export interface RevertPaymentToPendingDependencies {
    * sobre un saldo que cambiaba debajo.
    */
   readonly withCreditLock: typeof withPaymentAdvisoryLock;
+  /**
+   * Un pago que entró por Nexa no se devuelve a pendiente: Nexa ya aprobó la
+   * transferencia y no hay forma de deshacerla. Corre antes de la transacción.
+   */
+  readonly rechazarSiPagoEsNexa: typeof rechazarSiPagoEsNexa;
 }
 
 const defaultDependencies: RevertPaymentToPendingDependencies = {
@@ -135,6 +147,7 @@ const defaultDependencies: RevertPaymentToPendingDependencies = {
   setCapitalSource,
   emitTerminal: emitPaymentReversalToPending,
   withCreditLock: withPaymentAdvisoryLock,
+  rechazarSiPagoEsNexa,
 };
 
 async function reverseAndCleanInvestors(
@@ -181,6 +194,8 @@ export function createRevertPaymentToPending(
     }
     const { credito_id, pago_id } = parseResult.data;
 
+    await dependencies.rechazarSiPagoEsNexa({ credito_id, pago_id });
+
     // 🔥 TRANSACCIÓN ATÓMICA, bajo el candado por crédito. El candado se espera
     // en el pool DEDICADO y NO dentro de la transacción, por la misma razón que
     // en `revalidatePayment`: un waiter que retiene una conexión del pool de
@@ -203,6 +218,12 @@ export function createRevertPaymentToPending(
 
       if (!pago) {
         throw new Error("Payment not found");
+      }
+      // Re-chequeo bajo el candado y antes de escribir: un callback Nexa en
+      // vuelo pudo tomar esta fila después de la lectura previa (que queda
+      // como salida rápida). El catch lo convierte en 409.
+      if (await pagoNexaBloqueaAnular(tx, pago.nexaPaymentEventId)) {
+        throw new NexaPaymentNotReversibleError();
       }
 
       const pagoValidado = pago.validationStatus === "validated";
@@ -452,6 +473,15 @@ export function createRevertPaymentToPending(
       data: result.data,
     };
   } catch (error: any) {
+    if (esNexaPaymentNotReversibleError(error)) {
+      dependencies.emitTerminal({
+        outcome: "rejected",
+        reasonCode: "state_conflict",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+      set.status = 409;
+      return respuestaNexaNoReversible();
+    }
     const reasonCode = error instanceof RevertPaymentCreditRejection
       ? error.reasonCode
       : error?.message === "Payment not found"

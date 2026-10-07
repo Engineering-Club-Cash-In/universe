@@ -85,6 +85,35 @@ export interface VariablesPlantilla {
 	cabinaSeguro?: string;
 }
 
+/** Línea de la cuenta Nexa que la bienvenida automática agrega a las cuentas. */
+export function lineaCuentaNexa(token: string | null | undefined): string {
+	return token
+		? `Además, puede pagar su cuota desde su banco con su código de pago Nexa: *${token}*`
+		: "";
+}
+
+/**
+ * Agrega la cuenta Nexa al final del bloque de cuentas (el que empieza con 💳)
+ * de una bienvenida ya interpolada. Va en el mismo bloque, así que el mensaje
+ * sigue con 5 bloques (template `mensaje5parametro`).
+ *
+ * Solo lo usa la bienvenida AUTOMÁTICA (`send-welcome-message.ts`): la
+ * plantilla compartida no lleva marcador, así que el envío manual (masivo o
+ * desde la ficha) nunca muestra ni manda nada de Nexa.
+ */
+export function agregarCuentaNexaABienvenida(
+	mensaje: string,
+	token: string | null | undefined,
+): string {
+	const linea = lineaCuentaNexa(token);
+	if (!linea) return mensaje;
+	const bloques = mensaje.split("\n\n");
+	const i = bloques.findIndex((b) => b.trimStart().startsWith("💳"));
+	if (i === -1) return mensaje;
+	bloques[i] = `${bloques[i]}\n${linea}`;
+	return bloques.join("\n\n");
+}
+
 /**
  * Fila de `cuotasAtrasadas` tal como la devuelve `getCredito` de cartera: una
  * por par cuota-pago (leftJoin), así que una misma cuota puede venir repetida

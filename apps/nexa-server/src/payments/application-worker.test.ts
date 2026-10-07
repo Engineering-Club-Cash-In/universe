@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ApplicationClaim, ApplicationWorkerRepository } from "./application-worker";
 import { runApplicationWorkerOnce } from "./application-worker";
+import { HttpCarteraPaymentClient } from "./cartera-client";
 
 const baseClaim: ApplicationClaim = {
   id: 7,
@@ -90,6 +91,51 @@ test("applied payment keeps billing pending durable while queuing bank approval"
     new Date("2026-09-08T12:00:00Z"),
     1,
   ]);
+});
+
+test("applied payment forwards every cartera paymentId to the repository", async () => {
+  const finalized: unknown[] = [];
+  await runApplicationWorkerOnce({
+    repository: repository(baseClaim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("applied payment must not retry"); },
+    }),
+    cartera: { applyNexaPayment: async () => ({ status: "APPLIED", paymentId: 701, paymentIds: [701, 702] }) },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect((finalized[0] as unknown[])[1]).toMatchObject({ paymentId: 701, paymentIds: [701, 702] });
+});
+
+test("billing retry against an old cartera replica (no paymentIds) does not send a list that would overwrite the stored one", async () => {
+  const finalized: unknown[] = [];
+  const legacy = new HttpCarteraPaymentClient({
+    baseUrl: "https://cartera.example.com",
+    secret: "c".repeat(32),
+    fetch: async () => Response.json({ status: "APPLIED", paymentId: 701, billingStatus: "PENDING" }),
+  });
+  await runApplicationWorkerOnce({
+    repository: repository({ ...baseClaim, carteraPaymentId: 701 }, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("billing retry must not fail"); },
+    }),
+    cartera: legacy,
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  const outcome = (finalized[0] as unknown[])[1] as { paymentId: number; paymentIds?: number[] };
+  expect(outcome.paymentId).toBe(701);
+  expect(outcome.paymentIds).toBeUndefined();
 });
 
 test.each(["rejected", "different_payment", "missing_token"])("billing retry %s cannot reject or replace applied money", async (scenario) => {
@@ -184,16 +230,71 @@ test("returned transfer rejection keeps precedence over unsupported values", asy
   ]);
 });
 
+test("manda a cartera el token completo: prefijo + identificador", async () => {
+  const finalized: unknown[] = [];
+  const receivedTransaction: unknown[] = [];
+  const claim: ApplicationClaim = {
+    ...baseClaim,
+    tokenPrefix: "32200",
+    tokenIdentifier: "100000002",
+  };
+
+  await runApplicationWorkerOnce({
+    repository: repository(claim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("token passing must not fail"); },
+    }),
+    cartera: {
+      applyNexaPayment: async (input) => {
+        receivedTransaction.push(input.transaction);
+        return { status: "APPLIED", paymentId: 701 };
+      },
+    },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(receivedTransaction[0]).toMatchObject({
+    token: "32200100000002",
+  });
+  expect(finalized[0]).toEqual([
+    7,
+    { paymentId: 701, reviewStatus: "APPROVED", failureReason: null, nextAttemptAt: null },
+    new Date("2026-09-08T12:00:00Z"),
+    1,
+  ]);
+});
+
 function repository(claim: ApplicationClaim, callbacks: {
   finalize: (...args: Parameters<ApplicationWorkerRepository["finalizeApplication"]>) => void;
-  lookup: () => number | null;
+  lookup: (options?: { includeInactive?: boolean }) => number | null;
   fail: () => void;
 }): ApplicationWorkerRepository {
   let claimed = false;
   return {
     claimNextApplication: async () => claimed ? null : (claimed = true, claim),
-    resolveCreditoId: async () => callbacks.lookup(),
+    resolveCreditoId: async (_id, _prefix, options) => callbacks.lookup(options),
     finalizeApplication: async (...args) => callbacks.finalize(...args),
     markApplicationFailed: async () => callbacks.fail(),
   };
 }
+
+test("un reintento de pago ya aplicado resuelve el crédito aunque esté inactivo; el primer intento no", async () => {
+  const seen: Array<boolean | undefined> = [];
+  for (const carteraPaymentId of [null, 701]) {
+    await runApplicationWorkerOnce({
+      repository: repository({ ...baseClaim, carteraPaymentId }, {
+        finalize: () => {},
+        lookup: (options) => { seen.push(options?.includeInactive); return 42; },
+        fail: () => {},
+      }),
+      cartera: { applyNexaPayment: async () => ({ status: "APPLIED", paymentId: 701 }) },
+      leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,
+    });
+  }
+  expect(seen).toEqual([false, true]);
+});

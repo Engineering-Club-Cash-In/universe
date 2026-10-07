@@ -1,0 +1,312 @@
+/**
+ * Send Welcome Message Service
+ *
+ * Envía el WhatsApp de "Bienvenida" al cliente una vez que su crédito ya existe
+ * en cartera. Reutiliza exactamente la misma infraestructura que el envío de
+ * cobros ("Enviar Directo"): la plantilla del server (`cobros-plantillas.ts`),
+ * la interpolación de variables (`interpolar`) y `sendWhatsappTemplate`
+ * (SimpleTech / Meta).
+ *
+ * Diseño portable y desacoplado a propósito:
+ *  - Recibe SOLO `opportunityId` + `userId` (el `numeroSifco` es opcional; si no
+ *    viene se resuelve desde `opportunities.numeroSifco`, que `closeOpportunity`
+ *    ya dejó seteado). Así se puede disparar desde donde sea — hoy al 90% (al
+ *    confirmar contratos firmados, desde `bienvenida-credito.ts`), mañana al
+ *    100% (desembolso) o manual — sin tocar este servicio.
+ *  - Nunca lanza error al caller: devuelve un resultado y loguea. Un fallo de
+ *    WhatsApp jamás debe romper el flujo de cierre de la oportunidad.
+ */
+
+import { eq, sql } from "drizzle-orm";
+import { db } from "../db";
+import { bienvenidasCredito } from "../db/schema/cobros-send-logs";
+import { leads, opportunities } from "../db/schema/crm";
+import {
+	agregarCuentaNexaABienvenida,
+	interpolar,
+	PLANTILLAS_MENSAJES,
+	seguroPorAseguradora,
+} from "../lib/cobros-plantillas";
+import { persistCobrosSendLog } from "../lib/cobros-send-log";
+import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
+import { primerTelefono } from "../lib/phone-utils";
+import { sendWhatsappTemplate } from "../lib/simpletech";
+import { carteraBackClient } from "./cartera-back-client";
+import { isCarteraBackEnabled } from "./cartera-back-integration";
+
+/** Id de la plantilla de bienvenida en `cobros-plantillas.ts`. */
+const PLANTILLA_BIENVENIDA_ID = "bienvenida";
+
+const LOG_PREFIX = "[Bienvenida]";
+
+export interface SendWelcomeMessageParams {
+	opportunityId: string;
+	userId: string;
+	/** Si no se pasa, se resuelve desde `opportunities.numeroSifco`. */
+	numeroSifco?: string;
+	/** Token de la cuenta Nexa; si viene, la bienvenida lo incluye. */
+	cuentaNexa?: string | null;
+}
+
+export interface SendWelcomeMessageResult {
+	sent: boolean;
+	/** true cuando no se envió por una condición esperada (sin teléfono, etc.). */
+	skipped?: boolean;
+	reason?: string;
+	error?: string;
+	templateMessageId?: string;
+}
+
+/**
+ * Día de pago para `{fechaPago}`: tomamos el día del mes de la cuota pendiente
+ * más próxima (menor `fecha_vencimiento`) que devuelve cartera — mismo criterio
+ * que el masivo de cobros. Si no hay cuotas pendientes, caemos al
+ * `diaPagoMensual` de la oportunidad (que vive en el CRM).
+ */
+function resolverDiaPago(
+	cuotasPendientes: Array<{ fecha_vencimiento: string }> | undefined,
+	fallbackDia: number | null,
+): string {
+	if (cuotasPendientes && cuotasPendientes.length > 0) {
+		const proxima = [...cuotasPendientes].sort((a, b) =>
+			a.fecha_vencimiento.localeCompare(b.fecha_vencimiento),
+		)[0];
+		// `fecha_vencimiento` ISO "YYYY-MM-DD" → día = chars 8-10.
+		const dia = Number.parseInt(proxima.fecha_vencimiento.substring(8, 10), 10);
+		if (dia) return String(dia);
+	}
+	return fallbackDia ? String(fallbackDia) : "";
+}
+
+type ReservaBienvenida = "nueva" | "ya_enviada" | "en_curso";
+
+/**
+ * Reserva la bienvenida automática del crédito antes de llamar a WhatsApp
+ * (tabla `bienvenidas_credito`, migración 0048). Solo una nueva o una fallida
+ * se manda; una enviada o en curso no, así dos procesos del CRM (disparo y
+ * barrido, o dos instancias) no la mandan dos veces.
+ */
+async function reservarBienvenida(
+	numeroSifco: string,
+): Promise<ReservaBienvenida> {
+	const [tomada] = await db
+		.insert(bienvenidasCredito)
+		.values({ numeroCreditoSifco: numeroSifco, estado: "enviando" })
+		.onConflictDoUpdate({
+			target: bienvenidasCredito.numeroCreditoSifco,
+			set: {
+				estado: "enviando",
+				intentos: sql`${bienvenidasCredito.intentos} + 1`,
+				actualizadoAt: new Date(),
+			},
+			setWhere: eq(bienvenidasCredito.estado, "fallida"),
+		})
+		.returning({ sifco: bienvenidasCredito.numeroCreditoSifco });
+	if (tomada) return "nueva";
+	const [actual] = await db
+		.select({ estado: bienvenidasCredito.estado })
+		.from(bienvenidasCredito)
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco))
+		.limit(1);
+	// Un "enviando" que quedó sin cerrar (proceso caído) no se reenvía: no se
+	// sabe si llegó, y una bienvenida repetida es peor que una perdida.
+	return actual?.estado === "enviada" ? "ya_enviada" : "en_curso";
+}
+
+async function cerrarBienvenida(
+	numeroSifco: string,
+	estado: "enviada" | "fallida",
+): Promise<void> {
+	await db
+		.update(bienvenidasCredito)
+		.set({ estado, actualizadoAt: new Date() })
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco));
+}
+
+/** Deps inyectables solo para tests — en producción no se pasa nada. */
+export interface SendWelcomeMessageDeps {
+	reservar?: (numeroSifco: string) => Promise<ReservaBienvenida>;
+	cerrar?: (
+		numeroSifco: string,
+		estado: "enviada" | "fallida",
+	) => Promise<void>;
+}
+
+/**
+ * Envía el mensaje de bienvenida del crédito recién creado.
+ * Idempotencia: NO se aplica guarda — el crédito se cierra una sola vez. El log
+ * en `cobros_send_logs` queda como traza de que ya se envió.
+ */
+export async function sendWelcomeMessage(
+	params: SendWelcomeMessageParams,
+	deps: SendWelcomeMessageDeps = {},
+): Promise<SendWelcomeMessageResult> {
+	const { opportunityId, userId } = params;
+	const reservar = deps.reservar ?? reservarBienvenida;
+	const cerrar = deps.cerrar ?? cerrarBienvenida;
+
+	try {
+		// 0. Habilitado por env: solo se envía si BIENVENIDA_WHATSAPP_ENABLED="true".
+		//    Si no, se omite (condición esperada, no error) y el cierre sigue normal.
+		if (process.env.BIENVENIDA_WHATSAPP_ENABLED !== "true") {
+			console.log(
+				`${LOG_PREFIX} BIENVENIDA_WHATSAPP_ENABLED != "true"; no se envía bienvenida`,
+			);
+			return { sent: false, skipped: true, reason: "deshabilitado" };
+		}
+
+		if (!isCarteraBackEnabled()) {
+			console.log(
+				`${LOG_PREFIX} Cartera-back deshabilitado; no se envía bienvenida`,
+			);
+			return { sent: false, skipped: true, reason: "cartera_back_disabled" };
+		}
+
+		// 1. Datos locales: teléfono del cliente, numeroSifco y día de pago fallback.
+		const [row] = await db
+			.select({
+				leadPhone: leads.phone,
+				numeroSifco: opportunities.numeroSifco,
+				diaPagoMensual: opportunities.diaPagoMensual,
+				insuranceProvider: opportunities.insuranceProvider,
+			})
+			.from(opportunities)
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.where(eq(opportunities.id, opportunityId))
+			.limit(1);
+
+		if (!row) {
+			console.error(`${LOG_PREFIX} Oportunidad ${opportunityId} no encontrada`);
+			return { sent: false, error: "Oportunidad no encontrada" };
+		}
+
+		const numeroSifco = params.numeroSifco ?? row.numeroSifco;
+		if (!numeroSifco) {
+			console.error(
+				`${LOG_PREFIX} Oportunidad ${opportunityId} sin numeroSifco`,
+			);
+			return { sent: false, error: "Crédito sin numeroSifco" };
+		}
+
+		// El modo prueba se resuelve ANTES de exigir teléfono: con TEST_MESSAGE
+		// todo va al número de prueba, aunque la oportunidad no tenga uno válido.
+		const telefono = primerTelefono(row.leadPhone);
+		const testMode = isTestModeEnabled();
+		if (!telefono && !testMode) {
+			console.log(
+				`${LOG_PREFIX} Crédito ${numeroSifco} sin teléfono válido; se omite`,
+			);
+			return { sent: false, skipped: true, reason: "sin_telefono" };
+		}
+
+		// 2. Traer el crédito recién creado desde cartera (asesor, cuota, cliente,
+		//    cuotas). Justo tras crearlo, el primer GET es cache-miss → datos frescos.
+		const credito = await carteraBackClient.getCredito(numeroSifco);
+
+		// 3. Armar variables de la plantilla. La bienvenida usa clienteNombre,
+		//    fechaPago, cuotaMensual, nombreAsesor, la aseguradora del cliente (si
+		//    no, a un cliente de GYT le saldría Seguros Universales) y la cuenta
+		//    Nexa; el resto va en blanco (la interpolación reemplaza vacíos por "").
+		const variables = {
+			clienteNombre: credito.usuario?.nombre ?? "",
+			fechaPago: resolverDiaPago(credito.cuotasPendientes, row.diaPagoMensual),
+			cuotaMensual: credito.credito?.cuota ?? "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: credito.asesor?.telefono ?? "",
+			nombreAsesor: credito.asesor?.nombre ?? "",
+			expectativaMora: "",
+			...seguroPorAseguradora(row.insuranceProvider),
+		};
+
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(p) => p.id === PLANTILLA_BIENVENIDA_ID,
+		);
+		if (!plantilla) {
+			console.error(
+				`${LOG_PREFIX} Plantilla "${PLANTILLA_BIENVENIDA_ID}" no encontrada`,
+			);
+			return { sent: false, error: "Plantilla de bienvenida no encontrada" };
+		}
+
+		// La cuenta Nexa la agrega solo este envío automático; la plantilla
+		// compartida (envío manual) no la lleva.
+		const mensaje = agregarCuentaNexaABienvenida(
+			interpolar(plantilla.cuerpo, variables),
+			params.cuentaNexa,
+		);
+
+		// 4. Test-mode + envío con la MISMA función que usa "Enviar Directo".
+		const telefonoDestino = testMode ? getTestPhone() : (telefono as string);
+
+		// Reserva atómica del crédito: con dos procesos del CRM a la vez, solo
+		// uno manda la bienvenida.
+		const reserva = await reservar(numeroSifco);
+		if (reserva !== "nueva") {
+			console.log(
+				`${LOG_PREFIX} Bienvenida de ${numeroSifco} ${reserva === "ya_enviada" ? "ya enviada" : "en curso en otro proceso"}; no se repite`,
+			);
+			return { sent: false, skipped: true, reason: reserva };
+		}
+
+		const result = await sendWhatsappTemplate({
+			phone: telefonoDestino,
+			message: mensaje,
+			logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
+		});
+		try {
+			await cerrar(numeroSifco, result.success ? "enviada" : "fallida");
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.error(
+				`${LOG_PREFIX} No se pudo cerrar la reserva de ${numeroSifco}: ${msg}`,
+			);
+		}
+
+		// 5. Log de traza en cobros_send_logs.
+		await persistCobrosSendLog({
+			numeroCreditoSifco: numeroSifco,
+			plantillaId: PLANTILLA_BIENVENIDA_ID,
+			telefono: telefonoDestino,
+			mensaje,
+			providerRequest: result.providerRequest ?? null,
+			createdBy: userId,
+			result: result.success
+				? {
+						success: true,
+						providerResponse: {
+							...(result.providerResponse ?? {}),
+							templateMessageId: result.templateMessageId,
+							testMode,
+							realTarget: testMode ? (telefono ?? undefined) : undefined,
+						},
+					}
+				: {
+						success: false,
+						errorMessage: result.error,
+						providerResponse: {
+							...(result.providerResponse ?? {}),
+							...(testMode
+								? { testMode, realTarget: telefono ?? undefined }
+								: {}),
+						},
+					},
+		});
+
+		if (!result.success) {
+			console.error(
+				`${LOG_PREFIX} Falló envío para ${numeroSifco}: ${result.error}`,
+			);
+			return { sent: false, error: result.error };
+		}
+
+		console.log(`${LOG_PREFIX} ✓ Bienvenida enviada para ${numeroSifco}`);
+		return { sent: true, templateMessageId: result.templateMessageId };
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error(`${LOG_PREFIX} Error no controlado: ${msg}`);
+		return { sent: false, error: msg };
+	}
+}

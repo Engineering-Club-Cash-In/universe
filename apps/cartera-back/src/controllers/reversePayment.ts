@@ -20,6 +20,7 @@ import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
+import type { anularCondonacionesNexaPorPagoPendiente } from "./condonacionNexaPagoPendiente";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 import {
@@ -31,6 +32,14 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import {
+  esNexaPaymentNotReversibleError,
+  NexaPaymentNotReversibleError,
+  desligarFilaDeEventoNexaFallido,
+  pagoNexaBloqueaAnular,
+  rechazarSiPagoEsNexa,
+  respuestaNexaNoReversible,
+} from "./nexaPagoNoReversible";
 import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
 import {
   buildInstallmentRemainderReplication,
@@ -124,6 +133,17 @@ export interface ReversePaymentDependencies {
    * corrida.
    */
   readonly restituirMora: typeof updateMora;
+  /**
+   * Portero de negocio: un pago que entró por Nexa no se anula (Nexa ya aprobó
+   * la transferencia y no hay forma de deshacerla). Corre ANTES de abrir la
+   * transacción y de tomar el candado, y tira `NexaPaymentNotReversibleError`.
+   */
+  readonly rechazarSiPagoEsNexa: typeof rechazarSiPagoEsNexa;
+  /**
+   * Anula las condonaciones Nexa que se sostenían en el pago revertido si
+   * estaba pendiente (drizzle/0052). Opcional: quien no la pasa no la corre.
+   */
+  readonly anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -133,6 +153,12 @@ const defaultDependencies: ReversePaymentDependencies = {
   withCreditLock: withPaymentAdvisoryLock,
   refrescarProyeccion: refrescarProyeccionTrasReversa,
   restituirMora: updateMora,
+  rechazarSiPagoEsNexa,
+  // Por `import()`: arrastra `./latefee`, que varios archivos de la suite mockean.
+  anularCondonacionesPorPagoPendiente: async (params) => {
+    const { anularCondonacionesNexaPorPagoPendiente: anular } = await import("./condonacionNexaPagoPendiente");
+    return anular(params);
+  },
 };
 
 export function createReversePayment(
@@ -168,6 +194,10 @@ export function createReversePayment(
     }
     const { credito_id, pago_id } = parseResult.data;
 
+    // Pago Nexa: no se anula. Salida rápida antes del candado; el chequeo que
+    // decide va dentro de la transacción (paso 2️⃣).
+    await dependencies.rechazarSiPagoEsNexa({ credito_id, pago_id });
+
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
@@ -198,6 +228,15 @@ export function createReversePayment(
       if (!pago) {
         throw new Error("Payment not found");
       }
+      // Re-chequeo bajo el candado y antes de escribir: un callback Nexa en
+      // vuelo pudo tomar esta fila después de la lectura previa. El catch lo
+      // convierte en 409 y la transacción no deja nada escrito.
+      if (await pagoNexaBloqueaAnular(tx, pago.nexaPaymentEventId)) {
+        throw new NexaPaymentNotReversibleError();
+      }
+      // Fila de un evento `failed`: se desliga en esta misma transacción (la reversa la resetea a
+      // cero o la borra), para que un reintento de Nexa registre limpio. Ver el helper.
+      await desligarFilaDeEventoNexaFallido(tx, pago_id, pago.nexaPaymentEventId);
 
       const pagoValidado = esPagoAplicado(pago.validationStatus);
       previousPaymentState = pagoValidado ? "applied" : "pending";
@@ -950,6 +989,21 @@ export function createReversePayment(
       }
 
       // ======================================================================
+      // 🧾 CONDONACIONES NEXA SOSTENIDAS POR ESTE PENDIENTE
+      // ======================================================================
+      // Si el pago revertido estaba pendiente y una condonación Nexa a tiempo
+      // se apoyaba en él para dar el crédito por al día, se anula en esta misma
+      // transacción (la mora vuelve). Un pago ya validado no: quedó firme.
+      if (pago.validationStatus === "pending") {
+        await dependencies.anularCondonacionesPorPagoPendiente?.({
+          credito_id,
+          pago_id,
+          accion: "revirtio",
+          dbClient: tx as unknown as typeof db,
+        });
+      }
+
+      // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN
       // ======================================================================
       return {
@@ -1255,6 +1309,19 @@ export function createReversePayment(
     }
     return response;
   } catch (error: unknown) {
+    if (esNexaPaymentNotReversibleError(error)) {
+      set.status = 409;
+      emitPaymentReversal({
+        outcome: "rejected",
+        previousPaymentState: "unknown",
+        creditUpdated: false,
+        investmentsReversed: false,
+        manualActionRequired: false,
+        durationMs: elapsedMilliseconds(startedAt),
+        reasonCode: "state_conflict",
+      }, telemetryLogger);
+      return respuestaNexaNoReversible();
+    }
     const errorMessage = caughtErrorMessage(error);
     const terminal = classifyPaymentReversalFailure({
       errorMessage,

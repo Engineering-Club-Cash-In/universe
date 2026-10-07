@@ -24,6 +24,8 @@
 		{ "key": "JWT_REFRESH_SECRET", "runtime": true },
 		{ "key": "JWT_SECRET", "runtime": true },
 
+		{ "key": "NEXA_CARTERA_EVENTS_SECRET", "runtime": true },
+		{ "key": "NEXA_SERVER_URL", "runtime": true },
 		{ "key": "PORT", "runtime": true },
 		{ "key": "PORTAL_PROVISIONING_SECRET", "runtime": true },
 		{ "key": "R2_ACCESS_KEY_ID", "runtime": true },

@@ -21,6 +21,7 @@ import {
 	investmentRealizedReportProcedure,
 } from "../lib/orpc";
 import {
+	CarteraBackHttpError,
 	carteraBackClient,
 	type FacturacionMesResponse,
 	type FlujoCuotasInversionesResponse,
@@ -31,12 +32,22 @@ import {
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 
-export function fetchReinvestmentLiquidaciones(
+export async function fetchReinvestmentLiquidaciones(
 	input: { mes: number; anio: number },
 	client: Pick<typeof carteraBackClient, "getReinversionLiquidaciones"> =
 		carteraBackClient,
 ) {
-	return client.getReinversionLiquidaciones(input);
+	try {
+		return await client.getReinversionLiquidaciones(input);
+	} catch (error) {
+		// 422 = datos del período que no concilian (no es falla de cartera).
+		if (error instanceof CarteraBackHttpError && error.status === 422) {
+			throw new ORPCError("UNPROCESSABLE_CONTENT", {
+				message: "No se puede mostrar la conciliación de este período",
+			});
+		}
+		throw error;
+	}
 }
 
 export const reportesCarteraRouter = {

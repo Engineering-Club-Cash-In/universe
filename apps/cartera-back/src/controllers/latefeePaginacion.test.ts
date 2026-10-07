@@ -39,6 +39,12 @@ const CONDONACIONES = Array.from({ length: 5 }, (_, i) => ({
   montoCondonacion: "50.00",
 }));
 
+/** Lo que devuelve la query de totales de condonaciones (numeric de Postgres: strings). */
+let totalesCondonaciones: { monto_total: string | null; monto_total_automatica: string | null } = {
+  monto_total: "250.00",
+  monto_total_automatica: "100.00",
+};
+
 // Guarda el estado de la última query de datos para poder afirmar LIMIT/OFFSET.
 let ultimaQueryDatos: ChainState = {};
 /** Último predicado WHERE que armó el controlador (para renderizar su SQL). */
@@ -105,7 +111,7 @@ mock.module("../database", () => {
     if (esTotales) {
       const { chain } = makeChain(() => [
         esCondonaciones
-          ? { condonaciones: filas.length, monto_total: "250.00" }
+          ? { condonaciones: filas.length, ...totalesCondonaciones }
           : { creditos: filas.length, mora_total: "700.00" },
       ]);
       return chain;
@@ -159,6 +165,7 @@ mock.module("../utils/moraPagadaPorCuota", () => ({
 // anotaciones del ledger no afectan los conteos de condonación
 mock.module("../utils/anotarMoraPagada", () => ({
   anotarMoraPagada: async () => [],
+  compensarAnotacionesVivas: async () => [],
 }));
 
 const {
@@ -169,6 +176,7 @@ const {
   ParametroInvalidoError,
   updateMora,
   condonarTodasLasMoras,
+  textoMotivoCondonacion,
 } = await import("./latefee");
 
 const { PgDialect } = await import("drizzle-orm/pg-core");
@@ -225,6 +233,19 @@ describe("getCreditosWithMoras (paginación)", () => {
   });
 });
 
+describe("textoMotivoCondonacion", () => {
+  it("traduce el código de la condonación Nexa y deja intacto el motivo manual", () => {
+    expect(textoMotivoCondonacion("NEXA_ACH_A_TIEMPO")).toBe("Pago Nexa a tiempo (ACH)");
+    expect(textoMotivoCondonacion("Cliente en convenio")).toBe("Cliente en convenio");
+    expect(textoMotivoCondonacion(null)).toBe("");
+  });
+
+  it("con la marca de ALERTA agregada sigue traduciendo el código y conserva la alerta visible", () => {
+    expect(textoMotivoCondonacion("NEXA_ACH_A_TIEMPO — ALERTA: el crédito no quedó al día tras aplicar el pago"))
+      .toBe("Pago Nexa a tiempo (ACH) — ALERTA: el crédito no quedó al día tras aplicar el pago");
+  });
+});
+
 describe("getCondonacionesMora (paginación)", () => {
   it("pagina y devuelve totales del conjunto filtrado", async () => {
     const res: any = await getCondonacionesMora({ page: 2, pageSize: 2 });
@@ -232,7 +253,28 @@ describe("getCondonacionesMora (paginación)", () => {
     expect(ultimaQueryDatos).toEqual({ limit: 2, offset: 2 });
     expect(res.data.length).toBe(2);
     expect(res.pagination).toEqual({ page: 2, pageSize: 2, total: 5, totalPages: 3 });
-    expect(res.totales).toEqual({ monto_total: "250.00", condonaciones: 5 });
+    expect(res.totales).toEqual({
+      monto_total: "250.00",
+      monto_total_manual: "150.00",
+      monto_total_automatica: "100.00",
+      condonaciones: 5,
+    });
+    // Cada fila trae la marca y el motivo legible.
+    expect(res.data.every((f: any) => f.automatica === false && "motivo_texto" in f)).toBe(true);
+  });
+
+  it("los totales no pierden centavos: manual + automática = total exacto", async () => {
+    totalesCondonaciones = { monto_total: "9007199254740991.99", monto_total_automatica: "1234.56" };
+    try {
+      const res: any = await getCondonacionesMora({ page: 1, pageSize: 2 });
+      expect(res.totales).toMatchObject({
+        monto_total: "9007199254740991.99",
+        monto_total_manual: "9007199254739757.43",
+        monto_total_automatica: "1234.56",
+      });
+    } finally {
+      totalesCondonaciones = { monto_total: "250.00", monto_total_automatica: "100.00" };
+    }
   });
 });
 

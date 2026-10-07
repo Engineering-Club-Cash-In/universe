@@ -15,6 +15,7 @@ import {
   inversionistas,
   pagos_credito_inversionistas,
   cuentasEmpresa,
+  audit_logs,
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -79,7 +80,11 @@ import {
   type PaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
-import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
+import {
+  carteraStructuredLogger,
+  emitNexaPaymentEdited,
+  emitRecoveredDuplicatePendingInstallment,
+} from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
 import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
 
@@ -4794,6 +4799,81 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
  * Edita campos de un pago existente (abonos, restantes, mora, otros, etc.)
  * Solo actualiza los campos que se envíen. Recalcula monto_aplicado y pagado automáticamente.
  */
+// Columnas numéricas de `pagos_credito` que edita `editarPago`: se comparan
+// por valor ("100" y "100.00" son lo mismo). `otros` es text pero guarda montos.
+const CAMPOS_NUMERICOS_EDICION = new Set([
+  "abono_capital", "abono_interes", "abono_iva_12", "abono_seguro", "abono_gps",
+  "capital_restante", "interes_restante", "iva_12_restante", "seguro_restante", "gps_restante",
+  "membresias", "membresias_pago", "otros", "mora", "monto_boleta", "monto_aplicado",
+]);
+
+const mismoValorEdicion = (campo: string, antes: unknown, despues: unknown): boolean => {
+  if (antes == null || despues == null) return antes == despues;
+  if (campo === "fecha_pago") {
+    return new Date(antes as string | Date).getTime() === new Date(despues as string | Date).getTime();
+  }
+  if (CAMPOS_NUMERICOS_EDICION.has(campo)) {
+    try {
+      return new Big(antes as string).eq(new Big(despues as string));
+    } catch {
+      return String(antes) === String(despues); // `otros` con texto no numérico
+    }
+  }
+  return antes === despues;
+};
+
+/** Qué campos del update difieren de la fila leída bajo el candado. */
+export function cambiosDeEdicion(pago: Record<string, unknown>, updateData: Record<string, unknown>) {
+  return Object.entries(updateData)
+    .filter(([campo, despues]) => !mismoValorEdicion(campo, pago[campo], despues))
+    .map(([campo, despues]) => ({ campo, antes: pago[campo] ?? null, despues }));
+}
+
+/**
+ * Constancia de que un operador editó un pago que entró por Nexa. Va a
+ * `audit_logs` (almacenamiento durable) con el detalle completo: quién, pago,
+ * crédito, evento Nexa y el antes/después de cada campo. El log operativo solo
+ * recibe el conteo (ver `emitNexaPaymentEdited`).
+ *
+ * No es la misma transacción que el UPDATE: `editarPago` no abre una (escribe
+ * con `db` bajo el advisory lock del crédito), así que se escribe justo después,
+ * todavía bajo el candado. Si la escritura falla, la edición ya está hecha y NO
+ * se cae: queda un log de error sin datos y `audit_persisted: false`.
+ */
+async function dejarConstanciaEdicionNexa(datos: {
+  usuario?: string | number | null;
+  pago_id: number;
+  credito_id: number | null;
+  nexa_payment_event_id: number;
+  cambios: { campo: string; antes: unknown; despues: unknown }[];
+}): Promise<void> {
+  let auditPersisted = true;
+  try {
+    await db.insert(audit_logs).values({
+      user_id: typeof datos.usuario === "number" ? datos.usuario : null,
+      user_email: typeof datos.usuario === "string" ? datos.usuario : null,
+      method: "PATCH",
+      path: "/api/pago-nexa-editado",
+      status_code: 200,
+      body: JSON.stringify({
+        pago_id: datos.pago_id,
+        credito_id: datos.credito_id,
+        nexa_payment_event_id: datos.nexa_payment_event_id,
+      }),
+      response: JSON.stringify({ cambios: datos.cambios }),
+    });
+  } catch {
+    auditPersisted = false;
+    // Sin el error crudo: puede traer los valores del INSERT (montos, texto).
+    carteraStructuredLogger.emit("audit.persistence", "failed", {
+      operation: "write",
+      retryable: false,
+      error_code: "persistence_failed",
+    });
+  }
+  emitNexaPaymentEdited(datos.cambios.length, auditPersisted);
+}
+
 export async function editarPago(pago_id: number, campos: {
   abono_capital?: string;
   abono_interes?: string;
@@ -4815,7 +4895,7 @@ export async function editarPago(pago_id: number, campos: {
   pagado?: boolean;
   fecha_pago?: string;
   origen_pago?: "transferencia" | "cheque" | "boleta";
-}) {
+}, usuario?: string | number | null) {
   try {
     /**
      * 1. Pre-lectura MÍNIMA: sólo para saber de qué crédito es el pago y con qué
@@ -4998,7 +5078,28 @@ export async function editarPago(pago_id: number, campos: {
         .where(eq(pagos_credito.pago_id, pago_id))
         .returning();
 
-
+      // Editar un pago que entró por Nexa no se bloquea (decisión de negocio),
+      // pero deja constancia: cartera y Nexa quedan distintos.
+      // Solo lo que de verdad cambió: el front manda todos los campos del
+      // formulario, toque el operador uno o ninguno. Sin cambios no hay rastro.
+      // Se compara contra lo PERSISTIDO (RETURNING), no contra el payload:
+      // numeric(18,2) redondea al guardar (30.004 queda 30.00).
+      const persistido = pagoActualizado as Record<string, unknown> | undefined;
+      const cambios = pago.nexaPaymentEventId != null && persistido
+        ? cambiosDeEdicion(
+            pago as Record<string, unknown>,
+            Object.fromEntries(Object.keys(updateData).map((campo) => [campo, persistido[campo]])),
+          )
+        : [];
+      if (cambios.length > 0) {
+        await dejarConstanciaEdicionNexa({
+          usuario,
+          pago_id,
+          credito_id: pago.credito_id,
+          nexa_payment_event_id: pago.nexaPaymentEventId as number,
+          cambios,
+        });
+      }
 
       return {
         success: true,

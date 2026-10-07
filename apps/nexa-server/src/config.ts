@@ -7,6 +7,11 @@ const envOrigins = z.string().transform((value) =>
   value.split(",").map((origin) => origin.trim()).filter(Boolean),
 ).optional();
 const positiveFiniteInteger = z.coerce.number().int().finite().positive();
+const optionalText = z.string().trim().optional().transform((value) => value || undefined);
+// Lista separada por comas; vacía o ausente = alertas por correo apagadas.
+const envEmails = z.string().optional().transform((value) =>
+  (value ?? "").split(",").map((email) => email.trim()).filter(Boolean),
+).pipe(z.array(z.string().email()));
 
 const configSchema = z.object({
   port: z.coerce.number().int().positive().default(7010),
@@ -29,6 +34,7 @@ const configSchema = z.object({
   workerMaxBackoffSeconds: positiveFiniteInteger.default(300),
   nexaAdminApiKey: z.string().trim().min(1).optional(),
   carteraInternalApiSecret: z.string().trim().min(1).optional(),
+  nexaCarteraEventsSecret: z.string().trim().min(1).optional(),
   carteraApiBaseUrl: z.string().url().optional(),
   carteraApiTimeoutMs: z.coerce.number().int().positive().default(10_000),
   carteraTargetEnv: z.enum(["development", "qa", "production"]).optional(),
@@ -40,6 +46,9 @@ const configSchema = z.object({
   enableTestUi: envBoolean.default(false),
   nodeEnv: z.string().default("development"),
   deploymentMode: z.enum(["integration", "qa_real_payments", "production"]).default("integration"),
+  nexaAlertasCorreos: envEmails,
+  resendApiKey: optionalText,
+  emailDomain: optionalText,
 }).superRefine((config, context) => {
   const tlsPaths = [config.nexaClientCertPath, config.nexaClientKeyPath, config.nexaCaCertPath];
   if (config.nexaMtlsMode === "required" && tlsPaths.some((value) => !value)) {
@@ -73,6 +82,14 @@ const configSchema = z.object({
       }
     }
   }
+  if (config.nexaCarteraEventsSecret !== undefined) {
+    if (Buffer.byteLength(config.nexaCarteraEventsSecret) < 32) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaCarteraEventsSecret"], message: "NEXA_CARTERA_EVENTS_SECRET requires at least 32 bytes" });
+    }
+    if (config.nexaCarteraEventsSecret === config.carteraInternalApiSecret || config.nexaCarteraEventsSecret === config.nexaAdminApiKey) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaCarteraEventsSecret"], message: "NEXA_CARTERA_EVENTS_SECRET must be a separate credential" });
+    }
+  }
   if (config.enableAdminApi && !config.nexaAdminApiKey) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaAdminApiKey"], message: "Admin API requires NEXA_ADMIN_API_KEY" });
   }
@@ -88,6 +105,12 @@ const configSchema = z.object({
     }
   }
   if (config.deploymentMode === "production") {
+    // Cartera's production manifest requires this secret to send credit
+    // cancellations; without it the receiver answers 503 forever and the
+    // cancelled credit's token users stay active. Fail at startup instead.
+    if (!config.nexaCarteraEventsSecret) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaCarteraEventsSecret"], message: "Production requires NEXA_CARTERA_EVENTS_SECRET" });
+    }
     if (new URL(config.nexaBaseUrl).protocol !== "https:") {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaBaseUrl"], message: "Production requires an HTTPS Nexa endpoint" });
     }
@@ -175,6 +198,7 @@ export function loadConfig(env = process.env) {
     workerMaxBackoffSeconds: env.WORKER_MAX_BACKOFF_SECONDS,
     nexaAdminApiKey: env.NEXA_ADMIN_API_KEY,
     carteraInternalApiSecret: env.CARTERA_INTERNAL_API_SECRET,
+    nexaCarteraEventsSecret: env.NEXA_CARTERA_EVENTS_SECRET,
     carteraApiBaseUrl: env.CARTERA_API_BASE_URL,
     carteraApiTimeoutMs: env.CARTERA_API_TIMEOUT_MS,
     carteraTargetEnv: env.CARTERA_TARGET_ENV,
@@ -186,6 +210,9 @@ export function loadConfig(env = process.env) {
     enableTestUi: env.ENABLE_TEST_UI,
     nodeEnv: env.NODE_ENV,
     deploymentMode: env.NEXA_DEPLOYMENT_MODE,
+    nexaAlertasCorreos: env.NEXA_ALERTAS_CORREOS,
+    resendApiKey: env.RESEND_API_KEY,
+    emailDomain: env.EMAIL_DOMAIN,
   });
 }
 

@@ -1508,13 +1508,17 @@ export default function MorasManager() {
                 icono={HandCoins}
                 titulo="Monto total condonado"
                 valor={fmtQ(condonaciones?.totales?.monto_total)}
-                nota={
+                nota={`${
                   filtrosCond > 0
                     ? `Suma de lo filtrado${
                         rangoCondAplicado ? ` · ${rangoCondAplicado}` : ""
                       }`
                     : "Suma de todas las condonaciones"
-                }
+                }${
+                  condonaciones?.totales?.monto_total_automatica !== undefined
+                    ? ` · Automáticas Nexa ${fmtQ(condonaciones.totales.monto_total_automatica)}`
+                    : ""
+                }`}
                 cargando={loadingCondonaciones || condonacionesDesactualizadas}
                 acento="emerald"
               />
@@ -1647,9 +1651,14 @@ export default function MorasManager() {
                           <TableCell>{c.usuario}</TableCell>
                           <TableCell
                             className="max-w-[300px] truncate text-gray-600"
-                            title={c.motivo}
+                            title={c.motivo_texto ?? c.motivo}
                           >
-                            {c.motivo}
+                            {c.automatica && (
+                              <span className="mr-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                Automática
+                              </span>
+                            )}
+                            {c.motivo_texto ?? c.motivo}
                           </TableCell>
                           <TableCell className="text-right font-semibold text-green-700 tabular-nums">
                             {fmtQ(c.montoCondonacion)}
@@ -1679,7 +1688,12 @@ export default function MorasManager() {
                       <p className="text-xs mt-1">{c.usuario}</p>
                       <p className="text-xs text-gray-600 mt-1">
                         <span className="font-semibold">Motivo:</span>{" "}
-                        {c.motivo}
+                        {c.automatica && (
+                          <span className="mr-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                            Automática
+                          </span>
+                        )}
+                        {c.motivo_texto ?? c.motivo}
                       </p>
                       <p className="text-xs font-semibold text-green-700 tabular-nums">
                         {fmtQ(c.montoCondonacion)}

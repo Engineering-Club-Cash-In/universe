@@ -6,6 +6,7 @@ import { iniciarTareasProgramadas } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
 import { validationErrorMiddleware } from "./middleware/validationError";
 import { nexaPaymentHandler } from "./controllers/nexaPaymentRuntime";
+import { nexaTokenHandler } from "./controllers/nexaTokenRuntime";
 import { createNexaInternalRouter } from "./routers/nexa";
 
 const app = new Elysia()
@@ -16,7 +17,7 @@ const app = new Elysia()
     allowedHeaders: ["Content-Type", "Authorization"],
   }))
   .use(auditLogMiddleware)
-  .use(createNexaInternalRouter(config.environment, config.nexaInternalPaymentsEnabled, nexaPaymentHandler))
+  .use(createNexaInternalRouter(config.environment, config.nexaInternalPaymentsEnabled, nexaPaymentHandler, nexaTokenHandler))
   .use(routers.healthRouter)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)
@@ -60,6 +61,8 @@ const app = new Elysia()
   .use(routers.modalidadFacturacionRouter)
   .use(routers.consultaMoraRouter)
   .use(routers.rubrosRouter)
+  .use(routers.nexaDashboardRouter)
+  .use(routers.nexaCuentaRouter)
   .use(routers.estadoCuentaCancelacionRouter)
   .use(routers.enlacePublicoEstadoCuentaRouter);
 

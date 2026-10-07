@@ -119,7 +119,7 @@ test("Cobranza e Inversión usan el mismo workbook multihoja", async () => {
 	expect(source).toContain("canAccessCobranzaReport ? exportAdminReportsExcel : undefined");
 	expect(source).toContain("onClick={exportAdminReportsExcel}");
 	expect(source).toMatch(
-		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{officialMoraPending\}\s*>/,
+		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{officialMoraPending \|\| isExportingAdminReports\}\s*>/,
 	);
 });
 
@@ -159,8 +159,12 @@ test("bloquea la tabla sin mora oficial pero la exportación solo espera mientra
 
 	expect(source).not.toContain("if (!officialMoraReady)");
 	expect(source).not.toContain("disabled={!officialMoraReady}");
-	expect(source).toContain("disabled={officialMoraPending}");
-	const exportStart = source.indexOf("const exportAdminReportsExcel = () => {");
+	expect(source).toContain(
+		"disabled={officialMoraPending || isExportingAdminReports}",
+	);
+	const exportStart = source.indexOf(
+		"const exportAdminReportsExcel = async () => {",
+	);
 	expect(exportStart).toBeGreaterThan(-1);
 	const exportBlock = source.slice(
 		exportStart,

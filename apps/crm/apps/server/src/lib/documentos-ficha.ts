@@ -127,6 +127,34 @@ const COBERTURA_SEGURO_PDF_URL = process.env.COBERTURA_SEGURO_PDF_URL;
 export type ArchivoDocumento = { key: string } | { url: string };
 
 /**
+ * Vehículo del caso. Con contrato vinculado manda el vehículo del contrato
+ * (la oportunidad puede apuntar a uno viejo o distinto, igual que en
+ * `cargarSeguro`); solo sin contrato se cae al de la oportunidad.
+ */
+async function resolverVehiculoId(ctx: ContextoCaso): Promise<string | null> {
+	const [caso] = await db
+		.select({
+			contratoId: casosCobros.contratoId,
+			vehicleId: contratosFinanciamiento.vehicleId,
+		})
+		.from(casosCobros)
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.id, casosCobros.contratoId),
+		)
+		.where(eq(casosCobros.id, ctx.casoCobroId))
+		.limit(1);
+	if (caso?.contratoId) return caso.vehicleId ?? null;
+	if (!ctx.opportunityId) return null;
+	const [opp] = await db
+		.select({ vehicleId: opportunities.vehicleId })
+		.from(opportunities)
+		.where(eq(opportunities.id, ctx.opportunityId))
+		.limit(1);
+	return opp?.vehicleId ?? null;
+}
+
+/**
  * El PDF más reciente del documento: primero los del vehículo, después los
  * de la oportunidad. Solo PDF: el template de WhatsApp lleva header de
  * documento. Para el seguro, si no hay póliza, la cobertura general.
@@ -136,27 +164,23 @@ export async function archivoDocumento(
 	clave: DocumentoEnviar,
 ): Promise<ArchivoDocumento | null> {
 	const tipos = TIPOS_ARCHIVO[clave];
-	if (ctx.opportunityId) {
-		const [opp] = await db
-			.select({ vehicleId: opportunities.vehicleId })
-			.from(opportunities)
-			.where(eq(opportunities.id, ctx.opportunityId))
+	const vehicleId = await resolverVehiculoId(ctx);
+	if (vehicleId) {
+		const [delVehiculo] = await db
+			.select({ key: vehicleDocuments.filePath })
+			.from(vehicleDocuments)
+			.where(
+				and(
+					eq(vehicleDocuments.vehicleId, vehicleId),
+					inArray(vehicleDocuments.documentType, tipos),
+					eq(vehicleDocuments.mimeType, "application/pdf"),
+				),
+			)
+			.orderBy(desc(vehicleDocuments.uploadedAt))
 			.limit(1);
-		if (opp?.vehicleId) {
-			const [delVehiculo] = await db
-				.select({ key: vehicleDocuments.filePath })
-				.from(vehicleDocuments)
-				.where(
-					and(
-						eq(vehicleDocuments.vehicleId, opp.vehicleId),
-						inArray(vehicleDocuments.documentType, tipos),
-						eq(vehicleDocuments.mimeType, "application/pdf"),
-					),
-				)
-				.orderBy(desc(vehicleDocuments.uploadedAt))
-				.limit(1);
-			if (delVehiculo) return delVehiculo;
-		}
+		if (delVehiculo) return delVehiculo;
+	}
+	if (ctx.opportunityId) {
 		const [deOportunidad] = await db
 			.select({ key: opportunityDocuments.filePath })
 			.from(opportunityDocuments)
@@ -502,7 +526,8 @@ export async function listarSolicitudesDocumentos(filtro: {
 			notaResolucion: solicitudesDocumentosCobros.notaResolucion,
 		})
 		.from(solicitudesDocumentosCobros)
-		.innerJoin(
+		// Usuario eliminado: la FK queda en NULL y la solicitud se conserva.
+		.leftJoin(
 			solicitante,
 			eq(solicitante.id, solicitudesDocumentosCobros.solicitadoPor),
 		)
@@ -515,6 +540,7 @@ export async function listarSolicitudesDocumentos(filtro: {
 		.limit(filtro.limite);
 	return filas.map((f) => ({
 		...f,
+		solicitadoPor: f.solicitadoPor ?? "Usuario eliminado",
 		documento: nombreDocumento(f.clave),
 	}));
 }

@@ -32,7 +32,7 @@ import {
 import {
 	cargarCodeudores,
 	cargarDatosPersonales,
-	cargarHistorico,
+	cargarHistoricoDetallado,
 	cargarSeguro,
 } from "../lib/ficha-complementos";
 import {
@@ -254,7 +254,8 @@ export const fichaCobrosRouter = {
 				});
 			// F4 se usa dos veces (bloque propio y contexto del asistente IA):
 			// una sola lectura de cartera.
-			const historicoP = cargarHistorico(input.casoCobroId);
+			const historicoDetalleP = cargarHistoricoDetallado(input.casoCobroId);
+			const historicoP = historicoDetalleP.then((h) => h.hitos);
 			const [
 				datosPersonales,
 				codeudores,
@@ -283,7 +284,7 @@ export const fichaCobrosRouter = {
 				bloque<DocumentoFicha[]>("documentos", () => cargarDocumentos(ctx)),
 				// F7 · Resumen por IA; null mientras COBROS_ASISTENTE_IA no sea "on".
 				bloque<ResumenIA>("resumen IA", () =>
-					obtenerResumenIA(input.casoCobroId, historicoP),
+					obtenerResumenIA(input.casoCobroId, historicoDetalleP),
 				),
 			]);
 			return {

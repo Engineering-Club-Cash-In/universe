@@ -1022,11 +1022,13 @@ export const solicitudesDocumentosCobros = pgTable(
 		comentario: text("comentario"),
 		// 'pendiente' | 'aprobada' | 'rechazada'
 		estado: text("estado").notNull().default("pendiente"),
-		solicitadoPor: text("solicitado_por")
-			.notNull()
-			.references(() => user.id),
+		solicitadoPor: text("solicitado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
 		solicitadoEn: timestamp("solicitado_en").notNull().defaultNow(),
-		resueltoPor: text("resuelto_por").references(() => user.id),
+		resueltoPor: text("resuelto_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
 		resueltoEn: timestamp("resuelto_en"),
 		notaResolucion: text("nota_resolucion"),
 	},
@@ -1077,9 +1079,9 @@ export const preguntasIaCobros = pgTable(
 		respuesta: text("respuesta"),
 		ok: boolean("ok").notNull().default(true),
 		modelo: text("modelo").notNull(),
-		realizadaPor: text("realizada_por")
-			.notNull()
-			.references(() => user.id),
+		realizadaPor: text("realizada_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 	},
 	(table) => [

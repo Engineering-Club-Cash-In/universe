@@ -40,7 +40,10 @@ import {
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { contarCuotasAtrasadasUnicas } from "./cobros-plantillas";
-import { cargarHistorico } from "./ficha-complementos";
+import {
+	cargarHistoricoDetallado,
+	type HistoricoCargado,
+} from "./ficha-complementos";
 import { calcularDiasMoraExactos, diasMoraDelDetalle } from "./mora-utils";
 
 export const MODELO_ASISTENTE = "gemini-3-flash-preview";
@@ -161,12 +164,12 @@ async function cargarCreditoVivo(
 
 /**
  * `hitos`: si el que llama ya los cargó (la ficha), se reutilizan para no
- * volver a llamar a cartera. `completo` = false si cartera no respondió (ni
- * el historial ni el estado del crédito): con datos a medias no se genera.
+ * volver a llamar a cartera. `completo` = false si cartera no respondió del
+ * todo o a medias (historial parcial o estado del crédito): con datos a medias no se genera.
  */
 async function cargarContextoIA(
 	casoCobroId: string,
-	hitosYaCargados?: Promise<HitoCredito[] | null>,
+	hitosYaCargados?: Promise<HistoricoCargado>,
 ): Promise<{ contexto: ContextoIA; completo: boolean }> {
 	const [caso] = await db
 		.select({ numeroSifco: casosCobros.numeroCreditoSifco })
@@ -178,9 +181,11 @@ async function cargarContextoIA(
 			message: "Caso de cobro no encontrado.",
 		});
 	}
-	const [credito, hitos, gestiones] = await Promise.all([
+	const [credito, historico, gestiones] = await Promise.all([
 		cargarCreditoVivo(caso.numeroSifco),
-		(hitosYaCargados ?? cargarHistorico(casoCobroId)).catch(() => null),
+		(hitosYaCargados ?? cargarHistoricoDetallado(casoCobroId)).catch(
+			(): HistoricoCargado => ({ hitos: null, completo: false }),
+		),
 		db
 			.select({
 				fechaContacto: contactosCobros.fechaContacto,
@@ -205,10 +210,10 @@ async function cargarContextoIA(
 				moraAcumulada: "0.00",
 				cuotaMensual: "0.00",
 			},
-			hitos,
+			hitos: historico.hitos,
 			gestiones,
 		}),
-		completo: credito !== null && hitos !== null,
+		completo: credito !== null && historico.completo,
 	};
 }
 
@@ -307,7 +312,7 @@ function generarUnaVez(
  */
 export async function obtenerResumenIA(
 	casoCobroId: string,
-	hitos?: Promise<HitoCredito[] | null>,
+	hitos?: Promise<HistoricoCargado>,
 ): Promise<ResumenIA | null> {
 	if (!asistenteActivo()) return null;
 	const [[guardado], { contexto, completo }] = await Promise.all([
@@ -354,24 +359,6 @@ export async function preguntarAsistente(params: {
 			message: "El asistente IA todavía no está activo.",
 		});
 	}
-	const [uso] = await db
-		.select({ total: sql<number>`count(*)::int` })
-		.from(preguntasIaCobros)
-		.where(
-			and(
-				eq(preguntasIaCobros.realizadaPor, params.userId),
-				gte(
-					preguntasIaCobros.createdAt,
-					new Date(Date.now() - 24 * 60 * 60 * 1000),
-				),
-			),
-		);
-	if (Number(uso?.total ?? 0) >= TOPE_PREGUNTAS_24H) {
-		throw new ORPCError("TOO_MANY_REQUESTS", {
-			message: `Llegó al tope de ${TOPE_PREGUNTAS_24H} preguntas en 24 horas. Intente más tarde.`,
-		});
-	}
-
 	const { contexto, completo } = await cargarContextoIA(params.casoCobroId);
 	if (!completo) {
 		throw new ORPCError("BAD_GATEWAY", {
@@ -379,15 +366,44 @@ export async function preguntarAsistente(params: {
 				"No se pudo leer el estado del crédito en cartera. Intente de nuevo.",
 		});
 	}
-	const registrar = (respuesta: string | null, ok: boolean) =>
-		db.insert(preguntasIaCobros).values({
-			casoCobroId: params.casoCobroId,
-			pregunta: params.pregunta,
-			respuesta,
-			ok,
-			modelo: MODELO_ASISTENTE,
-			realizadaPor: params.userId,
+	// Se reserva el cupo antes de llamar al modelo, con el conteo y el insert
+	// bajo un lock por usuario: preguntas concurrentes no leen el mismo conteo.
+	// Si la lectura de cartera de arriba falló no se gastó nada, no se reserva.
+	const reserva = await db.transaction(async (tx) => {
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${`preguntas-ia:${params.userId}`}))`,
+		);
+		const [uso] = await tx
+			.select({ total: sql<number>`count(*)::int` })
+			.from(preguntasIaCobros)
+			.where(
+				and(
+					eq(preguntasIaCobros.realizadaPor, params.userId),
+					gte(
+						preguntasIaCobros.createdAt,
+						new Date(Date.now() - 24 * 60 * 60 * 1000),
+					),
+				),
+			);
+		if (Number(uso?.total ?? 0) >= TOPE_PREGUNTAS_24H) return null;
+		const [fila] = await tx
+			.insert(preguntasIaCobros)
+			.values({
+				casoCobroId: params.casoCobroId,
+				pregunta: params.pregunta,
+				respuesta: null,
+				ok: false,
+				modelo: MODELO_ASISTENTE,
+				realizadaPor: params.userId,
+			})
+			.returning({ id: preguntasIaCobros.id });
+		return fila.id;
+	});
+	if (!reserva) {
+		throw new ORPCError("TOO_MANY_REQUESTS", {
+			message: `Llegó al tope de ${TOPE_PREGUNTAS_24H} preguntas en 24 horas. Intente más tarde.`,
 		});
+	}
 	try {
 		const { text } = await generateText({
 			model: google(MODELO_ASISTENTE),
@@ -405,15 +421,17 @@ export async function preguntarAsistente(params: {
 			],
 		});
 		const respuesta = text.trim();
-		await registrar(respuesta, true);
+		await db
+			.update(preguntasIaCobros)
+			.set({ respuesta, ok: true })
+			.where(eq(preguntasIaCobros.id, reserva));
 		return { respuesta };
 	} catch (error) {
 		console.error(
 			`[AsistenteIA] pregunta del caso ${params.casoCobroId}:`,
 			error,
 		);
-		// Cuenta para el tope: un intento fallido también pudo costar.
-		await registrar(null, false).catch(() => undefined);
+		// La reserva queda con ok=false: un intento fallido también pudo costar.
 		throw new ORPCError("BAD_GATEWAY", {
 			message: "El asistente no pudo responder. Intente de nuevo.",
 		});

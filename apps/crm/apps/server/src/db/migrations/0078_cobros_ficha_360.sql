@@ -50,9 +50,9 @@ CREATE TABLE IF NOT EXISTS "public"."solicitudes_documentos_cobros" (
 	"clave" text NOT NULL,
 	"comentario" text,
 	"estado" text DEFAULT 'pendiente' NOT NULL,
-	"solicitado_por" text NOT NULL REFERENCES "public"."user"("id"),
+	"solicitado_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	"solicitado_en" timestamp DEFAULT now() NOT NULL,
-	"resuelto_por" text REFERENCES "public"."user"("id"),
+	"resuelto_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	"resuelto_en" timestamp,
 	"nota_resolucion" text,
 	CONSTRAINT "solicitudes_documentos_clave_check"
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS "public"."preguntas_ia_cobros" (
 	"respuesta" text,
 	"ok" boolean DEFAULT true NOT NULL,
 	"modelo" text NOT NULL,
-	"realizada_por" text NOT NULL REFERENCES "public"."user"("id"),
+	"realizada_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 

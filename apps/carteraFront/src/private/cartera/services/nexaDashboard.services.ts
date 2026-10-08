@@ -1,4 +1,5 @@
 import api from "@/Provider/interceptor";
+import type { CuotaFranjaNexa, EstadoCuotaMes, RechazoNexa } from "@/lib/cuotasNexa";
 
 const API_URL = import.meta.env.VITE_BACK_URL || "";
 
@@ -21,11 +22,17 @@ export interface NexaDashboardCredito {
   ultimoPagoFecha: string | null;
   ultimoPagoMonto: string | null;
   ultimoPagoNexa: boolean;
+  // Banco de la boleta manual; null en Nexa (cartera no recibe el banco de origen).
+  ultimoPagoBanco: string | null;
   pagosNexa: number;
   montoNexa: string;
   rechazosNexa: number;
-  // Canal de los últimos 12 pagos, del más viejo al más nuevo: "N" Nexa, "M" manual.
-  ultimosCanales: string;
+  // Los 5 más recientes de los que cuenta rechazosNexa.
+  rechazosDetalle: RechazoNexa[];
+  // Últimas 12 cuotas hasta fin del mes en curso, de la más vieja a la más nueva.
+  ultimasCuotas: CuotaFranjaNexa[];
+  // Primera cuota que vence este mes (hora de Guatemala); sin cuota este mes, la última vencida.
+  cuotaMes: { numero: number; vencimiento: string; estado: EstadoCuotaMes } | null;
 }
 
 export interface NexaDashboardResponse {
@@ -44,6 +51,8 @@ export interface RangoFechas {
 
 export interface NexaDashboardParams extends RangoFechas {
   q: string;
+  medio: "" | "nexa" | "manual";
+  cuotaMes: "" | EstadoCuotaMes;
   page: number;
   pageSize: number;
 }
@@ -65,6 +74,7 @@ export interface NexaPagoCredito {
   filas: number;
   eventoEstado: string | null;
   cuotas: number[];
+  banco: string | null;
 }
 
 export interface NexaEventoSinPago {

@@ -5,22 +5,26 @@ const { mapNexaDashboardRows, parseNexaDashboardParams, mapNexaCreditPayments, m
 
 describe("parseNexaDashboardParams", () => {
   test.each([
-    [{}, { q: "", page: 1, pageSize: 20, desde: "", hasta: "" }],
-    [{ q: "  juan ", page: "3", pageSize: "500" }, { q: "juan", page: 3, pageSize: 100, desde: "", hasta: "" }],
-    [{ page: "-2", pageSize: "0" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "" }],
-    [{ q: "x".repeat(150) }, { q: "x".repeat(100), page: 1, pageSize: 20, desde: "", hasta: "" }],
-    [{ desde: "2026-09-01", hasta: "2026-09-30" }, { q: "", page: 1, pageSize: 20, desde: "2026-09-01", hasta: "2026-09-30" }],
-    [{ desde: "2026-02-30", hasta: "30/09/2026" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "" }],
-    [{ desde: "2026-09-01'; drop", hasta: 7 }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "" }],
+    [{}, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ q: "  juan ", page: "3", pageSize: "500" }, { q: "juan", page: 3, pageSize: 100, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ page: "-2", pageSize: "0" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ q: "x".repeat(150) }, { q: "x".repeat(100), page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ desde: "2026-09-01", hasta: "2026-09-30" }, { q: "", page: 1, pageSize: 20, desde: "2026-09-01", hasta: "2026-09-30", medio: "", cuotaMes: "" }],
+    [{ desde: "2026-02-30", hasta: "30/09/2026" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ desde: "2026-09-01'; drop", hasta: 7 }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
     // Postgres no tiene año 0000: llegaría al ::date y daría 500.
-    [{ desde: "0000-01-01", hasta: "0001-01-01" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "0001-01-01" }],
+    [{ desde: "0000-01-01", hasta: "0001-01-01" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "0001-01-01", medio: "", cuotaMes: "" }],
+    [{ medio: "nexa", cuotaMes: "vencida" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "vencida" }],
+    [{ medio: "manual", cuotaMes: "por_vencer" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "manual", cuotaMes: "por_vencer" }],
+    [{ medio: "NEXA", cuotaMes: "no_pagada" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ medio: ["nexa"], cuotaMes: "pagada' OR '1'='1" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
   ])("%j → %j", (query, expected) => {
-    expect(parseNexaDashboardParams(query)).toEqual(expected);
+    expect(parseNexaDashboardParams(query)).toEqual(expected as ReturnType<typeof parseNexaDashboardParams>);
   });
 });
 
 describe("mapNexaDashboardRows", () => {
-  const params = { q: "", page: 2, pageSize: 10, desde: "", hasta: "" };
+  const params = { q: "", page: 2, pageSize: 10, desde: "", hasta: "", medio: "" as const, cuotaMes: "" as const };
   const totales = (n: string) => ({
     total_creditos: n, total_con_token: "1", total_pagos_nexa: "8", total_monto_nexa: "8423.92",
     total_rechazos_nexa: "1", total_ultimo_pago_nexa: "2",
@@ -28,7 +32,10 @@ describe("mapNexaDashboardRows", () => {
   const fila = {
     credito_id: "445", numero_credito_sifco: "01010214116430", cliente: "Cliente 445", estado: "EN_CONVENIO",
     nexa_token: "1111222233334444", activo: true, ultimo_pago_fecha: "2026-10-05T10:00:00",
-    ultimo_pago_monto: "50.00", ultimo_pago_nexa: true, pagos_nexa: "5", monto_nexa: "600.00", rechazos_nexa: "1", ultimos_canales: "MMMNN",
+    ultimo_pago_monto: "50.00", ultimo_pago_nexa: true, ultimo_pago_banco: null, pagos_nexa: "5", monto_nexa: "600.00", rechazos_nexa: "1",
+    rechazos_detalle: [{ fecha: "2026-10-05T11:16:49", monto: "50.00", codigo: "token_mismatch", estado: "failed" }],
+    ultimas_cuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null }],
+    cuota_mes_numero: 18, cuota_mes_vencimiento: "2026-10-05", cuota_mes_estado: "pagada",
   };
 
   test("convierte filas y toma los totales de la primera", () => {
@@ -38,10 +45,16 @@ describe("mapNexaDashboardRows", () => {
     expect(result.creditos[0]).toEqual({
       creditoId: 445, numeroCreditoSifco: "01010214116430", cliente: "Cliente 445", estado: "EN_CONVENIO",
       nexaToken: "1111222233334444", bindingActivo: true, ultimoPagoFecha: "2026-10-05T10:00:00",
-      ultimoPagoMonto: "50.00", ultimoPagoNexa: true, pagosNexa: 5, montoNexa: "600.00", rechazosNexa: 1,
-      ultimosCanales: "MMMNN",
+      ultimoPagoMonto: "50.00", ultimoPagoNexa: true, ultimoPagoBanco: null, pagosNexa: 5, montoNexa: "600.00", rechazosNexa: 1,
+      rechazosDetalle: [{ fecha: "2026-10-05T11:16:49", monto: "50.00", codigo: "token_mismatch", estado: "failed" }],
+      ultimasCuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null }],
+      cuotaMes: { numero: 18, vencimiento: "2026-10-05", estado: "pagada" },
     });
     expect(result.creditos[1]).toMatchObject({ creditoId: 352, nexaToken: null, ultimoPagoFecha: null, ultimoPagoMonto: null, ultimoPagoNexa: false });
+    // Manual con banco, sin cuotas ni rechazos: el SQL los manda NULL.
+    const manual = mapNexaDashboardRows([{ ...fila, ultimo_pago_banco: "Banrural", rechazos_detalle: null, ultimas_cuotas: null,
+      cuota_mes_numero: null, cuota_mes_vencimiento: null, cuota_mes_estado: null }], params).creditos[0];
+    expect(manual).toMatchObject({ ultimoPagoBanco: "Banrural", rechazosDetalle: [], ultimasCuotas: [], cuotaMes: null });
     expect(result.totales).toEqual({ creditos: 2, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2 });
     expect({ total: result.total, page: result.page, pageSize: result.pageSize }).toEqual({ total: 2, page: 2, pageSize: 10 });
   });
@@ -66,11 +79,11 @@ describe("mapNexaCreditPayments", () => {
     const pagos = [
       {
         fecha_pago: "2026-10-04T15:30:00", monto_boleta: "500.00", es_nexa: true, registrado_por: null,
-        autorizacion: "AUTH123", validado: true, filas: "3", evento_estado: "billed", cuotas: [18, 19, 20],
+        autorizacion: "AUTH123", validado: true, filas: "3", evento_estado: "billed", cuotas: [18, 19, 20], banco: null,
       },
       {
         fecha_pago: "2026-10-03T10:00:00", monto_boleta: "250.00", es_nexa: false, registrado_por: "cobros@x.com",
-        autorizacion: null, validado: false, filas: "2", evento_estado: null, cuotas: null,
+        autorizacion: null, validado: false, filas: "2", evento_estado: null, cuotas: null, banco: "Banco Industrial",
       },
     ];
     const eventos = [
@@ -84,11 +97,11 @@ describe("mapNexaCreditPayments", () => {
     expect(result.creditoId).toBe(7);
     expect(result.pagos[0]).toEqual({
       fechaPago: "2026-10-04T15:30:00", montoBoleta: "500.00", canal: "NEXA",
-      registradoPor: null, autorizacion: "AUTH123", validado: true, filas: 3, eventoEstado: "billed", cuotas: [18, 19, 20],
+      registradoPor: null, autorizacion: "AUTH123", validado: true, filas: 3, eventoEstado: "billed", cuotas: [18, 19, 20], banco: null,
     });
     expect(result.pagos[1]).toEqual({
       fechaPago: "2026-10-03T10:00:00", montoBoleta: "250.00", canal: "MANUAL",
-      registradoPor: "cobros@x.com", autorizacion: null, validado: false, filas: 2, eventoEstado: null, cuotas: [],
+      registradoPor: "cobros@x.com", autorizacion: null, validado: false, filas: 2, eventoEstado: null, cuotas: [], banco: "Banco Industrial",
     });
     expect(result.eventosSinPago[0]).toEqual({
       referencia: "E2E-1", monto: "50.00", estado: "failed", error: "token_mismatch", creado: "2026-10-05T10:00:00", tieneFilasVivas: false,

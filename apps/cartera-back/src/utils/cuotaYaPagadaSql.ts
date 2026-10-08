@@ -55,6 +55,19 @@ export function hasPaidPaymentSql(
     SELECT 1
     FROM cartera.pagos_credito pc
     WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
+      AND ${filaQueCubreCuotaSql()}${exclusion}
+  )`;
+}
+
+/**
+ * La parte de `hasPaidPaymentSql` que mira solo la fila `pc` (sin atarla a una
+ * cuota): «esta fila de pago cuenta como cobertura». Se expone para que quien
+ * necesite saber QUÉ filas cubren una cuota (el medio de pago del dashboard
+ * Nexa) use exactamente las mismas que el cron.
+ */
+export function filaQueCubreCuotaSql(): SQL<boolean> {
+  // El TRUE deja cada condición con su AND, igual que en coberturaDeCuotaSql (el test compara el texto).
+  return sql<boolean>`(TRUE
       AND pc."paymentFalse" = false
       AND pc.pagado = true
       AND COALESCE(pc.monto_aplicado, 0) > 0
@@ -69,8 +82,7 @@ export function hasPaidPaymentSql(
           -- noche de Guatemala cae en el día siguiente. Peor caso: 8 días.
           AND pc.fecha_pago::date <= ((now() AT TIME ZONE 'America/Guatemala')::date + 1)
         )
-      )${exclusion}
-  )`;
+      ))`;
 }
 
 /**

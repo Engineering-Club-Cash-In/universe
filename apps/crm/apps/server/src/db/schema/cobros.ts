@@ -219,6 +219,14 @@ export const casosCobros = pgTable(
 		emailContacto: text("email_contacto").notNull(),
 		direccionContacto: text("direccion_contacto").notNull(),
 
+		// F8 (#1864) · Direcciones corregidas desde la Ficha 360. NULL = la de
+		// origen: la residencia del lead (`leads.direccion`) y el trabajo de la
+		// solicitud de crédito firmada. No se pisan esas fuentes porque son de
+		// ventas y de lo que firmó el cliente. Migración 0078.
+		direccionResidenciaCobros: text("direccion_residencia_cobros"),
+		empresaTrabajoCobros: text("empresa_trabajo_cobros"),
+		direccionTrabajoCobros: text("direccion_trabajo_cobros"),
+
 		// Próximo contacto programado
 		proximoContacto: timestamp("proximo_contacto"),
 		metodoContactoProximo: metodoContactoEnum("metodo_contacto_proximo"),
@@ -952,5 +960,47 @@ export const cierreDiarioCreditoCobros = pgTable(
 			.on(table.contactoId)
 			.where(sql`${table.contactoId} IS NOT NULL`),
 		index("idx_cierre_detalle_fecha_asesor").on(table.fecha, table.asesorId),
+	],
+);
+
+// F3 (#1864) · Bitácora de cambios de los datos del cliente hechos desde
+// cobros (teléfonos, correo, direcciones): campo, antes y después, quién y
+// desde dónde. Append-only. La lee la Ficha 360 › Contacto › «Historial de
+// cambios». No es crm_entity_audit: esa guarda el body de la operación, no el
+// valor anterior, y no cubre los casos de cobros. Migración 0078.
+export const cambiosDatosClienteCobros = pgTable(
+	"cambios_datos_cliente_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		// Clave estable del campo ('telefono_principal', 'direccion_trabajo'…);
+		// el texto que ve el asesor se arma al leer.
+		campo: text("campo").notNull(),
+		// 'contacto' | 'direcciones' | 'datos_personales'
+		categoria: text("categoria").notNull(),
+		valorAnterior: text("valor_anterior"),
+		valorNuevo: text("valor_nuevo"),
+		// 'ficha_360' | 'workspace' | 'carga_masiva' | 'sistema'
+		origen: text("origen").notNull(),
+		realizadoPor: text("realizado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_cambios_datos_cliente_caso").on(
+			table.casoCobroId,
+			table.createdAt.desc(),
+		),
+		check(
+			"cambios_datos_cliente_categoria_check",
+			sql`${table.categoria} IN ('contacto', 'direcciones', 'datos_personales')`,
+		),
+		check(
+			"cambios_datos_cliente_origen_check",
+			sql`${table.origen} IN ('ficha_360', 'workspace', 'carga_masiva', 'sistema')`,
+		),
 	],
 );

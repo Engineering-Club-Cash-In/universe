@@ -106,6 +106,7 @@ import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { metasAsesorCobrosRouter } from "./routers/cobros-asesor";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { fichaCobrosAccionesRouter } from "./routers/ficha-cobros-acciones";
 import { gpsCatalogoBucketRouter } from "./routers/gps-catalogo-bucket";
 import { gpsEventosRouter } from "./routers/gps-eventos-router";
 import { gpsIntegracionRouter } from "./routers/gps-integracion";
@@ -307,7 +308,10 @@ app.route("/api/contracts/external", externalContractsRouter);
 app.route("/api/contracts/weetrust-status", weetrustStatusRouter);
 // Cartera avisa que una compra de cartera fue aceptada y abre la batería de
 // contratos del inversionista.
-app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter);
+app.route(
+	"/api/investor-contracts/compra-aceptada",
+	carteraCompraAceptadaRouter,
+);
 
 const handler = new RPCHandler(
 	Object.assign(
@@ -339,6 +343,7 @@ const handler = new RPCHandler(
 		gpsCatalogoBucketRouter,
 		supervisionCobrosRouter,
 		metasAsesorCobrosRouter,
+		fichaCobrosAccionesRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -2191,7 +2196,6 @@ console.warn(
 			.join(", ") || "ninguna"
 	}. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción y el resto de jobs NO está corriendo.`,
 );
-
 
 // Verificación SAT automática diaria (22:00 GT). No es un job de cobros ni le
 // escribe a clientes, así que no va detrás de JOBS_PROGRAMADOS: se gobierna

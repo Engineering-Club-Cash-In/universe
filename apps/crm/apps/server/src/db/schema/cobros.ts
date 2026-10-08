@@ -377,6 +377,10 @@ export const contactosCobros = pgTable(
 		index("idx_contactos_cobros_bucket_fecha")
 			.on(table.bucketSnapshot, table.fechaContacto.desc())
 			.where(sql`${table.bucketSnapshot} IS NOT NULL`),
+		check(
+			"contactos_cobros_medio_proximo_contacto_check",
+			sql`${table.medioProximoContacto} IS NULL OR ${table.medioProximoContacto} IN ('llamada', 'whatsapp')`,
+		),
 	],
 );
 

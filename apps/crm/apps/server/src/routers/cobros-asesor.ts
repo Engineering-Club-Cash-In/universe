@@ -137,8 +137,11 @@ function movimientosDeHoy(hoyStr: string): Promise<MovimientoBucketDelDia[]> {
 
 /**
  * Lo que falta sumar al cierre para que el rango incluya hoy. Si el cierre de
- * hoy ya corrió, sus filas ya están en `movimiento` y no se suma nada (sin
- * doble conteo). `incluyeHoy: false` solo si no se pudo calcular.
+ * movimientos de hoy ya corrió, sus filas ya están en `movimiento` y no se suma
+ * nada (sin doble conteo). Solo cuentan las filas de subida/bajada: el cierre
+ * inserta primero los contactos y después los movimientos, así que una fila de
+ * contacto no prueba que el paso de movimientos terminó. `incluyeHoy: false`
+ * solo si no se pudo calcular.
  */
 async function movimientoDeHoyEnVivo(
 	userId: string,
@@ -152,7 +155,12 @@ async function movimientoDeHoyEnVivo(
 		const [cierreDeHoy] = await db
 			.select({ fecha: cierreDiarioCreditoCobros.fecha })
 			.from(cierreDiarioCreditoCobros)
-			.where(eq(cierreDiarioCreditoCobros.fecha, hoyStr))
+			.where(
+				and(
+					eq(cierreDiarioCreditoCobros.fecha, hoyStr),
+					inArray(cierreDiarioCreditoCobros.tipo, ["subida", "bajada"]),
+				),
+			)
 			.limit(1);
 		if (cierreDeHoy) return sinNada;
 		const propios = (await movimientosDeHoy(hoyStr)).filter(

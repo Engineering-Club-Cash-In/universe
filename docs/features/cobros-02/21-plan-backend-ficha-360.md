@@ -113,13 +113,14 @@ Todo el código está hecho y probado en local, en 4 commits sobre `jalvarez-cob
 
 - **Apagado por defecto:** solo corre con `COBROS_ASISTENTE_IA=on` y `GOOGLE_GENERATIVE_AI_API_KEY`. Apagado: `resumenIA = null` (la ficha muestra «Pronto») y `preguntarAsistenteCaso` responde «El asistente IA todavía no está activo.».
 - **Modelo:** `gemini-3-flash-preview`, el mismo de la lectura de boletas. Cero reintentos y 30 s de timeout.
-- **Qué ve el modelo:** estado de mora del caso, hasta 10 hitos de F4 y las últimas 20 gestiones (fecha, método, resultado, comentario, monto y fecha prometidos, estado de la promesa). **No** se le mandan el nombre, el DPI ni los teléfonos del cliente, y en los comentarios se tapan los números de 8 dígitos o más («[número]»).
+- **Qué ve el modelo:** el estado VIVO del crédito (estado, días de mora, cuotas vencidas, cuota mensual y mora acumulada, leídos de cartera como la ficha; los campos de mora de `casos_cobros` están desactualizados y no se usan), hasta 10 hitos de F4 y las últimas 20 gestiones (fecha, método, resultado, comentario, monto y fecha prometidos, estado de la promesa). **No** se le mandan el nombre, el DPI ni los teléfonos del cliente, y en los comentarios se tapan los números de 8 dígitos o más («[número]»).
 - **Resumen** (`resumenes_ia_cobros`, uno por caso): texto de 3 a 5 oraciones y de 1 a 4 etiquetas. Se guarda con la **huella** (hash) de los datos que se le mandaron:
   - misma huella → se devuelve el guardado, sin llamar al modelo;
   - huella distinta → se devuelve el guardado y se regenera atrás;
   - sin guardado → la ficha espera hasta 8 s; si no llega, sigue sin él y queda listo para la próxima vez;
   - si cartera no respondió, no se regenera (la huella cambiaría solo por faltar los hitos);
   - una sola generación en curso por caso.
+  - si cartera no responde (ni el crédito ni el historial) no se genera nada con datos a medias: se devuelve el guardado o `null`.
 - **Preguntas** (`preguntarAsistenteCaso({ casoCobroId, pregunta })` → `{ respuesta }`): con el mismo contexto, máximo 6 oraciones. Cada pregunta queda en `preguntas_ia_cobros` (también las fallidas) y hay un tope de **30 preguntas por usuario en 24 horas**.
 
 ### F8 · Editar direcciones
@@ -150,8 +151,8 @@ Todo el código está hecho y probado en local, en 4 commits sobre `jalvarez-cob
 - **F1/F2/F5:** caso con RENAP (datos de RENAP, `codeudores: []`); caso con codeudor y solicitud (correo, teléfono, residencia y trabajo); caso sin oportunidad (los tres en `null`).
 - **F3/F8:** cambiar teléfono, correo, residencia y dirección de trabajo deja 4 filas en la bitácora con el antes, el después, «Luis Ralda (administrador)» y «Ficha 360»; repetir el mismo teléfono no deja fila; `getDatosLaboralesCaso` devuelve la dirección corregida conservando empresa, puesto y horario; sin ningún campo responde error de validación. Los datos de prueba se revirtieron.
 - **F4:** caso con convenio (bucket B3 → B4 y convenio firmado); caso con promesa cumplida (B0 y promesa); caso con subidas y bajadas el mismo día. Con cartera apagada: `null`, o solo las promesas.
-- **F6:** catálogo con la tarjeta disponible y el seguro no; la URL firmada del PDF responde 206 con `application/pdf`; solicitar expertaje → la fila pasa a no disponible; repetirla → CONFLICT; la bandeja la lista; un asesor recibe FORBIDDEN en la bandeja; aprobar → «aprobada»; resolver otra vez → CONFLICT. **El envío por WhatsApp no se probó** (manda un mensaje real al teléfono de prueba): queda para el QA en pantalla.
-- **F7:** apagado → `null` y la pregunta responde «no está activo». Encendido: el primer resumen tardó unos 6 s y el segundo salió de caché en 42 ms, sin llamar al modelo; la pregunta «¿Cuál es el siguiente paso recomendado?» respondió con los datos del caso.
+- **F6:** catálogo con la tarjeta disponible y el seguro no; la URL firmada del PDF responde 206 con `application/pdf`; solicitar expertaje → la fila pasa a no disponible; repetirla → CONFLICT; la bandeja la lista; un asesor recibe FORBIDDEN en la bandeja; aprobar → «aprobada»; resolver otra vez → CONFLICT. **El envío por WhatsApp** se probó en modo de prueba (`TEST_MESSAGE=true`, sale a `getTestPhone(2)` = 35219722): llegaron los dos PDF (tarjeta de circulación y seguro) con su texto y quedó la traza `documento_tarjeta_circulacion` y `documento_seguro` en `cobros_send_logs`, sin la URL firmada. Un caso sin tarjeta responde «Este crédito no tiene ese documento cargado.»; las 4 solicitudes, el rechazo del asesor (FORBIDDEN), aprobar con nota, rechazar y resolver dos veces (CONFLICT) funcionan.
+- **F7:** apagado → `null` y la pregunta responde «no está activo». Encendido: el primer resumen tardó unos 6 s y el segundo salió de caché en 42 ms, sin llamar al modelo. QA en pantalla: el primer resumen decía «al día, 0 días» en un crédito con 23 días de mora (usaba `casos_cobros`); corregido para leer cartera. Con la corrección, la pregunta «¿Cuánto debe pagar hoy?» responde Q6,038.34 (cuota Q4,392.02 + mora Q1,646.32), igual que «Total a pagar hoy» de la ficha.
 
 **Cobertura de datos en la base local (casos activos: 1,378):**
 - Con oportunidad: 1,361. Con DPI en el lead: 1,090. Con RENAP: 69.
@@ -171,6 +172,8 @@ El backend de todas estas piezas está listo. Las mutaciones nuevas están en `f
 | **Bandeja de Solicitudes y Dashboard del supervisor: documentos** (F6, S1) | `components/cobros/solicitudes/bandeja-solicitudes.tsx` (chip «Documentos» en «Pronto») | Fuente: `getSolicitudesDocumentos({ estado: "pendiente" })`. Decidir con `resolverSolicitudDocumento({ solicitudId, decision, nota? })`. |
 | **Editar direcciones** (F8) | `routes/cobros/$id.tsx` (~3455, `DireccionCard` con la nota «pendiente de backend (tarea F8)») | Hacer editables las dos tarjetas y guardar con `guardarDireccionesCaso`. Después, invalidar `getDetallesCreditoCarteraBack`, `getDatosLaboralesCaso` y `getFichaComplementos`. |
 | **Preguntas al asistente** (F7) | `components/cobros/ficha/ficha-pestanas.tsx` (~578–585, campo «Pregúntele a la IA… (pronto)») | `preguntarAsistenteCaso({ casoCobroId, pregunta })` → `{ respuesta }`. Mostrar el error de tope o de «no está activo». |
+| **Fecha del resumen sin formato** (F7) | `components/cobros/ficha/ficha-pestanas.tsx` (`AsistenteIA`) | Muestra «Generado por IA · 2026-10-08T20:28:26.119Z»: formatear `generadoEn` como las demás fechas de la ficha. |
+| **Refrescar la ficha tras editar** (F3) | `routes/cobros/$id.tsx` (`guardarContacto`, autoguardado de teléfonos) | `getFichaComplementos` se guarda 5 minutos (`staleTime`) y no se invalida al guardar: el «Historial de cambios» no muestra el cambio hasta recargar. Invalidar `getFichaComplementos` al guardar teléfonos, correo o direcciones. |
 | **Origen de los cambios desde el Workspace** (F3) | Donde el Workspace edite teléfonos, correo o direcciones | Mandar `origen: "workspace"`; sin él queda «Ficha 360». Hoy solo la ficha edita. |
 | Textos «Pendiente de backend (tarea F2/F4)» | `contexto-caso.tsx:909`, `gestion-panel.tsx:254` | Solo comentarios y textos de respaldo: con datos ya no se ven. Se pueden limpiar. |
 

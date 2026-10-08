@@ -241,9 +241,9 @@ export function NexaFiltros(props: {
             />
           </Campo>
 
-          <Campo etiqueta="Medio">
+          <Campo etiqueta="Medio de la cuota del mes">
             <Segmentado<Medio>
-              etiqueta="Medio con que se pagó la cuota del mes"
+              etiqueta="Medio de la cuota del mes"
               valor={props.medio}
               onChange={props.onMedio}
               deshabilitado={props.cuotaMes === "sinpago"}

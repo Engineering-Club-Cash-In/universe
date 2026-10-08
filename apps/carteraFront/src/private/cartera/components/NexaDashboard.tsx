@@ -94,7 +94,7 @@ export function NexaDashboard() {
     chips.push({ id: "cuota", texto, quitar: () => { setCuotaMes(""); setPage(1); } });
   }
   if (medio) {
-    chips.push({ id: "medio", texto: `Medio: ${medio === "nexa" ? "Nexa" : "Manual"}`, quitar: () => { setMedio(""); setPage(1); } });
+    chips.push({ id: "medio", texto: `Cuota del mes por ${medio === "nexa" ? "Nexa" : "manual"}`, quitar: () => { setMedio(""); setPage(1); } });
   }
   if (puedeFiltrarAsesor && asesor) {
     const nombre = opcionesAsesor.find((a) => String(a.asesor_id) === asesor)?.nombre ?? asesor;

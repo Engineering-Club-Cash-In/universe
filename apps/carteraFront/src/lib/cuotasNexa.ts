@@ -7,7 +7,7 @@ export type CuotaFranjaNexa = {
   pagada: boolean; // criterio del cron de mora (cuotaYaPagadaSql)
   medio: "NEXA" | "MANUAL" | null; // quien puso más plata en la cuota; empate: el pago más reciente
   banco: string | null;
-  aplicado: string; // monto_aplicado de las filas no anuladas y no 'reset' de la cuota
+  aplicado: string; // monto_aplicado de las filas no anuladas, ni 'reset' ni de capital, de la cuota
   monto: string; // monto de la cuota (creditos.cuota)
   // Algún pago que le aplica plata sigue sin validar (validation_status 'pending'). La cuota igual
   // cuenta como pagada si el cron la da por pagada; esto solo avisa que falta validar.
@@ -15,10 +15,6 @@ export type CuotaFranjaNexa = {
 };
 
 export type TonoCuotaNexa = "nexa" | "otro" | "pendiente";
-
-// Morado: pagada por Nexa. Verde: pagada por otro medio. Gris: no pagada (aunque tenga abonos).
-export const tonoCuotaNexa = (c: CuotaFranjaNexa): TonoCuotaNexa =>
-  !c.pagada ? "pendiente" : c.medio === "NEXA" ? "nexa" : "otro";
 
 export const CLASES_TONO_CUOTA: Record<TonoCuotaNexa, string> = {
   nexa: "bg-purple-600",
@@ -192,12 +188,6 @@ export const tituloCuotaNexa = (c: CuotaFranjaNexa) => {
 
 export type EstadoCuotaMes = "pagada" | "vencida" | "por_vencer";
 
-export const ESTADO_CUOTA_MES: Record<EstadoCuotaMes, { etiqueta: string; clases: string }> = {
-  pagada: { etiqueta: "Pagada", clases: "bg-green-50 text-green-700 border-green-300" },
-  vencida: { etiqueta: "Vencida", clases: "bg-red-50 text-red-700 border-red-300" },
-  por_vencer: { etiqueta: "Por vencer", clases: "bg-slate-100 text-slate-700 border-slate-300" },
-};
-
 // Filtro de la tabla: pagados = cuota del mes pagada; parciales = no pagada con plata aplicada;
 // sinpago = no pagada y sin plata aplicada. (El back aún acepta "pendientes" = parciales + sinpago.)
 export type FiltroCuotaMes = "pagados" | "parciales" | "sinpago";
@@ -215,12 +205,6 @@ export type CuotaMesNexa = {
   // Pagada solo porque la cubre un pago pendiente (<= 7 días): sin él no estaría pagada.
   cubiertaPorPendiente: boolean;
 };
-
-// "Completa · Nexa", "Completa · Manual", "Parcial · Q 500.00 de Q 1,752.36", "Sin pago"
-export const pagoCuotaMesTexto = (c: CuotaMesNexa) =>
-  c.pago === "completa" ? `Completa · ${c.medio === "NEXA" ? "Nexa" : "Manual"}`
-  : c.pago === "parcial" ? `Parcial · ${parcialTexto(c.aplicado, c.monto)}`
-  : "Sin pago";
 
 export type RechazoNexa = { fecha: string | null; monto: string; codigo: string | null; estado: string };
 

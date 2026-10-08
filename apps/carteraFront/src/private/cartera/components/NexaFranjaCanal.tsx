@@ -97,7 +97,7 @@ export function NexaFranjaCanal({ cuotas, cuotaMes, mini = false, hoy = hoyGuate
               )}
               <Barra c={c} hoy={hoy} mini={false} />
               <span className={`text-[11px] leading-none ${esMes ? "font-semibold text-blue-900" : "font-medium text-slate-700"}`}>{mesCortoNexa(c.vencimiento)}</span>
-              <span className="font-mono text-[10px] leading-none tabular-nums text-slate-500">{c.numero}</span>
+              <span className="font-mono text-[10px] leading-none tabular-nums text-slate-600">{c.numero}</span>
             </button>
           );
         })}

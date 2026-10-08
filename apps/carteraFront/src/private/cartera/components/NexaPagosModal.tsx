@@ -113,7 +113,7 @@ export function NexaPagosModal({ credito, rango, onClose }: NexaPagosModalProps)
                       <span className="truncate text-xs">
                         <span className={esNexa(p) ? "font-medium text-purple-700" : "text-green-700"}>{esNexa(p) ? "Nexa" : `Manual · ${bancoTexto("MANUAL", p.banco)}`}</span>
                         {!esNexa(p) && p.registradoPor && <span className="text-slate-500"> · {p.registradoPor}</span>}
-                        {p.cuotas.length > 0 && <span className="text-slate-400"> · {cuotasTexto(p.cuotas)}</span>}
+                        {p.cuotas.length > 0 && <span className="text-slate-600"> · {cuotasTexto(p.cuotas)}</span>}
                       </span>
                       <span className="order-last col-span-3 justify-self-end sm:order-none sm:col-span-1"><EstadoPago pago={p} /></span>
                       <span className="text-right font-mono text-sm font-semibold tabular-nums">{fmtQ(p.montoBoleta)}</span>

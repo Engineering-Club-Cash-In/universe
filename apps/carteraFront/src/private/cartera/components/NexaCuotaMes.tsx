@@ -3,6 +3,7 @@ import {
   avisoCuotaMesNexa,
   fmtDiaNexa,
   hoyGuatemala,
+  fraccionPagadaNexa,
   type CuotaFranjaNexa,
   type CuotaMesNexa,
   type TonoAvisoNexa,
@@ -23,12 +24,9 @@ type Props = { cuotaMes: CuotaMesNexa; ultimasCuotas: CuotaFranjaNexa[]; hoy?: s
 const bancoDe = (cuotaMes: CuotaMesNexa, cuotas: CuotaFranjaNexa[]) =>
   cuotas.find((c) => c.numero === cuotaMes.numero)?.banco ?? null;
 
-// Cuánto de la cuota del mes está cubierto (pagada = todo).
-const fraccion = (c: CuotaMesNexa) => {
-  if (c.estado === "pagada") return 1;
-  const monto = Number(c.monto);
-  return monto > 0 ? Math.min(Number(c.aplicado) / monto, 1) : 0;
-};
+// Cuánto de la cuota del mes está cubierto, con los mismos topes que la franja: un parcial nunca parece completo.
+const fraccion = (c: CuotaMesNexa) =>
+  fraccionPagadaNexa({ pagada: c.estado === "pagada", aplicado: c.aplicado, monto: c.monto });
 
 export function NexaCuotaMesBloque({ cuotaMes, ultimasCuotas, hoy = hoyGuatemala() }: Props) {
   const aviso = avisoCuotaMesNexa(cuotaMes, hoy, bancoDe(cuotaMes, ultimasCuotas));

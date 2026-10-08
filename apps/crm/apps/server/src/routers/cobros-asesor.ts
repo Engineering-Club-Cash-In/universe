@@ -24,6 +24,7 @@ import {
 import {
 	contarPagosPorConfirmar,
 	contarReferenciasPorContactar,
+	sifcosDelUniversoDe,
 } from "../lib/agenda-asesor-cobros";
 import {
 	metaRecuperacionDelRango,
@@ -125,15 +126,16 @@ async function asesorDeLaSesion(email: string | undefined) {
 }
 
 /**
- * Correos (`email_cash_in`) de las carteras que el usuario trabaja hoy: la
- * propia y las que cubre por una suplencia vigente (CB-114). Es el mismo
- * universo que `getColaDia` (`resolverAgendaEfectivaDelUsuario`).
+ * SIFCOs de la cola del día del usuario: la cartera propia más las que cubre
+ * por una suplencia vigente (CB-114). Es el mismo universo que `getColaDia`
+ * (`resolverAgendaEfectivaDelUsuario` + pool de buckets). Vacío si es un
+ * titular ausente hoy.
  */
-async function emailsCarterasEfectivas(
+async function universoDeLaCola(
 	userId: string,
 	propio: { asesorId: number; nombre: string },
 	ahora: Date,
-): Promise<string[]> {
+): Promise<Set<string>> {
 	const pool = await carteraBackClient.getPoolPorAsesor();
 	const efectivos = await resolverAgendaEfectivaDelUsuario(
 		propio,
@@ -141,10 +143,7 @@ async function emailsCarterasEfectivas(
 		pool,
 		toDateStrGT(ahora),
 	);
-	const ids = new Set(efectivos.map((a) => a.asesorId));
-	return pool
-		.filter((a) => ids.has(a.asesor_id) && a.email_cash_in)
-		.map((a) => (a.email_cash_in as string).trim().toLowerCase());
+	return sifcosDelUniversoDe(efectivos.map((a) => a.asesorId));
 }
 
 function emailDeLaSesion(context: {
@@ -409,29 +408,29 @@ export const cobrosAsesorRouter = {
 				return { pagosPorConfirmar: null, referenciasPorContactar: null };
 			}
 			const ahora = new Date();
-			// CB-114: mismas carteras que la cola del día. Con cobertura el
+			// Mismo universo que la cola del día (pool de buckets, CB-114). Con cobertura el
 			// suplente suma las del titular ausente; un titular ausente no tiene
 			// ninguna hoy (su trabajo lo hace el suplente).
-			const emails = await emailsCarterasEfectivas(
+			const universo = await universoDeLaCola(
 				context.userId,
 				{ asesorId: asesor.asesor_id, nombre: asesor.nombre },
 				ahora,
 			).catch((error) => {
-				console.error("[Agenda] carteras efectivas:", error);
+				console.error("[Agenda] universo de la cola:", error);
 				return null;
 			});
-			if (!emails) {
+			if (!universo) {
 				return { pagosPorConfirmar: null, referenciasPorContactar: null };
 			}
-			if (emails.length === 0) {
+			if (universo.size === 0) {
 				return { pagosPorConfirmar: 0, referenciasPorContactar: 0 };
 			}
 			const [pagosPorConfirmar, referenciasPorContactar] = await Promise.all([
-				contarPagosPorConfirmar(emails, ahora).catch((error) => {
+				contarPagosPorConfirmar(universo, ahora).catch((error) => {
 					console.error("[Agenda] pagos por confirmar:", error);
 					return null;
 				}),
-				contarReferenciasPorContactar(context.userId, emails, ahora).catch(
+				contarReferenciasPorContactar(context.userId, universo, ahora).catch(
 					(error) => {
 						console.error("[Agenda] referencias por contactar:", error);
 						return null;

@@ -96,7 +96,7 @@ PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3)
 
 - `sifcosConPagoPorConfirmar` lee las boletas en esos dos estados que **llegaron hoy** (día de Guatemala). Se mide por `created_at`, no por `updated_at`: los avisos y el job de respaldo vuelven a tocar `updated_at` y una boleta vieja aparecería como de hoy.
 - **Una sola ventana** para el contador y para la fila. Con dos (por ejemplo 7 días y hoy), el contador diría «1» sin ninguna fila marcada. «Hoy» también coincide con el texto del front («Agenda de hoy», «Confirmar pago · recibido hoy») y acota el contador, porque `confirmada_a_verificar` es un estado terminal que nadie mueve.
-- **Contador** de la Agenda: se parte de las boletas de hoy y se confirma contra cartera cuáles son hoy del asesor (`sifcosEnCarteraDe`).
+- **Contador** de la Agenda: se parte de las boletas de hoy y se cruza contra el universo de la cola del asesor (`sifcosDelUniversoDe`: `/buckets/cola-dia` de su cartera y de las que cubre, el mismo de `getColaDia`). Las referencias por contactar solo cuentan casos con al menos una referencia con teléfono.
 - **Acción pendiente** «Confirmar pago» en Mi Cartera y en la Cola del día. Va justo después del SLA.
 - **Costo conocido:** una boleta de ayer que nadie revisó deja de aparecer, en el contador y en la fila. Si negocio quiere seguirla varios días, hay que cambiar el texto del front a «hace N días».
 
@@ -187,7 +187,7 @@ Primera ronda, sobre los cambios locales:
 | --- | --- |
 | Sin la migración 0077 el CRM falla | Cierto. Queda como advertencia arriba y en la descripción del PR que trae la 0077. |
 | B7 podía contar dos veces un crédito con dos casos | Corregido: cuenta SIFCOs únicos (`casos_cobros.numero_credito_sifco` no tiene índice único). |
-| `email_asesor` de `/getAllCredits` filtra por subcadena (`ILIKE '%…%'`) | Ya era así antes. Hoy no hay colisiones en `cartera_cobros2` local (8 asesores). `sifcosEnCarteraDe` ahora confirma el correo exacto del asesor de cada crédito. El `ILIKE` de cartera-back no se toca: lo usa toda la cartera. |
+| `email_asesor` de `/getAllCredits` filtra por subcadena (`ILIKE '%…%'`) | Ya era así antes. Los contadores de la Agenda ya no filtran por correo: usan el universo de `/buckets/cola-dia` por `asesor_id`, así que no les afecta. El `ILIKE` de cartera-back no se toca: lo usa toda la cartera. |
 | Subconsultas en el `ORDER BY` de `bucket_motor` | Se monitorea. Existe `idx_cuotas_credito_credito_fecha`; la cartera completa (1778) tarda unos 100 ms en local. |
 | `new Big("")` con `monto_mora` vacío | No aplica: es `numeric`, nunca llega `""`. |
 | La Cola del día volvía a armar la lista de SIFCOs | Corregido: usa `sifcos`, que ya está sin duplicados. |

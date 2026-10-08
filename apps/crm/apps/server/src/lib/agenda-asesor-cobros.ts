@@ -26,7 +26,12 @@ import { botCobrosBoletas } from "../db/schema/bot-cobros-boletas";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	cargarReferencias,
+	resolverContextoCaso,
+} from "../services/referencias-cobros-datos";
 import { agruparCasosVigentesPorSifco } from "./caso-vigente";
+import { fetchAllPages } from "./fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import {
 	cargarSeguimientoPorCaso,
@@ -41,10 +46,6 @@ export const MIN_INTENTOS_REFERENCIAS = 3;
 export const DIAS_SIN_GESTION_REFERENCIAS = 7;
 
 const MS_DIA = 24 * 60 * 60 * 1000;
-/** Todos los buckets del motor: limita la consulta a cartera al funnel. */
-const BUCKETS_FUNNEL = [0, 1, 2, 3, 4, 5];
-/** Tamaño de cada consulta a cartera (la lista va en el body si pasa de 50). */
-const LOTE_SIFCOS = 200;
 
 /** Inicio (medianoche GT) del día en que se miden las boletas «recibidas hoy». */
 export function inicioVentanaPagoPorConfirmar(ahora: Date = new Date()): Date {
@@ -92,55 +93,50 @@ export function debeContactarReferencias(
 }
 
 /**
- * De `sifcos`, los que hoy están en alguna de las carteras `emailsAsesores`
- * (`email_cash_in`) y dentro del funnel. Son varias cuando hay cobertura
- * (CB-114): la propia más las del titular ausente que el usuario cubre. Una
- * consulta por lote y por cartera a `/getAllCredits`.
- *
- * cartera-back filtra `email_asesor` por SUBCADENA (`ILIKE '%…%'`): con
- * `ana@…` también vendrían los créditos de `juana@…`. Por eso cada crédito se
- * confirma acá contra el correo EXACTO de su asesor.
+ * SIFCOs del universo de la cola del día de las carteras `asesorIds` (la
+ * propia y las que cubre, CB-114): el mismo que usa `getColaDia`, el POOL de
+ * buckets del asesor (`asesor_bucket`) vía `/buckets/cola-dia`, no el dueño
+ * directo del crédito. Un crédito de otro asesor que cae en su pool también
+ * está en su cola, así que cuenta en sus contadores.
  */
-export async function sifcosEnCarteraDe(
-	emailsAsesores: string[],
-	sifcos: string[],
+export async function sifcosDelUniversoDe(
+	asesorIds: number[],
 ): Promise<Set<string>> {
-	const unicos = [...new Set(sifcos)];
-	const enCartera = new Set<string>();
-	for (const emailAsesor of new Set(emailsAsesores)) {
-		const email = emailAsesor.trim().toLowerCase();
-		for (let i = 0; i < unicos.length; i += LOTE_SIFCOS) {
-			const lote = unicos.slice(i, i + LOTE_SIFCOS);
-			const resp = await carteraBackClient.getAllCreditos({
-				mes: 0,
-				anio: 0,
-				page: 1,
-				perPage: lote.length,
-				numeros_credito_sifco: lote,
-				email_cobrador: emailAsesor,
-				buckets: BUCKETS_FUNNEL,
-			});
-			for (const c of resp.data) {
-				const sifco = c.creditos.numero_credito_sifco;
-				const emailDelCredito = c.asesores?.emailCashIn?.trim().toLowerCase();
-				if (sifco && emailDelCredito === email) enCartera.add(sifco);
-			}
-		}
+	const universo = new Set<string>();
+	const porAsesor = await Promise.all(
+		[...new Set(asesorIds)].map((asesorId) =>
+			fetchAllPages(
+				async (page) => {
+					const resp = await carteraBackClient.getColaDiaSLA({
+						asesorId,
+						page,
+						perPage: 100,
+					});
+					return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+				},
+				{ maxPages: 200 },
+			),
+		),
+	);
+	for (const filas of porAsesor) {
+		for (const f of filas) universo.add(f.numero_credito_sifco);
 	}
-	return enCartera;
+	return universo;
 }
 
 /**
- * B6: boletas por confirmar de los créditos de las carteras que el usuario
- * trabaja hoy (`emailsAsesores`: la propia y las que cubre).
+ * B6: boletas por confirmar de los créditos del universo de la cola del
+ * asesor (`universo`, ver `sifcosDelUniversoDe`).
  */
 export async function contarPagosPorConfirmar(
-	emailsAsesores: string[],
+	universo: ReadonlySet<string>,
 	ahora: Date = new Date(),
 ): Promise<number> {
+	if (universo.size === 0) return 0;
 	const sifcos = await sifcosConPagoPorConfirmar(undefined, ahora);
-	if (sifcos.size === 0) return 0;
-	return (await sifcosEnCarteraDe(emailsAsesores, [...sifcos])).size;
+	let cuenta = 0;
+	for (const sifco of sifcos) if (universo.has(sifco)) cuenta++;
+	return cuenta;
 }
 
 /**
@@ -151,10 +147,10 @@ export async function contarPagosPorConfirmar(
  */
 export async function contarReferenciasPorContactar(
 	userId: string,
-	emailsAsesores: string[],
+	universo: ReadonlySet<string>,
 	ahora: Date = new Date(),
 ): Promise<number> {
-	const casos = await db
+	const gestionados = await db
 		.selectDistinct({
 			casoId: casosCobros.id,
 			numeroSifco: casosCobros.numeroCreditoSifco,
@@ -168,6 +164,10 @@ export async function contarReferenciasPorContactar(
 				isNotNull(casosCobros.numeroCreditoSifco),
 			),
 		);
+	// Solo lo que está en la cola del asesor; el resto ni se consulta.
+	const casos = gestionados.filter((c) =>
+		universo.has(c.numeroSifco as string),
+	);
 	if (casos.length === 0) return 0;
 
 	// Un SIFCO puede tener varios casos (reaperturas, migraciones): se evalúa
@@ -226,10 +226,22 @@ export async function contarReferenciasPorContactar(
 	});
 	if (candidatos.length === 0) return 0;
 
+	// Sin referencias con teléfono no hay a quién llamar: el caso no es una
+	// acción pendiente (hay casos sin lead u oportunidad, o sin referencias
+	// cargadas). Son pocos candidatos, se revisan de a uno.
+	const conReferencias: typeof candidatos = [];
+	for (const c of candidatos) {
+		if (await tieneReferenciaContactable(c.casoId)) conReferencias.push(c);
+	}
+
 	// Se cuentan CRÉDITOS, no casos: `casos_cobros.numero_credito_sifco` no
 	// tiene índice único y dos casos del mismo crédito no son dos pendientes.
-	const sifcosCandidatos = new Set(
-		candidatos.map((c) => c.numeroSifco as string),
-	);
-	return (await sifcosEnCarteraDe(emailsAsesores, [...sifcosCandidatos])).size;
+	return new Set(conReferencias.map((c) => c.numeroSifco as string)).size;
+}
+
+/** ¿El caso tiene al menos una referencia con un teléfono al cual llamar? */
+async function tieneReferenciaContactable(casoId: string): Promise<boolean> {
+	const ctx = await resolverContextoCaso(casoId);
+	const { referencias } = await cargarReferencias(ctx);
+	return referencias.some((r) => r.telefonos.length > 0);
 }

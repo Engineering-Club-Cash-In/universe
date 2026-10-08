@@ -1009,6 +1009,16 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		creditType: "autocompra",
 		analysisStatus: "pending",
 	};
+	const DPI = "2978485181201";
+	function prepararEvidenciaBot() {
+		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{
+				dpi: DPI,
+				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			},
+		]);
+	}
 
 	test("asegurarBuroOportunidad solo admite el 30% con la excepción registrada", async () => {
 		filasPorTabla.set(opportunities, [
@@ -1072,11 +1082,18 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 	});
 
 	test("sincronizar el origen del lead también habilita la reconsulta en 30%", async () => {
+		prepararEvidenciaBot();
 		filasPorTabla.set(leads, [
-			{ id: LEAD, source: "Whatsapp", assignedTo: "vendedor" },
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
 		]);
 		filasPorTabla.set(opportunities, [
-			{ ...base, stageId: ETAPA_30, source: "Whatsapp" },
+			{
+				...base,
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: "Whatsapp",
+				leadDpi: DPI,
+			},
 		]);
 
 		await invocar(
@@ -1087,10 +1104,87 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 
 		const [escritura] = escriturasSobreOportunidades();
 		expect(escritura?.valores.source).toBe("referral");
-		const expresion = textoSqlDelValor(escritura?.valores.buroRevalidacionAl30);
-		expect(expresion).toContain("case when");
-		expect(expresion).toContain("closure_percentage");
-		expect(expresion).toContain("'whatsapp'");
+		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
+	});
+
+	test("no corrige el origen del lead después de aprobar análisis sin volver al 30%", async () => {
+		prepararEvidenciaBot();
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				stageId: "etapa-40",
+				porcentaje: 40,
+				closurePercentage: 40,
+				source: "Whatsapp",
+				leadDpi: DPI,
+			},
+		]);
+
+		await expect(
+			invocar(
+				crmRouter.updateLead,
+				{ id: LEAD, source: "referral" },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/Regresa la oportunidad al 30%/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("no cambia directamente el origen de una oportunidad aprobada al 40%", async () => {
+		prepararEvidenciaBot();
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				stageId: "etapa-40",
+				porcentaje: 40,
+				closurePercentage: 40,
+				source: "Whatsapp",
+				leadDpi: DPI,
+			},
+		]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, source: "referral" },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/Regresa la oportunidad al 30%/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("un origen WhatsApp ya validado por Buró se puede corregir al 40%", async () => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				stageId: "etapa-40",
+				porcentaje: 40,
+				closurePercentage: 40,
+				source: "Whatsapp",
+				leadDpi: DPI,
+			},
+		]);
+		filasPorTabla.set(opportunityValidations, [
+			{
+				id: "validacion-existente",
+				tipo: "buro",
+				estado: "aprobado",
+				dpi: DPI,
+				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+		expect(escriturasSobreOportunidades()[0]?.valores.source).toBe("referral");
 	});
 });
 
@@ -1318,6 +1412,8 @@ describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 			stageId: ETAPA_40,
 			buroRevalidacionAl30: false,
 		});
+		const { sql: condicion } = sqlDeLaCondicion(aprobacion?.condicion);
+		expect(condicion).toContain("is not distinct from");
 	});
 
 	test("rechaza si una consulta de Buró cambia el veredicto mientras se aprueba", async () => {

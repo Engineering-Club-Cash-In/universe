@@ -1628,6 +1628,7 @@ export const crmRouter = {
 			const whereDelUpdate = candadoEnElPredicado
 				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
 				: whereClause;
+			let oportunidadConOrigenActualizado: string | null = null;
 
 			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
 			//
@@ -1716,6 +1717,82 @@ export const crmRouter = {
 						});
 					}
 				}
+				if (
+					updateData.source !== undefined ||
+					updateData.campaign !== undefined
+				) {
+					const [oportunidadActiva] = await tx
+						.select({
+							id: opportunities.id,
+							source: opportunities.source,
+							porcentaje: salesStages.closurePercentage,
+						})
+						.from(opportunities)
+						.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.where(
+							and(
+								eq(opportunities.leadId, id),
+								inArray(opportunities.status, ["open", "on_hold"]),
+							),
+						)
+						.orderBy(desc(opportunities.createdAt))
+						.limit(1)
+						.for("update", { of: opportunities });
+
+					if (oportunidadActiva) {
+						const veniaDelBot =
+							updateData.source !== undefined &&
+							updateData.source !== "Whatsapp" &&
+							(oportunidadActiva.source === "Whatsapp" ||
+								(oportunidadActiva.source === null &&
+									leadAntesDelUpdate?.source === "Whatsapp"));
+						const pierdeExencionBot =
+							veniaDelBot &&
+							(
+								await resolverExencionPorBot({
+									opportunityId: oportunidadActiva.id,
+									source: oportunidadActiva.source,
+									leadSource: leadAntesDelUpdate?.source ?? null,
+									leadId: id,
+									leadDpi: updateData.dpi ?? leadAntesDelUpdate?.dpi ?? null,
+								})
+							).exento;
+						if (pierdeExencionBot && oportunidadActiva.porcentaje > 30) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Regresa la oportunidad al 30% antes de corregir su origen de WhatsApp; debe revalidarse el Buró.",
+							});
+						}
+						await tx
+							.update(opportunities)
+							.set({
+								...(updateData.source !== undefined && {
+									source: updateData.source,
+								}),
+								...(pierdeExencionBot &&
+									oportunidadActiva.porcentaje === 30 && {
+										buroRevalidacionAl30: true,
+									}),
+								...(updateData.campaign !== undefined && {
+									campaign: updateData.campaign,
+								}),
+								updatedAt: new Date(),
+							})
+							.where(eq(opportunities.id, oportunidadActiva.id));
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidadActiva.id,
+							action: "sync_source_campaign",
+							data: {
+								leadId: id,
+								source: updateData.source,
+								campaign: updateData.campaign,
+							},
+						});
+						if (updateData.source !== undefined)
+							oportunidadConOrigenActualizado = oportunidadActiva.id;
+					}
+				}
 
 				return filas;
 			});
@@ -1795,57 +1872,11 @@ export const crmRouter = {
 				}
 			}
 
-			if (
-				updateData.source !== undefined ||
-				updateData.campaign !== undefined
-			) {
-				const [activeOpportunity] = await db
-					.select({ id: opportunities.id })
-					.from(opportunities)
-					.where(
-						and(
-							eq(opportunities.leadId, id),
-							inArray(opportunities.status, ["open", "on_hold"]),
-						),
-					)
-					.orderBy(desc(opportunities.createdAt))
-					.limit(1);
-
-				if (activeOpportunity) {
-					await db
-						.update(opportunities)
-						.set({
-							...(updateData.source !== undefined
-								? {
-										source: updateData.source,
-										...(updateData.source !== "Whatsapp" && {
-											buroRevalidacionAl30: sql`case when ${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) and (${opportunities.source} = 'Whatsapp' or (${opportunities.source} is null and ${leadAntesDelUpdate?.source} = 'Whatsapp')) then true else ${opportunities.buroRevalidacionAl30} end`,
-										}),
-									}
-								: {}),
-							...(updateData.campaign !== undefined
-								? { campaign: updateData.campaign }
-								: {}),
-							updatedAt: new Date(),
-						})
-						.where(eq(opportunities.id, activeOpportunity.id));
-					auditRecord({
-						entity: "opportunity",
-						id: activeOpportunity.id,
-						action: "sync_source_campaign",
-						data: {
-							leadId: id,
-							source: updateData.source,
-							campaign: updateData.campaign,
-						},
-					});
-					if (updateData.source !== undefined) {
-						consultarBuroAlVeinteTrasGuardar(
-							activeOpportunity.id,
-							context.userId,
-						);
-					}
-				}
+			if (oportunidadConOrigenActualizado) {
+				consultarBuroAlVeinteTrasGuardar(
+					oportunidadConOrigenActualizado,
+					context.userId,
+				);
 			}
 
 			if (consultarBuroPorDpi && updatedLead[0].dpi) {
@@ -3238,6 +3269,7 @@ export const crmRouter = {
 
 			let entrandoAAnalisis = false;
 			let regresandoAAnalisis = false;
+			let porcentajeDestinoSolicitado: number | null = null;
 			// Validate stage transitions
 			if (input.stageId) {
 				const targetStage = await db
@@ -3255,6 +3287,7 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				porcentajeDestinoSolicitado = toPercentage;
 				if (fromPercentage < 30 && toPercentage > 30) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -3779,6 +3812,43 @@ export const crmRouter = {
 					await tx.execute(
 						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
 					);
+				}
+				if (input.source !== undefined && input.source !== "Whatsapp") {
+					await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${id}))`);
+					const [origenActual] = await tx
+						.select({
+							source: opportunities.source,
+							leadSource: leads.source,
+							leadId: opportunities.leadId,
+							leadDpi: leads.dpi,
+							porcentaje: salesStages.closurePercentage,
+						})
+						.from(opportunities)
+						.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, id))
+						.for("update", { of: opportunities });
+					if (
+						origenActual &&
+						(porcentajeDestinoSolicitado ?? origenActual.porcentaje) > 30 &&
+						(origenActual.source === "Whatsapp" ||
+							(origenActual.source === null &&
+								origenActual.leadSource === "Whatsapp"))
+					) {
+						const exencion = await resolverExencionPorBot({
+							opportunityId: id,
+							source: origenActual.source,
+							leadSource: origenActual.leadSource,
+							leadId: origenActual.leadId,
+							leadDpi: origenActual.leadDpi,
+						});
+						if (exencion.exento) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Regresa la oportunidad al 30% antes de corregir su origen de WhatsApp; debe revalidarse el Buró.",
+							});
+						}
+					}
 				}
 				let condicionBuroParaAnalisis: SQL | undefined;
 				let habilitarBuroAlRegresar = false;
@@ -4876,16 +4946,25 @@ export const crmRouter = {
 								sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${cofirmantesValidados}`,
 							)
 						: condicionesConDpi;
+				// El origen puede quitar la exención del bot. Si se corrigió
+				// mientras se evaluaba, no se aprueba con esa exención anterior.
+				const condicionesConOrigen = firmaBitacoraRevisada
+					? and(
+							condicionesConCofirmantes,
+							sql`${opportunities.source} is not distinct from ${opportunity[0].source}`,
+							sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} is not distinct from ${opportunity[0].leadSource})`,
+						)
+					: condicionesConCofirmantes;
 
 				const whereClause = huellaBuro
 					? and(
-							condicionesConCofirmantes,
+							condicionesConOrigen,
 							sql`${huellaEvaluacionSql(
 								sql`${opportunities.id}`,
 								sql`${opportunities.leadId}`,
 							)} = ${huellaBuro}`,
 						)
-					: condicionesConCofirmantes;
+					: condicionesConOrigen;
 
 				// Update opportunity with analysisStatus.
 				// Cuando hay huella de buró, la escritura va dentro de una

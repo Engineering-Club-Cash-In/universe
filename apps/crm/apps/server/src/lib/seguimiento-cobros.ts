@@ -24,7 +24,7 @@
  *  · `link_pago_generado` no es gestión (se excluye en la query).
  */
 
-import { and, desc, gte, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import { contactosCobros } from "../db/schema/cobros";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
@@ -276,10 +276,13 @@ export function accionPendienteDe(
  * Trae en lote las gestiones de los casos y devuelve el seguimiento de cada
  * uno. Dos cortes para no leer el historial completo: los últimos
  * DIAS_VENTANA_SEGUIMIENTO días, más las promesas abiertas de cualquier fecha.
+ * Con `realizadoPor` solo se leen las gestiones de ese usuario (seguimiento
+ * «propio» del asesor); sin él, las de todos.
  */
 export async function cargarSeguimientoPorCaso(
 	casoIds: string[],
 	ahora: Date = new Date(),
+	realizadoPor?: string,
 ): Promise<Map<string, SeguimientoCaso>> {
 	const resultado = new Map<string, SeguimientoCaso>();
 	if (casoIds.length === 0) return resultado;
@@ -298,6 +301,9 @@ export async function cargarSeguimientoPorCaso(
 		.where(
 			and(
 				inArray(contactosCobros.casoCobroId, casoIds),
+				realizadoPor
+					? eq(contactosCobros.realizadoPor, realizadoPor)
+					: undefined,
 				ne(contactosCobros.estadoContacto, "link_pago_generado"),
 				or(
 					gte(contactosCobros.fechaContacto, desde),

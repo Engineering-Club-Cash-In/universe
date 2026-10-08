@@ -26,6 +26,7 @@ import { botCobrosBoletas } from "../db/schema/bot-cobros-boletas";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
+import { agruparCasosVigentesPorSifco } from "./caso-vigente";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import {
 	cargarSeguimientoPorCaso,
@@ -165,9 +166,31 @@ export async function contarReferenciasPorContactar(
 		);
 	if (casos.length === 0) return 0;
 
-	const casoIds = casos.map((c) => c.casoId);
+	// Un SIFCO puede tener varios casos (reaperturas, migraciones): se evalúa
+	// solo el VIGENTE, elegido entre TODOS los casos del crédito, no solo entre
+	// los que el asesor tocó. Si el vigente es otro, el viejo no cuenta.
+	const sifcosGestionados = [
+		...new Set(casos.map((c) => c.numeroSifco as string)),
+	];
+	const todosLosCasos = await db
+		.select({
+			id: casosCobros.id,
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			activo: casosCobros.activo,
+			updatedAt: casosCobros.updatedAt,
+		})
+		.from(casosCobros)
+		.where(inArray(casosCobros.numeroCreditoSifco, sifcosGestionados));
+	const vigentePorSifco = agruparCasosVigentesPorSifco(todosLosCasos);
+	const casosVigentes = casos.filter(
+		(c) => vigentePorSifco.get(c.numeroSifco as string)?.id === c.casoId,
+	);
+	if (casosVigentes.length === 0) return 0;
+
+	const casoIds = casosVigentes.map((c) => c.casoId);
 	const [seguimientos, gestionesReferencias] = await Promise.all([
-		cargarSeguimientoPorCaso(casoIds, ahora),
+		// Solo los intentos del asesor: los de otro no son suyos.
+		cargarSeguimientoPorCaso(casoIds, ahora, userId),
 		db
 			.select({
 				casoId: contactosReferenciasCobros.casoCobroId,
@@ -181,7 +204,7 @@ export async function contarReferenciasPorContactar(
 		gestionesReferencias.map((g) => [g.casoId, g.ultima]),
 	);
 
-	const candidatos = casos.filter((c) => {
+	const candidatos = casosVigentes.filter((c) => {
 		const seguimiento = seguimientos.get(c.casoId);
 		return (
 			!!seguimiento &&

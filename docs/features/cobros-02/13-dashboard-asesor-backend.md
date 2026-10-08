@@ -7,6 +7,8 @@
 > **PR:** #1861 (mergeado en `COBROS-02` el 2026-10-06).
 >
 > **Seguimiento:** issue #1862, asignado a José. Lo que se hizo en el front está en [14-rediseno-dashboard-asesor.md](./14-rediseno-dashboard-asesor.md).
+>
+> **Avance (2026-10-08):** B2–B9 implementados en `COBROS-02` (PRs #1901, #1902, #1904 y el último, con B6 y B7) y B10 decidido (B0 sigue fuera de la cola). Decisiones, estado y pruebas: [20-plan-backend-asesor.md](./20-plan-backend-asesor.md).
 
 ## Las pantallas
 
@@ -121,7 +123,7 @@ git grep -n "TODO(José)" -- apps/crm
 - **Qué hace falta:**
   - Guardar la hora: una columna `hora_proximo_contacto` o un timestamp real para los contactos que no son promesa. Las promesas siguen por día.
   - Agregar el selector de hora en el modal de contacto.
-  - En `resumirSeguimiento` (`lib/seguimiento-cobros.ts`), devolver la fecha con hora en `proximaLlamadaEn`. El front formatea la hora si viene distinta de medianoche.
+  - En `resumirSeguimiento` (`lib/seguimiento-cobros.ts`), devolver la fecha con hora en `proximaLlamadaEn`. El front debería formatear la hora si viene distinta de medianoche (verificado el 2026-10-08: todavía no lo hace; ver «Pendiente de front» en el [doc 20](./20-plan-backend-asesor.md)).
 
 ### B9 · Movimiento de buckets del día en vivo
 

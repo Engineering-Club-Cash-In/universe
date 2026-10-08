@@ -301,3 +301,20 @@ describe("hora del próximo contacto (B8)", () => {
 		expect(conHoraGT(dia, null).toISOString()).toBe(dia.toISOString());
 	});
 });
+
+describe("pago por confirmar (B6)", () => {
+	const base = resumirSeguimiento([], AHORA);
+	it("va después del SLA y antes de la promesa de hoy", () => {
+		expect(
+			accionPendienteDe(base, { slaHoy: true, pagoPorConfirmar: true }, AHORA)
+				?.tipo,
+		).toBe("gestionar_sla");
+		expect(
+			accionPendienteDe(
+				{ ...base, promesaVigenteEn: gt("2026-10-06", "00:00") },
+				{ pagoPorConfirmar: true },
+				AHORA,
+			)?.tipo,
+		).toBe("confirmar_pago");
+	});
+});

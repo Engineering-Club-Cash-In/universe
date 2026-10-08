@@ -71,6 +71,7 @@ import {
 	duenosEnCarteraPorSifco,
 	sifcosQueTrabaja,
 } from "../lib/acceso-caso-cobro";
+import { sifcosConPagoPorConfirmar } from "../lib/agenda-asesor-cobros";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	payloadEdicionManual,
@@ -1934,8 +1935,20 @@ export const cobrosRouter = {
 					// Rediseño (Dashboard del asesor / Mi Cartera): seguimiento de cada
 					// caso de la página, en lote — columnas Seguimiento, Estado de
 					// gestión y Acción pendiente.
-					const seguimientoPorCaso =
-						await cargarSeguimientoPorCaso(casoIdsPagina);
+					const [seguimientoPorCaso, sifcosPagoPorConfirmar] =
+						await Promise.all([
+							cargarSeguimientoPorCaso(casoIdsPagina),
+							// B6: "Confirmar pago" en Acción pendiente. Sin la tabla de
+							// boletas la página no se cae: se pierde solo esa acción.
+							sifcosConPagoPorConfirmar(
+								creditosResponse.data
+									.map((c) => c.creditos.numero_credito_sifco)
+									.filter((s): s is string => !!s),
+							).catch((error) => {
+								console.error("[Cobros] pagos por confirmar:", error);
+								return new Set<string>();
+							}),
+						]);
 					const hoyStrListado = toDateStrGT(new Date());
 
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
@@ -2080,6 +2093,7 @@ export const cobrosRouter = {
 										),
 										accionPendiente: accionPendienteDe(seguimiento, {
 											venceHoy,
+											pagoPorConfirmar: sifcosPagoPorConfirmar.has(numeroSifco),
 										}),
 									};
 								})(),
@@ -4795,7 +4809,14 @@ export const cobrosRouter = {
 				// Rediseño: seguimiento por caso (intentos, último intento, llamada
 				// agendada, estado de gestión). En lote sobre todo el universo porque
 				// alimenta los conteos extra y `filtroExtra`.
-				const seguimientoPorCaso = await cargarSeguimientoPorCaso(casoIds);
+				const [seguimientoPorCaso, sifcosPagoPorConfirmar] = await Promise.all([
+					cargarSeguimientoPorCaso(casoIds),
+					// B6: "Confirmar pago" en Acción pendiente.
+					sifcosConPagoPorConfirmar(sifcos).catch((error) => {
+						console.error("[ColaDia] pagos por confirmar:", error);
+						return new Set<string>();
+					}),
+				]);
 				const seguimientoDe = (sifco: string) => {
 					const caso = casoPorSifco.get(sifco);
 					return caso
@@ -4933,6 +4954,9 @@ export const cobrosRouter = {
 												? gtDateStrToDate(credito.fecha_limite_sla)
 												: null,
 											venceHoy: clasificacion.venceHoy,
+											pagoPorConfirmar: sifcosPagoPorConfirmar.has(
+												credito.numero_credito_sifco,
+											),
 										},
 										hoy,
 									),

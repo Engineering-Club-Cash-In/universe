@@ -6,6 +6,7 @@
  * Un dato que no se pudo calcular (cartera caída, asesor sin pool) llega como
  * `null` y la card del front muestra "—"; nunca tumba el resto del bloque.
  * Detalle de cada tarea: docs/features/cobros-02/13-dashboard-asesor-backend.md
+ * y el plan en docs/features/cobros-02/20-plan-backend-asesor.md.
  */
 
 import { and, eq, gte, inArray, lt, ne, not, or, sql } from "drizzle-orm";
@@ -20,6 +21,10 @@ import {
 	calcularMovimientosBucketDelDia,
 	type MovimientoBucketDelDia,
 } from "../jobs/cierre-diario-asesores";
+import {
+	contarPagosPorConfirmar,
+	contarReferenciasPorContactar,
+} from "../lib/agenda-asesor-cobros";
 import {
 	metaRecuperacionDelRango,
 	PERIODOS_DESEMPENO,
@@ -368,21 +373,33 @@ export const cobrosAsesorRouter = {
 		}),
 
 	/**
-	 * Contadores de la "Agenda de hoy" que todavía no tienen fuente. Conectados
-	 * en el front como "pronto" mientras sean null.
+	 * Contadores de la "Agenda de hoy" que no salen de la cola del día (B6 y
+	 * B7; reglas en lib/agenda-asesor-cobros.ts). null = no aplica (usuario sin
+	 * asesor en cartera) o no se pudo calcular; el front muestra "pronto".
 	 */
-	getMiAgendaContadoresPendientes: cobrosProcedure.handler(async () => {
-		// TODO(José) · tarea B6: pagos reportados por el cliente que esperan
-		// validación, de los créditos del asesor de la sesión (definir con negocio
-		// la fuente: pagos_credito.validation_status='pending' en cartera, boletas
-		// del bot en revisión, …). Número, o null si no aplica.
-		const pagosPorConfirmar: number | null = null;
-		// TODO(José) · tarea B7: créditos del asesor con referencias que hay que
-		// contactar (definir la regla: p. ej. N intentos fallidos al titular y
-		// referencias sin gestión). Número, o null si no aplica.
-		const referenciasPorContactar: number | null = null;
-		return { pagosPorConfirmar, referenciasPorContactar };
-	}),
+	getMiAgendaContadoresPendientes: cobrosProcedure.handler(
+		async ({ context }) => {
+			const email = emailDeLaSesion(context);
+			const asesor = await asesorDeLaSesion(email).catch(() => undefined);
+			if (!email || !asesor) {
+				return { pagosPorConfirmar: null, referenciasPorContactar: null };
+			}
+			const ahora = new Date();
+			const [pagosPorConfirmar, referenciasPorContactar] = await Promise.all([
+				contarPagosPorConfirmar(email, ahora).catch((error) => {
+					console.error("[Agenda] pagos por confirmar:", error);
+					return null;
+				}),
+				contarReferenciasPorContactar(context.userId, email, ahora).catch(
+					(error) => {
+						console.error("[Agenda] referencias por contactar:", error);
+						return null;
+					},
+				),
+			]);
+			return { pagosPorConfirmar, referenciasPorContactar };
+		},
+	),
 };
 
 /**

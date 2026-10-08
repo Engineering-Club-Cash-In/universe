@@ -8,7 +8,8 @@
  *  · Estado de gestión → Sin acuerdo / Promesa vigente / Promesa incumplida /
  *                        Convenio vigente
  *  · Acción pendiente  → Llamar / Promesa vence hoy / Promesa vencida /
- *                        Promesa por vencer / Cuota vence hoy / Gestionar (SLA)
+ *                        Promesa por vencer / Cuota vence hoy / Gestionar (SLA) /
+ *                        Confirmar pago
  *
  * La parte pura (`resumirSeguimiento`, `estadoGestionDe`, `accionPendienteDe`)
  * se prueba sin DB; `cargarSeguimientoPorCaso` solo trae las filas en lote.
@@ -212,7 +213,7 @@ export type TipoAccionPendiente =
 	| "cuota_vence_hoy"
 	| "promesa_vencida"
 	| "promesa_por_vencer"
-	/** Depende de "pagos por confirmar" (pendiente de backend, ver docs). */
+	/** Boleta del bot esperando revisión del asesor (B6, ver `pagoPorConfirmar`). */
 	| "confirmar_pago";
 
 export interface AccionPendiente {
@@ -224,7 +225,8 @@ export interface AccionPendiente {
 /**
  * La acción más urgente del caso, en el mismo orden de prioridad de la Cola
  * del día (SLA → promesa hoy → vence hoy → vencida → próxima), con la llamada
- * agendada para hoy después de la promesa de hoy.
+ * agendada para hoy después de la promesa de hoy. Un pago por confirmar va
+ * justo después del SLA: el cliente ya pagó y su boleta espera al asesor.
  */
 export function accionPendienteDe(
 	seguimiento: SeguimientoCaso,
@@ -232,6 +234,8 @@ export function accionPendienteDe(
 		slaHoy?: boolean;
 		fechaLimiteSla?: Date | null;
 		venceHoy?: boolean;
+		/** B6: hay boleta del bot en revisión manual o por verificar. */
+		pagoPorConfirmar?: boolean;
 	} = {},
 	ahora: Date = new Date(),
 ): AccionPendiente | null {
@@ -239,6 +243,7 @@ export function accionPendienteDe(
 	const esHoy = (d: Date | null) => !!d && toDateStrGT(d) === hoyStr;
 	if (extras.slaHoy)
 		return { tipo: "gestionar_sla", fecha: extras.fechaLimiteSla ?? null };
+	if (extras.pagoPorConfirmar) return { tipo: "confirmar_pago", fecha: null };
 	if (esHoy(seguimiento.promesaVigenteEn))
 		return { tipo: "promesa_hoy", fecha: seguimiento.promesaVigenteEn };
 	if (esHoy(seguimiento.proximaLlamadaEn))

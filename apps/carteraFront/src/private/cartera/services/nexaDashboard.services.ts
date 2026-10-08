@@ -55,6 +55,8 @@ export interface NexaDashboardParams extends RangoFechas {
   cuotaMes: "" | FiltroCuotaMes;
   // Medio con que se pagó la cuota del mes; el back lo ignora si cuotaMes no es "pagados".
   medio: "" | "nexa" | "manual";
+  // asesor_id para filtrar (solo ADMIN/CONTA). "" = todos. A un ASESOR el back le aplica el suyo siempre.
+  asesor: string;
   page: number;
   pageSize: number;
 }
@@ -62,7 +64,7 @@ export interface NexaDashboardParams extends RangoFechas {
 export const getNexaDashboard = async (
   params: NexaDashboardParams
 ): Promise<NexaDashboardResponse> => {
-  const { data } = await api.get(`${API_URL}/nexa/dashboard`, { params });
+  const { data } = await api.get(`${API_URL}/nexa/dashboard`, { params: { ...params, asesor: params.asesor || undefined } });
   return data;
 };
 

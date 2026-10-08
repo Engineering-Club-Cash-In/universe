@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useNexaDashboard } from "../hooks/useNexaDashboard";
+import { getAdvisors, type Advisor } from "../services/services";
+import { useAuth } from "@/Provider/authProvider";
 import { NexaPagosModal } from "./NexaPagosModal";
 import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,12 +57,32 @@ export function NexaDashboard() {
   const [medio, setMedio] = useState<NexaDashboardParams["medio"]>("");
   const [cuotaMes, setCuotaMes] = useState<NexaDashboardParams["cuotaMes"]>("");
   const [creditoModal, setCreditoModal] = useState<NexaDashboardCredito | null>(null);
-  const { data, isLoading, error } = useNexaDashboard({ q, page, pageSize: 20, medio, cuotaMes, ...rango });
+  // El alcance lo decide el back: esto solo muestra u oculta el filtro. Un ASESOR no lo ve y,
+  // aunque mande ?asesor=, el back le aplica el suyo.
+  const { user } = useAuth();
+  const esAsesor = user?.role === "ASESOR";
+  const puedeFiltrarAsesor = user?.role === "ADMIN" || user?.role === "CONTA";
+  const [asesor, setAsesor] = useState("");
+  const { data: advisors } = useQuery<Advisor[]>({
+    queryKey: ["advisors"],
+    queryFn: getAdvisors,
+    enabled: puedeFiltrarAsesor,
+    staleTime: 5 * 60 * 1000,
+  });
+  // GET /advisor une con platform_users: un asesor con dos usuarios viene repetido.
+  const opcionesAsesor = useMemo(() => {
+    const porId = new Map<number, Advisor>();
+    for (const a of Array.isArray(advisors) ? advisors : []) if (!porId.has(a.asesor_id)) porId.set(a.asesor_id, a);
+    return [...porId.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  }, [advisors]);
+  const { data, isLoading, error } = useNexaDashboard({
+    q, page, pageSize: 20, medio, cuotaMes, asesor: puedeFiltrarAsesor ? asesor : "", ...rango,
+  });
 
   const handleBuscar = () => { setQ(busqueda); setRango({ desde: desdeInput, hasta: hastaInput }); setPage(1); };
   const handleLimpiar = () => {
     setBusqueda(""); setQ(""); setDesdeInput(""); setHastaInput(""); setRango({ desde: "", hasta: "" });
-    setMedio(""); setCuotaMes(""); setPage(1);
+    setMedio(""); setCuotaMes(""); setAsesor(""); setPage(1);
   };
   const totalPages = data ? Math.max(1, Math.ceil(data.total / 20)) : 1;
 
@@ -71,6 +94,7 @@ export function NexaDashboard() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Pagos Nexa</h1>
         <p className="text-sm text-slate-700">Créditos con token de Nexa y si su último pago entró por Nexa{describirRango(rango)}</p>
+        {esAsesor && <p className="mt-1 text-sm font-medium text-blue-800">Mostrando tus créditos</p>}
       </div>
 
       {data?.totales && (
@@ -116,6 +140,17 @@ export function NexaDashboard() {
               <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa o manual</SelectItem>
               <SelectItem value="nexa" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa</SelectItem>
               <SelectItem value="manual" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: manual</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        {puedeFiltrarAsesor && (
+          <Select value={asesor || "todos"} onValueChange={(v) => { setAsesor(sinTodos<string>(v)); setPage(1); }}>
+            <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Asesor"><SelectValue /></SelectTrigger>
+            <SelectContent className="bg-white text-slate-900 border-slate-200">
+              <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Asesor: todos</SelectItem>
+              {opcionesAsesor.map((a) => (
+                <SelectItem key={a.asesor_id} value={String(a.asesor_id)} className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Asesor: {a.nombre}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         )}

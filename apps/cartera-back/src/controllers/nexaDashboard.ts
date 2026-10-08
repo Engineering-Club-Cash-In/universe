@@ -48,6 +48,51 @@ export const parseNexaDashboardParams = (query: Record<string, unknown>): NexaDa
   };
 };
 
+// Qué créditos puede ver la sesión, por `creditos.asesor_id`. todos: ADMIN/CONTA sin filtro.
+// asesor: solo los de ese asesor. ninguno: un ASESOR sin asesor vinculado (cierra en falso).
+export type AlcanceNexa = { tipo: "todos" } | { tipo: "asesor"; asesorId: number } | { tipo: "ninguno" };
+
+const INT4_MAX = 2_147_483_647;
+const esIdAsesor = (valor: unknown): valor is number =>
+  typeof valor === "number" && Number.isInteger(valor) && valor > 0 && valor <= INT4_MAX;
+
+/** `?asesor=` del ADMIN/CONTA: entero positivo en rango de int4, sin ceros a la izquierda. Lo demás, null (sin filtro). */
+export const parseAsesorFiltro = (valor: unknown): number | null => {
+  if (typeof valor !== "string" || !/^[1-9]\d{0,9}$/.test(valor)) return null;
+  const id = Number(valor);
+  return esIdAsesor(id) ? id : null;
+};
+
+/** Fila VIGENTE de platform_users de la sesión (findSessionUser); null si no existe. */
+export type SesionNexa = { role: string | null; is_active: boolean | null; asesor_id: number | null } | null;
+
+/**
+ * Alcance de la sesión. Un ASESOR (por el token o por su fila vigente) ve siempre y solo su
+ * `platform_users.asesor_id` de la base: el `?asesor=` y el claim del token se ignoran. Sin fila,
+ * inactivo o sin vínculo: ninguno. Los demás roles (el router ya filtró ADMIN/CONTA) ven todo,
+ * o el asesor que piden.
+ */
+export const resolverAlcanceNexa = (rolToken: unknown, sesion: SesionNexa, asesorPedido: number | null): AlcanceNexa => {
+  if (rolToken === "ASESOR" || sesion?.role === "ASESOR") {
+    const propio = sesion?.is_active === true ? sesion.asesor_id : null;
+    return esIdAsesor(propio) ? { tipo: "asesor", asesorId: propio } : { tipo: "ninguno" };
+  }
+  return esIdAsesor(asesorPedido) ? { tipo: "asesor", asesorId: asesorPedido } : { tipo: "todos" };
+};
+
+// Condición SQL del alcance sobre `columna` (creditos.asesor_id). Sin alcance válido lanza:
+// un llamador que lo olvide no ve todo por defecto.
+const condicionAlcance = (alcance: AlcanceNexa, columna: SQL): SQL => {
+  switch (alcance?.tipo) {
+    case "todos": return sql`true`;
+    case "ninguno": return sql`false`;
+    case "asesor":
+      if (!esIdAsesor(alcance.asesorId)) break;
+      return sql`${columna} = ${alcance.asesorId}::int`;
+  }
+  throw new Error("Alcance del dashboard Nexa no válido");
+};
+
 // `columna` es un timestamp sin zona (hora de Guatemala). NULLIF evita castear "" a fecha.
 const enRango = (columna: SQL, rango: RangoFechas) => sql`(${columna} >= COALESCE(NULLIF(${rango.desde}, '')::date, '-infinity'::date)
      AND ${columna} < COALESCE(NULLIF(${rango.hasta}, '')::date + 1, 'infinity'::date))`;
@@ -196,7 +241,9 @@ export const mapNexaDashboardRows = (rows: Record<string, unknown>[], params: Ne
 // manual_review con filas vigentes es incierto (pudo aplicarse): no cuenta como rechazo.
 const esRechazo = sql`e.pago_id IS NULL AND (e.status = 'failed' OR (e.status = 'manual_review' AND pe.vigente IS NOT TRUE))`;
 
-export const getNexaDashboard = async (params: NexaDashboardParams): Promise<NexaDashboardResponse> => {
+export const getNexaDashboard = async (alcance: AlcanceNexa, params: NexaDashboardParams): Promise<NexaDashboardResponse> => {
+  const filtroAlcance = condicionAlcance(alcance, sql.raw("c.asesor_id"));
+  // El alcance va en `base`: de ahí cuelgan las filas, los totales y la paginación.
   const result = await db.execute(sql`
 WITH base AS (
   SELECT b.credito_id, b.nexa_token, b.activo, c.numero_credito_sifco,
@@ -204,9 +251,10 @@ WITH base AS (
   FROM cartera.nexa_credit_bindings b
   JOIN cartera.creditos c ON c.credito_id = b.credito_id
   LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-  WHERE ${params.q} = ''
+  WHERE ${filtroAlcance}
+    AND (${params.q} = ''
      OR c.numero_credito_sifco ILIKE '%' || ${params.q} || '%'
-     OR u.nombre ILIKE '%' || ${params.q} || '%'
+     OR u.nombre ILIKE '%' || ${params.q} || '%')
 ), ${filasConBoleta(sql`p.credito_id IN (SELECT credito_id FROM base)`, params)}, boletas AS (
   SELECT f.credito_id, f.boleta, BOOL_OR(f.nexa_payment_event_id IS NOT NULL) AS es_nexa,
          MIN(f.fecha_pago) AS fecha, MAX(f.monto_boleta) AS monto, MIN(f.pago_id) AS primer_pago,
@@ -417,10 +465,18 @@ export const mapNexaCreditPayments = (
   })),
 });
 
+/** null: el crédito no entra en el alcance de la sesión (el router responde 404, sin datos). */
 export const getNexaCreditPayments = async (
+  alcance: AlcanceNexa,
   creditoId: number,
   rango: RangoFechas = { desde: "", hasta: "" },
-): Promise<NexaCreditPaymentsResponse> => {
+): Promise<NexaCreditPaymentsResponse | null> => {
+  const filtroAlcance = condicionAlcance(alcance, sql.raw("c.asesor_id"));
+  if (alcance.tipo !== "todos") {
+    const propio = await db.execute(sql`
+SELECT 1 FROM cartera.creditos c WHERE c.credito_id = ${creditoId} AND ${filtroAlcance}`);
+    if (propio.rows.length === 0) return null;
+  }
   const pagos = await db.execute(sql`
 WITH ${filasConBoleta(sql`p.credito_id = ${creditoId}`, rango)}
 SELECT to_char(MIN(f.fecha_pago), 'YYYY-MM-DD"T"HH24:MI:SS') AS fecha_pago,

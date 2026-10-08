@@ -6,6 +6,8 @@ import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const integrationTest = testDatabaseUrl ? test : test.skip;
 const sinRango = { desde: "", hasta: "" };
+// Estas pruebas no son de alcance (ver nexaDashboard.asesor.integration.test.ts): ven todo.
+const TODOS = { tipo: "todos" } as const;
 const dash = { q: "", page: 1, pageSize: 50, cuotaMes: "" as const, medio: "" as const, ...sinRango };
 
 type Sql = ReturnType<typeof postgres>;
@@ -56,9 +58,9 @@ const nuevoCredito = async (cliente?: string) => {
       VALUES (${id}, ${`ref-${id}-${Math.random()}`}, ${monto}, ${status}) RETURNING id`;
     return e!.id as number;
   };
-  const modal = (rango = sinRango) => mod.getNexaCreditPayments(id, rango);
+  const modal = async (rango = sinRango) => (await mod.getNexaCreditPayments(TODOS, id, rango))!;
   const fila = async (rango = sinRango) => {
-    const r = await mod.getNexaDashboard({ ...dash, ...rango, q: sifco });
+    const r = await mod.getNexaDashboard(TODOS, { ...dash, ...rango, q: sifco });
     return { r, fila: r.creditos[0] };
   };
   // Cuota que vence a `desfase` del primer día del mes en curso (hora de Guatemala), p. ej. '-1 month'.
@@ -282,17 +284,17 @@ integrationTest("página más allá del final: creditos vacío pero total y tota
   }
   const totales = { creditos: 3, conToken: 2, pagosNexa: 3, montoNexa: "120.00", rechazosNexa: 0, ultimoPagoNexa: 3 };
 
-  const ultima = await mod.getNexaDashboard({ ...dash, q: "Paginado", page: 2, pageSize: 2 });
+  const ultima = await mod.getNexaDashboard(TODOS, { ...dash, q: "Paginado", page: 2, pageSize: 2 });
   expect(ultima.creditos).toHaveLength(1);
   expect(ultima.total).toBe(3);
 
-  const fuera = await mod.getNexaDashboard({ ...dash, q: "Paginado", page: 3, pageSize: 2 });
+  const fuera = await mod.getNexaDashboard(TODOS, { ...dash, q: "Paginado", page: 3, pageSize: 2 });
   expect(fuera.creditos).toEqual([]);
   expect(fuera.total).toBe(3);
   expect(fuera.totales).toEqual(totales);
   expect({ page: fuera.page, pageSize: fuera.pageSize }).toEqual({ page: 3, pageSize: 2 });
 
-  const nada = await mod.getNexaDashboard({ ...dash, q: "no-existe-nadie" });
+  const nada = await mod.getNexaDashboard(TODOS, { ...dash, q: "no-existe-nadie" });
   expect(nada).toMatchObject({ creditos: [], total: 0 });
   expect(nada.totales).toEqual({ creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 });
 });
@@ -346,7 +348,7 @@ integrationTest("cuota del mes: pagados y pendientes (vencida y por vencer); el 
   await nuevoCredito(`${prefijo} E`);
   const { mod } = await setup();
   const ver = async (cuotaMes: "" | "pagados" | "pendientes", pageSize = 50) => {
-    const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes, pageSize });
+    const r = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes, pageSize });
     return { r, clientes: r.creditos.map((x) => x.cliente.slice(-1)).sort() };
   };
   const todos = await ver("");
@@ -390,14 +392,14 @@ integrationTest("pagados por Nexa o manual: el medio de la cuota del mes (gana e
   await pe.abono(await pe.cuota(1, "1 month -1 day"), { evento: evp, monto: 40, pagado: false });
   const { mod } = await setup();
   const ver = async (cuotaMes: "" | "pagados" | "pendientes", medio: "" | "nexa" | "manual") =>
-    (await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes, medio })).creditos.map((x) => x.cliente.slice(-1)).sort();
+    (await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes, medio })).creditos.map((x) => x.cliente.slice(-1)).sort();
   expect(await ver("pagados", "")).toEqual(["F", "M", "N"]);
   expect(await ver("pagados", "nexa")).toEqual(["N"]);
   expect(await ver("pagados", "manual")).toEqual(["F", "M"]);
   // Sin "pagados", el medio no filtra.
   expect(await ver("pendientes", "nexa")).toEqual(["P"]);
   expect(await ver("", "nexa")).toEqual(["F", "M", "N", "P"]);
-  const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes: "pagados", medio: "manual" });
+  const r = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes: "pagados", medio: "manual" });
   expect(r.totales.creditos).toBe(2);
   const fm = r.creditos.find((x) => x.cliente.endsWith("M"))!;
   expect(fm).toMatchObject({ ultimoPagoNexa: true });
@@ -424,7 +426,7 @@ integrationTest("parcial: suma lo aplicado sin anuladas ni 'reset', contra la cu
   await p.abono(q, { monto: 999, falso: true });
   await p.abono(q, { monto: 777, estado: "reset", pagado: false });
   const { mod } = await setup();
-  const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes: "pendientes" });
+  const r = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes: "pendientes" });
   expect(r.creditos.map((x) => x.cliente.slice(-1))).toEqual(["P", "S"]);
   expect(r.creditos[0]!.cuotaMes).toMatchObject({ estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "2500.00", medio: "NEXA" });
   expect(r.creditos[0]!.ultimasCuotas).toEqual([
@@ -432,7 +434,7 @@ integrationTest("parcial: suma lo aplicado sin anuladas ni 'reset', contra la cu
   ]);
   expect(r.creditos[1]!.cuotaMes).toMatchObject({ pago: "sin_pago", aplicado: "0.00" });
   // Sin el filtro de pendientes, el orden es el de siempre (último pago más reciente primero).
-  const todos = await mod.getNexaDashboard({ ...dash, q: prefijo });
+  const todos = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo });
   expect(todos.creditos.map((x) => x.cliente.slice(-1))).toEqual(["S", "P"]);
 });
 
@@ -462,7 +464,7 @@ integrationTest("los filtros llegan como parámetros: un valor fuera de la lista
   const params = mod.parseNexaDashboardParams({ medio: "nexa' OR 1=1 --", cuotaMes: "pagados; drop table x" });
   expect({ medio: params.medio, cuotaMes: params.cuotaMes }).toEqual({ medio: "", cuotaMes: "" });
   const c = await nuevoCredito();
-  expect((await mod.getNexaDashboard({ ...params, q: c.sifco })).creditos).toHaveLength(1);
+  expect((await mod.getNexaDashboard(TODOS, { ...params, q: c.sifco })).creditos).toHaveLength(1);
 });
 
 integrationTest("pagada = criterio del cron: cuotas_credito.pagado sin fila que la cubra cuenta como pagada", async () => {

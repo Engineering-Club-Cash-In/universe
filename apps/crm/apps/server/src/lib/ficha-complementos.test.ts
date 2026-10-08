@@ -49,6 +49,10 @@ describe("utilidades", () => {
 		expect(fechaISO("5/3/1990")).toBe("1990-03-05");
 		expect(fechaISO("")).toBeNull();
 		expect(fechaISO("ayer")).toBeNull();
+		expect(fechaISO("31/02/1990")).toBeNull();
+		expect(fechaISO("1990-13-40")).toBeNull();
+		expect(fechaISO("1990-02-30")).toBeNull();
+		expect(fechaISO("29/02/2024")).toBe("2024-02-29");
 	});
 	test("textoSexo entiende las tres fuentes", () => {
 		expect(textoSexo("M")).toBe("Masculino");
@@ -175,13 +179,37 @@ describe("armarCodeudores", () => {
 describe("armarSeguro", () => {
 	test("traduce el tipo de cobertura y el deducible", () => {
 		expect(armarSeguro({ tipoCobertura: "amplia", deducible: "2500" })).toEqual(
-			{ tipoSeguro: "Cobertura amplia", coberturas: "Deducible Q2,500.00" },
+			{
+				tipoSeguro: "Cobertura amplia",
+				coberturas: "Deducible Q2,500.00",
+				poliza: null,
+				montoAsegurado: null,
+				vencimiento: null,
+			},
 		);
+	});
+	test("póliza, monto y vencimiento viajan con el mismo vehículo", () => {
+		expect(
+			armarSeguro({
+				tipoCobertura: "total",
+				deducible: null,
+				numeroPoliza: " POL-123 ",
+				montoAsegurado: "85000.00",
+				fechaVencimientoSeguro: new Date("2027-03-15T00:00:00Z"),
+			}),
+		).toMatchObject({
+			poliza: "POL-123",
+			montoAsegurado: "85000.00",
+			vencimiento: "2027-03-15",
+		});
 	});
 	test("columnas vacías → null en cada campo", () => {
 		expect(armarSeguro({ tipoCobertura: null, deducible: null })).toEqual({
 			tipoSeguro: null,
 			coberturas: null,
+			poliza: null,
+			montoAsegurado: null,
+			vencimiento: null,
 		});
 	});
 	test("un tipo desconocido se muestra tal cual", () => {

@@ -73,11 +73,25 @@ export function fechaISO(v: Date | string | null | undefined): string | null {
 	}
 	const t = v.trim();
 	const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
-	if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+	if (iso) return armarFecha(iso[1], iso[2], iso[3]);
 	const dmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
-	if (dmy)
-		return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+	if (dmy) return armarFecha(dmy[3], dmy[2], dmy[1]);
 	return null;
+}
+
+/** "YYYY-MM-DD" solo si el día existe en el calendario (31/02 → `null`). */
+function armarFecha(a: string, m: string, d: string): string | null {
+	const año = Number(a);
+	const mes = Number(m);
+	const dia = Number(d);
+	const fecha = new Date(Date.UTC(año, mes - 1, dia));
+	if (
+		fecha.getUTCFullYear() !== año ||
+		fecha.getUTCMonth() !== mes - 1 ||
+		fecha.getUTCDate() !== dia
+	)
+		return null;
+	return `${a}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
 
 export type Sexo = "Masculino" | "Femenino";
@@ -419,6 +433,9 @@ const TIPOS_COBERTURA: Record<string, string> = {
 export function armarSeguro(vehiculo: {
 	tipoCobertura: string | null;
 	deducible: string | null;
+	numeroPoliza?: string | null;
+	montoAsegurado?: string | null;
+	fechaVencimientoSeguro?: Date | string | null;
 }): SeguroComplemento {
 	const tipo = limpio(vehiculo.tipoCobertura);
 	const clave = tipo?.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -429,6 +446,12 @@ export function armarSeguro(vehiculo: {
 	return {
 		tipoSeguro: tipo ? (TIPOS_COBERTURA[clave ?? ""] ?? tipo) : null,
 		coberturas: deducible,
+		poliza: limpio(vehiculo.numeroPoliza),
+		montoAsegurado:
+			vehiculo.montoAsegurado != null && Number(vehiculo.montoAsegurado) > 0
+				? vehiculo.montoAsegurado
+				: null,
+		vencimiento: fechaISO(vehiculo.fechaVencimientoSeguro),
 	};
 }
 
@@ -443,6 +466,9 @@ export async function cargarSeguro(
 			contratoId: casosCobros.contratoId,
 			tipoCobertura: vehicles.tipoCobertura,
 			deducible: vehicles.deducible,
+			numeroPoliza: vehicles.numeroPoliza,
+			montoAsegurado: vehicles.montoAsegurado,
+			fechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
 		})
 		.from(casosCobros)
 		.leftJoin(
@@ -453,10 +479,7 @@ export async function cargarSeguro(
 		.where(eq(casosCobros.id, ctx.casoCobroId))
 		.limit(1);
 	if (caso?.contratoId) {
-		return armarSeguro({
-			tipoCobertura: caso.tipoCobertura,
-			deducible: caso.deducible,
-		});
+		return armarSeguro(caso);
 	}
 	if (!ctx.opportunityId) return null;
 
@@ -464,6 +487,9 @@ export async function cargarSeguro(
 		.select({
 			tipoCobertura: vehicles.tipoCobertura,
 			deducible: vehicles.deducible,
+			numeroPoliza: vehicles.numeroPoliza,
+			montoAsegurado: vehicles.montoAsegurado,
+			fechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
 		})
 		.from(opportunities)
 		.innerJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))

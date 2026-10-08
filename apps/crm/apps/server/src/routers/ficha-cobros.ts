@@ -97,6 +97,11 @@ export interface HitoCredito {
 export interface SeguroComplemento {
 	tipoSeguro: string | null;
 	coberturas: string | null;
+	/** Póliza, monto y vencimiento del MISMO vehículo que tipo y deducible. */
+	poliza: string | null;
+	montoAsegurado: string | null;
+	/** "YYYY-MM-DD". */
+	vencimiento: string | null;
 }
 
 /** Tarea F6 · Documentos de la pestaña Documentos. */

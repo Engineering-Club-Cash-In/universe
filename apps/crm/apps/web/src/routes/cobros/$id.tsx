@@ -227,7 +227,7 @@ import {
 	textoReferenciasConTelefono,
 	ultimos8Digitos as ultimos8,
 } from "@/lib/cobros/reglas-caso";
-import { formatFechaLocal } from "@/lib/date-utils";
+import { formatFechaLocal, parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -3050,18 +3050,30 @@ function RouteComponent() {
 									tipoSeguro={comp?.seguro?.tipoSeguro ?? "—"}
 									telefonoEmergencia={caso.cabinaSeguro || "—"}
 									coberturas={comp?.seguro?.coberturas ?? "—"}
-									poliza={caso.vehiculoNumeroPoliza || undefined}
+									poliza={
+										comp?.seguro
+											? (comp.seguro.poliza ?? undefined)
+											: caso.vehiculoNumeroPoliza || undefined
+									}
 									montoAsegurado={
-										caso.vehiculoMontoAsegurado
-											? fmtQ(caso.vehiculoMontoAsegurado)
-											: undefined
+										comp?.seguro
+											? comp.seguro.montoAsegurado
+												? fmtQ(comp.seguro.montoAsegurado)
+												: undefined
+											: caso.vehiculoMontoAsegurado
+												? fmtQ(caso.vehiculoMontoAsegurado)
+												: undefined
 									}
 									vencimiento={
-										caso.vehiculoFechaVencimientoSeguro
-											? fechaLarga(
-													new Date(caso.vehiculoFechaVencimientoSeguro),
-												)
-											: undefined
+										comp?.seguro
+											? comp.seguro.vencimiento
+												? fechaLarga(parseFechaLocal(comp.seguro.vencimiento))
+												: undefined
+											: caso.vehiculoFechaVencimientoSeguro
+												? fechaLarga(
+														new Date(caso.vehiculoFechaVencimientoSeguro),
+													)
+												: undefined
 									}
 								/>
 							</div>

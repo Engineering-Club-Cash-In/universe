@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	accionPendienteDe,
+	conHoraGT,
 	estadoGestionDe,
 	type FilaContactoSeguimiento,
 	resumirSeguimiento,
@@ -238,5 +239,65 @@ describe("accionPendienteDe", () => {
 	});
 	it("sin nada pendiente devuelve null", () => {
 		expect(accionPendienteDe(base, {}, AHORA)).toBeNull();
+	});
+});
+
+describe("hora del próximo contacto (B8)", () => {
+	it("proximaLlamadaEn lleva la hora que agendó el asesor", () => {
+		const s = resumirSeguimiento(
+			[
+				fila({
+					fechaContacto: gt("2026-10-06", "09:00"),
+					estadoContacto: "no_contesta",
+					fechaProximoContacto: gt("2026-10-06", "00:00"),
+					horaProximoContacto: "15:30:00",
+				}),
+			],
+			AHORA,
+		);
+		expect(s.proximaLlamadaEn?.toISOString()).toBe(
+			gt("2026-10-06", "15:30").toISOString(),
+		);
+	});
+
+	it("una llamada de hoy con hora ya pasada sigue pendiente (se decide por el día)", () => {
+		const s = resumirSeguimiento(
+			[
+				fila({
+					fechaContacto: gt("2026-10-05"),
+					estadoContacto: "no_contesta",
+					fechaProximoContacto: gt("2026-10-06", "00:00"),
+					horaProximoContacto: "09:00",
+				}),
+			],
+			AHORA,
+		);
+		expect(s.proximaLlamadaEn?.toISOString()).toBe(
+			gt("2026-10-06", "09:00").toISOString(),
+		);
+		expect(accionPendienteDe(s, {}, AHORA)?.tipo).toBe("llamar");
+	});
+
+	it("sin hora queda la medianoche GT del día", () => {
+		const s = resumirSeguimiento(
+			[
+				fila({
+					fechaContacto: gt("2026-10-05"),
+					estadoContacto: "no_contesta",
+					fechaProximoContacto: gt("2026-10-07", "00:00"),
+				}),
+			],
+			AHORA,
+		);
+		expect(s.proximaLlamadaEn?.toISOString()).toBe(
+			gt("2026-10-07", "00:00").toISOString(),
+		);
+	});
+
+	it("conHoraGT ignora una hora inválida", () => {
+		const dia = gt("2026-10-07", "00:00");
+		expect(conHoraGT(dia, "25:00").toISOString()).toBe(dia.toISOString());
+		expect(conHoraGT(dia, "abc").toISOString()).toBe(dia.toISOString());
+		expect(conHoraGT(dia, null).toISOString()).toBe(dia.toISOString());
 	});
 });

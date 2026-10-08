@@ -2276,21 +2276,30 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// promesaContactoId y visitaId no son columnas: se separan del payload.
 			// Los stubs W1 del Workspace (dirección, participante, teléfono
-			// contactado, hora/medio del próximo contacto) tampoco: se separan para
-			// que el spread de `datos` no los lleve al insert/update.
-			// TODO(José) · tarea W1: persistirlos.
+			// contactado) tampoco: se separan para que el spread de `datos` no los
+			// lleve al insert/update.
+			// TODO(José) · tarea W1: persistir dirección, participante y teléfono.
 			const {
 				promesaContactoId,
 				visitaId,
 				direccion: _direccion,
 				participante: _participante,
 				telefonoContactado: _telefonoContactado,
-				horaProximoContacto: _horaProximoContacto,
-				medioProximoContacto: _medioProximoContacto,
+				horaProximoContacto,
+				medioProximoContacto,
 				...datos
 			} = input;
 			const esPromesa = datos.estadoContacto === "promesa_pago";
 			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
+			// B8 (doc 13): hora y medio del próximo contacto. Solo con fecha y
+			// fuera de las promesas, que siguen por día.
+			const proximoContactoConHora =
+				datos.fechaProximoContacto && !esPromesa
+					? {
+							horaProximoContacto: horaProximoContacto ?? null,
+							medioProximoContacto: medioProximoContacto ?? null,
+						}
+					: {};
 
 			// CB-037/038: se revisa la visita ANTES de escribir, para no dejar una
 			// promesa colgada de una visita que no es del caso o que no la pedía.
@@ -2403,6 +2412,7 @@ export const cobrosRouter = {
 					.insert(contactosCobros)
 					.values({
 						...datos,
+						...proximoContactoConHora,
 						estadoPromesa,
 						realizadoPor: context.userId,
 						bucketSnapshot,

@@ -55,6 +55,8 @@ export interface FilaContactoSeguimiento {
 	estadoContacto: string;
 	estadoPromesa: "pendiente" | "cumplida" | "incumplida" | null;
 	fechaProximoContacto: Date | null;
+	/** B8: hora del próximo contacto ("HH:MM" o "HH:MM:SS", hora GT); null = sin hora. */
+	horaProximoContacto?: string | null;
 	comentarios: string | null;
 }
 
@@ -73,7 +75,10 @@ export interface SeguimientoCaso {
 	intentadoHoy: boolean;
 	/** Hubo contacto logrado hoy (día GT). */
 	contactadoHoy: boolean;
-	/** Próxima llamada agendada (día; hoy o futuro) de la última gestión que no es promesa. */
+	/**
+	 * Próxima llamada agendada (hoy o futuro) de la última gestión que no es
+	 * promesa. Con hora si el asesor la puso (B8); si no, medianoche GT del día.
+	 */
 	proximaLlamadaEn: Date | null;
 	/** Promesa vigente más próxima (pendiente, fecha ≥ hoy). */
 	promesaVigenteEn: Date | null;
@@ -95,6 +100,22 @@ const SEGUIMIENTO_VACIO: SeguimientoCaso = {
 };
 
 const MS_DIA = 24 * 60 * 60 * 1000;
+
+/**
+ * El día de `fecha` (GT) a la hora `hora` ("HH:MM[:SS]", hora GT). Sin hora
+ * válida devuelve `fecha` tal cual (medianoche GT, como se guarda el día).
+ */
+export function conHoraGT(fecha: Date, hora: string | null | undefined): Date {
+	const m = hora ? /^(\d{2}):(\d{2})/.exec(hora) : null;
+	if (!m) return fecha;
+	const horas = Number(m[1]);
+	const minutos = Number(m[2]);
+	if (horas > 23 || minutos > 59) return fecha;
+	return new Date(
+		gtDateStrToDate(toDateStrGT(fecha)).getTime() +
+			(horas * 60 + minutos) * 60 * 1000,
+	);
+}
 
 /** Resume las gestiones de UN caso. `filas` en cualquier orden. */
 export function resumirSeguimiento(
@@ -118,10 +139,16 @@ export function resumirSeguimiento(
 	const ultimaNoPromesa = manuales.find(
 		(f) => f.estadoContacto !== "promesa_pago",
 	);
+	// "Hoy o futuro" se decide por el DÍA guardado; la hora solo afina la fecha
+	// que se muestra ("Llamar · hoy 3:00 PM"). Una llamada de hoy a las 9:00
+	// sigue pendiente a las 15:00.
 	const proximaLlamadaEn =
 		ultimaNoPromesa?.fechaProximoContacto &&
 		ultimaNoPromesa.fechaProximoContacto.getTime() >= inicioHoy.getTime()
-			? ultimaNoPromesa.fechaProximoContacto
+			? conHoraGT(
+					ultimaNoPromesa.fechaProximoContacto,
+					ultimaNoPromesa.horaProximoContacto,
+				)
 			: null;
 
 	// Promesas: todas (también las registradas por envíos automáticos no
@@ -259,6 +286,7 @@ export async function cargarSeguimientoPorCaso(
 			estadoContacto: contactosCobros.estadoContacto,
 			estadoPromesa: contactosCobros.estadoPromesa,
 			fechaProximoContacto: contactosCobros.fechaProximoContacto,
+			horaProximoContacto: contactosCobros.horaProximoContacto,
 			comentarios: contactosCobros.comentarios,
 		})
 		.from(contactosCobros)

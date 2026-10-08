@@ -36,4 +36,13 @@ describe("orden bucket_motor y monto_vencido — criterios alineados con la resp
     expect(monto).toContain("anulado_at");
     expect(monto).toContain("vencidoDeConvenio");
   });
+
+  it("el bucket del historial que devuelve la respuesta también respeta el piso por estado", () => {
+    const mapper = fuente.slice(
+      fuente.indexOf("const bucketHistorial = ultimoBucketMap.get(creditoId)"),
+      fuente.indexOf("const bucket =\n          numeroBucket"),
+    );
+    expect(mapper).toContain("Math.max(");
+    expect(mapper).toContain("pisoPorEstado(row.creditos.statusCredit, catalogoBuckets)");
+  });
 });

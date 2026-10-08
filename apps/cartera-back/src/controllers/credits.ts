@@ -87,7 +87,7 @@ import {
   STATUS_BUCKET_FUERA,
   STATUS_READER_FUERA,
 } from "./latefee";
-import { bucketActualSql } from "../lib/buckets-classification";
+import { bucketActualSql, pisoPorEstado } from "../lib/buckets-classification";
 import { STATUS_EXCLUIDOS_MORA } from "../constants/creditStatus";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
@@ -2350,14 +2350,24 @@ export async function getCreditosWithUserByMesAnio(
         const fueraDelFunnel = STATUS_READER_FUERA.includes(
           row.creditos.statusCredit,
         );
+        // El PISO por estado (estados_piso: EN_RECUPERACION nunca baja de B4)
+        // también aplica al bucket del historial: una fila vieja B0-B3 de un
+        // crédito que luego entró a recuperación se leería por debajo del
+        // piso, y el orden (bucketActualSql, que sí lo aplica) lo rankearía
+        // como B4 mientras la fila dice otro bucket (review Codex PR #1901).
+        const bucketHistorial = ultimoBucketMap.get(creditoId);
         const numeroBucket = fueraDelFunnel
           ? null
-          : ultimoBucketMap.get(creditoId) ??
-            bucketDeCredito(
-              row.creditos.statusCredit,
-              mora?.cuotas_atrasadas ?? 0,
-              catalogoBuckets,
-            );
+          : bucketHistorial !== undefined
+            ? Math.max(
+                bucketHistorial,
+                pisoPorEstado(row.creditos.statusCredit, catalogoBuckets),
+              )
+            : bucketDeCredito(
+                row.creditos.statusCredit,
+                mora?.cuotas_atrasadas ?? 0,
+                catalogoBuckets,
+              );
         const bucket =
           numeroBucket == null ? null : bucketDisplayMap.get(numeroBucket) ?? null;
 

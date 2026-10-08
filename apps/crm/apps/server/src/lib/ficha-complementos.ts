@@ -12,6 +12,7 @@
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
+import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
 import { vehicles } from "../db/schema/vehicles";
@@ -434,7 +435,31 @@ export function armarSeguro(vehiculo: {
 export async function cargarSeguro(
 	ctx: ContextoCaso,
 ): Promise<SeguroComplemento | null> {
+	// El vehículo del contrato es el autoritativo (mismo criterio que
+	// resolverVehiculoCasoPagalo): la oportunidad puede apuntar a otro
+	// vehículo si su vínculo cambió. Solo sin contrato se cae a la oportunidad.
+	const [caso] = await db
+		.select({
+			contratoId: casosCobros.contratoId,
+			tipoCobertura: vehicles.tipoCobertura,
+			deducible: vehicles.deducible,
+		})
+		.from(casosCobros)
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.id, casosCobros.contratoId),
+		)
+		.leftJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
+		.where(eq(casosCobros.id, ctx.casoCobroId))
+		.limit(1);
+	if (caso?.contratoId) {
+		return armarSeguro({
+			tipoCobertura: caso.tipoCobertura,
+			deducible: caso.deducible,
+		});
+	}
 	if (!ctx.opportunityId) return null;
+
 	const [fila] = await db
 		.select({
 			tipoCobertura: vehicles.tipoCobertura,

@@ -1,15 +1,13 @@
 import { Elysia, t } from "elysia";
 import {
   getNexaDashboard, parseNexaDashboardParams, getNexaCreditPayments, parseRangoFechas, contarPagosNexaCredito,
-  parseAsesorFiltro, resolverAlcanceNexa,
+  parseAsesorFiltro, resolverAlcanceNexa, ROLES_NEXA,
 } from "../controllers/nexaDashboard";
 import { findSessionUser } from "../controllers/auth";
 import { authMiddleware } from "./midleware";
 
 // `authMiddleware` solo valida la firma del JWT. El dashboard expone tokens
-// completos y pagos de todos los créditos: solo roles de operación.
-const ROLES_NEXA = ["ADMIN", "ASESOR", "CONTA"];
-
+// completos y pagos de todos los créditos: solo roles de operación (ROLES_NEXA, del controlador).
 // Alcance por asesor con la fila VIGENTE de platform_users (por el id del token), no con el
 // claim asesor_id del token, que se congela al firmarse. Si la base falla, lanza (500): cerrado.
 const alcanceDeSesion = async (user: { id?: unknown; role?: unknown } | undefined, asesorPedido: number | null) =>
@@ -57,8 +55,13 @@ export const nexaDashboardRouter = new Elysia()
   )
   .get(
     "/nexa/credito/:creditoId/pagos-nexa",
-    async ({ params, set }) => {
+    async ({ params, set, user }: any) => {
       try {
+        // Misma sesión vigente que las otras rutas: un ADMIN/CONTA desactivado o degradado no pasa.
+        if ((await alcanceDeSesion(user, null)).tipo === "ninguno") {
+          set.status = 403;
+          return { success: false, message: "[ERROR] No autorizado (sesión inactiva o sin rol vigente)" };
+        }
         return await contarPagosNexaCredito(params.creditoId);
       } catch (error) {
         console.error("Error contando los pagos Nexa del crédito:", error);

@@ -53,4 +53,20 @@ describe("resolverAlcanceNexa", () => {
       expect(resolverAlcanceNexa(rol, sesion, 4)).toEqual({ tipo: "asesor", asesorId: 4 });
     }
   });
+
+  test("ADMIN y CONTA con sesión inválida: ninguno, aunque pidan un asesor", () => {
+    for (const rol of ["ADMIN", "CONTA"]) {
+      const sesion = (extra: object) => ({ role: rol, is_active: true, asesor_id: null, ...extra });
+      expect(resolverAlcanceNexa(rol, null, null)).toEqual({ tipo: "ninguno" });
+      expect(resolverAlcanceNexa(rol, null, 4)).toEqual({ tipo: "ninguno" });
+      expect(resolverAlcanceNexa(rol, sesion({ is_active: false }), null)).toEqual({ tipo: "ninguno" });
+      expect(resolverAlcanceNexa(rol, sesion({ is_active: null }), null)).toEqual({ tipo: "ninguno" });
+      expect(resolverAlcanceNexa(rol, sesion({ role: "INVESTOR" }), 4)).toEqual({ tipo: "ninguno" });
+      expect(resolverAlcanceNexa(rol, sesion({ role: null }), null)).toEqual({ tipo: "ninguno" });
+    }
+  });
+
+  test("token ADMIN con la fila hoy CONTA (rol permitido): sigue viendo todo", () => {
+    expect(resolverAlcanceNexa("ADMIN", { role: "CONTA", is_active: true, asesor_id: null }, null)).toEqual({ tipo: "todos" });
+  });
 });

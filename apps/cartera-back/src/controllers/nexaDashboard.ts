@@ -64,20 +64,25 @@ export const parseAsesorFiltro = (valor: unknown): number | null => {
   return esIdAsesor(id) ? id : null;
 };
 
+/** Roles que pueden ver el dashboard Nexa. El router los exige en el token y el alcance en la fila vigente. */
+export const ROLES_NEXA = ["ADMIN", "ASESOR", "CONTA"];
+
 /** Fila VIGENTE de platform_users de la sesión (findSessionUser); null si no existe. */
 export type SesionNexa = { role: string | null; is_active: boolean | null; asesor_id: number | null } | null;
 
 /**
  * Alcance de la sesión. Un ASESOR (por el token o por su fila vigente) ve siempre y solo su
  * `platform_users.asesor_id` de la base: el `?asesor=` y el claim del token se ignoran. Sin fila,
- * inactivo o sin vínculo: ninguno. Los demás roles (el router ya filtró ADMIN/CONTA) ven todo,
- * o el asesor que piden.
+ * inactivo o sin vínculo: ninguno. ADMIN y CONTA también exigen la fila vigente (existe, activa y con un
+ * rol permitido): un token firmado antes de que desactivaran o degradaran al usuario no ve nada. Con eso
+ * ven todo, o el asesor que piden.
  */
 export const resolverAlcanceNexa = (rolToken: unknown, sesion: SesionNexa, asesorPedido: number | null): AlcanceNexa => {
   if (rolToken === "ASESOR" || sesion?.role === "ASESOR") {
     const propio = sesion?.is_active === true ? sesion.asesor_id : null;
     return esIdAsesor(propio) ? { tipo: "asesor", asesorId: propio } : { tipo: "ninguno" };
   }
+  if (sesion?.is_active !== true || !ROLES_NEXA.includes(String(sesion.role))) return { tipo: "ninguno" };
   return esIdAsesor(asesorPedido) ? { tipo: "asesor", asesorId: asesorPedido } : { tipo: "todos" };
 };
 

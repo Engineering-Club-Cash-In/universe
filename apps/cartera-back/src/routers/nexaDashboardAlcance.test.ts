@@ -29,6 +29,9 @@ const USUARIOS: Record<number, { id: number; role: string; is_active: boolean; a
   3: { id: 3, role: "ASESOR", is_active: true, asesor_id: null },
   4: { id: 4, role: "CONTA", is_active: true, asesor_id: null },
   5: { id: 5, role: "ASESOR", is_active: false, asesor_id: 7 },
+  6: { id: 6, role: "ADMIN", is_active: false, asesor_id: null },
+  7: { id: 7, role: "CONTA", is_active: false, asesor_id: null },
+  8: { id: 8, role: "INVESTOR", is_active: true, asesor_id: null },
 };
 mock.module("../controllers/auth", () => ({
   findSessionUser: async (id: unknown) => USUARIOS[Number(id)] ?? null,
@@ -106,5 +109,32 @@ describe("dashboard Nexa: alcance por asesor en el router", () => {
     const res = await get("/nexa/dashboard/10/pagos?asesor=3", 1, "ADMIN");
     expect(res.status).toBe(200);
     expect(consultas.every((q) => !q.sql.includes("c.asesor_id"))).toBe(true);
+  });
+
+  // Token firmado como ADMIN/CONTA, pero la fila vigente no existe, está inactiva o ya no es de operación.
+  const SESIONES_MALAS: [string, number, string][] = [
+    ["ADMIN sin fila", 404, "ADMIN"], ["ADMIN inactivo", 6, "ADMIN"], ["CONTA inactivo", 7, "CONTA"],
+    ["ADMIN degradado a ASESOR sin vínculo", 3, "ADMIN"], ["ADMIN degradado a otro rol", 8, "ADMIN"],
+  ];
+  for (const [nombre, id, rol] of SESIONES_MALAS) {
+    it(`listado: ${nombre} no ve nada (WHERE false), ni con ?asesor=`, async () => {
+      const res = await get("/nexa/dashboard?asesor=3", id, rol);
+      expect(res.status).toBe(200);
+      expect(consultas.map(filtroAsesor)).toEqual([{ ninguno: true }]);
+    });
+    it(`detalle: ${nombre} recibe 404 y no se consultan pagos`, async () => {
+      const res = await get("/nexa/dashboard/10/pagos", id, rol);
+      expect(res.status).toBe(404);
+      expect(consultas.every((q) => !q.sql.includes("filas_boleta"))).toBe(true);
+    });
+    it(`pagos-nexa: ${nombre} recibe 403 sin consultar`, async () => {
+      expect((await get("/nexa/credito/10/pagos-nexa", id, rol)).status).toBe(403);
+      expect(consultas).toHaveLength(0);
+    });
+  }
+
+  it("pagos-nexa: ADMIN y CONTA vigentes siguen pasando", async () => {
+    expect((await get("/nexa/credito/10/pagos-nexa", 1, "ADMIN")).status).toBe(200);
+    expect((await get("/nexa/credito/10/pagos-nexa", 4, "CONTA")).status).toBe(200);
   });
 });

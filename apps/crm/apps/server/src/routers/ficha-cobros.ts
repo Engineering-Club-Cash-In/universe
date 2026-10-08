@@ -6,11 +6,12 @@
  * - `getSeguimientoFicha`: la franja del Resumen (contactabilidad, días sin
  *   gestión, intentos sin contacto, próximo contacto) y el chip de estado de
  *   gestión del encabezado. Real, sale de `contactos_cobros`.
- * - `getFichaComplementos`: lo que Figma pide y el backend todavía no tiene.
- *   Está CONECTADO: devuelve `null` en cada bloque y el front muestra "—" o
- *   "pronto". Cada bloque tiene su `TODO(José) · tarea Fn` con el contrato ya
- *   fijado; solo hay que llenar el cuerpo, el front no se toca.
- *   Detalle: docs/features/cobros-02/15-ficha-360-backend.md
+ * - `getFichaComplementos`: los bloques de la ficha que no salen del detalle
+ *   del caso. Ya son reales F1 (datos personales), F2 (codeudores) y F5
+ *   (seguro), armados en `lib/ficha-complementos.ts`. Los que siguen en `null`
+ *   tienen su `TODO(José) · tarea Fn`; el front los muestra "—" o "pronto".
+ *   Detalle: docs/features/cobros-02/15-ficha-360-backend.md y
+ *   docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
 
 import { and, eq, gte, ne, not, sql } from "drizzle-orm";
@@ -24,6 +25,11 @@ import {
 	nivelContactabilidad,
 } from "../lib/ficha-cobros";
 import {
+	cargarCodeudores,
+	cargarDatosPersonales,
+	cargarSeguro,
+} from "../lib/ficha-complementos";
+import {
 	esContactoEfectivo,
 	esGestionAutomatica,
 } from "../lib/historial-agendas";
@@ -33,6 +39,7 @@ import {
 	cargarSeguimientoPorCaso,
 	estadoGestionDe,
 } from "../lib/seguimiento-cobros";
+import { resolverContextoCaso } from "../services/referencias-cobros-datos";
 import { assertAccesoCasoCobro } from "./cobros";
 
 /* ── Contratos de lo que llena José ─────────────────────────────────────────── */
@@ -220,12 +227,27 @@ export const fichaCobrosRouter = {
 				context.userId,
 				context.userRole,
 			);
-			// TODO(José) · tarea F1: datos personales del titular desde RENAP
-			// (nombre, DPI, fecha de nacimiento, sexo, estado civil). Solo lectura.
-			const datosPersonales = null as DatosPersonalesFicha | null;
-			// TODO(José) · tarea F2: codeudores del crédito (oportunidad/contrato)
-			// con sus teléfonos, correo y direcciones. [] si no tiene.
-			const codeudores = null as CodeudorFicha[] | null;
+			const ctx = await resolverContextoCaso(input.casoCobroId);
+			// Cada bloque por su lado: si uno falla, queda en null (la ficha lo
+			// muestra pendiente) y los demás se devuelven igual.
+			const bloque = <T>(nombre: string, cargar: () => Promise<T | null>) =>
+				cargar().catch((error) => {
+					console.error(
+						`[getFichaComplementos] ${nombre} del caso ${input.casoCobroId}:`,
+						error,
+					);
+					return null;
+				});
+			const [datosPersonales, codeudores, seguro] = await Promise.all([
+				// F1 · RENAP → lead → solicitud, campo por campo.
+				bloque<DatosPersonalesFicha>("datos personales", () =>
+					cargarDatosPersonales(ctx),
+				),
+				// F2 · Codeudores de la oportunidad del crédito; [] si no tiene.
+				bloque<CodeudorFicha[]>("codeudores", () => cargarCodeudores(ctx)),
+				// F5 · Tipo de cobertura y deducible del vehículo.
+				bloque<SeguroComplemento>("seguro", () => cargarSeguro(ctx)),
+			]);
 			// TODO(José) · tarea F3: bitácora de cambios de los datos del cliente
 			// (antes → después, autor, origen). Ver la bitácora crm_entity_audit.
 			const historialCambios = null as CambioFicha[] | null;
@@ -233,8 +255,6 @@ export const fichaCobrosRouter = {
 			// (cartera.buckets_historial), reestructuras, convenios, promesas
 			// cumplidas. Más reciente primero.
 			const historico = null as HitoCredito[] | null;
-			// TODO(José) · tarea F5: tipo de seguro y coberturas de la póliza.
-			const seguro = null as SeguroComplemento | null;
 			// TODO(José) · tarea F6: catálogo de documentos para enviar al cliente
 			// (tarjeta de circulación, seguro) y para solicitar al supervisor
 			// (contrato, carta poder, cambio de placas, expertaje), con su envío.

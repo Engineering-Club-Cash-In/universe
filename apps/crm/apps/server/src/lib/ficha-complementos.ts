@@ -9,18 +9,30 @@
  * Plan y decisiones: docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
 
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
+import { carteraBackReferences } from "../db/schema/cartera-back";
 import { creditApplications } from "../db/schema/client-forms";
+import {
+	casosCobros,
+	contactosCobros,
+	contactosCobrosAudit,
+} from "../db/schema/cobros";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
 import { vehicles } from "../db/schema/vehicles";
 import type {
 	CodeudorFicha,
 	DatosPersonalesFicha,
+	HitoCredito,
 	SeguroComplemento,
 } from "../routers/ficha-cobros";
+import { carteraBackClient } from "../services/cartera-back-client";
 import type { ContextoCaso } from "../services/referencias-cobros-datos";
+import type {
+	CarteraBucketHistorialEvento,
+	CarteraConvenio,
+} from "../types/cartera-back";
 import { quetzales } from "./bot-cobros/mensajes-credito";
 import { eqDpi } from "./dpi-lookup";
 
@@ -424,4 +436,193 @@ export async function cargarSeguro(
 		.where(eq(opportunities.id, ctx.opportunityId))
 		.limit(1);
 	return fila ? armarSeguro(fila) : null;
+}
+
+/* ── F4 · Vida del crédito ──────────────────────────────────────────────────── */
+
+export interface FuentePromesaCumplida {
+	id: string;
+	monto: string | null;
+	/** Cuándo pasó a cumplida (bitácora); si no, la fecha prometida. */
+	fecha: Date;
+}
+
+function etiquetaBucket(
+	numero: number | null,
+	prefijo: string | null,
+	nombre: string | null,
+): string {
+	const base = `Bucket ${limpio(prefijo) ?? `B${numero ?? "?"}`}`;
+	return limpio(nombre) ? `${base} · ${limpio(nombre)}` : base;
+}
+
+/**
+ * Hitos de la vida del crédito, lo más reciente primero:
+ * - entradas y salidas de bucket (historial del motor en cartera);
+ * - convenios firmados, completados y deshechos (el convenio es la
+ *   reestructura del crédito en cartera; no hay otra fuente de reestructuras).
+ *   Los pendientes de aprobación no; los rechazados tampoco (cartera borra su
+ *   fila y ya los muestra el historial de decisiones, justo debajo en la ficha);
+ * - promesas de pago cumplidas.
+ */
+export function armarHistorico(fuentes: {
+	buckets: CarteraBucketHistorialEvento[];
+	convenios: CarteraConvenio[];
+	promesas: FuentePromesaCumplida[];
+}): HitoCredito[] {
+	const hitos: HitoCredito[] = [];
+
+	for (const e of fuentes.buckets) {
+		const destino = etiquetaBucket(
+			e.bucket_nuevo,
+			e.bucket_nuevo_prefijo,
+			e.bucket_nuevo_nombre,
+		);
+		const desde =
+			e.bucket_anterior != null
+				? ` (desde ${limpio(e.bucket_anterior_prefijo) ?? `B${e.bucket_anterior}`})`
+				: "";
+		const descripcion =
+			e.tipo_evento === "SUBIDA"
+				? `Subió a ${destino}${desde}`
+				: e.tipo_evento === "BAJADA"
+					? `Bajó a ${destino}${desde}`
+					: `Ingresó a ${destino}`;
+		hitos.push({
+			id: `bucket-${e.historial_id}`,
+			descripcion,
+			fecha: new Date(e.fecha).toISOString(),
+			tipo: "bucket",
+		});
+	}
+
+	for (const c of fuentes.convenios) {
+		// Inactivo, sin completar y sin anular = pendiente de aprobación (o
+		// rechazado): no es un hito de la vida del crédito.
+		if (!c.activo && !c.completado && !c.anulado_at) continue;
+		const firmado = c.fecha_convenio ?? c.created_at;
+		const detalle = `${c.numero_meses} ${c.numero_meses === 1 ? "cuota" : "cuotas"} de ${quetzales(c.cuota_mensual)}`;
+		if (firmado) {
+			hitos.push({
+				id: `convenio-${c.convenio_id}`,
+				descripcion: `Convenio de pago firmado · ${detalle}`,
+				fecha: new Date(firmado).toISOString(),
+				tipo: "convenio",
+			});
+		}
+		const cierre = c.anulado_at ?? (c.completado ? c.updated_at : null);
+		if (cierre) {
+			hitos.push({
+				id: `convenio-${c.convenio_id}-cierre`,
+				descripcion: c.anulado_at
+					? "Convenio de pago deshecho"
+					: "Convenio de pago completado",
+				fecha: new Date(cierre).toISOString(),
+				tipo: "convenio",
+			});
+		}
+	}
+
+	for (const p of fuentes.promesas) {
+		const monto =
+			p.monto != null && Number(p.monto) > 0 ? ` · ${quetzales(p.monto)}` : "";
+		hitos.push({
+			id: `promesa-${p.id}`,
+			descripcion: `Promesa de pago cumplida${monto}`,
+			fecha: p.fecha.toISOString(),
+			tipo: "promesa",
+		});
+	}
+
+	return hitos.sort(
+		(a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
+	);
+}
+
+/** `credito_id` de cartera del caso, por su SIFCO. */
+export async function creditoIdDelCaso(
+	casoCobroId: string,
+): Promise<number | null> {
+	const [fila] = await db
+		.select({ creditoId: carteraBackReferences.carteraCreditoId })
+		.from(casosCobros)
+		.innerJoin(
+			carteraBackReferences,
+			eq(
+				carteraBackReferences.numeroCreditoSifco,
+				casosCobros.numeroCreditoSifco,
+			),
+		)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	return fila?.creditoId ?? null;
+}
+
+async function promesasCumplidas(
+	casoCobroId: string,
+): Promise<FuentePromesaCumplida[]> {
+	// Cuándo pasó a cumplida: la transición que dejó el recálculo en la
+	// bitácora de contactos ({"de": "...", "a": "cumplida"}).
+	const cumplidaEn = sql<Date | null>`(
+		SELECT max(${contactosCobrosAudit.editadoEn})
+		FROM ${contactosCobrosAudit}
+		WHERE ${contactosCobrosAudit.contactoId} = ${contactosCobros.id}
+			AND ${contactosCobrosAudit.accion} = 'cambio_estado_promesa'
+			AND ${contactosCobrosAudit.valoresAnteriores}->>'a' = 'cumplida'
+	)`;
+	const filas = await db
+		.select({
+			id: contactosCobros.id,
+			monto: contactosCobros.montoComprometido,
+			cumplidaEn,
+			prometida: contactosCobros.fechaProximoContacto,
+			registrada: contactosCobros.fechaContacto,
+		})
+		.from(contactosCobros)
+		.where(
+			and(
+				eq(contactosCobros.casoCobroId, casoCobroId),
+				eq(contactosCobros.estadoPromesa, "cumplida"),
+			),
+		);
+	return filas.map((f) => ({
+		id: f.id,
+		monto: f.monto,
+		fecha: new Date(f.cumplidaEn ?? f.prometida ?? f.registrada),
+	}));
+}
+
+/**
+ * Si cartera no responde, se devuelve lo que sí se pudo leer; pero si además
+ * no hay nada, `null` (la ficha lo muestra pendiente en vez de «Sin hitos»).
+ */
+export async function cargarHistorico(
+	casoCobroId: string,
+): Promise<HitoCredito[] | null> {
+	const creditoId = await creditoIdDelCaso(casoCobroId);
+	let carteraFallo = creditoId === null;
+	const deCartera = async <T>(nombre: string, leer: () => Promise<T[]>) => {
+		if (creditoId === null) return [] as T[];
+		try {
+			return await leer();
+		} catch (error) {
+			carteraFallo = true;
+			console.error(
+				`[ficha-complementos] ${nombre} del crédito ${creditoId}:`,
+				error,
+			);
+			return [] as T[];
+		}
+	};
+	const [buckets, convenios, promesas] = await Promise.all([
+		deCartera("historial de buckets", () =>
+			carteraBackClient.getBucketsHistorialCredito(creditoId as number),
+		),
+		deCartera("convenios", () =>
+			carteraBackClient.getConveniosPorCredito(creditoId as number, "all"),
+		),
+		promesasCumplidas(casoCobroId),
+	]);
+	const hitos = armarHistorico({ buckets, convenios, promesas });
+	return hitos.length === 0 && carteraFallo ? null : hitos;
 }

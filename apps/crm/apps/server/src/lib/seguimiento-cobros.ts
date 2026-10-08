@@ -8,7 +8,8 @@
  *  · Estado de gestión → Sin acuerdo / Promesa vigente / Promesa incumplida /
  *                        Convenio vigente
  *  · Acción pendiente  → Llamar / Promesa vence hoy / Promesa vencida /
- *                        Promesa por vencer / Cuota vence hoy / Gestionar (SLA)
+ *                        Promesa por vencer / Cuota vence hoy / Gestionar (SLA) /
+ *                        Confirmar pago
  *
  * La parte pura (`resumirSeguimiento`, `estadoGestionDe`, `accionPendienteDe`)
  * se prueba sin DB; `cargarSeguimientoPorCaso` solo trae las filas en lote.
@@ -58,6 +59,8 @@ export interface FilaContactoSeguimiento {
 	/** B8: hora del próximo contacto ("HH:MM" o "HH:MM:SS", hora GT); null = sin hora. */
 	horaProximoContacto?: string | null;
 	comentarios: string | null;
+	/** A quién se contactó; null/ausente = titular. */
+	participanteTipo?: "titular" | "codeudor" | "referencia" | null;
 }
 
 export type EstadoGestion =
@@ -131,6 +134,9 @@ export function resumirSeguimiento(
 
 	let intentosSinContacto = 0;
 	for (const f of manuales) {
+		// La racha es «al titular»: un contacto a un codeudor o a una referencia
+		// ni la suma ni la corta.
+		if (f.participanteTipo && f.participanteTipo !== "titular") continue;
 		if (ESTADOS_LOGRADO.has(f.estadoContacto)) break;
 		if (ESTADOS_SIN_CONTACTO.has(f.estadoContacto)) intentosSinContacto++;
 	}
@@ -212,7 +218,7 @@ export type TipoAccionPendiente =
 	| "cuota_vence_hoy"
 	| "promesa_vencida"
 	| "promesa_por_vencer"
-	/** Depende de "pagos por confirmar" (pendiente de backend, ver docs). */
+	/** Boleta del bot esperando revisión del asesor (B6, ver `pagoPorConfirmar`). */
 	| "confirmar_pago";
 
 export interface AccionPendiente {
@@ -224,7 +230,8 @@ export interface AccionPendiente {
 /**
  * La acción más urgente del caso, en el mismo orden de prioridad de la Cola
  * del día (SLA → promesa hoy → vence hoy → vencida → próxima), con la llamada
- * agendada para hoy después de la promesa de hoy.
+ * agendada para hoy después de la promesa de hoy. Un pago por confirmar va
+ * justo después del SLA: el cliente ya pagó y su boleta espera al asesor.
  */
 export function accionPendienteDe(
 	seguimiento: SeguimientoCaso,
@@ -232,6 +239,8 @@ export function accionPendienteDe(
 		slaHoy?: boolean;
 		fechaLimiteSla?: Date | null;
 		venceHoy?: boolean;
+		/** B6: hay boleta del bot en revisión manual o por verificar. */
+		pagoPorConfirmar?: boolean;
 	} = {},
 	ahora: Date = new Date(),
 ): AccionPendiente | null {
@@ -239,6 +248,7 @@ export function accionPendienteDe(
 	const esHoy = (d: Date | null) => !!d && toDateStrGT(d) === hoyStr;
 	if (extras.slaHoy)
 		return { tipo: "gestionar_sla", fecha: extras.fechaLimiteSla ?? null };
+	if (extras.pagoPorConfirmar) return { tipo: "confirmar_pago", fecha: null };
 	if (esHoy(seguimiento.promesaVigenteEn))
 		return { tipo: "promesa_hoy", fecha: seguimiento.promesaVigenteEn };
 	if (esHoy(seguimiento.proximaLlamadaEn))
@@ -271,11 +281,17 @@ export function accionPendienteDe(
  * Trae en lote las gestiones de los casos y devuelve el seguimiento de cada
  * uno. Dos cortes para no leer el historial completo: los últimos
  * DIAS_VENTANA_SEGUIMIENTO días, más las promesas abiertas de cualquier fecha.
+ * Con `realizadoPor` solo se leen las gestiones de esos usuarios (seguimiento
+ * «propio» del asesor, más el de quien cubre); sin él, las de todos. Con `sinTopeDeVentana` se lee
+ * todo el historial: la racha de intentos sin contacto no tiene tope de días
+ * (3 intentos hace 70, 35 y 1 días siguen siendo 3).
  */
 export async function cargarSeguimientoPorCaso(
 	casoIds: string[],
 	ahora: Date = new Date(),
+	opciones: { realizadoPor?: string[]; sinTopeDeVentana?: boolean } = {},
 ): Promise<Map<string, SeguimientoCaso>> {
+	const { realizadoPor, sinTopeDeVentana = false } = opciones;
 	const resultado = new Map<string, SeguimientoCaso>();
 	if (casoIds.length === 0) return resultado;
 	const desde = new Date(ahora.getTime() - DIAS_VENTANA_SEGUIMIENTO * MS_DIA);
@@ -288,25 +304,31 @@ export async function cargarSeguimientoPorCaso(
 			fechaProximoContacto: contactosCobros.fechaProximoContacto,
 			horaProximoContacto: contactosCobros.horaProximoContacto,
 			comentarios: contactosCobros.comentarios,
+			participanteTipo: contactosCobros.participanteTipo,
 		})
 		.from(contactosCobros)
 		.where(
 			and(
 				inArray(contactosCobros.casoCobroId, casoIds),
+				realizadoPor
+					? inArray(contactosCobros.realizadoPor, realizadoPor)
+					: undefined,
 				ne(contactosCobros.estadoContacto, "link_pago_generado"),
-				or(
-					gte(contactosCobros.fechaContacto, desde),
-					and(
-						inArray(contactosCobros.estadoContacto, ["promesa_pago"]),
-						or(
-							inArray(contactosCobros.estadoPromesa, [
-								"pendiente",
-								"incumplida",
-							]),
-							isNull(contactosCobros.estadoPromesa),
+				sinTopeDeVentana
+					? undefined
+					: or(
+							gte(contactosCobros.fechaContacto, desde),
+							and(
+								inArray(contactosCobros.estadoContacto, ["promesa_pago"]),
+								or(
+									inArray(contactosCobros.estadoPromesa, [
+										"pendiente",
+										"incumplida",
+									]),
+									isNull(contactosCobros.estadoPromesa),
+								),
+							),
 						),
-					),
-				),
 			),
 		)
 		.orderBy(desc(contactosCobros.fechaContacto));

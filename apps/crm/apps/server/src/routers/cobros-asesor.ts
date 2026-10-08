@@ -6,6 +6,7 @@
  * Un dato que no se pudo calcular (cartera caída, asesor sin pool) llega como
  * `null` y la card del front muestra "—"; nunca tumba el resto del bloque.
  * Detalle de cada tarea: docs/features/cobros-02/13-dashboard-asesor-backend.md
+ * y el plan en docs/features/cobros-02/20-plan-backend-asesor.md.
  */
 
 import { and, eq, gte, inArray, lt, ne, not, or, sql } from "drizzle-orm";
@@ -21,6 +22,11 @@ import {
 	type MovimientoBucketDelDia,
 } from "../jobs/cierre-diario-asesores";
 import {
+	contarPagosPorConfirmar,
+	contarReferenciasPorContactar,
+	sifcosDelUniversoDe,
+} from "../lib/agenda-asesor-cobros";
+import {
 	metaRecuperacionDelRango,
 	PERIODOS_DESEMPENO,
 	type PeriodoDesempeno,
@@ -34,6 +40,10 @@ import {
 } from "../lib/historial-agendas";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	obtenerCoberturasVigentes,
+	resolverAgendaEfectivaDelUsuario,
+} from "../services/agenda-cobros-source";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 /** Nivel del asesor según los buckets de su pool en cartera (no es un rol del CRM). */
@@ -116,6 +126,31 @@ async function asesorDeLaSesion(email: string | undefined) {
 	if (!email) return undefined;
 	const pool = await carteraBackClient.getPoolPorAsesor();
 	return pool.find((a) => a.email_cash_in?.trim().toLowerCase() === email);
+}
+
+/**
+ * SIFCOs de la cola del día del usuario: la cartera propia más las que cubre
+ * por una suplencia vigente (CB-114). Es el mismo universo que `getColaDia`
+ * (`resolverAgendaEfectivaDelUsuario` + pool de buckets). Vacío si es un
+ * titular ausente hoy. `gestores` = el usuario más los titulares que cubre
+ * hoy: su historial del caso es el mismo trabajo, no se pierde al cubrir.
+ */
+async function universoDeLaCola(
+	userId: string,
+	propio: { asesorId: number; nombre: string },
+	ahora: Date,
+): Promise<{ universo: Set<string>; gestores: string[] }> {
+	const pool = await carteraBackClient.getPoolPorAsesor();
+	const fechaGT = toDateStrGT(ahora);
+	const [efectivos, coberturas] = await Promise.all([
+		resolverAgendaEfectivaDelUsuario(propio, userId, pool, fechaGT),
+		obtenerCoberturasVigentes(userId, fechaGT),
+	]);
+	const universo = await sifcosDelUniversoDe(efectivos.map((a) => a.asesorId));
+	const cubiertos = coberturas
+		.filter((c) => c.suplenteId === userId)
+		.map((c) => c.titularId);
+	return { universo, gestores: [...new Set([userId, ...cubiertos])] };
 }
 
 function emailDeLaSesion(context: {
@@ -368,21 +403,52 @@ export const cobrosAsesorRouter = {
 		}),
 
 	/**
-	 * Contadores de la "Agenda de hoy" que todavía no tienen fuente. Conectados
-	 * en el front como "pronto" mientras sean null.
+	 * Contadores de la "Agenda de hoy" que no salen de la cola del día (B6 y
+	 * B7; reglas en lib/agenda-asesor-cobros.ts). null = no aplica (usuario sin
+	 * asesor en cartera) o no se pudo calcular; el front muestra "pronto".
 	 */
-	getMiAgendaContadoresPendientes: cobrosProcedure.handler(async () => {
-		// TODO(José) · tarea B6: pagos reportados por el cliente que esperan
-		// validación, de los créditos del asesor de la sesión (definir con negocio
-		// la fuente: pagos_credito.validation_status='pending' en cartera, boletas
-		// del bot en revisión, …). Número, o null si no aplica.
-		const pagosPorConfirmar: number | null = null;
-		// TODO(José) · tarea B7: créditos del asesor con referencias que hay que
-		// contactar (definir la regla: p. ej. N intentos fallidos al titular y
-		// referencias sin gestión). Número, o null si no aplica.
-		const referenciasPorContactar: number | null = null;
-		return { pagosPorConfirmar, referenciasPorContactar };
-	}),
+	getMiAgendaContadoresPendientes: cobrosProcedure.handler(
+		async ({ context }) => {
+			const email = emailDeLaSesion(context);
+			const asesor = await asesorDeLaSesion(email).catch(() => undefined);
+			if (!email || !asesor) {
+				return { pagosPorConfirmar: null, referenciasPorContactar: null };
+			}
+			const ahora = new Date();
+			// Mismo universo que la cola del día (pool de buckets, CB-114). Con cobertura el
+			// suplente suma las del titular ausente; un titular ausente no tiene
+			// ninguna hoy (su trabajo lo hace el suplente).
+			const cola = await universoDeLaCola(
+				context.userId,
+				{ asesorId: asesor.asesor_id, nombre: asesor.nombre },
+				ahora,
+			).catch((error) => {
+				console.error("[Agenda] universo de la cola:", error);
+				return null;
+			});
+			if (!cola) {
+				return { pagosPorConfirmar: null, referenciasPorContactar: null };
+			}
+			if (cola.universo.size === 0) {
+				return { pagosPorConfirmar: 0, referenciasPorContactar: 0 };
+			}
+			const [pagosPorConfirmar, referenciasPorContactar] = await Promise.all([
+				contarPagosPorConfirmar(cola.universo, ahora).catch((error) => {
+					console.error("[Agenda] pagos por confirmar:", error);
+					return null;
+				}),
+				contarReferenciasPorContactar(
+					cola.gestores,
+					cola.universo,
+					ahora,
+				).catch((error) => {
+					console.error("[Agenda] referencias por contactar:", error);
+					return null;
+				}),
+			]);
+			return { pagosPorConfirmar, referenciasPorContactar };
+		},
+	),
 };
 
 /**

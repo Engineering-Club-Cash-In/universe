@@ -61,6 +61,35 @@ describe("resumirSeguimiento", () => {
 		expect(s.intentadoHoy).toBe(false);
 	});
 
+	it("la racha es al titular: codeudor y referencia ni suman ni cortan", () => {
+		const s = resumirSeguimiento(
+			[
+				fila({
+					fechaContacto: gt("2026-10-01"),
+					estadoContacto: "no_contesta",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-02"),
+					estadoContacto: "no_contesta",
+					participanteTipo: "codeudor",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-03"),
+					estadoContacto: "contactado",
+					participanteTipo: "referencia",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-04"),
+					estadoContacto: "no_contesta",
+					participanteTipo: "titular",
+				}),
+			],
+			AHORA,
+		);
+		// Solo cuentan el 1 y el 4 (el contacto logrado a la referencia no corta).
+		expect(s.intentosSinContacto).toBe(2);
+	});
+
 	it("ignora los envíos automáticos (no son intentos del asesor)", () => {
 		const s = resumirSeguimiento(
 			[
@@ -299,5 +328,22 @@ describe("hora del próximo contacto (B8)", () => {
 		expect(conHoraGT(dia, "25:00").toISOString()).toBe(dia.toISOString());
 		expect(conHoraGT(dia, "abc").toISOString()).toBe(dia.toISOString());
 		expect(conHoraGT(dia, null).toISOString()).toBe(dia.toISOString());
+	});
+});
+
+describe("pago por confirmar (B6)", () => {
+	const base = resumirSeguimiento([], AHORA);
+	it("va después del SLA y antes de la promesa de hoy", () => {
+		expect(
+			accionPendienteDe(base, { slaHoy: true, pagoPorConfirmar: true }, AHORA)
+				?.tipo,
+		).toBe("gestionar_sla");
+		expect(
+			accionPendienteDe(
+				{ ...base, promesaVigenteEn: gt("2026-10-06", "00:00") },
+				{ pagoPorConfirmar: true },
+				AHORA,
+			)?.tipo,
+		).toBe("confirmar_pago");
 	});
 });

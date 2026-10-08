@@ -6,6 +6,10 @@
 -- existen siguen igual. La hora va aparte y solo se llena en gestiones que no
 -- son promesa (las promesas siguen por día).
 --
+-- Participante contactado. La racha de intentos sin contacto (B7) es «al
+-- titular»: un intento a un codeudor o a una referencia no cuenta. NULL =
+-- titular (gestiones anteriores).
+--
 -- B3 · Metas de recuperación por asesor, en quetzales y por mes. `asesor_id`
 -- es el id del asesor en cartera-back (`asesores.asesor_id`), el mismo que usa
 -- el pool de buckets. Una fila por asesor y mes (índice único para el upsert).
@@ -22,6 +26,16 @@ DO $$ BEGIN
 	ALTER TABLE "public"."contactos_cobros"
 		ADD CONSTRAINT "contactos_cobros_medio_proximo_contacto_check"
 		CHECK ("medio_proximo_contacto" IS NULL OR "medio_proximo_contacto" IN ('llamada', 'whatsapp'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+--> statement-breakpoint
+ALTER TABLE "public"."contactos_cobros"
+	ADD COLUMN IF NOT EXISTS "participante_tipo" text;
+--> statement-breakpoint
+DO $$ BEGIN
+	ALTER TABLE "public"."contactos_cobros"
+		ADD CONSTRAINT "contactos_cobros_participante_tipo_check"
+		CHECK ("participante_tipo" IS NULL OR "participante_tipo" IN ('titular', 'codeudor', 'referencia'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 --> statement-breakpoint

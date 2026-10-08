@@ -292,6 +292,12 @@ export const contactosCobros = pgTable(
 		medioProximoContacto: text("medio_proximo_contacto").$type<
 			"llamada" | "whatsapp"
 		>(),
+		// A quién se contactó (Workspace). NULL = titular (gestiones anteriores o
+		// de clientes que no lo mandan). La racha de intentos sin contacto, que es
+		// «al titular», ignora las que no son del titular. Migración 0077.
+		participanteTipo: text("participante_tipo").$type<
+			"titular" | "codeudor" | "referencia"
+		>(),
 		// CB-029: "alerta programada" — cuándo avisar al asesor ANTES de que venza
 		// la promesa (default = fecha prometida − 1 día, editable). El job diario
 		// dispara la notificación promesa_por_vencer cuando fecha_alerta = hoy (GT).

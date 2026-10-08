@@ -39,6 +39,7 @@ import {
 } from "../lib/historial-agendas";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { resolverAgendaEfectivaDelUsuario } from "../services/agenda-cobros-source";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 /** Nivel del asesor según los buckets de su pool en cartera (no es un rol del CRM). */
@@ -121,6 +122,29 @@ async function asesorDeLaSesion(email: string | undefined) {
 	if (!email) return undefined;
 	const pool = await carteraBackClient.getPoolPorAsesor();
 	return pool.find((a) => a.email_cash_in?.trim().toLowerCase() === email);
+}
+
+/**
+ * Correos (`email_cash_in`) de las carteras que el usuario trabaja hoy: la
+ * propia y las que cubre por una suplencia vigente (CB-114). Es el mismo
+ * universo que `getColaDia` (`resolverAgendaEfectivaDelUsuario`).
+ */
+async function emailsCarterasEfectivas(
+	userId: string,
+	propio: { asesorId: number; nombre: string },
+	ahora: Date,
+): Promise<string[]> {
+	const pool = await carteraBackClient.getPoolPorAsesor();
+	const efectivos = await resolverAgendaEfectivaDelUsuario(
+		propio,
+		userId,
+		pool,
+		toDateStrGT(ahora),
+	);
+	const ids = new Set(efectivos.map((a) => a.asesorId));
+	return pool
+		.filter((a) => ids.has(a.asesor_id) && a.email_cash_in)
+		.map((a) => (a.email_cash_in as string).trim().toLowerCase());
 }
 
 function emailDeLaSesion(context: {
@@ -385,12 +409,29 @@ export const cobrosAsesorRouter = {
 				return { pagosPorConfirmar: null, referenciasPorContactar: null };
 			}
 			const ahora = new Date();
+			// CB-114: mismas carteras que la cola del día. Con cobertura el
+			// suplente suma las del titular ausente; un titular ausente no tiene
+			// ninguna hoy (su trabajo lo hace el suplente).
+			const emails = await emailsCarterasEfectivas(
+				context.userId,
+				{ asesorId: asesor.asesor_id, nombre: asesor.nombre },
+				ahora,
+			).catch((error) => {
+				console.error("[Agenda] carteras efectivas:", error);
+				return null;
+			});
+			if (!emails) {
+				return { pagosPorConfirmar: null, referenciasPorContactar: null };
+			}
+			if (emails.length === 0) {
+				return { pagosPorConfirmar: 0, referenciasPorContactar: 0 };
+			}
 			const [pagosPorConfirmar, referenciasPorContactar] = await Promise.all([
-				contarPagosPorConfirmar(email, ahora).catch((error) => {
+				contarPagosPorConfirmar(emails, ahora).catch((error) => {
 					console.error("[Agenda] pagos por confirmar:", error);
 					return null;
 				}),
-				contarReferenciasPorContactar(context.userId, email, ahora).catch(
+				contarReferenciasPorContactar(context.userId, emails, ahora).catch(
 					(error) => {
 						console.error("[Agenda] referencias por contactar:", error);
 						return null;

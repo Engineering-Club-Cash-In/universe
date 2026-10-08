@@ -93,48 +93,55 @@ export function debeContactarReferencias(
 }
 
 /**
- * De `sifcos`, los que hoy están en la cartera del asesor (`email_cash_in`)
- * y dentro del funnel. Una consulta por lote a `/getAllCredits`.
+ * De `sifcos`, los que hoy están en alguna de las carteras `emailsAsesores`
+ * (`email_cash_in`) y dentro del funnel. Son varias cuando hay cobertura
+ * (CB-114): la propia más las del titular ausente que el usuario cubre. Una
+ * consulta por lote y por cartera a `/getAllCredits`.
  *
  * cartera-back filtra `email_asesor` por SUBCADENA (`ILIKE '%…%'`): con
  * `ana@…` también vendrían los créditos de `juana@…`. Por eso cada crédito se
  * confirma acá contra el correo EXACTO de su asesor.
  */
 export async function sifcosEnCarteraDe(
-	emailAsesor: string,
+	emailsAsesores: string[],
 	sifcos: string[],
 ): Promise<Set<string>> {
-	const email = emailAsesor.trim().toLowerCase();
 	const unicos = [...new Set(sifcos)];
 	const enCartera = new Set<string>();
-	for (let i = 0; i < unicos.length; i += LOTE_SIFCOS) {
-		const lote = unicos.slice(i, i + LOTE_SIFCOS);
-		const resp = await carteraBackClient.getAllCreditos({
-			mes: 0,
-			anio: 0,
-			page: 1,
-			perPage: lote.length,
-			numeros_credito_sifco: lote,
-			email_cobrador: emailAsesor,
-			buckets: BUCKETS_FUNNEL,
-		});
-		for (const c of resp.data) {
-			const sifco = c.creditos.numero_credito_sifco;
-			const emailDelCredito = c.asesores?.emailCashIn?.trim().toLowerCase();
-			if (sifco && emailDelCredito === email) enCartera.add(sifco);
+	for (const emailAsesor of new Set(emailsAsesores)) {
+		const email = emailAsesor.trim().toLowerCase();
+		for (let i = 0; i < unicos.length; i += LOTE_SIFCOS) {
+			const lote = unicos.slice(i, i + LOTE_SIFCOS);
+			const resp = await carteraBackClient.getAllCreditos({
+				mes: 0,
+				anio: 0,
+				page: 1,
+				perPage: lote.length,
+				numeros_credito_sifco: lote,
+				email_cobrador: emailAsesor,
+				buckets: BUCKETS_FUNNEL,
+			});
+			for (const c of resp.data) {
+				const sifco = c.creditos.numero_credito_sifco;
+				const emailDelCredito = c.asesores?.emailCashIn?.trim().toLowerCase();
+				if (sifco && emailDelCredito === email) enCartera.add(sifco);
+			}
 		}
 	}
 	return enCartera;
 }
 
-/** B6: boletas por confirmar de los créditos que hoy son del asesor. */
+/**
+ * B6: boletas por confirmar de los créditos de las carteras que el usuario
+ * trabaja hoy (`emailsAsesores`: la propia y las que cubre).
+ */
 export async function contarPagosPorConfirmar(
-	emailAsesor: string,
+	emailsAsesores: string[],
 	ahora: Date = new Date(),
 ): Promise<number> {
 	const sifcos = await sifcosConPagoPorConfirmar(undefined, ahora);
 	if (sifcos.size === 0) return 0;
-	return (await sifcosEnCarteraDe(emailAsesor, [...sifcos])).size;
+	return (await sifcosEnCarteraDe(emailsAsesores, [...sifcos])).size;
 }
 
 /**
@@ -145,7 +152,7 @@ export async function contarPagosPorConfirmar(
  */
 export async function contarReferenciasPorContactar(
 	userId: string,
-	emailAsesor: string,
+	emailsAsesores: string[],
 	ahora: Date = new Date(),
 ): Promise<number> {
 	const desde = new Date(ahora.getTime() - DIAS_VENTANA_SEGUIMIENTO * MS_DIA);
@@ -222,5 +229,5 @@ export async function contarReferenciasPorContactar(
 	const sifcosCandidatos = new Set(
 		candidatos.map((c) => c.numeroSifco as string),
 	);
-	return (await sifcosEnCarteraDe(emailAsesor, [...sifcosCandidatos])).size;
+	return (await sifcosEnCarteraDe(emailsAsesores, [...sifcosCandidatos])).size;
 }

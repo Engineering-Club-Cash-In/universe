@@ -5,21 +5,17 @@ import { useNexaDashboard } from "../hooks/useNexaDashboard";
 import { getAdvisors, type Advisor } from "../services/services";
 import { useAuth } from "@/Provider/authProvider";
 import { NexaPagosModal } from "./NexaPagosModal";
+import { NexaFiltros, type ChipFiltro } from "./NexaFiltros";
 import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, X, ChevronLeft, ChevronRight, AlertCircle, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, Loader2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fmtQ } from "@/lib/moneda";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { describirRango, fmtFechaNexa, type NexaDashboardCredito, type NexaDashboardParams } from "../services/nexaDashboard.services";
 import { ESTADO_CUOTA_MES, bancoTexto, fmtDiaNexa, pagoCuotaMesTexto, resumenRechazosNexa } from "@/lib/cuotasNexa";
 import { CLASES_TONO_NEXA, estadoNexa, motivoRechazoNexa } from "@/lib/estadoNexa";
-
-// Radix Select no admite value "": "todos" = sin filtro.
-const sinTodos = <T extends string>(v: string) => (v === "todos" ? "" : v) as T;
 
 function RechazosFila({ c }: { c: NexaDashboardCredito }) {
   if (c.rechazosNexa === 0) return null;
@@ -84,6 +80,22 @@ export function NexaDashboard() {
     setBusqueda(""); setQ(""); setDesdeInput(""); setHastaInput(""); setRango({ desde: "", hasta: "" });
     setMedio(""); setCuotaMes(""); setAsesor(""); setPage(1);
   };
+  // Filtros ya aplicados (no lo que está escrito sin "Buscar"), cada uno con su forma de quitarlo.
+  const chips: ChipFiltro[] = [];
+  if (q) chips.push({ id: "q", texto: `Búsqueda: ${q}`, quitar: () => { setBusqueda(""); setQ(""); setPage(1); } });
+  if (rango.desde || rango.hasta) {
+    const texto = describirRango(rango).replace(/^ · p/, "P");
+    chips.push({ id: "rango", texto, quitar: () => { setDesdeInput(""); setHastaInput(""); setRango({ desde: "", hasta: "" }); setPage(1); } });
+  }
+  if (cuotaMes) {
+    const texto = cuotaMes === "pendientes" ? "Cuota del mes pendiente"
+      : `Cuota del mes pagada${medio === "nexa" ? " por Nexa" : medio === "manual" ? " a mano" : ""}`;
+    chips.push({ id: "cuota", texto, quitar: () => { setCuotaMes(""); setMedio(""); setPage(1); } });
+  }
+  if (puedeFiltrarAsesor && asesor) {
+    const nombre = opcionesAsesor.find((a) => String(a.asesor_id) === asesor)?.nombre ?? asesor;
+    chips.push({ id: "asesor", texto: `Asesor: ${nombre}`, quitar: () => { setAsesor(""); setPage(1); } });
+  }
   const totalPages = data ? Math.max(1, Math.ceil(data.total / 20)) : 1;
 
   if (isLoading && !data) return <div className="flex items-center justify-center p-8 text-slate-700"><Loader2 className="animate-spin mr-2" /> Cargando…</div>;
@@ -113,50 +125,31 @@ export function NexaDashboard() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 items-center">
-        <Input className="flex-1 min-w-[220px]" placeholder="Número de crédito o cliente" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleBuscar()} aria-label="Buscar por número de crédito o cliente" />
-        <label htmlFor="nexa-desde" className="text-sm text-gray-600">Pagos desde</label>
-        <Input id="nexa-desde" type="date" className="w-40" value={desdeInput} max={hastaInput || undefined} onChange={(e) => setDesdeInput(e.target.value)} />
-        <label htmlFor="nexa-hasta" className="text-sm text-gray-600">hasta</label>
-        <Input id="nexa-hasta" type="date" className="w-40" value={hastaInput} min={desdeInput || undefined} onChange={(e) => setHastaInput(e.target.value)} />
-        <Select value={cuotaMes || "todos"} onValueChange={(v) => {
-          const nuevo = sinTodos<NexaDashboardParams["cuotaMes"]>(v);
+      <NexaFiltros
+        busqueda={busqueda}
+        onBusqueda={setBusqueda}
+        desde={desdeInput}
+        hasta={hastaInput}
+        onDesde={setDesdeInput}
+        onHasta={setHastaInput}
+        pendiente={busqueda !== q || desdeInput !== rango.desde || hastaInput !== rango.hasta}
+        onBuscar={handleBuscar}
+        cuotaMes={cuotaMes}
+        onCuotaMes={(nuevo) => {
           setCuotaMes(nuevo);
           // El medio solo aplica a cuotas pagadas.
           if (nuevo !== "pagados") setMedio("");
           setPage(1);
-        }}>
-          <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Cuota del mes"><SelectValue /></SelectTrigger>
-          <SelectContent className="bg-white text-slate-900 border-slate-200">
-            <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: todos</SelectItem>
-            <SelectItem value="pagados" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: pagados</SelectItem>
-            <SelectItem value="pendientes" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: pendientes</SelectItem>
-          </SelectContent>
-        </Select>
-        {cuotaMes === "pagados" && (
-          <Select value={medio || "todos"} onValueChange={(v) => { setMedio(sinTodos<NexaDashboardParams["medio"]>(v)); setPage(1); }}>
-            <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Medio con que se pagó la cuota del mes"><SelectValue /></SelectTrigger>
-            <SelectContent className="bg-white text-slate-900 border-slate-200">
-              <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa o manual</SelectItem>
-              <SelectItem value="nexa" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa</SelectItem>
-              <SelectItem value="manual" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: manual</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-        {puedeFiltrarAsesor && (
-          <Select value={asesor || "todos"} onValueChange={(v) => { setAsesor(sinTodos<string>(v)); setPage(1); }}>
-            <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Asesor"><SelectValue /></SelectTrigger>
-            <SelectContent className="bg-white text-slate-900 border-slate-200">
-              <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Asesor: todos</SelectItem>
-              {opcionesAsesor.map((a) => (
-                <SelectItem key={a.asesor_id} value={String(a.asesor_id)} className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Asesor: {a.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        <Button onClick={handleBuscar} variant="default" size="sm" aria-label="Buscar"><Search className="h-4 w-4" /></Button>
-        <Button onClick={handleLimpiar} variant="outline" size="sm" aria-label="Limpiar filtros"><X className="h-4 w-4" /></Button>
-      </div>
+        }}
+        medio={medio}
+        onMedio={(v) => { setMedio(v); setPage(1); }}
+        puedeFiltrarAsesor={puedeFiltrarAsesor}
+        asesor={asesor}
+        onAsesor={(v) => { setAsesor(v); setPage(1); }}
+        opcionesAsesor={opcionesAsesor}
+        chips={chips}
+        onLimpiar={handleLimpiar}
+      />
 
       {error && <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex gap-2 text-red-700"><AlertCircle className="h-5 w-5" /><span>{getApiErrorMessage(error, "No se pudieron cargar los créditos")}</span></div>}
 

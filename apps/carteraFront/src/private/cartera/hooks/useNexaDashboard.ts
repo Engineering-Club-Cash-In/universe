@@ -13,7 +13,7 @@ import {
 
 export const useNexaDashboard = (params: NexaDashboardParams) => {
   return useQuery<NexaDashboardResponse, Error>({
-    queryKey: ["nexaDashboard", params.q, params.page, params.pageSize, params.desde, params.hasta],
+    queryKey: ["nexaDashboard", params.q, params.page, params.pageSize, params.desde, params.hasta, params.medio, params.cuotaMes],
     queryFn: () => getNexaDashboard(params),
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,

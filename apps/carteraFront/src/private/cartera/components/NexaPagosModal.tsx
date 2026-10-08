@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { fmtQ, sumaQ } from "@/lib/moneda";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { CLASES_TONO_NEXA, estadoNexa, motivoRechazoNexa } from "@/lib/estadoNexa";
-import { cuotasTexto, describirRango, fmtFechaNexa, type NexaPagoCredito, type RangoFechas } from "../services/nexaDashboard.services";
-import { NexaFranjaCanal } from "./NexaFranjaCanal";
+import { cuotasTexto, describirRango, fmtFechaNexa, type NexaDashboardCredito, type NexaPagoCredito, type RangoFechas } from "../services/nexaDashboard.services";
+import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
+import { bancoTexto } from "@/lib/cuotasNexa";
 
 interface NexaPagosModalProps {
-  credito: { creditoId: number; numeroCreditoSifco: string; cliente: string; nexaToken?: string | null } | null;
+  credito: NexaDashboardCredito | null;
   rango: RangoFechas;
   onClose: () => void;
 }
@@ -20,23 +21,16 @@ const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "
 const mesDe = (fecha: string | null) => (fecha ? `${MESES[Number(fecha.slice(5, 7)) - 1]} ${fecha.slice(0, 4)}` : "Sin fecha");
 const esNexa = (p: NexaPagoCredito) => p.canal === "NEXA";
 
-function FranjaCanal({ pagos }: { pagos: NexaPagoCredito[] }) {
-  const barras = [...pagos].reverse().map((p) => ({
-    nexa: esNexa(p),
-    etiqueta: p.cuotas.length ? String(p.cuotas[0]) : "",
-    titulo: [fmtFechaNexa(p.fechaPago), fmtQ(p.montoBoleta), esNexa(p) ? "Nexa" : "Manual", cuotasTexto(p.cuotas)].filter(Boolean).join(" · "),
-  }));
+// Últimas cuotas del crédito (no depende del rango de fechas: es cómo están hoy).
+function FranjaCuotas({ credito }: { credito: NexaDashboardCredito }) {
   return (
     <div>
-      <NexaFranjaCanal barras={barras} />
+      <NexaFranjaCanal cuotas={credito.ultimasCuotas} cuotaMes={credito.cuotaMes?.numero} />
       <div className="mt-1.5 flex justify-between text-[11px] text-slate-500">
-        <span>Más antiguo · número de cuota</span>
-        <span className="flex gap-3">
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-teal-600" />Nexa</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-slate-300" />Manual</span>
-        </span>
+        <span>Más antigua · número de cuota</span>
         <span>Más reciente</span>
       </div>
+      <div className="mt-1"><LeyendaCuotasNexa /></div>
     </div>
   );
 }
@@ -63,7 +57,7 @@ export function NexaPagosModal({ credito, rango, onClose }: NexaPagosModalProps)
           <DialogTitle className="font-mono text-xl tracking-tight text-slate-900">{credito?.numeroCreditoSifco}</DialogTitle>
           <DialogDescription className="text-slate-600">{credito?.cliente}</DialogDescription>
           {credito?.nexaToken && (
-            <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-md bg-teal-50 px-2 py-1 font-mono text-xs text-teal-800">
+            <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-md bg-purple-50 px-2 py-1 font-mono text-xs text-purple-900">
               <Smartphone className="h-3.5 w-3.5" /> Token {credito.nexaToken}
             </span>
           )}
@@ -74,13 +68,14 @@ export function NexaPagosModal({ credito, rango, onClose }: NexaPagosModalProps)
           {error && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{getApiErrorMessage(error, "No se pudieron cargar los pagos")}</p>}
           {data && pagos.length === 0 && <p className="py-10 text-center text-slate-500">Este crédito no tiene pagos en el período elegido.</p>}
 
+          {credito && credito.ultimasCuotas.length > 0 && <FranjaCuotas credito={credito} />}
+
           {pagos.length > 0 && (
-            <section className="grid gap-5 sm:grid-cols-[1fr_auto]">
-              <FranjaCanal pagos={pagos} />
-              <dl className="grid grid-cols-3 sm:grid-cols-1 gap-x-4 gap-y-2 text-sm sm:border-l sm:border-slate-200 sm:pl-5">
+            <section>
+              <dl className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
                 <div><dt className="text-[11px] text-slate-500">Por Nexa</dt><dd className="font-semibold tabular-nums">{pagosNexa.length} de {pagos.length}</dd></div>
                 <div><dt className="text-[11px] text-slate-500">Monto por Nexa</dt><dd className="font-semibold tabular-nums">{fmtQ(sumaQ(pagosNexa.map((p) => p.montoBoleta)))}</dd></div>
-                <div><dt className="text-[11px] text-slate-500">Último pago</dt><dd className={`font-semibold ${ultimo && esNexa(ultimo) ? "text-teal-700" : "text-slate-700"}`}>{ultimo && esNexa(ultimo) ? "Por Nexa" : "Manual"}</dd></div>
+                <div><dt className="text-[11px] text-slate-500">Último pago</dt><dd className={`font-semibold ${ultimo && esNexa(ultimo) ? "text-purple-700" : "text-green-700"}`}>{ultimo && esNexa(ultimo) ? "Por Nexa" : "Manual"}</dd></div>
               </dl>
             </section>
           )}
@@ -91,7 +86,10 @@ export function NexaPagosModal({ credito, rango, onClose }: NexaPagosModalProps)
               <ul className="mt-2 divide-y divide-red-100">
                 {data!.eventosSinPago.map((e) => (
                   <li key={e.referencia} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 text-sm">
-                    <span className="text-red-900">{motivoRechazoNexa(e.error)}</span>
+                    <span className="flex items-center gap-2 text-red-900">
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${CLASES_TONO_NEXA[estadoNexa(e.estado).tono]}`}>{estadoNexa(e.estado).etiqueta}</span>
+                      {motivoRechazoNexa(e.error)}
+                    </span>
                     <span className="font-mono text-xs text-red-700/80 tabular-nums">{fmtFechaNexa(e.creado)} · {fmtQ(e.monto)} · ref. {e.referencia}</span>
                     {e.tieneFilasVivas && (
                       <span className="basis-full text-xs font-semibold text-red-800">
@@ -113,10 +111,11 @@ export function NexaPagosModal({ credito, rango, onClose }: NexaPagosModalProps)
                     {(i === 0 || mesDe(p.fechaPago) !== mesDe(pagos[i - 1].fechaPago)) && (
                       <li className="bg-slate-50 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200 first:rounded-t-lg">{mesDe(p.fechaPago)}</li>
                     )}
-                    <li className={`grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_6.5rem] items-center gap-x-4 gap-y-1 border-b border-slate-100 last:border-0 px-4 py-2 border-l-[3px] ${esNexa(p) ? "border-l-teal-600" : "border-l-transparent"}`}>
+                    <li className={`grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_6.5rem] items-center gap-x-4 gap-y-1 border-b border-slate-100 last:border-0 px-4 py-2 border-l-[3px] ${esNexa(p) ? "border-l-purple-600" : "border-l-green-600"}`}>
                       <span className="font-mono text-xs text-slate-500 tabular-nums">{fmtFechaNexa(p.fechaPago)}</span>
                       <span className="truncate text-xs">
-                        <span className={esNexa(p) ? "font-medium text-teal-700" : "text-slate-500"}>{esNexa(p) ? "Nexa" : p.registradoPor ?? "Manual"}</span>
+                        <span className={esNexa(p) ? "font-medium text-purple-700" : "text-green-700"}>{esNexa(p) ? "Nexa" : `Manual · ${bancoTexto("MANUAL", p.banco)}`}</span>
+                        {!esNexa(p) && p.registradoPor && <span className="text-slate-500"> · {p.registradoPor}</span>}
                         {p.cuotas.length > 0 && <span className="text-slate-400"> · {cuotasTexto(p.cuotas)}</span>}
                       </span>
                       <span className="order-last col-span-3 justify-self-end sm:order-none sm:col-span-1"><EstadoPago pago={p} /></span>

@@ -7,7 +7,7 @@ import { textoTokenNexa } from "@/lib/textoTokenNexa";
 // Token de Nexa del crédito, como referencia, con acceso a la pestaña Nexa.
 export function NexaTokenCredito({ numeroCreditoSifco }: { numeroCreditoSifco: string }) {
   const navigate = useNavigate();
-  const { data, isLoading, error } = useNexaDashboard({ q: numeroCreditoSifco, page: 1, pageSize: 100, desde: "", hasta: "" });
+  const { data, isLoading, error } = useNexaDashboard({ q: numeroCreditoSifco, page: 1, pageSize: 100, desde: "", hasta: "", medio: "", cuotaMes: "" });
   const credito = data?.creditos.find((c) => c.numeroCreditoSifco === numeroCreditoSifco);
 
   const { texto, tono } = textoTokenNexa({ isLoading, error, credito });

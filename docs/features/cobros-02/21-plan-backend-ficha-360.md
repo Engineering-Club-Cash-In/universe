@@ -104,7 +104,7 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - **Catálogo** (`getFichaComplementos.documentos`): las seis filas que ya dibuja el front, con las mismas claves y textos. `disponible`:
   - enviar: si hay archivo;
   - solicitar: si no hay otra solicitud pendiente del mismo documento.
-- **Archivo a enviar:** el PDF más reciente, primero de `vehicle_documents` y si no de `opportunity_documents`.
+- **Archivo a enviar:** el PDF más reciente, primero de `vehicle_documents` y si no de `opportunity_documents`. Con contrato manda el vehículo del contrato: los PDF de la oportunidad solo valen si esta apunta al mismo vehículo. En el mensaje, la oportunidad solo aporta el nombre si es la del cliente del contrato.
   - Tarjeta de circulación: tipos `tarjeta_circulacion` o `vehicle_title`.
   - Seguro: `seguro_vehiculo` (la póliza); si no hay, la cobertura general de `COBERTURA_SEGURO_PDF_URL` (la misma de `send-coverage-document.ts`).
   - Solo PDF: el template lleva header de documento. En la base local hay 883 PDF y 5 JPG de estos tipos.
@@ -118,7 +118,7 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 
 - **Apagado por defecto:** solo corre con `COBROS_ASISTENTE_IA=on` y `GOOGLE_GENERATIVE_AI_API_KEY`. Apagado: `resumenIA = null` (la ficha muestra «Pronto») y `preguntarAsistenteCaso` responde «El asistente IA todavía no está activo.».
 - **Modelo:** `gemini-3-flash-preview`, el mismo de la lectura de boletas. Cero reintentos y 30 s de timeout.
-- **Qué ve el modelo:** el estado VIVO del crédito (estado, días de mora, cuotas vencidas, cuota mensual y mora acumulada, leídos de cartera como la ficha; los campos de mora de `casos_cobros` están desactualizados y no se usan), hasta 10 hitos de F4 y las últimas 20 gestiones (fecha, método, resultado, comentario, monto y fecha prometidos, estado de la promesa). **No** se le mandan el nombre, el DPI ni los teléfonos del cliente, y en los comentarios se tapan los números de 8 dígitos o más («[número]»).
+- **Qué ve el modelo:** el estado VIVO del crédito (estado, días de mora, cuotas vencidas, cuota mensual y mora acumulada, leídos de cartera como la ficha; los campos de mora de `casos_cobros` están desactualizados y no se usan), hasta 10 hitos de F4 y las últimas 20 gestiones (fecha, método, resultado, comentario, monto y fecha prometidos, estado de la promesa). **No** se le mandan el nombre, el DPI ni los teléfonos del cliente, y en los comentarios y en la pregunta del asesor se tapan los números de 8 dígitos o más («[número]»), los correos («[correo]») y las palabras de los nombres de las personas del caso («[nombre]»: titular con todos sus componentes —contrato, lead, RENAP y solicitudes—, codeudores, referencias y cónyuge). Si no se pueden leer esos nombres no se llama al modelo. Con el crédito en mora se resume aunque no haya gestiones ni hitos; al día y sin historial, no.
 - **Resumen** (`resumenes_ia_cobros`, uno por caso): texto de 3 a 5 oraciones y de 1 a 4 etiquetas. Se guarda con la **huella** (hash) de los datos que se le mandaron:
   - misma huella → se devuelve el guardado, sin llamar al modelo;
   - huella distinta → se devuelve el guardado y se regenera atrás;

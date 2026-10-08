@@ -95,3 +95,49 @@ CREATE INDEX IF NOT EXISTS "idx_preguntas_ia_usuario_fecha"
 	ON "public"."preguntas_ia_cobros" ("realizada_por", "created_at" DESC);
 CREATE INDEX IF NOT EXISTS "idx_preguntas_ia_caso"
 	ON "public"."preguntas_ia_cobros" ("caso_cobro_id", "created_at" DESC);
+
+-- Auditoría que no bloquea el borrado de usuarios: las columnas de actor son
+-- nullable y sus FK hacia "user" son ON DELETE SET NULL. Los CREATE TABLE IF
+-- NOT EXISTS de arriba no tocan las tablas que ya existían con la definición
+-- anterior (NOT NULL y NO ACTION), así que se corrigen aquí. Idempotente.
+ALTER TABLE "public"."solicitudes_documentos_cobros"
+	ALTER COLUMN "solicitado_por" DROP NOT NULL;
+ALTER TABLE "public"."preguntas_ia_cobros"
+	ALTER COLUMN "realizada_por" DROP NOT NULL;
+
+DO $$
+DECLARE
+	destino record;
+	fk record;
+BEGIN
+	FOR destino IN
+		SELECT * FROM (VALUES
+			('cambios_datos_cliente_cobros', 'realizado_por'),
+			('solicitudes_documentos_cobros', 'solicitado_por'),
+			('solicitudes_documentos_cobros', 'resuelto_por'),
+			('preguntas_ia_cobros', 'realizada_por')
+		) AS t(tabla, columna)
+	LOOP
+		FOR fk IN
+			SELECT con.conname
+			FROM pg_constraint con
+			JOIN pg_attribute att
+				ON att.attrelid = con.conrelid AND att.attnum = ANY (con.conkey)
+			WHERE con.contype = 'f'
+				AND con.conrelid = format('public.%I', destino.tabla)::regclass
+				AND con.confrelid = 'public."user"'::regclass
+				AND att.attname = destino.columna
+		LOOP
+			EXECUTE format(
+				'ALTER TABLE public.%I DROP CONSTRAINT %I',
+				destino.tabla, fk.conname
+			);
+		END LOOP;
+		EXECUTE format(
+			'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES public."user"("id") ON DELETE SET NULL',
+			destino.tabla,
+			destino.tabla || '_' || destino.columna || '_fkey',
+			destino.columna
+		);
+	END LOOP;
+END $$;

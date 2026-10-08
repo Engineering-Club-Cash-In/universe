@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	armarContextoIA,
+	hayQueResumir,
 	asistenteActivo,
 	huellaContexto,
 	palabrasDeNombres,
@@ -133,5 +134,38 @@ describe("asistenteActivo", () => {
 		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "";
 		expect(asistenteActivo()).toBe(false);
 		process.env = antes;
+	});
+});
+
+describe("hayQueResumir", () => {
+	const alDia = {
+		estadoMora: "al_dia",
+		diasMora: 0,
+		cuotasVencidas: 0,
+		moraAcumulada: "0.00",
+		cuotaMensual: "1500.00",
+	};
+	test("al día y sin historial no hay nada que resumir", () => {
+		expect(hayQueResumir({ credito: alDia, hitos: [], gestiones: [] })).toBe(
+			false,
+		);
+	});
+	test("en mora basta el estado vivo, sin gestiones ni hitos", () => {
+		for (const credito of [
+			{ ...alDia, diasMora: 12 },
+			{ ...alDia, cuotasVencidas: 1 },
+			{ ...alDia, moraAcumulada: "35.50" },
+		]) {
+			expect(hayQueResumir({ credito, hitos: [], gestiones: [] })).toBe(true);
+		}
+	});
+	test("con gestiones o hitos siempre hay qué resumir", () => {
+		expect(
+			hayQueResumir({
+				credito: alDia,
+				hitos: [{ fecha: "2026-09-10", descripcion: "x" }],
+				gestiones: [],
+			}),
+		).toBe(true);
 	});
 });

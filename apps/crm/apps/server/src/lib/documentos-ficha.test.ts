@@ -3,6 +3,7 @@ import {
 	armarDocumentos,
 	combinarDatosMensaje,
 	construirMensajeDocumento,
+	decidirOportunidadMensaje,
 	decidirVehiculoCaso,
 } from "./documentos-ficha";
 
@@ -129,5 +130,47 @@ describe("decidirVehiculoCaso", () => {
 				vehiculoOportunidad: "v-opp",
 			}),
 		).toEqual({ vehicleId: null, usarOportunidad: false });
+	});
+});
+
+describe("decidirOportunidadMensaje", () => {
+	const base = {
+		vehiculoContrato: "v1",
+		vehiculoOportunidad: "v1",
+		oportunidadDelCliente: "o1",
+		oportunidadResuelta: "o1",
+	};
+	test("sin contrato la oportunidad rellena todo", () => {
+		expect(
+			decidirOportunidadMensaje({
+				...base,
+				tieneContrato: false,
+				vehiculoContrato: null,
+				oportunidadDelCliente: null,
+			}),
+		).toEqual({ usarOportunidad: true, usarNombreOportunidad: true });
+	});
+	test("con contrato y oportunidad del cliente con el mismo vehículo, todo", () => {
+		expect(decidirOportunidadMensaje({ ...base, tieneContrato: true })).toEqual(
+			{ usarOportunidad: true, usarNombreOportunidad: true },
+		);
+	});
+	test("con contrato, oportunidad hallada por SIFCO: ni nombre aunque el vehículo coincida", () => {
+		expect(
+			decidirOportunidadMensaje({
+				...base,
+				tieneContrato: true,
+				oportunidadDelCliente: null,
+			}),
+		).toEqual({ usarOportunidad: true, usarNombreOportunidad: false });
+	});
+	test("con contrato y otro vehículo, la oportunidad no aporta el vehículo", () => {
+		expect(
+			decidirOportunidadMensaje({
+				...base,
+				tieneContrato: true,
+				vehiculoOportunidad: "v-viejo",
+			}),
+		).toEqual({ usarOportunidad: false, usarNombreOportunidad: true });
 	});
 });

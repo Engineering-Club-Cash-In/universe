@@ -126,6 +126,27 @@ const COBERTURA_SEGURO_PDF_URL = process.env.COBERTURA_SEGURO_PDF_URL;
 
 export type ArchivoDocumento = { key: string } | { url: string };
 
+/**
+ * Qué de la oportunidad puede rellenar el mensaje. Sin contrato, todo (es el
+ * respaldo por SIFCO). Con contrato: el vehículo solo si es el mismo y el
+ * nombre solo si la oportunidad es la del cliente del contrato.
+ */
+export function decidirOportunidadMensaje(datos: {
+	tieneContrato: boolean;
+	vehiculoContrato: string | null;
+	vehiculoOportunidad: string | null;
+	oportunidadDelCliente: string | null;
+	oportunidadResuelta: string | null;
+}): { usarOportunidad: boolean; usarNombreOportunidad: boolean } {
+	return {
+		usarOportunidad: decidirVehiculoCaso(datos).usarOportunidad,
+		usarNombreOportunidad:
+			!datos.tieneContrato ||
+			(datos.oportunidadDelCliente !== null &&
+				datos.oportunidadDelCliente === datos.oportunidadResuelta),
+	};
+}
+
 /** Regla pura de `resolverVehiculoCaso`. */
 export function decidirVehiculoCaso(datos: {
 	tieneContrato: boolean;
@@ -331,6 +352,7 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				contratoId: casosCobros.contratoId,
 				vehicleId: contratosFinanciamiento.vehicleId,
+				oportunidadDelCliente: clients.opportunityId,
 				clienteNombre: clients.contactPerson,
 				vehiculoMarca: vehicles.make,
 				vehiculoModelo: vehicles.model,
@@ -372,18 +394,22 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 		vehiculoYear: null,
 		vehiculoPlaca: null,
 	};
-	// Con contrato, el vehículo del mensaje es el del contrato: el de la
-	// oportunidad (viejo o distinto) no rellena sus huecos. El nombre del
-	// cliente sí puede venir de la oportunidad, que ya es la del contrato.
-	const { usarOportunidad } = decidirVehiculoCaso({
+	// Con contrato manda el contrato: su vehículo no se completa con el de una
+	// oportunidad distinta, y el nombre del cliente solo sale de la oportunidad
+	// si es la de su cliente (`resolverContextoCaso` cae a una oportunidad por
+	// SIFCO cuando el cliente no tiene, y esa puede ser de otro lead).
+	const { usarOportunidad, usarNombreOportunidad } = decidirOportunidadMensaje({
 		tieneContrato: !!contrato?.contratoId,
 		vehiculoContrato: contrato?.vehicleId ?? null,
 		vehiculoOportunidad: oportunidad?.vehicleId ?? null,
+		oportunidadDelCliente: contrato?.oportunidadDelCliente ?? null,
+		oportunidadResuelta: ctx.opportunityId,
 	});
 	const deOportunidad = oportunidad
-		? usarOportunidad
-			? oportunidad
-			: { ...sinDatos, clienteNombre: oportunidad.clienteNombre }
+		? {
+				...(usarOportunidad ? oportunidad : sinDatos),
+				clienteNombre: usarNombreOportunidad ? oportunidad.clienteNombre : null,
+			}
 		: sinDatos;
 	return combinarDatosMensaje(
 		contrato ?? sinDatos,

@@ -33,7 +33,9 @@ import { generateObject, generateText } from "ai";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { creditApplications } from "../db/schema/client-forms";
 import { clients, leads } from "../db/schema/crm";
+import { renapInfo } from "../db/schema/renap";
 import {
 	casosCobros,
 	contactosCobros,
@@ -48,6 +50,7 @@ import {
 	resolverContextoCaso,
 } from "../services/referencias-cobros-datos";
 import { contarCuotasAtrasadasUnicas } from "./cobros-plantillas";
+import { eqDpi } from "./dpi-lookup";
 import {
 	cargarHistoricoDetallado,
 	type HistoricoCargado,
@@ -200,6 +203,22 @@ export function armarContextoIA(fuentes: {
 	};
 }
 
+/**
+ * Hay algo que contar si el crédito está en mora o tiene gestiones o hitos:
+ * un caso nuevo en mora sin historial igual se resume con el estado vivo.
+ * Un crédito al día y sin historial no vale una llamada al modelo.
+ */
+export function hayQueResumir(contexto: ContextoIA): boolean {
+	const { credito } = contexto;
+	return (
+		contexto.gestiones.length > 0 ||
+		contexto.hitos.length > 0 ||
+		credito.diasMora > 0 ||
+		credito.cuotasVencidas > 0 ||
+		Number(credito.moraAcumulada) > 0
+	);
+}
+
 export function huellaContexto(contexto: ContextoIA): string {
 	return createHash("sha256")
 		.update(`${MODELO_ASISTENTE}\n${JSON.stringify(contexto)}`)
@@ -237,35 +256,83 @@ async function cargarCreditoVivo(
 }
 
 /**
- * Palabras de los nombres de las personas del caso: titular (contrato y
- * lead), codeudores, referencias y cónyuge. Lanza si no se pueden leer.
+ * Palabras de los nombres de las personas del caso: titular (contrato, lead,
+ * RENAP y solicitudes de crédito, con todos sus componentes), codeudores,
+ * referencias y cónyuge. Lanza si no se pueden leer.
  */
 async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
 	const ctx = await resolverContextoCaso(casoCobroId);
-	const [delContrato, delLead, { referencias }] = await Promise.all([
-		db
-			.select({ nombre: clients.contactPerson })
-			.from(casosCobros)
-			.innerJoin(
-				contratosFinanciamiento,
-				eq(contratosFinanciamiento.id, casosCobros.contratoId),
-			)
-			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
-			.where(eq(casosCobros.id, casoCobroId))
-			.limit(1),
-		ctx.leadId
-			? db
-					.select({ nombre: leads.firstName, apellido: leads.lastName })
-					.from(leads)
-					.where(eq(leads.id, ctx.leadId))
-					.limit(1)
-			: Promise.resolve([]),
-		cargarReferencias(ctx),
-	]);
+	const [delContrato, delLead, solicitudes, { referencias }] =
+		await Promise.all([
+			db
+				.select({ nombre: clients.contactPerson })
+				.from(casosCobros)
+				.innerJoin(
+					contratosFinanciamiento,
+					eq(contratosFinanciamiento.id, casosCobros.contratoId),
+				)
+				.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+				.where(eq(casosCobros.id, casoCobroId))
+				.limit(1),
+			ctx.leadId
+				? db
+						.select({
+							primerNombre: leads.firstName,
+							segundoNombre: leads.middleName,
+							primerApellido: leads.lastName,
+							segundoApellido: leads.secondLastName,
+							dpi: leads.dpi,
+						})
+						.from(leads)
+						.where(eq(leads.id, ctx.leadId))
+						.limit(1)
+				: Promise.resolve([]),
+			// Titular y codeudores: todas las solicitudes de la oportunidad.
+			ctx.opportunityId
+				? db
+						.select({
+							primerNombre: creditApplications.primerNombre,
+							segundoNombre: creditApplications.segundoNombre,
+							primerApellido: creditApplications.primerApellido,
+							segundoApellido: creditApplications.segundoApellido,
+							apellidoCasada: creditApplications.apellidoCasada,
+							conyuge: creditApplications.conyugeNombre,
+						})
+						.from(creditApplications)
+						.where(eq(creditApplications.opportunityId, ctx.opportunityId))
+				: Promise.resolve([]),
+			cargarReferencias(ctx),
+		]);
+	const dpi = delLead[0]?.dpi?.trim();
+	const renap = dpi
+		? await db
+				.select({
+					primerNombre: renapInfo.firstName,
+					segundoNombre: renapInfo.secondName,
+					tercerNombre: renapInfo.thirdName,
+					primerApellido: renapInfo.firstLastName,
+					segundoApellido: renapInfo.secondLastName,
+					apellidoCasada: renapInfo.marriedLastName,
+				})
+				.from(renapInfo)
+				.where(eqDpi(renapInfo.dpi, dpi))
+				.limit(1)
+		: [];
 	return palabrasDeNombres([
 		delContrato[0]?.nombre,
-		delLead[0]?.nombre,
-		delLead[0]?.apellido,
+		delLead[0]?.primerNombre,
+		delLead[0]?.segundoNombre,
+		delLead[0]?.primerApellido,
+		delLead[0]?.segundoApellido,
+		...renap.flatMap((r) => Object.values(r)),
+		...solicitudes.flatMap((x) => [
+			x.primerNombre,
+			x.segundoNombre,
+			x.primerApellido,
+			x.segundoApellido,
+			x.apellidoCasada,
+			x.conyuge,
+		]),
 		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
 	]);
 }
@@ -452,10 +519,7 @@ export async function obtenerResumenIA(
 	// se paga una regeneración con menos información que el resumen que ya
 	// hay, y sin resumen previo no se inventa uno con datos a medias.
 	if (!completo) return guardado ? comoResumen(guardado) : null;
-	// Sin gestiones ni hitos no hay nada que resumir.
-	if (contexto.gestiones.length === 0 && contexto.hitos.length === 0) {
-		return null;
-	}
+	if (!hayQueResumir(contexto)) return null;
 	const huella = huellaContexto(contexto);
 	if (guardado && guardado.huella === huella) return comoResumen(guardado);
 

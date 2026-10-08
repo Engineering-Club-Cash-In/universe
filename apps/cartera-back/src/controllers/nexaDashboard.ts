@@ -355,37 +355,47 @@ WITH base AS (
   ORDER BY cuotas.credito_id, (cuotas.fecha_vencimiento >= hoy.inicio_mes) DESC,
            CASE WHEN cuotas.fecha_vencimiento >= hoy.inicio_mes THEN cuotas.fecha_vencimiento END,
            cuotas.fecha_vencimiento DESC, cuotas.numero_cuota DESC
-), medio_cuota AS (
+), filas_cuota AS (
   -- Una sola fuente para todo lo que sale de las filas de la cuota (medio, banco, aplicado, por validar):
   -- TODAS las filas no anuladas que le aplican plata, menos las 'reset' y las de capital ('capital',
   -- 'capital_validated': son abonos a capital, no pago de la cuota). Una parcial anterior cuenta aunque
   -- otra fila cierre la cuota. cubre (filaQueCubreCuotaSql) NO filtra: solo dice si la cuota está
   -- pagada y, de ahí, si la cubre un pendiente (cubierta_validada).
+  SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
+  FROM cartera.pagos_credito pc
+  WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes UNION SELECT cuota_id FROM cuota_mes)
+    AND pc."paymentFalse" = false AND COALESCE(pc.monto_aplicado, 0) > 0
+    AND pc.validation_status NOT IN ('reset', 'capital', 'capital_validated')
+), banco_cuota AS (
+  -- banco: con el mismo criterio que el medio, el banco que más plata manual le aplicó a la cuota
+  -- (empate: el del pago más reciente). No el del último pago: Q900 BI + Q100 Banrural es BI.
+  SELECT DISTINCT ON (cuota_id) cuota_id, nombre AS banco
+  FROM (
+    SELECT f.cuota_id, bk.nombre, SUM(f.monto_aplicado) AS monto,
+           MAX(f.fecha_pago) AS ultima_fecha, MAX(f.pago_id) AS ultimo_pago
+    FROM filas_cuota f JOIN cartera.bancos bk ON bk.banco_id = f.banco_id
+    WHERE f.nexa_payment_event_id IS NULL AND bk.nombre IS NOT NULL
+    GROUP BY f.cuota_id, bk.banco_id, bk.nombre
+  ) por_banco
+  ORDER BY cuota_id, monto DESC, ultima_fecha DESC NULLS LAST, ultimo_pago DESC
+), medio_cuota AS (
   -- medio: el que más plata le aplicó; empate, el del pago más reciente.
   -- por_validar: alguna de esas filas sigue 'pending' (contabilidad no la validó). Mira también las
   -- Nexa: entran 'pending' y applyPayment las valida en la misma llamada, así que una Nexa que queda
   -- 'pending' es un pago que no terminó de aplicarse.
   -- cubierta_validada: alguna fila que la cubre para el cron ya no está pendiente.
-  SELECT cuota_id, banco, aplicado, por_validar, cubierta_validada,
+  SELECT sumas.cuota_id, bc.banco, aplicado, por_validar, cubierta_validada,
          CASE WHEN nexa > otro THEN 'NEXA' WHEN otro > nexa THEN 'MANUAL' WHEN ultimo_nexa THEN 'NEXA' ELSE 'MANUAL' END AS medio
   FROM (
     SELECT pc.cuota_id, SUM(pc.monto_aplicado) AS aplicado, BOOL_OR(pc.validation_status = 'pending') AS por_validar,
            COALESCE(BOOL_OR(pc.cubre AND pc.validation_status <> 'pending'), false) AS cubierta_validada,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NOT NULL), 0) AS nexa,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NULL), 0) AS otro,
-           (array_agg(pc.nexa_payment_event_id IS NOT NULL ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC))[1] AS ultimo_nexa,
-           (array_agg(bk.nombre ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC)
-             FILTER (WHERE pc.nexa_payment_event_id IS NULL AND bk.nombre IS NOT NULL))[1] AS banco
-    FROM (
-      SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
-      FROM cartera.pagos_credito pc
-      WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes UNION SELECT cuota_id FROM cuota_mes)
-        AND pc."paymentFalse" = false AND COALESCE(pc.monto_aplicado, 0) > 0
-        AND pc.validation_status NOT IN ('reset', 'capital', 'capital_validated')
-    ) pc
-    LEFT JOIN cartera.bancos bk ON bk.banco_id = pc.banco_id
+           (array_agg(pc.nexa_payment_event_id IS NOT NULL ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC))[1] AS ultimo_nexa
+    FROM filas_cuota pc
     GROUP BY pc.cuota_id
   ) sumas
+  LEFT JOIN banco_cuota bc ON bc.cuota_id = sumas.cuota_id
 ), franja AS (
   SELECT r.credito_id, json_agg(json_build_object(
            'numero', r.numero_cuota, 'vencimiento', to_char(r.fecha_vencimiento, 'YYYY-MM-DD'), 'pagada', r.pagada,

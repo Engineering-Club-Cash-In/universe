@@ -553,6 +553,25 @@ integrationTest("medio: un abono parcial anterior cuenta aunque otra fila cierre
   expect(r.totales.desglose).toMatchObject({ pagadaNexa: 1, pagadaManual: 0 });
 });
 
+integrationTest("banco: el de la cuota manual es el que más plata puso, no el del último pago (Q900 BI + Q100 Banrural = BI)", async () => {
+  const c = await nuevoCredito();
+  const q = await c.cuota(1, "0 days");
+  await c.abono(q, { banco: 1, monto: 900, pagado: false, fecha: "2026-09-05 10:00:00" });
+  await c.abono(q, { banco: 2, monto: 100, fecha: "2026-09-12 10:00:00" });
+  const { fila } = await c.fila();
+  expect(fila!.cuotaMes).toMatchObject({ estado: "pagada", medio: "MANUAL" });
+  expect(fila!.ultimasCuotas[0]).toMatchObject({ medio: "MANUAL", banco: "Banco Industrial" });
+});
+
+integrationTest("banco: empate de montos entre bancos, gana el del pago más reciente", async () => {
+  const c = await nuevoCredito();
+  const q = await c.cuota(1, "0 days");
+  await c.abono(q, { banco: 1, monto: 500, pagado: false, fecha: "2026-09-05 10:00:00" });
+  await c.abono(q, { banco: 2, monto: 500, fecha: "2026-09-12 10:00:00" });
+  const { fila } = await c.fila();
+  expect(fila!.ultimasCuotas[0]).toMatchObject({ medio: "MANUAL", banco: "Banrural" });
+});
+
 integrationTest("capital: una fila 'capital' sobre una cuota sin pagar no la vuelve parcial ni le da medio", async () => {
   const c = await nuevoCredito();
   const q = await c.cuota(1, "1 month -1 day");

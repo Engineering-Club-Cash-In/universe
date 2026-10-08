@@ -165,13 +165,15 @@ export type NexaDashboardRow = {
 export type NexaCuotaMes = {
   numero: number; vencimiento: string; estado: EstadoCuotaMes; pago: PagoCuota;
   aplicado: string; monto: string; medio: "NEXA" | "MANUAL" | null;
+  /** Alguna fila que le aplica plata a la cuota sigue en validation_status 'pending' (ver medio_cuota). */
+  porValidar: boolean;
 };
 
 export type NexaRechazo = { fecha: string | null; monto: string; codigo: string | null; estado: string };
 // medio: quién puso más plata en la cuota (empate: el pago más reciente). null = sin pagos.
 export type NexaCuotaFranja = {
   numero: number; vencimiento: string; pagada: boolean; medio: "NEXA" | "MANUAL" | null; banco: string | null;
-  aplicado: string; monto: string;
+  aplicado: string; monto: string; porValidar: boolean;
 };
 
 export type NexaDashboardResponse = {
@@ -226,6 +228,7 @@ export const mapNexaDashboardRows = (rows: Record<string, unknown>[], params: Ne
       aplicado: String(row.cuota_mes_aplicado ?? "0.00"),
       monto: String(row.cuota_mes_monto ?? "0.00"),
       medio: row.cuota_mes_medio == null ? null : (String(row.cuota_mes_medio) as "NEXA" | "MANUAL"),
+      porValidar: row.cuota_mes_por_validar === true,
     },
   }));
 
@@ -321,10 +324,14 @@ WITH base AS (
   -- filas que cubren la cuota para el cron (filaQueCubreCuotaSql). Si ninguna la cubre (pagada solo
   -- por el flag, o no pagada con abonos), las filas no anuladas, no 'reset' y con monto aplicado.
   -- aplicado: lo que se le aplicó a la cuota (filas no anuladas y no 'reset'), para completa/parcial.
-  SELECT cuota_id, banco, aplicado,
+  -- por_validar: alguna fila no anulada que le aplica plata a la cuota sigue 'pending' (contabilidad
+  -- no la validó). El cron la cuenta como pagada hasta 7 días (filaQueCubreCuotaSql); se avisa igual.
+  -- Mira todas esas filas, cubran o no, y también las Nexa: entran 'pending' y applyPayment las valida
+  -- en la misma llamada, así que una Nexa que queda 'pending' es un pago que no terminó de aplicarse.
+  SELECT cuota_id, banco, aplicado, por_validar,
          CASE WHEN nexa > otro THEN 'NEXA' WHEN otro > nexa THEN 'MANUAL' WHEN ultimo_nexa THEN 'NEXA' ELSE 'MANUAL' END AS medio
   FROM (
-    SELECT pc.cuota_id, MAX(pc.aplicado) AS aplicado,
+    SELECT pc.cuota_id, MAX(pc.aplicado) AS aplicado, BOOL_OR(pc.por_validar) AS por_validar,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NOT NULL), 0) AS nexa,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NULL), 0) AS otro,
            (array_agg(pc.nexa_payment_event_id IS NOT NULL ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC))[1] AS ultimo_nexa,
@@ -332,7 +339,8 @@ WITH base AS (
              FILTER (WHERE pc.nexa_payment_event_id IS NULL AND bk.nombre IS NOT NULL))[1] AS banco
     FROM (
       SELECT filas.*, BOOL_OR(cubre) OVER (PARTITION BY cuota_id) AS alguna_cubre,
-             SUM(monto_aplicado) FILTER (WHERE validation_status <> 'reset') OVER (PARTITION BY cuota_id) AS aplicado
+             SUM(monto_aplicado) FILTER (WHERE validation_status <> 'reset') OVER (PARTITION BY cuota_id) AS aplicado,
+             BOOL_OR(validation_status = 'pending') OVER (PARTITION BY cuota_id) AS por_validar
       FROM (
         SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
         FROM cartera.pagos_credito pc
@@ -349,7 +357,8 @@ WITH base AS (
   SELECT r.credito_id, json_agg(json_build_object(
            'numero', r.numero_cuota, 'vencimiento', to_char(r.fecha_vencimiento, 'YYYY-MM-DD'), 'pagada', r.pagada,
            'medio', m.medio, 'banco', CASE WHEN m.medio = 'MANUAL' THEN m.banco END,
-           'aplicado', COALESCE(m.aplicado, 0)::numeric(18,2)::text, 'monto', base.monto_cuota::numeric(18,2)::text
+           'aplicado', COALESCE(m.aplicado, 0)::numeric(18,2)::text, 'monto', base.monto_cuota::numeric(18,2)::text,
+           'porValidar', COALESCE(m.por_validar, false)
          ) ORDER BY r.fecha_vencimiento, r.numero_cuota) AS ultimas_cuotas
   FROM recientes r LEFT JOIN medio_cuota m ON m.cuota_id = r.cuota_id
   JOIN base ON base.credito_id = r.credito_id
@@ -366,7 +375,7 @@ WITH base AS (
          to_char(cuota_mes.fecha_vencimiento, 'YYYY-MM-DD') AS cuota_mes_vencimiento, cuota_mes.estado AS cuota_mes_estado,
          CASE WHEN cuota_mes.estado = 'pagada' THEN 'completa' WHEN COALESCE(mm.aplicado, 0) > 0 THEN 'parcial' ELSE 'sin_pago' END AS cuota_mes_pago,
          COALESCE(mm.aplicado, 0)::numeric(18,2)::text AS cuota_mes_aplicado, base.monto_cuota::numeric(18,2)::text AS cuota_mes_monto,
-         mm.medio AS cuota_mes_medio
+         mm.medio AS cuota_mes_medio, COALESCE(mm.por_validar, false) AS cuota_mes_por_validar
   FROM base
   LEFT JOIN ultimo ON ultimo.credito_id = base.credito_id
   LEFT JOIN nexa ON nexa.credito_id = base.credito_id

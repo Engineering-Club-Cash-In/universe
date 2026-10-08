@@ -9,6 +9,9 @@ export type CuotaFranjaNexa = {
   banco: string | null;
   aplicado: string; // monto_aplicado de las filas no anuladas y no 'reset' de la cuota
   monto: string; // monto de la cuota (creditos.cuota)
+  // Algún pago que le aplica plata sigue sin validar (validation_status 'pending'). La cuota igual
+  // cuenta como pagada si el cron la da por pagada; esto solo avisa que falta validar.
+  porValidar: boolean;
 };
 
 export type TonoCuotaNexa = "nexa" | "otro" | "pendiente";
@@ -63,8 +66,14 @@ const faltaQ = (aplicado: string, monto: string) =>
 
 // Estado de una cuota en una frase, para el detalle de la franja.
 // "Pagada por Nexa" · "Pagada por otro medio (Banrural)" · "Pago parcial Q 600.00 de Q 1,000.00 por Nexa"
-// · "Vencida, sin pagar" · "Por vencer, sin pagar"
-export const estadoCuotaTexto = (c: CuotaFranjaNexa, hoy: string) => {
+// · "Vencida, sin pagar" · "Por vencer, sin pagar". Con un pago sin validar: "… · pago por validar".
+export const estadoCuotaTexto = (c: CuotaFranjaNexa, hoy: string) =>
+  `${estadoCuotaBase(c, hoy)}${conPagoPorValidar(c) ? " · pago por validar" : ""}`;
+
+// Solo se avisa si hay plata aplicada (pagada o parcial): sin pago no hay nada que validar.
+export const conPagoPorValidar = (c: Pick<CuotaFranjaNexa, "porValidar">) => c.porValidar === true;
+
+const estadoCuotaBase = (c: CuotaFranjaNexa, hoy: string) => {
   const medio = medioTexto(c.medio, c.banco);
   if (c.pagada) return medio ? `Pagada por ${medio}` : "Pagada (sin detalle del medio)";
   const vencida = diasAlVencimiento(c.vencimiento, hoy) < 0;
@@ -75,7 +84,17 @@ export const estadoCuotaTexto = (c: CuotaFranjaNexa, hoy: string) => {
 export type TonoAvisoNexa = "nexa" | "otro" | "vencida" | "pendiente";
 
 // La cuota del mes en palabras: un titular (el estado) y un detalle (cuánto y con qué).
+// porValidar: va como etiqueta ámbar "Por validar" junto al titular, y en `leido` para lectores de pantalla.
 export const avisoCuotaMesNexa = (c: CuotaMesNexa, hoy: string, banco: string | null = null) => {
+  const base = avisoCuotaMesBase(c, hoy, banco);
+  const porValidar = c.porValidar === true && c.pago !== "sin_pago";
+  return { ...base, porValidar, leido: `${base.titulo}${porValidar ? " · Por validar" : ""}` };
+};
+
+export const ETIQUETA_POR_VALIDAR = "Por validar";
+export const AYUDA_POR_VALIDAR = "Un pago de esta cuota todavía no fue validado por contabilidad.";
+
+const avisoCuotaMesBase = (c: CuotaMesNexa, hoy: string, banco: string | null) => {
   const n = diasAlVencimiento(c.vencimiento, hoy);
   const etiqueta = c.vencimiento.slice(0, 7) === hoy.slice(0, 7) ? "Cuota de este mes" : "Último vencimiento";
   const medio = medioTexto(c.medio, banco);
@@ -101,7 +120,7 @@ export const avisoCuotaMesNexa = (c: CuotaMesNexa, hoy: string, banco: string | 
   return { etiqueta, tono: (c.estado === "vencida" ? "vencida" : "pendiente") as TonoAvisoNexa, titulo, detalle, corto };
 };
 
-// Conteo de la franja: "10 pagadas (8 por Nexa) · 1 parcial · 1 sin pagar"
+// Conteo de la franja: "10 pagadas (8 por Nexa) · 1 parcial · 1 sin pagar · 1 con pago por validar"
 export const conteoFranjaNexa = (cuotas: CuotaFranjaNexa[]) => {
   const pagadas = cuotas.filter((c) => c.pagada).length;
   const nexa = cuotas.filter((c) => c.pagada && c.medio === "NEXA").length;
@@ -110,6 +129,8 @@ export const conteoFranjaNexa = (cuotas: CuotaFranjaNexa[]) => {
   const partes = [`${pagadas} ${pagadas === 1 ? "pagada" : "pagadas"}${nexa ? ` (${nexa} por Nexa)` : ""}`];
   if (parciales) partes.push(`${parciales} ${parciales === 1 ? "parcial" : "parciales"}`);
   if (sinPagar) partes.push(`${sinPagar} sin pagar`);
+  const porValidar = cuotas.filter(conPagoPorValidar).length;
+  if (porValidar) partes.push(`${porValidar} con pago por validar`);
   return partes.join(" · ");
 };
 
@@ -143,6 +164,7 @@ export const tituloCuotaNexa = (c: CuotaFranjaNexa) => {
     const medio = c.medio === "NEXA" ? "Nexa" : `Manual · ${bancoTexto(c.medio, c.banco)}`;
     partes.push(medio);
   }
+  if (conPagoPorValidar(c)) partes.push("pago por validar");
   return partes.join(" · ");
 };
 
@@ -167,6 +189,7 @@ export type CuotaMesNexa = {
   aplicado: string;
   monto: string;
   medio: "NEXA" | "MANUAL" | null; // el mismo de la franja
+  porValidar: boolean; // algún pago que le aplica plata sigue sin validar (el de la franja)
 };
 
 // "Completa · Nexa", "Completa · Manual", "Parcial · Q 500.00 de Q 1,752.36", "Sin pago"

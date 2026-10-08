@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Clock } from "lucide-react";
 import {
   CLASES_TONO_CUOTA,
+  conPagoPorValidar,
   conteoFranjaNexa,
   diasAlVencimiento,
   estadoCuotaTexto,
@@ -16,7 +18,8 @@ import {
 
 // Una barra por cuota, de la más vieja (izquierda) a la más nueva. La barra se llena con lo que se
 // pagó, en el color del medio (morado Nexa, verde otro medio); lo gris es lo que falta. Una cuota
-// que todavía no vence va punteada. La cuota del mes lleva la marca azul.
+// que todavía no vence va punteada. La cuota del mes lleva la marca azul. Una cuota con un pago que
+// falta validar lleva una marca ámbar arriba (punto en la mini, reloj en la grande).
 
 type Props = { cuotas: CuotaFranjaNexa[]; cuotaMes?: number | null; mini?: boolean; hoy?: string };
 
@@ -25,12 +28,26 @@ function Barra({ c, hoy, mini }: { c: CuotaFranjaNexa; hoy: string; mini: boolea
   const futura = !c.pagada && diasAlVencimiento(c.vencimiento, hoy) >= 0;
   const carril = futura ? "border border-dashed border-slate-400 bg-white" : "border border-slate-400 bg-slate-100";
   return (
-    <span className={`relative block overflow-hidden ${mini ? "h-6 w-2 rounded-[2px]" : "h-12 w-full max-w-[1.75rem] rounded"} ${carril}`}>
-      {fraccion > 0 && (
-        <span className={`absolute inset-x-0 bottom-0 ${rellenoCuotaNexa(c)}`} style={{ height: `${fraccion * 100}%` }} />
-      )}
+    <span className={`relative block ${mini ? "w-2" : "w-full max-w-[1.75rem]"}`}>
+      <span className={`relative block overflow-hidden ${mini ? "h-6 w-2 rounded-[2px]" : "h-12 w-full rounded"} ${carril}`}>
+        {fraccion > 0 && (
+          <span className={`absolute inset-x-0 bottom-0 ${rellenoCuotaNexa(c)}`} style={{ height: `${fraccion * 100}%` }} />
+        )}
+      </span>
+      {conPagoPorValidar(c) && <MarcaPorValidar mini={mini} />}
     </span>
   );
+}
+
+// Ámbar 600: contraste 3:1 contra el blanco, como pide un gráfico (amber-500 no llega).
+function MarcaPorValidar({ mini }: { mini: boolean }) {
+  return mini
+    ? <span aria-hidden className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-amber-600 ring-1 ring-white" />
+    : (
+      <span aria-hidden className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-600 text-white ring-2 ring-white">
+        <Clock className="h-2.5 w-2.5" strokeWidth={3} />
+      </span>
+    );
 }
 
 export function NexaFranjaCanal({ cuotas, cuotaMes, mini = false, hoy = hoyGuatemala() }: Props) {
@@ -139,6 +156,12 @@ export function LeyendaCuotasNexa({ conCuotaMes = true }: { conCuotaMes?: boolea
       </span>
       <span className="flex items-center gap-1.5"><Muestra />Sin pagar</span>
       <span className="flex items-center gap-1.5"><Muestra futura />Aún no vence</span>
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-600 text-white">
+          <Clock className="h-2.5 w-2.5" strokeWidth={3} />
+        </span>
+        Por validar
+      </span>
       {conCuotaMes && <span className="flex items-center gap-1.5"><span className="inline-block h-[3px] w-2.5 rounded-full bg-blue-700" />Cuota del mes</span>}
     </span>
   );

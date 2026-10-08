@@ -85,6 +85,7 @@ test("cuota del mes en palabras: titular, detalle y versión corta", () => {
   const mes = (o) => ({ numero: 41, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1000.00", monto: "1000.00", medio: "NEXA", ...o });
   expect(avisoCuotaMesNexa(mes({}), hoy)).toEqual({
     etiqueta: "Cuota de este mes", tono: "nexa", titulo: "Pagada por Nexa", detalle: "Pago completo", corto: "Completa",
+    porValidar: false, leido: "Pagada por Nexa",
   });
   expect(avisoCuotaMesNexa(mes({ medio: "MANUAL" }), hoy, "Banrural")).toMatchObject({
     tono: "otro", titulo: "Pagada por otro medio", detalle: "Pago completo · Banrural", corto: "Completa · Banrural",
@@ -94,6 +95,7 @@ test("cuota del mes en palabras: titular, detalle y versión corta", () => {
   expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "600.00" }), hoy)).toEqual({
     etiqueta: "Cuota de este mes", tono: "vencida", titulo: "Vencida hace 3 días",
     detalle: "Pago parcial: Q 600.00 de Q 1,000.00 por Nexa · faltan Q 400.00", corto: "Parcial Q 600.00 de Q 1,000.00 · Nexa",
+    porValidar: false, leido: "Vencida hace 3 días",
   });
   expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "0.10", monto: "0.30", medio: "MANUAL" }), "2026-10-06", "BI").detalle)
     .toBe("Pago parcial: Q 0.10 de Q 0.30 por otro medio (BI) · faltan Q 0.20");
@@ -146,4 +148,24 @@ test("resumen de rechazos: separa rechazados de revisión manual y avisa si hay 
   expect(resumenRechazosNexa([r("failed"), r("failed"), r("manual_review")], 3)).toBe("2 rechazados · 1 en revisión manual");
   expect(resumenRechazosNexa([r("manual_review")], 4)).toBe("1 en revisión manual · 3 más");
   expect(resumenRechazosNexa([], 0)).toBe("");
+});
+
+test("por validar: la cuota pagada con un pago pendiente sigue pagada y lo avisa en todos los textos", () => {
+  const hoy = "2026-10-08";
+  // Caso real: crédito 961, cuota 39, pago 53563 manual sin validar.
+  const mes = { numero: 39, vencimiento: "2026-10-06", estado: "pagada", pago: "completa", aplicado: "1627.78", monto: "1627.78", medio: "MANUAL", porValidar: true };
+  expect(avisoCuotaMesNexa(mes, hoy, "Banco Industrial")).toMatchObject({
+    tono: "otro", titulo: "Pagada por otro medio", porValidar: true, leido: "Pagada por otro medio · Por validar",
+    corto: "Completa · Banco Industrial",
+  });
+  // Parcial con pago pendiente: también.
+  expect(avisoCuotaMesNexa({ ...mes, estado: "vencida", pago: "parcial", aplicado: "600.00" }, hoy).porValidar).toBe(true);
+  // Sin pago no tiene nada que validar, aunque el flag venga prendido.
+  expect(avisoCuotaMesNexa({ ...mes, estado: "vencida", pago: "sin_pago", aplicado: "0.00", medio: null }, hoy).porValidar).toBe(false);
+  // Franja: detalle, tooltip y conteo.
+  const c39 = cuota({ numero: 39, vencimiento: "2026-10-06", medio: "MANUAL", banco: "Banco Industrial", porValidar: true });
+  expect(estadoCuotaTexto(c39, hoy)).toBe("Pagada por otro medio (Banco Industrial) · pago por validar");
+  expect(tituloCuotaNexa(c39)).toBe("Cuota 39 · vence 06/10/2026 · Pagada · pago completo · Manual · Banco Industrial · pago por validar");
+  expect(estadoCuotaTexto(cuota({ porValidar: false }), hoy)).toBe("Pagada por Nexa");
+  expect(conteoFranjaNexa([c39, cuota({ numero: 38 })])).toBe("2 pagadas (1 por Nexa) · 1 con pago por validar");
 });

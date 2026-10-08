@@ -438,7 +438,7 @@ integrationTest("parcial: suma lo aplicado sin anuladas ni 'reset', contra la cu
   expect(r.creditos.map((x) => x.cliente.slice(-1))).toEqual(["P", "S"]);
   expect(r.creditos[0]!.cuotaMes).toMatchObject({ estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "2500.00", medio: "NEXA" });
   expect(r.creditos[0]!.ultimasCuotas).toEqual([
-    { numero: 1, vencimiento: expect.any(String), pagada: false, medio: "NEXA", banco: null, aplicado: "500.00", monto: "2500.00" },
+    { numero: 1, vencimiento: expect.any(String), pagada: false, medio: "NEXA", banco: null, aplicado: "500.00", monto: "2500.00", porValidar: false },
   ]);
   expect(r.creditos[1]!.cuotaMes).toMatchObject({ pago: "sin_pago", aplicado: "0.00" });
   // parciales y sinpago no se solapan; parciales va primero; el medio filtra el parcial.
@@ -508,7 +508,7 @@ integrationTest("medio: solo cuentan las filas que cubren la cuota; una fila man
   const { fila } = await c.fila();
   expect(fila!.ultimasCuotas).toEqual([
     // aplicado: sin la fila 'reset' (100 Nexa + 800 manual), aunque el medio salga solo de la que cubre.
-    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null, aplicado: "900.00", monto: "1000.00" },
+    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null, aplicado: "900.00", monto: "1000.00", porValidar: false },
   ]);
 });
 
@@ -523,4 +523,39 @@ integrationTest("rechazos: tope de 5, ordenados por cuándo llegaron (no por id)
   const { fila } = await c.fila();
   expect(fila!.rechazosNexa).toBe(6);
   expect(fila!.rechazosDetalle.map((r) => r.fecha!.slice(0, 10))).toEqual(["2026-09-30", "2026-09-05", "2026-09-04", "2026-09-03", "2026-09-02"]);
+});
+
+integrationTest("por validar: la cuota cubierta por un pago 'pending' cuenta como pagada y lo avisa", async () => {
+  // Hoy en Guatemala: un pendiente de hoy cubre la cuota para el cron (ventana de 7 días).
+  const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guatemala" }).format(new Date());
+  const c = await nuevoCredito();
+  const ids: number[] = [];
+  for (let n = 1; n <= 6; n++) ids.push(await c.cuota(n, `${n - 6} months`)); // la 6 vence este mes
+  // 6 (cuota del mes): manual pendiente de hoy, como el 961/39 → pagada y por validar.
+  await c.abono(ids[5]!, { banco: 1, estado: "pending", fecha: `${hoy} 09:00:00` });
+  // 5: validada → no.
+  await c.abono(ids[4]!, { banco: 1 });
+  // 4: la cubre una validada, pero otra fila pendiente vieja también le aplicó plata → sí.
+  await c.abono(ids[3]!, { evento: await c.evento("applied", 100), monto: 60 });
+  await c.abono(ids[3]!, { banco: 2, monto: 40, estado: "pending", pagado: false, fecha: "2026-01-10 10:00:00" });
+  // 3: pendiente anulada (paymentFalse) → no.
+  await c.abono(ids[2]!, { estado: "pending", falso: true, fecha: `${hoy} 09:00:00` });
+  // 2: Nexa que quedó 'pending' (applyPayment no terminó): parcial y por validar.
+  await c.abono(ids[1]!, { evento: await c.evento("manual_review", 30), monto: 30, estado: "pending", pagado: false });
+  // 1: 'reset' no es pendiente → no.
+  await c.abono(ids[0]!, { estado: "reset" });
+  const { fila } = await c.fila();
+  expect(fila!.ultimasCuotas.map(({ numero, pagada, porValidar }) => ({ numero, pagada, porValidar }))).toEqual([
+    { numero: 1, pagada: false, porValidar: false },
+    { numero: 2, pagada: false, porValidar: true },
+    { numero: 3, pagada: false, porValidar: false },
+    { numero: 4, pagada: true, porValidar: true },
+    { numero: 5, pagada: true, porValidar: false },
+    { numero: 6, pagada: true, porValidar: true },
+  ]);
+  expect(fila!.cuotaMes).toMatchObject({ numero: 6, estado: "pagada", pago: "completa", medio: "MANUAL", porValidar: true });
+  // Sigue en "pagadas" (criterio del cron): el aviso no la saca del filtro.
+  const { mod } = await setup();
+  const pagados = await mod.getNexaDashboard(TODOS, { ...dash, q: c.sifco, cuotaMes: "pagados", medio: "manual" });
+  expect(pagados.creditos.map((x) => x.creditoId)).toEqual([c.id]);
 });

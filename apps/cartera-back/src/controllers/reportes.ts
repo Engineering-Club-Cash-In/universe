@@ -2285,6 +2285,11 @@ export async function getMoraCobradaPorAsesor({
 // Atribución: el asesor ACTUAL del crédito (`creditos.asesor_id`), igual que
 // los demás reportes por asesor. `fecha_pago` guarda la hora de Guatemala sin
 // zona, así que el rango se compara con los días tal cual.
+// "Vencida el día del pago" se lee del vencimiento que la fila del pago
+// guardó al registrarse (`pagos_credito.fecha_vencimiento`), no del actual de
+// la cuota: `updateDueDate` reescribe los de las cuotas después, y un pago
+// viejo no debe pasar de recuperado a no recuperado. Si la fila no lo trae
+// (legado, o sin `cuota_id`) se cae al de la cuota.
 export async function getRecuperacionPorAsesorRango({
   fechaDesde,
   fechaHasta,
@@ -2315,7 +2320,7 @@ export async function getRecuperacionPorAsesorRango({
       a.asesor_id,
       a.nombre,
       COALESCE(SUM(
-        CASE WHEN cc.fecha_vencimiento < pc.fecha_pago::date THEN
+        CASE WHEN COALESCE(pc.fecha_vencimiento, cc.fecha_vencimiento) < pc.fecha_pago::date THEN
           COALESCE(pc.abono_capital, 0) + COALESCE(pc.abono_interes, 0)
           + COALESCE(pc.abono_iva_12, 0) + COALESCE(pc.abono_seguro, 0)
           + COALESCE(pc.abono_gps, 0) + COALESCE(pc.membresias_pago, 0)

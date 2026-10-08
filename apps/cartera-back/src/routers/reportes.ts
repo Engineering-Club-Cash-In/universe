@@ -403,7 +403,7 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       const { fecha_desde, fecha_hasta, asesores, email_cobrador } =
         query as Record<string, string>;
       const esFecha = (v: string | undefined) =>
-        !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+        !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && fechaValida(v);
       if (!esFecha(fecha_desde) || !esFecha(fecha_hasta)) {
         set.status = 400;
         return { error: "Parámetros 'fecha_desde' y 'fecha_hasta' requeridos (YYYY-MM-DD)" };

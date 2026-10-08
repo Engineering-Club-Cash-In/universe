@@ -46,6 +46,7 @@ import {
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
+	type ContextoCaso,
 	cargarReferencias,
 	resolverContextoCaso,
 } from "../services/referencias-cobros-datos";
@@ -109,7 +110,12 @@ const sinAcentos = (t: string) =>
 		.replace(/\p{M}/gu, "")
 		.toLowerCase();
 
-/** Partículas de los nombres y palabras de cobranza que no son un nombre. */
+/**
+ * Partículas de los nombres y palabras de cobranza que también pueden ser un
+ * apellido («Mora», «San»). Si son parte del nombre de alguien del caso se
+ * tapan escritas con mayúscula inicial; en minúscula se leen como lo que son
+ * y se conservan.
+ */
 const NO_SON_NOMBRE = new Set([
 	"del",
 	"las",
@@ -133,7 +139,7 @@ const NO_SON_NOMBRE = new Set([
 
 /**
  * Palabras sueltas de los nombres dados, en minúscula y sin acentos, listas
- * para `taparDatosPersonales`.
+ * para `taparDatosPersonales` (todas, también las que son palabras comunes).
  */
 export function palabrasDeNombres(
 	nombres: Array<string | null | undefined>,
@@ -142,7 +148,7 @@ export function palabrasDeNombres(
 	for (const nombre of nombres) {
 		for (const w of (nombre ?? "").split(/[^\p{L}]+/u)) {
 			const t = sinAcentos(w);
-			if (t.length >= 3 && !NO_SON_NOMBRE.has(t)) palabras.add(t);
+			if (t.length >= 3) palabras.add(t);
 		}
 	}
 	return palabras;
@@ -159,9 +165,12 @@ export function taparDatosPersonales(
 	const sinCorreos = texto.replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[correo]");
 	const sinNumeros = taparNumeros(sinCorreos);
 	if (nombres.size === 0) return sinNumeros;
-	return sinNumeros.replace(/\p{L}+/gu, (w) =>
-		nombres.has(sinAcentos(w)) ? "[nombre]" : w,
-	);
+	return sinNumeros.replace(/\p{L}+/gu, (w) => {
+		const t = sinAcentos(w);
+		if (!nombres.has(t)) return w;
+		const comoPalabraComun = NO_SON_NOMBRE.has(t) && w === w.toLowerCase();
+		return comoPalabraComun ? w : "[nombre]";
+	});
 }
 
 const dia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -255,54 +264,43 @@ async function cargarCreditoVivo(
 	}
 }
 
-/**
- * Palabras de los nombres de las personas del caso: titular (contrato, lead,
- * RENAP y solicitudes de crédito, con todos sus componentes), codeudores,
- * referencias y cónyuge. Lanza si no se pueden leer.
- */
-async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
-	const ctx = await resolverContextoCaso(casoCobroId);
-	const [delContrato, delLead, solicitudes, { referencias }] =
-		await Promise.all([
-			db
-				.select({ nombre: clients.contactPerson })
-				.from(casosCobros)
-				.innerJoin(
-					contratosFinanciamiento,
-					eq(contratosFinanciamiento.id, casosCobros.contratoId),
-				)
-				.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
-				.where(eq(casosCobros.id, casoCobroId))
-				.limit(1),
-			ctx.leadId
-				? db
-						.select({
-							primerNombre: leads.firstName,
-							segundoNombre: leads.middleName,
-							primerApellido: leads.lastName,
-							segundoApellido: leads.secondLastName,
-							dpi: leads.dpi,
-						})
-						.from(leads)
-						.where(eq(leads.id, ctx.leadId))
-						.limit(1)
-				: Promise.resolve([]),
-			// Titular y codeudores: todas las solicitudes de la oportunidad.
-			ctx.opportunityId
-				? db
-						.select({
-							primerNombre: creditApplications.primerNombre,
-							segundoNombre: creditApplications.segundoNombre,
-							primerApellido: creditApplications.primerApellido,
-							segundoApellido: creditApplications.segundoApellido,
-							apellidoCasada: creditApplications.apellidoCasada,
-							conyuge: creditApplications.conyugeNombre,
-						})
-						.from(creditApplications)
-						.where(eq(creditApplications.opportunityId, ctx.opportunityId))
-				: Promise.resolve([]),
-			cargarReferencias(ctx),
-		]);
+type IdentidadCaso = { leadId: string | null; opportunityId: string | null };
+
+/** Todos los nombres guardados de una persona del caso (lead + oportunidad). */
+async function nombresDeIdentidad(
+	ctx: ContextoCaso,
+	{ leadId, opportunityId }: IdentidadCaso,
+): Promise<Array<string | null>> {
+	const [delLead, solicitudes, { referencias }] = await Promise.all([
+		leadId
+			? db
+					.select({
+						primerNombre: leads.firstName,
+						segundoNombre: leads.middleName,
+						primerApellido: leads.lastName,
+						segundoApellido: leads.secondLastName,
+						dpi: leads.dpi,
+					})
+					.from(leads)
+					.where(eq(leads.id, leadId))
+					.limit(1)
+			: Promise.resolve([]),
+		// Titular y codeudores: todas las solicitudes de la oportunidad.
+		opportunityId
+			? db
+					.select({
+						primerNombre: creditApplications.primerNombre,
+						segundoNombre: creditApplications.segundoNombre,
+						primerApellido: creditApplications.primerApellido,
+						segundoApellido: creditApplications.segundoApellido,
+						apellidoCasada: creditApplications.apellidoCasada,
+						conyuge: creditApplications.conyugeNombre,
+					})
+					.from(creditApplications)
+					.where(eq(creditApplications.opportunityId, opportunityId))
+			: Promise.resolve([]),
+		cargarReferencias({ ...ctx, leadId, opportunityId }),
+	]);
 	const dpi = delLead[0]?.dpi?.trim();
 	const renap = dpi
 		? await db
@@ -318,12 +316,13 @@ async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
 				.where(eqDpi(renapInfo.dpi, dpi))
 				.limit(1)
 		: [];
-	return palabrasDeNombres([
-		delContrato[0]?.nombre,
-		delLead[0]?.primerNombre,
-		delLead[0]?.segundoNombre,
-		delLead[0]?.primerApellido,
-		delLead[0]?.segundoApellido,
+	return [
+		...delLead.flatMap((l) => [
+			l.primerNombre,
+			l.segundoNombre,
+			l.primerApellido,
+			l.segundoApellido,
+		]),
 		...renap.flatMap((r) => Object.values(r)),
 		...solicitudes.flatMap((x) => [
 			x.primerNombre,
@@ -334,7 +333,50 @@ async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
 			x.conyuge,
 		]),
 		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
-	]);
+	];
+}
+
+/**
+ * Palabras de los nombres de las personas del caso: titular (contrato, lead,
+ * RENAP y solicitudes de crédito, con todos sus componentes), codeudores,
+ * referencias y cónyuge. Se leen desde el cliente del contrato Y desde la
+ * oportunidad que resuelve `resolverContextoCaso` (que sin oportunidad en el
+ * cliente cae a una por SIFCO, quizá de otro lead): tapar de más es inocuo,
+ * dejar un nombre sin tapar no. Lanza si no se pueden leer.
+ */
+async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
+	const ctx = await resolverContextoCaso(casoCobroId);
+	const [delContrato] = await db
+		.select({
+			nombre: clients.contactPerson,
+			leadId: clients.leadId,
+			opportunityId: clients.opportunityId,
+		})
+		.from(casosCobros)
+		.innerJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.id, casosCobros.contratoId),
+		)
+		.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	const identidades: IdentidadCaso[] = [
+		{ leadId: ctx.leadId, opportunityId: ctx.opportunityId },
+	];
+	if (
+		delContrato &&
+		(delContrato.leadId !== ctx.leadId ||
+			delContrato.opportunityId !== ctx.opportunityId)
+	) {
+		identidades.push({
+			leadId: delContrato.leadId,
+			opportunityId: delContrato.opportunityId,
+		});
+	}
+	const nombres = await Promise.all(
+		identidades.map((i) => nombresDeIdentidad(ctx, i)),
+	);
+	return palabrasDeNombres([delContrato?.nombre, ...nombres.flat()]);
 }
 
 /**
@@ -427,7 +469,11 @@ const resumenSchema = z.object({
 
 /* ── Resumen ────────────────────────────────────────────────────────────────── */
 
-const enCurso = new Map<string, Promise<ResumenIA | null>>();
+type EnCurso = Map<
+	string,
+	{ huella: string; promesa: Promise<ResumenIA | null> }
+>;
+const enCursoPorCaso: EnCurso = new Map();
 
 async function generarYGuardar(
 	casoCobroId: string,
@@ -474,18 +520,37 @@ async function generarYGuardar(
 	}
 }
 
-/** Una sola generación por caso a la vez. */
-function generarUnaVez(
+/**
+ * Una sola generación por caso a la vez, y la última gana: quien pide la misma
+ * huella que ya está en curso comparte su promesa; una huella distinta (los
+ * datos cambiaron mientras se generaba) espera a que termine la anterior y
+ * genera la nueva, salvo que llegue otra todavía más nueva.
+ */
+export function generarUnaVez(
 	casoCobroId: string,
 	contexto: ContextoIA,
 	huella: string,
+	generar: typeof generarYGuardar = generarYGuardar,
+	enCurso: EnCurso = enCursoPorCaso,
 ): Promise<ResumenIA | null> {
 	const previa = enCurso.get(casoCobroId);
-	if (previa) return previa;
-	const promesa = generarYGuardar(casoCobroId, contexto, huella).finally(() =>
-		enCurso.delete(casoCobroId),
-	);
-	enCurso.set(casoCobroId, promesa);
+	if (previa?.huella === huella) return previa.promesa;
+	// Sin generación previa se arranca ya; con una en curso se espera su turno.
+	const promesa: Promise<ResumenIA | null> = previa
+		? previa.promesa.then(() =>
+				enCurso.get(casoCobroId)?.promesa === promesa
+					? generar(casoCobroId, contexto, huella)
+					: null,
+			)
+		: generar(casoCobroId, contexto, huella);
+	promesa
+		.finally(() => {
+			if (enCurso.get(casoCobroId)?.promesa === promesa) {
+				enCurso.delete(casoCobroId);
+			}
+		})
+		.catch(() => undefined);
+	enCurso.set(casoCobroId, { huella, promesa });
 	return promesa;
 }
 

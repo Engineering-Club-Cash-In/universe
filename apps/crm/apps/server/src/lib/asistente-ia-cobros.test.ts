@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	armarContextoIA,
+	generarUnaVez,
 	hayQueResumir,
 	asistenteActivo,
 	huellaContexto,
@@ -64,13 +65,21 @@ describe("taparDatosPersonales", () => {
 			taparDatosPersonales("Habló con MARIA jose, esposa de Perez", nombres),
 		).toBe("Habló con [nombre] [nombre], esposa de [nombre]");
 	});
-	test("deja las palabras de cobranza aunque sean apellido", () => {
+	test("las palabras de cobranza se conservan en minúscula", () => {
 		expect(taparDatosPersonales("tiene mora y pagó la cuota", nombres)).toBe(
 			"tiene mora y pagó la cuota",
 		);
+	});
+	test("pero si son apellido de alguien del caso, con mayúscula se tapan", () => {
 		expect(palabrasDeNombres(["Juan Mora del Cid"])).toEqual(
-			new Set(["juan", "cid"]),
+			new Set(["juan", "mora", "del", "cid"]),
 		);
+		expect(
+			taparDatosPersonales("Habló con Juan Mora, MORA no contesta", nombres),
+		).toBe("Habló con [nombre] [nombre], [nombre] no contesta");
+		expect(
+			taparDatosPersonales("Se llama San Pedro, vive San Juan", palabrasDeNombres(["Rosa San"])),
+		).toBe("Se llama [nombre] Pedro, vive [nombre] Juan");
 	});
 	test("no toca montos ni fechas con diagonal", () => {
 		expect(taparDatosPersonales("pagará Q1,500.00 el 3/10", nombres)).toBe(
@@ -167,5 +176,72 @@ describe("hayQueResumir", () => {
 				gestiones: [],
 			}),
 		).toBe(true);
+	});
+});
+
+describe("generarUnaVez", () => {
+	const ctx = { credito: {}, hitos: [], gestiones: [] } as never;
+	const resumen = (t: string) => ({ texto: t, etiquetas: [], generadoEn: "x" });
+	const pausa = () => {
+		let fin!: () => void;
+		const p = new Promise<void>((r) => {
+			fin = r;
+		});
+		return { p, fin };
+	};
+
+	test("misma huella en curso comparte la generación", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		let llamadas = 0;
+		const generar = async () => {
+			llamadas++;
+			await gate.p;
+			return resumen("A");
+		};
+		const a = generarUnaVez("c1", ctx, "hA", generar, mapa);
+		const b = generarUnaVez("c1", ctx, "hA", generar, mapa);
+		gate.fin();
+		expect(await a).toEqual(await b);
+		expect(llamadas).toBe(1);
+		expect(mapa.size).toBe(0);
+	});
+
+	test("huella nueva mientras se genera: espera y genera la nueva", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const huellas: string[] = [];
+		const generar = async (_c: string, _x: unknown, h: string) => {
+			huellas.push(h);
+			if (h === "hA") await gate.p;
+			return resumen(h);
+		};
+		const a = generarUnaVez("c1", ctx, "hA", generar, mapa);
+		const b = generarUnaVez("c1", ctx, "hB", generar, mapa);
+		gate.fin();
+		expect((await a)?.texto).toBe("hA");
+		expect((await b)?.texto).toBe("hB");
+		expect(huellas).toEqual(["hA", "hB"]);
+		expect(mapa.size).toBe(0);
+	});
+
+	test("la intermedia se salta si ya llegó una más nueva", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const huellas: string[] = [];
+		const generar = async (_c: string, _x: unknown, h: string) => {
+			huellas.push(h);
+			if (h === "hA") await gate.p;
+			return resumen(h);
+		};
+		const a = generarUnaVez("c1", ctx, "hA", generar, mapa);
+		const b = generarUnaVez("c1", ctx, "hB", generar, mapa);
+		const c = generarUnaVez("c1", ctx, "hC", generar, mapa);
+		gate.fin();
+		await a;
+		expect(await b).toBeNull();
+		expect((await c)?.texto).toBe("hC");
+		expect(huellas).toEqual(["hA", "hC"]);
+		expect(mapa.size).toBe(0);
 	});
 });

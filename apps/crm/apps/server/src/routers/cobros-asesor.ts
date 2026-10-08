@@ -40,7 +40,10 @@ import {
 } from "../lib/historial-agendas";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
-import { resolverAgendaEfectivaDelUsuario } from "../services/agenda-cobros-source";
+import {
+	obtenerCoberturasVigentes,
+	resolverAgendaEfectivaDelUsuario,
+} from "../services/agenda-cobros-source";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 /** Nivel del asesor según los buckets de su pool en cartera (no es un rol del CRM). */
@@ -129,21 +132,25 @@ async function asesorDeLaSesion(email: string | undefined) {
  * SIFCOs de la cola del día del usuario: la cartera propia más las que cubre
  * por una suplencia vigente (CB-114). Es el mismo universo que `getColaDia`
  * (`resolverAgendaEfectivaDelUsuario` + pool de buckets). Vacío si es un
- * titular ausente hoy.
+ * titular ausente hoy. `gestores` = el usuario más los titulares que cubre
+ * hoy: su historial del caso es el mismo trabajo, no se pierde al cubrir.
  */
 async function universoDeLaCola(
 	userId: string,
 	propio: { asesorId: number; nombre: string },
 	ahora: Date,
-): Promise<Set<string>> {
+): Promise<{ universo: Set<string>; gestores: string[] }> {
 	const pool = await carteraBackClient.getPoolPorAsesor();
-	const efectivos = await resolverAgendaEfectivaDelUsuario(
-		propio,
-		userId,
-		pool,
-		toDateStrGT(ahora),
-	);
-	return sifcosDelUniversoDe(efectivos.map((a) => a.asesorId));
+	const fechaGT = toDateStrGT(ahora);
+	const [efectivos, coberturas] = await Promise.all([
+		resolverAgendaEfectivaDelUsuario(propio, userId, pool, fechaGT),
+		obtenerCoberturasVigentes(userId, fechaGT),
+	]);
+	const universo = await sifcosDelUniversoDe(efectivos.map((a) => a.asesorId));
+	const cubiertos = coberturas
+		.filter((c) => c.suplenteId === userId)
+		.map((c) => c.titularId);
+	return { universo, gestores: [...new Set([userId, ...cubiertos])] };
 }
 
 function emailDeLaSesion(context: {
@@ -411,7 +418,7 @@ export const cobrosAsesorRouter = {
 			// Mismo universo que la cola del día (pool de buckets, CB-114). Con cobertura el
 			// suplente suma las del titular ausente; un titular ausente no tiene
 			// ninguna hoy (su trabajo lo hace el suplente).
-			const universo = await universoDeLaCola(
+			const cola = await universoDeLaCola(
 				context.userId,
 				{ asesorId: asesor.asesor_id, nombre: asesor.nombre },
 				ahora,
@@ -419,23 +426,25 @@ export const cobrosAsesorRouter = {
 				console.error("[Agenda] universo de la cola:", error);
 				return null;
 			});
-			if (!universo) {
+			if (!cola) {
 				return { pagosPorConfirmar: null, referenciasPorContactar: null };
 			}
-			if (universo.size === 0) {
+			if (cola.universo.size === 0) {
 				return { pagosPorConfirmar: 0, referenciasPorContactar: 0 };
 			}
 			const [pagosPorConfirmar, referenciasPorContactar] = await Promise.all([
-				contarPagosPorConfirmar(universo, ahora).catch((error) => {
+				contarPagosPorConfirmar(cola.universo, ahora).catch((error) => {
 					console.error("[Agenda] pagos por confirmar:", error);
 					return null;
 				}),
-				contarReferenciasPorContactar(context.userId, universo, ahora).catch(
-					(error) => {
-						console.error("[Agenda] referencias por contactar:", error);
-						return null;
-					},
-				),
+				contarReferenciasPorContactar(
+					cola.gestores,
+					cola.universo,
+					ahora,
+				).catch((error) => {
+					console.error("[Agenda] referencias por contactar:", error);
+					return null;
+				}),
 			]);
 			return { pagosPorConfirmar, referenciasPorContactar };
 		},

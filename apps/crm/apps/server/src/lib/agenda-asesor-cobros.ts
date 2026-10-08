@@ -143,10 +143,11 @@ export async function contarPagosPorConfirmar(
  * B7: casos del asesor que piden contactar referencias. El universo son los
  * casos activos que el asesor gestionó alguna vez, sin tope de días (la regla
  * B7 no lo tiene): los intentos sin contacto son suyos, así que un caso que
- * nunca tocó no puede tener tres.
+ * nunca tocó no puede tener tres. `gestores` = el usuario y, con cobertura
+ * (CB-114), los titulares que cubre: hereda su historial del caso.
  */
 export async function contarReferenciasPorContactar(
-	userId: string,
+	gestores: string[],
 	universo: ReadonlySet<string>,
 	ahora: Date = new Date(),
 ): Promise<number> {
@@ -159,7 +160,7 @@ export async function contarReferenciasPorContactar(
 		.innerJoin(casosCobros, eq(casosCobros.id, contactosCobros.casoCobroId))
 		.where(
 			and(
-				eq(contactosCobros.realizadoPor, userId),
+				inArray(contactosCobros.realizadoPor, gestores),
 				eq(casosCobros.activo, true),
 				isNotNull(casosCobros.numeroCreditoSifco),
 			),
@@ -197,7 +198,7 @@ export async function contarReferenciasPorContactar(
 		// 60 días: la regla B7 no lo tiene, la ventana es de la vista de
 		// seguimiento.
 		cargarSeguimientoPorCaso(casoIds, ahora, {
-			realizadoPor: userId,
+			realizadoPor: gestores,
 			sinTopeDeVentana: true,
 		}),
 		db

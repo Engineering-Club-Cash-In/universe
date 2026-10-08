@@ -276,6 +276,8 @@ export async function updateLeadByEmail(c: Context) {
 			}
 			dpi = resultadoDpi.dpiLimpio;
 		}
+		const consultarBuroPorDpi =
+			dpi !== undefined && requiereConsultaDeMora(dpi, existingLead.dpi);
 
 		// El candado va ANTES que el gate de mora a propósito: es una consulta
 		// local barata, y si el DPI ya no se puede cambiar no tiene sentido pagar
@@ -299,11 +301,7 @@ export async function updateLeadByEmail(c: Context) {
 		// completa en cada guardado, así que con el mismo DPI de siempre esto
 		// es una edición común —dirección, teléfono— y no puede quedar trabada
 		// porque la persona esté en mora.
-		if (
-			dpi !== undefined &&
-			dpi.trim() !== "" &&
-			requiereConsultaDeMora(dpi, existingLead.dpi)
-		) {
+		if (consultarBuroPorDpi && dpi !== undefined) {
 			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
 			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
 			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
@@ -496,7 +494,7 @@ export async function updateLeadByEmail(c: Context) {
 		) {
 			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
-		if (updatedLead && candadoEnElPredicado && updatedLead.dpi) {
+		if (updatedLead && consultarBuroPorDpi && updatedLead.dpi) {
 			const oportunidades = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)

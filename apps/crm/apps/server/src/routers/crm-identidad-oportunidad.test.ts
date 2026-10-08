@@ -1178,6 +1178,45 @@ describe("corrección de DPI al 30%: solo revalida Buró", () => {
 	});
 });
 
+describe("primer DPI del titular al 20%", () => {
+	const OPORTUNIDAD = "71717171-7171-4171-8171-717171717171";
+	const LEAD = "72727272-7272-4272-8272-727272727272";
+	const DPI = "2978485181201";
+
+	test.each([
+		["primer DPI", null, true],
+		["DPI sin cambios", DPI, false],
+	] as const)("%s: consulta Buró solo cuando corresponde", async (_caso, dpiAnterior, debeConsultar) => {
+		filasDevueltasPorUpdate = [{ id: LEAD, dpi: DPI }];
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: dpiAnterior, assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				leadId: LEAD,
+				status: "open",
+				porcentaje: 20,
+				buroRevalidacionAl30: false,
+			},
+		]);
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await invocar(
+				crmRouter.updateLead,
+				{ id: LEAD, dpi: DPI },
+				contextoDe("vendedor", "sales"),
+			);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+		expect(lecturasPorTabla.includes(opportunities)).toBe(debeConsultar);
+	});
+});
+
 describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 	const OPORTUNIDAD = "63636363-6363-4363-8363-636363636363";
 	const ETAPA_30 = "64646464-6464-4464-8464-646464646464";

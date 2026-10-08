@@ -1541,6 +1541,11 @@ export const crmRouter = {
 			const elDpiCambia =
 				updateData.dpi !== undefined &&
 				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
+			// El candado no considera cambio el primer DPI, pero Buró sí debe
+			// consultarlo cuando la oportunidad ya está en 20% o 30% excepcional.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi);
 
 			// El veredicto del candado sobrevive al bloque: si el admin usó la
 			// válvula hay que cobrarle el costo DESPUÉS del UPDATE (ver F9 abajo).
@@ -1567,7 +1572,7 @@ export const crmRouter = {
 				// dirección — y son justamente las fichas que cobranza toca a diario.
 				// El borrado (`dpi: ""`) no llega hasta acá: se rechaza con 400 al
 				// entrar al handler. Ver `MENSAJE_DPI_EN_BLANCO`.
-				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
+				if (consultarBuroPorDpi) {
 					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
 					// que se está editando. Con solo los del DPI nuevo, el lead que
 					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
@@ -1831,7 +1836,7 @@ export const crmRouter = {
 				}
 			}
 
-			if (elDpiCambia && updatedLead[0].dpi) {
+			if (consultarBuroPorDpi && updatedLead[0].dpi) {
 				const oportunidades = await db
 					.select({ id: opportunities.id })
 					.from(opportunities)
@@ -9598,6 +9603,11 @@ export const crmRouter = {
 				}
 			}
 
+			// Un primer DPI también exige Buró, aunque no active el candado.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, coDebtorAntesDelUpdate?.dpi);
+
 			// Misma carrera que en `updateLead`: entre el candado y esta sentencia,
 			// otra transacción puede aprobar el análisis de la oportunidad que
 			// respalda y el DPI del co-deudor se escribiría igual. La condición
@@ -9665,11 +9675,7 @@ export const crmRouter = {
 						database: tx,
 					});
 				}
-				if (
-					coDebtorAntesDelUpdate &&
-					updateData.dpi !== undefined &&
-					dpiCambia(coDebtorAntesDelUpdate.dpi, updateData.dpi)
-				) {
+				if (coDebtorAntesDelUpdate && consultarBuroPorDpi) {
 					const marcadas = await tx
 						.update(opportunities)
 						.set({ buroRevalidacionAl30: true })
@@ -9723,10 +9729,7 @@ export const crmRouter = {
 				auditRecord(overrideDeMora);
 			}
 
-			if (
-				updateData.dpi !== undefined &&
-				dpiCambia(coDebtorAntesDelUpdate?.dpi, updatedCoDebtor.dpi)
-			) {
+			if (consultarBuroPorDpi) {
 				consultarBuroAlVeinteTrasGuardar(
 					updatedCoDebtor.opportunityId,
 					context.userId,

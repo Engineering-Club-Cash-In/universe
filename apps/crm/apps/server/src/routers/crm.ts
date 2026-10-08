@@ -1519,14 +1519,16 @@ export const crmRouter = {
 				});
 			}
 
-			// El NIT y el DPI que el lead tenía ANTES de esta edición. El NIT es la
+			// El NIT, DPI y origen que el lead tenía ANTES de esta edición. El NIT es la
 			// referencia para distinguir las oportunidades que siguen con la copia de
 			// las que alguien corrigió a mano; el DPI, para saber si esta edición lo
 			// cambia de verdad. Hay que leerlos antes del UPDATE.
 			const [leadAntesDelUpdate] =
-				updateData.nit !== undefined || updateData.dpi !== undefined
+				updateData.nit !== undefined ||
+				updateData.dpi !== undefined ||
+				updateData.source !== undefined
 					? await db
-							.select({ nit: leads.nit, dpi: leads.dpi })
+							.select({ nit: leads.nit, dpi: leads.dpi, source: leads.source })
 							.from(leads)
 							.where(eq(leads.id, id))
 							.limit(1)
@@ -1797,7 +1799,12 @@ export const crmRouter = {
 						.update(opportunities)
 						.set({
 							...(updateData.source !== undefined
-								? { source: updateData.source }
+								? {
+										source: updateData.source,
+										...(updateData.source !== "Whatsapp" && {
+											buroRevalidacionAl30: sql`case when ${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) and (${opportunities.source} = 'Whatsapp' or (${opportunities.source} is null and ${leadAntesDelUpdate?.source} = 'Whatsapp')) then true else ${opportunities.buroRevalidacionAl30} end`,
+										}),
+									}
 								: {}),
 							...(updateData.campaign !== undefined
 								? { campaign: updateData.campaign }
@@ -3819,6 +3826,16 @@ export const crmRouter = {
 					}
 					const estadoBuro = await getValidaciones({ opportunityId: id });
 					dpiComprobadoParaAnalisis = dpiValidado.dpiLimpio;
+					if (
+						estadoBuro.exento &&
+						input.source !== undefined &&
+						input.source !== "Whatsapp"
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Guarda primero el cambio de origen y completa el Buró antes de pasar al 30%.",
+						});
+					}
 					if (!estadoBuro.exento) {
 						if (estadoBuro.faltaConsentimiento) {
 							throw new ORPCError("BAD_REQUEST", {
@@ -3934,6 +3951,13 @@ export const crmRouter = {
 						...(regresandoAAnalisis && {
 							buroRevalidacionAl30: habilitarBuroAlRegresar,
 						}),
+						...(input.source !== undefined &&
+							input.source !== "Whatsapp" && {
+								// Al corregir el origen de una exención del bot, la
+								// consulta excepcional debe quedar habilitada en 30%.
+								// La etapa de destino cubre también el regreso desde 40%.
+								buroRevalidacionAl30: sql`case when ${input.stageId ?? sql`${opportunities.stageId}`} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) and (${opportunities.source} = 'Whatsapp' or (${opportunities.source} is null and exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} = 'Whatsapp'))) then true else ${opportunities.buroRevalidacionAl30} end`,
+							}),
 						...(entrandoAAnalisis && { buroRevalidacionAl30: false }),
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {

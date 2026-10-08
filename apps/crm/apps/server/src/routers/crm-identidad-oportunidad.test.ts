@@ -990,6 +990,8 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 
 describe("revalidación excepcional de Buró en el 30%", () => {
 	const OPORTUNIDAD = "61616161-6161-4161-8161-616161616161";
+	const LEAD = "62626262-6262-4262-8262-626262626262";
+	const ETAPA_30 = "63636363-6363-4363-8363-636363636363";
 	const base = {
 		id: OPORTUNIDAD,
 		assignedTo: "vendedor",
@@ -997,7 +999,7 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		porcentaje: 30,
 		source: "web",
 		leadSource: "web",
-		leadId: "62626262-6262-4262-8262-626262626262",
+		leadId: LEAD,
 		leadDpi: null,
 		creditType: "autocompra",
 		analysisStatus: "pending",
@@ -1036,6 +1038,54 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		filasPorTabla.set(opportunities, [{ ...base, buroRevalidacionAl30: true }]);
 		await ejecutarBuroAlVeinteSiCorresponde({ opportunityId: OPORTUNIDAD });
 		expect(lecturasPorTabla.length).toBeGreaterThan(1);
+	});
+
+	test("corregir el origen de WhatsApp en 30% habilita la reconsulta en la misma escritura", async () => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				stageId: ETAPA_30,
+				source: "Whatsapp",
+				leadSource: "Whatsapp",
+				analysisStatus: "pending",
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.source).toBe("referral");
+		const expresion = textoSqlDelValor(escritura?.valores.buroRevalidacionAl30);
+		expect(expresion).toContain("case when");
+		expect(expresion).toContain("closure_percentage");
+		expect(expresion).toContain("'whatsapp'");
+	});
+
+	test("sincronizar el origen del lead también habilita la reconsulta en 30%", async () => {
+		filasPorTabla.set(leads, [
+			{ id: LEAD, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{ ...base, stageId: ETAPA_30, source: "Whatsapp" },
+		]);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.source).toBe("referral");
+		const expresion = textoSqlDelValor(escritura?.valores.buroRevalidacionAl30);
+		expect(expresion).toContain("case when");
+		expect(expresion).toContain("closure_percentage");
+		expect(expresion).toContain("'whatsapp'");
 	});
 });
 
@@ -1273,6 +1323,33 @@ describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
 				contextoDe("vendedor", "sales"),
 			),
 		).rejects.toThrow(/ingresa el DPI del titular/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("no consume la exención del bot si cambia el origen al entrar al 30%", async () => {
+		prepararDestino(30);
+		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
+		filasPorTabla.set(opportunities, [
+			{ ...oportunidad, source: "Whatsapp", leadSource: "Whatsapp" },
+		]);
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: "2978485181201", source: "Whatsapp" },
+		]);
+		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{
+				dpi: "2978485181201",
+				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			},
+		]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_30, source: "referral" },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/Guarda primero el cambio de origen/);
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 

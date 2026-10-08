@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BORDE_PARCIAL, bancoTexto, esParcialNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
+import { avisoCuotaMesNexa, bancoTexto, conteoFranjaNexa, diasAlVencimiento, esParcialNexa, estadoCuotaTexto, fraccionPagadaNexa, hoyGuatemala, mesCortoNexa, rellenoCuotaNexa, resumenFranjaNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
 import { estadoNexa, motivoRechazoNexa } from "./estadoNexa";
 
 const cuota = (o) => ({ numero: 18, vencimiento: "2026-09-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36", ...o });
@@ -25,12 +25,86 @@ test("tooltip: número, vencimiento, completo o parcial, medio y banco", () => {
     .toBe("Cuota 18 · vence 05/09/2026 · No pagada · pago parcial Q 242.45 de Q 3,751.51 · Manual · Banrural");
 });
 
-test("parcial: no pagada con plata aplicada; la barra lleva borde del color del medio", () => {
+test("parcial: no pagada con plata aplicada; la barra se llena con el color del medio", () => {
   expect(esParcialNexa(cuota({ pagada: false, aplicado: "500.00" }))).toBe(true);
   expect(esParcialNexa(cuota({ pagada: false, aplicado: "0.00" }))).toBe(false);
   expect(esParcialNexa(cuota({ pagada: true, aplicado: "500.00" }))).toBe(false);
-  expect(BORDE_PARCIAL.NEXA).toContain("border-purple-600");
-  expect(BORDE_PARCIAL.MANUAL).toContain("border-green-600");
+  expect(rellenoCuotaNexa(cuota({ medio: "NEXA" }))).toBe("bg-purple-600");
+  expect(rellenoCuotaNexa(cuota({ medio: "MANUAL" }))).toBe("bg-green-600");
+  expect(rellenoCuotaNexa(cuota({ medio: null }))).toBe("bg-green-600");
+});
+
+test("relleno de la barra: pagada llena, parcial en proporción (con topes), sin pago vacía", () => {
+  expect(fraccionPagadaNexa(cuota({}))).toBe(1);
+  expect(fraccionPagadaNexa(cuota({ aplicado: "0.00", medio: null }))).toBe(1);
+  expect(fraccionPagadaNexa(cuota({ pagada: false, aplicado: "600.00", monto: "1000.00" }))).toBe(0.6);
+  // Un abono chico igual se ve; un parcial casi completo no parece pagado.
+  expect(fraccionPagadaNexa(cuota({ pagada: false, aplicado: "1.00", monto: "1000.00" }))).toBe(0.08);
+  expect(fraccionPagadaNexa(cuota({ pagada: false, aplicado: "999.00", monto: "1000.00" }))).toBe(0.92);
+  expect(fraccionPagadaNexa(cuota({ pagada: false, aplicado: "0.00" }))).toBe(0);
+  expect(fraccionPagadaNexa(cuota({ pagada: false, aplicado: "50.00", monto: "0" }))).toBe(0);
+});
+
+test("fechas: mes corto, días al vencimiento y hoy en Guatemala", () => {
+  expect(mesCortoNexa("2026-05-05")).toBe("may");
+  expect(mesCortoNexa("2025-12-31")).toBe("dic");
+  expect(diasAlVencimiento("2026-10-05", "2026-10-08")).toBe(-3);
+  expect(diasAlVencimiento("2026-10-08", "2026-10-08")).toBe(0);
+  expect(diasAlVencimiento("2026-11-01", "2026-10-31")).toBe(1);
+  expect(diasAlVencimiento("2026-03-10", "2026-02-28")).toBe(10);
+  // 03:00 UTC del 9 = 21:00 del 8 en Guatemala (UTC-6).
+  expect(hoyGuatemala(new Date("2026-10-09T03:00:00Z"))).toBe("2026-10-08");
+});
+
+test("estado de cada cuota en una frase", () => {
+  const hoy = "2026-10-08";
+  expect(estadoCuotaTexto(cuota({}), hoy)).toBe("Pagada por Nexa");
+  expect(estadoCuotaTexto(cuota({ medio: "MANUAL", banco: "Banrural" }), hoy)).toBe("Pagada por otro medio (Banrural)");
+  expect(estadoCuotaTexto(cuota({ medio: null }), hoy)).toBe("Pagada (sin detalle del medio)");
+  expect(estadoCuotaTexto(cuota({ pagada: false, aplicado: "600.00", monto: "1000.00" }), hoy))
+    .toBe("Vencida, pago parcial Q 600.00 de Q 1,000.00 por Nexa");
+  expect(estadoCuotaTexto(cuota({ pagada: false, medio: null, aplicado: "0.00" }), hoy)).toBe("Vencida, sin pagar");
+  expect(estadoCuotaTexto(cuota({ pagada: false, medio: null, aplicado: "0.00", vencimiento: "2026-10-08" }), hoy)).toBe("Por vencer, sin pagar");
+});
+
+test("resumen de la franja: conteo y rango de meses", () => {
+  const cuotas = [
+    cuota({ numero: 30, vencimiento: "2025-11-05" }),
+    cuota({ numero: 31, vencimiento: "2025-12-05", medio: "MANUAL" }),
+    cuota({ numero: 32, vencimiento: "2026-01-05", pagada: false, aplicado: "100.00" }),
+    cuota({ numero: 33, vencimiento: "2026-02-05", pagada: false, medio: null, aplicado: "0.00" }),
+  ];
+  expect(conteoFranjaNexa(cuotas)).toBe("2 pagadas (1 por Nexa) · 1 parcial · 1 sin pagar");
+  expect(resumenFranjaNexa(cuotas)).toBe("4 cuotas, de nov 2025 a feb 2026: 2 pagadas (1 por Nexa) · 1 parcial · 1 sin pagar");
+  expect(resumenFranjaNexa([])).toBe("Sin cuotas");
+  expect(conteoFranjaNexa([cuota({ medio: "MANUAL" })])).toBe("1 pagada");
+});
+
+test("cuota del mes en palabras: titular, detalle y versión corta", () => {
+  const hoy = "2026-10-08";
+  const mes = (o) => ({ numero: 41, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1000.00", monto: "1000.00", medio: "NEXA", ...o });
+  expect(avisoCuotaMesNexa(mes({}), hoy)).toEqual({
+    etiqueta: "Cuota de este mes", tono: "nexa", titulo: "Pagada por Nexa", detalle: "Pago completo", corto: "Completa",
+  });
+  expect(avisoCuotaMesNexa(mes({ medio: "MANUAL" }), hoy, "Banrural")).toMatchObject({
+    tono: "otro", titulo: "Pagada por otro medio", detalle: "Pago completo · Banrural", corto: "Completa · Banrural",
+  });
+  expect(avisoCuotaMesNexa(mes({ medio: null }), hoy)).toMatchObject({ tono: "otro", titulo: "Pagada", detalle: "Pago completo · sin detalle del medio" });
+  // Freddy: vencida con parcial Nexa.
+  expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "600.00" }), hoy)).toEqual({
+    etiqueta: "Cuota de este mes", tono: "vencida", titulo: "Vencida hace 3 días",
+    detalle: "Pago parcial: Q 600.00 de Q 1,000.00 por Nexa · faltan Q 400.00", corto: "Parcial Q 600.00 de Q 1,000.00 · Nexa",
+  });
+  expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "0.10", monto: "0.30", medio: "MANUAL" }), "2026-10-06", "BI").detalle)
+    .toBe("Pago parcial: Q 0.10 de Q 0.30 por otro medio (BI) · faltan Q 0.20");
+  expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "sin_pago", aplicado: "0.00", medio: null }), "2026-10-06"))
+    .toMatchObject({ titulo: "Vencida hace 1 día", detalle: "Sin pagos · faltan Q 1,000.00", corto: "Sin pagos" });
+  const porVencer = mes({ vencimiento: "2026-10-11", estado: "por_vencer", pago: "sin_pago", aplicado: "0.00", medio: null });
+  expect(avisoCuotaMesNexa(porVencer, hoy)).toMatchObject({ tono: "pendiente", titulo: "Pendiente · vence en 3 días" });
+  expect(avisoCuotaMesNexa(porVencer, "2026-10-10").titulo).toBe("Pendiente · vence mañana");
+  expect(avisoCuotaMesNexa(porVencer, "2026-10-11").titulo).toBe("Pendiente · vence hoy");
+  // Sin cuota este mes: el back manda la última vencida.
+  expect(avisoCuotaMesNexa(mes({ vencimiento: "2026-09-05" }), hoy).etiqueta).toBe("Último vencimiento");
 });
 
 test("cuota del mes: completa con su medio, parcial con su monto, o sin pago", () => {

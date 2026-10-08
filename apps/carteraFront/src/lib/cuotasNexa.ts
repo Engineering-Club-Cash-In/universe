@@ -1,5 +1,5 @@
 // Franja de cuotas, medio del último pago y rechazos del dashboard Nexa: texto y color, sin React.
-import { fmtQ } from "./moneda";
+import { fmtQ, sumaQ } from "./moneda";
 
 export type CuotaFranjaNexa = {
   numero: number;
@@ -23,11 +23,103 @@ export const CLASES_TONO_CUOTA: Record<TonoCuotaNexa, string> = {
   pendiente: "bg-slate-300",
 };
 
-// No pagada pero con plata aplicada: la barra gris lleva un borde del color del medio.
+// No pagada pero con plata aplicada: pago parcial.
 export const esParcialNexa = (c: Pick<CuotaFranjaNexa, "pagada" | "aplicado">) => !c.pagada && Number(c.aplicado) > 0;
-export const BORDE_PARCIAL: Record<"NEXA" | "MANUAL", string> = {
-  NEXA: "border-2 border-purple-600",
-  MANUAL: "border-2 border-green-600",
+
+// Cuánto de la cuota está cubierto, de 0 a 1: la barra se llena en esa proporción. Pagada = llena
+// aunque no tenga plata aplicada (la pagó el flag); no pagada nunca llega a 1.
+export const fraccionPagadaNexa = (c: Pick<CuotaFranjaNexa, "pagada" | "aplicado" | "monto">) => {
+  if (c.pagada) return 1;
+  const aplicado = Number(c.aplicado);
+  const monto = Number(c.monto);
+  if (!(aplicado > 0) || !(monto > 0)) return 0;
+  // Topes: un abono chico igual se ve, y un parcial nunca parece completo.
+  return Math.min(Math.max(aplicado / monto, 0.08), 0.92);
+};
+
+// Relleno de la barra (pagada o parcial) con el color del medio; el carril gris es lo que falta.
+export const rellenoCuotaNexa = (c: Pick<CuotaFranjaNexa, "medio">) =>
+  CLASES_TONO_CUOTA[c.medio === "NEXA" ? "nexa" : "otro"];
+
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+// "2026-05-05" -> "may"
+export const mesCortoNexa = (v: string) => MESES_CORTOS[Number(v.slice(5, 7)) - 1] ?? "";
+
+// Hoy en Guatemala (YYYY-MM-DD), el mismo "hoy" con que el back decide vencida o por vencer.
+export const hoyGuatemala = (ahora = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guatemala", year: "numeric", month: "2-digit", day: "2-digit" }).format(ahora);
+
+// Días de hoy al vencimiento: positivo = faltan, 0 = hoy, negativo = venció hace N.
+export const diasAlVencimiento = (vencimiento: string, hoy: string) => {
+  const dia = (v: string) => Date.UTC(Number(v.slice(0, 4)), Number(v.slice(5, 7)) - 1, Number(v.slice(8, 10)));
+  return Math.round((dia(vencimiento) - dia(hoy)) / 86_400_000);
+};
+
+const dias = (n: number) => `${n} ${n === 1 ? "día" : "días"}`;
+const medioTexto = (medio: "NEXA" | "MANUAL" | null, banco: string | null) =>
+  medio === "NEXA" ? "Nexa" : medio === "MANUAL" ? `otro medio (${bancoTexto("MANUAL", banco)})` : null;
+const faltaQ = (aplicado: string, monto: string) =>
+  fmtQ((Math.round(sumaQ([monto]) * 100) - Math.round(sumaQ([aplicado]) * 100)) / 100);
+
+// Estado de una cuota en una frase, para el detalle de la franja.
+// "Pagada por Nexa" · "Pagada por otro medio (Banrural)" · "Pago parcial Q 600.00 de Q 1,000.00 por Nexa"
+// · "Vencida, sin pagar" · "Por vencer, sin pagar"
+export const estadoCuotaTexto = (c: CuotaFranjaNexa, hoy: string) => {
+  const medio = medioTexto(c.medio, c.banco);
+  if (c.pagada) return medio ? `Pagada por ${medio}` : "Pagada (sin detalle del medio)";
+  const vencida = diasAlVencimiento(c.vencimiento, hoy) < 0;
+  if (esParcialNexa(c)) return `${vencida ? "Vencida" : "Por vencer"}, pago parcial ${parcialTexto(c.aplicado, c.monto)}${medio ? ` por ${medio}` : ""}`;
+  return vencida ? "Vencida, sin pagar" : "Por vencer, sin pagar";
+};
+
+export type TonoAvisoNexa = "nexa" | "otro" | "vencida" | "pendiente";
+
+// La cuota del mes en palabras: un titular (el estado) y un detalle (cuánto y con qué).
+export const avisoCuotaMesNexa = (c: CuotaMesNexa, hoy: string, banco: string | null = null) => {
+  const n = diasAlVencimiento(c.vencimiento, hoy);
+  const etiqueta = c.vencimiento.slice(0, 7) === hoy.slice(0, 7) ? "Cuota de este mes" : "Último vencimiento";
+  const medio = medioTexto(c.medio, banco);
+  if (c.estado === "pagada") {
+    return {
+      etiqueta,
+      tono: (c.medio === "NEXA" ? "nexa" : "otro") as TonoAvisoNexa,
+      titulo: c.medio === "NEXA" ? "Pagada por Nexa" : c.medio === "MANUAL" ? "Pagada por otro medio" : "Pagada",
+      detalle: c.medio === "MANUAL" ? `Pago completo · ${bancoTexto("MANUAL", banco)}`
+        : c.medio === "NEXA" ? "Pago completo" : "Pago completo · sin detalle del medio",
+      corto: c.medio === "MANUAL" ? `Completa · ${bancoTexto("MANUAL", banco)}` : "Completa",
+    };
+  }
+  const titulo = c.estado === "vencida"
+    ? `Vencida hace ${dias(-n)}`
+    : n <= 0 ? "Pendiente · vence hoy" : n === 1 ? "Pendiente · vence mañana" : `Pendiente · vence en ${dias(n)}`;
+  const detalle = c.pago === "parcial"
+    ? `Pago parcial: ${parcialTexto(c.aplicado, c.monto)}${medio ? ` por ${medio}` : ""} · faltan ${faltaQ(c.aplicado, c.monto)}`
+    : `Sin pagos · faltan ${fmtQ(c.monto)}`;
+  const corto = c.pago === "parcial"
+    ? `Parcial ${parcialTexto(c.aplicado, c.monto)}${c.medio === "NEXA" ? " · Nexa" : c.medio === "MANUAL" ? " · otro medio" : ""}`
+    : "Sin pagos";
+  return { etiqueta, tono: (c.estado === "vencida" ? "vencida" : "pendiente") as TonoAvisoNexa, titulo, detalle, corto };
+};
+
+// Conteo de la franja: "10 pagadas (8 por Nexa) · 1 parcial · 1 sin pagar"
+export const conteoFranjaNexa = (cuotas: CuotaFranjaNexa[]) => {
+  const pagadas = cuotas.filter((c) => c.pagada).length;
+  const nexa = cuotas.filter((c) => c.pagada && c.medio === "NEXA").length;
+  const parciales = cuotas.filter(esParcialNexa).length;
+  const sinPagar = cuotas.length - pagadas - parciales;
+  const partes = [`${pagadas} ${pagadas === 1 ? "pagada" : "pagadas"}${nexa ? ` (${nexa} por Nexa)` : ""}`];
+  if (parciales) partes.push(`${parciales} ${parciales === 1 ? "parcial" : "parciales"}`);
+  if (sinPagar) partes.push(`${sinPagar} sin pagar`);
+  return partes.join(" · ");
+};
+
+// Resumen de la franja para lectores de pantalla.
+// "12 cuotas, de nov 2025 a oct 2026: 10 pagadas (8 por Nexa) · 1 parcial · 1 sin pagar"
+export const resumenFranjaNexa = (cuotas: CuotaFranjaNexa[]) => {
+  if (cuotas.length === 0) return "Sin cuotas";
+  const desde = cuotas[0].vencimiento;
+  const hasta = cuotas[cuotas.length - 1].vencimiento;
+  return `${cuotas.length} ${cuotas.length === 1 ? "cuota" : "cuotas"}, de ${mesCortoNexa(desde)} ${desde.slice(0, 4)} a ${mesCortoNexa(hasta)} ${hasta.slice(0, 4)}: ${conteoFranjaNexa(cuotas)}`;
 };
 
 export const fmtDiaNexa = (v: string) => v.split("-").reverse().join("/");

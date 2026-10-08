@@ -8,7 +8,8 @@ import { fmtQ, sumaQ } from "@/lib/moneda";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { CLASES_TONO_NEXA, estadoNexa, motivoRechazoNexa } from "@/lib/estadoNexa";
 import { cuotasTexto, describirRango, fmtFechaNexa, type NexaDashboardCredito, type NexaPagoCredito, type RangoFechas } from "../services/nexaDashboard.services";
-import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
+import { NexaFranjaCanal } from "./NexaFranjaCanal";
+import { NexaCuotaMesBloque } from "./NexaCuotaMes";
 import { bancoTexto } from "@/lib/cuotasNexa";
 
 interface NexaPagosModalProps {
@@ -21,16 +22,12 @@ const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "
 const mesDe = (fecha: string | null) => (fecha ? `${MESES[Number(fecha.slice(5, 7)) - 1]} ${fecha.slice(0, 4)}` : "Sin fecha");
 const esNexa = (p: NexaPagoCredito) => p.canal === "NEXA";
 
-// Últimas cuotas del crédito (no depende del rango de fechas: es cómo están hoy).
+// Cuota del mes y últimas cuotas (no dependen del rango de fechas: es cómo están hoy).
 function FranjaCuotas({ credito }: { credito: NexaDashboardCredito }) {
   return (
-    <div>
+    <div className="space-y-5">
+      {credito.cuotaMes && <NexaCuotaMesBloque cuotaMes={credito.cuotaMes} ultimasCuotas={credito.ultimasCuotas} />}
       <NexaFranjaCanal cuotas={credito.ultimasCuotas} cuotaMes={credito.cuotaMes?.numero} />
-      <div className="mt-1.5 flex justify-between text-[11px] text-slate-500">
-        <span>Más antigua · número de cuota</span>
-        <span>Más reciente</span>
-      </div>
-      <div className="mt-1"><LeyendaCuotasNexa /></div>
     </div>
   );
 }

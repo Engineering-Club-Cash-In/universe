@@ -7,11 +7,12 @@ import {
 } from "./asistente-ia-cobros";
 
 const fuentes = {
-	caso: {
-		estadoMora: "mora_30",
-		diasMoraMaximo: 35,
+	credito: {
+		estadoMora: "MOROSO",
+		diasMora: 35,
 		cuotasVencidas: 1,
-		montoEnMora: "1500.00",
+		moraAcumulada: "1500.00",
+		cuotaMensual: "4392.02",
 	},
 	hitos: [
 		{
@@ -55,6 +56,7 @@ describe("armarContextoIA", () => {
 			fechaPrometida: "2026-10-03",
 			estadoPromesa: "pendiente",
 		});
+		expect(c.credito).toEqual(fuentes.credito);
 		expect(c.hitos).toEqual([
 			{ fecha: "2026-09-10", descripcion: "Ingresó a Bucket B1" },
 		]);

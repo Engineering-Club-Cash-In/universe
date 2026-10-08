@@ -38,7 +38,10 @@ import {
 	resumenesIaCobros,
 } from "../db/schema/cobros";
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { contarCuotasAtrasadasUnicas } from "./cobros-plantillas";
 import { cargarHistorico } from "./ficha-complementos";
+import { calcularDiasMoraExactos, diasMoraDelDetalle } from "./mora-utils";
 
 export const MODELO_ASISTENTE = "gemini-3-flash-preview";
 const TIMEOUT_GENERACION_MS = 30_000;
@@ -72,7 +75,8 @@ export interface ContextoIA {
 		estadoMora: string;
 		diasMora: number;
 		cuotasVencidas: number;
-		montoEnMora: string;
+		moraAcumulada: string;
+		cuotaMensual: string;
 	};
 	hitos: Array<{ fecha: string; descripcion: string }>;
 	gestiones: GestionContexto[];
@@ -89,12 +93,7 @@ const dia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 /** Arma el contexto (pura, en orden estable para que la huella sea estable). */
 export function armarContextoIA(fuentes: {
-	caso: {
-		estadoMora: string;
-		diasMoraMaximo: number;
-		cuotasVencidas: number;
-		montoEnMora: string;
-	};
+	credito: ContextoIA["credito"];
 	hitos: HitoCredito[] | null;
 	gestiones: Array<{
 		fechaContacto: Date;
@@ -107,12 +106,7 @@ export function armarContextoIA(fuentes: {
 	}>;
 }): ContextoIA {
 	return {
-		credito: {
-			estadoMora: fuentes.caso.estadoMora,
-			diasMora: fuentes.caso.diasMoraMaximo,
-			cuotasVencidas: fuentes.caso.cuotasVencidas,
-			montoEnMora: fuentes.caso.montoEnMora,
-		},
+		credito: fuentes.credito,
 		hitos: (fuentes.hitos ?? []).slice(0, MAX_HITOS).map((h) => ({
 			fecha: h.fecha.slice(0, 10),
 			descripcion: h.descripcion,
@@ -136,20 +130,46 @@ export function huellaContexto(contexto: ContextoIA): string {
 }
 
 /**
+ * La mora VIVA del crédito, de cartera: la misma que pinta la ficha. Los
+ * campos de mora de `casos_cobros` se desactualizan (un caso en mora podía
+ * figurar «al día, 0 días»), así que no se le mandan al modelo. `null` si
+ * cartera no responde.
+ */
+async function cargarCreditoVivo(
+	numeroSifco: string | null,
+): Promise<ContextoIA["credito"] | null> {
+	if (!numeroSifco) return null;
+	try {
+		const c = await carteraBackClient.getCredito(numeroSifco, false);
+		const cuotasVencidas = contarCuotasAtrasadasUnicas(c.cuotasAtrasadas ?? []);
+		return {
+			estadoMora: c.convenioActivo
+				? "en_convenio"
+				: (c.credito.statusCredit ?? "desconocido"),
+			diasMora: diasMoraDelDetalle(c.diasAtrasoMoraMaximo, () =>
+				calcularDiasMoraExactos(c.cuotasAtrasadas ?? []),
+			),
+			cuotasVencidas,
+			moraAcumulada: Number(c.moraActual ?? 0).toFixed(2),
+			cuotaMensual: Number(c.credito.cuota ?? 0).toFixed(2),
+		};
+	} catch (error) {
+		console.error(`[AsistenteIA] crédito ${numeroSifco} en cartera:`, error);
+		return null;
+	}
+}
+
+/**
  * `hitos`: si el que llama ya los cargó (la ficha), se reutilizan para no
- * volver a llamar a cartera. `hitosCompletos` = false si cartera no respondió.
+ * volver a llamar a cartera. `completo` = false si cartera no respondió (ni
+ * el historial ni el estado del crédito): con datos a medias no se genera.
  */
 async function cargarContextoIA(
 	casoCobroId: string,
 	hitosYaCargados?: Promise<HitoCredito[] | null>,
-): Promise<{ contexto: ContextoIA; hitosCompletos: boolean }> {
+): Promise<{ contexto: ContextoIA; completo: boolean }> {
 	const [caso] = await db
-		.select({
-			estadoMora: casosCobros.estadoMora,
-			diasMoraMaximo: casosCobros.diasMoraMaximo,
-			cuotasVencidas: casosCobros.cuotasVencidas,
-			montoEnMora: casosCobros.montoEnMora,
-		})
+		.select({ numeroSifco: casosCobros.numeroCreditoSifco })
 		.from(casosCobros)
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
@@ -158,7 +178,8 @@ async function cargarContextoIA(
 			message: "Caso de cobro no encontrado.",
 		});
 	}
-	const [hitos, gestiones] = await Promise.all([
+	const [credito, hitos, gestiones] = await Promise.all([
+		cargarCreditoVivo(caso.numeroSifco),
 		(hitosYaCargados ?? cargarHistorico(casoCobroId)).catch(() => null),
 		db
 			.select({
@@ -176,8 +197,18 @@ async function cargarContextoIA(
 			.limit(MAX_GESTIONES),
 	]);
 	return {
-		contexto: armarContextoIA({ caso, hitos, gestiones }),
-		hitosCompletos: hitos !== null,
+		contexto: armarContextoIA({
+			credito: credito ?? {
+				estadoMora: "desconocido",
+				diasMora: 0,
+				cuotasVencidas: 0,
+				moraAcumulada: "0.00",
+				cuotaMensual: "0.00",
+			},
+			hitos,
+			gestiones,
+		}),
+		completo: credito !== null && hitos !== null,
 	};
 }
 
@@ -186,7 +217,7 @@ Recibes, en JSON, el estado de UN crédito, los hitos de su vida (buckets de mor
 Reglas:
 - Usa SOLO esos datos. Si algo no está, no lo inventes ni lo supongas.
 - Escribe en español de Guatemala, con trato de usted hacia el asesor y sin voseo ni tuteo.
-- Los montos van en quetzales con el formato Q1,500.00.
+- Los montos van en quetzales con el formato Q1,500.00. «moraAcumulada» es el recargo por atraso, no el valor de la cuota.
 - No incluyas nombres, teléfonos ni números de documento.`;
 
 const resumenSchema = z.object({
@@ -279,7 +310,7 @@ export async function obtenerResumenIA(
 	hitos?: Promise<HitoCredito[] | null>,
 ): Promise<ResumenIA | null> {
 	if (!asistenteActivo()) return null;
-	const [[guardado], { contexto, hitosCompletos }] = await Promise.all([
+	const [[guardado], { contexto, completo }] = await Promise.all([
 		db
 			.select()
 			.from(resumenesIaCobros)
@@ -298,9 +329,10 @@ export async function obtenerResumenIA(
 		generadoEn: g.generadoEn.toISOString(),
 	});
 	if (guardado && guardado.huella === huella) return comoResumen(guardado);
-	// Sin cartera la huella cambia solo porque faltan los hitos: no se paga
-	// una regeneración con menos datos que el resumen que ya hay.
-	if (guardado && !hitosCompletos) return comoResumen(guardado);
+	// Sin cartera la huella cambia solo porque faltan datos: no se paga una
+	// regeneración con menos información que el resumen que ya hay, y sin
+	// resumen previo no se inventa uno con datos a medias.
+	if (!completo) return guardado ? comoResumen(guardado) : null;
 
 	const generacion = generarUnaVez(casoCobroId, contexto, huella);
 	if (guardado) return comoResumen(guardado);
@@ -340,7 +372,13 @@ export async function preguntarAsistente(params: {
 		});
 	}
 
-	const { contexto } = await cargarContextoIA(params.casoCobroId);
+	const { contexto, completo } = await cargarContextoIA(params.casoCobroId);
+	if (!completo) {
+		throw new ORPCError("BAD_GATEWAY", {
+			message:
+				"No se pudo leer el estado del crédito en cartera. Intente de nuevo.",
+		});
+	}
 	const registrar = (respuesta: string | null, ok: boolean) =>
 		db.insert(preguntasIaCobros).values({
 			casoCobroId: params.casoCobroId,

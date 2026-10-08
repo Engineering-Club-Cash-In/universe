@@ -31,7 +31,7 @@ import {
 	resolverContextoCaso,
 } from "../services/referencias-cobros-datos";
 import { agruparCasosVigentesPorSifco } from "./caso-vigente";
-import { fetchAllPages } from "./fetch-all-pages";
+import { fetchAllPages, mapWithConcurrency } from "./fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import {
 	cargarSeguimientoPorCaso,
@@ -46,6 +46,8 @@ export const MIN_INTENTOS_REFERENCIAS = 3;
 export const DIAS_SIN_GESTION_REFERENCIAS = 7;
 
 const MS_DIA = 24 * 60 * 60 * 1000;
+/** Casos cuyas referencias se revisan a la vez (cada uno son varias consultas). */
+const CONCURRENCIA_REFERENCIAS = 5;
 
 /** Inicio (medianoche GT) del día en que se miden las boletas «recibidas hoy». */
 export function inicioVentanaPagoPorConfirmar(ahora: Date = new Date()): Date {
@@ -229,11 +231,14 @@ export async function contarReferenciasPorContactar(
 
 	// Sin referencias con teléfono no hay a quién llamar: el caso no es una
 	// acción pendiente (hay casos sin lead u oportunidad, o sin referencias
-	// cargadas). Son pocos candidatos, se revisan de a uno.
-	const conReferencias: typeof candidatos = [];
-	for (const c of candidatos) {
-		if (await tieneReferenciaContactable(c.casoId)) conReferencias.push(c);
-	}
+	// cargadas). Cada caso son varias consultas, así que se revisan en
+	// paralelo acotado (no una por una, ni todas a la vez contra el pool de DB).
+	const contactables = await mapWithConcurrency(
+		candidatos,
+		CONCURRENCIA_REFERENCIAS,
+		(c) => tieneReferenciaContactable(c.casoId),
+	);
+	const conReferencias = candidatos.filter((_, i) => contactables[i]);
 
 	// Se cuentan CRÉDITOS, no casos: `casos_cobros.numero_credito_sifco` no
 	// tiene índice único y dos casos del mismo crédito no son dos pendientes.

@@ -7,6 +7,8 @@ import {
   getCreditoByNumero,
   getCreditosIncobrables,
   getCreditosWithUserByMesAnio,
+  ORDEN_LISTADO_CREDITOS,
+  type OrdenListadoCreditos,
   mergeCreditosAndUpdate,
   resetCredit,
   getCreditStats,
@@ -287,6 +289,7 @@ export const creditRouter = new Elysia()
     cuotas_max,          // 🆕 rango de cuotas atrasadas (max inclusivo)
     excluir_pagados_mes, // 🆕 NUEVO
     buckets,             // 🪣 COBROS-02: CSV de buckets del motor (0-5)
+    orden,               // 🪣 COBROS-02: "bucket_motor" = orden de la cobranza
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -447,6 +450,19 @@ export const creditRouter = new Elysia()
     return { message: "Parámetro 'buckets' inválido (CSV de enteros 0-5)." };
   }
 
+  // 🪣 COBROS-02: orden opcional. Un valor desconocido es un error del que
+  // llama, no un "orden por defecto" silencioso.
+  if (
+    orden !== undefined &&
+    !(ORDEN_LISTADO_CREDITOS as readonly string[]).includes(orden)
+  ) {
+    set.status = 400;
+    return {
+      message: `Parámetro 'orden' inválido (valores: ${ORDEN_LISTADO_CREDITOS.join(", ")}).`,
+    };
+  }
+  const ordenParam = orden as OrdenListadoCreditos | undefined;
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -500,7 +516,8 @@ export const creditRouter = new Elysia()
         cuotasMinNum,
         cuotasMaxNum,
         bucketsParsed,
-        excluirPagadosMesParam
+        excluirPagadosMesParam,
+        ordenParam
       );
       set.status = 200;
       return result;
@@ -549,6 +566,7 @@ export const creditRouter = new Elysia()
         cuotas_max,
         excluir_pagados_mes,
         buckets,
+        orden,
       } = body;
 
       // Mismos obligatorios que el GET (mes y anio): `estado` es un filtro
@@ -629,7 +647,8 @@ export const creditRouter = new Elysia()
           cuotas_min,
           cuotas_max,
           bucketsPost,
-          excluir_pagados_mes
+          excluir_pagados_mes,
+          orden
         );
         set.status = 200;
         return result;
@@ -690,6 +709,8 @@ export const creditRouter = new Elysia()
         cuotas_min: t.Optional(t.Number()),
         cuotas_max: t.Optional(t.Number()),
         excluir_pagados_mes: t.Optional(t.Boolean()),
+        // 🪣 COBROS-02: orden de la cobranza (ver ORDEN_LISTADO_CREDITOS).
+        orden: t.Optional(t.Literal("bucket_motor")),
       }),
     }
   )

@@ -2122,6 +2122,7 @@ export class CarteraBackClient {
 						}),
 						...(params.buckets &&
 							params.buckets.length > 0 && { buckets: params.buckets }),
+						...(params.orden && { orden: params.orden }),
 						excel: false,
 					}),
 				},
@@ -2172,6 +2173,7 @@ export class CarteraBackClient {
 				...(params.excluir_pagados_mes && {
 					excluir_pagados_mes: "true",
 				}),
+				...(params.orden && { orden: params.orden }),
 				excel: "false",
 			});
 

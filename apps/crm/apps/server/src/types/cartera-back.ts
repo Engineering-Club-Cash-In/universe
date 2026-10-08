@@ -224,6 +224,13 @@ export interface CreditoDetailResponse {
 	 * Ausente si la proyección de mora falló (cartera-back responde igual).
 	 */
 	diasAtrasoMoraMaximo?: number;
+	/**
+	 * Deuda vencida REAL con 2 decimales: saldo de las cuotas vencidas
+	 * (descuenta abonos parciales, validated y pending) + mora activa. Solo la
+	 * trae el listado (`/getAllCredits`); ausente si cartera-back no pudo
+	 * calcularla.
+	 */
+	monto_vencido?: string;
 	/** Mora ya pagada en efectivo sobre las cuotas que SIGUEN atrasadas (lo que baja la mora de hoy). No es el histórico: lo abonado a cuotas ya cubiertas sale de la cuenta. */
 	moraPagada?: string;
 	/** Mora condonada sobre las cuotas que SIGUEN atrasadas. Baja la mora igual que un pago, pero no es plata que entró. */
@@ -1322,6 +1329,11 @@ export interface GetAllCreditsParams {
 	 * INCOBRABLE).
 	 */
 	buckets?: number[];
+	/**
+	 * COBROS-02: `bucket_motor` = orden de la cobranza (bucket del motor desc →
+	 * cuota impaga más antigua → deuda total). Sin él, fecha de creación desc.
+	 */
+	orden?: "bucket_motor";
 }
 
 export interface GetPaymentsParams {

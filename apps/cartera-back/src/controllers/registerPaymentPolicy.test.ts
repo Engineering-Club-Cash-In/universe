@@ -1885,3 +1885,75 @@ describe("resolverCuotaParaFilaSuelta", () => {
     expect(resolverCuotaParaFilaSuelta({})).toBeNull();
   });
 });
+
+describe("saldoVencidoDeCuotas — deuda vencida real por montos", () => {
+  const saldo = registerPaymentPolicy.saldoVencidoDeCuotas;
+
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  // Cuota vencida sin ningún pago: el leftJoin trae las columnas del pago en null.
+  const sinPago = (numero_cuota: number) => ({
+    cuota_id: numero_cuota * 10,
+    numero_cuota,
+    pago_id: null,
+    validationStatus: null,
+    paymentFalse: null,
+  });
+
+  it("suma la cuota completa cuando no tiene pagos", () => {
+    expect(saldo([sinPago(1), sinPago(2)], "1000.00").toFixed(2)).toBe("2000.00");
+  });
+
+  it("descuenta el abono parcial validated", () => {
+    const rows = [fila({ abono_capital: "300.00", abono_interes: "100.00" })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("600.00");
+  });
+
+  it("descuenta también el pending (boleta en validación)", () => {
+    const rows = [fila({ validationStatus: "pending", abono_capital: "250.00" })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("750.00");
+  });
+
+  it("ignora los pagos anulados", () => {
+    const rows = [fila({ paymentFalse: true, abono_capital: "900.00" })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("1000.00");
+  });
+
+  it("no cuenta la cuota que ya está cubierta por montos", () => {
+    const rows = [
+      fila({ numero_cuota: 1, abono_capital: "1000.00" }),
+      sinPago(2),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("1000.00");
+  });
+
+  it("no cuenta la mora ni los otros del pago como abono a la cuota", () => {
+    const rows = [fila({ mora: "500.00", otros: "50", abono_capital: "100.00" })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("900.00");
+  });
+
+  it("suma los pagos repartidos entre filas duplicadas de la misma cuota", () => {
+    const rows = [
+      fila({ cuota_id: 10, pago_id: 1, abono_capital: "400.00" }),
+      fila({ cuota_id: 11, pago_id: 2, abono_capital: "200.00" }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("400.00");
+  });
+
+  it("devuelve 0 sin cuotas vencidas", () => {
+    expect(saldo([], "1000.00").toFixed(2)).toBe("0.00");
+  });
+});

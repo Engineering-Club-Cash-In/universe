@@ -49,6 +49,7 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   filtrarCuotasEnValidacion,
   filtrarCuotasVencidasSinCobertura,
+  saldoVencidoDeCuotas,
 } from "./registerPaymentPolicy";
 import {
   BASE_DIAS_MORA,
@@ -1109,6 +1110,98 @@ export async function incrementosMoraPorCredito(
   return resultado;
 }
 
+/**
+ * Deuda vencida REAL de cada crédito de la página: lo que falta de sus cuotas
+ * vencidas (descontando abonos parciales, con el mismo criterio por montos del
+ * contador de atrasadas, `saldoVencidoDeCuotas`) más la mora activa.
+ *
+ * El CRM la muestra en la columna "Deuda vencida" de Mi Cartera. Antes la
+ * aproximaba como `cuotas_atrasadas × cuota + mora`, que no descuenta abonos
+ * parciales.
+ *
+ * UNA consulta para toda la página (patrón de `incrementosMoraPorCredito`):
+ * cuotas impagas vencidas antes de hoy (GT) con sus pagos, plegadas en memoria.
+ * Un crédito sin cuotas vencidas sale con su mora (o "0.00"), nunca ausente.
+ */
+export async function montoVencidoPorCredito(
+  creditosDeLaPagina: {
+    credito_id: number;
+    cuota: Big | string | number | null;
+    monto_mora: Big | string | number | null;
+  }[],
+  hoyStr: string = new Date().toLocaleDateString("sv-SE", {
+    timeZone: "America/Guatemala",
+  })
+): Promise<Map<number, string>> {
+  const resultado = new Map<number, string>();
+  if (creditosDeLaPagina.length === 0) return resultado;
+
+  const ids = [...new Set(creditosDeLaPagina.map((c) => c.credito_id))];
+
+  const filas = await db
+    .select({
+      credito_id: cuotas_credito.credito_id,
+      cuota_id: cuotas_credito.cuota_id,
+      numero_cuota: cuotas_credito.numero_cuota,
+      pago_id: pagos_credito.pago_id,
+      validationStatus: pagos_credito.validationStatus,
+      paymentFalse: pagos_credito.paymentFalse,
+      monto_aplicado: pagos_credito.monto_aplicado,
+      pago_mora: pagos_credito.mora,
+      pago_otros: pagos_credito.otros,
+      abono_capital: pagos_credito.abono_capital,
+      abono_interes: pagos_credito.abono_interes,
+      abono_iva_12: pagos_credito.abono_iva_12,
+      abono_seguro: pagos_credito.abono_seguro,
+      abono_gps: pagos_credito.abono_gps,
+      membresias_pago: pagos_credito.membresias_pago,
+      capital_restante: pagos_credito.capital_restante,
+      interes_restante: pagos_credito.interes_restante,
+      iva_12_restante: pagos_credito.iva_12_restante,
+      seguro_restante: pagos_credito.seguro_restante,
+      gps_restante: pagos_credito.gps_restante,
+      membresias_restante: pagos_credito.membresias,
+    })
+    .from(cuotas_credito)
+    .leftJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, ids),
+        eq(cuotas_credito.pagado, false),
+        gt(cuotas_credito.numero_cuota, 0),
+        lt(cuotas_credito.fecha_vencimiento, hoyStr)
+      )
+    );
+
+  const filasPorCredito = new Map<number, typeof filas>();
+  for (const fila of filas) {
+    const lista = filasPorCredito.get(fila.credito_id);
+    if (lista) lista.push(fila);
+    else filasPorCredito.set(fila.credito_id, [fila]);
+  }
+
+  for (const credito of creditosDeLaPagina) {
+    const vencido = saldoVencidoDeCuotas(
+      filasPorCredito.get(credito.credito_id) ?? [],
+      credito.cuota ?? 0
+    );
+    resultado.set(
+      credito.credito_id,
+      vencido.plus(new Big(credito.monto_mora ?? 0)).toFixed(2)
+    );
+  }
+
+  return resultado;
+}
+
+/**
+ * Órdenes que acepta el listado de créditos además del de siempre.
+ * - `bucket_motor`: el de la cobranza de COBROS-02 (bucket desc → atraso →
+ *   deuda total).
+ */
+export const ORDEN_LISTADO_CREDITOS = ["bucket_motor"] as const;
+export type OrdenListadoCreditos = (typeof ORDEN_LISTADO_CREDITOS)[number];
+
 export interface CreditoConInfo {
   creditos: typeof creditos.$inferSelect;
   usuarios: typeof usuarios.$inferSelect;
@@ -1181,6 +1274,12 @@ export interface CreditoConInfo {
    * contradice al monto que se muestra al lado.
    */
   diasAtrasoMoraMaximo?: number;
+  /**
+   * Deuda vencida real: saldo de las cuotas vencidas (descuenta abonos
+   * parciales) + mora activa, con 2 decimales. Ausente si el cálculo falló;
+   * el CRM vuelve entonces a su aproximación. Ver `montoVencidoPorCredito`.
+   */
+  monto_vencido?: string;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1250,7 +1349,10 @@ export async function getCreditosWithUserByMesAnio(
   // créditos que el motor aún no vio (sin INICIAL — p.ej. ambientes donde las
   // migraciones cobros-02 no se han aplicado; ahí el try/catch degrada solo).
   buckets_numeros?: number[],
-  excluir_pagados_mes?: boolean
+  excluir_pagados_mes?: boolean,
+  // 🪣 COBROS-02: orden de la cobranza. Sin él, el de siempre (fecha de
+  // creación desc). Ver ORDEN_LISTADO_CREDITOS.
+  orden?: OrdenListadoCreditos
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1468,22 +1570,9 @@ export async function getCreditosWithUserByMesAnio(
   // con las reglas de bucketDeCredito: estados_incluidos manda → INCOBRABLE a
   // B5; luego rango de cuotas de la mora activa; sin mora = 0 → B0). El
   // fallback vivo solo aplica a créditos sin INICIAL (el motor no los ha visto).
-  if (buckets_numeros && buckets_numeros.length > 0) {
-    console.log(`🔎 Filtrando por bucket(s) [motor]: ${buckets_numeros.join(", ")}`);
-    const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
-    const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
-    // La derivación VIVA (branches 2 y 3 del COALESCE) solo aplica a estados que
-    // bucketDeCredito realmente bucketea. EN_CONVENIO pasa el filtro de arriba
-    // (para verse en la lista) pero su bucket sale SOLO de buckets_historial —lo
-    // que sembró el job de convenios—: sin el guard, el branch de mora lo caería
-    // a B0 (0 cuotas_atrasadas) y aparecería como B0 en el filtro mientras el
-    // mapper manda bucket: null (bucketDeCredito devuelve null para EN_CONVENIO),
-    // dejando filas que el front no puede pintar ni filtrar. Con el guard, filtro
-    // y mapper concuerdan: bucket del historial, o excluido si el job aún no lo
-    // sembró (review Codex #1223).
-    const bucketFueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
-    conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
-    conditions.push(sql`COALESCE(
+  // La expresión vive aparte porque también ordena (orden = "bucket_motor").
+  const bucketFueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const bucketMotorSql = sql`COALESCE(
       (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
         WHERE h.credito_id = ${creditos.credito_id}
         ORDER BY h.fecha DESC, h.historial_id DESC
@@ -1499,7 +1588,23 @@ export async function getCreditosWithUserByMesAnio(
           AND COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= b.cuotas_min
           AND (b.cuotas_max IS NULL OR COALESCE(${moras_credito.cuotas_atrasadas}, 0) <= b.cuotas_max)
         ORDER BY b.numero LIMIT 1)
-    ) IN (${numerosSql})`);
+    )`;
+
+  if (buckets_numeros && buckets_numeros.length > 0) {
+    console.log(`🔎 Filtrando por bucket(s) [motor]: ${buckets_numeros.join(", ")}`);
+    const numerosSql = sql.join(buckets_numeros.map((n) => sql`${n}`), sql`, `);
+    const fueraSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
+    // La derivación VIVA (branches 2 y 3 del COALESCE) solo aplica a estados que
+    // bucketDeCredito realmente bucketea. EN_CONVENIO pasa el filtro de arriba
+    // (para verse en la lista) pero su bucket sale SOLO de buckets_historial —lo
+    // que sembró el job de convenios—: sin el guard, el branch de mora lo caería
+    // a B0 (0 cuotas_atrasadas) y aparecería como B0 en el filtro mientras el
+    // mapper manda bucket: null (bucketDeCredito devuelve null para EN_CONVENIO),
+    // dejando filas que el front no puede pintar ni filtrar. Con el guard, filtro
+    // y mapper concuerdan: bucket del historial, o excluido si el job aún no lo
+    // sembró (review Codex #1223).
+    conditions.push(sql`${creditos.statusCredit} NOT IN (${fueraSql})`);
+    conditions.push(sql`${bucketMotorSql} IN (${numerosSql})`);
   }
 
   if (excluir_pagados_mes) {
@@ -1573,11 +1678,29 @@ export async function getCreditosWithUserByMesAnio(
       ) as any;
     }
 
+    // Orden de la cobranza (COBROS-02, Mi Cartera): bucket del motor más alto
+    // primero, después el atraso (cuota impaga vencida más antigua; es el
+    // proxy SQL de `diasAtrasoMoraMaximo`, que se calcula en memoria), después
+    // la deuda total. credito_id desempata para que la paginación sea estable.
+    const ordenSql =
+      orden === "bucket_motor"
+        ? [
+            sql`${bucketMotorSql} DESC NULLS LAST`,
+            sql`(SELECT MIN(cc.fecha_vencimiento) FROM ${cuotas_credito} cc
+                  WHERE cc.credito_id = ${creditos.credito_id}
+                    AND cc.pagado = false
+                    AND cc.numero_cuota > 0
+                    AND cc.fecha_vencimiento < ${hoyStr}::date) ASC NULLS LAST`,
+            sql`${creditos.deudatotal}::numeric DESC NULLS LAST`,
+            desc(creditos.credito_id),
+          ]
+        : [desc(creditos.fecha_creacion)];
+
     rows = await query
       .where(whereCondition)
       .limit(perPage)
       .offset(offset)
-      .orderBy(desc(creditos.fecha_creacion));
+      .orderBy(...ordenSql);
 
     console.log(`📄 Créditos encontrados: ${rows.length}`);
   } catch (err) {
@@ -2029,6 +2152,33 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error calculando incrementos de mora:", err);
   }
 
+  // 6.6 Deuda vencida real (cuotas vencidas sin cubrir + mora), para TODA la
+  // página de una vez.
+  let montoVencidoMap = new Map<number, string>();
+  try {
+    const creditosUnicosParaVencido = new Map<
+      number,
+      { credito_id: number; cuota: string | null; monto_mora: string | null }
+    >();
+    rows.forEach((row) => {
+      const creditoId = row.creditos.credito_id;
+      if (!creditosUnicosParaVencido.has(creditoId)) {
+        creditosUnicosParaVencido.set(creditoId, {
+          credito_id: creditoId,
+          cuota: row.creditos.cuota ?? null,
+          monto_mora: morasMap[creditoId]?.monto_mora ?? null,
+        });
+      }
+    });
+    montoVencidoMap = await montoVencidoPorCredito(
+      [...creditosUnicosParaVencido.values()],
+      hoyStr
+    );
+  } catch (err) {
+    // Fail-open: sin el campo el CRM vuelve a su aproximación.
+    console.error("❌ Error calculando deuda vencida:", err);
+  }
+
   // 7️⃣ 🔥 MAP FINAL - Sin duplicados
   let data: CreditoConInfo[] = [];
   try {
@@ -2113,6 +2263,7 @@ export async function getCreditosWithUserByMesAnio(
             incrementosMoraMap.get(creditoId)?.incrementoMaximoMensualMora,
           diasAtrasoMoraMaximo:
             incrementosMoraMap.get(creditoId)?.diasAtrasoMoraMaximo,
+          monto_vencido: montoVencidoMap.get(creditoId),
         });
       }
     });

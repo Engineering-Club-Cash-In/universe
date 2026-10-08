@@ -616,6 +616,38 @@ export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
   return rows.filter((row) => enValidacion.has(row.numero_cuota));
 };
 
+/**
+ * Lo que de verdad falta pagar de las cuotas VENCIDAS de un crédito (sin la
+ * mora): por cada cuota que `filtrarCuotasVencidasSinCobertura` deja como
+ * atrasada, el valor contractual menos lo que sus pagos vivos ya aplicaron.
+ *
+ * Mismo criterio que el contador de atrasadas: cuentan los pagos validated y
+ * pending (una boleta en validación ya es plata registrada), y una cuota
+ * cubierta por montos o por un recibo saldado aporta 0. Así el monto y el
+ * número de cuotas atrasadas que ve el asesor salen de la misma regla.
+ *
+ * Recibe las filas del leftJoin cuota↔pago, igual que el filtro.
+ */
+export const saldoVencidoDeCuotas = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): Big => {
+  const atrasadas = filtrarCuotasVencidasSinCobertura(rows, montoCuota);
+  let total = new Big(0);
+  for (const grupo of agruparPorNumeroCuota(atrasadas).values()) {
+    // Una cuota sin pagos llega como UNA fila con las columnas del pago en
+    // null; calcularCoberturaCuota la descarta (paymentFalse !== false) y el
+    // saldo queda en el valor completo de la cuota.
+    const { saldoPendiente } = calcularCoberturaCuota({
+      montoCuota,
+      pagos: grupo,
+      incluirPendientes: true,
+    });
+    total = total.plus(saldoPendiente);
+  }
+  return total;
+};
+
 type CuotaAbiertaConPagos = {
   cuotaId: number;
   numeroCuota: number;

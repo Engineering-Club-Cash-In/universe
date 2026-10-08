@@ -281,6 +281,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	excluir_pagados_mes?: boolean;
 	/** COBROS-02: buckets del motor (0-5); ver GetAllCreditsParams.buckets. */
 	buckets?: number[];
+	/** COBROS-02: orden de la cobranza; ver GetAllCreditsParams.orden. */
+	orden?: "bucket_motor";
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -335,6 +337,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		}),
 		...(params.buckets &&
 			params.buckets.length > 0 && { buckets: params.buckets }),
+		...(params.orden && { orden: params.orden }),
 	});
 
 	return {
@@ -1449,6 +1452,10 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// El asesor solo ve su cartera, mande lo que mande el front.
 			const emailCobrador = emailCobradorEfectivo(context, input.emailCobrador);
+			// Orden de la cobranza (B5 del doc 13): lo que se ve en la página 1
+			// es lo más urgente de TODA la cartera, no lo más reciente. El
+			// front sigue ordenando la página que recibe.
+			const ORDEN_CARTERA_COBROS = "bucket_motor" as const;
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
 				try {
@@ -1678,6 +1685,7 @@ export const cobrosRouter = {
 									`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
 								);
 								creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+									orden: ORDEN_CARTERA_COBROS,
 									buckets,
 									mes,
 									anio,
@@ -1726,6 +1734,7 @@ export const cobrosRouter = {
 								);
 								const perPage = 200;
 								const firstPage = await obtenerTodosLosCreditosCarteraBack({
+									orden: ORDEN_CARTERA_COBROS,
 									buckets,
 									mes,
 									anio,
@@ -1748,6 +1757,7 @@ export const cobrosRouter = {
 
 								for (let page = 2; page <= firstPage.totalPages; page++) {
 									const nextPage = await obtenerTodosLosCreditosCarteraBack({
+										orden: ORDEN_CARTERA_COBROS,
 										buckets,
 										mes,
 										anio,
@@ -1795,6 +1805,7 @@ export const cobrosRouter = {
 							};
 						} else {
 							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+								orden: ORDEN_CARTERA_COBROS,
 								buckets,
 								mes,
 								anio,
@@ -1816,6 +1827,7 @@ export const cobrosRouter = {
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
 						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+							orden: ORDEN_CARTERA_COBROS,
 							buckets,
 							mes,
 							anio,
@@ -2033,15 +2045,17 @@ export const cobrosRouter = {
 								bucketNumero: credito.bucket?.numero ?? null,
 								bucketPrefijo: credito.bucket?.prefijo ?? null,
 								bucketNombre: credito.bucket?.nombre ?? null,
-								// TODO(José): reemplazar por `monto_vencido` de cartera-back
-								// (saldo real de las cuotas atrasadas + mora; esto no descuenta
-								// abonos parciales). Ver docs/features/cobros-02/
-								// 13-dashboard-asesor-backend.md › B4.
-								deudaVencida: (
-									cuotasAtrasadas * Number(credito.creditos.cuota ?? 0) +
-									montoEnMora
-								).toFixed(2),
-								deudaVencidaAproximada: true,
+								// Deuda vencida real de cartera-back (saldo de las cuotas
+								// vencidas descontando abonos parciales + mora). Si no vino
+								// (cálculo fallido allá), la aproximación de antes y el flag
+								// lo dice.
+								deudaVencida:
+									credito.monto_vencido ??
+									(
+										cuotasAtrasadas * Number(credito.creditos.cuota ?? 0) +
+										montoEnMora
+									).toFixed(2),
+								deudaVencidaAproximada: credito.monto_vencido == null,
 								...(() => {
 									const seguimiento = casoCobro
 										? (seguimientoPorCaso.get(casoCobro.id) ??

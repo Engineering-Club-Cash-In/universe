@@ -10,16 +10,19 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 
 ## Estado
 
+> [!WARNING]
+> **Este PR trae la migración `0078_cobros_ficha_360.sql`: hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `guardarTelefonosCaso` y `updateContactInfoCobros` **fallan**, porque escriben la bitácora en la misma transacción, y el detalle del caso lee las columnas nuevas de `casos_cobros`. `getFichaComplementos` no se cae (cada bloque está aislado), pero el historial de cambios llega `null`.
+
 | Tarea | Qué es | Estado | Dónde quedó |
 | --- | --- | --- | --- |
-| **F1** | Datos personales del titular | ✅ Hecho (PR1, este) | `cargarDatosPersonales` en `lib/ficha-complementos.ts` |
-| **F2** | Codeudores | ✅ Hecho (PR1, este) | `cargarCodeudores` en `lib/ficha-complementos.ts` |
-| **F3** | Historial de cambios del cliente | ⏳ PR2 | Tabla nueva en la migración 0078 |
+| **F1** | Datos personales del titular | ✅ Mergeado (PR1, #1912) | `cargarDatosPersonales` en `lib/ficha-complementos.ts` |
+| **F2** | Codeudores | ✅ Mergeado (PR1, #1912) | `cargarCodeudores` en `lib/ficha-complementos.ts` |
+| **F3** | Historial de cambios del cliente | ✅ Hecho (PR2, este) | Tabla `cambios_datos_cliente_cobros` · `lib/cambios-datos-cliente.ts` |
 | **F4** | Vida del crédito | ⏳ PR3 | Historial de buckets + convenios + promesas cumplidas |
-| **F5** | Seguro | ✅ Hecho (PR1, este) · ⚠️ sin datos | `cargarSeguro` en `lib/ficha-complementos.ts` |
+| **F5** | Seguro | ✅ Mergeado (PR1, #1912) · ⚠️ sin datos | `cargarSeguro` en `lib/ficha-complementos.ts` |
 | **F6** | Documentos | ⏳ PR4 | Catálogo, envío por WhatsApp y solicitudes al supervisor |
 | **F7** | Asistente IA | ⏳ PR4 | Gemini detrás de `COBROS_ASISTENTE_IA=on` (apagado) |
-| **F8** | Editar direcciones | ⏳ PR2 | Mutación nueva + columnas de override en `casos_cobros` |
+| **F8** | Editar direcciones | ✅ Backend hecho (PR2, este) · ⚠️ falta cablear el front | `guardarDireccionesCaso` · `lib/direcciones-caso.ts` |
 
 ---
 
@@ -71,6 +74,14 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - `[]` si la oportunidad no tiene codeudores; `null` si el caso no tiene oportunidad.
 - El `id` es el de `co_debtors`. El Espacio de trabajo ya lo usa: los codeudores aparecen como participantes de la gestión (`gestion-panel.tsx`) sin cambiar el front.
 
+### F3 · Historial de cambios
+
+- **Tabla** `cambios_datos_cliente_cobros`: caso, campo, categoría, valor anterior y nuevo, origen (`ficha_360`, `workspace`, `carga_masiva`, `sistema`), quién y cuándo. Append-only.
+- **Quién escribe:** `guardarTelefonosCaso`, `updateContactInfoCobros` y `guardarDireccionesCaso`. Cada una lee el «antes» con `FOR UPDATE`, hace el UPDATE y registra **solo los campos que cambiaron**, todo en la misma transacción (si la bitácora falla, el cambio no se guarda).
+- **Origen:** las tres aceptan `origen` opcional (`ficha_360` por defecto, o `workspace`). Hoy solo la ficha las llama, así que el default es el correcto. `carga_masiva` queda reservado: no existe una carga masiva de contactos de cobros.
+- **Lectura:** lo más reciente primero, hasta 200. Textos: «Teléfono principal», «Dirección de trabajo»…; categoría «Contacto» o «Direcciones»; autor «Ana Gómez (asesor)» (supervisor, administrador; otros roles solo el nombre); un dato borrado se muestra «Sin dato».
+- **De paso:** `updateContactInfoCobros` no validaba el acceso al caso (cualquier usuario de cobros podía cambiar el contacto de un caso ajeno). Ahora llama a `assertAccesoCasoCobro`.
+
 ### F5 · Seguro
 
 - **Vehículo:** el del contrato (`casos_cobros.contrato_id → contratos_financiamiento.vehicle_id`), que es el autoritativo (mismo criterio que `resolverVehiculoCasoPagalo`). Solo sin contrato se cae a la oportunidad. En la base local 10 casos con contrato tienen un vehículo distinto al de la oportunidad, y ninguno pierde ni gana póliza.
@@ -79,9 +90,24 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - `coberturas`: «Deducible Q2,500.00» si `vehicles.deducible` es mayor que 0.
 - **⚠️ Sin datos hoy:** ningún vehículo tiene esas columnas llenas. Para que la tarjeta muestre algo, ventas o el cierre del crédito tienen que capturarlas. Si negocio prefiere un texto fijo por aseguradora, se cambia en `armarSeguro`.
 
+### F8 · Editar direcciones
+
+- **Columnas nuevas** en `casos_cobros`: `direccion_residencia_cobros`, `empresa_trabajo_cobros` y `direccion_trabajo_cobros`. NULL = la de origen.
+- **`guardarDireccionesCaso({ casoCobroId, residencia?, trabajo?: { empresa?, direccion? }, origen? })`:** con acceso al caso. Un campo que no viene no se toca; `""` o `null` vuelve a la dirección de origen. Al menos un campo es obligatorio. Cada cambio queda en la bitácora (F3), con el «antes» que la ficha mostraba (la corregida o la de origen).
+- **Quién lo lee:**
+  - residencia: `getDetallesCreditoCarteraBack` (la usan la ficha y el Espacio de trabajo), `getCasoCobroById` y `getDetallesContrato`;
+  - trabajo: `getDatosLaboralesCaso`, campo por campo sobre la solicitud (la tarjeta de trabajo, el Espacio de trabajo y las visitas lo ven sin cambiar el front).
+
 ---
 
 ## Pruebas hechas
+
+**PR2 (F3, F8), 2026-10-08:**
+- `lib/cambios-datos-cliente.test.ts` (10, en verde): diferencias campo por campo, textos de la bitácora y dirección de trabajo efectiva. `bunx tsc -b` sin errores; siguen en verde las pruebas de visitas, GPS y estado de cuenta.
+- La 0078 se aplicó dos veces seguidas en la base local sin errores (idempotente).
+- Smoke contra la base local llamando a los procedimientos reales con `call` de oRPC: cambiar teléfono, correo, residencia y dirección de trabajo deja 4 filas en la bitácora con el antes, el después, el autor y «Ficha 360»; repetir el mismo teléfono no deja fila; `getDatosLaboralesCaso` devuelve la dirección corregida conservando empresa, puesto y horario; sin ningún campo responde error de validación. Los datos de prueba se revirtieron.
+- **Acceso:** un asesor sobre un caso que no es suyo recibe «Caso de cobro no encontrado o sin acceso.» en `updateContactInfoCobros`, `guardarTelefonosCaso` y `guardarDireccionesCaso`; el teléfono del caso queda intacto y no se escribe nada en la bitácora.
+- **QA en pantalla:** la pestaña «Historial de cambios» muestra los cambios con su antes y después, el autor y el origen. Hay que recargar la página si se abre justo después de editar (ver «Pendiente de front»).
 
 **PR1 (F1, F2, F5):**
 - Pruebas unitarias nuevas en `lib/ficha-complementos.test.ts` (18, en verde): nombre propio, fechas, sexo y estado civil de las tres fuentes, precedencia por campo, apellido de casada con «DE», teléfonos con y sin código de país, codeudores sin números repetidos y seguro con y sin datos.
@@ -119,6 +145,7 @@ Revisión interna:
 | Teléfonos repetidos en el codeudor | **Cierto, corregido, y más amplio.** Además de celular y casa iguales entre sí (10 de 24 solicitudes), la comparación no reconocía el mismo número con y sin código de país. Ahora se comparan los últimos 8 dígitos. En el caso `CRM-9d3bf24a-…`, el Codeudor 1 ya no repite el teléfono del titular en alterno ni en casa. |
 | Falta `orderBy` en las solicitudes de codeudores | **No aplica.** `credit_applications` tiene un índice único (`opportunity_id`, `person_type`, `person_id`) y no hay duplicados: cada codeudor tiene como máximo una solicitud. |
 | `eqDpi` no usa el índice de `renapinfo` | **Cierto, impacto bajo, no se cambió.** `regexp_replace` sobre la columna evita la llave primaria. `renapinfo` tiene 1,459 filas y `eqDpi` es un helper que ya se usaba en otros lugares. Si en producción la tabla es grande: `CREATE INDEX idx_renap_dpi_normalizado ON renapinfo (regexp_replace(dpi, '\s', '', 'g'))`. |
+| `residenciaDeOrigen` ignora `casos_cobros.direccion_contacto` si el caso no tiene lead (F8) | **Parcial, no se cambió.** La ficha muestra «la corregida, si no la del lead» y el «antes» de la bitácora coincide con lo que se veía; la ficha nunca mostró `direccion_contacto` (6 casos tienen dirección en el caso pero no en el lead). Otros procedimientos (`getCasoCobroById`, `getDetallesContrato`) sí la usan de respaldo: es una inconsistencia anterior a este issue. |
 
 ---
 
@@ -127,7 +154,10 @@ Revisión interna:
 | Qué | Dónde | Detalle |
 | --- | --- | --- |
 | **Tarjeta «Seguro»: leer todo del bloque** (F5) | `routes/cobros/$id.tsx` (~3048, `CardSeguroFicha`) | Hoy la tarjeta toma tipo y coberturas de `complementos.seguro` (vehículo del contrato) pero aseguradora, cabina, póliza, monto y vencimiento de `caso.*` (vehículo de la oportunidad): en un caso con vehículo distinto mezcla los dos. Con `complementos.seguro` presente, tomar de ahí `aseguradora`, `telefonoEmergencia`, `poliza`, `montoAsegurado` y `vencimiento` (este último con `parseFechaLocal`, es `YYYY-MM-DD`); solo si el bloque llega `null`, usar `caso.*`. |
-| *(se completa con F3, F6, F7 y F8)* | | |
+| **Editar direcciones** (F8) | `routes/cobros/$id.tsx` (~3455, `DireccionCard` con la nota «pendiente de backend (tarea F8)») | Hacer editables las dos tarjetas y guardar con `guardarDireccionesCaso({ casoCobroId, residencia?, trabajo?: { empresa?, direccion? } })` (en `fichaCobrosAccionesRouter`: se tipa en `orpcAparte`). Después, invalidar `getDetallesCreditoCarteraBack`, `getDatosLaboralesCaso` y `getFichaComplementos`. |
+| **Refrescar la ficha tras editar** (F3) | `routes/cobros/$id.tsx` (`guardarContacto` y el autoguardado de teléfonos) | `getFichaComplementos` se guarda 5 minutos (`staleTime`) y no se invalida al guardar: el «Historial de cambios» no muestra el cambio hasta recargar. Invalidar `getFichaComplementos` al guardar teléfonos, correo o direcciones. |
+| **Origen de los cambios desde el Workspace** (F3) | Donde el Workspace edite teléfonos, correo o direcciones | Mandar `origen: "workspace"`; sin él queda «Ficha 360». Hoy solo la ficha edita. |
+| *(se completa con F6 y F7)* | | |
 
 ---
 
@@ -135,8 +165,8 @@ Revisión interna:
 
 | PR | Rama | Tareas | Migración | Estado |
 | --- | --- | --- | --- | --- |
-| PR1 | `feat/cobros-ficha-datos-contacto` | F1 + F2 + F5 y este doc | — | **Este PR** |
-| PR2 | `feat/cobros-ficha-cambios-direcciones` | F3 + F8 | Crea la 0078 | Pendiente |
+| PR1 | `feat/cobros-ficha-datos-contacto` | F1 + F2 + F5 y este doc | — | Mergeado (#1912) |
+| PR2 | `feat/cobros-ficha-cambios-direcciones` | F3 + F8 | Crea la 0078 | **Este PR** |
 | PR3 | `feat/cobros-ficha-vida-credito` | F4 | — | Pendiente |
 | PR4 | `feat/cobros-ficha-documentos-ia` | F6 + F7 y cierre de docs (15, 21, README) | Amplía la 0078 | Pendiente |
 

@@ -7,8 +7,8 @@
  *   gestión, intentos sin contacto, próximo contacto) y el chip de estado de
  *   gestión del encabezado. Real, sale de `contactos_cobros`.
  * - `getFichaComplementos`: los bloques de la ficha que no salen del detalle
- *   del caso. Ya son reales F1 (datos personales), F2 (codeudores) y F5
- *   (seguro), armados en `lib/ficha-complementos.ts`. Los que siguen en `null`
+ *   del caso. Ya son reales F1 (datos personales), F2 (codeudores), F3
+ *   (historial de cambios) y F5 (seguro), armados en `lib/ficha-complementos.ts`. Los que siguen en `null`
  *   tienen su `TODO(José) · tarea Fn`; el front los muestra "—" o "pronto".
  *   Detalle: docs/features/cobros-02/15-ficha-360-backend.md y
  *   docs/features/cobros-02/21-plan-backend-ficha-360.md
@@ -18,6 +18,7 @@ import { and, eq, gte, ne, not, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { contactosCobros } from "../db/schema/cobros";
+import { cargarHistorialCambios } from "../lib/cambios-datos-cliente";
 import {
 	DIAS_VENTANA_CONTACTABILIDAD,
 	diasSinGestion,
@@ -246,19 +247,21 @@ export const fichaCobrosRouter = {
 					);
 					return null;
 				});
-			const [datosPersonales, codeudores, seguro] = await Promise.all([
-				// F1 · RENAP → lead → solicitud, campo por campo.
-				bloque<DatosPersonalesFicha>("datos personales", () =>
-					cargarDatosPersonales(ctx),
-				),
-				// F2 · Codeudores de la oportunidad del crédito; [] si no tiene.
-				bloque<CodeudorFicha[]>("codeudores", () => cargarCodeudores(ctx)),
-				// F5 · Tipo de cobertura y deducible del vehículo.
-				bloque<SeguroComplemento>("seguro", () => cargarSeguro(ctx)),
-			]);
-			// TODO(José) · tarea F3: bitácora de cambios de los datos del cliente
-			// (antes → después, autor, origen). Ver la bitácora crm_entity_audit.
-			const historialCambios = null as CambioFicha[] | null;
+			const [datosPersonales, codeudores, seguro, historialCambios] =
+				await Promise.all([
+					// F1 · RENAP → lead → solicitud, campo por campo.
+					bloque<DatosPersonalesFicha>("datos personales", () =>
+						cargarDatosPersonales(ctx),
+					),
+					// F2 · Codeudores de la oportunidad del crédito; [] si no tiene.
+					bloque<CodeudorFicha[]>("codeudores", () => cargarCodeudores(ctx)),
+					// F5 · Tipo de cobertura y deducible del vehículo.
+					bloque<SeguroComplemento>("seguro", () => cargarSeguro(ctx)),
+					// F3 · Bitácora de cambios de teléfonos, correo y direcciones.
+					bloque<CambioFicha[]>("historial de cambios", () =>
+						cargarHistorialCambios(input.casoCobroId),
+					),
+				]);
 			// TODO(José) · tarea F4: vida del crédito — entradas/salidas de bucket
 			// (cartera.buckets_historial), reestructuras, convenios, promesas
 			// cumplidas. Más reciente primero.

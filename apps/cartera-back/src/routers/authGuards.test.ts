@@ -91,12 +91,14 @@ const { authRouter } = await import("./auth");
 const { advisorRouter } = await import("./advisor");
 const { default: defaultRouter } = await import("./default");
 const { creditosNuevosConAbonosRouter } = await import("./creditosNuevosConAbonos");
+const { sifcoRouter } = await import("./migration");
 
 const app = new Elysia()
   .use(authRouter)
   .use(advisorRouter)
   .use(defaultRouter)
-  .use(creditosNuevosConAbonosRouter);
+  .use(creditosNuevosConAbonosRouter)
+  .use(sifcoRouter);
 
 const PASSWORD = "secreta-123";
 const HASH = await bcrypt.hash(PASSWORD, 4);
@@ -164,6 +166,9 @@ const RUTAS_ADMIN: Array<[string, string, unknown?]> = [
   // Reasignar el asesor de un crédito: el dashboard Nexa acota al ASESOR por
   // `creditos.asesor_id`, así que un ASESOR no puede meterse créditos ajenos.
   ["POST", "/updateCreditAdvisor", { credito_id: 10, nombre_asesor: "Asesor" }],
+  // Re-importar un crédito del Excel le borra cuotas e inversionistas y el
+  // upsert le reescribe `asesor_id` (mismo alcance del dashboard Nexa).
+  ["POST", "/processFromExcelFull", { credito: { creditoBase: "1", cliente: "X", filas: [] } }],
   // Diagnósticos que mandan correos (uno adjunta la liquidación de un
   // inversionista a cualquier dirección) o exponen créditos.
   ["GET", "/test-email?email=atacante@example.com"],

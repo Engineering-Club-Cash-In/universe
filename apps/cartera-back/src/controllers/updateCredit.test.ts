@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { getTableName } from "drizzle-orm";
 
 // Evita que database/index.ts abra la conexión al importar el controller.
 // El db mockeado captura la condición WHERE del select de pagos para poder
@@ -39,9 +40,15 @@ let pagosActuales: any[] = [];
 let inversionistasActuales: any[] = [];
 const capturedUpdates: { vals: any; cond: any }[] = [];
 const capturedInserts: any[] = [];
+// Revalidación de la sesión (platform_users) para el permiso de reasignar el
+// asesor: filas que devuelve, o `null` para que la base FALLE.
+let sesionActual: any[] | null = [];
+// Si se llena, cada select del crédito saca la siguiente fila (la 1.ª es la
+// lectura previa al lock, la 2.ª la de dentro de la transacción).
+let lecturasCredito: any[] = [];
 const dbMock = {
   select: () => ({
-    from: () => ({
+    from: (tabla: any) => ({
       // select del crédito: .where(cond).limit(1)
       // select de montos de inversionistas: .where(cond) y se await directo,
       // por eso el retorno es thenable además de traer .limit().
@@ -52,7 +59,12 @@ const dbMock = {
         capturedCreditWheres.push(cond);
         const filas = inversionistasActuales;
         return {
-          limit: () => Promise.resolve([creditoActual]),
+          limit: () =>
+            getTableName(tabla) === "platform_users"
+              ? sesionActual
+                ? Promise.resolve(sesionActual)
+                : Promise.reject(new Error("BD caída"))
+              : Promise.resolve([lecturasCredito.shift() ?? creditoActual]),
           for: (strength: unknown) => {
             forCallsCount++;
             lastForArg = strength;
@@ -124,6 +136,8 @@ beforeEach(() => {
   pagosActuales = [];
   inversionistasActuales = [];
   creditoActual = fakeCredito;
+  sesionActual = [];
+  lecturasCredito = [];
   draftsWarning = null;
   checkCreditHasUnliquidatedDraftsMock.mockClear();
   forCallsCount = 0;
@@ -888,5 +902,72 @@ describe("updateCredit — validaciones monetarias", () => {
 
     expect(set.status).toBe(400);
     expect(result.message).toBe("El capital debe ser mayor o igual a 1");
+  });
+});
+
+// Codex P1 (#1909): el dashboard Nexa acota al ASESOR por `creditos.asesor_id`
+// y /updateCredit sólo pasa por authMiddleware: cualquier token podía
+// reasignarse créditos ajenos. Sólo el CAMBIO del asesor exige ADMIN vigente.
+describe("updateCredit — cambiar el asesor exige un ADMIN vigente", () => {
+  const conAsesor = { ...fakeCredito, asesor_id: 5 };
+  const ADMIN_ACTIVO = { id: 1, role: "ADMIN", is_active: true };
+  const llamar = (user: any, extra: Record<string, unknown> = {}) => {
+    const { set, request } = makeCtx();
+    return updateCredit({ body: { ...baseBody, ...extra }, set, request, user }).then(
+      (result: any) => ({ result, status: set.status })
+    );
+  };
+  const sinEscrituras = () => {
+    expect(capturedUpdates).toHaveLength(0);
+    expect(capturedInserts).toHaveLength(0);
+  };
+
+  beforeEach(() => {
+    creditoActual = conAsesor;
+  });
+
+  it("un ASESOR que cambia el asesor → 403 sin escribir nada", async () => {
+    const { status } = await llamar({ id: 7, role: "ASESOR" }, { asesor_id: 9 });
+    expect(status).toBe(403);
+    sinEscrituras();
+  });
+
+  it("un ASESOR que reenvía el mismo asesor o lo omite → pasa como hoy, sin reescribirlo", async () => {
+    for (const extra of [{ asesor_id: 5 }, {}]) {
+      capturedUpdates.length = 0;
+      const { status } = await llamar({ id: 7, role: "ASESOR" }, extra);
+      expect(status).toBe(200);
+      expect(capturedUpdates.length).toBeGreaterThan(0);
+      expect(capturedUpdates.some((u) => "asesor_id" in u.vals)).toBe(false);
+    }
+  });
+
+  it("un ADMIN activo que cambia el asesor → 200 y lo escribe", async () => {
+    sesionActual = [ADMIN_ACTIVO];
+    const { status } = await llamar({ id: 1, role: "ADMIN" }, { asesor_id: 9 });
+    expect(status).toBe(200);
+    expect(capturedUpdates.some((u) => u.vals.asesor_id === 9)).toBe(true);
+  });
+
+  it("un ADMIN desactivado (401) o degradado en la base (403) → rechazo sin escribir", async () => {
+    sesionActual = [{ ...ADMIN_ACTIVO, is_active: false }];
+    expect((await llamar({ id: 1, role: "ADMIN" }, { asesor_id: 9 })).status).toBe(401);
+    sesionActual = [{ ...ADMIN_ACTIVO, role: "ASESOR" }];
+    expect((await llamar({ id: 1, role: "ADMIN" }, { asesor_id: 9 })).status).toBe(403);
+    sinEscrituras();
+  });
+
+  it("si la base falla al revalidar la sesión → rechazo (500) sin escribir", async () => {
+    sesionActual = null;
+    const { status } = await llamar({ id: 1, role: "ADMIN" }, { asesor_id: 9 });
+    expect(status).toBe(500);
+    sinEscrituras();
+  });
+
+  it("si el asesor cambió entre la lectura previa y la transacción → 409 sin escribir", async () => {
+    lecturasCredito = [conAsesor, { ...conAsesor, asesor_id: 9 }];
+    const { status } = await llamar({ id: 7, role: "ASESOR" }, { asesor_id: 5 });
+    expect(status).toBe(409);
+    sinEscrituras();
   });
 });

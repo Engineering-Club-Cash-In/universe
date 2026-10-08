@@ -36,6 +36,7 @@ import {
 } from "../utils/withAuditContext";
 import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import { rechazoSiNoEsAdminActivo } from "../routers/midleware";
 import {
   getModalidadFacturacionSpreadById,
   resolveModalidadFacturacionSpread,
@@ -1479,7 +1480,7 @@ const extractUserId = (request: Request): number | null => {
   return null;
 };
 
-export const updateCredit = async ({ body, set, request }: any) => {
+export const updateCredit = async ({ body, set, request, user }: any) => {
   try {
     console.log("Updating credit with body:", body);
 
@@ -1521,6 +1522,26 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
+    // Reasignar el asesor es de ADMIN, igual que en /updateCreditAdvisor: el
+    // dashboard Nexa acota al ASESOR por `creditos.asesor_id`, y por acá
+    // cualquier token podía meterse créditos ajenos. Sólo se frena el CAMBIO:
+    // el modal (que sólo ve un ADMIN) reenvía el asesor actual en cada guardado.
+    // Va antes del lock y de toda escritura; si la base falla, lanza → 500 sin
+    // escribir. Dentro de la transacción se vuelve a comparar (ver abajo).
+    let puedeReasignarAsesor = false;
+    if (asesor_id !== undefined) {
+      const [fila] = await db
+        .select({ asesor_id: creditos.asesor_id })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1);
+      if (fila && fila.asesor_id !== asesor_id) {
+        const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+        if (rechazo) return rechazo;
+        puedeReasignarAsesor = true;
+      }
+    }
+
     const espejoUserId = extractUserId(request);
     const runUpdate = async (tx: typeof db) => {
       const db = tx;
@@ -1535,6 +1556,14 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (!current) {
       set.status = 400;
       return { message: "Credit not found" };
+    }
+
+    // El asesor cambió entre la lectura de arriba y ésta: lo que ahora sería un
+    // cambio no pasó por el permiso. Se rechaza antes de escribir nada.
+    const cambiaAsesor = asesor_id !== undefined && asesor_id !== current.asesor_id;
+    if (cambiaAsesor && !puedeReasignarAsesor) {
+      set.status = 409;
+      return { message: "El asesor del crédito cambió mientras se editaba. Recargá e intentá de nuevo." };
     }
 
     // Estados de cierre: el crédito se puede editar, pero su calendario de
@@ -1872,8 +1901,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (numero_credito_sifco !== undefined) {
       updateFields.numero_credito_sifco = numero_credito_sifco;
     }
-    if (asesor_id !== undefined) {
-      // ✅ Agregar al update
+    // Sólo se escribe si cambia (ya autorizado arriba): reenviar el mismo asesor
+    // no debe pisar una reasignación que entre en paralelo.
+    if (cambiaAsesor) {
       updateFields.asesor_id = asesor_id;
     }
     if (permite_abono_capital !== undefined) {

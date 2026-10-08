@@ -12,7 +12,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -21,7 +21,7 @@ import {
 	contratosFinanciamiento,
 	solicitudesDocumentosCobros,
 } from "../db/schema/cobros";
-import { clients, opportunities } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { vehicleDocuments, vehicles } from "../db/schema/vehicles";
 import type { DocumentoFicha } from "../routers/ficha-cobros";
@@ -235,6 +235,93 @@ const CODIGO_HTTP: Record<
 	ERROR_ENVIO: "BAD_GATEWAY",
 };
 
+/** Nombre y vehículo que van en el texto, con lo que se haya podido leer. */
+export interface DatosMensaje {
+	numeroCreditoSifco: string | null;
+	clienteNombre: string | null;
+	vehiculoMarca: string | null;
+	vehiculoModelo: string | null;
+	vehiculoYear: number | null;
+	vehiculoPlaca: string | null;
+}
+
+/**
+ * El contrato manda; lo que le falte sale de la oportunidad y el lead. El 56%
+ * de los casos activos no tiene contrato (`contrato_id` nulo) y sin este
+ * respaldo el cliente recibía un mensaje sin su nombre ni su vehículo. Pura.
+ */
+export function combinarDatosMensaje(
+	contrato: Omit<DatosMensaje, "numeroCreditoSifco">,
+	oportunidad: Omit<DatosMensaje, "numeroCreditoSifco">,
+	numeroCreditoSifco: string | null,
+): DatosMensaje {
+	const vacio = (v: string | null) => (v?.trim() ? v.trim() : null);
+	return {
+		numeroCreditoSifco,
+		clienteNombre:
+			vacio(contrato.clienteNombre) ?? vacio(oportunidad.clienteNombre),
+		vehiculoMarca:
+			vacio(contrato.vehiculoMarca) ?? vacio(oportunidad.vehiculoMarca),
+		vehiculoModelo:
+			vacio(contrato.vehiculoModelo) ?? vacio(oportunidad.vehiculoModelo),
+		vehiculoYear: contrato.vehiculoYear ?? oportunidad.vehiculoYear,
+		vehiculoPlaca:
+			vacio(contrato.vehiculoPlaca) ?? vacio(oportunidad.vehiculoPlaca),
+	};
+}
+
+async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
+	const [[contrato], [oportunidad]] = await Promise.all([
+		db
+			.select({
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				clienteNombre: clients.contactPerson,
+				vehiculoMarca: vehicles.make,
+				vehiculoModelo: vehicles.model,
+				vehiculoYear: vehicles.year,
+				vehiculoPlaca: vehicles.licensePlate,
+			})
+			.from(casosCobros)
+			.leftJoin(
+				contratosFinanciamiento,
+				eq(casosCobros.contratoId, contratosFinanciamiento.id),
+			)
+			.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+			.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+			.where(eq(casosCobros.id, ctx.casoCobroId))
+			.limit(1),
+		ctx.opportunityId
+			? db
+					.select({
+						clienteNombre: sql<
+							string | null
+						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+						vehiculoMarca: vehicles.make,
+						vehiculoModelo: vehicles.model,
+						vehiculoYear: vehicles.year,
+						vehiculoPlaca: vehicles.licensePlate,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(eq(opportunities.id, ctx.opportunityId))
+					.limit(1)
+			: Promise.resolve([]),
+	]);
+	const sinDatos = {
+		clienteNombre: null,
+		vehiculoMarca: null,
+		vehiculoModelo: null,
+		vehiculoYear: null,
+		vehiculoPlaca: null,
+	};
+	return combinarDatosMensaje(
+		contrato ?? sinDatos,
+		oportunidad ?? sinDatos,
+		contrato?.numeroCreditoSifco ?? ctx.numeroCreditoSifco,
+	);
+}
+
 /** Texto del mensaje (va completo en la única variable del template). */
 export function construirMensajeDocumento(
 	clave: DocumentoEnviar,
@@ -275,24 +362,7 @@ export async function enviarDocumentoCliente(params: {
 	const fallo = (codigo: EnvioDocumentoErrorCodigo) =>
 		new ORPCError(CODIGO_HTTP[codigo], { message: MENSAJES_ERROR[codigo] });
 
-	const [caso] = await db
-		.select({
-			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			clienteNombre: clients.contactPerson,
-			vehiculoMarca: vehicles.make,
-			vehiculoModelo: vehicles.model,
-			vehiculoYear: vehicles.year,
-			vehiculoPlaca: vehicles.licensePlate,
-		})
-		.from(casosCobros)
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(casosCobros.contratoId, contratosFinanciamiento.id),
-		)
-		.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-		.where(eq(casosCobros.id, ctx.casoCobroId))
-		.limit(1);
+	const caso = await datosParaMensaje(ctx);
 	const numeroSifco = caso?.numeroCreditoSifco;
 	if (!numeroSifco) throw fallo("SIN_SIFCO");
 

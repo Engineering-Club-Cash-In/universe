@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { armarDocumentos, construirMensajeDocumento } from "./documentos-ficha";
+import {
+	armarDocumentos,
+	combinarDatosMensaje,
+	construirMensajeDocumento,
+} from "./documentos-ficha";
 
 describe("armarDocumentos", () => {
 	test("envíos según archivo; solicitudes según pendientes", () => {
@@ -46,5 +50,41 @@ describe("construirMensajeDocumento", () => {
 		).toBe(
 			"Te compartimos la información del seguro del vehículo de tu crédito S-1 en el documento adjunto. Cualquier duda, comunícate con tu asesor.",
 		);
+	});
+});
+
+describe("combinarDatosMensaje", () => {
+	const sin = {
+		clienteNombre: null,
+		vehiculoMarca: null,
+		vehiculoModelo: null,
+		vehiculoYear: null,
+		vehiculoPlaca: null,
+	};
+	const opp = {
+		clienteNombre: "Juan Pérez",
+		vehiculoMarca: "Toyota",
+		vehiculoModelo: "Hilux",
+		vehiculoYear: 2021,
+		vehiculoPlaca: "P123ABC",
+	};
+	test("sin contrato (56% de los casos) usa la oportunidad y el lead", () => {
+		expect(combinarDatosMensaje(sin, opp, "S-1")).toEqual({
+			numeroCreditoSifco: "S-1",
+			...opp,
+		});
+	});
+	test("el contrato manda y la oportunidad solo completa lo que falta", () => {
+		const r = combinarDatosMensaje(
+			{ ...sin, clienteNombre: "Ana López", vehiculoPlaca: " " },
+			opp,
+			"S-1",
+		);
+		expect(r.clienteNombre).toBe("Ana López");
+		expect(r.vehiculoMarca).toBe("Toyota");
+		expect(r.vehiculoPlaca).toBe("P123ABC");
+	});
+	test("sin nada queda en null", () => {
+		expect(combinarDatosMensaje(sin, sin, null).clienteNombre).toBeNull();
 	});
 });

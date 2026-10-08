@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS "public"."cambios_datos_cliente_cobros" (
 	"valor_anterior" text,
 	"valor_nuevo" text,
 	"origen" text NOT NULL,
-	"realizado_por" text REFERENCES "public"."user"("id"),
+	"realizado_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "cambios_datos_cliente_categoria_check"
 		CHECK ("categoria" IN ('contacto', 'direcciones', 'datos_personales')),

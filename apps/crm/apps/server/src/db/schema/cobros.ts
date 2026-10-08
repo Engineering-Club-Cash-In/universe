@@ -984,7 +984,9 @@ export const cambiosDatosClienteCobros = pgTable(
 		valorNuevo: text("valor_nuevo"),
 		// 'ficha_360' | 'workspace' | 'carga_masiva' | 'sistema'
 		origen: text("origen").notNull(),
-		realizadoPor: text("realizado_por").references(() => user.id),
+		realizadoPor: text("realizado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 	},
 	(table) => [

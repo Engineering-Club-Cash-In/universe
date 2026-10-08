@@ -855,6 +855,8 @@ export const metasAsesorCobros = pgTable(
 			t.mes,
 		),
 		index("idx_metas_asesor_cobros_periodo").on(t.anio, t.mes),
+		check("metas_asesor_cobros_mes_check", sql`${t.mes} BETWEEN 1 AND 12`),
+		check("metas_asesor_cobros_monto_check", sql`${t.montoRecuperacion} >= 0`),
 	],
 );
 

@@ -1,4 +1,5 @@
 import api from "@/Provider/interceptor";
+import type { CuotaFranjaNexa, CuotaMesNexa, FiltroCuotaMes, RechazoNexa } from "@/lib/cuotasNexa";
 
 const API_URL = import.meta.env.VITE_BACK_URL || "";
 
@@ -9,6 +10,27 @@ export interface NexaDashboardTotales {
   montoNexa: string;
   rechazosNexa: number;
   ultimoPagoNexa: number;
+  // Cabecera: mismo alcance, búsqueda, asesor y fechas, pero sin el filtro de cuota ni de medio.
+  desglose: NexaDesglose;
+}
+
+// La cuota del mes sobre los créditos de la cabecera. Cada conteo es lo que devuelve su filtro:
+// pagadaNexa = pagados+nexa, parcialNexa + parcialManual = parciales, sinPago = sinpago.
+// pagadaNexa + pagadaManual + parcialNexa + parcialManual + sinPago = conCuotaMes.
+export interface NexaDesglose {
+  creditos: number;
+  conCuotaMes: number;
+  pagadaNexa: number;
+  pagadaManual: number;
+  parcialNexa: number;
+  parcialManual: number;
+  sinPago: number;
+  vencidaSinPago: number;
+  porValidar: number;
+  conToken: number;
+  pagosNexa: number;
+  montoNexa: string;
+  rechazosNexa: number;
 }
 
 export interface NexaDashboardCredito {
@@ -21,11 +43,17 @@ export interface NexaDashboardCredito {
   ultimoPagoFecha: string | null;
   ultimoPagoMonto: string | null;
   ultimoPagoNexa: boolean;
+  // Banco de la boleta manual; null en Nexa (cartera no recibe el banco de origen).
+  ultimoPagoBanco: string | null;
   pagosNexa: number;
   montoNexa: string;
   rechazosNexa: number;
-  // Canal de los últimos 12 pagos, del más viejo al más nuevo: "N" Nexa, "M" manual.
-  ultimosCanales: string;
+  // Los 5 más recientes de los que cuenta rechazosNexa.
+  rechazosDetalle: RechazoNexa[];
+  // Últimas 12 cuotas hasta fin del mes en curso, de la más vieja a la más nueva.
+  ultimasCuotas: CuotaFranjaNexa[];
+  // Primera cuota que vence este mes (hora de Guatemala); sin cuota este mes, la última vencida.
+  cuotaMes: CuotaMesNexa | null;
 }
 
 export interface NexaDashboardResponse {
@@ -44,6 +72,12 @@ export interface RangoFechas {
 
 export interface NexaDashboardParams extends RangoFechas {
   q: string;
+  // Cuota del mes: pagados, parciales o sinpago. "" = todos.
+  cuotaMes: "" | FiltroCuotaMes;
+  // Medio con que se pagó la cuota del mes; el back lo ignora si cuotaMes es "sinpago".
+  medio: "" | "nexa" | "manual";
+  // asesor_id para filtrar (solo ADMIN/CONTA). "" = todos. A un ASESOR el back le aplica el suyo siempre.
+  asesor: string;
   page: number;
   pageSize: number;
 }
@@ -51,7 +85,7 @@ export interface NexaDashboardParams extends RangoFechas {
 export const getNexaDashboard = async (
   params: NexaDashboardParams
 ): Promise<NexaDashboardResponse> => {
-  const { data } = await api.get(`${API_URL}/nexa/dashboard`, { params });
+  const { data } = await api.get(`${API_URL}/nexa/dashboard`, { params: { ...params, asesor: params.asesor || undefined } });
   return data;
 };
 
@@ -65,6 +99,7 @@ export interface NexaPagoCredito {
   filas: number;
   eventoEstado: string | null;
   cuotas: number[];
+  banco: string | null;
 }
 
 export interface NexaEventoSinPago {

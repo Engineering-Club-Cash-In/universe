@@ -7,8 +7,15 @@ import { lockPoolMock } from "../utils/testMocks";
 // siempre rechaza, así un rol permitido pasa el gate y cae en 500 del controlador.
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
+// Encadenable (db.select().from().where()…, como hace findSessionUser al resolver el alcance):
+// rechaza recién al esperarla, así no queda una promesa rechazada sin manejar a mitad de cadena.
+const sinBd: any = new Proxy(() => {}, {
+  get: (_t, prop) => (prop === "then" ? (_ok: unknown, ko: (e: Error) => void) => ko(new Error("sin BD en tests")) : sinBd),
+  apply: () => sinBd,
+});
+
 mock.module("../database", () => ({
-  db: new Proxy({}, { get: () => () => Promise.reject(new Error("sin BD en tests")) }),
+  db: sinBd,
   client: {},
   lockPool: lockPoolMock,
 }));

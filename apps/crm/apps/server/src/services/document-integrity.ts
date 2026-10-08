@@ -54,6 +54,7 @@ import {
 	MAX_PDF_PARSE_LEASE_MS,
 	scanPdfBytes,
 } from "../lib/document-integrity/pdf-forensics";
+import { stripNulCharacters } from "../lib/document-integrity/postgres-safe";
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
 	currentValidationResult,
@@ -779,10 +780,14 @@ async function persistValidation(params: {
 				contentSha256: sha256,
 				autoResult: engineResult.result,
 				autoScore: engineResult.score,
-				autoReason: engineResult.reason,
-				signals: engineResult.signals,
-				technicalFingerprint: engineResult.technicalFingerprint,
-				aiRawResponse: llm as Record<string, unknown> | null,
+				autoReason: stripNulCharacters(engineResult.reason),
+				signals: stripNulCharacters(engineResult.signals),
+				technicalFingerprint: stripNulCharacters(
+					engineResult.technicalFingerprint,
+				),
+				aiRawResponse: stripNulCharacters(
+					llm as Record<string, unknown> | null,
+				),
 				retryCount: internalPipelineError ? retryCount || 1 : 0,
 				errorMessage: internalPipelineError,
 			})
@@ -915,6 +920,22 @@ function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
+// El detalle técnico (SQL, rutas, respuesta de la IA) va al log, nunca al
+// vendedor; los errores de dominio ya traen un mensaje para mostrar.
+function toPublicDocumentError(
+	error: unknown,
+	publicMessage: string,
+	logContext: Record<string, unknown>,
+): { message: string; code?: DocumentIntegrityError["code"] } {
+	if (error instanceof DocumentIntegrityError)
+		return { message: error.message, code: error.code };
+	console.error("Document validation failed", {
+		...logContext,
+		error: errorMessage(error),
+	});
+	return { message: publicMessage };
+}
+
 function isRateLimitError(error: unknown) {
 	const status =
 		typeof error === "object" && error !== null
@@ -973,10 +994,17 @@ async function validatePreparedDocumentBatch(params: {
 				filename: document.fileName,
 			});
 		} catch (error) {
-			retryErrors.set(reference, {
-				message: errorMessage(error),
-				code: error instanceof DocumentIntegrityError ? error.code : undefined,
-			});
+			retryErrors.set(
+				reference,
+				toPublicDocumentError(
+					error,
+					"No se pudo completar la validación automática. Intenta nuevamente.",
+					{
+						validationRunId: params.validationRunId,
+						fileName: document.fileName,
+					},
+				),
+			);
 		}
 	}
 
@@ -1007,12 +1035,15 @@ async function validatePreparedDocumentBatch(params: {
 			});
 			results.push({ validation });
 		} catch (error) {
-			results.push({
-				validation: null,
-				error: errorMessage(error),
-				errorCode:
-					error instanceof DocumentIntegrityError ? error.code : undefined,
-			});
+			const { message, code } = toPublicDocumentError(
+				error,
+				"No se pudo guardar el resultado de la validación. Intenta nuevamente.",
+				{
+					validationRunId: params.validationRunId,
+					fileName: document.fileName,
+				},
+			);
+			results.push({ validation: null, error: message, errorCode: code });
 		}
 	}
 	return results;

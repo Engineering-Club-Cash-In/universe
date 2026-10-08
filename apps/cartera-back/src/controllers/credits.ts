@@ -88,6 +88,7 @@ import {
   STATUS_READER_FUERA,
 } from "./latefee";
 import { bucketActualSql } from "../lib/buckets-classification";
+import { STATUS_EXCLUIDOS_MORA } from "../constants/creditStatus";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
@@ -1129,6 +1130,7 @@ export async function montoVencidoPorCredito(
     credito_id: number;
     cuota: Big | string | number | null;
     monto_mora: Big | string | number | null;
+    statusCredit?: string | null;
   }[],
   hoyStr: string = new Date().toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
@@ -1139,7 +1141,75 @@ export async function montoVencidoPorCredito(
 
   const ids = [...new Set(creditosDeLaPagina.map((c) => c.credito_id))];
 
-  const filas = await db
+  // EN_CONVENIO: las cuotas originales que el convenio reestructuró siguen con
+  // pagado=false hasta que el convenio se completa (salirDeConvenioCompletado),
+  // así que contarlas reportaría TODO el atraso original aunque el convenio
+  // esté al día. Para estos créditos se excluyen esas cuotas y la deuda vencida
+  // es la del propio convenio (mismo cálculo que convenioAlertas). Review Codex
+  // PR #1901.
+  const idsEnConvenio = [
+    ...new Set(
+      creditosDeLaPagina
+        .filter((c) => c.statusCredit === "EN_CONVENIO")
+        .map((c) => c.credito_id)
+    ),
+  ];
+  const cuotasReestructuradas = new Set<number>();
+  const vencidoDeConvenio = new Map<number, Big>();
+  if (idsEnConvenio.length > 0) {
+    const convenios = await db
+      .select({
+        credito_id: convenios_pago.credito_id,
+        cuotas_convenio: convenios_pago.cuotas_convenio,
+      })
+      .from(convenios_pago)
+      .where(
+        and(
+          inArray(convenios_pago.credito_id, idsEnConvenio),
+          eq(convenios_pago.activo, true),
+          eq(convenios_pago.completado, false),
+          isNull(convenios_pago.anulado_at)
+        )
+      );
+    for (const convenio of convenios) {
+      for (const cuotaId of convenio.cuotas_convenio ?? []) {
+        cuotasReestructuradas.add(cuotaId);
+      }
+    }
+
+    const idsSql = sql.join(idsEnConvenio.map((id) => sql`${id}`), sql`, `);
+    const vencidos = await db.execute<{ credito_id: number; vencido: string }>(sql`
+      WITH adelante AS (
+        SELECT
+          cp.credito_id,
+          cp.cuota_mensual::numeric AS cuota_mensual,
+          cp.monto_pagado::numeric AS monto_pagado,
+          cc.fecha_vencimiento::date AS fecha_vencimiento,
+          ROW_NUMBER() OVER (
+            PARTITION BY cc.convenio_id ORDER BY cc.numero_cuota
+          ) AS j
+        FROM ${SQL_CARTERA_SCHEMA}.convenio_cuotas cc
+        INNER JOIN ${SQL_CARTERA_SCHEMA}.convenios_pago cp
+          ON cp.convenio_id = cc.convenio_id
+         AND cp.activo = true
+         AND cp.completado = false
+         AND cp.anulado_at IS NULL
+        WHERE cp.credito_id IN (${idsSql})
+          AND cc.fecha_vencimiento::date > cp.fecha_convenio::date
+      )
+      SELECT a.credito_id,
+             COALESCE(SUM(LEAST(a.cuota_mensual,
+               GREATEST(0, a.j * a.cuota_mensual - a.monto_pagado))), 0)::text AS vencido
+      FROM adelante a
+      WHERE a.monto_pagado < a.j * a.cuota_mensual
+        AND a.fecha_vencimiento < ${hoyStr}::date
+      GROUP BY a.credito_id`);
+    for (const r of vencidos.rows) {
+      vencidoDeConvenio.set(Number(r.credito_id), new Big(r.vencido ?? 0));
+    }
+  }
+
+  const filasTodas = await db
     .select({
       credito_id: cuotas_credito.credito_id,
       cuota_id: cuotas_credito.cuota_id,
@@ -1174,6 +1244,9 @@ export async function montoVencidoPorCredito(
       )
     );
 
+  const filas = filasTodas.filter(
+    (f) => !cuotasReestructuradas.has(f.cuota_id)
+  );
   const filasPorCredito = new Map<number, typeof filas>();
   for (const fila of filas) {
     const lista = filasPorCredito.get(fila.credito_id);
@@ -1188,7 +1261,10 @@ export async function montoVencidoPorCredito(
     );
     resultado.set(
       credito.credito_id,
-      vencido.plus(new Big(credito.monto_mora ?? 0)).toFixed(2)
+      vencido
+        .plus(vencidoDeConvenio.get(credito.credito_id) ?? 0)
+        .plus(new Big(credito.monto_mora ?? 0))
+        .toFixed(2)
     );
   }
 
@@ -1689,11 +1765,22 @@ export async function getCreditosWithUserByMesAnio(
     // aplica `estados_piso` (review Codex PR #1901).
     const ordenBucketSql = [
       sql`${bucketActualSql("creditos", "moras_credito")} DESC NULLS LAST`,
-      sql`(SELECT MIN(cc.fecha_vencimiento) FROM ${cuotas_credito} cc
-            WHERE cc.credito_id = ${creditos.credito_id}
-              AND cc.pagado = false
-              AND cc.numero_cuota > 0
-              AND cc.fecha_vencimiento < ${hoyStr}::date) ASC NULLS LAST`,
+      // Atraso = la cuota más antigua que `diasAtrasoMoraMaximo` también
+      // cuenta (esCuotaElegibleParaMora): impaga, SIN pago aplicado que la
+      // cubra (hasPaidPaymentSql, el helper del cron) y de un crédito que
+      // devenga mora (EN_CONVENIO y demás excluidos no). Con otro criterio el
+      // orden rankearía por un atraso que la respuesta no muestra (review
+      // Codex PR #1901). La tabla va sin alias: el helper califica la cuota de
+      // afuera a mano.
+      sql`(SELECT MIN(fecha_vencimiento) FROM ${cuotas_credito}
+            WHERE credito_id = ${creditos.credito_id}
+              AND pagado = false
+              AND fecha_vencimiento < ${hoyStr}::date
+              AND ${creditos.statusCredit} NOT IN (${sql.join(
+                STATUS_EXCLUIDOS_MORA.map((s) => sql`${s}`),
+                sql`, `
+              )})
+              AND NOT ${hasPaidPaymentSql()}) ASC NULLS LAST`,
       sql`${creditos.deudatotal}::numeric DESC NULLS LAST`,
       desc(creditos.credito_id),
     ];
@@ -2179,7 +2266,12 @@ export async function getCreditosWithUserByMesAnio(
   try {
     const creditosUnicosParaVencido = new Map<
       number,
-      { credito_id: number; cuota: string | null; monto_mora: string | null }
+      {
+        credito_id: number;
+        cuota: string | null;
+        monto_mora: string | null;
+        statusCredit: string | null;
+      }
     >();
     rows.forEach((row) => {
       const creditoId = row.creditos.credito_id;
@@ -2188,6 +2280,7 @@ export async function getCreditosWithUserByMesAnio(
           credito_id: creditoId,
           cuota: row.creditos.cuota ?? null,
           monto_mora: morasMap[creditoId]?.monto_mora ?? null,
+          statusCredit: row.creditos.statusCredit ?? null,
         });
       }
     });

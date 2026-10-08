@@ -659,6 +659,18 @@ function consultarBuroAlVeinteTrasGuardar(
 	);
 }
 
+function firmaBitacoraBuro(
+	estado: Awaited<ReturnType<typeof getValidaciones>>,
+): string {
+	return JSON.stringify({
+		exento: estado.exento,
+		validaciones: estado.validaciones.map((fila) => fila.id).sort(),
+		cofirmantes: estado.cofirmantes
+			.map((fila) => `${fila.coDebtorId}:${fila.dpi}:${fila.buro?.id ?? ""}`)
+			.sort(),
+	});
+}
+
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
 	getSalesStages: crmProcedure.handler(async ({ context: _ }) => {
@@ -4690,17 +4702,14 @@ export const crmRouter = {
 			let huellaBuro: string | null = null;
 			// Cofirmantes con el DPI con que pasaron por el buró; también viaja en el UPDATE
 			let cofirmantesValidados: string | null = null;
+			let firmaBitacoraRevisada: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
-				// La exención se resuelve en el servicio: `source` es editable por el
-				// usuario, así que además exige evidencia de que el bot validó.
-				const exencion = await resolverExencionPorBot({
+				// La exención y los veredictos deben venir de la misma lectura.
+				const estadoValidaciones = await getValidaciones({
 					opportunityId: input.opportunityId,
-					source: opportunity[0].source,
-					leadSource: opportunity[0].leadSource,
-					leadId: opportunity[0].leadId,
-					leadDpi: opportunity[0].leadDpi,
 				});
+				firmaBitacoraRevisada = firmaBitacoraBuro(estadoValidaciones);
 
 				// Vale para los dos caminos: el validado y el exento. Una oportunidad
 				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
@@ -4708,7 +4717,7 @@ export const crmRouter = {
 					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
 				}
 
-				if (!exencion.exento) {
+				if (!estadoValidaciones.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
 					// en paralelo al documento DPI exigido arriba
 					if (!opportunity[0].leadDpi) {
@@ -4719,9 +4728,6 @@ export const crmRouter = {
 					}
 
 					// El flujo normal llega validado; un cambio de DPI o vencimiento habilita reconsulta aquí.
-					const estadoValidaciones = await getValidaciones({
-						opportunityId: input.opportunityId,
-					});
 					if (estadoValidaciones.faltaConsentimiento) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
@@ -4908,6 +4914,35 @@ export const crmRouter = {
 
 				const updatedRows = huellaBuro
 					? await db.transaction(async (tx) => {
+							// Las consultas y overrides escriben la bitácora bajo este
+							// candado. Comprobamos de nuevo el veredicto mientras lo
+							// retenemos hasta confirmar la aprobación.
+							if (firmaBitacoraRevisada !== null) {
+								await tx.execute(
+									sql`select pg_advisory_xact_lock(hashtext(${input.opportunityId}))`,
+								);
+								const estadoActual = await getValidaciones({
+									opportunityId: input.opportunityId,
+								});
+								if (
+									firmaBitacoraBuro(estadoActual) !== firmaBitacoraRevisada ||
+									estadoActual.faltaConsentimiento ||
+									(!estadoActual.exento &&
+										Boolean(
+											errorBuroVigenteParaAnalisis(
+												estadoActual,
+												opportunity[0].buroRevalidacionAl30
+													? "revalidar_en_analisis"
+													: "aprobar_analisis",
+											),
+										))
+								) {
+									throw new ORPCError("CONFLICT", {
+										message:
+											"El Buró cambió durante la revisión. Recarga la oportunidad y revisa el resultado actual antes de aprobar.",
+									});
+								}
+							}
 							await tomarCandadoBuroInterno(tx);
 							return escribirAprobacion(tx);
 						})

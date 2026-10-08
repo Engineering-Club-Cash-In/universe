@@ -32,6 +32,7 @@ const filasPorTabla = new Map<unknown, Fila[]>();
 let secuenciaEtapas: Fila[][] = [];
 const lecturasPorTabla: unknown[] = [];
 let respuestaExecute: unknown = [];
+let alEjecutar: (() => void) | null = null;
 
 type Escritura = {
 	tipo: "update" | "insert";
@@ -120,7 +121,10 @@ const dbFalso = {
 	update: (tabla: unknown) => constructorUpdate(tabla),
 	insert: (tabla: unknown) => constructorInsert(tabla),
 	delete: () => ({ where: async () => [] }),
-	execute: async () => respuestaExecute,
+	execute: async () => {
+		alEjecutar?.();
+		return respuestaExecute;
+	},
 	transaction: async <T>(correr: (tx: unknown) => Promise<T>) =>
 		await correr(dbFalso),
 };
@@ -262,6 +266,7 @@ beforeEach(async () => {
 	lecturasPorTabla.length = 0;
 	secuenciaEtapas = [];
 	respuestaExecute = [];
+	alEjecutar = null;
 	escrituras.length = 0;
 	filasDevueltasPorUpdate = [{ id: "oportunidad" }];
 });
@@ -1313,6 +1318,36 @@ describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 			stageId: ETAPA_40,
 			buroRevalidacionAl30: false,
 		});
+	});
+
+	test("rechaza si una consulta de Buró cambia el veredicto mientras se aprueba", async () => {
+		prepararAprobacion(true, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+		respuestaExecute = { rows: [{ huella: "huella-vigente" }] };
+		let cambioAplicado = false;
+		alEjecutar = () => {
+			if (cambioAplicado || !lecturasPorTabla.includes(opportunityValidations))
+				return;
+			cambioAplicado = true;
+			filasPorTabla.set(opportunityValidations, [
+				{
+					id: "resultado-error-nuevo",
+					tipo: "buro",
+					estado: "error",
+					dpi: DPI,
+					expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+				},
+			]);
+		};
+
+		await expect(
+			invocar(
+				crmRouter.approveOpportunityAnalysis,
+				{ opportunityId: OPORTUNIDAD, approved: true },
+				contextoDe("analista", "analyst"),
+			),
+		).rejects.toThrow(/Buró cambió durante la revisión/);
+		expect(cambioAplicado).toBe(true);
+		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 });
 

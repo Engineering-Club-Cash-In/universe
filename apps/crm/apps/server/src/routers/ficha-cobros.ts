@@ -28,6 +28,7 @@ import {
 import {
 	cargarCodeudores,
 	cargarDatosPersonales,
+	cargarHistorico,
 	cargarSeguro,
 } from "../lib/ficha-complementos";
 import {
@@ -247,7 +248,7 @@ export const fichaCobrosRouter = {
 					);
 					return null;
 				});
-			const [datosPersonales, codeudores, seguro, historialCambios] =
+			const [datosPersonales, codeudores, seguro, historialCambios, historico] =
 				await Promise.all([
 					// F1 · RENAP → lead → solicitud, campo por campo.
 					bloque<DatosPersonalesFicha>("datos personales", () =>
@@ -261,11 +262,12 @@ export const fichaCobrosRouter = {
 					bloque<CambioFicha[]>("historial de cambios", () =>
 						cargarHistorialCambios(input.casoCobroId),
 					),
+					// F4 · Buckets, convenios y promesas cumplidas, lo más reciente
+					// primero.
+					bloque<HitoCredito[]>("vida del crédito", () =>
+						cargarHistorico(input.casoCobroId),
+					),
 				]);
-			// TODO(José) · tarea F4: vida del crédito — entradas/salidas de bucket
-			// (cartera.buckets_historial), reestructuras, convenios, promesas
-			// cumplidas. Más reciente primero.
-			const historico = null as HitoCredito[] | null;
 			// TODO(José) · tarea F6: catálogo de documentos para enviar al cliente
 			// (tarjeta de circulación, seguro) y para solicitar al supervisor
 			// (contrato, carta poder, cambio de placas, expertaje), con su envío.

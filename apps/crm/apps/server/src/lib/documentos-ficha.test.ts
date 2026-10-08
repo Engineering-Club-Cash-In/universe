@@ -3,6 +3,7 @@ import {
 	armarDocumentos,
 	combinarDatosMensaje,
 	construirMensajeDocumento,
+	decidirVehiculoCaso,
 } from "./documentos-ficha";
 
 describe("armarDocumentos", () => {
@@ -86,5 +87,47 @@ describe("combinarDatosMensaje", () => {
 	});
 	test("sin nada queda en null", () => {
 		expect(combinarDatosMensaje(sin, sin, null).clienteNombre).toBeNull();
+	});
+});
+
+describe("decidirVehiculoCaso", () => {
+	test("sin contrato manda la oportunidad y sus documentos valen", () => {
+		expect(
+			decidirVehiculoCaso({
+				tieneContrato: false,
+				vehiculoContrato: null,
+				vehiculoOportunidad: "v-opp",
+			}),
+		).toEqual({ vehicleId: "v-opp", documentosOportunidad: true });
+	});
+
+	test("con contrato manda su vehículo aunque la oportunidad apunte a otro", () => {
+		expect(
+			decidirVehiculoCaso({
+				tieneContrato: true,
+				vehiculoContrato: "v-contrato",
+				vehiculoOportunidad: "v-viejo",
+			}),
+		).toEqual({ vehicleId: "v-contrato", documentosOportunidad: false });
+	});
+
+	test("con contrato, los documentos de la oportunidad valen si es el mismo vehículo", () => {
+		expect(
+			decidirVehiculoCaso({
+				tieneContrato: true,
+				vehiculoContrato: "v1",
+				vehiculoOportunidad: "v1",
+			}),
+		).toEqual({ vehicleId: "v1", documentosOportunidad: true });
+	});
+
+	test("con contrato sin vehículo no se cae a la oportunidad", () => {
+		expect(
+			decidirVehiculoCaso({
+				tieneContrato: true,
+				vehiculoContrato: null,
+				vehiculoOportunidad: "v-opp",
+			}),
+		).toEqual({ vehicleId: null, documentosOportunidad: false });
 	});
 });

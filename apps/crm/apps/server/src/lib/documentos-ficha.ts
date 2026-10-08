@@ -126,37 +126,67 @@ const COBERTURA_SEGURO_PDF_URL = process.env.COBERTURA_SEGURO_PDF_URL;
 
 export type ArchivoDocumento = { key: string } | { url: string };
 
+/** Regla pura de `resolverVehiculoCaso`. */
+export function decidirVehiculoCaso(datos: {
+	tieneContrato: boolean;
+	vehiculoContrato: string | null;
+	vehiculoOportunidad: string | null;
+}): { vehicleId: string | null; documentosOportunidad: boolean } {
+	if (datos.tieneContrato) {
+		return {
+			vehicleId: datos.vehiculoContrato,
+			documentosOportunidad:
+				datos.vehiculoContrato !== null &&
+				datos.vehiculoOportunidad === datos.vehiculoContrato,
+		};
+	}
+	return {
+		vehicleId: datos.vehiculoOportunidad,
+		documentosOportunidad: true,
+	};
+}
+
 /**
- * Vehículo del caso. Con contrato vinculado manda el vehículo del contrato
- * (la oportunidad puede apuntar a uno viejo o distinto, igual que en
- * `cargarSeguro`); solo sin contrato se cae al de la oportunidad.
+ * Vehículo del caso y si los documentos de la oportunidad le corresponden.
+ * Con contrato vinculado manda el vehículo del contrato (la oportunidad puede
+ * apuntar a uno viejo o distinto, igual que en `cargarSeguro`): sus
+ * documentos solo sirven si la oportunidad apunta a ese mismo vehículo. Sin
+ * contrato se usa el de la oportunidad y sus documentos valen siempre.
  */
-async function resolverVehiculoId(ctx: ContextoCaso): Promise<string | null> {
-	const [caso] = await db
-		.select({
-			contratoId: casosCobros.contratoId,
-			vehicleId: contratosFinanciamiento.vehicleId,
-		})
-		.from(casosCobros)
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(contratosFinanciamiento.id, casosCobros.contratoId),
-		)
-		.where(eq(casosCobros.id, ctx.casoCobroId))
-		.limit(1);
-	if (caso?.contratoId) return caso.vehicleId ?? null;
-	if (!ctx.opportunityId) return null;
-	const [opp] = await db
-		.select({ vehicleId: opportunities.vehicleId })
-		.from(opportunities)
-		.where(eq(opportunities.id, ctx.opportunityId))
-		.limit(1);
-	return opp?.vehicleId ?? null;
+async function resolverVehiculoCaso(
+	ctx: ContextoCaso,
+): Promise<{ vehicleId: string | null; documentosOportunidad: boolean }> {
+	const [[caso], [opp]] = await Promise.all([
+		db
+			.select({
+				contratoId: casosCobros.contratoId,
+				vehicleId: contratosFinanciamiento.vehicleId,
+			})
+			.from(casosCobros)
+			.leftJoin(
+				contratosFinanciamiento,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
+			.where(eq(casosCobros.id, ctx.casoCobroId))
+			.limit(1),
+		ctx.opportunityId
+			? db
+					.select({ vehicleId: opportunities.vehicleId })
+					.from(opportunities)
+					.where(eq(opportunities.id, ctx.opportunityId))
+					.limit(1)
+			: Promise.resolve([]),
+	]);
+	return decidirVehiculoCaso({
+		tieneContrato: !!caso?.contratoId,
+		vehiculoContrato: caso?.vehicleId ?? null,
+		vehiculoOportunidad: opp?.vehicleId ?? null,
+	});
 }
 
 /**
  * El PDF más reciente del documento: primero los del vehículo, después los
- * de la oportunidad. Solo PDF: el template de WhatsApp lleva header de
+ * de la oportunidad (si no contradicen al vehículo del contrato). Solo PDF: el template de WhatsApp lleva header de
  * documento. Para el seguro, si no hay póliza, la cobertura general.
  */
 export async function archivoDocumento(
@@ -164,7 +194,7 @@ export async function archivoDocumento(
 	clave: DocumentoEnviar,
 ): Promise<ArchivoDocumento | null> {
 	const tipos = TIPOS_ARCHIVO[clave];
-	const vehicleId = await resolverVehiculoId(ctx);
+	const { vehicleId, documentosOportunidad } = await resolverVehiculoCaso(ctx);
 	if (vehicleId) {
 		const [delVehiculo] = await db
 			.select({ key: vehicleDocuments.filePath })
@@ -180,7 +210,7 @@ export async function archivoDocumento(
 			.limit(1);
 		if (delVehiculo) return delVehiculo;
 	}
-	if (ctx.opportunityId) {
+	if (ctx.opportunityId && documentosOportunidad) {
 		const [deOportunidad] = await db
 			.select({ key: opportunityDocuments.filePath })
 			.from(opportunityDocuments)
@@ -422,6 +452,8 @@ export async function enviarDocumentoCliente(params: {
 		templateName: TEMPLATE_NAME,
 		bodyParams: [mensaje],
 		header: { type: "document", url, filename },
+		// La URL firmada abre el documento a quien la tenga: no va a la consola.
+		ocultarEnlacesEnLog: true,
 		logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 	});
 

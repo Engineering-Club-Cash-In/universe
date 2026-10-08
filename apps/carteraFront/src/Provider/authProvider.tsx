@@ -1,7 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { rolCambio, rolDelToken } from "../lib/rolSesion";
+import { limpiarCacheDeSesion } from "../lib/sesionCache";
 
 const BACK_URL = import.meta.env.VITE_BACK_URL;
 
@@ -28,6 +30,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -101,7 +104,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   // 🔹 Función auxiliar para limpiar sesión
+  // Todo cierre de sesión (manual, token vencido, refresh fallido, cambio de rol) pasa por
+  // acá: también se borran los datos en caché del usuario que se va.
   const clearSession = () => {
+    limpiarCacheDeSesion(queryClient);
     setUser(null);
     setAccessToken(null);
     setRefreshToken(null);
@@ -112,6 +118,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🔹 Login
   const login = (user: User, access: string, refresh: string) => {
+    // Nada de lo que quedó en caché de una sesión anterior se le muestra al usuario nuevo.
+    limpiarCacheDeSesion(queryClient);
     setUser(user);
     setAccessToken(access);
     setRefreshToken(refresh);

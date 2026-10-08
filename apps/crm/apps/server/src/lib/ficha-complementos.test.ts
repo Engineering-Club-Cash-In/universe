@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+	apellidoDeCasada,
 	armarCodeudores,
 	armarDatosPersonales,
 	armarSeguro,
 	type FuenteLead,
 	type FuenteRenap,
 	fechaISO,
+	mismoTelefono,
 	nombrePropio,
 	textoEstadoCivil,
 	textoSexo,
@@ -186,5 +188,61 @@ describe("armarSeguro", () => {
 		expect(
 			armarSeguro({ tipoCobertura: "Todo riesgo", deducible: "0" }).tipoSeguro,
 		).toBe("Todo riesgo");
+	});
+});
+
+describe("apellidoDeCasada", () => {
+	test("no repite la preposición que RENAP ya trae", () => {
+		expect(apellidoDeCasada("MÉNDEZ")).toBe("de MÉNDEZ");
+		expect(apellidoDeCasada("DE MÉNDEZ")).toBe("DE MÉNDEZ");
+		expect(apellidoDeCasada("Del Cid")).toBe("Del Cid");
+		expect(apellidoDeCasada("DEL VALLE")).toBe("DEL VALLE");
+		expect(apellidoDeCasada("DELGADO")).toBe("de DELGADO");
+	});
+	test("el nombre completo no lleva «de de»", () => {
+		const r = armarDatosPersonales({
+			renap: { ...renap, marriedLastName: "DE MENDEZ" },
+			lead: null,
+			solicitud: null,
+		});
+		expect(r?.nombreCompleto).toBe("María José de la Cruz Pérez de Mendez");
+	});
+});
+
+describe("mismoTelefono", () => {
+	test("ignora guiones, espacios y el código de país", () => {
+		expect(mismoTelefono("5878-3734", "58783734")).toBe(true);
+		expect(mismoTelefono("50258783734", "58783734")).toBe(true);
+		expect(mismoTelefono("+502 5878 3734", "5878-3734")).toBe(true);
+		expect(mismoTelefono("58783734", "58783735")).toBe(false);
+		expect(mismoTelefono(null, "58783734")).toBe(false);
+	});
+});
+
+describe("armarCodeudores · teléfonos repetidos", () => {
+	const base = { id: "a", fullName: "Ana", email: null };
+	const sol = {
+		personId: "a",
+		email: null,
+		direccionResidencia: null,
+		empresa: null,
+		direccionTrabajo: null,
+	};
+	test("el código de país no esconde el número repetido", () => {
+		const [c] = armarCodeudores(
+			[{ ...base, phone: "58783734" }],
+			[{ ...sol, telMovil: "50258783734", telResidencia: "50258783734" }],
+		);
+		expect(c.telefonoPrincipal).toBe("58783734");
+		expect(c.celularAlterno).toBeNull();
+		expect(c.telefonoCasa).toBeNull();
+	});
+	test("celular y casa iguales entre sí salen una sola vez", () => {
+		const [c] = armarCodeudores(
+			[{ ...base, phone: "55550000" }],
+			[{ ...sol, telMovil: "52273737", telResidencia: "5227-3737" }],
+		);
+		expect(c.celularAlterno).toBe("52273737");
+		expect(c.telefonoCasa).toBeNull();
 	});
 });

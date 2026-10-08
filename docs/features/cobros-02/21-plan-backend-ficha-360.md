@@ -179,6 +179,21 @@ El backend de todas estas piezas está listo. Las mutaciones nuevas están en `f
 
 ---
 
+## Revisión de código (2026-10-08)
+
+Se validó cada punto del review contra la base local y el código:
+
+| Hallazgo | Resultado |
+| --- | --- |
+| El mensaje de WhatsApp de F6 salía sin nombre ni vehículo cuando el caso no tiene contrato | **Cierto, corregido.** El 56.3% de los casos activos (777 de 1,379) tiene `contrato_id` nulo. Nombre y vehículo salen ahora del contrato y, lo que falte, de la oportunidad y el lead (`combinarDatosMensaje`). Probado con un caso sin contrato: «Edgar Zepeda, te compartimos la tarjeta de circulación de tu Toyota Corolla 2015, placas P-319JJL…». El estado de cuenta (`send-estado-cuenta-whatsapp.ts`) tiene el mismo límite y **no se tocó**: no es de este issue. |
+| «de de Méndez» en el apellido de casada | **Cierto, corregido.** 4 de los 64 apellidos de casada de RENAP ya traen «DE». `apellidoDeCasada` no repite la preposición. |
+| Teléfonos repetidos en el codeudor | **Cierto, corregido, y más amplio.** Además de celular y casa iguales entre sí (10 de 24 solicitudes), la comparación no reconocía un mismo número con y sin código de país (`50258783734` y `58783734`). Ahora se comparan los últimos 8 dígitos y cada número sale una sola vez. |
+| Falta `orderBy` en las solicitudes de codeudores | **No aplica.** `credit_applications` tiene un índice único (`opportunity_id`, `person_type`, `person_id`) y no hay duplicados: cada codeudor tiene como máximo una solicitud. |
+| `residenciaDeOrigen` ignora `casos_cobros.direccion_contacto` sin lead | **Parcial, no se cambió.** La ficha muestra «la corregida, si no la del lead» y el «antes» de la bitácora coincide con lo que se veía. La ficha nunca mostró `direccion_contacto` (6 casos tienen dirección en el caso pero no en el lead). Otros procedimientos (`getCasoCobroById`, `getDetallesContrato`) sí la usan de respaldo: es una inconsistencia anterior a este issue. |
+| `eqDpi` no usa el índice de `renapinfo` | **Cierto, impacto bajo, no se cambió.** `regexp_replace` sobre la columna evita la llave primaria. `renapinfo` tiene 1,459 filas y `eqDpi` es un helper que ya se usaba en otros lugares. Si en producción la tabla es grande: `CREATE INDEX idx_renap_dpi_normalizado ON renapinfo (regexp_replace(dpi, '\s', '', 'g'))`. |
+
+---
+
 ## Para encender el asistente IA (F7)
 
 1. Aprobar el costo.

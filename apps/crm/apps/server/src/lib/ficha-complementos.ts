@@ -173,6 +173,14 @@ export interface FuenteSolicitud {
 	estadoCivil: string | null;
 }
 
+/**
+ * RENAP a veces ya trae la preposición («DE MÉNDEZ»); sin esto saldría
+ * «de de Méndez».
+ */
+export function apellidoDeCasada(casada: string): string {
+	return /^(de|del)\s/i.test(casada.trim()) ? casada.trim() : `de ${casada}`;
+}
+
 /** "MARÍA JOSÉ LÓPEZ PÉREZ DE GARCÍA", en nombre propio. */
 export function nombreRenap(r: FuenteRenap): string | null {
 	const casada = limpio(r.marriedLastName);
@@ -182,7 +190,7 @@ export function nombreRenap(r: FuenteRenap): string | null {
 		r.thirdName,
 		r.firstLastName,
 		r.secondLastName,
-		casada ? `de ${casada}` : null,
+		casada ? apellidoDeCasada(casada) : null,
 	]);
 	return nombre ? nombrePropio(nombre) : null;
 }
@@ -316,10 +324,15 @@ export interface FuenteSolicitudCodeudor {
 	direccionTrabajo: string | null;
 }
 
-/** Mismo número aunque uno venga con guiones o espacios. */
-function mismoTelefono(a: string | null, b: string | null): boolean {
+/**
+ * Mismo número aunque uno venga con guiones, espacios o con el código de país
+ * (`50258783734` y `58783734` son el mismo): se comparan los últimos 8
+ * dígitos, la longitud de un número de Guatemala.
+ */
+export function mismoTelefono(a: string | null, b: string | null): boolean {
 	if (!a || !b) return false;
-	return a.replace(/\D/g, "") === b.replace(/\D/g, "");
+	const ultimos = (t: string) => t.replace(/\D/g, "").slice(-8);
+	return ultimos(a).length >= 7 && ultimos(a) === ultimos(b);
 }
 
 /**
@@ -336,16 +349,24 @@ export function armarCodeudores(
 		const telefonoPrincipal = limpio(c.phone) ?? limpio(s?.telMovil);
 		const movil = limpio(s?.telMovil);
 		const casa = limpio(s?.telResidencia);
+		// Cada número una sola vez: ni el principal repetido, ni el celular y el
+		// de casa iguales entre sí.
+		const celularAlterno =
+			movil && !mismoTelefono(movil, telefonoPrincipal) ? movil : null;
+		const telefonoCasa =
+			casa &&
+			!mismoTelefono(casa, telefonoPrincipal) &&
+			!mismoTelefono(casa, celularAlterno)
+				? casa
+				: null;
 		return {
 			id: c.id,
 			nombre: c.fullName.trim(),
 			rol: `Codeudor ${i + 1}`,
 			correo: limpio(c.email) ?? limpio(s?.email),
 			telefonoPrincipal,
-			celularAlterno:
-				movil && !mismoTelefono(movil, telefonoPrincipal) ? movil : null,
-			telefonoCasa:
-				casa && !mismoTelefono(casa, telefonoPrincipal) ? casa : null,
+			celularAlterno,
+			telefonoCasa,
 			residencia: limpio(s?.direccionResidencia),
 			trabajo: unir([s?.empresa, s?.direccionTrabajo], " · "),
 		};

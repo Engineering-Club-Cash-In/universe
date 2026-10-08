@@ -9,7 +9,7 @@ import {
 	Loader2,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	formatMissingAssignmentsMessage,
 	getMissingOpportunityAssignments,
@@ -204,6 +204,45 @@ function OpportunityDocumentsPage() {
 	});
 
 	const opportunity = opportunitiesData?.[0];
+	const resumenBuro = useQuery({
+		...orpc.getResumenBuroOportunidad.queryOptions({
+			input: { opportunityId },
+		}),
+		enabled:
+			!!opportunityId &&
+			!!userProfile.data &&
+			PERMISSIONS.canAccessAnalysis(userProfile.data.role),
+		refetchInterval: 15_000,
+	});
+	const consultasBuroIniciadas = useRef(new Set<string>());
+	const refetchResumenBuro = resumenBuro.refetch;
+	useEffect(() => {
+		const resumen = resumenBuro.data;
+		if (
+			!resumen?.permitirReejecucion ||
+			resumen.exento ||
+			resumen.faltaConsentimiento
+		)
+			return;
+		const pendientes = ["pendiente", "vencido", "desactualizado"];
+		const titularPendiente =
+			!resumen.faltaDpi && pendientes.includes(resumen.titular);
+		const cofirmantesPendientes = resumen.cofirmantes.some((cofirmante) =>
+			pendientes.includes(cofirmante.estado),
+		);
+		if (!titularPendiente && !cofirmantesPendientes) return;
+		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
+		if (consultasBuroIniciadas.current.has(clave)) return;
+		consultasBuroIniciadas.current.add(clave);
+		void client
+			.asegurarBuroOportunidad({ opportunityId })
+			.catch((error) => {
+				console.error("No se pudo iniciar Buró", error);
+			})
+			.finally(() => {
+				void refetchResumenBuro();
+			});
+	}, [opportunityId, resumenBuro.data, refetchResumenBuro]);
 
 	// Validation query for approve button
 	const validation = useQuery({
@@ -530,6 +569,11 @@ function OpportunityDocumentsPage() {
 			{/* Validaciones RENAP y Buró (oportunidades fuera del bot de WhatsApp) */}
 			<RenapBuroValidation
 				opportunityId={opportunityId}
+				permitirReejecucion={resumenBuro.data?.permitirReejecucion ?? false}
+				permitirValidacionManualBuro={
+					resumenBuro.data?.permitirValidacionManualBuro ?? false
+				}
+				actualizarAutomaticamente
 				onEjecucionChange={setValidandoBuroRenap}
 				currentUserRole={userProfile.data?.role}
 			/>

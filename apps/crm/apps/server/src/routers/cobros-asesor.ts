@@ -3,25 +3,27 @@
  * Asesor Junior / Asesor Senior). Datos personales del asesor logueado: SIEMPRE
  * se resuelven desde la sesión, nunca desde lo que mande el front.
  *
- * Lo que todavía no existe en el backend está CONECTADO pero devuelve `null`
- * (las cards del front muestran "—"). Cada uno tiene su `TODO(José)` con el
- * contrato ya fijado: solo hay que llenar el cuerpo, el front no se toca.
+ * Un dato que no se pudo calcular (cartera caída, asesor sin pool) llega como
+ * `null` y la card del front muestra "—"; nunca tumba el resto del bloque.
  * Detalle de cada tarea: docs/features/cobros-02/13-dashboard-asesor-backend.md
  */
 
-import { and, eq, gte, inArray, lt, ne, not, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, ne, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
 	cierreDiarioCreditoCobros,
 	contactosCobros,
+	metasAsesorCobros,
 } from "../db/schema/cobros";
 import {
 	calcularMovimientosBucketDelDia,
 	type MovimientoBucketDelDia,
 } from "../jobs/cierre-diario-asesores";
 import {
+	metaRecuperacionDelRango,
 	PERIODOS_DESEMPENO,
+	type PeriodoDesempeno,
 	type RangoFechas,
 	rangosDesempeno,
 } from "../lib/desempeno-asesor";
@@ -30,7 +32,7 @@ import {
 	esContactoEfectivo,
 	esGestionAutomatica,
 } from "../lib/historial-agendas";
-import { cobrosProcedure } from "../lib/orpc";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
@@ -45,9 +47,12 @@ export function nivelPorBuckets(buckets: number[]): NivelAsesor {
 	return buckets.some((b) => b >= 2) ? "senior" : "junior";
 }
 
-/** Contrato de "Recuperación" (KPI de Mi desempeño). Lo llena José. */
+/** Contrato de "Recuperación" (KPI de Mi desempeño). */
 export interface RecuperacionAsesor {
-	/** Q recuperados en el período (definición: ver docs, tarea B2). */
+	/**
+	 * Q recuperados en el período: lo aplicado a cuotas ya vencidas el día del
+	 * pago + la mora pagada (B2, regla de negocio 2026-10-07).
+	 */
 	monto: number;
 	/** Q del mismo tramo del período anterior (para la tendencia ▲▼). */
 	montoAnterior: number | null;
@@ -104,6 +109,86 @@ async function promesas(userId: string, r: RangoFechas, ahora: Date) {
 		pactadas: Number(fila?.pactadas ?? 0),
 		cumplidas: Number(fila?.cumplidas ?? 0),
 	};
+}
+
+/** El asesor de cartera del usuario de la sesión (match por `email_cash_in`). */
+async function asesorDeLaSesion(email: string | undefined) {
+	if (!email) return undefined;
+	const pool = await carteraBackClient.getPoolPorAsesor();
+	return pool.find((a) => a.email_cash_in?.trim().toLowerCase() === email);
+}
+
+function emailDeLaSesion(context: {
+	session?: { user?: { email?: string | null } | null } | null;
+}): string | undefined {
+	return context.session?.user?.email?.trim().toLowerCase() || undefined;
+}
+
+/**
+ * B2 + B3: recuperación del asesor en el período y el anterior, con su meta
+ * prorrateada. null si cartera no responde: el KPI muestra "—".
+ */
+async function recuperacionDelAsesor(
+	asesorId: number,
+	periodo: PeriodoDesempeno,
+	actual: RangoFechas,
+	anterior: RangoFechas,
+): Promise<RecuperacionAsesor | null> {
+	try {
+		const montoDe = async (r: RangoFechas) => {
+			const resp = await carteraBackClient.getRecuperacionPorAsesorRango({
+				fechaDesde: r.desdeStr,
+				fechaHasta: r.hastaStr,
+				asesores: [asesorId],
+			});
+			const fila = resp.porAsesor.find((a) => a.asesorId === asesorId);
+			return fila ? Number(fila.monto) : 0;
+		};
+		const [monto, montoAnterior, metas] = await Promise.all([
+			montoDe(actual),
+			montoDe(anterior),
+			metasDelAsesorEnRango(asesorId, actual),
+		]);
+		const meta = metaRecuperacionDelRango(
+			periodo,
+			actual,
+			(anio, mes) => metas.get(`${anio}-${mes}`) ?? null,
+		);
+		return { monto, montoAnterior, meta };
+	} catch (error) {
+		console.error("[getMiDesempeno] recuperación no disponible:", error);
+		return null;
+	}
+}
+
+/** Metas mensuales del asesor para los meses que toca el rango ("anio-mes" → Q). */
+async function metasDelAsesorEnRango(asesorId: number, r: RangoFechas) {
+	const meses = new Map<string, { anio: number; mes: number }>();
+	for (const fecha of [r.desdeStr, r.hastaStr]) {
+		const [anio, mes] = fecha.split("-").map(Number);
+		meses.set(`${anio}-${mes}`, { anio, mes });
+	}
+	const filas = await db
+		.select({
+			anio: metasAsesorCobros.anio,
+			mes: metasAsesorCobros.mes,
+			monto: metasAsesorCobros.montoRecuperacion,
+		})
+		.from(metasAsesorCobros)
+		.where(
+			and(
+				eq(metasAsesorCobros.asesorId, asesorId),
+				or(
+					...[...meses.values()].map((m) =>
+						and(
+							eq(metasAsesorCobros.anio, m.anio),
+							eq(metasAsesorCobros.mes, m.mes),
+						),
+					),
+				),
+			),
+		);
+	return new Map(filas.map((f) => [`${f.anio}-${f.mes}`, Number(f.monto)]));
 }
 
 /**
@@ -207,11 +292,7 @@ export const cobrosAsesorRouter = {
 	 */
 	getMiPerfilCobros: cobrosProcedure.handler(async ({ context }) => {
 		const esSupervision = PERMISSIONS.canAssignCobros(context.userRole ?? "");
-		const email = context.session?.user?.email?.trim().toLowerCase();
-		const pool = await carteraBackClient.getPoolPorAsesor();
-		const propio = email
-			? pool.find((a) => a.email_cash_in?.trim().toLowerCase() === email)
-			: undefined;
+		const propio = await asesorDeLaSesion(emailDeLaSesion(context));
 		const buckets = [...(propio?.buckets ?? [])].sort((a, b) => a - b);
 		return {
 			esSupervision,
@@ -234,21 +315,31 @@ export const cobrosAsesorRouter = {
 			const ahora = new Date();
 			const { actual, anterior } = rangosDesempeno(input.periodo, ahora);
 			const userId = context.userId;
-			const [cA, cP, pA, pP, mov, movHoy] = await Promise.all([
+			const asesor = await asesorDeLaSesion(emailDeLaSesion(context)).catch(
+				(error) => {
+					console.error(
+						"[getMiDesempeno] pool de cartera no disponible:",
+						error,
+					);
+					return undefined;
+				},
+			);
+			const [cA, cP, pA, pP, mov, movHoy, recuperacion] = await Promise.all([
 				contactabilidad(userId, actual),
 				contactabilidad(userId, anterior),
 				promesas(userId, actual, ahora),
 				promesas(userId, anterior, ahora),
 				movimiento(userId, actual),
 				movimientoDeHoyEnVivo(userId, actual, ahora),
+				asesor
+					? recuperacionDelAsesor(
+							asesor.asesor_id,
+							input.periodo,
+							actual,
+							anterior,
+						)
+					: Promise.resolve(null),
 			]);
-
-			// TODO(José) · tarea B2 + B3 (docs/features/cobros-02/13-dashboard-asesor-backend.md):
-			// devolver { monto, montoAnterior, meta } del asesor de la sesión para
-			// `actual` y `anterior`. Hoy cartera-back solo tiene recuperación MENSUAL y
-			// para supervisor (/reportes/mora-recuperacion-por-asesor), y no hay metas
-			// por asesor. Mientras sea null, el front muestra "—" en la card.
-			const recuperacion = null as RecuperacionAsesor | null;
 
 			return {
 				periodo: input.periodo,
@@ -292,4 +383,115 @@ export const cobrosAsesorRouter = {
 		const referenciasPorContactar: number | null = null;
 		return { pagosPorConfirmar, referenciasPorContactar };
 	}),
+};
+
+/**
+ * B3: metas de recuperación por asesor. Va en su propio router, montado en
+ * `src/index.ts` y no en `routers/index.ts`: `cobrosAppRouter` está en el
+ * límite donde TS7056 trunca el tipo en silencio (ver la nota de
+ * `routers/bucket-capacidad.ts`); con dos miembros más, el web perdía el tipo
+ * de todo cobros. Si el front lo consume, se tipa en `orpcAparte`.
+ */
+export const metasAsesorCobrosRouter = {
+	/**
+	 * B3: metas de recuperación (Q) de todos los asesores del pool para un mes.
+	 * Las ve cualquiera de cobros; las edita el supervisor.
+	 */
+	getMetasAsesor: cobrosProcedure
+		.input(
+			z.object({
+				mes: z.number().int().min(1).max(12),
+				anio: z.number().int().min(2024),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [pool, filas] = await Promise.all([
+				carteraBackClient.getPoolPorAsesor(),
+				db
+					.select({
+						asesorId: metasAsesorCobros.asesorId,
+						montoRecuperacion: metasAsesorCobros.montoRecuperacion,
+						updatedAt: metasAsesorCobros.updatedAt,
+					})
+					.from(metasAsesorCobros)
+					.where(
+						and(
+							eq(metasAsesorCobros.anio, input.anio),
+							eq(metasAsesorCobros.mes, input.mes),
+						),
+					),
+			]);
+			const metaPorAsesor = new Map(filas.map((f) => [f.asesorId, f]));
+			return pool
+				.filter((a) => a.activo)
+				.map((a) => ({
+					asesorId: a.asesor_id,
+					nombre: a.nombre,
+					buckets: [...a.buckets].sort((x, y) => x - y),
+					montoRecuperacion:
+						metaPorAsesor.get(a.asesor_id)?.montoRecuperacion ?? null,
+					actualizadaEn: metaPorAsesor.get(a.asesor_id)?.updatedAt ?? null,
+				}))
+				.sort((x, y) => x.nombre.localeCompare(y.nombre, "es"));
+		}),
+
+	/**
+	 * B3: guarda las metas de un mes. `montoRecuperacion: null` borra la meta
+	 * del asesor (queda "sin meta" y el KPI no muestra porcentaje).
+	 */
+	upsertMetasAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number().int().min(1).max(12),
+				anio: z.number().int().min(2024),
+				metas: z
+					.array(
+						z.object({
+							asesorId: z.number().int().positive(),
+							montoRecuperacion: z
+								.string()
+								.regex(/^\d{1,12}(\.\d{1,2})?$/, "Formato de monto inválido")
+								.nullable(),
+						}),
+					)
+					.max(200),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await db.transaction(async (tx) => {
+				for (const meta of input.metas) {
+					const delAsesor = and(
+						eq(metasAsesorCobros.asesorId, meta.asesorId),
+						eq(metasAsesorCobros.anio, input.anio),
+						eq(metasAsesorCobros.mes, input.mes),
+					);
+					if (meta.montoRecuperacion === null) {
+						await tx.delete(metasAsesorCobros).where(delAsesor);
+						continue;
+					}
+					await tx
+						.insert(metasAsesorCobros)
+						.values({
+							asesorId: meta.asesorId,
+							anio: input.anio,
+							mes: input.mes,
+							montoRecuperacion: meta.montoRecuperacion,
+							actualizadoPor: context.userId,
+						})
+						.onConflictDoUpdate({
+							target: [
+								metasAsesorCobros.asesorId,
+								metasAsesorCobros.anio,
+								metasAsesorCobros.mes,
+							],
+							set: {
+								montoRecuperacion: meta.montoRecuperacion,
+								actualizadoPor: context.userId,
+								updatedAt: new Date(),
+							},
+						});
+				}
+			});
+			return { guardadas: input.metas.length };
+		}),
 };

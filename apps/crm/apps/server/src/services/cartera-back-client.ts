@@ -1290,6 +1290,23 @@ export type MoraCobradaPorAsesorResponse = {
 	totalCobrado: string;
 };
 
+/**
+ * Recuperación por asesor en un rango de días (COBROS-02, KPI "Recuperación"
+ * del Dashboard del asesor): lo aplicado a cuotas ya vencidas el día del pago
+ * más la mora pagada. Montos con 2 decimales.
+ */
+export type RecuperacionPorAsesorRangoResponse = {
+	rango: { desde: string; hasta: string };
+	porAsesor: {
+		asesorId: number;
+		nombre: string;
+		cuotasVencidas: string;
+		mora: string;
+		monto: string;
+	}[];
+	total: string;
+};
+
 export type MoraRecuperacionPorAsesorResponse = {
 	periodo: { inicio: string; fin: string };
 	metadata: {
@@ -4547,6 +4564,29 @@ export class CarteraBackClient {
 		// "Actualizar" podría devolver un hit stale tras registrar/ajustar un pago.
 		return this.request<MoraCobradaPorAsesorResponse>(
 			`/reportes/mora-cobrada-por-asesor?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	/** Recuperación (cuotas vencidas + mora) por asesor entre dos días GT inclusivos. */
+	async getRecuperacionPorAsesorRango(params: {
+		fechaDesde: string;
+		fechaHasta: string;
+		asesores?: number[];
+		emailCobrador?: string;
+	}) {
+		const queryParams = new URLSearchParams();
+		queryParams.set("fecha_desde", params.fechaDesde);
+		queryParams.set("fecha_hasta", params.fechaHasta);
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		if (params.emailCobrador)
+			queryParams.set("email_cobrador", params.emailCobrador);
+		// Sin caché, como los otros reportes de flujo: el KPI del día tiene que
+		// moverse apenas se registra un pago.
+		return this.request<RecuperacionPorAsesorRangoResponse>(
+			`/reportes/recuperacion-por-asesor-rango?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

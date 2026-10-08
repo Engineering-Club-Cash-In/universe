@@ -103,19 +103,19 @@ export function NexaDashboard() {
           setPage(1);
         }}>
           <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Cuota del mes"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Cuota del mes: todos</SelectItem>
-            <SelectItem value="pagados">Cuota del mes: pagados</SelectItem>
-            <SelectItem value="pendientes">Cuota del mes: pendientes</SelectItem>
+          <SelectContent className="bg-white text-slate-900 border-slate-200">
+            <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: todos</SelectItem>
+            <SelectItem value="pagados" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: pagados</SelectItem>
+            <SelectItem value="pendientes" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Cuota del mes: pendientes</SelectItem>
           </SelectContent>
         </Select>
         {cuotaMes === "pagados" && (
           <Select value={medio || "todos"} onValueChange={(v) => { setMedio(sinTodos<NexaDashboardParams["medio"]>(v)); setPage(1); }}>
             <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Medio con que se pagó la cuota del mes"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Pagada por: Nexa o manual</SelectItem>
-              <SelectItem value="nexa">Pagada por: Nexa</SelectItem>
-              <SelectItem value="manual">Pagada por: manual</SelectItem>
+            <SelectContent className="bg-white text-slate-900 border-slate-200">
+              <SelectItem value="todos" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa o manual</SelectItem>
+              <SelectItem value="nexa" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: Nexa</SelectItem>
+              <SelectItem value="manual" className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">Pagada por: manual</SelectItem>
             </SelectContent>
           </Select>
         )}

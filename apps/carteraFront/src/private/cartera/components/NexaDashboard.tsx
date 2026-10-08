@@ -89,9 +89,11 @@ export function NexaDashboard() {
     chips.push({ id: "rango", texto, quitar: () => { setDesdeInput(""); setHastaInput(""); setRango({ desde: "", hasta: "" }); setPage(1); } });
   }
   if (cuotaMes) {
-    const texto = cuotaMes === "pendientes" ? "Cuota del mes pendiente"
-      : `Cuota del mes pagada${medio === "nexa" ? " por Nexa" : medio === "manual" ? " a mano" : ""}`;
-    chips.push({ id: "cuota", texto, quitar: () => { setCuotaMes(""); setMedio(""); setPage(1); } });
+    const texto = `Cuota del mes: ${cuotaMes === "pagados" ? "pagada" : cuotaMes === "parciales" ? "parcial" : "sin pago"}`;
+    chips.push({ id: "cuota", texto, quitar: () => { setCuotaMes(""); setPage(1); } });
+  }
+  if (medio) {
+    chips.push({ id: "medio", texto: `Medio: ${medio === "nexa" ? "Nexa" : "Manual"}`, quitar: () => { setMedio(""); setPage(1); } });
   }
   if (puedeFiltrarAsesor && asesor) {
     const nombre = opcionesAsesor.find((a) => String(a.asesor_id) === asesor)?.nombre ?? asesor;
@@ -138,8 +140,8 @@ export function NexaDashboard() {
         cuotaMes={cuotaMes}
         onCuotaMes={(nuevo) => {
           setCuotaMes(nuevo);
-          // El medio solo aplica a cuotas pagadas.
-          if (nuevo !== "pagados") setMedio("");
+          // Sin pago no tiene medio.
+          if (nuevo === "sinpago") setMedio("");
           setPage(1);
         }}
         medio={medio}

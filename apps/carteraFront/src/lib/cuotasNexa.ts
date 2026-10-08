@@ -154,8 +154,9 @@ export const ESTADO_CUOTA_MES: Record<EstadoCuotaMes, { etiqueta: string; clases
   por_vencer: { etiqueta: "Por vencer", clases: "bg-slate-100 text-slate-700 border-slate-300" },
 };
 
-// Filtro de la tabla: pagados = cuota del mes pagada; pendientes = vencida o por vencer.
-export type FiltroCuotaMes = "pagados" | "pendientes";
+// Filtro de la tabla: pagados = cuota del mes pagada; parciales = no pagada con plata aplicada;
+// sinpago = no pagada y sin plata aplicada. (El back aún acepta "pendientes" = parciales + sinpago.)
+export type FiltroCuotaMes = "pagados" | "parciales" | "sinpago";
 export type PagoCuotaMes = "completa" | "parcial" | "sin_pago";
 
 export type CuotaMesNexa = {

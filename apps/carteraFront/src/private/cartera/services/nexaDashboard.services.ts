@@ -51,9 +51,9 @@ export interface RangoFechas {
 
 export interface NexaDashboardParams extends RangoFechas {
   q: string;
-  // Cuota del mes: pagados o pendientes (vencida o por vencer). "" = todos.
+  // Cuota del mes: pagados, parciales o sinpago. "" = todos.
   cuotaMes: "" | FiltroCuotaMes;
-  // Medio con que se pagó la cuota del mes; el back lo ignora si cuotaMes no es "pagados".
+  // Medio con que se pagó la cuota del mes; el back lo ignora si cuotaMes es "sinpago".
   medio: "" | "nexa" | "manual";
   // asesor_id para filtrar (solo ADMIN/CONTA). "" = todos. A un ASESOR el back le aplica el suyo siempre.
   asesor: string;

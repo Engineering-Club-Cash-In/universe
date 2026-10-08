@@ -6,16 +6,17 @@ import type { SQL } from "drizzle-orm";
 
 // Rango de fecha de pago, inclusivo, en días de Guatemala. "" = sin límite.
 export type RangoFechas = { desde: string; hasta: string };
-// cuotaMes: pagados = cuota del mes pagada (criterio del cron); pendientes = no pagada (vencida o
-// por vencer). medio: con qué se pagó la cuota del mes; solo filtra junto con cuotaMes = "pagados".
+// cuotaMes: pagados = cuota del mes pagada (criterio del cron); parciales = no pagada con plata aplicada;
+// sinpago = no pagada y sin plata aplicada; pendientes = no pagada (parcial o sin pago, compatibilidad).
+// medio: con qué se pagó la cuota del mes (pagada o parcial); con sinpago se ignora.
 export type NexaDashboardParams = RangoFechas & {
   q: string; page: number; pageSize: number;
   cuotaMes: "" | FiltroCuotaMes; medio: "" | "nexa" | "manual";
 };
 
 const MEDIOS = ["nexa", "manual"] as const;
-export type FiltroCuotaMes = "pagados" | "pendientes";
-const CUOTA_MES = ["pagados", "pendientes"] as const;
+export type FiltroCuotaMes = "pagados" | "parciales" | "sinpago" | "pendientes";
+const CUOTA_MES = ["pagados", "parciales", "sinpago", "pendientes"] as const;
 // pagada: criterio del cron. vencida: venció antes de hoy (GT) y no está pagada. por_vencer: vence hoy o después.
 export type EstadoCuotaMes = "pagada" | "vencida" | "por_vencer";
 // completa: pagada (criterio del cron). parcial: no pagada pero con plata aplicada. sin_pago: ninguna de las dos.
@@ -43,8 +44,8 @@ export const parseNexaDashboardParams = (query: Record<string, unknown>): NexaDa
   const cuotaMes = deLista(CUOTA_MES, query.cuotaMes);
   return {
     q, page, pageSize, ...parseRangoFechas(query),
-    // El medio solo existe para una cuota pagada: con otro filtro de cuota se ignora.
-    cuotaMes, medio: cuotaMes === "pagados" ? deLista(MEDIOS, query.medio) : "",
+    // Sin pago no tiene medio: ahí se ignora.
+    cuotaMes, medio: cuotaMes === "sinpago" ? "" : deLista(MEDIOS, query.medio),
   };
 };
 
@@ -375,11 +376,17 @@ WITH base AS (
   -- Con rango de fechas, solo los créditos con algún pago o algún rechazo Nexa en el período.
   WHERE (${!conRango(params)} OR ultimo.credito_id IS NOT NULL OR COALESCE(nexa.rechazos_nexa, 0) > 0)
     -- Sin cuota del mes no entra en ningún filtro de cuota.
+    -- parcial = la misma regla de cuota_mes_pago: no pagada y con plata aplicada.
     AND (${params.cuotaMes} = '' OR (${params.cuotaMes} = 'pagados' AND cuota_mes.estado = 'pagada')
+         OR (${params.cuotaMes} = 'parciales' AND cuota_mes.estado IN ('vencida', 'por_vencer') AND COALESCE(mm.aplicado, 0) > 0)
+         OR (${params.cuotaMes} = 'sinpago' AND cuota_mes.estado IN ('vencida', 'por_vencer') AND COALESCE(mm.aplicado, 0) = 0)
          OR (${params.cuotaMes} = 'pendientes' AND cuota_mes.estado IN ('vencida', 'por_vencer')))
-    -- Medio de la cuota del mes pagada, como la franja: sin detalle del medio cuenta como manual (verde).
-    AND (${params.medio} = '' OR ${params.cuotaMes} <> 'pagados'
-         OR COALESCE(mm.medio, 'MANUAL') = CASE WHEN ${params.medio} = 'nexa' THEN 'NEXA' ELSE 'MANUAL' END)
+    -- Medio de la cuota del mes (pagada o con pago parcial), como la franja: una pagada sin detalle del medio
+    -- cuenta como manual (verde). Sin plata aplicada no tiene medio.
+    AND (${params.medio} = '' OR (
+         CASE WHEN cuota_mes.estado = 'pagada' THEN COALESCE(mm.medio, 'MANUAL')
+              WHEN COALESCE(mm.aplicado, 0) > 0 THEN mm.medio END
+         = CASE WHEN ${params.medio} = 'nexa' THEN 'NEXA' ELSE 'MANUAL' END))
 ), totales AS (
   -- Aparte de la página: si la página pedida queda más allá del final, los totales siguen.
   SELECT COUNT(*) AS total_creditos,
@@ -396,11 +403,11 @@ FROM totales
 LEFT JOIN (
   SELECT filas.* FROM filas
   -- En pendientes, primero las cuotas con pago parcial.
-  ORDER BY CASE WHEN ${params.cuotaMes} = 'pendientes' AND filas.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
+  ORDER BY CASE WHEN ${params.cuotaMes} IN ('pendientes', 'parciales') AND filas.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
            filas.ultimo_pago_fecha DESC NULLS LAST, filas.credito_id
   LIMIT ${params.pageSize} OFFSET ${(params.page - 1) * params.pageSize}
 ) pagina ON true
-ORDER BY CASE WHEN ${params.cuotaMes} = 'pendientes' AND pagina.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
+ORDER BY CASE WHEN ${params.cuotaMes} IN ('pendientes', 'parciales') AND pagina.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
          pagina.ultimo_pago_fecha DESC NULLS LAST, pagina.credito_id
   `);
 

@@ -20,26 +20,44 @@ export interface ChipFiltro {
   quitar: () => void;
 }
 
-function Segmentado<T extends string>({ etiqueta, valor, opciones, onChange }: {
+type Tono = "neutro" | "nexa" | "manual";
+const ACTIVO: Record<Tono, string> = {
+  neutro: "bg-white font-medium text-blue-800 shadow-sm ring-1 ring-slate-200",
+  nexa: "border border-purple-300 bg-purple-50 font-medium text-purple-800 shadow-sm",
+  manual: "border border-green-300 bg-green-50 font-medium text-green-800 shadow-sm",
+};
+const PUNTO: Record<Tono, string> = { neutro: "", nexa: "bg-purple-600", manual: "bg-green-600" };
+
+function Segmentado<T extends string>({ etiqueta, valor, opciones, onChange, deshabilitado, titulo }: {
   etiqueta: string;
   valor: T;
-  opciones: { valor: T; texto: string }[];
+  opciones: { valor: T; texto: string; tono?: Tono }[];
   onChange: (v: T) => void;
+  deshabilitado?: boolean;
+  titulo?: string;
 }) {
   return (
-    <div role="group" aria-label={etiqueta} className="inline-flex rounded-md border border-slate-300 bg-slate-100 p-0.5">
+    <div
+      role="group"
+      aria-label={etiqueta}
+      title={deshabilitado ? titulo : undefined}
+      className={`inline-flex max-w-full flex-wrap rounded-md border border-slate-300 bg-slate-100 p-0.5 ${deshabilitado ? "opacity-50" : ""}`}
+    >
       {opciones.map((o) => {
         const activo = o.valor === valor;
+        const tono = o.tono ?? "neutro";
         return (
           <button
             key={o.valor}
             type="button"
+            disabled={deshabilitado}
             aria-pressed={activo}
             onClick={() => onChange(o.valor)}
-            className={`h-[30px] rounded px-3 text-sm transition-colors ${FOCO} ${
-              activo ? "bg-white font-medium text-blue-800 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:text-slate-900"
+            className={`inline-flex h-[30px] items-center gap-1.5 rounded border border-transparent px-3 text-sm transition-colors disabled:cursor-not-allowed ${FOCO} ${
+              activo ? ACTIVO[tono] : "text-slate-600 hover:text-slate-900"
             }`}
           >
+            {tono !== "neutro" && <span aria-hidden className={`h-2 w-2 rounded-sm ${PUNTO[tono]}`} />}
             {o.texto}
           </button>
         );
@@ -133,33 +151,32 @@ export function NexaFiltros(props: {
           </Campo>
 
           <Campo etiqueta="Cuota del mes">
-            <div className="flex flex-wrap items-center gap-2">
-              <Segmentado<CuotaMes>
-                etiqueta="Cuota del mes"
-                valor={props.cuotaMes}
-                onChange={props.onCuotaMes}
-                opciones={[
-                  { valor: "", texto: "Todas" },
-                  { valor: "pagados", texto: "Pagadas" },
-                  { valor: "pendientes", texto: "Pendientes" },
-                ]}
-              />
-              {props.cuotaMes === "pagados" && (
-                <div className="flex items-center gap-2 border-l-2 border-blue-200 pl-2">
-                  <span className="text-xs font-medium text-slate-600">por</span>
-                  <Segmentado<Medio>
-                    etiqueta="Medio con que se pagó la cuota del mes"
-                    valor={props.medio}
-                    onChange={props.onMedio}
-                    opciones={[
-                      { valor: "", texto: "Ambos" },
-                      { valor: "nexa", texto: "Nexa" },
-                      { valor: "manual", texto: "Manual" },
-                    ]}
-                  />
-                </div>
-              )}
-            </div>
+            <Segmentado<CuotaMes>
+              etiqueta="Cuota del mes"
+              valor={props.cuotaMes}
+              onChange={props.onCuotaMes}
+              opciones={[
+                { valor: "", texto: "Todas" },
+                { valor: "pagados", texto: "Pagadas" },
+                { valor: "parciales", texto: "Parciales" },
+                { valor: "sinpago", texto: "Sin pago" },
+              ]}
+            />
+          </Campo>
+
+          <Campo etiqueta="Medio">
+            <Segmentado<Medio>
+              etiqueta="Medio con que se pagó la cuota del mes"
+              valor={props.medio}
+              onChange={props.onMedio}
+              deshabilitado={props.cuotaMes === "sinpago"}
+              titulo="Sin pago no tiene medio"
+              opciones={[
+                { valor: "", texto: "Todos" },
+                { valor: "nexa", texto: "Nexa", tono: "nexa" },
+                { valor: "manual", texto: "Manual", tono: "manual" },
+              ]}
+            />
           </Campo>
 
           {props.puedeFiltrarAsesor && (

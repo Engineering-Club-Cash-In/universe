@@ -16,11 +16,16 @@ describe("parseNexaDashboardParams", () => {
     [{ desde: "0000-01-01", hasta: "0001-01-01" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "0001-01-01", medio: "", cuotaMes: "" }],
     [{ medio: "nexa", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "pagados" }],
     [{ medio: "manual", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "manual", cuotaMes: "pagados" }],
-    // El medio solo filtra cuotas pagadas: con pendientes o todos se descarta.
-    [{ medio: "nexa", cuotaMes: "pendientes" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "pendientes" }],
-    [{ medio: "manual" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    // El medio filtra con cualquier cuota salvo sinpago, donde se descarta.
+    [{ medio: "nexa", cuotaMes: "pendientes" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "pendientes" }],
+    [{ medio: "manual" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "manual", cuotaMes: "" }],
+    [{ cuotaMes: "parciales" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "parciales" }],
+    [{ cuotaMes: "sinpago" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "sinpago" }],
+    [{ medio: "nexa", cuotaMes: "parciales" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "parciales" }],
+    [{ medio: "nexa", cuotaMes: "sinpago" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "sinpago" }],
+    [{ medio: "otro", cuotaMes: "parciales" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "parciales" }],
     // Los valores viejos (pagada / vencida / por_vencer) ya no son filtros.
-    [{ medio: "nexa", cuotaMes: "vencida" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ medio: "nexa", cuotaMes: "vencida" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "" }],
     [{ medio: "NEXA", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "pagados" }],
     [{ medio: ["nexa"], cuotaMes: "pagados' OR '1'='1" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
   ])("%j → %j", (query, expected) => {

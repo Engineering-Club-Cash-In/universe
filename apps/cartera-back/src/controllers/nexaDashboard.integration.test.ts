@@ -391,14 +391,22 @@ integrationTest("pagados por Nexa o manual: el medio de la cuota del mes (gana e
   const evp = await pe.evento("applied", 40);
   await pe.abono(await pe.cuota(1, "1 month -1 day"), { evento: evp, monto: 40, pagado: false });
   const { mod } = await setup();
-  const ver = async (cuotaMes: "" | "pagados" | "pendientes", medio: "" | "nexa" | "manual") =>
+  const ver = async (cuotaMes: "" | "pagados" | "parciales" | "sinpago" | "pendientes", medio: "" | "nexa" | "manual") =>
     (await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes, medio })).creditos.map((x) => x.cliente.slice(-1)).sort();
   expect(await ver("pagados", "")).toEqual(["F", "M", "N"]);
   expect(await ver("pagados", "nexa")).toEqual(["N"]);
   expect(await ver("pagados", "manual")).toEqual(["F", "M"]);
-  // Sin "pagados", el medio no filtra.
+  // Con pendientes, el medio filtra el pago parcial; con Todas, pagadas y parciales de ese medio.
   expect(await ver("pendientes", "nexa")).toEqual(["P"]);
-  expect(await ver("", "nexa")).toEqual(["F", "M", "N", "P"]);
+  expect(await ver("pendientes", "manual")).toEqual([]);
+  expect(await ver("parciales", "nexa")).toEqual(["P"]);
+  expect(await ver("parciales", "manual")).toEqual([]);
+  expect(await ver("parciales", "")).toEqual(["P"]);
+  expect(await ver("sinpago", "")).toEqual([]);
+  // Con sinpago el medio se ignora (parseo), y en SQL nadie sin plata aplicada tiene medio.
+  expect(await ver("sinpago", "nexa")).toEqual([]);
+  expect(await ver("", "nexa")).toEqual(["N", "P"]);
+  expect(await ver("", "manual")).toEqual(["F", "M"]);
   const r = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes: "pagados", medio: "manual" });
   expect(r.totales.creditos).toBe(2);
   const fm = r.creditos.find((x) => x.cliente.endsWith("M"))!;
@@ -433,6 +441,13 @@ integrationTest("parcial: suma lo aplicado sin anuladas ni 'reset', contra la cu
     { numero: 1, vencimiento: expect.any(String), pagada: false, medio: "NEXA", banco: null, aplicado: "500.00", monto: "2500.00" },
   ]);
   expect(r.creditos[1]!.cuotaMes).toMatchObject({ pago: "sin_pago", aplicado: "0.00" });
+  // parciales y sinpago no se solapan; parciales va primero; el medio filtra el parcial.
+  const idx = async (cuotaMes: "parciales" | "sinpago", medio: "" | "nexa" | "manual" = "") =>
+    (await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes, medio })).creditos.map((x) => x.cliente.slice(-1));
+  expect(await idx("parciales")).toEqual(["P"]);
+  expect(await idx("sinpago")).toEqual(["S"]);
+  expect(await idx("parciales", "nexa")).toEqual(["P"]);
+  expect(await idx("parciales", "manual")).toEqual([]);
   // Sin el filtro de pendientes, el orden es el de siempre (último pago más reciente primero).
   const todos = await mod.getNexaDashboard(TODOS, { ...dash, q: prefijo });
   expect(todos.creditos.map((x) => x.cliente.slice(-1))).toEqual(["S", "P"]);

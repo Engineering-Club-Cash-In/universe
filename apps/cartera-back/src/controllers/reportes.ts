@@ -2273,6 +2273,88 @@ export async function getMoraCobradaPorAsesor({
   return { periodo: { inicio, fin }, porAsesor, totalCobrado };
 }
 
+// RECUPERACIÓN del asesor en un rango de días (COBROS-02, KPI "Recuperación"
+// del Dashboard del asesor; decisión de negocio 2026-10-07):
+//   · lo que los pagos del rango aplicaron a cuotas que YA estaban vencidas el
+//     día del pago (Σ de rubros: capital, interés, IVA, seguro, GPS y
+//     membresías — la misma suma que `sumarAplicadoACuota`), más
+//   · la mora pagada en esos pagos.
+// Un pago adelantado o al día no es recuperación. Cuentan los pagos vivos
+// (paymentFalse = false) validated, pending (boleta en validación) y
+// no_required (legado); los abonos directos a capital y los reset no.
+// Atribución: el asesor ACTUAL del crédito (`creditos.asesor_id`), igual que
+// los demás reportes por asesor. `fecha_pago` guarda la hora de Guatemala sin
+// zona, así que el rango se compara con los días tal cual.
+export async function getRecuperacionPorAsesorRango({
+  fechaDesde,
+  fechaHasta,
+  asesores,
+  emailCobrador,
+}: {
+  /** YYYY-MM-DD inclusivo (día GT). */
+  fechaDesde: string;
+  /** YYYY-MM-DD inclusivo (día GT). */
+  fechaHasta: string;
+  asesores?: number[];
+  emailCobrador?: string;
+}) {
+  const emailFilter = emailCobrador
+    ? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
+    : sql``;
+  const asesoresFilter = asesores && asesores.length
+    ? sql`AND a.asesor_id IN (${sql.join(asesores.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
+
+  const rows = await db.execute<{
+    asesor_id: number;
+    nombre: string;
+    cuotas_vencidas: string;
+    mora: string;
+  }>(sql`
+    SELECT
+      a.asesor_id,
+      a.nombre,
+      COALESCE(SUM(
+        CASE WHEN cc.fecha_vencimiento < pc.fecha_pago::date THEN
+          COALESCE(pc.abono_capital, 0) + COALESCE(pc.abono_interes, 0)
+          + COALESCE(pc.abono_iva_12, 0) + COALESCE(pc.abono_seguro, 0)
+          + COALESCE(pc.abono_gps, 0) + COALESCE(pc.membresias_pago, 0)
+        ELSE 0 END
+      ), 0) AS cuotas_vencidas,
+      COALESCE(SUM(COALESCE(pc.mora, 0)), 0) AS mora
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = pc.credito_id
+    INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito cc ON cc.cuota_id = pc.cuota_id
+    WHERE pc.fecha_pago >= ${fechaDesde}::date
+      AND pc.fecha_pago < (${fechaHasta}::date + 1)
+      AND COALESCE(pc."paymentFalse", false) = false
+      AND pc.validation_status IN ('validated', 'pending', 'no_required')
+      ${emailFilter}
+      ${asesoresFilter}
+    GROUP BY a.asesor_id, a.nombre
+  `);
+
+  const porAsesor = rows.rows
+    .map((r) => {
+      const cuotasVencidas = new Big(r.cuotas_vencidas ?? 0);
+      const mora = new Big(r.mora ?? 0);
+      return {
+        asesorId: Number(r.asesor_id),
+        nombre: r.nombre,
+        cuotasVencidas: cuotasVencidas.toFixed(2),
+        mora: mora.toFixed(2),
+        monto: cuotasVencidas.plus(mora).toFixed(2),
+      };
+    })
+    .sort((x, y) => Number(y.monto) - Number(x.monto));
+  const total = porAsesor
+    .reduce((s, r) => s.plus(r.monto), new Big(0))
+    .toFixed(2);
+
+  return { rango: { desde: fechaDesde, hasta: fechaHasta }, porAsesor, total };
+}
+
 export async function getMoraRecuperacionPorAsesor({
   mes,
   anio,

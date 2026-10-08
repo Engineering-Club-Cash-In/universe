@@ -3,7 +3,7 @@ import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfo
 import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
 import { MoraRecoveryFuturePeriodError } from "../controllers/moraRecuperacion";
 import { getOfficialClosure } from "../controllers/cierreMoraOficial";
-import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getReinversionLiquidaciones } from "../controllers/reportes";
+import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getRecuperacionPorAsesorRango, getReinversionLiquidaciones } from "../controllers/reportes";
 import { client, db } from "../database";
 import { getVehiclesBySifcoMap } from "../services/crm.service";
 import { authMiddleware } from "./midleware";
@@ -390,6 +390,44 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/mora-cobrada-por-asesor]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  // COBROS-02: recuperación (cuotas vencidas + mora cobradas) por asesor en
+  // un rango de días. La usa el KPI "Recuperación" del Dashboard del asesor
+  // (día / semana / mes y su período anterior).
+  .get("/reportes/recuperacion-por-asesor-rango", async ({ query, set }) => {
+    try {
+      const { fecha_desde, fecha_hasta, asesores, email_cobrador } =
+        query as Record<string, string>;
+      const esFecha = (v: string | undefined) =>
+        !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+      if (!esFecha(fecha_desde) || !esFecha(fecha_hasta)) {
+        set.status = 400;
+        return { error: "Parámetros 'fecha_desde' y 'fecha_hasta' requeridos (YYYY-MM-DD)" };
+      }
+      if (fecha_desde > fecha_hasta) {
+        set.status = 400;
+        return { error: "'fecha_desde' no puede ser posterior a 'fecha_hasta'" };
+      }
+      const asesoresIds = asesores
+        ? asesores.split(",").map((value) => Number(value.trim())).filter((id) => Number.isInteger(id) && id > 0)
+        : undefined;
+      if (asesores && !asesoresIds?.length) {
+        set.status = 400;
+        return { error: "Parámetro 'asesores' inválido" };
+      }
+      set.status = 200;
+      return await getRecuperacionPorAsesorRango({
+        fechaDesde: fecha_desde,
+        fechaHasta: fecha_hasta,
+        asesores: asesoresIds,
+        emailCobrador: email_cobrador,
+      });
+    } catch (error) {
+      console.error("[/reportes/recuperacion-por-asesor-rango]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

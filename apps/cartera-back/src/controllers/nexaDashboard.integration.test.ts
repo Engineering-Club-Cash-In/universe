@@ -6,7 +6,7 @@ import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const integrationTest = testDatabaseUrl ? test : test.skip;
 const sinRango = { desde: "", hasta: "" };
-const dash = { q: "", page: 1, pageSize: 50, medio: "" as const, cuotaMes: "" as const, ...sinRango };
+const dash = { q: "", page: 1, pageSize: 50, cuotaMes: "" as const, medio: "" as const, ...sinRango };
 
 type Sql = ReturnType<typeof postgres>;
 let ready: Promise<{ sql: Sql; mod: typeof import("./nexaDashboard") }> | undefined;
@@ -18,7 +18,7 @@ const setup = () => (ready ??= (async () => {
   await sql`CREATE SCHEMA cartera`;
   await sql`CREATE TABLE cartera.usuarios (usuario_id integer PRIMARY KEY, nombre text)`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY, usuario_id integer,
-    numero_credito_sifco text, "statusCredit" text)`;
+    numero_credito_sifco text, "statusCredit" text, cuota numeric(18,2) NOT NULL DEFAULT 1000)`;
   await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY, numero_cuota integer, credito_id integer, fecha_vencimiento date,
     pagado boolean DEFAULT false)`;
   await sql`CREATE TABLE cartera.bancos (banco_id integer PRIMARY KEY, nombre text)`;
@@ -327,15 +327,15 @@ integrationTest("franja por cuota: últimas 12 hasta fin de mes, color por medio
   expect(fila!.cuotaMes).toMatchObject({ numero: 13, estado: "pagada" });
 });
 
-integrationTest("cuota del mes: pagada, vencida sin pagar y por vencer; el filtro pagina y cuenta con eso", async () => {
+integrationTest("cuota del mes: pagados y pendientes (vencida y por vencer); el filtro pagina y cuenta con eso", async () => {
   const prefijo = `CuotaMes-${Date.now()}`;
   // A: la cuota de este mes, pagada.
   const a = await nuevoCredito(`${prefijo} A`);
   await a.abono(await a.cuota(1, "0 days"));
-  // B: sin cuota este mes; la última vencida (mes pasado) sin pagar → vencida.
+  // B: sin cuota este mes; la última vencida (mes pasado) sin pagar → pendiente, vencida.
   const b = await nuevoCredito(`${prefijo} B`);
   await b.cuota(1, "-1 month");
-  // C: vence el último día de este mes, sin pagar → por vencer.
+  // C: vence el último día de este mes, sin pagar → pendiente, por vencer.
   const c = await nuevoCredito(`${prefijo} C`);
   await c.cuota(1, "1 month -1 day");
   // D: dos cuotas este mes (plazo de 30 días): cuenta la primera, que está pagada.
@@ -345,48 +345,95 @@ integrationTest("cuota del mes: pagada, vencida sin pagar y por vencer; el filtr
   // E: sin cuotas → no entra en ningún filtro de cuota.
   await nuevoCredito(`${prefijo} E`);
   const { mod } = await setup();
-  const ver = async (cuotaMes: "" | "pagada" | "vencida" | "por_vencer", pageSize = 50) => {
+  const ver = async (cuotaMes: "" | "pagados" | "pendientes", pageSize = 50) => {
     const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes, pageSize });
     return { r, clientes: r.creditos.map((x) => x.cliente.slice(-1)).sort() };
   };
   const todos = await ver("");
   expect(todos.clientes).toEqual(["A", "B", "C", "D", "E"]);
-  const b0 = todos.r.creditos.find((x) => x.cliente.endsWith("B"))!;
-  expect(b0.cuotaMes).toMatchObject({ numero: 1, estado: "vencida" });
-  expect(b0.cuotaMes!.vencimiento).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  expect(todos.r.creditos.find((x) => x.cliente.endsWith("E"))!.cuotaMes).toBeNull();
-  expect((await ver("pagada")).clientes).toEqual(["A", "D"]);
-  expect((await ver("vencida")).clientes).toEqual(["B"]);
-  expect((await ver("por_vencer")).clientes).toEqual(["C"]);
-  const pag = await ver("pagada", 1);
+  const de = (l: string) => todos.r.creditos.find((x) => x.cliente.endsWith(l))!.cuotaMes;
+  expect(de("A")).toMatchObject({ numero: 1, estado: "pagada", pago: "completa", aplicado: "100.00", monto: "1000.00", medio: "MANUAL" });
+  expect(de("B")).toMatchObject({ numero: 1, estado: "vencida", pago: "sin_pago", aplicado: "0.00", monto: "1000.00", medio: null });
+  expect(de("B")!.vencimiento).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(de("C")).toMatchObject({ estado: "por_vencer", pago: "sin_pago" });
+  expect(de("E")).toBeNull();
+  expect((await ver("pagados")).clientes).toEqual(["A", "D"]);
+  const pendientes = await ver("pendientes");
+  expect(pendientes.clientes).toEqual(["B", "C"]);
+  // La etiqueta sigue distinguiendo vencida de por vencer.
+  expect(pendientes.r.creditos.map((x) => x.cuotaMes!.estado).sort()).toEqual(["por_vencer", "vencida"]);
+  const pag = await ver("pagados", 1);
   expect(pag.r.creditos).toHaveLength(1);
   expect(pag.r.total).toBe(2);
   expect(pag.r.totales.creditos).toBe(2);
 });
 
-integrationTest("filtro de medio del último pago y banco del último pago", async () => {
+integrationTest("pagados por Nexa o manual: el medio de la cuota del mes (gana el que más aplicó), no el del último pago", async () => {
   const prefijo = `Medio-${Date.now()}`;
+  // N: cuota del mes pagada por Nexa, pero el último pago del crédito fue manual (a otra cuota).
   const n = await nuevoCredito(`${prefijo} N`);
-  await n.pago(1, "2026-09-01 10:00:00", { monto: 30 });
-  const ev = await n.evento("applied", 50);
-  await n.pago(1, "2026-09-10 10:00:00", { monto: 50, evento: ev, por: "", aut: "" });
+  const ev = await n.evento("applied", 100);
+  await n.abono(await n.cuota(2, "0 days"), { evento: ev, fecha: "2026-09-10 10:00:00" });
+  await n.pago(1, "2026-09-20 10:00:00", { monto: 30 });
+  // M: cuota del mes mixta, el manual aplicó más; el último pago fue Nexa.
   const m = await nuevoCredito(`${prefijo} M`);
-  await m.pago(1, "2026-09-10 10:00:00", { monto: 70 });
-  await m.sql`UPDATE cartera.pagos_credito SET banco_id = 1 WHERE credito_id = ${m.id}`;
-  const s = await nuevoCredito(`${prefijo} S`); // sin pagos
-  void s;
+  const qm = await m.cuota(1, "0 days");
+  const evm = await m.evento("applied", 40);
+  await m.abono(qm, { banco: 1, monto: 60, fecha: "2026-09-01 10:00:00" });
+  await m.abono(qm, { evento: evm, monto: 40, fecha: "2026-09-12 10:00:00" });
+  // F: pagada solo por el flag, sin filas: "sin detalle del medio", la franja la pinta verde → manual.
+  const f = await nuevoCredito(`${prefijo} F`);
+  await f.cuota(1, "0 days", true);
+  // P: pendiente con un abono Nexa: no entra en pagados por Nexa.
+  const pe = await nuevoCredito(`${prefijo} P`);
+  const evp = await pe.evento("applied", 40);
+  await pe.abono(await pe.cuota(1, "1 month -1 day"), { evento: evp, monto: 40, pagado: false });
   const { mod } = await setup();
-  const ver = async (medio: "" | "nexa" | "manual") =>
-    (await mod.getNexaDashboard({ ...dash, q: prefijo, medio })).creditos.map((x) => x.cliente.slice(-1)).sort();
-  expect(await ver("")).toEqual(["M", "N", "S"]);
-  expect(await ver("nexa")).toEqual(["N"]);
-  expect(await ver("manual")).toEqual(["M"]);
-  const r = await mod.getNexaDashboard({ ...dash, q: prefijo, medio: "manual" });
-  expect(r.totales).toMatchObject({ creditos: 1, ultimoPagoNexa: 0 });
-  expect(r.creditos[0]).toMatchObject({ ultimoPagoNexa: false, ultimoPagoBanco: "Banco Industrial" });
-  expect((await n.fila()).fila).toMatchObject({ ultimoPagoNexa: true, ultimoPagoBanco: null });
-  expect((await m.modal()).pagos[0]).toMatchObject({ canal: "MANUAL", banco: "Banco Industrial" });
-  expect((await n.modal()).pagos.map((p) => p.banco)).toEqual([null, null]);
+  const ver = async (cuotaMes: "" | "pagados" | "pendientes", medio: "" | "nexa" | "manual") =>
+    (await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes, medio })).creditos.map((x) => x.cliente.slice(-1)).sort();
+  expect(await ver("pagados", "")).toEqual(["F", "M", "N"]);
+  expect(await ver("pagados", "nexa")).toEqual(["N"]);
+  expect(await ver("pagados", "manual")).toEqual(["F", "M"]);
+  // Sin "pagados", el medio no filtra.
+  expect(await ver("pendientes", "nexa")).toEqual(["P"]);
+  expect(await ver("", "nexa")).toEqual(["F", "M", "N", "P"]);
+  const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes: "pagados", medio: "manual" });
+  expect(r.totales.creditos).toBe(2);
+  const fm = r.creditos.find((x) => x.cliente.endsWith("M"))!;
+  expect(fm).toMatchObject({ ultimoPagoNexa: true });
+  expect(fm.cuotaMes).toMatchObject({ pago: "completa", aplicado: "100.00", medio: "MANUAL" });
+  expect(r.creditos.find((x) => x.cliente.endsWith("F"))!.cuotaMes).toMatchObject({ pago: "completa", aplicado: "0.00", medio: null });
+  const fn = (await n.fila()).fila!;
+  expect(fn).toMatchObject({ ultimoPagoNexa: false });
+  expect(fn.cuotaMes).toMatchObject({ estado: "pagada", pago: "completa", medio: "NEXA" });
+});
+
+integrationTest("parcial: suma lo aplicado sin anuladas ni 'reset', contra la cuota del crédito; en pendientes van primero", async () => {
+  const prefijo = `Parcial-${Date.now()}`;
+  // S: pendiente sin pago, con un último pago más reciente que el de P (sin el orden, iría primero).
+  const sp = await nuevoCredito(`${prefijo} S`);
+  await sp.cuota(1, "-1 month");
+  await sp.pago(1, "2026-09-25 10:00:00", { monto: 5 });
+  // P: cuota de Q2,500 vencida con 300 + 200 aplicados; una anulada (999) y una 'reset' (777) no cuentan.
+  const p = await nuevoCredito(`${prefijo} P`);
+  await p.sql`UPDATE cartera.creditos SET cuota = 2500 WHERE credito_id = ${p.id}`;
+  const q = await p.cuota(1, "-1 month");
+  const ev = await p.evento("applied", 300);
+  await p.abono(q, { evento: ev, monto: 300, pagado: false, fecha: "2026-09-01 10:00:00" });
+  await p.abono(q, { banco: 2, monto: 200, pagado: false, fecha: "2026-09-02 10:00:00" });
+  await p.abono(q, { monto: 999, falso: true });
+  await p.abono(q, { monto: 777, estado: "reset", pagado: false });
+  const { mod } = await setup();
+  const r = await mod.getNexaDashboard({ ...dash, q: prefijo, cuotaMes: "pendientes" });
+  expect(r.creditos.map((x) => x.cliente.slice(-1))).toEqual(["P", "S"]);
+  expect(r.creditos[0]!.cuotaMes).toMatchObject({ estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "2500.00", medio: "NEXA" });
+  expect(r.creditos[0]!.ultimasCuotas).toEqual([
+    { numero: 1, vencimiento: expect.any(String), pagada: false, medio: "NEXA", banco: null, aplicado: "500.00", monto: "2500.00" },
+  ]);
+  expect(r.creditos[1]!.cuotaMes).toMatchObject({ pago: "sin_pago", aplicado: "0.00" });
+  // Sin el filtro de pendientes, el orden es el de siempre (último pago más reciente primero).
+  const todos = await mod.getNexaDashboard({ ...dash, q: prefijo });
+  expect(todos.creditos.map((x) => x.cliente.slice(-1))).toEqual(["S", "P"]);
 });
 
 integrationTest("detalle de rechazos: fecha, monto, código y estado; manual_review con filas vivas no aparece", async () => {
@@ -412,7 +459,7 @@ integrationTest("detalle de rechazos: fecha, monto, código y estado; manual_rev
 
 integrationTest("los filtros llegan como parámetros: un valor fuera de la lista no filtra ni rompe el SQL", async () => {
   const { mod } = await setup();
-  const params = mod.parseNexaDashboardParams({ medio: "nexa' OR 1=1 --", cuotaMes: "pagada; drop table x" });
+  const params = mod.parseNexaDashboardParams({ medio: "nexa' OR 1=1 --", cuotaMes: "pagados; drop table x" });
   expect({ medio: params.medio, cuotaMes: params.cuotaMes }).toEqual({ medio: "", cuotaMes: "" });
   const c = await nuevoCredito();
   expect((await mod.getNexaDashboard({ ...params, q: c.sifco })).creditos).toHaveLength(1);
@@ -443,7 +490,8 @@ integrationTest("medio: solo cuentan las filas que cubren la cuota; una fila man
   await c.abono(q, { banco: 1, monto: 800, estado: "capital_validated", fecha: "2026-09-13 10:00:00" });
   const { fila } = await c.fila();
   expect(fila!.ultimasCuotas).toEqual([
-    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null },
+    // aplicado: sin la fila 'reset' (100 Nexa + 800 manual), aunque el medio salga solo de la que cubre.
+    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null, aplicado: "900.00", monto: "1000.00" },
   ]);
 });
 

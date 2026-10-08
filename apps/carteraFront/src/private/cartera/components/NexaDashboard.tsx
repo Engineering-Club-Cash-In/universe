@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { fmtQ } from "@/lib/moneda";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { describirRango, fmtFechaNexa, type NexaDashboardCredito, type NexaDashboardParams } from "../services/nexaDashboard.services";
-import { ESTADO_CUOTA_MES, bancoTexto, fmtDiaNexa, resumenRechazosNexa } from "@/lib/cuotasNexa";
+import { ESTADO_CUOTA_MES, bancoTexto, fmtDiaNexa, pagoCuotaMesTexto, resumenRechazosNexa } from "@/lib/cuotasNexa";
 import { CLASES_TONO_NEXA, estadoNexa, motivoRechazoNexa } from "@/lib/estadoNexa";
 
 // Radix Select no admite value "": "todos" = sin filtro.
@@ -63,13 +63,14 @@ export function NexaDashboard() {
   };
   const totalPages = data ? Math.max(1, Math.ceil(data.total / 20)) : 1;
 
-  if (isLoading && !data) return <div className="flex items-center justify-center p-8"><Loader2 className="animate-spin mr-2" /> Cargando…</div>;
+  if (isLoading && !data) return <div className="flex items-center justify-center p-8 text-slate-700"><Loader2 className="animate-spin mr-2" /> Cargando…</div>;
 
   return (
-    <div className="p-6 space-y-4">
+    // Color explícito: el contenedor de la página hereda texto blanco.
+    <div className="p-6 space-y-4 text-slate-900">
       <div>
-        <h1 className="text-2xl font-bold">Pagos Nexa</h1>
-        <p className="text-sm text-gray-600">Créditos con token de Nexa y si su último pago entró por Nexa{describirRango(rango)}</p>
+        <h1 className="text-2xl font-bold text-slate-900">Pagos Nexa</h1>
+        <p className="text-sm text-slate-700">Créditos con token de Nexa y si su último pago entró por Nexa{describirRango(rango)}</p>
       </div>
 
       {data?.totales && (
@@ -94,23 +95,30 @@ export function NexaDashboard() {
         <Input id="nexa-desde" type="date" className="w-40" value={desdeInput} max={hastaInput || undefined} onChange={(e) => setDesdeInput(e.target.value)} />
         <label htmlFor="nexa-hasta" className="text-sm text-gray-600">hasta</label>
         <Input id="nexa-hasta" type="date" className="w-40" value={hastaInput} min={desdeInput || undefined} onChange={(e) => setHastaInput(e.target.value)} />
-        <Select value={medio || "todos"} onValueChange={(v) => { setMedio(sinTodos<NexaDashboardParams["medio"]>(v)); setPage(1); }}>
-          <SelectTrigger className="w-auto gap-2" aria-label="Medio del último pago"><SelectValue /></SelectTrigger>
+        <Select value={cuotaMes || "todos"} onValueChange={(v) => {
+          const nuevo = sinTodos<NexaDashboardParams["cuotaMes"]>(v);
+          setCuotaMes(nuevo);
+          // El medio solo aplica a cuotas pagadas.
+          if (nuevo !== "pagados") setMedio("");
+          setPage(1);
+        }}>
+          <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Cuota del mes"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="todos">Último pago: todos</SelectItem>
-            <SelectItem value="nexa">Último pago: Nexa</SelectItem>
-            <SelectItem value="manual">Último pago: manual u otro</SelectItem>
+            <SelectItem value="todos">Cuota del mes: todos</SelectItem>
+            <SelectItem value="pagados">Cuota del mes: pagados</SelectItem>
+            <SelectItem value="pendientes">Cuota del mes: pendientes</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={cuotaMes || "todos"} onValueChange={(v) => { setCuotaMes(sinTodos<NexaDashboardParams["cuotaMes"]>(v)); setPage(1); }}>
-          <SelectTrigger className="w-auto gap-2" aria-label="Cuota del mes"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Cuota del mes: todas</SelectItem>
-            <SelectItem value="pagada">Cuota del mes: pagada</SelectItem>
-            <SelectItem value="vencida">Cuota del mes: vencida sin pagar</SelectItem>
-            <SelectItem value="por_vencer">Cuota del mes: por vencer</SelectItem>
-          </SelectContent>
-        </Select>
+        {cuotaMes === "pagados" && (
+          <Select value={medio || "todos"} onValueChange={(v) => { setMedio(sinTodos<NexaDashboardParams["medio"]>(v)); setPage(1); }}>
+            <SelectTrigger className="w-auto gap-2 text-slate-900" aria-label="Medio con que se pagó la cuota del mes"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Pagada por: Nexa o manual</SelectItem>
+              <SelectItem value="nexa">Pagada por: Nexa</SelectItem>
+              <SelectItem value="manual">Pagada por: manual</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         <Button onClick={handleBuscar} variant="default" size="sm" aria-label="Buscar"><Search className="h-4 w-4" /></Button>
         <Button onClick={handleLimpiar} variant="outline" size="sm" aria-label="Limpiar filtros"><X className="h-4 w-4" /></Button>
       </div>
@@ -148,13 +156,14 @@ export function NexaDashboard() {
                     {c.cuotaMes ? (
                       <>
                         <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${ESTADO_CUOTA_MES[c.cuotaMes.estado].clases}`}>{ESTADO_CUOTA_MES[c.cuotaMes.estado].etiqueta}</span>
+                        <div className={`mt-1 whitespace-nowrap text-[11px] font-medium ${c.cuotaMes.pago === "parcial" ? "text-amber-700" : c.cuotaMes.pago === "completa" ? (c.cuotaMes.medio === "NEXA" ? "text-purple-700" : "text-green-700") : "text-slate-600"}`}>{pagoCuotaMesTexto(c.cuotaMes)}</div>
                         <div className="mt-1 font-mono text-[11px] text-slate-600 tabular-nums">Cuota {c.cuotaMes.numero} · vence {fmtDiaNexa(c.cuotaMes.vencimiento)}</div>
                       </>
                     ) : <span className="text-xs text-slate-400">Sin cuotas</span>}
                   </TableCell>
                   <TableCell>
                     {c.ultimoPagoFecha ? (
-                      <><div className="font-mono text-xs text-slate-600 tabular-nums">{fmtFechaNexa(c.ultimoPagoFecha)}</div>{c.ultimoPagoMonto && <div className="font-mono text-sm font-semibold tabular-nums">{fmtQ(c.ultimoPagoMonto)}</div>}</>
+                      <><div className="font-mono text-xs text-slate-600 tabular-nums">{fmtFechaNexa(c.ultimoPagoFecha)}</div>{c.ultimoPagoMonto && <div className="font-mono text-sm font-semibold tabular-nums text-slate-900">{fmtQ(c.ultimoPagoMonto)}</div>}</>
                     ) : <span className="text-xs text-slate-400">Sin pagos</span>}
                   </TableCell>
                   <TableCell>
@@ -165,7 +174,7 @@ export function NexaDashboard() {
                       </>
                     ) : <span className="text-xs text-slate-400">--</span>}
                   </TableCell>
-                  <TableCell className="text-sm tabular-nums min-w-[9rem]">
+                  <TableCell className="text-sm tabular-nums min-w-[9rem] text-slate-900">
                     {c.pagosNexa}
                     <RechazosFila c={c} />
                   </TableCell>

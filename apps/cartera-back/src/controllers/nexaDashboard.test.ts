@@ -14,17 +14,22 @@ describe("parseNexaDashboardParams", () => {
     [{ desde: "2026-09-01'; drop", hasta: 7 }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
     // Postgres no tiene año 0000: llegaría al ::date y daría 500.
     [{ desde: "0000-01-01", hasta: "0001-01-01" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "0001-01-01", medio: "", cuotaMes: "" }],
-    [{ medio: "nexa", cuotaMes: "vencida" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "vencida" }],
-    [{ medio: "manual", cuotaMes: "por_vencer" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "manual", cuotaMes: "por_vencer" }],
-    [{ medio: "NEXA", cuotaMes: "no_pagada" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
-    [{ medio: ["nexa"], cuotaMes: "pagada' OR '1'='1" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ medio: "nexa", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "nexa", cuotaMes: "pagados" }],
+    [{ medio: "manual", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "manual", cuotaMes: "pagados" }],
+    // El medio solo filtra cuotas pagadas: con pendientes o todos se descarta.
+    [{ medio: "nexa", cuotaMes: "pendientes" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "pendientes" }],
+    [{ medio: "manual" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    // Los valores viejos (pagada / vencida / por_vencer) ya no son filtros.
+    [{ medio: "nexa", cuotaMes: "vencida" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
+    [{ medio: "NEXA", cuotaMes: "pagados" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "pagados" }],
+    [{ medio: ["nexa"], cuotaMes: "pagados' OR '1'='1" }, { q: "", page: 1, pageSize: 20, desde: "", hasta: "", medio: "", cuotaMes: "" }],
   ])("%j → %j", (query, expected) => {
     expect(parseNexaDashboardParams(query)).toEqual(expected as ReturnType<typeof parseNexaDashboardParams>);
   });
 });
 
 describe("mapNexaDashboardRows", () => {
-  const params = { q: "", page: 2, pageSize: 10, desde: "", hasta: "", medio: "" as const, cuotaMes: "" as const };
+  const params = { q: "", page: 2, pageSize: 10, desde: "", hasta: "", cuotaMes: "" as const, medio: "" as const };
   const totales = (n: string) => ({
     total_creditos: n, total_con_token: "1", total_pagos_nexa: "8", total_monto_nexa: "8423.92",
     total_rechazos_nexa: "1", total_ultimo_pago_nexa: "2",
@@ -34,8 +39,9 @@ describe("mapNexaDashboardRows", () => {
     nexa_token: "1111222233334444", activo: true, ultimo_pago_fecha: "2026-10-05T10:00:00",
     ultimo_pago_monto: "50.00", ultimo_pago_nexa: true, ultimo_pago_banco: null, pagos_nexa: "5", monto_nexa: "600.00", rechazos_nexa: "1",
     rechazos_detalle: [{ fecha: "2026-10-05T11:16:49", monto: "50.00", codigo: "token_mismatch", estado: "failed" }],
-    ultimas_cuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null }],
+    ultimas_cuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36" }],
     cuota_mes_numero: 18, cuota_mes_vencimiento: "2026-10-05", cuota_mes_estado: "pagada",
+    cuota_mes_pago: "completa", cuota_mes_aplicado: "1752.36", cuota_mes_monto: "1752.36", cuota_mes_medio: "NEXA",
   };
 
   test("convierte filas y toma los totales de la primera", () => {
@@ -47,9 +53,13 @@ describe("mapNexaDashboardRows", () => {
       nexaToken: "1111222233334444", bindingActivo: true, ultimoPagoFecha: "2026-10-05T10:00:00",
       ultimoPagoMonto: "50.00", ultimoPagoNexa: true, ultimoPagoBanco: null, pagosNexa: 5, montoNexa: "600.00", rechazosNexa: 1,
       rechazosDetalle: [{ fecha: "2026-10-05T11:16:49", monto: "50.00", codigo: "token_mismatch", estado: "failed" }],
-      ultimasCuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null }],
-      cuotaMes: { numero: 18, vencimiento: "2026-10-05", estado: "pagada" },
+      ultimasCuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36" }],
+      cuotaMes: { numero: 18, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1752.36", monto: "1752.36", medio: "NEXA" },
     });
+    // Parcial: vencida con plata aplicada y sin medio de pago completo.
+    const parcial = mapNexaDashboardRows([{ ...fila, cuota_mes_estado: "vencida", cuota_mes_pago: "parcial",
+      cuota_mes_aplicado: "500.00", cuota_mes_medio: "MANUAL" }], params).creditos[0];
+    expect(parcial!.cuotaMes).toEqual({ numero: 18, vencimiento: "2026-10-05", estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "1752.36", medio: "MANUAL" });
     expect(result.creditos[1]).toMatchObject({ creditoId: 352, nexaToken: null, ultimoPagoFecha: null, ultimoPagoMonto: null, ultimoPagoNexa: false });
     // Manual con banco, sin cuotas ni rechazos: el SQL los manda NULL.
     const manual = mapNexaDashboardRows([{ ...fila, ultimo_pago_banco: "Banrural", rechazos_detalle: null, ultimas_cuotas: null,

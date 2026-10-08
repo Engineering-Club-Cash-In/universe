@@ -1,5 +1,5 @@
 import api from "@/Provider/interceptor";
-import type { CuotaFranjaNexa, EstadoCuotaMes, RechazoNexa } from "@/lib/cuotasNexa";
+import type { CuotaFranjaNexa, CuotaMesNexa, FiltroCuotaMes, RechazoNexa } from "@/lib/cuotasNexa";
 
 const API_URL = import.meta.env.VITE_BACK_URL || "";
 
@@ -32,7 +32,7 @@ export interface NexaDashboardCredito {
   // Últimas 12 cuotas hasta fin del mes en curso, de la más vieja a la más nueva.
   ultimasCuotas: CuotaFranjaNexa[];
   // Primera cuota que vence este mes (hora de Guatemala); sin cuota este mes, la última vencida.
-  cuotaMes: { numero: number; vencimiento: string; estado: EstadoCuotaMes } | null;
+  cuotaMes: CuotaMesNexa | null;
 }
 
 export interface NexaDashboardResponse {
@@ -51,8 +51,10 @@ export interface RangoFechas {
 
 export interface NexaDashboardParams extends RangoFechas {
   q: string;
+  // Cuota del mes: pagados o pendientes (vencida o por vencer). "" = todos.
+  cuotaMes: "" | FiltroCuotaMes;
+  // Medio con que se pagó la cuota del mes; el back lo ignora si cuotaMes no es "pagados".
   medio: "" | "nexa" | "manual";
-  cuotaMes: "" | EstadoCuotaMes;
   page: number;
   pageSize: number;
 }

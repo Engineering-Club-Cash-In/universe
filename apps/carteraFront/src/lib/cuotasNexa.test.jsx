@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { bancoTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
+import { BORDE_PARCIAL, bancoTexto, esParcialNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
 import { estadoNexa, motivoRechazoNexa } from "./estadoNexa";
 
-const cuota = (o) => ({ numero: 18, vencimiento: "2026-09-05", pagada: true, medio: "NEXA", banco: null, ...o });
+const cuota = (o) => ({ numero: 18, vencimiento: "2026-09-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36", ...o });
 
 test("color: morado Nexa, verde otro medio, gris no pagada aunque tenga abono", () => {
   expect(tonoCuotaNexa(cuota({}))).toBe("nexa");
@@ -11,14 +11,35 @@ test("color: morado Nexa, verde otro medio, gris no pagada aunque tenga abono", 
   expect(tonoCuotaNexa(cuota({ pagada: false, medio: null }))).toBe("pendiente");
 });
 
-test("tooltip: número, vencimiento, si está pagada, medio y banco", () => {
-  expect(tituloCuotaNexa(cuota({}))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · Nexa");
-  expect(tituloCuotaNexa(cuota({ medio: "MANUAL", banco: "Banrural" }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · Manual · Banrural");
-  expect(tituloCuotaNexa(cuota({ medio: "MANUAL" }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · Manual · Sin banco");
-  expect(tituloCuotaNexa(cuota({ pagada: false, medio: null }))).toBe("Cuota 18 · vence 05/09/2026 · No pagada");
-  expect(tituloCuotaNexa(cuota({ medio: null }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · sin detalle del medio");
+test("tooltip: número, vencimiento, completo o parcial, medio y banco", () => {
+  expect(tituloCuotaNexa(cuota({}))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · pago completo · Nexa");
+  expect(tituloCuotaNexa(cuota({ medio: "MANUAL", banco: "Banrural" }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · pago completo · Manual · Banrural");
+  expect(tituloCuotaNexa(cuota({ medio: "MANUAL" }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · pago completo · Manual · Sin banco");
+  expect(tituloCuotaNexa(cuota({ pagada: false, medio: null, aplicado: "0.00" }))).toBe("Cuota 18 · vence 05/09/2026 · No pagada");
+  // Pagada solo por el flag: completa aunque no tenga plata aplicada.
+  expect(tituloCuotaNexa(cuota({ medio: null, aplicado: "0.00" }))).toBe("Cuota 18 · vence 05/09/2026 · Pagada · pago completo · sin detalle del medio");
   expect(tonoCuotaNexa(cuota({ medio: null }))).toBe("otro");
-  expect(tituloCuotaNexa(cuota({ pagada: false, medio: "NEXA" }))).toBe("Cuota 18 · vence 05/09/2026 · No pagada · abono parcial Nexa");
+  expect(tituloCuotaNexa(cuota({ pagada: false, medio: "NEXA", aplicado: "500.00" })))
+    .toBe("Cuota 18 · vence 05/09/2026 · No pagada · pago parcial Q 500.00 de Q 1,752.36 · Nexa");
+  expect(tituloCuotaNexa(cuota({ pagada: false, medio: "MANUAL", banco: "Banrural", aplicado: "242.45", monto: "3751.51" })))
+    .toBe("Cuota 18 · vence 05/09/2026 · No pagada · pago parcial Q 242.45 de Q 3,751.51 · Manual · Banrural");
+});
+
+test("parcial: no pagada con plata aplicada; la barra lleva borde del color del medio", () => {
+  expect(esParcialNexa(cuota({ pagada: false, aplicado: "500.00" }))).toBe(true);
+  expect(esParcialNexa(cuota({ pagada: false, aplicado: "0.00" }))).toBe(false);
+  expect(esParcialNexa(cuota({ pagada: true, aplicado: "500.00" }))).toBe(false);
+  expect(BORDE_PARCIAL.NEXA).toContain("border-purple-600");
+  expect(BORDE_PARCIAL.MANUAL).toContain("border-green-600");
+});
+
+test("cuota del mes: completa con su medio, parcial con su monto, o sin pago", () => {
+  const mes = (o) => ({ numero: 18, vencimiento: "2026-10-15", estado: "pagada", pago: "completa", aplicado: "1752.36", monto: "1752.36", medio: "NEXA", ...o });
+  expect(pagoCuotaMesTexto(mes({}))).toBe("Completa · Nexa");
+  expect(pagoCuotaMesTexto(mes({ medio: "MANUAL" }))).toBe("Completa · Manual");
+  expect(pagoCuotaMesTexto(mes({ medio: null, aplicado: "0.00" }))).toBe("Completa · Manual");
+  expect(pagoCuotaMesTexto(mes({ estado: "vencida", pago: "parcial", aplicado: "2994.30", monto: "5617.77" }))).toBe("Parcial · Q 2,994.30 de Q 5,617.77");
+  expect(pagoCuotaMesTexto(mes({ estado: "por_vencer", pago: "sin_pago", aplicado: "0.00", medio: null }))).toBe("Sin pago");
 });
 
 test("banco: Nexa dice Nexa; manual sin banco dice Sin banco", () => {

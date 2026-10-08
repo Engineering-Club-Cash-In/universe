@@ -6,16 +6,20 @@ import type { SQL } from "drizzle-orm";
 
 // Rango de fecha de pago, inclusivo, en días de Guatemala. "" = sin límite.
 export type RangoFechas = { desde: string; hasta: string };
-// medio: con qué entró el último pago. cuotaMes: estado de la cuota del mes (ver `cuota_mes` en el SQL).
+// cuotaMes: pagados = cuota del mes pagada (criterio del cron); pendientes = no pagada (vencida o
+// por vencer). medio: con qué se pagó la cuota del mes; solo filtra junto con cuotaMes = "pagados".
 export type NexaDashboardParams = RangoFechas & {
   q: string; page: number; pageSize: number;
-  medio: "" | "nexa" | "manual"; cuotaMes: "" | EstadoCuotaMes;
+  cuotaMes: "" | FiltroCuotaMes; medio: "" | "nexa" | "manual";
 };
 
 const MEDIOS = ["nexa", "manual"] as const;
+export type FiltroCuotaMes = "pagados" | "pendientes";
+const CUOTA_MES = ["pagados", "pendientes"] as const;
 // pagada: criterio del cron. vencida: venció antes de hoy (GT) y no está pagada. por_vencer: vence hoy o después.
 export type EstadoCuotaMes = "pagada" | "vencida" | "por_vencer";
-const CUOTA_MES = ["pagada", "vencida", "por_vencer"] as const;
+// completa: pagada (criterio del cron). parcial: no pagada pero con plata aplicada. sin_pago: ninguna de las dos.
+export type PagoCuota = "completa" | "parcial" | "sin_pago";
 // Solo valores de la lista: lo demás es "sin filtro".
 const deLista = <T extends string>(lista: readonly T[], valor: unknown): T | "" =>
   lista.includes(valor as T) ? (valor as T) : "";
@@ -36,9 +40,11 @@ export const parseNexaDashboardParams = (query: Record<string, unknown>): NexaDa
   const q = typeof query.q === "string" ? query.q.replace(/\u0000/g, "").trim().slice(0, 100) : "";
   const page = Math.min(10_000, Math.max(1, Math.trunc(Number(query.page) || 1)));
   const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(query.pageSize) || 20)));
+  const cuotaMes = deLista(CUOTA_MES, query.cuotaMes);
   return {
     q, page, pageSize, ...parseRangoFechas(query),
-    medio: deLista(MEDIOS, query.medio), cuotaMes: deLista(CUOTA_MES, query.cuotaMes),
+    // El medio solo existe para una cuota pagada: con otro filtro de cuota se ignora.
+    cuotaMes, medio: cuotaMes === "pagados" ? deLista(MEDIOS, query.medio) : "",
   };
 };
 
@@ -105,13 +111,21 @@ export type NexaDashboardRow = {
   rechazosDetalle: NexaRechazo[];
   /** Últimas 12 cuotas hasta fin del mes en curso, de la más vieja a la más nueva. */
   ultimasCuotas: NexaCuotaFranja[];
-  cuotaMes: { numero: number; vencimiento: string; estado: EstadoCuotaMes } | null;
+  cuotaMes: NexaCuotaMes | null;
+};
+
+// aplicado: monto_aplicado de las filas no anuladas y no 'reset' de la cuota. monto: creditos.cuota
+// (cuotas_credito no guarda el monto de cada cuota). medio: el mismo de la franja.
+export type NexaCuotaMes = {
+  numero: number; vencimiento: string; estado: EstadoCuotaMes; pago: PagoCuota;
+  aplicado: string; monto: string; medio: "NEXA" | "MANUAL" | null;
 };
 
 export type NexaRechazo = { fecha: string | null; monto: string; codigo: string | null; estado: string };
 // medio: quién puso más plata en la cuota (empate: el pago más reciente). null = sin pagos.
 export type NexaCuotaFranja = {
   numero: number; vencimiento: string; pagada: boolean; medio: "NEXA" | "MANUAL" | null; banco: string | null;
+  aplicado: string; monto: string;
 };
 
 export type NexaDashboardResponse = {
@@ -162,6 +176,10 @@ export const mapNexaDashboardRows = (rows: Record<string, unknown>[], params: Ne
       numero: Number(row.cuota_mes_numero),
       vencimiento: String(row.cuota_mes_vencimiento),
       estado: String(row.cuota_mes_estado) as EstadoCuotaMes,
+      pago: String(row.cuota_mes_pago) as PagoCuota,
+      aplicado: String(row.cuota_mes_aplicado ?? "0.00"),
+      monto: String(row.cuota_mes_monto ?? "0.00"),
+      medio: row.cuota_mes_medio == null ? null : (String(row.cuota_mes_medio) as "NEXA" | "MANUAL"),
     },
   }));
 
@@ -182,7 +200,7 @@ export const getNexaDashboard = async (params: NexaDashboardParams): Promise<Nex
   const result = await db.execute(sql`
 WITH base AS (
   SELECT b.credito_id, b.nexa_token, b.activo, c.numero_credito_sifco,
-         c."statusCredit" AS estado, u.nombre AS cliente
+         c."statusCredit" AS estado, u.nombre AS cliente, c.cuota AS monto_cuota
   FROM cartera.nexa_credit_bindings b
   JOIN cartera.creditos c ON c.credito_id = b.credito_id
   LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
@@ -239,25 +257,37 @@ WITH base AS (
   SELECT * FROM (SELECT cuotas.*, row_number() OVER (
     PARTITION BY credito_id ORDER BY fecha_vencimiento DESC, numero_cuota DESC) AS n FROM cuotas) x
   WHERE n <= 12
+), cuota_mes AS (
+  -- Cuota del mes: la PRIMERA que vence en el mes en curso (hora de Guatemala); con plazos de
+  -- 30 días caen dos en el mismo mes y la segunda es la del mes siguiente corrida. Si el crédito
+  -- no tiene cuota este mes, la última que ya venció.
+  SELECT DISTINCT ON (cuotas.credito_id) cuotas.credito_id, cuotas.cuota_id, cuotas.numero_cuota, cuotas.fecha_vencimiento,
+         CASE WHEN cuotas.pagada THEN 'pagada' WHEN cuotas.fecha_vencimiento < hoy.dia THEN 'vencida' ELSE 'por_vencer' END AS estado
+  FROM cuotas, hoy
+  ORDER BY cuotas.credito_id, (cuotas.fecha_vencimiento >= hoy.inicio_mes) DESC,
+           CASE WHEN cuotas.fecha_vencimiento >= hoy.inicio_mes THEN cuotas.fecha_vencimiento END,
+           cuotas.fecha_vencimiento DESC, cuotas.numero_cuota DESC
 ), medio_cuota AS (
   -- Medio de la cuota: el que más plata le aplicó; empate, el del pago más reciente. Cuentan las
   -- filas que cubren la cuota para el cron (filaQueCubreCuotaSql). Si ninguna la cubre (pagada solo
   -- por el flag, o no pagada con abonos), las filas no anuladas, no 'reset' y con monto aplicado.
-  SELECT cuota_id, banco,
+  -- aplicado: lo que se le aplicó a la cuota (filas no anuladas y no 'reset'), para completa/parcial.
+  SELECT cuota_id, banco, aplicado,
          CASE WHEN nexa > otro THEN 'NEXA' WHEN otro > nexa THEN 'MANUAL' WHEN ultimo_nexa THEN 'NEXA' ELSE 'MANUAL' END AS medio
   FROM (
-    SELECT pc.cuota_id,
+    SELECT pc.cuota_id, MAX(pc.aplicado) AS aplicado,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NOT NULL), 0) AS nexa,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NULL), 0) AS otro,
            (array_agg(pc.nexa_payment_event_id IS NOT NULL ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC))[1] AS ultimo_nexa,
            (array_agg(bk.nombre ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC)
              FILTER (WHERE pc.nexa_payment_event_id IS NULL AND bk.nombre IS NOT NULL))[1] AS banco
     FROM (
-      SELECT filas.*, BOOL_OR(cubre) OVER (PARTITION BY cuota_id) AS alguna_cubre
+      SELECT filas.*, BOOL_OR(cubre) OVER (PARTITION BY cuota_id) AS alguna_cubre,
+             SUM(monto_aplicado) FILTER (WHERE validation_status <> 'reset') OVER (PARTITION BY cuota_id) AS aplicado
       FROM (
         SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
         FROM cartera.pagos_credito pc
-        WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes)
+        WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes UNION SELECT cuota_id FROM cuota_mes)
           AND pc."paymentFalse" = false AND COALESCE(pc.monto_aplicado, 0) > 0
       ) filas
       WHERE filas.cubre OR filas.validation_status <> 'reset'
@@ -269,20 +299,12 @@ WITH base AS (
 ), franja AS (
   SELECT r.credito_id, json_agg(json_build_object(
            'numero', r.numero_cuota, 'vencimiento', to_char(r.fecha_vencimiento, 'YYYY-MM-DD'), 'pagada', r.pagada,
-           'medio', m.medio, 'banco', CASE WHEN m.medio = 'MANUAL' THEN m.banco END
+           'medio', m.medio, 'banco', CASE WHEN m.medio = 'MANUAL' THEN m.banco END,
+           'aplicado', COALESCE(m.aplicado, 0)::numeric(18,2)::text, 'monto', base.monto_cuota::numeric(18,2)::text
          ) ORDER BY r.fecha_vencimiento, r.numero_cuota) AS ultimas_cuotas
   FROM recientes r LEFT JOIN medio_cuota m ON m.cuota_id = r.cuota_id
+  JOIN base ON base.credito_id = r.credito_id
   GROUP BY r.credito_id
-), cuota_mes AS (
-  -- Cuota del mes: la PRIMERA que vence en el mes en curso (hora de Guatemala); con plazos de
-  -- 30 días caen dos en el mismo mes y la segunda es la del mes siguiente corrida. Si el crédito
-  -- no tiene cuota este mes, la última que ya venció.
-  SELECT DISTINCT ON (cuotas.credito_id) cuotas.credito_id, cuotas.numero_cuota, cuotas.fecha_vencimiento,
-         CASE WHEN cuotas.pagada THEN 'pagada' WHEN cuotas.fecha_vencimiento < hoy.dia THEN 'vencida' ELSE 'por_vencer' END AS estado
-  FROM cuotas, hoy
-  ORDER BY cuotas.credito_id, (cuotas.fecha_vencimiento >= hoy.inicio_mes) DESC,
-           CASE WHEN cuotas.fecha_vencimiento >= hoy.inicio_mes THEN cuotas.fecha_vencimiento END,
-           cuotas.fecha_vencimiento DESC, cuotas.numero_cuota DESC
 ), filas AS (
   SELECT base.credito_id, base.nexa_token, base.activo, base.numero_credito_sifco, base.estado, base.cliente,
          -- Como texto: fecha_pago no tiene zona horaria y el driver la correría.
@@ -292,18 +314,24 @@ WITH base AS (
          COALESCE(nexa.monto_nexa, 0) AS monto_nexa,
          COALESCE(nexa.rechazos_nexa, 0) AS rechazos_nexa, nexa.rechazos_detalle,
          franja.ultimas_cuotas, cuota_mes.numero_cuota AS cuota_mes_numero,
-         to_char(cuota_mes.fecha_vencimiento, 'YYYY-MM-DD') AS cuota_mes_vencimiento, cuota_mes.estado AS cuota_mes_estado
+         to_char(cuota_mes.fecha_vencimiento, 'YYYY-MM-DD') AS cuota_mes_vencimiento, cuota_mes.estado AS cuota_mes_estado,
+         CASE WHEN cuota_mes.estado = 'pagada' THEN 'completa' WHEN COALESCE(mm.aplicado, 0) > 0 THEN 'parcial' ELSE 'sin_pago' END AS cuota_mes_pago,
+         COALESCE(mm.aplicado, 0)::numeric(18,2)::text AS cuota_mes_aplicado, base.monto_cuota::numeric(18,2)::text AS cuota_mes_monto,
+         mm.medio AS cuota_mes_medio
   FROM base
   LEFT JOIN ultimo ON ultimo.credito_id = base.credito_id
   LEFT JOIN nexa ON nexa.credito_id = base.credito_id
   LEFT JOIN franja ON franja.credito_id = base.credito_id
   LEFT JOIN cuota_mes ON cuota_mes.credito_id = base.credito_id
+  LEFT JOIN medio_cuota mm ON mm.cuota_id = cuota_mes.cuota_id
   -- Con rango de fechas, solo los créditos con algún pago o algún rechazo Nexa en el período.
   WHERE (${!conRango(params)} OR ultimo.credito_id IS NOT NULL OR COALESCE(nexa.rechazos_nexa, 0) > 0)
-    -- Sin último pago no hay medio, y sin cuota del mes no hay estado de cuota.
-    AND (${params.medio} = '' OR (${params.medio} = 'nexa' AND ultimo.es_nexa)
-         OR (${params.medio} = 'manual' AND NOT ultimo.es_nexa))
-    AND (${params.cuotaMes} = '' OR cuota_mes.estado = ${params.cuotaMes})
+    -- Sin cuota del mes no entra en ningún filtro de cuota.
+    AND (${params.cuotaMes} = '' OR (${params.cuotaMes} = 'pagados' AND cuota_mes.estado = 'pagada')
+         OR (${params.cuotaMes} = 'pendientes' AND cuota_mes.estado IN ('vencida', 'por_vencer')))
+    -- Medio de la cuota del mes pagada, como la franja: sin detalle del medio cuenta como manual (verde).
+    AND (${params.medio} = '' OR ${params.cuotaMes} <> 'pagados'
+         OR COALESCE(mm.medio, 'MANUAL') = CASE WHEN ${params.medio} = 'nexa' THEN 'NEXA' ELSE 'MANUAL' END)
 ), totales AS (
   -- Aparte de la página: si la página pedida queda más allá del final, los totales siguen.
   SELECT COUNT(*) AS total_creditos,
@@ -319,10 +347,13 @@ SELECT pagina.*, totales.*
 FROM totales
 LEFT JOIN (
   SELECT filas.* FROM filas
-  ORDER BY filas.ultimo_pago_fecha DESC NULLS LAST, filas.credito_id
+  -- En pendientes, primero las cuotas con pago parcial.
+  ORDER BY CASE WHEN ${params.cuotaMes} = 'pendientes' AND filas.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
+           filas.ultimo_pago_fecha DESC NULLS LAST, filas.credito_id
   LIMIT ${params.pageSize} OFFSET ${(params.page - 1) * params.pageSize}
 ) pagina ON true
-ORDER BY pagina.ultimo_pago_fecha DESC NULLS LAST, pagina.credito_id
+ORDER BY CASE WHEN ${params.cuotaMes} = 'pendientes' AND pagina.cuota_mes_pago = 'parcial' THEN 0 ELSE 1 END,
+         pagina.ultimo_pago_fecha DESC NULLS LAST, pagina.credito_id
   `);
 
   return mapNexaDashboardRows(result.rows, params);

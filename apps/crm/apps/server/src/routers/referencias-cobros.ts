@@ -520,6 +520,8 @@ export const referenciasCobrosRouter = {
 			z.object({
 				casoCobroId: z.string().uuid(),
 				hallazgoId: z.string().uuid(),
+				/** F3: desde dónde se agregó (bitácora de cambios). */
+				origen: origenCambioSchema,
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -581,6 +583,13 @@ export const referenciasCobrosRouter = {
 							updatedAt: new Date(),
 						})
 						.where(eq(casosCobros.id, input.casoCobroId));
+					await registrarCambiosCaso(tx, {
+						casoCobroId: input.casoCobroId,
+						antes: { telefono_alternativo: caso.telefonoAlternativo },
+						despues: { telefono_alternativo: nuevoAlternativo },
+						origen: input.origen,
+						userId: context.userId,
+					});
 				}
 				await tx
 					.update(hallazgosLocalizacionCobros)

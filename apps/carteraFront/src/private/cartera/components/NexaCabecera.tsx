@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { AlertCircle, Clock } from "lucide-react";
 import { fmtQ } from "@/lib/moneda";
-import { hoyGuatemala, mesLargoNexa, segmentosCuotaMesNexa, type SegmentoCuotaMesNexa } from "@/lib/cuotasNexa";
+import { hoyGuatemala, mesLargoNexa, segmentosCuotaMesNexa, textoPorValidarCabecera, type SegmentoCuotaMesNexa } from "@/lib/cuotasNexa";
 import type { NexaDashboardParams, NexaDesglose } from "../services/nexaDashboard.services";
 
 // Cabecera del dashboard Nexa: la cuota del mes contada sobre todos los créditos de la vista (sin el
@@ -128,9 +128,7 @@ export function NexaCabecera({ desglose: d, filtro, onFiltrar, periodo, hoy = ho
             {d.porValidar > 0 && (
               <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-900">
                 <Clock aria-hidden className="h-3.5 w-3.5 shrink-0 text-amber-700" />
-                {d.porValidar === 1
-                  ? "1 cuota cuenta como pagada con un pago que contabilidad todavía no validó."
-                  : `${d.porValidar} cuotas cuentan como pagadas con pagos que contabilidad todavía no validó.`}
+                {textoPorValidarCabecera(d.porValidar)}
               </p>
             )}
           </>

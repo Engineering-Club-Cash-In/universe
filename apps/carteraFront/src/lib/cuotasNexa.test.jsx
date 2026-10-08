@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { avisoCuotaMesNexa, mesLargoNexa, porcentajesNexa, segmentosCuotaMesNexa, bancoTexto, conteoFranjaNexa, diasAlVencimiento, esParcialNexa, estadoCuotaTexto, fraccionPagadaNexa, hoyGuatemala, mesCortoNexa, rellenoCuotaNexa, resumenFranjaNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
+import { faltaQ, avisoCuotaMesNexa, cubiertaSinValidarNexa, textoPorValidarCabecera, mesLargoNexa, porcentajesNexa, segmentosCuotaMesNexa, bancoTexto, conteoFranjaNexa, diasAlVencimiento, esParcialNexa, estadoCuotaTexto, fraccionPagadaNexa, hoyGuatemala, mesCortoNexa, rellenoCuotaNexa, resumenFranjaNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
 import { estadoNexa, motivoRechazoNexa } from "./estadoNexa";
 
 const cuota = (o) => ({ numero: 18, vencimiento: "2026-09-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36", ...o });
@@ -85,7 +85,7 @@ test("cuota del mes en palabras: titular, detalle y versión corta", () => {
   const mes = (o) => ({ numero: 41, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1000.00", monto: "1000.00", medio: "NEXA", ...o });
   expect(avisoCuotaMesNexa(mes({}), hoy)).toEqual({
     etiqueta: "Cuota de este mes", tono: "nexa", titulo: "Pagada por Nexa", detalle: "Pago completo", corto: "Completa",
-    porValidar: false, leido: "Pagada por Nexa",
+    porValidar: false, ayudaPorValidar: "", leido: "Pagada por Nexa",
   });
   expect(avisoCuotaMesNexa(mes({ medio: "MANUAL" }), hoy, "Banrural")).toMatchObject({
     tono: "otro", titulo: "Pagada por otro medio", detalle: "Pago completo · Banrural", corto: "Completa · Banrural",
@@ -95,7 +95,7 @@ test("cuota del mes en palabras: titular, detalle y versión corta", () => {
   expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "600.00" }), hoy)).toEqual({
     etiqueta: "Cuota de este mes", tono: "vencida", titulo: "Vencida hace 3 días",
     detalle: "Pago parcial: Q 600.00 de Q 1,000.00 por Nexa · faltan Q 400.00", corto: "Parcial Q 600.00 de Q 1,000.00 · Nexa",
-    porValidar: false, leido: "Vencida hace 3 días",
+    porValidar: false, ayudaPorValidar: "", leido: "Vencida hace 3 días",
   });
   expect(avisoCuotaMesNexa(mes({ estado: "vencida", pago: "parcial", aplicado: "0.10", monto: "0.30", medio: "MANUAL" }), "2026-10-06", "BI").detalle)
     .toBe("Pago parcial: Q 0.10 de Q 0.30 por otro medio (BI) · faltan Q 0.20");
@@ -184,4 +184,65 @@ test("cabecera: cuatro grupos que suman el total, cada uno con su filtro, y porc
   expect(porcentajesNexa([0, 0, 0, 0])).toEqual([0, 0, 0, 0]);
   expect(porcentajesNexa([0, 1, 1, 3])).toEqual([0, 20, 20, 60]);
   expect(mesLargoNexa("2026-10-08")).toBe("octubre");
+});
+
+test("por validar: 'cuenta como pagada' solo si la cuota está pagada únicamente por el pendiente", () => {
+  const hoy = "2026-10-08";
+  const mes = { numero: 39, vencimiento: "2026-10-06", estado: "pagada", pago: "completa", aplicado: "1000.00", monto: "1000.00", medio: "MANUAL", porValidar: true, cubiertaPorPendiente: true };
+  expect(avisoCuotaMesNexa(mes, hoy).ayudaPorValidar)
+    .toBe("Un pago de esta cuota todavía no fue validado por contabilidad. Mientras tanto cuenta como pagada.");
+  // Pagada por una fila validada o por el flag, con otro pago sin validar: texto neutro.
+  expect(avisoCuotaMesNexa({ ...mes, cubiertaPorPendiente: false }, hoy).ayudaPorValidar).toBe("Tiene un pago que contabilidad todavía no validó.");
+  // Parcial: nunca "cuenta como pagada", ni con el booleano prendido por error.
+  expect(avisoCuotaMesNexa({ ...mes, estado: "vencida", pago: "parcial", aplicado: "600.00" }, hoy).ayudaPorValidar)
+    .toBe("Tiene un pago que contabilidad todavía no validó.");
+  // Un back viejo sin el campo: neutro.
+  const { cubiertaPorPendiente, ...viejo } = mes;
+  expect(avisoCuotaMesNexa(viejo, hoy).ayudaPorValidar).not.toContain("cuenta como pagada");
+});
+
+test("cabecera por validar: neutro, singular y plural", () => {
+  expect(textoPorValidarCabecera(1)).toBe("1 cuota del mes tiene un pago que contabilidad todavía no validó.");
+  expect(textoPorValidarCabecera(3)).toBe("3 cuotas del mes tienen un pago que contabilidad todavía no validó.");
+  expect(textoPorValidarCabecera(3)).not.toContain("pagadas");
+});
+
+test("faltan: nunca negativo, y una cuota ya cubierta por un pago sin validar no es 'parcial'", () => {
+  const hoy = "2026-10-08";
+  const mes = (o) => ({ numero: 41, vencimiento: "2026-10-05", estado: "vencida", pago: "parcial", aplicado: "1300.00", monto: "1000.00", medio: "MANUAL", porValidar: true, cubiertaPorPendiente: false, ...o });
+  // Aplicado de más: sin "faltan Q -300.00".
+  const sobre = avisoCuotaMesNexa(mes({}), hoy, "BI");
+  expect(sobre.detalle).toBe("Cubierta por un pago que no se validó a tiempo");
+  expect(sobre.detalle).not.toContain("faltan");
+  expect(sobre.titulo).toBe("Vencida hace 3 días");
+  expect(sobre.corto).toBe("Cubierta, sin validar a tiempo");
+  // Aplicado igual al monto: tampoco "parcial Q X de Q X · faltan Q 0.00".
+  expect(avisoCuotaMesNexa(mes({ aplicado: "1000.00" }), hoy).detalle).toBe("Cubierta por un pago que no se validó a tiempo");
+  // Por vencer conserva su titular.
+  expect(avisoCuotaMesNexa(mes({ estado: "por_vencer", vencimiento: "2026-10-11", aplicado: "1000.00" }), hoy).titulo).toBe("Pendiente · vence en 3 días");
+  // Un parcial de verdad sigue igual.
+  expect(avisoCuotaMesNexa(mes({ aplicado: "600.00" }), hoy).detalle).toBe("Pago parcial: Q 600.00 de Q 1,000.00 por otro medio (Sin banco) · faltan Q 400.00");
+  // Franja.
+  const c = cuota({ pagada: false, aplicado: "1000.00", monto: "1000.00", medio: "MANUAL", banco: "BI" });
+  expect(cubiertaSinValidarNexa(c)).toBe(true);
+  expect(cubiertaSinValidarNexa({ ...c, aplicado: "999.99" })).toBe(false);
+  expect(cubiertaSinValidarNexa({ ...c, pagada: true })).toBe(false);
+  expect(cubiertaSinValidarNexa({ ...c, monto: "0.00", aplicado: "0.00" })).toBe(false);
+  expect(estadoCuotaTexto(c, hoy)).toBe("Vencida, cubierta por un pago que no se validó a tiempo");
+  expect(tituloCuotaNexa(c)).toBe("Cuota 18 · vence 05/09/2026 · No pagada · cubierta por un pago que no se validó a tiempo · Manual · BI");
+});
+
+test("vencida nunca dice 'hace 0 días'", () => {
+  const mes = { numero: 41, vencimiento: "2026-10-08", estado: "vencida", pago: "sin_pago", aplicado: "0.00", monto: "1000.00", medio: null };
+  // El back dice vencida pero el front ve el vencimiento hoy (hora o reloj distintos): al menos 1 día.
+  expect(avisoCuotaMesNexa(mes, "2026-10-08").titulo).toBe("Vencida hace 1 día");
+  expect(avisoCuotaMesNexa(mes, "2026-10-07").titulo).toBe("Vencida hace 1 día");
+  expect(avisoCuotaMesNexa(mes, "2026-10-10").titulo).toBe("Vencida hace 2 días");
+});
+
+test("faltaQ: piso en cero, con centavos exactos", () => {
+  expect(faltaQ("1300.00", "1000.00")).toBe("Q 0.00");
+  expect(faltaQ("1000.00", "1000.00")).toBe("Q 0.00");
+  expect(faltaQ("600.00", "1000.00")).toBe("Q 400.00");
+  expect(faltaQ("0.10", "0.30")).toBe("Q 0.20");
 });

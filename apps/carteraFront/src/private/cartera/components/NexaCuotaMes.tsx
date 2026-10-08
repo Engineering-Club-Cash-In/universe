@@ -62,7 +62,7 @@ export function NexaCuotaMesBloque({ cuotaMes, ultimasCuotas, hoy = hoyGuatemala
         <tono.Icono className="h-5 w-5 shrink-0" aria-hidden /> {aviso.titulo}
         {aviso.porValidar && <EtiquetaPorValidar />}
       </p>
-      {aviso.porValidar && <p className="mt-1 text-xs text-amber-900">{AYUDA_POR_VALIDAR}{cuotaMes.estado === "pagada" ? " Mientras tanto cuenta como pagada." : ""}</p>}
+      {aviso.porValidar && <p className="mt-1 text-xs text-amber-900">{aviso.ayudaPorValidar}</p>}
       <p className="mt-1 text-sm text-slate-700">{aviso.detalle}</p>
       <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-slate-200" aria-hidden>
         {pct > 0 && <div className={`h-full rounded-full ${relleno}`} style={{ width: `${pct}%` }} />}

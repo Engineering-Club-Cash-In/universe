@@ -61,8 +61,15 @@ export const diasAlVencimiento = (vencimiento: string, hoy: string) => {
 const dias = (n: number) => `${n} ${n === 1 ? "día" : "días"}`;
 const medioTexto = (medio: "NEXA" | "MANUAL" | null, banco: string | null) =>
   medio === "NEXA" ? "Nexa" : medio === "MANUAL" ? `otro medio (${bancoTexto("MANUAL", banco)})` : null;
-const faltaQ = (aplicado: string, monto: string) =>
-  fmtQ((Math.round(sumaQ([monto]) * 100) - Math.round(sumaQ([aplicado]) * 100)) / 100);
+// Lo que falta, nunca negativo: un pago de más no es una deuda a favor.
+export const faltaQ = (aplicado: string, monto: string) =>
+  fmtQ(Math.max(0, Math.round(sumaQ([monto]) * 100) - Math.round(sumaQ([aplicado]) * 100)) / 100);
+
+// No pagada para el cron pero con tanto aplicado como la cuota: la cubre un pago que no se validó a
+// tiempo (pendiente de más de 7 días, que el cron ya no cuenta). No es un "pago parcial".
+export const cubiertaSinValidarNexa = (c: Pick<CuotaFranjaNexa, "pagada" | "aplicado" | "monto">) =>
+  !c.pagada && Number(c.monto) > 0 && Math.round(sumaQ([c.aplicado]) * 100) >= Math.round(sumaQ([c.monto]) * 100);
+const TEXTO_CUBIERTA_SIN_VALIDAR = "Cubierta por un pago que no se validó a tiempo";
 
 // Estado de una cuota en una frase, para el detalle de la franja.
 // "Pagada por Nexa" · "Pagada por otro medio (Banrural)" · "Pago parcial Q 600.00 de Q 1,000.00 por Nexa"
@@ -77,6 +84,7 @@ const estadoCuotaBase = (c: CuotaFranjaNexa, hoy: string) => {
   const medio = medioTexto(c.medio, c.banco);
   if (c.pagada) return medio ? `Pagada por ${medio}` : "Pagada (sin detalle del medio)";
   const vencida = diasAlVencimiento(c.vencimiento, hoy) < 0;
+  if (cubiertaSinValidarNexa(c)) return `${vencida ? "Vencida" : "Por vencer"}, ${TEXTO_CUBIERTA_SIN_VALIDAR.toLowerCase()}`;
   if (esParcialNexa(c)) return `${vencida ? "Vencida" : "Por vencer"}, pago parcial ${parcialTexto(c.aplicado, c.monto)}${medio ? ` por ${medio}` : ""}`;
   return vencida ? "Vencida, sin pagar" : "Por vencer, sin pagar";
 };
@@ -88,11 +96,21 @@ export type TonoAvisoNexa = "nexa" | "otro" | "vencida" | "pendiente";
 export const avisoCuotaMesNexa = (c: CuotaMesNexa, hoy: string, banco: string | null = null) => {
   const base = avisoCuotaMesBase(c, hoy, banco);
   const porValidar = c.porValidar === true && c.pago !== "sin_pago";
-  return { ...base, porValidar, leido: `${base.titulo}${porValidar ? " · Por validar" : ""}` };
+  // "Mientras tanto cuenta como pagada" solo si la cuota está pagada únicamente por el pendiente.
+  const ayudaPorValidar = !porValidar ? ""
+    : c.estado === "pagada" && c.cubiertaPorPendiente === true ? `${AYUDA_POR_VALIDAR} Mientras tanto cuenta como pagada.`
+    : AYUDA_PAGO_SIN_VALIDAR;
+  return { ...base, porValidar, ayudaPorValidar, leido: `${base.titulo}${porValidar ? " · Por validar" : ""}` };
 };
+
+// Cabecera: cuántas cuotas del mes (pagadas o parciales) tienen un pago sin validar. Neutro: no dice si cuentan como pagadas.
+export const textoPorValidarCabecera = (n: number) =>
+  n === 1 ? "1 cuota del mes tiene un pago que contabilidad todavía no validó."
+    : `${n} cuotas del mes tienen un pago que contabilidad todavía no validó.`;
 
 export const ETIQUETA_POR_VALIDAR = "Por validar";
 export const AYUDA_POR_VALIDAR = "Un pago de esta cuota todavía no fue validado por contabilidad.";
+const AYUDA_PAGO_SIN_VALIDAR = "Tiene un pago que contabilidad todavía no validó.";
 
 const avisoCuotaMesBase = (c: CuotaMesNexa, hoy: string, banco: string | null) => {
   const n = diasAlVencimiento(c.vencimiento, hoy);
@@ -109,12 +127,15 @@ const avisoCuotaMesBase = (c: CuotaMesNexa, hoy: string, banco: string | null) =
     };
   }
   const titulo = c.estado === "vencida"
-    ? `Vencida hace ${dias(-n)}`
+    ? `Vencida hace ${dias(Math.max(1, -n))}`
     : n <= 0 ? "Pendiente · vence hoy" : n === 1 ? "Pendiente · vence mañana" : `Pendiente · vence en ${dias(n)}`;
-  const detalle = c.pago === "parcial"
+  const cubierta = c.pago === "parcial" && cubiertaSinValidarNexa({ pagada: false, aplicado: c.aplicado, monto: c.monto });
+  const detalle = cubierta ? TEXTO_CUBIERTA_SIN_VALIDAR
+    : c.pago === "parcial"
     ? `Pago parcial: ${parcialTexto(c.aplicado, c.monto)}${medio ? ` por ${medio}` : ""} · faltan ${faltaQ(c.aplicado, c.monto)}`
     : `Sin pagos · faltan ${fmtQ(c.monto)}`;
-  const corto = c.pago === "parcial"
+  const corto = cubierta ? "Cubierta, sin validar a tiempo"
+    : c.pago === "parcial"
     ? `Parcial ${parcialTexto(c.aplicado, c.monto)}${c.medio === "NEXA" ? " · Nexa" : c.medio === "MANUAL" ? " · otro medio" : ""}`
     : "Sin pagos";
   return { etiqueta, tono: (c.estado === "vencida" ? "vencida" : "pendiente") as TonoAvisoNexa, titulo, detalle, corto };
@@ -157,6 +178,7 @@ const parcialTexto = (aplicado: string, monto: string) => `${fmtQ(aplicado)} de 
 export const tituloCuotaNexa = (c: CuotaFranjaNexa) => {
   const partes = [`Cuota ${c.numero}`, `vence ${fmtDiaNexa(c.vencimiento)}`, c.pagada ? "Pagada" : "No pagada"];
   if (c.pagada) partes.push("pago completo");
+  else if (cubiertaSinValidarNexa(c)) partes.push(TEXTO_CUBIERTA_SIN_VALIDAR.toLowerCase());
   else if (esParcialNexa(c)) partes.push(`pago parcial ${parcialTexto(c.aplicado, c.monto)}`);
   if (c.pagada && !c.medio) partes.push("sin detalle del medio");
   if (c.medio) {
@@ -190,6 +212,8 @@ export type CuotaMesNexa = {
   monto: string;
   medio: "NEXA" | "MANUAL" | null; // el mismo de la franja
   porValidar: boolean; // algún pago que le aplica plata sigue sin validar (el de la franja)
+  // Pagada solo porque la cubre un pago pendiente (<= 7 días): sin él no estaría pagada.
+  cubiertaPorPendiente: boolean;
 };
 
 // "Completa · Nexa", "Completa · Manual", "Parcial · Q 500.00 de Q 1,752.36", "Sin pago"

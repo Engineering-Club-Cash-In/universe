@@ -16,16 +16,16 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | **B3** | Metas de recuperación por asesor (Q) | ✅ Mergeado (#1904) · ⚠️ falta UI de captura (front) | Tabla `metas_asesor_cobros` (migración 0077) · `getMetasAsesor` / `upsertMetasAsesor` |
 | **B4** | Deuda vencida real por crédito | ✅ Mergeado (#1901) | cartera-back `monto_vencido` en `/getAllCredits` · CRM `getTodosLosCreditos` |
 | **B5** | Orden de la cartera por bucket del motor | ✅ Mergeado (#1901; el filtro ya estaba) | cartera-back `orden=bucket_motor` · CRM lo manda siempre |
-| **B6** | Pagos por confirmar | ✅ En el último PR | `lib/agenda-asesor-cobros.ts` · acción `confirmar_pago` |
-| **B7** | Referencias por contactar | ✅ En el último PR | `lib/agenda-asesor-cobros.ts` |
+| **B6** | Pagos por confirmar | ✅ Mergeado (#1905) | `lib/agenda-asesor-cobros.ts` · acción `confirmar_pago` |
+| **B7** | Referencias por contactar | ✅ Mergeado (#1905) | `lib/agenda-asesor-cobros.ts` |
 | **B8** | Hora del próximo contacto | ✅ Mergeado (#1902; cubre la parte de hora y medio de W1) | Columnas nuevas en `contactos_cobros` (migración 0077) |
 | **B9** | Movimiento de buckets de hoy en vivo | ✅ Mergeado (#1902) | `getMiDesempeno` + `calcularMovimientosBucketDelDia` |
 | **B10** | ¿B0 en «atención hoy»? | ✅ Decidido: **no** | Sin código |
 
-PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3). B6, B7 y estos docs van en el último PR.
+PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9), #1904 (B2 y B3) y #1905 (B6 y B7, con estos docs).
 
 > [!WARNING]
-> **La migración `0077_cobros_asesor_backend.sql` ya está corrida en DEV** (viene con el PR #1902). En cualquier otro ambiente hay que correrla antes de desplegar el server del CRM: `cargarSeguimientoPorCaso` lee `contactos_cobros.hora_proximo_contacto`, y sin la columna fallan Mi Cartera, la Cola del día y la Ficha 360. Es idempotente.
+> **La migración `0077_cobros_asesor_backend.sql` se amplió en el PR #1905** (columna `participante_tipo`): quien la corrió antes, con el PR #1902, **tiene que volver a correrla**. Es idempotente. En cualquier ambiente hay que correrla antes de desplegar el server del CRM: `cargarSeguimientoPorCaso` lee `hora_proximo_contacto` y `participante_tipo`. **Sin las columnas, Mi Cartera responde vacía (0 filas) en silencio**, porque el listado traga el error, y fallan también la Cola del día y la Ficha 360.
 
 ---
 
@@ -36,7 +36,7 @@ PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3)
 | B2 | **Recuperación** = lo que los pagos del período aplicaron a cuotas que **ya estaban vencidas** el día del pago (capital, interés, IVA, seguro, GPS y membresías) + la mora pagada. Un pago adelantado o al día no cuenta. |
 | B3 | La meta es **mensual en Q**. Para el día y la semana se reparte entre los **días hábiles de lunes a sábado** del mes. |
 | B6 | **Pago por confirmar** = boleta del bot de WhatsApp en `revision_manual` o `confirmada_a_verificar`. *(Refinado el 2026-10-08: solo las que llegaron **hoy**, ver B6 abajo. Es una regla nuestra, no de negocio: conviene confirmarla.)* |
-| B7 | **Referencias por contactar** = caso con **3 o más intentos sin contacto seguidos** al titular y **sin gestión a referencias en 7 días**. |
+| B7 | **Referencias por contactar** = caso de la cola del asesor con **3 o más intentos sin contacto seguidos al titular** (sin tope de días) y **sin gestión a referencias en 7 días**. *(Afinado en la revisión del PR #1905: además exige al menos una referencia con teléfono; ver B7 abajo.)* |
 | B10 | B0 **sigue fuera** de «Casos que requieren atención hoy». En Mi Cartera sí aparece. |
 
 ---
@@ -96,14 +96,19 @@ PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3)
 
 - `sifcosConPagoPorConfirmar` lee las boletas en esos dos estados que **llegaron hoy** (día de Guatemala). Se mide por `created_at`, no por `updated_at`: los avisos y el job de respaldo vuelven a tocar `updated_at` y una boleta vieja aparecería como de hoy.
 - **Una sola ventana** para el contador y para la fila. Con dos (por ejemplo 7 días y hoy), el contador diría «1» sin ninguna fila marcada. «Hoy» también coincide con el texto del front («Agenda de hoy», «Confirmar pago · recibido hoy») y acota el contador, porque `confirmada_a_verificar` es un estado terminal que nadie mueve.
-- **Contador** de la Agenda: se parte de las boletas de hoy y se cruza contra el universo de la cola del asesor (`sifcosDelUniversoDe`: `/buckets/cola-dia` de su cartera y de las que cubre, el mismo de `getColaDia`). Las referencias por contactar solo cuentan casos con al menos una referencia con teléfono.
+- **Contador** de la Agenda: se parte de las boletas de hoy y se cruza contra el universo de la cola del asesor (`sifcosDelUniversoDe`: `/buckets/cola-dia` de su cartera y de las que cubre por una suplencia, CB-114; el mismo universo de `getColaDia`, que sale del pool de buckets y no del dueño directo del crédito).
 - **Acción pendiente** «Confirmar pago» en Mi Cartera y en la Cola del día. Va justo después del SLA.
 - **Costo conocido:** una boleta de ayer que nadie revisó deja de aparecer, en el contador y en la fila. Si negocio quiere seguirla varios días, hay que cambiar el texto del front a «hace N días».
 
 ### B7 · Referencias por contactar
 
-- El universo son los casos activos que el asesor gestionó en los últimos 60 días: los intentos sin contacto son suyos, así que un caso que nunca tocó no puede tener tres.
-- Se aplica la regla con `debeContactarReferencias` y se confirma contra cartera cuáles siguen siendo del asesor.
+- **Universo:** los créditos de la cola del día del asesor (el mismo de B6). Un titular **ausente** hoy no tiene ninguno (su trabajo lo hace el suplente), y el suplente suma los del titular que cubre.
+- **Casos:** los activos que el asesor gestionó alguna vez, **sin tope de días** (la regla B7 no lo tiene; la ventana de 60 días es de la vista de seguimiento). Si un SIFCO tiene varios casos (reaperturas, migraciones), se evalúa solo el **vigente**, elegido entre todos los casos del crédito.
+- **Intentos:** solo cuentan los del asesor y los de los titulares que cubre (su historial del caso es el mismo trabajo). La racha es **«al titular»**: un intento a un codeudor o a una referencia ni suma ni corta. Para distinguirlo, `contactos_cobros.participante_tipo` (migración 0077; NULL = titular).
+- **Regla:** 3 o más intentos sin contacto seguidos, sin gestión a referencias en los últimos 7 días (`debeContactarReferencias`).
+- **Referencia contactable:** el caso debe tener al menos una referencia con teléfono; sin ella no hay a quién llamar y no es una acción pendiente. Cada caso son varias consultas, así que se revisan en paralelo acotado (5 a la vez).
+- **Se cuentan créditos**, no casos (`casos_cobros.numero_credito_sifco` no tiene índice único).
+- `null` si no se pudo calcular el universo de la cola; el front muestra «pronto».
 
 ### B8 · Hora del próximo contacto
 
@@ -152,6 +157,12 @@ PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3)
 - **Asesor junior (Octavio):** Recuperación del día Q0 de Q2K (su meta de Q54,000 entre 27 días hábiles), Movimiento 0↑ 0↓, 1 llamada pendiente, 0 pagos por confirmar y 1 referencia por contactar.
 - **Admin:** el dashboard del supervisor carga sin cambios.
 - Todo coincide con lo esperado. Lo que no se ve en pantalla está en «Pendiente de front».
+
+**Verificación final sobre `COBROS-02` (2026-10-08, tras mergear los cuatro PRs):**
+- `tsc` limpio en el CRM; sin errores nuevos en los archivos de cartera-back de la feature.
+- Tests por archivo: en el CRM falla solo `cartera-back-client.moraRecuperacion.test.ts` (ya fallaba, necesita el auth local en `:7000`); en cartera-back no hay ninguna falla nueva.
+- Prueba funcional de B2 a B9 contra la base local (18 de 18): recuperación y metas, movimiento en vivo, orden, deuda real, hora del próximo contacto y «Confirmar pago».
+- B7 por el camino positivo, con un caso real con referencias: 3 intentos al titular lo cuentan, un intento a un codeudor no cambia nada y una gestión reciente a una referencia lo saca del conteo.
 
 **Sandbox local desfasado:** el schema `cartera_cobros2` de la base local no tenía las migraciones 0035–0044 de cartera-back (`mora_pagada_cuota`, `rubros*`, `cierre_mora_oficial`, entre otras). Sin ellas, el detalle del crédito responde 500 y el Espacio de trabajo muestra «No se encontró el caso de cobranza». No tiene relación con #1862: el `credits.ts` de HEAD ya las usa. Se aplicaron a mano en la base local, con `cartera.` cambiado a `cartera_cobros2.`.
 
@@ -208,6 +219,7 @@ Tercera ronda (2026-10-08), comentarios de los PRs ya mergeados. Las correccione
 | #1901 | `monto_vencido` de créditos en convenio, pagos `no_required` y cuotas recortadas; orden con la expresión canónica del bucket y con el atraso que se muestra; bucket con el piso por estado; reintento con el orden por defecto si el `ORDER BY` falla. |
 | #1902 | Hora del próximo contacto validada en rango; el «cierre de hoy ya corrió» exige filas de subida o bajada; checks de la migración espejados en Drizzle; se quitó un symlink `node_modules` agregado por error. |
 | #1904 | La recuperación usa el vencimiento que guardó el pago; las fechas inexistentes responden 400. |
+| #1905 | Los contadores de la Agenda usan el universo de la cola (pool de buckets y coberturas CB-114) en vez del dueño directo del crédito; B7 evalúa el caso vigente, solo los intentos del asesor y de quien cubre, sin tope de 60 días y con la racha «al titular» (columna `participante_tipo` en la 0077); exige una referencia con teléfono; las referencias se revisan en paralelo acotado. |
 
 ---
 
@@ -218,6 +230,6 @@ Tercera ronda (2026-10-08), comentarios de los PRs ya mergeados. Las correccione
 | #1901 | B4 + B5 | cartera-back + CRM | Mergeado |
 | #1902 | B8 + B9 (crea la 0077) | CRM | Mergeado |
 | #1904 | B2 + B3 (la tabla de metas entró en la misma 0077) | cartera-back + CRM | Mergeado |
-| Último | B6 + B7 (B10 solo en docs) y estos docs | CRM | En revisión |
+| #1905 | B6 + B7 (B10 solo en docs) y estos docs | CRM | Mergeado |
 
 Cada PR salió de `jalvarez-cobros` hacia `COBROS-02`, uno por uno y sin crear el siguiente hasta que se mergeó el anterior.

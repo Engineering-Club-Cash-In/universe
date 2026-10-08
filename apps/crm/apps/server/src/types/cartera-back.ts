@@ -640,6 +640,8 @@ export interface CarteraConvenio {
 	motivo?: string | null;
 	observaciones?: string | null;
 	created_by?: number | null;
+	/** COBROS-02 Fase 3: fecha en que se deshizo el convenio (soft delete). */
+	anulado_at?: string | null;
 	cuotaConvenioAPagar?: string | null;
 	/**
 	 * CB-027: plan de pagos del convenio (numero_cuota/fecha_vencimiento/

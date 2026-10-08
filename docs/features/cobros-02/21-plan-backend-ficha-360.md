@@ -11,18 +11,18 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 ## Estado
 
 > [!WARNING]
-> **Este PR trae la migración `0078_cobros_ficha_360.sql`: hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `guardarTelefonosCaso` y `updateContactInfoCobros` **fallan**, porque escriben la bitácora en la misma transacción, y el detalle del caso lee las columnas nuevas de `casos_cobros`. `getFichaComplementos` no se cae (cada bloque está aislado), pero el historial de cambios llega `null`.
+> **La migración `0078_cobros_ficha_360.sql` (PR2, mergeado) hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `guardarTelefonosCaso`, `updateContactInfoCobros` y `agregarHallazgoATelefonosCaso` **fallan**, porque escriben la bitácora en la misma transacción. Si ya se corrió antes del commit `707e0c555`, la FK `realizado_por` quedó sin `ON DELETE SET NULL`: ajustarla con `ALTER TABLE public.cambios_datos_cliente_cobros DROP CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey, ADD CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey FOREIGN KEY (realizado_por) REFERENCES public."user"(id) ON DELETE SET NULL;`. **Este PR (F4) no trae migración.**
 
 | Tarea | Qué es | Estado | Dónde quedó |
 | --- | --- | --- | --- |
 | **F1** | Datos personales del titular | ✅ Mergeado (PR1, #1912) | `cargarDatosPersonales` en `lib/ficha-complementos.ts` |
 | **F2** | Codeudores | ✅ Mergeado (PR1, #1912) | `cargarCodeudores` en `lib/ficha-complementos.ts` |
-| **F3** | Historial de cambios del cliente | ✅ Hecho (PR2, este) | Tabla `cambios_datos_cliente_cobros` · `lib/cambios-datos-cliente.ts` |
-| **F4** | Vida del crédito | ⏳ PR3 | Historial de buckets + convenios + promesas cumplidas |
+| **F3** | Historial de cambios del cliente | ✅ Mergeado (PR2, #1913) | Tabla `cambios_datos_cliente_cobros` · `lib/cambios-datos-cliente.ts` |
+| **F4** | Vida del crédito | ✅ Hecho (PR3, este) | `cargarHistorico` en `lib/ficha-complementos.ts` |
 | **F5** | Seguro | ✅ Mergeado (PR1, #1912) · ⚠️ sin datos | `cargarSeguro` en `lib/ficha-complementos.ts` |
 | **F6** | Documentos | ⏳ PR4 | Catálogo, envío por WhatsApp y solicitudes al supervisor |
 | **F7** | Asistente IA | ⏳ PR4 | Gemini detrás de `COBROS_ASISTENTE_IA=on` (apagado) |
-| **F8** | Editar direcciones | ✅ Backend hecho (PR2, este) · ⚠️ falta cablear el front | `guardarDireccionesCaso` · `lib/direcciones-caso.ts` |
+| **F8** | Editar direcciones | ✅ Mergeado (PR2, #1913) · ⚠️ falta cablear el front | `guardarDireccionesCaso` · `lib/direcciones-caso.ts` |
 
 ---
 
@@ -77,10 +77,19 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 ### F3 · Historial de cambios
 
 - **Tabla** `cambios_datos_cliente_cobros`: caso, campo, categoría, valor anterior y nuevo, origen (`ficha_360`, `workspace`, `carga_masiva`, `sistema`), quién y cuándo. Append-only.
-- **Quién escribe:** `guardarTelefonosCaso`, `updateContactInfoCobros` y `guardarDireccionesCaso`. Cada una lee el «antes» con `FOR UPDATE`, hace el UPDATE y registra **solo los campos que cambiaron**, todo en la misma transacción (si la bitácora falla, el cambio no se guarda).
+- **Quién escribe:** `guardarTelefonosCaso`, `updateContactInfoCobros`, `guardarDireccionesCaso` y `agregarHallazgoATelefonosCaso` (el teléfono que el asesor acepta desde un hallazgo de referencia; solo registra cuando el número realmente se agrega). Cada una lee el «antes» con `FOR UPDATE`, hace el UPDATE y registra **solo los campos que cambiaron**, todo en la misma transacción (si la bitácora falla, el cambio no se guarda).
 - **Origen:** las tres aceptan `origen` opcional (`ficha_360` por defecto, o `workspace`). Hoy solo la ficha las llama, así que el default es el correcto. `carga_masiva` queda reservado: no existe una carga masiva de contactos de cobros.
 - **Lectura:** lo más reciente primero, hasta 200. Textos: «Teléfono principal», «Dirección de trabajo»…; categoría «Contacto» o «Direcciones»; autor «Ana Gómez (asesor)» (supervisor, administrador; otros roles solo el nombre); un dato borrado se muestra «Sin dato».
+- **Autor eliminado:** `realizado_por` es `ON DELETE SET NULL`: eliminar al asesor conserva sus filas y la ficha muestra «Sistema».
 - **De paso:** `updateContactInfoCobros` no validaba el acceso al caso (cualquier usuario de cobros podía cambiar el contacto de un caso ajeno). Ahora llama a `assertAccesoCasoCobro`.
+
+### F4 · Vida del crédito
+
+- **Buckets:** `getBucketsHistorialCredito` de cartera (ya existía). «Ingresó a Bucket B1 · Alerta temprana», «Subió a Bucket B3 · Rescate (desde B2)», «Bajó a Bucket B2 · Gestión Activa (desde B3)».
+- **Convenios:** `getConveniosPorCredito(…, "all")`. «Convenio de pago firmado · 6 cuotas de Q1,685.71» en la fecha del convenio, más «Convenio de pago completado» o «Convenio de pago deshecho» (por `anulado_at`). Los pendientes de aprobación no salen; los rechazados tampoco (cartera borra su fila y ya los muestra el historial de decisiones, justo debajo en la ficha).
+- **Promesas cumplidas:** `contactos_cobros` con `estado_promesa = 'cumplida'`. La fecha es la de la transición a cumplida en `contactos_cobros_audit` (`{"a": "cumplida"}`); si no está, la fecha prometida.
+- **`credito_id`:** por `cartera_back_references` (todos los casos activos locales lo tienen).
+- **Si cartera no responde:** se devuelve lo que sí se pudo leer (las promesas). Si además no hay nada, `null` para que la ficha diga «Pronto» y no «Sin hitos registrados».
 
 ### F5 · Seguro
 
@@ -96,11 +105,17 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - **`guardarDireccionesCaso({ casoCobroId, residencia?, trabajo?: { empresa?, direccion? }, origen? })`:** con acceso al caso. Un campo que no viene no se toca; `""` o `null` vuelve a la dirección de origen. Al menos un campo es obligatorio. Cada cambio queda en la bitácora (F3), con el «antes» que la ficha mostraba (la corregida o la de origen).
 - **Quién lo lee:**
   - residencia: `getDetallesCreditoCarteraBack` (la usan la ficha y el Espacio de trabajo), `getCasoCobroById` y `getDetallesContrato`;
-  - trabajo: `getDatosLaboralesCaso`, campo por campo sobre la solicitud (la tarjeta de trabajo, el Espacio de trabajo y las visitas lo ven sin cambiar el front).
+  - residencia también en **Págalo**: `resolverContactoPagalo` manda la corregida como `ClientContact.location` al crear y regenerar links;
+  - trabajo: `getDatosLaboralesCaso` y el **checklist de recuperación** (`tieneDatosLaborales`: la visita al trabajo ya no sale como `sin_datos_laborales` si cobros cargó el dato), campo por campo sobre la solicitud (la tarjeta de trabajo, el Espacio de trabajo y las visitas lo ven sin cambiar el front).
 
 ---
 
 ## Pruebas hechas
+
+**PR3 (F4), 2026-10-08:**
+- `lib/ficha-historico.test.ts` (3, en verde): textos de bucket, convenios vigente/completado/deshecho/pendiente y promesas mezcladas por fecha. `bunx tsc -b` sin errores.
+- Smoke con cartera-back local (`:9000`) y los cargadores reales: caso con convenio (subió a B4 y convenio firmado en mayo), caso con promesa cumplida (ingreso a B0 y promesa), caso con subidas y bajadas el mismo día. Con cartera apagada: `null`, o solo las promesas.
+- **QA en pantalla:** Historial › «Histórico» muestra «Ingresó a Bucket B0 · Cartera Sana» (9 sep) y «Subió a Bucket B1 · Alerta Temprana (desde B0)» (18 sep), lo más reciente primero.
 
 **PR2 (F3, F8), 2026-10-08:**
 - `lib/cambios-datos-cliente.test.ts` (10, en verde): diferencias campo por campo, textos de la bitácora y dirección de trabajo efectiva. `bunx tsc -b` sin errores; siguen en verde las pruebas de visitas, GPS y estado de cuenta.
@@ -137,6 +152,15 @@ Comentarios de Codex en el PR, corregidos en el backend (el front quedó fuera, 
 | La tarjeta mezclaba póliza, monto, vencimiento y aseguradora de un vehículo con tipo y deducible de otro | **Cierto en el backend, corregido:** el bloque ya trae todos los campos del mismo vehículo. **Falta cablearlo en el front**: está en «Pendiente de front». |
 | `fechaISO` aceptaba fechas que no existen | **Cierto, corregido.** |
 
+Comentarios de Codex del PR2 (F3 y F8), corregidos antes del merge:
+
+| Hallazgo | Resultado |
+| --- | --- |
+| Págalo mandaba la residencia vieja al crear o regenerar un link | **Cierto, corregido** (`direccionResidenciaCasoSql`). Sin corrección guardada devuelve lo mismo que antes. |
+| El checklist de recuperación ignoraba el trabajo corregido en la ficha | **Cierto, corregido** (`trabajoEfectivo`). Ahora toma la solicitud más reciente del titular, no cualquiera; hoy no hay ninguna oportunidad con más de una. |
+| El teléfono agregado desde un hallazgo no quedaba en la bitácora | **Cierto, corregido** en `agregarHallazgoATelefonosCaso`. |
+| Eliminar a un asesor con historial fallaba por la FK | **Cierto, corregido** (`ON DELETE SET NULL`, también en la 0078 porque aún no estaba mergeada). Probado con una transacción que se deshace: la fila se conserva con autor nulo. |
+
 Revisión interna:
 
 | Hallazgo | Resultado |
@@ -166,8 +190,8 @@ Revisión interna:
 | PR | Rama | Tareas | Migración | Estado |
 | --- | --- | --- | --- | --- |
 | PR1 | `feat/cobros-ficha-datos-contacto` | F1 + F2 + F5 y este doc | — | Mergeado (#1912) |
-| PR2 | `feat/cobros-ficha-cambios-direcciones` | F3 + F8 | Crea la 0078 | **Este PR** |
-| PR3 | `feat/cobros-ficha-vida-credito` | F4 | — | Pendiente |
+| PR2 | `feat/cobros-ficha-cambios-direcciones` | F3 + F8 | Crea la 0078 | Mergeado (#1913) |
+| PR3 | `feat/cobros-ficha-vida-credito` | F4 | — | **Este PR** |
 | PR4 | `feat/cobros-ficha-documentos-ia` | F6 + F7 y cierre de docs (15, 21, README) | Amplía la 0078 | Pendiente |
 
 Cada PR sale de `COBROS-02` ya actualizado hacia `COBROS-02`, uno por uno, y la siguiente rama no se crea hasta que se mergea el anterior. Este doc crece con cada PR: lo que aún no se mergeó figura como pendiente.

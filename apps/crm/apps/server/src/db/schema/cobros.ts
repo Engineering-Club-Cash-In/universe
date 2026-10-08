@@ -1002,3 +1002,92 @@ export const cambiosDatosClienteCobros = pgTable(
 		),
 	],
 );
+
+// F6 (#1864) · Documentos que el asesor pide al supervisor desde la Ficha 360
+// (contrato, carta poder, cambio de placas, expertaje). El supervisor la
+// aprueba o la rechaza con una nota; la entrega del documento queda fuera del
+// sistema. Una sola pendiente por caso y documento. Migración 0078.
+export const solicitudesDocumentosCobros = pgTable(
+	"solicitudes_documentos_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		numeroCreditoSifco: text("numero_credito_sifco"),
+		// 'contrato' | 'carta-poder' | 'cambio-placas' | 'expertaje'
+		clave: text("clave").notNull(),
+		comentario: text("comentario"),
+		// 'pendiente' | 'aprobada' | 'rechazada'
+		estado: text("estado").notNull().default("pendiente"),
+		solicitadoPor: text("solicitado_por")
+			.notNull()
+			.references(() => user.id),
+		solicitadoEn: timestamp("solicitado_en").notNull().defaultNow(),
+		resueltoPor: text("resuelto_por").references(() => user.id),
+		resueltoEn: timestamp("resuelto_en"),
+		notaResolucion: text("nota_resolucion"),
+	},
+	(table) => [
+		uniqueIndex("uq_solicitud_documento_pendiente")
+			.on(table.casoCobroId, table.clave)
+			.where(sql`${table.estado} = 'pendiente'`),
+		index("idx_solicitudes_documentos_estado").on(
+			table.estado,
+			table.solicitadoEn.desc(),
+		),
+		check(
+			"solicitudes_documentos_clave_check",
+			sql`${table.clave} IN ('contrato', 'carta-poder', 'cambio-placas', 'expertaje')`,
+		),
+		check(
+			"solicitudes_documentos_estado_check",
+			sql`${table.estado} IN ('pendiente', 'aprobada', 'rechazada')`,
+		),
+	],
+);
+
+// F7 (#1864) · Resumen del caso generado por IA (Gemini), uno por caso. Se
+// regenera solo cuando cambia la huella (los datos que se le mandaron al
+// modelo): abrir la ficha sin cambios no vuelve a pagar la llamada.
+// Migración 0078.
+export const resumenesIaCobros = pgTable("resumenes_ia_cobros", {
+	casoCobroId: uuid("caso_cobro_id")
+		.primaryKey()
+		.references(() => casosCobros.id, { onDelete: "cascade" }),
+	texto: text("texto").notNull(),
+	etiquetas: text("etiquetas").array().notNull().default([]),
+	huella: text("huella").notNull(),
+	modelo: text("modelo").notNull(),
+	generadoEn: timestamp("generado_en").notNull().defaultNow(),
+});
+
+// F7 (#1864) · Preguntas al asistente del caso: traza de lo que se preguntó y
+// respondió, y base del tope diario por usuario. Migración 0078.
+export const preguntasIaCobros = pgTable(
+	"preguntas_ia_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		pregunta: text("pregunta").notNull(),
+		respuesta: text("respuesta"),
+		ok: boolean("ok").notNull().default(true),
+		modelo: text("modelo").notNull(),
+		realizadaPor: text("realizada_por")
+			.notNull()
+			.references(() => user.id),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_preguntas_ia_usuario_fecha").on(
+			table.realizadaPor,
+			table.createdAt.desc(),
+		),
+		index("idx_preguntas_ia_caso").on(
+			table.casoCobroId,
+			table.createdAt.desc(),
+		),
+	],
+);

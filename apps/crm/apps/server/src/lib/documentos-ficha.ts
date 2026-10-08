@@ -131,18 +131,18 @@ export function decidirVehiculoCaso(datos: {
 	tieneContrato: boolean;
 	vehiculoContrato: string | null;
 	vehiculoOportunidad: string | null;
-}): { vehicleId: string | null; documentosOportunidad: boolean } {
+}): { vehicleId: string | null; usarOportunidad: boolean } {
 	if (datos.tieneContrato) {
 		return {
 			vehicleId: datos.vehiculoContrato,
-			documentosOportunidad:
+			usarOportunidad:
 				datos.vehiculoContrato !== null &&
 				datos.vehiculoOportunidad === datos.vehiculoContrato,
 		};
 	}
 	return {
 		vehicleId: datos.vehiculoOportunidad,
-		documentosOportunidad: true,
+		usarOportunidad: true,
 	};
 }
 
@@ -155,7 +155,7 @@ export function decidirVehiculoCaso(datos: {
  */
 async function resolverVehiculoCaso(
 	ctx: ContextoCaso,
-): Promise<{ vehicleId: string | null; documentosOportunidad: boolean }> {
+): Promise<{ vehicleId: string | null; usarOportunidad: boolean }> {
 	const [[caso], [opp]] = await Promise.all([
 		db
 			.select({
@@ -194,7 +194,7 @@ export async function archivoDocumento(
 	clave: DocumentoEnviar,
 ): Promise<ArchivoDocumento | null> {
 	const tipos = TIPOS_ARCHIVO[clave];
-	const { vehicleId, documentosOportunidad } = await resolverVehiculoCaso(ctx);
+	const { vehicleId, usarOportunidad } = await resolverVehiculoCaso(ctx);
 	if (vehicleId) {
 		const [delVehiculo] = await db
 			.select({ key: vehicleDocuments.filePath })
@@ -210,7 +210,7 @@ export async function archivoDocumento(
 			.limit(1);
 		if (delVehiculo) return delVehiculo;
 	}
-	if (ctx.opportunityId && documentosOportunidad) {
+	if (ctx.opportunityId && usarOportunidad) {
 		const [deOportunidad] = await db
 			.select({ key: opportunityDocuments.filePath })
 			.from(opportunityDocuments)
@@ -329,6 +329,8 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 		db
 			.select({
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				contratoId: casosCobros.contratoId,
+				vehicleId: contratosFinanciamiento.vehicleId,
 				clienteNombre: clients.contactPerson,
 				vehiculoMarca: vehicles.make,
 				vehiculoModelo: vehicles.model,
@@ -347,6 +349,7 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 		ctx.opportunityId
 			? db
 					.select({
+						vehicleId: opportunities.vehicleId,
 						clienteNombre: sql<
 							string | null
 						>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
@@ -369,9 +372,22 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 		vehiculoYear: null,
 		vehiculoPlaca: null,
 	};
+	// Con contrato, el vehículo del mensaje es el del contrato: el de la
+	// oportunidad (viejo o distinto) no rellena sus huecos. El nombre del
+	// cliente sí puede venir de la oportunidad, que ya es la del contrato.
+	const { usarOportunidad } = decidirVehiculoCaso({
+		tieneContrato: !!contrato?.contratoId,
+		vehiculoContrato: contrato?.vehicleId ?? null,
+		vehiculoOportunidad: oportunidad?.vehicleId ?? null,
+	});
+	const deOportunidad = oportunidad
+		? usarOportunidad
+			? oportunidad
+			: { ...sinDatos, clienteNombre: oportunidad.clienteNombre }
+		: sinDatos;
 	return combinarDatosMensaje(
 		contrato ?? sinDatos,
-		oportunidad ?? sinDatos,
+		deOportunidad,
 		contrato?.numeroCreditoSifco ?? ctx.numeroCreditoSifco,
 	);
 }

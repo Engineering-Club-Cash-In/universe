@@ -18,8 +18,10 @@
  * - tope de preguntas por usuario en 24 horas.
  *
  * Al modelo NO se le mandan el nombre, el DPI ni los teléfonos del cliente:
- * solo el estado del crédito y las gestiones (con los números largos de los
- * comentarios tapados).
+ * solo el estado del crédito y las gestiones. Los comentarios son texto libre,
+ * así que se les tapan los números largos, los correos y los nombres de las
+ * personas del caso (titular, codeudores, referencias, cónyuge). Si no se
+ * pueden leer esos nombres, no se manda nada al modelo.
  *
  * Plan: docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
@@ -31,14 +33,20 @@ import { generateObject, generateText } from "ai";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { clients, leads } from "../db/schema/crm";
 import {
 	casosCobros,
 	contactosCobros,
+	contratosFinanciamiento,
 	preguntasIaCobros,
 	resumenesIaCobros,
 } from "../db/schema/cobros";
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	cargarReferencias,
+	resolverContextoCaso,
+} from "../services/referencias-cobros-datos";
 import { contarCuotasAtrasadasUnicas } from "./cobros-plantillas";
 import {
 	cargarHistoricoDetallado,
@@ -87,8 +95,69 @@ export interface ContextoIA {
 
 /** Tapa los números de 8 dígitos o más (teléfonos, DPI, cuentas). */
 export function taparNumeros(texto: string): string {
-	return texto.replace(/\d[\d\s-]{6,}\d/g, (m) =>
+	return texto.replace(/[+(]?\d[\d\s().-]{6,}\d/g, (m) =>
 		m.replace(/\D/g, "").length >= 8 ? "[número]" : m,
+	);
+}
+
+const sinAcentos = (t: string) =>
+	t
+		.normalize("NFD")
+		.replace(/\p{M}/gu, "")
+		.toLowerCase();
+
+/** Partículas de los nombres y palabras de cobranza que no son un nombre. */
+const NO_SON_NOMBRE = new Set([
+	"del",
+	"las",
+	"los",
+	"san",
+	"santa",
+	"mora",
+	"pago",
+	"pagos",
+	"cuota",
+	"cuotas",
+	"credito",
+	"banco",
+	"carro",
+	"moto",
+	"casa",
+	"cliente",
+	"promesa",
+	"convenio",
+]);
+
+/**
+ * Palabras sueltas de los nombres dados, en minúscula y sin acentos, listas
+ * para `taparDatosPersonales`.
+ */
+export function palabrasDeNombres(
+	nombres: Array<string | null | undefined>,
+): Set<string> {
+	const palabras = new Set<string>();
+	for (const nombre of nombres) {
+		for (const w of (nombre ?? "").split(/[^\p{L}]+/u)) {
+			const t = sinAcentos(w);
+			if (t.length >= 3 && !NO_SON_NOMBRE.has(t)) palabras.add(t);
+		}
+	}
+	return palabras;
+}
+
+/**
+ * Texto libre sin datos personales: correos, números largos y las palabras de
+ * los nombres de las personas del caso (sin importar mayúsculas ni acentos).
+ */
+export function taparDatosPersonales(
+	texto: string,
+	nombres: Set<string> = new Set(),
+): string {
+	const sinCorreos = texto.replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[correo]");
+	const sinNumeros = taparNumeros(sinCorreos);
+	if (nombres.size === 0) return sinNumeros;
+	return sinNumeros.replace(/\p{L}+/gu, (w) =>
+		nombres.has(sinAcentos(w)) ? "[nombre]" : w,
 	);
 }
 
@@ -107,6 +176,8 @@ export function armarContextoIA(fuentes: {
 		fechaProximoContacto: Date | null;
 		estadoPromesa: string | null;
 	}>;
+	/** Palabras de los nombres de las personas del caso (`palabrasDeNombres`). */
+	nombres?: Set<string>;
 }): ContextoIA {
 	return {
 		credito: fuentes.credito,
@@ -118,7 +189,10 @@ export function armarContextoIA(fuentes: {
 			fecha: g.fechaContacto.toISOString().slice(0, 16),
 			metodo: g.metodoContacto,
 			resultado: g.estadoContacto,
-			comentario: taparNumeros(g.comentarios.trim()).slice(0, 500),
+			comentario: taparDatosPersonales(g.comentarios.trim(), fuentes.nombres).slice(
+				0,
+				500,
+			),
 			montoPrometido: g.montoComprometido,
 			fechaPrometida: dia(g.fechaProximoContacto),
 			estadoPromesa: g.estadoPromesa,
@@ -163,14 +237,53 @@ async function cargarCreditoVivo(
 }
 
 /**
+ * Palabras de los nombres de las personas del caso: titular (contrato y
+ * lead), codeudores, referencias y cónyuge. Lanza si no se pueden leer.
+ */
+async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
+	const ctx = await resolverContextoCaso(casoCobroId);
+	const [delContrato, delLead, { referencias }] = await Promise.all([
+		db
+			.select({ nombre: clients.contactPerson })
+			.from(casosCobros)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
+			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+			.where(eq(casosCobros.id, casoCobroId))
+			.limit(1),
+		ctx.leadId
+			? db
+					.select({ nombre: leads.firstName, apellido: leads.lastName })
+					.from(leads)
+					.where(eq(leads.id, ctx.leadId))
+					.limit(1)
+			: Promise.resolve([]),
+		cargarReferencias(ctx),
+	]);
+	return palabrasDeNombres([
+		delContrato[0]?.nombre,
+		delLead[0]?.nombre,
+		delLead[0]?.apellido,
+		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
+	]);
+}
+
+/**
  * `hitos`: si el que llama ya los cargó (la ficha), se reutilizan para no
  * volver a llamar a cartera. `completo` = false si cartera no respondió del
- * todo o a medias (historial parcial o estado del crédito): con datos a medias no se genera.
+ * todo o a medias (historial parcial o estado del crédito) o si no se
+ * pudieron leer los nombres a tapar: con datos a medias no se genera.
  */
 async function cargarContextoIA(
 	casoCobroId: string,
 	hitosYaCargados?: Promise<HistoricoCargado>,
-): Promise<{ contexto: ContextoIA; completo: boolean }> {
+): Promise<{
+	contexto: ContextoIA;
+	completo: boolean;
+	nombres: Set<string>;
+}> {
 	const [caso] = await db
 		.select({ numeroSifco: casosCobros.numeroCreditoSifco })
 		.from(casosCobros)
@@ -181,7 +294,7 @@ async function cargarContextoIA(
 			message: "Caso de cobro no encontrado.",
 		});
 	}
-	const [credito, historico, gestiones] = await Promise.all([
+	const [credito, historico, gestiones, nombres] = await Promise.all([
 		cargarCreditoVivo(caso.numeroSifco),
 		(hitosYaCargados ?? cargarHistoricoDetallado(casoCobroId)).catch(
 			(): HistoricoCargado => ({ hitos: null, completo: false }),
@@ -200,6 +313,11 @@ async function cargarContextoIA(
 			.where(eq(contactosCobros.casoCobroId, casoCobroId))
 			.orderBy(desc(contactosCobros.fechaContacto))
 			.limit(MAX_GESTIONES),
+		// Sin los nombres no se puede tapar el texto libre: no se manda.
+		cargarNombresCaso(casoCobroId).catch((error) => {
+			console.error(`[AsistenteIA] nombres del caso ${casoCobroId}:`, error);
+			return null;
+		}),
 	]);
 	return {
 		contexto: armarContextoIA({
@@ -212,8 +330,10 @@ async function cargarContextoIA(
 			},
 			hitos: historico.hitos,
 			gestiones,
+			nombres: nombres ?? undefined,
 		}),
-		completo: credito !== null && historico.completo,
+		completo: credito !== null && historico.completo && nombres !== null,
+		nombres: nombres ?? new Set(),
 	};
 }
 
@@ -323,21 +443,21 @@ export async function obtenerResumenIA(
 			.limit(1),
 		cargarContextoIA(casoCobroId, hitos),
 	]);
+	const comoResumen = (g: NonNullable<typeof guardado>): ResumenIA => ({
+		texto: g.texto,
+		etiquetas: g.etiquetas,
+		generadoEn: g.generadoEn.toISOString(),
+	});
+	// Sin cartera el contexto sale incompleto (puede llegar hasta vacío): no
+	// se paga una regeneración con menos información que el resumen que ya
+	// hay, y sin resumen previo no se inventa uno con datos a medias.
+	if (!completo) return guardado ? comoResumen(guardado) : null;
 	// Sin gestiones ni hitos no hay nada que resumir.
 	if (contexto.gestiones.length === 0 && contexto.hitos.length === 0) {
 		return null;
 	}
 	const huella = huellaContexto(contexto);
-	const comoResumen = (g: typeof guardado): ResumenIA => ({
-		texto: g.texto,
-		etiquetas: g.etiquetas,
-		generadoEn: g.generadoEn.toISOString(),
-	});
 	if (guardado && guardado.huella === huella) return comoResumen(guardado);
-	// Sin cartera la huella cambia solo porque faltan datos: no se paga una
-	// regeneración con menos información que el resumen que ya hay, y sin
-	// resumen previo no se inventa uno con datos a medias.
-	if (!completo) return guardado ? comoResumen(guardado) : null;
 
 	const generacion = generarUnaVez(casoCobroId, contexto, huella);
 	if (guardado) return comoResumen(guardado);
@@ -359,7 +479,9 @@ export async function preguntarAsistente(params: {
 			message: "El asistente IA todavía no está activo.",
 		});
 	}
-	const { contexto, completo } = await cargarContextoIA(params.casoCobroId);
+	const { contexto, completo, nombres } = await cargarContextoIA(
+		params.casoCobroId,
+	);
 	if (!completo) {
 		throw new ORPCError("BAD_GATEWAY", {
 			message:
@@ -416,7 +538,7 @@ export async function preguntarAsistente(params: {
 				},
 				{
 					role: "user",
-					content: `Datos del caso:\n${JSON.stringify(contexto)}\n\nPregunta del asesor: ${params.pregunta}`,
+					content: `Datos del caso:\n${JSON.stringify(contexto)}\n\nPregunta del asesor: ${taparDatosPersonales(params.pregunta, nombres)}`,
 				},
 			],
 		});

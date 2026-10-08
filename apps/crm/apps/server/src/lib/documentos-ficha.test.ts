@@ -98,7 +98,7 @@ describe("decidirVehiculoCaso", () => {
 				vehiculoContrato: null,
 				vehiculoOportunidad: "v-opp",
 			}),
-		).toEqual({ vehicleId: "v-opp", documentosOportunidad: true });
+		).toEqual({ vehicleId: "v-opp", usarOportunidad: true });
 	});
 
 	test("con contrato manda su vehículo aunque la oportunidad apunte a otro", () => {
@@ -108,7 +108,7 @@ describe("decidirVehiculoCaso", () => {
 				vehiculoContrato: "v-contrato",
 				vehiculoOportunidad: "v-viejo",
 			}),
-		).toEqual({ vehicleId: "v-contrato", documentosOportunidad: false });
+		).toEqual({ vehicleId: "v-contrato", usarOportunidad: false });
 	});
 
 	test("con contrato, los documentos de la oportunidad valen si es el mismo vehículo", () => {
@@ -118,7 +118,7 @@ describe("decidirVehiculoCaso", () => {
 				vehiculoContrato: "v1",
 				vehiculoOportunidad: "v1",
 			}),
-		).toEqual({ vehicleId: "v1", documentosOportunidad: true });
+		).toEqual({ vehicleId: "v1", usarOportunidad: true });
 	});
 
 	test("con contrato sin vehículo no se cae a la oportunidad", () => {
@@ -128,6 +128,6 @@ describe("decidirVehiculoCaso", () => {
 				vehiculoContrato: null,
 				vehiculoOportunidad: "v-opp",
 			}),
-		).toEqual({ vehicleId: null, documentosOportunidad: false });
+		).toEqual({ vehicleId: null, usarOportunidad: false });
 	});
 });

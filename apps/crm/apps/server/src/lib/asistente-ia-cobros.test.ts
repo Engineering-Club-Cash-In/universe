@@ -3,6 +3,8 @@ import {
 	armarContextoIA,
 	asistenteActivo,
 	huellaContexto,
+	palabrasDeNombres,
+	taparDatosPersonales,
 	taparNumeros,
 } from "./asistente-ia-cobros";
 
@@ -44,6 +46,38 @@ describe("taparNumeros", () => {
 	});
 });
 
+describe("taparDatosPersonales", () => {
+	const nombres = palabrasDeNombres([
+		"María José Pérez de la Cruz",
+		"Juan Mora",
+		null,
+	]);
+	test("tapa correos y teléfonos o DPI con puntuación", () => {
+		expect(
+			taparDatosPersonales("escribe a juan.perez@correo.com o al (502) 5555-1234"),
+		).toBe("escribe a [correo] o al [número]");
+		expect(taparDatosPersonales("DPI 2993.06216.0101")).toBe("DPI [número]");
+	});
+	test("tapa los nombres sin importar mayúsculas ni acentos", () => {
+		expect(
+			taparDatosPersonales("Habló con MARIA jose, esposa de Perez", nombres),
+		).toBe("Habló con [nombre] [nombre], esposa de [nombre]");
+	});
+	test("deja las palabras de cobranza aunque sean apellido", () => {
+		expect(taparDatosPersonales("tiene mora y pagó la cuota", nombres)).toBe(
+			"tiene mora y pagó la cuota",
+		);
+		expect(palabrasDeNombres(["Juan Mora del Cid"])).toEqual(
+			new Set(["juan", "cid"]),
+		);
+	});
+	test("no toca montos ni fechas con diagonal", () => {
+		expect(taparDatosPersonales("pagará Q1,500.00 el 3/10", nombres)).toBe(
+			"pagará Q1,500.00 el 3/10",
+		);
+	});
+});
+
 describe("armarContextoIA", () => {
 	test("sin datos personales y con los números tapados", () => {
 		const c = armarContextoIA(fuentes);
@@ -60,6 +94,19 @@ describe("armarContextoIA", () => {
 		expect(c.hitos).toEqual([
 			{ fecha: "2026-09-10", descripcion: "Ingresó a Bucket B1" },
 		]);
+	});
+	test("con nombres, el comentario sale sin ellos", () => {
+		const c = armarContextoIA({
+			...fuentes,
+			nombres: palabrasDeNombres(["Carlos Ramírez"]),
+			gestiones: [
+				{
+					...fuentes.gestiones[0],
+					comentarios: "Habló con carlos ramirez, correo cr@x.com",
+				},
+			],
+		});
+		expect(c.gestiones[0].comentario).toBe("Habló con [nombre] [nombre], correo [correo]");
 	});
 	test("la huella es estable y cambia con una gestión nueva", () => {
 		const a = huellaContexto(armarContextoIA(fuentes));

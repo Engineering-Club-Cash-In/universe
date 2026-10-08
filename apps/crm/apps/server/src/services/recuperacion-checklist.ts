@@ -10,9 +10,8 @@
  * Sin autorización acá: el llamador ya exigió el acceso al caso.
  */
 
-import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { creditApplications } from "../db/schema/client-forms";
 import {
 	casosCobros,
 	contactosCobros,
@@ -22,6 +21,10 @@ import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { vehicles } from "../db/schema/vehicles";
 import { visitasCobros } from "../db/schema/visitas-cobros";
+import {
+	solicitudLaboralTitular,
+	trabajoEfectivo,
+} from "../lib/direcciones-caso";
 import {
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
@@ -221,30 +224,28 @@ async function leerVisitas(casoCobroId: string, desde: Date) {
 	};
 }
 
-/** ¿La solicitud de crédito trae dónde trabaja? (lo que usa la visita al trabajo). */
+/**
+ * ¿Hay dónde trabaja? La solicitud de crédito o lo corregido desde la ficha
+ * (F8): lo que usa la visita al trabajo.
+ */
 async function tieneDatosLaborales(casoCobroId: string): Promise<boolean> {
 	try {
-		const ctx = await resolverContextoCaso(casoCobroId);
-		if (!ctx.opportunityId) return false;
-		const [fila] = await db
-			.select({
-				empresa: creditApplications.empresa,
-				direccion: creditApplications.direccionTrabajo,
-			})
-			.from(creditApplications)
-			.where(
-				and(
-					eq(creditApplications.opportunityId, ctx.opportunityId),
-					// La del titular, igual que getDatosLaboralesCaso. NULL = solicitud
-					// anterior a la 0015, cuando había una sola por oportunidad.
-					or(
-						eq(creditApplications.personType, "lead"),
-						isNull(creditApplications.personType),
-					),
-				),
-			)
-			.limit(1);
-		return !!(fila?.empresa?.trim() || fila?.direccion?.trim());
+		const [ctx, [corregido]] = await Promise.all([
+			resolverContextoCaso(casoCobroId),
+			db
+				.select({
+					empresa: casosCobros.empresaTrabajoCobros,
+					direccion: casosCobros.direccionTrabajoCobros,
+				})
+				.from(casosCobros)
+				.where(eq(casosCobros.id, casoCobroId))
+				.limit(1),
+		]);
+		const trabajo = trabajoEfectivo(
+			await solicitudLaboralTitular(ctx.opportunityId),
+			corregido ?? { empresa: null, direccion: null },
+		);
+		return !!(trabajo?.empresa || trabajo?.direccion);
 	} catch {
 		return false;
 	}

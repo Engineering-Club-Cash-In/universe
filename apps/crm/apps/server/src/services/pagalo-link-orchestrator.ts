@@ -20,6 +20,7 @@ import {
 } from "../db/schema/pagalo-payments";
 import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
 import { registrarAuditContacto } from "../lib/audit-contactos";
+import { direccionResidenciaCasoSql } from "../lib/direcciones-caso";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
@@ -30,8 +31,8 @@ import {
 	construirComentarioGestionLinkPagalo,
 	esLinkPagaloContabilizableEnGestion,
 	gestionLinkPagaloTieneWhatsappConfirmado,
-	resultadoWhatsappGestionLinkPagalo,
 	responsableGestionLinkPagalo,
+	resultadoWhatsappGestionLinkPagalo,
 	resumenGestionLinksPagalo,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
@@ -120,7 +121,9 @@ async function resolverCreadorOriginalGrupoPagalo(params: {
 	while (true) {
 		const [regeneracion] = await db
 			.select({
-				grupoAnteriorId: sql<string | null>`${pagaloPaymentEvents.payload}->>'grupoAnteriorId'`,
+				grupoAnteriorId: sql<
+					string | null
+				>`${pagaloPaymentEvents.payload}->>'grupoAnteriorId'`,
 			})
 			.from(pagaloPaymentEvents)
 			.where(
@@ -493,7 +496,8 @@ async function resolverContactoPagalo(
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 			telefonoPrincipal: casosCobros.telefonoPrincipal,
 			emailContacto: casosCobros.emailContacto,
-			direccionContacto: casosCobros.direccionContacto,
+			// F8 (#1864): la residencia corregida desde la ficha gana.
+			direccionContacto: direccionResidenciaCasoSql,
 		})
 		.from(casosCobros)
 		.where(eq(casosCobros.id, casoCobroId))
@@ -586,7 +590,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				),
 			),
 		)
-		.orderBy(desc(pagaloPaymentGroups.createdAt))
+		.orderBy(desc(pagaloPaymentGroups.createdAt));
 
 	let grupoCompletadoSinGestion:
 		| (typeof gruposCompletadosSinGestion)[number]

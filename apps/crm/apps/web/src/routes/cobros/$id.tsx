@@ -227,7 +227,7 @@ import {
 	textoReferenciasConTelefono,
 	ultimos8Digitos as ultimos8,
 } from "@/lib/cobros/reglas-caso";
-import { formatFechaLocal, parseFechaLocal } from "@/lib/date-utils";
+import { formatFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -3046,42 +3046,22 @@ function RouteComponent() {
 									}
 								/>
 								<CardSeguroFicha
-									aseguradora={
-										comp?.seguro
-											? (comp.seguro.aseguradora ?? "—")
-											: caso.aseguradora || "—"
-									}
+									aseguradora={caso.aseguradora || "—"}
 									tipoSeguro={comp?.seguro?.tipoSeguro ?? "—"}
-									telefonoEmergencia={
-										comp?.seguro
-											? (comp.seguro.telefonoEmergencia ?? "—")
-											: caso.cabinaSeguro || "—"
-									}
+									telefonoEmergencia={caso.cabinaSeguro || "—"}
 									coberturas={comp?.seguro?.coberturas ?? "—"}
-									poliza={
-										comp?.seguro
-											? (comp.seguro.poliza ?? undefined)
-											: caso.vehiculoNumeroPoliza || undefined
-									}
+									poliza={caso.vehiculoNumeroPoliza || undefined}
 									montoAsegurado={
-										comp?.seguro
-											? comp.seguro.montoAsegurado
-												? fmtQ(comp.seguro.montoAsegurado)
-												: undefined
-											: caso.vehiculoMontoAsegurado
-												? fmtQ(caso.vehiculoMontoAsegurado)
-												: undefined
+										caso.vehiculoMontoAsegurado
+											? fmtQ(caso.vehiculoMontoAsegurado)
+											: undefined
 									}
 									vencimiento={
-										comp?.seguro
-											? comp.seguro.vencimiento
-												? fechaLarga(parseFechaLocal(comp.seguro.vencimiento))
-												: undefined
-											: caso.vehiculoFechaVencimientoSeguro
-												? fechaLarga(
-														new Date(caso.vehiculoFechaVencimientoSeguro),
-													)
-												: undefined
+										caso.vehiculoFechaVencimientoSeguro
+											? fechaLarga(
+													new Date(caso.vehiculoFechaVencimientoSeguro),
+												)
+											: undefined
 									}
 								/>
 							</div>

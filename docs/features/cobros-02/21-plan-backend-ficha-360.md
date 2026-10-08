@@ -41,7 +41,12 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 
 ### Común
 
-`getFichaComplementos` resuelve una vez el puente caso → SIFCO → oportunidad → lead (`resolverContextoCaso`, el mismo de referencias) y corre los bloques **en paralelo y aislados**: si uno falla, ese bloque vuelve `null` (la ficha lo muestra pendiente), se registra en el log y los demás se devuelven igual.
+`getFichaComplementos` resuelve una vez el puente caso → oportunidad → lead (`resolverContextoCaso`, el mismo de referencias) y corre los bloques **en paralelo y aislados**: si uno falla, ese bloque vuelve `null` (la ficha lo muestra pendiente), se registra en el log y los demás se devuelven igual.
+
+**Cómo se resuelve la oportunidad del caso** (`resolverContextoCaso`): con contrato vinculado manda el cliente del contrato (`contratoId → contratosFinanciamiento.clientId → clients.opportunityId`, y el lead de esa oportunidad o `clients.leadId`); sin contrato, o si el cliente no tiene oportunidad, se usa la heurística de siempre por SIFCO (la `won`/`migrate` más reciente). Se cambió porque un SIFCO repetido en oportunidades duplicadas u obsoletas podía mostrar los datos de otro lead. Como es un resolver compartido, el cambio también llega a referencias, visitas, GPS, checklist y el contador «referencias por contactar» del Dashboard.
+
+> [!NOTE]
+> **Límite conocido:** `clients.opportunityId` es una sola por cliente, no por crédito. Un cliente con varios contratos resuelve todos a la misma oportunidad. En la base local son 9 casos los que cambian de resultado con este orden y en ninguno hay solicitudes ni codeudores en las oportunidades involucradas, así que hoy no se nota. Si en producción un cliente con varios créditos muestra codeudores o trabajo de otro crédito, el arreglo es preferir, entre las oportunidades con el SIFCO del caso, la del lead del cliente del contrato, y usar `clients.opportunityId` solo si no hay ninguna.
 
 Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`. El armado es puro y tiene pruebas en `lib/ficha-complementos.test.ts`.
 
@@ -51,7 +56,7 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - **Precedencia por campo:** RENAP → lead → solicitud. Ejemplo: si RENAP no trae la fecha de nacimiento, se toma la del lead aunque el nombre siga saliendo de RENAP.
 - **Nombre:** RENAP guarda mayúsculas; se pasa a nombre propio con las partículas en minúscula («María José de la Cruz Pérez de García»). El apellido de casada va con «de», salvo que RENAP ya lo traiga («DE MÉNDEZ» no pasa a «de de Méndez»; ocurre en 4 de los 64 apellidos de casada de la base local).
 - **Textos:** sexo «Masculino»/«Femenino» (de `M/F`, `male/female` o `masculino/femenino`). Estado civil concordado con el sexo («Casada»); si no se conoce el sexo, «Casado(a)».
-- **Fecha:** `YYYY-MM-DD`. Acepta también `DD/MM/YYYY`; un texto vacío o inválido queda en `null`.
+- **Fecha:** `YYYY-MM-DD`. Acepta también `DD/MM/YYYY`. Un texto vacío, mal formado o con un día que no existe en el calendario (`31/02/1990`, `1990-13-40`) queda en `null` y la ficha muestra «—».
 - `null` si el caso no tiene lead (por ejemplo, un SIFCO sin oportunidad).
 
 ### F2 · Codeudores
@@ -68,6 +73,8 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 
 ### F5 · Seguro
 
+- **Vehículo:** el del contrato (`casos_cobros.contrato_id → contratos_financiamiento.vehicle_id`), que es el autoritativo (mismo criterio que `resolverVehiculoCasoPagalo`). Solo sin contrato se cae a la oportunidad. En la base local 10 casos con contrato tienen un vehículo distinto al de la oportunidad, y ninguno pierde ni gana póliza.
+- **El bloque trae todo el seguro del mismo vehículo:** además de tipo y coberturas, `poliza`, `montoAsegurado` y `vencimiento` (`YYYY-MM-DD`), más `aseguradora` y `telefonoEmergencia`, que salen de `opportunities.insurance_provider` de la oportunidad del caso (`seguroPorAseguradora`). Sin proveedor resuelto (caso sin oportunidad) la aseguradora llega `null`.
 - `tipoSeguro`: `vehicles.tipo_cobertura` (`basica`/`amplia`/`total` → «Cobertura básica/amplia/total»; otro valor se muestra tal cual).
 - `coberturas`: «Deducible Q2,500.00» si `vehicles.deducible` es mayor que 0.
 - **⚠️ Sin datos hoy:** ningún vehículo tiene esas columnas llenas. Para que la tarjeta muestre algo, ventas o el cierre del crédito tienen que capturarlas. Si negocio prefiere un texto fijo por aseguradora, se cambia en `armarSeguro`.
@@ -95,6 +102,17 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 
 ## Revisión de código (2026-10-08)
 
+Comentarios de Codex en el PR, corregidos en el backend (el front quedó fuera, ver «Pendiente de front»):
+
+| Hallazgo | Resultado |
+| --- | --- |
+| El seguro salía de la oportunidad y no del vehículo del contrato | **Cierto, corregido** en `cargarSeguro` (contrato primero). |
+| F1 y F2 podían salir de otro lead si el SIFCO está en oportunidades duplicadas | **Cierto, corregido** en `resolverContextoCaso` (cliente del contrato primero). Con el límite conocido de arriba para clientes con varios contratos. |
+| La tarjeta mezclaba póliza, monto, vencimiento y aseguradora de un vehículo con tipo y deducible de otro | **Cierto en el backend, corregido:** el bloque ya trae todos los campos del mismo vehículo. **Falta cablearlo en el front**: está en «Pendiente de front». |
+| `fechaISO` aceptaba fechas que no existen | **Cierto, corregido.** |
+
+Revisión interna:
+
 | Hallazgo | Resultado |
 | --- | --- |
 | «de de Méndez» en el apellido de casada | **Cierto, corregido** (`apellidoDeCasada`). |
@@ -108,6 +126,7 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 
 | Qué | Dónde | Detalle |
 | --- | --- | --- |
+| **Tarjeta «Seguro»: leer todo del bloque** (F5) | `routes/cobros/$id.tsx` (~3048, `CardSeguroFicha`) | Hoy la tarjeta toma tipo y coberturas de `complementos.seguro` (vehículo del contrato) pero aseguradora, cabina, póliza, monto y vencimiento de `caso.*` (vehículo de la oportunidad): en un caso con vehículo distinto mezcla los dos. Con `complementos.seguro` presente, tomar de ahí `aseguradora`, `telefonoEmergencia`, `poliza`, `montoAsegurado` y `vencimiento` (este último con `parseFechaLocal`, es `YYYY-MM-DD`); solo si el bloque llega `null`, usar `caso.*`. |
 | *(se completa con F3, F6, F7 y F8)* | | |
 
 ---

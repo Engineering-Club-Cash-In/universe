@@ -271,7 +271,7 @@ async function nombresDeIdentidad(
 	ctx: ContextoCaso,
 	{ leadId, opportunityId }: IdentidadCaso,
 ): Promise<Array<string | null>> {
-	const [delLead, solicitudes, { referencias }] = await Promise.all([
+	const [delLead, solicitudes, { referencias, contactos }] = await Promise.all([
 		leadId
 			? db
 					.select({
@@ -333,13 +333,16 @@ async function nombresDeIdentidad(
 			x.conyuge,
 		]),
 		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
+		// Las gestiones a referencias guardan su nombre copiado: sobrevive aunque
+		// la referencia se renombre o se borre.
+		...contactos.map((c) => c.referenciaNombre),
 	];
 }
 
 /**
  * Palabras de los nombres de las personas del caso: titular (contrato, lead,
  * RENAP y solicitudes de crédito, con todos sus componentes), codeudores,
- * referencias y cónyuge. Se leen desde el cliente del contrato Y desde la
+ * referencias (vigentes y las copiadas en sus gestiones) y cónyuge. Se leen desde el cliente del contrato Y desde la
  * oportunidad que resuelve `resolverContextoCaso` (que sin oportunidad en el
  * cliente cae a una por SIFCO, quizá de otro lead): tapar de más es inocuo,
  * dejar un nombre sin tapar no. Lanza si no se pueden leer.

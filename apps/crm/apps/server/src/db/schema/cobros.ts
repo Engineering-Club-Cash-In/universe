@@ -11,6 +11,7 @@ import {
 	pgTable,
 	serial,
 	text,
+	time,
 	timestamp,
 	unique,
 	uniqueIndex,
@@ -283,6 +284,14 @@ export const contactosCobros = pgTable(
 		// Próximo seguimiento
 		requiereSeguimiento: boolean("requiere_seguimiento").default(false),
 		fechaProximoContacto: timestamp("fecha_proximo_contacto"),
+		// B8 (doc 13): hora y medio del próximo contacto. `fechaProximoContacto`
+		// sigue siendo el DÍA (medianoche GT) para no tocar las comparaciones por
+		// día; la hora va aparte ("HH:MM:SS") y solo en gestiones que no son
+		// promesa. Migración 0077.
+		horaProximoContacto: time("hora_proximo_contacto"),
+		medioProximoContacto: text("medio_proximo_contacto").$type<
+			"llamada" | "whatsapp"
+		>(),
 		// CB-029: "alerta programada" — cuándo avisar al asesor ANTES de que venza
 		// la promesa (default = fecha prometida − 1 día, editable). El job diario
 		// dispara la notificación promesa_por_vencer cuando fecha_alerta = hoy (GT).
@@ -368,6 +377,10 @@ export const contactosCobros = pgTable(
 		index("idx_contactos_cobros_bucket_fecha")
 			.on(table.bucketSnapshot, table.fechaContacto.desc())
 			.where(sql`${table.bucketSnapshot} IS NOT NULL`),
+		check(
+			"contactos_cobros_medio_proximo_contacto_check",
+			sql`${table.medioProximoContacto} IS NULL OR ${table.medioProximoContacto} IN ('llamada', 'whatsapp')`,
+		),
 	],
 );
 
@@ -819,6 +832,37 @@ export const metasMoraCobros = pgTable("metas_mora_cobros", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// B3 (doc 13): meta de recuperación de cada asesor, en Q y por mes. El KPI
+// "Recuperación" del Dashboard la prorratea a día y semana (días L–S). El
+// asesor es el de cartera-back (`asesores.asesor_id`), igual que el pool de
+// buckets. Migración 0077.
+export const metasAsesorCobros = pgTable(
+	"metas_asesor_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		asesorId: integer("asesor_id").notNull(),
+		anio: integer("anio").notNull(),
+		mes: integer("mes").notNull(), // 1-12
+		montoRecuperacion: decimal("monto_recuperacion", {
+			precision: 14,
+			scale: 2,
+		}).notNull(),
+		actualizadoPor: text("actualizado_por").references(() => user.id),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(t) => [
+		unique("metas_asesor_cobros_asesor_mes_unique").on(
+			t.asesorId,
+			t.anio,
+			t.mes,
+		),
+		index("idx_metas_asesor_cobros_periodo").on(t.anio, t.mes),
+		check("metas_asesor_cobros_mes_check", sql`${t.mes} BETWEEN 1 AND 12`),
+		check("metas_asesor_cobros_monto_check", sql`${t.montoRecuperacion} >= 0`),
+	],
+);
 
 // Seguimientos programados recurrentes para casos de cobros
 export const seguimientosProgramados = pgTable(

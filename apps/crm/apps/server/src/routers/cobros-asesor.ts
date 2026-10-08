@@ -17,10 +17,15 @@ import {
 	contactosCobros,
 } from "../db/schema/cobros";
 import {
+	calcularMovimientosBucketDelDia,
+	type MovimientoBucketDelDia,
+} from "../jobs/cierre-diario-asesores";
+import {
 	PERIODOS_DESEMPENO,
 	type RangoFechas,
 	rangosDesempeno,
 } from "../lib/desempeno-asesor";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	esContactoEfectivo,
 	esGestionAutomatica,
@@ -101,6 +106,77 @@ async function promesas(userId: string, r: RangoFechas, ahora: Date) {
 	};
 }
 
+/**
+ * B9: movimientos de bucket de HOY en vivo. Se recalculan con la misma regla
+ * del cierre de las 22:00 (`calcularMovimientosBucketDelDia`), que lee toda la
+ * bitácora del día: por eso se guarda unos minutos y la comparten todos los
+ * asesores.
+ */
+const TTL_MOVIMIENTOS_HOY_MS = 2 * 60 * 1000;
+let movimientosHoyCache:
+	| { fecha: string; en: number; datos: Promise<MovimientoBucketDelDia[]> }
+	| undefined;
+
+function movimientosDeHoy(hoyStr: string): Promise<MovimientoBucketDelDia[]> {
+	const ahora = Date.now();
+	if (
+		movimientosHoyCache &&
+		movimientosHoyCache.fecha === hoyStr &&
+		ahora - movimientosHoyCache.en < TTL_MOVIMIENTOS_HOY_MS
+	) {
+		return movimientosHoyCache.datos;
+	}
+	const datos = calcularMovimientosBucketDelDia(hoyStr);
+	movimientosHoyCache = { fecha: hoyStr, en: ahora, datos };
+	// Un fallo no se queda guardado: la próxima carga vuelve a intentar.
+	datos.catch(() => {
+		if (movimientosHoyCache?.datos === datos) movimientosHoyCache = undefined;
+	});
+	return datos;
+}
+
+/**
+ * Lo que falta sumar al cierre para que el rango incluya hoy. Si el cierre de
+ * movimientos de hoy ya corrió, sus filas ya están en `movimiento` y no se suma
+ * nada (sin doble conteo). Solo cuentan las filas de subida/bajada: el cierre
+ * inserta primero los contactos y después los movimientos, así que una fila de
+ * contacto no prueba que el paso de movimientos terminó. `incluyeHoy: false`
+ * solo si no se pudo calcular.
+ */
+async function movimientoDeHoyEnVivo(
+	userId: string,
+	r: RangoFechas,
+	ahora: Date,
+): Promise<{ subieron: number; bajaron: number; incluyeHoy: boolean }> {
+	const hoyStr = toDateStrGT(ahora);
+	const sinNada = { subieron: 0, bajaron: 0, incluyeHoy: true };
+	if (r.hastaStr !== hoyStr) return sinNada;
+	try {
+		const [cierreDeHoy] = await db
+			.select({ fecha: cierreDiarioCreditoCobros.fecha })
+			.from(cierreDiarioCreditoCobros)
+			.where(
+				and(
+					eq(cierreDiarioCreditoCobros.fecha, hoyStr),
+					inArray(cierreDiarioCreditoCobros.tipo, ["subida", "bajada"]),
+				),
+			)
+			.limit(1);
+		if (cierreDeHoy) return sinNada;
+		const propios = (await movimientosDeHoy(hoyStr)).filter(
+			(m) => m.asesorId === userId,
+		);
+		return {
+			subieron: propios.filter((m) => m.tipo === "subida").length,
+			bajaron: propios.filter((m) => m.tipo === "bajada").length,
+			incluyeHoy: true,
+		};
+	} catch (error) {
+		console.error("[getMiDesempeno] movimiento de hoy no disponible:", error);
+		return { subieron: 0, bajaron: 0, incluyeHoy: false };
+	}
+}
+
 /** Créditos que bajaron / subieron de bucket, del cierre diario (corre a las 22:00). */
 async function movimiento(userId: string, r: RangoFechas) {
 	const [fila] = await db
@@ -158,12 +234,13 @@ export const cobrosAsesorRouter = {
 			const ahora = new Date();
 			const { actual, anterior } = rangosDesempeno(input.periodo, ahora);
 			const userId = context.userId;
-			const [cA, cP, pA, pP, mov] = await Promise.all([
+			const [cA, cP, pA, pP, mov, movHoy] = await Promise.all([
 				contactabilidad(userId, actual),
 				contactabilidad(userId, anterior),
 				promesas(userId, actual, ahora),
 				promesas(userId, anterior, ahora),
 				movimiento(userId, actual),
+				movimientoDeHoyEnVivo(userId, actual, ahora),
 			]);
 
 			// TODO(José) · tarea B2 + B3 (docs/features/cobros-02/13-dashboard-asesor-backend.md):
@@ -191,11 +268,10 @@ export const cobrosAsesorRouter = {
 					intentos: cA.total,
 				},
 				movimiento: {
-					bajaron: mov.bajaron,
-					subieron: mov.subieron,
-					// El cierre diario corre a las 22:00: el día en curso no aparece
-					// hasta esa hora. Para verlo en vivo: tarea B9 en los docs.
-					incluyeHoy: false,
+					// Cierre diario (días cerrados) + lo de hoy en vivo (B9).
+					bajaron: mov.bajaron + movHoy.bajaron,
+					subieron: mov.subieron + movHoy.subieron,
+					incluyeHoy: movHoy.incluyeHoy,
 				},
 			};
 		}),

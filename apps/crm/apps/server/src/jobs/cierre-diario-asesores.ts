@@ -261,7 +261,24 @@ async function resolverIdsDuenoManana(
 	});
 }
 
-async function _generarCierreMovimientosBucket(fecha: string) {
+/** Un movimiento de bucket del día, ya atribuido al usuario del CRM dueño de la mañana. */
+export type MovimientoBucketDelDia = {
+	asesorId: string;
+	numeroCreditoSifco: string;
+	bucketAnterior: number;
+	bucketNuevo: number;
+	tipo: "subida" | "bajada";
+};
+
+/**
+ * Las subidas y bajadas de bucket de `fecha`, atribuidas al dueño de la
+ * mañana (ver resolverIdsDuenoManana). Solo lee: el cierre las escribe y el
+ * Dashboard del asesor las usa en vivo para el día en curso (B9 del doc 13),
+ * con la MISMA regla para que el número de la tarde cuadre con el del cierre.
+ */
+export async function calcularMovimientosBucketDelDia(
+	fecha: string,
+): Promise<MovimientoBucketDelDia[]> {
 	const usuarios = await db
 		.select({ id: user.id, email: user.email })
 		.from(user);
@@ -320,14 +337,7 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 		);
 	}
 
-	type FilaMovimiento = {
-		asesorId: string;
-		numeroCreditoSifco: string;
-		bucketAnterior: number;
-		bucketNuevo: number;
-		tipo: "subida" | "bajada";
-	};
-	const filas: FilaMovimiento[] = [];
+	const filas: MovimientoBucketDelDia[] = [];
 
 	const idsDueno = await resolverIdsDuenoManana(eventos, fecha);
 	let descartados = 0;
@@ -350,6 +360,11 @@ async function _generarCierreMovimientosBucket(fecha: string) {
 			`[CierreDiarioAsesor] ${fecha}: ${descartados} movimiento(s) de bucket descartado(s) — asesor_id sin cruce a user.email (sin pool activo o email_cash_in no coincide)`,
 		);
 	}
+	return filas;
+}
+
+async function _generarCierreMovimientosBucket(fecha: string) {
+	const filas = await calcularMovimientosBucketDelDia(fecha);
 
 	// Resolver caso_cobro_id por número SIFCO — un crédito de cartera-back puede
 	// no tener caso creado todavía en CRM (queda NULL; la UI navega por SIFCO).

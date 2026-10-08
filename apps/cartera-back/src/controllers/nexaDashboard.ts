@@ -131,14 +131,14 @@ const filasConBoleta = (filtroCredito: SQL, rango: RangoFechas) => sql`pagos_viv
   SELECT pagos_vivos.*,
          CASE WHEN fecha_pago - LAG(fecha_pago) OVER islas <= interval '60 seconds' THEN 0 ELSE 1 END AS nueva
   FROM pagos_vivos
-  WINDOW islas AS (PARTITION BY credito_id, monto_boleta, por, aut, (nexa_payment_event_id IS NULL) ORDER BY fecha_pago, pago_id)
+  WINDOW islas AS (PARTITION BY credito_id, monto_boleta, por, aut, banco_id, (nexa_payment_event_id IS NULL) ORDER BY fecha_pago, pago_id)
 ), filas_boleta AS (
   SELECT con_corte.*,
          CASE WHEN nexa_payment_event_id IS NOT NULL THEN 'n' || nexa_payment_event_id
               -- json_build_array escapa cada campo: un '|' en registerby o en la autorización no
               -- puede hacer que dos tuplas distintas den la misma clave.
-              ELSE 'm' || md5(json_build_array(monto_boleta, por, aut, SUM(nueva) OVER (
-                PARTITION BY credito_id, monto_boleta, por, aut, (nexa_payment_event_id IS NULL) ORDER BY fecha_pago, pago_id))::text)
+              ELSE 'm' || md5(json_build_array(monto_boleta, por, aut, banco_id, SUM(nueva) OVER (
+                PARTITION BY credito_id, monto_boleta, por, aut, banco_id, (nexa_payment_event_id IS NULL) ORDER BY fecha_pago, pago_id))::text)
          END AS boleta
   FROM con_corte
 )`;

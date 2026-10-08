@@ -48,11 +48,11 @@ const nuevoCredito = async (cliente?: string) => {
   await sql`INSERT INTO cartera.usuarios VALUES (${id}, ${cliente ?? `Cliente ${id}`})`;
   await sql`INSERT INTO cartera.creditos VALUES (${id}, ${id}, ${sifco}, 'ACTIVO')`;
   await sql`INSERT INTO cartera.nexa_credit_bindings VALUES (${id}, ${`tok${id}`}, true)`;
-  const pago = (cuota: number, fecha: string, o: { monto?: number; por?: string; aut?: string; evento?: number; falso?: boolean; estado?: string } = {}) =>
+  const pago = (cuota: number, fecha: string, o: { monto?: number; por?: string; aut?: string; evento?: number; falso?: boolean; estado?: string; banco?: number } = {}) =>
     sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, fecha_pago, monto_boleta, nexa_payment_event_id,
-      registerby, numeroautorizacion, validation_status, "paymentFalse")
+      registerby, numeroautorizacion, validation_status, "paymentFalse", banco_id)
       VALUES (${id}, ${cuota}, ${fecha}::timestamp, ${o.monto ?? 100}, ${o.evento ?? null}, ${o.por ?? "cobros@x.com"},
-      ${o.aut ?? "A1"}, ${o.estado ?? "validated"}, ${o.falso ?? false})`;
+      ${o.aut ?? "A1"}, ${o.estado ?? "validated"}, ${o.falso ?? false}, ${o.banco ?? null})`;
   const evento = async (status: string, monto = 100) => {
     const [e] = await sql`INSERT INTO cartera.nexa_payment_events (credito_id, external_reference, amount, status)
       VALUES (${id}, ${`ref-${id}-${Math.random()}`}, ${monto}, ${status}) RETURNING id`;
@@ -100,6 +100,27 @@ integrationTest("distinta autorización a 10 s son 2 boletas", async () => {
   await c.pago(1, "2026-09-10 10:00:00", { aut: "A1" });
   await c.pago(1, "2026-09-10 10:00:10", { aut: "B2" });
   expect((await c.modal()).pagos).toHaveLength(2);
+});
+
+integrationTest("mismo monto, quien registró y autorización pero distinto banco a 1 s: son 2 boletas, cada una con su banco", async () => {
+  const c = await nuevoCredito();
+  await c.pago(1, "2026-09-10 10:00:00", { banco: 1 });
+  await c.pago(1, "2026-09-10 10:00:01", { banco: 2 });
+  const { pagos } = await c.modal();
+  expect(pagos).toHaveLength(2);
+  expect(pagos.map((p) => p.banco).sort()).toEqual(["Banco Industrial", "Banrural"]);
+  // Con autorización vacía (el caso real del crédito 553).
+  const d = await nuevoCredito();
+  await d.pago(1, "2026-09-10 10:00:00", { banco: 1, aut: "" });
+  await d.pago(1, "2026-09-10 10:00:01", { banco: 2, aut: "" });
+  expect((await d.modal()).pagos).toHaveLength(2);
+});
+
+integrationTest("el mismo banco a 30 s sigue siendo una sola boleta", async () => {
+  const c = await nuevoCredito();
+  await c.pago(3, "2026-09-10 10:00:00", { banco: 1 });
+  await c.pago(4, "2026-09-10 10:00:30", { banco: 1 });
+  expect((await c.modal()).pagos).toHaveLength(1);
 });
 
 integrationTest("un '|' en quien registró o en la autorización no fusiona dos boletas", async () => {

@@ -15,8 +15,13 @@ import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { creditApplications } from "../db/schema/client-forms";
-import { casosCobros } from "../db/schema/cobros";
-import { coDebtors, opportunities, referenciasLead } from "../db/schema/crm";
+import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import {
+	clients,
+	coDebtors,
+	opportunities,
+	referenciasLead,
+} from "../db/schema/crm";
 import {
 	contactosReferenciasCobros,
 	referenciasTelefonosCobros,
@@ -48,6 +53,7 @@ export async function resolverContextoCaso(
 	const [caso] = await db
 		.select({
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			contratoId: casosCobros.contratoId,
 			telefonoPrincipal: casosCobros.telefonoPrincipal,
 			telefonoAlternativo: casosCobros.telefonoAlternativo,
 		})
@@ -65,6 +71,32 @@ export async function resolverContextoCaso(
 		telefonoPrincipal: caso.telefonoPrincipal,
 		telefonoAlternativo: caso.telefonoAlternativo,
 	};
+
+	// Con contrato vinculado, el cliente del contrato manda: SIFCO puede
+	// repetirse en oportunidades duplicadas u obsoletas y la heurística de
+	// abajo elegiría la de otro lead. Sin contrato (o sin oportunidad en su
+	// cliente) se cae a la heurística por SIFCO.
+	if (caso.contratoId) {
+		const [delContrato] = await db
+			.select({
+				opportunityId: clients.opportunityId,
+				clientLeadId: clients.leadId,
+				oppLeadId: opportunities.leadId,
+			})
+			.from(contratosFinanciamiento)
+			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+			.leftJoin(opportunities, eq(opportunities.id, clients.opportunityId))
+			.where(eq(contratosFinanciamiento.id, caso.contratoId))
+			.limit(1);
+		if (delContrato?.opportunityId) {
+			return {
+				...base,
+				leadId: delContrato.oppLeadId ?? delContrato.clientLeadId ?? null,
+				opportunityId: delContrato.opportunityId,
+			};
+		}
+	}
+
 	if (!caso.numeroCreditoSifco) {
 		return { ...base, leadId: null, opportunityId: null };
 	}

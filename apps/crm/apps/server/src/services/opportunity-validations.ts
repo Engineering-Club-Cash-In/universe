@@ -5,7 +5,7 @@ import { infornetController } from "../controllers/buro";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { infornetPersonaCache } from "../db/schema/buro";
-import { coDebtors, leads, opportunities } from "../db/schema/crm";
+import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import {
 	documentRequirementsByClientType,
 	opportunityDocuments,
@@ -693,7 +693,7 @@ async function ejecutarValidacionesInterno({
 		await registrarValidacion({
 			opportunityId,
 			dpi: normalizarDpi(oportunidad.leadDpi),
-			tipo: "renap",
+			tipo: CONSULTAR_RENAP ? "renap" : "buro",
 			estado: "error",
 			mensaje: dpiValidado.error,
 			ejecutadoPor: userId ?? null,
@@ -705,7 +705,18 @@ async function ejecutarValidacionesInterno({
 			errorTecnico: true,
 			sinRegistroBuro: false,
 			mensaje: dpiValidado.error,
-			renap: { estado: "error", mensaje: dpiValidado.error },
+			...(CONSULTAR_RENAP
+				? { renap: { estado: "error" as const, mensaje: dpiValidado.error } }
+				: {
+						buro: {
+							estado: "error" as const,
+							mensaje: dpiValidado.error,
+							scoreRiesgo: null,
+							nivelRiesgo: null,
+							alertas: null,
+							fuenteDeDatos: null,
+						},
+					}),
 		};
 	}
 
@@ -1057,6 +1068,80 @@ export async function ejecutarBuroCofirmantes({
 	};
 }
 
+/**
+ * Consulta al 20%, o al 30% si una revalidación excepcional quedó registrada.
+ * Lee la etapa e identidad actuales antes de consultar.
+ * El resultado queda en la misma
+ * bitácora que usa el análisis del 30%.
+ */
+export async function ejecutarBuroAlVeinteSiCorresponde({
+	opportunityId,
+	userId,
+}: {
+	opportunityId: string;
+	userId?: string | null;
+}): Promise<void> {
+	const [oportunidad] = await db
+		.select({
+			porcentaje: salesStages.closurePercentage,
+			status: opportunities.status,
+			buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
+			source: opportunities.source,
+			leadSource: leads.source,
+			leadId: opportunities.leadId,
+			leadDpi: leads.dpi,
+			clientType: leads.clientType,
+			creditType: opportunities.creditType,
+		})
+		.from(opportunities)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	if (
+		!oportunidad ||
+		!(
+			oportunidad.porcentaje === 20 ||
+			(oportunidad.porcentaje === 30 && oportunidad.buroRevalidacionAl30)
+		) ||
+		oportunidad.status !== "open" ||
+		(await faltaConsentimientoDelTitular(
+			opportunityId,
+			oportunidad.clientType,
+			oportunidad.creditType,
+		))
+	) {
+		return;
+	}
+
+	if (
+		(
+			await resolverExencionPorBot({
+				opportunityId,
+				source: oportunidad.source,
+				leadSource: oportunidad.leadSource,
+				leadId: oportunidad.leadId,
+				leadDpi: oportunidad.leadDpi,
+			})
+		).exento
+	) {
+		return;
+	}
+
+	const [titular, cofirmantes] = await Promise.all([
+		oportunidad.leadDpi
+			? ejecutarValidaciones({ opportunityId, userId, reusarVigente: true })
+			: null,
+		ejecutarBuroCofirmantes({ opportunityId, userId, reusarVigente: true }),
+	]);
+	if (titular?.errorTecnico || cofirmantes.errorTecnico) {
+		console.warn(
+			`[Buró 20%] La validación de la oportunidad ${opportunityId} quedó pendiente: ${titular?.mensaje ?? cofirmantes.mensaje ?? "error técnico"}`,
+		);
+	}
+}
+
 /** Cofirmantes con el DPI con que se validaron, como `id:dpi` en orden de id: lo que compara `firmaCofirmantesSql` */
 export function firmaCofirmantes(
 	cofirmantes: { coDebtorId: string; dpi: string }[],
@@ -1379,10 +1464,9 @@ async function marcarValidacionManualCritico({
 	const dpiCrudo = await dpiCrudoDelSujeto(opportunityId, coDebtorId);
 	if (!dpiCrudo) throw new OverrideNoAplicaError(tipo);
 
-	// Un DPI con formato inválido es un dato mal capturado, no un fallo de la
-	// fuente externa: overridearlo no destraba nada, se corrige en la ficha. En
-	// el titular cae como error de RENAP; en el cofirmante, como error de Buró
-	if ((tipo === "renap" || coDebtorId) && !validarDpi(dpiCrudo).valid) {
+	// Un DPI inválido se corrige en la ficha: un override no satisface el
+	// requisito de identidad al entrar al 30%, sea titular o cofirmante.
+	if (!validarDpi(dpiCrudo).valid) {
 		throw new OverrideDpiInvalidoError(coDebtorId ? "cofirmante" : "titular");
 	}
 

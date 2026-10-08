@@ -3,9 +3,13 @@ import { type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 
 import { user } from "../db/schema/auth";
+import { infornetPersonaCache } from "../db/schema/buro";
 import { creditApplications } from "../db/schema/client-forms";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
+import { otps } from "../db/schema/otp";
+import { opportunityValidations } from "../db/schema/validations";
+import { vehicles } from "../db/schema/vehicles";
 import { PORCENTAJE_CANDADO_DPI } from "../lib/lead-dpi-lock";
 
 /**
@@ -25,6 +29,9 @@ type Fila = Record<string, unknown>;
 
 /** Lo que devuelve un SELECT, por tabla. La proyección de columnas se ignora. */
 const filasPorTabla = new Map<unknown, Fila[]>();
+let secuenciaEtapas: Fila[][] = [];
+const lecturasPorTabla: unknown[] = [];
+let respuestaExecute: unknown = [];
 
 type Escritura = {
 	tipo: "update" | "insert";
@@ -45,7 +52,12 @@ let filasDevueltasPorUpdate: Fila[] = [{ id: "oportunidad" }];
 
 function constructorSelect() {
 	let tabla: unknown = null;
-	const filas = () => filasPorTabla.get(tabla) ?? [];
+	const filas = () => (
+		lecturasPorTabla.push(tabla),
+		tabla === salesStages && secuenciaEtapas.length > 0
+			? (secuenciaEtapas.shift() ?? [])
+			: (filasPorTabla.get(tabla) ?? [])
+	);
 	// Drizzle encadena en cualquier orden y a veces se espera el builder
 	// directamente (sin `limit`), así que el builder es thenable.
 	const b: Record<string, unknown> = {
@@ -108,7 +120,7 @@ const dbFalso = {
 	update: (tabla: unknown) => constructorUpdate(tabla),
 	insert: (tabla: unknown) => constructorInsert(tabla),
 	delete: () => ({ where: async () => [] }),
-	execute: async () => [],
+	execute: async () => respuestaExecute,
 	transaction: async <T>(correr: (tx: unknown) => Promise<T>) =>
 		await correr(dbFalso),
 };
@@ -124,6 +136,10 @@ const instalarDbFalso = () => mock.module("../db", () => ({ db: dbFalso }));
 instalarDbFalso();
 
 const { crmRouter } = await import("./crm");
+const { validationsRouter } = await import("./validations");
+const { ejecutarBuroAlVeinteSiCorresponde } = await import(
+	"../services/opportunity-validations"
+);
 
 /**
  * Se invoca el handler del procedure, no `call(...)`.
@@ -243,6 +259,9 @@ function aplicarEscritura(fila: Fila, escritura: Escritura | undefined): Fila {
 beforeEach(async () => {
 	await instalarDbFalso();
 	filasPorTabla.clear();
+	lecturasPorTabla.length = 0;
+	secuenciaEtapas = [];
+	respuestaExecute = [];
 	escrituras.length = 0;
 	filasDevueltasPorUpdate = [{ id: "oportunidad" }];
 });
@@ -773,6 +792,37 @@ describe("createOpportunity: una oportunidad no nace arriba del umbral del canda
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 
+	test("nacer directamente en análisis (30%) sigue permitido y habilita Buró allí", async () => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, []);
+		filasPorTabla.set(leads, [{ id: LEAD, source: "web" }]);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_CIERRE_PROPUESTA,
+				name: "Recepción de documentación y traslado a análisis",
+				closurePercentage: 30,
+				order: 4,
+			},
+		]);
+
+		await invocar(
+			crmRouter.createOpportunity,
+			{
+				title: "Crédito directo a análisis",
+				leadId: LEAD,
+				creditType: "autocompra",
+				stageId: ETAPA_CIERRE_PROPUESTA,
+			},
+			contextoDe("vendedor", "sales"),
+		);
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.tipo).toBe("insert");
+		expect(escritura?.valores).toMatchObject({
+			stageId: ETAPA_CIERRE_PROPUESTA,
+			buroRevalidacionAl30: true,
+		});
+	});
+
 	test("nacer en la etapa inicial (1%) sigue funcionando", async () => {
 		// Red de seguridad: el tope no puede romper el alta normal, que es la que
 		// usa el CRM (su selector "Etapa Inicial" solo ofrece de 1% a 20%).
@@ -805,7 +855,543 @@ describe("createOpportunity: una oportunidad no nace arriba del umbral del canda
 			title: "Crédito normal",
 			leadId: LEAD,
 			stageId: ETAPA_PROSPECTO,
+			buroRevalidacionAl30: false,
 		});
+	});
+});
+
+describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => {
+	const OPORTUNIDAD = "96969696-9696-4696-8696-969696969696";
+
+	test.each([
+		["cobros", "cobros"],
+		["contabilidad", "accounting"],
+		["jurídico", "juridico"],
+		["asesor ajeno", "sales"],
+	] as const)("rechaza a %s", async (_nombre, role) => {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+			},
+		]);
+		await expect(
+			invocar(
+				validationsRouter.getResumenBuroOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("otro-usuario", role),
+			),
+		).rejects.toThrow(/No tienes acceso al Buró/);
+		expect(escrituras).toEqual([]);
+	});
+
+	test("la acción que puede consultar Infornet rechaza a Jurídico", async () => {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+			},
+		]);
+		await expect(
+			invocar(
+				validationsRouter.asegurarBuroOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("juridico", "juridico"),
+			),
+		).rejects.toThrow(/No tienes acceso al detalle de Buró/);
+		expect(escrituras).toEqual([]);
+	});
+
+	test("ventas no puede validar manualmente Buró de una oportunidad ajena", async () => {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+			},
+		]);
+		await expect(
+			invocar(
+				validationsRouter.marcarValidacionManual,
+				{
+					opportunityId: OPORTUNIDAD,
+					tipo: "buro",
+					motivo: "Verificado manualmente en Infornet",
+				},
+				contextoDe("asesor-ajeno", "sales"),
+			),
+		).rejects.toThrow(/No tienes acceso al detalle de Buró/);
+		expect(escrituras).toEqual([]);
+	});
+
+	test("ventas no puede validar RENAP ni siquiera en su oportunidad", async () => {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+			},
+		]);
+		await expect(
+			invocar(
+				validationsRouter.marcarValidacionManual,
+				{
+					opportunityId: OPORTUNIDAD,
+					tipo: "renap",
+					motivo: "Verificado manualmente en RENAP",
+				},
+				contextoDe("asesor-asignado", "sales"),
+			),
+		).rejects.toThrow(/No tienes acceso al detalle de Buró/);
+		expect(escrituras).toEqual([]);
+	});
+
+	test("el resumen respeta la exención de WhatsApp acreditada por OTP y estudio vigente", async () => {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+				source: "Whatsapp",
+				leadSource: "Whatsapp",
+				leadId: "10101010-1010-4010-8010-101010101010",
+				leadDpi: "2978485181201",
+				creditType: "autocompra",
+			},
+		]);
+		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{
+				dpi: "2978485181201",
+				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			},
+		]);
+		filasPorTabla.set(opportunityValidations, []);
+
+		const resumen = await invocar(
+			validationsRouter.getResumenBuroOportunidad,
+			{ opportunityId: OPORTUNIDAD },
+			contextoDe("asesor-asignado", "sales"),
+		);
+		expect(resumen).toMatchObject({
+			exento: true,
+			permitirValidacionManualBuro: true,
+		});
+		expect(escrituras).toEqual([]);
+	});
+});
+
+describe("revalidación excepcional de Buró en el 30%", () => {
+	const OPORTUNIDAD = "61616161-6161-4161-8161-616161616161";
+	const base = {
+		id: OPORTUNIDAD,
+		assignedTo: "vendedor",
+		status: "open",
+		porcentaje: 30,
+		source: "web",
+		leadSource: "web",
+		leadId: "62626262-6262-4262-8262-626262626262",
+		leadDpi: null,
+		creditType: "autocompra",
+		analysisStatus: "pending",
+	};
+
+	test("asegurarBuroOportunidad solo admite el 30% con la excepción registrada", async () => {
+		filasPorTabla.set(opportunities, [
+			{ ...base, buroRevalidacionAl30: false },
+		]);
+		await expect(
+			invocar(
+				validationsRouter.asegurarBuroOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/No tienes acceso al detalle de Buró/);
+
+		filasPorTabla.set(opportunities, [{ ...base, buroRevalidacionAl30: true }]);
+		expect(
+			await invocar(
+				validationsRouter.asegurarBuroOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("vendedor", "sales"),
+			),
+		).toEqual({ success: true });
+	});
+
+	test("el ejecutor no inicia la consulta en el 30% sin excepción", async () => {
+		filasPorTabla.set(opportunities, [
+			{ ...base, buroRevalidacionAl30: false },
+		]);
+		await ejecutarBuroAlVeinteSiCorresponde({ opportunityId: OPORTUNIDAD });
+		expect(lecturasPorTabla).toEqual([opportunities]);
+
+		lecturasPorTabla.length = 0;
+		filasPorTabla.set(opportunities, [{ ...base, buroRevalidacionAl30: true }]);
+		await ejecutarBuroAlVeinteSiCorresponde({ opportunityId: OPORTUNIDAD });
+		expect(lecturasPorTabla.length).toBeGreaterThan(1);
+	});
+});
+
+describe("corrección de DPI al 30%: solo revalida Buró", () => {
+	const OPORTUNIDAD = "67676767-6767-4676-8676-676767676767";
+	const LEAD = "68686868-6868-4686-8686-686868686868";
+	const CODEUDOR = "69696969-6969-4696-8696-696969696969";
+	const DPI_ANTERIOR = "2978485181201";
+	const DPI_NUEVO = "1234567890101";
+	const oportunidad = {
+		id: OPORTUNIDAD,
+		leadId: LEAD,
+		status: "open",
+		closurePercentage: 30,
+		maxHistoricoClosurePercentage: 30,
+		stageName: "Análisis",
+		analysisStatus: "pending",
+		creditDetailApproved: true,
+		identityRevalidatedAt: null,
+	};
+
+	function comprobarMarcaDeBuro() {
+		const marca = escriturasSobreOportunidades().find(
+			(escritura) => escritura.valores.buroRevalidacionAl30 === true,
+		);
+		expect(marca?.valores).toEqual({ buroRevalidacionAl30: true });
+		const { sql: condicion, params } = sqlDeLaCondicion(marca?.condicion);
+		expect(condicion).toContain("closure_percentage");
+		expect(params).toContain("lost");
+	}
+
+	test("editar el DPI del titular marca Buró sin caducar escaneo ni aprobación", async () => {
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI_ANTERIOR, assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [oportunidad]);
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await invocar(
+				crmRouter.updateLead,
+				{ id: LEAD, dpi: DPI_NUEVO },
+				contextoDe("vendedor", "sales"),
+			);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+		comprobarMarcaDeBuro();
+	});
+
+	test("crear un cofirmante marca Buró sin reiniciar análisis", async () => {
+		filasPorTabla.set(opportunities, [oportunidad]);
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await invocar(
+				crmRouter.createCoDebtor,
+				{ opportunityId: OPORTUNIDAD, fullName: "Cofirmante", dpi: DPI_NUEVO },
+				contextoDe("vendedor", "sales"),
+			);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+		comprobarMarcaDeBuro();
+	});
+
+	test("editar el DPI del cofirmante marca Buró sin reiniciar análisis", async () => {
+		filasPorTabla.set(opportunities, [oportunidad]);
+		filasPorTabla.set(coDebtors, [
+			{ id: CODEUDOR, opportunityId: OPORTUNIDAD, dpi: DPI_ANTERIOR },
+		]);
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await invocar(
+				crmRouter.updateCoDebtor,
+				{ id: CODEUDOR, dpi: DPI_NUEVO },
+				contextoDe("vendedor", "sales"),
+			);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+		comprobarMarcaDeBuro();
+	});
+});
+
+describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
+	const OPORTUNIDAD = "63636363-6363-4363-8363-636363636363";
+	const ETAPA_30 = "64646464-6464-4464-8464-646464646464";
+	const ETAPA_40 = "65656565-6565-4565-8565-656565656565";
+	const DPI = "2978485181201";
+
+	function prepararAprobacion(flag: boolean, expiraEn?: Date) {
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				title: "Análisis con Buró",
+				stageId: ETAPA_30,
+				status: "open",
+				assignedTo: null,
+				vehicleId: "vehiculo-nuevo",
+				creditType: "autocompra",
+				leadId: "66666666-6666-4666-8666-666666666666",
+				leadDpi: DPI,
+				dpi: DPI,
+				firstName: "Pilar",
+				lastName: "Mérida",
+				clientType: "individual",
+				source: "web",
+				leadSource: "web",
+				analysisStatus: "pending",
+				analysisRejectionCount: 0,
+				buroRevalidacionAl30: flag,
+			},
+		]);
+		filasPorTabla.set(vehicles, [{ isNew: true }]);
+		filasPorTabla.set(
+			opportunityValidations,
+			expiraEn
+				? [
+						{
+							id: "resultado-buro",
+							tipo: "buro",
+							estado: "aprobado",
+							dpi: DPI,
+							expiraEn,
+						},
+					]
+				: [],
+		);
+		secuenciaEtapas = [
+			[{ id: ETAPA_30, closurePercentage: 30 }],
+			[{ id: ETAPA_40, closurePercentage: 40 }],
+			[{ id: "etapa-20", closurePercentage: 20 }],
+		];
+	}
+
+	test.each([
+		["sin excepción", false, /Regresa la oportunidad al 20%/],
+		["con excepción", true, /en el 30% antes de aprobar/],
+	] as const)("bloquea aprobación sin Buró %s", async (_caso, flag, mensaje) => {
+		prepararAprobacion(flag);
+		await expect(
+			invocar(
+				crmRouter.approveOpportunityAnalysis,
+				{ opportunityId: OPORTUNIDAD, approved: true },
+				contextoDe("analista", "analyst"),
+			),
+		).rejects.toThrow(mensaje);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("bloquea aprobación con Buró vencido incluso sin excepción", async () => {
+		prepararAprobacion(false, new Date(Date.now() - 60_000));
+		await expect(
+			invocar(
+				crmRouter.approveOpportunityAnalysis,
+				{ opportunityId: OPORTUNIDAD, approved: true },
+				contextoDe("analista", "analyst"),
+			),
+		).rejects.toThrow(/validación de Buró vigente/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test.each([
+		["sin excepción", false],
+		["con excepción", true],
+	] as const)("aprueba con Buró vigente %s y limpia la excepción", async (_caso, flag) => {
+		prepararAprobacion(flag, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+		respuestaExecute = { rows: [{ huella: "huella-vigente" }] };
+		await invocar(
+			crmRouter.approveOpportunityAnalysis,
+			{ opportunityId: OPORTUNIDAD, approved: true },
+			contextoDe("analista", "analyst"),
+		);
+		const aprobacion = escriturasSobreOportunidades().find(
+			(escritura) => escritura.valores.analysisStatus === "approved",
+		);
+		expect(aprobacion?.valores).toMatchObject({
+			stageId: ETAPA_40,
+			buroRevalidacionAl30: false,
+		});
+	});
+});
+
+describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
+	const OPORTUNIDAD = "91919191-9191-4191-8191-919191919191";
+	const LEAD = "92929292-9292-4292-8292-929292929292";
+	const ETAPA_20 = "93939393-9393-4393-8393-939393939393";
+	const ETAPA_30 = "94949494-9494-4494-8494-949494949494";
+	const ETAPA_40 = "95959595-9595-4595-8595-959595959595";
+
+	function prepararDestino(porcentaje: 30 | 40) {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				leadId: LEAD,
+				stageId: ETAPA_20,
+				status: "open",
+				assignedTo: "vendedor",
+				analysisStatus: "not_applicable",
+				vehicleId: "vehiculo-1",
+				creditType: "autocompra",
+				source: "web",
+				leadSource: "web",
+				leadDpi: "2978485181201",
+			},
+		]);
+		secuenciaEtapas = [
+			[
+				{
+					id: porcentaje === 30 ? ETAPA_30 : ETAPA_40,
+					closurePercentage: porcentaje,
+				},
+			],
+			[{ id: ETAPA_20, closurePercentage: 20 }],
+		];
+	}
+
+	test("sin DPI no puede pasar del 20% al 30%", async () => {
+		prepararDestino(30);
+		filasPorTabla.set(leads, [{ id: LEAD, dpi: null }]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/ingresa el DPI del titular/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("no puede saltar del 20% al 40%", async () => {
+		prepararDestino(40);
+		filasPorTabla.set(leads, [{ id: LEAD, dpi: null }]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_40 },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/pasa por análisis/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test.each([
+		["pendiente", []],
+		[
+			"con error",
+			[
+				{
+					id: "validacion-error",
+					tipo: "buro",
+					estado: "error",
+					dpi: "2978485181201",
+					expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+				},
+			],
+		],
+	] as const)("con Buró %s no puede pasar al 30%", async (_caso, validaciones) => {
+		prepararDestino(30);
+		filasPorTabla.set(leads, [{ id: LEAD, dpi: "2978485181201" }]);
+		filasPorTabla.set(opportunityValidations, [...validaciones]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/necesita una validación de Buró vigente/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("el Buró validado manualmente permite entrar al 30%", async () => {
+		prepararDestino(30);
+		filasPorTabla.set(leads, [{ id: LEAD, dpi: "2978485181201" }]);
+		filasPorTabla.set(salesStages, [
+			{ id: ETAPA_20, closurePercentage: 20, order: 3 },
+		]);
+		filasPorTabla.set(opportunityValidations, [
+			{
+				id: "validacion-manual",
+				tipo: "buro",
+				estado: "sin_registro",
+				dpi: "2978485181201",
+				fuenteDeDatos: "manual",
+				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+			contextoDe("vendedor", "sales"),
+		);
+		expect(escriturasSobreOportunidades()[0]?.valores.stageId).toBe(ETAPA_30);
+		expect(
+			escriturasSobreOportunidades()[0]?.valores.buroRevalidacionAl30,
+		).toBe(false);
+		const { sql: predicado } = sqlDeLaCondicion(
+			escriturasSobreOportunidades()[0]?.condicion,
+		);
+		expect(predicado).toContain("string_agg");
+		expect(predicado).toContain("co_debtors");
+	});
+
+	test("al regresar de 40% a 30% con Buró vencido habilita reconsulta excepcional", async () => {
+		prepararDestino(30);
+		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
+		filasPorTabla.set(opportunities, [
+			{
+				...oportunidad,
+				stageId: ETAPA_40,
+				analysisStatus: "approved",
+			},
+		]);
+		filasPorTabla.set(salesStages, [
+			{ id: ETAPA_40, closurePercentage: 40, order: 5 },
+		]);
+		secuenciaEtapas = [
+			[{ id: ETAPA_30, closurePercentage: 30, order: 4 }],
+			[{ id: ETAPA_40, closurePercentage: 40, order: 5 }],
+			[{ id: ETAPA_30, closurePercentage: 30, order: 4 }],
+			[{ id: ETAPA_40, closurePercentage: 40, order: 5 }],
+		];
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: "2978485181201", source: "web" },
+		]);
+		filasPorTabla.set(opportunityValidations, [
+			{
+				id: "validacion-vencida",
+				tipo: "buro",
+				estado: "aprobado",
+				dpi: "2978485181201",
+				expiraEn: new Date(Date.now() - 24 * 60 * 60 * 1000),
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+			contextoDe("vendedor", "sales"),
+		);
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.stageId).toBe(ETAPA_30);
+		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
 	});
 });
 

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { leads, opportunities } from "../db/schema/crm";
+import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
@@ -24,10 +24,12 @@ import {
 	numerosSifcoConocidosPorDpi,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import { ejecutarBuroAlVeinteSiCorresponde } from "../services/opportunity-validations";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 import {
@@ -409,6 +411,7 @@ export async function updateLeadByEmail(c: Context) {
 		// candado lee bajo snapshot MVCC y no bloquea la fila — una aprobación
 		// 30→40 en vuelo podía commitear después de esta escritura. El FOR UPDATE
 		// serializa las dos.
+		let oportunidadesMarcadas: string[] = [];
 		const [updatedLead] = await db.transaction(async (tx) => {
 			if (candadoEnElPredicado) {
 				await tx
@@ -417,7 +420,7 @@ export async function updateLeadByEmail(c: Context) {
 					.where(eq(opportunities.leadId, existingLead.id))
 					.for("update");
 			}
-			return tx
+			const filas = await tx
 				.update(leads)
 				.set(updateData)
 				.where(whereDelUpdate)
@@ -431,6 +434,22 @@ export async function updateLeadByEmail(c: Context) {
 					direccion: leads.direccion,
 					updatedAt: leads.updatedAt,
 				});
+			if (filas.length > 0 && candadoEnElPredicado) {
+				const marcadas = await tx
+					.update(opportunities)
+					.set({ buroRevalidacionAl30: true })
+					.where(
+						and(
+							eq(opportunities.leadId, existingLead.id),
+							sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+							inArray(opportunities.status, ["open", "lost"]),
+							eq(opportunities.buroRevalidacionAl30, false),
+						),
+					)
+					.returning({ id: opportunities.id });
+				oportunidadesMarcadas = marcadas.map((oportunidad) => oportunidad.id);
+			}
+			return filas;
 		});
 		if (!updatedLead && candadoEnElPredicado) {
 			// Cero filas con la condición puesta: el candado se cerró en el medio.
@@ -453,16 +472,45 @@ export async function updateLeadByEmail(c: Context) {
 			action: "update",
 			data: updateData,
 		});
+		for (const opportunityId of oportunidadesMarcadas) {
+			auditRecord({
+				entity: "opportunity",
+				id: opportunityId,
+				action: "habilitar_buro_revalidacion_30",
+				data: { origen: "portal", leadId: existingLead.id },
+			});
+		}
 
 		// If address was updated, also update the lead direccion
 		if (address !== undefined && updatedLead) {
 			// Direccion is now only in the leads table, no need to update opportunities
 		}
 
-		// If DPI was updated, call RENAP to get information
+		// RENAP se consulta solo cuando Centinela vuelva a estar habilitado.
 		let renapInfo = null;
-		if (dpi !== undefined && dpi.trim() !== "" && updatedLead) {
+		if (
+			CONSULTAR_RENAP &&
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			updatedLead
+		) {
 			renapInfo = await getOnlyRenapInfoController(dpi);
+		}
+		if (updatedLead && candadoEnElPredicado && updatedLead.dpi) {
+			const oportunidades = await db
+				.select({ id: opportunities.id })
+				.from(opportunities)
+				.where(eq(opportunities.leadId, updatedLead.id));
+			for (const oportunidad of oportunidades) {
+				void ejecutarBuroAlVeinteSiCorresponde({
+					opportunityId: oportunidad.id,
+				}).catch((error) => {
+					console.error(
+						`[Buró 20%] No se pudo validar la oportunidad ${oportunidad.id} tras guardar el DPI en el portal`,
+						error,
+					);
+				});
+			}
 		}
 
 		return c.json({

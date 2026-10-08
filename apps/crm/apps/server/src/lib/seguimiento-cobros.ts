@@ -277,13 +277,16 @@ export function accionPendienteDe(
  * uno. Dos cortes para no leer el historial completo: los últimos
  * DIAS_VENTANA_SEGUIMIENTO días, más las promesas abiertas de cualquier fecha.
  * Con `realizadoPor` solo se leen las gestiones de ese usuario (seguimiento
- * «propio» del asesor); sin él, las de todos.
+ * «propio» del asesor); sin él, las de todos. Con `sinTopeDeVentana` se lee
+ * todo el historial: la racha de intentos sin contacto no tiene tope de días
+ * (3 intentos hace 70, 35 y 1 días siguen siendo 3).
  */
 export async function cargarSeguimientoPorCaso(
 	casoIds: string[],
 	ahora: Date = new Date(),
-	realizadoPor?: string,
+	opciones: { realizadoPor?: string; sinTopeDeVentana?: boolean } = {},
 ): Promise<Map<string, SeguimientoCaso>> {
+	const { realizadoPor, sinTopeDeVentana = false } = opciones;
 	const resultado = new Map<string, SeguimientoCaso>();
 	if (casoIds.length === 0) return resultado;
 	const desde = new Date(ahora.getTime() - DIAS_VENTANA_SEGUIMIENTO * MS_DIA);
@@ -305,19 +308,21 @@ export async function cargarSeguimientoPorCaso(
 					? eq(contactosCobros.realizadoPor, realizadoPor)
 					: undefined,
 				ne(contactosCobros.estadoContacto, "link_pago_generado"),
-				or(
-					gte(contactosCobros.fechaContacto, desde),
-					and(
-						inArray(contactosCobros.estadoContacto, ["promesa_pago"]),
-						or(
-							inArray(contactosCobros.estadoPromesa, [
-								"pendiente",
-								"incumplida",
-							]),
-							isNull(contactosCobros.estadoPromesa),
+				sinTopeDeVentana
+					? undefined
+					: or(
+							gte(contactosCobros.fechaContacto, desde),
+							and(
+								inArray(contactosCobros.estadoContacto, ["promesa_pago"]),
+								or(
+									inArray(contactosCobros.estadoPromesa, [
+										"pendiente",
+										"incumplida",
+									]),
+									isNull(contactosCobros.estadoPromesa),
+								),
+							),
 						),
-					),
-				),
 			),
 		)
 		.orderBy(desc(contactosCobros.fechaContacto));

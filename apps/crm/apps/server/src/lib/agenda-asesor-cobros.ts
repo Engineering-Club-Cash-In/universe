@@ -196,8 +196,13 @@ export async function contarReferenciasPorContactar(
 
 	const casoIds = casosVigentes.map((c) => c.casoId);
 	const [seguimientos, gestionesReferencias] = await Promise.all([
-		// Solo los intentos del asesor: los de otro no son suyos.
-		cargarSeguimientoPorCaso(casoIds, ahora, userId),
+		// Solo los intentos del asesor (los de otro no son suyos) y sin tope de
+		// 60 días: la regla B7 no lo tiene, la ventana es de la vista de
+		// seguimiento.
+		cargarSeguimientoPorCaso(casoIds, ahora, {
+			realizadoPor: userId,
+			sinTopeDeVentana: true,
+		}),
 		db
 			.select({
 				casoId: contactosReferenciasCobros.casoCobroId,

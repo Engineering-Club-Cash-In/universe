@@ -2292,12 +2292,13 @@ export const cobrosRouter = {
 			// Los stubs W1 del Workspace (dirección, participante, teléfono
 			// contactado) tampoco: se separan para que el spread de `datos` no los
 			// lleve al insert/update.
-			// TODO(José) · tarea W1: persistir dirección, participante y teléfono.
+			// TODO(José) · tarea W1: persistir dirección y teléfono (el tipo de
+			// participante ya se guarda: lo usa la racha de intentos del titular).
 			const {
 				promesaContactoId,
 				visitaId,
 				direccion: _direccion,
-				participante: _participante,
+				participante,
 				telefonoContactado: _telefonoContactado,
 				horaProximoContacto,
 				medioProximoContacto,
@@ -2430,6 +2431,9 @@ export const cobrosRouter = {
 						estadoPromesa,
 						realizadoPor: context.userId,
 						bucketSnapshot,
+						// A quién se contactó: la racha de intentos sin contacto es del
+						// titular. Sin dato (clientes viejos) se guarda NULL = titular.
+						participanteTipo: participante?.tipo ?? null,
 					})
 					.returning();
 			}

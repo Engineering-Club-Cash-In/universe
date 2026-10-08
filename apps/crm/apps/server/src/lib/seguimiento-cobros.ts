@@ -59,6 +59,8 @@ export interface FilaContactoSeguimiento {
 	/** B8: hora del próximo contacto ("HH:MM" o "HH:MM:SS", hora GT); null = sin hora. */
 	horaProximoContacto?: string | null;
 	comentarios: string | null;
+	/** A quién se contactó; null/ausente = titular. */
+	participanteTipo?: "titular" | "codeudor" | "referencia" | null;
 }
 
 export type EstadoGestion =
@@ -132,6 +134,9 @@ export function resumirSeguimiento(
 
 	let intentosSinContacto = 0;
 	for (const f of manuales) {
+		// La racha es «al titular»: un contacto a un codeudor o a una referencia
+		// ni la suma ni la corta.
+		if (f.participanteTipo && f.participanteTipo !== "titular") continue;
 		if (ESTADOS_LOGRADO.has(f.estadoContacto)) break;
 		if (ESTADOS_SIN_CONTACTO.has(f.estadoContacto)) intentosSinContacto++;
 	}
@@ -299,6 +304,7 @@ export async function cargarSeguimientoPorCaso(
 			fechaProximoContacto: contactosCobros.fechaProximoContacto,
 			horaProximoContacto: contactosCobros.horaProximoContacto,
 			comentarios: contactosCobros.comentarios,
+			participanteTipo: contactosCobros.participanteTipo,
 		})
 		.from(contactosCobros)
 		.where(

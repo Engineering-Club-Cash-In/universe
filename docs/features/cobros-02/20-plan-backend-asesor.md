@@ -111,7 +111,7 @@ PRs mergeados en `COBROS-02`: #1901 (B4 y B5), #1902 (B8 y B9) y #1904 (B2 y B3)
 - `createContactoCobros` guarda la hora y el medio que el modal **ya mandaba y se descartaban** (stub de W1). Solo los guarda en gestiones que no son promesa y que tienen fecha.
 - La hora se valida en rango (`00:00` a `23:59`): una hora como `25:00` pasaba el formato, la base la rechazaba al insertar y **toda la gestión fallaba**. Ahora se descarta la hora y la gestión se guarda. Los checks de la migración (`medio_proximo_contacto` y las metas) también están espejados en el schema de Drizzle.
 - `resumirSeguimiento` devuelve `proximaLlamadaEn` con la hora (`conHoraGT`). Que sea «hoy» se sigue decidiendo por el día.
-- Dirección, participante y teléfono contactado (el resto de W1) siguen pendientes.
+- El tipo de participante (`participante_tipo`, migración 0077) ya se guarda: la racha de intentos sin contacto es «al titular» y no cuenta ni corta con codeudores o referencias; NULL = titular. Dirección, nombre del participante y teléfono contactado (el resto de W1) siguen pendientes.
 
 ### B9 · Movimiento del día en vivo
 

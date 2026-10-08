@@ -61,6 +61,35 @@ describe("resumirSeguimiento", () => {
 		expect(s.intentadoHoy).toBe(false);
 	});
 
+	it("la racha es al titular: codeudor y referencia ni suman ni cortan", () => {
+		const s = resumirSeguimiento(
+			[
+				fila({
+					fechaContacto: gt("2026-10-01"),
+					estadoContacto: "no_contesta",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-02"),
+					estadoContacto: "no_contesta",
+					participanteTipo: "codeudor",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-03"),
+					estadoContacto: "contactado",
+					participanteTipo: "referencia",
+				}),
+				fila({
+					fechaContacto: gt("2026-10-04"),
+					estadoContacto: "no_contesta",
+					participanteTipo: "titular",
+				}),
+			],
+			AHORA,
+		);
+		// Solo cuentan el 1 y el 4 (el contacto logrado a la referencia no corta).
+		expect(s.intentosSinContacto).toBe(2);
+	});
+
 	it("ignora los envíos automáticos (no son intentos del asesor)", () => {
 		const s = resumirSeguimiento(
 			[

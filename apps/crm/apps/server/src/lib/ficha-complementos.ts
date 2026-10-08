@@ -23,6 +23,7 @@ import type {
 } from "../routers/ficha-cobros";
 import type { ContextoCaso } from "../services/referencias-cobros-datos";
 import { quetzales } from "./bot-cobros/mensajes-credito";
+import { seguroPorAseguradora } from "./cobros-plantillas";
 import { eqDpi } from "./dpi-lookup";
 
 /* ── Utilidades puras ───────────────────────────────────────────────────────── */
@@ -436,6 +437,8 @@ export function armarSeguro(vehiculo: {
 	numeroPoliza?: string | null;
 	montoAsegurado?: string | null;
 	fechaVencimientoSeguro?: Date | string | null;
+	/** `opportunities.insurance_provider`; `null` si no se pudo resolver. */
+	insuranceProvider?: string | null;
 }): SeguroComplemento {
 	const tipo = limpio(vehiculo.tipoCobertura);
 	const clave = tipo?.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -443,9 +446,14 @@ export function armarSeguro(vehiculo: {
 		vehiculo.deducible != null && Number(vehiculo.deducible) > 0
 			? `Deducible ${quetzales(vehiculo.deducible)}`
 			: null;
+	const proveedor = limpio(vehiculo.insuranceProvider)
+		? seguroPorAseguradora(vehiculo.insuranceProvider)
+		: null;
 	return {
 		tipoSeguro: tipo ? (TIPOS_COBERTURA[clave ?? ""] ?? tipo) : null,
 		coberturas: deducible,
+		aseguradora: proveedor?.aseguradora ?? null,
+		telefonoEmergencia: proveedor?.cabinaSeguro ?? null,
 		poliza: limpio(vehiculo.numeroPoliza),
 		montoAsegurado:
 			vehiculo.montoAsegurado != null && Number(vehiculo.montoAsegurado) > 0
@@ -461,25 +469,37 @@ export async function cargarSeguro(
 	// El vehículo del contrato es el autoritativo (mismo criterio que
 	// resolverVehiculoCasoPagalo): la oportunidad puede apuntar a otro
 	// vehículo si su vínculo cambió. Solo sin contrato se cae a la oportunidad.
-	const [caso] = await db
-		.select({
-			contratoId: casosCobros.contratoId,
-			tipoCobertura: vehicles.tipoCobertura,
-			deducible: vehicles.deducible,
-			numeroPoliza: vehicles.numeroPoliza,
-			montoAsegurado: vehicles.montoAsegurado,
-			fechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
-		})
-		.from(casosCobros)
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(contratosFinanciamiento.id, casosCobros.contratoId),
-		)
-		.leftJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
-		.where(eq(casosCobros.id, ctx.casoCobroId))
-		.limit(1);
-	if (caso?.contratoId) {
-		return armarSeguro(caso);
+	// La aseguradora sale de la oportunidad del contexto del caso, que con
+	// contrato ya es la del cliente del contrato (resolverContextoCaso).
+	const [[delContrato], [delProveedor]] = await Promise.all([
+		db
+			.select({
+				contratoId: casosCobros.contratoId,
+				tipoCobertura: vehicles.tipoCobertura,
+				deducible: vehicles.deducible,
+				numeroPoliza: vehicles.numeroPoliza,
+				montoAsegurado: vehicles.montoAsegurado,
+				fechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
+			})
+			.from(casosCobros)
+			.leftJoin(
+				contratosFinanciamiento,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
+			.leftJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
+			.where(eq(casosCobros.id, ctx.casoCobroId))
+			.limit(1),
+		ctx.opportunityId
+			? db
+					.select({ insuranceProvider: opportunities.insuranceProvider })
+					.from(opportunities)
+					.where(eq(opportunities.id, ctx.opportunityId))
+					.limit(1)
+			: Promise.resolve([]),
+	]);
+	const insuranceProvider = delProveedor?.insuranceProvider ?? null;
+	if (delContrato?.contratoId) {
+		return armarSeguro({ ...delContrato, insuranceProvider });
 	}
 	if (!ctx.opportunityId) return null;
 
@@ -495,5 +515,5 @@ export async function cargarSeguro(
 		.innerJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 		.where(eq(opportunities.id, ctx.opportunityId))
 		.limit(1);
-	return fila ? armarSeguro(fila) : null;
+	return fila ? armarSeguro({ ...fila, insuranceProvider }) : null;
 }

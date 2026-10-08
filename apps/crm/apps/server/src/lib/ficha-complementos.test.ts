@@ -182,6 +182,8 @@ describe("armarSeguro", () => {
 			{
 				tipoSeguro: "Cobertura amplia",
 				coberturas: "Deducible Q2,500.00",
+				aseguradora: null,
+				telefonoEmergencia: null,
 				poliza: null,
 				montoAsegurado: null,
 				vencimiento: null,
@@ -207,9 +209,24 @@ describe("armarSeguro", () => {
 		expect(armarSeguro({ tipoCobertura: null, deducible: null })).toEqual({
 			tipoSeguro: null,
 			coberturas: null,
+			aseguradora: null,
+			telefonoEmergencia: null,
 			poliza: null,
 			montoAsegurado: null,
 			vencimiento: null,
+		});
+	});
+	test("aseguradora y cabina según el proveedor de la oportunidad", () => {
+		const base = { tipoCobertura: null, deducible: null };
+		expect(armarSeguro({ ...base, insuranceProvider: "gyt" })).toMatchObject({
+			aseguradora: "Seguro GYT",
+			telefonoEmergencia: "1778",
+		});
+		expect(
+			armarSeguro({ ...base, insuranceProvider: "universales" }),
+		).toMatchObject({
+			aseguradora: "Seguros Universales",
+			telefonoEmergencia: "2384-7400",
 		});
 	});
 	test("un tipo desconocido se muestra tal cual", () => {

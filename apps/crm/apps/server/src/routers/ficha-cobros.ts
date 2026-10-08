@@ -97,6 +97,9 @@ export interface HitoCredito {
 export interface SeguroComplemento {
 	tipoSeguro: string | null;
 	coberturas: string | null;
+	/** Aseguradora y cabina de la oportunidad autoritativa del caso. */
+	aseguradora: string | null;
+	telefonoEmergencia: string | null;
 	/** Póliza, monto y vencimiento del MISMO vehículo que tipo y deducible. */
 	poliza: string | null;
 	montoAsegurado: string | null;

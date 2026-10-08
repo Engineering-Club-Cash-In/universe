@@ -3046,9 +3046,17 @@ function RouteComponent() {
 									}
 								/>
 								<CardSeguroFicha
-									aseguradora={caso.aseguradora || "—"}
+									aseguradora={
+										comp?.seguro
+											? (comp.seguro.aseguradora ?? "—")
+											: caso.aseguradora || "—"
+									}
 									tipoSeguro={comp?.seguro?.tipoSeguro ?? "—"}
-									telefonoEmergencia={caso.cabinaSeguro || "—"}
+									telefonoEmergencia={
+										comp?.seguro
+											? (comp.seguro.telefonoEmergencia ?? "—")
+											: caso.cabinaSeguro || "—"
+									}
 									coberturas={comp?.seguro?.coberturas ?? "—"}
 									poliza={
 										comp?.seguro

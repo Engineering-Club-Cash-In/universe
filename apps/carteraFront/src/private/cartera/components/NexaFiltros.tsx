@@ -14,25 +14,57 @@ const FOCO = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring
 const CAMPO = `h-9 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-500 shadow-xs ${FOCO}`;
 const ITEM = "text-slate-900 focus:bg-blue-50 focus:text-slate-900";
 
-// Altura real de la barra de navegación fija de la app (dashBoard.tsx), medida en el navegador:
-// 64 px hasta xl (h-16) y 84 px desde xl (logo h-14 + py-3 + borde de 4). El index.html no usa
-// viewport-fit=cover, así que env(safe-area-inset-top) hoy vale 0; se suma igual por si cambia.
+// La barra de navegación fija de la app (dashBoard.tsx) no tiene alto fijo: 64 px hasta xl (h-16),
+// 84 px desde xl, y más cuando los menús de un ADMIN no caben en una fila (108 px a 1280). Por eso se
+// mide en vivo: el borde de abajo de la nav fija visible. Los valores fijos solo cubren el primer render.
+// El index.html no usa viewport-fit=cover, así que env(safe-area-inset-top) hoy vale 0; se suma igual.
 const NAV_MOVIL = 64;
 const NAV_XL = 84;
 const SEGURO = "env(safe-area-inset-top, 0px)";
 
-// true cuando el centinela (un punto sin alto) quedó por encima del borde de abajo de la barra fija.
+const medirNav = () => {
+  let abajo = 0;
+  document.querySelectorAll<HTMLElement>("nav.fixed").forEach((n) => {
+    const r = n.getBoundingClientRect();
+    if (r.height > 0 && r.top <= 0) abajo = Math.max(abajo, r.bottom);
+  });
+  return Math.round(abajo) || (window.innerWidth >= 1280 ? NAV_XL : NAV_MOVIL);
+};
+
+function useAltoNav() {
+  const [alto, setAlto] = useState(NAV_XL);
+  useEffect(() => {
+    const actualizar = () => setAlto(medirNav());
+    actualizar();
+    window.addEventListener("resize", actualizar);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(actualizar);
+    document.querySelectorAll("nav.fixed").forEach((n) => ro?.observe(n));
+    return () => { window.removeEventListener("resize", actualizar); ro?.disconnect(); };
+  }, []);
+  return alto;
+}
+
+// true cuando el centinela (un punto sin alto) quedó por encima del borde de abajo de la nav fija.
+// Se mira la posición en cada scroll (no un IntersectionObserver): un salto grande (Fin, Av Pág,
+// restaurar el scroll al recargar) pasa de "abajo" a "arriba" sin cruzar el borde y el observer no avisa.
 function usePasoDebajoDeLaBarra(ref: RefObject<HTMLElement | null>, alto: number) {
   const [paso, setPaso] = useState(false);
   useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      ([e]) => setPaso(!e.isIntersecting && e.boundingClientRect.top < alto + 1),
-      { rootMargin: `-${alto}px 0px 0px 0px`, threshold: 0 },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
+    let cuadro = 0;
+    const revisar = () => {
+      cuadro = 0;
+      const el = ref.current;
+      if (el) setPaso(el.getBoundingClientRect().top < alto + 1);
+    };
+    const pedir = () => { if (!cuadro) cuadro = requestAnimationFrame(revisar); };
+    revisar();
+    window.addEventListener("scroll", pedir, { passive: true });
+    window.addEventListener("resize", pedir);
+    return () => {
+      window.removeEventListener("scroll", pedir);
+      window.removeEventListener("resize", pedir);
+      if (cuadro) cancelAnimationFrame(cuadro);
+    };
   }, [ref, alto]);
   return paso;
 }
@@ -126,12 +158,13 @@ export function NexaFiltros(props: {
   const inicio = useRef<HTMLSpanElement>(null);
   const fin = useRef<HTMLSpanElement>(null);
   const seccion = useRef<HTMLElement>(null);
-  const pegada = usePasoDebajoDeLaBarra(inicio, NAV_XL);
-  const compacta = usePasoDebajoDeLaBarra(fin, NAV_MOVIL);
+  const altoNav = useAltoNav();
+  const pegada = usePasoDebajoDeLaBarra(inicio, altoNav);
+  const compacta = usePasoDebajoDeLaBarra(fin, altoNav);
   const verFiltros = () => {
     const el = seccion.current;
     if (!el) return;
-    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - NAV_MOVIL - 12, behavior: "smooth" });
+    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - altoNav - 12, behavior: "smooth" });
   };
   return (
     <>
@@ -140,7 +173,7 @@ export function NexaFiltros(props: {
     <section
       ref={seccion}
       aria-label="Filtros"
-      style={{ top: `calc(${NAV_XL}px + ${SEGURO})` }}
+      style={{ top: `calc(${altoNav}px + ${SEGURO})` }}
       className={`rounded-lg border bg-white xl:sticky xl:z-30 ${
         pegada ? "border-slate-300 shadow-md shadow-slate-900/10 xl:rounded-t-none" : "border-slate-200 shadow-sm"}`}
     >
@@ -284,7 +317,7 @@ export function NexaFiltros(props: {
       <div
         className="fixed inset-x-0 z-30 border-b border-slate-300 bg-white px-4 py-2 shadow-md shadow-slate-900/10 xl:hidden"
         // margin 0: el contenedor de la página (space-y) le pone margen arriba a cada hijo.
-        style={{ top: `calc(${NAV_MOVIL}px + ${SEGURO})`, marginTop: 0 }}
+        style={{ top: `calc(${altoNav}px + ${SEGURO})`, marginTop: 0 }}
       >
         <form
           role="search"

@@ -28,12 +28,25 @@ export const advisorRouter = new Elysia()
   })
   .get("/advisor", getAdvisors)
   .get("/creditos-crm", getCreditosCRM)
-  .post("/updateCreditAdvisor", updateCreditAdvisor, {
-    body: t.Object({
-      credito_id: t.Number(),
-      nombre_asesor: t.String(),
-    }),
-  })
+  // Reasignar el asesor de un crédito es de ADMIN. El dashboard Nexa acota al
+  // ASESOR por `creditos.asesor_id`: con sólo `authMiddleware` un ASESOR podía
+  // meterse créditos ajenos en su dashboard. Ningún front ni el CRM la llaman
+  // (sólo el script de migración `actualizar_asesores.py`, a mano); el token de
+  // servicio del CRM es ADMIN, así que su camino sigue pasando este gate.
+  .post(
+    "/updateCreditAdvisor",
+    async (ctx: any) => {
+      const rechazo = await rechazoSiNoEsAdminActivo(ctx.user, ctx.set);
+      if (rechazo) return rechazo;
+      return updateCreditAdvisor(ctx);
+    },
+    {
+      body: t.Object({
+        credito_id: t.Number(),
+        nombre_asesor: t.String(),
+      }),
+    }
+  )
 .get(
   "/creditos-por-asesor",
   async ({ query, set }) => {

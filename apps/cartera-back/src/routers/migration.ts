@@ -4,7 +4,7 @@ import { fillPagosInversionistas, fillPagosInversionistasV2, mapPagosPorCreditos
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
-import { authMiddleware } from "./midleware";
+import { authMiddleware, rechazoSiNoEsAdminActivo } from "./midleware";
 import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
@@ -579,7 +579,11 @@ export const sifcoRouter = new Elysia()
   }
 ).post(
   "/processFromExcelFull",
-  async ({ body, set }) => {
+  // Es de ADMIN: si el crédito ya existe borra sus cuotas e inversionistas y el
+  // upsert le reescribe `asesor_id`, que acota el dashboard Nexa del ASESOR.
+  async ({ body, set, user }) => {
+    const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+    if (rechazo) return rechazo;
     try {
       console.log(`\n📥 ========== /processFromExcelFull ==========`);
       console.log(`📋 Crédito: ${body.credito.creditoBase}`);

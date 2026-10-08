@@ -91,12 +91,14 @@ const { authRouter } = await import("./auth");
 const { advisorRouter } = await import("./advisor");
 const { default: defaultRouter } = await import("./default");
 const { creditosNuevosConAbonosRouter } = await import("./creditosNuevosConAbonos");
+const { sifcoRouter } = await import("./migration");
 
 const app = new Elysia()
   .use(authRouter)
   .use(advisorRouter)
   .use(defaultRouter)
-  .use(creditosNuevosConAbonosRouter);
+  .use(creditosNuevosConAbonosRouter)
+  .use(sifcoRouter);
 
 const PASSWORD = "secreta-123";
 const HASH = await bcrypt.hash(PASSWORD, 4);
@@ -161,6 +163,12 @@ const RUTAS_ADMIN: Array<[string, string, unknown?]> = [
   ["GET", "/auth/platform-users"],
   ["POST", "/advisor", NUEVO_ASESOR],
   ["POST", "/updateAdvisor?id=7", { password: "nueva" }],
+  // Reasignar el asesor de un crédito: el dashboard Nexa acota al ASESOR por
+  // `creditos.asesor_id`, así que un ASESOR no puede meterse créditos ajenos.
+  ["POST", "/updateCreditAdvisor", { credito_id: 10, nombre_asesor: "Asesor" }],
+  // Re-importar un crédito del Excel le borra cuotas e inversionistas y el
+  // upsert le reescribe `asesor_id` (mismo alcance del dashboard Nexa).
+  ["POST", "/processFromExcelFull", { credito: { creditoBase: "1", cliente: "X", filas: [] } }],
   // Diagnósticos que mandan correos (uno adjunta la liquidación de un
   // inversionista a cualquier dirección) o exponen créditos.
   ["GET", "/test-email?email=atacante@example.com"],
@@ -222,6 +230,41 @@ describe("Rutas administrativas — el ADMIN se revalida contra la base", () => 
     cola = [[]];
     const res = await pedir("GET", "/auth/platform-users", { token: tokenDe("ADMIN") });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /updateCreditAdvisor — rol vigente en la base", () => {
+  const CUERPO = { credito_id: 10, nombre_asesor: "Asesor" };
+  const llamar = (token: string) =>
+    pedir("POST", "/updateCreditAdvisor", { token, body: CUERPO });
+
+  it("ADMIN activo → 200 y escribe el asesor del crédito", async () => {
+    cola = [
+      [ADMIN_ACTIVO], // revalidación del ADMIN
+      [{ asesores: { asesor_id: 4, nombre: "Asesor" }, platform_users: {} }],
+      [{ credito_id: 10, asesor_id: 4 }], // update ... returning
+    ];
+    const res = await llamar(tokenDe("ADMIN"));
+    expect(res.status).toBe(200);
+    expect(escritos).toEqual([{ asesor_id: 4 }]);
+  });
+
+  it("ADMIN desactivado (token todavía vivo) → 401 y no escribe", async () => {
+    cola = [[{ ...ADMIN_ACTIVO, is_active: false }]];
+    expect((await llamar(tokenDe("ADMIN"))).status).toBe(401);
+    expect(escritos).toEqual([]);
+  });
+
+  it("token dice ADMIN pero en la base ya es ASESOR → 403 y no escribe", async () => {
+    cola = [[{ ...ADMIN_ACTIVO, role: "ASESOR" }]];
+    expect((await llamar(tokenDe("ADMIN"))).status).toBe(403);
+    expect(escritos).toEqual([]);
+  });
+
+  it("si la base falla al revalidar, NO pasa (falla cerrado)", async () => {
+    cola = []; // la consulta rechaza
+    expect((await llamar(tokenDe("ADMIN"))).status).toBe(500);
+    expect(escritos).toEqual([]);
   });
 });
 

@@ -1956,4 +1956,57 @@ describe("saldoVencidoDeCuotas — deuda vencida real por montos", () => {
   it("devuelve 0 sin cuotas vencidas", () => {
     expect(saldo([], "1000.00").toFixed(2)).toBe("0.00");
   });
+
+  const restantes = (over: Record<string, any>) => ({
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+    ...over,
+  });
+
+  it("cuota recortada: usa el restante del recibo, no cuota - aplicado", () => {
+    // Recibo real de 400 (cuota contractual 1000), abonó 100, quedan 300.
+    const rows = [
+      fila({
+        abono_capital: "100.00",
+        ...restantes({ capital_restante: "250.00", seguro_restante: "50.00" }),
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("300.00");
+  });
+
+  it("recibo recortado sin pagos aplicados: cuenta su restante", () => {
+    const rows = [fila({ ...restantes({ capital_restante: "400.00" }) })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("400.00");
+  });
+
+  it("restantes incompletos (null) se ignoran", () => {
+    const rows = [
+      fila({
+        abono_capital: "300.00",
+        ...restantes({ capital_restante: "10.00", gps_restante: null }),
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("700.00");
+  });
+
+  it("un restante mayor al cálculo contractual no sube el saldo", () => {
+    const rows = [
+      fila({ abono_capital: "300.00", ...restantes({ capital_restante: "900.00" }) }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("700.00");
+  });
+
+  it("restante de un pago anulado no cuenta", () => {
+    const rows = [
+      fila({
+        paymentFalse: true,
+        ...restantes({ capital_restante: "50.00" }),
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("1000.00");
+  });
 });

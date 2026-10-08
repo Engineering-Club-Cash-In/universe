@@ -87,6 +87,7 @@ import {
   STATUS_BUCKET_FUERA,
   STATUS_READER_FUERA,
 } from "./latefee";
+import { bucketActualSql } from "../lib/buckets-classification";
 
 // Fallback B0-B5 — usado si el catálogo dinámico `cartera.buckets` no
 // responde (DB caída, migración pendiente). Incluye `estados_incluidos` en B5
@@ -1682,25 +1683,45 @@ export async function getCreditosWithUserByMesAnio(
     // primero, después el atraso (cuota impaga vencida más antigua; es el
     // proxy SQL de `diasAtrasoMoraMaximo`, que se calcula en memoria), después
     // la deuda total. credito_id desempata para que la paginación sea estable.
-    const ordenSql =
-      orden === "bucket_motor"
-        ? [
-            sql`${bucketMotorSql} DESC NULLS LAST`,
-            sql`(SELECT MIN(cc.fecha_vencimiento) FROM ${cuotas_credito} cc
-                  WHERE cc.credito_id = ${creditos.credito_id}
-                    AND cc.pagado = false
-                    AND cc.numero_cuota > 0
-                    AND cc.fecha_vencimiento < ${hoyStr}::date) ASC NULLS LAST`,
-            sql`${creditos.deudatotal}::numeric DESC NULLS LAST`,
-            desc(creditos.credito_id),
-          ]
-        : [desc(creditos.fecha_creacion)];
+    // Ordena con la expresión CANÓNICA (bucketActualSql: piso por estado,
+    // EN_CONVENIO solo con su historial), la misma semántica que el bucket que
+    // devuelve la respuesta — no con la del filtro (`bucketMotorSql`), que no
+    // aplica `estados_piso` (review Codex PR #1901).
+    const ordenBucketSql = [
+      sql`${bucketActualSql("creditos", "moras_credito")} DESC NULLS LAST`,
+      sql`(SELECT MIN(cc.fecha_vencimiento) FROM ${cuotas_credito} cc
+            WHERE cc.credito_id = ${creditos.credito_id}
+              AND cc.pagado = false
+              AND cc.numero_cuota > 0
+              AND cc.fecha_vencimiento < ${hoyStr}::date) ASC NULLS LAST`,
+      sql`${creditos.deudatotal}::numeric DESC NULLS LAST`,
+      desc(creditos.credito_id),
+    ];
+    const ordenDefault = [desc(creditos.fecha_creacion)];
 
-    rows = await query
-      .where(whereCondition)
-      .limit(perPage)
-      .offset(offset)
-      .orderBy(...ordenSql);
+    try {
+      rows = await query
+        .where(whereCondition)
+        .limit(perPage)
+        .offset(offset)
+        .orderBy(...(orden === "bucket_motor" ? ordenBucketSql : ordenDefault));
+    } catch (errOrden) {
+      if (orden !== "bucket_motor") throw errOrden;
+      // El ORDER BY lee cartera.buckets/buckets_historial: sin las migraciones
+      // cobros-02 la query entera caería (500) y el listado quedaría sin
+      // servicio, cuando antes solo degradaba el bucket. Se reintenta con el
+      // orden de siempre; si el fallo era otro, el reintento lo vuelve a tirar
+      // y el catch de abajo lo reporta igual (review Codex PR #1901).
+      console.error(
+        "⚠️ Orden bucket_motor falló, reintento con el orden por defecto:",
+        errOrden
+      );
+      rows = await query
+        .where(whereCondition)
+        .limit(perPage)
+        .offset(offset)
+        .orderBy(...ordenDefault);
+    }
 
     console.log(`📄 Créditos encontrados: ${rows.length}`);
   } catch (err) {

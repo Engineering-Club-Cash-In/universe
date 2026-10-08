@@ -617,6 +617,33 @@ export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
 };
 
 /**
+ * Menor restante POSITIVO que informan los recibos vivos (validated/pending,
+ * no anulados) de una cuota, o null si ninguno lo informa. Exige los seis
+ * restantes informados (un NULL no es un cero, igual que esReciboSaldado).
+ */
+const restanteVivoDeRecibos = (grupo: FilaCuotaVencida[]): Big | null => {
+  let menor: Big | null = null;
+  for (const row of grupo) {
+    if (row.paymentFalse !== false) continue;
+    if (row.validationStatus !== "validated" && row.validationStatus !== "pending")
+      continue;
+    const restantes = [
+      row.capital_restante,
+      row.interes_restante,
+      row.iva_12_restante,
+      row.seguro_restante,
+      row.gps_restante,
+      row.membresias_restante,
+    ];
+    if (restantes.some((v) => v === null || v === undefined)) continue;
+    const suma = restantes.reduce<Big>((acc, v) => acc.plus(new Big(v ?? 0)), new Big(0));
+    if (!suma.gt(0.01)) continue;
+    if (menor === null || suma.lt(menor)) menor = suma;
+  }
+  return menor;
+};
+
+/**
  * Lo que de verdad falta pagar de las cuotas VENCIDAS de un crédito (sin la
  * mora): por cada cuota que `filtrarCuotasVencidasSinCobertura` deja como
  * atrasada, el valor contractual menos lo que sus pagos vivos ya aplicaron.
@@ -643,7 +670,17 @@ export const saldoVencidoDeCuotas = <T extends FilaCuotaVencida>(
       pagos: grupo,
       incluirPendientes: true,
     });
-    total = total.plus(saldoPendiente);
+    // Cuota RECORTADA (recibo menor a `credito.cuota`): `cuota - aplicado`
+    // sobrestima lo que falta; el recibo mismo informa su restante real. Solo
+    // BAJA el saldo (tope = el cálculo contractual) y solo con restantes > 0:
+    // un 0 en la fila de cierre de una cuota partida es residuo, no deuda
+    // saldada (review Codex PR #1901).
+    const restanteRecibo = restanteVivoDeRecibos(grupo);
+    total = total.plus(
+      restanteRecibo && restanteRecibo.lt(saldoPendiente)
+        ? restanteRecibo
+        : saldoPendiente
+    );
   }
   return total;
 };

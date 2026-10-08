@@ -282,7 +282,9 @@ integrationTest("página más allá del final: creditos vacío pero total y tota
       VALUES (${id}, 1, '2026-09-10 10:00:00', 40, ${e!.id}, 'validated')`;
     await sql`UPDATE cartera.nexa_payment_events SET pago_id = (SELECT pago_id FROM cartera.pagos_credito WHERE nexa_payment_event_id = ${e!.id}) WHERE id = ${e!.id}`;
   }
-  const totales = { creditos: 3, conToken: 2, pagosNexa: 3, montoNexa: "120.00", rechazosNexa: 0, ultimoPagoNexa: 3 };
+  const totales = { creditos: 3, conToken: 2, pagosNexa: 3, montoNexa: "120.00", rechazosNexa: 0, ultimoPagoNexa: 3, desglose: {
+    creditos: 3, conCuotaMes: 0, pagadaNexa: 0, pagadaManual: 0, parcialNexa: 0, parcialManual: 0, sinPago: 0,
+    vencidaSinPago: 0, porValidar: 0, conToken: 2, pagosNexa: 3, montoNexa: "120.00", rechazosNexa: 0 } };
 
   const ultima = await mod.getNexaDashboard(TODOS, { ...dash, q: "Paginado", page: 2, pageSize: 2 });
   expect(ultima.creditos).toHaveLength(1);
@@ -296,7 +298,8 @@ integrationTest("página más allá del final: creditos vacío pero total y tota
 
   const nada = await mod.getNexaDashboard(TODOS, { ...dash, q: "no-existe-nadie" });
   expect(nada).toMatchObject({ creditos: [], total: 0 });
-  expect(nada.totales).toEqual({ creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 });
+  expect(nada.totales).toMatchObject({ creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 });
+  expect(nada.totales.desglose).toMatchObject({ creditos: 0, conCuotaMes: 0, pagosNexa: 0, montoNexa: "0" });
 });
 
 integrationTest("franja por cuota: últimas 12 hasta fin de mes, color por medio, pagada con el criterio del cron", async () => {
@@ -558,4 +561,53 @@ integrationTest("por validar: la cuota cubierta por un pago 'pending' cuenta com
   const { mod } = await setup();
   const pagados = await mod.getNexaDashboard(TODOS, { ...dash, q: c.sifco, cuotaMes: "pagados", medio: "manual" });
   expect(pagados.creditos.map((x) => x.creditoId)).toEqual([c.id]);
+});
+
+integrationTest("desglose de la cabecera: suma el total con cuota del mes, cada conteo es su filtro y no colapsa al filtrar", async () => {
+  const prefijo = `Desglose-${Date.now()}`;
+  const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guatemala" }).format(new Date());
+  // N1, N2: pagadas por Nexa. M: pagada manual con pago pendiente (por validar). F: pagada solo por el flag (manual).
+  for (const l of ["N1", "N2"]) {
+    const c = await nuevoCredito(`${prefijo} ${l}`);
+    await c.abono(await c.cuota(1, "0 days"), { evento: await c.evento("applied", 100) });
+  }
+  const m = await nuevoCredito(`${prefijo} M`);
+  await m.abono(await m.cuota(1, "0 days"), { banco: 1, estado: "pending", fecha: `${hoy} 08:00:00` });
+  const f = await nuevoCredito(`${prefijo} F`);
+  await f.cuota(1, "0 days", true);
+  // PN: parcial Nexa. PM: parcial manual.
+  const pn = await nuevoCredito(`${prefijo} PN`);
+  await pn.abono(await pn.cuota(1, "1 month -1 day"), { evento: await pn.evento("applied", 40), monto: 40, pagado: false });
+  const pm = await nuevoCredito(`${prefijo} PM`);
+  await pm.abono(await pm.cuota(1, "-1 month"), { banco: 2, monto: 40, pagado: false });
+  // SV: sin pago y vencida. SP: sin pago por vencer. X: sin cuotas (no entra en el desglose).
+  const sv = await nuevoCredito(`${prefijo} SV`);
+  await sv.cuota(1, "-1 month");
+  const sp = await nuevoCredito(`${prefijo} SP`);
+  await sp.cuota(1, "1 month -1 day");
+  await nuevoCredito(`${prefijo} X`);
+  const { mod } = await setup();
+  type F = { cuotaMes?: "" | "pagados" | "parciales" | "sinpago"; medio?: "" | "nexa" | "manual" };
+  const ver = (o: F = {}) => mod.getNexaDashboard(TODOS, { ...dash, q: prefijo, cuotaMes: o.cuotaMes ?? "", medio: o.medio ?? "" });
+  const d = (await ver()).totales.desglose;
+  expect(d).toMatchObject({
+    creditos: 9, conCuotaMes: 8, pagadaNexa: 2, pagadaManual: 2, parcialNexa: 1, parcialManual: 1, sinPago: 2,
+    vencidaSinPago: 1, porValidar: 1,
+  });
+  expect(d.pagadaNexa + d.pagadaManual + d.parcialNexa + d.parcialManual + d.sinPago).toBe(d.conCuotaMes);
+  // Cada conteo es lo que devuelve su filtro.
+  const total = async (o: F) => (await ver(o)).total;
+  expect(await total({ cuotaMes: "pagados", medio: "nexa" })).toBe(d.pagadaNexa);
+  expect(await total({ cuotaMes: "pagados", medio: "manual" })).toBe(d.pagadaManual);
+  expect(await total({ cuotaMes: "parciales", medio: "nexa" })).toBe(d.parcialNexa);
+  expect(await total({ cuotaMes: "parciales", medio: "manual" })).toBe(d.parcialManual);
+  expect(await total({ cuotaMes: "parciales" })).toBe(d.parcialNexa + d.parcialManual);
+  expect(await total({ cuotaMes: "sinpago" })).toBe(d.sinPago);
+  // Con un filtro aplicado, la tabla se achica pero el desglose es el mismo.
+  const filtrado = await ver({ cuotaMes: "pagados", medio: "nexa" });
+  expect(filtrado.total).toBe(2);
+  expect(filtrado.totales.desglose).toEqual(d);
+  // La búsqueda sí lo acota.
+  const uno = await mod.getNexaDashboard(TODOS, { ...dash, q: `${prefijo} PM` });
+  expect(uno.totales.desglose).toMatchObject({ creditos: 1, conCuotaMes: 1, parcialManual: 1, pagadaNexa: 0 });
 });

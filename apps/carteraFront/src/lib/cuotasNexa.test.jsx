@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { avisoCuotaMesNexa, bancoTexto, conteoFranjaNexa, diasAlVencimiento, esParcialNexa, estadoCuotaTexto, fraccionPagadaNexa, hoyGuatemala, mesCortoNexa, rellenoCuotaNexa, resumenFranjaNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
+import { avisoCuotaMesNexa, mesLargoNexa, porcentajesNexa, segmentosCuotaMesNexa, bancoTexto, conteoFranjaNexa, diasAlVencimiento, esParcialNexa, estadoCuotaTexto, fraccionPagadaNexa, hoyGuatemala, mesCortoNexa, rellenoCuotaNexa, resumenFranjaNexa, pagoCuotaMesTexto, resumenRechazosNexa, tituloCuotaNexa, tonoCuotaNexa } from "./cuotasNexa";
 import { estadoNexa, motivoRechazoNexa } from "./estadoNexa";
 
 const cuota = (o) => ({ numero: 18, vencimiento: "2026-09-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36", ...o });
@@ -168,4 +168,20 @@ test("por validar: la cuota pagada con un pago pendiente sigue pagada y lo avisa
   expect(tituloCuotaNexa(c39)).toBe("Cuota 39 · vence 06/10/2026 · Pagada · pago completo · Manual · Banco Industrial · pago por validar");
   expect(estadoCuotaTexto(cuota({ porValidar: false }), hoy)).toBe("Pagada por Nexa");
   expect(conteoFranjaNexa([c39, cuota({ numero: 38 })])).toBe("2 pagadas (1 por Nexa) · 1 con pago por validar");
+});
+
+test("cabecera: cuatro grupos que suman el total, cada uno con su filtro, y porcentajes que suman 100", () => {
+  const d = { conCuotaMes: 20, pagadaNexa: 5, pagadaManual: 2, parcialNexa: 2, parcialManual: 1, sinPago: 10 };
+  const segs = segmentosCuotaMesNexa(d);
+  expect(segs.map((s) => [s.id, s.conteo, s.pct])).toEqual([["nexa", 5, 25], ["manual", 2, 10], ["parcial", 3, 15], ["sinpago", 10, 50]]);
+  expect(segs.reduce((a, s) => a + s.conteo, 0)).toBe(d.conCuotaMes);
+  expect(segs.map((s) => s.filtro)).toEqual([
+    { cuotaMes: "pagados", medio: "nexa" }, { cuotaMes: "pagados", medio: "manual" },
+    { cuotaMes: "parciales", medio: "" }, { cuotaMes: "sinpago", medio: "" },
+  ]);
+  // 1/3 cada uno: 34 + 33 + 33, nunca 99.
+  expect(porcentajesNexa([1, 1, 1, 0])).toEqual([34, 33, 33, 0]);
+  expect(porcentajesNexa([0, 0, 0, 0])).toEqual([0, 0, 0, 0]);
+  expect(porcentajesNexa([0, 1, 1, 3])).toEqual([0, 20, 20, 60]);
+  expect(mesLargoNexa("2026-10-08")).toBe("octubre");
 });

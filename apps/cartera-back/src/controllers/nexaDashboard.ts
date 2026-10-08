@@ -176,6 +176,15 @@ export type NexaCuotaFranja = {
   aplicado: string; monto: string; porValidar: boolean;
 };
 
+// La cuota del mes sobre los créditos del alcance, con búsqueda, asesor y fechas, pero sin el filtro
+// de cuota ni de medio. pagadaNexa + pagadaManual + parcialNexa + parcialManual + sinPago = conCuotaMes.
+export type NexaDesglose = {
+  creditos: number; conCuotaMes: number;
+  pagadaNexa: number; pagadaManual: number; parcialNexa: number; parcialManual: number; sinPago: number;
+  vencidaSinPago: number; porValidar: number;
+  conToken: number; pagosNexa: number; montoNexa: string; rechazosNexa: number;
+};
+
 export type NexaDashboardResponse = {
   totales: {
     creditos: number;
@@ -184,6 +193,8 @@ export type NexaDashboardResponse = {
     montoNexa: string;
     rechazosNexa: number;
     ultimoPagoNexa: number;
+    /** Cabecera: sin el filtro de cuota ni de medio (ver la CTE desglose). */
+    desglose: NexaDesglose;
   };
   creditos: NexaDashboardRow[];
   total: number;
@@ -201,6 +212,21 @@ export const mapNexaDashboardRows = (rows: Record<string, unknown>[], params: Ne
     montoNexa: String(firstRow.total_monto_nexa ?? "0"),
     rechazosNexa: Number(firstRow.total_rechazos_nexa ?? 0),
     ultimoPagoNexa: Number(firstRow.total_ultimo_pago_nexa ?? 0),
+    desglose: {
+      creditos: Number(firstRow.d_creditos ?? 0),
+      conCuotaMes: Number(firstRow.d_con_cuota_mes ?? 0),
+      pagadaNexa: Number(firstRow.d_pagada_nexa ?? 0),
+      pagadaManual: Number(firstRow.d_pagada_manual ?? 0),
+      parcialNexa: Number(firstRow.d_parcial_nexa ?? 0),
+      parcialManual: Number(firstRow.d_parcial_manual ?? 0),
+      sinPago: Number(firstRow.d_sin_pago ?? 0),
+      vencidaSinPago: Number(firstRow.d_vencida_sin_pago ?? 0),
+      porValidar: Number(firstRow.d_por_validar ?? 0),
+      conToken: Number(firstRow.d_con_token ?? 0),
+      pagosNexa: Number(firstRow.d_pagos_nexa ?? 0),
+      montoNexa: String(firstRow.d_monto_nexa ?? "0"),
+      rechazosNexa: Number(firstRow.d_rechazos_nexa ?? 0),
+    },
   };
 
   // Página vacía: la única fila trae los totales y credito_id NULL; no es un crédito.
@@ -363,7 +389,11 @@ WITH base AS (
   FROM recientes r LEFT JOIN medio_cuota m ON m.cuota_id = r.cuota_id
   JOIN base ON base.credito_id = r.credito_id
   GROUP BY r.credito_id
-), filas AS (
+), universo AS (
+  -- Todos los créditos del alcance (asesor), con la búsqueda y el rango de fechas, SIN los filtros de
+  -- cuota ni de medio. De acá salen las filas (filtradas abajo) y el desglose de la cabecera, que así
+  -- no colapsa al filtrar. grupo_cuota y medio_filtro son LA definición de los filtros: el WHERE de
+  -- filas y los conteos del desglose leen estas mismas columnas.
   SELECT base.credito_id, base.nexa_token, base.activo, base.numero_credito_sifco, base.estado, base.cliente,
          -- Como texto: fecha_pago no tiene zona horaria y el driver la correría.
          to_char(ultimo.fecha_pago, 'YYYY-MM-DD"T"HH24:MI:SS') AS ultimo_pago_fecha, ultimo.monto_boleta AS ultimo_pago_monto,
@@ -375,7 +405,16 @@ WITH base AS (
          to_char(cuota_mes.fecha_vencimiento, 'YYYY-MM-DD') AS cuota_mes_vencimiento, cuota_mes.estado AS cuota_mes_estado,
          CASE WHEN cuota_mes.estado = 'pagada' THEN 'completa' WHEN COALESCE(mm.aplicado, 0) > 0 THEN 'parcial' ELSE 'sin_pago' END AS cuota_mes_pago,
          COALESCE(mm.aplicado, 0)::numeric(18,2)::text AS cuota_mes_aplicado, base.monto_cuota::numeric(18,2)::text AS cuota_mes_monto,
-         mm.medio AS cuota_mes_medio, COALESCE(mm.por_validar, false) AS cuota_mes_por_validar
+         mm.medio AS cuota_mes_medio, COALESCE(mm.por_validar, false) AS cuota_mes_por_validar,
+         -- pagados = pagada (criterio del cron); parciales = no pagada con plata aplicada (la misma regla
+         -- de cuota_mes_pago); sinpago = no pagada y sin plata. Sin cuota del mes: NULL, ningún filtro.
+         CASE WHEN cuota_mes.estado = 'pagada' THEN 'pagados'
+              WHEN cuota_mes.estado IN ('vencida', 'por_vencer') AND COALESCE(mm.aplicado, 0) > 0 THEN 'parciales'
+              WHEN cuota_mes.estado IN ('vencida', 'por_vencer') THEN 'sinpago' END AS grupo_cuota,
+         -- Medio de la cuota del mes (pagada o con pago parcial), como la franja: una pagada sin detalle del
+         -- medio cuenta como manual (verde). Sin plata aplicada no tiene medio.
+         CASE WHEN cuota_mes.estado = 'pagada' THEN COALESCE(mm.medio, 'MANUAL')
+              WHEN COALESCE(mm.aplicado, 0) > 0 THEN mm.medio END AS medio_filtro
   FROM base
   LEFT JOIN ultimo ON ultimo.credito_id = base.credito_id
   LEFT JOIN nexa ON nexa.credito_id = base.credito_id
@@ -384,18 +423,30 @@ WITH base AS (
   LEFT JOIN medio_cuota mm ON mm.cuota_id = cuota_mes.cuota_id
   -- Con rango de fechas, solo los créditos con algún pago o algún rechazo Nexa en el período.
   WHERE (${!conRango(params)} OR ultimo.credito_id IS NOT NULL OR COALESCE(nexa.rechazos_nexa, 0) > 0)
-    -- Sin cuota del mes no entra en ningún filtro de cuota.
-    -- parcial = la misma regla de cuota_mes_pago: no pagada y con plata aplicada.
-    AND (${params.cuotaMes} = '' OR (${params.cuotaMes} = 'pagados' AND cuota_mes.estado = 'pagada')
-         OR (${params.cuotaMes} = 'parciales' AND cuota_mes.estado IN ('vencida', 'por_vencer') AND COALESCE(mm.aplicado, 0) > 0)
-         OR (${params.cuotaMes} = 'sinpago' AND cuota_mes.estado IN ('vencida', 'por_vencer') AND COALESCE(mm.aplicado, 0) = 0)
-         OR (${params.cuotaMes} = 'pendientes' AND cuota_mes.estado IN ('vencida', 'por_vencer')))
-    -- Medio de la cuota del mes (pagada o con pago parcial), como la franja: una pagada sin detalle del medio
-    -- cuenta como manual (verde). Sin plata aplicada no tiene medio.
-    AND (${params.medio} = '' OR (
-         CASE WHEN cuota_mes.estado = 'pagada' THEN COALESCE(mm.medio, 'MANUAL')
-              WHEN COALESCE(mm.aplicado, 0) > 0 THEN mm.medio END
-         = CASE WHEN ${params.medio} = 'nexa' THEN 'NEXA' ELSE 'MANUAL' END))
+), filas AS (
+  SELECT universo.* FROM universo
+  -- pendientes (compatibilidad) = parciales + sinpago.
+  WHERE (${params.cuotaMes} = '' OR universo.grupo_cuota = ${params.cuotaMes}
+         OR (${params.cuotaMes} = 'pendientes' AND universo.grupo_cuota IN ('parciales', 'sinpago')))
+    AND (${params.medio} = '' OR universo.medio_filtro = CASE WHEN ${params.medio} = 'nexa' THEN 'NEXA' ELSE 'MANUAL' END)
+), desglose AS (
+  -- Cabecera: la cuota del mes sobre el universo (sin filtro de cuota ni de medio). Cada conteo es
+  -- exactamente lo que devuelve el filtro correspondiente: pagada_nexa = pagados+nexa, parcial = parciales,
+  -- sin_pago = sinpago. Suman d_con_cuota_mes (un parcial siempre tiene medio: tiene plata aplicada).
+  SELECT COUNT(*) AS d_creditos,
+         COUNT(*) FILTER (WHERE grupo_cuota IS NOT NULL) AS d_con_cuota_mes,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'pagados' AND medio_filtro = 'NEXA') AS d_pagada_nexa,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'pagados' AND medio_filtro = 'MANUAL') AS d_pagada_manual,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'parciales' AND medio_filtro = 'NEXA') AS d_parcial_nexa,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'parciales' AND medio_filtro = 'MANUAL') AS d_parcial_manual,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'sinpago') AS d_sin_pago,
+         COUNT(*) FILTER (WHERE grupo_cuota = 'sinpago' AND cuota_mes_estado = 'vencida') AS d_vencida_sin_pago,
+         COUNT(*) FILTER (WHERE grupo_cuota IN ('pagados', 'parciales') AND cuota_mes_por_validar) AS d_por_validar,
+         COUNT(*) FILTER (WHERE nexa_token IS NOT NULL) AS d_con_token,
+         COALESCE(SUM(pagos_nexa), 0) AS d_pagos_nexa,
+         COALESCE(SUM(monto_nexa), 0) AS d_monto_nexa,
+         COALESCE(SUM(rechazos_nexa), 0) AS d_rechazos_nexa
+  FROM universo
 ), totales AS (
   -- Aparte de la página: si la página pedida queda más allá del final, los totales siguen.
   SELECT COUNT(*) AS total_creditos,
@@ -407,8 +458,9 @@ WITH base AS (
   FROM filas
 )
 -- Siempre al menos una fila (la de totales); sin página, sus columnas de crédito vienen NULL.
-SELECT pagina.*, totales.*
+SELECT pagina.*, totales.*, desglose.*
 FROM totales
+CROSS JOIN desglose
 LEFT JOIN (
   SELECT filas.* FROM filas
   -- En pendientes, primero las cuotas con pago parcial.

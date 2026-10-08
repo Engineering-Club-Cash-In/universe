@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, X } from "lucide-react";
+import { Search, SlidersHorizontal, X } from "lucide-react";
 import type { NexaDashboardParams } from "../services/nexaDashboard.services";
 
 // Barra de filtros del dashboard Nexa. Solo dibuja: el estado y las reglas (qué se aplica al
@@ -13,6 +13,29 @@ type Medio = NexaDashboardParams["medio"];
 const FOCO = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1";
 const CAMPO = `h-9 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-500 shadow-xs ${FOCO}`;
 const ITEM = "text-slate-900 focus:bg-blue-50 focus:text-slate-900";
+
+// Altura real de la barra de navegación fija de la app (dashBoard.tsx), medida en el navegador:
+// 64 px hasta xl (h-16) y 84 px desde xl (logo h-14 + py-3 + borde de 4). El index.html no usa
+// viewport-fit=cover, así que env(safe-area-inset-top) hoy vale 0; se suma igual por si cambia.
+const NAV_MOVIL = 64;
+const NAV_XL = 84;
+const SEGURO = "env(safe-area-inset-top, 0px)";
+
+// true cuando el centinela (un punto sin alto) quedó por encima del borde de abajo de la barra fija.
+function usePasoDebajoDeLaBarra(ref: RefObject<HTMLElement | null>, alto: number) {
+  const [paso, setPaso] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([e]) => setPaso(!e.isIntersecting && e.boundingClientRect.top < alto + 1),
+      { rootMargin: `-${alto}px 0px 0px 0px`, threshold: 0 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [ref, alto]);
+  return paso;
+}
 
 export interface ChipFiltro {
   id: string;
@@ -98,8 +121,29 @@ export function NexaFiltros(props: {
   onLimpiar: () => void;
 }) {
   const { chips } = props;
+  // Desde xl la barra entera queda pegada arriba (cabe en dos filas). Más angosto taparía media
+  // pantalla: la barra se queda en su lugar y, al pasarla, aparece una fija con solo el buscador.
+  const inicio = useRef<HTMLSpanElement>(null);
+  const fin = useRef<HTMLSpanElement>(null);
+  const seccion = useRef<HTMLElement>(null);
+  const pegada = usePasoDebajoDeLaBarra(inicio, NAV_XL);
+  const compacta = usePasoDebajoDeLaBarra(fin, NAV_MOVIL);
+  const verFiltros = () => {
+    const el = seccion.current;
+    if (!el) return;
+    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - NAV_MOVIL - 12, behavior: "smooth" });
+  };
   return (
-    <section aria-label="Filtros" className="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <>
+    {/* Centinelas absolutos: no ocupan lugar ni mueven la página. */}
+    <span ref={inicio} aria-hidden className="pointer-events-none absolute h-0 w-0" />
+    <section
+      ref={seccion}
+      aria-label="Filtros"
+      style={{ top: `calc(${NAV_XL}px + ${SEGURO})` }}
+      className={`rounded-lg border bg-white xl:sticky xl:z-30 ${
+        pegada ? "border-slate-300 shadow-md shadow-slate-900/10 xl:rounded-t-none" : "border-slate-200 shadow-sm"}`}
+    >
       <form
         className="space-y-3 p-4"
         onSubmit={(e) => { e.preventDefault(); props.onBuscar(); }}
@@ -234,5 +278,52 @@ export function NexaFiltros(props: {
         </div>
       )}
     </section>
+    <span ref={fin} aria-hidden className="pointer-events-none absolute h-0 w-0" />
+
+    {compacta && (
+      <div
+        className="fixed inset-x-0 z-30 border-b border-slate-300 bg-white px-4 py-2 shadow-md shadow-slate-900/10 xl:hidden"
+        // margin 0: el contenedor de la página (space-y) le pone margen arriba a cada hijo.
+        style={{ top: `calc(${NAV_MOVIL}px + ${SEGURO})`, marginTop: 0 }}
+      >
+        <form
+          role="search"
+          aria-label="Buscar créditos"
+          className="mx-auto flex max-w-3xl items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); props.onBuscar(); }}
+        >
+          <div className="relative min-w-0 flex-1">
+            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <input
+              type="search"
+              className={`${CAMPO} w-full pl-9`}
+              placeholder="Crédito o cliente"
+              value={props.busqueda}
+              onChange={(e) => props.onBusqueda(e.target.value)}
+              aria-label="Buscar por número de crédito o cliente"
+            />
+          </div>
+          <button
+            type="submit"
+            aria-label="Buscar"
+            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-700 text-white hover:bg-blue-800 ${FOCO}`}
+          >
+            <Search aria-hidden className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={verFiltros}
+            className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50 ${FOCO}`}
+          >
+            <SlidersHorizontal aria-hidden className="h-4 w-4 text-slate-600" />
+            Filtros
+            {chips.length > 0 && (
+              <span className="rounded-full bg-blue-700 px-1.5 text-xs font-semibold tabular-nums text-white">{chips.length}</span>
+            )}
+          </button>
+        </form>
+      </div>
+    )}
+    </>
   );
 }

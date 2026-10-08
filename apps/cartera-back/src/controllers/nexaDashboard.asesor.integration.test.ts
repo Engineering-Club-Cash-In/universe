@@ -78,6 +78,34 @@ integrationTest("ASESOR ve solo sus créditos aunque pida los de otro asesor", a
   expect((await mod.getNexaDashboard(alcance, { ...dash, q: "SIFCO-301" })).creditos).toEqual([]);
 });
 
+integrationTest("desglose de la cabecera: respeta el alcance del ASESOR aunque filtre por cuota o medio", async () => {
+  // Cuota del mes: 201 pagada por Nexa, 202 sin pago (asesor 1); 301 pagada por Nexa (asesor 2).
+  const cuota = async (cuotaId: number, creditoId: number, pagadaPorEvento: boolean) => {
+    await sql`INSERT INTO cartera.cuotas_credito VALUES (${cuotaId}, 1, ${creditoId},
+      date_trunc('month', now() AT TIME ZONE 'America/Guatemala')::date, false)`;
+    if (!pagadaPorEvento) return;
+    const [e] = await sql`SELECT id FROM cartera.nexa_payment_events WHERE credito_id = ${creditoId}`;
+    await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, fecha_pago, monto_boleta, monto_aplicado,
+      nexa_payment_event_id, validation_status, "paymentFalse", pagado)
+      VALUES (${creditoId}, ${cuotaId}, '2026-09-10 10:00:00', 1000, 1000, ${e!.id}, 'validated', false, true)`;
+  };
+  await cuota(9201, 201, true);
+  await cuota(9202, 202, false);
+  await cuota(9301, 301, true);
+  const alcance = mod.resolverAlcanceNexa("ASESOR", asesorSesion(1), mod.parseAsesorFiltro("2"));
+  for (const filtro of [{}, { cuotaMes: "pagados" as const, medio: "nexa" as const }, { cuotaMes: "sinpago" as const }]) {
+    const r = await mod.getNexaDashboard(alcance, { ...dash, ...filtro });
+    expect(r.totales.desglose).toMatchObject({
+      creditos: 2, conCuotaMes: 2, pagadaNexa: 1, pagadaManual: 0, parcialNexa: 0, parcialManual: 0, sinPago: 1, conToken: 2, montoNexa: "90.00",
+    });
+  }
+  const admin = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", null, null), dash);
+  expect(admin.totales.desglose).toMatchObject({ creditos: 4, conCuotaMes: 3, pagadaNexa: 2, sinPago: 1 });
+  // Las pruebas de abajo no miran cuotas: se borran para no cambiarles nada.
+  await sql`DELETE FROM cartera.pagos_credito WHERE cuota_id IN (9201, 9301)`;
+  await sql`DELETE FROM cartera.cuotas_credito WHERE cuota_id IN (9201, 9202, 9301)`;
+});
+
 integrationTest("ASESOR: la paginación cuenta solo sus créditos", async () => {
   const alcance = mod.resolverAlcanceNexa("ASESOR", asesorSesion(1), null);
   const p1 = await mod.getNexaDashboard(alcance, { ...dash, pageSize: 1, page: 1 });
@@ -93,7 +121,8 @@ integrationTest("ASESOR sin vínculo (o inactivo, o sin fila) ve vacío y totale
   for (const sesion of [asesorSesion(null), asesorSesion(1, false), null]) {
     const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ASESOR", sesion, mod.parseAsesorFiltro("1")), dash);
     expect(r.creditos).toEqual([]);
-    expect(r.totales).toEqual({ creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 });
+    expect(r.totales).toMatchObject({ creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 });
+    expect(r.totales.desglose).toMatchObject({ creditos: 0, conCuotaMes: 0, sinPago: 0, pagosNexa: 0, montoNexa: "0" });
   }
 });
 

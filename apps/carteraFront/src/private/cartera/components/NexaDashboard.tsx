@@ -8,6 +8,7 @@ import { NexaPagosModal } from "./NexaPagosModal";
 import { NexaFiltros, type ChipFiltro } from "./NexaFiltros";
 import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
 import { NexaCuotaMesCelda } from "./NexaCuotaMes";
+import { NexaCabecera } from "./NexaCabecera";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, AlertCircle, Loader2 } from "lucide-react";
@@ -108,24 +109,17 @@ export function NexaDashboard() {
     <div className="p-6 space-y-4 text-slate-900">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Pagos Nexa</h1>
-        <p className="text-sm text-slate-700">Créditos con token de Nexa y si su último pago entró por Nexa{describirRango(rango)}</p>
+        <p className="text-sm text-slate-700">Cómo vienen pagando la cuota los créditos con token de Nexa{describirRango(rango)}</p>
         {esAsesor && <p className="mt-1 text-sm font-medium text-blue-800">Mostrando tus créditos</p>}
       </div>
 
-      {data?.totales && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "Créditos con token", value: `${data.totales.conToken} de ${data.totales.creditos}` },
-            { label: "Último pago por Nexa", value: `${data.totales.ultimoPagoNexa} créditos`, nexa: true },
-            { label: "Pagos por Nexa", value: `${data.totales.pagosNexa} · ${fmtQ(data.totales.montoNexa)}` },
-            { label: "Rechazados por Nexa", value: data.totales.rechazosNexa, red: data.totales.rechazosNexa > 0 },
-          ].map((stat) => (
-            <div key={stat.label} className="p-4 rounded-lg bg-white border border-slate-200 shadow-sm">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{stat.label}</div>
-              <div className={`mt-1 text-xl font-semibold tabular-nums ${stat.red ? "text-red-600" : stat.nexa ? "text-purple-700" : "text-slate-900"}`}>{stat.value}</div>
-            </div>
-          ))}
-        </div>
+      {data?.totales?.desglose && (
+        <NexaCabecera
+          desglose={data.totales.desglose}
+          filtro={{ cuotaMes, medio }}
+          onFiltrar={(f) => { setCuotaMes(f.cuotaMes); setMedio(f.medio); setPage(1); }}
+          periodo={describirRango(rango)}
+        />
       )}
 
       <NexaFiltros

@@ -38,7 +38,18 @@ describe("mapNexaDashboardRows", () => {
   const totales = (n: string) => ({
     total_creditos: n, total_con_token: "1", total_pagos_nexa: "8", total_monto_nexa: "8423.92",
     total_rechazos_nexa: "1", total_ultimo_pago_nexa: "2",
+    d_creditos: "20", d_con_cuota_mes: "19", d_pagada_nexa: "5", d_pagada_manual: "2", d_parcial_nexa: "2",
+    d_parcial_manual: "1", d_sin_pago: "9", d_vencida_sin_pago: "4", d_por_validar: "1", d_con_token: "18",
+    d_pagos_nexa: "37", d_monto_nexa: "45210.50", d_rechazos_nexa: "3",
   });
+  const desglose = {
+    creditos: 20, conCuotaMes: 19, pagadaNexa: 5, pagadaManual: 2, parcialNexa: 2, parcialManual: 1, sinPago: 9,
+    vencidaSinPago: 4, porValidar: 1, conToken: 18, pagosNexa: 37, montoNexa: "45210.50", rechazosNexa: 3,
+  };
+  const desgloseCero = {
+    creditos: 0, conCuotaMes: 0, pagadaNexa: 0, pagadaManual: 0, parcialNexa: 0, parcialManual: 0, sinPago: 0,
+    vencidaSinPago: 0, porValidar: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0,
+  };
   const fila = {
     credito_id: "445", numero_credito_sifco: "01010214116430", cliente: "Cliente 445", estado: "EN_CONVENIO",
     nexa_token: "1111222233334444", activo: true, ultimo_pago_fecha: "2026-10-05T10:00:00",
@@ -71,7 +82,7 @@ describe("mapNexaDashboardRows", () => {
     const manual = mapNexaDashboardRows([{ ...fila, ultimo_pago_banco: "Banrural", rechazos_detalle: null, ultimas_cuotas: null,
       cuota_mes_numero: null, cuota_mes_vencimiento: null, cuota_mes_estado: null }], params).creditos[0];
     expect(manual).toMatchObject({ ultimoPagoBanco: "Banrural", rechazosDetalle: [], ultimasCuotas: [], cuotaMes: null });
-    expect(result.totales).toEqual({ creditos: 2, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2 });
+    expect(result.totales).toEqual({ creditos: 2, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2, desglose });
     expect({ total: result.total, page: result.page, pageSize: result.pageSize }).toEqual({ total: 2, page: 2, pageSize: 10 });
   });
 
@@ -86,12 +97,12 @@ describe("mapNexaDashboardRows", () => {
     const result = mapNexaDashboardRows([{ credito_id: null, ...totales("21") }], params);
     expect(result.creditos).toEqual([]);
     expect(result.total).toBe(21);
-    expect(result.totales).toEqual({ creditos: 21, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2 });
+    expect(result.totales).toEqual({ creditos: 21, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2, desglose });
   });
 
   test("sin filas: totales en cero", () => {
     expect(mapNexaDashboardRows([], params)).toEqual({
-      totales: { creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0 },
+      totales: { creditos: 0, conToken: 0, pagosNexa: 0, montoNexa: "0", rechazosNexa: 0, ultimoPagoNexa: 0, desglose: desgloseCero },
       creditos: [], total: 0, page: 2, pageSize: 10,
     });
   });

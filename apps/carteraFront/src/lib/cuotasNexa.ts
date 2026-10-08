@@ -210,3 +210,52 @@ export const resumenRechazosNexa = (detalle: RechazoNexa[], total: number) => {
   if (total > detalle.length) partes.push(`${total - detalle.length} más`);
   return partes.join(" · ");
 };
+
+// Cabecera del dashboard: la cuota del mes sobre los créditos, en cuatro grupos que suman el total y
+// que son exactamente los filtros de la tabla (cuotaMes + medio).
+export type DesgloseCuotaMesNexa = {
+  conCuotaMes: number;
+  pagadaNexa: number;
+  pagadaManual: number;
+  parcialNexa: number;
+  parcialManual: number;
+  sinPago: number;
+};
+export type SegmentoCuotaMesNexa = {
+  id: "nexa" | "manual" | "parcial" | "sinpago";
+  etiqueta: string;
+  conteo: number;
+  pct: number; // entero; los cuatro suman 100 si hay cuotas
+  filtro: { cuotaMes: FiltroCuotaMes; medio: "" | "nexa" | "manual" };
+};
+
+// Porcentajes enteros que suman 100 (resto mayor): la barra y los rótulos no se contradicen.
+export const porcentajesNexa = (conteos: number[]) => {
+  const total = conteos.reduce((a, b) => a + b, 0);
+  if (total <= 0) return conteos.map(() => 0);
+  const exactos = conteos.map((c) => (c * 100) / total);
+  const pisos = exactos.map(Math.floor);
+  let falta = 100 - pisos.reduce((a, b) => a + b, 0);
+  const orden = exactos.map((e, i) => [e - pisos[i], i] as const).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (const [, i] of orden) {
+    if (falta <= 0) break;
+    pisos[i] += 1;
+    falta -= 1;
+  }
+  return pisos;
+};
+
+export const segmentosCuotaMesNexa = (d: DesgloseCuotaMesNexa): SegmentoCuotaMesNexa[] => {
+  const base = [
+    { id: "nexa", etiqueta: "Pagada por Nexa", conteo: d.pagadaNexa, filtro: { cuotaMes: "pagados", medio: "nexa" } },
+    { id: "manual", etiqueta: "Pagada por otro medio", conteo: d.pagadaManual, filtro: { cuotaMes: "pagados", medio: "manual" } },
+    { id: "parcial", etiqueta: "Pago parcial", conteo: d.parcialNexa + d.parcialManual, filtro: { cuotaMes: "parciales", medio: "" } },
+    { id: "sinpago", etiqueta: "Sin pago", conteo: d.sinPago, filtro: { cuotaMes: "sinpago", medio: "" } },
+  ] as const;
+  const pcts = porcentajesNexa(base.map((s) => s.conteo));
+  return base.map((s, i) => ({ ...s, filtro: { ...s.filtro }, pct: pcts[i] }));
+};
+
+const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+// "2026-10-08" -> "octubre"
+export const mesLargoNexa = (v: string) => MESES_LARGOS[Number(v.slice(5, 7)) - 1] ?? "";

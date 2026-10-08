@@ -10,6 +10,27 @@ export interface NexaDashboardTotales {
   montoNexa: string;
   rechazosNexa: number;
   ultimoPagoNexa: number;
+  // Cabecera: mismo alcance, búsqueda, asesor y fechas, pero sin el filtro de cuota ni de medio.
+  desglose: NexaDesglose;
+}
+
+// La cuota del mes sobre los créditos de la cabecera. Cada conteo es lo que devuelve su filtro:
+// pagadaNexa = pagados+nexa, parcialNexa + parcialManual = parciales, sinPago = sinpago.
+// pagadaNexa + pagadaManual + parcialNexa + parcialManual + sinPago = conCuotaMes.
+export interface NexaDesglose {
+  creditos: number;
+  conCuotaMes: number;
+  pagadaNexa: number;
+  pagadaManual: number;
+  parcialNexa: number;
+  parcialManual: number;
+  sinPago: number;
+  vencidaSinPago: number;
+  porValidar: number;
+  conToken: number;
+  pagosNexa: number;
+  montoNexa: string;
+  rechazosNexa: number;
 }
 
 export interface NexaDashboardCredito {

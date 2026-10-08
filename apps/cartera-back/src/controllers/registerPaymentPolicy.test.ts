@@ -1983,6 +1983,55 @@ describe("saldoVencidoDeCuotas — deuda vencida real por montos", () => {
     expect(saldo(rows, "1000.00").toFixed(2)).toBe("400.00");
   });
 
+  it("no_required con plata real (crédito 890) descuenta lo ya pagado", () => {
+    const rows = [
+      fila({
+        validationStatus: "no_required",
+        abono_interes: "705.88",
+        monto_aplicado: "705.88",
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("294.12");
+  });
+
+  it("no_required con plata que cubre la cuota no deja saldo", () => {
+    const rows = [
+      fila({
+        validationStatus: "no_required",
+        abono_capital: "1000.00",
+        monto_aplicado: "1000.00",
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("0.00");
+  });
+
+  it("la semilla no_required vacía no descuenta nada", () => {
+    const rows = [fila({ validationStatus: "no_required", monto_aplicado: "0" })];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("1000.00");
+  });
+
+  it("la semilla no_required porta el restante del recibo recortado", () => {
+    const rows = [
+      fila({
+        validationStatus: "no_required",
+        ...restantes({ capital_restante: "400.00" }),
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("400.00");
+  });
+
+  it("no_required anulado con plata no descuenta", () => {
+    const rows = [
+      fila({
+        validationStatus: "no_required",
+        paymentFalse: true,
+        abono_interes: "705.88",
+        monto_aplicado: "705.88",
+      }),
+    ];
+    expect(saldo(rows, "1000.00").toFixed(2)).toBe("1000.00");
+  });
+
   it("restantes incompletos (null) se ignoran", () => {
     const rows = [
       fila({

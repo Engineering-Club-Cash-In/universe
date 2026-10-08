@@ -436,6 +436,10 @@ export type FilaCuotaVencida = PagoCoberturaCuota & {
   monto_aplicado?: BigInput | null;
   pago_mora?: BigInput | null;
   pago_otros?: string | number | null;
+  // Solo para distinguir un `no_required` con plata real de la semilla vacía
+  // de SIFCO (esDestinoSobrescribible); no son rubros de cuota.
+  abono_interes_ci?: BigInput | null;
+  abono_iva_ci?: BigInput | null;
   capital_restante?: BigInput | null;
   interes_restante?: BigInput | null;
   iva_12_restante?: BigInput | null;
@@ -616,17 +620,23 @@ export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
   return rows.filter((row) => enValidacion.has(row.numero_cuota));
 };
 
+// Estados de un recibo vivo para el saldo vencido. `no_required` entra porque
+// es un recibo legítimo (legacy / semilla de SIFCO): la semilla porta los
+// `*_restante` del recibo recortado y las filas con plata real ya aplicaron
+// dinero a la cuota (crédito 890, Q705.88).
+const esEstadoVivoParaSaldo = (status: string | null | undefined): boolean =>
+  status === "validated" || status === "pending" || status === "no_required";
+
 /**
- * Menor restante POSITIVO que informan los recibos vivos (validated/pending,
- * no anulados) de una cuota, o null si ninguno lo informa. Exige los seis
+ * Menor restante POSITIVO que informan los recibos vivos (validated/pending/
+ * no_required, no anulados) de una cuota, o null si ninguno lo informa. Exige los seis
  * restantes informados (un NULL no es un cero, igual que esReciboSaldado).
  */
 const restanteVivoDeRecibos = (grupo: FilaCuotaVencida[]): Big | null => {
   let menor: Big | null = null;
   for (const row of grupo) {
     if (row.paymentFalse !== false) continue;
-    if (row.validationStatus !== "validated" && row.validationStatus !== "pending")
-      continue;
+    if (!esEstadoVivoParaSaldo(row.validationStatus)) continue;
     const restantes = [
       row.capital_restante,
       row.interes_restante,
@@ -675,11 +685,28 @@ export const saldoVencidoDeCuotas = <T extends FilaCuotaVencida>(
     // BAJA el saldo (tope = el cálculo contractual) y solo con restantes > 0:
     // un 0 en la fila de cierre de una cuota partida es residuo, no deuda
     // saldada (review Codex PR #1901).
+    // Lo aplicado por filas `no_required` con plata real (calcularCoberturaCuota
+    // solo acepta validated/pending, y no se toca porque lo comparte el flujo de
+    // pagos): se descuenta aparte con el mismo criterio de `cuentaComoHermanoVivo`
+    // para no cobrar de nuevo lo que el cliente ya pagó. La semilla vacía no
+    // entra. Review Codex PR #1901.
+    const aplicadoNoRequired = sumarAplicadoACuota(
+      grupo.filter(
+        (row) =>
+          row.paymentFalse === false &&
+          row.validationStatus === "no_required" &&
+          cuentaComoHermanoVivo(row)
+      )
+    );
+    const saldoNetoNoRequired = saldoPendiente.minus(aplicadoNoRequired);
+    const saldoContractual = saldoNetoNoRequired.gt(0)
+      ? saldoNetoNoRequired
+      : new Big(0);
     const restanteRecibo = restanteVivoDeRecibos(grupo);
     total = total.plus(
-      restanteRecibo && restanteRecibo.lt(saldoPendiente)
+      restanteRecibo && restanteRecibo.lt(saldoContractual)
         ? restanteRecibo
-        : saldoPendiente
+        : saldoContractual
     );
   }
   return total;

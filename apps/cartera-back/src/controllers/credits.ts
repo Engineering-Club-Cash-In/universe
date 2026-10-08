@@ -1220,6 +1220,13 @@ export async function montoVencidoPorCredito(
       monto_aplicado: pagos_credito.monto_aplicado,
       pago_mora: pagos_credito.mora,
       pago_otros: pagos_credito.otros,
+      // Para separar el `no_required` con plata real de la semilla vacía
+      // (esDestinoSobrescribible / cuentaComoHermanoVivo).
+      mora: pagos_credito.mora,
+      otros: pagos_credito.otros,
+      pagoConvenio: pagos_credito.pagoConvenio,
+      abono_interes_ci: pagos_credito.abono_interes_ci,
+      abono_iva_ci: pagos_credito.abono_iva_ci,
       abono_capital: pagos_credito.abono_capital,
       abono_interes: pagos_credito.abono_interes,
       abono_iva_12: pagos_credito.abono_iva_12,

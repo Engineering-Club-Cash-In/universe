@@ -30,7 +30,6 @@ import { agruparCasosVigentesPorSifco } from "./caso-vigente";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import {
 	cargarSeguimientoPorCaso,
-	DIAS_VENTANA_SEGUIMIENTO,
 	type SeguimientoCaso,
 } from "./seguimiento-cobros";
 
@@ -146,16 +145,15 @@ export async function contarPagosPorConfirmar(
 
 /**
  * B7: casos del asesor que piden contactar referencias. El universo son los
- * casos activos que el asesor gestionó en la ventana de seguimiento: los
- * intentos sin contacto son suyos, así que un caso que nunca tocó no puede
- * tener tres.
+ * casos activos que el asesor gestionó alguna vez, sin tope de días (la regla
+ * B7 no lo tiene): los intentos sin contacto son suyos, así que un caso que
+ * nunca tocó no puede tener tres.
  */
 export async function contarReferenciasPorContactar(
 	userId: string,
 	emailsAsesores: string[],
 	ahora: Date = new Date(),
 ): Promise<number> {
-	const desde = new Date(ahora.getTime() - DIAS_VENTANA_SEGUIMIENTO * MS_DIA);
 	const casos = await db
 		.selectDistinct({
 			casoId: casosCobros.id,
@@ -166,7 +164,6 @@ export async function contarReferenciasPorContactar(
 		.where(
 			and(
 				eq(contactosCobros.realizadoPor, userId),
-				gte(contactosCobros.fechaContacto, desde),
 				eq(casosCobros.activo, true),
 				isNotNull(casosCobros.numeroCreditoSifco),
 			),

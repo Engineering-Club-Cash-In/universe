@@ -17,17 +17,20 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { creditApplications } from "../db/schema/client-forms";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import {
 	visitasCobros,
 	visitasCobrosEvidencias,
 } from "../db/schema/visitas-cobros";
+import {
+	solicitudLaboralTitular,
+	trabajoEfectivo,
+} from "../lib/direcciones-caso";
 import { cobrosProcedure } from "../lib/orpc";
 import { getFileUrl } from "../lib/storage";
 import {
@@ -210,7 +213,9 @@ export const visitasCobrosRouter = {
 	/**
 	 * El trabajo del cliente, como lo declaró en la Solicitud de Crédito del
 	 * titular (lo único en el monorepo que guarda la dirección del trabajo).
-	 * Solo lectura: es lo que firmó el cliente, no se edita desde cobros.
+	 * La solicitud no se edita (es lo que firmó el cliente): la empresa y la
+	 * dirección corregidas desde la ficha (F8, `guardarDireccionesCaso`) van en
+	 * `casos_cobros` y ganan sobre ella.
 	 */
 	getDatosLaboralesCaso: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
@@ -220,40 +225,22 @@ export const visitasCobrosRouter = {
 				context.userId,
 				context.userRole,
 			);
-			const ctx = await resolverContextoCaso(input.casoCobroId);
-			if (!ctx.opportunityId) return null;
-			const [solicitud] = await db
-				.select({
-					empresa: creditApplications.empresa,
-					puesto: creditApplications.puesto,
-					direccion: creditApplications.direccionTrabajo,
-					telefono: creditApplications.telTrabajo,
-					horario: creditApplications.horarios,
-				})
-				.from(creditApplications)
-				.where(
-					and(
-						eq(creditApplications.opportunityId, ctx.opportunityId),
-						// La del titular. NULL = solicitud anterior a la 0015, cuando
-						// había una sola por oportunidad (mismo criterio que CB-036).
-						or(
-							eq(creditApplications.personType, "lead"),
-							isNull(creditApplications.personType),
-						),
-					),
-				)
-				.orderBy(desc(creditApplications.updatedAt))
-				.limit(1);
-			if (!solicitud) return null;
-			const limpio = (v: string | null) => v?.trim() || null;
-			const datos = {
-				empresa: limpio(solicitud.empresa),
-				puesto: limpio(solicitud.puesto),
-				direccion: limpio(solicitud.direccion),
-				telefono: limpio(solicitud.telefono),
-				horario: limpio(solicitud.horario),
-			};
-			return Object.values(datos).some(Boolean) ? datos : null;
+			const [ctx, [corregido]] = await Promise.all([
+				resolverContextoCaso(input.casoCobroId),
+				// F8 (#1864): lo corregido desde la ficha gana sobre la solicitud.
+				db
+					.select({
+						empresa: casosCobros.empresaTrabajoCobros,
+						direccion: casosCobros.direccionTrabajoCobros,
+					})
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.limit(1),
+			]);
+			return trabajoEfectivo(
+				await solicitudLaboralTitular(ctx.opportunityId),
+				corregido ?? { empresa: null, direccion: null },
+			);
 		}),
 
 	programarVisitaCobro: cobrosProcedure

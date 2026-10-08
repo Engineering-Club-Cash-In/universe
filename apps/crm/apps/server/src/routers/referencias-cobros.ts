@@ -31,6 +31,10 @@ import {
 	hallazgosLocalizacionCobros,
 	referenciasTelefonosCobros,
 } from "../db/schema/referencias-cobros";
+import {
+	origenCambioSchema,
+	registrarCambiosCaso,
+} from "../lib/cambios-datos-cliente";
 import { cobrosProcedure } from "../lib/orpc";
 import {
 	agregarATelefonosDelCaso,
@@ -610,6 +614,8 @@ export const referenciasCobrosRouter = {
 					.min(1, "El teléfono principal no puede quedar vacío")
 					.max(10),
 				telefonosAlternativos: z.array(telefonoSchema).max(20),
+				/** F3: desde dónde se editó (bitácora de cambios). */
+				origen: origenCambioSchema,
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -624,24 +630,47 @@ export const referenciasCobrosRouter = {
 				(t) => !principales.includes(t),
 			);
 			// Mismo formato que edita la ficha: separados por coma.
-			const [caso] = await db
-				.update(casosCobros)
-				.set({
-					telefonoPrincipal: principales.join(", "),
-					telefonoAlternativo:
-						alternativos.length > 0 ? alternativos.join(", ") : null,
-					updatedAt: new Date(),
-				})
-				.where(eq(casosCobros.id, input.casoCobroId))
-				.returning({
-					telefonoPrincipal: casosCobros.telefonoPrincipal,
-					telefonoAlternativo: casosCobros.telefonoAlternativo,
+			const despues = {
+				telefono_principal: principales.join(", "),
+				telefono_alternativo:
+					alternativos.length > 0 ? alternativos.join(", ") : null,
+			};
+			return db.transaction(async (tx) => {
+				// FOR UPDATE: dos autoguardados seguidos registran cada uno su
+				// propio "antes", no el mismo.
+				const [antes] = await tx
+					.select({
+						telefono_principal: casosCobros.telefonoPrincipal,
+						telefono_alternativo: casosCobros.telefonoAlternativo,
+					})
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.for("update");
+				if (!antes) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Caso de cobro no encontrado.",
+					});
+				}
+				const [caso] = await tx
+					.update(casosCobros)
+					.set({
+						telefonoPrincipal: despues.telefono_principal,
+						telefonoAlternativo: despues.telefono_alternativo,
+						updatedAt: new Date(),
+					})
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.returning({
+						telefonoPrincipal: casosCobros.telefonoPrincipal,
+						telefonoAlternativo: casosCobros.telefonoAlternativo,
+					});
+				await registrarCambiosCaso(tx, {
+					casoCobroId: input.casoCobroId,
+					antes,
+					despues,
+					origen: input.origen,
+					userId: context.userId,
 				});
-			if (!caso) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Caso de cobro no encontrado.",
-				});
-			}
-			return caso;
+				return caso;
+			});
 		}),
 };

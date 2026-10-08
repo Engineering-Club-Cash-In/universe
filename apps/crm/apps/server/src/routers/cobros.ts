@@ -79,7 +79,12 @@ import {
 } from "../lib/audit-contactos";
 import { hashPersona } from "../lib/bot-cobros/historial";
 import { buildCasoFromCartera } from "../lib/build-caso-from-cartera";
+import {
+	origenCambioSchema,
+	registrarCambiosCaso,
+} from "../lib/cambios-datos-cliente";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
+import { direccionResidenciaCasoSql } from "../lib/direcciones-caso";
 import {
 	deriveHasCapitalData,
 	recalculateCobrosPercentagesWithFallback,
@@ -2254,7 +2259,7 @@ export const cobrosRouter = {
 					telefonoPrincipal: casosCobros.telefonoPrincipal,
 					telefonoAlternativo: casosCobros.telefonoAlternativo,
 					emailContacto: casosCobros.emailContacto,
-					direccionContacto: casosCobros.direccionContacto,
+					direccionContacto: direccionResidenciaCasoSql,
 					proximoContacto: casosCobros.proximoContacto,
 					metodoContactoProximo: casosCobros.metodoContactoProximo,
 					// Datos del contrato
@@ -5292,7 +5297,7 @@ export const cobrosRouter = {
 						telefonoPrincipal: casosCobros.telefonoPrincipal,
 						telefonoAlternativo: casosCobros.telefonoAlternativo,
 						emailContacto: casosCobros.emailContacto,
-						direccionContacto: casosCobros.direccionContacto,
+						direccionContacto: direccionResidenciaCasoSql,
 						proximoContacto: casosCobros.proximoContacto,
 						metodoContactoProximo: casosCobros.metodoContactoProximo,
 						// Datos del contrato
@@ -5338,7 +5343,7 @@ export const cobrosRouter = {
 					telefonoPrincipal: sql<string>`COALESCE(${casosCobros.telefonoPrincipal}, '')`,
 					telefonoAlternativo: sql<string>`COALESCE(${casosCobros.telefonoAlternativo}, '')`,
 					emailContacto: sql<string>`COALESCE(${casosCobros.emailContacto}, '')`,
-					direccionContacto: sql<string>`COALESCE(${casosCobros.direccionContacto}, '')`,
+					direccionContacto: sql<string>`COALESCE(${direccionResidenciaCasoSql}, '')`,
 					proximoContacto: casosCobros.proximoContacto,
 					metodoContactoProximo: casosCobros.metodoContactoProximo,
 					// Datos del contrato
@@ -5884,7 +5889,9 @@ export const cobrosRouter = {
 						casoCobro?.telefonoPrincipal || leadInfo?.telefono || null,
 					telefonoAlternativo: casoCobro?.telefonoAlternativo || null,
 					emailContacto: casoCobro?.emailContacto || leadInfo?.email || null,
-					direccionContacto: direccion || null,
+					// F8 (#1864): la corregida desde la ficha manda sobre la del lead.
+					direccionContacto:
+						casoCobro?.direccionResidenciaCobros?.trim() || direccion || null,
 					proximoContacto: casoCobro?.proximoContacto || null,
 					metodoContactoProximo: null,
 					etiquetas: casoCobro?.etiquetas || [],
@@ -7437,27 +7444,58 @@ export const cobrosRouter = {
 				telefonoPrincipal: z.string().min(1),
 				telefonoAlternativo: z.string().optional(),
 				emailContacto: z.string().email().optional().or(z.literal("")),
+				/** F3 (#1864): desde dónde se editó (bitácora de cambios). */
+				origen: origenCambioSchema,
 			}),
 		)
-		.handler(async ({ input }) => {
-			const [updated] = await db
-				.update(casosCobros)
-				.set({
-					telefonoPrincipal: input.telefonoPrincipal,
-					telefonoAlternativo: input.telefonoAlternativo || null,
-					emailContacto: input.emailContacto || "",
-					updatedAt: new Date(),
-				})
-				.where(eq(casosCobros.id, input.casoCobroId))
-				.returning();
+		.handler(async ({ input, context }) => {
+			// `cobrosProcedure` solo valida el rol: sin esto, cualquier usuario de
+			// cobros podía cambiar el contacto de un caso que no es suyo.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const despues = {
+				telefono_principal: input.telefonoPrincipal,
+				telefono_alternativo: input.telefonoAlternativo || null,
+				correo: input.emailContacto || "",
+			};
+			return db.transaction(async (tx) => {
+				const [antes] = await tx
+					.select({
+						telefono_principal: casosCobros.telefonoPrincipal,
+						telefono_alternativo: casosCobros.telefonoAlternativo,
+						correo: casosCobros.emailContacto,
+					})
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.for("update");
+				if (!antes) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Caso de cobros no encontrado",
+					});
+				}
 
-			if (!updated) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Caso de cobros no encontrado",
+				const [updated] = await tx
+					.update(casosCobros)
+					.set({
+						telefonoPrincipal: despues.telefono_principal,
+						telefonoAlternativo: despues.telefono_alternativo,
+						emailContacto: despues.correo,
+						updatedAt: new Date(),
+					})
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.returning();
+				await registrarCambiosCaso(tx, {
+					casoCobroId: input.casoCobroId,
+					antes,
+					despues,
+					origen: input.origen,
+					userId: context.userId,
 				});
-			}
-
-			return updated;
+				return updated;
+			});
 		}),
 
 	// ========================================================================

@@ -58,13 +58,13 @@ const ids = (r: { creditos: { creditoId: number }[] }) => r.creditos.map((c) => 
 const asesorSesion = (asesor_id: number | null, is_active = true) => ({ role: "ASESOR", is_active, asesor_id });
 
 integrationTest("ADMIN sin filtro ve todos los créditos y los totales de todos", async () => {
-  const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", null, null), dash);
+  const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", { role: "ADMIN", is_active: true, asesor_id: null }, null), dash);
   expect(ids(r)).toEqual([201, 202, 301, 401]);
   expect(r.totales).toMatchObject({ creditos: 4, pagosNexa: 4, montoNexa: "250.00" });
 });
 
 integrationTest("ADMIN con filtro de asesor ve solo los de ese asesor, y los totales también", async () => {
-  const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", null, mod.parseAsesorFiltro("2")), dash);
+  const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", { role: "ADMIN", is_active: true, asesor_id: null }, mod.parseAsesorFiltro("2")), dash);
   expect(ids(r)).toEqual(DEL_2);
   expect(r.totales).toMatchObject({ creditos: 1, conToken: 1, pagosNexa: 1, montoNexa: "70.00", ultimoPagoNexa: 1 });
 });
@@ -99,7 +99,7 @@ integrationTest("desglose de la cabecera: respeta el alcance del ASESOR aunque f
       creditos: 2, conCuotaMes: 2, pagadaNexa: 1, pagadaManual: 0, parcialNexa: 0, parcialManual: 0, sinPago: 1, conToken: 2, montoNexa: "90.00",
     });
   }
-  const admin = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", null, null), dash);
+  const admin = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", { role: "ADMIN", is_active: true, asesor_id: null }, null), dash);
   expect(admin.totales.desglose).toMatchObject({ creditos: 4, conCuotaMes: 3, pagadaNexa: 2, sinPago: 1 });
   // Las pruebas de abajo no miran cuotas: se borran para no cambiarles nada.
   await sql`DELETE FROM cartera.pagos_credito WHERE cuota_id IN (9201, 9301)`;
@@ -137,13 +137,13 @@ integrationTest("detalle: un ASESOR que pide un crédito ajeno recibe null (404)
 });
 
 integrationTest("detalle: ADMIN ve el detalle de cualquier crédito", async () => {
-  const r = await mod.getNexaCreditPayments(mod.resolverAlcanceNexa("ADMIN", null, null), 301);
+  const r = await mod.getNexaCreditPayments(mod.resolverAlcanceNexa("ADMIN", { role: "ADMIN", is_active: true, asesor_id: null }, null), 301);
   expect(r?.pagos.map((p) => p.montoBoleta)).toEqual(["70.00"]);
 });
 
 integrationTest("un filtro de asesor inválido se ignora: el ADMIN ve todos", async () => {
   for (const valor of ["1 OR 1=1", "abc", "-1", "0", "1.5", "99999999999", ["1", "2"]]) {
-    const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", null, mod.parseAsesorFiltro(valor)), dash);
+    const r = await mod.getNexaDashboard(mod.resolverAlcanceNexa("ADMIN", { role: "ADMIN", is_active: true, asesor_id: null }, mod.parseAsesorFiltro(valor)), dash);
     expect(ids(r)).toEqual([201, 202, 301, 401]);
   }
 });

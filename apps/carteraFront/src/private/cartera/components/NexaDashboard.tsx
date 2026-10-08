@@ -7,6 +7,7 @@ import { useAuth } from "@/Provider/authProvider";
 import { NexaPagosModal } from "./NexaPagosModal";
 import { NexaFiltros, type ChipFiltro } from "./NexaFiltros";
 import { LeyendaCuotasNexa, NexaFranjaCanal } from "./NexaFranjaCanal";
+import { NexaCuotaMesCelda } from "./NexaCuotaMes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, AlertCircle, Loader2 } from "lucide-react";
@@ -14,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { fmtQ } from "@/lib/moneda";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { describirRango, fmtFechaNexa, type NexaDashboardCredito, type NexaDashboardParams } from "../services/nexaDashboard.services";
-import { ESTADO_CUOTA_MES, bancoTexto, fmtDiaNexa, pagoCuotaMesTexto, resumenRechazosNexa } from "@/lib/cuotasNexa";
+import { bancoTexto, resumenRechazosNexa } from "@/lib/cuotasNexa";
 import { CLASES_TONO_NEXA, estadoNexa, motivoRechazoNexa } from "@/lib/estadoNexa";
 
 function RechazosFila({ c }: { c: NexaDashboardCredito }) {
@@ -181,13 +182,9 @@ export function NexaDashboard() {
                     <NexaFranjaCanal mini cuotas={c.ultimasCuotas} cuotaMes={c.cuotaMes?.numero} />
                   </TableCell>
                   <TableCell>
-                    {c.cuotaMes ? (
-                      <>
-                        <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${ESTADO_CUOTA_MES[c.cuotaMes.estado].clases}`}>{ESTADO_CUOTA_MES[c.cuotaMes.estado].etiqueta}</span>
-                        <div className={`mt-1 whitespace-nowrap text-[11px] font-medium ${c.cuotaMes.pago === "parcial" ? "text-amber-700" : c.cuotaMes.pago === "completa" ? (c.cuotaMes.medio === "NEXA" ? "text-purple-700" : "text-green-700") : "text-slate-600"}`}>{pagoCuotaMesTexto(c.cuotaMes)}</div>
-                        <div className="mt-1 font-mono text-[11px] text-slate-600 tabular-nums">Cuota {c.cuotaMes.numero} · vence {fmtDiaNexa(c.cuotaMes.vencimiento)}</div>
-                      </>
-                    ) : <span className="text-xs text-slate-400">Sin cuotas</span>}
+                    {c.cuotaMes
+                      ? <NexaCuotaMesCelda cuotaMes={c.cuotaMes} ultimasCuotas={c.ultimasCuotas} />
+                      : <span className="text-xs text-slate-500">Sin cuotas</span>}
                   </TableCell>
                   <TableCell>
                     {c.ultimoPagoFecha ? (

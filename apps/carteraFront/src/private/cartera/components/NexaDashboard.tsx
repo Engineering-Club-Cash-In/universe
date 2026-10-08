@@ -154,11 +154,11 @@ export function NexaDashboard() {
         <div className="p-8 text-center text-gray-500">No hay créditos con Nexa para este filtro</div>
       ) : (
         <>
-          <LeyendaCuotasNexa />
+          <div className="py-1"><LeyendaCuotasNexa /></div>
           <Table className="rounded-lg border border-slate-200 bg-white">
             <TableHeader><TableRow className="bg-slate-50">
               {["Crédito", "Estado", "Token", "Últimas cuotas", "Cuota del mes", "Último pago", "Cómo pagó", "Pagos Nexa", ""].map((h) => (
-                <TableHead key={h} className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</TableHead>
+                <TableHead key={h} className="text-xs font-semibold uppercase tracking-wider text-slate-600">{h}</TableHead>
               ))}
             </TableRow></TableHeader>
             <TableBody>

@@ -135,7 +135,7 @@ export function NexaFranjaCanal({ cuotas, cuotaMes, mini = false, hoy = hoyGuate
 
 function Muestra({ relleno, futura = false }: { relleno?: string; futura?: boolean }) {
   return (
-    <span className={`relative inline-block h-3.5 w-2 overflow-hidden rounded-[2px] border border-slate-400 ${futura ? "border-dashed bg-white" : "bg-slate-100"}`}>
+    <span className={`relative inline-block h-5 w-3 overflow-hidden rounded-[3px] border border-slate-400 ${futura ? "border-dashed bg-white" : "bg-slate-100"}`}>
       {relleno && <span className={`absolute inset-0 ${relleno}`} />}
     </span>
   );
@@ -145,24 +145,24 @@ function Muestra({ relleno, futura = false }: { relleno?: string; futura?: boole
 // la cuota del mes va subrayada; en el modal lleva su rótulo y no hace falta explicarla.
 export function LeyendaCuotasNexa({ conCuotaMes = true }: { conCuotaMes?: boolean }) {
   return (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-700">
-      <span className="flex items-center gap-1.5"><Muestra relleno={CLASES_TONO_CUOTA.nexa} />Nexa</span>
-      <span className="flex items-center gap-1.5"><Muestra relleno={CLASES_TONO_CUOTA.otro} />Otro medio</span>
-      <span className="flex items-center gap-1.5">
-        <span className="relative inline-block h-3.5 w-2 overflow-hidden rounded-[2px] border border-slate-400 bg-slate-100">
+    <span className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-800">
+      <span className="flex items-center gap-2"><Muestra relleno={CLASES_TONO_CUOTA.nexa} />Nexa</span>
+      <span className="flex items-center gap-2"><Muestra relleno={CLASES_TONO_CUOTA.otro} />Otro medio</span>
+      <span className="flex items-center gap-2">
+        <span className="relative inline-block h-5 w-3 overflow-hidden rounded-[3px] border border-slate-400 bg-slate-100">
           <span className={`absolute inset-x-0 bottom-0 h-1/2 ${CLASES_TONO_CUOTA.nexa}`} />
         </span>
         Parcial: se llena según lo pagado
       </span>
-      <span className="flex items-center gap-1.5"><Muestra />Sin pagar</span>
-      <span className="flex items-center gap-1.5"><Muestra futura />Aún no vence</span>
-      <span className="flex items-center gap-1.5">
-        <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-600 text-white">
-          <Clock className="h-2.5 w-2.5" strokeWidth={3} />
+      <span className="flex items-center gap-2"><Muestra />Sin pagar</span>
+      <span className="flex items-center gap-2"><Muestra futura />Aún no vence</span>
+      <span className="flex items-center gap-2">
+        <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-white">
+          <Clock className="h-3.5 w-3.5" strokeWidth={2.75} />
         </span>
         Por validar
       </span>
-      {conCuotaMes && <span className="flex items-center gap-1.5"><span className="inline-block h-[3px] w-2.5 rounded-full bg-blue-700" />Cuota del mes</span>}
+      {conCuotaMes && <span className="flex items-center gap-2"><span className="inline-block h-1 w-4 rounded-full bg-blue-700" />Cuota del mes</span>}
     </span>
   );
 }

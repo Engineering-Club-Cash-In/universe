@@ -59,6 +59,7 @@ describe("mapNexaDashboardRows", () => {
     cuota_mes_numero: 18, cuota_mes_vencimiento: "2026-10-05", cuota_mes_estado: "pagada",
     cuota_mes_pago: "completa", cuota_mes_aplicado: "1752.36", cuota_mes_monto: "1752.36", cuota_mes_medio: "NEXA",
     cuota_mes_por_validar: false,
+    cuota_mes_cubierta_pendiente: false,
   };
 
   test("convierte filas y toma los totales de la primera", () => {
@@ -71,12 +72,12 @@ describe("mapNexaDashboardRows", () => {
       ultimoPagoMonto: "50.00", ultimoPagoNexa: true, ultimoPagoBanco: null, pagosNexa: 5, montoNexa: "600.00", rechazosNexa: 1,
       rechazosDetalle: [{ fecha: "2026-10-05T11:16:49", monto: "50.00", codigo: "token_mismatch", estado: "failed" }],
       ultimasCuotas: [{ numero: 18, vencimiento: "2026-10-05", pagada: true, medio: "NEXA", banco: null, aplicado: "1752.36", monto: "1752.36" }],
-      cuotaMes: { numero: 18, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1752.36", monto: "1752.36", medio: "NEXA", porValidar: false },
+      cuotaMes: { numero: 18, vencimiento: "2026-10-05", estado: "pagada", pago: "completa", aplicado: "1752.36", monto: "1752.36", medio: "NEXA", porValidar: false, cubiertaPorPendiente: false },
     });
     // Parcial: vencida con plata aplicada y sin medio de pago completo.
     const parcial = mapNexaDashboardRows([{ ...fila, cuota_mes_estado: "vencida", cuota_mes_pago: "parcial",
       cuota_mes_aplicado: "500.00", cuota_mes_medio: "MANUAL" }], params).creditos[0];
-    expect(parcial!.cuotaMes).toEqual({ numero: 18, vencimiento: "2026-10-05", estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "1752.36", medio: "MANUAL", porValidar: false });
+    expect(parcial!.cuotaMes).toEqual({ numero: 18, vencimiento: "2026-10-05", estado: "vencida", pago: "parcial", aplicado: "500.00", monto: "1752.36", medio: "MANUAL", porValidar: false, cubiertaPorPendiente: false });
     expect(result.creditos[1]).toMatchObject({ creditoId: 352, nexaToken: null, ultimoPagoFecha: null, ultimoPagoMonto: null, ultimoPagoNexa: false });
     // Manual con banco, sin cuotas ni rechazos: el SQL los manda NULL.
     const manual = mapNexaDashboardRows([{ ...fila, ultimo_pago_banco: "Banrural", rechazos_detalle: null, ultimas_cuotas: null,
@@ -84,6 +85,12 @@ describe("mapNexaDashboardRows", () => {
     expect(manual).toMatchObject({ ultimoPagoBanco: "Banrural", rechazosDetalle: [], ultimasCuotas: [], cuotaMes: null });
     expect(result.totales).toEqual({ creditos: 2, conToken: 1, pagosNexa: 8, montoNexa: "8423.92", rechazosNexa: 1, ultimoPagoNexa: 2, desglose });
     expect({ total: result.total, page: result.page, pageSize: result.pageSize }).toEqual({ total: 2, page: 2, pageSize: 10 });
+  });
+
+  test("cubiertaPorPendiente de la cuota del mes: solo un true del SQL lo prende", () => {
+    const de = (v: unknown) => mapNexaDashboardRows([{ ...fila, cuota_mes_cubierta_pendiente: v }], params).creditos[0]!.cuotaMes!.cubiertaPorPendiente;
+    expect(de(true)).toBe(true);
+    for (const v of [false, null, undefined, "t", 1]) expect(de(v)).toBe(false);
   });
 
   test("porValidar de la cuota del mes: solo un true del SQL lo prende", () => {

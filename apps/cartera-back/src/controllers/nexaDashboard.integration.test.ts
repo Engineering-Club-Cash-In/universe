@@ -522,7 +522,7 @@ integrationTest("pagada = criterio del cron: cuotas_credito.pagado sin fila que 
   expect(fila!.cuotaMes).toMatchObject({ numero: 2, estado: "pagada" });
 });
 
-integrationTest("medio: solo cuentan las filas que cubren la cuota; una fila manual 'reset' no la pinta de verde", async () => {
+integrationTest("medio: ni 'reset' ni las filas de capital cuentan para el medio ni para lo aplicado", async () => {
   const c = await nuevoCredito();
   const ev = await c.evento("applied", 100);
   const q = await c.cuota(1, "0 days");
@@ -531,9 +531,67 @@ integrationTest("medio: solo cuentan las filas que cubren la cuota; una fila man
   await c.abono(q, { banco: 1, monto: 800, estado: "capital_validated", fecha: "2026-09-13 10:00:00" });
   const { fila } = await c.fila();
   expect(fila!.ultimasCuotas).toEqual([
-    // aplicado: sin la fila 'reset' (100 Nexa + 800 manual), aunque el medio salga solo de la que cubre.
-    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null, aplicado: "900.00", monto: "1000.00", porValidar: false },
+    // aplicado: solo la fila Nexa; la 'reset' (900) y la de capital (800) no son pago de la cuota.
+    { numero: 1, vencimiento: expect.any(String), pagada: true, medio: "NEXA", banco: null, aplicado: "100.00", monto: "1000.00", porValidar: false },
   ]);
+});
+
+integrationTest("medio: un abono parcial anterior cuenta aunque otra fila cierre la cuota (Q900 Nexa + Q100 manual = NEXA)", async () => {
+  const c = await nuevoCredito();
+  const ev = await c.evento("applied", 900);
+  const q = await c.cuota(1, "0 days");
+  // El parcial Nexa no cubre la cuota (pagado = false); el manual de Q100 la cierra.
+  await c.abono(q, { evento: ev, monto: 900, pagado: false, fecha: "2026-09-05 10:00:00" });
+  await c.abono(q, { banco: 1, monto: 100, fecha: "2026-09-12 10:00:00" });
+  const { fila } = await c.fila();
+  expect(fila!.cuotaMes).toMatchObject({ estado: "pagada", pago: "completa", medio: "NEXA", aplicado: "1000.00" });
+  expect(fila!.ultimasCuotas[0]).toMatchObject({ medio: "NEXA", aplicado: "1000.00" });
+  // El filtro y la cabecera leen el mismo medio.
+  const { mod } = await setup();
+  const r = await mod.getNexaDashboard(TODOS, { ...dash, q: c.sifco, cuotaMes: "pagados", medio: "nexa" });
+  expect(r.creditos).toHaveLength(1);
+  expect(r.totales.desglose).toMatchObject({ pagadaNexa: 1, pagadaManual: 0 });
+});
+
+integrationTest("capital: una fila 'capital' sobre una cuota sin pagar no la vuelve parcial ni le da medio", async () => {
+  const c = await nuevoCredito();
+  const q = await c.cuota(1, "1 month -1 day");
+  await c.abono(q, { banco: 1, monto: 500, pagado: false, estado: "capital" });
+  await c.abono(q, { banco: 1, monto: 300, pagado: false, estado: "capital_validated" });
+  const { fila } = await c.fila();
+  expect(fila!.cuotaMes).toMatchObject({ estado: "por_vencer", pago: "sin_pago", aplicado: "0.00", medio: null });
+  const { mod } = await setup();
+  const r = await mod.getNexaDashboard(TODOS, { ...dash, q: c.sifco, cuotaMes: "sinpago" });
+  expect(r.creditos).toHaveLength(1);
+  expect(r.totales.desglose).toMatchObject({ sinPago: 1, parcialManual: 0, parcialNexa: 0 });
+});
+
+integrationTest("cubiertaPorPendiente: solo si la cuota está pagada únicamente por un pendiente", async () => {
+  const prefijo = `Cub-${Date.now()}`;
+  const ver = async (nombre: string, armar: (c: Awaited<ReturnType<typeof nuevoCredito>>) => Promise<void>) => {
+    const c = await nuevoCredito(`${prefijo} ${nombre}`);
+    await armar(c);
+    return (await c.fila()).fila!.cuotaMes;
+  };
+  const hoyStr = new Date().toISOString().slice(0, 10);
+  // Solo un pendiente reciente la cubre.
+  expect(await ver("pend", async (c) => { await c.abono(await c.cuota(1, "0 days"), { estado: "pending", fecha: `${hoyStr} 08:00:00` }); }))
+    .toMatchObject({ estado: "pagada", porValidar: true, cubiertaPorPendiente: true });
+  // Un pendiente y una validada la cubren: no depende del pendiente.
+  expect(await ver("mixta", async (c) => {
+    const q = await c.cuota(1, "0 days");
+    await c.abono(q, { estado: "pending", fecha: `${hoyStr} 08:00:00` });
+    await c.abono(q, { estado: "validated", fecha: `${hoyStr} 07:00:00` });
+  })).toMatchObject({ estado: "pagada", porValidar: true, cubiertaPorPendiente: false });
+  // Pagada por el flag con un pendiente aparte: tampoco depende de él.
+  expect(await ver("flag", async (c) => { await c.abono(await c.cuota(1, "0 days", true), { estado: "pending", fecha: `${hoyStr} 08:00:00` }); }))
+    .toMatchObject({ estado: "pagada", porValidar: true, cubiertaPorPendiente: false });
+  // Parcial con un pendiente (no cubre): no está pagada.
+  expect(await ver("parcial", async (c) => { await c.abono(await c.cuota(1, "1 month -1 day"), { monto: 400, pagado: false, estado: "pending", fecha: `${hoyStr} 08:00:00` }); }))
+    .toMatchObject({ estado: "por_vencer", pago: "parcial", porValidar: true, cubiertaPorPendiente: false });
+  // Sin pendientes.
+  expect(await ver("val", async (c) => { await c.abono(await c.cuota(1, "0 days")); }))
+    .toMatchObject({ porValidar: false, cubiertaPorPendiente: false });
 });
 
 integrationTest("rechazos: tope de 5, ordenados por cuándo llegaron (no por id), y el total cuenta todos", async () => {

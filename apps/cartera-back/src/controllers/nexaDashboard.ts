@@ -165,13 +165,15 @@ export type NexaDashboardRow = {
   cuotaMes: NexaCuotaMes | null;
 };
 
-// aplicado: monto_aplicado de las filas no anuladas y no 'reset' de la cuota. monto: creditos.cuota
+// aplicado: monto_aplicado de las filas no anuladas, ni 'reset' ni de capital, de la cuota. monto: creditos.cuota
 // (cuotas_credito no guarda el monto de cada cuota). medio: el mismo de la franja.
 export type NexaCuotaMes = {
   numero: number; vencimiento: string; estado: EstadoCuotaMes; pago: PagoCuota;
   aplicado: string; monto: string; medio: "NEXA" | "MANUAL" | null;
   /** Alguna fila que le aplica plata a la cuota sigue en validation_status 'pending' (ver medio_cuota). */
   porValidar: boolean;
+  /** Pagada solo porque la cubre un pago pendiente (<= 7 días): sin él, la cuota no estaría pagada. */
+  cubiertaPorPendiente: boolean;
 };
 
 export type NexaRechazo = { fecha: string | null; monto: string; codigo: string | null; estado: string };
@@ -260,6 +262,7 @@ export const mapNexaDashboardRows = (rows: Record<string, unknown>[], params: Ne
       monto: String(row.cuota_mes_monto ?? "0.00"),
       medio: row.cuota_mes_medio == null ? null : (String(row.cuota_mes_medio) as "NEXA" | "MANUAL"),
       porValidar: row.cuota_mes_por_validar === true,
+      cubiertaPorPendiente: row.cuota_mes_cubierta_pendiente === true,
     },
   }));
 
@@ -331,7 +334,8 @@ WITH base AS (
   SELECT DISTINCT ON (cuotas_credito.credito_id, cuotas_credito.numero_cuota)
          cuotas_credito.credito_id, cuotas_credito.cuota_id, cuotas_credito.numero_cuota,
          cuotas_credito.fecha_vencimiento,
-         (cuotas_credito.pagado IS DISTINCT FROM false OR ${hasPaidPaymentSql()}) AS pagada
+         (cuotas_credito.pagado IS DISTINCT FROM false OR ${hasPaidPaymentSql()}) AS pagada,
+         (cuotas_credito.pagado IS DISTINCT FROM false) AS pagada_por_flag
   FROM cartera.cuotas_credito, hoy
   WHERE cuotas_credito.credito_id IN (SELECT credito_id FROM base) AND cuotas_credito.numero_cuota > 0
     AND cuotas_credito.fecha_vencimiento < hoy.inicio_mes + interval '1 month'
@@ -345,43 +349,41 @@ WITH base AS (
   -- 30 días caen dos en el mismo mes y la segunda es la del mes siguiente corrida. Si el crédito
   -- no tiene cuota este mes, la última que ya venció.
   SELECT DISTINCT ON (cuotas.credito_id) cuotas.credito_id, cuotas.cuota_id, cuotas.numero_cuota, cuotas.fecha_vencimiento,
+         cuotas.pagada_por_flag,
          CASE WHEN cuotas.pagada THEN 'pagada' WHEN cuotas.fecha_vencimiento < hoy.dia THEN 'vencida' ELSE 'por_vencer' END AS estado
   FROM cuotas, hoy
   ORDER BY cuotas.credito_id, (cuotas.fecha_vencimiento >= hoy.inicio_mes) DESC,
            CASE WHEN cuotas.fecha_vencimiento >= hoy.inicio_mes THEN cuotas.fecha_vencimiento END,
            cuotas.fecha_vencimiento DESC, cuotas.numero_cuota DESC
 ), medio_cuota AS (
-  -- Medio de la cuota: el que más plata le aplicó; empate, el del pago más reciente. Cuentan las
-  -- filas que cubren la cuota para el cron (filaQueCubreCuotaSql). Si ninguna la cubre (pagada solo
-  -- por el flag, o no pagada con abonos), las filas no anuladas, no 'reset' y con monto aplicado.
-  -- aplicado: lo que se le aplicó a la cuota (filas no anuladas y no 'reset'), para completa/parcial.
-  -- por_validar: alguna fila no anulada que le aplica plata a la cuota sigue 'pending' (contabilidad
-  -- no la validó). El cron la cuenta como pagada hasta 7 días (filaQueCubreCuotaSql); se avisa igual.
-  -- Mira todas esas filas, cubran o no, y también las Nexa: entran 'pending' y applyPayment las valida
-  -- en la misma llamada, así que una Nexa que queda 'pending' es un pago que no terminó de aplicarse.
-  SELECT cuota_id, banco, aplicado, por_validar,
+  -- Una sola fuente para todo lo que sale de las filas de la cuota (medio, banco, aplicado, por validar):
+  -- TODAS las filas no anuladas que le aplican plata, menos las 'reset' y las de capital ('capital',
+  -- 'capital_validated': son abonos a capital, no pago de la cuota). Una parcial anterior cuenta aunque
+  -- otra fila cierre la cuota. cubre (filaQueCubreCuotaSql) NO filtra: solo dice si la cuota está
+  -- pagada y, de ahí, si la cubre un pendiente (cubierta_validada).
+  -- medio: el que más plata le aplicó; empate, el del pago más reciente.
+  -- por_validar: alguna de esas filas sigue 'pending' (contabilidad no la validó). Mira también las
+  -- Nexa: entran 'pending' y applyPayment las valida en la misma llamada, así que una Nexa que queda
+  -- 'pending' es un pago que no terminó de aplicarse.
+  -- cubierta_validada: alguna fila que la cubre para el cron ya no está pendiente.
+  SELECT cuota_id, banco, aplicado, por_validar, cubierta_validada,
          CASE WHEN nexa > otro THEN 'NEXA' WHEN otro > nexa THEN 'MANUAL' WHEN ultimo_nexa THEN 'NEXA' ELSE 'MANUAL' END AS medio
   FROM (
-    SELECT pc.cuota_id, MAX(pc.aplicado) AS aplicado, BOOL_OR(pc.por_validar) AS por_validar,
+    SELECT pc.cuota_id, SUM(pc.monto_aplicado) AS aplicado, BOOL_OR(pc.validation_status = 'pending') AS por_validar,
+           COALESCE(BOOL_OR(pc.cubre AND pc.validation_status <> 'pending'), false) AS cubierta_validada,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NOT NULL), 0) AS nexa,
            COALESCE(SUM(pc.monto_aplicado) FILTER (WHERE pc.nexa_payment_event_id IS NULL), 0) AS otro,
            (array_agg(pc.nexa_payment_event_id IS NOT NULL ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC))[1] AS ultimo_nexa,
            (array_agg(bk.nombre ORDER BY pc.fecha_pago DESC NULLS LAST, pc.pago_id DESC)
              FILTER (WHERE pc.nexa_payment_event_id IS NULL AND bk.nombre IS NOT NULL))[1] AS banco
     FROM (
-      SELECT filas.*, BOOL_OR(cubre) OVER (PARTITION BY cuota_id) AS alguna_cubre,
-             SUM(monto_aplicado) FILTER (WHERE validation_status <> 'reset') OVER (PARTITION BY cuota_id) AS aplicado,
-             BOOL_OR(validation_status = 'pending') OVER (PARTITION BY cuota_id) AS por_validar
-      FROM (
-        SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
-        FROM cartera.pagos_credito pc
-        WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes UNION SELECT cuota_id FROM cuota_mes)
-          AND pc."paymentFalse" = false AND COALESCE(pc.monto_aplicado, 0) > 0
-      ) filas
-      WHERE filas.cubre OR filas.validation_status <> 'reset'
+      SELECT pc.*, ${filaQueCubreCuotaSql()} AS cubre
+      FROM cartera.pagos_credito pc
+      WHERE pc.cuota_id IN (SELECT cuota_id FROM recientes UNION SELECT cuota_id FROM cuota_mes)
+        AND pc."paymentFalse" = false AND COALESCE(pc.monto_aplicado, 0) > 0
+        AND pc.validation_status NOT IN ('reset', 'capital', 'capital_validated')
     ) pc
     LEFT JOIN cartera.bancos bk ON bk.banco_id = pc.banco_id
-    WHERE pc.cubre OR NOT pc.alguna_cubre
     GROUP BY pc.cuota_id
   ) sumas
 ), franja AS (
@@ -411,6 +413,8 @@ WITH base AS (
          CASE WHEN cuota_mes.estado = 'pagada' THEN 'completa' WHEN COALESCE(mm.aplicado, 0) > 0 THEN 'parcial' ELSE 'sin_pago' END AS cuota_mes_pago,
          COALESCE(mm.aplicado, 0)::numeric(18,2)::text AS cuota_mes_aplicado, base.monto_cuota::numeric(18,2)::text AS cuota_mes_monto,
          mm.medio AS cuota_mes_medio, COALESCE(mm.por_validar, false) AS cuota_mes_por_validar,
+         -- Pagada solo porque la cubre un pago pendiente: ni el flag ni un pago validado la cubren.
+         (cuota_mes.estado = 'pagada' AND NOT cuota_mes.pagada_por_flag AND NOT COALESCE(mm.cubierta_validada, false)) AS cuota_mes_cubierta_pendiente,
          -- pagados = pagada (criterio del cron); parciales = no pagada con plata aplicada (la misma regla
          -- de cuota_mes_pago); sinpago = no pagada y sin plata. Sin cuota del mes: NULL, ningún filtro.
          CASE WHEN cuota_mes.estado = 'pagada' THEN 'pagados'

@@ -49,7 +49,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 ### W5 · Alertas leídas
 
 - **Agrupación pura** (`lib/alertas-caso.ts`): agrupa por tipo (o título si no hay tipo), deduplica por evento entre destinatarios y separa las leídas. Tiene pruebas en `lib/alertas-caso.test.ts` (5, en verde).
-- **Consultas** (`lib/alertas-caso-db.ts`): filas abiertas del caso, marcas del usuario y upsert del grupo.
+- **Consultas** (`lib/alertas-caso-db.ts`): filas abiertas del caso, marcas del usuario y upsert del grupo. El upsert es monótono: una marca atrasada no baja `leida_hasta`. `getAlertasCaso` lee todas las filas abiertas y descarta los grupos leídos antes de tomar los 10 primeros.
 - **`getAlertasCaso`**: deja fuera los grupos marcados como leídos.
 - **`getAlertasLeidasCaso`**: lista los grupos leídos con cuándo y quién («Automático (más de 30 días)» o el nombre). Devuelve `AlertaLeidaCaso[]`; ya no es `null`.
 - **`marcarAlertaCasoLeida`**: toma la alerta elegida y todas sus repeticiones abiertas, guarda la fecha más reciente como `leida_hasta` y responde `{ marcada: true }`. Si la alerta ya no está abierta, responde NOT_FOUND.

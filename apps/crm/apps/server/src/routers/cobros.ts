@@ -3222,10 +3222,12 @@ export const cobrosRouter = {
 						inArray(notifications.status, ["pending", "read", "in_progress"]),
 					),
 				)
-				// Modo agente primero ANTES del límite: con 50 avisos más nuevos
-				// quedaba fuera y el orden de abajo no tenía qué subir.
-				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
-				.limit(50);
+				// Sin límite de filas: los grupos leídos se descartan DESPUÉS de
+				// agrupar, y un tope de 50 dejaba fuera los grupos sin leer cuando
+				// las primeras filas eran de grupos ya leídos (o repeticiones de
+				// los jobs diarios por cada destinatario). El tope real son los 10
+				// grupos del final.
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt));
 
 			// Agrupa por TIPO de alerta, no por fila: los jobs son diarios, así que
 			// "Caso sin contacto reciente" se repite un día tras otro y llenaba la

@@ -3,7 +3,7 @@
  * agrupación y el «leída» viven en `alertas-caso.ts` (puro); aquí solo se lee y
  * se escribe la base.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { alertasCasoLeidasCobros } from "../db/schema/cobros";
@@ -89,8 +89,7 @@ export async function cargarMarcasAlertas(
 
 /**
  * Marca el grupo como leído para el usuario. Si ya había una marca, la
- * reemplaza: la nueva `leidaHasta` nunca es menor que la anterior, porque sale
- * de las filas que existen ahora.
+ * reemplaza solo si la nueva `leidaHasta` no es menor: la marca nunca retrocede.
  */
 export async function marcarGrupoLeido(params: {
 	casoCobroId: string;
@@ -122,5 +121,9 @@ export async function marcarGrupoLeido(params: {
 				leidaPor: params.leidaPor,
 				origen: "manual",
 			},
+			// Marca monótona: una petición atrasada (carrera entre dos marcas, o una
+			// manual que llega tras el job) no baja `leidaHasta` y no hace reaparecer
+			// notificaciones ya leídas. `<=` deja re-marcar con la misma fecha.
+			setWhere: sql`${alertasCasoLeidasCobros.leidaHasta} <= excluded.leida_hasta`,
 		});
 }

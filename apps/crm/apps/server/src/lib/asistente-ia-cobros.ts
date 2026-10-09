@@ -111,12 +111,37 @@ const sinAcentos = (t: string) =>
 		.toLowerCase();
 
 /**
- * Partículas de los nombres y palabras de cobranza que también pueden ser un
- * apellido («Mora», «San»). Si son parte del nombre de alguien del caso se
- * tapan escritas con mayúscula inicial; en minúscula se leen como lo que son
- * y se conservan.
+ * Palabras comunes (partículas de los nombres, palabras del español y de
+ * cobranza) que también pueden ser parte de un nombre («Mora», «San», «De»).
+ * Si lo son en alguien del caso se tapan escritas con mayúscula inicial; en
+ * minúscula se leen como lo que son y se conservan. Las iniciales de una sola
+ * letra («Juan A. Pérez») siguen la misma regla.
  */
 const NO_SON_NOMBRE = new Set([
+	"de",
+	"la",
+	"el",
+	"en",
+	"un",
+	"una",
+	"se",
+	"su",
+	"sus",
+	"mi",
+	"tu",
+	"me",
+	"te",
+	"lo",
+	"le",
+	"no",
+	"si",
+	"al",
+	"es",
+	"ya",
+	"que",
+	"con",
+	"por",
+	"para",
 	"del",
 	"las",
 	"los",
@@ -148,7 +173,7 @@ export function palabrasDeNombres(
 	for (const nombre of nombres) {
 		for (const w of (nombre ?? "").split(/[^\p{L}]+/u)) {
 			const t = sinAcentos(w);
-			if (t.length >= 3) palabras.add(t);
+			if (t.length >= 1) palabras.add(t);
 		}
 	}
 	return palabras;
@@ -168,7 +193,8 @@ export function taparDatosPersonales(
 	return sinNumeros.replace(/\p{L}+/gu, (w) => {
 		const t = sinAcentos(w);
 		if (!nombres.has(t)) return w;
-		const comoPalabraComun = NO_SON_NOMBRE.has(t) && w === w.toLowerCase();
+		const esComun = NO_SON_NOMBRE.has(t) || t.length === 1;
+		const comoPalabraComun = esComun && w === w.toLowerCase();
 		return comoPalabraComun ? w : "[nombre]";
 	});
 }

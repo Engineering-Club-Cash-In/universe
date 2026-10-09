@@ -81,6 +81,16 @@ describe("taparDatosPersonales", () => {
 			taparDatosPersonales("Se llama San Pedro, vive San Juan", palabrasDeNombres(["Rosa San"])),
 		).toBe("Se llama [nombre] Pedro, vive [nombre] Juan");
 	});
+	test("los nombres cortos (Li, Wu) y las iniciales se tapan", () => {
+		const n = palabrasDeNombres(["Li Wu", "Juan A. Pérez"]);
+		expect(n).toEqual(new Set(["li", "wu", "juan", "a", "perez"]));
+		expect(taparDatosPersonales("llamó li wu y Juan A. Pérez", n)).toBe(
+			"llamó [nombre] [nombre] y [nombre] [nombre]. [nombre]",
+		);
+		expect(taparDatosPersonales("pagará a las 3 con Li", n)).toBe(
+			"pagará a las 3 con [nombre]",
+		);
+	});
 	test("no toca montos ni fechas con diagonal", () => {
 		expect(taparDatosPersonales("pagará Q1,500.00 el 3/10", nombres)).toBe(
 			"pagará Q1,500.00 el 3/10",

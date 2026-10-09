@@ -30,7 +30,7 @@ import { createHash } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject, generateText } from "ai";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
@@ -750,6 +750,42 @@ async function reservarGeneracion(
 	});
 }
 
+/**
+ * Deja constancia, en la BD y bajo el lock del caso, de que el contexto leído
+ * en `inicio` es el del resumen guardado con esa huella: una generación de un
+ * contexto anterior (otra huella, iniciada antes) ve un `contexto_en` más nuevo
+ * que el suyo y no lo pisa. Un UPDATE de una fila por apertura de la ficha.
+ */
+export async function confirmarContextoVigente(
+	casoCobroId: string,
+	huella: string,
+	inicio: string,
+): Promise<void> {
+	await db
+		.transaction(async (tx) => {
+			await tx.execute(lockResumen(casoCobroId));
+			await tx
+				.update(resumenesIaCobros)
+				.set({ contextoEn: sql`${inicio}::timestamp` as unknown as Date })
+				.where(
+					and(
+						eq(resumenesIaCobros.casoCobroId, casoCobroId),
+						eq(resumenesIaCobros.huella, huella),
+						or(
+							isNull(resumenesIaCobros.contextoEn),
+							sql`${resumenesIaCobros.contextoEn} < ${inicio}::timestamp`,
+						),
+					),
+				);
+		})
+		.catch((error) =>
+			console.error(
+				`[AsistenteIA] confirmar contexto de ${casoCobroId}:`,
+				error,
+			),
+		);
+}
+
 /** Suelta la reserva propia (el modelo falló o el contexto dejó de valer). */
 async function liberarReserva(casoCobroId: string, huella: string) {
 	await db
@@ -996,7 +1032,14 @@ export async function obtenerResumenIA(
 		return null;
 	}
 	const huella = huellaContexto(contexto);
-	if (guardado && guardado.huella === huella) return comoResumen(guardado);
+	if (guardado && guardado.huella === huella) {
+		// El contexto volvió a ser el del resumen guardado (p. ej. se restauró una
+		// promesa editada): cualquier generación en curso, aquí o en otro proceso,
+		// es de un contexto distinto y más viejo que este y no debe guardarse.
+		invalidarGeneracion(casoCobroId);
+		await confirmarContextoVigente(casoCobroId, huella, inicio);
+		return comoResumen(guardado);
+	}
 
 	const generacion = generarUnaVez(
 		casoCobroId,

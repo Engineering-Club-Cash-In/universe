@@ -1738,6 +1738,9 @@ export class CarteraBackClient {
 						...(params.excluir_pagados_mes && {
 							excluir_pagados_mes: true,
 						}),
+						...(params.solo_con_cuenta_nexa && {
+							solo_con_cuenta_nexa: true,
+						}),
 						excel: false,
 					}),
 				},
@@ -1779,6 +1782,9 @@ export class CarteraBackClient {
 				}),
 				...(params.excluir_pagados_mes && {
 					excluir_pagados_mes: "true",
+				}),
+				...(params.solo_con_cuenta_nexa && {
+					solo_con_cuenta_nexa: "true",
 				}),
 				excel: "false",
 			});

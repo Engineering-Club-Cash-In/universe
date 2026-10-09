@@ -69,6 +69,12 @@ export interface VariablesPlantilla {
 	 */
 	aseguradora?: string;
 	cabinaSeguro?: string;
+	/**
+	 * Código de pago Nexa del crédito (nexa_token de cartera): el número que el
+	 * cliente usa como cuenta destino en su banco. Lo usa "Nueva cuenta
+	 * exclusiva Nexa"; vacío = el crédito no tiene cuenta.
+	 */
+	cuentaNexa?: string;
 }
 
 const SEGURO_DEFAULT = {
@@ -286,7 +292,13 @@ export function prepararTelefonoAsesorParaEnvio(
 	| { enviar: false; motivo: string } {
 	const telefonoAsesor = telefono?.trim() ?? "";
 
-	if (cuerpo.includes(COBROS_NO_REPLY_WARNING) && !telefonoAsesor) {
+	// El aviso no-reply remite al asesor; "Nueva cuenta exclusiva Nexa" (sin
+	// aviso) también lo menciona con {telefonoAsesor}: sin número saldría
+	// "comunícate con tu ejecutivo al ." roto.
+	const remiteAlAsesor =
+		cuerpo.includes(COBROS_NO_REPLY_WARNING) ||
+		cuerpo.includes("{telefonoAsesor}");
+	if (remiteAlAsesor && !telefonoAsesor) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR };
 	}
 
@@ -507,7 +519,25 @@ export function interpolar(
 				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
 				"fecha límite impuesto",
 			),
-		);
+		)
+		.replace(/{cuentaNexa}/g, v(variables.cuentaNexa ?? "", "cuenta Nexa"));
+}
+
+/**
+ * Plantillas que solo aplican a créditos con cuenta Nexa: sin cuenta, el
+ * mensaje saldría con "Banco Nexa / Cuenta Monetaria /" y el número en blanco.
+ * El masivo las descarta en el server (prepararCuentaNexaParaEnvio); el envío
+ * individual las oculta con esta función.
+ */
+const PLANTILLAS_SOLO_CON_CUENTA_NEXA = new Set(["cuenta_nexa_exclusiva"]);
+
+export function plantillasDisponibles(
+	cuentaNexa: string | null | undefined,
+): PlantillaMensaje[] {
+	const tieneCuenta = Boolean(cuentaNexa?.trim());
+	return PLANTILLAS_MENSAJES.filter(
+		(p) => tieneCuenta || !PLANTILLAS_SOLO_CON_CUENTA_NEXA.has(p.id),
+	);
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -622,6 +652,34 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 
 *${COBROS_NO_REPLY_WARNING}*
 *CashIn*`,
+	},
+	{
+		id: "cuenta_nexa_exclusiva",
+		nombre: "Nueva cuenta exclusiva Nexa",
+		etapa: "al_dia",
+		asunto: "Tu nueva cuenta exclusiva para pagos",
+		cuerpo: `Hola, {clienteNombre}.
+Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito.
+Vía transferencia desde tu banco de preferencia hacia:
+🏛️ Banco Nexa
+🔢 Cuenta Monetaria
+🔢 {cuentaNexa}
+Tus canales actuales continúan habilitados.
+
+Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente.
+📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+		// 2 bloques → template `mensaje2parametro` (igual que el server). Solo para
+		// créditos con cuenta Nexa (plantillasDisponibles / prepararCuentaNexaParaEnvio).
+		cuerpoWhastapp: `{clienteNombre}.
+Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito.
+Vía transferencia desde tu banco de preferencia hacia:
+🏛️ Banco Nexa
+🔢 *Cuenta Monetaria*
+🔢 *{cuentaNexa}*
+Tus canales actuales continúan habilitados.
+
+Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente.
+📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

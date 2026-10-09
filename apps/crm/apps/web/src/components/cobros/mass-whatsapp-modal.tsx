@@ -44,6 +44,7 @@ const VARIABLES_DISPONIBLES = [
 	"fechaLimiteImpuesto",
 	"aseguradora",
 	"cabinaSeguro",
+	"cuentaNexa",
 ] as const;
 
 interface DescartadoItem {
@@ -107,6 +108,7 @@ interface MassWhatsappModalProps {
 		fechaDesde?: string;
 		fechaHasta?: string;
 		excluirPagadosMes?: boolean;
+		soloConCuentaNexa?: boolean;
 	};
 	etiquetaLabels?: Record<string, string>;
 	totalDestinatarios?: number;
@@ -207,6 +209,7 @@ export function MassWhatsappModal({
 				fechaDesde: filtros.fechaDesde,
 				fechaHasta: filtros.fechaHasta,
 				excluirPagadosMes: filtros.excluirPagadosMes,
+				soloConCuentaNexa: filtros.soloConCuentaNexa,
 			}),
 		onSuccess: (res) => {
 			// `descartados` ya incluye los que fallaron en el proveedor, así que
@@ -381,6 +384,10 @@ export function MassWhatsappModal({
 											<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
 											<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
 											<li>
+												Solo con cuenta Nexa:{" "}
+												{filtros.soloConCuentaNexa ? "Sí" : "No"}
+											</li>
+											<li>
 												Etiquetas:{" "}
 												{filtros.etiquetas && filtros.etiquetas.length > 0
 													? filtros.etiquetas
@@ -389,6 +396,14 @@ export function MassWhatsappModal({
 													: "Todas"}
 											</li>
 										</ul>
+										{plantillaId === "cuenta_nexa_exclusiva" &&
+											!filtros.soloConCuentaNexa && (
+												<p className="mt-2 text-amber-700 text-xs dark:text-amber-400">
+													Esta plantilla solo se envía a créditos con cuenta Nexa
+													asignada; el resto se descarta. Activa el filtro "Solo
+													con cuenta Nexa" para ver el total real.
+												</p>
+											)}
 									</div>
 
 									{typeof totalDestinatarios === "number" && (

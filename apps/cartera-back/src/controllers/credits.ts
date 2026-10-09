@@ -20,6 +20,7 @@ import {
   inversionistas,
   montos_adicionales,
   moras_credito,
+  nexa_credit_bindings,
   pagos_credito,
   pagos_credito_inversionistas_espejo,
   platform_users,
@@ -111,6 +112,22 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .from(ajuste_fecha_ideal_pago)
       .where(eq(ajuste_fecha_ideal_pago.credito_id, creditoId))
       .limit(1);
+
+    // Código de pago Nexa del cliente (solo lectura: NO crea la cuenta, para eso
+    // está POST /creditos/cuenta-nexa). Lo usa el CRM en la plantilla "Nueva
+    // cuenta exclusiva Nexa". Un binding desactivado (crédito cancelado) o sin
+    // token no cuenta como cuenta.
+    const [bindingNexa] = await db
+      .select({ token: nexa_credit_bindings.nexa_token })
+      .from(nexa_credit_bindings)
+      .where(
+        and(
+          eq(nexa_credit_bindings.credito_id, creditoId),
+          eq(nexa_credit_bindings.activo, true)
+        )
+      )
+      .limit(1);
+    const cuentaNexa = bindingNexa?.token ?? null;
 
     const contractSummary =
       currentCredit.creditos.statusCredit === "CANCELADO"
@@ -643,6 +660,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
         asesor: currentCredit.asesores,
+        cuentaNexa,
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,
@@ -783,6 +801,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
       asesor: currentCredit.asesores,
+      cuentaNexa,
       cuotaActual,
       cuotaActualPagada,
       cuotaActualStatus,
@@ -1112,7 +1131,8 @@ export async function getCreditosWithUserByMesAnio(
   capital_max?: number,
   estados_credito?: StatusCredit[],
   aseguradora_id?: number,
-  excluir_pagados_mes?: boolean
+  excluir_pagados_mes?: boolean,
+  solo_con_cuenta_nexa?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1289,6 +1309,18 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  if (solo_con_cuenta_nexa) {
+    // Cuenta Nexa asignada = binding activo con token (el mismo criterio con que
+    // getCreditoByNumero devuelve `cuentaNexa`). EXISTS y no join para no
+    // multiplicar filas (paginación) y para que el COUNT herede la condición.
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${nexa_credit_bindings} nb
+      WHERE nb.credito_id = ${creditos.credito_id}
+        AND nb.activo = true
+        AND nb.nexa_token IS NOT NULL
+    )`);
   }
 
   if (excluir_pagados_mes) {

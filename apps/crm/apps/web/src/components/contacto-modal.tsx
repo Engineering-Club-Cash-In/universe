@@ -64,6 +64,7 @@ import {
 	mensajeSmsEditable,
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
+	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -101,6 +102,8 @@ interface ContactoModalProps {
 	incrementoMaximoMensualMora?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
+	/** Código de pago Nexa del crédito; vacío = sin cuenta (ver VariablesPlantilla). */
+	cuentaNexa?: string;
 }
 
 export function ContactoModal({
@@ -129,6 +132,7 @@ export function ContactoModal({
 	incrementoMaximoMensualMora = "",
 	aseguradora = "",
 	cabinaSeguro = "",
+	cuentaNexa = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -183,6 +187,7 @@ export function ContactoModal({
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
 			cabinaSeguro: cabinaSeguro || undefined,
+			cuentaNexa,
 		}),
 		[
 			clienteNombre,
@@ -200,6 +205,7 @@ export function ContactoModal({
 			incrementoMaximoMensualMora,
 			aseguradora,
 			cabinaSeguro,
+			cuentaNexa,
 		],
 	);
 
@@ -645,7 +651,7 @@ export function ContactoModal({
 											<SelectValue placeholder="Seleccionar plantilla..." />
 										</SelectTrigger>
 										<SelectContent>
-											{PLANTILLAS_MENSAJES.map((p) => (
+											{plantillasDisponibles(cuentaNexa).map((p) => (
 												<SelectItem key={p.id} value={p.id}>
 													{p.nombre}
 												</SelectItem>

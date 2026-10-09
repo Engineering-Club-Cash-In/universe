@@ -661,6 +661,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	key: string;
 	nombre: string;
 	userId: string;
+	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
 	const [fila] = await consultaBase()
 		.where(eq(opportunities.id, params.opportunityId))
@@ -712,6 +713,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 					status: opportunities.status,
 					closurePercentage: salesStages.closurePercentage,
 					companyId: opportunities.companyId,
+					assignedTo: opportunities.assignedTo,
 				})
 				.from(opportunities)
 				.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
@@ -722,6 +724,8 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				.from(insuranceInvoiceSubmissions)
 				.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
 			if (!vigente || vigente.status !== fila.status) return null;
+			// Pudo cambiar de asesor mientras se validaba el archivo.
+			if (!puedeReintentarDesdeCrm(params, vigente.assignedTo)) return null;
 			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
 				...vigente,
 				yaSubida: !!previa,

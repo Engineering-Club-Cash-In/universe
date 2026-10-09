@@ -6683,6 +6683,7 @@ export const crmRouter = {
 							key: uploadedFile.key,
 							nombre: input.file.name,
 							userId: context.userId,
+							userRole: context.userRole,
 						}).catch((error) => {
 							console.error(
 								"[uploadOpportunityDocument] No se pudo enviar la factura del seguro",

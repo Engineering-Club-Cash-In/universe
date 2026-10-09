@@ -854,13 +854,14 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	const KEY_CRM = `opportunities/${ID}/999-crm-factura.pdf`;
 	// La copia que sube el server con los bytes validados.
 	const COPIA = `opportunities/${ID}/123-abc-factura-crm.pdf`;
-	const enviar = (nombre = "factura-crm.pdf") =>
+	const enviar = (nombre = "factura-crm.pdf", rol = "admin") =>
 		enviarFacturaSeguroDesdeCrm({
 			opportunityId: ID,
 			documentId: "doc-crm",
 			key: KEY_CRM,
 			nombre,
 			userId: "crm-1",
+			userRole: rol,
 		});
 	const envioRegistrado = () =>
 		insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores;
@@ -987,6 +988,22 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(correos).toHaveLength(0);
 		// Se borra la copia y el documento sigue con su archivo.
 		expect(borradosR2).toEqual([COPIA]);
+	});
+
+	test("un asesor comercial al que le reasignaron la oportunidad mientras subía no registra ni envía", async () => {
+		casoBajoBloqueo = { ...caso, assignedTo: "otro-asesor" };
+		const r = await enviar("factura-crm.pdf", "sales");
+		expect(r).toMatchObject({ enviada: false });
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+		expect(borradosR2).toEqual([COPIA]);
+	});
+
+	test("el asesor comercial asignado sí la envía", async () => {
+		casoBajoBloqueo = { ...caso, assignedTo: "crm-1" };
+		expect(await enviar("factura-crm.pdf", "sales")).toMatchObject({
+			enviada: true,
+		});
 	});
 
 	test("sin destinatarios: queda registrada como sin destinatario y no se manda correo", async () => {

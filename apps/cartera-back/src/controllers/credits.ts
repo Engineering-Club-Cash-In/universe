@@ -44,6 +44,7 @@ import {
   gte,
   gt,
   isNull,
+  or,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
@@ -115,15 +116,21 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // Código de pago Nexa del cliente (solo lectura: NO crea la cuenta, para eso
     // está POST /creditos/cuenta-nexa). Lo usa el CRM en la plantilla "Nueva
-    // cuenta exclusiva Nexa". Un binding desactivado (crédito cancelado) o sin
-    // token no cuenta como cuenta.
+    // cuenta exclusiva Nexa". Un binding desactivado (crédito cancelado), sin
+    // token o vencido no cuenta como cuenta: cartera rechaza todo pago por un
+    // binding vencido (`binding_expired`, getNexaBindingRejection), así que
+    // avisarle esa cuenta al cliente lo mandaría a una cuenta inservible.
     const [bindingNexa] = await db
       .select({ token: nexa_credit_bindings.nexa_token })
       .from(nexa_credit_bindings)
       .where(
         and(
           eq(nexa_credit_bindings.credito_id, creditoId),
-          eq(nexa_credit_bindings.activo, true)
+          eq(nexa_credit_bindings.activo, true),
+          or(
+            isNull(nexa_credit_bindings.expires_at),
+            gt(nexa_credit_bindings.expires_at, new Date())
+          )
         )
       )
       .limit(1);
@@ -1312,13 +1319,14 @@ export async function getCreditosWithUserByMesAnio(
   }
 
   if (solo_con_cuenta_nexa) {
-    // Cuenta Nexa asignada = binding activo con token (el mismo criterio con que
-    // getCreditoByNumero devuelve `cuentaNexa`). EXISTS y no join para no
+    // Cuenta Nexa asignada = binding activo, vigente y con token (el mismo
+    // criterio con que getCreditoByNumero devuelve `cuentaNexa`). EXISTS y no join para no
     // multiplicar filas (paginación) y para que el COUNT herede la condición.
     conditions.push(sql`EXISTS (
       SELECT 1 FROM ${nexa_credit_bindings} nb
       WHERE nb.credito_id = ${creditos.credito_id}
         AND nb.activo = true
+        AND (nb.expires_at IS NULL OR nb.expires_at > NOW())
         AND nb.nexa_token IS NOT NULL
     )`);
   }

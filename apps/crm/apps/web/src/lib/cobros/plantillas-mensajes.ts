@@ -292,13 +292,7 @@ export function prepararTelefonoAsesorParaEnvio(
 	| { enviar: false; motivo: string } {
 	const telefonoAsesor = telefono?.trim() ?? "";
 
-	// El aviso no-reply remite al asesor; "Nueva cuenta exclusiva Nexa" (sin
-	// aviso) también lo menciona con {telefonoAsesor}: sin número saldría
-	// "comunícate con tu ejecutivo al ." roto.
-	const remiteAlAsesor =
-		cuerpo.includes(COBROS_NO_REPLY_WARNING) ||
-		cuerpo.includes("{telefonoAsesor}");
-	if (remiteAlAsesor && !telefonoAsesor) {
+	if (cuerpo.includes(COBROS_NO_REPLY_WARNING) && !telefonoAsesor) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR };
 	}
 
@@ -530,6 +524,27 @@ export function interpolar(
  * individual las oculta con esta función.
  */
 const PLANTILLAS_SOLO_CON_CUENTA_NEXA = new Set(["cuenta_nexa_exclusiva"]);
+
+/**
+ * true si la plantilla remite al cliente al teléfono del asesor
+ * ({telefonoAsesor}) y NO lleva el aviso no-reply, que es lo único que
+ * `prepararTelefonoAsesorParaEnvio` mira. El envío individual valida el
+ * mensaje YA interpolado, donde {telefonoAsesor} ya se volvió "" y no hay forma
+ * de saber que estaba; por eso se pregunta a la plantilla elegida. Hoy solo
+ * aplica a "Nueva cuenta exclusiva Nexa": el resto lleva el aviso y ya queda
+ * cubierto.
+ */
+export function plantillaRequiereTelefonoAsesor(
+	plantillaId: string | null | undefined,
+): boolean {
+	const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === plantillaId);
+	if (!plantilla) return false;
+	const cuerpo = plantilla.cuerpoWhastapp || plantilla.cuerpo;
+	return (
+		cuerpo.includes("{telefonoAsesor}") &&
+		!cuerpo.includes(COBROS_NO_REPLY_WARNING)
+	);
+}
 
 export function plantillasDisponibles(
 	cuentaNexa: string | null | undefined,

@@ -23,6 +23,7 @@ import {
 	mensajeSmsEditable,
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereTelefonoAsesor,
 	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
@@ -1036,5 +1037,23 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 		expect(msg).toContain("🔢 *1234567890123456*");
 		expect(msg).toContain("ejecutivo al 5555-1234");
 		expect(msg).not.toContain("{");
+	});
+});
+
+describe("plantillaRequiereTelefonoAsesor", () => {
+	test("la cuenta exclusiva Nexa (sin aviso no-reply) exige el teléfono del asesor", () => {
+		expect(plantillaRequiereTelefonoAsesor("cuenta_nexa_exclusiva")).toBe(true);
+	});
+
+	test("las plantillas con aviso no-reply ya quedan cubiertas por su guard: no cambian", () => {
+		for (const id of ["al_dia", "pre_mora", "mora_30", "mora_60", "aviso_juridico"]) {
+			expect(plantillaRequiereTelefonoAsesor(id), id).toBe(false);
+		}
+	});
+
+	test("un id desconocido o vacío no exige nada", () => {
+		expect(plantillaRequiereTelefonoAsesor("nope")).toBe(false);
+		expect(plantillaRequiereTelefonoAsesor(null)).toBe(false);
+		expect(plantillaRequiereTelefonoAsesor("")).toBe(false);
 	});
 });

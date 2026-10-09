@@ -64,6 +64,7 @@ import {
 	mensajeSmsEditable,
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereTelefonoAsesor,
 	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
@@ -385,6 +386,15 @@ export function ContactoModal({
 		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
 			toast.error(
 				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
+		// Plantillas sin aviso no-reply que igual remiten al asesor ("Nueva cuenta
+		// exclusiva Nexa"): el mensaje ya viene interpolado, así que se valida
+		// contra la plantilla elegida; sin teléfono saldría "con tu ejecutivo al .".
+		if (plantillaRequiereTelefonoAsesor(plantillaId) && !telefonoAsesorLimpio) {
+			toast.error(
+				"No se puede enviar esta plantilla porque el asesor no tiene teléfono registrado",
 			);
 			return;
 		}

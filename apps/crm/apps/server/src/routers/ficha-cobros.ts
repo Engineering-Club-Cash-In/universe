@@ -7,9 +7,11 @@
  *   gestión, intentos sin contacto, próximo contacto) y el chip de estado de
  *   gestión del encabezado. Real, sale de `contactos_cobros`.
  * - `getFichaComplementos`: los bloques de la ficha que no salen del detalle
- *   del caso. Ya son reales F1 (datos personales), F2 (codeudores), F3
- *   (historial de cambios) y F5 (seguro), armados en `lib/ficha-complementos.ts`. Los que siguen en `null`
- *   tienen su `TODO(José) · tarea Fn`; el front los muestra "—" o "pronto".
+ *   del caso (F1–F7 del issue #1864). Se arman en `lib/ficha-complementos.ts`,
+ *   `lib/cambios-datos-cliente.ts`, `lib/documentos-ficha.ts` y
+ *   `lib/asistente-ia-cobros.ts`. Cada bloque es independiente: si uno falla
+ *   llega `null` y el front lo muestra "—" o "pronto".
+ *   Las mutaciones nuevas (F6, F7, F8) están en `ficha-cobros-acciones.ts`.
  *   Detalle: docs/features/cobros-02/15-ficha-360-backend.md y
  *   docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
@@ -18,7 +20,9 @@ import { and, eq, gte, ne, not, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { contactosCobros } from "../db/schema/cobros";
+import { obtenerResumenIA } from "../lib/asistente-ia-cobros";
 import { cargarHistorialCambios } from "../lib/cambios-datos-cliente";
+import { cargarDocumentos } from "../lib/documentos-ficha";
 import {
 	DIAS_VENTANA_CONTACTABILIDAD,
 	diasSinGestion,
@@ -28,7 +32,7 @@ import {
 import {
 	cargarCodeudores,
 	cargarDatosPersonales,
-	cargarHistorico,
+	cargarHistoricoDetallado,
 	cargarSeguro,
 } from "../lib/ficha-complementos";
 import {
@@ -248,33 +252,41 @@ export const fichaCobrosRouter = {
 					);
 					return null;
 				});
-			const [datosPersonales, codeudores, seguro, historialCambios, historico] =
-				await Promise.all([
-					// F1 · RENAP → lead → solicitud, campo por campo.
-					bloque<DatosPersonalesFicha>("datos personales", () =>
-						cargarDatosPersonales(ctx),
-					),
-					// F2 · Codeudores de la oportunidad del crédito; [] si no tiene.
-					bloque<CodeudorFicha[]>("codeudores", () => cargarCodeudores(ctx)),
-					// F5 · Tipo de cobertura y deducible del vehículo.
-					bloque<SeguroComplemento>("seguro", () => cargarSeguro(ctx)),
-					// F3 · Bitácora de cambios de teléfonos, correo y direcciones.
-					bloque<CambioFicha[]>("historial de cambios", () =>
-						cargarHistorialCambios(input.casoCobroId),
-					),
-					// F4 · Buckets, convenios y promesas cumplidas, lo más reciente
-					// primero.
-					bloque<HitoCredito[]>("vida del crédito", () =>
-						cargarHistorico(input.casoCobroId),
-					),
-				]);
-			// TODO(José) · tarea F6: catálogo de documentos para enviar al cliente
-			// (tarjeta de circulación, seguro) y para solicitar al supervisor
-			// (contrato, carta poder, cambio de placas, expertaje), con su envío.
-			const documentos = null as DocumentoFicha[] | null;
-			// TODO(José) · tarea F7: resumen del caso por IA (requiere aprobar el
-			// costo de la API antes de activarlo).
-			const resumenIA = null as ResumenIA | null;
+			// F4 se usa dos veces (bloque propio y contexto del asistente IA):
+			// una sola lectura de cartera.
+			const historicoDetalleP = cargarHistoricoDetallado(input.casoCobroId);
+			const historicoP = historicoDetalleP.then((h) => h.hitos);
+			const [
+				datosPersonales,
+				codeudores,
+				seguro,
+				historialCambios,
+				historico,
+				documentos,
+				resumenIA,
+			] = await Promise.all([
+				// F1 · RENAP → lead → solicitud, campo por campo.
+				bloque<DatosPersonalesFicha>("datos personales", () =>
+					cargarDatosPersonales(ctx),
+				),
+				// F2 · Codeudores de la oportunidad del crédito; [] si no tiene.
+				bloque<CodeudorFicha[]>("codeudores", () => cargarCodeudores(ctx)),
+				// F5 · Tipo de cobertura y deducible del vehículo.
+				bloque<SeguroComplemento>("seguro", () => cargarSeguro(ctx)),
+				// F3 · Bitácora de cambios de teléfonos, correo y direcciones.
+				bloque<CambioFicha[]>("historial de cambios", () =>
+					cargarHistorialCambios(input.casoCobroId),
+				),
+				// F4 · Buckets, convenios y promesas cumplidas, lo más reciente
+				// primero.
+				bloque<HitoCredito[]>("vida del crédito", () => historicoP),
+				// F6 · Catálogo: envíos con archivo y solicitudes sin pendiente.
+				bloque<DocumentoFicha[]>("documentos", () => cargarDocumentos(ctx)),
+				// F7 · Resumen por IA; null mientras COBROS_ASISTENTE_IA no sea "on".
+				bloque<ResumenIA>("resumen IA", () =>
+					obtenerResumenIA(input.casoCobroId, historicoDetalleP),
+				),
+			]);
 			return {
 				datosPersonales,
 				codeudores,

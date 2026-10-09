@@ -33,6 +33,7 @@ export const LIMITE_BITACORA = 200;
 
 export type ContextoCaso = {
 	casoCobroId: string;
+	numeroCreditoSifco: string | null;
 	telefonoPrincipal: string;
 	telefonoAlternativo: string | null;
 	leadId: string | null;
@@ -68,6 +69,7 @@ export async function resolverContextoCaso(
 
 	const base = {
 		casoCobroId,
+		numeroCreditoSifco: caso.numeroCreditoSifco,
 		telefonoPrincipal: caso.telefonoPrincipal,
 		telefonoAlternativo: caso.telefonoAlternativo,
 	};

@@ -278,10 +278,16 @@ export async function verifyUploadedDocumentInR2(params: {
 }
 
 // Descargar archivo de R2 como Buffer (para enviar a AI)
-export async function getFileBuffer(key: string): Promise<Buffer> {
+// Con `limite`, baja como mucho limite + 1 bytes: alcanza para saber que el
+// archivo se pasa sin cargarlo entero en memoria.
+export async function getFileBuffer(
+	key: string,
+	limite?: number,
+): Promise<Buffer> {
 	const command = new GetObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
+		...(limite === undefined ? {} : { Range: `bytes=0-${limite}` }),
 	});
 	const response = await r2Client.send(command);
 	const arrayBuffer = await response.Body!.transformToByteArray();

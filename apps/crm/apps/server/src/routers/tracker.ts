@@ -679,8 +679,16 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		};
 	}
 
+	// El tamaño se validó con un HEAD, pero la URL firmada pudo reemplazar el
+	// archivo después: se baja con tope y se vuelve a medir.
+	const contenido = await getFileBuffer(params.key, MAX_FILE_SIZE);
+	if (contenido.length > MAX_FILE_SIZE) {
+		return {
+			enviada: false,
+			motivo: `la factura no puede pesar más de ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
+		};
+	}
 	// El CRM admite Word o Excel, pero a la aseguradora solo va PDF o imagen.
-	const contenido = await getFileBuffer(params.key);
 	const tipo = tipoRealDeFactura(contenido);
 	if (!tipo) {
 		return {

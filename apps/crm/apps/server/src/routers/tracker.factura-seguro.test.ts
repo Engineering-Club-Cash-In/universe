@@ -31,6 +31,7 @@ let cotizacion: Array<Record<string, unknown>> = [];
 let facturaPrevia: Array<Record<string, unknown>> = [];
 // Lo que devuelve R2 para un archivo ya subido (la factura desde el CRM).
 let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
+const topesLecturaR2: Array<number | undefined> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
@@ -184,7 +185,10 @@ mock.module("../lib/storage", () => ({
 		borradosR2.push(key);
 	},
 	getFileUrl: async (key: string) => `https://r2.test/${key}`,
-	getFileBuffer: async () => contenidoR2,
+	getFileBuffer: async (_key: string, limite?: number) => {
+		topesLecturaR2.push(limite);
+		return contenidoR2;
+	},
 }));
 // Solo cambia la lista por defecto; con una lista explícita (los tests de
 // lib/factura-seguro) se comporta como el módulo real.
@@ -281,6 +285,7 @@ beforeEach(() => {
 	insertados.length = 0;
 	actualizados.length = 0;
 	condicionesActualizacion.length = 0;
+	topesLecturaR2.length = 0;
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
@@ -902,6 +907,22 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 			expect.objectContaining({ filePath: COPIA, mimeType: "application/pdf" }),
 		);
 		expect(borradosR2).toEqual([KEY_CRM]);
+	});
+
+	test("el archivo se baja con tope y uno que se pasa de 10 MB no se copia ni se envía", async () => {
+		contenidoR2 = Buffer.concat([
+			Buffer.from("%PDF-1.4"),
+			Buffer.alloc(10 * 1024 * 1024),
+		]);
+		const r = await enviar();
+		expect(topesLecturaR2).toEqual([10 * 1024 * 1024]);
+		expect(r).toEqual({
+			enviada: false,
+			motivo: "la factura no puede pesar más de 10MB",
+		});
+		expect(subidosR2).toHaveLength(0);
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
 	});
 
 	test("un PDF subido como .docx queda como .pdf en el documento, que es lo que lee el reintento", async () => {

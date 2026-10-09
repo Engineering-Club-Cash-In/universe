@@ -42,3 +42,46 @@ export async function conectarAntesDe(
   }
 }
 
+
+/**
+ * Toma el advisory lock sondeando con `pg_try_advisory_lock` hasta `limite`.
+ *
+ * El plazo se revisa también DESPUÉS de un intento exitoso: si la conexión, la
+ * pausa o la query tardaron y el lock se obtuvo vencido el plazo, se suelta ahí
+ * mismo y se lanza el timeout. Un lock aceptado tarde dejaría correr la
+ * operación cuando el cliente ya dio la llamada por perdida.
+ *
+ * Devuelve solo si el lock quedó tomado dentro del plazo (el llamador lo suelta).
+ */
+export async function sondearLockAntesDe(
+  lockConn: PaymentAdvisoryLockConnection,
+  namespace: number,
+  credito_id: number,
+  limite: number,
+  esperaMaximaMs: number,
+  pausaMs: number,
+): Promise<void> {
+  for (;;) {
+    const res = (await lockConn.query(
+      "SELECT pg_try_advisory_lock($1, $2) AS tomado",
+      [namespace, credito_id],
+    )) as { rows?: { tomado?: boolean }[] };
+    const tomado = Boolean(res?.rows?.[0]?.tomado);
+    const vencido = Date.now() >= limite;
+    if (tomado && !vencido) return;
+    if (tomado) {
+      try {
+        await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+          namespace,
+          credito_id,
+        ]);
+      } catch (unlockError) {
+        console.error("⚠️ Error liberando advisory lock vencido:", unlockError);
+      }
+    }
+    if (vencido) {
+      throw new PaymentAdvisoryLockTimeoutError(credito_id, esperaMaximaMs);
+    }
+    await new Promise((r) => setTimeout(r, pausaMs));
+  }
+}

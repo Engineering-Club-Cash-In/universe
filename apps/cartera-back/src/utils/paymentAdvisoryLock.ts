@@ -1,7 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { lockPool } from "../database";
 import { CARTERA_SCHEMA } from "../database/db/schema";
-import { conectarAntesDe, PaymentAdvisoryLockTimeoutError } from "./paymentAdvisoryLockPlazo";
+import {
+  conectarAntesDe,
+  PaymentAdvisoryLockTimeoutError,
+  sondearLockAntesDe,
+} from "./paymentAdvisoryLockPlazo";
 
 export { PaymentAdvisoryLockTimeoutError };
 
@@ -120,17 +124,14 @@ export async function withPaymentAdvisoryLock<T>(
         credito_id,
       ]);
     } else {
-      for (;;) {
-        const res = (await lockConn.query(
-          "SELECT pg_try_advisory_lock($1, $2) AS tomado",
-          [PAYMENT_ADVISORY_LOCK_NAMESPACE, credito_id]
-        )) as { rows?: { tomado?: boolean }[] };
-        if (res?.rows?.[0]?.tomado) break;
-        if (Date.now() >= limite) {
-          throw new PaymentAdvisoryLockTimeoutError(credito_id, opciones?.esperaMaximaMs ?? 0);
-        }
-        await new Promise((r) => setTimeout(r, PAUSA_ENTRE_INTENTOS_MS));
-      }
+      await sondearLockAntesDe(
+        lockConn,
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+        limite,
+        opciones?.esperaMaximaMs ?? 0,
+        PAUSA_ENTRE_INTENTOS_MS,
+      );
     }
     tomado = true;
     heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });

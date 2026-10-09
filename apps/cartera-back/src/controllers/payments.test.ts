@@ -14,6 +14,8 @@ let mockDbTransactionCalls = 0;
 let mockLockQueries: string[] = [];
 let mockInsertCalls = 0;
 let mockInsertError: Error | null = null;
+// Filas que recibe el insert (para revisar montos calculados).
+let mockInsertedValues: any[] = [];
 
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
@@ -124,11 +126,14 @@ const databaseMockFactory = () => {
       insert: mock(() => {
         mockInsertCalls++;
         return {
-          values: () => ({
-            returning: () => mockInsertError
-              ? Promise.reject(mockInsertError)
-              : Promise.resolve([{ id: 801 }])
-          })
+          values: (v: any) => {
+            mockInsertedValues.push(v);
+            return {
+              returning: () => mockInsertError
+                ? Promise.reject(mockInsertError)
+                : Promise.resolve([{ id: 801 }])
+            };
+          }
         };
       }),
       update: mock(() => ({
@@ -154,7 +159,8 @@ const databaseMockFactory = () => {
               monto_aportado: c.montoAportado,
               porcentaje_participacion_inversionista: c.porcentajeParticipacion,
               porcentaje_cash_in: "0.00",
-              fecha_inicio_participacion: "2025-12-01",
+              // Solo los tests que lo piden cambian la fecha; el resto conserva la genérica.
+              fecha_inicio_participacion: c.fechaInicioEspejo ?? "2025-12-01",
               status: "completado"
             }))
           ))
@@ -234,6 +240,8 @@ let mockMontoRestarValidacion = new Big(0);
 let mockMontoRestarCalculo = new Big(0);
 let mockSumaComprasPendientes = new Big(0);
 let mockSumaComprasCompletadasMesActual = new Big(0);
+let mockSumaComprasMesAnterior = new Big(0);
+let mockFechaCompraMesAnterior: Date | null = null;
 mock.module("../utils/comprasAjuste", () => ({
   calcularAjusteCompras: mock(() => Promise.resolve({
     montoRestarValidacion: mockMontoRestarValidacion,
@@ -247,7 +255,8 @@ mock.module("../utils/comprasAjuste", () => ({
     montoRestarCalculo: mockMontoRestarCalculo
   })),
   columnasCompraAjuste: {},
-  obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(new Big(0))),
+  obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(mockSumaComprasMesAnterior)),
+  obtenerFechaCompraMesAnterior: mock(() => Promise.resolve(mockFechaCompraMesAnterior)),
   obtenerSumaComprasPendientes: mock(() => Promise.resolve(mockSumaComprasPendientes)),
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
@@ -271,6 +280,9 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockMontoRestarCalculo = new Big(0);
     mockSumaComprasPendientes = new Big(0);
     mockSumaComprasCompletadasMesActual = new Big(0);
+    mockSumaComprasMesAnterior = new Big(0);
+    mockFechaCompraMesAnterior = null;
+    mockInsertedValues = [];
     mockLockedCreditRows = null;
     mockCreditLockCalls = 0;
     mockLockPoolConnectCalls = 0;
@@ -452,6 +464,47 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     expect(mockLockPoolConnectCalls).toBe(0);
     expect(mockDbTransactionCalls).toBe(1);
     expect(mockInsertCalls).toBe(1);
+  });
+
+  // Caso real CRM-95bf1ef0 (Boca-Terra): compra de cartera el 8 sep y ampliación el
+  // 6 oct. La ampliación re-selló fecha_inicio_participacion a octubre, así que al
+  // generar octubre la compra de septiembre cobraba el mes completo en vez de sus días.
+  const espejoAmpliado = (fechaInicioEspejo: string) => [
+    {
+      creditoId: 101,
+      inversionistaId: 99,
+      montoAportado: "62800.00000000",
+      porcentajeParticipacion: "80.00",
+      fechaInicioEspejo,
+      numeroCreditoSifco: "CRED-101",
+      estadoDevolucion: "NO_APLICA",
+    },
+  ];
+  const interesInsertado = () =>
+    mockInsertedValues.flat().find((v: any) => v && "abono_interes" in v);
+
+  it("proporcional por fecha de la compra: ampliación del mes re-selló fecha_inicio", async () => {
+    mockCreditosInversionistaEspejo = espejoAmpliado("2026-10-06");
+    mockFechaCompraMesAnterior = new Date("2026-09-08T12:00:00Z"); // compra #990
+    mockSumaComprasMesAnterior = new Big(35000);
+    // La ampliación de octubre (27,800) sale de la base: cobra desde noviembre.
+    mockMontoRestarCalculo = new Big(27800);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // Base 35,000 × 10% × 80% = 2,800 de mes completo → 22/30 días (30 − 8).
+    const fila = interesInsertado();
+    expect(fila.abono_interes).toBe("2053.33");
+    expect(fila.abono_iva_12).toBe("246.4");
+  });
+
+  it("sin compra del mes anterior sigue usando fecha_inicio_participacion", async () => {
+    mockCreditosInversionistaEspejo = espejoAmpliado("2026-09-08");
+    mockMontoRestarCalculo = new Big(27800);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    expect(interesInsertado().abono_interes).toBe("2053.33");
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {

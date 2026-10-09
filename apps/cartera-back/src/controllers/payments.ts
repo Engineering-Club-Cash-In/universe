@@ -28,7 +28,8 @@ import {
 import { updateMora } from "./latefee";
 import { anularPagoYRestituirMoraSerializado } from "./anularPagoMora";
 import { CreditWithoutInvestorMirrorError } from "../utils/espejoInversionistasGuard";
-import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerFechaCompraMesAnterior, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
+import { partesGT } from "../utils/functions/diaGuatemala";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
 import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
@@ -809,14 +810,28 @@ export async function insertPagosCreditoInversionistas(
       ? fechaDelPeriodo.getFullYear() - 1
       : fechaDelPeriodo.getFullYear();
 
+    // Día de entrada: el de la compra de cartera del mes anterior (su fecha_completada,
+    // leída en hora GT). Si hubo una ampliación este mes, completeEspejo ya re-selló
+    // fecha_inicio_participacion al mes en curso y con ella la compra del mes anterior
+    // perdía su proporcional. Sin compra del mes anterior, se usa fecha_inicio como antes.
+    const fechaCompraMesAnterior = isCube
+      ? null
+      : await obtenerFechaCompraMesAnterior(credito_id, inv.inversionista_id, fechaDelPeriodo);
+    const fechaEntrada = fechaCompraMesAnterior
+      ? (() => {
+          const p = partesGT(fechaCompraMesAnterior);
+          return new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
+        })()
+      : fechaInicio;
+
     const esMesAnterior =
       !isCube &&
-      fechaInicio !== null &&
-      fechaInicio.getMonth() === mesAnterior &&
-      fechaInicio.getFullYear() === anioMesAnterior &&
+      fechaEntrada !== null &&
+      fechaEntrada.getMonth() === mesAnterior &&
+      fechaEntrada.getFullYear() === anioMesAnterior &&
       // Si inicia el día 1, participó el mes COMPLETO → interés normal (no proporcional).
       // Prorratear con (diasDelMes - 1) cobraría un día de menos y descuadra por centavos.
-      fechaInicio.getDate() !== 1;
+      fechaEntrada.getDate() !== 1;
 
     let bigInteres: Big;
     let bigIVA: Big;
@@ -833,7 +848,7 @@ export async function insertPagosCreditoInversionistas(
       // mes, la resta daría 0 y cobraría cero interés pese a haber participado.
       // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo.
       const { diasDelMes, diasProporcionales } = calcularVentanaProporcional(
-        fechaInicio!
+        fechaEntrada!
       );
 
       // ¿El inversionista ya era partícipe y además hizo compras este mes?
@@ -852,8 +867,10 @@ export async function insertPagosCreditoInversionistas(
         inv.inversionista_id,
       );
 
-      // Base proporcional = espejo SIN las pendientes (que aportan 0).
-      const montoAportadoBig = new Big(inv.monto_aportado || 0).minus(sumaPendientes);
+      // Base proporcional = espejo SIN las pendientes ni las compras completadas en el
+      // período (montoBaseCalculo, ver calcularAjusteCompras): esas cobran desde el
+      // mes siguiente y no pueden contarse como monto viejo.
+      const montoAportadoBig = montoBaseCalculo;
       // monto viejo = lo que ya tenía antes de las compras del mes (cobra mes completo).
       // Si las compras igualan o superan el espejo, queda 0 → actúa como hoy (todo proporcional).
       const montoViejo = montoAportadoBig.minus(sumaCompras);

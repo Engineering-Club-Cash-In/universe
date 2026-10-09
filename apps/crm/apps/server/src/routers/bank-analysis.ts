@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
-import { generateObject } from "ai";
+import { generateObject, NoObjectGeneratedError } from "ai";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -74,6 +74,17 @@ const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const AI_TIMEOUT_MS = 180_000; // 3 minutos timeout para la IA (p90 real ~55s; los PDFs grandes pasaban de 2)
+// Red de seguridad contra loops: Gemini a veces no cierra un número (3333...) y
+// sigue hasta su límite de 65k tokens, ~3,5 minutos que acababan en timeout. La
+// causa conocida (`estados_cuenta_detectados`) ya no se pide, pero cualquier
+// campo numérico podría repetirlo. En Gemini 3 el tope incluye el razonamiento
+// (hasta ~13k tokens) más la respuesta (~600-1.100): con 24k un loop se corta
+// en ~80s y todavía queda tiempo para volver a generar.
+const AI_MAX_OUTPUT_TOKENS = 24_576;
+// Generaciones por intento del usuario, todas dentro del mismo AI_TIMEOUT_MS
+const AI_MAX_GENERATIONS = 3;
+// No se vuelve a generar si no alcanza para una corrida normal (p90 ~55s)
+const AI_MIN_MS_TO_REGENERATE = 60_000;
 
 // Mismo nombre de variable que usa cartera-back para no tener dos tasas distintas.
 const RAW_USD_EXCHANGE_RATE = Number(process.env.USD_EXCHANGE_RATE);
@@ -1336,26 +1347,48 @@ export const bankAnalysisRouter = {
 				// persistencia financiera y ciclo real de adjuntos.
 				const initial = await runInitialBankStatementHandlerCore({
 					generateAnalysis: async () => {
+						const deadline = Date.now() + AI_TIMEOUT_MS;
 						try {
-							const result = await generateObject({
-								model: google("gemini-3-flash-preview"),
-								schema: bankStatementAnalysisSchema,
-								abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
-								messages: [
-									{ role: "system", content: BANK_ANALYSIS_PROMPT },
-									{
-										role: "user",
-										content: [
+							for (let generation = 1; ; generation++) {
+								try {
+									const result = await generateObject({
+										model: google("gemini-3-flash-preview"),
+										schema: bankStatementAnalysisSchema,
+										maxOutputTokens: AI_MAX_OUTPUT_TOKENS,
+										abortSignal: AbortSignal.timeout(
+											Math.max(deadline - Date.now(), 1),
+										),
+										messages: [
+											{ role: "system", content: BANK_ANALYSIS_PROMPT },
 											{
-												type: "text",
-												text: "Analiza los siguientes estados de cuenta bancarios:",
+												role: "user",
+												content: [
+													{
+														type: "text",
+														text: "Analiza los siguientes estados de cuenta bancarios:",
+													},
+													...fileParts,
+												],
 											},
-											...fileParts,
 										],
-									},
-								],
-							});
-							return result.object;
+									});
+									return result.object;
+								} catch (error) {
+									// Respuesta truncada o que no cumple el schema: la misma
+									// entrada suele salir bien al volver a generar
+									const regenerar =
+										NoObjectGeneratedError.isInstance(error) &&
+										generation < AI_MAX_GENERATIONS &&
+										deadline - Date.now() >= AI_MIN_MS_TO_REGENERATE;
+									if (!regenerar) throw error;
+									console.warn("La IA devolvió un análisis inválido; se regenera:", {
+										leadId: input.leadId,
+										generation,
+										finishReason: error.finishReason,
+										outputTokens: error.usage?.outputTokens,
+									});
+								}
+							}
 						} catch (error) {
 							const isTimeout =
 								error instanceof Error && error.name === "TimeoutError";

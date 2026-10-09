@@ -46,7 +46,10 @@ export const bankStatementAnalysisSchema = z.object({
 		})
 		.nullable()
 		.catch(null),
-	estados_cuenta_detectados: z.number().int().min(1).nullable().catch(null),
+	// Ya no se pide `estados_cuenta_detectados`: nada lo usaba desde que lo
+	// reemplazó cobertura_por_archivo, y Gemini a veces no cerraba ese entero
+	// (3333...) hasta agotar los tokens, lo que acababa en timeout. Los análisis
+	// guardados en full_analysis lo conservan; solo dejó de pedírsele a la IA.
 	// Evidencia informada por la IA; el servidor valida meses e índices y resuelve
 	// contradicciones. Es opcional para mantener compatibles análisis históricos.
 	cobertura_por_archivo: z
@@ -103,12 +106,7 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
      - porcentaje: Qué tan recomendado es ese día frente a los otros dos (0-100, entero). El primero debe tener el porcentaje más alto.
    - justificacion: 1-2 frases explicando el orden de los 3 candidatos según el patrón detectado. Si el ingreso es irregular, elige los 3 días más conservadores y acláralo; no inventes precisión.
 
-5. **estados_cuenta_detectados**: Cuenta cuántos ESTADOS DE CUENTA (documentos) DISTINTOS te fueron proporcionados en total, sin importar cuántos archivos PDF se subieron ni cuántos meses cubren.
-   - Un solo archivo PDF puede contener varios estados de cuenta consecutivos fusionados en un solo documento. Detecta el inicio de cada uno por señales como: una portada o encabezado nuevo, el nombre del banco/logo repitiéndose desde la primera página, un número de cuenta o periodo declarado que reinicia, o un salto que no continúa cronológicamente al estado anterior. Cuenta cada uno como un documento distinto.
-   - Si dos estados de cuenta se traslapan en fechas (ej. uno cubre enero a marzo y otro cubre solo marzo), igual cuentan como 2 estados de cuenta distintos: NO los fusiones en uno solo por compartir mes.
-   - Devuelve el número REAL que identificaste, sin limitarlo artificialmente.
-
-6. **cobertura_por_archivo**: Evidencia mensual por cada archivo recibido en esta misma llamada.
+5. **cobertura_por_archivo**: Evidencia mensual por cada archivo recibido en esta misma llamada.
    - Devuelve exactamente un objeto por archivo: { indice_archivo, meses }.
    - indice_archivo es el índice explícito (0 a N-1) indicado junto al PDF.
    - meses contiene solo meses calendario inequívocos en formato canónico YYYY-MM (ej. "2026-06").
@@ -116,7 +114,7 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
    - Si el año falta, el periodo es ilegible o hay contradicción, devuelve meses: [] para ese archivo. No adivines ni uses el mes actual.
    - Esta procedencia debe salir de la misma llamada de análisis; no solicites ni presupongas otra llamada.
 
-7. **moneda**: La moneda en la que están expresadas TODAS las cifras que devuelves.
+6. **moneda**: La moneda en la que están expresadas TODAS las cifras que devuelves.
    **NUNCA conviertas montos de una moneda a otra.** Reporta los valores exactamente como aparecen impresos en los estados de cuenta; la conversión la hace el sistema después.
    - "GTQ": todos los estados de cuenta están en quetzales.
    - "USD": todos los estados de cuenta están en dólares.

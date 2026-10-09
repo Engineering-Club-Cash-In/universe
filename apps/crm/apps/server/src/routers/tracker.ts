@@ -668,7 +668,8 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	}
 
 	// El CRM admite Word o Excel, pero a la aseguradora solo va PDF o imagen.
-	const tipo = tipoRealDeFactura(await getFileBuffer(params.key));
+	const contenido = await getFileBuffer(params.key);
+	const tipo = tipoRealDeFactura(contenido);
 	if (!tipo) {
 		return {
 			enviada: false,
@@ -676,64 +677,95 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		};
 	}
 
-	const creadoAt = new Date();
-	const registro = await db.transaction(async (tx) => {
-		const [vigente] = await tx
-			.select({
-				status: opportunities.status,
-				closurePercentage: salesStages.closurePercentage,
-				companyId: opportunities.companyId,
-			})
-			.from(opportunities)
-			.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
-			.where(eq(opportunities.id, fila.id))
-			.for("update", { of: opportunities });
-		const [previa] = await tx
-			.select({ id: insuranceInvoiceSubmissions.id })
-			.from(insuranceInvoiceSubmissions)
-			.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
-		if (!vigente || vigente.status !== fila.status) return null;
-		const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
-			...vigente,
-			yaSubida: !!previa,
-		});
-		if (!bajoBloqueo.ok) return null;
+	// La URL firmada de la subida se puede reusar 10 minutos: lo que se manda,
+	// ahora y en el reintento, es una copia que solo escribe el server, con los
+	// bytes que pasaron la validación.
+	const nombre = nombreDeFactura(params.nombre, tipo);
+	const copia = `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`;
+	await uploadBufferToR2(copia, contenido, tipo);
 
-		const { aseguradora, datos, destinatarios } =
-			await datosDelCorreoBajoBloqueo(tx, fila);
-		const correo = armarCorreoFacturaSeguro(datos, creadoAt);
-		const [envio] = await tx
-			.insert(insuranceInvoiceSubmissions)
-			.values({
-				opportunityId: fila.id,
-				companyId: vigente.companyId,
-				documentId: params.documentId,
-				insuranceProvider: aseguradora,
-				recipients: destinatarios,
-				status: destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
-				correoAsunto: correo.asunto,
-				correoHtml: correo.html,
-				submittedBy: params.userId,
-				createdAt: creadoAt,
-				updatedAt: creadoAt,
-			})
-			.returning({
-				id: insuranceInvoiceSubmissions.id,
-				intento: insuranceInvoiceSubmissions.intento,
+	const creadoAt = new Date();
+	const registrar = () =>
+		db.transaction(async (tx) => {
+			const [vigente] = await tx
+				.select({
+					status: opportunities.status,
+					closurePercentage: salesStages.closurePercentage,
+					companyId: opportunities.companyId,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+				.where(eq(opportunities.id, fila.id))
+				.for("update", { of: opportunities });
+			const [previa] = await tx
+				.select({ id: insuranceInvoiceSubmissions.id })
+				.from(insuranceInvoiceSubmissions)
+				.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
+			if (!vigente || vigente.status !== fila.status) return null;
+			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
+				...vigente,
+				yaSubida: !!previa,
 			});
-		return { envio, aseguradora, destinatarios, correo };
-	});
+			if (!bajoBloqueo.ok) return null;
+
+			// El documento pasa a la copia, con el nombre que lleva el adjunto: el
+			// reintento lee de aquí.
+			await tx
+				.update(opportunityDocuments)
+				.set({
+					filePath: copia,
+					filename: copia.split("/").pop() ?? copia,
+					originalName: nombre,
+					mimeType: tipo,
+					size: contenido.length,
+				})
+				.where(eq(opportunityDocuments.id, params.documentId));
+			const { aseguradora, datos, destinatarios } =
+				await datosDelCorreoBajoBloqueo(tx, fila);
+			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
+			const [envio] = await tx
+				.insert(insuranceInvoiceSubmissions)
+				.values({
+					opportunityId: fila.id,
+					companyId: vigente.companyId,
+					documentId: params.documentId,
+					insuranceProvider: aseguradora,
+					recipients: destinatarios,
+					status: destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
+					correoAsunto: correo.asunto,
+					correoHtml: correo.html,
+					submittedBy: params.userId,
+					createdAt: creadoAt,
+					updatedAt: creadoAt,
+				})
+				.returning({
+					id: insuranceInvoiceSubmissions.id,
+					intento: insuranceInvoiceSubmissions.intento,
+				});
+			return { envio, aseguradora, destinatarios, correo };
+		});
+
+	let registro: Awaited<ReturnType<typeof registrar>>;
+	try {
+		registro = await registrar();
+	} catch (error) {
+		await deleteFileFromR2(copia).catch(() => {});
+		throw error;
+	}
 	if (!registro) {
+		await deleteFileFromR2(copia).catch(() => {});
 		return {
 			enviada: false,
 			motivo: "la oportunidad cambió mientras se guardaba la factura",
 		};
 	}
+	// El documento ya apunta a la copia: el archivo de la URL firmada sobra.
+	await deleteFileFromR2(params.key).catch(() => {});
 
 	const envio = await enviarYRegistrar({
 		registro: registro.envio,
 		destinatarios: registro.destinatarios,
-		archivo: { key: params.key, nombre: nombreDeFactura(params.nombre, tipo) },
+		archivo: { key: copia, nombre },
 		correo: registro.correo,
 	});
 	return { enviada: true, envio, aseguradora: registro.aseguradora };

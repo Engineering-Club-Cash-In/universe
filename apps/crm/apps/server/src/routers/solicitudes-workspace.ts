@@ -14,6 +14,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { solicitudesRebajaMoraCobros } from "../db/schema/cobros";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
+import { isUniqueViolation } from "../lib/db-errors";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import {
 	aCentavos,
@@ -241,18 +242,31 @@ export const solicitudesWorkspaceRouter = {
 				});
 			}
 
-			const [creada] = await db
-				.insert(solicitudesRebajaMoraCobros)
-				.values({
-					casoCobroId: input.casoCobroId,
-					numeroCreditoSifco: caso.numeroSifco,
-					moraSnapshot: mora,
-					montoSolicitado: input.monto,
-					notas: input.notas,
-					estado: "pendiente",
-					solicitadoPor: context.userId,
-				})
-				.returning();
+			let creada: typeof solicitudesRebajaMoraCobros.$inferSelect | undefined;
+			try {
+				[creada] = await db
+					.insert(solicitudesRebajaMoraCobros)
+					.values({
+						casoCobroId: input.casoCobroId,
+						numeroCreditoSifco: caso.numeroSifco,
+						moraSnapshot: mora,
+						montoSolicitado: input.monto,
+						notas: input.notas,
+						estado: "pendiente",
+						solicitadoPor: context.userId,
+					})
+					.returning();
+			} catch (error) {
+				// Dos envíos a la vez (doble clic): el índice único de solicitud abierta
+				// deja pasar uno; el otro recibe el mismo conflicto que el chequeo de arriba.
+				if (isUniqueViolation(error)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Este caso ya tiene una solicitud de rebaja abierta. Espere la decisión del supervisor.",
+					});
+				}
+				throw error;
+			}
 			if (!creada) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "No se pudo registrar la solicitud.",

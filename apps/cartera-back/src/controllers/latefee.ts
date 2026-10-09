@@ -2946,12 +2946,23 @@ export async function condonarMoraParcial({
       }
 
       const moraNueva = moraAnterior.minus(montoSolicitado).toFixed(2);
+      // Si la rebaja se come toda la mora, es una condonación total: se cierra la
+      // mora y se levanta el estado igual que en condonarMora, no se deja una mora
+      // activa en 0 que sigue bloqueando al cliente hasta el próximo cron.
+      const agotaMora = new Big(moraNueva).lte(0);
       const [updatedMora] = await tx
         .update(moras_credito)
-        .set({ monto_mora: moraNueva, updated_at: new Date() })
+        .set(agotaMora ? { monto_mora: "0", activa: false, updated_at: new Date() } : { monto_mora: moraNueva, updated_at: new Date() })
         .where(and(eq(moras_credito.mora_id, moraActual.id), eq(moras_credito.activa, true)))
         .returning();
       if (!updatedMora) return { kind: "not_found" as const };
+      if (agotaMora) {
+        // Como condonarMora: no levanta un estado que puso una persona.
+        await tx
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(and(eq(creditos.credito_id, credito_id), notInArray(creditos.statusCredit, STATUS_NO_PISAR)));
+      }
 
       const [condonacion] = await tx
         .insert(moras_condonaciones)

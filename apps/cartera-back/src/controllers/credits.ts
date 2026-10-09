@@ -83,6 +83,17 @@ import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
 import { reclamosVivosDeRubros } from "./rubros";
 
 
+// Estados en que cartera acepta un pago Nexa: la MISMA lista que `credit_not_payable`
+// en nexaPayments.ts (un test las mantiene iguales). En otros estados —p. ej.
+// PENDIENTE_CANCELACION, que deja el binding activo— el token existe pero el pago
+// se rechaza, así que no se le ofrece al cliente como cuenta.
+export const NEXA_PAYABLE_CREDIT_STATUSES = [
+  "ACTIVO",
+  "MOROSO",
+  "EN_CONVENIO",
+  "INCOBRABLE",
+] as const;
+
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
   try {
     // 1. Buscar el crédito con su usuario
@@ -134,7 +145,11 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .limit(1);
-    const cuentaNexa = bindingNexa?.token ?? null;
+    const cuentaNexa = (NEXA_PAYABLE_CREDIT_STATUSES as readonly string[]).includes(
+      currentCredit.creditos.statusCredit
+    )
+      ? (bindingNexa?.token ?? null)
+      : null;
 
     const contractSummary =
       currentCredit.creditos.statusCredit === "CANCELADO"
@@ -1319,8 +1334,12 @@ export async function getCreditosWithUserByMesAnio(
   }
 
   if (solo_con_cuenta_nexa) {
-    // Cuenta Nexa asignada = binding activo, vigente y con token (el mismo
-    // criterio con que getCreditoByNumero devuelve `cuentaNexa`). EXISTS y no join para no
+    conditions.push(
+      inArray(creditos.statusCredit, [...NEXA_PAYABLE_CREDIT_STATUSES])
+    );
+    // Cuenta Nexa asignada = binding activo, vigente y con token, de un crédito
+    // en estado pagable (el mismo criterio con que getCreditoByNumero devuelve
+    // `cuentaNexa`). EXISTS y no join para no
     // multiplicar filas (paginación) y para que el COUNT herede la condición.
     conditions.push(sql`EXISTS (
       SELECT 1 FROM ${nexa_credit_bindings} nb

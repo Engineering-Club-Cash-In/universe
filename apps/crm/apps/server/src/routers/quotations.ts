@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -537,30 +537,7 @@ export const quotationsRouter = {
 					.from(opportunityCloseQuotations)
 					.where(eq(opportunityCloseQuotations.quotationId, input.quotationId))
 					.limit(1);
-				// Cierres anteriores al registro: la factura reconstruye la cotización
-				// entre las que existían al cerrar, así que ninguna de esas se borra.
-				const [cierreSinRegistro] = existing.opportunityId
-					? await tx
-							.select({ cerradaAt: opportunities.actualCloseDate })
-							.from(opportunities)
-							.leftJoin(
-								opportunityCloseQuotations,
-								eq(opportunityCloseQuotations.opportunityId, opportunities.id),
-							)
-							.where(
-								and(
-									eq(opportunities.id, existing.opportunityId),
-									eq(opportunities.status, "won"),
-									isNull(opportunityCloseQuotations.opportunityId),
-								),
-							)
-							.limit(1)
-					: [];
-				const candidataDelCierre =
-					!!cierreSinRegistro &&
-					(!cierreSinRegistro.cerradaAt ||
-						existing.createdAt <= cierreSinRegistro.cerradaAt);
-				if (delCierre || candidataDelCierre) {
+				if (delCierre) {
 					throw new ORPCError("CONFLICT", {
 						message:
 							"No se puede eliminar la cotización con la que se cerró el crédito",

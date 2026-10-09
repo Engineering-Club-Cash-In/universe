@@ -1802,6 +1802,30 @@ export const crmRouter = {
 							oportunidadesConOrigenActualizado.push(activeOpportunity.id);
 						}
 					}
+
+					// Las que heredaban WhatsApp del lead también pierden la exención,
+					// aunque su origen no se sincronice: necesitan su consulta al 20%.
+					if (
+						updateData.source !== undefined &&
+						updateData.source !== "Whatsapp" &&
+						leadAntesDelUpdate?.source === "Whatsapp"
+					) {
+						const heredaban = await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(
+								and(
+									eq(opportunities.leadId, id),
+									eq(opportunities.status, "open"),
+									isNull(opportunities.source),
+								),
+							);
+						for (const oportunidad of heredaban) {
+							if (!oportunidadesConOrigenActualizado.includes(oportunidad.id)) {
+								oportunidadesConOrigenActualizado.push(oportunidad.id);
+							}
+						}
+					}
 				}
 
 				return filas;

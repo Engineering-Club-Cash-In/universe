@@ -34,6 +34,8 @@ type Fila = Record<string, unknown>;
 const filasPorTabla = new Map<unknown, Fila[]>();
 let secuenciaEtapas: Fila[][] = [];
 const lecturasPorTabla: unknown[] = [];
+/** El WHERE de cada SELECT, para saber qué filas pidió el código. */
+const condicionesDeLectura: unknown[] = [];
 let respuestaExecute: unknown = [];
 let alEjecutar: (() => void) | null = null;
 let candadoBuroOcupado = false;
@@ -72,7 +74,10 @@ function constructorSelect() {
 		},
 		innerJoin: () => b,
 		leftJoin: () => b,
-		where: () => b,
+		where: (condicion: unknown) => {
+			condicionesDeLectura.push(condicion);
+			return b;
+		},
 		orderBy: () => b,
 		groupBy: () => b,
 		for: () => b,
@@ -271,6 +276,7 @@ beforeEach(async () => {
 	await instalarDbFalso();
 	filasPorTabla.clear();
 	lecturasPorTabla.length = 0;
+	condicionesDeLectura.length = 0;
 	secuenciaEtapas = [];
 	respuestaExecute = [];
 	alEjecutar = null;
@@ -1276,6 +1282,37 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		);
 		expect(marca?.valores).toEqual({ buroRevalidacionAl30: true });
 		expect(sqlDeLaCondicion(marca?.condicion).sql).toContain("is null");
+	});
+
+	test("las oportunidades al 20% que heredaban WhatsApp también disparan su consulta", async () => {
+		const MAS_RECIENTE = "11111111-1111-4111-8111-111111111111";
+		const ANTERIOR = "22222222-2222-4222-8222-222222222222";
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{ ...base, id: MAS_RECIENTE, porcentaje: 20, source: null, leadDpi: DPI },
+			{ ...base, id: ANTERIOR, porcentaje: 20, source: null, leadDpi: DPI },
+		]);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		// El origen se sincroniza solo en la más reciente, como antes del feature.
+		expect(
+			escriturasSobreOportunidades().filter(
+				(escritura) => escritura.valores.source === "referral",
+			),
+		).toHaveLength(1);
+		// La consulta posterior al guardado alcanza a las dos.
+		const consultadas = condicionesDeLectura.flatMap(
+			(condicion) => sqlDeLaCondicion(condicion).params,
+		);
+		expect(consultadas).toContain(MAS_RECIENTE);
+		expect(consultadas).toContain(ANTERIOR);
 	});
 
 	test("sincronizar el origen conserva el canal explícito de otras oportunidades", async () => {

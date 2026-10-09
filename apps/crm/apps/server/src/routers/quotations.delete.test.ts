@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { opportunities } from "../db/schema/crm";
 import {
 	opportunityCloseQuotations,
 	quotations,
@@ -16,6 +17,7 @@ function select() {
 			table = value;
 			return builder;
 		},
+		leftJoin: () => builder,
 		where: () => builder,
 		limit: () => builder,
 		for(modo: string) {
@@ -62,7 +64,14 @@ beforeEach(() => {
 	mock.module("../db", () => ({ db: fakeDb }));
 	rows.clear();
 	eventos.length = 0;
-	rows.set(quotations, [{ id: quotationId, salesUserId: "admin-1" }]);
+	rows.set(quotations, [
+		{
+			id: quotationId,
+			salesUserId: "admin-1",
+			opportunityId: "opp-1",
+			createdAt: new Date("2026-08-01"),
+		},
+	]);
 });
 
 describe("deleteQuotation y la cotización del cierre", () => {
@@ -75,5 +84,16 @@ describe("deleteQuotation y la cotización del cierre", () => {
 		rows.set(opportunityCloseQuotations, [{ opportunityId: "opp-1" }]);
 		await expect(borrar()).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(eventos).toEqual(["update:quotations"]);
+	});
+
+	test("un cierre anterior al registro: no se borran las cotizaciones que existían al cerrar", async () => {
+		rows.set(opportunities, [{ cerradaAt: new Date("2026-09-01") }]);
+		await expect(borrar()).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(eventos).toEqual(["update:quotations"]);
+	});
+
+	test("en ese mismo cierre, una cotización creada después sí se borra", async () => {
+		rows.set(opportunities, [{ cerradaAt: new Date("2026-07-01") }]);
+		await expect(borrar()).resolves.toEqual({ success: true });
 	});
 });

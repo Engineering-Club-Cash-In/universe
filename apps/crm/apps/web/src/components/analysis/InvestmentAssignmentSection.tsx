@@ -94,8 +94,10 @@ type InvestmentOpportunity = Awaited<
 
 export function InvestmentAssignmentSection({
 	initialOpportunityId,
+	userRole,
 }: {
 	initialOpportunityId?: string;
+	userRole?: string | null;
 } = {}) {
 	const queryClient = useQueryClient();
 	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
@@ -1370,7 +1372,7 @@ export function InvestmentAssignmentSection({
 				open={isOpportunityModalOpen}
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
-				userRole="analyst"
+				userRole={userRole}
 				readOnly
 			/>
 		</div>

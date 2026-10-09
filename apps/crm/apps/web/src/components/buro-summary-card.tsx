@@ -85,6 +85,7 @@ export function BuroSummaryCard({
 		refetchInterval: open ? 15_000 : false,
 	});
 	const resumen = resumenBuroQuery.data;
+	const resumenActualizadoEn = resumenBuroQuery.dataUpdatedAt;
 	const refetchResumenBuro = resumenBuroQuery.refetch;
 	const permitirReejecucion = resumen?.permitirReejecucion ?? false;
 	useEffect(() => {
@@ -107,13 +108,20 @@ export function BuroSummaryCard({
 		consultasIniciadas.current.add(clave);
 		void client
 			.asegurarBuroOportunidad({ opportunityId })
-			.catch((error) => {
-				console.error("No se pudo iniciar Buró", error);
-			})
-			.finally(() => {
+			.then(() => {
 				void refetchResumenBuro();
+			})
+			.catch((error) => {
+				consultasIniciadas.current.delete(clave);
+				console.error("No se pudo iniciar Buró", error);
 			});
-	}, [open, opportunityId, resumen, refetchResumenBuro]);
+	}, [
+		open,
+		opportunityId,
+		resumen,
+		resumenActualizadoEn,
+		refetchResumenBuro,
+	]);
 
 	return (
 		<>

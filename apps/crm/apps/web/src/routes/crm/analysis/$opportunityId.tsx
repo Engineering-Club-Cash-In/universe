@@ -215,6 +215,7 @@ function OpportunityDocumentsPage() {
 		refetchInterval: 15_000,
 	});
 	const consultasBuroIniciadas = useRef(new Set<string>());
+	const resumenBuroActualizadoEn = resumenBuro.dataUpdatedAt;
 	const refetchResumenBuro = resumenBuro.refetch;
 	useEffect(() => {
 		const resumen = resumenBuro.data;
@@ -236,13 +237,19 @@ function OpportunityDocumentsPage() {
 		consultasBuroIniciadas.current.add(clave);
 		void client
 			.asegurarBuroOportunidad({ opportunityId })
-			.catch((error) => {
-				console.error("No se pudo iniciar Buró", error);
-			})
-			.finally(() => {
+			.then(() => {
 				void refetchResumenBuro();
+			})
+			.catch((error) => {
+				consultasBuroIniciadas.current.delete(clave);
+				console.error("No se pudo iniciar Buró", error);
 			});
-	}, [opportunityId, resumenBuro.data, refetchResumenBuro]);
+	}, [
+		opportunityId,
+		resumenBuro.data,
+		resumenBuroActualizadoEn,
+		refetchResumenBuro,
+	]);
 
 	// Validation query for approve button
 	const validation = useQuery({
@@ -734,7 +741,7 @@ function OpportunityDocumentsPage() {
 					}
 				}}
 				opportunity={selectedOpportunityForModal}
-				userRole="analyst"
+				userRole={userProfile.data?.role}
 				readOnly
 				onNavigateToLead={() => {
 					setIsOpportunityModalOpen(false);

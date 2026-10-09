@@ -4,6 +4,7 @@ import {
 	clasificarErrorCartera,
 	ESTADOS_SIN_REBAJA,
 	esAprobacionColgada,
+	PLAZO_APLICACION_REBAJA_MS,
 	quetzalesRebaja,
 	UMBRAL_APROBACION_COLGADA_MS,
 } from "./rebaja-mora-reglas";
@@ -121,4 +122,13 @@ describe("esAprobacionColgada", () => {
 test("ESTADOS_SIN_REBAJA incluye convenio e incobrable", () => {
 	expect(ESTADOS_SIN_REBAJA).toContain("EN_CONVENIO");
 	expect(ESTADOS_SIN_REBAJA).toContain("INCOBRABLE");
+});
+
+describe("plazo de la aplicación en cartera", () => {
+	test("vence mucho antes de que el job de colgadas reclame la aprobación", () => {
+		// La llamada tiene plazo propio (token + POST) más el timeout del fetch (30 s).
+		expect(PLAZO_APLICACION_REBAJA_MS + 60_000).toBeLessThan(
+			UMBRAL_APROBACION_COLGADA_MS,
+		);
+	});
 });

@@ -129,3 +129,10 @@ export function esAprobacionColgada(
 }
 
 export const UMBRAL_APROBACION_COLGADA_MS = 10 * 60 * 1000;
+
+/**
+ * Plazo de toda la llamada a cartera al aplicar una rebaja (token + POST). Tiene
+ * que ser MUY menor que el umbral de colgada: el job solo puede devolver a
+ * `error_aplicacion` una aprobación cuyo POST ya no puede despacharse.
+ */
+export const PLAZO_APLICACION_REBAJA_MS = 3 * 60 * 1000;

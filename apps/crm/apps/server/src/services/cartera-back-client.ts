@@ -3009,32 +3009,51 @@ export class CarteraBackClient {
 		motivo: string;
 		usuarioEmail: string;
 		referenciaExterna: string;
+		/**
+		 * Plazo de TODA la operación. El timeout del fetch arranca después de
+		 * obtener el token: sin esta señal, una autenticación colgada deja el POST
+		 * por despacharse mucho después de que el CRM dio la aplicación por perdida.
+		 */
+		signal?: AbortSignal;
 	}): Promise<{
 		success: true;
 		kind: "ok" | "ya_aplicada";
 		condonacion_id?: number;
 		mora_nueva?: string;
 	}> {
-		const response = await this.request<{
+		// La invalidación va en `finally`: si la respuesta se pierde (timeout, corte)
+		// cartera pudo haber commiteado la rebaja igual, y lo cacheado con la mora
+		// vieja no puede quedar sirviéndose hasta que expire.
+		let response: {
 			success: boolean;
 			kind?: "ok" | "ya_aplicada";
 			condonacion_id?: number;
 			mora_nueva?: string;
 			message?: string;
-		}>("/mora/condonar-parcial", {
-			method: "POST",
-			body: JSON.stringify({
-				credito_id: input.creditoId,
-				monto: input.monto,
-				motivo: input.motivo,
-				usuario_email: input.usuarioEmail,
-				referencia_externa: input.referenciaExterna,
-			}),
-		});
-		// Cambia la mora del crédito: lo cacheado que la muestra queda viejo.
-		this.cache.invalidate("/credito?");
-		this.cache.invalidate("getAllCredits");
-		this.cache.invalidate("stats");
+		};
+		try {
+			response = await this.request<{
+				success: boolean;
+				kind?: "ok" | "ya_aplicada";
+				condonacion_id?: number;
+				mora_nueva?: string;
+				message?: string;
+			}>("/mora/condonar-parcial", {
+				method: "POST",
+				signal: input.signal,
+				body: JSON.stringify({
+					credito_id: input.creditoId,
+					monto: input.monto,
+					motivo: input.motivo,
+					usuario_email: input.usuarioEmail,
+					referencia_externa: input.referenciaExterna,
+				}),
+			});
+		} finally {
+			this.cache.invalidate("/credito?");
+			this.cache.invalidate("getAllCredits");
+			this.cache.invalidate("stats");
+		}
 		if (!response?.success || !response.kind) {
 			throw new Error(
 				response?.message || "cartera-back no confirmó la rebaja de mora",

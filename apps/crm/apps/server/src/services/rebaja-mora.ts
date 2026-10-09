@@ -20,6 +20,7 @@ import { notifications } from "../db/schema/notifications";
 import {
 	clasificarErrorCartera,
 	type ErrorCarteraRebaja,
+	PLAZO_APLICACION_REBAJA_MS,
 	quetzalesRebaja,
 } from "../lib/rebaja-mora-reglas";
 import { CarteraBackHttpError, carteraBackClient } from "./cartera-back-client";
@@ -264,6 +265,7 @@ export async function aplicarRebajaEnCartera(params: {
 			motivo: `Rebaja de mora aprobada por ${params.emailSupervisor}: ${params.solicitud.notas}`,
 			usuarioEmail: params.emailSupervisor,
 			referenciaExterna: params.solicitud.id,
+			signal: AbortSignal.timeout(PLAZO_APLICACION_REBAJA_MS),
 		});
 		return {
 			ok: true,

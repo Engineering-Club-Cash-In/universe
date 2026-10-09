@@ -499,7 +499,7 @@ export const solicitudesWorkspaceRouter = {
 
 			// Cartera ya descontó: `aplicada` gana sobre un `error_aplicacion` que el
 			// job de colgadas haya puesto mientras tanto, pero no sobre un cierre final.
-			await db
+			const [cerradaAplicada] = await db
 				.update(solicitudesRebajaMoraCobros)
 				.set({
 					estado: "aplicada",
@@ -514,7 +514,19 @@ export const solicitudesWorkspaceRouter = {
 							"error_aplicacion",
 						]),
 					),
+				)
+				.returning({ id: solicitudesRebajaMoraCobros.id });
+			if (!cerradaAplicada) {
+				// Cartera descontó pero la fila ya estaba cerrada por otro lado: no se
+				// avisa como aplicada algo que el CRM no registró.
+				console.error(
+					`[rebaja-mora] cartera aplicó la solicitud ${solicitud.id} pero ya estaba cerrada en el CRM`,
 				);
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Cartera aplicó la rebaja, pero la solicitud ya figuraba cerrada. Avise a sistemas para conciliarla.",
+				});
+			}
 
 			await avisarDecisionRebaja({
 				solicitudId: solicitud.id,

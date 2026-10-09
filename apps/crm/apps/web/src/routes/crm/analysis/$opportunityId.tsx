@@ -220,6 +220,7 @@ function OpportunityDocumentsPage() {
 		refetchInterval: 15_000,
 	});
 	const consultasBuroIniciadas = useRef(new Set<string>());
+	const consultaBuroAutomaticaEnCurso = useRef(false);
 	const resumenBuroActualizadoEn = resumenBuro.dataUpdatedAt;
 	const refetchResumenBuro = resumenBuro.refetch;
 	useEffect(() => {
@@ -236,6 +237,7 @@ function OpportunityDocumentsPage() {
 			return;
 		}
 		if (
+			consultaBuroAutomaticaEnCurso.current ||
 			validandoBuroRenap ||
 			!resumen.permitirReejecucion ||
 			resumen.exento ||
@@ -245,17 +247,18 @@ function OpportunityDocumentsPage() {
 		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasBuroIniciadas.current.has(clave)) return;
 		consultasBuroIniciadas.current.add(clave);
+		consultaBuroAutomaticaEnCurso.current = true;
 		setValidandoBuroAutomaticamente(true);
 		void client
 			.asegurarBuroOportunidad({ opportunityId })
-			.then(() => {
-				void refetchResumenBuro();
-			})
+			// Libera la guarda con el resumen ya actualizado, no con uno parcial.
+			.then(() => refetchResumenBuro())
 			.catch((error) => {
 				consultasBuroIniciadas.current.delete(clave);
 				console.error("No se pudo iniciar Buró", error);
 			})
 			.finally(() => {
+				consultaBuroAutomaticaEnCurso.current = false;
 				setValidandoBuroAutomaticamente(false);
 			});
 	}, [

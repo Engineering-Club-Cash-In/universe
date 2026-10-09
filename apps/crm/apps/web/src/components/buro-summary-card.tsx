@@ -81,6 +81,7 @@ export function BuroSummaryCard({
 	const [validacionDetalleEnCurso, setValidacionDetalleEnCurso] =
 		useState(false);
 	const consultasIniciadas = useRef(new Set<string>());
+	const consultaAutomaticaEnCurso = useRef(false);
 	const resumenBuroQuery = useQuery({
 		...orpc.getResumenBuroOportunidad.queryOptions({
 			input: { opportunityId },
@@ -105,6 +106,7 @@ export function BuroSummaryCard({
 			return;
 		}
 		if (
+			consultaAutomaticaEnCurso.current ||
 			validacionDetalleEnCurso ||
 			!resumen.permitirReejecucion ||
 			resumen.exento ||
@@ -114,17 +116,18 @@ export function BuroSummaryCard({
 		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasIniciadas.current.has(clave)) return;
 		consultasIniciadas.current.add(clave);
+		consultaAutomaticaEnCurso.current = true;
 		setValidacionAutomaticaEnCurso(true);
 		void client
 			.asegurarBuroOportunidad({ opportunityId })
-			.then(() => {
-				void refetchResumenBuro();
-			})
+			// Libera la guarda con el resumen ya actualizado, no con uno parcial.
+			.then(() => refetchResumenBuro())
 			.catch((error) => {
 				consultasIniciadas.current.delete(clave);
 				console.error("No se pudo iniciar Buró", error);
 			})
 			.finally(() => {
+				consultaAutomaticaEnCurso.current = false;
 				setValidacionAutomaticaEnCurso(false);
 			});
 	}, [

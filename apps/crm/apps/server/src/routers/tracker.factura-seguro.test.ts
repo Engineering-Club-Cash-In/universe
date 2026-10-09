@@ -39,6 +39,9 @@ let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
 // La oportunidad leída FOR UPDATE, si cambió desde la lectura inicial.
 let casoBajoBloqueo: Record<string, unknown> | undefined;
+// Lo que devuelve una relectura sin bloqueo después de la primera lectura.
+let casoReleido: Record<string, unknown> | undefined;
+let lecturasCaso = 0;
 // Cotización que guardó el cierre, y el filtro con el que se buscó la cotización.
 let cotizacionDelCierre: Array<{ quotationId: string }> = [];
 let filtroCotizacion: unknown;
@@ -101,9 +104,13 @@ const dbFalsa = {
 			if (tabla === partnerAccounts)
 				return cadena(() => [{ passwordChangedAt: new Date("2026-01-01") }]);
 			if (tabla === opportunities)
-				return cadena((bajoBloqueo) => [
-					bajoBloqueo && casoBajoBloqueo ? casoBajoBloqueo : caso,
-				]);
+				return cadena((bajoBloqueo) => {
+					lecturasCaso++;
+					if (bajoBloqueo && casoBajoBloqueo) return [casoBajoBloqueo];
+					if (!bajoBloqueo && casoReleido && lecturasCaso > 1)
+						return [casoReleido];
+					return [caso];
+				});
 			if (tabla === quotations)
 				return cadena(
 					() => {
@@ -290,6 +297,8 @@ beforeEach(() => {
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
 	documentosConKey = [];
+	casoReleido = undefined;
+	lecturasCaso = 0;
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
@@ -928,6 +937,14 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(subidosR2).toHaveLength(0);
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
+	});
+
+	test("el correo usa el vehículo vigente al registrar, no el de antes de validar", async () => {
+		casoReleido = { ...caso, vehicleMake: "Honda", vehicleModel: "Civic" };
+		await enviar();
+		const html = (correos[0] as { correo: { html: string } }).correo.html;
+		expect(html).toContain("Honda Civic");
+		expect(html).not.toContain("Toyota");
 	});
 
 	test("si otro documento usa la key original, no se borra", async () => {

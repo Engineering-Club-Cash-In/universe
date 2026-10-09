@@ -3863,8 +3863,6 @@ export const crmRouter = {
 						.select({
 							source: opportunities.source,
 							leadSource: leads.source,
-							leadId: opportunities.leadId,
-							leadDpi: leads.dpi,
 							porcentaje: salesStages.closurePercentage,
 						})
 						.from(opportunities)
@@ -3879,17 +3877,17 @@ export const crmRouter = {
 							(origenActual.source === null &&
 								origenActual.leadSource === "Whatsapp"))
 					) {
-						const exencion = await resolverExencionPorBot(
-							{
-								opportunityId: id,
-								source: origenActual.source,
-								leadSource: origenActual.leadSource,
-								leadId: origenActual.leadId,
-								leadDpi: origenActual.leadDpi,
-							},
-							tx,
-						);
-						if (exencion.exento) {
+						const [validacionTitular] = await tx
+							.select({ id: opportunityValidations.id })
+							.from(opportunityValidations)
+							.where(
+								and(
+									eq(opportunityValidations.opportunityId, id),
+									isNull(opportunityValidations.coDebtorId),
+								),
+							)
+							.limit(1);
+						if (!validacionTitular) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:
 									"Regresa la oportunidad al 30% antes de corregir su origen de WhatsApp; debe revalidarse el Buró.",

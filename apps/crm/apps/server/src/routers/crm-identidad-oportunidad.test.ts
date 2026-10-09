@@ -1332,7 +1332,7 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 	});
 
 	test("no cambia directamente el origen de una oportunidad aprobada al 40%", async () => {
-		prepararEvidenciaBot();
+		prepararEvidenciaBot(false);
 		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
 		filasPorTabla.set(opportunities, [
 			{

@@ -1069,6 +1069,8 @@ export const resumenesIaCobros = pgTable("resumenes_ia_cobros", {
 	// Reserva de la generación en curso: huella y hasta cuándo vale.
 	generandoHuella: text("generando_huella"),
 	generandoHasta: timestamp("generando_hasta"),
+	// Huella del contexto observado en `contexto_en` (la última observación).
+	observadoHuella: text("observado_huella"),
 });
 
 // F7 (#1864) · Preguntas al asistente del caso: traza de lo que se preguntó y

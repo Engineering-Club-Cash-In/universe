@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS "public"."resumenes_ia_cobros" (
 	"generado_en" timestamp DEFAULT now() NOT NULL,
 	"contexto_en" timestamp,
 	"generando_huella" text,
-	"generando_hasta" timestamp
+	"generando_hasta" timestamp,
+	"observado_huella" text
 );
 -- Instante (reloj de la BD) en que se leyó el contexto que originó la fila:
 -- ordena las versiones del resumen por contexto y no por cuándo terminó la
@@ -89,6 +90,10 @@ ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "contexto_en
 -- llama al modelo por huella sin retener una transacción mientras responde.
 ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "generando_huella" text;
 ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "generando_hasta" timestamp;
+-- Huella del contexto observado en `contexto_en` (la última observación de
+-- cualquier petición, haya o no resumen de esa huella): una generación solo se
+-- guarda si ninguna observación posterior es de otro contexto.
+ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "observado_huella" text;
 
 -- F7 · Preguntas al asistente: traza y tope diario por usuario.
 CREATE TABLE IF NOT EXISTS "public"."preguntas_ia_cobros" (

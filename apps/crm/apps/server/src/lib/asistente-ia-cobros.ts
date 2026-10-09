@@ -30,7 +30,7 @@ import { createHash } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject, generateText } from "ai";
-import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
@@ -732,7 +732,7 @@ async function reservarGeneracion(
 				// generación: una A lenta que termina después de leída B no es
 				// más nueva que B.
 				masNueva: inicio
-					? sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`
+					? hayObservacionMasNueva(huella, inicio)
 					: sql<boolean>`false`,
 				// Cualquier reserva vigente del caso, de la huella que sea: una sola
 				// generación a la vez; quien llega después espera y reevalúa.
@@ -742,10 +742,6 @@ async function reservarGeneracion(
 			.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
 			.limit(1);
 		if (previa && previa.huella !== SIN_RESUMEN && previa.huella === huella) {
-			// Reutilizar la fila también confirma que el contexto de esta petición
-			// es el vigente: una generación de otra huella, de un contexto más
-			// viejo, que reserve después no debe pisarla.
-			if (inicio) await avanzarContexto(tx, casoCobroId, huella, inicio);
 			return {
 				tipo: "listo",
 				resumen: {
@@ -782,57 +778,60 @@ async function reservarGeneracion(
 	});
 }
 
-/** Ejecutor de consultas: la conexión o una transacción. */
-type Ejecutor = Pick<typeof db, "update">;
-
 /**
- * Avanza el `contexto_en` de la fila guardada con esa huella al instante de
- * lectura dado, si es más nuevo. Va siempre bajo el lock del caso.
+ * Registra, en la BD y bajo el lock del caso, que en `inicio` se observó el
+ * contexto de esa huella (la última observación gana, ordenada por el instante
+ * de lectura). TODA petición lo hace antes de decidir qué devolver o generar:
+ * devolver un guardado, compartir una generación en curso, esperar una reserva
+ * o declarar «nada que resumir» son la misma cosa, una observación. Una
+ * generación solo se guarda si ninguna observación posterior es de otro
+ * contexto, así que una de un contexto anterior no pisa a la más nueva sin
+ * importar por qué camino llegó la observación. Una fila por apertura de la
+ * ficha (se crea una fila vacía, sin resumen, si el caso aún no tenía).
  */
-async function avanzarContexto(
-	ejecutor: Ejecutor,
+export async function registrarObservacion(
 	casoCobroId: string,
-	huella: string,
+	huellaObservada: string,
 	inicio: string,
 ): Promise<void> {
-	await ejecutor
-		.update(resumenesIaCobros)
-		.set({ contextoEn: sql`${inicio}::timestamp` as unknown as Date })
-		.where(
-			and(
-				eq(resumenesIaCobros.casoCobroId, casoCobroId),
-				eq(resumenesIaCobros.huella, huella),
-				or(
-					isNull(resumenesIaCobros.contextoEn),
-					sql`${resumenesIaCobros.contextoEn} < ${inicio}::timestamp`,
-				),
-			),
-		);
-}
-
-/**
- * Deja constancia, en la BD y bajo el lock del caso, de que el contexto leído
- * en `inicio` es el del resumen guardado con esa huella: una generación de un
- * contexto anterior (otra huella, iniciada antes) ve un `contexto_en` más nuevo
- * que el suyo y no lo pisa. Un UPDATE de una fila por apertura de la ficha.
- */
-export async function confirmarContextoVigente(
-	casoCobroId: string,
-	huella: string,
-	inicio: string,
-): Promise<void> {
+	const obs = {
+		contextoEn: sql`${inicio}::timestamp` as unknown as Date,
+		observadoHuella: huellaObservada,
+	};
 	await db
 		.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
-			await avanzarContexto(tx, casoCobroId, huella, inicio);
+			await tx
+				.insert(resumenesIaCobros)
+				.values({
+					casoCobroId,
+					texto: "",
+					etiquetas: [],
+					huella: SIN_RESUMEN,
+					modelo: MODELO_ASISTENTE,
+					...obs,
+				})
+				.onConflictDoUpdate({
+					target: resumenesIaCobros.casoCobroId,
+					set: obs,
+					setWhere: sql`${resumenesIaCobros.contextoEn} IS NULL OR ${resumenesIaCobros.contextoEn} < ${inicio}::timestamp`,
+				});
 		})
 		.catch((error) =>
 			console.error(
-				`[AsistenteIA] confirmar contexto de ${casoCobroId}:`,
+				`[AsistenteIA] registrar observación de ${casoCobroId}:`,
 				error,
 			),
 		);
 }
+
+/**
+ * ¿Hay una observación posterior a `inicio` de OTRO contexto? Entonces lo que
+ * esta generación produzca nacería viejo. Observaciones posteriores del mismo
+ * contexto no cuentan.
+ */
+const hayObservacionMasNueva = (huella: string, inicio: string) =>
+	sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp AND ${resumenesIaCobros.observadoHuella} IS DISTINCT FROM ${huella}`;
 
 /** Suelta la reserva propia (el modelo falló o el contexto dejó de valer). */
 async function liberarReserva(casoCobroId: string, huella: string) {
@@ -918,17 +917,25 @@ export async function generarYGuardar(
 			contextoEn: inicio
 				? (sql`${inicio}::timestamp` as unknown as Date)
 				: null,
+			observadoHuella: huella,
 			generandoHuella: null,
 			generandoHasta: null,
 		};
+		// Al actualizar, `contexto_en` no retrocede: puede haber una observación
+		// posterior de este mismo contexto.
+		const filaSet = inicio
+			? {
+					...fila,
+					contextoEn:
+						sql`GREATEST(${resumenesIaCobros.contextoEn}, ${inicio}::timestamp)` as unknown as Date,
+				}
+			: fila;
 		const guardada = await db.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
 			if (!sigueVigente()) return null;
 			if (inicio) {
 				const [mas] = await tx
-					.select({
-						masNueva: sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`,
-					})
+					.select({ masNueva: hayObservacionMasNueva(huella, inicio) })
 					.from(resumenesIaCobros)
 					.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
 					.limit(1);
@@ -939,7 +946,7 @@ export async function generarYGuardar(
 				.values({ casoCobroId, ...fila })
 				.onConflictDoUpdate({
 					target: resumenesIaCobros.casoCobroId,
-					set: fila,
+					set: filaSet,
 				})
 				.returning({ generadoEn: resumenesIaCobros.generadoEn });
 			return g;
@@ -1067,6 +1074,7 @@ export async function obtenerResumenIA(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
 			contextoEn: sql`${inicio}::timestamp` as unknown as Date,
+			observadoHuella: SIN_RESUMEN,
 			generandoHuella: null,
 			generandoHasta: null,
 		};
@@ -1093,12 +1101,15 @@ export async function obtenerResumenIA(
 		return null;
 	}
 	const huella = huellaContexto(contexto);
+	// Se registra la observación ANTES de decidir: devolver el guardado,
+	// compartir una generación en curso o esperar una reserva son todas
+	// observaciones de este contexto, y una generación de otro contexto más
+	// viejo (aquí o en otro proceso) no debe guardarse después de esta.
+	await registrarObservacion(casoCobroId, huella, inicio);
 	if (guardado && guardado.huella === huella) {
 		// El contexto volvió a ser el del resumen guardado (p. ej. se restauró una
-		// promesa editada): cualquier generación en curso, aquí o en otro proceso,
-		// es de un contexto distinto y más viejo que este y no debe guardarse.
+		// promesa editada): lo que se esté generando de otro contexto es viejo.
 		invalidarGeneracion(casoCobroId, inicio);
-		await confirmarContextoVigente(casoCobroId, huella, inicio);
 		return comoResumen(guardado);
 	}
 

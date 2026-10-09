@@ -11,17 +11,17 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 ## Estado
 
 > [!WARNING]
-> **La migración `0078_cobros_ficha_360.sql` (PR2, mergeado) hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `guardarTelefonosCaso`, `updateContactInfoCobros` y `agregarHallazgoATelefonosCaso` **fallan**, porque escriben la bitácora en la misma transacción. Si ya se corrió antes del commit `707e0c555`, la FK `realizado_por` quedó sin `ON DELETE SET NULL`: ajustarla con `ALTER TABLE public.cambios_datos_cliente_cobros DROP CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey, ADD CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey FOREIGN KEY (realizado_por) REFERENCES public."user"(id) ON DELETE SET NULL;`. **Este PR (F4) no trae migración.**
+> **La migración `0078_cobros_ficha_360.sql` (PR2, mergeado) hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `guardarTelefonosCaso`, `updateContactInfoCobros` y `agregarHallazgoATelefonosCaso` **fallan**, porque escriben la bitácora en la misma transacción. Si ya se corrió antes del commit `707e0c555`, la FK `realizado_por` quedó sin `ON DELETE SET NULL`: ajustarla con `ALTER TABLE public.cambios_datos_cliente_cobros DROP CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey, ADD CONSTRAINT cambios_datos_cliente_cobros_realizado_por_fkey FOREIGN KEY (realizado_por) REFERENCES public."user"(id) ON DELETE SET NULL;`. **El PR4 (F6 + F7) la amplía con 3 tablas (`solicitudes_documentos_cobros`, `resumenes_ia_cobros` y `preguntas_ia_cobros`): hay que volver a correrla**, es idempotente. Sin las tablas nuevas, `getFichaComplementos` no se cae (el bloque `documentos` llega `null`), pero solicitar un documento y preguntar a la IA fallan.
 
 | Tarea | Qué es | Estado | Dónde quedó |
 | --- | --- | --- | --- |
 | **F1** | Datos personales del titular | ✅ Mergeado (PR1, #1912) | `cargarDatosPersonales` en `lib/ficha-complementos.ts` |
 | **F2** | Codeudores | ✅ Mergeado (PR1, #1912) | `cargarCodeudores` en `lib/ficha-complementos.ts` |
 | **F3** | Historial de cambios del cliente | ✅ Mergeado (PR2, #1913) | Tabla `cambios_datos_cliente_cobros` · `lib/cambios-datos-cliente.ts` |
-| **F4** | Vida del crédito | ✅ Hecho (PR3, este) | `cargarHistorico` en `lib/ficha-complementos.ts` |
+| **F4** | Vida del crédito | ✅ Mergeado (PR3, #1917) | `cargarHistorico` en `lib/ficha-complementos.ts` |
 | **F5** | Seguro | ✅ Mergeado (PR1, #1912) · ⚠️ sin datos | `cargarSeguro` en `lib/ficha-complementos.ts` |
-| **F6** | Documentos | ⏳ PR4 | Catálogo, envío por WhatsApp y solicitudes al supervisor |
-| **F7** | Asistente IA | ⏳ PR4 | Gemini detrás de `COBROS_ASISTENTE_IA=on` (apagado) |
+| **F6** | Documentos | ✅ Backend hecho (PR4, este) · ⚠️ falta cablear el front | `lib/documentos-ficha.ts` · tabla `solicitudes_documentos_cobros` |
+| **F7** | Asistente IA | ✅ Hecho (PR4, este), **apagado** (`COBROS_ASISTENTE_IA`) · ⚠️ preguntas sin front | `lib/asistente-ia-cobros.ts` · tablas `resumenes_ia_cobros` y `preguntas_ia_cobros` |
 | **F8** | Editar direcciones | ✅ Mergeado (PR2, #1913) · ⚠️ falta cablear el front | `guardarDireccionesCaso` · `lib/direcciones-caso.ts` |
 
 ---
@@ -99,6 +99,35 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 - `coberturas`: «Deducible Q2,500.00» si `vehicles.deducible` es mayor que 0.
 - **⚠️ Sin datos hoy:** ningún vehículo tiene esas columnas llenas. Para que la tarjeta muestre algo, ventas o el cierre del crédito tienen que capturarlas. Si negocio prefiere un texto fijo por aseguradora, se cambia en `armarSeguro`.
 
+### F6 · Documentos
+
+- **Catálogo** (`getFichaComplementos.documentos`): las seis filas que ya dibuja el front, con las mismas claves y textos. `disponible`:
+  - enviar: si hay archivo;
+  - solicitar: si no hay otra solicitud pendiente del mismo documento.
+- **Archivo a enviar:** el PDF más reciente, primero de `vehicle_documents` y si no de `opportunity_documents`. Con contrato manda el vehículo del contrato: los PDF de la oportunidad solo valen si esta apunta al mismo vehículo. En el mensaje, la oportunidad solo aporta el nombre si es la del cliente del contrato.
+  - Tarjeta de circulación: tipos `tarjeta_circulacion` o `vehicle_title`.
+  - Seguro: `seguro_vehiculo` (la póliza); si no hay, la cobertura general de `COBERTURA_SEGURO_PDF_URL` (la misma de `send-coverage-document.ts`).
+  - Solo PDF: el template lleva header de documento. En la base local hay 883 PDF y 5 JPG de estos tipos.
+- **`enviarDocumentoClienteWhatsapp({ casoCobroId, clave })`:** mismo envío que el estado de cuenta: template `mensaje_adjunto`, teléfono del caso, modo de prueba (`TEST_MESSAGE`), cierre con el asesor y traza en `cobros_send_logs` (`plantilla_id` `documento_tarjeta_circulacion` o `documento_seguro`). La URL firmada **no** va al log. Errores: sin SIFCO, sin teléfono, sin documento, falla de envío.
+- **Solicitudes** (`solicitudes_documentos_cobros`):
+  - `solicitarDocumentoCaso({ casoCobroId, clave, comentario? })`: asesor con acceso al caso. Una segunda pendiente del mismo documento responde CONFLICT («Ya hay una solicitud pendiente de «Expertaje» para este caso.»), garantizado por un índice único parcial.
+  - `getSolicitudesDocumentos({ estado?, casoCobroId?, limite })`: solo supervisor y admin. Es la fuente para «documentos por autorizar» de S1 (doc 17) y para el chip «Documentos» de la bandeja de Solicitudes (doc 18).
+  - `resolverSolicitudDocumento({ solicitudId, decision, nota? })`: solo supervisor y admin. Solo resuelve pendientes; resolverla dos veces responde CONFLICT.
+
+### F7 · Asistente IA
+
+- **Apagado por defecto:** solo corre con `COBROS_ASISTENTE_IA=on` y `GOOGLE_GENERATIVE_AI_API_KEY`. Apagado: `resumenIA = null` (la ficha muestra «Pronto») y `preguntarAsistenteCaso` responde «El asistente IA todavía no está activo.».
+- **Modelo:** `gemini-3-flash-preview`, el mismo de la lectura de boletas. Cero reintentos y 30 s de timeout.
+- **Qué ve el modelo:** el estado VIVO del crédito (estado, días de mora, cuotas vencidas, cuota mensual y mora acumulada, leídos de cartera como la ficha; los campos de mora de `casos_cobros` están desactualizados y no se usan), hasta 10 hitos de F4 y las últimas 20 gestiones (fecha, método, resultado, comentario, monto y fecha prometidos, estado de la promesa). **No** se le mandan el nombre, el DPI ni los teléfonos del cliente, y en los comentarios y en la pregunta del asesor se tapan los números de 8 dígitos o más («[número]»), los correos («[correo]») y las palabras de los nombres de las personas del caso («[nombre]»: titular con todos sus componentes —contrato, lead, RENAP y solicitudes—, codeudores, referencias y cónyuge). Los nombres se leen del cliente del contrato y de la oportunidad resuelta (si difieren, de ambos). Una palabra de cobranza que sea apellido de alguien del caso («Mora», «San») se tapa escrita con mayúscula y se conserva en minúscula. El nombre del cliente en cartera también cuenta como fuente del titular (un caso sin contrato ni oportunidad solo lo conoce cartera). Si no se pueden leer los nombres, o no hay ningún nombre del titular, no se llama al modelo. Los nombres copiados en las gestiones a referencias se leen todos, sin el límite de la bitácora. Si el crédito se pone al día y no tiene historial, el resumen guardado se borra. Con el crédito en mora se resume aunque no haya gestiones ni hitos; al día y sin historial, no.
+- **Resumen** (`resumenes_ia_cobros`, uno por caso): texto de 3 a 5 oraciones y de 1 a 4 etiquetas. Se guarda con la **huella** (hash) de los datos que se le mandaron:
+  - misma huella → se devuelve el guardado, sin llamar al modelo;
+  - huella distinta → se devuelve el guardado y se regenera atrás; si mientras se genera cambian otra vez los datos, la generación nueva espera a la que va y solo corre la más reciente;
+  - sin guardado → la ficha espera hasta 8 s; si no llega, sigue sin él y queda listo para la próxima vez;
+  - si cartera no respondió, no se regenera (la huella cambiaría solo por faltar los hitos);
+  - una sola generación en curso por caso.
+  - si cartera no responde (ni el crédito ni el historial) no se genera nada con datos a medias: se devuelve el guardado o `null`.
+- **Preguntas** (`preguntarAsistenteCaso({ casoCobroId, pregunta })` → `{ respuesta }`): con el mismo contexto, máximo 6 oraciones. Cada pregunta queda en `preguntas_ia_cobros` (también las fallidas) y hay un tope de **30 preguntas por usuario en 24 horas**.
+
 ### F8 · Editar direcciones
 
 - **Columnas nuevas** en `casos_cobros`: `direccion_residencia_cobros`, `empresa_trabajo_cobros` y `direccion_trabajo_cobros`. NULL = la de origen.
@@ -111,6 +140,13 @@ Los cargadores y el armado de cada bloque están en `lib/ficha-complementos.ts`.
 ---
 
 ## Pruebas hechas
+
+**PR4 (F6, F7), 2026-10-08:**
+- Pruebas nuevas: `lib/documentos-ficha.test.ts` (6: disponibilidad del catálogo, texto del mensaje y datos del mensaje sin contrato) y `lib/asistente-ia-cobros.test.ts` (4: números tapados, contexto sin datos personales, huella estable y bandera). 50 en verde junto con las de F1 a F4; `bunx tsc -b` sin errores.
+- La 0078 ampliada se aplicó dos veces seguidas en la base local sin errores.
+- **F6, con los procedimientos reales** (`call` de oRPC contra la base local, cartera-back en `:9000`): catálogo con la tarjeta y el seguro disponibles; las 4 solicitudes pasan a no disponibles; repetir una pendiente da CONFLICT («Ya hay una solicitud pendiente de «Contrato de crédito» para este caso.»); una clave inválida se rechaza; la bandeja las lista; un asesor recibe FORBIDDEN en la bandeja y al resolver; aprobar con nota «ok» y rechazar con «falta firma» funcionan; resolver otra vez da CONFLICT; un caso sin tarjeta responde «Este crédito no tiene ese documento cargado.». La URL firmada del PDF responde 206 con `application/pdf`.
+- **Envío por WhatsApp** (en modo de prueba, `TEST_MESSAGE=true`, sale a `getTestPhone(2)` = 35219722): llegaron los dos PDF (tarjeta de circulación y seguro) con su texto, y quedó la traza `documento_tarjeta_circulacion` y `documento_seguro` en `cobros_send_logs` sin la URL firmada. Con un caso **sin contrato** el mensaje sale con el nombre y el vehículo de la oportunidad: «Edgar Zepeda, te compartimos la tarjeta de circulación de tu Toyota Corolla 2015, placas P-319JJL…».
+- **F7:** apagado → `null` y la pregunta responde «El asistente IA todavía no está activo.». Encendido: el primer resumen tarda entre 6 y 8 s, el segundo sale de caché en unos 40 ms sin llamar al modelo. QA en pantalla: el primer resumen decía «al día, 0 días» en un crédito con 23 días de mora (usaba `casos_cobros`); corregido para leer cartera. La pregunta «¿Cuánto debe pagar hoy el cliente para ponerse al día?» responde Q6,038.34 (cuota Q4,392.02 + mora Q1,646.32), igual que «Total a pagar hoy» de la ficha.
 
 **PR3 (F4), 2026-10-08:**
 - `lib/ficha-historico.test.ts` (3, en verde): textos de bucket, convenios vigente/completado/deshecho/pendiente y promesas mezcladas por fecha. `bunx tsc -b` sin errores.
@@ -161,7 +197,14 @@ Comentarios de Codex del PR2 (F3 y F8), corregidos antes del merge:
 | El teléfono agregado desde un hallazgo no quedaba en la bitácora | **Cierto, corregido** en `agregarHallazgoATelefonosCaso`. |
 | Eliminar a un asesor con historial fallaba por la FK | **Cierto, corregido** (`ON DELETE SET NULL`, también en la 0078 porque aún no estaba mergeada). Probado con una transacción que se deshace: la fila se conserva con autor nulo. |
 
-Revisión interna:
+Revisión interna (F6 y F7):
+
+| Hallazgo | Resultado |
+| --- | --- |
+| El mensaje de WhatsApp de F6 salía sin nombre ni vehículo cuando el caso no tiene contrato | **Cierto, corregido.** El 56.3% de los casos activos (777 de 1,379) tiene `contrato_id` nulo. Nombre y vehículo salen del contrato y, lo que falte, de la oportunidad y el lead (`combinarDatosMensaje`). El estado de cuenta (`send-estado-cuenta-whatsapp.ts`) tiene el mismo límite y **no se tocó**: no es de este issue. |
+| El resumen de la IA decía «al día, 0 días» en un crédito con 23 días de mora | **Cierto, corregido.** Usaba los campos de mora de `casos_cobros`, desactualizados; ahora lee cartera como la ficha, y si cartera no responde no genera con datos a medias. |
+
+Revisión de los PRs anteriores:
 
 | Hallazgo | Resultado |
 | --- | --- |
@@ -181,7 +224,17 @@ Revisión interna:
 | **Editar direcciones** (F8) | `routes/cobros/$id.tsx` (~3455, `DireccionCard` con la nota «pendiente de backend (tarea F8)») | Hacer editables las dos tarjetas y guardar con `guardarDireccionesCaso({ casoCobroId, residencia?, trabajo?: { empresa?, direccion? } })` (en `fichaCobrosAccionesRouter`: se tipa en `orpcAparte`). Después, invalidar `getDetallesCreditoCarteraBack`, `getDatosLaboralesCaso` y `getFichaComplementos`. |
 | **Refrescar la ficha tras editar** (F3) | `routes/cobros/$id.tsx` (`guardarContacto` y el autoguardado de teléfonos) | `getFichaComplementos` se guarda 5 minutos (`staleTime`) y no se invalida al guardar: el «Historial de cambios» no muestra el cambio hasta recargar. Invalidar `getFichaComplementos` al guardar teléfonos, correo o direcciones. |
 | **Origen de los cambios desde el Workspace** (F3) | Donde el Workspace edite teléfonos, correo o direcciones | Mandar `origen: "workspace"`; sin él queda «Ficha 360». Hoy solo la ficha edita. |
-| *(se completa con F6 y F7)* | | |
+| **Documentos** (F6) | `routes/cobros/$id.tsx` (~4969–5004) y `components/cobros/workspace/contexto-caso.tsx` (~1580–1625) | Hoy las filas están fijas con «Pendiente de backend (tarea F6)». Tomar `disponible` de `complementos.documentos`. «Enviar»: `enviarDocumentoClienteWhatsapp({ casoCobroId, clave })` con confirmación, como el estado de cuenta. «Solicitar»: `solicitarDocumentoCaso({ casoCobroId, clave, comentario? })`. Los procedimientos están en `fichaCobrosAccionesRouter` y se tipan en `orpcAparte`. |
+| **Bandeja de Solicitudes y Dashboard del supervisor: documentos** (F6, S1) | `components/cobros/solicitudes/bandeja-solicitudes.tsx` (chip «Documentos» en «Pronto») | Fuente: `getSolicitudesDocumentos({ estado: "pendiente" })`. Decidir con `resolverSolicitudDocumento({ solicitudId, decision, nota? })`. |
+| **Preguntas al asistente** (F7) | `components/cobros/ficha/ficha-pestanas.tsx` (~578–585, campo «Pregúntele a la IA… (pronto)») | `preguntarAsistenteCaso({ casoCobroId, pregunta })` → `{ respuesta }`. Mostrar los errores de tope (30 preguntas por usuario cada 24 horas) y «el asistente todavía no está activo». |
+| **Fecha del resumen sin formato** (F7) | `components/cobros/ficha/ficha-pestanas.tsx` (`AsistenteIA`) | Muestra «Generado por IA · 2026-10-08T20:28:26.119Z»: formatear `generadoEn` como las demás fechas de la ficha. |
+| Textos «Pendiente de backend (tarea F2/F4)» | `contexto-caso.tsx:909`, `gestion-panel.tsx:254` | Solo comentarios y textos de respaldo: con datos ya no se ven. Se pueden limpiar. |
+
+## Para encender el asistente IA (F7)
+
+1. Aprobar el costo.
+2. En el server del CRM: `COBROS_ASISTENTE_IA=on` (la `GOOGLE_GENERATIVE_AI_API_KEY` ya existe por el bot).
+3. Para apagarlo, quitar la variable: el resumen vuelve a `null` sin redeploy de front.
 
 ---
 
@@ -191,7 +244,7 @@ Revisión interna:
 | --- | --- | --- | --- | --- |
 | PR1 | `feat/cobros-ficha-datos-contacto` | F1 + F2 + F5 y este doc | — | Mergeado (#1912) |
 | PR2 | `feat/cobros-ficha-cambios-direcciones` | F3 + F8 | Crea la 0078 | Mergeado (#1913) |
-| PR3 | `feat/cobros-ficha-vida-credito` | F4 | — | **Este PR** |
-| PR4 | `feat/cobros-ficha-documentos-ia` | F6 + F7 y cierre de docs (15, 21, README) | Amplía la 0078 | Pendiente |
+| PR3 | `feat/cobros-ficha-vida-credito` | F4 | — | Mergeado (#1917) |
+| PR4 | `feat/cobros-ficha-documentos-ia` | F6 + F7 y cierre de docs (15, 21, README) | Amplía la 0078 | **Este PR** |
 
 Cada PR sale de `COBROS-02` ya actualizado hacia `COBROS-02`, uno por uno, y la siguiente rama no se crea hasta que se mergea el anterior. Este doc crece con cada PR: lo que aún no se mergeó figura como pendiente.

@@ -691,6 +691,24 @@ async function promesasCumplidas(
 export async function cargarHistorico(
 	casoCobroId: string,
 ): Promise<HitoCredito[] | null> {
+	return (await cargarHistoricoDetallado(casoCobroId)).hitos;
+}
+
+export type HistoricoCargado = {
+	hitos: HitoCredito[] | null;
+	/** false si cartera falló en alguna lectura: los hitos pueden estar a medias. */
+	completo: boolean;
+};
+
+/**
+ * Igual que `cargarHistorico`, pero dice si el historial quedó completo: una
+ * lectura de cartera caída con promesas locales produce hitos no nulos pero
+ * a medias, y quien no puede trabajar con datos parciales (el asistente IA)
+ * necesita distinguirlo.
+ */
+export async function cargarHistoricoDetallado(
+	casoCobroId: string,
+): Promise<HistoricoCargado> {
 	const creditoId = await creditoIdDelCaso(casoCobroId);
 	let carteraFallo = creditoId === null;
 	const deCartera = async <T>(nombre: string, leer: () => Promise<T[]>) => {
@@ -716,5 +734,8 @@ export async function cargarHistorico(
 		promesasCumplidas(casoCobroId),
 	]);
 	const hitos = armarHistorico({ buckets, convenios, promesas });
-	return hitos.length === 0 && carteraFallo ? null : hitos;
+	return {
+		hitos: hitos.length === 0 && carteraFallo ? null : hitos,
+		completo: !carteraFallo,
+	};
 }

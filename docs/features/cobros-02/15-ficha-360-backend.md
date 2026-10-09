@@ -13,6 +13,13 @@ El front ya está **conectado**. Lo que todavía no tiene fuente sale de un solo
 
 El front no se toca: al recibir datos, los pinta solo.
 
+> [!NOTE]
+> **Estado (2026-10-08):** F1–F8 tienen el backend hecho y probado. El plan, las decisiones, las pruebas y lo que falta del front están en [21-plan-backend-ficha-360.md](./21-plan-backend-ficha-360.md).
+> - F1–F4 y el resumen de F7 se pintan solos, como dice este doc.
+> - F5 sí necesita un cambio de front para leer todos los campos del bloque `seguro`, y no tiene datos en la base (`vehicles.tipo_cobertura` y `deducible` vacíos).
+> - F6 y F8 **sí necesitan cambios de front**: las filas de Documentos están fijas y las tarjetas de dirección son de solo lectura. Las preguntas de F7 tampoco están cableadas.
+> - F7 queda apagado hasta aprobar el costo (`COBROS_ASISTENTE_IA=on`).
+
 ## Lo que ya está hecho (real)
 
 | Qué | Dónde |

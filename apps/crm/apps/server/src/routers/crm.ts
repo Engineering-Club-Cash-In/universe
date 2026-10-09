@@ -1629,7 +1629,7 @@ export const crmRouter = {
 			const whereDelUpdate = candadoEnElPredicado
 				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
 				: whereClause;
-			let oportunidadConOrigenActualizado: string | null = null;
+			const oportunidadesConOrigenActualizado: string[] = [];
 
 			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
 			//
@@ -1732,7 +1732,7 @@ export const crmRouter = {
 					updateData.source !== undefined ||
 					updateData.campaign !== undefined
 				) {
-					const [oportunidadActiva] = await tx
+					const oportunidadesActivas = await tx
 						.select({
 							id: opportunities.id,
 							source: opportunities.source,
@@ -1747,10 +1747,10 @@ export const crmRouter = {
 							),
 						)
 						.orderBy(desc(opportunities.createdAt))
-						.limit(1)
 						.for("update", { of: opportunities });
 
-					if (oportunidadActiva) {
+					const oportunidadesConExencion = [];
+					for (const oportunidadActiva of oportunidadesActivas) {
 						const veniaDelBot =
 							updateData.source !== undefined &&
 							updateData.source !== "Whatsapp" &&
@@ -1777,6 +1777,16 @@ export const crmRouter = {
 									"Regresa la oportunidad al 30% antes de corregir su origen de WhatsApp; debe revalidarse el Buró.",
 							});
 						}
+						oportunidadesConExencion.push({
+							oportunidad: oportunidadActiva,
+							pierdeExencionBot,
+						});
+					}
+
+					for (const {
+						oportunidad: oportunidadActiva,
+						pierdeExencionBot,
+					} of oportunidadesConExencion) {
 						await tx
 							.update(opportunities)
 							.set({
@@ -1803,8 +1813,9 @@ export const crmRouter = {
 								campaign: updateData.campaign,
 							},
 						});
-						if (updateData.source !== undefined)
-							oportunidadConOrigenActualizado = oportunidadActiva.id;
+						if (updateData.source !== undefined) {
+							oportunidadesConOrigenActualizado.push(oportunidadActiva.id);
+						}
 					}
 				}
 
@@ -1886,11 +1897,8 @@ export const crmRouter = {
 				}
 			}
 
-			if (oportunidadConOrigenActualizado) {
-				consultarBuroAlVeinteTrasGuardar(
-					oportunidadConOrigenActualizado,
-					context.userId,
-				);
+			for (const oportunidadId of oportunidadesConOrigenActualizado) {
+				consultarBuroAlVeinteTrasGuardar(oportunidadId, context.userId);
 			}
 
 			if (consultarBuroPorDpi && updatedLead[0].dpi) {

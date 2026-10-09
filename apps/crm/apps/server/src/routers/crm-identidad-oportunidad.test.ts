@@ -1166,6 +1166,83 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
 	});
 
+	test("sincronizar el origen del lead revalida todas sus oportunidades activas", async () => {
+		prepararEvidenciaBot();
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				id: "11111111-1111-4111-8111-111111111111",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: null,
+				leadDpi: DPI,
+			},
+			{
+				...base,
+				id: "22222222-2222-4222-8222-222222222222",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: null,
+				leadDpi: DPI,
+				status: "on_hold",
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const sincronizaciones = escriturasSobreOportunidades().filter(
+			(escritura) => escritura.valores.source === "referral",
+		);
+		expect(sincronizaciones).toHaveLength(2);
+		expect(
+			sincronizaciones.every(
+				(escritura) => escritura.valores.buroRevalidacionAl30 === true,
+			),
+		).toBe(true);
+	});
+
+	test("bloquea el cambio de origen si cualquiera de sus oportunidades ya pasó del 30%", async () => {
+		prepararEvidenciaBot();
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				id: "11111111-1111-4111-8111-111111111111",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: null,
+				leadDpi: DPI,
+			},
+			{
+				...base,
+				id: "22222222-2222-4222-8222-222222222222",
+				stageId: "etapa-40",
+				porcentaje: 40,
+				closurePercentage: 40,
+				source: null,
+				leadDpi: DPI,
+			},
+		]);
+
+		await expect(
+			invocar(
+				crmRouter.updateLead,
+				{ id: LEAD, source: "referral" },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/Regresa la oportunidad al 30%/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
 	test("no corrige el origen del lead después de aprobar análisis sin volver al 30%", async () => {
 		prepararEvidenciaBot();
 		filasPorTabla.set(leads, [

@@ -1,12 +1,11 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
 	companies,
 	leads,
 	opportunities,
-	opportunityCloseQuotations,
 	quotations,
 	vehicles,
 } from "../db/schema";
@@ -523,51 +522,7 @@ export const quotationsRouter = {
 				});
 			}
 
-			// La del cierre no se borra: la cascada se llevaría su registro y la
-			// factura del seguro saldría con otra cotización. El FOR UPDATE frena
-			// un cierre simultáneo que la esté registrando.
-			await db.transaction(async (tx) => {
-				await tx
-					.select({ id: quotations.id })
-					.from(quotations)
-					.where(eq(quotations.id, input.quotationId))
-					.for("update");
-				const [delCierre] = await tx
-					.select({ opportunityId: opportunityCloseQuotations.opportunityId })
-					.from(opportunityCloseQuotations)
-					.where(eq(opportunityCloseQuotations.quotationId, input.quotationId))
-					.limit(1);
-				// Cierres anteriores al registro: la factura reconstruye la cotización
-				// entre las que existían al cerrar, así que ninguna de esas se borra.
-				const [cierreSinRegistro] = existing.opportunityId
-					? await tx
-							.select({ cerradaAt: opportunities.actualCloseDate })
-							.from(opportunities)
-							.leftJoin(
-								opportunityCloseQuotations,
-								eq(opportunityCloseQuotations.opportunityId, opportunities.id),
-							)
-							.where(
-								and(
-									eq(opportunities.id, existing.opportunityId),
-									eq(opportunities.status, "won"),
-									isNull(opportunityCloseQuotations.opportunityId),
-								),
-							)
-							.limit(1)
-					: [];
-				const candidataDelCierre =
-					!!cierreSinRegistro &&
-					(!cierreSinRegistro.cerradaAt ||
-						existing.createdAt <= cierreSinRegistro.cerradaAt);
-				if (delCierre || candidataDelCierre) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"No se puede eliminar la cotización con la que se cerró el crédito",
-					});
-				}
-				await tx.delete(quotations).where(eq(quotations.id, input.quotationId));
-			});
+			await db.delete(quotations).where(eq(quotations.id, input.quotationId));
 
 			return { success: true };
 		}),

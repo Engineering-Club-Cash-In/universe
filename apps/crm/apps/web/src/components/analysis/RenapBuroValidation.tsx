@@ -12,14 +12,9 @@ import {
 	UserCog,
 	XCircle,
 } from "lucide-react";
-import {
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import { CONSULTAR_RENAP } from "server/src/lib/renap-config";
+import { validarDpi } from "server/src/utils/cui-validation";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -66,13 +61,26 @@ type TipoValidacion = "buro" | "renap";
 
 interface RenapBuroValidationProps {
 	opportunityId: string;
+	/** Permiso calculado por el servidor: 20% o excepción de revalidación al 30%. */
+	permitirReejecucion: boolean;
+	/** Permiso calculado por el servidor para validar Buró manualmente. */
+	permitirValidacionManualBuro: boolean;
+	/** Abre el detalle del estudio al mostrarlo dentro del modal del 20%. */
+	expandirDetalleInicialmente?: boolean;
+	/** Mientras el modal esté abierto, sigue una consulta que aún está en curso. */
+	actualizarAutomaticamente?: boolean;
+	/** Indica que la vista contenedora está recuperando el Buró automáticamente. */
+	ejecucionExterna?: boolean;
 	/** Avisa a la página cuándo hay una validación en curso, para no dejar aprobar mientras tanto */
 	onEjecucionChange?: (ejecutando: boolean) => void;
-	/** Solo admin/analyst pueden marcar un override manual */
-	currentUserRole?: string | null;
+	/** Permiso calculado por el servidor para validar RENAP manualmente. */
+	permitirValidacionManualRenap: boolean;
 }
 
 const MOTIVO_MIN_LENGTH = 10;
+const CLASE_BOTON_REINTENTAR = "text-foreground hover:text-foreground";
+const CLASE_BOTON_VALIDACION_MANUAL =
+	"border-green-600 text-green-700 hover:border-green-700 hover:bg-green-50 hover:text-green-800 dark:border-green-500 dark:text-green-400 dark:hover:bg-green-950 dark:hover:text-green-300";
 
 const NOMBRE_FUENTE: Record<TipoValidacion, string> = {
 	buro: "Infornet",
@@ -187,11 +195,15 @@ function CajaBuro({
 	detalleBuro,
 	cofirmante,
 	ejecutando,
+	expandirDetalleInicialmente = false,
 }: Pick<EstadoValidaciones, "buro" | "buroVigente" | "detalleBuro"> & {
 	cofirmante?: string;
 	ejecutando?: boolean;
+	expandirDetalleInicialmente?: boolean;
 }) {
-	const [detalleAbierto, setDetalleAbierto] = useState(false);
+	const [detalleAbierto, setDetalleAbierto] = useState(
+		expandirDetalleInicialmente,
+	);
 	const buroConVeredicto =
 		buro?.estado === "aprobado" || buro?.estado === "rechazado";
 
@@ -349,8 +361,9 @@ function AlertasBuro({
 					<XCircle className="h-4 w-4" />
 					<AlertTitle>El buró no aprobó {aQuien}</AlertTitle>
 					<AlertDescription>
-						{buro.mensaje}. Puede rechazar la oportunidad o continuar bajo el
-						riesgo.
+						{/* Fuera de análisis el motivo no viaja: solo se ve el veredicto. */}
+						{buro.mensaje ? `${buro.mensaje}. ` : ""}Puede rechazar la
+						oportunidad o continuar bajo el riesgo.
 					</AlertDescription>
 				</Alert>
 			)}
@@ -378,8 +391,8 @@ function AlertasBuro({
 							: "Buró validado manualmente"}
 					</AlertTitle>
 					<AlertDescription>
-						{overrideBuro.marcadoPorNombre ?? "Un analista"} verificó {aQuien}{" "}
-						en Infornet
+						{overrideBuro.marcadoPorNombre ?? "Un usuario"} verificó {aQuien} en
+						Infornet
 						{overrideBuro.motivo ? `: "${overrideBuro.motivo}"` : ""}.
 					</AlertDescription>
 				</Alert>
@@ -393,16 +406,21 @@ function SeccionCofirmante({
 	cofirmante,
 	ejecutando,
 	puedeOverridear,
+	permitirReejecucion,
+	expandirDetalleInicialmente,
 	onReintentar,
 	onOverride,
 }: {
 	cofirmante: EstadoCofirmante;
 	ejecutando: boolean;
 	puedeOverridear: boolean;
+	permitirReejecucion: boolean;
+	expandirDetalleInicialmente?: boolean;
 	onReintentar: () => void;
 	onOverride: () => void;
 }) {
 	const { buro, nombre } = cofirmante;
+	const dpiValido = validarDpi(cofirmante.dpi).valid;
 	// Igual que en el titular: un error de una fila desactualizada no bloquea
 	const errorVigente =
 		buro?.estado === "error" && !cofirmante.buroDesactualizado;
@@ -415,6 +433,7 @@ function SeccionCofirmante({
 				detalleBuro={cofirmante.detalleBuro}
 				cofirmante={nombre}
 				ejecutando={ejecutando}
+				expandirDetalleInicialmente={expandirDetalleInicialmente}
 			/>
 
 			{cofirmante.buroDesactualizado && (
@@ -427,8 +446,10 @@ function SeccionCofirmante({
 						La ficha de {nombre} ahora tiene el DPI{" "}
 						<span className="font-medium">{cofirmante.dpi}</span>, distinto al
 						usado en <span className="font-medium">Buró ({buro?.dpi})</span>. Lo
-						que se muestra corresponde a la persona anterior. Se recomienda
-						re-ejecutar la validación.
+						que se muestra corresponde a la persona anterior.{" "}
+						{permitirReejecucion
+							? "Re-ejecuta la validación en esta etapa."
+							: "Regresa la oportunidad al 20% para validarla."}
 					</AlertDescription>
 				</Alert>
 			)}
@@ -446,36 +467,42 @@ function SeccionCofirmante({
 						No se completó el Buró del co-firmante {nombre}
 					</AlertTitle>
 					<AlertDescription className="flex flex-col gap-2">
-						<span>
-							{buro?.mensaje}. La aprobación del análisis quedará bloqueada
-							hasta obtener un veredicto.
+						<span className="text-foreground">
+							{buro?.mensaje}.{" "}
+							{dpiValido
+								? "La aprobación del análisis quedará bloqueada hasta obtener un veredicto."
+								: "Corrige el DPI en la ficha del cofirmante para poder consultar Buró."}
 						</span>
-						<div className="flex flex-wrap gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={onReintentar}
-								disabled={ejecutando}
-							>
-								{ejecutando ? (
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-								) : (
-									<RefreshCw className="mr-2 h-4 w-4" />
-								)}
-								Reintentar
-							</Button>
-							{puedeOverridear && (
+						{permitirReejecucion && dpiValido && (
+							<div className="flex flex-wrap gap-2">
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={onOverride}
+									className={CLASE_BOTON_REINTENTAR}
+									onClick={onReintentar}
 									disabled={ejecutando}
 								>
-									<UserCog className="mr-2 h-4 w-4" />
-									Marcar Buró como validado manualmente
+									{ejecutando ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<RefreshCw className="mr-2 h-4 w-4" />
+									)}
+									Reintentar
 								</Button>
-							)}
-						</div>
+								{puedeOverridear && (
+									<Button
+										variant="outline"
+										size="sm"
+										className={CLASE_BOTON_VALIDACION_MANUAL}
+										onClick={onOverride}
+										disabled={ejecutando}
+									>
+										<UserCog className="mr-2 h-4 w-4" />
+										Marcar Buró como validado manualmente
+									</Button>
+								)}
+							</div>
+						)}
 					</AlertDescription>
 				</Alert>
 			)}
@@ -485,13 +512,16 @@ function SeccionCofirmante({
 
 export function RenapBuroValidation({
 	opportunityId,
+	permitirReejecucion,
+	permitirValidacionManualBuro,
 	onEjecucionChange,
-	currentUserRole,
+	permitirValidacionManualRenap,
+	expandirDetalleInicialmente = false,
+	actualizarAutomaticamente = false,
+	ejecucionExterna = false,
 }: RenapBuroValidationProps) {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
-	/** Qué oportunidad se auto-ejecutó: la ruta reusa el componente al navegar */
-	const autoEjecutadaPara = useRef<string | null>(null);
 
 	// Override manual: paso 1 captura el motivo, paso 2 confirma explícitamente
 	const [overrideTipo, setOverrideTipo] = useState<TipoValidacion | null>(null);
@@ -503,22 +533,21 @@ export function RenapBuroValidation({
 	>(null);
 	const [overrideMotivo, setOverrideMotivo] = useState("");
 	const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
-
-	const puedeOverridear =
-		currentUserRole === "admin" || currentUserRole === "analyst";
+	const ejecucionEnCurso = isExecuting || ejecucionExterna;
 
 	const validacionesQuery = useQuery({
 		...orpc.getValidacionesOportunidad.queryOptions({
 			input: { opportunityId },
 		}),
 		enabled: !!opportunityId,
+		refetchInterval: actualizarAutomaticamente ? 15_000 : false,
 	});
 
 	const { refetch } = validacionesQuery;
 
 	const ejecutarValidaciones = useCallback(
 		async (reusarVigente?: boolean) => {
-			if (isExecuting) return;
+			if (ejecucionEnCurso || !permitirReejecucion) return;
 			try {
 				setIsExecuting(true);
 				onEjecucionChange?.(true);
@@ -548,7 +577,13 @@ export function RenapBuroValidation({
 				onEjecucionChange?.(false);
 			}
 		},
-		[isExecuting, opportunityId, refetch, onEjecucionChange],
+		[
+			ejecucionEnCurso,
+			permitirReejecucion,
+			opportunityId,
+			refetch,
+			onEjecucionChange,
+		],
 	);
 
 	const abrirOverride = useCallback(
@@ -573,7 +608,7 @@ export function RenapBuroValidation({
 	}, [opportunityId, cerrarOverride]);
 
 	const handleConfirmarOverride = useCallback(async () => {
-		if (!overrideTipo) return;
+		if (!overrideTipo || ejecucionEnCurso) return;
 		try {
 			setIsSubmittingOverride(true);
 			await client.marcarValidacionManual({
@@ -601,33 +636,9 @@ export function RenapBuroValidation({
 		overrideCofirmante,
 		overrideMotivo,
 		opportunityId,
+		ejecucionEnCurso,
 		ejecutarValidaciones,
 		cerrarOverride,
-	]);
-
-	// Auto-ejecuta solo si la oportunidad espera análisis, hay consentimiento y
-	// el titular o algún co-firmante nunca se validó. Con un resultado previo
-	// decide el analista con el botón.
-	useEffect(() => {
-		const data = validacionesQuery.data;
-		if (
-			data &&
-			!data.exento &&
-			!data.faltaDpi &&
-			!data.faltaConsentimiento &&
-			data.enAnalisisPendiente &&
-			(!data.buro || data.cofirmantes.some((c) => !c.buro)) &&
-			autoEjecutadaPara.current !== opportunityId &&
-			!isExecuting
-		) {
-			autoEjecutadaPara.current = opportunityId;
-			ejecutarValidaciones(true);
-		}
-	}, [
-		validacionesQuery.data,
-		isExecuting,
-		ejecutarValidaciones,
-		opportunityId,
 	]);
 
 	if (validacionesQuery.isLoading) {
@@ -647,6 +658,7 @@ export function RenapBuroValidation({
 	const data = validacionesQuery.data;
 
 	if (!data) return null;
+	const dpiTitularValido = data.dpi ? validarDpi(data.dpi).valid : false;
 
 	if (data.exento) {
 		return (
@@ -670,7 +682,7 @@ export function RenapBuroValidation({
 
 	const renap = data.renap;
 	const buro = data.buro;
-	const ejecutandoPrimeraVez = isExecuting && !buro && !renap;
+	const ejecutandoPrimeraVez = ejecucionEnCurso && !buro && !renap;
 	// Un error de una fila desactualizada no cuenta: no bloquea el gate real
 	// (que filtra por DPI actual) y mostrarlo como "bloqueado" contradice el
 	// aviso de "DPI cambió"
@@ -693,21 +705,23 @@ export function RenapBuroValidation({
 						<CardTitle className="text-lg">{TITULO}</CardTitle>
 						<CardDescription>{DESCRIPCION}</CardDescription>
 					</div>
-					{!data.faltaDpi && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => ejecutarValidaciones()}
-							disabled={isExecuting}
-						>
-							{isExecuting ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-							) : (
-								<RefreshCw className="mr-2 h-4 w-4" />
-							)}
-							{isExecuting ? "Ejecutando..." : "Re-ejecutar validación"}
-						</Button>
-					)}
+					{permitirReejecucion &&
+						dpiTitularValido &&
+						!data.faltaConsentimiento && (
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => ejecutarValidaciones()}
+								disabled={ejecucionEnCurso}
+							>
+								{ejecucionEnCurso ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<RefreshCw className="mr-2 h-4 w-4" />
+								)}
+								{ejecucionEnCurso ? "Ejecutando..." : "Re-ejecutar validación"}
+							</Button>
+						)}
 				</div>
 			</CardHeader>
 			<CardContent className="space-y-4">
@@ -716,8 +730,8 @@ export function RenapBuroValidation({
 						<AlertTriangle className="h-4 w-4" />
 						<AlertDescription>
 							El cliente no tiene DPI capturado en su ficha. Es obligatorio para
-							aprobar el análisis: captúralo en el detalle del lead y vuelve a
-							esta página.
+							aprobar el análisis: captúralo en la ficha del cliente y consulta
+							Buró {permitirReejecucion ? "en esta etapa" : "al 20%"}.
 						</AlertDescription>
 					</Alert>
 				)}
@@ -729,7 +743,8 @@ export function RenapBuroValidation({
 						<AlertDescription>
 							Este tipo de cliente requiere la cláusula firmada antes de
 							consultar el buró, así que la validación no se ejecuta sola. Subí
-							el documento o ejecutala manualmente bajo tu criterio.
+							el documento para habilitar la consulta de Infornet{" "}
+							{permitirReejecucion ? "en esta etapa" : "al 20%"}.
 						</AlertDescription>
 					</Alert>
 				)}
@@ -766,7 +781,10 @@ export function RenapBuroValidation({
 									.join(" y ")}
 							</span>
 							. Lo que se muestra abajo para esa fuente corresponde a la persona
-							anterior. Se recomienda re-ejecutar la validación.
+							anterior.{" "}
+							{permitirReejecucion
+								? "Re-ejecuta la validación en esta etapa."
+								: "Regresa la oportunidad al 20% para validarla."}
 						</AlertDescription>
 					</Alert>
 				)}
@@ -866,6 +884,7 @@ export function RenapBuroValidation({
 							buro={buro}
 							buroVigente={data.buroVigente}
 							detalleBuro={data.detalleBuro}
+							expandirDetalleInicialmente={expandirDetalleInicialmente}
 						/>
 					</div>
 				)}
@@ -894,49 +913,56 @@ export function RenapBuroValidation({
 						<AlertTriangle className="h-4 w-4" />
 						<AlertTitle>No se completaron las validaciones</AlertTitle>
 						<AlertDescription className="flex flex-col gap-2">
-							<span>
+							<span className="text-foreground">
 								{mensajeError}
 								{data.aprobacionBloqueada
 									? ", La aprobación del análisis quedará bloqueada hasta obtener un veredicto."
 									: ", El buró sí obtuvo veredicto, la aprobación del análisis puede continuar."}
 							</span>
-							<div className="flex flex-wrap gap-2">
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => ejecutarValidaciones()}
-									disabled={isExecuting}
-								>
-									{isExecuting ? (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									) : (
-										<RefreshCw className="mr-2 h-4 w-4" />
-									)}
-									Reintentar
-								</Button>
-								{buroErrorVigente && puedeOverridear && (
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={() => abrirOverride("buro")}
-										disabled={isExecuting}
-									>
-										<UserCog className="mr-2 h-4 w-4" />
-										Marcar Buró como validado manualmente
-									</Button>
+							{permitirReejecucion &&
+								dpiTitularValido &&
+								!data.faltaConsentimiento && (
+									<div className="flex flex-wrap gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											className={CLASE_BOTON_REINTENTAR}
+											onClick={() => ejecutarValidaciones()}
+											disabled={ejecucionEnCurso}
+										>
+											{ejecucionEnCurso ? (
+												<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+											) : (
+												<RefreshCw className="mr-2 h-4 w-4" />
+											)}
+											Reintentar
+										</Button>
+										{buroErrorVigente && permitirValidacionManualBuro && (
+											<Button
+												variant="outline"
+												size="sm"
+												className={CLASE_BOTON_VALIDACION_MANUAL}
+												onClick={() => abrirOverride("buro")}
+												disabled={ejecucionEnCurso}
+											>
+												<UserCog className="mr-2 h-4 w-4" />
+												Marcar Buró como validado manualmente
+											</Button>
+										)}
+										{renapErrorVigente && permitirValidacionManualRenap && (
+											<Button
+												variant="outline"
+												size="sm"
+												className={CLASE_BOTON_VALIDACION_MANUAL}
+												onClick={() => abrirOverride("renap")}
+												disabled={ejecucionEnCurso}
+											>
+												<UserCog className="mr-2 h-4 w-4" />
+												Marcar RENAP como validado manualmente
+											</Button>
+										)}
+									</div>
 								)}
-								{renapErrorVigente && puedeOverridear && (
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={() => abrirOverride("renap")}
-										disabled={isExecuting}
-									>
-										<UserCog className="mr-2 h-4 w-4" />
-										Marcar RENAP como validado manualmente
-									</Button>
-								)}
-							</div>
 						</AlertDescription>
 					</Alert>
 				)}
@@ -945,8 +971,14 @@ export function RenapBuroValidation({
 					<SeccionCofirmante
 						key={cofirmante.coDebtorId}
 						cofirmante={cofirmante}
-						ejecutando={isExecuting}
-						puedeOverridear={puedeOverridear}
+						ejecutando={ejecucionEnCurso}
+						puedeOverridear={
+							permitirValidacionManualBuro && !data.faltaConsentimiento
+						}
+						permitirReejecucion={
+							permitirReejecucion && !data.faltaConsentimiento
+						}
+						expandirDetalleInicialmente={expandirDetalleInicialmente}
 						onReintentar={() => ejecutarValidaciones()}
 						onOverride={() =>
 							abrirOverride("buro", {
@@ -1001,7 +1033,10 @@ export function RenapBuroValidation({
 						</Button>
 						<Button
 							onClick={() => setOverrideStep("confirmar")}
-							disabled={overrideMotivo.trim().length < MOTIVO_MIN_LENGTH}
+							disabled={
+								overrideMotivo.trim().length < MOTIVO_MIN_LENGTH ||
+								ejecucionEnCurso
+							}
 						>
 							Continuar
 						</Button>
@@ -1039,7 +1074,7 @@ export function RenapBuroValidation({
 					<AlertDialogFooter>
 						<AlertDialogCancel
 							onClick={() => setOverrideStep("motivo")}
-							disabled={isSubmittingOverride}
+							disabled={isSubmittingOverride || ejecucionEnCurso}
 						>
 							Volver
 						</AlertDialogCancel>
@@ -1049,7 +1084,7 @@ export function RenapBuroValidation({
 								e.preventDefault();
 								handleConfirmarOverride();
 							}}
-							disabled={isSubmittingOverride}
+							disabled={isSubmittingOverride || ejecucionEnCurso}
 						>
 							{isSubmittingOverride ? "Guardando..." : "Sí, confirmar"}
 						</AlertDialogAction>

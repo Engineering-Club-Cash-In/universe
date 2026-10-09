@@ -587,9 +587,28 @@ type EnCurso = Map<
 >;
 const enCursoPorCaso: EnCurso = new Map();
 
-/** Lock por caso que serializa guardar y borrar el resumen. */
+/** Lock por caso que serializa guardar e invalidar el resumen. */
 const lockResumen = (casoCobroId: string) =>
 	sql`SELECT pg_advisory_xact_lock(hashtext(${`resumen-ia:${casoCobroId}`}))`;
+
+/**
+ * Huella de la fila que marca «el contexto quedó sin nada que resumir» y su
+ * instante. Vive en la BD (no en memoria) para que una generación de OTRO
+ * proceso, iniciada antes, tampoco guarde un resumen obsoleto. No es un resumen:
+ * `obtenerResumenIA` la ignora.
+ */
+const SIN_RESUMEN = "__sin_resumen__";
+
+/**
+ * Reloj de la BD (el mismo de todos los procesos), como texto para compararlo
+ * con `generado_en` sin pasar por zonas horarias de JS.
+ */
+async function instanteBD(): Promise<string> {
+	const r = await db.execute<{ t: string }>(
+		sql`SELECT clock_timestamp()::timestamp::text AS t`,
+	);
+	return r.rows[0].t;
+}
 
 async function generarYGuardar(
 	casoCobroId: string,
@@ -597,6 +616,8 @@ async function generarYGuardar(
 	huella: string,
 	/** false si, mientras se generaba, el contexto quedó sin nada que resumir. */
 	sigueVigente: () => boolean = () => true,
+	/** `instanteBD()` tomado ANTES de leer el contexto que se resume. */
+	inicio?: string,
 ): Promise<ResumenIA | null> {
 	try {
 		const { object } = await generateObject({
@@ -623,12 +644,23 @@ async function generarYGuardar(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: new Date(),
 		};
-		// La vigencia se revisa DENTRO del lock del caso, el mismo que toma el
-		// borrado de `obtenerResumenIA`: o el borrado ve esta fila ya guardada y
-		// la elimina, o esta generación ve que fue invalidada y no escribe.
+		// La vigencia se revisa DENTRO del lock del caso, el mismo que toma la
+		// invalidación de `obtenerResumenIA`: o la invalidación ve esta fila ya
+		// guardada y la reemplaza, o esta generación ve que fue invalidada (en
+		// este proceso, por el mapa; en cualquiera, por la fila marcadora
+		// posterior a su inicio) y no escribe.
 		const guardado = await db.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
 			if (!sigueVigente()) return false;
+			if (inicio) {
+				const invalidada = await tx.execute(
+					sql`SELECT 1 FROM resumenes_ia_cobros
+						WHERE caso_cobro_id = ${casoCobroId}
+							AND huella = ${SIN_RESUMEN}
+							AND generado_en > ${inicio}::timestamp`,
+				);
+				if (invalidada.rows.length > 0) return false;
+			}
 			await tx
 				.insert(resumenesIaCobros)
 				.values({ casoCobroId, ...fila })
@@ -707,7 +739,10 @@ export async function obtenerResumenIA(
 	hitos?: Promise<HistoricoCargado>,
 ): Promise<ResumenIA | null> {
 	if (!asistenteActivo()) return null;
-	const [[guardado], { contexto, completo }] = await Promise.all([
+	// Antes de leer nada: una invalidación posterior a este instante descarta
+	// la generación que salga de este contexto.
+	const inicio = await instanteBD();
+	const [[fila], { contexto, completo }] = await Promise.all([
 		db
 			.select()
 			.from(resumenesIaCobros)
@@ -715,6 +750,7 @@ export async function obtenerResumenIA(
 			.limit(1),
 		cargarContextoIA(casoCobroId, hitos),
 	]);
+	const guardado = fila?.huella === SIN_RESUMEN ? undefined : fila;
 	const comoResumen = (g: NonNullable<typeof guardado>): ResumenIA => ({
 		texto: g.texto,
 		etiquetas: g.etiquetas,
@@ -729,24 +765,44 @@ export async function obtenerResumenIA(
 		// Con el contexto completo ya no hay nada que contar (el crédito se puso
 		// al día y no tiene historial): el resumen guardado quedó obsoleto y, si
 		// no se borra, un corte de cartera lo volvería a mostrar.
-		// Se borra siempre (aunque la lectura de arriba no viera fila): una
-		// generación ya iniciada pudo guardarla después de esa lectura.
+		// Se reemplaza por la fila marcadora siempre (aunque la lectura de arriba
+		// no viera fila): una generación ya iniciada, aquí o en otro proceso,
+		// pudo guardarla después de esa lectura o guardarla después de esto.
+		const marca = {
+			texto: "",
+			etiquetas: [],
+			huella: SIN_RESUMEN,
+			modelo: MODELO_ASISTENTE,
+			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
+		};
 		await db
 			.transaction(async (tx) => {
 				await tx.execute(lockResumen(casoCobroId));
 				await tx
-					.delete(resumenesIaCobros)
-					.where(eq(resumenesIaCobros.casoCobroId, casoCobroId));
+					.insert(resumenesIaCobros)
+					.values({ casoCobroId, ...marca })
+					.onConflictDoUpdate({
+						target: resumenesIaCobros.casoCobroId,
+						set: marca,
+					});
 			})
 			.catch((error) =>
-				console.error(`[AsistenteIA] borrar resumen de ${casoCobroId}:`, error),
+				console.error(
+					`[AsistenteIA] invalidar resumen de ${casoCobroId}:`,
+					error,
+				),
 			);
 		return null;
 	}
 	const huella = huellaContexto(contexto);
 	if (guardado && guardado.huella === huella) return comoResumen(guardado);
 
-	const generacion = generarUnaVez(casoCobroId, contexto, huella);
+	const generacion = generarUnaVez(
+		casoCobroId,
+		contexto,
+		huella,
+		(id, ctx, h, vigente) => generarYGuardar(id, ctx, h, vigente, inicio),
+	);
 	if (guardado) return comoResumen(guardado);
 	return Promise.race([
 		generacion,

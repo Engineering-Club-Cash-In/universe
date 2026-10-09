@@ -1052,8 +1052,6 @@ export const trackerRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			const fila = await casoDelCrm(input.opportunityId, context);
-			// Solo se usan si hay que abrir un intento nuevo (ver abajo).
-			const { datos } = await datosDelCorreo(fila);
 
 			// Se reserva el registro (pasa a `pendiente` bajo bloqueo) antes de
 			// mandar: dos clics seguidos no envían dos correos.
@@ -1119,8 +1117,8 @@ export const trackerRouter = {
 				// duplica si ya salió, dentro de las 24 h de la llave. Pasado ese
 				// plazo puede llegar dos veces; se permite igual para que el caso no
 				// quede trabado. Solo un envío que falló pasa a otro intento.
-				// Repetir el intento es reenviar exactamente el correo guardado; los
-				// registros previos a guardarlo (sin correo) se arman de nuevo.
+				// Siempre se reenvía el correo guardado al subir, con sus datos y su
+				// aseguradora; solo los registros previos a guardarlo se arman de nuevo.
 				const correoGuardado =
 					registro.correoAsunto && registro.correoHtml
 						? { asunto: registro.correoAsunto, html: registro.correoHtml }
@@ -1140,12 +1138,11 @@ export const trackerRouter = {
 					});
 				}
 				const correo =
-					repetirIntento && correoGuardado
-						? correoGuardado
-						: armarCorreoFacturaSeguro(
-								{ ...datos, aseguradora },
-								registro.createdAt,
-							);
+					correoGuardado ??
+					armarCorreoFacturaSeguro(
+						{ ...(await datosDelCorreo(fila, tx)).datos, aseguradora },
+						registro.createdAt,
+					);
 				await tx
 					.update(insuranceInvoiceSubmissions)
 					.set({

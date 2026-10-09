@@ -10,6 +10,7 @@ import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
+import { interesEmpresaApagado } from "../cofidi/facturaInteresEmpresas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { db } from "../database";
 import {
@@ -1372,6 +1373,15 @@ if (facturasExistentes.length > 0) {
               continue;
             }
 
+            // NO_FACTURAR_INTERES_EMPRESAS: nadie factura este interés. NO se
+            // agrega a facturasGeneradas (ni como ERROR ni como omitida): un
+            // ERROR traba pendiente_facturar y una entrada sin factura_id hace
+            // que Nexa responda invalid_billing_response.
+            if (interesEmpresaApagado(inv.nombre)) {
+              console.log(`      ⏭️  ${inv.nombre}: interés sin factura (NO_FACTURAR_INTERES_EMPRESAS)`);
+              continue;
+            }
+
             const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
             console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
 
@@ -1711,6 +1721,15 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
+          // NO_FACTURAR_INTERES_EMPRESAS: nadie factura este interés. NO se
+          // agrega a facturasGeneradas (ni como ERROR ni como omitida): un
+          // ERROR traba pendiente_facturar y una entrada sin factura_id hace
+          // que Nexa responda invalid_billing_response.
+          if (interesEmpresaApagado(inv.nombre)) {
+            console.log(`   ⏭️  ${inv.nombre} - Interés sin factura (NO_FACTURAR_INTERES_EMPRESAS)`);
+            continue;
+          }
+
           // 🔥 Facturar la parte del inversionista
           if (parteInversionista.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Parte inversionista es 0`);
@@ -1982,7 +2001,8 @@ if (facturasExistentes.length > 0) {
         //    IVA por inversionista), mismo criterio que el backfill histórico.
         //    factura_id NULL: es el residuo de los inversionistas, no factura CUBE.
         const invFacturadoRes = await db.execute(sql`
-          SELECT COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total,
+          SELECT i.nombre,
+                 COALESCE(SUM(pci.abono_interes + pci.abono_iva_12), 0) AS total,
                  COALESCE(SUM(pci.abono_iva_12), 0) AS iva
           FROM cartera.pagos_credito_inversionistas pci
           JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
@@ -2005,13 +2025,21 @@ if (facturasExistentes.length > 0) {
                   AND esp.status IN ('pendiente_reinversion', 'pendiente_compra_cartera')
               )
             )
+          GROUP BY i.inversionista_id, i.nombre
         `);
-        const invFacturadoTotal = new Big(
-          (invFacturadoRes as any).rows?.[0]?.total || 0
-        );
-        const invFacturadoIva = new Big(
-          (invFacturadoRes as any).rows?.[0]?.iva || 0
-        );
+        // NO_FACTURAR_INTERES_EMPRESAS: el interés de las empresas apagadas por
+        // la env var no se facturó, así que no cuenta en el rubro INTERES_INVERSIONISTAS
+        // (mismo filtro que en el loop de facturación). Con la env apagada o ausente,
+        // la suma es idéntica a la de hoy (suma de sumas = suma).
+        let invFacturadoTotal = new Big(0);
+        let invFacturadoIva = new Big(0);
+        for (const row of (invFacturadoRes as any).rows ?? []) {
+          if (interesEmpresaApagado(row.nombre)) {
+            continue;
+          }
+          invFacturadoTotal = invFacturadoTotal.plus(row.total);
+          invFacturadoIva = invFacturadoIva.plus(row.iva);
+        }
 
         pushRubro("CAPITAL", capitalCube, false); // solo capital de CUBE (de pci), sin IVA
         // Solo si el flujo de interés se calculó OK (no abortó). Si abortó,

@@ -3,6 +3,7 @@ import {
 	armarContextoIA,
 	generarUnaVez,
 	hayQueResumir,
+	invalidarGeneracion,
 	asistenteActivo,
 	huellaContexto,
 	palabrasDeNombres,
@@ -276,6 +277,31 @@ describe("generarUnaVez", () => {
 		expect(await b).toBeNull();
 		expect((await c)?.texto).toBe("hC");
 		expect(huellas).toEqual(["hA", "hC"]);
+		expect(mapa.size).toBe(0);
+	});
+
+	test("invalidar descarta la que va y la que espera turno", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const guardadas: string[] = [];
+		const generar = async (
+			_c: string,
+			_x: unknown,
+			h: string,
+			sigueVigente?: () => boolean,
+		) => {
+			if (h === "hA") await gate.p;
+			if (sigueVigente && !sigueVigente()) return null;
+			guardadas.push(h);
+			return resumen(h);
+		};
+		const a = generarUnaVez("c1", ctx, "hA", generar, mapa);
+		const b = generarUnaVez("c1", ctx, "hB", generar, mapa);
+		invalidarGeneracion("c1", mapa);
+		gate.fin();
+		expect(await a).toBeNull();
+		expect(await b).toBeNull();
+		expect(guardadas).toEqual([]);
 		expect(mapa.size).toBe(0);
 	});
 });

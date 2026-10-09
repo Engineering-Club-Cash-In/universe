@@ -556,6 +556,8 @@ async function generarYGuardar(
 	casoCobroId: string,
 	contexto: ContextoIA,
 	huella: string,
+	/** false si, mientras se generaba, el contexto quedó sin nada que resumir. */
+	sigueVigente: () => boolean = () => true,
 ): Promise<ResumenIA | null> {
 	try {
 		const { object } = await generateObject({
@@ -582,6 +584,7 @@ async function generarYGuardar(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: new Date(),
 		};
+		if (!sigueVigente()) return null;
 		await db
 			.insert(resumenesIaCobros)
 			.values({ casoCobroId, ...fila })
@@ -613,13 +616,12 @@ export function generarUnaVez(
 	const previa = enCurso.get(casoCobroId);
 	if (previa?.huella === huella) return previa.promesa;
 	// Sin generación previa se arranca ya; con una en curso se espera su turno.
+	const vigente = () => enCurso.get(casoCobroId)?.promesa === promesa;
 	const promesa: Promise<ResumenIA | null> = previa
 		? previa.promesa.then(() =>
-				enCurso.get(casoCobroId)?.promesa === promesa
-					? generar(casoCobroId, contexto, huella)
-					: null,
+				vigente() ? generar(casoCobroId, contexto, huella, vigente) : null,
 			)
-		: generar(casoCobroId, contexto, huella);
+		: generar(casoCobroId, contexto, huella, vigente);
 	promesa
 		.finally(() => {
 			if (enCurso.get(casoCobroId)?.promesa === promesa) {
@@ -629,6 +631,17 @@ export function generarUnaVez(
 		.catch(() => undefined);
 	enCurso.set(casoCobroId, { huella, promesa });
 	return promesa;
+}
+
+/**
+ * Descarta la generación en curso del caso (y las que esperan turno): ninguna
+ * guarda su resultado. Para cuando el contexto cambió a «nada que resumir».
+ */
+export function invalidarGeneracion(
+	casoCobroId: string,
+	enCurso: EnCurso = enCursoPorCaso,
+): void {
+	enCurso.delete(casoCobroId);
 }
 
 /**
@@ -662,6 +675,7 @@ export async function obtenerResumenIA(
 	// hay, y sin resumen previo no se inventa uno con datos a medias.
 	if (!completo) return guardado ? comoResumen(guardado) : null;
 	if (!hayQueResumir(contexto)) {
+		invalidarGeneracion(casoCobroId);
 		// Con el contexto completo ya no hay nada que contar (el crédito se puso
 		// al día y no tiene historial): el resumen guardado quedó obsoleto y, si
 		// no se borra, un corte de cartera lo volvería a mostrar.

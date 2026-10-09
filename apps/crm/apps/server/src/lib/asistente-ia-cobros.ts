@@ -180,6 +180,22 @@ export function palabrasDeNombres(
 }
 
 /**
+ * Une los nombres del titular con los demás. Sin el nombre del titular no hay
+ * forma de taparlo (un caso sin contrato ni oportunidad, válido, solo lo
+ * conoce cartera): lanza, y el asistente no manda texto libre al modelo.
+ */
+export function unirNombres(
+	titular: Array<string | null | undefined>,
+	otros: Array<string | null | undefined>,
+): Set<string> {
+	const delTitular = palabrasDeNombres(titular);
+	if (delTitular.size === 0) {
+		throw new Error("el caso no tiene el nombre del titular en ninguna fuente");
+	}
+	return new Set([...delTitular, ...palabrasDeNombres(otros)]);
+}
+
+/**
  * Texto libre sin datos personales: correos, números largos y las palabras de
  * los nombres de las personas del caso (sin importar mayúsculas ni acentos).
  */
@@ -268,21 +284,28 @@ export function huellaContexto(contexto: ContextoIA): string {
  */
 async function cargarCreditoVivo(
 	numeroSifco: string | null,
-): Promise<ContextoIA["credito"] | null> {
+): Promise<{
+	credito: ContextoIA["credito"];
+	/** Nombre del cliente en cartera: fuente del titular que no depende del CRM. */
+	nombreCliente: string | null;
+} | null> {
 	if (!numeroSifco) return null;
 	try {
 		const c = await carteraBackClient.getCredito(numeroSifco, false);
 		const cuotasVencidas = contarCuotasAtrasadasUnicas(c.cuotasAtrasadas ?? []);
 		return {
-			estadoMora: c.convenioActivo
-				? "en_convenio"
-				: (c.credito.statusCredit ?? "desconocido"),
-			diasMora: diasMoraDelDetalle(c.diasAtrasoMoraMaximo, () =>
-				calcularDiasMoraExactos(c.cuotasAtrasadas ?? []),
-			),
-			cuotasVencidas,
-			moraAcumulada: Number(c.moraActual ?? 0).toFixed(2),
-			cuotaMensual: Number(c.credito.cuota ?? 0).toFixed(2),
+			credito: {
+				estadoMora: c.convenioActivo
+					? "en_convenio"
+					: (c.credito.statusCredit ?? "desconocido"),
+				diasMora: diasMoraDelDetalle(c.diasAtrasoMoraMaximo, () =>
+					calcularDiasMoraExactos(c.cuotasAtrasadas ?? []),
+				),
+				cuotasVencidas,
+				moraAcumulada: Number(c.moraActual ?? 0).toFixed(2),
+				cuotaMensual: Number(c.credito.cuota ?? 0).toFixed(2),
+			},
+			nombreCliente: c.usuario?.nombre?.trim() || null,
 		};
 	} catch (error) {
 		console.error(`[AsistenteIA] crédito ${numeroSifco} en cartera:`, error);
@@ -296,7 +319,7 @@ type IdentidadCaso = { leadId: string | null; opportunityId: string | null };
 async function nombresDeIdentidad(
 	ctx: ContextoCaso,
 	{ leadId, opportunityId }: IdentidadCaso,
-): Promise<Array<string | null>> {
+): Promise<{ titular: Array<string | null>; otros: Array<string | null> }> {
 	const [delLead, solicitudes, { referencias, contactos }] = await Promise.all([
 		leadId
 			? db
@@ -342,7 +365,7 @@ async function nombresDeIdentidad(
 				.where(eqDpi(renapInfo.dpi, dpi))
 				.limit(1)
 		: [];
-	return [
+	const titular = [
 		...delLead.flatMap((l) => [
 			l.primerNombre,
 			l.segundoNombre,
@@ -350,6 +373,8 @@ async function nombresDeIdentidad(
 			l.segundoApellido,
 		]),
 		...renap.flatMap((r) => Object.values(r)),
+	];
+	const otros = [
 		...solicitudes.flatMap((x) => [
 			x.primerNombre,
 			x.segundoNombre,
@@ -363,6 +388,7 @@ async function nombresDeIdentidad(
 		// la referencia se renombre o se borre.
 		...contactos.map((c) => c.referenciaNombre),
 	];
+	return { titular, otros };
 }
 
 /**
@@ -373,7 +399,10 @@ async function nombresDeIdentidad(
  * cliente cae a una por SIFCO, quizá de otro lead): tapar de más es inocuo,
  * dejar un nombre sin tapar no. Lanza si no se pueden leer.
  */
-async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
+async function cargarNombresCaso(
+	casoCobroId: string,
+	nombreCartera: Promise<string | null>,
+): Promise<Set<string>> {
 	const ctx = await resolverContextoCaso(casoCobroId);
 	const [delContrato] = await db
 		.select({
@@ -402,10 +431,14 @@ async function cargarNombresCaso(casoCobroId: string): Promise<Set<string>> {
 			opportunityId: delContrato.opportunityId,
 		});
 	}
-	const nombres = await Promise.all(
-		identidades.map((i) => nombresDeIdentidad(ctx, i)),
+	const [porIdentidad, delCredito] = await Promise.all([
+		Promise.all(identidades.map((i) => nombresDeIdentidad(ctx, i))),
+		nombreCartera,
+	]);
+	return unirNombres(
+		[delContrato?.nombre, delCredito, ...porIdentidad.flatMap((n) => n.titular)],
+		porIdentidad.flatMap((n) => n.otros),
 	);
-	return palabrasDeNombres([delContrato?.nombre, ...nombres.flat()]);
 }
 
 /**
@@ -432,8 +465,9 @@ async function cargarContextoIA(
 			message: "Caso de cobro no encontrado.",
 		});
 	}
-	const [credito, historico, gestiones, nombres] = await Promise.all([
-		cargarCreditoVivo(caso.numeroSifco),
+	const vivo = cargarCreditoVivo(caso.numeroSifco);
+	const [creditoVivo, historico, gestiones, nombres] = await Promise.all([
+		vivo,
 		(hitosYaCargados ?? cargarHistoricoDetallado(casoCobroId)).catch(
 			(): HistoricoCargado => ({ hitos: null, completo: false }),
 		),
@@ -452,14 +486,17 @@ async function cargarContextoIA(
 			.orderBy(desc(contactosCobros.fechaContacto))
 			.limit(MAX_GESTIONES),
 		// Sin los nombres no se puede tapar el texto libre: no se manda.
-		cargarNombresCaso(casoCobroId).catch((error) => {
+		cargarNombresCaso(
+			casoCobroId,
+			vivo.then((v) => v?.nombreCliente ?? null),
+		).catch((error) => {
 			console.error(`[AsistenteIA] nombres del caso ${casoCobroId}:`, error);
 			return null;
 		}),
 	]);
 	return {
 		contexto: armarContextoIA({
-			credito: credito ?? {
+			credito: creditoVivo?.credito ?? {
 				estadoMora: "desconocido",
 				diasMora: 0,
 				cuotasVencidas: 0,
@@ -470,7 +507,7 @@ async function cargarContextoIA(
 			gestiones,
 			nombres: nombres ?? undefined,
 		}),
-		completo: credito !== null && historico.completo && nombres !== null,
+		completo: creditoVivo !== null && historico.completo && nombres !== null,
 		nombres: nombres ?? new Set(),
 	};
 }

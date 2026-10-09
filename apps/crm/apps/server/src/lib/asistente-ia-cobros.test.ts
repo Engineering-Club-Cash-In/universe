@@ -8,6 +8,7 @@ import {
 	palabrasDeNombres,
 	taparDatosPersonales,
 	taparNumeros,
+	unirNombres,
 } from "./asistente-ia-cobros";
 
 const fuentes = {
@@ -95,6 +96,18 @@ describe("taparDatosPersonales", () => {
 		expect(taparDatosPersonales("pagará Q1,500.00 el 3/10", nombres)).toBe(
 			"pagará Q1,500.00 el 3/10",
 		);
+	});
+});
+
+describe("unirNombres", () => {
+	test("junta al titular con los demás", () => {
+		expect(unirNombres(["Ana Gómez"], ["Luis Paz", null])).toEqual(
+			new Set(["ana", "gomez", "luis", "paz"]),
+		);
+	});
+	test("sin nombre del titular lanza, aunque haya referencias", () => {
+		expect(() => unirNombres([null, "  "], ["Luis Paz"])).toThrow();
+		expect(() => unirNombres([], [])).toThrow();
 	});
 });
 

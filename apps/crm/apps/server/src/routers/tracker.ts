@@ -55,6 +55,7 @@ import {
 	condicionDeAlcance,
 	type MembresiaSocio,
 } from "../lib/partner-scope";
+import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
@@ -65,7 +66,6 @@ import {
 	uploadBufferToR2,
 	validateResolvedMimeType,
 } from "../lib/storage";
-import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
 	construirHistorial,
 	type EntradaHistorial,
@@ -411,8 +411,9 @@ function exigirReglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 // resolvió al subir la factura.
 async function datosDelCorreo(
 	fila: Fila,
+	conexion: Pick<typeof db, "select"> = db,
 ): Promise<{ aseguradora: Aseguradora; datos: DatosCorreoFacturaSeguro }> {
-	const [oportunidad] = await db
+	const [oportunidad] = await conexion
 		.select({
 			insuranceProvider: opportunities.insuranceProvider,
 			cuotaMensual: opportunities.cuotaMensual,
@@ -432,7 +433,7 @@ async function datosDelCorreo(
 	// al cerrar y, entre ellas, las de la aseguradora del crédito.
 	const [delCierre] =
 		fila.status === "won"
-			? await db
+			? await conexion
 					.select({ quotationId: opportunityCloseQuotations.quotationId })
 					.from(opportunityCloseQuotations)
 					.where(eq(opportunityCloseQuotations.opportunityId, fila.id))
@@ -447,7 +448,7 @@ async function datosDelCorreo(
 	// Sin cerrar: la última cotización (confirmado con negocio), con el mismo
 	// orden que el cierre (getLatestApprovedQuotation): una aceptada manda
 	// sobre las más nuevas.
-	const [cotizacion] = await db
+	const [cotizacion] = await conexion
 		.select({
 			insuranceProvider: quotations.insuranceProvider,
 			insuredAmount: quotations.insuredAmount,
@@ -511,6 +512,22 @@ async function datosDelCorreo(
 			aseguradora,
 		},
 	};
+}
+
+// Dentro de la transacción del registro, con las cotizaciones de la oportunidad
+// FOR SHARE: aceptar o rechazar una espera al commit, y el correo guardado sale
+// con la cotización vigente al registrar.
+async function datosDelCorreoBajoBloqueo(
+	tx: Pick<typeof db, "select">,
+	fila: Fila,
+) {
+	await tx
+		.select({ id: quotations.id })
+		.from(quotations)
+		.where(eq(quotations.opportunityId, fila.id))
+		.for("share");
+	const { aseguradora, datos } = await datosDelCorreo(fila, tx);
+	return { aseguradora, datos, destinatarios: destinatariosDe(aseguradora) };
 }
 
 // La llave de idempotencia es por registro e intento: reintentar el mismo
@@ -593,12 +610,14 @@ function exigirMismoEstado(bajoBloqueo: string | undefined, alEmpezar: string) {
 export async function previsualizarFacturaSeguroDesdeCrm(
 	opportunityId: string,
 ): Promise<
-	{ seEnviara: true; aseguradora: Aseguradora } | { seEnviara: false; motivo: string }
+	| { seEnviara: true; aseguradora: Aseguradora }
+	| { seEnviara: false; motivo: string }
 > {
 	const [fila] = await consultaBase()
 		.where(eq(opportunities.id, opportunityId))
 		.limit(1);
-	if (!fila) return { seEnviara: false, motivo: "no se encontró la oportunidad" };
+	if (!fila)
+		return { seEnviara: false, motivo: "no se encontró la oportunidad" };
 	const regla = puedeEnviarFacturaDesdeCrm({
 		closurePercentage: fila.closurePercentage,
 		status: fila.status,
@@ -606,7 +625,10 @@ export async function previsualizarFacturaSeguroDesdeCrm(
 		yaSubida: fila.facturaEnvio != null,
 	});
 	if (!regla.ok) {
-		return { seEnviara: false, motivo: MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo] };
+		return {
+			seEnviara: false,
+			motivo: MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo],
+		};
 	}
 	const { aseguradora } = await datosDelCorreo(fila);
 	return { seEnviara: true, aseguradora };
@@ -654,11 +676,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		};
 	}
 
-	const { aseguradora, datos } = await datosDelCorreo(fila);
-	const destinatarios = destinatariosDe(aseguradora);
 	const creadoAt = new Date();
-	const correo = armarCorreoFacturaSeguro(datos, creadoAt);
-
 	const registro = await db.transaction(async (tx) => {
 		const [vigente] = await tx
 			.select({
@@ -681,6 +699,9 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		});
 		if (!bajoBloqueo.ok) return null;
 
+		const { aseguradora, datos, destinatarios } =
+			await datosDelCorreoBajoBloqueo(tx, fila);
+		const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 		const [envio] = await tx
 			.insert(insuranceInvoiceSubmissions)
 			.values({
@@ -700,7 +721,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				id: insuranceInvoiceSubmissions.id,
 				intento: insuranceInvoiceSubmissions.intento,
 			});
-		return envio;
+		return { envio, aseguradora, destinatarios, correo };
 	});
 	if (!registro) {
 		return {
@@ -710,12 +731,12 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	}
 
 	const envio = await enviarYRegistrar({
-		registro,
-		destinatarios,
+		registro: registro.envio,
+		destinatarios: registro.destinatarios,
 		archivo: { key: params.key, nombre: nombreDeFactura(params.nombre, tipo) },
-		correo,
+		correo: registro.correo,
 	});
-	return { enviada: true, envio, aseguradora };
+	return { enviada: true, envio, aseguradora: registro.aseguradora };
 }
 
 function mimeDeFactura(file: { name: string; type?: string }) {
@@ -918,14 +939,9 @@ export const trackerRouter = {
 			}
 			const nombre = nombreDeFactura(input.archivo.name, mimeType);
 
-			// Todo lo que puede fallar va antes de subir a R2: así la subida queda
-			// pegada a la transacción y a su limpieza, sin archivos huérfanos.
-			const { aseguradora, datos } = await datosDelCorreo(fila);
-			const destinatarios = destinatariosDe(aseguradora);
 			// El correo se arma una vez y se guarda: el saludo usa esta misma
 			// fecha (createdAt del registro), no la hora de cada reintento.
 			const creadoAt = new Date();
-			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 
 			const subido = {
 				key: `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`,
@@ -970,6 +986,9 @@ export const trackerRouter = {
 						context.membresias,
 					);
 
+					const { aseguradora, datos, destinatarios } =
+						await datosDelCorreoBajoBloqueo(tx, fila);
+					const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 					const [documento] = await tx
 						.insert(opportunityDocuments)
 						.values({
@@ -1006,7 +1025,7 @@ export const trackerRouter = {
 							id: insuranceInvoiceSubmissions.id,
 							intento: insuranceInvoiceSubmissions.intento,
 						});
-					return envio;
+					return { envio, aseguradora, destinatarios, correo };
 				});
 
 			let registro: Awaited<ReturnType<typeof registrar>>;
@@ -1020,12 +1039,12 @@ export const trackerRouter = {
 
 			// Después del commit: un fallo del correo no revierte la factura subida.
 			const envio = await enviarYRegistrar({
-				registro,
-				destinatarios,
+				registro: registro.envio,
+				destinatarios: registro.destinatarios,
 				archivo: { key: subido.key, nombre },
-				correo,
+				correo: registro.correo,
 			});
-			return { envio, aseguradora };
+			return { envio, aseguradora: registro.aseguradora };
 		}),
 
 	// Reintento único desde el CRM: usa la factura ya guardada.

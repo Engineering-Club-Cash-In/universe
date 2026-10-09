@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
+	insuranceInvoiceSubmissions,
 	opportunityAgencySellers,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -87,6 +88,11 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
+import {
+	envioSinConfirmar,
+	puedeReenviarFacturaSeguro,
+	puedeReintentarDesdeCrm,
+} from "../lib/factura-seguro";
 import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
@@ -220,6 +226,11 @@ import {
 	runOpportunityDocumentDeleteCore,
 	runOpportunityDocumentUploadCore,
 } from "./opportunity-document-core";
+import {
+	enviarFacturaSeguroDesdeCrm,
+	previsualizarFacturaSeguroDesdeCrm,
+	type ResultadoFacturaDesdeCrm,
+} from "./tracker";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -6356,18 +6367,63 @@ export const crmRouter = {
 						id: user.id,
 						name: user.name,
 					},
+					// La agencia solo si la subió un socio desde el tracker: desde el CRM
+					// la sube un usuario interno, no la agencia. El estado del correo
+					// viene en las dos vías.
+					subidoDesde: sql<
+						string | null
+					>`case when ${user.role} = 'partner' then ${companies.name} end`,
+					envioAseguradora: {
+						estado: insuranceInvoiceSubmissions.status,
+						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
+						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+						actualizadoAt: insuranceInvoiceSubmissions.updatedAt,
+						retryCount: insuranceInvoiceSubmissions.retryCount,
+					},
 				})
 				.from(opportunityDocuments)
 				.leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+				.leftJoin(
+					insuranceInvoiceSubmissions,
+					eq(insuranceInvoiceSubmissions.documentId, opportunityDocuments.id),
+				)
+				.leftJoin(
+					companies,
+					eq(companies.id, insuranceInvoiceSubmissions.companyId),
+				)
 				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
 				.orderBy(opportunityDocuments.uploadedAt);
+
+			const puedeReintentar = puedeReintentarDesdeCrm(
+				{ userId: context.userId, userRole: context.userRole },
+				opportunity[0].assignedTo,
+			);
 
 			// Generar URLs firmadas para cada documento
 			const documentsWithUrls = await Promise.all(
 				documents.map(async (doc) => {
 					const url = await getFileUrl(doc.filePath);
+					const { envioAseguradora } = doc;
 					return {
 						...doc,
+						envioAseguradora: envioAseguradora && {
+							estado: envioAseguradora.estado,
+							aseguradora: envioAseguradora.aseguradora,
+							enviadoAt: envioAseguradora.enviadoAt,
+							sinConfirmar: envioSinConfirmar({
+								envio: envioAseguradora.estado,
+								envioActualizadoAt: envioAseguradora.actualizadoAt,
+							}),
+							// Solo si quien mira puede usarlo: así el botón no aparece para
+							// recibir después un "sin permiso".
+							reintentoDisponible:
+								puedeReintentar &&
+								puedeReenviarFacturaSeguro({
+									envio: envioAseguradora.estado,
+									envioActualizadoAt: envioAseguradora.actualizadoAt,
+									retryCount: envioAseguradora.retryCount ?? 0,
+								}).ok,
+						},
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
@@ -6377,6 +6433,31 @@ export const crmRouter = {
 			);
 
 			return documentsWithUrls;
+		}),
+
+	// Para la confirmación del CRM antes de subir un "Seguro del Vehículo".
+	getEnvioFacturaSeguroCrm: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [opportunity] = await db
+				.select({ assignedTo: opportunities.assignedTo })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+			if (
+				context.userRole === "sales" &&
+				opportunity.assignedTo !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver esta oportunidad",
+				});
+			}
+			return previsualizarFacturaSeguroDesdeCrm(input.opportunityId);
 		}),
 
 	uploadOpportunityDocument: crmProcedure
@@ -6591,7 +6672,30 @@ export const crmRouter = {
 				opportunity[0]?.vehicleId || undefined,
 			);
 
-			return newDocument;
+			// La factura del seguro subida desde el CRM también va a la aseguradora
+			// (mismo envío que el tracker). El documento ya quedó guardado: un
+			// error del envío se informa sin tumbar la subida.
+			const facturaSeguro: ResultadoFacturaDesdeCrm | null =
+				input.documentType === "seguro_vehiculo"
+					? await enviarFacturaSeguroDesdeCrm({
+							opportunityId: input.opportunityId,
+							documentId: newDocument.id,
+							key: uploadedFile.key,
+							nombre: input.file.name,
+							userId: context.userId,
+						}).catch((error) => {
+							console.error(
+								"[uploadOpportunityDocument] No se pudo enviar la factura del seguro",
+								error,
+							);
+							return {
+								enviada: false as const,
+								motivo: "no se pudo procesar el envío a la aseguradora",
+							};
+						})
+					: null;
+
+			return { ...newDocument, facturaSeguro };
 		}),
 
 	deleteOpportunityDocument: crmProcedure
@@ -6611,6 +6715,20 @@ export const crmRouter = {
 			if (!document) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Documento no encontrado",
+				});
+			}
+
+			// La factura del seguro enviada desde el tracker es el respaldo del
+			// correo a la aseguradora: borrarla permitiría subir y enviar otra.
+			const [facturaDelTracker] = await db
+				.select({ id: insuranceInvoiceSubmissions.id })
+				.from(insuranceInvoiceSubmissions)
+				.where(eq(insuranceInvoiceSubmissions.documentId, input.documentId))
+				.limit(1);
+			if (facturaDelTracker) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esta factura del seguro ya se registró para la aseguradora desde el tracker y no se puede eliminar",
 				});
 			}
 

@@ -26,6 +26,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { auditedTransaction, auditRecord } from "../lib/audit";
+import { guardarCotizacionDelCierre } from "../lib/cotizacion-del-cierre";
 import { eqDpi } from "../lib/dpi-lookup";
 import { calcularFinanciamientoFechaIdeal } from "../lib/fecha-ideal-cotizacion";
 import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
@@ -1833,6 +1834,12 @@ export async function closeOpportunity(
 				contractId: clientResult.contractId,
 			};
 		});
+
+		// Después del commit y sin poder fallar: la factura del seguro del tracker
+		// usa esta cotización tal cual.
+		if (quotation?.id) {
+			await guardarCotizacionDelCierre(opportunityId, quotation.id);
+		}
 
 		console.log(
 			`[CloseOpportunity] ✓ Opportunity closed successfully: ${opportunityId}`,

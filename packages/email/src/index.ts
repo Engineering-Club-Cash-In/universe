@@ -1130,18 +1130,32 @@ export const sendPlainEmail = async (
   subject: string,
   html: string,
   cc?: string | string[],
+  opciones?: {
+    attachments?: { filename: string; content: Buffer }[];
+    // Resend no reenvía un correo con la misma llave y el mismo contenido
+    // (ventana de 24 h): permite reintentar sin duplicar.
+    idempotencyKey?: string;
+  },
 ) => {
   const recipients = Array.isArray(to) ? to : [to];
   recipients.forEach(email => emailSchema.parse(email));
 
   try {
-    const { data, error } = await resend.emails.send({
-      from: `Club Cash In <no-reply@${domain}>`,
-      to: recipients,
-      cc: cc,
-      subject,
-      html,
-    });
+    const { data, error } = await resend.emails.send(
+      {
+        from: `Club Cash In <no-reply@${domain}>`,
+        to: recipients,
+        cc: cc,
+        subject,
+        html,
+        attachments: opciones?.attachments?.length
+          ? opciones.attachments
+          : undefined,
+      },
+      opciones?.idempotencyKey
+        ? { idempotencyKey: opciones.idempotencyKey }
+        : undefined,
+    );
 
     if (error) {
       console.error("[sendPlainEmail] Resend API Error:", error);

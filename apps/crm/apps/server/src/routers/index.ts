@@ -74,6 +74,7 @@ export const crmAppRouter = {
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
+	getEnvioFacturaSeguroCrm: crmRouter.getEnvioFacturaSeguroCrm,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
 	getDocumentRequirementsByClientType:
 		crmRouter.getDocumentRequirementsByClientType,
@@ -548,6 +549,9 @@ export const partnerTrackerRouter = {
 	getPartnerAgencies: trackerRouter.getPartnerAgencies,
 	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
 	changePartnerPassword: trackerRouter.changePartnerPassword,
+	subirFacturaSeguro: trackerRouter.subirFacturaSeguro,
+	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
+	verFacturaSeguro: trackerRouter.verFacturaSeguro,
 };
 
 // Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.

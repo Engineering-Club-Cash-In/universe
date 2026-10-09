@@ -158,6 +158,11 @@ import {
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
+import {
+	agruparAlertasCaso,
+	separarLeidas,
+} from "../lib/alertas-caso";
+import { cargarMarcasAlertas } from "../lib/alertas-caso-db";
 import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import {
 	adminProcedure,
@@ -661,11 +666,9 @@ export const createContactoCobrosSchema = z
 			.string()
 			.regex(/^\d+(\.\d{1,2})?$/, "Formato de monto inválido")
 			.optional(),
-		// TODO(José) · tarea W1: persistir dirección, participante, teléfono
-		// contactado y hora/medio del próximo contacto (hoy se aceptan y se
-		// ignoran). Ver docs/features/cobros-02/16-workspace-backend.md
-		// Los manda el Workspace de cobros (ContactoModal embebido). No son
-		// columnas de contactos_cobros: el handler los separa antes del insert.
+		// W1 (Workspace, migración 0079): dirección, participante, teléfono
+		// contactado y hora/medio del próximo contacto. Los manda el Workspace de
+		// cobros (ContactoModal embebido). Ver docs/features/cobros-02/16-workspace-backend.md
 		// `.catch(undefined)`: un stub inválido se descarta en vez de rechazar
 		// la gestión entera (p. ej. cuando el WhatsApp ya salió).
 		direccion: z.enum(["saliente", "entrante"]).optional().catch(undefined),
@@ -2293,22 +2296,32 @@ export const cobrosRouter = {
 	createContactoCobros: cobrosProcedure
 		.input(createContactoCobrosSchema)
 		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			// promesaContactoId y visitaId no son columnas: se separan del payload.
-			// Los stubs W1 del Workspace (dirección, participante, teléfono
-			// contactado) tampoco: se separan para que el spread de `datos` no los
-			// lleve al insert/update.
-			// TODO(José) · tarea W1: persistir dirección y teléfono (el tipo de
-			// participante ya se guarda: lo usa la racha de intentos del titular).
+			// Los datos W1 del Workspace (dirección, participante, teléfono
+			// contactado) se separan también y se guardan aparte (`datosWorkspace`).
 			const {
 				promesaContactoId,
 				visitaId,
-				direccion: _direccion,
+				direccion,
 				participante,
-				telefonoContactado: _telefonoContactado,
+				telefonoContactado,
 				horaProximoContacto,
 				medioProximoContacto,
 				...datos
 			} = input;
+			// W1: solo se escribe lo que llega. Una edición de promesa que no trae
+			// estos datos no los borra con NULL.
+			const datosWorkspace = {
+				...(direccion ? { direccionContacto: direccion } : {}),
+				...(participante
+					? { participanteNombre: participante.nombre.trim() || null }
+					: {}),
+				...(telefonoContactado?.trim()
+					? { telefonoContactado: telefonoContactado.trim() }
+					: {}),
+			};
 			const esPromesa = datos.estadoContacto === "promesa_pago";
 			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
 			// B8 (doc 13): hora y medio del próximo contacto. Solo con fecha y
@@ -2378,7 +2391,13 @@ export const cobrosRouter = {
 
 					const actualizadas = await tx
 						.update(contactosCobros)
-						.set({ ...datos, estadoPromesa, updatedAt: new Date() })
+						.set({
+							...datos,
+							...datosWorkspace,
+							...(participante ? { participanteTipo: participante.tipo } : {}),
+							estadoPromesa,
+							updatedAt: new Date(),
+						})
 						.where(
 							and(
 								eq(contactosCobros.id, promesaContactoId),
@@ -2433,6 +2452,7 @@ export const cobrosRouter = {
 					.values({
 						...datos,
 						...proximoContactoConHora,
+						...datosWorkspace,
 						estadoPromesa,
 						realizadoPor: context.userId,
 						bucketSnapshot,
@@ -2496,7 +2516,9 @@ export const cobrosRouter = {
 	// Contrato: docs/features/bot-whatsapp-cobros/06-historial-interacciones.md
 	getActividadBot: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const vacio = {
 				sesiones: [] as ActividadBotSesion[],
 				accesosFallidos: [] as ActividadBotInteraccion[],
@@ -2765,6 +2787,8 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			console.log(
 				"Obteniendo historial de contactos para el caso:",
 				input.casoCobroId,
@@ -2796,6 +2820,13 @@ export const cobrosRouter = {
 					// de una inmovilización, InmovilizacionCard la excluye de la
 					// lista de contactos elegibles.
 					inmovilizacionId: contactosCobros.inmovilizacionId,
+					// W1: dirección, a quién se contactó y su teléfono.
+					direccionContacto: contactosCobros.direccionContacto,
+					participanteTipo: contactosCobros.participanteTipo,
+					participanteNombre: contactosCobros.participanteNombre,
+					telefonoContactado: contactosCobros.telefonoContactado,
+					horaProximoContacto: contactosCobros.horaProximoContacto,
+					medioProximoContacto: contactosCobros.medioProximoContacto,
 				})
 				.from(contactosCobros)
 				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))
@@ -2819,7 +2850,9 @@ export const cobrosRouter = {
 				pagina: z.number().int().min(1).default(1),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const POR_PAGINA = 10;
 
 			const filtro = and(
@@ -2849,6 +2882,13 @@ export const cobrosRouter = {
 					proximoPaso: contactosCobros.proximoPaso,
 					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
+					// W1: dirección, a quién se contactó y su teléfono.
+					direccionContacto: contactosCobros.direccionContacto,
+					participanteTipo: contactosCobros.participanteTipo,
+					participanteNombre: contactosCobros.participanteNombre,
+					telefonoContactado: contactosCobros.telefonoContactado,
+					horaProximoContacto: contactosCobros.horaProximoContacto,
+					medioProximoContacto: contactosCobros.medioProximoContacto,
 				})
 				.from(contactosCobros)
 				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))
@@ -3190,60 +3230,20 @@ export const cobrosRouter = {
 			// Agrupa por TIPO de alerta, no por fila: los jobs son diarios, así que
 			// "Caso sin contacto reciente" se repite un día tras otro y llenaba la
 			// tarjeta con 15 copias del mismo aviso. Se muestra la más reciente de
-			// cada tipo con cuántas veces se repitió — el asesor necesita saber
-			// QUÉ pasa y desde cuándo, no leer el mismo aviso 15 veces.
-			const porTipo = new Map<
-				string,
-				{
-					id: string;
-					titulo: string;
-					descripcion: string | null;
-					cobrosTipo: string | null;
-					status: string;
-					createdAt: Date;
-					repeticiones: number;
-					desde: Date;
-				}
-			>();
-			// `filasNotificacionCobros` inserta UNA FILA POR DESTINATARIO (asesor +
-			// supervisores) para el MISMO evento. Sin colapsarlas, una sola alerta
-			// escalada se contaba como varias repeticiones y podía quedarse con la
-			// redacción dirigida al supervisor (Codex). Se deduplica por evento
-			// (tipo + instante) prefiriendo la fila del usuario que está mirando,
-			// que es la que trae el texto escrito para él.
-			const porEvento = new Map<string, (typeof rows)[number]>();
-			for (const r of rows) {
-				if (!r.createdAt) continue;
-				const claveEvento = `${r.cobrosTipo ?? r.titulo}|${r.createdAt.getTime()}`;
-				const previa = porEvento.get(claveEvento);
-				if (!previa || r.assignedTo === context.userId) {
-					porEvento.set(claveEvento, r);
-				}
-			}
-
-			for (const r of porEvento.values()) {
-				if (!r.createdAt) continue;
-				// cobros_tipo es null en las notificaciones que no vienen de los jobs
-				// de cobros (asignaciones manuales, seguimientos): ahí agrupa el título.
-				const clave = r.cobrosTipo ?? r.titulo;
-				const previa = porTipo.get(clave);
-				if (!previa) {
-					porTipo.set(clave, {
-						...r,
-						createdAt: r.createdAt,
-						repeticiones: 1,
-						desde: r.createdAt,
-					});
-					continue;
-				}
-				previa.repeticiones += 1;
-				// `rows` viene ordenado desc, así que la primera es la más reciente y
-				// la última que se ve de cada tipo es la más antigua.
-				if (r.createdAt < previa.desde) previa.desde = r.createdAt;
-			}
+			// cada tipo con cuántas veces se repitió (lib/alertas-caso).
+			// W5: los grupos que el asesor ya marcó como leídos no salen; si el job
+			// genera una repetición nueva, vuelven a salir.
+			const marcas = await cargarMarcasAlertas(
+				input.casoCobroId,
+				context.userId,
+			);
+			const { activas } = separarLeidas(
+				agruparAlertasCaso(rows, context.userId),
+				marcas,
+			);
 			// El cliente esperando en modo agente va primero: es la única alerta
 			// con alguien del otro lado aguardando respuesta ahora mismo.
-			return [...porTipo.values()]
+			return activas
 				.sort(
 					(a, b) =>
 						Number(b.cobrosTipo === "bot_modo_agente") -
@@ -5986,6 +5986,21 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Con caso: el dueño del caso, y el SIFCO tiene que ser el del caso (si no, un caso propio
+			// con el SIFCO de otro crédito pagaría o registraría sobre ese crédito).
+			if (input.casoCobroId) {
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+				const [casoPago] = await db
+					.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.limit(1);
+				if (casoPago?.numeroCreditoSifco !== input.numeroSifco) {
+					throw new ORPCError("BAD_REQUEST", { message: "El crédito no corresponde al caso de cobros." });
+				}
+			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
+			}
 			// Verify the credit exists and user has access
 			const reference = await getCreditoReferenceByNumeroSifco(
 				input.numeroSifco,
@@ -6062,6 +6077,17 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Dueño del caso, y el SIFCO tiene que ser el del caso (si no, un caso propio con el SIFCO
+			// de otro crédito crearía links de pago sobre ese crédito).
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			const [casoLink] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (casoLink?.numeroCreditoSifco !== input.numeroSifco) {
+				throw new ORPCError("BAD_REQUEST", { message: "El crédito no corresponde al caso de cobros." });
+			}
 			try {
 				return await createPagaloLinks({
 					...input,
@@ -6502,6 +6528,8 @@ export const cobrosRouter = {
 				),
 		)
 		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const [caso] = await db
 				.select({
 					id: casosCobros.id,
@@ -7630,7 +7658,9 @@ export const cobrosRouter = {
 				),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const [updated] = await db
 				.update(casosCobros)
 				.set({
@@ -7663,6 +7693,12 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
+			if (input.casoCobroId) {
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
+			}
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
 			const testMode = isTestModeEnabled();
 			const telefonoDestino = testMode ? getTestPhone() : input.telefono;
@@ -7719,6 +7755,8 @@ export const cobrosRouter = {
 	enviarEstadoCuentaWhatsapp: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().min(1) }))
 		.handler(async ({ input, context }) => {
+			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const resultado = await sendEstadoCuentaWhatsapp({
 				casoCobroId: input.casoCobroId,
 				userId: context.userId,
@@ -8551,6 +8589,12 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
+			if (input.casoCobroId) {
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
+			}
 			const escapeHtml = (s: string) =>
 				s
 					.replace(/&/g, "&amp;")
@@ -8636,6 +8680,12 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
+			if (input.casoCobroId) {
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
+			}
 			const token = process.env.SMS_TOKEN;
 			const apiKeyRaw = process.env.SMS_API_KEY;
 			if (!token || !apiKeyRaw) {

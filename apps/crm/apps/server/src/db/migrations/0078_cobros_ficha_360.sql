@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS "public"."resumenes_ia_cobros" (
 	"contexto_en" timestamp,
 	"generando_huella" text,
 	"generando_hasta" timestamp,
-	"observado_huella" text
+	"observado_huella" text,
+	"generando_token" text
 );
 -- Instante (reloj de la BD) en que se leyó el contexto que originó la fila:
 -- ordena las versiones del resumen por contexto y no por cuándo terminó la
@@ -94,6 +95,10 @@ ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "generando_h
 -- cualquier petición, haya o no resumen de esa huella): una generación solo se
 -- guarda si ninguna observación posterior es de otro contexto.
 ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "observado_huella" text;
+-- Dueño de la reserva: un token único por reserva. Quien soltó o guarda solo
+-- toca la reserva si el token es el suyo (si venció y otra instancia la retomó
+-- con la misma huella, la reserva viva no es suya).
+ALTER TABLE "public"."resumenes_ia_cobros" ADD COLUMN IF NOT EXISTS "generando_token" text;
 
 -- F7 · Preguntas al asistente: traza y tope diario por usuario.
 CREATE TABLE IF NOT EXISTS "public"."preguntas_ia_cobros" (

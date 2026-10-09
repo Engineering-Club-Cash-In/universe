@@ -26,11 +26,12 @@
  * Plan: docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject, generateText } from "ai";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
@@ -700,7 +701,7 @@ const MARGEN_RESERVA_MS = 10_000;
 type Resultado =
 	| { tipo: "listo"; resumen: ResumenIA | null }
 	| { tipo: "espera" }
-	| { tipo: "reservado" };
+	| { tipo: "reservado"; token: string };
 
 /**
  * Paso 1, transacción CORTA bajo el lock del caso: decide si hay que generar y,
@@ -753,7 +754,9 @@ async function reservarGeneracion(
 		}
 		if (previa?.masNueva) return { tipo: "listo", resumen: null };
 		if (previa?.reservada) return { tipo: "espera" };
+		const token = randomUUID();
 		const reserva = {
+			generandoToken: token,
 			generandoHuella: huella,
 			generandoHasta:
 				sql`clock_timestamp()::timestamp + ${TIMEOUT_GENERACION_MS + MARGEN_RESERVA_MS} * interval '1 millisecond'` as unknown as Date,
@@ -774,7 +777,7 @@ async function reservarGeneracion(
 				target: resumenesIaCobros.casoCobroId,
 				set: reserva,
 			});
-		return { tipo: "reservado" };
+		return { tipo: "reservado", token };
 	});
 }
 
@@ -834,14 +837,16 @@ const hayObservacionMasNueva = (huella: string, inicio: string) =>
 	sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp AND ${resumenesIaCobros.observadoHuella} IS DISTINCT FROM ${huella}`;
 
 /** Suelta la reserva propia (el modelo falló o el contexto dejó de valer). */
-async function liberarReserva(casoCobroId: string, huella: string) {
+async function liberarReserva(casoCobroId: string, token: string) {
 	await db
 		.update(resumenesIaCobros)
-		.set({ generandoHuella: null, generandoHasta: null })
+		.set({ generandoHuella: null, generandoHasta: null, generandoToken: null })
 		.where(
 			and(
 				eq(resumenesIaCobros.casoCobroId, casoCobroId),
-				eq(resumenesIaCobros.generandoHuella, huella),
+				// Solo la reserva propia: si venció y otra instancia la retomó (con
+				// la misma huella), la reserva viva no es nuestra.
+				eq(resumenesIaCobros.generandoToken, token),
 			),
 		)
 		.catch((error) =>
@@ -872,7 +877,8 @@ export async function generarYGuardar(
 	/** `instanteBD()` tomado ANTES de leer el contexto que se resume. */
 	inicio?: string,
 ): Promise<ResumenIA | null> {
-	let reservada = false;
+	/** Token de la reserva propia, mientras se tenga. */
+	let token: string | undefined;
 	try {
 		const limite = Date.now() + TIMEOUT_GENERACION_MS + MARGEN_RESERVA_MS;
 		for (;;) {
@@ -884,7 +890,7 @@ export async function generarYGuardar(
 			);
 			if (r.tipo === "listo") return r.resumen;
 			if (r.tipo === "reservado") {
-				reservada = true;
+				token = r.token;
 				break;
 			}
 			if (Date.now() >= limite) return null;
@@ -920,16 +926,25 @@ export async function generarYGuardar(
 			observadoHuella: huella,
 			generandoHuella: null,
 			generandoHasta: null,
+			generandoToken: null,
 		};
-		// Al actualizar, `contexto_en` no retrocede: puede haber una observación
-		// posterior de este mismo contexto.
-		const filaSet = inicio
-			? {
-					...fila,
-					contextoEn:
-						sql`GREATEST(${resumenesIaCobros.contextoEn}, ${inicio}::timestamp)` as unknown as Date,
-				}
-			: fila;
+		// Al guardar solo se suelta la reserva si es la propia: si venció y otra
+		// instancia la retomó (con la misma huella), su reserva viva se respeta.
+		const sueltaSiEsMia = (columna: AnyPgColumn) =>
+			sql`CASE WHEN ${resumenesIaCobros.generandoToken} = ${token} THEN NULL ELSE ${columna} END` as unknown as null;
+		const filaSet = {
+			...fila,
+			// `contexto_en` no retrocede: puede haber una observación posterior de
+			// este mismo contexto.
+			...(inicio && {
+				contextoEn:
+					sql`GREATEST(${resumenesIaCobros.contextoEn}, ${inicio}::timestamp)` as unknown as Date,
+			}),
+			generandoHuella: sueltaSiEsMia(resumenesIaCobros.generandoHuella),
+			generandoHasta: sueltaSiEsMia(resumenesIaCobros.generandoHasta),
+			// (En un UPDATE todas las expresiones leen el valor previo de la fila.)
+			generandoToken: sueltaSiEsMia(resumenesIaCobros.generandoToken),
+		};
 		const guardada = await db.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
 			if (!sigueVigente()) return null;
@@ -952,10 +967,10 @@ export async function generarYGuardar(
 			return g;
 		});
 		if (!guardada) {
-			await liberarReserva(casoCobroId, huella);
+			await liberarReserva(casoCobroId, token);
 			return null;
 		}
-		reservada = false;
+		token = undefined;
 		return {
 			texto: fila.texto,
 			etiquetas: fila.etiquetas,
@@ -963,7 +978,7 @@ export async function generarYGuardar(
 		};
 	} catch (error) {
 		console.error(`[AsistenteIA] resumen del caso ${casoCobroId}:`, error);
-		if (reservada) await liberarReserva(casoCobroId, huella);
+		if (token) await liberarReserva(casoCobroId, token);
 		return null;
 	}
 }
@@ -1075,8 +1090,6 @@ export async function obtenerResumenIA(
 			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
 			contextoEn: sql`${inicio}::timestamp` as unknown as Date,
 			observadoHuella: SIN_RESUMEN,
-			generandoHuella: null,
-			generandoHasta: null,
 		};
 		await db
 			.transaction(async (tx) => {

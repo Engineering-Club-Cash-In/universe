@@ -1,4 +1,5 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq, gt, type SQL, sql } from "drizzle-orm";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
@@ -28,6 +29,7 @@ import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 
 const REINTENTOS_AUTOMATICOS = 1;
 const ESPERA_ENTRE_REINTENTOS_MS = 800;
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** El `fetch` de RENAP no lleva `AbortSignal`, así que la cota se aplica acá */
 const TIMEOUT_RENAP_MS = 30_000;
@@ -294,31 +296,26 @@ function delSujeto(coDebtorId: string | null) {
 		: eq(opportunityValidations.sujeto, "titular");
 }
 
-async function registrarValidacion(valores: {
-	opportunityId: string;
-	/** null o ausente = titular */
-	coDebtorId?: string | null;
-	dpi: string;
-	tipo: "renap" | "buro";
-	estado: EstadoValidacion;
-	mensaje?: string | null;
-	scoreRiesgo?: number | null;
-	nivelRiesgo?: string | null;
-	alertas?: string[] | null;
-	fuenteDeDatos?: string | null;
-	expiraEn?: Date | null;
-	ejecutadoPor?: string | null;
-}): Promise<void> {
-	await db.transaction(async (tx) => {
-		// Candado por oportunidad (no por DPI, que es mutable): serializa contra
-		// cualquier otra escritura a esta bitácora, incluida un override
-		// concurrente (mismo candado en `marcarValidacionManualCritico`) —
-		// necesario porque bajo READ COMMITTED un simple "insertar solo si..." no alcanza
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${valores.opportunityId}))`,
-		);
-
-		await tx.insert(opportunityValidations).values({
+async function registrarValidacion(
+	valores: {
+		opportunityId: string;
+		/** null o ausente = titular */
+		coDebtorId?: string | null;
+		dpi: string;
+		tipo: "renap" | "buro";
+		estado: EstadoValidacion;
+		mensaje?: string | null;
+		scoreRiesgo?: number | null;
+		nivelRiesgo?: string | null;
+		alertas?: string[] | null;
+		fuenteDeDatos?: string | null;
+		expiraEn?: Date | null;
+		ejecutadoPor?: string | null;
+	},
+	transaction?: Transaction,
+): Promise<void> {
+	const insertar = (tx: Transaction) =>
+		tx.insert(opportunityValidations).values({
 			opportunityId: valores.opportunityId,
 			sujeto: valores.coDebtorId ? "cofirmante" : "titular",
 			coDebtorId: valores.coDebtorId ?? null,
@@ -333,6 +330,20 @@ async function registrarValidacion(valores: {
 			expiraEn: valores.expiraEn ?? null,
 			ejecutadoPor: valores.ejecutadoPor ?? null,
 		});
+	if (transaction) {
+		await insertar(transaction);
+		return;
+	}
+	await db.transaction(async (tx) => {
+		// Candado por oportunidad (no por DPI, que es mutable): serializa contra
+		// cualquier otra escritura a esta bitácora, incluida un override
+		// concurrente (mismo candado en `marcarValidacionManualCritico`) —
+		// necesario porque bajo READ COMMITTED un simple "insertar solo si..." no alcanza
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${valores.opportunityId}))`,
+		);
+
+		await insertar(tx);
 	});
 }
 
@@ -842,157 +853,200 @@ async function consultarBuro({
 	coDebtorId: string | null;
 	userId?: string | null;
 }): Promise<ReusoBuro> {
-	// Los cofirmantes no pasan por RENAP: no se les puede exigir `renapinfo`
-	const opcionesInfornet = { exigirRenap: coDebtorId === null };
-
-	const consultaBuro = await enFilaPorDpi(dpi, async () => {
-		let resultado = await infornetController.obtenerEstudioPorDPI(
-			dpi,
-			opcionesInfornet,
+	return db.transaction(async (tx) => {
+		// El candado empieza ANTES de Infornet y termina DESPUÉS de guardar
+		// el veredicto. Aprobar análisis toma el mismo candado.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${opportunityId}))`,
 		);
-		let sinRegistro = false;
-		let expiraSinRegistro: Date | null = null;
+		const [actual] = await tx
+			.select({
+				porcentaje: salesStages.closurePercentage,
+				status: opportunities.status,
+				buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
+			})
+			.from(opportunities)
+			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.where(eq(opportunities.id, opportunityId))
+			.limit(1);
+		if (
+			!actual ||
+			actual.status !== "open" ||
+			!(
+				actual.porcentaje === 20 ||
+				(actual.porcentaje === 30 && actual.buroRevalidacionAl30)
+			)
+		) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"La oportunidad cambió de etapa antes de consultar Buró. Recarga la página para ver su estado actual.",
+			});
+		}
+		// Los cofirmantes no pasan por RENAP: no se les puede exigir `renapinfo`
+		const opcionesInfornet = { exigirRenap: coDebtorId === null };
 
-		if (!resultado.success) {
-			// El intento contra Infornet siempre se hace; solo se reusa su clasificación
-			if (resultado.error === ERROR_INFORNET_AMBIGUO) {
-				expiraSinRegistro = await sinRegistroVigentePorDpi(dpi);
-				sinRegistro =
-					expiraSinRegistro !== null ||
-					(await clasificarFalloInfornet(dpi)) === "sin_registro";
+		const consultaBuro = await enFilaPorDpi(dpi, async () => {
+			let resultado = await infornetController.obtenerEstudioPorDPI(
+				dpi,
+				opcionesInfornet,
+			);
+			let sinRegistro = false;
+			let expiraSinRegistro: Date | null = null;
+
+			if (!resultado.success) {
+				// El intento contra Infornet siempre se hace; solo se reusa su clasificación
+				if (resultado.error === ERROR_INFORNET_AMBIGUO) {
+					expiraSinRegistro = await sinRegistroVigentePorDpi(dpi);
+					sinRegistro =
+						expiraSinRegistro !== null ||
+						(await clasificarFalloInfornet(dpi)) === "sin_registro";
+				}
+
+				for (
+					let intento = 0;
+					intento < REINTENTOS_AUTOMATICOS &&
+					!resultado.success &&
+					!sinRegistro;
+					intento++
+				) {
+					await esperar(ESPERA_ENTRE_REINTENTOS_MS);
+					resultado = await infornetController.obtenerEstudioPorDPI(
+						dpi,
+						opcionesInfornet,
+					);
+				}
 			}
 
-			for (
-				let intento = 0;
-				intento < REINTENTOS_AUTOMATICOS && !resultado.success && !sinRegistro;
-				intento++
-			) {
-				await esperar(ESPERA_ENTRE_REINTENTOS_MS);
-				resultado = await infornetController.obtenerEstudioPorDPI(
+			return { resultado, sinRegistro, expiraSinRegistro };
+		});
+
+		const estudio = consultaBuro.resultado;
+		const buroSinRegistro = consultaBuro.sinRegistro;
+
+		if (!estudio.success) {
+			const mensajeCrudo =
+				estudio.error || "Error al obtener el estudio de Infornet";
+
+			const mensajeBuro = buroSinRegistro
+				? MENSAJE_SIN_REGISTRO_BURO
+				: mensajeCrudo === ERROR_BURO_SIN_RENAP_LOCAL
+					? // Suele aparecer tras overridear RENAP sin sincronizar datos reales; la salida es overridear Buró también
+						"La consulta automática a Infornet necesita datos de RENAP ya sincronizados para este DPI, y no existen. Mientras no existan, Buró debe validarse manualmente."
+					: mensajeCrudo;
+			const estadoBuro = buroSinRegistro ? "sin_registro" : "error";
+
+			await registrarValidacion(
+				{
+					opportunityId,
+					coDebtorId,
 					dpi,
-					opcionesInfornet,
-				);
-			}
+					tipo: "buro",
+					estado: estadoBuro,
+					mensaje: mensajeBuro,
+					expiraEn: buroSinRegistro
+						? (consultaBuro.expiraSinRegistro ??
+							new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS))
+						: null,
+					ejecutadoPor: userId ?? null,
+				},
+				tx,
+			);
+
+			return {
+				estado: estadoBuro,
+				mensaje: mensajeBuro,
+				scoreRiesgo: null,
+				nivelRiesgo: null,
+				alertas: null,
+				fuenteDeDatos: null,
+			};
 		}
 
-		return { resultado, sinRegistro, expiraSinRegistro };
-	});
+		// `analizarRiesgo` repite la consulta pero pega en el caché recién escrito
+		const analisisRiesgo = await infornetController
+			.analizarRiesgo(dpi, opcionesInfornet)
+			.catch((error) => {
+				console.error("Error al analizar el estudio de Buró:", error);
+				return null;
+			});
+		const veredicto = evaluarBuro(analisisRiesgo);
 
-	const estudio = consultaBuro.resultado;
-	const buroSinRegistro = consultaBuro.sinRegistro;
+		if (veredicto.sinVeredicto) {
+			await registrarValidacion(
+				{
+					opportunityId,
+					coDebtorId,
+					dpi,
+					tipo: "buro",
+					estado: "error",
+					mensaje: veredicto.mensajeBuro,
+					ejecutadoPor: userId ?? null,
+				},
+				tx,
+			);
 
-	if (!estudio.success) {
-		const mensajeCrudo =
-			estudio.error || "Error al obtener el estudio de Infornet";
+			return {
+				estado: "error",
+				mensaje: veredicto.mensajeBuro,
+				scoreRiesgo: null,
+				nivelRiesgo: null,
+				alertas: null,
+				fuenteDeDatos: null,
+			};
+		}
 
-		const mensajeBuro = buroSinRegistro
-			? MENSAJE_SIN_REGISTRO_BURO
-			: mensajeCrudo === ERROR_BURO_SIN_RENAP_LOCAL
-				? // Suele aparecer tras overridear RENAP sin sincronizar datos reales; la salida es overridear Buró también
-					"La consulta automática a Infornet necesita datos de RENAP ya sincronizados para este DPI, y no existen. Mientras no existan, Buró debe validarse manualmente."
-				: mensajeCrudo;
-		const estadoBuro = buroSinRegistro ? "sin_registro" : "error";
+		// `guardarEnCache` se traga los errores de base: sin fila vigente el estudio no quedó persistido
+		const [cacheRow] = await db
+			.select({ expiraEn: infornetPersonaCache.expiraEn })
+			.from(infornetPersonaCache)
+			.where(
+				and(
+					eq(infornetPersonaCache.dpi, dpi),
+					gt(infornetPersonaCache.expiraEn, new Date()),
+				),
+			)
+			.limit(1);
 
-		await registrarValidacion({
-			opportunityId,
-			coDebtorId,
-			dpi,
-			tipo: "buro",
-			estado: estadoBuro,
-			mensaje: mensajeBuro,
-			expiraEn: buroSinRegistro
-				? (consultaBuro.expiraSinRegistro ??
-					new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS))
-				: null,
-			ejecutadoPor: userId ?? null,
-		});
+		if (!cacheRow) {
+			console.warn(
+				`⚠️ El estudio de ${dpi} no quedó en caché; el veredicto se guarda con vigencia propia`,
+			);
+		}
 
-		return {
-			estado: estadoBuro,
-			mensaje: mensajeBuro,
-			scoreRiesgo: null,
-			nivelRiesgo: null,
-			alertas: null,
-			fuenteDeDatos: null,
-		};
-	}
+		// La consulta sí fue exitosa: el veredicto vale aunque el caché no lo respalde
+		const expiraEnBuro =
+			cacheRow?.expiraEn ?? new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS);
 
-	// `analizarRiesgo` repite la consulta pero pega en el caché recién escrito
-	const analisisRiesgo = await infornetController.analizarRiesgo(
-		dpi,
-		opcionesInfornet,
-	);
-	const veredicto = evaluarBuro(analisisRiesgo);
+		const fuenteDeDatos = estudio.fromCache ? "cache" : "api";
+		const estadoBuro = veredicto.pasoBuro ? "aprobado" : "rechazado";
 
-	if (veredicto.sinVeredicto) {
-		await registrarValidacion({
-			opportunityId,
-			coDebtorId,
-			dpi,
-			tipo: "buro",
-			estado: "error",
-			mensaje: veredicto.mensajeBuro,
-			ejecutadoPor: userId ?? null,
-		});
-
-		return {
-			estado: "error",
-			mensaje: veredicto.mensajeBuro,
-			scoreRiesgo: null,
-			nivelRiesgo: null,
-			alertas: null,
-			fuenteDeDatos: null,
-		};
-	}
-
-	// `guardarEnCache` se traga los errores de base: sin fila vigente el estudio no quedó persistido
-	const [cacheRow] = await db
-		.select({ expiraEn: infornetPersonaCache.expiraEn })
-		.from(infornetPersonaCache)
-		.where(
-			and(
-				eq(infornetPersonaCache.dpi, dpi),
-				gt(infornetPersonaCache.expiraEn, new Date()),
-			),
-		)
-		.limit(1);
-
-	if (!cacheRow) {
-		console.warn(
-			`⚠️ El estudio de ${dpi} no quedó en caché; el veredicto se guarda con vigencia propia`,
+		await registrarValidacion(
+			{
+				opportunityId,
+				coDebtorId,
+				dpi,
+				tipo: "buro",
+				estado: estadoBuro,
+				mensaje: veredicto.mensajeBuro,
+				scoreRiesgo: analisisRiesgo?.scoreRiesgo ?? null,
+				nivelRiesgo: analisisRiesgo?.nivelRiesgo ?? null,
+				alertas: analisisRiesgo?.alertas ?? null,
+				fuenteDeDatos,
+				expiraEn: expiraEnBuro,
+				ejecutadoPor: userId ?? null,
+			},
+			tx,
 		);
-	}
 
-	// La consulta sí fue exitosa: el veredicto vale aunque el caché no lo respalde
-	const expiraEnBuro =
-		cacheRow?.expiraEn ?? new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS);
-
-	const fuenteDeDatos = estudio.fromCache ? "cache" : "api";
-	const estadoBuro = veredicto.pasoBuro ? "aprobado" : "rechazado";
-
-	await registrarValidacion({
-		opportunityId,
-		coDebtorId,
-		dpi,
-		tipo: "buro",
-		estado: estadoBuro,
-		mensaje: veredicto.mensajeBuro,
-		scoreRiesgo: analisisRiesgo?.scoreRiesgo ?? null,
-		nivelRiesgo: analisisRiesgo?.nivelRiesgo ?? null,
-		alertas: analisisRiesgo?.alertas ?? null,
-		fuenteDeDatos,
-		expiraEn: expiraEnBuro,
-		ejecutadoPor: userId ?? null,
+		return {
+			estado: estadoBuro,
+			mensaje: veredicto.mensajeBuro,
+			scoreRiesgo: analisisRiesgo?.scoreRiesgo ?? null,
+			nivelRiesgo: analisisRiesgo?.nivelRiesgo ?? null,
+			alertas: analisisRiesgo?.alertas ?? null,
+			fuenteDeDatos,
+		};
 	});
-
-	return {
-		estado: estadoBuro,
-		mensaje: veredicto.mensajeBuro,
-		scoreRiesgo: analisisRiesgo?.scoreRiesgo ?? null,
-		nivelRiesgo: analisisRiesgo?.nivelRiesgo ?? null,
-		alertas: analisisRiesgo?.alertas ?? null,
-		fuenteDeDatos,
-	};
 }
 
 type CofirmanteDeOportunidad = { id: string; fullName: string; dpi: string };
@@ -1011,10 +1065,7 @@ async function cofirmantesDeOportunidad(
 		.orderBy(coDebtors.createdAt);
 }
 
-/**
- * Buró de cada cofirmante con las mismas reglas que el del titular. Si el
- * titular está exento por el bot, los cofirmantes también (decisión de negocio).
- */
+/** Consulta el Buró de cada cofirmante; la exención del bot solo cubre al titular. */
 export async function ejecutarBuroCofirmantes({
 	opportunityId,
 	userId,
@@ -1033,15 +1084,6 @@ export async function ejecutarBuroCofirmantes({
 			mensaje: "Oportunidad no encontrada",
 			cofirmantes: [],
 		};
-	}
-
-	const exencion = await resolverExencionPorBot({
-		opportunityId,
-		...oportunidad,
-	});
-
-	if (exencion.exento) {
-		return { exento: true, errorTecnico: false, cofirmantes: [] };
 	}
 
 	const resultados: ResultadoBuroCofirmante[] = [];
@@ -1115,22 +1157,17 @@ export async function ejecutarBuroAlVeinteSiCorresponde({
 		return;
 	}
 
-	if (
-		(
-			await resolverExencionPorBot({
-				opportunityId,
-				source: oportunidad.source,
-				leadSource: oportunidad.leadSource,
-				leadId: oportunidad.leadId,
-				leadDpi: oportunidad.leadDpi,
-			})
-		).exento
-	) {
-		return;
-	}
-
+	const titularExento = (
+		await resolverExencionPorBot({
+			opportunityId,
+			source: oportunidad.source,
+			leadSource: oportunidad.leadSource,
+			leadId: oportunidad.leadId,
+			leadDpi: oportunidad.leadDpi,
+		})
+	).exento;
 	const [titular, cofirmantes] = await Promise.all([
-		oportunidad.leadDpi
+		oportunidad.leadDpi && !titularExento
 			? ejecutarValidaciones({ opportunityId, userId, reusarVigente: true })
 			: null,
 		ejecutarBuroCofirmantes({ opportunityId, userId, reusarVigente: true }),
@@ -1678,6 +1715,7 @@ export async function getValidaciones({
 	});
 
 	if (exencion.exento) {
+		const cofirmantes = await estadoBuroCofirmantes(opportunityId);
 		return {
 			exento: true,
 			faltaDpi: false,
@@ -1685,9 +1723,17 @@ export async function getValidaciones({
 			renap: null,
 			buro: null,
 			buroVigente: false,
-			aprobacionBloqueada: false,
+			aprobacionBloqueada: cofirmantes.some(
+				(c) => c.buro?.estado === "error" && !c.buroDesactualizado,
+			),
 			origenBotSinEvidencia: false,
-			faltaConsentimiento: false,
+			faltaConsentimiento:
+				cofirmantes.length > 0 &&
+				(await faltaConsentimientoDelTitular(
+					opportunityId,
+					oportunidad.clientType,
+					oportunidad.creditType,
+				)),
 			enAnalisisPendiente: false,
 			dpiDesactualizado: false,
 			buroDesactualizado: false,
@@ -1697,7 +1743,7 @@ export async function getValidaciones({
 			overrideBuro: null,
 			overrideRenap: null,
 			validaciones: [],
-			cofirmantes: [],
+			cofirmantes,
 		};
 	}
 

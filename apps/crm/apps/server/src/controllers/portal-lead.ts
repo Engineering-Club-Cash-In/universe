@@ -440,7 +440,7 @@ export async function updateLeadByEmail(c: Context) {
 						and(
 							eq(opportunities.leadId, existingLead.id),
 							sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
-							inArray(opportunities.status, ["open", "lost"]),
+							inArray(opportunities.status, ["open", "on_hold", "lost"]),
 							eq(opportunities.buroRevalidacionAl30, false),
 						),
 					)

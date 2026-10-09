@@ -6,7 +6,10 @@ import { user } from "../db/schema/auth";
 import { infornetPersonaCache } from "../db/schema/buro";
 import { creditApplications } from "../db/schema/client-forms";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
-import { opportunityDocuments } from "../db/schema/documents";
+import {
+	documentRequirementsByClientType,
+	opportunityDocuments,
+} from "../db/schema/documents";
 import { otps } from "../db/schema/otp";
 import { opportunityValidations } from "../db/schema/validations";
 import { vehicles } from "../db/schema/vehicles";
@@ -979,6 +982,17 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 			},
 		]);
 		filasPorTabla.set(opportunityValidations, []);
+		filasPorTabla.set(documentRequirementsByClientType, [
+			{ documentType: "clausula_consentimiento" },
+		]);
+		filasPorTabla.set(coDebtors, [
+			{
+				id: "30303030-3030-4030-8030-303030303030",
+				opportunityId: OPORTUNIDAD,
+				fullName: "Cofirmante pendiente",
+				dpi: "2978485181201",
+			},
+		]);
 
 		const resumen = await invocar(
 			validationsRouter.getResumenBuroOportunidad,
@@ -987,7 +1001,9 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 		);
 		expect(resumen).toMatchObject({
 			exento: true,
+			faltaConsentimiento: true,
 			permitirValidacionManualBuro: true,
+			cofirmantes: [{ nombre: "Cofirmante pendiente", estado: "pendiente" }],
 		});
 		expect(escrituras).toEqual([]);
 	});
@@ -1213,14 +1229,18 @@ describe("corrección de DPI al 30%: solo revalida Buró", () => {
 		expect(marca?.valores).toEqual({ buroRevalidacionAl30: true });
 		const { sql: condicion, params } = sqlDeLaCondicion(marca?.condicion);
 		expect(condicion).toContain("closure_percentage");
+		expect(params).toContain("on_hold");
 		expect(params).toContain("lost");
 	}
 
-	test("editar el DPI del titular marca Buró sin caducar escaneo ni aprobación", async () => {
+	test.each([
+		"open",
+		"on_hold",
+	] as const)("editar el DPI del titular marca Buró en %s sin caducar escaneo ni aprobación", async (status) => {
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI_ANTERIOR, assignedTo: "vendedor" },
 		]);
-		filasPorTabla.set(opportunities, [oportunidad]);
+		filasPorTabla.set(opportunities, [{ ...oportunidad, status }]);
 		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
 		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
 		try {
@@ -1394,6 +1414,34 @@ describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 
+	test("no aprueba análisis si el bot validó al titular pero falta Buró del cofirmante", async () => {
+		prepararAprobacion(false);
+		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
+		filasPorTabla.set(opportunities, [
+			{ ...oportunidad, source: "Whatsapp", leadSource: "Whatsapp" },
+		]);
+		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{ dpi: DPI, expiraEn: new Date(Date.now() + 86_400_000) },
+		]);
+		filasPorTabla.set(coDebtors, [
+			{
+				id: "34343434-3434-4434-8434-343434343434",
+				opportunityId: OPORTUNIDAD,
+				fullName: "Cofirmante sin consulta",
+				dpi: DPI,
+			},
+		]);
+		await expect(
+			invocar(
+				crmRouter.approveOpportunityAnalysis,
+				{ opportunityId: OPORTUNIDAD, approved: true },
+				contextoDe("analista", "analyst"),
+			),
+		).rejects.toThrow(/cofirmante Cofirmante sin consulta/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
 	test.each([
 		["sin excepción", false],
 		["con excepción", true],
@@ -1534,6 +1582,38 @@ describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
 				contextoDe("vendedor", "sales"),
 			),
 		).rejects.toThrow(/pasa por análisis/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("la exención del bot no permite entrar al 30% sin Buró del cofirmante", async () => {
+		prepararDestino(30);
+		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
+		filasPorTabla.set(opportunities, [
+			{ ...oportunidad, source: "Whatsapp", leadSource: "Whatsapp" },
+		]);
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: "2978485181201", source: "Whatsapp" },
+		]);
+		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{ dpi: "2978485181201", expiraEn: new Date(Date.now() + 86_400_000) },
+		]);
+		filasPorTabla.set(coDebtors, [
+			{
+				id: "31313131-3131-4131-8131-313131313131",
+				opportunityId: OPORTUNIDAD,
+				fullName: "Cofirmante pendiente",
+				dpi: "2978485181201",
+			},
+		]);
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/cofirmante Cofirmante pendiente/);
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 

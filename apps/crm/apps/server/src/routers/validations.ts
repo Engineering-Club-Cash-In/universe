@@ -102,7 +102,7 @@ export const validationsRouter = {
 			const estado = await getValidaciones({
 				opportunityId: input.opportunityId,
 			});
-			if (estado.faltaConsentimiento && !estado.exento) {
+			if (estado.faltaConsentimiento) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Carga la cláusula de consentimiento antes de consultar Infornet",
@@ -260,8 +260,7 @@ export const validationsRouter = {
 			const estado = await getValidaciones({
 				opportunityId: input.opportunityId,
 			});
-			if (estado.faltaConsentimiento || estado.exento)
-				return { success: false };
+			if (estado.faltaConsentimiento) return { success: false };
 			await ejecutarBuroAlVeinteSiCorresponde({
 				opportunityId: input.opportunityId,
 				userId: context.userId,
@@ -327,7 +326,7 @@ export const validationsRouter = {
 			const estado = await getValidaciones({
 				opportunityId: input.opportunityId,
 			});
-			if (estado.faltaConsentimiento && !estado.exento) {
+			if (estado.faltaConsentimiento) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Carga la cláusula de consentimiento antes de validar Buró manualmente",

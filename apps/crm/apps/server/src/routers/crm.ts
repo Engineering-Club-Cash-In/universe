@@ -1703,7 +1703,7 @@ export const crmRouter = {
 							and(
 								eq(opportunities.leadId, id),
 								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
-								inArray(opportunities.status, ["open", "lost"]),
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
 								eq(opportunities.buroRevalidacionAl30, false),
 							),
 						)
@@ -3866,9 +3866,9 @@ export const crmRouter = {
 						});
 					}
 					const estadoBuro = await getValidaciones({ opportunityId: id });
-					habilitarBuroAlRegresar =
-						!estadoBuro.exento &&
-						Boolean(errorBuroVigenteParaAnalisis(estadoBuro));
+					habilitarBuroAlRegresar = Boolean(
+						errorBuroVigenteParaAnalisis(estadoBuro),
+					);
 				}
 				if (entrandoAAnalisis) {
 					// Espera cualquier escritura en la bitácora antes de decidir si el
@@ -3923,23 +3923,13 @@ export const crmRouter = {
 								"Guarda primero el cambio de origen y completa el Buró antes de pasar al 30%.",
 						});
 					}
+					if (estadoBuro.faltaConsentimiento) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Carga la cláusula de consentimiento y completa el Buró antes de pasar al 30%.",
+						});
+					}
 					if (!estadoBuro.exento) {
-						if (estadoBuro.faltaConsentimiento) {
-							throw new ORPCError("BAD_REQUEST", {
-								message:
-									"Carga la cláusula de consentimiento y completa el Buró antes de pasar al 30%.",
-							});
-						}
-						const errorBuro = errorBuroVigenteParaAnalisis(
-							estadoBuro,
-							"entrar_analisis",
-						);
-						if (errorBuro) {
-							throw new ORPCError("BAD_REQUEST", { message: errorBuro });
-						}
-						firmaComprobadaParaAnalisis = firmaCofirmantes(
-							estadoBuro.cofirmantes,
-						);
 						if (
 							CONSULTAR_RENAP &&
 							(!estadoBuro.renap ||
@@ -3952,6 +3942,16 @@ export const crmRouter = {
 							});
 						}
 					}
+					const errorBuro = errorBuroVigenteParaAnalisis(
+						estadoBuro,
+						"entrar_analisis",
+					);
+					if (errorBuro) {
+						throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+					}
+					firmaComprobadaParaAnalisis = firmaCofirmantes(
+						estadoBuro.cofirmantes,
+					);
 					// Si el DPI o los cofirmantes cambian durante el guardado, el
 					// UPDATE falla en vez de enviar al análisis una identidad distinta.
 					condicionBuroParaAnalisis = and(
@@ -3960,9 +3960,7 @@ export const crmRouter = {
 							? eq(opportunities.leadId, actual.leadId)
 							: isNull(opportunities.leadId),
 						sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${eqDpi(leads.dpi, dpiValidado.dpiLimpio)})`,
-						!estadoBuro.exento
-							? sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${firmaCofirmantes(estadoBuro.cofirmantes)}`
-							: undefined,
+						sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${firmaCofirmantes(estadoBuro.cofirmantes)}`,
 					);
 				}
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
@@ -4787,6 +4785,12 @@ export const crmRouter = {
 					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
 				}
 
+				if (estadoValidaciones.faltaConsentimiento) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Carga la cláusula de consentimiento antes de aprobar el análisis.",
+					});
+				}
 				if (!estadoValidaciones.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
 					// en paralelo al documento DPI exigido arriba
@@ -4798,23 +4802,6 @@ export const crmRouter = {
 					}
 
 					// El flujo normal llega validado; un cambio de DPI o vencimiento habilita reconsulta aquí.
-					if (estadoValidaciones.faltaConsentimiento) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Carga la cláusula de consentimiento antes de aprobar el análisis.",
-						});
-					}
-					const errorBuro = errorBuroVigenteParaAnalisis(
-						estadoValidaciones,
-						opportunity[0].buroRevalidacionAl30
-							? "revalidar_en_analisis"
-							: "aprobar_analisis",
-					);
-					if (errorBuro) {
-						throw new ORPCError("BAD_REQUEST", {
-							message: errorBuro,
-						});
-					}
 					if (
 						CONSULTAR_RENAP &&
 						(!estadoValidaciones.renap ||
@@ -4845,19 +4832,19 @@ export const crmRouter = {
 								"El DPI del cliente cambió durante la revisión. Recarga la oportunidad y espera la nueva validación de Buró en el 30%.",
 						});
 					}
-
-					// Mismo resguardo que con el DPI del cliente, y por la misma razón
-					// dentro del UPDATE y no como lectura previa: un cofirmante agregado
-					// o con DPI corregido entre la validación y la escritura no tiene
-					// veredicto
-					cofirmantesValidados = firmaCofirmantes(
-						estadoValidaciones.cofirmantes,
-					);
-
-					// Ni el rechazo del buró ni la ausencia de registro bloquean:
-					// quedan en la bitácora y visibles en la página de análisis
-					// para que el analista decida bajo su criterio
 				}
+				const errorBuro = errorBuroVigenteParaAnalisis(
+					estadoValidaciones,
+					opportunity[0].buroRevalidacionAl30
+						? "revalidar_en_analisis"
+						: "aprobar_analisis",
+				);
+				if (errorBuro) {
+					throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+				}
+				// Un cofirmante agregado o con DPI corregido entre la lectura y el
+				// UPDATE no puede quedar aprobado sin veredicto para su identidad.
+				cofirmantesValidados = firmaCofirmantes(estadoValidaciones.cofirmantes);
 
 				// Buró interno: corre también en las oportunidades exentas del bot,
 				// porque es una lista propia y no depende de fuentes externas. Solo
@@ -5006,15 +4993,14 @@ export const crmRouter = {
 								if (
 									firmaBitacoraBuro(estadoActual) !== firmaBitacoraRevisada ||
 									estadoActual.faltaConsentimiento ||
-									(!estadoActual.exento &&
-										Boolean(
-											errorBuroVigenteParaAnalisis(
-												estadoActual,
-												opportunity[0].buroRevalidacionAl30
-													? "revalidar_en_analisis"
-													: "aprobar_analisis",
-											),
-										))
+									Boolean(
+										errorBuroVigenteParaAnalisis(
+											estadoActual,
+											opportunity[0].buroRevalidacionAl30
+												? "revalidar_en_analisis"
+												: "aprobar_analisis",
+										),
+									)
 								) {
 									throw new ORPCError("CONFLICT", {
 										message:
@@ -9567,7 +9553,7 @@ export const crmRouter = {
 						and(
 							eq(opportunities.id, input.opportunityId),
 							sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
-							inArray(opportunities.status, ["open", "lost"]),
+							inArray(opportunities.status, ["open", "on_hold", "lost"]),
 							eq(opportunities.buroRevalidacionAl30, false),
 						),
 					)
@@ -9797,7 +9783,7 @@ export const crmRouter = {
 							and(
 								eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId),
 								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
-								inArray(opportunities.status, ["open", "lost"]),
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
 								eq(opportunities.buroRevalidacionAl30, false),
 							),
 						)

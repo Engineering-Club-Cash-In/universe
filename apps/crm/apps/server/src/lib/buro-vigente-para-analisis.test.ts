@@ -49,6 +49,25 @@ describe("Buró previo al aprobar análisis", () => {
 		).toContain("cofirmante DPI inválido");
 	});
 
+	test("la exención del bot solo aplica al titular; exige Buró al cofirmante", () => {
+		expect(
+			errorBuroVigenteParaAnalisis({
+				...vigente,
+				exento: true,
+				buro: null,
+				cofirmantes: [{ ...vigente, nombre: "Pendiente", buro: null }],
+			}),
+		).toContain("cofirmante Pendiente");
+		expect(
+			errorBuroVigenteParaAnalisis({
+				...vigente,
+				exento: true,
+				buro: null,
+				cofirmantes: [{ ...vigente, nombre: "Vigente" }],
+			}),
+		).toBeNull();
+	});
+
 	test("al entrar al 30% indica que el error se resuelve al 20%", () => {
 		expect(
 			errorBuroVigenteParaAnalisis(

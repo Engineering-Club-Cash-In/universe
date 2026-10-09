@@ -7,6 +7,7 @@ type SujetoConBuro = {
 };
 
 type EstadoBuro = SujetoConBuro & {
+	exento?: boolean;
 	cofirmantes: Array<SujetoConBuro & { nombre: string }>;
 };
 
@@ -37,7 +38,7 @@ export function errorBuroVigenteParaAnalisis(
 	};
 
 	return (
-		revisar(estado, "El titular") ??
+		(estado.exento ? null : revisar(estado, "El titular")) ??
 		estado.cofirmantes
 			.map((cofirmante) =>
 				revisar(cofirmante, `El cofirmante ${cofirmante.nombre}`),

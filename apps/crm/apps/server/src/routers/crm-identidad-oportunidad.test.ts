@@ -1004,11 +1004,11 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 			{ opportunityId: OPORTUNIDAD },
 			contextoDe("asesor-asignado", "sales"),
 		);
+		// La exención del bot cubre también a los cofirmantes (decisión de negocio).
 		expect(resumen).toMatchObject({
 			exento: true,
-			faltaConsentimiento: true,
-			permitirValidacionManualBuro: true,
-			cofirmantes: [{ nombre: "Cofirmante pendiente", estado: "pendiente" }],
+			faltaConsentimiento: false,
+			cofirmantes: [],
 		});
 		expect(escrituras).toEqual([]);
 	});
@@ -1069,6 +1069,17 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		analysisStatus: "pending",
 	};
 	const DPI = "2978485181201";
+	function comprobarOrigenYMarca() {
+		const escrituras = escriturasSobreOportunidades();
+		expect(
+			escrituras.filter((escritura) => escritura.valores.source === "referral"),
+		).toHaveLength(1);
+		expect(
+			escrituras.find(
+				(escritura) => escritura.valores.buroRevalidacionAl30 === true,
+			)?.valores,
+		).toEqual({ buroRevalidacionAl30: true });
+	}
 	function prepararEvidenciaBot(vigente = true) {
 		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
 		filasPorTabla.set(infornetPersonaCache, [
@@ -1163,9 +1174,7 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 			contextoDe("vendedor", "sales"),
 		);
 
-		const [escritura] = escriturasSobreOportunidades();
-		expect(escritura?.valores.source).toBe("referral");
-		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
+		comprobarOrigenYMarca();
 	});
 
 	test("el origen del bot con evidencia vencida también habilita la reconsulta en 30%", async () => {
@@ -1190,12 +1199,10 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 			contextoDe("vendedor", "sales"),
 		);
 
-		const [escritura] = escriturasSobreOportunidades();
-		expect(escritura?.valores.source).toBe("referral");
-		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
+		comprobarOrigenYMarca();
 	});
 
-	test("sincronizar el origen del lead revalida todas sus oportunidades activas", async () => {
+	test("el origen se sincroniza solo en la más reciente; la marca alcanza a las que heredaban WhatsApp", async () => {
 		prepararEvidenciaBot();
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
@@ -1229,12 +1236,12 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		const sincronizaciones = escriturasSobreOportunidades().filter(
 			(escritura) => escritura.valores.source === "referral",
 		);
-		expect(sincronizaciones).toHaveLength(2);
-		expect(
-			sincronizaciones.every(
-				(escritura) => escritura.valores.buroRevalidacionAl30 === true,
-			),
-		).toBe(true);
+		expect(sincronizaciones).toHaveLength(1);
+		const marca = escriturasSobreOportunidades().find(
+			(escritura) => escritura.valores.buroRevalidacionAl30 === true,
+		);
+		expect(marca?.valores).toEqual({ buroRevalidacionAl30: true });
+		expect(sqlDeLaCondicion(marca?.condicion).sql).toContain("is null");
 	});
 
 	test("sincronizar el origen conserva el canal explícito de otras oportunidades", async () => {
@@ -1306,7 +1313,7 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		expect(sincronizaciones).toHaveLength(1);
 	});
 
-	test("bloquea el cambio de origen si cualquiera de sus oportunidades ya pasó del 30%", async () => {
+	test("cambiar el origen del lead no se bloquea aunque una oportunidad pasó del 30%", async () => {
 		prepararEvidenciaBot();
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
@@ -1331,17 +1338,19 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 			},
 		]);
 
-		await expect(
-			invocar(
-				crmRouter.updateLead,
-				{ id: LEAD, source: "referral" },
-				contextoDe("vendedor", "sales"),
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+		expect(
+			escriturasSobreOportunidades().some(
+				(escritura) => escritura.valores.source === "referral",
 			),
-		).rejects.toThrow(/Regresa la oportunidad al 30%/);
-		expect(escriturasSobreOportunidades()).toEqual([]);
+		).toBe(true);
 	});
 
-	test("no corrige el origen del lead después de aprobar análisis sin volver al 30%", async () => {
+	test("corregir el origen del lead al 40% no se bloquea", async () => {
 		prepararEvidenciaBot(false);
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
@@ -1357,17 +1366,19 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 			},
 		]);
 
-		await expect(
-			invocar(
-				crmRouter.updateLead,
-				{ id: LEAD, source: "referral" },
-				contextoDe("vendedor", "sales"),
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+		expect(
+			escriturasSobreOportunidades().some(
+				(escritura) => escritura.valores.source === "referral",
 			),
-		).rejects.toThrow(/Regresa la oportunidad al 30%/);
-		expect(escriturasSobreOportunidades()).toEqual([]);
+		).toBe(true);
 	});
 
-	test("no cambia directamente el origen de una oportunidad aprobada al 40%", async () => {
+	test("editar directamente el origen de una oportunidad al 40% no se bloquea", async () => {
 		prepararEvidenciaBot(false);
 		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
 		filasPorTabla.set(opportunities, [
@@ -1381,14 +1392,12 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 			},
 		]);
 
-		await expect(
-			invocar(
-				crmRouter.updateOpportunity,
-				{ id: OPORTUNIDAD, source: "referral" },
-				contextoDe("vendedor", "sales"),
-			),
-		).rejects.toThrow(/Regresa la oportunidad al 30%/);
-		expect(escriturasSobreOportunidades()).toEqual([]);
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+		expect(escriturasSobreOportunidades()[0]?.valores.source).toBe("referral");
 	});
 
 	test("un origen WhatsApp ya validado por Buró se puede corregir al 40%", async () => {
@@ -1677,8 +1686,9 @@ describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 
-	test("no aprueba análisis si el bot validó al titular pero falta Buró del cofirmante", async () => {
+	test("la exención del bot cubre al cofirmante: aprueba sin su Buró", async () => {
 		prepararAprobacion(false);
+		respuestaExecute = { rows: [{ huella: "huella-vigente" }] };
 		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
 		filasPorTabla.set(opportunities, [
 			{ ...oportunidad, source: "Whatsapp", leadSource: "Whatsapp" },
@@ -1695,14 +1705,17 @@ describe("approveOpportunityAnalysis: Buró al pasar de 30% a 40%", () => {
 				dpi: DPI,
 			},
 		]);
-		await expect(
-			invocar(
-				crmRouter.approveOpportunityAnalysis,
-				{ opportunityId: OPORTUNIDAD, approved: true },
-				contextoDe("analista", "analyst"),
-			),
-		).rejects.toThrow(/cofirmante Cofirmante sin consulta/);
-		expect(escriturasSobreOportunidades()).toEqual([]);
+		await invocar(
+			crmRouter.approveOpportunityAnalysis,
+			{ opportunityId: OPORTUNIDAD, approved: true },
+			contextoDe("analista", "analyst"),
+		);
+		const aprobacion = escriturasSobreOportunidades().find(
+			(escritura) => escritura.valores.analysisStatus === "approved",
+		);
+		expect(aprobacion?.valores.stageId).toBe(ETAPA_40);
+		const { sql: condicion } = sqlDeLaCondicion(aprobacion?.condicion);
+		expect(condicion).not.toContain("cd.id::text");
 	});
 
 	test.each([
@@ -1862,7 +1875,7 @@ describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 
-	test("la exención del bot no permite entrar al 30% sin Buró del cofirmante", async () => {
+	test("la exención del bot cubre al cofirmante al entrar al 30%", async () => {
 		prepararDestino(30);
 		const [oportunidad] = filasPorTabla.get(opportunities) ?? [];
 		filasPorTabla.set(opportunities, [
@@ -1884,14 +1897,15 @@ describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
 			},
 		]);
 
-		await expect(
-			invocar(
-				crmRouter.updateOpportunity,
-				{ id: OPORTUNIDAD, stageId: ETAPA_30 },
-				contextoDe("vendedor", "sales"),
-			),
-		).rejects.toThrow(/cofirmante Cofirmante pendiente/);
-		expect(escriturasSobreOportunidades()).toEqual([]);
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+			contextoDe("vendedor", "sales"),
+		);
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.stageId).toBe(ETAPA_30);
+		const { sql: condicion } = sqlDeLaCondicion(escritura?.condicion);
+		expect(condicion).not.toContain("cd.id::text");
 	});
 
 	test.each([

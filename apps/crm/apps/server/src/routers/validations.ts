@@ -260,7 +260,8 @@ export const validationsRouter = {
 			const estado = await getValidaciones({
 				opportunityId: input.opportunityId,
 			});
-			if (estado.faltaConsentimiento) return { success: false };
+			if (estado.faltaConsentimiento || estado.exento)
+				return { success: false };
 			await ejecutarBuroAlVeinteSiCorresponde({
 				opportunityId: input.opportunityId,
 				userId: context.userId,

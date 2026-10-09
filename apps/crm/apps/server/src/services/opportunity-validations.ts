@@ -1212,7 +1212,9 @@ async function cofirmantesDeOportunidad(
 		.orderBy(coDebtors.createdAt);
 }
 
-/** Consulta el Buró de cada cofirmante; la exención del bot solo cubre al titular. */
+/**
+ * Buró de cada cofirmante con las mismas reglas que el del titular.
+ */
 export async function ejecutarBuroCofirmantes({
 	opportunityId,
 	userId,
@@ -1231,6 +1233,15 @@ export async function ejecutarBuroCofirmantes({
 			mensaje: "Oportunidad no encontrada",
 			cofirmantes: [],
 		};
+	}
+
+	const exencion = await resolverExencionPorBot({
+		opportunityId,
+		...oportunidad,
+	});
+
+	if (exencion.exento) {
+		return { exento: true, errorTecnico: false, cofirmantes: [] };
 	}
 
 	const resultados: ResultadoBuroCofirmante[] = [];
@@ -1304,17 +1315,22 @@ export async function ejecutarBuroAlVeinteSiCorresponde({
 		return;
 	}
 
-	const titularExento = (
-		await resolverExencionPorBot({
-			opportunityId,
-			source: oportunidad.source,
-			leadSource: oportunidad.leadSource,
-			leadId: oportunidad.leadId,
-			leadDpi: oportunidad.leadDpi,
-		})
-	).exento;
+	if (
+		(
+			await resolverExencionPorBot({
+				opportunityId,
+				source: oportunidad.source,
+				leadSource: oportunidad.leadSource,
+				leadId: oportunidad.leadId,
+				leadDpi: oportunidad.leadDpi,
+			})
+		).exento
+	) {
+		return;
+	}
+
 	const [titular, cofirmantes] = await Promise.all([
-		oportunidad.leadDpi && !titularExento
+		oportunidad.leadDpi
 			? ejecutarValidaciones({ opportunityId, userId, reusarVigente: true })
 			: null,
 		ejecutarBuroCofirmantes({ opportunityId, userId, reusarVigente: true }),
@@ -1875,7 +1891,6 @@ export async function getValidaciones({
 	);
 
 	if (exencion.exento) {
-		const cofirmantes = await estadoBuroCofirmantes(opportunityId, lector);
 		return {
 			exento: true,
 			faltaDpi: false,
@@ -1883,18 +1898,9 @@ export async function getValidaciones({
 			renap: null,
 			buro: null,
 			buroVigente: false,
-			aprobacionBloqueada: cofirmantes.some(
-				(c) => c.buro?.estado === "error" && !c.buroDesactualizado,
-			),
+			aprobacionBloqueada: false,
 			origenBotSinEvidencia: false,
-			faltaConsentimiento:
-				cofirmantes.length > 0 &&
-				(await faltaConsentimientoDelTitular(
-					opportunityId,
-					oportunidad.clientType,
-					oportunidad.creditType,
-					lector,
-				)),
+			faltaConsentimiento: false,
 			enAnalisisPendiente: false,
 			dpiDesactualizado: false,
 			buroDesactualizado: false,
@@ -1904,7 +1910,7 @@ export async function getValidaciones({
 			overrideBuro: null,
 			overrideRenap: null,
 			validaciones: [],
-			cofirmantes,
+			cofirmantes: [],
 		};
 	}
 

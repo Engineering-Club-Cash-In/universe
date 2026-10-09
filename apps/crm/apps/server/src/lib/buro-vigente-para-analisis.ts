@@ -37,8 +37,11 @@ export function errorBuroVigenteParaAnalisis(
 		return `${nombre} necesita una validación de Buró vigente para su DPI actual. ${instruccion}`;
 	};
 
+	// La exención del bot cubre al titular y a sus cofirmantes (decisión de negocio).
+	if (estado.exento) return null;
+
 	return (
-		(estado.exento ? null : revisar(estado, "El titular")) ??
+		revisar(estado, "El titular") ??
 		estado.cofirmantes
 			.map((cofirmante) =>
 				revisar(cofirmante, `El cofirmante ${cofirmante.nombre}`),

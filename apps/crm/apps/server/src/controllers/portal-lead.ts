@@ -7,7 +7,6 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { auditRecord } from "../lib/audit";
-import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import { eqDpi } from "../lib/dpi-lookup";
 import { eqEmail } from "../lib/email-lookup";
 import {
@@ -25,7 +24,6 @@ import {
 	numerosSifcoConocidosPorDpi,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
-import { CONSULTAR_RENAP } from "../lib/renap-config";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { carteraBackClient } from "../services/cartera-back-client";
@@ -302,7 +300,11 @@ export async function updateLeadByEmail(c: Context) {
 		// completa en cada guardado, así que con el mismo DPI de siempre esto
 		// es una edición común —dirección, teléfono— y no puede quedar trabada
 		// porque la persona esté en mora.
-		if (consultarBuroPorDpi && dpi !== undefined) {
+		if (
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			requiereConsultaDeMora(dpi, existingLead.dpi)
+		) {
 			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
 			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
 			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
@@ -412,16 +414,6 @@ export async function updateLeadByEmail(c: Context) {
 		// serializa las dos.
 		let oportunidadesMarcadas: string[] = [];
 		const [updatedLead] = await db.transaction(async (tx) => {
-			if (candadoEnElPredicado || consultarBuroPorDpi) {
-				const oportunidadesDelLead = await tx
-					.select({ id: opportunities.id })
-					.from(opportunities)
-					.where(eq(opportunities.leadId, existingLead.id))
-					.orderBy(opportunities.id);
-				for (const oportunidad of oportunidadesDelLead) {
-					await tomarCandadoBuroSiLibre(tx, oportunidad.id);
-				}
-			}
 			if (candadoEnElPredicado) {
 				await tx
 					.select({ id: opportunities.id })
@@ -495,9 +487,13 @@ export async function updateLeadByEmail(c: Context) {
 			// Direccion is now only in the leads table, no need to update opportunities
 		}
 
-		let oportunidadesConBuro: Array<{ id: string }> = [];
+		// If DPI was updated, call RENAP to get information
+		let renapInfo = null;
+		if (dpi !== undefined && dpi.trim() !== "" && updatedLead) {
+			renapInfo = await getOnlyRenapInfoController(dpi);
+		}
 		if (updatedLead && consultarBuroPorDpi && updatedLead.dpi) {
-			oportunidadesConBuro = await db
+			const oportunidadesConBuro = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)
 				.where(eq(opportunities.leadId, updatedLead.id));
@@ -511,18 +507,6 @@ export async function updateLeadByEmail(c: Context) {
 					);
 				});
 			}
-		}
-		// Si el flujo de oportunidad ya hará la validación, esa consulta protegida
-		// también resuelve RENAP cuando Centinela vuelva a habilitarse.
-		let renapInfo = null;
-		if (
-			CONSULTAR_RENAP &&
-			dpi !== undefined &&
-			dpi.trim() !== "" &&
-			updatedLead &&
-			(!consultarBuroPorDpi || oportunidadesConBuro.length === 0)
-		) {
-			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		return c.json({

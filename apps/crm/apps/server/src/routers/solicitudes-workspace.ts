@@ -398,22 +398,31 @@ export const solicitudesWorkspaceRouter = {
 				if (resultado.definitivo) {
 					// Repetir la aprobación no cambiaría nada: la solicitud se cierra como
 					// rechazada con el motivo de cartera, y el asesor lo ve.
-					await db
+					// Solo desde `aprobada`: no pisa una solicitud que otro cierre ya aplicó.
+					const [cerrada] = await db
 						.update(solicitudesRebajaMoraCobros)
 						.set({
 							estado: "rechazada",
 							notaResolucion: `No se aplicó en cartera: ${resultado.motivo}`,
 						})
-						.where(eq(solicitudesRebajaMoraCobros.id, solicitud.id));
-					await avisarDecisionRebaja({
-						solicitudId: solicitud.id,
-						casoCobroId: solicitud.casoCobroId,
-						decision: "rechazada",
-						solicitanteId: solicitud.solicitadoPor,
-						decidioPorId: context.userId,
-						monto: solicitud.montoSolicitado,
-						nota: resultado.motivo,
-					});
+						.where(
+							and(
+								eq(solicitudesRebajaMoraCobros.id, solicitud.id),
+								eq(solicitudesRebajaMoraCobros.estado, "aprobada"),
+							),
+						)
+						.returning({ id: solicitudesRebajaMoraCobros.id });
+					if (cerrada) {
+						await avisarDecisionRebaja({
+							solicitudId: solicitud.id,
+							casoCobroId: solicitud.casoCobroId,
+							decision: "rechazada",
+							solicitanteId: solicitud.solicitadoPor,
+							decidioPorId: context.userId,
+							monto: solicitud.montoSolicitado,
+							nota: resultado.motivo,
+						});
+					}
 					throw new ORPCError("CONFLICT", {
 						message: `La rebaja no se aplicó y quedó rechazada: ${resultado.motivo}`,
 					});
@@ -422,12 +431,19 @@ export const solicitudesWorkspaceRouter = {
 				await db
 					.update(solicitudesRebajaMoraCobros)
 					.set({ estado: "error_aplicacion", notaResolucion: resultado.motivo })
-					.where(eq(solicitudesRebajaMoraCobros.id, solicitud.id));
+					.where(
+						and(
+							eq(solicitudesRebajaMoraCobros.id, solicitud.id),
+							eq(solicitudesRebajaMoraCobros.estado, "aprobada"),
+						),
+					);
 				throw new ORPCError("SERVICE_UNAVAILABLE", {
 					message: resultado.motivo,
 				});
 			}
 
+			// Cartera ya descontó: `aplicada` gana sobre un `error_aplicacion` que el
+			// job de colgadas haya puesto mientras tanto, pero no sobre un cierre final.
 			await db
 				.update(solicitudesRebajaMoraCobros)
 				.set({
@@ -435,7 +451,15 @@ export const solicitudesWorkspaceRouter = {
 					montoAplicado: solicitud.montoSolicitado,
 					carteraCondonacionId: resultado.condonacionId,
 				})
-				.where(eq(solicitudesRebajaMoraCobros.id, solicitud.id));
+				.where(
+					and(
+						eq(solicitudesRebajaMoraCobros.id, solicitud.id),
+						inArray(solicitudesRebajaMoraCobros.estado, [
+							"aprobada",
+							"error_aplicacion",
+						]),
+					),
+				);
 
 			await avisarDecisionRebaja({
 				solicitudId: solicitud.id,

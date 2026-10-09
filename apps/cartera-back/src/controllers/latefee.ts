@@ -2864,7 +2864,21 @@ export async function condonarMoraParcial({
         .from(moras_condonaciones)
         .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
         .limit(1);
-      if (previa) return { kind: "ya_aplicada" as const, montoCondonacion: previa.montoCondonacion };
+      if (previa) {
+        // El reintento recibe el mismo id de auditoría que la primera aplicación
+        // y la mora vigente (puede haber bajado más desde entonces).
+        const [moraVigente] = await tx
+          .select({ monto: moras_credito.monto_mora })
+          .from(moras_credito)
+          .where(and(eq(moras_credito.credito_id, credito_id), eq(moras_credito.activa, true)))
+          .orderBy(desc(moras_credito.created_at))
+          .limit(1);
+        return {
+          kind: "ya_aplicada" as const,
+          condonacionId: previa.condonacion_id,
+          moraNueva: moraVigente?.monto ?? "0.00",
+        };
+      }
 
       const [moraActual] = await tx
         .select({
@@ -2954,7 +2968,7 @@ export async function condonarMoraParcial({
     }
     if (result.kind === "ya_aplicada") {
       emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
-      return { success: true, kind: "ya_aplicada" as const, message: "[INFO] Esta rebaja ya estaba aplicada" };
+      return { success: true, kind: "ya_aplicada" as const, condonacion_id: result.condonacionId, mora_nueva: result.moraNueva, message: "[INFO] Esta rebaja ya estaba aplicada" };
     }
     if (result.kind === "excede_mora") {
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });

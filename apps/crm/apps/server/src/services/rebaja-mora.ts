@@ -45,10 +45,13 @@ export const ESTADOS_RECHAZABLES: EstadoRebaja[] = [
 	"error_aplicacion",
 ];
 
-/** Estados desde los que el supervisor puede aprobar (o repetir la aprobación). */
+/**
+ * Estados desde los que el supervisor puede aprobar (o repetir la aprobación).
+ * `aprobada` no está: es el estado en vuelo de quien ya reclamó la solicitud, y
+ * si el proceso se cae el job la devuelve a `error_aplicacion`.
+ */
 export const ESTADOS_APROBABLES: EstadoRebaja[] = [
 	"pendiente",
-	"aprobada",
 	"error_aplicacion",
 ];
 

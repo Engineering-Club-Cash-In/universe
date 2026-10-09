@@ -54,6 +54,7 @@ import {
 	casoDentroDeAlcance,
 	condicionDeAlcance,
 	type MembresiaSocio,
+	resolvePartnerScope,
 } from "../lib/partner-scope";
 import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
@@ -1047,6 +1048,9 @@ export const trackerRouter = {
 						.where(eq(opportunities.id, fila.id))
 						.for("update", { of: opportunities });
 					exigirMismoEstado(vigente?.status, fila.status);
+					// Las membresías también se releen: un admin pudo quitarle el
+					// acceso al socio mientras se subía el archivo.
+					const membresias = await resolvePartnerScope(context.userId, tx);
 					const [asignado] = await tx
 						.select({ sellerId: opportunityAgencySellers.sellerId })
 						.from(opportunityAgencySellers)
@@ -1065,7 +1069,7 @@ export const trackerRouter = {
 							sellerId: asignado?.sellerId ?? null,
 							facturaEnvio: previa ? "pendiente" : null,
 						},
-						context.membresias,
+						membresias,
 					);
 
 					const { aseguradora, datos, destinatarios } =

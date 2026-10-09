@@ -25,6 +25,8 @@ import { registrarTransicionesDeBuckets } from "./buckets/motorTransiciones";
 import { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
 import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
 import { moraPendientePorCuota, repartirPagoDeMora, type CuotaParaPendiente } from "../utils/moraPendiente";
+import { motivoRebajaParcialNoPermitida } from "../lib/condonacion-parcial";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { moraPagadaPorCuota } from "../utils/moraPagadaPorCuota";
 import { anotarMoraPagada, type AnotacionMoraPagada } from "../utils/anotarMoraPagada";
 import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
@@ -2798,6 +2800,186 @@ export async function procesarMoras() {
   }
 }
 
+
+/**
+ * COBROS-02 W2 · Rebaja PARCIAL de la mora de un crédito, aprobada por el
+ * supervisor en el CRM. A diferencia de `condonarMora` (que deja la mora en 0 y
+ * la desactiva), descuenta solo `monto`: la mora sigue activa por el resto y el
+ * estado del crédito no cambia.
+ *
+ * Orden de comprobaciones (todo bajo los locks, sin escribir nada hasta el final):
+ *  1. `referencia_externa` ya aplicada → `ya_aplicada` (idempotencia).
+ *  2. Estado con régimen propio (convenio, incobrable, cancelado…) → rechazo.
+ *  3. `monto` no puede pasar de la mora activa → `excede_mora`.
+ *  4. `monto` tiene que caber en lo devengado por cuota: si no, la mora de
+ *     `moras_credito` y el recálculo del cron quedarían desfasados → `excede_devengado`.
+ * Solo entonces se descuenta la mora y se anota por cuota.
+ */
+export async function condonarMoraParcial({
+  credito_id,
+  monto,
+  motivo,
+  usuario_email,
+  referencia_externa,
+}: {
+  credito_id: number;
+  monto: string;
+  motivo: string;
+  usuario_email: string;
+  referencia_externa: string;
+}) {
+  const startedAt = safeNow();
+  try {
+    const montoSolicitado = new Big(monto);
+    if (!montoSolicitado.gt(0)) {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
+      return { success: false, kind: "monto_invalido" as const, message: "[ERROR] El monto a rebajar debe ser mayor que cero" };
+    }
+
+    const [user] = await db
+      .select({ id: platform_users.id })
+      .from(platform_users)
+      .where(eq(platform_users.email, usuario_email));
+    if (!user) {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
+      return { success: false, kind: "usuario_no_encontrado" as const, message: "[ERROR] Usuario no encontrado" };
+    }
+
+    // Candado por crédito: el mismo que toman los pagos (pg_advisory_lock(8765, credito_id)).
+    // Sin él, la rebaja puede calcular el reparto con un pagado viejo mientras se valida un pago.
+    // Orden: candado primero, transacción después (nunca al revés).
+    const result = await withPaymentAdvisoryLock(credito_id, () => db.transaction(async (tx) => {
+      // Mismo orden de candados que condonarMora: creditos primero, mora después.
+      const [creditoLocked] = await tx
+        .select({ credito_id: creditos.credito_id, capital: creditos.capital, statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1)
+        .for("update");
+      if (!creditoLocked) return { kind: "not_found" as const };
+
+      // 1. Idempotencia: la misma solicitud del CRM no descuenta dos veces.
+      const [previa] = await tx
+        .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
+        .from(moras_condonaciones)
+        .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
+        .limit(1);
+      if (previa) return { kind: "ya_aplicada" as const, montoCondonacion: previa.montoCondonacion };
+
+      const [moraActual] = await tx
+        .select({
+          id: moras_credito.mora_id,
+          monto: moras_credito.monto_mora,
+          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        })
+        .from(moras_credito)
+        .where(and(eq(moras_credito.credito_id, credito_id), eq(moras_credito.activa, true)))
+        .orderBy(desc(moras_credito.created_at))
+        .limit(1)
+        .for("update");
+      if (!moraActual) return { kind: "not_found" as const };
+
+      // 2. Régimen propio: convenio, incobrable, cancelado… no se rebajan desde aquí.
+      const motivoEstado = motivoRebajaParcialNoPermitida(creditoLocked.statusCredit);
+      if (motivoEstado) return { kind: "estado_no_permitido" as const, message: motivoEstado };
+
+      // 3. No se recorta en silencio: si la mora ya no alcanza, se rechaza.
+      const moraAnterior = new Big(moraActual.monto ?? "0");
+      if (montoSolicitado.gt(moraAnterior)) {
+        return { kind: "excede_mora" as const, moraActual: moraAnterior.toFixed(2) };
+      }
+
+      // 4. Lo que se rebaja tiene que caber en lo devengado por cuota. Se calcula
+      //    ANTES de tocar la mora: el mismo reparto que usa la anotación.
+      const hoy = hoyGuatemala();
+      const cuotasPorCredito = await cuotasParaPendienteDeCreditos([credito_id], tx as unknown as typeof db, hoy);
+      const anotaciones = anotacionesDeCondonacion({
+        credito_id,
+        monto: montoSolicitado.toFixed(2),
+        capital: creditoLocked.capital ?? 0,
+        cuotas: cuotasPorCredito.get(credito_id)?.cuotas ?? [],
+        usuario_id: user.id,
+        motivo,
+      });
+      const anotado = anotaciones.reduce((acc, a) => acc.plus(new Big(String(a.monto))), new Big(0));
+      if (!anotado.eq(montoSolicitado)) {
+        return { kind: "excede_devengado" as const, anotable: anotado.toFixed(2) };
+      }
+
+      const moraNueva = moraAnterior.minus(montoSolicitado).toFixed(2);
+      const [updatedMora] = await tx
+        .update(moras_credito)
+        .set({ monto_mora: moraNueva, updated_at: new Date() })
+        .where(and(eq(moras_credito.mora_id, moraActual.id), eq(moras_credito.activa, true)))
+        .returning();
+      if (!updatedMora) return { kind: "not_found" as const };
+
+      const [condonacion] = await tx
+        .insert(moras_condonaciones)
+        .values({
+          credito_id,
+          mora_id: moraActual.id,
+          motivo,
+          usuario_id: user.id,
+          montoCondonacion: montoSolicitado.toFixed(2),
+          referencia_externa,
+        })
+        .returning();
+
+      await anotarMoraPagada(anotaciones, tx as unknown as typeof db);
+
+      // Mismo tipo que la condonación total: el historial distingue el monto
+      // por la diferencia entre monto_anterior y monto_nuevo.
+      await registrarHistorialMora({
+        credito_id,
+        mora_id: moraActual.id,
+        tipo_evento: "CONDONACION",
+        origen: "CONDONACION_INDIVIDUAL",
+        monto_anterior: moraAnterior.toFixed(2),
+        monto_nuevo: moraNueva,
+        cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas ?? 0,
+        cuotas_atrasadas_nuevas: updatedMora.cuotas_atrasadas ?? moraActual.cuotas_atrasadas ?? 0,
+        usuario_id: user.id,
+        motivo,
+        dbClient: tx as unknown as typeof db,
+        propagarError: true,
+      });
+
+      return { kind: "ok" as const, condonacion, moraNueva };
+    }));
+
+    if (result.kind === "ok") {
+      emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
+      return { success: true, kind: "ok" as const, condonacion_id: result.condonacion.condonacion_id, mora_nueva: result.moraNueva, message: `[SUCCESS] Mora rebajada para crédito #${credito_id}` };
+    }
+    if (result.kind === "ya_aplicada") {
+      emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
+      return { success: true, kind: "ya_aplicada" as const, message: "[INFO] Esta rebaja ya estaba aplicada" };
+    }
+    if (result.kind === "excede_mora") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
+      return { success: false, kind: result.kind, mora_actual: result.moraActual, message: `[ERROR] El monto supera la mora activa (Q${result.moraActual})` };
+    }
+    if (result.kind === "estado_no_permitido") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
+      return { success: false, kind: result.kind, message: `[ERROR] ${result.message}` };
+    }
+    if (result.kind === "excede_devengado") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
+      return {
+        success: false,
+        kind: result.kind,
+        anotable: result.anotable,
+        message: `[ERROR] Lo devengado por cuota no alcanza para rebajar ese monto (alcanza Q${result.anotable}). La mora no se tocó.`,
+      };
+    }
+    emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
+    return { success: false, kind: "not_found" as const, message: "[ERROR] No hay mora activa para este crédito" };
+  } catch (error) {
+    // Un fallo inesperado se propaga: la transacción ya revirtió todo.
+    throw error;
+  }
+}
 
 /**
  * Condonar mora de un crédito:

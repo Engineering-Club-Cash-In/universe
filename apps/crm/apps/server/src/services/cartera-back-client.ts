@@ -2998,6 +2998,56 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	// W2 (Workspace) — rebaja PARCIAL de mora aprobada por el supervisor. Cartera
+	// la descuenta de `moras_credito` y la anota como pago de mora por cuota.
+	// `referencia_externa` es el id de la solicitud: un reintento no descuenta dos
+	// veces. Un 409 con `kind: "excede_mora"` llega como CarteraBackHttpError con
+	// `payload.kind`: el caller decide si es definitivo.
+	async condonarMoraParcial(input: {
+		creditoId: number;
+		monto: string;
+		motivo: string;
+		usuarioEmail: string;
+		referenciaExterna: string;
+	}): Promise<{
+		success: true;
+		kind: "ok" | "ya_aplicada";
+		condonacion_id?: number;
+		mora_nueva?: string;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			kind?: "ok" | "ya_aplicada";
+			condonacion_id?: number;
+			mora_nueva?: string;
+			message?: string;
+		}>("/mora/condonar-parcial", {
+			method: "POST",
+			body: JSON.stringify({
+				credito_id: input.creditoId,
+				monto: input.monto,
+				motivo: input.motivo,
+				usuario_email: input.usuarioEmail,
+				referencia_externa: input.referenciaExterna,
+			}),
+		});
+		// Cambia la mora del crédito: lo cacheado que la muestra queda viejo.
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		if (!response?.success || !response.kind) {
+			throw new Error(
+				response?.message || "cartera-back no confirmó la rebaja de mora",
+			);
+		}
+		return {
+			success: true,
+			kind: response.kind,
+			condonacion_id: response.condonacion_id,
+			mora_nueva: response.mora_nueva,
+		};
+	}
+
 	// CB-033 — aprobar/rechazar un convenio pendiente. `operacion_id` viaja
 	// desde el caller (nunca se genera acá): es la clave de la idempotencia,
 	// y generarlo en el server por llamada no protegería un reintento del

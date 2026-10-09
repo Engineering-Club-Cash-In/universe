@@ -566,6 +566,9 @@
       .notNull()
       .references(() => platform_users.id, { onDelete: "cascade" }),
     fecha: timestamp("fecha").defaultNow().notNull(),
+    // COBROS-02 W2: id de la solicitud en el CRM (rebaja parcial). Único cuando
+    // existe: un reintento de la misma aprobación no vuelve a descontar.
+    referencia_externa: text("referencia_externa"),
   });
 
   // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION

@@ -144,6 +144,8 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// CB-043: la decisión (aprobada, rechazada o sin efecto) de vuelta a quien
 	// pidió la recuperación.
 	"recuperacion_resuelta",
+	"rebaja_pendiente_aprobacion",
+	"rebaja_resuelta",
 ]);
 
 // Notifications table

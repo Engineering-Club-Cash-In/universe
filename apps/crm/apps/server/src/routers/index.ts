@@ -34,6 +34,7 @@ import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
+import { solicitudesWorkspaceRouter } from "./solicitudes-workspace";
 import { trackerRouter } from "./tracker";
 import { trasladosCobrosRouter } from "./traslados-cobros";
 import { uploadRouter } from "./upload";
@@ -180,6 +181,13 @@ export const cobrosAppRouter = {
 	getFichaComplementos: fichaCobrosRouter.getFichaComplementos,
 	getAlertasLeidasCaso: fichaCobrosRouter.getAlertasLeidasCaso,
 	marcarAlertaCasoLeida: fichaCobrosRouter.marcarAlertaCasoLeida,
+	// Workspace de cobros (issue #1873): solicitudes que se deciden en la bandeja.
+	solicitarRebajaMora: solicitudesWorkspaceRouter.solicitarRebajaMora,
+	getSolicitudesRebajaMora: solicitudesWorkspaceRouter.getSolicitudesRebajaMora,
+	decidirSolicitudRebajaMora:
+		solicitudesWorkspaceRouter.decidirSolicitudRebajaMora,
+	cancelarSolicitudRebajaMora:
+		solicitudesWorkspaceRouter.cancelarSolicitudRebajaMora,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,

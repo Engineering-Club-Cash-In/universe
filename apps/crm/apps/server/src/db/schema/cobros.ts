@@ -1103,6 +1103,66 @@ export const alertasCasoLeidasCobros = pgTable(
 	],
 );
 
+// W2 (Workspace, migración 0080) · Solicitud de rebaja de mora. El asesor pide
+// rebajar hasta la mora acumulada del caso; el supervisor la aprueba (se aplica
+// en cartera-back) o la rechaza. La fila es la bitácora: quién la pidió, cuánta
+// mora había, qué se rebajó y quién la resolvió.
+export const solicitudesRebajaMoraCobros = pgTable(
+	"solicitudes_rebaja_mora_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+		// Mora acumulada que vio el asesor al pedir (snapshot, no se recalcula).
+		moraSnapshot: decimal("mora_snapshot", { precision: 12, scale: 2 }).notNull(),
+		montoSolicitado: decimal("monto_solicitado", {
+			precision: 12,
+			scale: 2,
+		}).notNull(),
+		notas: text("notas").notNull(),
+		// 'pendiente' → 'aprobada' (en proceso de aplicarse en cartera) → 'aplicada'.
+		// 'error_aplicacion': el supervisor aprobó pero cartera no la aplicó: se
+		// reintenta o se rechaza. Cartera es idempotente por el id de esta fila.
+		// 'rechazada' y 'cancelada' cierran la solicitud.
+		estado: text("estado").notNull().default("pendiente"),
+		solicitadoPor: text("solicitado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		solicitadoEn: timestamp("solicitado_en").notNull().defaultNow(),
+		resueltoPor: text("resuelto_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		resueltoEn: timestamp("resuelto_en"),
+		notaResolucion: text("nota_resolucion"),
+		// Monto que cartera confirmó como rebajado (NULL hasta aplicar).
+		montoAplicado: decimal("monto_aplicado", { precision: 12, scale: 2 }),
+		// Id de la condonación en cartera (`moras_condonaciones`), para auditar.
+		carteraCondonacionId: integer("cartera_condonacion_id"),
+	},
+	(table) => [
+		// Una sola solicitud abierta por caso (pendiente, en proceso o con error).
+		uniqueIndex("uq_solicitud_rebaja_abierta")
+			.on(table.casoCobroId)
+			.where(
+				sql`${table.estado} IN ('pendiente', 'aprobada', 'error_aplicacion')`,
+			),
+		index("idx_solicitudes_rebaja_estado").on(
+			table.estado,
+			table.solicitadoEn.desc(),
+		),
+		check(
+			"solicitudes_rebaja_estado_check",
+			sql`${table.estado} IN ('pendiente', 'aprobada', 'aplicada', 'error_aplicacion', 'rechazada', 'cancelada')`,
+		),
+		check(
+			"solicitudes_rebaja_monto_check",
+			sql`${table.montoSolicitado} > 0 AND ${table.montoSolicitado} <= ${table.moraSnapshot}`,
+		),
+	],
+);
+
 // F7 (#1864) · Resumen del caso generado por IA (Gemini), uno por caso. Se
 // regenera solo cuando cambia la huella (los datos que se le mandaron al
 // modelo): abrir la ficha sin cambios no vuelve a pagar la llamada.

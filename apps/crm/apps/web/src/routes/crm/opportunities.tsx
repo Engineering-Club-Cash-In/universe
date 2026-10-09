@@ -71,6 +71,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { OpportunityAgencySellerCard } from "@/components/contract-parties/OpportunityAgencySellerCard";
 import { OpportunityContractPartyCard } from "@/components/contract-parties/OpportunityContractPartyCard";
 import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
@@ -973,6 +974,12 @@ function RouteComponent() {
 
 	const vendorsQuery = useQuery({
 		...orpc.getVendors.queryOptions(),
+		// Un vendedor de agencia nunca es el vendedor legal del contrato, y es
+		// el único que puede no tener DPI.
+		select: (vendors) =>
+			vendors
+				.filter((v) => v.vendorType !== "agencia")
+				.map((v) => ({ ...v, dpi: v.dpi ?? "" })),
 	});
 
 	const canFilterBySalesperson =
@@ -1488,6 +1495,10 @@ function RouteComponent() {
 			companyId?: string | null;
 		}) => client.setOpportunityContractParty(input),
 		onSuccess: async () => {
+			// Cambiar la agencia puede quitar al vendedor de agencia asignado
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityAgencySeller.key(),
+			});
 			const frescas = await client.getOpportunities();
 			const actualizada = frescas.find(
 				(opp) => opp.id === selectedOpportunity?.id,
@@ -2602,6 +2613,14 @@ function RouteComponent() {
 												</span>
 											</div>
 										</div>
+									)}
+
+									{selectedOpportunity.company?.id && (
+										<OpportunityAgencySellerCard
+											opportunityId={selectedOpportunity.id}
+											companyId={selectedOpportunity.company.id}
+											disabled={!puedeEditarPartesContrato}
+										/>
 									)}
 
 									{/* Expected Close Date */}

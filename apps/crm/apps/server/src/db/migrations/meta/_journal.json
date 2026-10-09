@@ -302,6 +302,13 @@
 			"when": 1791319254474,
 			"tag": "0048_bienvenidas_credito",
 			"breakpoints": true
+		},
+		{
+			"idx": 42,
+			"version": "7",
+			"when": 1791319354474,
+			"tag": "0049_add_agency_sellers",
+			"breakpoints": true
 		}
 	]
 }

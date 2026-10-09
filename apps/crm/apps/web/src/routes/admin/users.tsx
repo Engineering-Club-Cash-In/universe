@@ -18,6 +18,10 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
+	type MembresiaSocio,
+	PartnerAgenciesPicker,
+} from "@/components/admin/PartnerAgenciesPicker";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -28,7 +32,6 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -150,7 +153,7 @@ function RouteComponent() {
 			email: string;
 			password: string;
 			role: UserRole;
-			companyIds?: string[];
+			memberships?: MembresiaSocio[];
 		}) => client.createUser(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
@@ -183,10 +186,12 @@ function RouteComponent() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const [agenciasEditadas, setAgenciasEditadas] = useState<string[]>([]);
+	const [agenciasEditadas, setAgenciasEditadas] = useState<MembresiaSocio[]>(
+		[],
+	);
 
 	const setPartnerCompaniesMutation = useMutation({
-		mutationFn: (input: { userId: string; companyIds: string[] }) =>
+		mutationFn: (input: { userId: string; memberships: MembresiaSocio[] }) =>
 			client.setPartnerCompanies(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
@@ -201,10 +206,12 @@ function RouteComponent() {
 	const abrirEdicionDeAgencias = (usuario: {
 		id: string;
 		name: string;
-		agencias: { id: string; nombre: string }[];
+		agencias: { id: string; nombre: string; sellerId: string | null }[];
 	}) => {
 		setSocioAEditar({ id: usuario.id, name: usuario.name });
-		setAgenciasEditadas(usuario.agencias.map((a) => a.id));
+		setAgenciasEditadas(
+			usuario.agencias.map((a) => ({ companyId: a.id, sellerId: a.sellerId })),
+		);
 	};
 
 	const handleToggleSuspend = (
@@ -224,14 +231,14 @@ function RouteComponent() {
 			email: "",
 			password: "",
 			role: ROLES.SALES as UserRole,
-			companyIds: [] as string[],
+			memberships: [] as MembresiaSocio[],
 		},
 		onSubmit: async ({ value }) => {
 			// Solo los socios llevan agencias; el server rechaza lo contrario.
 			createUserMutation.mutate({
 				...value,
-				companyIds:
-					value.role === ROLES.PARTNER ? value.companyIds : undefined,
+				memberships:
+					value.role === ROLES.PARTNER ? value.memberships : undefined,
 			});
 		},
 		validators: {
@@ -240,11 +247,13 @@ function RouteComponent() {
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
 				role: z.enum(ALL_ROLES as [UserRole, ...UserRole[]]),
-				companyIds: z.array(z.string()),
+				memberships: z.array(
+					z.object({ companyId: z.string(), sellerId: z.string().nullable() }),
+				),
 			})
-			.refine((v) => v.role !== ROLES.PARTNER || v.companyIds.length > 0, {
+			.refine((v) => v.role !== ROLES.PARTNER || v.memberships.length > 0, {
 				message: "Selecciona al menos una agencia",
-				path: ["companyIds"],
+				path: ["memberships"],
 			}),
 		},
 	});
@@ -436,43 +445,20 @@ function RouteComponent() {
 									<createUserForm.Subscribe selector={(state) => state.values.role}>
 										{(rol) =>
 											rol === ROLES.PARTNER ? (
-												<createUserForm.Field name="companyIds">
+												<createUserForm.Field name="memberships">
 													{(field) => (
 														<div className="space-y-2">
 															<Label>Agencias asignadas</Label>
 															<p className="text-muted-foreground text-xs">
-																El socio solo verá los créditos de las agencias que
-																marques aquí.
+																Por cada agencia elige si ve todo (gerente) o solo las
+																oportunidades de un vendedor.
 															</p>
-															<div className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3">
-																{companiesQuery.data?.length ? (
-																	companiesQuery.data.map((company) => {
-																		const marcada = field.state.value.includes(company.id);
-																		return (
-																			<label
-																				key={company.id}
-																				className="flex cursor-pointer items-center gap-2 text-sm"
-																			>
-																				<Checkbox
-																					checked={marcada}
-																					onCheckedChange={() =>
-																						field.handleChange(
-																							marcada
-																								? field.state.value.filter((id) => id !== company.id)
-																								: [...field.state.value, company.id],
-																						)
-																					}
-																				/>
-																				{company.name.trim()}
-																			</label>
-																		);
-																	})
-																) : (
-																	<p className="text-muted-foreground text-sm">
-																		No hay agencias registradas.
-																	</p>
-																)}
-															</div>
+															<PartnerAgenciesPicker
+																className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3"
+																companies={companiesQuery.data ?? []}
+																value={field.state.value}
+																onChange={field.handleChange}
+															/>
 															{field.state.meta.errors.map((error) => (
 																<p key={error?.message} className="text-red-500 text-sm">
 																	{error?.message}
@@ -537,7 +523,11 @@ function RouteComponent() {
 											{user.role === ROLES.PARTNER && (
 												<p className="mt-1 text-muted-foreground text-xs">
 													{user.agencias.length
-														? user.agencias.map((a) => a.nombre).join(", ")
+														? user.agencias
+																.map((a) =>
+																	a.vendedor ? `${a.nombre} (${a.vendedor})` : a.nombre,
+																)
+																.join(", ")
 														: "Sin agencias asignadas"}
 												</p>
 											)}
@@ -820,31 +810,15 @@ function RouteComponent() {
 					</DialogHeader>
 					<div className="space-y-3">
 						<p className="text-muted-foreground text-sm">
-							El socio solo verá los créditos de las agencias que marques aquí.
+							Por cada agencia elige si el socio ve todo (gerente) o solo las
+							oportunidades de un vendedor.
 						</p>
-						<div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-3">
-							{companiesQuery.data?.map((company) => {
-								const marcada = agenciasEditadas.includes(company.id);
-								return (
-									<label
-										key={company.id}
-										className="flex cursor-pointer items-center gap-2 text-sm"
-									>
-										<Checkbox
-											checked={marcada}
-											onCheckedChange={() =>
-												setAgenciasEditadas(
-													marcada
-														? agenciasEditadas.filter((id) => id !== company.id)
-														: [...agenciasEditadas, company.id],
-												)
-											}
-										/>
-										{company.name.trim()}
-									</label>
-								);
-							})}
-						</div>
+						<PartnerAgenciesPicker
+							className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-3"
+							companies={companiesQuery.data ?? []}
+							value={agenciasEditadas}
+							onChange={setAgenciasEditadas}
+						/>
 						<Button
 							className="w-full"
 							disabled={
@@ -855,7 +829,7 @@ function RouteComponent() {
 								socioAEditar &&
 								setPartnerCompaniesMutation.mutate({
 									userId: socioAEditar.id,
-									companyIds: agenciasEditadas,
+									memberships: agenciasEditadas,
 								})
 							}
 						>

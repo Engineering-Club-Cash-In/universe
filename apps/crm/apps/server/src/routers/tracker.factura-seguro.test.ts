@@ -638,8 +638,10 @@ describe("reenviarFacturaSeguro", () => {
 		expect(correos).toHaveLength(0);
 	});
 
-	test("tras un rechazo: nuevo intento (nueva llave) con el correo armado de nuevo", async () => {
+	test("tras un rechazo: nuevo intento (nueva llave) con el mismo correo guardado al subir", async () => {
 		facturaPrevia = [registro("fallido")];
+		// Otra cotización aceptada después de subir no cambia lo que se reenvía.
+		cotizacion = [{ ...cotizacion[0], insuranceProvider: "universales" }];
 		const r = await call(
 			trackerRouter.reenviarFacturaSeguro,
 			{ opportunityId: ID },
@@ -651,16 +653,32 @@ describe("reenviarFacturaSeguro", () => {
 			intento: 2,
 			retryCount: 1,
 			recipients: ["polizas@gyt.test"],
+			correoHtml: "<p>Correo guardado del intento</p>",
 		});
-		const nuevoHtml = actualizados[0].correoHtml as string;
-		expect(nuevoHtml).toContain("la garantía va al Cliente Juan Pérez");
 		expect(correos[0]).toMatchObject({
 			archivo: { key: KEY, nombre: "factura.pdf" },
 			idempotencyKey: "factura-seguro/envio-1/2",
-			correo: { html: nuevoHtml },
+			correo: {
+				asunto: "Asunto guardado",
+				html: "<p>Correo guardado del intento</p>",
+			},
 		});
 		expect(actualizados[1]).toMatchObject({ status: "enviado" });
 		expect(insertados).toHaveLength(0);
+	});
+
+	test("un registro sin correo guardado (anterior a guardarlo) lo arma de nuevo", async () => {
+		facturaPrevia = [
+			{ ...registro("fallido"), correoAsunto: null, correoHtml: null },
+		];
+		await call(
+			trackerRouter.reenviarFacturaSeguro,
+			{ opportunityId: ID },
+			crmCtx,
+		);
+		expect(actualizados[0].correoHtml as string).toContain(
+			"la garantía va al Cliente Juan Pérez",
+		);
 	});
 
 	test("pendiente abandonado: repite el MISMO intento, destinatarios y correo guardado", async () => {

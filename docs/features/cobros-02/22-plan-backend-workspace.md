@@ -78,6 +78,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - **W1**: pintar «Llamada entrante», «Habló con: X (codeudor)» y el teléfono contactado en la línea de tiempo (`workspace/contexto-caso.tsx`, `routes/cobros/$id.tsx`).
 - **W5**: habilitar «Marcar como leída» y «Ver alertas leídas» (`contexto-caso.tsx`, `routes/cobros/$id.tsx`). Quitar el prefijo `alerta-` del id antes de llamar a `marcarAlertaCasoLeida`.
 - **W2 a W4**: formularios y bloques «Pronto» (`gestion/acciones.ts`, `convenio-modal.tsx`) y los tipos nuevos en la bandeja de solicitudes.
+- **W2 · Asesor**: el asesor lee las rebajas de su caso con `getSolicitudesRebajaMoraDelCaso` (`casoCobroId`; recupera el id para `cancelarSolicitudRebajaMora` y ve la bitácora). `getSolicitudesRebajaMora` sigue siendo solo del supervisor.
 
 ### W2 · Rebaja de mora
 
@@ -103,6 +104,9 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - **Bandeja.** `getSolicitudesRebajaMora` ordena abiertas primero y luego por fecha, para que el `limite` no deje fuera una solicitud que espera acción.
 - **Plazo de la aplicación.** La llamada a cartera lleva un plazo propio de 3 min (`PLAZO_APLICACION_REBAJA_MS`, token + POST), muy por debajo de los 10 min del job de colgadas: si la autenticación se cuelga, el POST ya no se despacha tarde y el job no reclama una aprobación todavía viva. Si aun así la fila ya estaba cerrada cuando cartera confirma, no se avisa como aplicada: responde CONFLICT para conciliar. Las cachés de crédito/stats se invalidan también si la respuesta se pierde (`finally`).
 - **Handler en vuelo en cartera.** La rebaja parcial espera el lock del crédito como máximo 60 s (`withPaymentAdvisoryLock` con `esperaMaximaMs`; vencido responde 503 `ocupado`, transitorio) y limita a 30 s los candados de fila de su transacción. La consulta de conciliación toma ese mismo lock (20 s) y recibe `credito_id`: si un handler está dentro, espera a que termine y ve su insert; si no obtiene el lock responde 503 y el CRM no rechaza. Así, cuando el job expone la fila (10 min), el handler ya terminó o ya no puede confirmar.
+- **Lectura por caso.** `getSolicitudesRebajaMoraDelCaso` (`cobrosProcedure` + `assertAccesoCasoCobro`) devuelve las solicitudes del caso al asesor; comparte la consulta con la bandeja del supervisor.
+- **Alerta de aprobación.** `rebaja_pendiente_aprobacion` entra a `COBROS_TIPO_RESOLUCION_BLOQUEADA`: la alerta no se resuelve ni descarta a mano, solo al decidir o cancelar la solicitud.
+- **Conciliación al rechazar.** Al marcarla `aplicada` se limpia la nota del error transitorio y el aviso al asesor atribuye la aprobación a quien la aprobó (`resueltoPor`), no a quien intentó rechazar.
 - **Aprobaciones colgadas.** Si el proceso se cae entre el reclamo (`aprobada`) y la respuesta de cartera, el job `rebajasMoraColgadas` (cada 5 min) las pasa a `error_aplicacion` y avisa a los supervisores. Repetir la aprobación es seguro: cartera no descuenta dos veces por `referencia_externa`.
 
 **Requisito de despliegue (rebaja):** el CRM llama a `/mora/condonar-parcial` con la cuenta de servicio. Para que pase el gate, hay que definir `CRM_SERVICE_USER_ID` en cartera (el id de esa cuenta en `platform_users`). Si falta, cartera avisa al arrancar y las aprobaciones responden 403; el CRM las deja en `error_aplicacion` con el motivo de configuración, no las rechaza.

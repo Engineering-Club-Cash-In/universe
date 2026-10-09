@@ -7,7 +7,7 @@
  * como los demás routers de la ficha. Lógica en services/rebaja-mora.ts.
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -41,6 +41,48 @@ const MONTO_REGEX = /^\d+(\.\d{1,2})?$/;
 
 const solicitante = alias(user, "solicitante");
 const decisor = alias(user, "decisor");
+
+/** Filas de la bandeja de rebajas (abiertas primero) con el nombre del cliente. */
+async function listarSolicitudesRebaja(filtros: SQL[], limite: number) {
+	const filas = await db
+		.select({
+			id: solicitudesRebajaMoraCobros.id,
+			casoCobroId: solicitudesRebajaMoraCobros.casoCobroId,
+			numeroCreditoSifco: solicitudesRebajaMoraCobros.numeroCreditoSifco,
+			estado: solicitudesRebajaMoraCobros.estado,
+			moraSnapshot: solicitudesRebajaMoraCobros.moraSnapshot,
+			montoSolicitado: solicitudesRebajaMoraCobros.montoSolicitado,
+			montoAplicado: solicitudesRebajaMoraCobros.montoAplicado,
+			notas: solicitudesRebajaMoraCobros.notas,
+			solicitadoEn: solicitudesRebajaMoraCobros.solicitadoEn,
+			solicitadoPorId: solicitudesRebajaMoraCobros.solicitadoPor,
+			solicitadoPor: solicitante.name,
+			resueltoEn: solicitudesRebajaMoraCobros.resueltoEn,
+			resueltoPor: decisor.name,
+			notaResolucion: solicitudesRebajaMoraCobros.notaResolucion,
+		})
+		.from(solicitudesRebajaMoraCobros)
+		.leftJoin(
+			solicitante,
+			eq(solicitante.id, solicitudesRebajaMoraCobros.solicitadoPor),
+		)
+		.leftJoin(decisor, eq(decisor.id, solicitudesRebajaMoraCobros.resueltoPor))
+		.where(filtros.length > 0 ? and(...filtros) : undefined)
+		// Abiertas primero: con `limite`, el historial resuelto más nuevo no
+		// puede dejar fuera una solicitud que espera acción.
+		.orderBy(
+			sql`CASE WHEN ${inArray(solicitudesRebajaMoraCobros.estado, [...ESTADOS_REBAJA_ABIERTA])} THEN 0 ELSE 1 END`,
+			desc(solicitudesRebajaMoraCobros.solicitadoEn),
+		)
+		.limit(limite);
+	const nombres = await nombresClientePorSifco(
+		filas.map((f) => f.numeroCreditoSifco),
+	);
+	return filas.map((f) => ({
+		...f,
+		clienteNombre: nombres.get(f.numeroCreditoSifco) ?? null,
+	}));
+}
 
 export const solicitudesWorkspaceRouter = {
 	/**
@@ -191,7 +233,7 @@ export const solicitudesWorkspaceRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const filtros = [];
+			const filtros: SQL[] = [];
 			if (input.estado) {
 				filtros.push(eq(solicitudesRebajaMoraCobros.estado, input.estado));
 			}
@@ -200,47 +242,31 @@ export const solicitudesWorkspaceRouter = {
 					eq(solicitudesRebajaMoraCobros.casoCobroId, input.casoCobroId),
 				);
 			}
-			const filas = await db
-				.select({
-					id: solicitudesRebajaMoraCobros.id,
-					casoCobroId: solicitudesRebajaMoraCobros.casoCobroId,
-					numeroCreditoSifco: solicitudesRebajaMoraCobros.numeroCreditoSifco,
-					estado: solicitudesRebajaMoraCobros.estado,
-					moraSnapshot: solicitudesRebajaMoraCobros.moraSnapshot,
-					montoSolicitado: solicitudesRebajaMoraCobros.montoSolicitado,
-					montoAplicado: solicitudesRebajaMoraCobros.montoAplicado,
-					notas: solicitudesRebajaMoraCobros.notas,
-					solicitadoEn: solicitudesRebajaMoraCobros.solicitadoEn,
-					solicitadoPorId: solicitudesRebajaMoraCobros.solicitadoPor,
-					solicitadoPor: solicitante.name,
-					resueltoEn: solicitudesRebajaMoraCobros.resueltoEn,
-					resueltoPor: decisor.name,
-					notaResolucion: solicitudesRebajaMoraCobros.notaResolucion,
-				})
-				.from(solicitudesRebajaMoraCobros)
-				.leftJoin(
-					solicitante,
-					eq(solicitante.id, solicitudesRebajaMoraCobros.solicitadoPor),
-				)
-				.leftJoin(
-					decisor,
-					eq(decisor.id, solicitudesRebajaMoraCobros.resueltoPor),
-				)
-				.where(filtros.length > 0 ? and(...filtros) : undefined)
-				// Abiertas primero: con `limite`, el historial resuelto más nuevo no
-				// puede dejar fuera una solicitud que espera acción.
-				.orderBy(
-					sql`CASE WHEN ${inArray(solicitudesRebajaMoraCobros.estado, [...ESTADOS_REBAJA_ABIERTA])} THEN 0 ELSE 1 END`,
-					desc(solicitudesRebajaMoraCobros.solicitadoEn),
-				)
-				.limit(input.limite);
-			const nombres = await nombresClientePorSifco(
-				filas.map((f) => f.numeroCreditoSifco),
+			return listarSolicitudesRebaja(filtros, input.limite);
+		}),
+
+	/**
+	 * W2 · Las solicitudes de rebaja de UN caso, para quien tiene acceso al caso
+	 * (el asesor las ve y recupera el id para cancelar). La bandeja global sigue
+	 * siendo solo del supervisor.
+	 */
+	getSolicitudesRebajaMoraDelCaso: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				limite: z.number().int().min(1).max(100).default(50),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
 			);
-			return filas.map((f) => ({
-				...f,
-				clienteNombre: nombres.get(f.numeroCreditoSifco) ?? null,
-			}));
+			return listarSolicitudesRebaja(
+				[eq(solicitudesRebajaMoraCobros.casoCobroId, input.casoCobroId)],
+				input.limite,
+			);
 		}),
 
 	/**
@@ -319,6 +345,8 @@ export const solicitudesWorkspaceRouter = {
 								estado: "aplicada",
 								montoAplicado: solicitud.montoSolicitado,
 								carteraCondonacionId: previa.condonacionId,
+								// El error transitorio que la dejó en error_aplicacion ya no aplica.
+								notaResolucion: null,
 							})
 							.where(
 								and(
@@ -333,7 +361,8 @@ export const solicitudesWorkspaceRouter = {
 								casoCobroId: solicitud.casoCobroId,
 								decision: "aplicada",
 								solicitanteId: solicitud.solicitadoPor,
-								decidioPorId: context.userId,
+								// Quien aprobó fue el supervisor guardado, no quien intentó rechazar.
+								decidioPorId: solicitud.resueltoPor ?? context.userId,
 								monto: solicitud.montoSolicitado,
 								nota: null,
 							});

@@ -394,6 +394,9 @@ export const notificationsRouter = {
 				// cancelarse / quedar sin efecto). Ocultarla a mano dejaba la
 				// solicitud pendiente sin nadie que la viera.
 				"recuperacion_pendiente_aprobacion",
+				// W2: la solicitud de rebaja de mora se cierra al decidirla o cancelarla.
+				// Ocultar la alerta a mano dejaba la rebaja pendiente sin que nadie la viera.
+				"rebaja_pendiente_aprobacion",
 			] as const;
 			// El texto conserva "inmovilización" para ese flujo (lo asertan sus tests).
 			const mensajeReaperturaCobros = (tipo: string | null) =>

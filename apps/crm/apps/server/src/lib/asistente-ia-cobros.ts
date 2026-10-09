@@ -36,6 +36,7 @@ import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
 import { clients, leads } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
+import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
 import {
 	casosCobros,
 	contactosCobros,
@@ -326,7 +327,7 @@ async function nombresDeIdentidad(
 	ctx: ContextoCaso,
 	{ leadId, opportunityId }: IdentidadCaso,
 ): Promise<{ titular: Array<string | null>; otros: Array<string | null> }> {
-	const [delLead, solicitudes, { referencias, contactos }] = await Promise.all([
+	const [delLead, solicitudes, { referencias }] = await Promise.all([
 		leadId
 			? db
 					.select({
@@ -390,9 +391,6 @@ async function nombresDeIdentidad(
 			x.conyuge,
 		]),
 		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
-		// Las gestiones a referencias guardan su nombre copiado: sobrevive aunque
-		// la referencia se renombre o se borre.
-		...contactos.map((c) => c.referenciaNombre),
 	];
 	return { titular, otros };
 }
@@ -400,7 +398,7 @@ async function nombresDeIdentidad(
 /**
  * Palabras de los nombres de las personas del caso: titular (contrato, lead,
  * RENAP y solicitudes de crédito, con todos sus componentes), codeudores,
- * referencias (vigentes y las copiadas en sus gestiones) y cónyuge. Se leen desde el cliente del contrato Y desde la
+ * referencias (vigentes y todas las copiadas en sus gestiones) y cónyuge. Se leen desde el cliente del contrato Y desde la
  * oportunidad que resuelve `resolverContextoCaso` (que sin oportunidad en el
  * cliente cae a una por SIFCO, quizá de otro lead): tapar de más es inocuo,
  * dejar un nombre sin tapar no. Lanza si no se pueden leer.
@@ -437,13 +435,20 @@ async function cargarNombresCaso(
 			opportunityId: delContrato.opportunityId,
 		});
 	}
-	const [porIdentidad, delCredito] = await Promise.all([
+	const [porIdentidad, delCredito, copiados] = await Promise.all([
 		Promise.all(identidades.map((i) => nombresDeIdentidad(ctx, i))),
 		nombreCartera,
+		// Las gestiones a referencias guardan su nombre copiado: sobrevive aunque
+		// la referencia se renombre o se borre. Todos, sin el límite de la
+		// bitácora de la ficha (`cargarReferencias` trae solo los 200 últimos).
+		db
+			.selectDistinct({ nombre: contactosReferenciasCobros.referenciaNombre })
+			.from(contactosReferenciasCobros)
+			.where(eq(contactosReferenciasCobros.casoCobroId, casoCobroId)),
 	]);
 	return unirNombres(
 		[delContrato?.nombre, delCredito, ...porIdentidad.flatMap((n) => n.titular)],
-		porIdentidad.flatMap((n) => n.otros),
+		[...porIdentidad.flatMap((n) => n.otros), ...copiados.map((c) => c.nombre)],
 	);
 }
 
@@ -656,7 +661,20 @@ export async function obtenerResumenIA(
 	// se paga una regeneración con menos información que el resumen que ya
 	// hay, y sin resumen previo no se inventa uno con datos a medias.
 	if (!completo) return guardado ? comoResumen(guardado) : null;
-	if (!hayQueResumir(contexto)) return null;
+	if (!hayQueResumir(contexto)) {
+		// Con el contexto completo ya no hay nada que contar (el crédito se puso
+		// al día y no tiene historial): el resumen guardado quedó obsoleto y, si
+		// no se borra, un corte de cartera lo volvería a mostrar.
+		if (guardado) {
+			await db
+				.delete(resumenesIaCobros)
+				.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
+				.catch((error) =>
+					console.error(`[AsistenteIA] borrar resumen de ${casoCobroId}:`, error),
+				);
+		}
+		return null;
+	}
 	const huella = huellaContexto(contexto);
 	if (guardado && guardado.huella === huella) return comoResumen(guardado);
 

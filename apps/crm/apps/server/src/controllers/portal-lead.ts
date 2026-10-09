@@ -495,22 +495,13 @@ export async function updateLeadByEmail(c: Context) {
 			// Direccion is now only in the leads table, no need to update opportunities
 		}
 
-		// RENAP se consulta solo cuando Centinela vuelva a estar habilitado.
-		let renapInfo = null;
-		if (
-			CONSULTAR_RENAP &&
-			dpi !== undefined &&
-			dpi.trim() !== "" &&
-			updatedLead
-		) {
-			renapInfo = await getOnlyRenapInfoController(dpi);
-		}
+		let oportunidadesConBuro: Array<{ id: string }> = [];
 		if (updatedLead && consultarBuroPorDpi && updatedLead.dpi) {
-			const oportunidades = await db
+			oportunidadesConBuro = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)
 				.where(eq(opportunities.leadId, updatedLead.id));
-			for (const oportunidad of oportunidades) {
+			for (const oportunidad of oportunidadesConBuro) {
 				void ejecutarBuroAlVeinteSiCorresponde({
 					opportunityId: oportunidad.id,
 				}).catch((error) => {
@@ -520,6 +511,18 @@ export async function updateLeadByEmail(c: Context) {
 					);
 				});
 			}
+		}
+		// Si el flujo de oportunidad ya hará la validación, esa consulta protegida
+		// también resuelve RENAP cuando Centinela vuelva a habilitarse.
+		let renapInfo = null;
+		if (
+			CONSULTAR_RENAP &&
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			updatedLead &&
+			(!consultarBuroPorDpi || oportunidadesConBuro.length === 0)
+		) {
+			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		return c.json({

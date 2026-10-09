@@ -1751,13 +1751,25 @@ export const crmRouter = {
 						.for("update", { of: opportunities });
 
 					const oportunidadMasRecienteId = oportunidadesActivas[0]?.id;
-					const oportunidadesASincronizar =
-						updateData.source !== undefined
-							? oportunidadesActivas
-							: oportunidadesActivas.slice(0, 1);
+					const idsConOrigenSincronizable = new Set(
+						updateData.source === undefined
+							? []
+							: oportunidadesActivas
+									.filter(
+										(oportunidad) =>
+											oportunidad.source === null ||
+											oportunidad.source === leadAntesDelUpdate?.source,
+									)
+									.map((oportunidad) => oportunidad.id),
+					);
+					const oportunidadesASincronizar = oportunidadesActivas.filter(
+						(oportunidad) =>
+							idsConOrigenSincronizable.has(oportunidad.id) ||
+							(updateData.campaign !== undefined &&
+								oportunidad.id === oportunidadMasRecienteId),
+					);
 					const oportunidadesConValidacionTitular = new Set(
-						updateData.source === undefined ||
-							oportunidadesASincronizar.length === 0
+						idsConOrigenSincronizable.size === 0
 							? []
 							: (
 									await tx
@@ -1767,12 +1779,9 @@ export const crmRouter = {
 										.from(opportunityValidations)
 										.where(
 											and(
-												inArray(
-													opportunityValidations.opportunityId,
-													oportunidadesASincronizar.map(
-														(oportunidad) => oportunidad.id,
-													),
-												),
+												inArray(opportunityValidations.opportunityId, [
+													...idsConOrigenSincronizable,
+												]),
 												isNull(opportunityValidations.coDebtorId),
 											),
 										)
@@ -1780,8 +1789,11 @@ export const crmRouter = {
 					);
 					const oportunidadesConExencion = [];
 					for (const oportunidadActiva of oportunidadesASincronizar) {
+						const sincronizaOrigen = idsConOrigenSincronizable.has(
+							oportunidadActiva.id,
+						);
 						const veniaDelBot =
-							updateData.source !== undefined &&
+							sincronizaOrigen &&
 							updateData.source !== "Whatsapp" &&
 							(oportunidadActiva.source === "Whatsapp" ||
 								(oportunidadActiva.source === null &&
@@ -1798,17 +1810,19 @@ export const crmRouter = {
 						oportunidadesConExencion.push({
 							oportunidad: oportunidadActiva,
 							pierdeExencionBot,
+							sincronizaOrigen,
 						});
 					}
 
 					for (const {
 						oportunidad: oportunidadActiva,
 						pierdeExencionBot,
+						sincronizaOrigen,
 					} of oportunidadesConExencion) {
 						await tx
 							.update(opportunities)
 							.set({
-								...(updateData.source !== undefined && {
+								...(sincronizaOrigen && {
 									source: updateData.source,
 								}),
 								...(pierdeExencionBot &&
@@ -1828,11 +1842,11 @@ export const crmRouter = {
 							action: "sync_source_campaign",
 							data: {
 								leadId: id,
-								source: updateData.source,
+								source: sincronizaOrigen ? updateData.source : undefined,
 								campaign: updateData.campaign,
 							},
 						});
-						if (updateData.source !== undefined) {
+						if (sincronizaOrigen) {
 							oportunidadesConOrigenActualizado.push(oportunidadActiva.id);
 						}
 					}

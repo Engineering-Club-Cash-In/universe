@@ -1237,6 +1237,42 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		).toBe(true);
 	});
 
+	test("sincronizar el origen conserva el canal explícito de otras oportunidades", async () => {
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				id: "11111111-1111-4111-8111-111111111111",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: null,
+				leadDpi: DPI,
+			},
+			{
+				...base,
+				id: "22222222-2222-4222-8222-222222222222",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: "agency",
+				leadDpi: DPI,
+			},
+		]);
+		filasPorTabla.set(opportunityValidations, []);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const sincronizaciones = escriturasSobreOportunidades().filter(
+			(escritura) => escritura.valores.source === "referral",
+		);
+		expect(sincronizaciones).toHaveLength(1);
+	});
+
 	test("sincronizar solo la campaña conserva el alcance de la oportunidad más reciente", async () => {
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI, source: "web", assignedTo: "vendedor" },

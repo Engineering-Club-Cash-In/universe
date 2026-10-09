@@ -1318,6 +1318,51 @@ describe("corrección de DPI al 30%: solo revalida Buró", () => {
 		comprobarMarcaDeBuro();
 	});
 
+	test("rechaza un cofirmante nuevo después del 30% antes de consultar fuentes", async () => {
+		filasPorTabla.set(opportunities, [
+			{ ...oportunidad, closurePercentage: 40 },
+		]);
+		await expect(
+			invocar(
+				crmRouter.createCoDebtor,
+				{ opportunityId: OPORTUNIDAD, fullName: "Cofirmante", dpi: DPI_NUEVO },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/Regresa la oportunidad al 30%/);
+		expect(escrituras).toEqual([]);
+	});
+
+	test("rechaza si la oportunidad avanzó al 40% durante el alta", async () => {
+		filasPorTabla.set(opportunities, [oportunidad]);
+		alEjecutar = () => {
+			filasPorTabla.set(opportunities, [
+				{ ...oportunidad, closurePercentage: 40 },
+			]);
+		};
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await expect(
+				invocar(
+					crmRouter.createCoDebtor,
+					{
+						opportunityId: OPORTUNIDAD,
+						fullName: "Cofirmante",
+						dpi: DPI_NUEVO,
+					},
+					contextoDe("vendedor", "sales"),
+				),
+			).rejects.toThrow(/Regresa la oportunidad al 30%/);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+		expect(
+			escrituras.filter((escritura) => escritura.tabla === coDebtors),
+		).toEqual([]);
+	});
+
 	test("editar el DPI del cofirmante marca Buró sin reiniciar análisis", async () => {
 		filasPorTabla.set(opportunities, [oportunidad]);
 		filasPorTabla.set(coDebtors, [

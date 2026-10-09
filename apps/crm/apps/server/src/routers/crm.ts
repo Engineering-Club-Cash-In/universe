@@ -9548,8 +9548,12 @@ export const crmRouter = {
 			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
 			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
-				.select({ id: opportunities.id })
+				.select({
+					id: opportunities.id,
+					closurePercentage: salesStages.closurePercentage,
+				})
 				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
@@ -9557,6 +9561,11 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+			const mensajeAltaTardia =
+				"Regresa la oportunidad al 30% antes de agregar un cofirmante; su Buró debe validarse antes de aprobar análisis.";
+			if (opportunity.closurePercentage > 30) {
+				throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
 			}
 
 			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
@@ -9576,6 +9585,15 @@ export const crmRouter = {
 			const [newCoDebtor] = await db.transaction(async (tx) => {
 				await tomarCandadoBuroSiLibre(tx, input.opportunityId);
 				await tomarCandadoBuroInterno(tx);
+				const [etapaActual] = await tx
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(opportunities)
+					.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update", { of: opportunities });
+				if (!etapaActual || etapaActual.closurePercentage > 30) {
+					throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
+				}
 
 				const creado = await tx
 					.insert(coDebtors)

@@ -32,8 +32,8 @@ let facturaPrevia: Array<Record<string, unknown>> = [];
 // Lo que devuelve R2 para un archivo ya subido (la factura desde el CRM).
 let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
 const topesLecturaR2: Array<number | undefined> = [];
-// Otros documentos que usan la key original de una subida del CRM.
-let documentosConKey: Array<{ id: string }> = [];
+// Locks tomados sobre la fila del usuario socio.
+const bloqueosUsuario: string[] = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
@@ -95,14 +95,18 @@ const dbFalsa = {
 	select: () => ({
 		from: (tabla: unknown) => {
 			if (tabla === user)
-				return cadena(() => [
-					{
-						id: "socio-1",
-						email: "s@x.com",
-						role: userRole,
-						banned: false,
-					},
-				]);
+				return cadena(
+					() => [
+						{
+							id: "socio-1",
+							email: "s@x.com",
+							role: userRole,
+							banned: false,
+						},
+					],
+					undefined,
+					(modo) => bloqueosUsuario.push(modo),
+				);
 			if (tabla === partnerMembers)
 				return cadena(() => {
 					lecturasMembresias++;
@@ -143,7 +147,6 @@ const dbFalsa = {
 				]);
 			if (tabla === insuranceInvoiceSubmissions)
 				return cadena(() => facturaPrevia);
-			if (tabla === opportunityDocuments) return cadena(() => documentosConKey);
 			if (tabla === companies || tabla === opportunityStageHistory)
 				return cadena(() => []);
 			throw new Error("Tabla no mockeada en tracker.factura-seguro.test.ts");
@@ -305,7 +308,7 @@ beforeEach(() => {
 	actualizados.length = 0;
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
-	documentosConKey = [];
+	bloqueosUsuario.length = 0;
 	casoReleido = undefined;
 	lecturasCaso = 0;
 	membresiasVigentes = undefined;
@@ -418,6 +421,11 @@ describe("subirFacturaSeguro", () => {
 		await expect(subir()).rejects.toThrow();
 		expect(borradosR2).toEqual([KEY]);
 		expect(insertados).toHaveLength(0);
+	});
+
+	test("relee las membresías con el usuario socio bloqueado, como asignarAgencias", async () => {
+		await subir();
+		expect(bloqueosUsuario).toEqual(["share"]);
 	});
 
 	test("si al socio le quitaron la agencia mientras subía, no registra ni envía", async () => {
@@ -944,7 +952,8 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(actualizados).toContainEqual(
 			expect.objectContaining({ filePath: COPIA, mimeType: "application/pdf" }),
 		);
-		expect(borradosR2).toEqual([KEY_CRM]);
+		// El original no se borra: otro documento puede usar esa key.
+		expect(borradosR2).toEqual([]);
 	});
 
 	test("el archivo se baja con tope y uno que se pasa de 10 MB no se copia ni se envía", async () => {
@@ -969,13 +978,6 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		const html = (correos[0] as { correo: { html: string } }).correo.html;
 		expect(html).toContain("Honda Civic");
 		expect(html).not.toContain("Toyota");
-	});
-
-	test("si otro documento usa la key original, no se borra", async () => {
-		documentosConKey = [{ id: "doc-anterior" }];
-		await enviar();
-		expect(correos).toHaveLength(1);
-		expect(borradosR2).toEqual([]);
 	});
 
 	test("un PDF subido como .docx queda como .pdf en el documento, que es lo que lee el reintento", async () => {

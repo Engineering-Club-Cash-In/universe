@@ -93,22 +93,24 @@ export function BuroSummaryCard({
 	const refetchResumenBuro = resumenBuroQuery.refetch;
 	const permitirReejecucion = resumen?.permitirReejecucion ?? false;
 	useEffect(() => {
-		if (
-			resumenActualizadoEn === 0 ||
-			!open ||
-			validacionDetalleEnCurso ||
-			!resumen?.permitirReejecucion ||
-			resumen.exento ||
-			resumen.faltaConsentimiento
-		)
-			return;
+		if (resumenActualizadoEn === 0 || !open || !resumen) return;
 		const pendientes = ["pendiente", "vencido", "desactualizado"];
 		const titularPendiente =
 			!resumen.faltaDpi && pendientes.includes(resumen.titular);
 		const cofirmantesPendientes = resumen.cofirmantes.some((cofirmante) =>
 			pendientes.includes(cofirmante.estado),
 		);
-		if (!titularPendiente && !cofirmantesPendientes) return;
+		if (!titularPendiente && !cofirmantesPendientes) {
+			consultasIniciadas.current.clear();
+			return;
+		}
+		if (
+			validacionDetalleEnCurso ||
+			!resumen.permitirReejecucion ||
+			resumen.exento ||
+			resumen.faltaConsentimiento
+		)
+			return;
 		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasIniciadas.current.has(clave)) return;
 		consultasIniciadas.current.add(clave);

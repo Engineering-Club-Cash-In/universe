@@ -224,21 +224,24 @@ function OpportunityDocumentsPage() {
 	const refetchResumenBuro = resumenBuro.refetch;
 	useEffect(() => {
 		const resumen = resumenBuro.data;
-		if (
-			resumenBuroActualizadoEn === 0 ||
-			validandoBuroRenap ||
-			!resumen?.permitirReejecucion ||
-			resumen.exento ||
-			resumen.faltaConsentimiento
-		)
-			return;
+		if (resumenBuroActualizadoEn === 0 || !resumen) return;
 		const pendientes = ["pendiente", "vencido", "desactualizado"];
 		const titularPendiente =
 			!resumen.faltaDpi && pendientes.includes(resumen.titular);
 		const cofirmantesPendientes = resumen.cofirmantes.some((cofirmante) =>
 			pendientes.includes(cofirmante.estado),
 		);
-		if (!titularPendiente && !cofirmantesPendientes) return;
+		if (!titularPendiente && !cofirmantesPendientes) {
+			consultasBuroIniciadas.current.clear();
+			return;
+		}
+		if (
+			validandoBuroRenap ||
+			!resumen.permitirReejecucion ||
+			resumen.exento ||
+			resumen.faltaConsentimiento
+		)
+			return;
 		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasBuroIniciadas.current.has(clave)) return;
 		consultasBuroIniciadas.current.add(clave);

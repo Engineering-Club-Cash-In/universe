@@ -320,6 +320,45 @@ async function cargarCreditoVivo(
 	}
 }
 
+type SolicitudNombres = {
+	primerNombre: string | null;
+	segundoNombre: string | null;
+	primerApellido: string | null;
+	segundoApellido: string | null;
+	apellidoCasada: string | null;
+	conyuge: string | null;
+	personType: string | null;
+};
+
+/**
+ * Nombres de las solicitudes de crédito. La del titular (`lead`, o sin tipo)
+ * cuenta como fuente del titular: un lead sin nombre y sin nombre en cartera
+ * igual se puede tapar. Codeudores y cónyuges van en `otros`.
+ */
+export function nombresDeSolicitudes(solicitudes: SolicitudNombres[]): {
+	titular: Array<string | null>;
+	otros: Array<string | null>;
+} {
+	return {
+		titular: solicitudes
+			.filter((x) => x.personType !== "coDebtor")
+			.flatMap((x) => [
+				x.primerNombre,
+				x.segundoNombre,
+				x.primerApellido,
+				x.segundoApellido,
+			]),
+		otros: solicitudes.flatMap((x) => [
+			x.primerNombre,
+			x.segundoNombre,
+			x.primerApellido,
+			x.segundoApellido,
+			x.apellidoCasada,
+			x.conyuge,
+		]),
+	};
+}
+
 type IdentidadCaso = { leadId: string | null; opportunityId: string | null };
 
 /** Todos los nombres guardados de una persona del caso (lead + oportunidad). */
@@ -351,6 +390,7 @@ async function nombresDeIdentidad(
 						segundoApellido: creditApplications.segundoApellido,
 						apellidoCasada: creditApplications.apellidoCasada,
 						conyuge: creditApplications.conyugeNombre,
+						personType: creditApplications.personType,
 					})
 					.from(creditApplications)
 					.where(eq(creditApplications.opportunityId, opportunityId))
@@ -372,6 +412,7 @@ async function nombresDeIdentidad(
 				.where(eqDpi(renapInfo.dpi, dpi))
 				.limit(1)
 		: [];
+	const porSolicitud = nombresDeSolicitudes(solicitudes);
 	const titular = [
 		...delLead.flatMap((l) => [
 			l.primerNombre,
@@ -380,16 +421,10 @@ async function nombresDeIdentidad(
 			l.segundoApellido,
 		]),
 		...renap.flatMap((r) => Object.values(r)),
+		...porSolicitud.titular,
 	];
 	const otros = [
-		...solicitudes.flatMap((x) => [
-			x.primerNombre,
-			x.segundoNombre,
-			x.primerApellido,
-			x.segundoApellido,
-			x.apellidoCasada,
-			x.conyuge,
-		]),
+		...porSolicitud.otros,
 		...referencias.flatMap((r) => [r.nombre, ...r.otrosNombres]),
 	];
 	return { titular, otros };

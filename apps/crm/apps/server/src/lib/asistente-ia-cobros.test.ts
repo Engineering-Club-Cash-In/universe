@@ -4,6 +4,7 @@ import {
 	generarUnaVez,
 	hayQueResumir,
 	invalidarGeneracion,
+	nombresDeSolicitudes,
 	asistenteActivo,
 	huellaContexto,
 	palabrasDeNombres,
@@ -303,5 +304,29 @@ describe("generarUnaVez", () => {
 		expect(await b).toBeNull();
 		expect(guardadas).toEqual([]);
 		expect(mapa.size).toBe(0);
+	});
+});
+
+describe("nombresDeSolicitudes", () => {
+	const base = {
+		segundoNombre: null,
+		segundoApellido: null,
+		apellidoCasada: null,
+		conyuge: null,
+	};
+	test("la solicitud del titular alimenta al titular; el codeudor no", () => {
+		const r = nombresDeSolicitudes([
+			{ ...base, primerNombre: "Ana", primerApellido: "Gómez", personType: "lead" },
+			{ ...base, primerNombre: "Luis", primerApellido: "Paz", personType: "coDebtor" },
+		]);
+		expect(r.titular).toContain("Ana");
+		expect(r.titular).not.toContain("Luis");
+		expect(r.otros).toContain("Luis");
+	});
+	test("una solicitud sin tipo cuenta como titular y evita el error de unirNombres", () => {
+		const r = nombresDeSolicitudes([
+			{ ...base, primerNombre: "Ana", primerApellido: "Gómez", personType: null },
+		]);
+		expect(unirNombres(r.titular, r.otros).has("ana")).toBe(true);
 	});
 });

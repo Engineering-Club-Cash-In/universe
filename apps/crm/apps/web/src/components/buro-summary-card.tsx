@@ -76,6 +76,10 @@ export function BuroSummaryCard({
 	userRole: string;
 }) {
 	const [detalleAbierto, setDetalleAbierto] = useState(false);
+	const [validacionAutomaticaEnCurso, setValidacionAutomaticaEnCurso] =
+		useState(false);
+	const [validacionDetalleEnCurso, setValidacionDetalleEnCurso] =
+		useState(false);
 	const consultasIniciadas = useRef(new Set<string>());
 	const resumenBuroQuery = useQuery({
 		...orpc.getResumenBuroOportunidad.queryOptions({
@@ -90,7 +94,9 @@ export function BuroSummaryCard({
 	const permitirReejecucion = resumen?.permitirReejecucion ?? false;
 	useEffect(() => {
 		if (
+			resumenActualizadoEn === 0 ||
 			!open ||
+			validacionDetalleEnCurso ||
 			!resumen?.permitirReejecucion ||
 			resumen.exento ||
 			resumen.faltaConsentimiento
@@ -106,6 +112,7 @@ export function BuroSummaryCard({
 		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasIniciadas.current.has(clave)) return;
 		consultasIniciadas.current.add(clave);
+		setValidacionAutomaticaEnCurso(true);
 		void client
 			.asegurarBuroOportunidad({ opportunityId })
 			.then(() => {
@@ -114,6 +121,9 @@ export function BuroSummaryCard({
 			.catch((error) => {
 				consultasIniciadas.current.delete(clave);
 				console.error("No se pudo iniciar Buró", error);
+			})
+			.finally(() => {
+				setValidacionAutomaticaEnCurso(false);
 			});
 	}, [
 		open,
@@ -121,6 +131,7 @@ export function BuroSummaryCard({
 		resumen,
 		resumenActualizadoEn,
 		refetchResumenBuro,
+		validacionDetalleEnCurso,
 	]);
 
 	return (
@@ -187,12 +198,14 @@ export function BuroSummaryCard({
 							opportunityId={opportunityId}
 							currentUserRole={userRole}
 							permitirReejecucion={permitirReejecucion}
+							ejecucionExterna={validacionAutomaticaEnCurso}
 							permitirValidacionManualBuro={
 								resumen?.permitirValidacionManualBuro ?? false
 							}
 							expandirDetalleInicialmente
 							actualizarAutomaticamente
 							onEjecucionChange={(ejecutando) => {
+								setValidacionDetalleEnCurso(ejecutando);
 								if (!ejecutando) void resumenBuroQuery.refetch();
 							}}
 						/>

@@ -69,6 +69,8 @@ interface RenapBuroValidationProps {
 	expandirDetalleInicialmente?: boolean;
 	/** Mientras el modal esté abierto, sigue una consulta que aún está en curso. */
 	actualizarAutomaticamente?: boolean;
+	/** Indica que la vista contenedora está recuperando el Buró automáticamente. */
+	ejecucionExterna?: boolean;
 	/** Avisa a la página cuándo hay una validación en curso, para no dejar aprobar mientras tanto */
 	onEjecucionChange?: (ejecutando: boolean) => void;
 	/** RENAP solo admite validación manual de admin/analyst. */
@@ -515,6 +517,7 @@ export function RenapBuroValidation({
 	currentUserRole,
 	expandirDetalleInicialmente = false,
 	actualizarAutomaticamente = false,
+	ejecucionExterna = false,
 }: RenapBuroValidationProps) {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
@@ -529,6 +532,7 @@ export function RenapBuroValidation({
 	>(null);
 	const [overrideMotivo, setOverrideMotivo] = useState("");
 	const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
+	const ejecucionEnCurso = isExecuting || ejecucionExterna;
 
 	const puedeOverridearRenap =
 		permitirReejecucion &&
@@ -546,7 +550,7 @@ export function RenapBuroValidation({
 
 	const ejecutarValidaciones = useCallback(
 		async (reusarVigente?: boolean) => {
-			if (isExecuting || !permitirReejecucion) return;
+			if (ejecucionEnCurso || !permitirReejecucion) return;
 			try {
 				setIsExecuting(true);
 				onEjecucionChange?.(true);
@@ -577,7 +581,7 @@ export function RenapBuroValidation({
 			}
 		},
 		[
-			isExecuting,
+			ejecucionEnCurso,
 			permitirReejecucion,
 			opportunityId,
 			refetch,
@@ -607,7 +611,7 @@ export function RenapBuroValidation({
 	}, [opportunityId, cerrarOverride]);
 
 	const handleConfirmarOverride = useCallback(async () => {
-		if (!overrideTipo) return;
+		if (!overrideTipo || ejecucionEnCurso) return;
 		try {
 			setIsSubmittingOverride(true);
 			await client.marcarValidacionManual({
@@ -635,6 +639,7 @@ export function RenapBuroValidation({
 		overrideCofirmante,
 		overrideMotivo,
 		opportunityId,
+		ejecucionEnCurso,
 		ejecutarValidaciones,
 		cerrarOverride,
 	]);
@@ -680,7 +685,7 @@ export function RenapBuroValidation({
 
 	const renap = data.renap;
 	const buro = data.buro;
-	const ejecutandoPrimeraVez = isExecuting && !buro && !renap;
+	const ejecutandoPrimeraVez = ejecucionEnCurso && !buro && !renap;
 	// Un error de una fila desactualizada no cuenta: no bloquea el gate real
 	// (que filtra por DPI actual) y mostrarlo como "bloqueado" contradice el
 	// aviso de "DPI cambió"
@@ -710,14 +715,14 @@ export function RenapBuroValidation({
 								variant="outline"
 								size="sm"
 								onClick={() => ejecutarValidaciones()}
-								disabled={isExecuting}
+								disabled={ejecucionEnCurso}
 							>
-								{isExecuting ? (
+								{ejecucionEnCurso ? (
 									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 								) : (
 									<RefreshCw className="mr-2 h-4 w-4" />
 								)}
-								{isExecuting ? "Ejecutando..." : "Re-ejecutar validación"}
+								{ejecucionEnCurso ? "Ejecutando..." : "Re-ejecutar validación"}
 							</Button>
 						)}
 				</div>
@@ -926,9 +931,9 @@ export function RenapBuroValidation({
 											size="sm"
 											className={CLASE_BOTON_REINTENTAR}
 											onClick={() => ejecutarValidaciones()}
-											disabled={isExecuting}
+											disabled={ejecucionEnCurso}
 										>
-											{isExecuting ? (
+											{ejecucionEnCurso ? (
 												<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 											) : (
 												<RefreshCw className="mr-2 h-4 w-4" />
@@ -941,7 +946,7 @@ export function RenapBuroValidation({
 												size="sm"
 												className={CLASE_BOTON_VALIDACION_MANUAL}
 												onClick={() => abrirOverride("buro")}
-												disabled={isExecuting}
+												disabled={ejecucionEnCurso}
 											>
 												<UserCog className="mr-2 h-4 w-4" />
 												Marcar Buró como validado manualmente
@@ -953,7 +958,7 @@ export function RenapBuroValidation({
 												size="sm"
 												className={CLASE_BOTON_VALIDACION_MANUAL}
 												onClick={() => abrirOverride("renap")}
-												disabled={isExecuting}
+												disabled={ejecucionEnCurso}
 											>
 												<UserCog className="mr-2 h-4 w-4" />
 												Marcar RENAP como validado manualmente
@@ -969,7 +974,7 @@ export function RenapBuroValidation({
 					<SeccionCofirmante
 						key={cofirmante.coDebtorId}
 						cofirmante={cofirmante}
-						ejecutando={isExecuting}
+						ejecutando={ejecucionEnCurso}
 						puedeOverridear={
 							permitirValidacionManualBuro && !data.faltaConsentimiento
 						}
@@ -1031,7 +1036,10 @@ export function RenapBuroValidation({
 						</Button>
 						<Button
 							onClick={() => setOverrideStep("confirmar")}
-							disabled={overrideMotivo.trim().length < MOTIVO_MIN_LENGTH}
+							disabled={
+								overrideMotivo.trim().length < MOTIVO_MIN_LENGTH ||
+								ejecucionEnCurso
+							}
 						>
 							Continuar
 						</Button>
@@ -1069,7 +1077,7 @@ export function RenapBuroValidation({
 					<AlertDialogFooter>
 						<AlertDialogCancel
 							onClick={() => setOverrideStep("motivo")}
-							disabled={isSubmittingOverride}
+							disabled={isSubmittingOverride || ejecucionEnCurso}
 						>
 							Volver
 						</AlertDialogCancel>
@@ -1079,7 +1087,7 @@ export function RenapBuroValidation({
 								e.preventDefault();
 								handleConfirmarOverride();
 							}}
-							disabled={isSubmittingOverride}
+							disabled={isSubmittingOverride || ejecucionEnCurso}
 						>
 							{isSubmittingOverride ? "Guardando..." : "Sí, confirmar"}
 						</AlertDialogAction>

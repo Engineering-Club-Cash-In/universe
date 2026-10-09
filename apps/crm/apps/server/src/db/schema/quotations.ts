@@ -233,3 +233,19 @@ export const quotations = pgTable("quotations", {
 	// Notas
 	notes: text("notes"),
 });
+
+// Cotización con la que el cierre armó el crédito (getLatestApprovedQuotation).
+// Después del cierre se pueden crear o aceptar otras, y la factura del seguro
+// del tracker tiene que decir lo mismo que el crédito.
+export const opportunityCloseQuotations = pgTable(
+	"opportunity_close_quotations",
+	{
+		opportunityId: uuid("opportunity_id")
+			.primaryKey()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		quotationId: uuid("quotation_id")
+			.notNull()
+			.references(() => quotations.id, { onDelete: "cascade" }),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+);

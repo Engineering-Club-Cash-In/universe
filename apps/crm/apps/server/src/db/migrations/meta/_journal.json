@@ -309,6 +309,13 @@
 			"when": 1791319354474,
 			"tag": "0049_add_agency_sellers",
 			"breakpoints": true
+		},
+		{
+			"idx": 43,
+			"version": "7",
+			"when": 1791319454474,
+			"tag": "0050_insurance_invoice_submissions",
+			"breakpoints": true
 		}
 	]
 }

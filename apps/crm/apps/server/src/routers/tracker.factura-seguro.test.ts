@@ -39,6 +39,8 @@ let casoBajoBloqueo: Record<string, unknown> | undefined;
 // Cotización que guardó el cierre, y el filtro con el que se buscó la cotización.
 let cotizacionDelCierre: Array<{ quotationId: string }> = [];
 let filtroCotizacion: unknown;
+// Cuántos archivos había subidos a R2 cada vez que se bloquearon las cotizaciones.
+const bloqueosCotizacion: Array<{ modo: string; subidosR2: number }> = [];
 let resultadoCorreo:
 	| { ok: true }
 	| {
@@ -56,6 +58,7 @@ const borradosR2: string[] = [];
 function cadena<T>(
 	obtenerFilas: (bajoBloqueo: boolean) => T[],
 	alFiltrar?: (condicion: unknown) => void,
+	alBloquear?: (modo: string) => void,
 ) {
 	let bajoBloqueo = false;
 	const nodo = {
@@ -68,8 +71,9 @@ function cadena<T>(
 		},
 		orderBy: () => nodo,
 		limit: () => nodo,
-		for: () => {
+		for: (modo: string) => {
 			bajoBloqueo = true;
+			alBloquear?.(modo);
 			return nodo;
 		},
 		then: (resolve: (filas: T[]) => void) => resolve(obtenerFilas(bajoBloqueo)),
@@ -105,6 +109,8 @@ const dbFalsa = {
 					(condicion) => {
 						filtroCotizacion = condicion;
 					},
+					(modo) =>
+						bloqueosCotizacion.push({ modo, subidosR2: subidosR2.length }),
 				);
 			if (tabla === opportunityCloseQuotations)
 				return cadena(() => cotizacionDelCierre);
@@ -268,6 +274,7 @@ beforeEach(() => {
 	casoBajoBloqueo = undefined;
 	cotizacionDelCierre = [];
 	filtroCotizacion = undefined;
+	bloqueosCotizacion.length = 0;
 	resultadoCorreo = { ok: true };
 	insertados.length = 0;
 	actualizados.length = 0;
@@ -374,11 +381,16 @@ describe("subirFacturaSeguro", () => {
 		expect(r.aseguradora).toBe("gyt");
 	});
 
-	test("si falla la lectura de los datos del correo, no se sube nada a R2", async () => {
+	test("si falla la lectura de los datos del correo, se borra el archivo recién subido y no se registra nada", async () => {
 		fallaLecturaCotizacion = true;
 		await expect(subir()).rejects.toThrow();
-		expect(subidosR2).toHaveLength(0);
+		expect(borradosR2).toEqual([KEY]);
 		expect(insertados).toHaveLength(0);
+	});
+
+	test("los datos del correo se leen después de subir, con las cotizaciones FOR SHARE", async () => {
+		await subir();
+		expect(bloqueosCotizacion).toEqual([{ modo: "share", subidosR2: 1 }]);
 	});
 
 	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {
@@ -807,6 +819,15 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		});
 	const envioRegistrado = () =>
 		insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores;
+
+	test("los datos del correo se leen dentro del registro, con las cotizaciones FOR SHARE", async () => {
+		caso = casoAl(90, {
+			status: "won",
+			actualCloseDate: new Date("2026-09-01"),
+		});
+		await enviar();
+		expect(bloqueosCotizacion.map((b) => b.modo)).toEqual(["share"]);
+	});
 
 	test("al 90% ganada, de una agencia: registra el envío con el documento del CRM y manda el correo", async () => {
 		caso = casoAl(90, {

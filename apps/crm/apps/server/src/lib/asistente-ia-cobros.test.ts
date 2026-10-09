@@ -329,6 +329,131 @@ describe("generarUnaVez", () => {
 		expect(mapa.size).toBe(0);
 	});
 
+	test("una petición que leyó el contexto antes no reemplaza a la más nueva", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const guardadas: string[] = [];
+		const generar = async (
+			_c: string,
+			_x: unknown,
+			h: string,
+			sigueVigente?: () => boolean,
+		) => {
+			await gate.p;
+			if (sigueVigente && !sigueVigente()) return null;
+			guardadas.push(h);
+			return resumen(h);
+		};
+		// La nueva (leyó a las 10:00:02) llega primero; la vieja (10:00:01), después.
+		const nueva = generarUnaVez(
+			"c1",
+			ctx,
+			"hNueva",
+			generar,
+			mapa,
+			"2026-10-09 10:00:02",
+		);
+		const vieja = generarUnaVez(
+			"c1",
+			ctx,
+			"hVieja",
+			generar,
+			mapa,
+			"2026-10-09 10:00:01",
+		);
+		gate.fin();
+		expect((await nueva)?.texto).toBe("hNueva");
+		expect((await vieja)?.texto).toBe("hNueva");
+		expect(guardadas).toEqual(["hNueva"]);
+		expect(mapa.size).toBe(0);
+	});
+
+	test("una petición que leyó el contexto después sí reemplaza a la anterior", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const huellas: string[] = [];
+		const generar = async (_c: string, _x: unknown, h: string) => {
+			huellas.push(h);
+			if (h === "hA") await gate.p;
+			return resumen(h);
+		};
+		const a = generarUnaVez(
+			"c1",
+			ctx,
+			"hA",
+			generar,
+			mapa,
+			"2026-10-09 10:00:01",
+		);
+		const b = generarUnaVez(
+			"c1",
+			ctx,
+			"hB",
+			generar,
+			mapa,
+			"2026-10-09 10:00:02",
+		);
+		gate.fin();
+		expect((await a)?.texto).toBe("hA");
+		expect((await b)?.texto).toBe("hB");
+		expect(huellas).toEqual(["hA", "hB"]);
+	});
+
+	test("invalidar con una lectura más vieja no descarta la generación nueva", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const guardadas: string[] = [];
+		const generar = async (
+			_c: string,
+			_x: unknown,
+			h: string,
+			sigueVigente?: () => boolean,
+		) => {
+			await gate.p;
+			if (sigueVigente && !sigueVigente()) return null;
+			guardadas.push(h);
+			return resumen(h);
+		};
+		const a = generarUnaVez(
+			"c1",
+			ctx,
+			"hA",
+			generar,
+			mapa,
+			"2026-10-09 10:00:02",
+		);
+		// Una lectura de las 10:00:01 vio «nada que resumir»: ya hay algo más nuevo.
+		invalidarGeneracion("c1", "2026-10-09 10:00:01", mapa);
+		gate.fin();
+		expect((await a)?.texto).toBe("hA");
+		expect(guardadas).toEqual(["hA"]);
+	});
+
+	test("invalidar con una lectura más nueva sí la descarta", async () => {
+		const mapa = new Map();
+		const gate = pausa();
+		const generar = async (
+			_c: string,
+			_x: unknown,
+			_h: string,
+			sigueVigente?: () => boolean,
+		) => {
+			await gate.p;
+			return sigueVigente && !sigueVigente() ? null : resumen("hA");
+		};
+		const a = generarUnaVez(
+			"c1",
+			ctx,
+			"hA",
+			generar,
+			mapa,
+			"2026-10-09 10:00:01",
+		);
+		invalidarGeneracion("c1", "2026-10-09 10:00:02", mapa);
+		gate.fin();
+		expect(await a).toBeNull();
+	});
+
 	test("invalidar descarta la que va y la que espera turno", async () => {
 		const mapa = new Map();
 		const gate = pausa();
@@ -346,7 +471,7 @@ describe("generarUnaVez", () => {
 		};
 		const a = generarUnaVez("c1", ctx, "hA", generar, mapa);
 		const b = generarUnaVez("c1", ctx, "hB", generar, mapa);
-		invalidarGeneracion("c1", mapa);
+		invalidarGeneracion("c1", undefined, mapa);
 		gate.fin();
 		expect(await a).toBeNull();
 		expect(await b).toBeNull();

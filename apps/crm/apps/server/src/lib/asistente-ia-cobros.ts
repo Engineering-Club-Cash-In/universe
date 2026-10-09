@@ -635,7 +635,12 @@ const resumenSchema = z.object({
 
 type EnCurso = Map<
 	string,
-	{ huella: string; promesa: Promise<ResumenIA | null> }
+	{
+		huella: string;
+		/** `instanteBD()` en que se leyó el contexto de esta generación. */
+		inicio?: string;
+		promesa: Promise<ResumenIA | null>;
+	}
 >;
 const enCursoPorCaso: EnCurso = new Map();
 
@@ -653,7 +658,9 @@ const SIN_RESUMEN = "__sin_resumen__";
 
 /**
  * Reloj de la BD (el mismo de todos los procesos), como texto para compararlo
- * con `generado_en` sin pasar por zonas horarias de JS.
+ * con `generado_en` sin pasar por zonas horarias de JS. El formato
+ * («AAAA-MM-DD HH:MM:SS[.ffffff]», sin ceros finales) se ordena igual como texto
+ * que como instante, así que `<` entre dos de ellos es la comparación correcta.
  */
 async function instanteBD(): Promise<string> {
 	const r = await db.execute<{ t: string }>(
@@ -925,9 +932,16 @@ export function generarUnaVez(
 	huella: string,
 	generar: typeof generarYGuardar = generarYGuardar,
 	enCurso: EnCurso = enCursoPorCaso,
+	/** `instanteBD()` tomado ANTES de leer `contexto`. */
+	inicio?: string,
 ): Promise<ResumenIA | null> {
 	const previa = enCurso.get(casoCobroId);
 	if (previa?.huella === huella) return previa.promesa;
+	// Dos peticiones leen el contexto a la vez y la más vieja termina de leer
+	// después: ordena el instante en que se leyó, no el de llegada. La más vieja
+	// no reemplaza a la nueva (cancelaría su guardado y se guardaría el contexto
+	// viejo): comparte su resultado.
+	if (previa?.inicio && inicio && inicio < previa.inicio) return previa.promesa;
 	// Sin generación previa se arranca ya; con una en curso se espera su turno.
 	const vigente = () => enCurso.get(casoCobroId)?.promesa === promesa;
 	const promesa: Promise<ResumenIA | null> = previa
@@ -942,7 +956,7 @@ export function generarUnaVez(
 			}
 		})
 		.catch(() => undefined);
-	enCurso.set(casoCobroId, { huella, promesa });
+	enCurso.set(casoCobroId, { huella, inicio, promesa });
 	return promesa;
 }
 
@@ -952,8 +966,14 @@ export function generarUnaVez(
  */
 export function invalidarGeneracion(
 	casoCobroId: string,
+	/** `instanteBD()` en que se leyó el contexto que motiva la invalidación. */
+	inicio?: string,
 	enCurso: EnCurso = enCursoPorCaso,
 ): void {
+	const actual = enCurso.get(casoCobroId);
+	// Una lectura más vieja que la generación en curso no la invalida: ya hay
+	// un contexto más nuevo que el suyo.
+	if (actual?.inicio && inicio && inicio < actual.inicio) return;
 	enCurso.delete(casoCobroId);
 }
 
@@ -992,7 +1012,7 @@ export async function obtenerResumenIA(
 	// hay, y sin resumen previo no se inventa uno con datos a medias.
 	if (!completo) return guardado ? comoResumen(guardado) : null;
 	if (!hayQueResumir(contexto)) {
-		invalidarGeneracion(casoCobroId);
+		invalidarGeneracion(casoCobroId, inicio);
 		// Con el contexto completo ya no hay nada que contar (el crédito se puso
 		// al día y no tiene historial): el resumen guardado quedó obsoleto y, si
 		// no se borra, un corte de cartera lo volvería a mostrar.
@@ -1036,7 +1056,7 @@ export async function obtenerResumenIA(
 		// El contexto volvió a ser el del resumen guardado (p. ej. se restauró una
 		// promesa editada): cualquier generación en curso, aquí o en otro proceso,
 		// es de un contexto distinto y más viejo que este y no debe guardarse.
-		invalidarGeneracion(casoCobroId);
+		invalidarGeneracion(casoCobroId, inicio);
 		await confirmarContextoVigente(casoCobroId, huella, inicio);
 		return comoResumen(guardado);
 	}
@@ -1046,6 +1066,8 @@ export async function obtenerResumenIA(
 		contexto,
 		huella,
 		(id, ctx, h, vigente) => generarYGuardar(id, ctx, h, vigente, inicio),
+		undefined,
+		inicio,
 	);
 	if (guardado) return comoResumen(guardado);
 	return Promise.race([

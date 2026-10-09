@@ -640,9 +640,13 @@ Reglas:
 - Los montos van en quetzales con el formato Q1,500.00. «moraAcumulada» es el recargo por atraso, no el valor de la cuota.
 - No incluyas nombres, teléfonos ni números de documento.`;
 
-const resumenSchema = z.object({
+export const resumenSchema = z.object({
+	// `.describe()` solo le explica al modelo qué escribir: no valida. Sin el
+	// `min(1)` (tras el trim) un resumen vacío se aceptaría y se cachearía.
 	texto: z
 		.string()
+		.trim()
+		.min(1)
 		.describe(
 			"Resumen del caso en 3 a 5 oraciones: situación de mora, cómo ha respondido el cliente, promesas y convenios, y el siguiente paso sugerido.",
 		),
@@ -911,8 +915,12 @@ export async function generarYGuardar(
 				},
 			],
 		});
+		const texto = object.texto.trim();
+		// Un resumen vacío no se guarda: quedaría cacheado bajo esta huella y se
+		// devolvería en blanco sin reintentar hasta que cambie el caso.
+		if (!texto) throw new Error("el modelo devolvió un resumen vacío");
 		const fila = {
-			texto: object.texto.trim(),
+			texto,
 			etiquetas: object.etiquetas
 				.map((e) => e.trim())
 				.filter(Boolean)
@@ -1217,6 +1225,9 @@ export async function preguntarAsistente(params: {
 			],
 		});
 		const respuesta = text.trim();
+		// Una respuesta vacía no es una respuesta: se trata como fallo (la
+		// reserva queda con ok=false) en vez de guardarla y devolverla en blanco.
+		if (!respuesta) throw new Error("el modelo devolvió una respuesta vacía");
 		await db
 			.update(preguntasIaCobros)
 			.set({ respuesta, ok: true })

@@ -12,6 +12,7 @@ import {
 	MODELO_ASISTENTE,
 	nombresDeSolicitudes,
 	palabrasDeNombres,
+	resumenSchema,
 	taparDatosPersonales,
 	taparNumeros,
 	unirNombres,
@@ -222,6 +223,25 @@ describe("exigirTitularPorIdentidad", () => {
 			]),
 		).toThrow();
 		expect(() => exigirTitularPorIdentidad([["Ana"], []])).toThrow();
+	});
+});
+
+describe("resumenSchema", () => {
+	test("rechaza un texto vacío o solo espacios", () => {
+		expect(
+			resumenSchema.safeParse({ texto: "", etiquetas: ["a"] }).success,
+		).toBe(false);
+		expect(
+			resumenSchema.safeParse({ texto: "  \n ", etiquetas: ["a"] }).success,
+		).toBe(false);
+	});
+	test("acepta un resumen con texto", () => {
+		const r = resumenSchema.safeParse({
+			texto: "  Cliente en mora.  ",
+			etiquetas: ["Sin contacto"],
+		});
+		expect(r.success).toBe(true);
+		if (r.success) expect(r.data.texto).toBe("Cliente en mora.");
 	});
 });
 

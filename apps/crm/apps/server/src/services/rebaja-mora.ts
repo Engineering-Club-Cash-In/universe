@@ -244,7 +244,13 @@ export async function avisarDecisionRebaja(params: {
 /* ── Aplicación en cartera ─────────────────────────────────────────────── */
 
 export type ResultadoAplicacion =
-	| { ok: true; moraNueva: string; condonacionId: number | null }
+	| {
+			ok: true;
+			moraNueva: string;
+			condonacionId: number | null;
+			/** Cartera ya la había aplicado (reintento tras perder la respuesta). */
+			yaAplicada: boolean;
+	  }
 	| { ok: false; definitivo: boolean; motivo: string };
 
 /**
@@ -271,6 +277,7 @@ export async function aplicarRebajaEnCartera(params: {
 			ok: true,
 			moraNueva: r.mora_nueva ?? "",
 			condonacionId: r.condonacion_id ?? null,
+			yaAplicada: r.kind === "ya_aplicada",
 		};
 	} catch (error) {
 		const clasificacion = clasificarErrorCartera(

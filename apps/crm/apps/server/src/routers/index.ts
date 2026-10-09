@@ -184,6 +184,8 @@ export const cobrosAppRouter = {
 	// Workspace de cobros (issue #1873): solicitudes que se deciden en la bandeja.
 	solicitarRebajaMora: solicitudesWorkspaceRouter.solicitarRebajaMora,
 	getSolicitudesRebajaMora: solicitudesWorkspaceRouter.getSolicitudesRebajaMora,
+	getSolicitudesRebajaMoraDelCaso:
+		solicitudesWorkspaceRouter.getSolicitudesRebajaMoraDelCaso,
 	decidirSolicitudRebajaMora:
 		solicitudesWorkspaceRouter.decidirSolicitudRebajaMora,
 	cancelarSolicitudRebajaMora:

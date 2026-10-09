@@ -1,8 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { lockPool } from "../database";
 import { CARTERA_SCHEMA } from "../database/db/schema";
+import { conectarAntesDe, PaymentAdvisoryLockTimeoutError } from "./paymentAdvisoryLockPlazo";
+
+export { PaymentAdvisoryLockTimeoutError };
 
 export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
+
+/** Pausa entre intentos de `pg_try_advisory_lock` cuando hay plazo de espera. */
+const PAUSA_ENTRE_INTENTOS_MS = 100;
 
 /**
  * Créditos cuyo lock ya sostiene la cadena async actual. Hace el lock
@@ -74,15 +80,6 @@ export async function withPaymentBindingLock<T>(
  * lock (deadlock de pool). Por eso NUNCA esperar este lock con conexiones de
  * `client`/`db` (p.ej. `pg_advisory_xact_lock` dentro de una transacción).
  */
-export class PaymentAdvisoryLockTimeoutError extends Error {
-  constructor(credito_id: number, esperaMaximaMs: number) {
-    super(`No se obtuvo el lock del crédito ${credito_id} en ${esperaMaximaMs} ms`);
-    this.name = "PaymentAdvisoryLockTimeoutError";
-  }
-}
-
-const PAUSA_ENTRE_INTENTOS_MS = 100;
-
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
   fn: (lock: PaymentAdvisoryLock) => Promise<T>,
@@ -101,17 +98,28 @@ export async function withPaymentAdvisoryLock<T>(
     // Reentrada: esta misma cadena ya tiene el lock del crédito.
     return fn(lockHeredado);
   }
-  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  // El plazo corre desde ACÁ: pedir la conexión al pool dedicado también espera
+  // (diez conexiones, sin timeout propio) y cuenta dentro de `esperaMaximaMs`.
+  const limite =
+    opciones?.esperaMaximaMs === undefined ? null : Date.now() + opciones.esperaMaximaMs;
+  const lockConn: PaymentAdvisoryLockConnection =
+    limite === null
+      ? await lockPool.connect()
+      : await conectarAntesDe(
+          () => lockPool.connect() as Promise<PaymentAdvisoryLockConnection>,
+          credito_id,
+          limite,
+          opciones?.esperaMaximaMs ?? 0,
+        );
   const lock = {} as PaymentAdvisoryLock;
   let tomado = false;
   try {
-    if (opciones?.esperaMaximaMs === undefined) {
+    if (limite === null) {
       await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
         PAYMENT_ADVISORY_LOCK_NAMESPACE,
         credito_id,
       ]);
     } else {
-      const limite = Date.now() + opciones.esperaMaximaMs;
       for (;;) {
         const res = (await lockConn.query(
           "SELECT pg_try_advisory_lock($1, $2) AS tomado",
@@ -119,7 +127,7 @@ export async function withPaymentAdvisoryLock<T>(
         )) as { rows?: { tomado?: boolean }[] };
         if (res?.rows?.[0]?.tomado) break;
         if (Date.now() >= limite) {
-          throw new PaymentAdvisoryLockTimeoutError(credito_id, opciones.esperaMaximaMs);
+          throw new PaymentAdvisoryLockTimeoutError(credito_id, opciones?.esperaMaximaMs ?? 0);
         }
         await new Promise((r) => setTimeout(r, PAUSA_ENTRE_INTENTOS_MS));
       }
@@ -131,7 +139,7 @@ export async function withPaymentAdvisoryLock<T>(
     return await locksDeLaCadena.run(sostenidos, () => fn(lock));
   } finally {
     heldPaymentLocks.delete(lock);
-    if (tomado || opciones?.esperaMaximaMs === undefined) {
+    if (tomado || limite === null) {
       try {
         await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
           PAYMENT_ADVISORY_LOCK_NAMESPACE,

@@ -535,12 +535,26 @@ export const solicitudesWorkspaceRouter = {
 
 			// Cartera ya descontó: `aplicada` gana sobre un `error_aplicacion` que el
 			// job de colgadas haya puesto mientras tanto, pero no sobre un cierre final.
+			// Si cartera ya la tenía aplicada (aprobó otro supervisor y se perdió la
+			// respuesta), el reclamo de ahora no es quien la aprobó: se conserva el
+			// resolutor, la hora y sin la nota de este intento.
+			const aprobadorOriginal =
+				resultado.yaAplicada && solicitud.resueltoPor
+					? solicitud.resueltoPor
+					: null;
 			const [cerradaAplicada] = await db
 				.update(solicitudesRebajaMoraCobros)
 				.set({
 					estado: "aplicada",
 					montoAplicado: solicitud.montoSolicitado,
 					carteraCondonacionId: resultado.condonacionId,
+					...(aprobadorOriginal
+						? {
+								resueltoPor: aprobadorOriginal,
+								resueltoEn: solicitud.resueltoEn,
+								notaResolucion: null,
+							}
+						: {}),
 				})
 				.where(
 					and(
@@ -569,9 +583,9 @@ export const solicitudesWorkspaceRouter = {
 				casoCobroId: solicitud.casoCobroId,
 				decision: "aplicada",
 				solicitanteId: solicitud.solicitadoPor,
-				decidioPorId: context.userId,
+				decidioPorId: aprobadorOriginal ?? context.userId,
 				monto: solicitud.montoSolicitado,
-				nota: input.nota ?? null,
+				nota: aprobadorOriginal ? null : (input.nota ?? null),
 			});
 			return { decision: "aplicada" as const, moraNueva: resultado.moraNueva };
 		}),

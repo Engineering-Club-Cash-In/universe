@@ -298,7 +298,7 @@ async function cargarCreditoVivo(
 } | null> {
 	if (!numeroSifco) return null;
 	try {
-		const c = await carteraBackClient.getCredito(numeroSifco, false);
+		const c = await carteraBackClient.getCredito(numeroSifco, false, false);
 		const cuotasVencidas = contarCuotasAtrasadasUnicas(c.cuotasAtrasadas ?? []);
 		return {
 			credito: {

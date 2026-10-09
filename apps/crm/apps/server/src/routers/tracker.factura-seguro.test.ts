@@ -867,12 +867,17 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	const KEY_CRM = `opportunities/${ID}/999-crm-factura.pdf`;
 	// La copia que sube el server con los bytes validados.
 	const COPIA = `opportunities/${ID}/123-abc-factura-crm.pdf`;
-	const enviar = (nombre = "factura-crm.pdf", rol = "admin") =>
+	const enviar = (
+		nombre = "factura-crm.pdf",
+		rol = "admin",
+		mimeType = "application/pdf",
+	) =>
 		enviarFacturaSeguroDesdeCrm({
 			opportunityId: ID,
 			documentId: "doc-crm",
 			key: KEY_CRM,
 			nombre,
+			mimeType,
 			userId: "crm-1",
 			userRole: rol,
 		});
@@ -986,16 +991,16 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(correos).toHaveLength(0);
 	});
 
-	test("si el archivo no es PDF ni imagen (por ejemplo, un Word), queda guardado pero no se envía", async () => {
+	test("un Word o un Excel también se envía, con su nombre y su tipo", async () => {
+		const DOCX =
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 		contenidoR2 = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
-		const r = await enviar("factura.docx");
-		expect(r).toEqual({
-			enviada: false,
-			motivo: "la factura tiene que ser un PDF o una imagen (JPG, PNG o WebP)",
-		});
-		expect(insertados).toHaveLength(0);
-		expect(correos).toHaveLength(0);
-		expect(subidosR2).toHaveLength(0);
+		const r = await enviar("factura.docx", "admin", DOCX);
+		expect(r).toMatchObject({ enviada: true });
+		expect(subidosR2).toEqual([
+			{ key: `opportunities/${ID}/123-abc-factura.docx`, mime: DOCX },
+		]);
+		expect(correos[0]).toMatchObject({ archivo: { nombre: "factura.docx" } });
 	});
 
 	test("el nombre del adjunto lleva la extensión del tipo real", async () => {

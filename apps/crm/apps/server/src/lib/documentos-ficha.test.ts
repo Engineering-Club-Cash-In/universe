@@ -6,6 +6,7 @@ import {
 	decidirOportunidadMensaje,
 	decidirVehiculoCaso,
 	nombresDeActores,
+	sifcoSinAmbiguedad,
 } from "./documentos-ficha";
 
 describe("armarDocumentos", () => {
@@ -93,20 +94,33 @@ describe("combinarDatosMensaje", () => {
 });
 
 describe("decidirVehiculoCaso", () => {
-	test("sin contrato manda la oportunidad y sus documentos valen", () => {
+	test("sin contrato manda la oportunidad verificada y sus documentos valen", () => {
 		expect(
 			decidirVehiculoCaso({
 				tieneContrato: false,
+				oportunidadVerificada: true,
 				vehiculoContrato: null,
 				vehiculoOportunidad: "v-opp",
 			}),
 		).toEqual({ vehicleId: "v-opp", usarOportunidad: true });
 	});
 
+	test("sin contrato y con SIFCO ambiguo no hay vehículo ni documentos", () => {
+		expect(
+			decidirVehiculoCaso({
+				tieneContrato: false,
+				oportunidadVerificada: false,
+				vehiculoContrato: null,
+				vehiculoOportunidad: "v-de-otro-lead",
+			}),
+		).toEqual({ vehicleId: null, usarOportunidad: false });
+	});
+
 	test("con contrato manda su vehículo aunque la oportunidad apunte a otro", () => {
 		expect(
 			decidirVehiculoCaso({
 				tieneContrato: true,
+				oportunidadVerificada: false,
 				vehiculoContrato: "v-contrato",
 				vehiculoOportunidad: "v-viejo",
 			}),
@@ -117,6 +131,7 @@ describe("decidirVehiculoCaso", () => {
 		expect(
 			decidirVehiculoCaso({
 				tieneContrato: true,
+				oportunidadVerificada: false,
 				vehiculoContrato: "v1",
 				vehiculoOportunidad: "v1",
 			}),
@@ -127,6 +142,7 @@ describe("decidirVehiculoCaso", () => {
 		expect(
 			decidirVehiculoCaso({
 				tieneContrato: true,
+				oportunidadVerificada: false,
 				vehiculoContrato: null,
 				vehiculoOportunidad: "v-opp",
 			}),
@@ -134,22 +150,58 @@ describe("decidirVehiculoCaso", () => {
 	});
 });
 
+describe("sifcoSinAmbiguedad", () => {
+	test("una sola oportunidad con lead es inequívoca", () => {
+		expect(sifcoSinAmbiguedad([{ leadId: "l1" }])).toBe(true);
+	});
+	test("varias del mismo lead también", () => {
+		expect(sifcoSinAmbiguedad([{ leadId: "l1" }, { leadId: "l1" }])).toBe(true);
+	});
+	test("leads distintos es ambiguo", () => {
+		expect(sifcoSinAmbiguedad([{ leadId: "l1" }, { leadId: "l2" }])).toBe(
+			false,
+		);
+	});
+	test("sin lead no se sabe de quién es", () => {
+		expect(sifcoSinAmbiguedad([{ leadId: null }])).toBe(false);
+		expect(sifcoSinAmbiguedad([{ leadId: "l1" }, { leadId: null }])).toBe(
+			false,
+		);
+	});
+	test("sin oportunidades no hay nada que verificar", () => {
+		expect(sifcoSinAmbiguedad([])).toBe(false);
+	});
+});
+
 describe("decidirOportunidadMensaje", () => {
 	const base = {
+		oportunidadVerificada: false,
 		vehiculoContrato: "v1",
 		vehiculoOportunidad: "v1",
 		oportunidadDelCliente: "o1",
 		oportunidadResuelta: "o1",
 	};
-	test("sin contrato la oportunidad rellena todo", () => {
+	test("sin contrato y con SIFCO inequívoco la oportunidad rellena todo", () => {
 		expect(
 			decidirOportunidadMensaje({
 				...base,
 				tieneContrato: false,
+				oportunidadVerificada: true,
 				vehiculoContrato: null,
 				oportunidadDelCliente: null,
 			}),
 		).toEqual({ usarOportunidad: true, usarNombreOportunidad: true });
+	});
+	test("sin contrato y con SIFCO ambiguo la oportunidad no aporta ni nombre ni vehículo", () => {
+		expect(
+			decidirOportunidadMensaje({
+				...base,
+				tieneContrato: false,
+				oportunidadVerificada: false,
+				vehiculoContrato: null,
+				oportunidadDelCliente: null,
+			}),
+		).toEqual({ usarOportunidad: false, usarNombreOportunidad: false });
 	});
 	test("con contrato y oportunidad del cliente con el mismo vehículo, todo", () => {
 		expect(decidirOportunidadMensaje({ ...base, tieneContrato: true })).toEqual(
@@ -179,7 +231,11 @@ describe("decidirOportunidadMensaje", () => {
 describe("nombresDeActores", () => {
 	test("pendiente sin resolutor: sigue siendo null", () => {
 		expect(
-			nombresDeActores({ estado: "pendiente", solicitadoPor: "Ana", resueltoPor: null }),
+			nombresDeActores({
+				estado: "pendiente",
+				solicitadoPor: "Ana",
+				resueltoPor: null,
+			}),
 		).toEqual({ solicitadoPor: "Ana", resueltoPor: null });
 	});
 	test("resuelta sin resolutor: el usuario fue eliminado", () => {
@@ -191,7 +247,11 @@ describe("nombresDeActores", () => {
 	});
 	test("solicitante eliminado y resolutor vigente", () => {
 		expect(
-			nombresDeActores({ estado: "aprobada", solicitadoPor: null, resueltoPor: "Luis" }),
+			nombresDeActores({
+				estado: "aprobada",
+				solicitadoPor: null,
+				resueltoPor: "Luis",
+			}),
 		).toEqual({ solicitadoPor: "Usuario eliminado", resueltoPor: "Luis" });
 	});
 });

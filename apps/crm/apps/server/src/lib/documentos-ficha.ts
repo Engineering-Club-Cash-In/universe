@@ -127,12 +127,33 @@ const COBERTURA_SEGURO_PDF_URL = process.env.COBERTURA_SEGURO_PDF_URL;
 export type ArchivoDocumento = { key: string } | { url: string };
 
 /**
- * Qué de la oportunidad puede rellenar el mensaje. Sin contrato, todo (es el
- * respaldo por SIFCO). Con contrato: el vehículo solo si es el mismo y el
- * nombre solo si la oportunidad es la del cliente del contrato.
+ * ¿El SIFCO identifica a una sola persona? `resolverContextoCaso` cae a la
+ * oportunidad por SIFCO cuando el caso no tiene contrato, y SIFCO puede
+ * repetirse en oportunidades duplicadas u obsoletas de OTRO lead. Es
+ * inequívoco si hay una sola oportunidad, o varias del mismo lead; con leads
+ * distintos (o uno sin lead) no se sabe de quién es y no se le manda nada.
+ */
+export function sifcoSinAmbiguedad(
+	oportunidades: Array<{ leadId: string | null }>,
+): boolean {
+	if (oportunidades.length === 0) return false;
+	const [primera] = oportunidades;
+	return (
+		primera.leadId !== null &&
+		oportunidades.every((o) => o.leadId === primera.leadId)
+	);
+}
+
+/**
+ * Qué de la oportunidad puede rellenar el mensaje. Sin contrato, todo si el
+ * SIFCO la identifica sin ambigüedad (es el respaldo por SIFCO) y nada si no.
+ * Con contrato: el vehículo solo si es el mismo y el nombre solo si la
+ * oportunidad es la del cliente del contrato.
  */
 export function decidirOportunidadMensaje(datos: {
 	tieneContrato: boolean;
+	/** Sin contrato: `sifcoSinAmbiguedad` del SIFCO del caso. */
+	oportunidadVerificada: boolean;
 	vehiculoContrato: string | null;
 	vehiculoOportunidad: string | null;
 	oportunidadDelCliente: string | null;
@@ -140,16 +161,18 @@ export function decidirOportunidadMensaje(datos: {
 }): { usarOportunidad: boolean; usarNombreOportunidad: boolean } {
 	return {
 		usarOportunidad: decidirVehiculoCaso(datos).usarOportunidad,
-		usarNombreOportunidad:
-			!datos.tieneContrato ||
-			(datos.oportunidadDelCliente !== null &&
-				datos.oportunidadDelCliente === datos.oportunidadResuelta),
+		usarNombreOportunidad: datos.tieneContrato
+			? datos.oportunidadDelCliente !== null &&
+				datos.oportunidadDelCliente === datos.oportunidadResuelta
+			: datos.oportunidadVerificada,
 	};
 }
 
 /** Regla pura de `resolverVehiculoCaso`. */
 export function decidirVehiculoCaso(datos: {
 	tieneContrato: boolean;
+	/** Sin contrato: `sifcoSinAmbiguedad` del SIFCO del caso. */
+	oportunidadVerificada: boolean;
 	vehiculoContrato: string | null;
 	vehiculoOportunidad: string | null;
 }): { vehicleId: string | null; usarOportunidad: boolean } {
@@ -161,10 +184,24 @@ export function decidirVehiculoCaso(datos: {
 				datos.vehiculoOportunidad === datos.vehiculoContrato,
 		};
 	}
+	// Sin contrato la oportunidad por SIFCO es la única fuente, pero solo si es
+	// inequívoca: si pudiera ser de otro lead, no hay vehículo ni documentos.
 	return {
-		vehicleId: datos.vehiculoOportunidad,
-		usarOportunidad: true,
+		vehicleId: datos.oportunidadVerificada ? datos.vehiculoOportunidad : null,
+		usarOportunidad: datos.oportunidadVerificada,
 	};
+}
+
+/** Las oportunidades que comparten el SIFCO del caso, para verificarlo. */
+async function oportunidadVerificadaDelCaso(
+	ctx: ContextoCaso,
+): Promise<boolean> {
+	if (!ctx.numeroCreditoSifco) return false;
+	const filas = await db
+		.select({ leadId: opportunities.leadId })
+		.from(opportunities)
+		.where(eq(opportunities.numeroSifco, ctx.numeroCreditoSifco));
+	return sifcoSinAmbiguedad(filas);
 }
 
 /**
@@ -172,12 +209,13 @@ export function decidirVehiculoCaso(datos: {
  * Con contrato vinculado manda el vehículo del contrato (la oportunidad puede
  * apuntar a uno viejo o distinto, igual que en `cargarSeguro`): sus
  * documentos solo sirven si la oportunidad apunta a ese mismo vehículo. Sin
- * contrato se usa el de la oportunidad y sus documentos valen siempre.
+ * contrato se usa el de la oportunidad y sus documentos valen solo si el SIFCO
+ * la identifica sin ambigüedad (`sifcoSinAmbiguedad`).
  */
 async function resolverVehiculoCaso(
 	ctx: ContextoCaso,
 ): Promise<{ vehicleId: string | null; usarOportunidad: boolean }> {
-	const [[caso], [opp]] = await Promise.all([
+	const [[caso], [opp], oportunidadVerificada] = await Promise.all([
 		db
 			.select({
 				contratoId: casosCobros.contratoId,
@@ -197,8 +235,10 @@ async function resolverVehiculoCaso(
 					.where(eq(opportunities.id, ctx.opportunityId))
 					.limit(1)
 			: Promise.resolve([]),
+		oportunidadVerificadaDelCaso(ctx),
 	]);
 	return decidirVehiculoCaso({
+		oportunidadVerificada,
 		tieneContrato: !!caso?.contratoId,
 		vehiculoContrato: caso?.vehicleId ?? null,
 		vehiculoOportunidad: opp?.vehicleId ?? null,
@@ -346,7 +386,7 @@ export function combinarDatosMensaje(
 }
 
 async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
-	const [[contrato], [oportunidad]] = await Promise.all([
+	const [[contrato], [oportunidad], oportunidadVerificada] = await Promise.all([
 		db
 			.select({
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
@@ -386,6 +426,7 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 					.where(eq(opportunities.id, ctx.opportunityId))
 					.limit(1)
 			: Promise.resolve([]),
+		oportunidadVerificadaDelCaso(ctx),
 	]);
 	const sinDatos = {
 		clienteNombre: null,
@@ -398,7 +439,9 @@ async function datosParaMensaje(ctx: ContextoCaso): Promise<DatosMensaje> {
 	// oportunidad distinta, y el nombre del cliente solo sale de la oportunidad
 	// si es la de su cliente (`resolverContextoCaso` cae a una oportunidad por
 	// SIFCO cuando el cliente no tiene, y esa puede ser de otro lead).
+	// Sin contrato, la oportunidad por SIFCO solo se usa si es inequívoca.
 	const { usarOportunidad, usarNombreOportunidad } = decidirOportunidadMensaje({
+		oportunidadVerificada,
 		tieneContrato: !!contrato?.contratoId,
 		vehiculoContrato: contrato?.vehicleId ?? null,
 		vehiculoOportunidad: oportunidad?.vehicleId ?? null,

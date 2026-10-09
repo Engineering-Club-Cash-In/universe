@@ -1066,6 +1066,9 @@ export const resumenesIaCobros = pgTable("resumenes_ia_cobros", {
 	generadoEn: timestamp("generado_en").notNull().defaultNow(),
 	// Cuándo se leyó el contexto del que salió la fila: ordena las versiones.
 	contextoEn: timestamp("contexto_en"),
+	// Reserva de la generación en curso: huella y hasta cuándo vale.
+	generandoHuella: text("generando_huella"),
+	generandoHasta: timestamp("generando_hasta"),
 });
 
 // F7 (#1864) · Preguntas al asistente del caso: traza de lo que se preguntó y

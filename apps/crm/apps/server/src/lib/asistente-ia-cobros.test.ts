@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
 	armarContextoIA,
+	asistenteActivo,
 	generarUnaVez,
 	hayQueResumir,
+	huellaContexto,
 	invalidarGeneracion,
 	nombresDeSolicitudes,
-	asistenteActivo,
-	huellaContexto,
 	palabrasDeNombres,
 	taparDatosPersonales,
 	taparNumeros,
@@ -59,7 +59,9 @@ describe("taparDatosPersonales", () => {
 	]);
 	test("tapa correos y teléfonos o DPI con puntuación", () => {
 		expect(
-			taparDatosPersonales("escribe a juan.perez@correo.com o al (502) 5555-1234"),
+			taparDatosPersonales(
+				"escribe a juan.perez@correo.com o al (502) 5555-1234",
+			),
 		).toBe("escribe a [correo] o al [número]");
 		expect(taparDatosPersonales("DPI 2993.06216.0101")).toBe("DPI [número]");
 	});
@@ -67,9 +69,9 @@ describe("taparDatosPersonales", () => {
 		expect(
 			taparDatosPersonales("tel +502 5555/1234 o 5555_1234 o 5555–1234"),
 		).toBe("tel [número] o [número] o [número]");
-		expect(taparDatosPersonales("DPI 2993/06216/0101 y 2993\\06216\\0101")).toBe(
-			"DPI [número] y [número]",
-		);
+		expect(
+			taparDatosPersonales("DPI 2993/06216/0101 y 2993\\06216\\0101"),
+		).toBe("DPI [número] y [número]");
 		expect(taparDatosPersonales("pagó Q1,500,000.00 el 3/10 y el 12/5")).toBe(
 			"pagó Q1,500,000.00 el 3/10 y el 12/5",
 		);
@@ -92,7 +94,10 @@ describe("taparDatosPersonales", () => {
 			taparDatosPersonales("Habló con Juan Mora, MORA no contesta", nombres),
 		).toBe("Habló con [nombre] [nombre], [nombre] no contesta");
 		expect(
-			taparDatosPersonales("Se llama San Pedro, vive San Juan", palabrasDeNombres(["Rosa San"])),
+			taparDatosPersonales(
+				"Se llama San Pedro, vive San Juan",
+				palabrasDeNombres(["Rosa San"]),
+			),
 		).toBe("Se llama [nombre] Pedro, vive [nombre] Juan");
 	});
 	test("los nombres cortos (Li, Wu) y las iniciales se tapan", () => {
@@ -152,7 +157,9 @@ describe("armarContextoIA", () => {
 				},
 			],
 		});
-		expect(c.gestiones[0].comentario).toBe("Habló con [nombre] [nombre], correo [correo]");
+		expect(c.gestiones[0].comentario).toBe(
+			"Habló con [nombre] [nombre], correo [correo]",
+		);
 	});
 	test("la huella es estable y cambia con una gestión nueva", () => {
 		const a = huellaContexto(armarContextoIA(fuentes));
@@ -316,8 +323,18 @@ describe("nombresDeSolicitudes", () => {
 	};
 	test("la solicitud del titular alimenta al titular; el codeudor no", () => {
 		const r = nombresDeSolicitudes([
-			{ ...base, primerNombre: "Ana", primerApellido: "Gómez", personType: "lead" },
-			{ ...base, primerNombre: "Luis", primerApellido: "Paz", personType: "coDebtor" },
+			{
+				...base,
+				primerNombre: "Ana",
+				primerApellido: "Gómez",
+				personType: "lead",
+			},
+			{
+				...base,
+				primerNombre: "Luis",
+				primerApellido: "Paz",
+				personType: "coDebtor",
+			},
 		]);
 		expect(r.titular).toContain("Ana");
 		expect(r.titular).not.toContain("Luis");
@@ -325,7 +342,12 @@ describe("nombresDeSolicitudes", () => {
 	});
 	test("una solicitud sin tipo cuenta como titular y evita el error de unirNombres", () => {
 		const r = nombresDeSolicitudes([
-			{ ...base, primerNombre: "Ana", primerApellido: "Gómez", personType: null },
+			{
+				...base,
+				primerNombre: "Ana",
+				primerApellido: "Gómez",
+				personType: null,
+			},
 		]);
 		expect(unirNombres(r.titular, r.otros).has("ana")).toBe(true);
 	});

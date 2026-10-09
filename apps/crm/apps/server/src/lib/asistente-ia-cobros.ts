@@ -34,9 +34,6 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
-import { clients, leads } from "../db/schema/crm";
-import { renapInfo } from "../db/schema/renap";
-import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
 import {
 	casosCobros,
 	contactosCobros,
@@ -44,6 +41,9 @@ import {
 	preguntasIaCobros,
 	resumenesIaCobros,
 } from "../db/schema/cobros";
+import { clients, leads } from "../db/schema/crm";
+import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
+import { renapInfo } from "../db/schema/renap";
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -106,16 +106,13 @@ export interface ContextoIA {
  * dejar pasar un teléfono escrito como «55/55/1234».
  */
 export function taparNumeros(texto: string): string {
-	return texto.replace(/[+(]?\d[\d\s().\/\\_·–—-]{6,}\d/g, (m) =>
+	return texto.replace(/[+(]?\d[\d\s()./\\_·–—-]{6,}\d/g, (m) =>
 		m.replace(/\D/g, "").length >= 8 ? "[número]" : m,
 	);
 }
 
 const sinAcentos = (t: string) =>
-	t
-		.normalize("NFD")
-		.replace(/\p{M}/gu, "")
-		.toLowerCase();
+	t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 /**
  * Palabras comunes (partículas de los nombres, palabras del español y de
@@ -250,10 +247,10 @@ export function armarContextoIA(fuentes: {
 			fecha: g.fechaContacto.toISOString().slice(0, 16),
 			metodo: g.metodoContacto,
 			resultado: g.estadoContacto,
-			comentario: taparDatosPersonales(g.comentarios.trim(), fuentes.nombres).slice(
-				0,
-				500,
-			),
+			comentario: taparDatosPersonales(
+				g.comentarios.trim(),
+				fuentes.nombres,
+			).slice(0, 500),
 			montoPrometido: g.montoComprometido,
 			fechaPrometida: dia(g.fechaProximoContacto),
 			estadoPromesa: g.estadoPromesa,
@@ -289,9 +286,7 @@ export function huellaContexto(contexto: ContextoIA): string {
  * figurar «al día, 0 días»), así que no se le mandan al modelo. `null` si
  * cartera no responde.
  */
-async function cargarCreditoVivo(
-	numeroSifco: string | null,
-): Promise<{
+async function cargarCreditoVivo(numeroSifco: string | null): Promise<{
 	credito: ContextoIA["credito"];
 	/** Nombre del cliente en cartera: fuente del titular que no depende del CRM. */
 	nombreCliente: string | null;
@@ -482,7 +477,11 @@ async function cargarNombresCaso(
 			.where(eq(contactosReferenciasCobros.casoCobroId, casoCobroId)),
 	]);
 	return unirNombres(
-		[delContrato?.nombre, delCredito, ...porIdentidad.flatMap((n) => n.titular)],
+		[
+			delContrato?.nombre,
+			delCredito,
+			...porIdentidad.flatMap((n) => n.titular),
+		],
 		[...porIdentidad.flatMap((n) => n.otros), ...copiados.map((c) => c.nombre)],
 	);
 }
@@ -610,16 +609,118 @@ async function instanteBD(): Promise<string> {
 	return r.rows[0].t;
 }
 
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Cada cuánto mira quien espera a que otro proceso termine la misma huella. */
+const ESPERA_RESERVA_MS = 500;
+/** Holgura de la reserva sobre el timeout del modelo. */
+const MARGEN_RESERVA_MS = 10_000;
+
+type Resultado =
+	| { tipo: "listo"; resumen: ResumenIA | null }
+	| { tipo: "espera" }
+	| { tipo: "reservado" };
+
 /**
- * Genera y guarda el resumen del caso. TODO ocurre bajo el lock del caso,
- * tomado ANTES de llamar al modelo y retenido hasta guardar:
- * - dos procesos con el mismo contexto no lo generan (ni cobran) dos veces: el
- *   segundo espera el lock, ve la fila ya guardada con su misma huella y la usa;
- * - una generación más vieja (su `inicio` es anterior a la fila guardada, sea
- *   un resumen o una marca de «sin nada que resumir») nunca pisa a una más nueva;
- * - la invalidación de `obtenerResumenIA` toma el mismo lock, así que o ve esta
- *   fila ya guardada y la reemplaza, o llega antes y esta generación la respeta.
- * La conexión queda ocupada hasta `TIMEOUT_GENERACION_MS` como máximo.
+ * Paso 1, transacción CORTA bajo el lock del caso: decide si hay que generar y,
+ * si sí, reserva la huella (`generando_*`, con vencimiento por si el proceso
+ * muere). Nada del modelo ocurre aquí.
+ * - ya está guardada esa huella → se reutiliza, sin generar;
+ * - hay algo guardado hecho con un contexto más nuevo (otro proceso o una
+ *   invalidación) → este resumen nacería viejo;
+ * - otro proceso tiene reservada esta misma huella → se espera su resultado.
+ */
+async function reservarGeneracion(
+	casoCobroId: string,
+	huella: string,
+	sigueVigente: () => boolean,
+	inicio?: string,
+): Promise<Resultado> {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockResumen(casoCobroId));
+		if (!sigueVigente()) return { tipo: "listo", resumen: null };
+		const [previa] = await tx
+			.select({
+				huella: resumenesIaCobros.huella,
+				texto: resumenesIaCobros.texto,
+				etiquetas: resumenesIaCobros.etiquetas,
+				generadoEn: resumenesIaCobros.generadoEn,
+				// Se ordena por el contexto leído, no por cuándo terminó la
+				// generación: una A lenta que termina después de leída B no es
+				// más nueva que B.
+				masNueva: inicio
+					? sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`
+					: sql<boolean>`false`,
+				reservada: sql<boolean>`${resumenesIaCobros.generandoHuella} = ${huella} AND ${resumenesIaCobros.generandoHasta} > clock_timestamp()::timestamp`,
+			})
+			.from(resumenesIaCobros)
+			.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
+			.limit(1);
+		if (previa && previa.huella !== SIN_RESUMEN && previa.huella === huella) {
+			return {
+				tipo: "listo",
+				resumen: {
+					texto: previa.texto,
+					etiquetas: previa.etiquetas,
+					generadoEn: previa.generadoEn.toISOString(),
+				},
+			};
+		}
+		if (previa?.masNueva) return { tipo: "listo", resumen: null };
+		if (previa?.reservada) return { tipo: "espera" };
+		const reserva = {
+			generandoHuella: huella,
+			generandoHasta:
+				sql`clock_timestamp()::timestamp + ${TIMEOUT_GENERACION_MS + MARGEN_RESERVA_MS} * interval '1 millisecond'` as unknown as Date,
+		};
+		// Sin fila previa se crea una fila vacía (huella de «sin resumen» y sin
+		// `contexto_en`: no cuenta como nada guardado) que solo sostiene la reserva.
+		await tx
+			.insert(resumenesIaCobros)
+			.values({
+				casoCobroId,
+				texto: "",
+				etiquetas: [],
+				huella: SIN_RESUMEN,
+				modelo: MODELO_ASISTENTE,
+				...reserva,
+			})
+			.onConflictDoUpdate({
+				target: resumenesIaCobros.casoCobroId,
+				set: reserva,
+			});
+		return { tipo: "reservado" };
+	});
+}
+
+/** Suelta la reserva propia (el modelo falló o el contexto dejó de valer). */
+async function liberarReserva(casoCobroId: string, huella: string) {
+	await db
+		.update(resumenesIaCobros)
+		.set({ generandoHuella: null, generandoHasta: null })
+		.where(
+			and(
+				eq(resumenesIaCobros.casoCobroId, casoCobroId),
+				eq(resumenesIaCobros.generandoHuella, huella),
+			),
+		)
+		.catch((error) =>
+			console.error(`[AsistenteIA] liberar reserva de ${casoCobroId}:`, error),
+		);
+}
+
+/**
+ * Genera y guarda el resumen del caso, sin retener ninguna transacción ni
+ * conexión mientras responde el modelo (hasta `TIMEOUT_GENERACION_MS`):
+ * 1. `reservarGeneracion`: transacción corta bajo el lock del caso;
+ * 2. el modelo, FUERA de toda transacción;
+ * 3. transacción corta bajo el mismo lock que revalida y escribe: no escribe si
+ *   ya hay guardado algo hecho con un contexto más nuevo (un resumen o la marca
+ *   de «sin nada que resumir»), y la invalidación de `obtenerResumenIA` toma el
+ *   mismo lock, así que o ve esta fila ya guardada y la reemplaza, o llega
+ *   antes y esta generación la respeta.
+ * Otro proceso con la misma huella no llama al modelo: espera consultando
+ * (consultas sueltas, sin conexión retenida) a que la fila aparezca.
  */
 export async function generarYGuardar(
 	casoCobroId: string,
@@ -630,64 +731,68 @@ export async function generarYGuardar(
 	/** `instanteBD()` tomado ANTES de leer el contexto que se resume. */
 	inicio?: string,
 ): Promise<ResumenIA | null> {
+	let reservada = false;
 	try {
-		return await db.transaction(async (tx) => {
+		const limite = Date.now() + TIMEOUT_GENERACION_MS + MARGEN_RESERVA_MS;
+		for (;;) {
+			const r = await reservarGeneracion(
+				casoCobroId,
+				huella,
+				sigueVigente,
+				inicio,
+			);
+			if (r.tipo === "listo") return r.resumen;
+			if (r.tipo === "reservado") {
+				reservada = true;
+				break;
+			}
+			if (Date.now() >= limite) return null;
+			await dormir(ESPERA_RESERVA_MS);
+		}
+
+		const { object } = await generateObject({
+			model: google(MODELO_ASISTENTE),
+			schema: resumenSchema,
+			abortSignal: AbortSignal.timeout(TIMEOUT_GENERACION_MS),
+			// El default del SDK son dos reintentos: hasta tres llamadas pagadas.
+			maxRetries: 0,
+			messages: [
+				{ role: "system", content: INSTRUCCIONES },
+				{
+					role: "user",
+					content: `Resuma este caso:\n${JSON.stringify(contexto)}`,
+				},
+			],
+		});
+		const fila = {
+			texto: object.texto.trim(),
+			etiquetas: object.etiquetas
+				.map((e) => e.trim())
+				.filter(Boolean)
+				.slice(0, 4),
+			huella,
+			modelo: MODELO_ASISTENTE,
+			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
+			contextoEn: inicio
+				? (sql`${inicio}::timestamp` as unknown as Date)
+				: null,
+			generandoHuella: null,
+			generandoHasta: null,
+		};
+		const guardada = await db.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
 			if (!sigueVigente()) return null;
-			const [previa] = await tx
-				.select({
-					huella: resumenesIaCobros.huella,
-					texto: resumenesIaCobros.texto,
-					etiquetas: resumenesIaCobros.etiquetas,
-					generadoEn: resumenesIaCobros.generadoEn,
-					// Se ordena por el contexto leído, no por cuándo terminó la
-					// generación: una A lenta que termina después de leída B no es
-					// más nueva que B.
-					masNueva: inicio
-						? sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`
-						: sql<boolean>`false`,
-				})
-				.from(resumenesIaCobros)
-				.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
-				.limit(1);
-			if (previa && previa.huella !== SIN_RESUMEN && previa.huella === huella) {
-				return {
-					texto: previa.texto,
-					etiquetas: previa.etiquetas,
-					generadoEn: previa.generadoEn.toISOString(),
-				};
+			if (inicio) {
+				const [mas] = await tx
+					.select({
+						masNueva: sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`,
+					})
+					.from(resumenesIaCobros)
+					.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
+					.limit(1);
+				if (mas?.masNueva) return null;
 			}
-			// Ya hay guardado algo hecho con un contexto más nuevo que este (otro
-			// proceso o una invalidación): este resumen nacería viejo.
-			if (previa?.masNueva) return null;
-
-			const { object } = await generateObject({
-				model: google(MODELO_ASISTENTE),
-				schema: resumenSchema,
-				abortSignal: AbortSignal.timeout(TIMEOUT_GENERACION_MS),
-				// El default del SDK son dos reintentos: hasta tres llamadas pagadas.
-				maxRetries: 0,
-				messages: [
-					{ role: "system", content: INSTRUCCIONES },
-					{
-						role: "user",
-						content: `Resuma este caso:\n${JSON.stringify(contexto)}`,
-					},
-				],
-			});
-			if (!sigueVigente()) return null;
-			const fila = {
-				texto: object.texto.trim(),
-				etiquetas: object.etiquetas
-					.map((e) => e.trim())
-					.filter(Boolean)
-					.slice(0, 4),
-				huella,
-				modelo: MODELO_ASISTENTE,
-				generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
-				contextoEn: inicio ? (sql`${inicio}::timestamp` as unknown as Date) : null,
-			};
-			const [guardada] = await tx
+			const [g] = await tx
 				.insert(resumenesIaCobros)
 				.values({ casoCobroId, ...fila })
 				.onConflictDoUpdate({
@@ -695,14 +800,21 @@ export async function generarYGuardar(
 					set: fila,
 				})
 				.returning({ generadoEn: resumenesIaCobros.generadoEn });
-			return {
-				texto: fila.texto,
-				etiquetas: fila.etiquetas,
-				generadoEn: guardada.generadoEn.toISOString(),
-			};
+			return g;
 		});
+		if (!guardada) {
+			await liberarReserva(casoCobroId, huella);
+			return null;
+		}
+		reservada = false;
+		return {
+			texto: fila.texto,
+			etiquetas: fila.etiquetas,
+			generadoEn: guardada.generadoEn.toISOString(),
+		};
 	} catch (error) {
 		console.error(`[AsistenteIA] resumen del caso ${casoCobroId}:`, error);
+		if (reservada) await liberarReserva(casoCobroId, huella);
 		return null;
 	}
 }
@@ -800,10 +912,10 @@ export async function obtenerResumenIA(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
 			contextoEn: sql`${inicio}::timestamp` as unknown as Date,
+			generandoHuella: null,
+			generandoHasta: null,
 		};
-		// Sin esperarla: el lock lo puede tener una generación en curso (hasta
-		// `TIMEOUT_GENERACION_MS`) y la ficha no debe esperar por eso.
-		void db
+		await db
 			.transaction(async (tx) => {
 				await tx.execute(lockResumen(casoCobroId));
 				await tx

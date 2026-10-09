@@ -1069,12 +1069,14 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		analysisStatus: "pending",
 	};
 	const DPI = "2978485181201";
-	function prepararEvidenciaBot() {
+	function prepararEvidenciaBot(vigente = true) {
 		filasPorTabla.set(otps, [{ id: "otp-validado", used: true }]);
 		filasPorTabla.set(infornetPersonaCache, [
 			{
 				dpi: DPI,
-				expiraEn: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+				expiraEn: new Date(
+					Date.now() + (vigente ? 30 : -1) * 24 * 60 * 60 * 1000,
+				),
 			},
 		]);
 	}
@@ -1154,6 +1156,33 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 				leadDpi: DPI,
 			},
 		]);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, source: "referral" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.source).toBe("referral");
+		expect(escritura?.valores.buroRevalidacionAl30).toBe(true);
+	});
+
+	test("el origen del bot con evidencia vencida también habilita la reconsulta en 30%", async () => {
+		prepararEvidenciaBot(false);
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				source: null,
+				leadDpi: DPI,
+			},
+		]);
+		filasPorTabla.set(opportunityValidations, []);
 
 		await invocar(
 			crmRouter.updateLead,
@@ -1277,7 +1306,7 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 	});
 
 	test("no corrige el origen del lead después de aprobar análisis sin volver al 30%", async () => {
-		prepararEvidenciaBot();
+		prepararEvidenciaBot(false);
 		filasPorTabla.set(leads, [
 			{ id: LEAD, dpi: DPI, source: "Whatsapp", assignedTo: "vendedor" },
 		]);

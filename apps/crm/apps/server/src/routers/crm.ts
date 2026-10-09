@@ -55,6 +55,7 @@ import {
 } from "../db/schema/documents";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
+import { opportunityValidations } from "../db/schema/validations";
 import {
 	carryForwardAnalysisChecklistVerificationState,
 	hasStaleAnalysisChecklistDocumentState,
@@ -1754,6 +1755,29 @@ export const crmRouter = {
 						updateData.source !== undefined
 							? oportunidadesActivas
 							: oportunidadesActivas.slice(0, 1);
+					const oportunidadesConValidacionTitular = new Set(
+						updateData.source === undefined ||
+							oportunidadesASincronizar.length === 0
+							? []
+							: (
+									await tx
+										.select({
+											opportunityId: opportunityValidations.opportunityId,
+										})
+										.from(opportunityValidations)
+										.where(
+											and(
+												inArray(
+													opportunityValidations.opportunityId,
+													oportunidadesASincronizar.map(
+														(oportunidad) => oportunidad.id,
+													),
+												),
+												isNull(opportunityValidations.coDebtorId),
+											),
+										)
+								).map((validacion) => validacion.opportunityId),
+					);
 					const oportunidadesConExencion = [];
 					for (const oportunidadActiva of oportunidadesASincronizar) {
 						const veniaDelBot =
@@ -1764,18 +1788,7 @@ export const crmRouter = {
 									leadAntesDelUpdate?.source === "Whatsapp"));
 						const pierdeExencionBot =
 							veniaDelBot &&
-							(
-								await resolverExencionPorBot(
-									{
-										opportunityId: oportunidadActiva.id,
-										source: oportunidadActiva.source,
-										leadSource: leadAntesDelUpdate?.source ?? null,
-										leadId: id,
-										leadDpi: updateData.dpi ?? leadAntesDelUpdate?.dpi ?? null,
-									},
-									tx,
-								)
-							).exento;
+							!oportunidadesConValidacionTitular.has(oportunidadActiva.id);
 						if (pierdeExencionBot && oportunidadActiva.porcentaje > 30) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:

@@ -48,6 +48,7 @@ import {
 } from "./controllers/vehicles";
 import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
+import { correrAlertasCasoAntiguasLeidas } from "./jobs/alertas-caso-leidas";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import {
@@ -2138,6 +2139,10 @@ const JOBS_PROGRAMADOS = {
 	 *  Lee las subidas de bucket de anoche, así que sin `moras` corriendo en
 	 *  cartera no tiene nada que reportar. */
 	alertasCobros: true,
+	/** W5 (Workspace): marca como leídas, por destinatario, las alertas del caso
+	 *  cuya última repetición tiene más de 30 días. Solo toca
+	 *  `alertas_caso_leidas_cobros`; no cambia las notificaciones. Idempotente. */
+	alertasCasoAntiguasLeidas: true,
 	/** Interno: espejo de promesas hacia cartera (CB-030, 23:30 GT). Va con
 	 *  promesasYSnapshots — es la misma cadena. */
 	syncPromesasCartera: true,
@@ -2621,6 +2626,14 @@ if (HAY_JOBS_ACTIVOS) {
 			);
 		}
 	}, 20_000);
+
+	// W5: alertas del caso sin repetición en 30 días, leídas por destinatario.
+	// Corre al arrancar y cada 24 h; es idempotente, así que repetirlo no
+	// duplica nada.
+	if (JOBS_PROGRAMADOS.alertasCasoAntiguasLeidas) {
+		void correrAlertasCasoAntiguasLeidas();
+		setInterval(correrAlertasCasoAntiguasLeidas, 24 * 60 * 60 * 1000);
+	}
 
 	// Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
 	// CB-020: también cierra el día evaluando TODAS las promesas de pago activas

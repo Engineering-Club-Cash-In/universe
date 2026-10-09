@@ -306,6 +306,13 @@ export const contactosCobros = pgTable(
 		participanteTipo: text("participante_tipo").$type<
 			"titular" | "codeudor" | "referencia"
 		>(),
+		// W1 (Workspace, migración 0079): dirección de la gestión, nombre de quien
+		// contestó y teléfono al que se contactó. NULL en gestiones anteriores.
+		direccionContacto: text("direccion_contacto").$type<
+			"saliente" | "entrante"
+		>(),
+		participanteNombre: text("participante_nombre"),
+		telefonoContactado: text("telefono_contactado"),
 		// CB-029: "alerta programada" — cuándo avisar al asesor ANTES de que venza
 		// la promesa (default = fecha prometida − 1 día, editable). El job diario
 		// dispara la notificación promesa_por_vencer cuando fecha_alerta = hoy (GT).
@@ -394,6 +401,10 @@ export const contactosCobros = pgTable(
 		check(
 			"contactos_cobros_medio_proximo_contacto_check",
 			sql`${table.medioProximoContacto} IS NULL OR ${table.medioProximoContacto} IN ('llamada', 'whatsapp')`,
+		),
+		check(
+			"contactos_cobros_direccion_contacto_check",
+			sql`${table.direccionContacto} IS NULL OR ${table.direccionContacto} IN ('saliente', 'entrante')`,
 		),
 	],
 );
@@ -1047,6 +1058,47 @@ export const solicitudesDocumentosCobros = pgTable(
 		check(
 			"solicitudes_documentos_estado_check",
 			sql`${table.estado} IN ('pendiente', 'aprobada', 'rechazada')`,
+		),
+	],
+);
+
+// W5 (Workspace, migración 0079) · Alertas del caso marcadas como leídas. Se
+// guarda por GRUPO (tipo de alerta, destinatario, caso): los jobs repiten la
+// misma alerta cada día y hay una fila por destinatario. `leida_hasta` es la
+// repetición más reciente que el usuario vio al marcarla; si un job la vuelve
+// a generar después, esa repetición es más nueva y la alerta reaparece. El job
+// diario de 30 días marca origen 'automatico' (sin `leida_por`).
+export const alertasCasoLeidasCobros = pgTable(
+	"alertas_caso_leidas_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		// Destinatario de las alertas (notifications.assigned_to).
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// cobros_tipo de la alerta, o el título si no tiene tipo.
+		clave: text("clave").notNull(),
+		leidaHasta: timestamp("leida_hasta").notNull(),
+		leidaEn: timestamp("leida_en").notNull().defaultNow(),
+		// Quién la marcó. NULL cuando el job de 30 días la marca sola.
+		leidaPor: text("leida_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		// 'manual' | 'automatico'
+		origen: text("origen").notNull().default("manual"),
+	},
+	(table) => [
+		unique("uq_alertas_caso_leidas_grupo").on(
+			table.casoCobroId,
+			table.userId,
+			table.clave,
+		),
+		check(
+			"alertas_caso_leidas_origen_check",
+			sql`${table.origen} IN ('manual', 'automatico')`,
 		),
 	],
 );

@@ -16,10 +16,22 @@
  *   docs/features/cobros-02/21-plan-backend-ficha-360.md
  */
 
+import { ORPCError } from "@orpc/server";
 import { and, eq, gte, ne, not, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { contactosCobros } from "../db/schema/cobros";
+import {
+	agruparAlertasCaso,
+	claveAlerta,
+	separarLeidas,
+	textoLeidaPor,
+} from "../lib/alertas-caso";
+import {
+	cargarFilasAbiertasCaso,
+	cargarMarcasAlertas,
+	marcarGrupoLeido,
+} from "../lib/alertas-caso-db";
 import { obtenerResumenIA } from "../lib/asistente-ia-cobros";
 import { cargarHistorialCambios } from "../lib/cambios-datos-cliente";
 import { cargarDocumentos } from "../lib/documentos-ficha";
@@ -299,20 +311,45 @@ export const fichaCobrosRouter = {
 		}),
 
 	/**
-	 * Tarea W5 · Alertas del caso marcadas como leídas. `null` = todavía no
-	 * existe (el front muestra «Ver alertas leídas · Pronto»).
+	 * Tarea W5 · Alertas del caso que el usuario marcó como leídas, con cuándo y
+	 * quién (o «Automático» si el job de 30 días las marcó). Solo las que siguen
+	 * sin repetición nueva: una alerta que volvió a generarse sale en
+	 * getAlertasCaso y no aquí.
 	 */
 	getAlertasLeidasCaso: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input, context }): Promise<AlertaLeidaCaso[]> => {
 			await assertAccesoCasoCobro(
 				input.casoCobroId,
 				context.userId,
 				context.userRole,
 			);
-			// TODO(José) · tarea W5: alertas leídas del caso (quién y cuándo),
-			// incluidas las que el job marca solas a los 30 días.
-			return null as AlertaLeidaCaso[] | null;
+			const marcas = await cargarMarcasAlertas(
+				input.casoCobroId,
+				context.userId,
+			);
+			if (marcas.size === 0) return [];
+			const grupos = agruparAlertasCaso(
+				await cargarFilasAbiertasCaso(input.casoCobroId),
+				context.userId,
+			);
+			const { leidas } = separarLeidas(grupos, marcas);
+			return leidas
+				.map((g) => {
+					const marca = marcas.get(g.clave);
+					// separarLeidas solo deja aquí grupos con marca.
+					if (!marca) throw new Error("Grupo leído sin marca");
+					return {
+						id: g.id,
+						titulo: g.titulo,
+						descripcion: g.descripcion,
+						cobrosTipo: g.cobrosTipo,
+						createdAt: g.createdAt.toISOString(),
+						leidaEn: marca.leidaEn.toISOString(),
+						leidaPor: textoLeidaPor(marca),
+					};
+				})
+				.sort((a, b) => b.leidaEn.localeCompare(a.leidaEn));
 		}),
 
 	/**
@@ -335,9 +372,31 @@ export const fichaCobrosRouter = {
 				context.userId,
 				context.userRole,
 			);
-			// TODO(José) · tarea W5: marcar el grupo como leído para este usuario
-			// y sacarlo de getAlertasCaso. Ver
-			// docs/features/cobros-02/16-workspace-backend.md.
-			return { marcada: false as boolean };
+			// El grupo se toma de las filas ABIERTAS del caso: la alerta que se
+			// eligió y todas sus repeticiones (de cualquier destinatario).
+			const filas = await cargarFilasAbiertasCaso(input.casoCobroId);
+			const elegida = filas.find((f) => f.id === input.alertaId);
+			if (!elegida) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "La alerta ya no está abierta en este caso.",
+				});
+			}
+			const clave = claveAlerta(elegida);
+			const fechas = filas
+				.filter((f) => claveAlerta(f) === clave && f.createdAt)
+				.map((f) => (f.createdAt as Date).getTime());
+			if (fechas.length === 0) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "La alerta ya no está abierta en este caso.",
+				});
+			}
+			await marcarGrupoLeido({
+				casoCobroId: input.casoCobroId,
+				userId: context.userId,
+				clave,
+				leidaHasta: new Date(Math.max(...fechas)),
+				leidaPor: context.userId,
+			});
+			return { marcada: true as boolean };
 		}),
 };

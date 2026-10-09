@@ -414,6 +414,8 @@ async function datosDelCorreo(
 	fila: Fila,
 	conexion: Pick<typeof db, "select"> = db,
 ): Promise<{ aseguradora: Aseguradora; datos: DatosCorreoFacturaSeguro }> {
+	// Cliente y vehículo se releen aquí y no se toman de `fila`: bajo el
+	// bloqueo del registro, el correo no mezcla datos de antes y de ahora.
 	const [oportunidad] = await conexion
 		.select({
 			insuranceProvider: opportunities.insuranceProvider,
@@ -421,11 +423,20 @@ async function datosDelCorreo(
 			actualCloseDate: opportunities.actualCloseDate,
 			vin: vehicles.vinNumber,
 			tipoVehiculo: vehicles.vehicleType,
+			leadFirstName: leads.firstName,
+			leadMiddleName: leads.middleName,
+			leadLastName: leads.lastName,
+			leadSecondLastName: leads.secondLastName,
+			vehicleMake: vehicles.make,
+			vehicleModel: vehicles.model,
+			vehicleYear: vehicles.year,
 		})
 		.from(opportunities)
+		.leftJoin(leads, eq(leads.id, opportunities.leadId))
 		.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 		.where(eq(opportunities.id, fila.id))
 		.limit(1);
+	const caso: Fila = oportunidad ? { ...fila, ...oportunidad } : fila;
 
 	// Ya ganada (el caso normal al 90%), el crédito se armó con la cotización
 	// que eligió el cierre, que la guarda en opportunity_close_quotations, y la
@@ -490,15 +501,15 @@ async function datosDelCorreo(
 		datos: {
 			referencia: fila.id.slice(0, 8).toUpperCase(),
 			cliente: nombreCliente(
-				fila.leadFirstName,
-				fila.leadMiddleName,
-				fila.leadLastName,
-				fila.leadSecondLastName,
+				caso.leadFirstName,
+				caso.leadMiddleName,
+				caso.leadLastName,
+				caso.leadSecondLastName,
 			),
 			// Sin vehículo vinculado, el nombre sale de esta misma cotización y no
 			// de la última editada: si no, mezclaría datos de dos cotizaciones.
 			vehiculo: descripcionVehiculo({
-				...fila,
+				...caso,
 				quotationBrand: cotizacion?.vehicleBrand ?? null,
 				quotationLine: cotizacion?.vehicleLine ?? null,
 				quotationModel: cotizacion?.vehicleModel ?? null,

@@ -244,7 +244,7 @@ function OpportunityDocumentsPage() {
 			resumen.faltaConsentimiento
 		)
 			return;
-		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
+		const clave = `${opportunityId}:${resumen.revisionIdentidad}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasBuroIniciadas.current.has(clave)) return;
 		consultasBuroIniciadas.current.add(clave);
 		consultaBuroAutomaticaEnCurso.current = true;
@@ -596,10 +596,12 @@ function OpportunityDocumentsPage() {
 				permitirValidacionManualBuro={
 					resumenBuro.data?.permitirValidacionManualBuro ?? false
 				}
+				permitirValidacionManualRenap={
+					resumenBuro.data?.permitirValidacionManualRenap ?? false
+				}
 				ejecucionExterna={validandoBuroAutomaticamente}
 				actualizarAutomaticamente
 				onEjecucionChange={setValidandoBuroRenap}
-				currentUserRole={userProfile.data?.role}
 			/>
 
 			{/* Buró interno: coincidencias con personas marcadas por cobros (informativo) */}
@@ -762,7 +764,7 @@ function OpportunityDocumentsPage() {
 					}
 				}}
 				opportunity={selectedOpportunityForModal}
-				userRole={userProfile.data?.role}
+				userRole="analyst"
 				readOnly
 				onNavigateToLead={() => {
 					setIsOpportunityModalOpen(false);

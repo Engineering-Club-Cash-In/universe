@@ -631,7 +631,6 @@ export function OpportunityDetailModal({
 								<BuroSummaryCard
 									opportunityId={opportunity.id}
 									open={open}
-									userRole={userRole ?? ""}
 								/>
 							)}
 

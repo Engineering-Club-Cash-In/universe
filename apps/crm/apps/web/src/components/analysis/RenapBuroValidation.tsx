@@ -73,8 +73,8 @@ interface RenapBuroValidationProps {
 	ejecucionExterna?: boolean;
 	/** Avisa a la página cuándo hay una validación en curso, para no dejar aprobar mientras tanto */
 	onEjecucionChange?: (ejecutando: boolean) => void;
-	/** RENAP solo admite validación manual de admin/analyst. */
-	currentUserRole?: string | null;
+	/** Permiso calculado por el servidor para validar RENAP manualmente. */
+	permitirValidacionManualRenap: boolean;
 }
 
 const MOTIVO_MIN_LENGTH = 10;
@@ -514,7 +514,7 @@ export function RenapBuroValidation({
 	permitirReejecucion,
 	permitirValidacionManualBuro,
 	onEjecucionChange,
-	currentUserRole,
+	permitirValidacionManualRenap,
 	expandirDetalleInicialmente = false,
 	actualizarAutomaticamente = false,
 	ejecucionExterna = false,
@@ -533,10 +533,6 @@ export function RenapBuroValidation({
 	const [overrideMotivo, setOverrideMotivo] = useState("");
 	const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
 	const ejecucionEnCurso = isExecuting || ejecucionExterna;
-
-	const puedeOverridearRenap =
-		permitirReejecucion &&
-		(currentUserRole === "admin" || currentUserRole === "analyst");
 
 	const validacionesQuery = useQuery({
 		...orpc.getValidacionesOportunidad.queryOptions({
@@ -952,7 +948,7 @@ export function RenapBuroValidation({
 												Marcar Buró como validado manualmente
 											</Button>
 										)}
-										{renapErrorVigente && puedeOverridearRenap && (
+										{renapErrorVigente && permitirValidacionManualRenap && (
 											<Button
 												variant="outline"
 												size="sm"

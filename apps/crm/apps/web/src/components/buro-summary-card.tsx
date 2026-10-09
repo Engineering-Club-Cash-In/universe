@@ -69,11 +69,9 @@ function EstadoResumenBadge({
 export function BuroSummaryCard({
 	opportunityId,
 	open,
-	userRole,
 }: {
 	opportunityId: string;
 	open: boolean;
-	userRole: string;
 }) {
 	const [detalleAbierto, setDetalleAbierto] = useState(false);
 	const [validacionAutomaticaEnCurso, setValidacionAutomaticaEnCurso] =
@@ -113,7 +111,7 @@ export function BuroSummaryCard({
 			resumen.faltaConsentimiento
 		)
 			return;
-		const clave = `${opportunityId}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
+		const clave = `${opportunityId}:${resumen.revisionIdentidad}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
 		if (consultasIniciadas.current.has(clave)) return;
 		consultasIniciadas.current.add(clave);
 		consultaAutomaticaEnCurso.current = true;
@@ -201,11 +199,13 @@ export function BuroSummaryCard({
 					{detalleAbierto && (
 						<RenapBuroValidation
 							opportunityId={opportunityId}
-							currentUserRole={userRole}
 							permitirReejecucion={permitirReejecucion}
 							ejecucionExterna={validacionAutomaticaEnCurso}
 							permitirValidacionManualBuro={
 								resumen?.permitirValidacionManualBuro ?? false
+							}
+							permitirValidacionManualRenap={
+								resumen?.permitirValidacionManualRenap ?? false
 							}
 							expandirDetalleInicialmente
 							actualizarAutomaticamente

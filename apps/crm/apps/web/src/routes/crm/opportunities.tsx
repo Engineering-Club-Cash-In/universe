@@ -2902,7 +2902,6 @@ function RouteComponent() {
 										<BuroSummaryCard
 											opportunityId={selectedOpportunity.id}
 											open={isDetailsDialogOpen}
-											userRole={userProfile.data.role}
 										/>
 									)}
 

@@ -644,7 +644,6 @@ function AnalysisPage() {
 
 				<TabsContent value="investment">
 					<InvestmentAssignmentSection
-						userRole={userProfile.data?.role}
 						initialOpportunityId={
 							search.stage === "investment" ? search.opportunityId : undefined
 						}
@@ -653,7 +652,6 @@ function AnalysisPage() {
 
 				<TabsContent value="disbursement">
 					<DisbursementSection
-						userRole={userProfile.data?.role}
 						initialOpportunityId={
 							search.stage === "disbursement" ? search.opportunityId : undefined
 						}
@@ -731,7 +729,7 @@ function AnalysisPage() {
 				open={isOpportunityModalOpen}
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
-				userRole={userProfile.data?.role}
+				userRole="analyst"
 				readOnly
 			/>
 
@@ -750,10 +748,8 @@ function AnalysisPage() {
 // Component for disbursement section (90% → 100%)
 function DisbursementSection({
 	initialOpportunityId,
-	userRole,
 }: {
 	initialOpportunityId?: string;
-	userRole?: string | null;
 }) {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
 		initialOpportunityId ?? null,
@@ -1065,7 +1061,7 @@ function DisbursementSection({
 				open={isOpportunityModalOpen}
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
-				userRole={userRole}
+				userRole="analyst"
 				readOnly
 				onNavigateToLead={handleNavigateToLead}
 			/>

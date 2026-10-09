@@ -50,6 +50,7 @@ export function CasoPage() {
 									</p>
 									<p className="mt-0.5 font-medium text-slate-500 text-xs">
 										{casoQuery.data.agencia}
+										{casoQuery.data.vendedor && ` · ${casoQuery.data.vendedor}`}
 									</p>
 									<h1 className="mt-1 font-bold text-slate-900 text-xl">
 										{casoQuery.data.vehiculo ?? casoQuery.data.cliente}

@@ -49,6 +49,8 @@ export const crmAppRouter = {
 	updateCompany: crmRouter.updateCompany,
 	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
 	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
+	getOpportunityAgencySeller: crmRouter.getOpportunityAgencySeller,
+	setOpportunityAgencySeller: crmRouter.setOpportunityAgencySeller,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,
@@ -351,6 +353,7 @@ export const legalAppRouter = {
 export const miscAppRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
+	getAgencySellers: vendorsRouter.getAgencySellers,
 	getVendorById: vendorsRouter.getById,
 	getVendorByVehicleId: vendorsRouter.getByVehicleId,
 	createVendor: vendorsRouter.create,

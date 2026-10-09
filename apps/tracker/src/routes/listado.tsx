@@ -554,6 +554,7 @@ export function ListadoPage() {
 									</p>
 													<p className="mt-1 truncate text-slate-400 text-xs">
 														{caso.agencia}
+														{caso.vendedor && ` · ${caso.vendedor}`}
 													</p>
 												</div>
 												<div className="flex shrink-0 items-center gap-2">

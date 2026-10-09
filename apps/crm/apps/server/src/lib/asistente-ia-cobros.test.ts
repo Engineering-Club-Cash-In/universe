@@ -61,6 +61,17 @@ describe("taparDatosPersonales", () => {
 		).toBe("escribe a [correo] o al [número]");
 		expect(taparDatosPersonales("DPI 2993.06216.0101")).toBe("DPI [número]");
 	});
+	test("tapa identificadores con diagonales y otros separadores", () => {
+		expect(
+			taparDatosPersonales("tel +502 5555/1234 o 5555_1234 o 5555–1234"),
+		).toBe("tel [número] o [número] o [número]");
+		expect(taparDatosPersonales("DPI 2993/06216/0101 y 2993\\06216\\0101")).toBe(
+			"DPI [número] y [número]",
+		);
+		expect(taparDatosPersonales("pagó Q1,500,000.00 el 3/10 y el 12/5")).toBe(
+			"pagó Q1,500,000.00 el 3/10 y el 12/5",
+		);
+	});
 	test("tapa los nombres sin importar mayúsculas ni acentos", () => {
 		expect(
 			taparDatosPersonales("Habló con MARIA jose, esposa de Perez", nombres),

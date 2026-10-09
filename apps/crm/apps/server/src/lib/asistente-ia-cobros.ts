@@ -97,9 +97,15 @@ export interface ContextoIA {
 	gestiones: GestionContexto[];
 }
 
-/** Tapa los números de 8 dígitos o más (teléfonos, DPI, cuentas). */
+/**
+ * Tapa los números de 8 dígitos o más (teléfonos, DPI, cuentas) aunque vengan
+ * separados por espacios, puntos, guiones, diagonales, guion bajo o paréntesis.
+ * La coma no separa: es la de los montos («Q1,500,000.00»). Una fecha completa
+ * con año («03/10/2024») también suma 8 dígitos y se tapa: es preferible a
+ * dejar pasar un teléfono escrito como «55/55/1234».
+ */
 export function taparNumeros(texto: string): string {
-	return texto.replace(/[+(]?\d[\d\s().-]{6,}\d/g, (m) =>
+	return texto.replace(/[+(]?\d[\d\s().\/\\_·–—-]{6,}\d/g, (m) =>
 		m.replace(/\D/g, "").length >= 8 ? "[número]" : m,
 	);
 }

@@ -197,6 +197,50 @@ export async function obtenerSumaComprasMesAnterior(
 }
 
 /**
+ * Fecha efectiva (`fecha_completada`, o `updated_at` si está NULL) de la compra de
+ * cartera MÁS RECIENTE completada en el MES ANTERIOR a `fechaPeriodo`, o null si no
+ * hay. Mismo filtro que `obtenerSumaComprasMesAnterior`.
+ *
+ * El interés proporcional la usa como día de entrada: una ampliación completada en
+ * el mes en curso re-sella `fecha_inicio_participacion` (completeEspejo) y con eso
+ * se pierde el día en que entró la compra del mes anterior.
+ */
+export async function obtenerFechaCompraMesAnterior(
+  credito_id: number,
+  inversionista_id: number,
+  fechaPeriodo: Date,
+): Promise<Date | null> {
+  const mes = fechaPeriodo.getMonth();
+  const anio = fechaPeriodo.getFullYear();
+  const mesAnterior = mes === 0 ? 11 : mes - 1;
+  const anioMesAnterior = mes === 0 ? anio - 1 : anio;
+
+  const inicioMesAnterior = new Date(anioMesAnterior, mesAnterior, 1);
+  const inicioMesActual = new Date(anio, mes, 1);
+
+  const [compra] = await db
+    .select({
+      fecha_completada: compras_credito_inversionista.fecha_completada,
+      updated_at: compras_credito_inversionista.updated_at,
+    })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        eq(compras_credito_inversionista.status, "completado"),
+        gte(fechaEfectivaCompra, inicioMesAnterior),
+        lt(fechaEfectivaCompra, inicioMesActual),
+      ),
+    )
+    .orderBy(desc(fechaEfectivaCompra))
+    .limit(1);
+
+  return compra ? (compra.fecha_completada ?? compra.updated_at) : null;
+}
+
+/**
  * Suma los monto_aportado de las compras de cartera (tipo_operacion = 'compra_cartera',
  * status = 'completado') confirmadas durante el MES ACTUAL de `fechaPeriodo`
  * (filtradas por `updated_at`).

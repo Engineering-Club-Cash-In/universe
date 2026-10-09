@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { APIError } from "better-auth/api";
 import { and, desc, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, QueryBuilder } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { session } from "../db/schema/auth";
@@ -124,8 +124,9 @@ function dentroDeVentanaDeRetencion(desde: Date) {
 
 // Una oportunidad puede tener varias cotizaciones. El tracker solo expone el
 // valor del vehículo de la última cotización actualizada, nunca el valor del
-// crédito de la oportunidad.
-const ultimaCotizacion = db
+// crédito de la oportunidad. Se arma sin `db`: crm.ts importa este módulo y
+// cargarlo no debe depender de la base.
+const ultimaCotizacion = new QueryBuilder()
 	.selectDistinctOn([quotations.opportunityId], {
 		opportunityId: quotations.opportunityId,
 		vehicleBrand: quotations.vehicleBrand,

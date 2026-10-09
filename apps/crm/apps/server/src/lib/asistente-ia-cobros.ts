@@ -610,7 +610,18 @@ async function instanteBD(): Promise<string> {
 	return r.rows[0].t;
 }
 
-async function generarYGuardar(
+/**
+ * Genera y guarda el resumen del caso. TODO ocurre bajo el lock del caso,
+ * tomado ANTES de llamar al modelo y retenido hasta guardar:
+ * - dos procesos con el mismo contexto no lo generan (ni cobran) dos veces: el
+ *   segundo espera el lock, ve la fila ya guardada con su misma huella y la usa;
+ * - una generación más vieja (su `inicio` es anterior a la fila guardada, sea
+ *   un resumen o una marca de «sin nada que resumir») nunca pisa a una más nueva;
+ * - la invalidación de `obtenerResumenIA` toma el mismo lock, así que o ve esta
+ *   fila ya guardada y la reemplaza, o llega antes y esta generación la respeta.
+ * La conexión queda ocupada hasta `TIMEOUT_GENERACION_MS` como máximo.
+ */
+export async function generarYGuardar(
 	casoCobroId: string,
 	contexto: ContextoIA,
 	huella: string,
@@ -620,62 +631,72 @@ async function generarYGuardar(
 	inicio?: string,
 ): Promise<ResumenIA | null> {
 	try {
-		const { object } = await generateObject({
-			model: google(MODELO_ASISTENTE),
-			schema: resumenSchema,
-			abortSignal: AbortSignal.timeout(TIMEOUT_GENERACION_MS),
-			// El default del SDK son dos reintentos: hasta tres llamadas pagadas.
-			maxRetries: 0,
-			messages: [
-				{ role: "system", content: INSTRUCCIONES },
-				{
-					role: "user",
-					content: `Resuma este caso:\n${JSON.stringify(contexto)}`,
-				},
-			],
-		});
-		const fila = {
-			texto: object.texto.trim(),
-			etiquetas: object.etiquetas
-				.map((e) => e.trim())
-				.filter(Boolean)
-				.slice(0, 4),
-			huella,
-			modelo: MODELO_ASISTENTE,
-			generadoEn: new Date(),
-		};
-		// La vigencia se revisa DENTRO del lock del caso, el mismo que toma la
-		// invalidación de `obtenerResumenIA`: o la invalidación ve esta fila ya
-		// guardada y la reemplaza, o esta generación ve que fue invalidada (en
-		// este proceso, por el mapa; en cualquiera, por la fila marcadora
-		// posterior a su inicio) y no escribe.
-		const guardado = await db.transaction(async (tx) => {
+		return await db.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
-			if (!sigueVigente()) return false;
-			if (inicio) {
-				const invalidada = await tx.execute(
-					sql`SELECT 1 FROM resumenes_ia_cobros
-						WHERE caso_cobro_id = ${casoCobroId}
-							AND huella = ${SIN_RESUMEN}
-							AND generado_en > ${inicio}::timestamp`,
-				);
-				if (invalidada.rows.length > 0) return false;
+			if (!sigueVigente()) return null;
+			const [previa] = await tx
+				.select({
+					huella: resumenesIaCobros.huella,
+					texto: resumenesIaCobros.texto,
+					etiquetas: resumenesIaCobros.etiquetas,
+					generadoEn: resumenesIaCobros.generadoEn,
+					masNueva: inicio
+						? sql<boolean>`${resumenesIaCobros.generadoEn} > ${inicio}::timestamp`
+						: sql<boolean>`false`,
+				})
+				.from(resumenesIaCobros)
+				.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
+				.limit(1);
+			if (previa && previa.huella !== SIN_RESUMEN && previa.huella === huella) {
+				return {
+					texto: previa.texto,
+					etiquetas: previa.etiquetas,
+					generadoEn: previa.generadoEn.toISOString(),
+				};
 			}
-			await tx
+			// Algo más nuevo que este contexto ya está guardado (otro proceso o
+			// una invalidación): este resumen nacería viejo.
+			if (previa?.masNueva) return null;
+
+			const { object } = await generateObject({
+				model: google(MODELO_ASISTENTE),
+				schema: resumenSchema,
+				abortSignal: AbortSignal.timeout(TIMEOUT_GENERACION_MS),
+				// El default del SDK son dos reintentos: hasta tres llamadas pagadas.
+				maxRetries: 0,
+				messages: [
+					{ role: "system", content: INSTRUCCIONES },
+					{
+						role: "user",
+						content: `Resuma este caso:\n${JSON.stringify(contexto)}`,
+					},
+				],
+			});
+			if (!sigueVigente()) return null;
+			const fila = {
+				texto: object.texto.trim(),
+				etiquetas: object.etiquetas
+					.map((e) => e.trim())
+					.filter(Boolean)
+					.slice(0, 4),
+				huella,
+				modelo: MODELO_ASISTENTE,
+				generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
+			};
+			const [guardada] = await tx
 				.insert(resumenesIaCobros)
 				.values({ casoCobroId, ...fila })
 				.onConflictDoUpdate({
 					target: resumenesIaCobros.casoCobroId,
 					set: fila,
-				});
-			return true;
+				})
+				.returning({ generadoEn: resumenesIaCobros.generadoEn });
+			return {
+				texto: fila.texto,
+				etiquetas: fila.etiquetas,
+				generadoEn: guardada.generadoEn.toISOString(),
+			};
 		});
-		if (!guardado) return null;
-		return {
-			texto: fila.texto,
-			etiquetas: fila.etiquetas,
-			generadoEn: fila.generadoEn.toISOString(),
-		};
 	} catch (error) {
 		console.error(`[AsistenteIA] resumen del caso ${casoCobroId}:`, error);
 		return null;
@@ -775,7 +796,9 @@ export async function obtenerResumenIA(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: sql`clock_timestamp()::timestamp` as unknown as Date,
 		};
-		await db
+		// Sin esperarla: el lock lo puede tener una generación en curso (hasta
+		// `TIMEOUT_GENERACION_MS`) y la ficha no debe esperar por eso.
+		void db
 			.transaction(async (tx) => {
 				await tx.execute(lockResumen(casoCobroId));
 				await tx

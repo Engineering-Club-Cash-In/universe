@@ -52,6 +52,7 @@ import {
 	resolverContextoCaso,
 } from "../services/referencias-cobros-datos";
 import { contarCuotasAtrasadasUnicas } from "./cobros-plantillas";
+import { sifcoSinAmbiguedad } from "./documentos-ficha";
 import { eqDpi } from "./dpi-lookup";
 import {
 	cargarHistoricoDetallado,
@@ -408,6 +409,20 @@ export function identidadesDelCaso(
 	return identidades;
 }
 
+/**
+ * Con titular desconocido entre varios candidatos, cada uno necesita su nombre
+ * legible; si no, no se manda texto libre (lanza).
+ */
+export function exigirTitularPorIdentidad(
+	titulares: Array<Array<string | null | undefined>>,
+): void {
+	if (titulares.some((t) => palabrasDeNombres(t).size === 0)) {
+		throw new Error(
+			"SIFCO en leads distintos y un candidato sin nombre de titular legible",
+		);
+	}
+}
+
 /** Todos los nombres guardados de una persona del caso (lead + oportunidad). */
 async function nombresDeIdentidad(
 	ctx: ContextoCaso,
@@ -529,6 +544,12 @@ export async function cargarNombresCaso(
 			.from(contactosReferenciasCobros)
 			.where(eq(contactosReferenciasCobros.casoCobroId, casoCobroId)),
 	]);
+	// Sin contrato y con SIFCO en leads distintos no se sabe cuál es el titular
+	// (cartera dice un nombre, no de qué candidato): cada candidato tiene que
+	// tener el suyo legible, o uno sin nombre dejaría sus nombres sin tapar.
+	if (!delContrato && porSifco.length > 0 && !sifcoSinAmbiguedad(porSifco)) {
+		exigirTitularPorIdentidad(porIdentidad.map((n) => n.titular));
+	}
 	return unirNombres(
 		[
 			delContrato?.nombre,
@@ -721,6 +742,10 @@ async function reservarGeneracion(
 			.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
 			.limit(1);
 		if (previa && previa.huella !== SIN_RESUMEN && previa.huella === huella) {
+			// Reutilizar la fila también confirma que el contexto de esta petición
+			// es el vigente: una generación de otra huella, de un contexto más
+			// viejo, que reserve después no debe pisarla.
+			if (inicio) await avanzarContexto(tx, casoCobroId, huella, inicio);
 			return {
 				tipo: "listo",
 				resumen: {
@@ -757,6 +782,34 @@ async function reservarGeneracion(
 	});
 }
 
+/** Ejecutor de consultas: la conexión o una transacción. */
+type Ejecutor = Pick<typeof db, "update">;
+
+/**
+ * Avanza el `contexto_en` de la fila guardada con esa huella al instante de
+ * lectura dado, si es más nuevo. Va siempre bajo el lock del caso.
+ */
+async function avanzarContexto(
+	ejecutor: Ejecutor,
+	casoCobroId: string,
+	huella: string,
+	inicio: string,
+): Promise<void> {
+	await ejecutor
+		.update(resumenesIaCobros)
+		.set({ contextoEn: sql`${inicio}::timestamp` as unknown as Date })
+		.where(
+			and(
+				eq(resumenesIaCobros.casoCobroId, casoCobroId),
+				eq(resumenesIaCobros.huella, huella),
+				or(
+					isNull(resumenesIaCobros.contextoEn),
+					sql`${resumenesIaCobros.contextoEn} < ${inicio}::timestamp`,
+				),
+			),
+		);
+}
+
 /**
  * Deja constancia, en la BD y bajo el lock del caso, de que el contexto leído
  * en `inicio` es el del resumen guardado con esa huella: una generación de un
@@ -771,19 +824,7 @@ export async function confirmarContextoVigente(
 	await db
 		.transaction(async (tx) => {
 			await tx.execute(lockResumen(casoCobroId));
-			await tx
-				.update(resumenesIaCobros)
-				.set({ contextoEn: sql`${inicio}::timestamp` as unknown as Date })
-				.where(
-					and(
-						eq(resumenesIaCobros.casoCobroId, casoCobroId),
-						eq(resumenesIaCobros.huella, huella),
-						or(
-							isNull(resumenesIaCobros.contextoEn),
-							sql`${resumenesIaCobros.contextoEn} < ${inicio}::timestamp`,
-						),
-					),
-				);
+			await avanzarContexto(tx, casoCobroId, huella, inicio);
 		})
 		.catch((error) =>
 			console.error(

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
 	armarContextoIA,
 	asistenteActivo,
+	exigirTitularPorIdentidad,
 	generarUnaVez,
 	hayQueResumir,
 	huellaContexto,
@@ -201,6 +202,26 @@ describe("identidadesDelCaso", () => {
 		expect(identidadesDelCaso(id(null, null), null, [])).toEqual([
 			id(null, null),
 		]);
+	});
+});
+
+describe("exigirTitularPorIdentidad", () => {
+	test("pasa si todos los candidatos tienen nombre legible", () => {
+		expect(() =>
+			exigirTitularPorIdentidad([
+				["Ana", "Gómez"],
+				["Luis", null],
+			]),
+		).not.toThrow();
+	});
+	test("lanza si un candidato no tiene nombre aunque otro sí", () => {
+		expect(() =>
+			exigirTitularPorIdentidad([
+				["Ana", "Gómez"],
+				[null, "  "],
+			]),
+		).toThrow();
+		expect(() => exigirTitularPorIdentidad([["Ana"], []])).toThrow();
 	});
 });
 

@@ -42,6 +42,9 @@ let casoBajoBloqueo: Record<string, unknown> | undefined;
 // Lo que devuelve una relectura sin bloqueo después de la primera lectura.
 let casoReleido: Record<string, unknown> | undefined;
 let lecturasCaso = 0;
+// Membresías que devuelve una relectura después de la de la sesión.
+let membresiasVigentes: typeof membresias | undefined;
+let lecturasMembresias = 0;
 // Cotización que guardó el cierre, y el filtro con el que se buscó la cotización.
 let cotizacionDelCierre: Array<{ quotationId: string }> = [];
 let filtroCotizacion: unknown;
@@ -100,7 +103,13 @@ const dbFalsa = {
 						banned: false,
 					},
 				]);
-			if (tabla === partnerMembers) return cadena(() => membresias);
+			if (tabla === partnerMembers)
+				return cadena(() => {
+					lecturasMembresias++;
+					return membresiasVigentes && lecturasMembresias > 1
+						? membresiasVigentes
+						: membresias;
+				});
 			if (tabla === partnerAccounts)
 				return cadena(() => [{ passwordChangedAt: new Date("2026-01-01") }]);
 			if (tabla === opportunities)
@@ -299,6 +308,8 @@ beforeEach(() => {
 	documentosConKey = [];
 	casoReleido = undefined;
 	lecturasCaso = 0;
+	membresiasVigentes = undefined;
+	lecturasMembresias = 0;
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
@@ -407,6 +418,14 @@ describe("subirFacturaSeguro", () => {
 		await expect(subir()).rejects.toThrow();
 		expect(borradosR2).toEqual([KEY]);
 		expect(insertados).toHaveLength(0);
+	});
+
+	test("si al socio le quitaron la agencia mientras subía, no registra ni envía", async () => {
+		membresiasVigentes = [];
+		await expect(subir()).rejects.toMatchObject({ code: "FORBIDDEN" });
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+		expect(borradosR2).toEqual([KEY]);
 	});
 
 	test("los datos del correo se leen después de subir, con las cotizaciones FOR SHARE", async () => {

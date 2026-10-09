@@ -827,6 +827,8 @@ describe("previsualizarFacturaSeguroDesdeCrm", () => {
 
 describe("enviarFacturaSeguroDesdeCrm", () => {
 	const KEY_CRM = `opportunities/${ID}/999-crm-factura.pdf`;
+	// La copia que sube el server con los bytes validados.
+	const COPIA = `opportunities/${ID}/123-abc-factura-crm.pdf`;
 	const enviar = (nombre = "factura-crm.pdf") =>
 		enviarFacturaSeguroDesdeCrm({
 			opportunityId: ID,
@@ -869,8 +871,25 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 			false,
 		);
 		expect(correos[0]).toMatchObject({
-			archivo: { key: KEY_CRM, nombre: "factura-crm.pdf" },
+			archivo: { key: COPIA, nombre: "factura-crm.pdf" },
 		});
+	});
+
+	test("manda una copia de los bytes validados: la URL firmada de la subida ya no alcanza lo que sale", async () => {
+		await enviar();
+		expect(subidosR2).toEqual([{ key: COPIA, mime: "application/pdf" }]);
+		expect(actualizados).toContainEqual(
+			expect.objectContaining({ filePath: COPIA, mimeType: "application/pdf" }),
+		);
+		expect(borradosR2).toEqual([KEY_CRM]);
+	});
+
+	test("un PDF subido como .docx queda como .pdf en el documento, que es lo que lee el reintento", async () => {
+		await enviar("factura.docx");
+		expect(actualizados).toContainEqual(
+			expect.objectContaining({ originalName: "factura.pdf" }),
+		);
+		expect(correos[0]).toMatchObject({ archivo: { nombre: "factura.pdf" } });
 	});
 
 	test("fuera de formalización final, sin agencia o con factura ya registrada: no se envía", async () => {
@@ -906,6 +925,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		});
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
+		expect(subidosR2).toHaveLength(0);
 	});
 
 	test("el nombre del adjunto lleva la extensión del tipo real", async () => {
@@ -924,6 +944,8 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		});
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
+		// Se borra la copia y el documento sigue con su archivo.
+		expect(borradosR2).toEqual([COPIA]);
 	});
 
 	test("sin destinatarios: queda registrada como sin destinatario y no se manda correo", async () => {

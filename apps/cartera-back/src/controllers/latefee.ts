@@ -2835,12 +2835,15 @@ export async function condonarMoraParcial({
   motivo,
   usuario_email,
   referencia_externa,
+  cancelada,
 }: {
   credito_id: number;
   monto: string;
   motivo: string;
   usuario_email: string;
   referencia_externa: string;
+  /** El cliente cortó la llamada (el CRM la dio por perdida): no se escribe. */
+  cancelada?: () => boolean;
 }) {
   const startedAt = safeNow();
   try {
@@ -2850,21 +2853,22 @@ export async function condonarMoraParcial({
       return { success: false, kind: "monto_invalido" as const, message: "[ERROR] El monto a rebajar debe ser mayor que cero" };
     }
 
-    const [user] = await db
-      .select({ id: platform_users.id })
-      .from(platform_users)
-      .where(eq(platform_users.email, usuario_email));
-    if (!user) {
-      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
-      return { success: false, kind: "usuario_no_encontrado" as const, message: "[ERROR] Usuario no encontrado" };
-    }
-
     // Candado por crédito: el mismo que toman los pagos (pg_advisory_lock(8765, credito_id)).
     // Sin él, la rebaja puede calcular el reparto con un pagado viejo mientras se valida un pago.
     // Orden: candado primero, transacción después (nunca al revés).
+    // Todo lo que precede a una escritura (incluida la búsqueda del usuario) corre
+    // DENTRO del candado con plazo: un handler vencido no puede escribir.
     const result = await withPaymentAdvisoryLock(credito_id, () => db.transaction(async (tx) => {
       // Tampoco se espera sin límite un candado de fila: el CRM da por perdida la llamada.
       await tx.execute(sql`SET LOCAL lock_timeout = '30s'`);
+      const [user] = await tx
+        .select({ id: platform_users.id })
+        .from(platform_users)
+        .where(eq(platform_users.email, usuario_email));
+      if (!user) return { kind: "usuario_no_encontrado" as const };
+      // Con el lock ya en mano y antes de escribir: si el cliente cortó la llamada,
+      // el CRM puede estar rechazando la solicitud; este handler no la confirma.
+      if (cancelada?.()) return { kind: "ocupado" as const };
       // Mismo orden de candados que condonarMora: creditos primero, mora después.
       const [creditoLocked] = await tx
         .select({ credito_id: creditos.credito_id, capital: creditos.capital, statusCredit: creditos.statusCredit })
@@ -2981,6 +2985,10 @@ export async function condonarMoraParcial({
       throw error;
     });
 
+    if (result.kind === "usuario_no_encontrado") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
+      return { success: false, kind: "usuario_no_encontrado" as const, message: "[ERROR] Usuario no encontrado" };
+    }
     if (result.kind === "ocupado") {
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
       return { success: false, kind: "ocupado" as const, message: "[ERROR] El crédito está ocupado con otra operación: la rebaja no se aplicó. Intente de nuevo" };

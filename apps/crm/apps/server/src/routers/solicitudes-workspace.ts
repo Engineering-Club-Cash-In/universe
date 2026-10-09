@@ -42,6 +42,65 @@ const MONTO_REGEX = /^\d+(\.\d{1,2})?$/;
 const solicitante = alias(user, "solicitante");
 const decisor = alias(user, "decisor");
 
+/**
+ * Una solicitud en `error_aplicacion` puede ser ambigua: tras un timeout cartera
+ * pudo descontar igual. Pregunta a cartera por la referencia y, si ya estaba
+ * aplicada, la cierra como `aplicada` (conserva al aprobador guardado, limpia el
+ * error transitorio y avisa al asesor). `true` = ya estaba aplicada. Si cartera
+ * no confirma, no se afirma nada: error 503 y la decisión no avanza.
+ */
+async function conciliarSiYaAplicada(
+	solicitud: NonNullable<Awaited<ReturnType<typeof leerSolicitudRebaja>>>,
+	creditoId: number,
+	decididoPorAhora: string,
+): Promise<boolean> {
+	let previa: Awaited<
+		ReturnType<typeof carteraBackClient.consultarRebajaMoraParcial>
+	>;
+	try {
+		previa = await carteraBackClient.consultarRebajaMoraParcial(
+			creditoId,
+			solicitud.id,
+		);
+	} catch (error) {
+		console.error("[rebaja-mora] no se confirmó en cartera:", error);
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"No se pudo confirmar en cartera si la rebaja ya se aplicó. Intente de nuevo en un momento.",
+		});
+	}
+	if (!previa.aplicada) return false;
+	const [conciliada] = await db
+		.update(solicitudesRebajaMoraCobros)
+		.set({
+			estado: "aplicada",
+			montoAplicado: solicitud.montoSolicitado,
+			carteraCondonacionId: previa.condonacionId,
+			// El error transitorio que la dejó en error_aplicacion ya no aplica.
+			notaResolucion: null,
+		})
+		.where(
+			and(
+				eq(solicitudesRebajaMoraCobros.id, solicitud.id),
+				eq(solicitudesRebajaMoraCobros.estado, "error_aplicacion"),
+			),
+		)
+		.returning({ id: solicitudesRebajaMoraCobros.id });
+	if (conciliada) {
+		await avisarDecisionRebaja({
+			solicitudId: solicitud.id,
+			casoCobroId: solicitud.casoCobroId,
+			decision: "aplicada",
+			solicitanteId: solicitud.solicitadoPor,
+			// Quien aprobó fue el supervisor guardado, no quien decide ahora.
+			decidioPorId: solicitud.resueltoPor ?? decididoPorAhora,
+			monto: solicitud.montoSolicitado,
+			nota: null,
+		});
+	}
+	return true;
+}
+
 /** Filas de la bandeja de rebajas (abiertas primero) con el nombre del cliente. */
 async function listarSolicitudesRebaja(filtros: SQL[], limite: number) {
 	const filas = await db
@@ -323,50 +382,13 @@ export const solicitudesWorkspaceRouter = {
 							message: "No se encontró el crédito en cartera para este caso.",
 						});
 					}
-					let previa: Awaited<
-						ReturnType<typeof carteraBackClient.consultarRebajaMoraParcial>
-					>;
-					try {
-						previa = await carteraBackClient.consultarRebajaMoraParcial(
+					if (
+						await conciliarSiYaAplicada(
+							solicitud,
 							casoRechazo.creditoId,
-							solicitud.id,
-						);
-					} catch (error) {
-						console.error("[rebaja-mora] no se confirmó en cartera:", error);
-						throw new ORPCError("SERVICE_UNAVAILABLE", {
-							message:
-								"No se pudo confirmar en cartera si la rebaja ya se aplicó. Intente rechazar de nuevo en un momento.",
-						});
-					}
-					if (previa.aplicada) {
-						const [conciliada] = await db
-							.update(solicitudesRebajaMoraCobros)
-							.set({
-								estado: "aplicada",
-								montoAplicado: solicitud.montoSolicitado,
-								carteraCondonacionId: previa.condonacionId,
-								// El error transitorio que la dejó en error_aplicacion ya no aplica.
-								notaResolucion: null,
-							})
-							.where(
-								and(
-									eq(solicitudesRebajaMoraCobros.id, solicitud.id),
-									eq(solicitudesRebajaMoraCobros.estado, "error_aplicacion"),
-								),
-							)
-							.returning({ id: solicitudesRebajaMoraCobros.id });
-						if (conciliada) {
-							await avisarDecisionRebaja({
-								solicitudId: solicitud.id,
-								casoCobroId: solicitud.casoCobroId,
-								decision: "aplicada",
-								solicitanteId: solicitud.solicitadoPor,
-								// Quien aprobó fue el supervisor guardado, no quien intentó rechazar.
-								decidioPorId: solicitud.resueltoPor ?? context.userId,
-								monto: solicitud.montoSolicitado,
-								nota: null,
-							});
-						}
+							context.userId,
+						)
+					) {
 						throw new ORPCError("CONFLICT", {
 							message:
 								"Cartera ya había aplicado esta rebaja: la solicitud quedó como aplicada y no se puede rechazar.",
@@ -419,6 +441,16 @@ export const solicitudesWorkspaceRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "No se encontró el crédito en cartera para este caso.",
 				});
+			}
+
+			// Un reintento desde error_aplicacion puede encontrar la rebaja ya aplicada
+			// (se perdió la respuesta): con la mora ya rebajada, la validación de
+			// abajo la rechazaría. Se concilia primero con la referencia.
+			if (
+				solicitud.estado === "error_aplicacion" &&
+				(await conciliarSiYaAplicada(solicitud, caso.creditoId, context.userId))
+			) {
+				return { decision: "aplicada" as const, moraNueva: "" };
 			}
 
 			// La mora pudo bajar desde que se pidió (pagó, o se aplicó otra rebaja).

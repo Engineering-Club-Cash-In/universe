@@ -196,7 +196,7 @@ export const morasRouter = new Elysia()
    * Autoriza la cuenta de servicio del CRM (que manda el correo de quien aprobó
    * en `usuario_email`) o un ADMIN de cartera, que actúa por sí mismo.
    */
-  .post("/mora/condonar-parcial", async ({ body, user, set }: any) => {
+  .post("/mora/condonar-parcial", async ({ body, user, set, request }: any) => {
     const esCrm = esCuentaDeServicioCRM(user);
     if (!esCrm && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
     const actor = esCrm ? body.usuario_email : (user?.email ?? body.usuario_email);
@@ -211,6 +211,7 @@ export const morasRouter = new Elysia()
         motivo: body.motivo,
         usuario_email: actor,
         referencia_externa: body.referencia_externa,
+        cancelada: () => request?.signal?.aborted === true,
       });
       if (result.success) {
         set.status = 200;

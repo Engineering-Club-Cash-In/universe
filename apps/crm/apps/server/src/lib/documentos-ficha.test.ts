@@ -5,6 +5,7 @@ import {
 	construirMensajeDocumento,
 	decidirOportunidadMensaje,
 	decidirVehiculoCaso,
+	nombresDeActores,
 } from "./documentos-ficha";
 
 describe("armarDocumentos", () => {
@@ -172,5 +173,25 @@ describe("decidirOportunidadMensaje", () => {
 				vehiculoOportunidad: "v-viejo",
 			}),
 		).toEqual({ usarOportunidad: false, usarNombreOportunidad: true });
+	});
+});
+
+describe("nombresDeActores", () => {
+	test("pendiente sin resolutor: sigue siendo null", () => {
+		expect(
+			nombresDeActores({ estado: "pendiente", solicitadoPor: "Ana", resueltoPor: null }),
+		).toEqual({ solicitadoPor: "Ana", resueltoPor: null });
+	});
+	test("resuelta sin resolutor: el usuario fue eliminado", () => {
+		for (const estado of ["aprobada", "rechazada"]) {
+			expect(
+				nombresDeActores({ estado, solicitadoPor: "Ana", resueltoPor: null }),
+			).toEqual({ solicitadoPor: "Ana", resueltoPor: "Usuario eliminado" });
+		}
+	});
+	test("solicitante eliminado y resolutor vigente", () => {
+		expect(
+			nombresDeActores({ estado: "aprobada", solicitadoPor: null, resueltoPor: "Luis" }),
+		).toEqual({ solicitadoPor: "Usuario eliminado", resueltoPor: "Luis" });
 	});
 });

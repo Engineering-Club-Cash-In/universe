@@ -569,6 +569,25 @@ export async function solicitarDocumento(params: {
 	return fila;
 }
 
+const USUARIO_ELIMINADO = "Usuario eliminado";
+
+/**
+ * Quién pidió y quién resolvió. Las FK son `ON DELETE SET NULL`: un `null`
+ * donde tiene que haber alguien es un usuario eliminado. Quien pidió siempre
+ * existió; quien resolvió solo si la solicitud ya no está pendiente.
+ */
+export function nombresDeActores(f: {
+	estado: string;
+	solicitadoPor: string | null;
+	resueltoPor: string | null;
+}): { solicitadoPor: string; resueltoPor: string | null } {
+	return {
+		solicitadoPor: f.solicitadoPor ?? USUARIO_ELIMINADO,
+		resueltoPor:
+			f.resueltoPor ?? (f.estado === "pendiente" ? null : USUARIO_ELIMINADO),
+	};
+}
+
 const solicitante = alias(user, "solicitante");
 const resolutor = alias(user, "resolutor");
 
@@ -614,7 +633,7 @@ export async function listarSolicitudesDocumentos(filtro: {
 		.limit(filtro.limite);
 	return filas.map((f) => ({
 		...f,
-		solicitadoPor: f.solicitadoPor ?? "Usuario eliminado",
+		...nombresDeActores(f),
 		documento: nombreDocumento(f.clave),
 	}));
 }

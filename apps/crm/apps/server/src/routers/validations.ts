@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -208,6 +209,27 @@ export const validationsRouter = {
 					buroRevalidacionAl30: oportunidad.buroRevalidacionAl30,
 					tipo: "buro",
 				}),
+				permitirValidacionManualRenap: puedeMarcarValidacionManualDetalleBuro({
+					userRole: context.userRole,
+					userId: context.userId,
+					assignedTo: oportunidad.assignedTo,
+					porcentaje: oportunidad.porcentaje,
+					status: oportunidad.status,
+					buroRevalidacionAl30: oportunidad.buroRevalidacionAl30,
+					tipo: "renap",
+				}),
+				// Cambia cuando cambia el DPI de algún sujeto, sin exponer los DPI.
+				revisionIdentidad: createHash("sha256")
+					.update(
+						[
+							estado.dpi ?? "",
+							...estado.cofirmantes.map(
+								(cofirmante) => `${cofirmante.coDebtorId}:${cofirmante.dpi}`,
+							),
+						].join("|"),
+					)
+					.digest("hex")
+					.slice(0, 16),
 				exento: estado.exento,
 				faltaDpi: estado.faltaDpi,
 				faltaConsentimiento: estado.faltaConsentimiento,

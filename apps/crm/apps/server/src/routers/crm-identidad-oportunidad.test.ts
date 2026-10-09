@@ -900,6 +900,40 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 		expect(escrituras).toEqual([]);
 	});
 
+	test("la validación manual de RENAP la decide el servidor y la revisión sigue al DPI", async () => {
+		const leer = async (role: string, dpi: string) => {
+			filasPorTabla.set(opportunities, [
+				{
+					id: OPORTUNIDAD,
+					assignedTo: "asesor-asignado",
+					status: "open",
+					porcentaje: 20,
+					source: "web",
+					leadSource: "web",
+					leadDpi: dpi,
+					creditType: "autocompra",
+				},
+			]);
+			filasPorTabla.set(opportunityValidations, []);
+			return (await invocar(
+				validationsRouter.getResumenBuroOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("asesor-asignado", role),
+			)) as {
+				permitirValidacionManualRenap: boolean;
+				revisionIdentidad: string;
+			};
+		};
+		const supervisora = await leer("sales_supervisor", "2978485181201");
+		const analista = await leer("analyst", "2978485181201");
+		const otroDpi = await leer("analyst", "1234567890101");
+		expect(supervisora.permitirValidacionManualRenap).toBe(false);
+		expect(analista.permitirValidacionManualRenap).toBe(true);
+		expect(analista.revisionIdentidad).toBe(supervisora.revisionIdentidad);
+		expect(otroDpi.revisionIdentidad).not.toBe(analista.revisionIdentidad);
+		expect(escrituras).toEqual([]);
+	});
+
 	test("la acción que puede consultar Infornet rechaza a Jurídico", async () => {
 		filasPorTabla.set(opportunities, [
 			{

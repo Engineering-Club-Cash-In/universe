@@ -32,6 +32,8 @@ let facturaPrevia: Array<Record<string, unknown>> = [];
 // Lo que devuelve R2 para un archivo ya subido (la factura desde el CRM).
 let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
 const topesLecturaR2: Array<number | undefined> = [];
+// Otros documentos que usan la key original de una subida del CRM.
+let documentosConKey: Array<{ id: string }> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
@@ -125,6 +127,7 @@ const dbFalsa = {
 				]);
 			if (tabla === insuranceInvoiceSubmissions)
 				return cadena(() => facturaPrevia);
+			if (tabla === opportunityDocuments) return cadena(() => documentosConKey);
 			if (tabla === companies || tabla === opportunityStageHistory)
 				return cadena(() => []);
 			throw new Error("Tabla no mockeada en tracker.factura-seguro.test.ts");
@@ -286,6 +289,7 @@ beforeEach(() => {
 	actualizados.length = 0;
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
+	documentosConKey = [];
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
@@ -924,6 +928,13 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(subidosR2).toHaveLength(0);
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
+	});
+
+	test("si otro documento usa la key original, no se borra", async () => {
+		documentosConKey = [{ id: "doc-anterior" }];
+		await enviar();
+		expect(correos).toHaveLength(1);
+		expect(borradosR2).toEqual([]);
 	});
 
 	test("un PDF subido como .docx queda como .pdf en el documento, que es lo que lee el reintento", async () => {

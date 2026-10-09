@@ -6,6 +6,7 @@ import {
 	companies,
 	leads,
 	opportunities,
+	opportunityCloseQuotations,
 	quotations,
 	vehicles,
 } from "../db/schema";
@@ -522,7 +523,28 @@ export const quotationsRouter = {
 				});
 			}
 
-			await db.delete(quotations).where(eq(quotations.id, input.quotationId));
+			// La del cierre no se borra: la cascada se llevaría su registro y la
+			// factura del seguro saldría con otra cotización. El FOR UPDATE frena
+			// un cierre simultáneo que la esté registrando.
+			await db.transaction(async (tx) => {
+				await tx
+					.select({ id: quotations.id })
+					.from(quotations)
+					.where(eq(quotations.id, input.quotationId))
+					.for("update");
+				const [delCierre] = await tx
+					.select({ opportunityId: opportunityCloseQuotations.opportunityId })
+					.from(opportunityCloseQuotations)
+					.where(eq(opportunityCloseQuotations.quotationId, input.quotationId))
+					.limit(1);
+				if (delCierre) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"No se puede eliminar la cotización con la que se cerró el crédito",
+					});
+				}
+				await tx.delete(quotations).where(eq(quotations.id, input.quotationId));
+			});
 
 			return { success: true };
 		}),

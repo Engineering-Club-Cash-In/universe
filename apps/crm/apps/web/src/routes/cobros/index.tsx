@@ -312,6 +312,7 @@ function RouteComponent() {
 	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>("cobros/capitalMin", undefined);
 	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>("cobros/capitalMax", undefined);
 	const [excluirPagados, setExcluirPagados] = usePersistedState<boolean>("cobros/excluirPagados", false);
+	const [soloConCuentaNexa, setSoloConCuentaNexa] = usePersistedState<boolean>("cobros/soloConCuentaNexa", false);
 
 	const hasActiveFilters =
 		filtroTemporal !== "hoy" ||
@@ -322,7 +323,8 @@ function RouteComponent() {
 		capitalMin !== undefined ||
 		capitalMax !== undefined ||
 		dateRange !== undefined ||
-		excluirPagados;
+		excluirPagados ||
+		soloConCuentaNexa;
 	const resetFilters = () => {
 		setFiltroTemporal("hoy");
 		setFiltroEtapa(null);
@@ -332,6 +334,7 @@ function RouteComponent() {
 		setCapitalMin(undefined);
 		setCapitalMax(undefined);
 		setExcluirPagados(false);
+		setSoloConCuentaNexa(false);
 		setDateRange(undefined);
 		setPickerRange(undefined);
 		setFechaError(null);
@@ -465,6 +468,7 @@ function RouteComponent() {
 				capitalMin,
 				capitalMax,
 				excluirPagadosMes: excluirPagados || undefined,
+				soloConCuentaNexa: soloConCuentaNexa || undefined,
 			},
 		}),
 		enabled: !!session,
@@ -1059,6 +1063,7 @@ function RouteComponent() {
 									fechaDesde,
 									fechaHasta,
 									excluirPagadosMes: excluirPagados || undefined,
+									soloConCuentaNexa: soloConCuentaNexa || undefined,
 								}}
 								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
 								totalDestinatarios={totalCreditos}
@@ -1203,6 +1208,16 @@ function RouteComponent() {
 										>
 											Ocultar los que ya pagaron su cuota
 										</Button>
+										<Button
+											variant={soloConCuentaNexa ? "default" : "outline"}
+											size="sm"
+											onClick={() => {
+												setSoloConCuentaNexa(!soloConCuentaNexa);
+												setPage(1);
+											}}
+										>
+											Solo con cuenta Nexa
+										</Button>
 									</div>
 								</div>
 
@@ -1266,7 +1281,7 @@ function RouteComponent() {
 											<X className="mr-1 h-3 w-3" />
 											Limpiar filtros
 											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-												{[filtroTemporal !== "hoy", filtroEtapa !== null, filtroEtiquetas.length > 0, filterValue !== "", sifcoFilterValue !== "", capitalMin !== undefined, capitalMax !== undefined, dateRange !== undefined, excluirPagados].filter(Boolean).length}
+												{[filtroTemporal !== "hoy", filtroEtapa !== null, filtroEtiquetas.length > 0, filterValue !== "", sifcoFilterValue !== "", capitalMin !== undefined, capitalMax !== undefined, dateRange !== undefined, excluirPagados, soloConCuentaNexa].filter(Boolean).length}
 											</Badge>
 										</Button>
 									</div>

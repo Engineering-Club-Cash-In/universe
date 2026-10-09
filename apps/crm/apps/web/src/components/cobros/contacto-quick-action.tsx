@@ -133,6 +133,7 @@ export function ContactoQuickAction({
 				incrementoMaximoMensualMora={d.incrementoMaximoMensualMora || ""}
 				aseguradora={d.aseguradora || ""}
 				cabinaSeguro={d.cabinaSeguro || ""}
+				cuentaNexa={d.cuentaNexa || ""}
 			/>
 		</span>
 	);

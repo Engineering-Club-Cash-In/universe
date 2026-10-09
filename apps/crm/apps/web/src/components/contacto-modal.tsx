@@ -64,6 +64,8 @@ import {
 	mensajeSmsEditable,
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereTelefonoAsesor,
+	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -101,6 +103,8 @@ interface ContactoModalProps {
 	incrementoMaximoMensualMora?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
+	/** Código de pago Nexa del crédito; vacío = sin cuenta (ver VariablesPlantilla). */
+	cuentaNexa?: string;
 }
 
 export function ContactoModal({
@@ -129,6 +133,7 @@ export function ContactoModal({
 	incrementoMaximoMensualMora = "",
 	aseguradora = "",
 	cabinaSeguro = "",
+	cuentaNexa = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -183,6 +188,7 @@ export function ContactoModal({
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
 			cabinaSeguro: cabinaSeguro || undefined,
+			cuentaNexa,
 		}),
 		[
 			clienteNombre,
@@ -200,6 +206,7 @@ export function ContactoModal({
 			incrementoMaximoMensualMora,
 			aseguradora,
 			cabinaSeguro,
+			cuentaNexa,
 		],
 	);
 
@@ -379,6 +386,15 @@ export function ContactoModal({
 		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
 			toast.error(
 				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
+		// Plantillas sin aviso no-reply que igual remiten al asesor ("Nueva cuenta
+		// exclusiva Nexa"): el mensaje ya viene interpolado, así que se valida
+		// contra la plantilla elegida; sin teléfono saldría "con tu ejecutivo al .".
+		if (plantillaRequiereTelefonoAsesor(plantillaId) && !telefonoAsesorLimpio) {
+			toast.error(
+				"No se puede enviar esta plantilla porque el asesor no tiene teléfono registrado",
 			);
 			return;
 		}
@@ -645,7 +661,7 @@ export function ContactoModal({
 											<SelectValue placeholder="Seleccionar plantilla..." />
 										</SelectTrigger>
 										<SelectContent>
-											{PLANTILLAS_MENSAJES.map((p) => (
+											{plantillasDisponibles(cuentaNexa).map((p) => (
 												<SelectItem key={p.id} value={p.id}>
 													{p.nombre}
 												</SelectItem>

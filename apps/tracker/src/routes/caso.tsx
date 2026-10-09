@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Car, Loader2 } from "lucide-react";
 import { BarraPasos } from "@/components/barra-pasos";
+import { DocumentosCaso } from "@/components/documentos-caso";
 import { ESTADOS, formatearFecha, formatearMonto } from "@/lib/pasos";
 import { cn } from "@/lib/utils";
 import { esErrorDeAcceso, orpc } from "@/utils/orpc";
@@ -108,6 +109,8 @@ export function CasoPage() {
 								</p>
 							)}
 						</section>
+
+						<DocumentosCaso caso={casoQuery.data} />
 
 						<section className="rounded-xl border border-slate-200 bg-white p-5">
 							<h2 className="mb-4 font-semibold text-slate-900">

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
 	ChevronLeft,
 	ChevronRight,
+	FileWarning,
 	Loader2,
 	LogOut,
 	Search,
@@ -12,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { logo } from "@/assets";
 import { BarraPasos } from "@/components/barra-pasos";
 import { authClient, cerrarSesion } from "@/lib/auth-client";
+import { tieneDocumentosPendientes } from "@/lib/documentos";
 import {
 	guardarFiltroPeriodo,
 	leerFiltroPeriodo,
@@ -97,6 +99,7 @@ export function ListadoPage() {
 	const [busqueda, setBusqueda] = useState("");
 	const [pasoFiltro, setPasoFiltro] = useState<number | null>(null);
 	const [pctFiltro, setPctFiltro] = useState<number | null>(null);
+	const [soloPendientes, setSoloPendientes] = useState(false);
 	const [pagina, setPagina] = useState(1);
 	const [porPagina, setPorPagina] = useState(10);
 
@@ -197,7 +200,14 @@ export function ListadoPage() {
 		);
 	}, [casosQuery.data, busqueda]);
 
+	const conPendientes = useMemo(
+		() => casosBuscados.filter(tieneDocumentosPendientes),
+		[casosBuscados],
+	);
+
 	const filtrados = useMemo(() => {
+		// Los documentos pendientes son de hoy: no dependen del período.
+		if (soloPendientes) return conPendientes;
 		return casosBuscados.filter((caso) => {
 			if (pasoFiltro === null) {
 				if (ventana && !tuvoAvanceEn(caso, ventana)) return false;
@@ -210,7 +220,15 @@ export function ListadoPage() {
 			}
 			return true;
 		});
-	}, [casosBuscados, pasoFiltro, pctFiltro, ventana, coincidencias]);
+	}, [
+		casosBuscados,
+		conPendientes,
+		soloPendientes,
+		pasoFiltro,
+		pctFiltro,
+		ventana,
+		coincidencias,
+	]);
 
 	const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
 
@@ -362,9 +380,51 @@ export function ListadoPage() {
 					</div>
 				</div>
 
+				<div>
+					<button
+						type="button"
+						aria-pressed={soloPendientes}
+						onClick={() =>
+							cambiarFiltro(() => {
+								setSoloPendientes(!soloPendientes);
+								setPasoFiltro(null);
+								setPctFiltro(null);
+							})
+						}
+						className={cn(
+							"inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm transition",
+							soloPendientes
+								? "border-amber-500 bg-amber-50 font-medium text-amber-800"
+								: "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+						)}
+					>
+						<FileWarning className="h-4 w-4" />
+						Documentos pendientes
+						<span
+							className={cn(
+								"rounded-full px-1.5 text-xs tabular-nums",
+								soloPendientes
+									? "bg-amber-200/70 text-amber-900"
+									: "bg-slate-100 text-slate-600",
+							)}
+						>
+							{conPendientes.length}
+						</span>
+						{soloPendientes && <X className="h-3.5 w-3.5" />}
+					</button>
+				</div>
+
 				{!casosQuery.isPending && (
 					<p className="text-slate-500 text-xs">
-						{hayPeriodo ? (
+						{soloPendientes ? (
+							<>
+								Mostrando{" "}
+								<span className="font-medium text-slate-700">
+									los casos con documentos pendientes
+								</span>
+								, sin importar el período.
+							</>
+						) : hayPeriodo ? (
 							<>
 								Mostrando{" "}
 								<span className="font-medium text-slate-700">
@@ -387,11 +447,12 @@ export function ListadoPage() {
 
 				<div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
 					<Chip
-						activo={pasoFiltro === null}
+						activo={pasoFiltro === null && !soloPendientes}
 						onClick={() =>
 							cambiarFiltro(() => {
 								setPasoFiltro(null);
 								setPctFiltro(null);
+								setSoloPendientes(false);
 							})
 						}
 						titulo="Todos"
@@ -405,6 +466,7 @@ export function ListadoPage() {
 								cambiarFiltro(() => {
 									setPasoFiltro(pasoFiltro === i + 1 ? null : i + 1);
 									setPctFiltro(null);
+									setSoloPendientes(false);
 								})
 							}
 							titulo={rangoDePaso(i + 1)}
@@ -484,7 +546,18 @@ export function ListadoPage() {
 					</div>
 				) : filtrados.length === 0 ? (
 					<div className="rounded-xl border border-slate-200 border-dashed bg-white py-16 text-center">
-						{hayPeriodo && !busqueda && pasoFiltro === null ? (
+						{soloPendientes ? (
+							<>
+								<p className="font-medium text-slate-900">
+									No hay casos con documentos pendientes
+								</p>
+								<p className="mt-1 text-slate-500 text-sm">
+									{busqueda
+										? "Prueba con otra búsqueda."
+										: "Todos los documentos están al día."}
+								</p>
+							</>
+						) : hayPeriodo && !busqueda && pasoFiltro === null ? (
 							<>
 								<p className="font-medium text-slate-900">
 									Sin movimientos en{" "}
@@ -520,14 +593,15 @@ export function ListadoPage() {
 							{visibles.map((caso) => {
 								// Con etapa filtrada manda la llegada de esa etapa; sin
 								// ella, la del mes, que es lo que hizo entrar al caso.
-								const marca = !ventana
-									? null
-									: pasoFiltro !== null
-										? coincidenciaPrincipal(
-												coincidencias(caso, pasoFiltro),
-												pctFiltro,
-											)
-										: llegadaEnVentana(caso, ventana);
+								const marca =
+									!ventana || soloPendientes
+										? null
+										: pasoFiltro !== null
+											? coincidenciaPrincipal(
+													coincidencias(caso, pasoFiltro),
+													pctFiltro,
+												)
+											: llegadaEnVentana(caso, ventana);
 								const llegada = marca?.fecha ?? null;
 								return (
 									<li key={caso.id}>

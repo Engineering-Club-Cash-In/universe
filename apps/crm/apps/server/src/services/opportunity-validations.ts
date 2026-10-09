@@ -1,6 +1,8 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, gt, type SQL, sql } from "drizzle-orm";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
@@ -312,9 +314,9 @@ async function registrarValidacion(
 		expiraEn?: Date | null;
 		ejecutadoPor?: string | null;
 	},
-	transaction?: Transaction,
+	escritor?: Pick<Transaction, "insert">,
 ): Promise<void> {
-	const insertar = (tx: Transaction) =>
+	const insertar = (tx: Pick<Transaction, "insert">) =>
 		tx.insert(opportunityValidations).values({
 			opportunityId: valores.opportunityId,
 			sujeto: valores.coDebtorId ? "cofirmante" : "titular",
@@ -330,8 +332,8 @@ async function registrarValidacion(
 			expiraEn: valores.expiraEn ?? null,
 			ejecutadoPor: valores.ejecutadoPor ?? null,
 		});
-	if (transaction) {
-		await insertar(transaction);
+	if (escritor) {
+		await insertar(escritor);
 		return;
 	}
 	await db.transaction(async (tx) => {
@@ -837,6 +839,50 @@ async function ejecutarValidacionesInterno({
 	};
 }
 
+const MAX_CONSULTAS_CON_CANDADO = 2;
+let consultasConCandado = 0;
+const esperaCandado: Array<() => void> = [];
+
+/** Usa una conexión dedicada y deja libre el pool que Infornet necesita. */
+async function conCandadoDuranteConsulta<T>(
+	opportunityId: string,
+	consultar: (escritor: NodePgDatabase) => Promise<T>,
+): Promise<T> {
+	if (consultasConCandado >= MAX_CONSULTAS_CON_CANDADO) {
+		await new Promise<void>((resolver) => esperaCandado.push(resolver));
+	} else {
+		consultasConCandado++;
+	}
+	try {
+		const cliente = new Client({ connectionString: process.env.DATABASE_URL });
+		let conectado = false;
+		let candadoTomado = false;
+		try {
+			await cliente.connect();
+			conectado = true;
+			await cliente.query("select pg_advisory_lock(hashtext($1))", [
+				opportunityId,
+			]);
+			candadoTomado = true;
+			return await consultar(drizzle(cliente));
+		} finally {
+			try {
+				if (conectado && candadoTomado) {
+					await cliente.query("select pg_advisory_unlock(hashtext($1))", [
+						opportunityId,
+					]);
+				}
+			} finally {
+				if (conectado) await cliente.end();
+			}
+		}
+	} finally {
+		const siguiente = esperaCandado.shift();
+		if (siguiente) siguiente();
+		else consultasConCandado--;
+	}
+}
+
 /**
  * Consulta Infornet para el DPI de un sujeto (titular o cofirmante), decide el
  * veredicto y lo registra en su bitácora. El fallo se clasifica ANTES de
@@ -853,20 +899,18 @@ async function consultarBuro({
 	coDebtorId: string | null;
 	userId?: string | null;
 }): Promise<ReusoBuro> {
-	return db.transaction(async (tx) => {
-		// El candado empieza ANTES de Infornet y termina DESPUÉS de guardar
-		// el veredicto. Aprobar análisis toma el mismo candado.
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${opportunityId}))`,
-		);
-		const [actual] = await tx
+	return conCandadoDuranteConsulta(opportunityId, async (escritor) => {
+		const [actual] = await escritor
 			.select({
 				porcentaje: salesStages.closurePercentage,
 				status: opportunities.status,
 				buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
+				clientType: leads.clientType,
+				creditType: opportunities.creditType,
 			})
 			.from(opportunities)
 			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.where(eq(opportunities.id, opportunityId))
 			.limit(1);
 		if (
@@ -880,6 +924,18 @@ async function consultarBuro({
 			throw new ORPCError("CONFLICT", {
 				message:
 					"La oportunidad cambió de etapa antes de consultar Buró. Recarga la página para ver su estado actual.",
+			});
+		}
+		if (
+			await faltaConsentimientoDelTitular(
+				opportunityId,
+				actual.clientType,
+				actual.creditType,
+			)
+		) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"Carga la cláusula de consentimiento antes de consultar Infornet.",
 			});
 		}
 		// Los cofirmantes no pasan por RENAP: no se les puede exigir `renapinfo`
@@ -949,7 +1005,7 @@ async function consultarBuro({
 						: null,
 					ejecutadoPor: userId ?? null,
 				},
-				tx,
+				escritor,
 			);
 
 			return {
@@ -982,7 +1038,7 @@ async function consultarBuro({
 					mensaje: veredicto.mensajeBuro,
 					ejecutadoPor: userId ?? null,
 				},
-				tx,
+				escritor,
 			);
 
 			return {
@@ -1035,7 +1091,7 @@ async function consultarBuro({
 				expiraEn: expiraEnBuro,
 				ejecutadoPor: userId ?? null,
 			},
-			tx,
+			escritor,
 		);
 
 		return {

@@ -6839,6 +6839,30 @@ export const crmRouter = {
 				context.userRole === "analyst" ||
 				document.uploadedBy === context.userId
 			) {
+				if (document.documentType === "clausula_consentimiento") {
+					// El borrado se confirma bajo el mismo candado que protege la consulta.
+					// R2 se limpia después para no retener una conexión durante esa llamada.
+					await db.transaction(async (tx) => {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(hashtext(${document.opportunityId}))`,
+						);
+						const [borrado] = await tx
+							.delete(opportunityDocuments)
+							.where(eq(opportunityDocuments.id, input.documentId))
+							.returning({ id: opportunityDocuments.id });
+						if (!borrado) {
+							throw new ORPCError("NOT_FOUND", {
+								message: "Documento no encontrado",
+							});
+						}
+					});
+					try {
+						await deleteFileFromR2(document.filePath);
+					} catch (error) {
+						console.error("No se pudo limpiar el consentimiento de R2:", error);
+					}
+					return { success: true };
+				}
 				if (
 					isBankStatementChecklistType(document.documentType) ||
 					isReservedBankCoverageDescription(document.description) ||

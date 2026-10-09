@@ -429,6 +429,10 @@ export const opportunities = pgTable("opportunities", {
 	 * `null` es lo normal —nunca se revalidó— y ahí no cambia nada.
 	 */
 	identityRevalidatedAt: timestamp("identity_revalidated_at"),
+	/** Permite reconsultar al 30% tras un cambio de identidad o un estudio vencido al regresar. */
+	buroRevalidacionAl30: boolean("buro_revalidacion_al_30")
+		.notNull()
+		.default(false),
 
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),

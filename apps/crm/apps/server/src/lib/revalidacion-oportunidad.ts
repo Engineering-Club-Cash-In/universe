@@ -162,6 +162,7 @@ export function parcheDeRevalidacion(
 	return {
 		...parcheDeIdentidadInvalidada(revalidadaEn),
 		stageId: etapaDeAnalisisId,
+		buroRevalidacionAl30: true,
 		// ⚠️ Va DESPUÉS del spread a propósito, y es literal y no la degradación
 		// condicional de `parcheDeIdentidadInvalidada`: este camino SÍ retrocede la
 		// etapa a análisis, así que el análisis se rehace desde cero y el estado

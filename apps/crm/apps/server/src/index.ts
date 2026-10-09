@@ -527,6 +527,14 @@ app.post("/api/upload-opportunity-document", async (c) => {
 			!!opportunity[0]?.vehicleId,
 			opportunity[0]?.vehicleId || undefined,
 		);
+		if (documentType === "clausula_consentimiento") {
+			const { ejecutarBuroAlVeinteSiCorresponde } = await import(
+				"./services/opportunity-validations"
+			);
+			void ejecutarBuroAlVeinteSiCorresponde({ opportunityId, userId }).catch(
+				(error) => console.error("Error al iniciar Buró tras cargar consentimiento:", error),
+			);
+		}
 
 		return c.json(newDocument);
 	} catch (error) {

@@ -16,6 +16,7 @@ import {
 	or,
 	sql,
 	sum,
+	type SQL,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -60,6 +61,9 @@ import {
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
+import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
@@ -190,10 +194,10 @@ import {
 } from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
-	ejecutarBuroCofirmantes,
-	ejecutarValidaciones,
+	ejecutarBuroAlVeinteSiCorresponde,
 	firmaCofirmantes,
 	firmaCofirmantesSql,
+	getValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
 import {
@@ -639,6 +643,33 @@ async function getVehicleInspectionStatus(vehicleId: string) {
 		inspectionId: inspection?.id ?? null,
 		inspectionStatus: inspection?.status ?? "pending",
 	};
+}
+
+/** Una falla de Infornet queda en la bitácora y no revierte el dato que la disparó. */
+function consultarBuroAlVeinteTrasGuardar(
+	opportunityId: string,
+	userId: string,
+): void {
+	void ejecutarBuroAlVeinteSiCorresponde({ opportunityId, userId }).catch(
+		(error) => {
+			console.error(
+				`[Buró 20%] No se pudo completar la consulta de ${opportunityId}`,
+				error,
+			);
+		},
+	);
+}
+
+function firmaBitacoraBuro(
+	estado: Awaited<ReturnType<typeof getValidaciones>>,
+): string {
+	return JSON.stringify({
+		exento: estado.exento,
+		validaciones: estado.validaciones.map((fila) => fila.id).sort(),
+		cofirmantes: estado.cofirmantes
+			.map((fila) => `${fila.coDebtorId}:${fila.dpi}:${fila.buro?.id ?? ""}`)
+			.sort(),
+	});
 }
 
 export const crmRouter = {
@@ -1501,14 +1532,16 @@ export const crmRouter = {
 				});
 			}
 
-			// El NIT y el DPI que el lead tenía ANTES de esta edición. El NIT es la
+			// El NIT, DPI y origen que el lead tenía ANTES de esta edición. El NIT es la
 			// referencia para distinguir las oportunidades que siguen con la copia de
 			// las que alguien corrigió a mano; el DPI, para saber si esta edición lo
 			// cambia de verdad. Hay que leerlos antes del UPDATE.
 			const [leadAntesDelUpdate] =
-				updateData.nit !== undefined || updateData.dpi !== undefined
+				updateData.nit !== undefined ||
+				updateData.dpi !== undefined ||
+				updateData.source !== undefined
 					? await db
-							.select({ nit: leads.nit, dpi: leads.dpi })
+							.select({ nit: leads.nit, dpi: leads.dpi, source: leads.source })
 							.from(leads)
 							.where(eq(leads.id, id))
 							.limit(1)
@@ -1521,6 +1554,11 @@ export const crmRouter = {
 			const elDpiCambia =
 				updateData.dpi !== undefined &&
 				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
+			// El candado no considera cambio el primer DPI, pero Buró sí debe
+			// consultarlo cuando la oportunidad ya está en 20% o 30% excepcional.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi);
 
 			// El veredicto del candado sobrevive al bloque: si el admin usó la
 			// válvula hay que cobrarle el costo DESPUÉS del UPDATE (ver F9 abajo).
@@ -1547,7 +1585,7 @@ export const crmRouter = {
 				// dirección — y son justamente las fichas que cobranza toca a diario.
 				// El borrado (`dpi: ""`) no llega hasta acá: se rechaza con 400 al
 				// entrar al handler. Ver `MENSAJE_DPI_EN_BLANCO`.
-				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
+				if (consultarBuroPorDpi) {
 					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
 					// que se está editando. Con solo los del DPI nuevo, el lead que
 					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
@@ -1591,6 +1629,7 @@ export const crmRouter = {
 			const whereDelUpdate = candadoEnElPredicado
 				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
 				: whereClause;
+			const oportunidadesConOrigenActualizado: string[] = [];
 
 			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
 			//
@@ -1656,6 +1695,137 @@ export const crmRouter = {
 						cambiadaPor: context.userId,
 						database: tx,
 					});
+				}
+				if (elDpiCambia) {
+					const marcadas = await tx
+						.update(opportunities)
+						.set({ buroRevalidacionAl30: true })
+						.where(
+							and(
+								eq(opportunities.leadId, id),
+								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
+								eq(opportunities.buroRevalidacionAl30, false),
+							),
+						)
+						.returning({ id: opportunities.id });
+					for (const oportunidad of marcadas) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "habilitar_buro_revalidacion_30",
+							data: { origen: "updateLead", leadId: id },
+						});
+					}
+				}
+				if (
+					updateData.source !== undefined ||
+					updateData.campaign !== undefined
+				) {
+					const [activeOpportunity] = await tx
+						.select({ id: opportunities.id, source: opportunities.source })
+						.from(opportunities)
+						.where(
+							and(
+								eq(opportunities.leadId, id),
+								inArray(opportunities.status, ["open", "on_hold"]),
+							),
+						)
+						.orderBy(desc(opportunities.createdAt))
+						.limit(1)
+						.for("update", { of: opportunities });
+
+					// Dejar WhatsApp quita la exención del bot: las oportunidades al 30%
+					// que la usaban necesitan poder consultar Buró ahí mismo.
+					if (
+						updateData.source !== undefined &&
+						updateData.source !== "Whatsapp"
+					) {
+						const marcadas = await tx
+							.update(opportunities)
+							.set({ buroRevalidacionAl30: true })
+							.where(
+								and(
+									eq(opportunities.leadId, id),
+									sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+									inArray(opportunities.status, ["open", "on_hold", "lost"]),
+									eq(opportunities.buroRevalidacionAl30, false),
+									or(
+										leadAntesDelUpdate?.source === "Whatsapp"
+											? isNull(opportunities.source)
+											: sql`false`,
+										activeOpportunity?.source === "Whatsapp"
+											? eq(opportunities.id, activeOpportunity.id)
+											: sql`false`,
+									),
+								),
+							)
+							.returning({ id: opportunities.id });
+						for (const oportunidad of marcadas) {
+							auditRecord({
+								entity: "opportunity",
+								id: oportunidad.id,
+								action: "habilitar_buro_revalidacion_30",
+								data: { origen: "updateLead_source", leadId: id },
+							});
+							oportunidadesConOrigenActualizado.push(oportunidad.id);
+						}
+					}
+
+					if (activeOpportunity) {
+						await tx
+							.update(opportunities)
+							.set({
+								...(updateData.source !== undefined
+									? { source: updateData.source }
+									: {}),
+								...(updateData.campaign !== undefined
+									? { campaign: updateData.campaign }
+									: {}),
+								updatedAt: new Date(),
+							})
+							.where(eq(opportunities.id, activeOpportunity.id));
+						auditRecord({
+							entity: "opportunity",
+							id: activeOpportunity.id,
+							action: "sync_source_campaign",
+							data: {
+								leadId: id,
+								source: updateData.source,
+								campaign: updateData.campaign,
+							},
+						});
+						if (
+							updateData.source !== undefined &&
+							!oportunidadesConOrigenActualizado.includes(activeOpportunity.id)
+						) {
+							oportunidadesConOrigenActualizado.push(activeOpportunity.id);
+						}
+					}
+
+					// Las que heredaban WhatsApp del lead también pierden la exención,
+					// aunque su origen no se sincronice: necesitan su consulta al 20%.
+					if (
+						updateData.source !== undefined &&
+						updateData.source !== "Whatsapp" &&
+						leadAntesDelUpdate?.source === "Whatsapp"
+					) {
+						const heredaban = await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(
+								and(
+									eq(opportunities.leadId, id),
+									eq(opportunities.status, "open"),
+									isNull(opportunities.source),
+								),
+							);
+						for (const oportunidad of heredaban) {
+							if (!oportunidadesConOrigenActualizado.includes(oportunidad.id)) {
+								oportunidadesConOrigenActualizado.push(oportunidad.id);
+							}
+						}
+					}
 				}
 
 				return filas;
@@ -1736,45 +1906,19 @@ export const crmRouter = {
 				}
 			}
 
-			if (
-				updateData.source !== undefined ||
-				updateData.campaign !== undefined
-			) {
-				const [activeOpportunity] = await db
+			for (const oportunidadId of oportunidadesConOrigenActualizado) {
+				consultarBuroAlVeinteTrasGuardar(oportunidadId, context.userId);
+			}
+
+			if (consultarBuroPorDpi && updatedLead[0].dpi) {
+				const oportunidades = await db
 					.select({ id: opportunities.id })
 					.from(opportunities)
 					.where(
-						and(
-							eq(opportunities.leadId, id),
-							inArray(opportunities.status, ["open", "on_hold"]),
-						),
-					)
-					.orderBy(desc(opportunities.createdAt))
-					.limit(1);
-
-				if (activeOpportunity) {
-					await db
-						.update(opportunities)
-						.set({
-							...(updateData.source !== undefined
-								? { source: updateData.source }
-								: {}),
-							...(updateData.campaign !== undefined
-								? { campaign: updateData.campaign }
-								: {}),
-							updatedAt: new Date(),
-						})
-						.where(eq(opportunities.id, activeOpportunity.id));
-					auditRecord({
-						entity: "opportunity",
-						id: activeOpportunity.id,
-						action: "sync_source_campaign",
-						data: {
-							leadId: id,
-							source: updateData.source,
-							campaign: updateData.campaign,
-						},
-					});
+						and(eq(opportunities.leadId, id), eq(opportunities.status, "open")),
+					);
+				for (const oportunidad of oportunidades) {
+					consultarBuroAlVeinteTrasGuardar(oportunidad.id, context.userId);
 				}
 			}
 
@@ -2780,6 +2924,8 @@ export const crmRouter = {
 					campaign,
 					nit: leadNit,
 					assignedTo,
+					// Un alta directa en análisis necesita poder consultar Buró en el 30%.
+					buroRevalidacionAl30: etapaInicial.closurePercentage === 30,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)
 						: undefined,
@@ -2792,6 +2938,7 @@ export const crmRouter = {
 				id: newOpportunity[0].id,
 				action: "create",
 			});
+			consultarBuroAlVeinteTrasGuardar(newOpportunity[0].id, context.userId);
 			return { ...newOpportunity[0], warning: false as const };
 		}),
 
@@ -3151,6 +3298,8 @@ export const crmRouter = {
 					: null;
 			}
 
+			let entrandoAAnalisis = false;
+			let regresandoAAnalisis = false;
 			// Validate stage transitions
 			if (input.stageId) {
 				const targetStage = await db
@@ -3168,6 +3317,24 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				if (fromPercentage < 30 && toPercentage > 30) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Antes de avanzar más allá del 30%, pasa por análisis y completa la validación de Buró al 20%.",
+					});
+				}
+				entrandoAAnalisis = toPercentage === 30 && fromPercentage < 30;
+				regresandoAAnalisis = toPercentage === 30 && fromPercentage > 30;
+				if (
+					entrandoAAnalisis &&
+					input.leadId !== undefined &&
+					input.leadId !== currentOpportunity[0].leadId
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Guarda primero el cambio de cliente y valida su Buró al 20% antes de enviar la oportunidad a análisis.",
+					});
+				}
 				const effectiveLeadId =
 					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const effectiveVehicleId =
@@ -3657,6 +3824,8 @@ export const crmRouter = {
 
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
+			let dpiComprobadoParaAnalisis: string | null = null;
+			let firmaComprobadaParaAnalisis: string | null = null;
 			const updatedOpportunity = await auditedTransaction(async (tx) => {
 				// Si cambia la etapa, primero el candado de firma: la escritura espera a
 				// que termine lo que se esté haciendo con los contratos de la
@@ -3671,6 +3840,130 @@ export const crmRouter = {
 				if (isStageChange) {
 					await tx.execute(
 						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
+					);
+				}
+				let condicionBuroParaAnalisis: SQL | undefined;
+				let habilitarBuroAlRegresar = false;
+				if (regresandoAAnalisis && !parcheRevalidacion) {
+					await tomarCandadoBuroSiLibre(tx, id);
+					const [actual] = await tx
+						.select({ stageId: opportunities.stageId })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.for("update");
+					if (!actual || actual.stageId !== currentOpportunity[0].stageId) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La etapa cambió. Recarga la oportunidad e intenta de nuevo.",
+						});
+					}
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
+					habilitarBuroAlRegresar = Boolean(
+						errorBuroVigenteParaAnalisis(estadoBuro),
+					);
+				}
+				if (entrandoAAnalisis) {
+					// Espera cualquier escritura en la bitácora antes de decidir si el
+					// estudio ya está completo. La comprobación no llama a Infornet.
+					await tomarCandadoBuroSiLibre(tx, id);
+					const [actual] = await tx
+						.select({
+							stageId: opportunities.stageId,
+							leadId: opportunities.leadId,
+						})
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.for("update", { of: opportunities });
+					if (
+						!actual ||
+						actual.stageId !== currentOpportunity[0].stageId ||
+						actual.leadId !== currentOpportunity[0].leadId
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió. Recarga la página e intenta de nuevo.",
+						});
+					}
+					const [leadParaAnalisis] = actual.leadId
+						? await tx
+								.select({ dpi: leads.dpi })
+								.from(leads)
+								.where(eq(leads.id, actual.leadId))
+								.limit(1)
+						: [];
+					if (!leadParaAnalisis?.dpi) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Antes de pasar al 30%, ingresa el DPI del titular en la ficha del cliente y espera su validación de Buró al 20%.",
+						});
+					}
+					const dpiValidado = validarDpi(leadParaAnalisis.dpi);
+					if (!dpiValidado.valid) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `El DPI del titular es inválido: ${dpiValidado.error}`,
+						});
+					}
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
+					dpiComprobadoParaAnalisis = dpiValidado.dpiLimpio;
+					if (
+						estadoBuro.exento &&
+						input.source !== undefined &&
+						input.source !== "Whatsapp"
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Guarda primero el cambio de origen y completa el Buró antes de pasar al 30%.",
+						});
+					}
+					if (estadoBuro.faltaConsentimiento) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Carga la cláusula de consentimiento y completa el Buró antes de pasar al 30%.",
+						});
+					}
+					if (!estadoBuro.exento) {
+						if (
+							CONSULTAR_RENAP &&
+							(!estadoBuro.renap ||
+								estadoBuro.renapDesactualizado ||
+								estadoBuro.renap.estado === "error")
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Completa RENAP al 20% antes de enviar la oportunidad a análisis.",
+							});
+						}
+					}
+					const errorBuro = errorBuroVigenteParaAnalisis(
+						estadoBuro,
+						"entrar_analisis",
+					);
+					if (errorBuro) {
+						throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+					}
+					// La exención del bot cubre también a los cofirmantes.
+					if (!estadoBuro.exento) {
+						firmaComprobadaParaAnalisis = firmaCofirmantes(
+							estadoBuro.cofirmantes,
+						);
+					}
+					// Si el DPI o los cofirmantes cambian durante el guardado, el
+					// UPDATE falla en vez de enviar al análisis una identidad distinta.
+					condicionBuroParaAnalisis = and(
+						eq(opportunities.stageId, actual.stageId),
+						actual.leadId
+							? eq(opportunities.leadId, actual.leadId)
+							: isNull(opportunities.leadId),
+						sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${eqDpi(leads.dpi, dpiValidado.dpiLimpio)})`,
+						!estadoBuro.exento
+							? sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${firmaCofirmantes(estadoBuro.cofirmantes)}`
+							: undefined,
 					);
 				}
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
@@ -3740,6 +4033,20 @@ export const crmRouter = {
 						// corresponde —`pending` o `resubmitted`, nunca `approved`— y pisa
 						// al `case` sin devolverle la aprobación a nadie.
 						...invalidacionPorCambioDeLead,
+						...(cambiaElLeadDeLaOportunidad && {
+							buroRevalidacionAl30: sql`case when ${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) then true else ${opportunities.buroRevalidacionAl30} end`,
+						}),
+						...(regresandoAAnalisis && {
+							buroRevalidacionAl30: habilitarBuroAlRegresar,
+						}),
+						...(input.source !== undefined &&
+							input.source !== "Whatsapp" && {
+								// Al corregir el origen de una exención del bot, la
+								// consulta excepcional debe quedar habilitada en 30%.
+								// La etapa de destino cubre también el regreso desde 40%.
+								buroRevalidacionAl30: sql`case when ${input.stageId ?? sql`${opportunities.stageId}`} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) and (${opportunities.source} = 'Whatsapp' or (${opportunities.source} is null and exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} = 'Whatsapp'))) then true else ${opportunities.buroRevalidacionAl30} end`,
+							}),
+						...(entrandoAAnalisis && { buroRevalidacionAl30: false }),
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 							analysisStatus: newAnalysisStatus,
@@ -3751,7 +4058,7 @@ export const crmRouter = {
 						...(parcheRevalidacion ?? {}),
 						updatedAt: new Date(),
 					})
-					.where(whereClause)
+					.where(and(whereClause, condicionBuroParaAnalisis))
 					.returning();
 
 				// 🔴 El reset cambiaba `stageId` sin dejar la transición: para los
@@ -3785,6 +4092,39 @@ export const crmRouter = {
 						throw new ORPCError("FORBIDDEN", {
 							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
 						});
+					}
+				}
+				if (
+					entrandoAAnalisis &&
+					dpiComprobadoParaAnalisis &&
+					canUpdateOpportunity
+				) {
+					const [identidadActual] = await db
+						.select({ leadId: opportunities.leadId, dpi: leads.dpi })
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (
+						identidadActual?.leadId !== currentOpportunity[0].leadId ||
+						normalizarDpi(identidadActual?.dpi ?? "") !==
+							dpiComprobadoParaAnalisis
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"El DPI o el titular cambiaron durante el envío a análisis. Recarga la oportunidad y valida el Buró de la identidad actual.",
+						});
+					}
+					if (firmaComprobadaParaAnalisis !== null) {
+						const { rows } = await db.execute<{ firma: string }>(
+							sql`select ${firmaCofirmantesSql(sql`${id}::uuid`)} as firma`,
+						);
+						if (rows[0]?.firma !== firmaComprobadaParaAnalisis) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"Los cofirmantes cambiaron durante el envío a análisis. Recarga la oportunidad y valida su Buró actual.",
+							});
+						}
 					}
 				}
 				if (canUpdateOpportunity) {
@@ -3926,6 +4266,14 @@ export const crmRouter = {
 				}
 			}
 
+			if (
+				isStageChange ||
+				cambiaElLeadDeLaOportunidad ||
+				input.status !== undefined ||
+				input.source !== undefined
+			) {
+				consultarBuroAlVeinteTrasGuardar(id, context.userId);
+			}
 			return updatedOpportunity[0];
 		}),
 
@@ -4204,6 +4552,7 @@ export const crmRouter = {
 					// Para no dar por válido el DPI de la identidad anterior: ver
 					// `documentosDeIdentidadVigentes`.
 					identityRevalidatedAt: opportunities.identityRevalidatedAt,
+					buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -4414,10 +4763,8 @@ export const crmRouter = {
 				});
 			}
 
-			// Validaciones RENAP + Buró para oportunidades que NO provienen del
-			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
-			// después de los chequeos de etapa y estado para no gastar llamadas
-			// a las fuentes externas en aprobaciones que igual van a fallar.
+			// Revisar el Buró ya guardado para oportunidades que no provienen del
+			// bot de WhatsApp. El bot conserva su propia exención comprobada.
 			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
 			// este DPI, tanto si se validó como si quedó exenta
 			let dpiVerificado: string | null = null;
@@ -4426,17 +4773,14 @@ export const crmRouter = {
 			let huellaBuro: string | null = null;
 			// Cofirmantes con el DPI con que pasaron por el buró; también viaja en el UPDATE
 			let cofirmantesValidados: string | null = null;
+			let firmaBitacoraRevisada: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
-				// La exención se resuelve en el servicio: `source` es editable por el
-				// usuario, así que además exige evidencia de que el bot validó.
-				const exencion = await resolverExencionPorBot({
+				// La exención y los veredictos deben venir de la misma lectura.
+				const estadoValidaciones = await getValidaciones({
 					opportunityId: input.opportunityId,
-					source: opportunity[0].source,
-					leadSource: opportunity[0].leadSource,
-					leadId: opportunity[0].leadId,
-					leadDpi: opportunity[0].leadDpi,
 				});
+				firmaBitacoraRevisada = firmaBitacoraBuro(estadoValidaciones);
 
 				// Vale para los dos caminos: el validado y el exento. Una oportunidad
 				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
@@ -4444,7 +4788,13 @@ export const crmRouter = {
 					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
 				}
 
-				if (!exencion.exento) {
+				if (estadoValidaciones.faltaConsentimiento) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Carga la cláusula de consentimiento antes de aprobar el análisis.",
+					});
+				}
+				if (!estadoValidaciones.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
 					// en paralelo al documento DPI exigido arriba
 					if (!opportunity[0].leadDpi) {
@@ -4454,23 +4804,21 @@ export const crmRouter = {
 						});
 					}
 
-					const resultadoValidaciones = await ejecutarValidaciones({
-						opportunityId: input.opportunityId,
-						userId: context.userId,
-						reusarVigente: true,
-					});
-
-					// Un fallo técnico (API caída, timeout, sin respuesta) sí
-					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
-					// validación ejecutada con veredicto
-					if (resultadoValidaciones.errorTecnico) {
+					// El flujo normal llega validado; un cambio de DPI o vencimiento habilita reconsulta aquí.
+					if (
+						CONSULTAR_RENAP &&
+						(!estadoValidaciones.renap ||
+							estadoValidaciones.renapDesactualizado ||
+							estadoValidaciones.renap.estado === "error")
+					) {
 						throw new ORPCError("BAD_REQUEST", {
-							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+							message:
+								"Falta una validación de RENAP para el DPI actual. Regresa la oportunidad al 20% antes de aprobar el análisis.",
 						});
 					}
 
-					// El DPI pudo cambiar mientras corrían las validaciones: el
-					// veredicto sería de otra persona
+					// El DPI pudo cambiar después de leer el resultado guardado: el
+					// veredicto sería de otra persona.
 					const [leadActual] = await db
 						.select({ dpi: leads.dpi })
 						.from(opportunities)
@@ -4484,33 +4832,26 @@ export const crmRouter = {
 					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
-								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+								"El DPI del cliente cambió durante la revisión. Recarga la oportunidad y espera la nueva validación de Buró en el 30%.",
 						});
 					}
-
-					// Los cofirmantes pesan igual que el titular: solo bloquea un
-					// fallo técnico, nunca el rechazo ni la falta de registro
-					const buroCofirmantes = await ejecutarBuroCofirmantes({
-						opportunityId: input.opportunityId,
-						userId: context.userId,
-						reusarVigente: true,
-					});
-
-					if (buroCofirmantes.errorTecnico) {
-						throw new ORPCError("BAD_REQUEST", {
-							message: `No se pudo completar la validación de Buró: ${buroCofirmantes.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
-						});
-					}
-
-					// Mismo resguardo que con el DPI del cliente, y por la misma razón
-					// dentro del UPDATE y no como lectura previa: un cofirmante agregado
-					// o con DPI corregido entre la validación y la escritura no tiene
-					// veredicto
-					cofirmantesValidados = firmaCofirmantes(buroCofirmantes.cofirmantes);
-
-					// Ni el rechazo del buró ni la ausencia de registro bloquean:
-					// quedan en la bitácora y visibles en la página de análisis
-					// para que el analista decida bajo su criterio
+				}
+				const errorBuro = errorBuroVigenteParaAnalisis(
+					estadoValidaciones,
+					opportunity[0].buroRevalidacionAl30
+						? "revalidar_en_analisis"
+						: "aprobar_analisis",
+				);
+				if (errorBuro) {
+					throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+				}
+				// Un cofirmante agregado o con DPI corregido entre la lectura y el
+				// UPDATE no puede quedar aprobado sin veredicto para su identidad.
+				// En las exentas por el bot los cofirmantes también lo están.
+				if (!estadoValidaciones.exento) {
+					cofirmantesValidados = firmaCofirmantes(
+						estadoValidaciones.cofirmantes,
+					);
 				}
 
 				// Buró interno: corre también en las oportunidades exentas del bot,
@@ -4600,16 +4941,25 @@ export const crmRouter = {
 								sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${cofirmantesValidados}`,
 							)
 						: condicionesConDpi;
+				// El origen puede quitar la exención del bot. Si se corrigió
+				// mientras se evaluaba, no se aprueba con esa exención anterior.
+				const condicionesConOrigen = firmaBitacoraRevisada
+					? and(
+							condicionesConCofirmantes,
+							sql`${opportunities.source} is not distinct from ${opportunity[0].source}`,
+							sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} is not distinct from ${opportunity[0].leadSource})`,
+						)
+					: condicionesConCofirmantes;
 
 				const whereClause = huellaBuro
 					? and(
-							condicionesConCofirmantes,
+							condicionesConOrigen,
 							sql`${huellaEvaluacionSql(
 								sql`${opportunities.id}`,
 								sql`${opportunities.leadId}`,
 							)} = ${huellaBuro}`,
 						)
-					: condicionesConCofirmantes;
+					: condicionesConOrigen;
 
 				// Update opportunity with analysisStatus.
 				// Cuando hay huella de buró, la escritura va dentro de una
@@ -4621,6 +4971,7 @@ export const crmRouter = {
 						.update(opportunities)
 						.set({
 							stageId: newStageId,
+							buroRevalidacionAl30: false,
 							analysisStatus: input.approved ? "approved" : "rejected",
 							analysisRejectionCount: input.approved
 								? opportunity[0].analysisRejectionCount
@@ -4637,6 +4988,33 @@ export const crmRouter = {
 
 				const updatedRows = huellaBuro
 					? await db.transaction(async (tx) => {
+							// Las consultas y overrides escriben la bitácora bajo este
+							// candado. Comprobamos de nuevo el veredicto mientras lo
+							// retenemos hasta confirmar la aprobación.
+							if (firmaBitacoraRevisada !== null) {
+								await tomarCandadoBuroSiLibre(tx, input.opportunityId);
+								const estadoActual = await getValidaciones({
+									opportunityId: input.opportunityId,
+									lector: tx,
+								});
+								if (
+									firmaBitacoraBuro(estadoActual) !== firmaBitacoraRevisada ||
+									estadoActual.faltaConsentimiento ||
+									Boolean(
+										errorBuroVigenteParaAnalisis(
+											estadoActual,
+											opportunity[0].buroRevalidacionAl30
+												? "revalidar_en_analisis"
+												: "aprobar_analisis",
+										),
+									)
+								) {
+									throw new ORPCError("CONFLICT", {
+										message:
+											"El Buró cambió durante la revisión. Recarga la oportunidad y revisa el resultado actual antes de aprobar.",
+									});
+								}
+							}
 							await tomarCandadoBuroInterno(tx);
 							return escribirAprobacion(tx);
 						})
@@ -4653,7 +5031,7 @@ export const crmRouter = {
 						if (rows[0]?.firma !== cofirmantesValidados) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:
-									"Los cofirmantes cambiaron mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+									"Los cofirmantes cambiaron durante la revisión. Recarga la oportunidad y espera su nueva validación de Buró en el 30%.",
 							});
 						}
 					}
@@ -4684,7 +5062,7 @@ export const crmRouter = {
 						if (normalizarDpi(leadAlMomento?.dpi ?? "") !== dpiVerificado) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:
-									"El DPI del cliente cambió mientras se aprobaba. Vuelve a ejecutar las validaciones antes de aprobar.",
+									"El DPI del cliente cambió durante la revisión. Recarga la oportunidad y espera la nueva validación de Buró en el 30%.",
 							});
 						}
 					}
@@ -4765,6 +5143,9 @@ export const crmRouter = {
 				}
 			}
 
+			if (!input.approved) {
+				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
+			}
 			return { success: true, approved: input.approved };
 		}),
 
@@ -6431,6 +6812,9 @@ export const crmRouter = {
 				!!opportunity[0]?.vehicleId,
 				opportunity[0]?.vehicleId || undefined,
 			);
+			if (input.documentType === "clausula_consentimiento") {
+				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
+			}
 
 			return newDocument;
 		}),
@@ -8752,13 +9136,11 @@ export const crmRouter = {
 							totalFinanced: regenerated.totalFinanced.toFixed(2),
 							monthlyPayment: regenerated.monthlyPayment.toFixed(2),
 							extraAdminCost: regenerated.extraAdminCost.toFixed(2),
-							idealPaymentDateAdjustment:
-								idealPaymentDateAdjustment.toFixed(2),
+							idealPaymentDateAdjustment: idealPaymentDateAdjustment.toFixed(2),
 							idealPaymentDateAdjustmentDays,
-							idealPaymentDateAdjustmentReferenceDate:
-								esDiaIA
-									? toDateStrGT(fechaReferencia)
-									: null,
+							idealPaymentDateAdjustmentReferenceDate: esDiaIA
+								? toDateStrGT(fechaReferencia)
+								: null,
 							updatedAt: fechaReferencia,
 						})
 						.where(eq(quotations.id, quotation.id));
@@ -8879,8 +9261,7 @@ export const crmRouter = {
 							? {
 									value: regenerated.totalFinanced.toFixed(2),
 									cuotaMensual: regenerated.monthlyPayment.toFixed(2),
-									gastosAdministrativos:
-										regenerated.extraAdminCost.toFixed(2),
+									gastosAdministrativos: regenerated.extraAdminCost.toFixed(2),
 								}
 							: {}),
 						updatedAt: fechaReferencia,
@@ -8894,7 +9275,8 @@ export const crmRouter = {
 					.returning({ id: opportunities.id });
 				if (updatedOpportunities.length !== 1) {
 					throw new ORPCError("CONFLICT", {
-						message: "La oportunidad cambió mientras se asignaban inversionistas",
+						message:
+							"La oportunidad cambió mientras se asignaban inversionistas",
 					});
 				}
 				auditRecord({
@@ -9112,7 +9494,7 @@ export const crmRouter = {
 				notes: z.string().optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			// Validar DPI del co-deudor
 			const resultadoDpi = validarDpi(input.dpi);
 			if (!resultadoDpi.valid) {
@@ -9126,8 +9508,12 @@ export const crmRouter = {
 			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
 			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
-				.select({ id: opportunities.id })
+				.select({
+					id: opportunities.id,
+					closurePercentage: salesStages.closurePercentage,
+				})
 				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
@@ -9135,6 +9521,11 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+			const mensajeAltaTardia =
+				"Regresa la oportunidad al 30% antes de agregar un cofirmante; su Buró debe validarse antes de aprobar análisis.";
+			if (opportunity.closurePercentage > 30) {
+				throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
 			}
 
 			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
@@ -9150,10 +9541,20 @@ export const crmRouter = {
 			// Mismo candado que el UPDATE que aprueba el análisis: su chequeo de
 			// cofirmantes validados es una foto en READ COMMITTED, y un alta que se
 			// confirma mientras corre quedaría aprobada sin buró
+			let oportunidadMarcada = false;
 			const [newCoDebtor] = await db.transaction(async (tx) => {
 				await tomarCandadoBuroInterno(tx);
+				const [etapaActual] = await tx
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(opportunities)
+					.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update", { of: opportunities });
+				if (!etapaActual || etapaActual.closurePercentage > 30) {
+					throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
+				}
 
-				return tx
+				const creado = await tx
 					.insert(coDebtors)
 					.values({
 						opportunityId: input.opportunityId,
@@ -9170,8 +9571,31 @@ export const crmRouter = {
 						notes: input.notes,
 					})
 					.returning();
+				const marcadas = await tx
+					.update(opportunities)
+					.set({ buroRevalidacionAl30: true })
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+							inArray(opportunities.status, ["open", "on_hold", "lost"]),
+							eq(opportunities.buroRevalidacionAl30, false),
+						),
+					)
+					.returning({ id: opportunities.id });
+				oportunidadMarcada = marcadas.length > 0;
+				return creado;
 			});
+			if (oportunidadMarcada) {
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "habilitar_buro_revalidacion_30",
+					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
+				});
+			}
 
+			consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
 			return newCoDebtor;
 		}),
 
@@ -9304,6 +9728,11 @@ export const crmRouter = {
 				}
 			}
 
+			// Un primer DPI también exige Buró, aunque no active el candado.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, coDebtorAntesDelUpdate?.dpi);
+
 			// Misma carrera que en `updateLead`: entre el candado y esta sentencia,
 			// otra transacción puede aprobar el análisis de la oportunidad que
 			// respalda y el DPI del co-deudor se escribiría igual. La condición
@@ -9371,6 +9800,28 @@ export const crmRouter = {
 						database: tx,
 					});
 				}
+				if (coDebtorAntesDelUpdate && consultarBuroPorDpi) {
+					const marcadas = await tx
+						.update(opportunities)
+						.set({ buroRevalidacionAl30: true })
+						.where(
+							and(
+								eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId),
+								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
+								eq(opportunities.buroRevalidacionAl30, false),
+							),
+						)
+						.returning({ id: opportunities.id });
+					for (const oportunidad of marcadas) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "habilitar_buro_revalidacion_30",
+							data: { origen: "updateCoDebtor", coDebtorId: id },
+						});
+					}
+				}
 
 				return filas;
 			});
@@ -9403,6 +9854,12 @@ export const crmRouter = {
 				auditRecord(overrideDeMora);
 			}
 
+			if (consultarBuroPorDpi) {
+				consultarBuroAlVeinteTrasGuardar(
+					updatedCoDebtor.opportunityId,
+					context.userId,
+				);
+			}
 			return updatedCoDebtor;
 		}),
 

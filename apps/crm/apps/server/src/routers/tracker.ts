@@ -538,6 +538,17 @@ export function llaveDeEnvio(registroId: string, intento: number): string {
 	return `factura-seguro/${registroId}/${intento}`;
 }
 
+// Un resultado tardío no pisa otro intento ni un `enviado`: el reintento de un
+// `pendiente` abandonado repite el mismo intento y puede terminar antes que el
+// envío original.
+function mismoIntentoSinEnviar(registro: { id: string; intento: number }) {
+	return and(
+		eq(insuranceInvoiceSubmissions.id, registro.id),
+		eq(insuranceInvoiceSubmissions.intento, registro.intento),
+		ne(insuranceInvoiceSubmissions.status, "enviado"),
+	);
+}
+
 // `correo` es el guardado en el registro para este intento.
 async function enviarYRegistrar(params: {
 	registro: { id: string; intento: number };
@@ -559,7 +570,7 @@ async function enviarYRegistrar(params: {
 		await db
 			.update(insuranceInvoiceSubmissions)
 			.set({ status: "enviado", error: null, sentAt: ahora, updatedAt: ahora })
-			.where(eq(insuranceInvoiceSubmissions.id, params.registro.id));
+			.where(mismoIntentoSinEnviar(params.registro));
 		return "enviado";
 	}
 	// Otro proceso tiene la misma llave en Resend: no se toca el registro.
@@ -570,7 +581,7 @@ async function enviarYRegistrar(params: {
 		await db
 			.update(insuranceInvoiceSubmissions)
 			.set({ error: resultado.error.slice(0, 2000), updatedAt: ahora })
-			.where(eq(insuranceInvoiceSubmissions.id, params.registro.id));
+			.where(mismoIntentoSinEnviar(params.registro));
 		return "pendiente";
 	}
 	await db
@@ -581,7 +592,7 @@ async function enviarYRegistrar(params: {
 			sentAt: null,
 			updatedAt: ahora,
 		})
-		.where(eq(insuranceInvoiceSubmissions.id, params.registro.id));
+		.where(mismoIntentoSinEnviar(params.registro));
 	return "fallido";
 }
 

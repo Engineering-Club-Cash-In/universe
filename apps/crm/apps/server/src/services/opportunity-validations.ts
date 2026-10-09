@@ -21,6 +21,7 @@ import {
 } from "../db/schema/validations";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import { evaluarBuro } from "../lib/buro-evaluation";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
 	isOpportunityFromSource,
@@ -32,6 +33,7 @@ import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 const REINTENTOS_AUTOMATICOS = 1;
 const ESPERA_ENTRE_REINTENTOS_MS = 800;
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Lector = Pick<Transaction, "select">;
 
 /** El `fetch` de RENAP no lleva `AbortSignal`, así que la cota se aplica acá */
 const TIMEOUT_RENAP_MS = 30_000;
@@ -341,15 +343,16 @@ async function registrarValidacion(
 		// cualquier otra escritura a esta bitácora, incluida un override
 		// concurrente (mismo candado en `marcarValidacionManualCritico`) —
 		// necesario porque bajo READ COMMITTED un simple "insertar solo si..." no alcanza
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${valores.opportunityId}))`,
-		);
+		await tomarCandadoBuroSiLibre(tx, valores.opportunityId);
 
 		await insertar(tx);
 	});
 }
 
-async function cargarOportunidadConLead(opportunityId: string): Promise<{
+async function cargarOportunidadConLead(
+	opportunityId: string,
+	lector: Lector = db,
+): Promise<{
 	source: LeadSource | null;
 	leadSource: LeadSource | null;
 	leadId: string | null;
@@ -358,7 +361,7 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 	creditType: string;
 	analysisStatus: string;
 } | null> {
-	const [row] = await db
+	const [row] = await lector
 		.select({
 			source: opportunities.source,
 			leadSource: leads.source,
@@ -380,10 +383,11 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 async function elBotValidoAlLead(
 	leadId: string | null,
 	leadDpi: string | null,
+	lector: Lector = db,
 ): Promise<boolean> {
 	if (!leadId || !leadDpi) return false;
 
-	const [otpCompletado] = await db
+	const [otpCompletado] = await lector
 		.select({ id: otps.id })
 		.from(otps)
 		.where(
@@ -398,7 +402,7 @@ async function elBotValidoAlLead(
 
 	if (!otpCompletado) return false;
 
-	const [estudioVigente] = await db
+	const [estudioVigente] = await lector
 		.select({ dpi: infornetPersonaCache.dpi })
 		.from(infornetPersonaCache)
 		.where(
@@ -419,8 +423,11 @@ export type ResolucionExencion = {
 };
 
 /** Una oportunidad ya validada no vuelve a ser exenta: escondería su propio veredicto. Solo cuenta el titular, que es a quien valida el bot */
-async function yaTieneBitacora(opportunityId: string): Promise<boolean> {
-	const [fila] = await db
+async function yaTieneBitacora(
+	opportunityId: string,
+	lector: Lector = db,
+): Promise<boolean> {
+	const [fila] = await lector
 		.select({ id: opportunityValidations.id })
 		.from(opportunityValidations)
 		.where(
@@ -435,13 +442,16 @@ async function yaTieneBitacora(opportunityId: string): Promise<boolean> {
 }
 
 /** Único punto donde se resuelve la exención; lo usan el servicio y el gate */
-export async function resolverExencionPorBot(oportunidad: {
-	opportunityId: string;
-	source: LeadSource | null;
-	leadSource: LeadSource | null;
-	leadId: string | null;
-	leadDpi: string | null;
-}): Promise<ResolucionExencion> {
+export async function resolverExencionPorBot(
+	oportunidad: {
+		opportunityId: string;
+		source: LeadSource | null;
+		leadSource: LeadSource | null;
+		leadId: string | null;
+		leadDpi: string | null;
+	},
+	lector: Lector = db,
+): Promise<ResolucionExencion> {
 	const declaraOrigenBot = isOpportunityFromSource(
 		oportunidad.source,
 		"Whatsapp",
@@ -453,13 +463,14 @@ export async function resolverExencionPorBot(oportunidad: {
 	}
 
 	// Si ya se validó, el veredicto es de esta oportunidad y tiene que verse
-	if (await yaTieneBitacora(oportunidad.opportunityId)) {
+	if (await yaTieneBitacora(oportunidad.opportunityId, lector)) {
 		return { exento: false, origenBotSinEvidencia: false };
 	}
 
 	const validadaPorElBot = await elBotValidoAlLead(
 		oportunidad.leadId,
 		oportunidad.leadDpi,
+		lector,
 	);
 
 	return {
@@ -478,8 +489,9 @@ export async function faltaConsentimientoDelTitular(
 	opportunityId: string,
 	clientType: string | null,
 	creditType: string,
+	lector: Lector = db,
 ): Promise<boolean> {
-	const [exigido] = await db
+	const [exigido] = await lector
 		.select({ tipo: documentRequirementsByClientType.documentType })
 		.from(documentRequirementsByClientType)
 		.where(
@@ -503,7 +515,7 @@ export async function faltaConsentimientoDelTitular(
 
 	if (!exigido) return false;
 
-	const [cargado] = await db
+	const [cargado] = await lector
 		.select({ id: opportunityDocuments.id })
 		.from(opportunityDocuments)
 		.where(
@@ -906,6 +918,7 @@ async function consultarBuro({
 				status: opportunities.status,
 				buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
 				clientType: leads.clientType,
+				leadDpi: leads.dpi,
 				creditType: opportunities.creditType,
 			})
 			.from(opportunities)
@@ -924,6 +937,25 @@ async function consultarBuro({
 			throw new ORPCError("CONFLICT", {
 				message:
 					"La oportunidad cambió de etapa antes de consultar Buró. Recarga la página para ver su estado actual.",
+			});
+		}
+		const [cofirmanteActual] = coDebtorId
+			? await escritor
+					.select({ dpi: coDebtors.dpi })
+					.from(coDebtors)
+					.where(
+						and(
+							eq(coDebtors.id, coDebtorId),
+							eq(coDebtors.opportunityId, opportunityId),
+						),
+					)
+					.limit(1)
+			: [];
+		const dpiActual = coDebtorId ? cofirmanteActual?.dpi : actual.leadDpi;
+		if (!dpiActual || normalizarDpi(dpiActual) !== dpi) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"El DPI del firmante cambió antes de consultar Buró. Recarga la oportunidad.",
 			});
 		}
 		if (
@@ -1109,8 +1141,9 @@ type CofirmanteDeOportunidad = { id: string; fullName: string; dpi: string };
 
 async function cofirmantesDeOportunidad(
 	opportunityId: string,
+	lector: Lector = db,
 ): Promise<CofirmanteDeOportunidad[]> {
-	return db
+	return lector
 		.select({
 			id: coDebtors.id,
 			fullName: coDebtors.fullName,
@@ -1373,8 +1406,11 @@ async function ejecutarBuroDeCofirmanteInterno({
 }
 
 /** Lee `renapinfo`, no consulta la API */
-async function obtenerDetalleRenap(dpi: string): Promise<DetalleRenap | null> {
-	const [fila] = await db
+async function obtenerDetalleRenap(
+	dpi: string,
+	lector: Lector = db,
+): Promise<DetalleRenap | null> {
+	const [fila] = await lector
 		.select()
 		.from(renapInfo)
 		.where(eqDpi(renapInfo.dpi, dpi))
@@ -1408,8 +1444,9 @@ async function obtenerDetalleRenap(dpi: string): Promise<DetalleRenap | null> {
 async function obtenerDetalleBuro(
 	dpi: string,
 	expiraEnAuditado: Date | null,
+	lector: Lector = db,
 ): Promise<DetalleBuro | null> {
-	const [fila] = await db
+	const [fila] = await lector
 		.select()
 		.from(infornetPersonaCache)
 		.where(eq(infornetPersonaCache.dpi, dpi))
@@ -1577,9 +1614,7 @@ async function marcarValidacionManualCritico({
 		// Mismo candado que `registrarValidacion`, tomado ANTES de leer
 		// `ultima`: el chequeo "¿sigue en error?" y el insert quedan
 		// protegidos como una sola operación (necesario bajo READ COMMITTED)
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${opportunityId}))`,
-		);
+		await tomarCandadoBuroSiLibre(tx, opportunityId);
 
 		// Chequeo defensivo server-side: la UI puede mostrar el botón
 		// desactualizado (otra pestaña, un reintento que sí resolvió)
@@ -1682,8 +1717,9 @@ function filaMasRecientePorDpi(
 /** Detalle de un override manual, con el nombre de quien lo marcó */
 async function obtenerOverride(
 	validationId: string,
+	lector: Lector = db,
 ): Promise<OverrideInfo | null> {
-	const [fila] = await db
+	const [fila] = await lector
 		.select({
 			motivo: opportunityValidationOverrideLogs.reason,
 			marcadoAt: opportunityValidationOverrideLogs.createdAt,
@@ -1706,11 +1742,12 @@ async function obtenerOverride(
 /** Buró de cada cofirmante, leído de la bitácora y del caché; no consulta la API */
 async function estadoBuroCofirmantes(
 	opportunityId: string,
+	lector: Lector = db,
 ): Promise<EstadoBuroCofirmante[]> {
-	const cofirmantes = await cofirmantesDeOportunidad(opportunityId);
+	const cofirmantes = await cofirmantesDeOportunidad(opportunityId, lector);
 	if (cofirmantes.length === 0) return [];
 
-	const filas = await db
+	const filas = await lector
 		.select()
 		.from(opportunityValidations)
 		.where(
@@ -1733,8 +1770,12 @@ async function estadoBuroCofirmantes(
 			);
 
 			const [detalleBuro, overrideBuro] = await Promise.all([
-				buro ? obtenerDetalleBuro(buro.dpi, buro.expiraEn ?? null) : null,
-				buro?.fuenteDeDatos === "manual" ? obtenerOverride(buro.id) : null,
+				buro
+					? obtenerDetalleBuro(buro.dpi, buro.expiraEn ?? null, lector)
+					: null,
+				buro?.fuenteDeDatos === "manual"
+					? obtenerOverride(buro.id, lector)
+					: null,
 			]);
 
 			return {
@@ -1756,22 +1797,27 @@ async function estadoBuroCofirmantes(
 /** Estado de las validaciones: exención, DPI y últimos resultados de la bitácora */
 export async function getValidaciones({
 	opportunityId,
+	lector = db,
 }: {
 	opportunityId: string;
+	lector?: Lector;
 }): Promise<EstadoValidacionesOportunidad> {
-	const oportunidad = await cargarOportunidadConLead(opportunityId);
+	const oportunidad = await cargarOportunidadConLead(opportunityId, lector);
 
 	if (!oportunidad) {
 		throw new OportunidadNoEncontradaError();
 	}
 
-	const exencion = await resolverExencionPorBot({
-		opportunityId,
-		...oportunidad,
-	});
+	const exencion = await resolverExencionPorBot(
+		{
+			opportunityId,
+			...oportunidad,
+		},
+		lector,
+	);
 
 	if (exencion.exento) {
-		const cofirmantes = await estadoBuroCofirmantes(opportunityId);
+		const cofirmantes = await estadoBuroCofirmantes(opportunityId, lector);
 		return {
 			exento: true,
 			faltaDpi: false,
@@ -1789,6 +1835,7 @@ export async function getValidaciones({
 					opportunityId,
 					oportunidad.clientType,
 					oportunidad.creditType,
+					lector,
 				)),
 			enAnalisisPendiente: false,
 			dpiDesactualizado: false,
@@ -1803,7 +1850,7 @@ export async function getValidaciones({
 		};
 	}
 
-	const validaciones = await db
+	const validaciones = await lector
 		.select()
 		.from(opportunityValidations)
 		.where(
@@ -1842,7 +1889,7 @@ export async function getValidaciones({
 	// Cada fuente bloquea por su cuenta (mismo criterio que
 	// `cargarVigenciasPorFuente`, que sí filtra por DPI actual): un error de
 	// una fila desactualizada no cuenta, para no contradecir al gate real
-	const cofirmantes = await estadoBuroCofirmantes(opportunityId);
+	const cofirmantes = await estadoBuroCofirmantes(opportunityId, lector);
 
 	const aprobacionBloqueada =
 		(buro?.estado === "error" && !buroDesactualizado) ||
@@ -1852,13 +1899,17 @@ export async function getValidaciones({
 		);
 
 	const [detalleRenap, detalleBuro] = await Promise.all([
-		renap?.dpi ? obtenerDetalleRenap(renap.dpi) : null,
-		buro?.dpi ? obtenerDetalleBuro(buro.dpi, buro?.expiraEn ?? null) : null,
+		renap?.dpi ? obtenerDetalleRenap(renap.dpi, lector) : null,
+		buro?.dpi
+			? obtenerDetalleBuro(buro.dpi, buro?.expiraEn ?? null, lector)
+			: null,
 	]);
 
 	const [overrideBuro, overrideRenap] = await Promise.all([
-		buro?.fuenteDeDatos === "manual" ? obtenerOverride(buro.id) : null,
-		renap?.fuenteDeDatos === "manual" ? obtenerOverride(renap.id) : null,
+		buro?.fuenteDeDatos === "manual" ? obtenerOverride(buro.id, lector) : null,
+		renap?.fuenteDeDatos === "manual"
+			? obtenerOverride(renap.id, lector)
+			: null,
 	]);
 
 	return {
@@ -1874,6 +1925,7 @@ export async function getValidaciones({
 			opportunityId,
 			oportunidad.clientType,
 			oportunidad.creditType,
+			lector,
 		),
 		enAnalisisPendiente: ESTADOS_EN_ANALISIS.includes(
 			oportunidad.analysisStatus,

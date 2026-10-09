@@ -62,6 +62,7 @@ import {
 } from "../lib/analysis-checklist";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
 import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	isReservedBankCoverageDescription,
@@ -1641,6 +1642,16 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
+				if (elDpiCambia || consultarBuroPorDpi) {
+					const oportunidadesDelLead = await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.leadId, id))
+						.orderBy(opportunities.id);
+					for (const oportunidad of oportunidadesDelLead) {
+						await tomarCandadoBuroSiLibre(tx, oportunidad.id);
+					}
+				}
 				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
 				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
 				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
@@ -1749,13 +1760,16 @@ export const crmRouter = {
 						const pierdeExencionBot =
 							veniaDelBot &&
 							(
-								await resolverExencionPorBot({
-									opportunityId: oportunidadActiva.id,
-									source: oportunidadActiva.source,
-									leadSource: leadAntesDelUpdate?.source ?? null,
-									leadId: id,
-									leadDpi: updateData.dpi ?? leadAntesDelUpdate?.dpi ?? null,
-								})
+								await resolverExencionPorBot(
+									{
+										opportunityId: oportunidadActiva.id,
+										source: oportunidadActiva.source,
+										leadSource: leadAntesDelUpdate?.source ?? null,
+										leadId: id,
+										leadDpi: updateData.dpi ?? leadAntesDelUpdate?.dpi ?? null,
+									},
+									tx,
+								)
 							).exento;
 						if (pierdeExencionBot && oportunidadActiva.porcentaje > 30) {
 							throw new ORPCError("BAD_REQUEST", {
@@ -3813,8 +3827,11 @@ export const crmRouter = {
 						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
 					);
 				}
+				if (cambiaElLeadDeLaOportunidad) {
+					await tomarCandadoBuroSiLibre(tx, id);
+				}
 				if (input.source !== undefined && input.source !== "Whatsapp") {
-					await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${id}))`);
+					await tomarCandadoBuroSiLibre(tx, id);
 					const [origenActual] = await tx
 						.select({
 							source: opportunities.source,
@@ -3835,13 +3852,16 @@ export const crmRouter = {
 							(origenActual.source === null &&
 								origenActual.leadSource === "Whatsapp"))
 					) {
-						const exencion = await resolverExencionPorBot({
-							opportunityId: id,
-							source: origenActual.source,
-							leadSource: origenActual.leadSource,
-							leadId: origenActual.leadId,
-							leadDpi: origenActual.leadDpi,
-						});
+						const exencion = await resolverExencionPorBot(
+							{
+								opportunityId: id,
+								source: origenActual.source,
+								leadSource: origenActual.leadSource,
+								leadId: origenActual.leadId,
+								leadDpi: origenActual.leadDpi,
+							},
+							tx,
+						);
 						if (exencion.exento) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:
@@ -3853,7 +3873,7 @@ export const crmRouter = {
 				let condicionBuroParaAnalisis: SQL | undefined;
 				let habilitarBuroAlRegresar = false;
 				if (regresandoAAnalisis && !parcheRevalidacion) {
-					await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${id}))`);
+					await tomarCandadoBuroSiLibre(tx, id);
 					const [actual] = await tx
 						.select({ stageId: opportunities.stageId })
 						.from(opportunities)
@@ -3865,7 +3885,10 @@ export const crmRouter = {
 								"La etapa cambió. Recarga la oportunidad e intenta de nuevo.",
 						});
 					}
-					const estadoBuro = await getValidaciones({ opportunityId: id });
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
 					habilitarBuroAlRegresar = Boolean(
 						errorBuroVigenteParaAnalisis(estadoBuro),
 					);
@@ -3873,7 +3896,7 @@ export const crmRouter = {
 				if (entrandoAAnalisis) {
 					// Espera cualquier escritura en la bitácora antes de decidir si el
 					// estudio ya está completo. La comprobación no llama a Infornet.
-					await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${id}))`);
+					await tomarCandadoBuroSiLibre(tx, id);
 					const [actual] = await tx
 						.select({
 							stageId: opportunities.stageId,
@@ -3911,7 +3934,10 @@ export const crmRouter = {
 							message: `El DPI del titular es inválido: ${dpiValidado.error}`,
 						});
 					}
-					const estadoBuro = await getValidaciones({ opportunityId: id });
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
 					dpiComprobadoParaAnalisis = dpiValidado.dpiLimpio;
 					if (
 						estadoBuro.exento &&
@@ -4984,11 +5010,10 @@ export const crmRouter = {
 							// candado. Comprobamos de nuevo el veredicto mientras lo
 							// retenemos hasta confirmar la aprobación.
 							if (firmaBitacoraRevisada !== null) {
-								await tx.execute(
-									sql`select pg_advisory_xact_lock(hashtext(${input.opportunityId}))`,
-								);
+								await tomarCandadoBuroSiLibre(tx, input.opportunityId);
 								const estadoActual = await getValidaciones({
 									opportunityId: input.opportunityId,
+									lector: tx,
 								});
 								if (
 									firmaBitacoraBuro(estadoActual) !== firmaBitacoraRevisada ||
@@ -6843,9 +6868,7 @@ export const crmRouter = {
 					// El borrado se confirma bajo el mismo candado que protege la consulta.
 					// R2 se limpia después para no retener una conexión durante esa llamada.
 					await db.transaction(async (tx) => {
-						await tx.execute(
-							sql`select pg_advisory_xact_lock(hashtext(${document.opportunityId}))`,
-						);
+						await tomarCandadoBuroSiLibre(tx, document.opportunityId);
 						const [borrado] = await tx
 							.delete(opportunityDocuments)
 							.where(eq(opportunityDocuments.id, input.documentId))
@@ -9551,6 +9574,7 @@ export const crmRouter = {
 			// confirma mientras corre quedaría aprobada sin buró
 			let oportunidadMarcada = false;
 			const [newCoDebtor] = await db.transaction(async (tx) => {
+				await tomarCandadoBuroSiLibre(tx, input.opportunityId);
 				await tomarCandadoBuroInterno(tx);
 
 				const creado = await tx
@@ -9756,6 +9780,12 @@ export const crmRouter = {
 			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
 			// aprobada contra la identidad vieja.
 			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				if (coDebtorAntesDelUpdate && updateData.dpi !== undefined) {
+					await tomarCandadoBuroSiLibre(
+						tx,
+						coDebtorAntesDelUpdate.opportunityId,
+					);
+				}
 				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
 				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
 				// oportunidad serializa las dos escrituras.
@@ -9923,6 +9953,7 @@ export const crmRouter = {
 				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
 				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
 				if (coDeudorABorrar) {
+					await tomarCandadoBuroSiLibre(tx, coDeudorABorrar.opportunityId);
 					await tx
 						.select({ id: opportunities.id })
 						.from(opportunities)

@@ -7,6 +7,7 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { auditRecord } from "../lib/audit";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import { eqDpi } from "../lib/dpi-lookup";
 import { eqEmail } from "../lib/email-lookup";
 import {
@@ -411,6 +412,16 @@ export async function updateLeadByEmail(c: Context) {
 		// serializa las dos.
 		let oportunidadesMarcadas: string[] = [];
 		const [updatedLead] = await db.transaction(async (tx) => {
+			if (candadoEnElPredicado || consultarBuroPorDpi) {
+				const oportunidadesDelLead = await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.leadId, existingLead.id))
+					.orderBy(opportunities.id);
+				for (const oportunidad of oportunidadesDelLead) {
+					await tomarCandadoBuroSiLibre(tx, oportunidad.id);
+				}
+			}
 			if (candadoEnElPredicado) {
 				await tx
 					.select({ id: opportunities.id })

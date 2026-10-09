@@ -36,6 +36,7 @@ let secuenciaEtapas: Fila[][] = [];
 const lecturasPorTabla: unknown[] = [];
 let respuestaExecute: unknown = [];
 let alEjecutar: (() => void) | null = null;
+let candadoBuroOcupado = false;
 
 type Escritura = {
 	tipo: "update" | "insert";
@@ -124,8 +125,11 @@ const dbFalso = {
 	update: (tabla: unknown) => constructorUpdate(tabla),
 	insert: (tabla: unknown) => constructorInsert(tabla),
 	delete: () => ({ where: async () => [] }),
-	execute: async () => {
+	execute: async (consulta?: unknown) => {
 		alEjecutar?.();
+		if (JSON.stringify(consulta)?.includes("pg_try_advisory_xact_lock")) {
+			return { rows: [{ tomado: !candadoBuroOcupado }] };
+		}
 		return respuestaExecute;
 	},
 	transaction: async <T>(correr: (tx: unknown) => Promise<T>) =>
@@ -144,7 +148,7 @@ instalarDbFalso();
 
 const { crmRouter } = await import("./crm");
 const { validationsRouter } = await import("./validations");
-const { ejecutarBuroAlVeinteSiCorresponde } = await import(
+const { ejecutarBuroAlVeinteSiCorresponde, getValidaciones } = await import(
 	"../services/opportunity-validations"
 );
 
@@ -270,6 +274,7 @@ beforeEach(async () => {
 	secuenciaEtapas = [];
 	respuestaExecute = [];
 	alEjecutar = null;
+	candadoBuroOcupado = false;
 	escrituras.length = 0;
 	filasDevueltasPorUpdate = [{ id: "oportunidad" }];
 });
@@ -1009,6 +1014,44 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 	});
 });
 
+test("el lector de validaciones usa la transacción recibida, sin abrir otra conexión", async () => {
+	const opportunityId = "35353535-3535-4535-8535-353535353535";
+	filasPorTabla.set(opportunities, [
+		{
+			id: opportunityId,
+			source: "web",
+			leadSource: "web",
+			leadDpi: "2978485181201",
+			clientType: "individual",
+			creditType: "autocompra",
+			analysisStatus: "pending",
+		},
+	]);
+	filasPorTabla.set(opportunityValidations, [
+		{
+			id: "resultado-buro",
+			tipo: "buro",
+			estado: "aprobado",
+			dpi: "2978485181201",
+			expiraEn: new Date(Date.now() + 86_400_000),
+		},
+	]);
+	const selectOriginal = dbFalso.select;
+	const lector = { select: selectOriginal } as unknown as NonNullable<
+		Parameters<typeof getValidaciones>[0]["lector"]
+	>;
+	dbFalso.select = () => {
+		throw new Error("Se usó el pool fuera de la transacción");
+	};
+	try {
+		const estado = await getValidaciones({ opportunityId, lector });
+		expect(estado.buro?.estado).toBe("aprobado");
+		expect(estado.exento).toBe(false);
+	} finally {
+		dbFalso.select = selectOriginal;
+	}
+});
+
 describe("revalidación excepcional de Buró en el 30%", () => {
 	const OPORTUNIDAD = "61616161-6161-4161-8161-616161616161";
 	const LEAD = "62626262-6262-4262-8262-626262626262";
@@ -1541,6 +1584,20 @@ describe("updateOpportunity: Buró obligatorio antes del análisis", () => {
 				contextoDe("vendedor", "sales"),
 			),
 		).rejects.toThrow(/ingresa el DPI del titular/);
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("Buró en curso bloquea el paso al 30% sin esperar una conexión", async () => {
+		prepararDestino(30);
+		filasPorTabla.set(leads, [{ id: LEAD, dpi: "2978485181201" }]);
+		candadoBuroOcupado = true;
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, stageId: ETAPA_30 },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/consulta de Buró sigue en curso/);
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 

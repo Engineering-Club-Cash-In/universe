@@ -52,7 +52,9 @@ import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { useConfirmarEnvioFactura } from "@/components/confirmar-envio-factura";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -108,6 +110,12 @@ import {
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import {
+	avisoFacturaSubida,
+	etiquetaEnvioAseguradora,
+	type ResultadoFacturaSubida,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
+import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
@@ -123,6 +131,7 @@ import {
 	getManualOpportunityDocumentFields,
 	type ManualOpportunityDocumentType,
 } from "@/lib/manual-opportunity-document";
+import { formatearTamanoArchivo } from "@/lib/tamano-archivo";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
@@ -4276,8 +4285,13 @@ function DocumentsManager({
 			}
 			return uploadSingleDocument(documentType);
 		},
-		onSuccess: () => {
-			toast.success("Documento subido exitosamente");
+		onSuccess: (data) => {
+			const aviso = avisoFacturaSubida(
+				(data as { facturaSeguro?: ResultadoFacturaSubida | null } | undefined)
+					?.facturaSeguro,
+			);
+			if (aviso) toast[aviso.tipo](aviso.texto);
+			else toast.success("Documento subido exitosamente");
 			setSelectedFile(null);
 			setDescription("");
 			setDocumentType("");
@@ -4302,6 +4316,8 @@ function DocumentsManager({
 			toast.error(error.message || "Error al subir el documento");
 		},
 	});
+
+	const confirmacionFactura = useConfirmarEnvioFactura(opportunityId);
 
 	// Delete mutation
 	const deleteMutation = useMutation({
@@ -4875,12 +4891,22 @@ function DocumentsManager({
 							!selectedFile ||
 							!documentType ||
 							uploadMutation.isPending ||
+							confirmacionFactura.revisando ||
 							(documentType === "other" && !description.trim())
 						}
-						onClick={() => uploadMutation.mutate()}
+						onClick={() => {
+							if (documentType === "seguro_vehiculo") {
+								void confirmacionFactura.confirmarSiSeEnvia(() =>
+									uploadMutation.mutate(),
+								);
+								return;
+							}
+							uploadMutation.mutate();
+						}}
 					>
 						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}
 					</Button>
+					{confirmacionFactura.dialogo}
 				</CardContent>
 			</Card>
 
@@ -4953,23 +4979,37 @@ function DocumentsManager({
 													</Badge>
 												);
 											})()}
+										{(() => {
+											const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+											return (
+												envio && (
+													<Badge className={`flex-shrink-0 text-xs ${envio.className}`}>
+														{envio.texto}
+													</Badge>
+												)
+											);
+										})()}
 									</div>
 											{doc.description && (
 												<p className="mt-1 text-muted-foreground text-xs">
 													{doc.description}
 												</p>
 											)}
-											<div className="mt-1 flex items-center gap-4 text-muted-foreground text-xs">
-												<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-												<span>
-													Subido por{" "}
-													{doc.uploadedBy?.name || "Usuario desconocido"}
-												</span>
-												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
+											<div className="mt-1 space-y-0.5 text-muted-foreground text-xs">
+												<p>{textoSubidoPor(doc)}</p>
+												<p>
+													{formatGuatemalaDateTime(doc.uploadedAt)} ·{" "}
+													{formatearTamanoArchivo(doc.size)}
+												</p>
 											</div>
 										</div>
 									</div>
 								<div className="flex flex-shrink-0 items-center gap-2">
+									<ReintentoFacturaSeguro
+										opportunityId={opportunityId}
+										disponible={doc.envioAseguradora?.reintentoDisponible}
+										aseguradora={doc.envioAseguradora?.aseguradora}
+									/>
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&
 										integrityStatusResolved &&

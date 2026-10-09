@@ -41,7 +41,7 @@ import {
 	preguntasIaCobros,
 	resumenesIaCobros,
 } from "../db/schema/cobros";
-import { clients, leads } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { contactosReferenciasCobros } from "../db/schema/referencias-cobros";
 import { renapInfo } from "../db/schema/renap";
 import type { HitoCredito, ResumenIA } from "../routers/ficha-cobros";
@@ -382,7 +382,31 @@ export function nombresDeSolicitudes(solicitudes: SolicitudNombres[]): {
 	};
 }
 
-type IdentidadCaso = { leadId: string | null; opportunityId: string | null };
+export type IdentidadCaso = {
+	leadId: string | null;
+	opportunityId: string | null;
+};
+
+/**
+ * Las identidades (lead + oportunidad) cuyos nombres hay que tapar: la que
+ * resolvió el caso, la del cliente del contrato y todas las que comparten su
+ * SIFCO, sin repetir. Tapar de más es inocuo; dejar un nombre sin tapar no.
+ */
+export function identidadesDelCaso(
+	ctx: IdentidadCaso,
+	delContrato: IdentidadCaso | null,
+	porSifco: IdentidadCaso[],
+): IdentidadCaso[] {
+	const vistas = new Set<string>();
+	const identidades: IdentidadCaso[] = [];
+	for (const i of [ctx, ...(delContrato ? [delContrato] : []), ...porSifco]) {
+		const clave = `${i.leadId ?? ""}|${i.opportunityId ?? ""}`;
+		if (vistas.has(clave)) continue;
+		vistas.add(clave);
+		identidades.push({ leadId: i.leadId, opportunityId: i.opportunityId });
+	}
+	return identidades;
+}
 
 /** Todos los nombres guardados de una persona del caso (lead + oportunidad). */
 async function nombresDeIdentidad(
@@ -461,7 +485,7 @@ async function nombresDeIdentidad(
  * cliente cae a una por SIFCO, quizá de otro lead): tapar de más es inocuo,
  * dejar un nombre sin tapar no. Lanza si no se pueden leer.
  */
-async function cargarNombresCaso(
+export async function cargarNombresCaso(
 	casoCobroId: string,
 	nombreCartera: Promise<string | null>,
 ): Promise<Set<string>> {
@@ -480,19 +504,20 @@ async function cargarNombresCaso(
 		.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
-	const identidades: IdentidadCaso[] = [
-		{ leadId: ctx.leadId, opportunityId: ctx.opportunityId },
-	];
-	if (
-		delContrato &&
-		(delContrato.leadId !== ctx.leadId ||
-			delContrato.opportunityId !== ctx.opportunityId)
-	) {
-		identidades.push({
-			leadId: delContrato.leadId,
-			opportunityId: delContrato.opportunityId,
-		});
-	}
+	// Todas las oportunidades con el SIFCO del caso: SIFCO puede repetirse en
+	// oportunidades de otro lead y `resolverContextoCaso` elige solo una; los
+	// nombres de las demás (cónyuge, codeudores, referencias) también se tapan.
+	const porSifco = ctx.numeroCreditoSifco
+		? await db
+				.select({ id: opportunities.id, leadId: opportunities.leadId })
+				.from(opportunities)
+				.where(eq(opportunities.numeroSifco, ctx.numeroCreditoSifco))
+		: [];
+	const identidades = identidadesDelCaso(
+		ctx,
+		delContrato ?? null,
+		porSifco.map((o) => ({ leadId: o.leadId, opportunityId: o.id })),
+	);
 	const [porIdentidad, delCredito, copiados] = await Promise.all([
 		Promise.all(identidades.map((i) => nombresDeIdentidad(ctx, i))),
 		nombreCartera,

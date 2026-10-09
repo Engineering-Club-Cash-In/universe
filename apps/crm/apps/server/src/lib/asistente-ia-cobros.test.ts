@@ -6,6 +6,7 @@ import {
 	generarUnaVez,
 	hayQueResumir,
 	huellaContexto,
+	identidadesDelCaso,
 	invalidarGeneracion,
 	MODELO_ASISTENTE,
 	nombresDeSolicitudes,
@@ -175,6 +176,31 @@ describe("armarContextoIA", () => {
 			],
 		});
 		expect(huellaContexto(otra)).not.toBe(a);
+	});
+});
+
+describe("identidadesDelCaso", () => {
+	const id = (leadId: string | null, opportunityId: string | null) => ({
+		leadId,
+		opportunityId,
+	});
+	test("suma las oportunidades que comparten el SIFCO, sin repetir", () => {
+		expect(
+			identidadesDelCaso(id("l1", "o1"), null, [
+				id("l1", "o1"),
+				id("l2", "o2"),
+			]),
+		).toEqual([id("l1", "o1"), id("l2", "o2")]);
+	});
+	test("incluye la del cliente del contrato aunque difiera de la resuelta", () => {
+		expect(
+			identidadesDelCaso(id("l2", "o2"), id("l1", "o1"), [id("l2", "o2")]),
+		).toEqual([id("l2", "o2"), id("l1", "o1")]);
+	});
+	test("sin nada más queda la resuelta", () => {
+		expect(identidadesDelCaso(id(null, null), null, [])).toEqual([
+			id(null, null),
+		]);
 	});
 });
 

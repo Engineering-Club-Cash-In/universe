@@ -12,8 +12,9 @@ export type MembresiaSocio = { companyId: string; sellerId: string | null };
 // Única fuente de verdad del alcance de un socio.
 export async function resolvePartnerScope(
 	userId: string,
+	conexion: Pick<typeof db, "select"> = db,
 ): Promise<MembresiaSocio[]> {
-	const rows = await db
+	const rows = await conexion
 		.select({
 			companyId: partnerMembers.companyId,
 			sellerId: partnerMembers.sellerId,

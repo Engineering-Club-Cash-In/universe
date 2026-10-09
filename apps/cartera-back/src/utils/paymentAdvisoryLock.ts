@@ -32,7 +32,8 @@ const locksDeLaCadena = new AsyncLocalStorage<
 
 export type PaymentAdvisoryLockConnection = {
   query: (text: string, values?: unknown[]) => Promise<unknown>;
-  release: () => void;
+  /** `true` = destruir la conexión en vez de devolverla al pool (conserva locks de sesión). */
+  release: (descartar?: boolean) => void;
 };
 
 declare const paymentLockBrand: unique symbol;
@@ -117,6 +118,7 @@ export async function withPaymentAdvisoryLock<T>(
         );
   const lock = {} as PaymentAdvisoryLock;
   let tomado = false;
+  let descartarConexion = false;
   try {
     if (limite === null) {
       await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
@@ -138,6 +140,11 @@ export async function withPaymentAdvisoryLock<T>(
     const sostenidos = new Map(yaSostenidos ?? []);
     sostenidos.set(credito_id, lock);
     return await locksDeLaCadena.run(sostenidos, () => fn(lock));
+  } catch (error) {
+    if (error instanceof PaymentAdvisoryLockTimeoutError && error.conexionDescartable) {
+      descartarConexion = true;
+    }
+    throw error;
   } finally {
     heldPaymentLocks.delete(lock);
     if (tomado || limite === null) {
@@ -147,10 +154,14 @@ export async function withPaymentAdvisoryLock<T>(
           credito_id,
         ]);
       } catch (unlockError) {
+        descartarConexion = true;
         console.error("⚠️ Error liberando advisory lock:", unlockError);
       }
     }
-    lockConn.release();
+    // Un advisory lock es de sesión: si no se pudo soltar, devolver la conexión al
+    // pool dejaría el lock del crédito tomado para siempre. Se destruye.
+    if (descartarConexion) lockConn.release(true);
+    else lockConn.release();
   }
 }
 
@@ -178,6 +189,7 @@ export async function tryWithPaymentAdvisoryLock<T>(
 ): Promise<{ obtenido: true; valor: T } | { obtenido: false }> {
   const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
   let obtenido = false;
+  let descartar = false;
 
   try {
     const res = (await lockConn.query(
@@ -197,10 +209,12 @@ export async function tryWithPaymentAdvisoryLock<T>(
           credito_id,
         ]);
       } catch (unlockError) {
+        descartar = true;
         console.error("⚠️ Error liberando advisory lock:", unlockError);
       }
     }
-    lockConn.release();
+    if (descartar) lockConn.release(true);
+    else lockConn.release();
   }
 }
 

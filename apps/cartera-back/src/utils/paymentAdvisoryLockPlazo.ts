@@ -4,6 +4,12 @@
 import type { PaymentAdvisoryLockConnection } from "./paymentAdvisoryLock";
 
 export class PaymentAdvisoryLockTimeoutError extends Error {
+  /**
+   * `true` si el lock llegó vencido el plazo y NO se pudo soltar: la sesión de
+   * Postgres lo conserva, así que esa conexión no puede volver al pool.
+   */
+  conexionDescartable = false;
+
   constructor(credito_id: number, esperaMaximaMs: number) {
     super(`No se obtuvo el lock del crédito ${credito_id} en ${esperaMaximaMs} ms`);
     this.name = "PaymentAdvisoryLockTimeoutError";
@@ -69,6 +75,7 @@ export async function sondearLockAntesDe(
     const tomado = Boolean(res?.rows?.[0]?.tomado);
     const vencido = Date.now() >= limite;
     if (tomado && !vencido) return;
+    let liberacionFallo = false;
     if (tomado) {
       try {
         await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
@@ -76,11 +83,14 @@ export async function sondearLockAntesDe(
           credito_id,
         ]);
       } catch (unlockError) {
+        liberacionFallo = true;
         console.error("⚠️ Error liberando advisory lock vencido:", unlockError);
       }
     }
     if (vencido) {
-      throw new PaymentAdvisoryLockTimeoutError(credito_id, esperaMaximaMs);
+      const error = new PaymentAdvisoryLockTimeoutError(credito_id, esperaMaximaMs);
+      error.conexionDescartable = liberacionFallo;
+      throw error;
     }
     await new Promise((r) => setTimeout(r, pausaMs));
   }

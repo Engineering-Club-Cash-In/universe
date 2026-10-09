@@ -87,3 +87,40 @@ describe("sondearLockAntesDe", () => {
     expect(consultas.some((q) => q.includes("unlock"))).toBeFalse();
   });
 });
+
+describe("sondearLockAntesDe · liberación fallida", () => {
+  it("marca la conexión como descartable si el unlock del lock tardío falla", async () => {
+    const conexion = {
+      query: async (texto: string) => {
+        if (texto.includes("pg_try_advisory_lock")) {
+          await new Promise((r) => setTimeout(r, 30));
+          return { rows: [{ tomado: true }] };
+        }
+        throw new Error("statement canceled");
+      },
+      release: () => undefined,
+    };
+    const error = await sondearLockAntesDe(conexion, 1, 5, Date.now() + 5, 5, 5).catch(
+      (e) => e,
+    );
+    expect(error).toBeInstanceOf(PaymentAdvisoryLockTimeoutError);
+    expect(error.conexionDescartable).toBeTrue();
+  });
+
+  it("no la marca si el unlock funciona", async () => {
+    const conexion = {
+      query: async (texto: string) => {
+        if (texto.includes("pg_try_advisory_lock")) {
+          await new Promise((r) => setTimeout(r, 30));
+          return { rows: [{ tomado: true }] };
+        }
+        return { rows: [] };
+      },
+      release: () => undefined,
+    };
+    const error = await sondearLockAntesDe(conexion, 1, 5, Date.now() + 5, 5, 5).catch(
+      (e) => e,
+    );
+    expect(error.conexionDescartable).toBeFalse();
+  });
+});

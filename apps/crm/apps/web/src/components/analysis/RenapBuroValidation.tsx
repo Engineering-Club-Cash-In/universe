@@ -361,8 +361,9 @@ function AlertasBuro({
 					<XCircle className="h-4 w-4" />
 					<AlertTitle>El buró no aprobó {aQuien}</AlertTitle>
 					<AlertDescription>
-						{buro.mensaje}. Puede rechazar la oportunidad o continuar bajo el
-						riesgo.
+						{/* Fuera de análisis el motivo no viaja: solo se ve el veredicto. */}
+						{buro.mensaje ? `${buro.mensaje}. ` : ""}Puede rechazar la
+						oportunidad o continuar bajo el riesgo.
 					</AlertDescription>
 				</Alert>
 			)}

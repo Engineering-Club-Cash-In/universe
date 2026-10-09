@@ -940,6 +940,76 @@ describe("getResumenBuroOportunidad: acceso antes de cualquier consulta", () => 
 		expect(escrituras).toEqual([]);
 	});
 
+	test("ventas recibe el veredicto sin el estudio; análisis lo recibe completo", async () => {
+		const DPI = "2978485181201";
+		const expiraEn = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+		filasPorTabla.set(opportunities, [
+			{
+				id: OPORTUNIDAD,
+				assignedTo: "asesor-asignado",
+				status: "open",
+				porcentaje: 20,
+				source: "web",
+				leadSource: "web",
+				leadDpi: DPI,
+				creditType: "autocompra",
+			},
+		]);
+		filasPorTabla.set(opportunityValidations, [
+			{
+				id: "resultado-buro",
+				tipo: "buro",
+				estado: "rechazado",
+				dpi: DPI,
+				mensaje: "Referencias judiciales activas",
+				scoreRiesgo: 35,
+				nivelRiesgo: "alto",
+				alertas: ["referencias_judiciales"],
+				fuenteDeDatos: "api",
+				expiraEn,
+			},
+		]);
+		filasPorTabla.set(infornetPersonaCache, [
+			{
+				dpi: DPI,
+				nombres: "Persona",
+				apellidos: "Consultada",
+				esPEP: true,
+				expiraEn,
+			},
+		]);
+		type Detalle = {
+			buro: Record<string, unknown> | null;
+			detalleBuro: unknown;
+			validaciones: Record<string, unknown>[];
+		};
+		const leer = async (usuario: string, role: string) =>
+			(await invocar(
+				validationsRouter.getValidacionesOportunidad,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe(usuario, role),
+			)) as Detalle;
+
+		const ventas = await leer("asesor-asignado", "sales");
+		expect(ventas.buro).toMatchObject({
+			estado: "rechazado",
+			mensaje: null,
+			scoreRiesgo: null,
+			nivelRiesgo: null,
+			alertas: null,
+		});
+		expect(ventas.detalleBuro).toBeNull();
+		expect(ventas.validaciones[0]).toMatchObject({ mensaje: null, alertas: null });
+
+		const analisis = await leer("analista", "analyst");
+		expect(analisis.buro).toMatchObject({
+			mensaje: "Referencias judiciales activas",
+			scoreRiesgo: 35,
+		});
+		expect(analisis.detalleBuro).not.toBeNull();
+		expect(escrituras).toEqual([]);
+	});
+
 	test("la acción que puede consultar Infornet rechaza a Jurídico", async () => {
 		filasPorTabla.set(opportunities, [
 			{

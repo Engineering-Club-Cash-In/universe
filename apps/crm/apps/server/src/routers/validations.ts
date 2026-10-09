@@ -29,9 +29,37 @@ import {
  * NO es el bot de WhatsApp. Las oportunidades del bot quedan exentas.
  * Los cofirmantes pasan solo por Buró, con las mismas reglas que el titular.
  *
- * El detalle sigue visible durante toda la oportunidad. Re-ejecutar solo se
+ * El estado sigue visible durante toda la oportunidad. Re-ejecutar solo se
  * permite al 20% y, excepcionalmente, al 30% tras revalidación. Un asesor solo ve las suyas.
  */
+
+type ConDetalleDeBuro = {
+	estado: string;
+	mensaje: string | null;
+	fuenteDeDatos: string | null;
+	scoreRiesgo: number | null;
+	nivelRiesgo: string | null;
+	alertas: string[] | null;
+};
+
+/**
+ * Fuera de análisis solo viaja el estado y el veredicto. Si ventas recibiera
+ * el estudio, podría leer el reporte de cualquier DPI que cargue como
+ * titular o cofirmante.
+ */
+function sinDetalleDeBuro<T extends ConDetalleDeBuro>(buro: T): T {
+	return {
+		...buro,
+		scoreRiesgo: null,
+		nivelRiesgo: null,
+		alertas: null,
+		// El error técnico y el motivo de una validación manual no son del estudio.
+		mensaje:
+			buro.estado === "error" || buro.fuenteDeDatos === "manual"
+				? buro.mensaje
+				: null,
+	};
+}
 async function verificarAccesoDetalleBuro({
 	opportunityId,
 	userId,
@@ -120,7 +148,20 @@ export const validationsRouter = {
 				ejecutarBuroCofirmantes(parametros),
 			]);
 
-			return { ...titular, cofirmantes };
+			if (PERMISSIONS.canAccessAnalysis(context.userRole)) {
+				return { ...titular, cofirmantes };
+			}
+			return {
+				...titular,
+				buro: titular.buro && sinDetalleDeBuro(titular.buro),
+				cofirmantes: {
+					...cofirmantes,
+					cofirmantes: cofirmantes.cofirmantes.map((cofirmante) => ({
+						...cofirmante,
+						buro: sinDetalleDeBuro(cofirmante.buro),
+					})),
+				},
+			};
 		}),
 
 	/** Estado operativo para ventas; no expone score, alertas ni motivos del buró. */
@@ -310,7 +351,16 @@ export const validationsRouter = {
 					detalleRenap: null,
 					overrideRenap: null,
 					renapDesactualizado: false,
-					validaciones: estado.validaciones.filter((v) => v.tipo === "buro"),
+					buro: estado.buro && sinDetalleDeBuro(estado.buro),
+					detalleBuro: null,
+					validaciones: estado.validaciones
+						.filter((v) => v.tipo === "buro")
+						.map(sinDetalleDeBuro),
+					cofirmantes: estado.cofirmantes.map((cofirmante) => ({
+						...cofirmante,
+						buro: cofirmante.buro && sinDetalleDeBuro(cofirmante.buro),
+						detalleBuro: null,
+					})),
 				};
 			} catch (error) {
 				if (error instanceof OportunidadNoEncontradaError) {

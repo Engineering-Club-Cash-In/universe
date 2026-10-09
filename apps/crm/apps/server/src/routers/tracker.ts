@@ -671,6 +671,8 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	documentId: string;
 	key: string;
 	nombre: string;
+	/** El tipo con el que el CRM aceptó el documento. */
+	mimeType: string;
 	userId: string;
 	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
@@ -700,19 +702,17 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			motivo: `la factura no puede pesar más de ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
 		};
 	}
-	// El CRM admite Word o Excel, pero a la aseguradora solo va PDF o imagen.
-	const tipo = tipoRealDeFactura(contenido);
-	if (!tipo) {
-		return {
-			enviada: false,
-			motivo: "la factura tiene que ser un PDF o una imagen (JPG, PNG o WebP)",
-		};
-	}
+	// A la aseguradora va cualquier tipo que el CRM admite. Si el contenido es
+	// PDF o imagen, el nombre lleva la extensión de su tipo real.
+	const tipoReal = tipoRealDeFactura(contenido);
+	const tipo = tipoReal ?? params.mimeType;
 
 	// La URL firmada de la subida se puede reusar 10 minutos: lo que se manda,
 	// ahora y en el reintento, es una copia que solo escribe el server, con los
 	// bytes que pasaron la validación.
-	const nombre = nombreDeFactura(params.nombre, tipo);
+	const nombre = tipoReal
+		? nombreDeFactura(params.nombre, tipoReal)
+		: params.nombre;
 	const copia = `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`;
 	await uploadBufferToR2(copia, contenido, tipo);
 

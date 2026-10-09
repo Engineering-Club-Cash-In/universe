@@ -6682,6 +6682,7 @@ export const crmRouter = {
 							documentId: newDocument.id,
 							key: uploadedFile.key,
 							nombre: input.file.name,
+							mimeType: uploadedFile.mimeType,
 							userId: context.userId,
 							userRole: context.userRole,
 						}).catch((error) => {

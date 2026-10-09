@@ -51,6 +51,7 @@ let resultadoCorreo:
 const insertados: Array<{ tabla: unknown; valores: Record<string, unknown> }> =
 	[];
 const actualizados: Array<Record<string, unknown>> = [];
+const condicionesActualizacion: unknown[] = [];
 const correos: Array<Record<string, unknown>> = [];
 const subidosR2: Array<{ key: string; mime: string }> = [];
 const borradosR2: string[] = [];
@@ -147,8 +148,9 @@ const dbFalsa = {
 	}),
 	update: () => ({
 		set: (valores: Record<string, unknown>) => ({
-			where: async () => {
+			where: async (condicion: unknown) => {
 				actualizados.push(valores);
+				condicionesActualizacion.push(condicion);
 			},
 		}),
 	}),
@@ -278,6 +280,7 @@ beforeEach(() => {
 	resultadoCorreo = { ok: true };
 	insertados.length = 0;
 	actualizados.length = 0;
+	condicionesActualizacion.length = 0;
 	correos.length = 0;
 	subidosR2.length = 0;
 	borradosR2.length = 0;
@@ -703,6 +706,23 @@ describe("reenviarFacturaSeguro", () => {
 				html: "<p>Correo guardado del intento</p>",
 			},
 		});
+	});
+
+	test("el resultado del envío solo se registra sobre el mismo intento y nunca pisa un enviado", async () => {
+		facturaPrevia = [registro("pendiente", new Date("2026-01-01T00:00:00Z"))];
+		await call(
+			trackerRouter.reenviarFacturaSeguro,
+			{ opportunityId: ID },
+			crmCtx,
+		);
+		// [0] reserva el registro; [1] guarda el resultado del envío.
+		expect(actualizados[1]).toMatchObject({ status: "enviado" });
+		const { sql, params } = new PgDialect().sqlToQuery(
+			condicionesActualizacion[1] as SQL,
+		);
+		expect(sql).toContain('"intento" = ');
+		expect(sql).toContain('"status" <> ');
+		expect(params).toEqual(["envio-1", 1, "enviado"]);
 	});
 
 	test("un asesor comercial no puede reenviar una oportunidad ajena", async () => {

@@ -4,7 +4,7 @@ import { and, desc, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { alias, QueryBuilder } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
-import { session } from "../db/schema/auth";
+import { session, user } from "../db/schema/auth";
 import {
 	companies,
 	leads,
@@ -756,12 +756,6 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 					size: contenido.length,
 				})
 				.where(eq(opportunityDocuments.id, params.documentId));
-			// La key la manda el cliente y puede ser la de otro documento.
-			const [otroDocumento] = await tx
-				.select({ id: opportunityDocuments.id })
-				.from(opportunityDocuments)
-				.where(eq(opportunityDocuments.filePath, params.key))
-				.limit(1);
 			const { aseguradora, datos, destinatarios } =
 				await datosDelCorreoBajoBloqueo(tx, fila);
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
@@ -784,13 +778,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 					id: insuranceInvoiceSubmissions.id,
 					intento: insuranceInvoiceSubmissions.intento,
 				});
-			return {
-				envio,
-				aseguradora,
-				destinatarios,
-				correo,
-				originalEnUso: !!otroDocumento,
-			};
+			return { envio, aseguradora, destinatarios, correo };
 		});
 
 	let registro: Awaited<ReturnType<typeof registrar>>;
@@ -807,11 +795,8 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			motivo: "la oportunidad cambió mientras se guardaba la factura",
 		};
 	}
-	// El documento ya apunta a la copia: el archivo de la URL firmada sobra,
-	// salvo que otro documento lo use.
-	if (!registro.originalEnUso) {
-		await deleteFileFromR2(params.key).catch(() => {});
-	}
+	// El archivo de la URL firmada no se borra: la key la manda el cliente y
+	// otro documento puede estar usándola.
 
 	const envio = await enviarYRegistrar({
 		registro: registro.envio,
@@ -1049,7 +1034,13 @@ export const trackerRouter = {
 						.for("update", { of: opportunities });
 					exigirMismoEstado(vigente?.status, fila.status);
 					// Las membresías también se releen: un admin pudo quitarle el
-					// acceso al socio mientras se subía el archivo.
+					// acceso al socio mientras se subía el archivo. El lock del usuario
+					// es el mismo con el que asignarAgencias serializa sus cambios.
+					await tx
+						.select({ id: user.id })
+						.from(user)
+						.where(eq(user.id, context.userId))
+						.for("share");
 					const membresias = await resolvePartnerScope(context.userId, tx);
 					const [asignado] = await tx
 						.select({ sellerId: opportunityAgencySellers.sellerId })

@@ -240,7 +240,7 @@ export const morasRouter = new Elysia()
   .get("/mora/condonar-parcial/:referencia", async ({ params, query, user, set }: any) => {
     if (!esCuentaDeServicioCRM(user) && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
     try {
-      return await consultarRebajaParcialPorReferencia(Number(query.credito_id), params.referencia);
+      return await consultarRebajaParcialPorReferencia(Number(query.credito_id), params.referencia, query.monto);
     } catch (err) {
       // Sin certeza (lock ocupado, error): 503, para que el CRM no rechace.
       set.status = esTimeoutDeLockDeCredito(err) ? 503 : 500;
@@ -248,7 +248,7 @@ export const morasRouter = new Elysia()
     }
   }, {
     params: t.Object({ referencia: t.String({ minLength: 1 }) }),
-    query: t.Object({ credito_id: t.Numeric() }),
+    query: t.Object({ credito_id: t.Numeric(), monto: t.Optional(t.String({ pattern: "^\\d+(\\.\\d{1,2})?$" })) }),
   })
 
   /**

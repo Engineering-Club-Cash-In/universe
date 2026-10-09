@@ -3073,6 +3073,7 @@ export class CarteraBackClient {
 	async consultarRebajaMoraParcial(
 		creditoId: number,
 		referenciaExterna: string,
+		monto?: string,
 	): Promise<{
 		aplicada: boolean;
 		condonacionId: number | null;
@@ -3083,7 +3084,7 @@ export class CarteraBackClient {
 			condonacion_id?: number;
 			message?: string;
 		}>(
-			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}?credito_id=${creditoId}`,
+			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}?credito_id=${creditoId}${monto ? `&monto=${encodeURIComponent(monto)}` : ""}`,
 			{ method: "GET" },
 			false,
 		);

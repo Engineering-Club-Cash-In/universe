@@ -61,6 +61,7 @@ async function conciliarSiYaAplicada(
 		previa = await carteraBackClient.consultarRebajaMoraParcial(
 			creditoId,
 			solicitud.id,
+			solicitud.montoSolicitado,
 		);
 	} catch (error) {
 		console.error("[rebaja-mora] no se confirmó en cartera:", error);
@@ -170,7 +171,9 @@ export const solicitudesWorkspaceRouter = {
 				context.userRole,
 			);
 			const caso = await creditoDelCasoRebaja(input.casoCobroId);
-			if (!caso) {
+			// Sin el id de cartera la rebaja nunca se podría aplicar: la solicitud
+			// quedaría abierta y bloquearía a las siguientes.
+			if (!caso || caso.creditoId == null) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "El caso no tiene crédito de cartera asociado.",
 				});

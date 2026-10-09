@@ -2880,11 +2880,16 @@ export async function condonarMoraParcial({
 
       // 1. Idempotencia: la misma solicitud del CRM no descuenta dos veces.
       const [previa] = await tx
-        .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
+        .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion, credito_id: moras_condonaciones.credito_id })
         .from(moras_condonaciones)
         .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
         .limit(1);
       if (previa) {
+        // La misma referencia solo es un reintento si es el mismo crédito y monto:
+        // si no, no se afirma "ya aplicada" (el otro crédito nunca se descontó).
+        if (previa.credito_id !== credito_id || !new Big(previa.montoCondonacion ?? "0").eq(montoSolicitado)) {
+          return { kind: "referencia_en_conflicto" as const };
+        }
         // El reintento recibe el mismo id de auditoría que la primera aplicación
         // y la mora vigente (puede haber bajado más desde entonces).
         const [moraVigente] = await tx
@@ -2989,6 +2994,10 @@ export async function condonarMoraParcial({
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
       return { success: false, kind: "usuario_no_encontrado" as const, message: "[ERROR] Usuario no encontrado" };
     }
+    if (result.kind === "referencia_en_conflicto") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
+      return { success: false, kind: "referencia_en_conflicto" as const, message: "[ERROR] La referencia ya se usó para otra rebaja (otro crédito o monto). No se aplicó nada" };
+    }
     if (result.kind === "ocupado") {
       emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
       return { success: false, kind: "ocupado" as const, message: "[ERROR] El crédito está ocupado con otra operación: la rebaja no se aplicó. Intente de nuevo" };
@@ -3032,17 +3041,22 @@ export async function condonarMoraParcial({
  * respuesta de cartera se perdió (timeout), la rebaja pudo haberse descontado
  * igual. Solo lectura.
  */
-export async function consultarRebajaParcialPorReferencia(credito_id: number, referencia_externa: string) {
+export async function consultarRebajaParcialPorReferencia(credito_id: number, referencia_externa: string, monto?: string) {
   // Se toma el mismo lock del crédito que la rebaja: si un handler sigue en
   // vuelo (ya dentro del lock), esta lectura espera a que termine y ve su
   // insert. Si no se obtiene a tiempo, no se afirma nada: el CRM no rechaza.
   return withPaymentAdvisoryLock(credito_id, async () => {
     const [previa] = await db
-      .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
+      .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion, credito_id: moras_condonaciones.credito_id })
       .from(moras_condonaciones)
       .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
       .limit(1);
     if (!previa) return { success: true as const, aplicada: false as const };
+    // Una referencia de otro crédito (o de otro monto) no es esta rebaja: el CRM
+    // no puede darla por aplicada.
+    if (previa.credito_id !== credito_id || (monto !== undefined && !new Big(previa.montoCondonacion ?? "0").eq(new Big(monto)))) {
+      return { success: true as const, aplicada: false as const };
+    }
     return {
       success: true as const,
       aplicada: true as const,

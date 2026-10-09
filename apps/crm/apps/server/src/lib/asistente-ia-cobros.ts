@@ -587,6 +587,10 @@ type EnCurso = Map<
 >;
 const enCursoPorCaso: EnCurso = new Map();
 
+/** Lock por caso que serializa guardar y borrar el resumen. */
+const lockResumen = (casoCobroId: string) =>
+	sql`SELECT pg_advisory_xact_lock(hashtext(${`resumen-ia:${casoCobroId}`}))`;
+
 async function generarYGuardar(
 	casoCobroId: string,
 	contexto: ContextoIA,
@@ -619,11 +623,22 @@ async function generarYGuardar(
 			modelo: MODELO_ASISTENTE,
 			generadoEn: new Date(),
 		};
-		if (!sigueVigente()) return null;
-		await db
-			.insert(resumenesIaCobros)
-			.values({ casoCobroId, ...fila })
-			.onConflictDoUpdate({ target: resumenesIaCobros.casoCobroId, set: fila });
+		// La vigencia se revisa DENTRO del lock del caso, el mismo que toma el
+		// borrado de `obtenerResumenIA`: o el borrado ve esta fila ya guardada y
+		// la elimina, o esta generación ve que fue invalidada y no escribe.
+		const guardado = await db.transaction(async (tx) => {
+			await tx.execute(lockResumen(casoCobroId));
+			if (!sigueVigente()) return false;
+			await tx
+				.insert(resumenesIaCobros)
+				.values({ casoCobroId, ...fila })
+				.onConflictDoUpdate({
+					target: resumenesIaCobros.casoCobroId,
+					set: fila,
+				});
+			return true;
+		});
+		if (!guardado) return null;
 		return {
 			texto: fila.texto,
 			etiquetas: fila.etiquetas,
@@ -714,14 +729,18 @@ export async function obtenerResumenIA(
 		// Con el contexto completo ya no hay nada que contar (el crédito se puso
 		// al día y no tiene historial): el resumen guardado quedó obsoleto y, si
 		// no se borra, un corte de cartera lo volvería a mostrar.
-		if (guardado) {
-			await db
-				.delete(resumenesIaCobros)
-				.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
-				.catch((error) =>
-					console.error(`[AsistenteIA] borrar resumen de ${casoCobroId}:`, error),
-				);
-		}
+		// Se borra siempre (aunque la lectura de arriba no viera fila): una
+		// generación ya iniciada pudo guardarla después de esa lectura.
+		await db
+			.transaction(async (tx) => {
+				await tx.execute(lockResumen(casoCobroId));
+				await tx
+					.delete(resumenesIaCobros)
+					.where(eq(resumenesIaCobros.casoCobroId, casoCobroId));
+			})
+			.catch((error) =>
+				console.error(`[AsistenteIA] borrar resumen de ${casoCobroId}:`, error),
+			);
 		return null;
 	}
 	const huella = huellaContexto(contexto);

@@ -1208,6 +1208,39 @@ describe("revalidación excepcional de Buró en el 30%", () => {
 		).toBe(true);
 	});
 
+	test("sincronizar solo la campaña conserva el alcance de la oportunidad más reciente", async () => {
+		filasPorTabla.set(leads, [
+			{ id: LEAD, dpi: DPI, source: "web", assignedTo: "vendedor" },
+		]);
+		filasPorTabla.set(opportunities, [
+			{
+				...base,
+				id: "11111111-1111-4111-8111-111111111111",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				campaign: "más-reciente",
+			},
+			{
+				...base,
+				id: "22222222-2222-4222-8222-222222222222",
+				stageId: ETAPA_30,
+				closurePercentage: 30,
+				campaign: "anterior",
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateLead,
+			{ id: LEAD, campaign: "campaña-nueva" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const sincronizaciones = escriturasSobreOportunidades().filter(
+			(escritura) => escritura.valores.campaign === "campaña-nueva",
+		);
+		expect(sincronizaciones).toHaveLength(1);
+	});
+
 	test("bloquea el cambio de origen si cualquiera de sus oportunidades ya pasó del 30%", async () => {
 		prepararEvidenciaBot();
 		filasPorTabla.set(leads, [

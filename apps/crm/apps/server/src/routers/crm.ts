@@ -1749,8 +1749,13 @@ export const crmRouter = {
 						.orderBy(desc(opportunities.createdAt))
 						.for("update", { of: opportunities });
 
+					const oportunidadMasRecienteId = oportunidadesActivas[0]?.id;
+					const oportunidadesASincronizar =
+						updateData.source !== undefined
+							? oportunidadesActivas
+							: oportunidadesActivas.slice(0, 1);
 					const oportunidadesConExencion = [];
-					for (const oportunidadActiva of oportunidadesActivas) {
+					for (const oportunidadActiva of oportunidadesASincronizar) {
 						const veniaDelBot =
 							updateData.source !== undefined &&
 							updateData.source !== "Whatsapp" &&
@@ -1797,9 +1802,10 @@ export const crmRouter = {
 									oportunidadActiva.porcentaje === 30 && {
 										buroRevalidacionAl30: true,
 									}),
-								...(updateData.campaign !== undefined && {
-									campaign: updateData.campaign,
-								}),
+								...(updateData.campaign !== undefined &&
+									oportunidadActiva.id === oportunidadMasRecienteId && {
+										campaign: updateData.campaign,
+									}),
 								updatedAt: new Date(),
 							})
 							.where(eq(opportunities.id, oportunidadActiva.id));

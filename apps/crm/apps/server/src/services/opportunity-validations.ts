@@ -757,70 +757,100 @@ async function ejecutarValidacionesInterno({
 
 	// 1. RENAP: sincronizar datos de identidad en renap_info (se salta si ya está vigente)
 	let renapResumen: ReusoRenap | undefined;
+	let buroProtegido: ReusoBuro | undefined;
 
 	if (!CONSULTAR_RENAP) {
 		// Deshabilitado: sin consulta no hay veredicto de RENAP que registrar ni que bloquee
 	} else if (renapVigente) {
 		renapResumen = renapVigente;
 	} else {
-		const renapResultado = await conReintento(
-			() =>
-				conTimeout(
-					() => getOnlyRenapInfoController(dpi),
-					TIMEOUT_RENAP_MS,
-					() => ({
-						success: false as const,
-						message: MENSAJE_TIMEOUT_RENAP,
-						error: null,
-					}),
-				),
-			// El timeout deja la petición original en vuelo: reintentar la duplicaría
-			(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
-		);
+		const consultaRenap = await conCandadoDuranteConsulta(
+			opportunityId,
+			async (escritor) => {
+				await validarContextoConsultaProtegida({
+					opportunityId,
+					dpi,
+					coDebtorId: null,
+					lector: escritor,
+					fuente: "RENAP",
+				});
+				const resultado = await conReintento(
+					() =>
+						conTimeout(
+							() => getOnlyRenapInfoController(dpi),
+							TIMEOUT_RENAP_MS,
+							() => ({
+								success: false as const,
+								message: MENSAJE_TIMEOUT_RENAP,
+								error: null,
+							}),
+						),
+					// El timeout deja la petición original en vuelo: reintentar la duplicaría
+					(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
+				);
+				const resumen = resultado.success
+					? {
+							estado: "aprobado" as const,
+							mensaje: "Datos de RENAP sincronizados",
+						}
+					: {
+							estado: "error" as const,
+							mensaje: resultado.message || null,
+						};
+				const mensaje = resultado.success
+					? null
+					: resultado.message || "Error desconocido al consultar RENAP";
 
-		renapResumen = renapResultado.success
-			? { estado: "aprobado" as const, mensaje: "Datos de RENAP sincronizados" }
-			: { estado: "error" as const, mensaje: renapResultado.message || null };
+				await registrarValidacion(
+					{
+						opportunityId,
+						dpi,
+						tipo: "renap",
+						estado: resumen.estado,
+						mensaje: resultado.success
+							? "Datos de RENAP sincronizados"
+							: mensaje,
+						ejecutadoPor: userId ?? null,
+					},
+					escritor,
+				);
 
-		if (!renapResultado.success) {
-			const mensajeRenap =
-				renapResultado.message || "Error desconocido al consultar RENAP";
-
-			await registrarValidacion({
-				opportunityId,
-				dpi,
-				tipo: "renap",
-				estado: "error",
-				mensaje: mensajeRenap,
-				ejecutadoPor: userId ?? null,
-			});
-
-			// Infornet exige el DPI en renap_info: con sincronización previa se continúa
-			const [renapPrevio] = await db
-				.select({ dpi: renapInfo.dpi })
-				.from(renapInfo)
-				.where(eqDpi(renapInfo.dpi, dpi))
-				.limit(1);
-
-			if (!renapPrevio) {
+				let tieneRenapPrevio = resultado.success;
+				if (!resultado.success) {
+					// Infornet exige el DPI en renap_info: con sincronización previa se continúa
+					const [renapPrevio] = await escritor
+						.select({ dpi: renapInfo.dpi })
+						.from(renapInfo)
+						.where(eqDpi(renapInfo.dpi, dpi))
+						.limit(1);
+					tieneRenapPrevio = Boolean(renapPrevio);
+				}
+				const buro = tieneRenapPrevio
+					? (buroVigente ??
+						(await consultarBuro(
+							{ opportunityId, dpi, coDebtorId: null, userId },
+							escritor,
+						)))
+					: undefined;
 				return {
-					exento: false,
-					faltaDpi: false,
-					errorTecnico: true,
-					sinRegistroBuro: false,
-					mensaje: `RENAP: ${mensajeRenap}`,
-					renap: renapResumen,
+					resumen,
+					mensaje,
+					tieneRenapPrevio,
+					buro,
 				};
-			}
-		} else {
-			await registrarValidacion({
-				opportunityId,
-				dpi,
-				tipo: "renap",
-				estado: "aprobado",
-				mensaje: "Datos de RENAP sincronizados",
-				ejecutadoPor: userId ?? null,
-			});
+			},
+		);
+		renapResumen = consultaRenap.resumen;
+		buroProtegido = consultaRenap.buro;
+		if (!consultaRenap.tieneRenapPrevio) {
+			return {
+				exento: false,
+				faltaDpi: false,
+				errorTecnico: true,
+				sinRegistroBuro: false,
+				mensaje: `RENAP: ${consultaRenap.mensaje}`,
+				renap: renapResumen,
+			};
 		}
 	}
 
@@ -830,6 +860,7 @@ async function ejecutarValidacionesInterno({
 	// 2. Buró: usa el caché de 30 días (se salta si ya está vigente, incluido un
 	// override manual)
 	const buro =
+		buroProtegido ??
 		buroVigente ??
 		(await consultarBuro({ opportunityId, dpi, coDebtorId: null, userId }));
 	const buroFallo = buro.estado === "error";
@@ -895,81 +926,105 @@ async function conCandadoDuranteConsulta<T>(
 	}
 }
 
+async function validarContextoConsultaProtegida({
+	opportunityId,
+	dpi,
+	coDebtorId,
+	lector,
+	fuente,
+}: {
+	opportunityId: string;
+	dpi: string;
+	coDebtorId: string | null;
+	lector: NodePgDatabase;
+	fuente: "Buró" | "RENAP";
+}): Promise<void> {
+	const [actual] = await lector
+		.select({
+			porcentaje: salesStages.closurePercentage,
+			status: opportunities.status,
+			buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
+			clientType: leads.clientType,
+			leadDpi: leads.dpi,
+			creditType: opportunities.creditType,
+		})
+		.from(opportunities)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	if (
+		!actual ||
+		actual.status !== "open" ||
+		!(
+			actual.porcentaje === 20 ||
+			(actual.porcentaje === 30 && actual.buroRevalidacionAl30)
+		)
+	) {
+		throw new ORPCError("CONFLICT", {
+			message: `La oportunidad cambió de etapa antes de consultar ${fuente}. Recarga la página para ver su estado actual.`,
+		});
+	}
+	const [cofirmanteActual] = coDebtorId
+		? await lector
+				.select({ dpi: coDebtors.dpi })
+				.from(coDebtors)
+				.where(
+					and(
+						eq(coDebtors.id, coDebtorId),
+						eq(coDebtors.opportunityId, opportunityId),
+					),
+				)
+				.limit(1)
+		: [];
+	const dpiActual = coDebtorId ? cofirmanteActual?.dpi : actual.leadDpi;
+	if (!dpiActual || normalizarDpi(dpiActual) !== dpi) {
+		throw new ORPCError("CONFLICT", {
+			message: `El DPI del firmante cambió antes de consultar ${fuente}. Recarga la oportunidad.`,
+		});
+	}
+	if (
+		await faltaConsentimientoDelTitular(
+			opportunityId,
+			actual.clientType,
+			actual.creditType,
+			lector,
+		)
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Carga la cláusula de consentimiento antes de consultar Infornet.",
+		});
+	}
+}
+
 /**
  * Consulta Infornet para el DPI de un sujeto (titular o cofirmante), decide el
  * veredicto y lo registra en su bitácora. El fallo se clasifica ANTES de
  * reintentar, porque reconsultar no hace aparecer a quien Infornet no tiene.
  */
-async function consultarBuro({
-	opportunityId,
-	dpi,
-	coDebtorId,
-	userId,
-}: {
-	opportunityId: string;
-	dpi: string;
-	coDebtorId: string | null;
-	userId?: string | null;
-}): Promise<ReusoBuro> {
-	return conCandadoDuranteConsulta(opportunityId, async (escritor) => {
-		const [actual] = await escritor
-			.select({
-				porcentaje: salesStages.closurePercentage,
-				status: opportunities.status,
-				buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
-				clientType: leads.clientType,
-				leadDpi: leads.dpi,
-				creditType: opportunities.creditType,
-			})
-			.from(opportunities)
-			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-			.leftJoin(leads, eq(opportunities.leadId, leads.id))
-			.where(eq(opportunities.id, opportunityId))
-			.limit(1);
-		if (
-			!actual ||
-			actual.status !== "open" ||
-			!(
-				actual.porcentaje === 20 ||
-				(actual.porcentaje === 30 && actual.buroRevalidacionAl30)
-			)
-		) {
-			throw new ORPCError("CONFLICT", {
-				message:
-					"La oportunidad cambió de etapa antes de consultar Buró. Recarga la página para ver su estado actual.",
-			});
-		}
-		const [cofirmanteActual] = coDebtorId
-			? await escritor
-					.select({ dpi: coDebtors.dpi })
-					.from(coDebtors)
-					.where(
-						and(
-							eq(coDebtors.id, coDebtorId),
-							eq(coDebtors.opportunityId, opportunityId),
-						),
-					)
-					.limit(1)
-			: [];
-		const dpiActual = coDebtorId ? cofirmanteActual?.dpi : actual.leadDpi;
-		if (!dpiActual || normalizarDpi(dpiActual) !== dpi) {
-			throw new ORPCError("CONFLICT", {
-				message:
-					"El DPI del firmante cambió antes de consultar Buró. Recarga la oportunidad.",
-			});
-		}
-		if (
-			await faltaConsentimientoDelTitular(
-				opportunityId,
-				actual.clientType,
-				actual.creditType,
-			)
-		) {
-			throw new ORPCError("BAD_REQUEST", {
-				message:
-					"Carga la cláusula de consentimiento antes de consultar Infornet.",
-			});
-		}
+async function consultarBuro(
+	{
+		opportunityId,
+		dpi,
+		coDebtorId,
+		userId,
+	}: {
+		opportunityId: string;
+		dpi: string;
+		coDebtorId: string | null;
+		userId?: string | null;
+	},
+	escritorExistente?: NodePgDatabase,
+): Promise<ReusoBuro> {
+	const ejecutar = async (escritor: NodePgDatabase): Promise<ReusoBuro> => {
+		await validarContextoConsultaProtegida({
+			opportunityId,
+			dpi,
+			coDebtorId,
+			lector: escritor,
+			fuente: "Buró",
+		});
 		// Los cofirmantes no pasan por RENAP: no se les puede exigir `renapinfo`
 		const opcionesInfornet = { exigirRenap: coDebtorId === null };
 
@@ -1134,7 +1189,10 @@ async function consultarBuro({
 			alertas: analisisRiesgo?.alertas ?? null,
 			fuenteDeDatos,
 		};
-	});
+	};
+	return escritorExistente
+		? ejecutar(escritorExistente)
+		: conCandadoDuranteConsulta(opportunityId, ejecutar);
 }
 
 type CofirmanteDeOportunidad = { id: string; fullName: string; dpi: string };

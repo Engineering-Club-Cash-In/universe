@@ -4,7 +4,7 @@ import { Elysia, t } from "elysia";
  
 import { authMiddleware } from "./midleware";
 import { esCuentaDeServicioCRM } from "../lib/cuentaServicioCrm";
-import { createMora, updateMora, procesarMoras, condonarMora, condonarMoraParcial, consultarRebajaParcialPorReferencia, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
+import { createMora, updateMora, procesarMoras, condonarMora, condonarMoraParcial, consultarRebajaParcialPorReferencia, esTimeoutDeLockDeCredito, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
 import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel, getMoraHistorialCreditoExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
@@ -215,7 +215,7 @@ export const morasRouter = new Elysia()
       if (result.success) {
         set.status = 200;
       } else {
-        set.status = result.kind === "monto_invalido" ? 400 : result.kind === "not_found" || result.kind === "usuario_no_encontrado" ? 404 : 409;
+        set.status = result.kind === "monto_invalido" ? 400 : result.kind === "not_found" || result.kind === "usuario_no_encontrado" ? 404 : result.kind === "ocupado" ? 503 : 409;
       }
       return result;
     } catch (err) {
@@ -236,16 +236,18 @@ export const morasRouter = new Elysia()
    * COBROS-02 W2 · ¿Se aplicó ya la rebaja parcial con esta referencia? Mismo
    * gate que el POST: cuenta de servicio del CRM o ADMIN. Solo lectura.
    */
-  .get("/mora/condonar-parcial/:referencia", async ({ params, user, set }: any) => {
+  .get("/mora/condonar-parcial/:referencia", async ({ params, query, user, set }: any) => {
     if (!esCuentaDeServicioCRM(user) && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
     try {
-      return await consultarRebajaParcialPorReferencia(params.referencia);
+      return await consultarRebajaParcialPorReferencia(Number(query.credito_id), params.referencia);
     } catch (err) {
-      set.status = 500;
+      // Sin certeza (lock ocupado, error): 503, para que el CRM no rechace.
+      set.status = esTimeoutDeLockDeCredito(err) ? 503 : 500;
       return { success: false, message: "[ERROR] No se pudo consultar la rebaja", error: String(err) };
     }
   }, {
-    params: t.Object({ referencia: t.String({ minLength: 1 }) })
+    params: t.Object({ referencia: t.String({ minLength: 1 }) }),
+    query: t.Object({ credito_id: t.Numeric() }),
   })
 
   /**

@@ -3070,7 +3070,10 @@ export class CarteraBackClient {
 	// W2 — ¿cartera ya aplicó la rebaja con esta referencia? Se usa antes de
 	// rechazar una solicitud en `error_aplicacion`: tras un timeout la rebaja pudo
 	// descontarse igual. Lectura, sin cache.
-	async consultarRebajaMoraParcial(referenciaExterna: string): Promise<{
+	async consultarRebajaMoraParcial(
+		creditoId: number,
+		referenciaExterna: string,
+	): Promise<{
 		aplicada: boolean;
 		condonacionId: number | null;
 	}> {
@@ -3080,7 +3083,7 @@ export class CarteraBackClient {
 			condonacion_id?: number;
 			message?: string;
 		}>(
-			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}`,
+			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}?credito_id=${creditoId}`,
 			{ method: "GET" },
 			false,
 		);

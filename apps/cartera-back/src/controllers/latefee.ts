@@ -2801,6 +2801,20 @@ export async function procesarMoras() {
 }
 
 
+/** Por nombre, no por `instanceof`: los tests mockean el módulo del lock. */
+export const esTimeoutDeLockDeCredito = (error: unknown) =>
+  error instanceof Error && error.name === "PaymentAdvisoryLockTimeoutError";
+
+/**
+ * Espera máxima del lock del crédito en la rebaja parcial. Menor que el plazo
+ * del CRM (3 min) y que el de su job de colgadas (10 min): un handler que sigue
+ * en la cola del lock no puede confirmar su escritura cuando el CRM ya dio la
+ * aplicación por perdida y dejó rechazarla.
+ */
+const REBAJA_PARCIAL_ESPERA_LOCK_MS = 60_000;
+/** Espera de la consulta de conciliación: el CRM le da 30 s al fetch. */
+const CONSULTA_REBAJA_ESPERA_LOCK_MS = 20_000;
+
 /**
  * COBROS-02 W2 · Rebaja PARCIAL de la mora de un crédito, aprobada por el
  * supervisor en el CRM. A diferencia de `condonarMora` (que deja la mora en 0 y
@@ -2849,6 +2863,8 @@ export async function condonarMoraParcial({
     // Sin él, la rebaja puede calcular el reparto con un pagado viejo mientras se valida un pago.
     // Orden: candado primero, transacción después (nunca al revés).
     const result = await withPaymentAdvisoryLock(credito_id, () => db.transaction(async (tx) => {
+      // Tampoco se espera sin límite un candado de fila: el CRM da por perdida la llamada.
+      await tx.execute(sql`SET LOCAL lock_timeout = '30s'`);
       // Mismo orden de candados que condonarMora: creditos primero, mora después.
       const [creditoLocked] = await tx
         .select({ credito_id: creditos.credito_id, capital: creditos.capital, statusCredit: creditos.statusCredit })
@@ -2960,8 +2976,15 @@ export async function condonarMoraParcial({
       });
 
       return { kind: "ok" as const, condonacion, moraNueva };
-    }));
+    }), { esperaMaximaMs: REBAJA_PARCIAL_ESPERA_LOCK_MS }).catch((error) => {
+      if (esTimeoutDeLockDeCredito(error)) return { kind: "ocupado" as const };
+      throw error;
+    });
 
+    if (result.kind === "ocupado") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
+      return { success: false, kind: "ocupado" as const, message: "[ERROR] El crédito está ocupado con otra operación: la rebaja no se aplicó. Intente de nuevo" };
+    }
     if (result.kind === "ok") {
       emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
       return { success: true, kind: "ok" as const, condonacion_id: result.condonacion.condonacion_id, mora_nueva: result.moraNueva, message: `[SUCCESS] Mora rebajada para crédito #${credito_id}` };
@@ -3001,19 +3024,24 @@ export async function condonarMoraParcial({
  * respuesta de cartera se perdió (timeout), la rebaja pudo haberse descontado
  * igual. Solo lectura.
  */
-export async function consultarRebajaParcialPorReferencia(referencia_externa: string) {
-  const [previa] = await db
-    .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
-    .from(moras_condonaciones)
-    .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
-    .limit(1);
-  if (!previa) return { success: true as const, aplicada: false as const };
-  return {
-    success: true as const,
-    aplicada: true as const,
-    condonacion_id: previa.condonacion_id,
-    monto: previa.montoCondonacion,
-  };
+export async function consultarRebajaParcialPorReferencia(credito_id: number, referencia_externa: string) {
+  // Se toma el mismo lock del crédito que la rebaja: si un handler sigue en
+  // vuelo (ya dentro del lock), esta lectura espera a que termine y ve su
+  // insert. Si no se obtiene a tiempo, no se afirma nada: el CRM no rechaza.
+  return withPaymentAdvisoryLock(credito_id, async () => {
+    const [previa] = await db
+      .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
+      .from(moras_condonaciones)
+      .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
+      .limit(1);
+    if (!previa) return { success: true as const, aplicada: false as const };
+    return {
+      success: true as const,
+      aplicada: true as const,
+      condonacion_id: previa.condonacion_id,
+      monto: previa.montoCondonacion,
+    };
+  }, { esperaMaximaMs: CONSULTA_REBAJA_ESPERA_LOCK_MS });
 }
 
 /**

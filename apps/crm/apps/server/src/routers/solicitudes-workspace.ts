@@ -291,11 +291,18 @@ export const solicitudesWorkspaceRouter = {
 				// Un error_aplicacion puede ser ambiguo (timeout: cartera pudo descontar
 				// igual). Antes de cerrarla como rechazada se confirma en cartera.
 				if (solicitud.estado === "error_aplicacion") {
+					const casoRechazo = await creditoDelCasoRebaja(solicitud.casoCobroId);
+					if (!casoRechazo || casoRechazo.creditoId == null) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "No se encontró el crédito en cartera para este caso.",
+						});
+					}
 					let previa: Awaited<
 						ReturnType<typeof carteraBackClient.consultarRebajaMoraParcial>
 					>;
 					try {
 						previa = await carteraBackClient.consultarRebajaMoraParcial(
+							casoRechazo.creditoId,
 							solicitud.id,
 						);
 					} catch (error) {

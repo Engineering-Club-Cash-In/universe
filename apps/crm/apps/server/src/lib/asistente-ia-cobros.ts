@@ -274,9 +274,37 @@ export function hayQueResumir(contexto: ContextoIA): boolean {
 	);
 }
 
+let versionPromptCache: string | undefined;
+
+/**
+ * Huella de lo que le dice el sistema al modelo: las instrucciones y el schema
+ * de la salida (serializado desde el propio schema, con sus descripciones). Se
+ * deriva del contenido, no de una versión que haya que acordarse de subir.
+ */
+export function versionPrompt(): string {
+	versionPromptCache ??= createHash("sha256")
+		.update(
+			INSTRUCCIONES +
+				JSON.stringify(resumenSchema.shape, (_k, v) =>
+					v && typeof v === "object" && "_def" in v ? v._def : v,
+				),
+		)
+		.digest("hex")
+		.slice(0, 16);
+	return versionPromptCache;
+}
+
+/**
+ * Huella de un resumen: modelo, prompt y schema, y los datos del caso. Si
+ * cambia cualquiera de los tres, el resumen guardado deja de valer y se
+ * regenera: una corrección del prompt (más estricto, o de privacidad) llega a
+ * los casos que no cambiaron.
+ */
 export function huellaContexto(contexto: ContextoIA): string {
 	return createHash("sha256")
-		.update(`${MODELO_ASISTENTE}\n${JSON.stringify(contexto)}`)
+		.update(
+			`${MODELO_ASISTENTE}\n${versionPrompt()}\n${JSON.stringify(contexto)}`,
+		)
 		.digest("hex");
 }
 
@@ -628,7 +656,9 @@ type Resultado =
  * - ya está guardada esa huella → se reutiliza, sin generar;
  * - hay algo guardado hecho con un contexto más nuevo (otro proceso o una
  *   invalidación) → este resumen nacería viejo;
- * - otro proceso tiene reservada esta misma huella → se espera su resultado.
+ * - otro proceso tiene una reserva vigente del caso (de esta huella o de otra:
+ *   los datos pudieron cambiar mientras generaba) → se espera a que termine y se
+ *   reevalúa: una sola generación a la vez por caso.
  */
 async function reservarGeneracion(
 	casoCobroId: string,
@@ -651,7 +681,9 @@ async function reservarGeneracion(
 				masNueva: inicio
 					? sql<boolean>`${resumenesIaCobros.contextoEn} IS NOT NULL AND ${resumenesIaCobros.contextoEn} > ${inicio}::timestamp`
 					: sql<boolean>`false`,
-				reservada: sql<boolean>`${resumenesIaCobros.generandoHuella} = ${huella} AND ${resumenesIaCobros.generandoHasta} > clock_timestamp()::timestamp`,
+				// Cualquier reserva vigente del caso, de la huella que sea: una sola
+				// generación a la vez; quien llega después espera y reevalúa.
+				reservada: sql<boolean>`${resumenesIaCobros.generandoHuella} IS NOT NULL AND ${resumenesIaCobros.generandoHasta} > clock_timestamp()::timestamp`,
 			})
 			.from(resumenesIaCobros)
 			.where(eq(resumenesIaCobros.casoCobroId, casoCobroId))
@@ -719,8 +751,9 @@ async function liberarReserva(casoCobroId: string, huella: string) {
  *   de «sin nada que resumir»), y la invalidación de `obtenerResumenIA` toma el
  *   mismo lock, así que o ve esta fila ya guardada y la reemplaza, o llega
  *   antes y esta generación la respeta.
- * Otro proceso con la misma huella no llama al modelo: espera consultando
- * (consultas sueltas, sin conexión retenida) a que la fila aparezca.
+ * Otro proceso con una reserva vigente del caso no llama al modelo: espera
+ * consultando (consultas sueltas, sin conexión retenida) y reevalúa: reutiliza
+ * la fila si es de su huella, o genera la suya cuando la anterior terminó.
  */
 export async function generarYGuardar(
 	casoCobroId: string,

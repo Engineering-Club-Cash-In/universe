@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
 	armarContextoIA,
 	asistenteActivo,
@@ -6,11 +7,13 @@ import {
 	hayQueResumir,
 	huellaContexto,
 	invalidarGeneracion,
+	MODELO_ASISTENTE,
 	nombresDeSolicitudes,
 	palabrasDeNombres,
 	taparDatosPersonales,
 	taparNumeros,
 	unirNombres,
+	versionPrompt,
 } from "./asistente-ia-cobros";
 
 const fuentes = {
@@ -172,6 +175,18 @@ describe("armarContextoIA", () => {
 			],
 		});
 		expect(huellaContexto(otra)).not.toBe(a);
+	});
+});
+
+describe("versionPrompt", () => {
+	test("es estable y entra en la huella del resumen", () => {
+		expect(versionPrompt()).toMatch(/^[0-9a-f]{16}$/);
+		expect(versionPrompt()).toBe(versionPrompt());
+		const contexto = armarContextoIA(fuentes);
+		const sinPrompt = createHash("sha256")
+			.update(`${MODELO_ASISTENTE}\n${JSON.stringify(contexto)}`)
+			.digest("hex");
+		expect(huellaContexto(contexto)).not.toBe(sinPrompt);
 	});
 });
 

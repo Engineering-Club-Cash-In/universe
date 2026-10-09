@@ -4,7 +4,7 @@ import { Elysia, t } from "elysia";
  
 import { authMiddleware } from "./midleware";
 import { esCuentaDeServicioCRM } from "../lib/cuentaServicioCrm";
-import { createMora, updateMora, procesarMoras, condonarMora, condonarMoraParcial, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
+import { createMora, updateMora, procesarMoras, condonarMora, condonarMoraParcial, consultarRebajaParcialPorReferencia, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
 import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel, getMoraHistorialCreditoExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
@@ -230,6 +230,22 @@ export const morasRouter = new Elysia()
       referencia_externa: t.String({ minLength: 1 }),
       usuario_email: t.Optional(t.String()),
     })
+  })
+
+  /**
+   * COBROS-02 W2 · ¿Se aplicó ya la rebaja parcial con esta referencia? Mismo
+   * gate que el POST: cuenta de servicio del CRM o ADMIN. Solo lectura.
+   */
+  .get("/mora/condonar-parcial/:referencia", async ({ params, user, set }: any) => {
+    if (!esCuentaDeServicioCRM(user) && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
+    try {
+      return await consultarRebajaParcialPorReferencia(params.referencia);
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo consultar la rebaja", error: String(err) };
+    }
+  }, {
+    params: t.Object({ referencia: t.String({ minLength: 1 }) })
   })
 
   /**

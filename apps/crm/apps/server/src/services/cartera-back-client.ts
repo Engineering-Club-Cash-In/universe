@@ -3048,6 +3048,34 @@ export class CarteraBackClient {
 		};
 	}
 
+	// W2 — ¿cartera ya aplicó la rebaja con esta referencia? Se usa antes de
+	// rechazar una solicitud en `error_aplicacion`: tras un timeout la rebaja pudo
+	// descontarse igual. Lectura, sin cache.
+	async consultarRebajaMoraParcial(referenciaExterna: string): Promise<{
+		aplicada: boolean;
+		condonacionId: number | null;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			aplicada?: boolean;
+			condonacion_id?: number;
+			message?: string;
+		}>(
+			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}`,
+			{ method: "GET" },
+			false,
+		);
+		if (!response?.success || typeof response.aplicada !== "boolean") {
+			throw new Error(
+				response?.message || "cartera-back no confirmó el estado de la rebaja",
+			);
+		}
+		return {
+			aplicada: response.aplicada,
+			condonacionId: response.condonacion_id ?? null,
+		};
+	}
+
 	// CB-033 — aprobar/rechazar un convenio pendiente. `operacion_id` viaja
 	// desde el caller (nunca se genera acá): es la clave de la idempotencia,
 	// y generarlo en el server por llamada no protegería un reintento del

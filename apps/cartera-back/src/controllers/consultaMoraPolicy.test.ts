@@ -526,6 +526,45 @@ describe("historial de mora compuesto", () => {
     ]);
   });
 
+  it("una rebaja parcial reporta lo rebajado, no el monto anterior", () => {
+    const eventos = [
+      {
+        fecha: new Date("2026-06-01T00:00:00.000Z"),
+        monto_anterior: "100.00",
+        monto_nuevo: "70.00",
+        tipo_evento: "CONDONACION",
+        numeroCreditoSifco: "A",
+        mora_id: 7,
+      },
+    ];
+    const historial = construirHistorialMora({
+      eventos,
+      morasCerradas: [],
+      convenios: [],
+    });
+    expect(historial[0]?.monto).toBe("30.00");
+    // La mora sigue viva: la rebaja no cuenta como el monto de una mora cerrada.
+    expect(montoDeMorasCerradas(eventos).size).toBe(0);
+  });
+
+  it("la condonación total sigue reportando el monto anterior", () => {
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-06-01T00:00:00.000Z"),
+          monto_anterior: "100.00",
+          monto_nuevo: "0",
+          tipo_evento: "CONDONACION",
+          numeroCreditoSifco: "A",
+          mora_id: 7,
+        },
+      ],
+      morasCerradas: [],
+      convenios: [],
+    });
+    expect(historial[0]?.monto).toBe("100.00");
+  });
+
   it("mezcla las tres fuentes ordenadas por fecha descendente", () => {
     const historial = construirHistorialMora({
       eventos: [

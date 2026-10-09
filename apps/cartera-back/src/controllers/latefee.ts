@@ -2996,6 +2996,27 @@ export async function condonarMoraParcial({
 }
 
 /**
+ * COBROS-02 W2 · ¿Ya se aplicó la rebaja con esta `referencia_externa`? El CRM
+ * la consulta antes de rechazar una solicitud en `error_aplicacion`: si la
+ * respuesta de cartera se perdió (timeout), la rebaja pudo haberse descontado
+ * igual. Solo lectura.
+ */
+export async function consultarRebajaParcialPorReferencia(referencia_externa: string) {
+  const [previa] = await db
+    .select({ condonacion_id: moras_condonaciones.condonacion_id, montoCondonacion: moras_condonaciones.montoCondonacion })
+    .from(moras_condonaciones)
+    .where(eq(moras_condonaciones.referencia_externa, referencia_externa))
+    .limit(1);
+  if (!previa) return { success: true as const, aplicada: false as const };
+  return {
+    success: true as const,
+    aplicada: true as const,
+    condonacion_id: previa.condonacion_id,
+    monto: previa.montoCondonacion,
+  };
+}
+
+/**
  * Condonar mora de un crédito:
  * 1. Look up user_id by email.
  * 2. Set mora monto = 0, activa = false.

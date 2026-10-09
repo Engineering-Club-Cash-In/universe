@@ -7,7 +7,7 @@
  * como los demás routers de la ficha. Lógica en services/rebaja-mora.ts.
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -21,6 +21,7 @@ import {
 	quetzalesRebaja,
 } from "../lib/rebaja-mora-reglas";
 import { PERMISSIONS } from "../lib/roles";
+import { carteraBackClient } from "../services/cartera-back-client";
 import { nombresClientePorSifco } from "../services/nombre-cliente-sifco";
 import {
 	aplicarRebajaEnCartera,
@@ -226,7 +227,12 @@ export const solicitudesWorkspaceRouter = {
 					eq(decisor.id, solicitudesRebajaMoraCobros.resueltoPor),
 				)
 				.where(filtros.length > 0 ? and(...filtros) : undefined)
-				.orderBy(desc(solicitudesRebajaMoraCobros.solicitadoEn))
+				// Abiertas primero: con `limite`, el historial resuelto más nuevo no
+				// puede dejar fuera una solicitud que espera acción.
+				.orderBy(
+					sql`CASE WHEN ${inArray(solicitudesRebajaMoraCobros.estado, [...ESTADOS_REBAJA_ABIERTA])} THEN 0 ELSE 1 END`,
+					desc(solicitudesRebajaMoraCobros.solicitadoEn),
+				)
 				.limit(input.limite);
 			const nombres = await nombresClientePorSifco(
 				filas.map((f) => f.numeroCreditoSifco),
@@ -281,6 +287,55 @@ export const solicitudesWorkspaceRouter = {
 						message:
 							"Esta solicitud ya no se puede rechazar: revise su estado.",
 					});
+				}
+				// Un error_aplicacion puede ser ambiguo (timeout: cartera pudo descontar
+				// igual). Antes de cerrarla como rechazada se confirma en cartera.
+				if (solicitud.estado === "error_aplicacion") {
+					let previa: Awaited<
+						ReturnType<typeof carteraBackClient.consultarRebajaMoraParcial>
+					>;
+					try {
+						previa = await carteraBackClient.consultarRebajaMoraParcial(
+							solicitud.id,
+						);
+					} catch (error) {
+						console.error("[rebaja-mora] no se confirmó en cartera:", error);
+						throw new ORPCError("SERVICE_UNAVAILABLE", {
+							message:
+								"No se pudo confirmar en cartera si la rebaja ya se aplicó. Intente rechazar de nuevo en un momento.",
+						});
+					}
+					if (previa.aplicada) {
+						const [conciliada] = await db
+							.update(solicitudesRebajaMoraCobros)
+							.set({
+								estado: "aplicada",
+								montoAplicado: solicitud.montoSolicitado,
+								carteraCondonacionId: previa.condonacionId,
+							})
+							.where(
+								and(
+									eq(solicitudesRebajaMoraCobros.id, solicitud.id),
+									eq(solicitudesRebajaMoraCobros.estado, "error_aplicacion"),
+								),
+							)
+							.returning({ id: solicitudesRebajaMoraCobros.id });
+						if (conciliada) {
+							await avisarDecisionRebaja({
+								solicitudId: solicitud.id,
+								casoCobroId: solicitud.casoCobroId,
+								decision: "aplicada",
+								solicitanteId: solicitud.solicitadoPor,
+								decidioPorId: context.userId,
+								monto: solicitud.montoSolicitado,
+								nota: null,
+							});
+						}
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Cartera ya había aplicado esta rebaja: la solicitud quedó como aplicada y no se puede rechazar.",
+						});
+					}
 				}
 				const [cerrada] = await db
 					.update(solicitudesRebajaMoraCobros)

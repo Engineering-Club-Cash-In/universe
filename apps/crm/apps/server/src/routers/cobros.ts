@@ -3599,6 +3599,7 @@ export const cobrosRouter = {
 			const { pagoIds, faltantes, sinRecibo } = resolverPagoIdsDeCuotas(
 				elegibles,
 				input.cuotaIds,
+				input.abonoInicialPagoId,
 			);
 			if (faltantes.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {

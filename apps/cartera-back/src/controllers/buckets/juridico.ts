@@ -81,7 +81,7 @@ export type JuridicoResultado =
       asesor_nuevo: number;
       status_credito: string;
     }
-  | { success: false; status: number; message: string; codigo?: "ya_en_juridico" | "bucket_ocupado" | "pool_b5_sin_asesor" };
+  | { success: false; status: number; message: string; codigo?: "ya_en_juridico" | "bucket_ocupado" | "pool_b5_sin_asesor" | "credito_no_encontrado" };
 
 /**
  * Escala un crédito a Jurídico (B5). Idempotente en la práctica: un segundo
@@ -354,7 +354,11 @@ export async function enviarAJuridico(params: {
       return { success: false, status: err.status, codigo: err.codigo, message: err.message };
     }
     if (err instanceof RecuperacionAbortada) {
-      return { success: false, status: err.status, message: err.message };
+      // `codigo` estable para el 404: el CRM distingue "el crédito ya no existe"
+      // (definitivo) de una ruta ausente en un despliegue viejo (transitorio).
+      return err.status === 404
+        ? { success: false, status: err.status, codigo: "credito_no_encontrado", message: err.message }
+        : { success: false, status: err.status, message: err.message };
     }
     if (esLockTimeout(err)) {
       return {

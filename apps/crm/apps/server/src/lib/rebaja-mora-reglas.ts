@@ -106,6 +106,12 @@ export function clasificarErrorCartera(
 				"Cartera no autorizó al CRM. Revise la cuenta de servicio (CRM_SERVICE_USER_ID); la aprobación se puede repetir cuando se corrija.",
 		};
 	}
+	if (payload?.codigo === "credito_no_encontrado") {
+		return {
+			tipo: "definitivo",
+			motivo: "El crédito ya no existe en cartera.",
+		};
+	}
 	if (status === 404 && !kind) {
 		return {
 			tipo: "transitorio",

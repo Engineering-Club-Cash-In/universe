@@ -826,9 +826,15 @@
         onDelete: "set null",
       }),
       motivo: text("motivo"),
+      // COBROS-02 W3 (migración 0024): llave de idempotencia del escalamiento a
+      // Jurídico (id de la solicitud del CRM). Única cuando existe.
+      referencia_externa: text("referencia_externa"),
       fecha: timestamp("fecha").defaultNow().notNull(),
     },
     (t) => [
+      uniqueIndex("buckets_historial_referencia_externa_uq")
+        .on(t.referencia_externa)
+        .where(sql`${t.referencia_externa} IS NOT NULL`),
       index("buckets_historial_fecha_idx").on(t.fecha),
       // Sirve el "último bucket por crédito" (DISTINCT ON credito_id ORDER BY
       // fecha DESC, historial_id DESC — el tiebreaker por historial_id hace

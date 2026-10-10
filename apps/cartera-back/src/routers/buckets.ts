@@ -14,7 +14,7 @@ import {
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
 import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
-import { enviarAJuridico } from "../controllers/buckets/juridico";
+import { enviarAJuridico, escalamientoAplicado } from "../controllers/buckets/juridico";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
 import { getAsesorPorSifco } from "../controllers/buckets/asesorPorSifco";
@@ -979,6 +979,7 @@ export const bucketsRouter = new Elysia()
           motivo: body?.motivo,
           usuario_email: body?.usuario_email,
           asesor_esperado_email: body?.asesor_esperado_email,
+          referencia_externa: body?.referencia_externa,
         });
         if (!result.success) {
           set.status = result.status ?? 400;
@@ -999,7 +1000,32 @@ export const bucketsRouter = new Elysia()
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
         asesor_esperado_email: t.Optional(t.String()),
+        referencia_externa: t.Optional(t.String({ maxLength: 100 })),
       }),
+    },
+  )
+
+  // COBROS-02 W3: ¿ya se aplicó el escalamiento de esa solicitud del CRM? Sirve
+  // para conciliar un error_aplicacion ambiguo sin depender del estado actual.
+  .get(
+    "/buckets/juridico/aplicacion/:referencia",
+    async ({ params, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const referencia = String(params.referencia ?? "").trim();
+        if (!referencia || referencia.length > 100) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] referencia inválida" };
+        }
+        return { success: true, aplicada: await escalamientoAplicado(referencia) };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo consultar el escalamiento",
+          error: String(err),
+        };
+      }
     },
   )
 

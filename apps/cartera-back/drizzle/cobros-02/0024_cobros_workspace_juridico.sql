@@ -8,6 +8,11 @@
 -- · `juridico_levantada_pago_id`: qué pago levantó Jurídico, para devolver el
 --   estado si ese pago se reversa (igual que `recuperacion_levantada_pago_id`).
 --
+-- · `buckets_historial.referencia_externa`: llave de idempotencia del escalamiento
+--   (el id de la solicitud del CRM). Un reintento con la misma referencia no
+--   vuelve a escalar y el CRM puede preguntar si ya se aplicó, aunque el estado
+--   del crédito haya cambiado desde entonces (p. ej. un pago lo sacó de Jurídico).
+--
 -- Se aplica a mano. Idempotente: se puede correr más de una vez.
 
 ALTER TABLE cartera.creditos
@@ -18,3 +23,12 @@ UPDATE cartera.buckets
    SET estados_piso = array_append(estados_piso, 'EN_JURIDICO'), updated_at = now()
  WHERE numero = 5
    AND NOT ('EN_JURIDICO' = ANY(estados_piso));
+--> statement-breakpoint
+
+ALTER TABLE cartera.buckets_historial
+  ADD COLUMN IF NOT EXISTS referencia_externa text;
+--> statement-breakpoint
+
+CREATE UNIQUE INDEX IF NOT EXISTS buckets_historial_referencia_externa_uq
+  ON cartera.buckets_historial (referencia_externa)
+  WHERE referencia_externa IS NOT NULL;

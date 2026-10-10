@@ -312,14 +312,14 @@ export const solicitudesJuridicoRouter = {
 						});
 					}
 					// El error pudo ser un timeout con cartera ya commiteada: antes de
-					// cerrarla como rechazada se concilia con el estado vivo del crédito.
-					const caso = await creditoDelCasoRebaja(solicitud.casoCobroId);
-					let vivo: string | null;
+					// cerrarla como rechazada se pregunta a cartera si ESTA solicitud
+					// ya se aplicó (por su referencia, no por el estado actual del
+					// crédito, que un pago posterior pudo haber cambiado).
+					let yaAplicada: boolean;
 					try {
-						vivo =
-							(await carteraBackClient.getBucketActualCredito(
-								caso?.numeroSifco ?? solicitud.numeroCreditoSifco,
-							))?.status_credito ?? null;
+						yaAplicada = await carteraBackClient.escalamientoJuridicoAplicado(
+							solicitud.id,
+						);
 					} catch (error) {
 						console.error("[juridico] no se concilió con cartera:", error);
 						throw new ORPCError("SERVICE_UNAVAILABLE", {
@@ -327,7 +327,7 @@ export const solicitudesJuridicoRouter = {
 								"No se pudo confirmar en cartera si el escalado ya se aplicó. Intente de nuevo en un momento.",
 						});
 					}
-					if (vivo === "EN_JURIDICO") {
+					if (yaAplicada) {
 						const [conciliada] = await db
 							.update(solicitudesJuridicoCobros)
 							.set({ estado: "aplicada" })
@@ -436,6 +436,7 @@ export const solicitudesJuridicoRouter = {
 
 			const resultado = await aplicarEscalamientoEnCartera({
 				creditoId: caso.creditoId,
+				solicitudId: solicitud.id,
 				motivo: `Escalado a Jurídico aprobado por ${context.session.user.email}: ${solicitud.motivo} — ${solicitud.notaJuridico}`,
 				emailSupervisor: context.session.user.email,
 			});

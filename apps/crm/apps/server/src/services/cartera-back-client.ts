@@ -3005,6 +3005,16 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	/** ¿Cartera ya aplicó el escalamiento de esa solicitud? (sin caché). */
+	async escalamientoJuridicoAplicado(referencia: string): Promise<boolean> {
+		const response = await this.request<{ success: boolean; aplicada: boolean }>(
+			`/buckets/juridico/aplicacion/${encodeURIComponent(referencia)}`,
+			{ method: "GET" },
+			false,
+		);
+		return response?.aplicada === true;
+	}
+
 	private invalidarCachesDeEscalado(): void {
 		this.cache.invalidate("/credito?");
 		this.cache.invalidate("getAllCredits");
@@ -3021,6 +3031,8 @@ export class CarteraBackClient {
 		motivo: string;
 		usuarioEmail?: string;
 		asesorEsperadoEmail?: string;
+		/** Id de la solicitud: cartera lo guarda y un reintento no vuelve a escalar. */
+		referenciaExterna?: string;
 	}): Promise<{
 		success: boolean;
 		bucket_anterior: number;
@@ -3069,6 +3081,9 @@ export class CarteraBackClient {
 							...(input.usuarioEmail && { usuario_email: input.usuarioEmail }),
 							...(input.asesorEsperadoEmail && {
 								asesor_esperado_email: input.asesorEsperadoEmail,
+							}),
+							...(input.referenciaExterna && {
+								referencia_externa: input.referenciaExterna,
 							}),
 						}),
 					},

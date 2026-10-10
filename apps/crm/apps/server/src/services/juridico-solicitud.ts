@@ -172,6 +172,8 @@ export type ResultadoEscalamiento =
  */
 export async function aplicarEscalamientoEnCartera(params: {
 	creditoId: number;
+	/** Id de la solicitud: llave de idempotencia en cartera. */
+	solicitudId: string;
 	motivo: string;
 	emailSupervisor: string;
 }): Promise<ResultadoEscalamiento> {
@@ -180,6 +182,7 @@ export async function aplicarEscalamientoEnCartera(params: {
 			creditoId: params.creditoId,
 			motivo: params.motivo,
 			usuarioEmail: params.emailSupervisor,
+			referenciaExterna: params.solicitudId,
 		});
 		return { ok: true };
 	} catch (error) {

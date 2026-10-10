@@ -92,8 +92,11 @@ export async function enviarAJuridico(params: {
   motivo: string;
   usuario_email?: string;
   asesor_esperado_email?: string;
+  /** Id de la solicitud del CRM: llave de idempotencia, se guarda en el historial. */
+  referencia_externa?: string;
 }): Promise<JuridicoResultado> {
   const { credito_id } = params;
+  const referencia = params.referencia_externa?.trim() || null;
   const motivo = (params.motivo ?? "").trim();
   const destino = BUCKET_JURIDICO;
 
@@ -156,6 +159,18 @@ export async function enviarAJuridico(params: {
         .from(creditos)
         .where(eq(creditos.credito_id, credito_id))
         .for("update");
+
+      // Idempotencia por la referencia, no por el estado actual: si un pago ya
+      // sacó al crédito de Jurídico, un reintento de la MISMA solicitud no debe
+      // volver a escalarlo ni tratarse como un escalamiento nuevo.
+      if (referencia) {
+        const [previo] = await tx
+          .select({ id: buckets_historial.historial_id })
+          .from(buckets_historial)
+          .where(eq(buckets_historial.referencia_externa, referencia))
+          .limit(1);
+        if (previo) throw new JuridicoYaAplicado();
+      }
 
       const estado = await getEstadoCredito(credito_id, tx);
       if (!estado) {
@@ -320,6 +335,7 @@ export async function enviarAJuridico(params: {
         cuotas_atrasadas_nuevas: estado.cuotas_atrasadas,
         status_credito: STATUS_EN_JURIDICO,
         motivo: motivoBucket,
+        referencia_externa: referencia,
       });
 
       // Última comprobación antes del commit: si las sentencias sumaron más que
@@ -458,4 +474,16 @@ async function reasignarEn(
     });
     return true;
   }
+}
+
+/** ¿Ya se aplicó el escalamiento de esa solicitud? (lectura para el CRM). */
+export async function escalamientoAplicado(referencia_externa: string): Promise<boolean> {
+  const ref = referencia_externa.trim();
+  if (!ref) return false;
+  const [fila] = await db
+    .select({ id: buckets_historial.historial_id })
+    .from(buckets_historial)
+    .where(eq(buckets_historial.referencia_externa, ref))
+    .limit(1);
+  return Boolean(fila);
 }

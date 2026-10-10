@@ -219,6 +219,7 @@ const CLIENT_CREDIT_CARTERA_STATUSES = [
 	"MOROSO",
 	// COBROS-02 Fase 4: mismos créditos que antes estaban como MOROSO.
 	"EN_RECUPERACION",
+	"EN_JURIDICO",
 	"EN_CONVENIO",
 ] as const satisfies readonly StatusCreditEnum[];
 

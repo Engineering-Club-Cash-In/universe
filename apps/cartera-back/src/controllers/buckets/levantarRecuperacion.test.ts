@@ -12,6 +12,7 @@ let cuotasVencidas = 0;
 mock.module("../latefee", () => ({
   contarCuotasVencidasReales: async () => cuotasVencidas,
   STATUS_EN_RECUPERACION: "EN_RECUPERACION",
+  STATUS_EN_JURIDICO: "EN_JURIDICO",
 }));
 
 const { levantarRecuperacionSiPagoTodo, restaurarRecuperacionSiEstePagoLaLevanto } =

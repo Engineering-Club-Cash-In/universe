@@ -3,7 +3,7 @@ import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 
 // COBROS-02 Fase 4: EN_RECUPERACION devenga mora (decisión 2 del plan 08) y
 // sigue en la cartera del asesor de B4, así que cuenta en estos reportes.
-export const creditosElegiblesMoraSql = sql.raw("'ACTIVO', 'MOROSO', 'EN_RECUPERACION'");
+export const creditosElegiblesMoraSql = sql.raw("'ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO'");
 
 export function buildCapitalCarteraQuery(
   emailCobrador?: string,

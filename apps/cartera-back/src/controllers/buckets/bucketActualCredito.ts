@@ -14,6 +14,8 @@ export type BucketActualCredito = {
   nombre: string | null;
   color: string | null;
   estado_mora: string | null;
+  /** statusCredit crudo del crédito (el CRM lo usa para conciliar escalados a Jurídico). */
+  status_credito: string | null;
   /** true = statusCredit en STATUS_READER_FUERA (CANCELADO/PENDIENTE_CANCELACION/CAIDO): sin bucket POR DISEÑO. EN_CONVENIO NO va acá: sí se muestra su bucket (lo lleva el job de convenios). */
   fuera_funnel: boolean;
   /**
@@ -55,6 +57,7 @@ export async function getBucketActualPorSifco(
     credito_id: number;
     numero_credito_sifco: string;
     fuera: boolean;
+    status_credito: string | null;
     bucket: number | null;
     prefijo: string | null;
     nombre: string | null;
@@ -69,6 +72,7 @@ export async function getBucketActualPorSifco(
         c.credito_id,
         c.numero_credito_sifco,
         (c."statusCredit" IN (${fueraSql})) AS fuera,
+        c."statusCredit" AS status_credito,
         ${bucketActualSql("c", "m")} AS bucket
       FROM ${SQL_CARTERA_SCHEMA}.creditos c
       LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
@@ -91,6 +95,7 @@ export async function getBucketActualPorSifco(
       a.credito_id,
       a.numero_credito_sifco,
       a.fuera,
+      a.status_credito,
       CASE WHEN a.fuera THEN NULL ELSE a.bucket END AS bucket,
       -- Solo hay fecha de entrada confiable si el bucket resuelto VIENE de la
       -- última fila de historial. Si ganó un branch de fallback de
@@ -134,6 +139,7 @@ export async function getBucketActualPorSifco(
     nombre: row.nombre ?? null,
     color: row.color ?? null,
     estado_mora: row.estado_mora ?? null,
+    status_credito: row.status_credito ?? null,
     fuera_funnel: Boolean(row.fuera),
     fecha_entrada_bucket: row.fecha_entrada_bucket ?? null,
     bucket_previo: row.bucket_previo == null ? null : Number(row.bucket_previo),

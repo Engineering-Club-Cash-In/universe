@@ -146,6 +146,8 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	"recuperacion_resuelta",
 	"rebaja_pendiente_aprobacion",
 	"rebaja_resuelta",
+	"juridico_pendiente_aprobacion",
+	"juridico_resuelto",
 ]);
 
 // Notifications table

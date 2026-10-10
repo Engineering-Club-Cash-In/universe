@@ -18,6 +18,7 @@ describe("active portfolio report", () => {
       "ACTIVO",
       "MOROSO",
       "EN_RECUPERACION",
+      "EN_JURIDICO",
       "EN_CONVENIO",
     ]);
   });

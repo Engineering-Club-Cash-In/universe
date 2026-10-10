@@ -77,7 +77,7 @@ export async function getMontoACobrar({
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito c
       JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
       WHERE c.pagado = false
-        AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+        AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
         AND c.fecha_vencimiento >= ${fechaInicio}::date
         AND c.fecha_vencimiento <= ${fechaFin}::date
     ),
@@ -104,7 +104,7 @@ export async function getMontoACobrar({
     JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
     JOIN mora_por_bucket mpb ON mpb.bucket = DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp)
     WHERE c.pagado = false
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
       AND c.fecha_vencimiento >= ${fechaInicio}::date
       AND c.fecha_vencimiento <= ${fechaFin}::date
     GROUP BY DATE_TRUNC(${pg}, c.fecha_vencimiento::timestamp), mpb.mora_promedio
@@ -568,7 +568,7 @@ export async function getCobradoDelMes({
     JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON p.credito_id = cr.credito_id
     WHERE p.fecha_pago >= ${inicioMesUtc.toISOString()}::timestamptz
       AND p.fecha_pago < ${inicioMesSiguienteUtc.toISOString()}::timestamptz
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO', 'CANCELADO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO', 'CANCELADO')
   `);
 
   const row = result.rows[0] as Record<string, unknown> | undefined;
@@ -663,7 +663,7 @@ export async function getFlujoCuotasInversiones({
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
       ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
     WHERE c.pagado = false
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
       AND c.fecha_vencimiento >= ${fechaInicio}::date
       AND c.fecha_vencimiento <= ${fechaFin}::date
     GROUP BY tipo_reinv_efectivo, i.inversionista_id, i.nombre
@@ -813,7 +813,7 @@ export async function getInvestmentProjectionContext({
       SELECT ca.credito_id
       FROM cuotas_autoritativas ca
       JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = ca.credito_id
-      WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
       GROUP BY ca.credito_id
       HAVING MAX(ca.fecha_vencimiento) >= ${fechaInicio}::date
         AND MAX(ca.fecha_vencimiento) <= ${fechaFin}::date
@@ -1003,7 +1003,7 @@ export async function getFlujoCuotasPorInversionista({
       AND cpp.inversionista_id = ce.inversionista_id
     JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON ce.inversionista_id = i.inversionista_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.inversionistas cube_i ON cube_i.inversionista_id = 86
-    WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+    WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
       AND ce.status::text IS DISTINCT FROM 'cancelado'
       AND ce.fecha_inicio_participacion <= p.fecha_corte
       AND ce.monto_aportado::numeric
@@ -1537,7 +1537,7 @@ export async function getReinversionLiquidaciones({
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     )
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
     GROUP BY ce.inversionista_id
   `);
   const capitalActivoPorInv = new Map<number, string>();
@@ -1885,7 +1885,7 @@ export async function getEsperadoDelMes({
     JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON c.credito_id = cr.credito_id
     WHERE c.fecha_vencimiento >= ${inicioMes}::date
       AND c.fecha_vencimiento < ${inicioMesSiguiente}::date
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
   `);
 
   const row = result.rows[0] as Record<string, unknown> | undefined;
@@ -1951,7 +1951,7 @@ export async function getComparativoHistorico({ anio }: { anio: number }) {
     FROM ${SQL_CARTERA_SCHEMA}.cierre_mensual
     WHERE periodo >= make_date(${anio}, 1, 1)
       AND periodo < make_date(${anio + 1}, 1, 1)
-      AND status_credit IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND status_credit IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
     GROUP BY periodo
     ORDER BY periodo
   `);
@@ -2539,7 +2539,7 @@ export async function getCuotasPorFecha({
     WHERE c.fecha_vencimiento::date >= ${fechaInicio}::date
       AND c.fecha_vencimiento::date <= ${fechaFin}::date
       AND c.numero_cuota > 0
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
+      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')
       ${asesorFilter}
     ORDER BY c.fecha_vencimiento ASC, cr.numero_credito_sifco ASC
   `);

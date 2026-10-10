@@ -19,6 +19,7 @@ export type StatusCreditEnum =
 	 * en dos cosas: fija B4 como PISO y el motor no se lo pisa.
 	 */
 	| "EN_RECUPERACION"
+	| "EN_JURIDICO"
 	| "EN_CONVENIO";
 
 export type EstadoLiquidacionEnum =
@@ -65,7 +66,7 @@ export interface CarteraUsuario {
 export interface CarteraCreditoOperativoSat {
 	numeroCreditoSifco: string;
 	nombreCliente: string;
-	estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+	estado: "ACTIVO" | "MOROSO" | "EN_JURIDICO" | "EN_CONVENIO";
 	fechaCreacion: string;
 }
 
@@ -1451,6 +1452,8 @@ export interface CarteraBucketActualCredito {
 	nombre: string | null;
 	color: string | null;
 	estado_mora: string | null;
+	/** statusCredit crudo del crédito (conciliar escalados a Jurídico). */
+	status_credito?: string | null;
 	/** true = statusCredit fuera del funnel (EN_CONVENIO/CANCELADO/CAIDO/...): sin bucket por diseño. */
 	fuera_funnel: boolean;
 	/**

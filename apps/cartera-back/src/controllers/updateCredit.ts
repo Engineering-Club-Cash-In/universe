@@ -3360,6 +3360,7 @@ export const updateAllInstallments = async ({
           "ACTIVO",
           "MOROSO",
           "EN_RECUPERACION",
+          "EN_JURIDICO",
           "PENDIENTE_CANCELACION",
           "EN_CONVENIO",
         ]);

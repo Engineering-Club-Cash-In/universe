@@ -10,7 +10,7 @@ describe("capital de cartera para aging", () => {
 
     expect(query.sql).toContain("SELECT DISTINCT c.credito_id");
     expect(query.sql).toContain("SUM(capital)");
-    expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION')");
+    expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO')");
     expect(query.sql).not.toContain("PENDIENTE_CANCELACION");
     expect(query.sql).not.toContain("INCOBRABLE");
     expect(query.sql).not.toContain("EN_CONVENIO");

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
+import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 
 import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
 import Big from "big.js";
@@ -988,6 +988,8 @@ export function createReversePayment(
       //
       // Sin console.log del resultado: este archivo ya no usa console (logs
       // estructurados; lo vigila reversePaymentStructuredLogging.test.ts).
+      // COBROS-02 W3: si este pago levantó Jurídico, el crédito vuelve a Jurídico.
+      await restaurarJuridicoSiEstePagoLoLevanto(creditData.creditos.credito_id, pago_id, tx as never);
       await restaurarRecuperacionSiEstePagoLaLevanto(
         creditData.creditos.credito_id,
         pago_id,

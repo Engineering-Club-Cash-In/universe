@@ -26,6 +26,7 @@ export const REVERSIBLE_CREDIT_STATUSES = [
   "ACTIVO",
   "MOROSO",
   "EN_RECUPERACION",
+  "EN_JURIDICO",
   "EN_CONVENIO",
   "INCOBRABLE",
 ] as const;

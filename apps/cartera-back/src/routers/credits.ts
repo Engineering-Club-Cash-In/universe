@@ -679,6 +679,7 @@ export const creditRouter = new Elysia()
             t.Literal("PENDIENTE_CANCELACION"),
             t.Literal("EN_CONVENIO"),
             t.Literal("MOROSO"),
+            t.Literal("EN_JURIDICO"),
             t.Literal("CAIDO"),
           ]),
         ),

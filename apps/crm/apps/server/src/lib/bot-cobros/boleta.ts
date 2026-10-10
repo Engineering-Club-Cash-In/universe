@@ -114,6 +114,7 @@ const ESTADOS_QUE_ACEPTAN = new Set([
 	"ACTIVO",
 	"MOROSO",
 	"EN_RECUPERACION",
+	"EN_JURIDICO",
 	"EN_CONVENIO",
 ]);
 

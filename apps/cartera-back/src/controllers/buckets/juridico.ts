@@ -46,6 +46,15 @@ import {
 
 const LOCK_TIMEOUT = "5s";
 
+/**
+ * Plazo del servidor para TODA la operación, incluida la espera de una conexión
+ * del pool. El `lock_timeout` solo corre dentro de la transacción: con el pool
+ * agotado, el handler podía quedar en cola y commitear mucho después de que el
+ * CRM cortó su llamada y un supervisor rechazó la solicitud. Tiene que ser menor
+ * que la espera del CRM antes de permitir ese rechazo.
+ */
+const PLAZO_OPERACION_MS = 90_000;
+
 /** El crédito ya estaba en Jurídico: un reintento no vuelve a escribir nada. */
 class JuridicoYaAplicado extends Error {}
 
@@ -92,8 +101,17 @@ export async function enviarAJuridico(params: {
     return { success: false, status: 400, message: "[ERROR] El motivo es obligatorio" };
   }
 
+  const venceEn = Date.now() + PLAZO_OPERACION_MS;
   try {
     return await db.transaction(async (tx) => {
+      // Primera instrucción: si la conexión llegó tarde, ya nadie espera esta
+      // respuesta y escribir sería posible tras un rechazo. Se aborta sin escribir.
+      if (Date.now() > venceEn) {
+        throw new RecuperacionAbortada(
+          503,
+          "[ERROR] La operación venció esperando una conexión de la base. Intente de nuevo en un momento.",
+        );
+      }
       await tx.execute(sql`SET LOCAL lock_timeout = ${sql.raw(`'${LOCK_TIMEOUT}'`)}`);
 
       // Locks SIN ESPERAR, por la misma política que la recuperación: si el cron

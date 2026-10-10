@@ -1403,6 +1403,7 @@ export async function getCreditosWithUserByMesAnio(
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "MOROSO"
+    | "EN_JURIDICO"
     | "EN_CONVENIO"
     | "CAIDO",
   asesor_id?: number,

@@ -258,6 +258,15 @@ export async function restaurarJuridicoSiEstePagoLoLevanto(
           eq(creditos.statusCredit, credito.statusCredit ?? "ACTIVO"),
         ),
       );
+    // El piso lo vuelve a B5: el asesor también tiene que ser del pool de B5.
+    // Import dinámico: juridico.ts arrastra el motor de buckets y este módulo
+    // se carga también desde rutas que no lo necesitan.
+    const { reasignarAsesorDeJuridicoSiHaceFalta } = await import("./juridico");
+    await reasignarAsesorDeJuridicoSiHaceFalta(
+      credito_id,
+      `Jurídico reinstalado por la reversa del pago ${pago_id}`,
+      ejecutor as never,
+    );
     return true;
   } catch (err) {
     console.error(

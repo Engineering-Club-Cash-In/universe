@@ -302,3 +302,80 @@ export async function enviarAJuridico(params: {
     throw err;
   }
 }
+
+/**
+ * Al reinstalar Jurídico por la reversa del pago que lo levantó: el motor pudo
+ * haber devuelto el crédito (y su asesor) a un bucket menor mientras tanto, y el
+ * piso lo clasifica en B5 de nuevo. Acá se le devuelve el dueño del pool de B5,
+ * con el mismo par UPDATE / historial que el escalamiento original.
+ *
+ * Nunca lanza ni espera: una reversa no puede fallar por esto. Sin candado libre,
+ * sin pool o con el dueño ya dentro del pool de B5, no hace nada (la corrida del
+ * motor reasigna). Corre sobre el ejecutor de la reversa.
+ */
+export async function reasignarAsesorDeJuridicoSiHaceFalta(
+  credito_id: number,
+  motivo: string,
+  ejecutor: Pick<typeof db, "select" | "update" | "insert" | "execute">,
+): Promise<boolean> {
+  try {
+    const destino = BUCKET_JURIDICO;
+    const lock = await ejecutor.execute<{ ok: boolean }>(
+      sql`SELECT pg_try_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id}) AS ok`,
+    );
+    if (!lock.rows?.[0]?.ok) return false;
+
+    const [actual] = await ejecutor
+      .select({ asesor_id: creditos.asesor_id })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id))
+      .limit(1);
+    if (!actual) return false;
+
+    const poolRows = await ejecutor
+      .select({ asesor_id: asesor_bucket.asesor_id })
+      .from(asesor_bucket)
+      .innerJoin(asesores, eq(asesores.asesor_id, asesor_bucket.asesor_id))
+      .where(
+        and(
+          eq(asesor_bucket.bucket, destino),
+          eq(asesor_bucket.activo, true),
+          eq(asesores.activo, true),
+        ),
+      )
+      .orderBy(asesor_bucket.asesor_id);
+    const pool = poolRows.map((r) => r.asesor_id);
+    if (pool.length === 0) return false;
+    // Ya lo tiene un asesor del pool de Jurídico: nada que mover.
+    if (actual.asesor_id !== null && pool.includes(actual.asesor_id)) return false;
+
+    const elegido = elegirAsesorParaBucket(pool, await getCargaDelBucket(destino, ejecutor as never), null);
+    if (elegido === null) return false;
+
+    const filas = await ejecutor
+      .update(creditos)
+      .set({ asesor_id: elegido })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${actual.asesor_id}`,
+        ),
+      )
+      .returning({ credito_id: creditos.credito_id });
+    if (filas.length !== 1) return false;
+
+    await ejecutor.insert(credito_asesor_historial).values({
+      credito_id,
+      asesor_anterior: actual.asesor_id,
+      asesor_nuevo: elegido,
+      bucket: destino,
+      origen: "API_MANUAL",
+      motivo,
+      usuario_id: null,
+    });
+    return true;
+  } catch (err) {
+    console.error(`[JURIDICO] ⚠️ No se pudo reasignar el asesor de B5 al crédito ${credito_id}:`, err);
+    return false;
+  }
+}

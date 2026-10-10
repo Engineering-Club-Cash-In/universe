@@ -24,7 +24,11 @@ export function debeCrearCasoCobros(
 	// no la mora sigue EN_RECUPERACION a propósito, con 0 días: con el gate, la
 	// sync le cerraba el caso mientras la recuperación del vehículo seguía
 	// activa. Mientras el estado exista, la decisión de recuperar sigue en pie.
-	if (statusCredit === "EN_RECUPERACION") return true;
+	// COBROS-02 W3: EN_JURIDICO igual (escalado aprobado): el caso sigue vivo
+	// mientras el estado exista, con o sin días de mora.
+	if (statusCredit === "EN_RECUPERACION" || statusCredit === "EN_JURIDICO") {
+		return true;
+	}
 
 	// Resto: solo créditos activos o morosos con días de mora > 0.
 	return (statusCredit === "ACTIVO" || statusCredit === "MOROSO") && diasMora > 0;

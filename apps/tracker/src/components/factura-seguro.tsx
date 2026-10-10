@@ -98,6 +98,8 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 		if (!file) return;
 		const error = errorDeArchivoFactura(file);
 		if (error) {
+			// Sin esto quedaría lista para subir la factura elegida antes.
+			setArchivo(null);
 			toast.error(error);
 			return;
 		}

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RotateCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
 	AlertDialog,
@@ -20,10 +20,12 @@ export function ReintentoFacturaSeguro({
 	opportunityId,
 	disponible,
 	aseguradora,
+	estado,
 }: {
 	opportunityId: string;
 	disponible: boolean | null | undefined;
 	aseguradora?: string | null;
+	estado?: string | null;
 }) {
 	const queryClient = useQueryClient();
 	const [confirmando, setConfirmando] = useState(false);
@@ -46,6 +48,21 @@ export function ReintentoFacturaSeguro({
 			refrescar();
 		},
 	});
+
+	// Un `pendiente` pasa a reintentable a los 10 minutos: mientras tanto se
+	// vuelve a consultar, para que el botón aparezca sin recargar.
+	useEffect(() => {
+		if (estado !== "pendiente" || disponible) return;
+		const id = setInterval(() => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityDocuments.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunityDocuments", opportunityId],
+			});
+		}, 60_000);
+		return () => clearInterval(id);
+	}, [estado, disponible, opportunityId, queryClient]);
 
 	if (!disponible) return null;
 

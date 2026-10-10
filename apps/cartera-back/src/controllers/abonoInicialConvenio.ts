@@ -72,3 +72,24 @@ export function rechazoLoteCreditosOcupados(creditoIds: number[]): RechazoAbonoI
     `[CREDITO_OCUPADO] Hay un pago o un convenio en curso en los créditos ${creditoIds.join(", ")}. No se escribió nada: reintente en unos segundos.`,
   );
 }
+
+/**
+ * Convenio pendiente, vigente o completado de este crédito que usa un pago suyo como abono
+ * inicial (null si no hay). Para las operaciones que borran TODOS los pagos del crédito
+ * (marcarlo CAIDO): con la FK en `ON DELETE SET NULL` el borrado pasaría y el vínculo de
+ * auditoría se perdería con el convenio todavía vivo.
+ */
+export async function convenioVivoConAbonoDelCredito(tx: typeof db, credito_id: number): Promise<number | null> {
+  const [fila] = await tx
+    .select({ convenio_id: convenios_pago.convenio_id })
+    .from(convenios_pago)
+    .where(
+      and(
+        eq(convenios_pago.credito_id, credito_id),
+        isNotNull(convenios_pago.abono_inicial_pago_id),
+        isNull(convenios_pago.anulado_at),
+      ),
+    )
+    .limit(1);
+  return fila?.convenio_id ?? null;
+}

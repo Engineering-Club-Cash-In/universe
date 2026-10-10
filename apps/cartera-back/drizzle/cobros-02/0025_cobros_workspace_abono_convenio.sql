@@ -29,3 +29,30 @@ ALTER TABLE cartera.convenios_pago
 CREATE UNIQUE INDEX IF NOT EXISTS uq_convenios_pago_abono_inicial
   ON cartera.convenios_pago (abono_inicial_pago_id)
   WHERE abono_inicial_pago_id IS NOT NULL;
+--> statement-breakpoint
+
+-- Red de seguridad para TODOS los caminos que borran filas de pagos_credito (marcar CAIDO,
+-- recalcular desde JSON, importación del Excel completo, migraciones…): con la FK en
+-- ON DELETE SET NULL, borrar el pago de un convenio VIVO pasaría y se perdería el vínculo de
+-- auditoría con el convenio intacto. Un convenio anulado (anulado_at) sí libera el abono.
+CREATE OR REPLACE FUNCTION cartera.bloquear_borrado_abono_inicial()
+RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM cartera.convenios_pago c
+    WHERE c.abono_inicial_pago_id = OLD.pago_id AND c.anulado_at IS NULL
+  ) THEN
+    RAISE EXCEPTION '[ABONO_INICIAL_DE_CONVENIO] El pago % es el abono inicial de un convenio vivo: no se puede borrar. Anule el convenio primero.', OLD.pago_id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+
+DROP TRIGGER IF EXISTS trg_bloquear_borrado_abono_inicial ON cartera.pagos_credito;
+--> statement-breakpoint
+
+CREATE TRIGGER trg_bloquear_borrado_abono_inicial
+  BEFORE DELETE ON cartera.pagos_credito
+  FOR EACH ROW EXECUTE FUNCTION cartera.bloquear_borrado_abono_inicial();

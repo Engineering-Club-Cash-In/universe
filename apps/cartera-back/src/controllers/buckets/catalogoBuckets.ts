@@ -22,7 +22,7 @@ export const FALLBACK_BUCKETS_CATALOGO: BucketCatalogoCompleto[] = [
   { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60", dias_sla: 3 },
   { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90", dias_sla: 2 },
   { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], estados_piso: ["EN_RECUPERACION"], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120", dias_sla: 2 },
-  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], estados_piso: [], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
+  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], estados_piso: ["EN_JURIDICO"], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
 ];
 
 export type CatalogoBucketsResultado = {

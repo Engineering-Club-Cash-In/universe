@@ -125,6 +125,7 @@ export const ESTADOS_CREDITO_VIGENTES = new Set([
 	"ACTIVO",
 	"MOROSO",
 	"EN_RECUPERACION",
+	"EN_JURIDICO",
 	"EN_CONVENIO",
 ]);
 

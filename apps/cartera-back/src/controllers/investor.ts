@@ -10744,6 +10744,7 @@ export async function simularInversionista(
           "ACTIVO",
           "MOROSO",
           "EN_RECUPERACION",
+          "EN_JURIDICO",
           "PENDIENTE_CANCELACION",
           "EN_CONVENIO",
           "CANCELADO",

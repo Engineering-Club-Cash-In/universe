@@ -84,6 +84,7 @@ const CLOSED_CREDIT_REPORT_CARTERA_STATUSES: StatusCreditEnum[] = [
 	// COBROS-02 Fase 4: mismos créditos que antes estaban como MOROSO; omitirlo
 	// encogía el reporte en silencio.
 	"EN_RECUPERACION",
+	"EN_JURIDICO",
 	"EN_CONVENIO",
 ];
 const MIGRATED_OPPORTUNITY_STATUS = "migrate";

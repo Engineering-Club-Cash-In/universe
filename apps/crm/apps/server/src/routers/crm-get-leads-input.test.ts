@@ -73,6 +73,7 @@ describe("getClientCreditSifcosFromCartera", () => {
 			"ACTIVO",
 			"MOROSO",
 			"EN_RECUPERACION",
+			"EN_JURIDICO",
 			"EN_CONVENIO",
 		]);
 	});
@@ -102,9 +103,11 @@ describe("getCurrentClientCreditsFromCartera", () => {
 			"ACTIVO-1",
 			"MOROSO-1",
 			"EN_RECUPERACION-1",
+			"EN_JURIDICO-1",
 			"EN_CONVENIO-1",
 		]);
 		expect(calls.map(({ mes, anio }) => ({ mes, anio }))).toEqual([
+			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },
 			{ mes: 0, anio: 0 },

@@ -43,7 +43,9 @@ export type CobrosNotifTipo =
 	| "recuperacion_pendiente_aprobacion"
 	| "recuperacion_resuelta"
 	| "rebaja_pendiente_aprobacion"
-	| "rebaja_resuelta";
+	| "rebaja_resuelta"
+	| "juridico_pendiente_aprobacion"
+	| "juridico_resuelto";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

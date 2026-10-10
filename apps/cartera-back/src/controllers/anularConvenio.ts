@@ -14,6 +14,7 @@ import {
   cuotasParaPendienteDeCreditos,
   decidirMoraTrasRomperConvenio,
   hoyGuatemalaDeLaBase,
+  STATUS_EN_JURIDICO,
   STATUS_EN_RECUPERACION,
 } from "./latefee";
 
@@ -41,7 +42,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Estados posibles del crédito después de deshacer el convenio. */
-export type EstadoTrasAnular = "MOROSO" | "ACTIVO" | "EN_RECUPERACION";
+export type EstadoTrasAnular = "MOROSO" | "ACTIVO" | "EN_RECUPERACION" | "EN_JURIDICO";
 
 export type AnularConvenioResultado =
   | {
@@ -215,8 +216,12 @@ export async function anularConvenio(params: {
       // levantar un estado que puso una persona (decisión 5: solo lo levanta
       // pagar el total). Los convenios anteriores a la migración 0020 no tienen
       // el dato y siguen el camino de siempre.
-      const volverARecuperacion =
-        anulado.status_credito_previo === STATUS_EN_RECUPERACION;
+      // COBROS-02 W3: igual con EN_JURIDICO, que tampoco lo levanta un convenio.
+      const estadoProtegido =
+        anulado.status_credito_previo === STATUS_EN_RECUPERACION ||
+        anulado.status_credito_previo === STATUS_EN_JURIDICO
+          ? anulado.status_credito_previo
+          : null;
 
       // ¿Cuánto debe el crédito ahora que el convenio no cuenta? Merge con
       // develop: el MISMO criterio que la ruptura de un convenio
@@ -272,7 +277,7 @@ export async function anularConvenio(params: {
         await tx
           .update(creditos)
           .set({
-            statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "MOROSO",
+            statusCredit: estadoProtegido ?? "MOROSO",
           })
           .where(eq(creditos.credito_id, anulado.credito_id));
 
@@ -300,9 +305,7 @@ export async function anularConvenio(params: {
           success: true as const,
           convenio_id: anulado.convenio_id,
           credito_id: anulado.credito_id,
-          status_credito: (volverARecuperacion
-            ? STATUS_EN_RECUPERACION
-            : "MOROSO") as EstadoTrasAnular,
+          status_credito: (estadoProtegido ?? "MOROSO") as EstadoTrasAnular,
           cuotas_atrasadas: cuotasAtrasadas,
         };
       }
@@ -315,7 +318,7 @@ export async function anularConvenio(params: {
       await tx
         .update(creditos)
         .set({
-          statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "ACTIVO",
+          statusCredit: estadoProtegido ?? "ACTIVO",
         })
         .where(eq(creditos.credito_id, anulado.credito_id));
 
@@ -323,9 +326,7 @@ export async function anularConvenio(params: {
         success: true as const,
         convenio_id: anulado.convenio_id,
         credito_id: anulado.credito_id,
-        status_credito: (volverARecuperacion
-          ? STATUS_EN_RECUPERACION
-          : "ACTIVO") as EstadoTrasAnular,
+        status_credito: (estadoProtegido ?? "ACTIVO") as EstadoTrasAnular,
         cuotas_atrasadas: 0,
       };
       }),

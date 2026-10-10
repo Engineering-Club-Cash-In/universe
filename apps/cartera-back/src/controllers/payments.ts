@@ -2814,7 +2814,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     // ✅ Créditos activos y cancelados
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','EN_RECUPERACION','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')`
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','EN_RECUPERACION', 'EN_JURIDICO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')`
     );
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`
@@ -3668,7 +3668,7 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "PENDIENTE_CANCELACION", "EN_CONVENIO","INCOBRABLE"]),
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_JURIDICO", "PENDIENTE_CANCELACION", "EN_CONVENIO","INCOBRABLE"]),
           eq(creditos_inversionistas_espejo.status, "completado")
           // El filtro por fecha_inicio_participacion se reemplazó por la evaluación de
           // "monto viejo" en el loop (mismo criterio que calcularYRegistrarPagosEspejo):
@@ -4087,6 +4087,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             "ACTIVO",
             "MOROSO",
             "EN_RECUPERACION",
+            "EN_JURIDICO",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
             "CANCELADO",

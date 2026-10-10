@@ -162,6 +162,7 @@ export async function sincronizarCasosCobros(
 				| "PENDIENTE_CANCELACION"
 				| "MOROSO"
 				| "EN_RECUPERACION"
+				| "EN_JURIDICO"
 			> = [
 				"ACTIVO",
 				"CANCELADO",
@@ -170,6 +171,8 @@ export async function sincronizarCasosCobros(
 				"MOROSO",
 				// COBROS-02 Fase 4 — mismos créditos que antes venían como MOROSO.
 				"EN_RECUPERACION",
+				// COBROS-02 W3 — un escalado a Jurídico sigue siendo un caso vivo.
+				"EN_JURIDICO",
 			];
 
 			// allSettled en vez de Promise.all: si un estado falla (red, cartera-back
@@ -230,7 +233,7 @@ export async function sincronizarCasosCobros(
 			// traer solo MOROSO lo dejaba sin refrescar su caso. Con allSettled por
 			// las mismas razones que el force-sync: que un estado falle no debe
 			// tumbar al otro.
-			const estadosEnMora = ["MOROSO", "EN_RECUPERACION"] as const;
+			const estadosEnMora = ["MOROSO", "EN_RECUPERACION", "EN_JURIDICO"] as const;
 			const porEstado = await Promise.allSettled(
 				estadosEnMora.map((estado) =>
 					fetchAllPages((page) =>

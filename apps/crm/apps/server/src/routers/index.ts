@@ -34,6 +34,7 @@ import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
+import { solicitudesJuridicoRouter } from "./solicitudes-juridico";
 import { solicitudesWorkspaceRouter } from "./solicitudes-workspace";
 import { trackerRouter } from "./tracker";
 import { trasladosCobrosRouter } from "./traslados-cobros";
@@ -190,6 +191,13 @@ export const cobrosAppRouter = {
 		solicitudesWorkspaceRouter.decidirSolicitudRebajaMora,
 	cancelarSolicitudRebajaMora:
 		solicitudesWorkspaceRouter.cancelarSolicitudRebajaMora,
+	solicitarEscalarJuridico: solicitudesJuridicoRouter.solicitarEscalarJuridico,
+	getSolicitudesJuridico: solicitudesJuridicoRouter.getSolicitudesJuridico,
+	getSolicitudesJuridicoDelCaso:
+		solicitudesJuridicoRouter.getSolicitudesJuridicoDelCaso,
+	decidirSolicitudJuridico: solicitudesJuridicoRouter.decidirSolicitudJuridico,
+	cancelarSolicitudJuridico:
+		solicitudesJuridicoRouter.cancelarSolicitudJuridico,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,

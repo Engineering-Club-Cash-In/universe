@@ -1163,6 +1163,55 @@ export const solicitudesRebajaMoraCobros = pgTable(
 	],
 );
 
+// W3 (Workspace, migración 0081) · Escalar un caso a Jurídico. El asesor lo pide
+// con un motivo y una nota para Jurídico; el supervisor lo aprueba (cartera-back
+// clava el crédito en B5 y lo saca de la cartera del asesor) o lo rechaza.
+export const solicitudesJuridicoCobros = pgTable(
+	"solicitudes_juridico_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+		// Bucket que tenía el crédito al pedir (B3 o B4).
+		bucketSnapshot: integer("bucket_snapshot").notNull(),
+		// 'no_contacto' | 'no_quiere_pagar' | 'sin_acuerdo'
+		motivo: text("motivo").notNull(),
+		notaJuridico: text("nota_juridico").notNull(),
+		// 'pendiente' | 'aprobada' | 'error_aplicacion' | 'aplicada' | 'rechazada' | 'cancelada'
+		estado: text("estado").notNull().default("pendiente"),
+		solicitadoPor: text("solicitado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		solicitadoEn: timestamp("solicitado_en").notNull().defaultNow(),
+		resueltoPor: text("resuelto_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		resueltoEn: timestamp("resuelto_en"),
+		notaResolucion: text("nota_resolucion"),
+	},
+	(table) => [
+		uniqueIndex("uq_solicitud_juridico_abierta")
+			.on(table.casoCobroId)
+			.where(
+				sql`${table.estado} IN ('pendiente', 'aprobada', 'error_aplicacion')`,
+			),
+		index("idx_solicitudes_juridico_estado").on(
+			table.estado,
+			table.solicitadoEn.desc(),
+		),
+		check(
+			"solicitudes_juridico_motivo_check",
+			sql`${table.motivo} IN ('no_contacto', 'no_quiere_pagar', 'sin_acuerdo')`,
+		),
+		check(
+			"solicitudes_juridico_estado_check",
+			sql`${table.estado} IN ('pendiente', 'aprobada', 'aplicada', 'error_aplicacion', 'rechazada', 'cancelada')`,
+		),
+	],
+);
+
 // F7 (#1864) · Resumen del caso generado por IA (Gemini), uno por caso. Se
 // regenera solo cuando cambia la huella (los datos que se le mandaron al
 // modelo): abrir la ficha sin cambios no vuelve a pagar la llamada.

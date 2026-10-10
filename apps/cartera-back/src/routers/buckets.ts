@@ -14,6 +14,7 @@ import {
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
 import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
+import { enviarAJuridico, escalamientoAplicado } from "../controllers/buckets/juridico";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
 import { getAsesorPorSifco } from "../controllers/buckets/asesorPorSifco";
@@ -47,6 +48,9 @@ export const STATUS_FUNNEL: StatusCredit[] = [
   // traslado masivo, en vez de mostrarlo en B4. Justo la cuenta que más hay que
   // mirar (review de Codex, P1).
   StatusCredit.EN_RECUPERACION,
+  // COBROS-02 W3 — mismo caso que EN_RECUPERACION: sin esto, escalar a Jurídico
+  // hacía DESAPARECER el crédito de la tabla por bucket (H1 de la revisión).
+  StatusCredit.EN_JURIDICO,
   StatusCredit.INCOBRABLE,
   StatusCredit.EN_CONVENIO,
 ];
@@ -954,6 +958,74 @@ export const bucketsRouter = new Elysia()
         // toda la cartera (admin/supervisor) y no hay dueño que exigir.
         asesor_esperado_email: t.Optional(t.String()),
       }),
+    },
+  )
+
+  // COBROS-02 W3 (issue #1873): traslado MANUAL a B5 · Jurídico. Mismo gate y
+  // bitácora que la recuperación; el caso sale de la cartera del asesor (se elige
+  // un asesor del pool de B5 distinto del actual).
+  .post(
+    "/buckets/creditos/:credito_id/juridico",
+    async ({ params, body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const creditoId = Number(params.credito_id);
+        if (!Number.isInteger(creditoId) || creditoId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] credito_id inválido" };
+        }
+        const result = await enviarAJuridico({
+          credito_id: creditoId,
+          motivo: body?.motivo,
+          usuario_email: body?.usuario_email,
+          asesor_esperado_email: body?.asesor_esperado_email,
+          referencia_externa: body?.referencia_externa,
+        });
+        if (!result.success) {
+          set.status = result.status ?? 400;
+          return { success: false, message: result.message, codigo: result.codigo };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo escalar el crédito a Jurídico",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        motivo: t.String(),
+        usuario_email: t.Optional(t.String()),
+        asesor_esperado_email: t.Optional(t.String()),
+        referencia_externa: t.Optional(t.String({ maxLength: 100 })),
+      }),
+    },
+  )
+
+  // COBROS-02 W3: ¿ya se aplicó el escalamiento de esa solicitud del CRM? Sirve
+  // para conciliar un error_aplicacion ambiguo sin depender del estado actual.
+  .get(
+    "/buckets/juridico/aplicacion/:referencia",
+    async ({ params, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const referencia = String(params.referencia ?? "").trim();
+        if (!referencia || referencia.length > 100) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] referencia inválida" };
+        }
+        return { success: true, aplicada: await escalamientoAplicado(referencia) };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo consultar el escalamiento",
+          error: String(err),
+        };
+      }
     },
   )
 

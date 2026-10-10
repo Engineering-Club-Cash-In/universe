@@ -50,6 +50,7 @@ import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { correrAlertasCasoAntiguasLeidas } from "./jobs/alertas-caso-leidas";
 import { correrRebajasMoraColgadas } from "./jobs/rebajas-mora-colgadas";
+import { correrJuridicoSolicitudesColgadas } from "./jobs/juridico-solicitudes-colgadas";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import {
@@ -2148,6 +2149,10 @@ const JOBS_PROGRAMADOS = {
 	 *  que se quedaron en `aprobada` (se cayó el proceso antes de la respuesta de
 	 *  cartera) y avisa a los supervisores. Cada 5 min; idempotente. */
 	rebajasMoraColgadas: true,
+	/** W3 (Workspace): devuelve a error_aplicacion los escalados a Jurídico aprobados
+	 *  que se quedaron en `aprobada` (se cayó el proceso antes de la respuesta de
+	 *  cartera) y avisa a los supervisores. Cada 5 min; idempotente. */
+	juridicoSolicitudesColgadas: true,
 	/** Interno: espejo de promesas hacia cartera (CB-030, 23:30 GT). Va con
 	 *  promesasYSnapshots — es la misma cadena. */
 	syncPromesasCartera: true,
@@ -2636,6 +2641,12 @@ if (HAY_JOBS_ACTIVOS) {
 	if (JOBS_PROGRAMADOS.rebajasMoraColgadas) {
 		void correrRebajasMoraColgadas();
 		setInterval(correrRebajasMoraColgadas, 5 * 60 * 1000);
+	}
+
+	// W3: escalados a Jurídico interrumpidos → error_aplicacion (cada 5 min).
+	if (JOBS_PROGRAMADOS.juridicoSolicitudesColgadas) {
+		void correrJuridicoSolicitudesColgadas();
+		setInterval(correrJuridicoSolicitudesColgadas, 5 * 60 * 1000);
 	}
 
 	// W5: alertas del caso sin repetición en 30 días, leídas por destinatario.

@@ -82,6 +82,22 @@ describe("clasificarErrorCartera", () => {
 		}
 	});
 
+	test("bucket_ocupado y pool_b5_sin_asesor son transitorios aunque vengan como 409", () => {
+		for (const codigo of ["bucket_ocupado", "pool_b5_sin_asesor"]) {
+			const r = clasificarErrorCartera({ status: 409, payload: { codigo, message: "[ERROR] Intente más tarde." } });
+			expect(r).toEqual({ tipo: "transitorio", motivo: "Intente más tarde." });
+		}
+	});
+
+	test("un 404 con codigo credito_no_encontrado es definitivo; sin él sigue siendo ruta ausente", () => {
+		const r = clasificarErrorCartera({
+			status: 404,
+			payload: { codigo: "credito_no_encontrado", message: "[ERROR] No se encontró crédito" },
+		});
+		expect(r.tipo).toBe("definitivo");
+		expect(clasificarErrorCartera({ status: 404 }).tipo).toBe("transitorio");
+	});
+
 	test("otro 4xx sin kind es definitivo, con el mensaje de cartera", () => {
 		const r = clasificarErrorCartera({
 			status: 400,

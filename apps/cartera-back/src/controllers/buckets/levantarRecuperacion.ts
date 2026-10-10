@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../database";
 import { creditos, moras_credito, SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { contarCuotasVencidasReales, STATUS_EN_RECUPERACION } from "../latefee";
+import { contarCuotasVencidasReales, STATUS_EN_JURIDICO, STATUS_EN_RECUPERACION } from "../latefee";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Fase 4 — LEVANTAR el estado `EN_RECUPERACION`.
@@ -26,6 +26,26 @@ import { contarCuotasVencidasReales, STATUS_EN_RECUPERACION } from "../latefee";
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Ejecutor = Pick<typeof db, "select" | "update" | "execute">;
+
+/**
+ * Corre `trabajo` en un SAVEPOINT cuando el ejecutor es una transacción (la de la
+ * reversa). Un query que falla deja abortada la transacción de PostgreSQL aunque
+ * el JS lo atrape: sin savepoint, el "best-effort" de estos helpers rompería el
+ * commit de la reversa financiera. Con savepoint, el fallo solo deshace el
+ * trabajo opcional. Un ejecutor sin `transaction` (la conexión suelta) no lo necesita.
+ */
+export async function enSavepoint<T>(
+  ejecutor: unknown,
+  trabajo: (e: Ejecutor) => Promise<T>,
+): Promise<T> {
+  const conTransaccion = ejecutor as {
+    transaction?: (fn: (e: Ejecutor) => Promise<T>) => Promise<T>;
+  };
+  if (typeof conTransaccion.transaction === "function") {
+    return conTransaccion.transaction((sp) => trabajo(sp));
+  }
+  return trabajo(ejecutor as Ejecutor);
+}
 
 /**
  * Estados que la recuperación puede reemplazar al restaurarse.
@@ -71,16 +91,19 @@ export async function levantarRecuperacionSiPagoTodo(
     .where(eq(creditos.credito_id, credito_id))
     .limit(1);
 
-  if (credito?.statusCredit !== STATUS_EN_RECUPERACION) {
+  // COBROS-02 W3: Jurídico se levanta con la misma regla que la recuperación.
+  const estadoLeido = credito?.statusCredit ?? null;
+  if (estadoLeido !== STATUS_EN_RECUPERACION && estadoLeido !== STATUS_EN_JURIDICO) {
     return { levantado: false, motivo: "no_estaba_en_recuperacion" };
   }
+  const esJuridico = estadoLeido === STATUS_EN_JURIDICO;
 
   // Cuotas vencidas REALES en este instante (el mismo predicado del motor: sin
   // pagar y sin pago validado que haya aplicado plata). No se usa
   // `moras_credito.cuotas_atrasadas` porque es una FOTO de la última corrida.
   const cuotasVencidas = await contarCuotasVencidasReales(
     credito_id,
-    STATUS_EN_RECUPERACION,
+    estadoLeido,
     ejecutor as never,
   );
   if (cuotasVencidas > 0) return { levantado: false, motivo: "debe_cuotas" };
@@ -106,17 +129,26 @@ export async function levantarRecuperacionSiPagoTodo(
   // una cancelación), y pisarlo desharía una decisión más reciente.
   await ejecutor
     .update(creditos)
-    .set({
-      statusCredit: "ACTIVO",
-      // Provenance: qué pago lo levantó. Es lo único que permite devolverle el
-      // estado si ese pago se reversa — sin esto, la decisión humana y su piso
-      // en B4 se pierden en silencio (review de Codex, P1).
-      recuperacion_levantada_pago_id: pago_id ?? null,
-    })
+    .set(
+      esJuridico
+        ? {
+            statusCredit: "ACTIVO",
+            // Provenance del levantamiento de Jurídico (W3), igual que el de
+            // recuperación: si ese pago se reversa, el crédito vuelve a Jurídico.
+            juridico_levantada_pago_id: pago_id ?? null,
+          }
+        : {
+            statusCredit: "ACTIVO",
+            // Provenance: qué pago lo levantó. Es lo único que permite devolverle el
+            // estado si ese pago se reversa — sin esto, la decisión humana y su piso
+            // en B4 se pierden en silencio (review de Codex, P1).
+            recuperacion_levantada_pago_id: pago_id ?? null,
+          },
+    )
     .where(
       and(
         eq(creditos.credito_id, credito_id),
-        eq(creditos.statusCredit, STATUS_EN_RECUPERACION),
+        eq(creditos.statusCredit, estadoLeido),
       ),
     );
 
@@ -148,6 +180,22 @@ export async function restaurarRecuperacionSiEstePagoLaLevanto(
   ejecutor: Ejecutor = db,
 ): Promise<boolean> {
   try {
+    return await enSavepoint(ejecutor, (ejecutor) => restaurarRecuperacionEn(credito_id, pago_id, ejecutor));
+  } catch (err) {
+    console.error(
+      `[RECUPERACION] ⚠️ No se pudo devolver EN_RECUPERACION al crédito ${credito_id}:`,
+      err,
+    );
+    return false;
+  }
+}
+
+async function restaurarRecuperacionEn(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor,
+): Promise<boolean> {
+  {
     const [credito] = await ejecutor
       .select({
         statusCredit: creditos.statusCredit,
@@ -195,11 +243,76 @@ export async function restaurarRecuperacionSiEstePagoLaLevanto(
         ),
       );
     return true;
+  }
+}
+
+/**
+ * COBROS-02 W3 · La vuelta atrás de Jurídico: si el pago que se reversa fue EL
+ * que levantó `EN_JURIDICO`, el crédito vuelve a Jurídico (y a su piso de B5).
+ * Mismo criterio que `restaurarRecuperacionSiEstePagoLaLevanto`. Solo restaura
+ * sobre estados que el levantamiento pudo dejar (ACTIVO, MOROSO): un régimen
+ * posterior (convenio, incobrable, cancelación) no se pisa. No lanza.
+ */
+export async function restaurarJuridicoSiEstePagoLoLevanto(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor = db,
+): Promise<boolean> {
+  try {
+    return await enSavepoint(ejecutor, (ejecutor) => restaurarJuridicoEn(credito_id, pago_id, ejecutor));
   } catch (err) {
     console.error(
-      `[RECUPERACION] ⚠️ No se pudo devolver EN_RECUPERACION al crédito ${credito_id}:`,
+      `[JURIDICO] ⚠️ No se pudo devolver EN_JURIDICO al crédito ${credito_id}:`,
       err,
     );
     return false;
+  }
+}
+
+async function restaurarJuridicoEn(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor,
+): Promise<boolean> {
+  {
+    const [credito] = await ejecutor
+      .select({
+        statusCredit: creditos.statusCredit,
+        levantadaPor: creditos.juridico_levantada_pago_id,
+      })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id))
+      .limit(1);
+
+    if (!credito || credito.levantadaPor !== pago_id) return false;
+
+    if (!(ESTADOS_QUE_LA_RECUPERACION_PUEDE_REEMPLAZAR as readonly string[]).includes(credito.statusCredit ?? "")) {
+      // La marca se limpia: ese pago ya no puede restaurar nada.
+      await ejecutor
+        .update(creditos)
+        .set({ juridico_levantada_pago_id: null })
+        .where(eq(creditos.credito_id, credito_id));
+      return false;
+    }
+
+    await ejecutor
+      .update(creditos)
+      .set({ statusCredit: STATUS_EN_JURIDICO, juridico_levantada_pago_id: null })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          eq(creditos.statusCredit, credito.statusCredit ?? "ACTIVO"),
+        ),
+      );
+    // El piso lo vuelve a B5: el asesor también tiene que ser del pool de B5.
+    // Import dinámico: juridico.ts arrastra el motor de buckets y este módulo
+    // se carga también desde rutas que no lo necesitan.
+    const { reasignarAsesorDeJuridicoSiHaceFalta } = await import("./juridico");
+    await reasignarAsesorDeJuridicoSiHaceFalta(
+      credito_id,
+      `Jurídico reinstalado por la reversa del pago ${pago_id}`,
+      ejecutor as never,
+    );
+    return true;
   }
 }

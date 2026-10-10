@@ -33,9 +33,16 @@ export function quetzalesRebaja(monto: string | number): string {
 export interface ErrorCarteraRebaja {
 	status: number | null;
 	payload?:
-		| { kind?: string; message?: string; mora_actual?: string }
+		| { kind?: string; codigo?: string; message?: string; mora_actual?: string }
 		| undefined;
 }
+
+/**
+ * Códigos de cartera que son REINTENTABLES aunque vengan como 409: contención con el
+ * cron (`bucket_ocupado`) o pool de Jurídico sin otro asesor (`pool_b5_sin_asesor`,
+ * configuración). Nunca deben rechazar la solicitud.
+ */
+export const CODIGOS_REINTENTABLES = ["bucket_ocupado", "pool_b5_sin_asesor"] as const;
 
 export type ClasificacionErrorCartera =
 	| { tipo: "definitivo"; motivo: string }
@@ -76,6 +83,9 @@ export function clasificarErrorCartera(
 			motivo: "El crédito ya no tiene mora activa que rebajar.",
 		};
 	}
+	if (payload?.codigo && (CODIGOS_REINTENTABLES as readonly string[]).includes(payload.codigo)) {
+		return { tipo: "transitorio", motivo: sinErrorPrefijo(payload.message) ?? "Cartera está ocupada. Puede aprobarla de nuevo." };
+	}
 	if (kind === "usuario_no_encontrado") {
 		return {
 			tipo: "transitorio",
@@ -94,6 +104,12 @@ export function clasificarErrorCartera(
 			tipo: "transitorio",
 			motivo:
 				"Cartera no autorizó al CRM. Revise la cuenta de servicio (CRM_SERVICE_USER_ID); la aprobación se puede repetir cuando se corrija.",
+		};
+	}
+	if (payload?.codigo === "credito_no_encontrado") {
+		return {
+			tipo: "definitivo",
+			motivo: "El crédito ya no existe en cartera.",
 		};
 	}
 	if (status === 404 && !kind) {

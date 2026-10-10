@@ -754,7 +754,7 @@ test("capital activo agrega compras pendientes por posición antes de restarlas"
   );
   expect(activeCapitalQuery).toContain(
     // Merge COBROS-02: EN_RECUPERACION sigue en la cartera activa del inversionista.
-    "cr.\"statusCredit\" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')",
+    "cr.\"statusCredit\" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')",
   );
   expect(activeCapitalQuery).toContain("GROUP BY ce.inversionista_id");
   expect(activeCapitalQuery).toContain(

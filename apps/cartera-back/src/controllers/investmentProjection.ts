@@ -2,7 +2,7 @@ import Big from "big.js";
 import { distribuirConResiduoCube } from "../cofidi/splitInteresPci";
 
 const CUBE_ID = 86;
-const ELIGIBLE_CREDIT_STATUSES = new Set(["ACTIVO", "MOROSO", "EN_CONVENIO"]);
+const ELIGIBLE_CREDIT_STATUSES = new Set(["ACTIVO", "MOROSO", "EN_JURIDICO", "EN_CONVENIO"]);
 
 export type ProjectionSourceRow = {
   inversionista_id: number;

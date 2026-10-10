@@ -265,7 +265,7 @@ export const processNexaPayment = (
         dependencies.now?.() ?? new Date(),
       );
       if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
-      if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
+      if (!["ACTIVO", "MOROSO", "EN_JURIDICO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
         throw new NexaPaymentError("credit_not_payable", 409);
       }
 

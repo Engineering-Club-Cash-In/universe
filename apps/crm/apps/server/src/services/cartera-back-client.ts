@@ -356,6 +356,13 @@ export function leerTimeoutConsultaMora(crudo: string | undefined): number {
 }
 
 /**
+ * Presupuesto del envío a Jurídico (autenticación + fetch). Tiene que ser menor
+ * que el umbral con el que el job devuelve a `error_aplicacion` una aprobación
+ * colgada (10 min), para que una llamada vencida nunca pueda despacharse después.
+ */
+const ENVIO_JURIDICO_PRESUPUESTO_MS = 120_000;
+
+/**
  * Corre `tarea` con un presupuesto que cubre TODO lo que hay entre la llamada y
  * la respuesta, autenticación incluida.
  *
@@ -2996,6 +3003,104 @@ export class CarteraBackClient {
 			);
 		}
 		return response.data;
+	}
+
+	/** ¿Cartera ya aplicó el escalamiento de esa solicitud? (sin caché). */
+	async escalamientoJuridicoAplicado(referencia: string): Promise<boolean> {
+		const response = await this.request<{ success: boolean; aplicada: boolean }>(
+			`/buckets/juridico/aplicacion/${encodeURIComponent(referencia)}`,
+			{ method: "GET" },
+			false,
+		);
+		return response?.aplicada === true;
+	}
+
+	private invalidarCachesDeEscalado(): void {
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("mora-por-etapa-asesor");
+		this.cache.invalidate("/buckets");
+	}
+
+	// W3 (Workspace) — escalado a Jurídico (B5). Cartera clava el crédito en B5,
+	// lo saca de la cartera del asesor y deja el estado EN_JURIDICO. Un 409 con
+	// `codigo: "ya_en_juridico"` significa que ya estaba aplicado (reintento).
+	async enviarAJuridico(input: {
+		creditoId: number;
+		motivo: string;
+		usuarioEmail?: string;
+		asesorEsperadoEmail?: string;
+		/** Id de la solicitud: cartera lo guarda y un reintento no vuelve a escalar. */
+		referenciaExterna?: string;
+	}): Promise<{
+		success: boolean;
+		bucket_anterior: number;
+		bucket_nuevo: number;
+		asesor_anterior: number | null;
+		asesor_nuevo: number;
+		status_credito: string;
+	}> {
+		this.invalidarCachesDeEscalado();
+		// Presupuesto de TODA la operación, autenticación incluida: el timeout de
+		// `request()` arranca después de esperar el token. Sin esto, un auth colgado
+		// más allá del umbral de aprobaciones colgadas (10 min) dejaba que el job
+		// devolviera la solicitud a `error_aplicacion`, que un supervisor la
+		// rechazara, y que el escalado se despachara igual al volver el token. Al
+		// vencer, la señal abortada impide que la llamada rezagada llegue a cartera.
+		const control = new AbortController();
+		let temporizador: ReturnType<typeof setTimeout> | undefined;
+		const vencimiento = new Promise<never>((_, rechazar) => {
+			temporizador = setTimeout(() => {
+				control.abort();
+				rechazar(
+					new Error(
+						`cartera-back no respondió el escalado a Jurídico en ${ENVIO_JURIDICO_PRESUPUESTO_MS}ms`,
+					),
+				);
+			}, ENVIO_JURIDICO_PRESUPUESTO_MS);
+		});
+		let response: {
+			success: boolean;
+			message?: string;
+			bucket_anterior: number;
+			bucket_nuevo: number;
+			asesor_anterior: number | null;
+			asesor_nuevo: number;
+			status_credito: string;
+		};
+		try {
+			response = await Promise.race([
+				this.request<typeof response>(
+					`/buckets/creditos/${input.creditoId}/juridico`,
+					{
+						method: "POST",
+						signal: control.signal,
+						body: JSON.stringify({
+							motivo: input.motivo,
+							...(input.usuarioEmail && { usuario_email: input.usuarioEmail }),
+							...(input.asesorEsperadoEmail && {
+								asesor_esperado_email: input.asesorEsperadoEmail,
+							}),
+							...(input.referenciaExterna && {
+								referencia_externa: input.referenciaExterna,
+							}),
+						}),
+					},
+				),
+				vencimiento,
+			]);
+		} finally {
+			clearTimeout(temporizador);
+			// De nuevo al terminar (también en timeout o error, donde cartera pudo
+			// aplicarlo): una lectura concurrente durante la espera pudo recachear
+			// el estado y el asesor de antes del escalado.
+			this.invalidarCachesDeEscalado();
+		}
+		if (!response?.success) {
+			throw new Error(response?.message || "cartera-back no confirmó el escalado a Jurídico");
+		}
+		return response;
 	}
 
 	// W2 (Workspace) — rebaja PARCIAL de mora aprobada por el supervisor. Cartera

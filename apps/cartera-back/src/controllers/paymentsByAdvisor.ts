@@ -38,6 +38,7 @@ export const getCuotasPorDiaYAsesor = async (
         "ACTIVO",
         "MOROSO",
         "EN_RECUPERACION",
+        "EN_JURIDICO",
         "EN_CONVENIO",
       ]),
     ];

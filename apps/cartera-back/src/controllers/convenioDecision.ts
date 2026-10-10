@@ -94,6 +94,13 @@ export interface ConvenioSnapshotV1 {
    * cliente tenía cuando se tomó la decisión.
    */
   plan_pagos_numeros: number[];
+  /**
+   * COBROS-02 W4: pago del abono inicial que sostuvo el convenio (`convenios_pago.abono_inicial_pago_id`,
+   * migración 0025), null si no tuvo. El rechazo borra la fila del convenio y, si un convenio anulado
+   * libera el abono y la reversa borra ese pago, el `ON DELETE SET NULL` suelta el vínculo: esta copia
+   * es la que deja la auditoría. Ausente en las decisiones anteriores a la 0025.
+   */
+  abono_inicial_pago_id?: number | null;
   created_by: number | null;
   created_at: string | null;
 }
@@ -138,7 +145,7 @@ function calcularFingerprint(input: {
     .digest("hex");
 }
 
-function construirSnapshot(
+export function construirSnapshot(
   convenio: typeof convenios_pago.$inferSelect,
   planPagosNumeros: number[],
 ): ConvenioSnapshotV1 {
@@ -164,6 +171,7 @@ function construirSnapshot(
     // una query aparte: la fila que las contiene se borra en el rechazo.
     cuotas_convenio: convenio.cuotas_convenio ?? [],
     plan_pagos_numeros: planPagosNumeros,
+    abono_inicial_pago_id: convenio.abono_inicial_pago_id ?? null,
     created_by: convenio.created_by ?? null,
     created_at: convenio.created_at ? new Date(convenio.created_at).toISOString() : null,
   };

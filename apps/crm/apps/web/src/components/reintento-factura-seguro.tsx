@@ -20,12 +20,13 @@ export function ReintentoFacturaSeguro({
 	opportunityId,
 	disponible,
 	aseguradora,
-	estado,
+	reintentoDesde,
 }: {
 	opportunityId: string;
 	disponible: boolean | null | undefined;
 	aseguradora?: string | null;
-	estado?: string | null;
+	/** Cuándo un envío pendiente pasa a reintentable (lo calcula el server). */
+	reintentoDesde?: string | null;
 }) {
 	const queryClient = useQueryClient();
 	const [confirmando, setConfirmando] = useState(false);
@@ -49,20 +50,21 @@ export function ReintentoFacturaSeguro({
 		},
 	});
 
-	// Un `pendiente` pasa a reintentable a los 10 minutos: mientras tanto se
-	// vuelve a consultar, para que el botón aparezca sin recargar.
+	// Un `pendiente` pasa a reintentable a los 10 minutos: se refresca una vez
+	// en ese momento, para que el botón aparezca sin recargar.
 	useEffect(() => {
-		if (estado !== "pendiente" || disponible) return;
-		const id = setInterval(() => {
+		if (!reintentoDesde || disponible) return;
+		const espera = Math.max(0, Date.parse(reintentoDesde) - Date.now()) + 1000;
+		const id = setTimeout(() => {
 			queryClient.invalidateQueries({
 				queryKey: orpc.getOpportunityDocuments.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
-		}, 60_000);
-		return () => clearInterval(id);
-	}, [estado, disponible, opportunityId, queryClient]);
+		}, espera);
+		return () => clearTimeout(id);
+	}, [reintentoDesde, disponible, opportunityId, queryClient]);
 
 	if (!disponible) return null;
 

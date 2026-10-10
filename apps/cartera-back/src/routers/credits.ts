@@ -229,6 +229,7 @@ export const creditRouter = new Elysia()
     estados_credito,
     aseguradora_id,      // 🆕 NUEVO
     excluir_pagados_mes, // 🆕 NUEVO
+    solo_con_cuenta_nexa,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -366,6 +367,9 @@ export const creditRouter = new Elysia()
   // 🆕 Excluir créditos con su cuota actual ya pagada (default false)
   const excluirPagadosMesParam = excluir_pagados_mes === "true" ? true : undefined;
 
+  // Solo créditos con cuenta Nexa asignada (binding activo con token)
+  const soloConCuentaNexaParam = solo_con_cuenta_nexa === "true" ? true : undefined;
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -387,6 +391,7 @@ export const creditRouter = new Elysia()
         inversionista_ids: inversionistaIdsArray,
         aseguradora_id: aseguradoraIdNum,
         excluir_pagados_mes: excluirPagadosMesParam,
+        solo_con_cuenta_nexa: soloConCuentaNexaParam,
         excel: true,
       });
       set.status = 200;
@@ -414,7 +419,8 @@ export const creditRouter = new Elysia()
         capitalMaxParam,
         estadosCreditoParsed?.values,
         aseguradoraIdNum,
-        excluirPagadosMesParam
+        excluirPagadosMesParam,
+        soloConCuentaNexaParam
       );
       set.status = 200;
       return result;
@@ -460,6 +466,7 @@ export const creditRouter = new Elysia()
         estados_credito,
         aseguradora_id,
         excluir_pagados_mes,
+        solo_con_cuenta_nexa,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -502,6 +509,7 @@ export const creditRouter = new Elysia()
             inversionista_ids,
             aseguradora_id,
             excluir_pagados_mes,
+            solo_con_cuenta_nexa,
             excel: true,
           });
           set.status = 200;
@@ -529,7 +537,8 @@ export const creditRouter = new Elysia()
           capital_max,
           estadosCreditoParsed?.values,
           aseguradora_id,
-          excluir_pagados_mes
+          excluir_pagados_mes,
+          solo_con_cuenta_nexa
         );
         set.status = 200;
         return result;
@@ -578,6 +587,7 @@ export const creditRouter = new Elysia()
         estados_credito: t.Optional(t.Array(t.String())),
         aseguradora_id: t.Optional(t.Number()),
         excluir_pagados_mes: t.Optional(t.Boolean()),
+        solo_con_cuenta_nexa: t.Optional(t.Boolean()),
       }),
     }
   )

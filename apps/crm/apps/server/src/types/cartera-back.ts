@@ -334,6 +334,12 @@ export interface CreditoDirectoResponse {
 	 */
 	incrementoMaximoMensualMora?: string;
 	/**
+	 * Código de pago Nexa del crédito (`nexa_credit_bindings.nexa_token`), solo
+	 * si el binding está activo; null si el crédito no tiene cuenta. Opcional
+	 * porque un cartera-back anterior a ese cambio no lo manda.
+	 */
+	cuentaNexa?: string | null;
+	/**
 	 * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
 	 * entre las que mueven la mora. cartera-back los calcula junto con el monto
 	 * proporcional (`incrementosMoraPorCredito`), así que cuadran con él.
@@ -749,6 +755,8 @@ export interface GetAllCreditsParams {
 	capital_min?: number;
 	capital_max?: number;
 	excluir_pagados_mes?: boolean;
+	/** Solo créditos con cuenta Nexa asignada (binding activo con token). */
+	solo_con_cuenta_nexa?: boolean;
 }
 
 export interface GetPaymentsParams {

@@ -16,6 +16,9 @@
     bigint,
     index,
     jsonb,
+    uuid,
+    bigserial,
+    char,
     type AnyPgColumn,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
@@ -482,7 +485,21 @@
       .notNull()
       .references(() => platform_users.id, { onDelete: "cascade" }),
     fecha: timestamp("fecha").defaultNow().notNull(),
-  });
+    // Evento Nexa que originó una condonación automática (pago ACH a tiempo).
+    // Único entre las vivas: el reintento del mismo evento no condona dos veces.
+    // Ver drizzle/0051_condonacion_nexa_a_tiempo.sql.
+    nexa_payment_event_id: integer("nexa_payment_event_id"),
+    // La condonación se anula (no se borra) si el pago Nexa se rechaza.
+    anulada_at: timestamp("anulada_at", { withTimezone: true }),
+    // Pagos pendientes que sostenían la condonación Nexa al decidirla: si uno
+    // se anula o se revierte sin validarse, la condonación se anula sola.
+    // Ver drizzle/0052_condonacion_nexa_pagos_pendientes.sql.
+    pagos_pendientes_ids: integer("pagos_pendientes_ids").array(),
+  }, (t) => [
+    uniqueIndex("uq_moras_condonaciones_nexa_evento_viva")
+      .on(t.nexa_payment_event_id)
+      .where(sql`${t.nexa_payment_event_id} IS NOT NULL AND ${t.anulada_at} IS NULL`),
+  ]);
 
   // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
   export type MoraPagadaTipo = "PAGO" | "CONDONACION" | "REVERSA" | "ANULACION";
@@ -517,6 +534,9 @@
       fecha: timestamp("fecha")
         .default(sql`clock_timestamp()`)
         .notNull(),
+      // La condonación (moras_condonaciones) que originó una fila CONDONACION.
+      // Sin FK, igual que pago_id. Ver drizzle/0051_condonacion_nexa_a_tiempo.sql.
+      condonacion_id: integer("condonacion_id"),
     },
     (table) => [
       // Impide doble clic: el mismo pago no puede registrar mora dos veces en la misma cuota.
@@ -539,6 +559,11 @@
       index("mora_pagada_cuota_idx_pago").on(table.pago_id).where(
         sql`${table.pago_id} IS NOT NULL`
       ),
+
+      // Buscar por condonación: compensar las filas de una condonación anulada.
+      index("mora_pagada_cuota_idx_condonacion").on(table.condonacion_id).where(
+        sql`${table.condonacion_id} IS NOT NULL`
+      ),
     ]
   );
 
@@ -556,6 +581,8 @@
     "API_MANUAL",
     "CONDONACION_INDIVIDUAL",
     "CONDONACION_MASIVA",
+    // Pago Nexa (ACH) que llegó a tiempo: ver drizzle/0051.
+    "CONDONACION_NEXA_A_TIEMPO",
   ]);
 
   export const moras_historial = customSchema.table("moras_historial", {
@@ -700,15 +727,40 @@
   }, (table) => ({
     cuotaIdx: index("idx_pagos_credito_cuota").on(table.cuota_id),
   }));
-  export const nexa_credit_bindings = customSchema.table("nexa_credit_bindings", {
-    credito_id: integer("credito_id")
-      .primaryKey()
-      .references(() => creditos.credito_id, { onDelete: "cascade" }),
-    activo: boolean("activo").notNull().default(true),
-    expires_at: timestamp("expires_at", { withTimezone: true }),
-    max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
-    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  });
+  export const nexa_credit_bindings = customSchema.table(
+    "nexa_credit_bindings",
+    {
+      credito_id: integer("credito_id")
+        .primaryKey()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      activo: boolean("activo").notNull().default(true),
+      expires_at: timestamp("expires_at", { withTimezone: true }),
+      max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      // Cuenta Nexa del cliente (migración 0045): el token que el cliente usa
+      // como cuenta destino en su banco y el seguimiento de su creación.
+      // Tipos de la 0045 (text): es la que corre primero en producción y la
+      // 0048 no cambia el tipo de una columna que ya existe.
+      nexa_user_id: integer("nexa_user_id"),
+      nexa_identifier: text("nexa_identifier"),
+      nexa_token: text("nexa_token"),
+      nexa_national_id: text("nexa_national_id"),
+      cuenta_solicitada_at: timestamp("cuenta_solicitada_at", { withTimezone: true }),
+      cuenta_intentos: integer("cuenta_intentos").notNull().default(0),
+      cuenta_error: text("cuenta_error"),
+      cuenta_notificada_at: timestamp("cuenta_notificada_at", { withTimezone: true }),
+      updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      // Migración 0048: cuándo nexa-server registró el token en cartera.
+      token_registrado_at: timestamp("token_registrado_at", { withTimezone: true }),
+    },
+    (table) => ({
+      // Nombre de la 0045 (el que existe en producción); la 0048 no crea el
+      // suyo si ya hay un índice único sobre nexa_token.
+      uqNexaToken: uniqueIndex("nexa_credit_bindings_uq_token")
+        .on(table.nexa_token)
+        .where(sql`${table.nexa_token} IS NOT NULL`),
+    }),
+  );
   export const nexa_payment_nonces = customSchema.table("nexa_payment_nonces", {
     nonce: varchar("nonce", { length: 150 }).primaryKey(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -728,9 +780,18 @@
       payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
       status: varchar("status", { length: 20 }).notNull().default("processing"),
       pago_id: integer("pago_id").references(() => pagos_credito.pago_id),
+      // El pago_id que tenía el evento cuando marcar CAÍDO borró el pago (sin FK).
+      // Ver drizzle/0050_nexa_evento_pago_eliminado.sql.
+      pago_id_eliminado: integer("pago_id_eliminado"),
       error: text("error"),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
       updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      // Bandeja de salida del recibo por WhatsApp (migración 0046).
+      recibo_status: varchar("recibo_status", { length: 20 }),
+      recibo_intentos: integer("recibo_intentos").notNull().default(0),
+      recibo_actualizado_at: timestamp("recibo_actualizado_at", { withTimezone: true }),
+      // pago_id que ya recibieron su recibo (migración 0047).
+      recibo_pagos_ok: integer("recibo_pagos_ok").array().notNull().default(sql`'{}'::integer[]`),
     },
     (table) => ({
       uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(
@@ -738,6 +799,28 @@
         table.external_reference,
       ),
       uqNonce: uniqueIndex("uq_nexa_payment_events_nonce").on(table.nonce),
+    }),
+  );
+  // Cola de eventos hacia nexa-server (patrón outbox): se escribe en la misma
+  // transacción que el cambio de negocio y un worker la drena.
+  export const nexa_outbox = customSchema.table(
+    "nexa_outbox",
+    {
+      id: bigserial("id", { mode: "number" }).primaryKey(),
+      event_id: uuid("event_id").notNull().defaultRandom().unique(),
+      tipo: varchar("tipo", { length: 40 }).notNull(),
+      credito_id: integer("credito_id").notNull(),
+      payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+      intentos: integer("intentos").notNull().default(0),
+      ultimo_error: text("ultimo_error"),
+      proximo_intento_at: timestamp("proximo_intento_at", { withTimezone: true }).notNull().defaultNow(),
+      enviado_at: timestamp("enviado_at", { withTimezone: true }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      pendientesIdx: index("idx_nexa_outbox_pendientes")
+        .on(table.proximo_intento_at)
+        .where(sql`${table.enviado_at} IS NULL`),
     }),
   );
   export const boletas = customSchema.table("boletas", {
@@ -2568,5 +2651,110 @@
       index("rubros_pagos_pago_idx").on(t.pago_id),
       // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
       index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
+    ]
+  );
+
+  // ================================================================
+  // Estado de cuenta al solicitar la cancelación de un crédito.
+  // Migración: drizzle/0045_estados_cuenta_cancelacion.sql (se aplica a mano).
+  // ================================================================
+
+  /**
+   * Una fila por PDF emitido al pulsar «Cancelar Crédito». Guarda la clave
+   * privada del archivo en R2 y su SHA-256: así se recupera el MISMO archivo
+   * aunque el saldo cambie, y se detecta si el objeto se corrompió.
+   * `monto_cancelacion` sin CHECK >= 0: el modal permite descuentos.
+   */
+  export const estados_cuenta_cancelacion = customSchema.table(
+    "estados_cuenta_cancelacion",
+    {
+      id: uuid("id").primaryKey().defaultRandom(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "restrict" }),
+      numero_credito_sifco: varchar("numero_credito_sifco", { length: 40 }).notNull(),
+      cliente_nombre: varchar("cliente_nombre", { length: 200 }).notNull(),
+      fecha_corte_gt: date("fecha_corte_gt").notNull(),
+      generado_at: timestamp("generado_at", { withTimezone: true }).notNull().defaultNow(),
+      generado_por_id: integer("generado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      monto_cancelacion: numeric("monto_cancelacion", { precision: 18, scale: 2 }).notNull(),
+      entrada_json: jsonb("entrada_json").notNull(),
+      desglose_json: jsonb("desglose_json").notNull(),
+      pdf_key: text("pdf_key").notNull().unique("estados_cuenta_cancelacion_pdf_key_unique"),
+      pdf_sha256: char("pdf_sha256", { length: 64 }).notNull(),
+    },
+    (t) => [
+      index("estados_cuenta_cancelacion_idx_credito_generado").on(
+        t.credito_id,
+        t.generado_at.desc()
+      ),
+    ]
+  );
+
+  /**
+   * Enlace público `/ec/<código>` a un documento, uno por envío. Se guarda la
+   * huella SHA-256 del código, nunca el código. Vence, se puede anular y cuenta
+   * aperturas.
+   */
+  export const estados_cuenta_cancelacion_enlaces = customSchema.table(
+    "estados_cuenta_cancelacion_enlaces",
+    {
+      id: uuid("id").primaryKey().defaultRandom(),
+      documento_id: uuid("documento_id")
+        .notNull()
+        .references(() => estados_cuenta_cancelacion.id, { onDelete: "restrict" }),
+      codigo_sha256: char("codigo_sha256", { length: 64 })
+        .notNull()
+        .unique("estados_cuenta_cancelacion_enlaces_codigo_unique"),
+      creado_por_id: integer("creado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      creado_at: timestamp("creado_at", { withTimezone: true }).notNull().defaultNow(),
+      vence_at: timestamp("vence_at", { withTimezone: true }).notNull(),
+      revocado_at: timestamp("revocado_at", { withTimezone: true }),
+      aperturas: integer("aperturas").notNull().default(0),
+      primera_apertura_at: timestamp("primera_apertura_at", { withTimezone: true }),
+      ultima_apertura_at: timestamp("ultima_apertura_at", { withTimezone: true }),
+    },
+    (t) => [index("estados_cuenta_cancelacion_enlaces_idx_documento").on(t.documento_id)]
+  );
+
+  /**
+   * Una fila por intento real de WhatsApp. `id` = `intentoId` del front: repetir
+   * el mismo ID devuelve el resultado existente en vez de mandar otro mensaje.
+   * `estado` ∈ EN_PROCESO | ENVIADO | ERROR; `destinatario_fuente` ∈
+   * CASO_COBROS | LEAD | SOLICITUD (CHECK en la migración).
+   */
+  export const estados_cuenta_cancelacion_envios = customSchema.table(
+    "estados_cuenta_cancelacion_envios",
+    {
+      id: uuid("id").primaryKey(),
+      documento_id: uuid("documento_id")
+        .notNull()
+        .references(() => estados_cuenta_cancelacion.id, { onDelete: "restrict" }),
+      enlace_id: uuid("enlace_id").references(() => estados_cuenta_cancelacion_enlaces.id, {
+        onDelete: "restrict",
+      }),
+      canal: varchar("canal", { length: 20 }).notNull().default("WHATSAPP"),
+      destinatario_telefono: varchar("destinatario_telefono", { length: 20 }).notNull(),
+      destinatario_fuente: varchar("destinatario_fuente", { length: 30 }).notNull(),
+      solicitado_por_id: integer("solicitado_por_id")
+        .notNull()
+        .references(() => platform_users.id),
+      estado: text("estado").notNull(),
+      proveedor: varchar("proveedor", { length: 40 }),
+      proveedor_mensaje_id: text("proveedor_mensaje_id"),
+      error_resumen: text("error_resumen"),
+      solicitado_at: timestamp("solicitado_at", { withTimezone: true }).notNull().defaultNow(),
+      finalizado_at: timestamp("finalizado_at", { withTimezone: true }),
+    },
+    (t) => [
+      index("estados_cuenta_cancelacion_envios_idx_documento").on(
+        t.documento_id,
+        t.solicitado_at.desc()
+      ),
+      index("estados_cuenta_cancelacion_envios_idx_estado").on(t.estado),
     ]
   );

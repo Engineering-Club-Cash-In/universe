@@ -14,6 +14,8 @@ export const nexaPaymentSchema = z
       .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid tokenDate")
       .optional(),
     transactionId: z.string().trim().max(100).transform((value) => value || undefined).optional(),
+    // Mismo formato que acepta el registro del token: prefijo variable + 9 dígitos.
+    token: z.string().regex(/^\d{10,32}$/).optional(),
   })
   .strict();
 
@@ -21,21 +23,35 @@ type NexaCreditBinding = {
   activo: boolean;
   expires_at: Date | null;
   max_payment_amount: string | null;
+  nexa_token?: string | null;
 };
 
 export const getNexaBindingRejection = (
   binding: NexaCreditBinding | null,
   amount: string,
   now: Date,
+  token: string | undefined,
 ) => {
   if (!binding) return "binding_missing" as const;
   if (!binding.activo) return "binding_inactive" as const;
   if (binding.expires_at && binding.expires_at <= now) return "binding_expired" as const;
+  if (!token) return "token_missing" as const;
+  if (!binding.nexa_token) return "binding_token_missing" as const;
+  if (token !== binding.nexa_token) return "token_mismatch" as const;
   if (binding.max_payment_amount && new Big(amount).gt(binding.max_payment_amount)) {
     return "amount_exceeds_binding" as const;
   }
   return null;
 };
+
+// Un pago SIN token no es un rechazo del banco: es un nexa-server que todavía
+// no manda el token (cartera desplegada antes) o que lo omitió. Se responde 503
+// porque nexa-server —la versión vieja y la nueva— reintenta todo >= 500 y
+// convierte un 403 con código en REJECTED, lo que le DEVUELVE el dinero al
+// cliente. binding_token_missing (auto-reparación) y token_mismatch siguen 403.
+const nexaBindingRejectionError = (
+  code: NonNullable<ReturnType<typeof getNexaBindingRejection>>,
+) => new NexaPaymentError(code, code === "token_missing" ? 503 : 403);
 
 export type NexaPaymentBody = z.infer<typeof nexaPaymentSchema>;
 
@@ -49,8 +65,10 @@ export type NexaPaymentContext = {
 
 export type NexaClaim =
   | { kind: "new" | "retry" | "billing"; eventId: number }
-  | { kind: "applied"; paymentId: number; billingStatus?: "PENDING" }
-  | { kind: "manual_review"; phase?: "payment" | "billing" }
+  | { kind: "applied"; paymentId: number; eventId?: number; billingStatus?: "PENDING" }
+  // processingEventId: solo cuando ESTA entrega pasa el evento de processing a
+  // manual_review (el proceso anterior murió), para reconciliar su condonación.
+  | { kind: "manual_review"; phase?: "payment" | "billing"; processingEventId?: number }
   | { kind: "conflict" | "replay" | "billing_failed" };
 
 export type NexaBillingOutcome =
@@ -65,6 +83,8 @@ export type StoredNexaEvent = {
   payload_hash: string;
   status: string;
   pago_id: number | null;
+  /** Pago que tenía el evento antes de que marcar CAÍDO lo borrara. */
+  pago_id_eliminado?: number | null;
 };
 
 export const classifyNexaClaim = (
@@ -89,8 +109,14 @@ export const classifyNexaClaim = (
   ) {
     return { kind: "conflict" };
   }
+  // Marcar CAÍDO borró el pago de una transferencia que cartera ya aceptó: el reintento de Nexa
+  // se contesta como ya aplicado con el pago original. Nunca para un `failed`: esa transferencia
+  // se rechazó y Nexa devolvió el dinero; sigue el camino de failed de abajo.
+  if (event.pago_id === null && event.pago_id_eliminado != null && event.status !== "failed") {
+    return { kind: "applied", paymentId: event.pago_id_eliminado, eventId: event.id };
+  }
   if (["applied", "billed"].includes(event.status) && event.pago_id !== null) {
-    return { kind: "applied", paymentId: event.pago_id };
+    return { kind: "applied", paymentId: event.pago_id, eventId: event.id };
   }
   if (event.status === "failed") return { kind: "retry", eventId: event.id };
   // Preserve a durable rejection across polls instead of resetting Nexa's retry budget with PENDING.
@@ -99,16 +125,25 @@ export const classifyNexaClaim = (
     return { kind: "billing", eventId: event.id };
   }
   if (event.status === "billing_running" && billingIsRunning && event.pago_id !== null) {
-    return { kind: "applied", paymentId: event.pago_id, billingStatus: "PENDING" };
+    return { kind: "applied", paymentId: event.pago_id, eventId: event.id, billingStatus: "PENDING" };
   }
   if (["billing_running", "billing_unknown"].includes(event.status)) {
     return { kind: "manual_review", phase: "billing" };
+  }
+  // Un evento ya en manual_review NO: un operador pudo resolverlo registrando la
+  // boleta a mano (fila sin nexaPaymentEventId) y 0 filas vinculadas no
+  // probaría que el pago no entró. Una anulación fallida que ya dejó el evento
+  // en manual_review queda con el log viva_sin_verificar para revisión humana.
+  if (event.status === "processing" && event.pago_id_eliminado == null) {
+    return { kind: "manual_review", processingEventId: event.id };
   }
   return { kind: "manual_review" };
 };
 
 type NexaPaymentResult = {
   paymentId: number;
+  /** Todos los pago_id del evento (ascendente); paymentId es el primero. */
+  paymentIds: number[];
   idempotent: boolean;
   billingStatus?: "PENDING";
 };
@@ -147,11 +182,51 @@ export type NexaPaymentDependencies = {
     validateAfterLock: () => Promise<void>,
     paymentLock: PaymentAdvisoryLock,
   ) => Promise<{ success?: boolean; code?: string; status?: number }>;
+  /**
+   * Condona la mora de un pago ACH que llegó a tiempo (ver
+   * `utils/condonacionNexaATiempo.ts`). Idempotente por evento y nunca lanza.
+   * Devuelve el monto condonado cuando lo sabe (solo para el log de error).
+   */
+  condonarMoraATiempo?: (body: NexaPaymentBody, eventId: number) => Promise<{ monto: string } | void>;
+  /**
+   * Anula la condonación viva del evento (si no hay, no hace nada). Si se niega
+   * a anular porque hay un pago posterior no vinculado (pudo ser esta misma
+   * transferencia, registrada a mano), lanza `CondonacionConservadaError`: la
+   * saga lo trata como cualquier fallo de anulación → 503 incierto y
+   * manual_review, nunca un rechazo (Nexa devolvería un dinero que entró).
+   */
+  anularCondonacionATiempo?: (eventId: number) => Promise<void>;
+  /**
+   * Con el pago ya aplicado, revisa que el crédito haya quedado al día (la
+   * condición de la condonación). Si no, deja alerta durable; NO anula: el
+   * pago sí entró. Nunca lanza.
+   */
+  verificarCondonacionATiempo?: (creditoId: number, eventId: number) => Promise<void>;
+  /**
+   * El registro dejó filas de pago vinculadas pero el desenlace quedó incierto
+   * (monto que no cuadra, registro que reventó, proceso que murió). Si las
+   * filas suman el monto de Nexa, el pago entró completo y la condonación se
+   * conserva siempre. Si entró A MEDIAS y el crédito NO quedó al día, se anula
+   * (con la guarda del pago posterior no vinculado); al día se conserva. La
+   * respuesta a Nexa no cambia. Nunca lanza.
+   */
+  reconciliarCondonacionIncierta?: (creditoId: number, eventId: number, montoNexa: string) => Promise<void>;
+  /**
+   * Qué pasó con la condonación del evento de este pago, para informarlo en
+   * cada 503 incierto (también en los reintentos, que ya no pasan por la saga).
+   * undefined = el evento no tiene condonación.
+   */
+  condonacionDelPago?: (body: NexaPaymentBody) => Promise<CondonacionNexaIncierta | undefined>;
   applyPayment: (
     paymentId: number,
     paymentLock: PaymentAdvisoryLock,
   ) => Promise<{ success?: boolean }>;
   complete: (eventId: number, paymentId: number) => Promise<void>;
+  /**
+   * Avisa que el dinero del evento ya quedó aplicado (después de `complete`).
+   * No se espera ni puede romper el pago: lo usa el recibo por WhatsApp.
+   */
+  onPaymentApplied?: (eventId: number) => void;
   fail: (eventId: number, code: string) => Promise<void>;
   billPayments?: (eventId: number, paymentIds: number[]) => Promise<NexaBillingOutcome>;
   completeBilling?: (eventId: number, paymentId: number) => Promise<void>;
@@ -210,10 +285,28 @@ export const classifyNexaBillingResponse = (
   return { kind: "unknown", code: "billing_provider_or_persistence_error" };
 };
 
+export class CondonacionConservadaError extends Error {
+  constructor(readonly motivo: "pago_posterior_no_vinculado") {
+    super(`condonacion_conservada: ${motivo}`);
+  }
+}
+
+/**
+ * Lo que cartera le informa a nexa-server de la condonación a tiempo en un 503
+ * `payment_outcome_uncertain`:
+ *  - anulada: con lo que entró, el crédito no quedó al día (o no entró nada);
+ *  - conservada: con lo que entró, el crédito quedó al día;
+ *  - conservada_pago_posterior: no se anuló porque hay un pago posterior no
+ *    vinculado que pudo ser esta misma transferencia;
+ *  - sin_verificar: sigue viva y no se pudo decidir.
+ */
+export type CondonacionNexaIncierta = "anulada" | "conservada" | "conservada_pago_posterior" | "sin_verificar";
+
 export class NexaPaymentError extends Error {
   constructor(
     readonly code: string,
     readonly status: number,
+    readonly condonacion?: CondonacionNexaIncierta,
   ) {
     super(code);
   }
@@ -224,14 +317,66 @@ export const processNexaPayment = (
   context: NexaPaymentContext,
   dependencies: NexaPaymentDependencies,
 ) => dependencies.withCreditLock(body.creditoId, async (paymentLock) => {
+  try {
+    return await procesarPagoNexa(body, context, dependencies, paymentLock);
+  } catch (error) {
+    if (
+      !(error instanceof NexaPaymentError)
+      || error.code !== "payment_outcome_uncertain"
+      || !dependencies.condonacionDelPago
+    ) throw error;
+    // Todavía con el candado del crédito: lo que se informa es lo que quedó.
+    // Si no se pudo leer, se dice: "sin_verificar" (no se sabe qué pasó). Leída y
+    // sin condonación, el 503 va sin el campo.
+    const condonacion = await dependencies.condonacionDelPago(body)
+      .catch((): CondonacionNexaIncierta => "sin_verificar");
+    throw condonacion ? new NexaPaymentError(error.code, error.status, condonacion) : error;
+  }
+});
+
+const procesarPagoNexa = async (
+  body: NexaPaymentBody,
+  context: NexaPaymentContext,
+  dependencies: NexaPaymentDependencies,
+  paymentLock: PaymentAdvisoryLock,
+): Promise<NexaPaymentResult> => {
   const existingCredit = await dependencies.loadCredit(body.creditoId);
   if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
   if ("paymentId" in claim) {
-    return { paymentId: claim.paymentId, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
+    // Buscar por nexa_payment_event_id: nexa_payment_events.pago_id solo guarda el primero y puede ser NULL.
+    const linked = claim.eventId === undefined
+      ? []
+      : (await dependencies.findPayments?.(claim.eventId, body.creditoId)) ?? [];
+    const paymentIds = [...new Set([claim.paymentId, ...linked.map((payment) => payment.paymentId)])]
+      .sort((a, b) => a - b);
+    return { paymentId: claim.paymentId, paymentIds, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
   }
   if (claim.kind === "billing_failed") throw new NexaPaymentError("billing_failed", 503);
   if (claim.kind === "manual_review") {
+    if (claim.phase !== "billing" && claim.processingEventId !== undefined && dependencies.anularCondonacionATiempo) {
+      // El proceso pudo morir entre la condonación (commiteada) y el registro: el
+      // evento queda processing → manual_review y la saga no vuelve a correr. Con
+      // el candado del crédito tomado nadie más está registrando: 0 filas de pago
+      // vinculadas = el pago no entró → se anula, salvo que el crédito tenga un
+      // pago posterior no vinculado (la anulación lo conserva: ver
+      // anularCondonacionNexaATiempo). Con filas, se decide por si el crédito
+      // quedó al día con lo que entró. La respuesta a Nexa no cambia.
+      try {
+        const linked = await dependencies.findPayments(claim.processingEventId, body.creditoId);
+        if (linked.length === 0) await dependencies.anularCondonacionATiempo(claim.processingEventId);
+        else await dependencies.reconciliarCondonacionIncierta?.(body.creditoId, claim.processingEventId, body.amount);
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: "error",
+          event: "nexa.condonacion_a_tiempo.viva_sin_verificar",
+          paso: "reconciliar_evento_incierto",
+          nexa_payment_event_id: claim.processingEventId,
+          credito_id: body.creditoId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }
     throw new NexaPaymentError(
       claim.phase === "billing" ? "billing_outcome_unknown" : "payment_outcome_uncertain",
       503,
@@ -263,15 +408,47 @@ export const processNexaPayment = (
         credit.binding,
         body.amount,
         dependencies.now?.() ?? new Date(),
+        body.token,
       );
-      if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
+      if (bindingRejection) throw nexaBindingRejectionError(bindingRejection);
       if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
         throw new NexaPaymentError("credit_not_payable", 409);
       }
 
       payments = await dependencies.findPayments(eventId, body.creditoId);
+      let condonacion: Awaited<ReturnType<NonNullable<NexaPaymentDependencies["condonarMoraATiempo"]>>> | undefined;
+      const condonacionVivaSinVerificar = (paso: string, error: unknown) => {
+        console.error(JSON.stringify({
+          level: "error",
+          event: "nexa.condonacion_a_tiempo.viva_sin_verificar",
+          paso,
+          nexa_payment_event_id: eventId,
+          credito_id: body.creditoId,
+          monto_condonado: condonacion?.monto ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        return new NexaPaymentError("payment_outcome_uncertain", 503);
+      };
+      // Registro a medias (filas vinculadas, desenlace incierto): la condonación
+      // se decide por lo que realmente entró. También en un reintento.
+      const inciertoConFilas = async () => {
+        await dependencies.reconciliarCondonacionIncierta?.(body.creditoId, eventId, body.amount);
+        return new NexaPaymentError("payment_outcome_uncertain", 503);
+      };
       if (payments.length === 0) {
-        let registered: Awaited<ReturnType<NexaPaymentDependencies["registerPayment"]>>;
+        // Saga: la condonación commitea ANTES del registro (insertPayment no es
+        // una sola transacción). Si el registro no termina en éxito —rechazo
+        // definitivo, desenlace incierto o excepción— se decide por el ESTADO
+        // OBSERVADO, no por la forma del error: ya con el registro terminado
+        // (await completo), se buscan las filas de pago del evento.
+        //  - 0 filas: el pago NO entró → se anula la condonación (restituye la
+        //    mora y compensa el ledger). El desenlace hacia nexa-server no cambia.
+        //  - ≥1 fila: el pago entró → la condonación se conserva.
+        // No se puede dejar para el reintento: un evento incierto queda en
+        // manual_review y `claim` corta ahí, sin volver a pasar por la saga.
+        condonacion = await dependencies.condonarMoraATiempo?.(body, eventId);
+        let registered: Awaited<ReturnType<NexaPaymentDependencies["registerPayment"]>> | undefined;
+        let registroError: unknown;
         try {
           registered = await dependencies.registerPayment(
             body,
@@ -284,36 +461,77 @@ export const processNexaPayment = (
                 currentCredit.binding,
                 body.amount,
                 dependencies.now?.() ?? new Date(),
+                body.token,
               );
-              if (rejection) throw new NexaPaymentError(rejection, 403);
+              if (rejection) throw nexaBindingRejectionError(rejection);
             },
             paymentLock,
           );
         } catch (error) {
-          if (error instanceof NexaPaymentError) throw error;
-          throw new NexaPaymentError("payment_outcome_uncertain", 503);
+          registroError = error;
         }
-        payments = await dependencies.findPayments(eventId, body.creditoId);
+        try {
+          payments = await dependencies.findPayments(eventId, body.creditoId);
+        } catch (error) {
+          throw dependencies.condonarMoraATiempo
+            ? condonacionVivaSinVerificar("consultar_filas_de_pago", error)
+            : error;
+        }
         if (payments.length === 0) {
-          throw registered.success === false
-            ? new NexaPaymentError(
-                registered.code ?? "payment_registration_rejected",
-                registered.status ?? 409,
-              )
-            : new NexaPaymentError("payment_outcome_uncertain", 503);
+          const desenlace = registroError !== undefined
+            ? registroError instanceof NexaPaymentError
+              ? registroError
+              : new NexaPaymentError("payment_outcome_uncertain", 503)
+            : registered?.success === false
+              ? new NexaPaymentError(
+                  registered.code ?? "payment_registration_rejected",
+                  registered.status ?? 409,
+                )
+              : new NexaPaymentError("payment_outcome_uncertain", 503);
+          try {
+            await dependencies.anularCondonacionATiempo?.(eventId);
+          } catch (error) {
+            throw condonacionVivaSinVerificar("anular_condonacion", error);
+          }
+          throw desenlace;
         }
+        // Hay filas pero el registro reventó: no se sabe si terminó de escribir.
+        if (registroError !== undefined) throw await inciertoConFilas();
       }
       const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
       if (!linkedAmount.eq(body.amount)) {
-        throw new NexaPaymentError("payment_outcome_uncertain", 503);
+        throw await inciertoConFilas();
       }
 
       for (const payment of payments) {
         if (["validated", "capital_validated"].includes(payment.validationStatus)) continue;
         const applied = await dependencies.applyPayment(payment.paymentId, paymentLock);
-        if (applied.success !== true) throw new NexaPaymentError("payment_not_applied", 409);
+        if (applied.success !== true) {
+          // nexa-server toma el 409 como rechazo y Nexa devuelve el dinero: la
+          // condonación (de este intento o de uno anterior, por eso sin condición;
+          // es idempotente) no puede quedar viva. Si no se puede anular, el
+          // desenlace queda incierto para revisión manual en vez de rechazo.
+          try {
+            await dependencies.anularCondonacionATiempo?.(eventId);
+          } catch (error) {
+            throw condonacionVivaSinVerificar("anular_condonacion_pago_no_aplicado", error);
+          }
+          throw new NexaPaymentError("payment_not_applied", 409);
+        }
       }
       await dependencies.complete(eventId, payments[0]!.paymentId);
+      // En un reintento `condonacion` es undefined, pero el primer intento pudo
+      // dejarla viva: también se verifica (sin condonación viva no hace nada).
+      if (condonacion || claim.kind === "retry") {
+        // La simulación pudo equivocarse: con el pago ya aplicado se revisa de
+        // verdad. Un fallo acá no puede marcar como fallido un pago que entró.
+        await dependencies.verificarCondonacionATiempo?.(body.creditoId, eventId).catch(() => undefined);
+      }
+      try {
+        dependencies.onPaymentApplied?.(eventId);
+      } catch {
+        // El aviso es best-effort: el pago ya está aplicado.
+      }
     } catch (error) {
       const code = error instanceof NexaPaymentError ? error.code : "processing_failed";
       await dependencies.fail(eventId, code);
@@ -322,6 +540,7 @@ export const processNexaPayment = (
   }
 
   const paymentId = payments[0]!.paymentId;
+  const paymentIds = payments.map((payment) => payment.paymentId);
   if (!dependencies.billPayments || !dependencies.completeBilling || !dependencies.failBilling) {
     throw new NexaPaymentError("billing_not_configured", 503);
   }
@@ -333,10 +552,10 @@ export const processNexaPayment = (
     );
     if (billing.kind === "billed") {
       await dependencies.completeBilling(eventId, paymentId);
-      return { paymentId, idempotent: false };
+      return { paymentId, paymentIds, idempotent: false };
     }
     if (billing.kind === "pending") {
-      return { paymentId, idempotent: false, billingStatus: "PENDING" };
+      return { paymentId, paymentIds, idempotent: false, billingStatus: "PENDING" };
     }
     await dependencies.failBilling(
       eventId,
@@ -356,7 +575,7 @@ export const processNexaPayment = (
     }
     throw new NexaPaymentError("billing_outcome_unknown", 503);
   }
-});
+};
 
 export const createNexaPaymentHandler = ({
   secret,
@@ -430,6 +649,7 @@ export const createNexaPaymentHandler = ({
     set.status = error instanceof NexaPaymentError ? error.status : 500;
     return {
       error: error instanceof NexaPaymentError ? error.code : "processing_failed",
+      ...(error instanceof NexaPaymentError && error.condonacion ? { condonacion: error.condonacion } : {}),
     };
   }
 };

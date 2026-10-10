@@ -1,6 +1,7 @@
 import { db } from "../database/index";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
+import { desactivarNexaPorCancelacion } from "./nexaCancelacion";
 import {
   ajuste_fecha_ideal_pago,
   aseguradoras,
@@ -19,6 +20,7 @@ import {
   inversionistas,
   montos_adicionales,
   moras_credito,
+  nexa_credit_bindings,
   pagos_credito,
   pagos_credito_inversionistas_espejo,
   platform_users,
@@ -42,6 +44,7 @@ import {
   gte,
   gt,
   isNull,
+  or,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
@@ -80,6 +83,17 @@ import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
 import { reclamosVivosDeRubros } from "./rubros";
 
 
+// Estados en que cartera acepta un pago Nexa: la MISMA lista que `credit_not_payable`
+// en nexaPayments.ts (un test las mantiene iguales). En otros estados —p. ej.
+// PENDIENTE_CANCELACION, que deja el binding activo— el token existe pero el pago
+// se rechaza, así que no se le ofrece al cliente como cuenta.
+export const NEXA_PAYABLE_CREDIT_STATUSES = [
+  "ACTIVO",
+  "MOROSO",
+  "EN_CONVENIO",
+  "INCOBRABLE",
+] as const;
+
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
   try {
     // 1. Buscar el crédito con su usuario
@@ -110,6 +124,32 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .from(ajuste_fecha_ideal_pago)
       .where(eq(ajuste_fecha_ideal_pago.credito_id, creditoId))
       .limit(1);
+
+    // Código de pago Nexa del cliente (solo lectura: NO crea la cuenta, para eso
+    // está POST /creditos/cuenta-nexa). Lo usa el CRM en la plantilla "Nueva
+    // cuenta exclusiva Nexa". Un binding desactivado (crédito cancelado), sin
+    // token o vencido no cuenta como cuenta: cartera rechaza todo pago por un
+    // binding vencido (`binding_expired`, getNexaBindingRejection), así que
+    // avisarle esa cuenta al cliente lo mandaría a una cuenta inservible.
+    const [bindingNexa] = await db
+      .select({ token: nexa_credit_bindings.nexa_token })
+      .from(nexa_credit_bindings)
+      .where(
+        and(
+          eq(nexa_credit_bindings.credito_id, creditoId),
+          eq(nexa_credit_bindings.activo, true),
+          or(
+            isNull(nexa_credit_bindings.expires_at),
+            gt(nexa_credit_bindings.expires_at, new Date())
+          )
+        )
+      )
+      .limit(1);
+    const cuentaNexa = (NEXA_PAYABLE_CREDIT_STATUSES as readonly string[]).includes(
+      currentCredit.creditos.statusCredit
+    )
+      ? (bindingNexa?.token ?? null)
+      : null;
 
     const contractSummary =
       currentCredit.creditos.statusCredit === "CANCELADO"
@@ -642,6 +682,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
         asesor: currentCredit.asesores,
+        cuentaNexa,
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,
@@ -782,6 +823,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
       asesor: currentCredit.asesores,
+      cuentaNexa,
       cuotaActual,
       cuotaActualPagada,
       cuotaActualStatus,
@@ -1111,7 +1153,8 @@ export async function getCreditosWithUserByMesAnio(
   capital_max?: number,
   estados_credito?: StatusCredit[],
   aseguradora_id?: number,
-  excluir_pagados_mes?: boolean
+  excluir_pagados_mes?: boolean,
+  solo_con_cuenta_nexa?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1288,6 +1331,23 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  if (solo_con_cuenta_nexa) {
+    conditions.push(
+      inArray(creditos.statusCredit, [...NEXA_PAYABLE_CREDIT_STATUSES])
+    );
+    // Cuenta Nexa asignada = binding activo, vigente y con token, de un crédito
+    // en estado pagable (el mismo criterio con que getCreditoByNumero devuelve
+    // `cuentaNexa`). EXISTS y no join para no
+    // multiplicar filas (paginación) y para que el COUNT herede la condición.
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${nexa_credit_bindings} nb
+      WHERE nb.credito_id = ${creditos.credito_id}
+        AND nb.activo = true
+        AND (nb.expires_at IS NULL OR nb.expires_at > NOW())
+        AND nb.nexa_token IS NOT NULL
+    )`);
   }
 
   if (excluir_pagados_mes) {
@@ -1985,6 +2045,22 @@ const STATUS_MAP = {
  */
 export type AccionCreditoParams = z.infer<typeof AccionCreditoParamsSchema>;
 
+/**
+ * Corre `fn` bajo el candado canónico de pagos del crédito
+ * (`withPaymentAdvisoryLock`). Lo usan las cancelaciones: escriben `creditos` y
+ * después el binding Nexa, y sin serializar con un pago Nexa en vuelo (que
+ * sostiene el binding mientras escribe `creditos` por otra conexión) se cuelgan
+ * sin que Postgres lo detecte.
+ *
+ * Entra por `import()` y no arriba: `paymentAdvisoryLock` importa `lockPool`, y
+ * varias suites mockean `../database` sin él; un import de valor en la cabecera
+ * rompe esas corridas (mismo motivo que en `anularPagoMora.ts`).
+ */
+async function conCandadoDePagos<T>(creditoId: number, fn: () => Promise<T>): Promise<T> {
+  const { withPaymentAdvisoryLock } = await import("../utils/paymentAdvisoryLock");
+  return withPaymentAdvisoryLock(creditoId, () => fn());
+}
+
 export async function actualizarEstadoCredito(input: AccionCreditoParams) {
   // Validate input
   const {
@@ -2012,8 +2088,35 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
     };
   }
 
+  // CANCELAR escribe `creditos` y después `nexa_credit_bindings`. Un pago Nexa en
+  // vuelo sostiene el binding (FOR UPDATE, conexión del advisory lock) mientras
+  // su trabajo escribe `creditos` por otra conexión: sin serializar, cada uno
+  // espera al otro y Postgres no lo ve como deadlock (cuelgue). Se toma el
+  // candado canónico de pagos ANTES de la tx, mismo orden que los pagos.
+  const conCandadoSiCancela = <T>(fn: () => Promise<T>) =>
+    accion === "CANCELAR" ? conCandadoDePagos(creditId, fn) : fn();
+
   try {
-    const result = await db.transaction(async (tx) => {
+    const result = await conCandadoSiCancela(() => db.transaction(async (tx) => {
+      /** 0) Un CANCELADO es terminal: no se reactiva ni cambia de estado por
+       *  NINGUNA acción (su token Nexa ya se desactivó y se le avisó a
+       *  nexa-server; pasarlo a PENDIENTE_CANCELACION y de ahí a ACTIVAR era un
+       *  rodeo). Incluye CANCELAR sobre un CANCELADO: se rechaza para no duplicar
+       *  credit_cancelations ni re-encolar el evento. Antes de cualquier
+       *  escritura, y FOR UPDATE para que una cancelación concurrente no se cuele
+       *  hasta el UPDATE. */
+      const [actual] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, creditId))
+        .for("update");
+      if (actual?.statusCredit === "CANCELADO") {
+        return {
+          ok: false,
+          message: "Un crédito CANCELADO no se puede reactivar ni cambiar de estado.",
+        };
+      }
+
       /** 1) OPCIONAL: insertar montos adicionales ANTES del cambio de estado */
       if (montosAdicionales?.length) {
         await tx.insert(montos_adicionales).values(
@@ -2042,6 +2145,12 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
               | "PENDIENTE_CANCELACION",
           })
           .where(eq(creditos.credito_id, creditId));
+
+        // Cancelado no se reactiva: el token de Nexa se desactiva en esta tx.
+        // PENDIENTE_CANCELACION todavía puede revertirse, por eso no entra.
+        if (newStatus === "CANCELADO") {
+          await desactivarNexaPorCancelacion(tx, creditId);
+        }
 
         // b) Register cancelation (idempotent insert; assume one row per credit)
         await tx.insert(credit_cancelations).values({
@@ -2248,7 +2357,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         ok: true,
         message: `Crédito #${creditId} marcado como incobrable. Capital: Q${capitalIncobrable.toString()}, Plazo: 1, Cuota: Q${capitalIncobrable.toString()}, ${pagoIds.length} pagos anulados.`,
       };
-    });
+    }));
 
     return result;
   } catch (err) {
@@ -2389,7 +2498,12 @@ export async function resetCredit({
         ? Number(normalizarMontoQ(montoIncobrable))
         : undefined;
 
-    const { statusCredit } = await db.transaction(async (tx) => {
+    // Puede terminar en CANCELADO (desactiva el binding Nexa después de escribir
+    // `creditos`): mismo candado canónico que los pagos, tomado ANTES de la tx,
+    // para no cruzarse con un pago Nexa que sostiene el binding (ver
+    // actualizarEstadoCredito). El estado final se decide adentro, así que el
+    // candado cubre el reinicio entero.
+    const { statusCredit } = await conCandadoDePagos(creditId, () => db.transaction(async (tx) => {
       const [lockedCredit] = await tx
         .select()
         .from(creditos)
@@ -2837,10 +2951,11 @@ export async function resetCredit({
             statusCredit: "CANCELADO",
           })
           .where(eq(creditos.credito_id, creditId));
+        await desactivarNexaPorCancelacion(tx, creditId);
       }
 
       return { nuevoPago, statusCredit };
-    });
+    }));
 
     // 17. Retorno OK
     return {
@@ -3402,12 +3517,18 @@ export const mergeCreditosAndUpdate = async ({
     // ========================================
     console.log("🔒 PASO 5: Marcando crédito origen como CANCELADO...");
 
-    await db
-      .update(creditos)
-      .set({
-        statusCredit: "CANCELADO",
-      })
-      .where(eq(creditos.credito_id, creditoOrigen.credito_id));
+    // Cancelado no se reactiva: el token de Nexa se desactiva en la misma tx.
+    // Bajo el candado canónico de pagos del crédito origen, por el mismo cruce
+    // con un pago Nexa en vuelo que actualizarEstadoCredito.
+    await conCandadoDePagos(creditoOrigen.credito_id, () => db.transaction(async (tx) => {
+      await tx
+        .update(creditos)
+        .set({
+          statusCredit: "CANCELADO",
+        })
+        .where(eq(creditos.credito_id, creditoOrigen.credito_id));
+      await desactivarNexaPorCancelacion(tx, creditoOrigen.credito_id);
+    }));
 
     console.log(
       `   ✅ Crédito ${creditoOrigen.numero_credito_sifco} (ID: ${creditoOrigen.credito_id}) marcado como CANCELADO`

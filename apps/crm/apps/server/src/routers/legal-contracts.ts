@@ -72,6 +72,8 @@ import {
 	vincularEnLaFila,
 } from "../lib/vincular-documento-weetrust";
 import { closeOpportunity } from "../services/close-opportunity";
+import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
+import { enviarMensajesDeCreditoNuevo } from "../services/bienvenida-credito";
 import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
@@ -1471,7 +1473,7 @@ export const legalContractsRouter = {
 			// entren mientras tanto esperan, en vez de dejar un contrato nuevo que
 			// esta confirmación marcaría firmado. También frena una segunda
 			// confirmación antes de que vuelva a cerrar la oportunidad en cartera-back.
-			await conCandadoDeFirma(input.opportunityId, async () => {
+			const cierre = await conCandadoDeFirma(input.opportunityId, async () => {
 				const [etapaConCandado] = await db
 					.select({ porcentaje: salesStages.closurePercentage })
 					.from(opportunities)
@@ -1587,9 +1589,11 @@ export const legalContractsRouter = {
 						fromStageId: opportunity.stageId,
 						toStageId: targetStage.id,
 						changedBy: context.userId,
-						reason: "Contratos firmados confirmados - Avanza a formalización",
+						reason: MOTIVO_CONTRATOS_FIRMADOS,
 					});
 				});
+
+				return closeResult;
 			});
 
 			// Notificar a análisis que está lista para desembolso
@@ -1604,6 +1608,17 @@ export const legalContractsRouter = {
 				relatedEntityId: input.opportunityId,
 				redirectPage: "analysis_90_details",
 			});
+
+			// Bienvenida al cliente con su cuenta Nexa (y el documento del seguro,
+			// apagado por env). Sin esperar: un WhatsApp o Nexa caídos no pueden
+			// romper la confirmación, y el servicio nunca lanza.
+			if (cierre.creditoId && cierre.numeroSifco) {
+				void enviarMensajesDeCreditoNuevo({
+					opportunityId: input.opportunityId,
+					userId: context.userId,
+					numeroSifco: cierre.numeroSifco,
+				});
+			}
 
 			return {
 				success: true,

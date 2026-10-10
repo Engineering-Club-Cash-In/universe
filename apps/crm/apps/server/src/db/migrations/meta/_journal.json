@@ -288,6 +288,27 @@
 			"when": 1791305850608,
 			"tag": "0047_add_cofirmante_opportunity_validations",
 			"breakpoints": true
+		},
+		{
+			"idx": 40,
+			"version": "7",
+			"when": 1791319188749,
+			"tag": "0047_recibos_pago_whatsapp",
+			"breakpoints": true
+		},
+		{
+			"idx": 41,
+			"version": "7",
+			"when": 1791319254474,
+			"tag": "0048_bienvenidas_credito",
+			"breakpoints": true
+		},
+		{
+			"idx": 42,
+			"version": "7",
+			"when": 1791475200000,
+			"tag": "0049_add_buro_revalidacion_al_30",
+			"breakpoints": true
 		}
 	]
 }

@@ -6,6 +6,8 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { launchBrowser } from "../utils/functions/browser";
+import { htmlReciboPago } from "../utils/reciboPagoHtml";
+import { filasDeLaBoleta, resumirBoleta } from "./reciboBoleta";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
 import Big from "big.js";
@@ -575,6 +577,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     inversionista_ids?: number[];
     aseguradora_id?: number;
     excluir_pagados_mes?: boolean;
+    solo_con_cuenta_nexa?: boolean;
     excel?: boolean;
   }
 ) {
@@ -602,7 +605,8 @@ export async function getCreditosWithUserByMesAnioExcel(
     undefined, // capital_max
     undefined, // estados_credito
     rest.aseguradora_id,
-    rest.excluir_pagados_mes
+    rest.excluir_pagados_mes,
+    rest.solo_con_cuenta_nexa
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal
@@ -1120,6 +1124,9 @@ export async function exportPagosConInversionistasExcel(
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;
+    canal?: string;
+    horaInicio?: string;
+    horaFin?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -1183,6 +1190,7 @@ export async function exportPagosConInversionistasExcel(
     { header: "Tipo de Pago", key: "tipoPago", width: 18 },
     { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
     { header: "Origen Pago", key: "origenPago", width: 18 },
+    { header: "Canal", key: "canal", width: 18 },
     { header: "Boletas", key: "boletas", width: 50 },
     { header: "Banco", key: "bancoNombre", width: 20 },
     { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
@@ -1266,6 +1274,7 @@ export async function exportPagosConInversionistasExcel(
       tipoPago,
       fechaAplicado: item.fechaAplicado ?? "",
       origenPago: item.origenPago ?? "",
+      canal: item.entroPorNexa ? (item.nexaEventoFallido ? "Nexa · rechazado" : "Nexa") : "Manual",
       boletas: boletas.map((b: any) => b.urlBoleta).filter(Boolean).join("\n"),
       bancoNombre: item.bancoNombre ?? "",
       cuentaEmpresaNombre: item.cuentaEmpresaNombre ?? "",
@@ -1442,6 +1451,9 @@ export async function exportPagosAdvisorExcel(
     fechaBoleta?: string;
     fechaBoletaInicio?: string;
     fechaBoletaFin?: string;
+    canal?: string;
+    horaInicio?: string;
+    horaFin?: string;
   }
 ) {
   const result = await getPagosConInversionistas({
@@ -1684,34 +1696,39 @@ export async function exportPagosAdvisorExcel(
  * Genera un recibo de pago en PDF y lo sube a R2
  */
 export async function generateReciboPagoPDF(pagoId: number) {
-  // 1️⃣ Traer datos del pago con crédito, usuario y cuota
+  // 1️⃣ Traer datos del pago con crédito, usuario, cuota y asesor
   const result = await db.execute(sql`
     SELECT
       p.pago_id,
+      p.credito_id,
       p.monto_boleta,
       p.monto_aplicado,
-      p.cuota,
-      p.abono_capital,
-      p.abono_interes,
-      p.abono_iva_12,
-      p.abono_seguro,
-      p.abono_gps,
       p.mora,
       p.otros,
-      p.reserva,
-      p.membresias_pago,
-      p.pago_convenio,
       p.observaciones,
-      TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+      p.numeroautorizacion,
+      p.validation_status,
+      p."paymentFalse" AS payment_false,
+      cq.pagado AS cuota_pagada,
+      -- fecha_pago se guarda en hora de Guatemala (manuales) o como día
+      -- bancario sin zona (Nexa): se lee tal cual. Convertirla desde UTC le
+      -- restaba 6 horas y un pago de Nexa del 30 salía como del 29.
+      TO_CHAR(p.fecha_pago, 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
       p.origen_pago,
       c.numero_credito_sifco,
+      c."statusCredit" AS status_credito,
+      c.plazo,
+      c.cuota AS cuota_credito,
       u.nombre AS usuario_nombre,
       u.nit AS usuario_nit,
-      cq.numero_cuota
+      cq.numero_cuota,
+      a.nombre AS asesor_nombre,
+      a.telefono AS asesor_telefono
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
     INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN cartera.cuotas_credito cq ON cq.cuota_id = p.cuota_id
+    LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
     WHERE p.pago_id = ${pagoId}
   `);
 
@@ -1721,245 +1738,100 @@ export async function generateReciboPagoPDF(pagoId: number) {
 
   const pago = result.rows[0] as any;
 
-  const montoBoleta = Number(pago.monto_boleta || 0);
-  const montoAplicado = Number(pago.monto_aplicado || 0);
-  const abonoCapital = Number(pago.abono_capital || 0);
-  const abonoInteres = Number(pago.abono_interes || 0);
-  const abonoIva = Number(pago.abono_iva_12 || 0);
-  const abonoSeguro = Number(pago.abono_seguro || 0);
-  const abonoGps = Number(pago.abono_gps || 0);
-  const mora = Number(pago.mora || 0);
-  const otros = Number(pago.otros || 0);
-  const reserva = Number(pago.reserva || 0);
-  const membresias = Number(pago.membresias_pago || 0);
-  const pagoConvenio = Number(pago.pago_convenio || 0);
+  // El recibo es de la BOLETA: una boleta de varias cuotas queda en varias
+  // filas, todas con el monto completo (ver reciboBoleta.ts).
+  const boleta = resumirBoleta(await filasDeLaBoleta(pagoId));
 
-  // Abono capital solo si los demás abonos son 0
-  const otrosAbonosSonCero = abonoInteres === 0 && abonoIva === 0 && abonoSeguro === 0 && abonoGps === 0;
-  const mostrarAbonoCapital = otrosAbonosSonCero && abonoCapital > 0;
-
-  const formatQ = (n: number) => `Q${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const fechaPago = pago.fecha_pago
-    ? new Date(pago.fecha_pago).toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" })
-    : "N/A";
-
-  // Construir filas del detalle (solo lo esencial)
-  const desgloseRows: string[] = [];
-
-  desgloseRows.push(`<tr><td>Monto Boleta</td><td>${formatQ(montoBoleta)}</td></tr>`);
-  if (mostrarAbonoCapital) {
-    desgloseRows.push(`<tr><td>Abono a Capital</td><td>${formatQ(abonoCapital)}</td></tr>`);
-  }
-  if (mora > 0) desgloseRows.push(`<tr><td>Mora</td><td>${formatQ(mora)}</td></tr>`);
-  if (otros > 0) desgloseRows.push(`<tr><td>Otros</td><td>${formatQ(otros)}</td></tr>`);
+  // Próxima cuota sin pagar del crédito, para el bloque "Estado del crédito".
+  // - Un crédito cancelado no tiene próximo pago: el reset conserva sus cuotas
+  //   viejas sin pagar solo como histórico.
+  // - Solo cuentan las cuotas con un pago VIVO (paymentFalse = false): el
+  //   reset anula los pagos de las cuotas archivadas, así que un castigo con
+  //   calendario nuevo toma el vigente y no el viejo.
+  // - Por número de cuota y no por fila: si cualquier fila de ese número está
+  //   pagada, la cuota lo está (calendarios regenerados con duplicados).
+  // - La fecha sale de la copia vigente (mayor cuota_id, la misma que toma el
+  //   registro de pagos tras una regeneración).
+  const creditoCancelado = ["CANCELADO", "PENDIENTE_CANCELACION"].includes(String(pago.status_credito));
+  const proximaResult = creditoCancelado
+    ? { rows: [] as unknown[] }
+    : await db.execute(sql`
+    WITH vivas AS (
+      SELECT cq.cuota_id, cq.numero_cuota, cq.pagado, cq.fecha_vencimiento
+      FROM cartera.cuotas_credito cq
+      WHERE cq.credito_id = ${pago.credito_id}
+        AND cq.numero_cuota > 0
+        AND EXISTS (
+          SELECT 1 FROM cartera.pagos_credito pv
+          WHERE pv.cuota_id = cq.cuota_id AND pv."paymentFalse" = false
+        )
+    ),
+    proxima AS (
+      SELECT numero_cuota
+      FROM vivas
+      GROUP BY numero_cuota
+      HAVING NOT bool_or(COALESCE(pagado, false))
+      ORDER BY numero_cuota
+      LIMIT 1
+    )
+    SELECT v.numero_cuota, TO_CHAR(v.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento
+    FROM vivas v
+    JOIN proxima ON proxima.numero_cuota = v.numero_cuota
+    ORDER BY v.cuota_id DESC
+    LIMIT 1
+  `);
+  const proxima = proximaResult.rows[0] as any | undefined;
 
   // 2️⃣ Generar HTML del recibo
-  const html = `
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="UTF-8">
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 40px; }
-      .recibo {
-        max-width: 500px;
-        margin: 0 auto;
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        overflow: hidden;
-      }
-      .header {
-        background: linear-gradient(135deg, #1F4E79, #2E75B6);
-        color: #fff;
-        padding: 30px 30px 25px;
-        text-align: center;
-      }
-      .header img {
-        width: 120px;
-        margin-bottom: 12px;
-      }
-      .header h1 {
-        font-size: 20px;
-        font-weight: 600;
-        margin-bottom: 4px;
-      }
-      .header p {
-        font-size: 12px;
-        opacity: 0.85;
-      }
-      .badge {
-        display: inline-block;
-        background: rgba(255,255,255,0.2);
-        padding: 4px 14px;
-        border-radius: 20px;
-        font-size: 11px;
-        margin-top: 10px;
-        letter-spacing: 0.5px;
-      }
-      .body { padding: 25px 30px; }
-      .info-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-bottom: 20px;
-      }
-      .info-item {
-        background: #f8fafc;
-        border-radius: 8px;
-        padding: 10px 12px;
-      }
-      .info-item.full { grid-column: 1 / -1; }
-      .info-label {
-        font-size: 10px;
-        color: #8899a6;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 2px;
-      }
-      .info-value {
-        font-size: 13px;
-        color: #1a1a2e;
-        font-weight: 500;
-      }
-      .divider {
-        border: none;
-        border-top: 1px dashed #e0e0e0;
-        margin: 20px 0;
-      }
-      .desglose h3 {
-        font-size: 13px;
-        color: #1F4E79;
-        margin-bottom: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .desglose table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .desglose td {
-        padding: 8px 0;
-        font-size: 13px;
-        color: #333;
-      }
-      .desglose td:last-child {
-        text-align: right;
-        font-weight: 500;
-      }
-      .desglose tr:not(:last-child) td {
-        border-bottom: 1px solid #f0f0f0;
-      }
-      .total-row {
-        background: linear-gradient(135deg, #1F4E79, #2E75B6);
-        border-radius: 8px;
-        padding: 14px 16px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 16px;
-      }
-      .total-row span:first-child {
-        color: rgba(255,255,255,0.85);
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .total-row span:last-child {
-        color: #fff;
-        font-size: 20px;
-        font-weight: 700;
-      }
-      .footer {
-        background: #f8fafc;
-        padding: 16px 30px;
-        text-align: center;
-        border-top: 1px solid #eee;
-      }
-      .footer p {
-        font-size: 10px;
-        color: #999;
-      }
-      ${pago.observaciones ? `.obs { background: #fffbeb; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 0 6px 6px 0; margin-top: 16px; font-size: 12px; color: #92400e; }` : ""}
-    </style>
-  </head>
-  <body>
-    <div class="recibo">
-      <div class="header">
-        <img src="${LOGO_URL}" alt="Cash-In" />
-        <h1>Recibo de Pago</h1>
-        <p>Club Cash-In</p>
-        <div class="badge">No. ${pago.pago_id}</div>
-      </div>
-      <div class="body">
-        <div class="info-grid">
-          <div class="info-item full">
-            <div class="info-label">Cliente</div>
-            <div class="info-value">${pago.usuario_nombre}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">NIT</div>
-            <div class="info-value">${pago.usuario_nit || "C/F"}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Crédito</div>
-            <div class="info-value">${pago.numero_credito_sifco}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Cuota No.</div>
-            <div class="info-value">${pago.numero_cuota ?? "N/A"}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Fecha</div>
-            <div class="info-value">${fechaPago}</div>
-          </div>
-          ${pago.origen_pago ? `
-          <div class="info-item">
-            <div class="info-label">Origen</div>
-            <div class="info-value">${pago.origen_pago}</div>
-          </div>` : ""}
-        </div>
-
-        <hr class="divider" />
-
-        <div class="desglose">
-          <h3>Desglose del Pago</h3>
-          <table>
-            ${desgloseRows.join("")}
-          </table>
-        </div>
-
-        <div class="total-row">
-          <span>Monto Aplicado</span>
-          <span>${formatQ(montoAplicado)}</span>
-        </div>
-
-        ${pago.observaciones ? `<div class="obs">${pago.observaciones}</div>` : ""}
-      </div>
-      <div class="footer">
-        <p>Este documento es un comprobante de pago generado por el sistema de Club Cash-In.</p>
-        <p>Generado el ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-      </div>
-    </div>
-  </body>
-  </html>`;
-
+  const html = htmlReciboPago({
+    pagoId: boleta.representativo,
+    estado: boleta.estado,
+    montoBoleta: Number(pago.monto_boleta || 0),
+    montoAplicado: boleta.montoAplicado,
+    mora: boleta.mora,
+    otros: boleta.otros,
+    fechaPago: pago.fecha_pago ?? null,
+    origenPago: pago.origen_pago ?? null,
+    referencia: pago.numeroautorizacion ?? null,
+    clienteNombre: pago.usuario_nombre,
+    clienteNit: pago.usuario_nit ?? null,
+    numeroCreditoSifco: pago.numero_credito_sifco,
+    cuotas: boleta.cuotas,
+    plazo: pago.plazo != null ? Number(pago.plazo) : null,
+    proximoPago: proxima?.fecha_vencimiento
+      ? {
+          fecha: proxima.fecha_vencimiento,
+          monto: Number(pago.cuota_credito || 0),
+          numeroCuota: Number(proxima.numero_cuota),
+        }
+      : null,
+    observaciones: pago.observaciones ?? null,
+    generadoEl: new Date().toLocaleString("es-GT", {
+      timeZone: "America/Guatemala",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  });
   // 3️⃣ Generar PDF con Puppeteer
   const browser = await launchBrowser();
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "networkidle0" });
-  const pdfData = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
-  });
-  await browser.close();
-
+  let pdfData: Uint8Array;
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    pdfData = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
+    });
+  } finally {
+    await browser.close();
+  }
   // 4️⃣ Subir a R2
   const fileBuffer = Buffer.from(pdfData);
-  const filename = `recibos/recibo_pago_${pagoId}_${Date.now()}.pdf`;
+  const filename = `recibos/recibo_pago_${boleta.representativo}_${Date.now()}.pdf`;
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -1968,7 +1840,6 @@ export async function generateReciboPagoPDF(pagoId: number) {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
   });
-
   await s3.send(
     new PutObjectCommand({
       Bucket: process.env.BUCKET_REPORTS as string,
@@ -1977,11 +1848,20 @@ export async function generateReciboPagoPDF(pagoId: number) {
       ContentType: "application/pdf",
     })
   );
-
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   console.log("✅ Recibo de pago PDF subido:", url);
-
-  return { pdfUrl: url };
+  // numeroCuota y asesor los usa el aviso por WhatsApp (mismo contrato que en
+  // COBROS-02); la descarga desde cartera solo lee pdfUrl.
+  return {
+    pdfUrl: url,
+    // Comprobante de la boleta (pago_id más bajo) y todas sus filas: el envío
+    // por WhatsApp usa el comprobante como llave para mandar UN recibo.
+    comprobante: boleta.representativo,
+    pagoIds: boleta.pagoIds,
+    numeroCuota: boleta.cuotas[0] ?? (pago.numero_cuota != null ? Number(pago.numero_cuota) : null),
+    asesorNombre: (pago.asesor_nombre as string | null) ?? null,
+    asesorTelefono: (pago.asesor_telefono as string | null) ?? null,
+  };
 }
 
 export async function getPagosByVencimiento({

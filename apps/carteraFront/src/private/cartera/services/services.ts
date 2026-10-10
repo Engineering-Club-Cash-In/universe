@@ -782,6 +782,8 @@ export interface PagoData {
     usuario_nit: string;
     url_boleta: string | null; // URL del PDF de la boleta
     paymentFalse:boolean
+    canal?: "NEXA" | "MANUAL"; // NEXA = entró por Nexa: no se puede anular
+    nexaEventoFallido?: boolean; // Nexa rechazó y devolvió el dinero: la fila sí se anula
     boletas:string[]
     monto_aplicado: string | null;
     abono_capital_id?: number | null;
@@ -1868,6 +1870,10 @@ export interface Condonacion {
   fecha: string;
   usuario_email: string;
   montoCondonacion: string;
+  /** true = la condonó el sistema (pago Nexa a tiempo), no una persona. */
+  automatica?: boolean;
+  /** Motivo legible; para las automáticas traduce el código interno. */
+  motivo_texto?: string;
 }
 
 // ---------- Requests ----------
@@ -1976,7 +1982,12 @@ export interface CondonacionesMoraResponse {
   success: boolean;
   data?: Condonacion[];
   pagination?: MoraPagination;
-  totales?: { monto_total: string; condonaciones: number };
+  totales?: {
+    monto_total: string;
+    monto_total_manual?: string;
+    monto_total_automatica?: string;
+    condonaciones: number;
+  };
   excelUrl?: string;
   count?: number;
 }
@@ -2104,6 +2115,11 @@ export interface PagoDataInvestor {
   boletas: BoletaPago[];
   monto_aplicado: number | null;
 
+  // true si el pago entró por Nexa (nexa_payment_event_id): no se puede anular.
+  entroPorNexa?: boolean;
+  // true si ese evento Nexa quedó failed (Nexa devolvió el dinero): la fila sí se anula.
+  nexaEventoFallido?: boolean;
+
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;
@@ -2184,6 +2200,10 @@ export interface GetPagosParams {
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
   fechaBoletaFin?: string;
+  canal?: "NEXA" | "MANUAL";
+  /** HH:MM; solo en el modo "Rango" de fecha de pago. */
+  horaInicio?: string;
+  horaFin?: string;
 }
 
 /**

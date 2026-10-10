@@ -1,13 +1,18 @@
-name: Deploy cartera (dev)
+name: Deploy cartera y nexa-server (dev)
 
 # Construye y empuja las imágenes -dev al ECR público y dispara el redeploy
 # en Coolify. Solo corre cuando hay push a develop que toque la app correspondiente.
+# nexa-server usa el mismo repo de imagen que producción (cci/nexa-server)
+# pero con el tag `develop`: `latest` es solo de producción, para que un push a
+# develop nunca quede listo para que producción lo levante en un reinicio.
 on:
   push:
     branches: ["develop"]
     paths:
       - "apps/cartera-back/**"
       - "apps/carteraFront/**"
+      - "apps/nexa-server/**"
+      - ".dockerignore"
       - "packages/email/**"
       - "packages/structured-logger/**"
       - "package.json"
@@ -22,13 +27,14 @@ permissions:
   contents: read
 
 jobs:
-  # 1) Detecta qué app cambió para no reconstruir las dos siempre
+  # 1) Detecta qué app cambió para no reconstruirlas todas siempre
   changes:
     name: Detectar cambios
     runs-on: ubuntu-latest
     outputs:
       back: ${{ steps.filter.outputs.back }}
       front: ${{ steps.filter.outputs.front }}
+      nexa: ${{ steps.filter.outputs.nexa }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -47,6 +53,9 @@ jobs:
               - 'bun.lock'
             front:
               - 'apps/carteraFront/**'
+            nexa:
+              - '.dockerignore'
+              - 'apps/nexa-server/**'
 
   # 2) Backend → cartera-back-dev:latest
   backend:
@@ -131,4 +140,42 @@ jobs:
         run: |
           curl --fail-with-body --request POST \
             "${{ secrets.COOLIFY_WEBHOOK_FRONT_DEV }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
+
+  # 4) nexa-server → cci/nexa-server:develop (`latest` es de producción)
+  nexa-server:
+    name: nexa-server (dev)
+    needs: changes
+    if: needs.changes.outputs.nexa == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-nexa-server-dev
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      - name: Build & push
+        run: |
+          podman build -f apps/nexa-server/Dockerfile . \
+            -t $ECR_REGISTRY/cci/nexa-server:develop \
+            -t $ECR_REGISTRY/cci/nexa-server:${{ github.sha }}
+          podman push $ECR_REGISTRY/cci/nexa-server:develop
+          podman push $ECR_REGISTRY/cci/nexa-server:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request POST \
+            "${{ secrets.COOLIFY_WEBHOOK_NEXA_SERVER_DEV }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

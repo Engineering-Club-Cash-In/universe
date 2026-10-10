@@ -9,7 +9,7 @@ import {
 	Loader2,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	formatMissingAssignmentsMessage,
 	getMissingOpportunityAssignments,
@@ -182,6 +182,11 @@ function OpportunityDocumentsPage() {
 	const [isApproving, setIsApproving] = useState(true);
 	const [reason, setReason] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [validandoBuroRenap, setValidandoBuroRenap] = useState(false);
+	const [validandoBuroAutomaticamente, setValidandoBuroAutomaticamente] =
+		useState(false);
+	const validacionBuroEnCurso =
+		validandoBuroRenap || validandoBuroAutomaticamente;
 
 	// Modal states
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -204,6 +209,65 @@ function OpportunityDocumentsPage() {
 	});
 
 	const opportunity = opportunitiesData?.[0];
+	const resumenBuro = useQuery({
+		...orpc.getResumenBuroOportunidad.queryOptions({
+			input: { opportunityId },
+		}),
+		enabled:
+			!!opportunityId &&
+			!!userProfile.data &&
+			PERMISSIONS.canAccessAnalysis(userProfile.data.role),
+		refetchInterval: 15_000,
+	});
+	const consultasBuroIniciadas = useRef(new Set<string>());
+	const consultaBuroAutomaticaEnCurso = useRef(false);
+	const resumenBuroActualizadoEn = resumenBuro.dataUpdatedAt;
+	const refetchResumenBuro = resumenBuro.refetch;
+	useEffect(() => {
+		const resumen = resumenBuro.data;
+		if (resumenBuroActualizadoEn === 0 || !resumen) return;
+		const pendientes = ["pendiente", "vencido", "desactualizado"];
+		const titularPendiente =
+			!resumen.faltaDpi && pendientes.includes(resumen.titular);
+		const cofirmantesPendientes = resumen.cofirmantes.some((cofirmante) =>
+			pendientes.includes(cofirmante.estado),
+		);
+		if (!titularPendiente && !cofirmantesPendientes) {
+			consultasBuroIniciadas.current.clear();
+			return;
+		}
+		if (
+			consultaBuroAutomaticaEnCurso.current ||
+			validandoBuroRenap ||
+			!resumen.permitirReejecucion ||
+			resumen.exento ||
+			resumen.faltaConsentimiento
+		)
+			return;
+		const clave = `${opportunityId}:${resumen.revisionIdentidad}:${resumen.titular}:${resumen.cofirmantes.map((cofirmante) => `${cofirmante.id}:${cofirmante.estado}`).join(",")}`;
+		if (consultasBuroIniciadas.current.has(clave)) return;
+		consultasBuroIniciadas.current.add(clave);
+		consultaBuroAutomaticaEnCurso.current = true;
+		setValidandoBuroAutomaticamente(true);
+		void client
+			.asegurarBuroOportunidad({ opportunityId })
+			// Libera la guarda con el resumen ya actualizado, no con uno parcial.
+			.then(() => refetchResumenBuro())
+			.catch((error) => {
+				consultasBuroIniciadas.current.delete(clave);
+				console.error("No se pudo iniciar Buró", error);
+			})
+			.finally(() => {
+				consultaBuroAutomaticaEnCurso.current = false;
+				setValidandoBuroAutomaticamente(false);
+			});
+	}, [
+		opportunityId,
+		resumenBuro.data,
+		resumenBuroActualizadoEn,
+		refetchResumenBuro,
+		validandoBuroRenap,
+	]);
 
 	// Validation query for approve button
 	const validation = useQuery({
@@ -229,10 +293,6 @@ function OpportunityDocumentsPage() {
 		((checklist.data as any)?.canApprove ?? false) &&
 		!bloqueadoPorBuroInterno;
 	const isValidationLoading = validation.isLoading || checklist.isLoading;
-	// Mientras la validación de Buró/RENAP corre no se puede aprobar: el gate
-	// volvería a llamar a las mismas fuentes y duplicaría consultas facturadas.
-	const [validandoBuroRenap, setValidandoBuroRenap] = useState(false);
-
 	const getDisabledReason = () => {
 		if (!validation.data || !checklist.data) return "Cargando validación...";
 
@@ -440,7 +500,9 @@ function OpportunityDocumentsPage() {
 											variant="default"
 											onClick={() => handleApprovalClick(true)}
 											disabled={
-												!canApprove || isValidationLoading || validandoBuroRenap
+												!canApprove ||
+												isValidationLoading ||
+												validacionBuroEnCurso
 											}
 										>
 											<CheckCircle className="mr-2 h-4 w-4" />
@@ -530,8 +592,16 @@ function OpportunityDocumentsPage() {
 			{/* Validaciones RENAP y Buró (oportunidades fuera del bot de WhatsApp) */}
 			<RenapBuroValidation
 				opportunityId={opportunityId}
+				permitirReejecucion={resumenBuro.data?.permitirReejecucion ?? false}
+				permitirValidacionManualBuro={
+					resumenBuro.data?.permitirValidacionManualBuro ?? false
+				}
+				permitirValidacionManualRenap={
+					resumenBuro.data?.permitirValidacionManualRenap ?? false
+				}
+				ejecucionExterna={validandoBuroAutomaticamente}
+				actualizarAutomaticamente
 				onEjecucionChange={setValidandoBuroRenap}
-				currentUserRole={userProfile.data?.role}
 			/>
 
 			{/* Buró interno: coincidencias con personas marcadas por cobros (informativo) */}
@@ -664,7 +734,11 @@ function OpportunityDocumentsPage() {
 						</Button>
 						<Button
 							onClick={handleSubmitApproval}
-							disabled={isSubmitting || (!isApproving && !reason.trim())}
+							disabled={
+								isSubmitting ||
+								validacionBuroEnCurso ||
+								(!isApproving && !reason.trim())
+							}
 							variant={isApproving ? "default" : "destructive"}
 						>
 							{isSubmitting

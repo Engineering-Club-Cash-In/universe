@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
-import { eq, and, isNull } from "drizzle-orm";
-import { RechazoAbonoInicial, rechazoReversaAbonoInicial } from "../lib/convenio-abono-inicial";
+import { eq, and } from "drizzle-orm";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { asegurarAbonoInicialLibre } from "./abonoInicialConvenio";
 import Big from "big.js";
 import { db } from "../database";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
@@ -11,7 +12,6 @@ import {
   creditos,
   pagos_credito_inversionistas,
   facturas_electronicas,
-  convenios_pago,
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
@@ -192,26 +192,8 @@ export function createRevertPaymentToPending(
     // `insertPayment`, y no se debe invertir.
     const result = await dependencies.withCreditLock(credito_id, () =>
       dependencies.runTransaction(async (tx) => {
-      // COBROS-02 W4: el abono inicial sostiene al convenio que lo usó. Mientras
-      // ese convenio esté pendiente, vigente o completado, el abono no se reversa.
-      // Anulado (o deshecho) libera el abono; el rechazo borra la fila.
-      const [convenioDelAbono] = await tx
-        .select({
-          convenio_id: convenios_pago.convenio_id,
-          activo: convenios_pago.activo,
-          completado: convenios_pago.completado,
-        })
-        .from(convenios_pago)
-        .where(
-          and(
-            eq(convenios_pago.abono_inicial_pago_id, pago_id),
-            isNull(convenios_pago.anulado_at),
-          ),
-        )
-        .limit(1);
-      if (convenioDelAbono) {
-        throw rechazoReversaAbonoInicial(convenioDelAbono);
-      }
+      // COBROS-02 W4: el abono inicial de un convenio no se pasa a pendiente (ver el helper).
+      await asegurarAbonoInicialLibre(tx as unknown as typeof db, pago_id);
 
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx

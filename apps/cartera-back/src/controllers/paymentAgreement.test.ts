@@ -200,9 +200,10 @@ const txMock: any = {
   ),
 };
 
+const lockConnect = mock(() => Promise.resolve({ query: mock(), release: mock() }));
 mock.module("../database", () => ({
   client: {},
-  lockPool: { connect: mock(() => Promise.resolve({ query: mock(), release: mock() })) },
+  lockPool: { connect: lockConnect },
   db: dbMock,
 }));
 
@@ -948,5 +949,35 @@ describe("createPaymentAgreement: orden de la salida del régimen normal", () =>
     const lectura = cuerpo.indexOf("bucketAntesDelConvenio(");
     expect(lock).toBeGreaterThan(-1);
     expect(lock).toBeLessThan(lectura);
+  });
+});
+
+describe("createPaymentAgreement: abono inicial bajo el candado de pagos del crédito (COBROS-02 W4)", () => {
+  const base = {
+    credit_id: 72,
+    payment_ids: [401],
+    total_agreement_amount: 3318.45,
+    number_of_months: 1,
+    created_by: 41,
+  };
+
+  it("con abono inicial toma el candado del crédito antes de validarlo (reversas y falsePayment esperan)", async () => {
+    lockConnect.mockClear();
+    // Usuario creador y luego el pago del abono: no existe → rechazo 400 antes de crear nada.
+    selectQueue = [[{ email: "asesor@clubcashin.com" }], [], []];
+
+    const error: any = await createPaymentAgreement({ ...base, abono_inicial_pago_id: 999 }).catch((e) => e);
+
+    expect(error?.name).toBe("RechazoAbonoInicial");
+    expect(lockConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin abono inicial no toma ese candado: el flujo normal no cambia", async () => {
+    lockConnect.mockClear();
+    selectQueue = [[]];
+
+    await createPaymentAgreement(base);
+
+    expect(lockConnect).not.toHaveBeenCalled();
   });
 });

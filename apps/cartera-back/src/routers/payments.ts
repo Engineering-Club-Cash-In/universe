@@ -36,6 +36,7 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
 import { importPagaloPayment } from "../controllers/pagaloPaymentImport";
 import { RubroError } from "../controllers/rubros";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -273,6 +274,11 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      // COBROS-02 W4: el pago es el abono inicial de un convenio. 409 con el motivo, no el 400 genérico.
+      if (error instanceof RechazoAbonoInicial) {
+        set.status = error.status;
+        return { success: false, message: error.message, error: "abono_inicial_de_convenio" };
+      }
       if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
         set.status = 422;
         return {

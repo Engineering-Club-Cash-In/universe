@@ -8,8 +8,22 @@
 --
 -- Se aplica a mano. Idempotente: se puede correr más de una vez.
 
+-- ON DELETE SET NULL: un convenio anulado libera el abono, y `reversePayment` puede
+-- borrar esa fila de pago (pago parcial con otra fila viva en la cuota). Con el
+-- NO ACTION por defecto el DELETE fallaba por la FK. Un convenio vivo no llega
+-- acá: el guard de la reversa lo frena antes.
 ALTER TABLE cartera.convenios_pago
-  ADD COLUMN IF NOT EXISTS abono_inicial_pago_id integer REFERENCES cartera.pagos_credito(pago_id);
+  ADD COLUMN IF NOT EXISTS abono_inicial_pago_id integer;
+--> statement-breakpoint
+
+-- Si la columna ya existía (migración corrida antes de este cambio), se rehace la FK.
+ALTER TABLE cartera.convenios_pago
+  DROP CONSTRAINT IF EXISTS convenios_pago_abono_inicial_pago_id_fkey;
+--> statement-breakpoint
+
+ALTER TABLE cartera.convenios_pago
+  ADD CONSTRAINT convenios_pago_abono_inicial_pago_id_fkey
+  FOREIGN KEY (abono_inicial_pago_id) REFERENCES cartera.pagos_credito(pago_id) ON DELETE SET NULL;
 --> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_convenios_pago_abono_inicial

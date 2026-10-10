@@ -81,7 +81,25 @@ export async function resolverPlatformUserIdPorEmail(
   return usuario?.id ?? null;
 }
 
+/**
+ * Con abono inicial, TODA la creación va bajo el candado de pagos del crédito: el
+ * mismo que toman `reversePayment`, `revertPaymentToPending` y `falsePayment`. Sin
+ * él, una de esas rutas podía invalidar el abono entre su validación y el insert
+ * del convenio, y el convenio quedaba sostenido por un pago ya no validado. Con el
+ * candado, la invalidación espera a que el convenio exista (y entonces se rechaza)
+ * o corre antes (y la validación de abajo lo ve). El candado es reentrante por
+ * cadena, así que lo que se llame adentro no se bloquea.
+ */
 export async function createPaymentAgreement(
+  input: CreatePaymentAgreementInput
+) {
+  if (input.abono_inicial_pago_id != null && input.credit_id) {
+    return withPaymentAdvisoryLock(input.credit_id, () => crearConvenioDePago(input));
+  }
+  return crearConvenioDePago(input);
+}
+
+async function crearConvenioDePago(
   input: CreatePaymentAgreementInput
 ) {
   try {

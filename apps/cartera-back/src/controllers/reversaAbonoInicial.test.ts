@@ -15,7 +15,8 @@ Object.assign(process.env, syntheticEnvironment);
 const { createReversePayment } = await import("./reversePayment");
 const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
-const { rechazoReversaAbonoInicial } = await import("../lib/convenio-abono-inicial");
+const { rechazoReversaAbonoInicial, RechazoAbonoInicial } = await import("../lib/convenio-abono-inicial");
+const { asegurarAbonoInicialLibre } = await import("./abonoInicialConvenio");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
   if (previous === undefined) delete process.env[key];
@@ -137,5 +138,16 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     await handler({ body, set });
 
     expect(set.status).toBe(500);
+  });
+});
+
+describe("anulación como falso (falsePayment) bloqueada por el abono inicial", () => {
+  test("asegurarAbonoInicialLibre: con convenio vivo lanza el rechazo 409; sin convenio no hace nada", async () => {
+    const txCon = { select: () => ({ from: () => ({ where: () => ({ limit: async () => [convenioDelAbono] }) }) }) };
+    const txSin = { select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }) };
+    const error = await asegurarAbonoInicialLibre(txCon as any, 30).catch((e) => e);
+    expect(error).toBeInstanceOf(RechazoAbonoInicial);
+    expect(error.status).toBe(409);
+    await expect(asegurarAbonoInicialLibre(txSin as any, 30)).resolves.toBeUndefined();
   });
 });

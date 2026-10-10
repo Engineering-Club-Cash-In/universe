@@ -31,13 +31,14 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito, rubros_pagos } from "../database/db";
 import { authMiddleware } from "./midleware";
-import { pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } from "../controllers/abonoInicialConvenio";
+import { pagosConAbonoInicialVivo, rechazoLoteAbonoInicial, rechazoLoteCreditosOcupados } from "../controllers/abonoInicialConvenio";
 import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { PAYMENT_ADVISORY_LOCK_NAMESPACE } from "../utils/paymentAdvisoryLock";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import {
   descargarCarteraDeR2,
@@ -565,11 +566,29 @@ export const actualizarPagosExcelRouter = new Elysia()
         };
       }
 
+      // Créditos cuyos pagos toca el lote (los inexistentes llevan credito_id -1).
+      const creditosDelLote = [...datosCredito.values()].map((d) => d.credito_id).filter((id) => id > 0);
+
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
       try {
         await db.transaction(async (tx) => {
-          // Re-chequeo adentro de la transacción: un convenio creado entre la planeación y esta
-          // escritura (el lote no toma un candado por crédito) aborta todo, no se reescribe.
+          // 🔒 El MISMO candado de pagos por crédito que toman `createPaymentAgreement`, las reversas
+          // y las ediciones (namespace 8765), tomado como lock de la transacción y SIN ESPERAR
+          // (`pg_try_advisory_xact_lock`): `paymentAdvisoryLock.ts` prohíbe esperar este lock con
+          // conexiones de `db` (el que espera puede agotar el pool y dejar sin conexión al dueño),
+          // y un lock por crédito en `lockPool` agotaría sus 10 conexiones con un lote largo. Si
+          // algún crédito está ocupado el lote entero aborta y se reintenta. Se toman TODOS antes
+          // de escribir; se sueltan solos al terminar. Sin esto, un convenio podía crearse entre el
+          // re-chequeo y el UPDATE (READ COMMITTED no lo impide).
+          const ocupados: number[] = [];
+          for (const creditoId of [...new Set(creditosDelLote)].sort((a, b) => a - b)) {
+            const r = await tx.execute(
+              sql`SELECT pg_try_advisory_xact_lock(${PAYMENT_ADVISORY_LOCK_NAMESPACE}, ${creditoId}) AS tomado`,
+            );
+            if (!(r.rows?.[0] as { tomado?: boolean } | undefined)?.tomado) ocupados.push(creditoId);
+          }
+          if (ocupados.length > 0) throw rechazoLoteCreditosOcupados(ocupados);
+          // Re-chequeo ya bajo los candados: un convenio creado antes de ellos se ve aquí y aborta todo.
           const vivos = await pagosConAbonoInicialVivo(tx as unknown as typeof db, updatesGlobal.map((u) => u.pago_id));
           if (vivos.size > 0) throw rechazoLoteAbonoInicial(vivos);
           for (const { pago_id, datos } of updatesGlobal) {

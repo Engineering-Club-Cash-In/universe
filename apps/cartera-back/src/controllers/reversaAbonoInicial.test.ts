@@ -16,7 +16,7 @@ const { createReversePayment } = await import("./reversePayment");
 const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
 const { rechazoReversaAbonoInicial, RechazoAbonoInicial } = await import("../lib/convenio-abono-inicial");
-const { asegurarAbonoInicialLibre, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } = await import("./abonoInicialConvenio");
+const { asegurarAbonoInicialLibre, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial, rechazoLoteCreditosOcupados } = await import("./abonoInicialConvenio");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
   if (previous === undefined) delete process.env[key];
@@ -171,5 +171,13 @@ describe("reescritura en lote (Excel de conta, marcar-cuotas) bloqueada por el a
     expect(r.status).toBe(409);
     expect(r.message).toContain("[ABONO_INICIAL_DE_CONVENIO]");
     expect(r.message).toContain("30, 31");
+  });
+
+  test("el rechazo por créditos ocupados es 409, nombra los créditos y pide reintentar", () => {
+    const r = rechazoLoteCreditosOcupados([5, 9]);
+    expect(r).toBeInstanceOf(RechazoAbonoInicial);
+    expect(r.status).toBe(409);
+    expect(r.message).toContain("[CREDITO_OCUPADO]");
+    expect(r.message).toContain("5, 9");
   });
 });

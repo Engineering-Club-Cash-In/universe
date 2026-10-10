@@ -64,3 +64,11 @@ export function rechazoLoteAbonoInicial(pagoIds: Iterable<number>): RechazoAbono
     `[ABONO_INICIAL_DE_CONVENIO] El pago ${[...pagoIds].join(", ")} es el abono inicial de un convenio pendiente, vigente o completado: no se reescribe en lote. Anule ese convenio primero.`,
   );
 }
+
+/** Rechazo (409) del lote que no pudo tomar el candado de pagos de algún crédito: reintentar. */
+export function rechazoLoteCreditosOcupados(creditoIds: number[]): RechazoAbonoInicial {
+  return new RechazoAbonoInicial(
+    409,
+    `[CREDITO_OCUPADO] Hay un pago o un convenio en curso en los créditos ${creditoIds.join(", ")}. No se escribió nada: reintente en unos segundos.`,
+  );
+}

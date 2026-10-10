@@ -441,6 +441,40 @@ export const solicitudesJuridicoRouter = {
 			});
 
 			if (!resultado.ok) {
+				if (resultado.definitivo) {
+					// Repetir la aprobación no cambiaría nada (el crédito ya no debe, salió
+					// de B3/B4…): se cierra como rechazada con el motivo de cartera, y el
+					// asesor lo ve. Solo desde `aprobada` y por quien la reclamó: no pisa
+					// una solicitud que otro cierre ya decidió.
+					const [cerrada] = await db
+						.update(solicitudesJuridicoCobros)
+						.set({
+							estado: "rechazada",
+							notaResolucion: `No se aplicó en cartera: ${resultado.motivo}`,
+						})
+						.where(
+							and(
+								eq(solicitudesJuridicoCobros.id, solicitud.id),
+								eq(solicitudesJuridicoCobros.estado, "aprobada"),
+								eq(solicitudesJuridicoCobros.resueltoPor, context.userId),
+							),
+						)
+						.returning({ id: solicitudesJuridicoCobros.id });
+					if (cerrada) {
+						await avisarDecisionJuridico({
+							solicitudId: solicitud.id,
+							casoCobroId: solicitud.casoCobroId,
+							decision: "rechazada",
+							solicitanteId: solicitud.solicitadoPor,
+							decidioPorId: context.userId,
+							nota: resultado.motivo,
+						});
+					}
+					throw new ORPCError("CONFLICT", {
+						message: `El escalado no se aplicó y quedó rechazado: ${resultado.motivo}`,
+					});
+				}
+				// Transitorio o ambiguo: queda en error_aplicacion y se puede repetir.
 				// Solo si la fila sigue siendo la aprobación en vuelo de esta llamada: si
 				// el job la devolvió y otro supervisor ya la rechazó o la aplicó, un
 				// fallo tardío no pisa esa decisión.
@@ -454,9 +488,6 @@ export const solicitudesJuridicoRouter = {
 							eq(solicitudesJuridicoCobros.resueltoPor, context.userId),
 						),
 					);
-				if (resultado.definitivo) {
-					throw new ORPCError("CONFLICT", { message: resultado.motivo });
-				}
 				throw new ORPCError("SERVICE_UNAVAILABLE", {
 					message: resultado.motivo,
 				});

@@ -230,6 +230,22 @@ export function puedeReenviarFacturaSeguro(caso: {
 	return { ok: true };
 }
 
+/**
+ * Cuándo un `pendiente` todavía en plazo pasa a reintentable; null si no va a
+ * pasar (ya se reintentó, no está pendiente o el plazo ya venció). El CRM
+ * refresca en ese momento en vez de consultar sin fin.
+ */
+export function reintentoDisponibleDesde(caso: {
+	envio: string | null;
+	envioActualizadoAt?: Date | null;
+	ahora?: Date;
+	retryCount: number;
+}): Date | null {
+	if (caso.envio !== "pendiente" || caso.retryCount >= 1) return null;
+	if (!caso.envioActualizadoAt || envioSinConfirmar(caso)) return null;
+	return new Date(caso.envioActualizadoAt.getTime() + PENDIENTE_ABANDONADO_MS);
+}
+
 // La aseguradora es la de la cotización que usa el cierre: la aceptada o, si no
 // hay, la última (confirmado con negocio). La oportunidad recién la copia al
 // cerrarse (close-opportunity.ts): sin cotización se usa la de la oportunidad

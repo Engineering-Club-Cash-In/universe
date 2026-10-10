@@ -10,6 +10,7 @@ import {
 	puedeReenviarFacturaSeguro,
 	puedeReintentarDesdeCrm,
 	puedeSubirFacturaSeguro,
+	reintentoDisponibleDesde,
 	resolverAseguradora,
 	tipoRealDeFactura,
 } from "./factura-seguro";
@@ -126,6 +127,39 @@ describe("destinatariosDe", () => {
 			...CORREOS_POLIZAS_INTERNOS,
 		]);
 		expect(CORREOS_POLIZAS_INTERNOS).toHaveLength(10);
+	});
+});
+
+describe("reintentoDisponibleDesde", () => {
+	const ahora = new Date("2026-09-30T12:00:00Z");
+	const hace5 = new Date("2026-09-30T11:55:00Z");
+	test("un pendiente en plazo pasa a reintentable a los 10 minutos", () => {
+		expect(
+			reintentoDisponibleDesde({
+				envio: "pendiente",
+				envioActualizadoAt: hace5,
+				retryCount: 0,
+				ahora,
+			}),
+		).toEqual(new Date("2026-09-30T12:05:00Z"));
+	});
+
+	test("nunca, si ya se reintentó, venció el plazo o no está pendiente", () => {
+		const base = { envioActualizadoAt: hace5, ahora };
+		expect(
+			reintentoDisponibleDesde({ ...base, envio: "pendiente", retryCount: 1 }),
+		).toBeNull();
+		expect(
+			reintentoDisponibleDesde({
+				envio: "pendiente",
+				envioActualizadoAt: new Date("2026-09-30T11:00:00Z"),
+				retryCount: 0,
+				ahora,
+			}),
+		).toBeNull();
+		expect(
+			reintentoDisponibleDesde({ ...base, envio: "fallido", retryCount: 0 }),
+		).toBeNull();
 	});
 });
 

@@ -92,6 +92,7 @@ import {
 	envioSinConfirmar,
 	puedeReenviarFacturaSeguro,
 	puedeReintentarDesdeCrm,
+	reintentoDisponibleDesde,
 } from "../lib/factura-seguro";
 import {
 	calcularAjusteFechaIdeal,
@@ -6423,6 +6424,13 @@ export const crmRouter = {
 									envioActualizadoAt: envioAseguradora.actualizadoAt,
 									retryCount: envioAseguradora.retryCount ?? 0,
 								}).ok,
+							reintentoDesde: puedeReintentar
+								? (reintentoDisponibleDesde({
+										envio: envioAseguradora.estado,
+										envioActualizadoAt: envioAseguradora.actualizadoAt,
+										retryCount: envioAseguradora.retryCount ?? 0,
+									})?.toISOString() ?? null)
+								: null,
 						},
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null

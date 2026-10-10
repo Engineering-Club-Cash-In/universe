@@ -561,6 +561,24 @@ function mismoIntentoSinEnviar(registro: { id: string; intento: number }) {
 	);
 }
 
+// Si la transacción falló de verdad, el archivo recién subido sobra. Pero si el
+// commit llegó y solo se perdió la respuesta, ya está registrado: ante la duda
+// se conserva.
+async function borrarSiNoQuedoRegistrado(key: string) {
+	let registrado: boolean;
+	try {
+		const filas = await db
+			.select({ id: opportunityDocuments.id })
+			.from(opportunityDocuments)
+			.where(eq(opportunityDocuments.filePath, key))
+			.limit(1);
+		registrado = filas.length > 0;
+	} catch {
+		registrado = true;
+	}
+	if (!registrado) await deleteFileFromR2(key).catch(() => {});
+}
+
 // `correo` es el guardado en el registro para este intento.
 async function enviarYRegistrar(params: {
 	registro: { id: string; intento: number };
@@ -705,6 +723,9 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			motivo: `la factura no puede pesar más de ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
 		};
 	}
+	if (contenido.length === 0) {
+		return { enviada: false, motivo: "el archivo de la factura está vacío" };
+	}
 	// A la aseguradora va cualquier tipo que el CRM admite. Si el contenido es
 	// PDF o imagen, el nombre lleva la extensión de su tipo real.
 	const tipoReal = tipoRealDeFactura(contenido);
@@ -793,7 +814,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	try {
 		registro = await registrar();
 	} catch (error) {
-		await deleteFileFromR2(copia).catch(() => {});
+		await borrarSiNoQuedoRegistrado(copia);
 		throw error;
 	}
 	if (!registro) {
@@ -1126,7 +1147,7 @@ export const trackerRouter = {
 				registro = await registrar();
 			} catch (error) {
 				// Solo se borra el archivo que esta misma llamada acaba de subir.
-				await deleteFileFromR2(subido.key).catch(() => {});
+				await borrarSiNoQuedoRegistrado(subido.key);
 				throw error;
 			}
 

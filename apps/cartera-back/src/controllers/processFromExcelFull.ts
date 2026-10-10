@@ -13,6 +13,7 @@ import {
 import { findOrCreateAdvisorByName } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
+import { convenioVivoConAbonoDelCredito } from "./abonoInicialConvenio";
 import { updateAllInstallments } from "./updateCredit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,6 +307,16 @@ export async function procesarCreditoDesdeExcelFull(
     .limit(1);
 
   if (existing) {
+    // COBROS-02 W4: preflight del abono inicial de un convenio vivo, ANTES de borrar nada. Los
+    // borrados de abajo son autocommit sueltos: si el trigger de `pagos_credito` frenara recién el
+    // de los pagos, las boletas y los pagos de inversionistas ya estarían borrados.
+    const convenioDelAbono = await convenioVivoConAbonoDelCredito(db, existing.credito_id);
+    if (convenioDelAbono !== null) {
+      throw new Error(
+        `El crédito ${creditoBase} tiene el convenio #${convenioDelAbono} (pendiente, vigente o completado) sostenido por un abono inicial. ` +
+          `Reconstruirlo borraría ese pago. Anule el convenio primero. No se borró nada.`,
+      );
+    }
     console.log(`🔄 Crédito existente (ID ${existing.credito_id}) — limpiando...`);
     const pagosExistentes = await db
       .select({ pago_id: pagos_credito.pago_id })

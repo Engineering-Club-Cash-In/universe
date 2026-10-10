@@ -22,6 +22,7 @@ import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { findOrCreateInvestor } from "./investor";
 import { updateInstallments } from "./updateCredit";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
+import { convenioVivoConAbonoDelCredito } from "./abonoInicialConvenio";
 import {
   emitCreditScheduleRecalculation,
   type CarteraStructuredLogger,
@@ -929,6 +930,19 @@ export async function eliminarCreditos(
           // `continue` no sirve adentro del callback: se devuelve el motivo y
           // decide el llamador, ya fuera del candado.
           if (rubrosConDeuda.length > 0) return rubrosConDeuda;
+
+          // COBROS-02 W4: preflight del abono inicial de un convenio vivo, ANTES de borrar nada.
+          // Los borrados de abajo son autocommit sueltos (boletas, pagos de inversionistas, pagos):
+          // si el trigger de `pagos_credito` frenara recién el último, quedarían las boletas y los
+          // pagos de inversionistas ya borrados y el crédito mutilado. Lanza y lo recoge el
+          // `catch` de abajo como error de ese crédito.
+          const convenioDelAbono = await convenioVivoConAbonoDelCredito(db, creditoId);
+          if (convenioDelAbono !== null) {
+            throw new Error(
+              `El crédito tiene el convenio #${convenioDelAbono} (pendiente, vigente o completado) sostenido por un abono inicial. ` +
+                `Borrarlo se llevaría ese pago. Anule el convenio primero y vuelva a intentar. No se borró nada.`,
+            );
+          }
 
 
       

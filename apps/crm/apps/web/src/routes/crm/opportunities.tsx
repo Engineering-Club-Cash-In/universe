@@ -52,7 +52,10 @@ import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
-import { useConfirmarEnvioFactura } from "@/components/confirmar-envio-factura";
+import {
+	type AseguradoraConfirmada,
+	useConfirmarEnvioFactura,
+} from "@/components/confirmar-envio-factura";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
@@ -4241,6 +4244,7 @@ function DocumentsManager({
 	// Upload a single document with a specific type
 	const uploadSingleDocument = async (
 		docType: ManualOpportunityDocumentType | "",
+		envioFacturaConfirmado: AseguradoraConfirmada = null,
 	) => {
 		if (!selectedFile || !docType) return;
 
@@ -4258,12 +4262,13 @@ function DocumentsManager({
 				size: selectedFile.size,
 				key,
 			},
+			envioFacturaConfirmado,
 		});
 	};
 
 	// Upload mutation
 	const uploadMutation = useMutation({
-		mutationFn: async () => {
+		mutationFn: async (envioFacturaConfirmado?: AseguradoraConfirmada) => {
 			if (
 				includeAll3Months &&
 				["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
@@ -4283,7 +4288,7 @@ function DocumentsManager({
 				}
 				return;
 			}
-			return uploadSingleDocument(documentType);
+			return uploadSingleDocument(documentType, envioFacturaConfirmado);
 		},
 		onSuccess: (data) => {
 			const aviso = avisoFacturaSubida(
@@ -4783,6 +4788,7 @@ function DocumentsManager({
 							placeholder="Buscar tipo de documento..."
 							width="full"
 							isInModal={true}
+							disabled={confirmacionFactura.revisando}
 						/>
 					</div>
 
@@ -4854,6 +4860,7 @@ function DocumentsManager({
 							type="file"
 							onChange={handleFileSelect}
 							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+							disabled={confirmacionFactura.revisando}
 						/>
 						<p className="text-muted-foreground text-xs">
 							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX, XLS, XLSX.
@@ -4873,6 +4880,7 @@ function DocumentsManager({
 							<Button
 								size="sm"
 								variant="ghost"
+								disabled={confirmacionFactura.revisando}
 								onClick={() => {
 									setSelectedFile(null);
 									if (fileInputRef.current) {
@@ -4896,12 +4904,12 @@ function DocumentsManager({
 						}
 						onClick={() => {
 							if (documentType === "seguro_vehiculo") {
-								void confirmacionFactura.confirmarSiSeEnvia(() =>
-									uploadMutation.mutate(),
+								void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
+									uploadMutation.mutate(confirmada),
 								);
 								return;
 							}
-							uploadMutation.mutate();
+							uploadMutation.mutate(null);
 						}}
 					>
 						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}
@@ -5009,6 +5017,7 @@ function DocumentsManager({
 										opportunityId={opportunityId}
 										disponible={doc.envioAseguradora?.reintentoDisponible}
 										aseguradora={doc.envioAseguradora?.aseguradora}
+										estado={doc.envioAseguradora?.estado}
 									/>
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&

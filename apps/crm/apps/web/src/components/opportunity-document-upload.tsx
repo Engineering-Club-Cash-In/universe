@@ -15,7 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
-import { useConfirmarEnvioFactura } from "@/components/confirmar-envio-factura";
+import {
+	type AseguradoraConfirmada,
+	useConfirmarEnvioFactura,
+} from "@/components/confirmar-envio-factura";
 import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
@@ -166,6 +169,7 @@ export function OpportunityDocumentUpload({
 		mutationFn: async (data: {
 			file: File;
 			documentType: ManualOpportunityDocumentType;
+			envioFacturaConfirmado?: AseguradoraConfirmada;
 		}) => {
 			const { key } = await uploadFileToR2WithRetry(data.file, {
 				resourceType: "opportunity_document",
@@ -181,6 +185,7 @@ export function OpportunityDocumentUpload({
 					size: data.file.size,
 					key,
 				},
+				envioFacturaConfirmado: data.envioFacturaConfirmado ?? null,
 			});
 		},
 		onSuccess: (data) => {
@@ -270,8 +275,12 @@ export function OpportunityDocumentUpload({
 			})();
 		} else if (documentType === "seguro_vehiculo") {
 			const file = selectedFile;
-			void confirmacionFactura.confirmarSiSeEnvia(() =>
-				uploadMutation.mutate({ file, documentType }),
+			void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
+				uploadMutation.mutate({
+					file,
+					documentType,
+					envioFacturaConfirmado: confirmada,
+				}),
 			);
 		} else {
 			uploadMutation.mutate({ file: selectedFile, documentType });
@@ -304,6 +313,7 @@ export function OpportunityDocumentUpload({
 								width="full"
 								popOverWidth="full"
 								isInModal={true}
+								disabled={confirmacionFactura.revisando}
 							/>
 						</div>
 
@@ -314,6 +324,7 @@ export function OpportunityDocumentUpload({
 								type="file"
 								accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls"
 								onChange={handleFileChange}
+								disabled={confirmacionFactura.revisando}
 								className="h-10 w-full rounded-md border bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:font-medium file:text-sm"
 							/>
 						</div>
@@ -451,6 +462,7 @@ export function OpportunityDocumentUpload({
 										opportunityId={opportunityId}
 										disponible={doc.envioAseguradora?.reintentoDisponible}
 										aseguradora={doc.envioAseguradora?.aseguradora}
+										estado={doc.envioAseguradora?.estado}
 									/>
 									{doc.url && (
 										<Button variant="outline" size="sm" asChild>

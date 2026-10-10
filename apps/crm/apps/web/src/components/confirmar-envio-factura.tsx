@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -12,37 +13,46 @@ import {
 import { nombreAseguradora } from "@/lib/envio-aseguradora";
 import { client } from "@/utils/orpc";
 
+export type AseguradoraConfirmada = "gyt" | "universales" | null;
+
 /**
  * Antes de subir un "Seguro del Vehículo": si el server lo va a mandar a la
  * aseguradora, pide confirmación nombrándola; si no, sube directo (el aviso de
- * después dice por qué no se envió).
+ * después dice por qué no se envió). `continuar` recibe la aseguradora
+ * confirmada: el server solo envía si coincide con la que resuelve al subir.
  */
 export function useConfirmarEnvioFactura(opportunityId: string) {
 	const [pendiente, setPendiente] = useState<{
+		codigo: AseguradoraConfirmada;
 		aseguradora: string;
-		continuar: () => void;
+		continuar: (confirmada: AseguradoraConfirmada) => void;
 	} | null>(null);
 	const [revisando, setRevisando] = useState(false);
 
-	const confirmarSiSeEnvia = async (continuar: () => void) => {
+	const confirmarSiSeEnvia = async (
+		continuar: (confirmada: AseguradoraConfirmada) => void,
+	) => {
 		setRevisando(true);
-		let previa: { seEnviara: boolean; aseguradora?: string };
+		let previa: { seEnviara: boolean; aseguradora?: AseguradoraConfirmada };
 		try {
 			previa = (await client.getEnvioFacturaSeguroCrm({ opportunityId })) as {
 				seEnviara: boolean;
-				aseguradora?: string;
+				aseguradora?: AseguradoraConfirmada;
 			};
 		} catch {
-			// Sin la consulta no se sabe si se enviará: se pregunta igual.
-			previa = { seEnviara: true };
+			toast.error(
+				"No se pudo revisar el envío a la aseguradora. Intenta de nuevo.",
+			);
+			return;
 		} finally {
 			setRevisando(false);
 		}
 		if (!previa.seEnviara) {
-			continuar();
+			continuar(null);
 			return;
 		}
 		setPendiente({
+			codigo: previa.aseguradora ?? null,
 			aseguradora: nombreAseguradora(previa.aseguradora),
 			continuar,
 		});
@@ -68,9 +78,9 @@ export function useConfirmarEnvioFactura(opportunityId: string) {
 					<AlertDialogCancel>No</AlertDialogCancel>
 					<AlertDialogAction
 						onClick={() => {
-							const continuar = pendiente?.continuar;
+							const confirmado = pendiente;
 							setPendiente(null);
-							continuar?.();
+							confirmado?.continuar(confirmado.codigo);
 						}}
 					>
 						Sí

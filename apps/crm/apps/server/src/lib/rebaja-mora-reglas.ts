@@ -136,3 +136,22 @@ export const UMBRAL_APROBACION_COLGADA_MS = 10 * 60 * 1000;
  * `error_aplicacion` una aprobación cuyo POST ya no puede despacharse.
  */
 export const PLAZO_APLICACION_REBAJA_MS = 3 * 60 * 1000;
+
+/**
+ * Espera antes de poder rechazar una rebaja que quedó en `error_aplicacion`.
+ * Un handler de cartera que sigue en la cola del lock puede escribir hasta que
+ * vence su espera, y el CRM corta su llamada a los 3 min (después de eso el
+ * handler ya no confirma). Pasado ese plazo más un margen, ningún intento vivo
+ * puede aplicar la rebaja tras un rechazo, aunque la conciliación no la vea.
+ */
+export const ESPERA_RECHAZO_TRAS_ERROR_MS =
+	PLAZO_APLICACION_REBAJA_MS + 60 * 1000;
+
+/** `resueltoEn` es el instante del último intento de aplicación. */
+export function puedeRechazarTrasError(
+	resueltoEn: Date | null,
+	ahora: Date,
+): boolean {
+	if (!resueltoEn) return true;
+	return ahora.getTime() - resueltoEn.getTime() >= ESPERA_RECHAZO_TRAS_ERROR_MS;
+}

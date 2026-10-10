@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	aCentavos,
 	clasificarErrorCartera,
+	ESPERA_RECHAZO_TRAS_ERROR_MS,
 	ESTADOS_SIN_REBAJA,
 	esAprobacionColgada,
 	PLAZO_APLICACION_REBAJA_MS,
+	puedeRechazarTrasError,
 	quetzalesRebaja,
 	UMBRAL_APROBACION_COLGADA_MS,
 } from "./rebaja-mora-reglas";
@@ -130,5 +132,23 @@ describe("plazo de la aplicación en cartera", () => {
 		expect(PLAZO_APLICACION_REBAJA_MS + 60_000).toBeLessThan(
 			UMBRAL_APROBACION_COLGADA_MS,
 		);
+	});
+});
+
+describe("puedeRechazarTrasError", () => {
+	const ahora = new Date("2026-10-10T12:00:00Z");
+
+	test("no deja rechazar mientras un intento de cartera aún puede escribir", () => {
+		const hace1min = new Date(ahora.getTime() - 60 * 1000);
+		expect(puedeRechazarTrasError(hace1min, ahora)).toBe(false);
+	});
+
+	test("deja rechazar pasado el plazo de la llamada más el margen", () => {
+		const alLimite = new Date(ahora.getTime() - ESPERA_RECHAZO_TRAS_ERROR_MS);
+		expect(puedeRechazarTrasError(alLimite, ahora)).toBe(true);
+	});
+
+	test("sin instante de intento no hay nada que esperar", () => {
+		expect(puedeRechazarTrasError(null, ahora)).toBe(true);
 	});
 });

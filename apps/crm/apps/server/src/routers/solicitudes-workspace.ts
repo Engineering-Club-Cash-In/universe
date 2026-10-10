@@ -19,6 +19,7 @@ import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import {
 	aCentavos,
 	ESTADOS_SIN_REBAJA,
+	puedeRechazarTrasError,
 	quetzalesRebaja,
 } from "../lib/rebaja-mora-reglas";
 import { PERMISSIONS } from "../lib/roles";
@@ -393,6 +394,15 @@ export const solicitudesWorkspaceRouter = {
 				// Un error_aplicacion puede ser ambiguo (timeout: cartera pudo descontar
 				// igual). Antes de cerrarla como rechazada se confirma en cartera.
 				if (solicitud.estado === "error_aplicacion") {
+					// Un intento de cartera aún puede estar en la cola del lock y escribir
+					// después de un rechazo que la conciliación no vio: se espera a que
+					// ninguno pueda hacerlo.
+					if (!puedeRechazarTrasError(solicitud.resueltoEn, new Date())) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Cartera todavía puede estar procesando esta rebaja. Espere unos minutos y vuelva a intentar el rechazo.",
+						});
+					}
 					const casoRechazo = await creditoDelCasoRebaja(solicitud.casoCobroId);
 					if (!casoRechazo || casoRechazo.creditoId == null) {
 						throw new ORPCError("NOT_FOUND", {

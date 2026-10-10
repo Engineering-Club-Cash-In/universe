@@ -249,7 +249,10 @@ export async function enviarAJuridico(params: {
       // las dos escrituras devolvería el crédito a su bucket por cuotas esa noche.
       await tx
         .update(creditos)
-        .set({ statusCredit: STATUS_EN_JURIDICO })
+        // Entrar a Jurídico invalida la marca de un levantamiento de recuperación
+        // anterior: si no, reversar ese pago viejo resucitaría EN_RECUPERACION
+        // por encima de esta decisión más nueva.
+        .set({ statusCredit: STATUS_EN_JURIDICO, recuperacion_levantada_pago_id: null })
         .where(eq(creditos.credito_id, credito_id));
 
       await tx.insert(buckets_historial).values({

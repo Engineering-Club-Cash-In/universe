@@ -5,12 +5,13 @@
  * services/juridico-solicitud.ts. Archivo aparte por TS7056.
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { solicitudesJuridicoCobros } from "../db/schema/cobros";
+import { isUniqueViolation } from "../lib/db-errors";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -109,18 +110,31 @@ export const solicitudesJuridicoRouter = {
 				});
 			}
 
-			const [creada] = await db
-				.insert(solicitudesJuridicoCobros)
-				.values({
-					casoCobroId: input.casoCobroId,
-					numeroCreditoSifco: caso.numeroSifco,
-					bucketSnapshot: bucket,
-					motivo: input.motivo,
-					notaJuridico: input.notaJuridico,
-					estado: "pendiente",
-					solicitadoPor: context.userId,
-				})
-				.returning();
+			let creada: typeof solicitudesJuridicoCobros.$inferSelect | undefined;
+			try {
+				[creada] = await db
+					.insert(solicitudesJuridicoCobros)
+					.values({
+						casoCobroId: input.casoCobroId,
+						numeroCreditoSifco: caso.numeroSifco,
+						bucketSnapshot: bucket,
+						motivo: input.motivo,
+						notaJuridico: input.notaJuridico,
+						estado: "pendiente",
+						solicitadoPor: context.userId,
+					})
+					.returning();
+			} catch (error) {
+				// Dos envíos a la vez (doble clic): el índice único de solicitud abierta
+				// deja pasar uno; el otro recibe el mismo conflicto que el chequeo de arriba.
+				if (isUniqueViolation(error)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Este caso ya tiene una solicitud de escalado abierta. Espere la decisión del supervisor.",
+					});
+				}
+				throw error;
+			}
 			if (!creada) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "No se pudo registrar la solicitud.",
@@ -192,7 +206,12 @@ export const solicitudesJuridicoRouter = {
 					eq(decisorJ.id, solicitudesJuridicoCobros.resueltoPor),
 				)
 				.where(filtros.length > 0 ? and(...filtros) : undefined)
-				.orderBy(desc(solicitudesJuridicoCobros.solicitadoEn))
+				// Abiertas primero: con `limite`, el historial resuelto más nuevo no
+				// puede dejar fuera una solicitud que espera acción.
+				.orderBy(
+					sql`CASE WHEN ${inArray(solicitudesJuridicoCobros.estado, [...ESTADOS_JURIDICO_ABIERTA])} THEN 0 ELSE 1 END`,
+					desc(solicitudesJuridicoCobros.solicitadoEn),
+				)
 				.limit(input.limite);
 			const nombres = await nombresClientePorSifco(
 				filas.map((f) => f.numeroCreditoSifco),
@@ -285,9 +304,7 @@ export const solicitudesJuridicoRouter = {
 			}
 
 			if (
-				!["pendiente", "aprobada", "error_aplicacion"].includes(
-					solicitud.estado,
-				)
+				!["pendiente", "error_aplicacion"].includes(solicitud.estado)
 			) {
 				throw new ORPCError("CONFLICT", {
 					message:
@@ -302,7 +319,8 @@ export const solicitudesJuridicoRouter = {
 			}
 
 			// Se reclama antes de tocar cartera: dos aprobaciones a la vez no mandan
-			// dos escalados (y cartera responde ya_en_juridico al segundo).
+			// dos escalados. `aprobada` NO se reclama: es una aplicación en vuelo; si
+			// el proceso se cayó, el job la devuelve a `error_aplicacion` y ahí sí.
 			const [reclamada] = await db
 				.update(solicitudesJuridicoCobros)
 				.set({
@@ -316,7 +334,6 @@ export const solicitudesJuridicoRouter = {
 						eq(solicitudesJuridicoCobros.id, solicitud.id),
 						inArray(solicitudesJuridicoCobros.estado, [
 							"pendiente",
-							"aprobada",
 							"error_aplicacion",
 						]),
 					),
@@ -336,10 +353,19 @@ export const solicitudesJuridicoRouter = {
 			});
 
 			if (!resultado.ok) {
+				// Solo si la fila sigue siendo la aprobación en vuelo de esta llamada: si
+				// el job la devolvió y otro supervisor ya la rechazó o la aplicó, un
+				// fallo tardío no pisa esa decisión.
 				await db
 					.update(solicitudesJuridicoCobros)
 					.set({ estado: "error_aplicacion", notaResolucion: resultado.motivo })
-					.where(eq(solicitudesJuridicoCobros.id, solicitud.id));
+					.where(
+						and(
+							eq(solicitudesJuridicoCobros.id, solicitud.id),
+							eq(solicitudesJuridicoCobros.estado, "aprobada"),
+							eq(solicitudesJuridicoCobros.resueltoPor, context.userId),
+						),
+					);
 				if (resultado.definitivo) {
 					throw new ORPCError("CONFLICT", { message: resultado.motivo });
 				}
@@ -351,7 +377,13 @@ export const solicitudesJuridicoRouter = {
 			await db
 				.update(solicitudesJuridicoCobros)
 				.set({ estado: "aplicada" })
-				.where(eq(solicitudesJuridicoCobros.id, solicitud.id));
+				.where(
+					and(
+						eq(solicitudesJuridicoCobros.id, solicitud.id),
+						eq(solicitudesJuridicoCobros.estado, "aprobada"),
+						eq(solicitudesJuridicoCobros.resueltoPor, context.userId),
+					),
+				);
 			await avisarDecisionJuridico({
 				solicitudId: solicitud.id,
 				casoCobroId: solicitud.casoCobroId,

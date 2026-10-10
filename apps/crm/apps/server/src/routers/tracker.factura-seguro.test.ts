@@ -34,6 +34,8 @@ let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
 const topesLecturaR2: Array<number | undefined> = [];
 // Locks tomados sobre la fila del usuario socio.
 const bloqueosUsuario: string[] = [];
+// Documentos ya registrados con una key (para la limpieza tras un error).
+let documentosRegistrados: Array<{ id: string }> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
@@ -147,6 +149,8 @@ const dbFalsa = {
 				]);
 			if (tabla === insuranceInvoiceSubmissions)
 				return cadena(() => facturaPrevia);
+			if (tabla === opportunityDocuments)
+				return cadena(() => documentosRegistrados);
 			if (tabla === companies || tabla === opportunityStageHistory)
 				return cadena(() => []);
 			throw new Error("Tabla no mockeada en tracker.factura-seguro.test.ts");
@@ -309,6 +313,7 @@ beforeEach(() => {
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
 	bloqueosUsuario.length = 0;
+	documentosRegistrados = [];
 	casoReleido = undefined;
 	lecturasCaso = 0;
 	membresiasVigentes = undefined;
@@ -434,6 +439,13 @@ describe("subirFacturaSeguro", () => {
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
 		expect(borradosR2).toEqual([KEY]);
+	});
+
+	test("si el commit llegó pero se perdió la respuesta, el archivo registrado no se borra", async () => {
+		fallaLecturaCotizacion = true;
+		documentosRegistrados = [{ id: "doc-ya-guardado" }];
+		await expect(subir()).rejects.toThrow();
+		expect(borradosR2).toEqual([]);
 	});
 
 	test("los datos del correo se leen después de subir, con las cotizaciones FOR SHARE", async () => {
@@ -1033,6 +1045,16 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(correos).toHaveLength(0);
 		expect(actualizados).toHaveLength(0);
 		expect(borradosR2).toEqual([COPIA, COPIA]);
+	});
+
+	test("un archivo vacío no se copia ni se envía", async () => {
+		contenidoR2 = Buffer.alloc(0);
+		expect(await enviar()).toEqual({
+			enviada: false,
+			motivo: "el archivo de la factura está vacío",
+		});
+		expect(subidosR2).toHaveLength(0);
+		expect(insertados).toHaveLength(0);
 	});
 
 	test("un Word o un Excel también se envía, con su nombre y su tipo", async () => {

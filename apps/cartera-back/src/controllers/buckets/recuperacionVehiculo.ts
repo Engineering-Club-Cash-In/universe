@@ -468,7 +468,9 @@ export async function enviarARecuperacionVehiculo(params: {
       if (pisaEstado) {
         await tx
           .update(creditos)
-          .set({ statusCredit: STATUS_EN_RECUPERACION })
+          // Y se invalida la marca de un levantamiento de Jurídico anterior: si no,
+          // reversar ese pago viejo resucitaría EN_JURIDICO sobre esta decisión.
+          .set({ statusCredit: STATUS_EN_RECUPERACION, juridico_levantada_pago_id: null })
           .where(eq(creditos.credito_id, credito_id));
       }
 

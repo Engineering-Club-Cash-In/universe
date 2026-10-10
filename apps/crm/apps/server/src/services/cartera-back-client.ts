@@ -3005,6 +3005,14 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	private invalidarCachesDeEscalado(): void {
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("mora-por-etapa-asesor");
+		this.cache.invalidate("/buckets");
+	}
+
 	// W3 (Workspace) — escalado a Jurídico (B5). Cartera clava el crédito en B5,
 	// lo saca de la cartera del asesor y deja el estado EN_JURIDICO. Un 409 con
 	// `codigo: "ya_en_juridico"` significa que ya estaba aplicado (reintento).
@@ -3021,11 +3029,7 @@ export class CarteraBackClient {
 		asesor_nuevo: number;
 		status_credito: string;
 	}> {
-		this.cache.invalidate("/credito?");
-		this.cache.invalidate("getAllCredits");
-		this.cache.invalidate("stats");
-		this.cache.invalidate("mora-por-etapa-asesor");
-		this.cache.invalidate("/buckets");
+		this.invalidarCachesDeEscalado();
 		// Presupuesto de TODA la operación, autenticación incluida: el timeout de
 		// `request()` arranca después de esperar el token. Sin esto, un auth colgado
 		// más allá del umbral de aprobaciones colgadas (10 min) dejaba que el job
@@ -3073,6 +3077,10 @@ export class CarteraBackClient {
 			]);
 		} finally {
 			clearTimeout(temporizador);
+			// De nuevo al terminar (también en timeout o error, donde cartera pudo
+			// aplicarlo): una lectura concurrente durante la espera pudo recachear
+			// el estado y el asesor de antes del escalado.
+			this.invalidarCachesDeEscalado();
 		}
 		if (!response?.success) {
 			throw new Error(response?.message || "cartera-back no confirmó el escalado a Jurídico");

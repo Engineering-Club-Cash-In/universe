@@ -7,6 +7,7 @@ import {
   buckets_historial,
   credito_asesor_historial,
   creditos,
+  moras_credito,
   platform_users,
 } from "../../database/db/schema";
 import { STATUS_EXCLUIDOS_MORA } from "../../constants/creditStatus";
@@ -17,6 +18,7 @@ import {
   PROCESAR_MORAS_LOCK_KEY,
 } from "../../lib/buckets-job-locks";
 import {
+  contarCuotasVencidasReales,
   elegirAsesorParaBucket,
   STATUS_EN_JURIDICO,
 } from "../latefee";
@@ -149,6 +151,27 @@ export async function enviarAJuridico(params: {
       const noEscalable = motivoBucketNoJuridico(estado.bucket_actual);
       if (noEscalable) {
         throw new RecuperacionAbortada(400, `[ERROR] ${noEscalable}`);
+      }
+
+      // La deuda VIVA, no el bucket: `bucket_actual` sale del último
+      // buckets_historial y no baja hasta la corrida nocturna. Si el cliente
+      // saldó mientras la solicitud esperaba, ese pago ya se validó y el hook que
+      // levanta Jurídico no volvería a correr: el crédito quedaría atascado.
+      const cuotasVencidas = await contarCuotasVencidasReales(
+        credito_id,
+        estado.status_credito ?? "",
+        tx as never,
+      );
+      const [moraViva] = await tx
+        .select({ monto: moras_credito.monto_mora })
+        .from(moras_credito)
+        .where(and(eq(moras_credito.credito_id, credito_id), eq(moras_credito.activa, true)))
+        .limit(1);
+      if (cuotasVencidas === 0 && !(moraViva && Number(moraViva.monto) > 0)) {
+        throw new RecuperacionAbortada(
+          409,
+          "[ERROR] El crédito ya no tiene cuotas vencidas ni mora: no se escala a Jurídico.",
+        );
       }
 
       // Precondición de dueño, bajo los locks (igual que la recuperación).

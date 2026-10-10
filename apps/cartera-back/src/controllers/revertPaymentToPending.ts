@@ -29,7 +29,7 @@ function elapsedMilliseconds(startedAt: number): number {
   return Math.max(0, Math.min(86_400_000, Math.round(safeNow() - startedAt)));
 }
 
-const REVERSIBLE_CREDIT_STATES = new Set(["ACTIVO", "MOROSO", "EN_CONVENIO"]);
+const REVERSIBLE_CREDIT_STATES = new Set(["ACTIVO", "MOROSO", "EN_JURIDICO", "EN_CONVENIO"]);
 
 export function classifyRevertPaymentCredit(
   credit: { readonly statusCredit?: string | null } | undefined,

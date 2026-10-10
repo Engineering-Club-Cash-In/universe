@@ -168,6 +168,7 @@ const dbFalsa = {
 						id: `id-${insertados.length}`,
 						intento: 1,
 						createdAt: new Date("2026-09-29T20:00:00Z"),
+						reservadoAt: new Date("2026-09-29T20:00:00Z"),
 					},
 				];
 			},
@@ -780,6 +781,23 @@ describe("reenviarFacturaSeguro", () => {
 		expect(sql).toContain('"intento" = ');
 		expect(sql).toContain('"status" <> ');
 		expect(params).toEqual(["envio-1", 1, "enviado"]);
+	});
+
+	test("un fallo solo se registra sobre la reserva de esa misma ejecución", async () => {
+		facturaPrevia = [registro("fallido")];
+		resultadoCorreo = { ok: false, error: "rechazado", resultado: "rechazado" };
+		await call(
+			trackerRouter.reenviarFacturaSeguro,
+			{ opportunityId: ID },
+			crmCtx,
+		);
+		expect(actualizados[1]).toMatchObject({ status: "fallido" });
+		const { sql, params } = new PgDialect().sqlToQuery(
+			condicionesActualizacion[1] as SQL,
+		);
+		expect(sql).toContain('"updated_at" = ');
+		const reservadoAt = actualizados[0].updatedAt as Date;
+		expect(params).toContain(reservadoAt.toISOString());
 	});
 
 	test("un asesor comercial no puede reenviar una oportunidad ajena", async () => {

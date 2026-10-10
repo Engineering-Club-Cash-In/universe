@@ -1494,7 +1494,7 @@ export const paymentRouter = new Elysia()
       };
     } catch (error: any) {
       console.error("Error en marcar-cuotas:", error);
-      set.status = 500;
+      set.status = error instanceof RechazoAbonoInicial ? error.status : 500;
       return { success: false, message: error.message };
     }
   },

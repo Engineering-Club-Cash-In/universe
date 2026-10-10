@@ -36,6 +36,8 @@ import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito, rubros_pagos } from "../database/db";
 import { authMiddleware } from "./midleware";
+import { pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } from "../controllers/abonoInicialConvenio";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import {
   descargarCarteraDeR2,
@@ -373,6 +375,10 @@ export const actualizarPagosExcelRouter = new Elysia()
         for (const fila of conRubros) pagosQueCobranRubros.add(fila.pago_id);
       }
 
+      // 🛡️ Abono inicial de un convenio vivo (COBROS-02 W4): su monto, fecha y estado son lo que
+      // se validó al crear el convenio. Se protege la cuota ENTERA, igual que con los rubros.
+      const pagosAbonoInicial = await pagosConAbonoInicialVivo(db, todosLosPagoIds);
+
       for (const sifcoRaw of lista) {
         const sifco = String(sifcoRaw);
         const d = datosCredito.get(sifco)!;
@@ -450,6 +456,23 @@ export const actualizarPagosExcelRouter = new Elysia()
             return;
           }
           
+          const pagosConConvenio = cuota.pagos
+            .map((pago) => pago.pago_id)
+            .filter((id) => pagosAbonoInicial.has(id));
+          if (pagosConConvenio.length > 0) {
+            const item = {
+              numero_credito_sifco: sifco,
+              numero_cuota: cuota.numero_cuota,
+              fecha_vencimiento: cuota.fecha_vencimiento,
+              mes_excel: excel.mes,
+              pago_ids: pagosConConvenio,
+              motivo: "abono_inicial_de_convenio",
+            };
+            protegidas.push(item);
+            cambiosCredito.push({ ...item, protegida: true, pagos: 0 });
+            return;
+          }
+
           if (debeProtegerCuota(excel, cuota.pagos)) {
             const item = {
               numero_credito_sifco: sifco,
@@ -545,12 +568,16 @@ export const actualizarPagosExcelRouter = new Elysia()
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
       try {
         await db.transaction(async (tx) => {
+          // Re-chequeo adentro de la transacción: un convenio creado entre la planeación y esta
+          // escritura (el lote no toma un candado por crédito) aborta todo, no se reescribe.
+          const vivos = await pagosConAbonoInicialVivo(tx as unknown as typeof db, updatesGlobal.map((u) => u.pago_id));
+          if (vivos.size > 0) throw rechazoLoteAbonoInicial(vivos);
           for (const { pago_id, datos } of updatesGlobal) {
             await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
           }
         });
       } catch (e: any) {
-        set.status = 500;
+        set.status = e instanceof RechazoAbonoInicial ? e.status : 500;
         return {
           success: false,
           abortado: true,

@@ -90,7 +90,7 @@ test("migration preserves persistence evidence ordering and indirect SIFCO HTTP"
   expect(source).toContain("consultarEstadoCuentaPrestamo(numero_credito_sifco)");
   expect(source).toContain(".returning({ cuota_id: cuotas_credito.cuota_id })");
   expect(source).toContain(".returning({ pago_id: pagos_credito.pago_id })");
-  const transaction = source.indexOf("const persistedWriteCount = await db.transaction");
+  const transaction = source.indexOf("const persistedWriteCount = await withPaymentAdvisoryLock");
   const persisted = source.indexOf("onPersisted?.()", transaction);
   const installments = source.indexOf("await updateInstallments({", persisted);
   expect(transaction).toBeGreaterThan(0);

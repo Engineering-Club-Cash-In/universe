@@ -16,7 +16,7 @@ const { createReversePayment } = await import("./reversePayment");
 const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
 const { rechazoReversaAbonoInicial, RechazoAbonoInicial } = await import("../lib/convenio-abono-inicial");
-const { asegurarAbonoInicialLibre } = await import("./abonoInicialConvenio");
+const { asegurarAbonoInicialLibre, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } = await import("./abonoInicialConvenio");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
   if (previous === undefined) delete process.env[key];
@@ -149,5 +149,27 @@ describe("anulación como falso (falsePayment) bloqueada por el abono inicial", 
     expect(error).toBeInstanceOf(RechazoAbonoInicial);
     expect(error.status).toBe(409);
     await expect(asegurarAbonoInicialLibre(txSin as any, 30)).resolves.toBeUndefined();
+  });
+});
+
+describe("reescritura en lote (Excel de conta, marcar-cuotas) bloqueada por el abono inicial", () => {
+  const txCon = (filas: unknown[]) => ({ select: () => ({ from: () => ({ where: async () => filas }) }) });
+
+  test("pagosConAbonoInicialVivo devuelve solo los pagos ligados a un convenio vivo", async () => {
+    const vivos = await pagosConAbonoInicialVivo(txCon([{ pago_id: 30 }, { pago_id: 31 }]) as any, [30, 31, 32]);
+    expect([...vivos].sort()).toEqual([30, 31]);
+  });
+
+  test("sin pagos no consulta y devuelve vacío", async () => {
+    const tx = { select: () => { throw new Error("no debía consultar"); } };
+    expect((await pagosConAbonoInicialVivo(tx as any, [])).size).toBe(0);
+  });
+
+  test("el rechazo del lote es 409 y nombra los pagos", () => {
+    const r = rechazoLoteAbonoInicial(new Set([30, 31]));
+    expect(r).toBeInstanceOf(RechazoAbonoInicial);
+    expect(r.status).toBe(409);
+    expect(r.message).toContain("[ABONO_INICIAL_DE_CONVENIO]");
+    expect(r.message).toContain("30, 31");
   });
 });

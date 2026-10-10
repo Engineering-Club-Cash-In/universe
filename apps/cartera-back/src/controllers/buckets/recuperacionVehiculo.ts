@@ -121,7 +121,7 @@ export type RecuperacionVehiculoResultado =
  * eso una validación tardía dejaba el crédito movido a B4 mientras la API
  * respondía un error (review de Codex, P1).
  */
-class RecuperacionAbortada extends Error {
+export class RecuperacionAbortada extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -146,7 +146,7 @@ type EstadoCredito = {
  * status, cuotas de la mora activa y bucket actual con la MISMA derivación que
  * usan el listado y la reasignación manual (bucketActualSql).
  */
-async function getEstadoCredito(
+export async function getEstadoCredito(
   credito_id: number,
   ejecutor: Ejecutor,
 ): Promise<EstadoCredito | null> {
@@ -193,7 +193,7 @@ async function getEstadoCredito(
  * y mandaba las recuperaciones nuevas al asesor equivocado (review de Codex, P2).
  * Conserva EN_CONVENIO: esos créditos sí se atienden.
  */
-async function getCargaDelBucket(
+export async function getCargaDelBucket(
   bucket: number,
   ejecutor: Ejecutor,
 ): Promise<Map<number, number>> {
@@ -216,7 +216,7 @@ async function getCargaDelBucket(
 }
 
 /** ¿El error viene de que no se pudo tomar un lock dentro de `lock_timeout`? */
-function esLockTimeout(err: unknown): boolean {
+export function esLockTimeout(err: unknown): boolean {
   return (err as { code?: string })?.code === "55P03";
 }
 

@@ -178,6 +178,12 @@
      * distinto en facturación) que pasa por contabilidad — decisión 6 del plan 08.
      */
     EN_RECUPERACION = "EN_RECUPERACION",
+    /**
+     * COBROS-02 W3 (migración 0024): escalado a Jurídico. Piso de B5. Ya es valor
+     * de la columna; aquí va en el enum TS para que el funnel, el filtro de
+     * estados y el cierre mensual lo vean (H1 de la revisión).
+     */
+    EN_JURIDICO = "EN_JURIDICO",
   }
   // 2. Créditos
 
@@ -243,7 +249,7 @@
     }).notNull(),
 
     statusCredit: text("statusCredit", {
-      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO", "EN_RECUPERACION"],
+      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO", "EN_RECUPERACION", "EN_JURIDICO"],
     })
       .notNull()
       .default(StatusCredit.ACTIVO),
@@ -255,6 +261,10 @@
     // crédito se queda ACTIVO y el motor a lo sumo lo vuelve MOROSO: el piso en
     // B4 se pierde en silencio. Sin FK a propósito: es una marca histórica.
     recuperacion_levantada_pago_id: integer("recuperacion_levantada_pago_id"),
+    // COBROS-02 W3 (migración 0024): qué pago levantó `EN_JURIDICO`. Mismo papel
+    // que la marca de recuperación: si contabilidad reversa ese pago, el crédito
+    // vuelve a Jurídico. Sin FK a propósito (marca histórica).
+    juridico_levantada_pago_id: integer("juridico_levantada_pago_id"),
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
     estado_devolucion: estadoDevolucionEnum("estado_devolucion").notNull().default("NO_APLICA"),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In

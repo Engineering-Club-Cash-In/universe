@@ -14,7 +14,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | --- | --- | --- | --- |
 | **W1** | Datos de la gestión (dirección, participante, teléfono contactado) | ✅ Hecho en el PR 1 · migración `0079` (CRM) | `contactos_cobros` · `createContactoCobros` · `getHistorialContactos(Paginado)` |
 | **W2** | Solicitud de rebaja de mora con aprobación | ✅ Hecho en el PR 2 · migraciones CRM `0080` y cartera `0023` | `solicitudes_rebaja_mora_cobros` · `routers/solicitudes-workspace.ts` · `services/rebaja-mora.ts` · cartera `POST /mora/condonar-parcial` |
-| **W3** | Escalar a Jurídico con aprobación | ⏳ PR 3 | Pendiente |
+| **W3** | Escalar a Jurídico con aprobación | ✅ Hecho en el PR 3 · migraciones CRM `0081` y cartera `0024` | `solicitudes_juridico_cobros` · `routers/solicitudes-juridico.ts` · cartera `POST /buckets/creditos/:id/juridico` · estado `EN_JURIDICO` |
 | **W4** | Abono inicial dentro del convenio | ⏳ PR 4 | Pendiente |
 | **W5** | Alertas leídas por grupo + job de 30 días | ✅ Hecho en el PR 1 · tabla en `0079` | `alertas_caso_leidas_cobros` · `alertas-caso.ts` · `jobs/alertas-caso-leidas.ts` |
 
@@ -23,6 +23,8 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 > - CRM `0079_cobros_workspace_gestion_alertas.sql` (PR 1): sin ella, `createContactoCobros` falla al insertar y `getAlertasCaso` al leer las marcas.
 > - CRM `0080_cobros_workspace_rebaja_mora.sql` (PR 2): crea la tabla de solicitudes y agrega dos valores a `cobros_notif_tipo`.
 > - Cartera `drizzle/cobros-02/0023_cobros_workspace_rebaja_mora.sql` (PR 2): columna `referencia_externa` en `moras_condonaciones`. Sin ella, `POST /mora/condonar-parcial` falla.
+> - CRM `0081_cobros_workspace_juridico.sql` (PR 3): tabla de solicitudes de Jurídico y dos tipos de notificación.
+> - Cartera `drizzle/cobros-02/0024_cobros_workspace_juridico.sql` (PR 3): columna `juridico_levantada_pago_id` y el piso `EN_JURIDICO` de B5. **Sin la columna, el ORM de cartera falla al leer `creditos`** (la columna está en el schema).
 >
 > Ninguna se corrió en ninguna base.
 
@@ -176,5 +178,5 @@ Del lado contrario, **reversar un abono que sostiene un convenio está bloqueado
 ## Decisiones abiertas
 
 - W2: la aprobación de una rebaja que cartera ya no puede aplicar queda en `error_aplicacion`; hoy no hay alerta automática, solo aparece en la bandeja.
-- W3: qué pasa al salir de Jurídico (fuera de alcance del PR 3).
+- W3: Jurídico como equipo no recibe aviso propio ni tiene bandeja; hoy solo lo ven los supervisores y el asesor.
 - W4: qué pasa si contabilidad rechaza el abono después de aprobado el convenio (se decide con producto; el PR 4 bloquea la aprobación hasta validar).

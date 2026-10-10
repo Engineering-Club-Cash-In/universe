@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
+import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
@@ -409,6 +409,8 @@ export function createRevertPaymentToPending(
       // aplicado. Va dentro de la transacción, por lo mismo que allá.
       // (Sin console.log: este slice solo emite el evento estructurado
       // payment.reversal_to_pending — ver revertPaymentToPendingStructuredLogging.test.ts.)
+      // COBROS-02 W3: si este pago levantó Jurídico, el crédito vuelve a Jurídico.
+      await restaurarJuridicoSiEstePagoLoLevanto(credito_id, pago_id, tx as never);
       await restaurarRecuperacionSiEstePagoLaLevanto(
         credito_id,
         pago_id,

@@ -2998,6 +2998,51 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	// W3 (Workspace) — escalado a Jurídico (B5). Cartera clava el crédito en B5,
+	// lo saca de la cartera del asesor y deja el estado EN_JURIDICO. Un 409 con
+	// `codigo: "ya_en_juridico"` significa que ya estaba aplicado (reintento).
+	async enviarAJuridico(input: {
+		creditoId: number;
+		motivo: string;
+		usuarioEmail?: string;
+		asesorEsperadoEmail?: string;
+	}): Promise<{
+		success: boolean;
+		bucket_anterior: number;
+		bucket_nuevo: number;
+		asesor_anterior: number | null;
+		asesor_nuevo: number;
+		status_credito: string;
+	}> {
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("mora-por-etapa-asesor");
+		this.cache.invalidate("/buckets");
+		const response = await this.request<{
+			success: boolean;
+			message?: string;
+			bucket_anterior: number;
+			bucket_nuevo: number;
+			asesor_anterior: number | null;
+			asesor_nuevo: number;
+			status_credito: string;
+		}>(`/buckets/creditos/${input.creditoId}/juridico`, {
+			method: "POST",
+			body: JSON.stringify({
+				motivo: input.motivo,
+				...(input.usuarioEmail && { usuario_email: input.usuarioEmail }),
+				...(input.asesorEsperadoEmail && {
+					asesor_esperado_email: input.asesorEsperadoEmail,
+				}),
+			}),
+		});
+		if (!response?.success) {
+			throw new Error(response?.message || "cartera-back no confirmó el escalado a Jurídico");
+		}
+		return response;
+	}
+
 	// W2 (Workspace) — rebaja PARCIAL de mora aprobada por el supervisor. Cartera
 	// la descuenta de `moras_credito` y la anota como pago de mora por cuota.
 	// `referencia_externa` es el id de la solicitud: un reintento no descuenta dos

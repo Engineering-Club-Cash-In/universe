@@ -77,6 +77,10 @@ export { STATUS_EXCLUIDOS_MORA };
  */
 export const STATUS_EN_RECUPERACION = "EN_RECUPERACION";
 
+// COBROS-02 Workspace (W3): escalado a Jurídico. Piso de B5 (catálogo, migración
+// 0024). Se levanta al validarse un pago que deja el crédito sin deuda.
+export const STATUS_EN_JURIDICO = "EN_JURIDICO";
+
 /**
  * Estados que el motor NO puede PISAR al mover `statusCredit`.
  *
@@ -93,6 +97,7 @@ export type StatusCreditValor = typeof creditos.$inferSelect["statusCredit"];
 export const STATUS_NO_PISAR = [
   ...STATUS_EXCLUIDOS_MORA,
   STATUS_EN_RECUPERACION,
+  STATUS_EN_JURIDICO,
 ] as StatusCreditValor[];
 
 // CB-030 — promesa vigente para el freeze por cuota. Espejo local de una fila

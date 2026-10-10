@@ -319,6 +319,20 @@ export async function reasignarAsesorDeJuridicoSiHaceFalta(
   ejecutor: Pick<typeof db, "select" | "update" | "insert" | "execute">,
 ): Promise<boolean> {
   try {
+    const { enSavepoint } = await import("./levantarRecuperacion");
+    return await enSavepoint(ejecutor, (e) => reasignarEn(credito_id, motivo, e as never));
+  } catch (err) {
+    console.error(`[JURIDICO] ⚠️ No se pudo reasignar el asesor de B5 al crédito ${credito_id}:`, err);
+    return false;
+  }
+}
+
+async function reasignarEn(
+  credito_id: number,
+  motivo: string,
+  ejecutor: Pick<typeof db, "select" | "update" | "insert" | "execute">,
+): Promise<boolean> {
+  {
     const destino = BUCKET_JURIDICO;
     const lock = await ejecutor.execute<{ ok: boolean }>(
       sql`SELECT pg_try_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id}) AS ok`,
@@ -374,8 +388,5 @@ export async function reasignarAsesorDeJuridicoSiHaceFalta(
       usuario_id: null,
     });
     return true;
-  } catch (err) {
-    console.error(`[JURIDICO] ⚠️ No se pudo reasignar el asesor de B5 al crédito ${credito_id}:`, err);
-    return false;
   }
 }

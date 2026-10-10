@@ -28,6 +28,26 @@ import { contarCuotasVencidasReales, STATUS_EN_JURIDICO, STATUS_EN_RECUPERACION 
 type Ejecutor = Pick<typeof db, "select" | "update" | "execute">;
 
 /**
+ * Corre `trabajo` en un SAVEPOINT cuando el ejecutor es una transacción (la de la
+ * reversa). Un query que falla deja abortada la transacción de PostgreSQL aunque
+ * el JS lo atrape: sin savepoint, el "best-effort" de estos helpers rompería el
+ * commit de la reversa financiera. Con savepoint, el fallo solo deshace el
+ * trabajo opcional. Un ejecutor sin `transaction` (la conexión suelta) no lo necesita.
+ */
+export async function enSavepoint<T>(
+  ejecutor: unknown,
+  trabajo: (e: Ejecutor) => Promise<T>,
+): Promise<T> {
+  const conTransaccion = ejecutor as {
+    transaction?: (fn: (e: Ejecutor) => Promise<T>) => Promise<T>;
+  };
+  if (typeof conTransaccion.transaction === "function") {
+    return conTransaccion.transaction((sp) => trabajo(sp));
+  }
+  return trabajo(ejecutor as Ejecutor);
+}
+
+/**
  * Estados que la recuperación puede reemplazar al restaurarse.
  *
  * Son los que el levantamiento pudo haber dejado: `ACTIVO` (no debía nada) y
@@ -160,6 +180,22 @@ export async function restaurarRecuperacionSiEstePagoLaLevanto(
   ejecutor: Ejecutor = db,
 ): Promise<boolean> {
   try {
+    return await enSavepoint(ejecutor, (ejecutor) => restaurarRecuperacionEn(credito_id, pago_id, ejecutor));
+  } catch (err) {
+    console.error(
+      `[RECUPERACION] ⚠️ No se pudo devolver EN_RECUPERACION al crédito ${credito_id}:`,
+      err,
+    );
+    return false;
+  }
+}
+
+async function restaurarRecuperacionEn(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor,
+): Promise<boolean> {
+  {
     const [credito] = await ejecutor
       .select({
         statusCredit: creditos.statusCredit,
@@ -207,12 +243,6 @@ export async function restaurarRecuperacionSiEstePagoLaLevanto(
         ),
       );
     return true;
-  } catch (err) {
-    console.error(
-      `[RECUPERACION] ⚠️ No se pudo devolver EN_RECUPERACION al crédito ${credito_id}:`,
-      err,
-    );
-    return false;
   }
 }
 
@@ -229,6 +259,22 @@ export async function restaurarJuridicoSiEstePagoLoLevanto(
   ejecutor: Ejecutor = db,
 ): Promise<boolean> {
   try {
+    return await enSavepoint(ejecutor, (ejecutor) => restaurarJuridicoEn(credito_id, pago_id, ejecutor));
+  } catch (err) {
+    console.error(
+      `[JURIDICO] ⚠️ No se pudo devolver EN_JURIDICO al crédito ${credito_id}:`,
+      err,
+    );
+    return false;
+  }
+}
+
+async function restaurarJuridicoEn(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor,
+): Promise<boolean> {
+  {
     const [credito] = await ejecutor
       .select({
         statusCredit: creditos.statusCredit,
@@ -268,11 +314,5 @@ export async function restaurarJuridicoSiEstePagoLoLevanto(
       ejecutor as never,
     );
     return true;
-  } catch (err) {
-    console.error(
-      `[JURIDICO] ⚠️ No se pudo devolver EN_JURIDICO al crédito ${credito_id}:`,
-      err,
-    );
-    return false;
   }
 }

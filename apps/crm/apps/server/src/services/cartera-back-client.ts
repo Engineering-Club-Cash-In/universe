@@ -356,6 +356,13 @@ export function leerTimeoutConsultaMora(crudo: string | undefined): number {
 }
 
 /**
+ * Presupuesto del envío a Jurídico (autenticación + fetch). Tiene que ser menor
+ * que el umbral con el que el job devuelve a `error_aplicacion` una aprobación
+ * colgada (10 min), para que una llamada vencida nunca pueda despacharse después.
+ */
+const ENVIO_JURIDICO_PRESUPUESTO_MS = 120_000;
+
+/**
  * Corre `tarea` con un presupuesto que cubre TODO lo que hay entre la llamada y
  * la respuesta, autenticación incluida.
  *
@@ -3019,7 +3026,25 @@ export class CarteraBackClient {
 		this.cache.invalidate("stats");
 		this.cache.invalidate("mora-por-etapa-asesor");
 		this.cache.invalidate("/buckets");
-		const response = await this.request<{
+		// Presupuesto de TODA la operación, autenticación incluida: el timeout de
+		// `request()` arranca después de esperar el token. Sin esto, un auth colgado
+		// más allá del umbral de aprobaciones colgadas (10 min) dejaba que el job
+		// devolviera la solicitud a `error_aplicacion`, que un supervisor la
+		// rechazara, y que el escalado se despachara igual al volver el token. Al
+		// vencer, la señal abortada impide que la llamada rezagada llegue a cartera.
+		const control = new AbortController();
+		let temporizador: ReturnType<typeof setTimeout> | undefined;
+		const vencimiento = new Promise<never>((_, rechazar) => {
+			temporizador = setTimeout(() => {
+				control.abort();
+				rechazar(
+					new Error(
+						`cartera-back no respondió el escalado a Jurídico en ${ENVIO_JURIDICO_PRESUPUESTO_MS}ms`,
+					),
+				);
+			}, ENVIO_JURIDICO_PRESUPUESTO_MS);
+		});
+		let response: {
 			success: boolean;
 			message?: string;
 			bucket_anterior: number;
@@ -3027,16 +3052,28 @@ export class CarteraBackClient {
 			asesor_anterior: number | null;
 			asesor_nuevo: number;
 			status_credito: string;
-		}>(`/buckets/creditos/${input.creditoId}/juridico`, {
-			method: "POST",
-			body: JSON.stringify({
-				motivo: input.motivo,
-				...(input.usuarioEmail && { usuario_email: input.usuarioEmail }),
-				...(input.asesorEsperadoEmail && {
-					asesor_esperado_email: input.asesorEsperadoEmail,
-				}),
-			}),
-		});
+		};
+		try {
+			response = await Promise.race([
+				this.request<typeof response>(
+					`/buckets/creditos/${input.creditoId}/juridico`,
+					{
+						method: "POST",
+						signal: control.signal,
+						body: JSON.stringify({
+							motivo: input.motivo,
+							...(input.usuarioEmail && { usuario_email: input.usuarioEmail }),
+							...(input.asesorEsperadoEmail && {
+								asesor_esperado_email: input.asesorEsperadoEmail,
+							}),
+						}),
+					},
+				),
+				vencimiento,
+			]);
+		} finally {
+			clearTimeout(temporizador);
+		}
 		if (!response?.success) {
 			throw new Error(response?.message || "cartera-back no confirmó el escalado a Jurídico");
 		}

@@ -3553,7 +3553,10 @@ export const cobrosRouter = {
 			if (
 				statusCredit !== "ACTIVO" &&
 				statusCredit !== "MOROSO" &&
-				statusCredit !== "EN_RECUPERACION"
+				statusCredit !== "EN_RECUPERACION" &&
+				// COBROS-02 W3: un crédito escalado a Jurídico también puede negociar;
+				// el convenio no levanta el piso (se guarda el estado previo).
+				statusCredit !== "EN_JURIDICO"
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `No se puede crear un convenio sobre un crédito ${statusCredit}`,

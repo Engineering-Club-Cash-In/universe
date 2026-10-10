@@ -13,13 +13,18 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | Tarea | Qué es | Estado | Dónde quedó |
 | --- | --- | --- | --- |
 | **W1** | Datos de la gestión (dirección, participante, teléfono contactado) | ✅ Hecho en el PR 1 · migración `0079` (CRM) | `contactos_cobros` · `createContactoCobros` · `getHistorialContactos(Paginado)` |
-| **W2** | Solicitud de rebaja de mora con aprobación | ⏳ PR 2 | Pendiente |
+| **W2** | Solicitud de rebaja de mora con aprobación | ✅ Hecho en el PR 2 · migraciones CRM `0080` y cartera `0023` | `solicitudes_rebaja_mora_cobros` · `routers/solicitudes-workspace.ts` · `services/rebaja-mora.ts` · cartera `POST /mora/condonar-parcial` |
 | **W3** | Escalar a Jurídico con aprobación | ⏳ PR 3 | Pendiente |
 | **W4** | Abono inicial dentro del convenio | ⏳ PR 4 | Pendiente |
 | **W5** | Alertas leídas por grupo + job de 30 días | ✅ Hecho en el PR 1 · tabla en `0079` | `alertas_caso_leidas_cobros` · `alertas-caso.ts` · `jobs/alertas-caso-leidas.ts` |
 
 > [!WARNING]
-> **La migración `0079_cobros_workspace_gestion_alertas.sql` hay que correrla (idempotente) antes de desplegar el server del CRM.** Sin ella, `createContactoCobros` falla al insertar (`direccion_contacto`, `participante_nombre`, `telefono_contactado`) y `getAlertasCaso` falla al leer las marcas. No se corrió en ninguna base desde este PR.
+> **Migraciones a correr (idempotentes) antes de desplegar, en este orden:**
+> - CRM `0079_cobros_workspace_gestion_alertas.sql` (PR 1): sin ella, `createContactoCobros` falla al insertar y `getAlertasCaso` al leer las marcas.
+> - CRM `0080_cobros_workspace_rebaja_mora.sql` (PR 2): crea la tabla de solicitudes y agrega dos valores a `cobros_notif_tipo`.
+> - Cartera `drizzle/cobros-02/0023_cobros_workspace_rebaja_mora.sql` (PR 2): columna `referencia_externa` en `moras_condonaciones`. Sin ella, `POST /mora/condonar-parcial` falla.
+>
+> Ninguna se corrió en ninguna base.
 
 ---
 
@@ -73,8 +78,103 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - **W1**: pintar «Llamada entrante», «Habló con: X (codeudor)» y el teléfono contactado en la línea de tiempo (`workspace/contexto-caso.tsx`, `routes/cobros/$id.tsx`).
 - **W5**: habilitar «Marcar como leída» y «Ver alertas leídas» (`contexto-caso.tsx`, `routes/cobros/$id.tsx`). Quitar el prefijo `alerta-` del id antes de llamar a `marcarAlertaCasoLeida`.
 - **W2 a W4**: formularios y bloques «Pronto» (`gestion/acciones.ts`, `convenio-modal.tsx`) y los tipos nuevos en la bandeja de solicitudes.
+- **W2 · Asesor**: el asesor lee las rebajas de su caso con `getSolicitudesRebajaMoraDelCaso` (`casoCobroId`; recupera el id para `cancelarSolicitudRebajaMora` y ve la bitácora). `getSolicitudesRebajaMora` sigue siendo solo del supervisor.
+
+### W2 · Rebaja de mora
+
+- **Schema** (`db/schema/cobros.ts`, `solicitudesRebajaMoraCobros`): una solicitud abierta por caso (índice único sobre `pendiente`, `aprobada`, `error_aplicacion`). CHECK: `0 < monto ≤ mora_snapshot`.
+- **Estados**: `pendiente` → `aprobada` (en proceso) → `aplicada`. `error_aplicacion` si cartera no la aplicó: se reintenta o se rechaza. `rechazada` y `cancelada` cierran.
+- **Pedir** (`solicitarRebajaMora`, asesor): la mora se lee EN VIVO de cartera, sin cache; el monto no puede pasar de la mora. Avisa a los supervisores que la pueden decidir (todos menos quien la pidió).
+- **Decidir** (`decidirSolicitudRebajaMora`, supervisor): cuatro ojos (quien la pidió no la decide). Antes de aprobar, vuelve a leer la mora: si ya no alcanza, no aprueba (CONFLICT) y el supervisor la rechaza. Aprobar llama a cartera con el id de la solicitud como `referencia_externa`: un reintento no descuenta dos veces.
+- **Cartera** (`condonarMoraParcial`, `POST /mora/condonar-parcial`): descuenta solo el monto (a diferencia de `condonarMora`, que deja la mora en 0 y la desactiva). Anota la rebaja por cuota como pago de mora, para que el cron no la vuelva a cobrar. No cambia el estado del crédito. Gate: cuenta de servicio del CRM (`CRM_SERVICE_USER_ID`, con el correo de quien aprobó en `usuario_email`) o ADMIN.
+- **Bitácora**: la propia fila de la solicitud (quién pidió, cuánta mora había, qué se rebajó, quién resolvió, nota). El historial de «Otras gestiones» la mostrará cuando el front la lea (pendiente de front).
+- **Cancelar**: solo quien la pidió o un supervisor, y solo mientras está `pendiente`.
+
+#### Correcciones posteriores (revisión de la rebaja)
+
+- **Estado con régimen propio.** Cartera rechaza la rebaja en `EN_CONVENIO`, `INCOBRABLE`, `CANCELADO`, `PENDIENTE_CANCELACION` y `CAIDO` (`lib/condonacion-parcial.ts`). El CRM lo valida también al pedir y al aprobar, para no pedir lo que cartera va a rechazar.
+- **Lo devengado por cuota tiene que alcanzar.** Antes de tocar `monto_mora`, cartera calcula la anotación por cuota. Si lo anotable no cubre el monto, responde `excede_devengado` y no descuenta nada. Así `monto_mora` y el recálculo del cron no se desfasan.
+- **Clasificación de fallos** (`lib/rebaja-mora-reglas.ts`, `clasificarErrorCartera`):
+  - *Definitivo* (la solicitud pasa a `rechazada` con el motivo de cartera, y el asesor lo ve): mora insuficiente, `excede_devengado`, `estado_no_permitido`, sin mora activa, y cualquier otro 4xx de negocio.
+  - *Transitorio* (queda en `error_aplicacion` y se puede repetir la aprobación): red o timeout, 5xx, 408, 429, 401/403 (configuración), 404 sin código (endpoint que no existe) y `usuario_no_encontrado` (el supervisor no tiene usuario en cartera).
+- **`aprobada` ya no se reclama.** Solo `pendiente` y `error_aplicacion` se pueden aprobar; `aprobada` es el estado en vuelo de quien reclamó. Los cierres del reclamo están acotados: `rechazada` y `error_aplicacion` solo salen de `aprobada`, y `aplicada` solo de `aprobada` o `error_aplicacion`, así una aprobación lenta no pisa un cierre final.
+- **Reintento idempotente.** Si `referencia_externa` ya estaba aplicada, cartera devuelve el `condonacion_id` original y la mora vigente, para que el CRM no pierda el vínculo de auditoría.
+- **Rechazar desde `error_aplicacion` se concilia primero.** Tras un timeout cartera pudo descontar igual. Antes de cerrar como `rechazada`, el CRM consulta `GET /mora/condonar-parcial/:referencia` (solo lectura, mismo gate que el POST): si ya estaba aplicada, la solicitud pasa a `aplicada` y el rechazo se corta con CONFLICT; si cartera no responde, no se rechaza (503).
+- **Historial de mora.** La rebaja parcial viaja como `CONDONACION`; el historial compuesto (`consultaMoraPolicy.ts`) muestra lo rebajado (`monto_anterior - monto_nuevo`) y no la toma como mora cerrada. La condonación total sigue igual.
+- **Bandeja.** `getSolicitudesRebajaMora` ordena abiertas primero y luego por fecha, para que el `limite` no deje fuera una solicitud que espera acción.
+- **Plazo de la aplicación.** La llamada a cartera lleva un plazo propio de 3 min (`PLAZO_APLICACION_REBAJA_MS`, token + POST), muy por debajo de los 10 min del job de colgadas: si la autenticación se cuelga, el POST ya no se despacha tarde y el job no reclama una aprobación todavía viva. Si aun así la fila ya estaba cerrada cuando cartera confirma, no se avisa como aplicada: responde CONFLICT para conciliar. Las cachés de crédito/stats se invalidan también si la respuesta se pierde (`finally`).
+- **Handler en vuelo en cartera.** La rebaja parcial espera el lock del crédito como máximo 60 s (`withPaymentAdvisoryLock` con `esperaMaximaMs`; vencido responde 503 `ocupado`, transitorio) y limita a 30 s los candados de fila de su transacción. La consulta de conciliación toma ese mismo lock (20 s) y recibe `credito_id`: si un handler está dentro, espera a que termine y ve su insert; si no obtiene el lock responde 503 y el CRM no rechaza. Así, cuando el job expone la fila (10 min), el handler ya terminó o ya no puede confirmar.
+- **Lectura por caso.** `getSolicitudesRebajaMoraDelCaso` (`cobrosProcedure` + `assertAccesoCasoCobro`) devuelve las solicitudes del caso al asesor; comparte la consulta con la bandeja del supervisor.
+- **Alerta de aprobación.** `rebaja_pendiente_aprobacion` entra a `COBROS_TIPO_RESOLUCION_BLOQUEADA`: la alerta no se resuelve ni descarta a mano, solo al decidir o cancelar la solicitud.
+- **Conciliación al rechazar.** Al marcarla `aplicada` se limpia la nota del error transitorio y el aviso al asesor atribuye la aprobación a quien la aprobó (`resueltoPor`), no a quien intentó rechazar.
+- **Plazo del lock incluye el pool.** El plazo de `esperaMaximaMs` corre desde antes de pedir la conexión al pool dedicado de locks (`conectarAntesDe`): un pool saturado ya no deja un handler en cola más allá del umbral del CRM; la conexión que llegue tarde se devuelve sola.
+- **`getSolicitudesRebajaMoraDelCaso` exportado** en `routers/index.ts` (`cobrosAppRouter`), para que el front lo pueda llamar.
+- **Reintento idempotente conserva al aprobador.** Si cartera responde `ya_aplicada`, la solicitud conserva el `resueltoPor` y `resueltoEn` originales y el aviso al asesor nombra a quien aprobó, no a quien reintentó; la nota del reintento no se le atribuye.
+- **Todo antes de escribir va dentro del lock.** La búsqueda del usuario de `condonarMoraParcial` pasó adentro del candado con plazo, y antes de escribir se revisa si el cliente cortó la llamada (`request.signal`): un handler vencido o abandonado responde 503 sin escribir.
+- **Reintento desde `error_aplicacion` concilia primero.** Al aprobar de nuevo, el CRM pregunta a cartera por la referencia antes de validar la mora viva; si ya estaba aplicada, la cierra como `aplicada` (con el aprobador original) en vez de rechazar el reintento contra la mora ya rebajada. Mismo helper que usa el rechazo.
+- **Lock obtenido tarde.** `sondearLockAntesDe` revisa el plazo también tras un intento exitoso: si el lock llegó vencido el plazo, lo suelta y lanza el timeout, sin ejecutar la operación.
+- **La referencia tiene que coincidir.** Cartera solo responde `ya_aplicada` si la `referencia_externa` pertenece al mismo crédito y monto; si no, responde 409 `referencia_en_conflicto` (el CRM lo trata como definitivo) y no toca nada. La consulta de conciliación aplica el mismo criterio (crédito y monto) y devuelve `aplicada: false` si no coinciden.
+- **Solicitar exige crédito de cartera.** `solicitarRebajaMora` valida `creditoId` antes de crear la solicitud: sin él nunca se podría aprobar y la solicitud abierta bloquearía a las siguientes.
+- **Alerta de aprobación interrumpida.** Se inserta bajo candado de la fila y solo si la solicitud sigue en `error_aplicacion`, como la alerta de pendiente.
+- **Rebaja que agota la mora.** Si `monto` es igual a la mora, es una condonación total: cartera cierra la mora (`activa = false`, monto 0) y pasa el crédito a ACTIVO salvo los estados de `STATUS_NO_PISAR`, igual que `condonarMora`. Antes quedaba una mora activa en 0 que seguía bloqueando al cliente hasta el cron.
+- **Doble envío.** Dos solicitudes simultáneas del mismo caso: la que pierde la carrera del índice único recibe el mismo CONFLICT («ya tiene una solicitud abierta») y no un error interno.
+- **Lock que no se pudo soltar.** Un advisory lock es de sesión: si el unlock falla (lock tardío o liberación normal), la conexión se destruye (`release(true)`) en vez de volver al pool, para no dejar el lock del crédito tomado y bloqueando pagos.
+- **Aprobaciones colgadas.** Si el proceso se cae entre el reclamo (`aprobada`) y la respuesta de cartera, el job `rebajasMoraColgadas` (cada 5 min) las pasa a `error_aplicacion` y avisa a los supervisores. Repetir la aprobación es seguro: cartera no descuenta dos veces por `referencia_externa`.
+
+**Requisito de despliegue (rebaja):** el CRM llama a `/mora/condonar-parcial` con la cuenta de servicio. Para que pase el gate, hay que definir `CRM_SERVICE_USER_ID` en cartera (el id de esa cuenta en `platform_users`). Si falta, cartera avisa al arrancar y las aprobaciones responden 403; el CRM las deja en `error_aplicacion` con el motivo de configuración, no las rechaza.
+
+**Pruebas de la rebaja:**
+- Cartera: `lib/condonacion-parcial.test.ts` (estados con régimen propio).
+- CRM: `lib/rebaja-mora-reglas.test.ts` (15 pruebas: montos en centavos, clasificación de cada tipo de fallo, criterio de aprobación colgada).
+- **Pendiente:** QA contra dev del flujo completo (pedir, aprobar, reintentar tras cortar la respuesta de cartera, rechazo definitivo por mora insuficiente, y que el cron no vuelva a cobrar lo rebajado al día siguiente).
+
+**Sin resolver a propósito:** no hay reversa de una rebaja ya aplicada (habría que corregir a mano en cartera), y la bitácora se muestra en «Otras gestiones» solo cuando el front la lea.
+
+### W3 · Escalar a Jurídico
+
+- **Schema CRM** (`solicitudesJuridicoCobros`): motivo (`no_contacto` | `no_quiere_pagar` | `sin_acuerdo`), nota para Jurídico (mínimo 10 caracteres), bucket que tenía al pedir. Una solicitud abierta por caso.
+- **Pedir** (`solicitarEscalarJuridico`): solo desde B3 o B4 (cartera vuelve a validarlo). Avisa a los supervisores.
+- **Decidir** (`decidirSolicitudJuridico`): cuatro ojos. Aprobar llama a cartera. Un 409 `ya_en_juridico` cuenta como aplicado (reintento). Un 4xx de cartera es definitivo (`error_aplicacion`, no se reintenta solo); un 5xx o de red se puede reintentar.
+- **Cartera** (`enviarAJuridico`, `POST /buckets/creditos/:id/juridico`): mismo mecanismo que la recuperación de vehículo. Locks sin esperar, fila `buckets_historial` (`API_MANUAL`), estado `EN_JURIDICO` en la misma transacción, y el caso sale de la cartera del asesor: se elige un asesor del pool de B5 distinto del actual (menor carga). Falla si el pool de B5 no tiene otro asesor activo. Reglas puras en `lib/buckets-juridico.ts` (pruebas en `lib/buckets-juridico.test.ts`).
+- **Piso**: `EN_JURIDICO` es piso de B5 (`buckets.estados_piso`, migración 0024). El motor no baja el crédito de B5 mientras esté; sí lo sube si la mora lo pide.
+- **Salida (decisión de negocio, 2026-10-09)**: como la recuperación, el estado se levanta solo cuando un pago validado deja al crédito sin cuotas vencidas ni mora (`levantarRecuperacionSiPagoTodo` atiende ahora `EN_JURIDICO`). Si ese pago se reversa, el crédito vuelve a Jurídico (`restaurarJuridicoSiEstePagoLoLevanto`, marca `juridico_levantada_pago_id`).
+- **Contradice** la decisión 6 del [doc 08](./08-plan-convenios-y-recuperacion.md): ahora sí hay un camino manual a Jurídico, con aprobación del supervisor.
+- **Pendiente**: Jurídico no recibe aviso propio todavía (la nota queda en la solicitud y en el aviso a supervisores). Y la bandeja de Jurídico como equipo no está definida.
+
+### W4 · Abono inicial en el convenio
+
+**Decisión (2026-10-09, con José): el abono es un pago normal que se valida ANTES de crear el convenio.** No se crea un pago pendiente ligado al convenio ni se toca la validación de pagos. El flujo queda así:
+
+1. El asesor registra el abono con su comprobante («Registrar comprobante de pago»). Cartera lo recibe como pago normal.
+2. Contabilidad valida el comprobante.
+3. El asesor crea el convenio con el `pago_id` del abono (`abonoInicialPagoId`). El total que llega ya es el remanente, porque el abono ya bajó cuotas y mora al aplicarse.
+
+**Hay que validarlo bien.** Cartera comprueba antes de crear nada (`createPaymentAgreement`, reglas en `lib/convenio-abono-inicial.ts`):
+
+- El pago existe y es de **este** crédito.
+- Su `validation_status` es `validated` o `capital_validated`. Un comprobante pendiente, en reset o sin validar no sirve.
+- Su monto es mayor que cero.
+- Su fecha es **hoy** (día de Guatemala). Esto sale del texto del Workspace («si el cliente abonó ese día»).
+- No sirvió ya a otro convenio: índice único sobre `abono_inicial_pago_id`.
+
+Del lado contrario, **reversar un abono que sostiene un convenio está bloqueado** (`reversePayment` y `revertPaymentToPending`, con `[ABONO_INICIAL_DE_CONVENIO]`): hay que anular el convenio primero. Así no queda un convenio sin plata que lo respalde.
+
+**Por validar antes de producción (lista de QA):**
+
+- [ ] Abono validado de hoy → el convenio se crea y `abono_inicial_pago_id` queda guardado.
+- [ ] Abono pendiente → 409 «todavía no lo valida contabilidad».
+- [ ] Abono de otro día → 409 «debe ser de hoy».
+- [ ] Abono de otro crédito → 400.
+- [ ] El mismo abono en un segundo convenio → 409 «ya sirvió para otro convenio».
+- [ ] Reversar el abono de un convenio → 409 con el mensaje de anular el convenio primero.
+- [ ] Un convenio creado con abono aparece igual que los demás (aprobación del supervisor, historial de decisiones).
+
+**Pendiente de decisión:** la regla «de hoy» hace que, si contabilidad valida al día siguiente, el asesor tenga que registrar el abono de nuevo. Si esto les pesa en la operación, hay que pasarla a una ventana de días (un cambio de una línea en `lib/convenio-abono-inicial.ts`).
+
+**Pendiente de front** (no se toca en este issue): el bloque «Abono inicial» de `convenio-modal.tsx` debe encadenar el registro del comprobante y mandar `abonoInicialPagoId` con el `pago_id` que devuelve `registrarPagoCompleto`.
 
 ## Decisiones abiertas
 
+- W2: la aprobación de una rebaja que cartera ya no puede aplicar queda en `error_aplicacion`; hoy no hay alerta automática, solo aparece en la bandeja.
 - W3: qué pasa al salir de Jurídico (fuera de alcance del PR 3).
 - W4: qué pasa si contabilidad rechaza el abono después de aprobado el convenio (se decide con producto; el PR 4 bloquea la aprobación hasta validar).

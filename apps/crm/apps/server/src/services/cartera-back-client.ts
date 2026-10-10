@@ -2998,6 +2998,107 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
+	// W2 (Workspace) — rebaja PARCIAL de mora aprobada por el supervisor. Cartera
+	// la descuenta de `moras_credito` y la anota como pago de mora por cuota.
+	// `referencia_externa` es el id de la solicitud: un reintento no descuenta dos
+	// veces. Un 409 con `kind: "excede_mora"` llega como CarteraBackHttpError con
+	// `payload.kind`: el caller decide si es definitivo.
+	async condonarMoraParcial(input: {
+		creditoId: number;
+		monto: string;
+		motivo: string;
+		usuarioEmail: string;
+		referenciaExterna: string;
+		/**
+		 * Plazo de TODA la operación. El timeout del fetch arranca después de
+		 * obtener el token: sin esta señal, una autenticación colgada deja el POST
+		 * por despacharse mucho después de que el CRM dio la aplicación por perdida.
+		 */
+		signal?: AbortSignal;
+	}): Promise<{
+		success: true;
+		kind: "ok" | "ya_aplicada";
+		condonacion_id?: number;
+		mora_nueva?: string;
+	}> {
+		// La invalidación va en `finally`: si la respuesta se pierde (timeout, corte)
+		// cartera pudo haber commiteado la rebaja igual, y lo cacheado con la mora
+		// vieja no puede quedar sirviéndose hasta que expire.
+		let response: {
+			success: boolean;
+			kind?: "ok" | "ya_aplicada";
+			condonacion_id?: number;
+			mora_nueva?: string;
+			message?: string;
+		};
+		try {
+			response = await this.request<{
+				success: boolean;
+				kind?: "ok" | "ya_aplicada";
+				condonacion_id?: number;
+				mora_nueva?: string;
+				message?: string;
+			}>("/mora/condonar-parcial", {
+				method: "POST",
+				signal: input.signal,
+				body: JSON.stringify({
+					credito_id: input.creditoId,
+					monto: input.monto,
+					motivo: input.motivo,
+					usuario_email: input.usuarioEmail,
+					referencia_externa: input.referenciaExterna,
+				}),
+			});
+		} finally {
+			this.cache.invalidate("/credito?");
+			this.cache.invalidate("getAllCredits");
+			this.cache.invalidate("stats");
+		}
+		if (!response?.success || !response.kind) {
+			throw new Error(
+				response?.message || "cartera-back no confirmó la rebaja de mora",
+			);
+		}
+		return {
+			success: true,
+			kind: response.kind,
+			condonacion_id: response.condonacion_id,
+			mora_nueva: response.mora_nueva,
+		};
+	}
+
+	// W2 — ¿cartera ya aplicó la rebaja con esta referencia? Se usa antes de
+	// rechazar una solicitud en `error_aplicacion`: tras un timeout la rebaja pudo
+	// descontarse igual. Lectura, sin cache.
+	async consultarRebajaMoraParcial(
+		creditoId: number,
+		referenciaExterna: string,
+		monto?: string,
+	): Promise<{
+		aplicada: boolean;
+		condonacionId: number | null;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			aplicada?: boolean;
+			condonacion_id?: number;
+			message?: string;
+		}>(
+			`/mora/condonar-parcial/${encodeURIComponent(referenciaExterna)}?credito_id=${creditoId}${monto ? `&monto=${encodeURIComponent(monto)}` : ""}`,
+			{ method: "GET" },
+			false,
+		);
+		if (!response?.success || typeof response.aplicada !== "boolean") {
+			throw new Error(
+				response?.message || "cartera-back no confirmó el estado de la rebaja",
+			);
+		}
+		return {
+			aplicada: response.aplicada,
+			condonacionId: response.condonacion_id ?? null,
+		};
+	}
+
 	// CB-033 — aprobar/rechazar un convenio pendiente. `operacion_id` viaja
 	// desde el caller (nunca se genera acá): es la clave de la idempotencia,
 	// y generarlo en el server por llamada no protegería un reintento del

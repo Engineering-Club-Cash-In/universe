@@ -614,6 +614,7 @@ export function montoDeMorasCerradas(
     tipo_evento: string;
     mora_id?: number | null;
     monto_anterior?: string | number | null;
+    monto_nuevo?: string | number | null;
   }>
 ): Map<number, string> {
   const ultimo = new Map<number, { fecha: string; monto: string }>();
@@ -628,6 +629,9 @@ export function montoDeMorasCerradas(
     )
       continue;
     if (fila.mora_id === null || fila.mora_id === undefined) continue;
+    // Una rebaja parcial (CONDONACION que deja monto_nuevo > 0) no cierra la
+    // mora: su monto_anterior no es lo que debía al cerrarse.
+    if (fila.tipo_evento === "CONDONACION" && esRebajaParcial(fila)) continue;
 
     const fecha = aISO(fila.fecha);
     const previo = ultimo.get(fila.mora_id);
@@ -660,14 +664,18 @@ export function construirHistorialMora(
   const eventos: EventoHistorialMora[] = [
     ...fuentes.eventos.map((fila) => ({
       fecha: aISO(fila.fecha),
-      // En la CONDONACION el monto que importa es lo condonado: latefee deja
-      // monto_nuevo en 0 y el original viaja en monto_anterior. Con
-      // monto_nuevo, la fila decía "condonación de 0".
-      monto: aMonto(
-        fila.tipo_evento === "CONDONACION" && fila.monto_anterior != null
-          ? fila.monto_anterior
-          : fila.monto_nuevo
-      ),
+      // En la CONDONACION el monto que importa es lo condonado: la total deja
+      // monto_nuevo en 0 y el original viaja en monto_anterior; la rebaja
+      // parcial deja el resto en monto_nuevo, y lo condonado es la diferencia.
+      // Con monto_nuevo, la fila decía "condonación de 0".
+      monto:
+        fila.tipo_evento === "CONDONACION" && esRebajaParcial(fila)
+          ? montoRebajado(fila.monto_anterior, fila.monto_nuevo)
+          : aMonto(
+              fila.tipo_evento === "CONDONACION" && fila.monto_anterior != null
+                ? fila.monto_anterior
+                : fila.monto_nuevo
+            ),
       numeroCreditoSifco: fila.numeroCreditoSifco,
       evento: fila.tipo_evento,
     })),
@@ -793,6 +801,28 @@ function aISO(fecha: Date | string): string {
   // conserva el comportamiento anterior (reventar) en lugar de inventar una
   // fecha: un evento de mora fechado en falso es peor que un error visible.
   return (instante ?? new Date(fecha as string)).toISOString();
+}
+
+/** CONDONACION que dejó mora viva: `monto_nuevo` > 0 (la total la deja en 0). */
+function esRebajaParcial(fila: {
+  monto_anterior?: string | number | null;
+  monto_nuevo?: string | number | null;
+}): boolean {
+  return (
+    fila.monto_anterior != null &&
+    fila.monto_nuevo != null &&
+    Number(fila.monto_nuevo) > 0
+  );
+}
+
+/** Lo rebajado = monto_anterior - monto_nuevo, en centavos enteros. */
+function montoRebajado(
+  anterior: string | number | null | undefined,
+  nuevo: string | number | null | undefined
+): string {
+  const centavos =
+    Math.round(Number(anterior) * 100) - Math.round(Number(nuevo) * 100);
+  return (centavos / 100).toFixed(2);
 }
 
 function aMonto(monto: string | number | null | undefined): string {

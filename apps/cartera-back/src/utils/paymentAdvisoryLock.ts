@@ -1,8 +1,18 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { lockPool } from "../database";
 import { CARTERA_SCHEMA } from "../database/db/schema";
+import {
+  conectarAntesDe,
+  PaymentAdvisoryLockTimeoutError,
+  sondearLockAntesDe,
+} from "./paymentAdvisoryLockPlazo";
+
+export { PaymentAdvisoryLockTimeoutError };
 
 export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
+
+/** Pausa entre intentos de `pg_try_advisory_lock` cuando hay plazo de espera. */
+const PAUSA_ENTRE_INTENTOS_MS = 100;
 
 /**
  * Créditos cuyo lock ya sostiene la cadena async actual. Hace el lock
@@ -22,7 +32,8 @@ const locksDeLaCadena = new AsyncLocalStorage<
 
 export type PaymentAdvisoryLockConnection = {
   query: (text: string, values?: unknown[]) => Promise<unknown>;
-  release: () => void;
+  /** `true` = destruir la conexión en vez de devolverla al pool (conserva locks de sesión). */
+  release: (descartar?: boolean) => void;
 };
 
 declare const paymentLockBrand: unique symbol;
@@ -76,7 +87,15 @@ export async function withPaymentBindingLock<T>(
  */
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
-  fn: (lock: PaymentAdvisoryLock) => Promise<T>
+  fn: (lock: PaymentAdvisoryLock) => Promise<T>,
+  /**
+   * `esperaMaximaMs`: sin él se espera sin límite (lo normal). Con él se sondea
+   * con `pg_try_advisory_lock` y, vencido el plazo, se lanza
+   * `PaymentAdvisoryLockTimeoutError` SIN haber ejecutado `fn`. Es para quien
+   * tiene un cliente que da por perdida la llamada: un handler que sigue en la
+   * cola del lock no puede confirmar su escritura horas después.
+   */
+  opciones?: { esperaMaximaMs?: number }
 ): Promise<T> {
   const yaSostenidos = locksDeLaCadena.getStore();
   const lockHeredado = yaSostenidos?.get(credito_id);
@@ -84,28 +103,65 @@ export async function withPaymentAdvisoryLock<T>(
     // Reentrada: esta misma cadena ya tiene el lock del crédito.
     return fn(lockHeredado);
   }
-  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  // El plazo corre desde ACÁ: pedir la conexión al pool dedicado también espera
+  // (diez conexiones, sin timeout propio) y cuenta dentro de `esperaMaximaMs`.
+  const limite =
+    opciones?.esperaMaximaMs === undefined ? null : Date.now() + opciones.esperaMaximaMs;
+  const lockConn: PaymentAdvisoryLockConnection =
+    limite === null
+      ? await lockPool.connect()
+      : await conectarAntesDe(
+          () => lockPool.connect() as Promise<PaymentAdvisoryLockConnection>,
+          credito_id,
+          limite,
+          opciones?.esperaMaximaMs ?? 0,
+        );
   const lock = {} as PaymentAdvisoryLock;
+  let tomado = false;
+  let descartarConexion = false;
   try {
-    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAYMENT_ADVISORY_LOCK_NAMESPACE,
-      credito_id,
-    ]);
+    if (limite === null) {
+      await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+      ]);
+    } else {
+      await sondearLockAntesDe(
+        lockConn,
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+        limite,
+        opciones?.esperaMaximaMs ?? 0,
+        PAUSA_ENTRE_INTENTOS_MS,
+      );
+    }
+    tomado = true;
     heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });
     const sostenidos = new Map(yaSostenidos ?? []);
     sostenidos.set(credito_id, lock);
     return await locksDeLaCadena.run(sostenidos, () => fn(lock));
+  } catch (error) {
+    if (error instanceof PaymentAdvisoryLockTimeoutError && error.conexionDescartable) {
+      descartarConexion = true;
+    }
+    throw error;
   } finally {
     heldPaymentLocks.delete(lock);
-    try {
-      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
-        PAYMENT_ADVISORY_LOCK_NAMESPACE,
-        credito_id,
-      ]);
-    } catch (unlockError) {
-      console.error("⚠️ Error liberando advisory lock:", unlockError);
+    if (tomado || limite === null) {
+      try {
+        await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+          PAYMENT_ADVISORY_LOCK_NAMESPACE,
+          credito_id,
+        ]);
+      } catch (unlockError) {
+        descartarConexion = true;
+        console.error("⚠️ Error liberando advisory lock:", unlockError);
+      }
     }
-    lockConn.release();
+    // Un advisory lock es de sesión: si no se pudo soltar, devolver la conexión al
+    // pool dejaría el lock del crédito tomado para siempre. Se destruye.
+    if (descartarConexion) lockConn.release(true);
+    else lockConn.release();
   }
 }
 
@@ -133,6 +189,7 @@ export async function tryWithPaymentAdvisoryLock<T>(
 ): Promise<{ obtenido: true; valor: T } | { obtenido: false }> {
   const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
   let obtenido = false;
+  let descartar = false;
 
   try {
     const res = (await lockConn.query(
@@ -152,10 +209,12 @@ export async function tryWithPaymentAdvisoryLock<T>(
           credito_id,
         ]);
       } catch (unlockError) {
+        descartar = true;
         console.error("⚠️ Error liberando advisory lock:", unlockError);
       }
     }
-    lockConn.release();
+    if (descartar) lockConn.release(true);
+    else lockConn.release();
   }
 }
 

@@ -49,6 +49,7 @@ import {
 import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { correrAlertasCasoAntiguasLeidas } from "./jobs/alertas-caso-leidas";
+import { correrRebajasMoraColgadas } from "./jobs/rebajas-mora-colgadas";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import {
@@ -2143,6 +2144,10 @@ const JOBS_PROGRAMADOS = {
 	 *  cuya última repetición tiene más de 30 días. Solo toca
 	 *  `alertas_caso_leidas_cobros`; no cambia las notificaciones. Idempotente. */
 	alertasCasoAntiguasLeidas: true,
+	/** W2 (Workspace): devuelve a error_aplicacion las rebajas de mora aprobadas
+	 *  que se quedaron en `aprobada` (se cayó el proceso antes de la respuesta de
+	 *  cartera) y avisa a los supervisores. Cada 5 min; idempotente. */
+	rebajasMoraColgadas: true,
 	/** Interno: espejo de promesas hacia cartera (CB-030, 23:30 GT). Va con
 	 *  promesasYSnapshots — es la misma cadena. */
 	syncPromesasCartera: true,
@@ -2626,6 +2631,12 @@ if (HAY_JOBS_ACTIVOS) {
 			);
 		}
 	}, 20_000);
+
+	// W2: aprobaciones de rebaja de mora interrumpidas → error_aplicacion (cada 5 min).
+	if (JOBS_PROGRAMADOS.rebajasMoraColgadas) {
+		void correrRebajasMoraColgadas();
+		setInterval(correrRebajasMoraColgadas, 5 * 60 * 1000);
+	}
 
 	// W5: alertas del caso sin repetición en 30 días, leídas por destinatario.
 	// Corre al arrancar y cada 24 h; es idempotente, así que repetirlo no

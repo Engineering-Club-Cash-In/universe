@@ -3,7 +3,8 @@ import { Elysia, t } from "elysia";
  
  
 import { authMiddleware } from "./midleware";
-import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
+import { esCuentaDeServicioCRM } from "../lib/cuentaServicioCrm";
+import { createMora, updateMora, procesarMoras, condonarMora, condonarMoraParcial, consultarRebajaParcialPorReferencia, esTimeoutDeLockDeCredito, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, getBucketsCatalogo, ParametroInvalidoError } from "../controllers/latefee";
 import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel, getMoraHistorialCreditoExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
@@ -188,6 +189,66 @@ export const morasRouter = new Elysia()
       motivo: t.String(),
       usuario_email: t.Optional(t.String()),
     })
+  })
+
+  /**
+   * COBROS-02 W2 · Rebaja PARCIAL de mora aprobada por el supervisor en el CRM.
+   * Autoriza la cuenta de servicio del CRM (que manda el correo de quien aprobó
+   * en `usuario_email`) o un ADMIN de cartera, que actúa por sí mismo.
+   */
+  .post("/mora/condonar-parcial", async ({ body, user, set, request }: any) => {
+    const esCrm = esCuentaDeServicioCRM(user);
+    if (!esCrm && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
+    const actor = esCrm ? body.usuario_email : (user?.email ?? body.usuario_email);
+    if (!actor) {
+      set.status = 400;
+      return { success: false, message: "[ERROR] Falta el correo de quien aprueba la rebaja" };
+    }
+    try {
+      const result = await condonarMoraParcial({
+        credito_id: body.credito_id,
+        monto: body.monto,
+        motivo: body.motivo,
+        usuario_email: actor,
+        referencia_externa: body.referencia_externa,
+        cancelada: () => request?.signal?.aborted === true,
+      });
+      if (result.success) {
+        set.status = 200;
+      } else {
+        set.status = result.kind === "monto_invalido" ? 400 : result.kind === "not_found" || result.kind === "usuario_no_encontrado" ? 404 : result.kind === "ocupado" ? 503 : 409;
+      }
+      return result;
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo rebajar la mora", error: String(err) };
+    }
+  }, {
+    body: t.Object({
+      credito_id: t.Number(),
+      monto: t.String({ pattern: "^\\d+(\\.\\d{1,2})?$" }),
+      motivo: t.String({ minLength: 3 }),
+      referencia_externa: t.String({ minLength: 1 }),
+      usuario_email: t.Optional(t.String()),
+    })
+  })
+
+  /**
+   * COBROS-02 W2 · ¿Se aplicó ya la rebaja parcial con esta referencia? Mismo
+   * gate que el POST: cuenta de servicio del CRM o ADMIN. Solo lectura.
+   */
+  .get("/mora/condonar-parcial/:referencia", async ({ params, query, user, set }: any) => {
+    if (!esCuentaDeServicioCRM(user) && !requireRole(["ADMIN"])(user, set)) return NO_AUTORIZADO_CONDONACION;
+    try {
+      return await consultarRebajaParcialPorReferencia(Number(query.credito_id), params.referencia, query.monto);
+    } catch (err) {
+      // Sin certeza (lock ocupado, error): 503, para que el CRM no rechace.
+      set.status = esTimeoutDeLockDeCredito(err) ? 503 : 500;
+      return { success: false, message: "[ERROR] No se pudo consultar la rebaja", error: String(err) };
+    }
+  }, {
+    params: t.Object({ referencia: t.String({ minLength: 1 }) }),
+    query: t.Object({ credito_id: t.Numeric(), monto: t.Optional(t.String({ pattern: "^\\d+(\\.\\d{1,2})?$" })) }),
   })
 
   /**

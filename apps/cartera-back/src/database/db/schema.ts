@@ -2092,6 +2092,11 @@
 
     pagos_pendientes: integer("pagos_pendientes").notNull(), // Cuántos pagos faltan
 
+    // COBROS-02 W4 (migración 0025): el pago del abono inicial que se validó para
+    // crear este convenio. Solo auditoría: el abono ya se aplicó como pago normal.
+    // Único: un mismo abono no sostiene dos convenios.
+    abono_inicial_pago_id: integer("abono_inicial_pago_id").references(() => pagos_credito.pago_id),
+
     // Estado del convenio
     activo: boolean("activo").notNull().default(true),
 

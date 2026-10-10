@@ -2,6 +2,7 @@ import { z } from "zod";
 import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 
 import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
+import { RechazoAbonoInicial, rechazoReversaAbonoInicial } from "../lib/convenio-abono-inicial";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -190,6 +191,27 @@ export function createReversePayment(
     const result = await dependencies.withCreditLock(credito_id, async () => {
       const datosReversa = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
+      // COBROS-02 W4: el abono inicial sostiene al convenio que lo usó. Mientras
+      // ese convenio esté pendiente, vigente o completado, el abono no se reversa.
+      // Anulado (o deshecho) libera el abono; el rechazo borra la fila.
+      const [convenioDelAbono] = await tx
+        .select({
+          convenio_id: convenios_pago.convenio_id,
+          activo: convenios_pago.activo,
+          completado: convenios_pago.completado,
+        })
+        .from(convenios_pago)
+        .where(
+          and(
+            eq(convenios_pago.abono_inicial_pago_id, pago_id),
+            isNull(convenios_pago.anulado_at),
+          ),
+        )
+        .limit(1);
+      if (convenioDelAbono) {
+        throw rechazoReversaAbonoInicial(convenioDelAbono);
+      }
+
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
       const [pago] = await tx
@@ -1341,6 +1363,12 @@ export function createReversePayment(
         durationMs: terminal.durationMs,
         errorCode: terminal.errorCode,
       }, telemetryLogger);
+    }
+
+    // Rechazo de negocio del abono inicial: 409 con el motivo, no el 500 genérico.
+    if (error instanceof RechazoAbonoInicial) {
+      set.status = error.status;
+      return { message: error.message, error: "abono_inicial_de_convenio" };
     }
 
     // Determinar status code según el tipo de error

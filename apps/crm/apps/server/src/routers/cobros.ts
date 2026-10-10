@@ -3474,6 +3474,12 @@ export const cobrosRouter = {
 				// alguna cuota tenía otro monto o la mora cambió entre medio
 				// (hallazgo de Codex, PR #1570).
 				montoTotal: z.number().positive(),
+				// COBROS-02 W4 (Workspace): pago del abono que el asesor registró hoy
+				// («Convenio flexible»). Es el `pago_id` que devuelve registrarPagoCompleto.
+				// Cartera lo acepta solo si contabilidad ya lo validó, es de hoy, es de
+				// este crédito y no sirvió a otro convenio. El `montoTotal` que llega ya
+				// es el remanente: el abono ya se aplicó como pago normal.
+				abonoInicialPagoId: z.number().int().positive().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3637,6 +3643,7 @@ export const cobrosRouter = {
 					reason: input.motivo,
 					observations: input.observaciones || undefined,
 					created_by_email: email,
+					abono_inicial_pago_id: input.abonoInicialPagoId,
 				});
 			} catch (error) {
 				// Un 4xx de cartera trae el motivo de negocio en payload.message
@@ -3716,6 +3723,8 @@ export const cobrosRouter = {
 				// cobros_supervisor lo apruebe desde el CRM (CB-033) — reemplaza
 				// el paso de conta/admin en carteraFront.
 				pendienteActivacion: convenio.activo === false,
+				// W4: el abono que sostuvo el convenio (null si no hubo).
+				abonoInicialPagoId: input.abonoInicialPagoId ?? null,
 			};
 		}),
 

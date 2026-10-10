@@ -550,14 +550,24 @@ export function llaveDeEnvio(registroId: string, intento: number): string {
 	return `factura-seguro/${registroId}/${intento}`;
 }
 
+type RegistroDeEnvio = { id: string; intento: number; reservadoAt: Date };
+
 // Un resultado tardío no pisa otro intento ni un `enviado`: el reintento de un
 // `pendiente` abandonado repite el mismo intento y puede terminar antes que el
-// envío original.
-function mismoIntentoSinEnviar(registro: { id: string; intento: number }) {
+// envío original. Un fallo o un resultado incierto, además, solo cuentan para
+// la ejecución que reservó el registro (`updatedAt` de la reserva); un `enviado`
+// se registra siempre, porque el correo salió.
+function mismoIntentoSinEnviar(
+	registro: RegistroDeEnvio,
+	{ soloSuReserva }: { soloSuReserva: boolean },
+) {
 	return and(
 		eq(insuranceInvoiceSubmissions.id, registro.id),
 		eq(insuranceInvoiceSubmissions.intento, registro.intento),
 		ne(insuranceInvoiceSubmissions.status, "enviado"),
+		soloSuReserva
+			? eq(insuranceInvoiceSubmissions.updatedAt, registro.reservadoAt)
+			: undefined,
 	);
 }
 
@@ -581,7 +591,7 @@ async function borrarSiNoQuedoRegistrado(key: string) {
 
 // `correo` es el guardado en el registro para este intento.
 async function enviarYRegistrar(params: {
-	registro: { id: string; intento: number };
+	registro: RegistroDeEnvio;
 	destinatarios: string[];
 	archivo: { key: string; nombre: string };
 	correo: { asunto: string; html: string };
@@ -600,7 +610,7 @@ async function enviarYRegistrar(params: {
 		await db
 			.update(insuranceInvoiceSubmissions)
 			.set({ status: "enviado", error: null, sentAt: ahora, updatedAt: ahora })
-			.where(mismoIntentoSinEnviar(params.registro));
+			.where(mismoIntentoSinEnviar(params.registro, { soloSuReserva: false }));
 		return "enviado";
 	}
 	// Otro proceso tiene la misma llave en Resend: no se toca el registro.
@@ -611,7 +621,7 @@ async function enviarYRegistrar(params: {
 		await db
 			.update(insuranceInvoiceSubmissions)
 			.set({ error: resultado.error.slice(0, 2000), updatedAt: ahora })
-			.where(mismoIntentoSinEnviar(params.registro));
+			.where(mismoIntentoSinEnviar(params.registro, { soloSuReserva: true }));
 		return "pendiente";
 	}
 	await db
@@ -622,7 +632,7 @@ async function enviarYRegistrar(params: {
 			sentAt: null,
 			updatedAt: ahora,
 		})
-		.where(mismoIntentoSinEnviar(params.registro));
+		.where(mismoIntentoSinEnviar(params.registro, { soloSuReserva: true }));
 	return "fallido";
 }
 
@@ -806,6 +816,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				.returning({
 					id: insuranceInvoiceSubmissions.id,
 					intento: insuranceInvoiceSubmissions.intento,
+					reservadoAt: insuranceInvoiceSubmissions.updatedAt,
 				});
 			return { envio, aseguradora, destinatarios, correo };
 		});
@@ -1138,6 +1149,7 @@ export const trackerRouter = {
 						.returning({
 							id: insuranceInvoiceSubmissions.id,
 							intento: insuranceInvoiceSubmissions.intento,
+							reservadoAt: insuranceInvoiceSubmissions.updatedAt,
 						});
 					return { envio, aseguradora, destinatarios, correo };
 				});
@@ -1257,6 +1269,7 @@ export const trackerRouter = {
 						{ ...(await datosDelCorreo(fila, tx)).datos, aseguradora },
 						registro.createdAt,
 					);
+				const reservadoAt = new Date();
 				await tx
 					.update(insuranceInvoiceSubmissions)
 					.set({
@@ -1267,11 +1280,11 @@ export const trackerRouter = {
 						correoAsunto: correo.asunto,
 						correoHtml: correo.html,
 						error: null,
-						updatedAt: new Date(),
+						updatedAt: reservadoAt,
 					})
 					.where(eq(insuranceInvoiceSubmissions.id, registro.id));
 				return {
-					registro: { ...registro, intento },
+					registro: { ...registro, intento, reservadoAt },
 					aseguradora,
 					destinatarios,
 					correo,

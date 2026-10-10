@@ -566,8 +566,17 @@ export const actualizarPagosExcelRouter = new Elysia()
         };
       }
 
-      // Créditos cuyos pagos toca el lote (los inexistentes llevan credito_id -1).
-      const creditosDelLote = [...datosCredito.values()].map((d) => d.credito_id).filter((id) => id > 0);
+      // Créditos con al menos un pago que SE VA A ESCRIBIR. No todos los pedidos: uno omitido,
+      // protegido o sin cambios no se toca, y bloquearlo haría que cualquier operación ajena sobre
+      // él abortara el lote entero (y gastaría consultas de lock de más).
+      const creditoDelPago = new Map<number, number>();
+      for (const d of datosCredito.values()) {
+        for (const c of d.cuotasPagadas) for (const p of c.pagos) creditoDelPago.set(p.pago_id, d.credito_id);
+        for (const id of d.cuotaCeroPagoIds) creditoDelPago.set(id, d.credito_id);
+      }
+      const creditosDelLote = updatesGlobal
+        .map((u) => creditoDelPago.get(u.pago_id))
+        .filter((id): id is number => id !== undefined && id > 0);
 
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
       try {

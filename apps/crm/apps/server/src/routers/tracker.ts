@@ -674,6 +674,8 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	nombre: string;
 	/** El tipo con el que el CRM aceptó el documento. */
 	mimeType: string;
+	/** La aseguradora a la que el usuario confirmó el envío, si confirmó. */
+	aseguradoraConfirmada: Aseguradora | null | undefined;
 	userId: string;
 	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
@@ -744,6 +746,14 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			});
 			if (!bajoBloqueo.ok) return null;
 
+			const { aseguradora, datos, destinatarios } =
+				await datosDelCorreoBajoBloqueo(tx, fila);
+			// Solo sale lo que el usuario confirmó: la consulta previa pudo decir
+			// que no se enviaba, o la aseguradora cambió con el diálogo abierto.
+			if (aseguradora !== params.aseguradoraConfirmada) {
+				return { sinConfirmar: true as const };
+			}
+
 			// El documento pasa a la copia, con el nombre que lleva el adjunto: el
 			// reintento lee de aquí.
 			await tx
@@ -756,8 +766,6 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 					size: contenido.length,
 				})
 				.where(eq(opportunityDocuments.id, params.documentId));
-			const { aseguradora, datos, destinatarios } =
-				await datosDelCorreoBajoBloqueo(tx, fila);
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 			const [envio] = await tx
 				.insert(insuranceInvoiceSubmissions)
@@ -793,6 +801,14 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		return {
 			enviada: false,
 			motivo: "la oportunidad cambió mientras se guardaba la factura",
+		};
+	}
+	if ("sinConfirmar" in registro) {
+		await deleteFileFromR2(copia).catch(() => {});
+		return {
+			enviada: false,
+			motivo:
+				"no se confirmó el envío a la aseguradora; vuelve a subirla para enviarla",
 		};
 	}
 	// El archivo de la URL firmada no se borra: la key la manda el cliente y

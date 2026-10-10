@@ -894,6 +894,11 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	const KEY_CRM = `opportunities/${ID}/999-crm-factura.pdf`;
 	// La copia que sube el server con los bytes validados.
 	const COPIA = `opportunities/${ID}/123-abc-factura-crm.pdf`;
+	// La aseguradora que confirmó el usuario en el diálogo.
+	let confirmada: "gyt" | "universales" | null = "gyt";
+	beforeEach(() => {
+		confirmada = "gyt";
+	});
 	const enviar = (
 		nombre = "factura-crm.pdf",
 		rol = "admin",
@@ -905,6 +910,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 			key: KEY_CRM,
 			nombre,
 			mimeType,
+			aseguradoraConfirmada: confirmada,
 			userId: "crm-1",
 			userRole: rol,
 		});
@@ -925,6 +931,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 			status: "won",
 			actualCloseDate: new Date("2026-09-01"),
 		});
+		confirmada = "universales";
 		const r = await enviar();
 		expect(r).toEqual({
 			enviada: true,
@@ -1010,6 +1017,22 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		}
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
+	});
+
+	test("sin confirmación, o confirmada para otra aseguradora, se guarda pero no se envía", async () => {
+		for (const valor of [null, "universales"] as const) {
+			confirmada = valor;
+			const r = await enviar();
+			expect(r).toEqual({
+				enviada: false,
+				motivo:
+					"no se confirmó el envío a la aseguradora; vuelve a subirla para enviarla",
+			});
+		}
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+		expect(actualizados).toHaveLength(0);
+		expect(borradosR2).toEqual([COPIA, COPIA]);
 	});
 
 	test("un Word o un Excel también se envía, con su nombre y su tipo", async () => {

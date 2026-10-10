@@ -15,7 +15,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | **W1** | Datos de la gestión (dirección, participante, teléfono contactado) | ✅ Hecho en el PR 1 · migración `0079` (CRM) | `contactos_cobros` · `createContactoCobros` · `getHistorialContactos(Paginado)` |
 | **W2** | Solicitud de rebaja de mora con aprobación | ✅ Hecho en el PR 2 · migraciones CRM `0080` y cartera `0023` | `solicitudes_rebaja_mora_cobros` · `routers/solicitudes-workspace.ts` · `services/rebaja-mora.ts` · cartera `POST /mora/condonar-parcial` |
 | **W3** | Escalar a Jurídico con aprobación | ✅ Hecho en el PR 3 · migraciones CRM `0081` y cartera `0024` | `solicitudes_juridico_cobros` · `routers/solicitudes-juridico.ts` · cartera `POST /buckets/creditos/:id/juridico` · estado `EN_JURIDICO` |
-| **W4** | Abono inicial dentro del convenio | ⏳ PR 4 | Pendiente |
+| **W4** | Abono inicial dentro del convenio | ✅ Hecho en el PR 4 · migración cartera `0025` | `convenios_pago.abono_inicial_pago_id` · `motivoAbonoInicialNoValido` (`lib/convenio-abono-inicial.ts`) · `crearConvenioDesdeFicha({ abonoInicialPagoId })` |
 | **W5** | Alertas leídas por grupo + job de 30 días | ✅ Hecho en el PR 1 · tabla en `0079` | `alertas_caso_leidas_cobros` · `alertas-caso.ts` · `jobs/alertas-caso-leidas.ts` |
 
 > [!WARNING]
@@ -25,6 +25,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 > - Cartera `drizzle/cobros-02/0023_cobros_workspace_rebaja_mora.sql` (PR 2): columna `referencia_externa` en `moras_condonaciones`. Sin ella, `POST /mora/condonar-parcial` falla.
 > - CRM `0081_cobros_workspace_juridico.sql` (PR 3): tabla de solicitudes de Jurídico y dos tipos de notificación.
 > - Cartera `drizzle/cobros-02/0024_cobros_workspace_juridico.sql` (PR 3): columna `juridico_levantada_pago_id` y el piso `EN_JURIDICO` de B5. **Sin la columna, el ORM de cartera falla al leer `creditos`** (la columna está en el schema).
+> - Cartera `drizzle/cobros-02/0025_cobros_workspace_abono_convenio.sql` (PR 4): columna `abono_inicial_pago_id` y su índice único. **Sin la columna, el ORM de cartera falla al leer `convenios_pago`.**
 >
 > Ninguna se corrió en ninguna base.
 
@@ -39,7 +40,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | W5 | Un grupo leído reaparece solo si el job genera una repetición **posterior** a la que el usuario vio al marcarlo. |
 | W5 | El job diario marca como leídas (origen `automatico`) los grupos cuya última repetición tiene más de 30 días. No cambia `notifications`. Corre al arrancar y cada 24 h; es idempotente. |
 | W2 | Al aprobar, **se aplica en cartera** con un endpoint de condonación parcial. El asesor pide un monto ≤ mora acumulada. |
-| W3 | Solicitud + aprobación del supervisor. Al aprobar, cartera clava el crédito en B5 con una marca `juridico_desde` que el motor no revierte y lo reasigna fuera del asesor. Contradice la decisión 6 del [doc 08](./08-plan-convenios-y-recuperacion.md) («no hay botón de pasar a jurídico»). |
+| W3 | Solicitud + aprobación del supervisor. Al aprobar, cartera clava el crédito en B5 con el estado `EN_JURIDICO` (piso de B5, migración cartera `0024`) y lo reasigna fuera del asesor. El plan inicial usaba una marca `juridico_desde` en `creditos`; se cambió a estado porque `EN_JURIDICO` ya es valor de la columna y el motor lo respeta como piso. Contradice la decisión 6 del [doc 08](./08-plan-convenios-y-recuperacion.md) («no hay botón de pasar a jurídico»). |
 | W4 | El convenio no se aprueba hasta que contabilidad valide el abono inicial. |
 | Migraciones | Una por feature, con número nuevo: CRM `0079` (W1 + W5), `0080` (W2), `0081` (W3); cartera-back `drizzle/cobros-02/0023`–`0025`. Se aplican a mano, como las anteriores. |
 
@@ -159,7 +160,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - Su fecha es **hoy** (día de Guatemala). Esto sale del texto del Workspace («si el cliente abonó ese día»).
 - No sirvió ya a otro convenio: índice único sobre `abono_inicial_pago_id`.
 
-Del lado contrario, **reversar un abono que sostiene un convenio está bloqueado** (`reversePayment` y `revertPaymentToPending`, con `[ABONO_INICIAL_DE_CONVENIO]`): hay que anular el convenio primero. Así no queda un convenio sin plata que lo respalde.
+Del lado contrario, **reversar el abono de un convenio vivo está bloqueado** (`reversePayment` y `revertPaymentToPending`, con `[ABONO_INICIAL_DE_CONVENIO]`). Está bloqueado mientras el convenio esté pendiente de decisión, vigente o completado. Al anularlo o deshacerlo, el abono queda libre para reversa. Ver «Revisión de código externa», H2.
 
 **Por validar antes de producción (lista de QA):**
 
@@ -175,8 +176,81 @@ Del lado contrario, **reversar un abono que sostiene un convenio está bloqueado
 
 **Pendiente de front** (no se toca en este issue): el bloque «Abono inicial» de `convenio-modal.tsx` debe encadenar el registro del comprobante y mandar `abonoInicialPagoId` con el `pago_id` que devuelve `registrarPagoCompleto`.
 
+## Cableado de prueba del front (no va en el PR)
+
+Son cambios de front para probar W2 y W3 desde la pantalla. Están en una rama local aparte (`wip-front-cobros-no-pr`), sin subir, y no entran al PR de backend. Cuando el front se conecte de verdad, se rehacen con el diseño final.
+
+| Pantalla | Qué quedó cableado en prueba | Archivos |
+| --- | --- | --- |
+| Workspace (asesor) · Jurídico | «Escalar a Jurídico» deja de estar en «Pronto». Formulario con motivo y nota (10 caracteres o más) → `solicitarEscalarJuridico`. Visible desde B3; cartera solo acepta B3 y B4. | `workspace/gestion/escalar-juridico.tsx` (nuevo), `workspace/gestion/acciones.ts`, `workspace/gestion-panel.tsx` |
+| Workspace (asesor) · Rebaja | «Solicitar rebaja de mora» deja de estar en «Pronto» (en «Otras gestiones» y en el resultado de la llamada). Formulario con monto (sin pasar de la mora del caso) y motivo de 10 caracteres o más → `solicitarRebajaMora`. | `workspace/gestion/solicitar-rebaja.tsx` (nuevo), `workspace/gestion/acciones.ts`, `workspace/gestion-panel.tsx` |
+| Dashboard · Aprobaciones pendientes | Filas y conteo «Jurídico» y «Rebaja de mora» en el pie. Consultas `getSolicitudesJuridico` y `getSolicitudesRebajaMora` (pendientes), solo en el dashboard del supervisor. | `supervision/dashboard-supervisor.tsx`, `supervision/aprobaciones-pendientes.tsx`, `solicitudes/normalizar.ts` |
+| Bandeja `/cobros/solicitudes` | Filtros «Jurídico» y «Rebaja», texto vacío y filas reales (ya no dicen «Pronto»). Al abrir una fila, el espacio de aprobación muestra el detalle y decide con `decidirSolicitudJuridico` o `decidirSolicitudRebajaMora` (rechazo con nota de 10 caracteres o más). Si lo pidió quien mira, no lo puede decidir. | `solicitudes/use-solicitudes.ts`, `solicitudes/bandeja-solicitudes.tsx`, `solicitudes/piezas.tsx`, `solicitudes/espacio-aprobacion.tsx`, `solicitudes/decidir-juridico-modal.tsx` (nuevo), `solicitudes/decidir-rebaja-modal.tsx` (nuevo), `solicitudes/solicitudes-pagina.tsx` |
+
+**Pendiente de front** (la lista completa, por tarea, va en el comentario de #1873):
+- W1: historial con dirección, «Habló con», teléfono contactado y hora y medio del próximo contacto. Codeudores (F2) siguen sin llegar.
+- Bandejas de Jurídico y rebaja: mostrar `clienteNombre` (hoy solo se ve el número de crédito).
+- W2 y W3: diseño final de la tarjeta y del espacio de aprobación, bitácora de rebajas en «Otras gestiones», cancelar solicitud del asesor, historial de decisiones con Jurídico y rebajas, mensaje cuando la mora ya no alcanza para aprobar una rebaja.
+- W3: bandeja de Jurídico como equipo (decisión abierta) y aviso propio a Jurídico.
+- W4: bloque «Abono inicial» de `convenio-modal.tsx`, con el encadenado comprobante → `pago_id` → convenio con `abonoInicialPagoId`.
+- W5: habilitar «Marcar como leída» y «Ver alertas leídas» en `contexto-caso.tsx` y `routes/cobros/$id.tsx`.
+
+**Backend** (hecho, ver H5): el historial devuelve `horaProximoContacto` y `medioProximoContacto`, y las dos bandejas traen `clienteNombre`. Falta que el front lo pinte.
+
+**Entorno local** (no es código): si el dashboard responde 500 en `getHistorialAgendasResumen` con `invalid input value for enum estado_contacto: "mensaje_enviado"`, falta la migración CRM `0039_estado_contacto_mensaje_enviado.sql` en la base local. Aplicarla solo en local.
+
+**Prueba desde la pantalla** (base local): hay pendientes de Jurídico y de rebaja pedidos por dos cuentas distintas. Cada solicitud la aprueba una cuenta distinta de quien la pidió. Después de aprobar, revisar el estado `aplicada` en `solicitudes_juridico_cobros` o `solicitudes_rebaja_mora_cobros`, `statusCredit` = `EN_JURIDICO` en cartera (Jurídico) y el `monto_mora` del crédito en `moras_credito` (rebaja).
+
+## Revisión de código externa (estado de cada hallazgo)
+
+Un review externo sobre los 8 commits de `jalvarez-cobros` señaló cinco hallazgos. Se verificaron uno por uno contra el código y la base local.
+
+| # | Hallazgo | Veredicto | Estado | PR |
+| --- | --- | --- | --- | --- |
+| H1 | `EN_JURIDICO` no está en `STATUS_FUNNEL` (listados por bucket y por defecto) ni en el enum TS `StatusCredit`. | Válido (P1). La clasificación de bucket sí lo trata bien; el fallo es del listado. | Corregido. | PR3 |
+| H2 | Reversa del abono bloqueada aun después de anular el convenio. | Válido (P1). | Corregido (ver abajo). | PR4 |
+| H3 | Validaciones del abono responden 500 y no 4xx; el CRM oculta el motivo. | Válido en la reversa, con matiz en el convenio: ver «Hallazgos nuevos». | Corregido. | PR4 |
+| H4 | Jurídico colgado en `aprobada` no tiene job y no se puede rechazar. | Válido (P2). El rechazo desde `error_aplicacion` ya estaba permitido; faltaba el job. | Corregido. | PR3 |
+| H5 | El historial no devuelve `horaProximoContacto` ni `medioProximoContacto`. Y `clienteNombre` en Jurídico. | Hora y medio: válido (P3). Nombre: ninguna bandeja mostraba el cliente. La fuente es `opportunities.numero_sifco` → `leads`, la misma del recordatorio de Pagalo, no `clients.contact_person`. | Corregido. | PR1 (historial) y PR3 (nombre) |
+
+**Hallazgos nuevos al cerrar la revisión:**
+
+- **H2 había roto 12 pruebas de reversa.** El guard agrega una lectura al inicio de la transacción, y las colas de `tx.select` de los tests se corrían una posición. Se agregó una respuesta vacía al frente de cada cola. La tanda anterior solo había corrido `src/lib`.
+- **La traza congelada de `reversePayment.test.ts`** no incluía la lectura de la restauración de Jurídico que agregó `05146c952` (W3). Ya estaba roja en la rama; ahora coincide con el código.
+- **H3, matiz:** en la creación del convenio no había 500. Respondía 400 con el motivo, porque el `catch` externo de `createPaymentAgreement` convertía el error en `success: false`. Y en la reversa, `reversePayment` respondía 400 con cuerpo «Internal server error» y el motivo en `error`, no 500.
+- **Nombre del cliente:** `clienteDelCaso` (avisos de CB-043, rebaja y Jurídico) lee `clients.contact_person`, y las bandejas leen `leads`. Para el mismo caso pueden salir nombres distintos. Ver Decisiones abiertas.
+
+Lo que el review afirma y se confirmó: 12 guardas `assertAccesoCasoCobro` en `40016e0a7`; lock por crédito con `withPaymentAdvisoryLock`; idempotencia con `referencia_externa` y `UPDATE … RETURNING` en rebaja y en Jurídico.
+
+### H2 · cómo quedó
+
+- **Causa:** la reversa buscaba cualquier convenio con `abono_inicial_pago_id = pago` y bloqueaba sin mirar su estado. Anular marca `anulado_at` y no limpia el enlace.
+- **Corrección:** el guard solo cuenta convenios sin `anulado_at`. Un convenio anulado o deshecho libera el abono. El rechazo no necesita regla: la rotura borra la fila de `convenios_pago`.
+- **Mensaje según estado:** pendiente → decidirlo primero; vigente → anularlo primero; completado → corrección manual. Un completado no cuenta como vigente.
+- **Dónde:** `controllers/reversePayment.ts` y `controllers/revertPaymentToPending.ts`. Helper `mensajeBloqueoReversaAbono` en `lib/convenio-abono-inicial.ts`.
+- **Pruebas:** `lib/convenio-abono-inicial.test.ts` con 11 pruebas en verde (3 nuevas, una por estado). `lib/` completo: 50 de 50. Simulación en la base local dentro de transacciones revertidas: anulado libera (0 filas) y completado bloquea (1 fila). Los datos quedaron sin cambios.
+- **Datos locales:** los 6 convenios con abono de prueba (113 a 118) siguen bloqueados. Están pendientes de decisión: nunca se aprobaron ni se rechazaron.
+- **Decisión de negocio pendiente:** reutilizar el abono de un convenio anulado en otro convenio. Hoy no: el enlace queda y el índice único lo impide. Recomiendo que siga así, por auditoría.
+
+### H1, H3, H4 y H5 · cómo quedaron
+
+- **H1 · `EN_JURIDICO` en el funnel.** Entra en el enum `StatusCredit` y en `STATUS_FUNNEL` (listados por bucket y por defecto), junto a `EN_RECUPERACION`. Efecto: el filtro de estados de `/credits` acepta el valor, y el cierre mensual deja una fila en cero aunque no haya créditos en ese estado. Prueba: `routers/buckets-funnel.test.ts` (3 pruebas).
+- **H3 · status de los rechazos del abono.** El helper devuelve un status (409 para «no validado», «de otro día» o «ya usado», 400 para los demás), pero `createPaymentAgreement` lo descartaba y todo salía como 400. Ahora lanza `RechazoAbonoInicial` con su status, el `catch` externo lo deja subir y la ruta lo responde tal cual. En la reversa, `reversePayment` responde 409 con el motivo en `message` (antes 400 con cuerpo genérico). `revertPaymentToPending` ya respondía 409, pero decidía por el texto del mensaje; ahora decide por el tipo del error. Pruebas: `controllers/reversaAbonoInicial.test.ts` (5 pruebas: 409 de cada handler, el guard corta antes de escribir y un error sin tipo sigue en 500) y 2 más en `lib/convenio-abono-inicial.test.ts`. **No se probó la creación de convenio por HTTP:** la verificación es de tipos y de lectura del código.
+- **H4 · escalados colgados.** `marcarEscalamientosColgados` (`services/juridico-solicitud.ts`) pasa a `error_aplicacion` las solicitudes en `aprobada` con más de 10 min y avisa a los supervisores. Corre cada 5 min desde `jobs/juridico-solicitudes-colgadas.ts`, con la bandera `juridicoSolicitudesColgadas` en `JOBS_PROGRAMADOS`, igual que las rebajas. `cerrarAvisosJuridico` ahora cierra también los avisos con sufijo `:interrumpida:`; antes no los cerraba. Prueba en la base local `Cobros2`: la aprobación colgada pasó a `error_aplicacion`, se crearon 4 avisos y los 4 quedaron cerrados. La fila de prueba se borró.
+- **H5 · historial y nombre del cliente.** Los dos `select` del historial traen `horaProximoContacto` y `medioProximoContacto`. `getSolicitudesJuridico` y `getSolicitudesRebajaMora` traen `clienteNombre`, armado por `services/nombre-cliente-sifco.ts` con la fuente del recordatorio de Pagalo (oportunidad ganada o migrada más reciente, y su lead). Pruebas: `lib/nombre-cliente.test.ts` (3 pruebas) y consulta real en la base local: caso libre, SIFCO con oportunidad, SIFCO inexistente y lista vacía.
+- **Sin migraciones nuevas** en esta tanda.
+
+### Estado para los PR
+
+- PR1: historial con `horaProximoContacto` y `medioProximoContacto` (H5, parte 1). Hecho (#1928).
+- PR3: `EN_JURIDICO` en el funnel y en el enum (H1); job de Jurídico colgado y cierre de avisos (H4); `clienteNombre` (H5, parte 2). Hecho (#1929 y #1935).
+- PR4: status de los rechazos del abono y reversa con 409 (H3); reversa bloqueada por el abono de un convenio vivo (H2). Hecho en este PR.
+- Antes del PR: quitar el cableado de prueba del front (no va en el PR) y decidir la fuente del nombre en los avisos.
+
 ## Decisiones abiertas
 
 - W2: la aprobación de una rebaja que cartera ya no puede aplicar queda en `error_aplicacion`; hoy no hay alerta automática, solo aparece en la bandeja.
 - W3: Jurídico como equipo no recibe aviso propio ni tiene bandeja; hoy solo lo ven los supervisores y el asesor.
-- W4: qué pasa si contabilidad rechaza el abono después de aprobado el convenio (se decide con producto; el PR 4 bloquea la aprobación hasta validar).
+- W4: la regla «abono de hoy» (ver arriba) y, si cambia, la ventana de días.
+- W4: reutilizar el abono de un convenio anulado en otro convenio. Hoy no; recomiendo que siga así.
+- Nombre del cliente en los avisos: `clienteDelCaso` (CB-043, rebaja y Jurídico) usa `clients.contact_person`, y las bandejas usan `leads`. Hay que elegir una sola fuente. Cambiarla cambia el texto de los avisos ya existentes.

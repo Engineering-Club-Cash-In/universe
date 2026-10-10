@@ -15,6 +15,8 @@ import {
   asesores,
 } from "../database/db";
 import Big from "big.js";
+import { diaDeFechaPago, motivoAbonoInicialNoValido, RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { partesGT } from "../utils/functions/diaGuatemala";
 import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
@@ -47,6 +49,12 @@ interface CreatePaymentAgreementInput {
   reason?: string;
   observations?: string;
   created_by: number;
+  /**
+   * COBROS-02 W4: pago del abono inicial, ya VALIDADO por contabilidad y de hoy.
+   * El abono ya se aplicó como pago normal, así que el total que llega es el
+   * remanente: aquí solo se comprueba y se liga al convenio para auditarlo.
+   */
+  abono_inicial_pago_id?: number;
 }
 
 /**
@@ -73,7 +81,25 @@ export async function resolverPlatformUserIdPorEmail(
   return usuario?.id ?? null;
 }
 
+/**
+ * Con abono inicial, TODA la creación va bajo el candado de pagos del crédito: el
+ * mismo que toman `reversePayment`, `revertPaymentToPending` y `falsePayment`. Sin
+ * él, una de esas rutas podía invalidar el abono entre su validación y el insert
+ * del convenio, y el convenio quedaba sostenido por un pago ya no validado. Con el
+ * candado, la invalidación espera a que el convenio exista (y entonces se rechaza)
+ * o corre antes (y la validación de abajo lo ve). El candado es reentrante por
+ * cadena, así que lo que se llame adentro no se bloquea.
+ */
 export async function createPaymentAgreement(
+  input: CreatePaymentAgreementInput
+) {
+  if (input.abono_inicial_pago_id != null && input.credit_id) {
+    return withPaymentAdvisoryLock(input.credit_id, () => crearConvenioDePago(input));
+  }
+  return crearConvenioDePago(input);
+}
+
+async function crearConvenioDePago(
   input: CreatePaymentAgreementInput
 ) {
   try {
@@ -88,6 +114,7 @@ export async function createPaymentAgreement(
       reason,
       observations,
       created_by,
+      abono_inicial_pago_id,
     } = input;
 
     // ============================================
@@ -125,6 +152,50 @@ export async function createPaymentAgreement(
     }
 
     console.log("✅ Usuario encontrado:", usuario.email);
+
+    // ============================================
+    // 🧾 ABONO INICIAL (COBROS-02 W4)
+    // ============================================
+    // Se valida ANTES de crear nada. Un abono sin validar por contabilidad, de
+    // otro día o de otro crédito no puede sostener el convenio.
+    const abonoInicialPagoId = abono_inicial_pago_id ?? null;
+    if (abonoInicialPagoId != null) {
+      const [pagoAbono] = await db
+        .select({
+          credito_id: pagos_credito.credito_id,
+          validationStatus: pagos_credito.validationStatus,
+          paymentFalse: pagos_credito.paymentFalse,
+          monto_boleta: pagos_credito.monto_boleta,
+          fecha_pago: pagos_credito.fecha_pago,
+        })
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, abonoInicialPagoId))
+        .limit(1);
+      const [yaLigado] = await db
+        .select({ convenio_id: convenios_pago.convenio_id })
+        .from(convenios_pago)
+        .where(eq(convenios_pago.abono_inicial_pago_id, abonoInicialPagoId))
+        .limit(1);
+      const diaHoyGT = () => {
+        const p = partesGT(new Date());
+        return `${p.year}-${p.month}-${p.day}`;
+      };
+      const error = motivoAbonoInicialNoValido({
+        pago: pagoAbono
+          ? {
+              credito_id: pagoAbono.credito_id,
+              validationStatus: pagoAbono.validationStatus,
+              anulado: pagoAbono.paymentFalse === true,
+              monto_boleta: pagoAbono.monto_boleta,
+              dia_pago: diaDeFechaPago(pagoAbono.fecha_pago),
+            }
+          : null,
+        creditoId: credit_id,
+        diaHoy: diaHoyGT(),
+        ligadoAOtroConvenio: Boolean(yaLigado),
+      });
+      if (error) throw new RechazoAbonoInicial(error.status, error.message);
+    }
 
     // ============================================
     // 💰 BUSCAR LOS PAGOS Y CUOTAS
@@ -341,6 +412,7 @@ export async function createPaymentAgreement(
         .insert(convenios_pago)
         .values({
           credito_id: credit_id,
+          abono_inicial_pago_id: abonoInicialPagoId,
           monto_total_convenio: total_agreement_amount.toString(),
           numero_meses: number_of_months,
           cuota_mensual: monthly_installment.toString(),
@@ -640,6 +712,9 @@ export async function createPaymentAgreement(
       message: "Convenio de pago creado exitosamente",
     };
   } catch (error) {
+    // Rechazo de negocio del abono inicial: no es una falla del convenio. Sube a
+    // la ruta, que lo responde con su status y su mensaje.
+    if (error instanceof RechazoAbonoInicial) throw error;
     console.error("💥 ========== ERROR EN CREACIÓN DE CONVENIO ==========");
     console.error("❌ Error:", error);
     console.error("❌ Mensaje:", error instanceof Error ? error.message : "Error desconocido");

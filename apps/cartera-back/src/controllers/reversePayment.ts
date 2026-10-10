@@ -2,6 +2,8 @@ import { z } from "zod";
 import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 
 import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { asegurarAbonoInicialLibre } from "./abonoInicialConvenio";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -189,6 +191,9 @@ export function createReversePayment(
     // la tx (HTTP de hasta 60s por factura).
     const result = await dependencies.withCreditLock(credito_id, async () => {
       const datosReversa = await dependencies.runTransaction(async (tx) => {
+      // COBROS-02 W4: el abono inicial de un convenio no se reversa (ver el helper).
+      await asegurarAbonoInicialLibre(tx as unknown as typeof db, pago_id);
+
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -1341,6 +1346,12 @@ export function createReversePayment(
         durationMs: terminal.durationMs,
         errorCode: terminal.errorCode,
       }, telemetryLogger);
+    }
+
+    // Rechazo de negocio del abono inicial: 409 con el motivo, no el 500 genérico.
+    if (error instanceof RechazoAbonoInicial) {
+      set.status = error.status;
+      return { message: error.message, error: "abono_inicial_de_convenio" };
     }
 
     // Determinar status code según el tipo de error

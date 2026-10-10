@@ -135,7 +135,9 @@ function createTransactionTx(
 ) {
   // Cada harness es una corrida: la traza de lecturas arranca limpia.
   lecturas = [];
-  const selectResults: unknown[][] = [[payment], [activeCredit], [user], []];
+  // La primera lectura es el guard del abono inicial (COBROS-02 W4): sin convenio
+  // vivo ligado al pago, vacía.
+  const selectResults: unknown[][] = [[], [payment], [activeCredit], [user], []];
   const takeRows = () => {
     const rows = selectResults.shift() ?? [];
     // `.for(...)` además de `.limit(...)`: desde que la reversa devuelve los
@@ -484,7 +486,7 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
 
     // ── EL CAMINO DE LECTURAS, para el camino ESTÁNDAR de la reversa ────────
     // Lo congela: si alguien agrega o quita una lectura, esto lo dice y señala
-    // dónde. `selectResults` solo trae 4 entradas y después devuelve `[]` en
+    // dónde. `selectResults` solo trae 5 entradas y después devuelve `[]` en
     // silencio, así que una lectura nueva no se notaba por ningún lado.
     //
     // Va acá y no en el helper a propósito: la secuencia DEPENDE de la forma
@@ -493,6 +495,7 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
     // secuencia compartida sería falsa para la mitad de los casos. Éste es el
     // camino estándar: pago de una cuota, con hermanas vivas.
     expect(lecturas).toEqual([
+      "convenios_pago", // guard del abono inicial: ¿el pago sostiene un convenio vivo?
       "pagos_credito", // el pago a revertir
       "creditos", // el crédito activo
       "usuarios", // el dueño, para devolverle el saldo a favor

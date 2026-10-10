@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { restaurarJuridicoSiEstePagoLoLevanto, restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 import { eq, and } from "drizzle-orm";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { asegurarAbonoInicialLibre } from "./abonoInicialConvenio";
 import Big from "big.js";
 import { db } from "../database";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
@@ -190,6 +192,9 @@ export function createRevertPaymentToPending(
     // `insertPayment`, y no se debe invertir.
     const result = await dependencies.withCreditLock(credito_id, () =>
       dependencies.runTransaction(async (tx) => {
+      // COBROS-02 W4: el abono inicial de un convenio no se pasa a pendiente (ver el helper).
+      await asegurarAbonoInicialLibre(tx as unknown as typeof db, pago_id);
+
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -529,6 +534,12 @@ export function createRevertPaymentToPending(
       error.reasonCode === "capital_no_soportado"
     ) {
       set.status = 409;
+      return { success: false, message: error.message };
+    }
+
+    // Rechazo de negocio del abono inicial: se decide por el TIPO, no por el texto.
+    if (error instanceof RechazoAbonoInicial) {
+      set.status = error.status;
       return { success: false, message: error.message };
     }
 

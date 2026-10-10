@@ -6472,6 +6472,9 @@ export const crmRouter = {
 					size: z.number(),
 					key: z.string(), // R2 key from presigned upload
 				}),
+				// "Seguro del Vehículo": la aseguradora a la que el usuario confirmó
+				// el envío. Sin esto la factura se guarda pero no se manda.
+				envioFacturaConfirmado: z.enum(["gyt", "universales"]).nullish(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -6683,6 +6686,7 @@ export const crmRouter = {
 							key: uploadedFile.key,
 							nombre: input.file.name,
 							mimeType: uploadedFile.mimeType,
+							aseguradoraConfirmada: input.envioFacturaConfirmado,
 							userId: context.userId,
 							userRole: context.userRole,
 						}).catch((error) => {

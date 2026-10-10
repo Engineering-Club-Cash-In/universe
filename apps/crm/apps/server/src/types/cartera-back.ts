@@ -1451,6 +1451,8 @@ export interface CarteraBucketActualCredito {
 	nombre: string | null;
 	color: string | null;
 	estado_mora: string | null;
+	/** statusCredit crudo del crédito (conciliar escalados a Jurídico). */
+	status_credito?: string | null;
 	/** true = statusCredit fuera del funnel (EN_CONVENIO/CANCELADO/CAIDO/...): sin bucket por diseño. */
 	fuera_funnel: boolean;
 	/**

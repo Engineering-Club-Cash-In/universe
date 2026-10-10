@@ -268,6 +268,39 @@ export const solicitudesJuridicoRouter = {
 							"Esta solicitud ya no se puede rechazar: revise su estado.",
 					});
 				}
+				if (solicitud.estado === "error_aplicacion") {
+					// El error pudo ser un timeout con cartera ya commiteada: antes de
+					// cerrarla como rechazada se concilia con el estado vivo del crédito.
+					const caso = await creditoDelCasoRebaja(solicitud.casoCobroId);
+					let vivo: string | null;
+					try {
+						vivo =
+							(await carteraBackClient.getBucketActualCredito(
+								caso?.numeroSifco ?? solicitud.numeroCreditoSifco,
+							))?.status_credito ?? null;
+					} catch (error) {
+						console.error("[juridico] no se concilió con cartera:", error);
+						throw new ORPCError("SERVICE_UNAVAILABLE", {
+							message:
+								"No se pudo confirmar en cartera si el escalado ya se aplicó. Intente de nuevo en un momento.",
+						});
+					}
+					if (vivo === "EN_JURIDICO") {
+						await db
+							.update(solicitudesJuridicoCobros)
+							.set({ estado: "aplicada" })
+							.where(
+								and(
+									eq(solicitudesJuridicoCobros.id, solicitud.id),
+									eq(solicitudesJuridicoCobros.estado, "error_aplicacion"),
+								),
+							);
+						throw new ORPCError("CONFLICT", {
+							message:
+								"El escalado ya estaba aplicado en cartera: la solicitud se marcó como aplicada y no se puede rechazar.",
+						});
+					}
+				}
 				const [cerrada] = await db
 					.update(solicitudesJuridicoCobros)
 					.set({

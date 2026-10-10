@@ -24,6 +24,7 @@ import {
   cuotasParaPendienteDeCreditos,
   decidirMoraTrasRomperConvenio,
   desactivarMoraPorConvenio,
+  STATUS_EN_JURIDICO,
   STATUS_EN_RECUPERACION,
 } from "./latefee";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
@@ -1453,9 +1454,12 @@ async function salirDeConvenioCompletado({
   // el total SIN convenio, al validarse ese pago (decisión 5).
   // Los convenios anteriores a la migración 0020 no tienen el dato: para
   // ellos se conserva el comportamiento de siempre (ACTIVO).
+  // COBROS-02 W3: EN_JURIDICO también es una decisión humana que el convenio no
+  // levanta (solo la levanta un pago que salda el crédito).
   const statusAlSalir =
-    convenio.status_credito_previo === STATUS_EN_RECUPERACION
-      ? STATUS_EN_RECUPERACION
+    convenio.status_credito_previo === STATUS_EN_RECUPERACION ||
+    convenio.status_credito_previo === STATUS_EN_JURIDICO
+      ? convenio.status_credito_previo
       : "ACTIVO";
   await dbc
     .update(creditos)
@@ -2048,8 +2052,12 @@ export async function romperConvenioRecalculandoMora(
   }
   const tx = txExterna;
   const { convenio_id, creditoId } = params;
-  const volverARecuperacion =
-    params.statusCreditoPrevio === STATUS_EN_RECUPERACION;
+  // Estado de decisión humana (recuperación o Jurídico) al que vuelve el crédito.
+  const estadoProtegido =
+    params.statusCreditoPrevio === STATUS_EN_RECUPERACION ||
+    params.statusCreditoPrevio === STATUS_EN_JURIDICO
+      ? params.statusCreditoPrevio
+      : null;
 
   // 🔒 CRÉDITO PRIMERO, igual que condonarMora y la masiva: el insert al
   // ledger de abajo toma KEY SHARE sobre este crédito por la FK, y el
@@ -2163,7 +2171,7 @@ export async function romperConvenioRecalculandoMora(
     // (mismo criterio que deshacerlo). EN_RECUPERACION sí devenga mora.
     await tx
       .update(creditos)
-      .set({ statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "MOROSO" })
+      .set({ statusCredit: estadoProtegido ?? "MOROSO" })
       .where(eq(creditos.credito_id, creditoId));
 
     // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
@@ -2190,7 +2198,7 @@ export async function romperConvenioRecalculandoMora(
     // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
     // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO (o
     // devolverlo a EN_RECUPERACION, COBROS-02 Fase 4).
-    const statusSinMora = volverARecuperacion ? STATUS_EN_RECUPERACION : "ACTIVO";
+    const statusSinMora = estadoProtegido ?? "ACTIVO";
     await tx
       .update(creditos)
       .set({ statusCredit: statusSinMora })

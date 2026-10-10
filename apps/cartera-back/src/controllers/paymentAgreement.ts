@@ -15,7 +15,7 @@ import {
   asesores,
 } from "../database/db";
 import Big from "big.js";
-import { motivoAbonoInicialNoValido, RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { diaDeFechaPago, motivoAbonoInicialNoValido, RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { partesGT } from "../utils/functions/diaGuatemala";
 import {
   calcularAplicacionConvenio,
@@ -164,6 +164,7 @@ async function crearConvenioDePago(
         .select({
           credito_id: pagos_credito.credito_id,
           validationStatus: pagos_credito.validationStatus,
+          paymentFalse: pagos_credito.paymentFalse,
           monto_boleta: pagos_credito.monto_boleta,
           fecha_pago: pagos_credito.fecha_pago,
         })
@@ -175,9 +176,8 @@ async function crearConvenioDePago(
         .from(convenios_pago)
         .where(eq(convenios_pago.abono_inicial_pago_id, abonoInicialPagoId))
         .limit(1);
-      const diaDe = (f: Date | null | undefined) => {
-        if (!f) return null;
-        const p = partesGT(new Date(f));
+      const diaHoyGT = () => {
+        const p = partesGT(new Date());
         return `${p.year}-${p.month}-${p.day}`;
       };
       const error = motivoAbonoInicialNoValido({
@@ -185,12 +185,13 @@ async function crearConvenioDePago(
           ? {
               credito_id: pagoAbono.credito_id,
               validationStatus: pagoAbono.validationStatus,
+              anulado: pagoAbono.paymentFalse === true,
               monto_boleta: pagoAbono.monto_boleta,
-              dia_pago: diaDe(pagoAbono.fecha_pago),
+              dia_pago: diaDeFechaPago(pagoAbono.fecha_pago),
             }
           : null,
         creditoId: credit_id,
-        diaHoy: diaDe(new Date()) ?? "",
+        diaHoy: diaHoyGT(),
         ligadoAOtroConvenio: Boolean(yaLigado),
       });
       if (error) throw new RechazoAbonoInicial(error.status, error.message);

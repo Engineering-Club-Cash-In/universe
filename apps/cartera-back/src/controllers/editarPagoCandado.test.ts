@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import { pagos_credito, rubros_pagos } from "../database/db";
+import { convenios_pago, pagos_credito, rubros_pagos } from "../database/db";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // `editarPago` — QUÉ queda adentro del advisory lock del crédito.
@@ -33,6 +33,7 @@ import { pagos_credito, rubros_pagos } from "../database/db";
 const NOMBRES = new Map<unknown, string>([
   [pagos_credito, "pagos_credito"],
   [rubros_pagos, "rubros_pagos"],
+  [convenios_pago, "convenios_pago"],
 ]);
 
 let eventos: string[] = [];
@@ -118,7 +119,7 @@ mock.module("../utils/paymentAdvisoryLock", () => ({
   },
 }));
 
-const { editarPago } = await import("./registerPayment");
+const { editarPago, aplicarMontoAPago } = await import("./registerPayment");
 
 const preparar = (credito_id: number | null) => {
   eventos = [];
@@ -213,5 +214,42 @@ describe("editarPago — qué pasa bajo el candado", () => {
     expect(r.success).toBe(false);
     expect(r.message).toContain("300.00");
     expect(eventos).not.toContain("update:pagos_credito");
+  });
+});
+
+describe("pago que sostiene un convenio vivo (abono inicial, COBROS-02 W4)", () => {
+  const conConvenio = () => {
+    preparar(9);
+    filas.set(convenios_pago, [{ convenio_id: 7, activo: true, completado: false }]);
+  };
+
+  it("editarPago lo rechaza bajo el candado y no escribe", async () => {
+    conConvenio();
+
+    const r = await editarPago(55, { monto_boleta: "0" });
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("[ABONO_INICIAL_DE_CONVENIO]");
+    expect(eventos).not.toContain("update:pagos_credito");
+    const abre = eventos.indexOf("lock:9");
+    expect(eventos.indexOf("select:convenios_pago:proyectada")).toBeGreaterThan(abre);
+  });
+
+  it("aplicarMontoAPago lo rechaza bajo el candado y no escribe", async () => {
+    conConvenio();
+
+    const r = await aplicarMontoAPago(55, 100);
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("[ABONO_INICIAL_DE_CONVENIO]");
+    expect(eventos.some((e) => e.startsWith("update:") || e.startsWith("insert:"))).toBe(false);
+  });
+
+  it("sin convenio la edición sigue su curso normal", async () => {
+    preparar(9);
+
+    await editarPago(55, { mora: "50.00" });
+
+    expect(eventos).toContain("update:pagos_credito");
   });
 });

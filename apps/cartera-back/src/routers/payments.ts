@@ -105,7 +105,9 @@ export const paymentRouter = new Elysia()
     }
     const result = await editarPago(pagoId, body);
     if (!result.success) {
-      set.status = result.message.includes("no encontrado") ? 404 : 400;
+      set.status = result.message.includes("no encontrado")
+        ? 404
+        : result.message.includes("[ABONO_INICIAL_DE_CONVENIO]") ? 409 : 400;
     }
     return result;
   })
@@ -1586,7 +1588,7 @@ export const paymentRouter = new Elysia()
     try {
       const { pago_id, monto, fecha_pago, validationStatus } = body;
       const result = await aplicarMontoAPago(pago_id, monto, fecha_pago, validationStatus);
-      set.status = result.success ? 200 : 400;
+      set.status = result.success ? 200 : result.message?.includes("[ABONO_INICIAL_DE_CONVENIO]") ? 409 : 400;
       return result;
     } catch (error: any) {
       console.error("Error en /aplicar-monto-pago:", error);

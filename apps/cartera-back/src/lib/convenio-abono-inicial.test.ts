@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  diaDeFechaPago,
   motivoAbonoInicialNoValido,
   mensajeBloqueoReversaAbono,
   RechazoAbonoInicial,
@@ -14,6 +15,7 @@ function pago(over: Partial<PagoParaAbonoInicial> = {}): PagoParaAbonoInicial {
   return {
     credito_id: CREDITO,
     validationStatus: "validated",
+    anulado: false,
     monto_boleta: "500.00",
     dia_pago: HOY,
     ...over,
@@ -64,6 +66,19 @@ describe("motivoAbonoInicialNoValido", () => {
     const r = motivo(pago({ dia_pago: "2026-10-08" }));
     expect(r?.status).toBe(409);
     expect(r?.message).toContain("de hoy");
+  });
+
+  test("un abono ya anulado (boleta falsa) no sirve aunque conserve estado, monto y fecha", () => {
+    const r = motivo(pago({ anulado: true }));
+    expect(r?.status).toBe(409);
+    expect(r?.message).toContain("anulado");
+  });
+
+  test("el día del abono se lee de la hora de pared GT guardada, sin restarle otras 6 h", () => {
+    // Guardado 2026-10-10 01:00 (hora GT, columna sin zona) y leído como Date en UTC.
+    expect(diaDeFechaPago(new Date("2026-10-10T01:00:00.000Z"))).toBe("2026-10-10");
+    expect(diaDeFechaPago(new Date("2026-10-10T23:59:00.000Z"))).toBe("2026-10-10");
+    expect(diaDeFechaPago(null)).toBeNull();
   });
 
   test("un abono que ya financió otro convenio no se reutiliza", () => {

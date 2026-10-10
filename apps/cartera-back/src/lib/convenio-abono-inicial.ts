@@ -16,6 +16,8 @@ export const ESTADOS_PAGO_VALIDADO = ["validated", "capital_validated"] as const
 export type PagoParaAbonoInicial = {
   credito_id: number | null;
   validationStatus: string | null;
+  /** `paymentFalse`: la boleta se declaró falsa. Conserva estado, monto y fecha, pero ya no aplica. */
+  anulado: boolean;
   monto_boleta: string | null;
   /** Día GT del pago, `YYYY-MM-DD`. */
   dia_pago: string | null;
@@ -39,6 +41,9 @@ export function motivoAbonoInicialNoValido(params: {
   }
   if (pago.credito_id !== creditoId) {
     return { status: 400, message: "[ERROR] El abono inicial pertenece a otro crédito." };
+  }
+  if (pago.anulado) {
+    return { status: 409, message: "[ERROR] El abono inicial fue anulado (boleta falsa): ya no aplica. Registre un abono nuevo." };
   }
   if (!ESTADOS_PAGO_VALIDADO.includes((pago.validationStatus ?? "") as (typeof ESTADOS_PAGO_VALIDADO)[number])) {
     return {
@@ -104,4 +109,14 @@ export class RechazoAbonoInicial extends Error {
 /** Rechazo con el que se frena el reverso de un pago que es abono inicial de un convenio. */
 export function rechazoReversaAbonoInicial(c: ConvenioDelAbono): RechazoAbonoInicial {
   return new RechazoAbonoInicial(409, mensajeBloqueoReversaAbono(c));
+}
+
+/**
+ * Día (`YYYY-MM-DD`) de `pagos_credito.fecha_pago`. La columna es un timestamp SIN zona que
+ * el registro llena con la hora de pared de Guatemala: leída como Date, sus campos UTC YA son
+ * el día GT. Convertirla otra vez a GT restaba 6 h y un abono de las 00:00 a las 05:59 se
+ * leía como de ayer. Solo "ahora" (un instante real) se pasa a GT (`partesGT`).
+ */
+export function diaDeFechaPago(fecha: Date | string | null | undefined): string | null {
+  return fecha ? new Date(fecha).toISOString().slice(0, 10) : null;
 }

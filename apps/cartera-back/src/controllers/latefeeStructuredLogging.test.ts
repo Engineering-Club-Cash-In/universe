@@ -77,7 +77,10 @@ test("late-fee callsites use only the finite safe application payload", () => {
   // y la condonación masiva emite cuando no hay ninguna mora activa.
   // 44 = + 2 del merge con COBROS-02: la lectura de promesas vigentes (freeze
   // por cuota, CB-030) emite `degraded` si falla, en el cron y en el reparto.
-  expect(calls).toBe(44);
+  // 54 = + 10 de condonarMoraParcial (COBROS-02 W2): rechazos por monto,
+  // usuario, referencia, lock ocupado, mora excedida, estado y devengado, más el
+  // éxito y la rebaja ya aplicada. Todas con el payload finito permitido.
+  expect(calls).toBe(54);
 });
 
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {

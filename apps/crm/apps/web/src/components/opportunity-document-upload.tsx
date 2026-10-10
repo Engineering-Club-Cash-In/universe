@@ -462,7 +462,7 @@ export function OpportunityDocumentUpload({
 										opportunityId={opportunityId}
 										disponible={doc.envioAseguradora?.reintentoDisponible}
 										aseguradora={doc.envioAseguradora?.aseguradora}
-										estado={doc.envioAseguradora?.estado}
+										reintentoDesde={doc.envioAseguradora?.reintentoDesde}
 									/>
 									{doc.url && (
 										<Button variant="outline" size="sm" asChild>

@@ -5017,7 +5017,7 @@ function DocumentsManager({
 										opportunityId={opportunityId}
 										disponible={doc.envioAseguradora?.reintentoDisponible}
 										aseguradora={doc.envioAseguradora?.aseguradora}
-										estado={doc.envioAseguradora?.estado}
+										reintentoDesde={doc.envioAseguradora?.reintentoDesde}
 									/>
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&

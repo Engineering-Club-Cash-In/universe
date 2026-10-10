@@ -189,7 +189,7 @@ if (!isAdmin && asesorId !== null && asesorId !== undefined) {
 export interface CreditoOperativoParaSat {
   numeroCreditoSifco: string;
   nombreCliente: string;
-  estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+  estado: "ACTIVO" | "MOROSO" | "EN_JURIDICO" | "EN_CONVENIO";
   fechaCreacion: Date;
 }
 
@@ -208,7 +208,7 @@ export async function getCreditosOperativosParaSat(): Promise<CreditoOperativoPa
     })
     .from(creditos)
     .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
-    .where(inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]))
+    .where(inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_JURIDICO", "EN_CONVENIO"]))
     .orderBy(desc(creditos.fecha_creacion));
 
   return rows as CreditoOperativoParaSat[];

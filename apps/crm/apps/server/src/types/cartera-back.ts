@@ -66,7 +66,7 @@ export interface CarteraUsuario {
 export interface CarteraCreditoOperativoSat {
 	numeroCreditoSifco: string;
 	nombreCliente: string;
-	estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+	estado: "ACTIVO" | "MOROSO" | "EN_JURIDICO" | "EN_CONVENIO";
 	fechaCreacion: string;
 }
 

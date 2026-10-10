@@ -14,6 +14,7 @@ import { solicitudesJuridicoCobros } from "../db/schema/cobros";
 import { isUniqueViolation } from "../lib/db-errors";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { puedeRechazarTrasError } from "../lib/rebaja-mora-reglas";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -301,6 +302,15 @@ export const solicitudesJuridicoRouter = {
 					});
 				}
 				if (solicitud.estado === "error_aplicacion") {
+					// Un intento de cartera aún puede estar en vuelo y escribir después de
+					// un rechazo que la conciliación no vio: se espera a que ninguno pueda
+					// (mismo plazo que la rebaja).
+					if (!puedeRechazarTrasError(solicitud.resueltoEn, new Date())) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Cartera todavía puede estar procesando este escalado. Espere unos minutos y vuelva a intentar el rechazo.",
+						});
+					}
 					// El error pudo ser un timeout con cartera ya commiteada: antes de
 					// cerrarla como rechazada se concilia con el estado vivo del crédito.
 					const caso = await creditoDelCasoRebaja(solicitud.casoCobroId);

@@ -7,6 +7,7 @@ import { clavesPlaca, normalizarPlaca } from "./placas";
 export const ESTADOS_CREDITO_OPERATIVOS = [
 	"ACTIVO",
 	"MOROSO",
+	"EN_JURIDICO",
 	"EN_CONVENIO",
 ] as const;
 

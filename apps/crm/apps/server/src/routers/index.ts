@@ -193,6 +193,8 @@ export const cobrosAppRouter = {
 		solicitudesWorkspaceRouter.cancelarSolicitudRebajaMora,
 	solicitarEscalarJuridico: solicitudesJuridicoRouter.solicitarEscalarJuridico,
 	getSolicitudesJuridico: solicitudesJuridicoRouter.getSolicitudesJuridico,
+	getSolicitudesJuridicoDelCaso:
+		solicitudesJuridicoRouter.getSolicitudesJuridicoDelCaso,
 	decidirSolicitudJuridico: solicitudesJuridicoRouter.decidirSolicitudJuridico,
 	cancelarSolicitudJuridico:
 		solicitudesJuridicoRouter.cancelarSolicitudJuridico,

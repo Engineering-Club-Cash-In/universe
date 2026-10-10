@@ -1509,7 +1509,7 @@ export async function getCreditosWithUserByMesAnio(
         if (esAlDia) {
           conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
         } else {
-          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')`);
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO', 'EN_CONVENIO')`);
         }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);
@@ -4168,7 +4168,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   // Primero obtener el total de créditos activos para calcular porcentajes
   const baseConditionsTotal = [
-    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO"]),
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_JURIDICO", "EN_CONVENIO"]),
   ];
   if (asesorId) {
     baseConditionsTotal.push(eq(creditos.asesor_id, asesorId));
@@ -4242,7 +4242,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   // Consulta para créditos activos/morosos con sus moras
   const baseConditionsActive = [
-    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO"]),
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_JURIDICO", "EN_CONVENIO"]),
   ];
 
   if (asesorId) {

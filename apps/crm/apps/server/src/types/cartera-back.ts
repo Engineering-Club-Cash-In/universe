@@ -19,6 +19,7 @@ export type StatusCreditEnum =
 	 * en dos cosas: fija B4 como PISO y el motor no se lo pisa.
 	 */
 	| "EN_RECUPERACION"
+	| "EN_JURIDICO"
 	| "EN_CONVENIO";
 
 export type EstadoLiquidacionEnum =

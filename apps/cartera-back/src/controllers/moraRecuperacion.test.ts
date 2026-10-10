@@ -1293,7 +1293,7 @@ describe("buildMoraRecoveryReport", () => {
 		});
 		expect(query.sql).toContain("FULL JOIN pagos_por_credito");
 		expect(query.sql).toContain("moras_historial");
-		expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION')");
+		expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_JURIDICO')");
 		expect(query.sql).not.toContain("PENDIENTE_CANCELACION");
 		expect(query.sql).not.toContain("INCOBRABLE");
 		expect(query.sql).not.toContain("EN_CONVENIO");

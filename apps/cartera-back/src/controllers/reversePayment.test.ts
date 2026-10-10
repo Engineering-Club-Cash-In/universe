@@ -501,8 +501,7 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
       "rubros_pagos", // los reclamos de rubro de este pago, FOR UPDATE
       "pagos_credito", // COUNT(*) de filas vivas: ¿borrar la fila o resetearla?
       // COBROS-02 W3: ¿este pago había levantado un EN_JURIDICO? La restauración
-      // lee el crédito antes de decidir (commit 05146c952 la agregó sin actualizar
-      // esta traza).
+      // lee el crédito antes de decidir si hay marca que revertir.
       "creditos",
       // COBROS-02 Fase 4: ¿este pago había levantado un EN_RECUPERACION? Si la
       // reversa lo deshace, el crédito vuelve a recuperación.

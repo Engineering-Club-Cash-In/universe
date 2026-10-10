@@ -113,7 +113,7 @@ const FALLBACK_BUCKETS_CUOTAS: {
   { numero: 2, estados_piso: [], cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa", estado_mora: "mora_60" },
   { numero: 3, estados_piso: [], cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate", estado_mora: "mora_90" },
   { numero: 4, estados_piso: ["EN_RECUPERACION"], cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", estado_mora: "mora_120" },
-  { numero: 5, estados_piso: [], cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico", estado_mora: "mora_120_plus" },
+  { numero: 5, estados_piso: ["EN_JURIDICO"], cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico", estado_mora: "mora_120_plus" },
 ];
 
 

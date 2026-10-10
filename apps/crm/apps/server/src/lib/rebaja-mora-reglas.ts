@@ -86,9 +86,6 @@ export function clasificarErrorCartera(
 	if (payload?.codigo && (CODIGOS_REINTENTABLES as readonly string[]).includes(payload.codigo)) {
 		return { tipo: "transitorio", motivo: sinErrorPrefijo(payload.message) ?? "Cartera está ocupada. Puede aprobarla de nuevo." };
 	}
-	if (payload?.codigo && (CODIGOS_REINTENTABLES as readonly string[]).includes(payload.codigo)) {
-		return { tipo: "transitorio", motivo: sinErrorPrefijo(payload.message) ?? "Cartera está ocupada. Puede aprobarla de nuevo." };
-	}
 	if (kind === "usuario_no_encontrado") {
 		return {
 			tipo: "transitorio",

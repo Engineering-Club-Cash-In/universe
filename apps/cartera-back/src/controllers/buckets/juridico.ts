@@ -124,6 +124,16 @@ export async function enviarAJuridico(params: {
         );
       }
 
+      // Lock de fila ANTES de leer el estado y la deuda viva: un pago que está
+      // validando (y que podría levantar Jurídico) toma esta fila al actualizarla,
+      // así que o commitea antes de esta lectura o espera a que termine el escalado.
+      // Los advisory locks de arriba no lo cubren: el pago no los toma.
+      await tx
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .for("update");
+
       const estado = await getEstadoCredito(credito_id, tx);
       if (!estado) {
         throw new RecuperacionAbortada(404, `[ERROR] No se encontró crédito con credito_id=${credito_id}`);

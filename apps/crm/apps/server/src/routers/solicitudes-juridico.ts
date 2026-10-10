@@ -5,7 +5,7 @@
  * services/juridico-solicitud.ts. Archivo aparte por TS7056.
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -34,6 +34,53 @@ const BUCKET_MAX = 4;
 
 const solicitanteJ = alias(user, "solicitante_juridico");
 const decisorJ = alias(user, "decisor_juridico");
+
+/** Las solicitudes que cumplen `filtros`, abiertas primero, con el nombre del cliente. */
+async function listarSolicitudesJuridico(
+	filtros: SQL[],
+	limite: number,
+) {
+	const filas = await db
+		.select({
+			id: solicitudesJuridicoCobros.id,
+			casoCobroId: solicitudesJuridicoCobros.casoCobroId,
+			numeroCreditoSifco: solicitudesJuridicoCobros.numeroCreditoSifco,
+			bucketSnapshot: solicitudesJuridicoCobros.bucketSnapshot,
+			motivo: solicitudesJuridicoCobros.motivo,
+			notaJuridico: solicitudesJuridicoCobros.notaJuridico,
+			estado: solicitudesJuridicoCobros.estado,
+			solicitadoEn: solicitudesJuridicoCobros.solicitadoEn,
+			solicitadoPorId: solicitudesJuridicoCobros.solicitadoPor,
+			solicitadoPor: solicitanteJ.name,
+			resueltoEn: solicitudesJuridicoCobros.resueltoEn,
+			resueltoPor: decisorJ.name,
+			notaResolucion: solicitudesJuridicoCobros.notaResolucion,
+		})
+		.from(solicitudesJuridicoCobros)
+		.leftJoin(
+			solicitanteJ,
+			eq(solicitanteJ.id, solicitudesJuridicoCobros.solicitadoPor),
+		)
+		.leftJoin(
+			decisorJ,
+			eq(decisorJ.id, solicitudesJuridicoCobros.resueltoPor),
+		)
+		.where(filtros.length > 0 ? and(...filtros) : undefined)
+		// Abiertas primero: con `limite`, el historial resuelto más nuevo no
+		// puede dejar fuera una solicitud que espera acción.
+		.orderBy(
+			sql`CASE WHEN ${inArray(solicitudesJuridicoCobros.estado, [...ESTADOS_JURIDICO_ABIERTA])} THEN 0 ELSE 1 END`,
+			desc(solicitudesJuridicoCobros.solicitadoEn),
+		)
+		.limit(limite);
+	const nombres = await nombresClientePorSifco(
+		filas.map((f) => f.numeroCreditoSifco),
+	);
+	return filas.map((f) => ({
+		...f,
+		clienteNombre: nombres.get(f.numeroCreditoSifco) ?? null,
+	}));
+}
 
 export const solicitudesJuridicoRouter = {
 	/** W3 · El asesor pide escalar el caso a Jurídico. */
@@ -180,46 +227,31 @@ export const solicitudesJuridicoRouter = {
 					eq(solicitudesJuridicoCobros.casoCobroId, input.casoCobroId),
 				);
 			}
-			const filas = await db
-				.select({
-					id: solicitudesJuridicoCobros.id,
-					casoCobroId: solicitudesJuridicoCobros.casoCobroId,
-					numeroCreditoSifco: solicitudesJuridicoCobros.numeroCreditoSifco,
-					bucketSnapshot: solicitudesJuridicoCobros.bucketSnapshot,
-					motivo: solicitudesJuridicoCobros.motivo,
-					notaJuridico: solicitudesJuridicoCobros.notaJuridico,
-					estado: solicitudesJuridicoCobros.estado,
-					solicitadoEn: solicitudesJuridicoCobros.solicitadoEn,
-					solicitadoPorId: solicitudesJuridicoCobros.solicitadoPor,
-					solicitadoPor: solicitanteJ.name,
-					resueltoEn: solicitudesJuridicoCobros.resueltoEn,
-					resueltoPor: decisorJ.name,
-					notaResolucion: solicitudesJuridicoCobros.notaResolucion,
-				})
-				.from(solicitudesJuridicoCobros)
-				.leftJoin(
-					solicitanteJ,
-					eq(solicitanteJ.id, solicitudesJuridicoCobros.solicitadoPor),
-				)
-				.leftJoin(
-					decisorJ,
-					eq(decisorJ.id, solicitudesJuridicoCobros.resueltoPor),
-				)
-				.where(filtros.length > 0 ? and(...filtros) : undefined)
-				// Abiertas primero: con `limite`, el historial resuelto más nuevo no
-				// puede dejar fuera una solicitud que espera acción.
-				.orderBy(
-					sql`CASE WHEN ${inArray(solicitudesJuridicoCobros.estado, [...ESTADOS_JURIDICO_ABIERTA])} THEN 0 ELSE 1 END`,
-					desc(solicitudesJuridicoCobros.solicitadoEn),
-				)
-				.limit(input.limite);
-			const nombres = await nombresClientePorSifco(
-				filas.map((f) => f.numeroCreditoSifco),
+			return listarSolicitudesJuridico(filtros, input.limite);
+		}),
+
+	/**
+	 * W3 · Las solicitudes de Jurídico de UN caso, para quien tiene acceso al caso
+	 * (el asesor las ve y recupera el id para cancelar). La bandeja global sigue
+	 * siendo solo del supervisor.
+	 */
+	getSolicitudesJuridicoDelCaso: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				limite: z.number().int().min(1).max(100).default(50),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
 			);
-			return filas.map((f) => ({
-				...f,
-				clienteNombre: nombres.get(f.numeroCreditoSifco) ?? null,
-			}));
+			return listarSolicitudesJuridico(
+				[eq(solicitudesJuridicoCobros.casoCobroId, input.casoCobroId)],
+				input.limite,
+			);
 		}),
 
 	/**
@@ -286,7 +318,7 @@ export const solicitudesJuridicoRouter = {
 						});
 					}
 					if (vivo === "EN_JURIDICO") {
-						await db
+						const [conciliada] = await db
 							.update(solicitudesJuridicoCobros)
 							.set({ estado: "aplicada" })
 							.where(
@@ -294,7 +326,20 @@ export const solicitudesJuridicoRouter = {
 									eq(solicitudesJuridicoCobros.id, solicitud.id),
 									eq(solicitudesJuridicoCobros.estado, "error_aplicacion"),
 								),
-							);
+							)
+							.returning({ id: solicitudesJuridicoCobros.id });
+						// Es un estado terminal: se cierran las alertas de aprobación que
+						// quedaron abiertas y se avisa al asesor, igual que en la decisión.
+						if (conciliada) {
+							await avisarDecisionJuridico({
+								solicitudId: solicitud.id,
+								casoCobroId: solicitud.casoCobroId,
+								decision: "aplicada",
+								solicitanteId: solicitud.solicitadoPor,
+								decidioPorId: context.userId,
+								nota: null,
+							});
+						}
 						throw new ORPCError("CONFLICT", {
 							message:
 								"El escalado ya estaba aplicado en cartera: la solicitud se marcó como aplicada y no se puede rechazar.",

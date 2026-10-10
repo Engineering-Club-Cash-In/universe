@@ -397,6 +397,10 @@ export const notificationsRouter = {
 				// W2: la solicitud de rebaja de mora se cierra al decidirla o cancelarla.
 				// Ocultar la alerta a mano dejaba la rebaja pendiente sin que nadie la viera.
 				"rebaja_pendiente_aprobacion",
+				// W3: la solicitud de escalado a Jurídico se cierra al decidirla o
+				// cancelarla. Ocultar la alerta a mano la dejaba pendiente sin que
+				// nadie la viera.
+				"juridico_pendiente_aprobacion",
 			] as const;
 			// El texto conserva "inmovilización" para ese flujo (lo asertan sus tests).
 			const mensajeReaperturaCobros = (tipo: string | null) =>

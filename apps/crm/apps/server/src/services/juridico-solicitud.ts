@@ -258,7 +258,19 @@ export async function marcarEscalamientosColgados(
 				dedupKey: `${llaveSolicitud(s.id)}:interrumpida:${(s.resueltoEn ?? ahora).getTime()}`,
 				type: "action_required",
 			});
-			await db.insert(notifications).values(filas).onConflictDoNothing();
+			// Bajo candado de la fila y solo si sigue en error_aplicacion: mientras se
+			// armaba el aviso un supervisor pudo reintentar, rechazar o conciliar, y
+			// esta alerta (que no se resuelve a mano) quedaría huérfana.
+			await db.transaction(async (tx) => {
+				const [fila] = await tx
+					.select({ estado: solicitudesJuridicoCobros.estado })
+					.from(solicitudesJuridicoCobros)
+					.where(eq(solicitudesJuridicoCobros.id, s.id))
+					.for("update")
+					.limit(1);
+				if (fila?.estado !== "error_aplicacion") return;
+				await tx.insert(notifications).values(filas).onConflictDoNothing();
+			});
 		});
 	}
 	return colgadas.length;

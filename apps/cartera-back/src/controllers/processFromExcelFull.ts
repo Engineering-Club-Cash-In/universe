@@ -14,6 +14,7 @@ import { findOrCreateAdvisorByName } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
 import { convenioVivoConAbonoDelCredito } from "./abonoInicialConvenio";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { updateAllInstallments } from "./updateCredit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,38 +308,45 @@ export async function procesarCreditoDesdeExcelFull(
     .limit(1);
 
   if (existing) {
-    // COBROS-02 W4: preflight del abono inicial de un convenio vivo, ANTES de borrar nada. Los
-    // borrados de abajo son autocommit sueltos: si el trigger de `pagos_credito` frenara recién el
-    // de los pagos, las boletas y los pagos de inversionistas ya estarían borrados.
-    const convenioDelAbono = await convenioVivoConAbonoDelCredito(db, existing.credito_id);
-    if (convenioDelAbono !== null) {
-      throw new Error(
-        `El crédito ${creditoBase} tiene el convenio #${convenioDelAbono} (pendiente, vigente o completado) sostenido por un abono inicial. ` +
-          `Reconstruirlo borraría ese pago. Anule el convenio primero. No se borró nada.`,
-      );
-    }
-    console.log(`🔄 Crédito existente (ID ${existing.credito_id}) — limpiando...`);
-    const pagosExistentes = await db
-      .select({ pago_id: pagos_credito.pago_id })
-      .from(pagos_credito)
-      .where(eq(pagos_credito.credito_id, existing.credito_id));
+    // Todo bajo el candado de pagos del crédito y en UNA transacción. El candado serializa con
+    // `createPaymentAgreement` (que no puede ligar un abono entre la comprobación y el borrado) y
+    // la transacción revierte los borrados anteriores si el trigger de `pagos_credito` frena el
+    // de los pagos: sin eso, los DELETE autocommit dejaban el crédito sin boletas ni pagos de
+    // inversionistas. COBROS-02 W4: con un convenio vivo sostenido por un abono inicial se
+    // rechaza antes de borrar nada.
+    await withPaymentAdvisoryLock(existing.credito_id, () =>
+      db.transaction(async (tx) => {
+        const convenioDelAbono = await convenioVivoConAbonoDelCredito(tx as unknown as typeof db, existing.credito_id);
+        if (convenioDelAbono !== null) {
+          throw new Error(
+            `El crédito ${creditoBase} tiene el convenio #${convenioDelAbono} (pendiente, vigente o completado) sostenido por un abono inicial. ` +
+              `Reconstruirlo borraría ese pago. Anule el convenio primero. No se borró nada.`,
+          );
+        }
+        console.log(`🔄 Crédito existente (ID ${existing.credito_id}) — limpiando...`);
+        const pagosExistentes = await tx
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(eq(pagos_credito.credito_id, existing.credito_id));
 
-    const pagoIds = pagosExistentes.map((p) => p.pago_id);
-    if (pagoIds.length > 0) {
-      await db.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
-      await db
-        .delete(pagos_credito_inversionistas)
-        .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
-    }
-    await db
-      .delete(pagos_credito)
-      .where(eq(pagos_credito.credito_id, existing.credito_id));
-    await db
-      .delete(cuotas_credito)
-      .where(eq(cuotas_credito.credito_id, existing.credito_id));
-    await db
-      .delete(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, existing.credito_id));
+        const pagoIds = pagosExistentes.map((p) => p.pago_id);
+        if (pagoIds.length > 0) {
+          await tx.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
+          await tx
+            .delete(pagos_credito_inversionistas)
+            .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
+        }
+        await tx
+          .delete(pagos_credito)
+          .where(eq(pagos_credito.credito_id, existing.credito_id));
+        await tx
+          .delete(cuotas_credito)
+          .where(eq(cuotas_credito.credito_id, existing.credito_id));
+        await tx
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, existing.credito_id));
+      }),
+    );
     console.log(`✅ Limpieza completada`);
   }
 

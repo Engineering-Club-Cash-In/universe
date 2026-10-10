@@ -10,6 +10,7 @@
     "check-types": "tsc --noEmit",
     "webhook:simulate": "bun run src/scripts/simulate-webhook.ts",
     "tokens:sync-cartera": "bun run src/scripts/sync-tokens-cartera.ts",
+    "tokens:crear-lote": "bun run src/scripts/crear-tokens-lote.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts"
   },

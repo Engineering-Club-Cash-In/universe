@@ -509,7 +509,11 @@ export async function createPaymentAgreement(
         statusCredit: string;
       }>(sql`
         UPDATE ${SQL_CARTERA_SCHEMA}.creditos c
-           SET "statusCredit" = 'EN_CONVENIO'
+           SET "statusCredit" = 'EN_CONVENIO',
+               -- Un convenio posterior invalida la marca de un levantamiento de
+               -- Jurídico anterior: reversar ese pago viejo no debe reinstalar
+               -- EN_JURIDICO sobre el ciclo nuevo.
+               juridico_levantada_pago_id = NULL
           FROM (
             SELECT "statusCredit" AS previo
               FROM ${SQL_CARTERA_SCHEMA}.creditos

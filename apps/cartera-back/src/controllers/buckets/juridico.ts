@@ -113,6 +113,11 @@ export async function enviarAJuridico(params: {
         );
       }
       await tx.execute(sql`SET LOCAL lock_timeout = ${sql.raw(`'${LOCK_TIMEOUT}'`)}`);
+      // Cada sentencia cabe en lo que queda del plazo (`lock_timeout` solo limita
+      // la espera de locks, no la ejecución).
+      await tx.execute(
+        sql`SET LOCAL statement_timeout = ${sql.raw(`'${Math.max(1, venceEn - Date.now())}ms'`)}`,
+      );
 
       // Locks SIN ESPERAR, por la misma política que la recuperación: si el cron
       // de moras los tiene, es mejor pedirle a la persona que reintente.
@@ -316,6 +321,15 @@ export async function enviarAJuridico(params: {
         status_credito: STATUS_EN_JURIDICO,
         motivo: motivoBucket,
       });
+
+      // Última comprobación antes del commit: si las sentencias sumaron más que
+      // el plazo, nadie espera ya esta respuesta; se revierte todo.
+      if (Date.now() > venceEn) {
+        throw new RecuperacionAbortada(
+          503,
+          "[ERROR] La operación venció antes de confirmarse. Intente de nuevo en un momento.",
+        );
+      }
 
       return {
         success: true as const,

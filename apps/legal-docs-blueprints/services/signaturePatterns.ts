@@ -60,6 +60,11 @@ export interface SignaturePatternConfig {
    * de guiones eso queda bien; con una etiqueta, el cuadro baja hasta ella y
    * tapa la línea y la etiqueta. Se mide en el PDF: la distancia entre la línea
    * dibujada y la base de la etiqueta. Sin esto no se sube nada.
+   *
+   * Sólo se aplica a las firmas que se ubicaron por una etiqueta o un ancla.
+   * En un contrato que mezcla las dos cosas (el de participación de sociedad:
+   * CUBE por su etiqueta, el representante en una raya), las rayas se quedan
+   * donde están.
    */
   subirSobreLaEtiqueta?: number;
   /**
@@ -406,6 +411,25 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Inversionista', 'Rep. Legal']
   },
 
+  // Los mismos anexos, cada uno en su documento: el par de firmas va una vez.
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION]: {
+    pattern: 'Firma del Inversionista',
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    subirSobreLaEtiqueta: 13,
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    signerCount: 2,
+    signers: ['Inversionista', 'Rep. Legal']
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO]: {
+    pattern: 'Firma del Inversionista',
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    subirSobreLaEtiqueta: 13,
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    signerCount: 2,
+    signers: ['Inversionista', 'Rep. Legal']
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   // Mismos patrones de firma que sus equivalentes de inversiones individuales
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
@@ -470,6 +494,40 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
+  },
+
+  // Dos columnas, como el individual. CUBE se ubica por su etiqueta, impresa
+  // debajo de una línea dibujada: a esa sola se le sube el cuadro. La de la
+  // sociedad no puede ubicarse así (debajo va el nombre de la sociedad, que
+  // cambia y también sale en el cuerpo), así que su línea es una raya de texto
+  // a la misma altura, y la raya queda primero en orden de lectura.
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD]: {
+    pattern: '___________________________________',
+    anclasExactas: ['CUBE INVESTMENTS, S.A.'],
+    subirSobreLaEtiqueta: 16,
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    // El mismo contrato que el individual, con la misma rúbrica por hoja.
+    rubrica: { franja: { izquierda: 63, derecha: 550, abajo: 6, arriba: 34 } },
+    signerCount: 1,
+    signers: ['Representante de la sociedad']
+  },
+
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD]: {
+    pattern: 'Firma del Inversionista',
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    subirSobreLaEtiqueta: 13,
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    signerCount: 2,
+    signers: ['Representante de la sociedad', 'Rep. Legal']
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
+    pattern: 'Firma del Inversionista',
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    subirSobreLaEtiqueta: 13,
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    signerCount: 2,
+    signers: ['Representante de la sociedad', 'Rep. Legal']
   },
 
   // ===== CARTA PODER =====

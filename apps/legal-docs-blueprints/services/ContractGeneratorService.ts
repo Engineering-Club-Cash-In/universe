@@ -404,6 +404,23 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // Los mismos anexos, cada uno en su documento (mismo texto para hombre y mujer).
+    this.registerTemplate({
+      type: ContractType.ANEXO1_CONFIRMACION_PARTICIPACION,
+      templateFilename: 'inversiones/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      templateFilenameFemale: 'inversiones/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      description: 'Anexo 1 - Confirmación de Participación',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.ANEXO2_DESIGNACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      description: 'Anexo 2 - Designación de Beneficiario',
+      requiredFields: []
+    });
+
     // ===== INVERSIONES SOCIEDAD =====
     this.registerTemplate({
       type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
@@ -475,6 +492,32 @@ export class ContractGeneratorService {
       templateFilename: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
       templateFilenameFemale: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
       description: 'Anexo 7 - Designación de Beneficiarios (Sociedad)',
+      requiredFields: []
+    });
+
+    // El género es el del representante de la sociedad.
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera_mujer.docx',
+      description: 'Contrato de Participación y Administración de Cartera - Sociedad',
+      requiredFields: []
+    });
+
+    // Los anexos de sociedad no cambian con el género del representante.
+    this.registerTemplate({
+      type: ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      description: 'Anexo 1 - Confirmación de Participación (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      description: 'Anexo 2 - Designación de Beneficiario (Sociedad)',
       requiredFields: []
     });
 

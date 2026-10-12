@@ -215,6 +215,20 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
     signerCount: 1,
@@ -273,6 +287,27 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
   },
 
   [ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
     signerCount: 1,
     signers: [
       { role: 'Inversionista', required: true },

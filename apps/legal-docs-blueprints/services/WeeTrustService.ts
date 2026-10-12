@@ -1196,7 +1196,7 @@ export class WeeTrustService {
 				linea.pageHeight -
 				linea.pdfY -
 				SIGNATURE_HEIGHT -
-				(config.subirSobreLaEtiqueta ?? 0);
+				(linea.porEtiqueta ? (config.subirSobreLaEtiqueta ?? 0) : 0);
 
 			console.log(
 				`[WeeTrust]   firma ${i + 1}: ${esperados[i].role} -> pág. ${linea.pageNum} (${x.toFixed(0)}, ${y.toFixed(0)})`,
@@ -1531,7 +1531,7 @@ export class WeeTrustService {
 				linea.pageHeight -
 				linea.pdfY -
 				SIGNATURE_HEIGHT -
-				(config.subirSobreLaEtiqueta ?? 0);
+				(linea.porEtiqueta ? (config.subirSobreLaEtiqueta ?? 0) : 0);
 			return {
 				user: { email },
 				coordinates: { x, y },
@@ -1579,6 +1579,8 @@ export class WeeTrustService {
 			pageWidth: number;
 			pageHeight: number;
 			debajo: string[];
+			/** Se ubicó por una etiqueta (o ancla), no por una raya de guiones. */
+			porEtiqueta: boolean;
 		}>
 	> {
 		const pdfDocument = await pdfjsLib.getDocument({
@@ -1622,6 +1624,7 @@ export class WeeTrustService {
 			pageWidth: number;
 			pageHeight: number;
 			debajo: string[];
+			porEtiqueta: boolean;
 		}> = [];
 
 		for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
@@ -1655,6 +1658,7 @@ export class WeeTrustService {
 					pageWidth: viewport.width,
 					pageHeight: viewport.height,
 					debajo,
+					porEtiqueta: !reLineaDeFirma.test(item.str.trim()),
 				});
 			}
 		}

@@ -39,6 +39,8 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "designacion_beneficiario",
   "contrato_participacion_administracion_cartera",
   "anexos_confirmacion_participacion_beneficiario",
+  "anexo1_confirmacion_participacion",
+  "anexo2_designacion_beneficiario",
   // ===== INVERSIONES SOCIEDAD =====
   "acuerdo_inversion_cash_in_sociedad",
   "carta_confirmacion_inversion_inicial_sociedad",
@@ -49,6 +51,9 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "cesion_creditos_sociedad",
   "contrato_servicios_cash_in_inversor_general_sociedad",
   "designacion_beneficiario_sociedad",
+  "contrato_participacion_administracion_cartera_sociedad",
+  "anexo1_confirmacion_participacion_sociedad",
+  "anexo2_designacion_beneficiario_sociedad",
   "carta_cube_andres",
   "carta_cube_don_alex",
   "carta_rdbe_don_alex",

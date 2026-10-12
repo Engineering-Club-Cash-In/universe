@@ -38,6 +38,10 @@ export enum ContractType {
   DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
   CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA = 'contrato_participacion_administracion_cartera',
   ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO = 'anexos_confirmacion_participacion_beneficiario',
+  // Los anexos 1 y 2 por separado, como los pide jurídico ahora. El unificado
+  // queda registrado para reemitir y vincular los que ya se generaron con él.
+  ANEXO1_CONFIRMACION_PARTICIPACION = 'anexo1_confirmacion_participacion',
+  ANEXO2_DESIGNACION_BENEFICIARIO = 'anexo2_designacion_beneficiario',
 
   // ===== INVERSIONES SOCIEDAD =====
   ACUERDO_INVERSION_CASH_IN_SOCIEDAD = 'acuerdo_inversion_cash_in_sociedad',
@@ -49,6 +53,9 @@ export enum ContractType {
   CESION_CREDITOS_SOCIEDAD = 'cesion_creditos_sociedad',
   CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD = 'contrato_servicios_cash_in_inversor_general_sociedad',
   DESIGNACION_BENEFICIARIO_SOCIEDAD = 'designacion_beneficiario_sociedad',
+  CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD = 'contrato_participacion_administracion_cartera_sociedad',
+  ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD = 'anexo1_confirmacion_participacion_sociedad',
+  ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD = 'anexo2_designacion_beneficiario_sociedad',
 
   // ===== CARTA PODER =====
   CARTA_CUBE_ANDRES = 'carta_cube_andres',
@@ -80,6 +87,8 @@ export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
   ContractType.DESIGNACION_BENEFICIARIO,
   ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
   ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+  ContractType.ANEXO1_CONFIRMACION_PARTICIPACION,
+  ContractType.ANEXO2_DESIGNACION_BENEFICIARIO,
   ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
   ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
   ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
@@ -89,6 +98,9 @@ export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
   ContractType.CESION_CREDITOS_SOCIEDAD,
   ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
   ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+  ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD,
+  ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD,
+  ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD,
 ]);
 
 /**

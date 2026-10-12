@@ -22,7 +22,7 @@ const gerente: MembresiaSocio[] = [{ companyId: "agencia-1", sellerId: null }];
 function caso(parcial: Partial<Parameters<typeof puedeSubirFacturaSeguro>[0]>) {
 	return puedeSubirFacturaSeguro({
 		closurePercentage: 90,
-		status: "open",
+		status: "won",
 		companyId: "agencia-1",
 		sellerId: "v1",
 		membresias: vendedor,
@@ -32,13 +32,19 @@ function caso(parcial: Partial<Parameters<typeof puedeSubirFacturaSeguro>[0]>) {
 }
 
 describe("puedeSubirFacturaSeguro", () => {
-	test("el vendedor asignado puede subirla al 90%", () => {
+	test("el vendedor asignado puede subirla al 90% ya ganada (el flujo normal)", () => {
 		expect(caso({})).toEqual({ ok: true });
-		expect(caso({ status: "on_hold" })).toEqual({ ok: true });
 	});
 
-	test("al 90% ya ganada (el flujo normal: confirmar contratos la cierra y la mueve a 90%)", () => {
-		expect(caso({ status: "won" })).toEqual({ ok: true });
+	test("al 90% sin cerrar (abierta o en pausa) todavía no", () => {
+		expect(caso({ status: "open" })).toEqual({
+			ok: false,
+			motivo: "sin_cerrar",
+		});
+		expect(caso({ status: "on_hold" })).toEqual({
+			ok: false,
+			motivo: "sin_cerrar",
+		});
 	});
 
 	test("solo en formalización final: ni antes del 90% ni ya desembolsado", () => {
@@ -207,9 +213,10 @@ describe("puedeEnviarFacturaDesdeCrm", () => {
 			...parcial,
 		});
 
-	test("al 90% (abierta, en pausa o ganada) y de una agencia: se envía", () => {
-		for (const status of ["open", "on_hold", "won"]) {
-			expect(caso({ status })).toEqual({ ok: true });
+	test("al 90% ganada y de una agencia: se envía; sin cerrar, todavía no", () => {
+		expect(caso({})).toEqual({ ok: true });
+		for (const status of ["open", "on_hold"]) {
+			expect(caso({ status })).toEqual({ ok: false, motivo: "sin_cerrar" });
 		}
 	});
 

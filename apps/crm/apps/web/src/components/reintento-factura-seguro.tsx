@@ -41,8 +41,16 @@ export function ReintentoFacturaSeguro({
 	};
 	const reenviar = useMutation({
 		mutationFn: () => client.reenviarFacturaSeguro({ opportunityId }),
-		onSuccess: () => {
-			toast.info("Reintento procesado. Revisa el estado del correo.");
+		onSuccess: (respuesta) => {
+			const r = respuesta as { envio?: string; aseguradora?: string };
+			const destino = nombreAseguradora(r.aseguradora);
+			if (r.envio === "enviado") {
+				toast.success(`Factura reenviada a ${destino}`);
+			} else if (r.envio === "fallido") {
+				toast.error(`No se pudo reenviar el correo a ${destino}`);
+			} else {
+				toast.info(`Reintento a ${destino} en proceso`);
+			}
 			refrescar();
 		},
 		onError: (error) => {

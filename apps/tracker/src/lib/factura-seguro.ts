@@ -56,7 +56,12 @@ export function vistaFacturaSeguro(
 	// En formalización final sin factura: quien no puede subirla (el gerente)
 	// ve que está pendiente y por qué. No se mira `cerrado`: en el flujo normal
 	// el caso llega a 90% ya ganado.
-	if (caso.estado !== "rechazado" && caso.porcentaje >= 90) {
+	// Al 100% (ya desembolsado) se puede subir, pero no se marca como pendiente.
+	if (
+		caso.estado !== "rechazado" &&
+		caso.porcentaje >= 90 &&
+		caso.porcentaje < 100
+	) {
 		return {
 			tono: "info",
 			titulo: "Factura del seguro pendiente",

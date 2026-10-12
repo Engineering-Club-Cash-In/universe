@@ -58,6 +58,7 @@ import {
 	etiquetaEnvioAseguradora,
 	textoSubidoPor,
 } from "@/lib/envio-aseguradora";
+import { formatearTamanoArchivo } from "@/lib/tamano-archivo";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -161,7 +162,7 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 										</p>
 									)}
 									<div className="mt-2 flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
-										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
+										<span>{formatearTamanoArchivo(doc.size)}</span>
 										<span>{textoSubidoPor(doc)}</span>
 										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
 									</div>

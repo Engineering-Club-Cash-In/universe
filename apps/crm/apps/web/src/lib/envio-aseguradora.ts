@@ -46,6 +46,11 @@ export function etiquetaEnvioAseguradora(
 				texto: `Correo a ${aseguradora} pendiente de configuración`,
 				className: "bg-amber-100 text-amber-800",
 			};
+		case "programado":
+			return {
+				texto: `Se enviará a ${aseguradora} al confirmar los contratos`,
+				className: "bg-blue-100 text-blue-800",
+			};
 		default:
 			return null;
 	}
@@ -56,8 +61,8 @@ export interface ResultadoFacturaSubida {
 	envio?: string;
 	aseguradora?: string;
 	motivo?: string;
-	/** Subida antes del cierre: se enviará sola al quedar ganada al 90%. */
-	alCerrar?: boolean;
+	/** Quedó programada: sale sola al confirmar los contratos. */
+	programada?: { aseguradora: string };
 }
 
 /** Aviso tras subir un "Seguro del Vehículo" desde el CRM; null para los demás documentos. */
@@ -65,11 +70,10 @@ export function avisoFacturaSubida(
 	resultado: ResultadoFacturaSubida | null | undefined,
 ): { tipo: "success" | "info" | "warning"; texto: string } | null {
 	if (!resultado) return null;
-	if (!resultado.enviada && resultado.alCerrar) {
+	if (!resultado.enviada && resultado.programada) {
 		return {
 			tipo: "info",
-			texto:
-				"Documento guardado. Se enviará a la aseguradora cuando la oportunidad quede ganada al 90%.",
+			texto: `Factura programada: se enviará a ${nombreAseguradora(resultado.programada.aseguradora)} al confirmar los contratos.`,
 		};
 	}
 	if (!resultado.enviada) {

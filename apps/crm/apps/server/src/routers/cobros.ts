@@ -54,6 +54,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -3360,6 +3361,18 @@ export const cobrosRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `La fecha límite del impuesto de circulación (${fechaLimiteImpuestoCirculacion()}) ya venció; edite el mensaje o contacte a los clientes directamente.`,
+				});
+			}
+
+			// Las plantillas con imagen tienen un número fijo de variables y
+			// WhatsApp rechaza las vacías: el mensaje editado no puede quedarse con
+			// menos párrafos que variables.
+			if (
+				plantilla.adjunto &&
+				!cuerpoCubreAdjunto(cuerpoBase, plantilla.adjunto)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Esta plantilla lleva imagen y necesita al menos ${plantilla.adjunto.parametros} párrafos separados por una línea en blanco; el mensaje editado tiene menos.`,
 				});
 			}
 

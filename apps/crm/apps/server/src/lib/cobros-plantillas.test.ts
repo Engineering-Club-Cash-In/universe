@@ -13,6 +13,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	type FilaCuotaAtrasada,
 	FRAGMENTO_RITMO_INCREMENTO_MORA,
@@ -1363,6 +1364,16 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 	test("se envía con la imagen: template mensaje2image y URL pública", () => {
 		expect(plantilla?.adjunto?.templateName).toBe("mensaje2image");
 		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
+	});
+
+	test("el mensaje editado necesita al menos un párrafo por variable del template", () => {
+		const adjunto = plantilla?.adjunto;
+		expect(adjunto).toBeDefined();
+		if (!adjunto) return;
+		expect(cuerpoCubreAdjunto(plantilla?.cuerpo ?? "", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc\n\nd", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb", adjunto)).toBe(false);
+		expect(cuerpoCubreAdjunto("una sola línea\ncon salto", adjunto)).toBe(false);
 	});
 
 	test("interpolar pone nombre, cuenta y teléfono del asesor", () => {

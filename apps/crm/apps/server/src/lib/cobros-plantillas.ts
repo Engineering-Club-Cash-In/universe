@@ -609,6 +609,26 @@ export interface PlantillaMensaje {
 }
 
 /**
+ * Cantidad de párrafos (separados por línea en blanco) del cuerpo: cada uno
+ * viaja en una variable del template, igual que `splitTemplateParams`.
+ */
+export function contarBloquesWhatsapp(cuerpo: string): number {
+	return cuerpo.split(/\n\s*\n/g).filter((bloque) => bloque.trim()).length;
+}
+
+/**
+ * Un template con adjunto tiene un número fijo de variables y WhatsApp rechaza
+ * las vacías: el cuerpo (editado o no) necesita al menos un párrafo por
+ * variable. Los párrafos de más se unen en la última.
+ */
+export function cuerpoCubreAdjunto(
+	cuerpo: string,
+	adjunto: NonNullable<PlantillaMensaje["adjunto"]>,
+): boolean {
+	return contarBloquesWhatsapp(cuerpo) >= adjunto.parametros;
+}
+
+/**
  * Imagen del aviso de cuenta exclusiva Nexa (bucket público `crm` de R2).
  * `COBROS_CUENTA_NEXA_IMAGEN_URL` permite cambiarla sin desplegar.
  */

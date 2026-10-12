@@ -56,6 +56,8 @@ export interface ResultadoFacturaSubida {
 	envio?: string;
 	aseguradora?: string;
 	motivo?: string;
+	/** Subida antes del cierre: se enviará sola al quedar ganada al 90%. */
+	alCerrar?: boolean;
 }
 
 /** Aviso tras subir un "Seguro del Vehículo" desde el CRM; null para los demás documentos. */
@@ -63,6 +65,13 @@ export function avisoFacturaSubida(
 	resultado: ResultadoFacturaSubida | null | undefined,
 ): { tipo: "success" | "info" | "warning"; texto: string } | null {
 	if (!resultado) return null;
+	if (!resultado.enviada && resultado.alCerrar) {
+		return {
+			tipo: "info",
+			texto:
+				"Documento guardado. Se enviará a la aseguradora cuando la oportunidad quede ganada al 90%.",
+		};
+	}
 	if (!resultado.enviada) {
 		return {
 			tipo: "info",

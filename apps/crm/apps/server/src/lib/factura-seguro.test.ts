@@ -404,13 +404,38 @@ function zipConEntradas(nombres: string[]): Uint8Array {
 	return new Uint8Array(Buffer.concat([...locales, directorio, fin]));
 }
 
+// Archivo OLE mínimo pero bien formado (.doc/.xls viejos): encabezado, un
+// sector de FAT y uno de directorio con estos streams.
+function oleConStreams(streams: string[]): Uint8Array {
+	const encabezado = Buffer.alloc(512, 0);
+	Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(
+		encabezado,
+	);
+	encabezado.writeUInt16LE(9, 0x1e); // sectores de 512 bytes
+	encabezado.writeUInt32LE(1, 0x2c); // un sector de FAT
+	encabezado.writeUInt32LE(1, 0x30); // el directorio empieza en el sector 1
+	for (let i = 0; i < 109; i++)
+		encabezado.writeUInt32LE(0xffffffff, 0x4c + i * 4);
+	encabezado.writeUInt32LE(0, 0x4c); // la FAT está en el sector 0
+	const fat = Buffer.alloc(512, 0xff);
+	fat.writeUInt32LE(0xfffffffd, 0); // sector 0: la propia FAT
+	fat.writeUInt32LE(0xfffffffe, 4); // sector 1: fin de la cadena del directorio
+	const directorio = Buffer.alloc(512, 0);
+	["Root Entry", ...streams].slice(0, 4).forEach((nombre, i) => {
+		const n = Buffer.from(`${nombre}\0`, "utf16le");
+		n.copy(directorio, i * 128);
+		directorio.writeUInt16LE(n.length, i * 128 + 0x40);
+	});
+	return new Uint8Array(Buffer.concat([encabezado, fat, directorio]));
+}
+
 describe("tipoPermitidoDesdeCrm", () => {
 	const DOCX =
 		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 	const zipDe = (entrada: string) =>
 		zipConEntradas(["[Content_Types].xml", entrada]);
 	const zip = zipDe("word/document.xml");
-	const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+	const ole = oleConStreams(["WordDocument"]);
 	const avif = new Uint8Array([
 		0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
 	]);
@@ -442,6 +467,23 @@ describe("tipoPermitidoDesdeCrm", () => {
 			]),
 		);
 		expect(tipoPermitidoDesdeCrm(falso, DOCX)).toBeNull();
+	});
+
+	test("Word y Excel viejos (OLE) solo con su stream principal", () => {
+		expect(
+			tipoPermitidoDesdeCrm(
+				oleConStreams(["Workbook"]),
+				"application/vnd.ms-excel",
+			),
+		).toBe("application/vnd.ms-excel");
+		// Un Word declarado como Excel, o solo la firma de 8 bytes: no.
+		expect(tipoPermitidoDesdeCrm(ole, "application/vnd.ms-excel")).toBeNull();
+		expect(
+			tipoPermitidoDesdeCrm(
+				new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+				"application/msword",
+			),
+		).toBeNull();
 	});
 
 	test("un HTML declarado como PDF o como Word no pasa", () => {

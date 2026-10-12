@@ -8,7 +8,7 @@ function conexionFalsa(falla = false) {
 		valores: unknown;
 		conflicto: unknown;
 	}> = [];
-	const conexion = {
+	const savepoint = {
 		insert: (tabla: unknown) => ({
 			values: (valores: unknown) => ({
 				onConflictDoUpdate: async (conflicto: unknown) => {
@@ -17,6 +17,10 @@ function conexionFalsa(falla = false) {
 				},
 			}),
 		}),
+	};
+	const conexion = {
+		transaction: async (fn: (sp: typeof savepoint) => Promise<void>) =>
+			fn(savepoint),
 	};
 	return { conexion: conexion as never, llamadas };
 }

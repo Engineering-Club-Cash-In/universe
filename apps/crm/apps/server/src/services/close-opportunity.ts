@@ -1808,6 +1808,11 @@ export async function closeOpportunity(
 				action: "mark_won",
 				data: { numeroSifco },
 			});
+			// En la misma transacción que el `won` (en un savepoint que no puede
+			// tumbar el cierre): la factura del seguro usa esta cotización tal cual.
+			if (quotation?.id) {
+				await guardarCotizacionDelCierre(opportunityId, quotation.id, tx);
+			}
 
 			// Update vehicle status to 'sold'
 			if (opportunity.vehicleId) {
@@ -1834,12 +1839,6 @@ export async function closeOpportunity(
 				contractId: clientResult.contractId,
 			};
 		});
-
-		// Después del commit y sin poder fallar: la factura del seguro del tracker
-		// usa esta cotización tal cual.
-		if (quotation?.id) {
-			await guardarCotizacionDelCierre(opportunityId, quotation.id);
-		}
 
 		console.log(
 			`[CloseOpportunity] ✓ Opportunity closed successfully: ${opportunityId}`,

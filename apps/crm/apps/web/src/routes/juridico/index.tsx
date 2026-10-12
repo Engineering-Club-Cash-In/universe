@@ -3,7 +3,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
-	Banknote,
 	CheckCircle,
 	FilePlus2,
 	FileText,
@@ -581,7 +580,6 @@ function RouteComponent() {
 											<TableHead>Oportunidad</TableHead>
 											<TableHead>Cliente</TableHead>
 											<TableHead>Etapa</TableHead>
-											<TableHead className="text-right">Valor</TableHead>
 											<TableHead className="text-center">Contratos</TableHead>
 											<TableHead className="text-right">Acciones</TableHead>
 										</TableRow>
@@ -597,7 +595,7 @@ function RouteComponent() {
 													})
 												}
 											>
-												<TableCell>
+												<TableCell className="min-w-48 whitespace-normal">
 													<div className="text-sm">
 														<button
 															type="button"
@@ -616,7 +614,7 @@ function RouteComponent() {
 														</div>
 													</div>
 												</TableCell>
-												<TableCell>
+												<TableCell className="min-w-48 whitespace-normal">
 													<div className="text-sm">
 														<button
 															type="button"
@@ -642,14 +640,6 @@ function RouteComponent() {
 													>
 														{opp.stage.name} ({opp.stage.closurePercentage}%)
 													</Badge>
-												</TableCell>
-												<TableCell className="text-right">
-													<div className="flex items-center justify-end gap-1 font-medium text-green-600">
-														<Banknote className="h-4 w-4" />Q
-														{Number.parseFloat(
-															opp.value || "0",
-														).toLocaleString()}
-													</div>
 												</TableCell>
 												<TableCell className="text-center">
 													<Badge
@@ -684,8 +674,11 @@ function RouteComponent() {
 																</Link>
 															</Button>
 														)}
+														{/* Sin contratos no hay nada que aprobar: el botón aparece
+														    cuando ya se generaron. */}
 														{canApproveLegalStage &&
-															opp.stage.closurePercentage === 80 && (
+															opp.stage.closurePercentage === 80 &&
+															opp.contractCount > 0 && (
 																<Button
 																	variant="outline"
 																	size="sm"
@@ -697,7 +690,6 @@ function RouteComponent() {
 																		});
 																		setIsApproveModalOpen(true);
 																	}}
-																	disabled={opp.contractCount === 0}
 																>
 																	<CheckCircle />
 																	Aprobar (→ 85%)

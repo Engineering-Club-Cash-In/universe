@@ -60,13 +60,14 @@ export function ReintentoFacturaSeguro({
 	});
 
 	// Un `pendiente` pasa a reintentable a los 10 minutos: se refresca en ese
-	// momento para que el botón aparezca sin recargar. Si el reloj del navegador
-	// va adelantado y el server todavía no lo habilita, se vuelve a revisar cada
-	// 30 segundos; el server deja de mandar `reintentoDesde` al vencer el plazo.
+	// momento para que el botón aparezca sin recargar. El reloj del navegador
+	// puede ir adelantado o atrasado respecto del server, así que se revisa como
+	// mucho cada minuto (cada 30 s si el plazo ya pasó) hasta que el server lo
+	// habilite; deja de mandar `reintentoDesde` al vencer el plazo.
 	useEffect(() => {
 		if (!reintentoDesde || disponible) return;
 		const restante = Date.parse(reintentoDesde) - Date.now();
-		const espera = restante > 0 ? restante + 1000 : 30_000;
+		const espera = restante > 0 ? Math.min(restante + 1000, 60_000) : 30_000;
 		const id = setTimeout(() => {
 			queryClient.invalidateQueries({
 				queryKey: orpc.getOpportunityDocuments.key(),

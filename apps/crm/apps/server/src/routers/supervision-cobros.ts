@@ -20,6 +20,7 @@
 
 import { z } from "zod";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
+import { calcularKpisYEquipo } from "../services/supervision-complementos";
 
 /** Mismos períodos que el segmentado Día / Semana / Mes del dashboard. */
 export const PERIODOS_SUPERVISION = ["dia", "semana", "mes"] as const;
@@ -75,7 +76,7 @@ export interface EquipoAsesorSupervision {
 	contactosHoy: number | null;
 	/** Meta del asesor, en % (definir sobre qué). */
 	meta: number | null;
-	/** «Rescate», en % (definirlo). */
+	/** «Rescate», en %: recuperados ÷ (recuperados + escalados) del período. */
 	rescate: number | null;
 }
 
@@ -96,12 +97,9 @@ export const supervisionCobrosRouter = {
 			// en la alerta, más de 5 días en la cola, 48 h en la cartera): unificar
 			// y exponer el conteo aquí y como filtro de la cola/cartera.
 			const sinContacto3Dias = null as number | null;
-			// TODO(José) · tarea S3: recuperación del equipo con meta en Q, cuentas
-			// curadas y promesas cumplidas del equipo para `input.periodo`.
-			const kpis = null as KpisEquipoSupervision | null;
-			// TODO(José) · tarea S4: por asesor, contactos de hoy en vivo, meta y
-			// «rescate». Una fila por asesor del pool.
-			const equipo = null as EquipoAsesorSupervision[] | null;
+			// S3 + S4: KPIs del equipo y columnas de la tabla Equipo
+			// (services/supervision-complementos.ts). Cada bloque falla solo.
+			const { kpis, equipo } = await calcularKpisYEquipo(input.periodo);
 			return {
 				periodo: input.periodo,
 				pendientes,

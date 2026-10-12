@@ -256,20 +256,20 @@ function movimientosDeHoy(hoyStr: string): Promise<MovimientoBucketDelDia[]> {
 }
 
 /**
- * Lo que falta sumar al cierre para que el rango incluya hoy. Si el cierre de
- * movimientos de hoy ya corrió, sus filas ya están en `movimiento` y no se suma
- * nada (sin doble conteo). Solo cuentan las filas de subida/bajada: el cierre
- * inserta primero los contactos y después los movimientos, así que una fila de
- * contacto no prueba que el paso de movimientos terminó. `incluyeHoy: false`
- * solo si no se pudo calcular.
+ * Los movimientos de HOY que todavía no están en el cierre diario, para sumar
+ * al rango. Si el cierre de movimientos de hoy ya corrió, sus filas ya están en
+ * `movimiento` y no se devuelve nada (sin doble conteo). Solo cuentan las
+ * filas de subida/bajada: el cierre inserta primero los contactos y después los
+ * movimientos, así que una fila de contacto no prueba que el paso de
+ * movimientos terminó. `incluyeHoy: false` solo si no se pudo calcular.
+ * Lo comparten el Dashboard del asesor y el del supervisor (S3/S4).
  */
-async function movimientoDeHoyEnVivo(
-	userId: string,
+export async function movimientosDeHoySinCerrar(
 	r: RangoFechas,
 	ahora: Date,
-): Promise<{ subieron: number; bajaron: number; incluyeHoy: boolean }> {
+): Promise<{ movimientos: MovimientoBucketDelDia[]; incluyeHoy: boolean }> {
 	const hoyStr = toDateStrGT(ahora);
-	const sinNada = { subieron: 0, bajaron: 0, incluyeHoy: true };
+	const sinNada = { movimientos: [], incluyeHoy: true };
 	if (r.hastaStr !== hoyStr) return sinNada;
 	try {
 		const [cierreDeHoy] = await db
@@ -283,18 +283,26 @@ async function movimientoDeHoyEnVivo(
 			)
 			.limit(1);
 		if (cierreDeHoy) return sinNada;
-		const propios = (await movimientosDeHoy(hoyStr)).filter(
-			(m) => m.asesorId === userId,
-		);
-		return {
-			subieron: propios.filter((m) => m.tipo === "subida").length,
-			bajaron: propios.filter((m) => m.tipo === "bajada").length,
-			incluyeHoy: true,
-		};
+		return { movimientos: await movimientosDeHoy(hoyStr), incluyeHoy: true };
 	} catch (error) {
-		console.error("[getMiDesempeno] movimiento de hoy no disponible:", error);
-		return { subieron: 0, bajaron: 0, incluyeHoy: false };
+		console.error("[movimientos de hoy] no disponibles:", error);
+		return { movimientos: [], incluyeHoy: false };
 	}
+}
+
+/** Lo de hoy en vivo para un solo asesor (B9 del Dashboard del asesor). */
+async function movimientoDeHoyEnVivo(
+	userId: string,
+	r: RangoFechas,
+	ahora: Date,
+): Promise<{ subieron: number; bajaron: number; incluyeHoy: boolean }> {
+	const { movimientos, incluyeHoy } = await movimientosDeHoySinCerrar(r, ahora);
+	const propios = movimientos.filter((m) => m.asesorId === userId);
+	return {
+		subieron: propios.filter((m) => m.tipo === "subida").length,
+		bajaron: propios.filter((m) => m.tipo === "bajada").length,
+		incluyeHoy,
+	};
 }
 
 /** Créditos que bajaron / subieron de bucket, del cierre diario (corre a las 22:00). */

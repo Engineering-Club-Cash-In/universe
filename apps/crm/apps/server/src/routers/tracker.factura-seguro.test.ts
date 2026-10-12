@@ -262,7 +262,8 @@ const crmCtx = {
 function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 	return {
 		id: ID,
-		status: "open",
+		// En el flujo normal el caso llega a 90% ya ganado.
+		status: "won",
 		createdAt: new Date("2026-01-01"),
 		updatedAt: new Date("2026-02-01"),
 		closurePercentage: porcentaje,
@@ -415,11 +416,17 @@ describe("subirFacturaSeguro", () => {
 		);
 	});
 
-	test("sin cerrar, la aseguradora sigue saliendo de la cotización", async () => {
-		caso = casoAl(90, { insuranceProvider: "universales" });
-		cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
-		const r = await subir();
-		expect(r.aseguradora).toBe("gyt");
+	test("al 90% sin cerrar (abierta o en pausa): BAD_REQUEST, sin subir nada a R2", async () => {
+		for (const status of ["open", "on_hold"]) {
+			caso = casoAl(90, { status });
+			await expect(subir()).rejects.toMatchObject({
+				code: "BAD_REQUEST",
+				message:
+					"La factura del seguro se sube cuando el crédito ya está cerrado (ganado)",
+			});
+		}
+		expect(subidosR2).toHaveLength(0);
+		expect(insertados).toHaveLength(0);
 	});
 
 	test("si falla la lectura de los datos del correo, se borra el archivo recién subido y no se registra nada", async () => {
@@ -640,8 +647,8 @@ describe("subirFacturaSeguro", () => {
 		expect(html).not.toContain("Kia");
 	});
 
-	test("si el caso se cerró mientras se subía, rechaza, borra el archivo y no manda un correo con datos de antes del cierre", async () => {
-		casoBajoBloqueo = { ...caso, status: "won" };
+	test("si el caso cambió de estado mientras se subía, rechaza, borra el archivo y no manda el correo", async () => {
+		casoBajoBloqueo = { ...caso, status: "lost" };
 		await expect(subir()).rejects.toMatchObject({
 			code: "CONFLICT",
 			message:
@@ -685,9 +692,9 @@ describe("reenviarFacturaSeguro", () => {
 		nombre: "factura.pdf",
 	});
 
-	test("si el caso cambió de estado antes del bloqueo (se cerró), no reenvía con datos viejos", async () => {
+	test("si el caso cambió de estado antes del bloqueo, no reenvía con datos viejos", async () => {
 		facturaPrevia = [registro("fallido")];
-		casoBajoBloqueo = { ...caso, status: "won" };
+		casoBajoBloqueo = { ...caso, status: "lost" };
 		await expect(
 			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
 		).rejects.toMatchObject({
@@ -1040,6 +1047,14 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 				casoAl(90, { status: "lost" }),
 				"la oportunidad ya no admite la factura del seguro",
 			],
+			[
+				casoAl(90, { status: "open" }),
+				"la oportunidad todavía no está ganada (crédito sin cerrar)",
+			],
+			[
+				casoAl(90, { status: "on_hold" }),
+				"la oportunidad todavía no está ganada (crédito sin cerrar)",
+			],
 		];
 		for (const [c, motivo] of casos) {
 			caso = c;
@@ -1095,7 +1110,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	});
 
 	test("si la oportunidad cambió de estado mientras tanto, no registra ni envía", async () => {
-		casoBajoBloqueo = { ...caso, status: "won" };
+		casoBajoBloqueo = { ...caso, status: "lost" };
 		const r = await enviar();
 		expect(r).toEqual({
 			enviada: false,

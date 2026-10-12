@@ -686,7 +686,7 @@ Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia
 		// 4 bloques → template `mensaje4image` (imagen + 4 variables) (igual que el
 		// server). Solo para créditos con cuenta Nexa (plantillasDisponibles /
 		// prepararCuentaNexaParaEnvio).
-		cuerpoWhastapp: `{clienteNombre}. Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito. Vía transferencia desde tu banco de preferencia hacia:
+		cuerpoWhastapp: `{clienteNombre}. Ya está disponible tu *nueva cuenta exclusiva para realizar los pagos de tu crédito*. Vía transferencia desde tu banco de preferencia hacia:
 
 🏛️ *Banco Nexa*
 

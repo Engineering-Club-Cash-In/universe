@@ -622,6 +622,10 @@ interface CacheEntry<T> {
 
 class SimpleCache {
 	private cache = new Map<string, CacheEntry<unknown>>();
+	// Sube con cada invalidación. Una lectura anota la generación al empezar y
+	// solo guarda su respuesta si no cambió: así una consulta que ya estaba en
+	// vuelo cuando se invalidó no vuelve a llenar la caché con datos viejos.
+	private generacion = 0;
 
 	constructor(private ttl: number) {}
 
@@ -637,11 +641,17 @@ class SimpleCache {
 		return entry.data;
 	}
 
-	set<T>(key: string, data: T): void {
+	generacionActual(): number {
+		return this.generacion;
+	}
+
+	set<T>(key: string, data: T, generacion?: number): void {
+		if (generacion !== undefined && generacion !== this.generacion) return;
 		this.cache.set(key, { data, timestamp: Date.now() });
 	}
 
 	invalidate(pattern?: string): void {
+		this.generacion++;
 		if (!pattern) {
 			this.cache.clear();
 			return;
@@ -655,6 +665,7 @@ class SimpleCache {
 	}
 
 	clear(): void {
+		this.generacion++;
 		this.cache.clear();
 	}
 }
@@ -1398,6 +1409,10 @@ export class CarteraBackClient {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
 
+		// Generación de la caché al empezar: si se invalida mientras esta lectura
+		// está en vuelo, su respuesta (posiblemente vieja) no se guarda.
+		const generacionAlEmpezar = this.cache.generacionActual();
+
 		// Check cache for GET requests
 		if (useCache && this.config.enableCache && options.method === "GET") {
 			const cached = this.cache.get<T>(cacheKey);
@@ -1546,7 +1561,7 @@ export class CarteraBackClient {
 
 				// Cache successful GET requests
 				if (useCache && this.config.enableCache && options.method === "GET") {
-					this.cache.set(cacheKey, data);
+					this.cache.set(cacheKey, data, generacionAlEmpezar);
 				}
 
 				return data;
@@ -3650,6 +3665,62 @@ export class CarteraBackClient {
 			}),
 		});
 		return result;
+	}
+
+	// Reasignación MANUAL EN BLOQUE (S6, issue #1891): varios créditos a un mismo
+	// asesor en UNA transacción de cartera, todo o nada. Mismo contrato que
+	// `reasignarAsesor` (el email es el del supervisor real). Ante un lote con
+	// errores cartera responde 400 con `errores` por crédito y no escribe nada.
+	async reasignarAsesorLote(input: {
+		credito_ids: number[];
+		asesor_nuevo_id: number;
+		motivo: string;
+		usuario_email?: string;
+	}): Promise<{
+		success: boolean;
+		asesor_nuevo: number;
+		reasignados: Array<{
+			credito_id: number;
+			asesor_anterior: number | null;
+			bucket: number;
+		}>;
+		omitidos: Array<{ credito_id: number; motivo: "ya_asignado" }>;
+	}> {
+		// Mismas lecturas cacheadas que muestran asesor_id (ver reasignarAsesor).
+		const invalidar = () => {
+			this.cache.invalidate("/credito?");
+			this.cache.invalidate("getAllCredits");
+			this.cache.invalidate("stats");
+			this.cache.invalidate("mora-por-etapa-asesor");
+		};
+		// Antes y DESPUÉS: una lectura que llegue entre la invalidación y el commit
+		// del lote volvería a llenar la caché con los dueños viejos.
+		invalidar();
+		try {
+			return await this.request("/buckets/creditos/reasignar-lote", {
+				method: "POST",
+				body: JSON.stringify({
+					credito_ids: input.credito_ids,
+					asesor_nuevo_id: input.asesor_nuevo_id,
+					motivo: input.motivo,
+					...(input.usuario_email && { usuario_email: input.usuario_email }),
+				}),
+			});
+		} catch (error) {
+			// Sin respuesta de cartera (timeout, conexión caída): abortar el fetch
+			// no cancela la transacción del servidor, que puede confirmar después.
+			// Se vuelve a invalidar un par de veces más tarde para que ninguna
+			// lectura intermedia deje dueños viejos en la caché. Si cartera sí
+			// respondió (400, 409, 5xx), el resultado es definitivo.
+			if (!(error instanceof CarteraBackHttpError)) {
+				for (const retardoMs of [15_000, 60_000, 180_000]) {
+					setTimeout(invalidar, retardoMs).unref?.();
+				}
+			}
+			throw error;
+		} finally {
+			invalidar();
+		}
 	}
 
 	// Recuperación de vehículo: traslado MANUAL del crédito a B4 (Última

@@ -1385,8 +1385,16 @@ describe("factura programada para el cierre", () => {
 
 	test("un AVIF subido como factura.pdf sale con la extensión real", async () => {
 		caso = casoAl(90);
-		contenidoR2 = Buffer.from([
-			0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+		const caja = (tipo: string, contenido: Buffer) => {
+			const encabezado = Buffer.alloc(8);
+			encabezado.writeUInt32BE(8 + contenido.length, 0);
+			encabezado.write(tipo, 4, "latin1");
+			return Buffer.concat([encabezado, contenido]);
+		};
+		contenidoR2 = Buffer.concat([
+			caja("ftyp", Buffer.from("avif\u0000\u0000\u0000\u0000avif", "latin1")),
+			caja("meta", Buffer.alloc(4)),
+			caja("mdat", Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])),
 		]);
 		await enviarFacturaSeguroDesdeCrm({
 			opportunityId: ID,

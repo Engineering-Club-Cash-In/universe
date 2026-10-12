@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deflateRawSync } from "node:zlib";
 import {
 	CORREOS_POLIZAS_GYT,
 	CORREOS_POLIZAS_INTERNOS,
@@ -430,23 +431,27 @@ describe("nombreDeFactura", () => {
 // ZIP mínimo pero bien formado (sin comprimir), con su directorio central.
 // Cada entrada lleva el contenido dado (vacío si no se pasa).
 function zipConEntradas(
-	entradas: Array<string | [string, string]>,
+	entradas: Array<string | [string, string] | [string, string, boolean]>,
 ): Uint8Array {
 	const locales: Buffer[] = [];
 	const centrales: Buffer[] = [];
 	let desplazamiento = 0;
 	for (const entrada of entradas) {
-		const [nombre, contenido] =
-			typeof entrada === "string" ? [entrada, ""] : entrada;
+		const [nombre, contenido, comprimir] =
+			typeof entrada === "string" ? [entrada, "", false] : entrada;
 		const n = Buffer.from(nombre);
-		const d = Buffer.from(contenido);
+		const d = comprimir
+			? deflateRawSync(Buffer.from(contenido))
+			: Buffer.from(contenido);
 		const local = Buffer.alloc(30);
 		local.writeUInt32LE(0x04034b50, 0);
+		if (comprimir) local.writeUInt16LE(8, 8);
 		local.writeUInt32LE(d.length, 18);
 		local.writeUInt32LE(d.length, 22);
 		local.writeUInt16LE(n.length, 26);
 		const central = Buffer.alloc(46);
 		central.writeUInt32LE(0x02014b50, 0);
+		if (comprimir) central.writeUInt16LE(8, 10);
 		central.writeUInt32LE(d.length, 20);
 		central.writeUInt32LE(d.length, 24);
 		central.writeUInt16LE(n.length, 28);
@@ -493,6 +498,23 @@ function oleConStreams(streams: string[], tipoStream = 2): Uint8Array {
 	return new Uint8Array(Buffer.concat([encabezado, fat, directorio]));
 }
 
+// AVIF mínimo pero completo: cajas ftyp, meta y mdat encadenadas hasta el final.
+function avifCompleto(): Uint8Array {
+	const caja = (tipo: string, contenido: Buffer) => {
+		const encabezado = Buffer.alloc(8);
+		encabezado.writeUInt32BE(8 + contenido.length, 0);
+		encabezado.write(tipo, 4, "latin1");
+		return Buffer.concat([encabezado, contenido]);
+	};
+	return new Uint8Array(
+		Buffer.concat([
+			caja("ftyp", Buffer.from("avif\u0000\u0000\u0000\u0000avif", "latin1")),
+			caja("meta", Buffer.alloc(4)),
+			caja("mdat", Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])),
+		]),
+	);
+}
+
 describe("tipoPermitidoDesdeCrm", () => {
 	const DOCX =
 		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -503,9 +525,7 @@ describe("tipoPermitidoDesdeCrm", () => {
 		["word/document.xml", "<w:document/>"],
 	]);
 	const ole = oleConStreams(["WordDocument"]);
-	const avif = new Uint8Array([
-		0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
-	]);
+	const avif = avifCompleto();
 	const texto = (s: string) => new TextEncoder().encode(s);
 
 	test("PDF, imagen y AVIF por su contenido", () => {
@@ -513,6 +533,10 @@ describe("tipoPermitidoDesdeCrm", () => {
 			"application/pdf",
 		);
 		expect(tipoPermitidoDesdeCrm(avif, "image/avif")).toBe("image/avif");
+		// Solo el comienzo del contenedor (truncado): no.
+		expect(
+			tipoPermitidoDesdeCrm(avif.subarray(0, 12), "image/avif"),
+		).toBeNull();
 	});
 
 	test("Word y Excel solo si el contenido es de Office del tipo declarado", () => {
@@ -534,6 +558,30 @@ describe("tipoPermitidoDesdeCrm", () => {
 		).toBeNull();
 		expect(
 			tipoPermitidoDesdeCrm(zipConEntradas(["word/document.xml"]), DOCX),
+		).toBeNull();
+		// Comprimido también vale; una parte que se infla sin tope (ZIP bomb),
+		// no.
+		expect(
+			tipoPermitidoDesdeCrm(
+				zipConEntradas([
+					["[Content_Types].xml", MANIFIESTO_DOCX, true],
+					["word/document.xml", "<w:document/>", true],
+				]),
+				DOCX,
+			),
+		).toBe(DOCX);
+		expect(
+			tipoPermitidoDesdeCrm(
+				zipConEntradas([
+					[
+						"[Content_Types].xml",
+						MANIFIESTO_DOCX + " ".repeat(25 * 1024 * 1024),
+						true,
+					],
+					["word/document.xml", "<w:document/>"],
+				]),
+				DOCX,
+			),
 		).toBeNull();
 		// Con las entradas vacías (sin manifiesto ni documento de verdad): no.
 		expect(

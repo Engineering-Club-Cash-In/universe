@@ -92,6 +92,7 @@ import {
 } from "./contract-generation";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
+import { enviarFacturaSubidaAntes } from "./tracker";
 
 // Standardized env var naming: R2_BUCKET_* pattern
 const R2_LEGAL_DOCS_BUCKET_NAME =
@@ -1608,6 +1609,11 @@ export const legalContractsRouter = {
 				relatedEntityId: input.opportunityId,
 				redirectPage: "analysis_90_details",
 			});
+
+			// La factura del seguro subida desde el CRM antes del cierre sale sola
+			// ahora que la oportunidad quedó ganada al 90%. Sin esperar y nunca
+			// lanza: un correo caído no puede romper la confirmación.
+			void enviarFacturaSubidaAntes(input.opportunityId, context.userId);
 
 			// Bienvenida al cliente con su cuenta Nexa (y el documento del seguro,
 			// apagado por env). Sin esperar: un WhatsApp o Nexa caídos no pueden

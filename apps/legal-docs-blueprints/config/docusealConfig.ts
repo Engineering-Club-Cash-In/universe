@@ -137,6 +137,13 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  [ContractType.COBERTURA_GYT]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
   // ===== INVERSIONES =====
   [ContractType.ACUERDO_INVERSION_CASH_IN]: {
     signerCount: 1,

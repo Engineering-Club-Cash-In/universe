@@ -96,3 +96,30 @@ describe("subir el cuadro sobre la etiqueta", () => {
 		}
 	});
 });
+
+describe("dónde arranca el cuadro en una raya con etiqueta", () => {
+	const TITULAR: ContractSigner = { role: SignerRole.TITULAR, email: "titular@test", name: "Titular" };
+
+	test("en la cobertura de G&T arranca en la raya, no sobre «Firma:»", async () => {
+		const pdf = await pdfCon([{ texto: "Firma:___________________________", x: 100, y: 300 }]);
+		const [firma] = firmas(
+			await WeeTrustService.locateSignatureWidgets(pdf, ContractType.COBERTURA_GYT, [TITULAR]),
+		);
+		// "Firma:" en Helvetica 10 mide unos 28 puntos.
+		expect(firma.coordinates.x).toBeGreaterThan(120);
+		expect(firma.coordinates.x).toBeLessThan(140);
+		expect(firma.coordinates.y).toBeCloseTo(ALTO_PAGINA - 300 - ALTO_FIRMA, 0);
+	});
+
+	test("sin la opción, el cuadro sigue arrancando donde empieza el texto", async () => {
+		const pdf = await pdfCon([{ texto: "F)_______________________________________", x: 100, y: 300 }]);
+		const [firma] = firmas(
+			await WeeTrustService.locateSignatureWidgets(
+				pdf,
+				ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
+				[TITULAR],
+			),
+		);
+		expect(firma.coordinates.x).toBeCloseTo(100, 0);
+	});
+});

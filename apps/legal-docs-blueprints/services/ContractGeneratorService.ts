@@ -236,6 +236,19 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar cobertura de Seguros G&T (no tiene género, solo singular y plural)
+    this.registerTemplate({
+      type: ContractType.COBERTURA_GYT,
+      templateFilename: 'cobertura_gyt/CARTA_COBERTURA_GYT.docx',
+      templateFilenameFemale: 'cobertura_gyt/CARTA_COBERTURA_GYT.docx',
+      templateFilenamePlural: 'cobertura_gyt/CARTA_COBERTURA_GYT_PLURAL.docx',
+      templateFilenameFemalePlural: 'cobertura_gyt/CARTA_COBERTURA_GYT_PLURAL.docx',
+      description: 'Carta de cobertura Seguros G&T',
+      requiredFields: [
+        'nombreCompleto',
+      ]
+    });
+
     // Registrar pagaré único libre de protesto
     this.registerTemplate({
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,

@@ -68,6 +68,15 @@ export interface SignaturePatternConfig {
    */
   subirSobreLaEtiqueta?: number;
   /**
+   * Que el cuadro de firma empiece donde empieza la raya, no la etiqueta que
+   * va delante en la misma línea ("Firma:___").
+   *
+   * El cuadro arranca en el primer carácter del texto encontrado. Con "f)" eso
+   * casi no se nota, pero "Firma:" es ancha y el cuadro la tapa. Sólo se aplica
+   * a las firmas ubicadas por una raya.
+   */
+  firmaSobreLaRaya?: boolean;
+  /**
    * Cómo se firma este contrato. Por defecto `electronica`.
    *
    * Un contrato `fisica` no se sube a WeeTrust: se genera, se guarda en R2 y
@@ -196,6 +205,15 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente'],
     yOffset: -4.0,  // Un poquito más arriba
     xOffset: -4.5   // Más a la izquierda
+  },
+
+  // A diferencia de las de Universales, la de G&T trae una sola sección.
+  [ContractType.COBERTURA_GYT]: {
+    pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    firmaSobreLaRaya: true,
+    signerCount: 1,
+    signers: ['Cliente']
   },
 
   [ContractType.CONTRATO_PRIVADO_USO]: {
@@ -568,7 +586,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
  *
  * Gerencia lo pidió porque a los clientes les llegaban once enlaces y no los
  * firmaban. Las cartas son lo que se puede juntar: sólo las firman el cliente y
- * sus codeudores, y casi todas son de una hoja (la cobertura es de dos).
+ * sus codeudores, y casi todas son de una hoja (las coberturas de Universales
+ * son de dos).
  *
  * Los contratos NO van acá: llevan al representante legal y la rúbrica por
  * página, y cada uno tiene que poder anularse o regenerarse por separado. El
@@ -586,6 +605,7 @@ export const CARTAS_UNIFICABLES: readonly ContractType[] = [
   ContractType.SOLICITUD_COMPRA_VEHICULO,
   ContractType.COBERTURA_INREXSA,
   ContractType.COBERTURA_INREXSA_COMERCIAL,
+  ContractType.COBERTURA_GYT,
 ];
 
 export function esCartaUnificable(contractType: string): boolean {

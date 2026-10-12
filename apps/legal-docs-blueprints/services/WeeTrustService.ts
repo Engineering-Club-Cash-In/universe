@@ -1191,7 +1191,8 @@ export class WeeTrustService {
 			// de la firma para que quede SOBRE la línea y no a partir de ella, y
 			// en los que se ubican por una etiqueta impresa debajo de la línea,
 			// lo que hay entre las dos: si no, el cuadro tapa la etiqueta.
-			const x = linea.pdfX;
+			const x =
+				config.firmaSobreLaRaya && !linea.porEtiqueta ? linea.pdfXRaya : linea.pdfX;
 			const y =
 				linea.pageHeight -
 				linea.pdfY -
@@ -1526,7 +1527,8 @@ export class WeeTrustService {
 
 		return elegidas.map((linea, i) => {
 			const email = signerEmails[Math.min(i, signerEmails.length - 1)];
-			const x = linea.pdfX;
+			const x =
+				config.firmaSobreLaRaya && !linea.porEtiqueta ? linea.pdfXRaya : linea.pdfX;
 			const y =
 				linea.pageHeight -
 				linea.pdfY -
@@ -1575,6 +1577,8 @@ export class WeeTrustService {
 		Array<{
 			pageNum: number;
 			pdfX: number;
+			/** Donde empiezan los guiones de la raya, después de su etiqueta. */
+			pdfXRaya: number;
 			pdfY: number;
 			pageWidth: number;
 			pageHeight: number;
@@ -1620,6 +1624,7 @@ export class WeeTrustService {
 		const encontradas: Array<{
 			pageNum: number;
 			pdfX: number;
+			pdfXRaya: number;
 			pdfY: number;
 			pageWidth: number;
 			pageHeight: number;
@@ -1632,8 +1637,15 @@ export class WeeTrustService {
 			const textContent = await page.getTextContent();
 			const viewport = page.getViewport({ scale: 1.0 });
 
-			const items = (textContent.items as Array<{ str: string; transform: number[] }>)
-				.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
+			const items = (
+				textContent.items as Array<{ str: string; transform: number[]; width: number }>
+			)
+				.map((it) => ({
+					str: it.str,
+					x: it.transform[4],
+					y: it.transform[5],
+					width: it.width,
+				}))
 				.filter((it) => it.str.trim());
 
 			for (const item of items) {
@@ -1651,9 +1663,19 @@ export class WeeTrustService {
 					.slice(0, 3)
 					.map((otro) => otro.str.trim());
 
+				// pdf.js da el ancho del texto entero, no el de cada letra: el inicio
+				// de la raya se estima en proporción a los caracteres. Alcanza para
+				// no tapar la etiqueta, que es lo que importa.
+				const guion = item.str.indexOf("_");
+				const pdfXRaya =
+					guion > 0 && item.str.length > 0
+						? item.x + (item.width * guion) / item.str.length
+						: item.x;
+
 				encontradas.push({
 					pageNum,
 					pdfX: item.x,
+					pdfXRaya,
 					pdfY: item.y,
 					pageWidth: viewport.width,
 					pageHeight: viewport.height,

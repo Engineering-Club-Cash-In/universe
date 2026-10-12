@@ -7,7 +7,8 @@ import {
 	FileSignature,
 	Loader2,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { coberturasQueNoCorresponden } from "server/src/lib/cobertura-por-aseguradora";
 import { ETAPA_EN_FIRMA } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import {
@@ -184,6 +185,14 @@ function RouteComponent() {
 			toast.error(error.message || "Error al enlazar contratos");
 		},
 	});
+
+	// La carta de cobertura va según la aseguradora de la cotización: las de la
+	// otra se ven en la lista, pero deshabilitadas.
+	const aseguradora = previewQuery.data?.oportunidad.aseguradora;
+	const coberturasDeshabilitadas = useMemo(
+		() => (aseguradora ? coberturasQueNoCorresponden(aseguradora) : undefined),
+		[aseguradora],
+	);
 
 	// Redirect if no permissions
 	if (!isLoadingPermissions && !canViewLegal) {
@@ -593,6 +602,7 @@ function RouteComponent() {
 					<CardContent>
 						<DynamicContractWizard
 							documentTypes={contractTypes}
+							documentosDeshabilitados={coberturasDeshabilitadas}
 							crmData={crmData}
 							opportunityId={opportunityId}
 							leadId={opportunity?.lead?.id}

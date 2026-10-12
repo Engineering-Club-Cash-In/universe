@@ -18,6 +18,7 @@ export const CONTRATOS_VENTA_MAPEADOS = [
 	"carta_traspaso_vehiculo_rdbe",
 	"cobertura_inrexsa",
 	"cobertura_inrexsa_comercial",
+	"cobertura_gyt",
 	"contrato_privado_uso_carro_nuevo",
 	"contrato_privado_uso_carro_usado",
 	"declaracion_vendedor",

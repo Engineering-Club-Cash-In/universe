@@ -9,6 +9,7 @@ import { investors } from "../db/schema/investments";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
+import { normalizarAseguradora } from "../lib/cobertura-por-aseguradora";
 import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
 import {
 	formatEntityName,
@@ -35,6 +36,8 @@ import {
 	numberToWordsQuetzalesLegal,
 	toUpperCase,
 } from "../lib/contract-utils";
+import type { InsuranceProvider } from "../lib/insurance-selection";
+import { getLatestApprovedQuotation } from "./close-opportunity";
 
 // Tipos de contratos disponibles
 // Solo incluir tipos que existen en legal-docs-blueprints API
@@ -249,6 +252,12 @@ export interface ContractData {
 		titulo: string;
 		tipoCredito: string;
 		categoria?: string;
+		/**
+		 * La aseguradora de la venta, que decide qué carta de cobertura va. Sale
+		 * de la cotización, como en el cierre: la oportunidad recién la recibe
+		 * al cerrarse, y en 80% todavía tiene la de por defecto.
+		 */
+		aseguradora: InsuranceProvider;
 	};
 }
 
@@ -637,6 +646,11 @@ export async function mapOpportunityToContractData(
 	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
 	// reconoce como sociedad solo después de formatearlo, y si no el contrato
 	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
+	const cotizacion = await getLatestApprovedQuotation(opportunityId);
+	const aseguradora = normalizarAseguradora(
+		cotizacion?.insuranceProvider ?? opportunity.insuranceProvider,
+	);
+
 	const nombreEntidad = inversionistaPrincipal
 		? formatEntityName(inversionistaPrincipal.nombre)
 		: null;
@@ -715,6 +729,7 @@ export async function mapOpportunityToContractData(
 			titulo: opportunity.title,
 			tipoCredito: opportunity.creditType || "autocompra",
 			categoria: opportunity.categoria || undefined,
+			aseguradora,
 		},
 	};
 }

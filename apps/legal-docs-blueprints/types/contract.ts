@@ -10,6 +10,8 @@ export enum ContractType {
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
   COBERTURA_INREXSA_COMERCIAL = 'cobertura_inrexsa_comercial',
+  /** La cobertura de Seguros G&T, para las ventas aseguradas con G&T. */
+  COBERTURA_GYT = 'cobertura_gyt',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
   DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
@@ -541,6 +543,21 @@ export interface CoberturaInrexsaComercialData extends BaseContractData {
   full_date: string;
 }
 
+// ===== COBERTURA SEGUROS G&T =====
+/**
+ * Carta de cobertura de Seguros G&T. Los mismos campos que las de Universales,
+ * en una sola sección (las de Universales la traen dos veces).
+ */
+export interface CoberturaGytData extends BaseContractData {
+  contractType: ContractType.COBERTURA_GYT;
+
+  /** Nombre completo del deudor/solicitante */
+  debtor_name: string;
+
+  /** Fecha completa del documento (ej: "Guatemala 28 de octubre de dos mil veinticinco") */
+  full_date: string;
+}
+
 // ===== PAGARÉ ÚNICO LIBRE DE PROTESTO =====
 /**
  * Datos para generar pagaré único libre de protesto
@@ -769,7 +786,7 @@ export interface CartaCarroNuevoData extends BaseContractData {
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | CoberturaInrexsaComercialData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | CoberturaInrexsaComercialData | CoberturaGytData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

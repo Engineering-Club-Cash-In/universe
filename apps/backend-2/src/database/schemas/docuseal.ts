@@ -19,6 +19,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "descargo_responsabilidades",
   "cobertura_inrexsa",
   "cobertura_inrexsa_comercial",
+  "cobertura_gyt",
   "reconocimiento_deuda_feb_2025",
   "carta_carro_nuevo",
   "contrato_privado_uso_carro_nuevo",

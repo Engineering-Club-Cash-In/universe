@@ -5,6 +5,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { user } from "../db/schema/auth";
 import {
 	companies,
+	leads,
 	opportunities,
 	opportunityStageHistory,
 } from "../db/schema/crm";
@@ -36,6 +37,7 @@ const topesLecturaR2: Array<number | undefined> = [];
 // Locks tomados sobre la fila del usuario socio y la del vehículo.
 const bloqueosUsuario: string[] = [];
 const bloqueosVehiculo: string[] = [];
+const bloqueosLead: string[] = [];
 // Documentos ya registrados con una key (para la limpieza tras un error).
 let documentosRegistrados: Array<{ id: string }> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
@@ -153,6 +155,12 @@ const dbFalsa = {
 				return cadena(() => facturaPrevia);
 			if (tabla === opportunityDocuments)
 				return cadena(() => documentosRegistrados);
+			if (tabla === leads)
+				return cadena(
+					() => [{ id: "lead-1" }],
+					undefined,
+					(modo) => bloqueosLead.push(modo),
+				);
 			if (tabla === vehicles)
 				return cadena(
 					() => [{ id: "vehiculo-1" }],
@@ -324,6 +332,7 @@ beforeEach(() => {
 	topesLecturaR2.length = 0;
 	bloqueosUsuario.length = 0;
 	bloqueosVehiculo.length = 0;
+	bloqueosLead.length = 0;
 	documentosRegistrados = [];
 	casoReleido = undefined;
 	lecturasCaso = 0;
@@ -469,6 +478,7 @@ describe("subirFacturaSeguro", () => {
 		await subir();
 		expect(bloqueosCotizacion).toEqual([{ modo: "share", subidosR2: 1 }]);
 		expect(bloqueosVehiculo).toEqual(["share"]);
+		expect(bloqueosLead).toEqual(["share"]);
 	});
 
 	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {

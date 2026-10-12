@@ -16,7 +16,7 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 | **S2** | «Sin contacto» del equipo a 3 días hábiles | ✅ Código en el PR 2 (sin migración) | `lib/sin-contacto.ts` · `contarSinContactoEquipo` · cola del día y filtro `sin_gestion_48h` |
 | **S3** | KPIs del equipo por período | ✅ Código en el PR 1 (sin migración) | `services/supervision-complementos.ts` · `lib/supervision-kpis.ts` · `getSupervisionComplementos.kpis` |
 | **S4** | Columnas de la tabla Equipo | ✅ Código en el PR 1 (sin migración) | `getSupervisionComplementos.equipo` |
-| **S5** | Filtros y paginación real de la Cartera general | ⏳ PR 3 | — |
+| **S5** | Filtros y paginación real de la Cartera general | ✅ Código en el PR 3 (sin migración) | `getTodosLosCreditos` · `enviarWhatsappMasivoCobros` · `getAlertasPromesas` · `ejecutarColaDia` |
 | **S6** | Reasignación en bloque transaccional | ⏳ PR 4 | — |
 
 > [!NOTE]
@@ -79,6 +79,28 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - La alerta `sin_contacto_3d` **no cambia**: conserva su ancla en la subida de bucket.
 - **Rendimiento:** el conteo del equipo recorre toda la cola y tarda unos 3 s (medido en la BD local: 3,030 ms de los 3,715 ms de `getSupervisionComplementos`; el resto del endpoint, 54 ms por período). No depende del período, así que se guarda **60 s** en memoria (`lib/memo-ttl.ts`, usado en `routers/supervision-cobros.ts`): cambiar entre Día, Semana y Mes ya no lo recalcula. La primera carga, o la primera después de 60 s, sigue tardando esos ~3 s. Si hace falta bajarlo más, la solución de fondo es una consulta SQL propia en vez de armar toda la cola.
 
+### S5 · Cartera general
+
+**Filtros nuevos de `getTodosLosCreditos`** (se pueden combinar entre sí y con los de siempre):
+- `asesorId`: asesor dueño del crédito, **id exacto**. Viaja a cartera como `asesor_id` (ya lo soportaba; faltaba en el cliente del CRM, GET y POST). El filtro por `emailCobrador` sigue siendo parcial (ILIKE).
+- `cola`: `sla_hoy`, `promesa_hoy`, `vence_hoy`, `incumplida`, `promesa_proxima`, `sin_contacto`, `llamada_hoy`, `sin_intento_hoy`. Usa **la misma regla y el mismo alcance por rol** que `getColaDia`.
+- `alertaPromesa`: `vencida`, `vence_hoy`, `por_vencer`, `programada`. `alertaConvenio`: `vencida`, `vence_hoy`, `por_vencer`, `proxima`.
+- **Alcance de la cola:** con `cola`, la lista ya define el alcance (pool del bucket y coberturas, como `getColaDia`), así que a cartera **no** se le reenvía el dueño directo (`asesor_id` ni el correo de la sesión del asesor); si no, se perderían créditos que el asesor trabaja por pool o cobertura. Un supervisor que manda un correo explícito lo conserva. Lo mismo para el correo de la sesión con `alertaPromesa` y `alertaConvenio` (su fuente ya limita al asesor y a quien cubre). `asesor_id` sí se sigue enviando con las alertas, porque ellas filtran por dueño directo. Con `alertaPromesa` y `asesorId`, si la consulta de dueños de cartera falla, el filtro **falla** en vez de devolver una lista vacía.
+- `cola`, `alertaPromesa` y `alertaConvenio` también aceptan **`todas`** (el segmento completo, sin filtrar por categoría), igual que los selectores de la Cartera general; con `todas` en la cola o en las alertas de promesa también se piden los buckets 0 a 5.
+- `sinAcuerdo`: sin convenio, sin promesa vigente y sin promesa fallida en los últimos 30 días (`estadoGestionDe`). Un crédito sin caso en el CRM cuenta como sin acuerdo.
+
+**Cómo funciona.** Cada filtro se resuelve en el CRM a una lista de SIFCOs, se intersecta con las demás (como ya hacían etiquetas, DPI y los chips de gestión) y viaja a cartera en `numeros_credito_sifco`. Cartera pagina y cuenta con SQL, así que **`total` y la paginación son exactos más allá de los 200 SIFCOs** (a partir de 50 SIFCOs la llamada es POST, que no tiene tope).
+
+**Reuso sin duplicar reglas.** Para no copiar la lógica, el cuerpo de tres procedimientos pasó a funciones del mismo archivo: `ejecutarColaDia` (con la opción `sinPaginar`), `ejecutarAlertasPromesas` y `ejecutarAlertasConvenios`. Los procedimientos `getColaDia`, `getAlertasPromesas` y `getAlertasConvenios` las llaman igual que antes. **El diff de `routers/cobros.ts` es grande por el movimiento y la re-indentación de ese código, no por cambios de lógica.**
+
+**Otros:**
+- `getAlertasPromesas` devuelve `asesorId` en cada fila (antes solo el nombre).
+- `getTodosLosCreditos` devuelve `asesorId` en cada fila.
+- `enviarWhatsappMasivoCobros` acepta `asesorId`, `cola`, `alertaPromesa` y `alertaConvenio`, con la misma resolución, para que el envío llegue exactamente a lo que muestra la pantalla. **Sigue sin aceptar** `sinAcuerdo`, `filtroGestion` ni rango de capital: el front debe seguir bloqueándolo con esos filtros.
+- **INCOBRABLE:** la cola del día incluye créditos INCOBRABLE (B5) y la cartera, sin etapa, consultaba solo `ACTIVO` y los dejaba fuera (445 contra 442 en «sin contacto», 1,659 contra 1,585 en «sin intento hoy»). Con `cola` o `alertaPromesa` se piden los buckets 0 a 5 (`lib/cartera-filtros.ts`) y los totales cuadran. Las alertas de convenio no lo necesitan (`EN_CONVENIO` ya entra en `ACTIVO`).
+- **Rendimiento:** armar la cola tarda ~3 s, y cada cambio de página la repetía. La lista de SIFCOs de cada categoría de cola se guarda **30 s** por usuario, rol, categoría y asesor (`sifcosPorColaMemo`): la segunda llamada baja a ~40 ms. Una gestión nueva puede tardar hasta 30 s en reflejarse en una lista filtrada por cola.
+- Varios buckets a la vez: `getTodosLosCreditos` ya aceptaba `buckets` como lista; no hubo que cambiar nada en el servidor.
+
 ---
 
 ## Pruebas hechas
@@ -96,6 +118,11 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - `bunx tsc -b` en `apps/crm/apps/server` y `tsc` de cartera-back sobre `paymentAgree.ts`: sin errores.
 - **No se probó contra base de datos ni con cartera levantada.**
 
+**PR 3 (S5), 2026-10-12:**
+- `bunx tsc -b` en `apps/crm/apps/server`: sin errores. `bun test src/lib`: mismos 81 fallos que en la rama sin los cambios (de ambiente: requieren base de datos), ninguno nuevo.
+- Las reglas reutilizadas ya tenían pruebas (`lib/cola-dia.test.ts`, `lib/seguimiento-cobros`); lo nuevo es la composición con la base de datos y cartera, **que solo se prueba contra dev**.
+- **Pendiente:** con más de 200 SIFCOs en cola o alertas, comparar `total` de `getTodosLosCreditos` contra el conteo de la fuente; `asesorId` contra el filtro por correo.
+
 ---
 
 ## Pendiente de front
@@ -104,4 +131,5 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - **S1**: los chips «Rebaja» y «Documentos» de Aprobaciones pendientes no tienen filas (`solicitudes/normalizar.ts`). Fuentes: `getSolicitudesRebajaMora`, `getSolicitudesDocumentos` (y `getSolicitudesJuridico`, que no tiene chip). Cuando existan los chips, sumar `otrasResueltasHoy` a las resueltas **y** esas solicitudes a los pendientes de la barra «x de y» al mismo tiempo (hoy el denominador solo tiene convenios, recuperaciones y apagados). Los tres contadores no tienen `destino`, así que no son enlaces.
 - **S2**: las etiquetas «Sin contacto > 5 días (equipo)» (fallback) y «48 h» de la cartera deben decir «3 días hábiles». `cola=sin_contacto` ya usa la regla nueva. `diasSinContacto` de las filas ahora son días hábiles.
 - **Indicador de carga al cambiar Día / Semana / Mes** (`dashboard-supervisor.tsx`): la consulta usa `placeholderData: keepPreviousData`, así que mientras llega el período nuevo las tarjetas **siguen mostrando los números del período anterior** y parece que «no cambian». Hay que usar `isPlaceholderData` (o `isFetching`) de esa consulta para atenuar las tarjetas de «Desempeño del equipo» y mostrar un spinner o el esqueleto mientras carga; el componente `TarjetaCargando` de `desempeno-equipo.tsx` ya existe. Con el backend actual la espera típica es de menos de 0.2 s con el caché caliente y de ~3 s en frío.
+- **S5**: `cartera-general/use-cartera-general.ts` debe mandar `asesorId`, `cola`, `alertaPromesa`, `alertaConvenio` y `sinAcuerdo` a `getTodosLosCreditos` en vez de combinar `getColaDia`, `getAlertasPromesas` y `getAlertasConvenios` en el cliente; con eso desaparecen el aviso de «solo la página visible», el filtrado de «sin acuerdo» sobre la página y la llamada extra con `estadoMora: "en_convenio"` (cartera ya incluye `EN_CONVENIO` cuando no hay etapa; confirmarlo contra datos reales antes de quitarla). El filtro por asesor de las alertas de promesa pasa de nombre a `asesorId`. El botón de WhatsApp masivo se puede desbloquear para asesor y categoría (no para `sinAcuerdo`, gestión ni capital).
 - **S4**: el punto de estado de cada fila usa `rescate ?? agenda`, pero el showcase de ejemplo lo calcula con la meta. Confirmar con diseño cuál manda.

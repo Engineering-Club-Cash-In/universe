@@ -35,7 +35,8 @@ const makeSelectChain = () => {
   const chain: any = {
     from: (tabla?: unknown) => chain,
     innerJoin: () => chain,
-    where: () => Promise.resolve(result),
+    // `.for()`: el candado del crédito al abrir la transacción.
+    where: () => Object.assign(Promise.resolve(result), { for: () => Promise.resolve(result) }),
   };
   return chain;
 };

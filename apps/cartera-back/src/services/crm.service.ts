@@ -178,6 +178,8 @@ export interface NotifyReciboPagoWhatsappInput {
   pagoId: number;
   numeroSifco: string;
   reciboUrl: string;
+  /** Imagen JPG del recibo: el CRM la manda con la plantilla de imagen. Sin ella va el PDF. */
+  imagenUrl?: string | null;
   clienteNombre: string;
   numeroCuota?: number | null;
   asesorNombre?: string | null;
@@ -206,6 +208,7 @@ export async function notifyReciboPagoWhatsapp(
         pagoId: input.pagoId,
         numeroSifco: input.numeroSifco,
         reciboUrl: input.reciboUrl,
+        imagenUrl: input.imagenUrl ?? null,
         clienteNombre: input.clienteNombre,
         numeroCuota: input.numeroCuota ?? null,
         asesorNombre: input.asesorNombre ?? null,

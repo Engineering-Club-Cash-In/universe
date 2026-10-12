@@ -1717,7 +1717,15 @@ export async function exportPagosAdvisorExcel(
 /**
  * Genera un recibo de pago en PDF y lo sube a R2
  */
-export async function generateReciboPagoPDF(pagoId: number) {
+/**
+ * Recibo de pago en PDF. Con `conImagen` saca además una imagen JPG de la
+ * tarjeta del recibo (lo que se manda por WhatsApp con la plantilla de imagen).
+ * La imagen es opcional: si falla, `imagenUrl` queda en null y el PDF sale igual.
+ */
+export async function generateReciboPagoPDF(
+  pagoId: number,
+  opciones: { conImagen?: boolean } = {},
+) {
   // 1️⃣ Traer datos del pago con crédito, usuario, cuota y asesor
   const result = await db.execute(sql`
     SELECT
@@ -1837,9 +1845,10 @@ export async function generateReciboPagoPDF(pagoId: number) {
       minute: "2-digit",
     }),
   });
-  // 3️⃣ Generar PDF con Puppeteer
+  // 3️⃣ Generar PDF (y la imagen, si se pidió) con Puppeteer
   const browser = await launchBrowser();
   let pdfData: Uint8Array;
+  let imagenData: Uint8Array | null = null;
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
@@ -1848,12 +1857,22 @@ export async function generateReciboPagoPDF(pagoId: number) {
       printBackground: true,
       margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
     });
+    if (opciones.conImagen) {
+      try {
+        // Solo la tarjeta del recibo (560 px de ancho) a 2x: se lee bien en
+        // el teléfono y WhatsApp no la recorta como una página A4.
+        await page.setViewport({ width: 600, height: 1200, deviceScaleFactor: 2 });
+        const tarjeta = await page.$(".recibo");
+        if (!tarjeta) throw new Error("no se encontró la tarjeta .recibo");
+        imagenData = await tarjeta.screenshot({ type: "jpeg", quality: 92 });
+      } catch (error: any) {
+        console.error(`⚠️ No se pudo generar la imagen del recibo del pago ${pagoId}; sale solo el PDF:`, error?.message);
+      }
+    }
   } finally {
     await browser.close();
   }
   // 4️⃣ Subir a R2
-  const fileBuffer = Buffer.from(pdfData);
-  const filename = `recibos/recibo_pago_${boleta.representativo}_${Date.now()}.pdf`;
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -1862,20 +1881,34 @@ export async function generateReciboPagoPDF(pagoId: number) {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
   });
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: process.env.BUCKET_REPORTS as string,
-      Key: filename,
-      Body: fileBuffer,
-      ContentType: "application/pdf",
-    })
-  );
-  const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  const subir = async (key: string, body: Uint8Array, contentType: string) => {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.BUCKET_REPORTS as string,
+        Key: key,
+        Body: Buffer.from(body),
+        ContentType: contentType,
+      })
+    );
+    return `${process.env.URL_PUBLIC_R2_REPORTS}/${key}`;
+  };
+  const base = `recibos/recibo_pago_${boleta.representativo}_${Date.now()}`;
+  const url = await subir(`${base}.pdf`, pdfData, "application/pdf");
   console.log("✅ Recibo de pago PDF subido:", url);
+  let imagenUrl: string | null = null;
+  if (imagenData) {
+    try {
+      imagenUrl = await subir(`${base}.jpg`, imagenData, "image/jpeg");
+      console.log("✅ Recibo de pago imagen subida:", imagenUrl);
+    } catch (error: any) {
+      console.error(`⚠️ No se pudo subir la imagen del recibo del pago ${pagoId}; sale solo el PDF:`, error?.message);
+    }
+  }
   // numeroCuota y asesor los usa el aviso por WhatsApp (mismo contrato que en
   // COBROS-02); la descarga desde cartera solo lee pdfUrl.
   return {
     pdfUrl: url,
+    imagenUrl,
     // Comprobante de la boleta (pago_id más bajo) y todas sus filas: el envío
     // por WhatsApp usa el comprobante como llave para mandar UN recibo.
     comprobante: boleta.representativo,

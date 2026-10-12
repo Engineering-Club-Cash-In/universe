@@ -61,6 +61,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararCuentaNexaParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
@@ -129,6 +130,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	capital_min?: number;
 	capital_max?: number;
 	excluir_pagados_mes?: boolean;
+	solo_con_cuenta_nexa?: boolean;
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -177,6 +179,9 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		}),
 		...(params.excluir_pagados_mes && {
 			excluir_pagados_mes: true,
+		}),
+		...(params.solo_con_cuenta_nexa && {
+			solo_con_cuenta_nexa: true,
 		}),
 	});
 
@@ -711,6 +716,7 @@ export const cobrosRouter = {
 				capitalMin: z.number().optional(),
 				capitalMax: z.number().optional(),
 				excluirPagadosMes: z.boolean().optional(),
+				soloConCuentaNexa: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -895,6 +901,7 @@ export const cobrosRouter = {
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
 									excluir_pagados_mes: input.excluirPagadosMes,
+									solo_con_cuenta_nexa: input.soloConCuentaNexa,
 								});
 							}
 						} else {
@@ -941,6 +948,7 @@ export const cobrosRouter = {
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
 									excluir_pagados_mes: input.excluirPagadosMes,
+									solo_con_cuenta_nexa: input.soloConCuentaNexa,
 								});
 
 								const allCredits = [...firstPage.data];
@@ -961,6 +969,7 @@ export const cobrosRouter = {
 										capital_min: input.capitalMin,
 										capital_max: input.capitalMax,
 										excluir_pagados_mes: input.excluirPagadosMes,
+										solo_con_cuenta_nexa: input.soloConCuentaNexa,
 									});
 									allCredits.push(...nextPage.data);
 								}
@@ -1006,6 +1015,7 @@ export const cobrosRouter = {
 								capital_min: input.capitalMin,
 								capital_max: input.capitalMax,
 								excluir_pagados_mes: input.excluirPagadosMes,
+								solo_con_cuenta_nexa: input.soloConCuentaNexa,
 							});
 						}
 					} else {
@@ -1026,6 +1036,7 @@ export const cobrosRouter = {
 							capital_min: input.capitalMin,
 							capital_max: input.capitalMax,
 							excluir_pagados_mes: input.excluirPagadosMes,
+							solo_con_cuenta_nexa: input.soloConCuentaNexa,
 						});
 					}
 
@@ -2370,6 +2381,9 @@ export const cobrosRouter = {
 						montoEnMora,
 						statusCredit,
 					),
+					// Código de pago Nexa del crédito para "Nueva cuenta exclusiva
+					// Nexa"; "" si el crédito no tiene cuenta (la plantilla no aplica).
+					cuentaNexa: creditoCompleto.cuentaNexa ?? "",
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad (Universales o G&T).
 					...seguroPorAseguradora(insuranceProvider),
@@ -3313,6 +3327,7 @@ export const cobrosRouter = {
 				fechaDesde: z.string().optional(),
 				fechaHasta: z.string().optional(),
 				excluirPagadosMes: z.boolean().optional(),
+				soloConCuentaNexa: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3553,6 +3568,7 @@ export const cobrosRouter = {
 						fecha_desde: input.fechaDesde,
 						fecha_hasta: input.fechaHasta,
 						excluir_pagados_mes: input.excluirPagadosMes,
+						solo_con_cuenta_nexa: input.soloConCuentaNexa,
 						page,
 						perPage,
 					});
@@ -3672,6 +3688,7 @@ export const cobrosRouter = {
 					cuotasAtraso: number;
 					incrementoDiarioMora: string;
 					incrementoMaximoMensualMora: string;
+					cuentaNexa: string;
 				} | null
 			>();
 			// Las tres variables salen del MISMO detalle de cartera-back, así que
@@ -3683,7 +3700,8 @@ export const cobrosRouter = {
 			if (
 				cuerpoBase.includes("{montoAdeudado}") ||
 				cuerpoBase.includes("{incrementoDiarioMora}") ||
-				cuerpoBase.includes("{incrementoMaximoMensualMora}")
+				cuerpoBase.includes("{incrementoMaximoMensualMora}") ||
+				cuerpoBase.includes("{cuentaNexa}")
 			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
@@ -3720,6 +3738,8 @@ export const cobrosRouter = {
 										incrementoMaximoMensualMora: formatearIncrementoMora(
 											detalle.incrementoMaximoMensualMora,
 										),
+										// Código de pago Nexa del crédito; "" si no tiene cuenta.
+										cuentaNexa: detalle.cuentaNexa ?? "",
 									});
 								} catch (err) {
 									console.error(
@@ -3825,6 +3845,22 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// {cuentaNexa} ("Nueva cuenta exclusiva Nexa") solo se manda a
+				// créditos que ya tienen cuenta Nexa; sin ella se descarta antes que
+				// mandar "Banco Nexa / Cuenta Monetaria /" con el número en blanco.
+				const cuentaNexa = prepararCuentaNexaParaEnvio(
+					cuerpoBase,
+					detalleCartera?.cuentaNexa,
+				);
+				if (!cuentaNexa.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: cuentaNexa.motivo,
+					});
+					continue;
+				}
+
 				// La cláusula incorporada del aumento desaparece sola al interpolar
 				// cuando no hay nada que anunciar, pero el modal ofrece
 				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
@@ -3885,6 +3921,7 @@ export const cobrosRouter = {
 					// Su techo, del mismo detalle. Vacío = la frase se queda solo
 					// con el ritmo, corta pero sana.
 					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
+					cuentaNexa: cuentaNexa.cuentaNexa,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

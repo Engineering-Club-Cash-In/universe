@@ -20,6 +20,7 @@ import {
   inversionistas,
   montos_adicionales,
   moras_credito,
+  nexa_credit_bindings,
   pagos_credito,
   pagos_credito_inversionistas_espejo,
   platform_users,
@@ -43,6 +44,7 @@ import {
   gte,
   gt,
   isNull,
+  or,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
@@ -81,6 +83,17 @@ import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
 import { reclamosVivosDeRubros } from "./rubros";
 
 
+// Estados en que cartera acepta un pago Nexa: la MISMA lista que `credit_not_payable`
+// en nexaPayments.ts (un test las mantiene iguales). En otros estados —p. ej.
+// PENDIENTE_CANCELACION, que deja el binding activo— el token existe pero el pago
+// se rechaza, así que no se le ofrece al cliente como cuenta.
+export const NEXA_PAYABLE_CREDIT_STATUSES = [
+  "ACTIVO",
+  "MOROSO",
+  "EN_CONVENIO",
+  "INCOBRABLE",
+] as const;
+
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
   try {
     // 1. Buscar el crédito con su usuario
@@ -111,6 +124,32 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .from(ajuste_fecha_ideal_pago)
       .where(eq(ajuste_fecha_ideal_pago.credito_id, creditoId))
       .limit(1);
+
+    // Código de pago Nexa del cliente (solo lectura: NO crea la cuenta, para eso
+    // está POST /creditos/cuenta-nexa). Lo usa el CRM en la plantilla "Nueva
+    // cuenta exclusiva Nexa". Un binding desactivado (crédito cancelado), sin
+    // token o vencido no cuenta como cuenta: cartera rechaza todo pago por un
+    // binding vencido (`binding_expired`, getNexaBindingRejection), así que
+    // avisarle esa cuenta al cliente lo mandaría a una cuenta inservible.
+    const [bindingNexa] = await db
+      .select({ token: nexa_credit_bindings.nexa_token })
+      .from(nexa_credit_bindings)
+      .where(
+        and(
+          eq(nexa_credit_bindings.credito_id, creditoId),
+          eq(nexa_credit_bindings.activo, true),
+          or(
+            isNull(nexa_credit_bindings.expires_at),
+            gt(nexa_credit_bindings.expires_at, new Date())
+          )
+        )
+      )
+      .limit(1);
+    const cuentaNexa = (NEXA_PAYABLE_CREDIT_STATUSES as readonly string[]).includes(
+      currentCredit.creditos.statusCredit
+    )
+      ? (bindingNexa?.token ?? null)
+      : null;
 
     const contractSummary =
       currentCredit.creditos.statusCredit === "CANCELADO"
@@ -643,6 +682,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         credito: currentCredit.creditos,
         usuario: currentCredit.usuarios,
         asesor: currentCredit.asesores,
+        cuentaNexa,
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,
@@ -783,6 +823,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
       asesor: currentCredit.asesores,
+      cuentaNexa,
       cuotaActual,
       cuotaActualPagada,
       cuotaActualStatus,
@@ -1112,7 +1153,8 @@ export async function getCreditosWithUserByMesAnio(
   capital_max?: number,
   estados_credito?: StatusCredit[],
   aseguradora_id?: number,
-  excluir_pagados_mes?: boolean
+  excluir_pagados_mes?: boolean,
+  solo_con_cuenta_nexa?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1289,6 +1331,23 @@ export async function getCreditosWithUserByMesAnio(
 
   if (aseguradora_id !== undefined) {
     conditions.push(eq(creditos.aseguradora_id, aseguradora_id));
+  }
+
+  if (solo_con_cuenta_nexa) {
+    conditions.push(
+      inArray(creditos.statusCredit, [...NEXA_PAYABLE_CREDIT_STATUSES])
+    );
+    // Cuenta Nexa asignada = binding activo, vigente y con token, de un crédito
+    // en estado pagable (el mismo criterio con que getCreditoByNumero devuelve
+    // `cuentaNexa`). EXISTS y no join para no
+    // multiplicar filas (paginación) y para que el COUNT herede la condición.
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${nexa_credit_bindings} nb
+      WHERE nb.credito_id = ${creditos.credito_id}
+        AND nb.activo = true
+        AND (nb.expires_at IS NULL OR nb.expires_at > NOW())
+        AND nb.nexa_token IS NOT NULL
+    )`);
   }
 
   if (excluir_pagados_mes) {

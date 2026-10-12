@@ -30,7 +30,6 @@ function analysisFixture(overrides: Record<string, unknown> = {}) {
 			disponibilidad_economica: 20,
 		},
 		analisis_fecha_pago: null,
-		estados_cuenta_detectados: 1,
 		moneda: "GTQ",
 		...overrides,
 	};
@@ -97,5 +96,19 @@ describe("bank analysis AI contract", () => {
 		expect(BANK_ANALYSIS_PROMPT).toContain("YYYY-MM");
 		expect(BANK_ANALYSIS_PROMPT).toContain("indice_archivo");
 		expect(BANK_ANALYSIS_PROMPT).toContain("misma llamada");
+	});
+
+	test("does not ask the AI for estados_cuenta_detectados, which made Gemini loop", () => {
+		expect(Object.keys(bankStatementAnalysisSchema.shape)).not.toContain(
+			"estados_cuenta_detectados",
+		);
+		expect(BANK_ANALYSIS_PROMPT).not.toContain("estados_cuenta_detectados");
+	});
+
+	test("still accepts historical payloads that include estados_cuenta_detectados", () => {
+		const parsed = bankStatementAnalysisSchema.parse(
+			analysisFixture({ estados_cuenta_detectados: 1 }),
+		);
+		expect(parsed.moneda).toBe("GTQ");
 	});
 });

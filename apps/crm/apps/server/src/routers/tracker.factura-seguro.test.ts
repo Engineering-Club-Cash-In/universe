@@ -39,7 +39,7 @@ const bloqueosUsuario: string[] = [];
 const bloqueosVehiculo: string[] = [];
 const bloqueosLead: string[] = [];
 // Documentos ya registrados con una key (para la limpieza tras un error).
-let documentosRegistrados: Array<{ id: string }> = [];
+let documentosRegistrados: Array<Record<string, unknown>> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
 let fallaLecturaCotizacion = false;
@@ -259,6 +259,7 @@ mock.module("../lib/correo-factura-seguro", () => ({
 const {
 	trackerRouter,
 	enviarFacturaSeguroDesdeCrm,
+	enviarFacturaSubidaAntes,
 	previsualizarFacturaSeguroDesdeCrm,
 } = await import("./tracker");
 
@@ -1091,7 +1092,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		];
 		for (const [c, motivo] of casos) {
 			caso = c;
-			expect(await enviar()).toEqual({ enviada: false, motivo });
+			expect(await enviar()).toMatchObject({ enviada: false, motivo });
 		}
 		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
@@ -1176,6 +1177,83 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		const r = await enviar();
 		expect(r).toMatchObject({ enviada: true, envio: "sin_destinatario" });
 		expect(envioRegistrado()).toMatchObject({ status: "sin_destinatario" });
+		expect(correos).toHaveLength(0);
+	});
+});
+
+describe("factura subida antes del cierre", () => {
+	const KEY_ANTES = `opportunities/${ID}/555-antes-factura.pdf`;
+	const subir = (c: Record<string, unknown>) => {
+		caso = c;
+		return enviarFacturaSeguroDesdeCrm({
+			opportunityId: ID,
+			documentId: "doc-antes",
+			key: KEY_ANTES,
+			nombre: "factura.pdf",
+			mimeType: "application/pdf",
+			aseguradoraConfirmada: null,
+			userId: "crm-1",
+			userRole: "admin",
+		});
+	};
+
+	test("al 85%, o al 90% sin cerrar, se guarda y avisa que se enviará al cierre", async () => {
+		for (const c of [
+			casoAl(85, { status: "open" }),
+			casoAl(90, { status: "open" }),
+			casoAl(90, { status: "on_hold" }),
+		]) {
+			expect(await subir(c)).toMatchObject({ enviada: false, alCerrar: true });
+		}
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+	});
+
+	test("perdida, ya desembolsada o sin agencia: no se enviará después", async () => {
+		for (const c of [
+			casoAl(85, { status: "lost" }),
+			casoAl(100),
+			casoAl(85, { status: "open", companyId: null }),
+		]) {
+			const r = await subir(c);
+			expect(r).toMatchObject({ enviada: false });
+			expect("alCerrar" in r).toBe(false);
+		}
+	});
+
+	test("al confirmar los contratos, manda sola la última factura subida, sin confirmación", async () => {
+		caso = casoAl(90);
+		documentosRegistrados = [
+			{
+				id: "doc-antes",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+				mimeType: "application/pdf",
+			},
+		];
+		const r = await enviarFacturaSubidaAntes(ID, "crm-1");
+		expect(r).toMatchObject({ enviada: true, envio: "enviado" });
+		expect(
+			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
+		).toMatchObject({ documentId: "doc-antes", submittedBy: "crm-1" });
+		expect(correos).toHaveLength(1);
+	});
+
+	test("sin factura subida antes, o con una ya registrada, no manda nada", async () => {
+		caso = casoAl(90);
+		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toBeNull();
+		caso = casoAl(90, { facturaEnvio: "enviado" });
+		documentosRegistrados = [
+			{
+				id: "doc-antes",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+				mimeType: "application/pdf",
+			},
+		];
+		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toMatchObject({
+			enviada: false,
+		});
 		expect(correos).toHaveLength(0);
 	});
 });

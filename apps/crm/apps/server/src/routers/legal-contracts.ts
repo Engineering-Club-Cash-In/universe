@@ -92,7 +92,7 @@ import {
 } from "./contract-generation";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
-import { enviarFacturaSubidaAntes } from "./tracker";
+import { enviarFacturaProgramada } from "./tracker";
 
 // Standardized env var naming: R2_BUCKET_* pattern
 const R2_LEGAL_DOCS_BUCKET_NAME =
@@ -1597,11 +1597,11 @@ export const legalContractsRouter = {
 				return closeResult;
 			});
 
-			// La factura del seguro subida desde el CRM antes del cierre sale sola
-			// ahora que la oportunidad quedó ganada al 90%. Antes de lo que puede
-			// fallar después del commit (si no, no se volvería a disparar). Sin
-			// esperar y nunca lanza: un correo caído no rompe la confirmación.
-			void enviarFacturaSubidaAntes(input.opportunityId, context.userId);
+			// La factura del seguro que se programó al subirla antes del cierre
+			// sale ahora que la oportunidad quedó ganada al 90%. Antes de lo que
+			// puede fallar después del commit (si no, no se volvería a disparar).
+			// Sin esperar y nunca lanza: un correo caído no rompe la confirmación.
+			void enviarFacturaProgramada(input.opportunityId);
 
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({

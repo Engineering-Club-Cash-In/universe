@@ -37,12 +37,14 @@ import {
 	MENSAJE_SIN_ENVIO_DESDE_CRM,
 	MENSAJE_SIN_REENVIO,
 	MIME_FACTURA_SEGURO,
+	type MotivoSinEnvioDesdeCrm,
 	nombreDeFactura,
 	puedeEnviarFacturaDesdeCrm,
 	puedeReenviarFacturaSeguro,
 	puedeReintentarDesdeCrm,
 	puedeSubirFacturaSeguro,
 	resolverAseguradora,
+	tipoPermitidoDesdeCrm,
 	tipoRealDeFactura,
 } from "../lib/factura-seguro";
 import {
@@ -669,16 +671,34 @@ function exigirMismoEstado(bajoBloqueo: string | undefined, alEmpezar: string) {
 	}
 }
 
+// Subida antes del cierre que se puede programar: al confirmar los contratos
+// la oportunidad queda ganada al 90% y la factura sale sola.
+function programableAlCerrar(
+	fila: Pick<Fila, "companyId" | "closurePercentage">,
+	motivo: MotivoSinEnvioDesdeCrm,
+): boolean {
+	return (
+		!!fila.companyId &&
+		(motivo === "sin_cerrar" ||
+			(motivo === "etapa" && fila.closurePercentage < ETAPA_FACTURA_SEGURO))
+	);
+}
+
 /**
  * Antes de subir un "Seguro del Vehículo" desde el CRM: si se mandaría a la
- * aseguradora y a cuál, con las mismas reglas que el envío. Solo lectura; al
- * guardar se vuelve a validar todo.
+ * aseguradora y a cuál, o si se puede programar para el cierre. Solo lectura;
+ * al guardar se vuelve a validar todo.
  */
 export async function previsualizarFacturaSeguroDesdeCrm(
 	opportunityId: string,
 ): Promise<
 	| { seEnviara: true; aseguradora: Aseguradora }
-	| { seEnviara: false; motivo: string }
+	| {
+			seEnviara: false;
+			motivo: string;
+			/** Se puede programar para que salga sola al cerrar, a esta aseguradora. */
+			programable?: { aseguradora: Aseguradora };
+	  }
 > {
 	const [fila] = await consultaBase()
 		.where(eq(opportunities.id, opportunityId))
@@ -697,10 +717,12 @@ export async function previsualizarFacturaSeguroDesdeCrm(
 		yaSubida: fila.facturaEnvio != null,
 	});
 	if (!regla.ok) {
-		return {
-			seEnviara: false,
-			motivo: MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo],
-		};
+		const motivo = MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo];
+		if (!programableAlCerrar(fila, regla.motivo)) {
+			return { seEnviara: false, motivo };
+		}
+		const { aseguradora } = await datosDelCorreo(fila);
+		return { seEnviara: false, motivo, programable: { aseguradora } };
 	}
 	const { aseguradora } = await datosDelCorreo(fila);
 	return { seEnviara: true, aseguradora };
@@ -711,14 +733,16 @@ export type ResultadoFacturaDesdeCrm =
 	| {
 			enviada: false;
 			motivo: string;
-			/** Se mandará sola cuando la oportunidad quede ganada al 90%. */
-			alCerrar?: boolean;
+			/** Quedó programada: sale sola al confirmar los contratos. */
+			programada?: { aseguradora: Aseguradora };
 	  };
 
 /**
  * Un "Seguro del Vehículo" subido desde el CRM sigue el mismo envío que la
  * factura del tracker. El documento ya está guardado: si no corresponde
- * mandarlo, se devuelve el motivo y queda como un documento más.
+ * mandarlo, se devuelve el motivo y queda como un documento más. Antes del
+ * cierre, si el usuario aceptó programarlo, queda registrado como `programado`
+ * y sale al confirmar los contratos (enviarFacturaProgramada).
  */
 export async function enviarFacturaSeguroDesdeCrm(params: {
 	opportunityId: string;
@@ -728,10 +752,10 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	/** El tipo con el que el CRM aceptó el documento. */
 	mimeType: string;
 	/**
-	 * La aseguradora a la que el usuario confirmó el envío, si confirmó.
-	 * "automatico": la manda el cierre (ver enviarFacturaSubidaAntes).
+	 * La aseguradora a la que el usuario confirmó el envío, si confirmó, o
+	 * "programado" si aceptó que salga sola al cerrar.
 	 */
-	aseguradoraConfirmada: Aseguradora | "automatico" | null | undefined;
+	aseguradoraConfirmada: Aseguradora | "programado" | null | undefined;
 	userId: string;
 	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
@@ -741,25 +765,20 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	if (!fila) {
 		return { enviada: false, motivo: MENSAJE_SIN_ENVIO_DESDE_CRM.sin_agencia };
 	}
-	const automatico = params.aseguradoraConfirmada === "automatico";
 	const regla = puedeEnviarFacturaDesdeCrm({
 		closurePercentage: fila.closurePercentage,
 		status: fila.status,
 		companyId: fila.companyId,
 		yaSubida: fila.facturaEnvio != null,
 	});
-	if (!regla.ok) {
-		// Subida antes del cierre: el cierre la mandará sola (al confirmar los
-		// contratos, que deja la oportunidad ganada al 90%).
-		const alCerrar =
-			!!fila.companyId &&
-			(regla.motivo === "sin_cerrar" ||
-				(regla.motivo === "etapa" &&
-					fila.closurePercentage < ETAPA_FACTURA_SEGURO));
+	const programar =
+		!regla.ok &&
+		params.aseguradoraConfirmada === "programado" &&
+		programableAlCerrar(fila, regla.motivo);
+	if (!regla.ok && !programar) {
 		return {
 			enviada: false,
 			motivo: MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo],
-			...(alCerrar && { alCerrar: true }),
 		};
 	}
 
@@ -775,14 +794,18 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	if (contenido.length === 0) {
 		return { enviada: false, motivo: "el archivo de la factura está vacío" };
 	}
-	// A la aseguradora va cualquier tipo que el CRM admite. Si el contenido es
-	// PDF o imagen, el nombre lleva la extensión de su tipo real.
+	const tipo = tipoPermitidoDesdeCrm(contenido, params.mimeType);
+	if (!tipo) {
+		return {
+			enviada: false,
+			motivo: "la factura tiene que ser un PDF, una imagen, un Word o un Excel",
+		};
+	}
 	const tipoReal = tipoRealDeFactura(contenido);
-	const tipo = tipoReal ?? params.mimeType;
 
 	// La URL firmada de la subida se puede reusar 10 minutos: lo que se manda,
-	// ahora y en el reintento, es una copia que solo escribe el server, con los
-	// bytes que pasaron la validación.
+	// ahora, al cierre o en el reintento, es una copia que solo escribe el
+	// server, con los bytes que pasaron la validación.
 	const nombre = tipoReal
 		? nombreDeFactura(params.nombre, tipoReal)
 		: params.nombre;
@@ -809,25 +832,32 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
 			if (!vigente || vigente.status !== fila.status) return null;
 			// Pudo cambiar de asesor mientras se validaba el archivo.
-			if (!automatico && !puedeReintentarDesdeCrm(params, vigente.assignedTo)) {
-				return null;
-			}
+			if (!puedeReintentarDesdeCrm(params, vigente.assignedTo)) return null;
 			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
 				...vigente,
 				yaSubida: !!previa,
 			});
-			if (!bajoBloqueo.ok) return null;
+			if (programar) {
+				if (
+					bajoBloqueo.ok ||
+					!programableAlCerrar(vigente, bajoBloqueo.motivo)
+				) {
+					return null;
+				}
+			} else if (!bajoBloqueo.ok) {
+				return null;
+			}
 
 			const { aseguradora, datos, destinatarios } =
 				await datosDelCorreoBajoBloqueo(tx, fila);
 			// Solo sale lo que el usuario confirmó: la consulta previa pudo decir
 			// que no se enviaba, o la aseguradora cambió con el diálogo abierto.
-			if (!automatico && aseguradora !== params.aseguradoraConfirmada) {
+			if (!programar && aseguradora !== params.aseguradoraConfirmada) {
 				return { sinConfirmar: true as const };
 			}
 
 			// El documento pasa a la copia, con el nombre que lleva el adjunto: el
-			// reintento lee de aquí.
+			// envío del cierre y el reintento leen de aquí.
 			await tx
 				.update(opportunityDocuments)
 				.set({
@@ -838,6 +868,22 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 					size: contenido.length,
 				})
 				.where(eq(opportunityDocuments.id, params.documentId));
+
+			if (programar) {
+				// Sin correo todavía: los datos se toman al cerrar.
+				await tx.insert(insuranceInvoiceSubmissions).values({
+					opportunityId: fila.id,
+					companyId: vigente.companyId,
+					documentId: params.documentId,
+					insuranceProvider: aseguradora,
+					status: "programado",
+					submittedBy: params.userId,
+					createdAt: creadoAt,
+					updatedAt: creadoAt,
+				});
+				return { programada: aseguradora };
+			}
+
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 			const [envio] = await tx
 				.insert(insuranceInvoiceSubmissions)
@@ -886,6 +932,13 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	}
 	// El archivo de la URL firmada no se borra: la key la manda el cliente y
 	// otro documento puede estar usándola.
+	if ("programada" in registro && registro.programada) {
+		return {
+			enviada: false,
+			motivo: "se enviará al confirmar los contratos",
+			programada: { aseguradora: registro.programada },
+		};
+	}
 
 	const envio = await enviarYRegistrar({
 		registro: registro.envio,
@@ -897,46 +950,81 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 }
 
 /**
- * Al confirmar los contratos (la oportunidad queda ganada al 90%), manda sola
- * la factura del seguro que se subió desde el CRM antes del cierre: la última
- * "Seguro del Vehículo" de la oportunidad, con las mismas reglas y el mismo
- * registro que una subida. Nunca lanza: no puede romper la confirmación.
+ * Al confirmar los contratos (la oportunidad queda ganada al 90%), manda la
+ * factura que el usuario programó al subirla antes del cierre. Solo esa: un
+ * "Seguro del Vehículo" subido sin programar (por ejemplo, el del proceso
+ * manual de antes) no sale. Nunca lanza: no puede romper la confirmación.
  */
-export async function enviarFacturaSubidaAntes(
+export async function enviarFacturaProgramada(
 	opportunityId: string,
-	userId: string,
-): Promise<ResultadoFacturaDesdeCrm | null> {
+): Promise<EstadoEnvioFactura | null> {
 	try {
-		const [documento] = await db
-			.select({
-				id: opportunityDocuments.id,
-				key: opportunityDocuments.filePath,
-				nombre: opportunityDocuments.originalName,
-				mimeType: opportunityDocuments.mimeType,
-			})
-			.from(opportunityDocuments)
-			.where(
-				and(
-					eq(opportunityDocuments.opportunityId, opportunityId),
-					eq(opportunityDocuments.documentType, "seguro_vehiculo"),
-				),
-			)
-			.orderBy(desc(opportunityDocuments.uploadedAt))
-			.limit(1);
-		if (!documento) return null;
-		return await enviarFacturaSeguroDesdeCrm({
-			opportunityId,
-			documentId: documento.id,
-			key: documento.key,
-			nombre: documento.nombre,
-			mimeType: documento.mimeType,
-			aseguradoraConfirmada: "automatico",
-			userId,
-			userRole: null,
+		const reservado = await db.transaction(async (tx) => {
+			const [vigente] = await tx
+				.select({
+					status: opportunities.status,
+					closurePercentage: salesStages.closurePercentage,
+					companyId: opportunities.companyId,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+				.where(eq(opportunities.id, opportunityId))
+				.for("update", { of: opportunities });
+			const [programada] = await tx
+				.select({
+					id: insuranceInvoiceSubmissions.id,
+					status: insuranceInvoiceSubmissions.status,
+					intento: insuranceInvoiceSubmissions.intento,
+					key: opportunityDocuments.filePath,
+					nombre: opportunityDocuments.originalName,
+				})
+				.from(insuranceInvoiceSubmissions)
+				.innerJoin(
+					opportunityDocuments,
+					eq(opportunityDocuments.id, insuranceInvoiceSubmissions.documentId),
+				)
+				.where(eq(insuranceInvoiceSubmissions.opportunityId, opportunityId))
+				.for("update", { of: insuranceInvoiceSubmissions });
+			if (!vigente || programada?.status !== "programado") return null;
+			const regla = puedeEnviarFacturaDesdeCrm({ ...vigente, yaSubida: false });
+			if (!regla.ok) return null;
+
+			const [fila] = await consultaBase()
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
+			if (!fila) return null;
+			const { aseguradora, datos, destinatarios } =
+				await datosDelCorreoBajoBloqueo(tx, fila);
+			const reservadoAt = new Date();
+			const correo = armarCorreoFacturaSeguro(datos, reservadoAt);
+			await tx
+				.update(insuranceInvoiceSubmissions)
+				.set({
+					status: destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
+					insuranceProvider: aseguradora,
+					recipients: destinatarios,
+					correoAsunto: correo.asunto,
+					correoHtml: correo.html,
+					createdAt: reservadoAt,
+					updatedAt: reservadoAt,
+				})
+				.where(eq(insuranceInvoiceSubmissions.id, programada.id));
+			return {
+				registro: {
+					id: programada.id,
+					intento: programada.intento,
+					reservadoAt,
+				},
+				archivo: { key: programada.key, nombre: programada.nombre },
+				destinatarios,
+				correo,
+			};
 		});
+		if (!reservado) return null;
+		return await enviarYRegistrar(reservado);
 	} catch (error) {
 		console.error(
-			"[enviarFacturaSubidaAntes] No se pudo enviar la factura del seguro",
+			"[enviarFacturaProgramada] No se pudo enviar la factura del seguro",
 			error,
 		);
 		return null;

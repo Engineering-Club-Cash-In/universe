@@ -20,6 +20,14 @@ EXCEPTION
 	WHEN duplicate_object THEN null;
 END $$;--> statement-breakpoint
 
+-- El DPI solo deja de ser obligatorio para el vendedor de agencia: el vendedor
+-- legal (individual o empresa) sale en el contrato y lo sigue necesitando.
+DO $$ BEGIN
+	ALTER TABLE "public"."vehicle_vendors" ADD CONSTRAINT "vehicle_vendors_dpi_requerido_salvo_agencia" CHECK ("vendor_type" = 'agencia' OR "dpi" IS NOT NULL);
+EXCEPTION
+	WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+
 CREATE INDEX IF NOT EXISTS "vehicle_vendors_company_id_idx" ON "public"."vehicle_vendors" USING btree ("company_id");--> statement-breakpoint
 
 -- Tabla aparte para no sumar columnas a `opportunities`. El UNIQUE garantiza

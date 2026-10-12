@@ -7,7 +7,7 @@ import {
 	Loader2,
 	Stamp,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	CARTAS_PODER,
 	type CamposCartaPoder,
@@ -109,6 +109,14 @@ function RouteComponent() {
 		resumen: string;
 	} | null>(null);
 	const [documentLink, setDocumentLink] = useState<string | null>(null);
+	// Cuántas veces cambió el formulario. Generar tarda, y el formulario sigue
+	// habilitado: si cambia mientras tanto, el PDF que vuelve es de los datos
+	// viejos y no se muestra.
+	const versionRef = useRef(0);
+	const descartarCarta = () => {
+		versionRef.current += 1;
+		setDocumentLink(null);
+	};
 	// Al terminar se avisa con un modal: con un botón al pie de la página
 	// nadie se daba cuenta de que la carta ya estaba lista.
 	const [avisoListo, setAvisoListo] = useState(false);
@@ -147,7 +155,7 @@ function RouteComponent() {
 				fechaVencimiento: actual.fechaVencimiento,
 				edadRepresentante: actual.edadRepresentante,
 			}));
-			setDocumentLink(null);
+			descartarCarta();
 		},
 		onError: (error: Error) => {
 			toast.error(
@@ -157,8 +165,18 @@ function RouteComponent() {
 	});
 
 	const generar = useMutation({
-		mutationFn: () => client.generarCartaPoder({ tipo, campos }),
-		onSuccess: ({ documentLink }) => {
+		mutationFn: async () => {
+			const version = versionRef.current;
+			const respuesta = await client.generarCartaPoder({ tipo, campos });
+			return { ...respuesta, version };
+		},
+		onSuccess: ({ documentLink, version }) => {
+			if (version !== versionRef.current) {
+				toast.info(
+					"Cambiaste la carta mientras se generaba: generala de nuevo con los datos de ahora.",
+				);
+				return;
+			}
 			setDocumentLink(documentLink);
 			setAvisoListo(true);
 		},
@@ -179,7 +197,7 @@ function RouteComponent() {
 		valor: CamposCartaPoder[K],
 	) => {
 		setCampos((actual) => ({ ...actual, [campo]: valor }));
-		setDocumentLink(null);
+		descartarCarta();
 	};
 
 	const empezarDeCero = () => {
@@ -190,7 +208,7 @@ function RouteComponent() {
 			fechaVencimiento: actual.fechaVencimiento,
 			edadRepresentante: actual.edadRepresentante,
 		}));
-		setDocumentLink(null);
+		descartarCarta();
 	};
 
 	const texto = (campo: CampoDeTexto, etiqueta: string, placeholder = "") => (
@@ -277,7 +295,7 @@ function RouteComponent() {
 							value={tipo}
 							onValueChange={(valor) => {
 								setTipo(valor as TipoCartaPoder);
-								setDocumentLink(null);
+								descartarCarta();
 							}}
 						>
 							<SelectTrigger id="carta-tipo" className="w-full">
@@ -311,7 +329,7 @@ function RouteComponent() {
 										? vencimientoPorDefecto(fechaFirma)
 										: actual.fechaVencimiento,
 								}));
-								setDocumentLink(null);
+								descartarCarta();
 							}}
 						/>
 					</div>

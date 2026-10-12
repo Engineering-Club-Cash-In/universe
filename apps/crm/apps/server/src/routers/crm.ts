@@ -4242,6 +4242,15 @@ export const crmRouter = {
 					});
 				}
 
+				// En la misma transacción, como en las otras rutas que cambian la
+				// agencia: la limpieza compara contra la agencia vigente en el DELETE.
+				if (
+					filas[0] &&
+					filas[0].companyId !== currentOpportunity[0].companyId
+				) {
+					await limpiarVendedorSiCambiaAgencia(tx, id);
+				}
+
 				return filas;
 			});
 			if (updatedOpportunity.length === 0) {
@@ -4306,12 +4315,6 @@ export const crmRouter = {
 
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
-
-			// Después del commit: la limpieza compara contra la agencia vigente en
-			// el mismo DELETE, así que una edición posterior no la vuelve inválida.
-			if (updatedOpportunity[0].companyId !== currentOpportunity[0].companyId) {
-				await limpiarVendedorSiCambiaAgencia(db, id);
-			}
 
 			// El cambio de lead deja su propia fila. Sin esto, quien encuentre el
 			// expediente de vuelta sin aprobación ve un retroceso sin causa y parece

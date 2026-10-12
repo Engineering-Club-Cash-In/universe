@@ -13,11 +13,12 @@ import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-// Sin `sellerId` el usuario es gerente de esa agencia; con él, solo ve las
-// oportunidades de ese vendedor.
+// `sellerId: null` = gerente de esa agencia; con un vendedor, solo ve sus
+// oportunidades. Es obligatorio: omitirlo no puede dar por descuido el acceso
+// más amplio.
 const membresiaSchema = z.object({
 	companyId: z.string().uuid(),
-	sellerId: z.string().uuid().nullable().optional(),
+	sellerId: z.string().uuid().nullable(),
 });
 
 /**
@@ -70,7 +71,7 @@ async function reemplazarAgencias(
 		membresias.map((m) => ({
 			userId,
 			companyId: m.companyId,
-			sellerId: m.sellerId ?? null,
+			sellerId: m.sellerId,
 		})),
 	);
 }
@@ -160,7 +161,7 @@ export const adminRouter = {
 			lista.push({
 				id: m.companyId,
 				nombre: m.agencia.trim(),
-				sellerId: m.sellerId ?? null,
+				sellerId: m.sellerId,
 				vendedor: m.vendedor?.trim() || null,
 			});
 			agenciasPorUsuario.set(m.userId, lista);

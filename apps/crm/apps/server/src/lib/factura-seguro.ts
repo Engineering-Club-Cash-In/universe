@@ -77,6 +77,9 @@ const XLS = "application/vnd.ms-excel";
  * Nombres de las entradas de un ZIP según su directorio central (el índice al
  * final del archivo), o null si no es un ZIP bien formado.
  */
+// Tope al descomprimir el manifiesto o la parte principal de un Word/Excel.
+const MAX_PARTE_OFFICE = 20 * 1024 * 1024;
+
 interface EntradaZip {
 	metodo: number;
 	comprimido: number;
@@ -137,7 +140,12 @@ function leerEntradaZip(bytes: Uint8Array, entrada: EntradaZip): string | null {
 	if (crudo.length !== entrada.comprimido) return null;
 	try {
 		if (entrada.metodo === 0) return crudo.toString("utf8");
-		if (entrada.metodo === 8) return inflateRawSync(crudo).toString("utf8");
+		if (entrada.metodo === 8) {
+			// Con tope: un ZIP armado a propósito puede inflarse a gigas.
+			return inflateRawSync(crudo, {
+				maxOutputLength: MAX_PARTE_OFFICE,
+			}).toString("utf8");
+		}
 	} catch {
 		return null;
 	}
@@ -216,6 +224,31 @@ function streamsDeOle(bytes: Uint8Array): Set<string> | null {
 }
 
 /**
+ * Un AVIF entero: sus cajas (ISO-BMFF) se encadenan hasta el final del archivo
+ * sin pasarse, y trae los metadatos (`meta`) y los datos de imagen (`mdat`).
+ */
+function esAvifCompleto(bytes: Uint8Array): boolean {
+	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const cajas = new Set<string>();
+	let pos = 0;
+	while (pos < datos.length) {
+		if (pos + 8 > datos.length) return false;
+		let tam = datos.readUInt32BE(pos);
+		const tipo = datos.toString("latin1", pos + 4, pos + 8);
+		if (tam === 1) {
+			if (pos + 16 > datos.length) return false;
+			tam = Number(datos.readBigUInt64BE(pos + 8));
+		} else if (tam === 0) {
+			tam = datos.length - pos;
+		}
+		if (tam < 8 || pos + tam > datos.length) return false;
+		if (tipo !== "mdat" || tam > 8) cajas.add(tipo);
+		pos += tam;
+	}
+	return cajas.has("ftyp") && cajas.has("meta") && cajas.has("mdat");
+}
+
+/**
  * Tipo con el que una factura subida desde el CRM puede ir a la aseguradora,
  * según su contenido: PDF, imagen (también AVIF), o Word/Excel cuyo contenido
  * sea de verdad un documento de Office del tipo declarado. Null si no: así un
@@ -229,7 +262,9 @@ export function tipoPermitidoDesdeCrm(
 	const real = tipoRealDeFactura(bytes);
 	if (real) return real;
 	const marca = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
-	if (marca === "ftypavif" || marca === "ftypavis") return "image/avif";
+	if ((marca === "ftypavif" || marca === "ftypavis") && esAvifCompleto(bytes)) {
+		return "image/avif";
+	}
 	if (empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04])) {
 		// Un .docx/.xlsx es un ZIP con el manifiesto de Office y la parte
 		// principal de su tipo, según el índice del propio ZIP.

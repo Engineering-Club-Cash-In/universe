@@ -47,21 +47,19 @@ export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
 	return null;
 }
 
-/** Nombre del adjunto con la extensión del tipo real ("factura.exe" → "factura.pdf"). */
-const MIME_WORD_EXCEL_ZIP = new Set([
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-]);
-const MIME_WORD_EXCEL_OLE = new Set([
-	"application/msword",
-	"application/vnd.ms-excel",
-]);
+const DOCX =
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX =
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const DOC = "application/msword";
+const XLS = "application/vnd.ms-excel";
 
 /**
  * Tipo con el que una factura subida desde el CRM puede ir a la aseguradora,
  * según su contenido: PDF, imagen (también AVIF), o Word/Excel cuyo contenido
  * sea de verdad un documento de Office del tipo declarado. Null si no: así un
- * HTML declarado como PDF no sale adjunto desde un correo de Club Cash In.
+ * HTML declarado como PDF, o un ZIP cualquiera declarado como Word, no sale
+ * adjunto desde un correo de Club Cash In.
  */
 export function tipoPermitidoDesdeCrm(
 	bytes: Uint8Array,
@@ -71,30 +69,40 @@ export function tipoPermitidoDesdeCrm(
 	if (real) return real;
 	const marca = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
 	if (marca === "ftypavif" || marca === "ftypavis") return "image/avif";
-	if (
-		empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04]) &&
-		MIME_WORD_EXCEL_ZIP.has(declarado)
-	) {
-		return declarado;
+	if (empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04])) {
+		// Los nombres de las entradas del ZIP van sin comprimir: un .docx trae
+		// "word/" y un .xlsx "xl/", además del manifiesto de Office.
+		const contenido = Buffer.from(bytes).toString("latin1");
+		if (!contenido.includes("[Content_Types].xml")) return null;
+		if (declarado === DOCX && contenido.includes("word/")) return DOCX;
+		if (declarado === XLSX && contenido.includes("xl/")) return XLSX;
+		return null;
 	}
 	if (
 		empiezaCon(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) &&
-		MIME_WORD_EXCEL_OLE.has(declarado)
+		(declarado === DOC || declarado === XLS)
 	) {
 		return declarado;
 	}
 	return null;
 }
 
-export function nombreDeFactura(
-	original: string,
-	tipo: MimeFacturaSeguro,
-): string {
+const EXTENSION_POR_TIPO: Record<string, string> = {
+	...EXTENSION_FACTURA,
+	"image/avif": ".avif",
+	[DOCX]: ".docx",
+	[XLSX]: ".xlsx",
+	[DOC]: ".doc",
+	[XLS]: ".xls",
+};
+
+/** Nombre del adjunto con la extensión del tipo aceptado ("factura.exe" → "factura.pdf"). */
+export function nombreDeFactura(original: string, tipo: string): string {
 	const base = (original.split(/[\\/]/).pop() ?? "")
 		.replace(/\.[^.]*$/, "")
 		.replace(/[^\p{L}\p{N} ._-]/gu, "")
 		.trim();
-	return `${base || "factura"}${EXTENSION_FACTURA[tipo]}`;
+	return `${base || "factura"}${EXTENSION_POR_TIPO[tipo] ?? ""}`;
 }
 
 export type Aseguradora = "gyt" | "universales";

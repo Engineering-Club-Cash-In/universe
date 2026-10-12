@@ -66,6 +66,7 @@ let resultadoCorreo:
 const insertados: Array<{ tabla: unknown; valores: Record<string, unknown> }> =
 	[];
 const actualizados: Array<Record<string, unknown>> = [];
+const borradosDb: unknown[] = [];
 const condicionesActualizacion: unknown[] = [];
 const correos: Array<Record<string, unknown>> = [];
 const subidosR2: Array<{ key: string; mime: string }> = [];
@@ -195,6 +196,11 @@ const dbFalsa = {
 				];
 			},
 		}),
+	}),
+	delete: (tabla: unknown) => ({
+		where: async () => {
+			borradosDb.push(tabla);
+		},
 	}),
 	update: () => ({
 		set: (valores: Record<string, unknown>) => ({
@@ -341,6 +347,7 @@ beforeEach(() => {
 	resultadoCorreo = { ok: true };
 	insertados.length = 0;
 	actualizados.length = 0;
+	borradosDb.length = 0;
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
 	bloqueosUsuario.length = 0;
@@ -1156,7 +1163,10 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	test("un Word o un Excel también se envía, con su nombre y su tipo", async () => {
 		const DOCX =
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-		contenidoR2 = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+		contenidoR2 = Buffer.concat([
+			Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+			Buffer.from("[Content_Types].xml word/document.xml"),
+		]);
 		const r = await enviar("factura.docx", "admin", DOCX);
 		expect(r).toMatchObject({ enviada: true });
 		expect(subidosR2).toEqual([
@@ -1214,7 +1224,11 @@ describe("factura programada para el cierre", () => {
 	const KEY_ANTES = `opportunities/${ID}/555-antes-factura.pdf`;
 	const subir = (
 		c: Record<string, unknown>,
-		confirmada: "gyt" | "programado" | null = "programado",
+		confirmada:
+			| "gyt"
+			| "universales"
+			| { programado: "gyt" | "universales" }
+			| null = { programado: "gyt" },
 	) => {
 		caso = c;
 		return enviarFacturaSeguroDesdeCrm({
@@ -1279,6 +1293,56 @@ describe("factura programada para el cierre", () => {
 		expect(insertados).toHaveLength(0);
 	});
 
+	test("programada para otra aseguradora que la que corresponde: no se programa", async () => {
+		const r = await subir(casoAl(85, { status: "open" }), {
+			programado: "universales",
+		});
+		expect(r).toMatchObject({ enviada: false });
+		expect("programada" in r).toBe(false);
+		expect(insertados).toHaveLength(0);
+	});
+
+	test("un ZIP que no es Word, declarado como Word, no pasa", async () => {
+		caso = casoAl(85, { status: "open" });
+		contenidoR2 = Buffer.concat([
+			Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+			Buffer.from("cualquier-cosa.txt"),
+		]);
+		const r = await enviarFacturaSeguroDesdeCrm({
+			opportunityId: ID,
+			documentId: "doc-antes",
+			key: KEY_ANTES,
+			nombre: "factura.docx",
+			mimeType:
+				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			aseguradoraConfirmada: { programado: "gyt" },
+			userId: "crm-1",
+			userRole: "admin",
+		});
+		expect(r).toEqual({
+			enviada: false,
+			motivo: "la factura tiene que ser un PDF, una imagen, un Word o un Excel",
+		});
+	});
+
+	test("un AVIF subido como factura.pdf sale con la extensión real", async () => {
+		caso = casoAl(90);
+		contenidoR2 = Buffer.from([
+			0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+		]);
+		await enviarFacturaSeguroDesdeCrm({
+			opportunityId: ID,
+			documentId: "doc-avif",
+			key: KEY_ANTES,
+			nombre: "factura.pdf",
+			mimeType: "application/pdf",
+			aseguradoraConfirmada: "gyt",
+			userId: "crm-1",
+			userRole: "admin",
+		});
+		expect(correos[0]).toMatchObject({ archivo: { nombre: "factura.avif" } });
+	});
+
 	test("un HTML declarado como PDF no se programa ni se envía", async () => {
 		contenidoR2 = Buffer.from("<html><body>hola</body></html>");
 		expect(await subir(casoAl(85, { status: "open" }))).toEqual({
@@ -1295,6 +1359,7 @@ describe("factura programada para el cierre", () => {
 				id: "envio-prog",
 				status: "programado",
 				intento: 1,
+				confirmada: "gyt",
 				key: KEY_ANTES,
 				nombre: "factura.pdf",
 			},
@@ -1316,6 +1381,23 @@ describe("factura programada para el cierre", () => {
 		expect(await enviarFacturaProgramada(ID)).toBeNull();
 		facturaPrevia = [{ id: "envio-1", status: "enviado", intento: 1 }];
 		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(correos).toHaveLength(0);
+	});
+
+	test("si al cierre corresponde otra aseguradora, no sale y se cancela la programación", async () => {
+		caso = casoAl(90);
+		facturaPrevia = [
+			{
+				id: "envio-prog",
+				status: "programado",
+				intento: 1,
+				confirmada: "universales",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+			},
+		];
+		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(borradosDb).toEqual([insuranceInvoiceSubmissions]);
 		expect(correos).toHaveLength(0);
 	});
 

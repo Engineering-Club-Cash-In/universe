@@ -6868,9 +6868,13 @@ export const crmRouter = {
 				}),
 				// "Seguro del Vehículo": la aseguradora a la que el usuario confirmó
 				// el envío. Sin esto la factura se guarda pero no se manda.
-				// "programado": aceptó que salga sola al confirmar los contratos.
+				// { programado }: aceptó que salga sola a esa aseguradora al
+				// confirmar los contratos.
 				envioFacturaConfirmado: z
-					.enum(["gyt", "universales", "programado"])
+					.union([
+						z.enum(["gyt", "universales"]),
+						z.object({ programado: z.enum(["gyt", "universales"]) }),
+					])
 					.nullish(),
 			}),
 		)
@@ -7153,6 +7157,39 @@ export const crmRouter = {
 						"Esta factura del seguro ya se registró para la aseguradora y no se puede eliminar",
 				});
 			}
+			if (facturaRegistrada) {
+				// Bajo bloqueo, como la reserva del envío al cierre: si mientras
+				// tanto empezó a enviarse, no se borra. El archivo se borra de R2
+				// solo después de quitarlo de la base.
+				const borrada = await db.transaction(async (tx) => {
+					const [programada] = await tx
+						.select({ id: insuranceInvoiceSubmissions.id })
+						.from(insuranceInvoiceSubmissions)
+						.where(
+							and(
+								eq(insuranceInvoiceSubmissions.id, facturaRegistrada.id),
+								eq(insuranceInvoiceSubmissions.status, "programado"),
+							),
+						)
+						.for("update");
+					if (!programada) return false;
+					await tx
+						.delete(insuranceInvoiceSubmissions)
+						.where(eq(insuranceInvoiceSubmissions.id, programada.id));
+					await tx
+						.delete(opportunityDocuments)
+						.where(eq(opportunityDocuments.id, input.documentId));
+					return true;
+				});
+				if (!borrada) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Esta factura del seguro ya empezó a enviarse a la aseguradora y no se puede eliminar",
+					});
+				}
+				await deleteFileFromR2(document.filePath).catch(() => {});
+				return { success: true };
+			}
 
 			// Verificar permisos
 			if (
@@ -7285,17 +7322,7 @@ export const crmRouter = {
 					await deleteFileFromR2(document.filePath);
 				}
 
-				// Eliminar de la base de datos (con su programación, si la tenía)
-				if (facturaRegistrada) {
-					await db
-						.delete(insuranceInvoiceSubmissions)
-						.where(
-							and(
-								eq(insuranceInvoiceSubmissions.id, facturaRegistrada.id),
-								eq(insuranceInvoiceSubmissions.status, "programado"),
-							),
-						);
-				}
+				// Eliminar de la base de datos
 				await db
 					.delete(opportunityDocuments)
 					.where(eq(opportunityDocuments.id, input.documentId));

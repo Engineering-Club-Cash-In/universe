@@ -23,6 +23,7 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { coberturasQueNoCorresponden } from "../lib/cobertura-por-aseguradora";
 import {
 	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 	resolveLegacyContractGender,
@@ -75,6 +76,7 @@ import {
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import { conVencimientoDelContrato } from "../lib/vencimiento-del-contrato";
 import {
+	aseguradoraDeLaOportunidad,
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
 	transformToApiFormat,
@@ -348,6 +350,28 @@ export async function firmantesDeLaOportunidad(
  * Del 90% en adelante los contratos que están en análisis son los que son:
  * cambiarlos ahí sería mover el piso de una decisión ya tomada.
  */
+/**
+ * Corta si se pide la carta de cobertura de la otra aseguradora.
+ *
+ * El asistente las deja deshabilitadas, pero la pantalla pudo cargarse antes de
+ * que cambiaran la cotización, y regenerar o subir a mano reusan el tipo que
+ * venía: se vuelve a leer la cotización acá.
+ */
+async function exigirCoberturaDeLaAseguradora(
+	opportunityId: string,
+	contractTypes: string[],
+): Promise<void> {
+	const noCorresponden = coberturasQueNoCorresponden(
+		await aseguradoraDeLaOportunidad(opportunityId),
+	);
+	const tipo = contractTypes.find((t) => noCorresponden[t]);
+	if (tipo) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${noCorresponden[tipo]}: no va la carta de cobertura de la otra aseguradora. Elegí la que corresponde.`,
+		});
+	}
+}
+
 async function exigirEtapaQuePermiteReemplazo(
 	opportunityId: string,
 ): Promise<{ stageId: string | null; porcentaje: number }> {
@@ -1465,6 +1489,10 @@ export const contractGenerationRouter = {
 					async () => {
 						if (input.opportunityId) {
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+							await exigirCoberturaDeLaAseguradora(
+								input.opportunityId,
+								input.contracts.map((c) => c.contractType),
+							);
 							await exigirQueElPaqueteTraigaLasVigentes(
 								input.opportunityId,
 								cartasDelPedido(aGenerar),
@@ -2212,6 +2240,11 @@ export const contractGenerationRouter = {
 					const etapa = await exigirEtapaQuePermiteReemplazo(
 						input.opportunityId,
 					);
+					// La foto puede ser de antes de que cambiaran la cotización.
+					await exigirCoberturaDeLaAseguradora(
+						input.opportunityId,
+						contractsToRegenerate.map((c) => c.contractType),
+					);
 					const etapaInicial = etapa.stageId;
 					const porcentajeEtapa = etapa.porcentaje;
 					const aGenerar = agruparCartas(contractsWithNewDate);
@@ -2460,6 +2493,10 @@ export const contractGenerationRouter = {
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
 				// esperaba el candado.
 				await exigirQueSePuedaSubir(input);
+				// La cobertura tiene que ser la de la aseguradora de la cotización.
+				await exigirCoberturaDeLaAseguradora(input.opportunityId, [
+					input.contractType,
+				]);
 
 				// En WeeTrust se ve quién firma y qué firma, no el nombre con el
 				// que quedó guardado el archivo en la computadora de jurídico

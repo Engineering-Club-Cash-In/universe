@@ -635,20 +635,21 @@ export async function mapOpportunityToContractData(
 	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
 	// la distribuidora. En usados no aplica; companyId puede haberse heredado
 	// del lead y no necesariamente representa una agencia del vehículo.
-	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
-		? await db
-				.select({ name: companies.name, razonSocial: companies.razonSocial })
-				.from(companies)
-				.where(eq(companies.id, opportunity.companyId))
-				.limit(1)
-		: [];
+	const [empresaAgencia] =
+		vehicle?.isNew === true && opportunity.companyId
+			? await db
+					.select({ name: companies.name, razonSocial: companies.razonSocial })
+					.from(companies)
+					.where(eq(companies.id, opportunity.companyId))
+					.limit(1)
+			: [];
 
 	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
 	// reconoce como sociedad solo después de formatearlo, y si no el contrato
 	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
-	const cotizacion = await getLatestApprovedQuotation(opportunityId);
-	const aseguradora = normalizarAseguradora(
-		cotizacion?.insuranceProvider ?? opportunity.insuranceProvider,
+	const aseguradora = await aseguradoraDeLaOportunidad(
+		opportunityId,
+		opportunity.insuranceProvider,
 	);
 
 	const nombreEntidad = inversionistaPrincipal
@@ -732,6 +733,31 @@ export async function mapOpportunityToContractData(
 			aseguradora,
 		},
 	};
+}
+
+/**
+ * La aseguradora de la venta, que decide qué carta de cobertura va.
+ *
+ * Sale de la cotización (la aceptada primero, si no la más reciente), igual
+ * que en el cierre: la oportunidad recién la recibe al cerrarse, y en 80%
+ * todavía tiene la de por defecto.
+ */
+export async function aseguradoraDeLaOportunidad(
+	opportunityId: string,
+	deLaOportunidad?: string | null,
+): Promise<InsuranceProvider> {
+	const cotizacion = await getLatestApprovedQuotation(opportunityId);
+	if (cotizacion?.insuranceProvider || deLaOportunidad !== undefined) {
+		return normalizarAseguradora(
+			cotizacion?.insuranceProvider ?? deLaOportunidad,
+		);
+	}
+	const [oportunidad] = await db
+		.select({ insuranceProvider: opportunities.insuranceProvider })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	return normalizarAseguradora(oportunidad?.insuranceProvider);
 }
 
 /**

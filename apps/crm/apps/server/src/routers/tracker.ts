@@ -752,10 +752,14 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	/** El tipo con el que el CRM aceptó el documento. */
 	mimeType: string;
 	/**
-	 * La aseguradora a la que el usuario confirmó el envío, si confirmó, o
-	 * "programado" si aceptó que salga sola al cerrar.
+	 * La aseguradora a la que el usuario confirmó el envío, si confirmó; con
+	 * `programado`, aceptó que salga sola a esa aseguradora al cerrar.
 	 */
-	aseguradoraConfirmada: Aseguradora | "programado" | null | undefined;
+	aseguradoraConfirmada:
+		| Aseguradora
+		| { programado: Aseguradora }
+		| null
+		| undefined;
 	userId: string;
 	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
@@ -771,9 +775,14 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		companyId: fila.companyId,
 		yaSubida: fila.facturaEnvio != null,
 	});
+	const confirmada =
+		typeof params.aseguradoraConfirmada === "object"
+			? params.aseguradoraConfirmada?.programado
+			: params.aseguradoraConfirmada;
 	const programar =
 		!regla.ok &&
-		params.aseguradoraConfirmada === "programado" &&
+		typeof params.aseguradoraConfirmada === "object" &&
+		params.aseguradoraConfirmada !== null &&
 		programableAlCerrar(fila, regla.motivo);
 	if (!regla.ok && !programar) {
 		return {
@@ -801,14 +810,11 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			motivo: "la factura tiene que ser un PDF, una imagen, un Word o un Excel",
 		};
 	}
-	const tipoReal = tipoRealDeFactura(contenido);
 
 	// La URL firmada de la subida se puede reusar 10 minutos: lo que se manda,
 	// ahora, al cierre o en el reintento, es una copia que solo escribe el
 	// server, con los bytes que pasaron la validación.
-	const nombre = tipoReal
-		? nombreDeFactura(params.nombre, tipoReal)
-		: params.nombre;
+	const nombre = nombreDeFactura(params.nombre, tipo);
 	const copia = `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`;
 	await uploadBufferToR2(copia, contenido, tipo);
 
@@ -850,9 +856,10 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 
 			const { aseguradora, datos, destinatarios } =
 				await datosDelCorreoBajoBloqueo(tx, fila);
-			// Solo sale lo que el usuario confirmó: la consulta previa pudo decir
-			// que no se enviaba, o la aseguradora cambió con el diálogo abierto.
-			if (!programar && aseguradora !== params.aseguradoraConfirmada) {
+			// Solo sale (o se programa) lo que el usuario confirmó: la consulta
+			// previa pudo decir otra cosa, o la aseguradora cambió con el diálogo
+			// abierto.
+			if (aseguradora !== confirmada) {
 				return { sinConfirmar: true as const };
 			}
 
@@ -975,6 +982,7 @@ export async function enviarFacturaProgramada(
 					id: insuranceInvoiceSubmissions.id,
 					status: insuranceInvoiceSubmissions.status,
 					intento: insuranceInvoiceSubmissions.intento,
+					confirmada: insuranceInvoiceSubmissions.insuranceProvider,
 					key: opportunityDocuments.filePath,
 					nombre: opportunityDocuments.originalName,
 				})
@@ -995,6 +1003,19 @@ export async function enviarFacturaProgramada(
 			if (!fila) return null;
 			const { aseguradora, datos, destinatarios } =
 				await datosDelCorreoBajoBloqueo(tx, fila);
+			// Se programó para la aseguradora que el usuario vio: si al cierre
+			// corresponde otra, no sale sin reconfirmar y la programación se
+			// cancela (hay que volver a subirla).
+			if (aseguradora !== programada.confirmada) {
+				await tx
+					.delete(insuranceInvoiceSubmissions)
+					.where(eq(insuranceInvoiceSubmissions.id, programada.id));
+				console.warn(
+					"[enviarFacturaProgramada] La aseguradora cambió: se canceló la programación",
+					{ opportunityId, confirmada: programada.confirmada, aseguradora },
+				);
+				return null;
+			}
 			const reservadoAt = new Date();
 			const correo = armarCorreoFacturaSeguro(datos, reservadoAt);
 			await tx

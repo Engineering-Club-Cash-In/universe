@@ -70,7 +70,7 @@ export type MotivoSinFactura =
 
 export const MENSAJE_MOTIVO: Record<MotivoSinFactura, string> = {
 	etapa:
-		"La factura del seguro se sube cuando el crédito está en formalización final",
+		"La factura del seguro se sube desde que el crédito está en formalización final (90%)",
 	estado: "Este crédito ya no admite la factura del seguro",
 	sin_cerrar:
 		"La factura del seguro se sube cuando el crédito ya está cerrado (ganado)",
@@ -88,12 +88,8 @@ function motivoPorEstadoYEtapa(caso: {
 	closurePercentage: number;
 }): "estado" | "etapa" | "sin_cerrar" | null {
 	if (caso.status === "lost") return "estado";
-	if (
-		caso.closurePercentage < ETAPA_FACTURA_SEGURO ||
-		caso.closurePercentage >= 100
-	) {
-		return "etapa";
-	}
+	// Desde el 90% en adelante, también ya desembolsada (100%).
+	if (caso.closurePercentage < ETAPA_FACTURA_SEGURO) return "etapa";
 	if (caso.status !== "won") return "sin_cerrar";
 	return null;
 }
@@ -125,7 +121,7 @@ export const MENSAJE_SIN_ENVIO_DESDE_CRM: Record<
 	MotivoSinEnvioDesdeCrm,
 	string
 > = {
-	etapa: "la oportunidad no está en formalización final (90%)",
+	etapa: "la oportunidad todavía no llega a formalización final (90%)",
 	estado: "la oportunidad ya no admite la factura del seguro",
 	sin_cerrar: "la oportunidad todavía no está ganada (crédito sin cerrar)",
 	sin_agencia: "la oportunidad no es de una agencia o predio",

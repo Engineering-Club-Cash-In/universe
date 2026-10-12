@@ -683,8 +683,13 @@ export async function previsualizarFacturaSeguroDesdeCrm(
 	const [fila] = await consultaBase()
 		.where(eq(opportunities.id, opportunityId))
 		.limit(1);
+	// consultaBase solo trae casos de agencia; quien llama ya comprobó que la
+	// oportunidad existe, así que sin fila es que no es de agencia ni predio.
 	if (!fila)
-		return { seEnviara: false, motivo: "no se encontró la oportunidad" };
+		return {
+			seEnviara: false,
+			motivo: MENSAJE_SIN_ENVIO_DESDE_CRM.sin_agencia,
+		};
 	const regla = puedeEnviarFacturaDesdeCrm({
 		closurePercentage: fila.closurePercentage,
 		status: fila.status,
@@ -733,14 +738,12 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	const [fila] = await consultaBase()
 		.where(eq(opportunities.id, params.opportunityId))
 		.limit(1);
-	if (!fila) return { enviada: false, motivo: "no se encontró la oportunidad" };
+	if (!fila) {
+		return { enviada: false, motivo: MENSAJE_SIN_ENVIO_DESDE_CRM.sin_agencia };
+	}
 	const automatico = params.aseguradoraConfirmada === "automatico";
-	// El envío del cierre corre en segundo plano: si mientras tanto la
-	// oportunidad ya pasó al 100% (desembolso), se termina igual.
-	const etapaParaRegla = (porcentaje: number) =>
-		automatico && porcentaje >= 100 ? ETAPA_FACTURA_SEGURO : porcentaje;
 	const regla = puedeEnviarFacturaDesdeCrm({
-		closurePercentage: etapaParaRegla(fila.closurePercentage),
+		closurePercentage: fila.closurePercentage,
 		status: fila.status,
 		companyId: fila.companyId,
 		yaSubida: fila.facturaEnvio != null,
@@ -811,7 +814,6 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			}
 			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
 				...vigente,
-				closurePercentage: etapaParaRegla(vigente.closurePercentage),
 				yaSubida: !!previa,
 			});
 			if (!bajoBloqueo.ok) return null;

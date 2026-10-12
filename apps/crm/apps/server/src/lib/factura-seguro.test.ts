@@ -47,15 +47,12 @@ describe("puedeSubirFacturaSeguro", () => {
 		});
 	});
 
-	test("solo en formalización final: ni antes del 90% ni ya desembolsado", () => {
+	test("desde formalización final (90%) en adelante, también ya desembolsada", () => {
 		expect(caso({ closurePercentage: 85 })).toEqual({
 			ok: false,
 			motivo: "etapa",
 		});
-		expect(caso({ closurePercentage: 100 })).toEqual({
-			ok: false,
-			motivo: "etapa",
-		});
+		expect(caso({ closurePercentage: 100 })).toEqual({ ok: true });
 	});
 
 	test("un crédito perdido ya no la admite", () => {
@@ -229,10 +226,7 @@ describe("puedeEnviarFacturaDesdeCrm", () => {
 			ok: false,
 			motivo: "etapa",
 		});
-		expect(caso({ closurePercentage: 100 })).toEqual({
-			ok: false,
-			motivo: "etapa",
-		});
+		expect(caso({ closurePercentage: 100 })).toEqual({ ok: true });
 		expect(caso({ status: "lost" })).toEqual({ ok: false, motivo: "estado" });
 		expect(caso({ yaSubida: true })).toEqual({
 			ok: false,

@@ -1034,7 +1034,11 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 			cuentaNexa: "1234567890123456",
 		});
 		expect(msg.startsWith("Ana Lopez.")).toBe(true);
-		expect(msg).toContain("🔢 Cuenta Monetaria : 1234567890123456");
+		expect(msg).toContain(
+			"tu *nueva cuenta exclusiva para realizar los pagos de tu crédito*.",
+		);
+		expect(msg).toContain("🏛️ *Banco Nexa*");
+		expect(msg).toContain("🔢 *Cuenta Monetaria : 1234567890123456*");
 		expect(msg).toContain("ejecutivo al 5555-1234");
 		expect(msg).not.toContain("{");
 	});

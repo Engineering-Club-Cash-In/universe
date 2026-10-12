@@ -160,6 +160,14 @@ async function crearConvenioDePago(
     // otro día o de otro crédito no puede sostener el convenio.
     const abonoInicialPagoId = abono_inicial_pago_id ?? null;
     if (abonoInicialPagoId != null) {
+      // El abono ya se aplicó: no puede ser también una cuota del convenio. Si entrara a
+      // `payment_ids` iría al pivot y el primer pago del convenio sobrescribiría esa fila.
+      if (payment_ids.includes(abonoInicialPagoId)) {
+        throw new RechazoAbonoInicial(
+          400,
+          "El abono inicial no puede ser también un recibo del convenio. Envíe solo los recibos abiertos de las cuotas."
+        );
+      }
       const [pagoAbono] = await db
         .select({
           credito_id: pagos_credito.credito_id,

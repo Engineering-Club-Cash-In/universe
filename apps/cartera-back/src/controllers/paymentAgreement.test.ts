@@ -972,6 +972,20 @@ describe("createPaymentAgreement: abono inicial bajo el candado de pagos del cr�
     expect(lockConnect).toHaveBeenCalledTimes(1);
   });
 
+  it("rechaza 400 si el abono inicial viene también en payment_ids, antes de leer el pago", async () => {
+    selectQueue = [[{ email: "asesor@clubcashin.com" }]];
+
+    const error: any = await createPaymentAgreement({
+      ...base,
+      payment_ids: [401, 402],
+      abono_inicial_pago_id: 402,
+    }).catch((e) => e);
+
+    expect(error?.name).toBe("RechazoAbonoInicial");
+    expect(error?.status).toBe(400);
+    expect(error?.message).toContain("no puede ser también un recibo del convenio");
+  });
+
   it("sin abono inicial no toma ese candado: el flujo normal no cambia", async () => {
     lockConnect.mockClear();
     selectQueue = [[]];

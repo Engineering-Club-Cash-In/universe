@@ -15,6 +15,30 @@ export interface MembresiaSocio {
 	sellerId: string | null;
 }
 
+/**
+ * En el formulario, una agencia recién marcada todavía no tiene alcance
+ * (`undefined`): hay que elegir gerente o vendedor a propósito, para que nadie
+ * quede viendo toda la agencia por omisión.
+ */
+export interface MembresiaEnEdicion {
+	companyId: string;
+	sellerId?: string | null;
+}
+
+export function faltaElegirAlcance(value: MembresiaEnEdicion[]): boolean {
+	return value.some((m) => m.sellerId === undefined);
+}
+
+/** Solo con todos los alcances elegidos (ver `faltaElegirAlcance`). */
+export function membresiasElegidas(
+	value: MembresiaEnEdicion[],
+): MembresiaSocio[] {
+	return value.map((m) => ({
+		companyId: m.companyId,
+		sellerId: m.sellerId ?? null,
+	}));
+}
+
 const GERENTE = "__gerente__";
 
 /**
@@ -28,8 +52,8 @@ export function PartnerAgenciesPicker({
 	className,
 }: {
 	companies: Array<{ id: string; name: string }>;
-	value: MembresiaSocio[];
-	onChange: (value: MembresiaSocio[]) => void;
+	value: MembresiaEnEdicion[];
+	onChange: (value: MembresiaEnEdicion[]) => void;
 	className?: string;
 }) {
 	if (companies.length === 0) {
@@ -53,7 +77,10 @@ export function PartnerAgenciesPicker({
 									onChange(
 										membresia
 											? value.filter((m) => m.companyId !== company.id)
-											: [...value, { companyId: company.id, sellerId: null }],
+											: [
+													...value,
+													{ companyId: company.id, sellerId: undefined },
+												],
 									)
 								}
 							/>
@@ -85,7 +112,7 @@ function AlcanceSelect({
 	onChange,
 }: {
 	companyId: string;
-	sellerId: string | null;
+	sellerId: string | null | undefined;
 	onChange: (sellerId: string | null) => void;
 }) {
 	const vendedoresQuery = useQuery(
@@ -95,11 +122,17 @@ function AlcanceSelect({
 	return (
 		<div className="pl-6">
 			<Select
-				value={sellerId ?? GERENTE}
+				value={sellerId === undefined ? "" : (sellerId ?? GERENTE)}
 				onValueChange={(v) => onChange(v === GERENTE ? null : v)}
 			>
-				<SelectTrigger className="h-8 text-xs">
-					<SelectValue />
+				<SelectTrigger
+					className={
+						sellerId === undefined
+							? "h-8 border-amber-400 text-xs"
+							: "h-8 text-xs"
+					}
+				>
+					<SelectValue placeholder="Elige: toda la agencia o un vendedor" />
 				</SelectTrigger>
 				<SelectContent>
 					<SelectItem value={GERENTE}>Toda la agencia (gerente)</SelectItem>

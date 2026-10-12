@@ -327,19 +327,70 @@ describe("tipoRealDeFactura", () => {
 	};
 	const texto = (t: string) => new TextEncoder().encode(t);
 
-	test("reconoce PDF, JPEG, PNG y WebP por su firma", () => {
-		expect(tipoRealDeFactura(texto("%PDF-1.7\n..."))).toBe("application/pdf");
-		expect(tipoRealDeFactura(bytes(0xff, 0xd8, 0xff, 0xe0))).toBe("image/jpeg");
+	const conCierre = (inicio: Uint8Array, cierre: number[]) => {
+		const b = new Uint8Array(64);
+		b.set(inicio);
+		b.set(cierre, 64 - cierre.length);
+		return b;
+	};
+	const webp = () => {
+		const b = Buffer.alloc(32);
+		b.write("RIFF", 0, "latin1");
+		b.writeUInt32LE(24, 4);
+		b.write("WEBPVP8 ", 8, "latin1");
+		return new Uint8Array(b);
+	};
+
+	test("reconoce PDF, JPEG, PNG y WebP por su firma y su cierre", () => {
+		expect(tipoRealDeFactura(texto("%PDF-1.7\n...\n%%EOF\n"))).toBe(
+			"application/pdf",
+		);
 		expect(
-			tipoRealDeFactura(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
+			tipoRealDeFactura(conCierre(bytes(0xff, 0xd8, 0xff, 0xe0), [0xff, 0xd9])),
+		).toBe("image/jpeg");
+		expect(
+			tipoRealDeFactura(
+				conCierre(
+					bytes(
+						0x89,
+						0x50,
+						0x4e,
+						0x47,
+						0x0d,
+						0x0a,
+						0x1a,
+						0x0a,
+						0,
+						0,
+						0,
+						13,
+						0x49,
+						0x48,
+						0x44,
+						0x52,
+					),
+					[0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82],
+				),
+			),
 		).toBe("image/png");
-		expect(
-			tipoRealDeFactura(texto("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ")),
-		).toBe("image/webp");
+		expect(tipoRealDeFactura(webp())).toBe("image/webp");
 	});
 
 	test("un PDF con basura antes del encabezado (lo admite el estándar)", () => {
-		expect(tipoRealDeFactura(texto("\r\n  %PDF-1.4"))).toBe("application/pdf");
+		expect(tipoRealDeFactura(texto("\r\n  %PDF-1.4\n%%EOF"))).toBe(
+			"application/pdf",
+		);
+	});
+
+	test("un archivo truncado que solo trae la firma no pasa", () => {
+		expect(tipoRealDeFactura(texto("%PDF-1.4"))).toBeNull();
+		expect(tipoRealDeFactura(new Uint8Array([0xff, 0xd8, 0xff]))).toBeNull();
+		expect(
+			tipoRealDeFactura(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
+		).toBeNull();
+		expect(
+			tipoRealDeFactura(texto("RIFF\u00ff\u0000\u0000\u0000WEBPVP8 ")),
+		).toBeNull();
 	});
 
 	test("rechaza ejecutables, documentos de Office, vacíos o sin firma", () => {
@@ -377,28 +428,38 @@ describe("nombreDeFactura", () => {
 });
 
 // ZIP mínimo pero bien formado (sin comprimir), con su directorio central.
-function zipConEntradas(nombres: string[]): Uint8Array {
+// Cada entrada lleva el contenido dado (vacío si no se pasa).
+function zipConEntradas(
+	entradas: Array<string | [string, string]>,
+): Uint8Array {
 	const locales: Buffer[] = [];
 	const centrales: Buffer[] = [];
 	let desplazamiento = 0;
-	for (const nombre of nombres) {
+	for (const entrada of entradas) {
+		const [nombre, contenido] =
+			typeof entrada === "string" ? [entrada, ""] : entrada;
 		const n = Buffer.from(nombre);
+		const d = Buffer.from(contenido);
 		const local = Buffer.alloc(30);
 		local.writeUInt32LE(0x04034b50, 0);
+		local.writeUInt32LE(d.length, 18);
+		local.writeUInt32LE(d.length, 22);
 		local.writeUInt16LE(n.length, 26);
 		const central = Buffer.alloc(46);
 		central.writeUInt32LE(0x02014b50, 0);
+		central.writeUInt32LE(d.length, 20);
+		central.writeUInt32LE(d.length, 24);
 		central.writeUInt16LE(n.length, 28);
 		central.writeUInt32LE(desplazamiento, 42);
-		locales.push(local, n);
+		locales.push(local, n, d);
 		centrales.push(central, n);
-		desplazamiento += 30 + n.length;
+		desplazamiento += 30 + n.length + d.length;
 	}
 	const directorio = Buffer.concat(centrales);
 	const fin = Buffer.alloc(22);
 	fin.writeUInt32LE(0x06054b50, 0);
-	fin.writeUInt16LE(nombres.length, 8);
-	fin.writeUInt16LE(nombres.length, 10);
+	fin.writeUInt16LE(entradas.length, 8);
+	fin.writeUInt16LE(entradas.length, 10);
 	fin.writeUInt32LE(directorio.length, 12);
 	fin.writeUInt32LE(desplazamiento, 16);
 	return new Uint8Array(Buffer.concat([...locales, directorio, fin]));
@@ -406,7 +467,7 @@ function zipConEntradas(nombres: string[]): Uint8Array {
 
 // Archivo OLE mínimo pero bien formado (.doc/.xls viejos): encabezado, un
 // sector de FAT y uno de directorio con estos streams.
-function oleConStreams(streams: string[]): Uint8Array {
+function oleConStreams(streams: string[], tipoStream = 2): Uint8Array {
 	const encabezado = Buffer.alloc(512, 0);
 	Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(
 		encabezado,
@@ -425,6 +486,9 @@ function oleConStreams(streams: string[]): Uint8Array {
 		const n = Buffer.from(`${nombre}\0`, "utf16le");
 		n.copy(directorio, i * 128);
 		directorio.writeUInt16LE(n.length, i * 128 + 0x40);
+		directorio[i * 128 + 0x42] = i === 0 ? 5 : tipoStream; // raíz y streams
+		directorio.writeUInt32LE(0, i * 128 + 0x74); // sector de inicio
+		directorio.writeUInt32LE(4096, i * 128 + 0x78); // tamaño
 	});
 	return new Uint8Array(Buffer.concat([encabezado, fat, directorio]));
 }
@@ -432,9 +496,12 @@ function oleConStreams(streams: string[]): Uint8Array {
 describe("tipoPermitidoDesdeCrm", () => {
 	const DOCX =
 		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-	const zipDe = (entrada: string) =>
-		zipConEntradas(["[Content_Types].xml", entrada]);
-	const zip = zipDe("word/document.xml");
+	const MANIFIESTO_DOCX =
+		'<Types><Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
+	const zip = zipConEntradas([
+		["[Content_Types].xml", MANIFIESTO_DOCX],
+		["word/document.xml", "<w:document/>"],
+	]);
 	const ole = oleConStreams(["WordDocument"]);
 	const avif = new Uint8Array([
 		0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
@@ -442,7 +509,7 @@ describe("tipoPermitidoDesdeCrm", () => {
 	const texto = (s: string) => new TextEncoder().encode(s);
 
 	test("PDF, imagen y AVIF por su contenido", () => {
-		expect(tipoPermitidoDesdeCrm(texto("%PDF-1.4"), DOCX)).toBe(
+		expect(tipoPermitidoDesdeCrm(texto("%PDF-1.4\n%%EOF"), DOCX)).toBe(
 			"application/pdf",
 		);
 		expect(tipoPermitidoDesdeCrm(avif, "image/avif")).toBe("image/avif");
@@ -456,9 +523,24 @@ describe("tipoPermitidoDesdeCrm", () => {
 		expect(tipoPermitidoDesdeCrm(zip, "application/msword")).toBeNull();
 		// Un Excel declarado como Word, un ZIP sin manifiesto de Office, o bytes
 		// que solo nombran las entradas sin ser un ZIP de verdad: no.
-		expect(tipoPermitidoDesdeCrm(zipDe("xl/workbook.xml"), DOCX)).toBeNull();
+		expect(
+			tipoPermitidoDesdeCrm(
+				zipConEntradas([
+					["[Content_Types].xml", MANIFIESTO_DOCX],
+					["xl/workbook.xml", "<workbook/>"],
+				]),
+				DOCX,
+			),
+		).toBeNull();
 		expect(
 			tipoPermitidoDesdeCrm(zipConEntradas(["word/document.xml"]), DOCX),
+		).toBeNull();
+		// Con las entradas vacías (sin manifiesto ni documento de verdad): no.
+		expect(
+			tipoPermitidoDesdeCrm(
+				zipConEntradas(["[Content_Types].xml", "word/document.xml"]),
+				DOCX,
+			),
 		).toBeNull();
 		const falso = new Uint8Array(
 			Buffer.concat([
@@ -481,6 +563,13 @@ describe("tipoPermitidoDesdeCrm", () => {
 		expect(
 			tipoPermitidoDesdeCrm(
 				new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+				"application/msword",
+			),
+		).toBeNull();
+		// Un nombre en el directorio que no es un stream de verdad: no.
+		expect(
+			tipoPermitidoDesdeCrm(
+				oleConStreams(["WordDocument"], 0),
 				"application/msword",
 			),
 		).toBeNull();

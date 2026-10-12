@@ -1,3 +1,4 @@
+import { inflateRawSync } from "node:zlib";
 import { z } from "zod";
 import type { MembresiaSocio } from "./partner-scope";
 
@@ -35,15 +36,33 @@ function empiezaCon(bytes: Uint8Array, firma: number[], desde = 0) {
 export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
 	// El estándar de PDF admite basura antes del encabezado (hasta 1024 bytes).
 	const inicio = Buffer.from(bytes.subarray(0, 1024)).toString("latin1");
-	if (inicio.includes("%PDF-")) return "application/pdf";
-	if (empiezaCon(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg";
-	if (empiezaCon(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-		return "image/png";
+	// Además de la firma, la marca de cierre de cada formato: un archivo
+	// truncado (solo la firma) no se puede abrir y no debe salir adjunto.
+	const final = Buffer.from(
+		bytes.subarray(Math.max(0, bytes.length - 1024)),
+	).toString("latin1");
+	if (inicio.includes("%PDF-")) {
+		return final.includes("%%EOF") ? "application/pdf" : null;
+	}
+	if (empiezaCon(bytes, [0xff, 0xd8, 0xff])) {
+		return final.includes("\xff\xd9") ? "image/jpeg" : null;
+	}
+	if (empiezaCon(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+		return empiezaCon(bytes, [0x49, 0x48, 0x44, 0x52], 12) &&
+			final.includes("IEND")
+			? "image/png"
+			: null;
+	}
 	if (
 		empiezaCon(bytes, [0x52, 0x49, 0x46, 0x46]) &&
 		empiezaCon(bytes, [0x57, 0x45, 0x42, 0x50], 8)
-	)
-		return "image/webp";
+	) {
+		// El tamaño que declara el RIFF tiene que estar completo.
+		const declarado = Buffer.from(bytes.subarray(4, 8)).readUInt32LE(0);
+		return bytes.length >= 20 && declarado + 8 <= bytes.length
+			? "image/webp"
+			: null;
+	}
 	return null;
 }
 
@@ -58,7 +77,13 @@ const XLS = "application/vnd.ms-excel";
  * Nombres de las entradas de un ZIP según su directorio central (el índice al
  * final del archivo), o null si no es un ZIP bien formado.
  */
-function entradasDeZip(bytes: Uint8Array): Set<string> | null {
+interface EntradaZip {
+	metodo: number;
+	comprimido: number;
+	desplazamiento: number;
+}
+
+function entradasDeZip(bytes: Uint8Array): Map<string, EntradaZip> | null {
 	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	if (datos.length < 22) return null;
 	// El fin del directorio central ocupa 22 bytes más un comentario opcional.
@@ -76,7 +101,7 @@ function entradasDeZip(bytes: Uint8Array): Set<string> | null {
 	if (fin < 0) return null;
 	const total = datos.readUInt16LE(fin + 10);
 	let pos = datos.readUInt32LE(fin + 16);
-	const nombres = new Set<string>();
+	const entradas = new Map<string, EntradaZip>();
 	for (let n = 0; n < total; n++) {
 		if (pos + 46 > datos.length || datos.readUInt32LE(pos) !== 0x02014b50) {
 			return null;
@@ -86,10 +111,57 @@ function entradasDeZip(bytes: Uint8Array): Set<string> | null {
 		const largoComentario = datos.readUInt16LE(pos + 32);
 		const inicio = pos + 46;
 		if (inicio + largoNombre > datos.length) return null;
-		nombres.add(datos.toString("utf8", inicio, inicio + largoNombre));
+		entradas.set(datos.toString("utf8", inicio, inicio + largoNombre), {
+			metodo: datos.readUInt16LE(pos + 10),
+			comprimido: datos.readUInt32LE(pos + 20),
+			desplazamiento: datos.readUInt32LE(pos + 42),
+		});
 		pos = inicio + largoNombre + largoExtra + largoComentario;
 	}
-	return nombres;
+	return entradas;
+}
+
+/** Contenido de una entrada del ZIP (sin comprimir o deflate), o null. */
+function leerEntradaZip(bytes: Uint8Array, entrada: EntradaZip): string | null {
+	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const local = entrada.desplazamiento;
+	if (local + 30 > datos.length || datos.readUInt32LE(local) !== 0x04034b50) {
+		return null;
+	}
+	const inicio =
+		local +
+		30 +
+		datos.readUInt16LE(local + 26) +
+		datos.readUInt16LE(local + 28);
+	const crudo = datos.subarray(inicio, inicio + entrada.comprimido);
+	if (crudo.length !== entrada.comprimido) return null;
+	try {
+		if (entrada.metodo === 0) return crudo.toString("utf8");
+		if (entrada.metodo === 8) return inflateRawSync(crudo).toString("utf8");
+	} catch {
+		return null;
+	}
+	return null;
+}
+
+/** Un .docx/.xlsx de verdad: el manifiesto declara su parte principal y esta es XML. */
+function esOfficeAbierto(bytes: Uint8Array, tipo: "docx" | "xlsx"): boolean {
+	const entradas = entradasDeZip(bytes);
+	const manifiesto = entradas?.get("[Content_Types].xml");
+	const parte = entradas?.get(
+		tipo === "docx" ? "word/document.xml" : "xl/workbook.xml",
+	);
+	if (!entradas || !manifiesto || !parte) return false;
+	const tipos = leerEntradaZip(bytes, manifiesto);
+	const principal = leerEntradaZip(bytes, parte);
+	const contenidoPrincipal =
+		tipo === "docx"
+			? "wordprocessingml.document.main+xml"
+			: "spreadsheetml.sheet.main+xml";
+	return (
+		!!tipos?.includes(contenidoPrincipal) &&
+		!!principal?.trimStart().startsWith("<")
+	);
 }
 
 /**
@@ -124,7 +196,17 @@ function streamsDeOle(bytes: Uint8Array): Set<string> | null {
 		if (vueltas > 10_000 || base + tamSector > datos.length) return null;
 		for (let entrada = base; entrada < base + tamSector; entrada += 128) {
 			const largo = datos.readUInt16LE(entrada + 0x40);
-			if (largo >= 2 && largo <= 64) {
+			// Solo streams (tipo 2) con contenido y un sector de inicio válido.
+			const esStream = datos[entrada + 0x42] === 2;
+			const inicioStream = datos.readUInt32LE(entrada + 0x74);
+			const tamStream = datos.readUInt32LE(entrada + 0x78);
+			if (
+				largo >= 2 &&
+				largo <= 64 &&
+				esStream &&
+				tamStream > 0 &&
+				inicioStream < 0xfffffffa
+			) {
 				nombres.add(datos.toString("utf16le", entrada, entrada + largo - 2));
 			}
 		}
@@ -151,10 +233,8 @@ export function tipoPermitidoDesdeCrm(
 	if (empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04])) {
 		// Un .docx/.xlsx es un ZIP con el manifiesto de Office y la parte
 		// principal de su tipo, según el índice del propio ZIP.
-		const entradas = entradasDeZip(bytes);
-		if (!entradas?.has("[Content_Types].xml")) return null;
-		if (declarado === DOCX && entradas.has("word/document.xml")) return DOCX;
-		if (declarado === XLSX && entradas.has("xl/workbook.xml")) return XLSX;
+		if (declarado === DOCX && esOfficeAbierto(bytes, "docx")) return DOCX;
+		if (declarado === XLSX && esOfficeAbierto(bytes, "xlsx")) return XLSX;
 		return null;
 	}
 	if (empiezaCon(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {

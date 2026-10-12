@@ -706,6 +706,19 @@ describe("reenviarFacturaSeguro", () => {
 		expect(correos).toHaveLength(0);
 	});
 
+	test("si la oportunidad ya no está ganada (se perdió), no reenvía", async () => {
+		facturaPrevia = [registro("fallido")];
+		caso = { ...caso, status: "lost" };
+		await expect(
+			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, crmCtx),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message: "La oportunidad ya no está ganada: no se reenvía la factura",
+		});
+		expect(actualizados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
+	});
+
 	test("tras un rechazo: nuevo intento (nueva llave) con el mismo correo guardado al subir", async () => {
 		facturaPrevia = [registro("fallido")];
 		// Otra cotización aceptada después de subir no cambia lo que se reenvía.

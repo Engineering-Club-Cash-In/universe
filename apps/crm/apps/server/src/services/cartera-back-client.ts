@@ -2723,6 +2723,32 @@ export class CarteraBackClient {
 		);
 	}
 
+	/**
+	 * Supervisión de cobros (S1): cuántas decisiones de convenio (aprobar o
+	 * rechazar) tomó un supervisor desde `desde`. Sin cache: alimenta la barra
+	 * «x de y aprobaciones resueltas hoy».
+	 */
+	async getConvenioDecisionesConteo(params: {
+		decididoPorEmail: string;
+		desde: Date;
+		hasta?: Date;
+	}): Promise<{ aprobados: number; rechazados: number; total: number }> {
+		const queryParams = new URLSearchParams({
+			decidido_por_email: params.decididoPorEmail,
+			desde: params.desde.toISOString(),
+			...(params.hasta && { hasta: params.hasta.toISOString() }),
+		});
+		const resp = await this.request<{
+			success: boolean;
+			data: { aprobados: number; rechazados: number; total: number };
+		}>(
+			`/payment-agreements/decisiones/conteo?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+		return resp.data;
+	}
+
 	// COBROS-02: cuotas de CONVENIO próximas a vencer (créditos EN_CONVENIO). Lo
 	// consume el job diario de recordatorios de convenio del CRM. Sin cache: foto
 	// del día, debe reflejar los pagos del convenio más recientes.

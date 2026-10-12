@@ -157,25 +157,25 @@ describe("clasificarCreditoColaDia — vence hoy (cuota)", () => {
 });
 
 describe("clasificarCreditoColaDia — días sin contacto", () => {
-	test("6 días sin contacto (> umbral de 5) → sinContacto", () => {
+	test("4 días hábiles sin gestión manual (sobre el umbral de 3) → sinContacto", () => {
 		const c = clasificarCreditoColaDia(
-			creditoBase({ diasSinContacto: 6 }),
+			creditoBase({ diasSinContacto: 4 }),
 			HOY,
 		);
 		expect(c.sinContacto).toBe(true);
 	});
 
-	test("exactamente 5 días (= umbral, no lo supera) → NO sinContacto", () => {
+	test("exactamente 3 días hábiles completos (= umbral) → sinContacto", () => {
 		const c = clasificarCreditoColaDia(
-			creditoBase({ diasSinContacto: 5 }),
+			creditoBase({ diasSinContacto: 3 }),
 			HOY,
 		);
-		expect(c.sinContacto).toBe(false);
+		expect(c.sinContacto).toBe(true);
 	});
 
-	test("1 día sin contacto → NO sinContacto", () => {
+	test("2 días hábiles → NO sinContacto", () => {
 		const c = clasificarCreditoColaDia(
-			creditoBase({ diasSinContacto: 1 }),
+			creditoBase({ diasSinContacto: 2 }),
 			HOY,
 		);
 		expect(c.sinContacto).toBe(false);

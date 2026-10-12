@@ -12,8 +12,8 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 
 | Tarea | Qué es | Estado | Dónde quedó |
 | --- | --- | --- | --- |
-| **S1** | Pendientes sin fuente | ⏳ PR 2 | — |
-| **S2** | «Sin contacto» del equipo a 3 días hábiles | ⏳ PR 2 | — |
+| **S1** | Pendientes sin fuente | ✅ Código en el PR 2 (sin migración) | `services/supervision-pendientes.ts` · `lib/prejuridico.ts` · cartera `GET /payment-agreements/decisiones/conteo` |
+| **S2** | «Sin contacto» del equipo a 3 días hábiles | ✅ Código en el PR 2 (sin migración) | `lib/sin-contacto.ts` · `contarSinContactoEquipo` · cola del día y filtro `sin_gestion_48h` |
 | **S3** | KPIs del equipo por período | ✅ Código en el PR 1 (sin migración) | `services/supervision-complementos.ts` · `lib/supervision-kpis.ts` · `getSupervisionComplementos.kpis` |
 | **S4** | Columnas de la tabla Equipo | ✅ Código en el PR 1 (sin migración) | `getSupervisionComplementos.equipo` |
 | **S5** | Filtros y paginación real de la Cartera general | ⏳ PR 3 | — |
@@ -56,6 +56,29 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - Una fila por asesor del pool. `contactosHoy` y `rescate` llegan `null` si el asesor no tiene usuario en el CRM. `rescate` también es `null` si no hubo ningún movimiento de bucket en el período.
 - Corrección de textos: el cierre diario **no** corre a las 22:00 sino a las 00:15 (hora de Guatemala) del día siguiente; los comentarios del doc 17 y del front que dicen 22:00 están desfasados.
 
+### S1 · Pendientes
+
+- **Documentos por autorizar**: solicitudes de F6 en `pendiente` (`solicitudes_documentos_cobros`).
+- **Rebajas por revisar**: solicitudes de W2 en `pendiente` o `error_aplicacion` (las que el supervisor todavía puede resolver).
+- **Listos para Prejurídico**: no hizo falta un endpoint nuevo. `GET /cuotas/proximas-vencer` de cartera (con `dias=0..7`, `solo_al_dia=false`, `buckets=3`) ya trae bucket del motor, estado, cuotas vencidas reales y días para vencer. La regla está en `lib/prejuridico.ts`: B3, estado ACTIVO o MOROSO, exactamente 3 vencidas reales, 4.ª cuota en 7 días o menos, y sin promesa vigente **en su caso vigente** (una promesa olvidada en un caso viejo no cuenta).
+- **Aprobaciones resueltas hoy** (del supervisor de la sesión, aprobadas o rechazadas, nunca canceladas):
+  - Recuperaciones: `recuperaciones_vehiculo` (`decidido_por`, `decidido_at`, estado aprobada o rechazada).
+  - Apagados y reactivaciones: `inmovilizaciones_unidad` (se cuentan los eventos de decisión de hoy en `inmovilizaciones_unidad_eventos`, así una aprobación que luego se cancela no resta).
+  - Rebajas, Jurídico y Documentos: `resuelto_por`, `resuelto_en`.
+  - Convenios: viven en cartera (`convenio_decisiones`) y no había consulta por fecha ni por quien decidió. Se agregó `GET /payment-agreements/decisiones/conteo?decidido_por_email&desde[&hasta]` (solo cuenta, mismo gate que el resto del router). El cliente es `getConvenioDecisionesConteo`. La tabla vieja `convenios_pago.aprobado_por` es legado y no se usa.
+  - **Dos campos, por la barra «x de y»:** el front calcula el avance como pendientes + resueltas, y solo tiene en pendientes convenios, recuperaciones y apagados. `aprobacionesResueltasHoy` suma solo esos tres tipos; rebajas, documentos y Jurídico salen aparte en `otrasResueltasHoy {rebajas, documentos, juridico}` para que, al resolver un documento con otro pendiente, no se vea «1 de 1» al 100 %.
+  - Si **una** fuente no responde, el total llega `null` (no un número corto).
+
+### S2 · Sin contacto
+
+- **Regla única** en `lib/sin-contacto.ts`: al menos 3 días hábiles **completos** (regla de oro de `business-days-gt.ts`: lunes a viernes, y sábado o domingo si es 15 o fin de mes) desde el día siguiente a la última gestión **manual**. Es el mismo conteo de la alerta `sin_contacto_3d`.
+- **Cola del día** (`getColaDia`): `sin_contacto` usa la regla única. `diasSinContacto` que devuelve la cola ahora son días hábiles. «Contactado hoy» del SLA sigue contando cualquier gestión.
+- **Cartera** (`sifcosPorFiltroGestion`): el filtro `sin_gestion_48h` usa la misma ventana (`inicioVentanaConContacto`). Se evalúa solo en el caso vigente de cada SIFCO (como la cola y el conteo). Exige además al menos una gestión manual previa: quien nunca fue contactado no entra, igual que en la cola y en el conteo del Dashboard (`sin_contactar_hoy` no cambia). La clave se mantiene para no romper el contrato con el front.
+- **Conteo del equipo** (`contarSinContactoEquipo`): mismo universo que la cola sin filtro de asesor (`getColaDiaSLA`) y misma regla, así el número cuadra con la lista a la que enlaza el Dashboard.
+- **Quien nunca tuvo una gestión manual no califica** (se mantiene la decisión del doc de la cola: no se inventa una fecha base). Un crédito con solo envíos automáticos cuenta como nunca contactado.
+- La alerta `sin_contacto_3d` **no cambia**: conserva su ancla en la subida de bucket.
+- **Rendimiento:** el conteo del equipo recorre toda la cola y tarda unos 3 s (medido en la BD local: 3,030 ms de los 3,715 ms de `getSupervisionComplementos`; el resto del endpoint, 54 ms por período). No depende del período, así que se guarda **60 s** en memoria (`lib/memo-ttl.ts`, usado en `routers/supervision-cobros.ts`): cambiar entre Día, Semana y Mes ya no lo recalcula. La primera carga, o la primera después de 60 s, sigue tardando esos ~3 s. Si hace falta bajarlo más, la solución de fondo es una consulta SQL propia en vez de armar toda la cola.
+
 ---
 
 ## Pruebas hechas
@@ -66,9 +89,19 @@ Este documento lleva el plan, las decisiones y el estado de cada tarea. Se actua
 - `biome check` acotado a los archivos tocados: sin errores.
 - **No se probó contra base de datos.** Pendiente de prueba con `call` de oRPC contra dev.
 
+**PR 2 (S1, S2), 2026-10-12:**
+- `lib/sin-contacto.test.ts` (5): conteo de días hábiles, fin de semana y quincena, la gestión de hoy no suma, ventana reciente.
+- `lib/prejuridico.test.ts` (5): bucket, estado, vencidas, ventana de 7 días, deduplicación y promesa vigente.
+- `lib/cola-dia.test.ts` (30, en verde) con el umbral nuevo.
+- `bunx tsc -b` en `apps/crm/apps/server` y `tsc` de cartera-back sobre `paymentAgree.ts`: sin errores.
+- **No se probó contra base de datos ni con cartera levantada.**
+
 ---
 
 ## Pendiente de front
 
 - **S3**: el tooltip de «Cuentas curadas» (`desempeno-equipo.tsx`) describe «sin mora y siguen en su bucket»; debe decir que son las cuentas que bajaron de bucket en el período. El texto «22:00» del cierre diario (mismo archivo) debe decir 00:15.
+- **S1**: los chips «Rebaja» y «Documentos» de Aprobaciones pendientes no tienen filas (`solicitudes/normalizar.ts`). Fuentes: `getSolicitudesRebajaMora`, `getSolicitudesDocumentos` (y `getSolicitudesJuridico`, que no tiene chip). Cuando existan los chips, sumar `otrasResueltasHoy` a las resueltas **y** esas solicitudes a los pendientes de la barra «x de y» al mismo tiempo (hoy el denominador solo tiene convenios, recuperaciones y apagados). Los tres contadores no tienen `destino`, así que no son enlaces.
+- **S2**: las etiquetas «Sin contacto > 5 días (equipo)» (fallback) y «48 h» de la cartera deben decir «3 días hábiles». `cola=sin_contacto` ya usa la regla nueva. `diasSinContacto` de las filas ahora son días hábiles.
+- **Indicador de carga al cambiar Día / Semana / Mes** (`dashboard-supervisor.tsx`): la consulta usa `placeholderData: keepPreviousData`, así que mientras llega el período nuevo las tarjetas **siguen mostrando los números del período anterior** y parece que «no cambian». Hay que usar `isPlaceholderData` (o `isFetching`) de esa consulta para atenuar las tarjetas de «Desempeño del equipo» y mostrar un spinner o el esqueleto mientras carga; el componente `TarjetaCargando` de `desempeno-equipo.tsx` ya existe. Con el backend actual la espera típica es de menos de 0.2 s con el caché caliente y de ~3 s en frío.
 - **S4**: el punto de estado de cada fila usa `rescate ?? agenda`, pero el showcase de ejemplo lo calcula con la meta. Confirmar con diseño cuál manda.

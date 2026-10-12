@@ -99,6 +99,7 @@ describe("resolverPagoIdsDeCuotas", () => {
 			pagoIds: [100, 101, 102],
 			faltantes: [],
 			sinRecibo: [],
+			soloAbono: [],
 		});
 	});
 
@@ -108,9 +109,10 @@ describe("resolverPagoIdsDeCuotas", () => {
 		expect(r.pagoIds).toEqual([101, 102]);
 	});
 
-	it("si el abono es el único recibo de la cuota se conserva, para no dejarla sin recibo", () => {
-		const r = resolverPagoIdsDeCuotas(elegibles, [11], 102);
-		expect(r.pagoIds).toEqual([102]);
+	it("si el abono es el único recibo de la cuota no se manda: la cuota se reporta en soloAbono", () => {
+		const r = resolverPagoIdsDeCuotas(elegibles, [10, 11], 102);
+		expect(r.pagoIds).toEqual([100, 101]);
+		expect(r.soloAbono).toEqual([2]);
 		expect(r.sinRecibo).toEqual([]);
 	});
 

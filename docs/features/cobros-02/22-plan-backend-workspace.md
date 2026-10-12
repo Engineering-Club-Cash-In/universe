@@ -172,6 +172,8 @@ Del lado contrario, **reversar el abono de un convenio vivo está bloqueado** (`
 - [ ] Reversar el abono de un convenio → 409 con el mensaje de anular el convenio primero.
 - [ ] Un convenio creado con abono aparece igual que los demás (aprobación del supervisor, historial de decisiones).
 
+**Abono parcial y recibo de la cuota (CRM, `crearConvenioDesdeFicha`):** un abono parcial queda como fila aparte (`pagado = false`) junto al recibo abierto de su cuota. Al armar `payment_ids`, el servidor excluye el abono de cada cuota que tenga otro recibo, para que el pivot del convenio no duplique la cuota. Si la cuota elegida no tiene más recibo que el del abono, responde 400 («solo tienen el recibo del abono inicial»): mandarlo haría que el primer pago del convenio sobrescriba el abono ya validado. Se resuelve en contabilidad (generar el recibo abierto) y no en el front.
+
 **Pendiente de decisión:** la regla «de hoy» hace que, si contabilidad valida al día siguiente, el asesor tenga que registrar el abono de nuevo. Si esto les pesa en la operación, hay que pasarla a una ventana de días (un cambio de una línea en `lib/convenio-abono-inicial.ts`).
 
 **Pendiente de front** (no se toca en este issue): el bloque «Abono inicial» de `convenio-modal.tsx` debe encadenar el registro del comprobante y mandar `abonoInicialPagoId` con el `pago_id` que devuelve `registrarPagoCompleto`.

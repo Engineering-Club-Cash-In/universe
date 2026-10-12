@@ -3596,11 +3596,12 @@ export const cobrosRouter = {
 					credito.cuotasPendientes,
 				),
 			);
-			const { pagoIds, faltantes, sinRecibo } = resolverPagoIdsDeCuotas(
-				elegibles,
-				input.cuotaIds,
-				input.abonoInicialPagoId,
-			);
+			const { pagoIds, faltantes, sinRecibo, soloAbono } =
+				resolverPagoIdsDeCuotas(
+					elegibles,
+					input.cuotaIds,
+					input.abonoInicialPagoId,
+				);
 			if (faltantes.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
@@ -3610,6 +3611,11 @@ export const cobrosRouter = {
 			if (sinRecibo.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Las cuotas ${sinRecibo.join(", ")} no tienen recibo en cartera y no pueden entrar al convenio. Repórtelo a contabilidad.`,
+				});
+			}
+			if (soloAbono.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Las cuotas ${soloAbono.join(", ")} solo tienen el recibo del abono inicial y no un recibo abierto al cual cobrar el convenio. Repórtelo a contabilidad.`,
 				});
 			}
 			if (pagoIds.length === 0) {

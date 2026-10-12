@@ -602,9 +602,30 @@ export interface PlantillaMensaje {
 	cuerpo: string;
 	/**
 	 * Plantilla con imagen: se envía por un template de WittyBots con header de
-	 * imagen y 1 variable de body (todo el texto), en vez de `mensajeNparametro`.
+	 * imagen y `parametros` variables de body (un bloque del cuerpo por variable),
+	 * en vez de `mensajeNparametro`.
 	 */
-	adjunto?: { templateName: string; imagenUrl: string };
+	adjunto?: { templateName: string; imagenUrl: string; parametros: number };
+}
+
+/**
+ * Cantidad de párrafos (separados por línea en blanco) del cuerpo: cada uno
+ * viaja en una variable del template, igual que `splitTemplateParams`.
+ */
+export function contarBloquesWhatsapp(cuerpo: string): number {
+	return cuerpo.split(/\n\s*\n/g).filter((bloque) => bloque.trim()).length;
+}
+
+/**
+ * Un template con adjunto tiene un número fijo de variables y WhatsApp rechaza
+ * las vacías: el cuerpo (editado o no) necesita al menos un párrafo por
+ * variable. Los párrafos de más se unen en la última.
+ */
+export function cuerpoCubreAdjunto(
+	cuerpo: string,
+	adjunto: NonNullable<PlantillaMensaje["adjunto"]>,
+): boolean {
+	return contarBloquesWhatsapp(cuerpo) >= adjunto.parametros;
 }
 
 /**
@@ -961,25 +982,25 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		etapa: "al_dia",
 		asunto: "Tu nueva cuenta exclusiva para pagos",
 		adjunto: {
-			templateName: "mensajeimage",
+			templateName: "mensaje4image",
 			imagenUrl: CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL,
+			parametros: 4,
 		},
-		// Template `mensajeimage` (header imagen + 1 variable de body con todo el
-		// texto). Arranca con el nombre: el template de WhatsApp ya antepone su
-		// propio saludo. Texto tal cual lo definió
-		// cobros (sin aviso no-reply). Solo se envía a créditos que ya tienen
-		// cuenta Nexa (prepararCuentaNexaParaEnvio): es el aviso para clientes
-		// existentes; la bienvenida y `cuenta_nexa` cubren a los nuevos.
-		cuerpo: `{clienteNombre}.
-Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito.
-Vía transferencia desde tu banco de preferencia hacia:
-🏛️ Banco Nexa
-🔢 *Cuenta Monetaria*
-🔢 *{cuentaNexa}*
-Tus canales actuales continúan habilitados.
+		// Template `mensaje4image` (header imagen + 4 variables de body). WhatsApp
+		// no admite saltos de línea DENTRO de una variable: cada bloque va en una
+		// sola línea y el espaciado lo da el texto fijo del template entre {{1}}
+		// a {{4}}. Arranca con el nombre: el template ya antepone su propio
+		// saludo. Texto tal cual lo definió cobros (sin aviso no-reply). Solo se
+		// envía a créditos que ya tienen cuenta Nexa (prepararCuentaNexaParaEnvio):
+		// es el aviso para clientes existentes; la bienvenida y `cuenta_nexa`
+		// cubren a los nuevos.
+		cuerpo: `{clienteNombre}. Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito. Vía transferencia desde tu banco de preferencia hacia:
 
-Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente.
-📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+🏛️ Banco Nexa
+
+🔢 Cuenta Monetaria : {cuentaNexa}
+
+Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

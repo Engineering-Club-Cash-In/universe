@@ -13,6 +13,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	type FilaCuotaAtrasada,
 	FRAGMENTO_RITMO_INCREMENTO_MORA,
@@ -1353,15 +1354,26 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 		(p) => p.id === "cuenta_nexa_exclusiva",
 	);
 
-	test("existe, usa {cuentaNexa} y cabe en 2 bloques de WhatsApp", () => {
+	test("existe, usa {cuentaNexa} y cabe en 4 bloques de WhatsApp (uno por variable del template)", () => {
 		expect(plantilla).toBeDefined();
 		expect(plantilla?.cuerpo).toContain("{cuentaNexa}");
-		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(2);
+		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
+		expect(plantilla?.adjunto?.parametros).toBe(4);
 	});
 
-	test("se envía con la imagen: template mensajeimage y URL pública", () => {
-		expect(plantilla?.adjunto?.templateName).toBe("mensajeimage");
+	test("se envía con la imagen: template mensaje4image y URL pública", () => {
+		expect(plantilla?.adjunto?.templateName).toBe("mensaje4image");
 		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
+	});
+
+	test("el mensaje editado necesita al menos un párrafo por variable del template", () => {
+		const adjunto = plantilla?.adjunto;
+		expect(adjunto).toBeDefined();
+		if (!adjunto) return;
+		expect(cuerpoCubreAdjunto(plantilla?.cuerpo ?? "", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc\n\nd\n\ne", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc", adjunto)).toBe(false);
+		expect(cuerpoCubreAdjunto("una sola línea\ncon salto", adjunto)).toBe(false);
 	});
 
 	test("interpolar pone nombre, cuenta y teléfono del asesor", () => {
@@ -1379,9 +1391,11 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 			cuentaNexa: "1234567890123456",
 		});
 		expect(mensaje.startsWith("Juan Perez.")).toBe(true);
-		expect(mensaje).toContain("🔢 *1234567890123456*");
+		expect(mensaje).toContain("🔢 Cuenta Monetaria : 1234567890123456");
 		expect(mensaje).toContain("ejecutivo al 5555-1234");
 		expect(mensaje).not.toContain("{");
+		// Cada variable del template va en una sola línea.
+		for (const bloque of bloques(mensaje)) expect(bloque).not.toContain("\n");
 	});
 
 	test("sin cuenta Nexa se descarta con motivo", () => {

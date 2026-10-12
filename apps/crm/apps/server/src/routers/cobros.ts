@@ -54,6 +54,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -3363,6 +3364,18 @@ export const cobrosRouter = {
 				});
 			}
 
+			// Las plantillas con imagen tienen un número fijo de variables y
+			// WhatsApp rechaza las vacías: el mensaje editado no puede quedarse con
+			// menos párrafos que variables.
+			if (
+				plantilla.adjunto &&
+				!cuerpoCubreAdjunto(cuerpoBase, plantilla.adjunto)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Esta plantilla lleva imagen y necesita al menos ${plantilla.adjunto.parametros} párrafos separados por una línea en blanco; el mensaje editado tiene menos.`,
+				});
+			}
+
 			// Scope server-side: solo supervisores/admins pueden ver toda la
 			// cartera; el resto queda restringido a sus propios créditos.
 			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
@@ -3927,6 +3940,20 @@ export const cobrosRouter = {
 					...seguroPorAseguradora(info?.insuranceProvider),
 				});
 
+				// Un párrafo que era solo una variable vacía para este crédito (p. ej.
+				// {placa}) desaparece al interpolar y desplaza el resto: la plantilla
+				// con imagen se quedaría con una variable vacía y el proveedor la
+				// rechaza. Se revalida con el mensaje ya interpolado.
+				if (plantilla.adjunto && !cuerpoCubreAdjunto(mensaje, plantilla.adjunto)) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo:
+							"el mensaje queda con menos párrafos que variables de la plantilla con imagen (un dato vacío dejó un párrafo en blanco)",
+					});
+					continue;
+				}
+
 				candidatos.push({
 					numeroSifco: sifco ?? "",
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
@@ -3975,6 +4002,7 @@ export const cobrosRouter = {
 						? {
 								adjunto: {
 									templateName: plantilla.adjunto.templateName,
+									parametros: plantilla.adjunto.parametros,
 									header: {
 										type: "image" as const,
 										url: plantilla.adjunto.imagenUrl,

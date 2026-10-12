@@ -130,6 +130,9 @@ export const ESTADOS_ENVIO_FACTURA = [
 	"enviado",
 	"fallido",
 	"sin_destinatario",
+	// Subida desde el CRM antes del cierre y aceptada por el usuario: sale sola
+	// al confirmar los contratos.
+	"programado",
 ] as const;
 export type EstadoEnvioFactura = (typeof ESTADOS_ENVIO_FACTURA)[number];
 

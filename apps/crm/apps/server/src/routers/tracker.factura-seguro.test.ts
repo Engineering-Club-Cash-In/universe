@@ -177,6 +177,12 @@ const dbFalsa = {
 	}),
 	insert: (tabla: unknown) => ({
 		values: (valores: Record<string, unknown>) => ({
+			// Sin returning, el insert también se puede esperar directo.
+			// biome-ignore lint/suspicious/noThenProperty: los builders de Drizzle son thenables.
+			then: (resolve: (v: unknown) => void) => {
+				insertados.push({ tabla, valores });
+				resolve(undefined);
+			},
 			returning: async () => {
 				insertados.push({ tabla, valores });
 				return [
@@ -241,10 +247,16 @@ const destinatariosReal = facturaReal.destinatariosDe;
 let correosPolizas: CorreosPorAseguradora = { gyt: [], universales: [] };
 mock.module("../lib/factura-seguro", () => ({
 	...facturaReal,
+	// Con listas explícitas se comporta como el real: `mock.module` es global y
+	// los tests de lib/factura-seguro pueden correr en el mismo proceso.
 	destinatariosDe: (
 		aseguradora: "gyt" | "universales",
 		correos?: CorreosPorAseguradora,
-	) => destinatariosReal(aseguradora, correos ?? correosPolizas, []),
+		internos?: readonly string[],
+	) =>
+		correos
+			? destinatariosReal(aseguradora, correos, internos)
+			: destinatariosReal(aseguradora, correosPolizas, []),
 }));
 // La plantilla real sí corre; solo el envío se simula.
 const correoReal = await import("../lib/correo-factura-seguro");
@@ -259,7 +271,7 @@ mock.module("../lib/correo-factura-seguro", () => ({
 const {
 	trackerRouter,
 	enviarFacturaSeguroDesdeCrm,
-	enviarFacturaSubidaAntes,
+	enviarFacturaProgramada,
 	previsualizarFacturaSeguroDesdeCrm,
 } = await import("./tracker");
 
@@ -968,7 +980,7 @@ describe("previsualizarFacturaSeguroDesdeCrm", () => {
 
 	test("si no se enviaría, da el motivo y no pide confirmación", async () => {
 		caso = casoAl(85);
-		expect(await previsualizarFacturaSeguroDesdeCrm(ID)).toEqual({
+		expect(await previsualizarFacturaSeguroDesdeCrm(ID)).toMatchObject({
 			seEnviara: false,
 			motivo: "la oportunidad todavía no llega a formalización final (90%)",
 		});
@@ -1198,9 +1210,12 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	});
 });
 
-describe("factura subida antes del cierre", () => {
+describe("factura programada para el cierre", () => {
 	const KEY_ANTES = `opportunities/${ID}/555-antes-factura.pdf`;
-	const subir = (c: Record<string, unknown>) => {
+	const subir = (
+		c: Record<string, unknown>,
+		confirmada: "gyt" | "programado" | null = "programado",
+	) => {
 		caso = c;
 		return enviarFacturaSeguroDesdeCrm({
 			opportunityId: ID,
@@ -1208,99 +1223,109 @@ describe("factura subida antes del cierre", () => {
 			key: KEY_ANTES,
 			nombre: "factura.pdf",
 			mimeType: "application/pdf",
-			aseguradoraConfirmada: null,
+			aseguradoraConfirmada: confirmada,
 			userId: "crm-1",
 			userRole: "admin",
 		});
 	};
+	const registroProgramado = () =>
+		insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores;
 
-	test("al 85%, o al 90% sin cerrar, se guarda y avisa que se enviará al cierre", async () => {
+	test("la consulta previa ofrece programarla antes del cierre, con su aseguradora", async () => {
+		caso = casoAl(85, { status: "open" });
+		expect(await previsualizarFacturaSeguroDesdeCrm(ID)).toMatchObject({
+			seEnviara: false,
+			programable: { aseguradora: "gyt" },
+		});
+		caso = casoAl(85, { status: "lost" });
+		expect(
+			"programable" in (await previsualizarFacturaSeguroDesdeCrm(ID)),
+		).toBe(false);
+	});
+
+	test("si el usuario la programó, queda registrada como programada y no sale todavía", async () => {
 		for (const c of [
 			casoAl(85, { status: "open" }),
-			casoAl(90, { status: "open" }),
 			casoAl(90, { status: "on_hold" }),
 		]) {
-			expect(await subir(c)).toMatchObject({ enviada: false, alCerrar: true });
+			insertados.length = 0;
+			expect(await subir(c)).toMatchObject({
+				enviada: false,
+				programada: { aseguradora: "gyt" },
+			});
+			expect(registroProgramado()).toMatchObject({
+				status: "programado",
+				documentId: "doc-antes",
+			});
 		}
-		expect(insertados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
 	});
 
-	test("perdida o sin agencia: no se enviará después", async () => {
+	test("sin aceptar la programación, se guarda como un documento más", async () => {
+		const r = await subir(casoAl(85, { status: "open" }), null);
+		expect(r).toMatchObject({ enviada: false });
+		expect("programada" in r).toBe(false);
+		expect(insertados).toHaveLength(0);
+	});
+
+	test("perdida o sin agencia: no se puede programar", async () => {
 		for (const c of [
 			casoAl(85, { status: "lost" }),
 			casoAl(85, { status: "open", companyId: null }),
 		]) {
 			const r = await subir(c);
-			expect(r).toMatchObject({ enviada: false });
-			expect("alCerrar" in r).toBe(false);
+			expect("programada" in r).toBe(false);
 		}
+		expect(insertados).toHaveLength(0);
 	});
 
-	test("al confirmar los contratos, manda sola la última factura subida, sin confirmación", async () => {
-		caso = casoAl(90);
-		documentosRegistrados = [
-			{
-				id: "doc-antes",
-				key: KEY_ANTES,
-				nombre: "factura.pdf",
-				mimeType: "application/pdf",
-			},
-		];
-		const r = await enviarFacturaSubidaAntes(ID, "crm-1");
-		expect(r).toMatchObject({ enviada: true, envio: "enviado" });
-		expect(
-			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
-		).toMatchObject({ documentId: "doc-antes", submittedBy: "crm-1" });
-		expect(correos).toHaveLength(1);
-	});
-
-	test("ya desembolsada (100%) y ganada, la subida confirmada desde el CRM se envía", async () => {
-		caso = casoAl(100);
-		expect(
-			await enviarFacturaSeguroDesdeCrm({
-				opportunityId: ID,
-				documentId: "doc-100",
-				key: KEY_ANTES,
-				nombre: "factura.pdf",
-				mimeType: "application/pdf",
-				aseguradoraConfirmada: "gyt",
-				userId: "crm-1",
-				userRole: "admin",
-			}),
-		).toMatchObject({ enviada: true });
-	});
-
-	test("si la oportunidad ya pasó al 100% mientras tanto, el envío del cierre termina igual", async () => {
-		caso = casoAl(100);
-		documentosRegistrados = [
-			{
-				id: "doc-antes",
-				key: KEY_ANTES,
-				nombre: "factura.pdf",
-				mimeType: "application/pdf",
-			},
-		];
-		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toMatchObject({
-			enviada: true,
-		});
-	});
-
-	test("sin factura subida antes, o con una ya registrada, no manda nada", async () => {
-		caso = casoAl(90);
-		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toBeNull();
-		caso = casoAl(90, { facturaEnvio: "enviado" });
-		documentosRegistrados = [
-			{
-				id: "doc-antes",
-				key: KEY_ANTES,
-				nombre: "factura.pdf",
-				mimeType: "application/pdf",
-			},
-		];
-		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toMatchObject({
+	test("un HTML declarado como PDF no se programa ni se envía", async () => {
+		contenidoR2 = Buffer.from("<html><body>hola</body></html>");
+		expect(await subir(casoAl(85, { status: "open" }))).toEqual({
 			enviada: false,
+			motivo: "la factura tiene que ser un PDF, una imagen, un Word o un Excel",
 		});
+		expect(subidosR2).toHaveLength(0);
+	});
+
+	test("al confirmar los contratos sale la programada, sin confirmación", async () => {
+		caso = casoAl(90);
+		facturaPrevia = [
+			{
+				id: "envio-prog",
+				status: "programado",
+				intento: 1,
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+			},
+		];
+		expect(await enviarFacturaProgramada(ID)).toBe("enviado");
+		expect(actualizados[0]).toMatchObject({
+			status: "pendiente",
+			recipients: ["polizas@gyt.test"],
+		});
+		expect(correos[0]).toMatchObject({
+			archivo: { key: KEY_ANTES, nombre: "factura.pdf" },
+			idempotencyKey: "factura-seguro/envio-prog/1",
+		});
+	});
+
+	test("un seguro subido sin programar (por ejemplo, a mano antes del deploy) no sale", async () => {
+		caso = casoAl(90);
+		facturaPrevia = [];
+		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		facturaPrevia = [{ id: "envio-1", status: "enviado", intento: 1 }];
+		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(correos).toHaveLength(0);
+	});
+
+	test("si la oportunidad no quedó ganada, la programada espera", async () => {
+		caso = casoAl(90, { status: "open" });
+		facturaPrevia = [
+			{ id: "envio-prog", status: "programado", intento: 1, key: KEY_ANTES },
+		];
+		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(actualizados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
 	});
 });

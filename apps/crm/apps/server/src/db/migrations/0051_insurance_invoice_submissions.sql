@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "insurance_invoice_submissions_opportunity_id_unique" UNIQUE("opportunity_id"),
-	CONSTRAINT "insurance_invoice_submissions_status_check" CHECK ("status" IN ('pendiente', 'enviado', 'fallido', 'sin_destinatario'))
+	CONSTRAINT "insurance_invoice_submissions_status_check" CHECK ("status" IN ('pendiente', 'enviado', 'fallido', 'sin_destinatario', 'programado'))
 );--> statement-breakpoint
 
 DO $$ BEGIN

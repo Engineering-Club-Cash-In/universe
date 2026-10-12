@@ -11,12 +11,15 @@ describe("cobertura según la aseguradora", () => {
 		expect(coberturasQueNoCorresponden("gyt")).toEqual({
 			cobertura_inrexsa: "La cotización es con Seguros G&T",
 			cobertura_inrexsa_comercial: "La cotización es con Seguros G&T",
+			cobertura_inrexsa_sociedad: "La cotización es con Seguros G&T",
+			cobertura_inrexsa_comercial_sociedad: "La cotización es con Seguros G&T",
 		});
 	});
 
 	test("con Universales no se puede elegir la de G&T", () => {
 		expect(coberturasQueNoCorresponden("universales")).toEqual({
 			cobertura_gyt: "La cotización es con Seguros Universales",
+			cobertura_gyt_sociedad: "La cotización es con Seguros Universales",
 		});
 	});
 

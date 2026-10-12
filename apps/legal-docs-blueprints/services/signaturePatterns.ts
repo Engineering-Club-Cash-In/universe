@@ -296,6 +296,113 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   },
 
+  // ===== VENTAS A NOMBRE DE UNA SOCIEDAD =====
+  // Firma sólo el representante legal (más CUBE/RDBE en los contratos). Las
+  // líneas son las mismas que en el individual; las rúbricas se midieron sobre
+  // los PDF de sociedad con `scripts/previsualizar-rubricas.ts`.
+  [ContractType.SOLICITUD_COMPRA_VEHICULO_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.CARTA_CARRO_NUEVO_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.CARTA_EMISION_CHEQUES_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.DESCARGO_RESPONSABILIDADES_SOCIEDAD]: {
+    pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  // Como las individuales, la cobertura de Universales trae dos secciones. El
+  // cuadro arranca en la raya para no tapar "Firma:", como en la de G&T.
+  [ContractType.COBERTURA_INREXSA_SOCIEDAD]: {
+    pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    repeticiones: 2,
+    firmaSobreLaRaya: true,
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.COBERTURA_INREXSA_COMERCIAL_SOCIEDAD]: {
+    pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    repeticiones: 2,
+    firmaSobreLaRaya: true,
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.COBERTURA_GYT_SOCIEDAD]: {
+    pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    firmaSobreLaRaya: true,
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD]: {
+    pattern: 'f. _______________________________',
+    bloques: ['DEUDORES'],
+    rubrica: { franja: { izquierda: 43, derecha: 570, abajo: 24, arriba: 130 } },
+    signerCount: 1,
+    signers: ['Representante legal']
+  },
+
+  [ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD]: {
+    pattern: 'f)___________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { franja: { izquierda: 113, derecha: 571, abajo: 92, arriba: 138 } },
+    signerCount: 2,
+    signers: ['Lucrecia (CUBE)', 'Representante legal']
+  },
+
+  // "F. ___" con punto: el patrón trata "f)" y "f." igual.
+  [ContractType.GARANTIA_MOBILIARIA_SOCIEDAD]: {
+    pattern: 'f)_______________________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { franja: { izquierda: 71, derecha: 541, abajo: 66, arriba: 144 } },
+    signerCount: 2,
+    signers: ['Lucrecia (CUBE)', 'Representante legal']
+  },
+
+  [ContractType.CONTRATO_PRIVADO_USO_SOCIEDAD]: {
+    pattern: 'f)_____________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { franja: { izquierda: 139, derecha: 568, abajo: 24, arriba: 116 } },
+    signerCount: 2,
+    signers: ['Lucrecia (RDBE)', 'Representante legal']
+  },
+
   // Las cartas unidas en un solo documento. Firman los mismos que en cada carta
   // (titular y codeudores), así que el bloque es el de deudores: eso es lo que
   // ordena a los firmantes para WeeTrust.
@@ -606,6 +713,14 @@ export const CARTAS_UNIFICABLES: readonly ContractType[] = [
   ContractType.COBERTURA_INREXSA,
   ContractType.COBERTURA_INREXSA_COMERCIAL,
   ContractType.COBERTURA_GYT,
+  ContractType.CARTA_EMISION_CHEQUES_SOCIEDAD,
+  ContractType.CARTA_CARRO_NUEVO_SOCIEDAD,
+  ContractType.CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD,
+  ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD,
+  ContractType.SOLICITUD_COMPRA_VEHICULO_SOCIEDAD,
+  ContractType.COBERTURA_INREXSA_SOCIEDAD,
+  ContractType.COBERTURA_INREXSA_COMERCIAL_SOCIEDAD,
+  ContractType.COBERTURA_GYT_SOCIEDAD,
 ];
 
 export function esCartaUnificable(contractType: string): boolean {

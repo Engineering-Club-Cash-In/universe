@@ -13,8 +13,13 @@ export const COBERTURAS_POR_ASEGURADORA: Record<
 	InsuranceProvider,
 	readonly string[]
 > = {
-	universales: ["cobertura_inrexsa", "cobertura_inrexsa_comercial"],
-	gyt: ["cobertura_gyt"],
+	universales: [
+		"cobertura_inrexsa",
+		"cobertura_inrexsa_comercial",
+		"cobertura_inrexsa_sociedad",
+		"cobertura_inrexsa_comercial_sociedad",
+	],
+	gyt: ["cobertura_gyt", "cobertura_gyt_sociedad"],
 };
 
 const NOMBRE_ASEGURADORA: Record<InsuranceProvider, string> = {

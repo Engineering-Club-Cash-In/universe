@@ -33,6 +33,9 @@ const DOCUMENT_LABEL_OVERRIDES: Record<string, string> = {
   cobertura_inrexsa: "Cobertura Placas Particulares",
   cobertura_inrexsa_comercial: "Cobertura Placas Comerciales",
   cobertura_gyt: "Cobertura Seguros G&T",
+  cobertura_inrexsa_sociedad: "Cobertura Placas Particulares (Sociedad)",
+  cobertura_inrexsa_comercial_sociedad: "Cobertura Placas Comerciales (Sociedad)",
+  cobertura_gyt_sociedad: "Cobertura Seguros G&T (Sociedad)",
 };
 
 function formatDocumentName(name: string): string {

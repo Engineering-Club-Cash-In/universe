@@ -27,6 +27,20 @@ export const CONTRATOS_VENTA_MAPEADOS = [
 	"pagare_unico_libre_protesto",
 	"reconocimiento_deuda_feb_2025",
 	"solicitud_compra_vehiculo_tercero",
+	// Ventas a nombre de una sociedad: firma el representante legal.
+	"carta_aceptacion_instalacion_gps_sociedad",
+	"carta_carro_nuevo_sociedad",
+	"carta_emision_cheques_sociedad",
+	"carta_traspaso_vehiculo_rdbe_sociedad",
+	"cobertura_gyt_sociedad",
+	"cobertura_inrexsa_comercial_sociedad",
+	"cobertura_inrexsa_sociedad",
+	"contrato_privado_uso_sociedad",
+	"descargo_responsabilidades_sociedad",
+	"garantia_mobiliaria_sociedad",
+	"pagare_unico_libre_protesto_sociedad",
+	"reconocimiento_deuda_sociedad",
+	"solicitud_compra_vehiculo_tercero_sociedad",
 ] as const;
 
 export type ContratoVentaMapeado = (typeof CONTRATOS_VENTA_MAPEADOS)[number];

@@ -1777,7 +1777,9 @@ export function identificacionDe(
 	// no dijo otra cosa) porque el inversionista entrega dinero y la relación se
 	// arma por correo, sin nadie de la empresa enfrente.
 	const conSelfie =
-		contractType === ContractType.RECONOCIMIENTO_DEUDA || deInversion;
+		contractType === ContractType.RECONOCIMIENTO_DEUDA ||
+		contractType === ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD ||
+		deInversion;
 
 	return {
 		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,

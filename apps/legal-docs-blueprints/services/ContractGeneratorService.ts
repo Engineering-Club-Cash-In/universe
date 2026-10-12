@@ -249,6 +249,35 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Ventas a nombre de una sociedad: firma el representante legal. La
+    // plantilla va por el género del representante; las coberturas no tienen
+    // género. No hay versión con codeudores.
+    const ventasSociedad: Array<[ContractType, string, boolean]> = [
+      [ContractType.SOLICITUD_COMPRA_VEHICULO_SOCIEDAD, 'Solicitud de compra de vehículo por instrucción de tercero (sociedad)', true],
+      [ContractType.CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD, 'Carta de aceptación de instalación de GPS (sociedad)', true],
+      [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD, 'Carta de solicitud de traspaso de vehículo a RDBE (sociedad)', true],
+      [ContractType.CARTA_CARRO_NUEVO_SOCIEDAD, 'Carta para carro nuevo (sociedad)', true],
+      [ContractType.CARTA_EMISION_CHEQUES_SOCIEDAD, 'Carta de emisión de cheques (sociedad)', true],
+      [ContractType.DESCARGO_RESPONSABILIDADES_SOCIEDAD, 'Descargo de responsabilidades de vehículo (sociedad)', true],
+      [ContractType.COBERTURA_INREXSA_SOCIEDAD, 'Carta de cobertura placas particulares (sociedad)', false],
+      [ContractType.COBERTURA_INREXSA_COMERCIAL_SOCIEDAD, 'Carta de cobertura placas comerciales (sociedad)', false],
+      [ContractType.COBERTURA_GYT_SOCIEDAD, 'Carta de cobertura Seguros G&T (sociedad)', false],
+      [ContractType.PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD, 'Pagaré único libre de protesto (sociedad)', true],
+      [ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD, 'Reconocimiento de deuda (sociedad)', true],
+      [ContractType.GARANTIA_MOBILIARIA_SOCIEDAD, 'Garantía mobiliaria (sociedad)', true],
+      [ContractType.CONTRATO_PRIVADO_USO_SOCIEDAD, 'Contrato privado de uso de vehículo (sociedad)', true],
+    ];
+    for (const [type, description, conGenero] of ventasSociedad) {
+      const base = `ventas_sociedad/${type}/${type}`;
+      this.registerTemplate({
+        type,
+        templateFilename: `${base}.docx`,
+        templateFilenameFemale: conGenero ? `${base}-mujer.docx` : `${base}.docx`,
+        description,
+        requiredFields: ['nombreCompleto', 'nombreSociedad'],
+      });
+    }
+
     // Registrar pagaré único libre de protesto
     this.registerTemplate({
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,

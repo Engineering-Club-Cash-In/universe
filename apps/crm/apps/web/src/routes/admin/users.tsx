@@ -18,7 +18,10 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
+	faltaElegirAlcance,
+	type MembresiaEnEdicion,
 	type MembresiaSocio,
+	membresiasElegidas,
 	PartnerAgenciesPicker,
 } from "@/components/admin/PartnerAgenciesPicker";
 import {
@@ -186,9 +189,9 @@ function RouteComponent() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const [agenciasEditadas, setAgenciasEditadas] = useState<MembresiaSocio[]>(
-		[],
-	);
+	const [agenciasEditadas, setAgenciasEditadas] = useState<
+		MembresiaEnEdicion[]
+	>([]);
 
 	const setPartnerCompaniesMutation = useMutation({
 		mutationFn: (input: { userId: string; memberships: MembresiaSocio[] }) =>
@@ -231,14 +234,16 @@ function RouteComponent() {
 			email: "",
 			password: "",
 			role: ROLES.SALES as UserRole,
-			memberships: [] as MembresiaSocio[],
+			memberships: [] as MembresiaEnEdicion[],
 		},
 		onSubmit: async ({ value }) => {
 			// Solo los socios llevan agencias; el server rechaza lo contrario.
 			createUserMutation.mutate({
 				...value,
 				memberships:
-					value.role === ROLES.PARTNER ? value.memberships : undefined,
+					value.role === ROLES.PARTNER
+						? membresiasElegidas(value.memberships)
+						: undefined,
 			});
 		},
 		validators: {
@@ -248,13 +253,24 @@ function RouteComponent() {
 				password: z.string().min(8, "Password must be at least 8 characters"),
 				role: z.enum(ALL_ROLES as [UserRole, ...UserRole[]]),
 				memberships: z.array(
-					z.object({ companyId: z.string(), sellerId: z.string().nullable() }),
+					z.object({
+						companyId: z.string(),
+						sellerId: z.string().nullable().optional(),
+					}),
 				),
 			})
 			.refine((v) => v.role !== ROLES.PARTNER || v.memberships.length > 0, {
 				message: "Selecciona al menos una agencia",
 				path: ["memberships"],
-			}),
+			})
+			.refine(
+				(v) => v.role !== ROLES.PARTNER || !faltaElegirAlcance(v.memberships),
+				{
+					message:
+						"Elige para cada agencia si ve toda la agencia (gerente) o solo un vendedor",
+					path: ["memberships"],
+				},
+			),
 		},
 	});
 
@@ -823,13 +839,14 @@ function RouteComponent() {
 							className="w-full"
 							disabled={
 								agenciasEditadas.length === 0 ||
+								faltaElegirAlcance(agenciasEditadas) ||
 								setPartnerCompaniesMutation.isPending
 							}
 							onClick={() =>
 								socioAEditar &&
 								setPartnerCompaniesMutation.mutate({
 									userId: socioAEditar.id,
-									memberships: agenciasEditadas,
+									memberships: membresiasElegidas(agenciasEditadas),
 								})
 							}
 						>
@@ -840,6 +857,12 @@ function RouteComponent() {
 						{agenciasEditadas.length === 0 && (
 							<p className="text-amber-600 text-xs">
 								Un socio sin agencias no puede entrar al tracker.
+							</p>
+						)}
+						{faltaElegirAlcance(agenciasEditadas) && (
+							<p className="text-amber-600 text-xs">
+								Elige para cada agencia si ve toda la agencia (gerente) o solo
+								un vendedor.
 							</p>
 						)}
 					</div>

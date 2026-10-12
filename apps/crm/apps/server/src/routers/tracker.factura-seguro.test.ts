@@ -435,6 +435,11 @@ describe("subirFacturaSeguro", () => {
 		);
 	});
 
+	test("ya desembolsada (100%) el vendedor también puede subirla", async () => {
+		caso = casoAl(100);
+		expect(await subir()).toMatchObject({ envio: "enviado" });
+	});
+
 	test("al 90% sin cerrar (abierta o en pausa): BAD_REQUEST, sin subir nada a R2", async () => {
 		for (const status of ["open", "on_hold"]) {
 			caso = casoAl(90, { status });
@@ -952,11 +957,20 @@ describe("previsualizarFacturaSeguroDesdeCrm", () => {
 		expect(correos).toHaveLength(0);
 	});
 
+	test("sin agencia (la consulta del tracker no la trae): dice que no es de agencia", async () => {
+		// El innerJoin con companies deja fuera a la oportunidad: no hay fila.
+		caso = undefined as unknown as Record<string, unknown>;
+		expect(await previsualizarFacturaSeguroDesdeCrm(ID)).toEqual({
+			seEnviara: false,
+			motivo: "la oportunidad no es de una agencia o predio",
+		});
+	});
+
 	test("si no se enviaría, da el motivo y no pide confirmación", async () => {
 		caso = casoAl(85);
 		expect(await previsualizarFacturaSeguroDesdeCrm(ID)).toEqual({
 			seEnviara: false,
-			motivo: "la oportunidad no está en formalización final (90%)",
+			motivo: "la oportunidad todavía no llega a formalización final (90%)",
 		});
 	});
 });
@@ -1068,7 +1082,10 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 
 	test("fuera de formalización final, sin agencia o con factura ya registrada: no se envía", async () => {
 		const casos: Array<[Record<string, unknown>, string]> = [
-			[casoAl(85), "la oportunidad no está en formalización final (90%)"],
+			[
+				casoAl(85),
+				"la oportunidad todavía no llega a formalización final (90%)",
+			],
 			[
 				casoAl(90, { companyId: null }),
 				"la oportunidad no es de una agencia o predio",
@@ -1209,10 +1226,9 @@ describe("factura subida antes del cierre", () => {
 		expect(correos).toHaveLength(0);
 	});
 
-	test("perdida, ya desembolsada o sin agencia: no se enviará después", async () => {
+	test("perdida o sin agencia: no se enviará después", async () => {
 		for (const c of [
 			casoAl(85, { status: "lost" }),
-			casoAl(100),
 			casoAl(85, { status: "open", companyId: null }),
 		]) {
 			const r = await subir(c);
@@ -1237,6 +1253,22 @@ describe("factura subida antes del cierre", () => {
 			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
 		).toMatchObject({ documentId: "doc-antes", submittedBy: "crm-1" });
 		expect(correos).toHaveLength(1);
+	});
+
+	test("ya desembolsada (100%) y ganada, la subida confirmada desde el CRM se envía", async () => {
+		caso = casoAl(100);
+		expect(
+			await enviarFacturaSeguroDesdeCrm({
+				opportunityId: ID,
+				documentId: "doc-100",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+				mimeType: "application/pdf",
+				aseguradoraConfirmada: "gyt",
+				userId: "crm-1",
+				userRole: "admin",
+			}),
+		).toMatchObject({ enviada: true });
 	});
 
 	test("si la oportunidad ya pasó al 100% mientras tanto, el envío del cierre termina igual", async () => {

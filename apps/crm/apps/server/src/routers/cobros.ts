@@ -3975,6 +3975,7 @@ export const cobrosRouter = {
 						? {
 								adjunto: {
 									templateName: plantilla.adjunto.templateName,
+									parametros: plantilla.adjunto.parametros,
 									header: {
 										type: "image" as const,
 										url: plantilla.adjunto.imagenUrl,

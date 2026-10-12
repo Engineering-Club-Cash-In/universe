@@ -17,7 +17,7 @@ mock.module("@repo/simpletech", () => ({
 const { sendWhatsappTemplateBatch } = await import("./simpletech");
 
 const header = { type: "image" as const, url: "https://x.test/img.jpg" };
-const mensaje = "Juan.\nLínea 2\n\nSegundo bloque";
+const mensaje = "Juan.\nLínea 2\n\nSegundo bloque\n\nTercero";
 
 beforeEach(() => {
 	sendTemplate.mockReset();
@@ -29,15 +29,19 @@ beforeEach(() => {
 });
 
 describe("sendWhatsappTemplateBatch con adjunto", () => {
-	test("usa el template indicado, header de imagen y el mensaje completo como 1 parámetro", async () => {
+	test("usa el template indicado, header de imagen y un párrafo por variable sin saltos de línea", async () => {
 		await sendWhatsappTemplateBatch({
 			recipients: [{ phone: "55550001", message: mensaje }],
-			adjunto: { templateName: "mensajeimage", header },
+			adjunto: { templateName: "mensaje2image", header, parametros: 3 },
 		});
 
 		const request = sendTemplate.mock.calls[0][0];
-		expect(request.templateName).toBe("mensajeimage");
-		expect(request.messages[0].body).toEqual([mensaje]);
+		expect(request.templateName).toBe("mensaje2image");
+		expect(request.messages[0].body).toEqual([
+			"Juan. Línea 2",
+			"Segundo bloque",
+			"Tercero",
+		]);
 		expect(request.messages[0].header).toEqual(header);
 	});
 
@@ -47,8 +51,8 @@ describe("sendWhatsappTemplateBatch con adjunto", () => {
 		});
 
 		const request = sendTemplate.mock.calls[0][0];
-		expect(request.templateName).toBe("mensaje2parametro");
-		expect(request.messages[0].body).toHaveLength(2);
+		expect(request.templateName).toBe("mensaje3parametro");
+		expect(request.messages[0].body).toHaveLength(3);
 		expect(request.messages[0].header).toBeUndefined();
 	});
 });

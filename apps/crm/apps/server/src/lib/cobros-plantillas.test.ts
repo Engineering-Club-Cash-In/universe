@@ -1354,15 +1354,15 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 		(p) => p.id === "cuenta_nexa_exclusiva",
 	);
 
-	test("existe, usa {cuentaNexa} y cabe en 3 bloques de WhatsApp (uno por variable del template)", () => {
+	test("existe, usa {cuentaNexa} y cabe en 4 bloques de WhatsApp (uno por variable del template)", () => {
 		expect(plantilla).toBeDefined();
 		expect(plantilla?.cuerpo).toContain("{cuentaNexa}");
-		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(3);
-		expect(plantilla?.adjunto?.parametros).toBe(3);
+		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
+		expect(plantilla?.adjunto?.parametros).toBe(4);
 	});
 
-	test("se envía con la imagen: template mensaje2image y URL pública", () => {
-		expect(plantilla?.adjunto?.templateName).toBe("mensaje2image");
+	test("se envía con la imagen: template mensaje4image y URL pública", () => {
+		expect(plantilla?.adjunto?.templateName).toBe("mensaje4image");
 		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
 	});
 
@@ -1371,8 +1371,8 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 		expect(adjunto).toBeDefined();
 		if (!adjunto) return;
 		expect(cuerpoCubreAdjunto(plantilla?.cuerpo ?? "", adjunto)).toBe(true);
-		expect(cuerpoCubreAdjunto("a\n\nb\n\nc\n\nd", adjunto)).toBe(true);
-		expect(cuerpoCubreAdjunto("a\n\nb", adjunto)).toBe(false);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc\n\nd\n\ne", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc", adjunto)).toBe(false);
 		expect(cuerpoCubreAdjunto("una sola línea\ncon salto", adjunto)).toBe(false);
 	});
 
@@ -1391,7 +1391,7 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 			cuentaNexa: "1234567890123456",
 		});
 		expect(mensaje.startsWith("Juan Perez.")).toBe(true);
-		expect(mensaje).toContain("🔢 1234567890123456");
+		expect(mensaje).toContain("🔢 Cuenta Monetaria : 1234567890123456");
 		expect(mensaje).toContain("ejecutivo al 5555-1234");
 		expect(mensaje).not.toContain("{");
 		// Cada variable del template va en una sola línea.

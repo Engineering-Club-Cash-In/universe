@@ -311,7 +311,7 @@ export async function sendWhatsappTemplateBatch(params: {
 	recipients: WhatsappBatchRecipient[];
 	logPrefix?: string;
 	/**
-	 * Template explícito con header de media (p. ej. `mensaje2image`: imagen + 3
+	 * Template explícito con header de media (p. ej. `mensaje4image`: imagen + 4
 	 * variables de body). Si se pasa, NO se auto-resuelve `mensajeNparametro`:
 	 * cada párrafo del mensaje va en una variable (`parametros` en total) y los
 	 * saltos de línea dentro de un párrafo pasan a espacios, porque WhatsApp no

@@ -32,6 +32,7 @@ const thenable = (obtener: () => any) => {
       return builder;
     },
     returning: () => builder,
+    for: () => builder, // candado del crédito al abrir la desactivación
     then: (res: any, rej: any) => Promise.resolve().then(obtener).then(res, rej),
   };
   return builder;

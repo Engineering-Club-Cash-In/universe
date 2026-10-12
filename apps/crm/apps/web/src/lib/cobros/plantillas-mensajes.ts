@@ -683,18 +683,16 @@ Tus canales actuales continúan habilitados.
 
 Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente.
 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
-		// 2 bloques → template `mensaje2parametro` (igual que el server). Solo para
-		// créditos con cuenta Nexa (plantillasDisponibles / prepararCuentaNexaParaEnvio).
-		cuerpoWhastapp: `{clienteNombre}.
-Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito.
-Vía transferencia desde tu banco de preferencia hacia:
-🏛️ Banco Nexa
-🔢 *Cuenta Monetaria*
-🔢 *{cuentaNexa}*
-Tus canales actuales continúan habilitados.
+		// 4 bloques → template `mensaje4image` (imagen + 4 variables) (igual que el
+		// server). Solo para créditos con cuenta Nexa (plantillasDisponibles /
+		// prepararCuentaNexaParaEnvio).
+		cuerpoWhastapp: `{clienteNombre}. Ya está disponible tu *nueva cuenta exclusiva para realizar los pagos de tu crédito*. Vía transferencia desde tu banco de preferencia hacia:
 
-Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente.
-📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+🏛️ *Banco Nexa*
+
+🔢 *Cuenta Monetaria : {cuentaNexa}*
+
+Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

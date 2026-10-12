@@ -382,6 +382,13 @@ describe("orden de candados: creditos ANTES que moras_credito", () => {
     expect(estado.transacciones[0]?.[0]).toEqual({ tabla: creditos, via: "for update", modo: "no key update" });
   });
 
+  it("desactivarMoraSiCreditoAlDia sobre un crédito NO MOROSO: lo primero de la tx es candar el crédito", async () => {
+    estado.selects = [[MORA_ACTIVA], [{ statusCredit: "ACTIVO", capital: "114160.35" }], [CUOTA_AL_DIA]];
+    await desactivarMoraSiCreditoAlDia(CREDITO_ID);
+
+    expect(estado.transacciones[0]?.[0]).toEqual({ tabla: creditos, via: "for update", modo: "no key update" });
+  });
+
   it("el detector no es decorativo: una secuencia invertida SÍ se marca", () => {
     expect(
       violacionDeOrden([

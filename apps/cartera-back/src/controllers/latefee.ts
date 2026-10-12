@@ -737,7 +737,8 @@ export function hoyGuatemala(ahora: Date = new Date()): Date {
 }
 
 /**
- * 🧊 Estados cuya mora activa el cron NO apaga: se congela tal cual está.
+ * 🧊 Estados cuya mora activa NADIE apaga en automático (ni el cron ni la
+ * validación de un pago): se congela tal cual está.
  *
  * PENDIENTE_CANCELACION está en STATUS_EXCLUIDOS_MORA, así que para el
  * criterio "¿quedan cuotas vencidas?" el crédito siempre parece al día. Pero
@@ -773,8 +774,9 @@ async function candarCreditoParaMora(tx: Pick<typeof db, "select">, creditoId: n
 
 /**
  * Condición para el UPDATE que apaga una mora: que su crédito NO esté en un
- * estado que la congela. El cron lee el status al principio de la corrida; si
- * el crédito pasa a PENDIENTE_CANCELACION en el medio, este filtro hace que el UPDATE no
+ * estado que la congela. El status se lee al principio de la corrida (cron) o
+ * antes de abrir la transacción (validación); si el crédito pasa a
+ * PENDIENTE_CANCELACION en el medio, este filtro hace que el UPDATE no
  * matchee filas y la ruta lo trate como "otra ruta la ganó" (`MoraYaApagada`).
  * Solo es exacto con el crédito candado ANTES (`candarCreditoParaMora`): sin
  * candado, un cambio a PENDIENTE_CANCELACION que commitea después de la foto
@@ -860,6 +862,7 @@ export async function evaluarCreditoAlDia(credito_id: number, dbi: typeof db = d
 
   return {
     cuotasVencidas,
+    statusCredit: credito?.statusCredit ?? null,
     ...decidirLimpiezaMoraTrasAplicar({
       cuotasVencidasRestantes: cuotasVencidas,
       capitalCredito: credito?.capital ?? null,
@@ -878,7 +881,10 @@ export async function evaluarCreditoAlDia(credito_id: number, dbi: typeof db = d
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
- * "se puso al día" del cron.
+ * "se puso al día" del cron — con la MISMA excepción: la mora de un crédito
+ * PENDIENTE_CANCELACION no se apaga (`congelaMoraActiva`), porque sus cuotas
+ * no cuentan como vencidas y validar una boleta ya registrada la borraba como
+ * "se puso al día" antes de que `resetCredit` la cobrara.
  *
  * Nunca lanza: la limpieza de mora no debe romper la aplicación del pago.
  * El UPDATE es condicional sobre `activa=true`: si el cron u otra validación
@@ -913,7 +919,16 @@ export async function desactivarMoraSiCreditoAlDia(
       return { desactivada: false };
     }
 
-    const { cuotasVencidas, ...decision } = await evaluarCreditoAlDia(credito_id, dbi);
+    const { cuotasVencidas, statusCredit, ...decision } = await evaluarCreditoAlDia(credito_id, dbi);
+
+    // 🧊 Misma regla que el paso 6 del cron (ver `STATUS_CONGELA_MORA`). Si el
+    // crédito cambia de status después de esta lectura (sin candado), lo frena
+    // el filtro `creditoNoCongelaMora` del UPDATE de abajo, exacto porque la
+    // transacción candó el crédito antes.
+    if (congelaMoraActiva(statusCredit)) {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
+      return { desactivada: false };
+    }
 
     if (!decision.desactivarMora) {
       emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "overdue_installments_remain" });
@@ -931,7 +946,9 @@ export async function desactivarMoraSiCreditoAlDia(
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). El convenio toma el crédito y después
       // la mora; si acá lo hiciéramos al revés, las dos transacciones se
-      // esperarían en cruz y Postgres mataría una con 40P01.
+      // esperarían en cruz y Postgres mataría una con 40P01. El candado va
+      // SIEMPRE: el UPDATE de abajo solo corre si el crédito está MOROSO.
+      await candarCreditoParaMora(txm, credito_id);
       if (decision.bajarStatusAActivo) {
         await txm
           .update(creditos)
@@ -956,6 +973,7 @@ export async function desactivarMoraSiCreditoAlDia(
           and(
             eq(moras_credito.mora_id, moraActiva.mora_id),
             eq(moras_credito.activa, true),
+            creditoNoCongelaMora(credito_id),
           ),
         )
         .returning({ mora_id: moras_credito.mora_id });

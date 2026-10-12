@@ -32,7 +32,7 @@ let caso: Record<string, unknown> = {};
 let cotizacion: Array<Record<string, unknown>> = [];
 let facturaPrevia: Array<Record<string, unknown>> = [];
 // Lo que devuelve R2 para un archivo ya subido (la factura desde el CRM).
-let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
+let contenidoR2: Buffer = Buffer.from("%PDF-1.4\n%%EOF\n");
 const topesLecturaR2: Array<number | undefined> = [];
 // Locks tomados sobre la fila del usuario socio y la del vehículo.
 const bloqueosUsuario: string[] = [];
@@ -323,9 +323,19 @@ function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 const KEY = `opportunities/${ID}/123-abc-factura.pdf`;
 // Con encabezado real: el server valida el contenido, no el tipo declarado.
 const ENCABEZADO_PDF = new TextEncoder().encode("%PDF-1.4\n");
-function conContenido(inicio: Uint8Array, bytes: number) {
+// Firma al inicio y la marca de cierre del formato al final (por defecto, la
+// de un PDF): el server valida las dos.
+const CIERRE_PDF = new TextEncoder().encode("\n%%EOF\n");
+function conContenido(
+	inicio: Uint8Array,
+	bytes: number,
+	cierre: Uint8Array = CIERRE_PDF,
+) {
 	const contenido = new Uint8Array(bytes);
 	contenido.set(inicio.subarray(0, bytes));
+	if (bytes >= inicio.length + cierre.length) {
+		contenido.set(cierre, bytes - cierre.length);
+	}
 	return contenido;
 }
 const pdf = (nombre = "factura.pdf", tipo = "application/pdf", bytes = 2048) =>
@@ -337,7 +347,7 @@ beforeEach(() => {
 	caso = casoAl(90);
 	cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
 	facturaPrevia = [];
-	contenidoR2 = Buffer.from("%PDF-1.4");
+	contenidoR2 = Buffer.from("%PDF-1.4\n%%EOF\n");
 	vendedorVigente = undefined;
 	fallaLecturaCotizacion = false;
 	casoBajoBloqueo = undefined;
@@ -604,8 +614,12 @@ describe("subirFacturaSeguro", () => {
 		const png = new File(
 			[
 				conContenido(
-					new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+					new Uint8Array([
+						0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49,
+						0x48, 0x44, 0x52,
+					]),
 					2048,
+					new Uint8Array([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
 				),
 			],
 			"factura.jpg",
@@ -1071,6 +1085,7 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		contenidoR2 = Buffer.concat([
 			Buffer.from("%PDF-1.4"),
 			Buffer.alloc(10 * 1024 * 1024),
+			Buffer.from("%%EOF"),
 		]);
 		const r = await enviar();
 		expect(topesLecturaR2).toEqual([10 * 1024 * 1024]);
@@ -1164,7 +1179,13 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		const DOCX =
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 		contenidoR2 = Buffer.from(
-			zipConEntradas(["[Content_Types].xml", "word/document.xml"]),
+			zipConEntradas([
+				[
+					"[Content_Types].xml",
+					'<Types><Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+				],
+				["word/document.xml", "<w:document/>"],
+			]),
 		);
 		const r = await enviar("factura.docx", "admin", DOCX);
 		expect(r).toMatchObject({ enviada: true });
@@ -1220,28 +1241,38 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 });
 
 // ZIP mínimo pero bien formado (sin comprimir), con su directorio central.
-function zipConEntradas(nombres: string[]): Uint8Array {
+// Cada entrada lleva el contenido dado (vacío si no se pasa).
+function zipConEntradas(
+	entradas: Array<string | [string, string]>,
+): Uint8Array {
 	const locales: Buffer[] = [];
 	const centrales: Buffer[] = [];
 	let desplazamiento = 0;
-	for (const nombre of nombres) {
+	for (const entrada of entradas) {
+		const [nombre, contenido] =
+			typeof entrada === "string" ? [entrada, ""] : entrada;
 		const n = Buffer.from(nombre);
+		const d = Buffer.from(contenido);
 		const local = Buffer.alloc(30);
 		local.writeUInt32LE(0x04034b50, 0);
+		local.writeUInt32LE(d.length, 18);
+		local.writeUInt32LE(d.length, 22);
 		local.writeUInt16LE(n.length, 26);
 		const central = Buffer.alloc(46);
 		central.writeUInt32LE(0x02014b50, 0);
+		central.writeUInt32LE(d.length, 20);
+		central.writeUInt32LE(d.length, 24);
 		central.writeUInt16LE(n.length, 28);
 		central.writeUInt32LE(desplazamiento, 42);
-		locales.push(local, n);
+		locales.push(local, n, d);
 		centrales.push(central, n);
-		desplazamiento += 30 + n.length;
+		desplazamiento += 30 + n.length + d.length;
 	}
 	const directorio = Buffer.concat(centrales);
 	const fin = Buffer.alloc(22);
 	fin.writeUInt32LE(0x06054b50, 0);
-	fin.writeUInt16LE(nombres.length, 8);
-	fin.writeUInt16LE(nombres.length, 10);
+	fin.writeUInt16LE(entradas.length, 8);
+	fin.writeUInt16LE(entradas.length, 10);
 	fin.writeUInt32LE(directorio.length, 12);
 	fin.writeUInt32LE(desplazamiento, 16);
 	return new Uint8Array(Buffer.concat([...locales, directorio, fin]));
@@ -1404,6 +1435,8 @@ describe("factura programada para el cierre", () => {
 			status: "pendiente",
 			recipients: ["polizas@gyt.test"],
 		});
+		// La fecha de subida (createdAt) no se pisa con la del cierre.
+		expect(actualizados[0]).not.toHaveProperty("createdAt");
 		expect(correos[0]).toMatchObject({
 			archivo: { key: KEY_ANTES, nombre: "factura.pdf" },
 			idempotencyKey: "factura-seguro/envio-prog/1",

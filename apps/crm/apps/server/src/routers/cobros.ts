@@ -3940,6 +3940,20 @@ export const cobrosRouter = {
 					...seguroPorAseguradora(info?.insuranceProvider),
 				});
 
+				// Un párrafo que era solo una variable vacía para este crédito (p. ej.
+				// {placa}) desaparece al interpolar y desplaza el resto: la plantilla
+				// con imagen se quedaría con una variable vacía y el proveedor la
+				// rechaza. Se revalida con el mensaje ya interpolado.
+				if (plantilla.adjunto && !cuerpoCubreAdjunto(mensaje, plantilla.adjunto)) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo:
+							"el mensaje queda con menos párrafos que variables de la plantilla con imagen (un dato vacío dejó un párrafo en blanco)",
+					});
+					continue;
+				}
+
 				candidatos.push({
 					numeroSifco: sifco ?? "",
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,

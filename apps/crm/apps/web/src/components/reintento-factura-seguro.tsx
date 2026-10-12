@@ -30,6 +30,7 @@ export function ReintentoFacturaSeguro({
 }) {
 	const queryClient = useQueryClient();
 	const [confirmando, setConfirmando] = useState(false);
+	const [revisiones, setRevisiones] = useState(0);
 	const refrescar = () => {
 		queryClient.invalidateQueries({
 			queryKey: orpc.getOpportunityDocuments.key(),
@@ -50,11 +51,14 @@ export function ReintentoFacturaSeguro({
 		},
 	});
 
-	// Un `pendiente` pasa a reintentable a los 10 minutos: se refresca una vez
-	// en ese momento, para que el botón aparezca sin recargar.
+	// Un `pendiente` pasa a reintentable a los 10 minutos: se refresca en ese
+	// momento para que el botón aparezca sin recargar. Si el reloj del navegador
+	// va adelantado y el server todavía no lo habilita, se vuelve a revisar cada
+	// 30 segundos; el server deja de mandar `reintentoDesde` al vencer el plazo.
 	useEffect(() => {
 		if (!reintentoDesde || disponible) return;
-		const espera = Math.max(0, Date.parse(reintentoDesde) - Date.now()) + 1000;
+		const restante = Date.parse(reintentoDesde) - Date.now();
+		const espera = restante > 0 ? restante + 1000 : 30_000;
 		const id = setTimeout(() => {
 			queryClient.invalidateQueries({
 				queryKey: orpc.getOpportunityDocuments.key(),
@@ -62,9 +66,10 @@ export function ReintentoFacturaSeguro({
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
+			setRevisiones((n) => n + 1);
 		}, espera);
 		return () => clearTimeout(id);
-	}, [reintentoDesde, disponible, opportunityId, queryClient]);
+	}, [reintentoDesde, disponible, opportunityId, queryClient, revisiones]);
 
 	if (!disponible) return null;
 

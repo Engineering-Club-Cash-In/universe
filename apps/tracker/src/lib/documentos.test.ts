@@ -37,10 +37,10 @@ describe("documentosDelCaso", () => {
 		}
 	});
 
-	test("el caso ganado al 90% conserva el pendiente; fuera de la etapa no pide factura", () => {
+	test("el caso ganado desde el 90% (también al 100%) conserva el pendiente; antes no pide factura", () => {
 		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
+		expect(tieneDocumentosPendientes(caso({}, 100, "aprobado"))).toBe(true);
 		expect(documentosDelCaso(caso({}, 85))).toEqual([]);
-		expect(documentosDelCaso(caso({}, 100, "aprobado"))).toEqual([]);
 		expect(documentosDelCaso(caso({}, 90, "rechazado"))).toEqual([]);
 	});
 });

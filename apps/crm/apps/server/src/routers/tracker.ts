@@ -468,6 +468,7 @@ async function datosDelCorreo(
 		.select({
 			insuranceProvider: quotations.insuranceProvider,
 			insuredAmount: quotations.insuredAmount,
+			vehicleValue: quotations.vehicleValue,
 			monthlyPayment: quotations.monthlyPayment,
 			vehicleType: quotations.vehicleType,
 			vehicleBrand: quotations.vehicleBrand,
@@ -521,7 +522,11 @@ async function datosDelCorreo(
 			vin: oportunidad?.vin ?? null,
 			tipoVehiculo:
 				oportunidad?.tipoVehiculo?.trim() || cotizacion?.vehicleType || null,
-			montoAsegurado: aNumero(cotizacion?.insuredAmount),
+			// Igual que el cierre al crear el crédito: sin monto asegurado (las
+			// cotizaciones viejas), el valor del vehículo.
+			montoAsegurado: aNumero(
+				cotizacion?.insuredAmount || cotizacion?.vehicleValue,
+			),
 			cuotaMensual: aNumero(
 				cotizacion?.monthlyPayment ?? oportunidad?.cuotaMensual,
 			),

@@ -23,6 +23,8 @@ import {
 	mensajeSmsEditable,
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereTelefonoAsesor,
+	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 } from "./plantillas-mensajes";
@@ -30,9 +32,10 @@ import {
 const NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 
-// La bienvenida es la única plantilla sin aviso no-reply: pide confirmar la
-// recepción del mensaje (diseño "Mensajes Cobros 2026").
-const IDS_SIN_AVISO = new Set(["bienvenida"]);
+// La bienvenida pide confirmar la recepción del mensaje (diseño "Mensajes Cobros
+// 2026") y la cuenta exclusiva Nexa va con el texto que definió cobros: ninguna
+// lleva el aviso no-reply.
+const IDS_SIN_AVISO = new Set(["bienvenida", "cuenta_nexa_exclusiva"]);
 
 const MAX_PARAMS_SIMPLETECH = 5;
 
@@ -1000,5 +1003,57 @@ describe("debeAnunciarCrecimientoMora", () => {
 				incrementoMaximoMensualMora: "420.00",
 			}),
 		).toBe(false);
+	});
+});
+
+describe("Nueva cuenta exclusiva Nexa", () => {
+	const ID = "cuenta_nexa_exclusiva";
+
+	test("solo se ofrece a créditos con cuenta Nexa", () => {
+		for (const sin of [null, undefined, "", "  "]) {
+			expect(plantillasDisponibles(sin).some((p) => p.id === ID)).toBe(false);
+		}
+		expect(plantillasDisponibles("1234567890123456").some((p) => p.id === ID)).toBe(
+			true,
+		);
+	});
+
+	test("el texto de WhatsApp lleva la cuenta y el asesor, sin aviso no-reply", () => {
+		const p = PLANTILLAS_MENSAJES.find((x) => x.id === ID);
+		const msg = interpolar(p?.cuerpoWhastapp ?? "", {
+			clienteNombre: "ana lopez",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "5555-1234",
+			nombreAsesor: "",
+			expectativaMora: "",
+			cuentaNexa: "1234567890123456",
+		});
+		expect(msg.startsWith("Ana Lopez.")).toBe(true);
+		expect(msg).toContain("🔢 *1234567890123456*");
+		expect(msg).toContain("ejecutivo al 5555-1234");
+		expect(msg).not.toContain("{");
+	});
+});
+
+describe("plantillaRequiereTelefonoAsesor", () => {
+	test("la cuenta exclusiva Nexa (sin aviso no-reply) exige el teléfono del asesor", () => {
+		expect(plantillaRequiereTelefonoAsesor("cuenta_nexa_exclusiva")).toBe(true);
+	});
+
+	test("las plantillas con aviso no-reply ya quedan cubiertas por su guard: no cambian", () => {
+		for (const id of ["al_dia", "pre_mora", "mora_30", "mora_60", "aviso_juridico"]) {
+			expect(plantillaRequiereTelefonoAsesor(id), id).toBe(false);
+		}
+	});
+
+	test("un id desconocido o vacío no exige nada", () => {
+		expect(plantillaRequiereTelefonoAsesor("nope")).toBe(false);
+		expect(plantillaRequiereTelefonoAsesor(null)).toBe(false);
+		expect(plantillaRequiereTelefonoAsesor("")).toBe(false);
 	});
 });

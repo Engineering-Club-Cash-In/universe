@@ -15,9 +15,9 @@ import {
 	ne,
 	not,
 	or,
+	type SQL,
 	sql,
 	sum,
-	type SQL,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -62,13 +62,12 @@ import {
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
-import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
-import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
-import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
 } from "../lib/bank-statement-documents";
+import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -86,6 +85,10 @@ import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audi
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
+	aplicarDeltaMontosInversionistas,
+	calcularRegeneracionCotizacionFechaIdeal,
+} from "../lib/fecha-ideal-cotizacion";
+import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
@@ -94,10 +97,6 @@ import {
 	puedeCambiarDiaPago,
 	requiereCongelarEtapaParaCambioDia,
 } from "../lib/fecha-ideal-pago-edicion";
-import {
-	calcularRegeneracionCotizacionFechaIdeal,
-	aplicarDeltaMontosInversionistas,
-} from "../lib/fecha-ideal-cotizacion";
 import {
 	esDpiEnBlanco,
 	evaluarGateMoraDpi,
@@ -137,6 +136,7 @@ import {
 	numerosSifcoDelDpiYDeLaOportunidad,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
+import { motivoSinCelularDelRepresentante } from "../lib/oportunidad-de-sociedad";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -150,6 +150,7 @@ import {
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	type DecisionRevalidacion,
 	decidirRevalidacion,
@@ -695,6 +696,35 @@ async function quitarMarcaDeRepresentante(
 				salvo ? ne(coDebtors.id, salvo) : undefined,
 			),
 		);
+}
+
+/**
+ * Por qué la oportunidad no puede entrar a jurídico por el celular de quien
+ * firma por la sociedad, o null (ver `motivoSinCelularDelRepresentante`).
+ */
+async function motivoCelularDelRepresentante(
+	opportunityId: string,
+): Promise<string | null> {
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	if (!oportunidad) return null;
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+			phone: coDebtors.phone,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	return motivoSinCelularDelRepresentante({
+		clientType: oportunidad.clientType,
+		coDeudores,
+	});
 }
 
 export const crmRouter = {
@@ -3418,6 +3448,13 @@ export const crmRouter = {
 						message:
 							"Para avanzar de 80% a la siguiente etapa, la oportunidad debe ser aprobada por el departamento jurídico desde el módulo de Jurídico.",
 					});
+				}
+
+				// Al entrar a jurídico, una sociedad necesita a su representante con
+				// celular: a él le llegan los enlaces de firma.
+				if (fromPercentage < 80 && toPercentage >= 80) {
+					const motivo = await motivoCelularDelRepresentante(id);
+					if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
 				}
 
 				// Validaciones para avanzar a etapa 80% (jurídica)
@@ -8549,6 +8586,7 @@ export const crmRouter = {
 								firstName: leads.firstName,
 								lastName: leads.lastName,
 								phone: leads.phone,
+								clientType: leads.clientType,
 								dpi: leads.dpi,
 								direccion: leads.direccion,
 								maritalStatus: leads.maritalStatus,
@@ -8712,6 +8750,9 @@ export const crmRouter = {
 								id: lead.id,
 								name: `${lead.firstName} ${lead.lastName}`,
 								phone: lead.phone,
+								// Empresa: firma su representante legal (ver
+								// `lib/oportunidad-de-sociedad.ts`).
+								clientType: lead.clientType,
 								direccion: lead.direccion,
 								hasRequiredData: !!(
 									lead.dpi &&
@@ -8988,6 +9029,13 @@ export const crmRouter = {
 			} else {
 				validationErrors.push("No hay cliente asociado a la oportunidad");
 			}
+
+			// Una sociedad firma por su representante legal: tiene que estar marcado
+			// y con celular, que es a donde le llegan los enlaces de firma.
+			const sinCelular = await motivoCelularDelRepresentante(
+				input.opportunityId,
+			);
+			if (sinCelular) validationErrors.push(sinCelular);
 
 			// Validate vehicle data
 			if (opportunity.vehicleId) {

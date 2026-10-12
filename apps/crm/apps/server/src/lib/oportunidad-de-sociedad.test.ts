@@ -3,6 +3,8 @@ import {
 	codeudoresDeMas,
 	esOportunidadDeSociedad,
 	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	motivoSinCelularDelRepresentante,
 	nombreDeLaSociedad,
 	representanteLegalDe,
 } from "./oportunidad-de-sociedad";
@@ -115,5 +117,76 @@ describe("qué batería se puede generar", () => {
 		expect(
 			nombreDeLaSociedad(["Grupo ", "de ", "Negocios STS", "S.A", null]),
 		).toBe("GRUPO DE NEGOCIOS STS S.A");
+	});
+});
+
+describe("regenerar con el representante de la última generación", () => {
+	const representante = { dpi: "2999999980101", email: "rep@prueba.test" };
+
+	test("mismo DPI, aunque venga con espacios: se puede", () => {
+		expect(
+			motivoPorRepresentanteCambiado(representante, {
+				dpi: "2999 99998 0101",
+				email: "otro@prueba.test",
+			}),
+		).toBeNull();
+	});
+
+	test("otro DPI: hay que generar de nuevo", () => {
+		expect(
+			motivoPorRepresentanteCambiado(representante, {
+				dpi: "1111111110101",
+				email: "rep@prueba.test",
+			}),
+		).toContain("cambió");
+	});
+
+	test("foto sin DPI: se compara el correo", () => {
+		expect(
+			motivoPorRepresentanteCambiado(representante, {
+				email: "REP@prueba.test",
+			}),
+		).toBeNull();
+		expect(
+			motivoPorRepresentanteCambiado(representante, { email: "x@prueba.test" }),
+		).toContain("cambió");
+	});
+});
+
+describe("celular del representante para pasar a jurídico", () => {
+	const con = (phone: string | null, esRepresentanteLegal = true) => ({
+		id: "a",
+		esRepresentanteLegal,
+		phone,
+	});
+
+	test("una persona no lo necesita", () => {
+		expect(
+			motivoSinCelularDelRepresentante({
+				clientType: "individual",
+				coDeudores: [con(null, false)],
+			}),
+		).toBeNull();
+	});
+
+	test("una sociedad sin representante o sin su celular no pasa", () => {
+		expect(
+			motivoSinCelularDelRepresentante({
+				clientType: "empresa",
+				coDeudores: [],
+			}),
+		).toContain("marcá a su representante");
+		expect(
+			motivoSinCelularDelRepresentante({
+				clientType: "empresa",
+				coDeudores: [con("  ")],
+			}),
+		).toContain("Falta el celular");
+		expect(
+			motivoSinCelularDelRepresentante({
+				clientType: "empresa",
+				coDeudores: [con("50255555555")],
+			}),
+		).toBeNull();
 	});
 });

@@ -125,3 +125,48 @@ export function motivoParaNoGenerar<C extends CodeudorDeLaOportunidad>(
 		? "La oportunidad es de una sociedad: van los contratos de sociedad, no los individuales."
 		: null;
 }
+
+/**
+ * Por qué no se puede volver a emitir con el titular de la última generación,
+ * o null.
+ *
+ * Regenerar reusa los firmantes de la foto. En una sociedad el titular es el
+ * representante legal: si después lo cambiaron, la batería saldría a firma con
+ * el anterior. Se compara por DPI y, en fotos que no lo guardaron, por correo.
+ */
+export function motivoPorRepresentanteCambiado(
+	representante: { dpi: string; email: string | null } | null,
+	titular: { dpi?: string; email: string } | undefined,
+): string | null {
+	if (!representante || !titular) return null;
+	const soloDigitos = (dpi: string) => dpi.replace(/\D/g, "");
+	const mismo = titular.dpi?.trim()
+		? soloDigitos(titular.dpi) === soloDigitos(representante.dpi)
+		: titular.email.trim().toLowerCase() ===
+			(representante.email ?? "").trim().toLowerCase();
+	return mismo
+		? null
+		: "El representante legal de la sociedad cambió desde la última generación: generá la batería de nuevo desde el asistente.";
+}
+
+/**
+ * Por qué una sociedad todavía no puede pasar a jurídico, o null.
+ *
+ * Al aprobar los contratos, los enlaces de firma le llegan por WhatsApp a quien
+ * firma. En una sociedad es el representante legal, no la empresa: tiene que
+ * estar marcado y tener su celular (no el teléfono de la empresa). Fuera de una
+ * sociedad no aplica.
+ */
+export function motivoSinCelularDelRepresentante<
+	C extends CodeudorDeLaOportunidad & { phone: string | null },
+>(datos: DatosDeSociedad<C>): string | null {
+	if (!esOportunidadDeSociedad(datos)) return null;
+	const representante = representanteLegalDe(datos);
+	if (!representante) {
+		return "Es una sociedad: marcá a su representante legal en los co-firmantes. Es quien firma y a quien le llegan los enlaces de firma.";
+	}
+	if (!representante.phone?.trim()) {
+		return "Falta el celular del representante legal: a ese número le llegan los enlaces de firma por WhatsApp.";
+	}
+	return null;
+}

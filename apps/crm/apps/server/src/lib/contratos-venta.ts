@@ -11,6 +11,11 @@
  * `bloques` declarados. Inversiones, sociedad y cartas poder no están y siguen
  * por el camino viejo.
  */
+import {
+	CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD,
+	esContratoDeSociedad,
+} from "./oportunidad-de-sociedad";
+
 export const CONTRATOS_VENTA_MAPEADOS = [
 	"carta_aceptacion_instalacion_gps",
 	"carta_carro_nuevo",
@@ -47,4 +52,20 @@ export type ContratoVentaMapeado = (typeof CONTRATOS_VENTA_MAPEADOS)[number];
 
 export function esContratoVentaMapeado(contractType: string): boolean {
 	return (CONTRATOS_VENTA_MAPEADOS as readonly string[]).includes(contractType);
+}
+
+/**
+ * Los que se pueden subir a mano en una oportunidad: los de su batería. En una
+ * sociedad, los de sociedad y la declaración del vendedor; si no, los
+ * individuales. El servidor lo vuelve a exigir al subir.
+ */
+export function contratosParaSubirAMano(
+	esSociedad: boolean,
+): ContratoVentaMapeado[] {
+	return CONTRATOS_VENTA_MAPEADOS.filter((tipo) =>
+		esSociedad
+			? esContratoDeSociedad(tipo) ||
+				CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD.includes(tipo)
+			: !esContratoDeSociedad(tipo),
+	);
 }

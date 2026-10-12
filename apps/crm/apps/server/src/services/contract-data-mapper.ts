@@ -914,6 +914,7 @@ export async function validateOpportunityForContracts(
 			id: coDebtors.id,
 			dpi: coDebtors.dpi,
 			email: coDebtors.email,
+			phone: coDebtors.phone,
 			gender: coDebtors.gender,
 			age: coDebtors.age,
 			maritalStatus: coDebtors.maritalStatus,
@@ -949,6 +950,9 @@ export async function validateOpportunityForContracts(
 			if (!representante.dpi?.trim()) missingRepresentanteFields.push("DPI");
 			if (!representante.email?.trim())
 				missingRepresentanteFields.push("Correo");
+			// Los enlaces de firma le llegan por WhatsApp a él, no a la empresa.
+			if (!representante.phone?.trim())
+				missingRepresentanteFields.push("Teléfono");
 			if (!representante.gender) missingRepresentanteFields.push("Género");
 			if (!representante.age) missingRepresentanteFields.push("Edad");
 			if (!representante.maritalStatus)

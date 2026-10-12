@@ -20,14 +20,15 @@ import {
 	User,
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
+import { motivoSinCelularDelRepresentante } from "server/src/lib/oportunidad-de-sociedad";
 import { toast } from "sonner";
+import { TelefonosParaFirmar } from "@/components/analysis/TelefonosParaFirmar";
 import {
 	ContractPartiesFields,
 	type ContractPartiesValue,
 	emptyContractParties,
 	toContractPartiesPayload,
 } from "@/components/contract-parties/ContractPartiesFields";
-import { TelefonosParaFirmar } from "@/components/analysis/TelefonosParaFirmar";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -533,6 +534,26 @@ export function InvestmentAssignmentSection({
 			0,
 		) || 0);
 	const participacionCoincide = Math.abs(totalParticipacion - 100) < 0.01;
+
+	// Una sociedad firma por su representante legal: sin él marcado, o sin su
+	// celular, los enlaces de firma no le llegarían a nadie. Misma consulta que
+	// "Celulares para la firma", que es donde se corrige.
+	const codeudoresParaFirmar = useQuery({
+		queryKey: ["codeudores-para-firmar", selectedOpportunity?.id],
+		queryFn: () =>
+			client.getCoDebtorsByOpportunity({
+				opportunityId: selectedOpportunity?.id ?? "",
+			}),
+		enabled: !!selectedOpportunity?.id,
+	});
+	const sinCelularDelRepresentante =
+		selectedOpportunity && codeudoresParaFirmar.data
+			? motivoSinCelularDelRepresentante({
+					clientType: selectedOpportunity.lead?.clientType,
+					coDeudores: codeudoresParaFirmar.data,
+				})
+			: null;
+
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
@@ -541,7 +562,8 @@ export function InvestmentAssignmentSection({
 		selectedOpportunity.hasCreditData &&
 		montosCoinciden &&
 		participacionCoincide &&
-		hasValidNit;
+		hasValidNit &&
+		!sinCelularDelRepresentante;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -594,6 +616,10 @@ export function InvestmentAssignmentSection({
 
 		if (!editNit.trim()) {
 			reasons.push("El NIT es obligatorio");
+		}
+
+		if (sinCelularDelRepresentante) {
+			reasons.push(sinCelularDelRepresentante);
 		}
 
 		return reasons;
@@ -707,76 +733,76 @@ export function InvestmentAssignmentSection({
 						</Alert>
 					) : (
 						<>
-								<div className="space-y-2">
-									{opportunities.map((opp) => {
-										const seleccionar = () => {
-											setSelectedOpportunityId(opp.id);
-											setSelectedInversionistas([]);
-										};
-										return (
-											<div
-												key={opp.id}
-												className={cn(
-													"cursor-pointer rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted/50",
-													selectedOpportunityId === opp.id &&
-														"border-primary bg-muted/50",
-												)}
-												role="button"
-												tabIndex={0}
-												onClick={seleccionar}
-												onKeyDown={(e) => {
-													if (e.key === "Enter" || e.key === " ") {
-														e.preventDefault();
-														seleccionar();
-													}
-												}}
-											>
-												<div className="flex items-start justify-between gap-3">
-													<div className="min-w-0">
-														<p className="truncate font-medium text-sm">
-															{opp.lead?.name || "Sin cliente"}
-														</p>
-														<p className="truncate text-muted-foreground text-xs">
-															{opp.vehicle?.description || "Sin vehículo"}
-														</p>
-													</div>
-													<p className="shrink-0 font-medium text-sm tabular-nums">
-														{formatCurrency(opp.value)}
+							<div className="space-y-2">
+								{opportunities.map((opp) => {
+									const seleccionar = () => {
+										setSelectedOpportunityId(opp.id);
+										setSelectedInversionistas([]);
+									};
+									return (
+										<div
+											key={opp.id}
+											className={cn(
+												"cursor-pointer rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted/50",
+												selectedOpportunityId === opp.id &&
+													"border-primary bg-muted/50",
+											)}
+											role="button"
+											tabIndex={0}
+											onClick={seleccionar}
+											onKeyDown={(e) => {
+												if (e.key === "Enter" || e.key === " ") {
+													e.preventDefault();
+													seleccionar();
+												}
+											}}
+										>
+											<div className="flex items-start justify-between gap-3">
+												<div className="min-w-0">
+													<p className="truncate font-medium text-sm">
+														{opp.lead?.name || "Sin cliente"}
+													</p>
+													<p className="truncate text-muted-foreground text-xs">
+														{opp.vehicle?.description || "Sin vehículo"}
 													</p>
 												</div>
-												<div className="mt-2 flex items-center justify-between gap-2">
-													<div className="flex flex-wrap items-center gap-1">
-														<DataCheck
-															ok={!!opp.lead?.hasRequiredData}
-															icon={User}
-															label="Cliente"
-														/>
-														<DataCheck
-															ok={!!opp.vehicle?.hasRequiredData}
-															icon={Car}
-															label="Vehículo"
-														/>
-														<DataCheck
-															ok={opp.hasCreditData}
-															icon={CreditCard}
-															label="Crédito"
-														/>
-													</div>
-													<span
-														className={cn(
-															"shrink-0 text-xs",
-															opp.hasInvestor
-																? "font-medium text-emerald-700 dark:text-emerald-400"
-																: "text-muted-foreground",
-														)}
-													>
-														{opp.hasInvestor ? "Con inversor" : "Sin inversor"}
-													</span>
-												</div>
+												<p className="shrink-0 font-medium text-sm tabular-nums">
+													{formatCurrency(opp.value)}
+												</p>
 											</div>
-										);
-									})}
-								</div>
+											<div className="mt-2 flex items-center justify-between gap-2">
+												<div className="flex flex-wrap items-center gap-1">
+													<DataCheck
+														ok={!!opp.lead?.hasRequiredData}
+														icon={User}
+														label="Cliente"
+													/>
+													<DataCheck
+														ok={!!opp.vehicle?.hasRequiredData}
+														icon={Car}
+														label="Vehículo"
+													/>
+													<DataCheck
+														ok={opp.hasCreditData}
+														icon={CreditCard}
+														label="Crédito"
+													/>
+												</div>
+												<span
+													className={cn(
+														"shrink-0 text-xs",
+														opp.hasInvestor
+															? "font-medium text-emerald-700 dark:text-emerald-400"
+															: "text-muted-foreground",
+													)}
+												>
+													{opp.hasInvestor ? "Con inversor" : "Sin inversor"}
+												</span>
+											</div>
+										</div>
+									);
+								})}
+							</div>
 
 							{/* Paginación */}
 							{totalPages > 1 && (
@@ -835,132 +861,142 @@ export function InvestmentAssignmentSection({
 			<div>
 				{selectedOpportunity ? (
 					<Card>
-							<CardHeader className="gap-1">
-								<div className="flex items-start justify-between gap-3">
-									<div className="min-w-0">
-										<CardTitle className="text-lg">
-											{selectedOpportunity.lead?.name || "Sin cliente"}
-										</CardTitle>
-										<CardDescription className="flex flex-wrap gap-x-3">
-											<span>
-												{selectedOpportunity.vehicle?.description ||
-													"Sin vehículo"}
-											</span>
-											<span className="font-medium text-foreground tabular-nums">
-												{formatCurrency(selectedOpportunity.value)}
-											</span>
-											<span className="font-mono text-xs">
-												ID {selectedOpportunity.id.slice(0, 8)}
-											</span>
-										</CardDescription>
-									</div>
-									<div className="flex shrink-0 items-center gap-2">
-										<Badge
-											variant="outline"
-											style={{
-												borderColor: selectedOpportunity.stage.color,
-												color: selectedOpportunity.stage.color,
-											}}
-										>
-											{selectedOpportunity.stage.closurePercentage}%
-										</Badge>
-										<Button
-											variant="outline"
-											size="sm"
-											className="border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
-											onClick={() =>
-												handleOpenOpportunityModal(selectedOpportunity)
-											}
-										>
-											<Eye className="mr-1 h-4 w-4" />
-											Ver detalle
-										</Button>
-									</div>
+						<CardHeader className="gap-1">
+							<div className="flex items-start justify-between gap-3">
+								<div className="min-w-0">
+									<CardTitle className="text-lg">
+										{selectedOpportunity.lead?.name || "Sin cliente"}
+									</CardTitle>
+									<CardDescription className="flex flex-wrap gap-x-3">
+										<span>
+											{selectedOpportunity.vehicle?.description ||
+												"Sin vehículo"}
+										</span>
+										<span className="font-medium text-foreground tabular-nums">
+											{formatCurrency(selectedOpportunity.value)}
+										</span>
+										<span className="font-mono text-xs">
+											ID {selectedOpportunity.id.slice(0, 8)}
+										</span>
+									</CardDescription>
 								</div>
-							</CardHeader>
-							<CardContent className="space-y-6">
-								<div className="grid gap-6 xl:grid-cols-2">
-									<div className="space-y-6">
-							{/* Datos del Crédito - Campos editables */}
-							<div className="space-y-3">
-								<div className="flex items-center gap-2">
-									<FileText className="h-4 w-4" />
-									<Label className="font-medium text-sm">
-										Datos del Crédito
-									</Label>
+								<div className="flex shrink-0 items-center gap-2">
+									<Badge
+										variant="outline"
+										style={{
+											borderColor: selectedOpportunity.stage.color,
+											color: selectedOpportunity.stage.color,
+										}}
+									>
+										{selectedOpportunity.stage.closurePercentage}%
+									</Badge>
+									<Button
+										variant="outline"
+										size="sm"
+										className="border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+										onClick={() =>
+											handleOpenOpportunityModal(selectedOpportunity)
+										}
+									>
+										<Eye className="mr-1 h-4 w-4" />
+										Ver detalle
+									</Button>
 								</div>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-6">
+							<div className="grid gap-6 xl:grid-cols-2">
+								<div className="space-y-6">
+									{/* Datos del Crédito - Campos editables */}
+									<div className="space-y-3">
+										<div className="flex items-center gap-2">
+											<FileText className="h-4 w-4" />
+											<Label className="font-medium text-sm">
+												Datos del Crédito
+											</Label>
+										</div>
 
-									<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-										<p className="text-sm">
-											<span className="text-muted-foreground">Categoría </span>
-											<span className="font-medium">
-												{getAutomaticCategoria(selectedOpportunity) ||
-													"Sin categoría"}
-											</span>
-										</p>
-										<div className="grid gap-3 sm:grid-cols-2">
-											<div className="space-y-1">
-												<Label htmlFor="asignacion-nit" className="text-xs">
-													NIT *
-												</Label>
-												<Input
-													id="asignacion-nit"
-													value={editNit}
-													onChange={(e) => setEditNit(e.target.value)}
-													placeholder="Ej: 12345678-9"
-													className={!editNit.trim() ? "border-orange-400" : ""}
-												/>
-											</div>
-											<div className="space-y-1">
-												<Label className="text-xs">Día de pago mensual</Label>
-												<Select
-													value={
-														elegidoDesdeRecomendacionIA
-															? `ia-${editDiaPagoMensual}`
-															: editDiaPagoMensual.toString()
-													}
-													onValueChange={(value) => {
-														if (value.startsWith("ia-")) {
-															setEditDiaPagoMensual(Number(value.slice(3)));
-															setElegidoDesdeRecomendacionIA(true);
-														} else {
-															setEditDiaPagoMensual(Number(value));
-															setElegidoDesdeRecomendacionIA(false);
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+											<p className="text-sm">
+												<span className="text-muted-foreground">
+													Categoría{" "}
+												</span>
+												<span className="font-medium">
+													{getAutomaticCategoria(selectedOpportunity) ||
+														"Sin categoría"}
+												</span>
+											</p>
+											<div className="grid gap-3 sm:grid-cols-2">
+												<div className="space-y-1">
+													<Label htmlFor="asignacion-nit" className="text-xs">
+														NIT *
+													</Label>
+													<Input
+														id="asignacion-nit"
+														value={editNit}
+														onChange={(e) => setEditNit(e.target.value)}
+														placeholder="Ej: 12345678-9"
+														className={
+															!editNit.trim() ? "border-orange-400" : ""
 														}
-													}}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar día" />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="15">15</SelectItem>
-														<SelectItem value="30">Fin de mes</SelectItem>
-														{/* No se excluyen 15/30: si la IA los recomienda, deben
+													/>
+												</div>
+												<div className="space-y-1">
+													<Label className="text-xs">Día de pago mensual</Label>
+													<Select
+														value={
+															elegidoDesdeRecomendacionIA
+																? `ia-${editDiaPagoMensual}`
+																: editDiaPagoMensual.toString()
+														}
+														onValueChange={(value) => {
+															if (value.startsWith("ia-")) {
+																setEditDiaPagoMensual(Number(value.slice(3)));
+																setElegidoDesdeRecomendacionIA(true);
+															} else {
+																setEditDiaPagoMensual(Number(value));
+																setElegidoDesdeRecomendacionIA(false);
+															}
+														}}
+													>
+														<SelectTrigger className="w-full">
+															<SelectValue placeholder="Seleccionar día" />
+														</SelectTrigger>
+														<SelectContent>
+															<SelectItem value="15">15</SelectItem>
+															<SelectItem value="30">Fin de mes</SelectItem>
+															{/* No se excluyen 15/30: si la IA los recomienda, deben
 														verse como opción aparte para que el analista sepa que
 														la IA los sugirió — aunque el número se repita. */}
-														{selectedOpportunity.suggestedPaymentDays
-															?.filter(
-																(d, i, arr) =>
-																	arr.findIndex((x) => x.dia === d.dia) === i,
-															)
-															.map((d: { dia: number; porcentaje: number }) => (
-																<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
-																	Día {d.dia} ({d.porcentaje}% recomendado en Análisis)
-																</SelectItem>
-															))}
-													</SelectContent>
-												</Select>
+															{selectedOpportunity.suggestedPaymentDays
+																?.filter(
+																	(d, i, arr) =>
+																		arr.findIndex((x) => x.dia === d.dia) === i,
+																)
+																.map(
+																	(d: { dia: number; porcentaje: number }) => (
+																		<SelectItem
+																			key={`ia-${d.dia}`}
+																			value={`ia-${d.dia}`}
+																		>
+																			Día {d.dia} ({d.porcentaje}% recomendado
+																			en Análisis)
+																		</SelectItem>
+																	),
+																)}
+														</SelectContent>
+													</Select>
+												</div>
 											</div>
+											{selectedOpportunity.suggestedPaymentDays &&
+												selectedOpportunity.suggestedPaymentDays.length > 0 && (
+													<p className="text-muted-foreground text-xs">
+														El análisis de capacidad de pago sugiere días según
+														los ingresos del cliente.
+													</p>
+												)}
 										</div>
-										{selectedOpportunity.suggestedPaymentDays &&
-											selectedOpportunity.suggestedPaymentDays.length > 0 && (
-												<p className="text-muted-foreground text-xs">
-													El análisis de capacidad de pago sugiere días según los
-													ingresos del cliente.
-												</p>
-											)}
 									</div>
-								</div>
 
 									{/* A estos números les llegan los enlaces de firma al aprobar
 									    los contratos: se revisan antes de pasar a jurídico. */}
@@ -976,11 +1012,12 @@ export function InvestmentAssignmentSection({
 													}
 												: null
 										}
+										clientType={selectedOpportunity.lead?.clientType}
 										onGuardado={() => refetchOpportunities()}
 									/>
-									</div>
+								</div>
 
-									<div className="space-y-4">
+								<div className="space-y-4">
 									{/* Partes del contrato: solo con vehículo, que decide qué pedir.
 									    Va a la derecha, arriba de los inversionistas: así quedan dos
 									    bloques por columna. */}
@@ -992,41 +1029,236 @@ export function InvestmentAssignmentSection({
 										/>
 									)}
 
-							{/* Existing Investors section */}
-							{selectedOpportunity?.existingInvestors &&
-								selectedOpportunity.existingInvestors.length > 0 && (
+									{/* Existing Investors section */}
+									{selectedOpportunity?.existingInvestors &&
+										selectedOpportunity.existingInvestors.length > 0 && (
+											<div className="space-y-2">
+												<div className="flex items-center justify-between">
+													<Label className="font-medium text-sm">
+														Inversionistas Asignados
+													</Label>
+													{!isEditingExisting && (
+														<Button
+															type="button"
+															variant="outline"
+															size="sm"
+															onClick={handleStartEditExisting}
+														>
+															<Pencil className="mr-1 h-4 w-4" />
+															Editar
+														</Button>
+													)}
+												</div>
+
+												{isEditingExisting ? (
+													<div className="space-y-3">
+														{editedExistingInvestors.map((inv, index) => (
+															<div
+																key={`edit-${inv.inversionista_id || index}`}
+																className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950"
+															>
+																<div className="space-y-3">
+																	<div>
+																		<Label className="text-xs">
+																			Inversionista
+																		</Label>
+																		<Combobox
+																			value={
+																				inv.inversionista_id?.toString() || ""
+																			}
+																			onChange={(value) =>
+																				handleUpdateExistingInvestor(
+																					index,
+																					"inversionista_id",
+																					value,
+																				)
+																			}
+																			options={
+																				inversionistasQuery.data?.inversionistas?.map(
+																					(investor) => ({
+																						label: investor.nombre,
+																						value:
+																							investor.inversionistaId.toString(),
+																					}),
+																				) || []
+																			}
+																			placeholder="Seleccionar inversionista..."
+																			width="full"
+																		/>
+																	</div>
+																	<div className="grid grid-cols-2 gap-2">
+																		<div>
+																			<Label className="text-xs">
+																				Monto aportado
+																			</Label>
+																			<Input
+																				type="number"
+																				value={inv.monto_aportado || ""}
+																				onChange={(e) =>
+																					handleUpdateExistingInvestor(
+																						index,
+																						"monto_aportado",
+																						e.target.value,
+																					)
+																				}
+																				placeholder="Q0.00"
+																			/>
+																		</div>
+																		<div>
+																			<Label className="text-xs">
+																				% Participación
+																			</Label>
+																			<Input
+																				type="number"
+																				value={
+																					inv.porcentaje_participacion || ""
+																				}
+																				onChange={(e) =>
+																					handleUpdateExistingInvestor(
+																						index,
+																						"porcentaje_participacion",
+																						e.target.value,
+																					)
+																				}
+																				placeholder="0%"
+																			/>
+																		</div>
+																	</div>
+																	<div className="flex justify-end">
+																		<Button
+																			type="button"
+																			variant="ghost"
+																			size="sm"
+																			onClick={() =>
+																				handleRemoveExistingInvestor(index)
+																			}
+																		>
+																			<Trash2 className="mr-1 h-4 w-4" />
+																			Eliminar
+																		</Button>
+																	</div>
+																</div>
+															</div>
+														))}
+
+														<Button
+															type="button"
+															variant="outline"
+															size="sm"
+															onClick={handleAddExistingInvestor}
+														>
+															<Plus className="mr-1 h-4 w-4" />
+															Agregar
+														</Button>
+
+														<div className="flex gap-2">
+															<Button
+																type="button"
+																variant="default"
+																size="sm"
+																onClick={handleSaveExistingInvestors}
+																disabled={updateInvestorsMutation.isPending}
+															>
+																{updateInvestorsMutation.isPending ? (
+																	<Loader2 className="mr-1 h-4 w-4 animate-spin" />
+																) : (
+																	<Save className="mr-1 h-4 w-4" />
+																)}
+																Guardar cambios
+															</Button>
+															<Button
+																type="button"
+																variant="outline"
+																size="sm"
+																onClick={handleCancelEditExisting}
+																disabled={updateInvestorsMutation.isPending}
+															>
+																Cancelar
+															</Button>
+														</div>
+													</div>
+												) : (
+													<div className="space-y-2">
+														{selectedOpportunity.existingInvestors.map(
+															(inv: ExistingInvestor, index: number) => (
+																<div
+																	key={index}
+																	className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
+																>
+																	<div className="flex items-center justify-between">
+																		<div>
+																			<p className="font-medium text-sm">
+																				{inv.nombre}
+																			</p>
+																			<p className="text-muted-foreground text-xs">
+																				Monto: Q{" "}
+																				{inv.monto_aportado?.toLocaleString(
+																					"es-GT",
+																					{
+																						minimumFractionDigits: 2,
+																					},
+																				)}{" "}
+																				| Participación:{" "}
+																				{inv.porcentaje_participacion}%
+																				{inv.porcentaje_cash_in !== undefined &&
+																					` | Cash-in: ${inv.porcentaje_cash_in}%`}
+																			</p>
+																		</div>
+																		<Badge
+																			variant="default"
+																			className="bg-green-600"
+																		>
+																			Asignado
+																		</Badge>
+																	</div>
+																</div>
+															),
+														)}
+													</div>
+												)}
+											</div>
+										)}
+
+									{/* New Investors section */}
 									<div className="space-y-2">
 										<div className="flex items-center justify-between">
 											<Label className="font-medium text-sm">
-												Inversionistas Asignados
+												{selectedOpportunity?.existingInvestors?.length
+													? "Agregar más inversionistas"
+													: "Inversionistas"}
 											</Label>
-											{!isEditingExisting && (
-												<Button
-													type="button"
-													variant="outline"
-													size="sm"
-													onClick={handleStartEditExisting}
-												>
-													<Pencil className="mr-1 h-4 w-4" />
-													Editar
-												</Button>
-											)}
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={handleAddInversionista}
+											>
+												<Plus className="mr-1 h-4 w-4" />
+												Agregar
+											</Button>
 										</div>
 
-										{isEditingExisting ? (
+										{selectedInversionistas.length === 0 ? (
+											<div className="rounded-lg border bg-muted/30 p-4 text-center text-muted-foreground text-sm">
+												{selectedOpportunity?.existingInvestors?.length
+													? 'Haga clic en "Agregar" para agregar más inversionistas.'
+													: 'No hay inversionistas asignados. Haga clic en "Agregar" para agregar uno.'}
+											</div>
+										) : (
 											<div className="space-y-3">
-												{editedExistingInvestors.map((inv, index) => (
+												{selectedInversionistas.map((inv, index) => (
 													<div
-														key={`edit-${inv.inversionista_id || index}`}
-														className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950"
+														key={index}
+														className="rounded-lg border bg-background p-3"
 													>
 														<div className="space-y-3">
+															{/* Investor selector */}
 															<div>
 																<Label className="text-xs">Inversionista</Label>
 																<Combobox
 																	value={inv.inversionista_id?.toString() || ""}
 																	onChange={(value) =>
-																		handleUpdateExistingInvestor(
+																		handleUpdateInversionista(
 																			index,
 																			"inversionista_id",
 																			value,
@@ -1045,6 +1277,8 @@ export function InvestmentAssignmentSection({
 																	width="full"
 																/>
 															</div>
+
+															{/* Amount */}
 															<div className="grid grid-cols-2 gap-2">
 																<div>
 																	<Label className="text-xs">
@@ -1054,7 +1288,7 @@ export function InvestmentAssignmentSection({
 																		type="number"
 																		value={inv.monto_aportado || ""}
 																		onChange={(e) =>
-																			handleUpdateExistingInvestor(
+																			handleUpdateInversionista(
 																				index,
 																				"monto_aportado",
 																				e.target.value,
@@ -1071,7 +1305,7 @@ export function InvestmentAssignmentSection({
 																		type="number"
 																		value={inv.porcentaje_participacion || ""}
 																		onChange={(e) =>
-																			handleUpdateExistingInvestor(
+																			handleUpdateInversionista(
 																				index,
 																				"porcentaje_participacion",
 																				e.target.value,
@@ -1081,13 +1315,15 @@ export function InvestmentAssignmentSection({
 																	/>
 																</div>
 															</div>
+
+															{/* Remove button */}
 															<div className="flex justify-end">
 																<Button
 																	type="button"
 																	variant="ghost"
 																	size="sm"
 																	onClick={() =>
-																		handleRemoveExistingInvestor(index)
+																		handleRemoveInversionista(index)
 																	}
 																>
 																	<Trash2 className="mr-1 h-4 w-4" />
@@ -1098,261 +1334,77 @@ export function InvestmentAssignmentSection({
 													</div>
 												))}
 
-												<Button
-													type="button"
-													variant="outline"
-													size="sm"
-													onClick={handleAddExistingInvestor}
-												>
-													<Plus className="mr-1 h-4 w-4" />
-													Agregar
-												</Button>
-
-												<div className="flex gap-2">
-													<Button
-														type="button"
-														variant="default"
-														size="sm"
-														onClick={handleSaveExistingInvestors}
-														disabled={updateInvestorsMutation.isPending}
-													>
-														{updateInvestorsMutation.isPending ? (
-															<Loader2 className="mr-1 h-4 w-4 animate-spin" />
-														) : (
-															<Save className="mr-1 h-4 w-4" />
-														)}
-														Guardar cambios
-													</Button>
-													<Button
-														type="button"
-														variant="outline"
-														size="sm"
-														onClick={handleCancelEditExisting}
-														disabled={updateInvestorsMutation.isPending}
-													>
-														Cancelar
-													</Button>
-												</div>
-											</div>
-										) : (
-											<div className="space-y-2">
-												{selectedOpportunity.existingInvestors.map(
-													(inv: ExistingInvestor, index: number) => (
-														<div
-															key={index}
-															className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
+												{/* Total summary */}
+												<div className="rounded-lg border bg-muted/50 p-3">
+													<div className="flex items-center justify-between">
+														<span className="font-medium text-sm">
+															Total aportado:
+														</span>
+														<span
+															className={`font-bold ${
+																Math.abs(totalMonto - creditAmount) < 0.01
+																	? "text-green-600"
+																	: "text-orange-600"
+															}`}
 														>
-															<div className="flex items-center justify-between">
-																<div>
-																	<p className="font-medium text-sm">
-																		{inv.nombre}
-																	</p>
-																	<p className="text-muted-foreground text-xs">
-																		Monto: Q{" "}
-																		{inv.monto_aportado?.toLocaleString(
-																			"es-GT",
-																			{
-																				minimumFractionDigits: 2,
-																			},
-																		)}{" "}
-																		| Participación:{" "}
-																		{inv.porcentaje_participacion}%
-																		{inv.porcentaje_cash_in !== undefined &&
-																			` | Cash-in: ${inv.porcentaje_cash_in}%`}
-																	</p>
-																</div>
-																<Badge
-																	variant="default"
-																	className="bg-green-600"
-																>
-																	Asignado
-																</Badge>
-															</div>
-														</div>
-													),
-												)}
+															{formatCurrency(totalMonto)}
+														</span>
+													</div>
+													<div className="flex items-center justify-between text-muted-foreground text-sm">
+														<span>Capital del crédito:</span>
+														<span>{formatCurrency(creditAmount)}</span>
+													</div>
+													{Math.abs(totalMonto - creditAmount) >= 0.01 && (
+														<p className="mt-1 text-orange-600 text-xs">
+															La suma de aportes debe ser exactamente igual al
+															capital del crédito (diferencia:{" "}
+															{formatCurrency(
+																Math.abs(totalMonto - creditAmount),
+															)}
+															)
+														</p>
+													)}
+												</div>
 											</div>
 										)}
 									</div>
-								)}
-
-							{/* New Investors section */}
-							<div className="space-y-2">
-								<div className="flex items-center justify-between">
-									<Label className="font-medium text-sm">
-										{selectedOpportunity?.existingInvestors?.length
-											? "Agregar más inversionistas"
-											: "Inversionistas"}
-									</Label>
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={handleAddInversionista}
-									>
-										<Plus className="mr-1 h-4 w-4" />
-										Agregar
-									</Button>
 								</div>
-
-								{selectedInversionistas.length === 0 ? (
-									<div className="rounded-lg border bg-muted/30 p-4 text-center text-muted-foreground text-sm">
-										{selectedOpportunity?.existingInvestors?.length
-											? 'Haga clic en "Agregar" para agregar más inversionistas.'
-											: 'No hay inversionistas asignados. Haga clic en "Agregar" para agregar uno.'}
-									</div>
-								) : (
-									<div className="space-y-3">
-										{selectedInversionistas.map((inv, index) => (
-											<div
-												key={index}
-												className="rounded-lg border bg-background p-3"
-											>
-												<div className="space-y-3">
-													{/* Investor selector */}
-													<div>
-														<Label className="text-xs">Inversionista</Label>
-														<Combobox
-															value={inv.inversionista_id?.toString() || ""}
-															onChange={(value) =>
-																handleUpdateInversionista(
-																	index,
-																	"inversionista_id",
-																	value,
-																)
-															}
-															options={
-																inversionistasQuery.data?.inversionistas?.map(
-																	(investor) => ({
-																		label: investor.nombre,
-																		value: investor.inversionistaId.toString(),
-																	}),
-																) || []
-															}
-															placeholder="Seleccionar inversionista..."
-															width="full"
-														/>
-													</div>
-
-													{/* Amount */}
-													<div className="grid grid-cols-2 gap-2">
-														<div>
-															<Label className="text-xs">Monto aportado</Label>
-															<Input
-																type="number"
-																value={inv.monto_aportado || ""}
-																onChange={(e) =>
-																	handleUpdateInversionista(
-																		index,
-																		"monto_aportado",
-																		e.target.value,
-																	)
-																}
-																placeholder="Q0.00"
-															/>
-														</div>
-														<div>
-															<Label className="text-xs">% Participación</Label>
-															<Input
-																type="number"
-																value={inv.porcentaje_participacion || ""}
-																onChange={(e) =>
-																	handleUpdateInversionista(
-																		index,
-																		"porcentaje_participacion",
-																		e.target.value,
-																	)
-																}
-																placeholder="0%"
-															/>
-														</div>
-													</div>
-
-													{/* Remove button */}
-													<div className="flex justify-end">
-														<Button
-															type="button"
-															variant="ghost"
-															size="sm"
-															onClick={() => handleRemoveInversionista(index)}
-														>
-															<Trash2 className="mr-1 h-4 w-4" />
-															Eliminar
-														</Button>
-													</div>
-												</div>
-											</div>
-										))}
-
-										{/* Total summary */}
-										<div className="rounded-lg border bg-muted/50 p-3">
-											<div className="flex items-center justify-between">
-												<span className="font-medium text-sm">
-													Total aportado:
-												</span>
-												<span
-													className={`font-bold ${
-														Math.abs(totalMonto - creditAmount) < 0.01
-															? "text-green-600"
-															: "text-orange-600"
-													}`}
-												>
-													{formatCurrency(totalMonto)}
-												</span>
-											</div>
-											<div className="flex items-center justify-between text-muted-foreground text-sm">
-												<span>Capital del crédito:</span>
-												<span>{formatCurrency(creditAmount)}</span>
-											</div>
-											{Math.abs(totalMonto - creditAmount) >= 0.01 && (
-												<p className="mt-1 text-orange-600 text-xs">
-													La suma de aportes debe ser exactamente igual al
-													capital del crédito (diferencia:{" "}
-													{formatCurrency(Math.abs(totalMonto - creditAmount))})
-												</p>
-											)}
-										</div>
-									</div>
-								)}
 							</div>
 
-									</div>
+							{/* Acción: fija abajo para no tener que bajar a buscarla */}
+							<div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-xl border-t bg-card px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+								<div className="min-w-0 text-xs">
+									{canAssign ? (
+										<span className="text-muted-foreground">
+											Todo listo para pasar a jurídico.
+										</span>
+									) : (
+										getDisabledReasons().length > 0 && (
+											<ul className="space-y-0.5 text-orange-700 dark:text-orange-400">
+												{getDisabledReasons().map((reason) => (
+													<li key={reason} className="flex gap-1">
+														<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+														{reason}
+													</li>
+												))}
+											</ul>
+										)
+									)}
 								</div>
-
-								{/* Acción: fija abajo para no tener que bajar a buscarla */}
-								<div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-xl border-t bg-card px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
-									<div className="min-w-0 text-xs">
-										{canAssign ? (
-											<span className="text-muted-foreground">
-												Todo listo para pasar a jurídico.
-											</span>
-										) : (
-											getDisabledReasons().length > 0 && (
-												<ul className="space-y-0.5 text-orange-700 dark:text-orange-400">
-													{getDisabledReasons().map((reason) => (
-														<li key={reason} className="flex gap-1">
-															<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-															{reason}
-														</li>
-													))}
-												</ul>
-											)
-										)}
-									</div>
-									<Button
-										className="shrink-0"
-										onClick={handleAssign}
-										disabled={!canAssign || assignMutation.isPending}
-									>
-										{assignMutation.isPending ? (
-											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-										) : (
-											<TrendingUp className="mr-2 h-4 w-4" />
-										)}
-										Asignar y avanzar a 80%
-									</Button>
-								</div>
-													</CardContent>
+								<Button
+									className="shrink-0"
+									onClick={handleAssign}
+									disabled={!canAssign || assignMutation.isPending}
+								>
+									{assignMutation.isPending ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<TrendingUp className="mr-2 h-4 w-4" />
+									)}
+									Asignar y avanzar a 80%
+								</Button>
+							</div>
+						</CardContent>
 					</Card>
 				) : (
 					<Card>

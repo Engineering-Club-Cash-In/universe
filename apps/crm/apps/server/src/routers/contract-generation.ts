@@ -74,6 +74,8 @@ import {
 	type DatosDeSociedad,
 	esOportunidadDeSociedad,
 	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	representanteLegalDe,
 } from "../lib/oportunidad-de-sociedad";
 import { juridicoProcedure } from "../lib/orpc";
 import {
@@ -980,7 +982,9 @@ async function exigirQueSePuedaSubir(input: {
  */
 async function sociedadDeLaOportunidad(
 	opportunityId: string,
-): Promise<DatosDeSociedad<CodeudorDeLaOportunidad> | null> {
+): Promise<DatosDeSociedad<
+	CodeudorDeLaOportunidad & { dpi: string; email: string | null }
+> | null> {
 	const [oportunidad] = await db
 		.select({ clientType: leads.clientType })
 		.from(opportunities)
@@ -992,6 +996,8 @@ async function sociedadDeLaOportunidad(
 	const coDeudores = await db
 		.select({
 			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
 			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
 		})
 		.from(coDebtors)
@@ -1010,10 +1016,20 @@ async function sociedadDeLaOportunidad(
 async function exigirLaBateriaDeLaOportunidad(
 	opportunityId: string,
 	contractTypes: string[],
+	/**
+	 * Quien firma como titular en lo que se va a emitir, cuando sale de una
+	 * generación anterior (regenerar): en una sociedad tiene que seguir siendo
+	 * el representante.
+	 */
+	titular?: { dpi?: string; email: string },
 ): Promise<void> {
 	const datos = await sociedadDeLaOportunidad(opportunityId);
 	if (!datos) return;
-	const motivo = motivoParaNoGenerar(datos, contractTypes);
+	const motivo =
+		motivoParaNoGenerar(datos, contractTypes) ??
+		(titular && esOportunidadDeSociedad(datos)
+			? motivoPorRepresentanteCambiado(representanteLegalDe(datos), titular)
+			: null);
 	if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
 }
 
@@ -2368,7 +2384,17 @@ export const contractGenerationRouter = {
 					const etapa = await exigirEtapaQuePermiteReemplazo(
 						input.opportunityId,
 					);
-					// La foto puede ser de antes de que cambiaran la cotización.
+					// La foto puede ser de antes de que marcaran (o cambiaran) al
+					// representante: la batería y quien firma tienen que seguir siendo
+					// los que le tocan hoy a la oportunidad.
+					await exigirLaBateriaDeLaOportunidad(
+						input.opportunityId,
+						contractsToRegenerate.map((c) => c.contractType),
+						contractsToRegenerate
+							.flatMap((c) => c.signers ?? [])
+							.find((f) => f.role === "TITULAR"),
+					);
+					// Y la cobertura, por si cambiaron la cotización después.
 					await exigirCoberturaDeLaAseguradora(
 						input.opportunityId,
 						contractsToRegenerate.map((c) => c.contractType),
@@ -2573,6 +2599,12 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			// Y de la batería de la oportunidad: uno individual no va en una
+			// sociedad, ni uno de sociedad en una persona.
+			await exigirLaBateriaDeLaOportunidad(input.opportunityId, [
+				input.contractType,
+			]);
+
 			// ~15 MB de PDF. Un contrato pesa bastante menos; lo que pasa de ahí es
 			// un escaneo sin comprimir y conviene frenarlo antes de pasearlo.
 			const bytes = Math.floor((input.pdfBase64.length * 3) / 4);
@@ -2619,8 +2651,11 @@ export const contractGenerationRouter = {
 				const { porcentaje: porcentajeEtapa } =
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
-				// esperaba el candado.
+				// esperaba el candado, o pudieron marcar al representante.
 				await exigirQueSePuedaSubir(input);
+				await exigirLaBateriaDeLaOportunidad(input.opportunityId, [
+					input.contractType,
+				]);
 				// La cobertura tiene que ser la de la aseguradora de la cotización.
 				await exigirCoberturaDeLaAseguradora(input.opportunityId, [
 					input.contractType,

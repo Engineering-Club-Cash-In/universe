@@ -539,13 +539,20 @@ async function datosDelCorreoBajoBloqueo(
 		.from(quotations)
 		.where(eq(quotations.opportunityId, fila.id))
 		.for("share");
-	// El vehículo también: editarlo no toma el lock de la oportunidad.
+	// El vehículo y el cliente también: editarlos no toma el lock de la
+	// oportunidad.
 	await tx
 		.select({ id: vehicles.id })
 		.from(vehicles)
 		.innerJoin(opportunities, eq(opportunities.vehicleId, vehicles.id))
 		.where(eq(opportunities.id, fila.id))
 		.for("share", { of: vehicles });
+	await tx
+		.select({ id: leads.id })
+		.from(leads)
+		.innerJoin(opportunities, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.id))
+		.for("share", { of: leads });
 	const { aseguradora, datos } = await datosDelCorreo(fila, tx);
 	return { aseguradora, datos, destinatarios: destinatariosDe(aseguradora) };
 }

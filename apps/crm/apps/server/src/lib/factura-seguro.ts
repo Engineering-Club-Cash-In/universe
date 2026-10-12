@@ -93,6 +93,47 @@ function entradasDeZip(bytes: Uint8Array): Set<string> | null {
 }
 
 /**
+ * Nombres de los streams de un archivo OLE (formato compuesto de los
+ * .doc/.xls viejos), recorriendo su directorio por la tabla FAT; null si el
+ * contenedor no está bien formado.
+ */
+function streamsDeOle(bytes: Uint8Array): Set<string> | null {
+	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	if (datos.length < 512) return null;
+	const desplazamientoSector = datos.readUInt16LE(0x1e);
+	if (desplazamientoSector !== 9 && desplazamientoSector !== 12) return null;
+	const tamSector = 1 << desplazamientoSector;
+	const inicioDe = (sector: number) => (sector + 1) * tamSector;
+	// Los primeros 109 sectores de la FAT vienen listados en el encabezado.
+	const sectoresFat: number[] = [];
+	const totalFat = Math.min(datos.readUInt32LE(0x2c), 109);
+	for (let i = 0; i < totalFat; i++) {
+		sectoresFat.push(datos.readUInt32LE(0x4c + i * 4));
+	}
+	const porSector = tamSector / 4;
+	const siguiente = (sector: number) => {
+		const sectorFat = sectoresFat[Math.floor(sector / porSector)];
+		if (sectorFat === undefined) return null;
+		const pos = inicioDe(sectorFat) + (sector % porSector) * 4;
+		return pos + 4 <= datos.length ? datos.readUInt32LE(pos) : null;
+	};
+	const nombres = new Set<string>();
+	let sector: number | null = datos.readUInt32LE(0x30);
+	for (let vueltas = 0; sector !== null && sector < 0xfffffffa; vueltas++) {
+		const base = inicioDe(sector);
+		if (vueltas > 10_000 || base + tamSector > datos.length) return null;
+		for (let entrada = base; entrada < base + tamSector; entrada += 128) {
+			const largo = datos.readUInt16LE(entrada + 0x40);
+			if (largo >= 2 && largo <= 64) {
+				nombres.add(datos.toString("utf16le", entrada, entrada + largo - 2));
+			}
+		}
+		sector = siguiente(sector);
+	}
+	return sector === 0xfffffffe ? nombres : null;
+}
+
+/**
  * Tipo con el que una factura subida desde el CRM puede ir a la aseguradora,
  * según su contenido: PDF, imagen (también AVIF), o Word/Excel cuyo contenido
  * sea de verdad un documento de Office del tipo declarado. Null si no: así un
@@ -116,11 +157,17 @@ export function tipoPermitidoDesdeCrm(
 		if (declarado === XLSX && entradas.has("xl/workbook.xml")) return XLSX;
 		return null;
 	}
-	if (
-		empiezaCon(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) &&
-		(declarado === DOC || declarado === XLS)
-	) {
-		return declarado;
+	if (empiezaCon(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) {
+		// .doc/.xls viejos: contenedor OLE con el stream principal de su tipo.
+		const streams = streamsDeOle(bytes);
+		if (declarado === DOC && streams?.has("WordDocument")) return DOC;
+		if (
+			declarado === XLS &&
+			(streams?.has("Workbook") || streams?.has("Book"))
+		) {
+			return XLS;
+		}
+		return null;
 	}
 	return null;
 }

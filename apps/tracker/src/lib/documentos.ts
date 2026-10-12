@@ -5,9 +5,10 @@ type CasoConDocumentos = Pick<Caso, "facturaSeguro" | "porcentaje" | "estado">;
 
 /**
  * - `pendiente`: falta subirlo.
+ * - `opcional`: se puede subir, pero no cuenta como pendiente (ya desembolsado).
  * - `subido`: no requiere nada del socio.
  */
-export type EstadoDocumento = "pendiente" | "subido";
+export type EstadoDocumento = "pendiente" | "opcional" | "subido";
 
 export interface DocumentoCaso {
 	clave: "factura_seguro";
@@ -19,15 +20,19 @@ export interface DocumentoCaso {
 export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 	const documentos: DocumentoCaso[] = [];
 	const factura = vistaFacturaSeguro(caso);
-	// Ya desembolsado y sin factura: se puede subir, pero no cuenta como
-	// pendiente (si no, aparecerían de golpe todos los casos viejos).
-	const pendienteAl100 =
-		caso.porcentaje >= 100 && caso.facturaSeguro.envio === null;
-	if (factura && !pendienteAl100) {
+	if (factura) {
+		// Ya desembolsado y sin factura: el vendedor la puede subir, pero no
+		// cuenta como pendiente (si no, aparecerían de golpe los casos viejos).
+		const estado: EstadoDocumento =
+			caso.facturaSeguro.envio !== null
+				? "subido"
+				: caso.porcentaje >= 100
+					? "opcional"
+					: "pendiente";
 		documentos.push({
 			clave: "factura_seguro",
 			nombre: "Factura del seguro",
-			estado: caso.facturaSeguro.envio === null ? "pendiente" : "subido",
+			estado,
 		});
 	}
 	return documentos;

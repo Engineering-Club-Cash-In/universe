@@ -142,10 +142,14 @@ function RouteComponent() {
 			.join(" · "),
 	}));
 
+	// El crédito cuyos datos se están esperando. "Empezar de cero" lo suelta: si
+	// la respuesta llega después, ya no es del formulario y no se aplica.
+	const creditoPedidoRef = useRef<string | null>(null);
 	const cargarDatos = useMutation({
 		mutationFn: (opportunityId: string) =>
 			client.datosCartaPoder({ opportunityId, hoy: hoy() }),
-		onSuccess: (datos) => {
+		onSuccess: (datos, opportunityId) => {
+			if (creditoPedidoRef.current !== opportunityId) return;
 			// La carta (fechas, país, edad del representante) es de quien llena,
 			// no del crédito: cambiar de crédito no la borra.
 			setCampos((actual) => ({
@@ -201,6 +205,7 @@ function RouteComponent() {
 	};
 
 	const empezarDeCero = () => {
+		creditoPedidoRef.current = null;
 		setCreditoElegido(null);
 		setCampos((actual) => ({
 			...camposVacios(actual.fechaFirma),
@@ -251,11 +256,18 @@ function RouteComponent() {
 						options={opciones}
 						value={creditoElegido?.opportunityId ?? null}
 						onChange={(opportunityId) => {
+							// Volver a tocar el elegido lo suelta ("" ): es empezar de cero,
+							// no pedir los datos de un crédito vacío.
+							if (!opportunityId) {
+								empezarDeCero();
+								return;
+							}
 							const opcion = opciones.find((o) => o.value === opportunityId);
 							setCreditoElegido({
 								opportunityId,
 								resumen: opcion?.label ?? "",
 							});
+							creditoPedidoRef.current = opportunityId;
 							cargarDatos.mutate(opportunityId);
 						}}
 						onSearchChange={setBusqueda}

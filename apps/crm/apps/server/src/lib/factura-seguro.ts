@@ -55,6 +55,44 @@ const DOC = "application/msword";
 const XLS = "application/vnd.ms-excel";
 
 /**
+ * Nombres de las entradas de un ZIP según su directorio central (el índice al
+ * final del archivo), o null si no es un ZIP bien formado.
+ */
+function entradasDeZip(bytes: Uint8Array): Set<string> | null {
+	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	if (datos.length < 22) return null;
+	// El fin del directorio central ocupa 22 bytes más un comentario opcional.
+	let fin = -1;
+	for (
+		let i = datos.length - 22;
+		i >= Math.max(0, datos.length - 22 - 0xffff);
+		i--
+	) {
+		if (datos.readUInt32LE(i) === 0x06054b50) {
+			fin = i;
+			break;
+		}
+	}
+	if (fin < 0) return null;
+	const total = datos.readUInt16LE(fin + 10);
+	let pos = datos.readUInt32LE(fin + 16);
+	const nombres = new Set<string>();
+	for (let n = 0; n < total; n++) {
+		if (pos + 46 > datos.length || datos.readUInt32LE(pos) !== 0x02014b50) {
+			return null;
+		}
+		const largoNombre = datos.readUInt16LE(pos + 28);
+		const largoExtra = datos.readUInt16LE(pos + 30);
+		const largoComentario = datos.readUInt16LE(pos + 32);
+		const inicio = pos + 46;
+		if (inicio + largoNombre > datos.length) return null;
+		nombres.add(datos.toString("utf8", inicio, inicio + largoNombre));
+		pos = inicio + largoNombre + largoExtra + largoComentario;
+	}
+	return nombres;
+}
+
+/**
  * Tipo con el que una factura subida desde el CRM puede ir a la aseguradora,
  * según su contenido: PDF, imagen (también AVIF), o Word/Excel cuyo contenido
  * sea de verdad un documento de Office del tipo declarado. Null si no: así un
@@ -70,12 +108,12 @@ export function tipoPermitidoDesdeCrm(
 	const marca = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
 	if (marca === "ftypavif" || marca === "ftypavis") return "image/avif";
 	if (empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04])) {
-		// Los nombres de las entradas del ZIP van sin comprimir: un .docx trae
-		// "word/" y un .xlsx "xl/", además del manifiesto de Office.
-		const contenido = Buffer.from(bytes).toString("latin1");
-		if (!contenido.includes("[Content_Types].xml")) return null;
-		if (declarado === DOCX && contenido.includes("word/")) return DOCX;
-		if (declarado === XLSX && contenido.includes("xl/")) return XLSX;
+		// Un .docx/.xlsx es un ZIP con el manifiesto de Office y la parte
+		// principal de su tipo, según el índice del propio ZIP.
+		const entradas = entradasDeZip(bytes);
+		if (!entradas?.has("[Content_Types].xml")) return null;
+		if (declarado === DOCX && entradas.has("word/document.xml")) return DOCX;
+		if (declarado === XLSX && entradas.has("xl/workbook.xml")) return XLSX;
 		return null;
 	}
 	if (

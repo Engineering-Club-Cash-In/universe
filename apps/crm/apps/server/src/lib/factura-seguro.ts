@@ -64,6 +64,7 @@ export type Aseguradora = "gyt" | "universales";
 export type MotivoSinFactura =
 	| "etapa"
 	| "estado"
+	| "sin_cerrar"
 	| "no_es_el_vendedor"
 	| "ya_subida";
 
@@ -71,14 +72,31 @@ export const MENSAJE_MOTIVO: Record<MotivoSinFactura, string> = {
 	etapa:
 		"La factura del seguro se sube cuando el crédito está en formalización final",
 	estado: "Este crédito ya no admite la factura del seguro",
+	sin_cerrar:
+		"La factura del seguro se sube cuando el crédito ya está cerrado (ganado)",
 	no_es_el_vendedor:
 		"Solo el vendedor asignado puede subir la factura del seguro",
 	ya_subida: "La factura del seguro de este crédito ya fue subida",
 };
 
-// En el flujo normal la oportunidad llega a 90% ya ganada: confirmar los
-// contratos firmados la cierra (won) y después la mueve a formalización.
-const ESTADOS_CON_FACTURA = new Set(["open", "on_hold", "won"]);
+// Solo con el crédito cerrado: en el flujo normal la oportunidad llega a 90%
+// ya ganada (confirmar los contratos la cierra y después la mueve a
+// formalización). Antes del cierre todavía puede cambiar la cotización con la
+// que se arma el crédito, y la factura saldría con otra.
+function motivoPorEstadoYEtapa(caso: {
+	status: string;
+	closurePercentage: number;
+}): "estado" | "etapa" | "sin_cerrar" | null {
+	if (caso.status === "lost") return "estado";
+	if (
+		caso.closurePercentage < ETAPA_FACTURA_SEGURO ||
+		caso.closurePercentage >= 100
+	) {
+		return "etapa";
+	}
+	if (caso.status !== "won") return "sin_cerrar";
+	return null;
+}
 
 export function puedeSubirFacturaSeguro(caso: {
 	closurePercentage: number;
@@ -89,15 +107,8 @@ export function puedeSubirFacturaSeguro(caso: {
 	yaSubida: boolean;
 }): { ok: true } | { ok: false; motivo: MotivoSinFactura } {
 	if (caso.yaSubida) return { ok: false, motivo: "ya_subida" };
-	if (!ESTADOS_CON_FACTURA.has(caso.status)) {
-		return { ok: false, motivo: "estado" };
-	}
-	if (
-		caso.closurePercentage < ETAPA_FACTURA_SEGURO ||
-		caso.closurePercentage >= 100
-	) {
-		return { ok: false, motivo: "etapa" };
-	}
+	const motivo = motivoPorEstadoYEtapa(caso);
+	if (motivo) return { ok: false, motivo };
 	if (!esVendedorAsignado(caso))
 		return { ok: false, motivo: "no_es_el_vendedor" };
 	return { ok: true };
@@ -106,6 +117,7 @@ export function puedeSubirFacturaSeguro(caso: {
 export type MotivoSinEnvioDesdeCrm =
 	| "etapa"
 	| "estado"
+	| "sin_cerrar"
 	| "sin_agencia"
 	| "ya_subida";
 
@@ -115,6 +127,7 @@ export const MENSAJE_SIN_ENVIO_DESDE_CRM: Record<
 > = {
 	etapa: "la oportunidad no está en formalización final (90%)",
 	estado: "la oportunidad ya no admite la factura del seguro",
+	sin_cerrar: "la oportunidad todavía no está ganada (crédito sin cerrar)",
 	sin_agencia: "la oportunidad no es de una agencia o predio",
 	ya_subida: "la oportunidad ya tiene su factura del seguro registrada",
 };
@@ -131,15 +144,8 @@ export function puedeEnviarFacturaDesdeCrm(caso: {
 	yaSubida: boolean;
 }): { ok: true } | { ok: false; motivo: MotivoSinEnvioDesdeCrm } {
 	if (caso.yaSubida) return { ok: false, motivo: "ya_subida" };
-	if (!ESTADOS_CON_FACTURA.has(caso.status)) {
-		return { ok: false, motivo: "estado" };
-	}
-	if (
-		caso.closurePercentage < ETAPA_FACTURA_SEGURO ||
-		caso.closurePercentage >= 100
-	) {
-		return { ok: false, motivo: "etapa" };
-	}
+	const motivo = motivoPorEstadoYEtapa(caso);
+	if (motivo) return { ok: false, motivo };
 	if (!caso.companyId) return { ok: false, motivo: "sin_agencia" };
 	return { ok: true };
 }

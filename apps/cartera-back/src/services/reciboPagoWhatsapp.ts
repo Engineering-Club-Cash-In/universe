@@ -33,11 +33,12 @@ export async function enviarReciboPagoWhatsappBestEffort(
   }
 
   try {
-    const recibo = await conTurnoDeRecibo(() => generateReciboPagoPDF(params.pagoId));
+    const recibo = await conTurnoDeRecibo(() => generateReciboPagoPDF(params.pagoId, { conImagen: true }));
     return await notifyReciboPagoWhatsapp({
       pagoId: recibo.comprobante,
       numeroSifco: params.numeroSifco,
       reciboUrl: recibo.pdfUrl,
+      imagenUrl: recibo.imagenUrl,
       clienteNombre: params.clienteNombre,
       numeroCuota: recibo.numeroCuota,
       asesorNombre: recibo.asesorNombre,

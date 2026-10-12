@@ -999,6 +999,7 @@ app.post(
 				pagoId?: number;
 				numeroSifco?: string;
 				reciboUrl?: string;
+				imagenUrl?: string | null;
 				clienteNombre?: string;
 				numeroCuota?: number | null;
 				asesorNombre?: string | null;
@@ -1024,6 +1025,7 @@ app.post(
 				pagoId: body.pagoId,
 				numeroSifco: body.numeroSifco,
 				reciboUrl: body.reciboUrl,
+				imagenUrl: body.imagenUrl ?? null,
 				clienteNombre: body.clienteNombre ?? "",
 				numeroCuota: body.numeroCuota ?? null,
 				asesorNombre: body.asesorNombre ?? null,

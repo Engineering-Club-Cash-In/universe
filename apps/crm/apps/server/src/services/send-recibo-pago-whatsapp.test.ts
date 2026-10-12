@@ -23,6 +23,7 @@ afterEach(() => {
 const SIFCO = "SIFCO-001";
 const PAGO_ID = 42;
 const RECIBO_URL = "https://r2.example.com/recibo_pago_42.pdf";
+const IMAGEN_URL = "https://r2.example.com/recibo_pago_42.jpg";
 const SUPERVISOR_ID = "user-supervisor-1";
 
 function casoBase(
@@ -232,6 +233,50 @@ describe("sendReciboPagoWhatsapp", () => {
 			url: RECIBO_URL,
 			filename: `Recibo-Pago-${PAGO_ID}.pdf`,
 		});
+	});
+
+	test("con imagen: plantilla mensajeimage con header de imagen y el texto habla de la imagen adjunta", async () => {
+		let paramsRecibidos: any;
+		let logParams: any;
+		const { deps } = buildDeps({
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-999" };
+			}),
+			guardarLog: mock(async (params: any) => {
+				logParams = params;
+			}),
+		});
+
+		const r = await sendReciboPagoWhatsapp(
+			baseParams({ imagenUrl: IMAGEN_URL }),
+			deps,
+		);
+
+		expect(r.sent).toBe(true);
+		expect(paramsRecibidos.templateName).toBe("mensajeimage");
+		expect(paramsRecibidos.bodyParams).toHaveLength(1);
+		expect(paramsRecibidos.header).toEqual({ type: "image", url: IMAGEN_URL });
+		expect(paramsRecibidos.bodyParams[0]).toContain("en la imagen adjunta");
+		expect(paramsRecibidos.bodyParams[0]).not.toContain("documento adjunto");
+		expect(logParams.result.providerResponse.imagenUrl).toBe(IMAGEN_URL);
+		expect(logParams.result.providerResponse.reciboUrl).toBe(RECIBO_URL);
+	});
+
+	test("sin imagen (cartera no pudo generarla): va el PDF con mensaje_adjunto y el texto habla del documento", async () => {
+		let paramsRecibidos: any;
+		const { deps } = buildDeps({
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-999" };
+			}),
+		});
+
+		await sendReciboPagoWhatsapp(baseParams({ imagenUrl: null }), deps);
+
+		expect(paramsRecibidos.templateName).toBe("mensaje_adjunto");
+		expect(paramsRecibidos.header.type).toBe("document");
+		expect(paramsRecibidos.bodyParams[0]).toContain("en el documento adjunto");
 	});
 
 	test("camino feliz: log con plantillaId recibo_pago, createdBy del usuario de sistema y pagoId en providerResponse", async () => {
@@ -457,6 +502,23 @@ describe("construirMensajeReciboPago", () => {
 			{ numeroCuota: 7 },
 		);
 		expect(msg).toContain("placas P-507GFV (cuota 7)");
+	});
+
+	test("adjunto imagen: dice 'la imagen adjunta'; por defecto 'el documento adjunto'", () => {
+		const vehiculo = {
+			marca: "TOYOTA",
+			modelo: "RAV4",
+			year: 2017,
+			placa: "P-507GFV",
+		};
+		expect(
+			construirMensajeReciboPago("Juan Pérez", vehiculo, SIFCO, {
+				adjunto: "imagen",
+			}),
+		).toContain("en la imagen adjunta.");
+		expect(construirMensajeReciboPago("Juan Pérez", vehiculo, SIFCO)).toContain(
+			"en el documento adjunto.",
+		);
 	});
 
 	test("con asesor completo: cierre invita a llamar al asesor, no genérico", () => {

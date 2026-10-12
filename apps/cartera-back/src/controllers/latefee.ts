@@ -737,6 +737,63 @@ export function hoyGuatemala(ahora: Date = new Date()): Date {
 }
 
 /**
+ * 🧊 Estados cuya mora activa NADIE apaga en automático (ni el cron ni la
+ * validación de un pago): se congela tal cual está.
+ *
+ * PENDIENTE_CANCELACION está en STATUS_EXCLUIDOS_MORA, así que para el
+ * criterio "¿quedan cuotas vencidas?" el crédito siempre parece al día. Pero
+ * no se puso al día: se está cerrando, y `resetCredit` (PENDIENTE_CANCELACION
+ * → CANCELADO) cobra la mora ACTIVA en el pago de cierre. Apagarla dejaba la
+ * cancelación cobrando Q0 de mora (pasó en prod con la "Mora para
+ * cancelación" que ingresa el asesor). Decisión de negocio: la mora queda
+ * exactamente como está hasta el cierre. EN_CONVENIO NO va acá: su mora sí se
+ * apaga (ver "RED DE SEGURIDAD DEL CONVENIO" en procesarMoras).
+ */
+export const STATUS_CONGELA_MORA: readonly string[] = ["PENDIENTE_CANCELACION"];
+
+export function congelaMoraActiva(statusCredit: string | null | undefined): boolean {
+  return statusCredit != null && STATUS_CONGELA_MORA.includes(statusCredit);
+}
+
+/**
+ * 🔒 Primer statement de toda transacción que apaga una mora: candado de fila
+ * sobre el crédito, incondicional (un UPDATE condicional a MOROSO no candaba
+ * nada si el crédito estaba ACTIVO/EN_CONVENIO). Así el cambio de status de
+ * `actualizarEstadoCredito` (que también lo canda) o espera o ya commiteó y el
+ * guard `creditoNoCongelaMora` lo ve. "no key update" y NO "update": el pago
+ * Nexa sostiene FOR KEY SHARE sobre `creditos` desde otra conexión
+ * (utils/paymentAdvisoryLock.ts) y FOR UPDATE se colgaría (ver `updateMora`).
+ */
+async function candarCreditoParaMora(tx: Pick<typeof db, "select">, creditoId: number) {
+  await tx
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId))
+    .for("no key update");
+}
+
+/**
+ * Condición para el UPDATE que apaga una mora: que su crédito NO esté en un
+ * estado que la congela. El status se lee al principio de la corrida (cron) o
+ * antes de abrir la transacción (validación); si el crédito pasa a
+ * PENDIENTE_CANCELACION en el medio, este filtro hace que el UPDATE no
+ * matchee filas y la ruta lo trate como "otra ruta la ganó" (`MoraYaApagada`).
+ * Solo es exacto con el crédito candado ANTES (`candarCreditoParaMora`): sin
+ * candado, un cambio a PENDIENTE_CANCELACION que commitea después de la foto
+ * del UPDATE no se ve y la mora se apaga igual.
+ * Va filtrado por el id LITERAL del crédito, sin correlacionar con
+ * `moras_credito`: según el contexto drizzle renderiza columnas sin tabla, y
+ * una subconsulta correlacionada así compararía `credito_id = credito_id`
+ * consigo misma (congelaría TODAS las moras).
+ */
+function creditoNoCongelaMora(creditoId: number) {
+  return sql`NOT EXISTS (SELECT 1 FROM ${creditos} WHERE ${and(
+    eq(creditos.credito_id, creditoId),
+    inArray(creditos.statusCredit, [...STATUS_CONGELA_MORA] as any),
+  )})`;
+}
+
+/**
  * Decisión pura de limpieza de mora al validar/aplicar un pago. Espejo del
  * paso "se puso al día" de procesarMoras: la mora se desactiva si el crédito
  * ya no tiene cuotas vencidas elegibles — o si quedó sin capital (mismo
@@ -805,6 +862,7 @@ export async function evaluarCreditoAlDia(credito_id: number, dbi: typeof db = d
 
   return {
     cuotasVencidas,
+    statusCredit: credito?.statusCredit ?? null,
     ...decidirLimpiezaMoraTrasAplicar({
       cuotasVencidasRestantes: cuotasVencidas,
       capitalCredito: credito?.capital ?? null,
@@ -823,7 +881,10 @@ export async function evaluarCreditoAlDia(credito_id: number, dbi: typeof db = d
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
- * "se puso al día" del cron.
+ * "se puso al día" del cron — con la MISMA excepción: la mora de un crédito
+ * PENDIENTE_CANCELACION no se apaga (`congelaMoraActiva`), porque sus cuotas
+ * no cuentan como vencidas y validar una boleta ya registrada la borraba como
+ * "se puso al día" antes de que `resetCredit` la cobrara.
  *
  * Nunca lanza: la limpieza de mora no debe romper la aplicación del pago.
  * El UPDATE es condicional sobre `activa=true`: si el cron u otra validación
@@ -858,7 +919,16 @@ export async function desactivarMoraSiCreditoAlDia(
       return { desactivada: false };
     }
 
-    const { cuotasVencidas, ...decision } = await evaluarCreditoAlDia(credito_id, dbi);
+    const { cuotasVencidas, statusCredit, ...decision } = await evaluarCreditoAlDia(credito_id, dbi);
+
+    // 🧊 Misma regla que el paso 6 del cron (ver `STATUS_CONGELA_MORA`). Si el
+    // crédito cambia de status después de esta lectura (sin candado), lo frena
+    // el filtro `creditoNoCongelaMora` del UPDATE de abajo, exacto porque la
+    // transacción candó el crédito antes.
+    if (congelaMoraActiva(statusCredit)) {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
+      return { desactivada: false };
+    }
 
     if (!decision.desactivarMora) {
       emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "overdue_installments_remain" });
@@ -876,7 +946,9 @@ export async function desactivarMoraSiCreditoAlDia(
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). El convenio toma el crédito y después
       // la mora; si acá lo hiciéramos al revés, las dos transacciones se
-      // esperarían en cruz y Postgres mataría una con 40P01.
+      // esperarían en cruz y Postgres mataría una con 40P01. El candado va
+      // SIEMPRE: el UPDATE de abajo solo corre si el crédito está MOROSO.
+      await candarCreditoParaMora(txm, credito_id);
       if (decision.bajarStatusAActivo) {
         await txm
           .update(creditos)
@@ -901,6 +973,7 @@ export async function desactivarMoraSiCreditoAlDia(
           and(
             eq(moras_credito.mora_id, moraActiva.mora_id),
             eq(moras_credito.activa, true),
+            creditoNoCongelaMora(credito_id),
           ),
         )
         .returning({ mora_id: moras_credito.mora_id });
@@ -1070,7 +1143,9 @@ export async function createMora({
     // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
     // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
     // no llevan mora; además el cron procesarMoras desactivaría esa mora en su corrida (la fila
-    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Para
+    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Excepción:
+    // en PENDIENTE_CANCELACION el cron ya NO la apaga (`STATUS_CONGELA_MORA`), pero esta regla no
+    // cambia — por acá no se le crea mora a un excluido. Para
     // morar uno de estos hay que sacarlo del estado excluido primero (como hace el teardown de
     // convenio, que lo pone MOROSO antes de llamar a createMora).
     if (estadoExcluido) {
@@ -1620,9 +1695,11 @@ async function desactivarMoraDelCron(
   return await db
     .transaction(async (tx) => {
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
-      // la regla al inicio del archivo). Este UPDATE es además la escritura
-      // que igual había que hacer, así que toma el candado sin costo.
-      //
+      // la regla al inicio del archivo). El candado explícito va SIEMPRE, aunque
+      // el crédito no esté MOROSO: el UPDATE de abajo es condicional y sin filas
+      // no canda nada, y el guard de PENDIENTE_CANCELACION necesita el candado.
+      await candarCreditoParaMora(tx, creditoId);
+
       // Es CONDICIONAL sobre MOROSO a propósito: bajar a ACTIVO sin esa
       // condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE. Que no
       // matchee filas es un desenlace legítimo (el crédito no estaba MOROSO),
@@ -1647,6 +1724,10 @@ async function desactivarMoraDelCron(
             // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
             // que el cron "gane" también y duplique el evento DESACTIVACION.
             eq(moras_credito.activa, true),
+            // 🧊 El paso 6 leyó el status al principio de la corrida: si el
+            // crédito pasó a PENDIENTE_CANCELACION desde entonces, no se apaga
+            // (cero filas → `MoraYaApagada` → omitido).
+            creditoNoCongelaMora(creditoId),
           ),
         )
         .returning({ mora_id: moras_credito.mora_id });
@@ -1843,7 +1924,7 @@ export async function procesarMoras() {
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
       emitCreditLateFee({ outcome: "skipped", operation: "process", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
-      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0 };
+      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0, congeladasPendienteCancelacion: 0 };
     }
 
     const hoy = hoyGuatemala();
@@ -1913,8 +1994,12 @@ export async function procesarMoras() {
         monto_mora: moras_credito.monto_mora,
         cuotas_atrasadas: moras_credito.cuotas_atrasadas,
         porcentaje_mora: moras_credito.porcentaje_mora,
+        // El status del crédito lo necesita el paso 6 para no apagar la mora
+        // de un PENDIENTE_CANCELACION (ver ahí el porqué).
+        statusCredit: creditos.statusCredit,
       })
       .from(moras_credito)
+      .innerJoin(creditos, eq(moras_credito.credito_id, creditos.credito_id))
       .where(eq(moras_credito.activa, true));
 
     const morasActivasPorCredito = new Map<number, typeof morasActivas[number]>();
@@ -1933,6 +2018,8 @@ export async function procesarMoras() {
     let moraCero = 0;
     let desactivadasMoraCero = 0;
     let skippedInternally = 0;
+    // Moras activas de créditos PENDIENTE_CANCELACION que el paso 6 deja tal cual.
+    let congeladasPendienteCancelacion = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
@@ -2277,6 +2364,18 @@ export async function procesarMoras() {
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 
+      // 🧊 PENDIENTE_CANCELACION: la mora activa se CONGELA, no se apaga.
+      // El status está en STATUS_EXCLUIDOS_MORA, así que el crédito nunca está
+      // en `moraPorCredito` y caería acá como "se puso al día" — mentira: se
+      // está cerrando y `resetCredit` cobra esa mora al cerrarlo (ver
+      // `STATUS_CONGELA_MORA`). El cron no la toca: ni la apaga, ni la
+      // recalcula, ni anota historial, ni cambia el status. EN_CONVENIO no
+      // entra acá: sigue cayendo a la red de arriba.
+      if (congelaMoraActiva(mora.statusCredit)) {
+        congeladasPendienteCancelacion++;
+        continue;
+      }
+
       const desactivo = await desactivarMoraDelCron(
         mora.credito_id,
         mora,
@@ -2303,11 +2402,13 @@ export async function procesarMoras() {
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
     // Un crédito "omitido" es el que no terminó en creación/recálculo/sin-cambios/
     // desactivación: los sin capital y los de mora Q0.00 que NO tenían mora previa
-    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded).
+    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded),
+    // y las moras congeladas de créditos PENDIENTE_CANCELACION.
     const skippedCount =
       (sinCapital - desactivadasSinCapital) +
       (moraCero - desactivadasMoraCero) +
-      skippedInternally;
+      skippedInternally +
+      congeladasPendienteCancelacion;
     emitCreditLateFee({
       outcome: "completed",
       operation: "process",
@@ -2317,7 +2418,7 @@ export async function procesarMoras() {
       failedCount: 0,
       skippedCount,
     });
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero, congeladasPendienteCancelacion };
 
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });

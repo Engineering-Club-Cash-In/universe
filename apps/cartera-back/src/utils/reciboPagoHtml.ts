@@ -8,7 +8,11 @@
  * otros cargos que incluyó el pago.
  */
 
-import { LOGO_CASHIN_AZUL, LOGO_CASHIN_BLANCO } from "./logosCashin";
+// Ícono oficial de Cash-In en el bucket público de reportes (igual que el logo
+// de los reportes de COFIDI): se cambia subiendo otro archivo, sin deploy. El
+// nombre "CashIn" va como texto al lado, en blanco o en oscuro según el fondo.
+export const ISOTIPO_CASHIN_URL =
+  "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/ISOTIPO_CASHIN.png";
 
 /** En qué quedó el pago: el recibo no puede decir "aplicado" si no lo está. */
 export type EstadoReciboPago = "aplicado" | "en_validacion" | "anulado" | "registrado";
@@ -133,7 +137,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
 <head>
 <meta charset="UTF-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; color: #1a1a2e; background: #fff; }
@@ -142,7 +146,9 @@ export function htmlReciboPago(d: DatosReciboPago): string {
   .header::before, .header::after { content: ""; position: absolute; border-radius: 50%; background: rgba(255,255,255,0.08); }
   .header::before { width: 220px; height: 220px; right: -60px; top: -90px; }
   .header::after { width: 260px; height: 260px; right: 40px; bottom: -170px; }
-  .logo { height: 34px; position: relative; }
+  .marca { display: inline-flex; align-items: center; gap: 10px; position: relative; font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-weight: 700; }
+  .marca img { height: 30px; width: 30px; }
+  .marca span { font-size: 26px; letter-spacing: -0.2px; color: #fff; }
   .titulo { font-family: 'Poppins', 'Inter', sans-serif; font-size: 30px; font-weight: 700; margin-top: 22px; position: relative; }
   .subtitulo { font-size: 12px; opacity: 0.85; margin-top: 6px; position: relative; }
   .pill { display: inline-block; margin-top: 16px; padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,0.18); font-size: 11px; font-weight: 600; position: relative; }
@@ -170,7 +176,9 @@ export function htmlReciboPago(d: DatosReciboPago): string {
   .proximo-det { font-size: 11px; font-weight: 600; margin-top: 2px; }
   .obs { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #fffbeb; border-left: 3px solid #f59e0b; font-size: 11px; color: #92400e; }
   .pie { background: #f7f7fb; padding: 18px 32px 20px; text-align: center; }
-  .pie img { height: 26px; }
+  .pie .marca { justify-content: center; }
+  .pie .marca img { height: 24px; width: 24px; }
+  .pie .marca span { font-size: 20px; color: #1a1a2e; }
   .pie p { font-size: 9px; color: #6b6b80; margin-top: 8px; }
   .pie p.gen { color: #9a9aad; margin-top: 4px; }
   .web { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px; border: 1px solid #ececf3; background: #fff; font-size: 9px; font-weight: 600; color: #4338ca; }
@@ -179,7 +187,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
 <body>
   <div class="recibo">
     <div class="header">
-      <img class="logo" src="${LOGO_CASHIN_BLANCO}" alt="Cash-In" />
+      <div class="marca"><img src="${ISOTIPO_CASHIN_URL}" alt="" /><span>CashIn</span></div>
       <div class="titulo">Recibo de pago</div>
       <div class="subtitulo">Comprobante de pago · Club Cash-In</div>
       <div class="pill"><small>Comprobante</small>No. ${d.pagoId}</div>
@@ -219,7 +227,7 @@ export function htmlReciboPago(d: DatosReciboPago): string {
       ${d.observaciones ? `<div class="obs">${e(d.observaciones)}</div>` : ""}
     </div>
     <div class="pie">
-      <img src="${LOGO_CASHIN_AZUL}" alt="Cash-In" />
+      <div class="marca"><img src="${ISOTIPO_CASHIN_URL}" alt="" /><span>CashIn</span></div>
       <p>Este documento es un comprobante de pago generado por el sistema de Club Cash-In.</p>
       <p class="gen">Generado el ${e(d.generadoEl)}</p>
       <span class="web">www.clubcashin.com</span>

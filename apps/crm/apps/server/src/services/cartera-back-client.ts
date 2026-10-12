@@ -2127,6 +2127,9 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
+						...(params.asesor_id !== undefined && {
+							asesor_id: params.asesor_id,
+						}),
 						// Sin esto el rango de fechas se perdía solo en la ruta POST
 						// (>50 SIFCOs) mientras el GET sí lo mandaba.
 						...(params.fecha_desde && {
@@ -2184,6 +2187,9 @@ export class CarteraBackClient {
 						numeros_credito_sifco: params.numeros_credito_sifco.join(","),
 					}),
 				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
+				...(params.asesor_id !== undefined && {
+					asesor_id: params.asesor_id.toString(),
+				}),
 				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
 				...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
 				...(params.capital_min !== undefined && {

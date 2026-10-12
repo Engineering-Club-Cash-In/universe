@@ -1323,6 +1323,8 @@ export interface GetAllCreditsParams {
 	nombre_usuario?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
+	/** S5: asesor dueño del crédito, por id exacto (cartera ya lo soporta). */
+	asesor_id?: number;
 	fecha_desde?: string;
 	fecha_hasta?: string;
 	capital_min?: number;

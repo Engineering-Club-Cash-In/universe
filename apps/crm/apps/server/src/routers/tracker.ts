@@ -734,8 +734,13 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		.where(eq(opportunities.id, params.opportunityId))
 		.limit(1);
 	if (!fila) return { enviada: false, motivo: "no se encontró la oportunidad" };
+	const automatico = params.aseguradoraConfirmada === "automatico";
+	// El envío del cierre corre en segundo plano: si mientras tanto la
+	// oportunidad ya pasó al 100% (desembolso), se termina igual.
+	const etapaParaRegla = (porcentaje: number) =>
+		automatico && porcentaje >= 100 ? ETAPA_FACTURA_SEGURO : porcentaje;
 	const regla = puedeEnviarFacturaDesdeCrm({
-		closurePercentage: fila.closurePercentage,
+		closurePercentage: etapaParaRegla(fila.closurePercentage),
 		status: fila.status,
 		companyId: fila.companyId,
 		yaSubida: fila.facturaEnvio != null,
@@ -754,7 +759,6 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			...(alCerrar && { alCerrar: true }),
 		};
 	}
-	const automatico = params.aseguradoraConfirmada === "automatico";
 
 	// El tamaño se validó con un HEAD, pero la URL firmada pudo reemplazar el
 	// archivo después: se baja con tope y se vuelve a medir.
@@ -807,6 +811,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 			}
 			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
 				...vigente,
+				closurePercentage: etapaParaRegla(vigente.closurePercentage),
 				yaSubida: !!previa,
 			});
 			if (!bajoBloqueo.ok) return null;

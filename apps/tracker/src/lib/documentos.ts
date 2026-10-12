@@ -19,7 +19,11 @@ export interface DocumentoCaso {
 export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 	const documentos: DocumentoCaso[] = [];
 	const factura = vistaFacturaSeguro(caso);
-	if (factura) {
+	// Ya desembolsado y sin factura: se puede subir, pero no cuenta como
+	// pendiente (si no, aparecerían de golpe todos los casos viejos).
+	const pendienteAl100 =
+		caso.porcentaje >= 100 && caso.facturaSeguro.envio === null;
+	if (factura && !pendienteAl100) {
 		documentos.push({
 			clave: "factura_seguro",
 			nombre: "Factura del seguro",

@@ -55,11 +55,9 @@ describe("vistaFacturaSeguro", () => {
 		).toMatchObject({ titulo: "Factura del seguro pendiente", accion: null });
 	});
 
-	test("sin factura, no aparece antes del 90% ni en un caso perdido; al 100% sí", () => {
+	test("sin factura, no aparece como pendiente antes del 90%, al 100% ni en un caso perdido", () => {
 		expect(vista({}, 85)).toBeNull();
-		expect(vista({}, 100, "aprobado")).toMatchObject({
-			titulo: "Factura del seguro pendiente",
-		});
+		expect(vista({}, 100, "aprobado")).toBeNull();
 		expect(vista({}, 90, "rechazado")).toBeNull();
 	});
 });

@@ -154,14 +154,14 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 						id={`factura-${caso.id}`}
 						type="file"
 						accept={[...MIME_FACTURA, ...EXTENSIONES_FACTURA].join(",")}
-						className="sr-only"
+						className="peer sr-only"
 						disabled={ocupado}
 						onChange={(e) => elegirArchivo(e.target.files?.[0])}
 					/>
 					{!archivo ? (
 						<label
 							htmlFor={`factura-${caso.id}`}
-							className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 font-medium text-sm text-white transition hover:bg-slate-800"
+							className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 font-medium text-sm text-white transition hover:bg-slate-800 peer-focus-visible:ring-2 peer-focus-visible:ring-slate-400 peer-focus-visible:ring-offset-2"
 						>
 							<FileUp className="h-4 w-4" />
 							Elegir factura (PDF o imagen)

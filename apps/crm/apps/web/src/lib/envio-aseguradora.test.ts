@@ -79,13 +79,17 @@ describe("textoSubidoPor", () => {
 });
 
 describe("avisoFacturaSubida", () => {
-	test("subida antes del cierre: avisa que se enviará sola", () => {
+	test("programada para el cierre: avisa a qué aseguradora saldrá", () => {
 		expect(
-			avisoFacturaSubida({ enviada: false, motivo: "x", alCerrar: true }),
+			avisoFacturaSubida({
+				enviada: false,
+				motivo: "x",
+				programada: { aseguradora: "gyt" },
+			}),
 		).toEqual({
 			tipo: "info",
 			texto:
-				"Documento guardado. Se enviará a la aseguradora cuando la oportunidad quede ganada al 90%.",
+				"Factura programada: se enviará a Seguros G&T al confirmar los contratos.",
 		});
 	});
 

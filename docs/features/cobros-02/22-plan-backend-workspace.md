@@ -257,4 +257,5 @@ Lo que el review afirma y se confirmó: 12 guardas `assertAccesoCasoCobro` en `4
 - W3: Jurídico como equipo no recibe aviso propio ni tiene bandeja; hoy solo lo ven los supervisores y el asesor.
 - W4: la regla «abono de hoy» (ver arriba) y, si cambia, la ventana de días.
 - W4: reutilizar el abono de un convenio anulado en otro convenio. Hoy no; recomiendo que siga así.
+- W4: pasar un crédito a INCOBRABLE (`/creditAction`) o resetearlo (`/resetCredit`) con un convenio vivo. Ambos ponen en cero los `*_restante` y la mora de los pagos sin cerrar, incluido un abono parcial. El abono conserva lo que se validó al crear el convenio (validación, monto, fecha, `paymentFalse = false`), pero el convenio queda sin cancelar. Es del ciclo de vida del crédito, no del abono: falta decidir si esas acciones deben exigir anular el convenio antes.
 - Nombre del cliente en los avisos: `clienteDelCaso` (CB-043, rebaja y Jurídico) usa `clients.contact_person`, y las bandejas usan `leads`. Hay que elegir una sola fuente. Cambiarla cambia el texto de los avisos ya existentes.

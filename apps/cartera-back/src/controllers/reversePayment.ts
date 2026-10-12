@@ -1310,6 +1310,7 @@ export function createReversePayment(
     const errorMessage = caughtErrorMessage(error);
     const terminal = classifyPaymentReversalFailure({
       errorMessage,
+      abonoInicialRechazado: error instanceof RechazoAbonoInicial,
       transactionCommitted,
       mayHaveGlobalPersistence,
       previousPaymentState,

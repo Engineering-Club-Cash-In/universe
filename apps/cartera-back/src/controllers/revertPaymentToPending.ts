@@ -479,7 +479,9 @@ export function createRevertPaymentToPending(
   } catch (error: any) {
     const reasonCode = error instanceof RevertPaymentCreditRejection
       ? error.reasonCode
-      : error?.message === "Payment not found"
+      : error instanceof RechazoAbonoInicial
+        ? "state_conflict"
+        : error?.message === "Payment not found"
         ? "payment_not_found"
         : error?.message === "Credit not found or not active"
           ? "credit_not_found"

@@ -66,6 +66,44 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     });
   });
 
+  // Codex: un rechazo de negocio previsto no es una falla; la telemetría lo clasifica
+  // `rejected` (state_conflict) y no `failed`/`unknown`, para no ensuciar métricas ni alertas.
+  test("reversePayment emite la telemetría como rejected, no failed", async () => {
+    const lines: string[] = [];
+    const handler = createReversePayment({
+      withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      runTransaction: async () => {
+        throw rechazoReversaAbonoInicial(convenioDelAbono);
+      },
+    } as unknown as Parameters<typeof createReversePayment>[0]);
+    await handler({
+      body,
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ environment: "staging", sink: (line) => lines.push(line) }),
+    });
+
+    const registro = JSON.parse(lines[0] ?? "{}");
+    expect(registro.outcome).toBe("rejected");
+    expect(registro.reason_code).toBe("state_conflict");
+    expect(registro.error_code).toBeUndefined();
+  });
+
+  test("revertPaymentToPending emite rejected con state_conflict, no failed/unknown", async () => {
+    const emitidos: any[] = [];
+    const handler = createRevertPaymentToPending({
+      withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      runTransaction: async () => {
+        throw rechazoReversaAbonoInicial(convenioDelAbono);
+      },
+      emitTerminal: (r: unknown) => emitidos.push(r),
+    } as unknown as Parameters<typeof createRevertPaymentToPending>[0]);
+    await handler({ body, set: { status: 0 } });
+
+    expect(emitidos).toHaveLength(1);
+    expect(emitidos[0].outcome).toBe("rejected");
+    expect(emitidos[0].reasonCode).toBe("state_conflict");
+  });
+
   // El guard es la PRIMERA lectura de la transacción: si un convenio vivo sostiene
   // el abono, corta antes de cualquier escritura. El `tx` falso falla si se escribe.
   test("reversePayment: el guard corta antes de escribir y responde 409", async () => {

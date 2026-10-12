@@ -1,11 +1,12 @@
 /**
  * Servicio para mapear datos del CRM al formato de legal-docs-blueprints
  */
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { creditChecks } from "../db/schema/checks";
 import { companies, leads, opportunities } from "../db/schema/crm";
 import { investors } from "../db/schema/investments";
+import { quotations } from "../db/schema/quotations";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
@@ -37,7 +38,6 @@ import {
 	toUpperCase,
 } from "../lib/contract-utils";
 import type { InsuranceProvider } from "../lib/insurance-selection";
-import { getLatestApprovedQuotation } from "./close-opportunity";
 
 // Tipos de contratos disponibles
 // Solo incluir tipos que existen en legal-docs-blueprints API
@@ -746,7 +746,18 @@ export async function aseguradoraDeLaOportunidad(
 	opportunityId: string,
 	deLaOportunidad?: string | null,
 ): Promise<InsuranceProvider> {
-	const cotizacion = await getLatestApprovedQuotation(opportunityId);
+	// Directo y no con `getLatestApprovedQuotation`, que se traga los errores y
+	// devuelve null: acá un error tiene que cortar. Si no, una venta con G&T
+	// caería en la Universales por defecto y se emitiría la carta equivocada.
+	const [cotizacion] = await db
+		.select({ insuranceProvider: quotations.insuranceProvider })
+		.from(quotations)
+		.where(eq(quotations.opportunityId, opportunityId))
+		.orderBy(
+			desc(eq(quotations.status, "accepted")),
+			desc(quotations.createdAt),
+		)
+		.limit(1);
 	if (cotizacion?.insuranceProvider || deLaOportunidad !== undefined) {
 		return normalizarAseguradora(
 			cotizacion?.insuranceProvider ?? deLaOportunidad,

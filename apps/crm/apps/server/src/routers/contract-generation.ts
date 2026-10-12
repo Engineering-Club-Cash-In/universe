@@ -2970,7 +2970,11 @@ async function callLegalDocsApi(
 			pagare: "pagare_unico_libre_protesto",
 			reconocimiento_deuda: "reconocimiento_deuda_feb_2025",
 			contrato_gps: "carta_aceptacion_instalacion_gps",
-			contrato_seguro: "cobertura_inrexsa",
+			// La carta de la aseguradora de la cotización: con G&T, la de G&T.
+			contrato_seguro:
+				data.oportunidad.aseguradora === "gyt"
+					? "cobertura_gyt"
+					: "cobertura_inrexsa",
 			declaracion_jurada: "declaracion_vendedor",
 			acta_entrega: "descargo_responsabilidades",
 			carta_compromiso: "carta_carro_nuevo",

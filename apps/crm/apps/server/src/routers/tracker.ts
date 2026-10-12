@@ -1031,7 +1031,7 @@ export async function enviarFacturaProgramada(
 					recipients: destinatarios,
 					correoAsunto: correo.asunto,
 					correoHtml: correo.html,
-					createdAt: reservadoAt,
+					// createdAt queda como la fecha en que se subió la factura.
 					updatedAt: reservadoAt,
 				})
 				.where(eq(insuranceInvoiceSubmissions.id, programada.id));

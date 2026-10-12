@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	AlertTriangle,
 	ArrowLeft,
+	Building2,
 	Eye,
 	FileSignature,
 	Loader2,
@@ -193,6 +194,7 @@ function RouteComponent() {
 		() => (aseguradora ? coberturasQueNoCorresponden(aseguradora) : undefined),
 		[aseguradora],
 	);
+	const sociedad = previewQuery.data?.oportunidad.sociedad;
 
 	// Redirect if no permissions
 	if (!isLoadingPermissions && !canViewLegal) {
@@ -309,6 +311,7 @@ function RouteComponent() {
 							dpi: null,
 							email: opportunity.lead.email,
 							phone: null,
+							clientType: opportunity.lead.clientType,
 						}
 					: null,
 				stage: opportunity.stage,
@@ -583,7 +586,18 @@ function RouteComponent() {
 					<CardHeader>
 						<div className="flex items-center justify-between">
 							<div>
-								<CardTitle>Generación de Documentos Legales</CardTitle>
+								<div className="flex items-center gap-2">
+									<CardTitle>Generación de Documentos Legales</CardTitle>
+									{sociedad?.esSociedad && (
+										<Badge
+											variant="outline"
+											className="gap-1 border-primary/40 bg-primary/10 text-primary"
+										>
+											<Building2 />
+											Sociedad
+										</Badge>
+									)}
+								</div>
 								<CardDescription>
 									Seleccione los documentos a generar. Los datos serán
 									pre-llenados automáticamente con la información del CRM.
@@ -598,6 +612,14 @@ function RouteComponent() {
 								Ver detalle de la oportunidad
 							</Button>
 						</div>
+						{sociedad?.faltaRepresentante && (
+							<div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 text-sm dark:text-amber-400">
+								La oportunidad es de una sociedad y no tiene marcado a su
+								representante legal, que es quien firma los contratos. Marcalo
+								en los co-firmantes de la oportunidad (Ver detalle de la
+								oportunidad → Co-firmantes).
+							</div>
+						)}
 					</CardHeader>
 					<CardContent>
 						<DynamicContractWizard
@@ -633,7 +655,12 @@ function RouteComponent() {
 			{/* Modal de detalle de oportunidad */}
 			<OpportunityDetailModal
 				open={isOpportunityModalOpen}
-				onOpenChange={setIsOpportunityModalOpen}
+				onOpenChange={(abierto) => {
+					setIsOpportunityModalOpen(abierto);
+					// Desde ahí se marca al representante: el aviso de sociedad se
+					// actualiza al volver.
+					if (!abierto && validation?.isValid) previewQuery.refetch();
+				}}
 				opportunity={selectedOpportunity}
 				userRole="juridico"
 				readOnly

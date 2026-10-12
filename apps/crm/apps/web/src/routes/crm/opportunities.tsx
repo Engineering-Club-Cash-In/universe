@@ -3066,6 +3066,7 @@ function RouteComponent() {
 								<CoDebtorsView
 									opportunityId={selectedOpportunity.id}
 									opportunity={selectedOpportunity}
+									clientType={selectedOpportunity.lead?.clientType}
 								/>
 							</TabsContent>
 

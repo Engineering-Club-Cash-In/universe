@@ -4,7 +4,7 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { creditChecks } from "../db/schema/checks";
-import { companies, leads, opportunities } from "../db/schema/crm";
+import { coDebtors, companies, leads, opportunities } from "../db/schema/crm";
 import { investors } from "../db/schema/investments";
 import { quotations } from "../db/schema/quotations";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
@@ -38,6 +38,11 @@ import {
 	toUpperCase,
 } from "../lib/contract-utils";
 import type { InsuranceProvider } from "../lib/insurance-selection";
+import {
+	codeudoresDeMas,
+	esOportunidadDeSociedad,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
 
 // Tipos de contratos disponibles
 // Solo incluir tipos que existen en legal-docs-blueprints API
@@ -258,6 +263,17 @@ export interface ContractData {
 		 * al cerrarse, y en 80% todavía tiene la de por defecto.
 		 */
 		aseguradora: InsuranceProvider;
+		/**
+		 * Si es de una sociedad y quién firma por ella (ver
+		 * `lib/oportunidad-de-sociedad.ts`). Los contratos de sociedad no llevan
+		 * codeudores: `codeudoresDeMas` son los que no caben.
+		 */
+		sociedad: {
+			esSociedad: boolean;
+			representante: { id: string; nombre: string; dpi: string } | null;
+			faltaRepresentante: boolean;
+			codeudoresDeMas: number;
+		};
 	};
 }
 
@@ -644,6 +660,21 @@ export async function mapOpportunityToContractData(
 					.limit(1)
 			: [];
 
+	// Sociedad: la empresa es el lead y su representante legal, un codeudor.
+	const codeudores = await db
+		.select({
+			id: coDebtors.id,
+			fullName: coDebtors.fullName,
+			dpi: coDebtors.dpi,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const deSociedad = { clientType: lead.clientType, coDeudores: codeudores };
+	const esSociedad = esOportunidadDeSociedad(deSociedad);
+	const representante = esSociedad ? representanteLegalDe(deSociedad) : null;
+
 	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
 	// reconoce como sociedad solo después de formatearlo, y si no el contrato
 	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
@@ -731,6 +762,18 @@ export async function mapOpportunityToContractData(
 			tipoCredito: opportunity.creditType || "autocompra",
 			categoria: opportunity.categoria || undefined,
 			aseguradora,
+			sociedad: {
+				esSociedad,
+				representante: representante
+					? {
+							id: representante.id,
+							nombre: representante.fullName,
+							dpi: representante.dpi,
+						}
+					: null,
+				faltaRepresentante: esSociedad && !representante,
+				codeudoresDeMas: codeudoresDeMas(deSociedad).length,
+			},
 		},
 	};
 }

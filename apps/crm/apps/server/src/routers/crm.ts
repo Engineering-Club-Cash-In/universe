@@ -12,6 +12,7 @@ import {
 	isNull,
 	lt,
 	lte,
+	ne,
 	not,
 	or,
 	sql,
@@ -670,6 +671,30 @@ function firmaBitacoraBuro(
 			.map((fila) => `${fila.coDebtorId}:${fila.dpi}:${fila.buro?.id ?? ""}`)
 			.sort(),
 	});
+}
+
+/**
+ * Le quita la marca de representante legal a los co-deudores de la
+ * oportunidad, menos a `salvo`. Va ANTES de marcar a otro: el índice único
+ * (`co_debtors_representante_legal_uq`) no admite dos marcados ni por un
+ * instante. El llamador ya tiene tomada la oportunidad con FOR UPDATE, así dos
+ * marcas a la vez se ordenan y gana la última en vez de chocar con el índice.
+ */
+async function quitarMarcaDeRepresentante(
+	tx: Transaction,
+	opportunityId: string,
+	salvo?: string,
+): Promise<void> {
+	await tx
+		.update(coDebtors)
+		.set({ esRepresentanteLegal: false, updatedAt: new Date() })
+		.where(
+			and(
+				eq(coDebtors.opportunityId, opportunityId),
+				eq(coDebtors.esRepresentanteLegal, true),
+				salvo ? ne(coDebtors.id, salvo) : undefined,
+			),
+		);
 }
 
 export const crmRouter = {
@@ -2407,6 +2432,8 @@ export const crmRouter = {
 					departamento: leads.departamento,
 					municipio: leads.municipio,
 					zona: leads.zona,
+					// Una empresa como lead hace que la oportunidad sea de sociedad
+					clientType: leads.clientType,
 				},
 				stage: {
 					id: salesStages.id,
@@ -9492,6 +9519,7 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				occupation: z.enum(["owner", "employee"]).optional(),
 				notes: z.string().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -9554,6 +9582,12 @@ export const crmRouter = {
 					throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
 				}
 
+				// Uno solo por oportunidad: el nuevo representante le quita la marca
+				// al anterior. Bajo el candado de la oportunidad tomado arriba.
+				if (input.esRepresentanteLegal) {
+					await quitarMarcaDeRepresentante(tx, input.opportunityId);
+				}
+
 				const creado = await tx
 					.insert(coDebtors)
 					.values({
@@ -9569,6 +9603,7 @@ export const crmRouter = {
 						phone: input.phone,
 						occupation: input.occupation,
 						notes: input.notes,
+						esRepresentanteLegal: input.esRepresentanteLegal ?? false,
 					})
 					.returning();
 				const marcadas = await tx
@@ -9591,6 +9626,16 @@ export const crmRouter = {
 					entity: "opportunity",
 					id: input.opportunityId,
 					action: "habilitar_buro_revalidacion_30",
+					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
+				});
+			}
+			// Quién firma por la empresa decide quién firma los contratos: queda en
+			// la bitácora de la oportunidad, como las demás decisiones sobre ella.
+			if (newCoDebtor.esRepresentanteLegal) {
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "marcar_representante_legal",
 					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
 				});
 			}
@@ -9626,10 +9671,12 @@ export const crmRouter = {
 				score: z.string().nullable().optional(),
 				fit: z.boolean().nullable().optional(),
 				scoredAt: z.date().nullable().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, ...updateData } = input;
+			// La marca de representante no va con el resto: ver más abajo.
+			const { id, esRepresentanteLegal, ...updateData } = input;
 
 			// Igual que en `updateLead`: el override se anota después de confirmar
 			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
@@ -9771,6 +9818,23 @@ export const crmRouter = {
 						.where(eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId))
 						.for("update");
 				}
+				// La marca de representante es una por oportunidad: también se toma
+				// SU oportunidad antes de tocar a los co-deudores, para que dos marcas
+				// a la vez se ordenen en vez de chocar con el índice único.
+				if (esRepresentanteLegal !== undefined) {
+					const [actual] = await tx
+						.select({ opportunityId: coDebtors.opportunityId })
+						.from(coDebtors)
+						.where(eq(coDebtors.id, id))
+						.limit(1);
+					if (actual) {
+						await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(eq(opportunities.id, actual.opportunityId))
+							.for("update");
+					}
+				}
 
 				const filas = await tx
 					.update(coDebtors)
@@ -9821,6 +9885,37 @@ export const crmRouter = {
 							data: { origen: "updateCoDebtor", coDebtorId: id },
 						});
 					}
+				}
+
+				// La marca va DESPUÉS de confirmar la fila y en su propio UPDATE: con
+				// otro co-deudor marcado, escribirla junto con el resto chocaba con el
+				// índice único, y quitársela al otro antes de saber si esta fila se
+				// escribe podía dejar la oportunidad sin representante. No pasa por
+				// los candados del DPI: no cambia la identidad de nadie, y jurídico la
+				// corrige con la oportunidad ya en 80%.
+				const [coDeudor] = filas;
+				if (
+					esRepresentanteLegal !== undefined &&
+					coDeudor.esRepresentanteLegal !== esRepresentanteLegal
+				) {
+					if (esRepresentanteLegal) {
+						await quitarMarcaDeRepresentante(tx, coDeudor.opportunityId, id);
+					}
+					const conLaMarca = await tx
+						.update(coDebtors)
+						.set({ esRepresentanteLegal })
+						.where(eq(coDebtors.id, id))
+						.returning();
+					// Quién firma por la empresa decide quién firma los contratos.
+					auditRecord({
+						entity: "opportunity",
+						id: coDeudor.opportunityId,
+						action: esRepresentanteLegal
+							? "marcar_representante_legal"
+							: "desmarcar_representante_legal",
+						data: { origen: "updateCoDebtor", coDebtorId: id },
+					});
+					return conLaMarca;
 				}
 
 				return filas;

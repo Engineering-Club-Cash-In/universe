@@ -291,8 +291,8 @@ function firmaDelGenerador(apiResponse: unknown): {
  * para la subida manual se arma acá, porque lo único que manda jurídico es el
  * archivo y el tipo de contrato.
  *
- * Con `subidaAMano`, si el cliente es una sociedad firma su representante (el
- * primer codeudor) y no la sociedad: ver `armarFirmantes`.
+ * Con `subidaAMano`, si la oportunidad es de una sociedad firma su
+ * representante legal y no la sociedad: ver `armarFirmantes`.
  */
 export async function firmantesDeLaOportunidad(
 	opportunityId: string,
@@ -320,8 +320,7 @@ export async function firmantesDeLaOportunidad(
 		.join(" ");
 
 	// Orden estable: el reparto de correos de prueba es posicional, así que los
-	// dos lados tienen que recorrer los codeudores en el mismo orden. Y en una
-	// sociedad, el primero registrado es su representante.
+	// dos lados tienen que recorrer los codeudores en el mismo orden.
 	const cofirmantes = await db
 		.select()
 		.from(coDebtors)
@@ -332,12 +331,14 @@ export async function firmantesDeLaOportunidad(
 		const signers = armarFirmantes({
 			titular: { email: lead.email, name: nombreTitular, dpi: lead.dpi },
 			codeudores: cofirmantes.map((cd) => ({
+				id: cd.id,
+				esRepresentanteLegal: cd.esRepresentanteLegal,
 				email: cd.email,
 				name: cd.fullName,
 				dpi: cd.dpi,
 			})),
-			sociedadFirmaPorSuRepresentante:
-				Boolean(opciones.subidaAMano) && lead.clientType === "empresa",
+			clientType: lead.clientType,
+			sociedadFirmaPorSuRepresentante: Boolean(opciones.subidaAMano),
 		});
 		return { leadId: lead.id, signers };
 	} catch (error) {

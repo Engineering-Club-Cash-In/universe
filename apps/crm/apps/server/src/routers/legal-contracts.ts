@@ -1597,6 +1597,12 @@ export const legalContractsRouter = {
 				return closeResult;
 			});
 
+			// La factura del seguro subida desde el CRM antes del cierre sale sola
+			// ahora que la oportunidad quedó ganada al 90%. Antes de lo que puede
+			// fallar después del commit (si no, no se volvería a disparar). Sin
+			// esperar y nunca lanza: un correo caído no rompe la confirmación.
+			void enviarFacturaSubidaAntes(input.opportunityId, context.userId);
+
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({
 				titulo: `Contratos firmados - ${opportunity.title}`,
@@ -1609,11 +1615,6 @@ export const legalContractsRouter = {
 				relatedEntityId: input.opportunityId,
 				redirectPage: "analysis_90_details",
 			});
-
-			// La factura del seguro subida desde el CRM antes del cierre sale sola
-			// ahora que la oportunidad quedó ganada al 90%. Sin esperar y nunca
-			// lanza: un correo caído no puede romper la confirmación.
-			void enviarFacturaSubidaAntes(input.opportunityId, context.userId);
 
 			// Bienvenida al cliente con su cuenta Nexa (y el documento del seguro,
 			// apagado por env). Sin esperar: un WhatsApp o Nexa caídos no pueden

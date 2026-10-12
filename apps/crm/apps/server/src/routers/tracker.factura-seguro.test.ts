@@ -1239,6 +1239,21 @@ describe("factura subida antes del cierre", () => {
 		expect(correos).toHaveLength(1);
 	});
 
+	test("si la oportunidad ya pasó al 100% mientras tanto, el envío del cierre termina igual", async () => {
+		caso = casoAl(100);
+		documentosRegistrados = [
+			{
+				id: "doc-antes",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+				mimeType: "application/pdf",
+			},
+		];
+		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toMatchObject({
+			enviada: true,
+		});
+	});
+
 	test("sin factura subida antes, o con una ya registrada, no manda nada", async () => {
 		caso = casoAl(90);
 		expect(await enviarFacturaSubidaAntes(ID, "crm-1")).toBeNull();

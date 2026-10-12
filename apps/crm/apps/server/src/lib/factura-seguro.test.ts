@@ -376,16 +376,39 @@ describe("nombreDeFactura", () => {
 	});
 });
 
+// ZIP mínimo pero bien formado (sin comprimir), con su directorio central.
+function zipConEntradas(nombres: string[]): Uint8Array {
+	const locales: Buffer[] = [];
+	const centrales: Buffer[] = [];
+	let desplazamiento = 0;
+	for (const nombre of nombres) {
+		const n = Buffer.from(nombre);
+		const local = Buffer.alloc(30);
+		local.writeUInt32LE(0x04034b50, 0);
+		local.writeUInt16LE(n.length, 26);
+		const central = Buffer.alloc(46);
+		central.writeUInt32LE(0x02014b50, 0);
+		central.writeUInt16LE(n.length, 28);
+		central.writeUInt32LE(desplazamiento, 42);
+		locales.push(local, n);
+		centrales.push(central, n);
+		desplazamiento += 30 + n.length;
+	}
+	const directorio = Buffer.concat(centrales);
+	const fin = Buffer.alloc(22);
+	fin.writeUInt32LE(0x06054b50, 0);
+	fin.writeUInt16LE(nombres.length, 8);
+	fin.writeUInt16LE(nombres.length, 10);
+	fin.writeUInt32LE(directorio.length, 12);
+	fin.writeUInt32LE(desplazamiento, 16);
+	return new Uint8Array(Buffer.concat([...locales, directorio, fin]));
+}
+
 describe("tipoPermitidoDesdeCrm", () => {
 	const DOCX =
 		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 	const zipDe = (entrada: string) =>
-		new Uint8Array(
-			Buffer.concat([
-				Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-				Buffer.from(`[Content_Types].xml ${entrada}`),
-			]),
-		);
+		zipConEntradas(["[Content_Types].xml", entrada]);
 	const zip = zipDe("word/document.xml");
 	const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 	const avif = new Uint8Array([
@@ -406,14 +429,19 @@ describe("tipoPermitidoDesdeCrm", () => {
 			"application/msword",
 		);
 		expect(tipoPermitidoDesdeCrm(zip, "application/msword")).toBeNull();
-		// Un Excel declarado como Word, o un ZIP sin manifiesto de Office, no.
+		// Un Excel declarado como Word, un ZIP sin manifiesto de Office, o bytes
+		// que solo nombran las entradas sin ser un ZIP de verdad: no.
 		expect(tipoPermitidoDesdeCrm(zipDe("xl/workbook.xml"), DOCX)).toBeNull();
 		expect(
-			tipoPermitidoDesdeCrm(
-				new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x61, 0x62]),
-				DOCX,
-			),
+			tipoPermitidoDesdeCrm(zipConEntradas(["word/document.xml"]), DOCX),
 		).toBeNull();
+		const falso = new Uint8Array(
+			Buffer.concat([
+				Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+				Buffer.from("[Content_Types].xml word/document.xml"),
+			]),
+		);
+		expect(tipoPermitidoDesdeCrm(falso, DOCX)).toBeNull();
 	});
 
 	test("un HTML declarado como PDF o como Word no pasa", () => {

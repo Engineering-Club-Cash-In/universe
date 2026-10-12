@@ -23,7 +23,10 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
-import { coberturasQueNoCorresponden } from "../lib/cobertura-por-aseguradora";
+import {
+	coberturasQueNoCorresponden,
+	esCartaDeCobertura,
+} from "../lib/cobertura-por-aseguradora";
 import {
 	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 	resolveLegacyContractGender,
@@ -1472,6 +1475,18 @@ export const contractGenerationRouter = {
 						},
 					};
 				});
+
+				// La carta de cobertura depende de la aseguradora de la cotización, y
+				// sin la oportunidad no hay de dónde leerla: no se emite a ciegas.
+				if (
+					!input.opportunityId &&
+					input.contracts.some((c) => esCartaDeCobertura(c.contractType))
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Las cartas de cobertura se generan desde la oportunidad: hace falta la aseguradora de su cotización.",
+					});
+				}
 
 				// Las cartas van en un solo documento. Se agrupa acá, antes de pedir
 				// nada, y los resultados se emparejan contra ESTA lista: el

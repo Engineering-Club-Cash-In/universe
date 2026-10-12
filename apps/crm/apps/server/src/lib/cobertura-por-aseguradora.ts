@@ -47,3 +47,10 @@ export function coberturasQueNoCorresponden(
 	}
 	return deshabilitadas;
 }
+
+/** Si el tipo es una carta de cobertura, de cualquier aseguradora. */
+export function esCartaDeCobertura(contractType: string): boolean {
+	return Object.values(COBERTURAS_POR_ASEGURADORA).some((coberturas) =>
+		coberturas.includes(contractType),
+	);
+}

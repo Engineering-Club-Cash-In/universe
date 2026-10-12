@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	coberturasQueNoCorresponden,
+	esCartaDeCobertura,
 	normalizarAseguradora,
 } from "./cobertura-por-aseguradora";
 import { esCartaUnificable } from "./paquete-cartas";
@@ -29,5 +30,13 @@ describe("cobertura según la aseguradora", () => {
 
 	test("la de G&T va unida con las demás cartas", () => {
 		expect(esCartaUnificable("cobertura_gyt")).toBe(true);
+	});
+});
+
+describe("qué es una carta de cobertura", () => {
+	test("las de las dos aseguradoras sí, lo demás no", () => {
+		expect(esCartaDeCobertura("cobertura_gyt")).toBe(true);
+		expect(esCartaDeCobertura("cobertura_inrexsa_comercial")).toBe(true);
+		expect(esCartaDeCobertura("garantia_mobiliaria")).toBe(false);
 	});
 });

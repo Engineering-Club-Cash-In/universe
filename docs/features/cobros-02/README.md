@@ -56,6 +56,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 19 | [Vinculación de la flota con Wialon](./19-vinculacion-flota-wialon.md) | Script que vincula todos los vehículos del CRM con su unidad de Wialon por placa y VIN: criterio, desempate de duplicados por crédito vigente, cómo correrlo de forma segura, resultados y por qué no se vincula el resto |
 | 20 | [Dashboard del asesor · plan y avance del backend](./20-plan-backend-asesor.md) | Issue #1862: decisiones de negocio y estado de B2–B10 (recuperación y metas por asesor, deuda vencida real, orden por bucket del motor, pagos por confirmar, referencias, hora del próximo contacto, movimiento en vivo) |
 | 21 | [Ficha 360 · plan y avance del backend](./21-plan-backend-ficha-360.md) | Issue #1864: decisiones y estado de F1–F8 (datos personales, codeudores, historial de cambios, vida del crédito, seguro, documentos, asistente IA y edición de direcciones) |
+| 23 | [Supervisión de cobros · plan y avance del backend](./23-plan-backend-supervision.md) | Issue #1891: decisiones y estado de S1–S6 (KPIs del equipo, pendientes, sin contacto, filtros de la Cartera general y reasignación en bloque) |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

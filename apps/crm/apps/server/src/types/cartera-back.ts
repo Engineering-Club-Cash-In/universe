@@ -669,6 +669,8 @@ export interface CreateConvenioInput {
 	reason?: string;
 	observations?: string;
 	created_by_email: string;
+	/** COBROS-02 W4: pago del abono inicial, ya validado por contabilidad y de hoy. */
+	abono_inicial_pago_id?: number;
 }
 
 /**

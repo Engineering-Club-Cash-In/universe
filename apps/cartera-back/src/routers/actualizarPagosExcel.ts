@@ -31,11 +31,14 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito, rubros_pagos } from "../database/db";
 import { authMiddleware } from "./midleware";
+import { pagosConAbonoInicialVivo, rechazoLoteAbonoInicial, rechazoLoteCreditosOcupados } from "../controllers/abonoInicialConvenio";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
+import { PAYMENT_ADVISORY_LOCK_NAMESPACE } from "../utils/paymentAdvisoryLock";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import {
   descargarCarteraDeR2,
@@ -373,6 +376,10 @@ export const actualizarPagosExcelRouter = new Elysia()
         for (const fila of conRubros) pagosQueCobranRubros.add(fila.pago_id);
       }
 
+      // 🛡️ Abono inicial de un convenio vivo (COBROS-02 W4): su monto, fecha y estado son lo que
+      // se validó al crear el convenio. Se protege la cuota ENTERA, igual que con los rubros.
+      const pagosAbonoInicial = await pagosConAbonoInicialVivo(db, todosLosPagoIds);
+
       for (const sifcoRaw of lista) {
         const sifco = String(sifcoRaw);
         const d = datosCredito.get(sifco)!;
@@ -450,6 +457,23 @@ export const actualizarPagosExcelRouter = new Elysia()
             return;
           }
           
+          const pagosConConvenio = cuota.pagos
+            .map((pago) => pago.pago_id)
+            .filter((id) => pagosAbonoInicial.has(id));
+          if (pagosConConvenio.length > 0) {
+            const item = {
+              numero_credito_sifco: sifco,
+              numero_cuota: cuota.numero_cuota,
+              fecha_vencimiento: cuota.fecha_vencimiento,
+              mes_excel: excel.mes,
+              pago_ids: pagosConConvenio,
+              motivo: "abono_inicial_de_convenio",
+            };
+            protegidas.push(item);
+            cambiosCredito.push({ ...item, protegida: true, pagos: 0 });
+            return;
+          }
+
           if (debeProtegerCuota(excel, cuota.pagos)) {
             const item = {
               numero_credito_sifco: sifco,
@@ -542,15 +566,46 @@ export const actualizarPagosExcelRouter = new Elysia()
         };
       }
 
+      // Créditos con al menos un pago que SE VA A ESCRIBIR. No todos los pedidos: uno omitido,
+      // protegido o sin cambios no se toca, y bloquearlo haría que cualquier operación ajena sobre
+      // él abortara el lote entero (y gastaría consultas de lock de más).
+      const creditoDelPago = new Map<number, number>();
+      for (const d of datosCredito.values()) {
+        for (const c of d.cuotasPagadas) for (const p of c.pagos) creditoDelPago.set(p.pago_id, d.credito_id);
+        for (const id of d.cuotaCeroPagoIds) creditoDelPago.set(id, d.credito_id);
+      }
+      const creditosDelLote = updatesGlobal
+        .map((u) => creditoDelPago.get(u.pago_id))
+        .filter((id): id is number => id !== undefined && id > 0);
+
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
       try {
         await db.transaction(async (tx) => {
+          // 🔒 El MISMO candado de pagos por crédito que toman `createPaymentAgreement`, las reversas
+          // y las ediciones (namespace 8765), tomado como lock de la transacción y SIN ESPERAR
+          // (`pg_try_advisory_xact_lock`): `paymentAdvisoryLock.ts` prohíbe esperar este lock con
+          // conexiones de `db` (el que espera puede agotar el pool y dejar sin conexión al dueño),
+          // y un lock por crédito en `lockPool` agotaría sus 10 conexiones con un lote largo. Si
+          // algún crédito está ocupado el lote entero aborta y se reintenta. Se toman TODOS antes
+          // de escribir; se sueltan solos al terminar. Sin esto, un convenio podía crearse entre el
+          // re-chequeo y el UPDATE (READ COMMITTED no lo impide).
+          const ocupados: number[] = [];
+          for (const creditoId of [...new Set(creditosDelLote)].sort((a, b) => a - b)) {
+            const r = await tx.execute(
+              sql`SELECT pg_try_advisory_xact_lock(${PAYMENT_ADVISORY_LOCK_NAMESPACE}, ${creditoId}) AS tomado`,
+            );
+            if (!(r.rows?.[0] as { tomado?: boolean } | undefined)?.tomado) ocupados.push(creditoId);
+          }
+          if (ocupados.length > 0) throw rechazoLoteCreditosOcupados(ocupados);
+          // Re-chequeo ya bajo los candados: un convenio creado antes de ellos se ve aquí y aborta todo.
+          const vivos = await pagosConAbonoInicialVivo(tx as unknown as typeof db, updatesGlobal.map((u) => u.pago_id));
+          if (vivos.size > 0) throw rechazoLoteAbonoInicial(vivos);
           for (const { pago_id, datos } of updatesGlobal) {
             await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
           }
         });
       } catch (e: any) {
-        set.status = 500;
+        set.status = e instanceof RechazoAbonoInicial ? e.status : 500;
         return {
           success: false,
           abortado: true,

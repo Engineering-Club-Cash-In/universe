@@ -117,11 +117,26 @@ export function elegiblesParaConvenio(
 export function resolverPagoIdsDeCuotas(
 	elegibles: CuotaParaConvenio[],
 	cuotaIds: number[],
-): { pagoIds: number[]; faltantes: number[]; sinRecibo: number[] } {
+	/**
+	 * COBROS-02 W4: pago del abono inicial. Si fue parcial queda `pagado = false` en la misma
+	 * cuota que su recibo abierto, y mandar los dos ids hacía que cartera metiera la cuota dos
+	 * veces en el pivot del convenio (restantes duplicados). Se excluye de cada cuota que tenga
+	 * otro recibo. Si es el único de la cuota no hay recibo abierto al cual cobrar el convenio:
+	 * mandarlo haría que el primer pago del convenio sobrescriba el abono ya validado, así que la
+	 * cuota se reporta en `soloAbono` y el caller rechaza.
+	 */
+	excluirPagoId?: number,
+): {
+	pagoIds: number[];
+	faltantes: number[];
+	sinRecibo: number[];
+	soloAbono: number[];
+} {
 	const porId = new Map(elegibles.map((c) => [c.cuotaId, c]));
 	const pagoIds: number[] = [];
 	const faltantes: number[] = [];
 	const sinRecibo: number[] = [];
+	const soloAbono: number[] = [];
 	for (const cuotaId of [...new Set(cuotaIds)]) {
 		const cuota = porId.get(cuotaId);
 		if (!cuota) {
@@ -132,11 +147,19 @@ export function resolverPagoIdsDeCuotas(
 			sinRecibo.push(cuota.numeroCuota);
 			continue;
 		}
-		for (const pagoId of cuota.pagoIds) {
+		const sinAbono =
+			excluirPagoId === undefined
+				? cuota.pagoIds
+				: cuota.pagoIds.filter((id) => id !== excluirPagoId);
+		if (sinAbono.length === 0) {
+			soloAbono.push(cuota.numeroCuota);
+			continue;
+		}
+		for (const pagoId of sinAbono) {
 			if (!pagoIds.includes(pagoId)) pagoIds.push(pagoId);
 		}
 	}
-	return { pagoIds, faltantes, sinRecibo };
+	return { pagoIds, faltantes, sinRecibo, soloAbono };
 }
 
 /**

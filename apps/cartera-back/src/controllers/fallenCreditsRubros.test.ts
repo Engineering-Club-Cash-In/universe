@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import {
   creditos,
+  convenios_pago,
   creditos_caidos,
   cuotas_credito,
   pagos_credito,
@@ -40,6 +41,7 @@ const NOMBRES = new Map<unknown, string>([
   [pagos_credito, "pagos_credito"],
   [rubros, "rubros"],
   [creditos_caidos, "creditos_caidos"],
+  [convenios_pago, "convenios_pago"],
 ]);
 
 let eventos: string[] = [];
@@ -293,5 +295,41 @@ describe("marcarCreditoComoCaido — rubros con deuda viva", () => {
 
     expect(chequeo).toBeGreaterThan(lock);
     expect(chequeo).toBeLessThan(unlock);
+  });
+});
+
+describe("marcarCreditoComoCaido — abono inicial de un convenio vivo (COBROS-02 W4)", () => {
+  it("rechaza, nombra el convenio y no borra nada", async () => {
+    preparar([]);
+    filas.set(convenios_pago, [{ convenio_id: 7 }]);
+
+    const r = await marcar();
+
+    expect(r.success).toBe(false);
+    expect(r.message).toContain("convenio #7");
+    expect(eventos).not.toContain("delete:pagos_credito");
+    expect(eventos).not.toContain("delete:cuotas_credito");
+    expect(eventos).not.toContain("update:creditos");
+  });
+
+  it("la comprobación corre adentro del candado del crédito", async () => {
+    preparar([]);
+    filas.set(convenios_pago, [{ convenio_id: 7 }]);
+
+    await marcar();
+
+    const abre = eventos.indexOf("lock:9");
+    const lectura = eventos.indexOf("select:convenios_pago");
+    expect(lectura).toBeGreaterThan(abre);
+    expect(lectura).toBeLessThan(eventos.indexOf("unlock"));
+  });
+
+  it("sin convenio con abono, marcar CAIDO sigue funcionando", async () => {
+    preparar([]);
+
+    const r = await marcar();
+
+    expect(r.success).toBe(true);
+    expect(eventos).toContain("delete:pagos_credito");
   });
 });

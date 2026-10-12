@@ -9,7 +9,7 @@
  * esto es descartar lo que esa boleta particular había contribuido al histórico.
  */
 import { beforeEach, describe, expect, it } from "bun:test";
-import { pagos_credito, mora_pagada_cuota } from "../database/db/schema";
+import { convenios_pago, pagos_credito, mora_pagada_cuota } from "../database/db/schema";
 
 process.env.SUPABASE_DB_URL ??= "postgresql://nadie:nadie@127.0.0.1:1/ninguna";
 const { anularPagoYRestituirMora } = await import("./anularPagoMora");
@@ -54,6 +54,8 @@ const txFalso: any = {
       orderBy: () => b,
       for: () => ((candado = true), b),
       then: (res: any, rej: any) => {
+        // Guard del abono inicial de un convenio (COBROS-02 W4): sin convenio, y sin consumir la cola posicional.
+        if (tabla === convenios_pago) return Promise.resolve([]).then(res, rej);
         estado.llamadas.push({
           tabla,
           via: candado ? "select for update" : "select",

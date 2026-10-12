@@ -84,6 +84,7 @@ import {
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
 import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
+import { rechazoPorAbonoInicial } from "./abonoInicialConvenio";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -4771,6 +4772,10 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
       return { success: false, message: `Pago ${pago_id} no encontrado` };
     }
 
+    // COBROS-02 W4: el abono inicial de un convenio vivo no se re-aplica.
+    const bloqueoAbono = await rechazoPorAbonoInicial(db, pago_id);
+    if (bloqueoAbono) return { success: false, message: bloqueoAbono.message };
+
     // 2. Obtener restantes del pago
     const interes_restante = new Big(pago.interes_restante ?? 0);
     const iva_restante = new Big(pago.iva_12_restante ?? 0);
@@ -5098,6 +5103,11 @@ export async function editarPago(pago_id: number, campos: {
       if (!pago) {
         return { success: false, message: `Pago ${pago_id} no encontrado` };
       }
+
+      // COBROS-02 W4: lo que se validó al crear el convenio (monto, fecha, estado) no se edita
+      // mientras el convenio esté pendiente, vigente o completado.
+      const bloqueoAbono = await rechazoPorAbonoInicial(db, pago_id);
+      if (bloqueoAbono) return { success: false, message: bloqueoAbono.message };
 
       // 2. Construir objeto de update solo con los campos enviados
       const updateData: Record<string, any> = {};

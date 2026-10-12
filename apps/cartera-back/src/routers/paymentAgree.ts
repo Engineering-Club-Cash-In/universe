@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus, listPaymentAgreements, getConvenioCuotas, resolverPlatformUserIdPorEmail } from "../controllers/paymentAgreement";
 import { ConvenioDecisionError, decidirConvenio } from "../controllers/convenioDecision";
+import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { anularConvenio } from "../controllers/anularConvenio";
 import { db } from "../database";
 import { convenioDecisiones } from "../database/db/schema";
@@ -99,6 +100,10 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
         set.status = 201;
         return result;
       } catch (error) {
+        if (error instanceof RechazoAbonoInicial) {
+          set.status = error.status;
+          return { success: false, message: error.message, error: "abono_inicial_no_valido" };
+        }
         set.status = 500;
         return {
           success: false,
@@ -119,6 +124,8 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
         // `created_by_email` = correo de login (CRM, CB-032), se resuelve arriba.
         created_by: t.Optional(t.Number()),
         created_by_email: t.Optional(t.String({ minLength: 3 })),
+        // COBROS-02 W4: pago del abono inicial, ya validado y de hoy.
+        abono_inicial_pago_id: t.Optional(t.Number({ minimum: 1 })),
       }),
       detail: {
         summary: "Create payment agreement",

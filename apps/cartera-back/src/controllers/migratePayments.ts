@@ -4,6 +4,8 @@ import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { asegurarCuotasSinAbonoVivo, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } from "./abonoInicialConvenio";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
 
@@ -102,7 +104,9 @@ export const ajustarCuotasConSIFCO = async ({
   };
 
 
-  await db.transaction(async (tx) => {
+  // Bajo el candado de pagos del crédito: el recorte del calendario borra pagos y no puede
+  // correr en medio de la creación de un convenio que usa uno de ellos como abono inicial.
+  await withPaymentAdvisoryLock(credito.credito_id, () => db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
     const cuotasExcedentes = cuotasExistentes.filter(
       (c) => c.numero_cuota > plazo_completo
@@ -110,6 +114,9 @@ export const ajustarCuotasConSIFCO = async ({
 
     if (cuotasExcedentes.length > 0) {
       const cuotaIdsExcedentes = cuotasExcedentes.map(c => c.cuota_id);
+
+      // Antes de borrar nada: un pago de esas cuotas puede sostener un convenio vivo.
+      await asegurarCuotasSinAbonoVivo(tx as unknown as typeof db, cuotaIdsExcedentes);
 
       await tx
         .delete(pagos_credito)
@@ -236,7 +243,7 @@ export const ajustarCuotasConSIFCO = async ({
       })
     );
 
-  });
+  }));
 
   emitSifcoPaymentMigration({
     outcome: "completed",
@@ -450,7 +457,16 @@ export const marcarCuotasPagadasHastaNumero = async ({
   const cuotasParaActualizar: any[] = [];
   const pagosParaActualizar: any[] = [];
 
-  const persistedWriteCount = await db.transaction(async (tx) => {
+  // Bajo el candado de pagos del crédito (el de registrar/reversar/editar): un pago que
+  // sostiene un convenio vivo (abono inicial, COBROS-02 W4) no se reescribe, y la
+  // comprobación y las escrituras no se separan de un convenio que se crea en medio.
+  const persistedWriteCount = await withPaymentAdvisoryLock(credito.credito_id, () => db.transaction(async (tx) => {
+    const abonosDeConvenio = await pagosConAbonoInicialVivo(
+      tx as unknown as typeof db,
+      cuotasConPagos.map((row) => row.pago_id).filter((id): id is number => id != null),
+    );
+    if (abonosDeConvenio.size > 0) throw rechazoLoteAbonoInicial(abonosDeConvenio);
+
     for (const row of cuotasConPagos) {
       const esPagada = row.numero_cuota <= hasta_cuota;
 
@@ -580,7 +596,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
       ),
     ]);
     return countPersistedRows(updatedRows);
-  });
+  }));
 
   if (persistedWriteCount > 0) {
     try {

@@ -3474,6 +3474,12 @@ export const cobrosRouter = {
 				// alguna cuota tenía otro monto o la mora cambió entre medio
 				// (hallazgo de Codex, PR #1570).
 				montoTotal: z.number().positive(),
+				// COBROS-02 W4 (Workspace): pago del abono que el asesor registró hoy
+				// («Convenio flexible»). Es el `pago_id` que devuelve registrarPagoCompleto.
+				// Cartera lo acepta solo si contabilidad ya lo validó, es de hoy, es de
+				// este crédito y no sirvió a otro convenio. El `montoTotal` que llega ya
+				// es el remanente: el abono ya se aplicó como pago normal.
+				abonoInicialPagoId: z.number().int().positive().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3590,10 +3596,12 @@ export const cobrosRouter = {
 					credito.cuotasPendientes,
 				),
 			);
-			const { pagoIds, faltantes, sinRecibo } = resolverPagoIdsDeCuotas(
-				elegibles,
-				input.cuotaIds,
-			);
+			const { pagoIds, faltantes, sinRecibo, soloAbono } =
+				resolverPagoIdsDeCuotas(
+					elegibles,
+					input.cuotaIds,
+					input.abonoInicialPagoId,
+				);
 			if (faltantes.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
@@ -3603,6 +3611,11 @@ export const cobrosRouter = {
 			if (sinRecibo.length > 0) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Las cuotas ${sinRecibo.join(", ")} no tienen recibo en cartera y no pueden entrar al convenio. Repórtelo a contabilidad.`,
+				});
+			}
+			if (soloAbono.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Las cuotas ${soloAbono.join(", ")} solo tienen el recibo del abono inicial y no un recibo abierto al cual cobrar el convenio. Repórtelo a contabilidad.`,
 				});
 			}
 			if (pagoIds.length === 0) {
@@ -3637,6 +3650,7 @@ export const cobrosRouter = {
 					reason: input.motivo,
 					observations: input.observaciones || undefined,
 					created_by_email: email,
+					abono_inicial_pago_id: input.abonoInicialPagoId,
 				});
 			} catch (error) {
 				// Un 4xx de cartera trae el motivo de negocio en payload.message
@@ -3716,6 +3730,8 @@ export const cobrosRouter = {
 				// cobros_supervisor lo apruebe desde el CRM (CB-033) — reemplaza
 				// el paso de conta/admin en carteraFront.
 				pendienteActivacion: convenio.activo === false,
+				// W4: el abono que sostuvo el convenio (null si no hubo).
+				abonoInicialPagoId: input.abonoInicialPagoId ?? null,
 			};
 		}),
 

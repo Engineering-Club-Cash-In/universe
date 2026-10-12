@@ -21,7 +21,7 @@
  * la corrida.
  */
 import { beforeEach, describe, expect, it } from "bun:test";
-import { creditos, moras_historial, pagos_credito } from "../database/db/schema";
+import { convenios_pago, creditos, moras_historial, pagos_credito } from "../database/db/schema";
 import { MOTIVO_ANULACION_MORA_PREFIJO } from "../utils/motivoReversaMora";
 
 // El módulo arrastra `../database` (por `./latefee`), que exige la URL al
@@ -68,6 +68,8 @@ const textoDeCondicion = (cond: any) =>
     typeof v === "object" && v !== null && "table" in v ? "<col>" : v,
   );
 
+let convenioDelAbono: any[] = [];
+
 /** Un `tx` de drizzle lo bastante real para este camino. */
 const txFalso: any = {
   select: () => {
@@ -80,6 +82,8 @@ const txFalso: any = {
       orderBy: () => b,
       for: () => ((candado = true), b),
       then: (res: any, rej: any) => {
+        // Guard del abono inicial de un convenio (COBROS-02 W4): sin convenio, y sin consumir la cola posicional.
+        if (tabla === convenios_pago) return Promise.resolve(convenioDelAbono).then(res, rej);
         estado.llamadas.push({
           tabla,
           via: candado ? "select for update" : "select",
@@ -190,6 +194,7 @@ const PAGO_CON_MORA = [
 ];
 
 beforeEach(() => {
+  convenioDelAbono = [];
   estado.selects = [];
   estado.llamadas = [];
   estado.rowCount = 1;
@@ -293,6 +298,21 @@ describe("anular la boleta y restituir su mora", () => {
 
     await expect(anular()).rejects.toThrow("No payment found");
     expect(estado.rubrosRevertidos).toEqual([]);
+  });
+
+  it("COBROS-02 W4: si el pago es el abono inicial de un convenio vivo, rechaza con 409 antes de leer o escribir el pago", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+    convenioDelAbono = [{ convenio_id: 7, activo: true, completado: false }];
+
+    const error: any = await anular().catch((e) => e);
+
+    expect(error?.name).toBe("RechazoAbonoInicial");
+    expect(error.status).toBe(409);
+    expect(error.message).toContain("convenio #7");
+    expect(estado.llamadas.some((l) => l.via === "update" || l.via === "insert")).toBe(false);
+    expect(estado.llamadas.some((l) => l.tabla === pagos_credito)).toBe(false);
+    expect(estado.rubrosRevertidos).toEqual([]);
+    expect(estado.updateMoraArgs).toEqual([]);
   });
 
   it("lee la fila del pago CON CANDADO (dos anulaciones simultáneas leían las dos `false`)", async () => {

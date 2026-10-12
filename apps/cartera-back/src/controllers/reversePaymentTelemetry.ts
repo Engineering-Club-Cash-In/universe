@@ -7,6 +7,8 @@ type PreviousPaymentState = "applied" | "pending" | "unknown";
 
 interface PaymentReversalFailureInput {
   readonly errorMessage: string | undefined;
+  /** Rechazo de negocio por abono inicial de un convenio vivo (`RechazoAbonoInicial`): se decide por tipo, no por texto. */
+  readonly abonoInicialRechazado?: boolean;
   readonly transactionCommitted: boolean;
   readonly mayHaveGlobalPersistence: boolean;
   readonly previousPaymentState: PreviousPaymentState;
@@ -78,6 +80,9 @@ export function classifyPaymentReversalFailure(
     investmentsReversed: input.investmentsReversed,
     durationMs: input.durationMs,
   };
+  if (input.abonoInicialRechazado) {
+    return { outcome: "rejected", ...common, manualActionRequired: false, reasonCode: "state_conflict" };
+  }
   if (input.errorMessage === "Payment not found") {
     return { outcome: "rejected", ...common, manualActionRequired: false, reasonCode: "payment_not_found" };
   }

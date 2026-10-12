@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { db } from "../database/index";
 import { creditos, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
+import { asegurarAbonoInicialLibre } from "./abonoInicialConvenio";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
@@ -129,6 +130,11 @@ export async function anularPagoYRestituirMora(
   if (bloqueo) {
     throw new PendingReturnAuthorizationError(bloqueo);
   }
+
+  // COBROS-02 W4: un pago que sostiene un convenio (abono inicial) no se anula como
+  // falso. Mismo guard que la reversa, aquí en la transacción compartida de
+  // `falsePayment` y de la anulación por incobrable: corta antes de escribir nada.
+  await asegurarAbonoInicialLibre(tx, pago_id);
 
   // La mora que ESTE pago había cubierto, leída ANTES de marcarlo falso: es lo
   // único que hay que restituir (no el monto de la boleta, que también trae

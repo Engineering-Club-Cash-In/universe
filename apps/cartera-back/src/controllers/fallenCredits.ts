@@ -11,6 +11,7 @@ import {
 } from "../database/db/schema";
 import { and, eq, sql, ne, desc, gte, lte } from "drizzle-orm";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { convenioVivoConAbonoDelCredito } from "./abonoInicialConvenio";
 
 /**
  * Marca un crédito como CAIDO:
@@ -67,6 +68,24 @@ export async function marcarCreditoComoCaido({
 
     if (credito.statusCredit === StatusCredit.CAIDO) {
       return { success: false, message: "El crédito ya está marcado como CAIDO." };
+    }
+
+    /**
+     * 🛡️ COBROS-02 W4: un convenio vivo (pendiente, vigente o completado) sostenido por un
+     * abono inicial de este crédito. El borrado de pagos se llevaría ese abono y, con la FK en
+     * `ON DELETE SET NULL`, el vínculo de auditoría desaparecería con el convenio todavía vivo.
+     * Se rechaza antes de escribir nada, bajo el candado del crédito; la salida es anular el
+     * convenio (que libera el abono).
+     */
+    const convenioDelAbono = await convenioVivoConAbonoDelCredito(db, credito_id);
+    if (convenioDelAbono !== null) {
+      return {
+        success: false,
+        message:
+          `El crédito tiene el convenio #${convenioDelAbono} (pendiente, vigente o completado) sostenido por un abono inicial. ` +
+          `Marcarlo como CAIDO borra todos los pagos del crédito, incluido ese abono. ` +
+          `Anule el convenio primero.`,
+      };
     }
 
     /**

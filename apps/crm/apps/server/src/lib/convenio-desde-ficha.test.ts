@@ -99,7 +99,21 @@ describe("resolverPagoIdsDeCuotas", () => {
 			pagoIds: [100, 101, 102],
 			faltantes: [],
 			sinRecibo: [],
+			soloAbono: [],
 		});
+	});
+
+	it("excluye el abono inicial parcial de su cuota: no se manda junto a su recibo abierto", () => {
+		// 100 es el abono parcial (pagado=false) y 101 el recibo abierto de la misma cuota.
+		const r = resolverPagoIdsDeCuotas(elegibles, [10, 11], 100);
+		expect(r.pagoIds).toEqual([101, 102]);
+	});
+
+	it("si el abono es el único recibo de la cuota no se manda: la cuota se reporta en soloAbono", () => {
+		const r = resolverPagoIdsDeCuotas(elegibles, [10, 11], 102);
+		expect(r.pagoIds).toEqual([100, 101]);
+		expect(r.soloAbono).toEqual([2]);
+		expect(r.sinRecibo).toEqual([]);
 	});
 
 	it("reporta cuotas que no son elegibles y cuotas sin recibo", () => {

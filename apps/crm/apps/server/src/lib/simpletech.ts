@@ -310,6 +310,13 @@ export interface WhatsappBatchResult {
 export async function sendWhatsappTemplateBatch(params: {
 	recipients: WhatsappBatchRecipient[];
 	logPrefix?: string;
+	/**
+	 * Template explícito con header de media (p. ej. `mensajeimage`: imagen + 1
+	 * variable de body). Si se pasa, NO se auto-resuelve `mensajeNparametro` y
+	 * el mensaje completo viaja como un único parámetro de body, igual que el
+	 * resto de templates con adjunto.
+	 */
+	adjunto?: { templateName: string; header: TemplateHeader };
 }): Promise<WhatsappBatchResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech][batch]";
 	const client = getSimpletechClient();
@@ -335,21 +342,29 @@ export async function sendWhatsappTemplateBatch(params: {
 	}
 
 	const firstMessage = normalized[0]?.message ?? "";
-	const templateParamCount = splitTemplateParams(firstMessage).length;
-	const templateName = resolveTemplateNameByParamCount(
-		SIMPLETECH_TEMPLATE_NAME,
-		templateParamCount,
-	);
+	const adjunto = params.adjunto;
+	const templateParamCount = adjunto
+		? 1
+		: splitTemplateParams(firstMessage).length;
+	const templateName =
+		adjunto?.templateName ??
+		resolveTemplateNameByParamCount(
+			SIMPLETECH_TEMPLATE_NAME,
+			templateParamCount,
+		);
 
 	const templateRequest = {
 		templateName,
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
 		messages: normalized.map((r) => ({
 			number: r.phoneNormalized,
-			body: normalizeParamsForTemplate(
-				splitTemplateParams(r.message),
-				templateParamCount,
-			),
+			body: adjunto
+				? [r.message]
+				: normalizeParamsForTemplate(
+						splitTemplateParams(r.message),
+						templateParamCount,
+					),
+			...(adjunto ? { header: adjunto.header } : {}),
 		})),
 	};
 

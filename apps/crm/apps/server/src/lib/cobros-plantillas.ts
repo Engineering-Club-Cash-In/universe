@@ -600,7 +600,20 @@ export interface PlantillaMensaje {
 	etapa: string;
 	asunto: string;
 	cuerpo: string;
+	/**
+	 * Plantilla con imagen: se envía por un template de WittyBots con header de
+	 * imagen y 1 variable de body (todo el texto), en vez de `mensajeNparametro`.
+	 */
+	adjunto?: { templateName: string; imagenUrl: string };
 }
+
+/**
+ * Imagen del aviso de cuenta exclusiva Nexa (bucket público `crm` de R2).
+ * `COBROS_CUENTA_NEXA_IMAGEN_URL` permite cambiarla sin desplegar.
+ */
+export const CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL =
+	process.env.COBROS_CUENTA_NEXA_IMAGEN_URL ||
+	"https://pub-e8fc0de6a599420ea473808b97217fdd.r2.dev/cobros/extras/a7f8d584-2c7d-4260-bf83-8acfe59457bf.jpeg";
 
 export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
@@ -947,8 +960,13 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		nombre: "Nueva cuenta exclusiva Nexa",
 		etapa: "al_dia",
 		asunto: "Tu nueva cuenta exclusiva para pagos",
-		// 2 bloques → template `mensaje2parametro`. Arranca con el nombre: el template
-		// de WhatsApp ya antepone su propio saludo. Texto tal cual lo definió
+		adjunto: {
+			templateName: "mensajeimage",
+			imagenUrl: CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL,
+		},
+		// Template `mensajeimage` (header imagen + 1 variable de body con todo el
+		// texto). Arranca con el nombre: el template de WhatsApp ya antepone su
+		// propio saludo. Texto tal cual lo definió
 		// cobros (sin aviso no-reply). Solo se envía a créditos que ya tienen
 		// cuenta Nexa (prepararCuentaNexaParaEnvio): es el aviso para clientes
 		// existentes; la bienvenida y `cuenta_nexa` cubren a los nuevos.

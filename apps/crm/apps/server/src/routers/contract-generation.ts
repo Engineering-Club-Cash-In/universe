@@ -1628,9 +1628,15 @@ export const contractGenerationRouter = {
 					input.opportunityId ?? null,
 					async () => {
 						if (input.opportunityId) {
+							// Con el titular que mandó la pantalla: si cambiaron al
+							// representante después de abrirla, la invitación le
+							// llegaría al anterior apenas se cree el documento.
 							await exigirLaBateriaDeLaOportunidad(
 								input.opportunityId,
 								input.contracts.map((c) => c.contractType),
+								input.contracts
+									.flatMap((c) => c.signers ?? [])
+									.find((f) => f.role === "TITULAR"),
 							);
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 							await exigirCoberturaDeLaAseguradora(

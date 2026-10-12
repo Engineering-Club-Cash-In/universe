@@ -20,7 +20,7 @@ import {
 	User,
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
-import { motivoSinCelularDelRepresentante } from "server/src/lib/oportunidad-de-sociedad";
+import { faltantesDelRepresentante } from "server/src/lib/oportunidad-de-sociedad";
 import { toast } from "sonner";
 import { TelefonosParaFirmar } from "@/components/analysis/TelefonosParaFirmar";
 import {
@@ -547,12 +547,17 @@ export function InvestmentAssignmentSection({
 			}),
 		enabled: !!selectedOpportunity?.id,
 	});
-	const sinCelularDelRepresentante =
+	// Lo mismo que pide el servidor al pasar a 80% y jurídico al generar.
+	const faltanDelRepresentante =
 		selectedOpportunity && codeudoresParaFirmar.data
-			? motivoSinCelularDelRepresentante({
+			? faltantesDelRepresentante({
 					clientType: selectedOpportunity.lead?.clientType,
 					coDeudores: codeudoresParaFirmar.data,
 				})
+			: [];
+	const motivoDelRepresentante =
+		faltanDelRepresentante.length > 0
+			? `Representante legal: Faltan ${faltanDelRepresentante.join(", ")}`
 			: null;
 
 	const canAssign =
@@ -564,7 +569,7 @@ export function InvestmentAssignmentSection({
 		montosCoinciden &&
 		participacionCoincide &&
 		hasValidNit &&
-		!sinCelularDelRepresentante;
+		!motivoDelRepresentante;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -619,8 +624,8 @@ export function InvestmentAssignmentSection({
 			reasons.push("El NIT es obligatorio");
 		}
 
-		if (sinCelularDelRepresentante) {
-			reasons.push(sinCelularDelRepresentante);
+		if (motivoDelRepresentante) {
+			reasons.push(motivoDelRepresentante);
 		}
 
 		return reasons;

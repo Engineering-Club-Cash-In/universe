@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
 	codeudoresDeMas,
 	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
 	motivoParaNoGenerar,
 	motivoPorRepresentanteCambiado,
-	motivoSinCelularDelRepresentante,
 	nombreDeLaSociedad,
 	representanteLegalDe,
 } from "./oportunidad-de-sociedad";
@@ -162,40 +162,51 @@ describe("regenerar con el representante de la última generación", () => {
 	});
 });
 
-describe("celular del representante para pasar a jurídico", () => {
-	const con = (phone: string | null, esRepresentanteLegal = true) => ({
+describe("lo que le falta al representante", () => {
+	const rep = (cambios: Partial<Record<string, unknown>> = {}) => ({
 		id: "a",
-		esRepresentanteLegal,
-		phone,
+		esRepresentanteLegal: true,
+		dpi: "2999999980101",
+		email: "rep@prueba.test",
+		phone: "50255555555",
+		gender: "female",
+		age: 41,
+		maritalStatus: "married",
+		...cambios,
 	});
 
-	test("una persona no lo necesita", () => {
+	test("una persona: no aplica", () => {
 		expect(
-			motivoSinCelularDelRepresentante({
+			faltantesDelRepresentante({
 				clientType: "individual",
-				coDeudores: [con(null, false)],
+				coDeudores: [rep({ esRepresentanteLegal: false, phone: null })],
 			}),
-		).toBeNull();
+		).toEqual([]);
 	});
 
-	test("una sociedad sin representante o sin su celular no pasa", () => {
+	test("una sociedad completa no pide nada", () => {
 		expect(
-			motivoSinCelularDelRepresentante({
-				clientType: "empresa",
-				coDeudores: [],
-			}),
-		).toContain("marcá a su representante");
+			faltantesDelRepresentante({ clientType: "empresa", coDeudores: [rep()] }),
+		).toEqual([]);
+	});
+
+	test("sin representante, sin celular o con codeudores de más", () => {
 		expect(
-			motivoSinCelularDelRepresentante({
-				clientType: "empresa",
-				coDeudores: [con("  ")],
-			}),
-		).toContain("Falta el celular");
+			faltantesDelRepresentante({ clientType: "empresa", coDeudores: [] }),
+		).toEqual(["Marcar al representante legal en los co-firmantes"]);
 		expect(
-			motivoSinCelularDelRepresentante({
+			faltantesDelRepresentante({
 				clientType: "empresa",
-				coDeudores: [con("50255555555")],
+				coDeudores: [rep({ phone: " ", age: null })],
 			}),
-		).toBeNull();
+		).toEqual(["Teléfono", "Edad"]);
+		expect(
+			faltantesDelRepresentante({
+				clientType: "empresa",
+				coDeudores: [rep(), rep({ id: "b", esRepresentanteLegal: false })],
+			}),
+		).toEqual([
+			"Quitar el co-firmante de más: los contratos de sociedad sólo los firma el representante",
+		]);
 	});
 });

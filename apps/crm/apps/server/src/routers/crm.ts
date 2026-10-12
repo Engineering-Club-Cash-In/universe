@@ -136,7 +136,10 @@ import {
 	numerosSifcoDelDpiYDeLaOportunidad,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
-import { motivoSinCelularDelRepresentante } from "../lib/oportunidad-de-sociedad";
+import {
+	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
+} from "../lib/oportunidad-de-sociedad";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -699,32 +702,46 @@ async function quitarMarcaDeRepresentante(
 }
 
 /**
- * Por qué la oportunidad no puede entrar a jurídico por el celular de quien
- * firma por la sociedad, o null (ver `motivoSinCelularDelRepresentante`).
+ * Lo que una sociedad necesita para entrar a jurídico, del lado de quien
+ * firma: si es de sociedad, y lo que le falta a su representante (ver
+ * `faltantesDelRepresentante`). `leadId` es el lead con el que va a quedar, si
+ * cambia en el mismo pedido.
  */
-async function motivoCelularDelRepresentante(
+async function sociedadParaJuridico(
 	opportunityId: string,
-): Promise<string | null> {
-	const [oportunidad] = await db
-		.select({ clientType: leads.clientType })
-		.from(opportunities)
-		.innerJoin(leads, eq(opportunities.leadId, leads.id))
-		.where(eq(opportunities.id, opportunityId))
-		.limit(1);
-	if (!oportunidad) return null;
+	leadId?: string | null,
+): Promise<{ esSociedad: boolean; faltanDelRepresentante: string[] }> {
+	const [lead] = leadId
+		? await db
+				.select({ clientType: leads.clientType })
+				.from(leads)
+				.where(eq(leads.id, leadId))
+				.limit(1)
+		: await db
+				.select({ clientType: leads.clientType })
+				.from(opportunities)
+				.innerJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
 	const coDeudores = await db
 		.select({
 			id: coDebtors.id,
 			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
 			phone: coDebtors.phone,
+			gender: coDebtors.gender,
+			age: coDebtors.age,
+			maritalStatus: coDebtors.maritalStatus,
 		})
 		.from(coDebtors)
 		.where(eq(coDebtors.opportunityId, opportunityId))
 		.orderBy(coDebtors.createdAt);
-	return motivoSinCelularDelRepresentante({
-		clientType: oportunidad.clientType,
-		coDeudores,
-	});
+	const datos = { clientType: lead?.clientType, coDeudores };
+	return {
+		esSociedad: esOportunidadDeSociedad(datos),
+		faltanDelRepresentante: faltantesDelRepresentante(datos),
+	};
 }
 
 export const crmRouter = {
@@ -3450,11 +3467,22 @@ export const crmRouter = {
 					});
 				}
 
-				// Al entrar a jurídico, una sociedad necesita a su representante con
-				// celular: a él le llegan los enlaces de firma.
-				if (fromPercentage < 80 && toPercentage >= 80) {
-					const motivo = await motivoCelularDelRepresentante(id);
-					if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
+				// En una sociedad firma su representante legal: al entrar a jurídico
+				// tiene que estar marcado y completo (a su celular le llegan los
+				// enlaces), y a la empresa no se le piden datos personales.
+				const sociedad =
+					toPercentage >= 80
+						? await sociedadParaJuridico(id, effectiveLeadId)
+						: null;
+				if (
+					fromPercentage < 80 &&
+					toPercentage >= 80 &&
+					sociedad &&
+					sociedad.faltanDelRepresentante.length > 0
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Para avanzar a etapa jurídica (80%), el representante legal de la sociedad debe tener: ${sociedad.faltanDelRepresentante.join(", ")}`,
+					});
 				}
 
 				// Validaciones para avanzar a etapa 80% (jurídica)
@@ -3518,9 +3546,11 @@ export const crmRouter = {
 							.limit(1);
 
 						if (leadForValidation[0]) {
-							const missingLeadFields = getMissingLeadFieldsForContracts(
-								leadForValidation[0],
-							);
+							const missingLeadFields = sociedad?.esSociedad
+								? leadForValidation[0].direccion
+									? []
+									: ["Dirección"]
+								: getMissingLeadFieldsForContracts(leadForValidation[0]);
 							if (missingLeadFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
 									message: `Para avanzar a etapa jurídica (80%), el cliente debe tener: ${formatMissingLeadFields(missingLeadFields)}`,
@@ -8634,6 +8664,24 @@ export const crmRouter = {
 							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
 
+			// Oportunidades con un co-firmante marcado como representante legal:
+			// también son de sociedad aunque el lead no sea empresa.
+			const conRepresentante = new Set(
+				opportunityIds.length > 0
+					? (
+							await db
+								.select({ opportunityId: coDebtors.opportunityId })
+								.from(coDebtors)
+								.where(
+									and(
+										inArray(coDebtors.opportunityId, opportunityIds),
+										eq(coDebtors.esRepresentanteLegal, true),
+									),
+								)
+						).map((c) => c.opportunityId)
+					: [],
+			);
+
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
@@ -8754,22 +8802,29 @@ export const crmRouter = {
 								// `lib/oportunidad-de-sociedad.ts`).
 								clientType: lead.clientType,
 								direccion: lead.direccion,
-								hasRequiredData: !!(
-									lead.dpi &&
-									lead.direccion &&
-									lead.maritalStatus &&
-									lead.gender &&
-									lead.birthDate &&
-									lead.nationality
-								),
-								missingFields: getMissingLeadFieldsForContracts({
-									dpi: lead.dpi,
-									direccion: lead.direccion,
-									maritalStatus: lead.maritalStatus,
-									gender: lead.gender,
-									birthDate: lead.birthDate,
-									nationality: lead.nationality,
-								}),
+								// Una empresa no tiene datos personales: de ella sólo se pide
+								// la dirección, y el resto es del representante legal (lo
+								// revisa la pantalla con sus co-firmantes).
+								...(() => {
+									const faltan =
+										lead.clientType === "empresa" ||
+										conRepresentante.has(opp.id)
+											? lead.direccion
+												? []
+												: ["Dirección"]
+											: getMissingLeadFieldsForContracts({
+													dpi: lead.dpi,
+													direccion: lead.direccion,
+													maritalStatus: lead.maritalStatus,
+													gender: lead.gender,
+													birthDate: lead.birthDate,
+													nationality: lead.nationality,
+												});
+									return {
+										hasRequiredData: faltan.length === 0,
+										missingFields: faltan,
+									};
+								})(),
 							}
 						: null,
 					vehicle: vehicle
@@ -9018,24 +9073,29 @@ export const crmRouter = {
 					.where(eq(leads.id, opportunity.leadId))
 					.limit(1);
 
+				// Una empresa no tiene datos personales: de ella sólo la dirección, y
+				// lo demás es de su representante legal, que firma por ella.
+				const sociedad = await sociedadParaJuridico(input.opportunityId);
 				if (lead) {
-					const missingLeadFields = getMissingLeadFieldsForContracts(lead);
+					const missingLeadFields = sociedad.esSociedad
+						? lead.direccion
+							? []
+							: ["Dirección"]
+						: getMissingLeadFieldsForContracts(lead);
 					if (missingLeadFields.length > 0) {
 						validationErrors.push(
 							`Cliente: Faltan ${formatMissingLeadFields(missingLeadFields)}`,
 						);
 					}
 				}
+				if (sociedad.faltanDelRepresentante.length > 0) {
+					validationErrors.push(
+						`Representante legal: Faltan ${sociedad.faltanDelRepresentante.join(", ")}`,
+					);
+				}
 			} else {
 				validationErrors.push("No hay cliente asociado a la oportunidad");
 			}
-
-			// Una sociedad firma por su representante legal: tiene que estar marcado
-			// y con celular, que es a donde le llegan los enlaces de firma.
-			const sinCelular = await motivoCelularDelRepresentante(
-				input.opportunityId,
-			);
-			if (sinCelular) validationErrors.push(sinCelular);
 
 			// Validate vehicle data
 			if (opportunity.vehicleId) {

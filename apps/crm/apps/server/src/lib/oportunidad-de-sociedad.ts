@@ -154,24 +154,49 @@ export function motivoPorRepresentanteCambiado(
 		: "El representante legal de la sociedad cambió desde la última generación: generá la batería de nuevo desde el asistente.";
 }
 
+/** Lo que hace falta de un codeudor para firmar por la sociedad. */
+export interface DatosDelRepresentante extends CodeudorDeLaOportunidad {
+	dpi: string | null;
+	email: string | null;
+	phone: string | null;
+	gender: string | null;
+	age: number | null;
+	maritalStatus: string | null;
+}
+
 /**
- * Por qué una sociedad todavía no puede pasar a jurídico, o null.
+ * Lo que le falta a una sociedad para sus contratos, del lado de quien firma.
  *
- * Al aprobar los contratos, los enlaces de firma le llegan por WhatsApp a quien
- * firma. En una sociedad es el representante legal, no la empresa: tiene que
- * estar marcado y tener su celular (no el teléfono de la empresa). Fuera de una
- * sociedad no aplica.
+ * El lead es la empresa: no tiene DPI, nacimiento, género ni estado civil, y
+ * esos datos los ponen los contratos del representante legal. Tiene que estar
+ * marcado, con DPI, correo y celular (a ese número le llegan los enlaces por
+ * WhatsApp, no al de la empresa), género, edad y estado civil, y sin codeudores
+ * de más. Fuera de una sociedad no aplica: lista vacía.
+ *
+ * Lo usan jurídico (`validateOpportunityForContracts`) y el paso de análisis a
+ * 80%, para que pidan lo mismo.
  */
-export function motivoSinCelularDelRepresentante<
-	C extends CodeudorDeLaOportunidad & { phone: string | null },
->(datos: DatosDeSociedad<C>): string | null {
-	if (!esOportunidadDeSociedad(datos)) return null;
+export function faltantesDelRepresentante<C extends DatosDelRepresentante>(
+	datos: DatosDeSociedad<C>,
+): string[] {
+	if (!esOportunidadDeSociedad(datos)) return [];
+	const faltan: string[] = [];
 	const representante = representanteLegalDe(datos);
 	if (!representante) {
-		return "Es una sociedad: marcá a su representante legal en los co-firmantes. Es quien firma y a quien le llegan los enlaces de firma.";
+		faltan.push("Marcar al representante legal en los co-firmantes");
+	} else {
+		if (!representante.dpi?.trim()) faltan.push("DPI");
+		if (!representante.email?.trim()) faltan.push("Correo");
+		if (!representante.phone?.trim()) faltan.push("Teléfono");
+		if (!representante.gender) faltan.push("Género");
+		if (!representante.age) faltan.push("Edad");
+		if (!representante.maritalStatus) faltan.push("Estado Civil");
 	}
-	if (!representante.phone?.trim()) {
-		return "Falta el celular del representante legal: a ese número le llegan los enlaces de firma por WhatsApp.";
+	const deMas = codeudoresDeMas(datos).length;
+	if (deMas > 0) {
+		faltan.push(
+			`Quitar ${deMas === 1 ? "el co-firmante" : `los ${deMas} co-firmantes`} de más: los contratos de sociedad sólo los firma el representante`,
+		);
 	}
-	return null;
+	return faltan;
 }

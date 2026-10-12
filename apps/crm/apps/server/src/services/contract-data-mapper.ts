@@ -41,6 +41,7 @@ import type { InsuranceProvider } from "../lib/insurance-selection";
 import {
 	codeudoresDeMas,
 	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
 	nombreDeLaSociedad,
 	representanteLegalDe,
 } from "../lib/oportunidad-de-sociedad";
@@ -941,29 +942,7 @@ export async function validateOpportunityForContracts(
 		// La de la empresa: es donde reciben notificaciones los deudores.
 		if (!lead.direccion) missingLeadFields.push("Dirección");
 
-		const representante = representanteLegalDe(deSociedad);
-		if (!representante) {
-			missingRepresentanteFields.push(
-				"Marcar al representante legal en los co-firmantes",
-			);
-		} else {
-			if (!representante.dpi?.trim()) missingRepresentanteFields.push("DPI");
-			if (!representante.email?.trim())
-				missingRepresentanteFields.push("Correo");
-			// Los enlaces de firma le llegan por WhatsApp a él, no a la empresa.
-			if (!representante.phone?.trim())
-				missingRepresentanteFields.push("Teléfono");
-			if (!representante.gender) missingRepresentanteFields.push("Género");
-			if (!representante.age) missingRepresentanteFields.push("Edad");
-			if (!representante.maritalStatus)
-				missingRepresentanteFields.push("Estado Civil");
-		}
-		const deMas = codeudoresDeMas(deSociedad).length;
-		if (deMas > 0) {
-			missingRepresentanteFields.push(
-				`Quitar ${deMas === 1 ? "el co-firmante" : `los ${deMas} co-firmantes`} de más: los contratos de sociedad sólo los firma el representante`,
-			);
-		}
+		missingRepresentanteFields.push(...faltantesDelRepresentante(deSociedad));
 	} else {
 		if (!lead.dpi) missingLeadFields.push("DPI");
 		if (!lead.direccion) missingLeadFields.push("Dirección");

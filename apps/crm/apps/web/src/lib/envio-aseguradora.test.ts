@@ -79,6 +79,16 @@ describe("textoSubidoPor", () => {
 });
 
 describe("avisoFacturaSubida", () => {
+	test("subida antes del cierre: avisa que se enviará sola", () => {
+		expect(
+			avisoFacturaSubida({ enviada: false, motivo: "x", alCerrar: true }),
+		).toEqual({
+			tipo: "info",
+			texto:
+				"Documento guardado. Se enviará a la aseguradora cuando la oportunidad quede ganada al 90%.",
+		});
+	});
+
 	test("los demás documentos no muestran aviso de la aseguradora", () => {
 		expect(avisoFacturaSubida(null)).toBeNull();
 		expect(avisoFacturaSubida(undefined)).toBeNull();

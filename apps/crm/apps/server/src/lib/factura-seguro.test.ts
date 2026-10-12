@@ -379,7 +379,14 @@ describe("nombreDeFactura", () => {
 describe("tipoPermitidoDesdeCrm", () => {
 	const DOCX =
 		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-	const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+	const zipDe = (entrada: string) =>
+		new Uint8Array(
+			Buffer.concat([
+				Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+				Buffer.from(`[Content_Types].xml ${entrada}`),
+			]),
+		);
+	const zip = zipDe("word/document.xml");
 	const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 	const avif = new Uint8Array([
 		0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
@@ -399,6 +406,14 @@ describe("tipoPermitidoDesdeCrm", () => {
 			"application/msword",
 		);
 		expect(tipoPermitidoDesdeCrm(zip, "application/msword")).toBeNull();
+		// Un Excel declarado como Word, o un ZIP sin manifiesto de Office, no.
+		expect(tipoPermitidoDesdeCrm(zipDe("xl/workbook.xml"), DOCX)).toBeNull();
+		expect(
+			tipoPermitidoDesdeCrm(
+				new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x61, 0x62]),
+				DOCX,
+			),
+		).toBeNull();
 	});
 
 	test("un HTML declarado como PDF o como Word no pasa", () => {

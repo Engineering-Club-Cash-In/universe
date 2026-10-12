@@ -9,10 +9,8 @@ import {
 	FileText,
 	Landmark,
 	Loader2,
-	MoreHorizontal,
 	Scale,
 	Search,
-	Settings,
 	Target,
 	User,
 } from "lucide-react";
@@ -41,12 +39,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
 	Table,
@@ -669,68 +661,49 @@ function RouteComponent() {
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">
-													<DropdownMenu>
-														<DropdownMenuTrigger asChild>
+													<div className="flex items-center justify-end gap-2">
+														{/* Generar va en 80% y también en 85%: jurídico rehace la
+														    batería con otra fecha cuando los contratos vencieron
+														    mientras la oportunidad está en firma. */}
+														{etapaPermite(
+															"reemplazar",
+															opp.stage.closurePercentage,
+														) && (
 															<Button
-																variant="ghost"
+																variant="outline"
 																size="sm"
-																className="h-8 w-8 p-0"
+																asChild
 																onClick={(e) => e.stopPropagation()}
 															>
-																<MoreHorizontal className="h-4 w-4" />
-															</Button>
-														</DropdownMenuTrigger>
-														<DropdownMenuContent align="end">
-															<DropdownMenuItem asChild>
 																<Link
-																	to="/juridico/$leadId"
-																	params={{ leadId: opp.lead.id }}
-																	search={{ opportunityId: opp.id }}
-																	className="cursor-pointer"
+																	to="/juridico/generate/$opportunityId"
+																	params={{ opportunityId: opp.id }}
 																>
-																	<Settings className="mr-2 h-4 w-4" />
-																	Gestionar
+																	<FilePlus2 />
+																	Generar contratos
 																</Link>
-															</DropdownMenuItem>
-															{/* Generar va en 80% y también en 85%: jurídico rehace la
-															    batería con otra fecha cuando los contratos vencieron
-															    mientras la oportunidad está en firma. */}
-															{etapaPermite(
-																"reemplazar",
-																opp.stage.closurePercentage,
-															) && (
-																<DropdownMenuItem asChild>
-																	<Link
-																		to="/juridico/generate/$opportunityId"
-																		params={{ opportunityId: opp.id }}
-																		className="cursor-pointer"
-																		onClick={(e) => e.stopPropagation()}
-																	>
-																		<FilePlus2 className="mr-2 h-4 w-4" />
-																		Generar Contratos
-																	</Link>
-																</DropdownMenuItem>
+															</Button>
+														)}
+														{canApproveLegalStage &&
+															opp.stage.closurePercentage === 80 && (
+																<Button
+																	variant="outline"
+																	size="sm"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		setOpportunityToApprove({
+																			id: opp.id,
+																			title: opp.title,
+																		});
+																		setIsApproveModalOpen(true);
+																	}}
+																	disabled={opp.contractCount === 0}
+																>
+																	<CheckCircle />
+																	Aprobar (→ 85%)
+																</Button>
 															)}
-															{canApproveLegalStage &&
-																opp.stage.closurePercentage === 80 && (
-																	<DropdownMenuItem
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			setOpportunityToApprove({
-																				id: opp.id,
-																				title: opp.title,
-																			});
-																			setIsApproveModalOpen(true);
-																		}}
-																		disabled={opp.contractCount === 0}
-																		className="cursor-pointer"
-																	>
-																		<CheckCircle className="mr-2 h-4 w-4" />
-																		Aprobar (→ 85%)
-																	</DropdownMenuItem>
-																)}
-														</DropdownMenuContent>
-													</DropdownMenu>
+													</div>
 												</TableCell>
 											</TableRow>
 										))}

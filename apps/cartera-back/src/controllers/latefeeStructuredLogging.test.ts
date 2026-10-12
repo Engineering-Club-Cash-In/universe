@@ -75,7 +75,9 @@ test("late-fee callsites use only the finite safe application payload", () => {
   // getCreditosWithMoras ahora emite en su rama JSON, en la del Excel y en su
   // catch (rejected/failed), getCondonacionesMora distingue rejected de failed
   // y la condonación masiva emite cuando no hay ninguna mora activa.
-  expect(calls).toBe(42);
+  // 43: desactivarMoraSiCreditoAlDia omite la mora congelada de un
+  // PENDIENTE_CANCELACION (reasonCode excluded_credit_state).
+  expect(calls).toBe(43);
 });
 
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {

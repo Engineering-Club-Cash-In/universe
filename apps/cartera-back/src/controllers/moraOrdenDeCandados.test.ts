@@ -38,7 +38,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Un pedido de candado: qué tabla y por qué vía. */
-type Candado = { tabla: any; via: "update" | "insert" | "for update" };
+type Candado = { tabla: any; via: "update" | "insert" | "for update"; modo?: string };
 /** Los candados que pidió UNA transacción, en orden. */
 type Transaccion = Candado[];
 type Insert = { tabla: any; values: any };
@@ -68,8 +68,8 @@ const estado: {
 type Scope = { candados: Candado[]; raiz: boolean };
 
 const clienteFalso = (scope: Scope): any => {
-  const pedirCandado = (tabla: any, via: Candado["via"]) => {
-    if (!scope.raiz) scope.candados.push({ tabla, via });
+  const pedirCandado = (tabla: any, via: Candado["via"], modo?: string) => {
+    if (!scope.raiz) scope.candados.push(modo ? { tabla, via, modo } : { tabla, via });
   };
 
   const selectChain = () => {
@@ -85,8 +85,8 @@ const clienteFalso = (scope: Scope): any => {
       orderBy: () => b,
       limit: () => b,
       // `SELECT … FOR UPDATE` candea la fila igual que un UPDATE.
-      for: () => {
-        pedirCandado(tabla, "for update");
+      for: (modo: string) => {
+        pedirCandado(tabla, "for update", modo);
         return b;
       },
       then: (res: any, rej: any) =>
@@ -370,6 +370,23 @@ describe("orden de candados: creditos ANTES que moras_credito", () => {
       ).length;
     }
     expect(vistas).toBeGreaterThan(0);
+  });
+
+  // 🧊 Un UPDATE condicional a MOROSO no canda nada si el crédito está ACTIVO:
+  // sin el candado explícito, un cambio a PENDIENTE_CANCELACION que commitea
+  // después de la foto del UPDATE de la mora no lo ve el guard.
+  it("paso 6 sobre un crédito NO MOROSO: lo primero de la tx es candar el crédito (no key update)", async () => {
+    estado.selects = [[], [{ ...MORA_ACTIVA, statusCredit: "ACTIVO" }]];
+    await procesarMoras();
+
+    expect(estado.transacciones[0]?.[0]).toEqual({ tabla: creditos, via: "for update", modo: "no key update" });
+  });
+
+  it("desactivarMoraSiCreditoAlDia sobre un crédito NO MOROSO: lo primero de la tx es candar el crédito", async () => {
+    estado.selects = [[MORA_ACTIVA], [{ statusCredit: "ACTIVO", capital: "114160.35" }], [CUOTA_AL_DIA]];
+    await desactivarMoraSiCreditoAlDia(CREDITO_ID);
+
+    expect(estado.transacciones[0]?.[0]).toEqual({ tabla: creditos, via: "for update", modo: "no key update" });
   });
 
   it("el detector no es decorativo: una secuencia invertida SÍ se marca", () => {

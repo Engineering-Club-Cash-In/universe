@@ -48,6 +48,7 @@ const selectChain = () => {
     innerJoin: () => b,
     leftJoin: () => b,
     where: () => b,
+    for: () => b, // candado del crédito al abrir la desactivación
     then: (res: any, rej: any) =>
       Promise.resolve(estado.resultados.shift() ?? []).then(res, rej),
   };

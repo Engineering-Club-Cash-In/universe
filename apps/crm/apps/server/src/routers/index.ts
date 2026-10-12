@@ -123,6 +123,8 @@ export const crmAppRouter = {
 	ejecutarValidacionesRenapBuro:
 		validationsRouter.ejecutarValidacionesRenapBuro,
 	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
+	getResumenBuroOportunidad: validationsRouter.getResumenBuroOportunidad,
+	asegurarBuroOportunidad: validationsRouter.asegurarBuroOportunidad,
 	marcarValidacionManual: validationsRouter.marcarValidacionManual,
 };
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
 	anioImpuestoCirculacion,
 	CLAUSULA_INCREMENTO_DIARIO_MORA,
+	COBROS_MOTIVO_SIN_CUENTA_NEXA,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
 	COBROS_MOTIVO_SIN_INCREMENTO_MORA,
 	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
@@ -23,6 +24,7 @@ import {
 	agregarCuentaNexaABienvenida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
+	prepararCuentaNexaParaEnvio,
 	prepararExpectativaMoraParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
@@ -33,9 +35,10 @@ import {
 const NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 
-// La bienvenida es la única plantilla sin aviso no-reply: pide confirmar la
-// recepción del mensaje (diseño "Mensajes Cobros 2026").
-const IDS_SIN_AVISO = new Set(["bienvenida"]);
+// La bienvenida pide confirmar la recepción del mensaje (diseño "Mensajes Cobros
+// 2026") y la cuenta exclusiva Nexa va con el texto que definió cobros: ninguna
+// lleva el aviso no-reply.
+const IDS_SIN_AVISO = new Set(["bienvenida", "cuenta_nexa_exclusiva"]);
 
 const MAX_PARAMS_SIMPLETECH = 5;
 
@@ -1342,5 +1345,58 @@ describe("CONTRATO: la oración del aumento no se separa de la del front", () =>
 		expect(
 			PLANTILLAS_MENSAJES.find((p) => p.id === "al_dia")?.cuerpo,
 		).toContain(oracion);
+	});
+});
+
+describe("Nueva cuenta exclusiva Nexa", () => {
+	const plantilla = PLANTILLAS_MENSAJES.find(
+		(p) => p.id === "cuenta_nexa_exclusiva",
+	);
+
+	test("existe, usa {cuentaNexa} y cabe en 2 bloques de WhatsApp", () => {
+		expect(plantilla).toBeDefined();
+		expect(plantilla?.cuerpo).toContain("{cuentaNexa}");
+		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(2);
+	});
+
+	test("interpolar pone nombre, cuenta y teléfono del asesor", () => {
+		const mensaje = interpolar(plantilla?.cuerpo ?? "", {
+			clienteNombre: "juan perez",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "5555-1234",
+			nombreAsesor: "",
+			expectativaMora: "",
+			cuentaNexa: "1234567890123456",
+		});
+		expect(mensaje.startsWith("Juan Perez.")).toBe(true);
+		expect(mensaje).toContain("🔢 *1234567890123456*");
+		expect(mensaje).toContain("ejecutivo al 5555-1234");
+		expect(mensaje).not.toContain("{");
+	});
+
+	test("sin cuenta Nexa se descarta con motivo", () => {
+		for (const cuenta of [null, undefined, "", "   "]) {
+			expect(
+				prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", cuenta),
+			).toEqual({ enviar: false, motivo: COBROS_MOTIVO_SIN_CUENTA_NEXA });
+		}
+	});
+
+	test("con cuenta Nexa se envía y se limpia el valor", () => {
+		expect(
+			prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", " 123 "),
+		).toEqual({ enviar: true, cuentaNexa: "123" });
+	});
+
+	test("un cuerpo sin {cuentaNexa} no exige la cuenta", () => {
+		expect(prepararCuentaNexaParaEnvio("Hola", null)).toEqual({
+			enviar: true,
+			cuentaNexa: "",
+		});
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { estadoReciboPago, fechaLarga, htmlReciboPago, listaCuotas, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
+import { estadoReciboPago, fechaLarga, htmlReciboPago, ISOTIPO_CASHIN_URL, listaCuotas, medioDePago, type DatosReciboPago } from "./reciboPagoHtml";
 
 const base: DatosReciboPago = {
   pagoId: 151515,
@@ -98,3 +98,11 @@ describe("recibo de una boleta de varias cuotas", () => {
   });
 });
 
+describe("marca del recibo", () => {
+  test("usa el ícono oficial de R2 y el nombre CashIn en el encabezado y en el pie", () => {
+    const html = htmlReciboPago(base);
+    expect(html.split(`src="${ISOTIPO_CASHIN_URL}"`).length - 1).toBe(2);
+    expect(html.split("<span>CashIn</span>").length - 1).toBe(2);
+    expect(html).not.toContain("data:image/svg+xml");
+  });
+});

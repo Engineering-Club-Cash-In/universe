@@ -310,6 +310,18 @@ export interface WhatsappBatchResult {
 export async function sendWhatsappTemplateBatch(params: {
 	recipients: WhatsappBatchRecipient[];
 	logPrefix?: string;
+	/**
+	 * Template explícito con header de media (p. ej. `mensaje4image`: imagen + 4
+	 * variables de body). Si se pasa, NO se auto-resuelve `mensajeNparametro`:
+	 * cada párrafo del mensaje va en una variable (`parametros` en total) y los
+	 * saltos de línea dentro de un párrafo pasan a espacios, porque WhatsApp no
+	 * admite saltos dentro de una variable de template.
+	 */
+	adjunto?: {
+		templateName: string;
+		header: TemplateHeader;
+		parametros: number;
+	};
 }): Promise<WhatsappBatchResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech][batch]";
 	const client = getSimpletechClient();
@@ -335,21 +347,35 @@ export async function sendWhatsappTemplateBatch(params: {
 	}
 
 	const firstMessage = normalized[0]?.message ?? "";
-	const templateParamCount = splitTemplateParams(firstMessage).length;
-	const templateName = resolveTemplateNameByParamCount(
-		SIMPLETECH_TEMPLATE_NAME,
-		templateParamCount,
-	);
+	const adjunto = params.adjunto;
+	const templateParamCount = adjunto
+		? adjunto.parametros
+		: splitTemplateParams(firstMessage).length;
+	const templateName =
+		adjunto?.templateName ??
+		resolveTemplateNameByParamCount(
+			SIMPLETECH_TEMPLATE_NAME,
+			templateParamCount,
+		);
 
 	const templateRequest = {
 		templateName,
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
 		messages: normalized.map((r) => ({
 			number: r.phoneNormalized,
-			body: normalizeParamsForTemplate(
-				splitTemplateParams(r.message),
-				templateParamCount,
-			),
+			body: adjunto
+				? // Se aplana DESPUÉS de normalizar: al sobrar bloques (mensaje editado
+					// con más párrafos que variables) `normalizeParamsForTemplate` los
+					// une con "\n\n" dentro de la última variable.
+					normalizeParamsForTemplate(
+						splitTemplateParams(r.message),
+						templateParamCount,
+					).map((bloque) => bloque.replaceAll(/\s*\n\s*/g, " "))
+				: normalizeParamsForTemplate(
+						splitTemplateParams(r.message),
+						templateParamCount,
+					),
+			...(adjunto ? { header: adjunto.header } : {}),
 		})),
 	};
 

@@ -1,9 +1,10 @@
 /**
  * Send Recibo Pago Whatsapp Service
  *
- * Envía por WhatsApp el recibo de comprobante de un pago (CB-113), usando el
- * template `mensaje_adjunto` de WittyBots (header de documento + body de 1
- * variable).
+ * Envía por WhatsApp el recibo de comprobante de un pago (CB-113). Va como
+ * imagen con el template `mensajeimage` de WittyBots (header de imagen + body
+ * de 1 variable); si cartera no pudo generar la imagen, va el PDF con
+ * `mensaje_adjunto` (header de documento + body de 1 variable).
  * El documento ya viene generado: lo dispara cartera-back cuando un pago queda
  * aplicado (conta lo valida o entra por Nexa) y manda la URL del PDF (1 recibo
  * por `pago_id`, no por factura ni por boleta).
@@ -37,7 +38,8 @@ import {
 	resolverContactoAsesor,
 } from "./asesor-whatsapp";
 
-const TEMPLATE_NAME = "mensaje_adjunto";
+const TEMPLATE_IMAGEN = "mensajeimage";
+const TEMPLATE_DOCUMENTO = "mensaje_adjunto";
 const LOG_PREFIX = "[ReciboPagoWhatsapp]";
 
 export type ReciboPagoErrorCodigo =
@@ -62,6 +64,8 @@ export interface SendReciboPagoWhatsappParams {
 	pagoId: number;
 	numeroSifco: string;
 	reciboUrl: string;
+	/** JPG del recibo. Si viene, se manda como imagen; si no, va el PDF. */
+	imagenUrl?: string | null;
 	clienteNombre: string;
 	numeroCuota?: number | null;
 	asesorNombre?: string | null;
@@ -186,7 +190,11 @@ export function construirMensajeReciboPago(
 		placa: string | null;
 	},
 	numeroSifco: string,
-	extra: { numeroCuota?: number | null; asesor?: ContactoAsesor | null } = {},
+	extra: {
+		numeroCuota?: number | null;
+		asesor?: ContactoAsesor | null;
+		adjunto?: "imagen" | "documento";
+	} = {},
 ): string {
 	// Registro formal (usted), como el resto de los textos de cobros.
 	const saludo = clienteNombre ? `${clienteNombre}, le` : "Le";
@@ -199,7 +207,9 @@ export function construirMensajeReciboPago(
 	const cuota =
 		extra.numeroCuota != null ? ` (cuota ${extra.numeroCuota})` : "";
 
-	return `${saludo} compartimos el recibo del pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
+	const adjunto =
+		extra.adjunto === "imagen" ? "la imagen adjunta" : "el documento adjunto";
+	return `${saludo} compartimos el recibo del pago${identificador}${cuota} en ${adjunto}. ${construirCierreAsesor(extra.asesor ?? null)}`;
 }
 
 type ReservaEnvio = "nueva" | "ya_enviado" | "en_curso";
@@ -281,6 +291,7 @@ export async function sendReciboPagoWhatsapp(
 	const {
 		numeroSifco,
 		reciboUrl,
+		imagenUrl,
 		clienteNombre,
 		pagoId,
 		numeroCuota,
@@ -368,7 +379,7 @@ export async function sendReciboPagoWhatsapp(
 			placa: caso.vehiculoPlaca,
 		},
 		numeroSifco,
-		{ numeroCuota, asesor },
+		{ numeroCuota, asesor, adjunto: imagenUrl ? "imagen" : "documento" },
 	);
 
 	// 4. Reservar el pago (idempotencia): si cartera reintenta porque la
@@ -395,13 +406,15 @@ export async function sendReciboPagoWhatsapp(
 	const result = await enviar({
 		phone: telefonoDestino,
 		message: mensaje,
-		templateName: TEMPLATE_NAME,
+		templateName: imagenUrl ? TEMPLATE_IMAGEN : TEMPLATE_DOCUMENTO,
 		bodyParams: [mensaje],
-		header: {
-			type: "document",
-			url: reciboUrl,
-			filename: `Recibo-Pago-${pagoId}.pdf`,
-		},
+		header: imagenUrl
+			? { type: "image", url: imagenUrl }
+			: {
+					type: "document",
+					url: reciboUrl,
+					filename: `Recibo-Pago-${pagoId}.pdf`,
+				},
 		logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 	});
 
@@ -429,6 +442,7 @@ export async function sendReciboPagoWhatsapp(
 						...(result.providerResponse ?? {}),
 						templateMessageId: result.templateMessageId,
 						reciboUrl,
+						imagenUrl: imagenUrl ?? undefined,
 						pagoId,
 						testMode,
 						realTarget: testMode ? (realPhone ?? undefined) : undefined,
@@ -440,6 +454,7 @@ export async function sendReciboPagoWhatsapp(
 					providerResponse: {
 						...(result.providerResponse ?? {}),
 						reciboUrl,
+						imagenUrl: imagenUrl ?? undefined,
 						pagoId,
 						testMode,
 						realTarget: testMode ? (realPhone ?? undefined) : undefined,

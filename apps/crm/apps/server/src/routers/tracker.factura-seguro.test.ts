@@ -1163,10 +1163,9 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 	test("un Word o un Excel también se envía, con su nombre y su tipo", async () => {
 		const DOCX =
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-		contenidoR2 = Buffer.concat([
-			Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-			Buffer.from("[Content_Types].xml word/document.xml"),
-		]);
+		contenidoR2 = Buffer.from(
+			zipConEntradas(["[Content_Types].xml", "word/document.xml"]),
+		);
 		const r = await enviar("factura.docx", "admin", DOCX);
 		expect(r).toMatchObject({ enviada: true });
 		expect(subidosR2).toEqual([
@@ -1219,6 +1218,34 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 		expect(correos).toHaveLength(0);
 	});
 });
+
+// ZIP mínimo pero bien formado (sin comprimir), con su directorio central.
+function zipConEntradas(nombres: string[]): Uint8Array {
+	const locales: Buffer[] = [];
+	const centrales: Buffer[] = [];
+	let desplazamiento = 0;
+	for (const nombre of nombres) {
+		const n = Buffer.from(nombre);
+		const local = Buffer.alloc(30);
+		local.writeUInt32LE(0x04034b50, 0);
+		local.writeUInt16LE(n.length, 26);
+		const central = Buffer.alloc(46);
+		central.writeUInt32LE(0x02014b50, 0);
+		central.writeUInt16LE(n.length, 28);
+		central.writeUInt32LE(desplazamiento, 42);
+		locales.push(local, n);
+		centrales.push(central, n);
+		desplazamiento += 30 + n.length;
+	}
+	const directorio = Buffer.concat(centrales);
+	const fin = Buffer.alloc(22);
+	fin.writeUInt32LE(0x06054b50, 0);
+	fin.writeUInt16LE(nombres.length, 8);
+	fin.writeUInt16LE(nombres.length, 10);
+	fin.writeUInt32LE(directorio.length, 12);
+	fin.writeUInt32LE(desplazamiento, 16);
+	return new Uint8Array(Buffer.concat([...locales, directorio, fin]));
+}
 
 describe("factura programada para el cierre", () => {
 	const KEY_ANTES = `opportunities/${ID}/555-antes-factura.pdf`;

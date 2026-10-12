@@ -1924,6 +1924,20 @@ export const contractGenerationRouter = {
 					let etapa: Awaited<ReturnType<typeof exigirEtapaQuePermiteReemplazo>>;
 					try {
 						etapa = await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						// Entre generar y enlazar pudieron marcar o cambiar al
+						// representante: la batería y quien firma tienen que seguir
+						// siendo los de la oportunidad. Si no, se borran en WeeTrust.
+						await exigirLaBateriaDeLaOportunidad(
+							input.opportunityId,
+							input.contracts.flatMap((c) =>
+								c.contractType === PAQUETE_CARTAS
+									? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+									: [c.contractType],
+							),
+							(input.generationData ?? [])
+								.flatMap((c) => c.signers ?? [])
+								.find((f) => f.role === "TITULAR"),
+						);
 						// Entre generar y enlazar pudo instalarse otro paquete (otra
 						// pestaña, otra persona). Se revisa de nuevo antes de retirar nada.
 						await exigirQueElPaqueteTraigaLasVigentes(
@@ -2614,25 +2628,31 @@ export const contractGenerationRouter = {
 				});
 			}
 
-			const { leadId, signers } = await firmantesDeLaOportunidad(
-				input.opportunityId,
-				{ subidaAMano: true },
-			);
+			// Quiénes firman, sacado de la oportunidad tal como está ahora. Se arma
+			// antes del candado para cortar temprano, y otra vez ya con el candado:
+			// en la espera pudieron cambiar al representante de la sociedad.
+			const prepararFirmantes = async () => {
+				const { leadId, signers } = await firmantesDeLaOportunidad(
+					input.opportunityId,
+					{ subidaAMano: true },
+				);
+				const firmantes = firmantesDelContrato(input.contractType, signers);
 
-			const firmantes = firmantesDelContrato(input.contractType, signers);
-
-			// Hace falta el titular, no cualquier firmante: sin él, el primer
-			// codeudor ocupa el bloque de deudores y termina firmando en la línea
-			// del cliente.
-			if (
-				!esFirmaFisica(input.contractType) &&
-				!firmantes?.some((f) => f.role === "TITULAR")
-			) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El cliente no tiene correo registrado. Cargalo antes de subir el contrato.",
-				});
-			}
+				// Hace falta el titular, no cualquier firmante: sin él, el primer
+				// codeudor ocupa el bloque de deudores y termina firmando en la línea
+				// del cliente.
+				if (
+					!esFirmaFisica(input.contractType) &&
+					!firmantes?.some((f) => f.role === "TITULAR")
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El cliente no tiene correo registrado. Cargalo antes de subir el contrato.",
+					});
+				}
+				return { leadId, firmantes };
+			};
+			await prepararFirmantes();
 
 			await exigirQueSePuedaSubir(input);
 
@@ -2660,6 +2680,7 @@ export const contractGenerationRouter = {
 				await exigirCoberturaDeLaAseguradora(input.opportunityId, [
 					input.contractType,
 				]);
+				const { leadId, firmantes } = await prepararFirmantes();
 
 				// En WeeTrust se ve quién firma y qué firma, no el nombre con el
 				// que quedó guardado el archivo en la computadora de jurídico

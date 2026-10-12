@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
+	coDebtors,
 	leads,
 	opportunities,
 	opportunityStageHistory,
@@ -50,10 +51,17 @@ import {
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
+	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
+import {
 	adminProcedure,
 	juridicoProcedure,
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
+import { cartasDelPaquete, PAQUETE_CARTAS } from "../lib/paquete-cartas";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -171,6 +179,83 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	}
 
 	return { contract, documentID };
+}
+
+/**
+ * Por qué la batería vigente ya no es la de la oportunidad, o null.
+ *
+ * Después de enlazar pueden marcar o cambiar al representante legal, o pasar
+ * el lead a empresa: los contratos quedan con la batería o el titular de antes
+ * y aprobar los mandaría a firmar así (y el WhatsApp, que busca al firmante de
+ * hoy, no encontraría sus enlaces). Se mira al aprobar porque es la puerta por
+ * donde salen a firma, sea cual sea el cambio que los dejó viejos.
+ */
+async function motivoBateriaVigenteDesactualizada(
+	opportunityId: string,
+): Promise<string | null> {
+	const vigentes = await db
+		.select({
+			id: generatedLegalContracts.id,
+			contractType: generatedLegalContracts.contractType,
+			apiResponse: generatedLegalContracts.apiResponse,
+		})
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				contratoVigente(),
+			),
+		);
+	const tipos = vigentes.flatMap((c) =>
+		c.contractType === PAQUETE_CARTAS
+			? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+			: [c.contractType],
+	);
+
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const datos = { clientType: oportunidad?.clientType, coDeudores };
+
+	const motivo = motivoParaNoGenerar(datos, tipos);
+	if (motivo) return motivo;
+
+	// El titular de cada contrato tiene que ser el representante de hoy. En
+	// modo prueba no se puede comparar: todos los titulares tienen el correo de
+	// prueba.
+	if (!esOportunidadDeSociedad(datos) || isTestModeEnabled()) return null;
+	const representante = representanteLegalDe(datos);
+	if (vigentes.length === 0) return null;
+	const titulares = await db
+		.select({ email: contractSignatories.email })
+		.from(contractSignatories)
+		.where(
+			and(
+				inArray(
+					contractSignatories.contractId,
+					vigentes.map((c) => c.id),
+				),
+				eq(contractSignatories.role, "TITULAR"),
+			),
+		);
+	for (const titular of titulares) {
+		const cambio = motivoPorRepresentanteCambiado(representante, titular);
+		if (cambio) return cambio;
+	}
+	return null;
 }
 
 /**
@@ -1310,6 +1395,16 @@ export const legalContractsRouter = {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
+					});
+				}
+
+				// Y que sean los que le tocan hoy (batería y titular de la sociedad).
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede aprobar: ${desactualizada}`,
 					});
 				}
 

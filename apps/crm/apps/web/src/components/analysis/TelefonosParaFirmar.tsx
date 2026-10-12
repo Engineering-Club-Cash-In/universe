@@ -38,7 +38,9 @@ export function TelefonosParaFirmar({
 	onGuardado?: () => void;
 }) {
 	const codeudoresQuery = useQuery({
-		queryKey: ["codeudores-para-firmar", opportunityId],
+		// La misma clave que `CoDebtorsView`: al marcar al representante o
+		// cargarle el celular desde el detalle, esto se actualiza solo.
+		queryKey: ["coDebtors", opportunityId],
 		queryFn: () => client.getCoDebtorsByOpportunity({ opportunityId }),
 	});
 

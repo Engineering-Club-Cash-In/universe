@@ -123,13 +123,22 @@ describe("qué batería se puede generar", () => {
 describe("regenerar con el representante de la última generación", () => {
 	const representante = { dpi: "2999999980101", email: "rep@prueba.test" };
 
-	test("mismo DPI, aunque venga con espacios: se puede", () => {
+	test("mismo DPI, aunque venga con espacios, y mismo correo: se puede", () => {
 		expect(
 			motivoPorRepresentanteCambiado(representante, {
 				dpi: "2999 99998 0101",
-				email: "otro@prueba.test",
+				email: "REP@prueba.test",
 			}),
 		).toBeNull();
+	});
+
+	test("mismo DPI pero le corrigieron el correo: hay que generar de nuevo", () => {
+		expect(
+			motivoPorRepresentanteCambiado(representante, {
+				dpi: "2999999980101",
+				email: "viejo@prueba.test",
+			}),
+		).toContain("cambió");
 	});
 
 	test("otro DPI: hay que generar de nuevo", () => {

@@ -536,10 +536,11 @@ export function InvestmentAssignmentSection({
 	const participacionCoincide = Math.abs(totalParticipacion - 100) < 0.01;
 
 	// Una sociedad firma por su representante legal: sin él marcado, o sin su
-	// celular, los enlaces de firma no le llegarían a nadie. Misma consulta que
-	// "Celulares para la firma", que es donde se corrige.
+	// celular, los enlaces de firma no le llegarían a nadie. Misma consulta (y
+	// clave) que "Celulares para la firma" y los co-firmantes del detalle: lo
+	// que se corrija en cualquiera de los dos destraba el botón sin recargar.
 	const codeudoresParaFirmar = useQuery({
-		queryKey: ["codeudores-para-firmar", selectedOpportunity?.id],
+		queryKey: ["coDebtors", selectedOpportunity?.id],
 		queryFn: () =>
 			client.getCoDebtorsByOpportunity({
 				opportunityId: selectedOpportunity?.id ?? "",

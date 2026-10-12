@@ -130,9 +130,11 @@ export function motivoParaNoGenerar<C extends CodeudorDeLaOportunidad>(
  * Por qué no se puede volver a emitir con el titular de la última generación,
  * o null.
  *
- * Regenerar reusa los firmantes de la foto. En una sociedad el titular es el
- * representante legal: si después lo cambiaron, la batería saldría a firma con
- * el anterior. Se compara por DPI y, en fotos que no lo guardaron, por correo.
+ * Regenerar y enlazar reusan los firmantes de la generación. En una sociedad
+ * el titular es el representante legal: si después lo cambiaron, o le
+ * corrigieron el correo, la batería saldría a firma con el anterior (y el
+ * WhatsApp, que busca por el correo de hoy, no encontraría sus enlaces). Tienen
+ * que coincidir el correo y, si la foto lo guardó, el DPI.
  */
 export function motivoPorRepresentanteCambiado(
 	representante: { dpi: string; email: string | null } | null,
@@ -140,10 +142,13 @@ export function motivoPorRepresentanteCambiado(
 ): string | null {
 	if (!representante || !titular) return null;
 	const soloDigitos = (dpi: string) => dpi.replace(/\D/g, "");
-	const mismo = titular.dpi?.trim()
-		? soloDigitos(titular.dpi) === soloDigitos(representante.dpi)
-		: titular.email.trim().toLowerCase() ===
-			(representante.email ?? "").trim().toLowerCase();
+	const mismoDpi =
+		!titular.dpi?.trim() ||
+		soloDigitos(titular.dpi) === soloDigitos(representante.dpi);
+	const mismoCorreo =
+		titular.email.trim().toLowerCase() ===
+		(representante.email ?? "").trim().toLowerCase();
+	const mismo = mismoDpi && mismoCorreo;
 	return mismo
 		? null
 		: "El representante legal de la sociedad cambió desde la última generación: generá la batería de nuevo desde el asistente.";

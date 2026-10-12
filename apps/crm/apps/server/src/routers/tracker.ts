@@ -1193,6 +1193,14 @@ export const trackerRouter = {
 					.where(eq(opportunities.id, fila.id))
 					.for("update");
 				exigirMismoEstado(vigente?.status, fila.status);
+				// El correo dice que se autorizó un crédito: si dejó de estar ganado
+				// (por ejemplo, se perdió), ya no se reenvía.
+				if (vigente?.status !== "won") {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La oportunidad ya no está ganada: no se reenvía la factura",
+					});
+				}
 				if (!puedeReintentarDesdeCrm(context, vigente?.assignedTo)) {
 					throw new ORPCError("FORBIDDEN", {
 						message: "No tienes permiso para reenviar esta factura",

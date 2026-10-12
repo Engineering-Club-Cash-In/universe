@@ -474,6 +474,18 @@ const DATE_DERIVED_FIELDS = [
 ];
 
 // Helper function to convert a number group to words (for DPI)
+const VEINTIS_CON_TILDE: Record<number, string> = {
+	2: "veintidós",
+	3: "veintitrés",
+	6: "veintiséis",
+};
+
+/** En los montos va "veintiún" ("veintiún mil quetzales"), que también es aguda. */
+const VEINTIS_CON_TILDE_APOCOPADOS: Record<number, string> = {
+	...VEINTIS_CON_TILDE,
+	1: "veintiún",
+};
+
 function dpiGroupToWords(numStr: string): string {
 	const num = Number.parseInt(numStr, 10);
 	if (Number.isNaN(num)) return numStr;
@@ -568,7 +580,9 @@ function dpiGroupToWords(numStr: string): string {
 				if (u === 0) {
 					result += result ? ` ${decenas[d]}` : decenas[d];
 				} else if (d === 2) {
-					result += result ? ` veinti${unidades[u]}` : `veinti${unidades[u]}`;
+					// Las agudas llevan tilde: veintidós, veintitrés, veintiséis.
+					const veinti = VEINTIS_CON_TILDE[u] ?? `veinti${unidades[u]}`;
+					result += result ? ` ${veinti}` : veinti;
 				} else {
 					result += result
 						? ` ${decenas[d]} y ${unidades[u]}`
@@ -649,7 +663,9 @@ export function moneyToWords(amount: number): string {
 			if (u === 0) {
 				resultado += decenas[d];
 			} else if (d === 2) {
-				resultado += "VEINTI" + unidades[u];
+				resultado += (
+					VEINTIS_CON_TILDE_APOCOPADOS[u] ?? `veinti${unidades[u]}`
+				).toUpperCase();
 			} else {
 				resultado += decenas[d] + " Y " + unidades[u];
 			}
@@ -1286,10 +1302,13 @@ export function DynamicContractWizard({
 				// === CLIENTE DATA (from CRM) ===
 				switch (fieldKeyLower) {
 					case "nombrecompleto":
-						if (cliente.nombreCompleto) {
+						// RENAP aunque el CRM no traiga nombre: en una sociedad no lo trae
+						// (el de la compra es el de la empresa) y RENAP responde con el
+						// del representante, que es quien firma.
+						if (renapInfo || cliente.nombreCompleto) {
 							initialValues[field.key] = renapInfo
 								? `${renapInfo.firstName} ${renapInfo.secondName} ${renapInfo.thirdName} ${renapInfo.firstLastName} ${renapInfo.secondLastName} ${renapInfo.marriedLastName}`.toUpperCase()
-								: cliente.nombreCompleto.toUpperCase();
+								: (cliente.nombreCompleto ?? "").toUpperCase();
 							return;
 						}
 						break;

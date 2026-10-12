@@ -1,18 +1,6 @@
--- Catálogo de documentos de backend-2 (schema docuseal, Supabase PROD).
--- Anexos 1 y 2 separados (individual) + contrato de participación y sus
--- anexos para sociedad. Lo corre a mano quien tenga acceso a PROD.
---
--- Correr en orden. El paso 1 va SUELTO (fuera de transacción): Postgres no deja
--- usar un valor de enum en la misma transacción que lo agrega.
-
--- ============================================================================
--- 1) Valores nuevos del enum (fuera de transacción, uno por uno)
--- ============================================================================
-ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'anexo1_confirmacion_participacion';
-ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'anexo2_designacion_beneficiario';
-ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'contrato_participacion_administracion_cartera_sociedad';
-ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'anexo1_confirmacion_participacion_sociedad';
-ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'anexo2_designacion_beneficiario_sociedad';
+-- Catálogo de documentos de backend-2 (schema docuseal, Supabase PROD), PASO 2 de 2.
+-- Correr DESPUÉS de catalogo-anexos-y-participacion-sociedad-1-enum.sql, en otra
+-- ejecución. Se puede repetir: no duplica campos, documentos ni enlaces.
 
 -- ============================================================================
 -- 2) Campos, documentos y enlaces (en una transacción)

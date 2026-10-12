@@ -974,9 +974,9 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		// envía a créditos que ya tienen cuenta Nexa (prepararCuentaNexaParaEnvio):
 		// es el aviso para clientes existentes; la bienvenida y `cuenta_nexa`
 		// cubren a los nuevos.
-		cuerpo: `{clienteNombre}. Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito.
+		cuerpo: `{clienteNombre}. Ya está disponible tu nueva cuenta exclusiva para realizar los pagos de tu crédito. Vía transferencia desde tu banco de preferencia hacia:
 
-Vía transferencia desde tu banco de preferencia hacia: 🏛️ Banco Nexa 🔢 Cuenta Monetaria 🔢 {cuentaNexa}
+🏛️ Banco Nexa 🔢 Cuenta Monetaria 🔢 {cuentaNexa}
 
 Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},

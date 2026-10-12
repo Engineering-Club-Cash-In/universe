@@ -137,6 +137,10 @@ import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 import { esGestionAutomatica } from "../lib/historial-agendas";
 import {
+	diasHabilesSinContacto,
+	inicioVentanaConContacto,
+} from "../lib/sin-contacto";
+import {
 	getTestPhone,
 	isTestModeEnabled,
 	TEST_EMAIL,
@@ -1083,24 +1087,71 @@ async function sifcosPorFiltroGestion(
 	// sin_gestion_48h / sin_contactar_hoy: universo menos lo gestionado.
 	const universo = await opts.universo();
 	if (universo.length === 0) return [];
+	// S2: «sin gestión» usa la regla única de «sin contacto» (lib/sin-contacto.ts):
+	// al menos 3 días hábiles completos sin gestión manual. (La clave del filtro
+	// sigue siendo `sin_gestion_48h` para no romper el contrato con el front.)
 	const desde =
-		filtro === "sin_contactar_hoy"
-			? inicioHoy
-			: new Date(ahora.getTime() - 48 * 60 * 60 * 1000);
-	const gestionados = await db
-		.selectDistinct({ numeroSifco: casosCobros.numeroCreditoSifco })
+		filtro === "sin_contactar_hoy" ? inicioHoy : inicioVentanaConContacto(ahora);
+	if (filtro === "sin_contactar_hoy") {
+		const gestionados = await db
+			.selectDistinct({ numeroSifco: casosCobros.numeroCreditoSifco })
+			.from(contactosCobros)
+			.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
+			.where(
+				and(
+					inArray(casosCobros.numeroCreditoSifco, universo),
+					gte(contactosCobros.fechaContacto, desde),
+					ne(contactosCobros.estadoContacto, "link_pago_generado"),
+					not(esGestionAutomatica()),
+				),
+			);
+		const yaGestionados = new Set(gestionados.map((g) => g.numeroSifco));
+		return universo.filter((s) => !yaGestionados.has(s));
+	}
+	// sin_gestion_48h (S2): igual que la cola del día y el conteo del Dashboard,
+	// se mira solo el caso VIGENTE de cada SIFCO (reaperturas y migraciones dejan
+	// casos viejos con gestiones que no cuentan). Sin ninguna gestión manual
+	// nunca hay fecha base, así que no califica; con una dentro de la ventana
+	// tampoco. Queda quien tiene gestión manual y toda es anterior a la ventana.
+	const casos = await db
+		.select({
+			id: casosCobros.id,
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			activo: casosCobros.activo,
+			updatedAt: casosCobros.updatedAt,
+		})
+		.from(casosCobros)
+		.where(inArray(casosCobros.numeroCreditoSifco, universo));
+	const vigentes = [...agruparCasosVigentesPorSifco(casos).values()];
+	if (vigentes.length === 0) return [];
+	const ultimaManual = await db
+		.select({
+			casoCobroId: contactosCobros.casoCobroId,
+			ultima: sql<Date | null>`max(${contactosCobros.fechaContacto})`.mapWith(
+				contactosCobros.fechaContacto,
+			),
+		})
 		.from(contactosCobros)
-		.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
 		.where(
 			and(
-				inArray(casosCobros.numeroCreditoSifco, universo),
-				gte(contactosCobros.fechaContacto, desde),
+				inArray(
+					contactosCobros.casoCobroId,
+					vigentes.map((c) => c.id),
+				),
 				ne(contactosCobros.estadoContacto, "link_pago_generado"),
 				not(esGestionAutomatica()),
 			),
-		);
-	const yaGestionados = new Set(gestionados.map((g) => g.numeroSifco));
-	return universo.filter((s) => !yaGestionados.has(s));
+		)
+		.groupBy(contactosCobros.casoCobroId);
+	const antiguas = new Set(
+		ultimaManual
+			.filter((u) => u.ultima && u.ultima < desde)
+			.map((u) => u.casoCobroId),
+	);
+	return universo.filter((sifco) => {
+		const caso = vigentes.find((c) => c.numeroCreditoSifco === sifco);
+		return caso != null && antiguas.has(caso.id);
+	});
 }
 
 /**
@@ -4783,6 +4834,12 @@ export const cobrosRouter = {
 								.select({
 									casoCobroId: contactosCobros.casoCobroId,
 									ultimaFecha: max(contactosCobros.fechaContacto),
+									// S2: «sin contacto» mide solo gestión MANUAL (regla única en
+									// lib/sin-contacto.ts); `ultimaFecha` sigue contando cualquier
+									// tipo porque lo usa «contactado hoy» del SLA.
+									ultimaManual: sql<Date | null>`max(${contactosCobros.fechaContacto}) FILTER (WHERE NOT ${esGestionAutomatica()})`.mapWith(
+										contactosCobros.fechaContacto,
+									),
 								})
 								.from(contactosCobros)
 								.where(
@@ -4817,23 +4874,23 @@ export const cobrosRouter = {
 					promesasPorCaso.set(p.casoCobroId, lista);
 				}
 
-				const hoyStr = toDateStrGT(new Date());
+				const ahoraCola = new Date();
+				const hoyStr = toDateStrGT(ahoraCola);
 				const contactadoHoyPorCaso = new Set<string>();
+				// Días HÁBILES completos sin gestión manual (lib/sin-contacto.ts).
 				const diasSinContactoPorCaso = new Map<string, number>();
-				// gtDateStrToDate: medianoche GT del día, no medianoche UTC — misma
-				// convención que usa el resto del proyecto para comparar fechas GT
-				// por día calendario (ver promesa-pago.ts).
-				const hoyMs = gtDateStrToDate(hoyStr).getTime();
-				const MS_POR_DIA = 24 * 60 * 60 * 1000;
 				for (const c of ultimosContactos) {
 					if (!c.ultimaFecha) continue;
 					if (toDateStrGT(c.ultimaFecha) === hoyStr) {
 						contactadoHoyPorCaso.add(c.casoCobroId);
 					}
-					const ultimaFechaStr = toDateStrGT(c.ultimaFecha);
-					const ultimaMs = gtDateStrToDate(ultimaFechaStr).getTime();
-					const dias = Math.floor((hoyMs - ultimaMs) / MS_POR_DIA);
-					diasSinContactoPorCaso.set(c.casoCobroId, dias);
+					// Sin gestión manual nunca no hay fecha base: no califica.
+					if (c.ultimaManual) {
+						diasSinContactoPorCaso.set(
+							c.casoCobroId,
+							diasHabilesSinContacto(c.ultimaManual, ahoraCola),
+						);
+					}
 				}
 
 				// Rediseño: seguimiento por caso (intentos, último intento, llamada

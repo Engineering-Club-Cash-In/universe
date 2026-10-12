@@ -19,8 +19,20 @@
  */
 
 import { z } from "zod";
+import { memoConTtl } from "../lib/memo-ttl";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
 import { calcularKpisYEquipo } from "../services/supervision-complementos";
+import {
+	calcularPendientes,
+	contarSinContactoEquipo,
+} from "../services/supervision-pendientes";
+
+/**
+ * «Sin contacto» del equipo (S2) tarda ~3 s (recorre toda la cola) y NO depende
+ * del período ni de quien consulta: se guarda 60 s para que cambiar entre Día,
+ * Semana y Mes no lo recalcule cada vez.
+ */
+const sinContactoEquipoMemo = memoConTtl<number>(60_000);
 
 /** Mismos períodos que el segmentado Día / Semana / Mes del dashboard. */
 export const PERIODOS_SUPERVISION = ["dia", "semana", "mes"] as const;
@@ -36,11 +48,21 @@ export interface PendientesSupervision {
 	/** Créditos que cumplen el criterio para pasar a Prejurídico (criterio por definir). */
 	listosPrejuridico: number | null;
 	/**
-	 * Aprobaciones que el supervisor resolvió hoy (convenios, recuperaciones,
-	 * apagados y, cuando existan, rebajas y documentos). Alimenta la barra
-	 * «x de y aprobaciones resueltas hoy».
+	 * Aprobaciones que el supervisor resolvió hoy de los tipos que el Dashboard
+	 * ya lista como pendientes (convenios, recuperaciones y apagados). Alimenta
+	 * la barra «x de y aprobaciones resueltas hoy».
 	 */
 	aprobacionesResueltasHoy: number | null;
+	/**
+	 * Rebajas, documentos y Jurídico que resolvió hoy. Van aparte para que la
+	 * barra no cuente resueltas de tipos que aún no están en sus pendientes;
+	 * el front las suma a ambos lados cuando agregue esos chips.
+	 */
+	otrasResueltasHoy: {
+		rebajas: number;
+		documentos: number;
+		juridico: number;
+	} | null;
 }
 
 /** Tarea S3 · KPIs del equipo en el período (Día / Semana / Mes). */
@@ -87,16 +109,20 @@ export const supervisionCobrosRouter = {
 	 */
 	getSupervisionComplementos: cobrosSupervisorProcedure
 		.input(z.object({ periodo: z.enum(PERIODOS_SUPERVISION) }))
-		.handler(async ({ input }) => {
-			// TODO(José) · tarea S1: documentos por autorizar (F6), rebajas de mora
-			// por revisar (W2), listos para Prejurídico (criterio + consulta) y las
-			// aprobaciones que este supervisor resolvió hoy (para «x de y»).
-			const pendientes = null as PendientesSupervision | null;
-			// TODO(José) · tarea S2: créditos del equipo sin contacto efectivo en
-			// más de 3 días hábiles. Hoy hay tres umbrales distintos (3 días hábiles
-			// en la alerta, más de 5 días en la cola, 48 h en la cartera): unificar
-			// y exponer el conteo aquí y como filtro de la cola/cartera.
-			const sinContacto3Dias = null as number | null;
+		.handler(async ({ input, context }) => {
+			// S1 + S2 (services/supervision-pendientes.ts). Cada conteo falla solo.
+			const [pendientes, sinContacto3Dias] = await Promise.all([
+				calcularPendientes({
+					userId: context.userId,
+					email: context.session?.user?.email,
+				}),
+				sinContactoEquipoMemo("equipo", () => contarSinContactoEquipo()).catch(
+					(error) => {
+						console.error("[getSupervisionComplementos] sin contacto:", error);
+						return null;
+					},
+				),
+			]);
 			// S3 + S4: KPIs del equipo y columnas de la tabla Equipo
 			// (services/supervision-complementos.ts). Cada bloque falla solo.
 			const { kpis, equipo } = await calcularKpisYEquipo(input.periodo);

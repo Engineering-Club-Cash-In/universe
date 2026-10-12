@@ -6,7 +6,7 @@ import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { anularConvenio } from "../controllers/anularConvenio";
 import { db } from "../database";
 import { convenioDecisiones } from "../database/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { authMiddleware } from "./midleware";
 
 // CB-033 — Gate de rol server-side para decidir un convenio (aprobar/
@@ -451,6 +451,61 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       detail: {
         summary: "Get convenio decision history for a credit",
         description: "CB-033: append-only decision log, survives convenio deletion on rejection",
+        tags: ["Payment Agreements"],
+      },
+    }
+  )
+
+  // Supervisión de cobros (S1, issue #1891) — decisiones de convenio que tomó
+  // UN supervisor en una ventana de tiempo, para la barra «x de y aprobaciones
+  // resueltas hoy». Solo cuenta; la bitácora completa sigue siendo
+  // GET /decisiones por crédito.
+  .get(
+    "/decisiones/conteo",
+    async ({ query, set }) => {
+      const desde = new Date(query.desde);
+      const hasta = query.hasta ? new Date(query.hasta) : null;
+      const email = query.decidido_por_email.trim().toLowerCase();
+      if (Number.isNaN(desde.getTime()) || (hasta && Number.isNaN(hasta.getTime())) || !email) {
+        set.status = 400;
+        return { success: false, message: "desde, hasta o decidido_por_email inválidos" };
+      }
+      try {
+        const condiciones = [
+          sql`lower(${convenioDecisiones.decididoPorEmail}) = ${email}`,
+          gte(convenioDecisiones.decididoEn, desde),
+        ];
+        if (hasta) condiciones.push(lt(convenioDecisiones.decididoEn, hasta));
+        const [fila] = await db
+          .select({
+            aprobados: sql<number>`count(*) FILTER (WHERE ${convenioDecisiones.decision} = 'aprobado')::int`,
+            rechazados: sql<number>`count(*) FILTER (WHERE ${convenioDecisiones.decision} = 'rechazado')::int`,
+          })
+          .from(convenioDecisiones)
+          .where(and(...condiciones));
+        const aprobados = Number(fila?.aprobados ?? 0);
+        const rechazados = Number(fila?.rechazados ?? 0);
+        set.status = 200;
+        return { success: true, data: { aprobados, rechazados, total: aprobados + rechazados } };
+      } catch (error) {
+        console.error("[GET /payment-agreements/decisiones/conteo] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Internal server error",
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+    {
+      query: t.Object({
+        decidido_por_email: t.String(),
+        desde: t.String(),
+        hasta: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Count convenio decisions made by one supervisor in a time window",
+        description: "S1 (supervisión de cobros): aprobaciones resueltas hoy por el supervisor. `desde` inclusive, `hasta` exclusivo (ISO).",
         tags: ["Payment Agreements"],
       },
     }

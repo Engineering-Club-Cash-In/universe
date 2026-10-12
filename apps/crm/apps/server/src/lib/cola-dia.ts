@@ -13,8 +13,8 @@
  *  4. incumplida: hay una promesa incumplida (estado_promesa='incumplida'),
  *     o pendiente cuya fecha prometida ya pasó (venció antes de hoy y el job
  *     nocturno / getEstadoPromesasPago aún no la marcó incumplida).
- *  5. sinContacto: lleva más de UMBRAL_SIN_CONTACTO días sin que NADIE lo
- *     contacte (MAX(fecha_contacto) por caso), sin importar bucket ni SLA —
+ *  5. sinContacto: lleva al menos 3 días hábiles completos sin una gestión
+ *     manual (regla única, lib/sin-contacto.ts), sin importar bucket ni SLA —
  *     un crédito puede llevar meses en el mismo bucket sin que nadie lo
  *     toque, y SLA no lo detecta porque solo mira la entrada al bucket, no
  *     la actividad real. Un crédito SIN NINGÚN contacto (nunca se le llamó)
@@ -27,6 +27,7 @@
  */
 
 import { toDateStrGT } from "./guatemala-month-window";
+import { estaSinContacto } from "./sin-contacto";
 
 // Única fuente de verdad de las categorías — el input zod de getColaDia
 // (routers/cobros.ts) usa z.enum(CATEGORIAS_COLA_DIA) directo sobre este
@@ -47,8 +48,8 @@ export const CATEGORIAS_COLA_DIA = [
 
 export type CategoriaColaDia = (typeof CATEGORIAS_COLA_DIA)[number];
 
-/** Días sin contacto a partir de los cuales un crédito entra a la categoría "sin_contacto". */
-export const UMBRAL_DIAS_SIN_CONTACTO = 5;
+// El umbral de "sin_contacto" vive en lib/sin-contacto.ts (regla única: 3 días
+// hábiles completos sin gestión manual).
 
 export interface CreditoParaClasificar {
 	/** YYYY-MM-DD (día GT), ya calculado por cartera-back. null = sin SLA (crédito sin fila en buckets_historial, o B0). */
@@ -70,8 +71,8 @@ export interface CreditoParaClasificar {
 		fechaAlerta?: Date | null;
 	}>;
 	/**
-	 * Días transcurridos desde el ÚLTIMO contacto registrado (cualquier tipo),
-	 * ya calculados en día GT. null = nunca se registró ningún contacto para
+	 * Días HÁBILES completos desde la última gestión MANUAL (lib/sin-contacto.ts),
+	 * ya calculados en día GT. null = nunca se registró una gestión manual para
 	 * este crédito — sin fecha base, no califica para "sin_contacto".
 	 */
 	diasSinContacto: number | null;
@@ -137,9 +138,7 @@ export function clasificarCreditoColaDia(
 		}
 	}
 
-	const sinContacto =
-		credito.diasSinContacto != null &&
-		credito.diasSinContacto > UMBRAL_DIAS_SIN_CONTACTO;
+	const sinContacto = estaSinContacto(credito.diasSinContacto);
 
 	return {
 		slaHoy,

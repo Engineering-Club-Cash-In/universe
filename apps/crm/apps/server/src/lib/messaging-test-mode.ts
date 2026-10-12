@@ -39,5 +39,12 @@ export function isTestModeEnabled(): boolean {
  * Si se pasa un índice, rota por la lista (útil para masivos).
  */
 export function getTestPhone(index = 0): string {
-	return TEST_PHONES[index % TEST_PHONES.length];
+	// `TEST_PHONES` en el .env (lista separada por comas) reemplaza a los
+	// números quemados: así se prueba un envío masivo contra UN solo teléfono.
+	const delEntorno = (process.env.TEST_PHONES ?? "")
+		.split(",")
+		.map((telefono) => telefono.trim())
+		.filter(Boolean);
+	const lista = delEntorno.length > 0 ? delEntorno : TEST_PHONES;
+	return lista[index % lista.length];
 }

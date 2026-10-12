@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { etapaPermite } from "server/src/lib/contratos-anulacion";
+import { BuroSummaryCard } from "@/components/buro-summary-card";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
@@ -512,8 +513,7 @@ export function OpportunityDetailModal({
 								contracts={opportunityContractsQuery.data}
 								isLoading={opportunityContractsQuery.isLoading}
 								puedeRegenerar={
-									!!userRole &&
-									PERMISSIONS.canRegenerateContractLinks(userRole)
+									!!userRole && PERMISSIONS.canRegenerateContractLinks(userRole)
 								}
 								// El rol no alcanza: fuera de 80% y 85% el servidor lo
 								// rechaza, y no hay que ofrecerlo.
@@ -525,7 +525,10 @@ export function OpportunityDetailModal({
 								puedeVincular={
 									!!userRole &&
 									PERMISSIONS.canLinkWeetrustDocument(userRole) &&
-									etapaPermite("regenerar", opportunity.stage?.closurePercentage)
+									etapaPermite(
+										"regenerar",
+										opportunity.stage?.closurePercentage,
+									)
 								}
 								enEtapaDeFirma={etapaPermite(
 									"regenerar",
@@ -621,6 +624,15 @@ export function OpportunityDetailModal({
 								)}
 							</div>
 						)}
+
+						{canAccessCRM &&
+							userRole !== "juridico" &&
+							(opportunity.stage?.closurePercentage ?? 0) >= 20 && (
+								<BuroSummaryCard
+									opportunityId={opportunity.id}
+									open={open}
+								/>
+							)}
 
 						{/* Disbursement Notes */}
 						{opportunity.status === "won" &&
@@ -781,8 +793,7 @@ export function OpportunityDetailModal({
 								quotation={
 									contractualQuotation
 										? {
-												amountToFinance:
-													contractualQuotation.amountToFinance,
+												amountToFinance: contractualQuotation.amountToFinance,
 												totalFinanced: contractualQuotation.totalFinanced,
 											}
 										: null

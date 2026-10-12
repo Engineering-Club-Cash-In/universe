@@ -26,12 +26,27 @@ export type PoolAsesor = { asesor_id: number; nombre: string };
  * Asesores elegibles (pool activo) de un bucket. Alimenta el dropdown del modal
  * de reasignación en el CRM y es la misma fuente que valida el server-side.
  */
-export async function getAsesoresPorBucket(bucket: number): Promise<PoolAsesor[]> {
-  const rows = await db
+export async function getAsesoresPorBucket(
+  bucket: number,
+  // Dentro de una transacción se pasa `tx`: pedir otra conexión al pool global
+  // mientras se sostiene una puede interbloquear con varias en paralelo.
+  ejecutor: Pick<typeof db, "select"> = db,
+  // Un asesor desactivado (`asesores.activo = false`, sin login) conserva sus
+  // filas de `asesor_bucket`; la recuperación y Jurídico ya exigen ambas
+  // banderas. Opt-in para no cambiar la reasignación individual.
+  soloAsesorActivo = false,
+): Promise<PoolAsesor[]> {
+  const rows = await ejecutor
     .select({ asesor_id: asesor_bucket.asesor_id, nombre: asesores.nombre })
     .from(asesor_bucket)
     .innerJoin(asesores, eq(asesores.asesor_id, asesor_bucket.asesor_id))
-    .where(and(eq(asesor_bucket.bucket, bucket), eq(asesor_bucket.activo, true)))
+    .where(
+      and(
+        eq(asesor_bucket.bucket, bucket),
+        eq(asesor_bucket.activo, true),
+        ...(soloAsesorActivo ? [eq(asesores.activo, true)] : []),
+      ),
+    )
     .orderBy(asesores.nombre);
   return rows;
 }

@@ -13,6 +13,7 @@ import {
   getAsesoresPorBucket,
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
+import { reasignarAsesorLote } from "../controllers/buckets/reasignarAsesorLote";
 import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
 import { enviarAJuridico, escalamientoAplicado } from "../controllers/buckets/juridico";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
@@ -908,6 +909,53 @@ export const bucketsRouter = new Elysia()
     },
     {
       body: t.Object({
+        asesor_nuevo_id: t.Union([t.Number(), t.String()]),
+        motivo: t.String(),
+        usuario_email: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // Reasignación MANUAL EN BLOQUE (S6): varios créditos a un mismo asesor, todo o
+  // nada. Misma validación que la individual, aplicada al lote completo antes de
+  // escribir; ante un solo error no se toca ningún crédito.
+  .post(
+    "/buckets/creditos/reasignar-lote",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const asesorNuevoId = Number(body?.asesor_nuevo_id);
+        if (!Number.isInteger(asesorNuevoId) || asesorNuevoId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_nuevo_id inválido" };
+        }
+        const result = await reasignarAsesorLote({
+          credito_ids: body?.credito_ids,
+          asesor_nuevo_id: asesorNuevoId,
+          motivo: body?.motivo,
+          usuario_email: body?.usuario_email,
+        });
+        if (!result.success) {
+          set.status = result.status;
+          return {
+            success: false,
+            message: result.message,
+            ...(result.errores && { errores: result.errores }),
+          };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo reasignar el lote de créditos",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
+        credito_ids: t.Array(t.Union([t.Number(), t.String()])),
         asesor_nuevo_id: t.Union([t.Number(), t.String()]),
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),

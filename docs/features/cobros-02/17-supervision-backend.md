@@ -6,6 +6,8 @@ La fase 1 del rediseño del supervisor trae dos pantallas del Figma «CRM Ventas
 
 Supervisión y administración ven lo mismo: el supervisor es el «admin de cobros». Todos los procedimientos que usa el Dashboard dejan pasar a ambos roles (`cobrosSupervisorProcedure` o `cobrosProcedure`).
 
+> **Plan, decisiones y avance de estas tareas: [doc 23](./23-plan-backend-supervision.md).** Este documento conserva el contrato original; donde diga «22:00» el cierre diario corre en realidad a las 00:15 (hora de Guatemala).
+
 El front ya está **conectado**. Lo que el Figma pide y el sistema todavía no tiene se muestra con «—» o con la marca «Pronto», y lee del stub `getSupervisionComplementos` (`apps/crm/apps/server/src/routers/supervision-cobros.ts`), que hoy devuelve `null` en cada campo.
 
 **Para cerrar una tarea:**

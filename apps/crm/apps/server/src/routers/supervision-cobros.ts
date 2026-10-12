@@ -6,11 +6,14 @@
  * coberturas, Págalo, carga por bucket, historial de agendas, cierre diario).
  * Lo que el Figma pide y el backend todavía no tiene vive acá:
  *
- * - `getSupervisionComplementos`: está CONECTADO. Devuelve `null` en cada campo
- *   y el front muestra "—" o "Pronto". Cada campo tiene su
- *   `TODO(José) · tarea Sn` con el contrato ya fijado: solo hay que llenar el
- *   cuerpo, el front no se toca.
- *   Detalle: docs/features/cobros-02/17-supervision-backend.md
+ * - `getSupervisionComplementos`: CONECTADO y lleno (tareas S1 a S4). Cada
+ *   bloque se calcula aparte y, si su fuente falla, llega `null` y el front
+ *   muestra "—": nunca tumba el resto. Servicios: services/supervision-
+ *   pendientes.ts (S1, S2) y services/supervision-complementos.ts (S3, S4).
+ * - `reasignarAsesorCreditosLote` (S6): reasignación en bloque, todo o nada.
+ *   Los filtros de la Cartera general (S5) viven en `getTodosLosCreditos`.
+ *   Decisiones y avance: docs/features/cobros-02/23-plan-backend-supervision.md
+ *   (contrato original: 17-supervision-backend.md).
  *
  * Archivo aparte (y montado aparte en src/index.ts), no en routers/index.ts:
  * `cobrosAppRouter` está en el límite donde TS7056 trunca EN SILENCIO el tipo
@@ -18,9 +21,15 @@
  * tipa por `orpcAparte` (web/src/utils/orpc.ts).
  */
 
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { memoConTtl } from "../lib/memo-ttl";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
+import {
+	CarteraBackHttpError,
+	carteraBackClient,
+} from "../services/cartera-back-client";
+import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import { calcularKpisYEquipo } from "../services/supervision-complementos";
 import {
 	calcularPendientes,
@@ -45,7 +54,7 @@ export interface PendientesSupervision {
 	documentosPorAutorizar: number | null;
 	/** Solicitudes de rebaja de mora por revisar (W2). */
 	rebajasPorRevisar: number | null;
-	/** Créditos que cumplen el criterio para pasar a Prejurídico (criterio por definir). */
+	/** Créditos que cumplen el criterio para pasar a Prejurídico (B3 a punto de caer a B4; ver lib/prejuridico.ts). */
 	listosPrejuridico: number | null;
 	/**
 	 * Aprobaciones que el supervisor resolvió hoy de los tipos que el Dashboard
@@ -74,7 +83,7 @@ export interface KpisEquipoSupervision {
 		/** Mismo monto en el período anterior, para la tendencia. */
 		montoAnterior: number | null;
 	} | null;
-	/** Cuentas curadas: quedaron sin mora y siguen en su bucket (definirlo). */
+	/** Cuentas curadas: créditos del equipo que bajaron de bucket en el período. */
 	cuentasCuradas: {
 		curadas: number;
 		/** Universo del que salen (el «/ 70» del Figma). */
@@ -94,9 +103,9 @@ export interface KpisEquipoSupervision {
 export interface EquipoAsesorSupervision {
 	/** asesor_id de cartera (el mismo de getAsesoresTraslados). */
 	asesorId: number;
-	/** Contactos que registró hoy, en vivo (el cierre diario solo llega a las 22:00). */
+	/** Gestiones manuales que registró hoy, en vivo (el cierre diario corre a las 00:15). */
 	contactosHoy: number | null;
-	/** Meta del asesor, en % (definir sobre qué). */
+	/** Meta del asesor, en %: recuperación del período ÷ su meta prorrateada. */
 	meta: number | null;
 	/** «Rescate», en %: recuperados ÷ (recuperados + escalados) del período. */
 	rescate: number | null;
@@ -133,5 +142,87 @@ export const supervisionCobrosRouter = {
 				kpis,
 				equipo,
 			};
+		}),
+
+	/**
+	 * S6 · Reasignación en bloque, TODO O NADA. Recibe varios créditos, el asesor
+	 * destino y el motivo; cartera valida el lote completo (el pool de cada
+	 * bucket, como `reasignarAsesorCredito`) y lo escribe en una sola
+	 * transacción. Si un solo crédito no cumple, no se reasigna ninguno y el
+	 * error nombra los que fallaron. Los que ya eran del asesor destino se
+	 * omiten (no es un error). Reemplaza el ciclo de `reasignarAsesorCredito`
+	 * del front, que dejaba la reasignación a medias ante un fallo.
+	 */
+	reasignarAsesorCreditosLote: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				creditoIds: z
+					.array(z.number().int().positive().max(2_147_483_647))
+					.min(1, "Seleccione al menos un crédito")
+					.max(200, "El máximo es de 200 créditos por lote"),
+				asesorNuevoId: z.number().int().positive().max(2_147_483_647),
+				motivo: z.string().trim().min(1, "El motivo es obligatorio"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				const res = await carteraBackClient.reasignarAsesorLote({
+					credito_ids: [...new Set(input.creditoIds)],
+					asesor_nuevo_id: input.asesorNuevoId,
+					motivo: input.motivo,
+					usuario_email: context.session.user.email,
+				});
+				// El acceso sigue a cartera: los avisos pendientes de «llamar al
+				// cliente» pasan al asesor nuevo (como en la reasignación individual).
+				await reconciliarAvisosLlamarCliente();
+				return {
+					asesorNuevoId: res.asesor_nuevo,
+					reasignados: res.reasignados.map((r) => ({
+						creditoId: r.credito_id,
+						asesorAnteriorId: r.asesor_anterior,
+						bucket: r.bucket,
+					})),
+					omitidos: res.omitidos.map((o) => ({
+						creditoId: o.credito_id,
+						motivo: o.motivo,
+					})),
+				};
+			} catch (err) {
+				if (err instanceof CarteraBackHttpError) {
+					const detalle = Array.isArray(err.payload.errores)
+						? (err.payload.errores as unknown[])
+								.map((e) =>
+									typeof e === "string"
+										? e
+										: ((e as { message?: string })?.message ?? ""),
+								)
+								.filter(Boolean)
+						: [];
+					const mensaje = [err.payload.message ?? err.message, ...detalle]
+						.join(" ")
+						.replace(/\[ERROR\]\s*/g, "");
+					// Solo 400 (el lote no cumple) y 409 (cambió o hay un job) son
+					// errores esperados del supervisor; 401/403/404/5xx son fallas del
+					// servicio y no deben verse como un dato inválido.
+					const codigo =
+						err.status === 409
+							? "CONFLICT"
+							: err.status === 400
+								? "BAD_REQUEST"
+								: "INTERNAL_SERVER_ERROR";
+					throw new ORPCError(codigo, {
+						message:
+							codigo === "INTERNAL_SERVER_ERROR"
+								? "No se pudo reasignar el lote: el servicio de cartera no respondió correctamente. Intente de nuevo."
+								: mensaje,
+						data: { errores: err.payload.errores ?? [] },
+					});
+				}
+				console.error("[reasignarAsesorCreditosLote]", err);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						"No se pudo reasignar el lote de créditos. Intente de nuevo.",
+				});
+			}
 		}),
 };

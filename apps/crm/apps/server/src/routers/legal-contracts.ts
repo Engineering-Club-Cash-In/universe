@@ -14,6 +14,7 @@ import {
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
+import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	documentIdDesdeLink,
@@ -71,9 +72,8 @@ import {
 	terminarDeVincular,
 	vincularEnLaFila,
 } from "../lib/vincular-documento-weetrust";
-import { closeOpportunity } from "../services/close-opportunity";
-import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { enviarMensajesDeCreditoNuevo } from "../services/bienvenida-credito";
+import { closeOpportunity } from "../services/close-opportunity";
 import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
@@ -173,8 +173,14 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	return { contract, documentID };
 }
 
-/** El tipo que lleva selfie además del DPI: es el título que se ejecuta. */
-const RECONOCIMIENTO_DE_DEUDA = "reconocimiento_deuda_feb_2025";
+/**
+ * Los tipos que llevan selfie además del DPI: es el título que se ejecuta, el
+ * individual y el de sociedad (lo firma el representante).
+ */
+const RECONOCIMIENTOS_DE_DEUDA = [
+	"reconocimiento_deuda_feb_2025",
+	"reconocimiento_deuda_sociedad",
+];
 
 /**
  * El contrato de una oportunidad al que se le quiere vincular un documento de
@@ -2391,7 +2397,7 @@ export const legalContractsRouter = {
 					esperados,
 					// Lo mismo que pide el generador cuando lo emite él: selfie con
 					// prueba de vida en el reconocimiento de deuda, DPI en el resto.
-					contract.contractType === RECONOCIMIENTO_DE_DEUDA
+					RECONOCIMIENTOS_DE_DEUDA.includes(contract.contractType)
 						? "Selfie y DPI"
 						: "DPI",
 				),

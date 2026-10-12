@@ -68,6 +68,13 @@ import { eqDpi } from "../lib/dpi-lookup";
 import { armarFirmantes } from "../lib/firmantes-de-la-oportunidad";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { createNotification } from "../lib/notificaciones";
+import {
+	CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD,
+	type CodeudorDeLaOportunidad,
+	type DatosDeSociedad,
+	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+} from "../lib/oportunidad-de-sociedad";
 import { juridicoProcedure } from "../lib/orpc";
 import {
 	agruparCartas,
@@ -967,6 +974,49 @@ async function exigirQueSePuedaSubir(input: {
 	}
 }
 
+/**
+ * Lo que decide si la oportunidad es de una sociedad: el tipo de cliente del
+ * lead y sus codeudores, en orden de registro. Null si no existe.
+ */
+async function sociedadDeLaOportunidad(
+	opportunityId: string,
+): Promise<DatosDeSociedad<CodeudorDeLaOportunidad> | null> {
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	if (!oportunidad) return null;
+
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+
+	return { clientType: oportunidad.clientType, coDeudores };
+}
+
+/**
+ * Corta si lo pedido no es la batería de la oportunidad: una sociedad lleva
+ * los de sociedad (y sin codeudores de más), una persona los individuales.
+ * Lo decide el servidor y no la pantalla, que pudo cargarse antes de que
+ * marcaran al representante.
+ */
+async function exigirLaBateriaDeLaOportunidad(
+	opportunityId: string,
+	contractTypes: string[],
+): Promise<void> {
+	const datos = await sociedadDeLaOportunidad(opportunityId);
+	if (!datos) return;
+	const motivo = motivoParaNoGenerar(datos, contractTypes);
+	if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
+}
+
 /** Firmante tal como lo manda el front. */
 const signerSchema = z.object({
 	role: z.enum(["TITULAR", "COFIRMANTE", "REP_LEGAL", "VENDEDOR"]),
@@ -980,29 +1030,63 @@ export const contractGenerationRouter = {
 	/**
 	 * Obtiene los tipos de contratos disponibles desde la API
 	 */
-	getContractTypes: juridicoProcedure.handler(async () => {
-		try {
-			const response = await getDocumentTypes();
-			if (!response.success) {
+	getContractTypes: juridicoProcedure
+		.input(
+			z
+				.object({
+					/**
+					 * Con la oportunidad, la batería es la que le toca: la de sociedad
+					 * si es de una empresa, sin opción de cambiarla. Sin ella, la de
+					 * ventas de siempre.
+					 */
+					opportunityId: z.string().uuid().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			try {
+				const datos = input?.opportunityId
+					? await sociedadDeLaOportunidad(input.opportunityId)
+					: null;
+				const esSociedad = datos ? esOportunidadDeSociedad(datos) : false;
+
+				const response = await getDocumentTypes(
+					esSociedad ? "ventas_sociedad" : undefined,
+				);
+				if (!response.success) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: "Error al obtener tipos de documentos",
+					});
+				}
+
+				// La declaración del vendedor no tiene versión de sociedad (la firma
+				// el vendedor): se toma de la de ventas, al final de la lista.
+				let data = response.data;
+				if (esSociedad) {
+					const deVentas = await getDocumentTypes();
+					const tambien = (deVentas.data ?? []).filter((doc) =>
+						CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD.includes(doc.enum),
+					);
+					data = [...data, ...tambien];
+				}
+
+				return {
+					success: true,
+					total: data.length,
+					data,
+					esSociedad,
+				};
+			} catch (error) {
+				console.error("[getContractTypes] Error:", error);
+				if (error instanceof ORPCError) throw error;
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message: "Error al obtener tipos de documentos",
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al obtener tipos de documentos",
 				});
 			}
-			return {
-				success: true,
-				total: response.total,
-				data: response.data,
-			};
-		} catch (error) {
-			console.error("[getContractTypes] Error:", error);
-			throw new ORPCError("INTERNAL_SERVER_ERROR", {
-				message:
-					error instanceof Error
-						? error.message
-						: "Error al obtener tipos de documentos",
-			});
-		}
-	}),
+		}),
 
 	/**
 	 * Obtiene documentos y campos por DPI y tipos seleccionados
@@ -1028,28 +1112,51 @@ export const contractGenerationRouter = {
 				// duplicados entre leads (154 grupos según la migración 0028) y un
 				// lead viejo puede traer el género vacío o distinto al del dueño de
 				// esta oportunidad, que es el que firma.
-				const [leadDeLaOportunidad] = input.opportunityId
+				// En una sociedad firma el representante, que es un codeudor: si el
+				// DPI es el de uno de los codeudores de la oportunidad, el género es
+				// el suyo y no el de la empresa.
+				const [codeudorConEseDpi] = input.opportunityId
 					? await db
-							.select({ gender: leads.gender })
-							.from(opportunities)
-							.innerJoin(leads, eq(opportunities.leadId, leads.id))
-							.where(eq(opportunities.id, input.opportunityId))
+							.select({ gender: coDebtors.gender })
+							.from(coDebtors)
+							.where(
+								and(
+									eq(coDebtors.opportunityId, input.opportunityId),
+									eqDpi(coDebtors.dpi, input.dpi),
+								),
+							)
 							.limit(1)
 					: [];
+
+				const [leadDeLaOportunidad] =
+					input.opportunityId && !codeudorConEseDpi
+						? await db
+								.select({ gender: leads.gender })
+								.from(opportunities)
+								.innerJoin(leads, eq(opportunities.leadId, leads.id))
+								.where(eq(opportunities.id, input.opportunityId))
+								.limit(1)
+						: [];
 
 				// Solo si ese lead no tiene género se busca por DPI: los duplicados
 				// son la misma persona, así que sirve cualquiera que sí lo tenga.
 				// eqDpi y no eq porque los DPI viejos quedaron guardados con
 				// espacios ("1648 57656 0101") y el front manda el DPI normalizado.
-				const [leadPorDpi] = leadDeLaOportunidad?.gender
-					? []
-					: await db
-							.select({ gender: leads.gender })
-							.from(leads)
-							.where(and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)))
-							.limit(1);
+				const [leadPorDpi] =
+					codeudorConEseDpi?.gender || leadDeLaOportunidad?.gender
+						? []
+						: await db
+								.select({ gender: leads.gender })
+								.from(leads)
+								.where(
+									and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)),
+								)
+								.limit(1);
 
-				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
+				const gender =
+					codeudorConEseDpi?.gender ??
+					leadDeLaOportunidad?.gender ??
+					leadPorDpi?.gender;
 				const generoFallback =
 					input.genero ??
 					(gender === "female"
@@ -1227,6 +1334,7 @@ export const contractGenerationRouter = {
 					...validation.missingVehicleFields,
 					...validation.missingLeadFields,
 					...validation.missingCreditFields,
+					...validation.missingRepresentanteFields,
 				];
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Faltan datos para generar contratos: ${allMissing.join(", ")}`,
@@ -1504,6 +1612,10 @@ export const contractGenerationRouter = {
 					input.opportunityId ?? null,
 					async () => {
 						if (input.opportunityId) {
+							await exigirLaBateriaDeLaOportunidad(
+								input.opportunityId,
+								input.contracts.map((c) => c.contractType),
+							);
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 							await exigirCoberturaDeLaAseguradora(
 								input.opportunityId,

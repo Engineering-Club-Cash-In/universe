@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
 	codeudoresDeMas,
 	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+	nombreDeLaSociedad,
 	representanteLegalDe,
 } from "./oportunidad-de-sociedad";
 
@@ -61,5 +63,57 @@ describe("oportunidad de sociedad", () => {
 		expect(esOportunidadDeSociedad(datos)).toBe(false);
 		expect(representanteLegalDe(datos)).toBeNull();
 		expect(codeudoresDeMas(datos)).toEqual([]);
+	});
+});
+
+describe("qué batería se puede generar", () => {
+	const persona = { clientType: "individual", coDeudores: [codeudor("a")] };
+	const sociedad = { clientType: "empresa", coDeudores: [codeudor("a", true)] };
+
+	test("una persona lleva los individuales, no los de sociedad", () => {
+		expect(
+			motivoParaNoGenerar(persona, [
+				"garantia_mobiliaria",
+				"declaracion_vendedor",
+			]),
+		).toBeNull();
+		expect(
+			motivoParaNoGenerar(persona, ["garantia_mobiliaria_sociedad"]),
+		).toContain("no es de una sociedad");
+	});
+
+	test("una sociedad lleva los de sociedad y la declaración del vendedor", () => {
+		expect(
+			motivoParaNoGenerar(sociedad, [
+				"garantia_mobiliaria_sociedad",
+				"declaracion_vendedor",
+			]),
+		).toBeNull();
+		expect(motivoParaNoGenerar(sociedad, ["garantia_mobiliaria"])).toContain(
+			"no los individuales",
+		);
+	});
+
+	test("sin representante o con codeudores de más no se genera", () => {
+		const sinMarca = {
+			clientType: "empresa",
+			coDeudores: [codeudor("a"), codeudor("b")],
+		};
+		expect(
+			motivoParaNoGenerar(sinMarca, ["garantia_mobiliaria_sociedad"]),
+		).toContain("representante legal");
+		const conDeMas = {
+			clientType: "empresa",
+			coDeudores: [codeudor("a", true), codeudor("b")],
+		};
+		expect(
+			motivoParaNoGenerar(conDeMas, ["garantia_mobiliaria_sociedad"]),
+		).toContain("un co-firmante de más");
+	});
+
+	test("el nombre de la sociedad sale del lead, en mayúsculas", () => {
+		expect(
+			nombreDeLaSociedad(["Grupo ", "de ", "Negocios STS", "S.A", null]),
+		).toBe("GRUPO DE NEGOCIOS STS S.A");
 	});
 });

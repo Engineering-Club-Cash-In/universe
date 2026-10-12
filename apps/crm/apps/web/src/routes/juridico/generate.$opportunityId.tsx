@@ -46,6 +46,15 @@ function RouteComponent() {
 	const { canViewLegal, isLoading: isLoadingPermissions } =
 		useJuridicoPermissions();
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	// Con qué pestaña se abre el detalle: los datos del representante se
+	// completan en los co-firmantes.
+	const [pestanaDelDetalle, setPestanaDelDetalle] = useState<
+		"details" | "coDebtors"
+	>("details");
+	const abrirDetalle = (pestana: "details" | "coDebtors") => {
+		setPestanaDelDetalle(pestana);
+		setIsOpportunityModalOpen(true);
+	};
 	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
 	// Lo que se acaba de enlazar: sólo eso se reenvía, no la batería entera.
 	const [contratosAReenviar, setContratosAReenviar] = useState<
@@ -59,11 +68,11 @@ function RouteComponent() {
 		nombre: string;
 	}> | null>(null);
 
-	// Get contract types from API (dynamic)
+	// Los documentos que le tocan a la oportunidad: el servidor decide la
+	// batería (la de sociedad si es de una empresa), sin opción de cambiarla.
 	const contractTypesQuery = useQuery({
-		queryKey: ["getContractTypes"],
-		queryFn: () => client.getContractTypes(),
-		enabled: canViewLegal,
+		...orpc.getContractTypes.queryOptions({ input: { opportunityId } }),
+		enabled: canViewLegal && !!opportunityId,
 	});
 
 	// Validate if opportunity has all required data
@@ -195,6 +204,17 @@ function RouteComponent() {
 		[aseguradora],
 	);
 	const sociedad = previewQuery.data?.oportunidad.sociedad;
+	// En una sociedad firma su representante: es él quien dice "Yo, ..." en los
+	// contratos, con su DPI, su correo y su género. El de la empresa va en
+	// `nombreSociedad`.
+	const representante = sociedad?.esSociedad ? sociedad.representante : null;
+	const valoresIniciales = useMemo(
+		() =>
+			sociedad?.esSociedad && sociedad.nombre
+				? { nombreSociedad: sociedad.nombre }
+				: undefined,
+		[sociedad?.esSociedad, sociedad?.nombre],
+	);
 
 	// Redirect if no permissions
 	if (!isLoadingPermissions && !canViewLegal) {
@@ -227,17 +247,36 @@ function RouteComponent() {
 	// Map preview data to CRM data format for the wizard
 	const crmData: CRMData = previewQuery.data
 		? {
-				cliente: {
-					nombreCompleto: previewQuery.data.cliente?.nombreCompleto,
-					dpi: previewQuery.data.cliente?.dpi,
-					direccion: previewQuery.data.cliente?.direccion,
-					nacionalidad: previewQuery.data.cliente?.nacionalidad,
-					estadoCivil: previewQuery.data.cliente?.estadoCivil,
-					profesion: previewQuery.data.cliente?.profesion,
-					correo: previewQuery.data.cliente?.email,
-					edad: previewQuery.data.cliente?.edad,
-					genero: previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
-				},
+				cliente: representante
+					? {
+							nombreCompleto: representante.nombre,
+							dpi: representante.dpi,
+							// La de la empresa: ahí reciben notificaciones los deudores.
+							direccion: previewQuery.data.cliente?.direccion,
+							nacionalidad: representante.nacionalidad,
+							estadoCivil: representante.estadoCivil,
+							profesion: representante.profesion,
+							correo: representante.email,
+							edad: representante.edad ?? undefined,
+							genero:
+								representante.genero === "femenino"
+									? "F"
+									: representante.genero === "masculino"
+										? "M"
+										: undefined,
+						}
+					: {
+							nombreCompleto: previewQuery.data.cliente?.nombreCompleto,
+							dpi: previewQuery.data.cliente?.dpi,
+							direccion: previewQuery.data.cliente?.direccion,
+							nacionalidad: previewQuery.data.cliente?.nacionalidad,
+							estadoCivil: previewQuery.data.cliente?.estadoCivil,
+							profesion: previewQuery.data.cliente?.profesion,
+							correo: previewQuery.data.cliente?.email,
+							edad: previewQuery.data.cliente?.edad,
+							genero:
+								previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
+						},
 				vendedor: previewQuery.data.vendedor
 					? {
 							nombreMayusculas: previewQuery.data.vendedor.nombreMayusculas,
@@ -275,17 +314,22 @@ function RouteComponent() {
 					porcentajeInteres: previewQuery.data.credito?.tasaInteres,
 					diaPagoMensualRaw: previewQuery.data.credito?.diaPagoMensualRaw,
 				},
-				coDebtors: coDebtorsQuery.data?.map((cd) => ({
-					id: cd.id,
-					fullName: cd.fullName,
-					dpi: cd.dpi,
-					age: cd.age,
-					gender: cd.gender,
-					maritalStatus: cd.maritalStatus,
-					profession: cd.profession,
-					nationality: cd.nationality,
-					email: cd.email,
-				})),
+				// Los contratos de sociedad sólo los firma el representante: no
+				// llevan codeudores (con alguno de más, la validación no deja
+				// llegar hasta acá).
+				coDebtors: representante
+					? []
+					: coDebtorsQuery.data?.map((cd) => ({
+							id: cd.id,
+							fullName: cd.fullName,
+							dpi: cd.dpi,
+							age: cd.age,
+							gender: cd.gender,
+							maritalStatus: cd.maritalStatus,
+							profession: cd.profession,
+							nationality: cd.nationality,
+							email: cd.email,
+						})),
 			}
 		: {
 				cliente: {},
@@ -569,6 +613,25 @@ function RouteComponent() {
 									</ul>
 								</div>
 							)}
+							{validation.missingRepresentanteFields.length > 0 && (
+								<div>
+									<h4 className="mb-2 font-semibold text-amber-800">
+										Representante legal
+									</h4>
+									<ul className="list-inside list-disc space-y-1 text-amber-700 text-sm">
+										{validation.missingRepresentanteFields.map((field) => (
+											<li key={field}>{field}</li>
+										))}
+									</ul>
+									<button
+										type="button"
+										onClick={() => abrirDetalle("coDebtors")}
+										className="mt-2 inline-block text-primary text-sm hover:underline"
+									>
+										Ir a los co-firmantes →
+									</button>
+								</div>
+							)}
 						</div>
 
 						<div className="mt-4 flex gap-2">
@@ -606,19 +669,21 @@ function RouteComponent() {
 							<Button
 								variant="outline"
 								className="border-blue-500 text-blue-500 hover:bg-blue-50"
-								onClick={() => setIsOpportunityModalOpen(true)}
+								onClick={() => abrirDetalle("details")}
 							>
 								<Eye className="mr-2 h-4 w-4" />
 								Ver detalle de la oportunidad
 							</Button>
 						</div>
-						{sociedad?.faltaRepresentante && (
-							<div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 text-sm dark:text-amber-400">
-								La oportunidad es de una sociedad y no tiene marcado a su
-								representante legal, que es quien firma los contratos. Marcalo
-								en los co-firmantes de la oportunidad (Ver detalle de la
-								oportunidad → Co-firmantes).
-							</div>
+						{representante && (
+							<p className="mt-3 text-muted-foreground text-sm">
+								Batería de sociedad: firma{" "}
+								<strong className="text-foreground">
+									{representante.nombre.toUpperCase()}
+								</strong>{" "}
+								como representante legal de{" "}
+								<strong className="text-foreground">{sociedad?.nombre}</strong>.
+							</p>
 						)}
 					</CardHeader>
 					<CardContent>
@@ -626,6 +691,7 @@ function RouteComponent() {
 							documentTypes={contractTypes}
 							documentosDeshabilitados={coberturasDeshabilitadas}
 							crmData={crmData}
+							valoresIniciales={valoresIniciales}
 							opportunityId={opportunityId}
 							leadId={opportunity?.lead?.id}
 							onGetDocumentsByDpi={handleGetDocumentsByDpi}
@@ -657,13 +723,19 @@ function RouteComponent() {
 				open={isOpportunityModalOpen}
 				onOpenChange={(abierto) => {
 					setIsOpportunityModalOpen(abierto);
-					// Desde ahí se marca al representante: el aviso de sociedad se
-					// actualiza al volver.
-					if (!abierto && validation?.isValid) previewQuery.refetch();
+					// Desde ahí se marca al representante y se completan sus datos:
+					// la validación, la batería y el aviso de sociedad se actualizan al
+					// volver.
+					if (!abierto) {
+						validationQuery.refetch();
+						contractTypesQuery.refetch();
+						if (validation?.isValid) previewQuery.refetch();
+					}
 				}}
 				opportunity={selectedOpportunity}
 				userRole="juridico"
 				readOnly
+				initialTab={pestanaDelDetalle}
 			/>
 		</div>
 	);

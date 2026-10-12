@@ -15,6 +15,26 @@ import { STATUS_EXCLUIDOS_MORA } from "./latefee";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
+// ExcelJS chequea cada mergeCells contra TODAS las merges previas (O(n²)): con miles
+// de pagos bloquea el event loop por decenas de segundos. Las merges de este reporte
+// no se solapan por construcción (cada transacción usa sus propias filas), así que se
+// hace el merge con el índice vacío y se devuelve el resultado al índice real.
+function mergeSinChequeoDeSolape(sheet: ExcelJS.Worksheet, top: number, left: number, bottom: number, right: number) {
+  const ws = sheet as unknown as { _merges: Record<string, unknown> };
+  const indice = ws._merges;
+  ws._merges = {};
+  try {
+    sheet.mergeCells(top, left, bottom, right);
+    Object.assign(indice, ws._merges);
+  } finally {
+    ws._merges = indice;
+  }
+}
+
+// Cada cuántos pagos se cede el event loop mientras se arma el Excel.
+const PAGOS_POR_TANDA_EXCEL = 200;
+const cederEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 // Créditos "muertos" que NO facturan → se excluyen del esperado del mes (panel azul).
 // Subconjunto de STATUS_EXCLUIDOS_MORA; EN_CONVENIO y CAIDO sí siguen facturando.
 const STATUS_SIN_FACTURACION = ["CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"];
@@ -1231,7 +1251,9 @@ export async function exportPagosConInversionistasExcel(
   };
 
   // 5️⃣ Recorrer todos los pagos (sin agrupar por asesor)
-  result.data.forEach((item: any) => {
+  let procesados = 0;
+  for (const item of result.data as any[]) {
+    if (++procesados % PAGOS_POR_TANDA_EXCEL === 0) await cederEventLoop();
     const noPrestamo = item.credito?.numeroCreditoSifco ?? "";
     const nombreDeudor = item.usuario?.nombre ?? "";
     const montoOtorgado = Number(item.credito?.capital ?? 0);
@@ -1248,11 +1270,11 @@ export async function exportPagosConInversionistasExcel(
     txHeaderRow.getCell(1).value = noPrestamo;
     txHeaderRow.getCell(9).value = `Correlativo: ${item.pagoId}`;
     txHeaderRow.getCell(10).value = `Cuenta Bancaria: ${item.cuentaEmpresaNombre ?? ""}`;
-    sheet.mergeCells(txHeaderRow.number, 11, txHeaderRow.number, 13);
+    mergeSinChequeoDeSolape(sheet, txHeaderRow.number, 11, txHeaderRow.number, 13);
     txHeaderRow.getCell(11).value = `Fecha Transaccion: ${item.fechaPago}`;
-    sheet.mergeCells(txHeaderRow.number, 14, txHeaderRow.number, 16);
+    mergeSinChequeoDeSolape(sheet, txHeaderRow.number, 14, txHeaderRow.number, 16);
     txHeaderRow.getCell(14).value = `Transacción: ${tipoPago}`;
-    sheet.mergeCells(txHeaderRow.number, 17, txHeaderRow.number, totalCols);
+    mergeSinChequeoDeSolape(sheet, txHeaderRow.number, 17, txHeaderRow.number, totalCols);
     txHeaderRow.getCell(17).value = boletas.length > 0 ? `No. Boleta: ${boletas[0]?.boletaId ?? ""}` : "";
     txHeaderRow.font = { bold: true, size: 10 };
     txHeaderRow.eachCell({ includeEmpty: false }, (cell) => {
@@ -1331,13 +1353,13 @@ export async function exportPagosConInversionistasExcel(
       if (inversionistas.length > 1) {
         // Cols A-I (datos del pago, incluyendo Otros)
         for (let col = 1; col <= 9; col++) {
-          sheet.mergeCells(txFirstInvRow, col, txLastInvRow, col);
+          mergeSinChequeoDeSolape(sheet, txFirstInvRow, col, txLastInvRow, col);
           sheet.getCell(txFirstInvRow, col).alignment = { vertical: "middle" };
         }
         // Cols finales: Categoría, Tipo Pago, Fecha Aplicado, Boletas
         const catIdx = columns.findIndex(c => c.key === "categoriaCredito") + 1;
         for (let col = catIdx; col <= totalCols; col++) {
-          sheet.mergeCells(txFirstInvRow, col, txLastInvRow, col);
+          mergeSinChequeoDeSolape(sheet, txFirstInvRow, col, txLastInvRow, col);
           sheet.getCell(txFirstInvRow, col).alignment = { vertical: "middle" };
         }
       }
@@ -1363,7 +1385,7 @@ export async function exportPagosConInversionistasExcel(
       cell.border = thinBorder;
       cell.alignment = { vertical: "middle" };
     });
-  });
+  }
 
   // Fila vacía + TOTALES GENERALES
   sheet.addRow([]);

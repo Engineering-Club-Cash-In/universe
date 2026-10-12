@@ -224,6 +224,9 @@ function RouteComponent() {
 				value={campos[campo]}
 				placeholder={placeholder}
 				onChange={(e) => cambiar(campo, e.target.value)}
+				// Mientras llegan los datos del crédito: al llegar pisan el
+				// formulario, y lo que se escribiera en ese rato se perdería.
+				disabled={cargarDatos.isPending}
 			/>
 		</div>
 	);
@@ -268,6 +271,8 @@ function RouteComponent() {
 								resumen: opcion?.label ?? "",
 							});
 							creditoPedidoRef.current = opportunityId;
+							// Lo que se esté generando es del crédito anterior.
+							descartarCarta();
 							cargarDatos.mutate(opportunityId);
 						}}
 						onSearchChange={setBusqueda}
@@ -306,6 +311,12 @@ function RouteComponent() {
 						<Select
 							value={tipo}
 							onValueChange={(valor) => {
+								// La edad es del representante: con otro, la de antes
+								// saldría en su carta. Entre las dos de Don Alex se queda.
+								const nueva = CARTAS_PODER.find((c) => c.tipo === valor);
+								if (nueva && nueva.representante !== carta.representante) {
+									setCampos((actual) => ({ ...actual, edadRepresentante: "" }));
+								}
 								setTipo(valor as TipoCartaPoder);
 								descartarCarta();
 							}}
@@ -370,6 +381,7 @@ function RouteComponent() {
 						<Label htmlFor="carta-genero">Género</Label>
 						<Select
 							value={campos.genero}
+							disabled={cargarDatos.isPending}
 							onValueChange={(valor) =>
 								cambiar("genero", valor as CamposCartaPoder["genero"])
 							}
@@ -389,6 +401,7 @@ function RouteComponent() {
 						<Label htmlFor="carta-estado-civil">Estado civil</Label>
 						<Select
 							value={campos.estadoCivil}
+							disabled={cargarDatos.isPending}
 							onValueChange={(valor) =>
 								cambiar("estadoCivil", valor as EstadoCivil)
 							}

@@ -19,6 +19,7 @@ import {
 	opportunityCloseQuotations,
 	quotations,
 } from "../db/schema/quotations";
+import { vehicles } from "../db/schema/vehicles";
 import type { CorreosPorAseguradora } from "../lib/factura-seguro";
 import { ROLES } from "../lib/roles";
 
@@ -32,8 +33,9 @@ let facturaPrevia: Array<Record<string, unknown>> = [];
 // Lo que devuelve R2 para un archivo ya subido (la factura desde el CRM).
 let contenidoR2: Buffer = Buffer.from("%PDF-1.4");
 const topesLecturaR2: Array<number | undefined> = [];
-// Locks tomados sobre la fila del usuario socio.
+// Locks tomados sobre la fila del usuario socio y la del vehículo.
 const bloqueosUsuario: string[] = [];
+const bloqueosVehiculo: string[] = [];
 // Documentos ya registrados con una key (para la limpieza tras un error).
 let documentosRegistrados: Array<{ id: string }> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
@@ -151,6 +153,12 @@ const dbFalsa = {
 				return cadena(() => facturaPrevia);
 			if (tabla === opportunityDocuments)
 				return cadena(() => documentosRegistrados);
+			if (tabla === vehicles)
+				return cadena(
+					() => [{ id: "vehiculo-1" }],
+					undefined,
+					(modo) => bloqueosVehiculo.push(modo),
+				);
 			if (tabla === companies || tabla === opportunityStageHistory)
 				return cadena(() => []);
 			throw new Error("Tabla no mockeada en tracker.factura-seguro.test.ts");
@@ -315,6 +323,7 @@ beforeEach(() => {
 	condicionesActualizacion.length = 0;
 	topesLecturaR2.length = 0;
 	bloqueosUsuario.length = 0;
+	bloqueosVehiculo.length = 0;
 	documentosRegistrados = [];
 	casoReleido = undefined;
 	lecturasCaso = 0;
@@ -459,6 +468,7 @@ describe("subirFacturaSeguro", () => {
 	test("los datos del correo se leen después de subir, con las cotizaciones FOR SHARE", async () => {
 		await subir();
 		expect(bloqueosCotizacion).toEqual([{ modo: "share", subidosR2: 1 }]);
+		expect(bloqueosVehiculo).toEqual(["share"]);
 	});
 
 	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {

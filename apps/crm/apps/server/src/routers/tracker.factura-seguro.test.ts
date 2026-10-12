@@ -1352,6 +1352,14 @@ describe("factura programada para el cierre", () => {
 		expect(subidosR2).toHaveLength(0);
 	});
 
+	test("sin monto asegurado (cotización vieja), el correo usa el valor del vehículo, como el cierre", async () => {
+		caso = casoAl(90);
+		cotizacion = [{ insuranceProvider: "gyt", vehicleValue: "185000" }];
+		await subir(caso, "gyt");
+		const html = (correos[0] as { correo: { html: string } }).correo.html;
+		expect(html).toContain("185,000");
+	});
+
 	test("al confirmar los contratos sale la programada, sin confirmación", async () => {
 		caso = casoAl(90);
 		facturaPrevia = [

@@ -3971,6 +3971,17 @@ export const cobrosRouter = {
 						externalRef: c.numeroSifco,
 					})),
 					logPrefix: "[SimpleTech][cobros-masivo]",
+					...(plantilla.adjunto
+						? {
+								adjunto: {
+									templateName: plantilla.adjunto.templateName,
+									header: {
+										type: "image" as const,
+										url: plantilla.adjunto.imagenUrl,
+									},
+								},
+							}
+						: {}),
 				});
 
 				const byRef = new Map(

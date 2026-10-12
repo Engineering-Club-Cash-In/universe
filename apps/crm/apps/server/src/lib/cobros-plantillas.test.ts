@@ -1359,6 +1359,11 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(2);
 	});
 
+	test("se envía con la imagen: template mensajeimage y URL pública", () => {
+		expect(plantilla?.adjunto?.templateName).toBe("mensajeimage");
+		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
+	});
+
 	test("interpolar pone nombre, cuenta y teléfono del asesor", () => {
 		const mensaje = interpolar(plantilla?.cuerpo ?? "", {
 			clienteNombre: "juan perez",

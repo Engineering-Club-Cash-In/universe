@@ -14,8 +14,11 @@ import { nombreAseguradora } from "@/lib/envio-aseguradora";
 import { client } from "@/utils/orpc";
 
 type Aseguradora = "gyt" | "universales";
-/** Lo que el usuario aceptó: enviarla ya a esa aseguradora, o programarla. */
-export type AseguradoraConfirmada = Aseguradora | "programado" | null;
+/** Lo que el usuario aceptó: enviarla ya a esa aseguradora, o programarla para ella. */
+export type AseguradoraConfirmada =
+	| Aseguradora
+	| { programado: Aseguradora }
+	| null;
 
 /**
  * Antes de subir un "Seguro del Vehículo": si el server lo va a mandar a la
@@ -26,7 +29,7 @@ export type AseguradoraConfirmada = Aseguradora | "programado" | null;
  */
 export function useConfirmarEnvioFactura(opportunityId: string) {
 	const [pendiente, setPendiente] = useState<{
-		codigo: AseguradoraConfirmada;
+		codigo: Aseguradora | null;
 		aseguradora: string;
 		alCierre: boolean;
 		continuar: (confirmada: AseguradoraConfirmada) => void;
@@ -65,7 +68,7 @@ export function useConfirmarEnvioFactura(opportunityId: string) {
 		}
 		if (previa.programable) {
 			setPendiente({
-				codigo: "programado",
+				codigo: previa.programable.aseguradora,
 				aseguradora: nombreAseguradora(previa.programable.aseguradora),
 				alCierre: true,
 				continuar,
@@ -101,7 +104,12 @@ export function useConfirmarEnvioFactura(opportunityId: string) {
 						onClick={() => {
 							const confirmado = pendiente;
 							setPendiente(null);
-							confirmado?.continuar(confirmado.codigo);
+							if (!confirmado) return;
+							confirmado.continuar(
+								confirmado.alCierre && confirmado.codigo
+									? { programado: confirmado.codigo }
+									: confirmado.codigo,
+							);
 						}}
 					>
 						Sí

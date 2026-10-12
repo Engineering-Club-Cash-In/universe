@@ -40,10 +40,11 @@ describe("documentosDelCaso", () => {
 	test("el caso ganado al 90% conserva el pendiente; al 100% no se marca; antes no pide factura", () => {
 		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
 		expect(tieneDocumentosPendientes(caso({}, 100, "aprobado"))).toBe(false);
-		// El vendedor puede subirla al 100%, pero tampoco cuenta como pendiente.
-		expect(
-			tieneDocumentosPendientes(caso({ habilitada: true }, 100, "aprobado")),
-		).toBe(false);
+		// El vendedor la sigue viendo para subirla al 100%, pero no cuenta como
+		// pendiente.
+		const alCien = caso({ habilitada: true }, 100, "aprobado");
+		expect(documentosDelCaso(alCien)).toMatchObject([{ estado: "opcional" }]);
+		expect(tieneDocumentosPendientes(alCien)).toBe(false);
 		expect(documentosDelCaso(caso({}, 85))).toEqual([]);
 		expect(documentosDelCaso(caso({}, 90, "rechazado"))).toEqual([]);
 	});

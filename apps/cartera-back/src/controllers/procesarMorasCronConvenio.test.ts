@@ -68,17 +68,24 @@ const valoresDe = (nodo: any, acc: any[] = []): any[] => {
   return acc;
 };
 
-const selectChain = () => {
+const selectChain = (registro?: { joins: unknown[] }) => {
   const b: any = {
     from: () => b,
-    innerJoin: () => b,
+    innerJoin: (tabla: unknown) => {
+      registro?.joins.push(tabla);
+      return b;
+    },
     leftJoin: () => b,
     where: () => b,
+    for: () => b, // candado del crédito al abrir la desactivación
     then: (res: any, rej: any) =>
       Promise.resolve(estado.resultados.shift() ?? []).then(res, rej),
   };
   return b;
 };
+
+/** Columnas y joins de cada select, en orden (se vacía en `reset`). */
+const camposSelect: { campos: any; joins: unknown[] }[] = [];
 
 /** Writes pendientes de una transacción abierta. */
 type Scope = { writes: Call[] };
@@ -91,7 +98,11 @@ type Scope = { writes: Call[] };
  * procesarMorasCronEscriturasAtomicas.test.ts.
  */
 const clienteFalso = (scope: Scope): any => ({
-  select: () => selectChain(),
+  select: (campos: any) => {
+    const registro = { campos, joins: [] as unknown[] };
+    camposSelect.push(registro);
+    return selectChain(registro);
+  },
   insert: (tabla: any) => ({
     values: (values: any) => {
       const ejecutar = () => {
@@ -195,6 +206,7 @@ const reset = () => {
   estado.updateReturns = new Map();
   estado.insertThrows = undefined;
   estado.emitidos = [];
+  camposSelect.length = 0;
 };
 
 const correr = async (opts: {
@@ -323,5 +335,51 @@ describe("procesarMoras — el convenio se confirma a media corrida", () => {
     expect(historial()).toEqual([]);
     expect(r.creadas).toBe(0);
     expect(skippedCount()).toBe(1);
+  });
+});
+
+describe("PENDIENTE_CANCELACION congela la mora", () => {
+  // `resetCredit` cobra la mora ACTIVA al cerrar el crédito: el paso 6 no puede
+  // apagarla como "se puso al día" (sus cuotas no cuentan por estar excluido).
+  const moraDe = (statusCredit: string) => ({ ...MORA_ACTIVA, statusCredit });
+  const cuotaDe = (statusCredit: string) => ({ ...cuotaDeAyer(), statusCredit });
+  const correrCon = async (cuotas: any[], moras: any[]) => {
+    reset();
+    estado.resultados = [cuotas, moras];
+    return (await procesarMoras()) as any;
+  };
+
+  it("deja la mora intacta: sin update, sin historial, sin tocar el status; cuenta como omitida", async () => {
+    const r = await correrCon([cuotaDe("PENDIENTE_CANCELACION")], [moraDe("PENDIENTE_CANCELACION")]);
+
+    expect(estado.confirmados).toEqual([]);
+    expect(r.desactivadas).toBe(0);
+    expect(r.congeladasPendienteCancelacion).toBe(1);
+    expect(succeededCount()).toBe(0);
+    expect(skippedCount()).toBe(1);
+    // El paso 4b tiene que traer el status (sin él la regla no ve nada) y
+    // unir `creditos` (sin el join, Postgres aborta el cron entero).
+    expect(camposSelect[1].campos).toHaveProperty("statusCredit", creditos.statusCredit);
+    expect(camposSelect[1].joins).toContain(creditos);
+  });
+
+  it("control: un ACTIVO sin cuotas vencidas se sigue desactivando, con guard SQL contra la carrera", async () => {
+    const r = await correrCon([], [moraDe("ACTIVO")]);
+
+    expect(updatesDeMora()[0].set).toMatchObject({ activa: false, monto_mora: "0" });
+    expect(historial()[0].values).toMatchObject({ tipo_evento: "DESACTIVACION" });
+    expect(r.desactivadas).toBe(1);
+    expect(r.congeladasPendienteCancelacion).toBe(0);
+    // Si pasó a PENDIENTE_CANCELACION desde el paso 4b, el UPDATE no matchea.
+    expect(valoresDe(updatesDeMora()[0].where)).toContain("PENDIENTE_CANCELACION");
+    expect(valoresDe(updatesDeMora()[0].where)).toContain(CREDITO_ID);
+  });
+
+  it("la red de seguridad del convenio sigue: EN_CONVENIO con mora activa se desactiva", async () => {
+    const r = await correrCon([cuotaDe("EN_CONVENIO")], [moraDe("EN_CONVENIO")]);
+
+    expect(updatesDeMora()[0].set).toMatchObject({ activa: false });
+    expect(historial()[0].values).toMatchObject({ tipo_evento: "DESACTIVACION" });
+    expect(r.desactivadas).toBe(1);
   });
 });

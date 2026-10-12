@@ -690,7 +690,7 @@ Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia
 
 🏛️ *Banco Nexa*
 
-🔢 Cuenta Monetaria : *{cuentaNexa}*
+🔢 *Cuenta Monetaria : {cuentaNexa}*
 
 Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},

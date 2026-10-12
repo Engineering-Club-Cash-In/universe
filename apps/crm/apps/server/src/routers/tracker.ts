@@ -32,6 +32,7 @@ import {
 import {
 	type Aseguradora,
 	destinatariosDe,
+	ETAPA_FACTURA_SEGURO,
 	MENSAJE_MOTIVO,
 	MENSAJE_SIN_ENVIO_DESDE_CRM,
 	MENSAJE_SIN_REENVIO,
@@ -702,7 +703,12 @@ export async function previsualizarFacturaSeguroDesdeCrm(
 
 export type ResultadoFacturaDesdeCrm =
 	| { enviada: true; envio: EstadoEnvioFactura; aseguradora: Aseguradora }
-	| { enviada: false; motivo: string };
+	| {
+			enviada: false;
+			motivo: string;
+			/** Se mandará sola cuando la oportunidad quede ganada al 90%. */
+			alCerrar?: boolean;
+	  };
 
 /**
  * Un "Seguro del Vehículo" subido desde el CRM sigue el mismo envío que la
@@ -716,8 +722,11 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	nombre: string;
 	/** El tipo con el que el CRM aceptó el documento. */
 	mimeType: string;
-	/** La aseguradora a la que el usuario confirmó el envío, si confirmó. */
-	aseguradoraConfirmada: Aseguradora | null | undefined;
+	/**
+	 * La aseguradora a la que el usuario confirmó el envío, si confirmó.
+	 * "automatico": la manda el cierre (ver enviarFacturaSubidaAntes).
+	 */
+	aseguradoraConfirmada: Aseguradora | "automatico" | null | undefined;
 	userId: string;
 	userRole: string | null | undefined;
 }): Promise<ResultadoFacturaDesdeCrm> {
@@ -732,11 +741,20 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		yaSubida: fila.facturaEnvio != null,
 	});
 	if (!regla.ok) {
+		// Subida antes del cierre: el cierre la mandará sola (al confirmar los
+		// contratos, que deja la oportunidad ganada al 90%).
+		const alCerrar =
+			!!fila.companyId &&
+			(regla.motivo === "sin_cerrar" ||
+				(regla.motivo === "etapa" &&
+					fila.closurePercentage < ETAPA_FACTURA_SEGURO));
 		return {
 			enviada: false,
 			motivo: MENSAJE_SIN_ENVIO_DESDE_CRM[regla.motivo],
+			...(alCerrar && { alCerrar: true }),
 		};
 	}
+	const automatico = params.aseguradoraConfirmada === "automatico";
 
 	// El tamaño se validó con un HEAD, pero la URL firmada pudo reemplazar el
 	// archivo después: se baja con tope y se vuelve a medir.
@@ -784,7 +802,9 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
 			if (!vigente || vigente.status !== fila.status) return null;
 			// Pudo cambiar de asesor mientras se validaba el archivo.
-			if (!puedeReintentarDesdeCrm(params, vigente.assignedTo)) return null;
+			if (!automatico && !puedeReintentarDesdeCrm(params, vigente.assignedTo)) {
+				return null;
+			}
 			const bajoBloqueo = puedeEnviarFacturaDesdeCrm({
 				...vigente,
 				yaSubida: !!previa,
@@ -795,7 +815,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 				await datosDelCorreoBajoBloqueo(tx, fila);
 			// Solo sale lo que el usuario confirmó: la consulta previa pudo decir
 			// que no se enviaba, o la aseguradora cambió con el diálogo abierto.
-			if (aseguradora !== params.aseguradoraConfirmada) {
+			if (!automatico && aseguradora !== params.aseguradoraConfirmada) {
 				return { sinConfirmar: true as const };
 			}
 
@@ -867,6 +887,53 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 		correo: registro.correo,
 	});
 	return { enviada: true, envio, aseguradora: registro.aseguradora };
+}
+
+/**
+ * Al confirmar los contratos (la oportunidad queda ganada al 90%), manda sola
+ * la factura del seguro que se subió desde el CRM antes del cierre: la última
+ * "Seguro del Vehículo" de la oportunidad, con las mismas reglas y el mismo
+ * registro que una subida. Nunca lanza: no puede romper la confirmación.
+ */
+export async function enviarFacturaSubidaAntes(
+	opportunityId: string,
+	userId: string,
+): Promise<ResultadoFacturaDesdeCrm | null> {
+	try {
+		const [documento] = await db
+			.select({
+				id: opportunityDocuments.id,
+				key: opportunityDocuments.filePath,
+				nombre: opportunityDocuments.originalName,
+				mimeType: opportunityDocuments.mimeType,
+			})
+			.from(opportunityDocuments)
+			.where(
+				and(
+					eq(opportunityDocuments.opportunityId, opportunityId),
+					eq(opportunityDocuments.documentType, "seguro_vehiculo"),
+				),
+			)
+			.orderBy(desc(opportunityDocuments.uploadedAt))
+			.limit(1);
+		if (!documento) return null;
+		return await enviarFacturaSeguroDesdeCrm({
+			opportunityId,
+			documentId: documento.id,
+			key: documento.key,
+			nombre: documento.nombre,
+			mimeType: documento.mimeType,
+			aseguradoraConfirmada: "automatico",
+			userId,
+			userRole: null,
+		});
+	} catch (error) {
+		console.error(
+			"[enviarFacturaSubidaAntes] No se pudo enviar la factura del seguro",
+			error,
+		);
+		return null;
+	}
 }
 
 function mimeDeFactura(file: { name: string; type?: string }) {

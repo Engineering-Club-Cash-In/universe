@@ -5,7 +5,7 @@ import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
-import { pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } from "./abonoInicialConvenio";
+import { asegurarCuotasSinAbonoVivo, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial } from "./abonoInicialConvenio";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
 
@@ -104,7 +104,9 @@ export const ajustarCuotasConSIFCO = async ({
   };
 
 
-  await db.transaction(async (tx) => {
+  // Bajo el candado de pagos del crédito: el recorte del calendario borra pagos y no puede
+  // correr en medio de la creación de un convenio que usa uno de ellos como abono inicial.
+  await withPaymentAdvisoryLock(credito.credito_id, () => db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
     const cuotasExcedentes = cuotasExistentes.filter(
       (c) => c.numero_cuota > plazo_completo
@@ -112,6 +114,9 @@ export const ajustarCuotasConSIFCO = async ({
 
     if (cuotasExcedentes.length > 0) {
       const cuotaIdsExcedentes = cuotasExcedentes.map(c => c.cuota_id);
+
+      // Antes de borrar nada: un pago de esas cuotas puede sostener un convenio vivo.
+      await asegurarCuotasSinAbonoVivo(tx as unknown as typeof db, cuotaIdsExcedentes);
 
       await tx
         .delete(pagos_credito)
@@ -238,7 +243,7 @@ export const ajustarCuotasConSIFCO = async ({
       })
     );
 
-  });
+  }));
 
   emitSifcoPaymentMigration({
     outcome: "completed",

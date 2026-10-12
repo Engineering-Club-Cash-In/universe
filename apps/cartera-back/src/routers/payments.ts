@@ -884,7 +884,7 @@ export const paymentRouter = new Elysia()
         };
       } catch (error) {
         console.error(`❌ Error ajustando crédito ${numero_credito_sifco}:`, error);
-        set.status = 500;
+        set.status = error instanceof RechazoAbonoInicial ? error.status : 500;
         return {
           success: false,
           mensaje: error instanceof Error ? error.message : "Error desconocido",

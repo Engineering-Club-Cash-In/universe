@@ -16,7 +16,7 @@ const { createReversePayment } = await import("./reversePayment");
 const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
 const { rechazoReversaAbonoInicial, RechazoAbonoInicial } = await import("../lib/convenio-abono-inicial");
-const { asegurarAbonoInicialLibre, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial, rechazoLoteCreditosOcupados } = await import("./abonoInicialConvenio");
+const { asegurarAbonoInicialLibre, asegurarCuotasSinAbonoVivo, pagosConAbonoInicialVivo, rechazoLoteAbonoInicial, rechazoLoteCreditosOcupados } = await import("./abonoInicialConvenio");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
   if (previous === undefined) delete process.env[key];
@@ -217,5 +217,50 @@ describe("reescritura en lote (Excel de conta, marcar-cuotas) bloqueada por el a
     expect(r.status).toBe(409);
     expect(r.message).toContain("[CREDITO_OCUPADO]");
     expect(r.message).toContain("5, 9");
+  });
+});
+
+// Codex: el recorte de calendario de `ajustarCuotasConSIFCO` borra pagos de cuotas excedentes;
+// si uno es el abono de un convenio vivo rechaza 409 antes de borrar nada.
+describe("recorte de calendario bloqueado por el abono inicial", () => {
+  const filas = (...respuestas: unknown[][]) => {
+    const cola = [...respuestas];
+    const consultas: number[] = [];
+    const tx = {
+      select: () => ({
+        from: () => ({
+          where: () => {
+            consultas.push(consultas.length);
+            return Promise.resolve(cola.shift() ?? []);
+          },
+        }),
+      }),
+    };
+    return { tx, consultas };
+  };
+
+  test("un pago excedente que sostiene un convenio vivo lanza el rechazo 409", async () => {
+    const { tx } = filas([{ pago_id: 900 }, { pago_id: 901 }], [{ pago_id: 900 }]);
+
+    const error: any = await asegurarCuotasSinAbonoVivo(tx as any, [3, 4]).catch((e) => e);
+
+    expect(error).toBeInstanceOf(RechazoAbonoInicial);
+    expect(error.status).toBe(409);
+    expect(error.message).toContain("[ABONO_INICIAL_DE_CONVENIO]");
+    expect(error.message).toContain("900");
+  });
+
+  test("sin abono vivo entre esos pagos no rechaza", async () => {
+    const { tx } = filas([{ pago_id: 900 }], []);
+
+    await expect(asegurarCuotasSinAbonoVivo(tx as any, [3])).resolves.toBeUndefined();
+  });
+
+  test("sin cuotas excedentes no consulta nada", async () => {
+    const { tx, consultas } = filas();
+
+    await asegurarCuotasSinAbonoVivo(tx as any, []);
+
+    expect(consultas).toHaveLength(0);
   });
 });

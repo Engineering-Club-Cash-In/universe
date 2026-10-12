@@ -15,7 +15,7 @@
 
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { db } from "../database/index";
-import { convenios_pago } from "../database/db/schema";
+import { convenios_pago, pagos_credito } from "../database/db/schema";
 import { RechazoAbonoInicial, rechazoReversaAbonoInicial } from "../lib/convenio-abono-inicial";
 
 /** Rechazo si un convenio pendiente, vigente o completado usa este pago como abono inicial; null si está libre. */
@@ -92,4 +92,22 @@ export async function convenioVivoConAbonoDelCredito(tx: typeof db, credito_id: 
     )
     .limit(1);
   return fila?.convenio_id ?? null;
+}
+
+/**
+ * Preflight de un recorte de calendario: si algún pago de esas cuotas es el abono inicial de un
+ * convenio vivo, rechaza (409) ANTES de borrar nada. Sin esto el trigger de la 0025 frena el
+ * DELETE y la ruta responde 500 por un conflicto de negocio previsto.
+ */
+export async function asegurarCuotasSinAbonoVivo(tx: typeof db, cuotaIds: number[]): Promise<void> {
+  if (cuotaIds.length === 0) return;
+  const pagos = await tx
+    .select({ pago_id: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(inArray(pagos_credito.cuota_id, cuotaIds));
+  const abonosDeConvenio = await pagosConAbonoInicialVivo(
+    tx,
+    pagos.map((p) => p.pago_id),
+  );
+  if (abonosDeConvenio.size > 0) throw rechazoLoteAbonoInicial(abonosDeConvenio);
 }

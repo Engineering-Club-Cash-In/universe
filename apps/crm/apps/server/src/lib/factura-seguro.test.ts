@@ -12,6 +12,7 @@ import {
 	puedeSubirFacturaSeguro,
 	reintentoDisponibleDesde,
 	resolverAseguradora,
+	tipoPermitidoDesdeCrm,
 	tipoRealDeFactura,
 } from "./factura-seguro";
 import type { MembresiaSocio } from "./partner-scope";
@@ -120,15 +121,20 @@ describe("destinatariosDe", () => {
 		expect(destinatariosDe("universales", correos, ["i@cci.com"])).toEqual([]);
 	});
 
-	test("por defecto, las listas fijas de pólizas más el equipo interno", () => {
-		expect(destinatariosDe("gyt")).toEqual([
+	test("las listas fijas de pólizas más el equipo interno", () => {
+		// Explícitas: si otro test mockea el módulo en el mismo proceso, las
+		// listas por defecto podrían no ser las reales.
+		const fijas = {
+			gyt: CORREOS_POLIZAS_GYT,
+			universales: CORREOS_POLIZAS_UNIVERSALES,
+		};
+		expect(destinatariosDe("gyt", fijas, CORREOS_POLIZAS_INTERNOS)).toEqual([
 			...CORREOS_POLIZAS_GYT,
 			...CORREOS_POLIZAS_INTERNOS,
 		]);
-		expect(destinatariosDe("universales")).toEqual([
-			...CORREOS_POLIZAS_UNIVERSALES,
-			...CORREOS_POLIZAS_INTERNOS,
-		]);
+		expect(
+			destinatariosDe("universales", fijas, CORREOS_POLIZAS_INTERNOS),
+		).toEqual([...CORREOS_POLIZAS_UNIVERSALES, ...CORREOS_POLIZAS_INTERNOS]);
 		expect(CORREOS_POLIZAS_INTERNOS).toHaveLength(10);
 	});
 });
@@ -367,5 +373,37 @@ describe("nombreDeFactura", () => {
 		);
 		expect(nombreDeFactura("../../x<>|.pdf", "application/pdf")).toBe("x.pdf");
 		expect(nombreDeFactura("<>.pdf", "application/pdf")).toBe("factura.pdf");
+	});
+});
+
+describe("tipoPermitidoDesdeCrm", () => {
+	const DOCX =
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+	const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+	const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+	const avif = new Uint8Array([
+		0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+	]);
+	const texto = (s: string) => new TextEncoder().encode(s);
+
+	test("PDF, imagen y AVIF por su contenido", () => {
+		expect(tipoPermitidoDesdeCrm(texto("%PDF-1.4"), DOCX)).toBe(
+			"application/pdf",
+		);
+		expect(tipoPermitidoDesdeCrm(avif, "image/avif")).toBe("image/avif");
+	});
+
+	test("Word y Excel solo si el contenido es de Office del tipo declarado", () => {
+		expect(tipoPermitidoDesdeCrm(zip, DOCX)).toBe(DOCX);
+		expect(tipoPermitidoDesdeCrm(ole, "application/msword")).toBe(
+			"application/msword",
+		);
+		expect(tipoPermitidoDesdeCrm(zip, "application/msword")).toBeNull();
+	});
+
+	test("un HTML declarado como PDF o como Word no pasa", () => {
+		const html = texto("<html><script>x</script></html>");
+		expect(tipoPermitidoDesdeCrm(html, "application/pdf")).toBeNull();
+		expect(tipoPermitidoDesdeCrm(html, DOCX)).toBeNull();
 	});
 });

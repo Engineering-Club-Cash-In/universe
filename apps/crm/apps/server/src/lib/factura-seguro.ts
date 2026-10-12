@@ -48,6 +48,44 @@ export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
 }
 
 /** Nombre del adjunto con la extensión del tipo real ("factura.exe" → "factura.pdf"). */
+const MIME_WORD_EXCEL_ZIP = new Set([
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+const MIME_WORD_EXCEL_OLE = new Set([
+	"application/msword",
+	"application/vnd.ms-excel",
+]);
+
+/**
+ * Tipo con el que una factura subida desde el CRM puede ir a la aseguradora,
+ * según su contenido: PDF, imagen (también AVIF), o Word/Excel cuyo contenido
+ * sea de verdad un documento de Office del tipo declarado. Null si no: así un
+ * HTML declarado como PDF no sale adjunto desde un correo de Club Cash In.
+ */
+export function tipoPermitidoDesdeCrm(
+	bytes: Uint8Array,
+	declarado: string,
+): string | null {
+	const real = tipoRealDeFactura(bytes);
+	if (real) return real;
+	const marca = Buffer.from(bytes.subarray(4, 12)).toString("latin1");
+	if (marca === "ftypavif" || marca === "ftypavis") return "image/avif";
+	if (
+		empiezaCon(bytes, [0x50, 0x4b, 0x03, 0x04]) &&
+		MIME_WORD_EXCEL_ZIP.has(declarado)
+	) {
+		return declarado;
+	}
+	if (
+		empiezaCon(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) &&
+		MIME_WORD_EXCEL_OLE.has(declarado)
+	) {
+		return declarado;
+	}
+	return null;
+}
+
 export function nombreDeFactura(
 	original: string,
 	tipo: MimeFacturaSeguro,
@@ -166,12 +204,15 @@ export type MotivoSinReenvio =
 	| "sin_factura"
 	| "ya_enviada"
 	| "en_curso"
+	| "programada"
 	| "sin_reintentos";
 
 export const MENSAJE_SIN_REENVIO: Record<MotivoSinReenvio, string> = {
 	sin_factura: "Este crédito todavía no tiene la factura del seguro",
 	ya_enviada: "La factura del seguro ya fue enviada a la aseguradora",
 	en_curso: "El envío de la factura del seguro está en curso",
+	programada:
+		"La factura del seguro se enviará sola al confirmar los contratos",
 	sin_reintentos: "Esta factura ya usó su único reintento de envío",
 };
 
@@ -225,6 +266,7 @@ export function puedeReenviarFacturaSeguro(caso: {
 }): { ok: true } | { ok: false; motivo: MotivoSinReenvio } {
 	if (caso.envio === null) return { ok: false, motivo: "sin_factura" };
 	if (caso.envio === "enviado") return { ok: false, motivo: "ya_enviada" };
+	if (caso.envio === "programado") return { ok: false, motivo: "programada" };
 	if (caso.retryCount >= 1) return { ok: false, motivo: "sin_reintentos" };
 	if (caso.envio === "pendiente" && !envioSinConfirmar(caso)) {
 		return { ok: false, motivo: "en_curso" };

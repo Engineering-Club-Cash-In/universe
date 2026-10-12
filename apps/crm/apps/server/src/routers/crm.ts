@@ -6800,18 +6800,20 @@ export const crmRouter = {
 							// recibir después un "sin permiso".
 							reintentoDisponible:
 								puedeReintentar &&
+								opportunity[0].status === "won" &&
 								puedeReenviarFacturaSeguro({
 									envio: envioAseguradora.estado,
 									envioActualizadoAt: envioAseguradora.actualizadoAt,
 									retryCount: envioAseguradora.retryCount ?? 0,
 								}).ok,
-							reintentoDesde: puedeReintentar
-								? (reintentoDisponibleDesde({
-										envio: envioAseguradora.estado,
-										envioActualizadoAt: envioAseguradora.actualizadoAt,
-										retryCount: envioAseguradora.retryCount ?? 0,
-									})?.toISOString() ?? null)
-								: null,
+							reintentoDesde:
+								puedeReintentar && opportunity[0].status === "won"
+									? (reintentoDisponibleDesde({
+											envio: envioAseguradora.estado,
+											envioActualizadoAt: envioAseguradora.actualizadoAt,
+											retryCount: envioAseguradora.retryCount ?? 0,
+										})?.toISOString() ?? null)
+									: null,
 						},
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
@@ -6863,7 +6865,10 @@ export const crmRouter = {
 				}),
 				// "Seguro del Vehículo": la aseguradora a la que el usuario confirmó
 				// el envío. Sin esto la factura se guarda pero no se manda.
-				envioFacturaConfirmado: z.enum(["gyt", "universales"]).nullish(),
+				// "programado": aceptó que salga sola al confirmar los contratos.
+				envioFacturaConfirmado: z
+					.enum(["gyt", "universales", "programado"])
+					.nullish(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -7116,17 +7121,33 @@ export const crmRouter = {
 				});
 			}
 
-			// La factura del seguro enviada desde el tracker es el respaldo del
-			// correo a la aseguradora: borrarla permitiría subir y enviar otra.
-			const [facturaDelTracker] = await db
-				.select({ id: insuranceInvoiceSubmissions.id })
+			// Los permisos van primero: sin permiso, no se revela nada más.
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor" &&
+				context.userRole !== "analyst" &&
+				document.uploadedBy !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar este documento",
+				});
+			}
+
+			// La factura del seguro registrada para la aseguradora es el respaldo
+			// del correo: borrarla permitiría subir y enviar otra. Una programada
+			// para el cierre todavía no salió y sí se puede quitar.
+			const [facturaRegistrada] = await db
+				.select({
+					id: insuranceInvoiceSubmissions.id,
+					status: insuranceInvoiceSubmissions.status,
+				})
 				.from(insuranceInvoiceSubmissions)
 				.where(eq(insuranceInvoiceSubmissions.documentId, input.documentId))
 				.limit(1);
-			if (facturaDelTracker) {
+			if (facturaRegistrada && facturaRegistrada.status !== "programado") {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"Esta factura del seguro ya se registró para la aseguradora desde el tracker y no se puede eliminar",
+						"Esta factura del seguro ya se registró para la aseguradora y no se puede eliminar",
 				});
 			}
 
@@ -7261,7 +7282,17 @@ export const crmRouter = {
 					await deleteFileFromR2(document.filePath);
 				}
 
-				// Eliminar de la base de datos
+				// Eliminar de la base de datos (con su programación, si la tenía)
+				if (facturaRegistrada) {
+					await db
+						.delete(insuranceInvoiceSubmissions)
+						.where(
+							and(
+								eq(insuranceInvoiceSubmissions.id, facturaRegistrada.id),
+								eq(insuranceInvoiceSubmissions.status, "programado"),
+							),
+						);
+				}
 				await db
 					.delete(opportunityDocuments)
 					.where(eq(opportunityDocuments.id, input.documentId));

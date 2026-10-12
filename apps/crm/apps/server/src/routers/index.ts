@@ -75,6 +75,8 @@ export const crmAppRouter = {
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
 	getEnvioFacturaSeguroCrm: crmRouter.getEnvioFacturaSeguroCrm,
+	// Vive en el router del tracker, pero lo usa el CRM: así el cliente web lo tipa.
+	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
 	getDocumentRequirementsByClientType:
 		crmRouter.getDocumentRequirementsByClientType,

@@ -363,14 +363,18 @@ export async function sendWhatsappTemplateBatch(params: {
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
 		messages: normalized.map((r) => ({
 			number: r.phoneNormalized,
-			body: normalizeParamsForTemplate(
-				adjunto
-					? splitTemplateParams(r.message).map((bloque) =>
-							bloque.replaceAll(/\s*\n\s*/g, " "),
-						)
-					: splitTemplateParams(r.message),
-				templateParamCount,
-			),
+			body: adjunto
+				? // Se aplana DESPUÉS de normalizar: al sobrar bloques (mensaje editado
+					// con más párrafos que variables) `normalizeParamsForTemplate` los
+					// une con "\n\n" dentro de la última variable.
+					normalizeParamsForTemplate(
+						splitTemplateParams(r.message),
+						templateParamCount,
+					).map((bloque) => bloque.replaceAll(/\s*\n\s*/g, " "))
+				: normalizeParamsForTemplate(
+						splitTemplateParams(r.message),
+						templateParamCount,
+					),
 			...(adjunto ? { header: adjunto.header } : {}),
 		})),
 	};

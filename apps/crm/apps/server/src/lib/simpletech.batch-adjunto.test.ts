@@ -45,6 +45,23 @@ describe("sendWhatsappTemplateBatch con adjunto", () => {
 		expect(request.messages[0].header).toEqual(header);
 	});
 
+	test("con más párrafos que variables, el excedente se une con espacio y no deja saltos de línea", async () => {
+		await sendWhatsappTemplateBatch({
+			recipients: [
+				{ phone: "55550001", message: `${mensaje}\n\nCuarto\ncon salto` },
+			],
+			adjunto: { templateName: "mensaje2image", header, parametros: 3 },
+		});
+
+		const body = sendTemplate.mock.calls[0][0].messages[0].body;
+		expect(body).toEqual([
+			"Juan. Línea 2",
+			"Segundo bloque",
+			"Tercero Cuarto con salto",
+		]);
+		for (const parametro of body) expect(parametro).not.toContain("\n");
+	});
+
 	test("sin adjunto sigue partiendo por párrafos y sin header", async () => {
 		await sendWhatsappTemplateBatch({
 			recipients: [{ phone: "55550001", message: mensaje }],

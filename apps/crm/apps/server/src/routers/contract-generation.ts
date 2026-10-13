@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { creditChecks } from "../db/schema/checks";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import {
 	contractGenerationSnapshots,
@@ -27,6 +28,10 @@ import {
 	coberturasQueNoCorresponden,
 	esCartaDeCobertura,
 } from "../lib/cobertura-por-aseguradora";
+import {
+	esCartaDeCheques,
+	mapChecksToDisbursementRows,
+} from "../lib/contract-disbursement";
 import {
 	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 	resolveLegacyContractGender,
@@ -1611,6 +1616,24 @@ export const contractGenerationRouter = {
 						message:
 							"Las cartas de cobertura se generan desde la oportunidad: hace falta la aseguradora de su cotización.",
 					});
+				}
+
+				// La carta de cheques deja afuera los que no son en GTQ: con alguno
+				// así no se emite, igual que en el asistente.
+				if (
+					input.opportunityId &&
+					input.contracts.some((c) => esCartaDeCheques(c.contractType))
+				) {
+					const cheques = await db
+						.select()
+						.from(creditChecks)
+						.where(eq(creditChecks.opportunityId, input.opportunityId));
+					const { omitidosPorMoneda } = mapChecksToDisbursementRows(cheques);
+					if (omitidosPorMoneda > 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se puede generar la carta de emisión de cheques: ${omitidosPorMoneda === 1 ? "hay un cheque" : `hay ${omitidosPorMoneda} cheques`} en una moneda distinta de GTQ. Corregí la moneda en el detalle de crédito.`,
+						});
+					}
 				}
 
 				// Las cartas van en un solo documento. Se agrupa acá, antes de pedir

@@ -1586,6 +1586,18 @@ export const legalContractsRouter = {
 					});
 				}
 
+				// Lo firmado tiene que ser la batería de hoy: si algo cambió después de
+				// aprobar (el representante de la sociedad, el tipo de cliente), no se
+				// cierra con contratos de otra persona.
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede confirmar: ${desactualizada}`,
+					});
+				}
+
 				// Primero: cerrar la oportunidad (crear crédito en cartera-back, cliente, contrato)
 				// Si falla, la oportunidad se queda en 85% y no se mueve a 90%
 				const closeResult = await closeOpportunity({

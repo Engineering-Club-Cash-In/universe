@@ -10006,6 +10006,21 @@ export const crmRouter = {
 					esRepresentanteLegal !== undefined &&
 					coDeudor.esRepresentanteLegal !== esRepresentanteLegal
 				) {
+					// En firma los contratos ya salieron a nombre del representante
+					// actual: cambiarlo ahí dejaría sus invitaciones vivas con otra
+					// persona. Se cambia en 80%, y jurídico rehace la batería.
+					const [etapa] = await tx
+						.select({ porcentaje: salesStages.closurePercentage })
+						.from(opportunities)
+						.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.where(eq(opportunities.id, coDeudor.opportunityId))
+						.limit(1);
+					if ((etapa?.porcentaje ?? 0) >= 85) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"La oportunidad ya está en firma: los contratos salieron a nombre del representante legal actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+						});
+					}
 					if (esRepresentanteLegal) {
 						await quitarMarcaDeRepresentante(tx, coDeudor.opportunityId, id);
 					}

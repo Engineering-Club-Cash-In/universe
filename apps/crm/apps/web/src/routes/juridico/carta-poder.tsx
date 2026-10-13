@@ -169,6 +169,12 @@ function RouteComponent() {
 			// no del crédito: cambiar de crédito no la borra.
 			setCampos((actual) => ({
 				...datos,
+				// La edad que vino es a la fecha de firma con que se pidió: si la
+				// movieron mientras cargaba, se recalcula a la de ahora.
+				edad:
+					fechaNacimiento && actual.fechaFirma
+						? String(edadAl(fechaNacimiento, actual.fechaFirma) ?? datos.edad)
+						: datos.edad,
 				paisDestino: actual.paisDestino,
 				fechaFirma: actual.fechaFirma,
 				fechaVencimiento: actual.fechaVencimiento,

@@ -149,7 +149,7 @@ export function pagoNexaDentroDeVentana(
   return aMs(fechaBanco) <= aMs(sumarDiasHabilesGT(fechaVencimiento, DIAS_HABILES_VENTANA_NEXA));
 }
 
-type BigInput = Big | string | number;
+export type BigInput = Big | string | number;
 
 /** Una cuota que HOY devenga mora, con el criterio del cron (`cuotasParaPendienteDeCreditos`). */
 export type CuotaConMoraNexa = CuotaParaPendiente & { fecha_vencimiento: Date | string };
@@ -242,48 +242,74 @@ export type RazonSinCondonacionNexa =
   | "no_alcanza_mora"
   | "no_queda_al_dia";
 
+/** Razones de la regla genérica: las de Nexa más las propias de la boleta tardía. */
+export type RazonSinCondonacion =
+  | RazonSinCondonacionNexa
+  | "fuera_de_tope" // la cuota lleva más de 5 días de mora
+  | "boleta_invalida" // fecha_boleta con formato malo, imposible o futura
+  | "boleta_de_otro_periodo"; // la boleta no es posterior al vencimiento de la cuota previa
+
+export type DecisionSiCondona = {
+  condonar: true;
+  /** Total a condonar, en centavos. */
+  monto: Big;
+  /** Lo que queda de mora y cobra el pago (la mora legítima). */
+  moraACobrar: Big;
+  /** Reparto para el ledger, solo cuotas dentro de la ventana. */
+  cuotas: { cuota_id: number; monto: Big }[];
+  /**
+   * Pagos pendientes de cuotas vencidas sin los que el crédito no quedaría
+   * al día (ordenados, sin repetir). Vacío = no depende de ninguno.
+   */
+  pagosPendientes: number[];
+};
+
 export type DecisionCondonacionNexa =
   | { condonar: false; razon: RazonSinCondonacionNexa }
-  | {
-      condonar: true;
-      /** Total a condonar, en centavos. */
-      monto: Big;
-      /** Lo que queda de mora y cobra el pago (la mora legítima). */
-      moraACobrar: Big;
-      /** Reparto para el ledger, solo cuotas dentro de la ventana. */
-      cuotas: { cuota_id: number; monto: Big }[];
-      /**
-       * Pagos pendientes de cuotas vencidas sin los que el crédito no quedaría
-       * al día (ordenados, sin repetir). Vacío = no depende de ninguno.
-       */
-      pagosPendientes: number[];
-    };
+  | DecisionSiCondona;
+
+export type DecisionCondonacion =
+  | { condonar: false; razon: RazonSinCondonacion }
+  | DecisionSiCondona;
 
 const TOLERANCIA_CUOTA = new Big("0.01");
 
-export function decidirCondonacionNexaATiempo(params: {
+export type ParamsDecisionCondonacion = {
   statusCredit: string | null;
   capital: BigInput | null;
   /** `moras_credito.monto_mora` de la mora ACTIVA, o null si no hay. */
   moraActiva: BigInput | null;
   cuotasConMora: CuotaConMoraNexa[];
   cuotasAbiertas: CuotaAbiertaNexa[];
-  /** Monto del pago Nexa. */
+  /** Disponible que reparte el pago (Nexa: el monto; boleta: `disponibleParaCuotas`). */
   monto: BigInput;
-  /** `tokenDate.slice(0, 10)`. */
-  fechaBanco: string;
   /** Hoy en Guatemala: define qué cuotas siguen vencidas. */
   hoy: Date | string;
   /** Lo que los rubros vivos podrían tomar de la boleta (ver `cobrarRubrosParaBoleta`). */
   rubrosPendientes: BigInput;
   ajusteFechaIdeal: { id: number; monto_total: BigInput } | null;
-}): DecisionCondonacionNexa {
+};
+
+/** Qué mora es "del retraso" (condonable). Nexa: vencimiento + 3 hábiles; boleta tardía: ver abajo. */
+export type ReglaDeVentana = {
+  enVentana: (cuota: CuotaConMoraNexa) => boolean;
+  /** Se evalúa justo después de `sin_mora`; una razón corta la decisión. */
+  validarPrevio?: () => RazonSinCondonacion | null;
+  /** Razón cuando ninguna cuota con mora está en ventana. */
+  razonSinCuotasEnVentana: () => RazonSinCondonacion;
+};
+
+export function decidirCondonacion(
+  params: ParamsDecisionCondonacion & { regla: ReglaDeVentana },
+): DecisionCondonacion {
   // EN_CONVENIO / INCOBRABLE / … no devengan mora (STATUS_EXCLUIDOS_MORA).
   if (!["ACTIVO", "MOROSO"].includes(params.statusCredit ?? "")) {
     return { condonar: false, razon: "estado_no_aplica" };
   }
   const moraActual = new Big(params.moraActiva ?? 0);
   if (moraActual.lte(0)) return { condonar: false, razon: "sin_mora" };
+  const previo = params.regla.validarPrevio?.() ?? null;
+  if (previo) return { condonar: false, razon: previo };
 
   // Cuotas duplicadas (mismo numero_cuota): insertPayment solo paga la de mayor cuota_id, que es la
   // única que llega en `cuotasAbiertas`. Una cuota con mora que no está ahí es la duplicada vieja:
@@ -298,16 +324,14 @@ export function decidirCondonacionNexaATiempo(params: {
     cuotas: params.cuotasConMora,
   });
   const enVentana = new Set(
-    params.cuotasConMora
-      .filter((c) => pagoNexaDentroDeVentana(c.fecha_vencimiento, params.fechaBanco))
-      .map((c) => c.cuota_id),
+    params.cuotasConMora.filter((c) => params.regla.enVentana(c)).map((c) => c.cuota_id),
   );
   const pendientesVentana = porCuota.filter((c) => enVentana.has(c.cuota_id));
   const moraVentana = pendientesVentana.reduce((acc, c) => acc.plus(c.pendiente), new Big(0));
   const moraLegitima = porCuota
     .filter((c) => !enVentana.has(c.cuota_id))
     .reduce((acc, c) => acc.plus(c.pendiente), new Big(0));
-  if (moraVentana.lte(0)) return { condonar: false, razon: "fuera_de_ventana" };
+  if (moraVentana.lte(0)) return { condonar: false, razon: params.regla.razonSinCuotasEnVentana() };
 
   // `monto_mora` es el total redondeado a centavos; la parte legítima se cobra
   // redondeada y el resto es de la ventana. El tope (la mora de la ventana
@@ -315,7 +339,7 @@ export function decidirCondonacionNexaATiempo(params: {
   const tope = moraVentana.round(2, Big.roundUp);
   const resto = moraActual.minus(moraLegitima.round(2, Big.roundHalfUp));
   const montoCondonar = (resto.lt(tope) ? resto : tope).round(2, Big.roundDown);
-  if (montoCondonar.lte(0)) return { condonar: false, razon: "fuera_de_ventana" };
+  if (montoCondonar.lte(0)) return { condonar: false, razon: params.regla.razonSinCuotasEnVentana() };
   const moraACobrar = moraActual.minus(montoCondonar);
 
   // ── Simulación del reparto de insertPayment ────────────────────────────────
@@ -365,4 +389,21 @@ export function decidirCondonacionNexaATiempo(params: {
     cuotas: reparto,
     pagosPendientes: [...pagosPendientes].sort((a, b) => a - b),
   };
+}
+
+/** Nexa (ACH): firma pública y comportamiento idénticos a los de antes de la generalización. */
+export function decidirCondonacionNexaATiempo(
+  params: ParamsDecisionCondonacion & {
+    /** `tokenDate.slice(0, 10)`. */
+    fechaBanco: string;
+  },
+): DecisionCondonacionNexa {
+  const { fechaBanco, ...resto } = params;
+  return decidirCondonacion({
+    ...resto,
+    regla: {
+      enVentana: (c) => pagoNexaDentroDeVentana(c.fecha_vencimiento, fechaBanco),
+      razonSinCuotasEnVentana: () => "fuera_de_ventana",
+    },
+  }) as DecisionCondonacionNexa;
 }

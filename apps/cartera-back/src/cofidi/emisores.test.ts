@@ -164,8 +164,8 @@ describe("emisorPorClave", () => {
 
 describe("emisoresParaSelector", () => {
   // Helper para crear emisores mock con credenciales
-  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", endpointUrl: "https://x" } });
-  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, endpointUrl: undefined as any } });
+  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", userName: "u", endpointUrl: "https://x" } });
+  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, userName: undefined as any, endpointUrl: undefined as any } });
 
   it("con todos con credenciales: devuelve las 7 en el orden exacto", () => {
     const resultado = emisoresParaSelector(EMISORES.map(conCred));
@@ -259,11 +259,11 @@ describe("complementosFacturaGenerica", () => {
 });
 
 describe("emisorTieneCredenciales", () => {
-  it("devuelve true si requestor y endpointUrl están presentes", () => {
+  it("devuelve true si los tres (requestor, userName, endpointUrl) están presentes", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "req", endpointUrl: "https://test.com" },
+      satConfig: { requestor: "req", userName: "user", endpointUrl: "https://test.com" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(true);
@@ -273,7 +273,47 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "", endpointUrl: "https://test.com" },
+      satConfig: { requestor: "", userName: "user", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si userName es undefined", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: undefined, endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si userName es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: "   ", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si requestor es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "  ", userName: "user", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si endpointUrl es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: "user", endpointUrl: " " },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -283,7 +323,7 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "req", endpointUrl: "" },
+      satConfig: { requestor: "req", userName: "user", endpointUrl: "" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -293,7 +333,7 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "", endpointUrl: "" },
+      satConfig: { requestor: "", userName: "", endpointUrl: "" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -352,8 +392,8 @@ describe("logoUrlEmisor", () => {
 
 describe("emisoresParaAnular", () => {
   // Helper para crear emisores mock con credenciales
-  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", endpointUrl: "https://x" } });
-  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, endpointUrl: undefined as any } });
+  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", userName: "u", endpointUrl: "https://x" } });
+  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, userName: undefined as any, endpointUrl: undefined as any } });
 
   it("NIT de AMJK con credenciales: devuelve solo AMJK", () => {
     const lista = EMISORES.map(conCred);

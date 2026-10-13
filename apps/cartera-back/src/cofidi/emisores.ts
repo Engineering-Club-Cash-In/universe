@@ -52,11 +52,14 @@ export function emisorPorNit(nit: string | null | undefined): Emisor | undefined
 }
 
 /**
- * Un emisor sin requestor o sin URL de COFIDI no puede facturar: mejor decirlo que fallar en COFIDI.
+ * Un emisor sin requestor, usuario o URL de COFIDI no puede facturar ni anular: mejor decirlo que fallar en COFIDI (con el usuario vacío viaja "<UserName>undefined</UserName>").
  * Nota: se define aquí para que emisoresParaSelector pueda usarlo en su filtro.
  */
 export function emisorTieneCredenciales(emisor: Emisor): boolean {
-  return Boolean(emisor.satConfig.requestor && emisor.satConfig.endpointUrl);
+  const { requestor, userName, endpointUrl } = emisor.satConfig;
+  return [requestor, userName, endpointUrl].every(
+    (valor) => typeof valor === "string" && valor.trim() !== ""
+  );
 }
 
 /** Lo que necesita el selector de Facturas Genéricas: clave y nombre, en el orden del registro, solo emisores con credenciales. */

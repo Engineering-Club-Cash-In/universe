@@ -15,14 +15,8 @@ import {
 } from "../database/db";
 import { and, eq, getTableColumns, gt, gte, sql } from "drizzle-orm";
 import { SATClientService } from "../cofidi/satClientService";
-import {
-  SAT_CONFIG,
-  SE_PRESTA_SAT_CONFIG,
-  AMJK_SAT_CONFIG,
-  CREACION_IMAGEN_SAT_CONFIG,
-  GRUPO_BATRO_SAT_CONFIG,
-  AUTOCASH_SAT_CONFIG,
-} from "../utils/functions/const";
+import { EMISORES } from "../cofidi/emisores";
+import { SAT_CONFIG } from "../utils/functions/const";
 import { sendPlainEmail } from "@cci/email";
 
 const JOB_NAME = "verificar_facturas_sat";
@@ -59,14 +53,7 @@ const DEFAULT_EMAILS = [
 // Mapa NIT emisor -> SAT config. Las configs no-CUBE usan `nit`,
 // CUBE usa `entity`; se normaliza a `entity`.
 // ------------------------------------------------------------
-const SAT_CONFIGS: any[] = [
-  SAT_CONFIG,
-  SE_PRESTA_SAT_CONFIG,
-  AMJK_SAT_CONFIG,
-  CREACION_IMAGEN_SAT_CONFIG,
-  GRUPO_BATRO_SAT_CONFIG,
-  AUTOCASH_SAT_CONFIG,
-];
+const SAT_CONFIGS: any[] = EMISORES.map((e) => e.satConfig);
 
 const nitDeConfig = (cfg: any): string => cfg.entity ?? cfg.nit;
 

@@ -4,6 +4,7 @@ import {
 	camposVacios,
 	datosDeLaCartaPoder,
 	edadAl,
+	nacionalidadSegunGenero,
 	vencimientoPorDefecto,
 } from "./carta-poder";
 import { dpiEnLetras, dpiToLegalFormat } from "./contract-utils";
@@ -148,5 +149,24 @@ describe("edad a la fecha de firma", () => {
 	test("sin fecha válida no hay edad", () => {
 		expect(edadAl("", "2026-10-13")).toBeNull();
 		expect(edadAl("1985-03-20", "")).toBeNull();
+	});
+});
+
+describe("nacionalidad en el género de quien recibe la carta", () => {
+	test("las que tienen masculino y femenino cambian", () => {
+		expect(nacionalidadSegunGenero("Guatemalteco", "female")).toBe(
+			"guatemalteca",
+		);
+		expect(nacionalidadSegunGenero("salvadoreña", "male")).toBe("salvadoreño");
+		expect(nacionalidadSegunGenero("mexicano", "female")).toBe("mexicana");
+	});
+
+	test("las invariables quedan como se escribieron", () => {
+		expect(nacionalidadSegunGenero("belga", "male")).toBe("belga");
+		expect(nacionalidadSegunGenero("croata", "male")).toBe("croata");
+		expect(nacionalidadSegunGenero("vietnamita", "female")).toBe("vietnamita");
+		expect(nacionalidadSegunGenero("estadounidense", "female")).toBe(
+			"estadounidense",
+		);
 	});
 });

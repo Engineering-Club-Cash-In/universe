@@ -19,7 +19,6 @@ import {
 	dpiEnLetras,
 	formatDateInWords,
 	formatDpi,
-	formatNationality,
 	mapMaritalStatus,
 	numberToWords,
 } from "./contract-utils";
@@ -165,6 +164,51 @@ function fechaEnLetras(valor: string): string {
 	return formatDateInWords(new Date(anio, mes - 1, dia));
 }
 
+/**
+ * Terminaciones de nacionalidades que cambian con el género (masculino →
+ * femenino): guatemalteco/a, salvadoreño/a, mexicano/a, chileno/a, argentino/a,
+ * noruego/a, uruguayo/a, polaco/a, turco/a, ruso/a, suizo/a, egipcio/a,
+ * sirio/a, indio/a.
+ */
+const TERMINACIONES_CON_GENERO: ReadonlyArray<[string, string]> = [
+	["eño", "eña"],
+	["ano", "ana"],
+	["eno", "ena"],
+	["ino", "ina"],
+	["eco", "eca"],
+	["ego", "ega"],
+	["ayo", "aya"],
+	["aco", "aca"],
+	["rco", "rca"],
+	["uso", "usa"],
+	["izo", "iza"],
+	["cio", "cia"],
+	["rio", "ria"],
+	["dio", "dia"],
+];
+
+/**
+ * La nacionalidad en el género de quien recibe la carta.
+ *
+ * Sólo se cambian las terminaciones que de verdad tienen masculino y femenino:
+ * "belga", "croata" o "vietnamita" son iguales para los dos, y cambiarles la
+ * última letra las dejaba en "belgo" o "croato". Lo demás (estadounidense,
+ * costarricense, francés) se deja como se escribió.
+ */
+export function nacionalidadSegunGenero(
+	nacionalidad: string,
+	genero: "male" | "female",
+): string {
+	const valor = nacionalidad.trim().replace(/\s+/g, " ").toLowerCase();
+	if (!valor) return "";
+	for (const [masculino, femenino] of TERMINACIONES_CON_GENERO) {
+		const [de, a] =
+			genero === "female" ? [masculino, femenino] : [femenino, masculino];
+		if (valor.endsWith(de)) return valor.slice(0, -de.length) + a;
+	}
+	return valor;
+}
+
 /** Las variables de la plantilla, ya con el texto que va en la carta. */
 export function datosDeLaCartaPoder(
 	tipo: TipoCartaPoder,
@@ -183,9 +227,7 @@ export function datosDeLaCartaPoder(
 			? mapMaritalStatus(campos.estadoCivil, campos.genero)
 			: "",
 		profesion: limpio(campos.profesion.toLowerCase()),
-		nacionalidad: campos.nacionalidad.trim()
-			? formatNationality(campos.nacionalidad, campos.genero).toLowerCase()
-			: "",
+		nacionalidad: nacionalidadSegunGenero(campos.nacionalidad, campos.genero),
 		dpiTexto: dpiCompleto ? dpiEnLetras(dpi) : limpio(campos.dpi.toLowerCase()),
 		dpiNumero: dpiCompleto ? formatDpi(dpi) : limpio(campos.dpi),
 

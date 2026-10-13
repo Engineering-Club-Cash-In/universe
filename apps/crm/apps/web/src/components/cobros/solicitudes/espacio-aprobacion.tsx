@@ -35,6 +35,7 @@ import {
 	ESTADOS_VEHICULO,
 	etiquetaMotivo,
 } from "server/src/lib/recuperacion-vehiculo";
+import { toast } from "sonner";
 import { ConvenioAprobacionModal } from "@/components/cobros/convenio-aprobacion-modal";
 import { DecisionPorConfirmarBanner } from "@/components/cobros/decision-por-confirmar-banner";
 import { DecisionInmovilizacionModal } from "@/components/cobros/inmovilizacion-decision-modal";
@@ -73,12 +74,16 @@ import {
 import { cn } from "@/lib/utils";
 import { googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
+import {
+	ContrapropuestaDialog,
+	ContrapropuestaPendienteAviso,
+} from "./contrapropuesta-dialog";
 import type {
 	RecuperacionFuente,
 	Solicitud,
 	TipoSolicitud,
 } from "./normalizar";
-import { ChipPronto, ChipTipoSolicitud, quetzales } from "./piezas";
+import { ChipTipoSolicitud, quetzales } from "./piezas";
 
 /* ── Textos por tipo ────────────────────────────────────────────────────────── */
 
@@ -279,7 +284,7 @@ export function quienEsRecuperacion(r: RecuperacionFuente) {
 	return r.cliente?.trim() ? r.cliente.trim() : `El crédito ${r.numeroSifco}`;
 }
 
-/** Primer pago del plan (M4, `getPlanConvenio`); sin él se muestra «Pronto» (showcase). */
+/** Primer pago del plan (M4, `getPlanConvenio`); sin él se muestra «—». */
 export type PrimerPagoVista = { cargando: boolean; valor: string | null };
 
 function fechaPrimerPago(valor: string) {
@@ -319,10 +324,7 @@ function DetalleConvenio({
 								"—"
 							)
 						) : (
-							<span className="inline-flex items-center gap-1.5 font-normal text-fg-tertiary">
-								—
-								<ChipPronto />
-							</span>
+							"—"
 						)}
 					</Dato>
 					<Dato etiqueta="Bucket antes del convenio">
@@ -577,8 +579,10 @@ export type PanelSolicitudVistaProps = {
 	onSiguiente?: () => void;
 	/** Mapa chico de la ubicación del apagado (apagado en el showcase). */
 	conMapa?: boolean;
-	/** Primer pago del convenio pendiente (M4); sin esto se muestra «Pronto». */
+	/** Primer pago del convenio pendiente (M4); sin esto se muestra «—». */
 	primerPago?: PrimerPagoVista;
+	/** Abre el editor de la contrapropuesta (M4); solo convenios. */
+	onContraproponer?: () => void;
 	className?: string;
 };
 
@@ -596,6 +600,7 @@ export function PanelSolicitudVista({
 	onSiguiente,
 	conMapa = true,
 	primerPago,
+	onContraproponer,
 	className,
 }: PanelSolicitudVistaProps) {
 	const notasId = React.useId();
@@ -694,20 +699,17 @@ export function PanelSolicitudVista({
 
 			{decide || bloqueo ? (
 				<footer className="flex shrink-0 flex-col gap-2 border-line-subtle border-t px-5 py-3 sm:px-6">
-					{solicitud.tipo === "convenio" ? (
-						// TODO(José) · tarea M4: contrapropuesta de convenio (Figma
-						// «WS Aprob · Convenio · Contrapropuesta»): total, número de
-						// cuotas, cuota recalculada y nota para el cliente.
+					{solicitud.tipo === "convenio" && onContraproponer ? (
 						<Button
 							type="button"
 							variant="secondary"
 							className="w-full"
-							disabled
-							title="Pronto: contrapropuesta del convenio"
+							onClick={onContraproponer}
+							disabled={!!bloqueo}
+							title={bloqueo ?? undefined}
 						>
 							<Pencil aria-hidden />
 							Editar y contraproponer
-							<ChipPronto className="ml-1" />
 						</Button>
 					) : null}
 					<div className="grid grid-cols-2 gap-2">
@@ -1006,6 +1008,19 @@ function ContenidoEspacio({
 				}
 			: undefined;
 
+	// M4: contrapropuesta que espera la respuesta del asesor (si la hay).
+	const contrapropuestas = useQuery({
+		...orpc.getContrapropuestasConvenio.queryOptions({
+			input: { convenioId: s.tipo === "convenio" ? s.convenio.convenio_id : 1 },
+		}),
+		enabled: s.tipo === "convenio",
+	});
+	const contraPendiente =
+		s.tipo === "convenio"
+			? (contrapropuestas.data?.find((c) => c.estado === "pendiente") ?? null)
+			: null;
+	const [contraAbierta, setContraAbierta] = React.useState(false);
+
 	const [notas, setNotas] = React.useState("");
 	const [decision, setDecision] = React.useState<"aprobar" | "rechazar" | null>(
 		null,
@@ -1057,6 +1072,19 @@ function ContenidoEspacio({
 				/>
 			);
 		}
+		if (contraPendiente && !bloqueo) {
+			bloqueo = "Hay una contrapropuesta esperando la respuesta del asesor";
+			aviso = (
+				<ContrapropuestaPendienteAviso
+					contrapropuesta={{
+						numeroMeses: contraPendiente.numeroMeses,
+						cuotaMensual: contraPendiente.cuotaMensual,
+						primerPago: contraPendiente.primerPago,
+						nota: contraPendiente.nota,
+					}}
+				/>
+			);
+		}
 	} else if (s.tipo === "recuperacion" && s.recuperacion.esMia) {
 		// Cuatro ojos: la propia no se decide (el servidor lo exige igual).
 		puedeDecidir = false;
@@ -1083,6 +1111,9 @@ function ContenidoEspacio({
 			? {
 					onAprobar: () => setDecision("aprobar"),
 					onRechazar: () => setDecision("rechazar"),
+					...(s.tipo === "convenio"
+						? { onContraproponer: () => setContraAbierta(true) }
+						: {}),
 				}
 			: {};
 
@@ -1120,6 +1151,16 @@ function ContenidoEspacio({
 					/>
 				}
 			/>
+
+			{s.tipo === "convenio" ? (
+				<ContrapropuestaDialog
+					abierto={contraAbierta}
+					convenio={s.convenio}
+					primerPagoActual={planConvenio.data?.primer_pago ?? null}
+					onCerrar={() => setContraAbierta(false)}
+					onEnviada={() => undefined}
+				/>
+			) : null}
 
 			{/* Las decisiones: los modales de siempre, con su lógica intacta. */}
 			{decision && s.tipo === "convenio" && userId ? (

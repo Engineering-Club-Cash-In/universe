@@ -140,7 +140,7 @@ Los esquemas de Drizzle (`db/schema/cobros.ts`, `inmovilizacion-unidad.ts` y `no
 
 ## Pendiente de front
 
-Nada de esto se toca en esta fase. Cada punto sale también en el comentario del issue #1895.
+Estado del cableado: **M1, M2, M3, M6 y M7** (y el «Primer pago» de M4) los cablea el PR #1973. **El resto de M4 (contrapropuesta del supervisor) y M5 (ausencia indefinida con reparto)** van en el PR del front siguiente, que quita los `TODO(José)` de esas dos tareas. Lo que no es un `TODO` y queda fuera de esas entregas está en «Extras fuera de los TODO», más abajo. Cada punto sale también en el comentario del issue #1895.
 
 | Tarea | Qué tiene que cablear el front |
 | --- | --- |
@@ -151,6 +151,19 @@ Nada de esto se toca en esta fase. Cada punto sale también en el comentario del
 | M5 | `equipo/asignacion/marcar-ausente.tsx`: motivo «Incidente», hora de inicio (`inicio_at` se toma al marcar) y fin indefinido; el modal «Redistribución» se arma con `previsualizarRepartoAusencia` (`carga[]` da las filas «28 → 32 +4») y se confirma con `marcarAusenteIndefinido`. `equipo/reactivar-dialogs.tsx` y la tarjeta: «Reactivar» con `reactivarAsesor` y el resultado (`devueltas` / `retenidas`). El estado «Ausente» de las tarjetas hoy sale de `listarCoberturas`; las ausencias indefinidas vienen de `listarAusencias` (`finAt` es `null`, no hay `hasta`). `estado-asesor.ts` y `textoAusencia` suponen fecha de fin. El aviso `asesor_reactivado` necesita su tarjeta en la bandeja. |
 | M6 | `equipo/estado-asesor.ts`: leer `nivel` de `getAsesoresTraslados` en lugar de derivarlo de los buckets. |
 | M7 | `equipo/asesores.tsx`: reemplazar el `useQueries` de `getHistorialAgendasResumen` por una llamada a `getContactabilidadPorAsesor({ desde, hasta, usuarioIds, roles: ["cobros"] })`. |
+
+### Extras fuera de los TODO (sin cablear todavía)
+
+Lo que sigue no tenía un `TODO(José)` en el código, así que no entra en las entregas anteriores. Es el siguiente paso si se quiere cerrar bien M4 y M5:
+
+| Extra | Detalle |
+| --- | --- |
+| **Vista del asesor para responder la contrapropuesta** | Una tarjeta en la Ficha 360 con la contrapropuesta pendiente y los botones Aceptar y Descartar (`responderContrapropuesta`). El aviso al asesor ya redirige a la ficha del caso. Hace falta un procedimiento nuevo de lectura **por caso** (la ficha no conoce el id del convenio pendiente), por ejemplo `getContrapropuestaPendienteDelCaso({ casoCobroId })`, con el mismo control de acceso del caso. Sin esta vista, el supervisor contrapropone pero el asesor no tiene dónde responder desde el CRM. |
+| **Retirar la contrapropuesta** | Botón en el Espacio de aprobación (`responderContrapropuesta` con `accion: "descartar"`; el servidor ya deja al supervisor retirarla). Mientras no esté, el convenio queda bloqueado hasta que el asesor responda. |
+| **Historial de contrapropuestas** | Mostrar en el Espacio de aprobación cómo terminaron (aceptada, descartada, sin efecto) con `getContrapropuestasConvenio`. |
+| **Tarjetas de notificación nuevas** | `convenio_contrapropuesta`, `convenio_contrapropuesta_respondida` y `asesor_reactivado` necesitan su tarjeta en la bandeja de notificaciones. |
+| **Hora de inicio del incidente** | El servidor toma el instante de la confirmación (`inicio_at`); el Figma pide elegir la hora. No se cablea mientras no haya campo. |
+| **Showcase del editor de contrapropuesta** | Un grupo en el showcase de Solicitudes con los estados del editor. |
 
 Los routers nuevos viven dentro de `supervision-cobros.ts` y `convenio-decision.ts`, que ya están montados y tipados en el web: no hace falta registrar nada más, salvo regenerar los tipos.
 

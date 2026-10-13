@@ -223,7 +223,19 @@ export function fechaCorta(fecha: string): string {
 export const MOTIVO_COBERTURA_LABEL: Record<string, string> = {
 	vacaciones: "Vacaciones",
 	permiso: "Permiso",
+	incidente: "Incidente",
 };
+
+/** Línea de la tarjeta de un asesor con ausencia indefinida (M5): sin fecha de regreso. */
+export function textoAusenciaIndefinida(ausencia: {
+	motivo: string;
+	reactivacionIniciadaAt?: unknown;
+}): string {
+	const motivo = MOTIVO_COBERTURA_LABEL[ausencia.motivo] ?? ausencia.motivo;
+	return ausencia.reactivacionIniciadaAt
+		? `Ausente · ${motivo} · reactivación a medias`
+		: `Ausente · ${motivo} · cartera repartida, sin fecha de regreso`;
+}
 
 /**
  * «Ausente · Vacaciones · vuelve el 30 sep» (línea de la tarjeta ausente).

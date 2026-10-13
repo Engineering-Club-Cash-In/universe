@@ -17,11 +17,13 @@ import {
 	estadoAsesor,
 	rangosContactabilidad,
 	textoAusencia,
+	textoAusenciaIndefinida,
 } from "./estado-asesor";
 import {
 	AsesorReactivadoDialog,
 	type CoberturaReactivar,
 	ConfirmarReactivarDialog,
+	type ResultadoReactivacion,
 } from "./reactivar-dialogs";
 import { resultadoRecuperacion } from "./recuperacion";
 import type { GrupoEquipo } from "./search";
@@ -35,7 +37,8 @@ import type { GrupoEquipo } from "./search";
  *                                   lote con usuarioIds y roles:["cobros"]
  *   - recuperación y meta         → getRecuperacionAsesores (M1), del mes
  *   - nivel                       → `nivel` de getAsesoresTraslados (M6)
- *   - ausente                     → listarCoberturas de hoy (cobertura vigente)
+ *   - ausente                     → listarCoberturas de hoy (cobertura vigente) o
+ *                                   listarAusencias (M5, ausencia indefinida)
  */
 
 type Cobertura = {
@@ -118,6 +121,15 @@ export function MiEquipoAsesores({
 		enabled: habilitado,
 	});
 
+	// M5: ausencias indefinidas vigentes (con la cartera repartida al equipo).
+	const ausenciasQuery = useQuery({
+		...orpcAparte.listarAusencias.queryOptions({
+			input: { soloVigentes: true },
+		}),
+		enabled: habilitado,
+	});
+	const ausencias = ausenciasQuery.data ?? [];
+
 	// M7: una sola llamada para todo el equipo (antes, una por asesor).
 	const conUsuario = activos.filter((a) => a.userId);
 	const contactabilidadQuery = useQuery({
@@ -176,12 +188,13 @@ export function MiEquipoAsesores({
 					? (contactabilidadPorUsuario.get(a.userId) ?? null)
 					: null;
 				const cobertura = coberturaVigente(coberturas, a.userId, hoy);
+				const indefinida = ausencias.find((x) => x.asesorId === a.asesor_id);
 				return {
 					asesorId: a.asesor_id,
 					nombre: a.nombre,
 					nivel: a.nivel,
 					estado: estadoAsesor({
-						ausente: !!cobertura,
+						ausente: !!cobertura || !!indefinida,
 						cumplimiento: ag && ag.planificados > 0 ? ag.porcentaje : null,
 						contactabilidad,
 					}),
@@ -194,7 +207,11 @@ export function MiEquipoAsesores({
 					recuperacion: resultadoRecuperacion(
 						recuperacionPorAsesor.get(a.asesor_id),
 					),
-					ausencia: cobertura ? textoAusencia(cobertura) : null,
+					ausencia: indefinida
+						? textoAusenciaIndefinida(indefinida)
+						: cobertura
+							? textoAusencia(cobertura)
+							: null,
 					destino: { to: `/cobros/equipo/${a.asesor_id}` },
 				};
 			})
@@ -205,21 +222,43 @@ export function MiEquipoAsesores({
 			);
 	})();
 
-	/* ── Reactivar = cancelar la cobertura vigente ─────────────────────────── */
+	/* ── Reactivar = cancelar la cobertura o reactivar la ausencia indefinida ── */
 
 	const [porReactivar, setPorReactivar] = useState<{
 		asesorId: number;
-		coberturaId: string;
+		/** Cobertura (`cancelarCobertura`) o ausencia indefinida (`reactivarAsesor`). */
+		id: string;
+		indefinida: boolean;
 		datos: CoberturaReactivar;
 	} | null>(null);
 	const [reactivado, setReactivado] = useState<string | null>(null);
+	const [resultado, setResultado] = useState<ResultadoReactivacion | null>(
+		null,
+	);
 
 	const cancelar = useMutation({
-		mutationFn: (id: string) => client.cancelarCobertura({ id }),
-		onSuccess: () => {
+		mutationFn: async (r: { id: string; indefinida: boolean }) => {
+			if (!r.indefinida) {
+				await client.cancelarCobertura({ id: r.id });
+				return null;
+			}
+			const res = await orpcAparte.reactivarAsesor.call({ id: r.id });
+			return {
+				devueltas: res.devueltas,
+				retenidas: res.retenidas as { motivo: string }[],
+			} satisfies ResultadoReactivacion;
+		},
+		onSuccess: (res) => {
 			void queryClient.invalidateQueries({
 				queryKey: orpc.listarCoberturas.key(),
 			});
+			void queryClient.invalidateQueries({
+				queryKey: orpcAparte.listarAusencias.key(),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getCargaPorAsesorBucket.key(),
+			});
+			setResultado(res);
 			setReactivado(porReactivar?.datos.nombre ?? null);
 			setPorReactivar(null);
 		},
@@ -228,12 +267,30 @@ export function MiEquipoAsesores({
 
 	const pedirReactivar = (asesorId: number) => {
 		const a = activos.find((x) => x.asesor_id === asesorId);
+		cancelar.reset();
+		const indefinida = ausencias.find((x) => x.asesorId === asesorId);
+		if (a && indefinida) {
+			setPorReactivar({
+				asesorId,
+				id: indefinida.id,
+				indefinida: true,
+				datos: {
+					nombre: a.nombre,
+					motivo: indefinida.motivo,
+					desde: "",
+					hasta: "",
+					suplente: "",
+					indefinida: { aMedias: !!indefinida.reactivacionIniciadaAt },
+				},
+			});
+			return;
+		}
 		const c = a ? coberturaVigente(coberturas, a.userId, hoy) : null;
 		if (!a || !c) return;
-		cancelar.reset();
 		setPorReactivar({
 			asesorId,
-			coberturaId: c.id,
+			id: c.id,
+			indefinida: false,
 			datos: {
 				nombre: a.nombre,
 				motivo: c.motivo,
@@ -255,7 +312,7 @@ export function MiEquipoAsesores({
 		recuperacionQuery.isError
 			? "No se pudo cargar la recuperación de los asesores."
 			: null,
-		coberturasQuery.isError
+		coberturasQuery.isError || ausenciasQuery.isError
 			? "No se pudieron cargar las ausencias de hoy."
 			: null,
 	].filter((a): a is string => a !== null);
@@ -269,7 +326,8 @@ export function MiEquipoAsesores({
 				cargando={
 					asesoresQuery.isLoading ||
 					cargaQuery.isLoading ||
-					coberturasQuery.isLoading
+					coberturasQuery.isLoading ||
+					ausenciasQuery.isLoading
 				}
 				error={asesoresQuery.isError}
 				onReintentar={() => void asesoresQuery.refetch()}
@@ -289,13 +347,21 @@ export function MiEquipoAsesores({
 				cobertura={porReactivar?.datos ?? null}
 				pendiente={cancelar.isPending}
 				onConfirmar={() =>
-					porReactivar && cancelar.mutate(porReactivar.coberturaId)
+					porReactivar &&
+					cancelar.mutate({
+						id: porReactivar.id,
+						indefinida: porReactivar.indefinida,
+					})
 				}
 				onCerrar={() => setPorReactivar(null)}
 			/>
 			<AsesorReactivadoDialog
 				nombre={reactivado}
-				onCerrar={() => setReactivado(null)}
+				resultado={resultado}
+				onCerrar={() => {
+					setReactivado(null);
+					setResultado(null);
+				}}
 			/>
 		</>
 	);

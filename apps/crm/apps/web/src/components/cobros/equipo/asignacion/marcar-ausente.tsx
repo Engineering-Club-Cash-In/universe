@@ -1,13 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CalendarClock, Info, Users } from "lucide-react";
+import { Info, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { hoyGT } from "@/components/cobros/coberturas-panel";
 import { CrmAvatar, inicialesDe } from "@/components/ds/cards-credito";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -19,14 +17,8 @@ import { FieldMessage } from "@/components/ui/field-message";
 import { Label } from "@/components/ui/label";
 import { PopoverPortalContext } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-	Select,
-	SelectContent,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { client, orpc, queryClient } from "@/utils/orpc";
+import { client, orpc, orpcAparte, queryClient } from "@/utils/orpc";
 import { etiquetaNivel, nivelAsesor } from "../estado-asesor";
 import {
 	type AsesorTraslado,
@@ -44,12 +36,31 @@ import {
  * Durante la ausencia, la agenda del titular se muestra al suplente; la
  * cartera conserva su propietario.
  *
- * Lo que el Figma pide y no existe va «Pronto» (TODO(José) · tarea M5): motivo
- * «Incidente», hora de inicio, fin indefinido y el reparto automático de la
- * cartera al equipo (modal «Redistribución», 3360:4254).
+ * Además de la cobertura con suplente, «Repartir su cartera entre el equipo»
+ * (M5, Figma «Redistribución» 3360:4254) marca al asesor ausente SIN fecha de
+ * regreso: se previsualiza el reparto de sus cuentas según la capacidad del
+ * equipo (`previsualizarRepartoAusencia`), se confirma
+ * (`marcarAusenteIndefinido`) y el asesor queda fuera del pool hasta que se le
+ * reactive. El motivo «Incidente» solo existe en este modo. La hora de inicio
+ * es la de la confirmación.
  */
 
-export type MotivoAusencia = "vacaciones" | "permiso";
+export type MotivoAusencia = "vacaciones" | "permiso" | "incidente";
+export type ModoAusencia = "suplente" | "equipo";
+
+/** Reparto previsualizado, ya resumido por asesor receptor. */
+export type RepartoAusencia = {
+	/** Cuentas que se reparten. */
+	cuentas: number;
+	/** Cuentas fuera de cobro (canceladas, caídas…) que se quedan con el asesor. */
+	conservadas: number;
+	receptores: {
+		asesorId: number;
+		nombre: string;
+		antes: number;
+		despues: number;
+	}[];
+};
 
 export type MarcarAusenteVistaProps = {
 	paso: "formulario" | "revision";
@@ -74,6 +85,11 @@ export type MarcarAusenteVistaProps = {
 	nombreSuplente: string | null;
 	motivo: MotivoAusencia;
 	onMotivo: (motivo: MotivoAusencia) => void;
+	/** Quién atiende la ausencia: un suplente (fechas cerradas) o el equipo (sin regreso fijo). */
+	modo: ModoAusencia;
+	onModo: (modo: ModoAusencia) => void;
+	/** Reparto previsualizado (revisión del modo «equipo»). */
+	reparto: RepartoAusencia | null;
 	desde: string;
 	hasta: string;
 	onDesde: (fecha: string) => void;
@@ -92,7 +108,14 @@ export type MarcarAusenteVistaProps = {
 const MOTIVOS: { valor: MotivoAusencia; etiqueta: string }[] = [
 	{ valor: "vacaciones", etiqueta: "Vacaciones" },
 	{ valor: "permiso", etiqueta: "Permiso" },
+	{ valor: "incidente", etiqueta: "Incidente" },
 ];
+
+const MOTIVO_TEXTO: Record<MotivoAusencia, string> = {
+	vacaciones: "vacaciones",
+	permiso: "permiso",
+	incidente: "un incidente",
+};
 
 /** «2026-10-12» → «12/10/2026». */
 function fechaLegible(fecha: string) {
@@ -100,34 +123,77 @@ function fechaLegible(fecha: string) {
 	return y && m && d ? `${d}/${m}/${y}` : fecha;
 }
 
-function Pronto() {
+/** Revisión del modo «equipo» (Figma «Redistribución»): a quién va la cartera. */
+function ResumenReparto({
+	nombre,
+	motivo,
+	reparto,
+}: {
+	nombre: string;
+	motivo: MotivoAusencia;
+	reparto: RepartoAusencia | null;
+}) {
+	if (!reparto) return null;
 	return (
-		<Badge variant="neutral" className="shrink-0">
-			Pronto
-		</Badge>
+		<div className="space-y-3">
+			<p className="text-fg-secondary text-sm leading-normal">
+				{nombre} estará ausente por {MOTIVO_TEXTO[motivo]}, sin fecha de
+				regreso. Se repartirán {reparto.cuentas} cuentas entre{" "}
+				{reparto.receptores.length} asesores, según la capacidad de cada uno.
+				{reparto.conservadas > 0
+					? ` Otras ${reparto.conservadas} (canceladas o caídas) no se gestionan y se quedan con ${nombre}.`
+					: ""}
+			</p>
+			<ul className="divide-y divide-line-subtle rounded-xl border border-line-subtle">
+				{reparto.receptores.map((r) => (
+					<li
+						key={r.asesorId}
+						className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+					>
+						<span className="truncate text-fg">{r.nombre}</span>
+						<span className="shrink-0 text-fg-secondary tabular-nums">
+							{r.antes} → {r.despues}{" "}
+							<span className="text-fg-tertiary">(+{r.despues - r.antes})</span>
+						</span>
+					</li>
+				))}
+			</ul>
+		</div>
 	);
 }
 
 /** Contenido del modal (sin el Dialog: así el showcase lo pinta en línea). */
 export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 	const revision = p.paso === "revision";
+	const equipo = p.modo === "equipo";
 	return (
 		<div className="flex flex-col gap-5">
 			<h2 className={cn(dialogTitleClassName, "pr-10")}>
-				{revision ? "Registrar cobertura" : "Marcar ausente"}
+				{revision
+					? equipo
+						? "Redistribución de la cartera"
+						: "Registrar cobertura"
+					: "Marcar ausente"}
 			</h2>
 
 			{p.cargando || p.errorCarga ? (
 				<EstadoConsulta error={p.errorCarga} retry={p.onReintentar} />
 			) : revision ? (
 				<>
-					<p className="text-fg-secondary text-sm leading-normal">
-						{p.titularInfo?.nombre} estará ausente por{" "}
-						{p.motivo === "vacaciones" ? "vacaciones" : "permiso"} del{" "}
-						{fechaLegible(p.desde)} al {fechaLegible(p.hasta)}, ambos incluidos.
-						Suplente propuesto: {p.nombreSuplente}. Sus tareas de agenda se
-						mostrarán al suplente.
-					</p>
+					{equipo ? (
+						<ResumenReparto
+							nombre={p.titularInfo?.nombre ?? ""}
+							motivo={p.motivo}
+							reparto={p.reparto}
+						/>
+					) : (
+						<p className="text-fg-secondary text-sm leading-normal">
+							{p.titularInfo?.nombre} estará ausente por{" "}
+							{MOTIVO_TEXTO[p.motivo]} del {fechaLegible(p.desde)} al{" "}
+							{fechaLegible(p.hasta)}, ambos incluidos. Suplente propuesto:{" "}
+							{p.nombreSuplente}. Sus tareas de agenda se mostrarán al suplente.
+						</p>
+					)}
 					{p.errorServidor ? (
 						<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
 					) : null}
@@ -140,7 +206,11 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 							Volver
 						</Button>
 						<Button loading={p.pendiente} onClick={p.onConfirmar}>
-							{p.pendiente ? "Registrando…" : "Registrar cobertura"}
+							{p.pendiente
+								? "Registrando…"
+								: equipo
+									? "Confirmar ausencia"
+									: "Registrar cobertura"}
 						</Button>
 					</div>
 				</>
@@ -204,125 +274,102 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 						</div>
 					</fieldset>
 
-					<div className="grid gap-3 sm:grid-cols-2">
-						<div className="space-y-1.5">
-							<Label htmlFor="cobertura-desde">Desde (primer día)</Label>
-							<CampoFecha
-								id="cobertura-desde"
-								min={p.hoy}
-								value={p.desde}
-								disabled={p.pendiente}
-								onChange={p.onDesde}
-							/>
-						</div>
-						<div className="space-y-1.5">
-							<Label htmlFor="cobertura-hasta">Hasta (incluido)</Label>
-							<CampoFecha
-								id="cobertura-hasta"
-								min={p.desde}
-								value={p.hasta}
-								disabled={p.pendiente}
-								onChange={p.onHasta}
-							/>
-						</div>
-					</div>
-
-					{/* TODO(José) · tarea M5: ausencia por incidente — motivo «Incidente»,
-					    hora de inicio y fin indefinido (se reactiva al regresar). */}
-					<div className="space-y-2.5 rounded-xl border border-line-subtle border-dashed p-3">
-						<div className="flex items-center justify-between gap-2">
-							<p className="flex items-center gap-2 font-medium text-fg-secondary text-sm">
-								<CalendarClock aria-hidden className="size-4" />
-								Incidente: por horas y sin fecha de regreso
-							</p>
-							<Pronto />
-						</div>
+					{equipo ? null : (
 						<div className="grid gap-3 sm:grid-cols-2">
 							<div className="space-y-1.5">
-								<Label htmlFor="cobertura-hora" className="text-fg-tertiary">
-									Hora de inicio
-								</Label>
-								<Select disabled>
-									<SelectTrigger id="cobertura-hora">
-										<SelectValue placeholder="--:--" />
-									</SelectTrigger>
-									<SelectContent />
-								</Select>
+								<Label htmlFor="cobertura-desde">Desde (primer día)</Label>
+								<CampoFecha
+									id="cobertura-desde"
+									min={p.hoy}
+									value={p.desde}
+									disabled={p.pendiente}
+									onChange={p.onDesde}
+								/>
 							</div>
-							<div className="flex items-center gap-2 self-end pb-2.5">
-								<Checkbox id="cobertura-fin-indefinido" disabled />
-								<Label
-									htmlFor="cobertura-fin-indefinido"
-									className="text-fg-tertiary"
-								>
-									Fin indefinido
-								</Label>
+							<div className="space-y-1.5">
+								<Label htmlFor="cobertura-hasta">Hasta (incluido)</Label>
+								<CampoFecha
+									id="cobertura-hasta"
+									min={p.desde}
+									value={p.hasta}
+									disabled={p.pendiente}
+									onChange={p.onHasta}
+								/>
 							</div>
 						</div>
-					</div>
+					)}
 
 					<fieldset className="space-y-2.5" disabled={p.pendiente}>
 						<legend className="mb-2 font-medium text-fg text-sm">
 							¿Quién atiende su agenda?
 						</legend>
-						<RadioGroup value="suplente" aria-label="Quién atiende su agenda">
+						<RadioGroup
+							value={p.modo}
+							onValueChange={(v) => p.onModo(v as ModoAusencia)}
+							aria-label="Quién atiende su agenda"
+						>
 							<div className="flex items-center gap-2">
 								<RadioGroupItem
 									value="suplente"
 									id="cobertura-reparto-suplente"
+									disabled={p.motivo === "incidente"}
 								/>
-								<Label htmlFor="cobertura-reparto-suplente">Un suplente</Label>
-							</div>
-							<div className="space-y-1.5 pl-6">
-								<Label htmlFor="cobertura-suplente" className="sr-only">
-									Suplente
+								<Label
+									htmlFor="cobertura-reparto-suplente"
+									className={cn(p.motivo === "incidente" && "text-fg-tertiary")}
+								>
+									Un suplente
 								</Label>
-								<SelectorAsesor
-									id="cobertura-suplente"
-									value={p.suplente}
-									onChange={p.onSuplente}
-									asesores={p.suplentes}
-									disabled={!p.titularInfo}
-								/>
-								{p.titularInfo && !p.suplentes.length ? (
-									<FieldMessage variant="warning">
-										Ningún suplente habilitado cubre todos los buckets del
-										titular.
-									</FieldMessage>
-								) : null}
 							</div>
-							{/* TODO(José) · tarea M5: reparto temporal de la cartera al equipo
-							    según la capacidad (modal «Redistribución», Figma 3360:4254) y
-							    devolución al reactivar. */}
-							<div className="flex items-center justify-between gap-2">
-								<div className="flex items-center gap-2">
-									<RadioGroupItem
-										value="equipo"
-										id="cobertura-reparto-equipo"
-										disabled
-									/>
-									<Label
-										htmlFor="cobertura-reparto-equipo"
-										className="gap-1.5 text-fg-tertiary"
-									>
-										<Users aria-hidden className="size-4" />
-										Repartir su cartera entre el equipo
+							{equipo ? null : (
+								<div className="space-y-1.5 pl-6">
+									<Label htmlFor="cobertura-suplente" className="sr-only">
+										Suplente
 									</Label>
+									<SelectorAsesor
+										id="cobertura-suplente"
+										value={p.suplente}
+										onChange={p.onSuplente}
+										asesores={p.suplentes}
+										disabled={!p.titularInfo}
+									/>
+									{p.titularInfo && !p.suplentes.length ? (
+										<FieldMessage variant="warning">
+											Ningún suplente habilitado cubre todos los buckets del
+											titular.
+										</FieldMessage>
+									) : null}
 								</div>
-								<Pronto />
+							)}
+							<div className="flex items-center gap-2">
+								<RadioGroupItem value="equipo" id="cobertura-reparto-equipo" />
+								<Label htmlFor="cobertura-reparto-equipo" className="gap-1.5">
+									<Users aria-hidden className="size-4" />
+									Repartir su cartera entre el equipo
+								</Label>
 							</div>
 						</RadioGroup>
 					</fieldset>
 
 					<div className="flex gap-2.5 rounded-xl bg-info-subtle p-3 text-info-text text-sm leading-normal">
 						<Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-						<p>
-							{p.titularInfo && p.nombreSuplente
-								? `Durante esas fechas, las tareas de agenda de ${p.titularInfo.nombre} se muestran a ${p.nombreSuplente}.`
-								: "Durante la ausencia, las tareas de agenda del titular se muestran al suplente."}{" "}
-							La cartera conserva su propietario. Vacaciones y permisos son por
-							días completos, en horario de Guatemala.
-						</p>
+						{equipo ? (
+							<p>
+								La ausencia no tiene fecha de regreso: su cartera se reparte
+								entre el equipo según la capacidad de cada asesor y no recibe
+								cuentas nuevas hasta que usted lo reactive. Al reactivarlo se le
+								devuelve lo que no haya cambiado de dueño. Antes de confirmar
+								verá el reparto.
+							</p>
+						) : (
+							<p>
+								{p.titularInfo && p.nombreSuplente
+									? `Durante esas fechas, las tareas de agenda de ${p.titularInfo.nombre} se muestran a ${p.nombreSuplente}.`
+									: "Durante la ausencia, las tareas de agenda del titular se muestran al suplente."}{" "}
+								La cartera conserva su propietario. Vacaciones y permisos son
+								por días completos, en horario de Guatemala.
+							</p>
+						)}
 					</div>
 
 					{p.error ? (
@@ -340,8 +387,12 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 						>
 							Cancelar
 						</Button>
-						<Button disabled={!!p.error || p.pendiente} onClick={p.onContinuar}>
-							Continuar
+						<Button
+							loading={p.pendiente && equipo}
+							disabled={!!p.error || p.pendiente}
+							onClick={p.onContinuar}
+						>
+							{p.pendiente && equipo ? "Calculando reparto…" : "Continuar"}
 						</Button>
 					</div>
 				</>
@@ -415,6 +466,11 @@ function FormularioAusencia({
 	const [hasta, setHasta] = useState(hoyGT);
 	const [id, setId] = useState(() => crypto.randomUUID());
 	const [paso, setPaso] = useState<"formulario" | "revision">("formulario");
+	const [modo, setModo] = useState<ModoAusencia>("suplente");
+	const [preview, setPreview] = useState<{
+		previewId: string;
+		reparto: RepartoAusencia;
+	} | null>(null);
 
 	const asesores = useQuery(orpc.getAsesoresTraslados.queryOptions());
 	const titularNumero = /^\d+$/.test(titular) ? Number(titular) : null;
@@ -446,19 +502,75 @@ function FormularioAusencia({
 
 	const error = !origen
 		? "Seleccione el titular."
-		: !receptor
-			? "Seleccione un suplente habilitado para los buckets del titular."
-			: !desde || !hasta || desde > hasta
-				? "Indique un rango de fechas válido."
-				: desde < hoyGT()
-					? "La cobertura debe comenzar hoy o después."
-					: null;
+		: modo === "equipo"
+			? null
+			: !receptor
+				? "Seleccione un suplente habilitado para los buckets del titular."
+				: !desde || !hasta || desde > hasta
+					? "Indique un rango de fechas válido."
+					: desde < hoyGT()
+						? "La cobertura debe comenzar hoy o después."
+						: null;
+
+	const previsualizar = useMutation({
+		...orpcAparte.previsualizarRepartoAusencia.mutationOptions(),
+		retry: false,
+		onSuccess: (data) => {
+			// Un asesor receptor aparece una vez por bucket: se suma por asesor.
+			const porAsesor = new Map<
+				number,
+				{ asesorId: number; nombre: string; antes: number; despues: number }
+			>();
+			for (const c of data.carga) {
+				const fila = porAsesor.get(c.asesorId) ?? {
+					asesorId: c.asesorId,
+					nombre: c.nombre,
+					antes: 0,
+					despues: 0,
+				};
+				fila.antes += c.antes;
+				fila.despues += c.despues;
+				porAsesor.set(c.asesorId, fila);
+			}
+			setPreview({
+				previewId: data.previewId,
+				reparto: {
+					cuentas: data.asignaciones.length,
+					conservadas: data.excluidos.length,
+					receptores: [...porAsesor.values()]
+						.filter((r) => r.despues > r.antes)
+						.sort((a, b) => b.despues - b.antes - (a.despues - a.antes)),
+				},
+			});
+			setPaso("revision");
+		},
+	});
+	const confirmarEquipo = useMutation({
+		...orpcAparte.marcarAusenteIndefinido.mutationOptions(),
+		retry: false,
+		onSuccess: () => {
+			void queryClient.invalidateQueries({
+				queryKey: orpcAparte.listarAusencias.key(),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getCargaPorAsesorBucket.key(),
+			});
+			toast.success("Ausencia registrada", {
+				description: `${origen?.nombre ?? "El asesor"} quedó ausente y su cartera se repartió entre el equipo.`,
+			});
+			onRegistrada({ desde: hoyGT(), hasta: hoyGT() });
+			onCerrar();
+		},
+		onError: () => setPaso("formulario"),
+	});
 
 	const crear = useMutation({
 		retry: false,
 		mutationFn: () => {
 			if (!origen?.userId || !receptor?.userId)
 				throw new Error("Seleccione el titular y el suplente.");
+			if (motivo === "incidente")
+				throw new Error("El incidente se registra repartiendo la cartera.");
 			return client.crearCobertura({
 				id,
 				titularId: origen.userId,
@@ -484,6 +596,9 @@ function FormularioAusencia({
 	const cambiar = () => {
 		setId(crypto.randomUUID());
 		crear.reset();
+		previsualizar.reset();
+		confirmarEquipo.reset();
+		setPreview(null);
 	};
 
 	const creditos = cargaTitular.data
@@ -521,8 +636,16 @@ function FormularioAusencia({
 			motivo={motivo}
 			onMotivo={(m) => {
 				setMotivo(m);
+				// «Incidente» no tiene fechas ni suplente: solo se reparte al equipo.
+				if (m === "incidente") setModo("equipo");
 				cambiar();
 			}}
+			modo={modo}
+			onModo={(m) => {
+				setModo(m);
+				cambiar();
+			}}
+			reparto={preview?.reparto ?? null}
 			desde={desde}
 			hasta={hasta}
 			onDesde={(v) => {
@@ -535,12 +658,34 @@ function FormularioAusencia({
 			}}
 			hoy={hoyGT()}
 			error={error}
-			errorServidor={crear.error?.message ?? null}
-			pendiente={crear.isPending}
+			errorServidor={
+				(crear.error ?? previsualizar.error ?? confirmarEquipo.error)
+					?.message ?? null
+			}
+			pendiente={
+				crear.isPending || previsualizar.isPending || confirmarEquipo.isPending
+			}
 			onCancelar={onCerrar}
-			onContinuar={() => setPaso("revision")}
-			onVolver={() => setPaso("formulario")}
-			onConfirmar={() => crear.mutate()}
+			onContinuar={() => {
+				if (modo !== "equipo") return setPaso("revision");
+				if (origen)
+					previsualizar.mutate({ asesorId: origen.asesor_id, motivo });
+			}}
+			onVolver={() => {
+				// Volver invalida el reparto (puede vencer): se pide uno nuevo.
+				if (modo === "equipo") cambiar();
+				setPaso("formulario");
+			}}
+			onConfirmar={() => {
+				if (modo !== "equipo") return crear.mutate();
+				if (origen && preview)
+					confirmarEquipo.mutate({
+						id,
+						asesorId: origen.asesor_id,
+						motivo,
+						previewId: preview.previewId,
+					});
+			}}
 		/>
 	);
 }

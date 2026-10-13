@@ -3,6 +3,7 @@ import {
 	type CamposCartaPoder,
 	camposVacios,
 	datosDeLaCartaPoder,
+	edadAl,
 	vencimientoPorDefecto,
 } from "./carta-poder";
 import { dpiEnLetras, dpiToLegalFormat } from "./contract-utils";
@@ -134,5 +135,18 @@ describe("dpiEnLetras", () => {
 		expect(dpiToLegalFormat("2553050520101")).toBe(
 			"dos mil quinientos cincuenta y tres, cero cinco mil cincuenta y dos, cero ciento uno (2553 05052 0101)",
 		);
+	});
+});
+
+describe("edad a la fecha de firma", () => {
+	test("cumple antes o después de la firma", () => {
+		expect(edadAl("1985-03-20", "2026-03-19")).toBe(40);
+		expect(edadAl("1985-03-20", "2026-03-20")).toBe(41);
+		expect(edadAl("1985-03-20", "2026-10-13")).toBe(41);
+	});
+
+	test("sin fecha válida no hay edad", () => {
+		expect(edadAl("", "2026-10-13")).toBeNull();
+		expect(edadAl("1985-03-20", "")).toBeNull();
 	});
 });

@@ -10,9 +10,9 @@ import {
 	camposVacios,
 	datosDeLaCartaPoder,
 	ESTADOS_CIVILES,
+	edadAl,
 	TIPOS_CARTA_PODER,
 } from "../lib/carta-poder";
-import { calculateAge } from "../lib/contract-utils";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import { generateContractsBatch } from "../services/legal-docs-api";
@@ -153,6 +153,11 @@ export const cartaPoderRouter = {
 			z.object({
 				opportunityId: z.string().uuid(),
 				hoy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+				/** La edad del cliente es a esta fecha; sin ella, a `hoy`. */
+				fechaFirma: z
+					.string()
+					.regex(/^\d{4}-\d{2}-\d{2}$/)
+					.optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -171,13 +176,18 @@ export const cartaPoderRouter = {
 			}
 
 			const { lead, vehicle: v } = fila;
-			const edad = lead.birthDate
-				? calculateAge(lead.birthDate)
+			// La fecha de nacimiento como "AAAA-MM-DD", para calcular la edad a la
+			// fecha de firma (y que la pantalla la recalcule si la mueven).
+			const fechaNacimiento = lead.birthDate
+				? lead.birthDate.toISOString().slice(0, 10)
+				: "";
+			const edad = fechaNacimiento
+				? edadAl(fechaNacimiento, input.fechaFirma ?? input.hoy)
 				: (lead.age ?? null);
 			// Sin marca, el año del migrado es relleno (2000), no el modelo.
 			const tieneVehiculo = Boolean(v && dato(v.make));
 
-			return {
+			const campos = {
 				...camposVacios(input.hoy),
 				genero: lead.gender === "female" ? "female" : "male",
 				nombreCompleto: [
@@ -209,6 +219,7 @@ export const cartaPoderRouter = {
 				cilindrosVehiculo: dato(v?.cylinders),
 				iscvVehiculo: dato(v?.iscvCode),
 			} satisfies CamposCartaPoder;
+			return { ...campos, fechaNacimiento };
 		}),
 
 	/**

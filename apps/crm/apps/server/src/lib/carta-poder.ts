@@ -209,3 +209,17 @@ export function datosDeLaCartaPoder(
 		[carta.variableEdad]: numeroEnLetras(campos.edadRepresentante),
 	};
 }
+
+/**
+ * La edad que tiene el día `fecha` quien nació el día `nacimiento` (las dos
+ * "AAAA-MM-DD"). La carta dice la edad a su fecha de firma, que puede no ser
+ * hoy. Null si alguna de las dos no es una fecha.
+ */
+export function edadAl(nacimiento: string, fecha: string): number | null {
+	const [an, mn, dn] = nacimiento.split("-").map(Number);
+	const [af, mf, df] = fecha.split("-").map(Number);
+	if (!an || !mn || !dn || !af || !mf || !df) return null;
+	let edad = af - an;
+	if (mf < mn || (mf === mn && df < dn)) edad--;
+	return edad >= 0 ? edad : null;
+}

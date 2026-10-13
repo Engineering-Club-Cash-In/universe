@@ -13,6 +13,7 @@ import {
 	type CamposCartaPoder,
 	camposVacios,
 	type EstadoCivil,
+	edadAl,
 	type TipoCartaPoder,
 	vencimientoPorDefecto,
 } from "server/src/lib/carta-poder";
@@ -148,11 +149,22 @@ function RouteComponent() {
 	// El crédito cuyos datos se están esperando. "Empezar de cero" lo suelta: si
 	// la respuesta llega después, ya no es del formulario y no se aplica.
 	const creditoPedidoRef = useRef<string | null>(null);
+	// La fecha de nacimiento del crédito cargado: la edad de la carta es a la
+	// fecha de firma, y se recalcula si la mueven, salvo que la hayan escrito
+	// a mano.
+	const fechaNacimientoRef = useRef("");
+	const edadEditadaRef = useRef(false);
 	const cargarDatos = useMutation({
 		mutationFn: (opportunityId: string) =>
-			client.datosCartaPoder({ opportunityId, hoy: hoy() }),
-		onSuccess: (datos, opportunityId) => {
+			client.datosCartaPoder({
+				opportunityId,
+				hoy: hoy(),
+				fechaFirma: campos.fechaFirma || undefined,
+			}),
+		onSuccess: ({ fechaNacimiento, ...datos }, opportunityId) => {
 			if (creditoPedidoRef.current !== opportunityId) return;
+			fechaNacimientoRef.current = fechaNacimiento;
+			edadEditadaRef.current = false;
 			// La carta (fechas, país, edad del representante) es de quien llena,
 			// no del crédito: cambiar de crédito no la borra.
 			setCampos((actual) => ({
@@ -209,12 +221,15 @@ function RouteComponent() {
 		campo: K,
 		valor: CamposCartaPoder[K],
 	) => {
+		if (campo === "edad") edadEditadaRef.current = true;
 		setCampos((actual) => ({ ...actual, [campo]: valor }));
 		descartarCarta();
 	};
 
 	const empezarDeCero = () => {
 		creditoPedidoRef.current = null;
+		fechaNacimientoRef.current = "";
+		edadEditadaRef.current = false;
 		setCreditoElegido(null);
 		setCampos((actual) => ({
 			...camposVacios(actual.fechaFirma),
@@ -353,6 +368,13 @@ function RouteComponent() {
 							date={aFecha(campos.fechaFirma)}
 							onDateChange={(fecha) => {
 								const fechaFirma = fecha ? aTexto(fecha) : "";
+								// La edad del cliente es a la fecha de firma.
+								const edad =
+									fechaFirma &&
+									fechaNacimientoRef.current &&
+									!edadEditadaRef.current
+										? edadAl(fechaNacimientoRef.current, fechaFirma)
+										: null;
 								// Vence al año: se recalcula al mover la firma.
 								setCampos((actual) => ({
 									...actual,
@@ -360,6 +382,7 @@ function RouteComponent() {
 									fechaVencimiento: fechaFirma
 										? vencimientoPorDefecto(fechaFirma)
 										: actual.fechaVencimiento,
+									...(edad !== null ? { edad: String(edad) } : {}),
 								}));
 								descartarCarta();
 							}}

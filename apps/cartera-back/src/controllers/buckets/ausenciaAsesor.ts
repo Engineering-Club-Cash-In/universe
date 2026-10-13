@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../database";
 import { asesor_bucket, asesores, SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
-import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_BUCKET_FUERA, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import { BUCKETS_CONVENIO_LOCK_KEY, CREDITO_ASESOR_LOCK_NAMESPACE, PROCESAR_MORAS_LOCK_KEY } from "../../lib/buckets-job-locks";
 import { clasificarDevolucion, separarYaDevueltos, type UltimoCambioDueno } from "../../lib/ausencia-devolucion";
 import { leerCreditos, reasignarAsesorLote } from "./reasignarAsesorLote";
@@ -234,14 +234,19 @@ async function devolverSinBucket(params: {
     }
     const idsSql = sql.join(ids.map((id) => sql`${id}`), sql`, `);
     const cerradoSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
+    const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
     const res = await tx.execute<{ credito_id: number; asesor_anterior: number; bucket: number | null }>(sql`
       WITH previos AS (
         SELECT c.credito_id, c.asesor_id AS asesor_anterior, d.bucket
         FROM ${schema}.creditos c
         JOIN ${schema}.operaciones_traslado_cartera_detalle d
           ON d.credito_id = c.credito_id AND d.operacion_id = ${params.operacionId}::uuid
+        LEFT JOIN ${schema}.moras_credito m ON m.credito_id = c.credito_id AND m.activa
         WHERE c.credito_id IN (${idsSql}) AND c.asesor_id = d.asesor_nuevo_id
           AND COALESCE(c."statusCredit", '') NOT IN (${cerradoSql})
+          -- Sigue sin bucket operativo bajo los locks: si entró a uno, la regla del
+          -- pool la aplica la reasignación en bloque (el reintento lo reclasifica).
+          AND (CASE WHEN c."statusCredit" IN (${fueraSql}) THEN NULL ELSE ${bucketActualSql("c", "m")} END) IS NULL
         FOR UPDATE OF c
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = ${params.titular}

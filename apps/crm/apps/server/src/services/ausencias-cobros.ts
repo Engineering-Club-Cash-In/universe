@@ -11,7 +11,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -179,7 +179,11 @@ async function validarQueSePuedeMarcar(
 		.from(coberturasAgendaCobros)
 		.where(
 			and(
-				eq(coberturasAgendaCobros.titularId, titularUserId),
+				// Como titular o como suplente: sacarlo del pool deja sin cubrir al titular.
+				or(
+					eq(coberturasAgendaCobros.titularId, titularUserId),
+					eq(coberturasAgendaCobros.suplenteId, titularUserId),
+				),
 				isNull(coberturasAgendaCobros.canceladaEn),
 				gte(coberturasAgendaCobros.hasta, hoy),
 			),

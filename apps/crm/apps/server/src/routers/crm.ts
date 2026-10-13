@@ -139,6 +139,7 @@ import {
 import {
 	esOportunidadDeSociedad,
 	faltantesDelRepresentante,
+	representanteLegalDe,
 } from "../lib/oportunidad-de-sociedad";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
@@ -742,6 +743,78 @@ async function sociedadParaJuridico(
 		esSociedad: esOportunidadDeSociedad(datos),
 		faltanDelRepresentante: faltantesDelRepresentante(datos),
 	};
+}
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor y, si ya está en
+ * firma (85% o más) y él es quien firma por la sociedad, no deja cambiarle el
+ * nombre, el correo ni el DPI: los contratos vivos y sus firmantes guardados
+ * quedarían con la identidad vieja, y el WhatsApp buscaría sus enlaces con la
+ * nueva. Se corrige regresando la oportunidad a 80% y rehaciendo la batería.
+ */
+async function congelarRepresentanteEnFirma(
+	tx: Transaction,
+	coDebtorId: string,
+	cambios: { fullName?: string; email?: string | null; dpi?: string },
+): Promise<void> {
+	const [fila] = await tx
+		.select({
+			opportunityId: coDebtors.opportunityId,
+			fullName: coDebtors.fullName,
+			email: coDebtors.email,
+			dpi: coDebtors.dpi,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+
+	const [oportunidad] = await tx
+		.select({
+			porcentaje: salesStages.closurePercentage,
+			clientType: leads.clientType,
+		})
+		.from(opportunities)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+	if ((oportunidad?.porcentaje ?? 0) < 85) return;
+
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id !== coDebtorId) return;
+
+	const cambia = (antes: string | null, despues: string | null | undefined) =>
+		despues !== undefined &&
+		(antes ?? "").trim().toLowerCase() !== (despues ?? "").trim().toLowerCase();
+	const cambiaDpi =
+		cambios.dpi !== undefined &&
+		fila.dpi.replace(/\D/g, "") !== cambios.dpi.replace(/\D/g, "");
+	if (
+		cambia(fila.fullName, cambios.fullName) ||
+		cambia(fila.email, cambios.email) ||
+		cambiaDpi
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La oportunidad ya está en firma: los contratos salieron a nombre del representante legal con estos datos. Para corregir su nombre, correo o DPI, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+		});
+	}
 }
 
 export const crmRouter = {
@@ -9912,6 +9985,24 @@ export const crmRouter = {
 			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
 			// aprobada contra la identidad vieja.
 			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				// Quién firma por una sociedad lo leen generar, enlazar y aprobar con
+				// el candado de firma de la oportunidad tomado. Cambiar la marca o la
+				// identidad de un co-deudor pasa por el mismo candado, y ANTES de
+				// cualquier FOR UPDATE: la aprobación toma el candado y después
+				// escribe la oportunidad, y al revés se esperarían entre sí.
+				if (
+					esRepresentanteLegal !== undefined ||
+					updateData.fullName !== undefined ||
+					updateData.email !== undefined ||
+					updateData.dpi !== undefined
+				) {
+					await congelarRepresentanteEnFirma(tx, id, {
+						fullName: updateData.fullName,
+						email: updateData.email,
+						dpi: updateData.dpi,
+					});
+				}
+
 				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
 				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
 				// oportunidad serializa las dos escrituras.

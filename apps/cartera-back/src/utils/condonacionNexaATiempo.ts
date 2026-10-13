@@ -4,7 +4,7 @@ import {
   getAjusteFechaIdealADeducir,
 } from "../controllers/registerPaymentPolicy";
 import { DIAS_PAGO_PENDIENTE_FRENA_MORA } from "./cuotaYaPagadaSql";
-import { fechaCalendarioGT } from "./fechaCalendarioGT";
+import { fechaCalendarioGT, validarFechaBoleta, ymdDeFechaCalendario } from "./fechaCalendarioGT";
 import {
   moraPendientePorCuota,
   repartirPagoDeMora,
@@ -378,6 +378,8 @@ export function decidirCondonacion(
     // parcial que este pago completaría se rechazó arriba): el crédito queda al
     // día gracias a ellos —el cron le da 7 días a un pendiente—. La condonación
     // se marca con ellos y se anula si alguno se anula o se revierte sin validarse.
+    // (La boleta tardía no se apoya en pendientes: lo descarta
+    // `decidirCondonacionBoletaTardia`.)
     if (vencida) for (const id of cuota.pagosPendientes ?? []) pagosPendientes.add(id);
   }
 
@@ -406,4 +408,99 @@ export function decidirCondonacionNexaATiempo(
       razonSinCuotasEnVentana: () => "fuera_de_ventana",
     },
   }) as DecisionCondonacionNexa;
+}
+
+// ── Boleta pagada a tiempo, registrada tarde ─────────────────────────────────
+export const TOPE_DIAS_BOLETA_TARDIA = 5;
+
+/** El disponible que usa `insertPayment` (`calcularMontoEfectivo`): boleta − otros − abono directo, sin pasar de 0. */
+export function disponibleParaCuotas(p: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): Big {
+  const d = new Big(p.montoBoleta).minus(p.otros ?? 0).minus(p.abonoDirectoCapital ?? 0);
+  return d.lt(0) ? new Big(0) : d;
+}
+
+const fechaBoletaValida = (fechaBoleta: string, hoy: Date | string): boolean =>
+  validarFechaBoleta(fechaBoleta, ymdDeFechaCalendario(hoy)) === null;
+
+export type ParamsBoletaTardia = ParamsDecisionCondonacion & {
+  /** `pagos_credito.fecha_boleta`, `YYYY-MM-DD`. */
+  fechaBoleta: string;
+  /**
+   * cuota_id → vencimiento (`YYYY-MM-DD`) de la cuota número N−1 del crédito.
+   * Una entrada AUSENTE nunca equivale a "cuota 1": la cuota no califica
+   * (`boleta_de_otro_periodo`). Para la cuota 1 el valor esperado es la FECHA DE
+   * DESEMBOLSO del crédito; `null` solo se tolera en la cuota 1 y únicamente si
+   * el crédito no tiene fecha de desembolso. `null` en una cuota > 1 no califica.
+   */
+  vencimientoCuotaAnterior: ReadonlyMap<number, string | null>;
+};
+
+/**
+ * Qué cuotas con mora califican para condonar por boleta tardía, y por qué no
+ * ninguna. Una cuota califica si la boleta es de su vencimiento o anterior
+ * Y lleva a lo sumo `TOPE_DIAS_BOLETA_TARDIA` días de mora. El control de
+ * período (anti boleta vieja) se mide contra la candidata más vieja.
+ */
+export function cuotasQueCalificanBoletaTardia(p: Pick<
+  ParamsBoletaTardia,
+  "cuotasConMora" | "cuotasAbiertas" | "fechaBoleta" | "hoy" | "vencimientoCuotaAnterior"
+>): { calificadas: CuotaConMoraNexa[]; razonSiNinguna: RazonSinCondonacion | null } {
+  if (!fechaBoletaValida(p.fechaBoleta, p.hoy)) return { calificadas: [], razonSiNinguna: "boleta_invalida" };
+  const boleta = aMs(p.fechaBoleta);
+  const hoy = aMs(p.hoy);
+  const aTiempo = p.cuotasConMora.filter((c) => boleta <= aMs(c.fecha_vencimiento));
+  if (aTiempo.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_ventana" };
+  // El tope acota también el MONTO: lo condonado sale de `diasAtraso`, así que debe coincidir con
+  // `hoy − vencimiento`; si no (dato inconsistente del llamador) la cuota no califica.
+  const dentroDelTope = aTiempo.filter((c) => {
+    const dias = (hoy - aMs(c.fecha_vencimiento)) / DIA_MS;
+    return dias <= TOPE_DIAS_BOLETA_TARDIA && c.diasAtraso === dias;
+  });
+  if (dentroDelTope.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_tope" };
+  const masVieja = [...dentroDelTope].sort((a, b) => aMs(a.fecha_vencimiento) - aMs(b.fecha_vencimiento))[0]!;
+  const otroPeriodo: { calificadas: CuotaConMoraNexa[]; razonSiNinguna: RazonSinCondonacion } =
+    { calificadas: [], razonSiNinguna: "boleta_de_otro_periodo" };
+  if (!p.vencimientoCuotaAnterior.has(masVieja.cuota_id)) return otroPeriodo; // ausente ≠ cuota 1
+  const previo = p.vencimientoCuotaAnterior.get(masVieja.cuota_id);
+  if (previo == null) {
+    const esCuota1 = p.cuotasAbiertas.find((q) => q.cuota_id === masVieja.cuota_id)?.numero_cuota === 1;
+    if (!esCuota1) return otroPeriodo;
+  } else if (boleta <= aMs(previo)) return otroPeriodo;
+  return { calificadas: dentroDelTope, razonSiNinguna: null };
+}
+
+/**
+ * Boleta pagada a tiempo y registrada tarde: condona la mora que el retraso del
+ * registro generó (cuotas con `fecha_boleta ≤ vencimiento` y a lo sumo
+ * `TOPE_DIAS_BOLETA_TARDIA` días de mora), solo si el pago deja el crédito al día.
+ * Si para quedar al día hace falta un pago PENDIENTE vigente no condona
+ * (`no_queda_al_dia`): a diferencia de Nexa, no se apoya en pendientes.
+ *
+ * Limitaciones conocidas (spec 4.1, se documentan, no se resuelven):
+ *  - Dos boletas del mismo día para la misma cuota no califican: la segunda cae
+ *    en `cierreDiferido`/`no_queda_al_dia`.
+ *  - El control de período se mide contra la candidata más vieja: con
+ *    vencimientos mensuales solo una cuota puede calificar, y medirlo cuota a
+ *    cuota haría imposible el caso de varias cuotas en ventana (spec §6).
+ */
+export function decidirCondonacionBoletaTardia(p: ParamsBoletaTardia): DecisionCondonacion {
+  const { fechaBoleta, vencimientoCuotaAnterior, ...resto } = p;
+  const calif = cuotasQueCalificanBoletaTardia({
+    cuotasConMora: p.cuotasConMora, cuotasAbiertas: p.cuotasAbiertas, fechaBoleta, hoy: p.hoy, vencimientoCuotaAnterior,
+  });
+  const ids = new Set(calif.calificadas.map((c) => c.cuota_id));
+  const d = decidirCondonacion({
+    ...resto,
+    regla: {
+      validarPrevio: () => (calif.razonSiNinguna === "boleta_invalida" ? "boleta_invalida" : null),
+      enVentana: (c) => ids.has(c.cuota_id),
+      razonSinCuotasEnVentana: () => calif.razonSiNinguna ?? "fuera_de_ventana",
+    },
+  });
+  if (d.condonar && d.pagosPendientes.length > 0) return { condonar: false, razon: "no_queda_al_dia" };
+  return d;
 }

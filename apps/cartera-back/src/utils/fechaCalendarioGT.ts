@@ -42,3 +42,29 @@ export function fechaCalendarioGT(valor: Date | string): number {
   }
   return Date.UTC(valor.getFullYear(), valor.getMonth(), valor.getDate());
 }
+
+/** `YYYY-MM-DD` de una fecha de calendario (string o Date con campos locales). Lanza si es inválida. */
+export function ymdDeFechaCalendario(valor: Date | string): string {
+  const ms = fechaCalendarioGT(valor);
+  if (!Number.isFinite(ms)) throw new Error(`Fecha inválida: ${String(valor)}`);
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Valida `fecha_boleta` contra el "hoy" de Guatemala (`hoyYmd`, `YYYY-MM-DD`).
+ * Devuelve null si es válida o el motivo si no: no es un string `YYYY-MM-DD`,
+ * es una fecha imposible (2026-02-30) o es futura. Única fuente de esta regla.
+ */
+export function validarFechaBoleta(fecha: unknown, hoyYmd: string): string | null {
+  if (typeof fecha !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    return "fecha_boleta debe tener formato YYYY-MM-DD";
+  }
+  const ms = fechaCalendarioGT(fecha);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== fecha) {
+    return "fecha_boleta no es una fecha real";
+  }
+  const hoyMs = fechaCalendarioGT(hoyYmd);
+  if (!Number.isFinite(hoyMs) || new Date(hoyMs).toISOString().slice(0, 10) !== hoyYmd) throw new Error(`hoyYmd inválido: ${String(hoyYmd)}`);
+  if (ms > hoyMs) return "fecha_boleta es futura";
+  return null;
+}

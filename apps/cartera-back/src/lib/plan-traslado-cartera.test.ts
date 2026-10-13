@@ -110,3 +110,57 @@ describe("previsualizarTrasladoCartera", () => {
 		]);
 	});
 });
+
+describe("previsualizarTrasladoCartera · ponderar por capacidad", () => {
+	const creditos = [1, 2, 3, 4, 5, 6].map((creditoId) => ({
+		creditoId,
+		bucket: 1,
+		asesorId: 10,
+		tieneCompromisoVigente: false,
+	}));
+
+	test("reparte según la capacidad: el de más capacidad recibe más", () => {
+		const r = previsualizarTrasladoCartera({
+			asesorOrigenId: 10,
+			modo: "redistribucion",
+			creditos,
+			poolPorBucket: new Map([[1, [20, 30]]]),
+			cargaPorBucket: new Map([[1, new Map([[20, 0], [30, 0]])]]),
+			capacidadPorBucket: new Map([[1, new Map([[20, 100], [30, 300]])]]),
+			ponderarPorCapacidad: true,
+		});
+		const por = (id: number) => r.asignaciones.filter((a) => a.asesorNuevoId === id).length;
+		// Capacidad 1:3 → de 6 cuentas, 2 y 4.
+		expect(por(20)).toBe(2);
+		expect(por(30)).toBe(4);
+	});
+
+	test("sin ponderar sigue repartiendo por conteo", () => {
+		const r = previsualizarTrasladoCartera({
+			asesorOrigenId: 10,
+			modo: "redistribucion",
+			creditos,
+			poolPorBucket: new Map([[1, [20, 30]]]),
+			cargaPorBucket: new Map([[1, new Map([[20, 0], [30, 0]])]]),
+			capacidadPorBucket: new Map([[1, new Map([[20, 100], [30, 300]])]]),
+		});
+		const por = (id: number) => r.asignaciones.filter((a) => a.asesorNuevoId === id).length;
+		expect(por(20)).toBe(3);
+		expect(por(30)).toBe(3);
+	});
+
+	test("tiene en cuenta la carga que ya traen y trata la capacidad 0 como lleno", () => {
+		const r = previsualizarTrasladoCartera({
+			asesorOrigenId: 10,
+			modo: "redistribucion",
+			creditos: creditos.slice(0, 2),
+			poolPorBucket: new Map([[1, [20, 30, 40]]]),
+			cargaPorBucket: new Map([[1, new Map([[20, 50], [30, 10], [40, 0]])]]),
+			capacidadPorBucket: new Map([[1, new Map([[20, 100], [30, 100], [40, 0]])]]),
+			ponderarPorCapacidad: true,
+		});
+		// 30 (10 %) recibe primero; luego 30 (11 %) sigue por debajo de 20 (50 %); 40 nunca.
+		expect(r.asignaciones.map((a) => a.asesorNuevoId)).toEqual([30, 30]);
+	});
+});
+

@@ -90,6 +90,8 @@ export type ReasignarAsesorResultado =
  * bucket actual. Escribe la bitácora (origen=API_MANUAL, usuario_id, motivo) y
  * actualiza creditos.asesor_id — ÚNICAMENTE ese campo — en una transacción.
  */
+class PoolCambio extends Error {}
+
 export async function reasignarAsesorManual(params: {
   credito_id: number;
   asesor_nuevo_id: number;
@@ -158,30 +160,54 @@ export async function reasignarAsesorManual(params: {
   // cuando se escribe. Un traslado masivo puede haber terminado entre ambas
   // cosas; en ese caso no se inserta historia basada en dueño viejo ni se pisa
   // su destino. UPDATE + bitácora siguen siendo una sola transacción.
-  const actualizado = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id})`);
-    const filas = await tx
-      .update(creditos)
-      .set({ asesor_id: asesor_nuevo_id })
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${asesorActual}`,
-        ),
-      )
-      .returning({ credito_id: creditos.credito_id });
-    if (filas.length !== 1) return false;
-    await tx.insert(credito_asesor_historial).values({
-      credito_id,
-      asesor_anterior: asesorActual,
-      asesor_nuevo: asesor_nuevo_id,
-      bucket,
-      origen: "API_MANUAL",
-      motivo,
-      usuario_id: usuarioId,
+  let actualizado: boolean;
+  try {
+    actualizado = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id})`);
+      const filas = await tx
+        .update(creditos)
+        .set({ asesor_id: asesor_nuevo_id })
+        .where(
+          and(
+            eq(creditos.credito_id, credito_id),
+            sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${asesorActual}`,
+          ),
+        )
+        .returning({ credito_id: creditos.credito_id });
+      if (filas.length !== 1) return false;
+      // El pool se validó antes de la transacción: se revalida con un lock compartido
+      // sobre la fila, que una pausa del asesor (ausencia) espera o a la que espera.
+      const sigueEnPool = await tx
+        .select({ id: asesor_bucket.id })
+        .from(asesor_bucket)
+        .where(
+          and(
+            eq(asesor_bucket.asesor_id, asesor_nuevo_id),
+            eq(asesor_bucket.bucket, bucket),
+            eq(asesor_bucket.activo, true),
+          ),
+        )
+        .for("share");
+      if (sigueEnPool.length === 0) throw new PoolCambio();
+      await tx.insert(credito_asesor_historial).values({
+        credito_id,
+        asesor_anterior: asesorActual,
+        asesor_nuevo: asesor_nuevo_id,
+        bucket,
+        origen: "API_MANUAL",
+        motivo,
+        usuario_id: usuarioId,
     });
     return true;
-  });
+    });
+  } catch (error) {
+    if (!(error instanceof PoolCambio)) throw error;
+    return {
+      success: false,
+      status: 409,
+      message: `[ERROR] El asesor ${asesor_nuevo_id} dejó de estar en el pool activo del bucket B${bucket}. Actualiza la vista e intenta de nuevo.`,
+    };
+  }
   if (!actualizado) {
     return {
       success: false,

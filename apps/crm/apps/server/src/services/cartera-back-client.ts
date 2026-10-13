@@ -92,6 +92,7 @@ import type {
 	HistorialTraslado,
 	HistorialTrasladosPaginado,
 	PreviewTraslado,
+	ResultadoDevolucionTraslado,
 	ResultadoTraslado,
 	SolicitudTraslado,
 } from "../types/traslados-cobros";
@@ -3965,10 +3966,33 @@ export class CarteraBackClient {
 		});
 	}
 
+	/** M5 · la operación ya confirmada con esa clave de idempotencia (o `null`). */
+	async buscarTrasladoPorClave(
+		clave: string,
+	): Promise<
+		(ResultadoTraslado & { asesorOrigenId: number; esAusencia: boolean }) | null
+	> {
+		const r = await this.request<{
+			success: boolean;
+			data:
+				| (Omit<ResultadoTraslado, "success"> & {
+						asesorOrigenId: number;
+						esAusencia: boolean;
+				  })
+				| null;
+		}>(`/buckets/traslados/clave/${clave}`, { method: "GET" });
+		return r?.data ? { success: true, ...r.data } : null;
+	}
+
 	async confirmarTrasladoCartera(input: {
 		previewId: string;
 		actorEmail: string;
 		idempotencyKey: string;
+		/** M5: cartera rechaza la previsualización si es de otro asesor o sin pausa de pool. */
+		asesorOrigenId?: number;
+		pausarPoolOrigen?: boolean;
+		/** M5: cartera rechaza la confirmación si el motivo difiere del previsualizado. */
+		motivo?: string;
 	}) {
 		const result = await this.request<ResultadoTraslado>(
 			"/buckets/traslados/confirmar",
@@ -3989,6 +4013,52 @@ export class CarteraBackClient {
 			`/buckets/traslados?page=${page}`,
 			{ method: "GET" },
 		);
+	}
+
+	/** M5 · devuelve al asesor a los buckets que se le pausaron. */
+	async reanudarPoolAsesor(
+		asesorId: number,
+		buckets: number[],
+		/** El traslado que lo pausó: también lo devuelve al balanceo de créditos nuevos. */
+		operacionId?: string,
+	): Promise<{ asesor_id: number; buckets: number[] }> {
+		const r = await this.request<{
+			success: boolean;
+			asesor_id: number;
+			buckets: number[];
+			message?: string;
+		}>(`/buckets/asesores/${asesorId}/pool/reanudar`, {
+			method: "POST",
+			body: JSON.stringify({ buckets, operacion_id: operacionId }),
+		});
+		this.cache.invalidate("/buckets/");
+		if (!r?.success) {
+			throw new Error(r?.message || "cartera-back no reanudó al asesor");
+		}
+		return { asesor_id: r.asesor_id, buckets: r.buckets };
+	}
+
+	/**
+	 * M5 · devuelve al asesor original lo que un traslado repartió, salvo lo que
+	 * ya cambió de dueño o de bucket. Hay que reanudar su pool antes.
+	 */
+	async devolverTrasladoCartera(
+		operacionId: string,
+		input: { motivo: string; usuario_email?: string },
+	): Promise<ResultadoDevolucionTraslado> {
+		const r = await this.request<ResultadoDevolucionTraslado>(
+			`/buckets/traslados/${operacionId}/devolver`,
+			{ method: "POST", body: JSON.stringify(input) },
+		);
+		for (const key of [
+			"/credito?",
+			"getAllCredits",
+			"stats",
+			"mora-por-etapa-asesor",
+			"/buckets/",
+		])
+			this.cache.invalidate(key);
+		return r;
 	}
 
 	/** M3 · traslados confirmados con total, fechas y `perPage` (hasta 100). */

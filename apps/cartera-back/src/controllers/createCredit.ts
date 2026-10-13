@@ -2,6 +2,8 @@ import Big from "big.js";
 import z from "zod";
 import { db } from "../database";
 import {
+  asesores,
+  SQL_CARTERA_SCHEMA,
   aseguradoras,
   ajuste_fecha_ideal_pago,
   creditos,
@@ -94,7 +96,7 @@ interface NewCredit {
   [key: string]: unknown;
 }
 
-type DbExecutor = Pick<typeof db, "insert" | "select">;
+type DbExecutor = Pick<typeof db, "insert" | "select" | "execute">;
 
 interface User {
   usuario_id: number;
@@ -411,6 +413,61 @@ export const findOrCreateAseguradora = async (
   return row.id;
 };
 
+/**
+ * Elige al asesor de menor carga y lo valida con un lock compartido sobre su fila
+ * dentro de la transacción del crédito: una ausencia que lo saque del balanceo
+ * (traslado con pausa) toma el lock de escritura antes de su foto, así que o este
+ * crédito queda confirmado antes de esa foto o el asesor deja de ser elegible y se
+ * elige otro.
+ */
+async function asignarAsesorConLock(executor: DbExecutor): Promise<number> {
+  for (let intento = 0; intento < 3; intento++) {
+    const candidato = await getAsesorConMenorCarga();
+    const vigente = await executor
+      .select({ asesor_id: asesores.asesor_id })
+      .from(asesores)
+      .where(
+        and(
+          eq(asesores.asesor_id, candidato),
+          eq(asesores.activo, true),
+          eq(asesores.activo_para_creditos, true),
+        ),
+      )
+      .for("share");
+    if (vigente.length > 0) return candidato;
+  }
+  throw new Error("No hay un asesor disponible para asignar el crédito.");
+}
+
+/**
+ * Un asesor indicado a mano (p. ej. el de una oportunidad que se cierra) se valida
+ * con el mismo lock compartido: si está ausente (una ausencia lo sacó del balanceo
+ * de créditos nuevos), el crédito no se le asigna y se elige a otro elegible.
+ * Un asesor que simplemente no recibe créditos automáticos sigue asignable a mano.
+ */
+export async function validarAsesorExplicito(executor: DbExecutor, asesorId: number): Promise<number> {
+  // Lock compartido PRIMERO: una ausencia que se confirme en paralelo (y que ya
+  // tocó la fila del asesor) espera a este crédito, o este espera a que ella
+  // termine. Solo después de tomarlo se lee la marca: leerla antes dejaba pasar a
+  // un asesor cuya ausencia estaba por confirmarse, sin marca todavía visible.
+  await executor
+    .select({ asesor_id: asesores.asesor_id })
+    .from(asesores)
+    .where(eq(asesores.asesor_id, asesorId))
+    .for("share");
+  // `ausente` es la marca de la ausencia vigente (se enciende al confirmar el traslado
+  // con pausa y se apaga al reanudar), independiente de si el flag de créditos se
+  // tuvo que apagar o ya lo estaba.
+  const ausente = await executor.execute(sql`
+    SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.operaciones_traslado_cartera
+    WHERE asesor_origen_id = ${asesorId} AND estado = 'confirmada'
+      AND solicitud->>'ausente' = 'true'
+    LIMIT 1`);
+  if ((ausente.rows ?? []).length === 0) return asesorId;
+  console.warn(`[createCredit] El asesor ${asesorId} está ausente: se asigna a otro elegible.`);
+  return asignarAsesorConLock(executor);
+}
+
 const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
@@ -447,7 +504,9 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
   );
 
   console.log("🎯 Aplicando load balancing de asesores...");
-  const asesor_id = creditData.asesor_id || await getAsesorConMenorCarga();
+  const asesor_id = creditData.asesor_id
+    ? await validarAsesorExplicito(executor, creditData.asesor_id)
+    : await asignarAsesorConLock(executor);
   console.log(`✅ Asesor asignado: ${asesor_id}`);
 
   const formatCredit = creditData.inversionistas.length > 1 &&

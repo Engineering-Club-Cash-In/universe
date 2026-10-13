@@ -18,6 +18,21 @@ export const solicitudTrasladoSchema = z.object({
   destinosPorBucket: z.record(z.string().regex(/^\d+$/), z.number().int().positive()).optional(),
   modo: z.enum(["traslado_completo", "redistribucion", "destino_por_bucket"]),
   motivo: z.string().trim().min(1).max(1000),
+  /** COBROS-02 M5: reparte por utilización (carga ÷ capacidad) en vez de por conteo. */
+  ponderarPorCapacidad: z.boolean().optional(),
+  /**
+   * COBROS-02 M5: las cuentas fuera del funnel (CANCELADO, CAIDO…) se quedan con
+   * el asesor de origen y no exigen un destino especial. Es para ausencias
+   * temporales: esas cuentas no se gestionan y no hay nada que repartir.
+   */
+  mantenerEspeciales: z.boolean().optional(),
+  /**
+   * COBROS-02 M5: al confirmar, el asesor de origen sale de su pool EN LA MISMA
+   * transacción que el traslado (sin ventana en la que el motor le asigne cuentas
+   * que el traslado no vio). Los buckets pausados quedan en la operación y se
+   * devuelven también en un replay idempotente.
+   */
+  pausarPoolOrigen: z.boolean().optional(),
   actorEmail: z.string().email(),
 }).superRefine((v, ctx) => {
   if (v.modo === "traslado_completo" && (!v.asesorDestinoId || v.asesorDestinoId === v.asesorOrigenId)) ctx.addIssue({ code: "custom", message: "Selecciona un destino distinto del origen" });
@@ -77,7 +92,7 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
   const especialesDelOrigen = creditos.filter(
     (c) => c.asesor_id === entrada.asesorOrigenId && c.especial,
   ).length;
-  if (especialesDelOrigen > 0 && entrada.asesorDestinoEspecialId === undefined) {
+  if (especialesDelOrigen > 0 && entrada.asesorDestinoEspecialId === undefined && !entrada.mantenerEspeciales) {
     // Los estados salen de la constante, no enumerados a mano: escritos aparte,
     // el mensaje termina nombrando estados que ya no aplican (pasó con
     // INCOBRABLE al alinear `especial` con STATUS_READER_FUERA).
@@ -94,7 +109,13 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
     counts.set(c.asesor_id, (counts.get(c.asesor_id) ?? 0) + 1);
     carga.set(c.bucket, counts);
   }
-  const plan = previsualizarTrasladoCartera({ ...entrada,
+  const capacidad = new Map<number, Map<number, number>>();
+  for (const p of pool) {
+    const porAsesor = capacidad.get(p.bucket) ?? new Map<number, number>();
+    porAsesor.set(p.asesor_id, Number(p.capacidad_base));
+    capacidad.set(p.bucket, porAsesor);
+  }
+  const plan = previsualizarTrasladoCartera({ ...entrada, capacidadPorBucket: capacidad,
     destinosPorBucket: new Map(Object.entries(entrada.destinosPorBucket ?? {}).map(([bucket, asesorId]) => [Number(bucket), asesorId])),
     creditos: creditos.map(c => ({ creditoId: c.credito_id, asesorId: c.asesor_id, bucket: c.bucket, tieneCompromisoVigente: c.compromiso, esEspecial: c.especial })),
     poolPorBucket: elegibles, cargaPorBucket: carga });
@@ -280,16 +301,33 @@ export async function previsualizarTrasladoCarteraMasivo(raw: unknown) {
 }
 
 export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
-  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email() }).parse(raw);
+  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional(), motivo: z.string().min(1).max(1000).optional() }).parse(raw);
   try {
     return await db.transaction(async tx => {
-    const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
+    const row = (await tx.execute<{ id: string; estado: string; motivo: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
     if (!row || row.actor_email !== input.actorEmail) throw new TrasladoConflict("Previsualización no encontrada para este usuario");
+    // El llamador declara a qué asesor y con qué opciones previsualizó: una
+    // previsualización de otro asesor no se confirma bajo este.
+    if (input.asesorOrigenId !== undefined && row.solicitud.asesorOrigenId !== input.asesorOrigenId) {
+      throw new TrasladoConflict("La previsualización no corresponde a este asesor");
+    }
+    // Mismo motivo que se previsualizó: la bitácora de cartera y la del llamador no se contradicen.
+    if (input.motivo !== undefined && row.motivo !== input.motivo) {
+      throw new TrasladoConflict("El motivo no coincide con el de la previsualización");
+    }
+    if (input.pausarPoolOrigen && !row.solicitud.pausarPoolOrigen) {
+      throw new TrasladoConflict("La previsualización no incluye la pausa del pool");
+    }
     if (row.estado === "confirmada") {
       if (row.idempotency_key !== input.idempotencyKey) throw new TrasladoConflict("La operación ya fue confirmada con otra solicitud");
-      return { success: true as const, operacionId: row.id, cuentas: row.preview.asignaciones.length };
+      return {
+        success: true as const,
+        operacionId: row.id,
+        cuentas: row.preview.asignaciones.length,
+        ...(row.solicitud.pausarPoolOrigen ? { bucketsPausados: row.solicitud.bucketsPausados ?? [] } : {}),
+      };
     }
     // Solo una confirmación NUEVA escribe historial. Un replay idempotente no
     // debe depender de que el actor siga activo después de su operación.
@@ -304,25 +342,69 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // espere al job en curso; mientras confirma, la siguiente corrida se omite.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
+    // Pausa del pool del origen: su lock de escritura se toma ANTES de las fotos del
+    // plan. Quien asigna a este asesor revalida su pertenencia al pool bajo un lock
+    // compartido sobre esas filas, así que o confirma antes de la foto o espera a
+    // que la pausa termine y se rechaza. El lock global evita que dos pausas se
+    // crucen con los pools de la otra como destinos.
+    let creditosPausados = false;
+    if (row.solicitud.pausarPoolOrigen) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('traslado-pausa-pool'))`);
+      await tx.execute(sql`SELECT id FROM ${schema}.asesor_bucket
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} ORDER BY id FOR UPDATE`);
+      // Sale del balanceo de créditos nuevos ANTES de las fotos: el UPDATE retiene el
+      // lock de la fila hasta el commit, y quien asigna un crédito nuevo lo valida
+      // con un lock compartido sobre esa fila (createCredit), así que o su crédito
+      // ya está confirmado cuando se toma la foto o la asignación se rechaza y
+      // elige a otro asesor.
+      // Una ausencia no se confirma sobre un asesor desactivado: la reactivación no
+      // podría devolverle la cartera y quedaría abierta. Se lee bajo el mismo lock de
+      // fila que retiene el UPDATE de abajo, así una desactivación concurrente o termina
+      // antes y se rechaza acá, o espera a esta confirmación.
+      const [origenFila] = (
+        await tx.execute<{ activo: boolean }>(sql`
+          SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${row.solicitud.asesorOrigenId} FOR UPDATE`)
+      ).rows;
+      if (!origenFila?.activo) {
+        throw new TrasladoConflict("El asesor está desactivado: no se puede marcar ausente. Para repartir su cartera use un traslado.");
+      }
+      const sinBalanceo = await tx.execute(sql`
+        UPDATE ${schema}.asesores SET activo_para_creditos = false
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo_para_creditos
+        RETURNING asesor_id`);
+      creditosPausados = sinBalanceo.rows.length > 0;
+    }
     // Primera foto descubre qué créditos hay que proteger. Tras tomar sus
     // locks se lee de nuevo: un editor que ya estaba en curso termina antes y
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
-    await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    // Las cuentas EXCLUIDAS (las que se quedan con el asesor de origen) también se
+    // bloquean: el chequeo final solo cuenta cuántas quedan en el origen, así que una
+    // reactivación que las devolviera al funnel después de la última foto pasaría
+    // inadvertida y dejaría una cuenta viva con el asesor pausado.
+    const aProteger = [
+      ...plan.asignaciones.map((a) => a.creditoId),
+      ...plan.excluidos.map((e) => e.creditoId),
+    ];
+    await bloquearCreditosAsesor(tx, aProteger);
     // Orden del módulo de mora (develop, latefee.ts): `creditos` PRIMERO y
     // `moras_credito` después. Al revés, un traslado y un pago/convenio/cron
     // concurrentes se pedían los candados en cruz (40P01).
-    await bloquearFilasCredito(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearFilasCredito(tx, aProteger);
     await bloquearFilasMora(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
-    if (plan.excluidos.length) {
+    // Con `mantenerEspeciales` (ausencia temporal, M5) las cuentas fuera del funnel
+    // se quedan con el asesor de origen a propósito: no se exige repartirlas.
+    if (plan.excluidos.length && !row.solicitud.mantenerEspeciales) {
       throw new TrasladoConflict(
         `Hay ${plan.excluidos.length} crédito(s) activos sin bucket operativo. Asigna su bucket antes de confirmar el traslado.`,
       );
     }
-    if (plan.bloqueos.length || !plan.asignaciones.length) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
+    // Con `mantenerEspeciales` (ausencia, M5) un traslado sin cuentas que repartir es
+    // válido: el asesor sin cartera operativa igual debe poder marcarse ausente.
+    if (plan.bloqueos.length || (!plan.asignaciones.length && !row.solicitud.mantenerEspeciales)) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
     // Un solo CTE mantiene UPDATE, historial y detalle atómicos. El CAS por
     // fila preserva la protección frente a reasignaciones manuales; si una
     // sola fila cambió, se lanza conflicto y la transacción revierte lote
@@ -408,8 +490,21 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     `);
     const esperados = plan.asignaciones.length;
     const conteos = escrito.rows[0];
-    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== 0) {
+    // Con `mantenerEspeciales` (M5) se quedan en el origen exactamente las cuentas excluidas.
+    const restantesEsperados = row.solicitud.mantenerEspeciales ? plan.excluidos.length : 0;
+    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== restantesEsperados) {
       throw new TrasladoConflict("El propietario cambió durante la operación");
+    }
+    let bucketsPausados: number[] | undefined;
+    if (row.solicitud.pausarPoolOrigen) {
+      const pausados = await tx.execute<{ bucket: number }>(sql`
+        UPDATE ${schema}.asesor_bucket SET activo = false
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo
+        RETURNING bucket`);
+      bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
+      await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados, ausente: true })}::jsonb
+        WHERE id = ${row.id}::uuid`);
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA
     // previsualización choca acá. Sin mapearlo, la violación sube cruda,
@@ -424,7 +519,12 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       }
       throw error;
     }
-    return { success: true as const, operacionId: row.id, cuentas: plan.asignaciones.length };
+    return {
+      success: true as const,
+      operacionId: row.id,
+      cuentas: plan.asignaciones.length,
+      ...(bucketsPausados ? { bucketsPausados } : {}),
+    };
     });
   } catch (error) {
     if (esTimeoutDeLock(error)) {
@@ -432,6 +532,26 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     }
     throw error;
   }
+}
+
+/** M5 · la operación confirmada con esta clave de idempotencia, para reconciliar un registro pendiente. */
+export async function consultarTrasladoPorClave(clave: string) {
+  const fila = (await db.execute<{ id: string; cuentas: number; buckets: number[] | null; asesor_origen_id: number; es_ausencia: boolean }>(sql`
+    SELECT id, jsonb_array_length(preview->'asignaciones') AS cuentas,
+      asesor_origen_id, COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false) AS es_ausencia,
+      CASE WHEN jsonb_typeof(solicitud->'bucketsPausados') = 'array'
+        THEN ARRAY(SELECT jsonb_array_elements_text(solicitud->'bucketsPausados')::int) END AS buckets
+    FROM ${schema}.operaciones_traslado_cartera
+    WHERE idempotency_key = ${clave} AND estado = 'confirmada'`)).rows[0];
+  return fila
+    ? {
+        operacionId: fila.id,
+        cuentas: Number(fila.cuentas),
+        bucketsPausados: fila.buckets ?? [],
+        asesorOrigenId: Number(fila.asesor_origen_id),
+        esAusencia: fila.es_ausencia,
+      }
+    : null;
 }
 
 export async function listarTrasladosCartera(page: number) {

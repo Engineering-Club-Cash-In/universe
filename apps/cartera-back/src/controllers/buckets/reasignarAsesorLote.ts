@@ -7,7 +7,7 @@ import {
   platform_users,
   SQL_CARTERA_SCHEMA,
 } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_BUCKET_FUERA, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import {
   BUCKETS_CONVENIO_LOCK_KEY,
   CREDITO_ASESOR_LOCK_NAMESPACE,
@@ -37,12 +37,13 @@ export type ReasignarLoteResultado =
       success: true;
       asesor_nuevo: number;
       reasignados: Array<{ credito_id: number; asesor_anterior: number | null; bucket: number }>;
-      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" }>;
+      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" | "cambio_de_dueno" | "bucket_fuera_del_pool" }>;
     }
   | { success: false; status: number; message: string; errores?: ErrorLote[] };
 
 class LoteEnConflicto extends Error {}
 class BucketsOcupado extends Error {}
+class DestinoInactivo extends Error {}
 
 /** Presupuesto TOTAL de espera por locks de crédito y de elegibilidad. */
 const PRESUPUESTO_LOCKS_MS = 5_000;
@@ -51,22 +52,25 @@ const MENSAJE_BUCKETS_OCUPADO =
   "[ERROR] Hay un proceso de buckets trabajando sobre la cartera en este momento (moras 00:05 / convenios 00:30). Intente de nuevo en unos minutos.";
 
 /** Dueño y bucket actual de varios créditos en una sola consulta. */
-async function leerCreditos(
+export async function leerCreditos(
   ejecutor: Pick<typeof db, "execute">,
   ids: number[],
 ): Promise<Map<number, CreditoLoteLeido | null>> {
   const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const cerradoSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
   const idsSql = sql.join(ids.map((id) => sql`${id}`), sql`, `);
   const res = await ejecutor.execute<{
     credito_id: number;
     asesor_id: number | null;
     fuera: boolean;
+    cerrado: boolean;
     bucket: number | null;
   }>(sql`
     SELECT
       c.credito_id,
       c.asesor_id,
       (c."statusCredit" IN (${fueraSql})) AS fuera,
+      (c."statusCredit" IN (${cerradoSql})) AS cerrado,
       ${bucketActualSql("c", "m")} AS bucket
     FROM ${SQL_CARTERA_SCHEMA}.creditos c
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
@@ -81,6 +85,7 @@ async function leerCreditos(
         fila.fuera || fila.bucket === null || fila.bucket === undefined
           ? null
           : Number(fila.bucket),
+      cerrado: Boolean(fila.cerrado),
     });
   }
   return mapa;
@@ -91,6 +96,20 @@ export async function reasignarAsesorLote(params: {
   asesor_nuevo_id: number;
   motivo: string;
   usuario_email?: string;
+  /**
+   * credito_id → dueño que debe tener AL ESCRIBIR (M5, devolución de una
+   * ausencia). Se compara bajo los mismos locks que la escritura: el crédito
+   * que ya tiene otro dueño se omite ("cambio_de_dueno") en vez de quitárselo.
+   */
+  duenios_esperados?: ReadonlyMap<number, number>;
+  /**
+   * La elegibilidad del destino ya la decidió el llamador (devolución al titular
+   * con su pool aún pausado) PARA ESTOS BUCKETS: en ellos no se exige que esté
+   * activo en el pool. Se aplica al bucket que el crédito tiene bajo los locks,
+   * no al que tenía al clasificar: si cambió a otro bucket, el crédito se omite
+   * (`bucket_fuera_del_pool`) en vez de entregarse a un asesor que no es elegible ahí.
+   */
+  buckets_pool_validados?: ReadonlySet<number>;
 }): Promise<ReasignarLoteResultado> {
   const motivo = (params.motivo ?? "").trim();
   if (!motivo) {
@@ -180,11 +199,16 @@ export async function reasignarAsesorLote(params: {
       // espera a que este lote termine, así que la elegibilidad leída es la
       // que rige cuando se escribe.
       await acotarEspera();
-      await tx
-        .select({ asesor_id: asesores.asesor_id })
+      const [destinoFila] = await tx
+        .select({ asesor_id: asesores.asesor_id, activo: asesores.activo })
         .from(asesores)
         .where(eq(asesores.asesor_id, params.asesor_nuevo_id))
         .for("share");
+      // Los buckets que el llamador da por validados se saltan el filtro de «activo»
+      // del pool: si el destino se desactivó mientras tanto, no se le entrega nada.
+      if (params.buckets_pool_validados && !destinoFila?.activo) {
+        throw new DestinoInactivo();
+      }
       await acotarEspera();
       await tx
         .select({ asesor_id: asesor_bucket.asesor_id })
@@ -228,14 +252,48 @@ export async function reasignarAsesorLote(params: {
       const poolPorBucket = new Map<number, Set<number>>();
       for (const bucket of bucketsUsados) {
         const pool = await getAsesoresPorBucket(bucket, tx, true);
-        poolPorBucket.set(bucket, new Set(pool.map((a) => a.asesor_id)));
+        const ids = new Set(pool.map((a) => a.asesor_id));
+        if (params.buckets_pool_validados?.has(bucket)) ids.add(params.asesor_nuevo_id);
+        poolPorBucket.set(bucket, ids);
       }
-      const evaluacion = evaluarLote({
-        creditoIds: ids,
+      const cambiaronDeDueno: number[] = [];
+      const elegibles = params.duenios_esperados
+        ? ids.filter((id) => {
+            const esperado = params.duenios_esperados?.get(id);
+            const ok = esperado === undefined || creditos.get(id)?.asesor_id === esperado;
+            if (!ok) cambiaronDeDueno.push(id);
+            return ok;
+          })
+        : ids;
+      // Un crédito que bajo los locks está en un bucket fuera de los validados por el
+      // llamador no se evalúa contra el pool (no es un error del lote): se omite.
+      const fueraDelPool: number[] = [];
+      const aEvaluar = params.buckets_pool_validados
+        ? elegibles.filter((id) => {
+            const c = creditos.get(id);
+            const fuera =
+              !!c &&
+              c.asesor_id !== params.asesor_nuevo_id &&
+              c.bucket !== null &&
+              !params.buckets_pool_validados?.has(c.bucket);
+            if (fuera) fueraDelPool.push(id);
+            return !fuera;
+          })
+        : elegibles;
+      const evaluado = evaluarLote({
+        creditoIds: aEvaluar,
         creditos,
         poolPorBucket,
         asesorNuevoId: params.asesor_nuevo_id,
       });
+      const evaluacion = {
+        ...evaluado,
+        omitidos: [
+          ...evaluado.omitidos,
+          ...cambiaronDeDueno.map((credito_id) => ({ credito_id, motivo: "cambio_de_dueno" as const })),
+          ...fueraDelPool.map((credito_id) => ({ credito_id, motivo: "bucket_fuera_del_pool" as const })),
+        ],
+      };
       if (evaluacion.errores.length > 0 || evaluacion.aReasignar.length === 0) {
         // Nada que escribir: o el lote no cumple, o todos ya eran del destino.
         return evaluacion;
@@ -293,6 +351,9 @@ export async function reasignarAsesorLote(params: {
     // el presupuesto de espera de los locks.
     if (error instanceof BucketsOcupado || codigoPg === "55P03" || codigoPg === "57014") {
       return { success: false, status: 409, message: MENSAJE_BUCKETS_OCUPADO };
+    }
+    if (error instanceof DestinoInactivo) {
+      return { success: false, status: 409, message: "[ERROR] El asesor destino no está activo: no se le entregan cuentas." };
     }
     if (error instanceof LoteEnConflicto) {
       return {

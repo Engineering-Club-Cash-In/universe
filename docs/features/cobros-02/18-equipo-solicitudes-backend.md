@@ -35,6 +35,10 @@ Para encontrarlos: `grep -rn "TODO(José) · tarea M" apps/crm/apps/web/src`
 
 Las **rebajas de mora** y los **documentos por autorizar** de la bandeja de Solicitudes (chips en «Pronto») ya son tareas W2 (#1873) y F6.
 
+## Avance y migraciones
+
+El plan, las decisiones, las migraciones (CRM `0082` y cartera `0026`, solo en local o DEV) y lo que queda pendiente de front están en el [doc 24](./24-plan-backend-equipo-solicitudes.md).
+
 ## De dónde sale cada bloque
 
 | Bloque | Fuente | Estado |

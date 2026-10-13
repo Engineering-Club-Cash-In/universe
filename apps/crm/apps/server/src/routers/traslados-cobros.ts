@@ -3,7 +3,10 @@ import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { coberturasAgendaCobros } from "../db/schema/cobros";
+import {
+	ausenciasAsesorCobros,
+	coberturasAgendaCobros,
+} from "../db/schema/cobros";
 import { ventanaDiaGuatemala } from "../lib/agenda-cobros-snapshot";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import { nivelPorBuckets } from "../lib/nivel-asesor";
@@ -240,6 +243,26 @@ export const trasladosCobrosRouter = {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							"Titular y suplente deben estar habilitados; el suplente debe cubrir los buckets del titular",
+					});
+				// Una ausencia indefinida vigente (o pendiente de confirmar) es
+				// incompatible con una cobertura del mismo asesor, en cualquier rol.
+				const [ausente] = await tx
+					.select({ id: ausenciasAsesorCobros.id })
+					.from(ausenciasAsesorCobros)
+					.where(
+						and(
+							eq(ausenciasAsesorCobros.estado, "vigente"),
+							or(
+								eq(ausenciasAsesorCobros.titularId, input.titularId),
+								eq(ausenciasAsesorCobros.titularId, input.suplenteId),
+							),
+						),
+					)
+					.limit(1);
+				if (ausente)
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Existe una ausencia o cobertura incompatible en estas fechas",
 					});
 				const [solapada] = await tx
 					.select({ id: coberturasAgendaCobros.id })

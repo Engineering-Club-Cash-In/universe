@@ -241,6 +241,31 @@ export async function previsualizarRepartoAusencia(params: {
 	}
 }
 
+type DatosSolicitudAusencia = {
+	asesorId: number;
+	motivo: MotivoAusencia;
+	nota?: string;
+	actor: Actor;
+};
+
+/** ¿La fila guardada es la MISMA solicitud (mismo asesor, motivo, nota y usuario)? */
+function esLaMismaSolicitud(
+	fila: {
+		asesorId: number;
+		motivo: string;
+		nota: string | null;
+		creadaPor: string | null;
+	},
+	params: DatosSolicitudAusencia,
+) {
+	return (
+		fila.asesorId === params.asesorId &&
+		fila.motivo === params.motivo &&
+		(fila.nota ?? null) === (params.nota || null) &&
+		fila.creadaPor === params.actor.userId
+	);
+}
+
 export async function marcarAusenteIndefinido(params: {
 	id: string;
 	asesorId: number;
@@ -257,13 +282,7 @@ export async function marcarAusenteIndefinido(params: {
 		.then((r) => r[0]);
 	// Un reintento solo puede repetir la solicitud original: ni otro asesor, ni otro
 	// motivo, ni otro usuario con el mismo id.
-	if (
-		existente &&
-		(existente.asesorId !== params.asesorId ||
-			existente.motivo !== params.motivo ||
-			(existente.nota ?? null) !== (params.nota || null) ||
-			existente.creadaPor !== params.actor.userId)
-	) {
+	if (existente && !esLaMismaSolicitud(existente, params)) {
 		throw new ORPCError("CONFLICT", {
 			message: "La solicitud ya se usó con otros datos.",
 		});
@@ -283,7 +302,7 @@ export async function marcarAusenteIndefinido(params: {
 		: undefined;
 	// Se descartó o se conciliaron mientras tanto.
 	if (existente && vigente?.operacionTrasladoId) return vigente;
-	const reintento = vigente;
+	let reintento = vigente;
 
 	const { asesor, userId: titularId } = await asesorConUsuario(params.asesorId);
 	// Solo al crear: un reintento de un registro pendiente (cuyo traslado quizá ya se
@@ -310,16 +329,35 @@ export async function marcarAusenteIndefinido(params: {
 				});
 			});
 		} catch (error) {
-			if (error instanceof ORPCError) throw error;
-			// Solo la violación del índice único (23505: otra ausencia vigente ganó la
-			// carrera) es «ya está ausente». Cualquier otro fallo (conexión, tiempo,
-			// interbloqueo, migración faltante) se relanza: la transacción se revirtió y
-			// decir que ya está ausente sería falso y no dejaría reintentar.
-			const e = error as { code?: string; cause?: { code?: string } };
-			if ((e?.code ?? e?.cause?.code) !== "23505") throw error;
-			throw new ORPCError("CONFLICT", {
-				message: "Este asesor ya está marcado como ausente.",
-			});
+			// Si otra llamada idéntica (doble envío, reintento del cliente) creó ESTA misma
+			// solicitud mientras tanto, esto no es «ya está ausente» sino el reintento
+			// anunciado: se sigue por la ruta de conciliación con la fila de la ganadora.
+			const ganadora = await db
+				.select()
+				.from(ausenciasAsesorCobros)
+				.where(eq(ausenciasAsesorCobros.id, params.id))
+				.limit(1)
+				.then((r) => r[0]);
+			if (ganadora) {
+				if (!esLaMismaSolicitud(ganadora, params)) {
+					throw new ORPCError("CONFLICT", {
+						message: "La solicitud ya se usó con otros datos.",
+					});
+				}
+				if (ganadora.operacionTrasladoId) return ganadora;
+				reintento = ganadora;
+			} else {
+				if (error instanceof ORPCError) throw error;
+				// Solo la violación del índice único (23505: otra ausencia vigente ganó la
+				// carrera) es «ya está ausente». Cualquier otro fallo (conexión, tiempo,
+				// interbloqueo, migración faltante) se relanza: la transacción se revirtió y
+				// decir que ya está ausente sería falso y no dejaría reintentar.
+				const e = error as { code?: string; cause?: { code?: string } };
+				if ((e?.code ?? e?.cause?.code) !== "23505") throw error;
+				throw new ORPCError("CONFLICT", {
+					message: "Este asesor ya está marcado como ausente.",
+				});
+			}
 		}
 	}
 

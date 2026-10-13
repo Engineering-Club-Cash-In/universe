@@ -747,10 +747,12 @@ async function sociedadParaJuridico(
 }
 
 /**
- * Las oportunidades (de las dadas) con contratos vivos: vigentes y todavía
- * sin firmar. Salieron a firma con los datos de hoy —WeeTrust manda las
- * invitaciones apenas se generan, ya en 80%— y pueden seguir pendientes
- * después de 90%: lo que cuenta son los contratos, no la etapa.
+ * Las oportunidades (de las dadas) con contratos vivos: vigentes (sin anular
+ * ni reemplazar) y pendientes de firma, o ya firmados mientras la oportunidad
+ * no pasó la confirmación final (90%). Salieron a firma con los datos de hoy
+ * —WeeTrust manda las invitaciones apenas se generan, ya en 80%—, y uno
+ * firmado en 85% todavía va a cerrar la oportunidad: lo que cuenta son los
+ * contratos, no sólo la etapa.
  */
 async function conContratosPendientes(
 	tx: Transaction,
@@ -758,17 +760,29 @@ async function conContratosPendientes(
 ): Promise<Set<string>> {
 	if (opportunityIds.length === 0) return new Set();
 	const filas = await tx
-		.select({ opportunityId: generatedLegalContracts.opportunityId })
+		.select({
+			opportunityId: generatedLegalContracts.opportunityId,
+			status: generatedLegalContracts.status,
+			porcentaje: salesStages.closurePercentage,
+		})
 		.from(generatedLegalContracts)
+		.innerJoin(
+			opportunities,
+			eq(generatedLegalContracts.opportunityId, opportunities.id),
+		)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 		.where(
 			and(
 				inArray(generatedLegalContracts.opportunityId, opportunityIds),
-				eq(generatedLegalContracts.status, "pending"),
+				inArray(generatedLegalContracts.status, ["pending", "signed"]),
 				isNull(generatedLegalContracts.replacedByContractId),
 			),
 		);
 	return new Set(
-		filas.map((f) => f.opportunityId).filter((id): id is string => !!id),
+		filas
+			.filter((f) => f.status === "pending" || (f.porcentaje ?? 0) < 90)
+			.map((f) => f.opportunityId)
+			.filter((id): id is string => !!id),
 	);
 }
 
@@ -867,7 +881,7 @@ async function congelarRepresentanteEnFirma(
 	) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"La oportunidad tiene contratos pendientes de firma con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+				"La oportunidad tiene contratos en firma (o firmados sin confirmar) con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 }
@@ -948,7 +962,7 @@ async function protegerLeadEnFirma(
 	if (cambiaTipo) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"El cliente tiene contratos pendientes de firma de la batería del tipo de cliente actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+				"El cliente tiene contratos en firma (o firmados sin confirmar) de la batería del tipo de cliente actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 
@@ -965,7 +979,7 @@ async function protegerLeadEnFirma(
 	if (lead.clientType === "empresa" || marcados.length > 0) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"La sociedad tiene contratos pendientes de firma con este nombre y esta dirección. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+				"La sociedad tiene contratos en firma (o firmados sin confirmar) con este nombre y esta dirección. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 }
@@ -10285,7 +10299,7 @@ export const crmRouter = {
 					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
-								"La oportunidad tiene contratos pendientes de firma a nombre del representante legal actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+								"La oportunidad tiene contratos en firma (o firmados sin confirmar) a nombre del representante legal actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
 						});
 					}
 					if (esRepresentanteLegal) {

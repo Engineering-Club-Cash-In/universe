@@ -80,6 +80,20 @@ async function asesorConUsuario(asesorId: number) {
 	};
 }
 
+/**
+ * Una ausencia es temporal: a un asesor ya desactivado no se le marca ausente (su
+ * cartera se reparte con un traslado normal). Además la reactivación le devuelve la
+ * cartera solo si está activo, así que la ausencia quedaría sin poder cerrarse.
+ */
+function exigirAsesorActivo(asesor: { activo: boolean | null }) {
+	if (asesor.activo === false) {
+		throw new ORPCError("CONFLICT", {
+			message:
+				"El asesor está desactivado: no se puede marcar ausente. Para repartir su cartera use un traslado.",
+		});
+	}
+}
+
 async function ausenciaVigente(
 	asesorId: number,
 	ejecutor: Pick<typeof db, "select"> = db,
@@ -204,7 +218,8 @@ export async function previsualizarRepartoAusencia(params: {
 	motivo: MotivoAusencia;
 	actorEmail: string;
 }) {
-	const { userId } = await asesorConUsuario(params.asesorId);
+	const { asesor, userId } = await asesorConUsuario(params.asesorId);
+	exigirAsesorActivo(asesor);
 	await descartarPendientesVencidas(params.asesorId);
 	await validarQueSePuedeMarcar(params.asesorId, userId);
 	try {
@@ -270,7 +285,10 @@ export async function marcarAusenteIndefinido(params: {
 	if (existente && vigente?.operacionTrasladoId) return vigente;
 	const reintento = vigente;
 
-	const { userId: titularId } = await asesorConUsuario(params.asesorId);
+	const { asesor, userId: titularId } = await asesorConUsuario(params.asesorId);
+	// Solo al crear: un reintento de un registro pendiente (cuyo traslado quizá ya se
+	// confirmó) debe poder conciliarse aunque el asesor se haya desactivado después.
+	if (!reintento) exigirAsesorActivo(asesor);
 	if (!reintento) {
 		// Serializa con `crearCobertura` (mismo lock por participante): la
 		// comprobación de coberturas y el alta de la ausencia son una sola unidad.

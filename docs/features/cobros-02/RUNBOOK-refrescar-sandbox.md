@@ -367,7 +367,7 @@ Corrida con `alinear_desde_prod.sh --sin-swap`; se revisó el resultado y se hiz
 (backup `cartera_cobros2_bk_20261013_1512`). 2,036 créditos; el motor hizo 12 subidas y 1,062
 bajadas (el sandbox llevaba un mes sin pagos de producción). Se agregó `--correcciones`
 (`correcciones_asesores.csv`) porque Samuel y Octavio tienen otro correo en producción. El mismo
-día se pisó el CRM de DEV con el de producción. Detalle en [24 · Seed de datos de demo](./24-seed-datos-demo.md).
+día se pisó el CRM de DEV con el de producción. Detalle en [25 · Seed de datos de demo](./25-seed-datos-demo.md).
 
 ### 2026-08-17 — primera ejecución
 

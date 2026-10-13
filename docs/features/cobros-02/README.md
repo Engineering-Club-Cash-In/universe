@@ -58,7 +58,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 21 | [Ficha 360 · plan y avance del backend](./21-plan-backend-ficha-360.md) | Issue #1864: decisiones y estado de F1–F8 (datos personales, codeudores, historial de cambios, vida del crédito, seguro, documentos, asistente IA y edición de direcciones) |
 | 23 | [Supervisión de cobros · plan y avance del backend](./23-plan-backend-supervision.md) | Issue #1891: decisiones y estado de S1–S6 (KPIs del equipo, pendientes, sin contacto, filtros de la Cartera general y reasignación en bloque) |
 | 24 | [Mi equipo y Solicitudes · plan y avance del backend](./24-plan-backend-equipo-solicitudes.md) | Issue #1895: decisiones y estado de M1–M7 (recuperación por asesor, próximos a subir de bucket, bitácora de decisiones, contrapropuesta de convenio, ausencia indefinida, nivel del asesor y contactabilidad en lote) |
-| 24 | [Seed de datos de demo](./24-seed-datos-demo.md) | Cartera y CRM de producción en el sandbox (hecho el 2026-10-13) y el plan del seed de 90 días de gestiones para los créditos `CRM-` (pendiente) |
+| 25 | [Seed de datos de demo](./25-seed-datos-demo.md) | Cartera y CRM de producción en el sandbox y 90 días de gestiones sembradas para los créditos `CRM-`. Cómo correrlo cada día (`--dias=N`), qué sembró y qué jobs están prendidos |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

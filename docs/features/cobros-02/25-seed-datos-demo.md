@@ -1,4 +1,4 @@
-# 24 · Seed de datos de demo para presentar COBROS-02
+# 25 · Seed de datos de demo para presentar COBROS-02
 
 **Estado al 2026-10-13:** las tres fases hechas. El seed se corre de nuevo (incremental) para refrescar la demo; ver [Cómo correrlo](#cómo-correrlo).
 **Para qué:** que el sandbox tenga datos creíbles para mostrar el diseño del Figma al PM: la

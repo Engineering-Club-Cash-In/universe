@@ -1,6 +1,6 @@
 /**
  * Seed de datos de demo de COBROS-02 — SOLO DEV (Neon `ep-green-tree`).
- * Plan y decisiones: docs/features/cobros-02/24-seed-datos-demo.md
+ * Plan y decisiones: docs/features/cobros-02/25-seed-datos-demo.md
  *
  *   TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --dry-run
  *   TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --confirmar-bd=ep-green-tree

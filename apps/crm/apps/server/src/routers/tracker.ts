@@ -579,7 +579,13 @@ export function llaveDeEnvio(registroId: string, intento: number): string {
 	return `factura-seguro/${registroId}/${intento}`;
 }
 
-type RegistroDeEnvio = { id: string; intento: number; reservadoAt: Date };
+type RegistroDeEnvio = {
+	id: string;
+	intento: number;
+	reservadoAt: Date;
+	/** Estado antes de reservar un reintento de un `pendiente` abandonado. */
+	previo?: { updatedAt: Date; retryCount: number };
+};
 
 // Un resultado tardío no pisa otro intento ni un `enviado`: el reintento de un
 // `pendiente` abandonado repite el mismo intento y puede terminar antes que el
@@ -642,8 +648,20 @@ async function enviarYRegistrar(params: {
 			.where(mismoIntentoSinEnviar(params.registro, { soloSuReserva: false }));
 		return "enviado";
 	}
-	// Otro proceso tiene la misma llave en Resend: no se toca el registro.
-	if (resultado.resultado === "en_curso") return "pendiente";
+	// Otro proceso tiene la misma llave en Resend: no salió nada de este
+	// intento. Un reintento devuelve el registro a como estaba (su reserva y el
+	// reintento sin gastar): si el envío original falla después, su resultado
+	// tiene que poder registrarse y el usuario poder volver a intentarlo.
+	if (resultado.resultado === "en_curso") {
+		const previo = params.registro.previo;
+		if (previo) {
+			await db
+				.update(insuranceInvoiceSubmissions)
+				.set({ retryCount: previo.retryCount, updatedAt: previo.updatedAt })
+				.where(mismoIntentoSinEnviar(params.registro, { soloSuReserva: true }));
+		}
+		return "pendiente";
+	}
 	// Pudo haber salido: el intento se conserva en `pendiente` (y su llave),
 	// así el reenvío lo repite sin duplicar en vez de abrir otro intento.
 	if (resultado.resultado === "incierto") {
@@ -1512,7 +1530,18 @@ export const trackerRouter = {
 					})
 					.where(eq(insuranceInvoiceSubmissions.id, registro.id));
 				return {
-					registro: { ...registro, intento, reservadoAt },
+					registro: {
+						...registro,
+						intento,
+						reservadoAt,
+						previo:
+							repetirIntento && registro.actualizadoAt
+								? {
+										updatedAt: registro.actualizadoAt,
+										retryCount: registro.retryCount,
+									}
+								: undefined,
+					},
 					aseguradora,
 					destinatarios,
 					correo,

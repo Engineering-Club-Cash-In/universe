@@ -2183,6 +2183,14 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 // ═══════════════════════════════════════════════════════════════════════════
 //   Fase de pruebas de COBROS-02: en vez de una sola bandera apagada, se
 //   prende job por job. Lo que le ESCRIBE AL CLIENTE sigue en `false`.
+//
+//   Los tres que sí le escriben con el modo prueba activo (recordatorio de
+//   Págalo, recordatorios de convenio y bienvenida) piden además
+//   `JOBS_MENSAJES_ENABLED=true`: el sandbox los tiene apagados aunque solo
+//   lleguen a los teléfonos de prueba (decisión del 2026-10-13: el sandbox es
+//   para mostrar y probar pantallas, no para mandar mensajes).
+const JOBS_MENSAJES =
+	isTestModeEnabled() && process.env.JOBS_MENSAJES_ENABLED === "true";
 const JOBS_PROGRAMADOS = {
 	/** Reclama grupos Págalo listos y los manda a cartera. Hoy la aplicación
 	 *  solo ocurre inline desde el poller: si ese despacho falla, sin este job
@@ -2200,7 +2208,7 @@ const JOBS_PROGRAMADOS = {
 	 *  mismo documento dice por qué la protección no puede depender de que
 	 *  alguien revise la env: "depender de que la env quedara bien puesta en
 	 *  el ambiente era demasiado frágil para lo que está en juego". */
-	recordatorioPagalo: isTestModeEnabled(),
+	recordatorioPagalo: JOBS_MENSAJES,
 	/** Interno: promesas incumplidas + cierre de snapshots de la agenda. */
 	promesasYSnapshots: true,
 	/** Interno: foto de "paga bien" + auto-revoke de la reducción (CB-010). */
@@ -2245,7 +2253,7 @@ const JOBS_PROGRAMADOS = {
 	 *  Para el envío real hacen falta DOS cosas más, y las dos son decisión de
 	 *  negocio, no del código: `CONVENIO_WHATSAPP_ENABLED=true` en el ambiente
 	 *  (el gate propio del servicio) y apagar el modo prueba. */
-	recordatoriosConvenio: isTestModeEnabled(),
+	recordatoriosConvenio: JOBS_MENSAJES,
 	/** CB-119: detección de eventos GPS (desconexión de energía, ignición,
 	 *  GPS sin reportar) por polling cada 5 min, acotado a créditos en B4. No
 	 *  le escribe al cliente, pero sí depende de cartera-back (bucket real
@@ -2272,14 +2280,14 @@ const JOBS_PROGRAMADOS = {
 	 *  a `isTestModeEnabled()`, FALLA CERRADO. Además tiene su propio gate,
 	 *  `BIENVENIDA_WHATSAPP_ENABLED=true` (el mismo del disparo al 90%): sin él
 	 *  el barrido no hace nada aunque esté prendido acá. */
-	bienvenidaPendiente: isTestModeEnabled(),
+	bienvenidaPendiente: JOBS_MENSAJES,
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
 
 if (!JOBS_PROGRAMADOS.recordatorioPagalo) {
 	console.warn(
-		"[Jobs] ⚠️  Recordatorio de Págalo APAGADO: TEST_MESSAGE no está en 'true' y ese job le escribe al cliente. Es a propósito — se prende solo con el modo prueba activo.",
+		"[Jobs] ⚠️  Recordatorio de Págalo APAGADO: le escribe al cliente. Es a propósito — se prende solo con TEST_MESSAGE=true y JOBS_MENSAJES_ENABLED=true.",
 	);
 }
 

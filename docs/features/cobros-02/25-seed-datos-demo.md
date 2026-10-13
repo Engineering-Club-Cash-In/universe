@@ -165,7 +165,7 @@ según el asesor: depende de la contactabilidad (una llamada sin respuesta no cu
 | Eventos GPS y ubicaciones clave | **Prendidos** con `GPS_EVENTOS_ENABLED` y `GPS_UBICACIONES_ENABLED` | Solo leen de Wialon (ya hay 1,141 unidades vinculadas) |
 | Agenda y promesas, alertas, sync de promesas, elegibilidad premora, rebajas/jurídico colgados | Prendidos | Internos |
 | Poller y dispatcher de Págalo | Prendidos, sin interruptor | Decisión anterior: corre siempre (`index.ts`, comentario del poller) |
-| Recordatorio Págalo, recordatorios de convenio, bienvenida | Prendidos solo con `TEST_MESSAGE=true` | Mandan a los teléfonos de prueba |
+| Recordatorio Págalo, recordatorios de convenio, bienvenida | **Apagados**: piden `TEST_MESSAGE=true` y además `JOBS_MENSAJES_ENABLED=true` | Le escriben al cliente (en modo prueba, a los teléfonos de prueba). El sandbox es para mostrar pantallas |
 | Recordatorios premora | **Apagado** | Le escribe al cliente |
 
 Cartera del sandbox: solo `moras` y `buckets_convenio`.

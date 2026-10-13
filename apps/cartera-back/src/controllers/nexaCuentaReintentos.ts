@@ -12,19 +12,34 @@
  *      salió, se marca avisada. Se espera 15 minutos desde el último cambio
  *      para no pisarse con la bienvenida que la está mandando.
  *
- * Las filas del piloto (insertadas a mano, sin `cuenta_solicitada_at`) no se
- * tocan. Nunca lanza.
+ * Solo entran cuentas usables: binding activo y sin vencer, y crédito en un
+ * estado que acepta pago Nexa (`NEXA_PAYABLE_CREDIT_STATUSES`). Un crédito
+ * cancelado no recibe ni cuenta ni aviso. Las filas del piloto (insertadas a
+ * mano, sin `cuenta_solicitada_at`) no se tocan. Nunca lanza.
  */
 
-import { and, asc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import config from "../config";
 import { db } from "../database";
 import { asesores, creditos, nexa_credit_bindings, usuarios } from "../database/db";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import { notifyCuentaNexaWhatsapp } from "../services/crm.service";
+import { NEXA_PAYABLE_CREDIT_STATUSES } from "./credits";
 import { cuentaNexaDeps, solicitarCuentaNexa } from "./nexaCuentaCliente";
 
 const MAX_INTENTOS_CUENTA = 10;
 const LIMITE = 50;
+
+// Solo cuentas que el cliente puede usar, con el mismo criterio que el detalle
+// del crédito (`cuentaNexa` en credits.ts): binding activo (una cancelación lo
+// apaga y deja el token), sin vencer y crédito en un estado que acepta el pago.
+const bindingVigente = () =>
+  and(
+    eq(nexa_credit_bindings.activo, true),
+    or(isNull(nexa_credit_bindings.expires_at), sql`${nexa_credit_bindings.expires_at} > now()`),
+  );
+const cuentaUsable = () =>
+  and(bindingVigente(), inArray(creditos.statusCredit, [...NEXA_PAYABLE_CREDIT_STATUSES]));
 
 export async function reintentarCuentasNexaPendientes(): Promise<{
   cuentasReintentadas: number;
@@ -49,6 +64,7 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
           isNull(nexa_credit_bindings.nexa_token),
           lt(nexa_credit_bindings.cuenta_intentos, MAX_INTENTOS_CUENTA),
           lt(nexa_credit_bindings.updated_at, sql`now() - interval '10 minutes'`),
+          cuentaUsable(),
         ))
         .orderBy(asc(nexa_credit_bindings.updated_at))
         .limit(LIMITE);
@@ -77,6 +93,7 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
           isNotNull(nexa_credit_bindings.nexa_token),
           isNull(nexa_credit_bindings.cuenta_notificada_at),
           lt(nexa_credit_bindings.updated_at, sql`now() - interval '15 minutes'`),
+          cuentaUsable(),
         ))
         .orderBy(asc(nexa_credit_bindings.updated_at))
         .limit(LIMITE);
@@ -85,7 +102,9 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
         // Toma la fila antes de llamar al CRM: correr el reloj con un UPDATE
         // condicional hace que otra corrida (una que se encimó con esta o
         // una segunda instancia) ya no la vea elegible, así que el cliente no
-        // recibe el código dos veces.
+        // recibe el código dos veces. Repite el filtro de cuenta usable: una
+        // cancelación que entró después del SELECT ya no deja tomar la fila.
+        // El crédito va por id (no correlacionado) para que no quede ambiguo.
         const [tomada] = await db
           .update(nexa_credit_bindings)
           .set({ updated_at: new Date() })
@@ -93,6 +112,15 @@ export async function reintentarCuentasNexaPendientes(): Promise<{
             eq(nexa_credit_bindings.credito_id, fila.creditoId),
             isNull(nexa_credit_bindings.cuenta_notificada_at),
             lt(nexa_credit_bindings.updated_at, sql`now() - interval '15 minutes'`),
+            bindingVigente(),
+            sql`EXISTS (
+              SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.creditos c
+               WHERE c.credito_id = ${fila.creditoId}
+                 AND c."statusCredit"::text IN (${sql.join(
+                   NEXA_PAYABLE_CREDIT_STATUSES.map((estado) => sql`${estado}`),
+                   sql`, `,
+                 )})
+            )`,
           ))
           .returning({ creditoId: nexa_credit_bindings.credito_id });
         if (!tomada) continue;

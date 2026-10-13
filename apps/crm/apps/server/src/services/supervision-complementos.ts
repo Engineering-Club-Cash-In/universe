@@ -28,11 +28,13 @@ import {
 	metaDelEquipo,
 	montoDe,
 	rescatePct,
+	resultadoCartera,
 } from "../lib/supervision-kpis";
 import { movimientosDeHoySinCerrar } from "../routers/cobros-asesor";
 import type {
 	EquipoAsesorSupervision,
 	KpisEquipoSupervision,
+	RecuperacionAsesorSupervision,
 } from "../routers/supervision-cobros";
 import { carteraBackClient } from "./cartera-back-client";
 
@@ -377,8 +379,49 @@ export async function calcularKpisYEquipo(
 				metaPorAsesor?.get(a.asesorId) ?? null,
 			),
 			rescate: mov ? rescatePct(mov.bajaron, mov.subieron) : null,
+			recuperacion: resultadoCartera(
+				recActual?.get(a.asesorId) ?? null,
+				recAnterior?.get(a.asesorId) ?? null,
+				metaPorAsesor?.get(a.asesorId) ?? null,
+			),
 		};
 	});
 
 	return { kpis, equipo: filas };
+}
+
+/**
+ * M1 · Resultado de cartera por asesor, sin el resto de los KPIs. Misma fuente
+ * que las filas de `calcularKpisYEquipo` (cartera por rango + metas), así las
+ * tarjetas de Mi equipo y el dashboard cuadran. `null` si no hay pool o falla
+ * la recuperación del período; si solo falla la anterior o las metas, esos
+ * campos van `null` y el monto se muestra igual.
+ */
+export async function calcularRecuperacionAsesores(
+	periodo: PeriodoDesempeno,
+	ahora: Date = new Date(),
+): Promise<RecuperacionAsesorSupervision[] | null> {
+	const { actual, anterior } = rangosDesempeno(periodo, ahora);
+	const equipo = await intentar("pool del equipo", asesoresDelEquipo);
+	if (!equipo) return null;
+	const asesorIds = equipo.map((a) => a.asesorId);
+	const [recActual, recAnterior, metas] = await Promise.all([
+		intentar("recuperación", () => recuperacionPorAsesor(actual, asesorIds)),
+		intentar("recuperación anterior", () =>
+			recuperacionPorAsesor(anterior, asesorIds),
+		),
+		intentar("metas", () => metasPorAsesor(asesorIds, actual)),
+	]);
+	if (!recActual) return null;
+	const metaPorAsesor = metas
+		? metasDelPeriodo(periodo, actual, asesorIds, metas)
+		: null;
+	return asesorIds.map((id) => ({
+		asesorId: id,
+		recuperacion: resultadoCartera(
+			recActual.get(id) ?? null,
+			recAnterior?.get(id) ?? null,
+			metaPorAsesor?.get(id) ?? null,
+		),
+	}));
 }

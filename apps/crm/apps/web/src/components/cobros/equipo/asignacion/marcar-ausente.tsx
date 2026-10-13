@@ -555,6 +555,10 @@ function FormularioAusencia({
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getCargaPorAsesorBucket.key(),
 			});
+			// Cartera le apaga el pool al repartirle la cartera.
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getAsesoresTraslados.key(),
+			});
 			toast.success("Ausencia registrada", {
 				description: `${origen?.nombre ?? "El asesor"} quedó ausente y su cartera se repartió entre el equipo.`,
 			});

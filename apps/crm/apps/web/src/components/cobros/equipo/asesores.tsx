@@ -271,6 +271,10 @@ export function MiEquipoAsesores({
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getCargaPorAsesorBucket.key(),
 			});
+			// El pool vuelve: el catálogo cacheado trae al asesor sin buckets.
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getAsesoresTraslados.key(),
+			});
 			setResultado(res);
 			setReactivado(porReactivar?.datos.nombre ?? null);
 			setPorReactivar(null);

@@ -1022,6 +1022,22 @@ function ContenidoEspacio({
 		s.tipo === "convenio"
 			? (contrapropuestas.data?.find((c) => c.estado === "pendiente") ?? null)
 			: null;
+	// Si la contrapropuesta se resuelve (el asesor la aceptó o descartó) con el
+	// Espacio abierto, el plan y la lista se vuelven a leer: la aceptada reescribe
+	// cuotas, cuota y primer pago, y no se puede aprobar sobre datos viejos.
+	const habiaContra = React.useRef(false);
+	React.useEffect(() => {
+		const hay = !!contraPendiente;
+		if (habiaContra.current && !hay) {
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getPlanConvenio.key(),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: orpc.getConveniosListado.key(),
+			});
+		}
+		habiaContra.current = hay;
+	}, [contraPendiente, queryClient]);
 	const [contraAbierta, setContraAbierta] = React.useState(false);
 
 	const [notas, setNotas] = React.useState("");

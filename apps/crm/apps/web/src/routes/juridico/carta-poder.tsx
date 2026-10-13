@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	ChevronDown,
+	CircleAlert,
 	CircleCheck,
 	ExternalLink,
 	FileText,
@@ -26,7 +28,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import {
+	Command,
+	CommandGroup,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
 import {
 	Dialog,
 	DialogContent,
@@ -37,6 +46,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Select,
@@ -50,6 +64,16 @@ import { client, orpc } from "@/utils/orpc";
 
 /** El estado civil sin elegir, en el Select (que no admite un valor vacío). */
 const SIN_DATO = "sin_dato";
+
+type Representante = (typeof CARTAS_PODER)[number]["representante"];
+
+/** Lo que salió de generar una de las cartas elegidas. */
+type CartaGenerada = {
+	tipo: TipoCartaPoder;
+	nombre: string;
+	documentLink?: string;
+	error?: string;
+};
 
 export const Route = createFileRoute("/juridico/carta-poder")({
 	component: RouteComponent,
@@ -104,7 +128,14 @@ function RouteComponent() {
 	const navigate = Route.useNavigate();
 	const { canViewLegal, isLoading } = useJuridicoPermissions();
 
-	const [tipo, setTipo] = useState<TipoCartaPoder>(CARTAS_PODER[0].tipo);
+	// Del mismo cliente se sacan varias cartas a la vez (una por empresa y
+	// representante), así que se eligen varias.
+	const [tipos, setTipos] = useState<TipoCartaPoder[]>([CARTAS_PODER[0].tipo]);
+	// La edad de cada representante: va en sus cartas, y las dos de Don Alex
+	// llevan la misma.
+	const [edades, setEdades] = useState<Partial<Record<Representante, string>>>(
+		{},
+	);
 	const [campos, setCampos] = useState<CamposCartaPoder>(() =>
 		camposVacios(hoy()),
 	);
@@ -112,14 +143,14 @@ function RouteComponent() {
 		opportunityId: string;
 		resumen: string;
 	} | null>(null);
-	const [documentLink, setDocumentLink] = useState<string | null>(null);
+	const [generadas, setGeneradas] = useState<CartaGenerada[] | null>(null);
 	// Cuántas veces cambió el formulario. Generar tarda, y el formulario sigue
-	// habilitado: si cambia mientras tanto, el PDF que vuelve es de los datos
-	// viejos y no se muestra.
+	// habilitado: si cambia mientras tanto, los PDF que vuelven son de los
+	// datos viejos y no se muestran.
 	const versionRef = useRef(0);
 	const descartarCarta = () => {
 		versionRef.current += 1;
-		setDocumentLink(null);
+		setGeneradas(null);
 	};
 	// Al terminar se avisa con un modal: con un botón al pie de la página
 	// nadie se daba cuenta de que la carta ya estaba lista.
@@ -198,17 +229,34 @@ function RouteComponent() {
 	const generar = useMutation({
 		mutationFn: async () => {
 			const version = versionRef.current;
-			const respuesta = await client.generarCartaPoder({ tipo, campos });
-			return { ...respuesta, version };
+			const elegidas = CARTAS_PODER.filter((c) => tipos.includes(c.tipo));
+			// Todas en un solo pedido: el generador las arma una tras otra, y si
+			// una falla, las demás vuelven igual.
+			const { cartas } = await client.generarCartasPoder({
+				cartas: elegidas.map((c) => ({
+					tipo: c.tipo,
+					edadRepresentante: edades[c.representante] ?? "",
+				})),
+				campos,
+			});
+			const resultado: CartaGenerada[] = cartas.map((c) => ({
+				...c,
+				nombre: CARTAS_PODER.find((d) => d.tipo === c.tipo)?.nombre ?? c.tipo,
+			}));
+			return { resultado, version };
 		},
-		onSuccess: ({ documentLink, version }) => {
+		onSuccess: ({ resultado, version }) => {
 			if (version !== versionRef.current) {
 				toast.info(
 					"Cambiaste la carta mientras se generaba: generala de nuevo con los datos de ahora.",
 				);
 				return;
 			}
-			setDocumentLink(documentLink);
+			if (resultado.every((c) => c.error)) {
+				toast.error(resultado[0]?.error || "No se pudo generar la carta poder");
+				return;
+			}
+			setGeneradas(resultado);
 			setAvisoListo(true);
 		},
 		onError: (error: Error) => {
@@ -221,7 +269,18 @@ function RouteComponent() {
 		return null;
 	}
 
-	const carta = CARTAS_PODER.find((c) => c.tipo === tipo) ?? CARTAS_PODER[0];
+	const cartas = CARTAS_PODER.filter((c) => tipos.includes(c.tipo));
+	// Una edad por representante, aunque firme dos de las elegidas.
+	const representantes = [...new Set(cartas.map((c) => c.representante))];
+
+	const alternarCarta = (tipo: TipoCartaPoder) => {
+		setTipos((actuales) =>
+			actuales.includes(tipo)
+				? actuales.filter((t) => t !== tipo)
+				: [...actuales, tipo],
+		);
+		descartarCarta();
+	};
 
 	const cambiar = <K extends keyof CamposCartaPoder>(
 		campo: K,
@@ -338,36 +397,76 @@ function RouteComponent() {
 				<CardContent className="grid gap-4 md:grid-cols-2">
 					<div className="space-y-2">
 						<Label htmlFor="carta-tipo">Empresa y representante</Label>
-						<Select
-							value={tipo}
-							onValueChange={(valor) => {
-								// La edad es del representante: con otro, la de antes
-								// saldría en su carta. Entre las dos de Don Alex se queda.
-								const nueva = CARTAS_PODER.find((c) => c.tipo === valor);
-								if (nueva && nueva.representante !== carta.representante) {
-									setCampos((actual) => ({ ...actual, edadRepresentante: "" }));
-								}
-								setTipo(valor as TipoCartaPoder);
-								descartarCarta();
-							}}
-						>
-							<SelectTrigger id="carta-tipo" className="w-full">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{CARTAS_PODER.map((c) => (
-									<SelectItem key={c.tipo} value={c.tipo}>
-										{c.nombre}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+						<Popover>
+							<PopoverTrigger asChild>
+								<Button
+									id="carta-tipo"
+									variant="outline"
+									className="w-full justify-between font-normal"
+								>
+									<span
+										className={
+											cartas.length
+												? "truncate"
+												: "truncate text-muted-foreground"
+										}
+									>
+										{cartas.length
+											? cartas.map((c) => c.nombre).join(", ")
+											: "Elija una o varias cartas"}
+									</span>
+									<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+								</Button>
+							</PopoverTrigger>
+							<PopoverContent
+								className="w-(--radix-popover-trigger-width) p-0"
+								align="start"
+							>
+								<Command>
+									<CommandList>
+										<CommandGroup>
+											{CARTAS_PODER.map((c) => (
+												<CommandItem
+													key={c.tipo}
+													onSelect={() => alternarCarta(c.tipo)}
+												>
+													<Checkbox
+														checked={tipos.includes(c.tipo)}
+														className="mr-2"
+													/>
+													{c.nombre}
+												</CommandItem>
+											))}
+										</CommandGroup>
+									</CommandList>
+								</Command>
+							</PopoverContent>
+						</Popover>
+						{cartas.length === 0 && (
+							<p className="text-muted-foreground text-sm">
+								Elija al menos una para poder generar.
+							</p>
+						)}
 					</div>
-					{texto(
-						"edadRepresentante",
-						`Edad de ${carta.representante}`,
-						"En número, ej. 42",
-					)}
+					{representantes.map((representante) => (
+						<div key={representante} className="space-y-2">
+							<Label htmlFor={`carta-edad-${representante}`}>
+								Edad de {representante}
+							</Label>
+							<Input
+								id={`carta-edad-${representante}`}
+								value={edades[representante] ?? ""}
+								placeholder="En número, ej. 42"
+								onChange={(e) => {
+									setEdades((actuales) => ({
+										...actuales,
+										[representante]: e.target.value,
+									}));
+									descartarCarta();
+								}}
+							/>
+						</div>
+					))}
 					<div className="space-y-2">
 						<Label>Fecha de firma</Label>
 						<DatePicker
@@ -483,27 +582,29 @@ function RouteComponent() {
 			</Card>
 
 			<div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
-				{documentLink && (
-					<Button
-						variant="outline"
-						onClick={() =>
-							window.open(documentLink, "_blank", "noopener,noreferrer")
-						}
-					>
+				{generadas && (
+					<Button variant="outline" onClick={() => setAvisoListo(true)}>
 						<ExternalLink className="mr-2 h-4 w-4" />
-						Abrir PDF
+						{generadas.length === 1 ? "Ver la carta" : "Ver las cartas"}
 					</Button>
 				)}
 				<Button
 					onClick={() => generar.mutate()}
-					disabled={generar.isPending || cargarDatos.isPending}
+					// Sin ninguna carta elegida no hay qué generar.
+					disabled={
+						generar.isPending || cargarDatos.isPending || cartas.length === 0
+					}
 				>
 					{generar.isPending ? (
 						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 					) : (
 						<FileText className="mr-2 h-4 w-4" />
 					)}
-					Generar PDF
+					{generar.isPending
+						? "Generando…"
+						: cartas.length > 1
+							? `Generar ${cartas.length} PDF`
+							: "Generar PDF"}
 				</Button>
 			</div>
 
@@ -513,31 +614,59 @@ function RouteComponent() {
 						<div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
 							<CircleCheck className="h-8 w-8 text-green-600" />
 						</div>
-						<DialogTitle>La carta poder está lista</DialogTitle>
+						<DialogTitle>
+							{generadas?.length === 1
+								? "La carta poder está lista"
+								: "Las cartas poder están listas"}
+						</DialogTitle>
 						<DialogDescription>
-							{campos.nombreCompleto.trim()
-								? `La de ${campos.nombreCompleto.trim()}, ${carta.nombre}.`
-								: carta.nombre}{" "}
-							El PDF se abre en otra pestaña, desde ahí lo descarga o lo imprime
-							para firmarlo ante notario.
+							{campos.nombreCompleto.trim() &&
+								`${generadas?.length === 1 ? "La" : "Las"} de ${campos.nombreCompleto.trim()}. `}
+							{generadas?.length === 1 ? "El PDF" : "Cada PDF"} se abre en otra
+							pestaña, desde ahí lo descarga o lo imprime para firmarlo ante
+							notario.
 						</DialogDescription>
 					</DialogHeader>
+					<ul className="divide-y rounded-md border">
+						{generadas?.map((c) => (
+							<li
+								key={c.tipo}
+								className="flex items-center justify-between gap-3 p-3 text-sm"
+							>
+								<div className="min-w-0">
+									<p className="font-medium">{c.nombre}</p>
+									{c.error && (
+										<p className="flex items-center gap-1 text-destructive">
+											<CircleAlert className="h-4 w-4 shrink-0" />
+											{c.error}
+										</p>
+									)}
+								</div>
+								{c.documentLink && (
+									<Button asChild size="sm">
+										<a
+											href={c.documentLink}
+											target="_blank"
+											rel="noopener noreferrer"
+										>
+											<ExternalLink className="mr-2 h-4 w-4" />
+											Abrir PDF
+										</a>
+									</Button>
+								)}
+							</li>
+						))}
+					</ul>
+					{generadas?.some((c) => c.error) && (
+						<p className="text-muted-foreground text-sm">
+							Las que no salieron se pueden generar de nuevo: deje marcadas solo
+							esas y vuelva a generar.
+						</p>
+					)}
 					<DialogFooter className="sm:justify-center">
 						<Button variant="outline" onClick={() => setAvisoListo(false)}>
 							Cerrar
 						</Button>
-						{documentLink && (
-							<Button asChild>
-								<a
-									href={documentLink}
-									target="_blank"
-									rel="noopener noreferrer"
-								>
-									<ExternalLink className="mr-2 h-4 w-4" />
-									Abrir PDF
-								</a>
-							</Button>
-						)}
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>

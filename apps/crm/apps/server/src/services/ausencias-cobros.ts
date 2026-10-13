@@ -11,7 +11,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -80,8 +80,11 @@ async function asesorConUsuario(asesorId: number) {
 	};
 }
 
-async function ausenciaVigente(asesorId: number) {
-	const [fila] = await db
+async function ausenciaVigente(
+	asesorId: number,
+	ejecutor: Pick<typeof db, "select"> = db,
+) {
+	const [fila] = await ejecutor
 		.select()
 		.from(ausenciasAsesorCobros)
 		.where(
@@ -115,19 +118,63 @@ async function reconciliarPendiente(id: string) {
 	return fila ?? null;
 }
 
+/** Lo que dura una previsualización de cartera (10 min) más un margen. */
+const PENDIENTE_VENCE_MS = 15 * 60_000;
+
+/**
+ * Ausencias que nunca llegaron a registrar su traslado y ya pasaron la vida de
+ * cualquier previsualización: no pueden confirmarse nunca más. Se concilian con
+ * cartera (por si el traslado sí se confirmó) y, si no, se descartan para que el
+ * asesor pueda previsualizarse y marcarse de nuevo.
+ */
+async function descartarPendientesVencidas(asesorId: number) {
+	const vencidas = await db
+		.select({ id: ausenciasAsesorCobros.id })
+		.from(ausenciasAsesorCobros)
+		.where(
+			and(
+				eq(ausenciasAsesorCobros.asesorId, asesorId),
+				eq(ausenciasAsesorCobros.estado, "vigente"),
+				isNull(ausenciasAsesorCobros.operacionTrasladoId),
+				lt(
+					ausenciasAsesorCobros.inicioAt,
+					new Date(Date.now() - PENDIENTE_VENCE_MS),
+				),
+			),
+		);
+	for (const { id } of vencidas) {
+		try {
+			if (await reconciliarPendiente(id)) continue;
+		} catch (error) {
+			// Sin poder preguntar a cartera no se descarta nada.
+			console.warn("[ausencias] No se pudo conciliar la pendiente:", id, error);
+			continue;
+		}
+		await db
+			.delete(ausenciasAsesorCobros)
+			.where(
+				and(
+					eq(ausenciasAsesorCobros.id, id),
+					isNull(ausenciasAsesorCobros.operacionTrasladoId),
+				),
+			);
+	}
+}
+
 /** No se marca ausente a quien ya lo está ni a quien tiene una cobertura abierta. */
 async function validarQueSePuedeMarcar(
 	asesorId: number,
 	titularUserId: string | null,
+	ejecutor: Pick<typeof db, "select"> = db,
 ) {
-	if (await ausenciaVigente(asesorId)) {
+	if (await ausenciaVigente(asesorId, ejecutor)) {
 		throw new ORPCError("CONFLICT", {
 			message: "Este asesor ya está marcado como ausente.",
 		});
 	}
 	if (!titularUserId) return;
 	const hoy = toDateStrGT(new Date());
-	const [cobertura] = await db
+	const [cobertura] = await ejecutor
 		.select({ id: coberturasAgendaCobros.id })
 		.from(coberturasAgendaCobros)
 		.where(
@@ -153,6 +200,7 @@ export async function previsualizarRepartoAusencia(params: {
 	actorEmail: string;
 }) {
 	const { userId } = await asesorConUsuario(params.asesorId);
+	await descartarPendientesVencidas(params.asesorId);
 	await validarQueSePuedeMarcar(params.asesorId, userId);
 	try {
 		return await carteraBackClient.previsualizarTrasladoCartera({
@@ -187,22 +235,59 @@ export async function marcarAusenteIndefinido(params: {
 		.where(eq(ausenciasAsesorCobros.id, params.id))
 		.limit(1)
 		.then((r) => r[0]);
+	// Un reintento solo puede repetir la solicitud original: ni otro asesor, ni otro
+	// motivo, ni otro usuario con el mismo id.
+	if (
+		existente &&
+		(existente.asesorId !== params.asesorId ||
+			existente.motivo !== params.motivo ||
+			(existente.nota ?? null) !== (params.nota || null) ||
+			existente.creadaPor !== params.actor.userId)
+	) {
+		throw new ORPCError("CONFLICT", {
+			message: "La solicitud ya se usó con otros datos.",
+		});
+	}
 	// Reintento del mismo clic: si ya se repartió, se devuelve lo hecho.
 	if (existente?.operacionTrasladoId) return existente;
 
+	// Pendientes vencidas (de esta u otra solicitud) se concilian o se descartan.
+	await descartarPendientesVencidas(params.asesorId);
+	const vigente = existente
+		? await db
+				.select()
+				.from(ausenciasAsesorCobros)
+				.where(eq(ausenciasAsesorCobros.id, params.id))
+				.limit(1)
+				.then((r) => r[0])
+		: undefined;
+	// Se descartó o se conciliaron mientras tanto.
+	if (existente && vigente?.operacionTrasladoId) return vigente;
+	const reintento = vigente;
+
 	const { userId: titularId } = await asesorConUsuario(params.asesorId);
-	if (!existente) {
-		await validarQueSePuedeMarcar(params.asesorId, titularId);
+	if (!reintento) {
+		// Serializa con `crearCobertura` (mismo lock por participante): la
+		// comprobación de coberturas y el alta de la ausencia son una sola unidad.
 		try {
-			await db.insert(ausenciasAsesorCobros).values({
-				id: params.id,
-				asesorId: params.asesorId,
-				titularId,
-				motivo: params.motivo,
-				nota: params.nota || null,
-				creadaPor: params.actor.userId,
+			await db.transaction(async (tx) => {
+				if (titularId) {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(114, hashtext(${titularId}))`,
+					);
+				}
+				await validarQueSePuedeMarcar(params.asesorId, titularId, tx);
+				await tx.insert(ausenciasAsesorCobros).values({
+					id: params.id,
+					asesorId: params.asesorId,
+					titularId,
+					motivo: params.motivo,
+					nota: params.nota || null,
+					creadaPor: params.actor.userId,
+				});
 			});
 		} catch (error) {
+			if (error instanceof ORPCError) throw error;
 			// Índice único: otra ausencia vigente ganó la carrera.
 			throw new ORPCError("CONFLICT", {
 				message: "Este asesor ya está marcado como ausente.",
@@ -212,11 +297,14 @@ export async function marcarAusenteIndefinido(params: {
 
 	// Reintento de un registro pendiente: antes de confirmar de nuevo se pregunta si
 	// el traslado ya se había confirmado (aunque la previsualización sea otra).
-	if (existente) {
+	if (reintento) {
 		const conciliada = await reconciliarPendiente(params.id);
 		if (conciliada) {
 			await reconciliarAvisosLlamarCliente().catch((error) =>
-				console.warn("[ausencias] No se reconciliaron los avisos de llamadas:", error),
+				console.warn(
+					"[ausencias] No se reconciliaron los avisos de llamadas:",
+					error,
+				),
 			);
 			return conciliada;
 		}
@@ -244,7 +332,7 @@ export async function marcarAusenteIndefinido(params: {
 		// el registro se conserva y el reintento con la misma clave de idempotencia
 		// lo reconcilia (el replay devuelve también los buckets pausados).
 		if (
-			!existente &&
+			!reintento &&
 			error instanceof CarteraBackHttpError &&
 			(error.status === 400 || error.status === 404 || error.status === 409)
 		) {
@@ -310,6 +398,15 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 			() => null,
 		);
 		if (!conciliada) {
+			const vencida =
+				Date.now() - ausencia.inicioAt.getTime() > PENDIENTE_VENCE_MS;
+			if (vencida) {
+				await descartarPendientesVencidas(ausencia.asesorId);
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La ausencia nunca se confirmó y se descartó: el asesor no tiene cartera repartida ni está fuera del pool.",
+				});
+			}
 			throw new ORPCError("CONFLICT", {
 				message:
 					"La ausencia está pendiente de confirmar. Reintente marcarla ausente con la misma solicitud antes de reactivar.",

@@ -745,17 +745,35 @@ async function sociedadParaJuridico(
 	};
 }
 
+/** En firma: los contratos ya salieron y todavía no están firmados. */
+function estaEnFirma(porcentaje: number | null | undefined): boolean {
+	return (porcentaje ?? 0) >= 85 && (porcentaje ?? 0) < 90;
+}
+
+/** Lo que los contratos de sociedad dicen del representante legal. */
+type DatosDelRepresentanteEnContratos = {
+	fullName?: string;
+	email?: string | null;
+	dpi?: string;
+	age?: number | null;
+	gender?: string | null;
+	maritalStatus?: string | null;
+	nationality?: string | null;
+	profession?: string | null;
+};
+
 /**
- * Toma el candado de firma de la oportunidad del co-deudor y, si ya está en
- * firma (85% o más) y él es quien firma por la sociedad, no deja cambiarle el
- * nombre, el correo ni el DPI: los contratos vivos y sus firmantes guardados
- * quedarían con la identidad vieja, y el WhatsApp buscaría sus enlaces con la
- * nueva. Se corrige regresando la oportunidad a 80% y rehaciendo la batería.
+ * Toma el candado de firma de la oportunidad del co-deudor y, si está en
+ * firma y él es quien firma por la sociedad, no deja cambiar nada de lo que
+ * los contratos dicen de él (nombre, correo, DPI, edad, género, estado civil,
+ * nacionalidad, profesión): los contratos vivos y sus firmantes quedarían con
+ * los datos viejos. Se corrige regresando la oportunidad a 80% y rehaciendo la
+ * batería. El celular no está en los contratos y se puede cambiar.
  */
 async function congelarRepresentanteEnFirma(
 	tx: Transaction,
 	coDebtorId: string,
-	cambios: { fullName?: string; email?: string | null; dpi?: string },
+	cambios: DatosDelRepresentanteEnContratos,
 ): Promise<void> {
 	const [fila] = await tx
 		.select({
@@ -763,6 +781,11 @@ async function congelarRepresentanteEnFirma(
 			fullName: coDebtors.fullName,
 			email: coDebtors.email,
 			dpi: coDebtors.dpi,
+			age: coDebtors.age,
+			gender: coDebtors.gender,
+			maritalStatus: coDebtors.maritalStatus,
+			nationality: coDebtors.nationality,
+			profession: coDebtors.profession,
 		})
 		.from(coDebtors)
 		.where(eq(coDebtors.id, coDebtorId))
@@ -783,7 +806,7 @@ async function congelarRepresentanteEnFirma(
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
 		.where(eq(opportunities.id, fila.opportunityId))
 		.limit(1);
-	if ((oportunidad?.porcentaje ?? 0) < 85) return;
+	if (!estaEnFirma(oportunidad?.porcentaje)) return;
 
 	const coDeudores = await tx
 		.select({
@@ -799,20 +822,69 @@ async function congelarRepresentanteEnFirma(
 	});
 	if (representante?.id !== coDebtorId) return;
 
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().toLowerCase();
 	const cambia = (antes: string | null, despues: string | null | undefined) =>
-		despues !== undefined &&
-		(antes ?? "").trim().toLowerCase() !== (despues ?? "").trim().toLowerCase();
+		despues !== undefined && texto(antes) !== texto(despues);
 	const cambiaDpi =
 		cambios.dpi !== undefined &&
 		fila.dpi.replace(/\D/g, "") !== cambios.dpi.replace(/\D/g, "");
+	const cambiaEdad =
+		cambios.age !== undefined && (fila.age ?? null) !== (cambios.age ?? null);
 	if (
 		cambia(fila.fullName, cambios.fullName) ||
 		cambia(fila.email, cambios.email) ||
-		cambiaDpi
+		cambiaDpi ||
+		cambiaEdad ||
+		cambia(fila.gender, cambios.gender) ||
+		cambia(fila.maritalStatus, cambios.maritalStatus) ||
+		cambia(fila.nationality, cambios.nationality) ||
+		cambia(fila.profession, cambios.profession)
 	) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"La oportunidad ya está en firma: los contratos salieron a nombre del representante legal con estos datos. Para corregir su nombre, correo o DPI, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+				"La oportunidad está en firma: los contratos salieron con estos datos del representante legal. Para corregirlos, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+		});
+	}
+}
+
+/**
+ * Toma el candado de firma de cada oportunidad del lead antes de cambiarle el
+ * tipo de cliente (en orden, para que dos pedidos no se crucen), y no lo deja
+ * cambiar si alguna está en firma: sus contratos son de la batería anterior.
+ */
+async function serializarCambioDeTipoDeCliente(
+	tx: Transaction,
+	leadId: string,
+	nuevo: string,
+): Promise<void> {
+	const [lead] = await tx
+		.select({ clientType: leads.clientType })
+		.from(leads)
+		.where(eq(leads.id, leadId))
+		.limit(1);
+	if (!lead || lead.clientType === nuevo) return;
+
+	const oportunidades = await tx
+		.select({ id: opportunities.id })
+		.from(opportunities)
+		.where(eq(opportunities.leadId, leadId))
+		.orderBy(asc(opportunities.id));
+	for (const oportunidad of oportunidades) {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(${claveDeFirma(oportunidad.id)})`,
+		);
+	}
+
+	const enFirma = await tx
+		.select({ porcentaje: salesStages.closurePercentage })
+		.from(opportunities)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.where(eq(opportunities.leadId, leadId));
+	if (enFirma.some((o) => estaEnFirma(o.porcentaje))) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El cliente tiene una oportunidad en firma: sus contratos son de la batería del tipo de cliente actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
 		});
 	}
 }
@@ -1787,6 +1859,13 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
+				// El tipo de cliente decide la batería (individual o de sociedad), y
+				// generar, enlazar y aprobar la revisan con el candado de firma de
+				// cada oportunidad tomado: cambiarlo pasa por los mismos candados.
+				if (updateData.clientType !== undefined) {
+					await serializarCambioDeTipoDeCliente(tx, id, updateData.clientType);
+				}
+
 				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
 				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
 				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
@@ -9990,17 +10069,21 @@ export const crmRouter = {
 				// identidad de un co-deudor pasa por el mismo candado, y ANTES de
 				// cualquier FOR UPDATE: la aprobación toma el candado y después
 				// escribe la oportunidad, y al revés se esperarían entre sí.
+				const datosEnContratos: DatosDelRepresentanteEnContratos = {
+					fullName: updateData.fullName,
+					email: updateData.email,
+					dpi: updateData.dpi,
+					age: updateData.age,
+					gender: updateData.gender,
+					maritalStatus: updateData.maritalStatus,
+					nationality: updateData.nationality,
+					profession: updateData.profession,
+				};
 				if (
 					esRepresentanteLegal !== undefined ||
-					updateData.fullName !== undefined ||
-					updateData.email !== undefined ||
-					updateData.dpi !== undefined
+					Object.values(datosEnContratos).some((v) => v !== undefined)
 				) {
-					await congelarRepresentanteEnFirma(tx, id, {
-						fullName: updateData.fullName,
-						email: updateData.email,
-						dpi: updateData.dpi,
-					});
+					await congelarRepresentanteEnFirma(tx, id, datosEnContratos);
 				}
 
 				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
@@ -10106,10 +10189,10 @@ export const crmRouter = {
 						.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 						.where(eq(opportunities.id, coDeudor.opportunityId))
 						.limit(1);
-					if ((etapa?.porcentaje ?? 0) >= 85) {
+					if (estaEnFirma(etapa?.porcentaje)) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
-								"La oportunidad ya está en firma: los contratos salieron a nombre del representante legal actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+								"La oportunidad está en firma: los contratos salieron a nombre del representante legal actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
 						});
 					}
 					if (esRepresentanteLegal) {

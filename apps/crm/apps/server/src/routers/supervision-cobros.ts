@@ -25,12 +25,18 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { memoConTtl } from "../lib/memo-ttl";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
+import { USER_ROLE_VALUES } from "../lib/roles";
+import type { ResultadoCartera } from "../lib/supervision-kpis";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
 } from "../services/cartera-back-client";
 import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
-import { calcularKpisYEquipo } from "../services/supervision-complementos";
+import {
+	calcularKpisYEquipo,
+	calcularRecuperacionAsesores,
+} from "../services/supervision-complementos";
+import { contactabilidadPorAsesor } from "../services/supervision-contactabilidad";
 import {
 	calcularPendientes,
 	contarSinContactoEquipo,
@@ -109,6 +115,15 @@ export interface EquipoAsesorSupervision {
 	meta: number | null;
 	/** «Rescate», en %: recuperados ÷ (recuperados + escalados) del período. */
 	rescate: number | null;
+	/** M1 · Recuperación del asesor en Q con su meta y el período anterior. */
+	recuperacion: ResultadoCartera | null;
+}
+
+/** Tarea M1 · Resultado de cartera de un asesor (tarjetas de Mi equipo y Detalle). */
+export interface RecuperacionAsesorSupervision {
+	/** asesor_id de cartera (el mismo de getAsesoresTraslados). */
+	asesorId: number;
+	recuperacion: ResultadoCartera | null;
 }
 
 export const supervisionCobrosRouter = {
@@ -143,6 +158,48 @@ export const supervisionCobrosRouter = {
 				equipo,
 			};
 		}),
+
+	/**
+	 * M1 · Recuperación (Q) y resultado de cartera de cada asesor del equipo en
+	 * el período, con su meta prorrateada y el período anterior. Es la versión
+	 * liviana de las filas de `getSupervisionComplementos`: mismas cifras, sin
+	 * calcular el resto del dashboard. Con `asesorId` devuelve solo ese asesor
+	 * (Detalle del asesor). `null` si cartera no responde.
+	 */
+	getRecuperacionAsesores: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				periodo: z.enum(PERIODOS_SUPERVISION),
+				asesorId: z.number().int().positive().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const filas = await calcularRecuperacionAsesores(input.periodo);
+			if (!filas) return null;
+			return input.asesorId == null
+				? filas
+				: filas.filter((f) => f.asesorId === input.asesorId);
+		}),
+
+	/**
+	 * M7 · Contactabilidad en lote: efectivos y total de gestiones por asesor en
+	 * un rango, en una sola llamada. Reemplaza las N llamadas a
+	 * `getHistorialAgendasResumen` (una por asesor) de las tarjetas de Mi equipo
+	 * y usa el mismo filtro y la misma definición de «efectivo». Los asesores
+	 * pedidos sin gestiones llegan con 0 de 0.
+	 */
+	getContactabilidadPorAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				desde: z.string().date().optional(),
+				hasta: z.string().date().optional(),
+				usuarioIds: z.array(z.string().min(1)).max(500).optional(),
+				roles: z.array(z.enum(USER_ROLE_VALUES)).optional(),
+			}),
+		)
+		.handler(async ({ input }) => ({
+			asesores: await contactabilidadPorAsesor(input),
+		})),
 
 	/**
 	 * S6 · Reasignación en bloque, TODO O NADA. Recibe varios créditos, el asesor

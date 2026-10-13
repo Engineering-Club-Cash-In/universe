@@ -6,6 +6,7 @@ import { user } from "../db/schema/auth";
 import { coberturasAgendaCobros } from "../db/schema/cobros";
 import { ventanaDiaGuatemala } from "../lib/agenda-cobros-snapshot";
 import { toDateStrGT } from "../lib/guatemala-month-window";
+import { nivelPorBuckets } from "../lib/nivel-asesor";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
 import {
 	CarteraBackHttpError,
@@ -63,6 +64,8 @@ export const trasladosCobrosRouter = {
 			);
 			return {
 				...a,
+				// M6 · nivel real del asesor (lib/nivel-asesor.ts), no derivado en el front.
+				nivel: nivelPorBuckets(a.buckets),
 				userId: crm?.id ?? null,
 				usuarioHabilitado:
 					!!crm &&

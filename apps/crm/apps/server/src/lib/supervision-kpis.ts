@@ -48,6 +48,59 @@ export function rescatePct(
 	return porcentajeEntero(recuperados, recuperados + escalados);
 }
 
+/**
+ * Resultado de cartera de un asesor en el período (tarea M1): lo que recuperó,
+ * lo del período anterior (para la tendencia), su meta prorrateada en Q y el %
+ * de la meta. Es la versión por asesor del KPI «Recuperación» del equipo.
+ */
+export interface ResultadoCartera {
+	monto: number;
+	montoAnterior: number | null;
+	/** Meta prorrateada al período, en Q; `null` si el asesor no tiene meta. */
+	meta: number | null;
+	/** Recuperación ÷ meta, en %. Puede pasar de 100. `null` sin meta. */
+	porcentaje: number | null;
+}
+
+/** `null` si no se pudo leer la recuperación del período (el front muestra «—»). */
+export function resultadoCartera(
+	monto: number | null,
+	montoAnterior: number | null,
+	meta: number | null,
+): ResultadoCartera | null {
+	if (monto == null) return null;
+	const metaValida = meta != null && meta > 0 ? meta : null;
+	return {
+		monto,
+		montoAnterior,
+		meta: metaValida,
+		porcentaje: metaCumplidaPct(monto, metaValida),
+	};
+}
+
+/** Contactabilidad de un asesor en un rango (tarea M7): efectivos sobre el total. */
+export interface ContactabilidadAsesor {
+	userId: string;
+	efectivos: number;
+	total: number;
+}
+
+/**
+ * Un asesor sin gestiones en el rango no aparece en el GROUP BY: se agrega con
+ * 0 de 0 para que quien consume no confunda «sin gestiones» con «no se
+ * consultó». Mantiene el orden pedido y ignora ids repetidos.
+ */
+export function rellenarContactabilidad(
+	filas: readonly ContactabilidadAsesor[],
+	usuarioIds: readonly string[] | undefined,
+): ContactabilidadAsesor[] {
+	if (!usuarioIds) return [...filas];
+	const porUsuario = new Map(filas.map((f) => [f.userId, f]));
+	return [...new Set(usuarioIds)].map(
+		(userId) => porUsuario.get(userId) ?? { userId, efectivos: 0, total: 0 },
+	);
+}
+
 /** Convierte el string decimal de cartera en número (0 si no es válido). */
 export function montoDe(valor: string | number | null | undefined): number {
 	const n = Number(valor);

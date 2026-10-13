@@ -4,7 +4,9 @@ import {
 	metaDelEquipo,
 	montoDe,
 	porcentajeEntero,
+	rellenarContactabilidad,
 	rescatePct,
+	resultadoCartera,
 } from "./supervision-kpis";
 
 describe("supervision-kpis", () => {
@@ -43,5 +45,38 @@ describe("supervision-kpis", () => {
 		expect(montoDe("12.50")).toBe(12.5);
 		expect(montoDe(undefined)).toBe(0);
 		expect(montoDe("abc")).toBe(0);
+	});
+
+	test("resultadoCartera junta monto, meta y % (M1)", () => {
+		expect(resultadoCartera(80, 50, 100)).toEqual({
+			monto: 80,
+			montoAnterior: 50,
+			meta: 100,
+			porcentaje: 80,
+		});
+		// Pasa de 100 % si supera la meta.
+		expect(resultadoCartera(150, null, 100)?.porcentaje).toBe(150);
+		// Sin meta (o meta 0) el monto va solo, sin %.
+		expect(resultadoCartera(80, 50, null)).toEqual({
+			monto: 80,
+			montoAnterior: 50,
+			meta: null,
+			porcentaje: null,
+		});
+		expect(resultadoCartera(80, 50, 0)?.meta).toBeNull();
+		// Recuperación 0 con meta es 0 %, no «—».
+		expect(resultadoCartera(0, 0, 100)?.porcentaje).toBe(0);
+		// Si no se pudo leer la recuperación, todo es «—».
+		expect(resultadoCartera(null, 50, 100)).toBeNull();
+	});
+
+	test("rellenarContactabilidad agrega 0 de 0 a quien no tiene gestiones (M7)", () => {
+		const filas = [{ userId: "b", efectivos: 3, total: 4 }];
+		expect(rellenarContactabilidad(filas, ["a", "b", "a"])).toEqual([
+			{ userId: "a", efectivos: 0, total: 0 },
+			{ userId: "b", efectivos: 3, total: 4 },
+		]);
+		// Sin lista pedida devuelve lo que hay.
+		expect(rellenarContactabilidad(filas, undefined)).toEqual(filas);
 	});
 });

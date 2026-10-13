@@ -38,6 +38,7 @@ import {
 	esContactoEfectivo,
 	esGestionAutomatica,
 } from "../lib/historial-agendas";
+import { nivelPorBuckets } from "../lib/nivel-asesor";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -46,17 +47,8 @@ import {
 } from "../services/agenda-cobros-source";
 import { carteraBackClient } from "../services/cartera-back-client";
 
-/** Nivel del asesor según los buckets de su pool en cartera (no es un rol del CRM). */
-export type NivelAsesor = "junior" | "senior";
-
-/**
- * Junior = B0–B1; senior = B2 en adelante (regla de negocio 2026-10-06: "los
- * junior están en B0 y B1, los senior en B2, B3, B4; es por bucket").
- */
-export function nivelPorBuckets(buckets: number[]): NivelAsesor {
-	return buckets.some((b) => b >= 2) ? "senior" : "junior";
-}
-
+// El nivel (junior, senior o especial) vive en lib/nivel-asesor.ts: un solo
+// criterio para el perfil del asesor y para Mi equipo (tarea M6).
 /** Contrato de "Recuperación" (KPI de Mi desempeño). */
 export interface RecuperacionAsesor {
 	/**

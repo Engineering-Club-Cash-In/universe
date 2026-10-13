@@ -24,7 +24,7 @@ export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 		// Ya desembolsado y sin factura: el vendedor la puede subir, pero no
 		// cuenta como pendiente (si no, aparecerían de golpe los casos viejos).
 		const estado: EstadoDocumento =
-			caso.facturaSeguro.envio !== null
+			caso.facturaSeguro.envio !== null || caso.facturaSeguro.yaRegistrada
 				? "subido"
 				: caso.porcentaje >= 100
 					? "opcional"

@@ -37,7 +37,9 @@ export function vistaFacturaSeguro(
 			accion: null,
 		};
 	}
-	if (f.envio !== null) {
+	// Con registro de envío, o con un "Seguro del Vehículo" de antes (el del
+	// proceso manual): ya hay factura y no se puede subir otra.
+	if (f.envio !== null || (f.yaRegistrada && caso.porcentaje >= 90)) {
 		return {
 			tono: "info",
 			titulo: "Factura recibida",

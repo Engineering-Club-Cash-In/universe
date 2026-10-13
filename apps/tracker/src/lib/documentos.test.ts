@@ -11,6 +11,7 @@ const base: Caso["facturaSeguro"] = {
 	motivo: null,
 	subidaAt: null,
 	envio: null,
+	yaRegistrada: false,
 };
 
 function caso(
@@ -40,6 +41,10 @@ describe("documentosDelCaso", () => {
 	test("el caso ganado al 90% conserva el pendiente; al 100% no se marca; antes no pide factura", () => {
 		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
 		expect(tieneDocumentosPendientes(caso({}, 100, "aprobado"))).toBe(false);
+		// Un Seguro del Vehículo de antes cuenta como subido.
+		expect(
+			documentosDelCaso(caso({ yaRegistrada: true }, 90, "aprobado")),
+		).toMatchObject([{ estado: "subido" }]);
 		// El vendedor la sigue viendo para subirla al 100%, pero no cuenta como
 		// pendiente.
 		const alCien = caso({ habilitada: true }, 100, "aprobado");

@@ -36,7 +36,8 @@ export function parametrosPreviewBoletaTardia(
   return { credito_id: v.credito_id, monto_boleta: v.monto_boleta, otros: v.otros ?? 0, abono_directo_capital: v.abono_directo_capital ?? 0, fecha_boleta: v.fecha_boleta };
 }
 export function estadoRecuadroBoletaTardia(vista: VistaPreviaBoletaTardia | null | undefined, entorno: EntornoRecuadro): EstadoRecuadro {
-  if (!vista || entorno.esCancelacion) return { tipo: "oculto" };
+  // Sin fecha de vencimiento no hay línea de tiempo ni nada que afirmar (p. ej. cuotas duplicadas): se oculta.
+  if (!vista || entorno.esCancelacion || !vista.fechaVencimiento) return { tipo: "oculto" };
   if (!vista.aplica) {
     const motivo = vista.razon ? RAZONES_GRISES[vista.razon] : undefined;
     return motivo ? { tipo: "gris", motivo, vista } : { tipo: "oculto" };
@@ -54,6 +55,18 @@ export function moraDespuesDeCondonar(mora: number, vista: VistaPreviaBoletaTard
 /** Confirmar espera la vista previa solo mientras está en su primera carga; con error o sin params el pago sigue normal. */
 export const confirmacionEsperaVistaPrevia = (p: { params: ParamsPreviewBoletaTardia | null; abierto: boolean; cargando: boolean }): boolean =>
   p.abierto && p.params !== null && p.cargando;
+/** Mora que realmente se cobra: con la casilla aceptada es la que calculó el servidor (moraACobrar); si no, la local. UNA sola fuente para el modal y para handleFormSubmit. */
+export function moraEfectivaParaCobrar(moraLocal: number, vista: VistaPreviaBoletaTardia | null | undefined, aceptada: boolean): number {
+  if (!aceptada || !vista?.aplica) return moraLocal;
+  const mora = Number(vista.moraACobrar);
+  return Number.isFinite(mora) && mora >= 0 ? mora : moraLocal;
+}
+/** Lo que se tacha en el modal al aceptar: la mora de antes de condonar según el servidor (moraACobrar + montoCondonar). */
+export function moraAntesDeCondonar(moraLocal: number, vista: VistaPreviaBoletaTardia | null | undefined, aceptada: boolean): number {
+  if (!aceptada || !vista?.aplica) return moraLocal;
+  const total = Number(vista.moraACobrar) + Number(vista.montoCondonar);
+  return Number.isFinite(total) ? redondear(total) : moraLocal;
+}
 /** Solo viaja si el recuadro está en "casilla" (si pasó a gris después de marcar, no se envía), el monto es válido y hay intentoId. */
 export function bloqueCondonacionParaEnviar(vista: VistaPreviaBoletaTardia | null | undefined, aceptadaIntentoId: string | null, entorno: EntornoRecuadro): BloqueCondonacionBoletaTardia | undefined {
   if (!vista || !vista.intentoId || !estaAceptada(vista, aceptadaIntentoId)) return undefined;

@@ -41,6 +41,7 @@ import {
 	carteraBackClient,
 } from "../services/cartera-back-client";
 import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
+import { listarProximosSubirBucket } from "../services/proximos-subir-bucket";
 import {
 	calcularKpisYEquipo,
 	calcularRecuperacionAsesores,
@@ -293,6 +294,16 @@ export const supervisionCobrosRouter = {
 			}),
 		)
 		.handler(({ input }) => getEscaladasDelAsesor(input)),
+
+	/**
+	 * M2 · Créditos próximos a subir de bucket de un asesor (Detalle › Casos
+	 * críticos): B1 a B4 cuya siguiente cuota vence en 7 días o menos y que no
+	 * tienen una promesa vigente. Devuelve el conteo, el desglose por bucket y la
+	 * lista. `asesorId` es el de cartera (el mismo de la ruta del Detalle).
+	 */
+	getProximosSubirBucket: cobrosSupervisorProcedure
+		.input(z.object({ asesorId: z.number().int().positive() }))
+		.handler(({ input }) => listarProximosSubirBucket(input.asesorId)),
 
 	/**
 	 * S6 · Reasignación en bloque, TODO O NADA. Recibe varios créditos, el asesor

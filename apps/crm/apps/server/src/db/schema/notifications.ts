@@ -108,6 +108,12 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// CB-041: la decisión (aprobada/rechazada) de una inmovilización, de
 	// vuelta al asesor que la solicitó.
 	"inmovilizacion_resuelta",
+	// M4 (#1895, migración 0082): el supervisor devolvió un convenio con una
+	// contrapropuesta. Va al asesor que lleva el crédito.
+	"convenio_contrapropuesta",
+	// M4: el asesor aceptó o descartó la contrapropuesta. Va a los
+	// cobros_supervisor.
+	"convenio_contrapropuesta_respondida",
 	// CB-041: el apagado o la reactivación ya se ejecutó (LEGION lo confirmó
 	// y el supervisor lo marcó) — el asesor dueño del caso debe llamar al
 	// cliente. Se resuelve al registrar esa llamada, o, si es el aviso de un

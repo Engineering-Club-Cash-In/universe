@@ -31,6 +31,7 @@ import type {
 	CarteraConvenioDecision,
 	CarteraConvenioDecisionesHistorialResponse,
 	CarteraConvenioListado,
+	CarteraConvenioPlan,
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCreditoOperativoSat,
@@ -3057,6 +3058,57 @@ export class CarteraBackClient {
 			data: CarteraConvenioCuota[];
 		}>(`/payment-agreements/${convenioId}/cuotas`, { method: "GET" });
 		return response.data ?? [];
+	}
+
+	/**
+	 * M4 · plan de pagos de un convenio en CUALQUIER estado (también el pendiente
+	 * de aprobación), con la fecha del primer pago. Sin cache: lo ve el
+	 * supervisor al decidir.
+	 */
+	async getPlanConvenio(convenioId: number): Promise<CarteraConvenioPlan> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenioPlan;
+			message?: string;
+		}>(`/payment-agreements/${convenioId}/plan`, { method: "GET" });
+		if (!response?.success) {
+			throw new Error(
+				response?.message || "cartera-back no devolvió el plan del convenio",
+			);
+		}
+		return response.data;
+	}
+
+	/**
+	 * M4 · reprograma un convenio PENDIENTE (número de cuotas y primer pago; el
+	 * total no cambia). Lo llama la aceptación de una contrapropuesta. No es
+	 * idempotente para `request`: no reintenta PATCH.
+	 */
+	async reprogramarConvenioPendiente(
+		convenioId: number,
+		input: {
+			numero_meses: number;
+			primer_pago: string;
+			actor_email: string;
+			/** Asesor que debe llevar el crédito al momento de reprogramar (cartera lo revalida). */
+			asesor_email?: string;
+		},
+	): Promise<CarteraConvenioPlan> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenioPlan;
+			message?: string;
+		}>(`/payment-agreements/${convenioId}/plan`, {
+			method: "PATCH",
+			body: JSON.stringify(input),
+		});
+		if (!response?.success) {
+			throw new Error(
+				response?.message || "cartera-back no reprogramó el convenio",
+			);
+		}
+		this.cache.invalidate("payment-agreements");
+		return response.data;
 	}
 
 	/**

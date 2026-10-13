@@ -305,8 +305,8 @@ export async function notificarUnidadReactivada(params: {
 }
 
 /**
- * Pone cada aviso abierto de "llamar al cliente" en manos de quien lleva HOY
- * el crédito en CARTERA.
+ * Pone cada aviso abierto de "llamar al cliente" (y de contrapropuesta de
+ * convenio) en manos de quien lleva HOY el crédito en CARTERA.
  *
  * El aviso nace dirigido al dueño del momento, pero cartera puede reasignar el
  * crédito después (el motor de las 23:59, una reasignación manual, un traslado
@@ -348,7 +348,12 @@ export async function reconciliarAvisosLlamarCliente(
 				)
 				.where(
 					and(
-						eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
+						inArray(notifications.cobrosTipo, [
+							"inmovilizacion_llamar_cliente",
+							// La contrapropuesta de convenio también es una tarea del asesor
+							// dueño del crédito: si se reasigna, la hereda el nuevo.
+							"convenio_contrapropuesta",
+						]),
 						eq(notifications.relatedEntityType, "collection_case"),
 						inArray(notifications.status, [...ESTADOS_ABIERTOS]),
 						pendientes

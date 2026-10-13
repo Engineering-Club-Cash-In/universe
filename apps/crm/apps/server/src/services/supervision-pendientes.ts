@@ -31,6 +31,7 @@ import { esPromesaVigente } from "../lib/promesa-vigente";
 import { diasHabilesSinContacto, estaSinContacto } from "../lib/sin-contacto";
 import type { PendientesSupervision } from "../routers/supervision-cobros";
 import { carteraBackClient } from "./cartera-back-client";
+import { sifcosConPromesaVigente } from "./promesas-vigentes-sifco";
 
 async function intentar<T>(
 	nombre: string,
@@ -94,45 +95,8 @@ async function contarListosPrejuridico(ahora: Date): Promise<number> {
 	const proximos = sifcosProximosAB4(cuotas);
 	if (proximos.size === 0) return 0;
 
-	// Solo el caso vigente de cada SIFCO: una promesa olvidada en un caso viejo
-	// (reaperturas, migraciones) no debe sacar al crédito del conteo.
-	const casos = await db
-		.select({
-			id: casosCobros.id,
-			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			activo: casosCobros.activo,
-			updatedAt: casosCobros.updatedAt,
-		})
-		.from(casosCobros)
-		.where(inArray(casosCobros.numeroCreditoSifco, [...proximos]));
-	const vigentes = [...agruparCasosVigentesPorSifco(casos).values()];
-	const sifcoPorCaso = new Map(
-		vigentes.map((c) => [c.id, c.numeroCreditoSifco]),
-	);
-	const conPromesa =
-		vigentes.length === 0
-			? []
-			: await db
-					.selectDistinct({ casoCobroId: contactosCobros.casoCobroId })
-					.from(contactosCobros)
-					.where(
-						and(
-							inArray(
-								contactosCobros.casoCobroId,
-								vigentes.map((c) => c.id),
-							),
-							esPromesaVigente(ahora),
-						),
-					);
-	return listosPrejuridico(
-		proximos,
-		new Set(
-			conPromesa.flatMap((f) => {
-				const sifco = sifcoPorCaso.get(f.casoCobroId);
-				return sifco ? [sifco] : [];
-			}),
-		),
-	).length;
+	const conPromesa = await sifcosConPromesaVigente([...proximos], ahora);
+	return listosPrejuridico(proximos, conPromesa).length;
 }
 
 /**

@@ -1116,7 +1116,10 @@ export const solicitudesRebajaMoraCobros = pgTable(
 			.references(() => casosCobros.id, { onDelete: "cascade" }),
 		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
 		// Mora acumulada que vio el asesor al pedir (snapshot, no se recalcula).
-		moraSnapshot: decimal("mora_snapshot", { precision: 12, scale: 2 }).notNull(),
+		moraSnapshot: decimal("mora_snapshot", {
+			precision: 12,
+			scale: 2,
+		}).notNull(),
 		montoSolicitado: decimal("monto_solicitado", {
 			precision: 12,
 			scale: 2,
@@ -1208,6 +1211,67 @@ export const solicitudesJuridicoCobros = pgTable(
 		check(
 			"solicitudes_juridico_estado_check",
 			sql`${table.estado} IN ('pendiente', 'aprobada', 'aplicada', 'error_aplicacion', 'rechazada', 'cancelada')`,
+		),
+	],
+);
+
+// M4 (issue #1895, migración 0082) · Contrapropuesta de convenio. El supervisor
+// edita el plan que propuso el asesor (número de cuotas y primer pago; el total
+// no cambia) y se lo devuelve. El asesor la acepta (el plan se reescribe en
+// cartera y el convenio sigue pendiente de aprobación) o la descarta. Mientras
+// hay una pendiente, el convenio no se puede decidir.
+export const contrapropuestasConvenioCobros = pgTable(
+	"contrapropuestas_convenio_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id, { onDelete: "cascade" }),
+		convenioId: integer("convenio_id").notNull(),
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+		// Lo que propuso el asesor, para mostrar «propuesta vs contrapropuesta».
+		montoTotal: decimal("monto_total", { precision: 14, scale: 2 }).notNull(),
+		numeroMesesOriginal: integer("numero_meses_original").notNull(),
+		cuotaMensualOriginal: decimal("cuota_mensual_original", {
+			precision: 14,
+			scale: 2,
+		}).notNull(),
+		primerPagoOriginal: date("primer_pago_original"),
+		// Lo que propone el supervisor.
+		numeroMeses: integer("numero_meses").notNull(),
+		cuotaMensual: decimal("cuota_mensual", {
+			precision: 14,
+			scale: 2,
+		}).notNull(),
+		primerPago: date("primer_pago").notNull(),
+		nota: text("nota").notNull(),
+		// 'pendiente' | 'aceptada' | 'descartada' | 'sin_efecto'
+		estado: text("estado").notNull().default("pendiente"),
+		creadaPor: text("creada_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		creadaEn: timestamp("creada_en").notNull().defaultNow(),
+		resueltaPor: text("resuelta_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		resueltaEn: timestamp("resuelta_en"),
+		notaRespuesta: text("nota_respuesta"),
+	},
+	(table) => [
+		uniqueIndex("uq_contrapropuesta_convenio_pendiente")
+			.on(table.convenioId)
+			.where(sql`${table.estado} = 'pendiente'`),
+		index("idx_contrapropuestas_convenio").on(
+			table.convenioId,
+			table.creadaEn.desc(),
+		),
+		check(
+			"contrapropuestas_convenio_estado_check",
+			sql`${table.estado} IN ('pendiente', 'aceptada', 'descartada', 'sin_efecto')`,
+		),
+		check(
+			"contrapropuestas_convenio_meses_check",
+			sql`${table.numeroMeses} BETWEEN 1 AND 60`,
 		),
 	],
 );

@@ -724,9 +724,12 @@ export const insertPayment = async (
   { body, set }: any,
   {
     nexaPaymentEventId,
+    boletaTardiaIntentoId,
     paymentLock,
     deps,
   }: {
+    /** UUID del intento de boleta tardía: TODA fila de pagos_credito que escriba esta boleta lo lleva. */
+    boletaTardiaIntentoId?: string;
     nexaPaymentEventId?: number;
     paymentLock?: PaymentAdvisoryLock;
     deps?: InsertarPagoDeps;
@@ -921,6 +924,7 @@ export const insertPayment = async (
         monto_aplicado: pagoEspecialCuota.montoAplicado,
         observaciones,
         nexaPaymentEventId,
+        boletaTardiaIntentoId,
       });
     }
 
@@ -993,6 +997,7 @@ export const insertPayment = async (
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
             nexaPaymentEventId,
+            boletaTardiaIntentoId,
           });
           // `insertarPago` ya anotó la mora de esta boleta en el ledger.
           moraYaAnotada = true;
@@ -1020,6 +1025,7 @@ export const insertPayment = async (
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
             nexaPaymentEventId,
+            boletaTardiaIntentoId,
           });
           await estamparDecrementoMora(pagoDeMora?.pago_id);
         }
@@ -1051,6 +1057,7 @@ export const insertPayment = async (
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           observaciones,
           nexaPaymentEventId,
+          boletaTardiaIntentoId,
         });
         await estamparDecrementoMora(pagoDeMora?.pago_id);
       }
@@ -1731,7 +1738,9 @@ export const insertPayment = async (
           "Diciembre",
         ];
         const mes_pagado = months[currentDate.getMonth()];
-        const paymentFalse = existingPago
+        // Boleta tardía: la fila nace viva aunque la reutilizada sea de relleno anulada
+        // (heredar paymentFalse=true dejaría el pago invisible a la condonación/compensación).
+        const paymentFalse = existingPago && !boletaTardiaIntentoId
           ? existingPago.pago.paymentFalse
           : false;
         const fechaGuatemala = paymentRegistrationDate();
@@ -1828,6 +1837,9 @@ export const insertPayment = async (
           monto_aplicado: totalPagado.toString(),
           origen_pago: origen_pago,
           nexaPaymentEventId,
+          // null explícito: el UPDATE de cierre sobre una fila reutilizada borra una marca vieja
+          // (drizzle descarta las claves undefined en .set).
+          boletaTardiaIntentoId: boletaTardiaIntentoId ?? null,
         };
 
         // Insertar o actualizar pago
@@ -2038,6 +2050,7 @@ export const insertPayment = async (
                   // completo): conservar el origen del pago en la fila de cierre.
                   origen_pago: pagoData.origen_pago,
                   nexaPaymentEventId,
+                  boletaTardiaIntentoId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -2217,6 +2230,7 @@ export const insertPayment = async (
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   nexaPaymentEventId,
+                  boletaTardiaIntentoId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -2510,6 +2524,7 @@ export const insertPayment = async (
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
         nexaPaymentEventId,
+        boletaTardiaIntentoId,
       };
 
 
@@ -2799,6 +2814,7 @@ export const insertPayment = async (
           pagoConvenio: 0,
           observaciones,
           nexaPaymentEventId,
+          boletaTardiaIntentoId,
         });
         if (anotaEstaFila && moraCobradaEnBoleta.gt(0)) moraYaAnotada = true;
         if (new Big(pagoConvenioParaFila).gt(0)) {
@@ -3002,6 +3018,7 @@ interface InsertarPagoParams {
   pagoConvenio?: number;
   observaciones?: string;
   nexaPaymentEventId?: number;
+  boletaTardiaIntentoId?: string;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -3021,6 +3038,7 @@ export async function insertarPago({
   pagoConvenio = 0,
   observaciones = "",
   nexaPaymentEventId,
+  boletaTardiaIntentoId,
   deps = DEPS_INSERTAR_PAGO(),
   anotarMoraEnLedger = true,
 }: InsertarPagoParams) {
@@ -3166,6 +3184,7 @@ export async function insertarPago({
         pagoConvenio: pagoConvenio.toString(),
         monto_aplicado: monto_aplicado.toString(),
         nexaPaymentEventId,
+        boletaTardiaIntentoId,
       })
       .returning();
 

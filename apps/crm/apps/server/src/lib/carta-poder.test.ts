@@ -170,3 +170,17 @@ describe("nacionalidad en el género de quien recibe la carta", () => {
 		);
 	});
 });
+
+describe("DPI incompleto", () => {
+	test("el número entre paréntesis va sólo con un DPI de 13 dígitos", () => {
+		expect(datosDeLaCartaPoder("carta_cube_andres", campos()).dpiCompleto).toBe(
+			true,
+		);
+		const incompleto = datosDeLaCartaPoder(
+			"carta_cube_andres",
+			campos({ dpi: "2400 501" }),
+		);
+		expect(incompleto.dpiCompleto).toBe(false);
+		expect(incompleto.dpiTexto).toBe("2400 501");
+	});
+});

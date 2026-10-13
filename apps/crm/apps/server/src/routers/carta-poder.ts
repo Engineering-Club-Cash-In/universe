@@ -26,9 +26,26 @@ import { generateContractsBatch } from "../services/legal-docs-api";
  * ya guarda, o del que trae la oportunidad en los clientes migrados.
  */
 
+/**
+ * La referencia de cartera más reciente de cada oportunidad: puede tener
+ * varias, y unirlas todas repetía el crédito en el buscador (y el límite de
+ * resultados se llenaba con repetidos). Igual que en `reports.ts`.
+ */
+const ultimaReferencia = db
+	.select({
+		id: carteraBackReferences.id,
+		opportunityId: carteraBackReferences.opportunityId,
+		numeroCreditoSifco: carteraBackReferences.numeroCreditoSifco,
+		rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${carteraBackReferences.opportunityId} ORDER BY ${carteraBackReferences.createdAt} DESC, ${carteraBackReferences.id} DESC)`.as(
+			"rn_referencia",
+		),
+	})
+	.from(carteraBackReferences)
+	.as("ultima_referencia");
+
 const numeroDeCredito = sql<
 	string | null
->`coalesce(${carteraBackReferences.numeroCreditoSifco}, ${opportunities.numeroSifco})`;
+>`coalesce(${ultimaReferencia.numeroCreditoSifco}, ${opportunities.numeroSifco})`;
 
 /**
  * Los clientes migrados traen el vehículo con relleno ("N/A", "No
@@ -109,14 +126,17 @@ export const cartaPoderRouter = {
 				.from(opportunities)
 				.innerJoin(leads, eq(leads.id, opportunities.leadId))
 				.leftJoin(
-					carteraBackReferences,
-					eq(carteraBackReferences.opportunityId, opportunities.id),
+					ultimaReferencia,
+					and(
+						eq(ultimaReferencia.opportunityId, opportunities.id),
+						eq(ultimaReferencia.rn, 1),
+					),
 				)
 				.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 				.where(
 					and(
 						or(
-							isNotNull(carteraBackReferences.id),
+							isNotNull(ultimaReferencia.id),
 							isNotNull(opportunities.numeroSifco),
 						),
 						...porTermino,

@@ -213,7 +213,7 @@ export function nacionalidadSegunGenero(
 export function datosDeLaCartaPoder(
 	tipo: TipoCartaPoder,
 	campos: CamposCartaPoder,
-): Record<string, string> {
+): Record<string, string | boolean> {
 	const carta = CARTAS_PODER.find((c) => c.tipo === tipo);
 	if (!carta) throw new Error(`Carta poder desconocida: ${tipo}`);
 
@@ -230,6 +230,9 @@ export function datosDeLaCartaPoder(
 		nacionalidad: nacionalidadSegunGenero(campos.nacionalidad, campos.genero),
 		dpiTexto: dpiCompleto ? dpiEnLetras(dpi) : limpio(campos.dpi.toLowerCase()),
 		dpiNumero: dpiCompleto ? formatDpi(dpi) : limpio(campos.dpi),
+		// Las plantillas ponen "({dpiNumero})" sólo con esto en true: con un DPI
+		// incompleto, lo que se escribió ya va en dpiTexto y saldría dos veces.
+		dpiCompleto,
 
 		tipoVehiculo: limpio(campos.tipoVehiculo),
 		marcaVehiculo: limpio(campos.marcaVehiculo),

@@ -51,6 +51,20 @@ test("a concurrent or stale billing claim fails closed before provider calls", a
   expect(invoiced).toBe(false);
 });
 
+test("a payment deleted by CAIDO stays pending, never unknown, and never reaches the provider", async () => {
+  const { runNexaBilling } = await import("./nexaBilling");
+  let invoiced = false;
+
+  await expect(runNexaBilling({
+    enabled: true,
+    eventId: 7,
+    paymentIds: [17],
+    start: async () => "payment_deleted",
+    invoice: async () => { invoiced = true; return { status: 200, response: {} }; },
+  })).resolves.toEqual({ kind: "pending", code: "billing_payment_deleted" });
+  expect(invoiced).toBe(false);
+});
+
 test("a later definitive rejection is unknown after an earlier row was billed", async () => {
   const { runNexaBilling } = await import("./nexaBilling");
   const invoiced: number[] = [];

@@ -27,6 +27,8 @@ type Operacion = {
   marca: string;
   tipo: "BEGIN" | "COMMIT" | "ROLLBACK" | "select" | "update" | "insert";
   tabla?: any;
+  /** Lo que recibió `.set()` en un update. */
+  valores?: any;
 };
 
 const estado: {
@@ -70,9 +72,9 @@ const clienteFalso = (marca: string): any => ({
     },
   }),
   update: (tabla: any) => ({
-    set: () => {
+    set: (valores: any) => {
       const ejecutar = () => {
-        estado.operaciones.push({ marca, tipo: "update", tabla });
+        estado.operaciones.push({ marca, tipo: "update", tabla, valores });
         return [
           { mora_id: 77, credito_id: CREDITO_ID, porcentaje_mora: "1.12", cuotas_atrasadas: 2 },
         ];
@@ -212,6 +214,34 @@ describe("updateMora sin dbClient: la bitácora va dentro de su transacción", (
     expect(primerCredito).toBeGreaterThan(-1);
     expect(primeraMora).toBeGreaterThan(-1);
     expect(primerCredito).toBeLessThan(primeraMora);
+  });
+
+  it("monto_cambio como decimal string se suma exacto, sin pasar por Number", async () => {
+    // La anulación de una condonación Nexa restituye `monto_condonacion` (numeric
+    // de hasta 16 enteros). Number("9007199254740991.99") da 9007199254740992 y
+    // la mora quedaría distinta de lo que el ledger compensó.
+    estado.selects = [
+      [{ statusCredit: "MOROSO" }],
+      [{ id: 77, monto: "0.01", activa: true, porcentaje_mora: "1.12", cuotas_atrasadas: 2 }],
+    ];
+
+    const res = await updateMora({
+      credito_id: CREDITO_ID,
+      tipo: "INCREMENTO",
+      monto_cambio: "9007199254740991.99",
+      motivo: "anulación de condonación",
+    });
+
+    expect(res.success).toBe(true);
+    const mutacion = estado.operaciones.find((o) => o.tipo === "update" && o.tabla === moras_credito);
+    expect(mutacion!.valores.monto_mora).toBe("9007199254740992");
+  });
+
+  it("monto_cambio string negativo se rechaza igual que el number", async () => {
+    const res = await updateMora({ credito_id: CREDITO_ID, tipo: "INCREMENTO", monto_cambio: "-0.01" });
+
+    expect(res.success).toBe(false);
+    expect(estado.operaciones).toHaveLength(0);
   });
 
   it("sin mora que tocar no inventa evento", async () => {

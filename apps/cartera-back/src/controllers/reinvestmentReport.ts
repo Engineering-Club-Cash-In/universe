@@ -1,5 +1,15 @@
 import Big from "big.js";
 
+// Datos de liquidación que no concilian: es un problema del dato, no del
+// servidor. El router lo responde 422 (no 5xx) para que el CRM no reintente
+// ni abra su circuit breaker.
+export class ReinvestmentDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReinvestmentDataError";
+  }
+}
+
 type NetInterestInput = {
   inversionista_id: number;
   inversionista: string;
@@ -46,7 +56,7 @@ export function normalizeReinvestmentComponents(
     [capital, rest, total].some((value) => value.lt(0)) ||
     unclassified.lt(0)
   ) {
-    throw new Error("Composición de liquidación inválida");
+    throw new ReinvestmentDataError("Composición de liquidación inválida");
   }
 
   return {
@@ -141,7 +151,7 @@ export function buildLiquidationComposition(input: LiquidationCompositionInput) 
     flowRest.lt(0) ||
     reinvestedUnclassified.lt(0)
   ) {
-    throw new Error("Composición de liquidación inválida");
+    throw new ReinvestmentDataError("Composición de liquidación inválida");
   }
 
   let paidCapital = new Big(0);
@@ -151,7 +161,7 @@ export function buildLiquidationComposition(input: LiquidationCompositionInput) 
     paidCapital = flowCapital.minus(reinvestedCapital);
     paidRest = flowRest.minus(reinvestedRest);
     if (paidCapital.lt(0) || paidRest.lt(0)) {
-      throw new Error("Composición de liquidación inválida");
+      throw new ReinvestmentDataError("Composición de liquidación inválida");
     }
     paidUnclassified = new Big(0);
   }
@@ -724,7 +734,7 @@ export function assertModeReconciliation(mode: ModeReconciliation) {
     mode.reinversion_total,
   ]);
   if (distributed !== destinations) {
-    throw new Error("Modalidad no concilia");
+    throw new ReinvestmentDataError("Modalidad no concilia");
   }
   return true;
 }

@@ -1,0 +1,48 @@
+-- Agrega `acceso_portal` al enum `investor_activity_log_action`.
+--
+-- POR QUÉ ES OBLIGATORIA Y NO COSMÉTICA
+--
+-- `routers/investor-documents.ts` (`darAccesoPortal`) escribe una fila en
+-- `investor_activity_log` con `action = 'acceso_portal'`. Esa fila es la ÚNICA
+-- constancia veraz de quién autorizó mandarle la contraseña del portal a un
+-- inversionista: `cartera.audit_logs` decodifica el "quién" del JWT, y el CRM
+-- llama con un token de servicio que pertenece a una persona fija, así que allá
+-- el acto aparece firmado por ESA persona lo apriete quien lo apriete.
+--
+-- Sin este valor en el enum, el insert revienta con `invalid input value for
+-- enum`. Y no revienta ruidosamente: `dejarConstanciaDeAccesoPortal` se traga
+-- la falla a propósito —lo irreversible ya pasó, la contraseña ya salió, y un
+-- rojo sobre algo que SÍ ocurrió hace que la persona lo vuelva a apretar—. O
+-- sea: con el enum sin aplicar, el botón funciona, la contraseña sale, y NO
+-- QUEDA CONSTANCIA de quién la mandó. Solo un `console.error`.
+--
+-- Por eso ESTA MIGRACIÓN VA ANTES QUE EL CÓDIGO, no junto ni después.
+--
+-- SOBRE LA TRANSACCIÓN
+--
+-- `ALTER TYPE ... ADD VALUE` no se comporta como el resto del DDL: hasta
+-- PostgreSQL 11 no podía ejecutarse dentro de un bloque de transacción, y desde
+-- el 12 sí puede pero EL VALOR NUEVO NO SE PUEDE USAR hasta que esa transacción
+-- haga commit. Y el aplicador no envuelve cada archivo por separado: `migrate()`
+-- de drizzle-orm (`pg-core/dialect.js`) abre UNA sola transacción y corre DENTRO
+-- de ella TODAS las migraciones pendientes.
+--
+-- Por eso este archivo agrega el valor Y NADA MÁS: cualquier INSERT/UPDATE que
+-- escribiera 'acceso_portal' acá fallaría aunque el ALTER TYPE de arriba hubiera
+-- corrido bien (`ERROR: unsafe use of new value ... New enum values must be
+-- committed before they can be used`, verificado contra PostgreSQL 15). Lo mismo
+-- vale para cualquier migración POSTERIOR que se aplique en la misma corrida. Si
+-- algún día hace falta rellenar datos con este valor, va en un archivo aparte y
+-- en una corrida aparte.
+--
+-- `IF NOT EXISTS` la hace idempotente por sí sola —correrla dos veces solo
+-- emite un NOTICE—, así que NO se envuelve en el bloque anónimo con
+-- `EXCEPTION WHEN duplicate_object` que usan 0022 y 0033. Ese envoltorio TAMBIÉN
+-- funciona (se probó contra PostgreSQL 15: el `ADD VALUE` corre bien dentro de
+-- la subtransacción que abre el manejador), pero su `EXCEPTION` ya no puede
+-- dispararse teniendo `IF NOT EXISTS` delante. Se usa la forma simple, que es
+-- además la que genera `drizzle-kit` y la de 0013 y 0020.
+--
+-- Aditiva y retrocompatible: agregar un valor al final del enum no toca ninguna
+-- fila existente ni invalida ningún `action` ya escrito.
+ALTER TYPE "public"."investor_activity_log_action" ADD VALUE IF NOT EXISTS 'acceso_portal';

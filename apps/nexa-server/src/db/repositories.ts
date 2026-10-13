@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { receivedTokenTransactionSchema, tokenTransactionSchema, type TokenTransaction, type ReceivedTokenTransaction } from "../nexa/schemas";
+import type { ManualReviewEmailCase } from "../alerts/manual-review-email";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
 import type { PaymentTransactionRepository, TokenUserRepository } from "../payments/repositories";
 import type { TokenUserCreationRepository } from "../tokens/service";
 import type { NexaDb } from "./index";
-import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUsers } from "./schema";
+import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUserReservations, nexaTokenUsers } from "./schema";
 
 export class PaymentTokenRepository {
   constructor(private readonly db: NexaDb) {}
@@ -40,8 +41,53 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
     nexaUserId: number;
     token: string;
   }) {
-    const [created] = await this.db.insert(nexaTokenUsers).values(user).returning();
-    return created;
+    // Si otro proceso ya guardó el token de este crédito (carrera o reintento),
+    // no se falla: se devuelve el guardado, que es el vigente.
+    const [created] = await this.db
+      .insert(nexaTokenUsers)
+      .values(user)
+      .onConflictDoNothing({ target: nexaTokenUsers.creditoId })
+      .returning();
+    return created ?? (await this.findByCreditoId(user.creditoId));
+  }
+
+  // Identificador reservado del crédito: el existente o uno nuevo. Se guarda
+  // ANTES de llamar a Nexa, así un reintento tras una caída manda el mismo.
+  async reserveIdentifier(creditoId: number, nextIdentifier: () => Promise<string>) {
+    const fila = (r: typeof nexaTokenUserReservations.$inferSelect, reused: boolean) => ({
+      identifier: r.identifier,
+      reused,
+      nexaUserId: r.nexaUserId,
+      token: r.token,
+    });
+    const [existing] = await this.db.select().from(nexaTokenUserReservations)
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
+    if (existing) return fila(existing, true);
+    const identifier = await nextIdentifier();
+    const [created] = await this.db.insert(nexaTokenUserReservations)
+      .values({ creditoId, identifier })
+      .onConflictDoNothing({ target: nexaTokenUserReservations.creditoId })
+      .returning();
+    if (created) return fila(created, false);
+    const [winner] = await this.db.select().from(nexaTokenUserReservations)
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId)).limit(1);
+    if (!winner) throw new Error(`No se pudo reservar el identificador del crédito ${creditoId}`);
+    return fila(winner, true);
+  }
+
+  // Guarda la respuesta de Nexa en la reserva antes de escribir el token user.
+  async saveReservationResponse(creditoId: number, response: { nexaUserId: number; token: string }) {
+    await this.db.update(nexaTokenUserReservations)
+      .set({ nexaUserId: response.nexaUserId, token: response.token })
+      .where(eq(nexaTokenUserReservations.creditoId, creditoId));
+  }
+
+  // Un crédito tiene a lo sumo un token user (credito_id UNIQUE). Lo usa
+  // POST /admin/token-users para devolver el existente en vez de pedirle a
+  // Nexa un usuario nuevo que después no se podría guardar.
+  async findByCreditoId(creditoId: number) {
+    const [user] = await this.db.select().from(nexaTokenUsers).where(eq(nexaTokenUsers.creditoId, creditoId)).limit(1);
+    return user ?? null;
   }
 
   async findByToken(token: string) {
@@ -50,7 +96,10 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
   }
 
   async list() {
-    return this.db.select().from(nexaTokenUsers).orderBy(nexaTokenUsers.id);
+    return this.db.select({ ...getTableColumns(nexaTokenUsers), prefix: nexaPaymentTokens.prefix, paymentTokenActive: nexaPaymentTokens.active })
+      .from(nexaTokenUsers)
+      .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
+      .orderBy(nexaTokenUsers.id);
   }
 }
 
@@ -74,7 +123,12 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
     };
-    const canEnrich = sql`
+    // Como en enrichIncomingStatement: el crédito se resuelve por prefijo + identificador y a
+    // cartera va su concatenación, así que el token completo de Nexa tiene que cuadrar. Si no
+    // cuadra no se aplica ni se rechaza ante Nexa (un rechazo le devuelve la plata al cliente):
+    // queda en MANUAL_REVIEW para que lo concilie una persona.
+    const tokenMatches = transaction.token === transaction.tokenPrefix + transaction.tokenIdentifier;
+    const canEnrich = !tokenMatches ? sql`false` : sql`
       ${nexaPaymentTransactions.tokenDate} = ''
       AND excluded.token_date <> ''
       AND ${nexaPaymentTransactions.amount} = excluded.amount
@@ -98,8 +152,8 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       tokenPrefix: transaction.tokenPrefix,
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
-      processingStatus: tokenDate ? "RECEIVED" : "MANUAL_REVIEW",
-      failureReason: tokenDate ? null : "missing_token_date",
+      processingStatus: tokenMatches && tokenDate ? "RECEIVED" : "MANUAL_REVIEW",
+      failureReason: !tokenMatches ? "token_mismatch" : tokenDate ? null : "missing_token_date",
       rawPayload: sanitizedPayload,
       payloadFingerprint,
     }).onConflictDoUpdate({
@@ -204,7 +258,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 
   async markApplied(id: number, paymentId: number) {
-    await this.db.update(nexaPaymentTransactions).set({ processingStatus: "APPLIED", carteraPaymentId: paymentId, updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
+    await this.db.update(nexaPaymentTransactions).set({ processingStatus: "APPLIED", carteraPaymentId: paymentId, carteraPaymentIds: [paymentId], updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
   }
 
   async markRejected(id: number, reason: string) {
@@ -277,8 +331,26 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     } : null;
   }
 
-  async resolveCreditoId(tokenIdentifier: string, tokenPrefix: string) {
+  async resolveCreditoId(tokenIdentifier: string, tokenPrefix: string, options: { includeInactive?: boolean } = {}) {
     const [user] = await this.db.select({ creditoId: nexaTokenUsers.creditoId })
+      .from(nexaTokenUsers)
+      .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
+      .where(and(
+        eq(nexaTokenUsers.identifier, tokenIdentifier),
+        eq(nexaPaymentTokens.prefix, tokenPrefix),
+        ...(options.includeInactive ? [] : [eq(nexaTokenUsers.active, true), eq(nexaPaymentTokens.active, true)]),
+      ))
+      .limit(1);
+    return user?.creditoId ?? null;
+  }
+
+  async findTokenUser(tokenIdentifier: string, tokenPrefix: string) {
+    const [user] = await this.db.select({
+      creditoId: nexaTokenUsers.creditoId,
+      token: nexaTokenUsers.token,
+      identifier: nexaTokenUsers.identifier,
+      nexaUserId: nexaTokenUsers.nexaUserId,
+    })
       .from(nexaTokenUsers)
       .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
       .where(and(
@@ -288,11 +360,12 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         eq(nexaPaymentTokens.active, true),
       ))
       .limit(1);
-    return user?.creditoId ?? null;
+    return user ?? null;
   }
 
   async finalizeApplication(id: number, outcome: {
     paymentId: number | null;
+    paymentIds?: number[];
     reviewStatus: "APPROVED" | "REJECTED";
     failureReason: string | null;
     nextAttemptAt?: Date | null;
@@ -305,6 +378,9 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       // Billing owns only the application lease/schedule, never the bank review state.
       const [billed] = await tx.update(nexaPaymentTransactions).set({
         rawPayload,
+        // A billing retry may be the first time Cartera reports every linked id (rows backfilled
+        // by migration 0005 hold only [cartera_payment_id]); keep the stored list when it sends none.
+        carteraPaymentIds: outcome.paymentIds ?? sql`${nexaPaymentTransactions.carteraPaymentIds}`,
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,
@@ -322,6 +398,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         processingStatus: "REVIEW_PENDING",
         rawPayload,
         carteraPaymentId: outcome.paymentId,
+        carteraPaymentIds: outcome.paymentId === null ? null : (outcome.paymentIds ?? [outcome.paymentId]),
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,
@@ -395,14 +472,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 
   async listManualReviewAlerts(staleBefore: Date) {
-    const rows = await reconciliationQuery(this.db, or(
-      eq(nexaPaymentTransactions.failureReason, "billing_reconciliation_required"),
-      and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
-      and(
-        eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
-        or(isNull(nexaPaymentTransactions.failureReason), ne(nexaPaymentTransactions.failureReason, "missing_token_date")),
-      ),
-    ));
+    const rows = await reconciliationQuery(this.db, manualReviewAlertCondition(staleBefore));
     return rows.map((row) => ({
       ...toSafeReconciliationRow(row),
       alertType: row.failureReason === "missing_token_date"
@@ -410,6 +480,46 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         : "MANUAL_REVIEW" as const,
     }));
   }
+
+  // Los mismos casos que listManualReviewAlerts, solo los que todavía no salieron por correo.
+  async listUnsentManualReviewEmailAlerts(staleBefore: Date): Promise<ManualReviewEmailCase[]> {
+    return this.db.select({
+      id: nexaPaymentTransactions.id,
+      creditoId: sql<number | null>`CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.creditoId} END`,
+      amount: nexaPaymentTransactions.amount,
+      currency: nexaPaymentTransactions.currency,
+      reference: nexaPaymentTransactions.reference,
+      transactionId: nexaPaymentTransactions.transactionId,
+      failureReason: nexaPaymentTransactions.failureReason,
+      createdAt: nexaPaymentTransactions.createdAt,
+      maskedToken: maskedTokenSql,
+    }).from(nexaPaymentTransactions)
+      .leftJoin(nexaTokenUsers, eq(nexaTokenUsers.identifier, nexaPaymentTransactions.tokenIdentifier))
+      .leftJoin(nexaPaymentTokens, and(
+        eq(nexaPaymentTokens.id, nexaTokenUsers.paymentTokenId),
+        eq(nexaPaymentTokens.prefix, nexaPaymentTransactions.tokenPrefix),
+      ))
+      .where(and(manualReviewAlertCondition(staleBefore), isNull(nexaPaymentTransactions.alertaCorreoEnviadaAt)))
+      .orderBy(nexaPaymentTransactions.id);
+  }
+
+  async markManualReviewEmailAlertsSent(ids: number[], now: Date) {
+    if (!ids.length) return;
+    await this.db.update(nexaPaymentTransactions)
+      .set({ alertaCorreoEnviadaAt: now })
+      .where(and(inArray(nexaPaymentTransactions.id, ids), isNull(nexaPaymentTransactions.alertaCorreoEnviadaAt)));
+  }
+}
+
+function manualReviewAlertCondition(staleBefore: Date) {
+  return or(
+    eq(nexaPaymentTransactions.failureReason, "billing_reconciliation_required"),
+    and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
+    and(
+      eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+      or(isNull(nexaPaymentTransactions.failureReason), ne(nexaPaymentTransactions.failureReason, "missing_token_date")),
+    ),
+  );
 }
 
 export class DbReviewRepository implements ReviewWorkerRepository {
@@ -552,11 +662,14 @@ function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {
   return value;
 }
 
+// Solo los últimos 4 dígitos: ni el token ni el identificador completo salen de la base.
+const fullTokenSql = sql<string>`COALESCE(NULLIF(${nexaPaymentTransactions.token}, ''), CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.token} END, ${nexaPaymentTransactions.tokenPrefix} || ${nexaPaymentTransactions.tokenIdentifier})`;
+const maskedTokenSql = sql<string>`CASE WHEN length(${fullTokenSql}) <= 4 THEN repeat('*', length(${fullTokenSql})) ELSE repeat('*', length(${fullTokenSql}) - 4) || right(${fullTokenSql}, 4) END`;
+
 function reconciliationQuery(db: NexaDb, where?: ReturnType<typeof or>) {
-  const token = sql<string>`COALESCE(NULLIF(${nexaPaymentTransactions.token}, ''), CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.token} END, ${nexaPaymentTransactions.tokenPrefix} || ${nexaPaymentTransactions.tokenIdentifier})`;
   const query = db.select({
     reference: nexaPaymentTransactions.reference,
-    token: sql<string>`CASE WHEN length(${token}) <= 4 THEN repeat('*', length(${token})) ELSE repeat('*', length(${token}) - 4) || right(${token}, 4) END`,
+    token: maskedTokenSql,
     creditoId: sql<number | null>`CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.creditoId} END`,
     carteraPaymentId: nexaPaymentTransactions.carteraPaymentId,
     amount: nexaPaymentTransactions.amount,
@@ -592,12 +705,19 @@ function toSafeReconciliationRow<T extends {
     ...safeRow,
     reviewAttemptCount: reviewAttempts ?? storedReviewAttemptCount,
     reviewNextAttemptAt: reviewNextAttemptAt ?? storedReviewNextAttemptAt,
-    failureReason: row.failureReason && /^[a-z0-9_]{1,64}$/.test(row.failureReason)
-      ? row.failureReason
-      : row.failureReason
-        ? "processing_failed"
-        : null,
+    failureReason: safeFailureReason(row.failureReason),
   };
+}
+
+// Los motivos internos conocidos se ven tal cual en logs y admin: un código, o
+// un código con su detalle (token_repair_failed:<código>,
+// payment_outcome_uncertain:<detalle>). Cualquier otra cosa puede ser texto
+// libre de cartera y se oculta.
+const KNOWN_FAILURE_REASON = /^(?:[a-z0-9_]{1,64}|(?:token_repair_failed|payment_outcome_uncertain):[a-z0-9_]{1,64})$/;
+
+export function safeFailureReason(reason: string | null) {
+  if (!reason) return null;
+  return KNOWN_FAILURE_REASON.test(reason) ? reason : "processing_failed";
 }
 
 export class PollRunRepository {

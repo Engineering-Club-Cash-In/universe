@@ -52,7 +52,12 @@ export type AnotacionMoraPagada = {
   motivo?: string | null;
 } & (
   | { tipo: "PAGO"; /** El pago que la cubrió. */ pago_id: number }
-  | { tipo: "CONDONACION"; pago_id?: null }
+  | {
+      tipo: "CONDONACION";
+      pago_id?: null;
+      /** La fila de moras_condonaciones que la originó (para compensarla sin buscar texto). */
+      condonacion_id?: number | null;
+    }
 );
 
 type Ejecutor = NodePgDatabase<any>;
@@ -128,6 +133,9 @@ async function insertarBloque(
             : null,
         usuario_id: f.usuario_id ?? null,
         motivo: f.motivo ?? null,
+        // Solo una CONDONACION lo lleva; los demás tipos, NULL (y por el TIPO,
+        // igual que pago_id, por los llamadores que pasan por `as any`).
+        condonacion_id: f.tipo === "CONDONACION" ? (f.condonacion_id ?? null) : null,
       })),
     )
     .returning({ id: mora_pagada_cuota.id });

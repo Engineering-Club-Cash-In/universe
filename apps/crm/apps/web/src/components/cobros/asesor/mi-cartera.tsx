@@ -197,6 +197,8 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		K("excluirPagados"),
 		false,
 	);
+	const [soloConCuentaNexa, setSoloConCuentaNexa] =
+		usePersistedState<boolean>(K("soloConCuentaNexa"), false);
 	const [sifco, setSifco] = usePersistedState<string>(K("sifco"), "");
 	const [gestionGuardada, setGestion] =
 		usePersistedState<FiltroGestionCartera | null>(K("gestion"), null);
@@ -247,6 +249,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		capitalMin,
 		capitalMax,
 		excluirPagados,
+		soloConCuentaNexa,
 		sifco,
 		gestion,
 		busqueda,
@@ -260,6 +263,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		if ("capitalMin" in c) setCapitalMin(c.capitalMin);
 		if ("capitalMax" in c) setCapitalMax(c.capitalMax);
 		if ("excluirPagados" in c) setExcluirPagados(!!c.excluirPagados);
+		if ("soloConCuentaNexa" in c) setSoloConCuentaNexa(!!c.soloConCuentaNexa);
 		if ("gestion" in c) {
 			setGestion(c.gestion ?? null);
 			// Gestión y segmento son excluyentes.
@@ -440,6 +444,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		capitalMin,
 		capitalMax,
 		excluirPagadosMes: excluirPagados || undefined,
+		soloConCuentaNexa: soloConCuentaNexa || undefined,
 	};
 
 	// Cartera general con un segmento: la tabla sale de la fuente del segmento
@@ -464,6 +469,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				capitalMin,
 				capitalMax,
 				excluirPagados,
+				soloConCuentaNexa,
 				sifco,
 				gestion,
 				busqueda,
@@ -591,6 +597,7 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				fechaDesde,
 				fechaHasta,
 				excluirPagadosMes: excluirPagados || undefined,
+				soloConCuentaNexa: soloConCuentaNexa || undefined,
 			}}
 			etiquetaLabels={ETIQUETA_LABELS}
 			totalDestinatarios={total}

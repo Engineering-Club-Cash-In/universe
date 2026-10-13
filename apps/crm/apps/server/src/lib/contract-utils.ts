@@ -42,6 +42,12 @@ const DECENAS = [
 	"noventa",
 ];
 
+const VEINTIS_CON_TILDE: Record<number, string> = {
+	22: "veintidós",
+	23: "veintitrés",
+	26: "veintiséis",
+};
+
 const CENTENAS = [
 	"",
 	"ciento",
@@ -77,7 +83,8 @@ function convertirDecenas(n: number): string {
 	if (n < 10) return UNIDADES[n];
 	if (n < 20) return ESPECIALES[n - 10];
 	if (n === 20) return "veinte";
-	if (n < 30) return `veinti${UNIDADES[n % 10]}`;
+	// Las agudas llevan tilde: veintidós, veintitrés, veintiséis.
+	if (n < 30) return VEINTIS_CON_TILDE[n] ?? `veinti${UNIDADES[n % 10]}`;
 
 	const decena = Math.floor(n / 10);
 	const unidad = n % 10;
@@ -389,20 +396,21 @@ export function dpiToLegalFormat(dpi: string): string {
 	const cleanDpi = dpi.replace(/\D/g, "");
 	if (cleanDpi.length !== 13) return dpi;
 
-	// Dividir en grupos: 4-5-4
-	const grupo1 = cleanDpi.slice(0, 4);
-	const grupo2 = cleanDpi.slice(4, 9);
-	const grupo3 = cleanDpi.slice(9, 13);
+	return `${dpiEnLetras(cleanDpi)} (${formatDpi(cleanDpi)})`;
+}
 
-	// Convertir cada grupo a palabras
-	const palabras1 = dpiGroupToWords(grupo1);
-	const palabras2 = dpiGroupToWords(grupo2);
-	const palabras3 = dpiGroupToWords(grupo3);
+/**
+ * El DPI en palabras por grupos, sin el número: para las plantillas que ponen
+ * el número aparte. Si no trae 13 dígitos lo devuelve como vino.
+ * Ejemplo: "1731641100101" => "mil setecientos treinta y uno, sesenta y cuatro mil ciento diez, cero ciento uno"
+ */
+export function dpiEnLetras(dpi: string): string {
+	const cleanDpi = dpi.replace(/\D/g, "");
+	if (cleanDpi.length !== 13) return dpi;
 
-	// Formato con espacios
-	const formateado = `${grupo1} ${grupo2} ${grupo3}`;
-
-	return `${palabras1}, ${palabras2}, ${palabras3} (${formateado})`;
+	return [cleanDpi.slice(0, 4), cleanDpi.slice(4, 9), cleanDpi.slice(9, 13)]
+		.map(dpiGroupToWords)
+		.join(", ");
 }
 
 /**

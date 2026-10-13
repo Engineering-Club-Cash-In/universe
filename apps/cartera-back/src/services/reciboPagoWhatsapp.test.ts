@@ -1,8 +1,11 @@
 import { describe, expect, it, mock } from "bun:test";
 
-const generateReciboPagoPDF = mock((_pagoId: number) =>
+const generateReciboPagoPDF = mock((_pagoId: number, _opciones?: { conImagen?: boolean }) =>
   Promise.resolve({
     pdfUrl: "https://r2.example.com/recibo_pago_42.pdf",
+    imagenUrl: "https://r2.example.com/recibo_pago_42.jpg",
+    comprobante: 42,
+    pagoIds: [42],
     numeroCuota: 5,
     asesorNombre: "Carlos Ruiz",
     asesorTelefono: "41234567",
@@ -47,11 +50,12 @@ describe("enviarReciboPagoWhatsappBestEffort", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(generateReciboPagoPDF).toHaveBeenCalledWith(42);
+    expect(generateReciboPagoPDF).toHaveBeenCalledWith(42, { conImagen: true });
     expect(notifyReciboPagoWhatsapp).toHaveBeenCalledWith({
       pagoId: 42,
       numeroSifco: "SIFCO-001",
       reciboUrl: "https://r2.example.com/recibo_pago_42.pdf",
+      imagenUrl: "https://r2.example.com/recibo_pago_42.jpg",
       clienteNombre: "Juan Pérez",
       numeroCuota: 5,
       asesorNombre: "Carlos Ruiz",

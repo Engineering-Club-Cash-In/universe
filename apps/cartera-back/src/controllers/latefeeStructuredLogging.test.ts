@@ -80,7 +80,9 @@ test("late-fee callsites use only the finite safe application payload", () => {
   // 54 = + 10 de condonarMoraParcial (COBROS-02 W2): rechazos por monto,
   // usuario, referencia, lock ocupado, mora excedida, estado y devengado, más el
   // éxito y la rebaja ya aplicada. Todas con el payload finito permitido.
-  expect(calls).toBe(54);
+  // 55 = + 1 de develop: desactivarMoraSiCreditoAlDia omite la mora congelada
+  // de un PENDIENTE_CANCELACION (reasonCode excluded_credit_state).
+  expect(calls).toBe(55);
 });
 
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {

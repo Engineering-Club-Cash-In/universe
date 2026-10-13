@@ -49,6 +49,18 @@ export const nexaTokenUsers = pgTable("nexa_token_users", {
   creditoIdx: uniqueIndex("nexa_token_users_credito_idx").on(table.creditoId),
 }));
 
+// Reserva durable del identificador de un crédito antes de pedirle a Nexa el
+// token user (migración 0007): un reintento reusa el mismo identificador y
+// Nexa lo rechaza como repetido en vez de crear un segundo usuario huérfano.
+export const nexaTokenUserReservations = pgTable("nexa_token_user_reservations", {
+  creditoId: integer("credito_id").primaryKey(),
+  identifier: varchar("identifier", { length: 9 }).notNull().unique(),
+  // Respuesta de Nexa guardada antes que nexa_token_users (ver migración 0007).
+  nexaUserId: integer("nexa_user_id"),
+  token: varchar("token", { length: 32 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   id: serial("id").primaryKey(),
   reference: varchar("reference", { length: 80 }).notNull().unique(),
@@ -66,6 +78,8 @@ export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   transactionId: varchar("transaction_id", { length: 120 }).notNull().default(""),
   processingStatus: processingStatus("processing_status").notNull().default("RECEIVED"),
   carteraPaymentId: integer("cartera_payment_id"),
+  // Todas las filas de pagos_credito de la boleta (carteraPaymentId es la primera).
+  carteraPaymentIds: integer("cartera_payment_ids").array(),
   failureReason: text("failure_reason"),
   rawPayload: jsonb("raw_payload").notNull(),
   payloadFingerprint: varchar("payload_fingerprint", { length: 64 }),
@@ -75,6 +89,8 @@ export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   leaseUntil: timestamp("lease_until", { withTimezone: true }),
   reviewAttemptCount: integer("review_attempt_count").notNull().default(0),
   reviewNextAttemptAt: timestamp("review_next_attempt_at", { withTimezone: true }),
+  // Cuándo salió el correo de revisión manual de este pago; NULL = no se avisó.
+  alertaCorreoEnviadaAt: timestamp("alerta_correo_enviada_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({

@@ -289,6 +289,27 @@ export const getContractTypeLabel = (contractType: string) => {
 		contrato_privado_uso_carro_usado: "Contrato Privado Uso Carro Usado",
 		contrato_privado_uso_carro_nuevo: "Contrato Privado Uso Carro Nuevo",
 		pagare: "Pagaré",
+		cobertura_gyt: "Cobertura Seguros G&T",
+		// Venta a nombre de una sociedad: firma su representante legal.
+		solicitud_compra_vehiculo_tercero_sociedad:
+			"Solicitud Compra Vehículo Tercero (Sociedad)",
+		carta_aceptacion_instalacion_gps_sociedad:
+			"Carta Aceptación Instalación GPS (Sociedad)",
+		carta_traspaso_vehiculo_rdbe_sociedad:
+			"Carta Traspaso Vehículo RDBE (Sociedad)",
+		descargo_responsabilidades_sociedad:
+			"Descargo de Responsabilidades (Sociedad)",
+		cobertura_inrexsa_sociedad: "Cobertura Placas Particulares (Sociedad)",
+		cobertura_inrexsa_comercial_sociedad:
+			"Cobertura Placas Comerciales (Sociedad)",
+		cobertura_gyt_sociedad: "Cobertura Seguros G&T (Sociedad)",
+		reconocimiento_deuda_sociedad: "Reconocimiento de Deuda (Sociedad)",
+		carta_carro_nuevo_sociedad: "Carta Carro Nuevo (Sociedad)",
+		contrato_privado_uso_sociedad: "Contrato Privado de Uso (Sociedad)",
+		pagare_unico_libre_protesto_sociedad:
+			"Pagaré Único Libre de Protesto (Sociedad)",
+		carta_emision_cheques_sociedad: "Carta Emisión de Cheques (Sociedad)",
+		garantia_mobiliaria_sociedad: "Garantía Mobiliaria (Sociedad)",
 		// Las cartas de la venta unidas en un solo documento.
 		paquete_cartas: "Cartas",
 		carta_notarial: "Carta Notarial",

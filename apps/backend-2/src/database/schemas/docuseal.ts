@@ -8,7 +8,9 @@ export const documentCategoriaEnum = docusealSchema.enum("document_categoria_enu
   "ventas",
   "inversiones",
   "inversiones_sociedad",
-  "carta_poder"
+  "carta_poder",
+  // Ventas a nombre de una sociedad: firma su representante legal.
+  "ventas_sociedad"
 ]);
 
 // 📘 ENUM de nombres de documentos
@@ -19,6 +21,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "descargo_responsabilidades",
   "cobertura_inrexsa",
   "cobertura_inrexsa_comercial",
+  "cobertura_gyt",
   "reconocimiento_deuda_feb_2025",
   "carta_carro_nuevo",
   "contrato_privado_uso_carro_nuevo",
@@ -39,6 +42,8 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "designacion_beneficiario",
   "contrato_participacion_administracion_cartera",
   "anexos_confirmacion_participacion_beneficiario",
+  "anexo1_confirmacion_participacion",
+  "anexo2_designacion_beneficiario",
   // ===== INVERSIONES SOCIEDAD =====
   "acuerdo_inversion_cash_in_sociedad",
   "carta_confirmacion_inversion_inicial_sociedad",
@@ -49,10 +54,27 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "cesion_creditos_sociedad",
   "contrato_servicios_cash_in_inversor_general_sociedad",
   "designacion_beneficiario_sociedad",
+  "contrato_participacion_administracion_cartera_sociedad",
+  "anexo1_confirmacion_participacion_sociedad",
+  "anexo2_designacion_beneficiario_sociedad",
   "carta_cube_andres",
   "carta_cube_don_alex",
   "carta_rdbe_don_alex",
-  "carta_rdbe_richard"
+  "carta_rdbe_richard",
+  // ===== VENTAS A NOMBRE DE UNA SOCIEDAD =====
+  "solicitud_compra_vehiculo_tercero_sociedad",
+  "carta_aceptacion_instalacion_gps_sociedad",
+  "carta_traspaso_vehiculo_rdbe_sociedad",
+  "descargo_responsabilidades_sociedad",
+  "cobertura_inrexsa_sociedad",
+  "cobertura_inrexsa_comercial_sociedad",
+  "cobertura_gyt_sociedad",
+  "reconocimiento_deuda_sociedad",
+  "carta_carro_nuevo_sociedad",
+  "contrato_privado_uso_sociedad",
+  "pagare_unico_libre_protesto_sociedad",
+  "carta_emision_cheques_sociedad",
+  "garantia_mobiliaria_sociedad",
 ]);
 
 // 📗 Tabla principal

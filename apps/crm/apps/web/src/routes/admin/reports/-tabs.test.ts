@@ -30,4 +30,15 @@ describe("getReportTabs", () => {
 			defaultTab: "creditos",
 		});
 	});
+
+	test("limits the investment manager to the Inversiones tab", () => {
+		expect(
+			getReportTabs({
+				canAccessClosedCreditsReport: false,
+				canAccessCobranzaReport: false,
+				canAccessInvestmentRealizedReport: true,
+				isAdmin: false,
+			}),
+		).toEqual({ tabs: ["inversiones"], defaultTab: "inversiones" });
+	});
 });

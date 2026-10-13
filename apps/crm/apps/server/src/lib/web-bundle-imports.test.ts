@@ -60,7 +60,7 @@ function archivosTs(dir: string): string[] {
 	});
 }
 
-/** Las carpetas de `server/src` que el Dockerfile de la web copia. */
+/** Las carpetas y archivos de `server/src` que el Dockerfile de la web copia. */
 function carpetasCopiadas(): string[] {
 	const dockerfile = readFileSync(DOCKERFILE, "utf8");
 	return [
@@ -97,7 +97,8 @@ describe.skipIf(!hayWeb)("imports de la web hacia el servidor", () => {
 
 		while (pendientes.length > 0) {
 			const archivo = pendientes.pop() as string;
-			if (!copiadas.some((c) => archivo.startsWith(c + sep))) {
+			// Una copia puede ser una carpeta o un archivo suelto (cui-validation.ts).
+			if (!copiadas.some((c) => archivo === c || archivo.startsWith(c + sep))) {
 				problemas.push(
 					`${relative(CRM, archivo)} entra al bundle de la web (lo importa ${origen.get(archivo)}) y el Dockerfile de la web no lo copia`,
 				);

@@ -211,7 +211,7 @@ export function OpportunityContractsCard({
 
 	return (
 		<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-			<div className="flex items-center gap-2">
+			<div className="flex flex-wrap items-center gap-2">
 				<FileSignature className="h-5 w-5 text-muted-foreground" />
 				<Label className="font-semibold text-muted-foreground text-sm">
 					Contratos Legales
@@ -481,9 +481,11 @@ function ContratoFila({
 
 	return (
 		<div className="rounded-md border bg-background p-3">
-			{/* Encabezado: qué contrato es y cómo va */}
-			<div className="flex items-start justify-between gap-3">
-				<div className="min-w-0">
+			{/* Encabezado: qué contrato es y cómo va. Las etiquetas y botones bajan
+			    de línea cuando no entran: el diálogo toma el ancho de su contenido
+			    y, en una ventana angosta, todo lo que se pasaba quedaba cortado. */}
+			<div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+				<div className="min-w-0 max-w-full">
 					<p className="truncate font-medium text-sm">
 						{contract.contractName}
 					</p>
@@ -495,7 +497,7 @@ function ContratoFila({
 						apiResponse={contract.apiResponse}
 					/>
 				</div>
-				<div className="flex shrink-0 items-center gap-2">
+				<div className="flex flex-wrap items-center gap-2">
 					<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
 					<EtiquetaVinculado apiResponse={contract.apiResponse} />
 					<EtiquetaIdentidadOmitida apiResponse={contract.apiResponse} />

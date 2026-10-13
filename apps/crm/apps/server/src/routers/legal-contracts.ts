@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
+	coDebtors,
 	leads,
 	opportunities,
 	opportunityStageHistory,
@@ -14,6 +15,7 @@ import {
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
+import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
@@ -50,10 +52,17 @@ import {
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
+	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
+import {
 	adminProcedure,
 	juridicoProcedure,
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
+import { cartasDelPaquete, PAQUETE_CARTAS } from "../lib/paquete-cartas";
 import { PERMISSIONS, ROLES } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -72,9 +81,8 @@ import {
 	terminarDeVincular,
 	vincularEnLaFila,
 } from "../lib/vincular-documento-weetrust";
+import { enviarMensajesDeCreditoNuevo } from "../services/bienvenida-credito";
 import { closeOpportunity } from "../services/close-opportunity";
-import { sendCoverageDocument } from "../services/send-coverage-document";
-import { sendWelcomeMessage } from "../services/send-welcome-message";
 import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
@@ -174,8 +182,91 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	return { contract, documentID };
 }
 
-/** El tipo que lleva selfie además del DPI: es el título que se ejecuta. */
-const RECONOCIMIENTO_DE_DEUDA = "reconocimiento_deuda_feb_2025";
+/**
+ * Por qué la batería vigente ya no es la de la oportunidad, o null.
+ *
+ * Después de enlazar pueden marcar o cambiar al representante legal, o pasar
+ * el lead a empresa: los contratos quedan con la batería o el titular de antes
+ * y aprobar los mandaría a firmar así (y el WhatsApp, que busca al firmante de
+ * hoy, no encontraría sus enlaces). Se mira al aprobar porque es la puerta por
+ * donde salen a firma, sea cual sea el cambio que los dejó viejos.
+ */
+async function motivoBateriaVigenteDesactualizada(
+	opportunityId: string,
+): Promise<string | null> {
+	const vigentes = await db
+		.select({
+			id: generatedLegalContracts.id,
+			contractType: generatedLegalContracts.contractType,
+			apiResponse: generatedLegalContracts.apiResponse,
+		})
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				contratoVigente(),
+			),
+		);
+	const tipos = vigentes.flatMap((c) =>
+		c.contractType === PAQUETE_CARTAS
+			? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+			: [c.contractType],
+	);
+
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const datos = { clientType: oportunidad?.clientType, coDeudores };
+
+	const motivo = motivoParaNoGenerar(datos, tipos);
+	if (motivo) return motivo;
+
+	// El titular de cada contrato tiene que ser el representante de hoy. En
+	// modo prueba no se puede comparar: todos los titulares tienen el correo de
+	// prueba.
+	if (!esOportunidadDeSociedad(datos) || isTestModeEnabled()) return null;
+	const representante = representanteLegalDe(datos);
+	if (vigentes.length === 0) return null;
+	const titulares = await db
+		.select({ email: contractSignatories.email })
+		.from(contractSignatories)
+		.where(
+			and(
+				inArray(
+					contractSignatories.contractId,
+					vigentes.map((c) => c.id),
+				),
+				eq(contractSignatories.role, "TITULAR"),
+			),
+		);
+	for (const titular of titulares) {
+		const cambio = motivoPorRepresentanteCambiado(representante, titular);
+		if (cambio) return cambio;
+	}
+	return null;
+}
+
+/**
+ * Los tipos que llevan selfie además del DPI: es el título que se ejecuta, el
+ * individual y el de sociedad (lo firma el representante).
+ */
+const RECONOCIMIENTOS_DE_DEUDA = [
+	"reconocimiento_deuda_feb_2025",
+	"reconocimiento_deuda_sociedad",
+];
 
 /**
  * El contrato de una oportunidad al que se le quiere vincular un documento de
@@ -243,6 +334,7 @@ async function firmantesParaVincular(
 		}
 		const { signers } = await firmantesDeLaOportunidad(
 			contract.opportunityId as string,
+			{ subidaAMano: fueSubidoAMano(contract.apiResponse) },
 		);
 		return firmantesDelContrato(contract.contractType, signers) ?? [];
 	}
@@ -1340,6 +1432,16 @@ export const legalContractsRouter = {
 					});
 				}
 
+				// Y que sean los que le tocan hoy (batería y titular de la sociedad).
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede aprobar: ${desactualizada}`,
+					});
+				}
+
 				// Actualizar la oportunidad y registrar historial en una transacción
 				await auditedTransaction(async (tx) => {
 					// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
@@ -1506,10 +1608,7 @@ export const legalContractsRouter = {
 			// entren mientras tanto esperan, en vez de dejar un contrato nuevo que
 			// esta confirmación marcaría firmado. También frena una segunda
 			// confirmación antes de que vuelva a cerrar la oportunidad en cartera-back.
-			//
-			// Devuelve el resultado de closeOpportunity: los WhatsApp automáticos de
-			// más abajo (bienvenida + seguro) dependen de `creditoId`/`numeroSifco`.
-			const closeResult = await conCandadoDeFirma(input.opportunityId, async () => {
+			const cierre = await conCandadoDeFirma(input.opportunityId, async () => {
 				const [etapaConCandado] = await db
 					.select({ porcentaje: salesStages.closurePercentage })
 					.from(opportunities)
@@ -1518,6 +1617,18 @@ export const legalContractsRouter = {
 				if (etapaConCandado?.porcentaje !== 85) {
 					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad ya fue procesada por otro usuario.",
+					});
+				}
+
+				// Lo firmado tiene que ser la batería de hoy: si algo cambió después de
+				// aprobar (el representante de la sociedad, el tipo de cliente), no se
+				// cierra con contratos de otra persona.
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede confirmar: ${desactualizada}`,
 					});
 				}
 
@@ -1555,7 +1666,17 @@ export const legalContractsRouter = {
 						});
 					}
 
-					// Marcar todos los contratos pending como signed
+					// Los contratos que están en WeeTrust NO se tocan: su estado y el de
+					// cada firmante lo pone WeeTrust (el aviso o "Actualizar estado").
+					// Pasar al 90% es una decisión de ventas, no una firma: marcarlos
+					// firmados le inventaba la firma al representante legal, que firma
+					// después, y la ficha decía "firmado" con el documento pendiente
+					// allá (01-oct-2026). Cuando WeeTrust lo complete, el CRM lo pasa a
+					// firmado solo.
+					//
+					// Sí se marcan los que no tienen documento en WeeTrust (en papel, o
+					// los de antes): para ellos esta confirmación es lo único que dice
+					// que se firmaron.
 					const confirmados = await tx
 						.update(generatedLegalContracts)
 						.set({
@@ -1566,6 +1687,7 @@ export const legalContractsRouter = {
 							and(
 								eq(generatedLegalContracts.opportunityId, input.opportunityId),
 								eq(generatedLegalContracts.status, "pending"),
+								isNull(generatedLegalContracts.weetrustDocumentId),
 								// Un original reclamado por un reemplazo ya no es el vigente:
 								// confirmarlo le inventaba firmas a un documento descartado.
 								isNull(generatedLegalContracts.replacedByContractId),
@@ -1573,8 +1695,8 @@ export const legalContractsRouter = {
 						)
 						.returning({ id: generatedLegalContracts.id });
 
-					// Y a cada firmante: si no, la ficha mostraba el contrato firmado con
-					// todas sus personas todavía "pendiente".
+					// Y a cada firmante de esos: si no, la ficha mostraba el contrato
+					// firmado con todas sus personas todavía "pendiente".
 					if (confirmados.length > 0) {
 						await tx
 							.update(contractSignatories)
@@ -1614,7 +1736,7 @@ export const legalContractsRouter = {
 						fromStageId: opportunity.stageId,
 						toStageId: targetStage.id,
 						changedBy: context.userId,
-						reason: "Contratos firmados confirmados - Avanza a formalización",
+						reason: MOTIVO_CONTRATOS_FIRMADOS,
 					});
 				});
 
@@ -1634,33 +1756,15 @@ export const legalContractsRouter = {
 				redirectPage: "analysis_90_details",
 			});
 
-			// ── WhatsApp automáticos al cliente (bienvenida + documento de seguro) ─
-			// DEPENDEN de que el crédito se haya creado en cartera: solo disparamos
-			// si `closeResult.creditoId` existe (id que cartera devuelve al crearlo).
-			// Si la creación en cartera falla, closeOpportunity devuelve
-			// success=false y el handler ya lanzó error más arriba, así que ni
-			// llegamos acá; este guard lo deja explícito y a prueba de que se mueva
-			// el bloque a futuro.
-			// Disparos fire-and-forget: nunca bloquean ni rompen el cierre si
-			// WhatsApp falla (eso sí es independiente). Ambos servicios son
-			// autocontenidos y desacoplados: para moverlos a otro punto del flujo
-			// (p. ej. al 100% / desembolso) basta con reubicar este bloque completo.
-			if (closeResult.creditoId) {
-				void sendWelcomeMessage({
+			// Bienvenida al cliente con su cuenta Nexa (y el documento del seguro,
+			// apagado por env). Sin esperar: un WhatsApp o Nexa caídos no pueden
+			// romper la confirmación, y el servicio nunca lanza.
+			if (cierre.creditoId && cierre.numeroSifco) {
+				void enviarMensajesDeCreditoNuevo({
 					opportunityId: input.opportunityId,
 					userId: context.userId,
-					numeroSifco: closeResult.numeroSifco,
-				}).catch((e) => console.error("[Bienvenida] fallo no bloqueante:", e));
-
-				// Mensaje con el PDF de cobertura/instrucciones del seguro. Sin
-				// `toTestPhone` → va al teléfono real del lead (respeta el test-mode
-				// global si estuviera activo).
-				void sendCoverageDocument({
-					opportunityId: input.opportunityId,
-					userId: context.userId,
-				}).catch((e) =>
-					console.error("[MensajeAdjunto] fallo no bloqueante:", e),
-				);
+					numeroSifco: cierre.numeroSifco,
+				});
 			}
 
 			return {
@@ -2434,7 +2538,7 @@ export const legalContractsRouter = {
 					esperados,
 					// Lo mismo que pide el generador cuando lo emite él: selfie con
 					// prueba de vida en el reconocimiento de deuda, DPI en el resto.
-					contract.contractType === RECONOCIMIENTO_DE_DEUDA
+					RECONOCIMIENTOS_DE_DEUDA.includes(contract.contractType)
 						? "Selfie y DPI"
 						: "DPI",
 				),

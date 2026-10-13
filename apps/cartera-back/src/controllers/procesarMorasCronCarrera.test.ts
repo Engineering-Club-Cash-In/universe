@@ -48,6 +48,7 @@ const selectChain = () => {
     innerJoin: () => b,
     leftJoin: () => b,
     where: () => b,
+    for: () => b, // candado del crédito al abrir la desactivación
     then: (res: any, rej: any) =>
       Promise.resolve(estado.resultados.shift() ?? []).then(res, rej),
   };
@@ -119,7 +120,7 @@ const clientFalso = {
   }),
 };
 
-mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
+mock.module("../database", () => ({ db: dbFalsa, client: clientFalso, lockPool: {} }));
 mock.module("../utils/structuredLogger", () => ({
   emitCreditLateFee: (p: any) => estado.emitidos.push(p),
 }));

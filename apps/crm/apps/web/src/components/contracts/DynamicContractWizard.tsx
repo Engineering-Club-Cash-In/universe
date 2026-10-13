@@ -22,6 +22,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { esCartaDeCheques } from "server/src/lib/contract-disbursement";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import {
 	esCartaUnificable,
@@ -96,6 +97,15 @@ interface Document {
  * pintaban todos como una caja de texto y no había forma de cargarlos.
  */
 type FieldType = "text" | "select" | "list";
+
+/**
+ * Género de quien firma, elegido en pantalla cuando RENAP no responde.
+ *
+ * Sin RENAP y sin género en el CRM (inversiones no tiene lead) no se podía
+ * elegir la plantilla y el flujo se cortaba. Desde 2026-09 RENAP rechaza la
+ * llave, así que esto es lo que deja seguir.
+ */
+export type GeneroSinRenap = "hombre" | "mujer";
 
 interface FieldOption {
 	value: string;
@@ -296,6 +306,14 @@ interface GenerationResultWithData extends GenerationResult {
 
 interface DynamicContractWizardProps {
 	documentTypes: DocumentType[];
+	/**
+	 * Documentos que se muestran pero no se pueden elegir, con el motivo.
+	 *
+	 * Ventas lo usa para la carta de cobertura: va la de la aseguradora de la
+	 * cotización, y las de la otra quedan a la vista deshabilitadas para que
+	 * jurídico sepa cuál va a salir.
+	 */
+	documentosDeshabilitados?: Record<string, string>;
 	crmData: CRMData;
 	/**
 	 * La oportunidad de venta, cuando los contratos son de ventas.
@@ -308,6 +326,8 @@ interface DynamicContractWizardProps {
 	onGetDocumentsByDpi: (
 		dpi: string,
 		documentNames: string[],
+		/** El que eligieron en pantalla cuando RENAP no responde. */
+		genero?: GeneroSinRenap,
 	) => Promise<{
 		success: boolean;
 		/** null cuando RENAP no tiene a la persona: se usan los datos del CRM */
@@ -463,6 +483,18 @@ const DATE_DERIVED_FIELDS = [
 ];
 
 // Helper function to convert a number group to words (for DPI)
+const VEINTIS_CON_TILDE: Record<number, string> = {
+	2: "veintidós",
+	3: "veintitrés",
+	6: "veintiséis",
+};
+
+/** En los montos va "veintiún" ("veintiún mil quetzales"), que también es aguda. */
+const VEINTIS_CON_TILDE_APOCOPADOS: Record<number, string> = {
+	...VEINTIS_CON_TILDE,
+	1: "veintiún",
+};
+
 function dpiGroupToWords(numStr: string): string {
 	const num = Number.parseInt(numStr, 10);
 	if (Number.isNaN(num)) return numStr;
@@ -557,7 +589,9 @@ function dpiGroupToWords(numStr: string): string {
 				if (u === 0) {
 					result += result ? ` ${decenas[d]}` : decenas[d];
 				} else if (d === 2) {
-					result += result ? ` veinti${unidades[u]}` : `veinti${unidades[u]}`;
+					// Las agudas llevan tilde: veintidós, veintitrés, veintiséis.
+					const veinti = VEINTIS_CON_TILDE[u] ?? `veinti${unidades[u]}`;
+					result += result ? ` ${veinti}` : veinti;
 				} else {
 					result += result
 						? ` ${decenas[d]} y ${unidades[u]}`
@@ -638,7 +672,9 @@ export function moneyToWords(amount: number): string {
 			if (u === 0) {
 				resultado += decenas[d];
 			} else if (d === 2) {
-				resultado += "VEINTI" + unidades[u];
+				resultado += (
+					VEINTIS_CON_TILDE_APOCOPADOS[u] ?? `veinti${unidades[u]}`
+				).toUpperCase();
 			} else {
 				resultado += decenas[d] + " Y " + unidades[u];
 			}
@@ -897,6 +933,7 @@ function CampoDeLista({
 
 export function DynamicContractWizard({
 	documentTypes,
+	documentosDeshabilitados,
 	crmData,
 	opportunityId,
 	leadId,
@@ -963,6 +1000,13 @@ export function DynamicContractWizard({
 	const [renapData, setRenapData] = useState<RenapData | null>(null);
 	// RENAP no encontró el DPI: los campos se llenaron solo con datos del CRM
 	const [renapUnavailable, setRenapUnavailable] = useState(false);
+	// RENAP no respondió y no hay género de dónde sacarlo: se pide en pantalla
+	const [pedirGenero, setPedirGenero] = useState(false);
+	const [generoSinRenap, setGeneroSinRenap] = useState<GeneroSinRenap | "">("");
+	// El género del cliente: el del CRM, y si no hay, el elegido en pantalla
+	const generoDelCliente =
+		crmData.cliente.genero ||
+		(generoSinRenap === "mujer" ? "F" : generoSinRenap === "hombre" ? "M" : "");
 	const [documents, setDocuments] = useState<Document[]>([]);
 	const [fields, setFields] = useState<Field[]>([]);
 	const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -1260,7 +1304,7 @@ export function DynamicContractWizard({
 				entidad,
 				agencia,
 			} = crmData;
-			const gender = cliente.genero || renapInfo?.gender || "M";
+			const gender = generoDelCliente || renapInfo?.gender || "M";
 
 			fieldsData.forEach((field) => {
 				const fieldKeyLower = field.key?.toLowerCase();
@@ -1268,10 +1312,13 @@ export function DynamicContractWizard({
 				// === CLIENTE DATA (from CRM) ===
 				switch (fieldKeyLower) {
 					case "nombrecompleto":
-						if (cliente.nombreCompleto) {
+						// RENAP aunque el CRM no traiga nombre: en una sociedad no lo trae
+						// (el de la compra es el de la empresa) y RENAP responde con el
+						// del representante, que es quien firma.
+						if (renapInfo || cliente.nombreCompleto) {
 							initialValues[field.key] = renapInfo
 								? `${renapInfo.firstName} ${renapInfo.secondName} ${renapInfo.thirdName} ${renapInfo.firstLastName} ${renapInfo.secondLastName} ${renapInfo.marriedLastName}`.toUpperCase()
-								: cliente.nombreCompleto.toUpperCase();
+								: (cliente.nombreCompleto ?? "").toUpperCase();
 							return;
 						}
 						break;
@@ -1701,7 +1748,7 @@ export function DynamicContractWizard({
 				return { ...initialValues, ...valoresIniciales, ...editadosAMano };
 			});
 		},
-		[crmData, numberToText, moneyToText, valoresIniciales],
+		[crmData, numberToText, moneyToText, valoresIniciales, generoDelCliente],
 	);
 
 	/**
@@ -1751,6 +1798,7 @@ export function DynamicContractWizard({
 			const response = await onGetDocumentsByDpi(
 				crmData.cliente.dpi,
 				selectedDocuments,
+				generoSinRenap || undefined,
 			);
 			if (response.success) {
 				trajoCampos = true;
@@ -1817,6 +1865,15 @@ export function DynamicContractWizard({
 			}
 		} catch (error: any) {
 			console.error("Error fetching documents data:", error);
+			// RENAP no respondió y no hay género en el CRM: en vez de cortar, se
+			// pide en pantalla y se vuelve a intentar con él.
+			if (error?.data?.pideGenero) {
+				setPedirGenero(true);
+				toast.warning(
+					"RENAP no respondió. Elegí el género de quien firma y dale Continuar.",
+				);
+				return false;
+			}
 			const message = error?.message || "Error al obtener datos de documentos";
 			toast.error(message);
 		} finally {
@@ -2026,8 +2083,25 @@ export function DynamicContractWizard({
 		};
 	}, [relevantFields, fieldHasValue]);
 
+	const motivoDeshabilitado = (docEnum: string) =>
+		documentosDeshabilitados?.[docEnum];
+	const documentosElegibles = documentTypes.filter(
+		(doc) => !motivoDeshabilitado(doc.enum),
+	);
+
+	// Lo deshabilitado puede llegar después de que lo eligieran (la aseguradora
+	// se lee aparte): se suelta.
+	useEffect(() => {
+		if (!documentosDeshabilitados) return;
+		setSelectedDocuments((prev) => {
+			const siguen = prev.filter((d) => !documentosDeshabilitados[d]);
+			return siguen.length === prev.length ? prev : siguen;
+		});
+	}, [documentosDeshabilitados]);
+
 	// Toggle document selection
 	const handleDocumentToggle = (docEnum: string) => {
+		if (motivoDeshabilitado(docEnum)) return;
 		setSelectedDocuments((prev) =>
 			prev.includes(docEnum)
 				? prev.filter((d) => d !== docEnum)
@@ -2035,29 +2109,30 @@ export function DynamicContractWizard({
 		);
 	};
 
+	const allSelected =
+		documentosElegibles.length > 0 &&
+		documentosElegibles.every((doc) => selectedDocuments.includes(doc.enum));
+
 	// Select/deselect all documents
 	const handleSelectAll = () => {
-		if (selectedDocuments.length === documentTypes.length) {
+		if (allSelected) {
 			setSelectedDocuments([]);
 		} else {
-			setSelectedDocuments(documentTypes.map((doc) => doc.enum));
+			setSelectedDocuments(documentosElegibles.map((doc) => doc.enum));
 		}
 	};
 
-	const allSelected =
-		documentTypes.length > 0 &&
-		selectedDocuments.length === documentTypes.length;
-
-	const canProceedStep1 = selectedDocuments.length > 0;
+	// Si RENAP no respondió, sin género no hay plantilla: se espera a que lo elijan
+	const canProceedStep1 =
+		selectedDocuments.length > 0 && (!pedirGenero || Boolean(generoSinRenap));
 	const vendorDeclarationSelected = selectedDocuments.includes(
 		"declaracion_vendedor",
 	);
 	const vendorGenderSelected =
 		fieldValues.genderVendedor === "male" ||
 		fieldValues.genderVendedor === "female";
-	const unsupportedDisbursementCount = selectedDocuments.includes(
-		"carta_emision_cheques",
-	)
+	// La individual y la de sociedad salen de las mismas filas de cheques.
+	const unsupportedDisbursementCount = selectedDocuments.some(esCartaDeCheques)
 		? (crmData.desembolso?.omitidosPorMoneda ?? 0)
 		: 0;
 	const canProceedStep2 =
@@ -2172,7 +2247,7 @@ export function DynamicContractWizard({
 
 				// Determine combined gender: if any male (lead or co-debtor), use "male"
 				// Only use "female" if ALL are female
-				const leadIsMale = crmData.cliente.genero !== "F";
+				const leadIsMale = generoDelCliente !== "F";
 				const anyCoDebtorIsMale = crmData.coDebtors?.some(
 					(cd) => cd.gender === "male" || !cd.gender,
 				);
@@ -2493,37 +2568,53 @@ export function DynamicContractWizard({
 						</CardHeader>
 						<CardContent>
 							<div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-								{documentTypes.map((docType) => (
-									<div
-										key={docType.enum}
-										className={`flex cursor-pointer items-center space-x-3 rounded-lg border p-4 transition-colors ${
-											selectedDocuments.includes(docType.enum)
-												? "border-primary bg-primary/5"
-												: "border-border hover:border-primary/50"
-										}`}
-										role="button"
-										tabIndex={0}
-										onClick={() => handleDocumentToggle(docType.enum)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" || e.key === " ") {
-												e.preventDefault();
-												handleDocumentToggle(docType.enum);
-											}
-										}}
-									>
-										<Checkbox
-											id={docType.enum}
-											checked={selectedDocuments.includes(docType.enum)}
-											onCheckedChange={() => handleDocumentToggle(docType.enum)}
-										/>
-										<Label
-											htmlFor={docType.enum}
-											className="flex-1 cursor-pointer font-medium text-sm"
+								{documentTypes.map((docType) => {
+									const motivo = motivoDeshabilitado(docType.enum);
+									return (
+										<div
+											key={docType.enum}
+											className={`flex items-center space-x-3 rounded-lg border p-4 transition-colors ${
+												motivo
+													? "cursor-not-allowed border-border opacity-60"
+													: selectedDocuments.includes(docType.enum)
+														? "cursor-pointer border-primary bg-primary/5"
+														: "cursor-pointer border-border hover:border-primary/50"
+											}`}
+											role="button"
+											tabIndex={motivo ? -1 : 0}
+											aria-disabled={Boolean(motivo)}
+											onClick={() => handleDocumentToggle(docType.enum)}
+											onKeyDown={(e) => {
+												if (e.key === "Enter" || e.key === " ") {
+													e.preventDefault();
+													handleDocumentToggle(docType.enum);
+												}
+											}}
 										>
-											{docType.label}
-										</Label>
-									</div>
-								))}
+											<Checkbox
+												id={docType.enum}
+												checked={selectedDocuments.includes(docType.enum)}
+												disabled={Boolean(motivo)}
+												onCheckedChange={() =>
+													handleDocumentToggle(docType.enum)
+												}
+											/>
+											<div className="flex-1">
+												<Label
+													htmlFor={docType.enum}
+													className={`font-medium text-sm ${motivo ? "cursor-not-allowed" : "cursor-pointer"}`}
+												>
+													{docType.label}
+												</Label>
+												{motivo && (
+													<p className="mt-0.5 text-muted-foreground text-xs">
+														{motivo}
+													</p>
+												)}
+											</div>
+										</div>
+									);
+								})}
 							</div>
 							{documentTypes.length === 0 && (
 								<p className="text-center text-muted-foreground">
@@ -2538,6 +2629,37 @@ export function DynamicContractWizard({
 									firmante. Si la oportunidad ya tiene cartas unidas, éstas las
 									reemplazan enteras: tienen que venir todas las que ya estaban.
 								</p>
+							)}
+							{/* RENAP no respondió y no hay género de dónde sacarlo: se elige
+							    acá para escoger la plantilla y redactar el contrato. */}
+							{pedirGenero && (
+								<div className="mt-4 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+									<p className="text-amber-900 text-sm dark:text-amber-300">
+										RENAP no respondió. Elegí el género de quien firma para
+										seguir sin RENAP; los demás datos los revisás en el paso
+										siguiente.
+									</p>
+									<div className="flex flex-wrap gap-2">
+										{(
+											[
+												["hombre", "Masculino"],
+												["mujer", "Femenino"],
+											] as const
+										).map(([valor, etiqueta]) => (
+											<Button
+												key={valor}
+												type="button"
+												size="sm"
+												variant={
+													generoSinRenap === valor ? "default" : "outline"
+												}
+												onClick={() => setGeneroSinRenap(valor)}
+											>
+												{etiqueta}
+											</Button>
+										))}
+									</div>
+								</div>
 							)}
 						</CardContent>
 					</Card>

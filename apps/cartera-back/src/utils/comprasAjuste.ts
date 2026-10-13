@@ -197,6 +197,52 @@ export async function obtenerSumaComprasMesAnterior(
 }
 
 /**
+ * `fecha_completada` de la compra de cartera MÁS RECIENTE completada en el MES
+ * ANTERIOR a `fechaPeriodo`, o null si no hay.
+ *
+ * El interés proporcional la usa como día de entrada: una ampliación completada en
+ * el mes en curso re-sella `fecha_inicio_participacion` (completeEspejo) y con eso
+ * se pierde el día en que entró la compra del mes anterior.
+ *
+ * A diferencia de `obtenerSumaComprasMesAnterior`, NO cae a `updated_at`: la
+ * facturación (cofidi) lo reescribe al cerrar `pendiente_facturar` y movería el día
+ * de entrada a otro mes. Una compra sin `fecha_completada` no aporta fecha y el
+ * llamador sigue con `fecha_inicio_participacion`, como antes.
+ */
+export async function obtenerFechaCompraMesAnterior(
+  credito_id: number,
+  inversionista_id: number,
+  fechaPeriodo: Date,
+): Promise<Date | null> {
+  const mes = fechaPeriodo.getMonth();
+  const anio = fechaPeriodo.getFullYear();
+  const mesAnterior = mes === 0 ? 11 : mes - 1;
+  const anioMesAnterior = mes === 0 ? anio - 1 : anio;
+
+  const inicioMesAnterior = new Date(anioMesAnterior, mesAnterior, 1);
+  const inicioMesActual = new Date(anio, mes, 1);
+
+  const [compra] = await db
+    .select({ fecha_completada: compras_credito_inversionista.fecha_completada })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        eq(compras_credito_inversionista.status, "completado"),
+        // Los NULL quedan fuera solos: ninguna comparación con NULL es verdadera.
+        gte(compras_credito_inversionista.fecha_completada, inicioMesAnterior),
+        lt(compras_credito_inversionista.fecha_completada, inicioMesActual),
+      ),
+    )
+    .orderBy(desc(compras_credito_inversionista.fecha_completada))
+    .limit(1);
+
+  return compra?.fecha_completada ?? null;
+}
+
+/**
  * Suma los monto_aportado de las compras de cartera (tipo_operacion = 'compra_cartera',
  * status = 'completado') confirmadas durante el MES ACTUAL de `fechaPeriodo`
  * (filtradas por `updated_at`).

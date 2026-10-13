@@ -101,6 +101,7 @@ mock.module("./latefee", () => ({
   // importa estos dos de latefee; el mock global tiene que exponerlos o el
   // módulo no enlaza. Los créditos de estos tests no están EN_RECUPERACION.
   STATUS_EN_RECUPERACION: "EN_RECUPERACION",
+  STATUS_EN_JURIDICO: "EN_JURIDICO",
   contarCuotasVencidasReales: mock(() => Promise.resolve(0)),
 }));
 

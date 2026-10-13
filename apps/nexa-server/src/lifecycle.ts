@@ -2,8 +2,10 @@ import type { AppConfig } from "./config";
 import type { AppDependencies } from "./dependencies";
 import { defaultScheduler, type Scheduler } from "./jobs/scheduler";
 import { runApplicationWorkerOnce } from "./payments/application-worker";
+import { DbCarteraEventTokenUserRepository } from "./db/cartera-events-repository";
 import { runReviewWorkerOnce } from "./payments/review-worker";
 import { runStatementEnrichmentOnce } from "./payments/statement-enrichment";
+import { createResendSender, missingEmailAlertConfig, sendManualReviewEmailAlerts, type EmailSender } from "./alerts/manual-review-email";
 
 export type LifecycleScheduler = Scheduler;
 
@@ -12,7 +14,13 @@ const MANUAL_REVIEW_ALERT_INTERVAL_SECONDS = 300;
 export function startPaymentLifecycle(
   config: AppConfig,
   deps: AppDependencies,
-  options: { scheduler?: Scheduler; logError?: (message: string) => void; logInfo?: (message: string) => void } = {},
+  options: {
+    scheduler?: Scheduler;
+    logError?: (message: string) => void;
+    logInfo?: (message: string) => void;
+    // Solo para pruebas: reemplaza el envío por Resend.
+    sendEmail?: EmailSender;
+  } = {},
 ) {
   if (config.deploymentMode === "integration") return () => {};
 
@@ -25,6 +33,14 @@ export function startPaymentLifecycle(
     backoffSeconds: config.workerBackoffSeconds,
     maxBackoffSeconds: config.workerMaxBackoffSeconds,
   };
+  const missingEmailConfig = missingEmailAlertConfig(config);
+  const sendEmail = missingEmailConfig.length
+    ? null
+    : options.sendEmail ?? createResendSender({ apiKey: config.resendApiKey!, domain: config.emailDomain! });
+  if (!sendEmail) {
+    // Una sola vez por proceso: el scanner sigue, solo con logs.
+    logInfo(JSON.stringify({ scope: "nexa-reconciliation", event: "manual_review_email_disabled", missing: missingEmailConfig }));
+  }
   type ReconciliationAlert =
     | Awaited<ReturnType<typeof deps.transactions.listReconciliationAlerts>>[number]
     | Awaited<ReturnType<typeof deps.transactions.listManualReviewAlerts>>[number];
@@ -53,6 +69,11 @@ export function startPaymentLifecycle(
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
       cartera: deps.cartera,
+      tokenRepair: {
+        findTokenUser: (identifier, prefix) => deps.transactions.findTokenUser(identifier, prefix),
+        cartera: deps.cartera,
+        cancelledTokenUsers: new DbCarteraEventTokenUserRepository(deps.db),
+      },
       ...workerOptions,
     }), scheduler, logError),
     startWorkerLoop("Review worker", config.workerIntervalSeconds, () => runReviewWorkerOnce({
@@ -70,9 +91,18 @@ export function startPaymentLifecycle(
     }, scheduler, logError),
     startWorkerLoop("Manual review scanner", MANUAL_REVIEW_ALERT_INTERVAL_SECONDS, async () => {
       const now = new Date();
-      logAlerts(await deps.transactions.listManualReviewAlerts(
-        new Date(now.getTime() - MANUAL_REVIEW_ALERT_INTERVAL_SECONDS * 1_000),
-      ));
+      const staleBefore = new Date(now.getTime() - MANUAL_REVIEW_ALERT_INTERVAL_SECONDS * 1_000);
+      logAlerts(await deps.transactions.listManualReviewAlerts(staleBefore));
+      if (sendEmail) {
+        await sendManualReviewEmailAlerts({
+          repository: deps.transactions,
+          send: sendEmail,
+          recipients: config.nexaAlertasCorreos,
+          staleBefore,
+          now,
+          logError,
+        });
+      }
       return false;
     }, scheduler, logError, true),
   ];

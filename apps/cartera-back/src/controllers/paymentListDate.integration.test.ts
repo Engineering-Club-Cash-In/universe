@@ -47,6 +47,6 @@ integration("payment list preserves Nexa calendar dates and legacy Guatemala dat
   ]);
   // Projection and all five payment-date filters must share this expression.
   const listing = source.slice(source.indexOf("export async function getPagosConInversionistas"), source.indexOf("fechaPago: r.fechaPago"));
-  expect(listing.match(/\$\{fechaPagoLocalSQL\}/g)?.length).toBe(5);
+  expect(listing.match(/\$\{fechaPagoLocal\}/g)?.length).toBe(5);
   expect(listing).toContain("TO_CHAR(${sql.raw(fechaPagoLocalSQL)},");
 });

@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { NexaClient } from "../nexa/client";
-import type { CarteraPaymentClient } from "../payments/cartera-client";
+import type { CarteraPaymentClient, CarteraTokenClient } from "../payments/cartera-client";
 import { pollPaymentTokenDate } from "../payments/poller";
-import { createTokenUserForCredit } from "../tokens/service";
+import { createTokenUserForCredit, TokenUserReconciliationRequiredError } from "../tokens/service";
+import { deactivateIfCreditCancelled } from "../tokens/credit-cancelled";
+import type { CarteraEventTokenUsers } from "./cartera-events";
 import type { DbPaymentTransactionRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "../db/repositories";
 
 const createTokenUserSchema = z.object({
@@ -22,9 +24,11 @@ const mockCreditSchema = z.object({
 export function createAdminRouter(deps: {
   adminApiKey: string;
   nexa: NexaClient;
-  cartera: CarteraPaymentClient;
+  cartera: CarteraPaymentClient & CarteraTokenClient;
   paymentTokens: PaymentTokenRepository;
   tokenUsers: DbTokenUserRepository;
+  // Desactiva el token user local si cartera responde credit_cancelled.
+  cancelledTokenUsers: CarteraEventTokenUsers;
   transactions: DbPaymentTransactionRepository;
   pollRuns: PollRunRepository;
   mockCredits?: {
@@ -60,6 +64,21 @@ export function createAdminRouter(deps: {
 
   router.post("/token-users", async (c) => {
     const body = createTokenUserSchema.parse(await c.req.json());
+    // Idempotente por crédito: cartera reintenta la creación (si Nexa o la red
+    // fallan a medias) y un segundo usuario en Nexa para el mismo crédito no
+    // se podría guardar (credito_id es UNIQUE) y quedaría huérfano allá.
+    const existing = await deps.tokenUsers.findByCreditoId(body.creditoId);
+    if (existing) {
+      return c.json({
+        paymentTokenId: existing.paymentTokenId,
+        creditoId: existing.creditoId,
+        identifier: existing.identifier,
+        description: existing.description,
+        nationalId: existing.nationalId,
+        nexaUserId: existing.nexaUserId,
+        token: existing.token,
+      }, 200);
+    }
     const paymentToken = await deps.paymentTokens.findActive();
     if (!paymentToken) return c.json({ error: "No active Nexa payment token. Run /tokens/bootstrap first." }, 409);
 
@@ -70,8 +89,28 @@ export function createAdminRouter(deps: {
         repository: deps.tokenUsers,
         nexa: deps.nexa,
       });
-      return c.json(created, 201);
+      let carteraRegistration: string;
+      try {
+        const registered = await deps.cartera.registerNexaToken({
+          creditoId: created.creditoId,
+          token: created.token,
+          identifier: created.identifier,
+          nexaUserId: created.nexaUserId,
+        });
+        carteraRegistration = registered.status === "REJECTED"
+          ? `REJECTED:${registered.reason}`
+          : registered.status;
+        await deactivateIfCreditCancelled(registered, created.creditoId, deps.cancelledTokenUsers);
+      } catch {
+        // El token ya existe en Nexa: no se deshace. Queda pendiente y lo repara
+        // el script tokens:sync-cartera, que es idempotente.
+        carteraRegistration = "PENDING";
+      }
+      return c.json({ ...created, carteraRegistration }, 201);
     } catch (error) {
+      if (error instanceof TokenUserReconciliationRequiredError) {
+        return c.json({ error: error.message, code: "token_user_requires_reconciliation" }, 409);
+      }
       const message = error instanceof Error ? error.message : String(error);
       if (message.startsWith("Nexa rejected token user")) {
         return c.json({ error: message }, 422);

@@ -595,14 +595,15 @@ describe("reset credit atomic closing payment wiring", () => {
 		const transactionStart = resetCredit?.indexOf(
 			"db.transaction(async (tx) => {",
 		);
-		const transactionEnd = resetCredit?.indexOf("\n    });", transactionStart);
+		// La tx va envuelta en conCandadoDePagos: cierra con "}));".
+		const transactionEnd = resetCredit?.indexOf("\n    }));", transactionStart);
 		const transaction =
 			resetCredit &&
 			transactionStart !== undefined &&
 			transactionStart >= 0 &&
 			transactionEnd !== undefined &&
 			transactionEnd >= 0
-				? resetCredit.slice(transactionStart, transactionEnd + 7)
+				? resetCredit.slice(transactionStart, transactionEnd + 8)
 				: undefined;
 		if (!transaction || !resetCredit || transactionStart === undefined)
 			throw new Error("No se encontró la transacción de cierre");
@@ -619,6 +620,8 @@ describe("reset credit atomic closing payment wiring", () => {
 		];
 
 		expect(transaction).toContain('.for("update")');
+		// Puede terminar en CANCELADO: serializa con los pagos Nexa (binding lock).
+		expect(beforeTransaction).toMatch(/conCandadoDePagos\(creditId, \(\) => $/);
 		expect(
 			transaction.slice(0, lockIndex).match(/await\s+(?:db|tx)\s*\./g),
 		).toHaveLength(1);

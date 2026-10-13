@@ -27,6 +27,7 @@ import {
 	Settings,
 	ShieldBan,
 	ShieldCheck,
+	Stamp,
 	Target,
 	TrendingUp,
 	UserCircle,
@@ -479,6 +480,12 @@ export default function Header() {
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
+										<Link to="/juridico/carta-poder" className="cursor-pointer">
+											<Stamp className="mr-2 h-4 w-4" />
+											Carta poder
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
 										<Link to="/juridico/dashboard" className="cursor-pointer">
 											<LayoutDashboard className="mr-2 h-4 w-4" />
 											Dashboard
@@ -567,7 +574,8 @@ export default function Header() {
 						{session &&
 							userRole &&
 							(PERMISSIONS.canAccessAdmin(userRole) ||
-								PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+								PERMISSIONS.canAccessClosedCreditsReport(userRole) ||
+								PERMISSIONS.canAccessInvestmentRealizedReport(userRole)) && (
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
@@ -905,6 +913,13 @@ function MobileNav({
 											Gestión jurídica
 										</Link>
 										<Link
+											to="/juridico/carta-poder"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Stamp />
+											Carta poder
+										</Link>
+										<Link
 											to="/juridico/dashboard"
 											className={MOBILE_LINK_CLASS}
 										>
@@ -951,7 +966,10 @@ function MobileNav({
 
 								{userRole &&
 									(PERMISSIONS.canAccessAdmin(userRole) ||
-										PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+										PERMISSIONS.canAccessClosedCreditsReport(userRole) ||
+										PERMISSIONS.canAccessInvestmentRealizedReport(
+											userRole,
+										)) && (
 										<MobileSection label="Admin">
 											{PERMISSIONS.canAccessAdmin(userRole) && (
 												<Link to="/admin/users" className={MOBILE_LINK_CLASS}>

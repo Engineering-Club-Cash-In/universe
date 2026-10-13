@@ -181,6 +181,8 @@ async function revertir({
     reverseCapitalPayment: mock(() =>
       Promise.resolve(undefined),
     ) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+    // Pago manual: el portero Nexa no lo frena (la rama Nexa se prueba en nexaPagoNoReversible.test.ts).
+    rechazarSiPagoEsNexa: (async () => undefined) as unknown as ReversePaymentDependencies["rechazarSiPagoEsNexa"],
     withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
       fn()) as ReversePaymentDependencies["withCreditLock"],
     refrescarProyeccion: mock(() =>

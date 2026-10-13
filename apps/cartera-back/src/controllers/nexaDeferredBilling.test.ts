@@ -18,7 +18,7 @@ test("slow fiscal work returns pending immediately, coalesces retries, and persi
   });
   for (let i = 0; i < 8; i++) {
     expect(await runner.run(1, [99])).toMatchObject({ kind: "pending" });
-    expect(classifyNexaClaim(event, false, request, runner.isRunning(1))).toEqual({ kind: "applied", paymentId: 99, billingStatus: "PENDING" });
+    expect(classifyNexaClaim(event, false, request, runner.isRunning(1))).toEqual({ kind: "applied", paymentId: 99, eventId: 1, billingStatus: "PENDING" });
   }
   expect(invoices).toBe(1);
   expect(completed).toBe(0);

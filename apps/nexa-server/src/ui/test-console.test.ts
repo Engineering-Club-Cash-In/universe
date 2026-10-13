@@ -28,6 +28,7 @@ describe("test console UI", () => {
       enableTestUi: true,
       nodeEnv: "test",
       deploymentMode: "integration",
+      nexaAlertasCorreos: [],
     }, {} as never);
 
     const response = await app.request("/ui");

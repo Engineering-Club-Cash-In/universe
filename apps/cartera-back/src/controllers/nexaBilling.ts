@@ -45,11 +45,14 @@ export async function runNexaBilling({
   enabled: boolean;
   eventId: number;
   paymentIds: number[];
-  start: (eventId: number) => Promise<boolean>;
+  start: (eventId: number) => Promise<boolean | "payment_deleted">;
   invoice: (paymentId: number) => Promise<{ status: number; response: unknown }>;
 }): Promise<NexaBillingOutcome> {
   if (!enabled) return { kind: "pending", code: "billing_not_enabled" };
-  if (!await start(eventId)) {
+  const started = await start(eventId);
+  // El pago se borró al marcar CAIDO: nada se emitió y nada se emitirá. "pending" no mueve el evento.
+  if (started === "payment_deleted") return { kind: "pending", code: "billing_payment_deleted" };
+  if (!started) {
     return { kind: "unknown", code: "billing_state_conflict" };
   }
   let billedAny = false;

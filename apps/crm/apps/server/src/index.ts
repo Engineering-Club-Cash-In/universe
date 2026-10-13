@@ -82,6 +82,7 @@ import {
 	msHastaProximoRecordatorio,
 } from "./jobs/pagalo-reminder";
 import { iniciarSchedulerVerificacionSat } from "./jobs/sat-verificacion-scheduler";
+import { recuperarBienvenidasPendientes } from "./jobs/bienvenida-pendiente";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import {
@@ -107,6 +108,7 @@ import {
 import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
+import { cartaPoderRouter } from "./routers/carta-poder";
 import { metasAsesorCobrosRouter } from "./routers/cobros-asesor";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
 import { fichaCobrosAccionesRouter } from "./routers/ficha-cobros-acciones";
@@ -140,6 +142,7 @@ import { tareasCobrosRouter } from "./routers/tareas-cobros";
 import { visitasCobrosRouter } from "./routers/visitas-cobros";
 import { wialonRouter } from "./routers/wialon";
 import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
+import carteraEstadoCuentaRouter from "./routes/cartera-estado-cuenta";
 import externalContractsRouter from "./routes/external-contracts";
 import weetrustStatusRouter from "./routes/weetrust-status";
 import { carteraBackClient } from "./services/cartera-back-client";
@@ -315,6 +318,9 @@ app.route(
 	"/api/investor-contracts/compra-aceptada",
 	carteraCompraAceptadaRouter,
 );
+// Cartera pide los teléfonos del cliente y el envío por WhatsApp del estado de
+// cuenta que emite al solicitar la cancelación de un crédito.
+app.route("/api/cartera/estado-cuenta", carteraEstadoCuentaRouter);
 
 const handler = new RPCHandler(
 	Object.assign(
@@ -347,6 +353,7 @@ const handler = new RPCHandler(
 		supervisionCobrosRouter,
 		metasAsesorCobrosRouter,
 		fichaCobrosAccionesRouter,
+		cartaPoderRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -789,6 +796,14 @@ app.post("/api/upload-opportunity-document", async (c) => {
 			!!opportunity[0]?.vehicleId,
 			opportunity[0]?.vehicleId || undefined,
 		);
+		if (documentType === "clausula_consentimiento") {
+			const { ejecutarBuroAlVeinteSiCorresponde } = await import(
+				"./services/opportunity-validations"
+			);
+			void ejecutarBuroAlVeinteSiCorresponde({ opportunityId, userId }).catch(
+				(error) => console.error("Error al iniciar Buró tras cargar consentimiento:", error),
+			);
+		}
 
 		return c.json(newDocument);
 	} catch (error) {
@@ -1238,6 +1253,116 @@ app.post("/api/accounting/upload-boleta", async (c) => {
 	}
 });
 
+// Endpoint para que cartera-back mande el recibo de un pago por WhatsApp
+// (CB-113), cuando el pago queda aplicado. Servidor-a-servidor: autenticado
+// con API key, no con sesión de usuario.
+app.post(
+	"/api/notifications/recibo-pago-whatsapp",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		try {
+			const body = await c.req.json<{
+				pagoId?: number;
+				numeroSifco?: string;
+				reciboUrl?: string;
+				imagenUrl?: string | null;
+				clienteNombre?: string;
+				numeroCuota?: number | null;
+				asesorNombre?: string | null;
+				asesorTelefono?: string | null;
+			}>();
+
+			if (!body.pagoId || !body.numeroSifco || !body.reciboUrl) {
+				return c.json(
+					{
+						success: false,
+						error:
+							"Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
+					},
+					400,
+				);
+			}
+
+			const { sendReciboPagoWhatsapp } = await import(
+				"./services/send-recibo-pago-whatsapp"
+			);
+
+			const resultado = await sendReciboPagoWhatsapp({
+				pagoId: body.pagoId,
+				numeroSifco: body.numeroSifco,
+				reciboUrl: body.reciboUrl,
+				imagenUrl: body.imagenUrl ?? null,
+				clienteNombre: body.clienteNombre ?? "",
+				numeroCuota: body.numeroCuota ?? null,
+				asesorNombre: body.asesorNombre ?? null,
+				asesorTelefono: body.asesorTelefono ?? null,
+			});
+
+			return c.json(
+				{ success: resultado.sent, ...resultado },
+				resultado.sent ? 200 : 502,
+			);
+		} catch (err: any) {
+			console.error("[ReciboPagoWhatsapp] Error:", err);
+			return c.json(
+				{ success: false, error: err.message || "Error al enviar el recibo" },
+				500,
+			);
+		}
+	},
+);
+
+// Endpoint para que cartera-back le mande al cliente su cuenta Nexa en un
+// mensaje aparte, cuando la cuenta se creó después de la bienvenida (su
+// barrido de reintentos). Servidor-a-servidor con la API key de cartera.
+app.post(
+	"/api/notifications/cuenta-nexa-whatsapp",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		try {
+			const body = await c.req.json<{
+				numeroSifco?: string;
+				token?: string;
+				clienteNombre?: string | null;
+				asesorNombre?: string | null;
+				asesorTelefono?: string | null;
+			}>();
+
+			if (!body.numeroSifco || !body.token || !/^\d+$/.test(body.token)) {
+				return c.json(
+					{
+						success: false,
+						error: "Los campos 'numeroSifco' y 'token' (solo dígitos) son requeridos",
+					},
+					400,
+				);
+			}
+
+			const { sendCuentaNexaWhatsapp } = await import(
+				"./services/send-cuenta-nexa-whatsapp"
+			);
+			const resultado = await sendCuentaNexaWhatsapp({
+				numeroSifco: body.numeroSifco,
+				token: body.token,
+				clienteNombre: body.clienteNombre ?? null,
+				asesorNombre: body.asesorNombre ?? null,
+				asesorTelefono: body.asesorTelefono ?? null,
+			});
+
+			return c.json(
+				{ success: resultado.sent, ...resultado },
+				resultado.sent ? 200 : 502,
+			);
+		} catch (err: any) {
+			console.error("[CuentaNexaWhatsapp] Error:", err);
+			return c.json(
+				{ success: false, error: err.message || "Error al enviar la cuenta Nexa" },
+				500,
+			);
+		}
+	},
+);
+
 // Endpoint para que cartera-back cree notificaciones de pago de inversionistas
 app.post("/api/notifications/pay-investors", async (c) => {
 	try {
@@ -1287,63 +1412,6 @@ app.post("/api/notifications/pay-investors", async (c) => {
 		return c.json({ error: err.message || "Error al crear notificación" }, 500);
 	}
 });
-
-// Endpoint para que cartera-back mande el recibo de un pago por WhatsApp
-// (CB-113), justo después de facturarlo. Servidor-a-servidor: autenticado
-// con API key, no con sesión de usuario.
-app.post(
-	"/api/notifications/recibo-pago-whatsapp",
-	autenticarNotificacionesCarteraBack,
-	async (c) => {
-		try {
-			const body = await c.req.json<{
-				pagoId?: number;
-				numeroSifco?: string;
-				reciboUrl?: string;
-				clienteNombre?: string;
-				numeroCuota?: number | null;
-				asesorNombre?: string | null;
-				asesorTelefono?: string | null;
-			}>();
-
-			if (!body.pagoId || !body.numeroSifco || !body.reciboUrl) {
-				return c.json(
-					{
-						success: false,
-						error:
-							"Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
-					},
-					400,
-				);
-			}
-
-			const { sendReciboPagoWhatsapp } = await import(
-				"./services/send-recibo-pago-whatsapp"
-			);
-
-			const resultado = await sendReciboPagoWhatsapp({
-				pagoId: body.pagoId,
-				numeroSifco: body.numeroSifco,
-				reciboUrl: body.reciboUrl,
-				clienteNombre: body.clienteNombre ?? "",
-				numeroCuota: body.numeroCuota ?? null,
-				asesorNombre: body.asesorNombre ?? null,
-				asesorTelefono: body.asesorTelefono ?? null,
-			});
-
-			return c.json(
-				{ success: resultado.sent, ...resultado },
-				resultado.sent ? 200 : 502,
-			);
-		} catch (err: any) {
-			console.error("[ReciboPagoWhatsapp] Error:", err);
-			return c.json(
-				{ success: false, error: err.message || "Error al enviar el recibo" },
-				500,
-			);
-		}
-	},
-);
 
 // El límite es más alto que el de la bandeja del CRM (100) porque acá el
 // consumidor es cartera-back paginando para armar un XLSX/PDF, no un navegador
@@ -2193,6 +2261,15 @@ const JOBS_PROGRAMADOS = {
 	 *  aplicadas. Default `false` FIJO — exige `GPS_UBICACIONES_ENABLED=true`
 	 *  explícito. */
 	ubicacionesClaveGps: process.env.GPS_UBICACIONES_ENABLED === "true",
+	/** ⚠️ Le escribe al CLIENTE por WhatsApp: barrido de bienvenidas perdidas
+	 *  (jobs/bienvenida-pendiente.ts, cada 30 min) y, de paso, le pide a
+	 *  cartera la cuenta Nexa del crédito.
+	 *
+	 *  Mismo criterio que `recordatorioPagalo` y `recordatoriosConvenio`: atado
+	 *  a `isTestModeEnabled()`, FALLA CERRADO. Además tiene su propio gate,
+	 *  `BIENVENIDA_WHATSAPP_ENABLED=true` (el mismo del disparo al 90%): sin él
+	 *  el barrido no hace nada aunque esté prendido acá. */
+	bienvenidaPendiente: isTestModeEnabled(),
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
@@ -2439,6 +2516,22 @@ function programarRecordatorioDePagalo(): void {
 
 if (JOBS_PROGRAMADOS.recordatorioPagalo) {
 	programarRecordatorioDePagalo();
+}
+
+// Bienvenidas al cliente que se perdieron (el CRM se reinició mientras el
+// disparo del cierre al 90% esperaba a cartera o WhatsApp) - cada 30 minutos.
+// Con BIENVENIDA_WHATSAPP_ENABLED apagado no hace nada. Ver
+// jobs/bienvenida-pendiente.ts.
+if (JOBS_PROGRAMADOS.bienvenidaPendiente) {
+	setInterval(
+		() => {
+			recuperarBienvenidasPendientes().catch(console.error);
+		},
+		30 * 60 * 1000,
+	);
+	setTimeout(() => {
+		recuperarBienvenidasPendientes().catch(console.error);
+	}, 60_000);
 }
 
 if (HAY_JOBS_ACTIVOS) {

@@ -130,7 +130,7 @@ const fakeDb: any = {
 
 // `db` es la base falsa para poder ejercitar también el camino SIN `dbClient`,
 // que es el que usa producción (createPaymentAgreement).
-mock.module("../database", () => ({ db: fakeDb, client: {} }));
+mock.module("../database", () => ({ db: fakeDb, client: {}, lockPool: {} }));
 
 const { desactivarMoraPorConvenio } = await import("./latefee");
 const { moras_credito, moras_historial } = await import(

@@ -32,6 +32,7 @@ const thenable = (obtener: () => any) => {
       return builder;
     },
     returning: () => builder,
+    for: () => builder, // candado del crédito al abrir la desactivación
     then: (res: any, rej: any) => Promise.resolve().then(obtener).then(res, rej),
   };
   return builder;
@@ -73,7 +74,7 @@ const clientFalso = {
   }),
 };
 
-mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
+mock.module("../database", () => ({ db: dbFalsa, client: clientFalso, lockPool: {} }));
 // ledger vacío = créditos existentes arrancan de cero
 mock.module("../utils/moraPagadaPorCuota", () => ({
   moraPagadaPorCuota: async () => new Map(),

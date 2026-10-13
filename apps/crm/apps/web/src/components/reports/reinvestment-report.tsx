@@ -5,6 +5,7 @@ import {
 	ChevronsLeft,
 	ChevronsRight,
 	Download,
+	Loader2,
 } from "lucide-react";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
 	getReconciliationPresentation,
 	getReinvestmentModeLabel,
 	getReportState,
+	getUnclassifiedReconciliationNote,
 	REGISTERED_ZERO_ACTIVITY_COPY,
 } from "@/lib/reports/reinvestment-report";
 import type { ReinversionLiquidacionesResponse } from "@/lib/reports/scenario";
@@ -50,6 +52,7 @@ export function ReinvestmentReport({
 	periodLabel,
 	onRetry,
 	onExportInvestors,
+	isExporting = false,
 }: {
 	data?: unknown;
 	isPending: boolean;
@@ -57,6 +60,7 @@ export function ReinvestmentReport({
 	periodLabel: string;
 	onRetry: () => void;
 	onExportInvestors?: () => void;
+	isExporting?: boolean;
 }) {
 	const [showInvestors, setShowInvestors] = useState(false);
 	const [detail, setDetail] = useState<DetailKey | null>(null);
@@ -123,6 +127,7 @@ export function ReinvestmentReport({
 		model.reconciled,
 		model,
 	);
+	const unclassifiedNote = getUnclassifiedReconciliationNote(model);
 	const showSecondaryDetails = canRenderSecondaryDetails(state);
 	const currency = (value: number | string) =>
 		new Intl.NumberFormat("es-GT", {
@@ -184,6 +189,19 @@ export function ReinvestmentReport({
 							{currency(model.totals.distributed)} flujo liquidado
 						</span>
 					</div>
+				) : reconciliation === "unclassified" ? (
+					<div className="mt-3 space-y-1 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-emerald-900 text-sm">
+						<div className="flex flex-wrap items-center gap-2">
+							<CheckCircle2 className="h-4 w-4" />
+							<strong>Conciliación verificada:</strong>
+							<span>
+								{currency(model.totals.paid)} pagado +{" "}
+								{currency(model.totals.reinvested)} reinvertido ={" "}
+								{currency(model.totals.distributed)} flujo liquidado
+							</span>
+						</div>
+						<p>Incluye: {unclassifiedNote.join(", ")}.</p>
+					</div>
 				) : (
 					<output className="mt-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
 						<AlertCircle className="h-4 w-4 shrink-0" />
@@ -205,8 +223,16 @@ export function ReinvestmentReport({
 					</div>
 					<div className="flex flex-wrap gap-2">
 						{onExportInvestors ? (
-							<Button variant="outline" onClick={onExportInvestors}>
-								<Download className="mr-2 h-4 w-4" />
+							<Button
+								variant="outline"
+								onClick={onExportInvestors}
+								disabled={isExporting}
+							>
+								{isExporting ? (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								) : (
+									<Download className="mr-2 h-4 w-4" />
+								)}
 								Exportar Excel
 							</Button>
 						) : null}

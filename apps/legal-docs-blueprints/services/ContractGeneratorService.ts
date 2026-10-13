@@ -236,6 +236,48 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar cobertura de Seguros G&T (no tiene género, solo singular y plural)
+    this.registerTemplate({
+      type: ContractType.COBERTURA_GYT,
+      templateFilename: 'cobertura_gyt/CARTA_COBERTURA_GYT.docx',
+      templateFilenameFemale: 'cobertura_gyt/CARTA_COBERTURA_GYT.docx',
+      templateFilenamePlural: 'cobertura_gyt/CARTA_COBERTURA_GYT_PLURAL.docx',
+      templateFilenameFemalePlural: 'cobertura_gyt/CARTA_COBERTURA_GYT_PLURAL.docx',
+      description: 'Carta de cobertura Seguros G&T',
+      requiredFields: [
+        'nombreCompleto',
+      ]
+    });
+
+    // Ventas a nombre de una sociedad: firma el representante legal. La
+    // plantilla va por el género del representante; las coberturas no tienen
+    // género. No hay versión con codeudores.
+    const ventasSociedad: Array<[ContractType, string, boolean]> = [
+      [ContractType.SOLICITUD_COMPRA_VEHICULO_SOCIEDAD, 'Solicitud de compra de vehículo por instrucción de tercero (sociedad)', true],
+      [ContractType.CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD, 'Carta de aceptación de instalación de GPS (sociedad)', true],
+      [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD, 'Carta de solicitud de traspaso de vehículo a RDBE (sociedad)', true],
+      [ContractType.CARTA_CARRO_NUEVO_SOCIEDAD, 'Carta para carro nuevo (sociedad)', true],
+      [ContractType.CARTA_EMISION_CHEQUES_SOCIEDAD, 'Carta de emisión de cheques (sociedad)', true],
+      [ContractType.DESCARGO_RESPONSABILIDADES_SOCIEDAD, 'Descargo de responsabilidades de vehículo (sociedad)', true],
+      [ContractType.COBERTURA_INREXSA_SOCIEDAD, 'Carta de cobertura placas particulares (sociedad)', false],
+      [ContractType.COBERTURA_INREXSA_COMERCIAL_SOCIEDAD, 'Carta de cobertura placas comerciales (sociedad)', false],
+      [ContractType.COBERTURA_GYT_SOCIEDAD, 'Carta de cobertura Seguros G&T (sociedad)', false],
+      [ContractType.PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD, 'Pagaré único libre de protesto (sociedad)', true],
+      [ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD, 'Reconocimiento de deuda (sociedad)', true],
+      [ContractType.GARANTIA_MOBILIARIA_SOCIEDAD, 'Garantía mobiliaria (sociedad)', true],
+      [ContractType.CONTRATO_PRIVADO_USO_SOCIEDAD, 'Contrato privado de uso de vehículo (sociedad)', true],
+    ];
+    for (const [type, description, conGenero] of ventasSociedad) {
+      const base = `ventas_sociedad/${type}/${type}`;
+      this.registerTemplate({
+        type,
+        templateFilename: `${base}.docx`,
+        templateFilenameFemale: conGenero ? `${base}-mujer.docx` : `${base}.docx`,
+        description,
+        requiredFields: ['nombreCompleto', 'nombreSociedad'],
+      });
+    }
+
     // Registrar pagaré único libre de protesto
     this.registerTemplate({
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
@@ -404,6 +446,23 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // Los mismos anexos, cada uno en su documento (mismo texto para hombre y mujer).
+    this.registerTemplate({
+      type: ContractType.ANEXO1_CONFIRMACION_PARTICIPACION,
+      templateFilename: 'inversiones/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      templateFilenameFemale: 'inversiones/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      description: 'Anexo 1 - Confirmación de Participación',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.ANEXO2_DESIGNACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      description: 'Anexo 2 - Designación de Beneficiario',
+      requiredFields: []
+    });
+
     // ===== INVERSIONES SOCIEDAD =====
     this.registerTemplate({
       type: ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
@@ -475,6 +534,32 @@ export class ContractGeneratorService {
       templateFilename: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
       templateFilenameFemale: 'inversiones_Sociedad/anexo7/designacion_beneficiarios.docx',
       description: 'Anexo 7 - Designación de Beneficiarios (Sociedad)',
+      requiredFields: []
+    });
+
+    // El género es el del representante de la sociedad.
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera_hombre.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/contrato_participacion_administracion_cartera/contrato_participacion_administracion_cartera_mujer.docx',
+      description: 'Contrato de Participación y Administración de Cartera - Sociedad',
+      requiredFields: []
+    });
+
+    // Los anexos de sociedad no cambian con el género del representante.
+    this.registerTemplate({
+      type: ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo1_confirmacion_participacion/anexo1_confirmacion_participacion.docx',
+      description: 'Anexo 1 - Confirmación de Participación (Sociedad)',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD,
+      templateFilename: 'inversiones_Sociedad/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      templateFilenameFemale: 'inversiones_Sociedad/anexo2_designacion_beneficiario/anexo2_designacion_beneficiario.docx',
+      description: 'Anexo 2 - Designación de Beneficiario (Sociedad)',
       requiredFields: []
     });
 

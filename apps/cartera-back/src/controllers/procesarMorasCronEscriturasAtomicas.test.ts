@@ -154,7 +154,7 @@ const clientFalso = {
   }),
 };
 
-mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
+mock.module("../database", () => ({ db: dbFalsa, client: clientFalso, lockPool: {} }));
 mock.module("../utils/structuredLogger", () => ({
   emitCreditLateFee: (p: any) => estado.emitidos.push(p),
 }));

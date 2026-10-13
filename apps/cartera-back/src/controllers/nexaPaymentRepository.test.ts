@@ -40,7 +40,7 @@ test("claim usa el evento persistente para devolver el paymentId aplicado", asyn
       { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z" },
       { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
     ),
-  ).resolves.toEqual({ kind: "applied", paymentId: 17 });
+  ).resolves.toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
 });
 
 test("new client replays a legacy-body applied event by stable compatibility fingerprint", async () => {
@@ -78,7 +78,7 @@ test("new client replays a legacy-body applied event by stable compatibility fin
       legacyPayloadHash: legacyHash,
       now: new Date(),
     },
-  )).resolves.toEqual({ kind: "applied", paymentId: 17 });
+  )).resolves.toEqual({ kind: "applied", paymentId: 17, eventId: 7 });
   expect(insertedFingerprints).toEqual([semanticFingerprint]);
 });
 
@@ -146,6 +146,33 @@ test("claim bloquea un reintento cuyo evento quedó en manual_review", async () 
     { externalReference: "qa-payment-uncertain", creditoId: 10, amount: "10.00", currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z" },
     { nonce: "nonce-retry", payloadHash: "a".repeat(64), now: new Date() },
   )).resolves.toEqual({ kind: "manual_review" });
+});
+
+test("claim pasa a manual_review un evento que quedó processing y entrega su id para reconciliar la condonación", async () => {
+  const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
+  const updates: unknown[][] = [];
+  const responses = [
+    { rows: [{ nonce_claimed: true, id: null }] },
+    {
+      rows: [{
+        id: 7, credito_id: 10, amount: "10.00", currency: "GTQ",
+        payload_hash: "a".repeat(64), status: "processing", pago_id: null,
+      }],
+    },
+    { rows: [{ id: 7 }] },
+  ];
+
+  await expect(claimNexaPaymentEvent(
+    {
+      query: async (text, values) => {
+        if (text.includes("SET status = 'manual_review'")) updates.push(values ?? []);
+        return responses.shift() ?? { rows: [] };
+      },
+    },
+    { externalReference: "qa-payment-murio", creditoId: 10, amount: "10.00", currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z" },
+    { nonce: "nonce-murio", payloadHash: "a".repeat(64), now: new Date() },
+  )).resolves.toEqual({ kind: "manual_review", processingEventId: 7 });
+  expect(updates).toHaveLength(1);
 });
 
 test("claim rechaza en una sola operación un nonce ya consumido", async () => {

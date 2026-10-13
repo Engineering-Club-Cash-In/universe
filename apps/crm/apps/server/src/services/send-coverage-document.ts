@@ -7,10 +7,10 @@
  * archivo (URL fija); lo único dinámico es el texto.
  *
  * Mismo diseño que `send-welcome-message.ts`: autocontenido, desacoplado
- * (recibe solo `opportunityId` + `userId`) y nunca lanza error al caller. Hoy se
- * dispara desde un botón de prueba en oportunidades; mañana se llamará en el
- * cierre del crédito (junto al de bienvenida) — SOLO se reubica la llamada, la
- * lógica es la misma.
+ * (recibe solo `opportunityId` + `userId`) y nunca lanza error al caller. Se
+ * dispara en el cierre del crédito, después de la bienvenida
+ * (`bienvenida-credito.ts`), y está APAGADO (COBERTURA_SEGURO_ENABLED) hasta
+ * que mercadeo entregue el PDF.
  *
  * NO depende de cartera: nombre y vehículo salen del CRM local, así se puede
  * probar sobre cualquier oportunidad (tenga o no crédito creado).
@@ -70,11 +70,12 @@ function construirTexto(
 	placa: string | null,
 	vin: string | null,
 ): string {
-	const saludo = nombre ? `Hola ${nombre}` : "Hola";
+	// Registro formal (usted), como el resto de los textos de cobros.
+	const saludo = nombre ? `Estimado(a) ${nombre}` : "Estimado(a) cliente";
 	let vehiculo = "";
-	if (placa) vehiculo = ` Tu vehículo registrado tiene placa ${placa}.`;
-	else if (vin) vehiculo = ` Tu vehículo registrado tiene VIN ${vin}.`;
-	return `${saludo}, te compartimos la cobertura y las instrucciones de tu seguro en el documento adjunto.${vehiculo} Cualquier duda, escribinos por acá.`;
+	if (placa) vehiculo = ` Su vehículo registrado tiene placa ${placa}.`;
+	else if (vin) vehiculo = ` Su vehículo registrado tiene VIN ${vin}.`;
+	return `${saludo}, le compartimos en el documento adjunto la cobertura y las instrucciones de su seguro.${vehiculo} Ante cualquier consulta, puede escribirnos por este medio.`;
 }
 
 export async function sendCoverageDocument(
@@ -83,8 +84,12 @@ export async function sendCoverageDocument(
 	const { opportunityId, userId } = params;
 
 	try {
-		// 0. Sin URL de documento configurada, no se envía nada (se omite y se
-		//    registra). Es una condición esperada, no un error.
+		// 0. Apagado hasta que mercadeo entregue el PDF: solo se envía con
+		//    COBERTURA_SEGURO_ENABLED="true" Y una URL de documento configurada.
+		//    Es una condición esperada, no un error.
+		if (process.env.COBERTURA_SEGURO_ENABLED !== "true") {
+			return { sent: false, skipped: true, reason: "deshabilitado" };
+		}
 		if (!DOCUMENTO_URL) {
 			console.log(
 				`${LOG_PREFIX} COBERTURA_SEGURO_PDF_URL no definida; no se envía documento`,

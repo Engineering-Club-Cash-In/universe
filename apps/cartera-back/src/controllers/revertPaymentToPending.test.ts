@@ -56,6 +56,8 @@ const revertPaymentToPending = createRevertPaymentToPending({
   voidInvoice: voidInvoice as unknown as Dependencies["voidInvoice"],
   setCapitalSource: mock(() => Promise.resolve()) as unknown as Dependencies["setCapitalSource"],
   emitTerminal: (event) => emitted.push(event),
+  // Pago manual: el portero Nexa no lo frena (la rama Nexa se prueba en nexaPagoNoReversible.test.ts).
+  rechazarSiPagoEsNexa: (async () => undefined) as unknown as Dependencies["rechazarSiPagoEsNexa"],
   withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
     fn()) as Dependencies["withCreditLock"],
 });

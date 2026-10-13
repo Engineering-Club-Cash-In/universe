@@ -40,7 +40,7 @@ describe("construirMensajeDocumento", () => {
 				telefono: "5555-0000",
 			}),
 		).toBe(
-			"Ana, te compartimos la tarjeta de circulación de tu Toyota Hilux 2020, placas P123ABC en el documento adjunto. Cualquier duda, llama a tu asesor Luis al 5555-0000.",
+			"Ana, le compartimos la tarjeta de circulación de su Toyota Hilux 2020, placas P123ABC en el documento adjunto. Ante cualquier consulta, comuníquese con su asesor Luis al 5555-0000.",
 		);
 	});
 	test("seguro sin nombre ni vehículo usa el crédito", () => {
@@ -52,7 +52,7 @@ describe("construirMensajeDocumento", () => {
 				"S-1",
 			),
 		).toBe(
-			"Te compartimos la información del seguro del vehículo de tu crédito S-1 en el documento adjunto. Cualquier duda, comunícate con tu asesor.",
+			"Le compartimos la información del seguro del vehículo de su crédito S-1 en el documento adjunto. Ante cualquier consulta, comuníquese con su asesor.",
 		);
 	});
 });

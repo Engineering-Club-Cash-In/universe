@@ -50,6 +50,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { BuroSummaryCard } from "@/components/buro-summary-card";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
@@ -2894,6 +2895,16 @@ function RouteComponent() {
 										</div>
 									)}
 
+								{userProfile.data?.role &&
+									PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+									userProfile.data.role !== "juridico" &&
+									(selectedOpportunity.stage?.closurePercentage ?? 0) >= 20 && (
+										<BuroSummaryCard
+											opportunityId={selectedOpportunity.id}
+											open={isDetailsDialogOpen}
+										/>
+									)}
+
 								{/* Disbursement Notes */}
 								{selectedOpportunity.status === "won" &&
 									disbursementNotesQuery.data?.notes && (
@@ -3055,6 +3066,7 @@ function RouteComponent() {
 								<CoDebtorsView
 									opportunityId={selectedOpportunity.id}
 									opportunity={selectedOpportunity}
+									clientType={selectedOpportunity.lead?.clientType}
 								/>
 							</TabsContent>
 

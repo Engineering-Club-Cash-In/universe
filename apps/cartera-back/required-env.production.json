@@ -20,9 +20,12 @@
 		{ "key": "CUBE_USER", "runtime": true },
 		{ "key": "EMAIL_ASSETS_BASE_URL", "runtime": true },
 		{ "key": "EMAIL_DOMAIN", "runtime": true },
+		{ "key": "ESTADO_CUENTA_ENLACE_BASE_URL", "runtime": true },
 		{ "key": "JWT_REFRESH_SECRET", "runtime": true },
 		{ "key": "JWT_SECRET", "runtime": true },
 
+		{ "key": "NEXA_CARTERA_EVENTS_SECRET", "runtime": true },
+		{ "key": "NEXA_SERVER_URL", "runtime": true },
 		{ "key": "PORT", "runtime": true },
 		{ "key": "PORTAL_PROVISIONING_SECRET", "runtime": true },
 		{ "key": "R2_ACCESS_KEY_ID", "runtime": true },

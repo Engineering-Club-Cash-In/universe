@@ -11,16 +11,22 @@
  *  - Recibe SOLO `opportunityId` + `userId` (el `numeroSifco` es opcional; si no
  *    viene se resuelve desde `opportunities.numeroSifco`, que `closeOpportunity`
  *    ya dejó seteado). Así se puede disparar desde donde sea — hoy al 90% (al
- *    confirmar contratos firmados), mañana al 100% (desembolso) o manual — sin
- *    tocar este servicio.
+ *    confirmar contratos firmados, desde `bienvenida-credito.ts`), mañana al
+ *    100% (desembolso) o manual — sin tocar este servicio.
  *  - Nunca lanza error al caller: devuelve un resultado y loguea. Un fallo de
  *    WhatsApp jamás debe romper el flujo de cierre de la oportunidad.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
+import { bienvenidasCredito } from "../db/schema/cobros-send-logs";
 import { leads, opportunities } from "../db/schema/crm";
-import { interpolar, PLANTILLAS_MENSAJES } from "../lib/cobros-plantillas";
+import {
+	agregarCuentaNexaABienvenida,
+	interpolar,
+	PLANTILLAS_MENSAJES,
+	seguroPorAseguradora,
+} from "../lib/cobros-plantillas";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { primerTelefono } from "../lib/phone-utils";
@@ -38,6 +44,8 @@ export interface SendWelcomeMessageParams {
 	userId: string;
 	/** Si no se pasa, se resuelve desde `opportunities.numeroSifco`. */
 	numeroSifco?: string;
+	/** Token de la cuenta Nexa; si viene, la bienvenida lo incluye. */
+	cuentaNexa?: string | null;
 }
 
 export interface SendWelcomeMessageResult {
@@ -70,6 +78,60 @@ function resolverDiaPago(
 	return fallbackDia ? String(fallbackDia) : "";
 }
 
+type ReservaBienvenida = "nueva" | "ya_enviada" | "en_curso";
+
+/**
+ * Reserva la bienvenida automática del crédito antes de llamar a WhatsApp
+ * (tabla `bienvenidas_credito`, migración 0048). Solo una nueva o una fallida
+ * se manda; una enviada o en curso no, así dos procesos del CRM (disparo y
+ * barrido, o dos instancias) no la mandan dos veces.
+ */
+async function reservarBienvenida(
+	numeroSifco: string,
+): Promise<ReservaBienvenida> {
+	const [tomada] = await db
+		.insert(bienvenidasCredito)
+		.values({ numeroCreditoSifco: numeroSifco, estado: "enviando" })
+		.onConflictDoUpdate({
+			target: bienvenidasCredito.numeroCreditoSifco,
+			set: {
+				estado: "enviando",
+				intentos: sql`${bienvenidasCredito.intentos} + 1`,
+				actualizadoAt: new Date(),
+			},
+			setWhere: eq(bienvenidasCredito.estado, "fallida"),
+		})
+		.returning({ sifco: bienvenidasCredito.numeroCreditoSifco });
+	if (tomada) return "nueva";
+	const [actual] = await db
+		.select({ estado: bienvenidasCredito.estado })
+		.from(bienvenidasCredito)
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco))
+		.limit(1);
+	// Un "enviando" que quedó sin cerrar (proceso caído) no se reenvía: no se
+	// sabe si llegó, y una bienvenida repetida es peor que una perdida.
+	return actual?.estado === "enviada" ? "ya_enviada" : "en_curso";
+}
+
+async function cerrarBienvenida(
+	numeroSifco: string,
+	estado: "enviada" | "fallida",
+): Promise<void> {
+	await db
+		.update(bienvenidasCredito)
+		.set({ estado, actualizadoAt: new Date() })
+		.where(eq(bienvenidasCredito.numeroCreditoSifco, numeroSifco));
+}
+
+/** Deps inyectables solo para tests — en producción no se pasa nada. */
+export interface SendWelcomeMessageDeps {
+	reservar?: (numeroSifco: string) => Promise<ReservaBienvenida>;
+	cerrar?: (
+		numeroSifco: string,
+		estado: "enviada" | "fallida",
+	) => Promise<void>;
+}
+
 /**
  * Envía el mensaje de bienvenida del crédito recién creado.
  * Idempotencia: NO se aplica guarda — el crédito se cierra una sola vez. El log
@@ -77,8 +139,11 @@ function resolverDiaPago(
  */
 export async function sendWelcomeMessage(
 	params: SendWelcomeMessageParams,
+	deps: SendWelcomeMessageDeps = {},
 ): Promise<SendWelcomeMessageResult> {
 	const { opportunityId, userId } = params;
+	const reservar = deps.reservar ?? reservarBienvenida;
+	const cerrar = deps.cerrar ?? cerrarBienvenida;
 
 	try {
 		// 0. Habilitado por env: solo se envía si BIENVENIDA_WHATSAPP_ENABLED="true".
@@ -103,6 +168,7 @@ export async function sendWelcomeMessage(
 				leadPhone: leads.phone,
 				numeroSifco: opportunities.numeroSifco,
 				diaPagoMensual: opportunities.diaPagoMensual,
+				insuranceProvider: opportunities.insuranceProvider,
 			})
 			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -122,8 +188,11 @@ export async function sendWelcomeMessage(
 			return { sent: false, error: "Crédito sin numeroSifco" };
 		}
 
+		// El modo prueba se resuelve ANTES de exigir teléfono: con TEST_MESSAGE
+		// todo va al número de prueba, aunque la oportunidad no tenga uno válido.
 		const telefono = primerTelefono(row.leadPhone);
-		if (!telefono) {
+		const testMode = isTestModeEnabled();
+		if (!telefono && !testMode) {
 			console.log(
 				`${LOG_PREFIX} Crédito ${numeroSifco} sin teléfono válido; se omite`,
 			);
@@ -134,9 +203,10 @@ export async function sendWelcomeMessage(
 		//    cuotas). Justo tras crearlo, el primer GET es cache-miss → datos frescos.
 		const credito = await carteraBackClient.getCredito(numeroSifco);
 
-		// 3. Armar variables de la plantilla. La bienvenida solo usa clienteNombre,
-		//    fechaPago, cuotaMensual, nombreAsesor y telefonoAsesor; el resto va en
-		//    blanco (la interpolación reemplaza vacíos por "").
+		// 3. Armar variables de la plantilla. La bienvenida usa clienteNombre,
+		//    fechaPago, cuotaMensual, nombreAsesor, la aseguradora del cliente (si
+		//    no, a un cliente de GYT le saldría Seguros Universales) y la cuenta
+		//    Nexa; el resto va en blanco (la interpolación reemplaza vacíos por "").
 		const variables = {
 			clienteNombre: credito.usuario?.nombre ?? "",
 			fechaPago: resolverDiaPago(credito.cuotasPendientes, row.diaPagoMensual),
@@ -148,6 +218,8 @@ export async function sendWelcomeMessage(
 			cuotasAtraso: 0,
 			telefonoAsesor: credito.asesor?.telefono ?? "",
 			nombreAsesor: credito.asesor?.nombre ?? "",
+			expectativaMora: "",
+			...seguroPorAseguradora(row.insuranceProvider),
 		};
 
 		const plantilla = PLANTILLAS_MENSAJES.find(
@@ -160,17 +232,39 @@ export async function sendWelcomeMessage(
 			return { sent: false, error: "Plantilla de bienvenida no encontrada" };
 		}
 
-		const mensaje = interpolar(plantilla.cuerpo, variables);
+		// La cuenta Nexa la agrega solo este envío automático; la plantilla
+		// compartida (envío manual) no la lleva.
+		const mensaje = agregarCuentaNexaABienvenida(
+			interpolar(plantilla.cuerpo, variables),
+			params.cuentaNexa,
+		);
 
 		// 4. Test-mode + envío con la MISMA función que usa "Enviar Directo".
-		const testMode = isTestModeEnabled();
-		const telefonoDestino = testMode ? getTestPhone() : telefono;
+		const telefonoDestino = testMode ? getTestPhone() : (telefono as string);
+
+		// Reserva atómica del crédito: con dos procesos del CRM a la vez, solo
+		// uno manda la bienvenida.
+		const reserva = await reservar(numeroSifco);
+		if (reserva !== "nueva") {
+			console.log(
+				`${LOG_PREFIX} Bienvenida de ${numeroSifco} ${reserva === "ya_enviada" ? "ya enviada" : "en curso en otro proceso"}; no se repite`,
+			);
+			return { sent: false, skipped: true, reason: reserva };
+		}
 
 		const result = await sendWhatsappTemplate({
 			phone: telefonoDestino,
 			message: mensaje,
 			logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 		});
+		try {
+			await cerrar(numeroSifco, result.success ? "enviada" : "fallida");
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.error(
+				`${LOG_PREFIX} No se pudo cerrar la reserva de ${numeroSifco}: ${msg}`,
+			);
+		}
 
 		// 5. Log de traza en cobros_send_logs.
 		await persistCobrosSendLog({
@@ -187,7 +281,7 @@ export async function sendWelcomeMessage(
 							...(result.providerResponse ?? {}),
 							templateMessageId: result.templateMessageId,
 							testMode,
-							realTarget: testMode ? telefono : undefined,
+							realTarget: testMode ? (telefono ?? undefined) : undefined,
 						},
 					}
 				: {
@@ -195,7 +289,9 @@ export async function sendWelcomeMessage(
 						errorMessage: result.error,
 						providerResponse: {
 							...(result.providerResponse ?? {}),
-							...(testMode ? { testMode, realTarget: telefono } : {}),
+							...(testMode
+								? { testMode, realTarget: telefono ?? undefined }
+								: {}),
 						},
 					},
 		});

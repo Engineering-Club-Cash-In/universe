@@ -37,8 +37,9 @@ export interface InversionistaQueFirma {
  * enlace de firma de la entidad.
  *
  * Qué entidades firman cada contrato sale del catálogo, no de quien llama: el
- * acuerdo y la cesión llevan a CUBE, el de servicios lleva además a RDBE, y las
- * cartas y anexos los firma sólo el inversionista.
+ * acuerdo, la cesión, el de participación y sus anexos llevan a CUBE (en los
+ * anexos, como quien recibe), el de servicios lleva además a RDBE, y las cartas
+ * las firma sólo el inversionista.
  */
 export function firmantesDeContratoDeInversion(
 	contractType: string,

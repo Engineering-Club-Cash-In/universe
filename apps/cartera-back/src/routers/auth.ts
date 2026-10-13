@@ -1,49 +1,21 @@
 import { Elysia, t } from "elysia";
-import { createAdminService, createContaService, getPlatformUsersService, loginService, updateContaUserService, verifyTokenService } from "../controllers/auth";
-import jwt from "jsonwebtoken"; 
- 
-const JWT_SECRET = process.env.JWT_SECRET!;
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
+import {
+  createAdminService,
+  createContaService,
+  getPlatformUsersService,
+  loginService,
+  refreshTokenService,
+  updateContaUserService,
+  verifyTokenService,
+} from "../controllers/auth";
+import { authMiddleware, rechazoSiNoEsAdminActivo } from "./midleware";
 
-export const authRouter = new Elysia()
-  /**
-    * 🆕 Crear administrador
-   */
-   .post(
-    "/auth/admin",
-    async ({ body, set }) => {
-      try {
-        const result = await createAdminService(body);
-
-        set.status = 201;
-        return {
-          success: true,
-          message: "Administrador creado exitosamente",
-          data: result,
-        };
-      } catch (error: any) {
-        console.error("❌ Error en /auth/admin:", error);
-        set.status = 500;
-        return {
-          success: false,
-          error: error.message || "Error creando administrador",
-        };
-      }
-    },
-    {
-      detail: {
-        summary: "Crea un nuevo administrador y su usuario de plataforma",
-        tags: ["Auth", "Admin"],
-      },
-      body: t.Object({
-        nombre: t.String(),
-        apellido: t.String(),
-        email: t.String({ format: "email" }),
-        telefono: t.Optional(t.String()),
-        password: t.String(),
-      }),
-    }
-  )
+/**
+ * Rutas PÚBLICAS de sesión: login, verify y refresh. Las usan el front de
+ * cartera, el CRM y auth-google sin un Authorization previo (el token viaja en
+ * el query/body), así que NO llevan `authMiddleware`.
+ */
+const authPublicRouter = new Elysia()
   .post(
     "/auth/login",
     async ({ body, set }) => {
@@ -92,7 +64,8 @@ export const authRouter = new Elysia()
         return { success: false, error: "El token es obligatorio." };
       }
 
-      const result = verifyTokenService(token);
+      // Revalida en la base: un usuario desactivado o borrado ya no renueva.
+      const result = await verifyTokenService(token);
 
       if (!result.success) {
         set.status = 401;
@@ -138,42 +111,20 @@ export const authRouter = new Elysia()
           return { success: false, error: "El refresh token es obligatorio." };
         }
 
-        let decoded: any;
-        try {
-          decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
-        } catch (err) {
+        // Revalida en la base: un usuario desactivado o borrado ya no renueva,
+        // y el token nuevo lleva el rol VIGENTE, no el del refresh viejo.
+        const result = await refreshTokenService(refreshToken);
+        if (!result.success) {
           set.status = 401;
-          return { success: false, error: "Refresh token inválido o expirado" };
+          return { success: false, error: result.error };
         }
-
-        const tokenPayload = {
-          id: decoded.id,
-          email: decoded.email,
-          role: decoded.role,
-          admin_id: decoded.admin_id,
-          asesor_id: decoded.asesor_id,
-        };
-
-        // ✅ Generar un nuevo access token
-        const newAccessToken = jwt.sign(
-          tokenPayload,
-          JWT_SECRET,
-          { expiresIn: "30m" } // Access token válido por 30 minutos
-        );
-
-        // Opcional: generar también un nuevo refresh token
-        const newRefreshToken = jwt.sign(
-          tokenPayload,
-          JWT_REFRESH_SECRET,
-          { expiresIn: "7d" } // Refresh válido por 7 días
-        );
 
         set.status = 200;
         return {
           success: true,
           message: "Token renovado correctamente",
-          accessToken: newAccessToken,
-          refreshToken: newRefreshToken, // opcional devolverlo
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken, // el front y el CRM persisten el rotado
         };
       } catch (error: any) {
         console.error("❌ Error en /auth/refresh:", error);
@@ -193,11 +144,66 @@ export const authRouter = new Elysia()
         refreshToken: t.String(),
       }),
     }
+  );
+
+/**
+ * Rutas que ADMINISTRAN usuarios: crear ADMIN/CONTA, editar un CONTA (clave
+ * incluida) y listar usuarios. Colgaban sin `authMiddleware`: cualquiera, sin
+ * token, podía crearse un ADMIN, cambiarle la clave a otro usuario o bajarse la
+ * tabla con password_hash. Ahora: token válido (`authMiddleware`) + ADMIN
+ * activo revalidado en la base, en CADA ruta.
+ *
+ * Instancia propia a propósito: el `derive` de `authMiddleware` es local a ella
+ * y no alcanza a las rutas públicas de arriba.
+ */
+const authAdminRouter = new Elysia()
+  .use(authMiddleware)
+  /**
+    * 🆕 Crear administrador
+   */
+   .post(
+    "/auth/admin",
+    async ({ body, set, user }: any) => {
+      const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+      if (rechazo) return rechazo;
+      try {
+        const result = await createAdminService(body);
+
+        set.status = 201;
+        return {
+          success: true,
+          message: "Administrador creado exitosamente",
+          data: result,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /auth/admin:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error creando administrador",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Crea un nuevo administrador y su usuario de plataforma",
+        tags: ["Auth", "Admin"],
+      },
+      body: t.Object({
+        nombre: t.String(),
+        apellido: t.String(),
+        email: t.String({ format: "email" }),
+        telefono: t.Optional(t.String()),
+        password: t.String(),
+      }),
+    }
   )
 
    .post(
     "/auth/conta",
-    async ({ body, set }) => {
+    async ({ body, set, user }: any) => {
+      const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+      if (rechazo) return rechazo;
       try {
         const result = await createContaService(body);
 
@@ -222,7 +228,7 @@ export const authRouter = new Elysia()
         tags: ["Auth", "Conta"],
       },
       body: t.Object({
-        nombre: t.String(), 
+        nombre: t.String(),
         email: t.String({ format: "email" }),
         telefono: t.Optional(t.String()),
         password: t.String(),
@@ -235,8 +241,11 @@ export const authRouter = new Elysia()
    */
   .post(
     "/auth/conta/update",
-    async ({ body, query, set }) => {
+    async ({ body, query, set, user }: any) => {
+      const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+      if (rechazo) return rechazo;
       try {
+        // Ojo: pese al nombre, `contaId` es el platform_users.id (así lo manda el front).
         const contaId = Number(query.contaId);
         if (!contaId) {
           set.status = 400;
@@ -284,7 +293,9 @@ export const authRouter = new Elysia()
    */
   .get(
     "/auth/platform-users",
-    async ({ set }) => {
+    async ({ set, user }: any) => {
+      const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+      if (rechazo) return rechazo;
       try {
         const result = await getPlatformUsersService();
 
@@ -310,3 +321,5 @@ export const authRouter = new Elysia()
       },
     }
   );
+
+export const authRouter = new Elysia().use(authPublicRouter).use(authAdminRouter);

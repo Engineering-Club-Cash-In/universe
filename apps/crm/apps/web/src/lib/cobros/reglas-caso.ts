@@ -84,6 +84,8 @@ export interface CasoDetalle {
 	incrementoMaximoMensualMora?: string | null;
 	aseguradora?: string | null;
 	cabinaSeguro?: string | null;
+	/** Código de pago Nexa del crédito; "" = sin cuenta (ver VariablesPlantilla). */
+	cuentaNexa?: string | null;
 	cuotaConvenio?: string | number | null;
 	convenioActivo?: {
 		convenioId?: string | number | null;
@@ -1034,6 +1036,7 @@ export type PropsContactoCaso = {
 	incrementoMaximoMensualMora: string;
 	aseguradora: string;
 	cabinaSeguro: string;
+	cuentaNexa: string;
 };
 
 export function propsContactoDelCaso(caso: CasoDetalle): PropsContactoCaso {
@@ -1067,6 +1070,7 @@ export function propsContactoDelCaso(caso: CasoDetalle): PropsContactoCaso {
 		incrementoMaximoMensualMora: caso.incrementoMaximoMensualMora || "",
 		aseguradora: caso.aseguradora || "",
 		cabinaSeguro: caso.cabinaSeguro || "",
+		cuentaNexa: caso.cuentaNexa || "",
 	};
 }
 

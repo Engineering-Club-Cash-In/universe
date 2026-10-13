@@ -143,13 +143,14 @@ export function construirMensajeEstadoCuenta(
 	numeroSifco: string,
 	asesor: ContactoAsesor | null = null,
 ): string {
-	const saludo = clienteNombre ? `${clienteNombre}, te` : "Te";
+	// Registro formal (usted), como el recibo y el resto de mensajes al cliente.
+	const saludo = clienteNombre ? `${clienteNombre}, le` : "Le";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
 		.filter((valor): valor is string | number => valor !== null)
 		.join(" ");
 	const identificador = descripcionVehiculo
-		? ` de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
-		: ` de tu crédito ${numeroSifco}`;
+		? ` de su ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
+		: ` de su crédito ${numeroSifco}`;
 	return `${saludo} compartimos el estado de cuenta${identificador} en el documento adjunto. ${construirCierreAsesor(asesor)}`;
 }
 

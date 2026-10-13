@@ -1,6 +1,10 @@
-import { and, count, desc, eq, exists, gt, gte, ilike, inArray, lte, notInArray, sql, sum } from "drizzle-orm";
+import {
+  MARCA_CONDONACION_NEXA_CONSERVADA_PAGO_POSTERIOR,
+  MOTIVO_CONDONACION_NEXA_A_TIEMPO,
+} from "../utils/condonacionNexaATiempo";
+import { and, count, desc, eq, exists, gt, gte, ilike, inArray, isNull, lte, notInArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
-import { MORAS_CREDITO_UQ_ACTIVA, asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
+import { MORAS_CREDITO_UQ_ACTIVA, asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, mora_pagada_cuota, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -24,11 +28,12 @@ import { registrarTransicionesDeBuckets } from "./buckets/motorTransiciones";
 // Importar para uso interno en este archivo
 import { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
 import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
+import { fechaCalendarioGT } from "../utils/fechaCalendarioGT";
 import { moraPendientePorCuota, repartirPagoDeMora, type CuotaParaPendiente } from "../utils/moraPendiente";
 import { motivoRebajaParcialNoPermitida } from "../lib/condonacion-parcial";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { moraPagadaPorCuota } from "../utils/moraPagadaPorCuota";
-import { anotarMoraPagada, type AnotacionMoraPagada } from "../utils/anotarMoraPagada";
+import { anotarMoraPagada, compensarAnotacionesVivas, type AnotacionMoraPagada } from "../utils/anotarMoraPagada";
 import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
 // Re-exportar para mantener compatibilidad con importadores existentes
 export { TASA_MORA_MENSUAL, BASE_DIAS_MORA, calcularMoraProporcional } from "../utils/moraFormula";
@@ -61,7 +66,8 @@ type MoraEventoOrigen =
   | "PROCESO_AUTO"
   | "API_MANUAL"
   | "CONDONACION_INDIVIDUAL"
-  | "CONDONACION_MASIVA";
+  | "CONDONACION_MASIVA"
+  | "CONDONACION_NEXA_A_TIEMPO";
 
 // La lista vive en constants/creditStatus.ts para que un módulo de reglas
 // puras pueda reusarla sin arrastrar la conexión a la base que importa este
@@ -209,7 +215,9 @@ export type { CatalogoBucketsResultado } from "./buckets/catalogoBuckets";
  *    toma el candado (no hace falta un SELECT … FOR UPDATE aparte);
  *  - si el UPDATE de `creditos` no puede ir primero porque depende de leer la
  *    mora (condonación, /mora/update), se toma el candado con un
- *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción;
+ *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción
+ *    (`FOR NO KEY UPDATE` en `updateMora`, que corre adentro del pago Nexa:
+ *    ver el comentario ahí);
  *  - un UPDATE condicional de `creditos` que no matchea filas no deja candado,
  *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
  *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
@@ -269,47 +277,8 @@ const STATUS_EXCLUIDOS_MORA_SQL = STATUS_EXCLUIDOS_MORA as Array<
  */
 export const STATUS_MOROSO_SALVO_RECUPERACION = sql<(typeof creditos.$inferSelect)["statusCredit"]>`CASE WHEN ${creditos.statusCredit} IN ('EN_RECUPERACION', 'EN_JURIDICO') THEN ${creditos.statusCredit} ELSE 'MOROSO' END`;
 
-/**
- * Fecha de CALENDARIO (año/mes/día) de un vencimiento, como número comparable
- * — `Date.UTC(y, m, d)`, o sea la medianoche UTC de ese día.
- *
- * `cuotas_credito.fecha_vencimiento` es un `timestamp` SIN zona que guarda la
- * fecha de calendario tal cual (siempre 00:00:00); NO es un instante. `pg` la
- * entrega como un Date cuyos campos LOCALES ya son esa fecha, así que se leen
- * tal cual. Pasarla por `toZonedTime` —que sirve para instantes reales, como
- * `moras_historial.fecha`— le resta 6 h y en un proceso UTC (producción: el
- * Dockerfile arranca de oven/bun y no fija TZ) la tira al DÍA ANTERIOR: la
- * cuota cobraría mora el mismo día que vence, y el cron (TS) quedaría peleado
- * con el guard de createMora/paymentAgreement (SQL, que usa
- * `fecha_vencimiento::date` y sí acierta).
- *
- * Con los dos extremos en `Date.UTC(...)` la resta es exacta en múltiplos de
- * 86_400_000: no hay residuos que redondear.
- *
- * El `hoy` que reciben los helpers de abajo es el canónico `hoyGuatemala()`,
- * cuyos campos locales YA son la hora de pared de Guatemala: por eso también
- * se le leen tal cual y no se lo vuelve a pasar por `toZonedTime` (hacerlo lo
- * correría un día más).
- */
-export function fechaCalendarioGT(valor: Date | string): number {
-  if (typeof valor === "string") {
-    // "2026-09-20", "2026-09-20 00:00:00", "2026-09-20T00:00:00.000Z": los
-    // primeros 10 caracteres son la fecha. Nunca `new Date(str)`, que
-    // reintroduce la zona del proceso.
-    // Se valida la FORMA antes de parsear: `Number("")` es 0, así que un string
-    // truncado como "2026-09" pasaba el chequeo de Number.isFinite (día 0) y
-    // devolvía en silencio el 31-ago-2026. Exigir YYYY-MM-DD en los primeros 10
-    // caracteres es lo único que distingue "fecha" de "basura"; lo que venga
-    // después ("T00:00:00Z", " 00:00:00") no importa y se ignora igual que antes.
-    const fecha = valor.slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return NaN;
-    const anio = Number(fecha.slice(0, 4));
-    const mes = Number(fecha.slice(5, 7));
-    const dia = Number(fecha.slice(8, 10));
-    return Date.UTC(anio, mes - 1, dia);
-  }
-  return Date.UTC(valor.getFullYear(), valor.getMonth(), valor.getDate());
-}
+// `fechaCalendarioGT` vive en utils/fechaCalendarioGT.ts (ver ahí el porqué).
+export { fechaCalendarioGT };
 
 export type CuotaParaMora = {
   fecha_vencimiento: Date | string;
@@ -940,6 +909,63 @@ export function hoyGuatemala(ahora: Date = new Date()): Date {
 }
 
 /**
+ * 🧊 Estados cuya mora activa NADIE apaga en automático (ni el cron ni la
+ * validación de un pago): se congela tal cual está.
+ *
+ * PENDIENTE_CANCELACION está en STATUS_EXCLUIDOS_MORA, así que para el
+ * criterio "¿quedan cuotas vencidas?" el crédito siempre parece al día. Pero
+ * no se puso al día: se está cerrando, y `resetCredit` (PENDIENTE_CANCELACION
+ * → CANCELADO) cobra la mora ACTIVA en el pago de cierre. Apagarla dejaba la
+ * cancelación cobrando Q0 de mora (pasó en prod con la "Mora para
+ * cancelación" que ingresa el asesor). Decisión de negocio: la mora queda
+ * exactamente como está hasta el cierre. EN_CONVENIO NO va acá: su mora sí se
+ * apaga (ver "RED DE SEGURIDAD DEL CONVENIO" en procesarMoras).
+ */
+export const STATUS_CONGELA_MORA: readonly string[] = ["PENDIENTE_CANCELACION"];
+
+export function congelaMoraActiva(statusCredit: string | null | undefined): boolean {
+  return statusCredit != null && STATUS_CONGELA_MORA.includes(statusCredit);
+}
+
+/**
+ * 🔒 Primer statement de toda transacción que apaga una mora: candado de fila
+ * sobre el crédito, incondicional (un UPDATE condicional a MOROSO no candaba
+ * nada si el crédito estaba ACTIVO/EN_CONVENIO). Así el cambio de status de
+ * `actualizarEstadoCredito` (que también lo canda) o espera o ya commiteó y el
+ * guard `creditoNoCongelaMora` lo ve. "no key update" y NO "update": el pago
+ * Nexa sostiene FOR KEY SHARE sobre `creditos` desde otra conexión
+ * (utils/paymentAdvisoryLock.ts) y FOR UPDATE se colgaría (ver `updateMora`).
+ */
+async function candarCreditoParaMora(tx: Pick<typeof db, "select">, creditoId: number) {
+  await tx
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId))
+    .for("no key update");
+}
+
+/**
+ * Condición para el UPDATE que apaga una mora: que su crédito NO esté en un
+ * estado que la congela. El status se lee al principio de la corrida (cron) o
+ * antes de abrir la transacción (validación); si el crédito pasa a
+ * PENDIENTE_CANCELACION en el medio, este filtro hace que el UPDATE no
+ * matchee filas y la ruta lo trate como "otra ruta la ganó" (`MoraYaApagada`).
+ * Solo es exacto con el crédito candado ANTES (`candarCreditoParaMora`): sin
+ * candado, un cambio a PENDIENTE_CANCELACION que commitea después de la foto
+ * del UPDATE no se ve y la mora se apaga igual.
+ * Va filtrado por el id LITERAL del crédito, sin correlacionar con
+ * `moras_credito`: según el contexto drizzle renderiza columnas sin tabla, y
+ * una subconsulta correlacionada así compararía `credito_id = credito_id`
+ * consigo misma (congelaría TODAS las moras).
+ */
+function creditoNoCongelaMora(creditoId: number) {
+  return sql`NOT EXISTS (SELECT 1 FROM ${creditos} WHERE ${and(
+    eq(creditos.credito_id, creditoId),
+    inArray(creditos.statusCredit, [...STATUS_CONGELA_MORA] as any),
+  )})`;
+}
+
+/**
  * Decisión pura de limpieza de mora al validar/aplicar un pago. Espejo del
  * paso "se puso al día" de procesarMoras: la mora se desactiva si el crédito
  * ya no tiene cuotas vencidas elegibles — o si quedó sin capital (mismo
@@ -969,6 +995,60 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
 }
 
 /**
+ * «¿El crédito quedó al día?» con el criterio del cron (`procesarMoras`),
+ * acotado a un crédito: cuotas vencidas sin un pago que las cubra
+ * (`hasPaidPaymentSql`) y la regla de `decidirLimpiezaMoraTrasAplicar`.
+ * `desactivarMora` es la respuesta. Lo usan `desactivarMoraSiCreditoAlDia` y
+ * la verificación posterior a la condonación Nexa a tiempo: si divergieran, la
+ * alerta diría "no quedó al día" de un crédito al que se le apagó la mora.
+ */
+export async function evaluarCreditoAlDia(credito_id: number, dbi: typeof db = db) {
+  const [credito] = await dbi
+    .select({
+      statusCredit: creditos.statusCredit,
+      capital: creditos.capital,
+    })
+    .from(creditos)
+    .where(eq(creditos.credito_id, credito_id));
+
+  const hoy = hoyGuatemala();
+
+  // Mismo universo y criterio que procesarMoras, acotado a este crédito.
+  // El EXISTS es el MISMO helper del cron, incluido COALESCE(monto_aplicado,0)>0:
+  // los pagos especiales (solo mora/otros/convenio) se cuelgan de la cuota
+  // con pagado=true y monto_aplicado=0 sin cubrirla de verdad.
+  const cuotas = await dbi
+    .select({
+      numero_cuota: cuotas_credito.numero_cuota, // CB-030: rango de la promesa
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pagado: cuotas_credito.pagado,
+      statusCredit: creditos.statusCredit,
+      hasPaidPayment: hasPaidPaymentSql(),
+    })
+    .from(cuotas_credito)
+    .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
+    .where(eq(cuotas_credito.credito_id, credito_id));
+
+  // CB-030 — mismo freeze por promesa que el cron: si las cuotas que quedan
+  // están congeladas, el cron ya no les cobra y esta evaluación (limpieza al
+  // validar y verificación de la condonación Nexa) debe decidir lo mismo que él.
+  const promesasPorCredito = await promesasVigentesDeCreditos([credito_id], dbi);
+  const cuotasVencidas = cuotas.filter((c) =>
+    isOverdueInstallmentForMora(c, hoy, promesasPorCredito, credito_id),
+  ).length;
+
+  return {
+    cuotasVencidas,
+    statusCredit: credito?.statusCredit ?? null,
+    ...decidirLimpiezaMoraTrasAplicar({
+      cuotasVencidasRestantes: cuotasVencidas,
+      capitalCredito: credito?.capital ?? null,
+      statusCredit: credito?.statusCredit ?? null,
+    }),
+  };
+}
+
+/**
  * Apaga la mora activa de un crédito que quedó al día al validar un pago.
  *
  * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
@@ -978,7 +1058,10 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
- * "se puso al día" del cron.
+ * "se puso al día" del cron — con la MISMA excepción: la mora de un crédito
+ * PENDIENTE_CANCELACION no se apaga (`congelaMoraActiva`), porque sus cuotas
+ * no cuentan como vencidas y validar una boleta ya registrada la borraba como
+ * "se puso al día" antes de que `resetCredit` la cobrara.
  *
  * Nunca lanza: la limpieza de mora no debe romper la aplicación del pago.
  * El UPDATE es condicional sobre `activa=true`: si el cron u otra validación
@@ -1013,45 +1096,16 @@ export async function desactivarMoraSiCreditoAlDia(
       return { desactivada: false };
     }
 
-    const [credito] = await dbi
-      .select({
-        statusCredit: creditos.statusCredit,
-        capital: creditos.capital,
-      })
-      .from(creditos)
-      .where(eq(creditos.credito_id, credito_id));
+    const { cuotasVencidas, statusCredit, ...decision } = await evaluarCreditoAlDia(credito_id, dbi);
 
-    const hoy = hoyGuatemala();
-
-    // Mismo universo y criterio que procesarMoras, acotado a este crédito.
-    // El EXISTS es el MISMO helper del cron, incluido COALESCE(monto_aplicado,0)>0:
-    // los pagos especiales (solo mora/otros/convenio) se cuelgan de la cuota
-    // con pagado=true y monto_aplicado=0 sin cubrirla de verdad.
-    const cuotas = await dbi
-      .select({
-        numero_cuota: cuotas_credito.numero_cuota, // CB-030: rango de la promesa
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pagado: cuotas_credito.pagado,
-        statusCredit: creditos.statusCredit,
-        hasPaidPayment: hasPaidPaymentSql(),
-      })
-      .from(cuotas_credito)
-      .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))
-      .where(eq(cuotas_credito.credito_id, credito_id));
-
-    // CB-030 — mismo freeze por promesa que el cron: si las cuotas que quedan
-    // están congeladas, el cron ya no les cobra y esta limpieza debe decidir lo
-    // mismo que él.
-    const promesasPorCredito = await promesasVigentesDeCreditos([credito_id], dbi);
-    const cuotasVencidas = cuotas.filter((c) =>
-      isOverdueInstallmentForMora(c, hoy, promesasPorCredito, credito_id),
-    ).length;
-
-    const decision = decidirLimpiezaMoraTrasAplicar({
-      cuotasVencidasRestantes: cuotasVencidas,
-      capitalCredito: credito?.capital ?? null,
-      statusCredit: credito?.statusCredit ?? null,
-    });
+    // 🧊 Misma regla que el paso 6 del cron (ver `STATUS_CONGELA_MORA`). Si el
+    // crédito cambia de status después de esta lectura (sin candado), lo frena
+    // el filtro `creditoNoCongelaMora` del UPDATE de abajo, exacto porque la
+    // transacción candó el crédito antes.
+    if (congelaMoraActiva(statusCredit)) {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
+      return { desactivada: false };
+    }
 
     if (!decision.desactivarMora) {
       emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "overdue_installments_remain" });
@@ -1069,7 +1123,9 @@ export async function desactivarMoraSiCreditoAlDia(
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). El convenio toma el crédito y después
       // la mora; si acá lo hiciéramos al revés, las dos transacciones se
-      // esperarían en cruz y Postgres mataría una con 40P01.
+      // esperarían en cruz y Postgres mataría una con 40P01. El candado va
+      // SIEMPRE: el UPDATE de abajo solo corre si el crédito está MOROSO.
+      await candarCreditoParaMora(txm, credito_id);
       if (decision.bajarStatusAActivo) {
         await txm
           .update(creditos)
@@ -1094,6 +1150,7 @@ export async function desactivarMoraSiCreditoAlDia(
           and(
             eq(moras_credito.mora_id, moraActiva.mora_id),
             eq(moras_credito.activa, true),
+            creditoNoCongelaMora(credito_id),
           ),
         )
         .returning({ mora_id: moras_credito.mora_id });
@@ -1442,7 +1499,9 @@ export async function createMora({
     // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
     // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
     // no llevan mora; además el cron procesarMoras desactivaría esa mora en su corrida (la fila
-    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Para
+    // quedaría huérfana), así que el override sobre un excluido era transitorio e inútil. Excepción:
+    // en PENDIENTE_CANCELACION el cron ya NO la apaga (`STATUS_CONGELA_MORA`), pero esta regla no
+    // cambia — por acá no se le crea mora a un excluido. Para
     // morar uno de estos hay que sacarlo del estado excluido primero (como hace el teardown de
     // convenio, que lo pone MOROSO antes de llamar a createMora).
     if (estadoExcluido) {
@@ -1652,11 +1711,13 @@ export async function updateMora({
   usuario_email,
   motivo,
   pago_id,
+  origen = "API_MANUAL",
   dbClient,
 }: {
   credito_id?: number;
   numero_credito_sifco?: string;
-  monto_cambio: number;
+  /** Decimal como string para no perder centavos (p. ej. un `numeric` leído de la base). */
+  monto_cambio: number | string;
   tipo: "INCREMENTO" | "DECREMENTO";
   cuotas_atrasadas?: number;
   activa?: boolean;
@@ -1673,6 +1734,12 @@ export async function updateMora({
    */
   pago_id?: number | string | null;
   /**
+   * Origen del evento en `moras_historial`. Por defecto `API_MANUAL` (ajuste de
+   * un analista o restitución de pago); la anulación de una condonación Nexa
+   * pasa `CONDONACION_NEXA_A_TIEMPO` para no verse como un ajuste a mano.
+   */
+  origen?: MoraEventoOrigen;
+  /**
    * Transacción del CALLER. Sin esto, `updateMora` abre la suya y commitea
    * sola: el ajuste de mora quedaba firme aunque el caller fallara un paso
    * después (o al revés). Quien necesita que su cambio de estado y el ajuste
@@ -1681,7 +1748,7 @@ export async function updateMora({
    * corre adentro de ella.
    *
    * 🔒 El orden de candados NO cambia por venir de afuera: este cuerpo sigue
-   * tomando `creditos` (SELECT … FOR UPDATE) antes que `moras_credito`. El
+   * tomando `creditos` (SELECT … FOR NO KEY UPDATE) antes que `moras_credito`. El
    * caller que ya tenga `creditos` candado no paga nada por re-pedirlo; el
    * que traiga `moras_credito` candado ANTES de llamar acá rompería la regla,
    * y por eso no hay ninguno.
@@ -1694,7 +1761,7 @@ export async function updateMora({
   // candadas es pedir un bloqueo contra uno mismo).
   const executor = dbClient ?? db;
   try {
-    if (monto_cambio < 0) {
+    if (new Big(monto_cambio).lt(0)) {
     emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
     return { success: false, message: "[ERROR] monto_cambio debe ser >= 0 (usa el campo 'tipo' para indicar dirección)" };
   }
@@ -1743,18 +1810,31 @@ export async function updateMora({
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). Acá el UPDATE de `creditos` no puede
       // ir primero —el estado a escribir depende del monto que resulte de la
-      // mora—, así que el candado se toma con este `SELECT … FOR UPDATE`, que
-      // además es la lectura de `statusCredit` que esta transacción ya
+      // mora—, así que el candado se toma con este `SELECT … FOR NO KEY UPDATE`,
+      // que además es la lectura de `statusCredit` que esta transacción ya
       // necesitaba más abajo: no agrega un viaje a la base, solo lo adelanta.
       // Con el orden viejo (mora FOR UPDATE y después el UPDATE del crédito)
       // esta ruta y la del convenio se pedían los candados en cruz: ciclo de
       // deadlock y 40P01 sin manejar.
+      //
+      // `NO KEY UPDATE` y no `UPDATE`: es el mismo candado que toma el UPDATE
+      // de `statusCredit` de más abajo, así que sigue serializando contra el
+      // convenio, el cron, la condonación y cualquier otro escritor del
+      // crédito (todos piden NO KEY UPDATE o más). Lo único que deja de
+      // excluir es `FOR KEY SHARE` —"no me borres la fila ni le cambies la
+      // llave"—, que esta ruta no hace. Y eso es justo lo que sostiene el pago
+      // Nexa: `withPaymentBindingLock` toma `FOR KEY SHARE` sobre este crédito
+      // en la conexión del advisory lock y llama acá por el pool global. Con
+      // `FOR UPDATE` esta lectura esperaba a esa transacción, que esperaba a
+      // que el trabajo terminara: un pago Nexa con mora activa se colgaba para
+      // siempre (Postgres no lo ve como deadlock: el ciclo pasa por la app).
+      // Ver `nexaPagoConMora.integration.test.ts`.
       const [creditoActual] = await tx
         .select({ statusCredit: creditos.statusCredit })
         .from(creditos)
         .where(eq(creditos.credito_id, targetCreditoId))
         .limit(1)
-        .for("update");
+        .for("no key update");
 
       const shouldReactivateMora = tipo === "INCREMENTO" && activa === true;
       const moraWhere = shouldReactivateMora
@@ -1813,7 +1893,7 @@ export async function updateMora({
       // crédito NO está en STATUS_EXCLUIDOS_MORA.
       const newStatus = (newMonto.gt(0) && newActiva) ? "MOROSO" : "ACTIVO";
 
-      // `creditoActual` se leyó al abrir la transacción, con FOR UPDATE: la
+      // `creditoActual` se leyó al abrir la transacción, con FOR NO KEY UPDATE: la
       // fila está candada desde entonces, así que este estado no puede haber
       // cambiado bajo nuestros pies.
       // STATUS_NO_PISAR, no STATUS_EXCLUIDOS_MORA: EN_RECUPERACION sí devenga
@@ -1871,7 +1951,7 @@ export async function updateMora({
         credito_id: targetCreditoId,
         mora_id: updated.mora_id,
         tipo_evento: tipo,
-        origen: "API_MANUAL",
+        origen,
         monto_anterior: moraActual.monto,
         monto_nuevo: newMonto.toString(),
         cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
@@ -1985,9 +2065,11 @@ async function desactivarMoraDelCron(
   return await db
     .transaction(async (tx) => {
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
-      // la regla al inicio del archivo). Este UPDATE es además la escritura
-      // que igual había que hacer, así que toma el candado sin costo.
-      //
+      // la regla al inicio del archivo). El candado explícito va SIEMPRE, aunque
+      // el crédito no esté MOROSO: el UPDATE de abajo es condicional y sin filas
+      // no canda nada, y el guard de PENDIENTE_CANCELACION necesita el candado.
+      await candarCreditoParaMora(tx, creditoId);
+
       // Es CONDICIONAL sobre MOROSO a propósito: bajar a ACTIVO sin esa
       // condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE. Que no
       // matchee filas es un desenlace legítimo (el crédito no estaba MOROSO),
@@ -2012,6 +2094,10 @@ async function desactivarMoraDelCron(
             // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
             // que el cron "gane" también y duplique el evento DESACTIVACION.
             eq(moras_credito.activa, true),
+            // 🧊 El paso 6 leyó el status al principio de la corrida: si el
+            // crédito pasó a PENDIENTE_CANCELACION desde entonces, no se apaga
+            // (cero filas → `MoraYaApagada` → omitido).
+            creditoNoCongelaMora(creditoId),
           ),
         )
         .returning({ mora_id: moras_credito.mora_id });
@@ -2247,7 +2333,7 @@ export async function procesarMoras() {
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
       emitCreditLateFee({ outcome: "skipped", operation: "process", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
-      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0 };
+      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0, congeladasPendienteCancelacion: 0 };
     }
 
     const hoy = hoyGuatemala();
@@ -2364,8 +2450,12 @@ export async function procesarMoras() {
         monto_mora: moras_credito.monto_mora,
         cuotas_atrasadas: moras_credito.cuotas_atrasadas,
         porcentaje_mora: moras_credito.porcentaje_mora,
+        // El status del crédito lo necesita el paso 6 para no apagar la mora
+        // de un PENDIENTE_CANCELACION (ver ahí el porqué).
+        statusCredit: creditos.statusCredit,
       })
       .from(moras_credito)
+      .innerJoin(creditos, eq(moras_credito.credito_id, creditos.credito_id))
       .where(eq(moras_credito.activa, true));
 
     const morasActivasPorCredito = new Map<number, typeof morasActivas[number]>();
@@ -2384,6 +2474,8 @@ export async function procesarMoras() {
     let moraCero = 0;
     let desactivadasMoraCero = 0;
     let skippedInternally = 0;
+    // Moras activas de créditos PENDIENTE_CANCELACION que el paso 6 deja tal cual.
+    let congeladasPendienteCancelacion = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
@@ -2736,6 +2828,18 @@ export async function procesarMoras() {
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 
+      // 🧊 PENDIENTE_CANCELACION: la mora activa se CONGELA, no se apaga.
+      // El status está en STATUS_EXCLUIDOS_MORA, así que el crédito nunca está
+      // en `moraPorCredito` y caería acá como "se puso al día" — mentira: se
+      // está cerrando y `resetCredit` cobra esa mora al cerrarlo (ver
+      // `STATUS_CONGELA_MORA`). El cron no la toca: ni la apaga, ni la
+      // recalcula, ni anota historial, ni cambia el status. EN_CONVENIO no
+      // entra acá: sigue cayendo a la red de arriba.
+      if (congelaMoraActiva(mora.statusCredit)) {
+        congeladasPendienteCancelacion++;
+        continue;
+      }
+
       const desactivo = await desactivarMoraDelCron(
         mora.credito_id,
         mora,
@@ -2772,11 +2876,13 @@ export async function procesarMoras() {
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
     // Un crédito "omitido" es el que no terminó en creación/recálculo/sin-cambios/
     // desactivación: los sin capital y los de mora Q0.00 que NO tenían mora previa
-    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded).
+    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded),
+    // y las moras congeladas de créditos PENDIENTE_CANCELACION.
     const skippedCount =
       (sinCapital - desactivadasSinCapital) +
       (moraCero - desactivadasMoraCero) +
-      skippedInternally;
+      skippedInternally +
+      congeladasPendienteCancelacion;
     emitCreditLateFee({
       outcome: "completed",
       operation: "process",
@@ -2786,7 +2892,7 @@ export async function procesarMoras() {
       failedCount: 0,
       skippedCount,
     });
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero, buckets: bucketsResumen };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero, congeladasPendienteCancelacion, buckets: bucketsResumen };
 
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
@@ -3175,8 +3281,12 @@ export async function condonarMora({
         return { kind: "not_found" as const };
       }
 
-      // Condonar la mora no levanta un estado que puso una persona: un crédito
-      // EN_RECUPERACION al que se le condona la mora sigue en recuperación
+      // Condicional sobre MOROSO (mismo criterio que la condonación masiva y el
+      // convenio): un CANCELADO/CAIDO/INCOBRABLE/EN_CONVENIO nunca cambia de
+      // estado por condonar su mora. La mora igual se condona.
+      //
+      // Y condonar la mora no levanta un estado que puso una persona: un crédito
+      // EN_RECUPERACION/EN_JURIDICO al que se le condona la mora sigue ahí
       // (decisión 5: solo lo levanta pagar el total de lo que debe).
       await tx
         .update(creditos)
@@ -3184,6 +3294,7 @@ export async function condonarMora({
         .where(
           and(
             eq(creditos.credito_id, credito_id),
+            eq(creditos.statusCredit, "MOROSO"),
             notInArray(creditos.statusCredit, STATUS_NO_PISAR),
           ),
         );
@@ -3281,6 +3392,309 @@ export async function condonarMora({
       error: String(error),
     };
   }
+}
+
+
+/** Usuario de sistema que firma las condonaciones automáticas (lo crea drizzle/0051). */
+export const EMAIL_USUARIO_SISTEMA_NEXA = "sistema-nexa@clubcashin.local";
+
+/**
+ * Condona una parte de la mora activa de un crédito, atribuida a cuotas
+ * puntuales, ligada a un evento Nexa. La usa el pago Nexa (ACH) que llegó a
+ * tiempo (ver `utils/condonacionNexaATiempo.ts`).
+ *
+ * No reusa `condonarMora` porque hace otra cosa: aquella perdona TODA la mora,
+ * la apaga y pasa el crédito a ACTIVO. Esta solo RESTA lo de las cuotas en
+ * ventana y deja la mora activa —aunque quede en Q0— para que la apague
+ * `desactivarMoraSiCreditoAlDia` cuando el pago se aplique: si el pago no
+ * llegara a registrarse, el crédito no debe haber pasado a ACTIVO.
+ *
+ * 🔒 `creditos` se toma con `FOR NO KEY UPDATE` (no `FOR UPDATE`): durante el
+ * pago Nexa `withPaymentBindingLock` sostiene `FOR KEY SHARE` sobre esa fila en
+ * OTRA conexión, y `FOR UPDATE` se colgaría esperándola (ver `updateMora` y
+ * `nexaPagoConMora.integration.test.ts`). El orden de candados del módulo se
+ * respeta: `creditos` primero, `moras_credito` después.
+ *
+ * Idempotente por evento: si ya hay una condonación viva de ese evento la
+ * devuelve sin tocar nada (el índice único parcial es la red de la base).
+ * Si `monto_mora` cambió desde que se decidió (el cron corrió en el medio), no
+ * condona: la decisión se tomó sobre otro número.
+ */
+export async function condonarMoraDeCuotas({
+  credito_id,
+  montoMoraEsperado,
+  monto,
+  cuotas,
+  nexa_payment_event_id,
+  motivo,
+  pagos_pendientes_ids = [],
+  usuario_email = EMAIL_USUARIO_SISTEMA_NEXA,
+  dbClient = db,
+}: {
+  credito_id: number;
+  /** Pagos pendientes que sostienen la condonación (drizzle/0052); vacío = ninguno. */
+  pagos_pendientes_ids?: number[];
+  /** El `monto_mora` sobre el que se tomó la decisión. */
+  montoMoraEsperado: Big | string | number;
+  /** Total a condonar (centavos). */
+  monto: Big | string | number;
+  /** Reparto por cuota para el ledger. */
+  cuotas: { cuota_id: number; monto: Big | string | number }[];
+  nexa_payment_event_id: number;
+  motivo: string;
+  usuario_email?: string;
+  dbClient?: typeof db;
+}): Promise<
+  | { kind: "condonada" | "ya_condonada"; condonacion_id: number; monto: string }
+  | { kind: "sin_cambio"; razon: "sin_mora" | "mora_cambio" | "monto_invalido" }
+> {
+  const montoBig = new Big(monto);
+  if (montoBig.lte(0)) return { kind: "sin_cambio", razon: "monto_invalido" };
+
+  const [user] = await dbClient
+    .select({ id: platform_users.id })
+    .from(platform_users)
+    .where(eq(platform_users.email, usuario_email));
+  if (!user) throw new Error(`Usuario de sistema ${usuario_email} no existe (falta drizzle/0051)`);
+
+  return dbClient.transaction(async (tx) => {
+    await tx
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id))
+      .limit(1)
+      .for("no key update");
+
+    const [previa] = await tx
+      .select({
+        condonacion_id: moras_condonaciones.condonacion_id,
+        monto: moras_condonaciones.montoCondonacion,
+      })
+      .from(moras_condonaciones)
+      .where(and(
+        eq(moras_condonaciones.nexa_payment_event_id, nexa_payment_event_id),
+        isNull(moras_condonaciones.anulada_at),
+      ))
+      .limit(1);
+    if (previa) {
+      return { kind: "ya_condonada" as const, condonacion_id: previa.condonacion_id, monto: previa.monto };
+    }
+
+    const [mora] = await tx
+      .select({
+        mora_id: moras_credito.mora_id,
+        monto: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+      })
+      .from(moras_credito)
+      .where(and(eq(moras_credito.credito_id, credito_id), eq(moras_credito.activa, true)))
+      .limit(1)
+      .for("update");
+    if (!mora) return { kind: "sin_cambio" as const, razon: "sin_mora" as const };
+    const montoActual = new Big(mora.monto ?? 0);
+    if (!montoActual.eq(montoMoraEsperado)) {
+      return { kind: "sin_cambio" as const, razon: "mora_cambio" as const };
+    }
+    if (montoBig.gt(montoActual)) return { kind: "sin_cambio" as const, razon: "monto_invalido" as const };
+    const montoNuevo = montoActual.minus(montoBig).toFixed(2);
+
+    await tx
+      .update(moras_credito)
+      .set({ monto_mora: montoNuevo, updated_at: new Date() })
+      .where(eq(moras_credito.mora_id, mora.mora_id));
+
+    const [condonacion] = await tx
+      .insert(moras_condonaciones)
+      .values({
+        credito_id,
+        mora_id: mora.mora_id,
+        motivo,
+        usuario_id: user.id,
+        montoCondonacion: montoBig.toFixed(2),
+        nexa_payment_event_id,
+        ...(pagos_pendientes_ids.length > 0 ? { pagos_pendientes_ids } : {}),
+      })
+      .returning({ condonacion_id: moras_condonaciones.condonacion_id });
+
+    await anotarMoraPagada(
+      cuotas.map((c) => ({
+        credito_id,
+        cuota_id: c.cuota_id,
+        monto: c.monto,
+        tipo: "CONDONACION" as const,
+        condonacion_id: condonacion!.condonacion_id,
+        usuario_id: user.id,
+        motivo,
+      })),
+      tx as unknown as typeof db,
+    );
+
+    await registrarHistorialMora({
+      credito_id,
+      mora_id: mora.mora_id,
+      tipo_evento: "CONDONACION",
+      origen: "CONDONACION_NEXA_A_TIEMPO",
+      monto_anterior: montoActual.toFixed(2),
+      monto_nuevo: montoNuevo,
+      cuotas_atrasadas_anterior: mora.cuotas_atrasadas ?? 0,
+      cuotas_atrasadas_nuevas: mora.cuotas_atrasadas ?? 0,
+      usuario_id: user.id,
+      motivo: `${motivo} (evento Nexa ${nexa_payment_event_id})`,
+      dbClient: tx as unknown as typeof db,
+      propagarError: true,
+    });
+
+    return {
+      kind: "condonada" as const,
+      condonacion_id: condonacion!.condonacion_id,
+      monto: montoBig.toFixed(2),
+    };
+  });
+}
+
+/**
+ * Deshace la condonación viva de un evento Nexa cuyo pago fue rechazado de
+ * forma definitiva: la marca `anulada_at`, compensa sus filas del ledger con
+ * ANULACION y le devuelve el monto a la mora activa (INCREMENTO por
+ * `updateMora`, en la misma transacción). Sin condonación viva no hace nada.
+ *
+ * Si la mora ya no está activa (otra ruta la apagó) no se reactiva a mano: el
+ * ledger ya quedó compensado, y el cron la recalcula desde ahí esa noche.
+ *
+ * Ante la duda se CONSERVA: si el crédito tiene una fila de pago NO vinculada
+ * a este evento creada después de la condonación (un operador registró la
+ * boleta a mano, un recálculo recreó las filas), ese pago pudo ser esta misma
+ * transferencia. No se anula y se devuelve el motivo con el pago y la
+ * condonación: el llamador deja el log `viva_sin_verificar` (este módulo no
+ * escribe a `console`, ver latefeeStructuredLogging.test.ts).
+ *
+ * `porPagoPendienteRevertido`: la anulación la pide la caída de un pago
+ * pendiente que SOSTENÍA la condonación (ver
+ * `anularCondonacionesNexaPorPagoPendiente`). Ahí la guarda de arriba no
+ * aplica: la duda que cubre es si el pago Nexa entró, y acá lo que se cayó es
+ * el otro pago, sin el cual el crédito no queda al día. Además el propio
+ * pendiente revertido (o cualquier pago posterior) dispararía la guarda.
+ */
+export async function anularCondonacionNexaATiempo({
+  nexa_payment_event_id,
+  motivo,
+  porPagoPendienteRevertido = false,
+  usuario_email = EMAIL_USUARIO_SISTEMA_NEXA,
+  dbClient = db,
+}: {
+  nexa_payment_event_id: number;
+  motivo: string;
+  porPagoPendienteRevertido?: boolean;
+  usuario_email?: string;
+  dbClient?: typeof db;
+}): Promise<
+  | { anulada: boolean; monto?: string; motivo?: undefined }
+  | {
+      anulada: false;
+      motivo: "pago_posterior_no_vinculado";
+      credito_id: number;
+      condonacion_id: number;
+      /** El pago posterior no vinculado que pudo ser esta transferencia. */
+      pago_id: number;
+    }
+> {
+  const [user] = await dbClient
+    .select({ id: platform_users.id })
+    .from(platform_users)
+    .where(eq(platform_users.email, usuario_email));
+
+  return dbClient.transaction(async (tx) => {
+    const [viva] = await tx
+      .select({
+        condonacion_id: moras_condonaciones.condonacion_id,
+        credito_id: moras_condonaciones.credito_id,
+        monto: moras_condonaciones.montoCondonacion,
+      })
+      .from(moras_condonaciones)
+      .where(and(
+        eq(moras_condonaciones.nexa_payment_event_id, nexa_payment_event_id),
+        isNull(moras_condonaciones.anulada_at),
+      ))
+      .limit(1);
+    if (!viva) return { anulada: false };
+
+    // 🔒 `creditos` primero (orden de candados), y NO KEY UPDATE por el binding lock.
+    await tx
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.credito_id, viva.credito_id))
+      .limit(1)
+      .for("no key update");
+
+    // Todo en SQL: `pagos_credito.createdat` y `moras_condonaciones.fecha` son
+    // `timestamp` sin zona con DEFAULT now() en la misma base; leerlas a JS las
+    // correría +6h (postgres.js). Toda ruta que inserta pagos (insertPayment,
+    // registro manual, recálculo) deja createdat al DEFAULT.
+    const [posterior] = porPagoPendienteRevertido ? [] : await tx
+      .select({ pago_id: pagos_credito.pago_id })
+      .from(pagos_credito)
+      .where(and(
+        eq(pagos_credito.credito_id, viva.credito_id),
+        // Una fila anulada (`paymentFalse`, anularPagoMora) no es un pago que
+        // entró; la reversa borra sus filas y la vuelta a pendiente la deja viva.
+        eq(pagos_credito.paymentFalse, false),
+        sql`${pagos_credito.nexaPaymentEventId} IS DISTINCT FROM ${nexa_payment_event_id}`,
+        sql`${pagos_credito.createdAt} >= (SELECT mc.fecha FROM ${SQL_CARTERA_SCHEMA}.moras_condonaciones mc WHERE mc.condonacion_id = ${viva.condonacion_id})`,
+      ))
+      .limit(1);
+    if (posterior) {
+      // Queda en el motivo: es lo que cartera le informa a nexa-server (y al
+      // reporte) de esta condonación en cada respuesta incierta del evento.
+      await tx
+        .update(moras_condonaciones)
+        .set({ motivo: sql`${moras_condonaciones.motivo} || ${` — ${MARCA_CONDONACION_NEXA_CONSERVADA_PAGO_POSTERIOR}`}` })
+        .where(and(
+          eq(moras_condonaciones.condonacion_id, viva.condonacion_id),
+          sql`position(${MARCA_CONDONACION_NEXA_CONSERVADA_PAGO_POSTERIOR} in ${moras_condonaciones.motivo}) = 0`,
+        ));
+      return {
+        anulada: false as const,
+        motivo: "pago_posterior_no_vinculado" as const,
+        credito_id: viva.credito_id,
+        condonacion_id: viva.condonacion_id,
+        pago_id: posterior.pago_id,
+      };
+    }
+
+    const [marcada] = await tx
+      .update(moras_condonaciones)
+      .set({ anulada_at: new Date() })
+      .where(and(
+        eq(moras_condonaciones.condonacion_id, viva.condonacion_id),
+        isNull(moras_condonaciones.anulada_at),
+      ))
+      .returning({ condonacion_id: moras_condonaciones.condonacion_id });
+    if (!marcada) return { anulada: false };
+
+    await compensarAnotacionesVivas(
+      and(
+        eq(mora_pagada_cuota.condonacion_id, viva.condonacion_id),
+        eq(mora_pagada_cuota.tipo, "CONDONACION"),
+      )!,
+      { tipo: "ANULACION", usuario_id: user?.id ?? null, motivo },
+      tx as unknown as typeof db,
+    );
+
+    const restitucion = await updateMora({
+      credito_id: viva.credito_id,
+      tipo: "INCREMENTO",
+      // El decimal tal cual: Number() pierde centavos en montos grandes y el
+      // ledger compensa con el original.
+      monto_cambio: viva.monto,
+      motivo: `${motivo} (evento Nexa ${nexa_payment_event_id})`,
+      origen: "CONDONACION_NEXA_A_TIEMPO",
+      dbClient: tx as unknown as typeof db,
+    });
+    if (!restitucion.success && "error" in restitucion && restitucion.error) {
+      throw new Error(`No se pudo restituir la mora: ${restitucion.error}`);
+    }
+    return { anulada: true, monto: viva.monto };
+  });
 }
 
 
@@ -3569,6 +3983,20 @@ export function filtroFechaCondonacionesGT(
  * sobre TODO el conjunto filtrado. If excel=true, exporta todas las filas
  * filtradas (sin paginar) y sube a R2.
  */
+/** Texto legible del motivo de una condonación; las automáticas Nexa guardan un código. */
+// startsWith y no igualdad: el motivo puede llevar la marca " — ALERTA: …" al final,
+// y esa alerta tiene que seguir visible en el texto.
+export const textoMotivoCondonacion = (motivo: string | null | undefined): string =>
+  motivo?.startsWith(MOTIVO_CONDONACION_NEXA_A_TIEMPO)
+    ? `Pago Nexa a tiempo (ACH)${motivo.slice(MOTIVO_CONDONACION_NEXA_A_TIEMPO.length)}`
+    : (motivo ?? "");
+
+const conMotivoLegible = <T extends { motivo: string | null; automatica: boolean | null }>(fila: T) => ({
+  ...fila,
+  automatica: fila.automatica === true,
+  motivo_texto: textoMotivoCondonacion(fila.motivo),
+});
+
 export async function getCondonacionesMora({
   numero_credito_sifco,
   nombre_usuario,
@@ -3606,6 +4034,8 @@ export async function getCondonacionesMora({
     whereClauses.push(eq(platform_users.email, usuario_email));
   }
   whereClauses.push(...filtroFechaCondonacionesGT(fecha_desde, fecha_hasta));
+  // Una condonación anulada (pago Nexa rechazado, ver drizzle/0051) no perdonó nada.
+  whereClauses.push(isNull(moras_condonaciones.anulada_at));
 
   // 2️⃣ Query con joins
   const query = db
@@ -3621,6 +4051,8 @@ export async function getCondonacionesMora({
       fecha: moras_condonaciones.fecha,
       usuario_email: platform_users.email,
       montoCondonacion: moras_condonaciones.montoCondonacion,
+      // Las automáticas (pago Nexa a tiempo) llevan el evento; las manuales no.
+      automatica: sql<boolean>`${moras_condonaciones.nexa_payment_event_id} IS NOT NULL`,
     })
     .from(moras_condonaciones)
     .innerJoin(creditos, eq(moras_condonaciones.credito_id, creditos.credito_id))
@@ -3640,6 +4072,7 @@ export async function getCondonacionesMora({
         .select({
           condonaciones: count(),
           monto_total: sum(moras_condonaciones.montoCondonacion),
+          monto_total_automatica: sql<string | null>`SUM(${moras_condonaciones.montoCondonacion}) FILTER (WHERE ${moras_condonaciones.nexa_payment_event_id} IS NOT NULL)`,
         })
         .from(moras_condonaciones)
         .innerJoin(creditos, eq(moras_condonaciones.credito_id, creditos.credito_id))
@@ -3652,21 +4085,28 @@ export async function getCondonacionesMora({
 
     const total = Number(totalesRes?.[0]?.condonaciones ?? 0);
 
+    // Big: los SUM son numeric de Postgres; con Number un total grande pierde centavos.
+    const montoTotal = new Big(totalesRes?.[0]?.monto_total ?? 0);
+    const montoAutomatica = new Big(totalesRes?.[0]?.monto_total_automatica ?? 0);
+
     emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
     return {
       success: true,
       count: data.length,
-      data,
+      data: data.map(conMotivoLegible),
       pagination: { page: pageNum, pageSize: size, total, totalPages: Math.ceil(total / size) },
       totales: {
-        monto_total: Number(totalesRes?.[0]?.monto_total ?? 0).toFixed(2),
+        monto_total: montoTotal.toFixed(2),
+        // Para separar lo perdonado a mano de lo que se condonó solo por Nexa.
+        monto_total_manual: montoTotal.minus(montoAutomatica).toFixed(2),
+        monto_total_automatica: montoAutomatica.toFixed(2),
         condonaciones: total,
       },
     };
   }
 
   // Excel: TODAS las filas filtradas, sin paginar.
-  const data = await query;
+  const data = (await query).map(conMotivoLegible);
 
   // 3️⃣ Crear Excel (mismo lenguaje visual que el reporte de inversionistas)
   const excelBuffer = await buildReporteCashInWorkbook({
@@ -3678,7 +4118,7 @@ export async function getCondonacionesMora({
     // condonado" de la pantalla. El capital del crédito no se suma —sumar
     // capitales no dice nada— y por eso va sin `total`.
     conTotales: true,
-    filas: data as any[],
+    filas: data.map((f) => ({ ...f, tipo_texto: f.automatica ? "Automática" : "Manual" })) as any[],
     columnas: [
       { header: "Condonación ID", key: "condonacion_id", width: 14, type: "number" },
       { header: "Crédito ID", key: "credito_id", width: 12, type: "number" },
@@ -3694,7 +4134,8 @@ export async function getCondonacionesMora({
       },
       { header: "Usuario Cliente", key: "usuario", width: 28 },
       { header: "Asesor", key: "asesor", width: 25 },
-      { header: "Motivo", key: "motivo", width: 40 },
+      { header: "Motivo", key: "motivo_texto", width: 40 },
+      { header: "Tipo", key: "tipo_texto", width: 14 },
       { header: "Fecha (GT)", key: "fecha", width: 18, type: "date" },
       { header: "Usuario que condonó", key: "usuario_email", width: 30 },
     ],

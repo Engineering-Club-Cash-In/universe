@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../database";
 import { asesor_bucket, asesores, SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA, STATUS_READER_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import { BUCKETS_CONVENIO_LOCK_KEY, CREDITO_ASESOR_LOCK_NAMESPACE, PROCESAR_MORAS_LOCK_KEY } from "../../lib/buckets-job-locks";
 import { clasificarDevolucion, separarYaDevueltos, type UltimoCambioDueno } from "../../lib/ausencia-devolucion";
 import { leerCreditos, reasignarAsesorLote } from "./reasignarAsesorLote";
@@ -233,13 +233,16 @@ export async function devolverTraslado(params: {
     const directos = await devolverSinBucket({
       operacionId: params.operacionId,
       titular,
+      bucketsDelTitular,
       creditoIds: aDevolverDirecto,
       motivo,
       usuarioEmail: params.usuarioEmail,
     });
-    devueltos += directos.length;
-    const devueltosDirecto = new Set(directos);
-    const omitidos = aDevolverDirecto.filter((id) => !devueltosDirecto.has(id));
+    devueltos += directos.devueltos.length;
+    // Con bucket sembrado (convenio) que el titular no cubre: se quedan y se informan.
+    for (const id of directos.fueraDelPool) retenidos.push({ credito_id: id, motivo: "bucket_fuera_del_pool" });
+    const resueltosDirecto = new Set([...directos.devueltos, ...directos.fueraDelPool]);
+    const omitidos = aDevolverDirecto.filter((id) => !resueltosDirecto.has(id));
     if (omitidos.length) {
       // Los que no se escribieron (cambiaron de dueño, se cerraron o ENTRARON a un
       // bucket mientras tanto) se vuelven a clasificar con lo que hay ahora: los que
@@ -312,10 +315,12 @@ async function ultimosCambiosDeDueno(ids: number[]): Promise<Map<number, UltimoC
 async function devolverSinBucket(params: {
   operacionId: string;
   titular: number;
+  /** Buckets que el titular cubre (pausados al repartir + activos hoy). */
+  bucketsDelTitular: ReadonlySet<number>;
   creditoIds: number[];
   motivo: string;
   usuarioEmail?: string;
-}): Promise<number[]> {
+}): Promise<{ devueltos: number[]; fueraDelPool: number[] }> {
   const ids = [...new Set(params.creditoIds)].sort((a, b) => a - b);
   return db.transaction(async (tx) => {
     const jobs = await tx.execute<{ moras: boolean; convenio: boolean }>(sql`
@@ -328,9 +333,11 @@ async function devolverSinBucket(params: {
         "buckets_ocupado",
       );
     }
+    // FOR SHARE: desactivar al asesor espera a esta devolución, o esta ve que ya
+    // no está activo y se aborta; sin el lock podía devolverle todo después.
     const [destino] = (
       await tx.execute<{ activo: boolean }>(sql`
-        SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${params.titular}`)
+        SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${params.titular} FOR SHARE`)
     ).rows;
     if (!destino?.activo) throw new AusenciaError("El asesor no está activo.", 409, "asesor_inactivo");
     for (const id of ids) {
@@ -338,7 +345,25 @@ async function devolverSinBucket(params: {
     }
     const idsSql = sql.join(ids.map((id) => sql`${id}`), sql`, `);
     const cerradoSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
-    const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+    // Una cuenta EN_CONVENIO no tiene bucket para el motor, pero el job de convenios
+    // le siembra uno y ese es el que cuenta para el pool: se lee con la regla de
+    // lectura (`bucketActualSql`, sin anular EN_CONVENIO). Si ese bucket no lo cubre
+    // el titular, la cuenta se queda con quien la recibió y se informa.
+    const bucketsSql = params.bucketsDelTitular.size
+      ? sql.join([...params.bucketsDelTitular].map((b) => sql`${b}`), sql`, `)
+      : sql`-1`;
+    const fuera = await tx.execute<{ credito_id: number }>(sql`
+      SELECT c.credito_id
+      FROM ${schema}.creditos c
+      JOIN ${schema}.operaciones_traslado_cartera_detalle d
+        ON d.credito_id = c.credito_id AND d.operacion_id = ${params.operacionId}::uuid
+      LEFT JOIN ${schema}.moras_credito m ON m.credito_id = c.credito_id AND m.activa
+      WHERE c.credito_id IN (${idsSql}) AND c.asesor_id = d.asesor_nuevo_id
+        AND COALESCE(c."statusCredit", '') NOT IN (${cerradoSql})
+        AND ${bucketActualSql("c", "m")} IS NOT NULL
+        AND ${bucketActualSql("c", "m")} NOT IN (${bucketsSql})`);
+    const fueraDelPool = fuera.rows.map((r) => Number(r.credito_id));
+    const fueraSet = sql.join(fueraDelPool.length ? fueraDelPool.map((id) => sql`${id}`) : [sql`-1`], sql`, `);
     const res = await tx.execute<{ credito_id: number; asesor_anterior: number; bucket: number | null }>(sql`
       WITH previos AS (
         SELECT c.credito_id, c.asesor_id AS asesor_anterior, d.bucket
@@ -350,7 +375,7 @@ async function devolverSinBucket(params: {
           AND COALESCE(c."statusCredit", '') NOT IN (${cerradoSql})
           -- Sigue sin bucket operativo bajo los locks: si entró a uno, la regla del
           -- pool la aplica la reasignación en bloque (el reintento lo reclasifica).
-          AND (CASE WHEN c."statusCredit" IN (${fueraSql}) THEN NULL ELSE ${bucketActualSql("c", "m")} END) IS NULL
+          AND c.credito_id NOT IN (${fueraSet})
         FOR UPDATE OF c
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = ${params.titular}
@@ -365,6 +390,6 @@ async function devolverSinBucket(params: {
         RETURNING credito_id
       )
       SELECT credito_id, asesor_anterior, bucket FROM actualizados`);
-    return res.rows.map((r) => Number(r.credito_id));
+    return { devueltos: res.rows.map((r) => Number(r.credito_id)), fueraDelPool };
   });
 }

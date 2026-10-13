@@ -25,6 +25,8 @@ export interface CreditoLoteLeido {
   asesor_id: number | null;
   /** Bucket actual (motor); null = fuera del funnel operativo. */
   bucket: number | null;
+  /** Cancelado, pendiente de cancelación o caído (distinto de EN_CONVENIO). */
+  cerrado?: boolean;
 }
 
 export interface EvaluacionLote {

@@ -114,6 +114,9 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// M4: el asesor aceptó o descartó la contrapropuesta. Va a los
 	// cobros_supervisor.
 	"convenio_contrapropuesta_respondida",
+	// M5 (#1895, migración 0082): un asesor ausente se reactivó y se le devolvió
+	// su cartera. Va al resto del equipo y a los cobros_supervisor.
+	"asesor_reactivado",
 	// CB-041: el apagado o la reactivación ya se ejecutó (LEGION lo confirmó
 	// y el supervisor lo marcó) — el asesor dueño del caso debe llamar al
 	// cliente. Se resuelve al registrar esa llamada, o, si es el aviso de un

@@ -34,9 +34,10 @@ const createInsertBuilder = (scope: "global" | "tx") => {
 mock.module("../database", () => {
   const tx = {
     insert: () => createInsertBuilder("tx"),
+    execute: () => Promise.resolve({ rows: [] }),
     select: () => ({
       from: () => ({
-        where: () => Promise.resolve([]),
+        where: () => Object.assign(Promise.resolve([]), { for: () => Promise.resolve([]) }),
       }),
     }),
   };

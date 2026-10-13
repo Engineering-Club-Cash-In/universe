@@ -23,6 +23,7 @@
 
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import { MOTIVOS_AUSENCIA } from "../lib/ausencia-asesor";
 import {
 	DECISIONES,
 	mensajeFueraDeAlcance,
@@ -32,6 +33,12 @@ import { memoConTtl } from "../lib/memo-ttl";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
 import { USER_ROLE_VALUES } from "../lib/roles";
 import type { ResultadoCartera } from "../lib/supervision-kpis";
+import {
+	listarAusencias,
+	marcarAusenteIndefinido,
+	previsualizarRepartoAusencia,
+	reactivarAsesor,
+} from "../services/ausencias-cobros";
 import {
 	getBitacoraDecisiones,
 	getEscaladasDelAsesor,
@@ -304,6 +311,87 @@ export const supervisionCobrosRouter = {
 	getProximosSubirBucket: cobrosSupervisorProcedure
 		.input(z.object({ asesorId: z.number().int().positive() }))
 		.handler(({ input }) => listarProximosSubirBucket(input.asesorId)),
+
+	/**
+	 * M5 · Previsualiza el reparto de la cartera de un asesor al marcarlo ausente
+	 * (Figma «Redistribución»): a quién va cada cuenta, repartido según la
+	 * capacidad de cada asesor, y la carga de cada uno antes y después. No toca
+	 * nada; el `previewId` vale 10 minutos y es lo que confirma
+	 * `marcarAusenteIndefinido`. Las cuentas fuera del funnel (canceladas, caídas…)
+	 * no se reparten: se quedan con el asesor.
+	 */
+	previsualizarRepartoAusencia: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				asesorId: z.number().int().positive(),
+				motivo: z.enum(MOTIVOS_AUSENCIA).default("incidente"),
+			}),
+		)
+		.handler(({ input, context }) =>
+			previsualizarRepartoAusencia({
+				...input,
+				actorEmail: context.session.user.email,
+			}),
+		),
+
+	/**
+	 * M5 · Marca ausente a un asesor sin fecha de regreso (motivo Incidente,
+	 * Permiso o Vacaciones; el fin queda abierto hasta `reactivarAsesor`). Reparte
+	 * su cartera al equipo con el reparto previsualizado y lo saca del pool para
+	 * que no reciba cuentas nuevas. `id` lo genera el cliente (reintento seguro).
+	 * La cobertura con suplente y fechas cerradas (`crearCobertura`) sigue igual.
+	 */
+	marcarAusenteIndefinido: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				asesorId: z.number().int().positive(),
+				motivo: z.enum(MOTIVOS_AUSENCIA),
+				previewId: z.string().uuid(),
+				nota: z.string().trim().max(1000).optional(),
+			}),
+		)
+		.handler(({ input, context }) =>
+			marcarAusenteIndefinido({
+				...input,
+				actor: {
+					userId: context.userId,
+					role: context.userRole,
+					email: context.session.user.email,
+				},
+			}),
+		),
+
+	/**
+	 * M5 · Reactiva a un asesor ausente: vuelve al pool, se le devuelve lo que
+	 * se repartió (salvo lo que ya cambió de dueño o de bucket) y se avisa al
+	 * equipo. Devuelve cuántas cuentas volvieron y cuáles se quedaron.
+	 */
+	reactivarAsesor: cobrosSupervisorProcedure
+		.input(z.object({ id: z.string().uuid() }))
+		.handler(({ input, context }) =>
+			reactivarAsesor({
+				id: input.id,
+				actor: {
+					userId: context.userId,
+					role: context.userRole,
+					email: context.session.user.email,
+				},
+			}),
+		),
+
+	/**
+	 * M5 · Ausencias indefinidas (vigentes por defecto) para marcar «Ausente» en
+	 * las tarjetas de Mi equipo y mostrar «Reactivar». Va aparte de
+	 * `listarCoberturas`, que sigue devolviendo solo las de suplente con fechas.
+	 */
+	listarAusencias: cobrosSupervisorProcedure
+		.input(
+			z
+				.object({ soloVigentes: z.boolean().default(true) })
+				.default({ soloVigentes: true }),
+		)
+		.handler(({ input }) => listarAusencias(input)),
 
 	/**
 	 * S6 · Reasignación en bloque, TODO O NADA. Recibe varios créditos, el asesor

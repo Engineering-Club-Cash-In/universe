@@ -34,6 +34,7 @@ export type CobrosNotifTipo =
 	| "inmovilizacion_resuelta"
 	| "convenio_contrapropuesta"
 	| "convenio_contrapropuesta_respondida"
+	| "asesor_reactivado"
 	| "inmovilizacion_llamar_cliente"
 	| "inmovilizacion_ejecutar_pendiente"
 	| "inmovilizacion_apagado_ejecutado"

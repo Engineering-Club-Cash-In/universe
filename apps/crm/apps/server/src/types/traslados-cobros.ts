@@ -5,6 +5,12 @@ export type SolicitudTraslado = {
 	destinosPorBucket?: Record<string, number>;
 	modo: "traslado_completo" | "redistribucion" | "destino_por_bucket";
 	motivo: string;
+	/** M5: reparte por utilización (carga ÷ capacidad) y no por cantidad de cuentas. */
+	ponderarPorCapacidad?: boolean;
+	/** M5: las cuentas fuera del funnel se quedan con el asesor de origen. */
+	mantenerEspeciales?: boolean;
+	/** M5: el asesor de origen sale de su pool en la misma transacción que el traslado. */
+	pausarPoolOrigen?: boolean;
 };
 export type PreviewTraslado = {
 	previewId: string;
@@ -44,6 +50,8 @@ export type ResultadoTraslado = {
 	success: true;
 	operacionId: string;
 	cuentas: number;
+	/** Solo con `pausarPoolOrigen`: los buckets que estaban activos y se pausaron. */
+	bucketsPausados?: number[];
 };
 export type HistorialTraslado = {
 	id: string;
@@ -65,4 +73,16 @@ export type HistorialTrasladosPaginado = {
 		total: number;
 		totalPages: number;
 	};
+};
+
+/** Respuesta de `POST /buckets/traslados/:id/devolver` (M5). */
+export type ResultadoDevolucionTraslado = {
+	success: true;
+	asesor_id: number;
+	devueltos: number;
+	total: number;
+	retenidos: {
+		credito_id: number;
+		motivo: "cambio_de_dueno" | "fuera_del_funnel" | "bucket_fuera_del_pool";
+	}[];
 };

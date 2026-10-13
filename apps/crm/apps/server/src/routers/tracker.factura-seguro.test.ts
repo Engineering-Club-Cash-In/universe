@@ -313,6 +313,7 @@ function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 		vehicleYear: 2020,
 		facturaEnvio: null,
 		facturaSubidaAt: null,
+		seguroPrevio: false,
 		insuranceProvider: "universales",
 		vin: "VIN123",
 		...extra,
@@ -385,6 +386,17 @@ describe("facturaSeguro en el caso", () => {
 			motivo: null,
 			subidaAt: null,
 			envio: null,
+			yaRegistrada: false,
+		});
+	});
+
+	test("con un Seguro del Vehículo de antes (proceso manual), ya cuenta como subida", async () => {
+		caso = casoAl(90, { seguroPrevio: true });
+		const [c] = await call(trackerRouter.getCasos, {}, ctx);
+		expect(c.facturaSeguro).toMatchObject({
+			habilitada: false,
+			yaRegistrada: true,
+			motivo: "La factura del seguro de este crédito ya fue subida",
 		});
 	});
 
@@ -507,6 +519,13 @@ describe("subirFacturaSeguro", () => {
 		documentosRegistrados = [{ id: "doc-ya-guardado" }];
 		await expect(subir()).rejects.toThrow();
 		expect(borradosR2).toEqual([]);
+	});
+
+	test("si apareció un Seguro del Vehículo mientras subía, no registra ni envía", async () => {
+		documentosRegistrados = [{ id: "doc-manual" }];
+		await expect(subir()).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(insertados).toHaveLength(0);
+		expect(correos).toHaveLength(0);
 	});
 
 	test("los datos del correo se leen después de subir, con las cotizaciones FOR SHARE", async () => {

@@ -82,3 +82,37 @@ export async function withPaymentAdvisoryLock<T>(
     lockConn.release();
   }
 }
+
+/**
+ * Hermano NO bloqueante de `withPaymentAdvisoryLock` (`pg_try_advisory_lock`, misma conexión de `lockPool`, misma
+ * marca de lock tomado). Si el lock está ocupado devuelve `{ adquirido: false }` SIN ejecutar `fn` y suelta la
+ * conexión de inmediato: para jobs que no deben esperar a un pago colgado. Libera siempre, aunque `fn` lance.
+ */
+export async function tryWithPaymentAdvisoryLock<T>(
+  credito_id: number,
+  fn: (lock: PaymentAdvisoryLock) => Promise<T>
+): Promise<{ adquirido: true; valor: T } | { adquirido: false }> {
+  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  const lock = {} as PaymentAdvisoryLock;
+  let tomado = false;
+  try {
+    const r = await lockConn.query("SELECT pg_try_advisory_lock($1, $2) AS ok", [
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
+      credito_id,
+    ]) as { rows?: { ok?: boolean }[] };
+    tomado = r.rows?.[0]?.ok === true;
+    if (!tomado) return { adquirido: false };
+    heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });
+    return { adquirido: true, valor: await fn(lock) };
+  } finally {
+    heldPaymentLocks.delete(lock);
+    if (tomado) {
+      try {
+        await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [PAYMENT_ADVISORY_LOCK_NAMESPACE, credito_id]);
+      } catch (unlockError) {
+        console.error("⚠️ Error liberando advisory lock:", unlockError);
+      }
+    }
+    lockConn.release();
+  }
+}

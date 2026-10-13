@@ -8,10 +8,10 @@ import { randomUUID } from "node:crypto";
  * REALES (sin fakes) sobre una COPIA de datos de producción. Las pruebas ESCRIBEN en la copia.
  *
  * Se salta si falta E2E_DB_URL. Preparación (copia descartable, nunca la base de PROD):
- *   docker exec cartera-local createdb -U postgres -T prod20261009 e2e_bt_t8
- *   (aplicar drizzle/0053, 0054 y 0055 con `docker exec -i cartera-local psql -U postgres -d e2e_bt_t8 -v ON_ERROR_STOP=1 -f - < archivo`)
- *   E2E_DB_URL=postgres://postgres:<pw>@localhost:5433/e2e_bt_t8 bun test src/controllers/boletaTardia.e2e.test.ts
- *   docker exec cartera-local dropdb -U postgres e2e_bt_t8
+ *   docker exec cartera-local createdb -U postgres -T prod20261009 e2e_bt_t9b
+ *   (aplicar drizzle/0053, 0054 y 0055 con `docker exec -i cartera-local psql -U postgres -d e2e_bt_t9b -v ON_ERROR_STOP=1 -f - < archivo`)
+ *   E2E_DB_URL=postgres://postgres:<pw>@localhost:5433/e2e_bt_t9b bun test src/controllers/boletaTardia.e2e.test.ts
+ *   docker exec cartera-local dropdb -U postgres e2e_bt_t9b
  *
  * CONTROL DE `hoy`: la copia es del 09-oct-2026 (la mora de sus créditos coincide con las fechas de ese día), así que
  * la DECISIÓN se evalúa con hoy = 09-oct (se inyecta `deps.hoy`). El resto (`insertPayment`, `evaluarCreditoAlDia`,
@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
  */
 const E2E_DB_URL = process.env.E2E_DB_URL;
 const PROD_SYSTEM_IDENTIFIER = "7473814220388481052";
-const DB_ESPERADA = "e2e_bt_t8";
+const DB_ESPERADA = "e2e_bt_t9b";
 const HOY_YMD = "2026-10-09";
 const HOY = new Date(2026, 9, 9);
 const EMAIL = "jalvarado@clubcashin.com";
@@ -295,29 +295,33 @@ suite("boleta tardía E2E: registrarPagoConBoletaTardia + insertPayment REAL sob
     expect(ledgerDe(f, "CONDONACION").minus(p.ledger0.CONDONACION).plus(ledgerDe(f, "ANULACION").minus(p.ledger0.ANULACION)).abs().lt("0.000001")).toBe(true);
   }, T);
 
-  test("5. LÍNEA BASE T9: caída simulada (condonar a mano y no registrar) deja la condonación viva y SIN filas (huérfana; el barrido es T9)", async () => {
+  test("5. caída simulada (condonar a mano y no registrar): pasado el umbral, el barrido REAL anula la huérfana y la mora vuelve exacta", async () => {
     const p = await preparar(tomar()); usados.push(`5:${p.credito}`);
-    const dec = await decidirHoy9()({ credito_id: p.credito, monto_boleta: p.body.monto_boleta, fecha_boleta: p.body.fecha_boleta });
-    expect(dec.aplica).toBe(true);
-    const c = await condonar({
-      credito_id: p.credito, montoMoraEsperado: dec.moraActiva!, monto: dec.montoCondonar,
-      cuotas: dec.porCuota.map((q: any) => ({ cuota_id: q.cuota_id, monto: q.monto })),
-      origen: "CONDONACION_BOLETA_TARDIA", intento_id: p.intento, usuario_email: EMAIL, motivo: "E2E 6c caída simulada",
-    });
-    expect(c.kind).toBe("condonada");
+    await huerfana(p);
     const f = await foto(p.credito, p.intento);
     expect(f.conds).toHaveLength(1);
     expect(f.conds[0].anulada).toBe(false);
-    expect(f.filas).toEqual([]); // ANOTADO PARA T9: viva + sin filas = huérfana que el barrido debe anular
+    expect(f.filas).toEqual([]); // viva + sin filas = huérfana
     expect(f.mora.monto).toBe(Big(p.moraAntes).minus(p.e.condonar).toFixed(2));
-    // Un reintento del mismo intento (con el lock) la reevalúa: anula la huérfana y vuelve a condonar y registrar.
-    const res = await correr(p);
+    // Aún joven (< 15 min): el barrido no la toca.
+    await barrer();
+    expect((await foto(p.credito, p.intento)).conds[0].anulada).toBe(false);
+    await envejecer(p.intento, 20);
+    const r = await barrer();
     const f2 = await foto(p.credito, p.intento);
+    expect(r.fallidas).toBe(0);
+    expect(r.anuladas).toBeGreaterThanOrEqual(1);
+    expect(f2.conds.map((x: any) => x.anulada)).toEqual([true]);
+    expect(f2.mora.monto).toBe(Big(p.moraAntes).toFixed(2)); // exactamente la mora de antes
+    expect(f2.mora.activa).toBe(true);
+    expect(ledgerDe(f2, "CONDONACION").minus(p.ledger0.CONDONACION).plus(ledgerDe(f2, "ANULACION").minus(p.ledger0.ANULACION)).abs().lt("0.000001")).toBe(true);
+    // Un reintento del mismo intento después del barrido sigue funcionando: vuelve a condonar y registrar.
+    const res = await correr(p);
     expect(res.error).toBeUndefined();
     expect(res.r.condonacionBoletaTardia.estado).toBe("vigente");
-    expect(f2.conds.map((x: any) => x.anulada)).toEqual([true, false]); // la huérfana se anuló y se condonó de nuevo
-    expect(f2.filas.length).toBeGreaterThan(0);
-    expect(f2.filas.reduce((a: Big, x: any) => a.plus(x.mora ?? 0), Big(0)).toFixed(2)).toBe(p.e.cobrar.toFixed(2));
+    const f3 = await foto(p.credito, p.intento);
+    expect(f3.conds.map((x: any) => x.anulada)).toEqual([true, false]);
+    expect(f3.filas.length).toBeGreaterThan(0);
   }, T);
 
   test("6. el crédito NO queda al día (cuota vencida extra que la decisión no vio): la condonación se ANULA con estado anulada_no_quedo_al_dia", async () => {
@@ -567,4 +571,225 @@ suite("boleta tardía E2E: registrarPagoConBoletaTardia + insertPayment REAL sob
     const ledger = await sql(`SELECT COALESCE(sum(monto),0)::text AS m FROM cartera.mora_pagada_cuota WHERE credito_id=$1 AND tipo='CONDONACION'`, [c]);
     expect(Big(ledger[0].m).toFixed(6)).toBe(p.ledger0.CONDONACION.toFixed(6)); // sin ledger nuevo de condonación
   }, T);
+  // ----- Tarea 9: barrido de huérfanas sobre datos reales -----
+  /** Condona a mano sin registrar (el proceso "murió" entre condonar e insertPayment). */
+  const huerfana = async (p: Prep) => {
+    const dec = await decidirHoy9()({ credito_id: p.credito, monto_boleta: p.body.monto_boleta, fecha_boleta: p.body.fecha_boleta });
+    expect(dec.aplica).toBe(true);
+    const c = await condonar({
+      credito_id: p.credito, montoMoraEsperado: dec.moraActiva!, monto: dec.montoCondonar,
+      cuotas: dec.porCuota.map((q: any) => ({ cuota_id: q.cuota_id, monto: q.monto })),
+      origen: "CONDONACION_BOLETA_TARDIA", intento_id: p.intento, usuario_email: EMAIL, motivo: "E2E T9 huérfana",
+    });
+    expect(c.kind).toBe("condonada");
+  };
+  const envejecer = (intento: string, minutos: number) =>
+    pool.query(`UPDATE cartera.moras_condonaciones SET fecha = now() - make_interval(mins => $2::int) WHERE intento_id = $1`, [intento, minutos]);
+  const barrer = async () => (await import("./barridoCondonacionesBoletaTardia")).barrerCondonacionesBoletaTardiaHuerfanas();
+  const viva = async (intento: string) => (await sql(`SELECT anulada_at IS NULL AS viva FROM cartera.moras_condonaciones WHERE intento_id=$1 ORDER BY condonacion_id DESC LIMIT 1`, [intento]))[0].viva as boolean;
+  const nAnulaciones = async (intento: string) => (await sql(`SELECT count(*)::int AS n FROM cartera.mora_pagada_cuota WHERE tipo='ANULACION' AND revierte_a IN (SELECT id FROM cartera.mora_pagada_cuota WHERE condonacion_id IN (SELECT condonacion_id FROM cartera.moras_condonaciones WHERE intento_id=$1))`, [intento]))[0].n as number;
+  const carrera = <X,>(pr: Promise<X>, ms: number) => Promise.race([pr, new Promise<"TIMEOUT">((r) => setTimeout(() => r("TIMEOUT"), ms))]);
+  const capturarLogs = async <X,>(fn: () => Promise<X>) => {
+    const originales = { warn: console.warn, error: console.error };
+    const lineas: string[] = [];
+    console.warn = (...a: unknown[]) => { lineas.push(a.map(String).join(" ")); };
+    console.error = (...a: unknown[]) => { lineas.push(a.map(String).join(" ")); };
+    try { return { r: await fn(), lineas }; } finally { console.warn = originales.warn; console.error = originales.error; }
+  };
+
+  /**
+   * Escenario (a): A y B huérfanas viejas (A con menor condonacion_id); otra conexión sostiene el advisory lock de A
+   * (el request entre condonar e insertPayment). El barrido NO debe esperar: se mide cuánto tarda.
+   */
+  async function escenarioLock(escribirFilaBajoLock: boolean) {
+    const A = await preparar(tomar()); const B = await preparar(tomar()); usados.push(`T9lock:${A.credito},${B.credito}`);
+    await huerfana(A); await huerfana(B);
+    await envejecer(A.intento, 60); await envejecer(B.intento, 60);
+    const { lockPool } = await import("../database");
+    const holder = await lockPool.connect();
+    let liberado = false;
+    const soltar = async () => { if (!liberado) { liberado = true; await holder.query("SELECT pg_advisory_unlock(8765, $1)", [A.credito]).catch(() => {}); holder.release(); } };
+    try {
+      await holder.query("SELECT pg_advisory_lock(8765, $1)", [A.credito]);
+      const t0 = Date.now();
+      const res = await carrera(barrer(), 20_000);
+      const ms = Date.now() - t0;
+      const esperando = await sql(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND classid=8765 AND objid=$1 AND NOT granted`, [A.credito]);
+      const obs = { ms, Aviva: await viva(A.intento), Bviva: await viva(B.intento), esperandoElLock: esperando[0].n };
+      if (escribirFilaBajoLock) await pool.query(`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, cuota_interes, boleta_tardia_intento_id) VALUES ($1,'pending',1,0,$2)`, [A.credito, A.intento]);
+      await soltar();
+      return { A, B, obs, res };
+    } finally { await soltar(); }
+  }
+
+  test("T9-a1. registro EN CURSO (lock de A tomado por otra conexión): A queda omitida sin esperar ni anularse; con la fila ya escrita, la siguiente corrida tampoco la anula", async () => {
+    const e = await escenarioLock(true);
+    console.log(`[T9-a1] medición: ${JSON.stringify(e.obs)} res=${JSON.stringify(e.res)}`);
+    expect(e.res).not.toBe("TIMEOUT");
+    expect((e.res as any).omitidas_por_lock).toBeGreaterThanOrEqual(1);
+    expect((e.res as any).fallidas).toBe(0);
+    expect(e.obs.ms).toBeLessThan(10_000);
+    expect(e.obs.esperandoElLock).toBe(0); // nadie queda en cola en pg_locks
+    expect(e.obs.Aviva).toBe(true);
+    expect(await viva(e.A.intento)).toBe(true);
+    // Ya sin lock y con la fila viva del registro: el siguiente tick sigue sin anular A.
+    const r2 = await barrer();
+    expect(r2.fallidas).toBe(0);
+    expect(await viva(e.A.intento)).toBe(true);
+    expect((await foto(e.A.credito, e.A.intento)).mora.monto).toBe(Big(e.A.moraAntes).minus(e.A.e.condonar).toFixed(2));
+    expect(await nAnulaciones(e.A.intento)).toBe(0);
+  }, 60_000);
+
+  test("T9-a2. B se anula RÁPIDO mientras A sigue bloqueada (sin cabeza de línea), y A se reintenta y anula en la corrida siguiente al soltarse el lock", async () => {
+    const e = await escenarioLock(false);
+    console.log(`[T9-a2] medición: ${JSON.stringify(e.obs)} res=${JSON.stringify(e.res)}`);
+    expect(e.res).not.toBe("TIMEOUT");
+    expect(e.obs.ms).toBeLessThan(10_000);
+    expect(e.obs.Bviva).toBe(false); // B anulada con A aún bloqueada
+    expect(e.obs.Aviva).toBe(true);
+    expect((e.res as any).anuladas).toBeGreaterThanOrEqual(1);
+    expect((e.res as any).omitidas_por_lock).toBeGreaterThanOrEqual(1);
+    const r2 = await barrer(); // lock suelto: la reintenta
+    expect(r2.fallidas).toBe(0);
+    expect(await viva(e.A.intento)).toBe(false);
+    expect((await foto(e.A.credito, e.A.intento)).mora.monto).toBe(Big(e.A.moraAntes).toFixed(2));
+  }, 60_000);
+
+  test("T9-b. condonación con filas vivas (registro completo) e intento propio: el barrido la deja intacta aunque pase de 15 min", async () => {
+    const p = await preparar(tomar()); usados.push(`T9b:${p.credito}`);
+    const r0 = await correr(p); afirmarExito(p, await foto(p.credito, p.intento), r0);
+    const antes = await foto(p.credito, p.intento);
+    await envejecer(p.intento, 120);
+    const r = await barrer();
+    expect(r.fallidas).toBe(0);
+    const f = await foto(p.credito, p.intento);
+    expect(f.conds[0].anulada).toBe(false);
+    expect(f.mora).toEqual(antes.mora);
+    expect(f.ledger).toEqual(antes.ledger);
+    expect(f.filas).toEqual(antes.filas);
+  }, 60_000);
+
+  test("T9-c. huérfana de más de 24 h: NO se toca y queda logueada como abandonada", async () => {
+    const p = await preparar(tomar()); usados.push(`T9c:${p.credito}`);
+    await huerfana(p);
+    await envejecer(p.intento, 24 * 60 + 5); // franja (24 h, 24 h + 15 min]: se avisa UNA vez
+    const antes = await foto(p.credito, p.intento);
+    const { r, lineas } = await capturarLogs(barrer);
+    const f = await foto(p.credito, p.intento);
+    expect(f.conds[0].anulada).toBe(false);
+    expect(f.mora).toEqual(antes.mora);
+    expect(f.ledger).toEqual(antes.ledger);
+    const log = lineas.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .find((j) => j?.event === "boleta_tardia.condonacion_huerfana_abandonada" && j.credito_id === p.credito);
+    expect(log).toBeDefined();
+    expect(log.intento_id).toBe(p.intento);
+    expect(r.abandonadas_nuevas).toBeGreaterThanOrEqual(1);
+    expect(r.anuladas + r.omitidas + r.fallidas + r.omitidas_por_lock + r.revision_manual).toBe(r.revisadas);
+    // Pasada la franja (25 h) ya no se vuelve a avisar: una sola alerta, no 96 por día.
+    await envejecer(p.intento, 25 * 60);
+    const { r: r2, lineas: l2 } = await capturarLogs(barrer);
+    expect(r2.abandonadas_nuevas).toBe(0);
+    expect(l2.some((l) => l.includes("condonacion_huerfana_abandonada") && l.includes(p.intento))).toBe(false);
+    expect((await foto(p.credito, p.intento)).conds[0].anulada).toBe(false);
+  }, 60_000);
+
+  test("T9-d. intento reusado en otro crédito: la huérfana de B se anula aunque A tenga filas con ese intento; la viva de A no", async () => {
+    const A = await preparar(tomar()); const B = await preparar(tomar()); usados.push(`T9d:${A.credito},${B.credito}`);
+    const r0 = await correr(A); afirmarExito(A, await foto(A.credito, A.intento), r0); // A: condonación viva con filas
+    await huerfana(B); // B: huérfana con SU intento
+    // Filas de A que cargan el intento de B (reuso del intento entre créditos).
+    await pool.query(`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, cuota_interes, boleta_tardia_intento_id) VALUES ($1,'pending',1,0,$2)`, [A.credito, B.intento]);
+    await envejecer(A.intento, 60); await envejecer(B.intento, 60);
+    const antesA = await foto(A.credito, A.intento);
+    const r = await barrer();
+    expect(r.fallidas).toBe(0);
+    expect(await viva(B.intento)).toBe(false);
+    expect((await foto(B.credito, B.intento)).mora.monto).toBe(Big(B.moraAntes).toFixed(2));
+    const fA = await foto(A.credito, A.intento);
+    expect(fA.conds[0].anulada).toBe(false);
+    expect(fA.mora).toEqual(antesA.mora);
+    expect(fA.ledger).toEqual(antesA.ledger);
+  }, 60_000);
+
+  test("T9-e. dos barridos simultáneos (Promise.all): uno solo trabaja, el otro sale solapado; una sola anulación por condonación, sin errores", async () => {
+    const A = await preparar(tomar()); const B = await preparar(tomar()); usados.push(`T9e:${A.credito},${B.credito}`);
+    await huerfana(A); await huerfana(B);
+    await envejecer(A.intento, 60); await envejecer(B.intento, 60);
+    const [r1, r2] = await Promise.all([barrer(), barrer()]);
+    console.log(`[T9-e] r1=${JSON.stringify(r1)} r2=${JSON.stringify(r2)}`);
+    expect(r1.fallidas + r2.fallidas).toBe(0);
+    expect([r1.solapada, r2.solapada].filter(Boolean)).toHaveLength(1);
+    expect(r1.anuladas + r2.anuladas).toBeGreaterThanOrEqual(2);
+    for (const x of [A, B]) {
+      expect(await viva(x.intento)).toBe(false);
+      expect(await nAnulaciones(x.intento)).toBeGreaterThan(0);
+      const f = await foto(x.credito, x.intento);
+      expect(f.mora.monto).toBe(Big(x.moraAntes).toFixed(2));
+      const inc = await sql(`SELECT count(*)::int AS n FROM cartera.moras_historial WHERE credito_id=$1 AND tipo_evento='INCREMENTO' AND origen='CONDONACION_BOLETA_TARDIA'`, [x.credito]);
+      expect(inc[0].n).toBe(1); // restituida una sola vez
+      expect(ledgerDe(f, "CONDONACION").minus(x.ledger0.CONDONACION).plus(ledgerDe(f, "ANULACION").minus(x.ledger0.ANULACION)).abs().lt("0.000001")).toBe(true);
+    }
+  }, 60_000);
+
+  test("T9-f. después del barrido, procesarMoras() real deja la mora = devengado - ledger (sin re-condonar ni duplicar)", async () => {
+    const p = await preparar(tomar()); usados.push(`T9f:${p.credito}`);
+    await huerfana(p);
+    await envejecer(p.intento, 60);
+    const r = await barrer();
+    expect(r.anuladas).toBeGreaterThanOrEqual(1);
+    const antes = await foto(p.credito, p.intento);
+    const { procesarMoras } = await import("./latefee");
+    await procesarMoras();
+    const d = await foto(p.credito, p.intento);
+    expect(d.conds[0].anulada).toBe(true);
+    expect(ledgerDe(d, "CONDONACION").toFixed(6)).toBe(ledgerDe(antes, "CONDONACION").toFixed(6));
+    expect(ledgerDe(d, "ANULACION").toFixed(6)).toBe(ledgerDe(antes, "ANULACION").toFixed(6));
+    const [{ n }] = await sql(`SELECT count(*)::int AS n FROM cartera.moras_credito WHERE credito_id=$1 AND activa`, [p.credito]);
+    expect(n).toBe(1);
+    const cuotas = await sql(
+      `SELECT q.cuota_id, ($2::date - q.fecha_vencimiento) AS dias, COALESCE((SELECT sum(l.monto) FROM cartera.mora_pagada_cuota l WHERE l.cuota_id=q.cuota_id),0)::text AS ledger
+       FROM cartera.cuotas_credito q WHERE q.credito_id=$1 AND NOT q.pagado AND q.fecha_vencimiento < $2::date`, [p.credito, hoyReal]);
+    const capital = (await sql(`SELECT capital::text AS c FROM cartera.creditos WHERE credito_id=$1`, [p.credito]))[0].c;
+    const devengado = cuotas.reduce((a: Big, q: any) => a.plus(pos(Big(capital).times("0.0112").times(Math.min(1, Number(q.dias) / 30)).minus(q.ledger))), Big(0));
+    console.log(`[T9-f c${p.credito}] mora antes=${antes.mora.monto} despues=${d.mora.monto} esperado=${devengado.toFixed(2)} moraPrevia=${p.moraAntes}`);
+    expect(Big(d.mora.monto).minus(devengado).abs().lt("0.05")).toBe(true);
+    // Un segundo barrido ya no encuentra nada de este crédito.
+    expect((await foto(p.credito, p.intento)).conds.every((c: any) => c.anulada)).toBe(true);
+  }, 60_000);
+
+  test("T9-g. fila viva SIN marca creada después de la condonación (fila reconstruida): NO se anula, queda para revisión manual con log", async () => {
+    const p = await preparar(tomar()); usados.push(`T9g:${p.credito}`);
+    await huerfana(p);
+    await envejecer(p.intento, 60);
+    await pool.query(`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, cuota_interes) VALUES ($1,'pending',1,0)`, [p.credito]);
+    const antes = await foto(p.credito, p.intento);
+    const { r, lineas } = await capturarLogs(barrer);
+    const f = await foto(p.credito, p.intento);
+    expect(r.revision_manual).toBeGreaterThanOrEqual(1);
+    expect(r.fallidas).toBe(0);
+    expect(f.conds[0].anulada).toBe(false);
+    expect(f.mora).toEqual(antes.mora);
+    expect(f.ledger).toEqual(antes.ledger);
+    const log = lineas.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .find((j) => j?.event === "boleta_tardia.condonacion_huerfana_revision_manual" && j.credito_id === p.credito);
+    expect(log).toBeDefined();
+    expect(log.intento_id).toBe(p.intento);
+  }, 60_000);
+
+  test("T9-h. dos barridos solapados: el segundo sale sin hacer nada (solapada, todo en cero) y el primero trabaja normal", async () => {
+    const p = await preparar(tomar()); usados.push(`T9h:${p.credito}`);
+    await huerfana(p);
+    await envejecer(p.intento, 60);
+    const { r: [r1, r2], lineas } = await capturarLogs(() => Promise.all([barrer(), barrer()]));
+    const sol = [r1, r2].find((x) => x.solapada)!;
+    const ok = [r1, r2].find((x) => !x.solapada)!;
+    expect(sol).toBeDefined();
+    expect(sol).toMatchObject({ revisadas: 0, anuladas: 0, omitidas: 0, fallidas: 0, omitidas_por_lock: 0, revision_manual: 0, abandonadas_nuevas: 0 });
+    expect(ok.anuladas).toBeGreaterThanOrEqual(1);
+    expect(lineas.some((l) => l.includes("boleta_tardia.barrido_solapado"))).toBe(true);
+    expect(await viva(p.intento)).toBe(false);
+    expect(await nAnulaciones(p.intento)).toBeGreaterThan(0);
+    expect((await foto(p.credito, p.intento)).mora.monto).toBe(Big(p.moraAntes).toFixed(2));
+  }, 60_000);
+
 });

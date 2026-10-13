@@ -898,6 +898,40 @@ describe("reenviarFacturaSeguro", () => {
 		expect(params).toContain(reservadoAt.toISOString());
 	});
 
+	test("si Resend dice que el envío original sigue en curso, el reintento devuelve su reserva y no se gasta", async () => {
+		const antes = new Date("2026-01-01T00:00:00Z");
+		facturaPrevia = [registro("pendiente", antes)];
+		resultadoCorreo = { ok: false, error: "en curso", resultado: "en_curso" };
+		const r = await call(
+			trackerRouter.reenviarFacturaSeguro,
+			{ opportunityId: ID },
+			crmCtx,
+		);
+		expect(r).toMatchObject({ envio: "pendiente" });
+		// [0] reserva el registro; [1] lo devuelve como estaba.
+		expect(actualizados[0]).toMatchObject({
+			status: "pendiente",
+			retryCount: 1,
+		});
+		expect(actualizados[1]).toEqual({ retryCount: 0, updatedAt: antes });
+		const { sql } = new PgDialect().sqlToQuery(
+			condicionesActualizacion[1] as SQL,
+		);
+		// Solo si el registro sigue con la reserva de este reintento.
+		expect(sql).toContain('"updated_at" = ');
+	});
+
+	test("un reintento de un envío fallido no tiene reserva que devolver", async () => {
+		facturaPrevia = [registro("fallido")];
+		resultadoCorreo = { ok: false, error: "en curso", resultado: "en_curso" };
+		await call(
+			trackerRouter.reenviarFacturaSeguro,
+			{ opportunityId: ID },
+			crmCtx,
+		);
+		expect(actualizados).toHaveLength(1);
+	});
+
 	test("un asesor comercial no puede reenviar una oportunidad ajena", async () => {
 		facturaPrevia = [registro("fallido")];
 		userRole = ROLES.SALES;

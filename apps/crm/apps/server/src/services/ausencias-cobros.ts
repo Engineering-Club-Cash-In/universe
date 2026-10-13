@@ -493,6 +493,20 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 				Date.now() - ausencia.inicioAt.getTime() > PENDIENTE_VENCE_MS;
 			if (vencida) {
 				await descartarPendientesVencidas(ausencia.asesorId);
+				// El helper conserva la fila si no pudo preguntar a cartera (o si la
+				// conciliación sí encontró el traslado): solo se afirma el descarte si
+				// de verdad ya no existe.
+				const [sigue] = await db
+					.select({ id: ausenciasAsesorCobros.id })
+					.from(ausenciasAsesorCobros)
+					.where(eq(ausenciasAsesorCobros.id, ausencia.id))
+					.limit(1);
+				if (sigue) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"No se pudo confirmar con cartera si la ausencia llegó a confirmarse. Intente de nuevo en unos minutos.",
+					});
+				}
 				throw new ORPCError("CONFLICT", {
 					message:
 						"La ausencia nunca se confirmó y se descartó: el asesor no tiene cartera repartida ni está fuera del pool.",

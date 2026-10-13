@@ -119,6 +119,15 @@ async function ausenciaVigente(
 async function reconciliarPendiente(id: string) {
 	const op = await carteraBackClient.buscarTrasladoPorClave(id);
 	if (!op) return null;
+	// La clave la manda el cliente: solo cuenta el traslado de ausencia de ESTE
+	// asesor; uno normal o de otro asesor con la misma clave no es la confirmación.
+	const [pendiente] = await db
+		.select({ asesorId: ausenciasAsesorCobros.asesorId })
+		.from(ausenciasAsesorCobros)
+		.where(eq(ausenciasAsesorCobros.id, id))
+		.limit(1);
+	if (!pendiente || !op.esAusencia || op.asesorOrigenId !== pendiente.asesorId)
+		return null;
 	const [fila] = await db
 		.update(ausenciasAsesorCobros)
 		.set({

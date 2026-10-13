@@ -532,13 +532,22 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
 
 /** M5 · la operación confirmada con esta clave de idempotencia, para reconciliar un registro pendiente. */
 export async function consultarTrasladoPorClave(clave: string) {
-  const fila = (await db.execute<{ id: string; cuentas: number; buckets: number[] | null }>(sql`
+  const fila = (await db.execute<{ id: string; cuentas: number; buckets: number[] | null; asesor_origen_id: number; es_ausencia: boolean }>(sql`
     SELECT id, jsonb_array_length(preview->'asignaciones') AS cuentas,
+      asesor_origen_id, COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false) AS es_ausencia,
       CASE WHEN jsonb_typeof(solicitud->'bucketsPausados') = 'array'
         THEN ARRAY(SELECT jsonb_array_elements_text(solicitud->'bucketsPausados')::int) END AS buckets
     FROM ${schema}.operaciones_traslado_cartera
     WHERE idempotency_key = ${clave} AND estado = 'confirmada'`)).rows[0];
-  return fila ? { operacionId: fila.id, cuentas: Number(fila.cuentas), bucketsPausados: fila.buckets ?? [] } : null;
+  return fila
+    ? {
+        operacionId: fila.id,
+        cuentas: Number(fila.cuentas),
+        bucketsPausados: fila.buckets ?? [],
+        asesorOrigenId: Number(fila.asesor_origen_id),
+        esAusencia: fila.es_ausencia,
+      }
+    : null;
 }
 
 export async function listarTrasladosCartera(page: number) {

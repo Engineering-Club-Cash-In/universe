@@ -3969,10 +3969,17 @@ export class CarteraBackClient {
 	/** M5 · la operación ya confirmada con esa clave de idempotencia (o `null`). */
 	async buscarTrasladoPorClave(
 		clave: string,
-	): Promise<ResultadoTraslado | null> {
+	): Promise<
+		(ResultadoTraslado & { asesorOrigenId: number; esAusencia: boolean }) | null
+	> {
 		const r = await this.request<{
 			success: boolean;
-			data: Omit<ResultadoTraslado, "success"> | null;
+			data:
+				| (Omit<ResultadoTraslado, "success"> & {
+						asesorOrigenId: number;
+						esAusencia: boolean;
+				  })
+				| null;
 		}>(`/buckets/traslados/clave/${clave}`, { method: "GET" });
 		return r?.data ? { success: true, ...r.data } : null;
 	}

@@ -1276,6 +1276,60 @@ export const contrapropuestasConvenioCobros = pgTable(
 	],
 );
 
+// M5 (issue #1895, migración 0082) · Ausencia indefinida de un asesor. A
+// diferencia de la cobertura (suplente fijo y fechas cerradas), su cartera se
+// reparte al equipo con un traslado real y vuelve cuando se lo reactiva. Una
+// vigente por asesor.
+export const ausenciasAsesorCobros = pgTable(
+	"ausencias_asesor_cobros",
+	{
+		// La genera el cliente: es la clave de idempotencia de «Marcar ausente».
+		id: uuid("id").primaryKey(),
+		// asesor_id de cartera.
+		asesorId: integer("asesor_id").notNull(),
+		// Usuario del CRM del asesor (match por correo); null si no está vinculado.
+		titularId: text("titular_id").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		// 'incidente' | 'permiso' | 'vacaciones'
+		motivo: text("motivo").notNull(),
+		nota: text("nota"),
+		inicioAt: timestamp("inicio_at").notNull().defaultNow(),
+		// null mientras siga ausente (fin abierto).
+		finAt: timestamp("fin_at"),
+		// 'vigente' | 'reactivada'
+		estado: text("estado").notNull().default("vigente"),
+		// Traslado `redistribucion` de cartera con el que se repartió su cartera.
+		operacionTrasladoId: uuid("operacion_traslado_id"),
+		cuentasRepartidas: integer("cuentas_repartidas").notNull().default(0),
+		cuentasDevueltas: integer("cuentas_devueltas"),
+		cuentasRetenidas: integer("cuentas_retenidas"),
+		// Buckets del pool que se pausaron (solo esos se reanudan).
+		bucketsPausados: integer("buckets_pausados").array().notNull().default([]),
+		poolPausado: boolean("pool_pausado").notNull().default(false),
+		creadaPor: text("creada_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		reactivadaPor: text("reactivada_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+	},
+	(table) => [
+		uniqueIndex("uq_ausencia_asesor_vigente")
+			.on(table.asesorId)
+			.where(sql`${table.estado} = 'vigente'`),
+		index("idx_ausencias_asesor_inicio").on(table.inicioAt.desc()),
+		check(
+			"ausencias_asesor_motivo_check",
+			sql`${table.motivo} IN ('incidente', 'permiso', 'vacaciones')`,
+		),
+		check(
+			"ausencias_asesor_estado_check",
+			sql`${table.estado} IN ('vigente', 'reactivada')`,
+		),
+	],
+);
+
 // F7 (#1864) · Resumen del caso generado por IA (Gemini), uno por caso. Se
 // regenera solo cuando cambia la huella (los datos que se le mandaron al
 // modelo): abrir la ficha sin cambios no vuelve a pagar la llamada.

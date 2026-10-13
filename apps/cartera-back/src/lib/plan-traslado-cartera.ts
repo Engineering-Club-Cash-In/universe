@@ -42,6 +42,14 @@ export function previsualizarTrasladoCartera(input: {
 	creditos: readonly CreditoParaTraslado[];
 	poolPorBucket: ReadonlyMap<number, readonly number[]>;
 	cargaPorBucket: ReadonlyMap<number, ReadonlyMap<number, number>>;
+	/**
+	 * COBROS-02 M5: capacidad de cada asesor por bucket. Con `ponderarPorCapacidad`
+	 * el reparto manda cada crédito a quien tenga MENOR UTILIZACIÓN
+	 * (carga ÷ capacidad) y no a quien tenga menos cuentas. Sin ella, o sin
+	 * capacidad para un asesor, se reparte por conteo como siempre.
+	 */
+	capacidadPorBucket?: ReadonlyMap<number, ReadonlyMap<number, number>>;
+	ponderarPorCapacidad?: boolean;
 }): PrevisualizacionTraslado {
 	const asignaciones: AsignacionTraslado[] = [];
 	const bloqueos: BloqueoTraslado[] = [];
@@ -112,7 +120,13 @@ export function previsualizarTrasladoCartera(input: {
 			}
 			asesorNuevoId = destino;
 		} else {
-			asesorNuevoId = elegirMenorCarga(pool, carga.get(credito.bucket));
+			asesorNuevoId = input.ponderarPorCapacidad
+				? elegirMenorUtilizacion(
+						pool,
+						carga.get(credito.bucket),
+						input.capacidadPorBucket?.get(credito.bucket),
+					)
+				: elegirMenorCarga(pool, carga.get(credito.bucket));
 			if (asesorNuevoId === undefined) {
 				bloqueos.push({
 					bucket: credito.bucket,
@@ -149,6 +163,36 @@ function elegirMenorCarga(
 		const cargaActual = carga?.get(asesorId) ?? 0;
 		if (cargaActual < menorCarga) {
 			elegido = asesorId;
+			menorCarga = cargaActual;
+		}
+	}
+	return elegido;
+}
+
+/**
+ * Menor utilización (carga ÷ capacidad). Sin capacidad conocida (o 0) un
+ * asesor se trata como el más lleno; el empate se resuelve por menos cuentas y
+ * luego por id (el pool llega ordenado), así el resultado es estable.
+ */
+function elegirMenorUtilizacion(
+	pool: readonly number[],
+	carga: ReadonlyMap<number, number> | undefined,
+	capacidad: ReadonlyMap<number, number> | undefined,
+): number | undefined {
+	let elegido: number | undefined;
+	let menorUtilizacion = Number.POSITIVE_INFINITY;
+	let menorCarga = Number.POSITIVE_INFINITY;
+	for (const asesorId of pool) {
+		const cargaActual = carga?.get(asesorId) ?? 0;
+		const cap = capacidad?.get(asesorId) ?? 0;
+		const utilizacion = cap > 0 ? cargaActual / cap : Number.POSITIVE_INFINITY;
+		if (
+			elegido === undefined ||
+			utilizacion < menorUtilizacion ||
+			(utilizacion === menorUtilizacion && cargaActual < menorCarga)
+		) {
+			elegido = asesorId;
+			menorUtilizacion = utilizacion;
 			menorCarga = cargaActual;
 		}
 	}

@@ -92,6 +92,7 @@ import type {
 	HistorialTraslado,
 	HistorialTrasladosPaginado,
 	PreviewTraslado,
+	ResultadoDevolucionTraslado,
 	ResultadoTraslado,
 	SolicitudTraslado,
 } from "../types/traslados-cobros";
@@ -3897,6 +3898,70 @@ export class CarteraBackClient {
 			`/buckets/traslados?page=${page}`,
 			{ method: "GET" },
 		);
+	}
+
+	/**
+	 * M5 · saca al asesor del pool de TODOS sus buckets (el motor deja de
+	 * mandarle cuentas) y devuelve cuáles estaban activos.
+	 */
+	async pausarPoolAsesor(
+		asesorId: number,
+	): Promise<{ asesor_id: number; buckets: number[] }> {
+		const r = await this.request<{
+			success: boolean;
+			asesor_id: number;
+			buckets: number[];
+			message?: string;
+		}>(`/buckets/asesores/${asesorId}/pool/pausar`, { method: "POST" });
+		this.cache.invalidate("/buckets/");
+		if (!r?.success) {
+			throw new Error(r?.message || "cartera-back no pausó al asesor");
+		}
+		return { asesor_id: r.asesor_id, buckets: r.buckets };
+	}
+
+	/** M5 · devuelve al asesor a los buckets que se le pausaron. */
+	async reanudarPoolAsesor(
+		asesorId: number,
+		buckets: number[],
+	): Promise<{ asesor_id: number; buckets: number[] }> {
+		const r = await this.request<{
+			success: boolean;
+			asesor_id: number;
+			buckets: number[];
+			message?: string;
+		}>(`/buckets/asesores/${asesorId}/pool/reanudar`, {
+			method: "POST",
+			body: JSON.stringify({ buckets }),
+		});
+		this.cache.invalidate("/buckets/");
+		if (!r?.success) {
+			throw new Error(r?.message || "cartera-back no reanudó al asesor");
+		}
+		return { asesor_id: r.asesor_id, buckets: r.buckets };
+	}
+
+	/**
+	 * M5 · devuelve al asesor original lo que un traslado repartió, salvo lo que
+	 * ya cambió de dueño o de bucket. Hay que reanudar su pool antes.
+	 */
+	async devolverTrasladoCartera(
+		operacionId: string,
+		input: { motivo: string; usuario_email?: string },
+	): Promise<ResultadoDevolucionTraslado> {
+		const r = await this.request<ResultadoDevolucionTraslado>(
+			`/buckets/traslados/${operacionId}/devolver`,
+			{ method: "POST", body: JSON.stringify(input) },
+		);
+		for (const key of [
+			"/credito?",
+			"getAllCredits",
+			"stats",
+			"mora-por-etapa-asesor",
+			"/buckets/",
+		])
+			this.cache.invalidate(key);
+		return r;
 	}
 
 	/** M3 · traslados confirmados con total, fechas y `perPage` (hasta 100). */

@@ -18,6 +18,14 @@ export const solicitudTrasladoSchema = z.object({
   destinosPorBucket: z.record(z.string().regex(/^\d+$/), z.number().int().positive()).optional(),
   modo: z.enum(["traslado_completo", "redistribucion", "destino_por_bucket"]),
   motivo: z.string().trim().min(1).max(1000),
+  /** COBROS-02 M5: reparte por utilización (carga ÷ capacidad) en vez de por conteo. */
+  ponderarPorCapacidad: z.boolean().optional(),
+  /**
+   * COBROS-02 M5: las cuentas fuera del funnel (CANCELADO, CAIDO…) se quedan con
+   * el asesor de origen y no exigen un destino especial. Es para ausencias
+   * temporales: esas cuentas no se gestionan y no hay nada que repartir.
+   */
+  mantenerEspeciales: z.boolean().optional(),
   actorEmail: z.string().email(),
 }).superRefine((v, ctx) => {
   if (v.modo === "traslado_completo" && (!v.asesorDestinoId || v.asesorDestinoId === v.asesorOrigenId)) ctx.addIssue({ code: "custom", message: "Selecciona un destino distinto del origen" });
@@ -77,7 +85,7 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
   const especialesDelOrigen = creditos.filter(
     (c) => c.asesor_id === entrada.asesorOrigenId && c.especial,
   ).length;
-  if (especialesDelOrigen > 0 && entrada.asesorDestinoEspecialId === undefined) {
+  if (especialesDelOrigen > 0 && entrada.asesorDestinoEspecialId === undefined && !entrada.mantenerEspeciales) {
     // Los estados salen de la constante, no enumerados a mano: escritos aparte,
     // el mensaje termina nombrando estados que ya no aplican (pasó con
     // INCOBRABLE al alinear `especial` con STATUS_READER_FUERA).
@@ -94,7 +102,13 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
     counts.set(c.asesor_id, (counts.get(c.asesor_id) ?? 0) + 1);
     carga.set(c.bucket, counts);
   }
-  const plan = previsualizarTrasladoCartera({ ...entrada,
+  const capacidad = new Map<number, Map<number, number>>();
+  for (const p of pool) {
+    const porAsesor = capacidad.get(p.bucket) ?? new Map<number, number>();
+    porAsesor.set(p.asesor_id, Number(p.capacidad_base));
+    capacidad.set(p.bucket, porAsesor);
+  }
+  const plan = previsualizarTrasladoCartera({ ...entrada, capacidadPorBucket: capacidad,
     destinosPorBucket: new Map(Object.entries(entrada.destinosPorBucket ?? {}).map(([bucket, asesorId]) => [Number(bucket), asesorId])),
     creditos: creditos.map(c => ({ creditoId: c.credito_id, asesorId: c.asesor_id, bucket: c.bucket, tieneCompromisoVigente: c.compromiso, esEspecial: c.especial })),
     poolPorBucket: elegibles, cargaPorBucket: carga });
@@ -317,7 +331,9 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
-    if (plan.excluidos.length) {
+    // Con `mantenerEspeciales` (ausencia temporal, M5) las cuentas fuera del funnel
+    // se quedan con el asesor de origen a propósito: no se exige repartirlas.
+    if (plan.excluidos.length && !row.solicitud.mantenerEspeciales) {
       throw new TrasladoConflict(
         `Hay ${plan.excluidos.length} crédito(s) activos sin bucket operativo. Asigna su bucket antes de confirmar el traslado.`,
       );
@@ -408,7 +424,9 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     `);
     const esperados = plan.asignaciones.length;
     const conteos = escrito.rows[0];
-    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== 0) {
+    // Con `mantenerEspeciales` (M5) se quedan en el origen exactamente las cuentas excluidas.
+    const restantesEsperados = row.solicitud.mantenerEspeciales ? plan.excluidos.length : 0;
+    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== restantesEsperados) {
       throw new TrasladoConflict("El propietario cambió durante la operación");
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA

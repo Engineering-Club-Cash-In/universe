@@ -5,6 +5,10 @@ export type SolicitudTraslado = {
 	destinosPorBucket?: Record<string, number>;
 	modo: "traslado_completo" | "redistribucion" | "destino_por_bucket";
 	motivo: string;
+	/** M5: reparte por utilización (carga ÷ capacidad) y no por cantidad de cuentas. */
+	ponderarPorCapacidad?: boolean;
+	/** M5: las cuentas fuera del funnel se quedan con el asesor de origen. */
+	mantenerEspeciales?: boolean;
 };
 export type PreviewTraslado = {
 	previewId: string;
@@ -65,4 +69,16 @@ export type HistorialTrasladosPaginado = {
 		total: number;
 		totalPages: number;
 	};
+};
+
+/** Respuesta de `POST /buckets/traslados/:id/devolver` (M5). */
+export type ResultadoDevolucionTraslado = {
+	success: true;
+	asesor_id: number;
+	devueltos: number;
+	total: number;
+	retenidos: {
+		credito_id: number;
+		motivo: "cambio_de_dueno" | "fuera_del_funnel" | "bucket_fuera_del_pool";
+	}[];
 };

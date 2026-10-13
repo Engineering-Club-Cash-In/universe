@@ -51,7 +51,7 @@ const MENSAJE_BUCKETS_OCUPADO =
   "[ERROR] Hay un proceso de buckets trabajando sobre la cartera en este momento (moras 00:05 / convenios 00:30). Intente de nuevo en unos minutos.";
 
 /** Dueño y bucket actual de varios créditos en una sola consulta. */
-async function leerCreditos(
+export async function leerCreditos(
   ejecutor: Pick<typeof db, "execute">,
   ids: number[],
 ): Promise<Map<number, CreditoLoteLeido | null>> {

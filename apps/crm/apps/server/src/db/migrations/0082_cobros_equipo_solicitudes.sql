@@ -53,3 +53,36 @@ CREATE INDEX IF NOT EXISTS "idx_contrapropuestas_convenio"
 ALTER TYPE "public"."cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'convenio_contrapropuesta';
 --> statement-breakpoint
 ALTER TYPE "public"."cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'convenio_contrapropuesta_respondida';
+--> statement-breakpoint
+
+-- ── M5 · ausencia indefinida de un asesor ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "public"."ausencias_asesor_cobros" (
+	"id" uuid PRIMARY KEY NOT NULL,
+	"asesor_id" integer NOT NULL,
+	"titular_id" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
+	"motivo" text NOT NULL,
+	"nota" text,
+	"inicio_at" timestamp DEFAULT now() NOT NULL,
+	"fin_at" timestamp,
+	"estado" text DEFAULT 'vigente' NOT NULL,
+	"operacion_traslado_id" uuid,
+	"cuentas_repartidas" integer DEFAULT 0 NOT NULL,
+	"cuentas_devueltas" integer,
+	"cuentas_retenidas" integer,
+	"buckets_pausados" integer[] DEFAULT '{}' NOT NULL,
+	"pool_pausado" boolean DEFAULT false NOT NULL,
+	"creada_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
+	"reactivada_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
+	CONSTRAINT "ausencias_asesor_motivo_check" CHECK ("motivo" IN ('incidente', 'permiso', 'vacaciones')),
+	CONSTRAINT "ausencias_asesor_estado_check" CHECK ("estado" IN ('vigente', 'reactivada'))
+);
+--> statement-breakpoint
+-- Una sola ausencia vigente por asesor.
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_ausencia_asesor_vigente"
+	ON "public"."ausencias_asesor_cobros" ("asesor_id")
+	WHERE "estado" = 'vigente';
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_ausencias_asesor_inicio"
+	ON "public"."ausencias_asesor_cobros" ("inicio_at" DESC);
+--> statement-breakpoint
+ALTER TYPE "public"."cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'asesor_reactivado';

@@ -26,6 +26,7 @@ import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualiz
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
+import { AusenciaError, detalleTraslado, devolverTraslado, pausarPoolAsesor, reanudarPoolAsesor } from "../controllers/buckets/ausenciaAsesor";
 import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, listarTrasladosCarteraPaginado, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import {
@@ -198,7 +199,7 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
+  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), ponderarPorCapacidad: t.Optional(t.Boolean()), mantenerEspeciales: t.Optional(t.Boolean()), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
   .post("/buckets/traslados/confirmar", async ({ body, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     try { return await confirmarTrasladoCarteraMasivo(body); }
@@ -231,6 +232,39 @@ export const bucketsRouter = new Elysia()
     desde: t.Optional(t.String()),
     hasta: t.Optional(t.String()),
   }) })
+
+  // COBROS-02 M5 — ausencia indefinida de un asesor (issue #1895).
+  .get("/buckets/traslados/:id/detalle", async ({ params, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try { return { success: true, data: await detalleTraslado(params.id) }; }
+    catch (error) {
+      if (!(error instanceof AusenciaError)) throw error;
+      set.status = error.httpStatus;
+      return { success: false, message: error.message, error: error.code };
+    }
+  }, { params: t.Object({ id: t.String({ format: "uuid" }) }) })
+  .post("/buckets/traslados/:id/devolver", async ({ params, body, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try { return { success: true, ...(await devolverTraslado({ operacionId: params.id, motivo: body.motivo, usuarioEmail: body.usuario_email })) }; }
+    catch (error) {
+      if (!(error instanceof AusenciaError)) throw error;
+      set.status = error.httpStatus;
+      return { success: false, message: error.message, error: error.code };
+    }
+  }, { params: t.Object({ id: t.String({ format: "uuid" }) }), body: t.Object({ motivo: t.String({ minLength: 1 }), usuario_email: t.Optional(t.String()) }) })
+  .post("/buckets/asesores/:asesor_id/pool/pausar", async ({ params, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try { return { success: true, ...(await pausarPoolAsesor(Number(params.asesor_id))) }; }
+    catch (error) {
+      if (!(error instanceof AusenciaError)) throw error;
+      set.status = error.httpStatus;
+      return { success: false, message: error.message, error: error.code };
+    }
+  }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }) })
+  .post("/buckets/asesores/:asesor_id/pool/reanudar", async ({ params, body, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    return { success: true, ...(await reanudarPoolAsesor(Number(params.asesor_id), body.buckets)) };
+  }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }), body: t.Object({ buckets: t.Array(t.Integer({ minimum: 0, maximum: 5 })) }) })
 
   // Histórico de transiciones de bucket, paginado y con filtros + resumen.
   .get(

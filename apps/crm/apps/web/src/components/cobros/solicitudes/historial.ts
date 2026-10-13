@@ -388,6 +388,56 @@ export function ordenarHistorial(entradas: EntradaHistorial[]) {
 	});
 }
 
+/* ── Fuentes paginadas ──────────────────────────────────────────────────────── */
+
+const ms = (fecha: string | null) => {
+	if (!fecha) return null;
+	const t = new Date(fecha).getTime();
+	return Number.isNaN(t) ? null : t;
+};
+
+/**
+ * Cada fuente se pagina aparte (de la más reciente a la más antigua). Al
+ * mezclarlas, una que trajo solo su última semana deja huecos frente a otra que
+ * trajo meses: lo de hace un mes de la primera todavía no se cargó. El corte es
+ * la fecha hasta la que TODAS las fuentes que tienen más páginas están
+ * completas (la más reciente de sus fechas más viejas cargadas); null si
+ * ninguna tiene más páginas cargadas.
+ */
+export function fechaDeCorte(
+	incompletas: Array<ReadonlyArray<{ fecha: string | null }>>,
+): number | null {
+	let corte: number | null = null;
+	for (const filas of incompletas) {
+		let masVieja: number | null = null;
+		for (const f of filas) {
+			const t = ms(f.fecha);
+			if (t !== null && (masVieja === null || t < masVieja)) masVieja = t;
+		}
+		if (masVieja !== null && (corte === null || masVieja > corte))
+			corte = masVieja;
+	}
+	return corte;
+}
+
+/**
+ * Deja solo lo que está antes del corte (`fechaDeCorte`): lo más viejo aparece
+ * con «Cargar más», en su lugar, sin saltarse filas de otras fuentes.
+ * `conservar` deja pasar filas que se muestran siempre (las pendientes).
+ */
+export function recortarAlCorte<T extends { fecha: string | null }>(
+	filas: T[],
+	corte: number | null,
+	conservar?: (fila: T) => boolean,
+): T[] {
+	if (corte === null) return filas;
+	return filas.filter((f) => {
+		if (conservar?.(f)) return true;
+		const t = ms(f.fecha);
+		return t !== null && t >= corte;
+	});
+}
+
 /* ── Filtros ────────────────────────────────────────────────────────────────── */
 
 /** Chips del Figma. */

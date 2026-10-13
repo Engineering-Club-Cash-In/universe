@@ -3920,20 +3920,13 @@ export class CarteraBackClient {
 	 */
 	async pausarPoolAsesor(
 		asesorId: number,
-		/** Compensación de una reactivación fallida: también lo saca del balanceo de créditos. */
-		operacionId?: string,
 	): Promise<{ asesor_id: number; buckets: number[] }> {
 		const r = await this.request<{
 			success: boolean;
 			asesor_id: number;
 			buckets: number[];
 			message?: string;
-		}>(`/buckets/asesores/${asesorId}/pool/pausar`, {
-			method: "POST",
-			...(operacionId
-				? { body: JSON.stringify({ operacion_id: operacionId }) }
-				: {}),
-		});
+		}>(`/buckets/asesores/${asesorId}/pool/pausar`, { method: "POST" });
 		this.cache.invalidate("/buckets/");
 		if (!r?.success) {
 			throw new Error(r?.message || "cartera-back no pausó al asesor");

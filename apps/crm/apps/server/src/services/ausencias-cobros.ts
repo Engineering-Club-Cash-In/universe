@@ -423,19 +423,10 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 		.then((a) => a.nombre)
 		.catch(() => null);
 
-	let resumido = false;
-	let yaCerrada = false;
 	try {
-		// 1. De vuelta al pool: la devolución exige que esté activo en el bucket.
-		if (ausencia.poolPausado) {
-			await carteraBackClient.reanudarPoolAsesor(
-				ausencia.asesorId,
-				ausencia.bucketsPausados,
-				ausencia.operacionTrasladoId ?? undefined,
-			);
-			resumido = true;
-		}
-		// 2. Lo repartido vuelve, salvo lo que ya cambió de dueño o de bucket.
+		// 1. Lo repartido vuelve, salvo lo que ya cambió de dueño o de bucket. El pool
+		// sigue PAUSADO mientras tanto: así el asesor no recibe cuentas nuevas en medio
+		// de la devolución, y si esta falla no hay nada que deshacer.
 		const devolucion = ausencia.operacionTrasladoId
 			? await carteraBackClient.devolverTrasladoCartera(
 					ausencia.operacionTrasladoId,
@@ -445,6 +436,17 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 					},
 				)
 			: { devueltos: 0, retenidos: [] as unknown[], total: 0 };
+
+		// 2. Recién entonces vuelve al pool y al balanceo de créditos (una sola
+		// transacción en cartera-back, idempotente). Si la respuesta se pierde, el
+		// reintento de la reactivación lo repite sin efecto.
+		if (ausencia.poolPausado) {
+			await carteraBackClient.reanudarPoolAsesor(
+				ausencia.asesorId,
+				ausencia.bucketsPausados,
+				ausencia.operacionTrasladoId ?? undefined,
+			);
+		}
 
 		const [cerrada] = await db
 			.update(ausenciasAsesorCobros)
@@ -467,7 +469,6 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 
 		// Otra reactivación simultánea ganó la carrera: no se avisa dos veces ni se
 		// reporta éxito (las operaciones de cartera son idempotentes).
-		yaCerrada = true;
 		if (!cerrada) {
 			throw new ORPCError("CONFLICT", {
 				message: "Este asesor ya fue reactivado. Actualice la vista.",
@@ -495,23 +496,6 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 			retenidas: devolucion.retenidos,
 		};
 	} catch (error) {
-		// Si la reactivación no terminó, el asesor sigue ausente: se lo vuelve a sacar
-		// del pool (y del balanceo de créditos) para que no reciba cuentas nuevas.
-		// Reintentar la reactivación repite todo (las operaciones son idempotentes).
-		// Si la ausencia ya se cerró (por esta u otra solicitud) no se toca nada.
-		if (resumido && !yaCerrada) {
-			await carteraBackClient
-				.pausarPoolAsesor(
-					ausencia.asesorId,
-					ausencia.operacionTrasladoId ?? undefined,
-				)
-				.catch((e) =>
-					console.error(
-						`[ausencias] No se pudo volver a pausar a ${ausencia.asesorId} tras una reactivación fallida:`,
-						e,
-					),
-				);
-		}
 		if (error instanceof ORPCError) throw error;
 		traducirErrorCartera(error);
 	}

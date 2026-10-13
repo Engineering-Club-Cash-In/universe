@@ -101,6 +101,11 @@ export async function reasignarAsesorLote(params: {
    * que ya tiene otro dueño se omite ("cambio_de_dueno") en vez de quitárselo.
    */
   duenios_esperados?: ReadonlyMap<number, number>;
+  /**
+   * La elegibilidad del destino ya la decidió el llamador (devolución al titular
+   * con su pool aún pausado): no se exige que esté activo en el pool del bucket.
+   */
+  pool_ya_validado?: boolean;
 }): Promise<ReasignarLoteResultado> {
   const motivo = (params.motivo ?? "").trim();
   if (!motivo) {
@@ -238,7 +243,9 @@ export async function reasignarAsesorLote(params: {
       const poolPorBucket = new Map<number, Set<number>>();
       for (const bucket of bucketsUsados) {
         const pool = await getAsesoresPorBucket(bucket, tx, true);
-        poolPorBucket.set(bucket, new Set(pool.map((a) => a.asesor_id)));
+        const ids = new Set(pool.map((a) => a.asesor_id));
+        if (params.pool_ya_validado) ids.add(params.asesor_nuevo_id);
+        poolPorBucket.set(bucket, ids);
       }
       const cambiaronDeDueno: number[] = [];
       const elegibles = params.duenios_esperados

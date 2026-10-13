@@ -33,10 +33,7 @@ const MAX_LOTE = 200;
  * activos (solo esos se reactivan después: un bucket que un admin ya había
  * desactivado no se enciende solo).
  */
-export async function pausarPoolAsesor(
-  asesorId: number,
-  operacionId?: string,
-): Promise<{ asesor_id: number; buckets: number[] }> {
+export async function pausarPoolAsesor(asesorId: number): Promise<{ asesor_id: number; buckets: number[] }> {
   const [asesor] = await db.select({ id: asesores.asesor_id }).from(asesores).where(eq(asesores.asesor_id, asesorId));
   if (!asesor) throw new AusenciaError("El asesor no existe.", 404, "asesor_no_existe");
   const filas = await db
@@ -44,55 +41,44 @@ export async function pausarPoolAsesor(
     .set({ activo: false })
     .where(and(eq(asesor_bucket.asesor_id, asesorId), eq(asesor_bucket.activo, true)))
     .returning({ bucket: asesor_bucket.bucket });
-  if (operacionId) {
-    // Compensación de una reactivación que falló: el asesor sigue ausente, así que
-    // también vuelve a salir del balanceo de créditos nuevos.
-    await db.execute(sql`
-      UPDATE ${schema}.asesores SET activo_para_creditos = false
-      WHERE asesor_id = ${asesorId}
-        AND EXISTS (
-          SELECT 1 FROM ${schema}.operaciones_traslado_cartera
-          WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
-            AND solicitud->>'creditosPausados' = 'true')`);
-    await marcarReanudada(asesorId, operacionId, false);
-  }
   return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
-}
-
-/** Registra en la operación si el asesor está hoy reanudado (para saber si sigue ausente). */
-async function marcarReanudada(asesorId: number, operacionId: string, reanudada: boolean) {
-  await db.execute(sql`
-    UPDATE ${schema}.operaciones_traslado_cartera
-    SET solicitud = solicitud || ${JSON.stringify({ reanudada })}::jsonb
-    WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}`);
 }
 
 /**
  * Devuelve al asesor a los buckets que se le pausaron y, si el traslado que lo
- * pausó también lo sacó del balanceo de créditos nuevos, lo vuelve a poner.
+ * pausó también lo sacó del balanceo de créditos nuevos, lo vuelve a poner. Es el
+ * ÚLTIMO paso de la reactivación (la devolución de cuentas se hace con el pool
+ * todavía pausado) y va en UNA transacción: o queda reanudado por completo o no.
+ * Es idempotente, así que repetirlo tras una respuesta perdida es inocuo.
  */
 export async function reanudarPoolAsesor(
   asesorId: number,
   buckets: number[],
   operacionId?: string,
 ): Promise<{ asesor_id: number; buckets: number[] }> {
-  if (operacionId) {
-    await db.execute(sql`
-      UPDATE ${schema}.asesores SET activo_para_creditos = true
-      WHERE asesor_id = ${asesorId}
-        AND EXISTS (
-          SELECT 1 FROM ${schema}.operaciones_traslado_cartera
-          WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
-            AND solicitud->>'creditosPausados' = 'true')`);
-    await marcarReanudada(asesorId, operacionId, true);
-  }
-  if (buckets.length === 0) return { asesor_id: asesorId, buckets: [] };
-  const filas = await db
-    .update(asesor_bucket)
-    .set({ activo: true })
-    .where(and(eq(asesor_bucket.asesor_id, asesorId), inArray(asesor_bucket.bucket, buckets)))
-    .returning({ bucket: asesor_bucket.bucket });
-  return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
+  return db.transaction(async (tx) => {
+    if (operacionId) {
+      await tx.execute(sql`
+        UPDATE ${schema}.asesores SET activo_para_creditos = true
+        WHERE asesor_id = ${asesorId}
+          AND EXISTS (
+            SELECT 1 FROM ${schema}.operaciones_traslado_cartera
+            WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
+              AND solicitud->>'creditosPausados' = 'true')`);
+      // La ausencia terminó: el asesor ya no figura como ausente para las asignaciones.
+      await tx.execute(sql`
+        UPDATE ${schema}.operaciones_traslado_cartera
+        SET solicitud = solicitud || '{"ausente": false}'::jsonb
+        WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}`);
+    }
+    if (buckets.length === 0) return { asesor_id: asesorId, buckets: [] };
+    const filas = await tx
+      .update(asesor_bucket)
+      .set({ activo: true })
+      .where(and(eq(asesor_bucket.asesor_id, asesorId), inArray(asesor_bucket.bucket, buckets)))
+      .returning({ bucket: asesor_bucket.bucket });
+    return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
+  });
 }
 
 export type DetalleTraslado = {
@@ -145,14 +131,23 @@ export async function devolverTraslado(params: {
   for (let i = 0; i < ids.length; i += 500) {
     for (const [id, valor] of await leerCreditos(db, ids.slice(i, i + 500))) actuales.set(id, valor);
   }
-  const bucketsDelTitular = new Set(
-    (
+  // El pool del titular sigue PAUSADO durante la devolución: sus buckets son los que
+  // se le pausaron (guardados en la operación) más los que tenga activos hoy.
+  const [opSolicitud] = (
+    await db.execute<{ buckets: number[] | null }>(sql`
+      SELECT CASE WHEN jsonb_typeof(solicitud->'bucketsPausados') = 'array'
+        THEN ARRAY(SELECT jsonb_array_elements_text(solicitud->'bucketsPausados')::int) END AS buckets
+      FROM ${schema}.operaciones_traslado_cartera WHERE id = ${params.operacionId}::uuid`)
+  ).rows;
+  const bucketsDelTitular = new Set<number>([
+    ...(opSolicitud?.buckets ?? []).map(Number),
+    ...(
       await db
         .select({ bucket: asesor_bucket.bucket })
         .from(asesor_bucket)
         .where(and(eq(asesor_bucket.asesor_id, titular), eq(asesor_bucket.activo, true)))
     ).map((b) => b.bucket),
-  );
+  ]);
 
   const clasificacion = clasificarDevolucion(detalle, actuales, bucketsDelTitular);
   const { aDevolver, aDevolverDirecto } = clasificacion;
@@ -192,6 +187,9 @@ export async function devolverTraslado(params: {
         asesor_nuevo_id: titular,
         motivo,
         usuario_email: params.usuarioEmail,
+        // El pool del titular sigue pausado hasta el final: la elegibilidad ya la
+        // decidió la clasificación (bucket de hoy dentro de sus buckets).
+        pool_ya_validado: true,
         // Bajo los locks del lote: si un supervisor la movió después de clasificar,
         // se queda con su nuevo dueño.
         duenios_esperados: new Map(lote.map((id) => [id, recibio.get(id) as number])),
@@ -237,7 +235,12 @@ export async function devolverTraslado(params: {
         bucketsDelTitular,
       );
       await devolverPorLotes(nueva.aDevolver);
-      retenidos.push(...nueva.retenidos);
+      // Un `cambio_de_dueno` aquí puede ser lo que otra reactivación acaba de devolver:
+      // se resuelve con la marca de la bitácora como el resto de las omisiones.
+      for (const r of nueva.retenidos) {
+        if (r.motivo === "cambio_de_dueno") cambiaronDeDueno.push(r.credito_id);
+        else retenidos.push(r);
+      }
       // Siguen sin bucket y con quien los recibió pero la escritura no los tomó.
       cambiaronDeDueno.push(...nueva.aDevolverDirecto);
     }

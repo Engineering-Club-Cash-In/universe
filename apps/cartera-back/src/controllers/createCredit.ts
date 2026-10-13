@@ -446,19 +446,21 @@ async function asignarAsesorConLock(executor: DbExecutor): Promise<number> {
  * Un asesor que simplemente no recibe créditos automáticos sigue asignable a mano.
  */
 async function validarAsesorExplicito(executor: DbExecutor, asesorId: number): Promise<number> {
-  const [fila] = await executor
-    .select({ activo_para_creditos: asesores.activo_para_creditos })
-    .from(asesores)
-    .where(eq(asesores.asesor_id, asesorId))
-    .for("share");
-  if (!fila || fila.activo_para_creditos) return asesorId;
+  // `ausente` es la marca de la ausencia vigente (se enciende al confirmar el traslado
+  // con pausa y se apaga al reanudar), independiente de si el flag de créditos se
+  // tuvo que apagar o ya lo estaba.
   const ausente = await executor.execute(sql`
     SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.operaciones_traslado_cartera
     WHERE asesor_origen_id = ${asesorId} AND estado = 'confirmada'
-      AND solicitud->>'creditosPausados' = 'true'
-      AND COALESCE(solicitud->>'reanudada', 'false') <> 'true'
+      AND solicitud->>'ausente' = 'true'
     LIMIT 1`);
   if ((ausente.rows ?? []).length === 0) return asesorId;
+  // Lock compartido: una ausencia que se confirme en paralelo espera a este crédito.
+  await executor
+    .select({ asesor_id: asesores.asesor_id })
+    .from(asesores)
+    .where(eq(asesores.asesor_id, asesorId))
+    .for("share");
   console.warn(`[createCredit] El asesor ${asesorId} está ausente: se asigna a otro elegible.`);
   return asignarAsesorConLock(executor);
 }

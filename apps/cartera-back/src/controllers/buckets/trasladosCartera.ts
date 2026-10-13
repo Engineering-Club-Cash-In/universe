@@ -480,7 +480,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         RETURNING bucket`);
       bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
       await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
-        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados })}::jsonb
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados, ausente: true })}::jsonb
         WHERE id = ${row.id}::uuid`);
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA

@@ -366,7 +366,9 @@ async function devolverSinBucket(params: {
     const fueraSet = sql.join(fueraDelPool.length ? fueraDelPool.map((id) => sql`${id}`) : [sql`-1`], sql`, `);
     const res = await tx.execute<{ credito_id: number; asesor_anterior: number; bucket: number | null }>(sql`
       WITH previos AS (
-        SELECT c.credito_id, c.asesor_id AS asesor_anterior, d.bucket
+        -- El bucket de la bitácora es el de ESTE momento (como en la reasignación en
+        -- bloque), no el que la cuenta tenía cuando se repartió.
+        SELECT c.credito_id, c.asesor_id AS asesor_anterior, ${bucketActualSql("c", "m")} AS bucket
         FROM ${schema}.creditos c
         JOIN ${schema}.operaciones_traslado_cartera_detalle d
           ON d.credito_id = c.credito_id AND d.operacion_id = ${params.operacionId}::uuid

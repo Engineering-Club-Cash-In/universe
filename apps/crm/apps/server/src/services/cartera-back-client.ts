@@ -29,6 +29,7 @@ import type {
 	CarteraConvenioAlertasResponse,
 	CarteraConvenioCuota,
 	CarteraConvenioDecision,
+	CarteraConvenioDecisionesHistorialResponse,
 	CarteraConvenioListado,
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
@@ -88,6 +89,7 @@ import type {
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import type {
 	HistorialTraslado,
+	HistorialTrasladosPaginado,
 	PreviewTraslado,
 	ResultadoTraslado,
 	SolicitudTraslado,
@@ -2770,6 +2772,42 @@ export class CarteraBackClient {
 		return resp.data;
 	}
 
+	/**
+	 * M3 · bitácora global de decisiones de convenio, paginada (más recientes
+	 * primero). `desde` inclusivo y `hasta` exclusivo. Sin cache: es auditoría.
+	 */
+	async getDecisionesConvenioHistorial(params: {
+		page?: number;
+		perPage?: number;
+		desde?: Date | null;
+		hasta?: Date | null;
+		decision?: "aprobado" | "rechazado";
+		decididoPorEmail?: string;
+		creadoPorEmail?: string;
+	}): Promise<CarteraConvenioDecisionesHistorialResponse> {
+		const queryParams = new URLSearchParams();
+		if (params.page) queryParams.set("page", String(params.page));
+		if (params.perPage) queryParams.set("per_page", String(params.perPage));
+		if (params.desde) queryParams.set("desde", params.desde.toISOString());
+		if (params.hasta) queryParams.set("hasta", params.hasta.toISOString());
+		if (params.decision) queryParams.set("decision", params.decision);
+		if (params.decididoPorEmail)
+			queryParams.set("decidido_por_email", params.decididoPorEmail);
+		if (params.creadoPorEmail)
+			queryParams.set("creado_por_email", params.creadoPorEmail);
+		const resp = await this.request<CarteraConvenioDecisionesHistorialResponse>(
+			`/payment-agreements/decisiones/historial?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+		if (!resp?.success) {
+			throw new Error(
+				"cartera-back no devolvió el historial global de decisiones de convenio",
+			);
+		}
+		return resp;
+	}
+
 	// COBROS-02: cuotas de CONVENIO próximas a vencer (créditos EN_CONVENIO). Lo
 	// consume el job diario de recordatorios de convenio del CRM. Sin cache: foto
 	// del día, debe reflejar los pagos del convenio más recientes.
@@ -3054,7 +3092,10 @@ export class CarteraBackClient {
 
 	/** ¿Cartera ya aplicó el escalamiento de esa solicitud? (sin caché). */
 	async escalamientoJuridicoAplicado(referencia: string): Promise<boolean> {
-		const response = await this.request<{ success: boolean; aplicada: boolean }>(
+		const response = await this.request<{
+			success: boolean;
+			aplicada: boolean;
+		}>(
 			`/buckets/juridico/aplicacion/${encodeURIComponent(referencia)}`,
 			{ method: "GET" },
 			false,
@@ -3145,7 +3186,9 @@ export class CarteraBackClient {
 			this.invalidarCachesDeEscalado();
 		}
 		if (!response?.success) {
-			throw new Error(response?.message || "cartera-back no confirmó el escalado a Jurídico");
+			throw new Error(
+				response?.message || "cartera-back no confirmó el escalado a Jurídico",
+			);
 		}
 		return response;
 	}
@@ -3801,6 +3844,25 @@ export class CarteraBackClient {
 		return this.request<HistorialTraslado[]>(
 			`/buckets/traslados?page=${page}`,
 			{ method: "GET" },
+		);
+	}
+
+	/** M3 · traslados confirmados con total, fechas y `perPage` (hasta 100). */
+	async listarTrasladosCarteraPaginado(params: {
+		page?: number;
+		perPage?: number;
+		desde?: Date | null;
+		hasta?: Date | null;
+	}) {
+		const queryParams = new URLSearchParams();
+		if (params.page) queryParams.set("page", String(params.page));
+		if (params.perPage) queryParams.set("per_page", String(params.perPage));
+		if (params.desde) queryParams.set("desde", params.desde.toISOString());
+		if (params.hasta) queryParams.set("hasta", params.hasta.toISOString());
+		return this.request<HistorialTrasladosPaginado>(
+			`/buckets/traslados/historial?${queryParams}`,
+			{ method: "GET" },
+			false,
 		);
 	}
 

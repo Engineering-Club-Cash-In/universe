@@ -116,6 +116,8 @@ export const inmovilizacionesUnidad = pgTable(
 		decididoPor: text("decidido_por").references(() => user.id),
 		decididoAt: timestamp("decidido_at"),
 		motivoRechazo: text("motivo_rechazo"),
+		// M3 · nota del supervisor al aprobar (al rechazar va `motivo_rechazo`).
+		notaDecision: text("nota_decision"),
 
 		ejecutadoPor: text("ejecutado_por").references(() => user.id),
 		ejecutadoAt: timestamp("ejecutado_at"),
@@ -169,6 +171,12 @@ export const inmovilizacionesUnidad = pgTable(
 			),
 		index("idx_inmovilizaciones_unidad_estado").on(table.estado),
 		index("idx_inmovilizaciones_unidad_caso").on(table.casoCobroId),
+		index("idx_inmovilizaciones_unidad_solicitado_at").on(
+			table.solicitadoAt.desc(),
+		),
+		index("idx_inmovilizaciones_unidad_decidido_at")
+			.on(table.decididoAt.desc())
+			.where(sql`${table.decididoAt} IS NOT NULL`),
 	],
 );
 

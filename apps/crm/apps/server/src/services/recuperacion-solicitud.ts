@@ -182,6 +182,8 @@ export async function aprobarSolicitudRecuperacion(params: {
 	creditoId: number;
 	supervisorId: string;
 	supervisorEmail: string;
+	/** Nota del supervisor al aprobar (opcional); se guarda en `motivo_decision`. */
+	nota?: string;
 }): Promise<TrasladoConfirmado> {
 	const { solicitud } = params;
 	const referencia = referenciaDelRegistro(solicitud.id);
@@ -249,6 +251,7 @@ export async function aprobarSolicitudRecuperacion(params: {
 				decididoAt: new Date(),
 				bucketOrigen: res.bucket_anterior,
 				bucketDestino: res.bucket_nuevo,
+				motivoDecision: params.nota ?? null,
 				updatedAt: new Date(),
 			})
 			.where(eq(recuperacionesVehiculo.id, solicitud.id));

@@ -17,7 +17,17 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	lt,
+	sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -31,7 +41,7 @@ import {
 import { clients } from "../db/schema/crm";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
-import { leerCatalogoJustificaciones } from "../services/recuperacion-justificaciones";
+import { enRangoSql, rangoDiasGT } from "../lib/rango-dias-gt";
 import {
 	definicionPaso,
 	leerChecklistGuardado,
@@ -40,6 +50,7 @@ import {
 } from "../lib/recuperacion-solicitud";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { checklistDelCaso } from "../services/recuperacion-checklist";
+import { leerCatalogoJustificaciones } from "../services/recuperacion-justificaciones";
 import {
 	aprobarSolicitudRecuperacion,
 	cancelarSolicitudRecuperacion,
@@ -139,14 +150,23 @@ function consultaBandeja() {
 
 type FilaBandeja = Awaited<ReturnType<typeof consultaBandeja>>[number];
 
-/** La fila para la web: checklist leído y si la pidió quien mira (no la puede decidir). */
-const paraLaBandeja =
-	(userId: string) =>
-	({ solicitanteId, ...f }: FilaBandeja) => ({
-		...f,
-		checklist: leerChecklistGuardado(f.checklist) ?? [],
-		esMia: solicitanteId === userId,
-	});
+/**
+ * La fila para la web: checklist leído y si la pidió quien mira (no la puede
+ * decidir). Conserva `solicitanteId` (M3): el front asocia las solicitudes con
+ * el asesor por id y no por nombre.
+ */
+const paraLaBandeja = (userId: string) => (f: FilaBandeja) => ({
+	...f,
+	checklist: leerChecklistGuardado(f.checklist) ?? [],
+	esMia: f.solicitanteId === userId,
+});
+
+const ESTADOS_DECIDIDOS = [
+	"aprobada",
+	"rechazada",
+	"cancelada",
+	"sin_efecto",
+] as const;
 
 /** Cuántas decididas trae el historial de la bandeja. */
 const LIMITE_HISTORIAL = 100;
@@ -204,10 +224,7 @@ export const recuperacionSolicitudesRouter = {
 						and(
 							isNotNull(recuperacionesVehiculo.estadoSolicitud),
 							inArray(recuperacionesVehiculo.estadoSolicitud, [
-								"aprobada",
-								"rechazada",
-								"cancelada",
-								"sin_efecto",
+								...ESTADOS_DECIDIDOS,
 							]),
 						),
 					)
@@ -224,6 +241,59 @@ export const recuperacionSolicitudesRouter = {
 			};
 		},
 	),
+
+	/**
+	 * M3 · Historial de solicitudes de recuperación decididas, paginado y con
+	 * filtros. Reemplaza el tope fijo de 100 de `getSolicitudesRecuperacion`
+	 * (que sigue igual para la bandeja). `desde`/`hasta` son días de Guatemala
+	 * (inclusivos) sobre la fecha de decisión, o de la solicitud si no tiene.
+	 */
+	getHistorialSolicitudesRecuperacion: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				page: z.number().int().min(1).default(1),
+				perPage: z.number().int().min(1).max(100).default(25),
+				estados: z.array(z.enum(ESTADOS_DECIDIDOS)).max(4).optional(),
+				solicitanteId: z.string().min(1).optional(),
+				desde: z.string().date().optional(),
+				hasta: z.string().date().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const rango = rangoDiasGT(input.desde, input.hasta);
+			const fecha = sql`coalesce(${recuperacionesVehiculo.decididoAt}, ${recuperacionesVehiculo.createdAt})`;
+			const condiciones = and(
+				inArray(recuperacionesVehiculo.estadoSolicitud, [
+					...(input.estados?.length ? input.estados : ESTADOS_DECIDIDOS),
+				]),
+				input.solicitanteId
+					? eq(recuperacionesVehiculo.registradoPor, input.solicitanteId)
+					: undefined,
+				enRangoSql(fecha, rango),
+			);
+			const [filas, [{ total }]] = await Promise.all([
+				consultaBandeja()
+					.where(condiciones)
+					.orderBy(
+						desc(recuperacionesVehiculo.decididoAt),
+						desc(recuperacionesVehiculo.createdAt),
+					)
+					.limit(input.perPage)
+					.offset((input.page - 1) * input.perPage),
+				db
+					.select({ total: sql<number>`count(*)::int` })
+					.from(recuperacionesVehiculo)
+					.where(condiciones),
+			]);
+			const fila = paraLaBandeja(context.userId);
+			return {
+				items: filas.map(fila),
+				page: input.page,
+				perPage: input.perPage,
+				total,
+				totalPages: Math.max(1, Math.ceil(total / input.perPage)),
+			};
+		}),
 
 	decidirSolicitudRecuperacion: cobrosSupervisorProcedure
 		.input(
@@ -318,6 +388,8 @@ export const recuperacionSolicitudesRouter = {
 				creditoId,
 				supervisorId: context.userId,
 				supervisorEmail: context.session.user.email,
+				// M3 · la nota del supervisor al aprobar queda en `motivo_decision`.
+				nota: input.motivo || undefined,
 			});
 			// El cierre "no pagó" de un apagado (CB-041) queda como enviado a
 			// recuperación, igual que con el envío directo.

@@ -23,10 +23,19 @@
 
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import {
+	DECISIONES,
+	mensajeFueraDeAlcance,
+	TIPOS_BITACORA,
+} from "../lib/bitacora-supervision";
 import { memoConTtl } from "../lib/memo-ttl";
 import { cobrosSupervisorProcedure } from "../lib/orpc";
 import { USER_ROLE_VALUES } from "../lib/roles";
 import type { ResultadoCartera } from "../lib/supervision-kpis";
+import {
+	getBitacoraDecisiones,
+	getEscaladasDelAsesor,
+} from "../services/bitacora-supervision";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
@@ -48,6 +57,12 @@ import {
  * Semana y Mes no lo recalcule cada vez.
  */
 const sinContactoEquipoMemo = memoConTtl<number>(60_000);
+
+/** 400 si la página pedida queda más allá de lo que la bitácora puede dar. */
+function exigirAlcanceBitacora(page: number, perPage: number) {
+	const mensaje = mensajeFueraDeAlcance(page, perPage);
+	if (mensaje) throw new ORPCError("BAD_REQUEST", { message: mensaje });
+}
 
 /** Mismos períodos que el segmentado Día / Semana / Mes del dashboard. */
 export const PERIODOS_SUPERVISION = ["dia", "semana", "mes"] as const;
@@ -200,6 +215,84 @@ export const supervisionCobrosRouter = {
 		.handler(async ({ input }) => ({
 			asesores: await contactabilidadPorAsesor(input),
 		})),
+
+	/**
+	 * M3 · Bitácora unificada y paginada de decisiones del supervisor: convenios,
+	 * apagados, reactivaciones, recuperaciones, rebajas de mora, Jurídico,
+	 * reasignaciones manuales, traslados y coberturas, más recientes primero.
+	 * Filtros por tipo, decisión, asesor que pidió y fecha (días de Guatemala,
+	 * inclusivos). Con `solicitanteId` o `decisiones` solo entran las
+	 * solicitudes (lo demás lo hace el supervisor, no se pide ni se decide).
+	 * Reemplaza la unión que el Historial de Solicitudes armaba en el navegador.
+	 */
+	getBitacoraDecisiones: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				page: z.number().int().min(1).default(1),
+				perPage: z.number().int().min(1).max(50).default(25),
+				tipos: z
+					.array(z.enum(TIPOS_BITACORA))
+					.max(TIPOS_BITACORA.length)
+					.optional(),
+				decisiones: z
+					.array(z.enum(DECISIONES))
+					.max(DECISIONES.length)
+					.optional(),
+				solicitanteId: z.string().min(1).optional(),
+				desde: z.string().date().optional(),
+				hasta: z.string().date().optional(),
+			}),
+		)
+		.handler(({ input }) => {
+			exigirAlcanceBitacora(input.page, input.perPage);
+			return getBitacoraDecisiones(input);
+		}),
+
+	/**
+	 * M3 · Historial global de decisiones de convenio, paginado (aprobadas y
+	 * rechazadas de todos los créditos; cartera borra el convenio rechazado, así
+	 * que esta es la única fuente). Mismo formato que la bitácora.
+	 */
+	getHistorialDecisionesConvenio: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				page: z.number().int().min(1).default(1),
+				perPage: z.number().int().min(1).max(50).default(25),
+				decision: z.enum(["aprobada", "rechazada"]).optional(),
+				solicitanteId: z.string().min(1).optional(),
+				desde: z.string().date().optional(),
+				hasta: z.string().date().optional(),
+			}),
+		)
+		.handler(({ input }) => {
+			exigirAlcanceBitacora(input.page, input.perPage);
+			return getBitacoraDecisiones({
+				page: input.page,
+				perPage: input.perPage,
+				tipos: ["convenio"],
+				decisiones: input.decision ? [input.decision] : undefined,
+				solicitanteId: input.solicitanteId,
+				desde: input.desde,
+				hasta: input.hasta,
+			});
+		}),
+
+	/**
+	 * M3 · Casos que un asesor escaló: sus solicitudes a Jurídico y de
+	 * recuperación del vehículo (el apagado del GPS no cuenta). Alimenta el chip
+	 * «Escaladas» de Detalle › Actividad. `userId` es el usuario del CRM del
+	 * asesor (`getAsesoresTraslados().userId`).
+	 */
+	getEscaladasAsesor: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				userId: z.string().min(1),
+				desde: z.string().date().optional(),
+				hasta: z.string().date().optional(),
+				limite: z.number().int().min(1).max(200).default(50),
+			}),
+		)
+		.handler(({ input }) => getEscaladasDelAsesor(input)),
 
 	/**
 	 * S6 · Reasignación en bloque, TODO O NADA. Recibe varios créditos, el asesor

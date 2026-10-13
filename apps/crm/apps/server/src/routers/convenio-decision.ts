@@ -111,7 +111,9 @@ export const convenioDecisionRouter = {
 				// El .trim() importa: sin él, "     " pasa esta validación y
 				// recién lo frena el CHECK de la DB en cartera — la regla tiene
 				// que decir lo mismo en los dos lados.
-				motivo: z.string().trim().min(5).max(1000).optional(),
+				// Al rechazar pide 5 caracteres (se valida abajo y lo exige el CHECK
+				// de cartera); al aprobar es la nota del supervisor y puede ser corta (M3).
+				motivo: z.string().trim().min(1).max(1000).optional(),
 				// Lo genera EL CLIENTE (no acá): es la clave de la idempotencia.
 				// Un reintento reenvía el mismo id y cartera responde
 				// idempotente en vez de duplicar el efecto.
@@ -135,7 +137,7 @@ export const convenioDecisionRouter = {
 			// Este SÍ es definitivo: el reenvío manda el payload congelado del
 			// intento original, así que un motivo ausente no puede aparecer
 			// después. Ningún reintento lo arreglaría.
-			if (input.decision === "rechazado" && !input.motivo) {
+			if (input.decision === "rechazado" && (input.motivo?.length ?? 0) < 5) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "El rechazo requiere un motivo de al menos 5 caracteres.",
 				});

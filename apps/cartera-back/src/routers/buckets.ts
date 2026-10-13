@@ -26,7 +26,7 @@ import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualiz
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
-import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
+import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, listarTrasladosCarteraPaginado, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import {
   getPromesaActivaPorCredito,
@@ -216,6 +216,21 @@ export const bucketsRouter = new Elysia()
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     return listarTrasladosCartera(Number(query.page ?? 1));
   }, { query: t.Object({ page: t.Optional(t.Numeric({ minimum: 1, maximum: 100000 })) }) })
+  .get("/buckets/traslados/historial", async ({ query, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    const desde = query.desde ? new Date(query.desde) : null;
+    const hasta = query.hasta ? new Date(query.hasta) : null;
+    if ((desde && Number.isNaN(desde.getTime())) || (hasta && Number.isNaN(hasta.getTime()))) {
+      set.status = 400;
+      return { success: false, message: "desde o hasta inválidos" };
+    }
+    return { success: true, ...(await listarTrasladosCarteraPaginado({ page: Number(query.page ?? 1), perPage: Number(query.per_page ?? 25), desde, hasta })) };
+  }, { query: t.Object({
+    page: t.Optional(t.Numeric({ minimum: 1, maximum: 100000 })),
+    per_page: t.Optional(t.Numeric({ minimum: 1, maximum: 500 })),
+    desde: t.Optional(t.String()),
+    hasta: t.Optional(t.String()),
+  }) })
 
   // Histórico de transiciones de bucket, paginado y con filtros + resumen.
   .get(

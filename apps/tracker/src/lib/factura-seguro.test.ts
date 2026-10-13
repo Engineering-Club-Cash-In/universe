@@ -7,6 +7,7 @@ const base: Caso["facturaSeguro"] = {
 	motivo: null,
 	subidaAt: null,
 	envio: null,
+	yaRegistrada: false,
 };
 
 function vista(
@@ -53,6 +54,13 @@ describe("vistaFacturaSeguro", () => {
 		expect(
 			vista({ motivo: "Solo el vendedor asignado puede subir la factura" }, 90, "aprobado"),
 		).toMatchObject({ titulo: "Factura del seguro pendiente", accion: null });
+	});
+
+	test("con un Seguro del Vehículo de antes, muestra 'Factura recibida' y no deja subir otra", () => {
+		expect(vista({ yaRegistrada: true }, 90, "aprobado")).toMatchObject({
+			titulo: "Factura recibida",
+			accion: null,
+		});
 	});
 
 	test("sin factura, no aparece como pendiente antes del 90%, al 100% ni en un caso perdido", () => {

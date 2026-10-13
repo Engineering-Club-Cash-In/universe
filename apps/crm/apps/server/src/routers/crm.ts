@@ -848,22 +848,61 @@ async function congelarRepresentanteEnFirma(
 	}
 }
 
+/** Lo que los contratos de sociedad toman del lead (la empresa). */
+type DatosDeLaEmpresaEnContratos = {
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	secondLastName?: string;
+	direccion?: string;
+};
+
 /**
- * Toma el candado de firma de cada oportunidad del lead antes de cambiarle el
- * tipo de cliente (en orden, para que dos pedidos no se crucen), y no lo deja
- * cambiar si alguna está en firma: sus contratos son de la batería anterior.
+ * Protege lo que el lead pone en los contratos mientras alguna oportunidad
+ * suya está en firma.
+ *
+ * - El tipo de cliente decide la batería (individual o de sociedad): no se
+ *   cambia con una oportunidad en firma.
+ * - En una sociedad, el nombre del lead es la razón social (`nombreSociedad`)
+ *   y su dirección la de notificaciones: no se cambian con una oportunidad de
+ *   sociedad en firma.
+ *
+ * Antes toma el candado de firma de cada oportunidad del lead, en orden, el
+ * mismo de generar, enlazar y aprobar. Se corrige regresando la oportunidad a
+ * 80% y rehaciendo la batería.
  */
-async function serializarCambioDeTipoDeCliente(
+async function protegerLeadEnFirma(
 	tx: Transaction,
 	leadId: string,
-	nuevo: string,
+	cambios: DatosDeLaEmpresaEnContratos & { clientType?: string },
 ): Promise<void> {
 	const [lead] = await tx
-		.select({ clientType: leads.clientType })
+		.select({
+			clientType: leads.clientType,
+			firstName: leads.firstName,
+			middleName: leads.middleName,
+			lastName: leads.lastName,
+			secondLastName: leads.secondLastName,
+			direccion: leads.direccion,
+		})
 		.from(leads)
 		.where(eq(leads.id, leadId))
 		.limit(1);
-	if (!lead || lead.clientType === nuevo) return;
+	if (!lead) return;
+
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+	const cambia = (antes: string | null, despues: string | undefined) =>
+		despues !== undefined && texto(antes) !== texto(despues);
+	const cambiaTipo =
+		cambios.clientType !== undefined && cambios.clientType !== lead.clientType;
+	const cambiaEmpresa =
+		cambia(lead.firstName, cambios.firstName) ||
+		cambia(lead.middleName, cambios.middleName) ||
+		cambia(lead.lastName, cambios.lastName) ||
+		cambia(lead.secondLastName, cambios.secondLastName) ||
+		cambia(lead.direccion, cambios.direccion);
+	if (!cambiaTipo && !cambiaEmpresa) return;
 
 	const oportunidades = await tx
 		.select({ id: opportunities.id })
@@ -876,15 +915,42 @@ async function serializarCambioDeTipoDeCliente(
 		);
 	}
 
-	const enFirma = await tx
-		.select({ porcentaje: salesStages.closurePercentage })
-		.from(opportunities)
-		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-		.where(eq(opportunities.leadId, leadId));
-	if (enFirma.some((o) => estaEnFirma(o.porcentaje))) {
+	const enFirma = (
+		await tx
+			.select({
+				id: opportunities.id,
+				porcentaje: salesStages.closurePercentage,
+			})
+			.from(opportunities)
+			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.where(eq(opportunities.leadId, leadId))
+	).filter((o) => estaEnFirma(o.porcentaje));
+	if (enFirma.length === 0) return;
+
+	if (cambiaTipo) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
 				"El cliente tiene una oportunidad en firma: sus contratos son de la batería del tipo de cliente actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+		});
+	}
+
+	// ¿Alguna de las que están en firma es de sociedad?
+	const marcados = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(
+			and(
+				inArray(
+					coDebtors.opportunityId,
+					enFirma.map((o) => o.id),
+				),
+				eq(coDebtors.esRepresentanteLegal, true),
+			),
+		);
+	if (lead.clientType === "empresa" || marcados.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La sociedad tiene una oportunidad en firma: sus contratos salieron con este nombre y esta dirección. Para corregirlos, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
 		});
 	}
 }
@@ -1859,11 +1925,26 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
-				// El tipo de cliente decide la batería (individual o de sociedad), y
-				// generar, enlazar y aprobar la revisan con el candado de firma de
-				// cada oportunidad tomado: cambiarlo pasa por los mismos candados.
-				if (updateData.clientType !== undefined) {
-					await serializarCambioDeTipoDeCliente(tx, id, updateData.clientType);
+				// El tipo de cliente decide la batería, y en una sociedad el nombre y
+				// la dirección del lead van en los contratos. Generar, enlazar y
+				// aprobar los leen con el candado de firma de cada oportunidad: estos
+				// cambios pasan por los mismos candados (ver `protegerLeadEnFirma`).
+				if (
+					updateData.clientType !== undefined ||
+					updateData.firstName !== undefined ||
+					updateData.middleName !== undefined ||
+					updateData.lastName !== undefined ||
+					updateData.secondLastName !== undefined ||
+					updateData.direccion !== undefined
+				) {
+					await protegerLeadEnFirma(tx, id, {
+						clientType: updateData.clientType,
+						firstName: updateData.firstName,
+						middleName: updateData.middleName,
+						lastName: updateData.lastName,
+						secondLastName: updateData.secondLastName,
+						direccion: updateData.direccion,
+					});
 				}
 
 				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee

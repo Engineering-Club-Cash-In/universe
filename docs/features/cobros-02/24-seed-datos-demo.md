@@ -1,6 +1,6 @@
 # 24 · Seed de datos de demo para presentar COBROS-02
 
-**Estado al 2026-10-13:** Fases 1 y 2 hechas. Falta la Fase 3, el seed de gestiones.
+**Estado al 2026-10-13:** las tres fases hechas. El seed se corre de nuevo (incremental) para refrescar la demo; ver [Cómo correrlo](#cómo-correrlo).
 **Para qué:** que el sandbox tenga datos creíbles para mostrar el diseño del Figma al PM: la
 cartera real de producción, el CRM real y 90 días de gestiones sembradas que tengan sentido.
 
@@ -95,10 +95,13 @@ Resultado: 10,117 leads, 1,633 casos y 23,680 contactos.
 
 | Qué | Dueño | Qué pasó |
 | --- | --- | --- |
+| `vehicles.wialon_unit_id` y compañía (vínculo vehículo ↔ unidad GPS) | COBROS-02 (en producción la columna existe pero va vacía) | Se perdió el vínculo de los 1,000 vehículos. Se rehízo con `vincular-flota-wialon.ts --aplicar` (mismo script que lo había hecho): quedaron 1,141 |
 | `nexa_payment_tokens`, `nexa_payment_transactions`, `nexa_poll_runs`, `nexa_reviews`, `nexa_token_users`, `nexa_token_user_reservations`, `mock_cartera_credits`, más 3 enums y una secuencia `nexa_*` | **Nexa Server Dev** usa esta misma base | Se borraron con el resto, se restauraron del respaldo con datos y se reinició Nexa Server Dev |
 | `opportunity_agency_sellers`, `opportunity_close_quotations`, `insurance_invoice_submissions`, `buro_interno_fuentes_cartera`, `vehicle_vendors.company_id`, `partner_members.seller_id`, `buro_interno_personas.origen` | Ramas del tracker y del buró que otros devs prueban en DEV | Se restauró la estructura. Sus filas de prueba se perdieron porque apuntaban a oportunidades que ya no existen |
 
-**La próxima vez:** antes de pisar `public`, comparar la estructura del respaldo contra la nueva
+**La próxima vez:** después del restore, correr
+`CARTERA_BACK_URL=<cartera del sandbox> bun run src/scripts/vincular-flota-wialon.ts --aplicar --confirmar-bd=<host>`
+(desde `apps/crm/apps/server`; tarda ~15 min). Y antes de pisar `public`, comparar la estructura del respaldo contra la nueva
 (restaurar el respaldo solo con estructura en una base temporal y comparar
 `information_schema.columns` y `pg_enum`). Después volver a poner lo que no es del CRM de
 producción.
@@ -112,7 +115,70 @@ producción.
 
 ---
 
-## Fase 3 · Seed de gestiones (pendiente)
+## Fase 3 · Seed de gestiones (hecha)
+
+Script: [`apps/crm/apps/server/src/scripts/seed-demo-cobros02.ts`](../../../apps/crm/apps/server/src/scripts/seed-demo-cobros02.ts).
+
+### Cómo correrlo
+
+Desde `apps/crm/apps/server` (toma `DATABASE_URL` del `.env` y usa la conexión directa):
+
+```bash
+TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --dry-run                 # conteos, no escribe
+TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --confirmar-bd=ep-green-tree
+TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --convenios --confirmar-bd=ep-green-tree
+TZ=UTC bun run src/scripts/seed-demo-cobros02.ts --limpiar --confirmar-bd=ep-green-tree
+```
+
+- **Primera siembra** (no hay nada sembrado): 90 días, o los que diga `--dias=N`.
+- **Incremental** (ya hubo una): `--dias=1` llena ayer y hoy; `--dias=3`, los últimos 3 días. Sigue
+  después de la última gestión sembrada (no duplica), continúa las promesas abiertas y no vuelve
+  a crear solicitudes, eventos GPS, coberturas ni avisos. Las subidas/bajadas del cierre, los avisos
+  y la agenda de cada mañana los llenan los jobs. Para la demo: correrlo la mañana de la
+  presentación con `--dias` = días desde la última corrida.
+- **`--limpiar`** borra todas las corridas (o solo `--corrida=demo-…`) y devuelve la historia de
+  buckets original. Los convenios de `--convenios` no se tocan: se van con la siguiente alineación.
+- Orden si se realinea cartera: alineación → `--limpiar` → seed → `--convenios`.
+
+### Qué sembró la primera corrida (2026-10-13)
+
+| Qué | Cantidad |
+| --- | --- |
+| Historia de buckets reconstruida (cuotas vencidas sin pagar por día, termina en el bucket y asesor que dejó el motor) | 1,820 créditos (los `CRM-` desde que nacieron; los viejos, 90 días) |
+| Gestiones (`contactos_cobros`) | 9,340, de las que ~1,080 son promesas (606 cumplidas, 430 incumplidas, 42 pendientes) |
+| Visitas / referencias / redes / hallazgos | 173 / 68 / 65 / 13 |
+| Recuperaciones (2 pendientes en la bandeja, 1 rechazada), apagados (1 pendiente, 1 ejecutado con reactivación), eventos GPS, jurídico, rebajas | 3 / 3 / 24 / 2 / 2 |
+| Cierre diario (contactos + subidas/bajadas) | 13,996 filas |
+| Agendas cerradas (30 días) con sus créditos | 129 / 3,790 |
+| Metas (ago–oct), 1 cobertura de vacaciones (Octavio → Samuel), avisos | 21 / 1 / 393 |
+| Convenios por la API (`--convenios`) | 14: 8 pendientes, 3 aprobados, 3 rechazados |
+
+La alineación había dejado 1,062 subidas/bajadas fechadas el día de la alineación. Con la historia
+reconstruida, "hoy" quedó con 7 subidas y 17 bajadas. El cumplimiento de agenda sale entre 37 % y 60 %
+según el asesor: depende de la contactabilidad (una llamada sin respuesta no cuenta como atendida).
+
+### Jobs del sandbox (CRM API Cobros)
+
+| Job | Estado | Por qué |
+| --- | --- | --- |
+| Cierre diario de asesores | **Prendido** con `CIERRE_DIARIO_ENABLED=true` | Llena «Mi equipo › Día» y los KPI del supervisor. No le escribe a nadie |
+| Eventos GPS y ubicaciones clave | **Prendidos** con `GPS_EVENTOS_ENABLED` y `GPS_UBICACIONES_ENABLED` | Solo leen de Wialon (ya hay 1,141 unidades vinculadas) |
+| Agenda y promesas, alertas, sync de promesas, elegibilidad premora, rebajas/jurídico colgados | Prendidos | Internos |
+| Poller y dispatcher de Págalo | Prendidos, sin interruptor | Decisión anterior: corre siempre (`index.ts`, comentario del poller) |
+| Recordatorio Págalo, recordatorios de convenio, bienvenida | Prendidos solo con `TEST_MESSAGE=true` | Mandan a los teléfonos de prueba |
+| Recordatorios premora | **Apagado** | Le escribe al cliente |
+
+Cartera del sandbox: solo `moras` y `buckets_convenio`.
+
+### Correcciones que necesitó
+
+- Samuel estaba baneado en el CRM de DEV: se desbaneó.
+- Los usuarios de cartera (`platform_users`) de Samuel y Octavio tenían el correo de producción, y
+  `crearConvenioDesdeFicha` busca al asesor por el correo de la sesión. Se corrigieron en la copia y
+  `alinear_desde_prod.sh --correcciones` ahora también los corrige.
+- `CRM_SERVICE_USER_ID=25` en Cartera-Api-Cobros (la cuenta con la que entra el CRM).
+
+### Plan original
 
 ### Reglas duras
 
@@ -191,7 +257,8 @@ Las fuentes son `src/db/schema/cobros.ts`, las migraciones 0025–0082 y `drizzl
 - **Correos de Octavio y Samuel** para el pase (ver Fase 1).
 - El `.env` local de cartera-back de Daniel tiene `SUPABASE_DB_URL` apuntando a Neon DEV (schema
   `cartera`). La de producción está comentada en la línea 33.
-- `Cartera-Api-Cobros` avisa `CRM_SERVICE_USER_ID no configurado`, así que en el sandbox las rebajas
-  de mora aprobadas desde el CRM devuelven 403.
+- ~~`CRM_SERVICE_USER_ID` sin configurar en `Cartera-Api-Cobros`~~: puesto el 2026-10-13.
+- «Sin contacto 3 días» del supervisor cuenta también los créditos viejos (sin gestiones sembradas,
+  por la regla de solo `CRM-`).
 - `RECIBO_PAGO_WHATSAPP_ENABLED=true` en `Cartera-Api-Cobros`, para que el sandbox siga mandando
   recibos a los teléfonos de prueba.

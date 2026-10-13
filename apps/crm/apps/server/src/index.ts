@@ -2225,8 +2225,11 @@ const JOBS_PROGRAMADOS = {
 	 *  promesasYSnapshots — es la misma cadena. */
 	syncPromesasCartera: true,
 	/** Interno: cierre diario de asesores (00:15 GT). Congela el histórico del
-	 *  día anterior; no hace falta para lo que se está probando. */
-	cierreDiarioAsesores: false,
+	 *  día anterior (contactos y subidas/bajadas) que leen «Mi equipo › Día» y
+	 *  los KPI del supervisor. No le escribe a nadie. Se prende con
+	 *  `CIERRE_DIARIO_ENABLED=true` en el ambiente: sin él, esa pantalla se
+	 *  queda en «No hay cierre generado». */
+	cierreDiarioAsesores: process.env.CIERRE_DIARIO_ENABLED === "true",
 	/** ⚠️ Le escribe al CLIENTE. Apagados a propósito en pruebas. */
 	recordatoriosPremora: false,
 	/** ⚠️ Le escribe al CLIENTE por WhatsApp (D-5/D-3/D-1/D-0 del convenio).

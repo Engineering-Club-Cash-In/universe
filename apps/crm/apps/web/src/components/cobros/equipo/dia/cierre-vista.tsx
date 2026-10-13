@@ -205,7 +205,7 @@ export function CierreVista({
 		<div className="flex min-w-0 flex-col gap-5">
 			<EncabezadoVistaDia
 				titulo="Cierre diario"
-				descripcion="Gestión de cada asesor en el rango · se genera todos los días a las 22:00 GT"
+				descripcion="Gestión de cada asesor en el rango · cada día se cierra a las 00:15 GT del día siguiente"
 				controles={
 					<>
 						{selector}
@@ -277,7 +277,7 @@ export function CierreVista({
 					variant="no-data"
 					size="sm"
 					title="No hay cierre generado en este rango"
-					description="El cierre se genera todos los días a las 22:00 GT."
+					description="El cierre de cada día se genera a las 00:15 GT del día siguiente."
 				/>
 			) : (
 				<>

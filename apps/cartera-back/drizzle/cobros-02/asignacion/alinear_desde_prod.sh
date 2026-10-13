@@ -167,6 +167,9 @@ if [[ -n "$CORRECCIONES_CSV" ]]; then
     faltan="$(pn -At -c "SELECT string_agg(format('%s (id %s)', c.nombre, c.asesor_id), ', ') FROM ${tabla_correcciones} WHERE NOT EXISTS (SELECT 1 FROM \"$NUEVO\".asesores a WHERE a.asesor_id = c.asesor_id AND lower(btrim(a.nombre)) = lower(btrim(c.nombre)))")"
     [[ -z "$faltan" ]] || die "Correcciones de correo que no coinciden con producción (id + nombre): $faltan. Revisá $CORRECCIONES_CSV."
     pn -At -c "UPDATE \"$NUEVO\".asesores a SET email_cash_in = c.correo FROM ${tabla_correcciones} WHERE a.asesor_id = c.asesor_id AND a.email_cash_in IS DISTINCT FROM c.correo RETURNING '· correo corregido en la copia: '||a.nombre||' (id '||a.asesor_id||') → '||c.correo"
+    # Su usuario de cartera (platform_users) también: el CRM crea convenios con el
+    # correo de la sesión (`created_by_email`) y cartera lo busca ahí.
+    pn -At -c "UPDATE \"$NUEVO\".platform_users p SET email = c.correo FROM ${tabla_correcciones} WHERE p.asesor_id = c.asesor_id AND p.email IS DISTINCT FROM c.correo AND NOT EXISTS (SELECT 1 FROM \"$NUEVO\".platform_users o WHERE lower(o.email) = lower(c.correo) AND o.id <> p.id) RETURNING '· usuario de cartera corregido en la copia: id '||p.id||' → '||c.correo"
   fi
 fi
 

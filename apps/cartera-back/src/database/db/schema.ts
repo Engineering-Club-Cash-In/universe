@@ -505,6 +505,10 @@
     uniqueIndex("uq_moras_condonaciones_intento_viva")
       .on(t.intento_id)
       .where(sql`${t.intento_id} IS NOT NULL AND ${t.anulada_at} IS NULL`),
+    // 0056: búsqueda por intento y crédito incluyendo anuladas (insignia de contabilidad).
+    index("moras_condonaciones_idx_intento")
+      .on(t.intento_id, t.credito_id)
+      .where(sql`${t.intento_id} IS NOT NULL`),
   ]);
 
   // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION

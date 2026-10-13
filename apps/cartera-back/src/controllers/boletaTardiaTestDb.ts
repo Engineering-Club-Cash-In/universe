@@ -32,7 +32,7 @@ const migracion = (nombre: string) => Bun.file(new URL(`../../drizzle/${nombre}`
 let listo: Promise<Entorno> | undefined;
 
 /**
- * Esquema mínimo + migraciones REALES 0043, 0051, 0052, 0053, 0054, 0055.
+ * Esquema mínimo + migraciones REALES 0043, 0051, 0052, 0053, 0054, 0055, 0056.
  * Créditos 1..CREDITOS: MOROSO, capital 10000, cuotas id*10+4 (vencida hace 40 días) e id*10+5 (hace 10; la del retraso), ambas impagas
  * y una mora activa de 119.47 = 112.00 legítima + 7.47 del retraso (cuota id*10+5).
  */
@@ -88,7 +88,7 @@ const levantar = (url: string): Promise<Entorno> => (listo ??= (async () => {
   for (const archivo of [
     "0043_mora_pagada_cuota.sql", "0051_condonacion_nexa_a_tiempo.sql", "0052_condonacion_nexa_pagos_pendientes.sql",
     "0053_condonacion_boleta_tardia_enum.sql", "0054_condonacion_boleta_tardia_columnas.sql",
-    "0055_condonacion_boleta_tardia_indice_pagos.sql",
+    "0055_condonacion_boleta_tardia_indice_pagos.sql", "0056_idx_condonaciones_intento.sql",
   ]) await sql.unsafe(await migracion(archivo)).simple();
   await sql`INSERT INTO cartera.platform_users (email, password_hash, role, is_active)
     VALUES (${EMAIL_ASESOR}, '!sin-login', 'ASESOR', true)`;

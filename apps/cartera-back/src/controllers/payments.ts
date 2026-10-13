@@ -41,6 +41,7 @@ import {
   PENDING_RETURN_AUTHORIZATION_CODE,
 } from "../utils/pendingReturnGuard";
 import { esCube } from "../utils/devolucionCompletada";
+import { CONDONACION_BOLETA_TARDIA_SELECT_SQL } from "./condonacionBoletaTardiaSql";
 import {
   desligarFilaDeEventoNexaFallido,
   NexaPaymentNotReversibleError,
@@ -2973,6 +2974,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         (p.nexa_payment_event_id IS NOT NULL) AS "entroPorNexa",
         EXISTS (SELECT 1 FROM cartera.nexa_payment_events ne
           WHERE ne.id = p.nexa_payment_event_id AND ne.status = 'failed') AS "nexaEventoFallido",
+        ${sql.raw(CONDONACION_BOLETA_TARDIA_SELECT_SQL)},
 
         -- 💳 Info del crédito
         json_build_object(
@@ -3321,6 +3323,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       origenPago: r.origenPago,
       entroPorNexa: r.entroPorNexa === true,
       nexaEventoFallido: r.nexaEventoFallido === true,
+      condonacionBoletaTardia: r.condonacionBoletaTardia ?? null,
       credito: r.credito,
       banderaReinversion: r.banderaReinversion ?? false,
       pendienteFacturar: r.pendienteFacturar ?? false,

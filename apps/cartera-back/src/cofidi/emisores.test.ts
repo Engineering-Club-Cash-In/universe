@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales } from "./emisores";
+import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "./emisores";
 import {
   AMJK_CONFIG,
   AMJK_SAT_CONFIG,
@@ -273,5 +273,55 @@ describe("emisorTieneCredenciales", () => {
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+});
+
+describe("logoUrlEmisor", () => {
+  it("devuelve el logo propio de CHECKIN si la env está puesta", () => {
+    const resultado = logoUrlEmisor("120310546", "def", { CHECKIN_LOGO_URL: "https://x/motorlab.png" });
+    expect(resultado).toBe("https://x/motorlab.png");
+  });
+
+  it("devuelve el default si CHECKIN no tiene la env puesta", () => {
+    const resultado = logoUrlEmisor("120310546", "def", {});
+    expect(resultado).toBe("def");
+  });
+
+  it("devuelve el default si CHECKIN tiene la env pero vacía", () => {
+    const resultado = logoUrlEmisor("120310546", "def", { CHECKIN_LOGO_URL: "" });
+    expect(resultado).toBe("def");
+  });
+
+  it("devuelve el default para emisores que NO tienen logoEnv", () => {
+    const resultado = logoUrlEmisor("100691455", "def", { CHECKIN_LOGO_URL: "https://x/motorlab.png" });
+    expect(resultado).toBe("def");
+  });
+
+  it("devuelve el default para NIT undefined", () => {
+    const resultado = logoUrlEmisor(undefined, "def", { CHECKIN_LOGO_URL: "https://x/motorlab.png" });
+    expect(resultado).toBe("def");
+  });
+
+  it("devuelve el default para NIT null", () => {
+    const resultado = logoUrlEmisor(null, "def", { CHECKIN_LOGO_URL: "https://x/motorlab.png" });
+    expect(resultado).toBe("def");
+  });
+
+  it("devuelve el default para NIT no registrado", () => {
+    const resultado = logoUrlEmisor("999", "def", { CHECKIN_LOGO_URL: "https://x/motorlab.png" });
+    expect(resultado).toBe("def");
+  });
+
+  it("las 6 de siempre tienen logoEnv === null", () => {
+    const nits = ["98766430", "52956032", "100691455", "2694247K", "54603064", "96896035"];
+    for (const nit of nits) {
+      const emisor = emisorPorNit(nit);
+      expect(emisor?.logoEnv).toBe(null);
+    }
+  });
+
+  it("CHECKIN tiene logoEnv === 'CHECKIN_LOGO_URL'", () => {
+    const checkin = emisorPorNit("120310546");
+    expect(checkin?.logoEnv).toBe("CHECKIN_LOGO_URL");
   });
 });

@@ -21,7 +21,7 @@ import { facturas_electronicas, pagos_credito, cuotas_credito } from "../databas
 import { SATClientService } from "../cofidi/satClientService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
 import { launchBrowser } from "../utils/functions/browser";
-import { EMISORES } from "../cofidi/emisores";
+import { EMISORES, logoUrlEmisor } from "../cofidi/emisores";
 
 const INSERT = process.argv.includes("--insert");
 const PDF = process.argv.includes("--pdf");
@@ -221,7 +221,7 @@ function buildDatos(xml: string) {
 // Devuelve la URL pública (misma convención que el pdf_url guardado).
 async function generarYSubirPdf(xml: string): Promise<string> {
   const datos = buildDatos(xml);
-  const logoUrl = process.env.LOGO_URL || "";
+  const logoUrl = logoUrlEmisor(String(datos.emisor?.nit ?? ""), process.env.LOGO_URL || "");
   const html = generarHTMLFacturaPro(datos as any, logoUrl);
 
   const browser = await launchBrowser();

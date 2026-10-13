@@ -71,7 +71,8 @@ describe("separarYaDevueltos", () => {
     { credito_id: 2, asesor_nuevo_id: 20 },
     { credito_id: 3, asesor_nuevo_id: 30 },
   ];
-  const motivo = "Reactivación de Ana: se le devuelve su cartera";
+  const marca = " · Devolución de la operación abc";
+  const motivo = `Reactivación de Ana: se le devuelve su cartera${marca}`;
 
   test("cuenta como devuelto lo que una tanda anterior ya regresó al titular", () => {
     const r = separarYaDevueltos(
@@ -92,7 +93,7 @@ describe("separarYaDevueltos", () => {
         [2, { asesor_anterior: 20, asesor_nuevo: 10, motivo: "Reasignación manual" }],
       ]),
       10,
-      motivo,
+      marca,
     );
     expect(r.yaDevueltos).toEqual([1]);
     expect(r.retenidos.map((x) => x.credito_id)).toEqual([2, 3]);
@@ -105,7 +106,7 @@ describe("separarYaDevueltos", () => {
       new Map([[1, { asesor_id: 99 }]]),
       new Map([[1, { asesor_anterior: 20, asesor_nuevo: 10, motivo }]]),
       10,
-      motivo,
+      marca,
     );
     expect(r.yaDevueltos).toEqual([]);
     expect(r.retenidos).toHaveLength(1);

@@ -44,8 +44,24 @@ export async function pausarPoolAsesor(asesorId: number): Promise<{ asesor_id: n
   return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
 }
 
-/** Devuelve al asesor a los buckets que se le pausaron. */
-export async function reanudarPoolAsesor(asesorId: number, buckets: number[]): Promise<{ asesor_id: number; buckets: number[] }> {
+/**
+ * Devuelve al asesor a los buckets que se le pausaron y, si el traslado que lo
+ * pausó también lo sacó del balanceo de créditos nuevos, lo vuelve a poner.
+ */
+export async function reanudarPoolAsesor(
+  asesorId: number,
+  buckets: number[],
+  operacionId?: string,
+): Promise<{ asesor_id: number; buckets: number[] }> {
+  if (operacionId) {
+    await db.execute(sql`
+      UPDATE ${schema}.asesores SET activo_para_creditos = true
+      WHERE asesor_id = ${asesorId}
+        AND EXISTS (
+          SELECT 1 FROM ${schema}.operaciones_traslado_cartera
+          WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
+            AND solicitud->>'creditosPausados' = 'true')`);
+  }
   if (buckets.length === 0) return { asesor_id: asesorId, buckets: [] };
   const filas = await db
     .update(asesor_bucket)
@@ -117,9 +133,12 @@ export async function devolverTraslado(params: {
   const clasificacion = clasificarDevolucion(detalle, actuales, bucketsDelTitular);
   const { aDevolver, aDevolverDirecto } = clasificacion;
   const recibio = new Map(detalle.map((d) => [d.credito_id, d.asesor_nuevo_id]));
+  // La bitácora de esta devolución lleva siempre la misma marca, derivada de la
+  // operación (no del texto que mande el llamador, que puede cambiar entre intentos):
+  // así un reintento reconoce lo que una tanda anterior ya regresó.
+  const marca = ` · Devolución de la operación ${params.operacionId}`;
+  const motivo = `${params.motivo}${marca}`;
 
-  // Reintento tras una devolución parcial: lo que una tanda anterior ya devolvió
-  // cuenta como devuelto, no como retenido.
   const { yaDevueltos, retenidos: retenidosSinRepetidos } = separarYaDevueltos(
     clasificacion.retenidos,
     detalle,
@@ -130,48 +149,69 @@ export async function devolverTraslado(params: {
         .map((r) => r.credito_id),
     ),
     titular,
-    params.motivo,
+    marca,
   );
   const retenidos = [...retenidosSinRepetidos];
   let devueltos = yaDevueltos.length;
+  let intentadas = 0;
 
-  for (let i = 0; i < aDevolver.length; i += MAX_LOTE) {
-    const lote = aDevolver.slice(i, i + MAX_LOTE);
-    const res = await reasignarAsesorLote({
-      credito_ids: lote,
-      asesor_nuevo_id: titular,
-      motivo: params.motivo,
-      usuario_email: params.usuarioEmail,
-      // Bajo los locks del lote: si un supervisor la movió después de clasificar,
-      // se queda con su nuevo dueño.
-      duenios_esperados: new Map(lote.map((id) => [id, recibio.get(id) as number])),
-    });
-    if (!res.success) {
-      // Lo devuelto en tandas anteriores ya está escrito; el supervisor puede
-      // reintentar y solo se intentará lo que siga con quien lo recibió.
-      throw new AusenciaError(
-        `${res.message} (ya se devolvieron ${devueltos} de ${aDevolver.length} cuentas; puede reintentar)`,
-        res.status,
-        "devolucion_parcial",
-      );
+  const devolverPorLotes = async (todas: number[]) => {
+    intentadas += todas.length;
+    for (let i = 0; i < todas.length; i += MAX_LOTE) {
+      const lote = todas.slice(i, i + MAX_LOTE);
+      const res = await reasignarAsesorLote({
+        credito_ids: lote,
+        asesor_nuevo_id: titular,
+        motivo,
+        usuario_email: params.usuarioEmail,
+        // Bajo los locks del lote: si un supervisor la movió después de clasificar,
+        // se queda con su nuevo dueño.
+        duenios_esperados: new Map(lote.map((id) => [id, recibio.get(id) as number])),
+      });
+      if (!res.success) {
+        // Lo devuelto en tandas anteriores ya está escrito; el supervisor puede
+        // reintentar y solo se intentará lo que siga con quien lo recibió.
+        throw new AusenciaError(
+          `${res.message} (ya se devolvieron ${devueltos} de ${intentadas} cuentas; puede reintentar)`,
+          res.status,
+          "devolucion_parcial",
+        );
+      }
+      devueltos += res.reasignados.length;
+      for (const o of res.omitidos) {
+        if (o.motivo === "cambio_de_dueno") retenidos.push({ credito_id: o.credito_id, motivo: "cambio_de_dueno" });
+      }
     }
-    devueltos += res.reasignados.length;
-    for (const o of res.omitidos) {
-      if (o.motivo === "cambio_de_dueno") retenidos.push({ credito_id: o.credito_id, motivo: "cambio_de_dueno" });
-    }
-  }
+  };
+
+  await devolverPorLotes(aDevolver);
   if (aDevolverDirecto.length) {
     const directos = await devolverSinBucket({
       operacionId: params.operacionId,
       titular,
       creditoIds: aDevolverDirecto,
-      motivo: params.motivo,
+      motivo,
       usuarioEmail: params.usuarioEmail,
     });
     devueltos += directos.length;
     const devueltosDirecto = new Set(directos);
-    for (const id of aDevolverDirecto) {
-      if (!devueltosDirecto.has(id)) retenidos.push({ credito_id: id, motivo: "cambio_de_dueno" });
+    const omitidos = aDevolverDirecto.filter((id) => !devueltosDirecto.has(id));
+    if (omitidos.length) {
+      // Los que no se escribieron (cambiaron de dueño, se cerraron o ENTRARON a un
+      // bucket mientras tanto) se vuelven a clasificar con lo que hay ahora: los que
+      // siguen con quien los recibió y ya tienen bucket en el pool pasan por la
+      // reasignación en bloque, que exige pool.
+      const ahora = new Map<number, { asesor_id: number | null; bucket: number | null; cerrado?: boolean } | null>();
+      for (const [id, valor] of await leerCreditos(db, omitidos)) ahora.set(id, valor);
+      const nueva = clasificarDevolucion(
+        detalle.filter((d) => omitidos.includes(d.credito_id)),
+        ahora,
+        bucketsDelTitular,
+      );
+      await devolverPorLotes(nueva.aDevolver);
+      retenidos.push(...nueva.retenidos);
+      // Siguen sin bucket y con quien los recibió pero la escritura no los tomó.
+      for (const id of nueva.aDevolverDirecto) retenidos.push({ credito_id: id, motivo: "cambio_de_dueno" });
     }
   }
   return { asesor_id: titular, devueltos, retenidos, total: detalle.length };

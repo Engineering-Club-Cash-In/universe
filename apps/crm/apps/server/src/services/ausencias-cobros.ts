@@ -428,6 +428,7 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 			await carteraBackClient.reanudarPoolAsesor(
 				ausencia.asesorId,
 				ausencia.bucketsPausados,
+				ausencia.operacionTrasladoId ?? undefined,
 			);
 			await db
 				.update(ausenciasAsesorCobros)

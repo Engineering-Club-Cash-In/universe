@@ -3936,6 +3936,8 @@ export class CarteraBackClient {
 	async reanudarPoolAsesor(
 		asesorId: number,
 		buckets: number[],
+		/** El traslado que lo pausó: también lo devuelve al balanceo de créditos nuevos. */
+		operacionId?: string,
 	): Promise<{ asesor_id: number; buckets: number[] }> {
 		const r = await this.request<{
 			success: boolean;
@@ -3944,7 +3946,7 @@ export class CarteraBackClient {
 			message?: string;
 		}>(`/buckets/asesores/${asesorId}/pool/reanudar`, {
 			method: "POST",
-			body: JSON.stringify({ buckets }),
+			body: JSON.stringify({ buckets, operacion_id: operacionId }),
 		});
 		this.cache.invalidate("/buckets/");
 		if (!r?.success) {

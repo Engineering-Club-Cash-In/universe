@@ -468,8 +468,15 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo
         RETURNING bucket`);
       bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
+      // La asignación automática de créditos nuevos (menor carga) no mira el pool de
+      // buckets sino este flag: también sale del balanceo mientras dure la ausencia.
+      const sinBalanceo = await tx.execute(sql`
+        UPDATE ${schema}.asesores SET activo_para_creditos = false
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo_para_creditos
+        RETURNING asesor_id`);
       await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
-        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados })}::jsonb WHERE id = ${row.id}::uuid`);
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados: sinBalanceo.rows.length > 0 })}::jsonb
+        WHERE id = ${row.id}::uuid`);
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA
     // previsualización choca acá. Sin mapearlo, la violación sube cruda,

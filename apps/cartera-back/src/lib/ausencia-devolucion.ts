@@ -59,7 +59,7 @@ export function separarYaDevueltos(
   actuales: ReadonlyMap<number, { asesor_id: number | null } | null>,
   ultimoCambio: ReadonlyMap<number, UltimoCambioDueno>,
   titular: number,
-  motivo: string,
+  marca: string,
 ): { yaDevueltos: number[]; retenidos: RetenidoDevolucion[] } {
   const recibio = new Map(detalle.map((d) => [d.credito_id, d.asesor_nuevo_id]));
   const yaDevueltos: number[] = [];
@@ -72,7 +72,7 @@ export function separarYaDevueltos(
       h &&
       h.asesor_nuevo === titular &&
       h.asesor_anterior === recibio.get(r.credito_id) &&
-      h.motivo === motivo
+      h.motivo?.endsWith(marca) === true
     ) {
       yaDevueltos.push(r.credito_id);
     } else {

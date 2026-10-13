@@ -267,8 +267,8 @@ export const bucketsRouter = new Elysia()
   }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }) })
   .post("/buckets/asesores/:asesor_id/pool/reanudar", async ({ params, body, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
-    return { success: true, ...(await reanudarPoolAsesor(Number(params.asesor_id), body.buckets)) };
-  }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }), body: t.Object({ buckets: t.Array(t.Integer({ minimum: 0, maximum: 5 })) }) })
+    return { success: true, ...(await reanudarPoolAsesor(Number(params.asesor_id), body.buckets, body.operacion_id)) };
+  }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }), body: t.Object({ buckets: t.Array(t.Integer({ minimum: 0, maximum: 5 })), operacion_id: t.Optional(t.String({ format: "uuid" })) }) })
 
   // Histórico de transiciones de bucket, paginado y con filtros + resumen.
   .get(

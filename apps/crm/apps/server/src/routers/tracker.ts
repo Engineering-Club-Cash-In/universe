@@ -108,6 +108,8 @@ export type CasoTracker = {
 		motivo: string | null;
 		subidaAt: string | null;
 		envio: EstadoEnvioFactura | null;
+		/** Ya hay una factura: con registro de envío, o un "Seguro del Vehículo" de antes. */
+		yaRegistrada: boolean;
 	};
 };
 
@@ -170,6 +172,9 @@ const filaSelect = {
 	vehicleValue: ultimaCotizacion.vehicleValue,
 	facturaEnvio: insuranceInvoiceSubmissions.status,
 	facturaSubidaAt: insuranceInvoiceSubmissions.createdAt,
+	// Un "Seguro del Vehículo" subido antes de esta función (por ejemplo, el del
+	// proceso manual) cuenta como factura ya subida: el tracker no deja otra.
+	seguroPrevio: sql<boolean>`exists (select 1 from ${opportunityDocuments} where ${opportunityDocuments.opportunityId} = ${opportunities.id} and ${opportunityDocuments.documentType} = 'seguro_vehiculo')`,
 };
 
 type Fila = {
@@ -196,6 +201,7 @@ type Fila = {
 	vehicleValue: string | null;
 	facturaEnvio: EstadoEnvioFactura | null;
 	facturaSubidaAt: Date | null;
+	seguroPrevio: boolean;
 };
 
 export function nombreCliente(
@@ -291,7 +297,7 @@ function reglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 		companyId: fila.companyId,
 		sellerId: fila.sellerId,
 		membresias,
-		yaSubida: fila.facturaEnvio != null,
+		yaSubida: fila.facturaEnvio != null || fila.seguroPrevio,
 	});
 }
 
@@ -327,6 +333,7 @@ function aCaso(
 			motivo: factura.ok ? null : MENSAJE_MOTIVO[factura.motivo],
 			subidaAt: fila.facturaSubidaAt?.toISOString() ?? null,
 			envio: fila.facturaEnvio ?? null,
+			yaRegistrada: fila.facturaEnvio != null || fila.seguroPrevio,
 		},
 	};
 }
@@ -1300,6 +1307,16 @@ export const trackerRouter = {
 						.select({ id: insuranceInvoiceSubmissions.id })
 						.from(insuranceInvoiceSubmissions)
 						.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
+					const [seguroPrevio] = await tx
+						.select({ id: opportunityDocuments.id })
+						.from(opportunityDocuments)
+						.where(
+							and(
+								eq(opportunityDocuments.opportunityId, fila.id),
+								eq(opportunityDocuments.documentType, "seguro_vehiculo"),
+							),
+						)
+						.limit(1);
 					exigirReglaFactura(
 						{
 							...fila,
@@ -1309,6 +1326,7 @@ export const trackerRouter = {
 							companyId: vigente?.companyId ?? null,
 							sellerId: asignado?.sellerId ?? null,
 							facturaEnvio: previa ? "pendiente" : null,
+							seguroPrevio: !!seguroPrevio,
 						},
 						membresias,
 					);

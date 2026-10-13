@@ -456,6 +456,7 @@ async function validarAsesorExplicito(executor: DbExecutor, asesorId: number): P
     SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.operaciones_traslado_cartera
     WHERE asesor_origen_id = ${asesorId} AND estado = 'confirmada'
       AND solicitud->>'creditosPausados' = 'true'
+      AND COALESCE(solicitud->>'reanudada', 'false') <> 'true'
     LIMIT 1`);
   if ((ausente.rows ?? []).length === 0) return asesorId;
   console.warn(`[createCredit] El asesor ${asesorId} está ausente: se asigna a otro elegible.`);

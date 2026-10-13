@@ -33,7 +33,10 @@ const MAX_LOTE = 200;
  * activos (solo esos se reactivan después: un bucket que un admin ya había
  * desactivado no se enciende solo).
  */
-export async function pausarPoolAsesor(asesorId: number): Promise<{ asesor_id: number; buckets: number[] }> {
+export async function pausarPoolAsesor(
+  asesorId: number,
+  operacionId?: string,
+): Promise<{ asesor_id: number; buckets: number[] }> {
   const [asesor] = await db.select({ id: asesores.asesor_id }).from(asesores).where(eq(asesores.asesor_id, asesorId));
   if (!asesor) throw new AusenciaError("El asesor no existe.", 404, "asesor_no_existe");
   const filas = await db
@@ -41,7 +44,27 @@ export async function pausarPoolAsesor(asesorId: number): Promise<{ asesor_id: n
     .set({ activo: false })
     .where(and(eq(asesor_bucket.asesor_id, asesorId), eq(asesor_bucket.activo, true)))
     .returning({ bucket: asesor_bucket.bucket });
+  if (operacionId) {
+    // Compensación de una reactivación que falló: el asesor sigue ausente, así que
+    // también vuelve a salir del balanceo de créditos nuevos.
+    await db.execute(sql`
+      UPDATE ${schema}.asesores SET activo_para_creditos = false
+      WHERE asesor_id = ${asesorId}
+        AND EXISTS (
+          SELECT 1 FROM ${schema}.operaciones_traslado_cartera
+          WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
+            AND solicitud->>'creditosPausados' = 'true')`);
+    await marcarReanudada(asesorId, operacionId, false);
+  }
   return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
+}
+
+/** Registra en la operación si el asesor está hoy reanudado (para saber si sigue ausente). */
+async function marcarReanudada(asesorId: number, operacionId: string, reanudada: boolean) {
+  await db.execute(sql`
+    UPDATE ${schema}.operaciones_traslado_cartera
+    SET solicitud = solicitud || ${JSON.stringify({ reanudada })}::jsonb
+    WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}`);
 }
 
 /**
@@ -61,6 +84,7 @@ export async function reanudarPoolAsesor(
           SELECT 1 FROM ${schema}.operaciones_traslado_cartera
           WHERE id = ${operacionId}::uuid AND asesor_origen_id = ${asesorId}
             AND solicitud->>'creditosPausados' = 'true')`);
+    await marcarReanudada(asesorId, operacionId, true);
   }
   if (buckets.length === 0) return { asesor_id: asesorId, buckets: [] };
   const filas = await db

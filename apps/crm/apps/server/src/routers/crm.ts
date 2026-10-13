@@ -748,11 +748,10 @@ async function sociedadParaJuridico(
 
 /**
  * Las oportunidades (de las dadas) con contratos vivos: vigentes (sin anular
- * ni reemplazar) y pendientes de firma, o ya firmados mientras la oportunidad
- * no pasó la confirmación final (90%). Salieron a firma con los datos de hoy
- * —WeeTrust manda las invitaciones apenas se generan, ya en 80%—, y uno
- * firmado en 85% todavía va a cerrar la oportunidad: lo que cuenta son los
- * contratos, no sólo la etapa.
+ * ni reemplazar), pendientes o ya firmados, mientras la oportunidad no pasó la
+ * confirmación final (90%). Salieron a firma con los datos de hoy —WeeTrust
+ * manda las invitaciones apenas se generan, ya en 80%—, y uno firmado en 85%
+ * todavía va a cerrar la oportunidad.
  */
 async function conContratosPendientes(
 	tx: Transaction,
@@ -778,9 +777,12 @@ async function conContratosPendientes(
 				isNull(generatedLegalContracts.replacedByContractId),
 			),
 		);
+	// Después de la confirmación (90%) los contratos ya cumplieron: muchos
+	// quedan en "pending" porque nadie vuelve a sincronizarlos (en PROD, 650
+	// así en 90 oportunidades cerradas), y no tienen que congelar nada.
 	return new Set(
 		filas
-			.filter((f) => f.status === "pending" || (f.porcentaje ?? 0) < 90)
+			.filter((f) => (f.porcentaje ?? 0) < 90)
 			.map((f) => f.opportunityId)
 			.filter((id): id is string => !!id),
 	);
@@ -882,6 +884,59 @@ async function congelarRepresentanteEnFirma(
 		throw new ORPCError("BAD_REQUEST", {
 			message:
 				"La oportunidad tiene contratos en firma (o firmados sin confirmar) con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+}
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor que se va a borrar
+ * y no deja borrarlo si es quien firma por la sociedad y hay contratos vivos:
+ * sus documentos e invitaciones seguirían a su nombre.
+ */
+async function protegerBorradoDelRepresentante(
+	tx: Transaction,
+	coDebtorId: string,
+): Promise<void> {
+	const [fila] = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
+
+	const [oportunidad] = await tx
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id === coDebtorId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Es el representante legal y la oportunidad tiene contratos en firma (o firmados sin confirmar) a su nombre. Para quitarlo, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 }
@@ -10420,6 +10475,10 @@ export const crmRouter = {
 			// transacción (el override del admin y su revalidación), así que si algo
 			// revierte, esas anotaciones tienen que irse con la escritura.
 			await auditedTransaction(async (tx) => {
+				// Primero el candado de firma (antes de cualquier FOR UPDATE, como
+				// en la edición): el representante con contratos vivos no se borra.
+				await protegerBorradoDelRepresentante(tx, input.id);
+
 				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
 				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
 				if (coDeudorABorrar) {

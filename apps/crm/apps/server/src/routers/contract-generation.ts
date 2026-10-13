@@ -1362,6 +1362,17 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			// El camino viejo arma todo como persona individual y le manda la
+			// invitación al correo del lead: una sociedad va por el asistente, que
+			// firma con su representante y la batería de sociedad.
+			const datosSociedad = await sociedadDeLaOportunidad(input.opportunityId);
+			if (datosSociedad && esOportunidadDeSociedad(datosSociedad)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"La oportunidad es de una sociedad: los contratos se generan desde el asistente de jurídico.",
+				});
+			}
+
 			if (
 				input.contractTypes.includes("declaracion_jurada") &&
 				!input.vendorGender

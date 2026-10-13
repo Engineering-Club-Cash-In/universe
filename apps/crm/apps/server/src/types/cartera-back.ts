@@ -765,6 +765,30 @@ export interface CarteraConvenioDecisionesHistorialResponse {
 	};
 }
 
+/** `GET /payment-agreements/:id/plan` (M4): plan de un convenio en cualquier estado. */
+export interface CarteraConvenioPlan {
+	convenio_id: number;
+	credito_id: number;
+	numero_credito_sifco: string | null;
+	/** Correo del asesor que armó el convenio. */
+	creado_por_email: string | null;
+	estado: "pendiente" | "activo" | "completado" | "anulado";
+	monto_total_convenio: string;
+	numero_meses: number;
+	cuota_mensual: string;
+	fecha_convenio: string;
+	/** YYYY-MM-DD de la primera cuota que vence desde que se firmó el convenio. */
+	primer_pago: string | null;
+	cuotas: {
+		numero_cuota: number;
+		fecha_vencimiento: string;
+		/** null = pendiente. */
+		fecha_pago: string | null;
+		/** Cada cuota vale la cuota mensual del convenio. */
+		monto: string;
+	}[];
+}
+
 export interface CarteraConvenioCuota {
 	cuota_convenio_id: number;
 	convenio_id: number;
@@ -1466,6 +1490,8 @@ export interface CarteraBucketCatalogo {
 	cuotas_min: number;
 	cuotas_max: number | null;
 	estados_incluidos: string[];
+	/** Bucket MÍNIMO para estos estados (COBROS-02 Fase 4). */
+	estados_piso?: string[];
 	es_operativo: boolean;
 	orden: number;
 	color: string | null;

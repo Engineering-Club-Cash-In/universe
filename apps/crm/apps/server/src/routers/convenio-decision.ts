@@ -14,11 +14,19 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import {
+	conBloqueoDeConvenio,
+	contrapropuestaPendienteDe,
+	contrapropuestasDelConvenio,
+	crearContrapropuesta,
+	responderContrapropuesta,
+} from "../services/convenio-contrapropuesta";
 import {
 	notificarConvenioResuelto,
 	resolverPendientesDeAprobacion,
@@ -153,67 +161,91 @@ export const convenioDecisionRouter = {
 				});
 			}
 
-			let resultado: Awaited<
+			// Serializado por convenio con crear/responder una contrapropuesta: sin
+			// el candado, una contrapropuesta podía insertarse entre esta lectura y
+			// la respuesta de cartera, y el convenio quedaba decidido con una
+			// contrapropuesta pendiente (review de Codex, PR #1963).
+			let resultado!: Awaited<
 				ReturnType<typeof carteraBackClient.decidirConvenio>
 			>;
-			try {
-				resultado = await carteraBackClient.decidirConvenio(input.convenioId, {
-					decision: input.decision,
-					motivo: input.motivo,
-					operacion_id: input.operacionId,
-					// El procedure ya validó el rol (cobrosSupervisorProcedure);
-					// cartera acepta esta atribución SOLO porque el llamante es la
-					// cuenta de servicio del CRM (CRM_SERVICE_USER_ID).
-					decidido_por_email: email,
-				});
-			} catch (error) {
-				// Lo que se propaga al cliente decide si conserva o descarta el
-				// rastro para recuperarse, así que se clasifica por CÓDIGO DE
-				// NEGOCIO, no por rango HTTP: un 401/403/429 de cartera es <500
-				// pero no prueba nada sobre si la decisión se ejecutó.
-				const codigo =
-					error instanceof CarteraBackHttpError
-						? error.payload?.error
-						: undefined;
-				const mensajeDefinitivo = codigo
-					? CODIGOS_NEGOCIO_DEFINITIVOS[codigo]
-					: undefined;
-
-				if (mensajeDefinitivo) {
-					// Cartera consultó la operación y la rechazó: la decisión NO
-					// se aplicó.
-					throw new ORPCError("BAD_REQUEST", { message: mensajeDefinitivo });
-				}
-
-				console.error("[decidirConvenio] Error de cartera-back:", error);
-
-				// Error de puerta (permisos, atribución): cartera ni llegó a mirar
-				// la operación, así que no dice nada de la petición original. Se
-				// propaga como INCIERTO —el cliente conserva el intento— pero con
-				// el mensaje real, porque el usuario puede hacer algo al respecto
-				// (pedir permisos, avisar a soporte).
-				// Puerta y reintento comparten desenlace (5xx, el intento
-				// sobrevive) pero no mensaje: uno pide arreglar permisos o
-				// configuración, el otro simplemente esperar.
-				const mensajeAccionable = codigo
-					? (CODIGOS_DE_PUERTA[codigo] ?? CODIGOS_DE_REINTENTO[codigo])
-					: undefined;
-				if (mensajeAccionable) {
-					throw new ORPCError("INTERNAL_SERVER_ERROR", {
-						message: mensajeAccionable,
+			await conBloqueoDeConvenio(input.convenioId, async (tx) => {
+				// M4 · un convenio devuelto al asesor con una contrapropuesta no se
+				// decide hasta que responda (o el supervisor la retire). Es un 409 de
+				// negocio de ESTA petición: no hay nada que recuperar con el mismo
+				// `operacion_id`.
+				const pendiente = await contrapropuestaPendienteDe(
+					input.convenioId,
+					tx,
+				);
+				if (pendiente) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Este convenio tiene una contrapropuesta esperando la respuesta del asesor. Espere su respuesta o retírela antes de decidirlo.",
 					});
 				}
 
-				// Todo lo demás —5xx, 401/403/429, timeout, red caída, código
-				// desconocido— deja el resultado INCIERTO: se propaga como 5xx
-				// para que el cliente conserve el intento y pueda reenviarlo
-				// con el mismo operacion_id.
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						"No se pudo confirmar el resultado de la decisión en cartera. " +
-						'Use "Reenviar" en el aviso de decisiones por confirmar para verificar si se aplicó.',
-				});
-			}
+				try {
+					resultado = await carteraBackClient.decidirConvenio(
+						input.convenioId,
+						{
+							decision: input.decision,
+							motivo: input.motivo,
+							operacion_id: input.operacionId,
+							// El procedure ya validó el rol (cobrosSupervisorProcedure);
+							// cartera acepta esta atribución SOLO porque el llamante es la
+							// cuenta de servicio del CRM (CRM_SERVICE_USER_ID).
+							decidido_por_email: email,
+						},
+					);
+				} catch (error) {
+					// Lo que se propaga al cliente decide si conserva o descarta el
+					// rastro para recuperarse, así que se clasifica por CÓDIGO DE
+					// NEGOCIO, no por rango HTTP: un 401/403/429 de cartera es <500
+					// pero no prueba nada sobre si la decisión se ejecutó.
+					const codigo =
+						error instanceof CarteraBackHttpError
+							? error.payload?.error
+							: undefined;
+					const mensajeDefinitivo = codigo
+						? CODIGOS_NEGOCIO_DEFINITIVOS[codigo]
+						: undefined;
+
+					if (mensajeDefinitivo) {
+						// Cartera consultó la operación y la rechazó: la decisión NO
+						// se aplicó.
+						throw new ORPCError("BAD_REQUEST", { message: mensajeDefinitivo });
+					}
+
+					console.error("[decidirConvenio] Error de cartera-back:", error);
+
+					// Error de puerta (permisos, atribución): cartera ni llegó a mirar
+					// la operación, así que no dice nada de la petición original. Se
+					// propaga como INCIERTO —el cliente conserva el intento— pero con
+					// el mensaje real, porque el usuario puede hacer algo al respecto
+					// (pedir permisos, avisar a soporte).
+					// Puerta y reintento comparten desenlace (5xx, el intento
+					// sobrevive) pero no mensaje: uno pide arreglar permisos o
+					// configuración, el otro simplemente esperar.
+					const mensajeAccionable = codigo
+						? (CODIGOS_DE_PUERTA[codigo] ?? CODIGOS_DE_REINTENTO[codigo])
+						: undefined;
+					if (mensajeAccionable) {
+						throw new ORPCError("INTERNAL_SERVER_ERROR", {
+							message: mensajeAccionable,
+						});
+					}
+
+					// Todo lo demás —5xx, 401/403/429, timeout, red caída, código
+					// desconocido— deja el resultado INCIERTO: se propaga como 5xx
+					// para que el cliente conserve el intento y pueda reenviarlo
+					// con el mismo operacion_id.
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							"No se pudo confirmar el resultado de la decisión en cartera. " +
+							'Use "Reenviar" en el aviso de decisiones por confirmar para verificar si se aplicó.',
+					});
+				}
+			});
 
 			// Best-effort: avisar al asesor. Nunca falla la decisión por esto —
 			// ya está commiteada en cartera y es irreversible desde acá. El
@@ -317,6 +349,84 @@ export const convenioDecisionRouter = {
 
 			return resultado;
 		}),
+
+	// M4 · Plan de pagos de un convenio pendiente (cuotas, fechas y primer pago)
+	// para el Espacio de aprobación. Hoy cartera solo lo devolvía en /credito
+	// para convenios activos.
+	getPlanConvenio: cobrosSupervisorProcedure
+		.input(z.object({ convenioId: z.number().int().positive() }))
+		.handler(async ({ input }) => {
+			try {
+				return await carteraBackClient.getPlanConvenio(input.convenioId);
+			} catch (error) {
+				// Solo el código de negocio dice que el convenio no existe: un 404 de
+				// ruta (cartera sin esta versión desplegada) es cartera no disponible.
+				if (
+					error instanceof CarteraBackHttpError &&
+					error.status === 404 &&
+					error.payload?.error === "convenio_no_existe"
+				) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "El convenio ya no existe (se rechazó o se deshizo).",
+					});
+				}
+				console.error("[getPlanConvenio]", error);
+				throw new ORPCError("SERVICE_UNAVAILABLE", {
+					message:
+						"No se pudo leer el plan del convenio. Intente de nuevo en un momento.",
+				});
+			}
+		}),
+
+	// M4 · El supervisor devuelve el convenio al asesor con otro número de
+	// cuotas y otra fecha de primer pago (el total no cambia).
+	contraproponerConvenio: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				convenioId: z.number().int().positive(),
+				numeroMeses: z.number().int().min(1).max(60),
+				primerPago: z.string().date(),
+				nota: z.string().trim().min(5).max(1000),
+			}),
+		)
+		.handler(({ input, context }) =>
+			crearContrapropuesta({
+				...input,
+				supervisorId: context.userId,
+				supervisorRole: context.userRole,
+			}),
+		),
+
+	// M4 · El asesor acepta (cartera reescribe el plan) o descarta la
+	// contrapropuesta. Un supervisor solo puede retirarla.
+	responderContrapropuesta: cobrosProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				accion: z.enum(["aceptar", "descartar"]),
+				nota: z.string().trim().max(1000).optional(),
+			}),
+		)
+		.handler(({ input, context }) =>
+			responderContrapropuesta({
+				...input,
+				userId: context.userId,
+				userRole: context.userRole,
+				email: context.session.user.email,
+				esSupervisor: PERMISSIONS.canAssignCobros(context.userRole ?? ""),
+			}),
+		),
+
+	// M4 · Contrapropuestas de un convenio (la más reciente primero).
+	getContrapropuestasConvenio: cobrosProcedure
+		.input(z.object({ convenioId: z.number().int().positive() }))
+		.handler(({ input, context }) =>
+			contrapropuestasDelConvenio({
+				convenioId: input.convenioId,
+				esSupervisor: PERMISSIONS.canAssignCobros(context.userRole ?? ""),
+				email: context.session.user.email,
+			}),
+		),
 
 	// CB-033 — Historial de decisiones de convenio POR CASO (no por convenio:
 	// el rechazo borra la fila del convenio en cartera). Autorización por

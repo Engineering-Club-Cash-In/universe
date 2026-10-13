@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus, listPaymentAgreements, getConvenioCuotas, resolverPlatformUserIdPorEmail } from "../controllers/paymentAgreement";
 import { ConvenioDecisionError, decidirConvenio } from "../controllers/convenioDecision";
+import { ConvenioPlanError, getPlanConvenio, reprogramarConvenioPendiente } from "../controllers/convenioPlan";
 import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { anularConvenio } from "../controllers/anularConvenio";
 import { db } from "../database";
@@ -506,6 +507,107 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       detail: {
         summary: "Count convenio decisions made by one supervisor in a time window",
         description: "S1 (supervisión de cobros): aprobaciones resueltas hoy por el supervisor. `desde` inclusive, `hasta` exclusivo (ISO).",
+        tags: ["Payment Agreements"],
+      },
+    }
+  )
+
+  // COBROS-02 M4 (issue #1895) — plan de pagos de un convenio en cualquier
+  // estado (también el pendiente de aprobación) con la fecha del primer pago.
+  .get(
+    "/:convenio_id/plan",
+    async ({ params, set, user }: any) => {
+      // Solo el CRM (cuenta de servicio) o un ADMIN: lo consume la contrapropuesta.
+      const gate = requireConvenioDecisionRole(user, set);
+      if (!gate.ok) return gate.body;
+      const convenioId = Number.parseInt(params.convenio_id, 10);
+      if (!Number.isInteger(convenioId) || convenioId < 1) {
+        set.status = 400;
+        return { success: false, message: "convenio_id inválido", error: "convenio_id_invalido" };
+      }
+      try {
+        set.status = 200;
+        return { success: true, data: await getPlanConvenio(convenioId) };
+      } catch (error) {
+        if (error instanceof ConvenioPlanError) {
+          set.status = error.httpStatus;
+          return { success: false, message: error.message, error: error.code };
+        }
+        console.error("[GET /payment-agreements/:id/plan] Error:", error);
+        set.status = 500;
+        return { success: false, message: "Internal server error" };
+      }
+    },
+    {
+      detail: {
+        summary: "Plan de pagos de un convenio (cualquier estado)",
+        description: "COBROS-02 M4: cuotas con fecha y monto, estado deducido y fecha del primer pago.",
+        tags: ["Payment Agreements"],
+      },
+    }
+  )
+
+  // COBROS-02 M4 — contrapropuesta aceptada: reprograma un convenio PENDIENTE
+  // (cuotas y primer pago; el total no cambia). Mismo gate que decidir.
+  .patch(
+    "/:convenio_id/plan",
+    async ({ params, body, set, user }: any) => {
+      const gate = requireConvenioDecisionRole(user, set);
+      if (!gate.ok) return gate.body;
+      const convenioId = Number.parseInt(params.convenio_id, 10);
+      if (!Number.isInteger(convenioId) || convenioId < 1) {
+        set.status = 400;
+        return { success: false, message: "convenio_id inválido", error: "convenio_id_invalido" };
+      }
+      // Misma regla que decidir: solo la cuenta de servicio del CRM nombra a otra
+      // persona; un ADMIN que llama directo queda atribuido a su propio correo.
+      if (body.actor_email && !esCuentaDeServicioCRM(user)) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "actor_email solo lo puede enviar la cuenta de servicio del CRM.",
+          error: "actor_email_no_permitido",
+        };
+      }
+      if (esCuentaDeServicioCRM(user) && !body.actor_email) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Falta actor_email: la cuenta de servicio del CRM debe nombrar a quien reprograma.",
+          error: "actor_email_requerido",
+        };
+      }
+      const actorEmail = String(body.actor_email ?? user.email).trim().toLowerCase();
+      try {
+        const data = await reprogramarConvenioPendiente({
+          convenioId,
+          numeroMeses: body.numero_meses,
+          primerPago: body.primer_pago,
+          actorEmail,
+          asesorEmail: body.asesor_email,
+        });
+        set.status = 200;
+        return { success: true, data };
+      } catch (error) {
+        if (error instanceof ConvenioPlanError) {
+          set.status = error.httpStatus;
+          return { success: false, message: error.message, error: error.code };
+        }
+        console.error("[PATCH /payment-agreements/:id/plan] Error:", error);
+        set.status = 500;
+        return { success: false, message: "Internal server error" };
+      }
+    },
+    {
+      body: t.Object({
+        numero_meses: t.Integer({ minimum: 1, maximum: 60 }),
+        primer_pago: t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }),
+        actor_email: t.Optional(t.String({ format: "email" })),
+        asesor_email: t.Optional(t.String({ format: "email" })),
+      }),
+      detail: {
+        summary: "Reprogramar un convenio pendiente de aprobación",
+        description: "COBROS-02 M4: cambia el número de cuotas y la fecha del primer pago; el total no cambia. Solo convenios pendientes.",
         tags: ["Payment Agreements"],
       },
     }

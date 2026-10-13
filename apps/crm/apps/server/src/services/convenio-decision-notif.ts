@@ -148,7 +148,13 @@ export async function resolverPendientesDeAprobacion(convenioId: number) {
 		.set({ status: "resolved", resolvedAt: new Date(), updatedAt: new Date() })
 		.where(
 			and(
-				eq(notifications.cobrosTipo, "convenio_pendiente_aprobacion"),
+				// También los de la contrapropuesta: con el convenio decidido, ni el
+				// aviso al asesor ni el de «respondió» tienen nada que hacer.
+				inArray(notifications.cobrosTipo, [
+					"convenio_pendiente_aprobacion",
+					"convenio_contrapropuesta",
+					"convenio_contrapropuesta_respondida",
+				]),
 				eq(notifications.convenioId, convenioId),
 				inArray(notifications.status, [...ESTADOS_ABIERTOS]),
 			),

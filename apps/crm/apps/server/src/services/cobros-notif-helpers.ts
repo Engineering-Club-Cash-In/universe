@@ -32,6 +32,8 @@ export type CobrosNotifTipo =
 	| "gps_evento"
 	| "inmovilizacion_pendiente_aprobacion"
 	| "inmovilizacion_resuelta"
+	| "convenio_contrapropuesta"
+	| "convenio_contrapropuesta_respondida"
 	| "inmovilizacion_llamar_cliente"
 	| "inmovilizacion_ejecutar_pendiente"
 	| "inmovilizacion_apagado_ejecutado"

@@ -81,6 +81,7 @@ const setup = () => (ready ??= (async () => {
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
     await sql`INSERT INTO cartera.creditos VALUES (${id}, ${`S-${id}`}, 'MOROSO', 10000)`;
     await sql`INSERT INTO cartera.cuotas_credito VALUES (${id * 10 + 4}, ${id}), (${id * 10 + 5}, ${id})`;

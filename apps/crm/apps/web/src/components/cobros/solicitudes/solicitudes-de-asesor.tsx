@@ -30,12 +30,12 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { orpc } from "@/utils/orpc";
+import { orpc, orpcAparte } from "@/utils/orpc";
 import { EspacioAprobacion, useEspacioAprobacion } from "./espacio-aprobacion";
 import {
 	type ConvenioFuente,
 	ETIQUETA_TIPO,
-	esDelAsesor,
+	esSolicitudDeAsesor,
 	type InmovilizacionHistorialFuente,
 	type RecuperacionFuente,
 	type Solicitud,
@@ -96,6 +96,8 @@ export type FilaSolicitudAsesor = {
 
 export type SolicitudesDeAsesorVistaProps = {
 	nombre: string;
+	/** El asesor no tiene usuario del CRM: sus solicitudes se asocian por nombre. */
+	sinUsuario?: boolean;
 	filas: FilaSolicitudAsesor[];
 	cargando: boolean;
 	error: boolean;
@@ -115,6 +117,7 @@ const CELDA = "whitespace-normal py-3.5 pr-4 align-middle first:pl-6 last:pr-6";
 
 export function SolicitudesDeAsesorVista({
 	nombre,
+	sinUsuario,
 	filas,
 	cargando,
 	error,
@@ -290,12 +293,11 @@ export function SolicitudesDeAsesorVista({
 			<p className="type-caption flex items-start gap-2 text-fg-tertiary">
 				<Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 				<span>
-					Los convenios rechazados no aparecen aquí: cartera elimina el convenio
-					al rechazarlo y su decisión se consulta en la Ficha 360 del crédito.
-					Los apagados, reactivaciones y recuperaciones se asocian al asesor por
-					el nombre del usuario que los solicitó.
-					{/* TODO(José) · tarea M3: historial global de decisiones de
-					    convenios e id del solicitante en las fuentes de solicitudes. */}
+					Los convenios rechazados salen de la bitácora de decisiones del
+					supervisor (cartera elimina el convenio al rechazarlo).
+					{sinUsuario
+						? " Este asesor no tiene usuario del CRM vinculado: sus apagados, reactivaciones y recuperaciones se asocian por el nombre de quien los solicitó."
+						: ""}
 				</span>
 			</p>
 		</section>
@@ -335,6 +337,28 @@ function filaDeConvenio(c: ConvenioFuente): FilaSolicitudAsesor {
 			: `${c.completado ? "Convenio cumplido" : "Convenio activo"}${plan ? ` · ${plan}` : ""}`,
 		solicitud: pendiente ? solicitudDeConvenio(c) : undefined,
 		ficha: { id: c.numero_credito_sifco },
+	};
+}
+
+/** Una decisión de convenio rechazada, de la bitácora del supervisor (M3). */
+function filaDeConvenioRechazado(d: {
+	id: string;
+	fecha: string;
+	credito: { sifco: string; cliente: string | null } | null;
+	resumen: string | null;
+	nota: string | null;
+	motivo: string | null;
+}): FilaSolicitudAsesor {
+	return {
+		id: d.id,
+		fecha: d.fecha,
+		tipo: "convenio",
+		credito: d.credito?.sifco ?? null,
+		bucket: null,
+		cliente: d.credito?.cliente?.trim() || "Sin nombre",
+		estado: "rechazada",
+		resultado: d.nota ?? d.resumen ?? d.motivo ?? null,
+		ficha: d.credito ? { id: d.credito.sifco } : null,
 	};
 }
 
@@ -427,6 +451,18 @@ export function SolicitudesDeAsesor({
 		}),
 		enabled: habilitado,
 	});
+	// M3: los convenios rechazados (cartera los borra) salen de la bitácora de
+	// decisiones, filtrada por el usuario que los pidió.
+	const conveniosRechazados = useQuery({
+		...orpcAparte.getHistorialDecisionesConvenio.queryOptions({
+			input: {
+				decision: "rechazada",
+				solicitanteId: userId ?? "",
+				perPage: 50,
+			},
+		}),
+		enabled: habilitado && !!userId,
+	});
 	const bandeja = useSolicitudesPendientes(habilitado);
 	const historialInmov = useHistorialInmovilizaciones(paginas, habilitado);
 	const usuarioCrm = useNombreUsuarioCrm(userId, habilitado);
@@ -434,12 +470,23 @@ export function SolicitudesDeAsesor({
 
 	const filas = React.useMemo(() => {
 		const nombres = [usuarioCrm.nombre, nombre];
-		const propias = (solicitante: string | null | undefined) =>
-			esDelAsesor(solicitante, nombres);
+		const propias = (
+			idSolicitante: string | null | undefined,
+			nombreSolicitante: string | null | undefined,
+		) =>
+			esSolicitudDeAsesor({
+				idSolicitante,
+				nombreSolicitante,
+				userIdAsesor: userId,
+				nombres,
+			});
 
 		const deConvenios = (
 			(convenios.data?.items ?? []) as unknown as ConvenioFuente[]
 		).map(filaDeConvenio);
+		const rechazados = (conveniosRechazados.data?.items ?? []).map(
+			filaDeConvenioRechazado,
+		);
 
 		// Pendientes y por ejecutar: de la cola (trae el respaldo de las
 		// reactivaciones). Las demás: del historial, sin repetir.
@@ -452,11 +499,18 @@ export function SolicitudesDeAsesor({
 		const inmov = new Map<string, FilaSolicitudAsesor>();
 		for (const s of enCola.values()) {
 			if (s.tipo !== "apagado" && s.tipo !== "reactivacion") continue;
-			if (!propias(s.inmovilizacion.solicitanteNombre)) continue;
+			if (
+				!propias(
+					s.inmovilizacion.solicitadoPorId,
+					s.inmovilizacion.solicitanteNombre,
+				)
+			)
+				continue;
 			inmov.set(s.inmovilizacion.id, filaDeInmovilizacion(s.inmovilizacion, s));
 		}
 		for (const i of historialInmov.items) {
-			if (inmov.has(i.id) || !propias(i.solicitanteNombre)) continue;
+			if (inmov.has(i.id) || !propias(i.solicitadoPorId, i.solicitanteNombre))
+				continue;
 			// Una pendiente que ya no está en la cola se decidió hace un momento.
 			inmov.set(i.id, filaDeInmovilizacion(i, enCola.get(i.id)));
 		}
@@ -470,12 +524,16 @@ export function SolicitudesDeAsesor({
 					]
 				: []
 		)
-			.filter((r) => propias(r.solicitante))
+			.filter((r) => propias(r.solicitanteId, r.solicitante))
 			.map(filaDeRecuperacion);
 
-		return [...deConvenios, ...inmov.values(), ...recup].sort(porFechaDesc);
+		return [...deConvenios, ...rechazados, ...inmov.values(), ...recup].sort(
+			porFechaDesc,
+		);
 	}, [
 		convenios.data,
+		conveniosRechazados.data,
+		userId,
 		bandeja.pendientes,
 		bandeja.porEjecutar,
 		bandeja.recuperacionesQuery.data,
@@ -493,9 +551,11 @@ export function SolicitudesDeAsesor({
 		<>
 			<SolicitudesDeAsesorVista
 				nombre={nombre}
+				sinUsuario={!userId}
 				filas={filas}
 				cargando={
 					convenios.isLoading ||
+					conveniosRechazados.isLoading ||
 					bandeja.cargando ||
 					historialInmov.cargando ||
 					usuarioCrm.cargando

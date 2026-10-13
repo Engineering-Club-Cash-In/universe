@@ -37,6 +37,7 @@ import {
 import {
 	type CoberturaFuente,
 	type EntradaHistorial,
+	entradaDeDecisionConvenio,
 	entradaDeInmovilizacion,
 	entradaDeReasignacion,
 	entradaDeRecuperacion,
@@ -49,7 +50,9 @@ import {
 import { HistorialDecisiones } from "./historial-decisiones";
 import type { SolicitudesSearch, TabSolicitudes } from "./search";
 import {
+	useHistorialDecisionesConvenio,
 	useHistorialInmovilizaciones,
+	useHistorialRecuperaciones,
 	useSolicitudesPendientes,
 } from "./use-solicitudes";
 
@@ -151,6 +154,14 @@ export function SolicitudesPagina({
 	/* Historial (solo se consulta con la pestaña abierta) */
 	const hoy = hoyGT();
 	const inmov = useHistorialInmovilizaciones(paginasInmov, enHistorial);
+	const recuperacionesHist = useHistorialRecuperaciones(
+		paginasInmov,
+		enHistorial,
+	);
+	const conveniosHist = useHistorialDecisionesConvenio(
+		paginasInmov,
+		enHistorial,
+	);
 	const reasignaciones = useQuery({
 		...orpc.getHistorialReasignaciones.queryOptions({
 			input: {
@@ -197,7 +208,8 @@ export function SolicitudesPagina({
 			null;
 		return ordenarHistorial([
 			...inmov.items.map(entradaDeInmovilizacion),
-			...bandeja.historialRecuperaciones.map(entradaDeRecuperacion),
+			...recuperacionesHist.items.map(entradaDeRecuperacion),
+			...conveniosHist.items.map(entradaDeDecisionConvenio),
 			...(
 				(reasignaciones.data?.data ?? []) as unknown as ReasignacionFuente[]
 			).map(entradaDeReasignacion),
@@ -211,7 +223,8 @@ export function SolicitudesPagina({
 	}, [
 		enHistorial,
 		inmov.items,
-		bandeja.historialRecuperaciones,
+		recuperacionesHist.items,
+		conveniosHist.items,
 		reasignaciones.data,
 		traslados.data,
 		coberturas.data,
@@ -222,7 +235,8 @@ export function SolicitudesPagina({
 
 	const erroresHistorial = [
 		inmov.error ? "apagados y reactivaciones" : null,
-		bandeja.recuperacionesQuery.isError ? "recuperaciones del vehículo" : null,
+		recuperacionesHist.error ? "recuperaciones del vehículo" : null,
+		conveniosHist.error ? "decisiones de convenios" : null,
 		reasignaciones.isError ? "reasignaciones" : null,
 		traslados.isError ? "traslados" : null,
 		coberturas.isError ? "coberturas" : null,
@@ -291,7 +305,8 @@ export function SolicitudesPagina({
 						}}
 						cargando={
 							inmov.cargando ||
-							bandeja.recuperacionesQuery.isLoading ||
+							recuperacionesHist.cargando ||
+							conveniosHist.cargando ||
 							reasignaciones.isLoading ||
 							traslados.isLoading ||
 							coberturas.isLoading
@@ -299,7 +314,8 @@ export function SolicitudesPagina({
 						errores={erroresHistorial}
 						onReintentar={() => {
 							inmov.refetch();
-							void bandeja.recuperacionesQuery.refetch();
+							recuperacionesHist.refetch();
+							conveniosHist.refetch();
 							void reasignaciones.refetch();
 							void traslados.refetch();
 							void coberturas.refetch();
@@ -309,9 +325,16 @@ export function SolicitudesPagina({
 							total: inmov.total,
 						}}
 						onCargarMas={
-							inmov.hayMas ? () => setPaginasInmov((p) => p + 1) : undefined
+							inmov.hayMas || recuperacionesHist.hayMas || conveniosHist.hayMas
+								? () => setPaginasInmov((p) => p + 1)
+								: undefined
 						}
-						cargandoMas={inmov.cargando && paginasInmov > 1}
+						cargandoMas={
+							(inmov.cargando ||
+								recuperacionesHist.cargando ||
+								conveniosHist.cargando) &&
+							paginasInmov > 1
+						}
 						historialEquipo={{
 							to: "/cobros/equipo",
 							search: { tab: "asignacion" },

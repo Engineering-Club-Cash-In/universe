@@ -34,6 +34,7 @@ import {
 	TrasladoVista,
 	type TrasladoVistaProps,
 } from "@/components/cobros/equipo/asignacion/trasladar-vista";
+import { nivelAsesor } from "@/components/cobros/equipo/estado-asesor";
 import type { SeccionHistorial } from "@/components/cobros/equipo/search";
 import { Button } from "@/components/ui/button";
 import { dialogPanelClassName } from "@/components/ui/dialog";
@@ -64,6 +65,7 @@ const asesorPool = (
 	buckets,
 	activo,
 	email_cash_in: null,
+	nivel: nivelAsesor(buckets),
 	userId: `u${asesor_id}`,
 	usuarioHabilitado: true,
 });

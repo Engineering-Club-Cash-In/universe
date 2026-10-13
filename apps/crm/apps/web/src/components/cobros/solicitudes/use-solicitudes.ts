@@ -6,7 +6,8 @@
  */
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { orpc } from "@/utils/orpc";
+import { orpc, orpcAparte } from "@/utils/orpc";
+import type { DecisionConvenioFuente } from "./historial";
 import {
 	type ConvenioFuente,
 	type InmovilizacionFuente,
@@ -140,6 +141,76 @@ export function useHistorialInmovilizaciones(
 		...r,
 		hayMas: r.total !== null && r.items.length < r.total,
 	};
+}
+
+/** Filas por página del historial de recuperaciones y de decisiones de convenio (M3). */
+export const DECISIONES_POR_PAGINA = 50;
+
+function combinarPaginas<T>(
+	consultas: Array<{
+		data?: { items?: unknown[]; total?: number } | undefined;
+		isLoading: boolean;
+		isError: boolean;
+		refetch: () => Promise<unknown>;
+	}>,
+) {
+	return {
+		items: consultas.flatMap((c) => (c.data?.items ?? []) as unknown as T[]),
+		total: consultas[0]?.data?.total ?? null,
+		cargando: consultas.some((c) => c.isLoading),
+		error: consultas.some((c) => c.isError),
+		refetch: () => {
+			for (const c of consultas) void c.refetch();
+		},
+	};
+}
+
+/**
+ * Historial de recuperaciones decididas, paginado por el servidor (M3,
+ * `getHistorialSolicitudesRecuperacion`): ya no tiene el tope de 100 de la
+ * bandeja. `paginas` crece con «Cargar más».
+ */
+export function useHistorialRecuperaciones(
+	paginas: number,
+	habilitado: boolean,
+	solicitanteId?: string,
+) {
+	const r = useQueries({
+		queries: Array.from({ length: Math.max(1, paginas) }, (_, i) => ({
+			...orpc.getHistorialSolicitudesRecuperacion.queryOptions({
+				input: {
+					page: i + 1,
+					perPage: DECISIONES_POR_PAGINA,
+					...(solicitanteId ? { solicitanteId } : {}),
+				},
+			}),
+			enabled: habilitado,
+			refetchOnWindowFocus: false,
+		})),
+		combine: (c) => combinarPaginas<RecuperacionFuente>(c),
+	});
+	return { ...r, hayMas: r.total !== null && r.items.length < r.total };
+}
+
+/**
+ * Decisiones de convenio de todos los créditos (M3, `getHistorialDecisionesConvenio`).
+ * Cartera borra el convenio al rechazarlo: esta es la única fuente global.
+ */
+export function useHistorialDecisionesConvenio(
+	paginas: number,
+	habilitado: boolean,
+) {
+	const r = useQueries({
+		queries: Array.from({ length: Math.max(1, paginas) }, (_, i) => ({
+			...orpcAparte.getHistorialDecisionesConvenio.queryOptions({
+				input: { page: i + 1, perPage: DECISIONES_POR_PAGINA },
+			}),
+			enabled: habilitado,
+			refetchOnWindowFocus: false,
+		})),
+		combine: (c) => combinarPaginas<DecisionConvenioFuente>(c),
+	});
+	return { ...r, hayMas: r.total !== null && r.items.length < r.total };
 }
 
 /** Nombre del usuario del CRM (para reconocer lo que pidió un asesor). */

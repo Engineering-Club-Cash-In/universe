@@ -19,7 +19,7 @@
  *    el showcase).
  *  - `EspacioAprobacion` + `useEspacioAprobacion`: el modal conectado.
  */
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
 	CheckCircle2,
@@ -279,10 +279,23 @@ export function quienEsRecuperacion(r: RecuperacionFuente) {
 	return r.cliente?.trim() ? r.cliente.trim() : `El crédito ${r.numeroSifco}`;
 }
 
+/** Primer pago del plan (M4, `getPlanConvenio`); sin él se muestra «Pronto» (showcase). */
+export type PrimerPagoVista = { cargando: boolean; valor: string | null };
+
+function fechaPrimerPago(valor: string) {
+	return new Date(`${valor}T12:00:00`).toLocaleDateString("es-GT", {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	});
+}
+
 function DetalleConvenio({
 	solicitud,
+	primerPago,
 }: {
 	solicitud: Extract<Solicitud, { tipo: "convenio" }>;
+	primerPago?: PrimerPagoVista;
 }) {
 	const c = solicitud.convenio;
 	return (
@@ -296,14 +309,21 @@ function DetalleConvenio({
 					<Dato etiqueta="Cuota mensual" tono="brand">
 						{quetzales(c.cuota_mensual)}
 					</Dato>
-					{/* TODO(José) · tarea M4: fecha del primer pago de un convenio
-					    pendiente (cartera solo devuelve el plan de cuotas de los
-					    convenios activos). */}
 					<Dato etiqueta="Primer pago">
-						<span className="inline-flex items-center gap-1.5 font-normal text-fg-tertiary">
-							—
-							<ChipPronto />
-						</span>
+						{primerPago ? (
+							primerPago.cargando ? (
+								<span className="font-normal text-fg-tertiary">Cargando…</span>
+							) : primerPago.valor ? (
+								fechaPrimerPago(primerPago.valor)
+							) : (
+								"—"
+							)
+						) : (
+							<span className="inline-flex items-center gap-1.5 font-normal text-fg-tertiary">
+								—
+								<ChipPronto />
+							</span>
+						)}
 					</Dato>
 					<Dato etiqueta="Bucket antes del convenio">
 						{c.bucket_previo_prefijo ||
@@ -557,6 +577,8 @@ export type PanelSolicitudVistaProps = {
 	onSiguiente?: () => void;
 	/** Mapa chico de la ubicación del apagado (apagado en el showcase). */
 	conMapa?: boolean;
+	/** Primer pago del convenio pendiente (M4); sin esto se muestra «Pronto». */
+	primerPago?: PrimerPagoVista;
 	className?: string;
 };
 
@@ -573,6 +595,7 @@ export function PanelSolicitudVista({
 	onVolver,
 	onSiguiente,
 	conMapa = true,
+	primerPago,
 	className,
 }: PanelSolicitudVistaProps) {
 	const notasId = React.useId();
@@ -637,7 +660,7 @@ export function PanelSolicitudVista({
 				{aviso}
 
 				{solicitud.tipo === "convenio" ? (
-					<DetalleConvenio solicitud={solicitud} />
+					<DetalleConvenio solicitud={solicitud} primerPago={primerPago} />
 				) : solicitud.tipo === "recuperacion" ? (
 					<DetalleRecuperacion solicitud={solicitud} />
 				) : (
@@ -660,12 +683,10 @@ export function PanelSolicitudVista({
 							rows={3}
 							disabled={!!bloqueo}
 						/>
-						{/* TODO(José) · tarea M3: guardar la nota del supervisor también
-						    al aprobar (hoy los procedimientos solo reciben el motivo
-						    del rechazo). */}
 						<p className="type-caption text-fg-tertiary">
 							Si rechaza la solicitud, esta nota se envía como motivo (mínimo{" "}
-							{minimo} caracteres). Al aprobar no se guarda.
+							{minimo} caracteres). Si la aprueba, queda guardada con la
+							aprobación.
 						</p>
 					</div>
 				) : null}
@@ -969,6 +990,22 @@ function ContenidoEspacio({
 	const idCaso = s.credito ?? s.casoCobroId ?? "";
 	const caso = useCasoWorkspace(idCaso);
 
+	// M4: el primer pago del plan del convenio pendiente (cartera lo calcula).
+	const planConvenio = useQuery({
+		...orpc.getPlanConvenio.queryOptions({
+			input: { convenioId: s.tipo === "convenio" ? s.convenio.convenio_id : 1 },
+		}),
+		enabled: s.tipo === "convenio",
+		staleTime: 60_000,
+	});
+	const primerPago: PrimerPagoVista | undefined =
+		s.tipo === "convenio"
+			? {
+					cargando: planConvenio.isPending,
+					valor: planConvenio.data?.primer_pago ?? null,
+				}
+			: undefined;
+
 	const [notas, setNotas] = React.useState("");
 	const [decision, setDecision] = React.useState<"aprobar" | "rechazar" | null>(
 		null,
@@ -1075,6 +1112,7 @@ function ContenidoEspacio({
 						{...handlers}
 						bloqueo={bloqueo}
 						aviso={aviso}
+						primerPago={primerPago}
 						resolucion={resolucion}
 						onVolver={onCerrar}
 						onSiguiente={hayMas ? () => onIr(posicion + 1) : undefined}

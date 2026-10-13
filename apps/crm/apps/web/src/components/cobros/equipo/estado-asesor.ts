@@ -21,11 +21,10 @@ export type NivelAsesor = "junior" | "senior" | "especial";
  * - `null` si no tiene pool asignado.
  * Criterio confirmado por el usuario (2026-10-07).
  *
- * Es un dato DERIVADO, no un atributo del asesor.
- * TODO(José) · tarea M6: el nivel tiene que ser un dato real del asesor.
- * Ojo: `nivelPorBuckets` del server (routers/cobros-asesor.ts) hoy dice
- * «senior = B2 en adelante» y no tiene «especial» (B5); al volverlo dato real
- * hay que dejar un solo criterio.
+ * Es un dato DERIVADO, no un atributo del asesor. Desde la tarea M6 lo calcula
+ * el servidor con este mismo criterio (`nivel` de `getAsesoresTraslados`,
+ * `lib/nivel-asesor.ts`) y las pantallas lo leen de ahí; esta función queda
+ * para los datos de ejemplo del design system.
  */
 export function nivelAsesor(
 	buckets: readonly number[] | null | undefined,

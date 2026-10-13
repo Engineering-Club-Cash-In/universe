@@ -12,6 +12,8 @@
  *
  * «Cambios de bucket» no sale de las gestiones: son los movimientos del cierre
  * diario (`getDetalleCierrePorAsesor`), y se pintan en lugar de la tabla.
+ * «Escaladas» tampoco: son sus solicitudes a Jurídico y de recuperación del
+ * vehículo (`getEscaladasAsesor`, M3), y también se pintan en lugar de la tabla.
  */
 
 export type CategoriaActividad =
@@ -69,14 +71,10 @@ export const CATEGORIAS_ACTIVIDAD: readonly DefCategoriaActividad[] = [
 		estados: ["promesa_pago", "acuerdo_parcial"],
 	},
 	{
-		// TODO(José) · tarea M3: no hay registro de «caso escalado» (derivado a
-		// jurídico, recuperación del vehículo, apagado) por asesor que se pueda
-		// listar junto a las gestiones; entra con la bitácora unificada.
 		clave: "escaladas",
 		etiqueta: "Escaladas",
 		descripcion:
-			"Casos que el asesor escaló (jurídico, recuperación del vehículo, apagado). Disponible pronto.",
-		pronto: true,
+			"Casos que el asesor escaló con una solicitud a Jurídico o de recuperación del vehículo.",
 	},
 	{
 		clave: "cambios_bucket",

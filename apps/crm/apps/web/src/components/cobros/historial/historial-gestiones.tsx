@@ -22,6 +22,7 @@ import {
 	defCategoria,
 	esCategoriaActividad,
 } from "./categorias";
+import { EscaladasAsesor } from "./escaladas-asesor";
 import {
 	aFechaISO,
 	aFechaISO_GT,
@@ -177,6 +178,9 @@ export function HistorialGestiones({
 			: "todas";
 	const defCat = defCategoria(categoria);
 	const enCambiosBucket = categoria === "cambios_bucket";
+	// Escaladas y cambios de bucket no salen de las gestiones: reemplazan la tabla.
+	const enEscaladas = categoria === "escaladas";
+	const enContenidoAlterno = enCambiosBucket || enEscaladas;
 
 	const [busquedaSifco, setBusquedaSifco] = useState("");
 	// El input dispara una query por tecla si se usa crudo, y el filtro es por
@@ -381,7 +385,7 @@ export function HistorialGestiones({
 		...orpcAny.getHistorialAgendas.queryOptions({
 			input: { ...filtros, page, pageSize },
 		}),
-		enabled: !!session && puedeConsultar && !enCambiosBucket,
+		enabled: !!session && puedeConsultar && !enContenidoAlterno,
 	});
 
 	const resumen = useQuery({
@@ -788,8 +792,8 @@ export function HistorialGestiones({
 				// Contra el total del FILTRO, no contra la página en pantalla: si
 				// el usuario está parado en una página que quedó vacía al cambiar
 				// de filtro, el export sigue teniendo miles de filas que traer.
-				deshabilitada: enCambiosBucket || (datos?.total ?? 0) === 0,
-				motivo: enCambiosBucket
+				deshabilitada: enContenidoAlterno || (datos?.total ?? 0) === 0,
+				motivo: enContenidoAlterno
 					? "La exportación es del historial de gestiones. Elija otra categoría para exportar."
 					: undefined,
 				onExportar: exportarXLSX,
@@ -812,6 +816,12 @@ export function HistorialGestiones({
 						hasta={rangoMovimientos.hasta}
 						vista={vistaLista}
 						hoy={hoyGTISO}
+					/>
+				) : usuarioFijo && enEscaladas ? (
+					<EscaladasAsesor
+						userId={usuarioFijo.userId}
+						desde={rangoMovimientos.desde}
+						hasta={rangoMovimientos.hasta}
 					/>
 				) : undefined
 			}

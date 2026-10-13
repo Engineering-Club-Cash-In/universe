@@ -43,3 +43,8 @@ export function emisorPorNit(nit: string | null | undefined): Emisor | undefined
   if (!nit) return undefined;
   return EMISORES.find((e) => e.config.emisor.nit === String(nit));
 }
+
+/** Lo que necesita el selector de Facturas Genéricas: clave y nombre, en el orden del registro. */
+export function emisoresParaSelector(): { clave: EmisorClave; nombre: string }[] {
+  return EMISORES.map((e) => ({ clave: e.clave, nombre: e.nombre }));
+}

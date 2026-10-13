@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useFormik, FieldArray, FormikProvider } from "formik";
 import * as Yup from "yup";
@@ -28,7 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/Provider/authProvider";
-import { useFacturarGenerico, useFacturasGenericas, useAnularFactura, useExportFacturasExcel } from "../hooks/cofidi";
+import { useFacturarGenerico, useFacturasGenericas, useAnularFactura, useExportFacturasExcel, useEmisores } from "../hooks/cofidi";
 import { DatePickerMUI } from "./calendar";
 import type { FacturaGenericaItem, EmisorKey, TipoFacturaGenerica } from "../services/services";
 import {
@@ -81,39 +81,30 @@ const validarNIT = (nit: string): boolean => {
   return /^\d{4,}[\dK]$/.test(nitLimpio);
 };
 
-// --- Opciones de emisor ---
-const EMISORES_OPTIONS: { value: EmisorKey; label: string }[] = [
-  { value: "CUBE", label: "CUBE" },
-  { value: "SE_PRESTA", label: "Se Presta" },
-  { value: "AMJK", label: "AMJK" },
-  { value: "CREACION_IMAGEN", label: "Creación Imagen" },
-  { value: "GRUPO_BATRO", label: "Grupo Batro" },
-  { value: "AUTOCASH", label: "AutoCash" },
-];
-
-// --- Schema de validación con Yup ---
-const validationSchema = Yup.object({
-  nit: Yup.string()
-    .required("El NIT es requerido")
-    .test("nit-valido", "NIT inválido (mínimo 5 caracteres o CF)", (value) =>
-      validarNIT(value || "")
-    ),
-  emisor: Yup.string()
-    .required("El emisor es requerido")
-    .oneOf(EMISORES_OPTIONS.map((e) => e.value), "Emisor inválido"),
-  items: Yup.array()
-    .of(
-      Yup.object({
-        rubro: Yup.string()
-          .required("El rubro es requerido")
-          .min(3, "Mínimo 3 caracteres"),
-        monto: Yup.number()
-          .required("El monto es requerido")
-          .min(0.01, "El monto debe ser mayor a 0"),
-      })
-    )
-    .min(1, "Debe agregar al menos un item"),
-});
+// --- Función para crear schema de validación con Yup ---
+const crearValidationSchema = (clavesEmisores: string[]) =>
+  Yup.object({
+    nit: Yup.string()
+      .required("El NIT es requerido")
+      .test("nit-valido", "NIT inválido (mínimo 5 caracteres o CF)", (value) =>
+        validarNIT(value || "")
+      ),
+    emisor: Yup.string()
+      .required("El emisor es requerido")
+      .oneOf(clavesEmisores, "Emisor inválido"),
+    items: Yup.array()
+      .of(
+        Yup.object({
+          rubro: Yup.string()
+            .required("El rubro es requerido")
+            .min(3, "Mínimo 3 caracteres"),
+          monto: Yup.number()
+            .required("El monto es requerido")
+            .min(0.01, "El monto debe ser mayor a 0"),
+        })
+      )
+      .min(1, "Debe agregar al menos un item"),
+  });
 
 // --- Componente Principal ---
 export function FacturasGenericas() {
@@ -138,6 +129,13 @@ export function FacturasGenericas() {
   const { mutate: facturar, isPending: isFacturando } = useFacturarGenerico();
   const anularFactura = useAnularFactura();
   const exportExcel = useExportFacturasExcel();
+  const {
+    data: emisoresRespuesta,
+    isLoading: cargandoEmisores,
+    isError: errorEmisores,
+    refetch: reintentarEmisores,
+  } = useEmisores();
+  const emisoresData = useMemo(() => emisoresRespuesta ?? [], [emisoresRespuesta]);
   const { data, isLoading, refetch } = useFacturasGenericas({
     nit: nitFiltro || undefined,
     fecha_inicio: fechaInicioFiltro || undefined,
@@ -146,6 +144,11 @@ export function FacturasGenericas() {
     page,
     limit,
   });
+
+  const validationSchema = useMemo(
+    () => crearValidationSchema(emisoresData.map((e) => e.clave)),
+    [emisoresData]
+  );
 
   const facturas: FacturaGenericaItem[] = data?.data?.facturas || [];
   const pagination = data?.data?.pagination;
@@ -768,16 +771,23 @@ export function FacturasGenericas() {
                     value={formik.values.emisor}
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
+                    disabled={cargandoEmisores || errorEmisores}
                     className={`w-full rounded-md px-3 py-2 border-2 text-gray-900 bg-white ${
                       formik.touched.emisor && formik.errors.emisor
                         ? "border-red-400 bg-red-50"
                         : "border-purple-300 focus:border-purple-500"
                     }`}
                   >
-                    <option value="">Selecciona un emisor...</option>
-                    {EMISORES_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
+                    <option value="">
+                      {cargandoEmisores
+                        ? "Cargando emisores..."
+                        : errorEmisores
+                          ? "No se pudieron cargar los emisores"
+                          : "Selecciona un emisor..."}
+                    </option>
+                    {emisoresData.map((e) => (
+                      <option key={e.clave} value={e.clave}>
+                        {e.nombre}
                       </option>
                     ))}
                   </select>
@@ -785,6 +795,11 @@ export function FacturasGenericas() {
                     <p className="text-red-500 text-sm mt-1 font-medium">
                       {formik.errors.emisor}
                     </p>
+                  )}
+                  {errorEmisores && (
+                    <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => reintentarEmisores()}>
+                      Reintentar
+                    </Button>
                   )}
                 </div>
 

@@ -15,6 +15,7 @@ import {
   facturarGenerico,
   getFacturasGenericas,
   exportFacturasGenericasExcel,
+  obtenerEmisores,
   type FacturarGenericoRequest,
   type GetFacturasGenericasParams,
   type GetFacturasGenericasExcelResponse
@@ -187,3 +188,11 @@ export const useExportFacturasExcel = () => {
     },
   });
 };
+
+// 🏢 Hook para obtener emisores del back
+export const useEmisores = () =>
+  useQuery({
+    queryKey: ['emisores-cofidi'],
+    queryFn: obtenerEmisores,
+    staleTime: 1000 * 60 * 60,
+  });

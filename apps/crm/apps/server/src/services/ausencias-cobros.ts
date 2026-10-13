@@ -94,6 +94,27 @@ async function ausenciaVigente(asesorId: number) {
 	return fila ?? null;
 }
 
+/**
+ * Una ausencia que quedó sin `operacionTrasladoId` (la confirmación se cortó sin
+ * respuesta) se concilia con cartera por su clave de idempotencia: si el traslado
+ * sí se confirmó, se completa el registro; si no, devuelve `null`.
+ */
+async function reconciliarPendiente(id: string) {
+	const op = await carteraBackClient.buscarTrasladoPorClave(id);
+	if (!op) return null;
+	const [fila] = await db
+		.update(ausenciasAsesorCobros)
+		.set({
+			operacionTrasladoId: op.operacionId,
+			cuentasRepartidas: op.cuentas,
+			bucketsPausados: op.bucketsPausados ?? [],
+			poolPausado: true,
+		})
+		.where(eq(ausenciasAsesorCobros.id, id))
+		.returning();
+	return fila ?? null;
+}
+
 /** No se marca ausente a quien ya lo está ni a quien tiene una cobertura abierta. */
 async function validarQueSePuedeMarcar(
 	asesorId: number,
@@ -189,6 +210,18 @@ export async function marcarAusenteIndefinido(params: {
 		}
 	}
 
+	// Reintento de un registro pendiente: antes de confirmar de nuevo se pregunta si
+	// el traslado ya se había confirmado (aunque la previsualización sea otra).
+	if (existente) {
+		const conciliada = await reconciliarPendiente(params.id);
+		if (conciliada) {
+			await reconciliarAvisosLlamarCliente().catch((error) =>
+				console.warn("[ausencias] No se reconciliaron los avisos de llamadas:", error),
+			);
+			return conciliada;
+		}
+	}
+
 	let operacionId: string;
 	let cuentas: number;
 	let buckets: number[];
@@ -197,17 +230,21 @@ export async function marcarAusenteIndefinido(params: {
 			previewId: params.previewId,
 			idempotencyKey: params.id,
 			actorEmail: params.actor.email,
+			// La previsualización debe ser de este asesor y con la pausa del pool.
+			asesorOrigenId: params.asesorId,
+			pausarPoolOrigen: true,
 		});
 		operacionId = res.operacionId;
 		cuentas = res.cuentas;
 		buckets = res.bucketsPausados ?? [];
 	} catch (error) {
-		// Solo se quita la ausencia si cartera-back RECHAZÓ el traslado (400/404/409):
+		// Solo se quita la ausencia que ESTA llamada creó y que cartera-back RECHAZÓ el traslado (400/404/409):
 		// ahí no se repartió nada ni se pausó el pool. Ante un timeout, corte de
 		// conexión o 5xx el traslado pudo confirmarse sin que llegara la respuesta:
 		// el registro se conserva y el reintento con la misma clave de idempotencia
 		// lo reconcilia (el replay devuelve también los buckets pausados).
 		if (
+			!existente &&
 			error instanceof CarteraBackHttpError &&
 			(error.status === 400 || error.status === 404 || error.status === 409)
 		) {
@@ -250,20 +287,35 @@ export async function marcarAusenteIndefinido(params: {
 }
 
 export async function reactivarAsesor(params: { id: string; actor: Actor }) {
-	const [ausencia] = await db
+	const [encontrada] = await db
 		.select()
 		.from(ausenciasAsesorCobros)
 		.where(eq(ausenciasAsesorCobros.id, params.id))
 		.limit(1);
-	if (!ausencia) {
+	if (!encontrada) {
 		throw new ORPCError("NOT_FOUND", {
 			message: "No se encontró la ausencia.",
 		});
 	}
-	if (ausencia.estado !== "vigente") {
+	if (encontrada.estado !== "vigente") {
 		throw new ORPCError("CONFLICT", {
 			message: "Este asesor ya fue reactivado. Actualice la vista.",
 		});
+	}
+	// Sin traslado registrado la confirmación quedó en duda: se concilia con
+	// cartera y, si no se puede asegurar, no se cierra la ausencia.
+	let ausencia = encontrada;
+	if (!ausencia.operacionTrasladoId) {
+		const conciliada = await reconciliarPendiente(ausencia.id).catch(
+			() => null,
+		);
+		if (!conciliada) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"La ausencia está pendiente de confirmar. Reintente marcarla ausente con la misma solicitud antes de reactivar.",
+			});
+		}
+		ausencia = conciliada;
 	}
 	const nombre = await asesorConUsuario(ausencia.asesorId)
 		.then((a) => a.nombre)

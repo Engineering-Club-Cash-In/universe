@@ -42,6 +42,9 @@ function crearBuilderSelect() {
     limit() {
       return b;
     },
+    for() {
+      return b;
+    },
     then(res: any, rej: any) {
       return Promise.resolve(estado.selectsPorTabla.get(tabla) ?? []).then(res, rej);
     },
@@ -82,7 +85,7 @@ const fakeDb: any = {
   select: () => crearBuilderSelect(),
   ...crearMutadores(),
   execute: async () => estado.executeResult,
-  transaction: async (cb: any) => cb({ ...crearMutadores(), execute: fakeDb.execute }),
+  transaction: async (cb: any) => cb({ ...crearMutadores(), select: () => crearBuilderSelect(), execute: fakeDb.execute }),
 };
 
 mock.module("../../database", () => ({ db: fakeDb, client: {} }));

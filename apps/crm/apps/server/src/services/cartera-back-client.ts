@@ -3874,10 +3874,22 @@ export class CarteraBackClient {
 		});
 	}
 
+	/** M5 · la operación ya confirmada con esa clave de idempotencia (o `null`). */
+	async buscarTrasladoPorClave(clave: string): Promise<ResultadoTraslado | null> {
+		const r = await this.request<{
+			success: boolean;
+			data: Omit<ResultadoTraslado, "success"> | null;
+		}>(`/buckets/traslados/clave/${clave}`, { method: "GET" });
+		return r?.data ? { success: true, ...r.data } : null;
+	}
+
 	async confirmarTrasladoCartera(input: {
 		previewId: string;
 		actorEmail: string;
 		idempotencyKey: string;
+		/** M5: cartera rechaza la previsualización si es de otro asesor o sin pausa de pool. */
+		asesorOrigenId?: number;
+		pausarPoolOrigen?: boolean;
 	}) {
 		const result = await this.request<ResultadoTraslado>(
 			"/buckets/traslados/confirmar",

@@ -27,7 +27,7 @@ import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
 import { AusenciaError, detalleTraslado, devolverTraslado, pausarPoolAsesor, reanudarPoolAsesor } from "../controllers/buckets/ausenciaAsesor";
-import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, listarTrasladosCarteraPaginado, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
+import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, listarTrasladosCarteraPaginado, consultarTrasladoPorClave, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import {
   getPromesaActivaPorCredito,
@@ -212,7 +212,11 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }) }) })
+  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }), asesorOrigenId: t.Optional(t.Integer({ minimum: 1 })), pausarPoolOrigen: t.Optional(t.Boolean()) }) })
+  .get("/buckets/traslados/clave/:clave", async ({ params, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    return { success: true, data: await consultarTrasladoPorClave(params.clave) };
+  }, { params: t.Object({ clave: t.String({ format: "uuid" }) }) })
   .get("/buckets/traslados", async ({ query, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     return listarTrasladosCartera(Number(query.page ?? 1));

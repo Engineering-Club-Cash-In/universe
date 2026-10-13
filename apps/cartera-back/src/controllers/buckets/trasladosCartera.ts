@@ -301,13 +301,21 @@ export async function previsualizarTrasladoCarteraMasivo(raw: unknown) {
 }
 
 export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
-  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email() }).parse(raw);
+  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional() }).parse(raw);
   try {
     return await db.transaction(async tx => {
     const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
     if (!row || row.actor_email !== input.actorEmail) throw new TrasladoConflict("Previsualización no encontrada para este usuario");
+    // El llamador declara a qué asesor y con qué opciones previsualizó: una
+    // previsualización de otro asesor no se confirma bajo este.
+    if (input.asesorOrigenId !== undefined && row.solicitud.asesorOrigenId !== input.asesorOrigenId) {
+      throw new TrasladoConflict("La previsualización no corresponde a este asesor");
+    }
+    if (input.pausarPoolOrigen && !row.solicitud.pausarPoolOrigen) {
+      throw new TrasladoConflict("La previsualización no incluye la pausa del pool");
+    }
     if (row.estado === "confirmada") {
       if (row.idempotency_key !== input.idempotencyKey) throw new TrasladoConflict("La operación ya fue confirmada con otra solicitud");
       return {
@@ -330,6 +338,16 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // espere al job en curso; mientras confirma, la siguiente corrida se omite.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
+    // Pausa del pool del origen: su lock de escritura se toma ANTES de las fotos del
+    // plan. Quien asigna a este asesor revalida su pertenencia al pool bajo un lock
+    // compartido sobre esas filas, así que o confirma antes de la foto o espera a
+    // que la pausa termine y se rechaza. El lock global evita que dos pausas se
+    // crucen con los pools de la otra como destinos.
+    if (row.solicitud.pausarPoolOrigen) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('traslado-pausa-pool'))`);
+      await tx.execute(sql`SELECT id FROM ${schema}.asesor_bucket
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} ORDER BY id FOR UPDATE`);
+    }
     // Primera foto descubre qué créditos hay que proteger. Tras tomar sus
     // locks se lee de nuevo: un editor que ya estaba en curso termina antes y
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
@@ -479,6 +497,17 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     }
     throw error;
   }
+}
+
+/** M5 · la operación confirmada con esta clave de idempotencia, para reconciliar un registro pendiente. */
+export async function consultarTrasladoPorClave(clave: string) {
+  const fila = (await db.execute<{ id: string; cuentas: number; buckets: number[] | null }>(sql`
+    SELECT id, jsonb_array_length(preview->'asignaciones') AS cuentas,
+      CASE WHEN jsonb_typeof(solicitud->'bucketsPausados') = 'array'
+        THEN ARRAY(SELECT jsonb_array_elements_text(solicitud->'bucketsPausados')::int) END AS buckets
+    FROM ${schema}.operaciones_traslado_cartera
+    WHERE idempotency_key = ${clave} AND estado = 'confirmada'`)).rows[0];
+  return fila ? { operacionId: fila.id, cuentas: Number(fila.cuentas), bucketsPausados: fila.buckets ?? [] } : null;
 }
 
 export async function listarTrasladosCartera(page: number) {

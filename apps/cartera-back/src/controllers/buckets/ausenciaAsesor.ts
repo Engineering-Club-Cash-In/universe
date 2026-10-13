@@ -189,7 +189,7 @@ export async function devolverTraslado(params: {
         usuario_email: params.usuarioEmail,
         // El pool del titular sigue pausado hasta el final: la elegibilidad ya la
         // decidió la clasificación (bucket de hoy dentro de sus buckets).
-        pool_ya_validado: true,
+        buckets_pool_validados: bucketsDelTitular,
         // Bajo los locks del lote: si un supervisor la movió después de clasificar,
         // se queda con su nuevo dueño.
         duenios_esperados: new Map(lote.map((id) => [id, recibio.get(id) as number])),
@@ -206,6 +206,10 @@ export async function devolverTraslado(params: {
       devueltos += res.reasignados.length;
       for (const o of res.omitidos) {
         if (o.motivo === "cambio_de_dueno") cambiaronDeDueno.push(o.credito_id);
+        // Cambió a un bucket fuera del pool del titular bajo los locks del lote.
+        if (o.motivo === "bucket_fuera_del_pool") {
+          retenidos.push({ credito_id: o.credito_id, motivo: "bucket_fuera_del_pool" });
+        }
       }
     }
   };

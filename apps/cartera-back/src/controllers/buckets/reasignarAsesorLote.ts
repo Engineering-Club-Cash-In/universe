@@ -37,7 +37,7 @@ export type ReasignarLoteResultado =
       success: true;
       asesor_nuevo: number;
       reasignados: Array<{ credito_id: number; asesor_anterior: number | null; bucket: number }>;
-      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" | "cambio_de_dueno" }>;
+      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" | "cambio_de_dueno" | "bucket_fuera_del_pool" }>;
     }
   | { success: false; status: number; message: string; errores?: ErrorLote[] };
 
@@ -103,9 +103,12 @@ export async function reasignarAsesorLote(params: {
   duenios_esperados?: ReadonlyMap<number, number>;
   /**
    * La elegibilidad del destino ya la decidió el llamador (devolución al titular
-   * con su pool aún pausado): no se exige que esté activo en el pool del bucket.
+   * con su pool aún pausado) PARA ESTOS BUCKETS: en ellos no se exige que esté
+   * activo en el pool. Se aplica al bucket que el crédito tiene bajo los locks,
+   * no al que tenía al clasificar: si cambió a otro bucket, el crédito se omite
+   * (`bucket_fuera_del_pool`) en vez de entregarse a un asesor que no es elegible ahí.
    */
-  pool_ya_validado?: boolean;
+  buckets_pool_validados?: ReadonlySet<number>;
 }): Promise<ReasignarLoteResultado> {
   const motivo = (params.motivo ?? "").trim();
   if (!motivo) {
@@ -244,7 +247,7 @@ export async function reasignarAsesorLote(params: {
       for (const bucket of bucketsUsados) {
         const pool = await getAsesoresPorBucket(bucket, tx, true);
         const ids = new Set(pool.map((a) => a.asesor_id));
-        if (params.pool_ya_validado) ids.add(params.asesor_nuevo_id);
+        if (params.buckets_pool_validados?.has(bucket)) ids.add(params.asesor_nuevo_id);
         poolPorBucket.set(bucket, ids);
       }
       const cambiaronDeDueno: number[] = [];
@@ -256,8 +259,23 @@ export async function reasignarAsesorLote(params: {
             return ok;
           })
         : ids;
+      // Un crédito que bajo los locks está en un bucket fuera de los validados por el
+      // llamador no se evalúa contra el pool (no es un error del lote): se omite.
+      const fueraDelPool: number[] = [];
+      const aEvaluar = params.buckets_pool_validados
+        ? elegibles.filter((id) => {
+            const c = creditos.get(id);
+            const fuera =
+              !!c &&
+              c.asesor_id !== params.asesor_nuevo_id &&
+              c.bucket !== null &&
+              !params.buckets_pool_validados?.has(c.bucket);
+            if (fuera) fueraDelPool.push(id);
+            return !fuera;
+          })
+        : elegibles;
       const evaluado = evaluarLote({
-        creditoIds: elegibles,
+        creditoIds: aEvaluar,
         creditos,
         poolPorBucket,
         asesorNuevoId: params.asesor_nuevo_id,
@@ -267,6 +285,7 @@ export async function reasignarAsesorLote(params: {
         omitidos: [
           ...evaluado.omitidos,
           ...cambiaronDeDueno.map((credito_id) => ({ credito_id, motivo: "cambio_de_dueno" as const })),
+          ...fueraDelPool.map((credito_id) => ({ credito_id, motivo: "bucket_fuera_del_pool" as const })),
         ],
       };
       if (evaluacion.errores.length > 0 || evaluacion.aReasignar.length === 0) {

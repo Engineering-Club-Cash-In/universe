@@ -22,6 +22,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { esCartaDeCheques } from "server/src/lib/contract-disbursement";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import {
 	esCartaUnificable,
@@ -2130,9 +2131,8 @@ export function DynamicContractWizard({
 	const vendorGenderSelected =
 		fieldValues.genderVendedor === "male" ||
 		fieldValues.genderVendedor === "female";
-	const unsupportedDisbursementCount = selectedDocuments.includes(
-		"carta_emision_cheques",
-	)
+	// La individual y la de sociedad salen de las mismas filas de cheques.
+	const unsupportedDisbursementCount = selectedDocuments.some(esCartaDeCheques)
 		? (crmData.desembolso?.omitidosPorMoneda ?? 0)
 		: 0;
 	const canProceedStep2 =

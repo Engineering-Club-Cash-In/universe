@@ -21,6 +21,25 @@ export enum ContractType {
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
   CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
 
+  // ===== VENTAS A NOMBRE DE UNA SOCIEDAD =====
+  // Firma el representante legal "en forma personal y en su calidad de" cargo
+  // de la sociedad. Hombre o mujer según el representante, y sin codeudores:
+  // las plantillas no tienen lugar para más firmantes.
+  SOLICITUD_COMPRA_VEHICULO_SOCIEDAD = 'solicitud_compra_vehiculo_tercero_sociedad',
+  CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD = 'carta_aceptacion_instalacion_gps_sociedad',
+  CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD = 'carta_traspaso_vehiculo_rdbe_sociedad',
+  CARTA_CARRO_NUEVO_SOCIEDAD = 'carta_carro_nuevo_sociedad',
+  CARTA_EMISION_CHEQUES_SOCIEDAD = 'carta_emision_cheques_sociedad',
+  DESCARGO_RESPONSABILIDADES_SOCIEDAD = 'descargo_responsabilidades_sociedad',
+  COBERTURA_INREXSA_SOCIEDAD = 'cobertura_inrexsa_sociedad',
+  COBERTURA_INREXSA_COMERCIAL_SOCIEDAD = 'cobertura_inrexsa_comercial_sociedad',
+  COBERTURA_GYT_SOCIEDAD = 'cobertura_gyt_sociedad',
+  PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD = 'pagare_unico_libre_protesto_sociedad',
+  RECONOCIMIENTO_DEUDA_SOCIEDAD = 'reconocimiento_deuda_sociedad',
+  GARANTIA_MOBILIARIA_SOCIEDAD = 'garantia_mobiliaria_sociedad',
+  /** Uno solo para carro nuevo y usado: dice que el vehículo "podrá ser nuevo (de agencia) o usado". */
+  CONTRATO_PRIVADO_USO_SOCIEDAD = 'contrato_privado_uso_sociedad',
+
   /**
    * Las cartas de una venta unidas en un solo documento, con un solo enlace
    * por firmante. No tiene template: se arma con las cartas que se pidan

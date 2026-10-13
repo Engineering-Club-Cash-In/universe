@@ -12,11 +12,12 @@ import {
 	isNull,
 	lt,
 	lte,
+	ne,
 	not,
 	or,
+	type SQL,
 	sql,
 	sum,
-	type SQL,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -53,6 +54,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
@@ -61,13 +63,12 @@ import {
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
-import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
-import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
-import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
 } from "../lib/bank-statement-documents";
+import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -85,6 +86,10 @@ import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audi
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
+	aplicarDeltaMontosInversionistas,
+	calcularRegeneracionCotizacionFechaIdeal,
+} from "../lib/fecha-ideal-cotizacion";
+import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
@@ -93,10 +98,6 @@ import {
 	puedeCambiarDiaPago,
 	requiereCongelarEtapaParaCambioDia,
 } from "../lib/fecha-ideal-pago-edicion";
-import {
-	calcularRegeneracionCotizacionFechaIdeal,
-	aplicarDeltaMontosInversionistas,
-} from "../lib/fecha-ideal-cotizacion";
 import {
 	esDpiEnBlanco,
 	evaluarGateMoraDpi,
@@ -136,6 +137,11 @@ import {
 	numerosSifcoDelDpiYDeLaOportunidad,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
+import {
+	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -149,6 +155,7 @@ import {
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	type DecisionRevalidacion,
 	decidirRevalidacion,
@@ -670,6 +677,366 @@ function firmaBitacoraBuro(
 			.map((fila) => `${fila.coDebtorId}:${fila.dpi}:${fila.buro?.id ?? ""}`)
 			.sort(),
 	});
+}
+
+/**
+ * Le quita la marca de representante legal a los co-deudores de la
+ * oportunidad, menos a `salvo`. Va ANTES de marcar a otro: el índice único
+ * (`co_debtors_representante_legal_uq`) no admite dos marcados ni por un
+ * instante. El llamador ya tiene tomada la oportunidad con FOR UPDATE, así dos
+ * marcas a la vez se ordenan y gana la última en vez de chocar con el índice.
+ */
+async function quitarMarcaDeRepresentante(
+	tx: Transaction,
+	opportunityId: string,
+	salvo?: string,
+): Promise<void> {
+	await tx
+		.update(coDebtors)
+		.set({ esRepresentanteLegal: false, updatedAt: new Date() })
+		.where(
+			and(
+				eq(coDebtors.opportunityId, opportunityId),
+				eq(coDebtors.esRepresentanteLegal, true),
+				salvo ? ne(coDebtors.id, salvo) : undefined,
+			),
+		);
+}
+
+/**
+ * Lo que una sociedad necesita para entrar a jurídico, del lado de quien
+ * firma: si es de sociedad, y lo que le falta a su representante (ver
+ * `faltantesDelRepresentante`). `leadId` es el lead con el que va a quedar, si
+ * cambia en el mismo pedido.
+ */
+async function sociedadParaJuridico(
+	opportunityId: string,
+	leadId?: string | null,
+): Promise<{ esSociedad: boolean; faltanDelRepresentante: string[] }> {
+	const [lead] = leadId
+		? await db
+				.select({ clientType: leads.clientType })
+				.from(leads)
+				.where(eq(leads.id, leadId))
+				.limit(1)
+		: await db
+				.select({ clientType: leads.clientType })
+				.from(opportunities)
+				.innerJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+			gender: coDebtors.gender,
+			age: coDebtors.age,
+			maritalStatus: coDebtors.maritalStatus,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const datos = { clientType: lead?.clientType, coDeudores };
+	return {
+		esSociedad: esOportunidadDeSociedad(datos),
+		faltanDelRepresentante: faltantesDelRepresentante(datos),
+	};
+}
+
+/**
+ * Las oportunidades (de las dadas) con contratos vivos: vigentes (sin anular
+ * ni reemplazar), pendientes o ya firmados, mientras la oportunidad no pasó la
+ * confirmación final (90%). Salieron a firma con los datos de hoy —WeeTrust
+ * manda las invitaciones apenas se generan, ya en 80%—, y uno firmado en 85%
+ * todavía va a cerrar la oportunidad.
+ */
+async function conContratosPendientes(
+	tx: Transaction,
+	opportunityIds: string[],
+): Promise<Set<string>> {
+	if (opportunityIds.length === 0) return new Set();
+	const filas = await tx
+		.select({
+			opportunityId: generatedLegalContracts.opportunityId,
+			status: generatedLegalContracts.status,
+			porcentaje: salesStages.closurePercentage,
+		})
+		.from(generatedLegalContracts)
+		.innerJoin(
+			opportunities,
+			eq(generatedLegalContracts.opportunityId, opportunities.id),
+		)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.where(
+			and(
+				inArray(generatedLegalContracts.opportunityId, opportunityIds),
+				inArray(generatedLegalContracts.status, ["pending", "signed"]),
+				isNull(generatedLegalContracts.replacedByContractId),
+			),
+		);
+	// Después de la confirmación (90%) los contratos ya cumplieron: muchos
+	// quedan en "pending" porque nadie vuelve a sincronizarlos (en PROD, 650
+	// así en 90 oportunidades cerradas), y no tienen que congelar nada.
+	return new Set(
+		filas
+			.filter((f) => (f.porcentaje ?? 0) < 90)
+			.map((f) => f.opportunityId)
+			.filter((id): id is string => !!id),
+	);
+}
+
+/** Lo que los contratos de sociedad dicen del representante legal. */
+type DatosDelRepresentanteEnContratos = {
+	fullName?: string;
+	email?: string | null;
+	dpi?: string;
+	age?: number | null;
+	gender?: string | null;
+	maritalStatus?: string | null;
+	nationality?: string | null;
+	profession?: string | null;
+};
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor y, si está en
+ * firma y él es quien firma por la sociedad, no deja cambiar nada de lo que
+ * los contratos dicen de él (nombre, correo, DPI, edad, género, estado civil,
+ * nacionalidad, profesión): los contratos vivos y sus firmantes quedarían con
+ * los datos viejos. Se corrige regresando la oportunidad a 80% y rehaciendo la
+ * batería. El celular no está en los contratos y se puede cambiar.
+ */
+async function congelarRepresentanteEnFirma(
+	tx: Transaction,
+	coDebtorId: string,
+	cambios: DatosDelRepresentanteEnContratos,
+): Promise<void> {
+	const [fila] = await tx
+		.select({
+			opportunityId: coDebtors.opportunityId,
+			fullName: coDebtors.fullName,
+			email: coDebtors.email,
+			dpi: coDebtors.dpi,
+			age: coDebtors.age,
+			gender: coDebtors.gender,
+			maritalStatus: coDebtors.maritalStatus,
+			nationality: coDebtors.nationality,
+			profession: coDebtors.profession,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
+	const [oportunidad] = await tx
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id !== coDebtorId) return;
+
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().toLowerCase();
+	const cambia = (antes: string | null, despues: string | null | undefined) =>
+		despues !== undefined && texto(antes) !== texto(despues);
+	const cambiaDpi =
+		cambios.dpi !== undefined &&
+		fila.dpi.replace(/\D/g, "") !== cambios.dpi.replace(/\D/g, "");
+	const cambiaEdad =
+		cambios.age !== undefined && (fila.age ?? null) !== (cambios.age ?? null);
+	if (
+		cambia(fila.fullName, cambios.fullName) ||
+		cambia(fila.email, cambios.email) ||
+		cambiaDpi ||
+		cambiaEdad ||
+		cambia(fila.gender, cambios.gender) ||
+		cambia(fila.maritalStatus, cambios.maritalStatus) ||
+		cambia(fila.nationality, cambios.nationality) ||
+		cambia(fila.profession, cambios.profession)
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La oportunidad tiene contratos en firma (o firmados sin confirmar) con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+}
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor que se va a borrar
+ * y no deja borrarlo si es quien firma por la sociedad y hay contratos vivos:
+ * sus documentos e invitaciones seguirían a su nombre.
+ */
+async function protegerBorradoDelRepresentante(
+	tx: Transaction,
+	coDebtorId: string,
+): Promise<void> {
+	const [fila] = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
+
+	const [oportunidad] = await tx
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id === coDebtorId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Es el representante legal y la oportunidad tiene contratos en firma (o firmados sin confirmar) a su nombre. Para quitarlo, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+}
+
+/** Lo que los contratos de sociedad toman del lead (la empresa). */
+type DatosDeLaEmpresaEnContratos = {
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	secondLastName?: string;
+	direccion?: string;
+};
+
+/**
+ * Protege lo que el lead pone en los contratos mientras alguna oportunidad
+ * suya está en firma.
+ *
+ * - El tipo de cliente decide la batería (individual o de sociedad): no se
+ *   cambia con una oportunidad en firma.
+ * - En una sociedad, el nombre del lead es la razón social (`nombreSociedad`)
+ *   y su dirección la de notificaciones: no se cambian con una oportunidad de
+ *   sociedad en firma.
+ *
+ * Antes toma el candado de firma de cada oportunidad del lead, en orden, el
+ * mismo de generar, enlazar y aprobar. Se corrige regresando la oportunidad a
+ * 80% y rehaciendo la batería.
+ */
+async function protegerLeadEnFirma(
+	tx: Transaction,
+	leadId: string,
+	cambios: DatosDeLaEmpresaEnContratos & { clientType?: string },
+): Promise<void> {
+	const [lead] = await tx
+		.select({
+			clientType: leads.clientType,
+			firstName: leads.firstName,
+			middleName: leads.middleName,
+			lastName: leads.lastName,
+			secondLastName: leads.secondLastName,
+			direccion: leads.direccion,
+		})
+		.from(leads)
+		.where(eq(leads.id, leadId))
+		.limit(1);
+	if (!lead) return;
+
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+	const cambia = (antes: string | null, despues: string | undefined) =>
+		despues !== undefined && texto(antes) !== texto(despues);
+	const cambiaTipo =
+		cambios.clientType !== undefined && cambios.clientType !== lead.clientType;
+	const cambiaEmpresa =
+		cambia(lead.firstName, cambios.firstName) ||
+		cambia(lead.middleName, cambios.middleName) ||
+		cambia(lead.lastName, cambios.lastName) ||
+		cambia(lead.secondLastName, cambios.secondLastName) ||
+		cambia(lead.direccion, cambios.direccion);
+	if (!cambiaTipo && !cambiaEmpresa) return;
+
+	const oportunidades = await tx
+		.select({ id: opportunities.id })
+		.from(opportunities)
+		.where(eq(opportunities.leadId, leadId))
+		.orderBy(asc(opportunities.id));
+	for (const oportunidad of oportunidades) {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(${claveDeFirma(oportunidad.id)})`,
+		);
+	}
+
+	const conPendientes = await conContratosPendientes(
+		tx,
+		oportunidades.map((o) => o.id),
+	);
+	if (conPendientes.size === 0) return;
+
+	if (cambiaTipo) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El cliente tiene contratos en firma (o firmados sin confirmar) de la batería del tipo de cliente actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+
+	// ¿Alguna de las que están en firma es de sociedad?
+	const marcados = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(
+			and(
+				inArray(coDebtors.opportunityId, [...conPendientes]),
+				eq(coDebtors.esRepresentanteLegal, true),
+			),
+		);
+	if (lead.clientType === "empresa" || marcados.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La sociedad tiene contratos en firma (o firmados sin confirmar) con este nombre y esta dirección. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
 }
 
 export const crmRouter = {
@@ -1642,6 +2009,28 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
+				// El tipo de cliente decide la batería, y en una sociedad el nombre y
+				// la dirección del lead van en los contratos. Generar, enlazar y
+				// aprobar los leen con el candado de firma de cada oportunidad: estos
+				// cambios pasan por los mismos candados (ver `protegerLeadEnFirma`).
+				if (
+					updateData.clientType !== undefined ||
+					updateData.firstName !== undefined ||
+					updateData.middleName !== undefined ||
+					updateData.lastName !== undefined ||
+					updateData.secondLastName !== undefined ||
+					updateData.direccion !== undefined
+				) {
+					await protegerLeadEnFirma(tx, id, {
+						clientType: updateData.clientType,
+						firstName: updateData.firstName,
+						middleName: updateData.middleName,
+						lastName: updateData.lastName,
+						secondLastName: updateData.secondLastName,
+						direccion: updateData.direccion,
+					});
+				}
+
 				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
 				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
 				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
@@ -2407,6 +2796,8 @@ export const crmRouter = {
 					departamento: leads.departamento,
 					municipio: leads.municipio,
 					zona: leads.zona,
+					// Una empresa como lead hace que la oportunidad sea de sociedad
+					clientType: leads.clientType,
 				},
 				stage: {
 					id: salesStages.id,
@@ -3393,6 +3784,24 @@ export const crmRouter = {
 					});
 				}
 
+				// En una sociedad firma su representante legal: al entrar a jurídico
+				// tiene que estar marcado y completo (a su celular le llegan los
+				// enlaces), y a la empresa no se le piden datos personales.
+				const sociedad =
+					toPercentage >= 80
+						? await sociedadParaJuridico(id, effectiveLeadId)
+						: null;
+				if (
+					fromPercentage < 80 &&
+					toPercentage >= 80 &&
+					sociedad &&
+					sociedad.faltanDelRepresentante.length > 0
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Para avanzar a etapa jurídica (80%), el representante legal de la sociedad debe tener: ${sociedad.faltanDelRepresentante.join(", ")}`,
+					});
+				}
+
 				// Validaciones para avanzar a etapa 80% (jurídica)
 				if (toPercentage >= 80) {
 					// Validar datos del vehículo para contratos
@@ -3454,9 +3863,11 @@ export const crmRouter = {
 							.limit(1);
 
 						if (leadForValidation[0]) {
-							const missingLeadFields = getMissingLeadFieldsForContracts(
-								leadForValidation[0],
-							);
+							const missingLeadFields = sociedad?.esSociedad
+								? leadForValidation[0].direccion
+									? []
+									: ["Dirección"]
+								: getMissingLeadFieldsForContracts(leadForValidation[0]);
 							if (missingLeadFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
 									message: `Para avanzar a etapa jurídica (80%), el cliente debe tener: ${formatMissingLeadFields(missingLeadFields)}`,
@@ -8522,6 +8933,7 @@ export const crmRouter = {
 								firstName: leads.firstName,
 								lastName: leads.lastName,
 								phone: leads.phone,
+								clientType: leads.clientType,
 								dpi: leads.dpi,
 								direccion: leads.direccion,
 								maritalStatus: leads.maritalStatus,
@@ -8568,6 +8980,24 @@ export const crmRouter = {
 							.from(creditAnalysis)
 							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
+
+			// Oportunidades con un co-firmante marcado como representante legal:
+			// también son de sociedad aunque el lead no sea empresa.
+			const conRepresentante = new Set(
+				opportunityIds.length > 0
+					? (
+							await db
+								.select({ opportunityId: coDebtors.opportunityId })
+								.from(coDebtors)
+								.where(
+									and(
+										inArray(coDebtors.opportunityId, opportunityIds),
+										eq(coDebtors.esRepresentanteLegal, true),
+									),
+								)
+						).map((c) => c.opportunityId)
+					: [],
+			);
 
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
@@ -8685,23 +9115,33 @@ export const crmRouter = {
 								id: lead.id,
 								name: `${lead.firstName} ${lead.lastName}`,
 								phone: lead.phone,
+								// Empresa: firma su representante legal (ver
+								// `lib/oportunidad-de-sociedad.ts`).
+								clientType: lead.clientType,
 								direccion: lead.direccion,
-								hasRequiredData: !!(
-									lead.dpi &&
-									lead.direccion &&
-									lead.maritalStatus &&
-									lead.gender &&
-									lead.birthDate &&
-									lead.nationality
-								),
-								missingFields: getMissingLeadFieldsForContracts({
-									dpi: lead.dpi,
-									direccion: lead.direccion,
-									maritalStatus: lead.maritalStatus,
-									gender: lead.gender,
-									birthDate: lead.birthDate,
-									nationality: lead.nationality,
-								}),
+								// Una empresa no tiene datos personales: de ella sólo se pide
+								// la dirección, y el resto es del representante legal (lo
+								// revisa la pantalla con sus co-firmantes).
+								...(() => {
+									const faltan =
+										lead.clientType === "empresa" ||
+										conRepresentante.has(opp.id)
+											? lead.direccion
+												? []
+												: ["Dirección"]
+											: getMissingLeadFieldsForContracts({
+													dpi: lead.dpi,
+													direccion: lead.direccion,
+													maritalStatus: lead.maritalStatus,
+													gender: lead.gender,
+													birthDate: lead.birthDate,
+													nationality: lead.nationality,
+												});
+									return {
+										hasRequiredData: faltan.length === 0,
+										missingFields: faltan,
+									};
+								})(),
 							}
 						: null,
 					vehicle: vehicle
@@ -8950,13 +9390,25 @@ export const crmRouter = {
 					.where(eq(leads.id, opportunity.leadId))
 					.limit(1);
 
+				// Una empresa no tiene datos personales: de ella sólo la dirección, y
+				// lo demás es de su representante legal, que firma por ella.
+				const sociedad = await sociedadParaJuridico(input.opportunityId);
 				if (lead) {
-					const missingLeadFields = getMissingLeadFieldsForContracts(lead);
+					const missingLeadFields = sociedad.esSociedad
+						? lead.direccion
+							? []
+							: ["Dirección"]
+						: getMissingLeadFieldsForContracts(lead);
 					if (missingLeadFields.length > 0) {
 						validationErrors.push(
 							`Cliente: Faltan ${formatMissingLeadFields(missingLeadFields)}`,
 						);
 					}
+				}
+				if (sociedad.faltanDelRepresentante.length > 0) {
+					validationErrors.push(
+						`Representante legal: Faltan ${sociedad.faltanDelRepresentante.join(", ")}`,
+					);
 				}
 			} else {
 				validationErrors.push("No hay cliente asociado a la oportunidad");
@@ -9492,6 +9944,7 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				occupation: z.enum(["owner", "employee"]).optional(),
 				notes: z.string().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -9554,6 +10007,12 @@ export const crmRouter = {
 					throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
 				}
 
+				// Uno solo por oportunidad: el nuevo representante le quita la marca
+				// al anterior. Bajo el candado de la oportunidad tomado arriba.
+				if (input.esRepresentanteLegal) {
+					await quitarMarcaDeRepresentante(tx, input.opportunityId);
+				}
+
 				const creado = await tx
 					.insert(coDebtors)
 					.values({
@@ -9569,6 +10028,7 @@ export const crmRouter = {
 						phone: input.phone,
 						occupation: input.occupation,
 						notes: input.notes,
+						esRepresentanteLegal: input.esRepresentanteLegal ?? false,
 					})
 					.returning();
 				const marcadas = await tx
@@ -9591,6 +10051,16 @@ export const crmRouter = {
 					entity: "opportunity",
 					id: input.opportunityId,
 					action: "habilitar_buro_revalidacion_30",
+					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
+				});
+			}
+			// Quién firma por la empresa decide quién firma los contratos: queda en
+			// la bitácora de la oportunidad, como las demás decisiones sobre ella.
+			if (newCoDebtor.esRepresentanteLegal) {
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "marcar_representante_legal",
 					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
 				});
 			}
@@ -9626,10 +10096,12 @@ export const crmRouter = {
 				score: z.string().nullable().optional(),
 				fit: z.boolean().nullable().optional(),
 				scoredAt: z.date().nullable().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, ...updateData } = input;
+			// La marca de representante no va con el resto: ver más abajo.
+			const { id, esRepresentanteLegal, ...updateData } = input;
 
 			// Igual que en `updateLead`: el override se anota después de confirmar
 			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
@@ -9757,6 +10229,28 @@ export const crmRouter = {
 			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
 			// aprobada contra la identidad vieja.
 			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				// Quién firma por una sociedad lo leen generar, enlazar y aprobar con
+				// el candado de firma de la oportunidad tomado. Cambiar la marca o la
+				// identidad de un co-deudor pasa por el mismo candado, y ANTES de
+				// cualquier FOR UPDATE: la aprobación toma el candado y después
+				// escribe la oportunidad, y al revés se esperarían entre sí.
+				const datosEnContratos: DatosDelRepresentanteEnContratos = {
+					fullName: updateData.fullName,
+					email: updateData.email,
+					dpi: updateData.dpi,
+					age: updateData.age,
+					gender: updateData.gender,
+					maritalStatus: updateData.maritalStatus,
+					nationality: updateData.nationality,
+					profession: updateData.profession,
+				};
+				if (
+					esRepresentanteLegal !== undefined ||
+					Object.values(datosEnContratos).some((v) => v !== undefined)
+				) {
+					await congelarRepresentanteEnFirma(tx, id, datosEnContratos);
+				}
+
 				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
 				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
 				// oportunidad serializa las dos escrituras.
@@ -9770,6 +10264,23 @@ export const crmRouter = {
 						.from(opportunities)
 						.where(eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId))
 						.for("update");
+				}
+				// La marca de representante es una por oportunidad: también se toma
+				// SU oportunidad antes de tocar a los co-deudores, para que dos marcas
+				// a la vez se ordenen en vez de chocar con el índice único.
+				if (esRepresentanteLegal !== undefined) {
+					const [actual] = await tx
+						.select({ opportunityId: coDebtors.opportunityId })
+						.from(coDebtors)
+						.where(eq(coDebtors.id, id))
+						.limit(1);
+					if (actual) {
+						await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(eq(opportunities.id, actual.opportunityId))
+							.for("update");
+					}
 				}
 
 				const filas = await tx
@@ -9821,6 +10332,49 @@ export const crmRouter = {
 							data: { origen: "updateCoDebtor", coDebtorId: id },
 						});
 					}
+				}
+
+				// La marca va DESPUÉS de confirmar la fila y en su propio UPDATE: con
+				// otro co-deudor marcado, escribirla junto con el resto chocaba con el
+				// índice único, y quitársela al otro antes de saber si esta fila se
+				// escribe podía dejar la oportunidad sin representante. No pasa por
+				// los candados del DPI: no cambia la identidad de nadie, y jurídico la
+				// corrige con la oportunidad ya en 80%.
+				const [coDeudor] = filas;
+				if (
+					esRepresentanteLegal !== undefined &&
+					coDeudor.esRepresentanteLegal !== esRepresentanteLegal
+				) {
+					// Con contratos vivos, ya salieron a nombre del representante
+					// actual: cambiarlo dejaría sus invitaciones con otra persona.
+					if (
+						(await conContratosPendientes(tx, [coDeudor.opportunityId])).has(
+							coDeudor.opportunityId,
+						)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"La oportunidad tiene contratos en firma (o firmados sin confirmar) a nombre del representante legal actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+						});
+					}
+					if (esRepresentanteLegal) {
+						await quitarMarcaDeRepresentante(tx, coDeudor.opportunityId, id);
+					}
+					const conLaMarca = await tx
+						.update(coDebtors)
+						.set({ esRepresentanteLegal })
+						.where(eq(coDebtors.id, id))
+						.returning();
+					// Quién firma por la empresa decide quién firma los contratos.
+					auditRecord({
+						entity: "opportunity",
+						id: coDeudor.opportunityId,
+						action: esRepresentanteLegal
+							? "marcar_representante_legal"
+							: "desmarcar_representante_legal",
+						data: { origen: "updateCoDebtor", coDebtorId: id },
+					});
+					return conLaMarca;
 				}
 
 				return filas;
@@ -9921,6 +10475,10 @@ export const crmRouter = {
 			// transacción (el override del admin y su revalidación), así que si algo
 			// revierte, esas anotaciones tienen que irse con la escritura.
 			await auditedTransaction(async (tx) => {
+				// Primero el candado de firma (antes de cualquier FOR UPDATE, como
+				// en la edición): el representante con contratos vivos no se borra.
+				await protegerBorradoDelRepresentante(tx, input.id);
+
 				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
 				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
 				if (coDeudorABorrar) {

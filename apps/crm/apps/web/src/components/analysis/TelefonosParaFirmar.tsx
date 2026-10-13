@@ -1,6 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Phone, Save } from "lucide-react";
 import { useState } from "react";
+import {
+	codeudoresDeMas,
+	esOportunidadDeSociedad,
+	representanteLegalDe,
+} from "server/src/lib/oportunidad-de-sociedad";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,45 +19,75 @@ import { client } from "@/utils/orpc";
  * Al aprobar los contratos, cada persona recibe sus enlaces de firma por
  * WhatsApp a este número. Si falta o está mal, no le llega nada y se descubre
  * recién en 85%, con la papelería ya hecha. Acá se ve y se corrige de una vez.
+ *
+ * En una sociedad no firma la empresa sino su representante legal (un
+ * codeudor marcado): se muestra sólo él, porque el teléfono de la empresa
+ * suele ser una planta y ahí no le llega el WhatsApp a nadie.
  */
 export function TelefonosParaFirmar({
 	opportunityId,
 	cliente,
+	clientType,
 	onGuardado,
 }: {
 	opportunityId: string;
 	cliente: { id: string; nombre: string; phone: string | null } | null;
+	/** `leads.client_type`: con "empresa" la oportunidad es de sociedad. */
+	clientType?: string | null;
 	/** Para que la pantalla recargue lo que muestra del cliente. */
 	onGuardado?: () => void;
 }) {
 	const codeudoresQuery = useQuery({
-		queryKey: ["codeudores-para-firmar", opportunityId],
+		// La misma clave que `CoDebtorsView`: al marcar al representante o
+		// cargarle el celular desde el detalle, esto se actualiza solo.
+		queryKey: ["coDebtors", opportunityId],
 		queryFn: () => client.getCoDebtorsByOpportunity({ opportunityId }),
 	});
 
-	const personas = [
-		...(cliente
+	const codeudores = codeudoresQuery.data ?? [];
+	const deSociedad = { clientType, coDeudores: codeudores };
+	const esSociedad = esOportunidadDeSociedad(deSociedad);
+	const representante = esSociedad ? representanteLegalDe(deSociedad) : null;
+	const sobran = codeudoresDeMas(deSociedad).length;
+
+	const personas = esSociedad
+		? representante
 			? [
 					{
-						clave: `lead-${cliente.id}`,
-						tipo: "lead" as const,
-						id: cliente.id,
-						etiqueta: "Cliente",
-						nombre: cliente.nombre,
-						phone: cliente.phone,
+						clave: `codeudor-${representante.id}`,
+						tipo: "codeudor" as const,
+						id: representante.id,
+						etiqueta: "Representante legal",
+						nombre: representante.fullName,
+						phone: representante.phone,
 					},
 				]
-			: []),
-		...(codeudoresQuery.data ?? []).map((cd, i) => ({
-			clave: `codeudor-${cd.id}`,
-			tipo: "codeudor" as const,
-			id: cd.id,
-			etiqueta: `Codeudor ${i + 1}`,
-			nombre: cd.fullName,
-			phone: cd.phone,
-		})),
-	];
-	const faltan = personas.filter((p) => !p.phone?.trim()).length;
+			: []
+		: [
+				...(cliente
+					? [
+							{
+								clave: `lead-${cliente.id}`,
+								tipo: "lead" as const,
+								id: cliente.id,
+								etiqueta: "Cliente",
+								nombre: cliente.nombre,
+								phone: cliente.phone,
+							},
+						]
+					: []),
+				...codeudores.map((cd, i) => ({
+					clave: `codeudor-${cd.id}`,
+					tipo: "codeudor" as const,
+					id: cd.id,
+					etiqueta: `Codeudor ${i + 1}`,
+					nombre: cd.fullName,
+					phone: cd.phone,
+				})),
+			];
+	const faltan =
+		personas.filter((p) => !p.phone?.trim()).length +
+		(esSociedad && !representante && !codeudoresQuery.isLoading ? 1 : 0);
 
 	return (
 		<div className="space-y-2">
@@ -82,9 +117,23 @@ export function TelefonosParaFirmar({
 						}}
 					/>
 				))}
+				{esSociedad && !representante && !codeudoresQuery.isLoading && (
+					<p className="text-amber-700 text-xs dark:text-amber-400">
+						Es una sociedad y no tiene marcado a su representante legal. Marcalo
+						en los co-firmantes: es quien firma y a quien le llegan los enlaces.
+					</p>
+				)}
+				{esSociedad && sobran > 0 && (
+					<p className="text-amber-700 text-xs dark:text-amber-400">
+						Los contratos de sociedad sólo los firma el representante: hay{" "}
+						{sobran === 1 ? "un co-firmante" : `${sobran} co-firmantes`} de más
+						que jurídico no va a poder incluir.
+					</p>
+				)}
 				<p className="text-muted-foreground text-xs">
-					Al aprobar los contratos, a cada uno le llegan sus enlaces de firma
-					por WhatsApp a este número.
+					{esSociedad
+						? "Es una sociedad: los enlaces de firma le llegan por WhatsApp al representante legal, a este número. Tiene que ser su celular, no el teléfono de la empresa."
+						: "Al aprobar los contratos, a cada uno le llegan sus enlaces de firma por WhatsApp a este número."}
 				</p>
 			</div>
 		</div>

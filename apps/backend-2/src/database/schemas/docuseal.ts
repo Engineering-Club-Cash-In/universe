@@ -8,7 +8,9 @@ export const documentCategoriaEnum = docusealSchema.enum("document_categoria_enu
   "ventas",
   "inversiones",
   "inversiones_sociedad",
-  "carta_poder"
+  "carta_poder",
+  // Ventas a nombre de una sociedad: firma su representante legal.
+  "ventas_sociedad"
 ]);
 
 // 📘 ENUM de nombres de documentos
@@ -58,7 +60,21 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "carta_cube_andres",
   "carta_cube_don_alex",
   "carta_rdbe_don_alex",
-  "carta_rdbe_richard"
+  "carta_rdbe_richard",
+  // ===== VENTAS A NOMBRE DE UNA SOCIEDAD =====
+  "solicitud_compra_vehiculo_tercero_sociedad",
+  "carta_aceptacion_instalacion_gps_sociedad",
+  "carta_traspaso_vehiculo_rdbe_sociedad",
+  "descargo_responsabilidades_sociedad",
+  "cobertura_inrexsa_sociedad",
+  "cobertura_inrexsa_comercial_sociedad",
+  "cobertura_gyt_sociedad",
+  "reconocimiento_deuda_sociedad",
+  "carta_carro_nuevo_sociedad",
+  "contrato_privado_uso_sociedad",
+  "pagare_unico_libre_protesto_sociedad",
+  "carta_emision_cheques_sociedad",
+  "garantia_mobiliaria_sociedad",
 ]);
 
 // 📗 Tabla principal

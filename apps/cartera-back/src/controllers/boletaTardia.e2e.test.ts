@@ -8,10 +8,10 @@ import { randomUUID } from "node:crypto";
  * REALES (sin fakes) sobre una COPIA de datos de producción. Las pruebas ESCRIBEN en la copia.
  *
  * Se salta si falta E2E_DB_URL. Preparación (copia descartable, nunca la base de PROD):
- *   docker exec cartera-local createdb -U postgres -T prod20261009 e2e_bt_6c
- *   (aplicar drizzle/0053, 0054 y 0055 con `docker exec -i cartera-local psql -U postgres -d e2e_bt_6c -v ON_ERROR_STOP=1 -f - < archivo`)
- *   E2E_DB_URL=postgres://postgres:<pw>@localhost:5433/e2e_bt_6c bun test src/controllers/boletaTardia.e2e.test.ts
- *   docker exec cartera-local dropdb -U postgres e2e_bt_6c
+ *   docker exec cartera-local createdb -U postgres -T prod20261009 e2e_bt_t8
+ *   (aplicar drizzle/0053, 0054 y 0055 con `docker exec -i cartera-local psql -U postgres -d e2e_bt_t8 -v ON_ERROR_STOP=1 -f - < archivo`)
+ *   E2E_DB_URL=postgres://postgres:<pw>@localhost:5433/e2e_bt_t8 bun test src/controllers/boletaTardia.e2e.test.ts
+ *   docker exec cartera-local dropdb -U postgres e2e_bt_t8
  *
  * CONTROL DE `hoy`: la copia es del 09-oct-2026 (la mora de sus créditos coincide con las fechas de ese día), así que
  * la DECISIÓN se evalúa con hoy = 09-oct (se inyecta `deps.hoy`). El resto (`insertPayment`, `evaluarCreditoAlDia`,
@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
  */
 const E2E_DB_URL = process.env.E2E_DB_URL;
 const PROD_SYSTEM_IDENTIFIER = "7473814220388481052";
-const DB_ESPERADA = "e2e_bt_6c";
+const DB_ESPERADA = "e2e_bt_t8";
 const HOY_YMD = "2026-10-09";
 const HOY = new Date(2026, 9, 9);
 const EMAIL = "jalvarado@clubcashin.com";
@@ -173,7 +173,7 @@ suite("boleta tardía E2E: registrarPagoConBoletaTardia + insertPayment REAL sob
     ({ condonarMoraDeCuotas: condonar } = await import("./latefee"));
     ({ insertPayment } = await import("./registerPayment"));
     BANCO_ID = (await pool.query(`SELECT banco_id FROM cartera.bancos ORDER BY banco_id LIMIT 1`)).rows[0].banco_id;
-    pool_creditos = await elegirCreditos(16);
+    pool_creditos = await elegirCreditos(20);
     console.log("Créditos candidatos:", pool_creditos.join(","));
   }, T);
 
@@ -341,34 +341,157 @@ suite("boleta tardía E2E: registrarPagoConBoletaTardia + insertPayment REAL sob
     expect(ledgerDe(f, "CONDONACION").minus(p.ledger0.CONDONACION).plus(ledgerDe(f, "ANULACION").minus(p.ledger0.ANULACION)).abs().lt("0.000001")).toBe(true);
   }, T);
 
-  test("7a. LÍNEA BASE T8: falsePayment del pago NO anula hoy la condonación", async () => {
-    const p = await preparar(tomar()); usados.push(`7a:${p.credito}`);
-    { const r0 = await correr(p); afirmarExito(p, await foto(p.credito, p.intento), r0); }
-    const { falsePayment } = await import("./payments");
-    const antes = await foto(p.credito, p.intento);
-    const out: any[] = [];
-    for (const fila of antes.filas) out.push(await falsePayment(fila.pago_id, p.credito).catch((e: any) => ({ error: String(e?.message ?? e) })));
+  // ----- Tarea 8: invalidar el pago de una boleta tardía anula su condonación (spec 4.4) -----
+  const ACTOR_ID = 2; // erik.r@clubcashin.com: activo y distinto del que condonó (id 1), para probar que FIRMA el actor
+  const ACTOR_EMAIL = "erik.r@clubcashin.com";
+  /** Neto ledger CONDONACION+ANULACION por cuota (sin lo previo del crédito: se resta la foto de antes). */
+  const netoCA = async (credito: number) => {
+    const rows = await sql(`SELECT cuota_id, sum(monto)::text AS m FROM cartera.mora_pagada_cuota WHERE credito_id=$1 AND tipo IN ('CONDONACION','ANULACION') GROUP BY cuota_id`, [credito]);
+    return new Map<number, string>(rows.map((r: any) => [r.cuota_id, r.m]));
+  };
+  const netoPorCuotaIgual = (a: Map<number, string>, b: Map<number, string>) => {
+    const ks = new Set([...a.keys(), ...b.keys()]);
+    return [...ks].every((k) => Big(a.get(k) ?? 0).minus(b.get(k) ?? 0).abs().lt("0.000001"));
+  };
+  const registrarYFoto = async (p: Prep) => {
+    const base = await netoCA(p.credito);
+    const r0 = await correr(p);
+    const f0 = await foto(p.credito, p.intento);
+    afirmarExito(p, f0, r0);
+    return { base, f0 };
+  };
+  /** Asserts comunes: condonación anulada UNA vez, mora = previa al pago exactamente, ledger neto 0, historial firmado por el actor. */
+  const afirmarAnulada = async (p: Prep, base: Map<number, string>, actorId = ACTOR_ID) => {
+    const conds = await sql(`SELECT anulada_at IS NOT NULL AS anulada FROM cartera.moras_condonaciones WHERE credito_id=$1 AND intento_id=$2`, [p.credito, p.intento]);
+    expect(conds).toEqual([{ anulada: true }]);
     const f = await foto(p.credito, p.intento);
-    console.log(`[LINEA BASE T8 falsePayment c${p.credito}] respuestas=${JSON.stringify(out)} filas=${JSON.stringify(f.filas)} conds=${JSON.stringify(f.conds)} mora=${JSON.stringify(f.mora)}`);
-    expect(f.conds).toHaveLength(1);
-    expect(f.conds[0].anulada).toBe(false); // hoy NO se anula: T8 lo cambia
+    expect(f.mora.monto).toBe(Big(p.moraAntes).toFixed(2)); // L + X, ni solo L ni L + 2X
+    expect(f.mora.activa).toBe(true);
+    expect(await netoCA(p.credito).then((n) => netoPorCuotaIgual(n, base))).toBe(true);
+    const anul = await sql(`SELECT usuario_id, count(*)::int AS n FROM cartera.mora_pagada_cuota WHERE credito_id=$1 AND tipo='ANULACION' AND revierte_a IN (SELECT id FROM cartera.mora_pagada_cuota WHERE condonacion_id IN (SELECT condonacion_id FROM cartera.moras_condonaciones WHERE intento_id=$2)) GROUP BY usuario_id`, [p.credito, p.intento]);
+    console.log(`[T8 c${p.credito}] ANULACION por usuario=${JSON.stringify(anul)} hist=${JSON.stringify(f.hist.filter((h: any) => h.origen === "CONDONACION_BOLETA_TARDIA"))}`);
+    expect(anul.length).toBeGreaterThan(0);
+    expect(anul.every((x: any) => x.usuario_id === actorId)).toBe(true);
+    const inc = await sql(`SELECT usuario_id, motivo FROM cartera.moras_historial WHERE credito_id=$1 AND tipo_evento='INCREMENTO' AND origen='CONDONACION_BOLETA_TARDIA'`, [p.credito]);
+    expect(inc).toHaveLength(1); // restituida UNA sola vez
+    expect(inc[0].usuario_id).toBe(actorId);
+    return f;
+  };
+  const falsear = async (credito: number, filas: any[]) => {
+    const { falsePayment } = await import("./payments");
+    const out: any[] = [];
+    for (const fila of filas) out.push(await falsePayment(fila.pago_id, credito, ACTOR_EMAIL));
+    return out;
+  };
+  const revertir = async (credito: number, filas: any[]) => {
+    const { reversePayment } = await import("./reversePayment");
+    const out: any[] = [];
+    for (const fila of filas) {
+      const set: { status?: number } = {};
+      const r = await reversePayment({ body: { credito_id: credito, pago_id: fila.pago_id }, set, user: { id: ACTOR_ID } });
+      expect(set.status ?? 200).toBeLessThan(400);
+      out.push(r);
+    }
+    return out;
+  };
+
+  test("7a. falsePayment de un pago PENDIENTE de boleta tardía: la condonación se ANULA, la mora vuelve a L+X una vez, ledger neto 0, firma el actor", async () => {
+    const p = await preparar(tomar()); usados.push(`7a:${p.credito}`);
+    const { base, f0 } = await registrarYFoto(p);
+    expect(f0.filas.every((x: any) => x.st === "pending")).toBe(true);
+    await falsear(p.credito, f0.filas);
+    const f = await afirmarAnulada(p, base);
+    expect(f.filas.every((x: any) => x.falso === true)).toBe(true);
   }, T);
 
-  test("7b. LÍNEA BASE T8: reversePayment del pago NO anula hoy la condonación", async () => {
+  test("7b. reversePayment de un pago PENDIENTE: la condonación se ANULA, la mora vuelve a L+X una vez, ledger neto 0, firma el actor", async () => {
     const p = await preparar(tomar()); usados.push(`7b:${p.credito}`);
-    { const r0 = await correr(p); afirmarExito(p, await foto(p.credito, p.intento), r0); }
-    const { reversePayment } = await import("./reversePayment");
+    const { base, f0 } = await registrarYFoto(p);
+    await revertir(p.credito, f0.filas);
+    await afirmarAnulada(p, base);
+  }, T);
+
+  test("7c. reversePayment de un pago VALIDADO (validado por aplicarPagoAlCredito real): la condonación se ANULA igual", async () => {
+    const p = await preparar(tomar()); usados.push(`7c:${p.credito}`);
+    const { base, f0 } = await registrarYFoto(p);
+    const { aplicarPagoAlCredito } = await import("./registerPayment");
+    for (const fila of f0.filas) await aplicarPagoAlCredito(fila.pago_id);
+    const validadas = await sql(`SELECT validation_status AS st FROM cartera.pagos_credito WHERE boleta_tardia_intento_id=$1`, [p.intento]);
+    console.log(`[7c c${p.credito}] estados tras validar=${JSON.stringify(validadas)}`);
+    expect(validadas.every((x: any) => x.st === "validated")).toBe(true);
+    await revertir(p.credito, f0.filas);
+    await afirmarAnulada(p, base);
+  }, T);
+
+  test("7d. boleta de 2+ filas: invalidar dos filas produce UNA sola anulación (no restituye dos veces)", async () => {
+    const p0 = await preparar(tomar()); usados.push(`7d:${p0.credito}`);
+    // Se sube el monto para que la boleta derrame a la cuota siguiente y escriba 2+ filas.
+    const [{ cuota }] = await sql(`SELECT cuota::float AS cuota FROM cartera.creditos WHERE credito_id=$1`, [p0.credito]);
+    const p = await preparar(p0.credito, { sumarMonto: Math.ceil(cuota) });
+    const { base, f0 } = await registrarYFoto(p).catch(async (e) => { console.log(`[7d] registro con sumarMonto falló: ${e}`); throw e; });
+    console.log(`[7d c${p.credito}] filas de la boleta=${f0.filas.length}`);
+    expect(f0.filas.length).toBeGreaterThanOrEqual(2);
+    await revertir(p.credito, f0.filas.slice(0, 2));
+    await afirmarAnulada(p, base);
+    const hist = await sql(`SELECT count(*)::int AS n FROM cartera.moras_historial WHERE credito_id=$1 AND tipo_evento='INCREMENTO' AND origen='CONDONACION_BOLETA_TARDIA'`, [p.credito]);
+    expect(hist[0].n).toBe(1);
+  }, T);
+
+  test("7e. la fila reseteada por reversePayment (no_required) queda con boleta_tardia_intento_id NULL", async () => {
+    const p = await preparar(tomar()); usados.push(`7e:${p.credito}`);
+    const { f0 } = await registrarYFoto(p);
+    const ids = f0.filas.map((x: any) => x.pago_id);
+    await revertir(p.credito, f0.filas);
+    const filas = await sql(`SELECT pago_id, validation_status AS st, boleta_tardia_intento_id AS intento, pagado FROM cartera.pagos_credito WHERE pago_id = ANY($1::int[])`, [ids]);
+    console.log(`[7e c${p.credito}] filas=${JSON.stringify(filas)}`);
+    expect(filas).toHaveLength(ids.length);
+    for (const f of filas) { expect(f.st).toBe("no_required"); expect(f.intento).toBeNull(); }
+    // Y una segunda invalidación de la fila ya limpia no toca la condonación (ya anulada).
     const antes = await foto(p.credito, p.intento);
-    const out: any[] = [];
-    for (const fila of antes.filas) {
+    expect(antes.conds.every((c: any) => c.anulada === true)).toBe(true);
+  }, T);
+
+  test("7f. revertPaymentToPending NO anula la condonación: sigue viva y la mora intacta", async () => {
+    const p = await preparar(tomar()); usados.push(`7f:${p.credito}`);
+    const { f0 } = await registrarYFoto(p);
+    const { aplicarPagoAlCredito } = await import("./registerPayment");
+    for (const fila of f0.filas) await aplicarPagoAlCredito(fila.pago_id);
+    const { revertPaymentToPending } = await import("./revertPaymentToPending");
+    const antes = await foto(p.credito, p.intento);
+    for (const fila of f0.filas) {
       const set: { status?: number } = {};
-      out.push({ status: set.status, r: await reversePayment({ body: { credito_id: p.credito, pago_id: fila.pago_id }, set }).catch((e: any) => ({ error: String(e?.message ?? e) })), st2: set.status });
+      const r = await revertPaymentToPending({ body: { credito_id: p.credito, pago_id: fila.pago_id }, set });
+      console.log(`[7f c${p.credito}] pago ${fila.pago_id} status=${set.status} r=${JSON.stringify(r)}`);
     }
     const f = await foto(p.credito, p.intento);
-    console.log(`[LINEA BASE T8 reversePayment c${p.credito}] respuestas=${JSON.stringify(out)} filas=${JSON.stringify(f.filas)} conds=${JSON.stringify(f.conds)} mora=${JSON.stringify(f.mora)}`);
-    expect(f.conds).toHaveLength(1);
-    expect(f.conds[0].anulada).toBe(false); // hoy NO se anula: T8 lo cambia
+    expect(f.conds).toEqual(antes.conds);
+    expect(f.conds[0].anulada).toBe(false);
+    expect(ledgerDe(f, "ANULACION").toFixed(6)).toBe(ledgerDe(antes, "ANULACION").toFixed(6));
+    expect(f.hist.filter((h: any) => h.tipo_evento === "INCREMENTO" && h.origen === "CONDONACION_BOLETA_TARDIA")).toEqual([]);
   }, T);
+
+  test("7g. procesarMoras() real después de 7a (pago falsificado, condonación anulada): mora = devengado - ledger, sin duplicar", async () => {
+    const p = await preparar(tomar()); usados.push(`7g:${p.credito}`);
+    const { f0 } = await registrarYFoto(p);
+    await falsear(p.credito, f0.filas);
+    const antes = await foto(p.credito, p.intento);
+    const { procesarMoras } = await import("./latefee");
+    await procesarMoras();
+    const d = await foto(p.credito, p.intento);
+    expect(d.conds).toEqual(antes.conds);
+    expect(d.conds[0].anulada).toBe(true);
+    expect(ledgerDe(d, "CONDONACION").toFixed(6)).toBe(ledgerDe(antes, "CONDONACION").toFixed(6));
+    expect(ledgerDe(d, "ANULACION").toFixed(6)).toBe(ledgerDe(antes, "ANULACION").toFixed(6));
+    const [{ n }] = await sql(`SELECT count(*)::int AS n FROM cartera.moras_credito WHERE credito_id=$1 AND activa`, [p.credito]);
+    expect(n).toBe(1);
+    const cuotas = await sql(
+      `SELECT q.cuota_id, ($2::date - q.fecha_vencimiento) AS dias, COALESCE((SELECT sum(l.monto) FROM cartera.mora_pagada_cuota l WHERE l.cuota_id=q.cuota_id),0)::text AS ledger
+       FROM cartera.cuotas_credito q WHERE q.credito_id=$1 AND NOT q.pagado AND q.fecha_vencimiento < $2::date`, [p.credito, hoyReal]);
+    const capital = (await sql(`SELECT capital::text AS c FROM cartera.creditos WHERE credito_id=$1`, [p.credito]))[0].c;
+    const devengado = cuotas.reduce((a: Big, q: any) => a.plus(pos(Big(capital).times("0.0112").times(Math.min(1, Number(q.dias) / 30)).minus(q.ledger))), Big(0));
+    console.log(`[7g c${p.credito}] mora antes=${antes.mora.monto} despues=${d.mora.monto} esperado(devengado-ledger)=${devengado.toFixed(2)} moraPrevia=${p.moraAntes}`);
+    expect(Big(d.mora.monto).minus(devengado).abs().lt("0.05")).toBe(true);
+  }, 600_000);
 
   test("8. revertPaymentToPending no toca la condonación", async () => {
     const p = await preparar(tomar()); usados.push(`8:${p.credito}`);

@@ -265,13 +265,15 @@ export const paymentRouter = new Elysia()
     }
   )
 
-  .post("/false-payment", async ({ body, set }) => {
+  .post("/false-payment", async ({ body, set, user }: any) => {
     try {
       // Validate request body
       const { pago_id, credito_id } = falsePaymentSchema.parse(body);
 
       // Call the controller
-      const result = await falsePayment(pago_id, credito_id);
+      // Quien anula firma la anulación de la condonación de boleta tardía (E-7).
+      const { emailVigenteDelActor } = await import("../controllers/condonacionBoletaTardiaAnulacion");
+      const result = await falsePayment(pago_id, credito_id, await emailVigenteDelActor(user));
 
       return result;
     } catch (error: any) {

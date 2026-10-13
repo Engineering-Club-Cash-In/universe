@@ -420,7 +420,15 @@ describe("no existe otra ruta que llegue a condonar por boleta tardía sin pasar
   });
 
   test("boletaTardiaIntentoId (la opción que hace que insertPayment marque filas) solo la pasa boletaTardia; el cuerpo HTTP nunca llega ahí", () => {
-    expect(quienes(/boletaTardiaIntentoId/)).toEqual(["controllers/boletaTardia.ts", "controllers/registerPayment.ts", "database/db/schema.ts"]);
+    // anularPagoMora y reversePayment LEEN la marca de la fila (para anular la condonación) o la limpian a null (8/11).
+    expect(quienes(/boletaTardiaIntentoId/)).toEqual(["controllers/anularPagoMora.ts", "controllers/boletaTardia.ts", "controllers/registerPayment.ts", "controllers/reversePayment.ts", "database/db/schema.ts"]);
+    for (const archivo of ["controllers/anularPagoMora.ts", "controllers/reversePayment.ts"]) {
+      const lineas = readFileSync(join(SRC, archivo), "utf8").split("\n").filter((l) => l.includes("boletaTardiaIntentoId") && !/^\s*(\/\/|\*|\/\*)/.test(l));
+      expect(lineas.length).toBeGreaterThan(0);
+      for (const l of lineas) {
+        expect(/boletaTardiaIntentoId: pagos_credito\.boletaTardiaIntentoId,|boleta_tardia_intento_id: pago(Previo)?\??\.boletaTardiaIntentoId,|boletaTardiaIntentoId: null/.test(l)).toBe(true);
+      }
+    }
     const rp = readFileSync(join(SRC, "controllers/registerPayment.ts"), "utf8");
     const i = rp.indexOf("boletaTardiaIntentoId", rp.indexOf("export async function insertPayment"));
     const firma = rp.slice(i - 400, i + 300);
@@ -428,7 +436,7 @@ describe("no existe otra ruta que llegue a condonar por boleta tardía sin pasar
   });
 
   test("ningún lugar fuera de boletaTardia y de la política de campos obligatorios lee el bloque 'condonacionBoletaTardia' del cuerpo", () => {
-    const f = quienes(/condonacionBoletaTardia/);
+    const f = quienes(/\bcondonacionBoletaTardia\b/);
     expect(f).toEqual(["controllers/boletaTardia.ts", "controllers/registerPaymentPolicy.ts"]);
     const rp = readFileSync(join(SRC, "controllers/registerPaymentPolicy.ts"), "utf8");
     const lecturas = [...rp.matchAll(/.*condonacionBoletaTardia.*/g)].map((m) => m[0]);

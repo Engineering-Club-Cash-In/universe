@@ -1970,7 +1970,7 @@ export async function insertPagosCreditoInversionistasSpecial(
 
   return resolvedInserts;
 }
-export async function falsePayment(pago_id: number, credito_id: number) {
+export async function falsePayment(pago_id: number, credito_id: number, usuario_email?: string) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
@@ -2297,6 +2297,7 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   const updatedCount = await anularPagoYRestituirMoraSerializado({
     pago_id,
     credito_id,
+    usuario_email,
   });
 
   // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:

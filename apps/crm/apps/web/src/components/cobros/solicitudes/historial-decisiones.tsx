@@ -70,7 +70,7 @@ const TIPOS_FILTRO = [
 	{ value: "reactivacion", label: "Reactivación de la unidad" },
 	{ value: "recuperacion", label: "Recuperación del vehículo" },
 	{ value: "por_ejecutar", label: "Aprobadas por ejecutar" },
-	{ value: "convenio", label: "Convenio (pronto)" },
+	{ value: "convenio", label: "Convenio" },
 ] as const;
 
 export type HistorialDecisionesProps = {
@@ -448,7 +448,9 @@ export function HistorialDecisiones({
 				description={
 					entradas.length === 0
 						? undefined
-						: "Revise la búsqueda o cambie el tipo y el estado."
+						: onCargarMas
+							? "Revise la búsqueda o cambie el tipo y el estado. También puede cargar registros más antiguos."
+							: "Revise la búsqueda o cambie el tipo y el estado."
 				}
 				action={
 					errores.length > 0 ? (
@@ -506,16 +508,14 @@ export function HistorialDecisiones({
 			<div className="flex items-start gap-2 rounded-lg bg-info-subtle px-3 py-2.5 text-[13px] text-info-text leading-snug">
 				<Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 				<div className="wrap-break-word min-w-0">
-					Vista parcial: se combinan en su navegador los registros más recientes
-					de cada fuente (apagados y reactivaciones:{" "}
+					El historial se trae del servidor por páginas, de lo más reciente a lo
+					más antiguo, y se muestra completo hasta la fecha que ya cargaron
+					todas sus fuentes (apagados y reactivaciones:{" "}
 					{inmovilizaciones.cargadas.toLocaleString("es-GT")}
 					{inmovilizaciones.total !== null
 						? ` de ${inmovilizaciones.total.toLocaleString("es-GT")}`
 						: ""}{" "}
-					cargados; las últimas 100 recuperaciones decididas; reasignaciones
-					manuales y coberturas de los últimos 30 días; la última página de
-					traslados). Las decisiones de convenios se consultan por crédito en la
-					Ficha 360.
+					cargados). Lo anterior aparece con «Cargar registros más antiguos».
 					{historialEquipo ? (
 						<>
 							{" "}
@@ -622,7 +622,7 @@ export function HistorialDecisiones({
 							onClick={onCargarMas}
 							loading={cargandoMas}
 						>
-							Cargar apagados y reactivaciones más antiguos
+							Cargar registros más antiguos
 						</Button>
 					</div>
 				) : null}

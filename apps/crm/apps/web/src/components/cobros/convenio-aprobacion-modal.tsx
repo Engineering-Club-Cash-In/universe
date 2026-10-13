@@ -137,7 +137,8 @@ export function ConvenioAprobacionModal({
 					? intentoPrevio.motivo
 					: esRechazo
 						? motivo.trim()
-						: null,
+						: // M3: al aprobar, la nota del supervisor también se guarda.
+							motivo.trim() || null,
 				creadoEn: intentoPrevio?.creadoEn ?? new Date().toISOString(),
 				resumen: intentoPrevio?.resumen ?? resumen,
 			};

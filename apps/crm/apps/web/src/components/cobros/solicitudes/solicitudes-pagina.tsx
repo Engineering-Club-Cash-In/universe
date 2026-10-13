@@ -37,19 +37,24 @@ import {
 import {
 	type CoberturaFuente,
 	type EntradaHistorial,
+	entradaDeDecisionConvenio,
 	entradaDeInmovilizacion,
 	entradaDeReasignacion,
 	entradaDeRecuperacion,
 	entradaDeTraslado,
 	entradasDeCobertura,
+	fechaDeCorte,
 	ordenarHistorial,
-	type ReasignacionFuente,
-	type TrasladoFuente,
+	recortarAlCorte,
 } from "./historial";
 import { HistorialDecisiones } from "./historial-decisiones";
 import type { SolicitudesSearch, TabSolicitudes } from "./search";
 import {
+	useHistorialDecisionesConvenio,
 	useHistorialInmovilizaciones,
+	useHistorialReasignaciones,
+	useHistorialRecuperaciones,
+	useHistorialTraslados,
 	useSolicitudesPendientes,
 } from "./use-solicitudes";
 
@@ -122,8 +127,11 @@ function sumarDias(fecha: string, dias: number) {
 	return new Date(Date.UTC(y, m - 1, d + dias)).toISOString().slice(0, 10);
 }
 
-/** Días hacia atrás de reasignaciones y coberturas en el historial. */
-const DIAS_HISTORIAL = 30;
+/**
+ * Desde cuándo se traen las coberturas: `listarCoberturas` no pagina y son
+ * pocas (una por ausencia), así que el historial las trae todas.
+ */
+const COBERTURAS_DESDE = "2020-01-01";
 
 export function SolicitudesPagina({
 	search,
@@ -141,7 +149,8 @@ export function SolicitudesPagina({
 	const [busqueda, setBusqueda] = React.useState("");
 	const [asesor, setAsesor] = React.useState<string | null>(null);
 	const [busquedaHistorial, setBusquedaHistorial] = React.useState("");
-	const [paginasInmov, setPaginasInmov] = React.useState(1);
+	/** Páginas cargadas de cada fuente del historial («Cargar más»). */
+	const [paginas, setPaginas] = React.useState(1);
 
 	/* Pendientes */
 	const bandeja = useSolicitudesPendientes(!!session);
@@ -150,29 +159,15 @@ export function SolicitudesPagina({
 
 	/* Historial (solo se consulta con la pestaña abierta) */
 	const hoy = hoyGT();
-	const inmov = useHistorialInmovilizaciones(paginasInmov, enHistorial);
-	const reasignaciones = useQuery({
-		...orpc.getHistorialReasignaciones.queryOptions({
-			input: {
-				origen: "API_MANUAL",
-				desde: sumarDias(hoy, -DIAS_HISTORIAL),
-				page: 1,
-				pageSize: 100,
-			},
-		}),
-		enabled: enHistorial,
-	});
-	const traslados = useQuery({
-		...orpc.listarTraslados.queryOptions({ input: { page: 1 } }),
-		enabled: enHistorial,
-	});
+	const inmov = useHistorialInmovilizaciones(paginas, enHistorial);
+	const recuperacionesHist = useHistorialRecuperaciones(paginas, enHistorial);
+	const conveniosHist = useHistorialDecisionesConvenio(paginas, enHistorial);
+	const reasignaciones = useHistorialReasignaciones(paginas, enHistorial);
+	const traslados = useHistorialTraslados(paginas, enHistorial);
 	const coberturas = useQuery({
 		...orpc.listarCoberturas.queryOptions({
 			// Las registradas hace poco pueden ser de fechas futuras.
-			input: {
-				desde: sumarDias(hoy, -DIAS_HISTORIAL),
-				hasta: sumarDias(hoy, 365),
-			},
+			input: { desde: COBERTURAS_DESDE, hasta: sumarDias(hoy, 365) },
 		}),
 		enabled: enHistorial,
 	});
@@ -195,25 +190,55 @@ export function SolicitudesPagina({
 			pool.find((a) => a.userId === id)?.nombre ??
 			usuarios.data?.find((u) => u.id === id)?.name ??
 			null;
-		return ordenarHistorial([
-			...inmov.items.map(entradaDeInmovilizacion),
-			...bandeja.historialRecuperaciones.map(entradaDeRecuperacion),
-			...(
-				(reasignaciones.data?.data ?? []) as unknown as ReasignacionFuente[]
-			).map(entradaDeReasignacion),
-			...((traslados.data ?? []) as unknown as TrasladoFuente[]).map((t) =>
-				entradaDeTraslado(t, nombreAsesor),
-			),
-			...((coberturas.data ?? []) as unknown as CoberturaFuente[]).flatMap(
-				(c) => entradasDeCobertura(c, nombreUsuario, hoy),
-			),
-		]);
+		// Fuentes paginadas: cada una con sus entradas y si le quedan páginas.
+		const paginadas = [
+			{
+				entradas: inmov.items.map(entradaDeInmovilizacion),
+				hayMas: inmov.hayMas,
+			},
+			{
+				entradas: recuperacionesHist.items.map(entradaDeRecuperacion),
+				hayMas: recuperacionesHist.hayMas,
+			},
+			{
+				entradas: conveniosHist.items.map(entradaDeDecisionConvenio),
+				hayMas: conveniosHist.hayMas,
+			},
+			{
+				entradas: reasignaciones.items.map(entradaDeReasignacion),
+				hayMas: reasignaciones.hayMas,
+			},
+			{
+				entradas: traslados.items.map((t) =>
+					entradaDeTraslado(t, nombreAsesor),
+				),
+				hayMas: traslados.hayMas,
+			},
+		];
+		const corte = fechaDeCorte(
+			paginadas.filter((p) => p.hayMas).map((p) => p.entradas),
+		);
+		return recortarAlCorte(
+			ordenarHistorial([
+				...paginadas.flatMap((p) => p.entradas),
+				...((coberturas.data ?? []) as unknown as CoberturaFuente[]).flatMap(
+					(c) => entradasDeCobertura(c, nombreUsuario, hoy),
+				),
+			]),
+			corte,
+		);
 	}, [
 		enHistorial,
 		inmov.items,
-		bandeja.historialRecuperaciones,
-		reasignaciones.data,
-		traslados.data,
+		inmov.hayMas,
+		recuperacionesHist.items,
+		recuperacionesHist.hayMas,
+		conveniosHist.items,
+		conveniosHist.hayMas,
+		reasignaciones.items,
+		reasignaciones.hayMas,
+		traslados.items,
+		traslados.hayMas,
 		coberturas.data,
 		asesores.data,
 		usuarios.data,
@@ -222,11 +247,25 @@ export function SolicitudesPagina({
 
 	const erroresHistorial = [
 		inmov.error ? "apagados y reactivaciones" : null,
-		bandeja.recuperacionesQuery.isError ? "recuperaciones del vehículo" : null,
-		reasignaciones.isError ? "reasignaciones" : null,
-		traslados.isError ? "traslados" : null,
+		recuperacionesHist.error ? "recuperaciones del vehículo" : null,
+		conveniosHist.error ? "decisiones de convenios" : null,
+		reasignaciones.error ? "reasignaciones" : null,
+		traslados.error ? "traslados" : null,
 		coberturas.isError ? "coberturas" : null,
 	].filter((e): e is string => e !== null);
+
+	const hayMasHistorial =
+		inmov.hayMas ||
+		recuperacionesHist.hayMas ||
+		conveniosHist.hayMas ||
+		reasignaciones.hayMas ||
+		traslados.hayMas;
+	const cargandoPaginas =
+		inmov.cargando ||
+		recuperacionesHist.cargando ||
+		conveniosHist.cargando ||
+		reasignaciones.cargando ||
+		traslados.cargando;
 
 	const avisosBandeja = (
 		<>
@@ -291,17 +330,19 @@ export function SolicitudesPagina({
 						}}
 						cargando={
 							inmov.cargando ||
-							bandeja.recuperacionesQuery.isLoading ||
-							reasignaciones.isLoading ||
-							traslados.isLoading ||
+							recuperacionesHist.cargando ||
+							conveniosHist.cargando ||
+							reasignaciones.cargando ||
+							traslados.cargando ||
 							coberturas.isLoading
 						}
 						errores={erroresHistorial}
 						onReintentar={() => {
 							inmov.refetch();
-							void bandeja.recuperacionesQuery.refetch();
-							void reasignaciones.refetch();
-							void traslados.refetch();
+							recuperacionesHist.refetch();
+							conveniosHist.refetch();
+							reasignaciones.refetch();
+							traslados.refetch();
 							void coberturas.refetch();
 						}}
 						inmovilizaciones={{
@@ -309,9 +350,9 @@ export function SolicitudesPagina({
 							total: inmov.total,
 						}}
 						onCargarMas={
-							inmov.hayMas ? () => setPaginasInmov((p) => p + 1) : undefined
+							hayMasHistorial ? () => setPaginas((p) => p + 1) : undefined
 						}
-						cargandoMas={inmov.cargando && paginasInmov > 1}
+						cargandoMas={cargandoPaginas && paginas > 1}
 						historialEquipo={{
 							to: "/cobros/equipo",
 							search: { tab: "asignacion" },

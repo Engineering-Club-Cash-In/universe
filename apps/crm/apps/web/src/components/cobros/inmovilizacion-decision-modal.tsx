@@ -103,6 +103,11 @@ export function DecisionInmovilizacionModal({
 								decision,
 								motivoRechazo:
 									decision === "rechazar" ? motivoRechazo.trim() : undefined,
+								// M3: al aprobar, la nota del supervisor también se guarda.
+								nota:
+									decision === "aprobar"
+										? motivoRechazo.trim() || undefined
+										: undefined,
 							})
 						}
 						variant={decision === "aprobar" ? "default" : "destructive"}

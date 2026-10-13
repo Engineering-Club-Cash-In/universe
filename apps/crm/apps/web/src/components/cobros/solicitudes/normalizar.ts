@@ -55,6 +55,8 @@ export type InmovilizacionFuente = {
 	accion: string;
 	estado: string;
 	solicitadoAt: string | Date | null;
+	/** Usuario del CRM que la pidió (M3); sirve para asociarla al asesor sin comparar nombres. */
+	solicitadoPorId?: string | null;
 	solicitanteNombre: string | null;
 	clienteNombre: string | null;
 	casoCobroId?: string;
@@ -84,6 +86,8 @@ export type RecuperacionFuente = {
 	numeroSifco: string | null;
 	cliente: string | null;
 	solicitante: string | null;
+	/** Usuario del CRM que la pidió (M3). */
+	solicitanteId?: string | null;
 	solicitadoAt: string | Date | null;
 	casoCobroId?: string;
 	estadoSolicitud?: string | null;
@@ -348,13 +352,24 @@ export function coincideBusqueda(s: Solicitud, busqueda: string) {
 }
 
 /**
- * ¿La pidió este asesor? Apagados, reactivaciones y recuperaciones solo traen
- * el NOMBRE del usuario que las pidió (no su id), así que se compara el
- * nombre sin tildes ni mayúsculas.
- * TODO(José) · tarea M3: devolver el id del solicitante en
- * getColaInmovilizaciones, getHistorialInmovilizaciones y
- * getSolicitudesRecuperacion para no depender del nombre.
+ * ¿La pidió este asesor? Apagados, reactivaciones y recuperaciones traen el id
+ * del usuario que las pidió (M3): si el asesor tiene usuario del CRM se compara
+ * por id. Sin id (o sin usuario vinculado) se cae al nombre, sin tildes ni
+ * mayúsculas.
  */
+export function esSolicitudDeAsesor(params: {
+	idSolicitante: string | null | undefined;
+	nombreSolicitante: string | null | undefined;
+	userIdAsesor: string | null;
+	nombres: Array<string | null | undefined>;
+}) {
+	if (params.userIdAsesor && params.idSolicitante) {
+		return params.idSolicitante === params.userIdAsesor;
+	}
+	return esDelAsesor(params.nombreSolicitante, params.nombres);
+}
+
+/** Comparación por nombre (respaldo cuando no hay id). */
 export function esDelAsesor(
 	nombreSolicitante: string | null | undefined,
 	nombres: Array<string | null | undefined>,

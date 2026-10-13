@@ -4,17 +4,15 @@
  *
  *  - Apagados y reactivaciones: `getHistorialInmovilizaciones` (todos los
  *    estados, paginado).
- *  - Recuperaciones del vehículo: `getSolicitudesRecuperacion().historial`
- *    (las últimas 100 decididas).
+ *  - Recuperaciones del vehículo: `getHistorialSolicitudesRecuperacion`
+ *    (decididas, paginado por el servidor).
+ *  - Decisiones de convenios: `getHistorialDecisionesConvenio` (global y
+ *    paginado; cartera borra el convenio al rechazarlo).
  *  - Reasignaciones manuales: `getHistorialReasignaciones({ origen: "API_MANUAL" })`.
  *  - Traslados de cartera: `listarTraslados` (despido o renuncia = baja de asesor).
  *  - Coberturas: `listarCoberturas` (registro = ausencia; cancelada o con el
  *    período terminado = reactivación del asesor).
  *
- * Las decisiones de convenios no tienen fuente global: cartera borra el
- * convenio al rechazarlo y su historial se consulta por crédito.
- * TODO(José) · tarea M3: bitácora unificada y paginada de decisiones del
- * supervisor, con el historial global de decisiones de convenios.
  */
 import { etiquetaMotivo } from "server/src/lib/recuperacion-vehiculo";
 import {
@@ -63,6 +61,23 @@ export type CoberturaFuente = {
 	hasta: string;
 	canceladaEn: string | Date | null;
 	createdAt: string | Date;
+};
+
+/** Entrada de `getHistorialDecisionesConvenio` (bitácora del supervisor, M3). */
+export type DecisionConvenioFuente = {
+	id: string;
+	fecha: string;
+	decision: "aprobada" | "rechazada" | "cancelada" | "sin_efecto" | null;
+	solicitante: { userId: string | null; nombre: string | null } | null;
+	decididoPor: { userId: string | null; nombre: string | null } | null;
+	credito: { sifco: string; cliente: string | null } | null;
+	/** «6 cuotas de Q 487.40». */
+	resumen: string | null;
+	/** Nota con la que el asesor armó el convenio. */
+	motivo: string | null;
+	/** Nota del supervisor al decidir. */
+	nota: string | null;
+	refId: string;
 };
 
 /* ── Entradas ───────────────────────────────────────────────────────────────── */
@@ -193,6 +208,37 @@ export function entradaDeRecuperacion(r: RecuperacionFuente): EntradaHistorial {
 				? { id: r.numeroSifco }
 				: null,
 		detalle: { tipo: "recuperacion", item: r },
+	};
+}
+
+export function entradaDeDecisionConvenio(
+	d: DecisionConvenioFuente,
+): EntradaHistorial {
+	const estado: EstadoHistorial =
+		d.decision === "aprobada" ? "aprobada" : "rechazada";
+	const filas = [
+		d.resumen ? { etiqueta: "Plan", valor: d.resumen } : null,
+		d.motivo ? { etiqueta: "Motivo del asesor", valor: d.motivo } : null,
+		d.decididoPor?.nombre
+			? { etiqueta: "Decidió", valor: d.decididoPor.nombre }
+			: null,
+		d.nota ? { etiqueta: "Nota del supervisor", valor: d.nota } : null,
+	].filter((f): f is { etiqueta: string; valor: string } => f !== null);
+	return {
+		id: `convenio-${d.refId}`,
+		fecha: d.fecha,
+		categoria: "solicitud",
+		tipoSolicitud: "convenio",
+		tipoEtiqueta: "Aprobación · Convenio",
+		objeto: {
+			titulo: d.credito ? `Crédito #${d.credito.sifco}` : "Crédito",
+			detalle: d.credito?.cliente?.trim() || null,
+		},
+		asesor: d.solicitante?.nombre ?? null,
+		estado,
+		motivo: d.nota ?? d.motivo,
+		ficha: d.credito ? { id: d.credito.sifco } : null,
+		detalle: { tipo: "filas", filas },
 	};
 }
 
@@ -339,6 +385,56 @@ export function ordenarHistorial(entradas: EntradaHistorial[]) {
 		if (!a.fecha) return 1;
 		if (!b.fecha) return -1;
 		return new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+	});
+}
+
+/* ── Fuentes paginadas ──────────────────────────────────────────────────────── */
+
+const ms = (fecha: string | null) => {
+	if (!fecha) return null;
+	const t = new Date(fecha).getTime();
+	return Number.isNaN(t) ? null : t;
+};
+
+/**
+ * Cada fuente se pagina aparte (de la más reciente a la más antigua). Al
+ * mezclarlas, una que trajo solo su última semana deja huecos frente a otra que
+ * trajo meses: lo de hace un mes de la primera todavía no se cargó. El corte es
+ * la fecha hasta la que TODAS las fuentes que tienen más páginas están
+ * completas (la más reciente de sus fechas más viejas cargadas); null si
+ * ninguna tiene más páginas cargadas.
+ */
+export function fechaDeCorte(
+	incompletas: Array<ReadonlyArray<{ fecha: string | null }>>,
+): number | null {
+	let corte: number | null = null;
+	for (const filas of incompletas) {
+		let masVieja: number | null = null;
+		for (const f of filas) {
+			const t = ms(f.fecha);
+			if (t !== null && (masVieja === null || t < masVieja)) masVieja = t;
+		}
+		if (masVieja !== null && (corte === null || masVieja > corte))
+			corte = masVieja;
+	}
+	return corte;
+}
+
+/**
+ * Deja solo lo que está antes del corte (`fechaDeCorte`): lo más viejo aparece
+ * con «Cargar más», en su lugar, sin saltarse filas de otras fuentes.
+ * `conservar` deja pasar filas que se muestran siempre (las pendientes).
+ */
+export function recortarAlCorte<T extends { fecha: string | null }>(
+	filas: T[],
+	corte: number | null,
+	conservar?: (fila: T) => boolean,
+): T[] {
+	if (corte === null) return filas;
+	return filas.filter((f) => {
+		if (conservar?.(f)) return true;
+		const t = ms(f.fecha);
+		return t !== null && t >= corte;
 	});
 }
 

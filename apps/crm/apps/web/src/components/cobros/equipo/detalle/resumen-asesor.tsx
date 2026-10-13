@@ -60,6 +60,22 @@ export type KpisAsesor = {
 		| { actual: number | null; anterior: number | null }
 		| null
 		| undefined;
+	/**
+	 * Resultado de cartera del mes (M1): recuperación frente a su meta, con la
+	 * variación contra el mes anterior. `null` = no se pudo leer.
+	 */
+	resultadoCartera:
+		| {
+				porcentaje: number | null;
+				/** «Q8.4K de Q9.1K», o «Q669 · sin meta». */
+				detalle: string;
+				/** Monto recuperado, para cuando no tiene meta. */
+				monto: string;
+				/** % contra el mes anterior; `null` si no hay base. */
+				variacion: number | null;
+		  }
+		| null
+		| undefined;
 	/** «vs. 7 días previos». */
 	comparacion: string;
 	/** Texto del tooltip de contactabilidad (qué período mide). */
@@ -139,7 +155,7 @@ function valorKpi(v: React.ReactNode | undefined) {
 }
 
 function KpisResumen({ kpis }: { kpis: KpisAsesor }) {
-	const { creditos, cumplimiento, contactabilidad } = kpis;
+	const { creditos, cumplimiento, contactabilidad, resultadoCartera } = kpis;
 	const variacion =
 		contactabilidad?.actual != null && contactabilidad.anterior != null
 			? Math.round(contactabilidad.actual - contactabilidad.anterior)
@@ -197,16 +213,37 @@ function KpisResumen({ kpis }: { kpis: KpisAsesor }) {
 				}
 				comparison={kpis.comparacion}
 			/>
-			{/* TODO(José) · tarea M1: resultado de cartera (recuperación) por asesor, con meta. */}
 			<KpiSimple
 				title="Resultado de cartera"
-				info="Recuperación de su cartera frente a la meta. Disponible pronto."
-				value="—"
-				showTrend
+				info="Recuperación del mes de su cartera frente a su meta, con la variación contra el mes anterior."
+				value={valorKpi(
+					resultadoCartera === undefined
+						? undefined
+						: resultadoCartera === null
+							? "—"
+							: resultadoCartera.porcentaje === null
+								? resultadoCartera.monto
+								: `${Math.round(resultadoCartera.porcentaje)}%`,
+				)}
+				showTrend={resultadoCartera !== undefined}
+				trend={
+					!resultadoCartera ||
+					resultadoCartera.variacion === null ||
+					resultadoCartera.variacion === 0
+						? "neutra"
+						: resultadoCartera.variacion > 0
+							? "positiva"
+							: "negativa"
+				}
+				trendValue={
+					!resultadoCartera || resultadoCartera.variacion === null
+						? undefined
+						: `${resultadoCartera.variacion > 0 ? "+" : resultadoCartera.variacion < 0 ? "−" : ""}${Math.abs(resultadoCartera.variacion)}%`
+				}
 				comparison={
-					<Badge variant="secondary" className="px-2 py-0">
-						Pronto
-					</Badge>
+					resultadoCartera
+						? `${resultadoCartera.detalle} · vs. mes previo`
+						: undefined
 				}
 			/>
 		</div>

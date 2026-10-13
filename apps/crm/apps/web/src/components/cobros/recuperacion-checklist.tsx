@@ -282,7 +282,8 @@ export function DecidirSolicitudDialog({
 			client.decidirSolicitudRecuperacion({
 				recuperacionId: solicitud.id,
 				decision,
-				motivo: aprobar ? undefined : motivo.trim(),
+				// M3: al aprobar, la nota del supervisor también se guarda.
+				motivo: aprobar ? motivo.trim() || undefined : motivo.trim(),
 			}),
 		onSuccess: (r) => {
 			toast.success(

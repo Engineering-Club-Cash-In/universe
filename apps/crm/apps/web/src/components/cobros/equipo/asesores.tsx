@@ -1,10 +1,10 @@
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { hoyGT } from "@/components/cobros/supervision/formato";
 import type { BucketAsesor } from "@/components/ds/card-asesor";
 import { ROLES } from "@/lib/roles";
-import { client, orpc, queryClient } from "@/utils/orpc";
+import { client, orpc, orpcAparte, queryClient } from "@/utils/orpc";
 import {
 	AsesoresVista,
 	type FilaAsesorEquipo,
@@ -15,7 +15,6 @@ import {
 	contactabilidadDeResumen,
 	DIAS_CONTACTABILIDAD,
 	estadoAsesor,
-	nivelAsesor,
 	rangosContactabilidad,
 	textoAusencia,
 } from "./estado-asesor";
@@ -24,6 +23,7 @@ import {
 	type CoberturaReactivar,
 	ConfirmarReactivarDialog,
 } from "./reactivar-dialogs";
+import { resultadoRecuperacion } from "./recuperacion";
 import type { GrupoEquipo } from "./search";
 
 /**
@@ -31,10 +31,10 @@ import type { GrupoEquipo } from "./search";
  *   - asesores activos con pool  → getAsesoresTraslados (asesor_id, userId, buckets)
  *   - créditos y barra por bucket → getCargaPorAsesorBucket().porAsesor
  *   - gestiones cumplidas         → getCumplimientoAgendaResumen (último cierre)
- *   - contactabilidad             → getHistorialAgendasResumen con usuarioIds:[userId]
- *                                   y roles:["cobros"], UNA llamada por asesor, en
- *                                   paralelo y con staleTime (no hay endpoint por
- *                                   asesor en lote; ver el informe de G4)
+ *   - contactabilidad             → getContactabilidadPorAsesor (M7): UNA llamada en
+ *                                   lote con usuarioIds y roles:["cobros"]
+ *   - recuperación y meta         → getRecuperacionAsesores (M1), del mes
+ *   - nivel                       → `nivel` de getAsesoresTraslados (M6)
  *   - ausente                     → listarCoberturas de hoy (cobertura vigente)
  */
 
@@ -54,8 +54,6 @@ type AgendaItem = {
 	atendidos: number;
 	porcentaje: number;
 };
-
-type ResumenHistorial = { total: number; efectivos: number };
 
 const BUCKETS_UI: BucketAsesor[] = ["B0", "B1", "B2", "B3", "B4", "B5"];
 
@@ -80,7 +78,7 @@ export function useEquipoActivo(habilitado: boolean) {
 export function useResumenEquipo(habilitado: boolean): string | null {
 	const { query, activos } = useEquipoActivo(habilitado);
 	if (!query.data) return null;
-	return resumenEquipo(activos.map((a) => nivelAsesor(a.buckets)));
+	return resumenEquipo(activos.map((a) => a.nivel));
 }
 
 export function MiEquipoAsesores({
@@ -105,6 +103,14 @@ export function MiEquipoAsesores({
 		...orpc.getCumplimientoAgendaResumen.queryOptions({ input: {} }),
 		enabled: habilitado,
 	});
+	// M1: recuperación del mes de cada asesor, con su meta.
+	const recuperacionQuery = useQuery({
+		...orpcAparte.getRecuperacionAsesores.queryOptions({
+			input: { periodo: "mes" },
+		}),
+		enabled: habilitado,
+		staleTime: 5 * 60_000,
+	});
 	const coberturasQuery = useQuery({
 		...orpc.listarCoberturas.queryOptions({
 			input: { desde: hoy, hasta: hoy },
@@ -112,34 +118,27 @@ export function MiEquipoAsesores({
 		enabled: habilitado,
 	});
 
-	// El tipo de getHistorialAgendasResumen llega truncado (TS7056): se lee a
-	// mano, igual que el Dashboard del supervisor.
-	const orpcSinTipo = orpc as unknown as {
-		getHistorialAgendasResumen: typeof orpc.getCobrosDashboardStats;
-	};
+	// M7: una sola llamada para todo el equipo (antes, una por asesor).
 	const conUsuario = activos.filter((a) => a.userId);
-	const contactabilidadQueries = useQueries({
-		queries: conUsuario.map((a) => ({
-			...orpcSinTipo.getHistorialAgendasResumen.queryOptions({
-				input: {
-					...rango,
-					usuarioIds: [a.userId],
-					roles: [ROLES.COBROS],
-				} as never,
-			}),
-			enabled: habilitado,
-			staleTime: 5 * 60_000,
-		})),
+	const contactabilidadQuery = useQuery({
+		...orpcAparte.getContactabilidadPorAsesor.queryOptions({
+			input: {
+				...rango,
+				usuarioIds: conUsuario.flatMap((a) => (a.userId ? [a.userId] : [])),
+				roles: [ROLES.COBROS],
+			},
+		}),
+		enabled: habilitado && conUsuario.length > 0,
+		staleTime: 5 * 60_000,
 	});
 	const contactabilidadPorUsuario = new Map<string, number | null>();
-	conUsuario.forEach((a, i) => {
-		const data = contactabilidadQueries[i]?.data as
-			| ResumenHistorial
-			| undefined;
-		if (a.userId && data)
-			contactabilidadPorUsuario.set(a.userId, contactabilidadDeResumen(data));
-	});
-	const errorContactabilidad = contactabilidadQueries.some((q) => q.isError);
+	for (const c of contactabilidadQuery.data?.asesores ?? [])
+		contactabilidadPorUsuario.set(c.userId, contactabilidadDeResumen(c));
+	const errorContactabilidad = contactabilidadQuery.isError;
+
+	const recuperacionPorAsesor = new Map(
+		(recuperacionQuery.data ?? []).map((r) => [r.asesorId, r.recuperacion]),
+	);
 
 	const coberturas = (coberturasQuery.data ?? []) as unknown as Cobertura[];
 	const nombrePorUsuario = new Map(
@@ -180,7 +179,7 @@ export function MiEquipoAsesores({
 				return {
 					asesorId: a.asesor_id,
 					nombre: a.nombre,
-					nivel: nivelAsesor(a.buckets),
+					nivel: a.nivel,
 					estado: estadoAsesor({
 						ausente: !!cobertura,
 						cumplimiento: ag && ag.planificados > 0 ? ag.porcentaje : null,
@@ -192,6 +191,9 @@ export function MiEquipoAsesores({
 						? { atendidos: ag.atendidos, planificados: ag.planificados }
 						: null,
 					contactabilidad,
+					recuperacion: resultadoRecuperacion(
+						recuperacionPorAsesor.get(a.asesor_id),
+					),
 					ausencia: cobertura ? textoAusencia(cobertura) : null,
 					destino: { to: `/cobros/equipo/${a.asesor_id}` },
 				};
@@ -249,6 +251,9 @@ export function MiEquipoAsesores({
 		agendaQuery.isError ? "No se pudo cargar el cumplimiento de agenda." : null,
 		errorContactabilidad
 			? "No se pudo cargar la contactabilidad de algunos asesores."
+			: null,
+		recuperacionQuery.isError
+			? "No se pudo cargar la recuperación de los asesores."
 			: null,
 		coberturasQuery.isError
 			? "No se pudieron cargar las ausencias de hoy."

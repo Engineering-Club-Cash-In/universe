@@ -13,7 +13,6 @@
  * solicitudes de recuperación del vehículo. Las pendientes abren el Espacio de
  * aprobación; las demás llevan a la Ficha 360.
  */
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Info } from "lucide-react";
 import * as React from "react";
@@ -30,12 +29,13 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { orpc } from "@/utils/orpc";
 import { EspacioAprobacion, useEspacioAprobacion } from "./espacio-aprobacion";
+import { fechaDeCorte, recortarAlCorte } from "./historial";
 import {
+	aIso,
 	type ConvenioFuente,
 	ETIQUETA_TIPO,
-	esDelAsesor,
+	esSolicitudDeAsesor,
 	type InmovilizacionHistorialFuente,
 	type RecuperacionFuente,
 	type Solicitud,
@@ -53,7 +53,10 @@ import {
 	type TonoDecision,
 } from "./piezas";
 import {
+	useConveniosDeAsesor,
+	useHistorialDecisionesConvenio,
 	useHistorialInmovilizaciones,
+	useHistorialRecuperaciones,
 	useNombreUsuarioCrm,
 	useSolicitudesPendientes,
 } from "./use-solicitudes";
@@ -96,13 +99,15 @@ export type FilaSolicitudAsesor = {
 
 export type SolicitudesDeAsesorVistaProps = {
 	nombre: string;
+	/** El asesor no tiene usuario del CRM: sus solicitudes se asocian por nombre. */
+	sinUsuario?: boolean;
 	filas: FilaSolicitudAsesor[];
 	cargando: boolean;
 	error: boolean;
 	onReintentar: () => void;
 	/** Abre una solicitud pendiente en el Espacio de aprobación. */
 	onAbrir?: (fila: FilaSolicitudAsesor) => void;
-	/** Hay apagados y reactivaciones más viejos sin cargar. */
+	/** Hay solicitudes más viejas sin cargar. */
 	onCargarMas?: () => void;
 	cargandoMas?: boolean;
 };
@@ -115,6 +120,7 @@ const CELDA = "whitespace-normal py-3.5 pr-4 align-middle first:pl-6 last:pr-6";
 
 export function SolicitudesDeAsesorVista({
 	nombre,
+	sinUsuario,
 	filas,
 	cargando,
 	error,
@@ -282,7 +288,7 @@ export function SolicitudesDeAsesorVista({
 							onClick={onCargarMas}
 							loading={cargandoMas}
 						>
-							Cargar apagados y reactivaciones más antiguos
+							Cargar solicitudes más antiguas
 						</Button>
 					</div>
 				) : null}
@@ -290,12 +296,11 @@ export function SolicitudesDeAsesorVista({
 			<p className="type-caption flex items-start gap-2 text-fg-tertiary">
 				<Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 				<span>
-					Los convenios rechazados no aparecen aquí: cartera elimina el convenio
-					al rechazarlo y su decisión se consulta en la Ficha 360 del crédito.
-					Los apagados, reactivaciones y recuperaciones se asocian al asesor por
-					el nombre del usuario que los solicitó.
-					{/* TODO(José) · tarea M3: historial global de decisiones de
-					    convenios e id del solicitante en las fuentes de solicitudes. */}
+					Los convenios rechazados salen de la bitácora de decisiones del
+					supervisor (cartera elimina el convenio al rechazarlo).
+					{sinUsuario
+						? " Este asesor no tiene usuario del CRM vinculado: sus apagados, reactivaciones y recuperaciones se asocian por el nombre de quien los solicitó, y sus convenios rechazados no se pueden mostrar."
+						: ""}
 				</span>
 			</p>
 		</section>
@@ -335,6 +340,28 @@ function filaDeConvenio(c: ConvenioFuente): FilaSolicitudAsesor {
 			: `${c.completado ? "Convenio cumplido" : "Convenio activo"}${plan ? ` · ${plan}` : ""}`,
 		solicitud: pendiente ? solicitudDeConvenio(c) : undefined,
 		ficha: { id: c.numero_credito_sifco },
+	};
+}
+
+/** Una decisión de convenio rechazada, de la bitácora del supervisor (M3). */
+function filaDeConvenioRechazado(d: {
+	id: string;
+	fecha: string;
+	credito: { sifco: string; cliente: string | null } | null;
+	resumen: string | null;
+	nota: string | null;
+	motivo: string | null;
+}): FilaSolicitudAsesor {
+	return {
+		id: d.id,
+		fecha: d.fecha,
+		tipo: "convenio",
+		credito: d.credito?.sifco ?? null,
+		bucket: null,
+		cliente: d.credito?.cliente?.trim() || "Sin nombre",
+		estado: "rechazada",
+		resultado: d.nota ?? d.resumen ?? d.motivo ?? null,
+		ficha: d.credito ? { id: d.credito.sifco } : null,
 	};
 }
 
@@ -419,27 +446,65 @@ export function SolicitudesDeAsesor({
 	nombre: string;
 }) {
 	const habilitado = Number.isInteger(asesorId) && asesorId > 0;
+	/** Páginas cargadas de cada fuente («Cargar más»). */
 	const [paginas, setPaginas] = React.useState(1);
 
-	const convenios = useQuery({
-		...orpc.getConveniosListado.queryOptions({
-			input: { estado: "all", asesorId, page: 1, perPage: 100 },
-		}),
-		enabled: habilitado,
-	});
+	const convenios = useConveniosDeAsesor(asesorId, paginas, habilitado);
+	// M3: los convenios rechazados (cartera los borra) salen de la bitácora de
+	// decisiones, filtrada por el usuario que los pidió.
+	const conveniosRechazados = useHistorialDecisionesConvenio(
+		paginas,
+		habilitado && !!userId,
+		{ decision: "rechazada", solicitanteId: userId ?? undefined },
+	);
 	const bandeja = useSolicitudesPendientes(habilitado);
-	const historialInmov = useHistorialInmovilizaciones(paginas, habilitado);
+	// Con usuario del CRM, el servidor filtra por quien lo pidió; sin usuario
+	// se recorre el historial de todos y se reconoce por nombre.
+	const historialInmov = useHistorialInmovilizaciones(
+		paginas,
+		habilitado,
+		userId,
+	);
+	// Con usuario del CRM, las recuperaciones decididas del asesor vienen
+	// paginadas por el servidor; sin usuario solo se pueden reconocer por
+	// nombre en el historial de la bandeja.
+	const historialRecup = useHistorialRecuperaciones(
+		paginas,
+		habilitado && !!userId,
+		userId,
+	);
 	const usuarioCrm = useNombreUsuarioCrm(userId, habilitado);
-	const espacio = useEspacioAprobacion({ alCerrar: bandeja.refetch });
+	// Lo que se decide en el Espacio de aprobación sale de la cola y entra al
+	// historial: se recargan los dos para que la fila no desaparezca.
+	const espacio = useEspacioAprobacion({
+		alCerrar: () => {
+			bandeja.refetch();
+			convenios.refetch();
+			if (userId) {
+				conveniosRechazados.refetch();
+				historialRecup.refetch();
+			}
+			historialInmov.refetch();
+		},
+	});
 
 	const filas = React.useMemo(() => {
 		const nombres = [usuarioCrm.nombre, nombre];
-		const propias = (solicitante: string | null | undefined) =>
-			esDelAsesor(solicitante, nombres);
+		const propias = (
+			idSolicitante: string | null | undefined,
+			nombreSolicitante: string | null | undefined,
+		) =>
+			esSolicitudDeAsesor({
+				idSolicitante,
+				nombreSolicitante,
+				userIdAsesor: userId,
+				nombres,
+			});
 
-		const deConvenios = (
-			(convenios.data?.items ?? []) as unknown as ConvenioFuente[]
-		).map(filaDeConvenio);
+		const deConvenios = convenios.items.map(filaDeConvenio);
+		const rechazados = userId
+			? conveniosRechazados.items.map(filaDeConvenioRechazado)
+			: [];
 
 		// Pendientes y por ejecutar: de la cola (trae el respaldo de las
 		// reactivaciones). Las demás: del historial, sin repetir.
@@ -452,38 +517,99 @@ export function SolicitudesDeAsesor({
 		const inmov = new Map<string, FilaSolicitudAsesor>();
 		for (const s of enCola.values()) {
 			if (s.tipo !== "apagado" && s.tipo !== "reactivacion") continue;
-			if (!propias(s.inmovilizacion.solicitanteNombre)) continue;
+			if (
+				!propias(
+					s.inmovilizacion.solicitadoPorId,
+					s.inmovilizacion.solicitanteNombre,
+				)
+			)
+				continue;
 			inmov.set(s.inmovilizacion.id, filaDeInmovilizacion(s.inmovilizacion, s));
 		}
 		for (const i of historialInmov.items) {
-			if (inmov.has(i.id) || !propias(i.solicitanteNombre)) continue;
+			if (inmov.has(i.id) || !propias(i.solicitadoPorId, i.solicitanteNombre))
+				continue;
 			// Una pendiente que ya no está en la cola se decidió hace un momento.
 			inmov.set(i.id, filaDeInmovilizacion(i, enCola.get(i.id)));
 		}
 
-		const recup = (
-			bandeja.recuperacionesQuery.data
-				? [
-						...((bandeja.recuperacionesQuery.data.pendientes ??
-							[]) as unknown as RecuperacionFuente[]),
-						...bandeja.historialRecuperaciones,
-					]
-				: []
-		)
-			.filter((r) => propias(r.solicitante))
-			.map(filaDeRecuperacion);
+		// Recuperaciones: las pendientes de la bandeja y las decididas del
+		// historial. Una que se decidió hace un momento puede venir en las dos:
+		// gana la del historial (el estado solo avanza).
+		const pendientesRecup = bandeja.recuperacionesQuery.data
+			? ((bandeja.recuperacionesQuery.data.pendientes ??
+					[]) as unknown as RecuperacionFuente[])
+			: [];
+		const decididasRecup = userId
+			? historialRecup.items
+			: bandeja.historialRecuperaciones;
+		const recupPorId = new Map<string, RecuperacionFuente>();
+		for (const r of [...pendientesRecup, ...decididasRecup]) {
+			if (propias(r.solicitanteId, r.solicitante)) recupPorId.set(r.id, r);
+		}
+		const recup = [...recupPorId.values()].map(filaDeRecuperacion);
 
-		return [...deConvenios, ...inmov.values(), ...recup].sort(porFechaDesc);
+		// Cada fuente paginada se trae aparte: se muestra solo hasta la fecha en
+		// que todas las que tienen más páginas siguen completas. El corte usa la
+		// fecha con la que el servidor ordena cada fuente (la de la decisión en
+		// apagados y recuperaciones), que nunca es anterior a la de la solicitud.
+		const porDecision = (
+			items: Array<{
+				decididoAt?: string | Date | null;
+				solicitadoAt?: string | Date | null;
+			}>,
+		) =>
+			items.map((i) => ({
+				fecha: aIso(i.decididoAt) ?? aIso(i.solicitadoAt),
+			}));
+		const corte = fechaDeCorte(
+			[
+				convenios.hayMas ? deConvenios : null,
+				userId && conveniosRechazados.hayMas ? rechazados : null,
+				historialInmov.hayMas ? porDecision(historialInmov.items) : null,
+				userId && historialRecup.hayMas
+					? porDecision(historialRecup.items)
+					: null,
+			].filter((f): f is Array<{ fecha: string | null }> => f !== null),
+		);
+
+		return recortarAlCorte(
+			[...deConvenios, ...rechazados, ...inmov.values(), ...recup].sort(
+				porFechaDesc,
+			),
+			corte,
+			// Las que esperan decisión vienen completas de la cola: siempre a la vista.
+			(f) => !!f.solicitud,
+		);
 	}, [
-		convenios.data,
+		convenios.items,
+		convenios.hayMas,
+		conveniosRechazados.items,
+		conveniosRechazados.hayMas,
+		userId,
 		bandeja.pendientes,
 		bandeja.porEjecutar,
 		bandeja.recuperacionesQuery.data,
 		bandeja.historialRecuperaciones,
 		historialInmov.items,
+		historialInmov.hayMas,
+		historialRecup.items,
+		historialRecup.hayMas,
 		usuarioCrm.nombre,
 		nombre,
 	]);
+
+	const conUsuario = (cond: boolean) => !!userId && cond;
+	const hayMas =
+		convenios.hayMas ||
+		conUsuario(conveniosRechazados.hayMas) ||
+		historialInmov.hayMas ||
+		conUsuario(historialRecup.hayMas);
+	const cargandoPaginas =
+		convenios.cargando ||
+		conUsuario(conveniosRechazados.cargando) ||
+		historialInmov.cargando ||
+		conUsuario(historialRecup.cargando);
 
 	const pendientes = filas
 		.map((f) => f.solicitud)
@@ -493,31 +619,31 @@ export function SolicitudesDeAsesor({
 		<>
 			<SolicitudesDeAsesorVista
 				nombre={nombre}
+				sinUsuario={!userId}
 				filas={filas}
-				cargando={
-					convenios.isLoading ||
-					bandeja.cargando ||
-					historialInmov.cargando ||
-					usuarioCrm.cargando
-				}
+				cargando={cargandoPaginas || bandeja.cargando || usuarioCrm.cargando}
 				error={
-					convenios.isError ||
+					convenios.error ||
+					conUsuario(conveniosRechazados.error) ||
 					bandeja.errores.length > 0 ||
-					historialInmov.error
+					historialInmov.error ||
+					conUsuario(historialRecup.error)
 				}
 				onReintentar={() => {
-					void convenios.refetch();
+					convenios.refetch();
 					bandeja.refetch();
 					historialInmov.refetch();
+					if (userId) {
+						conveniosRechazados.refetch();
+						historialRecup.refetch();
+					}
 				}}
 				onAbrir={(f) => {
 					const i = pendientes.findIndex((s) => s.id === f.solicitud?.id);
 					if (i >= 0) espacio.abrir(pendientes, i);
 				}}
-				onCargarMas={
-					historialInmov.hayMas ? () => setPaginas((p) => p + 1) : undefined
-				}
-				cargandoMas={historialInmov.cargando && paginas > 1}
+				onCargarMas={hayMas ? () => setPaginas((p) => p + 1) : undefined}
+				cargandoMas={cargandoPaginas && paginas > 1}
 			/>
 			<EspacioAprobacion {...espacio.modal} />
 		</>

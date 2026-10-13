@@ -474,6 +474,12 @@ const RESUMEN: ResumenAsesorVistaProps = {
 		creditos: 34,
 		cumplimiento: { atendidos: 16, planificados: 24, fecha: "6 oct" },
 		contactabilidad: { actual: 71, anterior: 75 },
+		resultadoCartera: {
+			porcentaje: 92,
+			detalle: "Q8.4K de Q9.1K",
+			monto: "Q8.4K",
+			variacion: 6.5,
+		},
 		comparacion: "vs. 7 días previos",
 		infoContactabilidad:
 			"Contactos efectivos / gestiones registradas en los últimos 7 días.",
@@ -508,9 +514,8 @@ const RESUMEN: ResumenAsesorVistaProps = {
 			},
 			{
 				clave: "proximos_bucket",
-				cantidad: null,
+				cantidad: 5,
 				etiqueta: "próximos a subir de bucket",
-				pronto: true,
 			},
 		],
 		total: 13,

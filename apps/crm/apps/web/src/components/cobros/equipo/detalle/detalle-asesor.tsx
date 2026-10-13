@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
 import type { FilaCartera } from "@/components/cobros/asesor/fila-cartera";
 import { destinoFicha } from "@/components/cobros/asesor/fila-cartera";
+import { formatoQCompacto } from "@/components/cobros/asesor/mi-desempeno";
 import {
 	type AlertaPromesa,
 	normalizarNombre,
@@ -15,10 +16,14 @@ import {
 	DIAS_CONTACTABILIDAD,
 	estadoAsesor,
 	etiquetaNivel,
-	nivelAsesor,
+	type NivelAsesor,
 	rangosContactabilidad,
 	textoAusencia,
 } from "@/components/cobros/equipo/estado-asesor";
+import {
+	resultadoRecuperacion,
+	variacionRecuperacion,
+} from "@/components/cobros/equipo/recuperacion";
 import type { AccionEquipo } from "@/components/cobros/equipo/search";
 import { HistorialGestiones } from "@/components/cobros/historial/historial-gestiones";
 import type {
@@ -36,7 +41,7 @@ import type { Bucket } from "@/components/ds/badges";
 import { EmptyState } from "@/components/ui/empty-state";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
-import { orpc } from "@/utils/orpc";
+import { orpc, orpcAparte } from "@/utils/orpc";
 import { type CargaDetalle, DetalleAsesorVista } from "./detalle-asesor-vista";
 import {
 	type DetalleAsesorSearch,
@@ -74,6 +79,7 @@ type AsesorPool = {
 	email_cash_in: string | null;
 	activo: boolean | null;
 	buckets: number[];
+	nivel: NivelAsesor | null;
 	userId: string | null;
 };
 
@@ -321,6 +327,14 @@ export function DetalleAsesor({
 		valor: number | undefined,
 		sinFiltro = false,
 	) => (sinFiltro || q.isError ? null : q.isPending ? undefined : valor);
+	// M2: créditos a punto de subir de bucket (cartera, por asesor).
+	const proximosQuery = useQuery({
+		...orpcAparte.getProximosSubirBucket.queryOptions({
+			input: { asesorId },
+		}),
+		enabled: habilitado && conResumen,
+		staleTime: 5 * 60_000,
+	});
 	const itemsCriticos: ItemCritico[] = [
 		{
 			clave: "convenios",
@@ -342,11 +356,10 @@ export function DetalleAsesor({
 			destino: criticosEnlaces.sinGestion,
 		},
 		{
-			// TODO(José) · tarea M2: «próximos a subir de bucket» por asesor.
 			clave: "proximos_bucket",
-			cantidad: null,
+			cantidad: cantidad(proximosQuery, proximosQuery.data?.total),
 			etiqueta: "próximos a subir de bucket",
-			pronto: true,
+			info: "Créditos de B1 a B4 cuya siguiente cuota vence en 7 días o menos y que no tienen una promesa vigente: si no pagan, suben al bucket siguiente.",
 		},
 	];
 	const conDato = itemsCriticos.filter((i) => !i.pronto);
@@ -368,6 +381,27 @@ export function DetalleAsesor({
 		enabled: habilitado && conResumen && !!email,
 	});
 	const filasCartera = (carteraQuery.data?.data ?? []) as FilaCartera[];
+
+	// M1: recuperación del mes de este asesor, con su meta y el mes anterior.
+	const recuperacionQuery = useQuery({
+		...orpcAparte.getRecuperacionAsesores.queryOptions({
+			input: { periodo: "mes", asesorId },
+		}),
+		enabled: habilitado && conResumen,
+		staleTime: 5 * 60_000,
+	});
+	const recuperacionAsesor = recuperacionQuery.data?.[0]?.recuperacion;
+	const resultadoCartera = (() => {
+		if (recuperacionQuery.isPending) return undefined;
+		const vista = resultadoRecuperacion(recuperacionAsesor);
+		if (recuperacionQuery.isError || !recuperacionAsesor || !vista) return null;
+		return {
+			porcentaje: vista.porcentaje,
+			detalle: vista.detalle,
+			monto: formatoQCompacto(recuperacionAsesor.monto),
+			variacion: variacionRecuperacion(recuperacionAsesor),
+		};
+	})();
 
 	const recientesQuery = useQuery({
 		...orpcSinTipo.getHistorialAgendas.queryOptions({
@@ -419,7 +453,7 @@ export function DetalleAsesor({
 						asesor: {
 							asesorId,
 							nombre: asesor.nombre,
-							nivel: nivelAsesor(asesor.buckets),
+							nivel: asesor.nivel,
 							estado,
 							ausencia: cobertura ? textoAusencia(cobertura) : null,
 						},
@@ -499,6 +533,7 @@ export function DetalleAsesor({
 													actual: contactabilidad,
 													anterior: contactabilidadAnt,
 												},
+								resultadoCartera,
 								comparacion: `vs. ${DIAS_CONTACTABILIDAD} días previos`,
 								infoContactabilidad: `Contactos efectivos / gestiones registradas en los últimos ${DIAS_CONTACTABILIDAD} días (hoy incluido), frente a los ${DIAS_CONTACTABILIDAD} días anteriores.`,
 							}}
@@ -509,7 +544,7 @@ export function DetalleAsesor({
 										? {
 												segmentos: [],
 												total: 0,
-												pool: etiquetaNivel(nivelAsesor(asesor.buckets)),
+												pool: etiquetaNivel(asesor.nivel),
 												error: true,
 											}
 										: {
@@ -518,7 +553,7 @@ export function DetalleAsesor({
 													cuentas: porBucket.get(numero) ?? 0,
 												})),
 												total: creditos ?? 0,
-												pool: `${etiquetaNivel(nivelAsesor(asesor.buckets))} (${textoBuckets(asesor.buckets)})`,
+												pool: `${etiquetaNivel(asesor.nivel)} (${textoBuckets(asesor.buckets)})`,
 											}
 							}
 							criticos={{

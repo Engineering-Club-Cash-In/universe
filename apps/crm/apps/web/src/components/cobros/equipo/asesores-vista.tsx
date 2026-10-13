@@ -20,6 +20,7 @@ import {
 	UMBRAL_CONTACTABILIDAD,
 	UMBRAL_CUMPLIMIENTO,
 } from "./estado-asesor";
+import type { ResultadoRecuperacionVista } from "./recuperacion";
 import type { GrupoEquipo } from "./search";
 
 /**
@@ -45,6 +46,8 @@ export type FilaAsesorEquipo = {
 	gestiones: { atendidos: number; planificados: number } | null;
 	/** % de contactabilidad del rango (0–100). */
 	contactabilidad: number | null;
+	/** Recuperación del mes frente a su meta (M1); `null` si no hay dato. */
+	recuperacion: ResultadoRecuperacionVista | null;
 	/** «Ausente · Vacaciones · vuelve el 30 sep», si tiene cobertura vigente. */
 	ausencia: string | null;
 	destino: Destino;
@@ -144,9 +147,12 @@ function TarjetaAsesor({
 							? "warning"
 							: "success"
 				}
-				// TODO(José) · tarea M1: recuperación por asesor (Q recuperado de Q
-				// esperado, con meta). Hasta entonces la barra va en «—».
-				recuperacion={{ porcentaje: null, detalle: "Pronto" }}
+				recuperacion={{
+					porcentaje: fila.recuperacion?.porcentaje ?? null,
+					detalle: fila.recuperacion?.detalle ?? "—",
+					etiqueta: "Recuperación del mes",
+					tono: fila.recuperacion?.tono,
+				}}
 				ausencia={fila.ausencia ?? undefined}
 				onReactivar={onReactivar ? () => onReactivar(fila.asesorId) : undefined}
 				reactivando={reactivando}

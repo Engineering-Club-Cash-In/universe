@@ -22,6 +22,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { desactivarMoraSiCreditoAlDia, updateMora, cuotasParaPendienteDeCreditos, hoyGuatemala } from "./latefee";
 import { crearEstampadorDecrementoMora } from "./moraDecrementoDePago";
 import { anotarMoraPagada } from "../utils/anotarMoraPagada";
+import { validarFechaBoleta, ymdDeFechaCalendario } from "../utils/fechaCalendarioGT";
 import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
@@ -766,6 +767,13 @@ export const insertPayment = async (
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+    if (nexaPaymentEventId === undefined) {
+      const errorFechaBoleta = validarFechaBoleta(fecha_boleta, ymdDeFechaCalendario(hoyGuatemala()));
+      if (errorFechaBoleta) {
+        set.status = 400;
+        return validationFailed({ fecha_boleta: [errorFechaBoleta] });
+      }
+    }
     const nexaPaymentDate = getInternalNexaPaymentDate(fecha_pago, nexaPaymentEventId);
     const paymentRegistrationDate = () => {
       if (nexaPaymentDate) return nexaPaymentDate;

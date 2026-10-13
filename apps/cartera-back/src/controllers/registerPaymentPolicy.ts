@@ -1484,3 +1484,17 @@ export function resolverCuotaParaFilaSuelta(opciones: {
 
   return null;
 }
+
+/** Con `condonacionBoletaTardia` el servidor exige la boleta y su número de autorización (activan el freno de duplicados). */
+export const camposObligatoriosCondonacion = (p: {
+  url_boletas: string[];
+  numeroAutorizacion?: string;
+  banco_id?: number;
+}): Record<string, string[]> => {
+  const errores: Record<string, string[]> = {};
+  const exige = (campo: string) => [`${campo} es obligatorio para condonar por boleta tardía`];
+  if (!p.url_boletas.some((u) => typeof u === "string" && u.trim())) errores.url_boletas = exige("url_boletas");
+  if (!p.numeroAutorizacion?.trim()) errores.numeroAutorizacion = exige("numeroAutorizacion");
+  if (!p.banco_id) errores.banco_id = exige("banco_id");
+  return errores;
+};

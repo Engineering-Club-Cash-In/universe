@@ -120,6 +120,53 @@ const normalizeManualValuationAmount = (
 	return sanitized;
 };
 
+const VEHICLE_STATUS_LABELS: Record<string, string> = {
+	pending: "pendiente",
+	available: "disponible",
+	sold: "vendido",
+	maintenance: "en mantenimiento",
+	auction: "en subasta",
+};
+
+/**
+ * Mensaje para una violación del UNIQUE del VIN: indica qué vehículo ya lo
+ * tiene (marca, modelo, año, placa y estado). Si la consulta falla o no
+ * encuentra dueño, cae al mensaje genérico: nunca debe tapar el error original.
+ */
+async function mensajeVinDuplicado(
+	vin: string | null | undefined,
+	excluirId?: string,
+) {
+	const base = `Ya existe un vehículo con el número de VIN "${vin}"`;
+	if (!vin) return base;
+	try {
+		const [dueno] = await db
+			.select({
+				make: vehicles.make,
+				model: vehicles.model,
+				year: vehicles.year,
+				licensePlate: vehicles.licensePlate,
+				status: vehicles.status,
+			})
+			.from(vehicles)
+			.where(
+				and(
+					eq(vehicles.vinNumber, vin),
+					excluirId ? not(eq(vehicles.id, excluirId)) : undefined,
+				),
+			)
+			.limit(1);
+		if (!dueno) return base;
+		const placa = dueno.licensePlate
+			? `placa ${dueno.licensePlate}`
+			: "sin placa";
+		const estado = VEHICLE_STATUS_LABELS[dueno.status] ?? dueno.status;
+		return `${base}: ${dueno.make} ${dueno.model} ${dueno.year} (${placa}, ${estado})`;
+	} catch {
+		return base;
+	}
+}
+
 export const createNewVehicleInputSchema = z.object({
 	// Campos básicos requeridos (conocidos desde proforma)
 	make: z.string(),
@@ -513,7 +560,7 @@ export const vehiclesRouter = {
 				}
 				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: `Ya existe un vehículo con el número de chasis/VIN "${input.vinNumber}"`,
+						message: await mensajeVinDuplicado(input.vinNumber),
 					});
 				}
 				throw error;
@@ -555,7 +602,7 @@ export const vehiclesRouter = {
 				}
 				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: `Ya existe un vehículo con el número de VIN "${input.vinNumber}"`,
+						message: await mensajeVinDuplicado(input.vinNumber),
 					});
 				}
 				throw error;
@@ -664,6 +711,11 @@ export const vehiclesRouter = {
 				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `Ya existe un vehículo con la placa "${input.data.licensePlate}"`,
+					});
+				}
+				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: await mensajeVinDuplicado(input.data.vinNumber, input.id),
 					});
 				}
 				throw error;

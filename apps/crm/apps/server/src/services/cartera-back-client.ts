@@ -4006,26 +4006,6 @@ export class CarteraBackClient {
 		);
 	}
 
-	/**
-	 * M5 · saca al asesor del pool de TODOS sus buckets (el motor deja de
-	 * mandarle cuentas) y devuelve cuáles estaban activos.
-	 */
-	async pausarPoolAsesor(
-		asesorId: number,
-	): Promise<{ asesor_id: number; buckets: number[] }> {
-		const r = await this.request<{
-			success: boolean;
-			asesor_id: number;
-			buckets: number[];
-			message?: string;
-		}>(`/buckets/asesores/${asesorId}/pool/pausar`, { method: "POST" });
-		this.cache.invalidate("/buckets/");
-		if (!r?.success) {
-			throw new Error(r?.message || "cartera-back no pausó al asesor");
-		}
-		return { asesor_id: r.asesor_id, buckets: r.buckets };
-	}
-
 	/** M5 · devuelve al asesor a los buckets que se le pausaron. */
 	async reanudarPoolAsesor(
 		asesorId: number,

@@ -29,22 +29,6 @@ export class AusenciaError extends Error {
 const MAX_LOTE = 200;
 
 /**
- * Saca al asesor del pool de TODOS sus buckets y devuelve cuáles estaban
- * activos (solo esos se reactivan después: un bucket que un admin ya había
- * desactivado no se enciende solo).
- */
-export async function pausarPoolAsesor(asesorId: number): Promise<{ asesor_id: number; buckets: number[] }> {
-  const [asesor] = await db.select({ id: asesores.asesor_id }).from(asesores).where(eq(asesores.asesor_id, asesorId));
-  if (!asesor) throw new AusenciaError("El asesor no existe.", 404, "asesor_no_existe");
-  const filas = await db
-    .update(asesor_bucket)
-    .set({ activo: false })
-    .where(and(eq(asesor_bucket.asesor_id, asesorId), eq(asesor_bucket.activo, true)))
-    .returning({ bucket: asesor_bucket.bucket });
-  return { asesor_id: asesorId, buckets: filas.map((f) => f.bucket).sort((a, b) => a - b) };
-}
-
-/**
  * Devuelve al asesor a los buckets que se le pausaron y, si el traslado que lo
  * pausó también lo sacó del balanceo de créditos nuevos, lo vuelve a poner. Es el
  * ÚLTIMO paso de la reactivación (la devolución de cuentas se hace con el pool
@@ -57,6 +41,17 @@ export async function reanudarPoolAsesor(
   operacionId?: string,
 ): Promise<{ asesor_id: number; buckets: number[] }> {
   return db.transaction(async (tx) => {
+    // El asesor se revisa AQUÍ, con lock: si se desactivó después de la última tanda
+    // de la devolución, no se le reactiva el balanceo ni el pool (quedaría un asesor
+    // inactivo con su configuración encendida, listo para recibir cuentas si se
+    // vuelve a activar). La ausencia queda abierta y se repite cuando esté activo.
+    const [asesor] = (
+      await tx.execute<{ activo: boolean }>(sql`
+        SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${asesorId} FOR SHARE`)
+    ).rows;
+    if (!asesor?.activo) {
+      throw new AusenciaError("El asesor no está activo: no se reanuda su pool.", 409, "asesor_inactivo");
+    }
     if (operacionId) {
       await tx.execute(sql`
         UPDATE ${schema}.asesores SET activo_para_creditos = true

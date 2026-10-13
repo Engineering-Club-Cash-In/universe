@@ -396,6 +396,7 @@ export async function marcarAusenteIndefinido(params: {
 			// La previsualización debe ser de este asesor y con la pausa del pool.
 			asesorOrigenId: params.asesorId,
 			pausarPoolOrigen: true,
+			motivo: motivoDelReparto(params.motivo),
 		});
 		operacionId = res.operacionId;
 		cuentas = res.cuentas;

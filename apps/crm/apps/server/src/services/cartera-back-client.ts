@@ -3991,6 +3991,8 @@ export class CarteraBackClient {
 		/** M5: cartera rechaza la previsualización si es de otro asesor o sin pausa de pool. */
 		asesorOrigenId?: number;
 		pausarPoolOrigen?: boolean;
+		/** M5: cartera rechaza la confirmación si el motivo difiere del previsualizado. */
+		motivo?: string;
 	}) {
 		const result = await this.request<ResultadoTraslado>(
 			"/buckets/traslados/confirmar",

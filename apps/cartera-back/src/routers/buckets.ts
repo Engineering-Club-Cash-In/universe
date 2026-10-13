@@ -212,7 +212,7 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }), asesorOrigenId: t.Optional(t.Integer({ minimum: 1 })), pausarPoolOrigen: t.Optional(t.Boolean()) }) })
+  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }), asesorOrigenId: t.Optional(t.Integer({ minimum: 1 })), pausarPoolOrigen: t.Optional(t.Boolean()), motivo: t.Optional(t.String({ minLength: 1, maxLength: 1000 })) }) })
   .get("/buckets/traslados/clave/:clave", async ({ params, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     return { success: true, data: await consultarTrasladoPorClave(params.clave) };

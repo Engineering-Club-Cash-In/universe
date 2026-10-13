@@ -301,10 +301,10 @@ export async function previsualizarTrasladoCarteraMasivo(raw: unknown) {
 }
 
 export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
-  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional() }).parse(raw);
+  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional(), motivo: z.string().min(1).max(1000).optional() }).parse(raw);
   try {
     return await db.transaction(async tx => {
-    const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
+    const row = (await tx.execute<{ id: string; estado: string; motivo: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
     if (!row || row.actor_email !== input.actorEmail) throw new TrasladoConflict("Previsualización no encontrada para este usuario");
@@ -312,6 +312,10 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // previsualización de otro asesor no se confirma bajo este.
     if (input.asesorOrigenId !== undefined && row.solicitud.asesorOrigenId !== input.asesorOrigenId) {
       throw new TrasladoConflict("La previsualización no corresponde a este asesor");
+    }
+    // Mismo motivo que se previsualizó: la bitácora de cartera y la del llamador no se contradicen.
+    if (input.motivo !== undefined && row.motivo !== input.motivo) {
+      throw new TrasladoConflict("El motivo no coincide con el de la previsualización");
     }
     if (input.pausarPoolOrigen && !row.solicitud.pausarPoolOrigen) {
       throw new TrasladoConflict("La previsualización no incluye la pausa del pool");

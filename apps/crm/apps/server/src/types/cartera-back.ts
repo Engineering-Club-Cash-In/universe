@@ -737,6 +737,34 @@ export interface CarteraConvenioDecision {
 	decididoEn: string;
 }
 
+/** Fila de `GET /payment-agreements/decisiones/historial` (M3): bitácora global. */
+export interface CarteraConvenioDecisionHistorial {
+	decisionId: number;
+	convenioId: number;
+	creditoId: number;
+	numeroCreditoSifco: string;
+	clienteNombre: string | null;
+	decision: "aprobado" | "rechazado";
+	motivo: string | null;
+	origen: "crm" | "cartera_front";
+	decididoPorEmail: string;
+	/** Correo del asesor que armó el convenio (el `created_by` del snapshot). */
+	creadoPorEmail: string | null;
+	decididoEn: string;
+	snapshot: CarteraConvenioSnapshotV1;
+}
+
+export interface CarteraConvenioDecisionesHistorialResponse {
+	success: boolean;
+	data: CarteraConvenioDecisionHistorial[];
+	pagination: {
+		page: number;
+		perPage: number;
+		total: number;
+		totalPages: number;
+	};
+}
+
 export interface CarteraConvenioCuota {
 	cuota_convenio_id: number;
 	convenio_id: number;

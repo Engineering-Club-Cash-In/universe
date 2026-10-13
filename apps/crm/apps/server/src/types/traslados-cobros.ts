@@ -54,3 +54,15 @@ export type HistorialTraslado = {
 	created_at: string;
 	cuentas: number;
 };
+
+/** Respuesta de `GET /buckets/traslados/historial` (M3): con paginación real. */
+export type HistorialTrasladosPaginado = {
+	success: true;
+	data: HistorialTraslado[];
+	pagination: {
+		page: number;
+		perPage: number;
+		total: number;
+		totalPages: number;
+	};
+};

@@ -5,7 +5,7 @@ import { ConvenioDecisionError, decidirConvenio } from "../controllers/convenioD
 import { RechazoAbonoInicial } from "../lib/convenio-abono-inicial";
 import { anularConvenio } from "../controllers/anularConvenio";
 import { db } from "../database";
-import { convenioDecisiones } from "../database/db/schema";
+import { convenioDecisiones, creditos, platform_users, usuarios } from "../database/db/schema";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { authMiddleware } from "./midleware";
 
@@ -506,6 +506,110 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       detail: {
         summary: "Count convenio decisions made by one supervisor in a time window",
         description: "S1 (supervisión de cobros): aprobaciones resueltas hoy por el supervisor. `desde` inclusive, `hasta` exclusivo (ISO).",
+        tags: ["Payment Agreements"],
+      },
+    }
+  )
+
+  // COBROS-02 M3 (issue #1895) — bitácora GLOBAL de decisiones de convenio,
+  // paginada, para el Historial de Solicitudes del supervisor. Las decisiones
+  // viven aquí (el rechazo borra el convenio), así que no hay otra fuente.
+  // `creado_por_email` es quien armó el convenio (el asesor): sale del
+  // `created_by` del snapshot, que es un platform_users.id.
+  .get(
+    "/decisiones/historial",
+    async ({ query, set, user }: any) => {
+      // Expone clientes, notas y correos de todos los créditos: solo la cuenta
+      // de servicio del CRM (que ya validó al supervisor) o un ADMIN.
+      const gate = requireConvenioDecisionRole(user, set);
+      if (!gate.ok) return gate.body;
+      const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
+      const perPage = Math.min(500, Math.max(1, Number.parseInt(query.per_page ?? "25", 10) || 25));
+      const desde = query.desde ? new Date(query.desde) : null;
+      const hasta = query.hasta ? new Date(query.hasta) : null;
+      if ((desde && Number.isNaN(desde.getTime())) || (hasta && Number.isNaN(hasta.getTime()))) {
+        set.status = 400;
+        return { success: false, message: "desde o hasta inválidos" };
+      }
+      if (query.decision && query.decision !== "aprobado" && query.decision !== "rechazado") {
+        set.status = 400;
+        return { success: false, message: "decision debe ser aprobado o rechazado" };
+      }
+      try {
+        const creadoPorId = sql`(${convenioDecisiones.snapshot}->>'created_by')::int`;
+        const condiciones = [
+          query.decision ? eq(convenioDecisiones.decision, query.decision) : undefined,
+          query.decidido_por_email
+            ? sql`lower(${convenioDecisiones.decididoPorEmail}) = ${query.decidido_por_email.trim().toLowerCase()}`
+            : undefined,
+          query.creado_por_email
+            ? sql`lower(${platform_users.email}) = ${query.creado_por_email.trim().toLowerCase()}`
+            : undefined,
+          desde ? gte(convenioDecisiones.decididoEn, desde) : undefined,
+          hasta ? lt(convenioDecisiones.decididoEn, hasta) : undefined,
+        ];
+        const donde = and(...condiciones);
+        const [filas, [conteo]] = await Promise.all([
+          db
+            .select({
+              decisionId: convenioDecisiones.decisionId,
+              convenioId: convenioDecisiones.convenioId,
+              creditoId: convenioDecisiones.creditoId,
+              numeroCreditoSifco: creditos.numero_credito_sifco,
+              clienteNombre: usuarios.nombre,
+              decision: convenioDecisiones.decision,
+              motivo: convenioDecisiones.motivo,
+              origen: convenioDecisiones.origen,
+              decididoPorEmail: convenioDecisiones.decididoPorEmail,
+              creadoPorEmail: platform_users.email,
+              decididoEn: convenioDecisiones.decididoEn,
+              snapshot: convenioDecisiones.snapshot,
+            })
+            .from(convenioDecisiones)
+            .innerJoin(creditos, eq(convenioDecisiones.creditoId, creditos.credito_id))
+            .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+            .leftJoin(platform_users, sql`${platform_users.id} = ${creadoPorId}`)
+            .where(donde)
+            .orderBy(desc(convenioDecisiones.decididoEn), desc(convenioDecisiones.decisionId))
+            .limit(perPage)
+            .offset((page - 1) * perPage),
+          db
+            .select({ total: sql<number>`count(*)::int` })
+            .from(convenioDecisiones)
+            .leftJoin(platform_users, sql`${platform_users.id} = ${creadoPorId}`)
+            .where(donde),
+        ]);
+        const total = Number(conteo?.total ?? 0);
+        set.status = 200;
+        return {
+          success: true,
+          data: filas,
+          pagination: { page, perPage, total, totalPages: Math.max(1, Math.ceil(total / perPage)) },
+        };
+      } catch (error) {
+        console.error("[GET /payment-agreements/decisiones/historial] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Internal server error",
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+    {
+      query: t.Object({
+        page: t.Optional(t.String()),
+        per_page: t.Optional(t.String()),
+        desde: t.Optional(t.String()),
+        hasta: t.Optional(t.String()),
+        decision: t.Optional(t.String()),
+        decidido_por_email: t.Optional(t.String()),
+        creado_por_email: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Paginated global log of convenio decisions",
+        description:
+          "COBROS-02 M3: decisiones de convenio de todos los créditos, más recientes primero. `desde` inclusivo y `hasta` exclusivo (ISO). Trae el crédito, el cliente y el asesor que armó el convenio.",
         tags: ["Payment Agreements"],
       },
     }

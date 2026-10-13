@@ -442,3 +442,39 @@ export async function listarTrasladosCartera(page: number) {
     ORDER BY created_at DESC, id DESC LIMIT 20 OFFSET ${(page - 1) * 20}
   `)).rows;
 }
+
+/**
+ * COBROS-02 M3 · traslados confirmados con paginación real, filtros de fecha y
+ * total, para la bitácora del supervisor. `listarTrasladosCartera` queda igual
+ * (20 por página, sin total) para el front existente. `desde` inclusivo y
+ * `hasta` exclusivo (instantes ISO).
+ */
+export async function listarTrasladosCarteraPaginado(params: {
+  page: number;
+  perPage: number;
+  desde?: Date | null;
+  hasta?: Date | null;
+}) {
+  const perPage = Math.min(500, Math.max(1, params.perPage));
+  const page = Math.max(1, params.page);
+  const filtroDesde = params.desde ? sql`AND created_at >= ${params.desde.toISOString()}::timestamptz` : sql``;
+  const filtroHasta = params.hasta ? sql`AND created_at < ${params.hasta.toISOString()}::timestamptz` : sql``;
+  const [filas, conteo] = await Promise.all([
+    db.execute<{ id: string; modo: string; motivo: string; asesor_origen_id: number; actor_email: string; created_at: string; cuentas: number }>(sql`
+      SELECT id, modo, motivo, asesor_origen_id, actor_email, created_at,
+        jsonb_array_length(preview->'asignaciones') AS cuentas
+      FROM ${schema}.operaciones_traslado_cartera
+      WHERE estado = 'confirmada' ${filtroDesde} ${filtroHasta}
+      ORDER BY created_at DESC, id DESC LIMIT ${perPage} OFFSET ${(page - 1) * perPage}
+    `),
+    db.execute<{ total: number }>(sql`
+      SELECT count(*)::int AS total FROM ${schema}.operaciones_traslado_cartera
+      WHERE estado = 'confirmada' ${filtroDesde} ${filtroHasta}
+    `),
+  ]);
+  const total = Number(conteo.rows[0]?.total ?? 0);
+  return {
+    data: filas.rows,
+    pagination: { page, perPage, total, totalPages: Math.max(1, Math.ceil(total / perPage)) },
+  };
+}

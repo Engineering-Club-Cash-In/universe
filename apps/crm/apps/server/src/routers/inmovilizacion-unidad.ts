@@ -16,7 +16,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -29,6 +29,7 @@ import {
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import {
+	inmovilizacionEstadoEnum,
 	inmovilizacionesUnidad,
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
@@ -38,6 +39,10 @@ import {
 	usuarioDuenoEnCarteraEstricto,
 } from "../lib/acceso-caso-cobro";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
+import {
+	decisorInmovilizacionId,
+	fechaDecisionInmovilizacion,
+} from "../lib/inmovilizacion-decision-sql";
 import {
 	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
@@ -69,6 +74,7 @@ import {
 } from "../lib/inmovilizacion-unidad";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { condicionesPromesaVigente } from "../lib/promesa-vigente";
+import { enRangoSql, rangoDiasGT } from "../lib/rango-dias-gt";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -2198,6 +2204,8 @@ export const inmovilizacionUnidadRouter = {
 				ubicacionSolicitud: inmovilizacionesUnidad.ubicacionSolicitud,
 				bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
 				solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
+				// M3 · id del solicitante: el front deja de asociar por nombre.
+				solicitadoPorId: inmovilizacionesUnidad.solicitadoPor,
 				solicitanteNombre: user.name,
 				clienteNombre: clients.contactPerson,
 			})
@@ -2232,6 +2240,9 @@ export const inmovilizacionUnidadRouter = {
 				id: z.string().uuid(),
 				decision: z.enum(["aprobar", "rechazar"]),
 				motivoRechazo: z.string().trim().min(5).max(1000).optional(),
+				// M3 · nota del supervisor al aprobar (opcional, el rechazo usa
+				// `motivoRechazo`). Se guarda en `nota_decision` y en el evento.
+				nota: z.string().trim().max(1000).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2297,6 +2308,8 @@ export const inmovilizacionUnidadRouter = {
 						decididoAt: new Date(),
 						motivoRechazo:
 							input.decision === "rechazar" ? input.motivoRechazo : null,
+						notaDecision:
+							input.decision === "aprobar" ? input.nota || null : null,
 						updatedAt: new Date(),
 					})
 					.where(
@@ -2323,7 +2336,9 @@ export const inmovilizacionUnidadRouter = {
 					detalle:
 						input.decision === "rechazar"
 							? { motivoRechazo: input.motivoRechazo }
-							: null,
+							: input.nota
+								? { nota: input.nota }
+								: null,
 				});
 				return fila;
 			});
@@ -2773,6 +2788,8 @@ export const ejecutarReactivacion = ejecutarPorAsesor("reactivacion");
 const usuarioDecisor = alias(user, "usuario_decisor");
 const usuarioEjecutor = alias(user, "usuario_ejecutor");
 
+const INMOVILIZACION_ESTADOS = inmovilizacionEstadoEnum.enumValues;
+
 /**
  * Historial COMPLETO de inmovilizaciones — todos los estados, no solo las
  * pendientes de `getColaInmovilizaciones`. Paginado: la tabla crece con cada
@@ -2787,10 +2804,33 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 		z.object({
 			page: z.number().int().min(1).default(1),
 			perPage: z.number().int().min(1).max(100).default(25),
+			// M3 · filtros. `desde`/`hasta` son días de Guatemala (inclusivos) y
+			// se aplican a la fecha en que se decidió la solicitud o, mientras
+			// siga pendiente, a la fecha en que se pidió.
+			estados: z.array(z.enum(INMOVILIZACION_ESTADOS)).max(5).optional(),
+			accion: z.enum(["apagado", "reactivacion"]).optional(),
+			solicitanteId: z.string().min(1).optional(),
+			desde: z.string().date().optional(),
+			hasta: z.string().date().optional(),
 		}),
 	)
 	.handler(async ({ input }) => {
 		const offset = (input.page - 1) * input.perPage;
+		const rango = rangoDiasGT(input.desde, input.hasta);
+		// Una cancelada se fecha con su evento de cancelación (M3).
+		const fecha = fechaDecisionInmovilizacion;
+		const condiciones = and(
+			input.estados?.length
+				? inArray(inmovilizacionesUnidad.estado, input.estados)
+				: undefined,
+			input.accion
+				? eq(inmovilizacionesUnidad.accion, input.accion)
+				: undefined,
+			input.solicitanteId
+				? eq(inmovilizacionesUnidad.solicitadoPor, input.solicitanteId)
+				: undefined,
+			enRangoSql(fecha, rango),
+		);
 
 		const [filas, [{ total }]] = await Promise.all([
 			db
@@ -2802,10 +2842,18 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 					estado: inmovilizacionesUnidad.estado,
 					motivo: inmovilizacionesUnidad.motivo,
 					motivoRechazo: inmovilizacionesUnidad.motivoRechazo,
+					notaDecision: inmovilizacionesUnidad.notaDecision,
 					bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
 					solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
+					solicitadoPorId: inmovilizacionesUnidad.solicitadoPor,
 					solicitanteNombre: user.name,
-					decididoAt: inmovilizacionesUnidad.decididoAt,
+					// Una cancelada muestra quién y cuándo la canceló (evento), no la
+					// aprobación anterior; las demás, sus columnas de decisión.
+					decididoAt:
+						sql<Date | null>`CASE WHEN ${inmovilizacionesUnidad.estado} = 'cancelada' THEN ${fecha} ELSE ${inmovilizacionesUnidad.decididoAt} END`.mapWith(
+							inmovilizacionesUnidad.decididoAt,
+						),
+					decididoPorId: decisorInmovilizacionId,
 					decididoPorNombre: usuarioDecisor.name,
 					ejecutadoAt: inmovilizacionesUnidad.ejecutadoAt,
 					ejecutadoPorNombre: usuarioEjecutor.name,
@@ -2823,7 +2871,7 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 				.innerJoin(user, eq(inmovilizacionesUnidad.solicitadoPor, user.id))
 				.leftJoin(
 					usuarioDecisor,
-					eq(inmovilizacionesUnidad.decididoPor, usuarioDecisor.id),
+					eq(decisorInmovilizacionId, usuarioDecisor.id),
 				)
 				.leftJoin(
 					usuarioEjecutor,
@@ -2838,12 +2886,14 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 					eq(casosCobros.contratoId, contratosFinanciamiento.id),
 				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-				.orderBy(desc(inmovilizacionesUnidad.solicitadoAt))
+				.where(condiciones)
+				.orderBy(desc(fecha), desc(inmovilizacionesUnidad.id))
 				.limit(input.perPage)
 				.offset(offset),
 			db
 				.select({ total: sql<number>`count(*)::int` })
-				.from(inmovilizacionesUnidad),
+				.from(inmovilizacionesUnidad)
+				.where(condiciones),
 		]);
 
 		// La llave de R2 no sale del server: el supervisor recibe la URL firmada

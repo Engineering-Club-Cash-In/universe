@@ -86,7 +86,9 @@ async function nombreDe(userId: string | null): Promise<string | null> {
  * pidió (nadie decide la suya). Si no queda ninguno —la pidió el único
  * supervisor—, los admins, para que no quede una solicitud que nadie ve.
  */
-export async function decisoresPosibles(solicitanteId: string): Promise<string[]> {
+export async function decisoresPosibles(
+	solicitanteId: string,
+): Promise<string[]> {
 	const supervisores = (await obtenerSupervisoresCobros()).filter(
 		(id) => id !== solicitanteId,
 	);
@@ -231,6 +233,7 @@ export async function cerrarSolicitudesPendientesDelCaso(params: {
 			.set({
 				estadoSolicitud: "sin_efecto",
 				motivoDecision: params.motivo,
+				decididoPor: params.actorId,
 				decididoAt: new Date(),
 				updatedAt: new Date(),
 			})

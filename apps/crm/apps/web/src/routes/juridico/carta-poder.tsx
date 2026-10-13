@@ -47,6 +47,9 @@ import {
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
+/** El estado civil sin elegir, en el Select (que no admite un valor vacío). */
+const SIN_DATO = "sin_dato";
+
 export const Route = createFileRoute("/juridico/carta-poder")({
 	component: RouteComponent,
 });
@@ -161,9 +164,15 @@ function RouteComponent() {
 			}));
 			descartarCarta();
 		},
-		onError: (error: Error) => {
+		onError: (error: Error, opportunityId) => {
+			// Si era el crédito pedido, el formulario tiene los datos del anterior
+			// y el resumen dice el nuevo: se suelta todo, para no generar la carta
+			// de una persona con los datos de otra.
+			if (creditoPedidoRef.current === opportunityId) empezarDeCero();
 			toast.error(
-				error.message || "No se pudieron traer los datos del crédito",
+				error.message
+					? `${error.message}. Elegí el crédito de nuevo.`
+					: "No se pudieron traer los datos del crédito. Elegí el crédito de nuevo.",
 			);
 		},
 	});
@@ -400,16 +409,22 @@ function RouteComponent() {
 					<div className="space-y-2">
 						<Label htmlFor="carta-estado-civil">Estado civil</Label>
 						<Select
-							value={campos.estadoCivil}
+							// El Select no admite un valor vacío: "Sin dato" lo representa,
+							// para poder quitar uno que vino mal del CRM.
+							value={campos.estadoCivil || SIN_DATO}
 							disabled={cargarDatos.isPending}
 							onValueChange={(valor) =>
-								cambiar("estadoCivil", valor as EstadoCivil)
+								cambiar(
+									"estadoCivil",
+									valor === SIN_DATO ? "" : (valor as EstadoCivil),
+								)
 							}
 						>
 							<SelectTrigger id="carta-estado-civil" className="w-full">
 								<SelectValue placeholder="Sin dato" />
 							</SelectTrigger>
 							<SelectContent>
+								<SelectItem value={SIN_DATO}>Sin dato</SelectItem>
 								{(Object.keys(ESTADOS_CIVILES) as EstadoCivil[]).map((e) => (
 									<SelectItem key={e} value={e}>
 										{ESTADOS_CIVILES[e]}

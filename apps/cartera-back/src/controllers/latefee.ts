@@ -2987,6 +2987,111 @@ async function anularCondonacionVivaEnTx(
   return { anulada: true, monto: viva.monto, restituida: restitucion.success };
 }
 
+/**
+ * Deshace la condonación viva de una boleta tardía (por `intento_id` o por `condonacion_id`).
+ * Sin condonación viva —o ya anulada— devuelve `{ anulada: false }`: idempotente. Solo toca
+ * condonaciones con `intento_id`: jamás una de Nexa ni una manual. Sin la guarda de Nexa
+ * "pago posterior no vinculado": quien llama invalida el pago a propósito.
+ *
+ * 🔒 `creditos` con `FOR NO KEY UPDATE` en su transacción: si el llamador ya lo tiene
+ * `FOR UPDATE` en la MISMA conexión (`dbClient` = su tx) no espera a nadie. Con `dbClient`
+ * de un llamador, corre en un savepoint de su transacción.
+ *
+ * `reactivarMora`: si la mora ya se apagó (el pago dejó al día), la reactiva con lo
+ * condonado. Sin él, un `not_found` de `updateMora` no lanza: el ledger queda compensado y
+ * el cron recalcula (misma tolerancia que Nexa).
+ */
+export async function anularCondonacionBoletaTardia(params: (
+  // Por intento se EXIGE el crédito (un intento no se reusa en otro crédito); por condonacion_id no hace falta.
+  | { intento_id: string; credito_id: number; condonacion_id?: undefined }
+  | { condonacion_id: number; intento_id?: undefined; credito_id?: undefined }
+) & {
+  motivo: string;
+  reactivarMora?: boolean;
+  /** El actor que invalida el pago (firma ANULACION e INCREMENTO); si se pasa y no existe, lanza. Default sistema (solo el barrido). */
+  usuario_email?: string;
+  dbClient?: typeof db;
+}): Promise<{ anulada: boolean; condonacion_id?: number; monto?: string; restituida?: boolean }> {
+  const { motivo, reactivarMora = false, dbClient = db } = params;
+  if ((params.intento_id === undefined) === (params.condonacion_id === undefined)) {
+    throw new Error("anularCondonacionBoletaTardia: pasar intento_id O condonacion_id");
+  }
+  if (params.intento_id !== undefined && params.credito_id === undefined) {
+    throw new Error("anularCondonacionBoletaTardia: con intento_id se requiere credito_id");
+  }
+  const usuario_email = params.usuario_email ?? EMAIL_USUARIO_SISTEMA_NEXA;
+  const [user] = await dbClient
+    .select({ id: platform_users.id })
+    .from(platform_users)
+    .where(eq(platform_users.email, usuario_email));
+  if (!user && params.usuario_email !== undefined) {
+    throw new Error(`El usuario ${params.usuario_email} no existe en platform_users`);
+  }
+
+  return dbClient.transaction(async (tx) => {
+    const [viva] = await tx
+      .select({
+        condonacion_id: moras_condonaciones.condonacion_id,
+        credito_id: moras_condonaciones.credito_id,
+        monto: moras_condonaciones.montoCondonacion,
+        intento_id: moras_condonaciones.intento_id,
+      })
+      .from(moras_condonaciones)
+      .where(and(
+        params.intento_id !== undefined
+          ? and(eq(moras_condonaciones.intento_id, params.intento_id), eq(moras_condonaciones.credito_id, params.credito_id!))
+          : eq(moras_condonaciones.condonacion_id, params.condonacion_id!),
+        sql`${moras_condonaciones.intento_id} IS NOT NULL`, // jamás una condonación de Nexa o manual
+        isNull(moras_condonaciones.anulada_at),
+      ))
+      .limit(1);
+    if (!viva) return { anulada: false };
+
+    // 🔒 `creditos` primero (orden de candados). NO KEY UPDATE: si el llamador ya lo tiene FOR UPDATE
+    // en esta misma conexión no espera a nadie. La misma lectura trae el estado.
+    const [credito] = await tx
+      .select({ statusCredit: creditos.statusCredit })
+      .from(creditos)
+      .where(eq(creditos.credito_id, viva.credito_id))
+      .limit(1)
+      .for("no key update");
+    // Por qué NO se reactiva aunque se pidió (queda en el rastro si la mora no recupera el monto).
+    const protegido = STATUS_EXCLUIDOS_MORA.includes(credito?.statusCredit ?? "");
+    let reactivar = reactivarMora && !protegido;
+    let cuotasAtrasadasAlReactivar: number | undefined;
+    let razonNoReactiva = reactivarMora && protegido ? `estado protegido ${credito?.statusCredit}` : "mora apagada";
+    if (reactivar) {
+      // Mismo criterio del cron: las cuotas vencidas con cobertura real. Sin ninguna, no hay mora que reactivar.
+      const porCredito = await cuotasParaPendienteDeCreditos([viva.credito_id], tx as unknown as typeof db, hoyGuatemala());
+      cuotasAtrasadasAlReactivar = porCredito.get(viva.credito_id)?.cuotas.length ?? 0;
+      if (cuotasAtrasadasAlReactivar === 0) {
+        reactivar = false;
+        razonNoReactiva = "sin cuotas vencidas";
+      }
+    }
+
+    const r = await anularCondonacionVivaEnTx(tx as unknown as typeof db, viva, {
+      motivo,
+      origen: "CONDONACION_BOLETA_TARDIA",
+      etiqueta: `intento ${viva.intento_id}`,
+      usuarioId: user?.id ?? null,
+      reactivarMora: reactivar,
+      usuarioEmail: user ? usuario_email : undefined,
+      cuotasAtrasadasAlReactivar,
+    });
+    if (!r.anulada) return { anulada: false };
+    if (!r.restituida) {
+      // Rastro en la propia condonación anulada. NADA en moras_historial: un evento ahí contamina la
+      // mora cerrada (consultaMoraPolicy) y el modal de historial.
+      await tx
+        .update(moras_condonaciones)
+        .set({ motivo: sql`${moras_condonaciones.motivo} || ${` — anulada SIN restituir la mora (${razonNoReactiva})`}` })
+        .where(eq(moras_condonaciones.condonacion_id, viva.condonacion_id));
+    }
+    return { anulada: true, condonacion_id: viva.condonacion_id, monto: r.monto, restituida: r.restituida };
+  });
+}
+
 
 // Clamp defensivo de paginación. Vive en utils/functions/pagination.ts porque
 // `getMoraHistorialSnapshot` (moraHistorial.ts) tenía su propia copia inline con

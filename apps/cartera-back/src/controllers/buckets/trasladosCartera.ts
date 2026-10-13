@@ -353,6 +353,17 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       // con un lock compartido sobre esa fila (createCredit), así que o su crédito
       // ya está confirmado cuando se toma la foto o la asignación se rechaza y
       // elige a otro asesor.
+      // Una ausencia no se confirma sobre un asesor desactivado: la reactivación no
+      // podría devolverle la cartera y quedaría abierta. Se lee bajo el mismo lock de
+      // fila que retiene el UPDATE de abajo, así una desactivación concurrente o termina
+      // antes y se rechaza acá, o espera a esta confirmación.
+      const [origenFila] = (
+        await tx.execute<{ activo: boolean }>(sql`
+          SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${row.solicitud.asesorOrigenId} FOR UPDATE`)
+      ).rows;
+      if (!origenFila?.activo) {
+        throw new TrasladoConflict("El asesor está desactivado: no se puede marcar ausente. Para repartir su cartera use un traslado.");
+      }
       const sinBalanceo = await tx.execute(sql`
         UPDATE ${schema}.asesores SET activo_para_creditos = false
         WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo_para_creditos

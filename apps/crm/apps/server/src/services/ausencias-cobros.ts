@@ -311,7 +311,12 @@ export async function marcarAusenteIndefinido(params: {
 			});
 		} catch (error) {
 			if (error instanceof ORPCError) throw error;
-			// Índice único: otra ausencia vigente ganó la carrera.
+			// Solo la violación del índice único (23505: otra ausencia vigente ganó la
+			// carrera) es «ya está ausente». Cualquier otro fallo (conexión, tiempo,
+			// interbloqueo, migración faltante) se relanza: la transacción se revirtió y
+			// decir que ya está ausente sería falso y no dejaría reintentar.
+			const e = error as { code?: string; cause?: { code?: string } };
+			if ((e?.code ?? e?.cause?.code) !== "23505") throw error;
 			throw new ORPCError("CONFLICT", {
 				message: "Este asesor ya está marcado como ausente.",
 			});

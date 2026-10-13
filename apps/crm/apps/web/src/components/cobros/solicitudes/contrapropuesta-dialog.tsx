@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { hoyGT } from "@/components/cobros/coberturas-panel";
+import { sumarDiasISO } from "@/components/cobros/equipo/estado-asesor";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -47,7 +48,9 @@ export type ContrapropuestaVistaProps = {
 	maxMeses: number;
 	primerPago: string;
 	onPrimerPago: (fecha: string) => void;
-	hoy: string;
+	/** Primer y último día elegibles del primer pago. */
+	minPrimerPago: string;
+	maxPrimerPago: string;
 	nota: string;
 	onNota: (valor: string) => void;
 	/** Validación del formulario (null = se puede enviar). */
@@ -59,6 +62,22 @@ export type ContrapropuestaVistaProps = {
 };
 
 export const MINIMO_NOTA_CONTRAPROPUESTA = 5;
+
+/** Igual que `MAX_DIAS_HASTA_PRIMER_PAGO` del servidor (que sigue validando). */
+export const MAX_DIAS_HASTA_PRIMER_PAGO = 90;
+
+/**
+ * Días en que puede caer el primer pago: desde hoy y después del día en que se
+ * firmó el convenio (las cuotas de ese día o anteriores cuentan como deuda
+ * vieja), hasta 90 días desde hoy.
+ */
+export function ventanaPrimerPago(hoy: string, diaConvenio: string | null) {
+	const despuesDelConvenio = diaConvenio ? sumarDiasISO(diaConvenio, 1) : hoy;
+	return {
+		min: despuesDelConvenio > hoy ? despuesDelConvenio : hoy,
+		max: sumarDiasISO(hoy, MAX_DIAS_HASTA_PRIMER_PAGO),
+	};
+}
 
 function fechaLegible(iso: string | null) {
 	if (!iso) return "—";
@@ -135,7 +154,8 @@ export function ContrapropuestaVista(p: ContrapropuestaVistaProps) {
 				<Label htmlFor="contra-primer-pago">Primer pago</Label>
 				<CampoFecha
 					id="contra-primer-pago"
-					min={p.hoy}
+					min={p.minPrimerPago}
+					max={p.maxPrimerPago}
 					value={p.primerPago}
 					disabled={p.pendiente}
 					onChange={p.onPrimerPago}
@@ -195,12 +215,15 @@ export function ContrapropuestaDialog({
 	abierto,
 	convenio,
 	primerPagoActual,
+	fechaConvenio,
 	onCerrar,
 	onEnviada,
 }: {
 	abierto: boolean;
 	convenio: ConvenioContrapropuesta;
 	primerPagoActual: string | null;
+	/** Cuándo se firmó el convenio (del plan); acota el primer pago. */
+	fechaConvenio: string | null;
 	onCerrar: () => void;
 	onEnviada: () => void;
 }) {
@@ -221,6 +244,7 @@ export function ContrapropuestaDialog({
 						<FormularioContrapropuesta
 							convenio={convenio}
 							primerPagoActual={primerPagoActual}
+							fechaConvenio={fechaConvenio}
 							onCerrar={onCerrar}
 							onEnviada={onEnviada}
 						/>
@@ -234,11 +258,13 @@ export function ContrapropuestaDialog({
 function FormularioContrapropuesta({
 	convenio,
 	primerPagoActual,
+	fechaConvenio,
 	onCerrar,
 	onEnviada,
 }: {
 	convenio: ConvenioContrapropuesta;
 	primerPagoActual: string | null;
+	fechaConvenio: string | null;
 	onCerrar: () => void;
 	onEnviada: () => void;
 }) {
@@ -248,6 +274,14 @@ function FormularioContrapropuesta({
 	const [primerPago, setPrimerPago] = useState(primerPagoActual ?? "");
 	const [nota, setNota] = useState("");
 	const total = Number(convenio.monto_total_convenio ?? 0);
+	const hoy = hoyGT();
+	// Día de Guatemala en que se firmó el convenio.
+	const diaConvenio = fechaConvenio
+		? new Date(fechaConvenio).toLocaleDateString("sv-SE", {
+				timeZone: "America/Guatemala",
+			})
+		: null;
+	const ventana = ventanaPrimerPago(hoy, diaConvenio);
 	const numeroMeses = Number(meses);
 
 	const error = !(
@@ -258,14 +292,18 @@ function FormularioContrapropuesta({
 		? `El número de cuotas debe estar entre 1 y ${maxMeses}.`
 		: !primerPago
 			? "Indique la fecha del primer pago."
-			: primerPago < hoyGT()
-				? "El primer pago no puede estar en el pasado."
-				: numeroMeses === convenio.numero_meses &&
-						primerPago === primerPagoActual
-					? "Cambie las cuotas o la fecha del primer pago: es igual al plan del asesor."
-					: nota.trim().length < MINIMO_NOTA_CONTRAPROPUESTA
-						? `La nota debe tener al menos ${MINIMO_NOTA_CONTRAPROPUESTA} caracteres.`
-						: null;
+			: primerPago < ventana.min
+				? diaConvenio && ventana.min > hoy
+					? "El primer pago debe ser posterior al día en que se firmó el convenio."
+					: "El primer pago no puede estar en el pasado."
+				: primerPago > ventana.max
+					? `El primer pago no puede ser dentro de más de ${MAX_DIAS_HASTA_PRIMER_PAGO} días.`
+					: numeroMeses === convenio.numero_meses &&
+							primerPago === primerPagoActual
+						? "Cambie las cuotas o la fecha del primer pago: es igual al plan del asesor."
+						: nota.trim().length < MINIMO_NOTA_CONTRAPROPUESTA
+							? `La nota debe tener al menos ${MINIMO_NOTA_CONTRAPROPUESTA} caracteres.`
+							: null;
 
 	const enviar = useMutation({
 		...orpc.contraproponerConvenio.mutationOptions(),
@@ -307,7 +345,8 @@ function FormularioContrapropuesta({
 				setPrimerPago(v);
 				enviar.reset();
 			}}
-			hoy={hoyGT()}
+			minPrimerPago={ventana.min}
+			maxPrimerPago={ventana.max}
 			nota={nota}
 			onNota={setNota}
 			error={error}

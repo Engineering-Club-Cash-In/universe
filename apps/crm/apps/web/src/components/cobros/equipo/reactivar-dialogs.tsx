@@ -179,7 +179,8 @@ export function AsesorReactivadoDialog({
 				) : null}
 				{resultado ? (
 					<p className="rounded-xl bg-muted px-4 py-3 text-fg-secondary text-sm">
-						Se avisó al equipo de la reincorporación.
+						El sistema avisa al equipo de la reincorporación. Si hace falta,
+						confírmesela también usted.
 					</p>
 				) : null}
 				<DialogFooter>

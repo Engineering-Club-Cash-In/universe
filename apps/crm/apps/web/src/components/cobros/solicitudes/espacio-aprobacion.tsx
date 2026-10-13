@@ -1198,6 +1198,7 @@ function ContenidoEspacio({
 					abierto={contraAbierta}
 					convenio={s.convenio}
 					primerPagoActual={planConvenio.data?.primer_pago ?? null}
+					fechaConvenio={planConvenio.data?.fecha_convenio ?? null}
 					onCerrar={() => setContraAbierta(false)}
 					onEnviada={() => undefined}
 				/>

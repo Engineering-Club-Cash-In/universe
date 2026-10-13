@@ -209,7 +209,9 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 							{p.pendiente
 								? "Registrando…"
 								: equipo
-									? "Confirmar ausencia"
+									? p.errorServidor
+										? "Reintentar confirmación"
+										: "Confirmar ausencia"
 									: "Registrar cobertura"}
 						</Button>
 					</div>
@@ -566,7 +568,10 @@ function FormularioAusencia({
 			// una ausencia indefinida no aparece.
 			onCerrar();
 		},
-		onError: () => setPaso("formulario"),
+		// Un fallo (incluso ambiguo: timeout o 5xx) deja la revisión abierta: el
+		// reintento reenvía la MISMA confirmación (mismo `id` y `previewId`), que es
+		// la que el servidor sabe reconciliar. Una previsualización nueva la
+		// rechazaría porque la ausencia ya quedó pendiente.
 	});
 
 	const crear = useMutation({

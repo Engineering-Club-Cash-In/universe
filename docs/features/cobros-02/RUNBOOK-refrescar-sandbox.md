@@ -361,6 +361,14 @@ después.
 
 ## Registro de corridas
 
+### 2026-10-13 — para el seed de la demo
+
+Corrida con `alinear_desde_prod.sh --sin-swap`; se revisó el resultado y se hizo el swap a mano
+(backup `cartera_cobros2_bk_20261013_1512`). 2,036 créditos; el motor hizo 12 subidas y 1,062
+bajadas (el sandbox llevaba un mes sin pagos de producción). Se agregó `--correcciones`
+(`correcciones_asesores.csv`) porque Samuel y Octavio tienen otro correo en producción. El mismo
+día se pisó el CRM de DEV con el de producción. Detalle en [24 · Seed de datos de demo](./24-seed-datos-demo.md).
+
 ### 2026-08-17 — primera ejecución
 
 Sandbox venía del **25 de junio** (1,628 créditos). Se refrescó a datos del **17 de agosto**

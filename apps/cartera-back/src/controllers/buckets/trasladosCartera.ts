@@ -374,11 +374,19 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // locks se lee de nuevo: un editor que ya estaba en curso termina antes y
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
-    await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    // Las cuentas EXCLUIDAS (las que se quedan con el asesor de origen) también se
+    // bloquean: el chequeo final solo cuenta cuántas quedan en el origen, así que una
+    // reactivación que las devolviera al funnel después de la última foto pasaría
+    // inadvertida y dejaría una cuenta viva con el asesor pausado.
+    const aProteger = [
+      ...plan.asignaciones.map((a) => a.creditoId),
+      ...plan.excluidos.map((e) => e.creditoId),
+    ];
+    await bloquearCreditosAsesor(tx, aProteger);
     // Orden del módulo de mora (develop, latefee.ts): `creditos` PRIMERO y
     // `moras_credito` después. Al revés, un traslado y un pago/convenio/cron
     // concurrentes se pedían los candados en cruz (40P01).
-    await bloquearFilasCredito(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearFilasCredito(tx, aProteger);
     await bloquearFilasMora(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);

@@ -111,3 +111,15 @@ export function mapChecksToDisbursementRows(
 		omitidosPorMoneda: conMontoValido.length - enQuetzales.length,
 	};
 }
+
+/**
+ * Las cartas de emisión de cheques: la individual y la de sociedad. Las dos
+ * salen de las mismas filas, y las dos tienen que cortar si hay cheques en otra
+ * moneda (`omitidosPorMoneda`): la carta los dejaría afuera sin decirlo.
+ */
+export function esCartaDeCheques(contractType: string): boolean {
+	return (
+		contractType === "carta_emision_cheques" ||
+		contractType === "carta_emision_cheques_sociedad"
+	);
+}

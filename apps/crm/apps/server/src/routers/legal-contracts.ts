@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
+	coDebtors,
 	leads,
 	opportunities,
 	opportunityStageHistory,
@@ -14,6 +15,7 @@ import {
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
+import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	documentIdDesdeLink,
@@ -49,10 +51,17 @@ import {
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
+	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
+import {
 	adminProcedure,
 	juridicoProcedure,
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
+import { cartasDelPaquete, PAQUETE_CARTAS } from "../lib/paquete-cartas";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -71,9 +80,8 @@ import {
 	terminarDeVincular,
 	vincularEnLaFila,
 } from "../lib/vincular-documento-weetrust";
-import { closeOpportunity } from "../services/close-opportunity";
-import { MOTIVO_CONTRATOS_FIRMADOS } from "../jobs/bienvenida-pendiente";
 import { enviarMensajesDeCreditoNuevo } from "../services/bienvenida-credito";
+import { closeOpportunity } from "../services/close-opportunity";
 import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
@@ -173,8 +181,91 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	return { contract, documentID };
 }
 
-/** El tipo que lleva selfie además del DPI: es el título que se ejecuta. */
-const RECONOCIMIENTO_DE_DEUDA = "reconocimiento_deuda_feb_2025";
+/**
+ * Por qué la batería vigente ya no es la de la oportunidad, o null.
+ *
+ * Después de enlazar pueden marcar o cambiar al representante legal, o pasar
+ * el lead a empresa: los contratos quedan con la batería o el titular de antes
+ * y aprobar los mandaría a firmar así (y el WhatsApp, que busca al firmante de
+ * hoy, no encontraría sus enlaces). Se mira al aprobar porque es la puerta por
+ * donde salen a firma, sea cual sea el cambio que los dejó viejos.
+ */
+async function motivoBateriaVigenteDesactualizada(
+	opportunityId: string,
+): Promise<string | null> {
+	const vigentes = await db
+		.select({
+			id: generatedLegalContracts.id,
+			contractType: generatedLegalContracts.contractType,
+			apiResponse: generatedLegalContracts.apiResponse,
+		})
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				contratoVigente(),
+			),
+		);
+	const tipos = vigentes.flatMap((c) =>
+		c.contractType === PAQUETE_CARTAS
+			? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+			: [c.contractType],
+	);
+
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const datos = { clientType: oportunidad?.clientType, coDeudores };
+
+	const motivo = motivoParaNoGenerar(datos, tipos);
+	if (motivo) return motivo;
+
+	// El titular de cada contrato tiene que ser el representante de hoy. En
+	// modo prueba no se puede comparar: todos los titulares tienen el correo de
+	// prueba.
+	if (!esOportunidadDeSociedad(datos) || isTestModeEnabled()) return null;
+	const representante = representanteLegalDe(datos);
+	if (vigentes.length === 0) return null;
+	const titulares = await db
+		.select({ email: contractSignatories.email })
+		.from(contractSignatories)
+		.where(
+			and(
+				inArray(
+					contractSignatories.contractId,
+					vigentes.map((c) => c.id),
+				),
+				eq(contractSignatories.role, "TITULAR"),
+			),
+		);
+	for (const titular of titulares) {
+		const cambio = motivoPorRepresentanteCambiado(representante, titular);
+		if (cambio) return cambio;
+	}
+	return null;
+}
+
+/**
+ * Los tipos que llevan selfie además del DPI: es el título que se ejecuta, el
+ * individual y el de sociedad (lo firma el representante).
+ */
+const RECONOCIMIENTOS_DE_DEUDA = [
+	"reconocimiento_deuda_feb_2025",
+	"reconocimiento_deuda_sociedad",
+];
 
 /**
  * El contrato de una oportunidad al que se le quiere vincular un documento de
@@ -1307,6 +1398,16 @@ export const legalContractsRouter = {
 					});
 				}
 
+				// Y que sean los que le tocan hoy (batería y titular de la sociedad).
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede aprobar: ${desactualizada}`,
+					});
+				}
+
 				// Actualizar la oportunidad y registrar historial en una transacción
 				await auditedTransaction(async (tx) => {
 					// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
@@ -1482,6 +1583,18 @@ export const legalContractsRouter = {
 				if (etapaConCandado?.porcentaje !== 85) {
 					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad ya fue procesada por otro usuario.",
+					});
+				}
+
+				// Lo firmado tiene que ser la batería de hoy: si algo cambió después de
+				// aprobar (el representante de la sociedad, el tipo de cliente), no se
+				// cierra con contratos de otra persona.
+				const desactualizada = await motivoBateriaVigenteDesactualizada(
+					input.opportunityId,
+				);
+				if (desactualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se puede confirmar: ${desactualizada}`,
 					});
 				}
 
@@ -2391,7 +2504,7 @@ export const legalContractsRouter = {
 					esperados,
 					// Lo mismo que pide el generador cuando lo emite él: selfie con
 					// prueba de vida en el reconocimiento de deuda, DPI en el resto.
-					contract.contractType === RECONOCIMIENTO_DE_DEUDA
+					RECONOCIMIENTOS_DE_DEUDA.includes(contract.contractType)
 						? "Selfie y DPI"
 						: "DPI",
 				),

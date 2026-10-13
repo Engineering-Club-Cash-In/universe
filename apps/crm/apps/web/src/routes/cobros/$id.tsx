@@ -57,6 +57,7 @@ import {
 } from "@/components/cobros/asesor/fila-cartera";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -2380,6 +2381,10 @@ function RouteComponent() {
 						valor:
 							`${caso.vehiculoMarca ?? ""} ${caso.vehiculoModelo ?? ""} ${caso.vehiculoYear ?? ""}`.trim() +
 							(caso.vehiculoPlaca ? ` · ${caso.vehiculoPlaca}` : ""),
+					},
+					{
+						label: "Cuenta Nexa",
+						valor: <CuentaNexa cuenta={caso.cuentaNexa} />,
 					},
 				]}
 			/>

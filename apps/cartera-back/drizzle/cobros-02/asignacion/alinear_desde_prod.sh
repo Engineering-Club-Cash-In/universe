@@ -42,7 +42,8 @@
 #   alinear_desde_prod.sh --prod URL_SUPABASE --neon URL_DIRECTA_NEON \
 #                         [--schema cartera_cobros2] [--prod-schema cartera] \
 #                         [--pool pool.csv] [--retencion 2] [--sin-swap] \
-#                         [--sin-motor] [--post-swap-cmd "curl ..."] [--dump-dir DIR]
+#                         [--sin-motor] [--post-swap-cmd "curl ..."] [--dump-dir DIR] \
+#                         [--correcciones correcciones_asesores.csv]
 #
 #   Sin --prod/--neon toma COBROS02_PROD_URL / COBROS02_NEON_URL del entorno.
 #   --sin-swap    deja el resultado en `<schema>_nuevo` sin cambiarlo por el vivo
@@ -50,6 +51,11 @@
 #                 y exige --sin-swap: un schema con historial viejo no se promueve
 #   --pool CSV    además re-arma el pool desde el CSV. Sin esto, se conserva el
 #                 pool que ya tenía el sandbox
+#   --correcciones CSV  correos de asesores que producción tiene mal y que el
+#                 mapa necesita (asesor_id_prod,nombre,email_cash_in). Se aplican
+#                 a la COPIA, nunca a producción, y abortan si el id y el nombre
+#                 no coinciden. Sin la opción se usa correcciones_asesores.csv si
+#                 existe junto al script
 #
 # Reglas duras:
 #   · A producción SOLO se le hace pg_dump. Jamás psql, restore, DDL ni el motor.
@@ -68,6 +74,7 @@ source "$AQUI/_lib.sh"
 PROD="${COBROS02_PROD_URL:-}"; PROD_SCHEMA="cartera"
 NEON="${COBROS02_NEON_URL:-}"; SCHEMA="cartera_cobros2"
 RETENCION=2; POOL_CSV=""; SIN_SWAP=0; SIN_MOTOR=0; POST_SWAP_CMD=""; DUMP_DIR=""
+CORRECCIONES_CSV=""
 
 uso() { sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -83,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --sin-motor)     SIN_MOTOR=1; shift ;;
     --post-swap-cmd) POST_SWAP_CMD="$2"; shift 2 ;;
     --dump-dir)      DUMP_DIR="$2"; shift 2 ;;
+    --correcciones)  CORRECCIONES_CSV="$2"; shift 2 ;;
     -h|--help)       uso 0 ;;
     *) die "Opción desconocida: $1 (ver --help)" ;;
   esac
@@ -92,6 +100,8 @@ done
 [[ -n "$NEON" ]] || die "Falta --neon (o COBROS02_NEON_URL): la cadena DIRECTA de Neon"
 [[ "$SCHEMA" != "cartera" ]] || die "El sandbox no puede llamarse 'cartera'."
 [[ -z "$POOL_CSV" || -f "$POOL_CSV" ]] || die "No existe el CSV del pool: $POOL_CSV"
+[[ -z "$CORRECCIONES_CSV" && -f "$AQUI/correcciones_asesores.csv" ]] && CORRECCIONES_CSV="$AQUI/correcciones_asesores.csv"
+[[ -z "$CORRECCIONES_CSV" || -f "$CORRECCIONES_CSV" ]] || die "No existe el CSV de correcciones: $CORRECCIONES_CSV"
 for h in psql pg_dump perl; do command -v "$h" >/dev/null || die "Falta $h en el PATH"; done
 
 exigir_directo "$NEON"
@@ -140,6 +150,25 @@ pg_dump "$PROD" --schema="$PROD_SCHEMA" --no-owner --no-privileges -Fp > "$DUMP_
 renombrar_dump "$PROD_SCHEMA" "$NUEVO" < "$DUMP_DIR/prod.sql" > "$DUMP_DIR/nuevo.sql"
 pn -1 -q -o /dev/null -f "$DUMP_DIR/nuevo.sql"
 pn -At -c "SELECT '· '||count(*)||' créditos, '||(SELECT count(*) FROM \"$NUEVO\".pagos_credito)||' pagos, última mora del '||(SELECT max(created_at)::date FROM \"$NUEVO\".moras_credito) FROM \"$NUEVO\".creditos"
+
+# Correos de asesores que producción tiene mal (p. ej. el genérico cobros@ o el
+# de otra persona). El mapa del paso 3 empareja por `email_cash_in`, así que sin
+# esto un asesor del pool "no existe en producción" y la corrida aborta. Se
+# corrige SOLO la copia; producción queda igual hasta que alguien la arregle.
+if [[ -n "$CORRECCIONES_CSV" ]]; then
+  valores=""
+  while IFS=, read -r c_id c_nombre c_correo _; do
+    [[ "$c_id" =~ ^[0-9]+$ ]] || continue   # encabezado y líneas vacías
+    valores+="${valores:+, }(${c_id}, '${c_nombre//\'/\'\'}', '${c_correo//\'/\'\'}')"
+  done < <(tr -d '\r' < "$CORRECCIONES_CSV")
+  if [[ -n "$valores" ]]; then
+    tabla_correcciones="(VALUES ${valores}) AS c(asesor_id, nombre, correo)"
+    # id Y nombre: si en producción ese id ya es otra persona, no se le cambia el correo.
+    faltan="$(pn -At -c "SELECT string_agg(format('%s (id %s)', c.nombre, c.asesor_id), ', ') FROM ${tabla_correcciones} WHERE NOT EXISTS (SELECT 1 FROM \"$NUEVO\".asesores a WHERE a.asesor_id = c.asesor_id AND lower(btrim(a.nombre)) = lower(btrim(c.nombre)))")"
+    [[ -z "$faltan" ]] || die "Correcciones de correo que no coinciden con producción (id + nombre): $faltan. Revisá $CORRECCIONES_CSV."
+    pn -At -c "UPDATE \"$NUEVO\".asesores a SET email_cash_in = c.correo FROM ${tabla_correcciones} WHERE a.asesor_id = c.asesor_id AND a.email_cash_in IS DISTINCT FROM c.correo RETURNING '· correo corregido en la copia: '||a.nombre||' (id '||a.asesor_id||') → '||c.correo"
+  fi
+fi
 
 # ── 2. Migraciones ──────────────────────────────────────────────────────────
 log "2 · migraciones cobros-02 sobre $NUEVO"

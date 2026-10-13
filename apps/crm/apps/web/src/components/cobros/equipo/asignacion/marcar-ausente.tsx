@@ -558,7 +558,8 @@ function FormularioAusencia({
 			toast.success("Ausencia registrada", {
 				description: `${origen?.nombre ?? "El asesor"} quedó ausente y su cartera se repartió entre el equipo.`,
 			});
-			onRegistrada({ desde: hoyGT(), hasta: hoyGT() });
+			// Sin `onRegistrada`: esa señal lleva al historial de coberturas, donde
+			// una ausencia indefinida no aparece.
 			onCerrar();
 		},
 		onError: () => setPaso("formulario"),

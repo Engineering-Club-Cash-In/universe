@@ -583,6 +583,8 @@ export type PanelSolicitudVistaProps = {
 	primerPago?: PrimerPagoVista;
 	/** Abre el editor de la contrapropuesta (M4); solo convenios. */
 	onContraproponer?: () => void;
+	/** El plan del convenio aún carga: el editor necesita su primer pago. */
+	cargandoPlan?: boolean;
 	className?: string;
 };
 
@@ -601,6 +603,7 @@ export function PanelSolicitudVista({
 	conMapa = true,
 	primerPago,
 	onContraproponer,
+	cargandoPlan = false,
 	className,
 }: PanelSolicitudVistaProps) {
 	const notasId = React.useId();
@@ -705,7 +708,7 @@ export function PanelSolicitudVista({
 							variant="secondary"
 							className="w-full"
 							onClick={onContraproponer}
-							disabled={!!bloqueo}
+							disabled={!!bloqueo || cargandoPlan}
 							title={bloqueo ?? undefined}
 						>
 							<Pencil aria-hidden />
@@ -1144,6 +1147,7 @@ function ContenidoEspacio({
 						bloqueo={bloqueo}
 						aviso={aviso}
 						primerPago={primerPago}
+						cargandoPlan={planConvenio.isPending}
 						resolucion={resolucion}
 						onVolver={onCerrar}
 						onSiguiente={hayMas ? () => onIr(posicion + 1) : undefined}

@@ -15,6 +15,7 @@ import {
 	contactabilidadDeResumen,
 	DIAS_CONTACTABILIDAD,
 	estadoAsesor,
+	filtrarEquipoActivo,
 	rangosContactabilidad,
 	textoAusencia,
 	textoAusenciaIndefinida,
@@ -60,20 +61,37 @@ type AgendaItem = {
 
 const BUCKETS_UI: BucketAsesor[] = ["B0", "B1", "B2", "B3", "B4", "B5"];
 
-/** Catálogo del equipo: asesores activos con buckets en el pool de cartera. */
+/** M5: ausencias indefinidas vigentes (con la cartera repartida al equipo). */
+function useAusenciasIndefinidas(habilitado: boolean) {
+	return useQuery({
+		...orpcAparte.listarAusencias.queryOptions({
+			input: { soloVigentes: true },
+		}),
+		enabled: habilitado,
+	});
+}
+
+/**
+ * Catálogo del equipo: asesores activos con buckets en el pool de cartera. Un
+ * asesor con ausencia indefinida se queda aunque no tenga buckets: cartera le
+ * apaga el pool al repartirle la cartera, y sin su tarjeta no habría cómo
+ * reactivarlo.
+ */
 export function useEquipoActivo(habilitado: boolean) {
 	const query = useQuery({
 		...orpc.getAsesoresTraslados.queryOptions(),
 		enabled: habilitado,
 		staleTime: 5 * 60_000,
 	});
-	const activos = useMemo(
-		() =>
-			(query.data ?? [])
-				.filter((a) => a.activo !== false && a.buckets.length > 0)
-				.sort((a, b) => a.nombre.localeCompare(b.nombre, "es")),
-		[query.data],
-	);
+	const ausenciasQuery = useAusenciasIndefinidas(habilitado);
+	const activos = useMemo(() => {
+		const ausentes = new Set(
+			(ausenciasQuery.data ?? []).map((x) => x.asesorId),
+		);
+		return filtrarEquipoActivo(query.data ?? [], ausentes).sort((a, b) =>
+			a.nombre.localeCompare(b.nombre, "es"),
+		);
+	}, [query.data, ausenciasQuery.data]);
 	return { query, activos };
 }
 
@@ -122,12 +140,7 @@ export function MiEquipoAsesores({
 	});
 
 	// M5: ausencias indefinidas vigentes (con la cartera repartida al equipo).
-	const ausenciasQuery = useQuery({
-		...orpcAparte.listarAusencias.queryOptions({
-			input: { soloVigentes: true },
-		}),
-		enabled: habilitado,
-	});
+	const ausenciasQuery = useAusenciasIndefinidas(habilitado);
 	const ausencias = ausenciasQuery.data ?? [];
 
 	// M7: una sola llamada para todo el equipo (antes, una por asesor).

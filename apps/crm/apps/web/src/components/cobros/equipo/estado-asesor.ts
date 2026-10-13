@@ -47,6 +47,24 @@ export function etiquetaNivel(nivel: NivelAsesor | null): string {
 	return nivel ? `Asesor ${NIVEL_ASESOR_LABEL[nivel]}` : "Sin pool asignado";
 }
 
+/**
+ * Asesores que cuentan en el equipo: activos y con buckets en el pool. Un asesor
+ * con ausencia indefinida se queda aunque no tenga buckets (cartera le apaga el
+ * pool al repartirle la cartera); sin su tarjeta no habría cómo reactivarlo.
+ */
+export function filtrarEquipoActivo<
+	A extends {
+		asesor_id: number;
+		activo?: boolean | null;
+		buckets: readonly number[];
+	},
+>(asesores: readonly A[], ausentes: ReadonlySet<number>): A[] {
+	return asesores.filter(
+		(a) =>
+			a.activo !== false && (a.buckets.length > 0 || ausentes.has(a.asesor_id)),
+	);
+}
+
 /* ── Estado ────────────────────────────────────────────────────────────── */
 
 export type EstadoAsesor = "al_dia" | "requiere_atencion" | "ausente";

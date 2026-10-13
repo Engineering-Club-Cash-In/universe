@@ -43,6 +43,7 @@ export type ReasignarLoteResultado =
 
 class LoteEnConflicto extends Error {}
 class BucketsOcupado extends Error {}
+class DestinoInactivo extends Error {}
 
 /** Presupuesto TOTAL de espera por locks de crédito y de elegibilidad. */
 const PRESUPUESTO_LOCKS_MS = 5_000;
@@ -198,11 +199,16 @@ export async function reasignarAsesorLote(params: {
       // espera a que este lote termine, así que la elegibilidad leída es la
       // que rige cuando se escribe.
       await acotarEspera();
-      await tx
-        .select({ asesor_id: asesores.asesor_id })
+      const [destinoFila] = await tx
+        .select({ asesor_id: asesores.asesor_id, activo: asesores.activo })
         .from(asesores)
         .where(eq(asesores.asesor_id, params.asesor_nuevo_id))
         .for("share");
+      // Los buckets que el llamador da por validados se saltan el filtro de «activo»
+      // del pool: si el destino se desactivó mientras tanto, no se le entrega nada.
+      if (params.buckets_pool_validados && !destinoFila?.activo) {
+        throw new DestinoInactivo();
+      }
       await acotarEspera();
       await tx
         .select({ asesor_id: asesor_bucket.asesor_id })
@@ -345,6 +351,9 @@ export async function reasignarAsesorLote(params: {
     // el presupuesto de espera de los locks.
     if (error instanceof BucketsOcupado || codigoPg === "55P03" || codigoPg === "57014") {
       return { success: false, status: 409, message: MENSAJE_BUCKETS_OCUPADO };
+    }
+    if (error instanceof DestinoInactivo) {
+      return { success: false, status: 409, message: "[ERROR] El asesor destino no está activo: no se le entregan cuentas." };
     }
     if (error instanceof LoteEnConflicto) {
       return {

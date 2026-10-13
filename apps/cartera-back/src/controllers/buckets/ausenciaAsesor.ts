@@ -121,10 +121,24 @@ export async function devolverTraslado(params: {
 }) {
   const detalle = await detalleTraslado(params.operacionId);
   const [origen] = (
-    await db.execute<{ asesor_origen_id: number }>(sql`
-      SELECT asesor_origen_id FROM ${schema}.operaciones_traslado_cartera WHERE id = ${params.operacionId}::uuid`)
+    await db.execute<{ asesor_origen_id: number; es_ausencia: boolean }>(sql`
+      SELECT asesor_origen_id, COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false) AS es_ausencia
+      FROM ${schema}.operaciones_traslado_cartera WHERE id = ${params.operacionId}::uuid`)
   ).rows;
+  // Solo se devuelve el reparto de una ausencia (el traslado que pausó el pool): un
+  // traslado normal es una decisión permanente y esta ruta no debe deshacerla.
+  if (!origen.es_ausencia) {
+    throw new AusenciaError("Este traslado no es el reparto de una ausencia: no se puede devolver.", 409, "traslado_no_es_ausencia");
+  }
   const titular = Number(origen.asesor_origen_id);
+  // Un asesor desactivado durante la ausencia no recibe su cartera de vuelta: se
+  // rechaza ANTES de mover nada (el lote lo vuelve a comprobar bajo sus locks).
+  const [titularActual] = (
+    await db.execute<{ activo: boolean }>(sql`SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${titular}`)
+  ).rows;
+  if (!titularActual?.activo) {
+    throw new AusenciaError("El asesor no está activo: no se le puede devolver su cartera.", 409, "asesor_inactivo");
+  }
 
   const actuales = new Map<number, { asesor_id: number | null; bucket: number | null } | null>();
   const ids = detalle.map((d) => d.credito_id);

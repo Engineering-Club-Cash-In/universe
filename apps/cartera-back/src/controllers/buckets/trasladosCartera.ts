@@ -338,7 +338,9 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         `Hay ${plan.excluidos.length} crédito(s) activos sin bucket operativo. Asigna su bucket antes de confirmar el traslado.`,
       );
     }
-    if (plan.bloqueos.length || !plan.asignaciones.length) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
+    // Con `mantenerEspeciales` (ausencia, M5) un traslado sin cuentas que repartir es
+    // válido: el asesor sin cartera operativa igual debe poder marcarse ausente.
+    if (plan.bloqueos.length || (!plan.asignaciones.length && !row.solicitud.mantenerEspeciales)) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
     // Un solo CTE mantiene UPDATE, historial y detalle atómicos. El CAS por
     // fila preserva la protección frente a reasignaciones manuales; si una
     // sola fila cambió, se lanza conflicto y la transacción revierte lote

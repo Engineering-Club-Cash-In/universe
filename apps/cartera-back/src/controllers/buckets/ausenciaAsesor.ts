@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../database";
 import { asesor_bucket, asesores, SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
 import { BUCKETS_CONVENIO_LOCK_KEY, CREDITO_ASESOR_LOCK_NAMESPACE, PROCESAR_MORAS_LOCK_KEY } from "../../lib/buckets-job-locks";
-import { clasificarDevolucion } from "../../lib/ausencia-devolucion";
+import { clasificarDevolucion, separarYaDevueltos, type UltimoCambioDueno } from "../../lib/ausencia-devolucion";
 import { leerCreditos, reasignarAsesorLote } from "./reasignarAsesorLote";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,9 +113,27 @@ export async function devolverTraslado(params: {
     ).map((b) => b.bucket),
   );
 
-  const { aDevolver, aDevolverDirecto, retenidos } = clasificarDevolucion(detalle, actuales, bucketsDelTitular);
+  const clasificacion = clasificarDevolucion(detalle, actuales, bucketsDelTitular);
+  const { aDevolver, aDevolverDirecto } = clasificacion;
+  const recibio = new Map(detalle.map((d) => [d.credito_id, d.asesor_nuevo_id]));
 
-  let devueltos = 0;
+  // Reintento tras una devolución parcial: lo que una tanda anterior ya devolvió
+  // cuenta como devuelto, no como retenido.
+  const { yaDevueltos, retenidos: retenidosSinRepetidos } = separarYaDevueltos(
+    clasificacion.retenidos,
+    detalle,
+    actuales,
+    await ultimosCambiosDeDueno(
+      clasificacion.retenidos
+        .filter((r) => r.motivo === "cambio_de_dueno" && actuales.get(r.credito_id)?.asesor_id === titular)
+        .map((r) => r.credito_id),
+    ),
+    titular,
+    params.motivo,
+  );
+  const retenidos = [...retenidosSinRepetidos];
+  let devueltos = yaDevueltos.length;
+
   for (let i = 0; i < aDevolver.length; i += MAX_LOTE) {
     const lote = aDevolver.slice(i, i + MAX_LOTE);
     const res = await reasignarAsesorLote({
@@ -123,6 +141,9 @@ export async function devolverTraslado(params: {
       asesor_nuevo_id: titular,
       motivo: params.motivo,
       usuario_email: params.usuarioEmail,
+      // Bajo los locks del lote: si un supervisor la movió después de clasificar,
+      // se queda con su nuevo dueño.
+      duenios_esperados: new Map(lote.map((id) => [id, recibio.get(id) as number])),
     });
     if (!res.success) {
       // Lo devuelto en tandas anteriores ya está escrito; el supervisor puede
@@ -134,17 +155,46 @@ export async function devolverTraslado(params: {
       );
     }
     devueltos += res.reasignados.length;
+    for (const o of res.omitidos) {
+      if (o.motivo === "cambio_de_dueno") retenidos.push({ credito_id: o.credito_id, motivo: "cambio_de_dueno" });
+    }
   }
   if (aDevolverDirecto.length) {
-    devueltos += await devolverSinBucket({
+    const directos = await devolverSinBucket({
       operacionId: params.operacionId,
       titular,
       creditoIds: aDevolverDirecto,
       motivo: params.motivo,
       usuarioEmail: params.usuarioEmail,
     });
+    devueltos += directos.length;
+    const devueltosDirecto = new Set(directos);
+    for (const id of aDevolverDirecto) {
+      if (!devueltosDirecto.has(id)) retenidos.push({ credito_id: id, motivo: "cambio_de_dueno" });
+    }
   }
   return { asesor_id: titular, devueltos, retenidos, total: detalle.length };
+}
+
+/** Último cambio de dueño de cada crédito en la bitácora (para reconocer lo ya devuelto). */
+async function ultimosCambiosDeDueno(ids: number[]): Promise<Map<number, UltimoCambioDueno>> {
+  const mapa = new Map<number, UltimoCambioDueno>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const idsSql = sql.join(ids.slice(i, i + 500).map((id) => sql`${id}`), sql`, `);
+    const res = await db.execute<{ credito_id: number } & UltimoCambioDueno>(sql`
+      SELECT DISTINCT ON (credito_id) credito_id, asesor_anterior, asesor_nuevo, motivo
+      FROM ${schema}.credito_asesor_historial
+      WHERE credito_id IN (${idsSql})
+      ORDER BY credito_id, historial_id DESC`);
+    for (const f of res.rows) {
+      mapa.set(Number(f.credito_id), {
+        asesor_anterior: f.asesor_anterior === null ? null : Number(f.asesor_anterior),
+        asesor_nuevo: f.asesor_nuevo === null ? null : Number(f.asesor_nuevo),
+        motivo: f.motivo,
+      });
+    }
+  }
+  return mapa;
 }
 
 /**
@@ -160,7 +210,7 @@ async function devolverSinBucket(params: {
   creditoIds: number[];
   motivo: string;
   usuarioEmail?: string;
-}): Promise<number> {
+}): Promise<number[]> {
   const ids = [...new Set(params.creditoIds)].sort((a, b) => a - b);
   return db.transaction(async (tx) => {
     const jobs = await tx.execute<{ moras: boolean; convenio: boolean }>(sql`
@@ -203,6 +253,6 @@ async function devolverSinBucket(params: {
         RETURNING credito_id
       )
       SELECT credito_id, asesor_anterior, bucket FROM actualizados`);
-    return res.rows.length;
+    return res.rows.map((r) => Number(r.credito_id));
   });
 }

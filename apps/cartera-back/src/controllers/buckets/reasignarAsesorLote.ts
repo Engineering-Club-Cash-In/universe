@@ -37,7 +37,7 @@ export type ReasignarLoteResultado =
       success: true;
       asesor_nuevo: number;
       reasignados: Array<{ credito_id: number; asesor_anterior: number | null; bucket: number }>;
-      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" }>;
+      omitidos: Array<{ credito_id: number; motivo: "ya_asignado" | "cambio_de_dueno" }>;
     }
   | { success: false; status: number; message: string; errores?: ErrorLote[] };
 
@@ -91,6 +91,12 @@ export async function reasignarAsesorLote(params: {
   asesor_nuevo_id: number;
   motivo: string;
   usuario_email?: string;
+  /**
+   * credito_id → dueño que debe tener AL ESCRIBIR (M5, devolución de una
+   * ausencia). Se compara bajo los mismos locks que la escritura: el crédito
+   * que ya tiene otro dueño se omite ("cambio_de_dueno") en vez de quitárselo.
+   */
+  duenios_esperados?: ReadonlyMap<number, number>;
 }): Promise<ReasignarLoteResultado> {
   const motivo = (params.motivo ?? "").trim();
   if (!motivo) {
@@ -230,12 +236,28 @@ export async function reasignarAsesorLote(params: {
         const pool = await getAsesoresPorBucket(bucket, tx, true);
         poolPorBucket.set(bucket, new Set(pool.map((a) => a.asesor_id)));
       }
-      const evaluacion = evaluarLote({
-        creditoIds: ids,
+      const cambiaronDeDueno: number[] = [];
+      const elegibles = params.duenios_esperados
+        ? ids.filter((id) => {
+            const esperado = params.duenios_esperados?.get(id);
+            const ok = esperado === undefined || creditos.get(id)?.asesor_id === esperado;
+            if (!ok) cambiaronDeDueno.push(id);
+            return ok;
+          })
+        : ids;
+      const evaluado = evaluarLote({
+        creditoIds: elegibles,
         creditos,
         poolPorBucket,
         asesorNuevoId: params.asesor_nuevo_id,
       });
+      const evaluacion = {
+        ...evaluado,
+        omitidos: [
+          ...evaluado.omitidos,
+          ...cambiaronDeDueno.map((credito_id) => ({ credito_id, motivo: "cambio_de_dueno" as const })),
+        ],
+      };
       if (evaluacion.errores.length > 0 || evaluacion.aReasignar.length === 0) {
         // Nada que escribir: o el lote no cumple, o todos ya eran del destino.
         return evaluacion;

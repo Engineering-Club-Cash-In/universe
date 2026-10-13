@@ -163,8 +163,10 @@ export async function marcarAusenteIndefinido(params: {
 		.where(eq(ausenciasAsesorCobros.id, params.id))
 		.limit(1)
 		.then((r) => r[0]);
-	// Reintento del mismo clic: si ya se repartió, se devuelve lo hecho.
-	if (existente?.operacionTrasladoId) return existente;
+	// Reintento del mismo clic: si ya se repartió Y se sacó del pool, se devuelve
+	// lo hecho. Si el reparto ya está pero el pool no se pudo pausar, solo se
+	// completa ese paso.
+	if (existente?.operacionTrasladoId && existente.poolPausado) return existente;
 
 	const { userId: titularId } = await asesorConUsuario(params.asesorId);
 	if (!existente) {
@@ -186,50 +188,68 @@ export async function marcarAusenteIndefinido(params: {
 		}
 	}
 
-	let operacionId: string;
-	let cuentas: number;
-	try {
-		const res = await carteraBackClient.confirmarTrasladoCartera({
-			previewId: params.previewId,
-			idempotencyKey: params.id,
-			actorEmail: params.actor.email,
-		});
-		operacionId = res.operacionId;
-		cuentas = res.cuentas;
-	} catch (error) {
-		// No se repartió nada: se quita la ausencia para poder volver a intentar.
+	if (!existente?.operacionTrasladoId) {
+		let operacionId: string;
+		let cuentas: number;
+		try {
+			const res = await carteraBackClient.confirmarTrasladoCartera({
+				previewId: params.previewId,
+				idempotencyKey: params.id,
+				actorEmail: params.actor.email,
+			});
+			operacionId = res.operacionId;
+			cuentas = res.cuentas;
+		} catch (error) {
+			// Solo se quita la ausencia si cartera-back RECHAZÓ el traslado (400/404/409):
+			// ahí no se repartió nada. Ante un timeout, corte de conexión o 5xx el
+			// traslado pudo confirmarse sin que llegara la respuesta: el registro se
+			// conserva y el reintento con la misma clave de idempotencia lo reconcilia.
+			if (
+				error instanceof CarteraBackHttpError &&
+				(error.status === 400 || error.status === 404 || error.status === 409)
+			) {
+				await db
+					.delete(ausenciasAsesorCobros)
+					.where(
+						and(
+							eq(ausenciasAsesorCobros.id, params.id),
+							isNull(ausenciasAsesorCobros.operacionTrasladoId),
+						),
+					);
+			}
+			traducirErrorCartera(error);
+		}
+
 		await db
-			.delete(ausenciasAsesorCobros)
-			.where(
-				and(
-					eq(ausenciasAsesorCobros.id, params.id),
-					isNull(ausenciasAsesorCobros.operacionTrasladoId),
-				),
-			);
-		traducirErrorCartera(error);
+			.update(ausenciasAsesorCobros)
+			.set({ operacionTrasladoId: operacionId, cuentasRepartidas: cuentas })
+			.where(eq(ausenciasAsesorCobros.id, params.id));
 	}
 
-	await db
-		.update(ausenciasAsesorCobros)
-		.set({ operacionTrasladoId: operacionId, cuentasRepartidas: cuentas })
-		.where(eq(ausenciasAsesorCobros.id, params.id));
-
-	// Fuera del pool para que el motor no le mande cuentas nuevas. Si falla, la
-	// ausencia queda registrada con `poolPausado = false` y se reintenta al
-	// reactivar (no se revierte un reparto que ya ocurrió).
+	// Fuera del pool para que el motor no le mande cuentas nuevas. Si falla no se
+	// revierte el reparto (ya ocurrió) pero tampoco se reporta éxito: la ausencia
+	// queda con `poolPausado = false` y reintentar el mismo clic repite solo este paso.
+	let errorPool: unknown = null;
 	try {
 		const { buckets } = await carteraBackClient.pausarPoolAsesor(
 			params.asesorId,
 		);
 		await db
 			.update(ausenciasAsesorCobros)
-			.set({ bucketsPausados: buckets, poolPausado: true })
+			// En un reintento los buckets ya pausados no vuelven a salir como activos.
+			.set({
+				bucketsPausados: [
+					...new Set([...(existente?.bucketsPausados ?? []), ...buckets]),
+				].sort((a, b) => a - b),
+				poolPausado: true,
+			})
 			.where(eq(ausenciasAsesorCobros.id, params.id));
 	} catch (error) {
 		console.error(
 			`[ausencias] No se pudo sacar a ${params.asesorId} del pool:`,
 			error,
 		);
+		errorPool = error;
 	}
 	try {
 		await reconciliarAvisosLlamarCliente();
@@ -238,6 +258,12 @@ export async function marcarAusenteIndefinido(params: {
 			"[ausencias] No se reconciliaron los avisos de llamadas:",
 			error,
 		);
+	}
+	if (errorPool) {
+		throw new ORPCError("BAD_GATEWAY", {
+			message:
+				"La cartera se repartió, pero no se pudo sacar al asesor del pool de asignación. Reintente para completar el paso.",
+		});
 	}
 	return db
 		.select()

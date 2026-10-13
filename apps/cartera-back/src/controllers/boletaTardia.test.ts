@@ -68,3 +68,25 @@ describe("traeCondonacionBoletaTardia (decide si /newPayment bifurca)", () => {
     expect(traeCondonacionBoletaTardia({ condonacionBoletaTardia: "x" })).toBe(true);
   });
 });
+
+describe("identidad del pago: registerBy sale del actor verificado, no del body", () => {
+  test("body con registerBy ajeno -> insertPayment recibe el email verificado; condonación y pago a nombre del mismo actor", async () => {
+    let llamadas = 0;
+    const vistos: { registerBy?: unknown; actorCondonar?: unknown; actorAnular?: unknown } = {};
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
+      filasVivas: (async () => (++llamadas === 1 ? [] : [99])) as never,
+      condonacionViva: (async () => null) as never,
+      decidir: (async () => ({ aplica: true, montoCondonar: "11.20", moraActiva: "20.00", porCuota: [{ cuota_id: 1, numero_cuota: 5, monto: "11.20" }], fechaRegistro: "2026-10-13" })) as never,
+      condonar: (async (p: { usuario_email: string }) => { vistos.actorCondonar = p.usuario_email; return { kind: "condonada", condonacion_id: 3, monto: "11.20" }; }) as never,
+      insertPayment: (async (ctx: { body: { registerBy?: unknown } }) => { vistos.registerBy = ctx.body.registerBy; return { success: true }; }) as never,
+      evaluarAlDia: (async () => ({ desactivarMora: true })) as never,
+    };
+    const body = cuerpo({ registerBy: "otro@x.com" });
+    const set: { status?: number } = {};
+    await registrarPagoConBoletaTardia({ body, set }, { usuarioEmail: "db@clubcashin.com" }, deps);
+    expect(vistos.registerBy).toBe("db@clubcashin.com");
+    expect(vistos.actorCondonar).toBe("db@clubcashin.com");
+  });
+});

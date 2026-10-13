@@ -95,10 +95,11 @@ export async function registrarPagoConBoletaTardia(
   const errorFecha = validarFechaBoleta(p.fecha_boleta, ymdDeFechaCalendario(hoyGuatemala()));
   if (errorFecha) { set.status = 400; return validationFailed({ fecha_boleta: [errorFecha] }); }
 
-  const body = { ...ctx.body, numeroAutorizacion };
+  const actor = opciones.usuarioEmail;
+  // El pago también queda a nombre del actor verificado: el `registerBy` del body es declarado por el cliente.
+  const body = { ...ctx.body, numeroAutorizacion, registerBy: actor };
   const { intentoId, montoAceptado } = bloque.data;
   const creditoId = p.credito_id;
-  const actor = opciones.usuarioEmail;
 
   return deps.conLock(creditoId, async (paymentLock) => {
     // 1. Idempotencia: ya hay filas vivas de ESTE crédito con ese intento → no se vuelve a registrar.

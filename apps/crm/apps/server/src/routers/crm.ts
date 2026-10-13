@@ -54,6 +54,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
@@ -745,9 +746,30 @@ async function sociedadParaJuridico(
 	};
 }
 
-/** En firma: los contratos ya salieron y todavía no están firmados. */
-function estaEnFirma(porcentaje: number | null | undefined): boolean {
-	return (porcentaje ?? 0) >= 85 && (porcentaje ?? 0) < 90;
+/**
+ * Las oportunidades (de las dadas) con contratos vivos: vigentes y todavía
+ * sin firmar. Salieron a firma con los datos de hoy —WeeTrust manda las
+ * invitaciones apenas se generan, ya en 80%— y pueden seguir pendientes
+ * después de 90%: lo que cuenta son los contratos, no la etapa.
+ */
+async function conContratosPendientes(
+	tx: Transaction,
+	opportunityIds: string[],
+): Promise<Set<string>> {
+	if (opportunityIds.length === 0) return new Set();
+	const filas = await tx
+		.select({ opportunityId: generatedLegalContracts.opportunityId })
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				inArray(generatedLegalContracts.opportunityId, opportunityIds),
+				eq(generatedLegalContracts.status, "pending"),
+				isNull(generatedLegalContracts.replacedByContractId),
+			),
+		);
+	return new Set(
+		filas.map((f) => f.opportunityId).filter((id): id is string => !!id),
+	);
 }
 
 /** Lo que los contratos de sociedad dicen del representante legal. */
@@ -796,17 +818,19 @@ async function congelarRepresentanteEnFirma(
 		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
 	);
 
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
 	const [oportunidad] = await tx
-		.select({
-			porcentaje: salesStages.closurePercentage,
-			clientType: leads.clientType,
-		})
+		.select({ clientType: leads.clientType })
 		.from(opportunities)
-		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
 		.where(eq(opportunities.id, fila.opportunityId))
 		.limit(1);
-	if (!estaEnFirma(oportunidad?.porcentaje)) return;
 
 	const coDeudores = await tx
 		.select({
@@ -843,7 +867,7 @@ async function congelarRepresentanteEnFirma(
 	) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"La oportunidad está en firma: los contratos salieron con estos datos del representante legal. Para corregirlos, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+				"La oportunidad tiene contratos pendientes de firma con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 }
@@ -915,22 +939,16 @@ async function protegerLeadEnFirma(
 		);
 	}
 
-	const enFirma = (
-		await tx
-			.select({
-				id: opportunities.id,
-				porcentaje: salesStages.closurePercentage,
-			})
-			.from(opportunities)
-			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-			.where(eq(opportunities.leadId, leadId))
-	).filter((o) => estaEnFirma(o.porcentaje));
-	if (enFirma.length === 0) return;
+	const conPendientes = await conContratosPendientes(
+		tx,
+		oportunidades.map((o) => o.id),
+	);
+	if (conPendientes.size === 0) return;
 
 	if (cambiaTipo) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"El cliente tiene una oportunidad en firma: sus contratos son de la batería del tipo de cliente actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+				"El cliente tiene contratos pendientes de firma de la batería del tipo de cliente actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 
@@ -940,17 +958,14 @@ async function protegerLeadEnFirma(
 		.from(coDebtors)
 		.where(
 			and(
-				inArray(
-					coDebtors.opportunityId,
-					enFirma.map((o) => o.id),
-				),
+				inArray(coDebtors.opportunityId, [...conPendientes]),
 				eq(coDebtors.esRepresentanteLegal, true),
 			),
 		);
 	if (lead.clientType === "empresa" || marcados.length > 0) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
-				"La sociedad tiene una oportunidad en firma: sus contratos salieron con este nombre y esta dirección. Para corregirlos, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+				"La sociedad tiene contratos pendientes de firma con este nombre y esta dirección. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
 		});
 	}
 }
@@ -10261,19 +10276,16 @@ export const crmRouter = {
 					esRepresentanteLegal !== undefined &&
 					coDeudor.esRepresentanteLegal !== esRepresentanteLegal
 				) {
-					// En firma los contratos ya salieron a nombre del representante
-					// actual: cambiarlo ahí dejaría sus invitaciones vivas con otra
-					// persona. Se cambia en 80%, y jurídico rehace la batería.
-					const [etapa] = await tx
-						.select({ porcentaje: salesStages.closurePercentage })
-						.from(opportunities)
-						.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-						.where(eq(opportunities.id, coDeudor.opportunityId))
-						.limit(1);
-					if (estaEnFirma(etapa?.porcentaje)) {
+					// Con contratos vivos, ya salieron a nombre del representante
+					// actual: cambiarlo dejaría sus invitaciones con otra persona.
+					if (
+						(await conContratosPendientes(tx, [coDeudor.opportunityId])).has(
+							coDeudor.opportunityId,
+						)
+					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
-								"La oportunidad está en firma: los contratos salieron a nombre del representante legal actual. Para cambiarlo, regresá la oportunidad a 80% y que jurídico rehaga la batería.",
+								"La oportunidad tiene contratos pendientes de firma a nombre del representante legal actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
 						});
 					}
 					if (esRepresentanteLegal) {

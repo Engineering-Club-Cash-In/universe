@@ -12,10 +12,14 @@ import {
 	ESTADOS_CIVILES,
 	edadAl,
 	TIPOS_CARTA_PODER,
+	type TipoCartaPoder,
 } from "../lib/carta-poder";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
-import { generateContractsBatch } from "../services/legal-docs-api";
+import {
+	type DocumentResult,
+	generateContractsBatch,
+} from "../services/legal-docs-api";
 
 /**
  * La carta poder sale del CRM: jurídico busca el crédito, el formulario se
@@ -255,33 +259,14 @@ export const cartaPoderRouter = {
 		)
 		.handler(async ({ input }) => {
 			const { tipo, campos } = input;
-			const nombre = campos.nombreCompleto.trim() || "Carta poder";
 
 			const respuesta = await generateContractsBatch({
-				contracts: [
-					{
-						contractType: tipo,
-						data: datosDeLaCartaPoder(tipo, campos),
-						options: {
-							gender: campos.genero,
-							generatePdf: true,
-							filenamePrefix: nombre
-								.normalize("NFD")
-								.replace(/[̀-ͯ]/g, "")
-								.replace(/[^A-Za-z0-9]+/g, "_"),
-						},
-					},
-				],
+				contracts: [pedidoDeLaCarta(tipo, campos)],
 			});
 
 			const resultado = respuesta.results?.[0];
-			// Sólo se mira que exista el PDF. No se pasa por `motivoDeFalla`: si el
-			// generador todavía no la tiene marcada como firma en papel, la devuelve
-			// como electrónica sin links y eso la daría por fallida.
-			if (
-				!resultado?.success ||
-				(!resultado.r2Key && !resultado.linkDocument)
-			) {
+			const documentLink = await pdfDeLaCarta(resultado);
+			if (!documentLink) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						resultado?.error ||
@@ -290,10 +275,92 @@ export const cartaPoderRouter = {
 				});
 			}
 
+			return { documentLink };
+		}),
+
+	/**
+	 * Varias cartas del mismo cliente en un solo pedido al generador, que las
+	 * arma una tras otra. Cada una lleva la edad de su representante; si una
+	 * falla, las demás se devuelven igual.
+	 */
+	generarCartasPoder: juridicoProcedure
+		.input(
+			z.object({
+				cartas: z
+					.array(
+						z.object({
+							tipo: z.enum(TIPOS_CARTA_PODER),
+							edadRepresentante: z.string(),
+						}),
+					)
+					.min(1, "Elija al menos una carta")
+					.refine(
+						(cartas) =>
+							new Set(cartas.map((c) => c.tipo)).size === cartas.length,
+						"Una misma carta viene dos veces",
+					),
+				campos: camposSchema,
+			}),
+		)
+		.handler(async ({ input }) => {
+			const { cartas, campos } = input;
+
+			const respuesta = await generateContractsBatch({
+				contracts: cartas.map((c) =>
+					pedidoDeLaCarta(c.tipo, {
+						...campos,
+						edadRepresentante: c.edadRepresentante,
+					}),
+				),
+			});
+
+			// El generador devuelve uno por pedido, en el mismo orden.
 			return {
-				documentLink: resultado.r2Key
-					? await getFileUrlWithBucketInKey(resultado.r2Key)
-					: resultado.linkDocument,
+				cartas: await Promise.all(
+					cartas.map(async ({ tipo }, i) => {
+						const resultado = respuesta.results?.[i];
+						const documentLink = await pdfDeLaCarta(resultado);
+						return documentLink
+							? { tipo, documentLink }
+							: {
+									tipo,
+									error:
+										resultado?.error ||
+										respuesta.message ||
+										"No se pudo generar la carta poder",
+								};
+					}),
+				),
 			};
 		}),
 };
+
+function pedidoDeLaCarta(tipo: TipoCartaPoder, campos: CamposCartaPoder) {
+	const nombre = campos.nombreCompleto.trim() || "Carta poder";
+	return {
+		contractType: tipo,
+		data: datosDeLaCartaPoder(tipo, campos),
+		options: {
+			gender: campos.genero,
+			generatePdf: true,
+			filenamePrefix: nombre
+				.normalize("NFD")
+				.replace(/[̀-ͯ]/g, "")
+				.replace(/[^A-Za-z0-9]+/g, "_"),
+		},
+	};
+}
+
+/**
+ * El enlace al PDF de una carta, o null si no salió. Sólo se mira que exista
+ * el PDF. No se pasa por `motivoDeFalla`: si el generador todavía no la tiene
+ * marcada como firma en papel, la devuelve como electrónica sin links y eso
+ * la daría por fallida.
+ */
+async function pdfDeLaCarta(
+	resultado: DocumentResult | undefined,
+): Promise<string | null> {
+	if (!resultado?.success) return null;
+	if (resultado.r2Key) return getFileUrlWithBucketInKey(resultado.r2Key);
+	return resultado.linkDocument || null;
+}

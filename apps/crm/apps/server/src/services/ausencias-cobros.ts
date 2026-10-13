@@ -392,24 +392,26 @@ export async function marcarAusenteIndefinido(params: {
 		cuentas = res.cuentas;
 		buckets = res.bucketsPausados ?? [];
 	} catch (error) {
-		// Solo se quita la ausencia que ESTA llamada creó y que cartera-back RECHAZÓ el traslado (400/404/409):
-		// ahí no se repartió nada ni se pausó el pool. Ante un timeout, corte de
-		// conexión o 5xx el traslado pudo confirmarse sin que llegara la respuesta:
-		// el registro se conserva y el reintento con la misma clave de idempotencia
-		// lo reconcilia (el replay devuelve también los buckets pausados).
-		if (
-			!reintento &&
+		// Ante un rechazo de cartera (400/404/409) primero se pregunta por la clave: otra
+		// llamada con ESTE mismo id (doble envío, otra previsualización) pudo confirmar
+		// el traslado mientras esta recibía su rechazo, p. ej. «la cartera cambió» porque
+		// la ganadora ya repartió. Si es así la ausencia existe y se devuelve, también
+		// al reintento, en vez de mostrar un error por algo que sí se hizo.
+		const rechazada =
 			error instanceof CarteraBackHttpError &&
-			(error.status === 400 || error.status === 404 || error.status === 409)
-		) {
-			// Antes de borrar se pregunta a cartera por la clave: un reintento
-			// concurrente (con otra previsualización) pudo confirmar el traslado con
-			// ESTE mismo id mientras esta llamada recibía su rechazo. Si es así el
-			// registro es suyo y no se toca.
+			(error.status === 400 || error.status === 404 || error.status === 409);
+		if (rechazada) {
 			const confirmada = await reconciliarPendiente(params.id).catch(
 				() => null,
 			);
 			if (confirmada) return confirmada;
+		}
+		// Solo se quita la ausencia que ESTA llamada creó y que cartera-back RECHAZÓ el
+		// traslado: ahí no se repartió nada ni se pausó el pool. Ante un timeout, corte
+		// de conexión o 5xx el traslado pudo confirmarse sin que llegara la respuesta:
+		// el registro se conserva y el reintento con la misma clave de idempotencia
+		// lo reconcilia (el replay devuelve también los buckets pausados).
+		if (!reintento && rechazada) {
 			await db
 				.delete(ausenciasAsesorCobros)
 				.where(

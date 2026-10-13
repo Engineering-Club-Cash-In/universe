@@ -8,6 +8,7 @@ import {
 	Users,
 } from "lucide-react";
 import type * as React from "react";
+import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -33,10 +34,7 @@ import {
 	FranjaSeguimiento,
 } from "@/components/cobros/ficha/ficha-resumen";
 import { BucketBadge, MoraBadge, PromesaBadge } from "@/components/ds/badges";
-import {
-	CardCobro,
-	CardPromesa,
-} from "@/components/ds/cards-cobranza";
+import { CardCobro, CardPromesa } from "@/components/ds/cards-cobranza";
 import { CrmPill } from "@/components/ds/cards-credito";
 import { FichaSaveBar } from "@/components/ds/ficha-edicion";
 import { HeaderCredito } from "@/components/ds/header-credito";
@@ -97,6 +95,10 @@ function Encabezado({ tab = "resumen" }: { tab?: string }) {
 					{ label: "Capital activo", valor: "Q38,900.00" },
 					{ label: "Cuotas restantes", valor: "13 de 48" },
 					{ label: "Vehículo", valor: "Toyota Hilux 2021 · P-472GST" },
+					{
+						label: "Cuenta Nexa",
+						valor: <CuentaNexa cuenta="CASHIN502123456789" />,
+					},
 				]}
 			/>
 			<Tabs value={tab}>

@@ -41,6 +41,7 @@ import {
 	type ResultadoVisita,
 } from "server/src/lib/visitas-cobros";
 import { toast } from "sonner";
+import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import {
 	AsistenteIA,
 	CuotaPlanFila,
@@ -270,6 +271,11 @@ export type ContextoCasoVistaProps = {
 	/** Tooltip del bucket ("B2 · Gestión Activa"). */
 	bucketTitulo?: string;
 	mora: { nivel: Mora; texto: string } | null;
+	/**
+	 * Cuenta Nexa (token de pago) para que el asesor se la dé al cliente si la
+	 * perdió. Vacía o ausente = «Sin cuenta Nexa».
+	 */
+	cuentaNexa?: string | null;
 	resumen: ResumenContexto;
 	historial: {
 		estado: Estado;
@@ -314,6 +320,7 @@ export function ContextoCasoVista({
 	bucket,
 	bucketTitulo,
 	mora,
+	cuentaNexa,
 	resumen,
 	historial,
 	historico,
@@ -384,16 +391,13 @@ export function ContextoCasoVista({
 						ultimoIntento={ultimoIntento ?? undefined}
 					/>
 				) : null}
-				{bucket || mora ? (
-					<div className="flex flex-wrap items-center gap-2">
-						{bucket ? (
-							<BucketBadge bucket={bucket} title={bucketTitulo} />
-						) : null}
-						{mora ? (
-							<MoraBadge mora={mora.nivel}>{mora.texto}</MoraBadge>
-						) : null}
-					</div>
-				) : null}
+				{/* Siempre visible: aunque no haya bucket ni mora, la cuenta Nexa
+				    (o «Sin cuenta Nexa») tiene que estar en el mismo lugar. */}
+				<div className="flex flex-wrap items-center gap-2">
+					{bucket ? <BucketBadge bucket={bucket} title={bucketTitulo} /> : null}
+					{mora ? <MoraBadge mora={mora.nivel}>{mora.texto}</MoraBadge> : null}
+					<CuentaNexa cuenta={cuentaNexa} conEtiqueta className="text-sm" />
+				</div>
 
 				{/* Pestañas: las cuatro de Figma y «Más ▾» con el resto */}
 				<Tabs value={tab} onValueChange={(v) => cambiarTab(v as TabContexto)}>
@@ -1472,6 +1476,7 @@ export function propsContextoDeCaso(
 			bucket.prefijo && bucket.etiqueta
 				? `${bucket.prefijo} · ${bucket.etiqueta}`
 				: undefined,
+		cuentaNexa: caso.detalle?.cuentaNexa ?? null,
 		mora:
 			mora.nivel && (mora.dias > 0 || mora.monto > 0)
 				? {

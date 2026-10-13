@@ -145,6 +145,7 @@ const BASE: ContextoCasoVistaProps = {
 	ultimoIntento: "11 ago 2026",
 	bucket: "B1",
 	bucketTitulo: "B1 · Alerta Temprana",
+	cuentaNexa: "CASHIN502123456789",
 	mora: { nivel: "Mora30", texto: "Mora Q200.00" },
 	resumen: {
 		estadoCobro: {
@@ -307,6 +308,7 @@ const B3_SIN_ACUERDO: ContextoCasoVistaProps = {
 	placa: null,
 	bucket: "B3",
 	bucketTitulo: "B3 · Rescate",
+	cuentaNexa: null,
 	mora: { nivel: "Mora90", texto: "Mora Q600.00" },
 	resumen: {
 		...BASE.resumen,

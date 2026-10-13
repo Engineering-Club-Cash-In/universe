@@ -2,6 +2,7 @@ import Big from "big.js";
 import z from "zod";
 import { db } from "../database";
 import {
+  asesores,
   aseguradoras,
   ajuste_fecha_ideal_pago,
   creditos,
@@ -411,6 +412,32 @@ export const findOrCreateAseguradora = async (
   return row.id;
 };
 
+/**
+ * Elige al asesor de menor carga y lo valida con un lock compartido sobre su fila
+ * dentro de la transacción del crédito: una ausencia que lo saque del balanceo
+ * (traslado con pausa) toma el lock de escritura antes de su foto, así que o este
+ * crédito queda confirmado antes de esa foto o el asesor deja de ser elegible y se
+ * elige otro.
+ */
+async function asignarAsesorConLock(executor: DbExecutor): Promise<number> {
+  for (let intento = 0; intento < 3; intento++) {
+    const candidato = await getAsesorConMenorCarga();
+    const vigente = await executor
+      .select({ asesor_id: asesores.asesor_id })
+      .from(asesores)
+      .where(
+        and(
+          eq(asesores.asesor_id, candidato),
+          eq(asesores.activo, true),
+          eq(asesores.activo_para_creditos, true),
+        ),
+      )
+      .for("share");
+    if (vigente.length > 0) return candidato;
+  }
+  throw new Error("No hay un asesor disponible para asignar el crédito.");
+}
+
 const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
@@ -447,7 +474,7 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
   );
 
   console.log("🎯 Aplicando load balancing de asesores...");
-  const asesor_id = creditData.asesor_id || await getAsesorConMenorCarga();
+  const asesor_id = creditData.asesor_id || await asignarAsesorConLock(executor);
   console.log(`✅ Asesor asignado: ${asesor_id}`);
 
   const formatCredit = creditData.inversionistas.length > 1 &&

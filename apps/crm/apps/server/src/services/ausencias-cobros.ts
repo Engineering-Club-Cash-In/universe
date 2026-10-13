@@ -128,6 +128,7 @@ const PENDIENTE_VENCE_MS = 15 * 60_000;
  * asesor pueda previsualizarse y marcarse de nuevo.
  */
 async function descartarPendientesVencidas(asesorId: number) {
+	const corte = new Date(Date.now() - PENDIENTE_VENCE_MS);
 	const vencidas = await db
 		.select({ id: ausenciasAsesorCobros.id })
 		.from(ausenciasAsesorCobros)
@@ -136,10 +137,7 @@ async function descartarPendientesVencidas(asesorId: number) {
 				eq(ausenciasAsesorCobros.asesorId, asesorId),
 				eq(ausenciasAsesorCobros.estado, "vigente"),
 				isNull(ausenciasAsesorCobros.operacionTrasladoId),
-				lt(
-					ausenciasAsesorCobros.inicioAt,
-					new Date(Date.now() - PENDIENTE_VENCE_MS),
-				),
+				lt(ausenciasAsesorCobros.inicioAt, corte),
 			),
 		);
 	for (const { id } of vencidas) {
@@ -150,12 +148,15 @@ async function descartarPendientesVencidas(asesorId: number) {
 			console.warn("[ausencias] No se pudo conciliar la pendiente:", id, error);
 			continue;
 		}
+		// Solo la versión vencida que se inspeccionó: si otra llamada la descartó y
+		// volvió a crear el registro con el mismo id, el nuevo no cumple `lt` y se queda.
 		await db
 			.delete(ausenciasAsesorCobros)
 			.where(
 				and(
 					eq(ausenciasAsesorCobros.id, id),
 					isNull(ausenciasAsesorCobros.operacionTrasladoId),
+					lt(ausenciasAsesorCobros.inicioAt, corte),
 				),
 			);
 	}

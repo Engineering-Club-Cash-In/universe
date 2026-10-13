@@ -343,10 +343,21 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // compartido sobre esas filas, así que o confirma antes de la foto o espera a
     // que la pausa termine y se rechaza. El lock global evita que dos pausas se
     // crucen con los pools de la otra como destinos.
+    let creditosPausados = false;
     if (row.solicitud.pausarPoolOrigen) {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('traslado-pausa-pool'))`);
       await tx.execute(sql`SELECT id FROM ${schema}.asesor_bucket
         WHERE asesor_id = ${row.solicitud.asesorOrigenId} ORDER BY id FOR UPDATE`);
+      // Sale del balanceo de créditos nuevos ANTES de las fotos: el UPDATE retiene el
+      // lock de la fila hasta el commit, y quien asigna un crédito nuevo lo valida
+      // con un lock compartido sobre esa fila (createCredit), así que o su crédito
+      // ya está confirmado cuando se toma la foto o la asignación se rechaza y
+      // elige a otro asesor.
+      const sinBalanceo = await tx.execute(sql`
+        UPDATE ${schema}.asesores SET activo_para_creditos = false
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo_para_creditos
+        RETURNING asesor_id`);
+      creditosPausados = sinBalanceo.rows.length > 0;
     }
     // Primera foto descubre qué créditos hay que proteger. Tras tomar sus
     // locks se lee de nuevo: un editor que ya estaba en curso termina antes y
@@ -468,14 +479,8 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo
         RETURNING bucket`);
       bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
-      // La asignación automática de créditos nuevos (menor carga) no mira el pool de
-      // buckets sino este flag: también sale del balanceo mientras dure la ausencia.
-      const sinBalanceo = await tx.execute(sql`
-        UPDATE ${schema}.asesores SET activo_para_creditos = false
-        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo_para_creditos
-        RETURNING asesor_id`);
       await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
-        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados: sinBalanceo.rows.length > 0 })}::jsonb
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados })}::jsonb
         WHERE id = ${row.id}::uuid`);
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA

@@ -155,6 +155,10 @@ export async function devolverTraslado(params: {
   let devueltos = yaDevueltos.length;
   let intentadas = 0;
 
+  // Lo que cambió de dueño DESPUÉS de clasificar puede ser lo que otra reactivación
+  // simultánea acaba de devolver: se resuelve al final mirando la marca en la bitácora.
+  const cambiaronDeDueno: number[] = [];
+
   const devolverPorLotes = async (todas: number[]) => {
     intentadas += todas.length;
     for (let i = 0; i < todas.length; i += MAX_LOTE) {
@@ -179,7 +183,7 @@ export async function devolverTraslado(params: {
       }
       devueltos += res.reasignados.length;
       for (const o of res.omitidos) {
-        if (o.motivo === "cambio_de_dueno") retenidos.push({ credito_id: o.credito_id, motivo: "cambio_de_dueno" });
+        if (o.motivo === "cambio_de_dueno") cambiaronDeDueno.push(o.credito_id);
       }
     }
   };
@@ -211,8 +215,23 @@ export async function devolverTraslado(params: {
       await devolverPorLotes(nueva.aDevolver);
       retenidos.push(...nueva.retenidos);
       // Siguen sin bucket y con quien los recibió pero la escritura no los tomó.
-      for (const id of nueva.aDevolverDirecto) retenidos.push({ credito_id: id, motivo: "cambio_de_dueno" });
+      cambiaronDeDueno.push(...nueva.aDevolverDirecto);
     }
+  }
+  if (cambiaronDeDueno.length) {
+    const unicos = [...new Set(cambiaronDeDueno)];
+    const ahora = new Map<number, { asesor_id: number | null; bucket: number | null; cerrado?: boolean } | null>();
+    for (const [id, valor] of await leerCreditos(db, unicos)) ahora.set(id, valor);
+    const resueltos = separarYaDevueltos(
+      unicos.map((id) => ({ credito_id: id, motivo: "cambio_de_dueno" as const })),
+      detalle,
+      ahora,
+      await ultimosCambiosDeDueno(unicos.filter((id) => ahora.get(id)?.asesor_id === titular)),
+      titular,
+      marca,
+    );
+    devueltos += resueltos.yaDevueltos.length;
+    retenidos.push(...resueltos.retenidos);
   }
   return { asesor_id: titular, devueltos, retenidos, total: detalle.length };
 }

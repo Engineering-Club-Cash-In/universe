@@ -86,8 +86,8 @@ async function verificarEnSat(
   uuid: string,
   emisorNit: string | null | undefined
 ): Promise<{ estado: EstadoSat; mensaje: string }> {
-  const client = getSatClientPorEmisor(emisorNit);
   try {
+    const client = getSatClientPorEmisor(emisorNit);
     let r = await client.obtenerPorUUID(uuid);
     if (!r.encontrado) {
       await new Promise((res) => setTimeout(res, REINTENTO_MS));

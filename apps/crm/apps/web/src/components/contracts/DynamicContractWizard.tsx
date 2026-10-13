@@ -305,6 +305,14 @@ interface GenerationResultWithData extends GenerationResult {
 
 interface DynamicContractWizardProps {
 	documentTypes: DocumentType[];
+	/**
+	 * Documentos que se muestran pero no se pueden elegir, con el motivo.
+	 *
+	 * Ventas lo usa para la carta de cobertura: va la de la aseguradora de la
+	 * cotización, y las de la otra quedan a la vista deshabilitadas para que
+	 * jurídico sepa cuál va a salir.
+	 */
+	documentosDeshabilitados?: Record<string, string>;
 	crmData: CRMData;
 	/**
 	 * La oportunidad de venta, cuando los contratos son de ventas.
@@ -474,6 +482,18 @@ const DATE_DERIVED_FIELDS = [
 ];
 
 // Helper function to convert a number group to words (for DPI)
+const VEINTIS_CON_TILDE: Record<number, string> = {
+	2: "veintidós",
+	3: "veintitrés",
+	6: "veintiséis",
+};
+
+/** En los montos va "veintiún" ("veintiún mil quetzales"), que también es aguda. */
+const VEINTIS_CON_TILDE_APOCOPADOS: Record<number, string> = {
+	...VEINTIS_CON_TILDE,
+	1: "veintiún",
+};
+
 function dpiGroupToWords(numStr: string): string {
 	const num = Number.parseInt(numStr, 10);
 	if (Number.isNaN(num)) return numStr;
@@ -568,7 +588,9 @@ function dpiGroupToWords(numStr: string): string {
 				if (u === 0) {
 					result += result ? ` ${decenas[d]}` : decenas[d];
 				} else if (d === 2) {
-					result += result ? ` veinti${unidades[u]}` : `veinti${unidades[u]}`;
+					// Las agudas llevan tilde: veintidós, veintitrés, veintiséis.
+					const veinti = VEINTIS_CON_TILDE[u] ?? `veinti${unidades[u]}`;
+					result += result ? ` ${veinti}` : veinti;
 				} else {
 					result += result
 						? ` ${decenas[d]} y ${unidades[u]}`
@@ -649,7 +671,9 @@ export function moneyToWords(amount: number): string {
 			if (u === 0) {
 				resultado += decenas[d];
 			} else if (d === 2) {
-				resultado += "VEINTI" + unidades[u];
+				resultado += (
+					VEINTIS_CON_TILDE_APOCOPADOS[u] ?? `veinti${unidades[u]}`
+				).toUpperCase();
 			} else {
 				resultado += decenas[d] + " Y " + unidades[u];
 			}
@@ -908,6 +932,7 @@ function CampoDeLista({
 
 export function DynamicContractWizard({
 	documentTypes,
+	documentosDeshabilitados,
 	crmData,
 	opportunityId,
 	leadId,
@@ -1286,10 +1311,13 @@ export function DynamicContractWizard({
 				// === CLIENTE DATA (from CRM) ===
 				switch (fieldKeyLower) {
 					case "nombrecompleto":
-						if (cliente.nombreCompleto) {
+						// RENAP aunque el CRM no traiga nombre: en una sociedad no lo trae
+						// (el de la compra es el de la empresa) y RENAP responde con el
+						// del representante, que es quien firma.
+						if (renapInfo || cliente.nombreCompleto) {
 							initialValues[field.key] = renapInfo
 								? `${renapInfo.firstName} ${renapInfo.secondName} ${renapInfo.thirdName} ${renapInfo.firstLastName} ${renapInfo.secondLastName} ${renapInfo.marriedLastName}`.toUpperCase()
-								: cliente.nombreCompleto.toUpperCase();
+								: (cliente.nombreCompleto ?? "").toUpperCase();
 							return;
 						}
 						break;
@@ -2054,8 +2082,25 @@ export function DynamicContractWizard({
 		};
 	}, [relevantFields, fieldHasValue]);
 
+	const motivoDeshabilitado = (docEnum: string) =>
+		documentosDeshabilitados?.[docEnum];
+	const documentosElegibles = documentTypes.filter(
+		(doc) => !motivoDeshabilitado(doc.enum),
+	);
+
+	// Lo deshabilitado puede llegar después de que lo eligieran (la aseguradora
+	// se lee aparte): se suelta.
+	useEffect(() => {
+		if (!documentosDeshabilitados) return;
+		setSelectedDocuments((prev) => {
+			const siguen = prev.filter((d) => !documentosDeshabilitados[d]);
+			return siguen.length === prev.length ? prev : siguen;
+		});
+	}, [documentosDeshabilitados]);
+
 	// Toggle document selection
 	const handleDocumentToggle = (docEnum: string) => {
+		if (motivoDeshabilitado(docEnum)) return;
 		setSelectedDocuments((prev) =>
 			prev.includes(docEnum)
 				? prev.filter((d) => d !== docEnum)
@@ -2063,18 +2108,18 @@ export function DynamicContractWizard({
 		);
 	};
 
+	const allSelected =
+		documentosElegibles.length > 0 &&
+		documentosElegibles.every((doc) => selectedDocuments.includes(doc.enum));
+
 	// Select/deselect all documents
 	const handleSelectAll = () => {
-		if (selectedDocuments.length === documentTypes.length) {
+		if (allSelected) {
 			setSelectedDocuments([]);
 		} else {
-			setSelectedDocuments(documentTypes.map((doc) => doc.enum));
+			setSelectedDocuments(documentosElegibles.map((doc) => doc.enum));
 		}
 	};
-
-	const allSelected =
-		documentTypes.length > 0 &&
-		selectedDocuments.length === documentTypes.length;
 
 	// Si RENAP no respondió, sin género no hay plantilla: se espera a que lo elijan
 	const canProceedStep1 =
@@ -2523,37 +2568,53 @@ export function DynamicContractWizard({
 						</CardHeader>
 						<CardContent>
 							<div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-								{documentTypes.map((docType) => (
-									<div
-										key={docType.enum}
-										className={`flex cursor-pointer items-center space-x-3 rounded-lg border p-4 transition-colors ${
-											selectedDocuments.includes(docType.enum)
-												? "border-primary bg-primary/5"
-												: "border-border hover:border-primary/50"
-										}`}
-										role="button"
-										tabIndex={0}
-										onClick={() => handleDocumentToggle(docType.enum)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" || e.key === " ") {
-												e.preventDefault();
-												handleDocumentToggle(docType.enum);
-											}
-										}}
-									>
-										<Checkbox
-											id={docType.enum}
-											checked={selectedDocuments.includes(docType.enum)}
-											onCheckedChange={() => handleDocumentToggle(docType.enum)}
-										/>
-										<Label
-											htmlFor={docType.enum}
-											className="flex-1 cursor-pointer font-medium text-sm"
+								{documentTypes.map((docType) => {
+									const motivo = motivoDeshabilitado(docType.enum);
+									return (
+										<div
+											key={docType.enum}
+											className={`flex items-center space-x-3 rounded-lg border p-4 transition-colors ${
+												motivo
+													? "cursor-not-allowed border-border opacity-60"
+													: selectedDocuments.includes(docType.enum)
+														? "cursor-pointer border-primary bg-primary/5"
+														: "cursor-pointer border-border hover:border-primary/50"
+											}`}
+											role="button"
+											tabIndex={motivo ? -1 : 0}
+											aria-disabled={Boolean(motivo)}
+											onClick={() => handleDocumentToggle(docType.enum)}
+											onKeyDown={(e) => {
+												if (e.key === "Enter" || e.key === " ") {
+													e.preventDefault();
+													handleDocumentToggle(docType.enum);
+												}
+											}}
 										>
-											{docType.label}
-										</Label>
-									</div>
-								))}
+											<Checkbox
+												id={docType.enum}
+												checked={selectedDocuments.includes(docType.enum)}
+												disabled={Boolean(motivo)}
+												onCheckedChange={() =>
+													handleDocumentToggle(docType.enum)
+												}
+											/>
+											<div className="flex-1">
+												<Label
+													htmlFor={docType.enum}
+													className={`font-medium text-sm ${motivo ? "cursor-not-allowed" : "cursor-pointer"}`}
+												>
+													{docType.label}
+												</Label>
+												{motivo && (
+													<p className="mt-0.5 text-muted-foreground text-xs">
+														{motivo}
+													</p>
+												)}
+											</div>
+										</div>
+									);
+								})}
 							</div>
 							{documentTypes.length === 0 && (
 								<p className="text-center text-muted-foreground">

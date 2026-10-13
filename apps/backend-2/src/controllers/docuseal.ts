@@ -9,6 +9,12 @@ import { getRenapData } from "./renap";
 const DOCUMENT_LABEL_OVERRIDES: Record<string, string> = {
   cobertura_inrexsa: "Cobertura Placas Particulares",
   cobertura_inrexsa_comercial: "Cobertura Placas Comerciales",
+  cobertura_gyt: "Cobertura Seguros G&T",
+  // Derivados del enum quedaban "Anexo1 Confirmacion Participacion".
+  anexo1_confirmacion_participacion: "Anexo 1 - Confirmación de Participación",
+  anexo2_designacion_beneficiario: "Anexo 2 - Designación de Beneficiario",
+  anexo1_confirmacion_participacion_sociedad: "Anexo 1 - Confirmación de Participación (Sociedad)",
+  anexo2_designacion_beneficiario_sociedad: "Anexo 2 - Designación de Beneficiario (Sociedad)",
 };
 
 /**

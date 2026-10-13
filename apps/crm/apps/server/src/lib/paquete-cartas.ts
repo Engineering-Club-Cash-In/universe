@@ -40,6 +40,7 @@ export const CARTAS_UNIFICABLES = [
 	"solicitud_compra_vehiculo_tercero",
 	"cobertura_inrexsa",
 	"cobertura_inrexsa_comercial",
+	"cobertura_gyt",
 ] as const;
 
 export function esCartaUnificable(contractType: string): boolean {

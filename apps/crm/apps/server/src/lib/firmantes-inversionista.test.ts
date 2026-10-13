@@ -82,6 +82,20 @@ describe("firmantes de un contrato de inversiones", () => {
 		expect(firmantes.map((f) => f.role)).toEqual(["TITULAR", "REP_LEGAL"]);
 	});
 
+	test("el de participación y sus anexos por separado llevan a CUBE, en individual y en sociedad", () => {
+		for (const tipo of [
+			"anexo1_confirmacion_participacion",
+			"anexo2_designacion_beneficiario",
+			"contrato_participacion_administracion_cartera_sociedad",
+			"anexo1_confirmacion_participacion_sociedad",
+			"anexo2_designacion_beneficiario_sociedad",
+		]) {
+			expect(
+				firmantesDeContratoDeInversion(tipo, ANA).map((f) => f.role),
+			).toEqual(["TITULAR", "REP_LEGAL"]);
+		}
+	});
+
 	test("un contrato de ventas no se emite por esta vía", () => {
 		expect(() =>
 			firmantesDeContratoDeInversion("garantia_mobiliaria", ANA),

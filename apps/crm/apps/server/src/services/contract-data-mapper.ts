@@ -1,14 +1,16 @@
 /**
  * Servicio para mapear datos del CRM al formato de legal-docs-blueprints
  */
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { creditChecks } from "../db/schema/checks";
 import { companies, leads, opportunities } from "../db/schema/crm";
 import { investors } from "../db/schema/investments";
+import { quotations } from "../db/schema/quotations";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
+import { normalizarAseguradora } from "../lib/cobertura-por-aseguradora";
 import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
 import {
 	formatEntityName,
@@ -35,6 +37,7 @@ import {
 	numberToWordsQuetzalesLegal,
 	toUpperCase,
 } from "../lib/contract-utils";
+import type { InsuranceProvider } from "../lib/insurance-selection";
 
 // Tipos de contratos disponibles
 // Solo incluir tipos que existen en legal-docs-blueprints API
@@ -249,6 +252,12 @@ export interface ContractData {
 		titulo: string;
 		tipoCredito: string;
 		categoria?: string;
+		/**
+		 * La aseguradora de la venta, que decide qué carta de cobertura va. Sale
+		 * de la cotización, como en el cierre: la oportunidad recién la recibe
+		 * al cerrarse, y en 80% todavía tiene la de por defecto.
+		 */
+		aseguradora: InsuranceProvider;
 	};
 }
 
@@ -626,17 +635,23 @@ export async function mapOpportunityToContractData(
 	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
 	// la distribuidora. En usados no aplica; companyId puede haberse heredado
 	// del lead y no necesariamente representa una agencia del vehículo.
-	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
-		? await db
-				.select({ name: companies.name, razonSocial: companies.razonSocial })
-				.from(companies)
-				.where(eq(companies.id, opportunity.companyId))
-				.limit(1)
-		: [];
+	const [empresaAgencia] =
+		vehicle?.isNew === true && opportunity.companyId
+			? await db
+					.select({ name: companies.name, razonSocial: companies.razonSocial })
+					.from(companies)
+					.where(eq(companies.id, opportunity.companyId))
+					.limit(1)
+			: [];
 
 	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
 	// reconoce como sociedad solo después de formatearlo, y si no el contrato
 	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
+	const aseguradora = await aseguradoraDeLaOportunidad(
+		opportunityId,
+		opportunity.insuranceProvider,
+	);
+
 	const nombreEntidad = inversionistaPrincipal
 		? formatEntityName(inversionistaPrincipal.nombre)
 		: null;
@@ -715,8 +730,45 @@ export async function mapOpportunityToContractData(
 			titulo: opportunity.title,
 			tipoCredito: opportunity.creditType || "autocompra",
 			categoria: opportunity.categoria || undefined,
+			aseguradora,
 		},
 	};
+}
+
+/**
+ * La aseguradora de la venta, que decide qué carta de cobertura va.
+ *
+ * Sale de la cotización (la aceptada primero, si no la más reciente), igual
+ * que en el cierre: la oportunidad recién la recibe al cerrarse, y en 80%
+ * todavía tiene la de por defecto.
+ */
+export async function aseguradoraDeLaOportunidad(
+	opportunityId: string,
+	deLaOportunidad?: string | null,
+): Promise<InsuranceProvider> {
+	// Directo y no con `getLatestApprovedQuotation`, que se traga los errores y
+	// devuelve null: acá un error tiene que cortar. Si no, una venta con G&T
+	// caería en la Universales por defecto y se emitiría la carta equivocada.
+	const [cotizacion] = await db
+		.select({ insuranceProvider: quotations.insuranceProvider })
+		.from(quotations)
+		.where(eq(quotations.opportunityId, opportunityId))
+		.orderBy(
+			desc(eq(quotations.status, "accepted")),
+			desc(quotations.createdAt),
+		)
+		.limit(1);
+	if (cotizacion?.insuranceProvider || deLaOportunidad !== undefined) {
+		return normalizarAseguradora(
+			cotizacion?.insuranceProvider ?? deLaOportunidad,
+		);
+	}
+	const [oportunidad] = await db
+		.select({ insuranceProvider: opportunities.insuranceProvider })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	return normalizarAseguradora(oportunidad?.insuranceProvider);
 }
 
 /**

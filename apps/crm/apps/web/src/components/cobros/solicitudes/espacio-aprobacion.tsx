@@ -1025,19 +1025,31 @@ function ContenidoEspacio({
 	// Si la contrapropuesta se resuelve (el asesor la aceptó o descartó) con el
 	// Espacio abierto, el plan y la lista se vuelven a leer: la aceptada reescribe
 	// cuotas, cuota y primer pago, y no se puede aprobar sobre datos viejos.
-	const habiaContra = React.useRef(false);
+	// Los controles siguen bloqueados hasta que ambas lecturas terminen.
+	const hayContra = !!contraPendiente;
+	const [habiaContra, setHabiaContra] = React.useState(false);
+	const [refrescandoPlan, setRefrescandoPlan] = React.useState(false);
+	if (hayContra !== habiaContra) {
+		// Al ajustar el estado durante el render no hay un cuadro intermedio con
+		// los botones habilitados y el plan anterior.
+		setHabiaContra(hayContra);
+		if (habiaContra) setRefrescandoPlan(true);
+	}
 	React.useEffect(() => {
-		const hay = !!contraPendiente;
-		if (habiaContra.current && !hay) {
-			void queryClient.invalidateQueries({
-				queryKey: orpc.getPlanConvenio.key(),
-			});
-			void queryClient.invalidateQueries({
+		if (!refrescandoPlan) return;
+		let vigente = true;
+		void Promise.all([
+			queryClient.invalidateQueries({ queryKey: orpc.getPlanConvenio.key() }),
+			queryClient.invalidateQueries({
 				queryKey: orpc.getConveniosListado.key(),
-			});
-		}
-		habiaContra.current = hay;
-	}, [contraPendiente, queryClient]);
+			}),
+		]).finally(() => {
+			if (vigente) setRefrescandoPlan(false);
+		});
+		return () => {
+			vigente = false;
+		};
+	}, [refrescandoPlan, queryClient]);
 	const [contraAbierta, setContraAbierta] = React.useState(false);
 
 	const [notas, setNotas] = React.useState("");
@@ -1091,7 +1103,16 @@ function ContenidoEspacio({
 				/>
 			);
 		}
-		if (contraPendiente && !bloqueo) {
+		// Sin saber si hay una contrapropuesta (cargando o con error) no se decide:
+		// el servidor rechazaría la decisión si la hubiera.
+		if (!bloqueo && contrapropuestas.isPending) {
+			bloqueo = "Verificando si hay una contrapropuesta del convenio…";
+		} else if (!bloqueo && contrapropuestas.isError) {
+			bloqueo =
+				"No se pudo verificar si hay una contrapropuesta. Cierre y vuelva a abrir la solicitud.";
+		} else if (!bloqueo && refrescandoPlan) {
+			bloqueo = "Actualizando el plan del convenio…";
+		} else if (contraPendiente && !bloqueo) {
 			bloqueo = "Hay una contrapropuesta esperando la respuesta del asesor";
 			aviso = (
 				<ContrapropuestaPendienteAviso

@@ -56,7 +56,8 @@ type MoraEventoOrigen =
   | "API_MANUAL"
   | "CONDONACION_INDIVIDUAL"
   | "CONDONACION_MASIVA"
-  | "CONDONACION_NEXA_A_TIEMPO";
+  | "CONDONACION_NEXA_A_TIEMPO"
+  | "CONDONACION_BOLETA_TARDIA";
 
 // La lista vive en constants/creditStatus.ts para que un módulo de reglas
 // puras pueda reusarla sin arrastrar la conexión a la base que importa este
@@ -2643,8 +2644,9 @@ export const EMAIL_USUARIO_SISTEMA_NEXA = "sistema-nexa@clubcashin.local";
 
 /**
  * Condona una parte de la mora activa de un crédito, atribuida a cuotas
- * puntuales, ligada a un evento Nexa. La usa el pago Nexa (ACH) que llegó a
- * tiempo (ver `utils/condonacionNexaATiempo.ts`).
+ * puntuales, ligada a UNA llave: un evento Nexa (pago ACH que llegó a tiempo,
+ * ver `utils/condonacionNexaATiempo.ts`) o el `intento_id` de una boleta
+ * pagada a tiempo y registrada tarde (origen CONDONACION_BOLETA_TARDIA).
  *
  * No reusa `condonarMora` porque hace otra cosa: aquella perdona TODA la mora,
  * la apaga y pasa el crédito a ACTIVO. Esta solo RESTA lo de las cuotas en
@@ -2658,22 +2660,14 @@ export const EMAIL_USUARIO_SISTEMA_NEXA = "sistema-nexa@clubcashin.local";
  * `nexaPagoConMora.integration.test.ts`). El orden de candados del módulo se
  * respeta: `creditos` primero, `moras_credito` después.
  *
- * Idempotente por evento: si ya hay una condonación viva de ese evento la
+ * Idempotente por llave: si ya hay una condonación viva de esa llave la
  * devuelve sin tocar nada (el índice único parcial es la red de la base).
  * Si `monto_mora` cambió desde que se decidió (el cron corrió en el medio), no
  * condona: la decisión se tomó sobre otro número.
  */
-export async function condonarMoraDeCuotas({
-  credito_id,
-  montoMoraEsperado,
-  monto,
-  cuotas,
-  nexa_payment_event_id,
-  motivo,
-  pagos_pendientes_ids = [],
-  usuario_email = EMAIL_USUARIO_SISTEMA_NEXA,
-  dbClient = db,
-}: {
+export type OrigenCondonacion = "CONDONACION_NEXA_A_TIEMPO" | "CONDONACION_BOLETA_TARDIA";
+
+export async function condonarMoraDeCuotas(params: {
   credito_id: number;
   /** Pagos pendientes que sostienen la condonación (drizzle/0052); vacío = ninguno. */
   pagos_pendientes_ids?: number[];
@@ -2681,16 +2675,35 @@ export async function condonarMoraDeCuotas({
   montoMoraEsperado: Big | string | number;
   /** Total a condonar (centavos). */
   monto: Big | string | number;
-  /** Reparto por cuota para el ledger. */
+  /** Reparto por cuota para el ledger, de la más vieja a la más nueva. */
   cuotas: { cuota_id: number; monto: Big | string | number }[];
-  nexa_payment_event_id: number;
   motivo: string;
+  /** Default: el usuario de sistema de Nexa. La boleta tardía manda el email VERIFICADO del asesor. */
   usuario_email?: string;
   dbClient?: typeof db;
-}): Promise<
+} & (
+  // UNA sola llave: Nexa → nexa_payment_event_id; boleta tardía → intento_id.
+  | { origen?: "CONDONACION_NEXA_A_TIEMPO"; nexa_payment_event_id: number; intento_id?: undefined }
+  | { origen: "CONDONACION_BOLETA_TARDIA"; intento_id: string; nexa_payment_event_id?: undefined }
+)): Promise<
   | { kind: "condonada" | "ya_condonada"; condonacion_id: number; monto: string }
   | { kind: "sin_cambio"; razon: "sin_mora" | "mora_cambio" | "monto_invalido" }
 > {
+  const {
+    credito_id, montoMoraEsperado, monto, cuotas, motivo, pagos_pendientes_ids = [],
+    usuario_email = EMAIL_USUARIO_SISTEMA_NEXA, dbClient = db,
+  } = params;
+  const origen: OrigenCondonacion = params.origen ?? "CONDONACION_NEXA_A_TIEMPO";
+  const esBoleta = origen === "CONDONACION_BOLETA_TARDIA";
+  if (esBoleta
+    ? params.intento_id === undefined || params.nexa_payment_event_id !== undefined
+    : params.nexa_payment_event_id === undefined || params.intento_id !== undefined) {
+    throw new Error("condonarMoraDeCuotas: se requiere exactamente una llave (nexa_payment_event_id con origen Nexa, o intento_id con origen CONDONACION_BOLETA_TARDIA)");
+  }
+  const llave = esBoleta
+    ? eq(moras_condonaciones.intento_id, params.intento_id!)
+    : eq(moras_condonaciones.nexa_payment_event_id, params.nexa_payment_event_id!);
+  const etiquetaMotivo = esBoleta ? `intento ${params.intento_id}` : `evento Nexa ${params.nexa_payment_event_id}`;
   const montoBig = new Big(monto);
   if (montoBig.lte(0)) return { kind: "sin_cambio", razon: "monto_invalido" };
 
@@ -2698,7 +2711,11 @@ export async function condonarMoraDeCuotas({
     .select({ id: platform_users.id })
     .from(platform_users)
     .where(eq(platform_users.email, usuario_email));
-  if (!user) throw new Error(`Usuario de sistema ${usuario_email} no existe (falta drizzle/0051)`);
+  if (!user) {
+    throw new Error(usuario_email === EMAIL_USUARIO_SISTEMA_NEXA
+      ? `Usuario de sistema ${usuario_email} no existe (falta drizzle/0051)`
+      : `El usuario ${usuario_email} no existe en platform_users`);
+  }
 
   return dbClient.transaction(async (tx) => {
     await tx
@@ -2711,14 +2728,16 @@ export async function condonarMoraDeCuotas({
     const [previa] = await tx
       .select({
         condonacion_id: moras_condonaciones.condonacion_id,
+        credito_id: moras_condonaciones.credito_id,
         monto: moras_condonaciones.montoCondonacion,
       })
       .from(moras_condonaciones)
-      .where(and(
-        eq(moras_condonaciones.nexa_payment_event_id, nexa_payment_event_id),
-        isNull(moras_condonaciones.anulada_at),
-      ))
+      .where(and(llave, isNull(moras_condonaciones.anulada_at)))
       .limit(1);
+    // Un intento pertenece a UN crédito: verlo vivo en otro es un bug del llamador, no una repetición.
+    if (previa && esBoleta && previa.credito_id !== credito_id) {
+      throw new Error(`condonarMoraDeCuotas: el intento ${params.intento_id} ya condonó en otro crédito (#${previa.credito_id})`);
+    }
     if (previa) {
       return { kind: "ya_condonada" as const, condonacion_id: previa.condonacion_id, monto: previa.monto };
     }
@@ -2754,7 +2773,7 @@ export async function condonarMoraDeCuotas({
         motivo,
         usuario_id: user.id,
         montoCondonacion: montoBig.toFixed(2),
-        nexa_payment_event_id,
+        ...(esBoleta ? { intento_id: params.intento_id } : { nexa_payment_event_id: params.nexa_payment_event_id }),
         ...(pagos_pendientes_ids.length > 0 ? { pagos_pendientes_ids } : {}),
       })
       .returning({ condonacion_id: moras_condonaciones.condonacion_id });
@@ -2776,13 +2795,13 @@ export async function condonarMoraDeCuotas({
       credito_id,
       mora_id: mora.mora_id,
       tipo_evento: "CONDONACION",
-      origen: "CONDONACION_NEXA_A_TIEMPO",
+      origen,
       monto_anterior: montoActual.toFixed(2),
       monto_nuevo: montoNuevo,
       cuotas_atrasadas_anterior: mora.cuotas_atrasadas ?? 0,
       cuotas_atrasadas_nuevas: mora.cuotas_atrasadas ?? 0,
       usuario_id: user.id,
-      motivo: `${motivo} (evento Nexa ${nexa_payment_event_id})`,
+      motivo: `${motivo} (${etiquetaMotivo})`,
       dbClient: tx as unknown as typeof db,
       propagarError: true,
     });
@@ -2904,40 +2923,65 @@ export async function anularCondonacionNexaATiempo({
       };
     }
 
-    const [marcada] = await tx
-      .update(moras_condonaciones)
-      .set({ anulada_at: new Date() })
-      .where(and(
-        eq(moras_condonaciones.condonacion_id, viva.condonacion_id),
-        isNull(moras_condonaciones.anulada_at),
-      ))
-      .returning({ condonacion_id: moras_condonaciones.condonacion_id });
-    if (!marcada) return { anulada: false };
-
-    await compensarAnotacionesVivas(
-      and(
-        eq(mora_pagada_cuota.condonacion_id, viva.condonacion_id),
-        eq(mora_pagada_cuota.tipo, "CONDONACION"),
-      )!,
-      { tipo: "ANULACION", usuario_id: user?.id ?? null, motivo },
-      tx as unknown as typeof db,
-    );
-
-    const restitucion = await updateMora({
-      credito_id: viva.credito_id,
-      tipo: "INCREMENTO",
-      // El decimal tal cual: Number() pierde centavos en montos grandes y el
-      // ledger compensa con el original.
-      monto_cambio: viva.monto,
-      motivo: `${motivo} (evento Nexa ${nexa_payment_event_id})`,
+    const r = await anularCondonacionVivaEnTx(tx as unknown as typeof db, viva, {
+      motivo,
       origen: "CONDONACION_NEXA_A_TIEMPO",
-      dbClient: tx as unknown as typeof db,
+      etiqueta: `evento Nexa ${nexa_payment_event_id}`,
+      usuarioId: user?.id ?? null,
+      reactivarMora: false,
     });
-    if (!restitucion.success && "error" in restitucion && restitucion.error) {
-      throw new Error(`No se pudo restituir la mora: ${restitucion.error}`);
-    }
-    return { anulada: true, monto: viva.monto };
+    return r.anulada ? { anulada: true as const, monto: r.monto } : { anulada: false as const };
   });
+}
+
+
+/** Tramo común de las anulaciones: marca, compensa el ledger y restituye el monto a la mora. */
+async function anularCondonacionVivaEnTx(
+  tx: typeof db,
+  viva: { condonacion_id: number; credito_id: number; monto: string },
+  o: {
+    motivo: string; origen: OrigenCondonacion; etiqueta: string; usuarioId: number | null; reactivarMora: boolean;
+    /** Para firmar el INCREMENTO de la mora; sin él, el evento queda sin usuario (como en Nexa). */
+    usuarioEmail?: string;
+    /** Con `reactivarMora`: las cuotas atrasadas que lleva la mora reactivada (criterio del cron). */
+    cuotasAtrasadasAlReactivar?: number;
+  },
+): Promise<{ anulada: false } | { anulada: true; monto: string; restituida: boolean }> {
+  const [marcada] = await tx
+    .update(moras_condonaciones)
+    .set({ anulada_at: new Date() })
+    .where(and(
+      eq(moras_condonaciones.condonacion_id, viva.condonacion_id),
+      isNull(moras_condonaciones.anulada_at),
+    ))
+    .returning({ condonacion_id: moras_condonaciones.condonacion_id });
+  if (!marcada) return { anulada: false };
+
+  await compensarAnotacionesVivas(
+    and(
+      eq(mora_pagada_cuota.condonacion_id, viva.condonacion_id),
+      eq(mora_pagada_cuota.tipo, "CONDONACION"),
+    )!,
+    { tipo: "ANULACION", usuario_id: o.usuarioId, motivo: o.motivo },
+    tx,
+  );
+
+  const restitucion = await updateMora({
+    credito_id: viva.credito_id,
+    tipo: "INCREMENTO",
+    // El decimal tal cual: Number() pierde centavos en montos grandes y el
+    // ledger compensa con el original.
+    monto_cambio: viva.monto,
+    motivo: `${o.motivo} (${o.etiqueta})`,
+    origen: o.origen,
+    ...(o.reactivarMora ? { activa: true, cuotas_atrasadas: o.cuotasAtrasadasAlReactivar } : {}),
+    ...(o.usuarioEmail ? { usuario_email: o.usuarioEmail } : {}),
+    dbClient: tx,
+  });
+  if (!restitucion.success && "error" in restitucion && restitucion.error) {
+    throw new Error(`No se pudo restituir la mora: ${restitucion.error}`);
+  }
+  return { anulada: true, monto: viva.monto, restituida: restitucion.success };
 }
 
 

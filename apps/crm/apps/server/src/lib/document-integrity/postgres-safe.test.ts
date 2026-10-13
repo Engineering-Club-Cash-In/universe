@@ -14,7 +14,8 @@ describe("stripNulCharacters", () => {
 			flag: true,
 		});
 
-		expect(cleaned).toEqual({
+		// El tipo de retorno conserva la llave original ("clave\0"); en runtime ya viene limpia.
+		expect(cleaned as unknown).toEqual({
 			clave: ["ab", 1, null, { c: "d" }],
 			date,
 			flag: true,

@@ -63,6 +63,7 @@ const asesorPool = (
 	nombre,
 	buckets,
 	activo,
+	nivel: null,
 	email_cash_in: null,
 	userId: `u${asesor_id}`,
 	usuarioHabilitado: true,

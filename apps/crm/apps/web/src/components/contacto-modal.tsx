@@ -83,6 +83,8 @@ import { client, orpc } from "@/utils/orpc";
 // campo y otro del form la repetían con el mismo string literal cada vez
 // (Codex, PR #1147). Centralizado para que un cambio de mensaje o condición
 // no pueda desincronizarse entre las 3 copias.
+const MENSAJE_NADA_QUE_PROMETER =
+	"El crédito está al día: no tiene cuotas vencidas ni mora que prometer.";
 const MENSAJE_RANGO_O_MORA_REQUERIDO =
 	"Indique un rango de cuotas, marque que incluye mora, o ambos";
 
@@ -601,6 +603,17 @@ export function ContactoModal({
 						.sort((a, b) => a - b),
 		[firmaCuotasAtrasadas],
 	);
+	/**
+	 * Crédito al día: sin cuotas vencidas ni mora no hay nada que prometer (la
+	 * promesa nacería "cumplida" e inflaría el KPI). Con convenio o editando una
+	 * promesa vigente sí se permite.
+	 */
+	const nadaQuePrometer =
+		esPromesa &&
+		!esEdicion &&
+		!esConvenio &&
+		numerosAtrasados.length === 0 &&
+		montoMora <= 0;
 
 	// CB-025: mismas cuotas pero con monto + fecha, para la LISTA de checkboxes.
 	// Firma rica (numero|monto|fecha) reconstruida dentro del memo → estable
@@ -680,7 +693,7 @@ export function ContactoModal({
 			// Con convenio la mora ya va absorbida en la cuota del convenio.
 			incluyeMora: esEdicion
 				? !!promesaActiva?.incluyeMora
-				: esPromesa && !esConvenio,
+				: esPromesa && !esConvenio && montoMora > 0,
 			// CB-025: monto que el cliente prometió pagar — informativo.
 			// En promesa se llena con lo que debe (cuotas + mora) y sigue a la
 			// selección; solo es editable si viene de un pago parcial en una
@@ -703,6 +716,10 @@ export function ContactoModal({
 			// garantiza esto y se borra este guard pensando que es
 			// redundante, reaparece el bug original: campo nunca tocado =
 			// onChange nunca corrió = se guarda sin fecha/rango/mora.
+			if (nadaQuePrometer) {
+				toast.error(MENSAJE_NADA_QUE_PROMETER);
+				return;
+			}
 			if (esPromesa && !value.fechaProximoContacto) {
 				toast.error("La fecha prometida es obligatoria");
 				return;
@@ -922,11 +939,13 @@ export function ContactoModal({
 			"cuotaFin",
 			numerosAtrasados[numerosAtrasados.length - 1],
 		);
-		// Con convenio la mora no entra (la absorbe la cuota del convenio).
-		form.setFieldValue("incluyeMora", !esConvenio);
+		// Con convenio la mora no entra (la absorbe la cuota del convenio); sin
+		// mora tampoco se marca: una promesa de Q0 de mora nace "cumplida".
+		const conMora = !esConvenio && montoMora > 0;
+		form.setFieldValue("incluyeMora", conMora);
 		form.setFieldValue(
 			"montoComprometido",
-			montoPromesaDe(todas, !esConvenio).toFixed(2),
+			montoPromesaDe(todas, conMora).toFixed(2),
 		);
 		// promesaActiva?.id (no el objeto, que cambia de identidad cada render):
 		// re-siembra cuando la promesa activa CARGA tarde o un refetch la cambia con
@@ -1447,7 +1466,9 @@ export function ContactoModal({
 			<div className="overflow-hidden rounded-lg border">
 				{numerosAtrasados.length === 0 ? (
 					<p className="p-3 text-muted-foreground text-sm">
-						Este contrato no tiene cuotas atrasadas.
+						{nadaQuePrometer
+							? MENSAJE_NADA_QUE_PROMETER
+							: "Este contrato no tiene cuotas atrasadas."}
 					</p>
 				) : (
 					<div className="max-h-[200px] divide-y overflow-y-auto">
@@ -1930,7 +1951,9 @@ export function ContactoModal({
 					<Button
 						type="submit"
 						className="min-w-0 flex-1"
-						disabled={!canSubmit || envioEnCurso || duracionIlegible}
+						disabled={
+							!canSubmit || envioEnCurso || duracionIlegible || nadaQuePrometer
+						}
 					>
 						{createContactoMutation.isPending ? (
 							<>

@@ -2120,6 +2120,51 @@ export async function ejecutarAlertasConvenios(context: ContextoAlertasCobros) {
 		}));
 }
 
+/**
+ * Una promesa NUEVA que ya nace cumplida no es un compromiso: el crédito está al
+ * día (sin cuotas vencidas ni mora) o lo seleccionado ya se pagó. Contaba como
+ * «promesa cumplida» en los KPI. Misma evaluación que el job y que
+ * getEstadoPromesasPago. Si cartera no responde no se bloquea al asesor: la
+ * promesa se evalúa después como cualquier otra.
+ */
+async function assertPromesaConDeuda(
+	casoCobroId: string,
+	promesa: {
+		cuotaInicio: number | null;
+		cuotaFin: number | null;
+		incluyeMora: boolean;
+	},
+) {
+	const [caso] = await db
+		.select({ sifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	if (!caso?.sifco) return;
+	let credito: Awaited<ReturnType<typeof carteraBackClient.getCredito>>;
+	try {
+		credito = await carteraBackClient.getCredito(caso.sifco, false);
+	} catch (error) {
+		console.error(
+			"[createContactoCobros] No se pudo validar la deuda de la promesa:",
+			error,
+		);
+		return;
+	}
+	if (!credito) return;
+	const estado = evaluarPromesa(
+		// Fecha lejana: solo interesa si ya nace cumplida, no si venció.
+		{ id: "nueva", ...promesa, fechaPrometida: new Date(8.64e15) },
+		derivarEstadoCredito(credito),
+	);
+	if (estado === "cumplida") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"No hay nada pendiente en esa promesa: las cuotas seleccionadas ya están pagadas y el crédito no tiene mora. Registre la gestión como «Contactado».",
+		});
+	}
+}
+
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -3445,6 +3490,13 @@ export const cobrosRouter = {
 					visitaId,
 					casoCobroId: datos.casoCobroId,
 					seguimiento: "promesa",
+				});
+			}
+			if (esPromesa && !promesaContactoId) {
+				await assertPromesaConDeuda(datos.casoCobroId, {
+					cuotaInicio: datos.cuotaInicio ?? null,
+					cuotaFin: datos.cuotaFin ?? null,
+					incluyeMora: !!datos.incluyeMora,
 				});
 			}
 

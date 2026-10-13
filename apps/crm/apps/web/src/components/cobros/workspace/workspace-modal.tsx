@@ -111,6 +111,17 @@ export function WorkspaceModal({
 	// dentro de los formularios embebidos (ver PopoverPortalContext).
 	const [cajaModal, setCajaModal] = React.useState<HTMLDivElement | null>(null);
 
+	// Cerrar o recargar la pestaña con una gestión a medias (p. ej. una llamada
+	// ya marcada sin su resultado) también avisa: el navegador pide confirmar.
+	React.useEffect(() => {
+		if (!enCurso) return;
+		const avisar = (e: BeforeUnloadEvent) => {
+			e.preventDefault();
+		};
+		window.addEventListener("beforeunload", avisar);
+		return () => window.removeEventListener("beforeunload", avisar);
+	}, [enCurso]);
+
 	/** Ejecuta `accion`, o primero pregunta si hay una gestión a medias. */
 	const conGuardian = (accion: () => void) => {
 		if (enCurso) setPendiente(() => accion);

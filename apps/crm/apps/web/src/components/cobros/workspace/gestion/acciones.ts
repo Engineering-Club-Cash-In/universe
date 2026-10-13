@@ -297,6 +297,7 @@ export function gruposDelInicio(
 				? "El cliente tiene una promesa de pago vigente"
 				: "Registrar el compromiso de pago del cliente",
 			tono: "success",
+			motivoBloqueo: motivoSinPromesa(caso),
 			onClick: () => abrir("promesa"),
 		},
 		{
@@ -435,6 +436,19 @@ export function tituloOpcionAcuerdo(
 	}
 }
 
+/**
+ * Crédito al día y sin promesa vigente: no hay nada que prometer (misma regla
+ * que el modal de promesa y que `createContactoCobros`). Con convenio se puede
+ * prometer la cuota del convenio.
+ */
+function motivoSinPromesa(caso: CasoWorkspace): string | undefined {
+	const p = caso.promesa;
+	if (p.promesaActiva || p.esConvenio) return undefined;
+	return p.cuotasDisponibles.length === 0 && p.montoMora <= 0
+		? "El crédito está al día: no tiene cuotas vencidas ni mora que prometer."
+		: undefined;
+}
+
 export function opcionesDeAcuerdo(
 	caso: CasoWorkspace,
 	elegir: (opcion: OpcionAcuerdo) => void,
@@ -448,6 +462,7 @@ export function opcionesDeAcuerdo(
 				? "Editar la promesa de pago vigente"
 				: "Registrar una promesa de pago",
 			tono: "success",
+			motivoBloqueo: motivoSinPromesa(caso),
 			onClick: () => elegir("promesa"),
 		},
 	];

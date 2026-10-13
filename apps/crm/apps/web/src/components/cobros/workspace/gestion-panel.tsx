@@ -142,12 +142,21 @@ type CanalMensaje = "whatsapp" | "sms" | "email";
 
 type Paso =
 	| { t: "inicio" }
-	| { t: "participante"; canal: CanalGestion }
+	| {
+			t: "participante";
+			canal: CanalGestion;
+			/** Ya se marcó al cliente: la gestión hay que registrarla. */
+			llamadaIniciada?: boolean;
+			/** «Cambiar participante» desde el resultado: «Atrás» vuelve ahí. */
+			volver?: Paso;
+	  }
 	| {
 			t: "resultado";
 			canal: CanalGestion;
 			resultado: ResultadoGestion;
 			opcion: OpcionAcuerdo | null;
+			/** Se tocó «Llamar»: salir sin registrar pide confirmación. */
+			llamadaIniciada?: boolean;
 	  }
 	| { t: "destinatario" }
 	| { t: "mensaje"; canal: CanalMensaje }
@@ -176,19 +185,23 @@ type Paso =
  * ¿Hay algo a medias que se perdería? (guardián del modal, R3-14). Elegir el
  * participante, mirar la lista de referencias o el resultado sin una opción
  * abierta no cuentan; un formulario abierto sí (con «No hubo acuerdo» / «No
- * hubo contacto» el formulario ya está abierto).
+ * hubo contacto» el formulario ya está abierto). Una llamada ya marcada
+ * también cuenta: salir sin registrar su resultado pide confirmación.
  */
 function pasoEnCurso(p: Paso): boolean {
 	switch (p.t) {
-		case "inicio":
 		case "participante":
+			return !!p.llamadaIniciada;
+		case "inicio":
 		case "destinatario":
 		case "enviado":
 		case "visita-registrada":
 		case "registrada":
 			return false;
 		case "resultado":
-			return p.resultado !== "acuerdo" || p.opcion !== null;
+			return (
+				!!p.llamadaIniciada || p.resultado !== "acuerdo" || p.opcion !== null
+			);
 		case "directa":
 			return p.accion !== "referencias";
 		default:
@@ -442,7 +455,7 @@ export function GestionPanel({
 			case "inicio":
 				return renderInicio();
 			case "participante":
-				return renderParticipante(paso.canal);
+				return renderParticipante(paso);
 			case "resultado":
 				return renderResultado(casoCobroId, paso);
 			case "destinatario":
@@ -678,11 +691,20 @@ export function GestionPanel({
 
 	/* ── Llamada / entrantes ─────────────────────────────────────────────── */
 
-	function irResultado(canal: CanalGestion) {
-		setPaso({ t: "resultado", canal, resultado: "acuerdo", opcion: null });
+	function irResultado(canal: CanalGestion, llamadaIniciada = false) {
+		setPaso({
+			t: "resultado",
+			canal,
+			resultado: "acuerdo",
+			opcion: null,
+			llamadaIniciada,
+		});
 	}
 
-	function renderParticipante(canal: CanalGestion) {
+	function renderParticipante(
+		pasoParticipante: Extract<Paso, { t: "participante" }>,
+	) {
+		const { canal, llamadaIniciada = false, volver } = pasoParticipante;
 		const saliente =
 			canal.metodo === "llamada" && canal.direccion === "saliente";
 		const destino =
@@ -700,21 +722,21 @@ export function GestionPanel({
 				onParticipante={elegirParticipante}
 				telefono={telefono}
 				onTelefono={setTelefonoElegido}
-				onAtras={irInicio}
+				onAtras={volver ? () => setPaso(volver) : irInicio}
 				pie={
 					saliente && telefono ? (
 						<div className="grid grid-cols-[auto_1fr] gap-2.5">
 							<Button
 								type="button"
 								variant="secondary"
-								onClick={() => irResultado(canal)}
+								onClick={() => irResultado(canal, llamadaIniciada)}
 							>
 								Continuar sin marcar
 							</Button>
 							<Button asChild>
 								<a
 									href={hrefTelefono(telefono)}
-									onClick={() => irResultado(canal)}
+									onClick={() => irResultado(canal, true)}
 								>
 									<Phone aria-hidden />
 									Llamar {destino}
@@ -725,7 +747,7 @@ export function GestionPanel({
 						<Button
 							type="button"
 							className="w-full"
-							onClick={() => irResultado(canal)}
+							onClick={() => irResultado(canal, llamadaIniciada)}
 						>
 							Continuar
 						</Button>
@@ -762,7 +784,45 @@ export function GestionPanel({
 		const telefonoContacto =
 			canal.metodo === "email" ? undefined : (telefono ?? undefined);
 		const alSubpaso = (o: OpcionAcuerdo | null) => setPaso({ ...p, opcion: o });
-		const volverParticipante = () => setPaso({ t: "participante", canal });
+		const volverParticipante = () =>
+			setPaso({
+				t: "participante",
+				canal,
+				llamadaIniciada: p.llamadaIniciada,
+				volver: p,
+			});
+		// Con la llamada ya marcada, «Cancelar» no abandona la gestión: vuelve a
+		// elegir el resultado (lo que pasó en la llamada hay que registrarlo).
+		const cancelarResultado = p.llamadaIniciada
+			? () => setPaso({ ...p, resultado: "acuerdo", opcion: null })
+			: irInicio;
+		/**
+		 * «Realizar pago» y «Comprobante recibido» guardan el link o el pago, no la
+		 * llamada: se registra aparte como contacto con acuerdo (con la nota, el
+		 * participante y el teléfono) y se enlaza al apagado si lo esperaba.
+		 */
+		const registrarLlamadaDelAcuerdo = async (acuerdo: string) => {
+			try {
+				const contacto = await client.createContactoCobros({
+					casoCobroId,
+					metodoContacto: canal.metodo,
+					estadoContacto: "contactado",
+					comentarios: notas.trim() || `Se llegó a un acuerdo: ${acuerdo}.`,
+					acuerdosAlcanzados: acuerdo,
+					requiereSeguimiento: false,
+					incluyeMora: false,
+					direccion: canal.direccion,
+					participante: participanteContacto,
+					telefonoContactado: telefonoContacto,
+				});
+				if (canal.metodo === "llamada") void enlazarLlamada(contacto.id);
+			} catch (error) {
+				toast.error(
+					(error as { message?: string })?.message ??
+						"El pago quedó registrado, pero no se pudo guardar la gestión de la llamada. Regístrela desde «No hubo acuerdo».",
+				);
+			}
+		};
 
 		let formulario = false;
 		let cuerpo: React.ReactNode;
@@ -815,19 +875,36 @@ export function GestionPanel({
 					);
 					break;
 				case "pago":
-					cuerpo = renderPagalo(casoCobroId, cancelar);
+					cuerpo = renderPagalo(casoCobroId, cancelar, () =>
+						registrarLlamadaDelAcuerdo(
+							"el cliente paga hoy con los links de Págalo",
+						),
+					);
 					break;
 				case "comprobante":
-					cuerpo = renderComprobante(cancelar, textoParticipante);
+					cuerpo = renderComprobante(cancelar, textoParticipante, () =>
+						registrarLlamadaDelAcuerdo(
+							"el cliente ya pagó y envió su comprobante",
+						),
+					);
 					break;
 				case "convenio":
-					cuerpo = renderConvenio(casoCobroId, cancelar);
+					cuerpo = renderConvenio(casoCobroId, cancelar, () =>
+						registrarLlamadaDelAcuerdo(
+							"convenio de pago, pendiente de la aprobación del supervisor",
+						),
+					);
 					break;
 				case "entrega":
 					cuerpo = renderRecuperacion(
 						casoCobroId,
 						"entrega_voluntaria",
 						cancelar,
+						undefined,
+						() =>
+							registrarLlamadaDelAcuerdo(
+								"el cliente entregará el vehículo voluntariamente",
+							),
 					);
 					break;
 			}
@@ -840,8 +917,9 @@ export function GestionPanel({
 					{...propsContacto}
 					metodoInicial={canal.metodo}
 					embebido
-					// «Cancelar» abandona la gestión: vuelve al inicio.
-					onCancelar={irInicio}
+					// «Cancelar» abandona la gestión (o, con la llamada ya marcada,
+					// vuelve a elegir el resultado).
+					onCancelar={cancelarResultado}
 					estadosPermitidos={
 						resultado === "no_contacto"
 							? ESTADOS_SIN_CONTACTO
@@ -1002,7 +1080,11 @@ export function GestionPanel({
 
 	/* ── Formularios directos ─────────────────────────────────────────────── */
 
-	function renderPagalo(casoCobroId: string, cancelar: () => void) {
+	function renderPagalo(
+		casoCobroId: string,
+		cancelar: () => void,
+		alRegistrar?: () => Promise<void>,
+	) {
 		if (!caso.identidad.numeroSifco || !caso.identidad.carteraCreditoId) {
 			return (
 				<SinDatos texto="Este caso no tiene un crédito de cartera para generar links de pago." />
@@ -1016,12 +1098,19 @@ export function GestionPanel({
 				mostrarTrigger={false}
 				embebido
 				onCancelar={cancelar}
-				onExito={(r) => registrar(resumenLinksPagalo(r))}
+				onExito={(r) => {
+					void alRegistrar?.();
+					registrar(resumenLinksPagalo(r));
+				}}
 			/>
 		);
 	}
 
-	function renderComprobante(cancelar: () => void, participanteTexto?: string) {
+	function renderComprobante(
+		cancelar: () => void,
+		participanteTexto?: string,
+		alRegistrar?: () => Promise<void>,
+	) {
 		// `embebido`: trae su resumen, su cuerpo con scroll y su pie fijo.
 		return (
 			<div className="flex min-h-0 flex-1 flex-col">
@@ -1029,13 +1118,20 @@ export function GestionPanel({
 					embebido
 					creditoId={caso.id}
 					onVolver={cancelar}
-					onExito={(r) => registrar(resumenPago(r, participanteTexto))}
+					onExito={(r) => {
+						void alRegistrar?.();
+						registrar(resumenPago(r, participanteTexto));
+					}}
 				/>
 			</div>
 		);
 	}
 
-	function renderConvenio(casoCobroId: string, cancelar: () => void) {
+	function renderConvenio(
+		casoCobroId: string,
+		cancelar: () => void,
+		alRegistrar?: () => Promise<void>,
+	) {
 		if (!caso.convenio.habilitado) {
 			return (
 				<SinDatos
@@ -1058,7 +1154,10 @@ export function GestionPanel({
 				maxMeses={caso.convenio.maxMeses}
 				embebido
 				onCancelar={cancelar}
-				onCreado={(r) => registrar(resumenConvenio(r))}
+				onCreado={(r) => {
+					void alRegistrar?.();
+					registrar(resumenConvenio(r));
+				}}
 			/>
 		);
 	}
@@ -1068,6 +1167,7 @@ export function GestionPanel({
 		tipo: "tomado" | "entrega_voluntaria",
 		cancelar: () => void,
 		visita?: VisitaRegistrada,
+		alRegistrar?: () => Promise<void>,
 	) {
 		const bloqueo =
 			tipo === "tomado"
@@ -1098,7 +1198,10 @@ export function GestionPanel({
 				}
 				embebido
 				onCancelar={cancelar}
-				onExito={(r) => registrar(resumenRecuperacion(r))}
+				onExito={(r) => {
+					void alRegistrar?.();
+					registrar(resumenRecuperacion(r));
+				}}
 			/>
 		);
 	}

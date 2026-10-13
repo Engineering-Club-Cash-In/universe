@@ -3,15 +3,17 @@ import z from "zod";
 
 type BigInput = number | string | Big;
 
+export const montoBoletaSchema = z.union([
+  z.number().min(0),
+  z.string().regex(/^\d{1,16}\.\d{2}$/),
+]);
+
 // Schema del body de /newPayment. Vive en este módulo puro (sin conexión a
 // BD) para que los tests puedan importarlo sin levantar la base.
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.union([
-    z.number().min(0),
-    z.string().regex(/^\d{1,16}\.\d{2}$/),
-  ]),
+  monto_boleta: montoBoletaSchema,
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),

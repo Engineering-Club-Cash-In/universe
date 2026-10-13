@@ -90,3 +90,31 @@ describe("identidad del pago: registerBy sale del actor verificado, no del body"
     expect(vistos.actorCondonar).toBe("db@clubcashin.com");
   });
 });
+
+describe("500 al condonar: no filtra el detalle del error (Drizzle trae consulta y parámetros)", () => {
+  test("el cliente recibe un mensaje genérico; el detalle va solo al log", async () => {
+    const secreto = 'Failed query: select "x" from cartera.creditos params: 12345,secreto@x.com';
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
+      filasVivas: (async () => []) as never,
+      condonacionViva: (async () => null) as never,
+      decidir: (async () => { throw new Error(secreto); }) as never,
+    };
+    const logs: string[] = [];
+    const origError = console.error, origWarn = console.warn, origLog = console.log;
+    console.error = console.warn = console.log = ((...a: unknown[]) => { logs.push(a.map(String).join(" ")); }) as never;
+    const set: { status?: number } = {};
+    let r: unknown;
+    try {
+      r = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "asesor@x.com" }, deps);
+    } finally {
+      console.error = origError; console.warn = origWarn; console.log = origLog;
+    }
+    expect(set.status).toBe(500);
+    expect((r as { success: boolean }).success).toBe(false);
+    expect(JSON.stringify(r)).not.toContain("secreto");
+    expect(JSON.stringify(r)).not.toContain("Failed query");
+    expect(logs.join("\n")).toContain("Failed query");
+  });
+});

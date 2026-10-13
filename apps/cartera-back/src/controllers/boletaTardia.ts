@@ -135,8 +135,10 @@ export async function registrarPagoConBoletaTardia(
         }),
       });
     } catch (error) {
+      // El detalle (Drizzle trae la consulta y sus parámetros) va solo al log, nunca al cliente.
+      log("condonar_fallo", { credito_id: creditoId, intento_id: intentoId, error: error instanceof Error ? error.message : String(error) });
       set.status = 500;
-      return { success: false, message: "No se pudo condonar la mora; el pago NO se registró", error: error instanceof Error ? error.message : String(error) };
+      return { success: false, message: "No se pudo condonar la mora; el pago NO se registró" };
     }
     if (cond.kind === "sin_cambio") {
       return cond.razon === "mora_cambio"

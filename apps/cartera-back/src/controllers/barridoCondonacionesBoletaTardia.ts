@@ -19,6 +19,12 @@ import { anularCondonacionBoletaTardia } from "./latefee";
  *
  * Falsos positivos: si el crédito tiene filas vivas SIN marca de intento creadas después de la condonación
  * (recalculateFromJson, resetCredit, caída a incobrable las reconstruyen sin marca) NO se anula: revisión manual.
+ * Esto protege a las filas NUEVAS sin marca (`filasSinMarca` compara `p.createdat >= mc.fecha`). Las FILAS DE PAGO
+ * sembradas o reutilizadas conservan un `createdat` anterior a la condonación, así que ahí la guarda no actúa: el
+ * pago existe pero perdió la marca (o nunca la tuvo) y el barrido anula la condonación. Es benigno porque
+ * `reactivarMora: false` no revive nada: solo compensa el ledger de la condonación.
+ * Una revisión manual sigue siendo candidata en cada corrida (15 min): solo la PRIMERA vez que el barrido la ve
+ * (`primera_vez`) hace fallar el job; las repetidas se cuentan aparte (`revision_manual_repetida`) y se loguean.
  *
  * Limitación (E-15): las condonaciones vivas cuyo registro dejó el log `verificacion_fallida` NO son detectables por
  * dato (solo queda el log en boletaTardia.ts); no hay columna ni motivo persistido. Tienen filas vivas, así que el
@@ -28,7 +34,7 @@ export const MINUTOS_GRACIA_CONDONACION_HUERFANA = 15;
 export const HORAS_MAXIMAS_CONDONACION_HUERFANA = 24;
 const LOTE = 200;
 
-type Candidata = { condonacion_id: number; credito_id: number; intento_id: string };
+type Candidata = { condonacion_id: number; credito_id: number; intento_id: string; primera_vez?: boolean };
 
 export type DepsBarrido = {
   candidatas: () => Promise<Candidata[]>;
@@ -46,7 +52,8 @@ const filas = <T>(r: unknown): T[] => (Array.isArray(r) ? r : (r as { rows?: T[]
 // `fecha` es timestamp sin zona con DEFAULT now(): se compara en SQL, no en JS (postgres.js la correría +6h).
 const huerfanas = (rango: ReturnType<typeof sql>) => async (): Promise<Candidata[]> =>
   filas<Candidata>(await db.execute(sql`
-    SELECT mc.condonacion_id, mc.credito_id, mc.intento_id::text AS intento_id
+    SELECT mc.condonacion_id, mc.credito_id, mc.intento_id::text AS intento_id,
+      (mc.fecha > now() - make_interval(mins => ${2 * MINUTOS_GRACIA_CONDONACION_HUERFANA})) AS primera_vez
     FROM cartera.moras_condonaciones mc
     WHERE mc.anulada_at IS NULL AND mc.intento_id IS NOT NULL ${rango}
       AND NOT EXISTS (SELECT 1 FROM cartera.pagos_credito p
@@ -81,10 +88,15 @@ export const depsBarridoReales = (): DepsBarrido => ({
 
 let enCurso = false;
 
+/** El job falla (y alerta) solo por lo nuevo: una revisión manual repetida no vuelve a avisar cada 15 minutos. */
+export const debeFallarElBarrido = (r: { fallidas: number; abandonadas_nuevas: number; revision_manual_nueva: number }) =>
+  r.fallidas > 0 || r.abandonadas_nuevas > 0 || r.revision_manual_nueva > 0;
+
 export async function barrerCondonacionesBoletaTardiaHuerfanas(deps: DepsBarrido = depsBarridoReales()) {
   const resultado = {
     revisadas: 0, anuladas: 0, omitidas: 0, fallidas: 0,
-    omitidas_por_lock: 0, revision_manual: 0, abandonadas_nuevas: 0, solapada: false,
+    omitidas_por_lock: 0, revision_manual: 0, revision_manual_nueva: 0, revision_manual_repetida: 0,
+    abandonadas_nuevas: 0, solapada: false,
   };
   if (enCurso) {
     console.warn(JSON.stringify({ level: "warn", event: "boleta_tardia.barrido_solapado" }));
@@ -101,6 +113,7 @@ export async function barrerCondonacionesBoletaTardiaHuerfanas(deps: DepsBarrido
           if (!(await deps.sinFilasVivas(c.credito_id, c.intento_id))) { resultado.omitidas++; return; }
           if (await deps.filasSinMarca(c.condonacion_id)) {
             resultado.revision_manual++;
+            if (c.primera_vez) resultado.revision_manual_nueva++; else resultado.revision_manual_repetida++;
             console.warn(JSON.stringify({ level: "warn", event: "boleta_tardia.condonacion_huerfana_revision_manual", ...c }));
             return;
           }

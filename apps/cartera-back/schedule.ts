@@ -20,7 +20,7 @@ import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPag
 import config from './src/config';
 import { reintentarCuentasNexaPendientes } from './src/controllers/nexaCuentaReintentos';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
-import { barrerCondonacionesBoletaTardiaHuerfanas } from './src/controllers/barridoCondonacionesBoletaTardia';
+import { barrerCondonacionesBoletaTardiaHuerfanas, debeFallarElBarrido } from './src/controllers/barridoCondonacionesBoletaTardia';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -232,8 +232,8 @@ export function iniciarTareasProgramadas() {
       'sweep_late_slip_waivers',
       async () => {
         const r = await barrerCondonacionesBoletaTardiaHuerfanas();
-        // Avisa una sola vez por abandonada/revisión manual (la abandonada cae en una franja de 15 min).
-        if (r.fallidas > 0 || r.abandonadas_nuevas > 0 || r.revision_manual > 0) throw new Error("scheduled job reported failure");
+        // Avisa una sola vez por abandonada/revisión manual nueva (cada una cae en una franja de 15 min).
+        if (debeFallarElBarrido(r)) throw new Error("scheduled job reported failure");
       },
     );
   });

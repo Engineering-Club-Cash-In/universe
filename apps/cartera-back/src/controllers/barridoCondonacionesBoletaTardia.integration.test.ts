@@ -163,7 +163,7 @@ integrationTest("F2: filas vivas SIN marca creadas después de la condonación: 
   try {
     r = await barrerCondonacionesBoletaTardiaHuerfanas({ ...reales, candidatas: async () => (await reales.candidatas()).filter((c) => [21, 22].includes(c.credito_id)) });
   } finally { console.warn = w; }
-  expect(r).toMatchObject({ revision_manual: 1, anuladas: 1 });
+  expect(r).toMatchObject({ revision_manual: 1, revision_manual_repetida: 1, revision_manual_nueva: 0, anuladas: 1 });
   expect(await viva(sql, uuidIntento(322))).toBe(true);
   expect(await viva(sql, uuidIntento(321))).toBe(false);
   expect(warns.some((m) => m.includes("condonacion_huerfana_revision_manual") && m.includes("322"))).toBe(true);
@@ -229,4 +229,15 @@ integrationTest("un fallo en una candidata no detiene a las demás y se cuenta",
   expect(r).toMatchObject({ revisadas: 2, anuladas: 1, fallidas: 1 });
   expect(await viva(sql, uuidIntento(337))).toBe(true);
   expect(await viva(sql, uuidIntento(338))).toBe(false);
+});
+
+integrationTest("FF2: primera_vez solo en la primera franja de 15 min tras el umbral; la repetida no", async () => {
+  const { sql, latefee } = await levantarEsquemaBoletaTardia();
+  const { depsBarridoReales } = await barrido();
+  await condonarBT(latefee, 39, uuidIntento(339));
+  await envejecer(sql, uuidIntento(339), 20);
+  await condonarBT(latefee, 40, uuidIntento(340));
+  await envejecer(sql, uuidIntento(340), 45);
+  const c = (await depsBarridoReales().candidatas()).filter((x) => [39, 40].includes(x.credito_id));
+  expect(Object.fromEntries(c.map((x) => [x.credito_id, x.primera_vez]))).toEqual({ 39: true, 40: false });
 });

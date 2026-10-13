@@ -12,7 +12,7 @@ test("schedule.ts agenda el barrido cada 15 min en hora de Guatemala con el job_
   expect(antes).toContain("rule: '*/15 * * * *', tz: TZ_GUATEMALA");
   const despues = src.slice(i, i + 600);
   expect(despues).toContain("barrerCondonacionesBoletaTardiaHuerfanas()");
-  expect(despues).toContain("r.fallidas > 0 || r.abandonadas_nuevas > 0 || r.revision_manual > 0");
+  expect(despues).toContain("debeFallarElBarrido(r)");
   expect(despues).toContain("throw new Error(\"scheduled job reported failure\")");
 });
 

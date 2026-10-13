@@ -9,7 +9,7 @@ function montoYAsesor(c: CondonacionBoletaTardiaPago | null | undefined): string
 
 export function valorCondonacionBoletaTardia(c: CondonacionBoletaTardiaPago | null | undefined): string | null {
   const base = montoYAsesor(c);
-  return base ? `${base}${c?.anulada ? " — ANULADA" : ""}` : null;
+  return base ? `${base} (por toda la boleta)${c?.anulada ? " — ANULADA" : ""}` : null;
 }
 
 /** "(por toda la boleta)": la condonación es de la boleta completa; no se suma por fila de pago. */

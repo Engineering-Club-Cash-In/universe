@@ -4,8 +4,10 @@ export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
 
 export type PaymentAdvisoryLockConnection = {
   query: (text: string, values?: unknown[]) => Promise<unknown>;
-  release: () => void;
+  release: (destroy?: boolean | Error) => void;
 };
+
+type LockPoolLike = { connect: () => Promise<PaymentAdvisoryLockConnection> };
 
 declare const paymentLockBrand: unique symbol;
 export type PaymentAdvisoryLock = { readonly [paymentLockBrand]: true };
@@ -58,10 +60,13 @@ export async function withPaymentBindingLock<T>(
  */
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
-  fn: (lock: PaymentAdvisoryLock) => Promise<T>
+  fn: (lock: PaymentAdvisoryLock) => Promise<T>,
+  pool: LockPoolLike = lockPool, // inyectable solo para pruebas
 ): Promise<T> {
-  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  const lockConn: PaymentAdvisoryLockConnection = await pool.connect();
   const lock = {} as PaymentAdvisoryLock;
+  // Si el unlock falla, la sesión conserva el lock: la conexión se destruye en vez de volver al pool.
+  let destruir = false;
   try {
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -77,9 +82,10 @@ export async function withPaymentAdvisoryLock<T>(
         credito_id,
       ]);
     } catch (unlockError) {
+      destruir = true;
       console.error("⚠️ Error liberando advisory lock:", unlockError);
     }
-    lockConn.release();
+    if (destruir) lockConn.release(true); else lockConn.release();
   }
 }
 
@@ -90,11 +96,13 @@ export async function withPaymentAdvisoryLock<T>(
  */
 export async function tryWithPaymentAdvisoryLock<T>(
   credito_id: number,
-  fn: (lock: PaymentAdvisoryLock) => Promise<T>
+  fn: (lock: PaymentAdvisoryLock) => Promise<T>,
+  pool: LockPoolLike = lockPool, // inyectable solo para pruebas
 ): Promise<{ adquirido: true; valor: T } | { adquirido: false }> {
-  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  const lockConn: PaymentAdvisoryLockConnection = await pool.connect();
   const lock = {} as PaymentAdvisoryLock;
   let tomado = false;
+  let destruir = false;
   try {
     const r = await lockConn.query("SELECT pg_try_advisory_lock($1, $2) AS ok", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -110,9 +118,10 @@ export async function tryWithPaymentAdvisoryLock<T>(
       try {
         await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [PAYMENT_ADVISORY_LOCK_NAMESPACE, credito_id]);
       } catch (unlockError) {
+        destruir = true;
         console.error("⚠️ Error liberando advisory lock:", unlockError);
       }
     }
-    lockConn.release();
+    if (destruir) lockConn.release(true); else lockConn.release();
   }
 }

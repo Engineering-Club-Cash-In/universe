@@ -4,13 +4,13 @@ import { claseInsigniaCondonacionBoletaTardia, etiquetaCondonacionBoletaTardia, 
 describe("etiqueta de la condonación por boleta tardía para contabilidad", () => {
   test("valor y etiqueta completos, con monto string o number", () => {
     const c = { condonacionId: 9, monto: "11.20", asesor: "asesor@clubcashin.com" };
-    expect(valorCondonacionBoletaTardia(c)).toBe("Q11.20 (asesor@clubcashin.com)");
+    expect(valorCondonacionBoletaTardia(c)).toBe("Q11.20 (asesor@clubcashin.com) (por toda la boleta)");
     expect(etiquetaCondonacionBoletaTardia(c)).toBe("Condonación por boleta tardía (por toda la boleta): Q11.20 (asesor@clubcashin.com)");
     expect(etiquetaCondonacionBoletaTardia({ ...c, monto: 7.4 })).toBe("Condonación por boleta tardía (por toda la boleta): Q7.40 (asesor@clubcashin.com)");
   });
   test("si la condonación está anulada, lo dice", () => {
     const c = { condonacionId: 9, monto: "11.20", asesor: "a@x.com", anulada: true };
-    expect(valorCondonacionBoletaTardia(c)).toBe("Q11.20 (a@x.com) — ANULADA");
+    expect(valorCondonacionBoletaTardia(c)).toBe("Q11.20 (a@x.com) (por toda la boleta) — ANULADA");
     expect(etiquetaCondonacionBoletaTardia(c)).toBe("Condonación por boleta tardía ANULADA (por toda la boleta): Q11.20 (a@x.com)");
   });
   test("la clase de color distingue viva de anulada", () => {

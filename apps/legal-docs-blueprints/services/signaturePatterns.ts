@@ -474,26 +474,32 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   // ===== CARTA PODER =====
   // Todas las cartas de poder usan el mismo patrón: F.___________________________ (29 underscores)
+  // La firma el representante de la empresa frente al notario, que legaliza la
+  // firma en el mismo papel: se imprimen, no van a WeeTrust.
   [ContractType.CARTA_CUBE_ANDRES]: {
     pattern: 'F.___________________________',
+    firma: 'fisica',
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.CARTA_CUBE_DON_ALEX]: {
     pattern: 'F.___________________________',
+    firma: 'fisica',
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.CARTA_RDBE_DON_ALEX]: {
     pattern: 'F.___________________________',
+    firma: 'fisica',
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.CARTA_RDBE_RICHARD]: {
     pattern: 'F.___________________________',
+    firma: 'fisica',
     signerCount: 1,
     signers: ['Cliente']
   }

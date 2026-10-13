@@ -36,7 +36,7 @@ mock.module("../database", () => {
     insert: () => createInsertBuilder("tx"),
     select: () => ({
       from: () => ({
-        where: () => Promise.resolve([]),
+        where: () => Object.assign(Promise.resolve([]), { for: () => Promise.resolve([]) }),
       }),
     }),
   };

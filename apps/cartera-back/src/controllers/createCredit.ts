@@ -3,6 +3,7 @@ import z from "zod";
 import { db } from "../database";
 import {
   asesores,
+  SQL_CARTERA_SCHEMA,
   aseguradoras,
   ajuste_fecha_ideal_pago,
   creditos,
@@ -95,7 +96,7 @@ interface NewCredit {
   [key: string]: unknown;
 }
 
-type DbExecutor = Pick<typeof db, "insert" | "select">;
+type DbExecutor = Pick<typeof db, "insert" | "select" | "execute">;
 
 interface User {
   usuario_id: number;
@@ -438,6 +439,29 @@ async function asignarAsesorConLock(executor: DbExecutor): Promise<number> {
   throw new Error("No hay un asesor disponible para asignar el crédito.");
 }
 
+/**
+ * Un asesor indicado a mano (p. ej. el de una oportunidad que se cierra) se valida
+ * con el mismo lock compartido: si está ausente (una ausencia lo sacó del balanceo
+ * de créditos nuevos), el crédito no se le asigna y se elige a otro elegible.
+ * Un asesor que simplemente no recibe créditos automáticos sigue asignable a mano.
+ */
+async function validarAsesorExplicito(executor: DbExecutor, asesorId: number): Promise<number> {
+  const [fila] = await executor
+    .select({ activo_para_creditos: asesores.activo_para_creditos })
+    .from(asesores)
+    .where(eq(asesores.asesor_id, asesorId))
+    .for("share");
+  if (!fila || fila.activo_para_creditos) return asesorId;
+  const ausente = await executor.execute(sql`
+    SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.operaciones_traslado_cartera
+    WHERE asesor_origen_id = ${asesorId} AND estado = 'confirmada'
+      AND solicitud->>'creditosPausados' = 'true'
+    LIMIT 1`);
+  if ((ausente.rows ?? []).length === 0) return asesorId;
+  console.warn(`[createCredit] El asesor ${asesorId} está ausente: se asigna a otro elegible.`);
+  return asignarAsesorConLock(executor);
+}
+
 const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
@@ -474,7 +498,9 @@ const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecut
   );
 
   console.log("🎯 Aplicando load balancing de asesores...");
-  const asesor_id = creditData.asesor_id || await asignarAsesorConLock(executor);
+  const asesor_id = creditData.asesor_id
+    ? await validarAsesorExplicito(executor, creditData.asesor_id)
+    : await asignarAsesorConLock(executor);
   console.log(`✅ Asesor asignado: ${asesor_id}`);
 
   const formatCredit = creditData.inversionistas.length > 1 &&

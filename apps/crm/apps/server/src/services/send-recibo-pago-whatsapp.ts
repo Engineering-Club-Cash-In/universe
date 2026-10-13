@@ -1,12 +1,13 @@
 /**
  * Send Recibo Pago Whatsapp Service
  *
- * Envía por WhatsApp el recibo de comprobante de un pago (CB-113), usando el
- * mismo template `mensaje_adjunto` de WittyBots que
- * `send-estado-cuenta-whatsapp.ts` (header de documento + body de 1 variable).
- * A diferencia de ese flujo, el documento ya viene generado: lo dispara
- * cartera-back justo después de facturar y manda la URL del PDF (1 recibo por
- * `pago_id`, no por factura ni por boleta).
+ * Envía por WhatsApp el recibo de comprobante de un pago (CB-113). Va como
+ * imagen con el template `mensajeimage` de WittyBots (header de imagen + body
+ * de 1 variable); si cartera no pudo generar la imagen, va el PDF con
+ * `mensaje_adjunto` (header de documento + body de 1 variable).
+ * El documento ya viene generado: lo dispara cartera-back cuando un pago queda
+ * aplicado (conta lo valida o entra por Nexa) y manda la URL del PDF (1 recibo
+ * por `pago_id`, no por factura ni por boleta).
  *
  * Sin sesión de usuario: lo llama cartera-back servidor-a-servidor (API key),
  * no un asesor desde el frontend, así que el caso se busca por número SIFCO
@@ -21,6 +22,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import { recibosPagoWhatsapp } from "../db/schema/cobros-send-logs";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
@@ -36,7 +38,8 @@ import {
 	resolverContactoAsesor,
 } from "./asesor-whatsapp";
 
-const TEMPLATE_NAME = "mensaje_adjunto";
+const TEMPLATE_IMAGEN = "mensajeimage";
+const TEMPLATE_DOCUMENTO = "mensaje_adjunto";
 const LOG_PREFIX = "[ReciboPagoWhatsapp]";
 
 export type ReciboPagoErrorCodigo =
@@ -44,6 +47,7 @@ export type ReciboPagoErrorCodigo =
 	| "SIN_TELEFONO"
 	| "SIN_USUARIO_SISTEMA"
 	| "ERROR_ENVIO"
+	| "EN_CURSO"
 	| "ERROR_INTERNO";
 
 const MENSAJES_ERROR: Record<ReciboPagoErrorCodigo, string> = {
@@ -52,6 +56,7 @@ const MENSAJES_ERROR: Record<ReciboPagoErrorCodigo, string> = {
 	SIN_USUARIO_SISTEMA:
 		"No se encontró un usuario cobros_supervisor para registrar el envío.",
 	ERROR_ENVIO: "No se pudo enviar el mensaje de WhatsApp.",
+	EN_CURSO: "El recibo de este pago ya se está enviando.",
 	ERROR_INTERNO: "No se pudo preparar el envío. Intente de nuevo.",
 };
 
@@ -59,6 +64,8 @@ export interface SendReciboPagoWhatsappParams {
 	pagoId: number;
 	numeroSifco: string;
 	reciboUrl: string;
+	/** JPG del recibo. Si viene, se manda como imagen; si no, va el PDF. */
+	imagenUrl?: string | null;
 	clienteNombre: string;
 	numeroCuota?: number | null;
 	asesorNombre?: string | null;
@@ -66,7 +73,13 @@ export interface SendReciboPagoWhatsappParams {
 }
 
 export type SendReciboPagoWhatsappResult =
-	| { sent: true; templateMessageId?: string; telefono: string }
+	| {
+			sent: true;
+			templateMessageId?: string;
+			telefono: string;
+			/** true si el recibo ya se había mandado y no se volvió a enviar. */
+			yaEnviado?: boolean;
+	  }
 	| { sent: false; codigo: ReciboPagoErrorCodigo; mensaje: string };
 
 interface DatosCaso {
@@ -177,23 +190,93 @@ export function construirMensajeReciboPago(
 		placa: string | null;
 	},
 	numeroSifco: string,
-	extra: { numeroCuota?: number | null; asesor?: ContactoAsesor | null } = {},
+	extra: {
+		numeroCuota?: number | null;
+		asesor?: ContactoAsesor | null;
+		adjunto?: "imagen" | "documento";
+	} = {},
 ): string {
-	const saludo = clienteNombre ? `${clienteNombre}, te` : "Te";
+	// Registro formal (usted), como el resto de los textos de cobros.
+	const saludo = clienteNombre ? `${clienteNombre}, le` : "Le";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
 		.filter((valor): valor is string | number => valor !== null)
 		.join(" ");
 	const identificador = descripcionVehiculo
-		? ` de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
-		: ` de tu crédito ${numeroSifco}`;
+		? ` de su ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
+		: ` de su crédito ${numeroSifco}`;
 	const cuota =
 		extra.numeroCuota != null ? ` (cuota ${extra.numeroCuota})` : "";
 
-	return `${saludo} compartimos el recibo de tu pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
+	const adjunto =
+		extra.adjunto === "imagen" ? "la imagen adjunta" : "el documento adjunto";
+	return `${saludo} compartimos el recibo del pago${identificador}${cuota} en ${adjunto}. ${construirCierreAsesor(extra.asesor ?? null)}`;
+}
+
+type ReservaEnvio = "nueva" | "ya_enviado" | "en_curso";
+
+/** Un "enviando" de más de 30 min no se reenvía: no se sabe si llegó. */
+const MINUTOS_ENVIO_TRABADO = 30;
+
+/**
+ * Reserva el pago antes de llamar a WhatsApp. Solo un pago nuevo o con un
+ * envío fallido se puede mandar; uno enviado o con un envío en curso no.
+ */
+async function reservarEnvioRecibo(
+	pagoId: number,
+	numeroSifco: string,
+): Promise<ReservaEnvio> {
+	const [tomada] = await db
+		.insert(recibosPagoWhatsapp)
+		.values({ pagoId, numeroCreditoSifco: numeroSifco, estado: "enviando" })
+		.onConflictDoUpdate({
+			target: recibosPagoWhatsapp.pagoId,
+			set: {
+				estado: "enviando",
+				intentos: sql`${recibosPagoWhatsapp.intentos} + 1`,
+				actualizadoAt: new Date(),
+			},
+			setWhere: eq(recibosPagoWhatsapp.estado, "fallido"),
+		})
+		.returning({ pagoId: recibosPagoWhatsapp.pagoId });
+	if (tomada) return "nueva";
+
+	const [actual] = await db
+		.select({
+			estado: recibosPagoWhatsapp.estado,
+			trabado: sql<boolean>`${recibosPagoWhatsapp.actualizadoAt} < now() - make_interval(mins => ${MINUTOS_ENVIO_TRABADO}::int)`,
+		})
+		.from(recibosPagoWhatsapp)
+		.where(eq(recibosPagoWhatsapp.pagoId, pagoId))
+		.limit(1);
+	if (actual?.estado === "enviando" && !actual.trabado) return "en_curso";
+	if (actual?.estado === "enviando") {
+		console.warn(
+			`${LOG_PREFIX} Pago ${pagoId}: envío anterior sin cerrar (más de ${MINUTOS_ENVIO_TRABADO} min); no se reenvía para no duplicar`,
+		);
+	}
+	return "ya_enviado";
+}
+
+async function cerrarEnvioRecibo(
+	pagoId: number,
+	estado: "enviado" | "fallido",
+): Promise<void> {
+	await db
+		.update(recibosPagoWhatsapp)
+		.set({ estado, actualizadoAt: new Date() })
+		.where(eq(recibosPagoWhatsapp.pagoId, pagoId));
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
 export interface ReciboPagoDeps {
+	reservarEnvio?: (
+		pagoId: number,
+		numeroSifco: string,
+	) => Promise<ReservaEnvio>;
+	cerrarEnvio?: (
+		pagoId: number,
+		estado: "enviado" | "fallido",
+	) => Promise<void>;
 	cargarCaso?: (numeroSifco: string) => Promise<DatosCaso | null>;
 	obtenerUsuarioSistema?: () => Promise<string | null>;
 	obtenerAsesor?: ObtenerAsesor;
@@ -208,6 +291,7 @@ export async function sendReciboPagoWhatsapp(
 	const {
 		numeroSifco,
 		reciboUrl,
+		imagenUrl,
 		clienteNombre,
 		pagoId,
 		numeroCuota,
@@ -219,6 +303,8 @@ export async function sendReciboPagoWhatsapp(
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
 	const obtenerAsesor = deps.obtenerAsesor ?? obtenerAsesorCartera;
+	const reservarEnvio = deps.reservarEnvio ?? reservarEnvioRecibo;
+	const cerrarEnvio = deps.cerrarEnvio ?? cerrarEnvioRecibo;
 
 	const fallo = (
 		codigo: ReciboPagoErrorCodigo,
@@ -293,24 +379,55 @@ export async function sendReciboPagoWhatsapp(
 			placa: caso.vehiculoPlaca,
 		},
 		numeroSifco,
-		{ numeroCuota, asesor },
+		{ numeroCuota, asesor, adjunto: imagenUrl ? "imagen" : "documento" },
 	);
 
-	// 4. Enviar por WhatsApp.
+	// 4. Reservar el pago (idempotencia): si cartera reintenta porque la
+	//    respuesta anterior se cortó, el recibo ya enviado no sale dos veces.
+	let reserva: ReservaEnvio;
+	try {
+		reserva = await reservarEnvio(pagoId, numeroSifco);
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error(
+			`${LOG_PREFIX} Error reservando el envío del pago ${pagoId}: ${msg}`,
+		);
+		return fallo("ERROR_INTERNO");
+	}
+	if (reserva === "ya_enviado") {
+		console.log(
+			`${LOG_PREFIX} Recibo del pago ${pagoId} ya enviado; no se repite`,
+		);
+		return { sent: true, telefono: telefonoDestino, yaEnviado: true };
+	}
+	if (reserva === "en_curso") return fallo("EN_CURSO");
+
+	// 5. Enviar por WhatsApp.
 	const result = await enviar({
 		phone: telefonoDestino,
 		message: mensaje,
-		templateName: TEMPLATE_NAME,
+		templateName: imagenUrl ? TEMPLATE_IMAGEN : TEMPLATE_DOCUMENTO,
 		bodyParams: [mensaje],
-		header: {
-			type: "document",
-			url: reciboUrl,
-			filename: `Recibo-Pago-${pagoId}.pdf`,
-		},
+		header: imagenUrl
+			? { type: "image", url: imagenUrl }
+			: {
+					type: "document",
+					url: reciboUrl,
+					filename: `Recibo-Pago-${pagoId}.pdf`,
+				},
 		logPrefix: testMode ? `${LOG_PREFIX}[TEST]` : LOG_PREFIX,
 	});
 
-	// 5. Log de traza en cobros_send_logs.
+	try {
+		await cerrarEnvio(pagoId, result.success ? "enviado" : "fallido");
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.error(
+			`${LOG_PREFIX} No se pudo cerrar el envío del pago ${pagoId}: ${msg}`,
+		);
+	}
+
+	// 6. Log de traza en cobros_send_logs.
 	await guardarLog({
 		numeroCreditoSifco: numeroSifco,
 		plantillaId: "recibo_pago",
@@ -325,6 +442,7 @@ export async function sendReciboPagoWhatsapp(
 						...(result.providerResponse ?? {}),
 						templateMessageId: result.templateMessageId,
 						reciboUrl,
+						imagenUrl: imagenUrl ?? undefined,
 						pagoId,
 						testMode,
 						realTarget: testMode ? (realPhone ?? undefined) : undefined,
@@ -336,6 +454,7 @@ export async function sendReciboPagoWhatsapp(
 					providerResponse: {
 						...(result.providerResponse ?? {}),
 						reciboUrl,
+						imagenUrl: imagenUrl ?? undefined,
 						pagoId,
 						testMode,
 						realTarget: testMode ? (realPhone ?? undefined) : undefined,

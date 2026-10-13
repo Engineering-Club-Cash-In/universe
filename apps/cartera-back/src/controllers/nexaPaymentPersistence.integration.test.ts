@@ -41,6 +41,10 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
     await sql`INSERT INTO cartera.creditos VALUES (10)`;
     await sql.unsafe(migration).simple();
     await sql.unsafe(migration).simple();
+    // startNexaBilling lee pago_id_eliminado para distinguir un pago borrado por CAIDO.
+    await sql.unsafe(await Bun.file(
+      new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url),
+    ).text()).simple();
 
     await sql`INSERT INTO cartera.nexa_payment_nonces (nonce) VALUES ('nonce-persisted')`;
     await expectRejected(
@@ -122,6 +126,15 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
     `;
     expect(billed).toEqual({ status: "billed", pago_id: 17 });
 
+    // Un evento cuyo pago se borró (crédito marcado CAIDO) nunca arranca a facturar.
+    const [sinPago] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash, status)
+      VALUES ('qa-billing-sin-pago', 'nonce-billing-sin-pago', 10, 10.00, 'GTQ', ${"f".repeat(64)}, 'billing_failed')
+      RETURNING id
+    `;
+    expect(await runtime.startNexaBilling(sinPago!.id)).toBe(false);
+
     const [unknownEvent] = await sql<{ id: number }[]>`
       INSERT INTO cartera.nexa_payment_events
         (external_reference, nonce, credito_id, amount, currency, payload_hash, status, pago_id)
@@ -174,6 +187,9 @@ integrationTest("un evento legado en crash-window acepta el cliente nuevo y qued
     await sql`CREATE TABLE cartera.pagos_credito (pago_id integer PRIMARY KEY)`;
     await sql`INSERT INTO cartera.creditos (credito_id) VALUES (10)`;
     await sql.unsafe(migration).simple();
+    await sql.unsafe(await Bun.file(
+      new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url),
+    ).text()).simple();
 
     const queryClient = {
       query: async (text: string, values: unknown[] = []) => ({
@@ -316,6 +332,7 @@ integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el 
       amount: "10.00",
       currency: "GTQ",
       tokenDate: "2026-09-08T23:30:00-06:00",
+      token: "1111222233334444",
     });
     const timestamp = String(now / 1000);
     const nonce = "nonce-internal-schema-boundary";
@@ -339,7 +356,7 @@ integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el 
         loadCredit: async () => ({
           usuarioId: 5,
           statusCredit: "ACTIVO",
-          binding: { activo: true, expires_at: null, max_payment_amount: null },
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
         }),
         findPayments: async () => [],
         registerPayment: async (...args) => {
@@ -396,10 +413,11 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
         activo boolean NOT NULL,
         expires_at timestamptz,
         max_payment_amount numeric(18, 2),
+        nexa_token varchar(32),
         created_at timestamptz NOT NULL DEFAULT now()
       )
     `;
-    await sql`INSERT INTO cartera.nexa_credit_bindings (credito_id, activo) VALUES (${creditoId}, true)`;
+    await sql`INSERT INTO cartera.nexa_credit_bindings (credito_id, activo, nexa_token) VALUES (${creditoId}, true, '1111222233334444')`;
     await sql`SELECT pg_advisory_lock(8765, ${creditoId})`;
     blockerHeld = true;
 
@@ -419,6 +437,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
           currency: "GTQ",
           tokenDate: "2026-09-08T23:30:00-06:00",
           transactionId: "binding-race",
+          token: "1111222233334444",
         },
         7,
         5,
@@ -431,7 +450,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
         },
         paymentLock,
       );
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     }).finally(() => { settled = true; });
 
     await Bun.sleep(50);
@@ -441,7 +460,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
     await sql`UPDATE cartera.nexa_credit_bindings SET activo = false WHERE credito_id = ${creditoId}`;
     await sql`SELECT pg_advisory_unlock(8765, ${creditoId})`;
     blockerHeld = false;
-    await expect(resultPromise).resolves.toEqual({ paymentId: 0, idempotent: false });
+    await expect(resultPromise).resolves.toEqual({ paymentId: 0, paymentIds: [0], idempotent: false });
     expect(registrationResult).toEqual({
       success: false,
       code: "binding_inactive",
@@ -460,7 +479,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
     const holding = nexaPaymentDependencies.withCreditLock(creditoId, async () => {
       entered?.();
       await workBlocked;
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     });
     await workEntered;
     let updateSettled = false;
@@ -476,7 +495,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
 
     const creditUpdate = nexaPaymentDependencies.withCreditLock(creditoId, async () => {
       await updater`UPDATE cartera.creditos SET saldo = saldo + 1 WHERE credito_id = ${creditoId}`;
-      return { paymentId: 0, idempotent: false };
+      return { paymentId: 0, paymentIds: [0], idempotent: false };
     });
     const creditUpdateResult = await Promise.race([
       creditUpdate.then(() => "settled"),
@@ -517,7 +536,8 @@ integrationTest("la reconciliación Nexa cuenta mora y otros una sola vez", asyn
         abono_iva_12 numeric(18, 2) NOT NULL DEFAULT 0,
         abono_seguro numeric(18, 2) NOT NULL DEFAULT 0,
         abono_gps numeric(18, 2) NOT NULL DEFAULT 0,
-        membresias_pago numeric(18, 2) NOT NULL DEFAULT 0
+        membresias_pago numeric(18, 2) NOT NULL DEFAULT 0,
+        "paymentFalse" boolean NOT NULL DEFAULT false
       )
     `;
     await sql`
@@ -529,6 +549,12 @@ integrationTest("la reconciliación Nexa cuenta mora y otros una sola vez", asyn
         (9488, 702, 30.00, 0.00, '15.00', 15.00),
         (9488, 703, 15.00, 5.38, '0', 15.00),
         (9488, 703, 15.00, 0.00, '0', 15.00)
+    `;
+    // Una fila anulada del mismo evento no cuenta: ni su id ni su monto.
+    await sql`
+      INSERT INTO cartera.pagos_credito
+        (credito_id, nexa_payment_event_id, monto_aplicado, abono_capital, "paymentFalse")
+      VALUES (9488, 703, 99.00, 99.00, true)
     `;
 
     const { nexaPaymentDependencies } = await import("./nexaPaymentRuntime");
@@ -634,7 +660,8 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, validated boolean NOT NULL DEFAULT false);
       INSERT INTO cartera.creditos VALUES (10);`);
     await query.query(await Bun.file(new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url)).text());
-    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending"]) {
+    await query.query(await Bun.file(new URL("../../drizzle/0050_nexa_evento_pago_eliminado.sql", import.meta.url)).text());
+    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending", "0005_cartera_payment_ids", "0006_alerta_correo"]) {
       await query.query(await Bun.file(new URL(`../../../nexa-server/drizzle/${file}.sql`, import.meta.url)).text());
     }
     await query.query(`INSERT INTO nexa_payment_tokens (nexa_token_id, prefix, account, name) VALUES (1, '1234567', 'local', 'local');
@@ -660,7 +687,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       ...nexaPaymentDependencies,
       withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(creditoId, work),
       claim: (body, context) => claimNexaPaymentEvent(query, body, context, deferred.isRunning),
-      loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null } }),
+      loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "123456710005010" } }),
       findPayments: async (eventId) => (await query.query<{ paymentId: number; validationStatus: string; amount: string }>(
         `SELECT pago_id AS "paymentId", CASE WHEN validated THEN 'validated' ELSE 'pending' END AS "validationStatus", '50.00' AS amount
          FROM cartera.pagos_credito WHERE nexa_payment_event_id = $1`, [eventId],

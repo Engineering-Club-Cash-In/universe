@@ -290,6 +290,7 @@ export const creditRouter = new Elysia()
     excluir_pagados_mes, // 🆕 NUEVO
     buckets,             // 🪣 COBROS-02: CSV de buckets del motor (0-5)
     orden,               // 🪣 COBROS-02: "bucket_motor" = orden de la cobranza
+    solo_con_cuenta_nexa,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -463,6 +464,9 @@ export const creditRouter = new Elysia()
   }
   const ordenParam = orden as OrdenListadoCreditos | undefined;
 
+  // Solo créditos con cuenta Nexa asignada (binding activo con token)
+  const soloConCuentaNexaParam = solo_con_cuenta_nexa === "true" ? true : undefined;
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -486,6 +490,7 @@ export const creditRouter = new Elysia()
         inversionista_ids: inversionistaIdsArray,
         aseguradora_id: aseguradoraIdNum,
         excluir_pagados_mes: excluirPagadosMesParam,
+        solo_con_cuenta_nexa: soloConCuentaNexaParam,
         excel: true,
       });
       set.status = 200;
@@ -517,7 +522,8 @@ export const creditRouter = new Elysia()
         cuotasMaxNum,
         bucketsParsed,
         excluirPagadosMesParam,
-        ordenParam
+        ordenParam,
+        soloConCuentaNexaParam
       );
       set.status = 200;
       return result;
@@ -567,6 +573,7 @@ export const creditRouter = new Elysia()
         excluir_pagados_mes,
         buckets,
         orden,
+        solo_con_cuenta_nexa,
       } = body;
 
       // Mismos obligatorios que el GET (mes y anio): `estado` es un filtro
@@ -617,6 +624,7 @@ export const creditRouter = new Elysia()
             inversionista_ids,
             aseguradora_id,
             excluir_pagados_mes,
+            solo_con_cuenta_nexa,
             excel: true,
           });
           set.status = 200;
@@ -648,7 +656,8 @@ export const creditRouter = new Elysia()
           cuotas_max,
           bucketsPost,
           excluir_pagados_mes,
-          orden
+          orden,
+          solo_con_cuenta_nexa
         );
         set.status = 200;
         return result;
@@ -712,6 +721,7 @@ export const creditRouter = new Elysia()
         excluir_pagados_mes: t.Optional(t.Boolean()),
         // 🪣 COBROS-02: orden de la cobranza (ver ORDEN_LISTADO_CREDITOS).
         orden: t.Optional(t.Literal("bucket_motor")),
+        solo_con_cuenta_nexa: t.Optional(t.Boolean()),
       }),
     }
   )

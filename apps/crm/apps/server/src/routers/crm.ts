@@ -12,8 +12,10 @@ import {
 	isNull,
 	lt,
 	lte,
+	ne,
 	not,
 	or,
+	type SQL,
 	sql,
 	sum,
 } from "drizzle-orm";
@@ -52,6 +54,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
@@ -64,6 +67,8 @@ import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
 } from "../lib/bank-statement-documents";
+import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
+import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -82,6 +87,10 @@ import { fetchAllPages } from "../lib/fetch-all-pages";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
+	aplicarDeltaMontosInversionistas,
+	calcularRegeneracionCotizacionFechaIdeal,
+} from "../lib/fecha-ideal-cotizacion";
+import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
@@ -90,10 +99,6 @@ import {
 	puedeCambiarDiaPago,
 	requiereCongelarEtapaParaCambioDia,
 } from "../lib/fecha-ideal-pago-edicion";
-import {
-	calcularRegeneracionCotizacionFechaIdeal,
-	aplicarDeltaMontosInversionistas,
-} from "../lib/fecha-ideal-cotizacion";
 import {
 	esDpiEnBlanco,
 	evaluarGateMoraDpi,
@@ -133,6 +138,11 @@ import {
 	numerosSifcoDelDpiYDeLaOportunidad,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
+import {
+	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -146,6 +156,7 @@ import {
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import {
 	type DecisionRevalidacion,
 	decidirRevalidacion,
@@ -191,7 +202,10 @@ import {
 } from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
-	ejecutarValidaciones,
+	ejecutarBuroAlVeinteSiCorresponde,
+	firmaCofirmantes,
+	firmaCofirmantesSql,
+	getValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
 import {
@@ -645,6 +659,393 @@ async function getVehicleInspectionStatus(vehicleId: string) {
 		inspectionId: inspection?.id ?? null,
 		inspectionStatus: inspection?.status ?? "pending",
 	};
+}
+
+/** Una falla de Infornet queda en la bitácora y no revierte el dato que la disparó. */
+function consultarBuroAlVeinteTrasGuardar(
+	opportunityId: string,
+	userId: string,
+): void {
+	void ejecutarBuroAlVeinteSiCorresponde({ opportunityId, userId }).catch(
+		(error) => {
+			console.error(
+				`[Buró 20%] No se pudo completar la consulta de ${opportunityId}`,
+				error,
+			);
+		},
+	);
+}
+
+function firmaBitacoraBuro(
+	estado: Awaited<ReturnType<typeof getValidaciones>>,
+): string {
+	return JSON.stringify({
+		exento: estado.exento,
+		validaciones: estado.validaciones.map((fila) => fila.id).sort(),
+		cofirmantes: estado.cofirmantes
+			.map((fila) => `${fila.coDebtorId}:${fila.dpi}:${fila.buro?.id ?? ""}`)
+			.sort(),
+	});
+}
+
+/**
+ * Le quita la marca de representante legal a los co-deudores de la
+ * oportunidad, menos a `salvo`. Va ANTES de marcar a otro: el índice único
+ * (`co_debtors_representante_legal_uq`) no admite dos marcados ni por un
+ * instante. El llamador ya tiene tomada la oportunidad con FOR UPDATE, así dos
+ * marcas a la vez se ordenan y gana la última en vez de chocar con el índice.
+ */
+async function quitarMarcaDeRepresentante(
+	tx: Transaction,
+	opportunityId: string,
+	salvo?: string,
+): Promise<void> {
+	await tx
+		.update(coDebtors)
+		.set({ esRepresentanteLegal: false, updatedAt: new Date() })
+		.where(
+			and(
+				eq(coDebtors.opportunityId, opportunityId),
+				eq(coDebtors.esRepresentanteLegal, true),
+				salvo ? ne(coDebtors.id, salvo) : undefined,
+			),
+		);
+}
+
+/**
+ * Lo que una sociedad necesita para entrar a jurídico, del lado de quien
+ * firma: si es de sociedad, y lo que le falta a su representante (ver
+ * `faltantesDelRepresentante`). `leadId` es el lead con el que va a quedar, si
+ * cambia en el mismo pedido.
+ */
+async function sociedadParaJuridico(
+	opportunityId: string,
+	leadId?: string | null,
+): Promise<{ esSociedad: boolean; faltanDelRepresentante: string[] }> {
+	const [lead] = leadId
+		? await db
+				.select({ clientType: leads.clientType })
+				.from(leads)
+				.where(eq(leads.id, leadId))
+				.limit(1)
+		: await db
+				.select({ clientType: leads.clientType })
+				.from(opportunities)
+				.innerJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+			gender: coDebtors.gender,
+			age: coDebtors.age,
+			maritalStatus: coDebtors.maritalStatus,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const datos = { clientType: lead?.clientType, coDeudores };
+	return {
+		esSociedad: esOportunidadDeSociedad(datos),
+		faltanDelRepresentante: faltantesDelRepresentante(datos),
+	};
+}
+
+/**
+ * Las oportunidades (de las dadas) con contratos vivos: vigentes (sin anular
+ * ni reemplazar), pendientes o ya firmados, mientras la oportunidad no pasó la
+ * confirmación final (90%). Salieron a firma con los datos de hoy —WeeTrust
+ * manda las invitaciones apenas se generan, ya en 80%—, y uno firmado en 85%
+ * todavía va a cerrar la oportunidad.
+ */
+async function conContratosPendientes(
+	tx: Transaction,
+	opportunityIds: string[],
+): Promise<Set<string>> {
+	if (opportunityIds.length === 0) return new Set();
+	const filas = await tx
+		.select({
+			opportunityId: generatedLegalContracts.opportunityId,
+			status: generatedLegalContracts.status,
+			porcentaje: salesStages.closurePercentage,
+		})
+		.from(generatedLegalContracts)
+		.innerJoin(
+			opportunities,
+			eq(generatedLegalContracts.opportunityId, opportunities.id),
+		)
+		.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.where(
+			and(
+				inArray(generatedLegalContracts.opportunityId, opportunityIds),
+				inArray(generatedLegalContracts.status, ["pending", "signed"]),
+				isNull(generatedLegalContracts.replacedByContractId),
+			),
+		);
+	// Después de la confirmación (90%) los contratos ya cumplieron: muchos
+	// quedan en "pending" porque nadie vuelve a sincronizarlos (en PROD, 650
+	// así en 90 oportunidades cerradas), y no tienen que congelar nada.
+	return new Set(
+		filas
+			.filter((f) => (f.porcentaje ?? 0) < 90)
+			.map((f) => f.opportunityId)
+			.filter((id): id is string => !!id),
+	);
+}
+
+/** Lo que los contratos de sociedad dicen del representante legal. */
+type DatosDelRepresentanteEnContratos = {
+	fullName?: string;
+	email?: string | null;
+	dpi?: string;
+	age?: number | null;
+	gender?: string | null;
+	maritalStatus?: string | null;
+	nationality?: string | null;
+	profession?: string | null;
+};
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor y, si está en
+ * firma y él es quien firma por la sociedad, no deja cambiar nada de lo que
+ * los contratos dicen de él (nombre, correo, DPI, edad, género, estado civil,
+ * nacionalidad, profesión): los contratos vivos y sus firmantes quedarían con
+ * los datos viejos. Se corrige regresando la oportunidad a 80% y rehaciendo la
+ * batería. El celular no está en los contratos y se puede cambiar.
+ */
+async function congelarRepresentanteEnFirma(
+	tx: Transaction,
+	coDebtorId: string,
+	cambios: DatosDelRepresentanteEnContratos,
+): Promise<void> {
+	const [fila] = await tx
+		.select({
+			opportunityId: coDebtors.opportunityId,
+			fullName: coDebtors.fullName,
+			email: coDebtors.email,
+			dpi: coDebtors.dpi,
+			age: coDebtors.age,
+			gender: coDebtors.gender,
+			maritalStatus: coDebtors.maritalStatus,
+			nationality: coDebtors.nationality,
+			profession: coDebtors.profession,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
+	const [oportunidad] = await tx
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id !== coDebtorId) return;
+
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().toLowerCase();
+	const cambia = (antes: string | null, despues: string | null | undefined) =>
+		despues !== undefined && texto(antes) !== texto(despues);
+	const cambiaDpi =
+		cambios.dpi !== undefined &&
+		fila.dpi.replace(/\D/g, "") !== cambios.dpi.replace(/\D/g, "");
+	const cambiaEdad =
+		cambios.age !== undefined && (fila.age ?? null) !== (cambios.age ?? null);
+	if (
+		cambia(fila.fullName, cambios.fullName) ||
+		cambia(fila.email, cambios.email) ||
+		cambiaDpi ||
+		cambiaEdad ||
+		cambia(fila.gender, cambios.gender) ||
+		cambia(fila.maritalStatus, cambios.maritalStatus) ||
+		cambia(fila.nationality, cambios.nationality) ||
+		cambia(fila.profession, cambios.profession)
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La oportunidad tiene contratos en firma (o firmados sin confirmar) con estos datos del representante legal. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+}
+
+/**
+ * Toma el candado de firma de la oportunidad del co-deudor que se va a borrar
+ * y no deja borrarlo si es quien firma por la sociedad y hay contratos vivos:
+ * sus documentos e invitaciones seguirían a su nombre.
+ */
+async function protegerBorradoDelRepresentante(
+	tx: Transaction,
+	coDebtorId: string,
+): Promise<void> {
+	const [fila] = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(eq(coDebtors.id, coDebtorId))
+		.limit(1);
+	if (!fila) return;
+
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${claveDeFirma(fila.opportunityId)})`,
+	);
+	if (
+		!(await conContratosPendientes(tx, [fila.opportunityId])).has(
+			fila.opportunityId,
+		)
+	) {
+		return;
+	}
+
+	const [oportunidad] = await tx
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, fila.opportunityId))
+		.limit(1);
+	const coDeudores = await tx
+		.select({
+			id: coDebtors.id,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, fila.opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const representante = representanteLegalDe({
+		clientType: oportunidad?.clientType,
+		coDeudores,
+	});
+	if (representante?.id === coDebtorId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Es el representante legal y la oportunidad tiene contratos en firma (o firmados sin confirmar) a su nombre. Para quitarlo, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+}
+
+/** Lo que los contratos de sociedad toman del lead (la empresa). */
+type DatosDeLaEmpresaEnContratos = {
+	firstName?: string;
+	middleName?: string;
+	lastName?: string;
+	secondLastName?: string;
+	direccion?: string;
+};
+
+/**
+ * Protege lo que el lead pone en los contratos mientras alguna oportunidad
+ * suya está en firma.
+ *
+ * - El tipo de cliente decide la batería (individual o de sociedad): no se
+ *   cambia con una oportunidad en firma.
+ * - En una sociedad, el nombre del lead es la razón social (`nombreSociedad`)
+ *   y su dirección la de notificaciones: no se cambian con una oportunidad de
+ *   sociedad en firma.
+ *
+ * Antes toma el candado de firma de cada oportunidad del lead, en orden, el
+ * mismo de generar, enlazar y aprobar. Se corrige regresando la oportunidad a
+ * 80% y rehaciendo la batería.
+ */
+async function protegerLeadEnFirma(
+	tx: Transaction,
+	leadId: string,
+	cambios: DatosDeLaEmpresaEnContratos & { clientType?: string },
+): Promise<void> {
+	const [lead] = await tx
+		.select({
+			clientType: leads.clientType,
+			firstName: leads.firstName,
+			middleName: leads.middleName,
+			lastName: leads.lastName,
+			secondLastName: leads.secondLastName,
+			direccion: leads.direccion,
+		})
+		.from(leads)
+		.where(eq(leads.id, leadId))
+		.limit(1);
+	if (!lead) return;
+
+	const texto = (v: string | null | undefined) =>
+		(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+	const cambia = (antes: string | null, despues: string | undefined) =>
+		despues !== undefined && texto(antes) !== texto(despues);
+	const cambiaTipo =
+		cambios.clientType !== undefined && cambios.clientType !== lead.clientType;
+	const cambiaEmpresa =
+		cambia(lead.firstName, cambios.firstName) ||
+		cambia(lead.middleName, cambios.middleName) ||
+		cambia(lead.lastName, cambios.lastName) ||
+		cambia(lead.secondLastName, cambios.secondLastName) ||
+		cambia(lead.direccion, cambios.direccion);
+	if (!cambiaTipo && !cambiaEmpresa) return;
+
+	const oportunidades = await tx
+		.select({ id: opportunities.id })
+		.from(opportunities)
+		.where(eq(opportunities.leadId, leadId))
+		.orderBy(asc(opportunities.id));
+	for (const oportunidad of oportunidades) {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(${claveDeFirma(oportunidad.id)})`,
+		);
+	}
+
+	const conPendientes = await conContratosPendientes(
+		tx,
+		oportunidades.map((o) => o.id),
+	);
+	if (conPendientes.size === 0) return;
+
+	if (cambiaTipo) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El cliente tiene contratos en firma (o firmados sin confirmar) de la batería del tipo de cliente actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
+
+	// ¿Alguna de las que están en firma es de sociedad?
+	const marcados = await tx
+		.select({ opportunityId: coDebtors.opportunityId })
+		.from(coDebtors)
+		.where(
+			and(
+				inArray(coDebtors.opportunityId, [...conPendientes]),
+				eq(coDebtors.esRepresentanteLegal, true),
+			),
+		);
+	if (lead.clientType === "empresa" || marcados.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"La sociedad tiene contratos en firma (o firmados sin confirmar) con este nombre y esta dirección. Para corregirlos, jurídico anula esos contratos y después rehace la batería.",
+		});
+	}
 }
 
 export const crmRouter = {
@@ -1507,14 +1908,16 @@ export const crmRouter = {
 				});
 			}
 
-			// El NIT y el DPI que el lead tenía ANTES de esta edición. El NIT es la
+			// El NIT, DPI y origen que el lead tenía ANTES de esta edición. El NIT es la
 			// referencia para distinguir las oportunidades que siguen con la copia de
 			// las que alguien corrigió a mano; el DPI, para saber si esta edición lo
 			// cambia de verdad. Hay que leerlos antes del UPDATE.
 			const [leadAntesDelUpdate] =
-				updateData.nit !== undefined || updateData.dpi !== undefined
+				updateData.nit !== undefined ||
+				updateData.dpi !== undefined ||
+				updateData.source !== undefined
 					? await db
-							.select({ nit: leads.nit, dpi: leads.dpi })
+							.select({ nit: leads.nit, dpi: leads.dpi, source: leads.source })
 							.from(leads)
 							.where(eq(leads.id, id))
 							.limit(1)
@@ -1527,6 +1930,11 @@ export const crmRouter = {
 			const elDpiCambia =
 				updateData.dpi !== undefined &&
 				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
+			// El candado no considera cambio el primer DPI, pero Buró sí debe
+			// consultarlo cuando la oportunidad ya está en 20% o 30% excepcional.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi);
 
 			// El veredicto del candado sobrevive al bloque: si el admin usó la
 			// válvula hay que cobrarle el costo DESPUÉS del UPDATE (ver F9 abajo).
@@ -1553,7 +1961,7 @@ export const crmRouter = {
 				// dirección — y son justamente las fichas que cobranza toca a diario.
 				// El borrado (`dpi: ""`) no llega hasta acá: se rechaza con 400 al
 				// entrar al handler. Ver `MENSAJE_DPI_EN_BLANCO`.
-				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
+				if (consultarBuroPorDpi) {
 					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
 					// que se está editando. Con solo los del DPI nuevo, el lead que
 					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
@@ -1597,6 +2005,7 @@ export const crmRouter = {
 			const whereDelUpdate = candadoEnElPredicado
 				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
 				: whereClause;
+			const oportunidadesConOrigenActualizado: string[] = [];
 
 			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
 			//
@@ -1609,6 +2018,28 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
+				// El tipo de cliente decide la batería, y en una sociedad el nombre y
+				// la dirección del lead van en los contratos. Generar, enlazar y
+				// aprobar los leen con el candado de firma de cada oportunidad: estos
+				// cambios pasan por los mismos candados (ver `protegerLeadEnFirma`).
+				if (
+					updateData.clientType !== undefined ||
+					updateData.firstName !== undefined ||
+					updateData.middleName !== undefined ||
+					updateData.lastName !== undefined ||
+					updateData.secondLastName !== undefined ||
+					updateData.direccion !== undefined
+				) {
+					await protegerLeadEnFirma(tx, id, {
+						clientType: updateData.clientType,
+						firstName: updateData.firstName,
+						middleName: updateData.middleName,
+						lastName: updateData.lastName,
+						secondLastName: updateData.secondLastName,
+						direccion: updateData.direccion,
+					});
+				}
+
 				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
 				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
 				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
@@ -1662,6 +2093,137 @@ export const crmRouter = {
 						cambiadaPor: context.userId,
 						database: tx,
 					});
+				}
+				if (elDpiCambia) {
+					const marcadas = await tx
+						.update(opportunities)
+						.set({ buroRevalidacionAl30: true })
+						.where(
+							and(
+								eq(opportunities.leadId, id),
+								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
+								eq(opportunities.buroRevalidacionAl30, false),
+							),
+						)
+						.returning({ id: opportunities.id });
+					for (const oportunidad of marcadas) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "habilitar_buro_revalidacion_30",
+							data: { origen: "updateLead", leadId: id },
+						});
+					}
+				}
+				if (
+					updateData.source !== undefined ||
+					updateData.campaign !== undefined
+				) {
+					const [activeOpportunity] = await tx
+						.select({ id: opportunities.id, source: opportunities.source })
+						.from(opportunities)
+						.where(
+							and(
+								eq(opportunities.leadId, id),
+								inArray(opportunities.status, ["open", "on_hold"]),
+							),
+						)
+						.orderBy(desc(opportunities.createdAt))
+						.limit(1)
+						.for("update", { of: opportunities });
+
+					// Dejar WhatsApp quita la exención del bot: las oportunidades al 30%
+					// que la usaban necesitan poder consultar Buró ahí mismo.
+					if (
+						updateData.source !== undefined &&
+						updateData.source !== "Whatsapp"
+					) {
+						const marcadas = await tx
+							.update(opportunities)
+							.set({ buroRevalidacionAl30: true })
+							.where(
+								and(
+									eq(opportunities.leadId, id),
+									sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+									inArray(opportunities.status, ["open", "on_hold", "lost"]),
+									eq(opportunities.buroRevalidacionAl30, false),
+									or(
+										leadAntesDelUpdate?.source === "Whatsapp"
+											? isNull(opportunities.source)
+											: sql`false`,
+										activeOpportunity?.source === "Whatsapp"
+											? eq(opportunities.id, activeOpportunity.id)
+											: sql`false`,
+									),
+								),
+							)
+							.returning({ id: opportunities.id });
+						for (const oportunidad of marcadas) {
+							auditRecord({
+								entity: "opportunity",
+								id: oportunidad.id,
+								action: "habilitar_buro_revalidacion_30",
+								data: { origen: "updateLead_source", leadId: id },
+							});
+							oportunidadesConOrigenActualizado.push(oportunidad.id);
+						}
+					}
+
+					if (activeOpportunity) {
+						await tx
+							.update(opportunities)
+							.set({
+								...(updateData.source !== undefined
+									? { source: updateData.source }
+									: {}),
+								...(updateData.campaign !== undefined
+									? { campaign: updateData.campaign }
+									: {}),
+								updatedAt: new Date(),
+							})
+							.where(eq(opportunities.id, activeOpportunity.id));
+						auditRecord({
+							entity: "opportunity",
+							id: activeOpportunity.id,
+							action: "sync_source_campaign",
+							data: {
+								leadId: id,
+								source: updateData.source,
+								campaign: updateData.campaign,
+							},
+						});
+						if (
+							updateData.source !== undefined &&
+							!oportunidadesConOrigenActualizado.includes(activeOpportunity.id)
+						) {
+							oportunidadesConOrigenActualizado.push(activeOpportunity.id);
+						}
+					}
+
+					// Las que heredaban WhatsApp del lead también pierden la exención,
+					// aunque su origen no se sincronice: necesitan su consulta al 20%.
+					if (
+						updateData.source !== undefined &&
+						updateData.source !== "Whatsapp" &&
+						leadAntesDelUpdate?.source === "Whatsapp"
+					) {
+						const heredaban = await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(
+								and(
+									eq(opportunities.leadId, id),
+									eq(opportunities.status, "open"),
+									isNull(opportunities.source),
+								),
+							);
+						for (const oportunidad of heredaban) {
+							if (!oportunidadesConOrigenActualizado.includes(oportunidad.id)) {
+								oportunidadesConOrigenActualizado.push(oportunidad.id);
+							}
+						}
+					}
 				}
 
 				return filas;
@@ -1742,45 +2304,19 @@ export const crmRouter = {
 				}
 			}
 
-			if (
-				updateData.source !== undefined ||
-				updateData.campaign !== undefined
-			) {
-				const [activeOpportunity] = await db
+			for (const oportunidadId of oportunidadesConOrigenActualizado) {
+				consultarBuroAlVeinteTrasGuardar(oportunidadId, context.userId);
+			}
+
+			if (consultarBuroPorDpi && updatedLead[0].dpi) {
+				const oportunidades = await db
 					.select({ id: opportunities.id })
 					.from(opportunities)
 					.where(
-						and(
-							eq(opportunities.leadId, id),
-							inArray(opportunities.status, ["open", "on_hold"]),
-						),
-					)
-					.orderBy(desc(opportunities.createdAt))
-					.limit(1);
-
-				if (activeOpportunity) {
-					await db
-						.update(opportunities)
-						.set({
-							...(updateData.source !== undefined
-								? { source: updateData.source }
-								: {}),
-							...(updateData.campaign !== undefined
-								? { campaign: updateData.campaign }
-								: {}),
-							updatedAt: new Date(),
-						})
-						.where(eq(opportunities.id, activeOpportunity.id));
-					auditRecord({
-						entity: "opportunity",
-						id: activeOpportunity.id,
-						action: "sync_source_campaign",
-						data: {
-							leadId: id,
-							source: updateData.source,
-							campaign: updateData.campaign,
-						},
-					});
+						and(eq(opportunities.leadId, id), eq(opportunities.status, "open")),
+					);
+				for (const oportunidad of oportunidades) {
+					consultarBuroAlVeinteTrasGuardar(oportunidad.id, context.userId);
 				}
 			}
 
@@ -2269,6 +2805,8 @@ export const crmRouter = {
 					departamento: leads.departamento,
 					municipio: leads.municipio,
 					zona: leads.zona,
+					// Una empresa como lead hace que la oportunidad sea de sociedad
+					clientType: leads.clientType,
 				},
 				stage: {
 					id: salesStages.id,
@@ -2786,6 +3324,8 @@ export const crmRouter = {
 					campaign,
 					nit: leadNit,
 					assignedTo,
+					// Un alta directa en análisis necesita poder consultar Buró en el 30%.
+					buroRevalidacionAl30: etapaInicial.closurePercentage === 30,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)
 						: undefined,
@@ -2798,6 +3338,7 @@ export const crmRouter = {
 				id: newOpportunity[0].id,
 				action: "create",
 			});
+			consultarBuroAlVeinteTrasGuardar(newOpportunity[0].id, context.userId);
 			return { ...newOpportunity[0], warning: false as const };
 		}),
 
@@ -3157,6 +3698,8 @@ export const crmRouter = {
 					: null;
 			}
 
+			let entrandoAAnalisis = false;
+			let regresandoAAnalisis = false;
 			// Validate stage transitions
 			if (input.stageId) {
 				const targetStage = await db
@@ -3174,6 +3717,24 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				if (fromPercentage < 30 && toPercentage > 30) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Antes de avanzar más allá del 30%, pasa por análisis y completa la validación de Buró al 20%.",
+					});
+				}
+				entrandoAAnalisis = toPercentage === 30 && fromPercentage < 30;
+				regresandoAAnalisis = toPercentage === 30 && fromPercentage > 30;
+				if (
+					entrandoAAnalisis &&
+					input.leadId !== undefined &&
+					input.leadId !== currentOpportunity[0].leadId
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Guarda primero el cambio de cliente y valida su Buró al 20% antes de enviar la oportunidad a análisis.",
+					});
+				}
 				const effectiveLeadId =
 					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const effectiveVehicleId =
@@ -3229,6 +3790,24 @@ export const crmRouter = {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							"Para avanzar de 80% a la siguiente etapa, la oportunidad debe ser aprobada por el departamento jurídico desde el módulo de Jurídico.",
+					});
+				}
+
+				// En una sociedad firma su representante legal: al entrar a jurídico
+				// tiene que estar marcado y completo (a su celular le llegan los
+				// enlaces), y a la empresa no se le piden datos personales.
+				const sociedad =
+					toPercentage >= 80
+						? await sociedadParaJuridico(id, effectiveLeadId)
+						: null;
+				if (
+					fromPercentage < 80 &&
+					toPercentage >= 80 &&
+					sociedad &&
+					sociedad.faltanDelRepresentante.length > 0
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Para avanzar a etapa jurídica (80%), el representante legal de la sociedad debe tener: ${sociedad.faltanDelRepresentante.join(", ")}`,
 					});
 				}
 
@@ -3293,9 +3872,11 @@ export const crmRouter = {
 							.limit(1);
 
 						if (leadForValidation[0]) {
-							const missingLeadFields = getMissingLeadFieldsForContracts(
-								leadForValidation[0],
-							);
+							const missingLeadFields = sociedad?.esSociedad
+								? leadForValidation[0].direccion
+									? []
+									: ["Dirección"]
+								: getMissingLeadFieldsForContracts(leadForValidation[0]);
 							if (missingLeadFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
 									message: `Para avanzar a etapa jurídica (80%), el cliente debe tener: ${formatMissingLeadFields(missingLeadFields)}`,
@@ -3663,6 +4244,8 @@ export const crmRouter = {
 
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
+			let dpiComprobadoParaAnalisis: string | null = null;
+			let firmaComprobadaParaAnalisis: string | null = null;
 			const updatedOpportunity = await auditedTransaction(async (tx) => {
 				// Si cambia la etapa, primero el candado de firma: la escritura espera a
 				// que termine lo que se esté haciendo con los contratos de la
@@ -3677,6 +4260,130 @@ export const crmRouter = {
 				if (isStageChange) {
 					await tx.execute(
 						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
+					);
+				}
+				let condicionBuroParaAnalisis: SQL | undefined;
+				let habilitarBuroAlRegresar = false;
+				if (regresandoAAnalisis && !parcheRevalidacion) {
+					await tomarCandadoBuroSiLibre(tx, id);
+					const [actual] = await tx
+						.select({ stageId: opportunities.stageId })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.for("update");
+					if (!actual || actual.stageId !== currentOpportunity[0].stageId) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La etapa cambió. Recarga la oportunidad e intenta de nuevo.",
+						});
+					}
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
+					habilitarBuroAlRegresar = Boolean(
+						errorBuroVigenteParaAnalisis(estadoBuro),
+					);
+				}
+				if (entrandoAAnalisis) {
+					// Espera cualquier escritura en la bitácora antes de decidir si el
+					// estudio ya está completo. La comprobación no llama a Infornet.
+					await tomarCandadoBuroSiLibre(tx, id);
+					const [actual] = await tx
+						.select({
+							stageId: opportunities.stageId,
+							leadId: opportunities.leadId,
+						})
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.for("update", { of: opportunities });
+					if (
+						!actual ||
+						actual.stageId !== currentOpportunity[0].stageId ||
+						actual.leadId !== currentOpportunity[0].leadId
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió. Recarga la página e intenta de nuevo.",
+						});
+					}
+					const [leadParaAnalisis] = actual.leadId
+						? await tx
+								.select({ dpi: leads.dpi })
+								.from(leads)
+								.where(eq(leads.id, actual.leadId))
+								.limit(1)
+						: [];
+					if (!leadParaAnalisis?.dpi) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Antes de pasar al 30%, ingresa el DPI del titular en la ficha del cliente y espera su validación de Buró al 20%.",
+						});
+					}
+					const dpiValidado = validarDpi(leadParaAnalisis.dpi);
+					if (!dpiValidado.valid) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `El DPI del titular es inválido: ${dpiValidado.error}`,
+						});
+					}
+					const estadoBuro = await getValidaciones({
+						opportunityId: id,
+						lector: tx,
+					});
+					dpiComprobadoParaAnalisis = dpiValidado.dpiLimpio;
+					if (
+						estadoBuro.exento &&
+						input.source !== undefined &&
+						input.source !== "Whatsapp"
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Guarda primero el cambio de origen y completa el Buró antes de pasar al 30%.",
+						});
+					}
+					if (estadoBuro.faltaConsentimiento) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Carga la cláusula de consentimiento y completa el Buró antes de pasar al 30%.",
+						});
+					}
+					if (!estadoBuro.exento) {
+						if (
+							CONSULTAR_RENAP &&
+							(!estadoBuro.renap ||
+								estadoBuro.renapDesactualizado ||
+								estadoBuro.renap.estado === "error")
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Completa RENAP al 20% antes de enviar la oportunidad a análisis.",
+							});
+						}
+					}
+					const errorBuro = errorBuroVigenteParaAnalisis(
+						estadoBuro,
+						"entrar_analisis",
+					);
+					if (errorBuro) {
+						throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+					}
+					// La exención del bot cubre también a los cofirmantes.
+					if (!estadoBuro.exento) {
+						firmaComprobadaParaAnalisis = firmaCofirmantes(
+							estadoBuro.cofirmantes,
+						);
+					}
+					// Si el DPI o los cofirmantes cambian durante el guardado, el
+					// UPDATE falla en vez de enviar al análisis una identidad distinta.
+					condicionBuroParaAnalisis = and(
+						eq(opportunities.stageId, actual.stageId),
+						actual.leadId
+							? eq(opportunities.leadId, actual.leadId)
+							: isNull(opportunities.leadId),
+						sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${eqDpi(leads.dpi, dpiValidado.dpiLimpio)})`,
+						!estadoBuro.exento
+							? sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${firmaCofirmantes(estadoBuro.cofirmantes)}`
+							: undefined,
 					);
 				}
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
@@ -3746,6 +4453,20 @@ export const crmRouter = {
 						// corresponde —`pending` o `resubmitted`, nunca `approved`— y pisa
 						// al `case` sin devolverle la aprobación a nadie.
 						...invalidacionPorCambioDeLead,
+						...(cambiaElLeadDeLaOportunidad && {
+							buroRevalidacionAl30: sql`case when ${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) then true else ${opportunities.buroRevalidacionAl30} end`,
+						}),
+						...(regresandoAAnalisis && {
+							buroRevalidacionAl30: habilitarBuroAlRegresar,
+						}),
+						...(input.source !== undefined &&
+							input.source !== "Whatsapp" && {
+								// Al corregir el origen de una exención del bot, la
+								// consulta excepcional debe quedar habilitada en 30%.
+								// La etapa de destino cubre también el regreso desde 40%.
+								buroRevalidacionAl30: sql`case when ${input.stageId ?? sql`${opportunities.stageId}`} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30) and (${opportunities.source} = 'Whatsapp' or (${opportunities.source} is null and exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} = 'Whatsapp'))) then true else ${opportunities.buroRevalidacionAl30} end`,
+							}),
+						...(entrandoAAnalisis && { buroRevalidacionAl30: false }),
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 							analysisStatus: newAnalysisStatus,
@@ -3757,7 +4478,7 @@ export const crmRouter = {
 						...(parcheRevalidacion ?? {}),
 						updatedAt: new Date(),
 					})
-					.where(whereClause)
+					.where(and(whereClause, condicionBuroParaAnalisis))
 					.returning();
 
 				// 🔴 El reset cambiaba `stageId` sin dejar la transición: para los
@@ -3791,6 +4512,39 @@ export const crmRouter = {
 						throw new ORPCError("FORBIDDEN", {
 							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
 						});
+					}
+				}
+				if (
+					entrandoAAnalisis &&
+					dpiComprobadoParaAnalisis &&
+					canUpdateOpportunity
+				) {
+					const [identidadActual] = await db
+						.select({ leadId: opportunities.leadId, dpi: leads.dpi })
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (
+						identidadActual?.leadId !== currentOpportunity[0].leadId ||
+						normalizarDpi(identidadActual?.dpi ?? "") !==
+							dpiComprobadoParaAnalisis
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"El DPI o el titular cambiaron durante el envío a análisis. Recarga la oportunidad y valida el Buró de la identidad actual.",
+						});
+					}
+					if (firmaComprobadaParaAnalisis !== null) {
+						const { rows } = await db.execute<{ firma: string }>(
+							sql`select ${firmaCofirmantesSql(sql`${id}::uuid`)} as firma`,
+						);
+						if (rows[0]?.firma !== firmaComprobadaParaAnalisis) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"Los cofirmantes cambiaron durante el envío a análisis. Recarga la oportunidad y valida su Buró actual.",
+							});
+						}
 					}
 				}
 				if (canUpdateOpportunity) {
@@ -3932,6 +4686,14 @@ export const crmRouter = {
 				}
 			}
 
+			if (
+				isStageChange ||
+				cambiaElLeadDeLaOportunidad ||
+				input.status !== undefined ||
+				input.source !== undefined
+			) {
+				consultarBuroAlVeinteTrasGuardar(id, context.userId);
+			}
 			return updatedOpportunity[0];
 		}),
 
@@ -4210,6 +4972,7 @@ export const crmRouter = {
 					// Para no dar por válido el DPI de la identidad anterior: ver
 					// `documentosDeIdentidadVigentes`.
 					identityRevalidatedAt: opportunities.identityRevalidatedAt,
+					buroRevalidacionAl30: opportunities.buroRevalidacionAl30,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -4420,27 +5183,24 @@ export const crmRouter = {
 				});
 			}
 
-			// Validaciones RENAP + Buró para oportunidades que NO provienen del
-			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
-			// después de los chequeos de etapa y estado para no gastar llamadas
-			// a las fuentes externas en aprobaciones que igual van a fallar.
+			// Revisar el Buró ya guardado para oportunidades que no provienen del
+			// bot de WhatsApp. El bot conserva su propia exención comprobada.
 			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
 			// este DPI, tanto si se validó como si quedó exenta
 			let dpiVerificado: string | null = null;
 			// Foto de lo que se evaluó (catálogo, reglas, lead, codeudores y
 			// referencias) al momento de revisar el buró; viaja en el UPDATE
 			let huellaBuro: string | null = null;
+			// Cofirmantes con el DPI con que pasaron por el buró; también viaja en el UPDATE
+			let cofirmantesValidados: string | null = null;
+			let firmaBitacoraRevisada: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
-				// La exención se resuelve en el servicio: `source` es editable por el
-				// usuario, así que además exige evidencia de que el bot validó.
-				const exencion = await resolverExencionPorBot({
+				// La exención y los veredictos deben venir de la misma lectura.
+				const estadoValidaciones = await getValidaciones({
 					opportunityId: input.opportunityId,
-					source: opportunity[0].source,
-					leadSource: opportunity[0].leadSource,
-					leadId: opportunity[0].leadId,
-					leadDpi: opportunity[0].leadDpi,
 				});
+				firmaBitacoraRevisada = firmaBitacoraBuro(estadoValidaciones);
 
 				// Vale para los dos caminos: el validado y el exento. Una oportunidad
 				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
@@ -4448,7 +5208,13 @@ export const crmRouter = {
 					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
 				}
 
-				if (!exencion.exento) {
+				if (estadoValidaciones.faltaConsentimiento) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Carga la cláusula de consentimiento antes de aprobar el análisis.",
+					});
+				}
+				if (!estadoValidaciones.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
 					// en paralelo al documento DPI exigido arriba
 					if (!opportunity[0].leadDpi) {
@@ -4458,23 +5224,21 @@ export const crmRouter = {
 						});
 					}
 
-					const resultadoValidaciones = await ejecutarValidaciones({
-						opportunityId: input.opportunityId,
-						userId: context.userId,
-						reusarVigente: true,
-					});
-
-					// Un fallo técnico (API caída, timeout, sin respuesta) sí
-					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
-					// validación ejecutada con veredicto
-					if (resultadoValidaciones.errorTecnico) {
+					// El flujo normal llega validado; un cambio de DPI o vencimiento habilita reconsulta aquí.
+					if (
+						CONSULTAR_RENAP &&
+						(!estadoValidaciones.renap ||
+							estadoValidaciones.renapDesactualizado ||
+							estadoValidaciones.renap.estado === "error")
+					) {
 						throw new ORPCError("BAD_REQUEST", {
-							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+							message:
+								"Falta una validación de RENAP para el DPI actual. Regresa la oportunidad al 20% antes de aprobar el análisis.",
 						});
 					}
 
-					// El DPI pudo cambiar mientras corrían las validaciones: el
-					// veredicto sería de otra persona
+					// El DPI pudo cambiar después de leer el resultado guardado: el
+					// veredicto sería de otra persona.
 					const [leadActual] = await db
 						.select({ dpi: leads.dpi })
 						.from(opportunities)
@@ -4488,13 +5252,26 @@ export const crmRouter = {
 					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
-								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+								"El DPI del cliente cambió durante la revisión. Recarga la oportunidad y espera la nueva validación de Buró en el 30%.",
 						});
 					}
-
-					// Ni el rechazo del buró ni la ausencia de registro bloquean:
-					// quedan en la bitácora y visibles en la página de análisis
-					// para que el analista decida bajo su criterio
+				}
+				const errorBuro = errorBuroVigenteParaAnalisis(
+					estadoValidaciones,
+					opportunity[0].buroRevalidacionAl30
+						? "revalidar_en_analisis"
+						: "aprobar_analisis",
+				);
+				if (errorBuro) {
+					throw new ORPCError("BAD_REQUEST", { message: errorBuro });
+				}
+				// Un cofirmante agregado o con DPI corregido entre la lectura y el
+				// UPDATE no puede quedar aprobado sin veredicto para su identidad.
+				// En las exentas por el bot los cofirmantes también lo están.
+				if (!estadoValidaciones.exento) {
+					cofirmantesValidados = firmaCofirmantes(
+						estadoValidaciones.cofirmantes,
+					);
 				}
 
 				// Buró interno: corre también en las oportunidades exentas del bot,
@@ -4577,15 +5354,32 @@ export const crmRouter = {
 						)
 					: condicionesBase;
 
+				const condicionesConCofirmantes =
+					cofirmantesValidados !== null
+						? and(
+								condicionesConDpi,
+								sql`${firmaCofirmantesSql(sql`${opportunities.id}`)} = ${cofirmantesValidados}`,
+							)
+						: condicionesConDpi;
+				// El origen puede quitar la exención del bot. Si se corrigió
+				// mientras se evaluaba, no se aprueba con esa exención anterior.
+				const condicionesConOrigen = firmaBitacoraRevisada
+					? and(
+							condicionesConCofirmantes,
+							sql`${opportunities.source} is not distinct from ${opportunity[0].source}`,
+							sql`exists (select 1 from ${leads} where ${leads.id} = ${opportunities.leadId} and ${leads.source} is not distinct from ${opportunity[0].leadSource})`,
+						)
+					: condicionesConCofirmantes;
+
 				const whereClause = huellaBuro
 					? and(
-							condicionesConDpi,
+							condicionesConOrigen,
 							sql`${huellaEvaluacionSql(
 								sql`${opportunities.id}`,
 								sql`${opportunities.leadId}`,
 							)} = ${huellaBuro}`,
 						)
-					: condicionesConDpi;
+					: condicionesConOrigen;
 
 				// Update opportunity with analysisStatus.
 				// Cuando hay huella de buró, la escritura va dentro de una
@@ -4597,6 +5391,7 @@ export const crmRouter = {
 						.update(opportunities)
 						.set({
 							stageId: newStageId,
+							buroRevalidacionAl30: false,
 							analysisStatus: input.approved ? "approved" : "rejected",
 							analysisRejectionCount: input.approved
 								? opportunity[0].analysisRejectionCount
@@ -4613,12 +5408,54 @@ export const crmRouter = {
 
 				const updatedRows = huellaBuro
 					? await db.transaction(async (tx) => {
+							// Las consultas y overrides escriben la bitácora bajo este
+							// candado. Comprobamos de nuevo el veredicto mientras lo
+							// retenemos hasta confirmar la aprobación.
+							if (firmaBitacoraRevisada !== null) {
+								await tomarCandadoBuroSiLibre(tx, input.opportunityId);
+								const estadoActual = await getValidaciones({
+									opportunityId: input.opportunityId,
+									lector: tx,
+								});
+								if (
+									firmaBitacoraBuro(estadoActual) !== firmaBitacoraRevisada ||
+									estadoActual.faltaConsentimiento ||
+									Boolean(
+										errorBuroVigenteParaAnalisis(
+											estadoActual,
+											opportunity[0].buroRevalidacionAl30
+												? "revalidar_en_analisis"
+												: "aprobar_analisis",
+										),
+									)
+								) {
+									throw new ORPCError("CONFLICT", {
+										message:
+											"El Buró cambió durante la revisión. Recarga la oportunidad y revisa el resultado actual antes de aprobar.",
+									});
+								}
+							}
 							await tomarCandadoBuroInterno(tx);
 							return escribirAprobacion(tx);
 						})
 					: await escribirAprobacion(db);
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
+					// Va antes que la huella: agregar un cofirmante también la cambia,
+					// y este mensaje dice qué hacer
+					if (cofirmantesValidados !== null) {
+						const { rows } = await db.execute<{ firma: string }>(
+							sql`SELECT ${firmaCofirmantesSql(sql`${input.opportunityId}::uuid`)} AS firma`,
+						);
+
+						if (rows[0]?.firma !== cofirmantesValidados) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Los cofirmantes cambiaron durante la revisión. Recarga la oportunidad y espera su nueva validación de Buró en el 30%.",
+							});
+						}
+					}
+
 					// Con el chequeo atómico del buró interno, 0 filas también
 					// significa que cambió algo de lo evaluado mientras se aprobaba
 					if (
@@ -4645,7 +5482,7 @@ export const crmRouter = {
 						if (normalizarDpi(leadAlMomento?.dpi ?? "") !== dpiVerificado) {
 							throw new ORPCError("BAD_REQUEST", {
 								message:
-									"El DPI del cliente cambió mientras se aprobaba. Vuelve a ejecutar las validaciones antes de aprobar.",
+									"El DPI del cliente cambió durante la revisión. Recarga la oportunidad y espera la nueva validación de Buró en el 30%.",
 							});
 						}
 					}
@@ -4726,6 +5563,9 @@ export const crmRouter = {
 				}
 			}
 
+			if (!input.approved) {
+				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
+			}
 			return { success: true, approved: input.approved };
 		}),
 
@@ -6392,6 +7232,9 @@ export const crmRouter = {
 				!!opportunity[0]?.vehicleId,
 				opportunity[0]?.vehicleId || undefined,
 			);
+			if (input.documentType === "clausula_consentimiento") {
+				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
+			}
 
 			return newDocument;
 		}),
@@ -8099,6 +8942,7 @@ export const crmRouter = {
 								firstName: leads.firstName,
 								lastName: leads.lastName,
 								phone: leads.phone,
+								clientType: leads.clientType,
 								dpi: leads.dpi,
 								direccion: leads.direccion,
 								maritalStatus: leads.maritalStatus,
@@ -8145,6 +8989,24 @@ export const crmRouter = {
 							.from(creditAnalysis)
 							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
+
+			// Oportunidades con un co-firmante marcado como representante legal:
+			// también son de sociedad aunque el lead no sea empresa.
+			const conRepresentante = new Set(
+				opportunityIds.length > 0
+					? (
+							await db
+								.select({ opportunityId: coDebtors.opportunityId })
+								.from(coDebtors)
+								.where(
+									and(
+										inArray(coDebtors.opportunityId, opportunityIds),
+										eq(coDebtors.esRepresentanteLegal, true),
+									),
+								)
+						).map((c) => c.opportunityId)
+					: [],
+			);
 
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
@@ -8262,23 +9124,33 @@ export const crmRouter = {
 								id: lead.id,
 								name: `${lead.firstName} ${lead.lastName}`,
 								phone: lead.phone,
+								// Empresa: firma su representante legal (ver
+								// `lib/oportunidad-de-sociedad.ts`).
+								clientType: lead.clientType,
 								direccion: lead.direccion,
-								hasRequiredData: !!(
-									lead.dpi &&
-									lead.direccion &&
-									lead.maritalStatus &&
-									lead.gender &&
-									lead.birthDate &&
-									lead.nationality
-								),
-								missingFields: getMissingLeadFieldsForContracts({
-									dpi: lead.dpi,
-									direccion: lead.direccion,
-									maritalStatus: lead.maritalStatus,
-									gender: lead.gender,
-									birthDate: lead.birthDate,
-									nationality: lead.nationality,
-								}),
+								// Una empresa no tiene datos personales: de ella sólo se pide
+								// la dirección, y el resto es del representante legal (lo
+								// revisa la pantalla con sus co-firmantes).
+								...(() => {
+									const faltan =
+										lead.clientType === "empresa" ||
+										conRepresentante.has(opp.id)
+											? lead.direccion
+												? []
+												: ["Dirección"]
+											: getMissingLeadFieldsForContracts({
+													dpi: lead.dpi,
+													direccion: lead.direccion,
+													maritalStatus: lead.maritalStatus,
+													gender: lead.gender,
+													birthDate: lead.birthDate,
+													nationality: lead.nationality,
+												});
+									return {
+										hasRequiredData: faltan.length === 0,
+										missingFields: faltan,
+									};
+								})(),
 							}
 						: null,
 					vehicle: vehicle
@@ -8527,13 +9399,25 @@ export const crmRouter = {
 					.where(eq(leads.id, opportunity.leadId))
 					.limit(1);
 
+				// Una empresa no tiene datos personales: de ella sólo la dirección, y
+				// lo demás es de su representante legal, que firma por ella.
+				const sociedad = await sociedadParaJuridico(input.opportunityId);
 				if (lead) {
-					const missingLeadFields = getMissingLeadFieldsForContracts(lead);
+					const missingLeadFields = sociedad.esSociedad
+						? lead.direccion
+							? []
+							: ["Dirección"]
+						: getMissingLeadFieldsForContracts(lead);
 					if (missingLeadFields.length > 0) {
 						validationErrors.push(
 							`Cliente: Faltan ${formatMissingLeadFields(missingLeadFields)}`,
 						);
 					}
+				}
+				if (sociedad.faltanDelRepresentante.length > 0) {
+					validationErrors.push(
+						`Representante legal: Faltan ${sociedad.faltanDelRepresentante.join(", ")}`,
+					);
 				}
 			} else {
 				validationErrors.push("No hay cliente asociado a la oportunidad");
@@ -8713,13 +9597,11 @@ export const crmRouter = {
 							totalFinanced: regenerated.totalFinanced.toFixed(2),
 							monthlyPayment: regenerated.monthlyPayment.toFixed(2),
 							extraAdminCost: regenerated.extraAdminCost.toFixed(2),
-							idealPaymentDateAdjustment:
-								idealPaymentDateAdjustment.toFixed(2),
+							idealPaymentDateAdjustment: idealPaymentDateAdjustment.toFixed(2),
 							idealPaymentDateAdjustmentDays,
-							idealPaymentDateAdjustmentReferenceDate:
-								esDiaIA
-									? toDateStrGT(fechaReferencia)
-									: null,
+							idealPaymentDateAdjustmentReferenceDate: esDiaIA
+								? toDateStrGT(fechaReferencia)
+								: null,
 							updatedAt: fechaReferencia,
 						})
 						.where(eq(quotations.id, quotation.id));
@@ -8840,8 +9722,7 @@ export const crmRouter = {
 							? {
 									value: regenerated.totalFinanced.toFixed(2),
 									cuotaMensual: regenerated.monthlyPayment.toFixed(2),
-									gastosAdministrativos:
-										regenerated.extraAdminCost.toFixed(2),
+									gastosAdministrativos: regenerated.extraAdminCost.toFixed(2),
 								}
 							: {}),
 						updatedAt: fechaReferencia,
@@ -8855,7 +9736,8 @@ export const crmRouter = {
 					.returning({ id: opportunities.id });
 				if (updatedOpportunities.length !== 1) {
 					throw new ORPCError("CONFLICT", {
-						message: "La oportunidad cambió mientras se asignaban inversionistas",
+						message:
+							"La oportunidad cambió mientras se asignaban inversionistas",
 					});
 				}
 				auditRecord({
@@ -9071,9 +9953,10 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				occupation: z.enum(["owner", "employee"]).optional(),
 				notes: z.string().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			// Validar DPI del co-deudor
 			const resultadoDpi = validarDpi(input.dpi);
 			if (!resultadoDpi.valid) {
@@ -9087,8 +9970,12 @@ export const crmRouter = {
 			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
 			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
-				.select({ id: opportunities.id })
+				.select({
+					id: opportunities.id,
+					closurePercentage: salesStages.closurePercentage,
+				})
 				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
@@ -9096,6 +9983,11 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+			const mensajeAltaTardia =
+				"Regresa la oportunidad al 30% antes de agregar un cofirmante; su Buró debe validarse antes de aprobar análisis.";
+			if (opportunity.closurePercentage > 30) {
+				throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
 			}
 
 			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
@@ -9108,24 +10000,81 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
 			}
 
-			const [newCoDebtor] = await db
-				.insert(coDebtors)
-				.values({
-					opportunityId: input.opportunityId,
-					fullName: input.fullName,
-					dpi: resultadoDpi.dpiLimpio,
-					age: input.age,
-					gender: input.gender,
-					maritalStatus: input.maritalStatus,
-					profession: input.profession,
-					nationality: input.nationality,
-					email: input.email,
-					phone: input.phone,
-					occupation: input.occupation,
-					notes: input.notes,
-				})
-				.returning();
+			// Mismo candado que el UPDATE que aprueba el análisis: su chequeo de
+			// cofirmantes validados es una foto en READ COMMITTED, y un alta que se
+			// confirma mientras corre quedaría aprobada sin buró
+			let oportunidadMarcada = false;
+			const [newCoDebtor] = await db.transaction(async (tx) => {
+				await tomarCandadoBuroInterno(tx);
+				const [etapaActual] = await tx
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(opportunities)
+					.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update", { of: opportunities });
+				if (!etapaActual || etapaActual.closurePercentage > 30) {
+					throw new ORPCError("BAD_REQUEST", { message: mensajeAltaTardia });
+				}
 
+				// Uno solo por oportunidad: el nuevo representante le quita la marca
+				// al anterior. Bajo el candado de la oportunidad tomado arriba.
+				if (input.esRepresentanteLegal) {
+					await quitarMarcaDeRepresentante(tx, input.opportunityId);
+				}
+
+				const creado = await tx
+					.insert(coDebtors)
+					.values({
+						opportunityId: input.opportunityId,
+						fullName: input.fullName,
+						dpi: resultadoDpi.dpiLimpio,
+						age: input.age,
+						gender: input.gender,
+						maritalStatus: input.maritalStatus,
+						profession: input.profession,
+						nationality: input.nationality,
+						email: input.email,
+						phone: input.phone,
+						occupation: input.occupation,
+						notes: input.notes,
+						esRepresentanteLegal: input.esRepresentanteLegal ?? false,
+					})
+					.returning();
+				const marcadas = await tx
+					.update(opportunities)
+					.set({ buroRevalidacionAl30: true })
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+							inArray(opportunities.status, ["open", "on_hold", "lost"]),
+							eq(opportunities.buroRevalidacionAl30, false),
+						),
+					)
+					.returning({ id: opportunities.id });
+				oportunidadMarcada = marcadas.length > 0;
+				return creado;
+			});
+			if (oportunidadMarcada) {
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "habilitar_buro_revalidacion_30",
+					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
+				});
+			}
+			// Quién firma por la empresa decide quién firma los contratos: queda en
+			// la bitácora de la oportunidad, como las demás decisiones sobre ella.
+			if (newCoDebtor.esRepresentanteLegal) {
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "marcar_representante_legal",
+					data: { origen: "createCoDebtor", coDebtorId: newCoDebtor.id },
+				});
+			}
+
+			consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
 			return newCoDebtor;
 		}),
 
@@ -9156,10 +10105,12 @@ export const crmRouter = {
 				score: z.string().nullable().optional(),
 				fit: z.boolean().nullable().optional(),
 				scoredAt: z.date().nullable().optional(),
+				esRepresentanteLegal: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, ...updateData } = input;
+			// La marca de representante no va con el resto: ver más abajo.
+			const { id, esRepresentanteLegal, ...updateData } = input;
 
 			// Igual que en `updateLead`: el override se anota después de confirmar
 			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
@@ -9258,6 +10209,11 @@ export const crmRouter = {
 				}
 			}
 
+			// Un primer DPI también exige Buró, aunque no active el candado.
+			const consultarBuroPorDpi =
+				updateData.dpi !== undefined &&
+				requiereConsultaDeMora(updateData.dpi, coDebtorAntesDelUpdate?.dpi);
+
 			// Misma carrera que en `updateLead`: entre el candado y esta sentencia,
 			// otra transacción puede aprobar el análisis de la oportunidad que
 			// respalda y el DPI del co-deudor se escribiría igual. La condición
@@ -9282,6 +10238,28 @@ export const crmRouter = {
 			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
 			// aprobada contra la identidad vieja.
 			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				// Quién firma por una sociedad lo leen generar, enlazar y aprobar con
+				// el candado de firma de la oportunidad tomado. Cambiar la marca o la
+				// identidad de un co-deudor pasa por el mismo candado, y ANTES de
+				// cualquier FOR UPDATE: la aprobación toma el candado y después
+				// escribe la oportunidad, y al revés se esperarían entre sí.
+				const datosEnContratos: DatosDelRepresentanteEnContratos = {
+					fullName: updateData.fullName,
+					email: updateData.email,
+					dpi: updateData.dpi,
+					age: updateData.age,
+					gender: updateData.gender,
+					maritalStatus: updateData.maritalStatus,
+					nationality: updateData.nationality,
+					profession: updateData.profession,
+				};
+				if (
+					esRepresentanteLegal !== undefined ||
+					Object.values(datosEnContratos).some((v) => v !== undefined)
+				) {
+					await congelarRepresentanteEnFirma(tx, id, datosEnContratos);
+				}
+
 				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
 				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
 				// oportunidad serializa las dos escrituras.
@@ -9295,6 +10273,23 @@ export const crmRouter = {
 						.from(opportunities)
 						.where(eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId))
 						.for("update");
+				}
+				// La marca de representante es una por oportunidad: también se toma
+				// SU oportunidad antes de tocar a los co-deudores, para que dos marcas
+				// a la vez se ordenen en vez de chocar con el índice único.
+				if (esRepresentanteLegal !== undefined) {
+					const [actual] = await tx
+						.select({ opportunityId: coDebtors.opportunityId })
+						.from(coDebtors)
+						.where(eq(coDebtors.id, id))
+						.limit(1);
+					if (actual) {
+						await tx
+							.select({ id: opportunities.id })
+							.from(opportunities)
+							.where(eq(opportunities.id, actual.opportunityId))
+							.for("update");
+					}
 				}
 
 				const filas = await tx
@@ -9324,6 +10319,71 @@ export const crmRouter = {
 						cambiadaPor: context.userId,
 						database: tx,
 					});
+				}
+				if (coDebtorAntesDelUpdate && consultarBuroPorDpi) {
+					const marcadas = await tx
+						.update(opportunities)
+						.set({ buroRevalidacionAl30: true })
+						.where(
+							and(
+								eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId),
+								sql`${opportunities.stageId} in (select ${salesStages.id} from ${salesStages} where ${salesStages.closurePercentage} = 30)`,
+								inArray(opportunities.status, ["open", "on_hold", "lost"]),
+								eq(opportunities.buroRevalidacionAl30, false),
+							),
+						)
+						.returning({ id: opportunities.id });
+					for (const oportunidad of marcadas) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "habilitar_buro_revalidacion_30",
+							data: { origen: "updateCoDebtor", coDebtorId: id },
+						});
+					}
+				}
+
+				// La marca va DESPUÉS de confirmar la fila y en su propio UPDATE: con
+				// otro co-deudor marcado, escribirla junto con el resto chocaba con el
+				// índice único, y quitársela al otro antes de saber si esta fila se
+				// escribe podía dejar la oportunidad sin representante. No pasa por
+				// los candados del DPI: no cambia la identidad de nadie, y jurídico la
+				// corrige con la oportunidad ya en 80%.
+				const [coDeudor] = filas;
+				if (
+					esRepresentanteLegal !== undefined &&
+					coDeudor.esRepresentanteLegal !== esRepresentanteLegal
+				) {
+					// Con contratos vivos, ya salieron a nombre del representante
+					// actual: cambiarlo dejaría sus invitaciones con otra persona.
+					if (
+						(await conContratosPendientes(tx, [coDeudor.opportunityId])).has(
+							coDeudor.opportunityId,
+						)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"La oportunidad tiene contratos en firma (o firmados sin confirmar) a nombre del representante legal actual. Para cambiarlo, jurídico anula esos contratos y después rehace la batería.",
+						});
+					}
+					if (esRepresentanteLegal) {
+						await quitarMarcaDeRepresentante(tx, coDeudor.opportunityId, id);
+					}
+					const conLaMarca = await tx
+						.update(coDebtors)
+						.set({ esRepresentanteLegal })
+						.where(eq(coDebtors.id, id))
+						.returning();
+					// Quién firma por la empresa decide quién firma los contratos.
+					auditRecord({
+						entity: "opportunity",
+						id: coDeudor.opportunityId,
+						action: esRepresentanteLegal
+							? "marcar_representante_legal"
+							: "desmarcar_representante_legal",
+						data: { origen: "updateCoDebtor", coDebtorId: id },
+					});
+					return conLaMarca;
 				}
 
 				return filas;
@@ -9357,6 +10417,12 @@ export const crmRouter = {
 				auditRecord(overrideDeMora);
 			}
 
+			if (consultarBuroPorDpi) {
+				consultarBuroAlVeinteTrasGuardar(
+					updatedCoDebtor.opportunityId,
+					context.userId,
+				);
+			}
 			return updatedCoDebtor;
 		}),
 
@@ -9418,6 +10484,10 @@ export const crmRouter = {
 			// transacción (el override del admin y su revalidación), así que si algo
 			// revierte, esas anotaciones tienen que irse con la escritura.
 			await auditedTransaction(async (tx) => {
+				// Primero el candado de firma (antes de cualquier FOR UPDATE, como
+				// en la edición): el representante con contratos vivos no se borra.
+				await protegerBorradoDelRepresentante(tx, input.id);
+
 				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
 				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
 				if (coDeudorABorrar) {

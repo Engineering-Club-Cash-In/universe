@@ -32,11 +32,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { PagoFormValues } from "./registerPayment";
 import { toast } from "sonner"; // 🔥 O tu librería de toast preferida
 import { getApiErrorMessage } from "@/lib/apiError";
+import { useAuth } from "@/Provider/authProvider";
 
 // ========== Hook ==========
 // 🚀 Administración de asesores, contadores, inversionistas, créditos y pagos
 export const useAdminData = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   // ====== ASESORES ======
   const { 
@@ -86,6 +88,8 @@ export const useAdminData = () => {
     queryKey: ["platformUsers"],
     queryFn: getPlatformUsersServiceFrontend,
     staleTime: 5 * 60 * 1000,
+    // GET /auth/platform-users es solo ADMIN: para CONTA/ASESOR daría 403 con reintentos.
+    enabled: user?.role === "ADMIN",
   });
 
   const addContaMutation = useMutation({

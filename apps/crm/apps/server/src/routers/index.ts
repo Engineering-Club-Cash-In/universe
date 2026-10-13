@@ -129,6 +129,8 @@ export const crmAppRouter = {
 	ejecutarValidacionesRenapBuro:
 		validationsRouter.ejecutarValidacionesRenapBuro,
 	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
+	getResumenBuroOportunidad: validationsRouter.getResumenBuroOportunidad,
+	asegurarBuroOportunidad: validationsRouter.asegurarBuroOportunidad,
 	marcarValidacionManual: validationsRouter.marcarValidacionManual,
 };
 
@@ -570,6 +572,8 @@ export const reportsAppRouter = {
 	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
 	getBancosCartera: investorDocumentsRouter.getBancosCartera,
 	compraCartera: investorDocumentsRouter.compraCartera,
+	darAccesoPortal: investorDocumentsRouter.darAccesoPortal,
+	estadoAccesoPortal: investorDocumentsRouter.estadoAccesoPortal,
 	crearInversionista: investorDocumentsRouter.crearInversionista,
 	editarInversionista: investorDocumentsRouter.editarInversionista,
 	cambiarStatusInversionista:

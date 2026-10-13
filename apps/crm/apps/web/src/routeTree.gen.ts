@@ -23,6 +23,7 @@ import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspec
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as JuridicoDashboardDataRouteImport } from './routes/juridico/dashboard-data'
 import { Route as JuridicoDashboardRouteImport } from './routes/juridico/dashboard'
+import { Route as JuridicoCartaPoderRouteImport } from './routes/juridico/carta-poder'
 import { Route as JuridicoLeadIdRouteImport } from './routes/juridico/$leadId'
 import { Route as InversionesOpportunityIdRouteImport } from './routes/inversiones/$opportunityId'
 import { Route as FormularioTokenRouteImport } from './routes/formulario.$token'
@@ -148,6 +149,11 @@ const JuridicoDashboardDataRoute = JuridicoDashboardDataRouteImport.update({
 const JuridicoDashboardRoute = JuridicoDashboardRouteImport.update({
   id: '/juridico/dashboard',
   path: '/juridico/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JuridicoCartaPoderRoute = JuridicoCartaPoderRouteImport.update({
+  id: '/juridico/carta-poder',
+  path: '/juridico/carta-poder',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JuridicoLeadIdRoute = JuridicoLeadIdRouteImport.update({
@@ -485,6 +491,7 @@ export interface FileRoutesByFullPath {
   '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/carta-poder': typeof JuridicoCartaPoderRoute
   '/juridico/dashboard': typeof JuridicoDashboardRoute
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -557,6 +564,7 @@ export interface FileRoutesByTo {
   '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/carta-poder': typeof JuridicoCartaPoderRoute
   '/juridico/dashboard': typeof JuridicoDashboardRoute
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -630,6 +638,7 @@ export interface FileRoutesById {
   '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/carta-poder': typeof JuridicoCartaPoderRoute
   '/juridico/dashboard': typeof JuridicoDashboardRoute
   '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -704,6 +713,7 @@ export interface FileRouteTypes {
     | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/carta-poder'
     | '/juridico/dashboard'
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
@@ -776,6 +786,7 @@ export interface FileRouteTypes {
     | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/carta-poder'
     | '/juridico/dashboard'
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
@@ -848,6 +859,7 @@ export interface FileRouteTypes {
     | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/carta-poder'
     | '/juridico/dashboard'
     | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
@@ -921,6 +933,7 @@ export interface RootRouteChildren {
   FormularioTokenRoute: typeof FormularioTokenRoute
   InversionesOpportunityIdRoute: typeof InversionesOpportunityIdRoute
   JuridicoLeadIdRoute: typeof JuridicoLeadIdRoute
+  JuridicoCartaPoderRoute: typeof JuridicoCartaPoderRoute
   JuridicoDashboardRoute: typeof JuridicoDashboardRoute
   JuridicoDashboardDataRoute: typeof JuridicoDashboardDataRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
@@ -1049,6 +1062,13 @@ declare module '@tanstack/react-router' {
       path: '/juridico/dashboard'
       fullPath: '/juridico/dashboard'
       preLoaderRoute: typeof JuridicoDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/juridico/carta-poder': {
+      id: '/juridico/carta-poder'
+      path: '/juridico/carta-poder'
+      fullPath: '/juridico/carta-poder'
+      preLoaderRoute: typeof JuridicoCartaPoderRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/$leadId': {
@@ -1489,6 +1509,7 @@ const rootRouteChildren: RootRouteChildren = {
   FormularioTokenRoute: FormularioTokenRoute,
   InversionesOpportunityIdRoute: InversionesOpportunityIdRoute,
   JuridicoLeadIdRoute: JuridicoLeadIdRoute,
+  JuridicoCartaPoderRoute: JuridicoCartaPoderRoute,
   JuridicoDashboardRoute: JuridicoDashboardRoute,
   JuridicoDashboardDataRoute: JuridicoDashboardDataRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,

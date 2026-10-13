@@ -183,6 +183,11 @@ export const PERMISSIONS = {
 	canAccessCobranzaReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	// Reportes → Inversiones → Realizado. Es lo único de Reportes que ve la
+	// gerencia de inversiones; la Proyección y el resto de pestañas son de admin.
+	canAccessInvestmentRealizedReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.INVESTMENT_MANAGER,
+
 	canAccessTiempoCierreReport: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 

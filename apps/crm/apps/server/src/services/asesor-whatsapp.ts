@@ -1,3 +1,10 @@
+/**
+ * Contacto del asesor para cerrar los mensajes automáticos de WhatsApp
+ * (recibo de pago, cuenta Nexa). Cartera suele mandar el asesor junto con el
+ * evento; si no viene completo, se pide a cartera con el mismo `/credito` que
+ * usa el resto del CRM.
+ */
+
 import { carteraBackClient } from "./cartera-back-client";
 
 export interface ContactoAsesor {
@@ -23,7 +30,12 @@ function contactoCompleto(
 export async function obtenerAsesorCartera(
 	numeroSifco: string,
 ): Promise<{ nombre: string | null; telefono: string | null } | null> {
-	return await carteraBackClient.getAsesorCredito(numeroSifco);
+	const credito = await carteraBackClient.getCredito(numeroSifco);
+	if (!credito?.asesor) return null;
+	return {
+		nombre: credito.asesor.nombre ?? null,
+		telefono: credito.asesor.telefono ?? null,
+	};
 }
 
 export async function resolverContactoAsesor(
@@ -45,8 +57,9 @@ export async function resolverContactoAsesor(
 	}
 }
 
+/** Cierre formal; sin teléfono no se escribe "al ." (pide el nombre y el número). */
 export function construirCierreAsesor(asesor: ContactoAsesor | null): string {
 	return asesor
-		? `Cualquier duda, llama a tu asesor ${asesor.nombre} al ${asesor.telefono}.`
-		: "Cualquier duda, comunícate con tu asesor.";
+		? `Ante cualquier consulta, comuníquese con su asesor ${asesor.nombre} al ${asesor.telefono}.`
+		: "Ante cualquier consulta, comuníquese con su asesor.";
 }

@@ -99,6 +99,41 @@ export interface VariablesPlantilla {
 	aseguradora?: string;
 	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
 	cabinaSeguro?: string;
+	/**
+	 * Código de pago Nexa del crédito (`nexa_credit_bindings.nexa_token`): el
+	 * número que el cliente usa como cuenta destino en su banco. Lo usa
+	 * "Nueva cuenta exclusiva Nexa"; vacío = el crédito no tiene cuenta.
+	 */
+	cuentaNexa?: string;
+}
+
+/** Línea de la cuenta Nexa que la bienvenida automática agrega a las cuentas. */
+export function lineaCuentaNexa(token: string | null | undefined): string {
+	return token
+		? `Además, puede pagar su cuota desde su banco con su código de pago Nexa: *${token}*`
+		: "";
+}
+
+/**
+ * Agrega la cuenta Nexa al final del bloque de cuentas (el que empieza con 💳)
+ * de una bienvenida ya interpolada. Va en el mismo bloque, así que el mensaje
+ * sigue con 5 bloques (template `mensaje5parametro`).
+ *
+ * Solo lo usa la bienvenida AUTOMÁTICA (`send-welcome-message.ts`): la
+ * plantilla compartida no lleva marcador, así que el envío manual (masivo o
+ * desde la ficha) nunca muestra ni manda nada de Nexa.
+ */
+export function agregarCuentaNexaABienvenida(
+	mensaje: string,
+	token: string | null | undefined,
+): string {
+	const linea = lineaCuentaNexa(token);
+	if (!linea) return mensaje;
+	const bloques = mensaje.split("\n\n");
+	const i = bloques.findIndex((b) => b.trimStart().startsWith("💳"));
+	if (i === -1) return mensaje;
+	bloques[i] = `${bloques[i]}\n${linea}`;
+	return bloques.join("\n\n");
 }
 
 /**
@@ -581,7 +616,41 @@ export interface PlantillaMensaje {
 	etapa: string;
 	asunto: string;
 	cuerpo: string;
+	/**
+	 * Plantilla con imagen: se envía por un template de WittyBots con header de
+	 * imagen y `parametros` variables de body (un bloque del cuerpo por variable),
+	 * en vez de `mensajeNparametro`.
+	 */
+	adjunto?: { templateName: string; imagenUrl: string; parametros: number };
 }
+
+/**
+ * Cantidad de párrafos (separados por línea en blanco) del cuerpo: cada uno
+ * viaja en una variable del template, igual que `splitTemplateParams`.
+ */
+export function contarBloquesWhatsapp(cuerpo: string): number {
+	return cuerpo.split(/\n\s*\n/g).filter((bloque) => bloque.trim()).length;
+}
+
+/**
+ * Un template con adjunto tiene un número fijo de variables y WhatsApp rechaza
+ * las vacías: el cuerpo (editado o no) necesita al menos un párrafo por
+ * variable. Los párrafos de más se unen en la última.
+ */
+export function cuerpoCubreAdjunto(
+	cuerpo: string,
+	adjunto: NonNullable<PlantillaMensaje["adjunto"]>,
+): boolean {
+	return contarBloquesWhatsapp(cuerpo) >= adjunto.parametros;
+}
+
+/**
+ * Imagen del aviso de cuenta exclusiva Nexa (bucket público `crm` de R2).
+ * `COBROS_CUENTA_NEXA_IMAGEN_URL` permite cambiarla sin desplegar.
+ */
+export const CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL =
+	process.env.COBROS_CUENTA_NEXA_IMAGEN_URL ||
+	"https://pub-e8fc0de6a599420ea473808b97217fdd.r2.dev/cobros/extras/a7f8d584-2c7d-4260-bf83-8acfe59457bf.jpeg";
 
 export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
@@ -653,6 +722,29 @@ export function prepararMontoAdeudadoParaEnvio(
 	return { enviar: true, montoAdeudado };
 }
 
+export const COBROS_MOTIVO_SIN_CUENTA_NEXA =
+	"el crédito no tiene cuenta Nexa asignada";
+
+/**
+ * Un cuerpo que usa {cuentaNexa} no se puede enviar a un crédito sin cuenta
+ * Nexa: el cliente recibiría "Banco Nexa / Cuenta Monetaria / " sin número. La
+ * plantilla "Nueva cuenta exclusiva Nexa" solo le sale a quien ya tiene cuenta;
+ * el resto se descarta con motivo (mismo patrón que los otros gates).
+ */
+export function prepararCuentaNexaParaEnvio(
+	cuerpo: string,
+	cuentaNexa: string | null | undefined,
+): { enviar: true; cuentaNexa: string } | { enviar: false; motivo: string } {
+	const cuenta = cuentaNexa?.trim() ?? "";
+	if (!cuerpo.includes("{cuentaNexa}")) {
+		return { enviar: true, cuentaNexa: cuenta };
+	}
+	if (!cuenta) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_CUENTA_NEXA };
+	}
+	return { enviar: true, cuentaNexa: cuenta };
+}
+
 export function prepararTelefonoAsesorParaEnvio(
 	cuerpo: string,
 	telefono: string | null | undefined,
@@ -661,7 +753,13 @@ export function prepararTelefonoAsesorParaEnvio(
 	| { enviar: false; motivo: string } {
 	const telefonoAsesor = telefono?.trim() ?? "";
 
-	if (cuerpo.includes(COBROS_NO_REPLY_WARNING) && !telefonoAsesor) {
+	// El aviso no-reply remite al asesor; "Nueva cuenta exclusiva Nexa" (sin
+	// aviso) también lo menciona con {telefonoAsesor}: sin número saldría
+	// "comunícate con tu ejecutivo al ." roto.
+	const remiteAlAsesor =
+		cuerpo.includes(COBROS_NO_REPLY_WARNING) ||
+		cuerpo.includes("{telefonoAsesor}");
+	if (remiteAlAsesor && !telefonoAsesor) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR };
 	}
 
@@ -823,7 +921,8 @@ export function interpolar(
 		.replace(
 			/{cabinaSeguro}/g,
 			v(variables.cabinaSeguro ?? seguroPorAseguradora(null).cabinaSeguro),
-		);
+		)
+		.replace(/{cuentaNexa}/g, v(variables.cuentaNexa ?? ""));
 }
 
 /**
@@ -906,6 +1005,32 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 
 *${COBROS_NO_REPLY_WARNING}*
 *CashIn*`,
+	},
+	{
+		id: "cuenta_nexa_exclusiva",
+		nombre: "Nueva cuenta exclusiva Nexa",
+		etapa: "al_dia",
+		asunto: "Tu nueva cuenta exclusiva para pagos",
+		adjunto: {
+			templateName: "mensaje4image",
+			imagenUrl: CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL,
+			parametros: 4,
+		},
+		// Template `mensaje4image` (header imagen + 4 variables de body). WhatsApp
+		// no admite saltos de línea DENTRO de una variable: cada bloque va en una
+		// sola línea y el espaciado lo da el texto fijo del template entre {{1}}
+		// a {{4}}. Arranca con el nombre: el template ya antepone su propio
+		// saludo. Texto tal cual lo definió cobros (sin aviso no-reply). Solo se
+		// envía a créditos que ya tienen cuenta Nexa (prepararCuentaNexaParaEnvio):
+		// es el aviso para clientes existentes; la bienvenida y `cuenta_nexa`
+		// cubren a los nuevos.
+		cuerpo: `{clienteNombre}. Ya está disponible tu *nueva cuenta exclusiva para realizar los pagos de tu crédito*. Vía transferencia desde tu banco de preferencia hacia:
+
+🏛️ *Banco Nexa*
+
+🔢 *Cuenta Monetaria : {cuentaNexa}*
+
+Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

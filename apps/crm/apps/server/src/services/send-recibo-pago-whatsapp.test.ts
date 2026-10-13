@@ -23,6 +23,7 @@ afterEach(() => {
 const SIFCO = "SIFCO-001";
 const PAGO_ID = 42;
 const RECIBO_URL = "https://r2.example.com/recibo_pago_42.pdf";
+const IMAGEN_URL = "https://r2.example.com/recibo_pago_42.jpg";
 const SUPERVISOR_ID = "user-supervisor-1";
 
 function casoBase(
@@ -89,6 +90,8 @@ function buildDeps(overrides: Partial<ReciboPagoDeps> = {}): {
 		guardarLog: mock(async (_params: any) => {
 			calls.guardarLog++;
 		}),
+		reservarEnvio: mock(async () => "nueva" as const),
+		cerrarEnvio: mock(async () => {}),
 		...overrides,
 	};
 
@@ -232,6 +235,50 @@ describe("sendReciboPagoWhatsapp", () => {
 		});
 	});
 
+	test("con imagen: plantilla mensajeimage con header de imagen y el texto habla de la imagen adjunta", async () => {
+		let paramsRecibidos: any;
+		let logParams: any;
+		const { deps } = buildDeps({
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-999" };
+			}),
+			guardarLog: mock(async (params: any) => {
+				logParams = params;
+			}),
+		});
+
+		const r = await sendReciboPagoWhatsapp(
+			baseParams({ imagenUrl: IMAGEN_URL }),
+			deps,
+		);
+
+		expect(r.sent).toBe(true);
+		expect(paramsRecibidos.templateName).toBe("mensajeimage");
+		expect(paramsRecibidos.bodyParams).toHaveLength(1);
+		expect(paramsRecibidos.header).toEqual({ type: "image", url: IMAGEN_URL });
+		expect(paramsRecibidos.bodyParams[0]).toContain("en la imagen adjunta");
+		expect(paramsRecibidos.bodyParams[0]).not.toContain("documento adjunto");
+		expect(logParams.result.providerResponse.imagenUrl).toBe(IMAGEN_URL);
+		expect(logParams.result.providerResponse.reciboUrl).toBe(RECIBO_URL);
+	});
+
+	test("sin imagen (cartera no pudo generarla): va el PDF con mensaje_adjunto y el texto habla del documento", async () => {
+		let paramsRecibidos: any;
+		const { deps } = buildDeps({
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-999" };
+			}),
+		});
+
+		await sendReciboPagoWhatsapp(baseParams({ imagenUrl: null }), deps);
+
+		expect(paramsRecibidos.templateName).toBe("mensaje_adjunto");
+		expect(paramsRecibidos.header.type).toBe("document");
+		expect(paramsRecibidos.bodyParams[0]).toContain("en el documento adjunto");
+	});
+
 	test("camino feliz: log con plantillaId recibo_pago, createdBy del usuario de sistema y pagoId en providerResponse", async () => {
 		let logParams: any;
 		const { deps } = buildDeps({
@@ -340,9 +387,9 @@ describe("sendReciboPagoWhatsapp", () => {
 
 		expect(paramsRecibidos.message).toContain("(cuota 7)");
 		expect(paramsRecibidos.message).toContain(
-			"llama a tu asesor Carlos Ruiz al 41234567",
+			"comuníquese con su asesor Carlos Ruiz al 41234567",
 		);
-		expect(paramsRecibidos.message).not.toContain("comunícate con tu asesor");
+		expect(paramsRecibidos.message).not.toContain("comuníquese con su asesor.");
 	});
 
 	test("sin asesor: cae al cierre genérico 'comunícate con tu asesor'", async () => {
@@ -356,7 +403,7 @@ describe("sendReciboPagoWhatsapp", () => {
 
 		await sendReciboPagoWhatsapp(baseParams({ asesorTelefono: null }), deps);
 
-		expect(paramsRecibidos.message).toContain("comunícate con tu asesor");
+		expect(paramsRecibidos.message).toContain("comuníquese con su asesor.");
 	});
 
 	test("asesor recibido incompleto: consulta cartera y usa contacto completo", async () => {
@@ -412,7 +459,7 @@ describe("sendReciboPagoWhatsapp", () => {
 		const resultado = await sendReciboPagoWhatsapp(baseParams(), deps);
 
 		expect(resultado.sent).toBe(true);
-		expect(paramsRecibidos.message).toContain("comunícate con tu asesor");
+		expect(paramsRecibidos.message).toContain("comuníquese con su asesor.");
 	});
 });
 
@@ -423,7 +470,7 @@ describe("construirMensajeReciboPago", () => {
 			{ marca: "TOYOTA", modelo: "RAV4", year: 2017, placa: "P-507GFV" },
 			SIFCO,
 		);
-		expect(msg).toContain("Juan Pérez, te");
+		expect(msg).toContain("Juan Pérez, le");
 		expect(msg).toContain("TOYOTA RAV4 2017, placas P-507GFV");
 		expect(msg).not.toContain(SIFCO);
 	});
@@ -457,6 +504,23 @@ describe("construirMensajeReciboPago", () => {
 		expect(msg).toContain("placas P-507GFV (cuota 7)");
 	});
 
+	test("adjunto imagen: dice 'la imagen adjunta'; por defecto 'el documento adjunto'", () => {
+		const vehiculo = {
+			marca: "TOYOTA",
+			modelo: "RAV4",
+			year: 2017,
+			placa: "P-507GFV",
+		};
+		expect(
+			construirMensajeReciboPago("Juan Pérez", vehiculo, SIFCO, {
+				adjunto: "imagen",
+			}),
+		).toContain("en la imagen adjunta.");
+		expect(construirMensajeReciboPago("Juan Pérez", vehiculo, SIFCO)).toContain(
+			"en el documento adjunto.",
+		);
+	});
+
 	test("con asesor completo: cierre invita a llamar al asesor, no genérico", () => {
 		const msg = construirMensajeReciboPago(
 			"Juan Pérez",
@@ -464,8 +528,8 @@ describe("construirMensajeReciboPago", () => {
 			SIFCO,
 			{ asesor: { nombre: "Carlos Ruiz", telefono: "41234567" } },
 		);
-		expect(msg).toContain("llama a tu asesor Carlos Ruiz al 41234567");
-		expect(msg).not.toContain("comunícate con tu asesor");
+		expect(msg).toContain("comuníquese con su asesor Carlos Ruiz al 41234567");
+		expect(msg).not.toContain("comuníquese con su asesor.");
 	});
 
 	test("sin asesor completo: cierre genérico", () => {
@@ -475,7 +539,7 @@ describe("construirMensajeReciboPago", () => {
 			SIFCO,
 			{ asesor: null },
 		);
-		expect(msg).toContain("comunícate con tu asesor");
+		expect(msg).toContain("comuníquese con su asesor.");
 	});
 
 	test("sin asesor: cierre genérico 'comunícate con tu asesor'", () => {
@@ -484,6 +548,34 @@ describe("construirMensajeReciboPago", () => {
 			{ marca: null, modelo: null, year: null, placa: null },
 			SIFCO,
 		);
-		expect(msg).toContain("comunícate con tu asesor");
+		expect(msg).toContain("comuníquese con su asesor.");
+	});
+});
+
+describe("idempotencia por pago", () => {
+	test("un recibo ya enviado no se vuelve a mandar", async () => {
+		const { deps, calls } = buildDeps({ reservarEnvio: mock(async () => "ya_enviado" as const) });
+		const r = await sendReciboPagoWhatsapp(baseParams(), deps);
+		expect(r).toMatchObject({ sent: true, yaEnviado: true });
+		expect(calls.enviar).toBe(0);
+	});
+
+	test("con otro envío en curso responde EN_CURSO sin llamar a WhatsApp", async () => {
+		const { deps, calls } = buildDeps({ reservarEnvio: mock(async () => "en_curso" as const) });
+		const r = await sendReciboPagoWhatsapp(baseParams(), deps);
+		expect(r).toMatchObject({ sent: false, codigo: "EN_CURSO" });
+		expect(calls.enviar).toBe(0);
+	});
+
+	test("cierra la reserva como enviado o fallido según WhatsApp", async () => {
+		const cierres: string[] = [];
+		const ok = buildDeps({ cerrarEnvio: mock(async (_p: number, e: "enviado" | "fallido") => { cierres.push(e); }) });
+		await sendReciboPagoWhatsapp(baseParams(), ok.deps);
+		const mal = buildDeps({
+			cerrarEnvio: mock(async (_p: number, e: "enviado" | "fallido") => { cierres.push(e); }),
+			enviar: mock(async () => ({ success: false, error: "x" })) as any,
+		});
+		await sendReciboPagoWhatsapp(baseParams(), mal.deps);
+		expect(cierres).toEqual(["enviado", "fallido"]);
 	});
 });

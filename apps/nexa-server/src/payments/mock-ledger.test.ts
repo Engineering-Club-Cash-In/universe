@@ -24,6 +24,6 @@ describe("mock cartera ledger", () => {
       },
     });
 
-    expect(result).toEqual({ status: "APPLIED", paymentId: 7001 });
+    expect(result).toEqual({ status: "APPLIED", paymentId: 7001, paymentIds: [7001] });
   });
 });

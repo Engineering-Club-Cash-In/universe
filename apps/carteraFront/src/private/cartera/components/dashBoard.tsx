@@ -22,6 +22,7 @@ import {
   Shield,
   Layers,
   UserCog,
+  Smartphone,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -149,6 +150,20 @@ const menuSections: MenuSection[] = [
         icon: <UserCog className="h-4 w-4" />,
         path: "/buckets-asesores",
         roles: ["ADMIN", "CONTA"],
+      },
+    ],
+  },
+  {
+    key: "nexa",
+    label: "Nexa",
+    icon: <Smartphone className="h-4 w-4" />,
+    items: [
+      {
+        key: "nexa-dashboard",
+        label: "Pagos Nexa",
+        icon: <Smartphone className="h-4 w-4" />,
+        path: "/nexa",
+        roles: ["ADMIN", "ASESOR", "CONTA"],
       },
     ],
   },

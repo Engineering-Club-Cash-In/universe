@@ -1,4 +1,5 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 // ============================================================================
 // Fake db para desactivarMoraSiCreditoAlDia
@@ -38,7 +39,7 @@ const state: {
    * devuelven las LECTURAS. Esto es lo único que lo delata.
    */
   lecturas: Array<{ tabla: string; filas: any[] }>;
-  updates: Array<{ table: any; set: any; returning: boolean }>;
+  updates: Array<{ table: any; set: any; returning: boolean; where?: any }>;
   inserts: Array<{ table: any; values: any }>;
   updateReturningQueue: SelectResult[];
   failNextUpdate: boolean;
@@ -73,7 +74,8 @@ const makeSelectChain = () => {
       return chain;
     },
     innerJoin: () => chain,
-    where: () => Promise.resolve(result),
+    // `.for()`: el candado del crédito al abrir la transacción.
+    where: () => Object.assign(Promise.resolve(result), { for: () => Promise.resolve(result) }),
   };
   return chain;
 };
@@ -85,7 +87,7 @@ const fakeDb = {
   select: () => makeSelectChain(),
   update: (table: any) => ({
     set: (setValues: any) => ({
-      where: () => {
+      where: (where: any) => {
         if (state.failNextUpdate) {
           state.failNextUpdate = false;
           // Revienta lo mismo si se espera el update directo (el de `creditos`)
@@ -98,7 +100,7 @@ const fakeDb = {
             Promise.reject(new Error("db caída simulada"));
           return failing;
         }
-        const entry = { table, set: setValues, returning: false };
+        const entry = { table, set: setValues, returning: false, where };
         state.updates.push(entry);
         // Solo el update de la mora usa `.returning()`; el del crédito no debe
         // comerse la fila que la prueba preparó para aquél.
@@ -134,7 +136,7 @@ const fakeDb = {
   }),
 };
 
-mock.module("../database", () => ({ db: {}, client: {} }));
+mock.module("../database", () => ({ db: {}, client: {}, lockPool: {} }));
 
 const { desactivarMoraSiCreditoAlDia } = await import("./latefee");
 const { moras_credito, creditos, moras_historial } = await import(
@@ -217,6 +219,7 @@ describe("desactivarMoraSiCreditoAlDia", () => {
       { tabla: "moras_credito", filas: [MORA_ACTIVA] }, // la mora activa
       { tabla: "creditos", filas: [CREDITO_MOROSO] }, // ¿está MOROSO?
       { tabla: "cuotas_credito", filas: CUOTAS_AL_DIA }, // ¿queda alguna vencida?
+      { tabla: "creditos", filas: [] }, // candado del crédito, ya dentro de la tx
     ]);
 
     // Update 1: la mora queda en 0 e inactiva
@@ -228,6 +231,11 @@ describe("desactivarMoraSiCreditoAlDia", () => {
       activa: false,
     });
     expect(moraUpdate!.returning).toBe(true);
+    // 🧊 Guard SQL: si el crédito pasó a PENDIENTE_CANCELACION después de leer
+    // su status, el UPDATE no matchea y la mora congelada sobrevive.
+    const { sql: sqlMora, params } = new PgDialect().sqlToQuery(moraUpdate!.where);
+    expect(sqlMora).toContain("NOT EXISTS");
+    expect(params).toEqual(expect.arrayContaining(["PENDIENTE_CANCELACION", 8685]));
 
     // Update 2: el crédito baja a ACTIVO
     const statusUpdate = state.updates.find((u) => u.table === creditos);
@@ -281,6 +289,23 @@ describe("desactivarMoraSiCreditoAlDia", () => {
     expect(result.desactivada).toBe(true);
     const statusUpdate = state.updates.find((u) => u.table === creditos);
     expect(statusUpdate).toBeUndefined();
+  });
+
+  it("PENDIENTE_CANCELACION: validar una boleta NO apaga la mora congelada (la cobra resetCredit al cerrar)", async () => {
+    state.selectQueue = [
+      [MORA_ACTIVA],
+      // Capital 0 a propósito: ni el override sinCapital la apaga.
+      [{ statusCredit: "PENDIENTE_CANCELACION", capital: "0.00" }],
+      // Excluido de mora → sus cuotas no cuentan como vencidas: "parece" al día.
+      CUOTAS_AL_DIA.map((c) => ({ ...c, statusCredit: "PENDIENTE_CANCELACION" })),
+    ];
+    state.updateReturningQueue = [[{ mora_id: 95201 }]];
+
+    const result = await correr(8685);
+
+    expect(result.desactivada).toBe(false);
+    expect(state.updates).toHaveLength(0);
+    expect(state.inserts).toHaveLength(0);
   });
 
   it("no duplica el historial si el cron ya había apagado la mora (update condicional no afecta filas)", async () => {

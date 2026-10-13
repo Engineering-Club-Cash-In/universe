@@ -16,10 +16,10 @@ import { faltaVincular } from "../lib/contrato-falta-vincular";
 import { conCandadoDeFirma } from "../lib/contratos-candado";
 import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
 import {
-	REP_LEGAL_EMAIL,
-	REP_LEGAL_NOMBRE,
-	REP_LEGAL_TELEFONO,
-} from "../lib/contratos-rep-legal";
+	type DestinatarioDeFirma,
+	destinatariosDeFirma,
+	rolesDelDestinatario,
+} from "../lib/destinatarios-de-firma";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -76,17 +76,6 @@ export function buildContractLinksMessage(
 	return `${clientName}, ${encabezado}:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
 }
 
-interface DestinatarioDeFirma {
-	/** TITULAR | COFIRMANTE | REP_LEGAL. Decide qué correo de prueba le toca. */
-	role: string;
-	nombre: string;
-	/** Con el que se emparejan los links: WeeTrust identifica por correo. */
-	email: string | null;
-	phone: string | null;
-	leadId?: string;
-	coDebtorId?: string;
-}
-
 /**
  * Los enlaces que le tocan HOY a una persona de una oportunidad.
  *
@@ -118,6 +107,7 @@ async function enlacesDeLaPersona(
 					lastName: leads.lastName,
 					email: leads.email,
 					phone: leads.phone,
+					clientType: leads.clientType,
 				})
 				.from(leads)
 				.where(eq(leads.id, oportunidad.leadId))
@@ -131,33 +121,24 @@ async function enlacesDeLaPersona(
 			fullName: coDebtors.fullName,
 			email: coDebtors.email,
 			phone: coDebtors.phone,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
 		})
 		.from(coDebtors)
 		.where(eq(coDebtors.opportunityId, opportunityId))
 		.orderBy(coDebtors.createdAt);
 
-	const reales: DestinatarioDeFirma[] = [
-		{
-			role: "TITULAR",
-			nombre: lead ? `${lead.firstName} ${lead.lastName}` : "Cliente",
-			email: lead?.email ?? null,
-			phone: lead?.phone ?? null,
-			...(lead ? { leadId: lead.id } : {}),
-		},
-		...coDebtorsList.map((cd) => ({
-			role: "COFIRMANTE",
-			nombre: cd.fullName,
-			email: cd.email,
-			phone: cd.phone,
-			coDebtorId: cd.id,
-		})),
-		{
-			role: "REP_LEGAL",
-			nombre: REP_LEGAL_NOMBRE,
-			email: REP_LEGAL_EMAIL,
-			phone: REP_LEGAL_TELEFONO || null,
-		},
-	];
+	const reales = destinatariosDeFirma({
+		lead: lead
+			? {
+					id: lead.id,
+					nombre: `${lead.firstName} ${lead.lastName}`,
+					email: lead.email,
+					phone: lead.phone,
+					clientType: lead.clientType,
+				}
+			: null,
+		codeudores: coDebtorsList,
+	});
 
 	const lista = isTestModeEnabled() ? aplicarCorreosDePrueba(reales) : reales;
 
@@ -187,7 +168,7 @@ async function enlacesDeLaPersona(
 				eq(generatedLegalContracts.opportunityId, opportunityId),
 				ne(generatedLegalContracts.status, "cancelled"),
 				isNull(generatedLegalContracts.replacedByContractId),
-				eq(contractSignatories.role, destinatario.role),
+				inArray(contractSignatories.role, rolesDelDestinatario(destinatario)),
 				// WeeTrust puede devolver el correo en minúsculas.
 				sql`lower(${contractSignatories.email}) = lower(${destinatario.email})`,
 				ne(contractSignatories.status, "signed"),
@@ -254,6 +235,7 @@ async function enviarEnlacesDeFirma(params: {
 			lastName: leads.lastName,
 			email: leads.email,
 			phone: leads.phone,
+			clientType: leads.clientType,
 		})
 		.from(leads)
 		.where(eq(leads.id, params.leadId))
@@ -267,6 +249,7 @@ async function enviarEnlacesDeFirma(params: {
 			fullName: coDebtors.fullName,
 			email: coDebtors.email,
 			phone: coDebtors.phone,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
 		})
 		.from(coDebtors)
 		.where(eq(coDebtors.opportunityId, params.opportunityId))
@@ -372,32 +355,16 @@ async function enviarEnlacesDeFirma(params: {
 	// Cada destinatario rota por la lista para que no lleguen todos al mismo.
 	const modoPrueba = isTestModeEnabled();
 
-	const destinatariosReales: DestinatarioDeFirma[] = [
-		{
-			role: "TITULAR",
+	const destinatariosReales = destinatariosDeFirma({
+		lead: {
+			id: params.leadId,
 			nombre: leadName,
 			email: lead?.email ?? null,
 			phone: lead?.phone ?? null,
-			leadId: params.leadId,
+			clientType: lead?.clientType ?? null,
 		},
-		...coDebtorsList.map((cd) => ({
-			role: "COFIRMANTE",
-			nombre: cd.fullName,
-			email: cd.email,
-			phone: cd.phone,
-			coDebtorId: cd.id,
-		})),
-		// El representante legal firma varios de estos contratos y hasta ahora sólo
-		// se enteraba por el correo de WeeTrust. Va al final porque es interno, y
-		// sin `leadId` ni `coDebtorId`: no es ninguno de los dos, y las dos
-		// columnas admiten nulo.
-		{
-			role: "REP_LEGAL",
-			nombre: REP_LEGAL_NOMBRE,
-			email: REP_LEGAL_EMAIL,
-			phone: REP_LEGAL_TELEFONO || null,
-		},
-	];
+		codeudores: coDebtorsList,
+	});
 
 	// En modo de prueba los enlaces se emitieron contra los correos de prueba, no
 	// contra los del cliente. Buscar por el correo real no calza con nada y nadie
@@ -448,19 +415,24 @@ async function enviarEnlacesDeFirma(params: {
 		// emitieron sin la verificación de identidad por rol de ahora, y su
 		// columna `clientSigningLink` no dice de quién es cada link. Sólo salen
 		// por WhatsApp los enlaces generados con el flujo nuevo.
-		const clave = destinatario.email
-			? claveDe(destinatario.role, destinatario.email)
-			: null;
+		const email = destinatario.email;
+		const claves = email
+			? rolesDelDestinatario(destinatario).map((r) => claveDe(r, email))
+			: [];
+		const clave = claves[0] ?? null;
+		const suClaveEn = (contractId: string) =>
+			claves.find((k) => linksPorContrato.get(contractId)?.has(k));
 		const susContratos = contratosDeFirma
-			.filter((c) => Boolean(clave && linksPorContrato.get(c.id)?.has(clave)))
+			.filter((c) => Boolean(suClaveEn(c.id)))
 			.map((c) => ({
 				contractName: c.contractName,
-				link: linksPorContrato.get(c.id)?.get(clave as string) ?? null,
+				link:
+					linksPorContrato.get(c.id)?.get(suClaveEn(c.id) as string) ?? null,
 				pdfLink: pdfResueltos.get(c.id) ?? null,
 			}));
 
 		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
-		if (susContratos.length === 0 && clave && firmaronAlgo.has(clave)) {
+		if (susContratos.length === 0 && claves.some((k) => firmaronAlgo.has(k))) {
 			continue;
 		}
 

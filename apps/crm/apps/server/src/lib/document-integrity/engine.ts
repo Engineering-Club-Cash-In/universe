@@ -152,6 +152,10 @@ function structureSignals(forensics: PdfForensicsResult): Signal[] {
 	}
 	if (forensics.protectedPdf)
 		signals.push(makeSignal("pdf_protegido_no_abre", 0, "alta", "estructura"));
+	if (forensics.restrictedPdf)
+		signals.push(
+			makeSignal("pdf_con_restricciones_del_emisor", 0, "baja", "estructura"),
+		);
 
 	const textPages = forensics.pages.filter((page) => page.hasText).length;
 	const rasterPages = forensics.pages.filter(

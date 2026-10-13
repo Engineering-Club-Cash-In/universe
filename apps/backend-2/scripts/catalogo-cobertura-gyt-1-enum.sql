@@ -1,0 +1,12 @@
+-- Catálogo de documentos de backend-2 (schema docuseal, Supabase PROD), PASO 1 de 2.
+-- Carta de cobertura de Seguros G&T, para las ventas aseguradas con G&T. Lo
+-- corre a mano quien tenga acceso a PROD.
+--
+-- Va en su propia ejecución, ANTES del paso 2: Postgres no deja usar un valor
+-- de enum en la misma transacción que lo agrega, y el editor de Supabase manda
+-- todo lo que se corre junto en una sola transacción (error 55P04). Se puede
+-- repetir sin problema.
+--
+-- AFTER: la lista de documentos de ventas se ordena por el enum, y así la de
+-- G&T sale junto a las dos de Universales.
+ALTER TYPE docuseal.document_name_enum ADD VALUE IF NOT EXISTS 'cobertura_gyt' AFTER 'cobertura_inrexsa_comercial';

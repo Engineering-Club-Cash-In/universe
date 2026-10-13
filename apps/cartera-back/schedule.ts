@@ -15,6 +15,11 @@ import {
   provisionarCuentasPortal,
 } from './src/controllers/provisionarCuentasPortal';
 import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
+import { enviarEventosNexaPendientes } from './src/controllers/nexaCarteraEvents';
+import { client } from './src/database';
+import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPago';
+import config from './src/config';
+import { reintentarCuentasNexaPendientes } from './src/controllers/nexaCuentaReintentos';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -58,7 +63,10 @@ export type TareaProgramada =
 	| 'snapshot_facturacion'
 	| 'cuadre_liquidaciones'
 	| 'cuentas_portal'
-	| 'baterias_crm';
+	| 'baterias_crm'
+	| 'eventos_nexa'
+	| 'recibos_nexa'
+	| 'cuentas_nexa';
 
 export const TODAS_LAS_TAREAS: TareaProgramada[] = [
   'moras',
@@ -72,6 +80,9 @@ export const TODAS_LAS_TAREAS: TareaProgramada[] = [
   'cuadre_liquidaciones',
   'cuentas_portal',
   'baterias_crm',
+  'eventos_nexa',
+  'recibos_nexa',
+  'cuentas_nexa',
 ];
 
 export function iniciarTareasProgramadas(
@@ -234,6 +245,54 @@ export function iniciarTareasProgramadas(
       'retry_crm_contract_batches',
       async () => {
         await reintentarBateriasPendientes();
+      },
+    );
+  });
+
+  // 📡 Eventos hacia nexa-server (cartera.nexa_outbox) - cada minuto.
+  //    Hoy: crédito CANCELADO → nexa-server desactiva el token. Sin
+  //    NEXA_SERVER_URL o NEXA_CARTERA_EVENTS_SECRET no hace nada y las filas
+  //    esperan. Varias instancias no chocan: el reclamo usa FOR UPDATE SKIP
+  //    LOCKED y un lease de 2 min. Ver nexaCarteraEvents.ts.
+  if (activa('eventos_nexa')) schedule.scheduleJob({ rule: '* * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'deliver_nexa_events',
+      async () => {
+        await enviarEventosNexaPendientes({
+          sql: client,
+          config: {
+            nexaServerUrl: process.env.NEXA_SERVER_URL,
+            secret: process.env.NEXA_CARTERA_EVENTS_SECRET,
+          },
+        });
+      },
+    );
+  });
+
+  // 🧾 Recibos por WhatsApp de pagos de Nexa que no salieron - cada 15 minutos.
+  //    Retoma los PENDIENTE/ENVIANDO/FALLIDO atascados (hasta 5 intentos) de la
+  //    bandeja de salida de nexa_payment_events. Con
+  //    RECIBO_PAGO_WHATSAPP_ENABLED apagado no hace nada. Ver nexaReciboPago.ts.
+  if (activa('recibos_nexa')) schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    if (!config.reciboPagoWhatsappEnabled) return;
+    await runScheduledJob(
+      'retry_nexa_receipts',
+      async () => {
+        await reintentarRecibosNexaPendientes();
+      },
+    );
+  });
+
+  // 💳 Cuentas Nexa pendientes - cada 15 minutos.
+  //    Reintenta las cuentas que nexa-server no pudo crear al cerrar el
+  //    crédito y le avisa al cliente las que no llegaron en la bienvenida.
+  //    Con NEXA_CUENTA_AUTOMATICA_ENABLED apagado no hace nada (los recibos
+  //    de Nexa los barre retry_nexa_receipts). Ver nexaCuentaReintentos.ts.
+  if (activa('cuentas_nexa')) schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'retry_nexa_accounts',
+      async () => {
+        await reintentarCuentasNexaPendientes();
       },
     );
   });

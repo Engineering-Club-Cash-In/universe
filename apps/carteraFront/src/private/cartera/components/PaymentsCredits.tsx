@@ -51,6 +51,18 @@ import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
 import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
 import { PaymentStatusBadges } from "./PaymentStatusBadges";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { textoAdvertenciaEditarPagoNexa } from "./advertenciaEditarPagoNexa";
+import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -213,6 +225,10 @@ function EditPaymentModal({
     setFormValues((prev) => ({ ...prev, [key]: value }));
   };
 
+  const pendingPayload = React.useRef<Record<string, string>>({});
+  const [confirmarNexa, setConfirmarNexa] = React.useState(false);
+  const textoNexa = textoAdvertenciaEditarPagoNexa(pago);
+
   const handleSave = () => {
     // Mandar todos los campos que tengan valor (el backend acepta parcial)
     const payload: Record<string, string> = {};
@@ -228,6 +244,15 @@ function EditPaymentModal({
       return;
     }
 
+    if (textoNexa) {
+      pendingPayload.current = payload;
+      setConfirmarNexa(true);
+      return;
+    }
+    guardar(payload);
+  };
+
+  const guardar = (payload: Record<string, string>) => {
     editPayment.mutate(
       { pagoId: pago.pago_id, params: payload },
       {
@@ -307,12 +332,31 @@ function EditPaymentModal({
           </Button>
         </div>
       </DialogContent>
+      <AlertDialog open={confirmarNexa} onOpenChange={(o) => !o && setConfirmarNexa(false)}>
+        <AlertDialogContent className="bg-white text-slate-900">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-900">Pago de Nexa</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600">{textoNexa}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmarNexa(false);
+                guardar(pendingPayload.current);
+              }}
+            >
+              Sí, guardar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  pago_id: "ID Pago", numero_cuota: "# Cuota", pagado: "Estado",
+  pago_id: "ID Pago", canal: "Canal", numero_cuota: "# Cuota", pagado: "Estado",
   cuota_pagada: "Cuota pagada",
   liquidacion_inversionistas: "Liquidación", validationStatus: "Estado Validación",
   monto_boleta: "Monto Boleta", monto_aplicado: "Monto Aplicado", cuota: "Cuota",
@@ -327,7 +371,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 const DETAIL_SECTIONS = [
   { title: "Información General", icon: <Info className="w-4 h-4" />, color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200",
-    fields: ["pago_id", "numero_cuota", "pagado", "cuota_pagada", "liquidacion_inversionistas", "validationStatus"] },
+    fields: ["pago_id", "canal", "numero_cuota", "pagado", "cuota_pagada", "liquidacion_inversionistas", "validationStatus"] },
   { title: "Montos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-green-700", bg: "bg-green-50", border: "border-green-200",
     fields: ["monto_boleta", "monto_aplicado", "cuota"] },
   { title: "Fechas", icon: <CalendarDays className="w-4 h-4" />, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200",
@@ -344,6 +388,7 @@ const DETAIL_SECTIONS = [
 
 function formatFieldValue(key: string, value: any): string {
   if (value === null || value === undefined) return "--";
+  if (key === "canal") return value === "NEXA" ? "Nexa" : "Manual";
   if (key === "pagado" || key === "liquidacion_inversionistas" || key === "cuota_pagada")
     return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
   if (typeof value === "boolean") return value ? "Sí" : "No";
@@ -878,14 +923,16 @@ const handleDownloadExcel = async () => {
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-50 text-yellow-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleReverse(item.pago.pago_id, item.pago.credito_id, true); }}
-                        disabled={item.pago.paymentFalse === true}>
+                        title={motivoNoAnularPago(item.pago)}
+                        disabled={item.pago.paymentFalse === true || !puedeAnularPago(item.pago)}>
                         {reversePago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Pago
                       </button>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-orange-50 text-orange-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleRevertToPending(item.pago.pago_id, item.pago.credito_id); }}
-                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending}>
+                        title={motivoNoAnularPago(item.pago)}
+                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending || !puedeAnularPago(item.pago)}>
                         {revertPaymentToPending.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Especial
                       </button>
                     </DropdownMenuItem>

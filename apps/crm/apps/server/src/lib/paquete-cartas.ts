@@ -40,6 +40,16 @@ export const CARTAS_UNIFICABLES = [
 	"solicitud_compra_vehiculo_tercero",
 	"cobertura_inrexsa",
 	"cobertura_inrexsa_comercial",
+	"cobertura_gyt",
+	// Las mismas cartas cuando la venta es a nombre de una sociedad.
+	"carta_emision_cheques_sociedad",
+	"carta_carro_nuevo_sociedad",
+	"carta_aceptacion_instalacion_gps_sociedad",
+	"carta_traspaso_vehiculo_rdbe_sociedad",
+	"solicitud_compra_vehiculo_tercero_sociedad",
+	"cobertura_inrexsa_sociedad",
+	"cobertura_inrexsa_comercial_sociedad",
+	"cobertura_gyt_sociedad",
 ] as const;
 
 export function esCartaUnificable(contractType: string): boolean {

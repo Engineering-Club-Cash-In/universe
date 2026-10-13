@@ -122,7 +122,48 @@ test("el manifiesto de producción declara toda variable que lee el provisionami
 	}
 });
 
+test("el manifiesto de producción declara lo que necesita el envío del estado de cuenta", () => {
+	const declaradas = new Map(
+		manifiestoProduccion.required.map((e) => [e.key, e.runtime]),
+	);
+	// Sin la base pública del enlace, cada envío por WhatsApp responde 503: el
+	// deploy tiene que fallar antes. La vigencia NO va: tiene default (3 días).
+	// También toda variable que lee el cliente hacia el CRM (URL y secreto).
+	const requeridas = [
+		"ESTADO_CUENTA_ENLACE_BASE_URL",
+		...leidasPorElServicio("../src/services/crmEstadoCuenta.service.ts"),
+	];
+	for (const clave of requeridas) {
+		assert.ok(
+			declaradas.has(clave),
+			`${clave} la necesita el envío del estado de cuenta pero no está en required-env.production.json: el deploy pasaría en verde sin ella`,
+		);
+		assert.equal(declaradas.get(clave), true, `${clave} tiene que ser runtime`);
+	}
+});
+
 test("el manifiesto de producción no repite claves", () => {
 	const claves = manifiestoProduccion.required.map((e) => e.key);
 	assert.equal(new Set(claves).size, claves.length);
+});
+
+test("el manifiesto de producción declara toda variable que lee el canal cartera -> nexa-server", () => {
+	const declaradas = new Map(
+		manifiestoProduccion.required.map((e) => [e.key, e.runtime]),
+	);
+	const fuentes = ["../schedule.ts", "../src/controllers/nexaCarteraEvents.ts"];
+	const leidas = new Set(fuentes.flatMap(leidasPorElServicio));
+
+	// Piso explícito: si alguien reescribe schedule.ts y la regex deja de ver
+	// estas dos, la prueba no puede pasar en vacío.
+	for (const clave of ["NEXA_SERVER_URL", "NEXA_CARTERA_EVENTS_SECRET"]) {
+		assert.ok(leidas.has(clave), `${clave} dejó de leerse en el canal: revisar esta prueba`);
+	}
+	for (const clave of leidas) {
+		assert.ok(
+			declaradas.has(clave),
+			`${clave} se lee en el canal a nexa-server pero no está en required-env.production.json: sin ella los eventos de cancelación no salen y el deploy pasaría en verde`,
+		);
+		assert.equal(declaradas.get(clave), true, `${clave} tiene que ser runtime`);
+	}
 });

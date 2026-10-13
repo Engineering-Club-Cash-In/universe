@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -7,6 +7,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { marcarCreditoCaido } from "../services/services";
 import { AlertCircle, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { useConsultarPagosNexa } from "../hooks/useNexaDashboard";
+import { resolverPreflightCaido } from "../lib/guardaCaidoNexa";
+import type { PagosNexaCredito } from "../services/nexaDashboard.services";
+import { AdvertenciaPagosNexaDialog } from "./AdvertenciaPagosNexaDialog";
 
 export function ModalCaidoCredit({
   open,
@@ -22,6 +26,12 @@ export function ModalCaidoCredit({
   const [motivo, setMotivo] = useState("");
   const [observaciones, setObservaciones] = useState("");
   const queryClient = useQueryClient();
+  const consultarPagosNexa = useConsultarPagosNexa();
+  const [verificando, setVerificando] = useState(false);
+  // Cuenta los intentos de marcar; cerrar el modal lo invalida y el resultado tardío se descarta.
+  const intentoRef = useRef(0);
+  // undefined = sin advertencia abierta; null = la consulta falló (advertencia genérica).
+  const [advertencia, setAdvertencia] = useState<PagosNexaCredito | null | undefined>(undefined);
 
   const mutation = useMutation({
     mutationFn: marcarCreditoCaido,
@@ -40,19 +50,38 @@ export function ModalCaidoCredit({
     },
   });
 
-  const handleSubmit = () => {
-    if (!motivo.trim()) {
-      toast.error("Debes escribir el motivo para marcar como caído.");
-      return;
-    }
+  const marcar = () =>
     mutation.mutate({
       credito_id: creditId,
       motivo,
       observaciones: observaciones.trim() || undefined,
     });
+
+  const handleSubmit = async () => {
+    if (!motivo.trim()) {
+      toast.error("Debes escribir el motivo para marcar como caído.");
+      return;
+    }
+    if (verificando) return;
+    // Marcar caído borra todos los pagos del crédito, también los que entraron por Nexa.
+    const intento = ++intentoRef.current;
+    setVerificando(true);
+    const pagosNexa = await consultarPagosNexa(creditId);
+    // Si el operador cerró mientras la consulta corría, no se marca ni se advierte.
+    const resultado = resolverPreflightCaido(pagosNexa, () => intento === intentoRef.current);
+    if (resultado === "cancelado") return;
+    setVerificando(false);
+    if (resultado === "advertir") {
+      setAdvertencia(pagosNexa);
+      return;
+    }
+    marcar();
   };
 
   const handleClose = () => {
+    intentoRef.current++;
+    setVerificando(false);
+    setAdvertencia(undefined);
     setMotivo("");
     setObservaciones("");
     onClose();
@@ -104,12 +133,22 @@ export function ModalCaidoCredit({
           <Button
             className="bg-gray-600 hover:bg-gray-700 text-white font-bold shadow-lg"
             onClick={handleSubmit}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || verificando}
           >
-            {mutation.isPending ? "Guardando..." : "Marcar como Caído"}
+            {mutation.isPending || verificando ? "Guardando..." : "Marcar como Caído"}
           </Button>
         </div>
       </DialogContent>
+      <AdvertenciaPagosNexaDialog
+        open={advertencia !== undefined}
+        pagos={advertencia ?? null}
+        accion="borrar"
+        onCancel={() => setAdvertencia(undefined)}
+        onConfirm={() => {
+          setAdvertencia(undefined);
+          marcar();
+        }}
+      />
     </Dialog>
   );
 }

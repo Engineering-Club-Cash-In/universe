@@ -19,6 +19,7 @@ describe("admin router", () => {
         upsert: async (input: unknown) => input,
       } as never,
       pollRuns: {} as never,
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
       accumulatorAccount: 10300102824,
       paymentTokenName: "Club Cashin GTQ UAT",
     });
@@ -54,11 +55,14 @@ describe("admin router", () => {
       } as never,
       tokenUsers: {
         nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
         createTokenUser: async () => ({ id: 1 }),
         findByToken: async () => null,
+        findByCreditoId: async () => null,
       } as never,
       transactions: {} as never,
       pollRuns: {} as never,
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
       accumulatorAccount: 10300102824,
       paymentTokenName: "Club Cashin GTQ UAT",
     });
@@ -74,5 +78,98 @@ describe("admin router", () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: "Nexa rejected token user 100000002: CUI no es válido." });
+  });
+
+  test.each([
+    ["CREATED", async () => ({ status: "CREATED" }), "CREATED", true],
+    ["REJECTED", async () => ({ status: "REJECTED", reason: "token_conflict" }), "REJECTED:token_conflict", true],
+    // Crédito ya cancelado: el token user local no puede quedar activo.
+    ["credit_cancelled", async () => ({ status: "REJECTED", reason: "credit_cancelled" }), "REJECTED:credit_cancelled", false],
+    ["falla de red", async () => { throw new Error("cartera caído"); }, "PENDING", true],
+  ])("al crear un token lo registra en cartera (%s)", async (_name, registerNexaToken, expected, activeAfter) => {
+    const calls: unknown[] = [];
+    // Token users locales por crédito: createTokenUser los crea activos.
+    const active = new Map<number, boolean>();
+    const router = createAdminRouter({
+      adminApiKey: "dev-secret",
+      nexa: { createTokenUsers: async () => ({ users: [{ id: 9, token: "32200100000002" }], errorUsers: [] }) } as never,
+      cartera: { registerNexaToken: async (input: unknown) => (calls.push(input), registerNexaToken()) } as never,
+      paymentTokens: { findActive: async () => ({ id: 1, nexaTokenId: 455, prefix: "32200" }) } as never,
+      tokenUsers: {
+        nextIdentifierSequence: async () => 100_000_002,
+        reserveIdentifier: async (_creditoId: number, next: () => Promise<string>) => ({ identifier: await next() }),
+        createTokenUser: async (user: { creditoId: number }) => (active.set(user.creditoId, true), { id: 1 }),
+        findByCreditoId: async () => null,
+      } as never,
+      transactions: {} as never,
+      pollRuns: {} as never,
+      cancelledTokenUsers: {
+        deactivateByCreditoId: async (creditoId: number) => (active.set(creditoId, false), 1),
+      },
+      accumulatorAccount: 10300102824,
+      paymentTokenName: "Club Cashin GTQ UAT",
+    });
+
+    const response = await router.request("/token-users", {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({ creditoId: 123, description: "Credito 123", nationalId: "1234567890123" }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(((await response.json()) as { carteraRegistration: string }).carteraRegistration).toBe(expected);
+    expect(calls).toEqual([{ creditoId: 123, token: "32200100000002", identifier: "100000002", nexaUserId: 9 }]);
+    expect(active.get(123)).toBe(activeAfter);
+  });
+
+  test("returns the existing token user for a credit without calling Nexa again", async () => {
+    let nexaCalls = 0;
+    const existing = {
+      id: 7,
+      paymentTokenId: 1,
+      creditoId: 123,
+      identifier: "100000002",
+      description: "Credito 123",
+      nationalId: "1234567890123",
+      nexaUserId: 99,
+      token: "32200100000002",
+    };
+    const router = createAdminRouter({
+      adminApiKey: "dev-secret",
+      nexa: {
+        createTokenUsers: async () => {
+          nexaCalls += 1;
+          return { users: [], errorUsers: [] };
+        },
+      } as never,
+      cartera: {} as never,
+      paymentTokens: { findActive: async () => ({ id: 1, nexaTokenId: 455, prefix: "32200" }) } as never,
+      tokenUsers: {
+        findByCreditoId: async (creditoId: number) => (creditoId === 123 ? existing : null),
+      } as never,
+      transactions: {} as never,
+      pollRuns: {} as never,
+      cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
+      accumulatorAccount: 10300102824,
+      paymentTokenName: "Club Cashin GTQ UAT",
+    });
+
+    const response = await router.request("/token-users", {
+      method: "POST",
+      headers: { Authorization: "Bearer dev-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({ creditoId: 123, description: "Credito 123", nationalId: "1234567890123" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      paymentTokenId: 1,
+      creditoId: 123,
+      identifier: "100000002",
+      description: "Credito 123",
+      nationalId: "1234567890123",
+      nexaUserId: 99,
+      token: "32200100000002",
+    });
+    expect(nexaCalls).toBe(0);
   });
 });

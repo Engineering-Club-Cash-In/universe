@@ -274,6 +274,48 @@
 			"when": 1790799299432,
 			"tag": "0045_add_sat_verificacion_vehiculos",
 			"breakpoints": true
+		},
+		{
+			"idx": 38,
+			"version": "7",
+			"when": 1791229780674,
+			"tag": "0046_add_acceso_portal_activity_action",
+			"breakpoints": true
+		},
+		{
+			"idx": 39,
+			"version": "7",
+			"when": 1791305850608,
+			"tag": "0047_add_cofirmante_opportunity_validations",
+			"breakpoints": true
+		},
+		{
+			"idx": 40,
+			"version": "7",
+			"when": 1791319188749,
+			"tag": "0047_recibos_pago_whatsapp",
+			"breakpoints": true
+		},
+		{
+			"idx": 41,
+			"version": "7",
+			"when": 1791319254474,
+			"tag": "0048_bienvenidas_credito",
+			"breakpoints": true
+		},
+		{
+			"idx": 42,
+			"version": "7",
+			"when": 1791475200000,
+			"tag": "0049_add_buro_revalidacion_al_30",
+			"breakpoints": true
+		},
+		{
+			"idx": 43,
+			"version": "7",
+			"when": 1791561600000,
+			"tag": "0050_co_debtors_representante_legal",
+			"breakpoints": true
 		}
 	]
 }

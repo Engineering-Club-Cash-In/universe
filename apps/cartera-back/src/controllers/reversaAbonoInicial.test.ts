@@ -34,6 +34,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
   test("reversePayment responde 409 con el motivo, no el 500 genérico", async () => {
     const handler = createReversePayment({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async () => {
         throw rechazoReversaAbonoInicial(convenioDelAbono);
       },
@@ -51,6 +52,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
   test("revertPaymentToPending responde 409 con success false y el motivo", async () => {
     const handler = createRevertPaymentToPending({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async () => {
         throw rechazoReversaAbonoInicial(convenioDelAbono);
       },
@@ -72,6 +74,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     const lines: string[] = [];
     const handler = createReversePayment({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async () => {
         throw rechazoReversaAbonoInicial(convenioDelAbono);
       },
@@ -92,6 +95,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     const emitidos: any[] = [];
     const handler = createRevertPaymentToPending({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async () => {
         throw rechazoReversaAbonoInicial(convenioDelAbono);
       },
@@ -123,6 +127,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     };
     const handler = createReversePayment({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
     } as unknown as Parameters<typeof createReversePayment>[0]);
     const set = { status: 0 };
@@ -153,6 +158,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
     };
     const handler = createRevertPaymentToPending({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
       emitTerminal: () => {},
     } as unknown as Parameters<typeof createRevertPaymentToPending>[0]);
@@ -167,6 +173,7 @@ describe("reversa bloqueada por el abono inicial de un convenio", () => {
   test("un error sin tipo, aunque lleve el prefijo, sigue siendo 500: se decide por tipo", async () => {
     const handler = createRevertPaymentToPending({
       withCreditLock: async (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+      rechazarSiPagoEsNexa: async () => {},
       runTransaction: async () => {
         throw new Error(rechazoReversaAbonoInicial(convenioDelAbono).message);
       },

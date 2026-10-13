@@ -35,7 +35,8 @@ const makeSelectChain = () => {
   const chain: any = {
     from: (tabla?: unknown) => chain,
     innerJoin: () => chain,
-    where: () => Promise.resolve(result),
+    // `.for()`: el candado del crédito al abrir la transacción.
+    where: () => Object.assign(Promise.resolve(result), { for: () => Promise.resolve(result) }),
   };
   return chain;
 };
@@ -73,7 +74,7 @@ const fakeDb: any = {
   }),
 };
 
-mock.module("../database", () => ({ db: {}, client: {} }));
+mock.module("../database", () => ({ db: {}, client: {}, lockPool: {} }));
 
 const { desactivarMoraSiCreditoAlDia } = await import("./latefee");
 const { moras_credito, creditos, moras_historial } = await import(

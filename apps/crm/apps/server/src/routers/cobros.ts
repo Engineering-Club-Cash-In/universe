@@ -101,6 +101,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -108,6 +109,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararCuentaNexaParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
@@ -302,6 +304,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	buckets?: number[];
 	/** COBROS-02: orden de la cobranza; ver GetAllCreditsParams.orden. */
 	orden?: "bucket_motor";
+	solo_con_cuenta_nexa?: boolean;
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -358,6 +361,9 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		...(params.buckets &&
 			params.buckets.length > 0 && { buckets: params.buckets }),
 		...(params.orden && { orden: params.orden }),
+		...(params.solo_con_cuenta_nexa && {
+			solo_con_cuenta_nexa: true,
+		}),
 	});
 
 	return {
@@ -2460,6 +2466,7 @@ export const cobrosRouter = {
 				// COBROS-02: chip de bucket = bucket ASIGNADO por el motor (0-5), no
 				// cuotas atrasadas. Con él se ignora `estadoMora`.
 				buckets: z.array(z.number().int().min(0).max(5)).max(6).optional(),
+				soloConCuentaNexa: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2792,6 +2799,7 @@ export const cobrosRouter = {
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
 									excluir_pagados_mes: input.excluirPagadosMes,
+									solo_con_cuenta_nexa: input.soloConCuentaNexa,
 								});
 							}
 						} else {
@@ -2842,6 +2850,7 @@ export const cobrosRouter = {
 									capital_min: input.capitalMin,
 									capital_max: input.capitalMax,
 									excluir_pagados_mes: input.excluirPagadosMes,
+									solo_con_cuenta_nexa: input.soloConCuentaNexa,
 								});
 
 								const allCredits = [...firstPage.data];
@@ -2866,6 +2875,7 @@ export const cobrosRouter = {
 										capital_min: input.capitalMin,
 										capital_max: input.capitalMax,
 										excluir_pagados_mes: input.excluirPagadosMes,
+										solo_con_cuenta_nexa: input.soloConCuentaNexa,
 									});
 									allCredits.push(...nextPage.data);
 								}
@@ -2915,6 +2925,7 @@ export const cobrosRouter = {
 								capital_min: input.capitalMin,
 								capital_max: input.capitalMax,
 								excluir_pagados_mes: input.excluirPagadosMes,
+								solo_con_cuenta_nexa: input.soloConCuentaNexa,
 							});
 						}
 					} else {
@@ -2939,6 +2950,7 @@ export const cobrosRouter = {
 							capital_min: input.capitalMin,
 							capital_max: input.capitalMax,
 							excluir_pagados_mes: input.excluirPagadosMes,
+							solo_con_cuenta_nexa: input.soloConCuentaNexa,
 						});
 					}
 
@@ -6218,6 +6230,9 @@ export const cobrosRouter = {
 						montoEnMora,
 						statusCredit,
 					),
+					// Código de pago Nexa del crédito para "Nueva cuenta exclusiva
+					// Nexa"; "" si el crédito no tiene cuenta (la plantilla no aplica).
+					cuentaNexa: creditoCompleto.cuentaNexa ?? "",
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad (Universales o G&T).
 					...seguroPorAseguradora(insuranceProvider),
@@ -8177,6 +8192,7 @@ export const cobrosRouter = {
 				cola: z.enum(COLAS_CARTERA_FILTRO).optional(),
 				alertaPromesa: z.enum(ALERTAS_PROMESA_FILTRO).optional(),
 				alertaConvenio: z.enum(ALERTAS_CONVENIO_FILTRO).optional(),
+				soloConCuentaNexa: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -8209,6 +8225,18 @@ export const cobrosRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `La fecha límite del impuesto de circulación (${fechaLimiteImpuestoCirculacion()}) ya venció; edite el mensaje o contacte a los clientes directamente.`,
+				});
+			}
+
+			// Las plantillas con imagen tienen un número fijo de variables y
+			// WhatsApp rechaza las vacías: el mensaje editado no puede quedarse con
+			// menos párrafos que variables.
+			if (
+				plantilla.adjunto &&
+				!cuerpoCubreAdjunto(cuerpoBase, plantilla.adjunto)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Esta plantilla lleva imagen y necesita al menos ${plantilla.adjunto.parametros} párrafos separados por una línea en blanco; el mensaje editado tiene menos.`,
 				});
 			}
 
@@ -8467,6 +8495,7 @@ export const cobrosRouter = {
 						fecha_desde: input.fechaDesde,
 						fecha_hasta: input.fechaHasta,
 						excluir_pagados_mes: input.excluirPagadosMes,
+						solo_con_cuenta_nexa: input.soloConCuentaNexa,
 						page,
 						perPage,
 					});
@@ -8600,6 +8629,7 @@ export const cobrosRouter = {
 					cuotasAtraso: number;
 					incrementoDiarioMora: string;
 					incrementoMaximoMensualMora: string;
+					cuentaNexa: string;
 				} | null
 			>();
 			// Las tres variables salen del MISMO detalle de cartera-back, así que
@@ -8611,7 +8641,8 @@ export const cobrosRouter = {
 			if (
 				cuerpoBase.includes("{montoAdeudado}") ||
 				cuerpoBase.includes("{incrementoDiarioMora}") ||
-				cuerpoBase.includes("{incrementoMaximoMensualMora}")
+				cuerpoBase.includes("{incrementoMaximoMensualMora}") ||
+				cuerpoBase.includes("{cuentaNexa}")
 			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
@@ -8648,6 +8679,8 @@ export const cobrosRouter = {
 										incrementoMaximoMensualMora: formatearIncrementoMora(
 											detalle.incrementoMaximoMensualMora,
 										),
+										// Código de pago Nexa del crédito; "" si no tiene cuenta.
+										cuentaNexa: detalle.cuentaNexa ?? "",
 									});
 								} catch (err) {
 									console.error(
@@ -8753,6 +8786,22 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// {cuentaNexa} ("Nueva cuenta exclusiva Nexa") solo se manda a
+				// créditos que ya tienen cuenta Nexa; sin ella se descarta antes que
+				// mandar "Banco Nexa / Cuenta Monetaria /" con el número en blanco.
+				const cuentaNexa = prepararCuentaNexaParaEnvio(
+					cuerpoBase,
+					detalleCartera?.cuentaNexa,
+				);
+				if (!cuentaNexa.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: cuentaNexa.motivo,
+					});
+					continue;
+				}
+
 				// La cláusula incorporada del aumento desaparece sola al interpolar
 				// cuando no hay nada que anunciar, pero el modal ofrece
 				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
@@ -8824,10 +8873,25 @@ export const cobrosRouter = {
 					// Su techo, del mismo detalle. Vacío = la frase se queda solo
 					// con el ritmo, corta pero sana.
 					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
+					cuentaNexa: cuentaNexa.cuentaNexa,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),
 				});
+
+				// Un párrafo que era solo una variable vacía para este crédito (p. ej.
+				// {placa}) desaparece al interpolar y desplaza el resto: la plantilla
+				// con imagen se quedaría con una variable vacía y el proveedor la
+				// rechaza. Se revalida con el mensaje ya interpolado.
+				if (plantilla.adjunto && !cuerpoCubreAdjunto(mensaje, plantilla.adjunto)) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo:
+							"el mensaje queda con menos párrafos que variables de la plantilla con imagen (un dato vacío dejó un párrafo en blanco)",
+					});
+					continue;
+				}
 
 				candidatos.push({
 					numeroSifco: sifco ?? "",
@@ -8895,6 +8959,18 @@ export const cobrosRouter = {
 						externalRef: c.numeroSifco,
 					})),
 					logPrefix: "[SimpleTech][cobros-masivo]",
+					...(plantilla.adjunto
+						? {
+								adjunto: {
+									templateName: plantilla.adjunto.templateName,
+									parametros: plantilla.adjunto.parametros,
+									header: {
+										type: "image" as const,
+										url: plantilla.adjunto.imagenUrl,
+									},
+								},
+							}
+						: {}),
 				});
 
 				const byRef = new Map(

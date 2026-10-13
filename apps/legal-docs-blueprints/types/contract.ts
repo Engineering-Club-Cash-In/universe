@@ -10,6 +10,8 @@ export enum ContractType {
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
   COBERTURA_INREXSA_COMERCIAL = 'cobertura_inrexsa_comercial',
+  /** La cobertura de Seguros G&T, para las ventas aseguradas con G&T. */
+  COBERTURA_GYT = 'cobertura_gyt',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
   DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
@@ -18,6 +20,25 @@ export enum ContractType {
   CONTRATO_PRIVADO_USO = 'contrato_privado_uso_carro_nuevo',
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
   CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
+
+  // ===== VENTAS A NOMBRE DE UNA SOCIEDAD =====
+  // Firma el representante legal "en forma personal y en su calidad de" cargo
+  // de la sociedad. Hombre o mujer según el representante, y sin codeudores:
+  // las plantillas no tienen lugar para más firmantes.
+  SOLICITUD_COMPRA_VEHICULO_SOCIEDAD = 'solicitud_compra_vehiculo_tercero_sociedad',
+  CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD = 'carta_aceptacion_instalacion_gps_sociedad',
+  CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD = 'carta_traspaso_vehiculo_rdbe_sociedad',
+  CARTA_CARRO_NUEVO_SOCIEDAD = 'carta_carro_nuevo_sociedad',
+  CARTA_EMISION_CHEQUES_SOCIEDAD = 'carta_emision_cheques_sociedad',
+  DESCARGO_RESPONSABILIDADES_SOCIEDAD = 'descargo_responsabilidades_sociedad',
+  COBERTURA_INREXSA_SOCIEDAD = 'cobertura_inrexsa_sociedad',
+  COBERTURA_INREXSA_COMERCIAL_SOCIEDAD = 'cobertura_inrexsa_comercial_sociedad',
+  COBERTURA_GYT_SOCIEDAD = 'cobertura_gyt_sociedad',
+  PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD = 'pagare_unico_libre_protesto_sociedad',
+  RECONOCIMIENTO_DEUDA_SOCIEDAD = 'reconocimiento_deuda_sociedad',
+  GARANTIA_MOBILIARIA_SOCIEDAD = 'garantia_mobiliaria_sociedad',
+  /** Uno solo para carro nuevo y usado: dice que el vehículo "podrá ser nuevo (de agencia) o usado". */
+  CONTRATO_PRIVADO_USO_SOCIEDAD = 'contrato_privado_uso_sociedad',
 
   /**
    * Las cartas de una venta unidas en un solo documento, con un solo enlace
@@ -38,6 +59,10 @@ export enum ContractType {
   DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
   CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA = 'contrato_participacion_administracion_cartera',
   ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO = 'anexos_confirmacion_participacion_beneficiario',
+  // Los anexos 1 y 2 por separado, como los pide jurídico ahora. El unificado
+  // queda registrado para reemitir y vincular los que ya se generaron con él.
+  ANEXO1_CONFIRMACION_PARTICIPACION = 'anexo1_confirmacion_participacion',
+  ANEXO2_DESIGNACION_BENEFICIARIO = 'anexo2_designacion_beneficiario',
 
   // ===== INVERSIONES SOCIEDAD =====
   ACUERDO_INVERSION_CASH_IN_SOCIEDAD = 'acuerdo_inversion_cash_in_sociedad',
@@ -49,6 +74,9 @@ export enum ContractType {
   CESION_CREDITOS_SOCIEDAD = 'cesion_creditos_sociedad',
   CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD = 'contrato_servicios_cash_in_inversor_general_sociedad',
   DESIGNACION_BENEFICIARIO_SOCIEDAD = 'designacion_beneficiario_sociedad',
+  CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD = 'contrato_participacion_administracion_cartera_sociedad',
+  ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD = 'anexo1_confirmacion_participacion_sociedad',
+  ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD = 'anexo2_designacion_beneficiario_sociedad',
 
   // ===== CARTA PODER =====
   CARTA_CUBE_ANDRES = 'carta_cube_andres',
@@ -80,6 +108,8 @@ export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
   ContractType.DESIGNACION_BENEFICIARIO,
   ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
   ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+  ContractType.ANEXO1_CONFIRMACION_PARTICIPACION,
+  ContractType.ANEXO2_DESIGNACION_BENEFICIARIO,
   ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
   ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
   ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
@@ -89,6 +119,9 @@ export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
   ContractType.CESION_CREDITOS_SOCIEDAD,
   ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
   ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+  ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD,
+  ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD,
+  ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD,
 ]);
 
 /**
@@ -529,6 +562,21 @@ export interface CoberturaInrexsaComercialData extends BaseContractData {
   full_date: string;
 }
 
+// ===== COBERTURA SEGUROS G&T =====
+/**
+ * Carta de cobertura de Seguros G&T. Los mismos campos que las de Universales,
+ * en una sola sección (las de Universales la traen dos veces).
+ */
+export interface CoberturaGytData extends BaseContractData {
+  contractType: ContractType.COBERTURA_GYT;
+
+  /** Nombre completo del deudor/solicitante */
+  debtor_name: string;
+
+  /** Fecha completa del documento (ej: "Guatemala 28 de octubre de dos mil veinticinco") */
+  full_date: string;
+}
+
 // ===== PAGARÉ ÚNICO LIBRE DE PROTESTO =====
 /**
  * Datos para generar pagaré único libre de protesto
@@ -757,7 +805,7 @@ export interface CartaCarroNuevoData extends BaseContractData {
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | CoberturaInrexsaComercialData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | CoberturaInrexsaComercialData | CoberturaGytData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData | CartaCarroNuevoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

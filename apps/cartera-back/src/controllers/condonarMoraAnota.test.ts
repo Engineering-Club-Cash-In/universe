@@ -226,4 +226,16 @@ describe("anotacionesDeCondonacion", () => {
     recorrer(src);
     expect(culpables).toEqual([]);
   });
+
+  test("k) condonarMora individual solo baja a ACTIVO un crédito MOROSO (un CANCELADO no cambia de estado)", async () => {
+    const { readFileSync } = await import("fs");
+    const contenido = readFileSync(new URL("./latefee.ts", import.meta.url), "utf-8");
+    const cuerpo = contenido.match(/export async function condonarMora\([^)]*\)[^{]*\{[\s\S]*?^export async function/m)?.[0] ?? "";
+    const idx = cuerpo.indexOf('.set({ statusCredit: "ACTIVO" })');
+    expect(idx).toBeGreaterThan(-1);
+    const update = cuerpo.slice(idx, cuerpo.indexOf(";", idx));
+    expect(update).toContain('eq(creditos.statusCredit, "MOROSO")');
+    // Y la mora se condona igual: el UPDATE de la mora no depende del estado.
+    expect(cuerpo.indexOf(".update(moras_credito)")).toBeLessThan(idx);
+  });
 });

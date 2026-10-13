@@ -85,7 +85,10 @@ import {
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
 } from "@/lib/reports/monto-a-cobrar";
-import { buildAdminReportsWorkbook } from "@/lib/reports/report-workbook";
+import {
+	buildAdminReportsWorkbook,
+	writeAdminReportsWorkbook,
+} from "@/lib/reports/report-workbook";
 import type {
 	ComparativoHistoricoRow,
 	FacturacionMesResponse,
@@ -359,6 +362,7 @@ function RouteComponent() {
 	}));
 	const [closedCreditsPage, setClosedCreditsPage] = useState(1);
 	const [isExportingCerrados, setIsExportingCerrados] = useState(false);
+	const [isExportingAdminReports, setIsExportingAdminReports] = useState(false);
 	const [montoCobrarPeriodo, setMontoCobrarPeriodo] = useState<
 		"anio" | "trimestre" | "mes" | "semana" | "dia"
 	>("mes");
@@ -455,11 +459,18 @@ function RouteComponent() {
 	const canAccessCobranzaReport = userRole
 		? PERMISSIONS.canAccessCobranzaReport(userRole)
 		: false;
+	const canAccessInvestmentRealizedReport = userRole
+		? PERMISSIONS.canAccessInvestmentRealizedReport(userRole)
+		: false;
 	const canAccessReports =
-		isAdmin || canAccessClosedCreditsReport || canAccessCobranzaReport;
+		isAdmin ||
+		canAccessClosedCreditsReport ||
+		canAccessCobranzaReport ||
+		canAccessInvestmentRealizedReport;
 	const reportTabs = getReportTabs({
 		canAccessClosedCreditsReport,
 		canAccessCobranzaReport,
+		canAccessInvestmentRealizedReport,
 		isAdmin,
 	});
 
@@ -527,9 +538,19 @@ function RouteComponent() {
 		officialMoraRequired &&
 		(officialMoraQuery.isError ||
 			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
+	const officialMoraPending =
+		officialMoraRequired && officialMoraQuery.isPending;
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
+	const officialMoraEsperado =
+		montoCobrarPeriodo === "mes"
+			? officialMoraQuery.data?.moraMensual.esperado
+			: undefined;
+	// Sale del mismo valor que se aplica a las filas: si una recarga falla con el
+	// oficial ya en caché, el Excel lleva el oficial y no debe avisar lo contrario.
+	const officialMoraMissing =
+		officialMoraRequired && officialMoraEsperado === undefined;
 	const montoCobrarRows = applyOfficialMonthlyMora(
 		fillMissingMontoACobrarPeriods(
 			montoCobrarData?.data ?? [],
@@ -538,9 +559,7 @@ function RouteComponent() {
 			montoCobrarRange.fechaFin,
 		),
 		officialMoraOperationalMonth,
-		montoCobrarPeriodo === "mes"
-			? officialMoraQuery.data?.moraMensual.esperado
-			: undefined,
+		officialMoraEsperado,
 	);
 
 	const facturacionMesQuery = useQuery({
@@ -558,7 +577,8 @@ function RouteComponent() {
 		...orpc.getReinversionLiquidaciones.queryOptions({
 			input: { mes: flujoMesNum, anio: flujoAnioNum },
 		}),
-		enabled: isAdmin && investmentView === "realizado",
+		enabled:
+			canAccessInvestmentRealizedReport && investmentView === "realizado",
 	});
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
@@ -801,15 +821,29 @@ function RouteComponent() {
 			setIsExportingCerrados(false);
 		}
 	};
-	const exportAdminReportsExcel = () => {
-		if (!officialMoraReady) {
+	const exportAdminReportsExcel = async () => {
+		// Exportar espera el import de xlsx-js-style: sin esto, doble clic baja dos archivos.
+		if (isExportingAdminReports) return;
+		if (officialMoraPending) {
 			toast.error("Espera a que la mora oficial del mes termine de cargar.");
+			return;
+		}
+		// Sin esto, una query que ya falló se reportaba como "todavía cargando".
+		if (!montoCobrarData && montoCobrarQuery.isError) {
+			toast.error("No fue posible cargar Cobranza. Intenta de nuevo.");
+			void montoCobrarQuery.refetch();
+			return;
+		}
+		if (!reinversionData && reinversionLiquidacionesQuery.isError) {
+			toast.error("No fue posible cargar Inversión. Intenta de nuevo.");
+			void reinversionLiquidacionesQuery.refetch();
 			return;
 		}
 		if (!montoCobrarData || !reinversionData) {
 			toast.error("Espera a que Cobranza e Inversión terminen de cargar.");
 			return;
 		}
+		setIsExportingAdminReports(true);
 		try {
 			const workbook = buildAdminReportsWorkbook({
 				cobranza: {
@@ -821,16 +855,27 @@ function RouteComponent() {
 					cobranzaPeriodo: `${montoCobrarRange.fechaInicio} a ${montoCobrarRange.fechaFin}`,
 					inversionPeriodo: `${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`,
 					generatedAt: new Date().toISOString(),
+					...(officialMoraMissing && {
+						avisoMoraMes:
+							"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera.",
+					}),
 				},
 			});
-			XLSX.writeFile(
+			await writeAdminReportsWorkbook(
 				workbook,
 				`reportes-admin-${flujoAnioNum}-${String(flujoMesNum).padStart(2, "0")}.xlsx`,
 			);
+			if (officialMoraMissing) {
+				toast.warning(
+					"Se exportó sin la mora oficial del mes; la mora del mes actual es la calculada por cartera.",
+				);
+			}
 		} catch (error) {
 			toast.error(
 				error instanceof Error ? error.message : "No fue posible exportar.",
 			);
+		} finally {
+			setIsExportingAdminReports(false);
 		}
 	};
 
@@ -1022,7 +1067,10 @@ function RouteComponent() {
 					<p className="text-muted-foreground">
 						{isAdmin
 							? "Vista general del negocio y métricas clave"
-							: "Reportes disponibles para el área de cobros"}
+							: canAccessInvestmentRealizedReport &&
+									!canAccessCobranzaReport
+								? "Reporte de inversión realizado"
+								: "Reportes disponibles para el área de cobros"}
 					</p>
 				</div>
 			</div>
@@ -1039,9 +1087,11 @@ function RouteComponent() {
 							{canAccessCobranzaReport && (
 								<TabsTrigger value="cobranza">Cobranza</TabsTrigger>
 							)}
+							{canAccessInvestmentRealizedReport && (
+								<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
+							)}
 							{isAdmin && (
 								<>
-									<TabsTrigger value="inversiones">Inversiones</TabsTrigger>
 									<TabsTrigger value="colocacion">Colocación</TabsTrigger>
 									<TabsTrigger value="proyeccion-liquidaciones">
 										Proyección Liquidaciones
@@ -1321,9 +1371,13 @@ function RouteComponent() {
 											<Button
 												variant="outline"
 												onClick={exportAdminReportsExcel}
-												disabled={!officialMoraReady}
+												disabled={officialMoraPending || isExportingAdminReports}
 											>
-												<Download className="mr-2 h-4 w-4" />
+												{isExportingAdminReports ? (
+													<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+												) : (
+													<Download className="mr-2 h-4 w-4" />
+												)}
 												Exportar Excel
 											</Button>
 										)}
@@ -1389,8 +1443,7 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{(montoCobrarQuery.isPending ||
-										(officialMoraRequired && officialMoraQuery.isPending)) && (
+									{(montoCobrarQuery.isPending || officialMoraPending) && (
 										<p>Cargando...</p>
 									)}
 									{montoCobrarQuery.isError && (
@@ -1850,12 +1903,12 @@ function RouteComponent() {
 							</Card>
 						</TabsContent>
 						)}
-						{isAdmin && (
-							<>
+						{canAccessInvestmentRealizedReport && (
 						<TabsContent value="inversiones" className="space-y-6">
 							<Card>
 								<CardHeader>
 									<div className="flex flex-col gap-4">
+										{isAdmin && (
 										<Tabs
 											value={investmentView}
 											onValueChange={(value) => {
@@ -1869,6 +1922,7 @@ function RouteComponent() {
 												<TabsTrigger value="proyeccion">Proyección</TabsTrigger>
 											</TabsList>
 										</Tabs>
+										)}
 										<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 											<div>
 												<CardTitle>Inversión y reinversión</CardTitle>
@@ -1943,7 +1997,10 @@ function RouteComponent() {
 											isError={reinversionLiquidacionesQuery.isError}
 											periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
 											onRetry={() => reinversionLiquidacionesQuery.refetch()}
-											onExportInvestors={exportAdminReportsExcel}
+											onExportInvestors={
+												canAccessCobranzaReport ? exportAdminReportsExcel : undefined
+											}
+											isExporting={isExportingAdminReports}
 										/>
 									) : (
 										<InvestmentProjection
@@ -1958,6 +2015,9 @@ function RouteComponent() {
 								</CardContent>
 							</Card>
 						</TabsContent>
+						)}
+						{isAdmin && (
+							<>
 						{/* Modal: Metas Mensuales */}
 						<Dialog open={metasModalOpen} onOpenChange={setMetasModalOpen}>
 							<DialogContent className="sm:max-w-[860px]">

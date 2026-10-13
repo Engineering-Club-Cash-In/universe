@@ -35,7 +35,10 @@ export async function autenticarNotificacionesCarteraBack(
 			"[NotificacionesCarteraBack] CARTERA_BACK_API_KEY no está configurada; se rechaza la petición",
 		);
 		return c.json(
-			{ success: false, error: "El servicio no está disponible en este momento." },
+			{
+				success: false,
+				error: "El servicio no está disponible en este momento.",
+			},
 			503,
 		);
 	}

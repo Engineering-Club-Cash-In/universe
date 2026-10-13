@@ -69,7 +69,9 @@ import { useActualizarCuentaPago, useCuentasEmpresa } from "../hooks/account";
 import { useFacturarPagoCompleto } from "../hooks/cofidi";
 import { ModalFacturasPago } from "./modalFacts";
 import { ModalDesgloseFacturas } from "./ModalDesgloseFacturas";
+import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 import { DatePickerMUI } from "./calendar";
+import { cierreCincoPm, etiquetaCanal, paramsRangoFechaPago, type CanalPago } from "@/lib/pagosCanalHora";
 
 // --- utilidades ---
 const meses = [
@@ -112,6 +114,17 @@ const formatDate = (d?: string) => {
 
   return `${day}/${month}/${year} ${time}`;
 };
+
+// Etiqueta del canal (mismo estilo que PaymentStatusBadges); nada si fue manual.
+function EtiquetaCanalPago({ pago }: { pago: PagoDataInvestor }) {
+  const etiqueta = etiquetaCanal(pago);
+  if (!etiqueta) return null;
+  return (
+    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-bold ${etiqueta.className}`}>
+      {etiqueta.label}
+    </span>
+  );
+}
 
 // --- hook para detectar pantallas pequeñas ---
 function useIsMobile() {
@@ -272,6 +285,9 @@ export function PaymentsTable() {
   const [dia, setDia] = usePersistedState<number | undefined>("cartera/pagos/dia", new Date().getDate());
   const [fechaInicio, setFechaInicio] = usePersistedState<string>("cartera/pagos/fechaInicio", "");
   const [fechaFin, setFechaFin] = usePersistedState<string>("cartera/pagos/fechaFin", "");
+  // Horas del modo "Rango" (cierre de las 5 pm): con alguna, se filtra por hora de registro.
+  const [horaInicio, setHoraInicio] = usePersistedState<string>("cartera/pagos/horaInicio", "");
+  const [horaFin, setHoraFin] = usePersistedState<string>("cartera/pagos/horaFin", "");
   const [fechaAplicadoInicio, setFechaAplicadoInicio] = usePersistedState<string>("cartera/pagos/fechaAplicadoInicio", "");
   const [fechaAplicadoFin, setFechaAplicadoFin] = usePersistedState<string>("cartera/pagos/fechaAplicadoFin", "");
   const [fechaBoleta, setFechaBoleta] = usePersistedState<string>("cartera/pagos/fechaBoleta", "");
@@ -289,6 +305,7 @@ export function PaymentsTable() {
   const [soloAplicados, setSoloAplicados] = usePersistedState<boolean | undefined>("cartera/pagos/soloAplicados", undefined);
   const [validationStatusFilter, setValidationStatusFilter] = usePersistedState<string>("cartera/pagos/validationStatusFilter", "");
   const [facturaStatusFilter, setFacturaStatusFilter] = usePersistedState<string>("cartera/pagos/facturaStatusFilter", "");
+  const [canal, setCanal] = usePersistedState<CanalPago>("cartera/pagos/canal", "");
   const [queryInv, setQueryInv] = usePersistedState<string>("cartera/pagos/queryInv", "");
   const filteredInvestors = queryInv === ""
     ? investors
@@ -305,6 +322,7 @@ export function PaymentsTable() {
     soloAplicados !== undefined ||
     validationStatusFilter !== "" ||
     facturaStatusFilter !== "" ||
+    canal !== "" ||
     categoriaCredito !== "" ||
     formatoCredito !== "" ||
     modoFecha !== "simple" ||
@@ -506,6 +524,17 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     );
   };
 
+  // Llena el rango con el cierre de las 5 pm (ayer 17:00 → hoy 17:00, en Guatemala); queda editable.
+  const aplicarCierreCincoPm = () => {
+    const c = cierreCincoPm();
+    setModoFecha("rango"); setDia(undefined);
+    setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin("");
+    setFechaInicio(c.fechaInicio); setHoraInicio(c.horaInicio);
+    setFechaFin(c.fechaFin); setHoraFin(c.horaFin);
+    setPage(1);
+  };
+  const campoHora = "w-[7.25rem] shrink-0 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400";
+
   const { data, isLoading, refetch } = usePagosConInversionistas({
     page,
     pageSize,
@@ -514,7 +543,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     ...(modoFecha === "simple"
       ? { dia, mes, anio }
       : modoFecha === "rango"
-        ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+        ? paramsRangoFechaPago({ fechaInicio, fechaFin, horaInicio, horaFin })
         : modoFecha === "aplicado"
           ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
           : {
@@ -528,6 +557,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     usuarioNombre: usuarioNombre || undefined,
     validationStatus: validationStatusFilter || undefined,
     facturaStatus: facturaStatusFilter || undefined,
+    canal: canal || undefined,
   });
 
   const pagos: PagoDataInvestor[] = data?.data || [];
@@ -558,7 +588,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         ...(modoFecha === "simple"
           ? { dia, mes, anio }
           : modoFecha === "rango"
-            ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+            ? paramsRangoFechaPago({ fechaInicio, fechaFin, horaInicio, horaFin })
             : modoFecha === "aplicado"
               ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
               : {
@@ -571,6 +601,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
+        canal: canal || undefined,
         excel: true,
       });
 
@@ -604,7 +635,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         ...(modoFecha === "simple"
           ? { dia, mes, anio }
           : modoFecha === "rango"
-            ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+            ? paramsRangoFechaPago({ fechaInicio, fechaFin, horaInicio, horaFin })
             : modoFecha === "aplicado"
               ? { fechaAplicadoInicio: fechaAplicadoInicio || undefined, fechaAplicadoFin: fechaAplicadoFin || undefined }
               : {
@@ -617,6 +648,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
+        canal: canal || undefined,
         reportAdvisor: true,
       });
 
@@ -673,6 +705,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setDia(new Date().getDate());
                   setFechaInicio("");
                   setFechaFin("");
+                  setHoraInicio(""); setHoraFin("");
                   setFechaAplicadoInicio(""); setFechaAplicadoFin("");
                   setFechaBoleta("");
                   setFechaBoletaInicio("");
@@ -683,6 +716,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setInversionistaId(undefined);
                   setValidationStatusFilter("");
                   setFacturaStatusFilter("");
+                  setCanal("");
                   setQueryInv("");
                   setPage(1);
                 }}
@@ -698,6 +732,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     soloAplicados !== undefined,
                     validationStatusFilter !== "",
                     facturaStatusFilter !== "",
+                    canal !== "",
                     categoriaCredito !== "",
                     formatoCredito !== "",
                     modoFecha !== "simple" || (modoFecha === "simple" && (mes !== today.getMonth() + 1 || anio !== today.getFullYear() || dia !== today.getDate())),
@@ -726,7 +761,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   <div className="flex gap-1 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
+                      onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setHoraInicio(""); setHoraFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "simple" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                     >
                       Fecha
@@ -738,6 +773,14 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     >
                       Rango
                     </button>
+                    <button
+                      type="button"
+                      onClick={aplicarCierreCincoPm}
+                      title="Desde ayer 17:00 hasta hoy 17:00 (hora de Guatemala)"
+                      className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all"
+                    >
+                      Cierre 5 pm
+                    </button>
                   </div>
                 </div>
                 {/* Grupo 2: filtran por OTRAS fechas (aplicación / boleta) */}
@@ -746,14 +789,14 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   <div className="flex gap-1 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
+                      onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setHoraInicio(""); setHoraFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "aplicado" ? "bg-emerald-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                     >
                       Aplicado
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setPage(1); }}
+                      onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setHoraInicio(""); setHoraFin(""); setFechaAplicadoInicio(""); setFechaAplicadoFin(""); setFechaBoleta(""); setPage(1); }}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "boleta" ? "bg-amber-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                     >
                       Boleta
@@ -800,22 +843,45 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 <div className="space-y-1.5">
                   <div>
                     <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Desde</label>
-                    <DatePickerMUI
-                      value={fechaInicio}
-                      onChange={(value) => { setFechaInicio(value); setPage(1); }}
-                      disableFuture={false}
-                      className="py-1.5 text-xs"
-                    />
+                    <div className="flex gap-1.5">
+                      <div className="flex-1 min-w-0">
+                        <DatePickerMUI
+                          value={fechaInicio}
+                          onChange={(value) => { setFechaInicio(value); setPage(1); }}
+                          disableFuture={false}
+                          className="py-1.5 text-xs"
+                        />
+                      </div>
+                      <input
+                        type="time"
+                        aria-label="Hora desde"
+                        value={horaInicio}
+                        onChange={(e) => { setHoraInicio(e.target.value); setPage(1); }}
+                        className={campoHora}
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Hasta</label>
-                    <DatePickerMUI
-                      value={fechaFin}
-                      onChange={(value) => { setFechaFin(value); setPage(1); }}
-                      disableFuture={false}
-                      className="py-1.5 text-xs"
-                    />
+                    <div className="flex gap-1.5">
+                      <div className="flex-1 min-w-0">
+                        <DatePickerMUI
+                          value={fechaFin}
+                          onChange={(value) => { setFechaFin(value); setPage(1); }}
+                          disableFuture={false}
+                          className="py-1.5 text-xs"
+                        />
+                      </div>
+                      <input
+                        type="time"
+                        aria-label="Hora hasta"
+                        value={horaFin}
+                        onChange={(e) => { setHoraFin(e.target.value); setPage(1); }}
+                        className={campoHora}
+                      />
+                    </div>
                   </div>
+                  <p className="text-[10px] text-gray-400">Desde incluye la hora; hasta no la incluye</p>
                 </div>
               ) : modoFecha === "aplicado" ? (
                 <div className="space-y-1.5">
@@ -1074,6 +1140,18 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 </select>
               </div>
               <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Canal</label>
+                <select
+                  value={canal}
+                  onChange={(e) => { setCanal(e.target.value as CanalPago); setPage(1); }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                >
+                  <option value="">Todos</option>
+                  <option value="NEXA">Nexa</option>
+                  <option value="MANUAL">Manual</option>
+                </select>
+              </div>
+              <div>
                 <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Formato</label>
                 <select
                   value={formatoCredito}
@@ -1286,6 +1364,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       <p className="text-blue-700 font-semibold">
                         {formatDate(pago.fechaPago)}
                       </p>
+                      <div className="mt-1"><EtiquetaCanalPago pago={pago} /></div>
                     </div>
                     {openIdx === idx ? (
                       <ChevronUp className="text-blue-700" />
@@ -1536,7 +1615,8 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           false,
                         )
                       }
-                      disabled={reversePago.isPending || user?.role !== "ADMIN"}
+                      disabled={reversePago.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)}
+                      title={motivoNoAnularPago(pago)}
                     >
                       {reversePago.isPending ? (
                         <>
@@ -1557,7 +1637,8 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       onClick={() => {
                         handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
                       }}
-                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN"}
+                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)}
+                      title={motivoNoAnularPago(pago)}
                     >
                       {revertPaymentToPending.isPending ? (
                         <>
@@ -1817,6 +1898,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                               </span>
                             );
                           })()}
+                          <EtiquetaCanalPago pago={pago} />
                           {pago.banderaReinversion && (
                             <span
                               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"
@@ -2255,8 +2337,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 }
                               }}
                               disabled={
-                                reversePago.isPending || user?.role !== "ADMIN"
+                                reversePago.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)
                               }
+                              title={motivoNoAnularPago(pago)}
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
                                 user?.role !== "ADMIN"
                                   ? "opacity-50 text-gray-400 bg-gray-50"
@@ -2284,8 +2367,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 }
                               }}
                               disabled={
-                                revertPaymentToPending.isPending || user?.role !== "ADMIN"
+                                revertPaymentToPending.isPending || user?.role !== "ADMIN" || !puedeAnularPago(pago)
                               }
+                              title={motivoNoAnularPago(pago)}
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
                                 user?.role !== "ADMIN"
                                   ? "opacity-50 text-gray-400 bg-gray-50"

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
 	anioImpuestoCirculacion,
 	CLAUSULA_INCREMENTO_DIARIO_MORA,
+	COBROS_MOTIVO_SIN_CUENTA_NEXA,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
 	COBROS_MOTIVO_SIN_INCREMENTO_MORA,
 	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
@@ -12,6 +13,7 @@ import {
 	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
+	cuerpoCubreAdjunto,
 	cuerpoUsaFechaLimiteImpuesto,
 	type FilaCuotaAtrasada,
 	FRAGMENTO_RITMO_INCREMENTO_MORA,
@@ -20,8 +22,10 @@ import {
 	fechaLimiteImpuestoVencida,
 	formatearIncrementoMora,
 	hayIncrementoMora,
+	agregarCuentaNexaABienvenida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
+	prepararCuentaNexaParaEnvio,
 	prepararExpectativaMoraParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
@@ -32,9 +36,10 @@ import {
 const NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 
-// La bienvenida es la única plantilla sin aviso no-reply: pide confirmar la
-// recepción del mensaje (diseño "Mensajes Cobros 2026").
-const IDS_SIN_AVISO = new Set(["bienvenida"]);
+// La bienvenida pide confirmar la recepción del mensaje (diseño "Mensajes Cobros
+// 2026") y la cuenta exclusiva Nexa va con el texto que definió cobros: ninguna
+// lleva el aviso no-reply.
+const IDS_SIN_AVISO = new Set(["bienvenida", "cuenta_nexa_exclusiva"]);
 
 const MAX_PARAMS_SIMPLETECH = 5;
 
@@ -153,6 +158,29 @@ describe("plantillas masivas de cobros", () => {
 		expect(bienvenida?.cuerpo).toContain("{aseguradora}");
 		expect(bienvenida?.cuerpo).toContain("{cabinaSeguro}");
 		expect(bienvenida?.cuerpo).toMatch(/confirmar la recepción/i);
+	});
+
+	test("la plantilla compartida no lleva Nexa: solo la bienvenida automática la agrega", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find((p) => p.id === "bienvenida");
+		// El envío manual (masivo o ficha) usa la plantilla tal cual: nada de Nexa.
+		expect(bienvenida?.cuerpo).not.toMatch(/nexa/i);
+		const interpolada = interpolar(bienvenida?.cuerpo ?? "", {
+			clienteNombre: "ana lópez",
+			fechaPago: "5",
+			cuotaMensual: "1,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "",
+			nombreAsesor: "Carlos",
+			expectativaMora: "",
+		});
+		const conCuenta = agregarCuentaNexaABienvenida(interpolada, "32200100000002");
+
+		expect(bloques(conCuenta)).toHaveLength(5);
+		expect(conCuenta).toContain("* Banrural: 3394002346\nAdemás, puede pagar su cuota desde su banco con su código de pago Nexa: *32200100000002*");
+		expect(agregarCuentaNexaABienvenida(interpolada, null)).toBe(interpolada);
 	});
 
 	test("el bloque del seguro de la bienvenida se resuelve por aseguradora", () => {
@@ -1350,5 +1378,80 @@ describe("CONTRATO: la oración del aumento no se separa de la del front", () =>
 		expect(
 			PLANTILLAS_MENSAJES.find((p) => p.id === "al_dia")?.cuerpo,
 		).toContain(oracion);
+	});
+});
+
+describe("Nueva cuenta exclusiva Nexa", () => {
+	const plantilla = PLANTILLAS_MENSAJES.find(
+		(p) => p.id === "cuenta_nexa_exclusiva",
+	);
+
+	test("existe, usa {cuentaNexa} y cabe en 4 bloques de WhatsApp (uno por variable del template)", () => {
+		expect(plantilla).toBeDefined();
+		expect(plantilla?.cuerpo).toContain("{cuentaNexa}");
+		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
+		expect(plantilla?.adjunto?.parametros).toBe(4);
+	});
+
+	test("se envía con la imagen: template mensaje4image y URL pública", () => {
+		expect(plantilla?.adjunto?.templateName).toBe("mensaje4image");
+		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
+	});
+
+	test("el mensaje editado necesita al menos un párrafo por variable del template", () => {
+		const adjunto = plantilla?.adjunto;
+		expect(adjunto).toBeDefined();
+		if (!adjunto) return;
+		expect(cuerpoCubreAdjunto(plantilla?.cuerpo ?? "", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc\n\nd\n\ne", adjunto)).toBe(true);
+		expect(cuerpoCubreAdjunto("a\n\nb\n\nc", adjunto)).toBe(false);
+		expect(cuerpoCubreAdjunto("una sola línea\ncon salto", adjunto)).toBe(false);
+	});
+
+	test("interpolar pone nombre, cuenta y teléfono del asesor", () => {
+		const mensaje = interpolar(plantilla?.cuerpo ?? "", {
+			clienteNombre: "juan perez",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "5555-1234",
+			nombreAsesor: "",
+			expectativaMora: "",
+			cuentaNexa: "1234567890123456",
+		});
+		expect(mensaje.startsWith("Juan Perez.")).toBe(true);
+		expect(mensaje).toContain(
+			"tu *nueva cuenta exclusiva para realizar los pagos de tu crédito*.",
+		);
+		expect(mensaje).toContain("🏛️ *Banco Nexa*");
+		expect(mensaje).toContain("🔢 *Cuenta Monetaria : 1234567890123456*");
+		expect(mensaje).toContain("ejecutivo al 5555-1234");
+		expect(mensaje).not.toContain("{");
+		// Cada variable del template va en una sola línea.
+		for (const bloque of bloques(mensaje)) expect(bloque).not.toContain("\n");
+	});
+
+	test("sin cuenta Nexa se descarta con motivo", () => {
+		for (const cuenta of [null, undefined, "", "   "]) {
+			expect(
+				prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", cuenta),
+			).toEqual({ enviar: false, motivo: COBROS_MOTIVO_SIN_CUENTA_NEXA });
+		}
+	});
+
+	test("con cuenta Nexa se envía y se limpia el valor", () => {
+		expect(
+			prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", " 123 "),
+		).toEqual({ enviar: true, cuentaNexa: "123" });
+	});
+
+	test("un cuerpo sin {cuentaNexa} no exige la cuenta", () => {
+		expect(prepararCuentaNexaParaEnvio("Hola", null)).toEqual({
+			enviar: true,
+			cuentaNexa: "",
+		});
 	});
 });

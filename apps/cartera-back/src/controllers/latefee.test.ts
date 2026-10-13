@@ -116,7 +116,7 @@ const fakeClient: any = {
   }),
 };
 
-mock.module("../database", () => ({ db: fakeDb, client: fakeClient }));
+mock.module("../database", () => ({ db: fakeDb, client: fakeClient, lockPool: {} }));
 
 const {
   procesarMoras,

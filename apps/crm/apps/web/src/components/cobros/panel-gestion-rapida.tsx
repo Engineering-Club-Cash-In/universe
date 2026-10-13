@@ -85,6 +85,8 @@ interface CasoPanel {
 	incrementoMaximoMensualMora?: string | null;
 	aseguradora?: string | null;
 	cabinaSeguro?: string | null;
+	/** Código de pago Nexa del crédito; "" = sin cuenta (ver VariablesPlantilla). */
+	cuentaNexa?: string | null;
 }
 
 interface ContactoPanel {
@@ -312,6 +314,7 @@ export function PanelGestionRapida({
 		incrementoMaximoMensualMora: caso?.incrementoMaximoMensualMora || "",
 		aseguradora: caso?.aseguradora || "",
 		cabinaSeguro: caso?.cabinaSeguro || "",
+		cuentaNexa: caso?.cuentaNexa || "",
 	};
 
 	const telefonos = String(caso?.telefonoPrincipal ?? "")

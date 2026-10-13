@@ -22,6 +22,7 @@
  * una. Así el PDF que se guardó en R2 alcanza para volver a ubicar todo.
  */
 import { PDFDocument } from "pdf-lib";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
 	type ComposicionDelPaquete,
 	type ContractSigner,
@@ -75,7 +76,15 @@ export async function unirCartas(
 
 	for (const carta of cartas) {
 		const origen = await PDFDocument.load(carta.pdf);
-		const paginas = await unido.copyPages(origen, origen.getPageIndices());
+		// Sin las hojas en blanco del final: cuando el texto llena la hoja, el
+		// último párrafo vacío de la plantilla se pasa a una hoja nueva, y
+		// WeeTrust rechaza el documento con una hoja vacía ("Unable to add
+		// document"). Las firmas están siempre en hojas con texto.
+		const conTexto = await hojasHastaLaUltimaConTexto(carta.pdf);
+		const paginas = await unido.copyPages(
+			origen,
+			origen.getPageIndices().slice(0, conTexto),
+		);
 		for (const pagina of paginas) unido.addPage(pagina);
 		composicion.push({
 			contractType: carta.contractType,
@@ -91,6 +100,24 @@ export async function unirCartas(
 	]);
 
 	return { pdf: Buffer.from(await unido.save()), composicion };
+}
+
+/**
+ * Cuántas hojas quedan si se quitan las del final que no tienen texto.
+ * Siempre al menos una, y las hojas vacías del medio se dejan.
+ */
+async function hojasHastaLaUltimaConTexto(pdf: Buffer): Promise<number> {
+	const documento = await pdfjsLib.getDocument({ data: new Uint8Array(pdf) })
+		.promise;
+	try {
+		for (let hoja = documento.numPages; hoja > 1; hoja--) {
+			const { items } = await (await documento.getPage(hoja)).getTextContent();
+			if (items.some((item) => "str" in item && item.str.trim())) return hoja;
+		}
+		return 1;
+	} finally {
+		await documento.destroy();
+	}
 }
 
 /**

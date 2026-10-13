@@ -41,6 +41,8 @@ import {
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
 import { cerrarMoraPagadaDeCredito } from "../utils/cerrarMoraPagadaDeCredito";
 
+const CREDITO_CANCELADO_SIN_CONVENIO = "Un crédito CANCELADO no admite convenio.";
+
 interface CreatePaymentAgreementInput {
   credit_id: number;
   payment_ids: number[];
@@ -315,6 +317,12 @@ async function crearConvenioDePago(
       throw new Error("Crédito no encontrado");
     }
 
+    // CANCELADO es terminal: no admite convenio. Se vuelve a mirar dentro de la
+    // transacción, en el UPDATE a EN_CONVENIO, por si lo cancelan entre medio.
+    if (creditExists.statusCredit === "CANCELADO") {
+      throw new Error(CREDITO_CANCELADO_SIN_CONVENIO);
+    }
+
     console.log("✅ Crédito encontrado!");
     console.log("📊 Estado actual del crédito:", creditExists.statusCredit);
     console.log("📊 Cliente:", creditExists.credito_id);
@@ -568,6 +576,10 @@ async function crearConvenioDePago(
       // desactivación de la mora— no lee `statusCredit` (la lectura del
       // bucket, que sí lo lee, ya corrió arriba).
       //
+      // CANCELADO es terminal: bajo el row lock de este UPDATE se vuelve a
+      // mirar. Si lo cancelaron después del Paso 7, no toca filas y la
+      // transacción entera se revierte (sin convenio).
+      //
       // COBROS-02 Fase 4 — y se guarda con qué estado ENTRÓ. `statusCredit`
       // es una sola columna: al pasar a EN_CONVENIO un EN_RECUPERACION se
       // perdería, y al completar el convenio el crédito quedaría ACTIVO — o
@@ -601,9 +613,15 @@ async function crearConvenioDePago(
              FOR UPDATE
           ) anterior
          WHERE c.credito_id = ${credit_id}
+           AND c."statusCredit" <> ${"CANCELADO"}
         RETURNING anterior.previo, c."statusCredit"
       `);
       const resultadoUpdate = cambio.rows ?? [];
+
+      if (resultadoUpdate.length === 0) {
+        throw new Error(CREDITO_CANCELADO_SIN_CONVENIO);
+      }
+
       const statusAlFirmar = resultadoUpdate[0]?.previo ?? null;
 
       await tx
@@ -2149,11 +2167,16 @@ export async function romperConvenioRecalculandoMora(
   // 🔒 CRÉDITO PRIMERO, igual que condonarMora y la masiva: el insert al
   // ledger de abajo toma KEY SHARE sobre este crédito por la FK, y el
   // UPDATE posterior escalaría el candado y podría trabarse (40P01).
-  await tx
-    .select({ credito_id: creditos.credito_id })
+  const [creditoBloqueado] = await tx
+    .select({ credito_id: creditos.credito_id, statusCredit: creditos.statusCredit })
     .from(creditos)
     .where(eq(creditos.credito_id, creditoId))
     .for("update");
+  // Solo un crédito EN_CONVENIO sale de ese estado al romper el convenio.
+  // Un CANCELADO (o CAIDO/INCOBRABLE/…) nunca cambia de estado por acá, y
+  // tampoco uno que una persona movió a EN_RECUPERACION/EN_JURIDICO con el
+  // convenio vivo: los UPDATE de abajo exigen el estado que esperan.
+  const eraEnConvenio = creditoBloqueado?.statusCredit === "EN_CONVENIO";
 
   // Eliminar cuotas del convenio
   await tx
@@ -2211,11 +2234,16 @@ export async function romperConvenioRecalculandoMora(
   // está excluido: con el crédito todavía en EN_CONVENIO devolvería cero
   // cuotas y el convenio roto terminaría ACTIVO sin mora. El convenio ya
   // no existe, así que el crédito sale de EN_CONVENIO ANTES de cargar;
-  // abajo la decisión lo deja MOROSO o ACTIVO.
-  await tx
-    .update(creditos)
-    .set({ statusCredit: "ACTIVO" })
-    .where(eq(creditos.credito_id, creditoId));
+  // abajo la decisión lo deja MOROSO o ACTIVO (o en su estado protegido).
+  if (eraEnConvenio) {
+    await tx
+      .update(creditos)
+      .set({ statusCredit: "ACTIVO" })
+      .where(and(
+        eq(creditos.credito_id, creditoId),
+        eq(creditos.statusCredit, "EN_CONVENIO"),
+      ));
+  }
 
   // «Hoy» de la BASE, no del reloj de la app: `createMora` recuenta las
   // cuotas atrasadas con `now()`, que dentro de la tx queda fijo en su
@@ -2256,10 +2284,15 @@ export async function romperConvenioRecalculandoMora(
     // COBROS-02 Fase 4: si el crédito venía EN_RECUPERACION, ahí vuelve —
     // romper el convenio no puede levantar un estado que puso una persona
     // (mismo criterio que deshacerlo). EN_RECUPERACION sí devenga mora.
-    await tx
-      .update(creditos)
-      .set({ statusCredit: estadoProtegido ?? "MOROSO" })
-      .where(eq(creditos.credito_id, creditoId));
+    if (eraEnConvenio) {
+      await tx
+        .update(creditos)
+        .set({ statusCredit: estadoProtegido ?? "MOROSO" })
+        .where(and(
+          eq(creditos.credito_id, creditoId),
+          eq(creditos.statusCredit, "ACTIVO"),
+        ));
+    }
 
     // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
     const resultMora = await createMora({
@@ -2284,14 +2317,24 @@ export async function romperConvenioRecalculandoMora(
   } else {
     // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
     // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO (o
-    // devolverlo a EN_RECUPERACION, COBROS-02 Fase 4).
+    // devolverlo a EN_RECUPERACION, COBROS-02 Fase 4). Si era EN_CONVENIO ya
+    // quedó ACTIVO arriba; si no, no se toca.
     const statusSinMora = estadoProtegido ?? "ACTIVO";
-    await tx
-      .update(creditos)
-      .set({ statusCredit: statusSinMora })
-      .where(eq(creditos.credito_id, creditoId));
+    if (eraEnConvenio && estadoProtegido) {
+      await tx
+        .update(creditos)
+        .set({ statusCredit: estadoProtegido })
+        .where(and(
+          eq(creditos.credito_id, creditoId),
+          eq(creditos.statusCredit, "ACTIVO"),
+        ));
+    }
 
-    console.log(`✅ Crédito actualizado a ${statusSinMora} (${decision.motivo})`);
+    console.log(
+      eraEnConvenio
+        ? `✅ Crédito actualizado a ${statusSinMora} (${decision.motivo})`
+        : `✅ Crédito sin cambio de estado: no estaba EN_CONVENIO (${decision.motivo})`,
+    );
   }
 
   return { success: true, message: "Convenio eliminado exitosamente" };

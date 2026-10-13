@@ -51,3 +51,10 @@ it("renderiza reset como estado final validado", () => {
   expect(html).toContain("Validado");
   expect(html).not.toContain("Validación pendiente");
 });
+
+it("marca con una insignia los pagos que entraron por Nexa", () => {
+  const base = { pagado: true, paymentFalse: false, validationStatus: "validated", cuota_pagada: true };
+  expect(render({ ...base, canal: "NEXA" })).toContain(">Nexa<");
+  expect(render({ ...base, canal: "MANUAL" })).not.toContain(">Nexa<");
+  expect(render(base)).not.toContain(">Nexa<");
+});

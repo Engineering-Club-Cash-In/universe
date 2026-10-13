@@ -176,6 +176,7 @@ mock.module("./latefee", () => ({
   hoyGuatemala: () => new Date(2026, 9, 5),
   contarCuotasVencidasReales: mock(async () => 0),
   STATUS_EN_RECUPERACION: "EN_RECUPERACION",
+  STATUS_EN_JURIDICO: "EN_JURIDICO",
 }));
 mock.module("./payments", () => ({
   insertPagosCreditoInversionistas: mock(),

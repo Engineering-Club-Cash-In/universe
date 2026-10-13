@@ -20,6 +20,7 @@ import type { ContractResult } from "@/components/contracts/ContractResults";
 import {
 	type CRMData,
 	DynamicContractWizard,
+	type GeneroSinRenap,
 	moneyToWords,
 } from "@/components/contracts/DynamicContractWizard";
 import {
@@ -209,7 +210,12 @@ function RouteComponent() {
 	const crmData: CRMData = useMemo(
 		() => ({
 			cliente: {
-				nombreCompleto: bateria?.investorName,
+				// En una sociedad la compra está a nombre de la empresa, y ese nombre
+				// va en el campo de la sociedad: el nombre completo es el de quien
+				// firma por ella. Lo pone RENAP con el DPI del representante, o
+				// jurídico; con el de la empresa salía el bloque de firma al revés.
+				nombreCompleto:
+					categoria === "sociedad" ? undefined : bateria?.investorName,
 				dpi: dpiEnUso,
 				correo: bateria?.investorEmail ?? undefined,
 			},
@@ -219,7 +225,7 @@ function RouteComponent() {
 			credito: {},
 			coDebtors: [],
 		}),
-		[bateria, dpiEnUso],
+		[bateria, dpiEnUso, categoria],
 	);
 
 	/**
@@ -235,11 +241,28 @@ function RouteComponent() {
 	 * cede su parte, que puede ser Q7,634 de un crédito de Q142,000.
 	 */
 	const valoresIniciales = useMemo(() => {
+		// La empresa de la compra es la sociedad del contrato. En mayúsculas,
+		// que es como lo pide el campo.
+		const deLaSociedad: Record<string, string> =
+			categoria === "sociedad" && bateria?.investorName
+				? {
+						nombreSociedadInversionista: bateria.investorName
+							.trim()
+							.toUpperCase(),
+					}
+				: {};
+
 		const creditos = bateria?.creditos ?? [];
-		if (creditos.length === 0) return undefined;
+		if (creditos.length === 0) {
+			return Object.keys(deLaSociedad).length > 0 ? deLaSociedad : undefined;
+		}
 
 		const items = creditos.map((credito) => ({
-			nombreDeudor: credito.clienteNombre,
+			// En mayúsculas, como lo pide jurídico; cartera lo trae como se escribió.
+			nombreDeudor: credito.clienteNombre
+				.trim()
+				.replace(/\s+/g, " ")
+				.toUpperCase(),
 			cantidadCapitalCredito: `${moneyToWords(Number(credito.monto)).toUpperCase()} (${quetzales(credito.monto)})`,
 			fechaTextoInicioCredito: fechaEnPalabras(credito.fechaInicio),
 			fechaTextoVencimiento: fechaEnPalabras(credito.fechaVencimiento),
@@ -259,6 +282,7 @@ function RouteComponent() {
 		const enLetras = moneyToWords(Number(monto)).toUpperCase();
 
 		return {
+			...deLaSociedad,
 			listaCreditos: JSON.stringify(items),
 			montoTotal: `${enLetras} (${quetzales(monto)})`,
 			montoNumero: soloElNumero(monto),
@@ -273,7 +297,7 @@ function RouteComponent() {
 				? { figuraFiscal: FIGURA_FISCAL[primero?.modalidadFacturacion ?? ""] }
 				: {}),
 		};
-	}, [bateria]);
+	}, [bateria, categoria]);
 
 	/**
 	 * El "Listo": manda al hilo de la compra los contratos que se ven en la
@@ -344,6 +368,7 @@ function RouteComponent() {
 	const traerCampos = async (
 		dpiConsultado: string,
 		documentNames: string[],
+		genero?: GeneroSinRenap,
 	) => {
 		const limpio = dpiConsultado.replace(/\D/g, "");
 		// El catálogo de campos se pide por DPI. Cartera no siempre lo tiene (y en
@@ -355,7 +380,7 @@ function RouteComponent() {
 			);
 		}
 
-		return client.getDocumentsByDpi({ dpi: limpio, documentNames });
+		return client.getDocumentsByDpi({ dpi: limpio, documentNames, genero });
 	};
 
 	if (cargandoPermisos || bateriaQuery.isLoading) {

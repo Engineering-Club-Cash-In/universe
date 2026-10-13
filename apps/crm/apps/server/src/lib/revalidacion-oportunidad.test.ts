@@ -186,6 +186,7 @@ describe("qué se le toca a la que se resetea", () => {
 
 		expect(parcheDeRevalidacion("etapa-30", cuando)).toEqual({
 			stageId: "etapa-30",
+			buroRevalidacionAl30: true,
 			analysisStatus: "pending",
 			creditDetailApproved: false,
 			// La marca viaja en el mismo parche: sin ella el DPI escaneado de la

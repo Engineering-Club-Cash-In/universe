@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { authMiddleware, rechazoSiNoEsAdminActivo } from "./midleware";
 import {
   getCreditosNuevosConAbonos,
   diagnosticoCreditosAbonos,
@@ -28,8 +29,13 @@ function elapsedMilliseconds(startedAt: number): number {
  *   bugs de query (total de créditos, rango de fechas, distribución por mes, etc.)
  */
 export const creditosNuevosConAbonosRouter = new Elysia()
+  // Colgaba SIN token: exponía créditos y abonos a cualquiera. Sin llamadores
+  // en el código (front, CRM, auth-google): diagnóstico de ADMIN.
+  .use(authMiddleware)
   // ── Diagnóstico ──────────────────────────────────────────────────────────
-  .get("/creditos-nuevos-con-abonos/diagnostico", async ({ set }) => {
+  .get("/creditos-nuevos-con-abonos/diagnostico", async ({ set, user }: any) => {
+    const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+    if (rechazo) return rechazo;
     const startedAt = Date.now();
     try {
       const result = await diagnosticoCreditosAbonos();
@@ -51,7 +57,9 @@ export const creditosNuevosConAbonosRouter = new Elysia()
     }
   })
   // ── Endpoint principal ────────────────────────────────────────────────────
-  .get("/creditos-nuevos-con-abonos", async ({ query, set }) => {
+  .get("/creditos-nuevos-con-abonos", async ({ query, set, user }: any) => {
+    const rechazo = await rechazoSiNoEsAdminActivo(user, set);
+    if (rechazo) return rechazo;
     const startedAt = Date.now();
     const { fecha_desde, fecha_hasta, solo_con_abonos } =
       query as Record<string, string>;

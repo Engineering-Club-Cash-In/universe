@@ -5,6 +5,7 @@ import { downloadPdfFromR2 } from './services/R2Service';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
 import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
+import { leerAvisoDeWeeTrust } from './services/avisoWeeTrust';
 import { getSignatureMode, getSignaturePattern } from './services/signaturePatterns';
 
 // Inicializar WeeTrust
@@ -860,6 +861,9 @@ const app = new Elysia()
    * Register webhook with: https://your-domain.com/webhooks/weetrust/{WEETRUST_WEBHOOK_SECRET}
    */
   .post('/webhooks/weetrust/:secret', async ({ params, body, set }) => {
+    // Antes de todo: si un aviso no se anota acá, WeeTrust no lo mandó. Sin esta
+    // línea no había forma de distinguir eso de un aviso que rechazamos.
+    console.log(`\n📥 [WeeTrust Webhook] Llegó un aviso (${typeof body === 'string' ? body.length : 0} bytes)`);
     try {
       // Validate webhook secret from URL
       const expectedSecret = process.env.WEETRUST_WEBHOOK_SECRET;
@@ -876,31 +880,17 @@ const app = new Elysia()
         return { success: false, error: 'Unauthorized' };
       }
 
-      const payload = body as {
-        event?: string;
-        type?: string;
-        documentID?: string;
-        document?: {
-          documentID: string;
-          status: string;
-        };
-        signatory?: {
-          emailID: string;
-          name: string;
-          isSigned: number;
-        };
-        timestamp?: string;
-      };
+      const aviso = leerAvisoDeWeeTrust(body);
 
       // Log event without sensitive data
-      console.log(`\n📥 [WeeTrust Webhook] Event: ${payload.event || payload.type}, DocumentID: ${payload.documentID || payload.document?.documentID}`);
+      console.log(`[WeeTrust Webhook] Event: ${aviso.tipo}, DocumentID: ${aviso.documentID}`);
 
-      // Determinar tipo de evento
-      const eventType = payload.event || payload.type || 'unknown';
-      const documentId = payload.documentID || payload.document?.documentID;
+      const eventType = aviso.tipo;
+      const documentId = aviso.documentID;
 
       if (!documentId) {
-        console.warn('[WeeTrust Webhook] Payload sin documentID');
+        // Las claves, no los valores: alcanzan para ver qué forma trajo.
+        console.warn(`[WeeTrust Webhook] Payload sin documentID (claves: ${aviso.claves.join(', ')})`);
         set.status = 400;
         return { success: false, error: 'Missing documentID' };
       }
@@ -958,6 +948,11 @@ const app = new Elysia()
       set.status = 500;
       return { success: false, error: error.message };
     }
+  }, {
+    // El cuerpo llega crudo y lo lee `leerAvisoDeWeeTrust`: si Elysia lo
+    // parseaba y fallaba (otro Content-Type, JSON raro), respondía antes de
+    // llegar al handler y el aviso se perdía sin dejar rastro.
+    parse: 'text'
   })
 
   /**

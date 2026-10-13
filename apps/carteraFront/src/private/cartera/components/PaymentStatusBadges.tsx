@@ -8,7 +8,7 @@ const TONE_CLASSES = {
 } as const;
 
 export function PaymentStatusBadges({ payment }: {
-  payment: Pick<PagoParaAtraso, "pagado" | "paymentFalse" | "validationStatus" | "cuota_pagada">;
+  payment: Pick<PagoParaAtraso, "pagado" | "paymentFalse" | "validationStatus" | "cuota_pagada"> & { canal?: string };
 }) {
   return (
     <div className="flex flex-col items-start gap-1 text-xs font-bold">
@@ -20,6 +20,9 @@ export function PaymentStatusBadges({ payment }: {
           {label}
         </span>
       ))}
+      {payment.canal === "NEXA" && (
+        <span className="whitespace-nowrap rounded px-2 py-1 bg-emerald-100 text-emerald-800">Nexa</span>
+      )}
     </div>
   );
 }

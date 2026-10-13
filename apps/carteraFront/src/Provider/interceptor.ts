@@ -1,5 +1,6 @@
 // src/api/axiosInstance.ts
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
+import { debeCerrarSesionPorRol } from "../lib/rolSesion";
 
 const API_URL =
   import.meta.env.VITE_BACK_URL ||
@@ -37,6 +38,7 @@ function isTokenExpiringSoon(token: string, marginSeconds: number): boolean {
 function clearAuthStorage() {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("refreshToken");
+  localStorage.removeItem("user");
 }
 
 function redirectToLogin() {
@@ -64,6 +66,11 @@ async function refreshAccessToken(): Promise<string | null> {
       );
 
       if (res.data?.success && res.data.accessToken) {
+        // Si cambió el rol, no se guardan los tokens: null cierra la sesión (los llamadores
+        // limpian y mandan a /login) para volver a entrar con los permisos vigentes.
+        if (debeCerrarSesionPorRol(localStorage.getItem("user"), res.data.accessToken)) {
+          return null;
+        }
         localStorage.setItem("accessToken", res.data.accessToken);
         // 🔑 Importante: el back rota el refresh token, hay que persistir el nuevo.
         if (res.data.refreshToken) {

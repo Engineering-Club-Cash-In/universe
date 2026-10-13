@@ -27,6 +27,7 @@ on:
       - "apps/legal-documents/**"
       - "apps/legal-docs-blueprints/**"
       - "apps/investment-calculator/**"
+      - "apps/nexa-server/**"
       - "packages/**"
       - "package.json"
       - "bun.lock"
@@ -50,6 +51,7 @@ on:
           - legal-docs-blueprints
           - investment
           - tracker
+          - nexa-server
 
 env:
   AWS_REGION: us-east-1
@@ -154,9 +156,12 @@ jobs:
               - 'apps/legal-docs-blueprints/**'
             investment:
               - 'apps/investment-calculator/**'
+            nexa-server:
+              - '.dockerignore'
+              - 'apps/nexa-server/**'
       - id: pick
         run: |
-          ALL='["cartera-back","cartera-front","crm-api","crm-web","portal-web","auth-google","backend-2","legal-documents","legal-docs-blueprints","investment","tracker"]'
+          ALL='["cartera-back","cartera-front","crm-api","crm-web","portal-web","auth-google","backend-2","legal-documents","legal-docs-blueprints","investment","tracker","nexa-server"]'
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ "${{ inputs.app }}" = "all" ]; then
               echo "apps=$ALL" >> "$GITHUB_OUTPUT"
@@ -238,6 +243,7 @@ jobs:
             legal-documents) CTX=apps/legal-documents FILE=apps/legal-documents/Dockerfile     IMAGE=cci/legal-documents ;;
             investment)      CTX=apps/investment-calculator FILE=apps/investment-calculator/Dockerfile IMAGE=cci/investment ;;
             tracker)         CTX=.                    FILE=apps/tracker/Dockerfile             IMAGE=cci/tracker ;;
+            nexa-server)     CTX=.                    FILE=apps/nexa-server/Dockerfile         IMAGE=cci/nexa-server ;;
             *) echo "App desconocida"; exit 1 ;;
           esac
           podman build "${BUILD_ARGS[@]}" -f "$FILE" "$CTX" \
@@ -265,6 +271,7 @@ jobs:
           WH_LEGAL_DOCS_BLUEPRINTS: ${{ secrets.COOLIFY_WEBHOOK_LEGAL_DOCS_BLUEPRINTS_PROD }}
           WH_INVESTMENT: ${{ secrets.COOLIFY_WEBHOOK_INVESTMENT_PROD }}
           WH_TRACKER: ${{ secrets.COOLIFY_WEBHOOK_TRACKER_PROD }}
+          WH_NEXA_SERVER: ${{ secrets.COOLIFY_WEBHOOK_NEXA_SERVER_PROD }}
         run: |
           case "${{ matrix.app }}" in
             cartera-back)    WEBHOOK="$WH_CARTERA_BACK" ;;
@@ -278,6 +285,7 @@ jobs:
             legal-docs-blueprints) WEBHOOK="$WH_LEGAL_DOCS_BLUEPRINTS" ;;
             investment)      WEBHOOK="$WH_INVESTMENT" ;;
             tracker)         WEBHOOK="$WH_TRACKER" ;;
+            nexa-server)     WEBHOOK="$WH_NEXA_SERVER" ;;
           esac
           if [ -z "$WEBHOOK" ]; then
             echo "::notice::Sin webhook configurado para ${{ matrix.app }}; imagen pusheada pero sin redeploy automático."

@@ -133,6 +133,8 @@ export type FiltrosCartera = {
 	capitalMin: number | undefined;
 	capitalMax: number | undefined;
 	excluirPagados: boolean;
+	/** Solo créditos con cuenta (código de pago) Nexa asignada. */
+	soloConCuentaNexa: boolean;
 	/** No. SIFCO exacto (texto crudo; el contenedor lo debouncea). */
 	sifco: string;
 	gestion: FiltroGestionCartera | null;
@@ -148,6 +150,7 @@ export const FILTROS_INICIALES: FiltrosCartera = {
 	capitalMin: undefined,
 	capitalMax: undefined,
 	excluirPagados: false,
+	soloConCuentaNexa: false,
 	sifco: "",
 	gestion: null,
 	busqueda: "",
@@ -181,6 +184,7 @@ export function contarFiltrosActivos(f: FiltrosCartera) {
 		f.etiquetas.length > 0,
 		f.capitalMin !== undefined || f.capitalMax !== undefined,
 		f.excluirPagados,
+		f.soloConCuentaNexa,
 		f.sifco !== "",
 		f.gestion !== null,
 		f.busqueda !== "",
@@ -200,6 +204,7 @@ export function contarFiltrosAvanzados(
 		f.etiquetas.length > 0,
 		f.capitalMin !== undefined || f.capitalMax !== undefined,
 		f.excluirPagados,
+		f.soloConCuentaNexa,
 		f.sifco !== "",
 	].filter(Boolean).length;
 }
@@ -443,6 +448,21 @@ export function PanelFiltrosCartera({
 					</label>
 				</div>
 			</Seccion>
+			<Seccion titulo="Cuenta Nexa">
+				<div className="flex items-center gap-3">
+					<Switch
+						id="cartera-solo-cuenta-nexa"
+						checked={filtros.soloConCuentaNexa}
+						onCheckedChange={(v) => onCambiar({ soloConCuentaNexa: v })}
+					/>
+					<label
+						htmlFor="cartera-solo-cuenta-nexa"
+						className="type-body-sm cursor-pointer text-fg"
+					>
+						Solo con cuenta Nexa
+					</label>
+				</div>
+			</Seccion>
 			{activos > 0 ? (
 				<div className="border-divider border-t pt-3">
 					<Button
@@ -551,6 +571,13 @@ export function ChipsFiltrosAplicados({
 			id: "pagados",
 			texto: "Sin los que ya pagaron su cuota",
 			quitar: () => onCambiar({ excluirPagados: false }),
+		});
+	}
+	if (filtros.soloConCuentaNexa) {
+		chips.push({
+			id: "cuenta-nexa",
+			texto: "Solo con cuenta Nexa",
+			quitar: () => onCambiar({ soloConCuentaNexa: false }),
 		});
 	}
 	if (filtros.sifco) {

@@ -54,6 +54,15 @@ describe("identificacionDe", () => {
 		).toEqual({ identification: "face" });
 	});
 
+	test("el reconocimiento de sociedad pide selfie al representante, como el individual", () => {
+		expect(
+			identificacionDe({ role: SignerRole.TITULAR }, ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD),
+		).toEqual({ identification: "face" });
+		expect(
+			identificacionDe({ role: SignerRole.TITULAR }, ContractType.PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD),
+		).not.toEqual({ identification: "face" });
+	});
+
 	test("al representante legal nunca se le pide nada", () => {
 		expect(
 			identificacionDe(

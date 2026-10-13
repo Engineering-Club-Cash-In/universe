@@ -474,13 +474,14 @@ export function construirMensajeDocumento(
 	numeroSifco: string,
 	asesor: ContactoAsesor | null = null,
 ): string {
-	const saludo = clienteNombre ? `${clienteNombre}, te` : "Te";
+	// Registro formal (usted), como el recibo y el resto de mensajes al cliente.
+	const saludo = clienteNombre ? `${clienteNombre}, le` : "Le";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
 		.filter((v): v is string | number => v !== null && v !== "")
 		.join(" ");
 	const deQue = descripcionVehiculo
-		? `de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
-		: `del vehículo de tu crédito ${numeroSifco}`;
+		? `de su ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
+		: `del vehículo de su crédito ${numeroSifco}`;
 	const documento =
 		clave === "tarjeta-circulacion"
 			? "la tarjeta de circulación"

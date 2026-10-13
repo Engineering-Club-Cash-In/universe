@@ -262,6 +262,50 @@ export const AUTOCASH_CONFIG = {
 };
 
 // ============================================
+// CHECKIN, SOCIEDAD ANÓNIMA (marca MOTORLAB)
+// Solo factura por /facturar-generico: NO va en INVERSIONISTAS_FACTURADORES.
+// Usa su PROPIA URL de COFIDI (CHECKIN_COFIDI_URL, hoy el ambiente de pruebas
+// portaltest): para pasar a producción se cambian solo las env CHECKIN_*.
+// ============================================
+export const CHECKIN_SAT_CONFIG = {
+  requestor: process.env.CHECKIN_REQUESTOR!,
+  user: process.env.CHECKIN_REQUESTOR!,
+  userName: process.env.CHECKIN_USER!,
+  endpointUrl: process.env.CHECKIN_COFIDI_URL!,
+  nit: "120310546",
+};
+
+export const CHECKIN_CONFIG = {
+  emisor: {
+    nit: "120310546",
+    nombreEmisor: "CHECKIN, SOCIEDAD ANÓNIMA",
+    codigoEstablecimiento: "2",
+    nombreComercial: "MOTORLAB",
+    afiliacionIVA: "GEN",
+    direccion: {
+      direccion: "CARRETERA AL SALVADOR KM 19.45 LOTIF MTE CARLO APTO A FRAIJANES ZONA 0",
+      codigoPostal: "01062",
+      municipio: "Fraijanes",
+      departamento: "Guatemala",
+      pais: "GT",
+    },
+  },
+  tipoDocumento: "FACT" as const,
+  codigoMoneda: "GTQ",
+  frases: [
+    {
+      tipoFrase: 1 as const,
+      codigoEscenario: "3",
+      numeroResolucion: "4846128202615264321",
+      fechaResolucion: "2026-08-12",
+    },
+  ],
+  portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
+  portalUser: process.env.CHECKIN_USER!,
+  portalPassword: process.env.CHECKIN_PASSWORD!,
+};
+
+// ============================================
 // 🔥 MAPA DE INVERSIONISTAS QUE EMITEN FACTURA PROPIA
 // ============================================
 export const INVERSIONISTAS_FACTURADORES = [

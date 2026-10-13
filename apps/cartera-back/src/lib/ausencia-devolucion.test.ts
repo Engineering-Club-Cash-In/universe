@@ -111,3 +111,21 @@ describe("separarYaDevueltos", () => {
     expect(r.retenidos).toHaveLength(1);
   });
 });
+
+describe("clasificarDevolucion · cerrados vs convenio", () => {
+  test("lo cancelado o caído durante la ausencia se retiene; el convenio se devuelve aparte", () => {
+    const r = clasificarDevolucion(
+      [
+        { credito_id: 1, asesor_nuevo_id: 20, bucket: 1 },
+        { credito_id: 2, asesor_nuevo_id: 20, bucket: 1 },
+      ],
+      new Map([
+        [1, { asesor_id: 20, bucket: null, cerrado: true }],
+        [2, { asesor_id: 20, bucket: null, cerrado: false }],
+      ]),
+      new Set([1]),
+    );
+    expect(r.retenidos).toEqual([{ credito_id: 1, motivo: "fuera_del_funnel" }]);
+    expect(r.aDevolverDirecto).toEqual([2]);
+  });
+});

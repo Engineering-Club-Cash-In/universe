@@ -110,11 +110,13 @@ Los esquemas de Drizzle (`db/schema/cobros.ts`, `inmovilizacion-unidad.ts` y `no
 - **Cartera:** `POST /buckets/asesores/:id/pool/pausar` y `/reanudar`, `GET /buckets/traslados/:id/detalle` y `POST /buckets/traslados/:id/devolver`. El traslado acepta `ponderarPorCapacidad` y `mantenerEspeciales` (el esquema de la ruta los tenía que declarar o Elysia los descartaba en silencio).
 - **Reintentos y fallos parciales (revisión del PR #1970):**
   - Si la confirmación del reparto falla con 400/404/409, cartera la rechazó y se borra el registro. Ante un timeout, corte de conexión o 5xx el traslado pudo haberse confirmado: el registro **se conserva** y reintentar con el mismo `id` (clave de idempotencia) lo reconcilia sin repartir dos veces.
-  - Si el reparto se hizo pero no se pudo sacar al asesor del pool, `marcarAusenteIndefinido` responde `BAD_GATEWAY` (no éxito). Reintentar el mismo `id` completa solo ese paso. Si el reintento no llega, la ausencia sigue vigente con `poolPausado = false` y se puede reactivar. Limitación: si la pausa se aplicó pero la respuesta se perdió, el reintento no ve esos buckets como activos y no los recuerda para reanudarlos.
+  - El asesor sale del pool **dentro de la misma transacción** que confirma el traslado (`pausarPoolOrigen`): no hay ventana en la que el motor le asigne cuentas que el reparto no vio, ni un estado «repartido pero sin pausar». Los buckets pausados se guardan en la operación y un replay idempotente los devuelve, así que un reintento tras perder la respuesta no los pierde. `marcarAusenteIndefinido` ya no llama a `pool/pausar` aparte (el endpoint queda disponible).
   - Un traslado con `mantenerEspeciales` puede confirmarse sin cuentas que repartir (asesor sin cartera operativa, o solo con cuentas especiales): igual se lo marca ausente y se lo saca del pool.
   - La devolución verifica el dueño esperado **bajo los mismos locks** de la reasignación en bloque (`duenios_esperados`): lo que un supervisor movió entre la clasificación y la escritura se queda con su nuevo dueño y se informa como retenido (`cambio_de_dueno`).
   - Tras una devolución parcial, el reintento reconoce como ya devuelto lo que una tanda anterior regresó (último cambio de la bitácora = receptor → titular, con el motivo de la devolución), así que los totales de auditoría y del aviso no quedan subcontados.
-  - **Front pendiente:** `marcarAusenteIndefinido` puede devolver `BAD_GATEWAY` con la cartera ya repartida; la pantalla debe ofrecer «Reintentar» con el mismo `id` y `previewId` en lugar de tratarlo como fallo total. Una ausencia sin cuentas por repartir ya no se rechaza.
+  - Dos reactivaciones simultáneas: la que pierde recibe 409 y no vuelve a avisar al equipo (las operaciones de cartera son idempotentes).
+  - Lo que se cancela, queda pendiente de cancelación o cae durante la ausencia se retiene (`fuera_del_funnel`); solo lo que entró en convenio se devuelve aparte.
+  - **Front pendiente:** ante un error de red al marcar ausente, ofrecer «Reintentar» con el mismo `id` y `previewId` (el registro se conserva y se reconcilia). Una ausencia sin cuentas por repartir ya no se rechaza.
 
 ---
 

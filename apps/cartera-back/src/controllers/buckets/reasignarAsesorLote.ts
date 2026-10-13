@@ -7,7 +7,7 @@ import {
   platform_users,
   SQL_CARTERA_SCHEMA,
 } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { bucketActualSql, STATUS_BUCKET_FUERA, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import {
   BUCKETS_CONVENIO_LOCK_KEY,
   CREDITO_ASESOR_LOCK_NAMESPACE,
@@ -56,17 +56,20 @@ export async function leerCreditos(
   ids: number[],
 ): Promise<Map<number, CreditoLoteLeido | null>> {
   const fueraSql = sql.join(STATUS_BUCKET_FUERA.map((s) => sql`${s}`), sql`, `);
+  const cerradoSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
   const idsSql = sql.join(ids.map((id) => sql`${id}`), sql`, `);
   const res = await ejecutor.execute<{
     credito_id: number;
     asesor_id: number | null;
     fuera: boolean;
+    cerrado: boolean;
     bucket: number | null;
   }>(sql`
     SELECT
       c.credito_id,
       c.asesor_id,
       (c."statusCredit" IN (${fueraSql})) AS fuera,
+      (c."statusCredit" IN (${cerradoSql})) AS cerrado,
       ${bucketActualSql("c", "m")} AS bucket
     FROM ${SQL_CARTERA_SCHEMA}.creditos c
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
@@ -81,6 +84,7 @@ export async function leerCreditos(
         fila.fuera || fila.bucket === null || fila.bucket === undefined
           ? null
           : Number(fila.bucket),
+      cerrado: Boolean(fila.cerrado),
     });
   }
   return mapa;

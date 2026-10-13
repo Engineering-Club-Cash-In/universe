@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../database";
 import { asesor_bucket, asesores, SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
+import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import { BUCKETS_CONVENIO_LOCK_KEY, CREDITO_ASESOR_LOCK_NAMESPACE, PROCESAR_MORAS_LOCK_KEY } from "../../lib/buckets-job-locks";
 import { clasificarDevolucion, separarYaDevueltos, type UltimoCambioDueno } from "../../lib/ausencia-devolucion";
 import { leerCreditos, reasignarAsesorLote } from "./reasignarAsesorLote";
@@ -232,6 +233,7 @@ async function devolverSinBucket(params: {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${id})`);
     }
     const idsSql = sql.join(ids.map((id) => sql`${id}`), sql`, `);
+    const cerradoSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
     const res = await tx.execute<{ credito_id: number; asesor_anterior: number; bucket: number | null }>(sql`
       WITH previos AS (
         SELECT c.credito_id, c.asesor_id AS asesor_anterior, d.bucket
@@ -239,6 +241,7 @@ async function devolverSinBucket(params: {
         JOIN ${schema}.operaciones_traslado_cartera_detalle d
           ON d.credito_id = c.credito_id AND d.operacion_id = ${params.operacionId}::uuid
         WHERE c.credito_id IN (${idsSql}) AND c.asesor_id = d.asesor_nuevo_id
+          AND COALESCE(c."statusCredit", '') NOT IN (${cerradoSql})
         FOR UPDATE OF c
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = ${params.titular}

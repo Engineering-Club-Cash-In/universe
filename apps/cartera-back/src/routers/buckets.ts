@@ -199,7 +199,7 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), ponderarPorCapacidad: t.Optional(t.Boolean()), mantenerEspeciales: t.Optional(t.Boolean()), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
+  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), ponderarPorCapacidad: t.Optional(t.Boolean()), mantenerEspeciales: t.Optional(t.Boolean()), pausarPoolOrigen: t.Optional(t.Boolean()), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
   .post("/buckets/traslados/confirmar", async ({ body, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     try { return await confirmarTrasladoCarteraMasivo(body); }

@@ -9,6 +9,8 @@ export type SolicitudTraslado = {
 	ponderarPorCapacidad?: boolean;
 	/** M5: las cuentas fuera del funnel se quedan con el asesor de origen. */
 	mantenerEspeciales?: boolean;
+	/** M5: el asesor de origen sale de su pool en la misma transacción que el traslado. */
+	pausarPoolOrigen?: boolean;
 };
 export type PreviewTraslado = {
 	previewId: string;
@@ -48,6 +50,8 @@ export type ResultadoTraslado = {
 	success: true;
 	operacionId: string;
 	cuentas: number;
+	/** Solo con `pausarPoolOrigen`: los buckets que estaban activos y se pausaron. */
+	bucketsPausados?: number[];
 };
 export type HistorialTraslado = {
 	id: string;

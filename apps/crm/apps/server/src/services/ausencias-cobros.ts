@@ -142,6 +142,9 @@ export async function previsualizarRepartoAusencia(params: {
 			// Una ausencia es temporal: las cuentas fuera del funnel (canceladas,
 			// caídas…) no se gestionan y se quedan con el asesor, no se reparten.
 			mantenerEspeciales: true,
+			// El pool se pausa dentro de la confirmación del traslado: sin ventana
+			// en la que el motor le asigne cuentas que el reparto no incluyó.
+			pausarPoolOrigen: true,
 			actorEmail: params.actorEmail,
 		});
 	} catch (error) {
@@ -163,10 +166,8 @@ export async function marcarAusenteIndefinido(params: {
 		.where(eq(ausenciasAsesorCobros.id, params.id))
 		.limit(1)
 		.then((r) => r[0]);
-	// Reintento del mismo clic: si ya se repartió Y se sacó del pool, se devuelve
-	// lo hecho. Si el reparto ya está pero el pool no se pudo pausar, solo se
-	// completa ese paso.
-	if (existente?.operacionTrasladoId && existente.poolPausado) return existente;
+	// Reintento del mismo clic: si ya se repartió, se devuelve lo hecho.
+	if (existente?.operacionTrasladoId) return existente;
 
 	const { userId: titularId } = await asesorConUsuario(params.asesorId);
 	if (!existente) {
@@ -188,69 +189,50 @@ export async function marcarAusenteIndefinido(params: {
 		}
 	}
 
-	if (!existente?.operacionTrasladoId) {
-		let operacionId: string;
-		let cuentas: number;
-		try {
-			const res = await carteraBackClient.confirmarTrasladoCartera({
-				previewId: params.previewId,
-				idempotencyKey: params.id,
-				actorEmail: params.actor.email,
-			});
-			operacionId = res.operacionId;
-			cuentas = res.cuentas;
-		} catch (error) {
-			// Solo se quita la ausencia si cartera-back RECHAZÓ el traslado (400/404/409):
-			// ahí no se repartió nada. Ante un timeout, corte de conexión o 5xx el
-			// traslado pudo confirmarse sin que llegara la respuesta: el registro se
-			// conserva y el reintento con la misma clave de idempotencia lo reconcilia.
-			if (
-				error instanceof CarteraBackHttpError &&
-				(error.status === 400 || error.status === 404 || error.status === 409)
-			) {
-				await db
-					.delete(ausenciasAsesorCobros)
-					.where(
-						and(
-							eq(ausenciasAsesorCobros.id, params.id),
-							isNull(ausenciasAsesorCobros.operacionTrasladoId),
-						),
-					);
-			}
-			traducirErrorCartera(error);
-		}
-
-		await db
-			.update(ausenciasAsesorCobros)
-			.set({ operacionTrasladoId: operacionId, cuentasRepartidas: cuentas })
-			.where(eq(ausenciasAsesorCobros.id, params.id));
-	}
-
-	// Fuera del pool para que el motor no le mande cuentas nuevas. Si falla no se
-	// revierte el reparto (ya ocurrió) pero tampoco se reporta éxito: la ausencia
-	// queda con `poolPausado = false` y reintentar el mismo clic repite solo este paso.
-	let errorPool: unknown = null;
+	let operacionId: string;
+	let cuentas: number;
+	let buckets: number[];
 	try {
-		const { buckets } = await carteraBackClient.pausarPoolAsesor(
-			params.asesorId,
-		);
-		await db
-			.update(ausenciasAsesorCobros)
-			// En un reintento los buckets ya pausados no vuelven a salir como activos.
-			.set({
-				bucketsPausados: [
-					...new Set([...(existente?.bucketsPausados ?? []), ...buckets]),
-				].sort((a, b) => a - b),
-				poolPausado: true,
-			})
-			.where(eq(ausenciasAsesorCobros.id, params.id));
+		const res = await carteraBackClient.confirmarTrasladoCartera({
+			previewId: params.previewId,
+			idempotencyKey: params.id,
+			actorEmail: params.actor.email,
+		});
+		operacionId = res.operacionId;
+		cuentas = res.cuentas;
+		buckets = res.bucketsPausados ?? [];
 	} catch (error) {
-		console.error(
-			`[ausencias] No se pudo sacar a ${params.asesorId} del pool:`,
-			error,
-		);
-		errorPool = error;
+		// Solo se quita la ausencia si cartera-back RECHAZÓ el traslado (400/404/409):
+		// ahí no se repartió nada ni se pausó el pool. Ante un timeout, corte de
+		// conexión o 5xx el traslado pudo confirmarse sin que llegara la respuesta:
+		// el registro se conserva y el reintento con la misma clave de idempotencia
+		// lo reconcilia (el replay devuelve también los buckets pausados).
+		if (
+			error instanceof CarteraBackHttpError &&
+			(error.status === 400 || error.status === 404 || error.status === 409)
+		) {
+			await db
+				.delete(ausenciasAsesorCobros)
+				.where(
+					and(
+						eq(ausenciasAsesorCobros.id, params.id),
+						isNull(ausenciasAsesorCobros.operacionTrasladoId),
+					),
+				);
+		}
+		traducirErrorCartera(error);
 	}
+
+	// El traslado y la salida del pool son una sola operación en cartera-back.
+	await db
+		.update(ausenciasAsesorCobros)
+		.set({
+			operacionTrasladoId: operacionId,
+			cuentasRepartidas: cuentas,
+			bucketsPausados: buckets,
+			poolPausado: true,
+		})
+		.where(eq(ausenciasAsesorCobros.id, params.id));
 	try {
 		await reconciliarAvisosLlamarCliente();
 	} catch (error) {
@@ -258,12 +240,6 @@ export async function marcarAusenteIndefinido(params: {
 			"[ausencias] No se reconciliaron los avisos de llamadas:",
 			error,
 		);
-	}
-	if (errorPool) {
-		throw new ORPCError("BAD_GATEWAY", {
-			message:
-				"La cartera se repartió, pero no se pudo sacar al asesor del pool de asignación. Reintente para completar el paso.",
-		});
 	}
 	return db
 		.select()
@@ -333,6 +309,14 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 			)
 			.returning();
 
+		// Otra reactivación simultánea ganó la carrera: no se avisa dos veces ni se
+		// reporta éxito (las operaciones de cartera son idempotentes).
+		if (!cerrada) {
+			throw new ORPCError("CONFLICT", {
+				message: "Este asesor ya fue reactivado. Actualice la vista.",
+			});
+		}
+
 		try {
 			await reconciliarAvisosLlamarCliente();
 		} catch (error) {
@@ -349,7 +333,7 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 			actor: params.actor,
 		});
 		return {
-			ausencia: cerrada ?? ausencia,
+			ausencia: cerrada,
 			devueltas: devolucion.devueltos,
 			retenidas: devolucion.retenidos,
 		};

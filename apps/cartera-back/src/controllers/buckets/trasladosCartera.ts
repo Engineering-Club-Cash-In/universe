@@ -26,6 +26,13 @@ export const solicitudTrasladoSchema = z.object({
    * temporales: esas cuentas no se gestionan y no hay nada que repartir.
    */
   mantenerEspeciales: z.boolean().optional(),
+  /**
+   * COBROS-02 M5: al confirmar, el asesor de origen sale de su pool EN LA MISMA
+   * transacción que el traslado (sin ventana en la que el motor le asigne cuentas
+   * que el traslado no vio). Los buckets pausados quedan en la operación y se
+   * devuelven también en un replay idempotente.
+   */
+  pausarPoolOrigen: z.boolean().optional(),
   actorEmail: z.string().email(),
 }).superRefine((v, ctx) => {
   if (v.modo === "traslado_completo" && (!v.asesorDestinoId || v.asesorDestinoId === v.asesorOrigenId)) ctx.addIssue({ code: "custom", message: "Selecciona un destino distinto del origen" });
@@ -297,13 +304,18 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
   const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email() }).parse(raw);
   try {
     return await db.transaction(async tx => {
-    const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
+    const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
     if (!row || row.actor_email !== input.actorEmail) throw new TrasladoConflict("Previsualización no encontrada para este usuario");
     if (row.estado === "confirmada") {
       if (row.idempotency_key !== input.idempotencyKey) throw new TrasladoConflict("La operación ya fue confirmada con otra solicitud");
-      return { success: true as const, operacionId: row.id, cuentas: row.preview.asignaciones.length };
+      return {
+        success: true as const,
+        operacionId: row.id,
+        cuentas: row.preview.asignaciones.length,
+        ...(row.solicitud.pausarPoolOrigen ? { bucketsPausados: row.solicitud.bucketsPausados ?? [] } : {}),
+      };
     }
     // Solo una confirmación NUEVA escribe historial. Un replay idempotente no
     // debe depender de que el actor siga activo después de su operación.
@@ -431,6 +443,16 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== restantesEsperados) {
       throw new TrasladoConflict("El propietario cambió durante la operación");
     }
+    let bucketsPausados: number[] | undefined;
+    if (row.solicitud.pausarPoolOrigen) {
+      const pausados = await tx.execute<{ bucket: number }>(sql`
+        UPDATE ${schema}.asesor_bucket SET activo = false
+        WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo
+        RETURNING bucket`);
+      bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
+      await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados })}::jsonb WHERE id = ${row.id}::uuid`);
+    }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA
     // previsualización choca acá. Sin mapearlo, la violación sube cruda,
     // esquiva el 409 del router y sale como 500 a mitad de transacción —
@@ -444,7 +466,12 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       }
       throw error;
     }
-    return { success: true as const, operacionId: row.id, cuentas: plan.asignaciones.length };
+    return {
+      success: true as const,
+      operacionId: row.id,
+      cuentas: plan.asignaciones.length,
+      ...(bucketsPausados ? { bucketsPausados } : {}),
+    };
     });
   } catch (error) {
     if (esTimeoutDeLock(error)) {

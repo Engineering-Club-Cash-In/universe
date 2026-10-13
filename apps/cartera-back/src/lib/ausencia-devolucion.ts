@@ -11,7 +11,10 @@ export type RetenidoDevolucion = {
 
 export function clasificarDevolucion(
   detalle: readonly { credito_id: number; asesor_nuevo_id: number; bucket: number | null }[],
-  actuales: ReadonlyMap<number, { asesor_id: number | null; bucket: number | null } | null>,
+  actuales: ReadonlyMap<
+    number,
+    { asesor_id: number | null; bucket: number | null; cerrado?: boolean } | null
+  >,
   bucketsDelTitular: ReadonlySet<number>,
 ): { aDevolver: number[]; aDevolverDirecto: number[]; retenidos: RetenidoDevolucion[] } {
   const aDevolver: number[] = [];
@@ -25,7 +28,9 @@ export function clasificarDevolucion(
     if (!hoy || hoy.asesor_id !== d.asesor_nuevo_id) {
       retenidos.push({ credito_id: d.credito_id, motivo: "cambio_de_dueno" });
     } else if (hoy.bucket === null) {
-      if (d.bucket !== null) aDevolverDirecto.push(d.credito_id);
+      // Cancelado/caído durante la ausencia: no se gestiona, se queda donde está.
+      // Solo lo que entró en convenio (sin bucket pero abierto) se devuelve aparte.
+      if (d.bucket !== null && !hoy.cerrado) aDevolverDirecto.push(d.credito_id);
       else retenidos.push({ credito_id: d.credito_id, motivo: "fuera_del_funnel" });
     } else if (!bucketsDelTitular.has(hoy.bucket)) {
       retenidos.push({ credito_id: d.credito_id, motivo: "bucket_fuera_del_pool" });

@@ -341,6 +341,14 @@ export async function marcarAusenteIndefinido(params: {
 			error instanceof CarteraBackHttpError &&
 			(error.status === 400 || error.status === 404 || error.status === 409)
 		) {
+			// Antes de borrar se pregunta a cartera por la clave: un reintento
+			// concurrente (con otra previsualización) pudo confirmar el traslado con
+			// ESTE mismo id mientras esta llamada recibía su rechazo. Si es así el
+			// registro es suyo y no se toca.
+			const confirmada = await reconciliarPendiente(params.id).catch(
+				() => null,
+			);
+			if (confirmada) return confirmada;
 			await db
 				.delete(ausenciasAsesorCobros)
 				.where(
@@ -354,15 +362,30 @@ export async function marcarAusenteIndefinido(params: {
 	}
 
 	// El traslado y la salida del pool son una sola operación en cartera-back.
+	// Upsert: si otra llamada con el mismo id borró el registro pendiente mientras
+	// esta confirmaba, el traslado ya está hecho y el pool pausado en cartera, así
+	// que el registro se vuelve a crear en vez de quedar sin ausencia en el CRM.
+	const datosTraslado = {
+		operacionTrasladoId: operacionId,
+		cuentasRepartidas: cuentas,
+		bucketsPausados: buckets,
+		poolPausado: true,
+	};
 	await db
-		.update(ausenciasAsesorCobros)
-		.set({
-			operacionTrasladoId: operacionId,
-			cuentasRepartidas: cuentas,
-			bucketsPausados: buckets,
-			poolPausado: true,
+		.insert(ausenciasAsesorCobros)
+		.values({
+			id: params.id,
+			asesorId: params.asesorId,
+			titularId,
+			motivo: params.motivo,
+			nota: params.nota || null,
+			creadaPor: params.actor.userId,
+			...datosTraslado,
 		})
-		.where(eq(ausenciasAsesorCobros.id, params.id));
+		.onConflictDoUpdate({
+			target: ausenciasAsesorCobros.id,
+			set: datosTraslado,
+		});
 	try {
 		await reconciliarAvisosLlamarCliente();
 	} catch (error) {
@@ -424,6 +447,21 @@ export async function reactivarAsesor(params: { id: string; actor: Actor }) {
 		.catch(() => null);
 
 	try {
+		// 0. Se deja constancia de que la reactivación empezó. Cartera es otro sistema:
+		// si reanuda el pool y la respuesta se pierde, o el cierre de abajo falla, la
+		// ausencia sigue «vigente» y con esta marca se sabe que hay que repetir la
+		// reactivación (todos los pasos son idempotentes) en vez de dejarla abierta
+		// con el asesor ya elegible en cartera.
+		await db
+			.update(ausenciasAsesorCobros)
+			.set({ reactivacionIniciadaAt: new Date() })
+			.where(
+				and(
+					eq(ausenciasAsesorCobros.id, params.id),
+					eq(ausenciasAsesorCobros.estado, "vigente"),
+					isNull(ausenciasAsesorCobros.reactivacionIniciadaAt),
+				),
+			);
 		// 1. Lo repartido vuelve, salvo lo que ya cambió de dueño o de bucket. El pool
 		// sigue PAUSADO mientras tanto: así el asesor no recibe cuentas nuevas en medio
 		// de la devolución, y si esta falla no hay nada que deshacer.
@@ -562,6 +600,8 @@ export async function listarAusencias(params: { soloVigentes: boolean }) {
 			cuentasDevueltas: ausenciasAsesorCobros.cuentasDevueltas,
 			cuentasRetenidas: ausenciasAsesorCobros.cuentasRetenidas,
 			poolPausado: ausenciasAsesorCobros.poolPausado,
+			// No nulo en una ausencia vigente = reactivación a medias: repetir «Reactivar».
+			reactivacionIniciadaAt: ausenciasAsesorCobros.reactivacionIniciadaAt,
 		})
 		.from(ausenciasAsesorCobros)
 		.leftJoin(user, eq(ausenciasAsesorCobros.titularId, user.id))

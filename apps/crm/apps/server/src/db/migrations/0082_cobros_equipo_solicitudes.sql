@@ -71,11 +71,16 @@ CREATE TABLE IF NOT EXISTS "public"."ausencias_asesor_cobros" (
 	"cuentas_retenidas" integer,
 	"buckets_pausados" integer[] DEFAULT '{}' NOT NULL,
 	"pool_pausado" boolean DEFAULT false NOT NULL,
+	"reactivacion_iniciada_at" timestamp,
 	"creada_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	"reactivada_por" text REFERENCES "public"."user"("id") ON DELETE SET NULL,
 	CONSTRAINT "ausencias_asesor_motivo_check" CHECK ("motivo" IN ('incidente', 'permiso', 'vacaciones')),
 	CONSTRAINT "ausencias_asesor_estado_check" CHECK ("estado" IN ('vigente', 'reactivada'))
 );
+--> statement-breakpoint
+-- Para tablas creadas antes de esta columna.
+ALTER TABLE "public"."ausencias_asesor_cobros"
+	ADD COLUMN IF NOT EXISTS "reactivacion_iniciada_at" timestamp;
 --> statement-breakpoint
 -- Una sola ausencia vigente por asesor.
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_ausencia_asesor_vigente"

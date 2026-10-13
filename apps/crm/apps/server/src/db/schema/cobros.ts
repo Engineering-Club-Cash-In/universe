@@ -1307,6 +1307,10 @@ export const ausenciasAsesorCobros = pgTable(
 		// Buckets del pool que se pausaron (solo esos se reanudan).
 		bucketsPausados: integer("buckets_pausados").array().notNull().default([]),
 		poolPausado: boolean("pool_pausado").notNull().default(false),
+		// Se marca ANTES de devolver cuentas y reanudar el pool en cartera: si el
+		// cierre en el CRM no llega a escribirse, la ausencia sigue «vigente» pero se
+		// sabe que la reactivación quedó a medias y hay que repetirla.
+		reactivacionIniciadaAt: timestamp("reactivacion_iniciada_at"),
 		creadaPor: text("creada_por").references(() => user.id, {
 			onDelete: "set null",
 		}),

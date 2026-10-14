@@ -1714,7 +1714,10 @@ export const legalContractsRouter = {
 			// sale ahora que la oportunidad quedó ganada al 90%. Antes de lo que
 			// puede fallar después del commit (si no, no se volvería a disparar).
 			// Sin esperar y nunca lanza: un correo caído no rompe la confirmación.
-			void enviarFacturaProgramada(input.opportunityId);
+			void enviarFacturaProgramada(input.opportunityId, {
+				userId: context.userId,
+				userRole: context.userRole,
+			});
 
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({

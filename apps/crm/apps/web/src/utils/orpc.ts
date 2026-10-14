@@ -17,6 +17,8 @@ type InvestmentsRouter =
 	typeof import("../../../server/src/routers/investments").investmentsRouter;
 type SatVehiculosRouter =
 	typeof import("../../../server/src/routers/sat-vehiculos").satVehiculosRouter;
+type CartaPoderRouter =
+	typeof import("../../../server/src/routers/carta-poder").cartaPoderRouter;
 
 // Detectar si es un error de sesión/autenticación
 const isSessionError = (error: Error): boolean => {
@@ -83,7 +85,8 @@ type MergedRouter = AppRouter &
 	SatVehiculosRouter &
 	typeof disbursementRouter &
 	typeof proyeccionRouter &
-	typeof buroInternoProcedures;
+	typeof buroInternoProcedures &
+	CartaPoderRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

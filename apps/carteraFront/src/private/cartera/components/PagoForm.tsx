@@ -13,7 +13,7 @@ import {
 import { montoParaAbonoDirectoACapital } from "./abonoDirectoACapital";
 import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
@@ -31,6 +31,19 @@ import {
 } from "@/components/ui/dialog"; 
 import {  DatePickerMUI } from "./calendar";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
+import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
+import {
+  bloqueCondonacionParaEnviar,
+  cascadaSinCondonar,
+  confirmacionEsperaVistaPrevia,
+  estaAceptada,
+  estadoRecuadroBoletaTardia,
+  moraAntesDeCondonar,
+  moraEfectivaParaCobrar,
+  parametrosPreviewBoletaTardia,
+  avisoVistaPreviaFallida,
+} from "./boletaTardia";
+import { useBoletaTardiaPreview } from "../hooks/useBoletaTardiaPreview";
 
 export function PagoForm() {
   const {
@@ -68,6 +81,8 @@ export function PagoForm() {
     cuotaSeleccionada,
     abonosCuota,
     permiteAbonoCapital,
+    fijarCondonacion,
+    soltarCondonacion,
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
@@ -80,6 +95,46 @@ export function PagoForm() {
 
   // 🎯 Estado para el modal de confirmación
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
+  // Boleta tardía: cada apertura del modal es un intento nuevo (aperturaId va en la consulta) y la casilla nace desmarcada.
+  const [aperturaId, setAperturaId] = useState(0);
+  const [aceptadaIntentoId, setAceptadaIntentoId] = useState<string | null>(null);
+  const paramsPreviewBoletaTardia = parametrosPreviewBoletaTardia(
+    {
+      credito_id: formik.values.credito_id,
+      monto_boleta: Number(formik.values.monto_boleta) || 0,
+      otros: Number(formik.values.otros) || 0,
+      abono_directo_capital: Number(formik.values.abono_directo_capital) || 0,
+      fecha_boleta: formik.values.fecha_boleta,
+    },
+    !!creditoCanceladoInfo,
+  );
+  const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia, error: errorVistaPrevia } = useBoletaTardiaPreview(paramsPreviewBoletaTardia, modalConfirmacionOpen, aperturaId);
+  const avisoVistaPrevia = avisoVistaPreviaFallida(falloVistaPrevia, errorVistaPrevia);
+  // Confirmar espera la vista previa: sin ella el pago saldría sin la condonación que el asesor no llegó a ver.
+  const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });
+  const entornoRecuadro = {
+    esCancelacion: !!creditoCanceladoInfo,
+    numeroAutorizacion: formik.values.numeroAutorizacion ?? "",
+    bancoId: Number(formik.values.banco_id) || 0,
+    hayBoleta: archivosParaSubir.length > 0,
+  };
+  const aceptada = estaAceptada(vistaBoletaTardia, aceptadaIntentoId);
+  const estadoRecuadro = estadoRecuadroBoletaTardia(vistaBoletaTardia, entornoRecuadro);
+  useEffect(() => {
+    const bloque = bloqueCondonacionParaEnviar(vistaBoletaTardia, aceptadaIntentoId, entornoRecuadro);
+    fijarCondonacion(bloque, vistaBoletaTardia, !!bloque);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vistaBoletaTardia, aceptadaIntentoId, entornoRecuadro.esCancelacion, entornoRecuadro.numeroAutorizacion, entornoRecuadro.bancoId, entornoRecuadro.hayBoleta]);
+  // Un 409 de condonación: el servidor recalculó. Consulta nueva (intento nuevo), casilla desmarcada y el modal vuelve a abrir.
+  useEffect(() => {
+    if (formik.status?.conflictoCondonacion) {
+      setAperturaId((a) => a + 1);
+      setAceptadaIntentoId(null);
+      setModalConfirmacionOpen(true);
+      formik.setStatus(undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formik.status]);
   const [creditoVisible, setCreditoVisible] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [bancoQuery, setBancoQuery] = useState("");
@@ -138,7 +193,10 @@ export function PagoForm() {
       return;
     }
 
-    // Abrir modal
+    // Abrir modal: intento nuevo y casilla desmarcada
+    soltarCondonacion();
+    setAperturaId((a) => a + 1);
+    setAceptadaIntentoId(null);
     setModalConfirmacionOpen(true);
   };
 
@@ -157,7 +215,13 @@ export function PagoForm() {
    {/* 🎯 MODAL DE CONFIRMACIÓN - ACTUALIZADO CON INFO DE CONVENIO */}
 {/* 🎯 MODAL DE CONFIRMACIÓN - SIMPLIFICADO */}
 {/* 🎯 MODAL DE CONFIRMACIÓN - CON JERARQUÍA DE PAGOS */}
-<Dialog open={modalConfirmacionOpen} onOpenChange={setModalConfirmacionOpen}>
+<Dialog
+  open={modalConfirmacionOpen}
+  onOpenChange={(abierto) => {
+    if (!abierto) setAceptadaIntentoId(null);
+    setModalConfirmacionOpen(abierto);
+  }}
+>
   <DialogContent className="max-w-xl bg-white">
     <DialogHeader>
       <DialogTitle className={`text-2xl font-bold flex items-center gap-2 ${creditoCanceladoInfo ? "text-red-700" : "text-blue-700"}`}>
@@ -220,10 +284,17 @@ export function PagoForm() {
         })()
       ) : (
       /* MODAL DE CONFIRMACION PARA PAGO NORMAL */
-      (() => {
+      <>
+      <BoletaTardiaRecuadro
+        estado={estadoRecuadro}
+        aceptada={aceptada}
+        onCambiarAceptada={(v) => setAceptadaIntentoId(v ? vistaBoletaTardia!.intentoId : null)}
+      />
+      {avisoVistaPrevia && <p role="status" className="text-xs text-gray-500">{avisoVistaPrevia}</p>}
+      {(() => {
         const montoBoleta = Number(formik.values.monto_boleta) || 0;
         const otros = Number(formik.values.otros) || 0;
-        const moraMonto = mora || 0;
+        const moraMonto = moraEfectivaParaCobrar(mora || 0, vistaBoletaTardia, aceptada);
         // rubrosActual ya viaja como number (a diferencia de moraActual, que
         // llega en string cuando hay mora).
         const rubrosMonto = Number(rubrosActual || 0);
@@ -246,7 +317,7 @@ export function PagoForm() {
         // Total disponible = Boleta − abono directo a capital
         let montoRestante = Math.max(0, montoBoleta - abonoCapitalDirecto);
 
-        const distribucion: { concepto: string; monto: number }[] = [];
+        const distribucion: { concepto: string; monto: number; tachado?: number }[] = [];
 
         // Los montos aplicados de cada escalón se declaran acá afuera porque el
         // aviso de "cobro corto" de más abajo tiene que nombrar QUIÉN se llevó
@@ -266,12 +337,13 @@ export function PagoForm() {
         }
 
         // 2 Mora
-        if (moraMonto > 0) {
+        if (moraMonto > 0 || aceptada) {
           montoMoraAplicado = Math.min(montoRestante, Number(moraMonto));
           montoRestante -= montoMoraAplicado;
           distribucion.push({
-            concepto: "2. Mora",
+            concepto: aceptada ? "2. Mora (sin la del retraso)" : "2. Mora",
             monto: montoMoraAplicado,
+            tachado: aceptada ? moraAntesDeCondonar(mora || 0, vistaBoletaTardia, aceptada) : undefined,
           });
         }
 
@@ -378,18 +450,21 @@ export function PagoForm() {
           otros,
         });
 
-        const noSeAplica = loQueElAbonoACapitalNoAplica({
-          mora: montoMoraAplicado,
-          rubros: montoRubrosAplicado,
-          convenio: montoConvenioAplicado,
-          // La cuota es el término que faltaba, y el caso más común: sin ella,
-          // una boleta normal sin mora ni rubros ni convenio dejaba todo en cero
-          // y el aviso no salía.
-          cuota: montoCuotaAplicado,
-          // El excedente es lo que sobra al final de la cascada, que es lo mismo
-          // que el modal pinta como "Excedente (nuevo saldo a favor)".
-          excedente: montoRestante,
-        });
+        // "Abonar todo a Capital" descarta la condonación: con la casilla, el aviso corre la cascada ENTERA
+        // con la mora SIN condonar (lo que la condonación liberaba no puede ir a rubros y cuota a la vez).
+        // Sin la casilla, es el desglose tal cual: la cuota es el término más común (sin ella una boleta
+        // normal dejaba todo en cero y el aviso no salía) y el excedente es lo que el modal pinta como saldo a favor.
+        const noSeAplica = loQueElAbonoACapitalNoAplica(
+          aceptada
+            ? cascadaSinCondonar({
+                disponible: Math.max(0, montoBoleta - abonoCapitalDirecto) - montoOtrosAplicado,
+                mora: moraAntesDeCondonar(Number(mora || 0), vistaBoletaTardia, aceptada),
+                rubros: rubrosMonto,
+                convenio: cuotaConvenio,
+                cuotaNormal,
+              })
+            : { mora: montoMoraAplicado, rubros: montoRubrosAplicado, convenio: montoConvenioAplicado, cuota: montoCuotaAplicado, excedente: montoRestante },
+        );
 
         const textoCausas = consumo.escalones
           .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)
@@ -424,6 +499,9 @@ export function PagoForm() {
                     {item.concepto}
                   </span>
                   <span className="font-bold text-green-700 text-lg">
+                    {item.tachado !== undefined && (
+                      <span className="text-gray-400 line-through mr-2 font-normal">Q{item.tachado.toFixed(2)}</span>
+                    )}
                     Q{item.monto.toFixed(2)}
                   </span>
                 </div>
@@ -594,7 +672,8 @@ export function PagoForm() {
   )}
           </div>
         );
-      })()
+      })()}
+      </>
       )}
     </div>
 
@@ -620,6 +699,7 @@ export function PagoForm() {
         <Button
           onClick={() => {
             setModalConfirmacionOpen(false);
+            setAceptadaIntentoId(null);
             handleAbonoCapitalDirecto();
           }}
           disabled={formik.isSubmitting}
@@ -633,17 +713,21 @@ export function PagoForm() {
     <DialogFooter className="gap-3 mt-6">
       <Button
         variant="outline"
-        onClick={() => setModalConfirmacionOpen(false)}
+        onClick={() => {
+          setAceptadaIntentoId(null);
+          soltarCondonacion();
+          setModalConfirmacionOpen(false);
+        }}
         className="px-6 py-2.5 text-base bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300"
       >
         Cancelar
       </Button>
       <Button
         onClick={handleConfirmarPago}
-        disabled={formik.isSubmitting}
+        disabled={formik.isSubmitting || esperaVistaPrevia}
         className={`px-8 py-2.5 text-base font-bold shadow-md transition-all ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
-        {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelación" : "Confirmar Pago"}
+        {formik.isSubmitting ? "Procesando..." : esperaVistaPrevia ? "Calculando condonación…" : creditoCanceladoInfo ? "Confirmar Cancelación" : "Confirmar Pago"}
       </Button>
     </DialogFooter>
   </DialogContent>

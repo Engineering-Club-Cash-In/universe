@@ -313,8 +313,15 @@
 		{
 			"idx": 43,
 			"version": "7",
-			"when": 1791475300000,
-			"tag": "0050_add_agency_sellers",
+			"when": 1791561600000,
+			"tag": "0050_co_debtors_representante_legal",
+			"breakpoints": true
+		},
+		{
+			"idx": 44,
+			"version": "7",
+			"when": 1791561700000,
+			"tag": "0051_add_agency_sellers",
 			"breakpoints": true
 		}
 	]

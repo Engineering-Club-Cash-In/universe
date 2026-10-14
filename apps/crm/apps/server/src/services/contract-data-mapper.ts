@@ -1,14 +1,16 @@
 /**
  * Servicio para mapear datos del CRM al formato de legal-docs-blueprints
  */
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { creditChecks } from "../db/schema/checks";
-import { companies, leads, opportunities } from "../db/schema/crm";
+import { coDebtors, companies, leads, opportunities } from "../db/schema/crm";
 import { investors } from "../db/schema/investments";
+import { quotations } from "../db/schema/quotations";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
+import { normalizarAseguradora } from "../lib/cobertura-por-aseguradora";
 import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
 import {
 	formatEntityName,
@@ -35,6 +37,14 @@ import {
 	numberToWordsQuetzalesLegal,
 	toUpperCase,
 } from "../lib/contract-utils";
+import type { InsuranceProvider } from "../lib/insurance-selection";
+import {
+	codeudoresDeMas,
+	esOportunidadDeSociedad,
+	faltantesDelRepresentante,
+	nombreDeLaSociedad,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
 
 // Tipos de contratos disponibles
 // Solo incluir tipos que existen en legal-docs-blueprints API
@@ -249,6 +259,41 @@ export interface ContractData {
 		titulo: string;
 		tipoCredito: string;
 		categoria?: string;
+		/**
+		 * La aseguradora de la venta, que decide qué carta de cobertura va. Sale
+		 * de la cotización, como en el cierre: la oportunidad recién la recibe
+		 * al cerrarse, y en 80% todavía tiene la de por defecto.
+		 */
+		aseguradora: InsuranceProvider;
+		/**
+		 * Si es de una sociedad y quién firma por ella (ver
+		 * `lib/oportunidad-de-sociedad.ts`). Los contratos de sociedad no llevan
+		 * codeudores: `codeudoresDeMas` son los que no caben.
+		 */
+		sociedad: {
+			esSociedad: boolean;
+			/** El de la empresa, como va en los contratos (`{nombreSociedad}`). */
+			nombre: string;
+			/**
+			 * Quien firma por la empresa, con lo que los contratos dicen de él: es
+			 * el "Yo, ..." de cada documento. Estado civil y nacionalidad ya van
+			 * con el género de la persona.
+			 */
+			representante: {
+				id: string;
+				nombre: string;
+				dpi: string;
+				email: string;
+				telefono: string;
+				genero: "masculino" | "femenino" | undefined;
+				edad: number | null;
+				estadoCivil: string;
+				nacionalidad: string;
+				profesion: string;
+			} | null;
+			faltaRepresentante: boolean;
+			codeudoresDeMas: number;
+		};
 	};
 }
 
@@ -626,17 +671,45 @@ export async function mapOpportunityToContractData(
 	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
 	// la distribuidora. En usados no aplica; companyId puede haberse heredado
 	// del lead y no necesariamente representa una agencia del vehículo.
-	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
-		? await db
-				.select({ name: companies.name, razonSocial: companies.razonSocial })
-				.from(companies)
-				.where(eq(companies.id, opportunity.companyId))
-				.limit(1)
-		: [];
+	const [empresaAgencia] =
+		vehicle?.isNew === true && opportunity.companyId
+			? await db
+					.select({ name: companies.name, razonSocial: companies.razonSocial })
+					.from(companies)
+					.where(eq(companies.id, opportunity.companyId))
+					.limit(1)
+			: [];
+
+	// Sociedad: la empresa es el lead y su representante legal, un codeudor.
+	const codeudores = await db
+		.select({
+			id: coDebtors.id,
+			fullName: coDebtors.fullName,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+			gender: coDebtors.gender,
+			age: coDebtors.age,
+			maritalStatus: coDebtors.maritalStatus,
+			nationality: coDebtors.nationality,
+			profession: coDebtors.profession,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const deSociedad = { clientType: lead.clientType, coDeudores: codeudores };
+	const esSociedad = esOportunidadDeSociedad(deSociedad);
+	const representante = esSociedad ? representanteLegalDe(deSociedad) : null;
 
 	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
 	// reconoce como sociedad solo después de formatearlo, y si no el contrato
 	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
+	const aseguradora = await aseguradoraDeLaOportunidad(
+		opportunityId,
+		opportunity.insuranceProvider,
+	);
+
 	const nombreEntidad = inversionistaPrincipal
 		? formatEntityName(inversionistaPrincipal.nombre)
 		: null;
@@ -715,8 +788,78 @@ export async function mapOpportunityToContractData(
 			titulo: opportunity.title,
 			tipoCredito: opportunity.creditType || "autocompra",
 			categoria: opportunity.categoria || undefined,
+			aseguradora,
+			sociedad: {
+				esSociedad,
+				nombre: esSociedad ? nombreDeLaSociedad(nombreParts) : "",
+				representante: representante
+					? {
+							id: representante.id,
+							nombre: representante.fullName,
+							dpi: representante.dpi,
+							email: representante.email ?? "",
+							telefono: representante.phone ?? "",
+							// Sin género no se asume: la plantilla (hombre o mujer)
+							// la decide RENAP o lo que elijan en el asistente.
+							genero:
+								representante.gender === "female"
+									? "femenino"
+									: representante.gender === "male"
+										? "masculino"
+										: undefined,
+							edad: representante.age,
+							estadoCivil: mapMaritalStatus(
+								representante.maritalStatus,
+								representante.gender,
+							),
+							nacionalidad: formatNationality(
+								representante.nationality,
+								representante.gender,
+							),
+							profesion: representante.profession ?? "",
+						}
+					: null,
+				faltaRepresentante: esSociedad && !representante,
+				codeudoresDeMas: codeudoresDeMas(deSociedad).length,
+			},
 		},
 	};
+}
+
+/**
+ * La aseguradora de la venta, que decide qué carta de cobertura va.
+ *
+ * Sale de la cotización (la aceptada primero, si no la más reciente), igual
+ * que en el cierre: la oportunidad recién la recibe al cerrarse, y en 80%
+ * todavía tiene la de por defecto.
+ */
+export async function aseguradoraDeLaOportunidad(
+	opportunityId: string,
+	deLaOportunidad?: string | null,
+): Promise<InsuranceProvider> {
+	// Directo y no con `getLatestApprovedQuotation`, que se traga los errores y
+	// devuelve null: acá un error tiene que cortar. Si no, una venta con G&T
+	// caería en la Universales por defecto y se emitiría la carta equivocada.
+	const [cotizacion] = await db
+		.select({ insuranceProvider: quotations.insuranceProvider })
+		.from(quotations)
+		.where(eq(quotations.opportunityId, opportunityId))
+		.orderBy(
+			desc(eq(quotations.status, "accepted")),
+			desc(quotations.createdAt),
+		)
+		.limit(1);
+	if (cotizacion?.insuranceProvider || deLaOportunidad !== undefined) {
+		return normalizarAseguradora(
+			cotizacion?.insuranceProvider ?? deLaOportunidad,
+		);
+	}
+	const [oportunidad] = await db
+		.select({ insuranceProvider: opportunities.insuranceProvider })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	return normalizarAseguradora(oportunidad?.insuranceProvider);
 }
 
 /**
@@ -727,6 +870,8 @@ export interface ValidationResult {
 	missingVehicleFields: string[];
 	missingLeadFields: string[];
 	missingCreditFields: string[];
+	/** Sólo en una sociedad: lo que falta de quien firma por ella. */
+	missingRepresentanteFields: string[];
 	canEnrichFromRenap: boolean;
 }
 
@@ -751,6 +896,7 @@ export async function validateOpportunityForContracts(
 			missingVehicleFields: ["Vehículo no asociado"],
 			missingLeadFields: ["Lead no encontrado"],
 			missingCreditFields: [],
+			missingRepresentanteFields: [],
 			canEnrichFromRenap: false,
 		};
 	}
@@ -759,6 +905,27 @@ export async function validateOpportunityForContracts(
 	const missingVehicleFields: string[] = [];
 	const missingLeadFields: string[] = [];
 	const missingCreditFields: string[] = [];
+	const missingRepresentanteFields: string[] = [];
+
+	// En una sociedad el lead es la empresa: no tiene fecha de nacimiento,
+	// estado civil ni género. Esos datos los ponen los contratos de quien firma
+	// por ella, su representante legal, que es un codeudor.
+	const codeudores = await db
+		.select({
+			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+			gender: coDebtors.gender,
+			age: coDebtors.age,
+			maritalStatus: coDebtors.maritalStatus,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+	const deSociedad = { clientType: lead.clientType, coDeudores: codeudores };
+	const esSociedad = esOportunidadDeSociedad(deSociedad);
 
 	// Validar campos del vehículo
 	if (!vehicle) {
@@ -771,12 +938,19 @@ export async function validateOpportunityForContracts(
 	}
 
 	// Validar campos del lead
-	if (!lead.dpi) missingLeadFields.push("DPI");
-	if (!lead.direccion) missingLeadFields.push("Dirección");
-	if (!lead.maritalStatus) missingLeadFields.push("Estado Civil");
-	if (!lead.gender) missingLeadFields.push("Género");
-	if (!lead.birthDate) missingLeadFields.push("Fecha de Nacimiento");
-	if (!lead.nationality) missingLeadFields.push("Nacionalidad");
+	if (esSociedad) {
+		// La de la empresa: es donde reciben notificaciones los deudores.
+		if (!lead.direccion) missingLeadFields.push("Dirección");
+
+		missingRepresentanteFields.push(...faltantesDelRepresentante(deSociedad));
+	} else {
+		if (!lead.dpi) missingLeadFields.push("DPI");
+		if (!lead.direccion) missingLeadFields.push("Dirección");
+		if (!lead.maritalStatus) missingLeadFields.push("Estado Civil");
+		if (!lead.gender) missingLeadFields.push("Género");
+		if (!lead.birthDate) missingLeadFields.push("Fecha de Nacimiento");
+		if (!lead.nationality) missingLeadFields.push("Nacionalidad");
+	}
 
 	// Validar campos del crédito
 	if (!opportunity.value) missingCreditFields.push("Monto del crédito");
@@ -787,16 +961,20 @@ export async function validateOpportunityForContracts(
 	// Determinar si se puede enriquecer desde RENAP
 	const renapFields = ["Género", "Fecha de Nacimiento", "Nacionalidad"];
 	const canEnrichFromRenap =
-		!!lead.dpi && missingLeadFields.some((f) => renapFields.includes(f));
+		!esSociedad &&
+		!!lead.dpi &&
+		missingLeadFields.some((f) => renapFields.includes(f));
 
 	return {
 		isValid:
 			missingVehicleFields.length === 0 &&
 			missingLeadFields.length === 0 &&
-			missingCreditFields.length === 0,
+			missingCreditFields.length === 0 &&
+			missingRepresentanteFields.length === 0,
 		missingVehicleFields,
 		missingLeadFields,
 		missingCreditFields,
+		missingRepresentanteFields,
 		canEnrichFromRenap,
 	};
 }

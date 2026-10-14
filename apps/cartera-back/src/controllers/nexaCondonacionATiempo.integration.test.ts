@@ -81,6 +81,7 @@ const setup = () => (ready ??= (async () => {
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
     await sql`INSERT INTO cartera.creditos VALUES (${id}, ${`S-${id}`}, 'MOROSO', 10000)`;
     await sql`INSERT INTO cartera.cuotas_credito VALUES (${id * 10 + 4}, ${id}), (${id * 10 + 5}, ${id})`;
@@ -183,7 +184,7 @@ integrationTest("reintento del mismo evento (secuencial y concurrente): una sola
 integrationTest("rechazo definitivo: la anulación compensa el ledger, restituye la mora y libera el evento", async () => {
   const { sql, latefee } = await setup();
   const r = await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 501, motivo: "rechazo" });
-  expect(r).toEqual({ anulada: true, monto: "7.47" });
+  expect(r).toEqual({ anulada: true, monto: "7.47", restituida: true });
   const [mora] = await sql`SELECT monto_mora, activa FROM cartera.moras_credito WHERE credito_id = 1`;
   expect(mora).toEqual({ monto_mora: "119.47", activa: true });
   const [cond] = await sql`SELECT anulada_at FROM cartera.moras_condonaciones WHERE nexa_payment_event_id = 501`;
@@ -223,7 +224,7 @@ integrationTest("la anulación restituye el monto condonado exacto, sin pasar po
     SELECT 3, mora_id, 'NEXA_ACH_A_TIEMPO', 9007199254740991.99, (SELECT id FROM cartera.platform_users LIMIT 1), 599
     FROM cartera.moras_credito WHERE credito_id = 3`;
   const r = await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 599, motivo: "rechazo" });
-  expect(r).toEqual({ anulada: true, monto: "9007199254740991.99" });
+  expect(r).toEqual({ anulada: true, monto: "9007199254740991.99", restituida: true });
   const [mora] = await sql`SELECT monto_mora FROM cartera.moras_credito WHERE credito_id = 3`;
   expect(mora!.monto_mora).toBe("9007199254740992.00");
   const [hist] = await sql`SELECT monto_anterior, monto_nuevo FROM cartera.moras_historial
@@ -386,7 +387,7 @@ integrationTest("un pago posterior ya ANULADO (paymentFalse) no impide anular la
   await sql`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, nexa_payment_event_id, "paymentFalse")
     VALUES (9, 'validated', 1000.00, NULL, true)`;
   expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 509, motivo: "caída" }))
-    .toEqual({ anulada: true, monto: "7.47" });
+    .toEqual({ anulada: true, monto: "7.47", restituida: true });
   const [mora9] = await sql`SELECT monto_mora FROM cartera.moras_credito WHERE credito_id = 9`;
   expect(mora9).toEqual({ monto_mora: "119.47" });
 });

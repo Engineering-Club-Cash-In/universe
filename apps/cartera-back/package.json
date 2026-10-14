@@ -3,6 +3,7 @@
   "version": "1.0.50",
   "scripts": {
     "devTest": "RUST_LOG=error NODE_ENV=DEV bun test ",
+    "test:cableado-boleta-tardia": "bun test src/routers/rolCondonacionBoletaTardia.cableado.test.ts",
     "dev": "RUST_LOG=error   bun run --watch src/index.ts",
     "devStart": "RUST_LOG=error NODE_ENV=DEV bun run src/index.ts",
     "generate": "bunx drizzle-kit generate",

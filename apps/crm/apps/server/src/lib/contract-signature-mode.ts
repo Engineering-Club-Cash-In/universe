@@ -21,15 +21,20 @@ export type SignatureMode = "electronica" | "fisica";
 /**
  * Contratos que se imprimen y se firman a mano.
  *
- * Hoy sólo la declaración de vendedor: la firma el vendedor del vehículo, de
- * quien tenemos nombre y DPI pero no correo, así que no hay a dónde mandarle un
- * link de firma.
+ * La declaración de vendedor la firma el vendedor del vehículo, de quien
+ * tenemos nombre y DPI pero no correo, así que no hay a dónde mandarle un link
+ * de firma. Las cartas poder las firma el representante de la empresa frente al
+ * notario, que legaliza la firma en el mismo papel.
  */
 export const CONTRATOS_FIRMA_FISICA = new Set<string>([
 	"declaracion_vendedor",
 	// El mismo contrato con el identificador viejo del CRM, que todavía queda
 	// guardado en filas generadas por el endpoint anterior.
 	"declaracion_jurada",
+	"carta_cube_andres",
+	"carta_cube_don_alex",
+	"carta_rdbe_don_alex",
+	"carta_rdbe_richard",
 ]);
 
 export function esFirmaFisica(contractType: string): boolean {

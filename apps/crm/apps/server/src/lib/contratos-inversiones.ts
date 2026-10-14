@@ -72,7 +72,20 @@ export const CONTRATOS_DE_INVERSION: readonly ContratoDeInversion[] = [
 	{
 		// Cada anexo lleva dos líneas: la del inversionista y la de quien recibe
 		// por Cube, que va impresa con su nombre en el template.
+		//
+		// Ya no se ofrece (jurídico los separó en dos documentos), pero sigue acá
+		// para reemitir y vincular los que se generaron unificados.
 		tipo: "anexos_confirmacion_participacion_beneficiario",
+		categoria: "individual",
+		entidades: ["CUBE"],
+	},
+	{
+		tipo: "anexo1_confirmacion_participacion",
+		categoria: "individual",
+		entidades: ["CUBE"],
+	},
+	{
+		tipo: "anexo2_designacion_beneficiario",
 		categoria: "individual",
 		entidades: ["CUBE"],
 	},
@@ -133,6 +146,21 @@ export const CONTRATOS_DE_INVERSION: readonly ContratoDeInversion[] = [
 		tipo: "contrato_servicios_cash_in_inversor_general_sociedad",
 		categoria: "sociedad",
 		entidades: ["CUBE", "RDBE"],
+	},
+	{
+		tipo: "contrato_participacion_administracion_cartera_sociedad",
+		categoria: "sociedad",
+		entidades: ["CUBE"],
+	},
+	{
+		tipo: "anexo1_confirmacion_participacion_sociedad",
+		categoria: "sociedad",
+		entidades: ["CUBE"],
+	},
+	{
+		tipo: "anexo2_designacion_beneficiario_sociedad",
+		categoria: "sociedad",
+		entidades: ["CUBE"],
 	},
 ] as const;
 

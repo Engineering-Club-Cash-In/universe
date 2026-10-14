@@ -349,6 +349,18 @@ export const saldoDeRespaldoDeSemillaAnulada = <
     ? semillaAnulada
     : undefined;
 
+/**
+ * ¿La cuota se quedó sin NINGUNA fuente de saldo? Ni una fila viva (cualquier estado, pagada o no)
+ * ni una semilla `no_required` anulada que sirva de respaldo. `insertPayment` no tendría dónde
+ * escribirla y la plata se iría a saldo a favor sin rastro (crédito 365, cuota 4): hay que
+ * rechazar el pago antes de escribir nada.
+ */
+export const cuotaSinFuenteDeSaldo = (
+  pagos: { validationStatus?: string | null; paymentFalse?: boolean | null }[],
+): boolean =>
+  !pagos.some((p) => p.paymentFalse !== true) &&
+  !pagos.some((p) => p.paymentFalse === true && p.validationStatus === "no_required");
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

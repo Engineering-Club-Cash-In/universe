@@ -67,6 +67,7 @@ import {
   resolverCuotaParaFilaSuelta,
   esPagoSaldoElegible,
   saldoDeRespaldoDeSemillaAnulada,
+  cuotaSinFuenteDeSaldo,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -89,7 +90,12 @@ import {
   emitRecoveredDuplicatePendingInstallment,
 } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
-import { condicionUltimaCuotaPagada, pagosExistentesDeCuota, semillaAnuladaDeCuota } from "./registerPaymentQueries";
+import {
+  condicionUltimaCuotaPagada,
+  hayFilaVivaEnCuota,
+  pagosExistentesDeCuota,
+  semillaAnuladaDeCuota,
+} from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -545,6 +551,20 @@ const obtenerInfoCompletaCredito = async (
       }
     }
     const cuotasPendientesUnicas = Array.from(porNumeroCuota.values());
+    // Una cuota sin fila viva ni semilla anulada no tiene dónde escribirse: el loop la saltaría y
+    // la plata quedaría en saldo a favor sin rastro. Se rechaza ACÁ, antes de que la mora, el
+    // "otros" o cualquier cuota escriban algo (el abono solo-capital y el de solo otros no la usan).
+    const cuotaHuerfana = esSoloCapital || pagoSoloOtros
+      ? undefined
+      : cuotasPendientesUnicas.find((item) =>
+          cuotaSinFuenteDeSaldo(cuotasParaValidar.get(item.cuotas_credito.cuota_id)?.pagos ?? []),
+        );
+    if (cuotaHuerfana) {
+      set.status = 409;
+      throw new Error(
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota #${cuotaHuerfana.cuotas_credito.numero_cuota} no tiene ninguna fila de pago viva; revisá la cuota antes de registrar el pago`
+      );
+    }
     const cuotaIdsPendientes = new Set(
       cuotasPagables.map((item) => item.cuotas_credito.cuota_id)
     );
@@ -1330,9 +1350,14 @@ export const insertPayment = async (
         // Cuota sin ninguna fila viva (datos viejos: todas anuladas, crédito 459 cuota 4): la semilla
         // anulada aporta el saldo y hace de `existingPago` para que el pago escriba, pero NUNCA es
         // destino (ver `destinoSobrescribible`): el pago INSERTA una fila nueva y viva.
+        // "Viva" = cualquier fila no anulada, también la `pending` ya pagada que la query de arriba
+        // deja afuera: si esa cerró la cuota, recargarla desde la semilla la sobre-aplica.
+        const hayFilasVivas =
+          allExistingPagos.length > 0 ||
+          (await hayFilaVivaEnCuota(db, cuota.cuotas_credito.cuota_id, credito.credito_id));
         const semillaDeRespaldo = saldoDeRespaldoDeSemillaAnulada({
-          hayFilasVivas: allExistingPagos.length > 0,
-          semillaAnulada: allExistingPagos.length > 0
+          hayFilasVivas,
+          semillaAnulada: hayFilasVivas
             ? undefined
             : await semillaAnuladaDeCuota(db, cuota.cuotas_credito.cuota_id, credito.credito_id),
         });

@@ -49,7 +49,7 @@ interface Escenario {
   /** Prepara datos en la copia (p. ej. un rubro) y devuelve el body parcial para ese crédito. */
   armar: (creditoId: number) => Promise<{ monto: number; otros?: number; abono?: number }>;
   /** Aserciones propias del escenario sobre las filas de la boleta. */
-  verificar?: (r: { delaBoleta: Fila[] }, conIntento: boolean) => void;
+  verificar?: (r: { delaBoleta: Fila[]; antes: Map<number, Fila>; despues: Map<number, Fila> }, conIntento: boolean) => void;
 }
 
 const cuotaDe = async (id: number) =>
@@ -90,7 +90,10 @@ const prepararPlaceholder = async (id: number, o: { anulado?: boolean; marcaViej
     [id, o.anulado ?? null, o.marcaVieja ?? null],
   );
   if (r.rowCount !== 1) throw new Error(`crédito ${id} sin placeholder`);
+  placeholderDe.set(id, r.rows[0].pago_id as number);
 };
+/** pago_id del placeholder que `prepararPlaceholder` tocó, por crédito. */
+const placeholderDe = new Map<number, number>();
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 const ESCENARIOS: Escenario[] = [
@@ -124,13 +127,21 @@ const ESCENARIOS: Escenario[] = [
     armar: async (id) => { await crearRubro(id, 200); return { monto: r2((await cuotaDe(id)) + 200) }; } },
   { nombre: "h2) boleta == rubro (ninguna cuota escribe: fila-rastro)", intento: 9233, control: 761,
     armar: async (id) => { await crearRubro(id, 150); return { monto: 150 }; } },
-  // k) Antes: la fila de la boleta HEREDABA paymentFalse del placeholder anulado (sin intento sigue igual: nace anulada
-  // y por eso el crédito no ve el pago). Con intento nace viva (F3), si no la condonación/compensación no la vería.
-  { nombre: "k) placeholder anulado (paymentFalse=true): con intento nace viva; sin intento hereda true (comportamiento previo)", intento: 8974, control: 9583,
+  // k) Un pago NUNCA reutiliza una fila anulada: antes, sin intento, la boleta pisaba el placeholder anulado y heredaba
+  // paymentFalse=true (el crédito no veía el pago). Ahora, con o sin intento, el placeholder queda intacto y anulado y
+  // la boleta escribe una fila NUEVA y viva (con intento, marcada: lo afirma el núcleo; sin intento, sin marca).
+  { nombre: "k) placeholder anulado (paymentFalse=true): el placeholder queda anulado y la boleta va a una fila nueva viva", intento: 8974, control: 9583,
     armar: async (id) => { await prepararPlaceholder(id, { anulado: true }); return { monto: await cuotaDe(id) }; },
     verificar: (r, conIntento) => {
       expect(r.delaBoleta.length).toBeGreaterThan(0);
-      expect(r.delaBoleta.every((f) => f.paymentFalse === !conIntento)).toBe(true);
+      expect(r.delaBoleta.every((f) => f.paymentFalse === false && !r.antes.has(f.pago_id))).toBe(true);
+      const placeholder = r.despues.get(placeholderDe.get(r.delaBoleta[0]!.credito_id)!)!;
+      const previo = r.antes.get(placeholder.pago_id)!;
+      expect(placeholder.paymentFalse).toBe(true);
+      expect(r.delaBoleta.some((f) => f.pago_id === placeholder.pago_id)).toBe(false);
+      for (const k of ["numeroautorizacion", "monto_aplicado", "boleta_tardia_intento_id", "capital_restante", "interes_restante"])
+        expect(placeholder[k]).toEqual(previo[k]);
+      if (!conIntento) expect(r.delaBoleta.every((f) => f.boleta_tardia_intento_id === null)).toBe(true);
     } },
   // l) Un pago normal (sin intento) que reutiliza con UPDATE un placeholder con marca vieja la BORRA (F4).
   { nombre: "l) placeholder con marca vieja: la reutiliza un pago normal y la marca queda NULL", intento: 9576, control: 9494,
@@ -205,7 +216,7 @@ async function ejecutar(creditoId: number, e: { monto: number; otros?: number; a
       [creditoId, inicio],
     )
   ).rows.map((r: any) => r.pago_id as number);
-  return { res, set, auth, nuevas, cambiadas, delaBoleta, vivasDesde, despues };
+  return { res, set, auth, nuevas, cambiadas, delaBoleta, vivasDesde, antes, despues };
 }
 
 suite("insertPayment E2E: boletaTardiaIntentoId marca TODA fila que escribe la boleta (copia de PROD)", () => {

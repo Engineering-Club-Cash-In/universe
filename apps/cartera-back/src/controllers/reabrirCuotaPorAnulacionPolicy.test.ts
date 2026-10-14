@@ -174,6 +174,22 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     }
   });
 
+  test("INCOBRABLE con capital 0 y anulada validated con abono_capital: la validación ya lo restó, se reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "validated", abono_capital: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+  });
+
+  test("INCOBRABLE con capital 0 y anulada pending: nunca descontó capital, no reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "pending", abono_capital: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital 0 y anulada validated sin abono_capital: no reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "validated", abono_capital: 0, abono_interes: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+  });
+
   test("restantes nulos se tratan como cero", () => {
     const p = plan({ filaAnulada: cierre({ capital_restante: null, membresias: null }) });
     expect(p.replica?.payload.capital_restante).toBe("1000");

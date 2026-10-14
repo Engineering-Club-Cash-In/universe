@@ -14,7 +14,7 @@ interface EnvioAseguradora {
 	sinConfirmar?: boolean;
 }
 
-/** Estado del correo de la factura del seguro subida desde el tracker. */
+/** Estado del correo de la factura del vehículo subida desde el tracker. */
 export function etiquetaEnvioAseguradora(
 	envio: EnvioAseguradora | null | undefined,
 ): { texto: string; className: string } | null {
@@ -65,7 +65,7 @@ export interface ResultadoFacturaSubida {
 	programada?: { aseguradora: string };
 }
 
-/** Aviso tras subir un "Seguro del Vehículo" desde el CRM; null para los demás documentos. */
+/** Aviso tras subir una "Factura del Vehículo" desde el CRM; null para los demás documentos. */
 export function avisoFacturaSubida(
 	resultado: ResultadoFacturaSubida | null | undefined,
 ): { tipo: "success" | "info" | "warning"; texto: string } | null {

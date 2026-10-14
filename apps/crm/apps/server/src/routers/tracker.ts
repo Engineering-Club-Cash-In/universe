@@ -110,7 +110,7 @@ export type CasoTracker = {
 		motivo: string | null;
 		subidaAt: string | null;
 		envio: EstadoEnvioFactura | null;
-		/** Ya hay una factura: con registro de envío, o un "Seguro del Vehículo" de antes. */
+		/** Ya hay una factura: con registro de envío, o una "Factura del Vehículo" de antes. */
 		yaRegistrada: boolean;
 	};
 };
@@ -174,9 +174,9 @@ const filaSelect = {
 	vehicleValue: ultimaCotizacion.vehicleValue,
 	facturaEnvio: insuranceInvoiceSubmissions.status,
 	facturaSubidaAt: insuranceInvoiceSubmissions.createdAt,
-	// Un "Seguro del Vehículo" subido antes de esta función (por ejemplo, el del
+	// Una "Factura del Vehículo" subida antes de esta función (por ejemplo, el del
 	// proceso manual) cuenta como factura ya subida: el tracker no deja otra.
-	seguroPrevio: sql<boolean>`exists (select 1 from ${opportunityDocuments} where ${opportunityDocuments.opportunityId} = ${opportunities.id} and ${opportunityDocuments.documentType} = 'seguro_vehiculo')`,
+	facturaPrevia: sql<boolean>`exists (select 1 from ${opportunityDocuments} where ${opportunityDocuments.opportunityId} = ${opportunities.id} and ${opportunityDocuments.documentType} = 'factura_vehiculo')`,
 };
 
 type Fila = {
@@ -203,7 +203,7 @@ type Fila = {
 	vehicleValue: string | null;
 	facturaEnvio: EstadoEnvioFactura | null;
 	facturaSubidaAt: Date | null;
-	seguroPrevio: boolean;
+	facturaPrevia: boolean;
 };
 
 export function nombreCliente(
@@ -299,7 +299,7 @@ function reglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 		companyId: fila.companyId,
 		sellerId: fila.sellerId,
 		membresias,
-		yaSubida: fila.facturaEnvio != null || fila.seguroPrevio,
+		yaSubida: fila.facturaEnvio != null || fila.facturaPrevia,
 	});
 }
 
@@ -335,7 +335,7 @@ function aCaso(
 			motivo: factura.ok ? null : MENSAJE_MOTIVO[factura.motivo],
 			subidaAt: fila.facturaSubidaAt?.toISOString() ?? null,
 			envio: fila.facturaEnvio ?? null,
-			yaRegistrada: fila.facturaEnvio != null || fila.seguroPrevio,
+			yaRegistrada: fila.facturaEnvio != null || fila.facturaPrevia,
 		},
 	};
 }
@@ -718,7 +718,7 @@ function programableAlCerrar(
 }
 
 /**
- * Antes de subir un "Seguro del Vehículo" desde el CRM: si se mandaría a la
+ * Antes de subir una "Factura del Vehículo" desde el CRM: si se mandaría a la
  * aseguradora y a cuál, o si se puede programar para el cierre. Solo lectura;
  * al guardar se vuelve a validar todo.
  */
@@ -771,7 +771,7 @@ export type ResultadoFacturaDesdeCrm =
 	  };
 
 /**
- * Un "Seguro del Vehículo" subido desde el CRM sigue el mismo envío que la
+ * Una "Factura del Vehículo" subida desde el CRM sigue el mismo envío que la
  * factura del tracker. El documento ya está guardado: si no corresponde
  * mandarlo, se devuelve el motivo y queda como un documento más. Antes del
  * cierre, si el usuario aceptó programarlo, queda registrado como `programado`
@@ -997,7 +997,7 @@ const NOMBRE_ASEGURADORA: Record<Aseguradora, string> = {
 /**
  * Al confirmar los contratos (la oportunidad queda ganada al 90%), manda la
  * factura que el usuario programó al subirla antes del cierre. Solo esa: un
- * "Seguro del Vehículo" subido sin programar (por ejemplo, el del proceso
+ * "Factura del Vehículo" subida sin programar (por ejemplo, el del proceso
  * manual de antes) no sale. Nunca lanza: no puede romper la confirmación.
  */
 export async function enviarFacturaProgramada(
@@ -1054,8 +1054,8 @@ export async function enviarFacturaProgramada(
 					.transaction((savepoint) =>
 						createNotification(
 							{
-								titulo: `Factura del seguro sin enviar - ${datos.cliente}`,
-								descripcion: `La factura del seguro estaba programada para ${NOMBRE_ASEGURADORA[resolverAseguradora(programada.confirmada, null)]}, pero al cierre corresponde ${NOMBRE_ASEGURADORA[aseguradora]}: no se envió. Para enviarla a ${NOMBRE_ASEGURADORA[aseguradora]} hay que borrarla y volver a subirla en los documentos de la oportunidad.`,
+								titulo: `Factura del vehículo sin enviar - ${datos.cliente}`,
+								descripcion: `La factura del vehículo estaba programada para ${NOMBRE_ASEGURADORA[resolverAseguradora(programada.confirmada, null)]}, pero al cierre corresponde ${NOMBRE_ASEGURADORA[aseguradora]}: no se envió. Para enviarla a ${NOMBRE_ASEGURADORA[aseguradora]} hay que borrarla y volver a subirla en los documentos de la oportunidad.`,
 								type: "aviso",
 								createdBy: confirmadoPor.userId,
 								createdByRole: confirmadoPor.userRole,
@@ -1106,7 +1106,7 @@ export async function enviarFacturaProgramada(
 		return await enviarYRegistrar(reservado);
 	} catch (error) {
 		console.error(
-			"[enviarFacturaProgramada] No se pudo enviar la factura del seguro",
+			"[enviarFacturaProgramada] No se pudo enviar la factura del vehículo",
 			error,
 		);
 		return null;
@@ -1356,13 +1356,13 @@ export const trackerRouter = {
 						.select({ id: insuranceInvoiceSubmissions.id })
 						.from(insuranceInvoiceSubmissions)
 						.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
-					const [seguroPrevio] = await tx
+					const [facturaPrevia] = await tx
 						.select({ id: opportunityDocuments.id })
 						.from(opportunityDocuments)
 						.where(
 							and(
 								eq(opportunityDocuments.opportunityId, fila.id),
-								eq(opportunityDocuments.documentType, "seguro_vehiculo"),
+								eq(opportunityDocuments.documentType, "factura_vehiculo"),
 							),
 						)
 						.limit(1);
@@ -1375,7 +1375,7 @@ export const trackerRouter = {
 							companyId: vigente?.companyId ?? null,
 							sellerId: asignado?.sellerId ?? null,
 							facturaEnvio: previa ? "pendiente" : null,
-							seguroPrevio: !!seguroPrevio,
+							facturaPrevia: !!facturaPrevia,
 						},
 						membresias,
 					);
@@ -1391,8 +1391,8 @@ export const trackerRouter = {
 							originalName: nombre,
 							mimeType: subido.mimeType,
 							size: subido.size,
-							documentType: "seguro_vehiculo",
-							description: "Factura del seguro subida desde el tracker",
+							documentType: "factura_vehiculo",
+							description: "Factura del vehículo subida desde el tracker",
 							uploadedBy: context.userId,
 							filePath: subido.key,
 						})
@@ -1610,7 +1610,7 @@ export const trackerRouter = {
 				.limit(1);
 			if (!documento) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "Este caso todavía no tiene factura del seguro",
+					message: "Este caso todavía no tiene factura del vehículo",
 				});
 			}
 			return { url: await getFileUrl(documento.key) };

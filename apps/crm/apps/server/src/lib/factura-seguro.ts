@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { MembresiaSocio } from "./partner-scope";
 
 /**
- * Factura del seguro que el vendedor de la agencia/predio sube desde el
+ * Factura del vehículo que el vendedor de la agencia/predio sube desde el
  * tracker, en la etapa final (90%), antes de que el vehículo pase a Cube.
  */
 export const ETAPA_FACTURA_SEGURO = 90;
@@ -371,13 +371,13 @@ export type MotivoSinFactura =
 
 export const MENSAJE_MOTIVO: Record<MotivoSinFactura, string> = {
 	etapa:
-		"La factura del seguro se sube desde que el crédito está en formalización final (90%)",
-	estado: "Este crédito ya no admite la factura del seguro",
+		"La factura del vehículo se sube desde que el crédito está en formalización final (90%)",
+	estado: "Este crédito ya no admite la factura del vehículo",
 	sin_cerrar:
-		"La factura del seguro se sube cuando el crédito ya está cerrado (ganado)",
+		"La factura del vehículo se sube cuando el crédito ya está cerrado (ganado)",
 	no_es_el_vendedor:
-		"Solo el vendedor asignado puede subir la factura del seguro",
-	ya_subida: "La factura del seguro de este crédito ya fue subida",
+		"Solo el vendedor asignado puede subir la factura del vehículo",
+	ya_subida: "La factura del vehículo de este crédito ya fue subida",
 };
 
 // Solo con el crédito cerrado: en el flujo normal la oportunidad llega a 90%
@@ -423,14 +423,14 @@ export const MENSAJE_SIN_ENVIO_DESDE_CRM: Record<
 	string
 > = {
 	etapa: "la oportunidad todavía no llega a formalización final (90%)",
-	estado: "la oportunidad ya no admite la factura del seguro",
+	estado: "la oportunidad ya no admite la factura del vehículo",
 	sin_cerrar: "la oportunidad todavía no está ganada (crédito sin cerrar)",
 	sin_agencia: "la oportunidad no es de una agencia o predio",
-	ya_subida: "la oportunidad ya tiene su factura del seguro registrada",
+	ya_subida: "la oportunidad ya tiene su factura del vehículo registrada",
 };
 
 /**
- * Si un "Seguro del Vehículo" subido desde el CRM se manda a la aseguradora:
+ * Si una "Factura del Vehículo" subida desde el CRM se manda a la aseguradora:
  * las mismas reglas que el tracker, salvo el vendedor asignado (en el CRM ya
  * filtra el permiso de subir documentos).
  */
@@ -471,11 +471,11 @@ export type MotivoSinReenvio =
 	| "sin_reintentos";
 
 export const MENSAJE_SIN_REENVIO: Record<MotivoSinReenvio, string> = {
-	sin_factura: "Este crédito todavía no tiene la factura del seguro",
-	ya_enviada: "La factura del seguro ya fue enviada a la aseguradora",
-	en_curso: "El envío de la factura del seguro está en curso",
+	sin_factura: "Este crédito todavía no tiene la factura del vehículo",
+	ya_enviada: "La factura del vehículo ya fue enviada a la aseguradora",
+	en_curso: "El envío de la factura del vehículo está en curso",
 	programada:
-		"La factura del seguro se enviará sola al confirmar los contratos",
+		"La factura del vehículo se enviará sola al confirmar los contratos",
 	sin_reintentos: "Esta factura ya usó su único reintento de envío",
 };
 

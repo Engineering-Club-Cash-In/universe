@@ -100,7 +100,7 @@ async function esperar413(respuesta: Response) {
 	});
 }
 
-describe("límite de la factura del seguro", () => {
+describe("límite de la factura del vehículo", () => {
 	test("por defecto admite 10 MB más el margen del multipart", () => {
 		expect(MAXIMO_CUERPO_FACTURA_SEGURO).toBe(11 * 1024 * 1024);
 	});

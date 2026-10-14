@@ -21,7 +21,7 @@ export type AseguradoraConfirmada =
 	| null;
 
 /**
- * Antes de subir un "Seguro del Vehículo": si el server lo va a mandar a la
+ * Antes de subir una "Factura del Vehículo": si el server lo va a mandar a la
  * aseguradora, pide confirmación nombrándola; si todavía no corresponde pero
  * se puede programar para el cierre, pregunta si debe salir sola al confirmar
  * los contratos; si no, sube directo (el aviso de después dice por qué no se
@@ -87,15 +87,14 @@ export function useConfirmarEnvioFactura(opportunityId: string) {
 				<AlertDialogHeader>
 					<AlertDialogTitle>Enviar factura a la aseguradora</AlertDialogTitle>
 					<AlertDialogDescription>
-						{pendiente?.alCierre
-							? "Esta factura se enviará automáticamente por correo electrónico a la aseguradora "
-							: "Esta factura se enviará por correo electrónico a la aseguradora "}
+						¿Está seguro de que subió la factura correcta del vehículo? Esta
+						acción enviará un correo directo a la aseguradora{" "}
 						<span className="font-medium text-foreground">
 							{pendiente?.aseguradora}
 						</span>
 						{pendiente?.alCierre
-							? " cuando la oportunidad quede ganada al 90% (al confirmar los contratos). ¿Está seguro?"
-							: ". ¿Está seguro?"}
+							? ", de forma automática, cuando la oportunidad quede ganada al 90% (al confirmar los contratos)."
+							: "."}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>

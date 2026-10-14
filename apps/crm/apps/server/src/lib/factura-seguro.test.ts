@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { deflateRawSync } from "node:zlib";
+import { documentTypeEnum } from "../db/schema/documents";
 import {
 	CORREOS_POLIZAS_GYT,
 	CORREOS_POLIZAS_INTERNOS,
@@ -672,5 +673,14 @@ describe("tipoPermitidoDesdeCrm", () => {
 		const html = texto("<html><script>x</script></html>");
 		expect(tipoPermitidoDesdeCrm(html, "application/pdf")).toBeNull();
 		expect(tipoPermitidoDesdeCrm(html, DOCX)).toBeNull();
+	});
+});
+
+describe("tipo de documento de la factura", () => {
+	test("la factura del vehículo está en el catálogo y el seguro sigue como documento aparte", () => {
+		// El correo a la aseguradora sale con la factura del vehículo; el
+		// "Seguro del Vehículo" ya no manda nada y sigue disponible como antes.
+		expect(documentTypeEnum.enumValues).toContain("factura_vehiculo");
+		expect(documentTypeEnum.enumValues).toContain("seguro_vehiculo");
 	});
 });

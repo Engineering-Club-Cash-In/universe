@@ -235,7 +235,7 @@ export const quotations = pgTable("quotations", {
 });
 
 // Cotización con la que el cierre armó el crédito (getLatestApprovedQuotation).
-// Después del cierre se pueden crear o aceptar otras, y la factura del seguro
+// Después del cierre se pueden crear o aceptar otras, y la factura del vehículo
 // del tracker tiene que decir lo mismo que el crédito.
 export const opportunityCloseQuotations = pgTable(
 	"opportunity_close_quotations",

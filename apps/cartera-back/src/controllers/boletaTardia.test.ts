@@ -9,7 +9,7 @@ process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la 
 const explota = (nombre: string) => (() => { throw new Error(`no debía llamarse: ${nombre}`); }) as never;
 const depsQueNoSeUsan: DepsBoletaTardia = {
   conLock: explota("conLock"), insertPayment: explota("insertPayment"), decidir: explota("decidir"), condonar: explota("condonar"),
-  anular: explota("anular"), verificarFoto: explota("verificarFoto"), condonacionDelIntento: explota("condonacionDelIntento"), evaluarAlDia: explota("evaluarAlDia"), filasVivas: explota("filasVivas"), condonacionViva: explota("condonacionViva"),
+  anular: explota("anular"), verificarFoto: explota("verificarFoto"), condonacionDelIntento: explota("condonacionDelIntento"), evaluarAlDia: explota("evaluarAlDia"), filasVivas: (async () => []) as never, condonacionViva: explota("condonacionViva"),
 };
 const INTENTO = "00000000-0000-4000-8000-000000000001";
 const cuerpo = (extra: Record<string, unknown> = {}) => ({
@@ -94,7 +94,7 @@ describe("identidad del pago: registerBy sale del actor verificado, no del body"
       ...depsQueNoSeUsan,
       verificarFoto: (async () => null) as never,
       conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
-      filasVivas: (async () => (++llamadas === 1 ? [] : [99])) as never,
+      filasVivas: (async () => (++llamadas <= 2 ? [] : [99])) as never, // 1ª fuera del candado, 2ª dentro, 3ª tras registrar
       condonacionViva: (async () => null) as never,
       decidir: (async () => ({ aplica: true, montoCondonar: "11.20", moraActiva: "20.00", porCuota: [{ cuota_id: 1, numero_cuota: 5, monto: "11.20" }], fechaRegistro: "2026-10-13" })) as never,
       condonar: (async (p: { usuario_email: string }) => { vistos.actorCondonar = p.usuario_email; return { kind: "condonada", condonacion_id: 3, monto: "11.20" }; }) as never,
@@ -158,6 +158,34 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
     const vistos: unknown[] = [];
     await registrarPagoConBoletaTardia({ body: cuerpo(), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "x", motivo: "reusada" }), vistos));
     expect(vistos).toEqual([{ credito_id: 1, intento_id: INTENTO, llaves: ["00000000-0000-4000-8000-000000000001.jpg"] }]);
+  });
+  test("reintento de un intento ya registrado: contesta idempotente sin verificar la foto (R2 caído -> 503)", async () => {
+    let llamadasFoto = 0;
+    const set: { status?: number } = {};
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      verificarFoto: (async () => { llamadasFoto++; return { status: 503, message: "x", motivo: "error_r2" }; }) as never,
+      filasVivas: (async () => [77]) as never,
+      condonacionDelIntento: (async () => ({ condonacion_id: 5, monto: "11.20", anulada: false })) as never,
+    };
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, deps);
+    expect(r).toMatchObject({ success: true, idempotent: true, pago_ids: [77], condonacionBoletaTardia: { condonacion_id: 5, estado: "vigente" } });
+    expect(llamadasFoto).toBe(0);
+    expect(set.status).toBeUndefined(); // y conLock (que explota) no se tocó
+  });
+  test("lo mismo si la foto saldría rechazada (400 reusada): el intento ya registrado manda", async () => {
+    let llamadasFoto = 0;
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      verificarFoto: (async () => { llamadasFoto++; return { status: 400, message: "x", motivo: "reusada" }; }) as never,
+      filasVivas: (async () => [77]) as never,
+      condonacionDelIntento: (async () => null) as never,
+    };
+    const set: { status?: number } = {};
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, deps);
+    expect(r).toMatchObject({ success: true, idempotent: true, pago_ids: [77], condonacionBoletaTardia: null });
+    expect(llamadasFoto).toBe(0);
+    expect(set.status).toBeUndefined();
   });
   test("las validaciones de forma (400) corren antes y no gastan una llamada a R2", async () => {
     const vistos: unknown[] = [];

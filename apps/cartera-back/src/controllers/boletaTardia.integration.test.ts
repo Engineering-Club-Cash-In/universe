@@ -262,11 +262,12 @@ integrationTest("E-12) filas vivas del intento en OTRO crédito no hacen idempot
   void latefee;
 });
 
+// 1ª lectura: reintento fuera del candado; 2ª: dentro; 3ª: tras registrar.
 integrationTest("F2) filasVivas falla después de un registro exitoso: se devuelve el éxito con estado sin_verificar y la condonación se mantiene", async () => {
   const { sql } = await levantarEsquemaBoletaTardia();
   const base = await armar(sql);
   let n = 0;
-  const deps = { ...base, filasVivas: async (c: number, i: string) => { if (++n >= 2) throw new Error("lectura caída"); return base.filasVivas(c, i); } };
+  const deps = { ...base, filasVivas: async (c: number, i: string) => { if (++n >= 3) throw new Error("lectura caída"); return base.filasVivas(c, i); } };
   const { r } = await correr(deps, 24, uuidIntento(124));
   expect(r.success).toBe(true);
   expect(r.condonacionBoletaTardia).toMatchObject({ monto: "7.47", estado: "sin_verificar" });

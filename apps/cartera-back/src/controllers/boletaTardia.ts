@@ -92,6 +92,20 @@ export async function registrarPagoConBoletaTardia(
   const base = pagoSchema.safeParse(ctx.body);
   if (!base.success) { set.status = 400; return validationFailed(base.error.flatten().fieldErrors as never); }
   const p = base.data;
+  const { intentoId, montoAceptado } = bloque.data;
+  // Un reintento de un intento que YA quedó registrado contesta lo ya escrito, sin exigir fecha, foto ni R2 (R2 caído, foto vencida o
+  // "reusada" por el propio pago darían un error falso). Solo lee; la revisión bajo el candado sigue siendo la que ordena dos primeros intentos.
+  const yaRegistrado = async (creditoId: number) => {
+    const previas = await deps.filasVivas(creditoId, intentoId);
+    if (previas.length === 0) return null;
+    const c = await deps.condonacionDelIntento(creditoId, intentoId);
+    return {
+      success: true, idempotent: true, message: "El pago ya estaba registrado", pago_ids: previas,
+      condonacionBoletaTardia: c ? { condonacion_id: c.condonacion_id, monto: c.monto, estado: c.anulada ? "anulada_no_quedo_al_dia" as const : "vigente" as const } : null,
+    };
+  };
+  const reintento = await yaRegistrado(p.credito_id);
+  if (reintento) return reintento;
   // El freno de duplicados compara exacto: " A-1" ≠ "A-1" registraría (y condonaría) dos veces.
   const numeroAutorizacion = p.numeroAutorizacion?.trim();
   const faltantes = camposObligatoriosCondonacion({ ...p, numeroAutorizacion });
@@ -100,7 +114,6 @@ export async function registrarPagoConBoletaTardia(
   if (errorFecha) { set.status = 400; return validationFailed({ fecha_boleta: [errorFecha] }); }
 
   // La foto es el control antifraude: se verifica en R2 ANTES del candado (no se retiene el lock del crédito esperando a la red).
-  const { intentoId, montoAceptado } = bloque.data;
   const rechazoFoto = await deps.verificarFoto({ credito_id: p.credito_id, intento_id: intentoId, llaves: p.url_boletas });
   if (rechazoFoto) {
     // Lo que ve el cliente es el mensaje; el motivo y los metadatos (sin credenciales ni URLs) quedan solo en el log.
@@ -119,15 +132,9 @@ export async function registrarPagoConBoletaTardia(
   const creditoId = p.credito_id;
 
   return deps.conLock(creditoId, async (paymentLock) => {
-    // 1. Idempotencia: ya hay filas vivas de ESTE crédito con ese intento → no se vuelve a registrar.
-    const previas = await deps.filasVivas(creditoId, intentoId);
-    if (previas.length > 0) {
-      const c = await deps.condonacionDelIntento(creditoId, intentoId);
-      return {
-        success: true, idempotent: true, message: "El pago ya estaba registrado", pago_ids: previas,
-        condonacionBoletaTardia: c ? { condonacion_id: c.condonacion_id, monto: c.monto, estado: c.anulada ? "anulada_no_quedo_al_dia" as const : "vigente" as const } : null,
-      };
-    }
+    // 1. Idempotencia (otra vez, ya con el candado: dos primeros intentos simultáneos solo se ordenan acá).
+    const repetido = await yaRegistrado(creditoId);
+    if (repetido) return repetido;
 
     let cond: Awaited<ReturnType<DepsBoletaTardia["condonar"]>>;
     try {

@@ -2853,7 +2853,8 @@ export async function anularCondonacionNexaATiempo({
   usuario_email?: string;
   dbClient?: typeof db;
 }): Promise<
-  | { anulada: boolean; monto?: string; motivo?: undefined }
+  /** `restituida: false` = anulada sin sumar el monto a la mora (p. ej. ledger ya compensado por ruptura de convenio). */
+  | { anulada: boolean; monto?: string; restituida?: boolean; motivo?: undefined }
   | {
       anulada: false;
       motivo: "pago_posterior_no_vinculado";
@@ -2933,7 +2934,7 @@ export async function anularCondonacionNexaATiempo({
       usuarioId: user?.id ?? null,
       reactivarMora: false,
     });
-    return r.anulada ? { anulada: true as const, monto: r.monto } : { anulada: false as const };
+    return r.anulada ? { anulada: true as const, monto: r.monto, restituida: r.restituida } : { anulada: false as const };
   });
 }
 

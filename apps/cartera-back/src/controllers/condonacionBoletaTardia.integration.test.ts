@@ -207,7 +207,7 @@ integrationTest("Nexa sigue igual: condona por evento y anula por evento", async
     nexa_payment_event_id: 1301, motivo: "NEXA_ACH_A_TIEMPO",
   });
   expect(c.kind).toBe("condonada");
-  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 1301, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 1301, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47", restituida: true });
   const [m] = await sql`SELECT monto_mora FROM cartera.moras_credito WHERE credito_id = 13`;
   expect(m!.monto_mora).toBe("119.47");
   const hist = await sql`SELECT origen FROM cartera.moras_historial WHERE credito_id = 13 ORDER BY historial_id`;
@@ -286,7 +286,7 @@ integrationTest("#1980 Nexa: tras la ruptura del convenio, anular por evento mar
   });
   expect(c.kind).toBe("condonada");
   await romperConvenio(e, 32, "150.00");
-  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 3201, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 3201, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47", restituida: false });
   const [m] = await sql`SELECT monto_mora FROM cartera.moras_credito WHERE credito_id = 32`;
   expect(m!.monto_mora).toBe("150.00");
   const tipos = await sql`SELECT tipo FROM cartera.mora_pagada_cuota WHERE credito_id = 32 ORDER BY id`;

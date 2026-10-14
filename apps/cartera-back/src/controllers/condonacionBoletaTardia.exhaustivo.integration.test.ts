@@ -830,7 +830,7 @@ integrationTest("NEXA: anular por evento restituye la mora con origen Nexa, es i
   const c = await nuevoCredito(env);
   const e = nuevoEvento();
   await condonarNexa(env, c, e);
-  expect(await env.latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: e, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await env.latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: e, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47", restituida: true });
   expect(await env.latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: e, motivo: "otra vez" })).toEqual({ anulada: false });
   expect(await mora(env, c)).toEqual({ monto_mora: "119.47", activa: true });
   const hist = await env.sql`SELECT origen FROM cartera.moras_historial WHERE credito_id = ${c} ORDER BY historial_id`;
@@ -855,20 +855,20 @@ integrationTest("NEXA: la guarda 'pago posterior no vinculado' sigue; un pago an
   expect(mc!.motivo.length).toBeGreaterThan("NEXA_ACH_A_TIEMPO".length); // quedó la marca
   // a2) con porPagoPendienteRevertido la guarda no aplica
   expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: ea, motivo: "pendiente caído", porPagoPendienteRevertido: true }))
-    .toEqual({ anulada: true, monto: "7.47" });
+    .toEqual({ anulada: true, monto: "7.47", restituida: true });
   expect(await mora(env, a)).toEqual({ monto_mora: "119.47", activa: true });
   // b) pago posterior pero anulado (paymentFalse): no cuenta
   const b = await nuevoCredito(env);
   const eb = nuevoEvento();
   await condonarNexa(env, b, eb);
   await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, validation_status, monto_aplicado, "paymentFalse") VALUES (${b}, ${b * 10 + 5}, 'VALIDATED', 100, true)`;
-  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: eb, motivo: "x" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: eb, motivo: "x" })).toEqual({ anulada: true, monto: "7.47", restituida: true });
   // c) pago vinculado al MISMO evento: no cuenta
   const c = await nuevoCredito(env);
   const ec = nuevoEvento();
   await condonarNexa(env, c, ec);
   await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, validation_status, monto_aplicado, nexa_payment_event_id) VALUES (${c}, ${c * 10 + 5}, 'VALIDATED', 100, ${ec})`;
-  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: ec, motivo: "x" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: ec, motivo: "x" })).toEqual({ anulada: true, monto: "7.47", restituida: true });
 });
 
 integrationTest("NEXA vs BT: la boleta tardía NUNCA aplica la guarda de pago posterior (anula aunque haya pagos posteriores)", async () => {
@@ -893,7 +893,7 @@ integrationTest("AISLAMIENTO: cada anulación toca solo lo suyo: BT no anula Nex
   expect(await anularPorIntento(env, { intento_id: nuevoIntento(), motivo: "x" })).toEqual({ anulada: false });
   expect((await mora(env, c)).monto_mora).toBe("109.00");
   // Nexa anula la suya sin afectar la BT
-  expect(await env.latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: evento, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47" });
+  expect(await env.latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: evento, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47", restituida: true });
   expect((await mora(env, c)).monto_mora).toBe("116.47");
   const vivas = await env.sql`SELECT condonacion_id FROM cartera.moras_condonaciones WHERE credito_id = ${c} AND anulada_at IS NULL`;
   expect(vivas.map((v) => v.condonacion_id)).toEqual([rb.condonacion_id]);

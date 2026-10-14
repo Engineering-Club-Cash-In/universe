@@ -371,7 +371,7 @@ export function OpcionesAcuerdo({
 	onNotasChange,
 }: {
 	opciones: AccionGestion[];
-	/** «Solicitar rebaja de mora» (Pronto). */
+	/** «Solicitar rebaja de mora». */
 	secundaria?: AccionGestion | null;
 	/** La nota compartida entre los 3 resultados (R2-13). */
 	notas?: string;

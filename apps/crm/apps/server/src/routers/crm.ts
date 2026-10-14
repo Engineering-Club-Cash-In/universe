@@ -7240,7 +7240,7 @@ export const crmRouter = {
 			return documentsWithUrls;
 		}),
 
-	// Para la confirmación del CRM antes de subir un "Seguro del Vehículo".
+	// Para la confirmación del CRM antes de subir una "Factura del Vehículo".
 	getEnvioFacturaSeguroCrm: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
@@ -7277,7 +7277,7 @@ export const crmRouter = {
 					size: z.number(),
 					key: z.string(), // R2 key from presigned upload
 				}),
-				// "Seguro del Vehículo": la aseguradora a la que el usuario confirmó
+				// "Factura del Vehículo": la aseguradora a la que el usuario confirmó
 				// el envío. Sin esto la factura se guarda pero no se manda.
 				// { programado }: aceptó que salga sola a esa aseguradora al
 				// confirmar los contratos.
@@ -7490,11 +7490,11 @@ export const crmRouter = {
 				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
 			}
 
-			// La factura del seguro subida desde el CRM también va a la aseguradora
+			// La factura del vehículo subida desde el CRM también va a la aseguradora
 			// (mismo envío que el tracker). El documento ya quedó guardado: un
 			// error del envío se informa sin tumbar la subida.
 			const facturaSeguro: ResultadoFacturaDesdeCrm | null =
-				input.documentType === "seguro_vehiculo"
+				input.documentType === "factura_vehiculo"
 					? await enviarFacturaSeguroDesdeCrm({
 							opportunityId: input.opportunityId,
 							documentId: newDocument.id,
@@ -7506,7 +7506,7 @@ export const crmRouter = {
 							userRole: context.userRole,
 						}).catch((error) => {
 							console.error(
-								"[uploadOpportunityDocument] No se pudo enviar la factura del seguro",
+								"[uploadOpportunityDocument] No se pudo enviar la factura del vehículo",
 								error,
 							);
 							return {
@@ -7551,7 +7551,7 @@ export const crmRouter = {
 				});
 			}
 
-			// La factura del seguro registrada para la aseguradora es el respaldo
+			// La factura del vehículo registrada para la aseguradora es el respaldo
 			// del correo: borrarla permitiría subir y enviar otra. Una programada
 			// para el cierre todavía no salió y sí se puede quitar.
 			const [facturaRegistrada] = await db
@@ -7565,7 +7565,7 @@ export const crmRouter = {
 			if (facturaRegistrada && facturaRegistrada.status !== "programado") {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"Esta factura del seguro ya se registró para la aseguradora y no se puede eliminar",
+						"Esta factura del vehículo ya se registró para la aseguradora y no se puede eliminar",
 				});
 			}
 			if (facturaRegistrada) {
@@ -7595,7 +7595,7 @@ export const crmRouter = {
 				if (!borrada) {
 					throw new ORPCError("CONFLICT", {
 						message:
-							"Esta factura del seguro ya empezó a enviarse a la aseguradora y no se puede eliminar",
+							"Esta factura del vehículo ya empezó a enviarse a la aseguradora y no se puede eliminar",
 					});
 				}
 				await deleteFileFromR2(document.filePath).catch(() => {});

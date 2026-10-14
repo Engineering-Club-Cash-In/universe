@@ -4495,6 +4495,7 @@ function DocumentsManager({
 		{ value: "multas_vehiculo", label: "Multas del Vehículo" },
 		// === Documentos Etapa 90% (Cierre) ===
 		{ value: "seguro_vehiculo", label: "Seguro del Vehículo" },
+		{ value: "factura_vehiculo", label: "Factura del Vehículo" },
 		{
 			value: "inscripcion_garantia_mobiliaria",
 			label: "Inscripción Garantía Mobiliaria",
@@ -4915,7 +4916,7 @@ function DocumentsManager({
 							(documentType === "other" && !description.trim())
 						}
 						onClick={() => {
-							if (documentType === "seguro_vehiculo") {
+							if (documentType === "factura_vehiculo") {
 								void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
 									uploadMutation.mutate(confirmada),
 								);

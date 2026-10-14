@@ -136,7 +136,7 @@ export const ESTADOS_ENVIO_FACTURA = [
 ] as const;
 export type EstadoEnvioFactura = (typeof ESTADOS_ENVIO_FACTURA)[number];
 
-// Factura del seguro subida desde el tracker: el archivo vive en
+// Factura del vehículo subida desde el tracker: el archivo vive en
 // opportunity_documents; aquí queda a quién se mandó y cómo terminó el envío.
 export const insuranceInvoiceSubmissions = pgTable(
 	"insurance_invoice_submissions",

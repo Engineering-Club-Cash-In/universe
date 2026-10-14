@@ -21,7 +21,7 @@ const setup = async () => {
   await sql`CREATE TYPE cartera.mora_evento_origen AS ENUM
     ('PROCESO_AUTO','API_MANUAL','CONDONACION_INDIVIDUAL','CONDONACION_MASIVA')`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY,
-    numero_credito_sifco text, estado_devolucion text, cuota numeric(18,2), "statusCredit" text)`;
+    numero_credito_sifco text, estado_devolucion text, cuota numeric(18,2), "statusCredit" text, capital numeric(18,2))`;
   await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY, credito_id integer, pagado boolean DEFAULT false)`;
   await sql`CREATE TABLE cartera.moras_historial (historial_id serial PRIMARY KEY,
     credito_id integer NOT NULL, mora_id integer, tipo_evento text NOT NULL,
@@ -44,7 +44,7 @@ const setup = async () => {
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql.unsafe(await migracion("0043_mora_pagada_cuota.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
-  await sql`INSERT INTO cartera.creditos VALUES (1, 'S-1', NULL, 2455.61, 'ACTIVO')`;
+  await sql`INSERT INTO cartera.creditos VALUES (1, 'S-1', NULL, 2455.61, 'ACTIVO', 10000)`;
   await sql`INSERT INTO cartera.cuotas_credito VALUES (48, 1, false)`;
   return { sql };
 };
@@ -146,5 +146,20 @@ integrationTest("un pago de solo mora (sin abonos a la cuota) no reabre ni repon
 
   const [parcial] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
   expect(parcial).toMatchObject({ pagado: true, capital: 0 });
+  await sql.end();
+});
+
+integrationTest("crédito PENDIENTE_CANCELACION: la cuota también se reabre (ACTIVAR lo devuelve a ACTIVO sin tocar cuotas)", async () => {
+  const { sql } = await setup();
+  await sql`UPDATE cartera.creditos SET "statusCredit" = 'PENDIENTE_CANCELACION' WHERE credito_id = 1`;
+  const { parcialId, cierreId } = await parcialYCierre(sql);
+  await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+
+  await anular(cierreId);
+
+  const [parcial] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
+  expect(parcial).toMatchObject({ pagado: false, capital: 1294.23 });
+  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
+  expect(cuota!.pagado).toBe(false);
   await sql.end();
 });

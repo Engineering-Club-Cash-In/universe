@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   calcularCoberturaCuota,
   cuentaComoHermanoVivo,
@@ -59,7 +60,7 @@ export type RestantesFila = {
 };
 
 export type FilaAnulada = RubrosCuotaRow &
-  RestantesFila & { cuota_id?: number | null };
+  RestantesFila & { cuota_id?: number | null; validationStatus?: string | null };
 
 export type PlanReaperturaCuota = {
   /** Restantes a estampar en las filas vivas de la cuota (null: no tocar). */
@@ -136,9 +137,15 @@ export function planReaperturaCuotaPorAnulacion({
   });
 
   // Solo el `pagado` depende de la cuota y del estado (ver el bloque de arriba).
+  // La validación ya restó el abono de `creditos.capital` y `falsePayment` no lo devuelve
+  // (pendiente aparte): se evalúa con el capital de ANTES del pago, como `reversePayment`
+  // (~375-396), y solo si el pago estaba aplicado. Un pending nunca descontó capital.
+  const capitalPrevio = new Big(capital ?? 0).plus(
+    esPagoAplicado(filaAnulada.validationStatus) ? (filaAnulada.abono_capital ?? 0) : 0,
+  );
   const incobrablePagada = shouldIncobrableInstallmentBePaid({
     statusCredit,
-    capital: capital === null || capital === undefined ? 0 : String(capital),
+    capital: capitalPrevio.toString(),
     abonoCapital: 0,
   });
   const reabrir =

@@ -5,7 +5,8 @@
 --
 -- ── ORDEN DE DESPLIEGUE ─────────────────────────────────────────────────────
 -- 0053 (manual) -> 0054 -> 0055 (manual) -> 0056 -> código. Tabla chica: sin CONCURRENTLY, corre normal
--- (psql -f). lock_timeout evita encolarse detrás de una transacción larga. Es idempotente. Sin él el código
+-- (psql -v ON_ERROR_STOP=1 -f 0056_idx_condonaciones_intento.sql; sin ON_ERROR_STOP psql sale con 0 tras
+-- un error). lock_timeout evita encolarse detrás de una transacción larga. Es idempotente. Sin él el código
 -- funciona, pero cada pago con intento hace scan secuencial de moras_condonaciones.
 -- Verificación:
 --   SELECT indexrelid::regclass, indisvalid FROM pg_index

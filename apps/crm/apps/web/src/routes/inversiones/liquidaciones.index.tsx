@@ -14,19 +14,22 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+	InvestorFormLayout,
+	investorFormDialogClassName,
+} from "@/components/investments/InvestorFormLayout";
 import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
-	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -45,11 +48,11 @@ import {
 	disparadorDeteccion,
 	type IdentidadDetectada,
 } from "@/lib/deteccion-empresa";
-import { PERMISSIONS } from "@/lib/roles";
 import {
 	MODALIDAD_FACTURACION_LABELS,
 	type ModalidadFacturacion,
 } from "@/lib/modalidad-facturacion";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/liquidaciones/")({
@@ -84,7 +87,8 @@ function LiquidacionesInversionistas() {
 	>([]);
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
-	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
+	const [formTipoReinversion, setFormTipoReinversion] =
+		useState("sin_reinversion");
 	const [formMontoReinversion, setFormMontoReinversion] = useState("");
 	// Compra de cartera opcional
 	const [hacerCompra, setHacerCompra] = useState(false);
@@ -168,7 +172,10 @@ function LiquidacionesInversionistas() {
 
 	// Al encontrar a la persona, el formulario pasa a modo empresa solo.
 	useEffect(() => {
-		const identidad = identidadQuery.data as IdentidadDetectada | null | undefined;
+		const identidad = identidadQuery.data as
+			| IdentidadDetectada
+			| null
+			| undefined;
 		if (!identidad || formDpiRepLegal) return;
 		// Apagar la query NO borra lo que ya tiene en caché: al descartar la
 		// detección, el DPI vuelve al campo, la clave vuelve a ser la de antes y
@@ -366,7 +373,7 @@ function LiquidacionesInversionistas() {
 			input: { page: 1, perPage: 100 },
 		}),
 		enabled: !!session,
-	})
+	});
 
 	const bancosQuery = useQuery({
 		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
@@ -543,20 +550,21 @@ function LiquidacionesInversionistas() {
 												Factura
 											</Badge>
 										)}
-										{inv.tipoReinversion && inv.tipoReinversion !== "sin_reinversion" && (
-											<Badge
-												variant="outline"
-												className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
-											>
-												{{
-													reinversion_capital: "Reinversión Capital",
-													reinversion_interes: "Reinversión Interés",
-													reinversion_total: "Reinversión Total",
-													reinversion_variable: "Reinversión Variable",
-													reinversion_combinada: "Reinversión Combinada",
-												}[inv.tipoReinversion as string] ?? "Reinversión"}
-											</Badge>
-										)}
+										{inv.tipoReinversion &&
+											inv.tipoReinversion !== "sin_reinversion" && (
+												<Badge
+													variant="outline"
+													className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
+												>
+													{{
+														reinversion_capital: "Reinversión Capital",
+														reinversion_interes: "Reinversión Interés",
+														reinversion_total: "Reinversión Total",
+														reinversion_variable: "Reinversión Variable",
+														reinversion_combinada: "Reinversión Combinada",
+													}[inv.tipoReinversion as string] ?? "Reinversión"}
+												</Badge>
+											)}
 										<InvestorStatusBadge
 											status={(inv as any).status}
 											size="sm"
@@ -576,208 +584,239 @@ function LiquidacionesInversionistas() {
 					if (!open) resetForm();
 				}}
 			>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-					<DialogHeader>
-						<DialogTitle>Crear Inversionista</DialogTitle>
-						<DialogDescription>
-							Completa los datos del nuevo inversionista
-						</DialogDescription>
-					</DialogHeader>
+				<DialogContent className={investorFormDialogClassName}>
+					<InvestorFormLayout
+						header={
+							<DialogHeader>
+								<DialogTitle>Crear Inversionista</DialogTitle>
+								<DialogDescription>
+									Completa los datos del nuevo inversionista
+								</DialogDescription>
+							</DialogHeader>
+						}
+						personal={
+							<>
+								{/* Nombre */}
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-nombre">Nombre *</Label>
+									<Input
+										id="inv-nombre"
+										value={formNombre}
+										onChange={(e) => {
+											setFormNombre(e.target.value);
+											limpiarDuplicado("nombre");
+										}}
+										placeholder="Nombre completo"
+										aria-invalid={duplicadoEn("nombre")}
+										className={
+											duplicadoEn("nombre") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeDuplicado campo="nombre" />
+								</div>
 
-					<div className="space-y-4 py-2">
-						{/* Nombre */}
-						<div className="space-y-1.5">
-							<Label htmlFor="inv-nombre">Nombre *</Label>
-							<Input
-								id="inv-nombre"
-								value={formNombre}
-								onChange={(e) => {
-									setFormNombre(e.target.value);
-									limpiarDuplicado("nombre");
-								}}
-								placeholder="Nombre completo"
-								aria-invalid={duplicadoEn("nombre")}
-								className={
-									duplicadoEn("nombre") ? "border-destructive" : undefined
-								}
-							/>
-							<MensajeDuplicado campo="nombre" />
-						</div>
+								{/* DPI. Desaparece cuando se detectó a la persona: la
+								    sociedad no tiene DPI propio, el que se escribió pasó a
+								    ser el del representante y se muestra en el aviso. */}
+								<div className={personaDetectada ? "hidden" : "space-y-1.5"}>
+									<Label htmlFor="inv-dpi">DPI</Label>
+									<Input
+										id="inv-dpi"
+										value={formDpi}
+										onChange={(e) => {
+											setFormDpi(e.target.value);
+											limpiarDuplicado("dpi");
+										}}
+										placeholder="Número de DPI"
+										aria-invalid={duplicadoEn("dpi")}
+										className={
+											duplicadoEn("dpi") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeDuplicado campo="dpi" />
+								</div>
 
-						{/* DPI + Email. El DPI desaparece cuando se detectó a la
-						    persona: la sociedad no tiene DPI propio, el que se escribió
-						    pasó a ser el del representante y se muestra en el aviso. */}
-						<div
-							className={
-								personaDetectada ? "space-y-1.5" : "grid grid-cols-2 gap-3"
-							}
-						>
-							<div
-								className={personaDetectada ? "hidden" : "space-y-1.5"}
-							>
-								<Label htmlFor="inv-dpi">DPI</Label>
-								<Input
-									id="inv-dpi"
-									value={formDpi}
-									onChange={(e) => {
-										setFormDpi(e.target.value);
-										limpiarDuplicado("dpi");
-									}}
-									placeholder="Número de DPI"
-									aria-invalid={duplicadoEn("dpi")}
-									className={
-										duplicadoEn("dpi") ? "border-destructive" : undefined
-									}
-								/>
-								<MensajeDuplicado campo="dpi" />
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="inv-email">Email</Label>
-								<Input
-									id="inv-email"
-									type="email"
-									value={formEmail}
-									onChange={(e) => {
-										setFormEmail(e.target.value);
-										limpiarDuplicado("email");
-									}}
-									placeholder="correo@ejemplo.com"
-									aria-invalid={duplicadoEn("email")}
-									className={
-										duplicadoEn("email") ? "border-destructive" : undefined
-									}
-								/>
-								<MensajeDuplicado campo="email" />
-							</div>
-						</div>
-
-						{/* Banco + Tipo cuenta */}
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="inv-banco">Banco</Label>
-								<Select
-									value={formBanco}
-									onValueChange={setFormBanco}
-								>
-									<SelectTrigger id="inv-banco">
-										<SelectValue placeholder="Seleccionar banco..." />
-									</SelectTrigger>
-									<SelectContent>
-										{bancos.map((b: any) => (
-											<SelectItem
-												key={b.banco_id}
-												value={String(b.banco_id)}
-											>
-												{b.nombre}
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-email">Email</Label>
+									<Input
+										id="inv-email"
+										type="email"
+										value={formEmail}
+										onChange={(e) => {
+											setFormEmail(e.target.value);
+											limpiarDuplicado("email");
+										}}
+										placeholder="correo@ejemplo.com"
+										aria-invalid={duplicadoEn("email")}
+										className={
+											duplicadoEn("email") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeDuplicado campo="email" />
+								</div>
+							</>
+						}
+						personalNotice={
+							// Empresa detectada. No hay interruptor: si el DPI o el correo
+							// ya son de alguien, lo que se está creando es su empresa.
+							personaDetectada ? (
+								<div className="flex flex-col gap-2 rounded-xl border border-warning-text/40 bg-warning-subtle p-3 md:flex-row md:items-center md:justify-between md:gap-6">
+									<div className="space-y-1">
+										<p className="font-medium text-fg text-sm">
+											Se va a crear una empresa de {personaDetectada.nombre}
+										</p>
+										<p className="text-fg-secondary text-xs">
+											{personaDetectada.via === "directo"
+												? "Ese dato ya es suyo, así que no es un duplicado."
+												: `Ese dato es de ${personaDetectada.sociedad}, que ${personaDetectada.nombre} ya representa.`}{" "}
+											El DPI{" "}
+											<span className="font-mono">{formDpiRepLegal}</span> se
+											guarda como representante legal y la empresa comparte su
+											correo. El nombre, el banco y la cuenta son los de la
+											empresa: llenalos aparte.
+										</p>
+									</div>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="self-start md:self-center"
+										onClick={descartarDeteccion}
+									>
+										No es su empresa, corregir el DPI
+									</Button>
+								</div>
+							) : identidadQuery.isError ? (
+								/*
+									La verificación falló. Se dice, en vez de dejar creer que el
+									DPI está libre: como ya no existe el interruptor "¿Es
+									empresa?", si la detección no corre no hay forma de mover el
+									DPI a representante legal, y el alta rebota como duplicada
+									sin que se entienda por qué.
+								*/
+								<div className="flex flex-col gap-2 rounded-xl border border-danger-text/40 bg-danger-subtle p-3 md:flex-row md:items-center md:justify-between md:gap-6">
+									<div className="space-y-1">
+										<p className="font-medium text-fg text-sm">
+											No pudimos verificar ese dato
+										</p>
+										<p className="text-fg-secondary text-xs">
+											No se pudo comprobar si el DPI o el correo ya son de
+											alguien. Si lo son y guardás así, el alta se va a rechazar
+											por duplicada.
+										</p>
+									</div>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="self-start md:self-center"
+										onClick={() => identidadQuery.refetch()}
+										disabled={identidadQuery.isFetching}
+									>
+										{identidadQuery.isFetching
+											? "Verificando..."
+											: "Reintentar verificación"}
+									</Button>
+								</div>
+							) : null
+						}
+						bank={
+							<>
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-banco">Banco</Label>
+									<Select value={formBanco} onValueChange={setFormBanco}>
+										<SelectTrigger id="inv-banco">
+											<SelectValue placeholder="Seleccionar banco..." />
+										</SelectTrigger>
+										<SelectContent>
+											{bancos.map((b: any) => (
+												<SelectItem key={b.banco_id} value={String(b.banco_id)}>
+													{b.nombre}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-tipo-cuenta">Tipo de cuenta</Label>
+									<Select
+										value={formTipoCuenta}
+										onValueChange={setFormTipoCuenta}
+									>
+										<SelectTrigger id="inv-tipo-cuenta">
+											<SelectValue placeholder="Seleccionar..." />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="AHORRO Q">Ahorro Q</SelectItem>
+											<SelectItem value="AHORRO $">Ahorro $</SelectItem>
+											<SelectItem value="MONETARIA Q">Monetaria Q</SelectItem>
+											<SelectItem value="MONETARIA $">Monetaria $</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-numero-cuenta">Número de cuenta</Label>
+									<Input
+										id="inv-numero-cuenta"
+										value={formNumeroCuenta}
+										onChange={(e) => setFormNumeroCuenta(e.target.value)}
+										placeholder="Número de cuenta bancaria"
+									/>
+								</div>
+							</>
+						}
+						investment={
+							<>
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-moneda">Moneda</Label>
+									<Select value={formMoneda} onValueChange={setFormMoneda}>
+										<SelectTrigger id="inv-moneda">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="quetzales">Quetzales (GTQ)</SelectItem>
+											<SelectItem value="dolares">Dólares (USD)</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-reinversion">Modelo de Inversión</Label>
+									<Select
+										value={formTipoReinversion}
+										onValueChange={setFormTipoReinversion}
+									>
+										<SelectTrigger id="inv-reinversion">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="sin_reinversion">
+												Tradicional
 											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="inv-tipo-cuenta">Tipo de cuenta</Label>
-								<Select
-									value={formTipoCuenta}
-									onValueChange={setFormTipoCuenta}
-								>
-									<SelectTrigger id="inv-tipo-cuenta">
-										<SelectValue placeholder="Seleccionar..." />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="AHORRO Q">Ahorro Q</SelectItem>
-										<SelectItem value="AHORRO $">Ahorro $</SelectItem>
-										<SelectItem value="MONETARIA Q">Monetaria Q</SelectItem>
-										<SelectItem value="MONETARIA $">Monetaria $</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-
-						{/* Número cuenta */}
-						<div className="space-y-1.5">
-							<Label htmlFor="inv-numero-cuenta">Número de cuenta</Label>
-							<Input
-								id="inv-numero-cuenta"
-								value={formNumeroCuenta}
-								onChange={(e) => setFormNumeroCuenta(e.target.value)}
-								placeholder="Número de cuenta bancaria"
-							/>
-						</div>
-
-						{/* Empresa detectada. No hay interruptor: si el DPI o el correo
-						    ya son de alguien, lo que se está creando es su empresa. */}
-						{/*
-							La verificación falló. Se dice, en vez de dejar creer que el DPI
-							está libre: como ya no existe el interruptor "¿Es empresa?", si
-							la detección no corre no hay forma de mover el DPI a
-							representante legal, y el alta rebota como duplicada sin que se
-							entienda por qué.
-						*/}
-						{!personaDetectada && identidadQuery.isError && (
-							<div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-2">
-								<p className="text-sm font-medium">
-									No pudimos verificar ese dato
-								</p>
-								<p className="text-muted-foreground text-xs">
-									No se pudo comprobar si el DPI o el correo ya son de alguien.
-									Si lo son y guardás así, el alta se va a rechazar por
-									duplicada.
-								</p>
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									onClick={() => identidadQuery.refetch()}
-									disabled={identidadQuery.isFetching}
-								>
-									{identidadQuery.isFetching
-										? "Verificando..."
-										: "Reintentar verificación"}
-								</Button>
-							</div>
-						)}
-
-						{personaDetectada && (
-							<div className="rounded-md border border-amber-500/40 bg-amber-50 p-3 space-y-2 dark:bg-amber-950/20">
-								<p className="text-sm font-medium">
-									Se va a crear una empresa de {personaDetectada.nombre}
-								</p>
-								<p className="text-muted-foreground text-xs">
-									{personaDetectada.via === "directo"
-										? "Ese dato ya es suyo, así que no es un duplicado."
-										: `Ese dato es de ${personaDetectada.sociedad}, que ${personaDetectada.nombre} ya representa.`}{" "}
-									El DPI{" "}
-									<span className="font-mono">{formDpiRepLegal}</span> se guarda
-									como representante legal y la empresa comparte su correo. El
-									nombre, el banco y la cuenta son los de la empresa: llenalos
-									aparte.
-								</p>
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									onClick={descartarDeteccion}
-								>
-									No es su empresa, corregir el DPI
-								</Button>
-							</div>
-						)}
-
-						{/* Moneda + Factura */}
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="inv-moneda">Moneda</Label>
-								<Select value={formMoneda} onValueChange={setFormMoneda}>
-									<SelectTrigger id="inv-moneda">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="quetzales">Quetzales (GTQ)</SelectItem>
-										<SelectItem value="dolares">Dólares (USD)</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="flex items-end pb-2">
+											<SelectItem value="reinversion_capital">
+												Reinversión Capital
+											</SelectItem>
+											<SelectItem value="reinversion_total">
+												Interés Compuesto
+											</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								{formTipoReinversion === "reinversion_variable" && (
+									<div className="space-y-1.5">
+										<Label htmlFor="inv-monto-reinversion">
+											Monto reinversión
+										</Label>
+										<Input
+											id="inv-monto-reinversion"
+											type="number"
+											min="0"
+											step="0.01"
+											value={formMontoReinversion}
+											onChange={(e) => setFormMontoReinversion(e.target.value)}
+											placeholder="0.00"
+										/>
+									</div>
+								)}
 								<div className="flex items-center gap-2">
 									<Checkbox
 										id="inv-factura"
@@ -786,106 +825,67 @@ function LiquidacionesInversionistas() {
 									/>
 									<Label htmlFor="inv-factura">Emite factura</Label>
 								</div>
-							</div>
-						</div>
-
-						{/* Reinversión */}
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="inv-reinversion">Modelo de Inversión</Label>
-								<Select
-									value={formTipoReinversion}
-									onValueChange={setFormTipoReinversion}
-								>
-									<SelectTrigger id="inv-reinversion">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="sin_reinversion">
-											Tradicional
-										</SelectItem>
-										<SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
-										<SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							{formTipoReinversion === "reinversion_variable" && (
-								<div className="space-y-1.5">
-									<Label htmlFor="inv-monto-reinversion">
-										Monto reinversión
-									</Label>
-									<Input
-										id="inv-monto-reinversion"
-										type="number"
-										min="0"
-										step="0.01"
-										value={formMontoReinversion}
-										onChange={(e) => setFormMontoReinversion(e.target.value)}
-										placeholder="0.00"
+							</>
+						}
+						extra={
+							// Compra de cartera (opcional), a todo el ancho.
+							<div className="space-y-4 rounded-xl border border-line-subtle bg-canvas p-4">
+								<div className="flex items-center gap-2">
+									<Checkbox
+										id="inv-compra"
+										checked={hacerCompra}
+										onCheckedChange={(v) => setHacerCompra(v === true)}
 									/>
+									<Label htmlFor="inv-compra" className="font-semibold">
+										Hacer compra de cartera
+									</Label>
 								</div>
-							)}
-						</div>
 
-						{/* Separador — Compra de cartera */}
-						<div className="rounded-lg border bg-muted/50 p-4 space-y-3">
-							<div className="flex items-center gap-2">
-								<Checkbox
-									id="inv-compra"
-									checked={hacerCompra}
-									onCheckedChange={(v) => setHacerCompra(v === true)}
-								/>
-								<Label htmlFor="inv-compra" className="font-semibold">
-									Hacer compra de cartera
-								</Label>
-							</div>
-
-							{hacerCompra && (
-								<div className="space-y-3">
-									<div className="space-y-1.5">
-										<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
-										<CurrencyInput
-											id="inv-monto-compra"
-											value={formMontoCompra}
-											onChange={setFormMontoCompra}
-										/>
-									</div>
-									<div className="space-y-1.5">
-										<Label htmlFor="inv-modalidad-fact">
-											Modalidad de Facturación
-										</Label>
-										<Select
-											value={formModalidadFacturacion}
-											onValueChange={(v) =>
-												setFormModalidadFacturacion(v as ModalidadFacturacion)
-											}
-										>
-											<SelectTrigger id="inv-modalidad-fact">
-												<SelectValue />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="p2p_directa">
-													{MODALIDAD_FACTURACION_LABELS.p2p_directa}
-												</SelectItem>
-												<SelectItem value="factura_cube">
-													{MODALIDAD_FACTURACION_LABELS.factura_cube}
-												</SelectItem>
-												<SelectItem value="factura_cube_pequeno">
-													{MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
-												</SelectItem>
-											</SelectContent>
-										</Select>
-									</div>
-									{/* % Inversionista: pre-elegido por el sistema, pero editable
-									    entre los spreads válidos de la modalidad actual. */}
-									{compraBracketFaltante ? (
-										<p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-											El monto ingresado no cae en ningún rango del catálogo
-											(mínimo Q1,000). Ajusta el monto.
-										</p>
-									) : (
-										<>
-											<div className="grid grid-cols-2 gap-3">
+								{hacerCompra && (
+									<div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
+											<CurrencyInput
+												id="inv-monto-compra"
+												value={formMontoCompra}
+												onChange={setFormMontoCompra}
+											/>
+										</div>
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-modalidad-fact">
+												Modalidad de Facturación
+											</Label>
+											<Select
+												value={formModalidadFacturacion}
+												onValueChange={(v) =>
+													setFormModalidadFacturacion(v as ModalidadFacturacion)
+												}
+											>
+												<SelectTrigger id="inv-modalidad-fact">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="p2p_directa">
+														{MODALIDAD_FACTURACION_LABELS.p2p_directa}
+													</SelectItem>
+													<SelectItem value="factura_cube">
+														{MODALIDAD_FACTURACION_LABELS.factura_cube}
+													</SelectItem>
+													<SelectItem value="factura_cube_pequeno">
+														{MODALIDAD_FACTURACION_LABELS.factura_cube_pequeno}
+													</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+										{/* % Inversionista: pre-elegido por el sistema, pero editable
+										    entre los spreads válidos de la modalidad actual. */}
+										{compraBracketFaltante ? (
+											<p className="rounded-xl border border-warning-text/30 bg-warning-subtle px-3 py-2 text-warning-text text-xs sm:col-span-2 lg:self-end">
+												El monto ingresado no cae en ningún rango del catálogo
+												(mínimo Q1,000). Ajusta el monto.
+											</p>
+										) : (
+											<>
 												<div className="space-y-1.5">
 													<Label htmlFor="inv-pct-inv">% Inversiónista</Label>
 													<Select
@@ -921,103 +921,104 @@ function LiquidacionesInversionistas() {
 												</div>
 												<div className="space-y-1.5">
 													<Label>% CCI</Label>
-													<div className="rounded-md border bg-muted px-3 py-2 text-sm font-semibold tabular-nums">
+													<div className="flex h-10.5 items-center rounded-xl border border-line bg-muted px-4 font-semibold text-sm tabular-nums">
 														{compraPctCashInCalc !== undefined
 															? `${compraPctCashInCalc.toFixed(4)}%`
 															: "—"}
 													</div>
 												</div>
-											</div>
-											{compraSpreadRow && (
-												<div className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
-													<span className="text-xs font-medium text-emerald-700">
-														Tasa del inversionista
-													</span>
-													<span className="text-sm font-bold text-emerald-800 tabular-nums">
-														{Number(compraSpreadRow.tasa).toFixed(4)}%
-													</span>
-												</div>
-											)}
+												{compraSpreadRow && (
+													<div className="flex items-center justify-between rounded-xl border border-success-text/30 bg-success-subtle px-3 py-2 sm:col-span-2 lg:col-span-4">
+														<span className="font-medium text-success-text text-xs">
+															Tasa del inversionista
+														</span>
+														<span className="font-bold text-sm text-success-text tabular-nums">
+															{Number(compraSpreadRow.tasa).toFixed(4)}%
+														</span>
+													</div>
+												)}
+											</>
+										)}
+									</div>
+								)}
+							</div>
+						}
+						footer={
+							<>
+								<Button
+									variant="outline"
+									onClick={() => {
+										setCrearOpen(false);
+										resetForm();
+									}}
+								>
+									Cancelar
+								</Button>
+								<Button
+									disabled={
+										crearMutation.isPending ||
+										!formNombre.trim() ||
+										(hacerCompra &&
+											(!formMontoCompra ||
+												Number(formMontoCompra) <= 0 ||
+												// Con compra activa exigimos un bracket válido.
+												!compraSpreadRow ||
+												// El debounce todavía no alcanzó al monto tecleado.
+												formMontoCompraNum !== formMontoCompraDebounced ||
+												modalidadResolverQuery.isFetching))
+									}
+									onClick={() => {
+										if (hacerCompra && !compraSpreadRow) return;
+										// Con "¿Es empresa?" marcado el DPI del representante es
+										// obligatorio: se marca el input con el mismo mecanismo que
+										// usan los rechazos de cartera, en vez de un toast suelto.
+										crearMutation.mutate({
+											nombre: formNombre.trim(),
+											dpi: formDpi.trim() || undefined,
+											email: formEmail.trim() || undefined,
+											banco: formBanco ? Number(formBanco) : null,
+											tipoCuenta: formTipoCuenta || undefined,
+											numeroCuenta: formNumeroCuenta.trim() || undefined,
+											// Llave ausente cuando no se detectó a nadie: al crear no hay
+											// nada que borrar y cartera deja el campo en blanco.
+											dpiRepLegal: formDpiRepLegal || undefined,
+											moneda: formMoneda as "quetzales" | "dolares",
+											emiteFactura: formEmiteFactura,
+											tipoReinversion: formTipoReinversion,
+											montoReinversion: formMontoReinversion
+												? Number(formMontoReinversion)
+												: undefined,
+											hacerCompraCartera: hacerCompra,
+											montoCompraCartera: hacerCompra
+												? Number(formMontoCompra)
+												: undefined,
+											modalidadFacturacion: hacerCompra
+												? formModalidadFacturacion
+												: undefined,
+											// Solo se manda con anulación manual explícita: sin
+											// esto, el backend re-resuelve y valida por monto.
+											modalidadFacturacionSpreadId: hacerCompra
+												? compraOverrideRow?.id
+												: undefined,
+										});
+									}}
+								>
+									{crearMutation.isPending ? (
+										<>
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+											Creando...
 										</>
+									) : hacerCompra ? (
+										"Crear y Comprar Cartera"
+									) : (
+										"Crear Inversionista"
 									)}
-								</div>
-							)}
-						</div>
-					</div>
-
-					<DialogFooter className="gap-2 sm:justify-between">
-						<Button
-							variant="outline"
-							onClick={() => {
-								setCrearOpen(false);
-								resetForm();
-							}}
-						>
-							Cancelar
-						</Button>
-						<Button
-							disabled={
-								crearMutation.isPending ||
-								!formNombre.trim() ||
-								(hacerCompra &&
-									(!formMontoCompra ||
-										Number(formMontoCompra) <= 0 ||
-										// Con compra activa exigimos un bracket válido.
-										!compraSpreadRow ||
-										// El debounce todavía no alcanzó al monto tecleado.
-										formMontoCompraNum !== formMontoCompraDebounced ||
-										modalidadResolverQuery.isFetching))
-							}
-							onClick={() => {
-								if (hacerCompra && !compraSpreadRow) return;
-								// Con "¿Es empresa?" marcado el DPI del representante es
-								// obligatorio: se marca el input con el mismo mecanismo que
-								// usan los rechazos de cartera, en vez de un toast suelto.
-								crearMutation.mutate({
-									nombre: formNombre.trim(),
-									dpi: formDpi.trim() || undefined,
-									email: formEmail.trim() || undefined,
-									banco: formBanco ? Number(formBanco) : null,
-									tipoCuenta: formTipoCuenta || undefined,
-									numeroCuenta: formNumeroCuenta.trim() || undefined,
-									// Llave ausente cuando no se detectó a nadie: al crear no hay
-									// nada que borrar y cartera deja el campo en blanco.
-									dpiRepLegal: formDpiRepLegal || undefined,
-									moneda: formMoneda as "quetzales" | "dolares",
-									emiteFactura: formEmiteFactura,
-									tipoReinversion: formTipoReinversion,
-									montoReinversion: formMontoReinversion
-										? Number(formMontoReinversion)
-										: undefined,
-									hacerCompraCartera: hacerCompra,
-									montoCompraCartera: hacerCompra
-										? Number(formMontoCompra)
-										: undefined,
-									modalidadFacturacion: hacerCompra
-										? formModalidadFacturacion
-										: undefined,
-									// Solo se manda con anulación manual explícita: sin
-									// esto, el backend re-resuelve y valida por monto.
-									modalidadFacturacionSpreadId: hacerCompra
-										? compraOverrideRow?.id
-										: undefined,
-								});
-							}}
-						>
-							{crearMutation.isPending ? (
-								<>
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									Creando...
-								</>
-							) : hacerCompra ? (
-								"Crear y Comprar Cartera"
-							) : (
-								"Crear Inversionista"
-							)}
-						</Button>
-					</DialogFooter>
+								</Button>
+							</>
+						}
+					/>
 				</DialogContent>
 			</Dialog>
 		</div>
-	)
+	);
 }

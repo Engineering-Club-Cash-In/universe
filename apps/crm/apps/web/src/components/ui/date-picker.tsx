@@ -3,7 +3,11 @@ import { es } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import * as React from "react";
 import type { DateRange, Matcher } from "react-day-picker";
-import { Calendar, calendarCardClassName } from "@/components/ui/calendar";
+import {
+	Calendar,
+	type CalendarProps,
+	calendarCardClassName,
+} from "@/components/ui/calendar";
 import {
 	Popover,
 	PopoverContent,
@@ -108,12 +112,19 @@ function DatePicker({
 	disabledDays,
 	applyOnSelect = false,
 	dateFormat = "dd / MM / yyyy",
+	captionLayout,
 	"aria-invalid": ariaInvalid,
 }: BaseProps & {
 	date?: Date;
 	onDateChange?: (date: Date | undefined) => void;
 	/** Formato de date-fns para el campo. Figma: "15 / 07 / 2026". */
 	dateFormat?: string;
+	/**
+	 * Encabezado del calendario. Con "dropdown" el mes y el año se eligen de una
+	 * lista (de hace 100 años al año en curso): sirve para fechas lejanas como
+	 * la de nacimiento. Por defecto, "Julio 2026" con ‹ ›.
+	 */
+	captionLayout?: CalendarProps["captionLayout"];
 }) {
 	const autoId = React.useId();
 	const campoId = id ?? autoId;
@@ -146,6 +157,7 @@ function DatePicker({
 				>
 					<Calendar
 						mode="single"
+						captionLayout={captionLayout}
 						selected={pendiente}
 						defaultMonth={pendiente ?? date}
 						onSelect={(dia) => {

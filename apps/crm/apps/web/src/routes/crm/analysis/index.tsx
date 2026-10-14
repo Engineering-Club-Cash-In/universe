@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	AlertCircle,
-	CheckCircle,
 	ChevronLeft,
 	ChevronRight,
 	ChevronsLeft,
@@ -12,11 +11,15 @@ import {
 	Search,
 	TrendingUp,
 	Wallet,
-	XCircle,
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+	AnalysisOpportunitiesTable,
+	OpportunityActionsView,
+	type OpportunityForAnalysis,
+} from "@/components/analysis/AnalysisOpportunitiesTable";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
 import {
@@ -46,22 +49,8 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -74,21 +63,19 @@ export const Route = createFileRoute("/crm/analysis/")({
 	}).parse,
 });
 
-type OpportunityForAnalysis = Awaited<
-	ReturnType<typeof client.getOpportunitiesForAnalysis>
->["data"][0];
-
 // Helper component to render action buttons with validation
 function OpportunityActions({
 	opportunity,
 	onApprove,
 	onReject,
 	onViewDocuments,
+	layout,
 }: {
 	opportunity: OpportunityForAnalysis;
 	onApprove: () => void;
 	onReject: () => void;
 	onViewDocuments: () => void;
+	layout: "compact" | "full";
 }) {
 	const validation = useQuery({
 		...orpc.validateOpportunityDocuments.queryOptions({
@@ -139,39 +126,17 @@ function OpportunityActions({
 	};
 
 	return (
-		<div className="flex gap-2">
-			<Button size="sm" variant="default" onClick={onViewDocuments}>
-				<FileText className="mr-1 h-4 w-4" />
-				Ver Documentos
-			</Button>
-			<TooltipProvider>
-				<Tooltip>
-					<TooltipTrigger asChild>
-						<span>
-							<Button
-								size="sm"
-								variant="outline"
-								onClick={onApprove}
-								disabled={!canApprove || isLoading}
-							>
-								<CheckCircle className="mr-1 h-4 w-4" />
-								Aprobar
-							</Button>
-						</span>
-					</TooltipTrigger>
-					{!canApprove && !isLoading && (
-						<TooltipContent className="max-w-xs whitespace-pre-line">
-							<p className="mb-1 font-semibold">No se puede aprobar:</p>
-							<p className="text-sm">{getDisabledReason()}</p>
-						</TooltipContent>
-					)}
-				</Tooltip>
-			</TooltipProvider>
-			<Button size="sm" variant="outline" onClick={onReject}>
-				<XCircle className="mr-1 h-4 w-4" />
-				Rechazar
-			</Button>
-		</div>
+		<OpportunityActionsView
+			canApprove={canApprove}
+			isLoading={isLoading}
+			disabledReason={
+				!canApprove && !isLoading ? getDisabledReason() : undefined
+			}
+			onApprove={onApprove}
+			onReject={onReject}
+			onViewDocuments={onViewDocuments}
+			layout={layout}
+		/>
 	);
 }
 
@@ -374,7 +339,7 @@ function AnalysisPage() {
 
 	if (isLoading && !opportunitiesData) {
 		return (
-			<div className="container mx-auto py-8">
+			<div className="container mx-auto px-4 py-8">
 				<Card>
 					<CardContent className="flex items-center justify-center py-8">
 						<p className="text-muted-foreground">Cargando oportunidades...</p>
@@ -385,7 +350,7 @@ function AnalysisPage() {
 	}
 
 	return (
-		<div className="container mx-auto py-8">
+		<div className="container mx-auto px-4 py-8">
 			<div className="mb-8">
 				<h1 className="font-bold text-3xl">Análisis de Documentación</h1>
 				<p className="mt-2 text-muted-foreground">
@@ -408,7 +373,9 @@ function AnalysisPage() {
 				}
 				className="w-full"
 			>
-				<TabsList className="mb-6">
+				{/* En pantallas angostas la barra se desplaza dentro de su caja,
+				    no la página entera. */}
+				<TabsList className="mb-6 overflow-x-auto">
 					<TabsTrigger value="analysis" className="flex items-center gap-2">
 						<FileText className="h-4 w-4" />
 						Análisis (30% → 40%)
@@ -471,126 +438,24 @@ function AnalysisPage() {
 								</Alert>
 							) : (
 								<>
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Título</TableHead>
-												<TableHead>Estado</TableHead>
-												<TableHead>Lead</TableHead>
-												<TableHead>Empresa</TableHead>
-												<TableHead>Valor</TableHead>
-												<TableHead>Fecha Esperada</TableHead>
-												<TableHead>Acciones</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{opportunities.map((opportunity) => (
-												<TableRow key={opportunity.id}>
-													<TableCell className="font-medium">
-														<div className="space-y-1">
-															<button
-																type="button"
-																className="cursor-pointer text-left text-primary hover:underline"
-																onClick={() =>
-																	handleOpenOpportunityModal(opportunity)
-																}
-															>
-																{opportunity.title}
-															</button>
-															<p className="font-mono text-[10px] text-muted-foreground/60">
-																ID: {opportunity.id.slice(0, 8)}
-															</p>
-														</div>
-													</TableCell>
-													<TableCell>
-														{opportunity.analysisStatus === "resubmitted" ? (
-															<Badge className="border-orange-300 bg-orange-100 text-orange-700">
-																<RefreshCw className="mr-1 h-3 w-3" />
-																Reenviado ({opportunity.analysisRejectionCount}
-																x)
-															</Badge>
-														) : (
-															<Badge className="border-green-300 bg-green-100 text-green-700">
-																Nueva
-															</Badge>
-														)}
-													</TableCell>
-													<TableCell>
-														{opportunity.lead ? (
-															<div>
-																<button
-																	type="button"
-																	className="cursor-pointer text-left font-medium text-primary hover:underline"
-																	onClick={() =>
-																		handleOpenLeadModal(opportunity)
-																	}
-																>
-																	{opportunity.lead.firstName}{" "}
-																	{opportunity.lead.lastName}
-																</button>
-																{opportunity.lead.email && (
-																	<p className="text-muted-foreground text-sm">
-																		{opportunity.lead.email}
-																	</p>
-																)}
-															</div>
-														) : (
-															<span className="text-muted-foreground">
-																Sin lead
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														{opportunity.company?.name || (
-															<span className="text-muted-foreground">
-																Sin empresa
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														{opportunity.value ? (
-															<span className="font-medium">
-																Q{Number(opportunity.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-															</span>
-														) : (
-															<span className="text-muted-foreground">
-																Sin valor
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														{opportunity.expectedCloseDate ? (
-															new Date(
-																opportunity.expectedCloseDate,
-															).toLocaleDateString("es-GT")
-														) : (
-															<span className="text-muted-foreground">
-																Sin fecha
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														<OpportunityActions
-															opportunity={opportunity}
-															onApprove={() =>
-																handleApprovalClick(opportunity, true)
-															}
-															onReject={() =>
-																handleApprovalClick(opportunity, false)
-															}
-															onViewDocuments={() =>
-																handleViewDocuments(opportunity)
-															}
-														/>
-													</TableCell>
-												</TableRow>
-											))}
-										</TableBody>
-									</Table>
+									<AnalysisOpportunitiesTable
+										opportunities={opportunities}
+										onOpenOpportunity={handleOpenOpportunityModal}
+										onOpenLead={handleOpenLeadModal}
+										renderActions={(opportunity, layout) => (
+											<OpportunityActions
+												opportunity={opportunity}
+												layout={layout}
+												onApprove={() => handleApprovalClick(opportunity, true)}
+												onReject={() => handleApprovalClick(opportunity, false)}
+												onViewDocuments={() => handleViewDocuments(opportunity)}
+											/>
+										)}
+									/>
 
 									{/* Paginación */}
 									{totalPages > 1 && (
-										<div className="mt-4 flex items-center justify-between border-t pt-4">
+										<div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
 											<span className="text-muted-foreground text-sm">
 												Mostrando {page * pageSize + 1} -{" "}
 												{Math.min((page + 1) * pageSize, total)} de {total}
@@ -959,7 +824,11 @@ function DisbursementSection({
 											</div>
 											<div className="text-right">
 												<p className="font-medium">
-													Q{Number(opp.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+													Q
+													{Number(opp.value).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
 												</p>
 												<div className="flex items-center gap-2">
 													{opp.hasChecklist ? (

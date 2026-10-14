@@ -35,7 +35,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Card,
 	CardContent,
@@ -82,19 +81,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
-import { ROLES } from "@/lib/roles";
 import {
-	isValidVehicleConditionOrigin,
-	VEHICLE_BODY_TYPE_OPTIONS,
-	VEHICLE_CONDITION_OPTIONS,
-	VEHICLE_PROVENANCE_OPTIONS,
-	VEHICLE_USE_OPTIONS,
-} from "@/lib/vehicle-form-options";
+	EditarVehiculoDialog,
+	RegistrarVehiculoDialog,
+} from "@/components/vehicles/vehicle-form-dialogs";
+import { usePersistedState } from "@/hooks/usePersistedState";
+import { ROLES } from "@/lib/roles";
+import { isValidVehicleConditionOrigin } from "@/lib/vehicle-form-options";
 import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -147,13 +144,25 @@ function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const search = useSearch({ from: "/vehicles/" });
-	const [searchTerm, setSearchTerm] = usePersistedState<string>("vehicles/searchTerm", "");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>(
+		"vehicles/searchTerm",
+		"",
+	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [filterStatus, setFilterStatus] = usePersistedState<string>("vehicles/filterStatus", "all");
-	const [filterOwnership, setFilterOwnership] = usePersistedState<string>("vehicles/filterOwnership", "all");
+	const [filterStatus, setFilterStatus] = usePersistedState<string>(
+		"vehicles/filterStatus",
+		"all",
+	);
+	const [filterOwnership, setFilterOwnership] = usePersistedState<string>(
+		"vehicles/filterOwnership",
+		"all",
+	);
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-	const [activeTab, setActiveTab] = usePersistedState<string>("vehicles/activeTab", "general");
+	const [activeTab, setActiveTab] = usePersistedState<string>(
+		"vehicles/activeTab",
+		"general",
+	);
 	const [page, setPage] = usePersistedState<number>("vehicles/page", 0);
 	const pageSize = 20;
 
@@ -184,10 +193,20 @@ function VehiclesDashboard() {
 				offset: page * pageSize,
 				query: debouncedSearch || undefined,
 				status: filterStatus !== "all" ? filterStatus : undefined,
-				ownership: filterOwnership !== "all" ? (filterOwnership as "owned" | "not_owned") : undefined,
+				ownership:
+					filterOwnership !== "all"
+						? (filterOwnership as "owned" | "not_owned")
+						: undefined,
 			},
 		}),
-		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus, filterOwnership],
+		queryKey: [
+			"getVehicles",
+			page,
+			pageSize,
+			debouncedSearch,
+			filterStatus,
+			filterOwnership,
+		],
 		placeholderData: keepPreviousData,
 	});
 	const { data: statistics } = useQuery(
@@ -330,9 +349,14 @@ function VehiclesDashboard() {
 	const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
-	const [photoCategoryFilter, setPhotoCategoryFilter] = usePersistedState<string>("vehicles/photoCategoryFilter", "all");
+	const [photoCategoryFilter, setPhotoCategoryFilter] =
+		usePersistedState<string>("vehicles/photoCategoryFilter", "all");
 
-	const hasActiveFilters = searchTerm !== "" || filterStatus !== "all" || filterOwnership !== "all" || photoCategoryFilter !== "all";
+	const hasActiveFilters =
+		searchTerm !== "" ||
+		filterStatus !== "all" ||
+		filterOwnership !== "all" ||
+		photoCategoryFilter !== "all";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setFilterStatus("all");
@@ -644,7 +668,10 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none rounded-l-md px-3 text-xs ${filterOwnership === "all" ? "bg-muted font-semibold" : ""}`}
-											onClick={() => { setFilterOwnership("all"); setPage(0); }}
+											onClick={() => {
+												setFilterOwnership("all");
+												setPage(0);
+											}}
 										>
 											Todos
 										</Button>
@@ -653,8 +680,15 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none border-x px-3 text-xs ${filterOwnership === "owned" ? "font-semibold" : ""}`}
-											style={filterOwnership === "owned" ? { backgroundColor: "#4E57EA15", color: "#4E57EA" } : {}}
-											onClick={() => { setFilterOwnership("owned"); setPage(0); }}
+											style={
+												filterOwnership === "owned"
+													? { backgroundColor: "#4E57EA15", color: "#4E57EA" }
+													: {}
+											}
+											onClick={() => {
+												setFilterOwnership("owned");
+												setPage(0);
+											}}
 										>
 											Cash In
 										</Button>
@@ -663,17 +697,35 @@ function VehiclesDashboard() {
 											variant="ghost"
 											size="sm"
 											className={`rounded-none rounded-r-md px-3 text-xs ${filterOwnership === "not_owned" ? "bg-muted font-semibold" : ""}`}
-											onClick={() => { setFilterOwnership("not_owned"); setPage(0); }}
+											onClick={() => {
+												setFilterOwnership("not_owned");
+												setPage(0);
+											}}
 										>
 											Externos
 										</Button>
 									</div>
 									{hasActiveFilters && (
-										<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={resetFilters}
+											className="shrink-0 text-muted-foreground"
+										>
 											<X className="mr-1 h-3 w-3" />
 											Limpiar filtros
-											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-												{[searchTerm !== "", filterStatus !== "all", filterOwnership !== "all", photoCategoryFilter !== "all"].filter(Boolean).length}
+											<Badge
+												variant="secondary"
+												className="ml-1 h-4 px-1 text-xs"
+											>
+												{
+													[
+														searchTerm !== "",
+														filterStatus !== "all",
+														filterOwnership !== "all",
+														photoCategoryFilter !== "all",
+													].filter(Boolean).length
+												}
 											</Badge>
 										</Button>
 									)}
@@ -711,7 +763,15 @@ function VehiclesDashboard() {
 															<div className="flex items-center gap-2 font-medium">
 																{vehicle.make} {vehicle.model}
 																{vehicle.isOwned && (
-																	<Badge variant="outline" className="text-xs" style={{ borderColor: "#4E57EA50", backgroundColor: "#4E57EA15", color: "#4E57EA" }}>
+																	<Badge
+																		variant="outline"
+																		className="text-xs"
+																		style={{
+																			borderColor: "#4E57EA50",
+																			backgroundColor: "#4E57EA15",
+																			color: "#4E57EA",
+																		}}
+																	>
 																		CashIn
 																	</Badge>
 																)}
@@ -734,7 +794,10 @@ function VehiclesDashboard() {
 																		Q
 																		{Number(
 																			latestInspection.suggestedCommercialValue,
-																		).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																		).toLocaleString("es-GT", {
+																			minimumFractionDigits: 2,
+																			maximumFractionDigits: 2,
+																		})}
 																	</div>
 																	<div
 																		className={
@@ -1023,7 +1086,10 @@ function VehiclesDashboard() {
 												<span className="font-medium">Valor Comercial: </span>Q
 												{Number(
 													auctionInspection.suggestedCommercialValue,
-												).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+												).toLocaleString("es-GT", {
+													minimumFractionDigits: 2,
+													maximumFractionDigits: 2,
+												})}
 											</p>
 											{auctionPrice !== null && auctionPrice > 0 && (
 												<p
@@ -1040,7 +1106,10 @@ function VehiclesDashboard() {
 														Number(auctionInspection.suggestedCommercialValue) -
 															auctionPrice,
 														0,
-													).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+													).toLocaleString("es-GT", {
+														minimumFractionDigits: 2,
+														maximumFractionDigits: 2,
+													})}
 												</p>
 											)}
 										</div>
@@ -1340,7 +1409,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.marketValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																			<div className="font-medium text-muted-foreground">
 																				Valor comercial sugerido:
@@ -1349,7 +1421,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.suggestedCommercialValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																			<div className="text-pretty font-medium text-muted-foreground">
 																				Valor actual condición:
@@ -1358,7 +1433,10 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.currentConditionValue,
-																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																				).toLocaleString("es-GT", {
+																					minimumFractionDigits: 2,
+																					maximumFractionDigits: 2,
+																				})}
 																			</div>
 																		</div>
 
@@ -1380,7 +1458,10 @@ function VehiclesDashboard() {
 																							Q
 																							{Number(
 																								inspection.aiSuggestedValue,
-																							).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																							).toLocaleString("es-GT", {
+																								minimumFractionDigits: 2,
+																								maximumFractionDigits: 2,
+																							})}
 																						</p>
 																					</div>
 																					<div className="flex flex-col items-end">
@@ -1411,16 +1492,24 @@ function VehiclesDashboard() {
 																				</span>
 																				<div className="flex items-center gap-6">
 																					<span className="font-medium">
-																						{inspection.scannerUsed ? "Sí" : "No"}
+																						{inspection.scannerUsed
+																							? "Sí"
+																							: "No"}
 																					</span>
 																					{inspection.scannerResultUrl && (
 																						<Button
 																							variant="outline"
 																							size="sm"
 																							className="h-6 px-2.5 text-[10px]"
-																							onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																							onClick={() =>
+																								window.open(
+																									inspection.scannerResultUrl,
+																									"_blank",
+																								)
+																							}
 																						>
-																							<FileText className="mr-1.5 h-3 w-3" /> Ver Reporte
+																							<FileText className="mr-1.5 h-3 w-3" />{" "}
+																							Ver Reporte
 																						</Button>
 																					)}
 																				</div>
@@ -1724,22 +1813,22 @@ function VehiclesDashboard() {
 																														<Camera className="h-4 w-4" />
 																													</Button>
 																												)}
-																										<Badge
-																											variant={
-																												!item.checked
-																													? "default"
-																													: item.checked &&
-																															item.severity ===
-																																"critical"
-																														? "destructive"
-																														: "secondary"
-																											}
-																											className="h-5 shrink-0 px-1.5 text-[10px]"
-																										>
-																											{!item.checked
-																												? "Cumple"
-																												: "No cumple"}
-																										</Badge>
+																											<Badge
+																												variant={
+																													!item.checked
+																														? "default"
+																														: item.checked &&
+																																item.severity ===
+																																	"critical"
+																															? "destructive"
+																															: "secondary"
+																												}
+																												className="h-5 shrink-0 px-1.5 text-[10px]"
+																											>
+																												{!item.checked
+																													? "Cumple"
+																													: "No cumple"}
+																											</Badge>
 																										</div>
 																									</div>
 																								),
@@ -2031,1064 +2120,85 @@ function VehiclesDashboard() {
 			</Dialog>
 
 			{/* Dialog para crear vehículo */}
-			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
-					<DialogHeader>
-						<DialogTitle className="flex items-center gap-2">
-							<Sparkles className="h-5 w-5 text-blue-500" />
-							Registrar Vehículo
-						</DialogTitle>
-						<DialogDescription>
-							Selecciona si es usado/rodado o nuevo de agencia. Los campos con * son requeridos.
-						</DialogDescription>
-					</DialogHeader>
-
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (
-								!newVehicleForm.make ||
-								!newVehicleForm.model ||
-								!newVehicleForm.color ||
-								!newVehicleForm.vehicleType
-							) {
-								toast.error("Por favor completa todos los campos requeridos");
-								return;
-							}
-							if (
-								!isValidVehicleConditionOrigin(
-									newVehicleForm.isNew,
-									newVehicleForm.origin,
-								)
-							) {
-								toast.error(
-									"Un vehículo nuevo de agencia no puede ser importado/rodado",
-								);
-								return;
-							}
-							createNewVehicleMutation.mutate(newVehicleForm);
-						}}
-						className="space-y-5"
-					>
-						{/* Información Básica */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-sm">Información Básica</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="make">Marca *</Label>
-									<Input
-										id="make"
-										value={newVehicleForm.make}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												make: e.target.value,
-											})
-										}
-										placeholder="Ej: Toyota"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="model">Modelo/Línea *</Label>
-									<Input
-										id="model"
-										value={newVehicleForm.model}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												model: e.target.value,
-											})
-										}
-										placeholder="Ej: Corolla"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="year">Año *</Label>
-									<Input
-										id="year"
-										type="number"
-										value={newVehicleForm.year}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												year:
-													Number.parseInt(e.target.value) ||
-													new Date().getFullYear(),
-											})
-										}
-										min={2000}
-										max={new Date().getFullYear() + 1}
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="color">Color *</Label>
-									<Input
-										id="color"
-										value={newVehicleForm.color}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												color: e.target.value,
-											})
-										}
-										placeholder="Ej: Blanco"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="vehicleType">Tipo de Vehículo *</Label>
-									<Select
-										value={newVehicleForm.vehicleType}
-										onValueChange={(value) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												vehicleType: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar tipo" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_BODY_TYPE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="vehicleCondition">Condición *</Label>
-									<Select
-										value={String(newVehicleForm.isNew)}
-										onValueChange={(value) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												isNew: value === "true",
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar condición" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_CONDITION_OPTIONS.map((option) => (
-												<SelectItem key={String(option.value)} value={String(option.value)}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="origin">Origen</Label>
-									<Select
-										value={newVehicleForm.origin}
-										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, origin: value })
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_PROVENANCE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-							</div>
-						</div>
-
-						{/* Identificación y Mecánica */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">Identificación y Mecánica</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="licensePlate">Placa</Label>
-									<Input
-										id="licensePlate"
-										value={newVehicleForm.licensePlate}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												licensePlate: e.target.value,
-											})
-										}
-										placeholder="Ej: P-123ABC"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="vinNumber">VIN</Label>
-									<Input
-										id="vinNumber"
-										value={newVehicleForm.vinNumber}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												vinNumber: e.target.value,
-											})
-										}
-										placeholder="Número de identificación"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="motorNumber">No. Motor</Label>
-									<Input
-										id="motorNumber"
-										value={newVehicleForm.motorNumber}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												motorNumber: e.target.value,
-											})
-										}
-										placeholder="Número de motor"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="fuelType">Combustible</Label>
-									<Select
-										value={newVehicleForm.fuelType}
-										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, fuelType: value })
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar combustible" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Gasolina">Gasolina</SelectItem>
-											<SelectItem value="Diesel">Diesel</SelectItem>
-											<SelectItem value="Eléctrico">Eléctrico</SelectItem>
-											<SelectItem value="Híbrido">Híbrido</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="transmission">Transmisión</Label>
-									<Select
-										value={newVehicleForm.transmission}
-										onValueChange={(value) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												transmission: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar transmisión" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Automático">Automático</SelectItem>
-											<SelectItem value="Manual">Manual</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="kmMileage">Kilometraje</Label>
-									<Input
-										id="kmMileage"
-										type="number"
-										value={newVehicleForm.kmMileage}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												kmMileage: Number.parseInt(e.target.value) || 0,
-											})
-										}
-										min={0}
-										placeholder="0"
-									/>
-								</div>
-							</div>
-						</div>
-
-						{/* Datos para Contratos */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">Datos para Contratos</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="seats">Asientos</Label>
-									<Input
-										id="seats"
-										type="number"
-										value={newVehicleForm.seats ?? ""}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												seats: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={1}
-										max={50}
-										placeholder="5"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="doors">Puertas</Label>
-									<Input
-										id="doors"
-										type="number"
-										value={newVehicleForm.doors ?? ""}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												doors: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={2}
-										max={6}
-										placeholder="4"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="axles">Ejes</Label>
-									<Input
-										id="axles"
-										type="number"
-										value={newVehicleForm.axles ?? ""}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												axles: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={2}
-										max={10}
-										placeholder="2"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="vehicleUse">Uso</Label>
-									<Select
-										value={newVehicleForm.vehicleUse}
-										onValueChange={(value) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												vehicleUse: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_USE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="series">Serie</Label>
-									<Input
-										id="series"
-										value={newVehicleForm.series}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												series: e.target.value,
-											})
-										}
-										placeholder="Serie"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="iscvCode">Código ISCV</Label>
-									<Input
-										id="iscvCode"
-										value={newVehicleForm.iscvCode}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												iscvCode: e.target.value,
-											})
-										}
-										placeholder="ISCV"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="cylinders">Cilindros</Label>
-									<Input
-										id="cylinders"
-										value={newVehicleForm.cylinders}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												cylinders: e.target.value,
-											})
-										}
-										placeholder="Ej. 4"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="engineCC">Motor (CC)</Label>
-									<Input
-										id="engineCC"
-										value={newVehicleForm.engineCC}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												engineCC: e.target.value,
-											})
-										}
-										placeholder="Ej. 2000"
-									/>
-								</div>
-							</div>
-						</div>
-
-						<div className="flex items-center space-x-2">
-							<Checkbox
-								id="isOwned"
-								checked={newVehicleForm.isOwned}
-								onCheckedChange={(checked) =>
-									setNewVehicleForm({
-										...newVehicleForm,
-										isOwned: checked === true,
-									})
-								}
-							/>
-							<Label htmlFor="isOwned" className="cursor-pointer text-sm">
-								Vehículo propiedad de Cash In
-							</Label>
-						</div>
-
-						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setIsNewVehicleOpen(false)}
-							>
-								Cancelar
-							</Button>
-							<Button
-								type="submit"
-								disabled={createNewVehicleMutation.isPending}
-							>
-								{createNewVehicleMutation.isPending
-									? "Creando..."
-									: "Crear Vehículo"}
-							</Button>
-						</DialogFooter>
-					</form>
-				</DialogContent>
-			</Dialog>
+			<RegistrarVehiculoDialog
+				open={isNewVehicleOpen}
+				onOpenChange={setIsNewVehicleOpen}
+				form={newVehicleForm}
+				onFormChange={setNewVehicleForm}
+				guardando={createNewVehicleMutation.isPending}
+				onSubmit={(e) => {
+					e.preventDefault();
+					if (
+						!newVehicleForm.make ||
+						!newVehicleForm.model ||
+						!newVehicleForm.color ||
+						!newVehicleForm.vehicleType
+					) {
+						toast.error("Por favor completa todos los campos requeridos");
+						return;
+					}
+					if (
+						!isValidVehicleConditionOrigin(
+							newVehicleForm.isNew,
+							newVehicleForm.origin,
+						)
+					) {
+						toast.error(
+							"Un vehículo nuevo de agencia no puede ser importado/rodado",
+						);
+						return;
+					}
+					createNewVehicleMutation.mutate(newVehicleForm);
+				}}
+			/>
 
 			{/* Dialog para editar vehículo */}
-			<Dialog open={isEditVehicleOpen} onOpenChange={setIsEditVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
-					<DialogHeader>
-						<DialogTitle className="flex items-center gap-2">
-							<Pencil className="h-5 w-5 text-blue-500" />
-							Editar Vehículo
-							{editVehicleForm.isNew && (
-								<Badge
-									variant="outline"
-									className="ml-2 border-blue-300 bg-blue-100 text-blue-800"
-								>
-									<Sparkles className="mr-1 h-3 w-3" />
-									Nuevo
-								</Badge>
-							)}
-						</DialogTitle>
-						<DialogDescription>
-							Modifica los datos del vehículo.{" "}
-							{editVehicleForm.isNew &&
-								"Completa los datos faltantes del vehículo nuevo."}
-						</DialogDescription>
-					</DialogHeader>
-
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (
-								!editVehicleForm.make ||
-								!editVehicleForm.model ||
-								!editVehicleForm.color ||
-								!editVehicleForm.vehicleType
-							) {
-								toast.error("Por favor completa todos los campos requeridos");
-								return;
-							}
-							if (
-								!isValidVehicleConditionOrigin(
-									editVehicleForm.isNew,
-									editVehicleForm.origin,
-								)
-							) {
-								toast.error(
-									"Un vehículo nuevo de agencia no puede ser importado/rodado",
-								);
-								return;
-							}
-							updateVehicleMutation.mutate(editVehicleForm);
-						}}
-						className="space-y-5"
-					>
-						{/* Estado del Vehículo - fila completa */}
-						<div className="space-y-2">
-							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
-							{editVehicleForm.status === "sold" &&
-							userProfile?.role &&
-							userProfile.role !== ROLES.ADMIN &&
-							userProfile.role !== ROLES.SALES_SUPERVISOR ? (
-								<div className="space-y-1">
-									<div className="flex h-10 w-full items-center rounded-md border bg-muted px-3 py-2 text-sm opacity-60">
-										<span className="font-medium">Vendido</span>
-									</div>
-									<p className="text-muted-foreground text-xs">
-										Solo un administrador o supervisor de ventas puede cambiar
-										el estado de un vehículo vendido.
-									</p>
-								</div>
-							) : (
-								<Select
-									value={editVehicleForm.status}
-									onValueChange={(
-										value:
-											| "pending"
-											| "available"
-											| "sold"
-											| "maintenance"
-											| "auction",
-									) => {
-										const wasVendido = editVehicleForm.status === "sold";
-										setEditVehicleForm({
-											...editVehicleForm,
-											status: value,
-											...(wasVendido && value !== "sold"
-												? { isOwned: true }
-												: {}),
-										});
-									}}
-								>
-									<SelectTrigger>
-										<SelectValue placeholder="Seleccionar estado" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="pending">
-											<div className="flex flex-col">
-												<span className="font-medium">Pendiente</span>
-												<span className="text-muted-foreground text-xs">
-													En espera o Próximo a la venta
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="available">
-											<div className="flex flex-col">
-												<span className="font-medium">Disponible</span>
-												<span className="text-muted-foreground text-xs">
-													Listo para venta o financiamiento
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="sold">
-											<div className="flex flex-col">
-												<span className="font-medium">Vendido</span>
-												<span className="text-muted-foreground text-xs">
-													Vehículo ya fue vendido/financiado
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="maintenance">
-											<div className="flex flex-col">
-												<span className="font-medium">En Mantenimiento</span>
-												<span className="text-muted-foreground text-xs">
-													En reparación o servicio técnico
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="auction">
-											<div className="flex flex-col">
-												<span className="font-medium">En Remate</span>
-												<span className="text-muted-foreground text-xs">
-													Disponible para subasta/remate
-												</span>
-											</div>
-										</SelectItem>
-									</SelectContent>
-								</Select>
-							)}
-							{isVehicleSoldLocked && (
-								<p className="text-muted-foreground text-xs">
-									La información de un vehículo vendido no se puede editar; el
-									estado debe pasar primero a Disponible para habilitar los
-									campos. La placa sí puede actualizarse, por si el vehículo
-									recibe placas después de la venta.
-								</p>
-							)}
-						</div>
-
-						{/* Información Básica */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-sm">Información Básica</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="edit-make">Marca *</Label>
-									<Input
-										id="edit-make"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.make}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												make: e.target.value,
-											})
-										}
-										placeholder="Ej: Toyota"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-model">Modelo/Línea *</Label>
-									<Input
-										id="edit-model"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.model}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												model: e.target.value,
-											})
-										}
-										placeholder="Ej: Corolla"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-year">Año *</Label>
-									<Input
-										id="edit-year"
-										disabled={isVehicleSoldLocked}
-										type="number"
-										value={editVehicleForm.year}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												year:
-													Number.parseInt(e.target.value) ||
-													new Date().getFullYear(),
-											})
-										}
-										min={1990}
-										max={new Date().getFullYear() + 1}
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-color">Color *</Label>
-									<Input
-										id="edit-color"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.color}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												color: e.target.value,
-											})
-										}
-										placeholder="Ej: Blanco"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-vehicleType">Tipo de Vehículo *</Label>
-									<Select
-										value={editVehicleForm.vehicleType}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												vehicleType: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar tipo" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_BODY_TYPE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-vehicleCondition">Condición *</Label>
-									<Select
-										value={String(editVehicleForm.isNew)}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												isNew: value === "true",
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar condición" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_CONDITION_OPTIONS.map((option) => (
-												<SelectItem key={String(option.value)} value={String(option.value)}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-origin">Origen</Label>
-									<Select
-										value={editVehicleForm.origin}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, origin: value })
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_PROVENANCE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-							</div>
-						</div>
-
-						{/* Identificación y Mecánica */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Identificación y Mecánica
-								{editVehicleForm.isNew && (
-									<span className="ml-2 font-normal text-amber-600 text-xs">
-										(requeridos para completar la oportunidad)
-									</span>
-								)}
-							</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="edit-licensePlate">Placa</Label>
-									<Input
-										id="edit-licensePlate"
-										value={editVehicleForm.licensePlate}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												licensePlate: e.target.value,
-											})
-										}
-										placeholder="Ej: P-123ABC"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-vinNumber">VIN</Label>
-									<Input
-										id="edit-vinNumber"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.vinNumber}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												vinNumber: e.target.value,
-											})
-										}
-										placeholder="Número de identificación"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-motorNumber">No. Motor</Label>
-									<Input
-										id="edit-motorNumber"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.motorNumber}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												motorNumber: e.target.value,
-											})
-										}
-										placeholder="Número de motor"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-fuelType">Combustible</Label>
-									<Select
-										value={editVehicleForm.fuelType}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												fuelType: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar combustible" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Gasolina">Gasolina</SelectItem>
-											<SelectItem value="Diesel">Diesel</SelectItem>
-											<SelectItem value="Eléctrico">Eléctrico</SelectItem>
-											<SelectItem value="Híbrido">Híbrido</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-transmission">Transmisión</Label>
-									<Select
-										value={editVehicleForm.transmission}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												transmission: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar transmisión" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Automático">Automático</SelectItem>
-											<SelectItem value="Manual">Manual</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
-									<Input
-										id="edit-kmMileage"
-										disabled={isVehicleSoldLocked}
-										type="number"
-										value={editVehicleForm.kmMileage}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												kmMileage: Number.parseInt(e.target.value) || 0,
-											})
-										}
-										min={0}
-										placeholder="0"
-									/>
-								</div>
-							</div>
-						</div>
-
-						{/* Datos para Contratos */}
-						<div className="space-y-3">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Datos para Contratos
-								<span className="ml-2 font-normal text-muted-foreground text-xs">
-									(requeridos para generar contratos legales)
-								</span>
-							</h4>
-							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
-								<div className="space-y-2">
-									<Label htmlFor="edit-seats">Asientos</Label>
-									<Input
-										id="edit-seats"
-										disabled={isVehicleSoldLocked}
-										type="number"
-										value={editVehicleForm.seats ?? ""}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												seats: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={1}
-										max={50}
-										placeholder="Ej: 5"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-doors">Puertas</Label>
-									<Input
-										id="edit-doors"
-										disabled={isVehicleSoldLocked}
-										type="number"
-										value={editVehicleForm.doors ?? ""}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												doors: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={2}
-										max={6}
-										placeholder="Ej: 4"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-axles">Ejes</Label>
-									<Input
-										id="edit-axles"
-										disabled={isVehicleSoldLocked}
-										type="number"
-										value={editVehicleForm.axles ?? ""}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												axles: e.target.value
-													? Number.parseInt(e.target.value)
-													: null,
-											})
-										}
-										min={2}
-										max={10}
-										placeholder="Ej: 2"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-vehicleUse">Uso del Vehículo</Label>
-									<Select
-										value={editVehicleForm.vehicleUse}
-										disabled={isVehicleSoldLocked}
-										onValueChange={(value) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												vehicleUse: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar uso" />
-										</SelectTrigger>
-										<SelectContent>
-											{VEHICLE_USE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-series">Serie</Label>
-									<Input
-										id="edit-series"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.series}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												series: e.target.value,
-											})
-										}
-										placeholder="Serie del vehículo"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-iscvCode">Código ISCV</Label>
-									<Input
-										id="edit-iscvCode"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.iscvCode}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												iscvCode: e.target.value,
-											})
-										}
-										placeholder="Código ISCV"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-cylinders">Cilindros</Label>
-									<Input
-										id="edit-cylinders"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.cylinders}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												cylinders: e.target.value,
-											})
-										}
-										placeholder="Ej. 4"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-engineCC">Motor (CC)</Label>
-									<Input
-										id="edit-engineCC"
-										disabled={isVehicleSoldLocked}
-										value={editVehicleForm.engineCC}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												engineCC: e.target.value,
-											})
-										}
-										placeholder="Ej. 2000"
-									/>
-								</div>
-							</div>
-						</div>
-
-						<div className="flex items-center space-x-2">
-							<Checkbox
-								id="edit-isOwned"
-								disabled={isVehicleSoldLocked}
-								checked={editVehicleForm.isOwned}
-								onCheckedChange={(checked) =>
-									setEditVehicleForm({
-										...editVehicleForm,
-										isOwned: checked === true,
-									})
-								}
-							/>
-							<Label htmlFor="edit-isOwned" className="cursor-pointer text-sm">
-								Vehículo propiedad de Cash In
-							</Label>
-						</div>
-
-						<DialogFooter>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => setIsEditVehicleOpen(false)}
-							>
-								Cancelar
-							</Button>
-							<Button type="submit" disabled={updateVehicleMutation.isPending}>
-								{updateVehicleMutation.isPending
-									? "Guardando..."
-									: "Guardar Cambios"}
-							</Button>
-						</DialogFooter>
-					</form>
-				</DialogContent>
-			</Dialog>
+			<EditarVehiculoDialog
+				open={isEditVehicleOpen}
+				onOpenChange={setIsEditVehicleOpen}
+				form={editVehicleForm}
+				onFormChange={setEditVehicleForm}
+				onEstadoChange={(value) => {
+					const wasVendido = editVehicleForm.status === "sold";
+					setEditVehicleForm({
+						...editVehicleForm,
+						status: value,
+						...(wasVendido && value !== "sold" ? { isOwned: true } : {}),
+					});
+				}}
+				estadoSoloLectura={
+					editVehicleForm.status === "sold" &&
+					!!userProfile?.role &&
+					userProfile.role !== ROLES.ADMIN &&
+					userProfile.role !== ROLES.SALES_SUPERVISOR
+				}
+				bloqueado={isVehicleSoldLocked}
+				guardando={updateVehicleMutation.isPending}
+				onSubmit={(e) => {
+					e.preventDefault();
+					if (
+						!editVehicleForm.make ||
+						!editVehicleForm.model ||
+						!editVehicleForm.color ||
+						!editVehicleForm.vehicleType
+					) {
+						toast.error("Por favor completa todos los campos requeridos");
+						return;
+					}
+					if (
+						!isValidVehicleConditionOrigin(
+							editVehicleForm.isNew,
+							editVehicleForm.origin,
+						)
+					) {
+						toast.error(
+							"Un vehículo nuevo de agencia no puede ser importado/rodado",
+						);
+						return;
+					}
+					updateVehicleMutation.mutate(editVehicleForm);
+				}}
+			/>
 
 			{/* Evidence Photos Modal */}
 			<Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>

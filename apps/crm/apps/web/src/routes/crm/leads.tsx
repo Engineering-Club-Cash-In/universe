@@ -31,6 +31,7 @@ import {
 	type LeadDuplicateConflict,
 } from "@/components/crm/lead-duplicate-conflict";
 import { LeadDuplicateDialog } from "@/components/crm/lead-duplicate-dialog";
+import { LeadFormDialogContent } from "@/components/crm/lead-form-dialog-content";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,6 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -77,7 +77,6 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
@@ -95,7 +94,6 @@ import {
 	getWorkTimeLabel,
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
-import { getLeadNameAutocomplete } from "@/lib/lead-name-autocomplete";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -131,28 +129,6 @@ type CreditAnalysis = Awaited<
 	ReturnType<typeof client.getCreditAnalysisByLeadId>
 >;
 
-function validatePositiveFinancialValue(
-	value: string,
-	label: string,
-) {
-	const normalizedValue = value.trim();
-
-	if (!normalizedValue) {
-		return undefined;
-	}
-
-	const numericValue = Number(normalizedValue);
-	if (!Number.isFinite(numericValue) || numericValue <= 0) {
-		return `${label} debe ser mayor a 0`;
-	}
-
-	return undefined;
-}
-
-function getUniqueFieldErrors(errors: readonly unknown[]) {
-	return Array.from(new Set(errors.map((error) => String(error))));
-}
-
 function RouteComponent() {
 	const {
 		data: session,
@@ -168,14 +144,29 @@ function RouteComponent() {
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
 	const [leadDuplicateConflict, setLeadDuplicateConflict] =
 		useState<LeadDuplicateConflict | null>(null);
-	const [searchTerm, setSearchTerm] = usePersistedState("crm/leads/searchTerm", "");
+	const [searchTerm, setSearchTerm] = usePersistedState(
+		"crm/leads/searchTerm",
+		"",
+	);
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
-	const [dateRange, setDateRange] = usePersistedDateRange("crm/leads/dateRange");
-	const [statusFilter, setStatusFilter] = usePersistedState<string>("crm/leads/statusFilter", "all");
-	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/leads/sourceFilter", "all");
+	const [dateRange, setDateRange] = usePersistedDateRange(
+		"crm/leads/dateRange",
+	);
+	const [statusFilter, setStatusFilter] = usePersistedState<string>(
+		"crm/leads/statusFilter",
+		"all",
+	);
+	const [sourceFilter, setSourceFilter] = usePersistedState<string>(
+		"crm/leads/sourceFilter",
+		"all",
+	);
 	const [page, setPage] = usePersistedState<number>("crm/leads/page", 0);
 
-	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined || statusFilter !== "all" || sourceFilter !== "all";
+	const hasActiveFilters =
+		searchTerm !== "" ||
+		dateRange !== undefined ||
+		statusFilter !== "all" ||
+		sourceFilter !== "all";
 	const resetFilters = () => {
 		setSearchTerm("");
 		setDebouncedSearch("");
@@ -324,14 +315,16 @@ function RouteComponent() {
 	);
 	const creditAnalysisQuery = useQuery({
 		queryKey: ["creditAnalysis", "opportunity", analysisOpportunityId],
-		queryFn: selectedLead?.id && analysisOpportunityId
-			? () =>
-					client.getCreditAnalysisByLeadId({
-						leadId: selectedLead.id,
-						opportunityId: analysisOpportunityId,
-					})
-			: () => Promise.resolve(null),
-		enabled: !!selectedLead?.id && !!analysisOpportunityId && isDetailsDialogOpen,
+		queryFn:
+			selectedLead?.id && analysisOpportunityId
+				? () =>
+						client.getCreditAnalysisByLeadId({
+							leadId: selectedLead.id,
+							opportunityId: analysisOpportunityId,
+						})
+				: () => Promise.resolve(null),
+		enabled:
+			!!selectedLead?.id && !!analysisOpportunityId && isDetailsDialogOpen,
 	});
 
 	// Query para obtener un lead específico por ID (desde URL)
@@ -1029,1051 +1022,18 @@ function RouteComponent() {
 										</Button>
 									</DialogTrigger>
 								)}
-							<DialogContent className="max-h-[90vh] min-w-[800px] max-w-4xl overflow-y-auto">
-								<DialogHeader>
-									<DialogTitle>
-										{editingLead ? "Editar Lead" : "Crear Nuevo Lead"}
-									</DialogTitle>
-								</DialogHeader>
-								<form
-									onSubmit={(e) => {
-										e.preventDefault();
-										e.stopPropagation();
-										void createLeadForm.handleSubmit().catch(() => undefined);
-									}}
-									autoComplete="off"
-									className="space-y-4"
-								>
-									<div className="grid grid-cols-4 gap-4">
-										<div>
-											<createLeadForm.Field
-												name="firstName"
-												validators={{
-													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El nombre es requerido";
-														}
-														return undefined;
-													},
-												}}
-											>
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Primer Nombre{" "}
-															<span className="text-red-500">*</span>
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															autoComplete={getLeadNameAutocomplete(
-																"firstName",
-															)}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															className={
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														/>
-														{getUniqueFieldErrors(field.state.meta.errors).map(
-															(error) => (
-																<p key={error} className="text-red-500 text-sm">
-																	{error}
-																</p>
-															),
-														)}
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-										<div>
-											<createLeadForm.Field name="middleName">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Segundo Nombre</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															autoComplete={getLeadNameAutocomplete(
-																"middleName",
-															)}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-														/>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-										<div>
-											<createLeadForm.Field
-												name="lastName"
-												validators={{
-													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El apellido es requerido";
-														}
-														return undefined;
-													},
-												}}
-											>
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Primer Apellido{" "}
-															<span className="text-red-500">*</span>
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															autoComplete={getLeadNameAutocomplete("lastName")}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															className={
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														/>
-													{getUniqueFieldErrors(field.state.meta.errors).map(
-														(error) => (
-															<p key={error} className="text-red-500 text-sm">
-																{error}
-															</p>
-														),
-													)}
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-										<div>
-											<createLeadForm.Field name="secondLastName">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Segundo Apellido</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															autoComplete={getLeadNameAutocomplete(
-																"secondLastName",
-															)}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-														/>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createLeadForm.Field
-												name="email"
-												validators={{
-													onChange: ({ value }) => {
-														if (
-															value.trim() &&
-															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-														) {
-															return "El correo electrónico no es válido";
-														}
-														return undefined;
-													},
-												}}
-											>
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Correo Electrónico
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="email"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															className={
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														/>
-														{getUniqueFieldErrors(field.state.meta.errors).map(
-															(error) => (
-																<p key={error} className="text-red-500 text-sm">
-																	{error}
-																</p>
-															),
-														)}
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-										<div>
-											<createLeadForm.Field
-												name="phone"
-												validators={{
-													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El teléfono es requerido";
-														}
-														return undefined;
-													},
-												}}
-											>
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Teléfono <span className="text-red-500">*</span>
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="tel"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															className={
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														/>
-														{getUniqueFieldErrors(field.state.meta.errors).map(
-															(error) => (
-																<p key={error} className="text-red-500 text-sm">
-																	{error}
-																</p>
-															),
-														)}
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createLeadForm.Field name="jobTitle">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Cargo</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-														/>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-										<div>
-											<createLeadForm.Field name="companyId">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Empresa</Label>
-														<Combobox
-															options={[
-																{ value: "none", label: "Sin empresa" },
-																...(companiesQuery.data?.map((company) => ({
-																	value: company.id,
-																	label: company.name,
-																})) || []),
-															]}
-															value={field.state.value ?? null}
-															onChange={(value) => field.handleChange(value)}
-															placeholder="Seleccionar empresa"
-															width="full"
-														/>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-									</div>
-
-									<div>
-										<createLeadForm.Field
-											name="source"
-											validators={{
-												onChange: ({ value }) => {
-													if (!value) {
-														return "La fuente del lead es requerida";
-													}
-													return undefined;
-												},
-											}}
-										>
-											{(field) => (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>
-														Fuente del Lead{" "}
-														<span className="text-red-500">*</span>
-													</Label>
-													<Select
-														value={field.state.value}
-														onValueChange={(value) =>
-															field.handleChange(value as LeadSource)
-														}
-													>
-														<SelectTrigger
-															className={
-																field.state.meta.errors.length > 0
-																	? "border-red-500"
-																	: ""
-															}
-														>
-															<SelectValue placeholder="Seleccionar fuente" />
-														</SelectTrigger>
-														<SelectContent>
-															{LEAD_SOURCE_OPTIONS.map((option) => (
-																<SelectItem
-																	key={option.value}
-																	value={option.value}
-																>
-																	{option.label}
-																</SelectItem>
-															))}
-														</SelectContent>
-													</Select>
-													{getUniqueFieldErrors(field.state.meta.errors).map(
-														(error) => (
-															<p
-																key={error}
-																className="text-red-500 text-sm"
-															>
-																{error}
-															</p>
-														),
-													)}
-												</div>
-											)}
-										</createLeadForm.Field>
-									</div>
-
-									{/* Personal Information */}
-									<div className="space-y-4">
-										<h3 className="font-semibold text-lg">
-											Información Personal
-										</h3>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<createLeadForm.Field name="age">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Edad</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																type="number"
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																min="18"
-																max="100"
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="dpi">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>DPI</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) => {
-																	const val = e.target.value
-																		.replace(/\D/g, "")
-																		.slice(0, 13);
-																	field.handleChange(val);
-																}}
-																placeholder="1234567890101"
-																maxLength={13}
-																inputMode="numeric"
-															/>
-															{field.state.value &&
-																field.state.value.length > 0 &&
-																field.state.value.length !== 13 && (
-																	<p className="text-destructive text-xs">
-																		El DPI debe tener 13 dígitos (
-																		{field.state.value.length}/13)
-																	</p>
-																)}
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<createLeadForm.Field name="nit">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>NIT</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="0000000-0"
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<createLeadForm.Field name="clientType">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Tipo de Cliente{" "}
-																<span className="text-red-500">*</span>
-															</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(
-																		value as
-																			| "individual"
-																			| "comerciante"
-																			| "empresa",
-																	)
-																}
-															>
-																<SelectTrigger id={field.name}>
-																	<SelectValue />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="individual">
-																		Cliente Individual
-																	</SelectItem>
-																	<SelectItem value="comerciante">
-																		Comerciante Individual
-																	</SelectItem>
-																	<SelectItem value="empresa">
-																		Empresa (S.A, Ltda, etc.)
-																	</SelectItem>
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="maritalStatus">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Estado Civil</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(
-																		value as
-																			| "single"
-																			| "married"
-																			| "divorced"
-																			| "widowed",
-																	)
-																}
-															>
-																<SelectTrigger>
-																	<SelectValue placeholder="Seleccionar estado civil" />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="single">
-																		Soltero/a
-																	</SelectItem>
-																	<SelectItem value="married">
-																		Casado/a
-																	</SelectItem>
-																	<SelectItem value="divorced">
-																		Divorciado/a
-																	</SelectItem>
-																	<SelectItem value="widowed">
-																		Viudo/a
-																	</SelectItem>
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="dependents">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Dependientes Económicos
-															</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																type="number"
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																min="0"
-																max="20"
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-									</div>
-
-									{/* Datos para Contratos Legales */}
-									<div className="space-y-4">
-										<h3 className="font-semibold text-lg">
-											Datos para Contratos
-											<span className="ml-2 font-normal text-muted-foreground text-sm">
-												(requeridos para generar documentos legales)
-											</span>
-										</h3>
-										<div className="grid grid-cols-3 gap-4">
-											<div>
-												<createLeadForm.Field name="birthDate">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Fecha de Nacimiento
-															</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																type="date"
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="gender">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Género</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(
-																		value as "male" | "female" | "",
-																	)
-																}
-															>
-																<SelectTrigger>
-																	<SelectValue placeholder="Seleccionar género" />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="male">
-																		Masculino
-																	</SelectItem>
-																	<SelectItem value="female">
-																		Femenino
-																	</SelectItem>
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="nationality">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Nacionalidad</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="Ej: guatemalteco"
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-									</div>
-
-									{/* Dirección */}
-									<div className="space-y-4">
-										<h3 className="font-semibold text-lg">Dirección</h3>
-										<div className="grid grid-cols-1 gap-4">
-											<div>
-												<createLeadForm.Field name="direccion">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Dirección Completa
-															</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="Ej: 4ta Calle 5-67, Zona 1"
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-										<div className="grid grid-cols-3 gap-4">
-											<div>
-												<createLeadForm.Field name="departamento">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Departamento</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) => {
-																	field.handleChange(value);
-																	setSelectedDepartamento(value);
-																	// Reset municipio when departamento changes
-																	createLeadForm.setFieldValue("municipio", "");
-																}}
-															>
-																<SelectTrigger>
-																	<SelectValue placeholder="Seleccionar departamento" />
-																</SelectTrigger>
-																<SelectContent>
-																	{departamentosQuery.data?.map((dep) => (
-																		<SelectItem key={dep} value={dep}>
-																			{dep}
-																		</SelectItem>
-																	))}
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="municipio">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Municipio</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(value)
-																}
-																disabled={!selectedDepartamento}
-															>
-																<SelectTrigger>
-																	<SelectValue
-																		placeholder={
-																			selectedDepartamento
-																				? "Seleccionar municipio"
-																				: "Primero seleccione departamento"
-																		}
-																	/>
-																</SelectTrigger>
-																<SelectContent>
-																	{municipiosQuery.data?.map((mun) => (
-																		<SelectItem key={mun} value={mun}>
-																			{mun}
-																		</SelectItem>
-																	))}
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="zona">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Zona</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="Ej: 1, 10, etc."
-															/>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-									</div>
-
-									{/* Financial Information */}
-									<div className="space-y-4">
-										<h3 className="font-semibold text-lg">
-											Información Financiera
-										</h3>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<createLeadForm.Field
-													name="monthlyIncome"
-													validators={{
-														onChange: ({ value }) =>
-															validatePositiveFinancialValue(
-																value,
-																"El ingreso mensual",
-															),
-													}}
-												>
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Ingreso Mensual
-															</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																type="number"
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="0.00"
-																step="0.01"
-																min="0"
-																className={
-																	field.state.meta.errors.length > 0
-																		? "border-red-500"
-																		: ""
-																}
-															/>
-															{field.state.meta.errors.map((error, index) => (
-																<p key={index} className="text-red-500 text-sm">
-																	{String(error)}
-																</p>
-															))}
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field
-													name="loanAmount"
-													validators={{
-														onChange: ({ value }) =>
-															validatePositiveFinancialValue(
-																value,
-																"El monto a financiar",
-															),
-													}}
-												>
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Monto a Financiar
-															</Label>
-															<Input
-																id={field.name}
-																name={field.name}
-																type="number"
-																value={field.state.value}
-																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="0.00"
-																step="0.01"
-																min="0"
-																className={
-																	field.state.meta.errors.length > 0
-																		? "border-red-500"
-																		: ""
-																}
-															/>
-															{field.state.meta.errors.map((error, index) => (
-																<p key={index} className="text-red-500 text-sm">
-																	{String(error)}
-																</p>
-															))}
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<createLeadForm.Field name="occupation">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>Ocupación</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(
-																		value as "owner" | "employee",
-																	)
-																}
-															>
-																<SelectTrigger>
-																	<SelectValue placeholder="Seleccionar ocupación" />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="owner">Dueño</SelectItem>
-																	<SelectItem value="employee">
-																		Empleado
-																	</SelectItem>
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-											<div>
-												<createLeadForm.Field name="workTime">
-													{(field) => (
-														<div className="space-y-2">
-															<Label htmlFor={field.name}>
-																Tiempo en el Trabajo
-															</Label>
-															<Select
-																value={field.state.value}
-																onValueChange={(value) =>
-																	field.handleChange(
-																		value as
-																			| "less_than_1"
-																			| "1_to_5"
-																			| "5_to_10"
-																			| "10_plus",
-																	)
-																}
-															>
-																<SelectTrigger>
-																	<SelectValue placeholder="Seleccionar tiempo" />
-																</SelectTrigger>
-																<SelectContent>
-																	<SelectItem value="less_than_1">
-																		Menos de un año
-																	</SelectItem>
-																	<SelectItem value="1_to_5">
-																		1 a 5 años
-																	</SelectItem>
-																	<SelectItem value="5_to_10">
-																		5 a 10 años
-																	</SelectItem>
-																	<SelectItem value="10_plus">
-																		Más de 10 años
-																	</SelectItem>
-																</SelectContent>
-															</Select>
-														</div>
-													)}
-												</createLeadForm.Field>
-											</div>
-										</div>
-									</div>
-
-									{/* Assets */}
-									<div className="space-y-4">
-										<h3 className="font-semibold text-lg">Activos</h3>
-										<div className="space-y-3">
-											<createLeadForm.Field name="ownsHome">
-												{(field) => (
-													<div className="flex items-center space-x-2">
-														<Checkbox
-															id={field.name}
-															checked={field.state.value}
-															onCheckedChange={(checked) =>
-																field.handleChange(checked as boolean)
-															}
-														/>
-														<Label htmlFor={field.name}>
-															Posee Casa Propia
-														</Label>
-													</div>
-												)}
-											</createLeadForm.Field>
-											<createLeadForm.Field name="ownsVehicle">
-												{(field) => (
-													<div className="flex items-center space-x-2">
-														<Checkbox
-															id={field.name}
-															checked={field.state.value}
-															onCheckedChange={(checked) =>
-																field.handleChange(checked as boolean)
-															}
-														/>
-														<Label htmlFor={field.name}>
-															Posee Vehículo Propio
-														</Label>
-													</div>
-												)}
-											</createLeadForm.Field>
-											<createLeadForm.Field name="hasCreditCard">
-												{(field) => (
-													<div className="flex items-center space-x-2">
-														<Checkbox
-															id={field.name}
-															checked={field.state.value}
-															onCheckedChange={(checked) =>
-																field.handleChange(checked as boolean)
-															}
-														/>
-														<Label htmlFor={field.name}>
-															Tiene Tarjeta de Crédito
-														</Label>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-									</div>
-
-									<div>
-										<createLeadForm.Field name="notes">
-											{(field) => (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>Notas</Label>
-													<Textarea
-														id={field.name}
-														name={field.name}
-														value={field.state.value}
-														onBlur={field.handleBlur}
-														onChange={(e) => field.handleChange(e.target.value)}
-														placeholder="Notas adicionales sobre este lead..."
-														rows={3}
-													/>
-												</div>
-											)}
-										</createLeadForm.Field>
-									</div>
-
-									{/* Score y Capacidad de Pago - Solo visible al editar */}
-									{editingLead && (
-										<div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4">
-											<createLeadForm.Field name="score">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Score Crediticio (0-1)
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="number"
-															min="0"
-															max="1"
-															step="0.01"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="Ej: 0.75"
-														/>
-														<p className="text-muted-foreground text-xs">
-															Puntaje de 0 a 1 (1 = excelente)
-														</p>
-													</div>
-												)}
-											</createLeadForm.Field>
-
-											<createLeadForm.Field name="fit">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Capacidad de Pago
-														</Label>
-														<div className="flex items-center space-x-2 pt-2">
-															<Checkbox
-																id={field.name}
-																checked={field.state.value}
-																onCheckedChange={(checked) =>
-																	field.handleChange(checked === true)
-																}
-															/>
-															<label
-																htmlFor={field.name}
-																className="cursor-pointer text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-															>
-																Pre-aprobado (tiene capacidad de pago)
-															</label>
-														</div>
-														<p className="text-muted-foreground text-xs">
-															Indica si el lead cumple con la capacidad de pago
-															requerida
-														</p>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
-									)}
-
-									<createLeadForm.Subscribe>
-										{(state) => (
-											<Button
-												type="submit"
-												className="w-full"
-												disabled={
-													!state.canSubmit ||
-													state.isSubmitting ||
-													createLeadMutation.isPending ||
-													updateLeadMutation.isPending
-												}
-											>
-												{state.isSubmitting ||
-												createLeadMutation.isPending ||
-												updateLeadMutation.isPending
-													? "Cargando..."
-													: editingLead
-														? "Editar Lead"
-														: "Crear Lead"}
-											</Button>
-										)}
-									</createLeadForm.Subscribe>
-								</form>
-							</DialogContent>
+							<LeadFormDialogContent
+								form={createLeadForm}
+								isEditing={!!editingLead}
+								isSaving={
+									createLeadMutation.isPending || updateLeadMutation.isPending
+								}
+								companies={companiesQuery.data}
+								departamentos={departamentosQuery.data}
+								municipios={municipiosQuery.data}
+								selectedDepartamento={selectedDepartamento}
+								onDepartamentoChange={setSelectedDepartamento}
+							/>
 						</Dialog>
 					</div>
 				</CardHeader>
@@ -2139,11 +1099,23 @@ function RouteComponent() {
 							</SelectContent>
 						</Select>
 						{hasActiveFilters && (
-							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={resetFilters}
+								className="shrink-0 text-muted-foreground"
+							>
 								<X className="mr-1 h-3 w-3" />
 								Limpiar filtros
 								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-									{[searchTerm !== "", dateRange !== undefined, statusFilter !== "all", sourceFilter !== "all"].filter(Boolean).length}
+									{
+										[
+											searchTerm !== "",
+											dateRange !== undefined,
+											statusFilter !== "all",
+											sourceFilter !== "all",
+										].filter(Boolean).length
+									}
 								</Badge>
 							</Button>
 						)}
@@ -2834,7 +1806,8 @@ function RouteComponent() {
 								{!leadOpportunitiesQuery.isLoading &&
 									leadOpportunitiesQuery.data?.length === 0 && (
 										<p className="text-amber-700 text-sm">
-											Este lead no tiene oportunidades disponibles para analizar.
+											Este lead no tiene oportunidades disponibles para
+											analizar.
 										</p>
 									)}
 
@@ -3192,9 +2165,9 @@ function RouteComponent() {
 												null && (
 												<div className="space-y-1.5">
 													<h4 className="font-medium text-base">
-														Fechas de Pago 
+														Fechas de Pago
 													</h4>
-													<p className="text-muted-foreground text-xs italic mb-3">
+													<p className="mb-3 text-muted-foreground text-xs italic">
 														Porcentaje indica día mejor ajustado
 													</p>
 													{creditAnalysisQuery.data.suggestedPaymentDays.map(

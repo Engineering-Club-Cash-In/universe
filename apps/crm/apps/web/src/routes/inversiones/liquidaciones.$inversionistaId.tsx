@@ -35,6 +35,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { InvestorContractsCard } from "@/components/inversiones/InvestorContractsCard";
+import {
+	InvestorFormLayout,
+	investorFormDialogClassName,
+} from "@/components/investments/InvestorFormLayout";
 import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2254,166 +2258,211 @@ function InvestorLiquidacionesPage() {
 					setEditOpen(open);
 				}}
 			>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-					<DialogHeader>
-						<DialogTitle>Editar Inversionista</DialogTitle>
-						<DialogDescription>
-							Modificar los datos de{" "}
-							<span className="font-semibold">
-								{investor?.nombre ?? "este inversionista"}
-							</span>
-						</DialogDescription>
-					</DialogHeader>
-
-					<div className="space-y-4 py-2">
-						<div className="space-y-1.5">
-							<Label htmlFor="edit-nombre">Nombre *</Label>
-							<Input
-								id="edit-nombre"
-								value={editNombre}
-								onChange={(e) => {
-									setEditNombre(e.target.value);
-									limpiarError("nombre");
-								}}
-								aria-invalid={errorEn("nombre")}
-								className={errorEn("nombre") ? "border-destructive" : undefined}
-							/>
-							<MensajeCampo campo="nombre" />
-						</div>
-
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-dpi">DPI</Label>
-								<Input
-									id="edit-dpi"
-									value={editDpi}
-									onChange={(e) => {
-										setEditDpi(e.target.value);
-										limpiarError("dpi");
-									}}
-									aria-invalid={errorEn("dpi")}
-									className={errorEn("dpi") ? "border-destructive" : undefined}
-								/>
-								<MensajeCampo campo="dpi" />
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-email">Email</Label>
-								<Input
-									id="edit-email"
-									type="email"
-									value={editEmail}
-									onChange={(e) => {
-										setEditEmail(e.target.value);
-										limpiarError("email");
-									}}
-									aria-invalid={errorEn("email")}
-									className={
-										errorEn("email") ? "border-destructive" : undefined
-									}
-								/>
-								<MensajeCampo campo="email" />
-							</div>
-						</div>
-
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-banco">Banco</Label>
-								<Select value={editBanco} onValueChange={setEditBanco}>
-									<SelectTrigger id="edit-banco">
-										<SelectValue placeholder="Seleccionar banco..." />
-									</SelectTrigger>
-									<SelectContent>
-										{bancos.map((b: any) => (
-											<SelectItem key={b.banco_id} value={String(b.banco_id)}>
-												{b.nombre}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-tipo-cuenta">Tipo de cuenta</Label>
-								<Select
-									value={editTipoCuenta}
-									onValueChange={setEditTipoCuenta}
-								>
-									<SelectTrigger id="edit-tipo-cuenta">
-										<SelectValue placeholder="Seleccionar..." />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="AHORRO Q">Ahorro Q</SelectItem>
-										<SelectItem value="AHORRO $">Ahorro $</SelectItem>
-										<SelectItem value="MONETARIA Q">Monetaria Q</SelectItem>
-										<SelectItem value="MONETARIA $">Monetaria $</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-
-						<div className="space-y-1.5">
-							<Label htmlFor="edit-numero-cuenta">Número de cuenta</Label>
-							<Input
-								id="edit-numero-cuenta"
-								value={editNumeroCuenta}
-								onChange={(e) => setEditNumeroCuenta(e.target.value)}
-							/>
-						</div>
-
-						<div className="space-y-3">
-							<div className="flex items-center gap-2">
-								<Checkbox
-									id="edit-es-empresa"
-									checked={editEsEmpresa}
-									onCheckedChange={(v) => {
-										setEditEsEmpresa(v === true);
-										// El "obligatorio" cuelga del interruptor: al
-										// desmarcar, la marca del campo deja de aplicar.
-										limpiarError("dpi_rep_legal");
-									}}
-								/>
-								<Label htmlFor="edit-es-empresa">¿Es empresa?</Label>
-							</div>
-							{editEsEmpresa && (
+				<DialogContent className={investorFormDialogClassName}>
+					<InvestorFormLayout
+						header={
+							<DialogHeader>
+								<DialogTitle>Editar Inversionista</DialogTitle>
+								<DialogDescription>
+									Modificar los datos de{" "}
+									<span className="font-semibold">
+										{investor?.nombre ?? "este inversionista"}
+									</span>
+								</DialogDescription>
+							</DialogHeader>
+						}
+						personal={
+							<>
 								<div className="space-y-1.5">
-									<Label htmlFor="edit-dpi-rep-legal">
-										DPI del representante legal
-									</Label>
+									<Label htmlFor="edit-nombre">Nombre *</Label>
 									<Input
-										id="edit-dpi-rep-legal"
-										value={editDpiRepLegal}
+										id="edit-nombre"
+										value={editNombre}
 										onChange={(e) => {
-											setEditDpiRepLegal(e.target.value.replace(/\D/g, ""));
-											limpiarError("dpi_rep_legal");
+											setEditNombre(e.target.value);
+											limpiarError("nombre");
 										}}
-										placeholder="DPI de quien representa a la empresa"
-										maxLength={20}
-										inputMode="numeric"
-										aria-invalid={errorEn("dpi_rep_legal")}
+										aria-invalid={errorEn("nombre")}
 										className={
-											errorEn("dpi_rep_legal")
-												? "border-destructive"
-												: undefined
+											errorEn("nombre") ? "border-destructive" : undefined
 										}
 									/>
-									<MensajeCampo campo="dpi_rep_legal" />
+									<MensajeCampo campo="nombre" />
 								</div>
-							)}
-						</div>
 
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-moneda">Moneda</Label>
-								<Select value={editMoneda} onValueChange={setEditMoneda}>
-									<SelectTrigger id="edit-moneda">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="quetzales">Quetzales (GTQ)</SelectItem>
-										<SelectItem value="dolares">Dólares (USD)</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							<div className="flex items-end pb-2">
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-dpi">DPI</Label>
+									<Input
+										id="edit-dpi"
+										value={editDpi}
+										onChange={(e) => {
+											setEditDpi(e.target.value);
+											limpiarError("dpi");
+										}}
+										aria-invalid={errorEn("dpi")}
+										className={
+											errorEn("dpi") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeCampo campo="dpi" />
+								</div>
+
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-email">Email</Label>
+									<Input
+										id="edit-email"
+										type="email"
+										value={editEmail}
+										onChange={(e) => {
+											setEditEmail(e.target.value);
+											limpiarError("email");
+										}}
+										aria-invalid={errorEn("email")}
+										className={
+											errorEn("email") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeCampo campo="email" />
+								</div>
+
+								<div className="space-y-3">
+									<div className="flex items-center gap-2">
+										<Checkbox
+											id="edit-es-empresa"
+											checked={editEsEmpresa}
+											onCheckedChange={(v) => {
+												setEditEsEmpresa(v === true);
+												// El "obligatorio" cuelga del interruptor: al
+												// desmarcar, la marca del campo deja de aplicar.
+												limpiarError("dpi_rep_legal");
+											}}
+										/>
+										<Label htmlFor="edit-es-empresa">¿Es empresa?</Label>
+									</div>
+									{editEsEmpresa && (
+										<div className="space-y-1.5">
+											<Label htmlFor="edit-dpi-rep-legal">
+												DPI del representante legal
+											</Label>
+											<Input
+												id="edit-dpi-rep-legal"
+												value={editDpiRepLegal}
+												onChange={(e) => {
+													setEditDpiRepLegal(e.target.value.replace(/\D/g, ""));
+													limpiarError("dpi_rep_legal");
+												}}
+												placeholder="DPI de quien representa a la empresa"
+												maxLength={20}
+												inputMode="numeric"
+												aria-invalid={errorEn("dpi_rep_legal")}
+												className={
+													errorEn("dpi_rep_legal")
+														? "border-destructive"
+														: undefined
+												}
+											/>
+											<MensajeCampo campo="dpi_rep_legal" />
+										</div>
+									)}
+								</div>
+							</>
+						}
+						bank={
+							<>
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-banco">Banco</Label>
+									<Select value={editBanco} onValueChange={setEditBanco}>
+										<SelectTrigger id="edit-banco">
+											<SelectValue placeholder="Seleccionar banco..." />
+										</SelectTrigger>
+										<SelectContent>
+											{bancos.map((b: any) => (
+												<SelectItem key={b.banco_id} value={String(b.banco_id)}>
+													{b.nombre}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-tipo-cuenta">Tipo de cuenta</Label>
+									<Select
+										value={editTipoCuenta}
+										onValueChange={setEditTipoCuenta}
+									>
+										<SelectTrigger id="edit-tipo-cuenta">
+											<SelectValue placeholder="Seleccionar..." />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="AHORRO Q">Ahorro Q</SelectItem>
+											<SelectItem value="AHORRO $">Ahorro $</SelectItem>
+											<SelectItem value="MONETARIA Q">Monetaria Q</SelectItem>
+											<SelectItem value="MONETARIA $">Monetaria $</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-numero-cuenta">Número de cuenta</Label>
+									<Input
+										id="edit-numero-cuenta"
+										value={editNumeroCuenta}
+										onChange={(e) => setEditNumeroCuenta(e.target.value)}
+									/>
+								</div>
+							</>
+						}
+						investment={
+							<>
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-moneda">Moneda</Label>
+									<Select value={editMoneda} onValueChange={setEditMoneda}>
+										<SelectTrigger id="edit-moneda">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="quetzales">Quetzales (GTQ)</SelectItem>
+											<SelectItem value="dolares">Dólares (USD)</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-reinversion">Modelo de Inversión</Label>
+									<Select
+										value={editTipoReinversion}
+										onValueChange={setEditTipoReinversion}
+									>
+										<SelectTrigger id="edit-reinversion">
+											<SelectValue />
+										</SelectTrigger>
+
+										<SelectContent>
+											<SelectItem value="sin_reinversion">
+												Tradicional
+											</SelectItem>
+											<SelectItem value="reinversion_capital">
+												Reinversión Capital
+											</SelectItem>
+											<SelectItem value="reinversion_total">
+												Interés Compuesto
+											</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								{editTipoReinversion === "reinversion_variable" && (
+									<div className="space-y-1.5">
+										<Label htmlFor="edit-monto-reinversion">
+											Monto reinversión
+										</Label>
+										<Input
+											id="edit-monto-reinversion"
+											type="number"
+											min="0"
+											step="0.01"
+											value={editMontoReinversion}
+											onChange={(e) => setEditMontoReinversion(e.target.value)}
+										/>
+									</div>
+								)}
 								<div className="flex items-center gap-2">
 									<Checkbox
 										id="edit-factura"
@@ -2422,98 +2471,63 @@ function InvestorLiquidacionesPage() {
 									/>
 									<Label htmlFor="edit-factura">Emite factura</Label>
 								</div>
-							</div>
-						</div>
-
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
-								<Label htmlFor="edit-reinversion">Modelo de Inversión</Label>
-								<Select
-									value={editTipoReinversion}
-									onValueChange={setEditTipoReinversion}
+							</>
+						}
+						footer={
+							<>
+								<Button variant="outline" onClick={() => setEditOpen(false)}>
+									Cancelar
+								</Button>
+								<Button
+									disabled={editMutation.isPending || !editNombre.trim()}
+									onClick={() => {
+										// Con "¿Es empresa?" marcado el DPI del representante es
+										// obligatorio: se marca el input con el mismo mecanismo que
+										// usan los rechazos de cartera.
+										const errorRep = errorRepLegal(
+											editEsEmpresa,
+											editDpiRepLegal,
+										);
+										if (errorRep) {
+											setCampoConError({
+												campo: "dpi_rep_legal",
+												mensaje: errorRep,
+											});
+											document.getElementById("edit-dpi-rep-legal")?.focus();
+											return;
+										}
+										// Desmarcar el interruptor en alguien que YA tenía
+										// representante borra su acceso al portal, y esa persona no
+										// está frente a la pantalla para enterarse: se confirma antes.
+										if (
+											requiereConfirmacionBorrado(
+												editRepLegalOriginal,
+												editEsEmpresa,
+												editDpiOriginal,
+											)
+										) {
+											// Un modal a la vez: se cierra el de edición (su estado
+											// vive fuera, así que no se pierde nada) y al cancelar
+											// la confirmación se vuelve a abrir tal cual estaba.
+											setEditOpen(false);
+											setConfirmarQuitarRepOpen(true);
+											return;
+										}
+										guardarEdicion();
+									}}
 								>
-									<SelectTrigger id="edit-reinversion">
-										<SelectValue />
-									</SelectTrigger>
-
-									<SelectContent>
-										<SelectItem value="sin_reinversion">Tradicional</SelectItem>
-										<SelectItem value="reinversion_capital">
-											Reinversión Capital
-										</SelectItem>
-										<SelectItem value="reinversion_total">
-											Interés Compuesto
-										</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-							{editTipoReinversion === "reinversion_variable" && (
-								<div className="space-y-1.5">
-									<Label htmlFor="edit-monto-reinversion">
-										Monto reinversión
-									</Label>
-									<Input
-										id="edit-monto-reinversion"
-										type="number"
-										min="0"
-										step="0.01"
-										value={editMontoReinversion}
-										onChange={(e) => setEditMontoReinversion(e.target.value)}
-									/>
-								</div>
-							)}
-						</div>
-					</div>
-
-					<DialogFooter className="gap-2 sm:justify-between">
-						<Button variant="outline" onClick={() => setEditOpen(false)}>
-							Cancelar
-						</Button>
-						<Button
-							disabled={editMutation.isPending || !editNombre.trim()}
-							onClick={() => {
-								// Con "¿Es empresa?" marcado el DPI del representante es
-								// obligatorio: se marca el input con el mismo mecanismo que
-								// usan los rechazos de cartera.
-								const errorRep = errorRepLegal(editEsEmpresa, editDpiRepLegal);
-								if (errorRep) {
-									setCampoConError({
-										campo: "dpi_rep_legal",
-										mensaje: errorRep,
-									});
-									document.getElementById("edit-dpi-rep-legal")?.focus();
-									return;
-								}
-								// Desmarcar el interruptor en alguien que YA tenía
-								// representante borra su acceso al portal, y esa persona no
-								// está frente a la pantalla para enterarse: se confirma antes.
-								if (
-									requiereConfirmacionBorrado(
-										editRepLegalOriginal,
-										editEsEmpresa,
-										editDpiOriginal,
-									)
-								) {
-									// Un modal a la vez: se cierra el de edición (su estado
-									// vive fuera, así que no se pierde nada) y al cancelar
-									// la confirmación se vuelve a abrir tal cual estaba.
-									setEditOpen(false);
-									setConfirmarQuitarRepOpen(true);
-									return;
-								}
-								guardarEdicion();
-							}}
-						>
-							{editMutation.isPending ? (
-								<>
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									Guardando...
-								</>
-							) : (
-								"Guardar cambios"
-							)}
-						</Button>
-					</DialogFooter>
+									{editMutation.isPending ? (
+										<>
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+											Guardando...
+										</>
+									) : (
+										"Guardar cambios"
+									)}
+								</Button>
+							</>
+						}
+					/>
 				</DialogContent>
 			</Dialog>
 

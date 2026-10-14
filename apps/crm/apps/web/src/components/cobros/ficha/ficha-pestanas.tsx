@@ -3,6 +3,7 @@ import {
 	CircleCheck,
 	Clock,
 	FileText,
+	Loader2,
 	Send,
 	Sparkles,
 	TriangleAlert,
@@ -551,9 +552,18 @@ export function DocumentosFicha({
 
 /* ── Asistente IA ───────────────────────────────────────────────────────────── */
 
+type MensajeAsistente = {
+	rol: "usuario" | "asistente" | "error";
+	texto: string;
+};
+
+const PREGUNTA_MIN = 3;
+const PREGUNTA_MAX = 500;
+
 export function AsistenteIA({
 	resumen,
 	compacto = false,
+	onPreguntar,
 }: {
 	resumen: { texto: string; etiquetas: string[]; generadoEn: string } | null;
 	/**
@@ -562,7 +572,57 @@ export function AsistenteIA({
 	 * ficha conserva su rejilla de siempre.
 	 */
 	compacto?: boolean;
+	/**
+	 * Pregunta al asistente del caso. Sin ella (showcase, caso sin id) el chat
+	 * queda deshabilitado como antes.
+	 */
+	onPreguntar?: (pregunta: string) => Promise<{ respuesta: string }>;
 }) {
+	const [mensajes, setMensajes] = React.useState<MensajeAsistente[]>([]);
+	const [texto, setTexto] = React.useState("");
+	const [enviando, setEnviando] = React.useState(false);
+	const chatRef = React.useRef<HTMLDivElement>(null);
+	const inputRef = React.useRef<HTMLInputElement>(null);
+
+	// Scroll solo dentro del chat y solo cuando hay algo nuevo: así no mueve la
+	// página al abrir la pestaña.
+	React.useEffect(() => {
+		const chat = chatRef.current;
+		if (!chat || (mensajes.length === 0 && !enviando)) return;
+		chat.scrollTo?.({ top: chat.scrollHeight, behavior: "smooth" });
+	}, [mensajes, enviando]);
+
+	const pregunta = texto.trim();
+	const puedeEnviar =
+		!!onPreguntar && !enviando && pregunta.length >= PREGUNTA_MIN;
+
+	const enviar = async () => {
+		if (!onPreguntar || !puedeEnviar) return;
+		setMensajes((m) => [...m, { rol: "usuario", texto: pregunta }]);
+		setTexto("");
+		setEnviando(true);
+		inputRef.current?.focus();
+		try {
+			const { respuesta } = await onPreguntar(pregunta);
+			setMensajes((m) => [...m, { rol: "asistente", texto: respuesta }]);
+		} catch (error) {
+			// Que la pregunta no se pierda: vuelve al input para reintentar.
+			setTexto((t) => t || pregunta);
+			setMensajes((m) => [
+				...m,
+				{
+					rol: "error",
+					texto:
+						error instanceof Error && error.message
+							? error.message
+							: "El asistente no pudo responder. Intente de nuevo.",
+				},
+			]);
+		} finally {
+			setEnviando(false);
+		}
+	};
+
 	const rejilla = (
 		<div
 			className={cn(
@@ -573,27 +633,71 @@ export function AsistenteIA({
 			)}
 		>
 			<div className="flex min-h-96 flex-col gap-3">
-				<div className="flex flex-1 flex-col gap-3 rounded-2xl border border-line-subtle bg-surface p-3">
-					<p className="max-w-80 rounded-xl border border-line-subtle px-3 py-2 text-fg-secondary text-xs leading-relaxed">
-						Hola, soy el asistente del caso. Pronto podrá pedirme un resumen del
-						caso o resolver dudas sobre este crédito.
+				<div
+					ref={chatRef}
+					role="log"
+					aria-live="polite"
+					className="flex max-h-[28rem] flex-1 flex-col gap-3 overflow-y-auto rounded-2xl border border-line-subtle bg-surface p-3"
+				>
+					<p className="max-w-80 self-start rounded-xl border border-line-subtle px-3 py-2 text-fg-secondary text-xs leading-relaxed">
+						{onPreguntar
+							? "Hola, soy el asistente del caso. Pregúnteme sobre este crédito."
+							: "Hola, soy el asistente del caso. Pronto podrá pedirme un resumen del caso o resolver dudas sobre este crédito."}
 					</p>
+					{mensajes.map((m, i) => (
+						<p
+							// biome-ignore lint/suspicious/noArrayIndexKey: la lista solo crece al final
+							key={i}
+							className={cn(
+								"wrap-break-word max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-xs leading-relaxed",
+								m.rol === "usuario" && "self-end bg-brand-subtle text-fg",
+								m.rol === "asistente" &&
+									"self-start border border-line-subtle text-fg-secondary",
+								m.rol === "error" &&
+									"self-start border border-danger-subtle bg-danger-subtle text-danger-text",
+							)}
+						>
+							{m.texto}
+						</p>
+					))}
+					{enviando && (
+						<p className="flex max-w-80 items-center gap-1.5 self-start rounded-xl border border-line-subtle px-3 py-2 text-fg-tertiary text-xs">
+							<Loader2 aria-hidden className="size-3 animate-spin" />
+							Pensando…
+						</p>
+					)}
 				</div>
-				<div className="flex items-center gap-2 rounded-full border border-line-subtle bg-surface py-1.5 pr-1.5 pl-4">
+				<form
+					className="flex items-center gap-2 rounded-full border border-line-subtle bg-surface py-1.5 pr-1.5 pl-4"
+					onSubmit={(e) => {
+						e.preventDefault();
+						void enviar();
+					}}
+				>
 					<input
-						disabled
-						placeholder="Pregúntele a la IA… (pronto)"
+						ref={inputRef}
+						disabled={!onPreguntar}
+						value={texto}
+						onChange={(e) => setTexto(e.target.value)}
+						maxLength={PREGUNTA_MAX}
+						placeholder={
+							onPreguntar
+								? "Pregúntele a la IA…"
+								: "Pregúntele a la IA… (pronto)"
+						}
+						aria-label="Pregunta al asistente"
 						className="min-w-0 flex-1 bg-transparent text-fg text-sm outline-none placeholder:text-fg-tertiary disabled:cursor-not-allowed"
 					/>
 					<Button
+						type="submit"
 						size="icon"
-						disabled
+						disabled={!puedeEnviar}
 						aria-label="Enviar pregunta"
 						className="rounded-full"
 					>
 						<Send aria-hidden />
 					</Button>
-				</div>
+				</form>
 			</div>
 			<aside
 				className={cn(

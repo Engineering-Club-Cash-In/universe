@@ -234,7 +234,7 @@ import {
 } from "@/lib/cobros/reglas-caso";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
-import { client, orpc } from "@/utils/orpc";
+import { client, orpc, orpcAparte } from "@/utils/orpc";
 
 // CB-020 (Codex, PR #1148): toLocaleDateString("es-GT") sin `timeZone`
 // explícito usa la zona horaria LOCAL del navegador para decidir qué día
@@ -5034,7 +5034,20 @@ function RouteComponent() {
 				</TabsContent>
 
 				<TabsContent value="asistente">
-					<AsistenteIA resumen={comp?.resumenIA ?? null} />
+					<AsistenteIA
+						// Otro caso (cambia el $id sin remontar la ruta) = chat desde cero.
+						key={caso.id}
+						resumen={comp?.resumenIA ?? null}
+						onPreguntar={
+							caso.id
+								? (pregunta) =>
+										orpcAparte.preguntarAsistenteCaso.call({
+											casoCobroId: caso.id as string,
+											pregunta,
+										})
+								: undefined
+						}
+					/>
 				</TabsContent>
 			</Tabs>
 

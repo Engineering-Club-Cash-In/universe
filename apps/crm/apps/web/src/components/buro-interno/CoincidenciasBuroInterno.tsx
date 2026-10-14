@@ -24,6 +24,9 @@ export type AutorizacionBuroInterno = {
 	createdAt: Date | string;
 };
 
+type FuenteCarteraCoincidencia =
+	CoincidenciaBuroInterno["registro"]["fuentesCartera"][number];
+
 /** Lista de coincidencias: a quién de la solicitud se parece y por qué reglas */
 export function CoincidenciasBuroInterno({
 	coincidencias,
@@ -57,6 +60,8 @@ export function CoincidenciasBuroInterno({
 								</p>
 								<p className="text-muted-foreground text-xs">
 									{etiquetaCategoria(coincidencia.registro.categoria)}
+									{coincidencia.registro.origen === "automatico_cartera" &&
+										" · Registro automático de Cartera"}
 									{coincidencia.registro.dpi &&
 										` · DPI ${coincidencia.registro.dpi}`}
 									{coincidencia.registro.numeroCreditoSifco &&
@@ -97,9 +102,27 @@ export function CoincidenciasBuroInterno({
 						<span className="font-medium">Motivo: </span>
 						{coincidencia.registro.motivo}
 					</p>
+					{coincidencia.registro.fuentesCartera.length > 0 && (
+						<div className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+							<p className="font-medium">Créditos fuente de Cartera</p>
+							<ul className="mt-1 space-y-1 text-muted-foreground">
+								{coincidencia.registro.fuentesCartera.map(
+									(fuente: FuenteCarteraCoincidencia) => (
+										<li key={fuente.id}>
+											SIFCO {fuente.numeroCreditoSifco} · {fuente.estadoCredito}{" "}
+											· {etiquetaCategoria(fuente.categoria)}: {fuente.motivo}
+										</li>
+									),
+								)}
+							</ul>
+						</div>
+					)}
 					<p className="mt-1 text-muted-foreground text-xs">
-						Registrado por {coincidencia.registro.creadoPorNombre ?? "—"} el{" "}
-						{formatearFecha(coincidencia.registro.createdAt)}
+						Registrado por{" "}
+						{coincidencia.registro.origen === "automatico_cartera"
+							? "Sistema (Cartera)"
+							: (coincidencia.registro.creadoPorNombre ?? "—")}{" "}
+						el {formatearFecha(coincidencia.registro.createdAt)}
 					</p>
 
 					{(() => {

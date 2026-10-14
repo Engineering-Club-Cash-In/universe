@@ -67,6 +67,7 @@ import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
 } from "../lib/bank-statement-documents";
+import { EvaluacionBuroInternoInestableError } from "../lib/buro-interno-automatico";
 import { errorBuroVigenteParaAnalisis } from "../lib/buro-vigente-para-analisis";
 import { tomarCandadoBuroSiLibre } from "../lib/candado-consulta-buro";
 import {
@@ -5270,7 +5271,14 @@ export const crmRouter = {
 				// frenan las coincidencias de severidad alta sin autorizar (ver
 				// `registrosQueBloquean`); el analista las levanta con un motivo
 				// desde la tarjeta "Buró interno" del análisis.
-				const buroInterno = await bloqueoBuroInterno(input.opportunityId);
+				const buroInterno = await bloqueoBuroInterno(input.opportunityId).catch(
+					(error) => {
+						if (error instanceof EvaluacionBuroInternoInestableError) {
+							throw new ORPCError("CONFLICT", { message: error.message });
+						}
+						throw error;
+					},
+				);
 				huellaBuro = buroInterno.huella;
 
 				if (buroInterno.bloquea) {

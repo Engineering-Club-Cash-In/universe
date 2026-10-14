@@ -56,9 +56,15 @@ export function BuroInternoAnalisis({
 	const [dialogoAbierto, setDialogoAbierto] = useState(false);
 	const [motivo, setMotivo] = useState("");
 
-	const evaluacion = useQuery(
-		orpc.getBuroInternoOportunidad.queryOptions({ input: { opportunityId } }),
-	);
+	const evaluacion = useQuery({
+		...orpc.getBuroInternoOportunidad.queryOptions({
+			input: { opportunityId },
+		}),
+		// La aprobación vuelve a consultar en backend. Evitamos recorrer Cartera
+		// solo porque la pestaña recuperó el foco; el botón permite refrescar.
+		refetchOnWindowFocus: false,
+		staleTime: 60_000,
+	});
 
 	const coincidencias = evaluacion.data?.coincidencias ?? [];
 	const autorizaciones = evaluacion.data?.autorizaciones ?? [];
@@ -114,7 +120,8 @@ export function BuroInternoAnalisis({
 						{peor && <SeveridadBadge severidad={peor} />}
 					</CardTitle>
 					<CardDescription>
-						Personas que cobros marcó como mal pagadoras.
+						Personas registradas por Cobros o detectadas automáticamente en
+						Cartera.
 						{resumenEvaluados && ` Se revisó: ${resumenEvaluados}.`} Las
 						coincidencias de severidad alta frenan la aprobación; las demás solo
 						avisan.

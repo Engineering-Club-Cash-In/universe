@@ -14,13 +14,16 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
 	type BuroInternoCategoria,
+	type BuroInternoOrigen,
 	type BuroInternoPersona,
 	type BuroInternoSeveridad,
 	buroInternoAutorizaciones,
 	buroInternoEventos,
+	buroInternoFuentesCartera,
 	buroInternoPersonas,
 	buroInternoReglas,
 } from "../db/schema/buro-interno";
+import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	coDebtors,
 	leads,
@@ -28,6 +31,22 @@ import {
 	referenciasLead,
 } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
+import {
+	cambioFuenteCartera,
+	cambioPersonaAutomatica,
+	decidirPersistenciaAutomatica,
+	esFichaManualActiva,
+	evaluarConHuellaEstable,
+	usuariosParaSincronizacionAutomatica,
+} from "../lib/buro-interno-automatico";
+import {
+	categoriaRiesgoPrioritaria,
+	evidenciaRiesgoCredito,
+	idsFuentesObsoletas,
+	planificarVigenciaPersonaAutomatica,
+	type RiesgoCartera,
+	resumirFuentesRiesgo,
+} from "../lib/buro-interno-cartera";
 import {
 	type CandidatoBuroInterno,
 	type CoincidenciaBuroInterno,
@@ -44,6 +63,7 @@ import {
 } from "../lib/buro-interno-match";
 import { isUniqueViolation } from "../lib/db-errors";
 import { eqDpi } from "../lib/dpi-lookup";
+import type { CreditoBuroInterno } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackPaymentsEnabled } from "./cartera-back-integration";
 
@@ -76,7 +96,7 @@ async function registrarEvento(
 	ejecutor: Ejecutor,
 	evento: {
 		accion: string;
-		actor: ActorBuroInterno;
+		actor: ActorBuroInterno | null;
 		personaId?: string | null;
 		reglaClave?: string | null;
 		detalle?: Record<string, unknown> | null;
@@ -87,8 +107,8 @@ async function registrarEvento(
 		personaId: evento.personaId ?? null,
 		reglaClave: evento.reglaClave ?? null,
 		detalle: evento.detalle ?? null,
-		realizadoPor: evento.actor.id,
-		realizadoPorRol: evento.actor.rol,
+		realizadoPor: evento.actor?.id ?? null,
+		realizadoPorRol: evento.actor?.rol ?? "system",
 	});
 }
 
@@ -238,6 +258,29 @@ export async function listarPersonas(parametros: {
 			.offset(parametros.offset),
 		db.select({ total: count() }).from(buroInternoPersonas).where(where),
 	]);
+	const personaIds = items.map((fila) => fila.persona.id);
+	const fuentes =
+		personaIds.length > 0
+			? await db
+					.select({
+						id: buroInternoFuentesCartera.id,
+						personaId: buroInternoFuentesCartera.personaId,
+						numeroCreditoSifco: buroInternoFuentesCartera.numeroCreditoSifco,
+						estadoCredito: buroInternoFuentesCartera.estadoCredito,
+						categoria: buroInternoFuentesCartera.categoria,
+						motivo: buroInternoFuentesCartera.motivo,
+						observadoAt: buroInternoFuentesCartera.observadoAt,
+					})
+					.from(buroInternoFuentesCartera)
+					.where(inArray(buroInternoFuentesCartera.personaId, personaIds))
+					.orderBy(desc(buroInternoFuentesCartera.observadoAt))
+			: [];
+	const fuentesPorPersona = new Map<string, typeof fuentes>();
+	for (const fuente of fuentes) {
+		const lista = fuentesPorPersona.get(fuente.personaId) ?? [];
+		lista.push(fuente);
+		fuentesPorPersona.set(fuente.personaId, lista);
+	}
 
 	return {
 		total,
@@ -245,6 +288,7 @@ export async function listarPersonas(parametros: {
 			...fila.persona,
 			creadoPorNombre: fila.creadoPorNombre,
 			desactivadoPorNombre: fila.desactivadoPorNombre,
+			fuentesCartera: fuentesPorPersona.get(fila.persona.id) ?? [],
 		})),
 	};
 }
@@ -590,6 +634,11 @@ export async function actualizarPersona(
 			"Un registro retirado del buró interno no se puede editar",
 		);
 	}
+	if (actual.origen === "automatico_cartera") {
+		throw new BuroInternoValidacionError(
+			"Los registros automáticos de Cartera no se editan manualmente. Podés retirarlo con una justificación y crear una ficha manual si corresponde.",
+		);
+	}
 
 	// El enlace al lead no se cambia al editar: se conserva el original
 	const limpios = { ...limpiarDatos(datos), leadId: actual.leadId };
@@ -812,8 +861,16 @@ export type CoincidenciaConRegistro = CoincidenciaBuroInterno & {
 		numeroCreditoSifco: string | null;
 		categoria: BuroInternoCategoria;
 		motivo: string;
+		origen: BuroInternoOrigen;
 		creadoPorNombre: string | null;
 		createdAt: Date;
+		fuentesCartera: Array<{
+			id: string;
+			numeroCreditoSifco: string;
+			estadoCredito: string;
+			categoria: BuroInternoCategoria;
+			motivo: string;
+		}>;
 	};
 };
 
@@ -830,6 +887,31 @@ async function evaluar(
 			.leftJoin(user, eq(user.id, buroInternoPersonas.creadoPor))
 			.where(eq(buroInternoPersonas.activo, true)),
 	]);
+	const fuentes =
+		registros.length > 0
+			? await db
+					.select({
+						id: buroInternoFuentesCartera.id,
+						personaId: buroInternoFuentesCartera.personaId,
+						numeroCreditoSifco: buroInternoFuentesCartera.numeroCreditoSifco,
+						estadoCredito: buroInternoFuentesCartera.estadoCredito,
+						categoria: buroInternoFuentesCartera.categoria,
+						motivo: buroInternoFuentesCartera.motivo,
+					})
+					.from(buroInternoFuentesCartera)
+					.where(
+						inArray(
+							buroInternoFuentesCartera.personaId,
+							registros.map(({ persona }) => persona.id),
+						),
+					)
+			: [];
+	const fuentesPorPersona = new Map<string, typeof fuentes>();
+	for (const fuente of fuentes) {
+		const lista = fuentesPorPersona.get(fuente.personaId) ?? [];
+		lista.push(fuente);
+		fuentesPorPersona.set(fuente.personaId, lista);
+	}
 
 	const paraMatch: RegistroParaMatch[] = registros.map(
 		({ persona }) => persona,
@@ -850,8 +932,10 @@ async function evaluar(
 					numeroCreditoSifco: persona.numeroCreditoSifco,
 					categoria: persona.categoria,
 					motivo: persona.motivo,
+					origen: persona.origen,
 					creadoPorNombre,
 					createdAt: persona.createdAt,
+					fuentesCartera: fuentesPorPersona.get(persona.id) ?? [],
 				},
 			};
 		},
@@ -870,7 +954,7 @@ export async function consultarPersona(
 	},
 	actor: ActorBuroInterno,
 ) {
-	const coincidencias = await evaluar([
+	const candidatos: CandidatoBuroInterno[] = [
 		{
 			origen: "titular",
 			etiqueta: "Consulta",
@@ -881,7 +965,11 @@ export async function consultarPersona(
 			telefonos: [consulta.telefono],
 			direccion: consulta.direccion,
 		},
-	]);
+	];
+	if (isCarteraBackPaymentsEnabled()) {
+		await registrarCoincidenciasCartera(candidatos);
+	}
+	const coincidencias = await evaluar(candidatos);
 
 	await registrarEvento(db, {
 		accion: "consulta",
@@ -905,12 +993,696 @@ export class OportunidadSinLeadError extends Error {
 	}
 }
 
+let cargaCreditosCarteraEnCurso: Promise<CreditoBuroInterno[]> | null = null;
+
+async function cargarCreditosCarteraSinCompartir(): Promise<
+	CreditoBuroInterno[]
+> {
+	const creditos: CreditoBuroInterno[] = [];
+	const idsVistos = new Set<number>();
+	const pageSize = 1_000;
+	let cursor: string | undefined;
+	let cursorAnterior: string | undefined;
+	let snapshotMaxCreditoId: number | null = null;
+	let ultimoCreditoId = 0;
+
+	for (let page = 1; page <= 10_000; page += 1) {
+		const respuesta = await carteraBackClient.obtenerCreditosBuroInterno({
+			cursor,
+			pageSize,
+		});
+		if (
+			!Number.isSafeInteger(respuesta.snapshotMaxCreditoId) ||
+			respuesta.snapshotMaxCreditoId < 0 ||
+			(snapshotMaxCreditoId !== null &&
+				respuesta.snapshotMaxCreditoId !== snapshotMaxCreditoId)
+		) {
+			throw new Error(
+				"El límite de la consulta de créditos de Cartera cambió durante la búsqueda del buró.",
+			);
+		}
+		snapshotMaxCreditoId ??= respuesta.snapshotMaxCreditoId;
+		if (respuesta.data.length === 0 && respuesta.hasMore) {
+			throw new Error(
+				"Cartera devolvió una página vacía con más créditos pendientes para el buró.",
+			);
+		}
+		for (const credito of respuesta.data) {
+			const id = credito.creditos?.credito_id;
+			if (
+				!Number.isSafeInteger(id) ||
+				id <= ultimoCreditoId ||
+				id > respuesta.snapshotMaxCreditoId ||
+				idsVistos.has(id)
+			) {
+				throw new Error(
+					"Cartera devolvió IDs de crédito repetidos o fuera de orden al consultar el buró.",
+				);
+			}
+			if (
+				!Number.isSafeInteger(credito.usuarios?.usuario_id) ||
+				credito.creditos.usuario_id !== credito.usuarios.usuario_id
+			) {
+				throw new Error(
+					"Cartera devolvió una relación inválida entre crédito y cliente al consultar el buró.",
+				);
+			}
+			idsVistos.add(id);
+			ultimoCreditoId = id;
+			creditos.push(credito);
+		}
+		if (!respuesta.hasMore) {
+			if (respuesta.nextCursor !== null) {
+				throw new Error(
+					"Cartera devolvió un cursor inesperado al finalizar la búsqueda del buró.",
+				);
+			}
+			return creditos;
+		}
+		if (
+			!respuesta.nextCursor ||
+			respuesta.nextCursor === cursorAnterior ||
+			respuesta.nextCursor === cursor
+		) {
+			throw new Error(
+				"Cartera devolvió un cursor inválido o repetido al consultar el buró.",
+			);
+		}
+		cursorAnterior = cursor;
+		cursor = respuesta.nextCursor;
+	}
+	throw new Error(
+		"La consulta del buró excedió el máximo de páginas de Cartera.",
+	);
+}
+
+/** Comparte únicamente cargas simultáneas; no conserva resultados para aprobaciones futuras. */
+async function cargarCreditosCarteraCompletos(): Promise<CreditoBuroInterno[]> {
+	if (cargaCreditosCarteraEnCurso) return cargaCreditosCarteraEnCurso;
+	const carga = cargarCreditosCarteraSinCompartir();
+	cargaCreditosCarteraEnCurso = carga;
+	try {
+		return await carga;
+	} finally {
+		if (cargaCreditosCarteraEnCurso === carga) {
+			cargaCreditosCarteraEnCurso = null;
+		}
+	}
+}
+
+/**
+ * Añade al catálogo únicamente clientes elegibles que coinciden con alguien
+ * de la solicitud. Se usa el matcher actual y una clave estable de usuario
+ * Cartera para que consultas repetidas no dupliquen personas.
+ */
+async function registrarCoincidenciasCartera(
+	candidatos: CandidatoBuroInterno[],
+) {
+	const creditos = await cargarCreditosCarteraCompletos();
+	type GrupoCartera = {
+		usuario: CreditoBuroInterno["usuarios"];
+		creditos: CreditoBuroInterno[];
+		riesgos: RiesgoCartera[];
+		lead: {
+			id: string;
+			nombres: string;
+			apellidos: string;
+			dpi: string | null;
+			nit: string | null;
+			telefono: string | null;
+			direccion: string | null;
+		} | null;
+	};
+	const grupos = new Map<number, GrupoCartera>();
+	for (const credito of creditos) {
+		const usuarioId = credito.usuarios?.usuario_id;
+		if (!Number.isInteger(usuarioId))
+			throw new Error("Cartera devolvió un cliente sin identificador válido");
+		const riesgos = evidenciaRiesgoCredito(credito);
+		if (riesgos.length === 0) continue;
+		const grupo = grupos.get(usuarioId) ?? {
+			usuario: credito.usuarios,
+			creditos: [],
+			riesgos: [],
+			lead: null,
+		};
+		grupo.creditos.push(credito);
+		grupo.riesgos.push(
+			...riesgos.map((riesgo) => ({
+				...riesgo,
+				texto: `${credito.creditos.numero_credito_sifco}: ${riesgo.texto}`,
+			})),
+		);
+		grupos.set(usuarioId, grupo);
+	}
+	const sifcosParaEnriquecer = [
+		...new Set(
+			[...grupos.values()].flatMap((grupo) =>
+				grupo.creditos.map((credito) => credito.creditos.numero_credito_sifco),
+			),
+		),
+	];
+	if (sifcosParaEnriquecer.length > 0) {
+		const leadsRelacionados = await db
+			.select({
+				sifco: carteraBackReferences.numeroCreditoSifco,
+				id: leads.id,
+				firstName: leads.firstName,
+				middleName: leads.middleName,
+				lastName: leads.lastName,
+				secondLastName: leads.secondLastName,
+				dpi: leads.dpi,
+				nit: leads.nit,
+				telefono: leads.phone,
+				direccion: leads.direccion,
+			})
+			.from(carteraBackReferences)
+			.innerJoin(
+				opportunities,
+				eq(opportunities.id, carteraBackReferences.opportunityId),
+			)
+			.innerJoin(leads, eq(leads.id, opportunities.leadId))
+			.where(
+				inArray(carteraBackReferences.numeroCreditoSifco, sifcosParaEnriquecer),
+			);
+		const porSifco = new Map(
+			leadsRelacionados.map((relacion) => [relacion.sifco, relacion]),
+		);
+		for (const grupo of grupos.values()) {
+			for (const credito of grupo.creditos) {
+				const relacionado = porSifco.get(credito.creditos.numero_credito_sifco);
+				if (!relacionado) continue;
+				grupo.lead = {
+					id: relacionado.id,
+					nombres: [relacionado.firstName, relacionado.middleName]
+						.filter(Boolean)
+						.join(" "),
+					apellidos: [relacionado.lastName, relacionado.secondLastName]
+						.filter(Boolean)
+						.join(" "),
+					dpi: relacionado.dpi,
+					nit: relacionado.nit,
+					telefono: relacionado.telefono,
+					direccion: relacionado.direccion,
+				};
+				break;
+			}
+		}
+	}
+
+	const reglas = candidatos.length > 0 ? await cargarReglas() : [];
+	const fuentes: RegistroParaMatch[] = [];
+	const porId = new Map<number, GrupoCartera>();
+	for (const [usuarioId, grupo] of grupos) {
+		const { nombres, apellidos } = sugerirNombresApellidos(
+			grupo.usuario.nombre,
+		);
+		fuentes.push({
+			id: `cartera-user-${usuarioId}`,
+			leadId: grupo.lead?.id ?? null,
+			nombres: grupo.lead?.nombres || nombres,
+			apellidos: grupo.lead?.apellidos || apellidos,
+			dpi: grupo.lead?.dpi ?? null,
+			nit: textoOpcional(grupo.lead?.nit) ?? textoOpcional(grupo.usuario.nit),
+			telefono: grupo.lead?.telefono ?? null,
+			direccion: grupo.lead?.direccion ?? grupo.usuario.direccion ?? null,
+		});
+		porId.set(usuarioId, grupo);
+	}
+	const coincidencias = evaluarCoincidencias(candidatos, fuentes, reglas);
+	const usuariosCoincidentes = new Set<number>();
+	for (const coincidencia of coincidencias) {
+		const match = /^cartera-user-(\d+)$/.exec(coincidencia.registroId);
+		if (match) usuariosCoincidentes.add(Number(match[1]));
+	}
+	await db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
+		const fuentesAutomaticas = await tx
+			.select({
+				persona: buroInternoPersonas,
+				carteraUsuarioId: buroInternoFuentesCartera.carteraUsuarioId,
+			})
+			.from(buroInternoFuentesCartera)
+			.innerJoin(
+				buroInternoPersonas,
+				eq(buroInternoPersonas.id, buroInternoFuentesCartera.personaId),
+			)
+			.where(eq(buroInternoPersonas.origen, "automatico_cartera"));
+		const personasAutomaticas = new Map<
+			string,
+			{
+				persona: BuroInternoPersona;
+				usuarios: Set<number>;
+			}
+		>();
+		for (const fuente of fuentesAutomaticas) {
+			const estado = personasAutomaticas.get(fuente.persona.id) ?? {
+				persona: fuente.persona,
+				usuarios: new Set<number>(),
+			};
+			estado.usuarios.add(fuente.carteraUsuarioId);
+			personasAutomaticas.set(fuente.persona.id, estado);
+		}
+		const personasAutomaticasCoincidentes = new Set(
+			evaluarCoincidencias(
+				candidatos,
+				[...personasAutomaticas.values()]
+					.map(({ persona }) => persona)
+					.filter((persona) => persona.activo && !persona.desactivadoPor),
+				reglas,
+			).map((coincidencia) => coincidencia.registroId),
+		);
+		for (const [personaId, estado] of personasAutomaticas) {
+			if (!personasAutomaticasCoincidentes.has(personaId)) continue;
+			if (!estado.persona.activo || estado.persona.desactivadoPor) continue;
+			const planVigencia = planificarVigenciaPersonaAutomatica(
+				estado.usuarios,
+				grupos.keys(),
+			);
+			if (!planVigencia.desactivar) {
+				if (planVigencia.usuariosSinRiesgo.length > 0) {
+					await tx
+						.delete(buroInternoFuentesCartera)
+						.where(
+							and(
+								eq(buroInternoFuentesCartera.personaId, personaId),
+								inArray(
+									buroInternoFuentesCartera.carteraUsuarioId,
+									planVigencia.usuariosSinRiesgo,
+								),
+							),
+						);
+					await registrarEvento(tx, {
+						accion: "retiro_fuentes_automaticas_cartera",
+						actor: null,
+						personaId,
+						detalle: {
+							usuariosCarteraId: planVigencia.usuariosSinRiesgo,
+						},
+					});
+				}
+				continue;
+			}
+			const ahora = new Date();
+			await tx
+				.update(buroInternoPersonas)
+				.set({
+					activo: false,
+					desactivadoAt: ahora,
+					motivoDesactivacion:
+						"La evidencia de riesgo ya no está vigente en Cartera.",
+					updatedAt: ahora,
+				})
+				.where(eq(buroInternoPersonas.id, personaId));
+			await registrarEvento(tx, {
+				accion: "retiro_automatico_cartera",
+				actor: null,
+				personaId,
+				detalle: { usuariosCarteraId: [...estado.usuarios] },
+			});
+		}
+		// La consulta en línea solo reconcilia personas relacionadas con el
+		// candidato. El mantenimiento global queda fuera del candado interactivo.
+		const usuariosASincronizar = usuariosParaSincronizacionAutomatica({
+			usuariosCoincidentes,
+			personasCoincidentes: personasAutomaticasCoincidentes,
+			usuariosPorPersona: new Map(
+				[...personasAutomaticas].map(([personaId, estado]) => [
+					personaId,
+					estado.usuarios,
+				]),
+			),
+			usuariosConRiesgo: grupos.keys(),
+		});
+		if (usuariosASincronizar.length === 0) return;
+		const personasProcesadas = new Set<string>();
+		for (const usuarioId of usuariosASincronizar) {
+			const grupo = porId.get(usuarioId);
+			if (!grupo) continue;
+			const { nombres, apellidos } = sugerirNombresApellidos(
+				grupo.usuario.nombre,
+			);
+			const sifcos = [
+				...new Set(grupo.creditos.map((c) => c.creditos.numero_credito_sifco)),
+			].sort();
+			const resumenGrupo = resumirFuentesRiesgo(
+				grupo.creditos.map((credito) => {
+					const riesgos = evidenciaRiesgoCredito(credito);
+					return {
+						numeroCreditoSifco: credito.creditos.numero_credito_sifco,
+						categoria: categoriaRiesgoPrioritaria(
+							riesgos.map((riesgo) => riesgo.categoria),
+						),
+						motivo: riesgos.map((riesgo) => riesgo.texto).join("; "),
+					};
+				}),
+			);
+			const { categoria, motivo } = resumenGrupo;
+			const nombresFuente =
+				grupo.lead?.nombres || nombres || grupo.usuario.nombre;
+			const apellidosFuente = grupo.lead?.apellidos || apellidos;
+			const nitFuente =
+				textoOpcional(grupo.lead?.nit) ?? textoOpcional(grupo.usuario.nit);
+
+			const fuentesDeUsuario = await tx
+				.select({
+					persona: buroInternoPersonas,
+				})
+				.from(buroInternoFuentesCartera)
+				.innerJoin(
+					buroInternoPersonas,
+					eq(buroInternoPersonas.id, buroInternoFuentesCartera.personaId),
+				)
+				.where(
+					and(
+						eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+						eq(buroInternoPersonas.origen, "automatico_cartera"),
+					),
+				)
+				.orderBy(
+					desc(buroInternoPersonas.activo),
+					desc(buroInternoPersonas.createdAt),
+				)
+				.limit(1);
+			let personaExistente = fuentesDeUsuario[0]?.persona ?? null;
+			if (personaExistente?.desactivadoPor) continue;
+
+			const buscarDuplicadoActivo = async () =>
+				(
+					await tx
+						.select({ persona: buroInternoPersonas })
+						.from(buroInternoPersonas)
+						.where(
+							and(
+								eq(buroInternoPersonas.activo, true),
+								or(
+									grupo.lead?.id
+										? eq(buroInternoPersonas.leadId, grupo.lead.id)
+										: undefined,
+									grupo.lead?.dpi
+										? eq(
+												buroInternoPersonas.dpi,
+												normalizarDpiMatch(grupo.lead.dpi) ?? "",
+											)
+										: undefined,
+									nitFuente && normalizarNitMatch(nitFuente)
+										? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${normalizarNitMatch(nitFuente)}`
+										: undefined,
+									...grupo.creditos.map((credito) =>
+										and(
+											eq(
+												buroInternoPersonas.numeroCreditoSifco,
+												credito.creditos.numero_credito_sifco,
+											),
+											sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
+										),
+									),
+								),
+							),
+						)
+						.orderBy(
+							sql`CASE WHEN ${buroInternoPersonas.origen} = 'manual' THEN 0 ELSE 1 END`,
+							desc(buroInternoPersonas.createdAt),
+						)
+						.limit(1)
+				)[0]?.persona ?? null;
+
+			// La precedencia manual se comprueba también al reactivar y ante una
+			// identidad compartida por varios usuarios de Cartera.
+			let duplicadoActivo = await buscarDuplicadoActivo();
+			if (esFichaManualActiva(duplicadoActivo)) continue;
+			let vinculadaAExistente = false;
+			if (
+				duplicadoActivo?.origen === "automatico_cartera" &&
+				duplicadoActivo.id !== personaExistente?.id &&
+				(!personaExistente || !personaExistente.activo)
+			) {
+				personaExistente = duplicadoActivo;
+				vinculadaAExistente = true;
+			}
+			let decisionPersistencia = decidirPersistenciaAutomatica({
+				automatica: personaExistente,
+			});
+
+			if (decisionPersistencia === "crear") {
+				const [personaInsertada] = await tx
+					.insert(buroInternoPersonas)
+					.values({
+						leadId: grupo.lead?.id ?? null,
+						origen: "automatico_cartera",
+						numeroCreditoSifco: sifcos[0] ?? null,
+						nombres: nombresFuente,
+						apellidos: apellidosFuente,
+						dpi: grupo.lead?.dpi ? normalizarDpiMatch(grupo.lead.dpi) : null,
+						nit: nitFuente,
+						telefono: grupo.lead?.telefono ?? null,
+						direccion: grupo.lead?.direccion ?? grupo.usuario.direccion ?? null,
+						categoria,
+						motivo,
+						creadoPor: null,
+					})
+					.onConflictDoNothing()
+					.returning();
+				personaExistente = personaInsertada ?? null;
+				if (!personaExistente) {
+					duplicadoActivo = await buscarDuplicadoActivo();
+					if (esFichaManualActiva(duplicadoActivo)) continue;
+					if (duplicadoActivo?.origen !== "automatico_cartera") {
+						throw new Error(
+							"No se pudo resolver el registro duplicado del buró automático.",
+						);
+					}
+					personaExistente = duplicadoActivo;
+					decisionPersistencia = "actualizar";
+					vinculadaAExistente = true;
+				} else {
+					await registrarEvento(tx, {
+						accion: "alta_automatica_cartera",
+						actor: null,
+						personaId: personaExistente.id,
+						detalle: {
+							usuarioCarteraId: usuarioId,
+							sifcos,
+							categoria,
+							evidencia: grupo.riesgos,
+						},
+					});
+				}
+			}
+			if (!personaExistente) continue;
+			const compartePersona =
+				personasProcesadas.has(personaExistente.id) ||
+				[
+					...(personasAutomaticas.get(personaExistente.id)?.usuarios ?? []),
+				].some((id) => id !== usuarioId);
+			const ahora = new Date();
+			const datosDeseados = {
+				activo: true,
+				leadId: compartePersona
+					? personaExistente.leadId
+					: (grupo.lead?.id ?? null),
+				numeroCreditoSifco: compartePersona
+					? personaExistente.numeroCreditoSifco
+					: (sifcos[0] ?? null),
+				nombres: compartePersona ? personaExistente.nombres : nombresFuente,
+				apellidos: compartePersona
+					? personaExistente.apellidos
+					: apellidosFuente,
+				dpi: compartePersona
+					? personaExistente.dpi
+					: grupo.lead?.dpi
+						? normalizarDpiMatch(grupo.lead.dpi)
+						: null,
+				nit: compartePersona ? personaExistente.nit : nitFuente,
+				telefono: compartePersona
+					? personaExistente.telefono
+					: (grupo.lead?.telefono ?? null),
+				direccion: compartePersona
+					? personaExistente.direccion
+					: (grupo.lead?.direccion ?? grupo.usuario.direccion ?? null),
+				categoria: compartePersona ? personaExistente.categoria : categoria,
+				motivo: compartePersona ? personaExistente.motivo : motivo,
+				desactivadoPor: null,
+				desactivadoAt: null,
+				motivoDesactivacion: null,
+			};
+			const cambioAutomatico = cambioPersonaAutomatica(
+				personaExistente,
+				datosDeseados,
+			);
+			if (cambioAutomatico) {
+				const [actualizada] = await tx
+					.update(buroInternoPersonas)
+					.set({ ...datosDeseados, updatedAt: ahora })
+					.where(eq(buroInternoPersonas.id, personaExistente.id))
+					.returning();
+				if (actualizada) personaExistente = actualizada;
+			}
+			if (decisionPersistencia === "reactivar") {
+				await registrarEvento(tx, {
+					accion: "reactivacion_automatica_cartera",
+					actor: null,
+					personaId: personaExistente.id,
+					detalle: {
+						usuarioCarteraId: usuarioId,
+						sifcos,
+						categoria,
+						evidencia: grupo.riesgos,
+					},
+				});
+			}
+
+			const idsCreditosVigentes = grupo.creditos.map(
+				(credito) => credito.creditos.credito_id,
+			);
+			const fuentesActuales = await tx
+				.select({
+					id: buroInternoFuentesCartera.id,
+					personaId: buroInternoFuentesCartera.personaId,
+					creditoId: buroInternoFuentesCartera.carteraCreditoId,
+					numeroCreditoSifco: buroInternoFuentesCartera.numeroCreditoSifco,
+					estadoCredito: buroInternoFuentesCartera.estadoCredito,
+					categoria: buroInternoFuentesCartera.categoria,
+					motivo: buroInternoFuentesCartera.motivo,
+					evidencia: buroInternoFuentesCartera.evidencia,
+				})
+				.from(buroInternoFuentesCartera)
+				.where(eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId));
+			const fuenteActualPorCredito = new Map(
+				fuentesActuales.map((fuente) => [fuente.creditoId, fuente]),
+			);
+			const fuentesObsoletas = idsFuentesObsoletas(
+				fuentesActuales.map((fuente) => fuente.creditoId),
+				idsCreditosVigentes,
+			);
+			if (fuentesObsoletas.length > 0) {
+				await tx
+					.delete(buroInternoFuentesCartera)
+					.where(
+						and(
+							eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+							inArray(
+								buroInternoFuentesCartera.carteraCreditoId,
+								fuentesObsoletas,
+							),
+						),
+					);
+				await registrarEvento(tx, {
+					accion: "retiro_fuentes_automaticas_cartera",
+					actor: null,
+					personaId: personaExistente.id,
+					detalle: {
+						usuarioCarteraId: usuarioId,
+						creditosCarteraId: fuentesObsoletas,
+					},
+				});
+			}
+
+			for (const credito of grupo.creditos) {
+				const riesgosCredito = evidenciaRiesgoCredito(credito);
+				const categoriaCredito = categoriaRiesgoPrioritaria(
+					riesgosCredito.map((riesgo) => riesgo.categoria),
+				);
+				const sifco = credito.creditos.numero_credito_sifco;
+				const datosDeseadosFuente = {
+					personaId: personaExistente.id,
+					numeroCreditoSifco: sifco,
+					estadoCredito: credito.creditos.statusCredit,
+					categoria: categoriaCredito,
+					motivo: riesgosCredito.map((riesgo) => riesgo.texto).join("; "),
+					evidencia: {
+						riesgos: riesgosCredito,
+						cuotasAtrasadasAlCancelar:
+							credito.cancelacion?.cuotas_atrasadas ?? null,
+					},
+				};
+				const fuenteExistente = fuenteActualPorCredito.get(
+					credito.creditos.credito_id,
+				);
+				if (!fuenteExistente) {
+					await tx.insert(buroInternoFuentesCartera).values({
+						...datosDeseadosFuente,
+						carteraUsuarioId: usuarioId,
+						carteraCreditoId: credito.creditos.credito_id,
+						observadoAt: ahora,
+						updatedAt: ahora,
+					});
+				} else if (cambioFuenteCartera(fuenteExistente, datosDeseadosFuente)) {
+					await tx
+						.update(buroInternoFuentesCartera)
+						.set({
+							...datosDeseadosFuente,
+							observadoAt: ahora,
+							updatedAt: ahora,
+						})
+						.where(eq(buroInternoFuentesCartera.id, fuenteExistente.id));
+				}
+			}
+			const fuentesVigentesPersona = await tx
+				.select({
+					numeroCreditoSifco: buroInternoFuentesCartera.numeroCreditoSifco,
+					categoria: buroInternoFuentesCartera.categoria,
+					motivo: buroInternoFuentesCartera.motivo,
+				})
+				.from(buroInternoFuentesCartera)
+				.where(eq(buroInternoFuentesCartera.personaId, personaExistente.id));
+			const resumenPersona = resumirFuentesRiesgo(fuentesVigentesPersona);
+			const cambioResumen =
+				personaExistente.categoria !== resumenPersona.categoria ||
+				personaExistente.motivo !== resumenPersona.motivo;
+			if (cambioResumen) {
+				const [actualizada] = await tx
+					.update(buroInternoPersonas)
+					.set({ ...resumenPersona, updatedAt: ahora })
+					.where(eq(buroInternoPersonas.id, personaExistente.id))
+					.returning();
+				if (actualizada) personaExistente = actualizada;
+			}
+			if (
+				decisionPersistencia !== "reactivar" &&
+				(cambioAutomatico || cambioResumen)
+			) {
+				await registrarEvento(tx, {
+					accion: "actualizacion_automatica_cartera",
+					actor: null,
+					personaId: personaExistente.id,
+					detalle: {
+						usuarioCarteraId: usuarioId,
+						sifcos,
+						categoria: resumenPersona.categoria,
+						evidencia: grupo.riesgos,
+					},
+				});
+			}
+			if (vinculadaAExistente) {
+				await registrarEvento(tx, {
+					accion: "vinculo_automatico_cartera",
+					actor: null,
+					personaId: personaExistente.id,
+					detalle: { usuarioCarteraId: usuarioId, sifcos },
+				});
+			}
+			const estadoMemoria = personasAutomaticas.get(personaExistente.id) ?? {
+				persona: personaExistente,
+				usuarios: new Set<number>(),
+			};
+			estadoMemoria.persona = personaExistente;
+			estadoMemoria.usuarios.add(usuarioId);
+			personasAutomaticas.set(personaExistente.id, estadoMemoria);
+			personasProcesadas.add(personaExistente.id);
+		}
+	});
+}
+
 /**
  * Evalúa a todos los de la solicitud: el titular (con los nombres de RENAP si
  * ya se sincronizaron, que vienen bien separados), los codeudores y las
  * referencias personales del lead.
  */
-export async function evaluarOportunidad(opportunityId: string) {
+export async function evaluarOportunidad(
+	opportunityId: string,
+	opciones: { sincronizarCartera?: boolean } = {},
+) {
 	const [fila] = await db
 		.select({
 			leadId: leads.id,
@@ -1015,6 +1787,10 @@ export async function evaluarOportunidad(opportunityId: string) {
 		leadId: fila.leadId,
 		dpi: normalizarDpiMatch(fila.dpi),
 	};
+
+	if ((opciones.sincronizarCartera ?? true) && isCarteraBackPaymentsEnabled()) {
+		await registrarCoincidenciasCartera(candidatos);
+	}
 
 	const [coincidencias, autorizaciones] = await Promise.all([
 		evaluar(candidatos),
@@ -1184,7 +1960,7 @@ export async function autorizarOportunidad(
 		}
 	});
 
-	return evaluarOportunidad(opportunityId);
+	return evaluarOportunidad(opportunityId, { sincronizarCartera: false });
 }
 
 /**
@@ -1194,12 +1970,19 @@ export async function autorizarOportunidad(
 export async function bloqueoBuroInterno(
 	opportunityId: string,
 ): Promise<{ bloquea: boolean; nombres: string[]; huella: string }> {
-	// Se toma ANTES de evaluar: si algo cambia mientras se evalúa, la huella
-	// queda vieja y la aprobación falla, que es el lado seguro del error
-	const huella = await huellaEvaluacion(opportunityId);
+	// La primera huella sigue tomándose antes de evaluar para detectar cambios
+	// concurrentes. La evaluación puede sincronizar legítimamente el catálogo
+	// automático; si eso cambia la foto, se repite sobre la nueva huella. Una
+	// sincronización idéntica no mueve `updated_at`, por lo que la segunda pasada
+	// queda estable y la aprobación no se bloquea a sí misma.
+	const huellaInicial = await huellaEvaluacion(opportunityId);
 
 	try {
-		const evaluacion = await evaluarOportunidad(opportunityId);
+		const { evaluacion, huella } = await evaluarConHuellaEstable({
+			huellaInicial,
+			obtenerHuella: () => huellaEvaluacion(opportunityId),
+			evaluar: () => evaluarOportunidad(opportunityId),
+		});
 		return {
 			bloquea: evaluacion.bloqueaAprobacion,
 			nombres: evaluacion.bloqueantes.map((b) => b.nombreCompleto),
@@ -1207,7 +1990,7 @@ export async function bloqueoBuroInterno(
 		};
 	} catch (error) {
 		if (error instanceof OportunidadSinLeadError) {
-			return { bloquea: false, nombres: [], huella };
+			return { bloquea: false, nombres: [], huella: huellaInicial };
 		}
 		throw error;
 	}

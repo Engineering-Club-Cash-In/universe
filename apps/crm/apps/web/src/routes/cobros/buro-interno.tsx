@@ -64,6 +64,8 @@ import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
+type FuenteCarteraRegistro = RegistroBuroInterno["fuentesCartera"][number];
+
 export const Route = createFileRoute("/cobros/buro-interno")({
 	component: BuroInternoPage,
 });
@@ -353,9 +355,23 @@ function RegistrosTab({ puedeDarDeBaja }: { puedeDarDeBaja: boolean }) {
 												.filter(Boolean)
 												.join(" · ")}
 										</p>
+										{registro.fuentesCartera.length > 0 && (
+											<p className="mt-1 text-muted-foreground text-xs">
+												Créditos Cartera:{" "}
+												{registro.fuentesCartera
+													.map(
+														(fuente: FuenteCarteraRegistro) =>
+															`${fuente.numeroCreditoSifco} (${fuente.estadoCredito} · ${etiquetaCategoria(fuente.categoria)})`,
+													)
+													.join(", ")}
+											</p>
+										)}
 									</TableCell>
 									<TableCell>
 										<div className="flex flex-col items-start gap-1">
+											{registro.origen === "automatico_cartera" && (
+												<Badge variant="secondary">Automático · Cartera</Badge>
+											)}
 											<Badge variant="outline">
 												{etiquetaCategoria(registro.categoria)}
 											</Badge>
@@ -378,7 +394,9 @@ function RegistrosTab({ puedeDarDeBaja }: { puedeDarDeBaja: boolean }) {
 									<TableCell className="hidden text-sm md:table-cell">
 										<p>{formatearFecha(registro.createdAt)}</p>
 										<p className="text-muted-foreground text-xs">
-											{registro.creadoPorNombre ?? "—"}
+											{registro.origen === "automatico_cartera"
+												? "Sistema (Cartera)"
+												: (registro.creadoPorNombre ?? "—")}
 										</p>
 									</TableCell>
 									<TableCell>
@@ -399,14 +417,15 @@ function RegistrosTab({ puedeDarDeBaja }: { puedeDarDeBaja: boolean }) {
 													<History className="mr-2 h-4 w-4" />
 													Ver historial
 												</DropdownMenuItem>
-												{registro.activo && (
-													<DropdownMenuItem
-														onSelect={() => setEditando(registro)}
-													>
-														<Pencil className="mr-2 h-4 w-4" />
-														Editar datos o motivo
-													</DropdownMenuItem>
-												)}
+												{registro.activo &&
+													registro.origen !== "automatico_cartera" && (
+														<DropdownMenuItem
+															onSelect={() => setEditando(registro)}
+														>
+															<Pencil className="mr-2 h-4 w-4" />
+															Editar datos o motivo
+														</DropdownMenuItem>
+													)}
 												{registro.activo && puedeDarDeBaja && (
 													<>
 														<DropdownMenuSeparator />

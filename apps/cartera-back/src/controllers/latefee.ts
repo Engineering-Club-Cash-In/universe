@@ -2939,7 +2939,7 @@ export async function anularCondonacionNexaATiempo({
 }
 
 
-/** Tramo común de las anulaciones: marca, compensa el ledger y restituye el monto a la mora. */
+/** Tramo común de las anulaciones: marca, compensa el ledger y restituye el monto a la mora, salvo que la ruptura de convenio ya haya compensado el ledger (ver el comentario de la compuerta). */
 async function anularCondonacionVivaEnTx(
   tx: typeof db,
   viva: { condonacion_id: number; credito_id: number; monto: string },
@@ -2972,7 +2972,10 @@ async function anularCondonacionVivaEnTx(
   );
   if (compensadas === 0) {
     // Tuvo ledger y alguien ya lo compensó: la ruptura de convenio (`cerrarMoraPagadaDeCredito`) recreó la mora
-    // desde cero SIN esta condonación. Restituir cobraría el monto dos veces. Sin ledger (todo sobrante), se restituye.
+    // desde cero. Se asume que las cuotas condonadas estaban vencidas y sin cobertura al romperse el convenio, así que
+    // la mora recreada ya incluye el monto y restituirlo lo cobraría dos veces. Si en ese momento estaban cubiertas
+    // (pago validado, o pendiente de ≤7 días), la mora queda de MENOS hasta que el cron la recalcule esa noche.
+    // Decisión: preferir de menos a de más. Sin ledger (todo sobrante), se restituye como siempre.
     const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(mora_pagada_cuota).where(delLedger);
     if (n > 0) return { anulada: true, monto: viva.monto, restituida: false, razon: "ledger ya compensado (ruptura de convenio)" };
   }

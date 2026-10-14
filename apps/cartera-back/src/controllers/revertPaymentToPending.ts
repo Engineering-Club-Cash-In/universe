@@ -411,6 +411,8 @@ export function createRevertPaymentToPending(
       }
 
       // 7️⃣ ACTUALIZAR ESTADO DEL PAGO A PENDING Y ANULAR FECHA
+      // Esta ruta NO anula la condonación por boleta tardía: el pago sigue vivo y contabilidad lo revalida
+      // (tampoco devuelve la mora que el pago cobró).
       await tx
         .update(pagos_credito)
         .set({

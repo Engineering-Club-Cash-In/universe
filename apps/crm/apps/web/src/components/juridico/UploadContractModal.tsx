@@ -1,11 +1,12 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { FileText, FileUp, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
 	MOTIVOS_DE_ANULACION,
 	type MotivoDeAnulacion,
 } from "server/src/lib/contratos-anulacion";
-import { CONTRATOS_VENTA_MAPEADOS } from "server/src/lib/contratos-venta";
+import { contratosParaSubirAMano } from "server/src/lib/contratos-venta";
+import { esOportunidadDeSociedad } from "server/src/lib/oportunidad-de-sociedad";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { leerBase64 } from "@/lib/archivo-base64";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 interface UploadContractModalProps {
 	opportunityId: string;
@@ -67,6 +68,28 @@ export function UploadContractModal({
 	reemplaza,
 }: UploadContractModalProps) {
 	const [contractType, setContractType] = useState<string>("");
+
+	// Los tipos de la batería de la oportunidad: los de sociedad si es de una
+	// empresa, los individuales si no. El servidor lo vuelve a exigir al subir.
+	const { data: oportunidades } = useQuery({
+		...orpc.getOpportunities.queryOptions({ input: { opportunityId } }),
+		enabled: open,
+	});
+	const { data: coDeudores } = useQuery({
+		queryKey: ["coDebtors", opportunityId],
+		queryFn: () => client.getCoDebtorsByOpportunity({ opportunityId }),
+		enabled: open,
+	});
+	const esSociedad = esOportunidadDeSociedad({
+		clientType: oportunidades?.[0]?.lead?.clientType,
+		coDeudores: coDeudores ?? [],
+	});
+	const tiposParaElegir: string[] = contratosParaSubirAMano(esSociedad);
+	// Al reemplazar, el tipo queda fijo aunque ya no sea de la batería: así se
+	// ve qué se reemplaza (y el servidor dice por qué no se puede).
+	if (reemplaza && !tiposParaElegir.includes(reemplaza.contractType)) {
+		tiposParaElegir.push(reemplaza.contractType);
+	}
 	const [archivo, setArchivo] = useState<File | null>(null);
 	const [motivo, setMotivo] = useState<string>("");
 
@@ -153,7 +176,7 @@ export function UploadContractModal({
 								<SelectValue placeholder="Elegí el tipo" />
 							</SelectTrigger>
 							<SelectContent>
-								{CONTRATOS_VENTA_MAPEADOS.map((tipo) => (
+								{tiposParaElegir.map((tipo) => (
 									<SelectItem key={tipo} value={tipo}>
 										{getContractTypeLabel(tipo)}
 									</SelectItem>

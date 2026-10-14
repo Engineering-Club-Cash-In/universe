@@ -85,6 +85,7 @@ export type OpportunityForModal = {
 		departamento?: string | null;
 		municipio?: string | null;
 		zona?: string | null;
+		clientType?: string | null;
 	} | null;
 	company?: {
 		id: string;
@@ -725,6 +726,7 @@ export function OpportunityDetailModal({
 						<CoDebtorsView
 							opportunityId={opportunity.id}
 							opportunity={opportunity as any}
+							clientType={opportunity.lead?.clientType}
 						/>
 					</TabsContent>
 

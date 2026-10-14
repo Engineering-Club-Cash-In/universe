@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
-import { authMiddleware } from "./midleware";
+import { authMiddleware, rechazoSiNoEsRolActivo } from "./midleware";
 // La constante se IMPORTA, no se repite: un literal duplicado entre el guard y
 // este router se desincroniza en silencio —el router deja de reconocer el error
 // y lo degrada a un 400 genérico— y no hay nada que lo delate.
@@ -38,6 +38,8 @@ import { updateInstallments, updateAllInstallments } from "../controllers/update
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
 import { RubroError } from "../controllers/rubros";
+import { registrarPagoConBoletaTardia, traeCondonacionBoletaTardia } from "../controllers/boletaTardia";
+import { EntradaBoletaTardiaInvalida, vistaPreviaBoletaTardia } from "../controllers/boletaTardiaDecision";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -55,7 +57,39 @@ const falsePaymentSchema = z.object({
 export const paymentRouter = new Elysia()
   .use(authMiddleware)
   // Endpoint para registrar pago (ya lo tienes)
-  .post("/newPayment", insertPayment)
+  .post("/newPayment", async (ctx: any) => {
+    // Sin el bloque, el camino de siempre. Con él: condonación por boleta tardía.
+    if (!traeCondonacionBoletaTardia(ctx.body)) return insertPayment(ctx);
+    // Condonar es una vía nueva de perdonar dinero: ASESOR o ADMIN vigentes (revalidados contra platform_users).
+    // Se decide ANTES de tomar el candado del crédito: un 403/401 no escribe nada. Quien firma es el email de la base.
+    const sesion = await rechazoSiNoEsRolActivo(ctx.user, ctx.set, ["ASESOR", "ADMIN"]);
+    if (!sesion.ok) return sesion.body;
+    return registrarPagoConBoletaTardia(ctx, { usuarioEmail: sesion.email });
+  })
+  .post("/pagos/boleta-tardia/preview", async ({ body, user, set }: any) => {
+    // Solo lectura, pero revela cuánta mora se perdonaría: mismo gate que condonar.
+    const sesion = await rechazoSiNoEsRolActivo(user, set, ["ASESOR", "ADMIN"]);
+    if (!sesion.ok) return sesion.body;
+    try {
+      return { success: true, data: await vistaPreviaBoletaTardia(body) };
+    } catch (error) {
+      if (error instanceof EntradaBoletaTardiaInvalida) {
+        set.status = 400;
+        return { success: false, message: "Monto o crédito inválido" };
+      }
+      console.error("[boleta-tardia/preview]", { credito_id: body?.credito_id, error });
+      set.status = 500;
+      return { success: false, message: "No se pudo calcular la vista previa de la condonación" };
+    }
+  }, {
+    body: t.Object({
+      credito_id: t.Integer({ minimum: 1 }),
+      monto_boleta: t.Union([t.Number({ minimum: 0 }), t.String({ pattern: "^\\d{1,16}\\.\\d{2}$" })]),
+      otros: t.Optional(t.Number({ minimum: 0 })),
+      abono_directo_capital: t.Optional(t.Number({ minimum: 0 })),
+      fecha_boleta: t.String(),
+    }),
+  })
   .post("/reversePayment", reversePayment)
   .post("/revertPaymentToPending", revertPaymentToPending)
   .post("/revalidatePayment", async (context) => {
@@ -231,13 +265,15 @@ export const paymentRouter = new Elysia()
     }
   )
 
-  .post("/false-payment", async ({ body, set }) => {
+  .post("/false-payment", async ({ body, set, user }: any) => {
     try {
       // Validate request body
       const { pago_id, credito_id } = falsePaymentSchema.parse(body);
 
       // Call the controller
-      const result = await falsePayment(pago_id, credito_id);
+      // Quien anula firma la anulación de la condonación de boleta tardía (E-7).
+      const { emailVigenteDelActor } = await import("../controllers/condonacionBoletaTardiaAnulacion");
+      const result = await falsePayment(pago_id, credito_id, await emailVigenteDelActor(user));
 
       return result;
     } catch (error: any) {

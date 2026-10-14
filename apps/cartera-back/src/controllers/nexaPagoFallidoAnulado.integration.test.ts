@@ -43,7 +43,8 @@ const setup = async () => {
     abono_interes numeric(18,2), abono_iva_12 numeric(18,2), abono_seguro numeric(18,2),
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
     pagado boolean, createdat timestamp DEFAULT now(),
-    "paymentFalse" boolean NOT NULL DEFAULT false)`;
+    "paymentFalse" boolean NOT NULL DEFAULT false,
+    boleta_tardia_intento_id uuid)`; // columna de 0054 que el esquema de drizzle ya pide
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql.unsafe(await migracion("0043_mora_pagada_cuota.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();

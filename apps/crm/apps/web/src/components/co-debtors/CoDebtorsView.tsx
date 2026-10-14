@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	Building2,
 	Calculator,
 	ChevronDown,
 	ChevronUp,
@@ -14,10 +15,16 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	codeudoresDeMas,
+	esOportunidadDeSociedad,
+} from "server/src/lib/oportunidad-de-sociedad";
 import { toast } from "sonner";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -47,6 +54,11 @@ import { client } from "@/utils/orpc";
 interface CoDebtorsViewProps {
 	opportunityId: string;
 	opportunity: IOpportunity;
+	/**
+	 * `client_type` del lead. Con una empresa la oportunidad es de sociedad y
+	 * hay que marcar a su representante; sin él, sólo cuenta la marca.
+	 */
+	clientType?: string | null;
 }
 
 // Tipo inferido de la query de co-deudores
@@ -87,6 +99,7 @@ interface CoDebtorFormData {
 	phone: string;
 	occupation: "" | "owner" | "employee";
 	notes: string;
+	esRepresentanteLegal: boolean;
 }
 
 const emptyFormData: CoDebtorFormData = {
@@ -101,6 +114,7 @@ const emptyFormData: CoDebtorFormData = {
 	phone: "",
 	occupation: "",
 	notes: "",
+	esRepresentanteLegal: false,
 };
 
 // Formatear moneda
@@ -228,7 +242,18 @@ function CoDebtorCard({
 							<User className="h-5 w-5 text-primary" />
 						</div>
 						<div>
-							<CardTitle className="text-base">{coDebtor.fullName}</CardTitle>
+							<div className="flex flex-wrap items-center gap-2">
+								<CardTitle className="text-base">{coDebtor.fullName}</CardTitle>
+								{coDebtor.esRepresentanteLegal && (
+									<Badge
+										variant="outline"
+										className="gap-1 border-primary/40 bg-primary/10 text-primary"
+									>
+										<Building2 />
+										Representante legal
+									</Badge>
+								)}
+							</div>
 							<p className="text-muted-foreground text-sm">
 								DPI: {coDebtor.dpi}
 							</p>
@@ -615,7 +640,10 @@ function CoDebtorCard({
 	);
 }
 
-export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
+export function CoDebtorsView({
+	opportunityId,
+	clientType,
+}: CoDebtorsViewProps) {
 	const queryClient = useQueryClient();
 	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -695,6 +723,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			phone: formData.phone || undefined,
 			occupation: formData.occupation || undefined,
 			notes: formData.notes || undefined,
+			esRepresentanteLegal: formData.esRepresentanteLegal,
 		});
 	};
 
@@ -717,6 +746,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			phone: formData.phone || null,
 			occupation: formData.occupation || null,
 			notes: formData.notes || null,
+			esRepresentanteLegal: formData.esRepresentanteLegal,
 		});
 	};
 
@@ -740,6 +770,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			phone: coDebtor.phone || "",
 			occupation: (coDebtor.occupation || "") as CoDebtorFormData["occupation"],
 			notes: coDebtor.notes || "",
+			esRepresentanteLegal: coDebtor.esRepresentanteLegal,
 		});
 		setIsEditDialogOpen(true);
 	};
@@ -748,6 +779,21 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 		setSelectedCoDebtor(coDebtor);
 		setIsDeleteDialogOpen(true);
 	};
+
+	// Oportunidad de sociedad: la firma sólo su representante legal
+	const deSociedad = { clientType, coDeudores: coDebtors };
+	const esSociedad = esOportunidadDeSociedad(deSociedad);
+	const representanteMarcado = coDebtors.find((cd) => cd.esRepresentanteLegal);
+	const sobranCodeudores = codeudoresDeMas(deSociedad).length > 0;
+	// Marcar a otro le quita la marca al que la tenía: se avisa en el formulario
+	const editandoAlRepresentante =
+		isEditDialogOpen && representanteMarcado?.id === selectedCoDebtor?.id;
+	const representanteQueDejaDeSerlo =
+		formData.esRepresentanteLegal &&
+		representanteMarcado &&
+		!editandoAlRepresentante
+			? representanteMarcado
+			: null;
 
 	// Form fields JSX
 	const renderFormFields = () => (
@@ -789,6 +835,35 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 								El DPI debe tener 13 dígitos ({formData.dpi.length}/13)
 							</p>
 						)}
+				</div>
+			</div>
+
+			<div className="flex items-start gap-2">
+				<Checkbox
+					id="esRepresentanteLegal"
+					checked={formData.esRepresentanteLegal}
+					onCheckedChange={(checked) =>
+						setFormData((prev) => ({
+							...prev,
+							esRepresentanteLegal: checked === true,
+						}))
+					}
+					className="mt-0.5"
+				/>
+				<div className="space-y-1">
+					<Label htmlFor="esRepresentanteLegal">
+						Representante legal de la empresa
+					</Label>
+					<p className="text-muted-foreground text-xs">
+						Firma los contratos en nombre de la empresa; la oportunidad pasa a
+						ser de sociedad.
+					</p>
+					{representanteQueDejaDeSerlo && (
+						<p className="text-amber-700 text-xs dark:text-amber-400">
+							{representanteQueDejaDeSerlo.fullName} deja de ser el
+							representante legal.
+						</p>
+					)}
 				</div>
 			</div>
 
@@ -955,6 +1030,22 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 					Agregar Co-firmante
 				</Button>
 			</div>
+
+			{/* Avisos de sociedad */}
+			{!isLoading && esSociedad && !representanteMarcado && (
+				<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 text-sm dark:text-amber-400">
+					{coDebtors.length === 0
+						? "Agregá al representante legal de la empresa como co-firmante y marcalo como representante: es quien firma los contratos de sociedad."
+						: "Marcá al representante legal de la empresa: es quien firma los contratos de sociedad."}
+				</div>
+			)}
+			{!isLoading && sobranCodeudores && (
+				<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 text-sm dark:text-amber-400">
+					En una oportunidad de sociedad solo firma el representante legal. Los
+					contratos de sociedad no llevan codeudores; si hacen falta, hay que
+					pedirle a jurídico la versión con codeudores.
+				</div>
+			)}
 
 			{/* Lista de co-deudores como tarjetas */}
 			{isLoading ? (

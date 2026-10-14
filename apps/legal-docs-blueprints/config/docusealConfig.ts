@@ -84,6 +84,89 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  // Ventas a nombre de una sociedad: firma el representante legal.
+  [ContractType.SOLICITUD_COMPRA_VEHICULO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.CARTA_ACEPTACION_INSTALACION_GPS_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.CARTA_CARRO_NUEVO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.CARTA_EMISION_CHEQUES_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.DESCARGO_RESPONSABILIDADES_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.COBERTURA_INREXSA_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.COBERTURA_INREXSA_COMERCIAL_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.COBERTURA_GYT_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.PAGARE_UNICO_LIBRE_PROTESTO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+  [ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD]: {
+    signerCount: 2,
+    signers: [
+      { role: 'Cliente', required: true },
+      { role: 'CCI_Representante', required: true },
+    ],
+  },
+  [ContractType.GARANTIA_MOBILIARIA_SOCIEDAD]: {
+    signerCount: 2,
+    signers: [
+      { role: 'Cliente', required: true },
+      { role: 'CCI_Representante', required: true },
+    ],
+  },
+  [ContractType.CONTRATO_PRIVADO_USO_SOCIEDAD]: {
+    signerCount: 2,
+    signers: [
+      { role: 'Cliente', required: true },
+      { role: 'CCI_Representante', required: true },
+    ],
+  },
+
   // Las cartas unidas: las firma el cliente, como cada carta. Nunca pasa por
   // DocuSeal (va sólo a WeeTrust), pero el mapa exige todos los tipos.
   [ContractType.PAQUETE_CARTAS]: {
@@ -131,6 +214,13 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
   },
 
   [ContractType.COBERTURA_INREXSA_COMERCIAL]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.COBERTURA_GYT]: {
     signerCount: 1,
     signers: [
       { role: 'Cliente', required: true },
@@ -215,6 +305,20 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
   // ===== INVERSIONES SOCIEDAD =====
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
     signerCount: 1,
@@ -273,6 +377,27 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
   },
 
   [ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO1_CONFIRMACION_PARTICIPACION_SOCIEDAD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.ANEXO2_DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
     signerCount: 1,
     signers: [
       { role: 'Inversionista', required: true },

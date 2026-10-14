@@ -183,13 +183,18 @@ intervenir a tiempo. Si nadie llama dentro del plazo, se genera una alerta.
 
 ## Promesas de pago
 
-Una promesa vigente **congela solo las cuotas prometidas**, no el crédito completo — el
-resto sigue contando para el atraso.
+Una promesa vigente **no cambia el bucket ni la mora** (CB-030, Jira CC2-33): el crédito
+conserva su bucket real y en el CRM se ve el subestado «Promesa activa». El bucket solo baja
+cuando se aplica un pago.
+
+Hasta el 2026-10-14 el motor sacaba del conteo las cuotas prometidas. Mientras duraba la
+promesa el crédito «bajaba» (de B4 a B0, por ejemplo), se le apagaba la mora y cambiaba de
+asesor; al vencer volvía a subir. Era justo el maquillaje que el ticket pedía evitar.
 
 Como las promesas viven en el CRM (`contactos_cobros`) y el motor corre en cartera, hay una
-**copia local** (`promesas_pago_espejo`) que se sincroniza desde el CRM y que es lo que
-`procesarMoras` consulta. Es la única forma de que el motor respete una promesa sin cruzar
-bases en medio del job.
+**copia local** (`promesas_pago_espejo`) que se sincroniza desde el CRM. Hoy la usan los
+traslados de cartera, que reparten primero los créditos con promesa vigente; el cálculo de
+mora y de buckets ya no la lee.
 
 Pantalla: `/cobros/promesas`.
 

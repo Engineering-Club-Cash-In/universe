@@ -127,8 +127,7 @@ const {
   updateMora,
   updateMoraEnTx,
 } = await import("./latefee");
-// CB-030 — misma función que usa el freeze real (latefee la importa de acá,
-// no la reimplementa): si divergen, estos tests lo detectan.
+// Día calendario GT que comparten el motor y carteraFront.
 const { hoyGtISO } = await import("../lib/buckets-classification");
 const {
   creditos,
@@ -739,154 +738,6 @@ describe("decidirLimpiezaMoraTrasAplicar", () => {
   });
 });
 
-// CB-030 — freeze por cuota cuando hay promesa de pago vigente
-describe("isOverdueInstallmentForMora — freeze por promesa (CB-030)", () => {
-  const hoy = new Date("2026-05-26T06:00:00.000Z");
-  const cuotaBase = {
-    fecha_vencimiento: new Date("2026-05-15T06:00:00.000Z"), // vencida
-    pagado: false,
-    hasPaidPayment: false,
-    statusCredit: "MOROSO",
-  };
-
-  it("sin Map de promesas (parámetro omitido) → comportamiento idéntico al actual", () => {
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5 },
-      hoy,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("promesa vigente cubre esta cuota → NO cuenta como vencida (congelada)", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(false);
-  });
-
-  it("promesa vigente cubre OTRA cuota → esta SÍ cuenta como vencida", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 8, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("promesa VENCIDA (fecha_promesa < hoy) sin pago → deja de congelar, cuenta como vencida", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-20" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("cuota exactamente en cuota_inicio → congelada (bound inclusivo)", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 5, cuota_fin: 6, fecha_promesa: "2026-05-30" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(false);
-  });
-
-  it("cuota exactamente en cuota_fin → congelada (bound inclusivo)", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 4, cuota_fin: 5, fecha_promesa: "2026-05-30" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(false);
-  });
-
-  it("fecha_promesa === hoy exacto → sigue vigente, congela (Codex PR #1234: toZonedTime corría la fecha date-only un día para atrás)", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: 4, cuota_fin: 6, fecha_promesa: "2026-05-26" }]], // === hoy
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(false);
-  });
-
-  it("promesa sin rango (cuota_inicio/cuota_fin null) → NO congela ninguna cuota", () => {
-    const promesas = new Map([
-      [1, [{ cuota_inicio: null, cuota_fin: null, fecha_promesa: "2026-05-30" }]],
-    ]);
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(true);
-  });
-
-  it("Map de promesas vacío para este crédito → comportamiento normal", () => {
-    const promesas = new Map<number, any[]>();
-    const result = isOverdueInstallmentForMora(
-      { ...cuotaBase, numero_cuota: 5, credito_id: 1 },
-      hoy,
-      promesas,
-      1,
-    );
-    expect(result).toBe(true);
-  });
-
-  it('"salto directo": 2 cuotas venciendo durante la ventana de promesa, luego la promesa vence sin pago → ambas cuentan de una vez', () => {
-    // Simula la corrida DESPUÉS de que la promesa (fecha_promesa=2026-05-20)
-    // ya venció sin pago: el Map de promesas vigentes viene VACÍO para este
-    // crédito (la promesa dejó de ser vigente, ya no se pasa/ya no aplica).
-    // cuotasVencidas debe reflejar TODAS las cuotas realmente vencidas —
-    // nunca hubo acumulación incremental que "recuperar": el conteo siempre
-    // se calcula desde fechas reales.
-    const cuota5 = {
-      ...cuotaBase,
-      numero_cuota: 5,
-      fecha_vencimiento: new Date("2026-05-16T06:00:00.000Z"),
-      credito_id: 1,
-    };
-    const cuota6 = {
-      ...cuotaBase,
-      numero_cuota: 6,
-      fecha_vencimiento: new Date("2026-05-18T06:00:00.000Z"),
-      credito_id: 1,
-    };
-    const promesasVencidasSinEfecto = new Map<number, any[]>(); // ya no vigente
-    const cuotas = [cuota5, cuota6].filter((c) =>
-      isOverdueInstallmentForMora(c, hoy, promesasVencidasSinEfecto, 1),
-    );
-    expect(cuotas.length).toBe(2); // salto directo: ambas cuentan, no incremental
-  });
-});
-
-// FASE 3 (COBROS-02) — reparto de asesor al entrar a un bucket
 describe("elegirAsesorParaBucket", () => {
   it("pool vacío → null (el crédito conserva su asesor)", () => {
     expect(elegirAsesorParaBucket([], new Map(), 7)).toBeNull();
@@ -1005,17 +856,13 @@ describe("día calendario GT — independiente del TZ del proceso (CB-030)", () 
     ).toBe(true);
   });
 
-  it("promesa que vence HOY en GT sigue congelando (>= hoy), tanto string como Date", () => {
+  // CC2-33 (CB-030): una promesa vigente NO congela cuotas — el bucket y la
+  // mora salen de las cuotas vencidas reales. La función ya no recibe promesas:
+  // si alguien vuelve a meter el freeze por parámetro, este test lo marca.
+  it("una cuota vencida cuenta aunque el crédito tenga una promesa vigente", () => {
     const hoy = new Date("2026-08-04T20:00:00.000Z");
     const cuota = { numero_cuota: 3, fecha_vencimiento: "2026-07-01", pagado: false, statusCredit: "MOROSO" };
-    for (const fecha_promesa of ["2026-08-04", new Date("2026-08-04T00:00:00.000Z")] as const) {
-      const mapa = new Map([[77, [{ cuota_inicio: 1, cuota_fin: 5, fecha_promesa }]]]);
-      expect(isOverdueInstallmentForMora(cuota, hoy, mapa, 77)).toBe(false);
-    }
-    // un día después ya no protege
-    for (const fecha_promesa of ["2026-08-03", new Date("2026-08-03T00:00:00.000Z")] as const) {
-      const mapa = new Map([[77, [{ cuota_inicio: 1, cuota_fin: 5, fecha_promesa }]]]);
-      expect(isOverdueInstallmentForMora(cuota, hoy, mapa, 77)).toBe(true);
-    }
+    expect(isOverdueInstallmentForMora(cuota, hoy)).toBe(true);
+    expect(isOverdueInstallmentForMora.length).toBe(2);
   });
 });

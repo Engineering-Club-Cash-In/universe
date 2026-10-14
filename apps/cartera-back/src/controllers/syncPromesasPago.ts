@@ -77,10 +77,8 @@ function validarPromesa(p: PromesaSync): string | null {
 	) {
 		return `cuota_inicio y cuota_fin deben ser enteros positivos (contacto_cobros_id=${p.contacto_cobros_id})`;
 	}
-	// Rango invertido no explota — simplemente nunca matchea ninguna cuota en
-	// cuotaCubiertaPorPromesa (numeroCuota < inicio || > fin siempre true) y
-	// falla en silencio a "no congela nada". Mejor rechazar acá que dejar una
-	// promesa vigente que jamás protege ninguna cuota.
+	// Un rango invertido no describe ninguna cuota: mejor rechazarlo acá que
+	// guardar una promesa vigente que no apunta a nada.
 	if (
 		p.cuota_inicio != null &&
 		p.cuota_fin != null &&

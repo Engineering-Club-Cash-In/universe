@@ -75,14 +75,15 @@ test("late-fee callsites use only the finite safe application payload", () => {
   // getCreditosWithMoras ahora emite en su rama JSON, en la del Excel y en su
   // catch (rejected/failed), getCondonacionesMora distingue rejected de failed
   // y la condonación masiva emite cuando no hay ninguna mora activa.
-  // 44 = + 2 del merge con COBROS-02: la lectura de promesas vigentes (freeze
-  // por cuota, CB-030) emite `degraded` si falla, en el cron y en el reparto.
+  // 44 = + 2 del merge con COBROS-02 (lectura de promesas vigentes del freeze
+  // por cuota, CB-030); se quitaron con el freeze (CC2-33), así que −2 al final.
   // 54 = + 10 de condonarMoraParcial (COBROS-02 W2): rechazos por monto,
   // usuario, referencia, lock ocupado, mora excedida, estado y devengado, más el
   // éxito y la rebaja ya aplicada. Todas con el payload finito permitido.
   // 55 = + 1 de develop: desactivarMoraSiCreditoAlDia omite la mora congelada
   // de un PENDIENTE_CANCELACION (reasonCode excluded_credit_state).
-  expect(calls).toBe(55);
+  // 53 = 55 − las 2 lecturas de promesas que se fueron con el freeze.
+  expect(calls).toBe(53);
 });
 
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {

@@ -46,7 +46,7 @@ La visita no duplica nada: registra qué pasó y abre el flujo de siempre.
 | Resultado | Gestión en `contactos_cobros` | Qué abre al guardar |
 | --- | --- | --- |
 | Pago total | `contactado` | Nada. El monto es lo vencido completo (no se teclea). El pago se registra con "Registrar Pago" (link o boleta); la tarjeta muestra esos dos botones |
-| Promesa de pago | `contactado` | El modal de **promesa de pago** de siempre (congela en cartera, mide cumplimiento), con el canal de la visita |
+| Promesa de pago | `contactado` | El modal de **promesa de pago** de siempre (mide cumplimiento; no cambia el bucket), con el canal de la visita |
 | Pago parcial + promesa | `acuerdo_parcial` | Las dos cosas: el asesor indica el **porcentaje** que pagó, el monto queda en la visita y se abre la promesa por el saldo |
 | Convenio de pago | `contactado` | El modal de **convenio de pago** (CB-032). Si se cierra sin crearlo, la tarjeta muestra "Falta registrar el convenio" mientras el crédito no tenga convenio |
 | Entrega voluntaria | `contactado` | El formulario de **entrega voluntaria de CB-042**, con el lugar y la fecha de la visita ya puestos. De B3 traslada a B4; en B4 solo registra ([doc 7](./07-recuperacion-de-vehiculo.md)) |

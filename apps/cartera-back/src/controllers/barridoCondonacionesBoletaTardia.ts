@@ -130,6 +130,8 @@ export async function barrerCondonacionesBoletaTardiaHuerfanas(deps: DepsBarrido
         console.warn(JSON.stringify({ level: "warn", event: "boleta_tardia.condonacion_huerfana_abandonada", ...c, nota: `más de ${HORAS_MAXIMAS_CONDONACION_HUERFANA} h: revisar a mano` }));
       }
     } catch (error) {
+      // Se avisan una sola vez: si esta consulta falla, el job tiene que reportarlo.
+      resultado.fallidas++;
       console.error(JSON.stringify({ level: "error", event: "boleta_tardia.abandonadas_fallo", error: error instanceof Error ? error.message : String(error) }));
     }
     return resultado;

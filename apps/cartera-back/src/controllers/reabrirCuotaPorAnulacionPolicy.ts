@@ -44,6 +44,8 @@ type BigInput = number | string | Big;
  *  - CANCELADO: no se reabre; es terminal (`desactivarNexaPorCancelacion`, no se
  *    reactiva) y el cron lo excluye. PENDIENTE_CANCELACION SÍ se reabre: `ACTIVAR`
  *    lo devuelve a ACTIVO sin tocar cuotas ni pagos.
+ *  - CAIDO: igual que CANCELADO; `fallenCredits` conserva solo la cuota 0 (ancla)
+ *    y `updateCredit` lo trata como finalizado. Los restantes sí se reponen.
  *  - INCOBRABLE: como `reversePayment` (~967-1005), filas y cuota quedan con el
  *    mismo valor, el de `shouldIncobrableInstallmentBePaid` (por capital).
  */
@@ -140,7 +142,9 @@ export function planReaperturaCuotaPorAnulacion({
     abonoCapital: 0,
   });
   const reabrir =
-    cuota.gt(0) && statusCredit !== "CANCELADO" && incobrablePagada !== true;
+    cuota.gt(0) && statusCredit !== "CANCELADO" &&
+    statusCredit !== "CAIDO" &&
+    incobrablePagada !== true;
 
   return { replica, reabrirFilas: reabrir, reabrirCuota: reabrir };
 }

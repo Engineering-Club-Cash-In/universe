@@ -144,8 +144,8 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     }
   });
 
-  test("CANCELADO (cerrado): repone restantes pero no reabre", () => {
-    for (const statusCredit of ["CANCELADO"]) {
+  test("CANCELADO y CAIDO (cerrados): repone restantes pero no reabre", () => {
+    for (const statusCredit of ["CANCELADO", "CAIDO"]) {
       const p = plan({ statusCredit });
       expect(p.replica).not.toBeNull();
       expect(p.reabrirFilas).toBe(false);

@@ -1203,13 +1203,13 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	// Temas generales: solo cuando piden contenido ajeno al caso. Una palabra
 	// suelta puede venir del texto libre de las gestiones («vendería bitcoin
 	// para pagar», «el clima afectó su cosecha», «receta médica»).
-	/\b(cuent\w*|dime|dame|escrib\w*|cant\w*|recit\w*|inventa\w*|recomiend\w*|sugiere\w*|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|horoscopo)\b|\breceta (de cocina|para (cocinar|preparar))\b/,
+	/\b(cuenta|cuentame|dime|dame|escribe|escribeme|canta|cantame|recita|recitame|inventa|inventame|recomienda|recomiendame|sugiere|sugiereme|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|horoscopo)\b|\breceta (de cocina|para (cocinar|preparar))\b/,
 	/\bque clima (hace|hay|tendremos|habra)\b|\bcomo (esta|estara|va a estar) el clima\b|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b/,
 	/\b(quien gano|marcador|resultado)\b[^?.!]*\bfutbol\b|\bquien gano el partido\b|\btabla de posiciones\b/,
 	/\b(cuanto (vale|cuesta)|precio d\w+|cotizacion d\w+|a como esta)\s+(el |la |los )?(bitcoin|criptomonedas?|ethereum)\b/,
 	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
-	// traduce la mora?» es una pregunta del caso.
-	/(^|[.!?;:,]\s*)traduc\w*\b|\btraduc\w*\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
+	// traduce la mora?» o «La mora, traducida a cuotas, ¿cuánto es?» son del caso.
+	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\b|\btraduc\w*\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
 ];
 
 const sinTildes = (t: string) =>

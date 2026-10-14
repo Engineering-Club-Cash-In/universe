@@ -1059,40 +1059,77 @@ const ALERTAS_PROMESA_FILTRO = ["todas", ...CATEGORIAS_ALERTA_PROMESA] as const;
 const ALERTAS_CONVENIO_FILTRO = ["todas", ...CATEGORIAS_ALERTA_CONVENIO] as const;
 
 /**
- * Armar la cola completa tarda unos 3 s (recorre toda la cartera): cambiar de
- * página o de filtro en la Cartera general no debe repetirlo. Se guarda 30 s por
- * usuario, rol y asesor, que es lo que define qué cola ve cada quien.
+ * Cola del día COMPLETA (sin paginar) de quien pregunta. Armarla tarda unos
+ * 3 s (recorre toda la cartera) y las pantallas la piden varias veces con
+ * distinta página o tamaño —y la Cartera general, por categoría—, así que se
+ * guarda 30 s por usuario, rol, asesor, buckets y filtro, y la página se corta
+ * después (`paginarColaDia`). Sin invalidación: una gestión recién registrada
+ * puede tardar hasta 30 s en reflejarse en la cola.
  */
-const sifcosPorColaMemo = memoConTtl<string[]>(30_000);
+const colaDiaCompletaMemo =
+	memoConTtl<Awaited<ReturnType<typeof ejecutarColaDia>>>(30_000);
+
+function colaDiaCompleta(
+	input: Pick<EntradaColaDia, "filtro" | "filtroExtra" | "asesorId" | "buckets">,
+	context: ContextoColaDia,
+) {
+	const clave = JSON.stringify([
+		context.session?.user?.id ?? "",
+		context.userRole ?? "",
+		input.asesorId ?? null,
+		input.buckets ?? null,
+		input.filtro ?? null,
+		input.filtroExtra ?? null,
+	]);
+	return colaDiaCompletaMemo(clave, () =>
+		ejecutarColaDia(
+			{
+				filtro: input.filtro,
+				filtroExtra: input.filtroExtra,
+				asesorId: input.asesorId,
+				buckets: input.buckets,
+			},
+			context,
+			{ sinPaginar: true },
+		),
+	);
+}
+
+/** Corta la página pedida de una cola completa (misma forma que la paginada). */
+function paginarColaDia(
+	completa: Awaited<ReturnType<typeof ejecutarColaDia>>,
+	page = 1,
+	perPage = 50,
+) {
+	const offset = (page - 1) * perPage;
+	return {
+		...completa,
+		items: completa.items.slice(offset, offset + perPage),
+		page,
+		perPage,
+		totalPages: Math.max(1, Math.ceil(completa.total / perPage)),
+	};
+}
 
 /** SIFCOs de una categoría de la cola del día (misma regla y alcance que `getColaDia`). */
-function sifcosPorCola(
+async function sifcosPorCola(
 	cola: (typeof COLAS_CARTERA_FILTRO)[number],
 	context: ContextoColaDia,
 	asesorId: number | undefined,
 ): Promise<string[]> {
-	const clave = [
-		context.session?.user?.id ?? "",
-		context.userRole ?? "",
-		cola,
-		asesorId ?? "",
-	].join("|");
-	return sifcosPorColaMemo(clave, async () => {
-		const esExtra = cola === "llamada_hoy" || cola === "sin_intento_hoy";
-		const resultado = await ejecutarColaDia(
-			{
-				...(cola === "todas"
-					? {}
-					: esExtra
-						? { filtroExtra: cola }
-						: { filtro: cola }),
-				asesorId,
-			},
-			context,
-			{ sinPaginar: true },
-		);
-		return [...new Set(resultado.items.map((i) => i.numeroCreditoSifco))];
-	});
+	const esExtra = cola === "llamada_hoy" || cola === "sin_intento_hoy";
+	const resultado = await colaDiaCompleta(
+		{
+			...(cola === "todas"
+				? {}
+				: esExtra
+					? { filtroExtra: cola }
+					: { filtro: cola }),
+			asesorId,
+		},
+		context,
+	);
+	return [...new Set(resultado.items.map((i) => i.numeroCreditoSifco))];
 }
 
 /** SIFCOs con una alerta de promesa de la categoría pedida (y del asesor, si se pide). */
@@ -1362,6 +1399,34 @@ export async function ejecutarColaDia(
 		const perPage = input.perPage ?? 50;
 		const page = input.page ?? 1;
 
+		// Lo que NO depende del asesor ni de lo que se resuelve más abajo se
+		// lanza ya y corre mientras se resuelven el pool y las coberturas (antes
+		// esperaba su turno detrás de ellas):
+		//  · cuotas que vencen HOY (D-0): sin filtro de asesor a propósito (ver
+		//    la nota más abajo); la intersección real la da el universo.
+		//  · boletas del bot por confirmar de HOY (B6): sin lista de SIFCOs, y
+		//    más abajo solo se consulta con `.has()` para los del universo.
+		// Los `.catch` vacíos solo evitan un rechazo sin manejar si el flujo sale
+		// antes; el `await` de abajo sigue recibiendo el error.
+		const cuotasHoyP = fetchAllPages(
+			async (page) => {
+				const resp = await obtenerPaginaAgenda(0, {
+					page,
+					perPage: 200,
+				});
+				return {
+					data: resp.data ?? [],
+					totalPages: resp.totalPages ?? 0,
+				};
+			},
+			{ maxPages: 200 },
+		);
+		cuotasHoyP.catch(() => {});
+		const pagosPorConfirmarP = sifcosConPagoPorConfirmar().catch((error) => {
+			console.error("[ColaDia] pagos por confirmar:", error);
+			return new Set<string>();
+		});
+
 		let asesorForzado: { asesorId: number; nombre: string } | null = null;
 		let asesorIdFiltro: number | undefined;
 		// CB-114: carteras que este usuario trabaja hoy (la propia + cubiertas).
@@ -1498,7 +1563,7 @@ export async function ejecutarColaDia(
 								asesorId: asesorUniverso,
 								buckets: input.buckets,
 								page,
-								perPage: 100,
+								perPage: 500, // tope de cartera-back: cada página recalcula la CTE completa
 							});
 							return { data: resp.data, totalPages: resp.totalPages ?? 0 };
 						},
@@ -1506,19 +1571,7 @@ export async function ejecutarColaDia(
 					),
 				),
 			),
-			fetchAllPages(
-				async (page) => {
-					const resp = await obtenerPaginaAgenda(0, {
-						page,
-						perPage: 200,
-					});
-					return {
-						data: resp.data ?? [],
-						totalPages: resp.totalPages ?? 0,
-					};
-				},
-				{ maxPages: 200 },
-			),
+			cuotasHoyP,
 		]);
 		// Dedupe por SIFCO: el pool de un bucket puede incluir a más de un
 		// asesor (ver docs/features/cobros-02/04-operacion-diaria.md), así que
@@ -1615,9 +1668,10 @@ export async function ejecutarColaDia(
 			oportunidades.map((o) => [o.numeroSifco ?? "", o.leadPhone]),
 		);
 
-		// Promesas activas y último contacto por caso — ambas dependen de
-		// `casoIds` pero son independientes entre sí → en paralelo.
-		const [promesas, ultimosContactos] = await Promise.all([
+		// Promesas activas, último contacto y seguimiento por caso: las tres
+		// dependen solo de `casoIds` y son independientes entre sí → UNA ronda en
+		// paralelo (antes el seguimiento esperaba a las otras dos).
+		const [promesas, ultimosContactos, seguimientoPorCaso] = await Promise.all([
 			// Promesas ACTIVAS (pendiente/incumplida — 'cumplida' es terminal,
 			// se excluye), para clasificar. `estadoPromesa IS NULL` (filas
 			// legacy nunca evaluadas, o creadas antes de que
@@ -1677,6 +1731,10 @@ export async function ejecutarColaDia(
 							),
 						)
 						.groupBy(contactosCobros.casoCobroId),
+			// Rediseño: seguimiento por caso (intentos, último intento, llamada
+			// agendada, estado de gestión). En lote sobre todo el universo porque
+			// alimenta los conteos extra y `filtroExtra`.
+			cargarSeguimientoPorCaso(casoIds),
 		]);
 		const promesasPorCaso = new Map<
 			string,
@@ -1721,17 +1779,8 @@ export async function ejecutarColaDia(
 			}
 		}
 
-		// Rediseño: seguimiento por caso (intentos, último intento, llamada
-		// agendada, estado de gestión). En lote sobre todo el universo porque
-		// alimenta los conteos extra y `filtroExtra`.
-		const [seguimientoPorCaso, sifcosPagoPorConfirmar] = await Promise.all([
-			cargarSeguimientoPorCaso(casoIds),
-			// B6: "Confirmar pago" en Acción pendiente.
-			sifcosConPagoPorConfirmar(sifcos).catch((error) => {
-				console.error("[ColaDia] pagos por confirmar:", error);
-				return new Set<string>();
-			}),
-		]);
+		// B6: "Confirmar pago" en Acción pendiente (ya venía en curso, ver arriba).
+		const sifcosPagoPorConfirmar = await pagosPorConfirmarP;
 		const seguimientoDe = (sifco: string) => {
 			const caso = casoPorSifco.get(sifco);
 			return caso
@@ -3032,24 +3081,66 @@ export const cobrosRouter = {
 						string,
 						{ id: string; etiquetas: string[] }
 					>();
-					if (sifcosPagina.length > 0) {
-						const casosRows = await db
-							.select({
-								id: casosCobros.id,
-								numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-								etiquetas: casosCobros.etiquetas,
-								activo: casosCobros.activo,
-								updatedAt: casosCobros.updatedAt,
-							})
-							.from(casosCobros)
-							.where(inArray(casosCobros.numeroCreditoSifco, sifcosPagina));
-						for (const [sifco, row] of agruparCasosVigentesPorSifco(
-							casosRows,
-						)) {
-							casosPorSifco.set(sifco, {
-								id: row.id,
-								etiquetas: row.etiquetas ?? [],
-							});
+					// Casos, vehículo de la oportunidad y boletas por confirmar de la
+					// página: las tres dependen solo de `sifcosPagina` → UNA ronda en
+					// paralelo. El vehículo se pedía crédito por crédito dentro del
+					// `map` de abajo (hasta `limit` consultas, que con el pool de 10
+					// conexiones iban en tandas); ahora es una sola consulta.
+					const [casosRows, oportunidadesRows, sifcosPagoPorConfirmar] =
+						await Promise.all([
+							sifcosPagina.length > 0
+								? db
+										.select({
+											id: casosCobros.id,
+											numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+											etiquetas: casosCobros.etiquetas,
+											activo: casosCobros.activo,
+											updatedAt: casosCobros.updatedAt,
+										})
+										.from(casosCobros)
+										.where(
+											inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
+										)
+								: Promise.resolve([]),
+							sifcosPagina.length > 0
+								? db
+										.select({
+											numeroSifco: opportunities.numeroSifco,
+											vehicleId: opportunities.vehicleId,
+											marca: vehicles.make,
+											modelo: vehicles.model,
+											year: vehicles.year,
+											placa: vehicles.licensePlate,
+										})
+										.from(opportunities)
+										.leftJoin(
+											vehicles,
+											eq(opportunities.vehicleId, vehicles.id),
+										)
+										.where(inArray(opportunities.numeroSifco, sifcosPagina))
+								: Promise.resolve([]),
+							// B6: "Confirmar pago" en Acción pendiente. Sin la tabla de
+							// boletas la página no se cae: se pierde solo esa acción.
+							sifcosConPagoPorConfirmar(sifcosPagina).catch((error) => {
+								console.error("[Cobros] pagos por confirmar:", error);
+								return new Set<string>();
+							}),
+						]);
+					for (const [sifco, row] of agruparCasosVigentesPorSifco(casosRows)) {
+						casosPorSifco.set(sifco, {
+							id: row.id,
+							etiquetas: row.etiquetas ?? [],
+						});
+					}
+					// Una fila por SIFCO (la primera): igual que el `limit 1` que
+					// había por crédito.
+					const oportunidadPorSifco = new Map<
+						string,
+						(typeof oportunidadesRows)[number]
+					>();
+					for (const fila of oportunidadesRows) {
+						if (fila.numeroSifco && !oportunidadPorSifco.has(fila.numeroSifco)) {
+							oportunidadPorSifco.set(fila.numeroSifco, fila);
 						}
 					}
 
@@ -3067,38 +3158,26 @@ export const cobrosRouter = {
 					// incumplida vieja.
 					const promesaPorCaso = new Set<string>();
 					const casoIdsPagina = [...casosPorSifco.values()].map((c) => c.id);
-					if (casoIdsPagina.length > 0) {
-						const promesasRows = await db
-							.select({ casoCobroId: contactosCobros.casoCobroId })
-							.from(contactosCobros)
-							.where(
-								and(
-									inArray(contactosCobros.casoCobroId, casoIdsPagina),
-									...condicionesPromesaVigente(),
-								),
-							);
-						for (const row of promesasRows) {
-							promesaPorCaso.add(row.casoCobroId);
-						}
+					// Promesas vigentes y seguimiento por caso (Dashboard del asesor /
+					// Mi Cartera: columnas Seguimiento, Estado de gestión y Acción
+					// pendiente): ambas dependen solo de `casoIdsPagina` → una ronda.
+					const [promesasRows, seguimientoPorCaso] = await Promise.all([
+						casoIdsPagina.length > 0
+							? db
+									.select({ casoCobroId: contactosCobros.casoCobroId })
+									.from(contactosCobros)
+									.where(
+										and(
+											inArray(contactosCobros.casoCobroId, casoIdsPagina),
+											...condicionesPromesaVigente(),
+										),
+									)
+							: Promise.resolve([]),
+						cargarSeguimientoPorCaso(casoIdsPagina),
+					]);
+					for (const row of promesasRows) {
+						promesaPorCaso.add(row.casoCobroId);
 					}
-
-					// Rediseño (Dashboard del asesor / Mi Cartera): seguimiento de cada
-					// caso de la página, en lote — columnas Seguimiento, Estado de
-					// gestión y Acción pendiente.
-					const [seguimientoPorCaso, sifcosPagoPorConfirmar] =
-						await Promise.all([
-							cargarSeguimientoPorCaso(casoIdsPagina),
-							// B6: "Confirmar pago" en Acción pendiente. Sin la tabla de
-							// boletas la página no se cae: se pierde solo esa acción.
-							sifcosConPagoPorConfirmar(
-								creditosResponse.data
-									.map((c) => c.creditos.numero_credito_sifco)
-									.filter((s): s is string => !!s),
-							).catch((error) => {
-								console.error("[Cobros] pagos por confirmar:", error);
-								return new Set<string>();
-							}),
-						]);
 					const hoyStrListado = toDateStrGT(new Date());
 
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
@@ -3151,18 +3230,7 @@ export const cobrosRouter = {
 							let vehiculoPlaca = "-";
 
 							if (numeroSifco) {
-								const [oportunidad] = await db
-									.select({
-										vehicleId: opportunities.vehicleId,
-										marca: vehicles.make,
-										modelo: vehicles.model,
-										year: vehicles.year,
-										placa: vehicles.licensePlate,
-									})
-									.from(opportunities)
-									.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-									.where(eq(opportunities.numeroSifco, numeroSifco))
-									.limit(1);
+								const oportunidad = oportunidadPorSifco.get(numeroSifco);
 
 								if (oportunidad?.vehicleId) {
 									vehiculoMarca = oportunidad.marca || "-";
@@ -5471,7 +5539,15 @@ export const cobrosRouter = {
 				perPage: z.number().int().min(1).max(200).optional(),
 			}),
 		)
-		.handler(async ({ input, context }) => ejecutarColaDia(input, context)),
+		.handler(async ({ input, context }) =>
+			// Cola completa guardada 30 s (ver `colaDiaCompleta`); aquí solo se
+			// corta la página pedida.
+			paginarColaDia(
+				await colaDiaCompleta(input, context),
+				input.page,
+				input.perPage,
+			),
+		),
 
 	// CB-020: actualizar días de SLA (dias_sla) por bucket (B1-B5). Solo supervisor / admin.
 	actualizarDiasSlaBuckets: cobrosSupervisorProcedure
@@ -5891,6 +5967,68 @@ export const cobrosRouter = {
 					numeroSifco = reference[0].numeroCreditoSifco;
 				}
 
+				// Oportunidad (paso 3) y caso vigente (paso 4) solo dependen del
+				// SIFCO y de la referencia, no del detalle de cartera: se lanzan ya,
+				// en paralelo con getCredito (la llamada lenta), y se esperan donde
+				// antes se consultaban. El `.catch` vacío solo evita un rechazo sin
+				// manejar si el handler sale antes de esperarlas; el `await` de
+				// abajo sigue recibiendo el error.
+				const contratoId = reference[0]?.contratoFinanciamientoId || null;
+				const oportunidadP = db
+					.select({
+						oportunidadId: opportunities.id,
+						vehicleId: opportunities.vehicleId,
+						leadId: opportunities.leadId,
+						direccion: leads.direccion,
+						// Datos de la oportunidad (para fallback)
+						oportunidadNotes: opportunities.notes,
+						oportunidadCuotaMensual: opportunities.cuotaMensual,
+						oportunidadDiaPago: opportunities.diaPagoMensual,
+						oportunidadCreditType: opportunities.creditType,
+						oportunidadInsuranceProvider: opportunities.insuranceProvider,
+						// Datos del vehículo
+						vehiculoMarca: vehicles.make,
+						vehiculoModelo: vehicles.model,
+						vehiculoYear: vehicles.year,
+						vehiculoPlaca: vehicles.licensePlate,
+						vehiculoTipo: vehicles.vehicleType,
+						vehiculoMotor: vehicles.motorNumber,
+						vehiculoChasis: vehicles.series,
+						vehiculoAsientos: vehicles.seats,
+						vehiculoUso: vehicles.vehicleUse,
+						// Datos del seguro del vehículo
+						vehiculoNumeroPoliza: vehicles.numeroPoliza,
+						vehiculoFechaInicioSeguro: vehicles.fechaInicioSeguro,
+						vehiculoFechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
+						vehiculoMontoAsegurado: vehicles.montoAsegurado,
+						// Datos del lead
+						leadFirstName: leads.firstName,
+						leadLastName: leads.lastName,
+						leadEmail: leads.email,
+						leadTelefono: leads.phone,
+					})
+					.from(opportunities)
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(eq(opportunities.numeroSifco, numeroSifco))
+					.limit(1)
+					.then((filas) => filas);
+				const casosP = db
+					.select()
+					.from(casosCobros)
+					.where(
+						and(
+							contratoId
+								? eq(casosCobros.contratoId, contratoId)
+								: eq(casosCobros.numeroCreditoSifco, numeroSifco),
+							eq(casosCobros.activo, true),
+						),
+					)
+					.limit(1)
+					.then((filas) => filas);
+				oportunidadP.catch(() => {});
+				casosP.catch(() => {});
+
 				// 2. Obtener detalles completos del crédito de cartera-back
 				if (creditoCompleto === null) {
 					try {
@@ -5984,46 +6122,7 @@ export const cobrosRouter = {
 				let vehiculo = null;
 				let leadInfo = null;
 				let direccion = null;
-				const contratoId = reference[0]?.contratoFinanciamientoId || null;
-
-				const oportunidadResult = await db
-					.select({
-						oportunidadId: opportunities.id,
-						vehicleId: opportunities.vehicleId,
-						leadId: opportunities.leadId,
-						direccion: leads.direccion,
-						// Datos de la oportunidad (para fallback)
-						oportunidadNotes: opportunities.notes,
-						oportunidadCuotaMensual: opportunities.cuotaMensual,
-						oportunidadDiaPago: opportunities.diaPagoMensual,
-						oportunidadCreditType: opportunities.creditType,
-						oportunidadInsuranceProvider: opportunities.insuranceProvider,
-						// Datos del vehículo
-						vehiculoMarca: vehicles.make,
-						vehiculoModelo: vehicles.model,
-						vehiculoYear: vehicles.year,
-						vehiculoPlaca: vehicles.licensePlate,
-						vehiculoTipo: vehicles.vehicleType,
-						vehiculoMotor: vehicles.motorNumber,
-						vehiculoChasis: vehicles.series,
-						vehiculoAsientos: vehicles.seats,
-						vehiculoUso: vehicles.vehicleUse,
-						// Datos del seguro del vehículo
-						vehiculoNumeroPoliza: vehicles.numeroPoliza,
-						vehiculoFechaInicioSeguro: vehicles.fechaInicioSeguro,
-						vehiculoFechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
-						vehiculoMontoAsegurado: vehicles.montoAsegurado,
-						// Datos del lead
-						leadFirstName: leads.firstName,
-						leadLastName: leads.lastName,
-						leadEmail: leads.email,
-						leadTelefono: leads.phone,
-					})
-					.from(opportunities)
-					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-					.leftJoin(leads, eq(opportunities.leadId, leads.id))
-					.where(eq(opportunities.numeroSifco, numeroSifco))
-					.limit(1);
+				const oportunidadResult = await oportunidadP;
 
 				// Datos extras de nuestra BD (para fallback si cartera no tiene)
 				let oportunidadData: {
@@ -6093,18 +6192,7 @@ export const cobrosRouter = {
 				let casoCobro = null;
 
 				// Buscar caso activo
-				const casosResult = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							contratoId
-								? eq(casosCobros.contratoId, contratoId)
-								: eq(casosCobros.numeroCreditoSifco, numeroSifco),
-							eq(casosCobros.activo, true),
-						),
-					)
-					.limit(1);
+				const casosResult = await casosP;
 				if (
 					casosResult.length === 0 &&
 					creditoCompleto.credito.statusCredit !== "CANCELADO"
@@ -6150,8 +6238,6 @@ export const cobrosRouter = {
 				} else {
 					casoCobro = casosResult[0] || null;
 				}
-
-				console.log(`COBROSCREDITOSDETALLES ${JSON.stringify(casoCobro)}`);
 
 				// 5. Calcular fecha de inicio (cuota 0) y cuotas restantes
 				const todasLasCuotas = [

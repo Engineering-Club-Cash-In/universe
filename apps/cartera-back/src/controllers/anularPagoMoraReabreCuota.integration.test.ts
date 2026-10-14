@@ -231,9 +231,10 @@ const unicoPago = async (sql: postgres.Sql, estado: "validated" | "pending") => 
   const [p] = await sql`INSERT INTO cartera.pagos_credito
       (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
        abono_seguro, abono_gps, membresias_pago, mora, pagado, cuota, cuota_interes, fecha_vencimiento, total_restante,
-       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias,
+       seguro_facturado, gps_facturado, pago_del_mes)
     VALUES (1, 48, ${estado}, 2455.61, 1005.44, 1314.37, 157.72, 271.66, 0, 570.84, 0, true, 2455.61, 1314.37, '2026-09-12', 8000,
-       0, 0, 0, 0, 0, 0) RETURNING pago_id`;
+       0, 0, 0, 0, 0, 0, 2716.6, 100, 2455.61) RETURNING pago_id`;
   await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
   return p!.pago_id as number;
 };
@@ -248,13 +249,14 @@ for (const estado of ["validated", "pending"] as const) {
     const vivas = await sql`SELECT validation_status, pagado, "paymentFalse", monto_aplicado::float AS aplicado,
         abono_capital::float AS abono, capital_restante::float AS capital, interes_restante::float AS interes,
         iva_12_restante::float AS iva, seguro_restante::float AS seguro, membresias::float AS membresias,
-        cuota::float AS cuota, fecha_vencimiento::text AS venc, total_restante::float AS total
+        cuota::float AS cuota, fecha_vencimiento::text AS venc, total_restante::float AS total,
+        seguro_facturado::float AS sf, gps_facturado::float AS gf, pago_del_mes::float AS pdm
       FROM cartera.pagos_credito WHERE cuota_id = 48 AND "paymentFalse" = false`;
     expect(vivas).toHaveLength(1);
     expect(vivas[0]).toMatchObject({
       validation_status: "no_required", pagado: false, paymentFalse: false, aplicado: 0, abono: 0,
       capital: 1005.44, interes: 1314.37, iva: 157.72, seguro: 271.66, membresias: 570.84,
-      cuota: 2455.61, venc: "2026-09-12", total: 8000,
+      cuota: 2455.61, venc: "2026-09-12", total: 8000, sf: 2716.6, gf: 100, pdm: 2455.61,
     });
     const [anulada] = await sql`SELECT "paymentFalse", abono_capital::float AS abono FROM cartera.pagos_credito WHERE pago_id = ${pagoId}`;
     expect(anulada).toMatchObject({ paymentFalse: true, abono: 1005.44 });

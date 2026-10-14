@@ -1,7 +1,15 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { db } from "../database/index";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db/schema";
 import { planReaperturaCuotaPorAnulacion } from "./reabrirCuotaPorAnulacionPolicy";
+import type { DestinoSobrescribibleRow, PagoCoberturaCuota } from "./registerPaymentPolicy";
+
+// `Required`: si al SELECT de hermanas le falta una columna que leen la cobertura,
+// `cuentaComoHermanoVivo` o `esDestinoSobrescribible`, rompe tsc.
+type HermanaLeida = Required<Pick<PagoCoberturaCuota & DestinoSobrescribibleRow,
+  "pago_id" | "validationStatus" | "paymentFalse" | "monto_aplicado" | "abono_capital" | "abono_interes"
+  | "abono_iva_12" | "abono_seguro" | "abono_gps" | "membresias_pago" | "abono_interes_ci" | "abono_iva_ci"
+  | "mora" | "pagoConvenio" | "otros">>;
 
 /**
  * Deshace en la cuota lo que `insertPayment` estampó con el pago que se acaba de
@@ -55,7 +63,7 @@ export async function reabrirCuotaPorAnulacion(
     .where(eq(creditos.credito_id, credito_id))
     .limit(1);
 
-  const hermanas = await tx
+  const hermanas: HermanaLeida[] = await tx
     .select({
       pago_id: pagos_credito.pago_id,
       validationStatus: pagos_credito.validationStatus,
@@ -158,6 +166,9 @@ export async function reabrirCuotaPorAnulacion(
           eq(pagos_credito.credito_id, credito_id),
           eq(pagos_credito.paymentFalse, false),
           eq(pagos_credito.pagado, true),
+          // Las de capital y `reset` no son de la cuota: sin `pagado` el guard de parciales del
+          // abono a capital las toma por parciales vivos, y RAMA B no se lo devuelve.
+          inArray(pagos_credito.validationStatus, ["validated", "pending", "no_required"]),
         ),
       );
   }

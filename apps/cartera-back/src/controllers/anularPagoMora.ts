@@ -249,7 +249,8 @@ export async function anularPagoYRestituirMora(
   // Si el pago había completado su cuota, las hermanas siguen con `pagado = true` y
   // los restantes en 0 (los estampó `insertPayment`): el cron daba la cuota por
   // cubierta y el pago siguiente la saltaba. Se reabre acá, en la misma
-  // transacción y bajo el candado del crédito, con el criterio de `reversePayment`.
+  // transacción y bajo el candado del crédito, con la réplica de `reversePayment` y la
+  // cobertura de `insertPayment`.
   await deps.reabrirCuota?.(tx, { pago_id, credito_id });
 
   // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento

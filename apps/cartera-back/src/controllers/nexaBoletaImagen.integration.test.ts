@@ -26,8 +26,8 @@ const setup = async () => {
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql`INSERT INTO cartera.usuarios VALUES (5, 'Cliente Prueba')`;
   await sql`INSERT INTO cartera.creditos VALUES (1, 5, '0101')`;
-  const { boletaNexaDeps } = await import("./nexaBoletaImagen");
-  return { sql, deps: boletaNexaDeps };
+  const { boletaNexaDeps, BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE } = await import("./nexaBoletaImagen");
+  return { sql, deps: boletaNexaDeps, BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE };
 };
 
 let referencia = 0;
@@ -48,7 +48,7 @@ const pago = async (sql: postgres.Sql, { nexa = true, anulado = false, estado = 
 };
 
 integrationTest("pendientes/datos/registrar: solo pagos Nexa vivos de un evento aplicado y sin boleta, y dos registros a la vez dejan una fila", async () => {
-  const { sql, deps } = await setup();
+  const { sql, deps, BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE } = await setup();
   const vivo = await pago(sql);
   const billed = await pago(sql, { estado: "billed" });
   const anulado = await pago(sql, { anulado: true });
@@ -73,9 +73,35 @@ integrationTest("pendientes/datos/registrar: solo pagos Nexa vivos de un evento 
     expect(await deps.registrar(id, "no")).toBe(false);
   }
 
-  const resultados = await Promise.all([deps.registrar(vivo, "u1"), deps.registrar(vivo, "u2")]);
-  expect(resultados.filter(Boolean).length).toBe(1);
-  expect((await sql`SELECT pago_id FROM cartera.boletas WHERE pago_id = ${vivo}`).length).toBe(1);
+  // Dos registros solapados de verdad (con Promise.all no se solapaban y el test pasaba sin el
+  // candado): el primero, en otra conexión, toma el candado e inserta sin commitear; el segundo
+  // tiene que quedar esperando y, tras el COMMIT, ver la fila y no insertar otra (no hay índice
+  // único en boletas.pago_id: sin el candado quedan dos).
+  const primero = await sql.reserve();
+  const [{ pid: pidPrimero }] = await primero`SELECT pg_backend_pid() AS pid`;
+  await primero`BEGIN`;
+  await primero`SELECT pg_advisory_xact_lock(${BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE}, ${vivo})`;
+  await primero`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${vivo}, 'u1')`;
+  const segundo = deps.registrar(vivo, "u2");
+  // No alcanza con "no terminó en N ms" (en CI lento pasa aunque falte el candado): se espera a
+  // que PostgreSQL muestre al segundo bloqueado en ESE advisory lock (dos int4 → objsubid = 2).
+  let terminado = false;
+  segundo.finally(() => { terminado = true; }).catch(() => {});
+  const tope = Date.now() + 5_000;
+  for (;;) {
+    const [{ esperando }] = await sql`SELECT count(*)::int AS esperando FROM pg_locks
+      WHERE locktype = 'advisory' AND classid = ${BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE}::oid
+        AND objid = ${vivo}::oid AND objsubid = 2 AND NOT granted AND pid <> ${pidPrimero}`;
+    if (esperando > 0) break;
+    if (terminado || Date.now() > tope) {
+      throw new Error(`el segundo registrar nunca quedó esperando el advisory lock (${terminado ? "terminó sin esperar" : "tope de 5 s"})`);
+    }
+    await Bun.sleep(20);
+  }
+  await primero`COMMIT`;
+  primero.release();
+  expect(await segundo).toBe(false);
+  expect((await sql`SELECT url_boleta FROM cartera.boletas WHERE pago_id = ${vivo}`).map((b) => b.url_boleta)).toEqual(["u1"]);
   expect(await deps.pendientes(25)).toEqual([billed]);
   await sql.end();
 });

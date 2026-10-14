@@ -146,6 +146,28 @@ export function usuariosParaSincronizacionAutomatica(input: {
 	return [...resultado].sort((a, b) => a - b);
 }
 
+/**
+ * Un crédito puede enlazarse al CRM por `opportunities.numero_sifco` o por la
+ * tabla de referencias. Ambos caminos enriquecen la misma fuente automática.
+ */
+export function indexarRelacionesLeadPorSifco<
+	T extends {
+		sifcoDirecto: string | null;
+		sifcoReferencia: string | null;
+	},
+>(filas: Iterable<T>, sifcosSolicitados: Iterable<string>): Map<string, T> {
+	const solicitados = new Set(sifcosSolicitados);
+	const porSifco = new Map<string, T>();
+	for (const fila of filas) {
+		for (const sifco of [fila.sifcoDirecto, fila.sifcoReferencia]) {
+			if (sifco && solicitados.has(sifco) && !porSifco.has(sifco)) {
+				porSifco.set(sifco, fila);
+			}
+		}
+	}
+	return porSifco;
+}
+
 export class EvaluacionBuroInternoInestableError extends Error {
 	constructor() {
 		super(

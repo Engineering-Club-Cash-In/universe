@@ -63,6 +63,16 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No se detectó evidencia de fraude",
 		"Sin indicios de fraude",
 		"No existe evidencia de fraude",
+		"No presenta evidencia de fraude",
+		"No hay evidencia alguna de fraude",
+		"Mora condonada",
+		"Se condonó la mora",
+		"Cliente al día, sin problemas de mora",
+		"No se le cobró mora",
+		"No aplica mora",
+		"Descuento de mora autorizado",
+		"Canceló pagando la mora pendiente",
+		"Cliente víctima de estafa",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -115,6 +125,19 @@ describe("clasificación de evidencia de Cartera", () => {
 			}),
 		);
 		expect(riesgos.map((riesgo) => riesgo.categoria)).toContain("fraude");
+	});
+
+	test("no interpreta cuotas restantes de una cancelación como mora", () => {
+		const riesgos = evidenciaRiesgoCredito(
+			credito("CANCELADO", {
+				cancelacion: {
+					cuotas_atrasadas: 12,
+					motivo: "Cancelación anticipada",
+					observaciones: "Cliente al día, sin problemas de mora",
+				},
+			}),
+		);
+		expect(riesgos).toEqual([]);
 	});
 
 	test("prioriza fraude explícito en el motivo de un crédito INCOBRABLE", () => {

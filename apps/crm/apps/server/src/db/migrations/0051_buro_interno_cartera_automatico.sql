@@ -40,3 +40,11 @@ CREATE INDEX IF NOT EXISTS buro_interno_fuentes_cartera_persona_idx
 	ON public.buro_interno_fuentes_cartera (persona_id);
 CREATE INDEX IF NOT EXISTS buro_interno_fuentes_cartera_usuario_idx
 	ON public.buro_interno_fuentes_cartera (cartera_usuario_id);
+
+-- Compartir los dos apellidos en el mismo orden bloquea la aprobación tanto
+-- para fichas manuales como automáticas; la configuración persistida manda
+-- sobre el valor predeterminado definido en código.
+UPDATE public.buro_interno_reglas
+SET severidad = 'alta', updated_at = now()
+WHERE clave = 'mismos_apellidos'
+	AND severidad IS DISTINCT FROM 'alta';

@@ -7,6 +7,7 @@ import {
 	EvaluacionBuroInternoInestableError,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
+	indexarRelacionesLeadPorSifco,
 	usuariosParaSincronizacionAutomatica,
 } from "./buro-interno-automatico";
 
@@ -104,6 +105,26 @@ describe("sincronización de fichas automáticas", () => {
 				usuariosConRiesgo: [20, 30, 99],
 			}),
 		).toEqual([20, 30]);
+	});
+
+	test("enriquece leads por SIFCO directo o por referencia", () => {
+		const directo = {
+			id: "lead-directo",
+			sifcoDirecto: "SIFCO-1",
+			sifcoReferencia: null,
+		};
+		const referencia = {
+			id: "lead-referencia",
+			sifcoDirecto: null,
+			sifcoReferencia: "SIFCO-2",
+		};
+		const relaciones = indexarRelacionesLeadPorSifco(
+			[directo, referencia],
+			["SIFCO-1", "SIFCO-2"],
+		);
+
+		expect(relaciones.get("SIFCO-1")?.id).toBe("lead-directo");
+		expect(relaciones.get("SIFCO-2")?.id).toBe("lead-referencia");
 	});
 });
 

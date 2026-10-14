@@ -37,6 +37,7 @@ import {
 	decidirPersistenciaAutomatica,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
+	indexarRelacionesLeadPorSifco,
 	usuariosParaSincronizacionAutomatica,
 } from "../lib/buro-interno-automatico";
 import {
@@ -1145,7 +1146,8 @@ async function registrarCoincidenciasCartera(
 	if (sifcosParaEnriquecer.length > 0) {
 		const leadsRelacionados = await db
 			.select({
-				sifco: carteraBackReferences.numeroCreditoSifco,
+				sifcoDirecto: opportunities.numeroSifco,
+				sifcoReferencia: carteraBackReferences.numeroCreditoSifco,
 				id: leads.id,
 				firstName: leads.firstName,
 				middleName: leads.middleName,
@@ -1156,17 +1158,27 @@ async function registrarCoincidenciasCartera(
 				telefono: leads.phone,
 				direccion: leads.direccion,
 			})
-			.from(carteraBackReferences)
-			.innerJoin(
-				opportunities,
+			.from(opportunities)
+			.leftJoin(
+				carteraBackReferences,
 				eq(opportunities.id, carteraBackReferences.opportunityId),
 			)
-			.innerJoin(leads, eq(leads.id, opportunities.leadId))
+			.innerJoin(
+				leads,
+				eq(leads.id, opportunities.leadId),
+			)
 			.where(
-				inArray(carteraBackReferences.numeroCreditoSifco, sifcosParaEnriquecer),
+				or(
+					inArray(opportunities.numeroSifco, sifcosParaEnriquecer),
+					inArray(
+						carteraBackReferences.numeroCreditoSifco,
+						sifcosParaEnriquecer,
+					),
+				),
 			);
-		const porSifco = new Map(
-			leadsRelacionados.map((relacion) => [relacion.sifco, relacion]),
+		const porSifco = indexarRelacionesLeadPorSifco(
+			leadsRelacionados,
+			sifcosParaEnriquecer,
 		);
 		for (const grupo of grupos.values()) {
 			for (const credito of grupo.creditos) {

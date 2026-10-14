@@ -77,13 +77,17 @@ const PREFIJO_NEGACION_COORDINADA = new RegExp(
 );
 const TERMINO_EVIDENCIA_NEGADA =
 	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?)/;
+const CALIFICADOR_EVIDENCIA_NEGADA =
+	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?)/;
 const VERBO_DETECCION_NEGADO =
-	/(?:detect(?:o|aron|ado|ada|ados|adas)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:o|aron|ado|ada|ados|adas)|confirm(?:o|aron|ado|ada|ados|adas)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:o|aron|ado|ada|ados|adas)|observ(?:o|aron|ado|ada|ados|adas)|registr(?:o|aron|ado|ada|ados|adas)|report(?:o|aron|ado|ada|ados|adas)|existe|hay|hubo)/;
+	/(?:detect(?:o|aron|ado|ada|ados|adas)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:o|aron|ado|ada|ados|adas)|confirm(?:o|aron|ado|ada|ados|adas)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:o|aron|ado|ada|ados|adas)|observ(?:o|aron|ado|ada|ados|adas)|registr(?:o|aron|ado|ada|ados|adas)|report(?:o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|existe|hay|hubo)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+de)?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
 );
+const PREFIJO_CONTEXTO_NO_RIESGO =
+	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|victimas?\s+de)\s+$/;
 const SUFIJO_NEGACION =
-	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?)(?=\s|$)/;
+	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
 
 function estaNegada(texto: string, inicio: number, fin: number): boolean {
 	const prefijo = texto.slice(0, inicio);
@@ -91,6 +95,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_NEGACION_DIRECTA.test(prefijo) ||
 		PREFIJO_NEGACION_COORDINADA.test(prefijo) ||
 		PREFIJO_NEGACION_INDIRECTA.test(prefijo) ||
+		PREFIJO_CONTEXTO_NO_RIESGO.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }
@@ -194,15 +199,6 @@ export function evidenciaRiesgoCredito(
 		}
 	}
 	const cancelacion = credito.cancelacion;
-	if (
-		statusCredit === "CANCELADO" &&
-		(cancelacion?.cuotas_atrasadas ?? 0) > 0
-	) {
-		agregarRiesgo({
-			categoria: "mala_paga",
-			texto: `Cancelado con ${cancelacion?.cuotas_atrasadas} cuota(s) atrasada(s) al cancelar`,
-		});
-	}
 	for (const motivo of [
 		cancelacion?.motivo,
 		cancelacion?.observaciones,

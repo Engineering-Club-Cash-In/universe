@@ -173,10 +173,19 @@ describe("familia", () => {
 			[registroBase],
 			reglasPorDefecto,
 		);
-		expect(coincidencia.severidad).toBe("media");
+		expect(coincidencia.severidad).toBe("alta");
 		expect(coincidencia.reglas.map((r) => r.clave)).toEqual([
 			"mismos_apellidos",
 		]);
+	});
+
+	test("los mismos apellidos en orden cruzado no activan la regla", () => {
+		const coincidencias = evaluarCoincidencias(
+			[titular({ nombres: "Pedro Fernando", apellidos: "Ixcot Pérez" })],
+			[registroBase],
+			reglasPorDefecto,
+		);
+		expect(coincidencias).toEqual([]);
 	});
 
 	test("apellido en común y la misma dirección", () => {

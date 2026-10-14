@@ -47,7 +47,10 @@ export function fechaCalendarioGT(valor: Date | string): number {
 export function ymdDeFechaCalendario(valor: Date | string): string {
   const ms = fechaCalendarioGT(valor);
   if (!Number.isFinite(ms)) throw new Error(`Fecha inválida: ${String(valor)}`);
-  return new Date(ms).toISOString().slice(0, 10);
+  const ymd = new Date(ms).toISOString().slice(0, 10);
+  // Ida y vuelta: "2026-02-30" se normalizaría a "2026-03-02" en silencio.
+  if (typeof valor === "string" && ymd !== valor.slice(0, 10)) throw new Error(`Fecha inválida: ${valor}`);
+  return ymd;
 }
 
 /**

@@ -338,6 +338,13 @@ describe("ymdDeFechaCalendario", () => {
     expect(ymdDeFechaCalendario(new Date(2026, 9, 3))).toBe("2026-10-03");
     expect(() => ymdDeFechaCalendario("no-es-fecha")).toThrow();
   });
+
+  test("Codex r1 #1: una fecha imposible lanza en vez de normalizarse a otro día", () => {
+    expect(() => ymdDeFechaCalendario("2026-02-30")).toThrow();
+    expect(() => ymdDeFechaCalendario("2026-02-30 00:00:00")).toThrow();
+    expect(ymdDeFechaCalendario("2026-09-30 00:00:00")).toBe("2026-09-30");
+    expect(() => decidirCondonacionBoletaTardia({ ...aTiempo, hoy: "2026-02-30" })).toThrow();
+  });
 });
 
 describe("Nexa conserva su regla exacta tras la generalización", () => {

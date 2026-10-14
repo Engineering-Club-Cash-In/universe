@@ -190,6 +190,35 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
   });
 
+  // Crédito 23: una fila estructural viva (system_reset) hace parecer cubierta la cuota.
+  // INCOBRABLE no usa el atajo de cobertura, como reversePayment (~964-983).
+  const incobrableCubierta = (o: Record<string, unknown>, anulada: Record<string, unknown>) =>
+    plan({
+      statusCredit: "INCOBRABLE",
+      montoCuota: 500,
+      filaAnulada: cierre({ abono_capital: 200, abono_interes: 0, ...anulada }),
+      hermanas: [hermana({ referencia: "system_reset", abono_capital: 500, abono_interes: 0 })],
+      ...o,
+    });
+
+  test("INCOBRABLE con hermana validated que cubre: decide por capitalPrevio, no por el atajo", () => {
+    const p = incobrableCubierta({ capital: 800 }, { validationStatus: "validated" });
+    expect(p.replica).not.toBeNull();
+    expect(p.replica?.payload.capital_restante).toBe("200");
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+  });
+
+  test("INCOBRABLE con hermana que cubre, capital 0 y anulada pending: repone pero no reabre", () => {
+    const p = incobrableCubierta({ capital: 0 }, { validationStatus: "pending" });
+    expect(p.replica).not.toBeNull();
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+  });
+
+  test("ACTIVO con la misma hermana que cubre: el atajo sigue en SIN_CAMBIOS", () => {
+    const p = incobrableCubierta({ statusCredit: "ACTIVO", capital: 800 }, { validationStatus: "validated" });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+  });
+
   test("abono directo a capital (capital / capital_validated): fuera de la lógica de cuota, sin cambios", () => {
     for (const validationStatus of ["capital", "capital_validated"]) {
       const p = plan({ filaAnulada: cierre({ validationStatus, abono_capital: 500 }) });

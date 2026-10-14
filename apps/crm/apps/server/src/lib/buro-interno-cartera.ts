@@ -68,7 +68,7 @@ export function normalizarMotivoRiesgo(texto: string): string {
 }
 
 const VERBO_DETECCION_NEGADO =
-	/(?:detect(?:o|aron|ado|ada|ados|adas)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:o|aron|ado|ada|ados|adas)|confirm(?:o|aron|ado|ada|ados|adas)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:o|aron|ado|ada|ados|adas)|observ(?:o|aron|ado|ada|ados|adas)|registr(?:o|aron|ado|ada|ados|adas)|report(?:o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|tiene|existe(?:n)?|hay|hubo)/;
+	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|tiene|existe(?:n)?|hay|hubo)/;
 const VERBO_ESTADO_NEGADO = new RegExp(
 	`(?:es|fue|esta|estuvo|tiene|tuvo|cuenta\\s+con|${VERBO_DETECCION_NEGADO.source})`,
 );

@@ -170,14 +170,15 @@ export function indexarRelacionesLeadPorSifco<
 		sifcoDirecto: string | null;
 		sifcoReferencia: string | null;
 	},
->(filas: Iterable<T>, sifcosSolicitados: Iterable<string>): Map<string, T> {
+>(filas: Iterable<T>, sifcosSolicitados: Iterable<string>): Map<string, T[]> {
 	const solicitados = new Set(sifcosSolicitados);
-	const porSifco = new Map<string, T>();
+	const porSifco = new Map<string, T[]>();
 	for (const fila of filas) {
 		for (const sifco of [fila.sifcoDirecto, fila.sifcoReferencia]) {
-			if (sifco && solicitados.has(sifco) && !porSifco.has(sifco)) {
-				porSifco.set(sifco, fila);
-			}
+			if (!sifco || !solicitados.has(sifco)) continue;
+			const relaciones = porSifco.get(sifco) ?? [];
+			if (!relaciones.includes(fila)) relaciones.push(fila);
+			porSifco.set(sifco, relaciones);
 		}
 	}
 	return porSifco;

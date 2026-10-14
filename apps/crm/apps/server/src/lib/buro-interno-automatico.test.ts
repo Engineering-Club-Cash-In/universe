@@ -145,8 +145,24 @@ describe("sincronización de fichas automáticas", () => {
 			["SIFCO-1", "SIFCO-2"],
 		);
 
-		expect(relaciones.get("SIFCO-1")?.id).toBe("lead-directo");
-		expect(relaciones.get("SIFCO-2")?.id).toBe("lead-referencia");
+		expect(relaciones.get("SIFCO-1")?.map((lead) => lead.id)).toEqual([
+			"lead-directo",
+		]);
+		expect(relaciones.get("SIFCO-2")?.map((lead) => lead.id)).toEqual([
+			"lead-referencia",
+		]);
+
+		const segundaRelacion = {
+			id: "lead-segundo",
+			sifcoDirecto: "SIFCO-1",
+			sifcoReferencia: null,
+		};
+		expect(
+			indexarRelacionesLeadPorSifco(
+				[directo, segundaRelacion],
+				["SIFCO-1"],
+			).get("SIFCO-1")?.map((lead) => lead.id),
+		).toEqual(["lead-directo", "lead-segundo"]);
 	});
 });
 

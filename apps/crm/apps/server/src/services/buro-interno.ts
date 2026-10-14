@@ -1102,19 +1102,21 @@ async function registrarCoincidenciasCartera(
 	candidatos: CandidatoBuroInterno[],
 ) {
 	const creditos = await cargarCreditosCarteraCompletos();
+	type LeadCartera = {
+		id: string;
+		nombres: string;
+		apellidos: string;
+		dpi: string | null;
+		nit: string | null;
+		telefono: string | null;
+		direccion: string | null;
+	};
 	type GrupoCartera = {
 		usuario: CreditoBuroInterno["usuarios"];
 		creditos: CreditoBuroInterno[];
 		riesgos: RiesgoCartera[];
-		lead: {
-			id: string;
-			nombres: string;
-			apellidos: string;
-			dpi: string | null;
-			nit: string | null;
-			telefono: string | null;
-			direccion: string | null;
-		} | null;
+		leads: LeadCartera[];
+		lead: LeadCartera | null;
 	};
 	const grupos = new Map<number, GrupoCartera>();
 	for (const credito of creditos) {
@@ -1127,6 +1129,7 @@ async function registrarCoincidenciasCartera(
 			usuario: credito.usuarios,
 			creditos: [],
 			riesgos: [],
+			leads: [],
 			lead: null,
 		};
 		grupo.creditos.push(credito);
@@ -1184,50 +1187,73 @@ async function registrarCoincidenciasCartera(
 		);
 		for (const grupo of grupos.values()) {
 			for (const credito of grupo.creditos) {
-				const relacionado = porSifco.get(credito.creditos.numero_credito_sifco);
-				if (!relacionado) continue;
-				grupo.lead = {
-					id: relacionado.id,
-					nombres: [relacionado.firstName, relacionado.middleName]
-						.filter(Boolean)
-						.join(" "),
-					apellidos: [relacionado.lastName, relacionado.secondLastName]
-						.filter(Boolean)
-						.join(" "),
-					dpi: relacionado.dpi,
-					nit: relacionado.nit,
-					telefono: relacionado.telefono,
-					direccion: relacionado.direccion,
-				};
-				break;
+				for (const relacionado of porSifco.get(
+					credito.creditos.numero_credito_sifco,
+				) ?? []) {
+					if (grupo.leads.some((lead) => lead.id === relacionado.id)) continue;
+					grupo.leads.push({
+						id: relacionado.id,
+						nombres: [relacionado.firstName, relacionado.middleName]
+							.filter(Boolean)
+							.join(" "),
+						apellidos: [relacionado.lastName, relacionado.secondLastName]
+							.filter(Boolean)
+							.join(" "),
+						dpi: relacionado.dpi,
+						nit: relacionado.nit,
+						telefono: relacionado.telefono,
+						direccion: relacionado.direccion,
+					});
+				}
 			}
 		}
 	}
 
 	const reglas = candidatos.length > 0 ? await cargarReglas() : [];
 	const fuentes: RegistroParaMatch[] = [];
+	const origenFuente = new Map<
+		string,
+		{ usuarioId: number; lead: LeadCartera | null }
+	>();
 	const porId = new Map<number, GrupoCartera>();
 	for (const [usuarioId, grupo] of grupos) {
 		const { nombres, apellidos } = sugerirNombresApellidos(
 			grupo.usuario.nombre,
 		);
-		fuentes.push({
-			id: `cartera-user-${usuarioId}`,
-			leadId: grupo.lead?.id ?? null,
-			nombres: grupo.lead?.nombres || nombres,
-			apellidos: grupo.lead?.apellidos || apellidos,
-			dpi: grupo.lead?.dpi ?? null,
-			nit: textoOpcional(grupo.lead?.nit) ?? textoOpcional(grupo.usuario.nit),
-			telefono: grupo.lead?.telefono ?? null,
-			direccion: grupo.lead?.direccion ?? grupo.usuario.direccion ?? null,
-		});
+		const agregarFuente = (id: string, lead: LeadCartera | null) => {
+			fuentes.push({
+				id,
+				leadId: lead?.id ?? null,
+				nombres: lead?.nombres || nombres,
+				apellidos: lead?.apellidos || apellidos,
+				dpi: lead?.dpi ?? null,
+				nit: textoOpcional(lead?.nit) ?? textoOpcional(grupo.usuario.nit),
+				telefono: lead?.telefono ?? null,
+				direccion: lead?.direccion ?? grupo.usuario.direccion ?? null,
+			});
+			origenFuente.set(id, { usuarioId, lead });
+		};
+		agregarFuente(`cartera-user-${usuarioId}-base`, null);
+		for (const lead of grupo.leads) {
+			agregarFuente(`cartera-user-${usuarioId}-lead-${lead.id}`, lead);
+		}
 		porId.set(usuarioId, grupo);
 	}
 	const coincidencias = evaluarCoincidencias(candidatos, fuentes, reglas);
 	const usuariosCoincidentes = new Set<number>();
 	for (const coincidencia of coincidencias) {
-		const match = /^cartera-user-(\d+)$/.exec(coincidencia.registroId);
-		if (match) usuariosCoincidentes.add(Number(match[1]));
+		const origen = origenFuente.get(coincidencia.registroId);
+		if (!origen) continue;
+		usuariosCoincidentes.add(origen.usuarioId);
+		const grupo = grupos.get(origen.usuarioId);
+		if (
+			grupo &&
+			origen.lead &&
+			(!grupo.lead ||
+				candidatos.some((candidato) => candidato.leadId === origen.lead?.id))
+		) {
+			grupo.lead = origen.lead;
+		}
 	}
 	await db.transaction(async (tx) => {
 		await tomarCandadoBuroInterno(tx);

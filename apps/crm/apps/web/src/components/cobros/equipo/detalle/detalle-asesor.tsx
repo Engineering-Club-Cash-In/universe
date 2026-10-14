@@ -19,6 +19,7 @@ import {
 	type NivelAsesor,
 	rangosContactabilidad,
 	textoAusencia,
+	textoAusenciaIndefinida,
 } from "@/components/cobros/equipo/estado-asesor";
 import {
 	resultadoRecuperacion,
@@ -207,6 +208,14 @@ export function DetalleAsesor({
 		}),
 		enabled: habilitado,
 	});
+	// M5: ausencia indefinida (cartera repartida al equipo), la misma fuente que
+	// las tarjetas de Mi equipo.
+	const ausenciasQuery = useQuery({
+		...orpcAparte.listarAusencias.queryOptions({
+			input: { soloVigentes: true },
+		}),
+		enabled: habilitado,
+	});
 	// El tipo de getHistorialAgendasResumen llega truncado (TS7056).
 	const orpcSinTipo = orpc as unknown as {
 		getHistorialAgendasResumen: typeof orpc.getCobrosDashboardStats;
@@ -237,6 +246,9 @@ export function DetalleAsesor({
 
 	const coberturas = (coberturasQuery.data ?? []) as unknown as Cobertura[];
 	const cobertura = coberturaVigente(coberturas, userId, hoy);
+	const indefinida = (ausenciasQuery.data ?? []).find(
+		(x) => x.asesorId === asesorId,
+	);
 	const agendaItems = (agendaQuery.data?.items ??
 		[]) as unknown as AgendaItem[];
 	const agendaFila = userId
@@ -252,10 +264,11 @@ export function DetalleAsesor({
 	const listoEstado =
 		!agendaQuery.isPending &&
 		!coberturasQuery.isPending &&
+		!ausenciasQuery.isPending &&
 		(!userId || !contactabilidadQuery.isPending);
 	const estado = listoEstado
 		? estadoAsesor({
-				ausente: !!cobertura,
+				ausente: !!cobertura || !!indefinida,
 				cumplimiento:
 					agendaFila && agendaFila.planificados > 0
 						? agendaFila.porcentaje
@@ -455,7 +468,11 @@ export function DetalleAsesor({
 							nombre: asesor.nombre,
 							nivel: asesor.nivel,
 							estado,
-							ausencia: cobertura ? textoAusencia(cobertura) : null,
+							ausencia: indefinida
+								? textoAusenciaIndefinida(indefinida)
+								: cobertura
+									? textoAusencia(cobertura)
+									: null,
 						},
 					};
 

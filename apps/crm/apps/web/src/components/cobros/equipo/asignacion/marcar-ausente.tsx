@@ -505,6 +505,11 @@ function FormularioAusencia({
 	const [vencida, setVencida] = useState(false);
 
 	const asesores = useQuery(orpc.getAsesoresTraslados.queryOptions());
+	// Quien ya tiene una ausencia indefinida no se puede marcar de nuevo.
+	const ausencias = useQuery(
+		orpcAparte.listarAusencias.queryOptions({ input: { soloVigentes: true } }),
+	);
+	const ausentes = new Set((ausencias.data ?? []).map((x) => x.asesorId));
 	const titularNumero = /^\d+$/.test(titular) ? Number(titular) : null;
 	const cargaTitular = useQuery({
 		...orpc.getCargaPorAsesorBucket.queryOptions({
@@ -514,7 +519,8 @@ function FormularioAusencia({
 	});
 
 	const disponibles = (asesores.data ?? []).filter(
-		(a) => a.activo && a.usuarioHabilitado && a.userId,
+		(a) =>
+			a.activo && a.usuarioHabilitado && a.userId && !ausentes.has(a.asesor_id),
 	);
 	const origen = disponibles.find((a) => String(a.asesor_id) === titular);
 	const receptor = disponibles.find((a) => String(a.asesor_id) === suplente);
@@ -529,7 +535,9 @@ function FormularioAusencia({
 		: undefined;
 	const avisoTitular =
 		pedido && titular === String(asesorInicial) && !origen
-			? `${pedido.nombre} no está activo o no tiene un usuario del CRM habilitado: no se puede registrar su ausencia.`
+			? ausentes.has(pedido.asesor_id)
+				? `${pedido.nombre} ya está ausente: reactívelo antes de volver a marcarlo.`
+				: `${pedido.nombre} no está activo o no tiene un usuario del CRM habilitado: no se puede registrar su ausencia.`
 			: null;
 
 	const error = !origen
@@ -669,7 +677,7 @@ function FormularioAusencia({
 	return (
 		<MarcarAusenteVista
 			paso={paso}
-			cargando={asesores.isPending}
+			cargando={asesores.isPending || ausencias.isPending}
 			errorCarga={asesores.isError}
 			onReintentar={() => void asesores.refetch()}
 			titulares={disponibles}

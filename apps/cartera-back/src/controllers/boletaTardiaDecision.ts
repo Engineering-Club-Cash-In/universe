@@ -3,7 +3,7 @@ import z from "zod";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../database";
 import { ajuste_fecha_ideal_pago, creditos, cuotas_credito, moras_credito, pagos_credito } from "../database/db";
-import { montoBoletaSchema } from "./registerPaymentPolicy";
+import { getCoveredOpenInstallment, montoBoletaSchema } from "./registerPaymentPolicy";
 import { cuotasParaPendienteDeCreditos, hoyGuatemala } from "./latefee";
 import { cobrarRubrosParaBoleta } from "./rubros";
 import {
@@ -160,7 +160,12 @@ export async function calcularDecisionBoletaTardia(
 
   // insertPayment no paga una cuota abierta sin fila en pagos_credito: si está vencida, no queda al día.
   const sinFila = unicas.some((c) => ymdDeFechaCalendario(c.fecha_vencimiento) < fechaRegistro && !pagos.some((p) => p.cuota_id === c.cuota_id));
-  const razonFinal = decision.condonar ? (sinFila ? "no_queda_al_dia" as const : null) : decision.razon;
+  // Misma guarda que insertPayment (409 CUOTA_INTEGRITY): una cuota abierta cuyos pagos validados ya la cubren rechaza el pago entero; no se condona para eso.
+  const cubierta = getCoveredOpenInstallment({
+    montoCuota: credito.cuota ?? 0,
+    cuotas: unicas.map((c) => ({ cuotaId: c.cuota_id, numeroCuota: c.numero_cuota, pagos: pagos.filter((p) => p.cuota_id === c.cuota_id) })),
+  });
+  const razonFinal = decision.condonar ? (sinFila || cubierta ? "no_queda_al_dia" as const : null) : decision.razon;
   if (decision.condonar && razonFinal === null) {
     const porCuota = decision.cuotas.map((c) => ({
       cuota_id: c.cuota_id, numero_cuota: infoCuota.get(c.cuota_id)!.numero,

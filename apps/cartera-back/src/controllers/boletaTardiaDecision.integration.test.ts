@@ -195,3 +195,13 @@ integrationTest("F1: montos negativos o no numéricos hacen LANZAR a la decisió
   await expect(calcularDecisionBoletaTardia(entrada(34, { monto_boleta: -5 }), deps)).rejects.toThrow(/inválid/i);
   await expect(calcularDecisionBoletaTardia(entrada(0), deps)).rejects.toThrow(/inválid/i);
 });
+
+integrationTest("Codex r4 #6: cuota abierta ya cubierta por pagos validados => no aplica (insertPayment rechazaría el pago con 409)", async () => {
+  const { sql } = await levantarEsquemaBoletaTardia();
+  await sembrar(sql, 35);
+  // La cuota 13 sigue abierta (pagado=false) pero un pago validado ya cubre el total (cuota = 1000).
+  await sql`UPDATE cartera.pagos_credito SET validation_status = 'validated', abono_capital = 1000, "paymentFalse" = false
+    WHERE credito_id = 35 AND cuota_id = 353`;
+  const r = await calcularDecisionBoletaTardia(entrada(35), await conBase(sql, depsFalsas(sql, 35)));
+  expect(r).toMatchObject({ aplica: false, razon: "no_queda_al_dia" });
+});

@@ -1861,3 +1861,21 @@ describe("resolverCuotaParaFilaSuelta", () => {
     expect(resolverCuotaParaFilaSuelta({})).toBeNull();
   });
 });
+
+describe("esPagoSaldoElegible: una fila anulada nunca es saldo vigente", () => {
+  const fila = (o: Record<string, unknown>) => ({ validationStatus: "validated", pagado: true, paymentFalse: false, ...o });
+  it("validated viva: elegible", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({}))).toBe(true);
+  });
+  it("validated ANULADA: no elegible (sus restantes son de después del pago)", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ paymentFalse: true }))).toBe(false);
+  });
+  it("pending no pagado vivo: elegible; anulado o pagado: no", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: false }))).toBe(true);
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: false, paymentFalse: true }))).toBe(false);
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: true }))).toBe(false);
+  });
+  it("no_required nunca es saldo elegible", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "no_required" }))).toBe(false);
+  });
+});

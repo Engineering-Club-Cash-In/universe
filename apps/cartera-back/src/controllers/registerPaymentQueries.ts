@@ -1,4 +1,5 @@
-import { and, eq, gt, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, notInArray, or } from "drizzle-orm";
+import type { db } from "../database/index";
 import { cuotas_credito, pagos_credito } from "../database/db";
 
 /**
@@ -68,3 +69,32 @@ export const condicionUltimaCuotaPagada = (credito_id: number) =>
       gt(pagos_credito.abono_interes, "0")
     )
   );
+
+/**
+ * Las filas de la cuota entre las que `insertPayment` elige el saldo vigente y el destino del
+ * cierre (`pagoOriginal`, `allExistingPagos[0]`). Una fila ANULADA (`paymentFalse = true`) nunca
+ * entra, sea `pending`, `validated` o `no_required`: sus restantes son los de después de un pago
+ * que ya no existe, y el cierre no puede sobrescribirla (crédito 9331, cuota 2).
+ */
+export const pagosExistentesDeCuota = (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) =>
+  executor
+    .select({ pago: pagos_credito })
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, false),
+        or(
+          // Los `pending` entran solo si siguen sin pagar (los pagados ya pasaron por /aplicar-pago).
+          notInArray(pagos_credito.validationStatus, ["pending"]),
+          eq(pagos_credito.pagado, false),
+        ),
+      ),
+    )
+    .orderBy(asc(pagos_credito.pago_id));

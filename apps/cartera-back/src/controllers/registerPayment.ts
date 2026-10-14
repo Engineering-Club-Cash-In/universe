@@ -65,6 +65,7 @@ import {
   getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
   resolverCuotaParaFilaSuelta,
+  esPagoSaldoElegible,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -87,7 +88,7 @@ import {
   emitRecoveredDuplicatePendingInstallment,
 } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
-import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
+import { condicionUltimaCuotaPagada, pagosExistentesDeCuota } from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -1264,31 +1265,11 @@ export const insertPayment = async (
 
       if (disponible_restante.gt(0)) {
         // Verificar si existe pago previo - priorizar el original (no_required)
-        const allExistingPagos = await db
-          .select({ pago: pagos_credito })
-          .from(pagos_credito)
-          .innerJoin(
-            cuotas_credito,
-            eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-          )
-          .where(
-            and(
-              eq(
-                pagos_credito.cuota_id,
-                cuota.cuotas_credito.cuota_id
-              ),
-              eq(pagos_credito.credito_id, credito.credito_id),
-              or(
-                ne(pagos_credito.validationStatus, "pending"),
-                and(
-                  eq(pagos_credito.validationStatus, "pending"),
-                  eq(pagos_credito.pagado, false),
-                  eq(pagos_credito.paymentFalse, false)
-                )
-              )
-            )
-          )
-          .orderBy(asc(pagos_credito.pago_id));
+        const allExistingPagos = await pagosExistentesDeCuota(
+          db,
+          cuota.cuotas_credito.cuota_id,
+          credito.credito_id
+        );
 
         // Último pago PARCIAL aún `pending` de esta cuota (todavía no pasó por
         // /aplicar-pago). El query de arriba excluye los `pending`, pero para
@@ -1321,11 +1302,6 @@ export const insertPayment = async (
             .plus(pago.membresias ?? 0)
             .plus(pago.capital_restante ?? 0)
             .gt(0);
-        const esPagoSaldoElegible = (pago: typeof pagos_credito.$inferSelect) =>
-          pago.validationStatus === "validated" ||
-          (pago.validationStatus === "pending" &&
-            pago.pagado === false &&
-            pago.paymentFalse === false);
         const ultimoPagoParcialConRestante = [...allExistingPagos]
           .reverse()
           .find(

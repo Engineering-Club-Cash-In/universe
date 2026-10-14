@@ -307,6 +307,24 @@ export const cuentaComoHermanoVivo = (
 ): boolean =>
   pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
 
+/**
+ * ¿Esta fila puede ser el SALDO VIGENTE de la cuota (de ella se leen los `*_restante`)?
+ *
+ * Una fila anulada (`paymentFalse = true`) NUNCA: su `*_restante` es el de DESPUÉS del pago
+ * que se anuló (ej. 0), y tomarlo hace que el pago siguiente parta de un saldo que ya no
+ * existe y cierre la cuota corta (crédito 9331, cuota 2).
+ */
+export const esPagoSaldoElegible = (pago: {
+  validationStatus?: string | null;
+  pagado?: boolean | null;
+  paymentFalse?: boolean | null;
+}): boolean =>
+  pago.paymentFalse !== true &&
+  (pago.validationStatus === "validated" ||
+    (pago.validationStatus === "pending" &&
+      pago.pagado === false &&
+      pago.paymentFalse === false));
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

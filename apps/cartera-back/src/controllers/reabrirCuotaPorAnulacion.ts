@@ -51,6 +51,11 @@ export async function reabrirCuotaPorAnulacion(
       seguro_restante: pagos_credito.seguro_restante,
       gps_restante: pagos_credito.gps_restante,
       membresias: pagos_credito.membresias,
+      // Para reconocer la vía stale-zero (abonos en 0 y el neto en `monto_aplicado`).
+      monto_aplicado: pagos_credito.monto_aplicado,
+      mora: pagos_credito.mora,
+      otros: pagos_credito.otros,
+      pagoConvenio: pagos_credito.pagoConvenio,
     })
     .from(pagos_credito)
     .where(and(eq(pagos_credito.pago_id, pago_id), eq(pagos_credito.credito_id, credito_id)))

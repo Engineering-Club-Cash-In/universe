@@ -266,6 +266,40 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] }).insertarPortadora).toBe(false);
   });
 
+  // Vía stale-zero (registerPayment ~1696-1708): sube monto_aplicado sin repartir rubros.
+  const staleZero = (o: Record<string, unknown> = {}) =>
+    cierre({ validationStatus: "validated", abono_capital: 0, abono_interes: 0, monto_aplicado: CUOTA, mora: 0, otros: "", pagoConvenio: 0, ...o });
+  test("stale-zero (abonos 0, neto = cuota): reabre con los restantes previos en 0 y portadora", () => {
+    for (const o of [{}, { monto_aplicado: CUOTA + 75, mora: 50, otros: "20", pagoConvenio: 5 }]) {
+      const p = plan({ filaAnulada: staleZero(o), hermanas: [] });
+      expect(p.reabrirFilas).toBe(true);
+      expect(p.reabrirCuota).toBe(true);
+      expect(p.insertarPortadora).toBe(true);
+      expect(p.replica?.payload).toEqual({
+        capital_restante: "0", interes_restante: "0", iva_12_restante: "0",
+        seguro_restante: "0", gps_restante: "0", membresias: "0",
+      });
+    }
+  });
+
+  test("abonos 0 con neto distinto de la cuota (sobrante legado, 552/111135): nada", () => {
+    for (const filaAnulada of [
+      staleZero({ monto_aplicado: 105.77 }),
+      staleZero({ monto_aplicado: CUOTA + 0.02 }),
+      staleZero({ monto_aplicado: CUOTA + 50, mora: 0 }),
+    ]) {
+      const p = plan({ montoCuota: CUOTA, filaAnulada, hermanas: [] });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+    const p552 = plan({ montoCuota: 1894.23, filaAnulada: staleZero({ monto_aplicado: 105.77 }), hermanas: [] });
+    expect(p552.replica).toBeNull();
+  });
+
+  test("stale-zero con hermanas que cubren (91506 / 40155): nada", () => {
+    const p = plan({ filaAnulada: staleZero(), hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] });
+    expect(p.reabrirFilas).toBe(false);
+  });
+
   test("restantes nulos se tratan como cero", () => {
     const p = plan({ filaAnulada: cierre({ capital_restante: null, membresias: null }) });
     expect(p.replica?.payload.capital_restante).toBe("1000");

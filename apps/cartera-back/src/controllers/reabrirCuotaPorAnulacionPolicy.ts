@@ -26,7 +26,14 @@ export type RestantesFila = {
 };
 
 export type FilaAnulada = RubrosCuotaRow &
-  RestantesFila & { cuota_id?: number | null; validationStatus?: string | null };
+  RestantesFila & {
+    cuota_id?: number | null;
+    validationStatus?: string | null;
+    monto_aplicado?: BigInput | null;
+    mora?: BigInput | null;
+    otros?: string | number | null; // TEXT
+    pagoConvenio?: BigInput | null;
+  };
 
 export type PlanReaperturaCuota = {
   /** Restantes a estampar en las filas vivas de la cuota (null: no tocar). */
@@ -120,10 +127,23 @@ export function planReaperturaCuotaPorAnulacion({
     return SIN_CAMBIOS;
   }
 
-  const aplicadoALaCuota = sumarAplicadoACuota([filaAnulada]);
+  const cuota = new Big(montoCuota ?? 0);
+  // Vía stale-zero (registerPayment.ts ~1696-1708): con los restantes ya en 0, el pago exacto de la
+  // cuota sube `monto_aplicado` sin repartir rubros. Solo si el neto es justo `credito.cuota`: los
+  // sobrantes legados con abonos en 0 (552/111135) no saldaron nada y siguen sin cambios.
+  const otros = String(filaAnulada.otros ?? "").trim();
+  const netoStaleZero = new Big(filaAnulada.monto_aplicado ?? 0)
+    .minus(filaAnulada.mora ?? 0)
+    .minus(/^-?\d+(\.\d+)?$/.test(otros) ? otros : 0)
+    .minus(filaAnulada.pagoConvenio ?? 0);
+  const esStaleZero =
+    [filaAnulada.abono_capital, filaAnulada.abono_interes, filaAnulada.abono_iva_12,
+      filaAnulada.abono_seguro, filaAnulada.abono_gps, filaAnulada.membresias_pago]
+      .every((a) => new Big(a ?? 0).eq(0)) &&
+    cuota.gt(0) && netoStaleZero.minus(cuota).abs().lte(0.01);
+  const aplicadoALaCuota = esStaleZero ? netoStaleZero : sumarAplicadoACuota([filaAnulada]);
   if (aplicadoALaCuota.lte(0)) return SIN_CAMBIOS;
 
-  const cuota = new Big(montoCuota ?? 0);
   // `no_required` con plata es un pago real (SIFCO; Caja vía /editPayment, crédito 890):
   // `insertPayment` la netea con este mismo predicado y el cron la cuenta como cobertura
   // (cuotaYaPagadaSql). Las semillas vacías no cuentan. Solo vale dentro de esta regla:

@@ -69,12 +69,19 @@ export type PlanReaperturaCuota = {
   reabrirFilas: boolean;
   /** Poner `cuotas_credito.pagado = false`. */
   reabrirCuota: boolean;
+  /**
+   * No queda ninguna fila viva de la que `insertPayment` pueda leer el saldo de la
+   * cuota: hay que insertar una fila `no_required` sin plata que lo lleve (como las
+   * semillas de `createCredit`). Sin ella el pago siguiente se salta la cuota reabierta.
+   */
+  insertarPortadora: boolean;
 };
 
 const SIN_CAMBIOS: PlanReaperturaCuota = {
   replica: null,
   reabrirFilas: false,
   reabrirCuota: false,
+  insertarPortadora: false,
 };
 
 const masAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
@@ -162,5 +169,18 @@ export function planReaperturaCuotaPorAnulacion({
     statusCredit !== "CAIDO" &&
     incobrablePagada !== true;
 
-  return { replica, reabrirFilas: reabrir, reabrirCuota: reabrir };
+  // `insertPayment` toma el saldo vigente de filas validated / pending / no_required vivas
+  // (registerPayment.ts ~1262-1370); las de capital no sirven. Sin ninguna, lee 0.
+  const hayDondeLeerSaldo = hermanas.some(
+    (h) =>
+      h.paymentFalse !== true &&
+      ["no_required", "validated", "pending"].includes(h.validationStatus ?? ""),
+  );
+
+  return {
+    replica,
+    reabrirFilas: reabrir,
+    reabrirCuota: reabrir,
+    insertarPortadora: replica !== null && !hayDondeLeerSaldo,
+  };
 }

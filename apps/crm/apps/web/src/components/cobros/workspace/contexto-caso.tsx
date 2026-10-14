@@ -106,7 +106,7 @@ import {
 	ordenarPlanDePagos,
 } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
-import { client } from "@/utils/orpc";
+import { client, orpcAparte } from "@/utils/orpc";
 import { useMarcarAlertaLeida, VerAlertasLeidas } from "./alertas-leidas";
 import { correoDeRelleno, telefonoDeRelleno } from "./gestion/contacto-valido";
 import type {
@@ -300,6 +300,8 @@ export type ContextoCasoVistaProps = {
 	referencias: { estado: Estado; items: ReferenciaContexto[] };
 	ubicaciones: UbicacionContexto[];
 	resumenIA: { texto: string; etiquetas: string[]; generadoEn: string } | null;
+	/** Pregunta al asistente IA del caso; sin ella el chat queda deshabilitado. */
+	onPreguntarIA?: (pregunta: string) => Promise<{ respuesta: string }>;
 	onAbrirFicha?: () => void;
 	tabInicial?: TabContexto;
 	historialInicial?: "actual" | "historico";
@@ -331,6 +333,7 @@ export function ContextoCasoVista({
 	referencias,
 	ubicaciones,
 	resumenIA,
+	onPreguntarIA,
 	onAbrirFicha,
 	tabInicial = "resumen",
 	historialInicial = "actual",
@@ -472,7 +475,13 @@ export function ContextoCasoVista({
 					/>
 				)}
 				{tab === "estado-cuenta" && <PestanaEstadoCuenta {...estadoCuenta} />}
-				{tab === "asistente" && <AsistenteIA resumen={resumenIA} compacto />}
+				{tab === "asistente" && (
+					<AsistenteIA
+						resumen={resumenIA}
+						onPreguntar={onPreguntarIA}
+						compacto
+					/>
+				)}
 				{tab === "documentos" && (
 					<DocumentosFicha
 						enviar={documentos.enviar}
@@ -1761,6 +1770,15 @@ export function ContextoCaso({
 				// Otro caso = pestañas y «Ver más» desde cero.
 				key={caso.id}
 				{...props}
+				onPreguntarIA={
+					caso.identidad.casoCobroId
+						? (pregunta) =>
+								orpcAparte.preguntarAsistenteCaso.call({
+									casoCobroId: caso.identidad.casoCobroId as string,
+									pregunta,
+								})
+						: undefined
+				}
 				tabInicial={tabInicial}
 				className={className}
 			/>

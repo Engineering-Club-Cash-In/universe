@@ -104,8 +104,12 @@ export async function registrarPagoConBoletaTardia(
       condonacionBoletaTardia: c ? { condonacion_id: c.condonacion_id, monto: c.monto, estado: c.anulada ? "anulada_no_quedo_al_dia" as const : "vigente" as const } : null,
     };
   };
-  const reintento = await yaRegistrado(p.credito_id);
-  if (reintento) return reintento;
+  // Si ya hay filas se relee BAJO el candado: el intento original lo suelta recién después de evaluarAlDia/anular, y leer afuera
+  // contestaría "vigente" una condonación que el original está por anular. Si bajo el candado ya no hay filas (reversa en el medio), sigue el camino completo.
+  if ((await deps.filasVivas(p.credito_id, intentoId)).length > 0) {
+    const reintento = await deps.conLock(p.credito_id, () => yaRegistrado(p.credito_id));
+    if (reintento) return reintento;
+  }
   // El freno de duplicados compara exacto: " A-1" ≠ "A-1" registraría (y condonaría) dos veces.
   const numeroAutorizacion = p.numeroAutorizacion?.trim();
   const faltantes = camposObligatoriosCondonacion({ ...p, numeroAutorizacion });

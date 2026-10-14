@@ -161,9 +161,11 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
   });
   test("reintento de un intento ya registrado: contesta idempotente sin verificar la foto (R2 caído -> 503)", async () => {
     let llamadasFoto = 0;
+    let tomasLock = 0;
     const set: { status?: number } = {};
     const deps: DepsBoletaTardia = {
       ...depsQueNoSeUsan,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => { tomasLock++; return fn({}); }) as never,
       verificarFoto: (async () => { llamadasFoto++; return { status: 503, message: "x", motivo: "error_r2" }; }) as never,
       filasVivas: (async () => [77]) as never,
       condonacionDelIntento: (async () => ({ condonacion_id: 5, monto: "11.20", anulada: false })) as never,
@@ -171,12 +173,15 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
     const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, deps);
     expect(r).toMatchObject({ success: true, idempotent: true, pago_ids: [77], condonacionBoletaTardia: { condonacion_id: 5, estado: "vigente" } });
     expect(llamadasFoto).toBe(0);
-    expect(set.status).toBeUndefined(); // y conLock (que explota) no se tocó
+    expect(set.status).toBeUndefined();
+    expect(tomasLock).toBe(1); // la relectura va bajo el candado, una sola vez
   });
   test("lo mismo si la foto saldría rechazada (400 reusada): el intento ya registrado manda", async () => {
     let llamadasFoto = 0;
+    let tomasLock = 0;
     const deps: DepsBoletaTardia = {
       ...depsQueNoSeUsan,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => { tomasLock++; return fn({}); }) as never,
       verificarFoto: (async () => { llamadasFoto++; return { status: 400, message: "x", motivo: "reusada" }; }) as never,
       filasVivas: (async () => [77]) as never,
       condonacionDelIntento: (async () => null) as never,
@@ -186,6 +191,36 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
     expect(r).toMatchObject({ success: true, idempotent: true, pago_ids: [77], condonacionBoletaTardia: null });
     expect(llamadasFoto).toBe(0);
     expect(set.status).toBeUndefined();
+    expect(tomasLock).toBe(1);
+  });
+  test("reintento mientras el original aún tiene el candado: contesta lo que quedó al soltarlo", async () => {
+    const vistosLock: number[] = [];
+    let anulada = false;
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      // El candado se obtiene recién cuando el original terminó de anular.
+      conLock: (async (id: number, fn: (l: unknown) => unknown) => { vistosLock.push(id); anulada = true; return fn({}); }) as never,
+      filasVivas: (async () => [77]) as never,
+      condonacionDelIntento: (async () => ({ condonacion_id: 5, monto: "11.20", anulada })) as never,
+    };
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set: {} }, { usuarioEmail: "a@x.com" }, deps);
+    expect(r.condonacionBoletaTardia.estado).toBe("anulada_no_quedo_al_dia");
+    expect(vistosLock).toEqual([1]);
+  });
+  test("si las filas desaparecen bajo el candado (reversa), sigue el camino completo", async () => {
+    let llamadasFilas = 0;
+    let llamadasFoto = 0;
+    const set: { status?: number } = {};
+    const deps: DepsBoletaTardia = {
+      ...depsQueNoSeUsan,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
+      filasVivas: (async () => (++llamadasFilas === 1 ? [77] : [])) as never,
+      verificarFoto: (async () => { llamadasFoto++; return { status: 400, message: "x", motivo: "reusada" }; }) as never,
+    };
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, deps);
+    expect(set.status).toBe(400);
+    expect(r.errors.url_boletas).toEqual(["x"]);
+    expect(llamadasFoto).toBe(1);
   });
   test("las validaciones de forma (400) corren antes y no gastan una llamada a R2", async () => {
     const vistos: unknown[] = [];

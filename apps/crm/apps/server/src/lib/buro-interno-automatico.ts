@@ -55,11 +55,18 @@ export type DecisionPersistenciaAutomatica =
 	| "actualizar"
 	| "reactivar";
 
-/** Una ficha manual activa siempre tiene precedencia sobre la automática. */
+/** Una ficha manual demuestra que Cobros ya gestionó a la persona. */
+export function esFichaManual(
+	persona: { origen: string } | null,
+): boolean {
+	return persona?.origen === "manual";
+}
+
+/** Una ficha manual activa siempre tiene precedencia sobre la automática activa. */
 export function esFichaManualActiva(
 	persona: { activo: boolean; origen: string } | null,
 ): boolean {
-	return persona?.activo === true && persona.origen === "manual";
+	return persona?.activo === true && esFichaManual(persona);
 }
 
 export function decidirPersistenciaAutomatica(input: {

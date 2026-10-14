@@ -35,6 +35,7 @@ import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
 	decidirPersistenciaAutomatica,
+	esFichaManual,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
 	indexarRelacionesLeadPorSifco,
@@ -1379,6 +1380,44 @@ async function registrarCoincidenciasCartera(
 			let personaExistente = fuentesDeUsuario[0]?.persona ?? null;
 			if (personaExistente?.desactivadoPor) continue;
 
+			const condicionIdentidad = or(
+				grupo.lead?.id
+					? eq(buroInternoPersonas.leadId, grupo.lead.id)
+					: undefined,
+				grupo.lead?.dpi
+					? eq(
+							buroInternoPersonas.dpi,
+							normalizarDpiMatch(grupo.lead.dpi) ?? "",
+						)
+					: undefined,
+				nitFuente && normalizarNitMatch(nitFuente)
+					? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${normalizarNitMatch(nitFuente)}`
+					: undefined,
+				...grupo.creditos.map((credito) =>
+					and(
+						eq(
+							buroInternoPersonas.numeroCreditoSifco,
+							credito.creditos.numero_credito_sifco,
+						),
+						sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
+					),
+				),
+			);
+			const fichaManual = (
+				await tx
+					.select({ persona: buroInternoPersonas })
+					.from(buroInternoPersonas)
+					.where(
+						and(
+							eq(buroInternoPersonas.origen, "manual"),
+							condicionIdentidad,
+						),
+					)
+					.orderBy(desc(buroInternoPersonas.createdAt))
+					.limit(1)
+			)[0]?.persona ?? null;
+			if (esFichaManual(fichaManual)) continue;
+
 			const buscarDuplicadoActivo = async () =>
 				(
 					await tx
@@ -1387,29 +1426,7 @@ async function registrarCoincidenciasCartera(
 						.where(
 							and(
 								eq(buroInternoPersonas.activo, true),
-								or(
-									grupo.lead?.id
-										? eq(buroInternoPersonas.leadId, grupo.lead.id)
-										: undefined,
-									grupo.lead?.dpi
-										? eq(
-												buroInternoPersonas.dpi,
-												normalizarDpiMatch(grupo.lead.dpi) ?? "",
-											)
-										: undefined,
-									nitFuente && normalizarNitMatch(nitFuente)
-										? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${normalizarNitMatch(nitFuente)}`
-										: undefined,
-									...grupo.creditos.map((credito) =>
-										and(
-											eq(
-												buroInternoPersonas.numeroCreditoSifco,
-												credito.creditos.numero_credito_sifco,
-											),
-											sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
-										),
-									),
-								),
+								condicionIdentidad,
 							),
 						)
 						.orderBy(

@@ -5,6 +5,7 @@ import {
 	type DatosPersonaAutomaticaComparables,
 	decidirPersistenciaAutomatica,
 	EvaluacionBuroInternoInestableError,
+	esFichaManual,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
 	indexarRelacionesLeadPorSifco,
@@ -60,6 +61,11 @@ describe("sincronización de fichas automáticas", () => {
 		expect(
 			esFichaManualActiva({ activo: true, origen: "automatico_cartera" }),
 		).toBe(false);
+	});
+
+	test("una ficha manual retirada conserva la precedencia de Cobros", () => {
+		expect(esFichaManual({ origen: "manual" })).toBe(true);
+		expect(esFichaManual({ origen: "automatico_cartera" })).toBe(false);
 	});
 
 	test("reactiva únicamente cuando no hay ficha manual activa", () => {

@@ -6,7 +6,7 @@
  * El servidor valida que el monto no pase de la mora vigente y que no haya
  * otra solicitud abierta en el caso.
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatoQuetzales } from "@/lib/cobros/reglas-caso";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 export type RebajaSolicitada = {
 	monto: number;
@@ -40,6 +40,7 @@ export function RebajaMoraForm({
 	const [monto, setMonto] = useState("");
 	const [notas, setNotas] = useState("");
 
+	const queryClient = useQueryClient();
 	const solicitar = useMutation({
 		mutationFn: () =>
 			client.solicitarRebajaMora({
@@ -48,6 +49,9 @@ export function RebajaMoraForm({
 				notas: notas.trim(),
 			}),
 		onSuccess: (r) => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getSolicitudesRebajaMora.key(),
+			});
 			toast.success("Solicitud de rebaja enviada al supervisor");
 			onExito({
 				monto: Number(r.montoSolicitado),

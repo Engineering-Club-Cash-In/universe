@@ -770,7 +770,10 @@ function AlertasCasoDesplegable({
 									type="button"
 									variant="ghost"
 									size="icon"
-									disabled={!casoCobroId || marcarLeida.isPending}
+									disabled={
+										!casoCobroId ||
+										(marcarLeida.isPending && marcarLeida.variables === a.id)
+									}
 									onClick={() => marcarLeida.mutate(a.id)}
 									title="Marcar como leída"
 									aria-label={`Marcar como leída: ${a.titulo}`}

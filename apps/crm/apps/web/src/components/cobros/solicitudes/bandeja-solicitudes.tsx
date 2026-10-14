@@ -348,6 +348,8 @@ export function BandejaSolicitudes({
 									return (
 										<FilaAprobaciones
 											key={s.id}
+											// Solo se listan: sin el realce de las filas que abren algo.
+											className="hover:bg-surface"
 											cliente={s.cliente || "Sin nombre"}
 											detalle={
 												[s.credito ? `Crédito #${s.credito}` : null, s.detalle]

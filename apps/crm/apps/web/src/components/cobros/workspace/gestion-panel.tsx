@@ -228,14 +228,37 @@ function pasoEnCurso(p: Paso): boolean {
 function abonosDeHoy(plan: CasoWorkspace["cuotas"]["plan"]): AbonoConvenio[] {
 	const hoy = fechaLargaGT(new Date());
 	const porId = new Map<number, AbonoConvenio>();
+	// Sin `montoBoleta`, el pago repartido en varias cuotas suma lo aplicado a
+	// cada una; con boleta, el monto es el de la boleta (una sola vez).
+	const conBoleta = new Set<number>();
 	for (const cuota of plan) {
 		for (const p of cuota.pagos ?? []) {
-			if (p.pagoId === undefined || porId.has(p.pagoId)) continue;
+			if (p.pagoId === undefined) continue;
+			// Solo lo que contabilidad ya validó: un abono parcial puede seguir
+			// pendiente aunque su cuota ya tenga estado.
 			if (p.estado !== "validado" && p.estado !== "parcial") continue;
+			if (p.validationStatus === "pending") continue;
 			if (!p.fechaPago || fechaLargaGT(p.fechaPago) !== hoy) continue;
-			const monto = Number(p.montoBoleta ?? p.montoAplicado ?? 0);
-			if (!(monto > 0)) continue;
-			porId.set(p.pagoId, { pagoId: p.pagoId, monto, estado: p.estado });
+			const boleta = Number(p.montoBoleta ?? 0);
+			const previo = porId.get(p.pagoId);
+			if (boleta > 0) {
+				if (conBoleta.has(p.pagoId)) continue;
+				conBoleta.add(p.pagoId);
+				porId.set(p.pagoId, {
+					pagoId: p.pagoId,
+					monto: boleta,
+					estado: p.estado,
+				});
+				continue;
+			}
+			if (conBoleta.has(p.pagoId)) continue;
+			const aplicado = Number(p.montoAplicado ?? 0);
+			if (!(aplicado > 0)) continue;
+			porId.set(p.pagoId, {
+				pagoId: p.pagoId,
+				monto: (previo?.monto ?? 0) + aplicado,
+				estado: p.estado,
+			});
 		}
 	}
 	return [...porId.values()];

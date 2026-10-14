@@ -127,6 +127,8 @@ export type CuotaPlan = CuotaHistorialFila & {
 		montoBoleta?: string | number | null;
 		montoAplicado?: string | number | null;
 		fechaPago?: string | null;
+		/** Contabilidad: "pending" = todavía sin validar. */
+		validationStatus?: string | null;
 		/** "validado", "en_validacion" o "parcial". */
 		estado?: string;
 	}> | null;

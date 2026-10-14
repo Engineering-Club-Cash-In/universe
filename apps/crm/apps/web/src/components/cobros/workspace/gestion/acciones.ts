@@ -339,6 +339,7 @@ export function gruposDelInicio(
 		icono: Percent,
 		titulo: "Solicitar rebaja de mora",
 		subtitulo: "Requiere la aprobación del supervisor",
+		motivoBloqueo: motivoSinMora(caso),
 		onClick: () => abrir("rebaja"),
 	});
 
@@ -464,6 +465,12 @@ function motivoSinPromesa(caso: CasoWorkspace): string | undefined {
 		: undefined;
 }
 
+function motivoSinMora(caso: CasoWorkspace): string | undefined {
+	return caso.mora.monto > 0
+		? undefined
+		: "El caso no tiene mora acumulada para rebajar.";
+}
+
 export function opcionesDeAcuerdo(
 	caso: CasoWorkspace,
 	elegir: (opcion: OpcionAcuerdo) => void,
@@ -530,6 +537,7 @@ export function opcionesDeAcuerdo(
 			icono: Percent,
 			titulo: "Solicitar rebaja de mora",
 			subtitulo: "Requiere la aprobación del supervisor",
+			motivoBloqueo: motivoSinMora(caso),
 			onClick: () => elegir("rebaja"),
 		},
 	};

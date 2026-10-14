@@ -29,11 +29,13 @@ export function idCrudoDeAlerta(id: string): string {
 export function useMarcarAlertaLeida(casoCobroId: string | null | undefined) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (alertaId: string) =>
-			client.marcarAlertaCasoLeida({
-				casoCobroId: casoCobroId ?? "",
+		mutationFn: (alertaId: string) => {
+			if (!casoCobroId) throw new Error("El caso todavía no está cargado");
+			return client.marcarAlertaCasoLeida({
+				casoCobroId,
 				alertaId: idCrudoDeAlerta(alertaId),
-			}),
+			});
+		},
 		onSuccess: () => {
 			toast.success("Alerta marcada como leída");
 		},
@@ -89,9 +91,19 @@ export function VerAlertasLeidas({
 							Cargando…
 						</div>
 					) : leidas.isError ? (
-						<p className="text-danger-text text-sm">
-							No se pudieron cargar las alertas leídas.
-						</p>
+						<div className="flex items-center gap-3">
+							<p className="min-w-0 flex-1 text-danger-text text-sm">
+								No se pudieron cargar las alertas leídas.
+							</p>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={() => void leidas.refetch()}
+							>
+								Reintentar
+							</Button>
+						</div>
 					) : (leidas.data ?? []).length === 0 ? (
 						<p className="text-fg-secondary text-sm">
 							Este caso no tiene alertas leídas.

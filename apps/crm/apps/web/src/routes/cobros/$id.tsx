@@ -2957,7 +2957,10 @@ function RouteComponent() {
 																type="button"
 																variant="text"
 																size="sm"
-																disabled={marcarAlertaLeida.isPending}
+																disabled={
+																	marcarAlertaLeida.isPending &&
+																	marcarAlertaLeida.variables === a.id
+																}
 																onClick={() => marcarAlertaLeida.mutate(a.id)}
 																className="h-auto shrink-0 px-0 text-[11px]"
 															>

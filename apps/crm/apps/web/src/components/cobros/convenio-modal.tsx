@@ -510,10 +510,16 @@ export function ConvenioModal({
 									))}
 								</SelectContent>
 							</Select>
-							{abono ? (
+							{abono && total > 0 ? (
 								<p className="text-muted-foreground text-xs">
 									Se descuentan {Q(abono.monto)} del total: el convenio cubre
 									solo el remanente de {Q(total)}.
+								</p>
+							) : null}
+							{abono && total <= 0 && seleccion.length > 0 ? (
+								<p className="text-danger-text text-xs">
+									El abono cubre todo lo seleccionado: no queda deuda para el
+									convenio. Elija otro abono o quite el abono inicial.
 								</p>
 							) : null}
 						</>

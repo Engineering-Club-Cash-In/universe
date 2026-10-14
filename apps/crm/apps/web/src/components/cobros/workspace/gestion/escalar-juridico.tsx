@@ -6,7 +6,7 @@
  * decide. Cartera solo la acepta en B3 y B4: el servidor lo valida contra el
  * bucket vigente.
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 type MotivoJuridico = "no_contacto" | "no_quiere_pagar" | "sin_acuerdo";
 
@@ -42,6 +42,7 @@ export function EscalarJuridicoForm({
 	const [motivo, setMotivo] = useState<MotivoJuridico | null>(null);
 	const [nota, setNota] = useState("");
 
+	const queryClient = useQueryClient();
 	const solicitar = useMutation({
 		mutationFn: () => {
 			if (!motivo) throw new Error("Seleccione el motivo");
@@ -52,11 +53,14 @@ export function EscalarJuridicoForm({
 			});
 		},
 		onSuccess: (r) => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getSolicitudesJuridico.key(),
+			});
 			toast.success("Solicitud enviada al supervisor");
 			onExito({
 				motivo: MOTIVOS.find((m) => m.valor === motivo)?.etiqueta ?? "",
 				nota: nota.trim(),
-				bucket: String(r.bucketSnapshot),
+				bucket: `B${r.bucketSnapshot}`,
 			});
 		},
 		onError: (error: Error) => {

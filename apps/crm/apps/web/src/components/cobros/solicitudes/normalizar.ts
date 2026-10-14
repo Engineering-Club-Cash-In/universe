@@ -291,6 +291,7 @@ export function ordenarPorAntiguedad<T extends { solicitadoEn: string | null }>(
 	filas: T[],
 ): T[] {
 	return [...filas].sort((a, b) => {
+		if (!a.solicitadoEn && !b.solicitadoEn) return 0;
 		if (!a.solicitadoEn) return 1;
 		if (!b.solicitadoEn) return -1;
 		return (

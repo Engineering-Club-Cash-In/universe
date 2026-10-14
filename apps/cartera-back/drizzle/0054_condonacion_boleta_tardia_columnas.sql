@@ -18,6 +18,17 @@
 -- green-tree) y en las bases locales usadas ANTES de mergear el stack a develop.
 -- ALTER TABLE pagos_credito toma ACCESS EXCLUSIVE: correr fuera de la ventana del
 -- cron de mora (00:05–00:20 GT). Es idempotente si hay que reintentar.
+--   psql -v ON_ERROR_STOP=1 -f 0054_condonacion_boleta_tardia_columnas.sql
+-- ⚠️ Sin ON_ERROR_STOP, si el lock_timeout corta un ALTER psql sigue con el resto,
+-- deja la migración a medias y sale con 0. No va `\set` acá: las pruebas ejecutan
+-- este archivo tal cual por protocolo simple y un meta-comando de psql no es SQL.
+-- Verificación (deben salir 2 filas, uuid, nullable YES; y el índice válido):
+--   SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns
+--   WHERE table_schema = 'cartera'
+--     AND (table_name, column_name) IN (('moras_condonaciones', 'intento_id'),
+--                                       ('pagos_credito', 'boleta_tardia_intento_id'));
+--   SELECT indexrelid::regclass, indisvalid FROM pg_index
+--   WHERE indexrelid = 'cartera.uq_moras_condonaciones_intento_viva'::regclass;  -- indisvalid = true
 --
 -- ── CONTEXTO ────────────────────────────────────────────────────────────────
 -- El cliente pagó con boleta a tiempo pero el asesor la registró tarde; cartera

@@ -1,8 +1,8 @@
 -- Boleta tardía: índice parcial sobre pagos_credito.boleta_tardia_intento_id.
 --
 -- ── ORDEN DE DESPLIEGUE ─────────────────────────────────────────────────────
--- Paso MANUAL en PROD, ANTES del código y fuera de transacción (psql -f, sin
--- BEGIN): CREATE INDEX CONCURRENTLY no corre dentro de un bloque de transacción,
+-- Paso MANUAL en PROD, ANTES del código y fuera de transacción
+-- (psql -v ON_ERROR_STOP=1 -f 0055_condonacion_boleta_tardia_indice_pagos.sql, sin BEGIN): CREATE INDEX CONCURRENTLY no corre dentro de un bloque de transacción,
 -- y se usa porque pagos_credito es grande (~170 k filas) y está viva.
 -- Si falla a medias deja un índice INVALID: hacer
 --   DROP INDEX CONCURRENTLY cartera.pagos_credito_idx_boleta_tardia_intento;

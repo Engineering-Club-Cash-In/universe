@@ -220,6 +220,8 @@ const BASE_AUSENTE: MarcarAusenteVistaProps = {
 	modo: "suplente",
 	onModo: nada,
 	reparto: null,
+	previewVencida: false,
+	onRecalcular: nada,
 	desde: "2026-10-12",
 	hasta: "2026-10-23",
 	onDesde: nada,
@@ -357,6 +359,8 @@ export default function CobrosMiEquipoShowcase() {
 							reparto={{
 								cuentas: 34,
 								conservadas: 2,
+								bloqueadas: 0,
+								venceEn: "2099-01-01T00:00:00.000Z",
 								receptores: [
 									{
 										asesorId: 1,

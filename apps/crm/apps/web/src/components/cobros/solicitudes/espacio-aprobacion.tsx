@@ -1029,6 +1029,7 @@ function ContenidoEspacio({
 	const hayContra = !!contraPendiente;
 	const [habiaContra, setHabiaContra] = React.useState(false);
 	const [refrescandoPlan, setRefrescandoPlan] = React.useState(false);
+	const [falloRefresco, setFalloRefresco] = React.useState(false);
 	if (hayContra !== habiaContra) {
 		// Al ajustar el estado durante el render no hay un cuadro intermedio con
 		// los botones habilitados y el plan anterior.
@@ -1038,14 +1039,29 @@ function ContenidoEspacio({
 	React.useEffect(() => {
 		if (!refrescandoPlan) return;
 		let vigente = true;
-		void Promise.all([
-			queryClient.invalidateQueries({ queryKey: orpc.getPlanConvenio.key() }),
-			queryClient.invalidateQueries({
-				queryKey: orpc.getConveniosListado.key(),
-			}),
-		]).finally(() => {
-			if (vigente) setRefrescandoPlan(false);
-		});
+		// Con `throwOnError`, un fallo de cualquiera de las dos lecturas no libera
+		// el bloqueo: se pide reintentar en lugar de mostrar el plan anterior.
+		Promise.all([
+			queryClient.invalidateQueries(
+				{ queryKey: orpc.getPlanConvenio.key() },
+				{ throwOnError: true },
+			),
+			queryClient.invalidateQueries(
+				{ queryKey: orpc.getConveniosListado.key() },
+				{ throwOnError: true },
+			),
+		]).then(
+			() => {
+				if (!vigente) return;
+				setFalloRefresco(false);
+				setRefrescandoPlan(false);
+			},
+			() => {
+				if (!vigente) return;
+				setFalloRefresco(true);
+				setRefrescandoPlan(false);
+			},
+		);
 		return () => {
 			vigente = false;
 		};
@@ -1110,6 +1126,29 @@ function ContenidoEspacio({
 		} else if (!bloqueo && contrapropuestas.isError) {
 			bloqueo =
 				"No se pudo verificar si hay una contrapropuesta. Cierre y vuelva a abrir la solicitud.";
+		} else if (!bloqueo && falloRefresco) {
+			bloqueo = "No se pudo actualizar el plan del convenio";
+			aviso = (
+				<div className="flex flex-col gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+					<p>
+						La contrapropuesta se resolvió y no se pudo leer el plan nuevo. No
+						se puede decidir sobre el plan anterior.
+					</p>
+					<div>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							onClick={() => {
+								setFalloRefresco(false);
+								setRefrescandoPlan(true);
+							}}
+						>
+							Reintentar
+						</Button>
+					</div>
+				</div>
+			);
 		} else if (!bloqueo && refrescandoPlan) {
 			bloqueo = "Actualizando el plan del convenio…";
 		} else if (contraPendiente && !bloqueo) {

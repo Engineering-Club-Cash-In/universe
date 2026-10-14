@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Info, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { hoyGT } from "@/components/cobros/coberturas-panel";
@@ -54,6 +54,10 @@ export type RepartoAusencia = {
 	cuentas: number;
 	/** Cuentas fuera de cobro (canceladas, caídas…) que se quedan con el asesor. */
 	conservadas: number;
+	/** Cuentas sin un destino válido (p. ej. ningún otro asesor cubre su bucket): no se puede confirmar. */
+	bloqueadas: number;
+	/** Hasta cuándo vale la previsualización (ISO). */
+	venceEn: string;
 	receptores: {
 		asesorId: number;
 		nombre: string;
@@ -90,6 +94,9 @@ export type MarcarAusenteVistaProps = {
 	onModo: (modo: ModoAusencia) => void;
 	/** Reparto previsualizado (revisión del modo «equipo»). */
 	reparto: RepartoAusencia | null;
+	/** La previsualización ya venció: hay que recalcular el reparto. */
+	previewVencida: boolean;
+	onRecalcular: () => void;
 	desde: string;
 	hasta: string;
 	onDesde: (fecha: string) => void;
@@ -144,6 +151,14 @@ function ResumenReparto({
 					? ` Otras ${reparto.conservadas} (canceladas o caídas) no se gestionan y se quedan con ${nombre}.`
 					: ""}
 			</p>
+			{reparto.bloqueadas > 0 ? (
+				<FieldMessage role="alert" variant="warning">
+					No se puede confirmar: {reparto.bloqueadas}{" "}
+					{reparto.bloqueadas === 1 ? "cuenta" : "cuentas"} sin destino válido
+					(ningún otro asesor cubre su bucket). Resuélvalo y vuelva a calcular
+					el reparto.
+				</FieldMessage>
+			) : null}
 			<ul className="divide-y divide-line-subtle rounded-xl border border-line-subtle">
 				{reparto.receptores.map((r) => (
 					<li
@@ -166,6 +181,7 @@ function ResumenReparto({
 export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 	const revision = p.paso === "revision";
 	const equipo = p.modo === "equipo";
+	const vencida = equipo && revision && p.previewVencida;
 	return (
 		<div className="flex flex-col gap-5">
 			<h2 className={cn(dialogTitleClassName, "pr-10")}>
@@ -194,7 +210,12 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 							{p.nombreSuplente}. Sus tareas de agenda se mostrarán al suplente.
 						</p>
 					)}
-					{p.errorServidor ? (
+					{vencida ? (
+						<FieldMessage role="alert" variant="warning">
+							El reparto previsualizado venció (vale 10 minutos). Recalcúlelo
+							para confirmar la ausencia.
+						</FieldMessage>
+					) : p.errorServidor ? (
 						<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
 					) : null}
 					<div className="grid grid-cols-2 gap-3">
@@ -205,14 +226,22 @@ export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
 						>
 							Volver
 						</Button>
-						<Button loading={p.pendiente} onClick={p.onConfirmar}>
+						<Button
+							loading={p.pendiente}
+							disabled={equipo && !vencida && (p.reparto?.bloqueadas ?? 0) > 0}
+							onClick={vencida ? p.onRecalcular : p.onConfirmar}
+						>
 							{p.pendiente
-								? "Registrando…"
-								: equipo
-									? p.errorServidor
-										? "Reintentar confirmación"
-										: "Confirmar ausencia"
-									: "Registrar cobertura"}
+								? vencida
+									? "Calculando reparto…"
+									: "Registrando…"
+								: vencida
+									? "Recalcular reparto"
+									: equipo
+										? p.errorServidor
+											? "Reintentar confirmación"
+											: "Confirmar ausencia"
+										: "Registrar cobertura"}
 						</Button>
 					</div>
 				</>
@@ -473,6 +502,7 @@ function FormularioAusencia({
 		previewId: string;
 		reparto: RepartoAusencia;
 	} | null>(null);
+	const [vencida, setVencida] = useState(false);
 
 	const asesores = useQuery(orpc.getAsesoresTraslados.queryOptions());
 	const titularNumero = /^\d+$/.test(titular) ? Number(titular) : null;
@@ -539,6 +569,8 @@ function FormularioAusencia({
 				reparto: {
 					cuentas: data.asignaciones.length,
 					conservadas: data.excluidos.length,
+					bloqueadas: data.bloqueos.length,
+					venceEn: data.venceEn,
 					receptores: [...porAsesor.values()]
 						.filter((r) => r.despues > r.antes)
 						.sort((a, b) => b.despues - b.antes - (a.despues - a.antes)),
@@ -547,9 +579,26 @@ function FormularioAusencia({
 			setPaso("revision");
 		},
 	});
+	// La previsualización vale 10 minutos: pasado ese instante (o si el servidor
+	// responde que venció) ya no se ofrece confirmarla sino recalcular el reparto.
+	const venceEn = preview?.reparto.venceEn;
+	useEffect(() => {
+		setVencida(false);
+		if (!venceEn) return;
+		const falta = new Date(venceEn).getTime() - Date.now();
+		if (falta <= 0) {
+			setVencida(true);
+			return;
+		}
+		const t = setTimeout(() => setVencida(true), falta);
+		return () => clearTimeout(t);
+	}, [venceEn]);
 	const confirmarEquipo = useMutation({
 		...orpcAparte.marcarAusenteIndefinido.mutationOptions(),
 		retry: false,
+		onError: (e) => {
+			if (/venci/i.test(e.message)) setVencida(true);
+		},
 		onSuccess: () => {
 			void queryClient.invalidateQueries({
 				queryKey: orpcAparte.listarAusencias.key(),
@@ -656,6 +705,14 @@ function FormularioAusencia({
 				cambiar();
 			}}
 			reparto={preview?.reparto ?? null}
+			previewVencida={vencida}
+			onRecalcular={() => {
+				// Reparto nuevo = confirmación nueva (otro `id`).
+				setId(crypto.randomUUID());
+				confirmarEquipo.reset();
+				if (origen)
+					previsualizar.mutate({ asesorId: origen.asesor_id, motivo });
+			}}
 			desde={desde}
 			hasta={hasta}
 			onDesde={(v) => {

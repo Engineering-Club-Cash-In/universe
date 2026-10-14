@@ -32,6 +32,7 @@ import {
   respuestaNexaNoReversible,
 } from "../controllers/nexaPagoNoReversible";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
+import { AnulacionCapitalNoRestituibleError } from "../controllers/restitucionCapitalError";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
@@ -286,6 +287,11 @@ export const paymentRouter = new Elysia()
       if (esNexaPaymentNotReversibleError(error)) {
         set.status = 409;
         return respuestaNexaNoReversible();
+      }
+      // Pago que ya bajó capital y ese capital no se puede reponer: no se anuló nada.
+      if (error instanceof AnulacionCapitalNoRestituibleError) {
+        set.status = 409;
+        return { success: false, code: error.code, message: error.message };
       }
       if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
         set.status = 422;

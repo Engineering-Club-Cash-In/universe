@@ -5,6 +5,9 @@ import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
 import { reabrirCuotaPorAnulacion } from "./reabrirCuotaPorAnulacion";
+import { restituirCapitalPorAnulacion } from "./restituirCapitalPorAnulacion";
+import { mueveCapital, precheckAnulacionConCapital } from "./restitucionCapitalPorAnulacionPolicy";
+import { AnulacionCapitalNoRestituibleError } from "./restitucionCapitalError";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // ── `./rubros` ENTRA COMO TIPO, Y COMO VALOR SOLO DENTRO DE LA FÁBRICA ─────
 // `./rubros` arrastra `../database/index`, o sea la conexión real. Importarlo
@@ -80,6 +83,8 @@ export type AnularPagoMoraDeps = {
    * pruebas con bases falsas de cola no ven consultas de más.
    */
   reabrirCuota?: typeof reabrirCuotaPorAnulacion;
+  /** Repone capital e inversionistas si el pago ya los había bajado (validated). Opcional, como `reabrirCuota`. */
+  restituirCapital?: typeof restituirCapitalPorAnulacion;
 };
 
 export const DEPS_REALES = (): AnularPagoMoraDeps => ({
@@ -100,6 +105,7 @@ export const DEPS_REALES = (): AnularPagoMoraDeps => ({
     return anularCondonacionPorPagoInvalidado(params);
   }) as typeof anularCondonacionPorPagoInvalidado,
   reabrirCuota: reabrirCuotaPorAnulacion,
+  restituirCapital: restituirCapitalPorAnulacion,
 });
 
 export async function anularPagoYRestituirMora(
@@ -121,6 +127,13 @@ export async function anularPagoYRestituirMora(
       // no sobre una foto que alguien más pueda estar cambiando.
       numero_credito_sifco: creditos.numero_credito_sifco,
       estado_devolucion: creditos.estado_devolucion,
+      // Para reponer el capital si el pago ya lo había bajado (restituirCapital).
+      capital: creditos.capital,
+      statusCredit: creditos.statusCredit,
+      porcentaje_interes: creditos.porcentaje_interes,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      gps: creditos.gps,
+      membresias_pago: creditos.membresias_pago,
     })
     .from(creditos)
     .where(eq(creditos.credito_id, credito_id))
@@ -182,6 +195,8 @@ export async function anularPagoYRestituirMora(
       created_at: pagos_credito.createdAt,
       nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
       boletaTardiaIntentoId: pagos_credito.boletaTardiaIntentoId,
+      abono_capital: pagos_credito.abono_capital,
+      registerBy: pagos_credito.registerBy,
     })
     .from(pagos_credito)
     .where(
@@ -199,6 +214,12 @@ export async function anularPagoYRestituirMora(
   if (await pagoNexaBloqueaAnular(tx, pagoPrevio?.nexaPaymentEventId)) {
     throw new NexaPaymentNotReversibleError();
   }
+
+  // Un pago que ya bajó capital solo se anula si ese capital se puede reponer. Lo que se decide
+  // con el crédito y la fila candados (estado del crédito, fila estructural) va acá, antes de
+  // escribir; el resto (PCI, roster, abonos_capital) lo decide `restituirCapital`, en esta tx.
+  const rechazoCapital = precheckAnulacionConCapital({ ...pagoPrevio, statusCredit: creditoCandado.statusCredit });
+  if (rechazoCapital) throw new AnulacionCapitalNoRestituibleError(rechazoCapital);
 
   // ¿Qué queda por restituir de la mora que este pago bajó? La pregunta —y su
   // ancla— viven en `moraDecrementoDePago.ts`, compartidas con la reversa de
@@ -252,6 +273,12 @@ export async function anularPagoYRestituirMora(
   // transacción y bajo el candado del crédito, con la réplica de `reversePayment` y la
   // cobertura de `insertPayment`.
   await deps.reabrirCuota?.(tx, { pago_id, credito_id });
+
+  // INMEDIATAMENTE DESPUÉS de reabrir: la reapertura evalúa el INCOBRABLE con capital + abono;
+  // con el capital ya repuesto lo sumaría dos veces.
+  if (pagoPrevio && mueveCapital(pagoPrevio.validationStatus, pagoPrevio.abono_capital)) {
+    await deps.restituirCapital?.(tx, { pago_id, credito_id, credito: creditoCandado, pago: pagoPrevio });
+  }
 
   // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento
   // de esa transferencia registre limpio en vez de reaplicar esta fila anulada.

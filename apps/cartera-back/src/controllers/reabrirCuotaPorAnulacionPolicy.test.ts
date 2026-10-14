@@ -190,6 +190,13 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
   });
 
+  test("abono directo a capital (capital / capital_validated): fuera de la lógica de cuota, sin cambios", () => {
+    for (const validationStatus of ["capital", "capital_validated"]) {
+      const p = plan({ filaAnulada: cierre({ validationStatus, abono_capital: 500 }) });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+    }
+  });
+
   test("restantes nulos se tratan como cero", () => {
     const p = plan({ filaAnulada: cierre({ capital_restante: null, membresias: null }) });
     expect(p.replica?.payload.capital_restante).toBe("1000");

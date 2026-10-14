@@ -100,6 +100,15 @@ export function planReaperturaCuotaPorAnulacion({
   const cuotaId = filaAnulada.cuota_id;
   if (cuotaId === null || cuotaId === undefined) return SIN_CAMBIOS;
 
+  // Un abono directo a capital queda fuera de la lógica de cuota (registerPayment.ts ~4244-4250):
+  // `sumarAplicadoACuota` suma su `abono_capital`, pero no le aportó nada a la cuota.
+  if (
+    filaAnulada.validationStatus === "capital" ||
+    filaAnulada.validationStatus === "capital_validated"
+  ) {
+    return SIN_CAMBIOS;
+  }
+
   const aplicadoALaCuota = sumarAplicadoACuota([filaAnulada]);
   if (aplicadoALaCuota.lte(0)) return SIN_CAMBIOS;
 

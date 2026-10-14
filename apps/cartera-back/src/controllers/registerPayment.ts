@@ -1760,11 +1760,6 @@ export const insertPayment = async (
           "Diciembre",
         ];
         const mes_pagado = months[currentDate.getMonth()];
-        // Boleta tardía: la fila nace viva aunque la reutilizada sea de relleno anulada
-        // (heredar paymentFalse=true dejaría el pago invisible a la condonación/compensación).
-        const paymentFalse = existingPago && !boletaTardiaIntentoId
-          ? existingPago.pago.paymentFalse
-          : false;
         const fechaGuatemala = paymentRegistrationDate();
 
         // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo
@@ -1851,7 +1846,7 @@ export const insertPayment = async (
           // fila reescrita conserva la `fecha_aplicado` de su vida anterior
           // (los placeholders `no_required` de SIFCO suelen traerla).
           fecha_aplicado: null,
-          paymentFalse: paymentFalse,
+          paymentFalse: false, // `existingPago` siempre es viva (la semilla de respaldo llega en false)
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,
           registerBy: registerBy,
@@ -1957,7 +1952,12 @@ export const insertPayment = async (
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
-                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                  and(
+                    eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                    eq(pagos_credito.credito_id, credito.credito_id),
+                    // Una anulada nunca cerró la cuota: con `pagado` la reversa la tomaría por el cierre.
+                    eq(pagos_credito.paymentFalse, false)
+                  )
                 );
 
               if (
@@ -2119,7 +2119,12 @@ export const insertPayment = async (
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
-                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                  and(
+                    eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                    eq(pagos_credito.credito_id, credito.credito_id),
+                    // Una anulada nunca cerró la cuota: con `pagado` la reversa la tomaría por el cierre.
+                    eq(pagos_credito.paymentFalse, false)
+                  )
                 );
 
               if (

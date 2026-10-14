@@ -24,6 +24,7 @@ import { s3 } from "../utils/functions/uploadsFiles";
 
 /** Namespace PROPIO del advisory lock del registro (8765 pagos, 8766 espejo, 8767 cuenta Nexa). */
 export const BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE = 8768;
+export const MAX_BOLETAS_NEXA_POR_BARRIDO = 25;
 
 export const boletaNexaHabilitada = () => process.env.NEXA_BOLETA_IMAGEN_ENABLED !== "false";
 
@@ -288,6 +289,62 @@ export function generarBoletasNexaBestEffort(
   } catch (error) {
     logError("nexa.boleta_imagen.error", { pago_ids: pagoIds }, error);
   }
+}
+
+// Espera en memoria de los pagos que fallaron en el barrido: 1 h, después 2 h,
+// 4 h… hasta 24 h. Sin esto, los que fallan siempre ocuparían los primeros
+// lugares (ORDER BY pago_id) y los nuevos no avanzarían. Acotada: si se llena,
+// sale el anotado hace más tiempo. Se pierde al reiniciar (vuelven a probarse).
+const ESPERA_INICIAL_MS = 60 * 60_000;
+const ESPERA_MAXIMA_MS = 24 * 60 * 60_000;
+const MAX_PAGOS_EN_ESPERA = 500;
+const enEspera = new Map<number, { hasta: number; fallos: number }>();
+
+const anotarEspera = (resultado: ResultadoBoletasNexa, ahora: number) => {
+  for (const id of [...resultado.generadas, ...resultado.omitidas]) enEspera.delete(id);
+  for (const id of resultado.fallidas) {
+    const fallos = (enEspera.get(id)?.fallos ?? 0) + 1;
+    enEspera.delete(id);
+    enEspera.set(id, { fallos, hasta: ahora + Math.min(ESPERA_INICIAL_MS * 2 ** (fallos - 1), ESPERA_MAXIMA_MS) });
+    if (enEspera.size > MAX_PAGOS_EN_ESPERA) enEspera.delete(enEspera.keys().next().value!);
+  }
+};
+
+/** Solo para pruebas. */
+export function reiniciarEsperaBoletasNexa() {
+  enEspera.clear();
+}
+
+/** El job sale como fallido si en el barrido hubo pagos que no se pudieron generar. */
+export const debeFallarBarridoBoletasNexa = (resultado: ResultadoBoletasNexa) => resultado.fallidas.length > 0;
+
+/**
+ * Barrido: retoma lo que el disparo no generó y hace el backfill. Salta los
+ * pagos en espera (pide de más y los filtra) para que los nuevos avancen.
+ */
+export async function barrerBoletasNexaPendientes(
+  deps: BoletaNexaDeps = boletaNexaDeps,
+  limite = MAX_BOLETAS_NEXA_POR_BARRIDO,
+  timeoutMs = TIMEOUT_BOLETA_NEXA_MS,
+  reloj: () => number = Date.now,
+): Promise<ResultadoBoletasNexa> {
+  if (!boletaNexaHabilitada()) return { generadas: [], omitidas: [], fallidas: [] };
+  return encolar(
+    async () => {
+      const ahora = reloj();
+      const esperando = new Set([...enEspera].filter(([, e]) => e.hasta > ahora).map(([id]) => id));
+      const candidatos = await conTope(deps.pendientes(limite + esperando.size), timeoutMs);
+      const resultado = await generarBoletasNexa(
+        candidatos.filter((id) => !esperando.has(id)).slice(0, limite),
+        deps,
+        timeoutMs,
+      );
+      anotarEspera(resultado, reloj());
+      return resultado;
+    },
+    // Un tope más por la consulta de pendientes.
+    topeDelTurno(limite, timeoutMs) + timeoutMs,
+  );
 }
 
 // ========================================

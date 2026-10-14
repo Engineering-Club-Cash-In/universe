@@ -163,22 +163,54 @@ export function accionEntrega(
 	};
 }
 
-/** «Escalar a Jurídico»: cartera solo lo acepta en B3 y B4 (el servidor lo valida). */
+/** Subtítulo de una gestión con una solicitud abierta (W2, W3). */
+const CON_SOLICITUD_ABIERTA =
+	"Ya hay una solicitud abierta: ábrala para ver en qué va o cancelarla.";
+
+/**
+ * «Escalar a Jurídico»: cartera solo lo acepta en B3 y B4 (el servidor lo
+ * valida). Con una solicitud abierta se abre igual, para verla o cancelarla.
+ */
 export function accionJuridico(
-	caso: Pick<CasoWorkspace, "bucket">,
+	caso: Pick<CasoWorkspace, "bucket" | "solicitudes">,
 	onClick: () => void,
 ): AccionGestion {
 	const nivel = nivelDelCaso(caso);
+	const abierta = !!caso.solicitudes.juridicoAbierta;
 	return {
 		id: "juridico",
 		icono: Scale,
 		titulo: "Escalar a Jurídico",
-		subtitulo: "Sin acuerdo ni recuperación: el caso pasa al área legal",
-		tono: "danger",
+		subtitulo: abierta
+			? CON_SOLICITUD_ABIERTA
+			: "Sin acuerdo ni recuperación: el caso pasa al área legal",
+		tono: abierta ? "warning" : "danger",
 		motivoBloqueo:
-			nivel === 3 || nivel === 4
+			abierta || nivel === 3 || nivel === 4
 				? undefined
 				: "Cartera solo acepta escalar a Jurídico en los buckets B3 y B4.",
+		onClick,
+	};
+}
+
+/**
+ * «Solicitar rebaja de mora» (W2). Con una solicitud abierta se abre igual,
+ * para verla o cancelarla; sin mora, se bloquea.
+ */
+export function accionRebaja(
+	caso: Pick<CasoWorkspace, "mora" | "solicitudes">,
+	onClick: () => void,
+): AccionGestion {
+	const abierta = !!caso.solicitudes.rebajaAbierta;
+	return {
+		id: "rebaja",
+		icono: Percent,
+		titulo: "Solicitar rebaja de mora",
+		subtitulo: abierta
+			? CON_SOLICITUD_ABIERTA
+			: "Requiere la aprobación del supervisor",
+		tono: abierta ? "warning" : undefined,
+		motivoBloqueo: abierta ? undefined : motivoSinMora(caso),
 		onClick,
 	};
 }
@@ -334,14 +366,7 @@ export function gruposDelInicio(
 			onClick: () => abrir("deshacer-convenio"),
 		});
 	}
-	acuerdos.push({
-		id: "rebaja",
-		icono: Percent,
-		titulo: "Solicitar rebaja de mora",
-		subtitulo: "Requiere la aprobación del supervisor",
-		motivoBloqueo: motivoSinMora(caso),
-		onClick: () => abrir("rebaja"),
-	});
+	acuerdos.push(accionRebaja(caso, () => abrir("rebaja")));
 
 	// ── Campo y rescate (B2 en adelante) ─────────────────────────────────────
 	const campo = grupoCampo(caso, abrir);
@@ -465,7 +490,7 @@ function motivoSinPromesa(caso: CasoWorkspace): string | undefined {
 		: undefined;
 }
 
-function motivoSinMora(caso: CasoWorkspace): string | undefined {
+function motivoSinMora(caso: Pick<CasoWorkspace, "mora">): string | undefined {
 	return caso.mora.monto > 0
 		? undefined
 		: "El caso no tiene mora acumulada para rebajar.";
@@ -532,13 +557,6 @@ export function opcionesDeAcuerdo(
 	}
 	return {
 		opciones,
-		secundaria: {
-			id: "rebaja",
-			icono: Percent,
-			titulo: "Solicitar rebaja de mora",
-			subtitulo: "Requiere la aprobación del supervisor",
-			motivoBloqueo: motivoSinMora(caso),
-			onClick: () => elegir("rebaja"),
-		},
+		secundaria: accionRebaja(caso, () => elegir("rebaja")),
 	};
 }

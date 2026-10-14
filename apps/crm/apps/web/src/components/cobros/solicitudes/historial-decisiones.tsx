@@ -1,23 +1,24 @@
 /**
  * Pestaña «Historial» de /cobros/solicitudes (Figma 3602:5360): las decisiones
- * y acciones del supervisor, con chips, buscador, tipo y estado. Cada fila se
- * despliega con todo lo que mostraban las páginas de antes (quién decidió,
- * quién ejecutó, evidencia, ubicación, checklist…). Presentación pura.
+ * y acciones del supervisor. La bitácora del servidor (`getBitacoraDecisiones`)
+ * ya trae todo mezclado y paginado: los chips, el tipo, el estado, el asesor,
+ * las fechas y la búsqueda (crédito o cliente) se resuelven en el servidor.
+ * Cada fila se despliega con su detalle (quién decidió, quién ejecutó, montos,
+ * evidencia, ubicación, checklist…). Presentación pura: el detalle extra lo
+ * consulta el contenedor (`DetalleExtra`).
  */
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, ExternalLink, FileText, Info } from "lucide-react";
+import { ChevronDown, ExternalLink, FileText, X } from "lucide-react";
 import * as React from "react";
 import { resumenChecklist } from "server/src/lib/recuperacion-solicitud";
 import { ESTADOS_VEHICULO } from "server/src/lib/recuperacion-vehiculo";
+import { fechaAIso, isoAFecha } from "@/components/cobros/campo-fecha";
 import { UbicacionGuardada } from "@/components/cobros/inmovilizacion-ubicacion";
 import { ChecklistVista } from "@/components/cobros/recuperacion-checklist";
-import {
-	type Destino,
-	EnlaceDestino,
-} from "@/components/cobros/supervision/destino";
 import { nombreCorto } from "@/components/cobros/supervision/formato";
 import { FilterChip } from "@/components/ds/cartera-chips";
 import { Button } from "@/components/ui/button";
+import { DateRangePicker } from "@/components/ui/date-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { SearchBar } from "@/components/ui/search-bar";
@@ -45,7 +46,7 @@ import {
 	ESTADOS_FILTRO_HISTORIAL,
 	type EstadoFiltroHistorial,
 	type FiltrosHistorial,
-	filtrarHistorial,
+	TIPOS_FILTRO_HISTORIAL,
 	VISTAS_HISTORIAL,
 } from "./historial";
 import type {
@@ -61,34 +62,31 @@ import {
 	TipoConPunto,
 } from "./piezas";
 
-const POR_PAGINA = 20;
-
-/** Tipos de solicitud del filtro (mismo `tipo` de la URL que la bandeja). */
-const TIPOS_FILTRO = [
-	{ value: "todas", label: "Todos los tipos" },
-	{ value: "apagado", label: "Apagado" },
-	{ value: "reactivacion", label: "Reactivación de la unidad" },
-	{ value: "recuperacion", label: "Recuperación del vehículo" },
-	{ value: "por_ejecutar", label: "Aprobadas por ejecutar" },
-	{ value: "convenio", label: "Convenio" },
-] as const;
-
 export type HistorialDecisionesProps = {
-	/** Todas las entradas cargadas, ya ordenadas (las más recientes primero). */
+	/** La página que se ve, ya ordenada (las más recientes primero). */
 	entradas: EntradaHistorial[];
+	/** Registros con estos filtros en el servidor; null mientras carga. */
+	total: number | null;
+	pagina: number;
+	totalPaginas: number;
+	onPagina: (pagina: number) => void;
+	porPagina: number;
 	filtros: FiltrosHistorial;
 	onFiltros: (cambio: Partial<FiltrosHistorial>) => void;
+	/** Asesores del filtro (usuario del CRM). */
+	asesores: Array<{ value: string; label: string }>;
 	cargando: boolean;
-	/** Fuentes que no se pudieron cargar. */
-	errores: string[];
+	/** Llega otra página u otros filtros: la tabla se atenúa. */
+	actualizando?: boolean;
+	error: boolean;
 	onReintentar: () => void;
-	/** Apagados y reactivaciones cargados de cuántos hay. */
-	inmovilizaciones: { cargadas: number; total: number | null };
-	onCargarMas?: () => void;
-	cargandoMas?: boolean;
-	/** Historial completo de reasignaciones, traslados y coberturas (Mi equipo). */
-	historialEquipo?: Destino;
+	/** Arriba de la tabla (límite de la bitácora, documentos…). */
+	aviso?: React.ReactNode;
+	/** Completa el detalle de una fila al abrirla. */
+	DetalleExtra?: DetalleExtraHistorial;
 };
+
+const TODOS = "__todos__";
 
 /* ── Detalle de cada fila ───────────────────────────────────────────────────── */
 
@@ -130,7 +128,11 @@ function PersonaFecha({
 }
 
 /** Lo que mostraba el historial de /cobros/inmovilizaciones. */
-function DetalleInmovilizacion({ i }: { i: InmovilizacionHistorialFuente }) {
+export function DetalleInmovilizacion({
+	i,
+}: {
+	i: InmovilizacionHistorialFuente;
+}) {
 	return (
 		<div className="grid @2xl:grid-cols-3 @md:grid-cols-2 grid-cols-1 gap-4">
 			<Campo etiqueta="Solicitado por">
@@ -192,7 +194,7 @@ function DetalleInmovilizacion({ i }: { i: InmovilizacionHistorialFuente }) {
 }
 
 /** Lo que mostraba el historial de /cobros/recuperaciones (fila y «Detalle»). */
-function DetalleRecuperacion({ r }: { r: RecuperacionFuente }) {
+export function DetalleRecuperacion({ r }: { r: RecuperacionFuente }) {
 	const resumen = resumenChecklist(r.checklist ?? []);
 	const lat = r.ubicacionLat != null ? Number(r.ubicacionLat) : undefined;
 	const lng = r.ubicacionLng != null ? Number(r.ubicacionLng) : undefined;
@@ -246,7 +248,7 @@ function DetalleRecuperacion({ r }: { r: RecuperacionFuente }) {
 	);
 }
 
-function DetalleFilas({
+export function DetalleFilas({
 	filas,
 }: {
 	filas: Array<{ etiqueta: string; valor: string }>;
@@ -264,11 +266,34 @@ function DetalleFilas({
 
 /* ── Tabla ──────────────────────────────────────────────────────────────────── */
 
+/** Lo que la entrada trae consigo, sin consultas. */
+function DetalleBase({ e }: { e: EntradaHistorial }) {
+	return e.detalle.tipo === "inmovilizacion" ? (
+		<DetalleInmovilizacion i={e.detalle.item} />
+	) : e.detalle.tipo === "recuperacion" ? (
+		<DetalleRecuperacion r={e.detalle.item} />
+	) : (
+		<DetalleFilas filas={e.detalle.filas} />
+	);
+}
+
 const CABECERA =
 	"h-9 px-0 pr-4 font-semibold text-[10px] text-fg-tertiary uppercase leading-[1.26] first:pl-6";
 const CELDA = "whitespace-normal py-3.5 pr-4 align-middle first:pl-6";
 
-function FilaHistorial({ e }: { e: EntradaHistorial }) {
+export type DetalleExtraHistorial = React.ComponentType<{
+	entrada: EntradaHistorial;
+	/** Lo que trae la bitácora; se muestra mientras carga o si no hay más. */
+	base: React.ReactNode;
+}>;
+
+function FilaHistorial({
+	e,
+	DetalleExtra,
+}: {
+	e: EntradaHistorial;
+	DetalleExtra?: DetalleExtraHistorial;
+}) {
 	const [abierta, setAbierta] = React.useState(false);
 	const estado = ESTADO_HISTORIAL[e.estado];
 	const detalleId = React.useId();
@@ -354,12 +379,10 @@ function FilaHistorial({ e }: { e: EntradaHistorial }) {
 						className="whitespace-normal bg-canvas px-6 py-4"
 					>
 						<div className="@container flex flex-col gap-3">
-							{e.detalle.tipo === "inmovilizacion" ? (
-								<DetalleInmovilizacion i={e.detalle.item} />
-							) : e.detalle.tipo === "recuperacion" ? (
-								<DetalleRecuperacion r={e.detalle.item} />
+							{DetalleExtra ? (
+								<DetalleExtra entrada={e} base={<DetalleBase e={e} />} />
 							) : (
-								<DetalleFilas filas={e.detalle.filas} />
+								<DetalleBase e={e} />
 							)}
 							{e.ficha ? (
 								<Link
@@ -387,35 +410,33 @@ function FilaHistorial({ e }: { e: EntradaHistorial }) {
 
 export function HistorialDecisiones({
 	entradas,
+	total,
+	pagina,
+	totalPaginas,
+	onPagina,
+	porPagina,
 	filtros,
 	onFiltros,
+	asesores,
 	cargando,
-	errores,
+	actualizando = false,
+	error,
 	onReintentar,
-	inmovilizaciones,
-	onCargarMas,
-	cargandoMas,
-	historialEquipo,
+	aviso,
+	DetalleExtra,
 }: HistorialDecisionesProps) {
-	const [pagina, setPagina] = React.useState(1);
-	const { vista, tipo, estado, busqueda } = filtros;
-	const visibles = React.useMemo(
-		() => filtrarHistorial(entradas, { vista, tipo, estado, busqueda }),
-		[entradas, vista, tipo, estado, busqueda],
-	);
-	// Otro filtro: de vuelta a la primera página.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: se dispara al cambiar los filtros
-	React.useEffect(() => setPagina(1), [vista, tipo, estado, busqueda]);
-	const totalPaginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
-	const paginaActual = Math.min(pagina, totalPaginas);
-	const filas = visibles.slice(
-		(paginaActual - 1) * POR_PAGINA,
-		paginaActual * POR_PAGINA,
-	);
-	const pronto = filtros.tipo === "rebaja" || filtros.tipo === "documentos";
-	const tipoValor = TIPOS_FILTRO.some((t) => t.value === filtros.tipo)
+	const visibles = entradas;
+	const tipoValor = TIPOS_FILTRO_HISTORIAL.some((t) => t.value === filtros.tipo)
 		? filtros.tipo
 		: "todas";
+	const filtrando =
+		filtros.vista !== "todas" ||
+		tipoValor !== "todas" ||
+		filtros.estado !== "todos" ||
+		filtros.asesorId !== null ||
+		filtros.desde !== null ||
+		filtros.hasta !== null;
+	const buscando = filtros.busqueda.trim() !== "";
 
 	let cuerpo: React.ReactNode;
 	if (cargando && entradas.length === 0) {
@@ -426,44 +447,49 @@ export function HistorialDecisiones({
 				))}
 			</div>
 		);
-	} else if (pronto) {
+	} else if (error && entradas.length === 0) {
 		cuerpo = (
 			<EmptyState
 				size="sm"
-				variant="no-data"
-				title="Pronto"
-				description="Las decisiones de rebajas de mora y de documentos se verán aquí cuando esas solicitudes lleguen a la bandeja."
+				variant="error"
+				title="No se pudo cargar el historial"
+				action={
+					<Button variant="outline" size="sm" onClick={onReintentar}>
+						Reintentar
+					</Button>
+				}
 			/>
 		);
 	} else if (visibles.length === 0) {
 		cuerpo = (
 			<EmptyState
 				size="sm"
-				variant={errores.length > 0 ? "error" : "no-data"}
+				variant="no-data"
 				title={
-					entradas.length === 0
-						? "No hay decisiones registradas"
-						: "No hay registros con estos filtros"
+					buscando
+						? "No hay registros con esa búsqueda"
+						: filtrando
+							? "No hay registros con estos filtros"
+							: "No hay decisiones registradas"
 				}
 				description={
-					entradas.length === 0
-						? undefined
-						: onCargarMas
-							? "Revise la búsqueda o cambie el tipo y el estado. También puede cargar registros más antiguos."
-							: "Revise la búsqueda o cambie el tipo y el estado."
-				}
-				action={
-					errores.length > 0 ? (
-						<Button variant="outline" size="sm" onClick={onReintentar}>
-							Reintentar
-						</Button>
-					) : undefined
+					buscando
+						? "Revise el número de crédito o el nombre del cliente, o cambie los filtros."
+						: filtrando
+							? "Cambie los filtros o el rango de fechas."
+							: undefined
 				}
 			/>
 		);
 	} else {
 		cuerpo = (
-			<div className="overflow-x-auto">
+			<div
+				className={cn(
+					"overflow-x-auto transition-opacity",
+					actualizando && "opacity-60",
+				)}
+				aria-busy={actualizando}
+			>
 				<Table className="min-w-240 table-fixed text-fg">
 					<TableHeader className="bg-canvas [&_tr]:border-b-0">
 						<TableRow className="hover:bg-transparent">
@@ -481,14 +507,22 @@ export function HistorialDecisiones({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{filas.map((e) => (
-							<FilaHistorial key={e.id} e={e} />
+						{visibles.map((e) => (
+							<FilaHistorial key={e.id} e={e} DetalleExtra={DetalleExtra} />
 						))}
 					</TableBody>
 				</Table>
 			</div>
 		);
 	}
+
+	const rango =
+		filtros.desde || filtros.hasta
+			? {
+					from: isoAFecha(filtros.desde ?? filtros.hasta ?? undefined),
+					to: isoAFecha(filtros.hasta ?? filtros.desde ?? undefined),
+				}
+			: undefined;
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -505,36 +539,13 @@ export function HistorialDecisiones({
 				))}
 			</fieldset>
 
-			<div className="flex items-start gap-2 rounded-lg bg-info-subtle px-3 py-2.5 text-[13px] text-info-text leading-snug">
-				<Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-				<div className="wrap-break-word min-w-0">
-					El historial se trae del servidor por páginas, de lo más reciente a lo
-					más antiguo, y se muestra completo hasta la fecha que ya cargaron
-					todas sus fuentes (apagados y reactivaciones:{" "}
-					{inmovilizaciones.cargadas.toLocaleString("es-GT")}
-					{inmovilizaciones.total !== null
-						? ` de ${inmovilizaciones.total.toLocaleString("es-GT")}`
-						: ""}{" "}
-					cargados). Lo anterior aparece con «Cargar registros más antiguos».
-					{historialEquipo ? (
-						<>
-							{" "}
-							<EnlaceDestino
-								destino={historialEquipo}
-								className="rounded-sm font-semibold underline outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							>
-								Historial completo de reasignaciones, traslados y coberturas
-							</EnlaceDestino>
-							.
-						</>
-					) : null}
-				</div>
-			</div>
+			{aviso}
 
-			{errores.length > 0 && entradas.length > 0 ? (
+			{error && entradas.length > 0 ? (
 				<div className="flex flex-wrap items-center gap-3 rounded-lg bg-danger-subtle px-3 py-2 text-[13px] text-danger-text">
 					<span className="min-w-0 flex-1">
-						No se pudieron cargar: {errores.join(", ")}.
+						No se pudo actualizar el historial. Se muestra lo último que se
+						cargó.
 					</span>
 					<Button variant="outline" size="sm" onClick={onReintentar}>
 						Reintentar
@@ -545,9 +556,9 @@ export function HistorialDecisiones({
 			<div className="@container flex flex-col overflow-hidden rounded-2xl border border-line-subtle bg-surface shadow-clay-raised contain-inline-size">
 				<div className="flex flex-wrap items-center gap-3 px-4 py-3">
 					<SearchBar
-						containerClassName="w-full sm:w-[360px]"
-						placeholder="Buscar por crédito, asesor, tipo o decisión…"
-						aria-label="Buscar por crédito, asesor, tipo o decisión"
+						containerClassName="w-full sm:w-[300px]"
+						placeholder="Buscar por crédito o cliente…"
+						aria-label="Buscar en el historial por número de crédito o nombre del cliente"
 						value={filtros.busqueda}
 						onChange={(ev) => onFiltros({ busqueda: ev.target.value })}
 						onClear={() => onFiltros({ busqueda: "" })}
@@ -564,7 +575,7 @@ export function HistorialDecisiones({
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent size="sm">
-							{TIPOS_FILTRO.map((t) => (
+							{TIPOS_FILTRO_HISTORIAL.map((t) => (
 								<SelectItem key={t.value} value={t.value}>
 									{t.label}
 								</SelectItem>
@@ -592,39 +603,79 @@ export function HistorialDecisiones({
 							))}
 						</SelectContent>
 					</Select>
+					<Select
+						value={filtros.asesorId ?? TODOS}
+						onValueChange={(v) =>
+							onFiltros({ asesorId: v === TODOS ? null : v })
+						}
+					>
+						<SelectTrigger
+							size="sm"
+							className="w-full sm:w-48"
+							aria-label="Asesor que pidió la solicitud"
+						>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent size="sm">
+							<SelectItem value={TODOS}>Todos los asesores</SelectItem>
+							{asesores.map((a) => (
+								<SelectItem key={a.value} value={a.value}>
+									{a.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<div className="flex w-full items-center gap-1 sm:w-auto">
+						<DateRangePicker
+							className="h-8 w-full min-w-48 rounded-lg px-3 text-[13px] sm:w-auto"
+							placeholder="Todas las fechas"
+							range={rango}
+							onRangeChange={(r) => {
+								if (!r?.from) {
+									onFiltros({ desde: null, hasta: null });
+									return;
+								}
+								const desde = fechaAIso(r.from);
+								onFiltros({
+									desde,
+									hasta: r.to ? fechaAIso(r.to) : desde,
+								});
+							}}
+						/>
+						{filtros.desde || filtros.hasta ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Quitar el rango de fechas"
+								onClick={() => onFiltros({ desde: null, hasta: null })}
+							>
+								<X />
+							</Button>
+						) : null}
+					</div>
 					<div className="ml-auto flex items-center gap-2.5">
 						<h3 className="font-semibold text-[15px] text-fg leading-[1.26]">
 							Registros
 						</h3>
 						<span className="inline-flex shrink-0 items-center rounded-full bg-brand-subtle px-2 py-0.5 font-semibold text-[11px] text-brand tabular-nums leading-[1.26]">
-							{cargando && entradas.length === 0
+							{total === null
 								? "…"
-								: `${visibles.length.toLocaleString("es-GT")} ${visibles.length === 1 ? "registro" : "registros"}`}
+								: `${total.toLocaleString("es-GT")} ${total === 1 ? "registro" : "registros"}`}
 						</span>
 					</div>
 				</div>
 				{cuerpo}
-				{!pronto && visibles.length > 0 ? (
+				{total !== null && total > 0 ? (
 					<Pagination
 						className="rounded-none border-x-0 border-b-0"
-						page={paginaActual}
+						page={pagina}
 						pageCount={totalPaginas}
-						onPageChange={setPagina}
-						totalItems={visibles.length}
-						pageSize={POR_PAGINA}
+						onPageChange={onPagina}
+						totalItems={total}
+						pageSize={porPagina}
+						disabled={actualizando}
 					/>
-				) : null}
-				{onCargarMas ? (
-					<div className="flex justify-center border-divider border-t px-4 py-3">
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={onCargarMas}
-							loading={cargandoMas}
-						>
-							Cargar registros más antiguos
-						</Button>
-					</div>
 				) : null}
 			</div>
 		</div>

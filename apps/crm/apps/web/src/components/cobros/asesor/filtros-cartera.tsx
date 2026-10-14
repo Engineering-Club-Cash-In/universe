@@ -49,7 +49,8 @@ export type FiltroGestionCartera = FiltroGestion | "sin_acuerdo";
 
 /** Orden de Figma (QuickFilters). */
 export const GESTION_LABEL: Record<FiltroGestionCartera, string> = {
-	sin_gestion_48h: "Sin gestión +48h",
+	// La clave se mantiene por el contrato de URL; la regla es de 3 días hábiles (S2).
+	sin_gestion_48h: "Sin gestión en 3 días hábiles",
 	promesa_por_vencer: "Promesas por vencer",
 	convenio_pendiente: "Convenios pendientes",
 	sin_contactar_hoy: "Sin contactar hoy",
@@ -239,18 +240,22 @@ const LIMITE_DIAS: Record<PeriodoCartera, number> = {
 
 /**
  * Lo que la tabla de antes hacía en el cliente sobre la página recibida:
- *  - sin etapa elegida, oculta completados e incobrables;
+ *  - sin etapa elegida, oculta completados e incobrables (salvo
+ *    `mantenerIncobrables`: la Cola del día y las alertas de promesa los
+ *    incluyen a propósito y el servidor ya los cuenta en el total, S5);
  *  - con un período (no "Todos"), deja solo vencidos y los que vencen dentro del período.
  */
 export function refinarPagina<T extends FilaCartera>(
 	filas: T[],
 	f: Pick<FiltrosCartera, "periodo" | "etapa">,
+	opciones: { mantenerIncobrables?: boolean } = {},
 ): T[] {
 	let out = filas;
 	if (!f.etapa) {
 		out = out.filter(
 			(c) =>
-				c.estadoContrato !== "completado" && c.estadoContrato !== "incobrable",
+				c.estadoContrato !== "completado" &&
+				(opciones.mantenerIncobrables || c.estadoContrato !== "incobrable"),
 		);
 	}
 	if (f.periodo === "todos") return out;

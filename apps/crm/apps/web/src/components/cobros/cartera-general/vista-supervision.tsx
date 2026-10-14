@@ -59,12 +59,13 @@ import {
  * estas piezas se enchufan ahí. Sin consultas: todo llega por props.
  *
  *   SelectorAsesor        filtro `?asesor=` (asesor_id de cartera).
- *   ChipsRapidosSupervision  chips de Figma: Sin gestión >48h, Promesa por vencer,
- *                         Convenio por vencer, Sin acuerdo.
+ *   ChipsRapidosSupervision  chips de Figma: Sin gestión en 3 días hábiles,
+ *                         Promesa por vencer, Convenio por vencer, Sin acuerdo.
  *   BotonSegmentos        popover con TODAS las categorías de la Cola del día y
  *                         de las Alertas de promesas y de convenios (con conteo),
  *                         más los filtros de gestión. Reemplaza a esas páginas.
- *   AvisoSegmento         qué es el segmento elegido + avisos (S5, ausencias…).
+ *   AvisoSegmento         qué es el segmento elegido + avisos (ausencias, fuente
+ *                         del detalle caída, asesor sin correo…).
  *   CeldaSegmento         lo que cada página vieja mostraba por crédito.
  *   VacioSegmento         estado vacío por segmento (Figma 2010:4449).
  */
@@ -95,7 +96,7 @@ export type SupervisionCartera = {
 	conteos: ConteosSegmentos;
 	/** Detalle de la fuente por No. de crédito (columna del segmento). */
 	detalles?: Map<string, DetalleSegmento>;
-	/** Avisos del segmento o de los filtros (p. ej. «se filtra sobre la página»). */
+	/** Avisos del segmento o de los filtros (p. ej. el asesor está ausente hoy). */
 	avisos?: string[];
 	/** Casos del segmento que no tienen fila en cartera (se listan como enlaces). */
 	sinFila?: CasoSinFila[];
@@ -706,7 +707,11 @@ const CATEGORIAS_ITEM: {
 	{ clave: "promesaProxima", texto: () => "Promesa próxima", tono: "info" },
 	{
 		clave: "sinContacto",
-		texto: (i) => `${i.diasSinContacto ?? "+5"} días sin contacto`,
+		// `diasSinContacto` son días hábiles completos sin gestión manual (S2).
+		texto: (i) =>
+			i.diasSinContacto == null
+				? "Sin contacto en 3 días hábiles"
+				: `${i.diasSinContacto} ${i.diasSinContacto === 1 ? "día hábil" : "días hábiles"} sin contacto`,
 		tono: "brand",
 	},
 ];

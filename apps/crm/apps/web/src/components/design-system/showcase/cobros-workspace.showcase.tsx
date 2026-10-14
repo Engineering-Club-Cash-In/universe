@@ -22,12 +22,22 @@ import {
 	Warehouse,
 } from "lucide-react";
 import * as React from "react";
+import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import {
+	CATALOGO_DOCUMENTOS,
+	filasDocumentos,
+} from "@/components/cobros/ficha/documentos-caso";
 import type { ItemGestion } from "@/components/cobros/ficha/ficha-pestanas";
 import {
 	ContextoCasoVista,
 	type ContextoCasoVistaProps,
 	type TabContexto,
 } from "@/components/cobros/workspace/contexto-caso";
+import {
+	ContrapropuestaAvisoVista,
+	type ContrapropuestaPendiente,
+	vistaDeContrapropuesta,
+} from "@/components/cobros/workspace/contrapropuesta-caso";
 import { InicioGestionVista } from "@/components/cobros/workspace/gestion/inicio";
 import {
 	NotasCompartidas,
@@ -39,15 +49,26 @@ import {
 } from "@/components/cobros/workspace/gestion/llamada";
 import {
 	type AccionGestion,
+	CabeceraPaso,
 	type GrupoGestiones,
 	ListaGestiones,
+	PasoGestion,
 } from "@/components/cobros/workspace/gestion/piezas";
+import { SolicitudAbiertaPaso } from "@/components/cobros/workspace/gestion/rebaja-mora";
 import {
 	GestionRegistradaVista,
 	MensajeEnviadoVista,
 	type ResumenRegistrada,
 } from "@/components/cobros/workspace/gestion/registrada";
 import { VisitaProgramadaTarjeta } from "@/components/cobros/workspace/gestion/visita-programada";
+import {
+	BitacoraSolicitudesVista,
+	SolicitudCasoTarjeta,
+	type SolicitudJuridicoCaso,
+	type SolicitudRebajaCaso,
+	vistaDeJuridico,
+	vistaDeRebaja,
+} from "@/components/cobros/workspace/solicitudes-caso";
 import { CrmPill } from "@/components/ds/cards-credito";
 import { AccionPendiente } from "@/components/ds/indicadores";
 import { Button } from "@/components/ui/button";
@@ -60,7 +81,7 @@ export const meta: ShowcaseMeta = {
 	figma:
 		"CRM Ventas › Workspace · Contexto del caso (ctx/*) y Gestión (gp/*, 2873:18339, 2135:734, 2370:3885, 3788:7794)",
 	description:
-		"Workspace de cobros (components/cobros/workspace) con datos de ejemplo, en marcos de 600×780 (gestión) y 566×780 (contexto). Panel izquierdo (ContextoCasoVista): Resumen B1 con promesa, B3 sin acuerdo, Historial, Estado de cuenta y B4. Panel derecho (gestion/*): inicio en B1, B3 y B4, ¿con quién está hablando?, resultado con opciones de acuerdo, mensaje enviado y gestión registrada.",
+		"Workspace de cobros (components/cobros/workspace) con datos de ejemplo, en marcos de 600×780 (gestión) y 566×780 (contexto). Panel izquierdo (ContextoCasoVista): Resumen B1 con promesa, B3 sin acuerdo, Historial, Estado de cuenta y B4. Panel derecho (gestion/*): inicio en B1, B3 y B4, ¿con quién está hablando?, resultado con opciones de acuerdo, mensaje enviado y gestión registrada. Solicitudes al supervisor: contrapropuesta del convenio (asesor y supervisor), rebaja y Jurídico abiertas con su bitácora, y «Abono de hoy» del convenio.",
 };
 
 /* ── Datos de ejemplo ─────────────────────────────────────────────────────── */
@@ -75,15 +96,21 @@ const gestion = (
 	tono: ItemGestion["tono"],
 	nota: string,
 	derecha?: string,
+	contacto?: ItemGestion["contacto"],
 ): ItemGestion => ({
 	id,
 	cuando,
 	titulo: (
 		<span className="inline-flex items-center gap-1.5">
-			<Phone aria-hidden className="size-3.5" />
+			{canal.endsWith("entrante") ? (
+				<PhoneIncoming aria-hidden className="size-3.5" />
+			) : (
+				<Phone aria-hidden className="size-3.5" />
+			)}
 			{canal}
 		</span>
 	),
+	contacto,
 	badge: (
 		<CrmPill
 			kind="chip"
@@ -97,7 +124,13 @@ const gestion = (
 	tono,
 	nota,
 	derecha,
-	detalles: [{ label: "Próximo paso", valor: "Llamar el 15 ago a las 10:00" }],
+	detalles: [
+		{
+			label: "Seguimiento programado",
+			valor: "15 ago 2026 · 10:00 · por llamada",
+		},
+		{ label: "Próximo paso", valor: "Llamar el 15 ago a las 10:00" },
+	],
 });
 
 const HISTORIAL: ItemGestion[] = [
@@ -112,10 +145,15 @@ const HISTORIAL: ItemGestion[] = [
 	gestion(
 		"g2",
 		"18 jul 2026 · 16:45",
-		"Llamada",
+		"Llamada entrante",
 		{ texto: "Contactado", tone: "success" },
 		"logrado",
 		"El cliente solicitó el cambio de placas; se trasladó al supervisor.",
+		undefined,
+		{
+			participante: "Habló con: Juan Pérez López (codeudor)",
+			telefono: "5555-1234",
+		},
 	),
 	gestion(
 		"g3",
@@ -133,8 +171,26 @@ const HISTORIAL: ItemGestion[] = [
 		{ texto: "No contesta", tone: "warning" },
 		"sin-contacto",
 		"Buzón de voz.",
+		undefined,
+		{
+			participante: "Intentó con: María José Contreras López (titular)",
+			telefono: "4444-9876",
+		},
 	),
 ];
+
+/** F6 · Filas de Documentos del catálogo (mismo armado que el Workspace). */
+const DOCUMENTOS_F6 = filasDocumentos({
+	catalogo: CATALOGO_DOCUMENTOS.map((d) => ({
+		...d,
+		disponible: d.clave !== "seguro" && d.clave !== "contrato",
+	})),
+	cargandoCatalogo: false,
+	motivoSinAcciones: null,
+	enviando: null,
+	onEnviar: () => undefined,
+	onSolicitar: () => undefined,
+});
 
 const BASE: ContextoCasoVistaProps = {
 	nombre: "María José Contreras López",
@@ -231,27 +287,17 @@ const BASE: ContextoCasoVistaProps = {
 	},
 	documentos: {
 		enviar: [
+			// F6: tarjeta de circulación (con archivo) y seguro (sin archivo).
+			...DOCUMENTOS_F6.enviar,
 			{
 				clave: "estado-cuenta",
 				nombre: "Estado de cuenta",
 				descripcion: "Resumen del crédito, por WhatsApp",
 				onClick: () => undefined,
 			},
-			{
-				clave: "seguro",
-				nombre: "Información de seguro",
-				descripcion: "Póliza vigente",
-				motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-			},
 		],
-		solicitar: [
-			{
-				clave: "contrato",
-				nombre: "Contrato de crédito",
-				descripcion: "PDF · Documento legal",
-				motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-			},
-		],
+		// F6: el contrato ya tiene una solicitud pendiente.
+		solicitar: DOCUMENTOS_F6.solicitar,
 	},
 	referencias: {
 		estado: "ok",
@@ -546,6 +592,7 @@ const PAGOS: GrupoGestiones = {
 const acuerdos = (
 	convenioBloqueo: string | null,
 	conConvenioVigente = false,
+	rebajaAbierta = false,
 ): GrupoGestiones => ({
 	id: "acuerdos",
 	titulo: "Acuerdos",
@@ -579,8 +626,10 @@ const acuerdos = (
 			"rebaja",
 			Percent,
 			"Solicitar rebaja de mora",
-			"Requiere la aprobación del supervisor",
-			{ pronto: true, onClick: undefined },
+			rebajaAbierta
+				? "Ya hay una solicitud abierta: ábrala para ver en qué va o cancelarla."
+				: "Requiere la aprobación del supervisor",
+			rebajaAbierta ? { tono: "warning" } : {},
 		),
 	],
 });
@@ -903,6 +952,122 @@ function DemoNotasAbiertas() {
 	return <NotasCompartidas valor={notas} onChange={setNotas} />;
 }
 
+/* ── Solicitudes al supervisor y contrapropuesta (W2, W3, M4) ─────────────── */
+
+const YO = "u-ana";
+
+const rebaja = (
+	id: string,
+	estado: string,
+	extra: Partial<SolicitudRebajaCaso> = {},
+): SolicitudRebajaCaso => ({
+	id,
+	casoCobroId: "caso-1",
+	numeroCreditoSifco: "01010214048972",
+	estado,
+	moraSnapshot: "1240.00",
+	montoSolicitado: "600.00",
+	montoAplicado: null,
+	notas:
+		"El cliente pagó dos cuotas atrasadas hoy y pide rebajar la mora acumulada por el atraso de la empresa.",
+	solicitadoEn: new Date("2026-10-14T15:20:00Z"),
+	solicitadoPorId: YO,
+	solicitadoPor: "Ana García",
+	resueltoEn: null,
+	resueltoPor: null,
+	notaResolucion: null,
+	clienteNombre: "María José Contreras López",
+	...extra,
+});
+
+const REBAJA_PENDIENTE = vistaDeRebaja(rebaja("r1", "pendiente"), YO);
+const REBAJAS_CERRADAS = [
+	vistaDeRebaja(
+		rebaja("r2", "aplicada", {
+			montoSolicitado: "300.00",
+			montoAplicado: "300.00",
+			solicitadoEn: new Date("2026-08-02T16:00:00Z"),
+			resueltoEn: new Date("2026-08-03T14:10:00Z"),
+			resueltoPor: "Luis Méndez",
+			notaResolucion: "Aprobada: el cliente regularizó dos cuotas.",
+		}),
+		YO,
+	),
+	vistaDeRebaja(
+		rebaja("r3", "rechazada", {
+			montoSolicitado: "900.00",
+			solicitadoEn: new Date("2026-06-20T16:00:00Z"),
+			resueltoEn: new Date("2026-06-21T14:10:00Z"),
+			resueltoPor: "Luis Méndez",
+			notaResolucion:
+				"El cliente no tiene pagos recientes: primero que regularice una cuota.",
+		}),
+		YO,
+	),
+	vistaDeRebaja(
+		rebaja("r4", "cancelada", {
+			montoSolicitado: "150.00",
+			solicitadoEn: new Date("2026-05-10T16:00:00Z"),
+			resueltoEn: new Date("2026-05-10T18:00:00Z"),
+			resueltoPor: "Ana García",
+		}),
+		YO,
+	),
+];
+
+const juridico = (
+	estado: string,
+	extra: Partial<SolicitudJuridicoCaso> = {},
+): SolicitudJuridicoCaso => ({
+	id: `j-${estado}`,
+	casoCobroId: "caso-1",
+	numeroCreditoSifco: "01010214048972",
+	bucketSnapshot: 4,
+	motivo: "no_quiere_pagar",
+	notaJuridico:
+		"Tres visitas sin acuerdo; el cliente dice que no pagará y ocultó el vehículo.",
+	estado,
+	solicitadoEn: new Date("2026-10-13T15:20:00Z"),
+	solicitadoPorId: YO,
+	solicitadoPor: "Ana García",
+	resueltoEn: null,
+	resueltoPor: null,
+	notaResolucion: null,
+	clienteNombre: "María José Contreras López",
+	...extra,
+});
+
+const JURIDICO_ERROR = vistaDeJuridico(
+	juridico("error_aplicacion", {
+		resueltoEn: new Date("2026-10-14T10:00:00Z"),
+		resueltoPor: "Luis Méndez",
+		notaResolucion:
+			"Cartera no respondió a tiempo. Se reintentará en unos minutos.",
+	}),
+	YO,
+);
+
+const contrapropuestaBase: ContrapropuestaPendiente = {
+	id: "c1",
+	convenioId: 118,
+	numeroCreditoSifco: "01010214048972",
+	montoTotal: 3000,
+	original: { numeroMeses: 6, cuotaMensual: 500, primerPago: "2026-10-20" },
+	propuesta: { numeroMeses: 4, cuotaMensual: 750, primerPago: "2026-11-02" },
+	nota: "El cliente tiene ingresos fijos desde noviembre: con cuatro cuotas se pone al día antes de fin de año.",
+	creadaEn: new Date("2026-10-14T16:30:00Z"),
+	creadaPor: "Luis Méndez",
+	puedeAceptar: true,
+	puedeDescartar: true,
+	esSupervisor: false,
+};
+const CONTRAPROPUESTA_ASESOR = vistaDeContrapropuesta(contrapropuestaBase);
+const CONTRAPROPUESTA_SUPERVISOR = vistaDeContrapropuesta({
+	...contrapropuestaBase,
+	puedeAceptar: false,
+	esSupervisor: true,
+});
+
 export default function CobrosWorkspaceShowcase() {
 	return (
 		<div className="space-y-8">
@@ -924,6 +1089,11 @@ export default function CobrosWorkspaceShowcase() {
 					<Panel
 						titulo="Resumen · B4 con vehículo a recuperar"
 						props={B4_RECUPERAR}
+					/>
+					<Panel
+						titulo="Más › Documentos (F6: catálogo del caso)"
+						props={BASE}
+						tab="documentos"
 					/>
 					<Panel titulo="Más › Referencias" props={BASE} tab="referencias" />
 					<Panel titulo="Más › Ubicaciones" props={BASE} tab="ubicaciones" />
@@ -1157,6 +1327,124 @@ export default function CobrosWorkspaceShowcase() {
 							resumen={REGISTRADA_LINKS}
 							onVolverInicio={nada}
 						/>
+					</Marco>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Solicitudes al supervisor y contrapropuesta (W2, W3, M4)">
+				<div className="flex flex-wrap gap-6 py-3">
+					<Marco titulo="Inicio · contrapropuesta del supervisor y rebaja abierta">
+						<InicioGestionVista
+							avisos={
+								<>
+									<ContrapropuestaAvisoVista
+										datos={CONTRAPROPUESTA_ASESOR}
+										onResponder={nada}
+									/>
+									<SolicitudCasoTarjeta
+										solicitud={REBAJA_PENDIENTE}
+										onCancelar={nada}
+									/>
+								</>
+							}
+							grupos={[CONTACTO, PAGOS, acuerdos(null, false, true)]}
+						/>
+					</Marco>
+					<Marco titulo="Solicitar rebaja · con una solicitud abierta y la bitácora">
+						<PasoGestion
+							formulario
+							cabecera={
+								<CabeceraPaso
+									titulo="Solicitar rebaja de mora"
+									onAtras={nada}
+								/>
+							}
+						>
+							<SolicitudAbiertaPaso
+								tarjeta={
+									<SolicitudCasoTarjeta
+										solicitud={REBAJA_PENDIENTE}
+										onCancelar={nada}
+									/>
+								}
+								bitacora={
+									<BitacoraSolicitudesVista
+										titulo="Rebajas anteriores"
+										solicitudes={REBAJAS_CERRADAS}
+									/>
+								}
+								aviso="Este caso ya tiene una solicitud de rebaja abierta. Para pedir otra, cancélela o espere la decisión del supervisor."
+								accion="Solicitar rebaja"
+								onVolver={nada}
+							/>
+						</PasoGestion>
+					</Marco>
+					<Marco titulo="Escalar a Jurídico · aprobada, no se pudo aplicar (sin cancelar)">
+						<PasoGestion
+							formulario
+							cabecera={
+								<CabeceraPaso titulo="Escalar a Jurídico" onAtras={nada} />
+							}
+						>
+							<SolicitudAbiertaPaso
+								tarjeta={
+									<SolicitudCasoTarjeta
+										solicitud={JURIDICO_ERROR}
+										onCancelar={nada}
+									/>
+								}
+								aviso="Este caso ya tiene una solicitud a Jurídico abierta. Para pedir otra, cancélela o espere la decisión del supervisor."
+								accion="Escalar a Jurídico"
+								onVolver={nada}
+							/>
+						</PasoGestion>
+					</Marco>
+					<Marco titulo="Contrapropuesta · vista del supervisor (solo retirar)">
+						<div className="p-5">
+							<ContrapropuestaAvisoVista
+								datos={CONTRAPROPUESTA_SUPERVISOR}
+								onResponder={nada}
+							/>
+						</div>
+					</Marco>
+					<Marco titulo="Convenio · «Abono de hoy» con un abono validado">
+						<PasoGestion
+							formulario
+							cabecera={
+								<CabeceraPaso titulo="Convenio de pago" onAtras={nada} />
+							}
+						>
+							<ConvenioModal
+								open
+								onOpenChange={nada}
+								casoCobroId="caso-1"
+								clienteNombre="María José Contreras López"
+								cuotas={[
+									{
+										cuotaId: 11,
+										numeroCuota: 11,
+										fechaVencimiento: "2026-09-15",
+										monto: 1850,
+										vencida: true,
+									},
+									{
+										cuotaId: 12,
+										numeroCuota: 12,
+										fechaVencimiento: "2026-10-15",
+										monto: 1850,
+										vencida: false,
+									},
+								]}
+								cuotaMensual={1850}
+								montoMora={420}
+								maxMeses={6}
+								abonos={[
+									{ pagoId: 5123, monto: 1000, aplicadoPorCuota: { 11: 800 } },
+								]}
+								embebido
+								onCancelar={nada}
+							/>
+						</PasoGestion>
 					</Marco>
 				</div>
 			</ShowcaseGroup>

@@ -325,7 +325,23 @@ export function DatosPersonalesCard({
 	);
 }
 
-/** Dirección de residencia o de trabajo, en modo vista. */
+export type FilaDireccion = {
+	label: string;
+	valor: string | null | undefined;
+	/**
+	 * Con `onChange` la fila se edita (Input del DS con la etiqueta encima,
+	 * como el correo); sin él, se muestra en modo vista.
+	 */
+	onChange?: (valor: string) => void;
+	placeholder?: string;
+	maxLength?: number;
+	disabled?: boolean;
+};
+
+/**
+ * Dirección de residencia o de trabajo. Las filas con `onChange` se editan;
+ * las demás (teléfono y horario del trabajo) quedan de solo lectura.
+ */
 export function DireccionCard({
 	titulo,
 	filas,
@@ -333,7 +349,7 @@ export function DireccionCard({
 	className,
 }: {
 	titulo: string;
-	filas: Array<{ label: string; valor: string | null | undefined }>;
+	filas: FilaDireccion[];
 	/** "Fuente: solicitud de crédito", "Última modificación…". */
 	nota?: React.ReactNode;
 	className?: string;
@@ -341,13 +357,26 @@ export function DireccionCard({
 	return (
 		<CrmCard superficie="outline" className={cn("gap-4 p-5", className)}>
 			<h3 className={crmText.name}>{titulo}</h3>
-			{filas.map((f) => (
-				<FichaEditableRow
-					key={f.label}
-					etiqueta={f.label}
-					valor={f.valor ?? ""}
-				/>
-			))}
+			{filas.map((f) =>
+				f.onChange ? (
+					<FichaEditableRow
+						key={f.label}
+						modo="edicion"
+						etiqueta={f.label}
+						valor={f.valor ?? ""}
+						onValorChange={f.onChange}
+						placeholder={f.placeholder}
+						maxLength={f.maxLength}
+						disabled={f.disabled}
+					/>
+				) : (
+					<FichaEditableRow
+						key={f.label}
+						etiqueta={f.label}
+						valor={f.valor ?? ""}
+					/>
+				),
+			)}
 			{nota ? <p className="text-[11px] text-fg-tertiary">{nota}</p> : null}
 		</CrmCard>
 	);

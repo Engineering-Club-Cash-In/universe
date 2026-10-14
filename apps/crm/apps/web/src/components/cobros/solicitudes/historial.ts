@@ -1,67 +1,40 @@
 /**
  * «Historial de decisiones» (Figma 3602:5360): lo que decidió o hizo el
- * supervisor, unido en el navegador desde varias fuentes. Funciones puras.
+ * supervisor. Funciones puras.
  *
- *  - Apagados y reactivaciones: `getHistorialInmovilizaciones` (todos los
- *    estados, paginado).
- *  - Recuperaciones del vehículo: `getHistorialSolicitudesRecuperacion`
- *    (decididas, paginado por el servidor).
- *  - Decisiones de convenios: `getHistorialDecisionesConvenio` (global y
- *    paginado; cartera borra el convenio al rechazarlo).
- *  - Reasignaciones manuales: `getHistorialReasignaciones({ origen: "API_MANUAL" })`.
- *  - Traslados de cartera: `listarTraslados` (despido o renuncia = baja de asesor).
- *  - Coberturas: `listarCoberturas` (registro = ausencia; cancelada o con el
- *    período terminado = reactivación del asesor).
- *
+ * La fuente es la bitácora del servidor (`getBitacoraDecisiones`, M3):
+ * convenios, apagados, reactivaciones, recuperaciones del vehículo, rebajas de
+ * mora, Jurídico, documentos, contrapropuestas de convenio, reasignaciones
+ * manuales, traslados (y bajas de asesor), coberturas y ausencias indefinidas,
+ * ya mezclados, paginados, filtrados y buscados en el servidor. Cada entrada
+ * trae lo que su detalle necesita (montos de la rebaja, nota para Jurídico,
+ * bucket, asesor de origen…). Aquí solo se traduce cada entrada a la fila de
+ * la tabla y los filtros de pantalla a los del servidor.
  */
-import { etiquetaMotivo } from "server/src/lib/recuperacion-vehiculo";
 import {
-	aIso,
+	type Decision,
+	type EntradaBitacora,
+	type EventoBitacora,
+	esBajaDeAsesor,
+	type PlanConvenioBitacora,
+	TIPOS_SIN_CREDITO,
+	type TipoBitacora,
+} from "server/src/lib/bitacora-supervision";
+import {
+	ETIQUETA_TIPO,
+	etiquetaMotivoJuridico,
 	type InmovilizacionHistorialFuente,
-	normalizarTexto,
 	type RecuperacionFuente,
 	type TipoSolicitud,
 } from "./normalizar";
-import { fechaCorta, type TonoDecision } from "./piezas";
+import {
+	fechaCorta,
+	fechaHoraCorta,
+	quetzales,
+	type TonoDecision,
+} from "./piezas";
 
-/* ── Fuentes extra ──────────────────────────────────────────────────────────── */
-
-/** Fila de `getHistorialReasignaciones` (AsesorCambioRow de cartera-back). */
-export type ReasignacionFuente = {
-	historial_id: number | string;
-	fecha: string;
-	numero_credito_sifco: string;
-	cliente: string | null;
-	asesor_anterior: string | null;
-	asesor_nuevo: string | null;
-	bucket: number | null;
-	bucket_prefijo?: string | null;
-	origen: string;
-	motivo: string | null;
-	usuario: string | null;
-};
-
-/** Fila de `listarTraslados` (HistorialTraslado). */
-export type TrasladoFuente = {
-	id: string;
-	motivo: string;
-	asesor_origen_id: number;
-	actor_email: string;
-	created_at: string;
-	cuentas: number;
-};
-
-/** Fila de `listarCoberturas` (coberturas_agenda_cobros). */
-export type CoberturaFuente = {
-	id: string;
-	titularId: string;
-	suplenteId: string;
-	motivo: string;
-	desde: string;
-	hasta: string;
-	canceladaEn: string | Date | null;
-	createdAt: string | Date;
-};
+export type { EntradaBitacora, TipoBitacora };
 
 /** Entrada de `getHistorialDecisionesConvenio` (bitácora del supervisor, M3). */
 export type DecisionConvenioFuente = {
@@ -84,6 +57,7 @@ export type DecisionConvenioFuente = {
 
 export type CategoriaHistorial =
 	| "solicitud"
+	| "contrapropuesta"
 	| "reasignacion"
 	| "traslado"
 	| "baja"
@@ -95,9 +69,15 @@ export type EstadoHistorial =
 	| "aprobada"
 	| "por_ejecutar"
 	| "ejecutada"
+	| "aplicando"
+	| "aplicada"
+	| "error_aplicacion"
 	| "rechazada"
 	| "cancelada"
 	| "sin_efecto"
+	| "aceptada"
+	| "descartada"
+	| "retirada"
 	| "realizada";
 
 export const ESTADO_HISTORIAL: Record<
@@ -108,9 +88,15 @@ export const ESTADO_HISTORIAL: Record<
 	aprobada: { etiqueta: "Aprobada", tono: "success" },
 	por_ejecutar: { etiqueta: "Aprobada · por ejecutar", tono: "success" },
 	ejecutada: { etiqueta: "Ejecutada", tono: "success" },
+	aplicando: { etiqueta: "Aprobada · aplicándose", tono: "info" },
+	aplicada: { etiqueta: "Aplicada", tono: "success" },
+	error_aplicacion: { etiqueta: "No se pudo aplicar", tono: "danger" },
 	rechazada: { etiqueta: "Rechazada", tono: "danger" },
 	cancelada: { etiqueta: "Cancelada", tono: "neutral" },
 	sin_efecto: { etiqueta: "Sin efecto", tono: "neutral" },
+	aceptada: { etiqueta: "Aceptada por el asesor", tono: "success" },
+	descartada: { etiqueta: "Descartada por el asesor", tono: "neutral" },
+	retirada: { etiqueta: "Retirada", tono: "neutral" },
 	realizada: { etiqueta: "Realizada", tono: "info" },
 };
 
@@ -130,13 +116,34 @@ export type EntradaHistorial = {
 	/** «Aprobación · Apagado», «Reasignación», «Baja de asesor»… */
 	tipoEtiqueta: string;
 	objeto: { titulo: string; detalle: string | null };
-	/** Quien pidió la solicitud; null en lo que hace el supervisor. */
+	/** Quien pidió la solicitud (o respondió la contrapropuesta); null en lo que hace el supervisor. */
 	asesor: string | null;
 	estado: EstadoHistorial;
 	motivo: string | null;
 	/** Ficha 360 relacionada (id de /cobros/$id). */
 	ficha: { id: string; seccion?: "inmovilizacion" } | null;
+	/** Lo que la bitácora trae de la fila (siempre se puede mostrar). */
 	detalle: DetalleEntrada;
+	/**
+	 * De dónde salió, para completar el detalle al abrir la fila (ubicación y
+	 * evidencia del apagado, checklist de la recuperación) con la consulta de
+	 * su tipo.
+	 */
+	origen?: {
+		tipo: TipoBitacora;
+		refId: string;
+		/** Estado propio de la fuente. */
+		estado: string;
+		solicitanteId: string | null;
+	};
+};
+
+export { esBajaDeAsesor };
+
+const MOTIVO_AUSENCIA: Record<string, string> = {
+	vacaciones: "Vacaciones",
+	permiso: "Permiso",
+	incidente: "Incidente",
 };
 
 const ESTADO_INMOVILIZACION: Record<string, EstadoHistorial> = {
@@ -147,248 +154,426 @@ const ESTADO_INMOVILIZACION: Record<string, EstadoHistorial> = {
 	cancelada: "cancelada",
 };
 
-export function entradaDeInmovilizacion(
-	i: InmovilizacionHistorialFuente,
-): EntradaHistorial {
-	const reactivacion = i.accion === "reactivacion";
-	return {
-		id: `inmovilizacion-${i.id}`,
-		fecha: aIso(i.decididoAt) ?? aIso(i.solicitadoAt),
-		categoria: "solicitud",
-		tipoSolicitud: reactivacion ? "reactivacion" : "apagado",
-		tipoEtiqueta: `Aprobación · ${reactivacion ? "Reactivación" : "Apagado"}`,
-		objeto: {
-			titulo: `Crédito #${i.numeroCreditoSifco}`,
-			detalle: i.clienteNombre,
-		},
-		asesor: i.solicitanteNombre,
-		estado: ESTADO_INMOVILIZACION[i.estado] ?? "pendiente",
-		motivo:
-			i.estado === "rechazada" ? (i.motivoRechazo ?? null) : (i.motivo ?? null),
-		ficha: {
-			id: i.casoCobroId ?? i.numeroCreditoSifco,
-			seccion: "inmovilizacion",
-		},
-		detalle: { tipo: "inmovilizacion", item: i },
-	};
-}
-
-const ESTADOS_RECUPERACION = new Set<EstadoHistorial>([
-	"pendiente",
-	"aprobada",
-	"rechazada",
-	"cancelada",
-	"sin_efecto",
-]);
-
-export function entradaDeRecuperacion(r: RecuperacionFuente): EntradaHistorial {
-	const estado = ESTADOS_RECUPERACION.has(r.estadoSolicitud as EstadoHistorial)
-		? (r.estadoSolicitud as EstadoHistorial)
-		: "pendiente";
-	const motivos = (r.motivos ?? [])
-		.filter((m) => m !== "otro")
-		.map(etiquetaMotivo)
-		.join(", ");
-	return {
-		id: `recuperacion-${r.id}`,
-		fecha: aIso(r.decididoAt) ?? aIso(r.solicitadoAt),
-		categoria: "solicitud",
-		tipoSolicitud: "recuperacion",
-		tipoEtiqueta: "Aprobación · Recuperación del vehículo",
-		objeto: {
-			titulo: r.numeroSifco ? `Crédito #${r.numeroSifco}` : "Crédito",
-			detalle: r.cliente?.trim() || null,
-		},
-		asesor: r.solicitante,
-		estado,
-		motivo: r.motivoDecision || motivos || r.motivoDetalle || null,
-		ficha: r.casoCobroId
-			? { id: r.casoCobroId }
-			: r.numeroSifco
-				? { id: r.numeroSifco }
-				: null,
-		detalle: { tipo: "recuperacion", item: r },
-	};
-}
-
-export function entradaDeDecisionConvenio(
-	d: DecisionConvenioFuente,
-): EntradaHistorial {
-	const estado: EstadoHistorial =
-		d.decision === "aprobada" ? "aprobada" : "rechazada";
-	const filas = [
-		d.resumen ? { etiqueta: "Plan", valor: d.resumen } : null,
-		d.motivo ? { etiqueta: "Motivo del asesor", valor: d.motivo } : null,
-		d.decididoPor?.nombre
-			? { etiqueta: "Decidió", valor: d.decididoPor.nombre }
-			: null,
-		d.nota ? { etiqueta: "Nota del supervisor", valor: d.nota } : null,
-	].filter((f): f is { etiqueta: string; valor: string } => f !== null);
-	return {
-		id: `convenio-${d.refId}`,
-		fecha: d.fecha,
-		categoria: "solicitud",
-		tipoSolicitud: "convenio",
-		tipoEtiqueta: "Aprobación · Convenio",
-		objeto: {
-			titulo: d.credito ? `Crédito #${d.credito.sifco}` : "Crédito",
-			detalle: d.credito?.cliente?.trim() || null,
-		},
-		asesor: d.solicitante?.nombre ?? null,
-		estado,
-		motivo: d.nota ?? d.motivo,
-		ficha: d.credito ? { id: d.credito.sifco } : null,
-		detalle: { tipo: "filas", filas },
-	};
-}
-
-export function entradaDeReasignacion(r: ReasignacionFuente): EntradaHistorial {
-	const cambio = `de ${r.asesor_anterior ?? "Sin asesor"} → ${r.asesor_nuevo ?? "—"}`;
-	return {
-		id: `reasignacion-${r.historial_id}`,
-		fecha: r.fecha,
-		categoria: "reasignacion",
-		tipoEtiqueta: "Reasignación",
-		objeto: { titulo: `Crédito #${r.numero_credito_sifco}`, detalle: cambio },
-		asesor: null,
-		estado: "realizada",
-		motivo: r.motivo,
-		ficha: { id: r.numero_credito_sifco },
-		detalle: {
-			tipo: "filas",
-			filas: [
-				{ etiqueta: "Cliente", valor: r.cliente || "—" },
-				{ etiqueta: "Cambio de asesor", valor: cambio },
-				{
-					etiqueta: "Bucket",
-					valor: r.bucket_prefijo || (r.bucket !== null ? `B${r.bucket}` : "—"),
-				},
-				{
-					etiqueta: "Origen",
-					valor: r.origen === "API_MANUAL" ? "Manual" : "Automático",
-				},
-				{ etiqueta: "Usuario", valor: r.usuario || "sistema" },
-			],
-		},
-	};
-}
-
-/** Despido o renuncia (el motivo se guarda como «Despido: …» o «Renuncia: …»). */
-export function esBajaDeAsesor(motivo: string | null | undefined) {
-	return /^(despido|renuncia)\b/i.test((motivo ?? "").trim());
-}
-
-export function entradaDeTraslado(
-	t: TrasladoFuente,
-	nombreAsesor: (asesorId: number) => string | null,
-): EntradaHistorial {
-	const baja = esBajaDeAsesor(t.motivo);
-	const origen =
-		nombreAsesor(t.asesor_origen_id) ?? `Asesor #${t.asesor_origen_id}`;
-	return {
-		id: `traslado-${t.id}`,
-		fecha: t.created_at,
-		categoria: baja ? "baja" : "traslado",
-		tipoEtiqueta: baja ? "Baja de asesor" : "Traslado de cartera",
-		objeto: {
-			titulo: origen,
-			detalle: `${t.cuentas.toLocaleString("es-GT")} ${t.cuentas === 1 ? "crédito trasladado" : "créditos trasladados"}`,
-		},
-		asesor: null,
-		estado: "realizada",
-		motivo: t.motivo,
-		ficha: null,
-		detalle: {
-			tipo: "filas",
-			filas: [
-				{ etiqueta: "Asesor de origen", valor: origen },
-				{ etiqueta: "Cuentas", valor: String(t.cuentas) },
-				{ etiqueta: "Usuario", valor: t.actor_email || "—" },
-				{ etiqueta: "Operación", valor: t.id },
-			],
-		},
-	};
-}
-
-const MOTIVO_COBERTURA: Record<string, string> = {
-	vacaciones: "Vacaciones",
-	permiso: "Permiso",
+/** Rebajas y Jurídico: `aprobada` es la aplicación en vuelo. */
+const ESTADO_APLICACION: Record<string, EstadoHistorial> = {
+	pendiente: "pendiente",
+	aprobada: "aplicando",
+	aplicada: "aplicada",
+	error_aplicacion: "error_aplicacion",
+	rechazada: "rechazada",
+	cancelada: "cancelada",
 };
 
-/**
- * Una cobertura da una «Ausencia de asesor» (cuando se registró) y, si ya se
- * canceló o terminó su período, una «Reactivación de asesor».
- */
-export function entradasDeCobertura(
-	c: CoberturaFuente,
-	nombreUsuario: (userId: string) => string | null,
-	hoy: string,
-): EntradaHistorial[] {
-	const titular = nombreUsuario(c.titularId) ?? "Asesor";
-	const suplente = nombreUsuario(c.suplenteId) ?? "otro asesor";
-	const motivo = MOTIVO_COBERTURA[c.motivo] ?? c.motivo;
-	const dia = (ymd: string) => fechaCorta(`${ymd}T12:00:00-06:00`);
-	const periodo = `del ${dia(c.desde)} al ${dia(c.hasta)}`;
-	const filas = [
-		{ etiqueta: "Titular", valor: titular },
-		{ etiqueta: "Suplente", valor: suplente },
-		{ etiqueta: "Fechas incluidas", valor: `${c.desde} → ${c.hasta}` },
-		{ etiqueta: "Motivo", valor: motivo },
-		{
-			etiqueta: "Estado",
-			valor: c.canceladaEn
-				? "Cancelada"
-				: c.hasta < hoy
-					? "Período finalizado"
-					: "Registrada",
-		},
-	];
-	const ausencia: EntradaHistorial = {
-		id: `cobertura-${c.id}`,
-		fecha: aIso(c.createdAt),
-		categoria: "ausencia",
-		tipoEtiqueta: "Ausencia de asesor",
-		objeto: { titulo: titular, detalle: `Lo cubre ${suplente}` },
-		asesor: null,
-		estado: "realizada",
-		motivo: `${motivo} · ${periodo}`,
-		ficha: null,
-		detalle: { tipo: "filas", filas },
+const ESTADO_CONTRAPROPUESTA: Record<string, EstadoHistorial> = {
+	aceptada: "aceptada",
+	descartada: "descartada",
+	retirada: "retirada",
+	sin_efecto: "sin_efecto",
+};
+
+const TIPO_SOLICITUD: Partial<Record<TipoBitacora, TipoSolicitud>> = {
+	convenio: "convenio",
+	apagado: "apagado",
+	reactivacion: "reactivacion",
+	recuperacion: "recuperacion",
+	rebaja: "rebaja",
+	juridico: "juridico",
+	documento: "documentos",
+};
+
+const ETIQUETA_APROBACION: Partial<Record<TipoSolicitud, string>> = {
+	reactivacion: "Reactivación",
+	juridico: "Escalar a Jurídico",
+};
+
+function estadoDeEntrada(b: EntradaBitacora): EstadoHistorial {
+	switch (b.tipo) {
+		case "apagado":
+		case "reactivacion":
+			return ESTADO_INMOVILIZACION[b.estado] ?? b.decision ?? "pendiente";
+		case "rebaja":
+		case "juridico":
+			return ESTADO_APLICACION[b.estado] ?? b.decision ?? "pendiente";
+		case "contrapropuesta":
+			return ESTADO_CONTRAPROPUESTA[b.estado] ?? "sin_efecto";
+		case "convenio":
+		case "recuperacion":
+		case "documento":
+			return b.decision ?? "pendiente";
+		default:
+			return "realizada";
+	}
+}
+
+/** «Ana Díaz → Luis Morales · 2026-10-01 al 2026-10-10» → sus partes. */
+function partesCobertura(resumen: string | null) {
+	const m =
+		/^(.*?)(?: → (.*?))? · (\d{4}-\d{2}-\d{2}) al (\d{4}-\d{2}-\d{2})$/.exec(
+			resumen ?? "",
+		);
+	if (!m) return null;
+	return { titular: m[1], suplente: m[2] ?? null, desde: m[3], hasta: m[4] };
+}
+
+const diaCorto = (ymd: string) => fechaCorta(`${ymd}T12:00:00-06:00`);
+
+type Fila = { etiqueta: string; valor: string };
+const fila = (etiqueta: string, valor: string | null | undefined) =>
+	valor?.trim() ? { etiqueta, valor } : null;
+const filas = (lista: Array<Fila | null>) =>
+	lista.filter((f): f is Fila => f !== null);
+
+const bucketTexto = (n: number | null | undefined) =>
+	n === null || n === undefined ? null : `B${n}`;
+
+const plural = (n: number, uno: string, varios: string) =>
+	`${n.toLocaleString("es-GT")} ${n === 1 ? uno : varios}`;
+
+/** «6 cuotas de Q 2,150.00 · primer pago 5 nov». */
+function textoPlan(p: PlanConvenioBitacora) {
+	return [
+		`${plural(p.numeroMeses, "cuota", "cuotas")} de ${quetzales(p.cuotaMensual)}`,
+		p.primerPago ? `primer pago ${diaCorto(p.primerPago)}` : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+/** Nombre del asesor que dejó la cartera (traslado, cobertura, ausencia). */
+function nombreAsesor(b: EntradaBitacora) {
+	const a = b.asesorAfectado;
+	if (a?.nombre?.trim()) return a.nombre;
+	if (a?.asesorId != null) return `Asesor #${a.asesorId}`;
+	return null;
+}
+
+/** Una entrada de la bitácora como fila del historial. */
+export function entradaDeBitacora(b: EntradaBitacora): EntradaHistorial {
+	const estado = estadoDeEntrada(b);
+	const origen = {
+		tipo: b.tipo,
+		refId: b.refId,
+		estado: b.estado,
+		solicitanteId: b.solicitante?.userId ?? null,
 	};
-	const entradas = [ausencia];
-	if (c.canceladaEn || c.hasta < hoy) {
-		entradas.push({
-			id: `reactivacion-${c.id}`,
-			fecha: c.canceladaEn ? aIso(c.canceladaEn) : `${c.hasta}T23:59:00-06:00`,
-			soloDia: !c.canceladaEn,
-			categoria: "reactivacion_asesor",
-			tipoEtiqueta: "Reactivación de asesor",
+	const decidio = b.decididoPor?.nombre
+		? `${b.decididoPor.nombre} · ${fechaHoraCorta(b.fecha)}`
+		: null;
+	const tipoSolicitud = TIPO_SOLICITUD[b.tipo];
+
+	if (tipoSolicitud) {
+		const motivoAsesor =
+			b.tipo === "juridico" ? etiquetaMotivoJuridico(b.motivo) : b.motivo;
+		const cerrada =
+			estado === "rechazada" ||
+			estado === "cancelada" ||
+			estado === "sin_efecto" ||
+			estado === "error_aplicacion";
+		const inmovilizacion = b.tipo === "apagado" || b.tipo === "reactivacion";
+		const montos = b.montos;
+		const detalle = filas([
+			fila("Cliente", b.credito?.cliente),
+			fila("Solicitado por", b.solicitante?.nombre),
+			fila(estado === "cancelada" ? "Cancelado por" : "Decidido por", decidio),
+			fila("Documento", b.documento),
+			fila(b.tipo === "convenio" ? "Plan" : "Resumen", b.resumen),
+			montos ? fila("Monto pedido", quetzales(montos.solicitado)) : null,
+			montos ? fila("Mora al pedir", quetzales(montos.moraAlPedir)) : null,
+			montos?.aplicado
+				? fila("Monto aplicado", quetzales(montos.aplicado))
+				: null,
+			fila(
+				b.tipo === "juridico" || b.tipo === "recuperacion"
+					? "Bucket al pedir"
+					: "Bucket",
+				bucketTexto(b.bucket),
+			),
+			fila(
+				b.tipo === "juridico"
+					? "Motivo del escalado"
+					: b.tipo === "documento"
+						? "Comentario del asesor"
+						: "Motivo del asesor",
+				motivoAsesor,
+			),
+			fila("Nota para Jurídico", b.notaJuridico),
+			fila(
+				estado === "error_aplicacion"
+					? "Respuesta de cartera"
+					: "Nota del supervisor",
+				b.nota,
+			),
+		]);
+		// Documentos: el documento va siempre en el motivo (Figma: «Carta de saldo enviada»).
+		const motivo =
+			b.tipo === "documento"
+				? [b.documento, b.nota ?? b.motivo].filter(Boolean).join(" · ") || null
+				: cerrada
+					? (b.nota ?? motivoAsesor ?? null)
+					: (motivoAsesor ?? b.nota ?? null);
+		return {
+			id: b.id,
+			fecha: b.fecha,
+			categoria: "solicitud",
+			tipoSolicitud,
+			tipoEtiqueta: `Aprobación · ${ETIQUETA_APROBACION[tipoSolicitud] ?? ETIQUETA_TIPO[tipoSolicitud]}`,
 			objeto: {
-				titulo: titular,
-				detalle: c.canceladaEn
-					? "Se canceló la cobertura"
-					: "Terminó el período de la cobertura",
+				titulo: b.credito ? `Crédito #${b.credito.sifco}` : "Crédito",
+				detalle: b.credito?.cliente?.trim() || null,
+			},
+			asesor: b.solicitante?.nombre ?? null,
+			estado,
+			motivo,
+			ficha: b.credito
+				? {
+						id: b.credito.sifco,
+						...(inmovilizacion ? { seccion: "inmovilizacion" as const } : {}),
+					}
+				: null,
+			detalle: { tipo: "filas", filas: detalle },
+			origen,
+		};
+	}
+
+	if (b.tipo === "contrapropuesta") {
+		const p = b.plan;
+		// Quien la cerró es el asesor cuando la aceptó o la descartó.
+		const respondio =
+			estado === "aceptada" || estado === "descartada"
+				? (b.decididoPor?.nombre ?? null)
+				: null;
+		const cambio = p
+			? `${plural(p.original.numeroMeses, "cuota", "cuotas")} → ${textoPlan(p.propuesto)}`
+			: b.resumen;
+		return {
+			id: b.id,
+			fecha: b.fecha,
+			categoria: "contrapropuesta",
+			tipoEtiqueta: "Contrapropuesta de convenio",
+			objeto: {
+				titulo: b.credito ? `Crédito #${b.credito.sifco}` : "Crédito",
+				detalle: b.credito?.cliente?.trim() || null,
+			},
+			asesor: respondio,
+			estado,
+			motivo:
+				estado === "sin_efecto"
+					? "El convenio cambió o se envió otra contrapropuesta"
+					: (b.nota ?? cambio ?? null),
+			ficha: b.credito ? { id: b.credito.sifco } : null,
+			detalle: {
+				tipo: "filas",
+				filas: filas([
+					fila("Cliente", b.credito?.cliente),
+					fila("Propuesta por", p?.propuestaPor?.nombre ?? null),
+					fila("Plan del asesor", p ? textoPlan(p.original) : null),
+					fila("Contrapropuesta", p ? textoPlan(p.propuesto) : b.resumen),
+					fila("Monto total", p ? quetzales(p.montoTotal) : null),
+					fila("Nota del supervisor", p?.nota ?? b.motivo),
+					fila(
+						estado === "retirada"
+							? "Retirada por"
+							: estado === "sin_efecto"
+								? "Cerrada"
+								: "Respondida por",
+						decidio ??
+							(estado === "sin_efecto" ? fechaHoraCorta(b.fecha) : null),
+					),
+					fila("Nota de la respuesta", b.nota),
+				]),
+			},
+			origen,
+		};
+	}
+
+	if (b.tipo === "reasignacion") {
+		const cambio = b.resumen ? `de ${b.resumen}` : null;
+		return {
+			id: b.id,
+			fecha: b.fecha,
+			categoria: "reasignacion",
+			tipoEtiqueta: "Reasignación",
+			objeto: {
+				titulo: b.credito ? `Crédito #${b.credito.sifco}` : "Crédito",
+				detalle: cambio,
 			},
 			asesor: null,
-			estado: "realizada",
-			motivo: `${motivo} · ${periodo}`,
-			ficha: null,
-			detalle: { tipo: "filas", filas },
-		});
+			estado,
+			motivo: b.motivo,
+			ficha: b.credito ? { id: b.credito.sifco } : null,
+			detalle: {
+				tipo: "filas",
+				filas: filas([
+					fila("Cliente", b.credito?.cliente),
+					fila("Cambio de asesor", cambio),
+					fila("Bucket", bucketTexto(b.bucket)),
+					{ etiqueta: "Origen", valor: "Manual" },
+					fila("Usuario", decidio),
+				]),
+			},
+			origen,
+		};
 	}
-	return entradas;
+
+	if (b.tipo === "traslado") {
+		const baja = b.evento ? b.evento === "baja" : esBajaDeAsesor(b.motivo);
+		const asesorOrigen = nombreAsesor(b);
+		const n =
+			b.cuentas?.movidas ??
+			(() => {
+				const m = /^(\d+) cuentas?/.exec(b.resumen ?? "")?.[1];
+				return m ? Number(m) : null;
+			})();
+		return {
+			id: b.id,
+			fecha: b.fecha,
+			categoria: baja ? "baja" : "traslado",
+			tipoEtiqueta: baja ? "Baja de asesor" : "Traslado de cartera",
+			objeto: {
+				titulo:
+					asesorOrigen ?? (baja ? "Baja de asesor" : "Traslado de cartera"),
+				detalle:
+					n !== null
+						? plural(n, "crédito trasladado", "créditos trasladados")
+						: b.resumen,
+			},
+			asesor: null,
+			estado,
+			motivo: b.motivo,
+			ficha: null,
+			detalle: {
+				tipo: "filas",
+				filas: filas([
+					fila("Asesor de origen", asesorOrigen),
+					fila("Cuentas", b.resumen),
+					fila("Usuario", decidio),
+					{ etiqueta: "Operación", valor: b.refId },
+				]),
+			},
+			origen,
+		};
+	}
+
+	if (b.tipo === "ausencia_indefinida") {
+		const titular = nombreAsesor(b) ?? "Asesor";
+		const motivoAusencia = MOTIVO_AUSENCIA[b.motivo ?? ""] ?? b.motivo ?? "";
+		const desde = b.periodo?.desde ? diaCorto(b.periodo.desde) : null;
+		const c = b.cuentas;
+		const reactivacion = b.evento === "reactivacion";
+		const repartidas =
+			c?.movidas != null
+				? plural(c.movidas, "crédito repartido", "créditos repartidos")
+				: null;
+		const devueltas =
+			c?.devueltas != null
+				? plural(c.devueltas, "devuelto", "devueltos")
+				: null;
+		const retenidas =
+			c?.retenidas != null && c.retenidas > 0
+				? `${plural(c.retenidas, "se quedó", "se quedaron")} con otro asesor`
+				: null;
+		return {
+			id: b.id,
+			fecha: b.fecha,
+			categoria: reactivacion ? "reactivacion_asesor" : "ausencia",
+			tipoEtiqueta: reactivacion
+				? "Reactivación de asesor"
+				: "Ausencia indefinida",
+			objeto: {
+				titulo: titular,
+				detalle: reactivacion
+					? [devueltas, retenidas].filter(Boolean).join(" · ") || null
+					: repartidas
+						? `${repartidas} al equipo`
+						: null,
+			},
+			asesor: null,
+			estado,
+			motivo: reactivacion
+				? `Volvió de su ausencia (${motivoAusencia || "sin motivo"})${desde ? ` · ausente desde el ${desde}` : ""}`
+				: [motivoAusencia, "sin fecha de regreso"].filter(Boolean).join(" · "),
+			ficha: null,
+			detalle: {
+				tipo: "filas",
+				filas: filas([
+					fila("Asesor", titular),
+					fila("Motivo", motivoAusencia),
+					fila("Ausente desde", desde),
+					fila(
+						"Reactivado",
+						b.periodo?.hasta ? diaCorto(b.periodo.hasta) : null,
+					),
+					fila("Cuentas repartidas", repartidas),
+					reactivacion ? fila("Cuentas devueltas", devueltas) : null,
+					reactivacion ? fila("Cuentas retenidas", retenidas) : null,
+					fila("Nota", b.nota),
+					fila(reactivacion ? "Reactivado por" : "Registrada por", decidio),
+				]),
+			},
+			origen,
+		};
+	}
+
+	// Cobertura: una «ausencia» (cuando se registró) y, si ya se canceló o
+	// terminó su período, una «reactivación» del asesor.
+	const partes = partesCobertura(b.resumen);
+	const titular = nombreAsesor(b) ?? (partes?.titular || "Asesor");
+	const motivo = MOTIVO_AUSENCIA[b.motivo ?? ""] ?? b.motivo ?? "";
+	const periodoDesde = b.periodo?.desde ?? partes?.desde ?? null;
+	const periodoHasta = b.periodo?.hasta ?? partes?.hasta ?? null;
+	const periodo =
+		periodoDesde && periodoHasta
+			? `del ${diaCorto(periodoDesde)} al ${diaCorto(periodoHasta)}`
+			: null;
+	const reactivacion = b.evento === "reactivacion";
+	return {
+		id: b.id,
+		fecha: b.fecha,
+		soloDia: reactivacion && /^Terminó/.test(b.nota ?? ""),
+		categoria: reactivacion ? "reactivacion_asesor" : "ausencia",
+		tipoEtiqueta: reactivacion
+			? "Reactivación de asesor"
+			: "Ausencia de asesor",
+		objeto: {
+			titulo: titular,
+			detalle: reactivacion
+				? b.nota
+				: partes?.suplente
+					? `Lo cubre ${partes.suplente}`
+					: null,
+		},
+		asesor: null,
+		estado,
+		motivo: [motivo, periodo].filter(Boolean).join(" · ") || null,
+		ficha: null,
+		detalle: {
+			tipo: "filas",
+			filas: filas([
+				fila("Titular", titular),
+				fila("Suplente", partes?.suplente),
+				fila(
+					"Fechas incluidas",
+					periodoDesde && periodoHasta
+						? `${periodoDesde} → ${periodoHasta}`
+						: null,
+				),
+				fila("Motivo", motivo),
+				fila(
+					"Estado",
+					reactivacion
+						? b.nota
+						: b.estado === "cancelada"
+							? "Cancelada"
+							: "Registrada",
+				),
+				fila("Registrada por", decidio),
+			]),
+		},
+		origen,
+	};
 }
 
-/** Las más recientes primero; sin fecha, al final. */
-export function ordenarHistorial(entradas: EntradaHistorial[]) {
-	return [...entradas].sort((a, b) => {
-		if (!a.fecha) return 1;
-		if (!b.fecha) return -1;
-		return new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
-	});
-}
-
-/* ── Fuentes paginadas ──────────────────────────────────────────────────────── */
+/* ── Fuentes paginadas (Solicitudes de un asesor) ───────────────────────────── */
 
 const ms = (fecha: string | null) => {
 	if (!fecha) return null;
@@ -440,7 +625,7 @@ export function recortarAlCorte<T extends { fecha: string | null }>(
 
 /* ── Filtros ────────────────────────────────────────────────────────────────── */
 
-/** Chips del Figma. */
+/** Chips del Figma (3602:5360). */
 export type VistaHistorial =
 	| "todas"
 	| "aprobadas"
@@ -459,21 +644,60 @@ export const VISTAS_HISTORIAL: Array<{ value: VistaHistorial; label: string }> =
 		{ value: "reactivaciones", label: "Reactivaciones de asesor" },
 	];
 
-export type EstadoFiltroHistorial = "todos" | EstadoHistorial;
+/**
+ * Qué trae cada chip de las acciones sobre asesores (como el Historial de
+ * antes): las reasignaciones incluyen los traslados de cartera; las bajas, los
+ * despidos y renuncias y las ausencias (coberturas e indefinidas); las
+ * reactivaciones, el regreso del asesor.
+ */
+const CHIP_ACCION: Partial<
+	Record<VistaHistorial, { tipos: TipoBitacora[]; eventos: EventoBitacora[] }>
+> = {
+	reasignaciones: {
+		tipos: ["reasignacion", "traslado"],
+		eventos: ["traslado"],
+	},
+	bajas: {
+		tipos: ["traslado", "cobertura", "ausencia_indefinida"],
+		eventos: ["baja", "ausencia"],
+	},
+	reactivaciones: {
+		tipos: ["cobertura", "ausencia_indefinida"],
+		eventos: ["reactivacion"],
+	},
+};
+
+/** Tipos del filtro (mismo `?tipo=` de la URL que la bandeja). */
+export const TIPOS_FILTRO_HISTORIAL = [
+	{ value: "todas", label: "Todos los tipos" },
+	{ value: "convenio", label: "Convenio" },
+	{ value: "contrapropuesta", label: "Contrapropuesta de convenio" },
+	{ value: "apagado", label: "Apagado" },
+	{ value: "reactivacion", label: "Reactivación de la unidad" },
+	{ value: "recuperacion", label: "Recuperación del vehículo" },
+	{ value: "rebaja", label: "Rebaja de mora" },
+	{ value: "juridico", label: "Jurídico" },
+	{ value: "documentos", label: "Documentos" },
+] as const;
+
+export type EstadoFiltroHistorial =
+	| "todos"
+	| "aprobada"
+	| "rechazada"
+	| "cancelada"
+	| "sin_efecto"
+	| "realizada";
 
 export const ESTADOS_FILTRO_HISTORIAL: Array<{
 	value: EstadoFiltroHistorial;
 	label: string;
 }> = [
 	{ value: "todos", label: "Todos los estados" },
-	{ value: "pendiente", label: "Pendiente" },
 	{ value: "aprobada", label: "Aprobada" },
-	{ value: "por_ejecutar", label: "Aprobada · por ejecutar" },
-	{ value: "ejecutada", label: "Ejecutada" },
 	{ value: "rechazada", label: "Rechazada" },
 	{ value: "cancelada", label: "Cancelada" },
 	{ value: "sin_efecto", label: "Sin efecto" },
-	{ value: "realizada", label: "Realizada" },
+	{ value: "realizada", label: "Realizada (acción del supervisor)" },
 ];
 
 export type FiltrosHistorial = {
@@ -481,58 +705,134 @@ export type FiltrosHistorial = {
 	/** `tipo` de la URL (compartido con la bandeja). */
 	tipo: string;
 	estado: EstadoFiltroHistorial;
+	/** Número de crédito (SIFCO) o nombre del cliente; lo busca el servidor. */
 	busqueda: string;
+	/** Usuario del CRM que pidió la solicitud; null = todos. */
+	asesorId: string | null;
+	/** Días de Guatemala (YYYY-MM-DD), inclusivos; null = sin límite. */
+	desde: string | null;
+	hasta: string | null;
 };
 
-const APROBADAS = new Set<EstadoHistorial>([
-	"aprobada",
-	"por_ejecutar",
-	"ejecutada",
-]);
+const TIPOS_SOLICITUD_BITACORA: TipoBitacora[] = [
+	"convenio",
+	"apagado",
+	"reactivacion",
+	"recuperacion",
+	"rebaja",
+	"juridico",
+	"documento",
+];
+/** Lo que hace el supervisor y queda «Realizada». */
+const TIPOS_ACCION: TipoBitacora[] = [
+	"reasignacion",
+	"traslado",
+	"cobertura",
+	"ausencia_indefinida",
+];
+const TODOS_LOS_TIPOS: TipoBitacora[] = [
+	...TIPOS_SOLICITUD_BITACORA,
+	"contrapropuesta",
+	...TIPOS_ACCION,
+];
 
-export function cumpleVista(e: EntradaHistorial, vista: VistaHistorial) {
-	switch (vista) {
-		case "todas":
-			return true;
-		case "aprobadas":
-			return APROBADAS.has(e.estado);
-		case "rechazadas":
-			return e.estado === "rechazada";
-		case "reasignaciones":
-			return e.categoria === "reasignacion" || e.categoria === "traslado";
-		case "bajas":
-			return e.categoria === "baja" || e.categoria === "ausencia";
-		case "reactivaciones":
-			return e.categoria === "reactivacion_asesor";
-	}
+/** `?tipo=` de la URL → tipo de la bitácora. */
+const TIPO_URL: Record<string, TipoBitacora> = {
+	convenio: "convenio",
+	contrapropuesta: "contrapropuesta",
+	apagado: "apagado",
+	reactivacion: "reactivacion",
+	recuperacion: "recuperacion",
+	rebaja: "rebaja",
+	juridico: "juridico",
+	documentos: "documento",
+};
+
+export type FiltroServidorHistorial = {
+	/** Sin tipos = todos. */
+	tipos?: TipoBitacora[];
+	decisiones?: Decision[];
+	solicitanteId?: string;
+	desde?: string;
+	hasta?: string;
+	/** Separa bajas de traslados y ausencias de reactivaciones. */
+	eventos?: EventoBitacora[];
+	/** Crédito o cliente. */
+	busqueda?: string;
+	/** La combinación no puede tener resultados: no se consulta. */
+	vacio: boolean;
+};
+
+function interseccion<T>(a: T[] | null, b: T[] | null): T[] | null {
+	if (a === null) return b;
+	if (b === null) return a;
+	return a.filter((x) => b.includes(x));
 }
 
-export function filtrarHistorial(
-	entradas: EntradaHistorial[],
+/**
+ * Los filtros de pantalla como filtros de la bitácora. Chips, tipo y estado
+ * se combinan (intersección); si no queda nada posible, `vacio`.
+ */
+export function filtroServidorHistorial(
 	f: FiltrosHistorial,
-) {
-	const q = normalizarTexto(f.busqueda);
-	return entradas.filter((e) => {
-		if (!cumpleVista(e, f.vista)) return false;
-		if (f.tipo === "por_ejecutar" && e.estado !== "por_ejecutar") return false;
-		if (
-			(f.tipo === "convenio" ||
-				f.tipo === "apagado" ||
-				f.tipo === "reactivacion" ||
-				f.tipo === "recuperacion") &&
-			e.tipoSolicitud !== f.tipo
-		)
-			return false;
-		if (f.tipo === "rebaja" || f.tipo === "documentos") return false;
-		if (f.estado !== "todos" && e.estado !== f.estado) return false;
-		if (!q) return true;
-		return [
-			e.objeto.titulo,
-			e.objeto.detalle,
-			e.asesor,
-			e.tipoEtiqueta,
-			ESTADO_HISTORIAL[e.estado].etiqueta,
-			e.motivo,
-		].some((v) => normalizarTexto(v).includes(q));
-	});
+): FiltroServidorHistorial {
+	const vistaDecision: Decision[] | null =
+		f.vista === "aprobadas"
+			? ["aprobada"]
+			: f.vista === "rechazadas"
+				? ["rechazada"]
+				: null;
+	const chip = CHIP_ACCION[f.vista] ?? null;
+	const estadoDecision: Decision[] | null =
+		f.estado === "aprobada" ||
+		f.estado === "rechazada" ||
+		f.estado === "cancelada" ||
+		f.estado === "sin_efecto"
+			? [f.estado]
+			: null;
+	const estadoTipos: TipoBitacora[] | null =
+		f.estado === "realizada" ? TIPOS_ACCION : null;
+	const decisiones = interseccion(vistaDecision, estadoDecision);
+
+	const tipoElegido = TIPO_URL[f.tipo];
+	let tipos = interseccion(
+		interseccion(chip?.tipos ?? null, estadoTipos),
+		tipoElegido ? [tipoElegido] : null,
+	);
+	// Con decisión o asesor, el servidor solo trae solicitudes.
+	if (decisiones !== null || f.asesorId) {
+		tipos = (tipos ?? TODOS_LOS_TIPOS).filter((t) =>
+			TIPOS_SOLICITUD_BITACORA.includes(t),
+		);
+	}
+	// La búsqueda es por crédito o cliente: lo que no tiene crédito no entra.
+	const busqueda = f.busqueda.trim();
+	if (busqueda) {
+		tipos = (tipos ?? TODOS_LOS_TIPOS).filter(
+			(t) => !TIPOS_SIN_CREDITO.includes(t),
+		);
+	}
+	const vacio =
+		(tipos !== null && tipos.length === 0) ||
+		(decisiones !== null && decisiones.length === 0);
+	return {
+		...(tipos !== null && tipos.length < TODOS_LOS_TIPOS.length
+			? { tipos }
+			: {}),
+		...(decisiones?.length ? { decisiones } : {}),
+		...(f.asesorId ? { solicitanteId: f.asesorId } : {}),
+		...(f.desde ? { desde: f.desde } : {}),
+		...(f.hasta ? { hasta: f.hasta } : {}),
+		...(chip ? { eventos: chip.eventos } : {}),
+		...(busqueda ? { busqueda } : {}),
+		vacio,
+	};
+}
+
+/** Día de Guatemala (YYYY-MM-DD) de un instante ISO. */
+export function diaGT(fecha: string | Date | null | undefined) {
+	if (!fecha) return null;
+	const d = fecha instanceof Date ? fecha : new Date(fecha);
+	if (Number.isNaN(d.getTime())) return null;
+	return d.toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
 }

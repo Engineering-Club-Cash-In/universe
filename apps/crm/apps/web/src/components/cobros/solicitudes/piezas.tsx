@@ -4,7 +4,6 @@
  */
 import type * as React from "react";
 import { type Bucket, BucketBadge } from "@/components/ds/badges";
-import { CrmPill } from "@/components/ds/cards-credito";
 import {
 	TipoCartera,
 	type TipoCarteraValor,
@@ -12,16 +11,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { TipoSolicitud } from "./normalizar";
 
-/** Tipos de la bandeja que no se deciden en el Espacio de aprobación. */
-export type TipoExtra = "rebaja" | "documentos";
-
 /**
  * Chip del tipo (Figma «Cartera/Tipo»). Mismos colores que el bloque del
- * Dashboard: convenio verde, recuperación roja, apagado ámbar, reactivación
- * azul.
+ * Dashboard: convenio verde, recuperación y Jurídico rojos, apagado y rebaja
+ * ámbar, reactivación azul, documentos gris.
  */
 const CHIP_TIPO: Record<
-	TipoSolicitud | TipoExtra,
+	TipoSolicitud,
 	{ tono: TipoCarteraValor; etiqueta: string }
 > = {
 	convenio: { tono: "Convenio", etiqueta: "Convenio" },
@@ -29,6 +25,7 @@ const CHIP_TIPO: Record<
 	apagado: { tono: "Rebaja", etiqueta: "Apagado" },
 	reactivacion: { tono: "Entrega", etiqueta: "Reactivación" },
 	rebaja: { tono: "Rebaja", etiqueta: "Rebaja" },
+	juridico: { tono: "Crítica", etiqueta: "Jurídico" },
 	documentos: { tono: "Documentos", etiqueta: "Documentos" },
 };
 
@@ -37,7 +34,7 @@ export function ChipTipoSolicitud({
 	children,
 	className,
 }: {
-	tipo: TipoSolicitud | TipoExtra;
+	tipo: TipoSolicitud;
 	children?: React.ReactNode;
 	className?: string;
 }) {
@@ -55,6 +52,10 @@ const PUNTO_TIPO: Record<string, string> = {
 	recuperacion: "bg-danger-solid",
 	apagado: "bg-warning-solid",
 	reactivacion: "bg-info-solid",
+	rebaja: "bg-warning-solid",
+	juridico: "bg-danger-solid",
+	documentos: "bg-fg-tertiary",
+	contrapropuesta: "bg-success-solid",
 	reasignacion: "bg-warning-solid",
 	traslado: "bg-warning-solid",
 	baja: "bg-danger-solid",
@@ -136,20 +137,6 @@ export function TextoDecision({
 		>
 			{children}
 		</span>
-	);
-}
-
-/** «Pronto»: lo que el Figma pide y todavía no tiene backend. */
-export function ChipPronto({ className }: { className?: string }) {
-	return (
-		<CrmPill
-			tone="neutral"
-			kind="chip"
-			dot={false}
-			className={cn("px-2 py-0.5 text-[11px]", className)}
-		>
-			Pronto
-		</CrmPill>
 	);
 }
 

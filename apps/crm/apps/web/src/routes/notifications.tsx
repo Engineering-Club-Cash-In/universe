@@ -25,6 +25,7 @@ import {
 	Send,
 	TrendingUp,
 	Upload,
+	UserCheck,
 	X,
 	XCircle,
 } from "lucide-react";
@@ -206,8 +207,15 @@ const REDIRECT_CONFIG: Record<
 	},
 };
 
-/** Botón de los avisos de apagado/reactivación: dice qué hacer, no solo "ver el caso". */
-const ETIQUETA_ACCION_INMOVILIZACION: Record<string, string> = {
+/**
+ * Botón de los avisos de cobros que piden algo concreto: dice qué hacer, no
+ * solo "ver el caso" (apagado/reactivación y contrapropuesta de convenio).
+ */
+const ETIQUETA_ACCION_COBROS: Record<string, string> = {
+	// M4: el asesor acepta o descarta la contrapropuesta desde la Ficha 360.
+	convenio_contrapropuesta: "Responder contrapropuesta",
+	// M4: el convenio vuelve a esperar la decisión del supervisor.
+	convenio_contrapropuesta_respondida: "Revisar convenio",
 	inmovilizacion_pendiente_aprobacion: "Revisar solicitud",
 	inmovilizacion_resuelta: "Ver estado de la solicitud",
 	inmovilizacion_llamar_cliente: "Registrar llamada",
@@ -455,6 +463,40 @@ const COBROS_TIPO_CONFIG: Record<
 		iconColor: "text-violet-600 dark:text-violet-400",
 		badge:
 			"bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400",
+	},
+	// M4: el supervisor devolvió el convenio con otro plan; el asesor que lleva
+	// el crédito lo acepta o lo descarta.
+	convenio_contrapropuesta: {
+		label: "Contrapropuesta de convenio",
+		border: "border-fuchsia-200 dark:border-fuchsia-900/50",
+		bg: "bg-fuchsia-50/50 dark:bg-fuchsia-950/20",
+		icon: Handshake,
+		iconWrap: "bg-fuchsia-100 dark:bg-fuchsia-900/40",
+		iconColor: "text-fuchsia-600 dark:text-fuchsia-400",
+		badge:
+			"bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900/30 dark:text-fuchsia-400",
+	},
+	// M4: el asesor respondió (o un supervisor retiró) la contrapropuesta: el
+	// convenio vuelve a esperar la decisión del supervisor.
+	convenio_contrapropuesta_respondida: {
+		label: "Contrapropuesta respondida",
+		border: "border-blue-200 dark:border-blue-900/50",
+		bg: "bg-blue-50/50 dark:bg-blue-950/20",
+		icon: Handshake,
+		iconWrap: "bg-blue-100 dark:bg-blue-900/40",
+		iconColor: "text-blue-600 dark:text-blue-400",
+		badge: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+	},
+	// M5: un asesor con ausencia indefinida se reincorporó (aviso al equipo).
+	asesor_reactivado: {
+		label: "Asesor reincorporado",
+		border: "border-green-200 dark:border-green-900/50",
+		bg: "bg-green-50/50 dark:bg-green-950/20",
+		icon: UserCheck,
+		iconWrap: "bg-green-100 dark:bg-green-900/40",
+		iconColor: "text-green-600 dark:text-green-400",
+		badge:
+			"bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
 	},
 	// CB-035: tarea de llamada al supervisor por ingreso de un crédito a B3.
 	b3_llamada_supervisor: {
@@ -1152,6 +1194,16 @@ function NotificationCard({
 	const navigate = useNavigate();
 
 	const getEntityLink = () => {
+		// M5: el aviso de reincorporación no trae caso. Al supervisor lo lleva a
+		// Mi equipo (la tarjeta del asesor); el asesor no tiene esa pantalla.
+		if (notification.cobrosTipo === "asesor_reactivado") {
+			return notification.assignedToRole === "cobros"
+				? null
+				: {
+						label: "Ver Mi equipo",
+						action: () => navigate({ to: "/cobros/equipo" }),
+					};
+		}
 		if (!notification.redirectPage) return null;
 
 		const config = REDIRECT_CONFIG[notification.redirectPage];
@@ -1177,8 +1229,7 @@ function NotificationCard({
 				: config.getRoute(notification.relatedEntityId ?? "");
 		return {
 			label:
-				ETIQUETA_ACCION_INMOVILIZACION[notification.cobrosTipo ?? ""] ??
-				config.label,
+				ETIQUETA_ACCION_COBROS[notification.cobrosTipo ?? ""] ?? config.label,
 			action: () => navigate(route as any),
 		};
 	};

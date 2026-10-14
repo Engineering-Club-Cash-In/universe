@@ -98,6 +98,11 @@ export type PagoRegistrado = {
 	cuota: number | null;
 	/** false: el pago se aplicó, pero la gestión no quedó en el historial. */
 	gestionRegistrada: boolean;
+	/**
+	 * `pago_id` de cartera (W4: el convenio lo elige como «Abono de hoy»).
+	 * null si la respuesta no lo trajo.
+	 */
+	pagoId: number | null;
 };
 
 /**
@@ -556,6 +561,7 @@ export function RegistrarPagoForm({
 					montoBoleta: montoBoletaNum,
 					cuota: cuotaSeleccionada ?? null,
 					gestionRegistrada: data?.gestionRegistrada !== false,
+					pagoId: typeof data?.pago_id === "number" ? data.pago_id : null,
 				});
 			} else {
 				volverAlCredito();

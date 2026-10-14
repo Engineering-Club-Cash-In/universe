@@ -12,11 +12,10 @@ import { EnlaceVer, TarjetaSupervision } from "./tarjeta";
  * lista mezclada de todo lo que espera la decisión del supervisor, las más
  * antiguas primero, con el chip del tipo y la antigüedad. Presentación pura.
  *
- * Hoy entran convenios de pago por aprobar, solicitudes de recuperación del
- * vehículo y solicitudes de apagado/reactivación. Documentos y rebajas de mora
- * (chips «Documentos» y «Rebaja» del Figma) se suman cuando existan (S1).
- * Cada fila lleva a la bandeja donde se decide. Al pie, un acceso por bandeja
- * (no hay todavía una bandeja única: llega en la fase 2).
+ * Entran convenios de pago por aprobar, solicitudes de recuperación del
+ * vehículo, de apagado/reactivación, rebajas de mora, documentos y escalados a
+ * Jurídico (S1). Cada fila lleva a la bandeja de Solicitudes con el chip de su
+ * tipo. Al pie, un acceso por tipo con su conteo.
  */
 
 export type TipoAprobacionSupervision =
@@ -25,7 +24,8 @@ export type TipoAprobacionSupervision =
 	| "apagado"
 	| "reactivacion"
 	| "documentos"
-	| "rebaja";
+	| "rebaja"
+	| "juridico";
 
 const TIPO: Record<
 	TipoAprobacionSupervision,
@@ -40,6 +40,7 @@ const TIPO: Record<
 	reactivacion: { etiqueta: "Reactivación", variante: "info" },
 	documentos: { etiqueta: "Documentos", variante: "neutral" },
 	rebaja: { etiqueta: "Rebaja", variante: "warning" },
+	juridico: { etiqueta: "Jurídico", variante: "danger" },
 };
 
 export type FilaAprobacion = {

@@ -3,6 +3,7 @@ import {
 	ArrowLeftRight,
 	LayoutList,
 	TriangleAlert,
+	UserCheck,
 	UserRound,
 	UserX,
 } from "lucide-react";
@@ -99,6 +100,13 @@ export type DetalleAsesorVistaProps = {
 	onTrasladar?: () => void;
 	/** Abre «Marcar ausente» sobre el detalle (si falta, enlaza a Mi equipo). */
 	onMarcarAusente?: () => void;
+	/**
+	 * Asesor ausente: abre «Reactivar» aquí mismo (cancela la cobertura o
+	 * reactiva la ausencia indefinida). Sin él, el botón queda deshabilitado.
+	 */
+	onReactivar?: () => void;
+	/** La reactivación está en curso. */
+	reactivando?: boolean;
 };
 
 export function EstadoAsesorChip({
@@ -180,6 +188,8 @@ export function DetalleAsesorVista({
 	avisos = [],
 	onTrasladar,
 	onMarcarAusente,
+	onReactivar,
+	reactivando,
 }: DetalleAsesorVistaProps) {
 	const enlaces = enlacesAsesor(asesorId);
 	const asesor = carga.tipo === "listo" ? carga.asesor : null;
@@ -280,15 +290,15 @@ export function DetalleAsesorVista({
 								</Button>
 							)}
 							{asesor.estado === "ausente" ? (
-								// Ya está ausente: marcarlo de nuevo se rechaza. Se reactiva
-								// desde su tarjeta en Mi equipo.
+								// Ya está ausente: marcarlo de nuevo se rechaza. En su lugar
+								// se ofrece «Reactivar», como en su tarjeta de Mi equipo.
 								<Button
 									size="sm"
-									disabled
-									title="Ya está ausente: reactívelo desde Mi equipo"
+									disabled={!onReactivar || reactivando}
+									onClick={onReactivar}
 								>
-									<UserX aria-hidden />
-									Ausente
+									<UserCheck aria-hidden />
+									{reactivando ? "Reactivando…" : "Reactivar"}
 								</Button>
 							) : onMarcarAusente ? (
 								<Button size="sm" onClick={onMarcarAusente}>

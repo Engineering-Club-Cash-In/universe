@@ -9,19 +9,26 @@ import {
 import { PeriodSelector } from "@/components/ui/period-selector";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { COMPARACION, type Periodo } from "./formato";
 
 /**
  * «Desempeño del equipo» del Dashboard del supervisor (Figma `1954:14`): cinco
  * KPI cards de ds/kpi.tsx con el segmentado Día / Semana / Mes. Presentación pura.
  *
- *   Recuperación del equipo   → KpiMeta (monto / meta). Sin fuente: «—» (tarea S3).
- *   Cuentas curadas           → KpiMeta (curadas / total). Sin fuente: «—» (S3).
+ *   Recuperación del equipo   → KpiMeta (monto / meta) de getSupervisionComplementos (S3).
+ *   Cuentas curadas           → KpiMeta: créditos del equipo que bajaron de bucket en
+ *                               el período, sobre las cuentas del equipo con mora hoy (S3).
  *   Contactabilidad del equipo → KpiSimple: efectivos / total de getHistorialAgendasResumen,
  *                               con la tendencia contra el período anterior.
  *   Migración de bucket       → KpiSimple: ↓ bajaron (recuperados) ↑ subieron
  *                               (escalados), del cierre diario.
- *   Promesas cumplidas        → KpiSimple con el % y el monto incumplido. Sin fuente: «—» (S3).
+ *   Promesas cumplidas        → KpiSimple con el % y el monto incumplido (S3).
+ *
+ * Las consultas guardan el período anterior mientras llega el nuevo
+ * (`keepPreviousData`): `actualizando` atenúa las tarjetas y muestra un spinner
+ * junto al segmentado para que no parezca que los números «no cambian».
  */
 
 export type RecuperacionEquipo = {
@@ -57,7 +64,7 @@ export type MigracionBucket = {
 export type DesempenoEquipoProps = {
 	periodo: Periodo;
 	onPeriodo: (p: Periodo) => void;
-	/** `null` = sin fuente (S3); `undefined` = cargando. */
+	/** `null` = la fuente no respondió («—»); `undefined` = cargando. */
 	recuperacion: RecuperacionEquipo | null | undefined;
 	cuentasCuradas: CuentasCuradas | null | undefined;
 	promesas: PromesasEquipo | null | undefined;
@@ -66,6 +73,8 @@ export type DesempenoEquipoProps = {
 	/** Errores de las dos fuentes reales: la card muestra «—» con la causa. */
 	errorContactabilidad?: boolean;
 	errorMigracion?: boolean;
+	/** Llega el período nuevo y las tarjetas todavía muestran el anterior. */
+	actualizando?: boolean;
 };
 
 const META_TEXTO: Record<Periodo, string> = {
@@ -74,7 +83,9 @@ const META_TEXTO: Record<Periodo, string> = {
 	mes: "de la meta del mes",
 };
 
-const PRONTO = "Pronto: este indicador todavía no está disponible.";
+/** El servidor manda `null` cuando una fuente no respondió (cada bloque falla solo). */
+const SIN_DATO =
+	"No se pudo calcular este indicador en este momento. Intente de nuevo más tarde.";
 
 function tono(delta: number): KpiTrendTone {
 	return delta > 0 ? "positiva" : delta < 0 ? "negativa" : "neutra";
@@ -105,7 +116,7 @@ function CardRecuperacion({
 	const titulo = "Recuperación del equipo";
 	if (!recuperacion) {
 		return (
-			<KpiSimple title={titulo} info={PRONTO} value="—" showIcon={false} />
+			<KpiSimple title={titulo} info={SIN_DATO} value="—" showIcon={false} />
 		);
 	}
 	const { monto, meta, montoAnterior } = recuperacion;
@@ -147,7 +158,7 @@ function CardCuentasCuradas({ cuentas }: { cuentas: CuentasCuradas | null }) {
 	const titulo = "Cuentas curadas";
 	if (!cuentas) {
 		return (
-			<KpiSimple title={titulo} info={PRONTO} value="—" showIcon={false} />
+			<KpiSimple title={titulo} info={SIN_DATO} value="—" showIcon={false} />
 		);
 	}
 	const delta =
@@ -157,11 +168,11 @@ function CardCuentasCuradas({ cuentas }: { cuentas: CuentasCuradas | null }) {
 	return (
 		<KpiMeta
 			title={titulo}
-			info="Créditos que quedaron sin mora y siguen en su bucket."
+			info={`Créditos del equipo que bajaron de bucket en el período (${cuentas.curadas.toLocaleString("es-GT")}), sobre las cuentas del equipo con mora hoy (B1 en adelante, ${cuentas.total.toLocaleString("es-GT")}). Incluye los movimientos de hoy.`}
 			value={cuentas.curadas.toLocaleString("es-GT")}
 			target={`/ ${cuentas.total.toLocaleString("es-GT")}`}
 			progress={cuentas.total > 0 ? (cuentas.curadas / cuentas.total) * 100 : 0}
-			progressLabel="sin mora, siguen en su bucket"
+			progressLabel="bajaron de bucket en el período"
 			trend={delta !== null ? tono(delta) : undefined}
 			trendValue={delta !== null ? conSigno(delta) : undefined}
 		/>
@@ -182,7 +193,7 @@ function CardContactabilidad({
 		return (
 			<KpiSimple
 				title={titulo}
-				info={error ? "No se pudo cargar el historial de gestiones." : PRONTO}
+				info={error ? "No se pudo cargar el historial de gestiones." : SIN_DATO}
 				value="—"
 			/>
 		);
@@ -217,7 +228,7 @@ function CardMigracion({
 		return (
 			<KpiSimple
 				title={titulo}
-				info={error ? "No se pudo cargar el cierre diario." : PRONTO}
+				info={error ? "No se pudo cargar el cierre diario." : SIN_DATO}
 				value="—"
 			/>
 		);
@@ -225,7 +236,7 @@ function CardMigracion({
 	return (
 		<KpiSimple
 			title={titulo}
-			info="Créditos del equipo que bajaron de bucket (recuperados, ↓) o subieron (escalados, ↑) en el período. Sale del cierre diario: el día en curso se suma después del cierre de las 22:00."
+			info="Créditos del equipo que bajaron de bucket (recuperados, ↓) o subieron (escalados, ↑) en el período. Sale del cierre diario, que corre a las 00:15 del día siguiente: lo de hoy se suma después de ese cierre."
 			value={
 				<span className="inline-flex items-center gap-5">
 					<span className="inline-flex items-center gap-0.5 text-success-solid">
@@ -249,7 +260,7 @@ function CardMigracion({
 function CardPromesas({ promesas }: { promesas: PromesasEquipo | null }) {
 	const titulo = "Promesas cumplidas";
 	if (!promesas) {
-		return <KpiSimple title={titulo} info={PRONTO} value="—" />;
+		return <KpiSimple title={titulo} info={SIN_DATO} value="—" />;
 	}
 	const pct =
 		promesas.pactadas > 0
@@ -281,6 +292,7 @@ export function DesempenoEquipo({
 	migracion,
 	errorContactabilidad,
 	errorMigracion,
+	actualizando,
 }: DesempenoEquipoProps) {
 	return (
 		<section className="flex flex-col gap-4">
@@ -288,10 +300,23 @@ export function DesempenoEquipo({
 				titleAs="h2"
 				title="Desempeño del equipo"
 				description="Resumen de KPIs de sus carteras y de su equipo."
-				action={<PeriodSelector value={periodo} onChange={onPeriodo} />}
+				action={
+					<div className="flex items-center gap-2.5">
+						{actualizando ? (
+							<Spinner size="sm" label="Actualizando el período" />
+						) : null}
+						<PeriodSelector value={periodo} onChange={onPeriodo} />
+					</div>
+				}
 				className="flex-wrap"
 			/>
-			<div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+			<div
+				aria-busy={actualizando || undefined}
+				className={cn(
+					"grid gap-5 transition-opacity duration-150 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5",
+					actualizando && "opacity-60",
+				)}
+			>
 				{recuperacion === undefined ? (
 					<TarjetaCargando />
 				) : (

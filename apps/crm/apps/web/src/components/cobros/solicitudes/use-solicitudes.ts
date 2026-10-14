@@ -4,41 +4,44 @@
  * páginas anteriores, así que comparten caché: abrir la bandeja después del
  * Dashboard sale de memoria.
  */
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { MAX_FILAS_BITACORA } from "server/src/lib/bitacora-supervision";
+import {
+	type EntradaBitacora,
+	MAX_FILAS_BITACORA,
+	type TipoBitacora,
+} from "server/src/lib/bitacora-supervision";
 import { orpc, orpcAparte } from "@/utils/orpc";
 import type {
 	DecisionConvenioFuente,
-	ReasignacionFuente,
-	TrasladoFuente,
+	FiltroServidorHistorial,
 } from "./historial";
 import {
 	type ConvenioFuente,
-	type DocumentoFuente,
 	type InmovilizacionFuente,
 	type InmovilizacionHistorialFuente,
-	ordenarPorAntiguedad,
-	type RebajaFuente,
 	type RecuperacionFuente,
 	type Solicitud,
-	solicitudDeDocumento,
-	solicitudDeRebaja,
 	solicitudesDeFuentes,
 } from "./normalizar";
 
 /** Convenios por aprobar que trae una consulta (mismo input que el Dashboard). */
 export const CONVENIOS_POR_CONSULTA = 100;
-/** Rebajas que el supervisor todavía puede resolver. */
-const ESTADOS_REBAJA_ACCIONABLES = ["pendiente", "error_aplicacion"];
+/**
+ * Rebajas y escalados a Jurídico por consulta. El servidor ordena las abiertas
+ * primero, así que el límite solo deja fuera las ya resueltas. Mismo input que
+ * el Dashboard del supervisor (comparten caché).
+ */
+export const SOLICITUDES_APLICACION_POR_CONSULTA = 200;
 /** Apagados y reactivaciones del historial por cada «Cargar más». */
 export const INMOVILIZACIONES_POR_PAGINA = 50;
 
 /**
  * La bandeja: convenios por aprobar, apagados y reactivaciones (pendientes y
- * por ejecutar) y recuperaciones del vehículo. Mismas opciones que las páginas
- * de antes: la cola de inmovilizaciones no se recarga al volver a la ventana
- * y la de recuperaciones sí.
+ * por ejecutar), recuperaciones del vehículo, rebajas de mora, escalados a
+ * Jurídico y solicitudes de documentos. Mismas opciones que las páginas de
+ * antes: la cola de inmovilizaciones no se recarga al volver a la ventana y
+ * la de recuperaciones sí.
  */
 export function useSolicitudesPendientes(habilitado: boolean) {
 	const convenios = useQuery({
@@ -62,7 +65,14 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 		// Sin filtro de estado: las abiertas van primero, y una que falló al
 		// aplicarse (`error_aplicacion`) sigue esperando al supervisor.
 		...orpc.getSolicitudesRebajaMora.queryOptions({
-			input: { limite: 200 },
+			input: { limite: SOLICITUDES_APLICACION_POR_CONSULTA },
+		}),
+		enabled: habilitado,
+		refetchOnWindowFocus: false,
+	});
+	const juridico = useQuery({
+		...orpc.getSolicitudesJuridico.queryOptions({
+			input: { limite: SOLICITUDES_APLICACION_POR_CONSULTA },
 		}),
 		enabled: habilitado,
 		refetchOnWindowFocus: false,
@@ -74,18 +84,6 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 		enabled: habilitado,
 		refetchOnWindowFocus: false,
 	});
-	const extras = useMemo(
-		() =>
-			ordenarPorAntiguedad([
-				...((rebajas.data ?? []) as unknown as RebajaFuente[])
-					.filter((r) => ESTADOS_REBAJA_ACCIONABLES.includes(r.estado))
-					.map(solicitudDeRebaja),
-				...((documentos.data ?? []) as unknown as DocumentoFuente[]).map(
-					solicitudDeDocumento,
-				),
-			]),
-		[rebajas.data, documentos.data],
-	);
 
 	const datos = useMemo(
 		() =>
@@ -95,47 +93,52 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 					[]) as unknown as RecuperacionFuente[],
 				inmovilizaciones: (inmovilizaciones.data ??
 					[]) as unknown as InmovilizacionFuente[],
+				rebajas: rebajas.data,
+				juridico: juridico.data,
+				documentos: documentos.data,
 			}),
-		[convenios.data, recuperaciones.data, inmovilizaciones.data],
+		[
+			convenios.data,
+			recuperaciones.data,
+			inmovilizaciones.data,
+			rebajas.data,
+			juridico.data,
+			documentos.data,
+		],
 	);
 
 	const totalConvenios = convenios.data?.total ?? 0;
 	const conveniosTraidos = convenios.data?.items?.length ?? 0;
 
+	const consultas = [
+		convenios,
+		recuperaciones,
+		inmovilizaciones,
+		rebajas,
+		juridico,
+		documentos,
+	];
+
 	return {
+		/** Todo lo que espera la decisión del supervisor, las más antiguas primero. */
 		pendientes: datos.pendientes,
 		porEjecutar: datos.porEjecutar,
-		/** Rebajas de mora y documentos pendientes (filas sin Espacio de aprobación). */
-		extras,
 		/** Hay más convenios por aprobar de los que entraron en la consulta. */
 		conveniosFuera:
 			totalConvenios > conveniosTraidos ? totalConvenios - conveniosTraidos : 0,
-		cargando:
-			convenios.isLoading ||
-			recuperaciones.isLoading ||
-			inmovilizaciones.isLoading ||
-			rebajas.isLoading ||
-			documentos.isLoading,
+		cargando: consultas.some((c) => c.isLoading),
 		/** Fuentes que fallaron (las demás se muestran igual). */
 		errores: [
 			convenios.isError ? "convenios" : null,
 			recuperaciones.isError ? "recuperaciones del vehículo" : null,
 			inmovilizaciones.isError ? "apagados y reactivaciones" : null,
 			rebajas.isError ? "rebajas de mora" : null,
+			juridico.isError ? "escalados a Jurídico" : null,
 			documentos.isError ? "solicitudes de documentos" : null,
 		].filter((e): e is string => e !== null),
-		actualizando:
-			convenios.isFetching ||
-			recuperaciones.isFetching ||
-			inmovilizaciones.isFetching ||
-			rebajas.isFetching ||
-			documentos.isFetching,
+		actualizando: consultas.some((c) => c.isFetching),
 		refetch: () => {
-			void convenios.refetch();
-			void recuperaciones.refetch();
-			void inmovilizaciones.refetch();
-			void rebajas.refetch();
-			void documentos.refetch();
+			for (const c of consultas) void c.refetch();
 		},
 		refetchConvenios: () => void convenios.refetch(),
 		/** Historial de recuperaciones (viene en la misma consulta). */
@@ -149,10 +152,6 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 
 /** Filas por página del historial de recuperaciones y de decisiones de convenio (M3). */
 export const DECISIONES_POR_PAGINA = 50;
-/** Reasignaciones manuales del historial por cada «Cargar más». */
-export const REASIGNACIONES_POR_PAGINA = 100;
-/** Traslados por página: cartera los devuelve de 20 en 20, sin total. */
-export const TRASLADOS_POR_PAGINA = 20;
 /** Convenios del asesor por cada «Cargar más» (máximo de `getConveniosListado`). */
 export const CONVENIOS_ASESOR_POR_PAGINA = 100;
 /** Páginas que la bitácora puede dar (`page × perPage` hasta su límite). */
@@ -327,106 +326,6 @@ export function useHistorialDecisionesConvenio(
 	return { ...r, hayMas: quedanMas(r, pedidas, MAX_PAGINAS_BITACORA) };
 }
 
-/** Fuera del hook: `combine` estable. Cartera responde `{ data, pagination }`. */
-function combinarReasignaciones(
-	consultas: Array<{
-		data?:
-			| { data?: unknown[]; pagination?: { total?: number } | null }
-			| undefined;
-		isLoading: boolean;
-		isError: boolean;
-		refetch: () => Promise<unknown>;
-	}>,
-) {
-	return combinarPaginas<ReasignacionFuente>(
-		consultas.map((c) => ({
-			...c,
-			data: c.data
-				? { items: c.data.data ?? [], total: c.data.pagination?.total }
-				: undefined,
-		})),
-	);
-}
-
-/**
- * Reasignaciones manuales (`getHistorialReasignaciones` con origen
- * `API_MANUAL`), todo el historial en páginas de `REASIGNACIONES_POR_PAGINA`.
- */
-export function useHistorialReasignaciones(
-	paginas: number,
-	habilitado: boolean,
-) {
-	const opciones = (page: number) => ({
-		...orpc.getHistorialReasignaciones.queryOptions({
-			input: {
-				origen: "API_MANUAL" as const,
-				page,
-				pageSize: REASIGNACIONES_POR_PAGINA,
-			},
-		}),
-		enabled: habilitado,
-		refetchOnWindowFocus: false,
-	});
-	const primera = useQuery(opciones(1));
-	const pedidas = paginasAPedir(
-		paginas,
-		primera.data?.pagination?.total,
-		REASIGNACIONES_POR_PAGINA,
-	);
-	const r = useQueries({
-		queries: Array.from({ length: pedidas }, (_, i) => opciones(i + 1)),
-		combine: combinarReasignaciones,
-	});
-	return { ...r, hayMas: quedanMas(r, pedidas) };
-}
-
-/** Fuera del hook: `combine` estable. `listarTraslados` no da total. */
-function combinarTraslados(
-	consultas: Array<{
-		data?: unknown[] | undefined;
-		isLoading: boolean;
-		isError: boolean;
-		refetch: () => Promise<unknown>;
-	}>,
-) {
-	// Sin total: hay más mientras la última página cargada venga llena (o si
-	// ya se pidieron páginas que todavía no llegan).
-	let hayMas = false;
-	for (let i = consultas.length - 1; i >= 0; i--) {
-		const data = consultas[i].data;
-		if (data === undefined) continue;
-		hayMas = i < consultas.length - 1 || data.length >= TRASLADOS_POR_PAGINA;
-		break;
-	}
-	return {
-		items: consultas.flatMap(
-			(c) => (c.data ?? []) as unknown as TrasladoFuente[],
-		),
-		cargando: consultas.some((c) => c.isLoading),
-		error: consultas.some((c) => c.isError),
-		hayMas,
-		refetch: () => {
-			for (const c of consultas) void c.refetch();
-		},
-	};
-}
-
-/**
- * Traslados de cartera (`listarTraslados`, de 20 en 20), todo el historial.
- * Sin total: si la fuente ya se agotó, «Cargar más» pide una página vacía
- * (barata) y `hayMas` sigue en false.
- */
-export function useHistorialTraslados(paginas: number, habilitado: boolean) {
-	return useQueries({
-		queries: Array.from({ length: Math.max(1, paginas) }, (_, i) => ({
-			...orpc.listarTraslados.queryOptions({ input: { page: i + 1 } }),
-			enabled: habilitado,
-			refetchOnWindowFocus: false,
-		})),
-		combine: combinarTraslados,
-	});
-}
-
 /**
  * Convenios de un asesor en todos los estados (`getConveniosListado` con
  * `asesorId`), de la fecha del convenio más reciente a la más antigua.
@@ -458,6 +357,88 @@ export function useConveniosDeAsesor(
 		combine: combinarConvenios,
 	});
 	return { ...r, hayMas: quedanMas(r, pedidas) };
+}
+
+/* ── Historial de decisiones (bitácora del servidor, M3) ───────────────────── */
+
+/** Filas por página del Historial (el servidor admite hasta 50). */
+export const BITACORA_POR_PAGINA = 20;
+/** Páginas que la bitácora puede dar con `BITACORA_POR_PAGINA`. */
+export const MAX_PAGINAS_HISTORIAL = Math.floor(
+	MAX_FILAS_BITACORA / BITACORA_POR_PAGINA,
+);
+
+/**
+ * Una página de la bitácora (`getBitacoraDecisiones`) con los filtros ya
+ * traducidos (`filtroServidorHistorial`), búsqueda incluida. Mientras llega
+ * otra página o cambian los filtros se sigue viendo la anterior
+ * (`actualizando`).
+ */
+export function useBitacoraDecisiones(
+	filtro: FiltroServidorHistorial,
+	pagina: number,
+	habilitado: boolean,
+) {
+	return useQuery({
+		...orpcAparte.getBitacoraDecisiones.queryOptions({
+			input: {
+				page: Math.min(Math.max(1, pagina), MAX_PAGINAS_HISTORIAL),
+				perPage: BITACORA_POR_PAGINA,
+				...(filtro.tipos ? { tipos: filtro.tipos } : {}),
+				...(filtro.decisiones ? { decisiones: filtro.decisiones } : {}),
+				...(filtro.solicitanteId
+					? { solicitanteId: filtro.solicitanteId }
+					: {}),
+				...(filtro.desde ? { desde: filtro.desde } : {}),
+				...(filtro.hasta ? { hasta: filtro.hasta } : {}),
+				...(filtro.eventos ? { eventos: filtro.eventos } : {}),
+				...(filtro.busqueda ? { busqueda: filtro.busqueda } : {}),
+			},
+		}),
+		enabled: habilitado && !filtro.vacio,
+		placeholderData: keepPreviousData,
+		refetchOnWindowFocus: false,
+	});
+}
+
+const combinarBitacora = (c: ConsultaPaginada[]) =>
+	combinarPaginas<EntradaBitacora>(c);
+
+/**
+ * Rebajas de mora, Jurídico y documentos que pidió un asesor y ya se
+ * decidieron (bitácora filtrada por quien los pidió), en páginas de
+ * `DECISIONES_POR_PAGINA`. Las que esperan decisión vienen de la bandeja.
+ * `paginas` crece con «Cargar más».
+ */
+export function useBitacoraDelAsesor(
+	userId: string | null,
+	paginas: number,
+	habilitado: boolean,
+) {
+	const opciones = (page: number) => ({
+		...orpcAparte.getBitacoraDecisiones.queryOptions({
+			input: {
+				page,
+				perPage: DECISIONES_POR_PAGINA,
+				tipos: ["rebaja", "juridico", "documento"] as TipoBitacora[],
+				solicitanteId: userId ?? "",
+			},
+		}),
+		enabled: habilitado && !!userId,
+		refetchOnWindowFocus: false,
+	});
+	const primera = useQuery(opciones(1));
+	const pedidas = paginasAPedir(
+		paginas,
+		primera.data?.total,
+		DECISIONES_POR_PAGINA,
+		MAX_PAGINAS_BITACORA,
+	);
+	const r = useQueries({
+		queries: Array.from({ length: pedidas }, (_, i) => opciones(i + 1)),
+		combine: combinarBitacora,
+	});
+	return { ...r, hayMas: quedanMas(r, pedidas, MAX_PAGINAS_BITACORA) };
 }
 
 /** Nombre del usuario del CRM (para reconocer lo que pidió un asesor). */

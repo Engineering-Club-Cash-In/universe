@@ -20,15 +20,16 @@ import { orpc, orpcAparte } from "@/utils/orpc";
 import type { SegmentoBucketEquipo } from "./cartera-equipo-bucket";
 import { DashboardSupervisorVista } from "./dashboard-supervisor-vista";
 import type { Destino } from "./destino";
-import type { EstadoAsesor, FilaEquipo } from "./equipo-tabla";
+import { estadoDelAsesor, type FilaEquipo } from "./equipo-tabla";
 import { hoyGT, nombreCorto, type Periodo, rangosPeriodo } from "./formato";
 import type { ItemPendiente } from "./pendientes-hoy";
 
 /**
  * Contenedor del Dashboard del supervisor (supervisión y admin): hace las
  * consultas y arma las props de `DashboardSupervisorVista`. Cada bloque carga
- * por su cuenta. Lo que no tiene fuente llega de `getSupervisionComplementos`
- * (stubs S1–S4 de José, doc 17) y se muestra con «—» o «Pronto».
+ * por su cuenta. Pendientes, KPIs del equipo y columnas de la tabla Equipo
+ * llegan de `getSupervisionComplementos` (S1–S4, doc 23); si una fuente no
+ * responde, su campo llega `null` y se muestra «—».
  *
  * Identificadores: el asesor_id de cartera (cola, carga, convenios, Págalo) y
  * el userId del CRM (agenda, coberturas) se cruzan con getAsesoresTraslados.
@@ -46,6 +47,11 @@ const LIMITE_APROBACIONES = 5;
 const cartera = (search?: Record<string, string>): Destino => ({
 	to: CARTERA,
 	search,
+});
+/** Bandeja de Solicitudes con el chip del tipo. */
+const solicitudes = (tipo: string): Destino => ({
+	to: SOLICITUDES,
+	search: { tipo },
 });
 
 type ResumenHistorial = { total: number; efectivos: number };
@@ -67,13 +73,6 @@ type AsesorPool = {
 };
 
 type AgendaItem = { asesorId: string; porcentaje: number };
-
-function estadoPorAgenda(pct: number | null): EstadoAsesor {
-	if (pct === null) return "sin_dato";
-	if (pct >= 80) return "bien";
-	if (pct >= 60) return "atencion";
-	return "riesgo";
-}
 
 export function DashboardSupervisor() {
 	const navigate = useNavigate();
@@ -110,6 +109,30 @@ export function DashboardSupervisor() {
 		...orpc.getColaInmovilizaciones.queryOptions(),
 		enabled: habilitado,
 	});
+	// Rebajas de mora, documentos y Jurídico (S1). Mismos inputs que la bandeja
+	// de /cobros/solicitudes, para compartir la caché.
+	const rebajasQuery = useQuery({
+		...orpc.getSolicitudesRebajaMora.queryOptions({ input: { limite: 200 } }),
+		enabled: habilitado,
+	});
+	const juridicoQuery = useQuery({
+		...orpc.getSolicitudesJuridico.queryOptions({ input: { limite: 200 } }),
+		enabled: habilitado,
+	});
+	const documentosQuery = useQuery({
+		...orpcAparte.getSolicitudesDocumentos.queryOptions({
+			input: { estado: "pendiente" },
+		}),
+		enabled: habilitado,
+	});
+	const fuentesAprobacion = [
+		conveniosQuery,
+		recuperacionesQuery,
+		inmovilizacionesQuery,
+		rebajasQuery,
+		juridicoQuery,
+		documentosQuery,
+	];
 
 	const coberturasQuery = useQuery({
 		...orpc.listarCoberturas.queryOptions({
@@ -214,23 +237,32 @@ export function DashboardSupervisor() {
 				convenios: conveniosQuery.data,
 				recuperaciones: recuperacionesQuery.data,
 				inmovilizaciones: inmovilizacionesQuery.data,
+				rebajas: rebajasQuery.data as unknown[] | undefined,
+				documentos: documentosQuery.data as unknown[] | undefined,
+				juridico: juridicoQuery.data as unknown[] | undefined,
 				destinos: {
-					convenio: { to: SOLICITUDES, search: { tipo: "convenio" } },
-					recuperacion: { to: SOLICITUDES, search: { tipo: "recuperacion" } },
+					convenio: solicitudes("convenio"),
+					recuperacion: solicitudes("recuperacion"),
 					// Apagados y reactivaciones comparten bandeja: sin chip de tipo.
 					inmovilizacion: { to: SOLICITUDES },
+					rebaja: solicitudes("rebaja"),
+					documentos: solicitudes("documentos"),
+					juridico: solicitudes("juridico"),
 				},
 			}),
-		[conveniosQuery.data, recuperacionesQuery.data, inmovilizacionesQuery.data],
+		[
+			conveniosQuery.data,
+			recuperacionesQuery.data,
+			inmovilizacionesQuery.data,
+			rebajasQuery.data,
+			documentosQuery.data,
+			juridicoQuery.data,
+		],
 	);
-	const cargandoAprobaciones =
-		conveniosQuery.isLoading ||
-		recuperacionesQuery.isLoading ||
-		inmovilizacionesQuery.isLoading;
-	const errorAprobaciones =
-		conveniosQuery.isError ||
-		recuperacionesQuery.isError ||
-		inmovilizacionesQuery.isError;
+	// La barra «x de y» y el total esperan a las seis fuentes: con una a medias
+	// el denominador quedaría corto frente a las resueltas de hoy.
+	const cargandoAprobaciones = fuentesAprobacion.some((q) => q.isLoading);
+	const errorAprobaciones = fuentesAprobacion.some((q) => q.isError);
 
 	const asesores = useMemo(
 		() =>
@@ -274,7 +306,7 @@ export function DashboardSupervisor() {
 					rescate: extra?.rescate ?? null,
 					agenda: ag,
 					ausencia: a.userId ? (ausencias.get(a.userId) ?? null) : null,
-					estado: estadoPorAgenda(extra?.rescate ?? ag),
+					estado: estadoDelAsesor({ meta: extra?.meta ?? null, agenda: ag }),
 					// La fila abre el Detalle del asesor (Mi equipo); su cartera se
 					// abre desde ahí con «Ver sus casos».
 					destino: { to: `/cobros/equipo/${a.asesor_id}` },
@@ -335,8 +367,28 @@ export function DashboardSupervisor() {
 
 	const conteosCola = (colaQuery.data as { conteos?: Record<string, number> })
 		?.conteos;
-	const sinContactoS2 = complementos?.sinContacto3Dias ?? null;
+	// El conteo S2 y la categoría `sin_contacto` de la cola usan la misma regla
+	// (3 días hábiles sin gestión manual): la cola es el respaldo si S2 falla.
+	const sinContacto =
+		complementos?.sinContacto3Dias ?? conteosCola?.sin_contacto ?? null;
 	const s1 = complementos?.pendientes ?? null;
+	// «x de y»: las resueltas suman los seis tipos que ya están en los
+	// pendientes (convenios, recuperaciones y apagados + rebajas, documentos y
+	// Jurídico). Llegan juntas del servidor; si faltan, la barra queda en «—».
+	const otras = s1?.otrasResueltasHoy ?? null;
+	const resueltasHoy =
+		s1?.aprobacionesResueltasHoy != null && otras
+			? s1.aprobacionesResueltasHoy +
+				otras.rebajas +
+				otras.documentos +
+				otras.juridico
+			: null;
+	// Mientras llega el período nuevo, las tarjetas siguen con el anterior.
+	const actualizandoDesempeno =
+		complementosQuery.isPlaceholderData ||
+		contactabilidadQuery.isPlaceholderData ||
+		contactabilidadAntQuery.isPlaceholderData ||
+		cierreQuery.isPlaceholderData;
 	const ausentesHoy = new Set(
 		asesores
 			.filter((a) => a.userId && ausencias.has(a.userId))
@@ -350,7 +402,7 @@ export function DashboardSupervisor() {
 			tono: "neutral",
 			valor: cargandoAprobaciones ? null : aprobaciones.total,
 			etiqueta: "Aprobaciones pendientes",
-			info: "Convenios de pago por aprobar, solicitudes de recuperación del vehículo y de apagado o reactivación.",
+			info: "Convenios de pago por aprobar, solicitudes de recuperación del vehículo, de apagado o reactivación, rebajas de mora, documentos y escalados a Jurídico.",
 		},
 		{
 			clave: "rebajas",
@@ -358,7 +410,8 @@ export function DashboardSupervisor() {
 			tono: "neutral",
 			valor: s1?.rebajasPorRevisar ?? null,
 			etiqueta: "Rebajas de mora por revisar",
-			pronto: s1?.rebajasPorRevisar == null,
+			info: "Solicitudes de rebaja de mora pendientes o que no se pudieron aplicar y esperan su decisión.",
+			destino: solicitudes("rebaja"),
 		},
 		{
 			clave: "documentos",
@@ -366,35 +419,24 @@ export function DashboardSupervisor() {
 			tono: "danger",
 			valor: s1?.documentosPorAutorizar ?? null,
 			etiqueta: "Documentos por autorizar",
-			pronto: s1?.documentosPorAutorizar == null,
+			destino: solicitudes("documentos"),
 		},
-		// Mientras no exista el conteo de «> 3 días» (S2), se muestra el de la
-		// cola del día, que usa otro umbral (más de 5 días) y se dice en la etiqueta.
-		sinContactoS2 !== null
-			? {
-					clave: "sin_contacto",
-					icono: PhoneOff,
-					tono: "warning",
-					valor: sinContactoS2,
-					etiqueta: "Sin contacto > 3 días (equipo)",
-					destino: cartera({ cola: "sin_contacto" }),
-				}
-			: {
-					clave: "sin_contacto",
-					icono: PhoneOff,
-					tono: "warning",
-					valor: conteosCola?.sin_contacto ?? null,
-					etiqueta: "Sin contacto > 5 días (equipo)",
-					info: "Créditos del equipo sin contacto en más de 5 días (criterio de la cola del día). El conteo de más de 3 días hábiles del diseño está pendiente.",
-					destino: cartera({ cola: "sin_contacto" }),
-				},
+		{
+			clave: "sin_contacto",
+			icono: PhoneOff,
+			tono: "warning",
+			valor: sinContacto,
+			etiqueta: "Sin contacto en 3 días hábiles (equipo)",
+			info: "Créditos del equipo sin gestión manual en al menos 3 días hábiles completos. No cuentan los envíos automáticos ni los links de pago. Es el mismo criterio de la cola del día.",
+			destino: cartera({ cola: "sin_contacto" }),
+		},
 		{
 			clave: "prejuridico",
 			icono: Gavel,
 			tono: "warning",
 			valor: s1?.listosPrejuridico ?? null,
 			etiqueta: "Listos para pasar a Prejurídico",
-			pronto: s1?.listosPrejuridico == null,
+			info: "Créditos del equipo en B3, activos o morosos y sin promesa vigente, cuya 4.ª cuota vence en 7 días o menos.",
 		},
 		{
 			clave: "ausentes",
@@ -442,7 +484,7 @@ export function DashboardSupervisor() {
 				items: itemsPendientes,
 				aprobaciones: {
 					pendientes: cargandoAprobaciones ? null : aprobaciones.total,
-					resueltasHoy: s1?.aprobacionesResueltasHoy ?? null,
+					resueltasHoy,
 				},
 				cargando: cargandoAprobaciones && coberturasQuery.isLoading,
 				tareas: tieneTareas ? (
@@ -465,6 +507,7 @@ export function DashboardSupervisor() {
 				migracion,
 				errorContactabilidad: contactabilidadQuery.isError,
 				errorMigracion: cierreQuery.isError,
+				actualizando: actualizandoDesempeno,
 			}}
 			links={{
 				pendientes: pagalo.pendientes,
@@ -478,9 +521,7 @@ export function DashboardSupervisor() {
 				cargando: cargandoAprobaciones,
 				error: errorAprobaciones,
 				onReintentar: () => {
-					void conveniosQuery.refetch();
-					void recuperacionesQuery.refetch();
-					void inmovilizacionesQuery.refetch();
+					for (const q of fuentesAprobacion) if (q.isError) void q.refetch();
 				},
 				verTodas: { to: SOLICITUDES },
 				bandejas: aprobaciones.bandejas,
@@ -499,6 +540,7 @@ export function DashboardSupervisor() {
 				error: asesoresQuery.isError,
 				onReintentar: () => void asesoresQuery.refetch(),
 				verEquipo: { to: "/cobros/equipo" },
+				actualizando: complementosQuery.isPlaceholderData,
 				fechaAgenda: agendaQuery.data?.fecha
 					? new Date(`${agendaQuery.data.fecha}T12:00:00`).toLocaleDateString(
 							"es-GT",

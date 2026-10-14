@@ -18,6 +18,7 @@ import {
 	segmentoDeSearch,
 } from "@/components/cobros/cartera-general/segmentos";
 import {
+	filtroServidorDeSegmento,
 	useAsesoresCartera,
 	useCarteraGeneral,
 } from "@/components/cobros/cartera-general/use-cartera-general";
@@ -87,6 +88,12 @@ import {
  *   de promesas y de convenios, que dejaron de ser páginas sueltas), selección
  *   múltiple con «Reasignar en bloque» y «Configurar SLA». Para el asesor esos
  *   parámetros se ignoran y la pantalla no cambia.
+ * - S5 (doc 23): el asesor (`asesorId`), el segmento (`cola`, `alertaPromesa`,
+ *   `alertaConvenio`) y «Sin acuerdo» (`sinAcuerdo`) viajan a
+ *   `getTodosLosCreditos` junto con los demás filtros (incluido el bucket del
+ *   motor): el servidor los combina y devuelve total y páginas exactos. El
+ *   cliente solo decora la página con el detalle de la fuente
+ *   (use-cartera-general.ts).
  */
 
 export type CarteraSearch = {
@@ -197,8 +204,10 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		K("excluirPagados"),
 		false,
 	);
-	const [soloConCuentaNexa, setSoloConCuentaNexa] =
-		usePersistedState<boolean>(K("soloConCuentaNexa"), false);
+	const [soloConCuentaNexa, setSoloConCuentaNexa] = usePersistedState<boolean>(
+		K("soloConCuentaNexa"),
+		false,
+	);
 	const [sifco, setSifco] = usePersistedState<string>(K("sifco"), "");
 	const [gestionGuardada, setGestion] =
 		usePersistedState<FiltroGestionCartera | null>(K("gestion"), null);
@@ -343,16 +352,20 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		asesorId === null
 			? undefined
 			: asesoresCartera.todos.find((a) => a.asesorId === asesorId);
-	// Con ?asesor= las consultas esperan a tener el correo de ese asesor, porque
-	// sin él `emailCobrador` queda vacío y el server devuelve todo el equipo.
-	// Si el catálogo falla o el asesor no aparece, se falla cerrado: sin
-	// consultas, sin filas y con error, nunca la cartera completa con el filtro.
+	// La tabla y los conteos por bucket filtran por `asesorId` (id exacto, S5).
+	// El resumen de arriba (/stats) solo filtra por correo: con ?asesor= espera
+	// a tener el correo de ese asesor y, si no lo tiene, queda en «—» (nunca
+	// los números de todo el equipo con el filtro puesto).
 	const asesorResuelto = asesorId === null || !!asesorElegido?.email;
-	const asesorSinResolver =
+	const asesorSinCorreo =
 		asesorId !== null && asesoresCartera.listo && !asesorElegido?.email;
 	const emailConsulta = esSup
 		? (asesorElegido?.email ?? undefined)
 		: emailCobrador;
+	// Dueño de la tabla: el asesor por su sesión; supervisión por `asesorId`.
+	const duenoTabla = esSup
+		? { asesorId: asesorId ?? undefined }
+		: { emailCobrador };
 
 	/* ── Consultas ─────────────────────────────────────────────────────── */
 	const perfilQ = useQuery({
@@ -375,12 +388,12 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 			...orpc.getTodosLosCreditos.queryOptions({
 				input: {
 					buckets: [n],
-					emailCobrador: emailConsulta,
+					...duenoTabla,
 					limit: 1,
 					offset: 0,
 				},
 			}),
-			enabled: !!session && !sinAsesor && asesorResuelto,
+			enabled: !!session && !sinAsesor,
 			staleTime: 60_000,
 		})),
 	});
@@ -447,19 +460,36 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 		soloConCuentaNexa: soloConCuentaNexa || undefined,
 	};
 
-	// Cartera general con un segmento: la tabla sale de la fuente del segmento
-	// (ver use-cartera-general.ts). Sin segmento, la consulta de siempre.
+	// «Sin acuerdo» (solo supervisión) va como `sinAcuerdo`; los demás chips de
+	// gestión, como `filtroGestion`.
+	const gestionServidor =
+		gestion === "sin_acuerdo"
+			? { sinAcuerdo: true }
+			: { filtroGestion: gestion ?? undefined };
+	const inputLista = {
+		...filtrosCreditos,
+		...duenoTabla,
+		...gestionServidor,
+		...filtroServidorDeSegmento(segmento),
+		limit: pageSize,
+		offset: (page - 1) * pageSize,
+	};
+	const creditosQ = useQuery({
+		...orpc.getTodosLosCreditos.queryOptions({ input: inputLista }),
+		enabled: !!session && !sinAsesor,
+		placeholderData: keepPreviousData,
+	});
+
+	// Cartera general: conteos de los chips y detalle de la fuente del segmento.
 	const general = useCarteraGeneral({
-		habilitado: !!session && esSup && asesorResuelto,
+		habilitado: !!session && esSup,
 		asesorId,
-		asesor: asesorElegido,
 		segmento,
-		filtros: filtrosCreditos,
-		periodo,
-		etapa,
-		orden,
-		page,
-		pageSize,
+		inputLista,
+		lista:
+			creditosQ.data && !creditosQ.isPlaceholderData
+				? { filas: creditosQ.data.data, total: creditosQ.data.total ?? 0 }
+				: undefined,
 		hayOtrosFiltros:
 			contarFiltrosActivos({
 				periodo,
@@ -475,52 +505,42 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				busqueda,
 			}) > 0,
 	});
-	const seg = general.resultado;
+	const decoracion = general.decoracion;
 
-	// «Sin acuerdo» (Figma) todavía no lo filtra el servidor (tarea S5): se
-	// pide la cartera sin él y se filtra la página.
-	const gestionServidor =
-		gestion && gestion !== "sin_acuerdo" ? gestion : undefined;
-	const creditosQ = useQuery({
-		...orpc.getTodosLosCreditos.queryOptions({
-			input: {
-				...filtrosCreditos,
-				limit: pageSize,
-				offset: (page - 1) * pageSize,
-				emailCobrador: emailConsulta,
-				filtroGestion: gestionServidor,
-			},
-		}),
-		enabled: !!session && !sinAsesor && !segmento && asesorResuelto,
-		placeholderData: keepPreviousData,
-	});
-
-	const total = asesorSinResolver
-		? 0
-		: seg
-			? seg.total
-			: (creditosQ.data?.total ?? 0);
-	const totalPaginas = seg ? seg.totalPaginas : creditosQ.data?.totalPages || 1;
-	const datosListos = seg ? !seg.cargando : !!creditosQ.data;
+	const total = creditosQ.data?.total ?? 0;
+	const totalPaginas = creditosQ.data?.totalPages || 1;
+	const datosListos = !!creditosQ.data;
 
 	// Si los filtros achican el total, no quedarse en una página que ya no existe.
 	useEffect(() => {
 		if (datosListos && page > totalPaginas) setPage(totalPaginas);
 	}, [datosListos, page, totalPaginas, setPage]);
 
-	const filasBase = useMemo(() => {
-		const refinadas = refinarPagina(creditosQ.data?.data ?? [], {
-			periodo,
-			etapa,
-		});
-		return ordenarPagina(
-			gestion === "sin_acuerdo"
-				? refinadas.filter((f) => f.estadoGestion === "sin_acuerdo")
-				: refinadas,
-			orden,
+	const filas = useMemo(() => {
+		const refinadas = refinarPagina(
+			creditosQ.data?.data ?? [],
+			{ periodo, etapa },
+			// La cola y las alertas de promesa incluyen incobrables (B5) y el
+			// total del servidor ya los cuenta.
+			{ mantenerIncobrables: !!segmento },
 		);
-	}, [creditosQ.data, periodo, etapa, orden, gestion]);
-	const filas = asesorSinResolver ? [] : seg ? seg.filas : filasBase;
+		// Con un segmento y el orden por defecto, la página sigue la prioridad
+		// de la fuente (como las páginas viejas); si no, el orden elegido.
+		const posicion = decoracion?.posicion;
+		if (
+			posicion &&
+			orden.campo === ORDEN_INICIAL.campo &&
+			orden.dir === ORDEN_INICIAL.dir
+		) {
+			const fin = Number.MAX_SAFE_INTEGER;
+			return [...refinadas].sort(
+				(a, b) =>
+					(posicion.get(a.numeroCredito ?? "") ?? fin) -
+					(posicion.get(b.numeroCredito ?? "") ?? fin),
+			);
+		}
+		return ordenarPagina(refinadas, orden);
+	}, [creditosQ.data, periodo, etapa, orden, segmento, decoracion]);
 
 	/* ── Selección múltiple y reasignación en bloque ───────────────────── */
 	const [seleccion, setSeleccion] = useState<Map<string, FilaCartera>>(
@@ -562,20 +582,17 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 			Enviar WhatsApp masivo
 		</ToolbarButton>
 	);
-	// El envío masivo filtra en el servidor con los filtros de siempre y no
-	// conoce los chips de gestión ni el rango de capital: mandarlo así llegaría a
-	// más clientes de los que se ven. Se bloquea (el envío masivo va de salida;
-	// lo importante es que nunca escriba a quien no corresponde).
-	// Tampoco conoce el asesor elegido ni los segmentos de la Cartera general.
-	const filtroNoSoportado = segmento
-		? `«${etiquetaSegmento(segmento)}»`
-		: asesorId !== null
-			? "el filtro por asesor"
-			: gestion
-				? `«${GESTION_LABEL[gestion]}»`
-				: capitalMin !== undefined || capitalMax !== undefined
-					? "el rango de capital"
-					: null;
+	// El envío masivo filtra en el servidor con los filtros de la tabla, incluidos
+	// el asesor y el segmento de la Cartera general (S5). No conoce los chips de
+	// gestión («Sin acuerdo» incluido) ni el rango de capital: mandarlo así
+	// llegaría a más clientes de los que se ven. Con esos filtros se bloquea (el
+	// envío masivo va de salida; lo importante es que nunca escriba a quien no
+	// corresponde).
+	const filtroNoSoportado = gestion
+		? `«${GESTION_LABEL[gestion]}»`
+		: capitalMin !== undefined || capitalMax !== undefined
+			? "el rango de capital"
+			: null;
 	const accionMasiva = filtroNoSoportado ? (
 		<Tooltip>
 			<TooltipTrigger asChild>
@@ -598,25 +615,27 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				fechaHasta,
 				excluirPagadosMes: excluirPagados || undefined,
 				soloConCuentaNexa: soloConCuentaNexa || undefined,
+				...(esSup
+					? {
+							asesorId: asesorId ?? undefined,
+							...filtroServidorDeSegmento(segmento),
+						}
+					: {}),
 			}}
 			etiquetaLabels={ETIQUETA_LABELS}
+			asesorNombre={asesorElegido?.nombre}
+			segmentoNombre={segmento ? etiquetaSegmento(segmento) : undefined}
 			totalDestinatarios={total}
 		>
 			{botonWhatsapp()}
 		</MassWhatsappModal>
 	);
 
-	const error = asesorSinResolver
-		? asesoresCartera.fallo
-			? "No se pudo cargar la lista de asesores, así que la cartera no se puede filtrar por el asesor elegido."
-			: "El asesor elegido no aparece en cartera o no tiene correo de Cash-In: la cartera no se puede filtrar por él. Elija otro asesor o quite el filtro."
-		: seg
-			? seg.error
-			: creditosQ.isError
-				? creditosQ.error instanceof Error && creditosQ.error.message
-					? creditosQ.error.message
-					: "Intente de nuevo en unos minutos."
-				: null;
+	const error = creditosQ.isError
+		? creditosQ.error instanceof Error && creditosQ.error.message
+			? creditosQ.error.message
+			: "Intente de nuevo en unos minutos."
+		: null;
 
 	/* ── Cartera general (supervisión y admin) ─────────────────────────── */
 	const datosCola = colaQ.data as
@@ -626,10 +645,12 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				conteosExtra?: Record<string, number>;
 		  }
 		| undefined;
-	const avisos = [...(seg?.avisos ?? [])];
-	if (!seg && gestion === "sin_acuerdo") {
+	const avisos = [...(decoracion?.avisos ?? [])];
+	if (asesorSinCorreo) {
 		avisos.push(
-			"«Sin acuerdo» se aplica sobre la página visible: el total y las demás páginas todavía no lo descuentan.",
+			asesoresCartera.fallo
+				? "No se pudo cargar la lista de asesores: el resumen de arriba no se puede filtrar por el asesor elegido. La tabla sí está filtrada."
+				: "El asesor elegido no tiene correo de Cash-In en cartera: el resumen de arriba no se puede filtrar por él. La tabla sí está filtrada.",
 		);
 	}
 	const supervision: SupervisionCartera | undefined = esSup
@@ -650,14 +671,13 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 						: {},
 					...general.conteos,
 				},
-				detalles: seg?.detalles,
+				detalles: decoracion?.detalles,
 				avisos,
-				sinFila: seg?.sinFila,
+				sinFila: decoracion?.sinFila,
 				seleccion: new Set(seleccion.keys()),
 				onSeleccionar: seleccionar,
 				onLimpiarSeleccion: () => setSeleccion(new Map()),
 				onReasignar: () => {
-					if (asesorSinResolver) return;
 					if (seleccion.size === 0) {
 						toast.info(
 							"Seleccione en la tabla los créditos que desea reasignar.",
@@ -702,22 +722,10 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 				etapasFiltro={etapasFiltro}
 				filas={filas}
 				total={total}
-				cargando={
-					asesorSinResolver
-						? false
-						: seg
-							? seg.cargando
-							: creditosQ.isLoading || !asesorResuelto
-				}
-				actualizando={seg ? seg.actualizando : creditosQ.isPlaceholderData}
+				cargando={creditosQ.isLoading}
+				actualizando={creditosQ.isPlaceholderData}
 				error={error}
-				onReintentar={() =>
-					asesorSinResolver
-						? asesoresCartera.refetch()
-						: seg
-							? seg.refetch()
-							: creditosQ.refetch()
-				}
+				onReintentar={() => creditosQ.refetch()}
 				pagina={Math.min(page, totalPaginas)}
 				totalPaginas={totalPaginas}
 				tamanoPagina={TAMANOS_PAGINA.includes(pageSize) ? pageSize : 25}

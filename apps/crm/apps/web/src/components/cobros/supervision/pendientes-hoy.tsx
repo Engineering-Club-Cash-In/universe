@@ -13,8 +13,12 @@ import { type Destino, EnlaceDestino } from "./destino";
  * Barra «x de y aprobaciones resueltas hoy» y una fila de pendientes (ícono +
  * cantidad + etiqueta). Cada pendiente lleva a donde se resuelve: la Cartera
  * general con su filtro, la bandeja correspondiente o el bloque de
- * Aprobaciones de esta misma pantalla. Lo que todavía no tiene fuente se ve con
- * «—» y la marca «Pronto» (tareas S1/S2 del doc 17).
+ * Aprobaciones de esta misma pantalla. Si una fuente no responde, su conteo se
+ * ve con «—» (S1/S2, doc 23).
+ *
+ * La barra cuenta los mismos tipos en los dos lados: pendientes = convenios,
+ * recuperaciones, apagados, rebajas, documentos y Jurídico; resueltas =
+ * `aprobacionesResueltasHoy` + `otrasResueltasHoy`.
  *
  * `tareas` es el hueco de las Tareas B3 del supervisor (MisTareasB3), que se
  * mudaron aquí desde la Cola del día: se dibujan al pie, separadas por una línea.
@@ -53,7 +57,7 @@ export type ItemPendiente = {
 
 export type PendientesHoyProps = {
 	items: ItemPendiente[];
-	/** Aprobaciones pendientes ahora y resueltas hoy (`null` = sin fuente, S1). */
+	/** Aprobaciones pendientes ahora y resueltas hoy (`null` = sin dato, «—»). */
 	aprobaciones: { pendientes: number | null; resueltasHoy: number | null };
 	cargando: boolean;
 	/** Tareas B3 del supervisor (MisTareasB3); se oculta solo si no hay tareas. */
@@ -146,8 +150,8 @@ function BarraAprobaciones({
 			<span className="type-caption text-fg-secondary">{texto}</span>
 			{resueltasHoy === null ? (
 				<InfoTooltip>
-					Pronto: el conteo de aprobaciones resueltas hoy todavía no está
-					disponible. El total es lo que espera su decisión ahora.
+					No se pudo cargar el conteo de aprobaciones resueltas hoy. El total es
+					lo que espera su decisión ahora.
 				</InfoTooltip>
 			) : null}
 		</div>

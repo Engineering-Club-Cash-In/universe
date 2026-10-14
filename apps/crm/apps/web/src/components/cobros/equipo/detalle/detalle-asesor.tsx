@@ -4,10 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { FilaCartera } from "@/components/cobros/asesor/fila-cartera";
 import { destinoFicha } from "@/components/cobros/asesor/fila-cartera";
 import { formatoQCompacto } from "@/components/cobros/asesor/mi-desempeno";
-import {
-	type AlertaPromesa,
-	normalizarNombre,
-} from "@/components/cobros/cartera-general/segmentos";
+import type { AlertaPromesa } from "@/components/cobros/cartera-general/segmentos";
 import { CumplimientoAgendaAsesor } from "@/components/cobros/cumplimiento-agenda-panel";
 import { ModalesEquipo } from "@/components/cobros/equipo/acciones-equipo";
 import {
@@ -26,6 +23,7 @@ import {
 	variacionRecuperacion,
 } from "@/components/cobros/equipo/recuperacion";
 import type { AccionEquipo } from "@/components/cobros/equipo/search";
+import { useReactivarAsesor } from "@/components/cobros/equipo/use-reactivar-asesor";
 import { HistorialGestiones } from "@/components/cobros/historial/historial-gestiones";
 import type {
 	RespuestaHistorial,
@@ -50,6 +48,7 @@ import {
 	enlacesCriticos,
 	type TabDetalle,
 } from "./enlaces";
+import { ProximosSubirDialog } from "./proximos-subir";
 import {
 	type ItemCritico,
 	ResumenAsesorVista,
@@ -61,12 +60,12 @@ import {
  * admin por igual): consultas y armado de props. La presentación está en
  * `detalle-asesor-vista.tsx` y `resumen-asesor.tsx`.
  *
- * Identidad: `$asesorId` es el `asesor_id` de cartera. De `getAsesoresTraslados`
- * salen su `userId` del CRM (historial, agenda, cierre, coberturas) y su
- * `email_cash_in` (cartera). Si el asesor no aparece o el catálogo falla, se
- * muestra el error y NUNCA se consulta sin el filtro: sin `userId` o sin
- * correo, las consultas que lo necesitan no se disparan (sin el filtro, el
- * server devolvería todo el equipo).
+ * Identidad: `$asesorId` es el `asesor_id` de cartera, y con él se filtran su
+ * cartera, los casos sin gestión y las promesas (S5: `asesorId` exacto). De
+ * `getAsesoresTraslados` sale su `userId` del CRM (historial, agenda, cierre,
+ * coberturas). Si el asesor no aparece o el catálogo falla, se muestra el error
+ * y NUNCA se consulta sin el filtro: sin `userId`, las consultas que lo
+ * necesitan no se disparan (sin el filtro, el server devolvería todo el equipo).
  *
  * Las consultas del encabezado (carga, último cierre de agenda, coberturas de
  * hoy y contactabilidad) son las mismas de Mi equipo, con las mismas llaves:
@@ -87,6 +86,7 @@ type AsesorPool = {
 type Cobertura = {
 	id: string;
 	titularId: string;
+	suplenteId: string;
 	motivo: string;
 	desde: string;
 	hasta: string;
@@ -180,7 +180,6 @@ export function DetalleAsesor({
 	const pool = (asesoresQuery.data ?? []) as unknown as AsesorPool[];
 	const asesor = pool.find((a) => a.asesor_id === asesorId) ?? null;
 	const userId = asesor?.userId ?? null;
-	const email = asesor?.email_cash_in?.trim() || null;
 	const opciones = useMemo(
 		() =>
 			pool
@@ -299,17 +298,18 @@ export function DetalleAsesor({
 		}),
 		enabled: habilitado && conResumen,
 	});
+	// Mismo filtro que el enlace (Cartera general con `?asesor=` y la gestión):
+	// `asesorId` exacto (S5), así el conteo cuadra con la lista.
 	const sinGestionQuery = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
-				emailCobrador: email ?? undefined,
+				asesorId,
 				filtroGestion: "sin_gestion_48h",
 				limit: 1,
 				offset: 0,
 			},
 		}),
-		// Sin correo, el server devolvería todo el equipo: no se consulta.
-		enabled: habilitado && conResumen && !!email,
+		enabled: habilitado && conResumen && !!asesor,
 	});
 	// Misma llave que la Cartera general (segmento «Alertas de promesas»).
 	const promesasQuery = useQuery({
@@ -318,21 +318,20 @@ export function DetalleAsesor({
 	});
 	const promesasIncumplidas = useMemo(() => {
 		if (!promesasQuery.data || !asesor) return undefined;
-		// Las alertas solo traen el nombre del dueño en cartera (como en la
-		// Cartera general, que filtra por asesor comparando nombres).
-		const n = normalizarNombre(asesor.nombre);
+		// Las alertas traen el asesor_id del dueño en cartera (S5), como el
+		// filtro de la Cartera general.
 		const sifcos = new Set(
 			(promesasQuery.data as unknown as AlertaPromesa[])
 				.filter(
 					(a) =>
 						a.categoria === "vencida" &&
-						normalizarNombre(a.asesorNombre) === n &&
+						a.asesorId === asesorId &&
 						a.numeroCreditoSifco,
 				)
 				.map((a) => a.numeroCreditoSifco),
 		);
 		return sifcos.size;
-	}, [promesasQuery.data, asesor]);
+	}, [promesasQuery.data, asesor, asesorId]);
 
 	const criticosEnlaces = enlacesCriticos(asesorId);
 	const cantidad = (
@@ -348,6 +347,8 @@ export function DetalleAsesor({
 		enabled: habilitado && conResumen,
 		staleTime: 5 * 60_000,
 	});
+	// Lista de esos créditos (`items`), en un diálogo sobre el Detalle.
+	const [proximosAbierto, setProximosAbierto] = useState(false);
 	const itemsCriticos: ItemCritico[] = [
 		{
 			clave: "convenios",
@@ -364,15 +365,19 @@ export function DetalleAsesor({
 		},
 		{
 			clave: "sin_gestion",
-			cantidad: cantidad(sinGestionQuery, sinGestionQuery.data?.total, !email),
-			etiqueta: "sin gestión > 48h",
+			cantidad: cantidad(sinGestionQuery, sinGestionQuery.data?.total),
+			etiqueta: "sin gestión en 3 días hábiles",
 			destino: criticosEnlaces.sinGestion,
+			info: "Créditos sin gestión manual en al menos 3 días hábiles completos.",
 		},
 		{
 			clave: "proximos_bucket",
 			cantidad: cantidad(proximosQuery, proximosQuery.data?.total),
 			etiqueta: "próximos a subir de bucket",
-			info: "Créditos de B1 a B4 cuya siguiente cuota vence en 7 días o menos y que no tienen una promesa vigente: si no pagan, suben al bucket siguiente.",
+			// La Cartera general no tiene un filtro con esta regla: la lista se
+			// abre aquí (M2, `items`).
+			onClick: () => setProximosAbierto(true),
+			info: "Créditos de B1 a B4 cuya siguiente cuota vence en 7 días o menos y que no tienen una promesa vigente: si no pagan, suben al bucket siguiente. Haga clic para ver la lista.",
 		},
 	];
 	const conDato = itemsCriticos.filter((i) => !i.pronto);
@@ -386,12 +391,12 @@ export function DetalleAsesor({
 	const carteraQuery = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
-				emailCobrador: email ?? undefined,
+				asesorId,
 				limit: FILAS_VISTA_RAPIDA,
 				offset: 0,
 			},
 		}),
-		enabled: habilitado && conResumen && !!email,
+		enabled: habilitado && conResumen && !!asesor,
 	});
 	const filasCartera = (carteraQuery.data?.data ?? []) as FilaCartera[];
 
@@ -442,6 +447,22 @@ export function DetalleAsesor({
 	// «Trasladar cartera» y «Marcar ausente» abren los mismos modales de Mi
 	// equipo, aquí mismo y con este asesor elegido.
 	const [accion, setAccion] = useState<AccionEquipo | undefined>();
+	const proximos = proximosQuery.data?.items ?? [];
+
+	// «Reactivar» (asesor ausente), el mismo flujo de su tarjeta en Mi equipo.
+	const nombrePorUsuario = useMemo(
+		() =>
+			new Map(
+				pool.flatMap((a) => (a.userId ? [[a.userId, a.nombre] as const] : [])),
+			),
+		[pool],
+	);
+	const reactivar = useReactivarAsesor({
+		coberturas,
+		ausencias: ausenciasQuery.data ?? [],
+		nombrePorUsuario,
+		hoy,
+	});
 
 	/* ── Carga del encabezado ─────────────────────────────────────────── */
 
@@ -492,11 +513,6 @@ export function DetalleAsesor({
 			"Este asesor no tiene un usuario del CRM vinculado a su correo de Cash-In: su agenda, su historial y su contactabilidad no se pueden consultar.",
 		);
 	}
-	if (asesor && !email) {
-		avisos.push(
-			"Este asesor no tiene correo de Cash-In en cartera: su cartera y los casos sin gestión no se pueden filtrar por él.",
-		);
-	}
 
 	if (!habilitado) {
 		return (
@@ -533,6 +549,17 @@ export function DetalleAsesor({
 				avisos={avisos}
 				onTrasladar={() => setAccion("trasladar")}
 				onMarcarAusente={() => setAccion("ausente")}
+				onReactivar={
+					asesor
+						? () =>
+								reactivar.pedir({
+									asesorId,
+									nombre: asesor.nombre,
+									userId,
+								})
+						: undefined
+				}
+				reactivando={reactivar.reactivandoId === asesorId}
 				contenido={{
 					resumen: asesor ? (
 						<ResumenAsesorVista
@@ -591,15 +618,11 @@ export function DetalleAsesor({
 							cartera={{
 								filas: filasCartera,
 								total: carteraQuery.data?.total ?? null,
-								cargando: !!email && carteraQuery.isPending,
-								error: !email
-									? "Sin correo de Cash-In: la cartera no se puede filtrar por este asesor."
-									: carteraQuery.isError
-										? "No se pudo cargar la cartera. Intente de nuevo en unos minutos."
-										: null,
-								onReintentar: email
-									? () => void carteraQuery.refetch()
-									: undefined,
+								cargando: carteraQuery.isPending,
+								error: carteraQuery.isError
+									? "No se pudo cargar la cartera. Intente de nuevo en unos minutos."
+									: null,
+								onReintentar: () => void carteraQuery.refetch(),
 								buckets: textoBuckets(asesor.buckets),
 								destino: enlaces.casos,
 								onAbrir: (i) =>
@@ -664,6 +687,25 @@ export function DetalleAsesor({
 				asesor={asesorId}
 				onCerrar={() => setAccion(undefined)}
 				onCoberturaRegistrada={() => {}}
+			/>
+			{reactivar.dialogos}
+			<ProximosSubirDialog
+				open={proximosAbierto}
+				onOpenChange={setProximosAbierto}
+				nombre={nombre}
+				items={proximos}
+				ventanaDias={proximosQuery.data?.ventanaDias ?? 7}
+				onAbrir={(i) => {
+					setProximosAbierto(false);
+					workspace.abrir(
+						proximos.map((p) => ({
+							id: p.sifco,
+							tipo: "caso" as const,
+							nombre: p.cliente,
+						})),
+						i,
+					);
+				}}
 			/>
 		</>
 	);

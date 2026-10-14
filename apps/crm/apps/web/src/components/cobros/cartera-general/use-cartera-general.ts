@@ -1,16 +1,9 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type {
 	FilaCartera,
 	FilaCola,
 } from "@/components/cobros/asesor/fila-cartera";
-import {
-	ORDEN_INICIAL,
-	type OrdenCartera,
-	ordenarPagina,
-	type PeriodoCartera,
-	refinarPagina,
-} from "@/components/cobros/asesor/filtros-cartera";
 import { type client, orpc } from "@/utils/orpc";
 import {
 	type AlertaConvenio,
@@ -20,7 +13,6 @@ import {
 	type DetalleSegmento,
 	EXTRAS_COLA,
 	type ItemCola,
-	normalizarNombre,
 	type Segmento,
 	sinRepetidos,
 } from "./segmentos";
@@ -28,22 +20,23 @@ import type { AsesorOpcion, CasoSinFila } from "./vista-supervision";
 
 /**
  * Datos de la Cartera general del supervisor que Mi Cartera no tenía: la lista
- * de asesores y los segmentos (Cola del día, Alertas de promesas y de convenios).
+ * de asesores y lo que la fuente de cada segmento (Cola del día, Alertas de
+ * promesas y de convenios) dice de cada crédito.
  *
- * `getTodosLosCreditos` todavía no filtra por categoría de la cola ni de las
- * alertas (tarea S5 de José). Mientras tanto, cada segmento se arma en el
- * cliente con lo que ya existe:
+ * Desde S5 (doc 23) la TABLA ya no se arma en el cliente: el contenedor manda
+ * el segmento (`cola`, `alertaPromesa`, `alertaConvenio`), el asesor
+ * (`asesorId`) y «sin acuerdo» (`sinAcuerdo`) a `getTodosLosCreditos`, que los
+ * resuelve en el servidor con total y paginación exactos y los combina con los
+ * demás filtros (bucket del motor, búsqueda, período, etiquetas, capital…).
  *
- *   1. La fuente (`getColaDia`, `getAlertasPromesas` o `getAlertasConvenios`)
- *      da la lista de SIFCOs del segmento, en su orden de prioridad.
- *   2. `getTodosLosCreditos({ numerosSifco })` completa las columnas de la
- *      tabla y aplica los demás filtros (bucket, búsqueda, asesor por correo,
- *      período, etiquetas, capital…). Los créditos en convenio están en
- *      `EN_CONVENIO` y el servidor, sin etapa, solo trae `ACTIVO`: por eso se
- *      pide también `estadoMora: "en_convenio"` y se juntan.
- *   3. Con 200 SIFCOs o menos (el máximo de `numerosSifco`), el total y la
- *      paginación son exactos y se pagina en el cliente. Con más, se pagina la
- *      fuente y los demás filtros se aplican solo sobre cada página (se avisa).
+ * Este hook solo decora esa tabla:
+ *   - los conteos de los chips de promesas y convenios (del asesor elegido);
+ *   - el detalle de la fuente por crédito (columna del segmento) y su orden de
+ *     prioridad, para ordenar la página como las páginas viejas;
+ *   - los casos del segmento que cartera no devuelve como fila (cancelados…),
+ *     para que sigan alcanzables;
+ *   - el aviso de ausencia del asesor (su cola la trabaja el suplente).
+ * Si una fuente de detalle falla, la tabla sigue: solo se avisa.
  */
 
 type InputCreditos = NonNullable<
@@ -53,20 +46,49 @@ type InputCreditos = NonNullable<
 /** Lo que `getTodosLosCreditos` recibe como filtros (sin paginación ni dueño). */
 export type FiltrosCreditos = Omit<
 	InputCreditos,
-	"limit" | "offset" | "numerosSifco" | "emailCobrador" | "filtroGestion"
+	| "limit"
+	| "offset"
+	| "numerosSifco"
+	| "emailCobrador"
+	| "filtroGestion"
+	| "asesorId"
+	| "cola"
+	| "alertaPromesa"
+	| "alertaConvenio"
+	| "sinAcuerdo"
 >;
 
-/** Máximo de `numerosSifco` en `getTodosLosCreditos` (y de `perPage` en la cola). */
+/** Máximo de `perPage` en `getColaDia` y de `limit` útil para «sin fila». */
 export const MAX_SIFCOS = 200;
 
-const formatoEntero = new Intl.NumberFormat("es-GT");
+/**
+ * Tope de páginas de la cola que se leen para el detalle (200 por página). La
+ * cola completa se guarda 30 s en el servidor, así que cada página es barata;
+ * más allá del tope, la columna del segmento queda en «—».
+ */
+const MAX_PAGINAS_COLA = 25;
+
+/** Junta las páginas 2.. de la cola (función estable: `useQueries` memoriza). */
+function combinarPaginasCola(
+	resultados: {
+		data?: { items?: unknown[] };
+		isLoading: boolean;
+		error: unknown;
+	}[],
+) {
+	return {
+		items: resultados.flatMap((q) => (q.data?.items ?? []) as FilaCola[]),
+		cargando: resultados.some((q) => q.isLoading),
+		error: resultados.find((q) => q.error)?.error ?? null,
+	};
+}
 
 /* ── Asesores ───────────────────────────────────────────────────────────────── */
 
 /**
  * `getAsesoresTraslados` es el único que trae, por asesor, el `asesor_id` de
- * cartera (cola, convenios), el correo de Cash-In (getTodosLosCreditos, stats)
- * y el `userId` del CRM.
+ * cartera (cola, convenios, filtro `asesorId`), el correo de Cash-In (stats) y
+ * el `userId` del CRM.
  */
 export function useAsesoresCartera(habilitado: boolean) {
 	const q = useQuery({
@@ -97,65 +119,50 @@ export function useAsesoresCartera(habilitado: boolean) {
 	};
 }
 
-/* ── Segmentos ──────────────────────────────────────────────────────────────── */
+/* ── Filtros del servidor ───────────────────────────────────────────────────── */
 
-type Fuente = {
-	/** SIFCOs a consultar en cartera, en el orden de la fuente. */
-	sifcos: string[];
-	/** Créditos del segmento (puede ser mayor que `sifcos` si se pagina la fuente). */
-	total: number;
-	/** true = la fuente tiene más de 200: se pagina allá, no en el cliente. */
-	paginaEnFuente: boolean;
-	detalles: Map<string, DetalleSegmento>;
-	cargando: boolean;
-	actualizando: boolean;
-	error: unknown;
-	refetch: () => void;
-	/** Mensaje si el asesor elegido está ausente hoy (su cola la trabaja el suplente). */
-	ausente: string | null;
-};
+/** El segmento elegido como filtro de `getTodosLosCreditos` (S5). */
+export function filtroServidorDeSegmento(
+	s: Segmento | null,
+): Pick<InputCreditos, "cola" | "alertaPromesa" | "alertaConvenio"> {
+	if (!s) return {};
+	switch (s.tipo) {
+		case "cola":
+			return { cola: s.valor };
+		case "promesa":
+			return { alertaPromesa: s.valor };
+		case "convenio":
+			return { alertaConvenio: s.valor };
+	}
+}
 
-export type ResultadoSegmento = {
-	filas: FilaCartera[];
-	total: number;
-	totalPaginas: number;
-	cargando: boolean;
-	actualizando: boolean;
-	error: string | null;
-	refetch: () => void;
+/* ── Decoración del segmento ────────────────────────────────────────────────── */
+
+export type DecoracionSegmento = {
+	/** Lo que la fuente dice de cada crédito (columna del segmento). */
 	detalles: Map<string, DetalleSegmento>;
+	/** Orden de prioridad de la fuente (SIFCO → posición). */
+	posicion: Map<string, number>;
+	/** Casos del segmento que cartera no devolvió como fila. */
 	sinFila: CasoSinFila[];
 	avisos: string[];
 };
 
-function mensajeError(e: unknown) {
-	return e instanceof Error && e.message
-		? e.message
-		: "Intente de nuevo en unos minutos.";
-}
-
 export function useCarteraGeneral(opts: {
 	habilitado: boolean;
 	asesorId: number | null;
-	asesor: AsesorOpcion | undefined;
 	segmento: Segmento | null;
-	filtros: FiltrosCreditos;
-	periodo: PeriodoCartera;
-	etapa: string | null;
-	orden: OrdenCartera;
-	page: number;
-	pageSize: number;
+	/** Lo que la tabla le pide a `getTodosLosCreditos` (con segmento y asesor). */
+	inputLista: InputCreditos;
+	/** Filas y total que devolvió la tabla (`undefined` mientras carga). */
+	lista: { filas: FilaCartera[]; total: number } | undefined;
 	/** Hay filtros además del segmento y el asesor (no se listan los «sin fila»). */
 	hayOtrosFiltros: boolean;
 }): {
 	conteos: Pick<ConteosSegmentos, "promesa" | "convenio">;
-	resultado: ResultadoSegmento | null;
+	decoracion: DecoracionSegmento | null;
 } {
-	const { habilitado, asesorId, segmento, page, pageSize } = opts;
-	// Con etapa (estadoMora) o bucket del motor, la consulta extra de los
-	// EN_CONVENIO sobra: el filtro ya define qué créditos entran.
-	const conEtapa =
-		!!opts.filtros.estadoMora || (opts.filtros.buckets?.length ?? 0) > 0;
+	const { habilitado, asesorId, segmento } = opts;
 
 	/* ── Alertas (siempre, para los conteos de los chips) ─────────────────── */
 	const promesasQ = useQuery({
@@ -167,15 +174,14 @@ export function useCarteraGeneral(opts: {
 		enabled: habilitado,
 	});
 
-	const nombreAsesor = opts.asesor?.nombre ?? null;
-	// Las promesas solo traen el nombre del dueño en cartera (no el asesor_id):
-	// el filtro por asesor compara nombres. Los convenios sí traen asesor_id.
+	// Las dos fuentes traen el asesor_id del dueño en cartera (S5): el filtro
+	// por asesor compara ids, como el servidor.
 	const promesas = useMemo(() => {
 		const todas = (promesasQ.data as AlertaPromesa[] | undefined) ?? [];
-		if (asesorId === null) return todas;
-		const n = normalizarNombre(nombreAsesor);
-		return todas.filter((a) => normalizarNombre(a.asesorNombre) === n);
-	}, [promesasQ.data, asesorId, nombreAsesor]);
+		return asesorId === null
+			? todas
+			: todas.filter((a) => a.asesorId === asesorId);
+	}, [promesasQ.data, asesorId]);
 	const convenios = useMemo(() => {
 		const todas = (conveniosQ.data as AlertaConvenio[] | undefined) ?? [];
 		return asesorId === null
@@ -205,7 +211,7 @@ export function useCarteraGeneral(opts: {
 		[promesas, convenios, promesasQ.data, conveniosQ.data],
 	);
 
-	/* ── Cola del día ─────────────────────────────────────────────────────── */
+	/* ── Cola del día (detalle de cada crédito) ───────────────────────────── */
 	const valorCola = segmento?.tipo === "cola" ? segmento.valor : null;
 	const enCola = habilitado && valorCola !== null;
 	const esExtra = (EXTRAS_COLA as readonly string[]).includes(valorCola ?? "");
@@ -224,29 +230,35 @@ export function useCarteraGeneral(opts: {
 			input: { ...inputCola, page: 1, perPage: MAX_SIFCOS },
 		}),
 		enabled: enCola,
-		placeholderData: keepPreviousData,
 		// Coberturas y gestiones cambian desde otras sesiones (como la página vieja).
 		refetchInterval: 60_000,
 	});
-	const colaTotal = colaQ.data?.total ?? 0;
-	const colaDesborda = colaTotal > MAX_SIFCOS;
-	const colaPaginaQ = useQuery({
-		...orpc.getColaDia.queryOptions({
-			input: { ...inputCola, page, perPage: pageSize },
-		}),
-		enabled: enCola && colaDesborda,
-		placeholderData: keepPreviousData,
-		refetchInterval: 60_000,
+	const paginasCola = Math.min(
+		MAX_PAGINAS_COLA,
+		Math.ceil((colaQ.data?.total ?? 0) / MAX_SIFCOS),
+	);
+	const restoColaQ = useQueries({
+		queries: Array.from({ length: Math.max(0, paginasCola - 1) }, (_, i) => ({
+			...orpc.getColaDia.queryOptions({
+				input: { ...inputCola, page: i + 2, perPage: MAX_SIFCOS },
+			}),
+			enabled: enCola && !!colaQ.data,
+			refetchInterval: 60_000,
+		})),
+		combine: combinarPaginasCola,
 	});
 
 	/* ── Fuente del segmento elegido ──────────────────────────────────────── */
-	const fuente = useMemo<Fuente | null>(() => {
+	const fuente = useMemo(() => {
 		if (!segmento) return null;
+		const detalles = new Map<string, DetalleSegmento>();
 		if (segmento.tipo === "cola") {
-			const q = colaDesborda ? colaPaginaQ : colaQ;
-			const items = (q.data?.items ?? []) as FilaCola[];
-			const detalles = new Map<string, DetalleSegmento>();
+			const items = [
+				...((colaQ.data?.items ?? []) as FilaCola[]),
+				...restoColaQ.items,
+			];
 			for (const i of items) {
+				if (detalles.has(i.numeroCreditoSifco)) continue;
 				detalles.set(i.numeroCreditoSifco, {
 					tipo: "cola",
 					item: i as unknown as ItemCola,
@@ -254,34 +266,24 @@ export function useCarteraGeneral(opts: {
 				});
 			}
 			const datos = colaQ.data as
-				| {
-						ausente?: boolean;
-						asesorForzado?: { nombre: string } | null;
-				  }
+				| { ausente?: boolean; asesorForzado?: { nombre: string } | null }
 				| undefined;
+			const total = colaQ.data?.total ?? 0;
 			return {
-				sifcos: sinRepetidos(items.map((i) => i.numeroCreditoSifco)),
-				total: colaDesborda ? colaTotal : items.length,
-				paginaEnFuente: colaDesborda,
 				detalles,
-				cargando: colaQ.isLoading || (colaDesborda && colaPaginaQ.isLoading),
-				actualizando: colaQ.isPlaceholderData || colaPaginaQ.isPlaceholderData,
-				error: colaQ.error ?? colaPaginaQ.error,
-				refetch: () => {
-					void colaQ.refetch();
-					if (colaDesborda) void colaPaginaQ.refetch();
-				},
+				orden: sinRepetidos(items.map((i) => i.numeroCreditoSifco)),
+				// Solo con la cola completa se sabe qué casos no tienen fila.
+				completa: !!colaQ.data && items.length >= total,
+				cargando: colaQ.isLoading || restoColaQ.cargando,
+				error: colaQ.error ?? restoColaQ.error,
 				ausente:
 					datos?.ausente && datos.asesorForzado
 						? `${datos.asesorForzado.nombre} está registrado como ausente hoy: su cola la está trabajando su suplente.`
 						: null,
+				nombreFuente: "la Cola del día",
 			};
 		}
-		const detalles = new Map<string, DetalleSegmento>();
-		let orden: string[];
-		let q: typeof promesasQ | typeof conveniosQ;
 		if (segmento.tipo === "promesa") {
-			q = promesasQ;
 			const filas = promesas.filter(
 				(a) => segmento.valor === "todas" || a.categoria === segmento.valor,
 			);
@@ -290,195 +292,118 @@ export function useCarteraGeneral(opts: {
 				const previo = detalles.get(a.numeroCreditoSifco);
 				if (previo?.tipo === "promesa") previo.alertas.push(a);
 				else
-					detalles.set(a.numeroCreditoSifco, {
-						tipo: "promesa",
-						alertas: [a],
-					});
+					detalles.set(a.numeroCreditoSifco, { tipo: "promesa", alertas: [a] });
 			}
-			orden = sinRepetidos(filas.map((a) => a.numeroCreditoSifco));
-		} else {
-			q = conveniosQ;
-			const filas = convenios.filter(
-				(a) => segmento.valor === "todas" || a.categoria === segmento.valor,
-			);
-			for (const a of filas) {
-				if (!detalles.has(a.numero_credito_sifco))
-					detalles.set(a.numero_credito_sifco, { tipo: "convenio", alerta: a });
-			}
-			orden = sinRepetidos(filas.map((a) => a.numero_credito_sifco));
+			return {
+				detalles,
+				orden: sinRepetidos(filas.map((a) => a.numeroCreditoSifco)),
+				completa: !!promesasQ.data,
+				cargando: promesasQ.isLoading,
+				error: promesasQ.error,
+				ausente: null,
+				nombreFuente: "las alertas de promesas",
+			};
 		}
-		const desborda = orden.length > MAX_SIFCOS;
+		const filas = convenios.filter(
+			(a) => segmento.valor === "todas" || a.categoria === segmento.valor,
+		);
+		for (const a of filas) {
+			if (!detalles.has(a.numero_credito_sifco))
+				detalles.set(a.numero_credito_sifco, { tipo: "convenio", alerta: a });
+		}
 		return {
-			sifcos: desborda
-				? orden.slice((page - 1) * pageSize, page * pageSize)
-				: orden,
-			total: orden.length,
-			paginaEnFuente: desborda,
 			detalles,
-			cargando: q.isLoading,
-			actualizando: false,
-			error: q.error,
-			refetch: () => void q.refetch(),
+			orden: sinRepetidos(filas.map((a) => a.numero_credito_sifco)),
+			completa: !!conveniosQ.data,
+			cargando: conveniosQ.isLoading,
+			error: conveniosQ.error,
 			ausente: null,
+			nombreFuente: "las alertas de convenios",
 		};
 	}, [
 		segmento,
-		colaQ,
-		colaPaginaQ,
-		colaDesborda,
-		colaTotal,
-		promesasQ,
-		conveniosQ,
+		colaQ.data,
+		colaQ.isLoading,
+		colaQ.error,
+		restoColaQ,
+		promesasQ.data,
+		promesasQ.isLoading,
+		promesasQ.error,
+		conveniosQ.data,
+		conveniosQ.isLoading,
+		conveniosQ.error,
 		promesas,
 		convenios,
 		asesorId,
-		page,
-		pageSize,
 	]);
 
-	/* ── Filas de cartera de esos SIFCOs ──────────────────────────────────── */
-	const sifcos = fuente?.sifcos ?? [];
-	const inputLista: InputCreditos = {
-		...opts.filtros,
-		numerosSifco: sifcos,
-		limit: MAX_SIFCOS,
-		offset: 0,
-		emailCobrador: opts.asesor?.email ?? undefined,
-	};
-	const conLista = habilitado && !!segmento && sifcos.length > 0;
-	const listaQ = useQuery({
-		...orpc.getTodosLosCreditos.queryOptions({ input: inputLista }),
-		enabled: conLista,
-		placeholderData: keepPreviousData,
-	});
-	// Sin etapa elegida el servidor trae solo ACTIVO: los créditos en convenio
-	// (EN_CONVENIO) se piden aparte.
-	const enConvenioQ = useQuery({
+	/* ── Casos del segmento sin fila en cartera ───────────────────────────── */
+	// Las páginas viejas listaban también los casos sin crédito vigente
+	// (cancelados…): siguen alcanzables. Se calcula solo sin otros filtros y con
+	// un segmento de hasta 200 créditos, comparando la fuente con TODO lo que
+	// cartera devuelve del segmento (la página, si ya lo trae todo).
+	const lista = opts.lista;
+	const faltan =
+		!!fuente &&
+		fuente.completa &&
+		!fuente.error &&
+		!opts.hayOtrosFiltros &&
+		!!lista &&
+		lista.total < fuente.orden.length &&
+		fuente.orden.length <= MAX_SIFCOS;
+	const paginaCompleta =
+		!!lista &&
+		lista.filas.length >= lista.total &&
+		(opts.inputLista.offset ?? 0) === 0;
+	const completaQ = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
-			input: { ...inputLista, estadoMora: "en_convenio" },
+			input: { ...opts.inputLista, limit: MAX_SIFCOS, offset: 0 },
 		}),
-		enabled: conLista && !conEtapa,
-		placeholderData: keepPreviousData,
+		enabled: habilitado && faltan && !paginaCompleta,
+		staleTime: 30_000,
 	});
 
-	const resultado = useMemo<ResultadoSegmento | null>(() => {
+	const decoracion = useMemo<DecoracionSegmento | null>(() => {
 		if (!segmento || !fuente) return null;
-		const vistos = new Set<string>();
-		const juntas: FilaCartera[] = [];
-		const listas = [
-			conLista ? (listaQ.data?.data ?? []) : [],
-			conLista && !conEtapa ? (enConvenioQ.data?.data ?? []) : [],
-		];
-		for (const lista of listas) {
-			for (const f of lista) {
-				if (vistos.has(f.contratoId)) continue;
-				vistos.add(f.contratoId);
-				juntas.push(f);
-			}
+		const posicion = new Map(fuente.orden.map((s, i) => [s, i]));
+
+		let sinFila: CasoSinFila[] = [];
+		const devueltas = paginaCompleta ? lista?.filas : completaQ.data?.data;
+		if (faltan && devueltas) {
+			const conFila = new Set(devueltas.map((f) => f.numeroCredito));
+			sinFila = fuente.orden
+				.filter((s) => !conFila.has(s))
+				.map((s) => {
+					const d = fuente.detalles.get(s);
+					return {
+						sifco: s,
+						nombre:
+							d?.tipo === "cola"
+								? d.item.cliente
+								: d?.tipo === "promesa"
+									? (d.alertas[0]?.clienteNombre ?? null)
+									: d?.tipo === "convenio"
+										? d.alerta.cliente
+										: null,
+						casoCobroId:
+							d?.tipo === "promesa"
+								? (d.alertas[0]?.casoCobroId ?? null)
+								: d?.tipo === "convenio"
+									? d.alerta.casoCobroId
+									: null,
+					};
+				});
 		}
-		const posicion = new Map(fuente.sifcos.map((s, i) => [s, i]));
-		const refinadas = refinarPagina(juntas, {
-			periodo: opts.periodo,
-			etapa: opts.etapa,
-		});
-		// Por defecto, el orden de prioridad de la fuente (como en las páginas
-		// viejas); si se eligió otro orden, ese.
-		const ordenadas =
-			opts.orden.campo === ORDEN_INICIAL.campo &&
-			opts.orden.dir === ORDEN_INICIAL.dir
-				? [...refinadas].sort(
-						(a, b) =>
-							(posicion.get(a.numeroCredito ?? "") ?? Number.MAX_SAFE_INTEGER) -
-							(posicion.get(b.numeroCredito ?? "") ?? Number.MAX_SAFE_INTEGER),
-					)
-				: ordenarPagina(refinadas, opts.orden);
-
-		const total = fuente.paginaEnFuente ? fuente.total : ordenadas.length;
-		const filas = fuente.paginaEnFuente
-			? ordenadas
-			: ordenadas.slice((page - 1) * pageSize, page * pageSize);
-
-		const cargandoLista =
-			conLista && (listaQ.isLoading || (!conEtapa && enConvenioQ.isLoading));
-		const cargando = fuente.cargando || cargandoLista;
-		const errorFuente = fuente.error ?? listaQ.error ?? enConvenioQ.error;
-
-		// Casos del segmento que cartera no devolvió (cancelados, sin crédito
-		// vigente…): las páginas viejas los listaban, así que siguen alcanzables.
-		const conFila = new Set(refinadas.map((f) => f.numeroCredito));
-		const sinFila: CasoSinFila[] =
-			cargando || errorFuente || opts.hayOtrosFiltros
-				? []
-				: fuente.sifcos
-						.filter((s) => !conFila.has(s))
-						.map((s) => {
-							const d = fuente.detalles.get(s);
-							return {
-								sifco: s,
-								nombre:
-									d?.tipo === "cola"
-										? d.item.cliente
-										: d?.tipo === "promesa"
-											? (d.alertas[0]?.clienteNombre ?? null)
-											: d?.tipo === "convenio"
-												? d.alerta.cliente
-												: null,
-								casoCobroId:
-									d?.tipo === "promesa"
-										? (d.alertas[0]?.casoCobroId ?? null)
-										: d?.tipo === "convenio"
-											? d.alerta.casoCobroId
-											: null,
-							};
-						});
 
 		const avisos: string[] = [];
 		if (fuente.ausente) avisos.push(fuente.ausente);
-		if (fuente.paginaEnFuente) {
+		if (fuente.error) {
 			avisos.push(
-				`Este segmento tiene ${formatoEntero.format(fuente.total)} créditos: la tabla avanza por páginas del segmento, y la búsqueda, los demás filtros y el orden se aplican sobre cada página.`,
+				`No se pudo cargar el detalle de ${fuente.nombreFuente}: la tabla está completa, pero la columna del segmento queda vacía.`,
 			);
 		}
-		if (opts.asesorId !== null && !opts.asesor?.email) {
-			avisos.push(
-				"El asesor elegido no tiene correo de Cash-In en cartera: la tabla no se puede filtrar por él.",
-			);
-		}
+		return { detalles: fuente.detalles, posicion, sinFila, avisos };
+	}, [segmento, fuente, faltan, paginaCompleta, lista, completaQ.data]);
 
-		return {
-			filas,
-			total,
-			totalPaginas: Math.max(1, Math.ceil(total / pageSize)),
-			cargando,
-			actualizando: fuente.actualizando || listaQ.isPlaceholderData,
-			error: errorFuente ? mensajeError(errorFuente) : null,
-			refetch: () => {
-				fuente.refetch();
-				if (conLista) {
-					void listaQ.refetch();
-					if (!conEtapa) void enConvenioQ.refetch();
-				}
-			},
-			detalles: fuente.detalles,
-			sinFila,
-			avisos,
-		};
-	}, [
-		segmento,
-		fuente,
-		conLista,
-		listaQ,
-		enConvenioQ,
-		conEtapa,
-		opts.periodo,
-		opts.etapa,
-		opts.orden,
-		opts.hayOtrosFiltros,
-		opts.asesorId,
-		opts.asesor,
-		page,
-		pageSize,
-	]);
-
-	return { conteos, resultado };
+	return { conteos, decoracion };
 }

@@ -9,13 +9,16 @@
  *    nombre del catálogo `getAsesoresTraslados`).
  *
  * Fuentes: convenios del asesor (`getConveniosListado` con `asesorId`, todos
- * los estados), la cola y el historial de apagados y reactivaciones, y las
- * solicitudes de recuperación del vehículo. Las pendientes abren el Espacio de
+ * los estados), la cola y el historial de apagados y reactivaciones, las
+ * solicitudes de recuperación del vehículo y las rebajas de mora, escalados a
+ * Jurídico y documentos (las que esperan, de la bandeja; las decididas, de la
+ * bitácora filtrada por quien las pidió). Las pendientes abren el Espacio de
  * aprobación; las demás llevan a la Ficha 360.
  */
 import { Link } from "@tanstack/react-router";
 import { Info } from "lucide-react";
 import * as React from "react";
+import type { EntradaBitacora } from "server/src/lib/bitacora-supervision";
 import { etiquetaMotivo } from "server/src/lib/recuperacion-vehiculo";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -36,6 +39,7 @@ import {
 	type ConvenioFuente,
 	ETIQUETA_TIPO,
 	esSolicitudDeAsesor,
+	etiquetaMotivoJuridico,
 	type InmovilizacionHistorialFuente,
 	type RecuperacionFuente,
 	type Solicitud,
@@ -53,6 +57,7 @@ import {
 	type TonoDecision,
 } from "./piezas";
 import {
+	useBitacoraDelAsesor,
 	useConveniosDeAsesor,
 	useHistorialDecisionesConvenio,
 	useHistorialInmovilizaciones,
@@ -87,7 +92,8 @@ export type FilaSolicitudAsesor = {
 	fecha: string | null;
 	tipo: TipoSolicitud;
 	credito: string | null;
-	bucket: number | null;
+	/** Bucket al pedir; null = sin bucket; undefined = la fuente no lo guarda. */
+	bucket: number | null | undefined;
 	cliente: string;
 	estado: EstadoSolicitudAsesor;
 	resultado: string | null;
@@ -233,9 +239,11 @@ export function SolicitudesDeAsesorVista({
 													Crédito #{f.credito ?? "—"}
 												</span>
 											)}
-											<span className="text-[11px] text-fg-tertiary leading-[1.26]">
-												{f.bucket !== null ? `B${f.bucket}` : "Sin bucket"}
-											</span>
+											{f.bucket !== undefined ? (
+												<span className="text-[11px] text-fg-tertiary leading-[1.26]">
+													{f.bucket !== null ? `B${f.bucket}` : "Sin bucket"}
+												</span>
+											) : null}
 										</div>
 									</TableCell>
 									<TableCell
@@ -296,10 +304,11 @@ export function SolicitudesDeAsesorVista({
 			<p className="type-caption flex items-start gap-2 text-fg-tertiary">
 				<Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 				<span>
-					Los convenios rechazados salen de la bitácora de decisiones del
-					supervisor (cartera elimina el convenio al rechazarlo).
+					Los convenios rechazados y las rebajas de mora, los escalados a
+					Jurídico y los documentos ya decididos salen de la bitácora de
+					decisiones del supervisor (cartera elimina el convenio al rechazarlo).
 					{sinUsuario
-						? " Este asesor no tiene usuario del CRM vinculado: sus apagados, reactivaciones y recuperaciones se asocian por el nombre de quien los solicitó, y sus convenios rechazados no se pueden mostrar."
+						? " Este asesor no tiene usuario del CRM vinculado: sus solicitudes pendientes, apagados, reactivaciones y recuperaciones se asocian por el nombre de quien los solicitó, y lo que sale de la bitácora no se puede mostrar."
 						: ""}
 				</span>
 			</p>
@@ -427,6 +436,96 @@ function filaDeRecuperacion(r: RecuperacionFuente): FilaSolicitudAsesor {
 	};
 }
 
+/**
+ * Una rebaja, un escalado a Jurídico o un documento que espera al supervisor
+ * (de la bandeja: trae lo necesario para abrir el Espacio de aprobación).
+ */
+function filaDePendiente(
+	s: Extract<Solicitud, { tipo: "rebaja" | "juridico" | "documentos" }>,
+): FilaSolicitudAsesor {
+	let resultado: string | null;
+	let bucket: number | null | undefined;
+	if (s.tipo === "rebaja") {
+		const r = s.rebaja;
+		resultado = s.errorAplicacion
+			? `No se pudo aplicar en cartera${r.notaResolucion ? `: ${r.notaResolucion}` : ""}`
+			: `Pide ${quetzales(r.montoSolicitado)} de ${quetzales(r.moraSnapshot)} de mora`;
+		bucket = undefined;
+	} else if (s.tipo === "juridico") {
+		const j = s.juridico;
+		resultado = s.errorAplicacion
+			? `No se pudo aplicar en cartera${j.notaResolucion ? `: ${j.notaResolucion}` : ""}`
+			: `Escalar a Jurídico · ${etiquetaMotivoJuridico(j.motivo)}`;
+		bucket = j.bucketSnapshot;
+	} else {
+		resultado = [s.documento.documento, s.documento.comentario?.trim()]
+			.filter(Boolean)
+			.join(" · ");
+		bucket = undefined;
+	}
+	return {
+		id: s.id,
+		fecha: s.solicitadoEn,
+		tipo: s.tipo,
+		credito: s.credito,
+		bucket,
+		cliente: s.cliente || "Sin nombre",
+		estado: "pendiente",
+		resultado,
+		solicitud: s,
+		ficha: s.casoCobroId
+			? { id: s.casoCobroId }
+			: s.credito
+				? { id: s.credito }
+				: null,
+	};
+}
+
+/** Una rebaja, un escalado a Jurídico o un documento ya decidido (bitácora). */
+function filaDeBitacora(b: EntradaBitacora): FilaSolicitudAsesor | null {
+	const tipo: TipoSolicitud | null =
+		b.tipo === "rebaja"
+			? "rebaja"
+			: b.tipo === "juridico"
+				? "juridico"
+				: b.tipo === "documento"
+					? "documentos"
+					: null;
+	if (!tipo) return null;
+	const noAplicada = b.estado === "error_aplicacion";
+	const estado: EstadoSolicitudAsesor = noAplicada
+		? "pendiente"
+		: (b.decision ?? "pendiente");
+	let resultado: string | null = b.nota;
+	if (noAplicada) {
+		resultado = `No se pudo aplicar en cartera${b.nota ? `: ${b.nota}` : ""}`;
+	} else if (tipo === "rebaja" && estado === "aprobada") {
+		const monto = quetzales(b.montos?.aplicado ?? b.montos?.solicitado);
+		resultado =
+			b.estado === "aplicada"
+				? `Rebaja de ${monto} aplicada`
+				: `Aprobada · aplicándose la rebaja de ${monto}`;
+	} else if (tipo === "juridico" && estado === "aprobada") {
+		resultado =
+			b.estado === "aplicada"
+				? "Enviado a Jurídico (B5)"
+				: "Aprobado · enviándose a Jurídico";
+	} else if (tipo === "documentos") {
+		resultado = [b.documento, b.nota].filter(Boolean).join(" · ") || null;
+	}
+	return {
+		id: b.id,
+		fecha: b.fecha,
+		tipo,
+		credito: b.credito?.sifco ?? null,
+		bucket: tipo === "juridico" ? (b.bucket ?? null) : undefined,
+		cliente: b.credito?.cliente?.trim() || "Sin nombre",
+		estado,
+		resultado,
+		ficha: b.credito ? { id: b.credito.sifco } : null,
+	};
+}
+
 /** Las más recientes primero (Figma). */
 function porFechaDesc(a: FilaSolicitudAsesor, b: FilaSolicitudAsesor) {
 	return new Date(b.fecha ?? 0).getTime() - new Date(a.fecha ?? 0).getTime();
@@ -473,6 +572,13 @@ export function SolicitudesDeAsesor({
 		habilitado && !!userId,
 		userId,
 	);
+	// Rebajas, Jurídico y documentos ya decididos: de la bitácora, por quien
+	// los pidió (solo con usuario del CRM).
+	const bitacoraAsesor = useBitacoraDelAsesor(
+		userId,
+		paginas,
+		habilitado && !!userId,
+	);
 	const usuarioCrm = useNombreUsuarioCrm(userId, habilitado);
 	// Lo que se decide en el Espacio de aprobación sale de la cola y entra al
 	// historial: se recargan los dos para que la fila no desaparezca.
@@ -483,6 +589,7 @@ export function SolicitudesDeAsesor({
 			if (userId) {
 				conveniosRechazados.refetch();
 				historialRecup.refetch();
+				bitacoraAsesor.refetch();
 			}
 			historialInmov.refetch();
 		},
@@ -549,6 +656,32 @@ export function SolicitudesDeAsesor({
 		}
 		const recup = [...recupPorId.values()].map(filaDeRecuperacion);
 
+		// Rebajas, Jurídico y documentos: los que esperan, de la bandeja (abren
+		// el Espacio de aprobación); los decididos, de la bitácora. Una rebaja
+		// o un escalado que cartera no pudo aplicar viene en las dos: gana la
+		// de la bandeja, que todavía se decide.
+		const aplicaciones = new Map<string, FilaSolicitudAsesor>();
+		for (const b of userId ? bitacoraAsesor.items : []) {
+			const fila = filaDeBitacora(b);
+			if (fila) aplicaciones.set(fila.id, fila);
+		}
+		for (const s of bandeja.pendientes) {
+			if (
+				s.tipo !== "rebaja" &&
+				s.tipo !== "juridico" &&
+				s.tipo !== "documentos"
+			)
+				continue;
+			const fuente =
+				s.tipo === "rebaja"
+					? s.rebaja
+					: s.tipo === "juridico"
+						? s.juridico
+						: s.documento;
+			if (!propias(fuente.solicitadoPorId, fuente.solicitadoPor)) continue;
+			aplicaciones.set(s.id, filaDePendiente(s));
+		}
+
 		// Cada fuente paginada se trae aparte: se muestra solo hasta la fecha en
 		// que todas las que tienen más páginas siguen completas. El corte usa la
 		// fecha con la que el servidor ordena cada fuente (la de la decisión en
@@ -570,13 +703,20 @@ export function SolicitudesDeAsesor({
 				userId && historialRecup.hayMas
 					? porDecision(historialRecup.items)
 					: null,
+				userId && bitacoraAsesor.hayMas
+					? bitacoraAsesor.items.map((b) => ({ fecha: b.fecha }))
+					: null,
 			].filter((f): f is Array<{ fecha: string | null }> => f !== null),
 		);
 
 		return recortarAlCorte(
-			[...deConvenios, ...rechazados, ...inmov.values(), ...recup].sort(
-				porFechaDesc,
-			),
+			[
+				...deConvenios,
+				...rechazados,
+				...inmov.values(),
+				...recup,
+				...aplicaciones.values(),
+			].sort(porFechaDesc),
 			corte,
 			// Las que esperan decisión vienen completas de la cola: siempre a la vista.
 			(f) => !!f.solicitud,
@@ -595,6 +735,8 @@ export function SolicitudesDeAsesor({
 		historialInmov.hayMas,
 		historialRecup.items,
 		historialRecup.hayMas,
+		bitacoraAsesor.items,
+		bitacoraAsesor.hayMas,
 		usuarioCrm.nombre,
 		nombre,
 	]);
@@ -604,12 +746,14 @@ export function SolicitudesDeAsesor({
 		convenios.hayMas ||
 		conUsuario(conveniosRechazados.hayMas) ||
 		historialInmov.hayMas ||
-		conUsuario(historialRecup.hayMas);
+		conUsuario(historialRecup.hayMas) ||
+		conUsuario(bitacoraAsesor.hayMas);
 	const cargandoPaginas =
 		convenios.cargando ||
 		conUsuario(conveniosRechazados.cargando) ||
 		historialInmov.cargando ||
-		conUsuario(historialRecup.cargando);
+		conUsuario(historialRecup.cargando) ||
+		conUsuario(bitacoraAsesor.cargando);
 
 	const pendientes = filas
 		.map((f) => f.solicitud)
@@ -627,7 +771,8 @@ export function SolicitudesDeAsesor({
 					conUsuario(conveniosRechazados.error) ||
 					bandeja.errores.length > 0 ||
 					historialInmov.error ||
-					conUsuario(historialRecup.error)
+					conUsuario(historialRecup.error) ||
+					conUsuario(bitacoraAsesor.error)
 				}
 				onReintentar={() => {
 					convenios.refetch();
@@ -636,6 +781,7 @@ export function SolicitudesDeAsesor({
 					if (userId) {
 						conveniosRechazados.refetch();
 						historialRecup.refetch();
+						bitacoraAsesor.refetch();
 					}
 				}}
 				onAbrir={(f) => {

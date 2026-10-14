@@ -19,9 +19,13 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Handshake, Loader } from "lucide-react";
+import { Handshake, Loader, Receipt } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+	type PagoRegistrado,
+	RegistrarPagoForm,
+} from "@/components/cobros/registrar-pago-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +39,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { PopoverPortalContext } from "@/components/ui/popover";
 import {
 	Select,
 	SelectContent,
@@ -73,11 +78,18 @@ interface ConvenioModalProps {
 	/** Tope de meses (getConvenioConfig). */
 	maxMeses: number;
 	/**
-	 * Workspace: pagos de HOY del crédito que pueden entrar como abono inicial
-	 * (ya validados por contabilidad). Se registran antes, como pago normal con
-	 * su comprobante; aquí solo se elige cuál descuenta el convenio.
+	 * Pagos de HOY del crédito ya validados por contabilidad, que pueden entrar
+	 * como abono inicial (`abonosDeHoy` de `lib/cobros/abonos-convenio.ts`).
+	 * Pasarlo (o `creditoId`) muestra el bloque «Abono de hoy» también en modo
+	 * diálogo (Ficha 360).
 	 */
 	abonos?: AbonoConvenio[];
+	/**
+	 * W4 · Mismo id que la ruta de la Ficha 360 (SIFCO o caso). Con él, el
+	 * bloque «Abono de hoy» ofrece «Registrar abono con comprobante»
+	 * (`RegistrarPagoForm` embebido) y el pago registrado queda elegido.
+	 */
+	creditoId?: string;
 	/**
 	 * Se llama tras crear con éxito, ANTES de cerrar — el padre refresca.
 	 * Recibe lo que devolvió cartera (montos, meses, si queda pendiente de
@@ -97,6 +109,12 @@ export interface AbonoConvenio {
 	monto: number;
 	/** Lo que el pago aplicó a cada cuota (por `cuotaId`). */
 	aplicadoPorCuota: Record<number, number>;
+	/**
+	 * Contabilidad ya lo validó (`validated` o `capital_validated`). `false`:
+	 * el abono recién registrado desde el modal, que espera validación y
+	 * cartera todavía no acepta. Sin el campo, validado.
+	 */
+	validado?: boolean;
 }
 
 /**
@@ -130,12 +148,30 @@ export function ConvenioModal({
 	cuotaMensual,
 	montoMora,
 	maxMeses,
-	abonos = [],
+	abonos: abonosProp,
+	creditoId,
 	onCreado,
 	embebido = false,
 	onCancelar,
 }: ConvenioModalProps) {
 	const queryClient = useQueryClient();
+	// «Abono de hoy»: en el Workspace siempre; en el diálogo, si el padre pasa
+	// los abonos o el crédito para registrarlos.
+	const ofrecerAbono = embebido || abonosProp !== undefined || !!creditoId;
+	// W4 · El abono que se acaba de registrar desde aquí: queda elegido aunque
+	// el plan todavía no lo traiga (o lo traiga sin validar).
+	const [abonoRegistrado, setAbonoRegistrado] = useState<AbonoConvenio | null>(
+		null,
+	);
+	const [registrandoAbono, setRegistrandoAbono] = useState(false);
+	const [cajaDialogo, setCajaDialogo] = useState<HTMLDivElement | null>(null);
+	const abonos = useMemo(() => {
+		const base = abonosProp ?? [];
+		return abonoRegistrado &&
+			!base.some((a) => a.pagoId === abonoRegistrado.pagoId)
+			? [...base, abonoRegistrado]
+			: base;
+	}, [abonosProp, abonoRegistrado]);
 
 	// Regla de negocio (CB-032): al convenio entran SOLO las cuotas vencidas y
 	// la cuota ACTUAL (la primera que todavía no venció). Las futuras no: un
@@ -172,6 +208,8 @@ export function ConvenioModal({
 		setMotivo("");
 		setObservaciones("");
 		setAbonoId(null);
+		setAbonoRegistrado(null);
+		setRegistrandoAbono(false);
 	}, [abierto]);
 
 	// Embebido: el Workspace puede montar el formulario mientras el plan de
@@ -224,7 +262,10 @@ export function ConvenioModal({
 		mutationFn: async (): Promise<ResultadoConvenio> =>
 			(await client.crearConvenioDesdeFicha({
 				casoCobroId,
-				cuotaIds: seleccion,
+				// Solo las que siguen en la lista: si el plan se refresca con el
+				// modal abierto (p. ej. tras registrar un abono, su cuota queda en
+				// validación), una cuota que salió no viaja al servidor.
+				cuotaIds: seleccionadas.map((c) => c.cuotaId),
 				numeroMeses: meses,
 				motivo: motivo.trim(),
 				observaciones: observaciones.trim() || undefined,
@@ -264,8 +305,34 @@ export function ConvenioModal({
 	});
 
 	const motivoValido = motivo.trim().length >= 3;
+	// Un abono que espera a contabilidad no sirve todavía: cartera lo rechaza.
+	const abonoSinValidar = !!abono && abono.validado === false;
 	const puedeCrear =
-		seleccion.length > 0 && meses >= 1 && total > 0 && motivoValido;
+		seleccionadas.length > 0 &&
+		meses >= 1 &&
+		total > 0 &&
+		motivoValido &&
+		!abonoSinValidar;
+
+	/** W4 · El abono registrado desde el modal queda elegido. */
+	const alRegistrarAbono = (r: PagoRegistrado) => {
+		setRegistrandoAbono(false);
+		// El plan de cuotas trae el pago nuevo (y su cuota pasa a validación).
+		queryClient.invalidateQueries({ queryKey: orpc.getHistorialPagos.key() });
+		if (r.pagoId == null) {
+			toast.warning(
+				"El abono se registró, pero no se pudo identificar para el convenio. Elíjalo en «Abono de hoy» cuando aparezca.",
+			);
+			return;
+		}
+		setAbonoRegistrado({
+			pagoId: r.pagoId,
+			monto: r.montoBoleta,
+			aplicadoPorCuota: {},
+			validado: false,
+		});
+		setAbonoId(r.pagoId);
+	};
 
 	const descripcion =
 		"Toma la deuda de las cuotas seleccionadas más la mora vigente y la reparte en cuotas mensuales que se cobran junto con la cuota normal. Al crearse, la mora se elimina y el crédito pasa a En Convenio; queda pendiente de activación en cartera.";
@@ -490,14 +557,28 @@ export function ConvenioModal({
 				</p>
 			</div>
 
-			{embebido && (
+			{ofrecerAbono && (
 				<div className="space-y-2 rounded-md border border-dashed p-3">
-					<Label htmlFor="convenio-abono-hoy">Abono de hoy (opcional)</Label>
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<Label htmlFor="convenio-abono-hoy">Abono de hoy (opcional)</Label>
+						{creditoId ? (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								disabled={crear.isPending}
+								onClick={() => setRegistrandoAbono(true)}
+							>
+								<Receipt aria-hidden className="mr-1.5 h-4 w-4" />
+								Registrar abono con comprobante
+							</Button>
+						) : null}
+					</div>
 					{abonos.length === 0 ? (
 						<p className="text-muted-foreground text-xs">
-							El cliente no tiene abonos validados hoy. Para descontar un abono,
-							regístrelo primero como pago con su comprobante y espere la
-							validación de contabilidad.
+							{creditoId
+								? "El cliente no tiene abonos de hoy. Registre el abono con su comprobante: queda elegido aquí y el convenio se puede crear cuando contabilidad lo valide."
+								: "El cliente no tiene abonos validados hoy. Para descontar un abono, regístrelo primero como pago con su comprobante y espere la validación de contabilidad."}
 						</p>
 					) : (
 						<>
@@ -515,11 +596,19 @@ export function ConvenioModal({
 									{abonos.map((a) => (
 										<SelectItem key={a.pagoId} value={String(a.pagoId)}>
 											Pago #{a.pagoId} · {Q(a.monto)}
+											{a.validado === false ? " · en validación" : ""}
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
-							{abono && total > 0 ? (
+							{abonoSinValidar ? (
+								<p className="text-warning-text text-xs">
+									Contabilidad todavía no valida este abono. El convenio se
+									puede crear con él cuando esté validado, hoy mismo. Para
+									crearlo ya, elija «Sin abono inicial».
+								</p>
+							) : null}
+							{abono && !abonoSinValidar && total > 0 ? (
 								<p className="text-muted-foreground text-xs">
 									{descuentoAbono > 0
 										? `Se descuentan ${Q(descuentoAbono)} del total: el convenio cubre solo el remanente de ${Q(total)}.`
@@ -562,6 +651,30 @@ export function ConvenioModal({
 		</div>
 	);
 
+	// W4 · Registrar el abono sin salir del convenio. El formulario del
+	// convenio sigue montado en el estado de este componente: al volver, las
+	// cuotas, el plazo y el motivo están como se dejaron.
+	const registroAbono = creditoId ? (
+		<RegistrarPagoForm
+			embebido
+			creditoId={creditoId}
+			onVolver={() => setRegistrandoAbono(false)}
+			onExito={alRegistrarAbono}
+		/>
+	) : null;
+
+	if (embebido && registrandoAbono && registroAbono) {
+		return (
+			<div className="@container flex min-h-0 flex-1 flex-col gap-3">
+				<p className="shrink-0 text-muted-foreground text-sm">
+					Registre el comprobante del abono. Al terminar vuelve al convenio con
+					el abono elegido como «Abono de hoy».
+				</p>
+				{registroAbono}
+			</div>
+		);
+	}
+
 	if (embebido) {
 		return (
 			<div className="@container flex min-h-0 flex-1 flex-col">
@@ -588,30 +701,49 @@ export function ConvenioModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+			<DialogContent
+				ref={setCajaDialogo}
+				className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+			>
 				<DialogHeader className="px-6 pt-6">
 					<DialogTitle className="flex items-center gap-2">
 						<Handshake className="h-4 w-4 text-blue-700 dark:text-blue-300" />
-						Convenio de pago - {clienteNombre}
+						{registrandoAbono && registroAbono
+							? `Abono del convenio - ${clienteNombre}`
+							: `Convenio de pago - ${clienteNombre}`}
 					</DialogTitle>
-					<DialogDescription>{descripcion}</DialogDescription>
+					<DialogDescription>
+						{registrandoAbono && registroAbono
+							? "Registre el comprobante del abono. Al terminar vuelve al convenio con el abono elegido como «Abono de hoy»."
+							: descripcion}
+					</DialogDescription>
 				</DialogHeader>
 
-				<form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
-					{cuerpo}
+				{registrandoAbono && registroAbono ? (
+					// El calendario de la boleta se monta en la caja del diálogo: el
+					// formulario embebido usa `@container` (ver PopoverPortalContext).
+					<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-4">
+						<PopoverPortalContext.Provider value={cajaDialogo}>
+							{registroAbono}
+						</PopoverPortalContext.Provider>
+					</div>
+				) : (
+					<form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
+						{cuerpo}
 
-					<DialogFooter className="border-t bg-background px-6 py-4">
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() => onOpenChange(false)}
-							disabled={crear.isPending}
-						>
-							Cancelar
-						</Button>
-						{botonCrear}
-					</DialogFooter>
-				</form>
+						<DialogFooter className="border-t bg-background px-6 py-4">
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => onOpenChange(false)}
+								disabled={crear.isPending}
+							>
+								Cancelar
+							</Button>
+							{botonCrear}
+						</DialogFooter>
+					</form>
+				)}
 			</DialogContent>
 		</Dialog>
 	);

@@ -2,6 +2,7 @@ import {
 	Briefcase,
 	Clock,
 	CreditCard,
+	History,
 	Home,
 	Mail,
 	Phone,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 import type * as React from "react";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
+import { SolicitarDocumentoVista } from "@/components/cobros/ficha/documentos-caso";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -42,7 +44,9 @@ import { Timeline, TimelineItem } from "@/components/ds/timeline";
 import { MapView, SegmentedNav } from "@/components/ds/ubicaciones";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { dialogPanelClassName } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
 export const meta: ShowcaseMeta = {
@@ -50,7 +54,7 @@ export const meta: ShowcaseMeta = {
 	title: "Cobros · Ficha 360",
 	figma: "CRM Ventas › Asesor Junior › 04 · Consulta · Ficha 360 (1887:4118)",
 	description:
-		"La Ficha 360 rediseñada (/cobros/$id) con datos de ejemplo: encabezado, Resumen, Contacto (con un correo largo), Ubicaciones, Edición, Historial, Estado de cuenta, Documentos y Asistente IA. Los bloques sin backend se ven como «Pronto».",
+		"La Ficha 360 rediseñada (/cobros/$id) con datos de ejemplo: encabezado, Resumen, Contacto (con un correo largo), Ubicaciones, Edición (direcciones editables), Historial, Estado de cuenta, Documentos (con el modal de solicitud) y Asistente IA. Los bloques sin backend se ven como «Pronto».",
 };
 
 function Marco({ children }: { children: React.ReactNode }) {
@@ -305,9 +309,35 @@ export default function CobrosFicha360Showcase() {
 							</p>
 						</PersonaContacto>
 					</div>
+					<PersonaContacto
+						nombre="María José de la Cruz Pérez"
+						rol="Codeudor 1"
+						filas={[
+							{
+								icono: <Mail aria-hidden />,
+								label: "Correo",
+								valores: [{ texto: "mariajose.cruz@gmail.com" }],
+							},
+							{
+								icono: <Phone aria-hidden />,
+								label: "Teléfono principal",
+								valores: [{ texto: "5587-1203", href: "tel:55871203" }],
+							},
+							{
+								icono: <Home aria-hidden />,
+								label: "Residencia",
+								valores: [{ texto: "4a. calle 3-12, zona 2, Mixco" }],
+							},
+							{
+								icono: <Briefcase aria-hidden />,
+								label: "Trabajo",
+								valores: [],
+							},
+						]}
+					/>
 					<PendienteBackend titulo="Codeudores">
-						Los codeudores del crédito y sus datos de contacto se mostrarán
-						aquí. Pendiente de backend (tarea F2).
+						No se pudieron cargar los codeudores. Si el crédito no tiene una
+						oportunidad vinculada en el CRM, no hay codeudores que mostrar.
 					</PendienteBackend>
 				</Marco>
 			</ShowcaseGroup>
@@ -370,19 +400,42 @@ export default function CobrosFicha360Showcase() {
 								{ label: "Estado civil", valor: null },
 							]}
 						/>
-						<DireccionCard
-							titulo="Dirección de residencia"
-							filas={[
-								{
-									label: "Dirección",
-									valor: "7AV 2-56 FUENTES DEL VALLE NORTE 4, Zona 18",
-								},
-							]}
-							nota="La edición de direcciones queda pendiente de backend (tarea F8)."
-						/>
+						<div className="space-y-5">
+							<DireccionCard
+								titulo="Dirección de residencia"
+								filas={[
+									{
+										label: "Dirección",
+										valor: "7AV 2-56 FUENTES DEL VALLE NORTE 4, Zona 18",
+										onChange: () => undefined,
+										placeholder: "Ej.: 5a. avenida 10-20, zona 1",
+									},
+								]}
+								nota="Si deja el campo vacío, se vuelve a usar la dirección registrada del cliente."
+							/>
+							<DireccionCard
+								titulo="Dirección de trabajo"
+								filas={[
+									{
+										label: "Empresa",
+										valor: "Distribuidora El Sol, S.A.",
+										onChange: () => undefined,
+									},
+									{
+										label: "Dirección",
+										valor:
+											"12 calle 1-25, zona 10, Edificio Géminis 10, torre norte",
+										onChange: () => undefined,
+									},
+									{ label: "Teléfono del trabajo", valor: "2385-4400" },
+									{ label: "Horario", valor: null },
+								]}
+								nota="Si deja la empresa o la dirección vacías, se vuelve a usar la de la solicitud de crédito. El teléfono y el horario son de la solicitud (solo lectura)."
+							/>
+						</div>
 					</div>
 					<FichaSaveBar
-						mensaje="El correo tiene cambios sin guardar"
+						mensaje="Hay cambios sin guardar en el correo y las direcciones"
 						onCancelar={() => undefined}
 						onGuardar={() => undefined}
 					/>
@@ -403,16 +456,25 @@ export default function CobrosFicha360Showcase() {
 								{
 									id: "1",
 									cuando: "20 jul 2026 · 10:30",
-									titulo: "Llamada",
+									// W1: entrante, con quién se habló y el teléfono.
+									titulo: "Llamada entrante",
 									badge: (
 										<Badge className="bg-green-100 text-green-800">
 											Contactado
 										</Badge>
 									),
 									subtitulo: "Por: Caren Rivera",
+									contacto: {
+										participante: "Habló con: Juan Pérez López (codeudor)",
+										telefono: "5555-1234",
+									},
 									tono: "logrado",
 									nota: "Cliente perdió el empleo temporalmente; retomará pagos en agosto.",
 									detalles: [
+										{
+											label: "Seguimiento programado",
+											valor: "5 ago 2026 · 10:30 · por WhatsApp",
+										},
 										{ label: "Próximo paso", valor: "Llamar el 5 de agosto" },
 									],
 								},
@@ -426,6 +488,10 @@ export default function CobrosFicha360Showcase() {
 										</Badge>
 									),
 									subtitulo: "Por: Caren Rivera",
+									contacto: {
+										participante: "Intentó con: Ana Contreras (titular)",
+										telefono: "4444-9876",
+									},
 									tono: "sin-contacto",
 								},
 								{
@@ -444,6 +510,14 @@ export default function CobrosFicha360Showcase() {
 							]}
 						/>
 					</SeccionHistorial>
+					<SeccionHistorial
+						titulo="Vida del crédito"
+						conteo={null}
+						icono={<History />}
+						descripcion="Entradas y salidas de bucket, reestructuras y convenios"
+						estado="error"
+						onReintentar={() => undefined}
+					/>
 					<SeccionHistorial
 						titulo="Links de pago"
 						conteo={0}
@@ -502,14 +576,30 @@ export default function CobrosFicha360Showcase() {
 					<DocumentosFicha
 						enviar={[
 							{
-								clave: "tc",
+								clave: "tarjeta-circulacion",
 								nombre: "Tarjeta de circulación",
 								descripcion: "Documento vehicular",
+								onClick: () => undefined,
+								cargando: true,
 							},
 							{
-								clave: "ec",
+								clave: "seguro",
+								nombre: "Información de seguro",
+								descripcion: "Póliza vigente",
+								estado: { etiqueta: "Sin archivo", tone: "neutral" },
+								motivoDeshabilitado:
+									"Este crédito no tiene ese documento cargado.",
+							},
+							{
+								clave: "estado-cuenta",
 								nombre: "Estado de cuenta",
 								descripcion: "Resumen del crédito, por WhatsApp",
+								onClick: () => undefined,
+							},
+							{
+								clave: "carta-notarial",
+								nombre: "Carta notarial",
+								descripcion: "Registrar el envío de la carta",
 								onClick: () => undefined,
 							},
 						]}
@@ -518,13 +608,67 @@ export default function CobrosFicha360Showcase() {
 								clave: "contrato",
 								nombre: "Contrato de crédito",
 								descripcion: "PDF · Documento legal",
+								onClick: () => undefined,
+							},
+							{
+								clave: "carta-poder",
+								nombre: "Carta poder",
+								descripcion: "Requiere firma del titular",
+								estado: { etiqueta: "Solicitado", tone: "warning" },
+								motivoDeshabilitado:
+									"Ya hay una solicitud pendiente de este documento.",
+							},
+							{
+								clave: "cambio-placas",
+								nombre: "Cambio de placas",
+								descripcion: "Trámite vehicular",
+								onClick: () => undefined,
+							},
+							{
+								clave: "expertaje",
+								nombre: "Expertaje",
+								descripcion: "Avalúo del vehículo",
+								onClick: () => undefined,
 							},
 						]}
 					/>
 				</Marco>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Asistente IA (pendiente)">
+			<ShowcaseGroup title="Documentos · Solicitar al supervisor (modal)">
+				<div
+					className={cn(dialogPanelClassName, "max-w-md")}
+					data-testid="modal-solicitar-documento"
+				>
+					<SolicitarDocumentoVista
+						documento="Contrato de crédito"
+						comentario="El cliente necesita el contrato para un trámite en el banco."
+						onComentario={() => undefined}
+						error="Ya hay una solicitud pendiente de «Contrato de crédito» para este caso."
+						pendiente={false}
+						onCancelar={() => undefined}
+						onSolicitar={() => undefined}
+					/>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Asistente IA">
+				<Marco>
+					<AsistenteIA
+						resumen={{
+							texto:
+								"Crédito con 23 días de mora y una cuota vencida. La última gestión fue una llamada sin contacto el 8 oct. El cliente cumplió su última promesa de pago en septiembre.",
+							etiquetas: ["Mora temprana", "Promesa cumplida"],
+							generadoEn: "2026-10-08T20:28:26.119Z",
+						}}
+						onPreguntar={async () => ({
+							respuesta: "Debe pagar Q6,038.34 para ponerse al día.",
+						})}
+					/>
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Asistente IA (apagado)">
 				<Marco>
 					<AsistenteIA resumen={null} />
 				</Marco>

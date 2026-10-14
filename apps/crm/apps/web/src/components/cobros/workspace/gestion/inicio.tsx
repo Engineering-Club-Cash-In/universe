@@ -29,6 +29,11 @@ export type InicioGestionVistaProps = {
 	pendiente?: React.ReactNode;
 	/** Arriba de todo: la visita programada (`VisitaProgramadaTarjeta`). */
 	visita?: React.ReactNode;
+	/**
+	 * Antes que todo: lo que espera respuesta en el caso (la contrapropuesta
+	 * del supervisor, las solicitudes abiertas de rebaja y Jurídico).
+	 */
+	avisos?: React.ReactNode;
 	grupos: GrupoGestiones[];
 	/** El crédito no tiene caso de cobros (la ficha se abre desde la izquierda). */
 	sinCaso?: boolean;
@@ -51,6 +56,7 @@ export function InicioGestionVista({
 	ultimaGestion,
 	pendiente,
 	visita,
+	avisos,
 	grupos,
 	sinCaso = false,
 	className,
@@ -75,6 +81,7 @@ export function InicioGestionVista({
 		<PasoGestion className={className} cabecera={<EtiquetaGestion />}>
 			<div className="flex flex-col gap-5">
 				<div className="flex flex-col gap-2.5">
+					{avisos}
 					{visita}
 					{rescate ? (
 						<div className="flex flex-col gap-1 rounded-xl bg-warning-subtle px-4 py-3">
@@ -112,7 +119,7 @@ export function InicioGestionVista({
 								</div>
 							) : null}
 						</CrmCard>
-					) : rescate || visita ? null : (
+					) : rescate || visita || avisos ? null : (
 						<EspacioVacio
 							compacto={hayGrupos}
 							icono={<Phone aria-hidden />}

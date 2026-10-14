@@ -155,10 +155,19 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     const currentCredit = creditoData[0];
     const creditoId = currentCredit.creditos.credito_id;
+    const hoy = new Date();
+    const hoyGT = hoyGuatemala();
+
+    // Todas las consultas que dependen SOLO del crédito se arman acá sin
+    // `await` y se disparan juntas en un Promise.all (más abajo). Antes iban
+    // una tras otra: ~20 viajes a la BD en serie, 2-4 s con la base remota.
+    // Los query builders de drizzle no se ejecutan hasta que se les hace
+    // `.then`, así que armarlos no adelanta nada. Las que dependen de otras
+    // (mora abonada, datos de las cuotas cargadas, convenio) siguen después.
 
     // Ingreso adicional por día IA (si aplicó al crear el crédito). A lo sumo
     // 1 fila por crédito — ver ajuste_fecha_ideal_pago en schema.ts.
-    const [ajusteFechaIdeal] = await db
+    const ajusteFechaIdealQ = db
       .select()
       .from(ajuste_fecha_ideal_pago)
       .where(eq(ajuste_fecha_ideal_pago.credito_id, creditoId))
@@ -170,7 +179,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // token o vencido no cuenta como cuenta: cartera rechaza todo pago por un
     // binding vencido (`binding_expired`, getNexaBindingRejection), así que
     // avisarle esa cuenta al cliente lo mandaría a una cuenta inservible.
-    const [bindingNexa] = await db
+    const bindingNexaQ = db
       .select({ token: nexa_credit_bindings.nexa_token })
       .from(nexa_credit_bindings)
       .where(
@@ -184,15 +193,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .limit(1);
-    const cuentaNexa = (NEXA_PAYABLE_CREDIT_STATUSES as readonly string[]).includes(
-      currentCredit.creditos.statusCredit
-    )
-      ? (bindingNexa?.token ?? null)
-      : null;
 
-    const contractSummary =
+    const contractSummaryP =
       currentCredit.creditos.statusCredit === "CANCELADO"
-        ? await (async () => {
+        ? (async () => {
             const payments = await db
               .select({
                 abono_capital: pagos_credito.abono_capital,
@@ -227,28 +231,27 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
                 null,
             };
           })()
-        : undefined;
+        : Promise.resolve(undefined);
 
     // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
-    const cancelacionActiva =
+    const cancelacionActivaP =
       currentCredit.creditos.statusCredit === "CANCELADO" ||
       currentCredit.creditos.statusCredit === "PENDIENTE_CANCELACION"
-        ? (
-            await db
-              .select()
-              .from(credit_cancelations)
-              .where(
-                and(
-                  eq(credit_cancelations.credit_id, creditoId),
-                  eq(credit_cancelations.activo, true)
-                )
+        ? db
+            .select()
+            .from(credit_cancelations)
+            .where(
+              and(
+                eq(credit_cancelations.credit_id, creditoId),
+                eq(credit_cancelations.activo, true)
               )
-              .limit(1)
-          )[0]
-        : undefined;
+            )
+            .limit(1)
+            .then((filas) => filas[0])
+        : Promise.resolve(undefined);
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
-    const cuotasPagadas = await db
+    const cuotasPagadasQ = db
       .select({
         // Campos de cuotas_credito
         cuota_id: cuotas_credito.cuota_id,
@@ -303,7 +306,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .orderBy(cuotas_credito.numero_cuota);
     // 4. Calcular la cuota que toca este mes (según meses transcurridos desde fecha_creacion)
     const fechaInicio = new Date(currentCredit.creditos.fecha_creacion);
-    const hoy = new Date();
     const mesesTranscurridos =
       (hoy.getFullYear() - fechaInicio.getFullYear()) * 12 +
       (hoy.getMonth() - fechaInicio.getMonth()) +
@@ -318,7 +320,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // filtrarCuotasVencidasSinCobertura (misma semántica de rubros y
     // tolerancia que calcularCoberturaCuota, pendientes incluidos para no
     // contar como deuda una boleta en validación).
-    const cuotasVencidasSinCerrar = await db
+    const cuotasVencidasSinCerrarQ = db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
@@ -371,103 +373,35 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
 
-    const cuotasAtrasadas = filtrarCuotasVencidasSinCobertura(
-      cuotasVencidasSinCerrar,
-      currentCredit.creditos.cuota ?? 0
-    );
-
-    // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
-    // no son deuda (no van en atrasadas), pero el asesor debe verlas. El cron
-    // les frena la mora solo 7 días desde la fecha del pago; pasado eso, si
-    // siguen sin validar, las vuelve a tratar como atraso.
-    const cuotasEnValidacion = filtrarCuotasEnValidacion(
-      cuotasVencidasSinCerrar,
-      currentCredit.creditos.cuota ?? 0
-    );
-
     // Cuánto le sube la mora a este crédito por cada día que pase, y su techo
     // mensual. Sale del MISMO helper que alimenta al listado, de una sola
     // consulta: el criterio de elegibilidad y la fórmula viven en un solo lugar
     // (ver `incrementosMoraPorCredito`).
-    const incrementosMora = await incrementosMoraPorCredito([
+    const incrementosMoraP = incrementosMoraPorCredito([
       {
         credito_id: creditoId,
         capital: currentCredit.creditos.capital ?? 0,
         statusCredit: currentCredit.creditos.statusCredit,
       },
     ]);
-    // `!`: el mapa trae SIEMPRE una entrada por cada crédito que se le pasa
-    // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
-    // una rama que ningún caso puede alcanzar.
-    const { incrementoDiarioMora: incrementoDiarioMoraStr,
-      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
-      diasAtrasoMoraMaximo } =
-      incrementosMora.get(creditoId)!;
 
     // El «por qué» de la mora para la pantalla de cobro: las cuotas y los días
     // con el MISMO cargador del cron, así que incluye las cuotas cuyo pago
     // lleva MÁS de 7 días sin validar (el cron las vuelve a cobrar aunque no se
     // vean como atrasadas) y resta lo ya abonado a cada una.
-    const hoyGT = hoyGuatemala();
-    const cargadas =
-      (await cuotasParaPendienteDeCreditos([creditoId], db, hoyGT)).get(creditoId)?.cuotas ?? [];
+    const cargadasP = cuotasParaPendienteDeCreditos([creditoId], db, hoyGT);
 
-    // Mora pagada/condonada: separa lo que el cliente ya abonó (PAGO/REVERSA de PAGO)
-    // de lo que fue condonado (CONDONACION/REVERSA de CONDONACION).
-    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas MÁS las en
-    // validación: las atrasadas excluyen las cuotas cubiertas por boletas sin
-    // validar, y el cron —y el desglose— tampoco cuentan las de un pago
-    // pendiente de hasta 7 días; sin sumarlas, lo ya abonado a esa cuota
-    // desaparecía de `moraPagada` mientras contabilidad no validara. Y
-    // `cargadas` sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no
-    // elegibles para el cron), donde lo ya pagado se seguiría mostrando.
-    const moraAbonoOrigen = await moraAbonadaPorOrigen(
-      [...new Set([
-        ...cargadas.map((c) => c.cuota_id),
-        ...cuotasAtrasadas.map((c) => c.cuota_id),
-        ...cuotasEnValidacion.map((c) => c.cuota_id),
-      ])],
-      db
-    );
-    const moraPagada = moraAbonoOrigen.pagada.toFixed(2);
-    const moraCondonada = moraAbonoOrigen.condonada.toFixed(2);
-    const datosCuota = cargadas.length
-      ? await db
-          .select({
-            cuota_id: cuotas_credito.cuota_id,
-            numero_cuota: cuotas_credito.numero_cuota,
-            fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-          })
-          .from(cuotas_credito)
-          .where(inArray(cuotas_credito.cuota_id, cargadas.map((c) => c.cuota_id)))
-      : [];
-    const datoPorCuota = new Map(datosCuota.map((d) => [d.cuota_id, d]));
-    // Cuotas sin pagar que vencen HOY: hoy no generan mora, mañana sí (su
-    // primer día). Mismo criterio de elegibilidad que el cron.
-    const cuotasQueVencenHoy = contarCuotasQueVencenHoy(
-      await db
-        .select({
-          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-          pagado: cuotas_credito.pagado,
-          hasPaidPayment: hasPaidPaymentSql(),
-        })
-        .from(cuotas_credito)
-        .where(and(eq(cuotas_credito.credito_id, creditoId), eq(cuotas_credito.pagado, false))),
-      hoyGT,
-      currentCredit.creditos.statusCredit,
-    );
-    const desgloseMora = construirDesgloseMora({
-      capital: currentCredit.creditos.capital ?? 0,
-      cuotas: cargadas.map((c) => ({
-        ...c,
-        numero_cuota: datoPorCuota.get(c.cuota_id)?.numero_cuota ?? 0,
-        fecha_vencimiento: String(datoPorCuota.get(c.cuota_id)?.fecha_vencimiento ?? ""),
-      })),
-      numerosEnValidacion: new Set(cuotasEnValidacion.map((c) => c.numero_cuota)),
-      cuotasQueVencenHoy,
-    });
+    // Cuotas sin pagar, para contar las que vencen HOY (ver más abajo).
+    const cuotasSinPagarQ = db
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        hasPaidPayment: hasPaidPaymentSql(),
+      })
+      .from(cuotas_credito)
+      .where(and(eq(cuotas_credito.credito_id, creditoId), eq(cuotas_credito.pagado, false)));
 
-    const cuotasPendientes = await db
+    const cuotasPendientesQ = db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
@@ -541,7 +475,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // depende de boletas sin validar. Ésta es más amplia —cualquier cuota sin
     // pagar con un pago pending, vencida o futura, completo o parcial— y va en
     // la respuesta como `cuotasConPagoEnValidacion`.
-    const cuotasConPagoEnValidacion = await db
+    const cuotasConPagoEnValidacionQ = db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
@@ -589,7 +523,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(cuotas_credito.numero_cuota);
 
-    const moraActual = await db
+    const moraActualQ = db
       .select()
       .from(moras_credito)
       .where(
@@ -608,110 +542,113 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // completo si otra boleta ya lo tomó. Envuelto en su propio try/catch: si
     // esto falla, el endpoint que alimenta la cobranza de toda la empresa NO
     // se cae, sale en 0/[] y se loguea.
-    let rubrosActual = 0;
-    let rubrosDetalle: {
-      rubro_id: number;
-      tipo_nombre: string;
-      descripcion: string;
-      saldo_pendiente: string;
-      disponible: string;
-      obligatorio: boolean;
-    }[] = [];
-    try {
-      /**
-       * LIMITACIÓN CONOCIDA, dicha acá para que no se descubra como sorpresa.
-       *
-       * `disponible` sale de restarle al saldo del rubro lo que las boletas
-       * hermanas ya apartaron, y cada dato viene de una consulta distinta. La
-       * base corre en READ COMMITTED, donde cada sentencia toma su propia
-       * instantánea, así que un `/aplicar-pago` que commitee entre las dos deja
-       * al asesor viendo un disponible que nunca existió: saldo de antes contra
-       * reclamos de después.
-       *
-       * NO se envuelve en una transacción `repeatable read` —que es lo que lo
-       * cerraría, y es lo que sí hace `listarRubrosDeCredito`— porque este
-       * endpoint alimenta la pantalla de cobro de toda la empresa y el bloque de
-       * rubros vive dentro de un handler que hace decenas de consultas más.
-       * Acotar la transacción a estas dos exige reordenar el bloque, y el riesgo
-       * de equivocarse acá es mayor que el del defecto: la ventana es de
-       * milisegundos, el número se corrige solo al recargar, y ninguna escritura
-       * depende de él — el cobro real lo recalcula el backend con la fila
-       * bloqueada.
-       */
-      const rubrosVivos = await db
-        .select({
-          rubro_id: rubros.rubro_id,
-          descripcion: rubros.descripcion,
-          saldo_pendiente: rubros.saldo_pendiente,
-          // No se devuelve al front: se selecciona sólo para poder ordenar la
-          // lista con el mismo criterio con que se va a cobrar (ver abajo).
-          created_at: rubros.created_at,
-          tipo_nombre: rubros_tipos.nombre,
-          obligatorio: rubros_tipos.obligatorio,
-        })
-        .from(rubros)
-        .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
-        .where(
-          and(
-            eq(rubros.credito_id, creditoId),
-            eq(rubros.activo, true),
-            eq(rubros.completado, false),
-            eq(rubros.anulado, false)
-          )
-        );
-
-      if (rubrosVivos.length > 0) {
+    const rubrosP = (async () => {
+      let rubrosActual = 0;
+      let rubrosDetalle: {
+        rubro_id: number;
+        tipo_nombre: string;
+        descripcion: string;
+        saldo_pendiente: string;
+        disponible: string;
+        obligatorio: boolean;
+      }[] = [];
+      try {
         /**
-         * Se ordena con la MISMA función que usa el cobro, no con un `ORDER BY`
-         * propio.
+         * LIMITACIÓN CONOCIDA, dicha acá para que no se descubra como sorpresa.
          *
-         * La pantalla le muestra al asesor la lista en este orden, y una boleta
-         * que no alcanza para todos los rubros los cobra de arriba hacia abajo.
-         * Si la lista viniera en orden arbitrario —que es lo que devuelve la
-         * base sin `ORDER BY`—, el asesor vería un orden y la plata iría en
-         * otro: con una boleta corta terminaría diciéndole al cliente que le
-         * cobró el rubro equivocado. Reusar la función pura en vez de repetir
-         * el criterio en SQL es lo que impide que los dos órdenes se separen
-         * el día que la regla cambie.
+         * `disponible` sale de restarle al saldo del rubro lo que las boletas
+         * hermanas ya apartaron, y cada dato viene de una consulta distinta. La
+         * base corre en READ COMMITTED, donde cada sentencia toma su propia
+         * instantánea, así que un `/aplicar-pago` que commitee entre las dos deja
+         * al asesor viendo un disponible que nunca existió: saldo de antes contra
+         * reclamos de después.
+         *
+         * NO se envuelve en una transacción `repeatable read` —que es lo que lo
+         * cerraría, y es lo que sí hace `listarRubrosDeCredito`— porque este
+         * endpoint alimenta la pantalla de cobro de toda la empresa y el bloque de
+         * rubros vive dentro de un handler que hace decenas de consultas más.
+         * Acotar la transacción a estas dos exige reordenar el bloque, y el riesgo
+         * de equivocarse acá es mayor que el del defecto: la ventana es de
+         * milisegundos, el número se corrige solo al recargar, y ninguna escritura
+         * depende de él — el cobro real lo recalcula el backend con la fila
+         * bloqueada.
          */
-        const enOrdenDeCobro = ordenarRubrosParaCobro(rubrosVivos);
-
-        const reclamos = await reclamosVivosDeRubros(
-          enOrdenDeCobro.map((r) => r.rubro_id)
-        );
-
-        let totalDisponible = new Big(0);
-        rubrosDetalle = enOrdenDeCobro.map((r) => {
-          const reclamadoVivo = (reclamos.get(r.rubro_id) ?? []).reduce(
-            (acc, c) => acc.plus(new Big(c.monto ?? 0)),
-            new Big(0)
+        const rubrosVivos = await db
+          .select({
+            rubro_id: rubros.rubro_id,
+            descripcion: rubros.descripcion,
+            saldo_pendiente: rubros.saldo_pendiente,
+            // No se devuelve al front: se selecciona sólo para poder ordenar la
+            // lista con el mismo criterio con que se va a cobrar (ver abajo).
+            created_at: rubros.created_at,
+            tipo_nombre: rubros_tipos.nombre,
+            obligatorio: rubros_tipos.obligatorio,
+          })
+          .from(rubros)
+          .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+          .where(
+            and(
+              eq(rubros.credito_id, creditoId),
+              eq(rubros.activo, true),
+              eq(rubros.completado, false),
+              eq(rubros.anulado, false)
+            )
           );
-          const disponible = disponibleDeRubro({
-            saldoPendiente: r.saldo_pendiente ?? "0",
-            reclamadoVivo,
+
+        if (rubrosVivos.length > 0) {
+          /**
+           * Se ordena con la MISMA función que usa el cobro, no con un `ORDER BY`
+           * propio.
+           *
+           * La pantalla le muestra al asesor la lista en este orden, y una boleta
+           * que no alcanza para todos los rubros los cobra de arriba hacia abajo.
+           * Si la lista viniera en orden arbitrario —que es lo que devuelve la
+           * base sin `ORDER BY`—, el asesor vería un orden y la plata iría en
+           * otro: con una boleta corta terminaría diciéndole al cliente que le
+           * cobró el rubro equivocado. Reusar la función pura en vez de repetir
+           * el criterio en SQL es lo que impide que los dos órdenes se separen
+           * el día que la regla cambie.
+           */
+          const enOrdenDeCobro = ordenarRubrosParaCobro(rubrosVivos);
+
+          const reclamos = await reclamosVivosDeRubros(
+            enOrdenDeCobro.map((r) => r.rubro_id)
+          );
+
+          let totalDisponible = new Big(0);
+          rubrosDetalle = enOrdenDeCobro.map((r) => {
+            const reclamadoVivo = (reclamos.get(r.rubro_id) ?? []).reduce(
+              (acc, c) => acc.plus(new Big(c.monto ?? 0)),
+              new Big(0)
+            );
+            const disponible = disponibleDeRubro({
+              saldoPendiente: r.saldo_pendiente ?? "0",
+              reclamadoVivo,
+            });
+            totalDisponible = totalDisponible.plus(disponible);
+
+            return {
+              rubro_id: r.rubro_id,
+              tipo_nombre: r.tipo_nombre,
+              descripcion: r.descripcion,
+              saldo_pendiente: new Big(r.saldo_pendiente ?? 0).toFixed(2),
+              disponible: disponible.toFixed(2),
+              obligatorio: r.obligatorio,
+            };
           });
-          totalDisponible = totalDisponible.plus(disponible);
 
-          return {
-            rubro_id: r.rubro_id,
-            tipo_nombre: r.tipo_nombre,
-            descripcion: r.descripcion,
-            saldo_pendiente: new Big(r.saldo_pendiente ?? 0).toFixed(2),
-            disponible: disponible.toFixed(2),
-            obligatorio: r.obligatorio,
-          };
-        });
-
-        rubrosActual = totalDisponible.toNumber();
+          rubrosActual = totalDisponible.toNumber();
+        }
+      } catch (error) {
+        console.error("[getCreditoByNumero] Error consultando rubros:", error);
+        rubrosActual = 0;
+        rubrosDetalle = [];
       }
-    } catch (error) {
-      console.error("[getCreditoByNumero] Error consultando rubros:", error);
-      rubrosActual = 0;
-      rubrosDetalle = [];
-    }
+      return { rubrosActual, rubrosDetalle };
+    })();
 
     // 6. Consultar si la cuota actual ya fue pagada
-    const cuotaActualDataResult = await db
+    const cuotaActualDataResultQ = db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
@@ -769,7 +706,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // Ordenado por cuota_id desc: hay créditos con cuotas_credito duplicadas
     // (mismo numero_cuota, cuota_id distinto, artefacto de un flujo viejo —
     // mismo criterio que obtenerInfoCompletaCredito en registerPayment.ts).
-    const [cuota1Row] = await db
+    const cuota1RowQ = db
       .select({ pagado: cuotas_credito.pagado })
       .from(cuotas_credito)
       .where(
@@ -780,6 +717,134 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(desc(cuotas_credito.cuota_id))
       .limit(1);
+    const convenioActivoQ = db
+      .select()
+      .from(convenios_pago)
+      .where(
+        and(
+          eq(convenios_pago.credito_id, creditoId),
+          eq(convenios_pago.activo, true),
+          eq(convenios_pago.completado, false)
+        )
+      )
+      .limit(1);
+
+    const [
+      [ajusteFechaIdeal],
+      [bindingNexa],
+      contractSummary,
+      cancelacionActiva,
+      cuotasPagadas,
+      cuotasVencidasSinCerrar,
+      incrementosMora,
+      cargadasPorCredito,
+      cuotasSinPagar,
+      cuotasPendientes,
+      cuotasConPagoEnValidacion,
+      moraActual,
+      { rubrosActual, rubrosDetalle },
+      cuotaActualDataResult,
+      [cuota1Row],
+      convenioActivo,
+    ] = await Promise.all([
+      ajusteFechaIdealQ,
+      bindingNexaQ,
+      contractSummaryP,
+      cancelacionActivaP,
+      cuotasPagadasQ,
+      cuotasVencidasSinCerrarQ,
+      incrementosMoraP,
+      cargadasP,
+      cuotasSinPagarQ,
+      cuotasPendientesQ,
+      cuotasConPagoEnValidacionQ,
+      moraActualQ,
+      rubrosP,
+      cuotaActualDataResultQ,
+      cuota1RowQ,
+      convenioActivoQ,
+    ]);
+
+    const cuentaNexa = (NEXA_PAYABLE_CREDIT_STATUSES as readonly string[]).includes(
+      currentCredit.creditos.statusCredit
+    )
+      ? (bindingNexa?.token ?? null)
+      : null;
+
+    const cuotasAtrasadas = filtrarCuotasVencidasSinCobertura(
+      cuotasVencidasSinCerrar,
+      currentCredit.creditos.cuota ?? 0
+    );
+
+    // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
+    // no son deuda (no van en atrasadas), pero el asesor debe verlas. El cron
+    // les frena la mora solo 7 días desde la fecha del pago; pasado eso, si
+    // siguen sin validar, las vuelve a tratar como atraso.
+    const cuotasEnValidacion = filtrarCuotasEnValidacion(
+      cuotasVencidasSinCerrar,
+      currentCredit.creditos.cuota ?? 0
+    );
+
+    // `!`: el mapa trae SIEMPRE una entrada por cada crédito que se le pasa
+    // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
+    // una rama que ningún caso puede alcanzar.
+    const { incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+      diasAtrasoMoraMaximo } =
+      incrementosMora.get(creditoId)!;
+
+    const cargadas = cargadasPorCredito.get(creditoId)?.cuotas ?? [];
+
+    // Mora pagada/condonada: separa lo que el cliente ya abonó (PAGO/REVERSA de PAGO)
+    // de lo que fue condonado (CONDONACION/REVERSA de CONDONACION).
+    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas MÁS las en
+    // validación: las atrasadas excluyen las cuotas cubiertas por boletas sin
+    // validar, y el cron —y el desglose— tampoco cuentan las de un pago
+    // pendiente de hasta 7 días; sin sumarlas, lo ya abonado a esa cuota
+    // desaparecía de `moraPagada` mientras contabilidad no validara. Y
+    // `cargadas` sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no
+    // elegibles para el cron), donde lo ya pagado se seguiría mostrando.
+    const [moraAbonoOrigen, datosCuota] = await Promise.all([
+      moraAbonadaPorOrigen(
+        [...new Set([
+          ...cargadas.map((c) => c.cuota_id),
+          ...cuotasAtrasadas.map((c) => c.cuota_id),
+          ...cuotasEnValidacion.map((c) => c.cuota_id),
+        ])],
+        db
+      ),
+      cargadas.length
+        ? db
+            .select({
+              cuota_id: cuotas_credito.cuota_id,
+              numero_cuota: cuotas_credito.numero_cuota,
+              fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+            })
+            .from(cuotas_credito)
+            .where(inArray(cuotas_credito.cuota_id, cargadas.map((c) => c.cuota_id)))
+        : Promise.resolve([]),
+    ]);
+    const moraPagada = moraAbonoOrigen.pagada.toFixed(2);
+    const moraCondonada = moraAbonoOrigen.condonada.toFixed(2);
+    const datoPorCuota = new Map(datosCuota.map((d) => [d.cuota_id, d]));
+    // Cuotas sin pagar que vencen HOY: hoy no generan mora, mañana sí (su
+    // primer día). Mismo criterio de elegibilidad que el cron.
+    const cuotasQueVencenHoy = contarCuotasQueVencenHoy(
+      cuotasSinPagar,
+      hoyGT,
+      currentCredit.creditos.statusCredit,
+    );
+    const desgloseMora = construirDesgloseMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      cuotas: cargadas.map((c) => ({
+        ...c,
+        numero_cuota: datoPorCuota.get(c.cuota_id)?.numero_cuota ?? 0,
+        fecha_vencimiento: String(datoPorCuota.get(c.cuota_id)?.fecha_vencimiento ?? ""),
+      })),
+      numerosEnValidacion: new Set(cuotasEnValidacion.map((c) => c.numero_cuota)),
+      cuotasQueVencenHoy,
+    });
+
     const cuota1Pendiente = cuota1Row?.pagado === false;
     const cuotaMensualAPagar =
       cuota1Pendiente && ajusteFechaIdeal && !ajusteFechaIdeal.fecha_cobro
@@ -829,23 +894,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // ¿Está pagada la cuota actual?
     const cuotaActualPagada = !!(cuotaActualData && cuotaActualData.pagado);
-    console.log("cuotaActualData", cuotaActualData);
 
     // La cuota actual del mes con toda su info
     const cuotaActual = cuotaActualData;
     const cuotaActualStatus = cuotaActualData.validationStatus;
-
-    const convenioActivo = await db
-      .select()
-      .from(convenios_pago)
-      .where(
-        and(
-          eq(convenios_pago.credito_id, creditoId),
-          eq(convenios_pago.activo, true),
-          eq(convenios_pago.completado, false)
-        )
-      )
-      .limit(1);
 
     let cuotasEnConvenio: any[] = [];
     let pagosConvenio: any[] = [];
@@ -853,20 +905,46 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     let cuotaConvenioAPagar = "0";
 
     if (convenioActivo.length > 0) {
-      // Traer los pagos del convenio
-      pagosConvenio = await db
-        .select()
-        .from(convenios_pagos_resume)
-        .where(
-          eq(convenios_pagos_resume.convenio_id, convenioActivo[0].convenio_id)
-        );
+      const ahora = new Date();
+      const fechaGuatemalaString = ahora.toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
 
-      // 🔥 Traer las cuotas mensuales del convenio
-      cuotasConvenioMensuales = await db
-        .select()
-        .from(convenio_cuotas)
-        .where(eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id))
-        .orderBy(convenio_cuotas.numero_cuota);
+      const [month, day, year] = fechaGuatemalaString.split(", ")[0].split("/");
+      const fechaActualGuatemala = `${year}-${month}-${day}`;
+
+      // Las tres dependen solo del convenio: en paralelo.
+      let cuotaDelMesResult: (typeof convenio_cuotas.$inferSelect)[];
+      [pagosConvenio, cuotasConvenioMensuales, cuotaDelMesResult] = await Promise.all([
+        // Traer los pagos del convenio
+        db
+          .select()
+          .from(convenios_pagos_resume)
+          .where(
+            eq(convenios_pagos_resume.convenio_id, convenioActivo[0].convenio_id)
+          ),
+        // 🔥 Traer las cuotas mensuales del convenio
+        db
+          .select()
+          .from(convenio_cuotas)
+          .where(eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id))
+          .orderBy(convenio_cuotas.numero_cuota),
+        // 🔍 Buscar la cuota del mes actual desde la DB
+        db
+          .select()
+          .from(convenio_cuotas)
+          .where(
+            and(
+              eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id),
+              gte(convenio_cuotas.fecha_vencimiento, fechaActualGuatemala)
+            )
+          )
+          .orderBy(asc(convenio_cuotas.fecha_vencimiento))
+          .limit(1),
+      ]);
 
       // Traer las cuotas que están en el convenio
       const paymentIds = pagosConvenio.map((p) => p.pago_id);
@@ -887,30 +965,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           .where(inArray(cuotas_credito.cuota_id, cuotaIds))
           .orderBy(asc(cuotas_credito.numero_cuota));
       }
-
-      const ahora = new Date();
-      const fechaGuatemalaString = ahora.toLocaleString("en-US", {
-        timeZone: "America/Guatemala",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      });
-
-      const [month, day, year] = fechaGuatemalaString.split(", ")[0].split("/");
-      const fechaActualGuatemala = `${year}-${month}-${day}`;
-
-      // 🔍 Buscar la cuota del mes actual desde la DB
-      const cuotaDelMesResult = await db
-        .select()
-        .from(convenio_cuotas)
-        .where(
-          and(
-            eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id),
-            gte(convenio_cuotas.fecha_vencimiento, fechaActualGuatemala)
-          )
-        )
-        .orderBy(asc(convenio_cuotas.fecha_vencimiento))
-        .limit(1);
 
       const cuotaDelMes = cuotaDelMesResult[0];
       console.log("cuotaDelMes convenio:", cuotaDelMes);
@@ -1788,6 +1842,55 @@ export async function getCreditosWithUserByMesAnio(
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
+  // 9️⃣ Paginación - Count total. Solo depende de los filtros (`whereCondition`),
+  // no de las filas: arranca junto a la consulta principal y se espera al
+  // final, en vez de pagar su viaje a la BD después de todo lo demás.
+  const countP = (async () => {
+    let count = 0;
+    try {
+      let countQuery = db
+        .select({ count: sql<number>`COUNT(DISTINCT ${creditos.credito_id})` }) // 🔥 DISTINCT
+        .from(creditos)
+        .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+        .leftJoin(
+          platform_users,
+          eq(asesores.asesor_id, platform_users.asesor_id)
+        )
+        .leftJoin(
+          moras_credito,
+          and(
+            eq(creditos.credito_id, moras_credito.credito_id),
+            eq(moras_credito.activa, true)
+          )
+        );
+
+      // 🔥 JOIN con cuotas_credito si filtramos por proximidad
+      if (needsProximidadJoin) {
+        countQuery = countQuery.innerJoin(
+          cuotas_credito,
+          eq(creditos.credito_id, cuotas_credito.credito_id)
+        ) as any;
+      }
+
+      // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
+      if (inversionista_ids && inversionista_ids.length > 0) {
+        countQuery = countQuery.innerJoin(
+          creditos_inversionistas,
+          eq(creditos.credito_id, creditos_inversionistas.credito_id)
+        ) as any;
+      }
+
+      const [{ count: total }] = await countQuery.where(whereCondition);
+
+      count = Number(total);
+      console.log(`📊 Total créditos únicos: ${count}`);
+    } catch (err) {
+      console.error("❌ Error contando créditos:", err);
+    }
+    return count;
+  })();
+
   let rows: any[] = [];
   try {
     // 1️⃣ 🔥 QUERY OPTIMIZADO - Buscar créditos únicos
@@ -1892,179 +1995,191 @@ export async function getCreditosWithUserByMesAnio(
   const creditosIds = [...new Set(rows.map((r) => r.creditos.credito_id))];
   console.log("🆔 Créditos IDs únicos:", creditosIds);
 
+  // Las consultas de abajo solo dependen de `rows`/`creditosIds` y cada una
+  // maneja su propio fallo (fail-open), así que arrancan TODAS a la vez y se
+  // esperan juntas antes del mapeo final. Antes iban una tras otra: ~12 viajes
+  // a la BD en serie (1.7 s con la base remota para 50 filas).
+  const tareas: Promise<void>[] = [];
+
   // 2️⃣ Rubros
   let rubrosMap: Record<number, { nombre_rubro: string; monto: number }[]> = {};
-  if (creditosIds.length > 0) {
-    try {
-      const rubrosPorCredito = await db
-        .select({
-          credito_id: creditos_rubros_otros.credito_id,
-          nombre_rubro: creditos_rubros_otros.nombre_rubro,
-          monto: creditos_rubros_otros.monto,
-        })
-        .from(creditos_rubros_otros)
-        .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        const rubrosPorCredito = await db
+          .select({
+            credito_id: creditos_rubros_otros.credito_id,
+            nombre_rubro: creditos_rubros_otros.nombre_rubro,
+            monto: creditos_rubros_otros.monto,
+          })
+          .from(creditos_rubros_otros)
+          .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
 
-      console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
+        console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
 
-      // 🔥 Agrupar por credito_id
-      rubrosMap = rubrosPorCredito.reduce((acc, r) => {
-        if (!acc[r.credito_id]) {
-          acc[r.credito_id] = [];
-        }
-        acc[r.credito_id].push({
-          nombre_rubro: r.nombre_rubro,
-          monto: Number(r.monto),
-        });
-        return acc;
-      }, {} as Record<number, { nombre_rubro: string; monto: number }[]>);
-    } catch (err) {
-      console.error("❌ Error consultando rubros:", err);
+        // 🔥 Agrupar por credito_id
+        rubrosMap = rubrosPorCredito.reduce((acc, r) => {
+          if (!acc[r.credito_id]) {
+            acc[r.credito_id] = [];
+          }
+          acc[r.credito_id].push({
+            nombre_rubro: r.nombre_rubro,
+            monto: Number(r.monto),
+          });
+          return acc;
+        }, {} as Record<number, { nombre_rubro: string; monto: number }[]>);
+      } catch (err) {
+        console.error("❌ Error consultando rubros:", err);
+      }
     }
-  }
+  })());
 
   // 3️⃣ 🔥 INVERSIONISTAS - Optimizado
   let inversionistasMap: Record<number, any> = {};
   let inversionistasEspejoMap: Record<number, any[]> = {}; // 🆕 Mapa para Espejos
 
-  if (creditosIds.length > 0) {
-    try {
-      // 3.1 Inversionistas Normales (Ordenados por ID para consistencia)
-      const inversionistasPorCredito = await db
-        .select({
-          credito_id: creditos_inversionistas.credito_id,
-          inversionista_id: inversionistas.inversionista_id,
-          nombre: inversionistas.nombre,
-          emite_factura: inversionistas.emite_factura,
-          monto_aportado: creditos_inversionistas.monto_aportado,
-          monto_cash_in: creditos_inversionistas.monto_cash_in,
-          monto_inversionista: creditos_inversionistas.monto_inversionista,
-          iva_cash_in: creditos_inversionistas.iva_cash_in,
-          iva_inversionista: creditos_inversionistas.iva_inversionista,
-          porcentaje_participacion_inversionista:
-            creditos_inversionistas.porcentaje_participacion_inversionista,
-          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-          fecha_inicio_participacion: creditos_inversionistas.fecha_inicio_participacion,
-        })
-        .from(creditos_inversionistas)
-        .innerJoin(
-          inversionistas,
-          eq(
-            creditos_inversionistas.inversionista_id,
-            inversionistas.inversionista_id
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        // 3.1 Inversionistas Normales (Ordenados por ID para consistencia)
+        const inversionistasPorCredito = await db
+          .select({
+            credito_id: creditos_inversionistas.credito_id,
+            inversionista_id: inversionistas.inversionista_id,
+            nombre: inversionistas.nombre,
+            emite_factura: inversionistas.emite_factura,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+            monto_cash_in: creditos_inversionistas.monto_cash_in,
+            monto_inversionista: creditos_inversionistas.monto_inversionista,
+            iva_cash_in: creditos_inversionistas.iva_cash_in,
+            iva_inversionista: creditos_inversionistas.iva_inversionista,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas.porcentaje_participacion_inversionista,
+            porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+            cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+            fecha_inicio_participacion: creditos_inversionistas.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas)
+          .innerJoin(
+            inversionistas,
+            eq(
+              creditos_inversionistas.inversionista_id,
+              inversionistas.inversionista_id
+            )
           )
-        )
-        .where(inArray(creditos_inversionistas.credito_id, creditosIds))
-        .orderBy(asc(creditos_inversionistas.id)); // 👈 Orden garantizado
+          .where(inArray(creditos_inversionistas.credito_id, creditosIds))
+          .orderBy(asc(creditos_inversionistas.id)); // 👈 Orden garantizado
 
-      // 3.2 Inversionistas Espejo (Ordenados por ID para consistencia)
-      const inversionistasEspejoPorCredito = await db
-        .select({
-          credito_id: creditos_inversionistas_espejo.credito_id,
-          inversionista_id: inversionistas.inversionista_id,
-          nombre: inversionistas.nombre,
-          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-          porcentaje_participacion: sql<string>`'0'`, // Calculado en frontend
-          porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
-          porcentaje_inversion:
-            creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
-          monto_cash_in: creditos_inversionistas_espejo.monto_cash_in,
-          monto_inversionista:
-            creditos_inversionistas_espejo.monto_inversionista,
-          cuota_inversionista:
-            creditos_inversionistas_espejo.cuota_inversionista,
-          fecha_inicio_participacion:
-            creditos_inversionistas_espejo.fecha_inicio_participacion,
-        })
-        .from(creditos_inversionistas_espejo)
-        .innerJoin(
-          inversionistas,
-          eq(
-            creditos_inversionistas_espejo.inversionista_id,
-            inversionistas.inversionista_id
+        // 3.2 Inversionistas Espejo (Ordenados por ID para consistencia)
+        const inversionistasEspejoPorCredito = await db
+          .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            inversionista_id: inversionistas.inversionista_id,
+            nombre: inversionistas.nombre,
+            monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+            porcentaje_participacion: sql<string>`'0'`, // Calculado en frontend
+            porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+            porcentaje_inversion:
+              creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+            monto_cash_in: creditos_inversionistas_espejo.monto_cash_in,
+            monto_inversionista:
+              creditos_inversionistas_espejo.monto_inversionista,
+            cuota_inversionista:
+              creditos_inversionistas_espejo.cuota_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas_espejo.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .innerJoin(
+            inversionistas,
+            eq(
+              creditos_inversionistas_espejo.inversionista_id,
+              inversionistas.inversionista_id
+            )
           )
-        )
-        .where(inArray(creditos_inversionistas_espejo.credito_id, creditosIds))
-        .orderBy(asc(creditos_inversionistas_espejo.id)); // 👈 Orden garantizado
+          .where(inArray(creditos_inversionistas_espejo.credito_id, creditosIds))
+          .orderBy(asc(creditos_inversionistas_espejo.id)); // 👈 Orden garantizado
 
-      // 3.3 Mapeo Normales
-      inversionistasMap = creditosIds.reduce(
-        (acc, creditoId) => {
-          const aportes = inversionistasPorCredito.filter(
-            (inv) => inv.credito_id === creditoId
-          );
+        // 3.3 Mapeo Normales
+        inversionistasMap = creditosIds.reduce(
+          (acc, creditoId) => {
+            const aportes = inversionistasPorCredito.filter(
+              (inv) => inv.credito_id === creditoId
+            );
 
-          acc[creditoId] = {
-            aportes,
-            resumen: {
-              total_cash_in_monto: aportes.reduce(
-                (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
-                0
-              ),
-              total_cash_in_iva: aportes.reduce(
-                (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
-                0
-              ),
-              total_inversion_monto: aportes.reduce(
-                (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
-                0
-              ),
-              total_inversion_iva: aportes.reduce(
-                (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
-                0
-              ),
-            },
-          };
-          return acc;
-        },
-        {} as Record<number, any>
-      );
+            acc[creditoId] = {
+              aportes,
+              resumen: {
+                total_cash_in_monto: aportes.reduce(
+                  (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
+                  0
+                ),
+                total_cash_in_iva: aportes.reduce(
+                  (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
+                  0
+                ),
+                total_inversion_monto: aportes.reduce(
+                  (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
+                  0
+                ),
+                total_inversion_iva: aportes.reduce(
+                  (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
+                  0
+                ),
+              },
+            };
+            return acc;
+          },
+          {} as Record<number, any>
+        );
 
-      // 3.4 Mapeo Espejos
-      inversionistasEspejoMap = creditosIds.reduce(
-        (acc, creditoId) => {
-          const aportesEspejo = inversionistasEspejoPorCredito.filter(
-            (inv) => inv.credito_id === creditoId
-          );
-          acc[creditoId] = aportesEspejo;
-          return acc;
-        },
-        {} as Record<number, any[]>
-      );
-    } catch (err) {
-      console.error("❌ Error consultando inversionistas:", err);
+        // 3.4 Mapeo Espejos
+        inversionistasEspejoMap = creditosIds.reduce(
+          (acc, creditoId) => {
+            const aportesEspejo = inversionistasEspejoPorCredito.filter(
+              (inv) => inv.credito_id === creditoId
+            );
+            acc[creditoId] = aportesEspejo;
+            return acc;
+          },
+          {} as Record<number, any[]>
+        );
+      } catch (err) {
+        console.error("❌ Error consultando inversionistas:", err);
+      }
     }
-  }
+  })());
 
   // 3.5 Créditos con borradores de pago vivos: bloquean la entrada a
   // devolución a CUBE (el backend lo rechaza en updateCredit; acá solo
   // apagamos el toggle correspondiente en el modal de edición).
   let creditosConBorradores = new Set<number>();
-  if (creditosIds.length > 0) {
-    try {
-      const filasBorrador = await db
-        .selectDistinct({
-          credito_id: pagos_credito_inversionistas_espejo.credito_id,
-        })
-        .from(pagos_credito_inversionistas_espejo)
-        .where(
-          and(
-            inArray(
-              pagos_credito_inversionistas_espejo.credito_id,
-              creditosIds
-            ),
-            ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
-          )
-        );
-      creditosConBorradores = new Set(filasBorrador.map((f) => f.credito_id));
-    } catch (err) {
-      console.error("❌ Error consultando borradores de pago:", err);
-      // Fail-open a propósito: el guard del backend (updateCredit) es la
-      // fuente de verdad; fallar cerrado acá trabaría el toggle sin poder
-      // explicar por qué.
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        const filasBorrador = await db
+          .selectDistinct({
+            credito_id: pagos_credito_inversionistas_espejo.credito_id,
+          })
+          .from(pagos_credito_inversionistas_espejo)
+          .where(
+            and(
+              inArray(
+                pagos_credito_inversionistas_espejo.credito_id,
+                creditosIds
+              ),
+              ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
+            )
+          );
+        creditosConBorradores = new Set(filasBorrador.map((f) => f.credito_id));
+      } catch (err) {
+        console.error("❌ Error consultando borradores de pago:", err);
+        // Fail-open a propósito: el guard del backend (updateCredit) es la
+        // fuente de verdad; fallar cerrado acá trabaría el toggle sin poder
+        // explicar por qué.
+      }
     }
-  }
+  })());
 
   // 4️⃣ Moras Map
   const morasMap: Record<number, any> = {};
@@ -2107,33 +2222,35 @@ export async function getCreditosWithUserByMesAnio(
     });
   };
 
-  try {
-    const catalogoRows = await getBucketsCatalogo();
+  tareas.push((async () => {
+    try {
+      const catalogoRows = await getBucketsCatalogo();
 
-    if (catalogoRows.length > 0) {
-      catalogoBuckets = catalogoRows.map((b) => ({
-        numero: b.numero,
-        cuotas_min: b.cuotas_min,
-        cuotas_max: b.cuotas_max,
-        estados_incluidos: b.estados_incluidos,
-        estados_piso: b.estados_piso,
-      }));
-      catalogoRows.forEach((b) => {
-        bucketDisplayMap.set(b.numero, {
+      if (catalogoRows.length > 0) {
+        catalogoBuckets = catalogoRows.map((b) => ({
           numero: b.numero,
-          prefijo: b.prefijo,
-          nombre: b.nombre,
-          color: b.color,
+          cuotas_min: b.cuotas_min,
+          cuotas_max: b.cuotas_max,
+          estados_incluidos: b.estados_incluidos,
+          estados_piso: b.estados_piso,
+        }));
+        catalogoRows.forEach((b) => {
+          bucketDisplayMap.set(b.numero, {
+            numero: b.numero,
+            prefijo: b.prefijo,
+            nombre: b.nombre,
+            color: b.color,
+          });
         });
-      });
-    } else {
-      // Catálogo vacío (migración pendiente).
+      } else {
+        // Catálogo vacío (migración pendiente).
+        aplicarFallbackBuckets();
+      }
+    } catch (err) {
+      console.error("❌ Error cargando catálogo de buckets:", err);
       aplicarFallbackBuckets();
     }
-  } catch (err) {
-    console.error("❌ Error cargando catálogo de buckets:", err);
-    aplicarFallbackBuckets();
-  }
+  })());
 
   // 4️⃣.6 Último bucket registrado por crédito (buckets_historial) — la columna
   // `bucket` dice lo MISMO que el filtro (la verdad del motor, no la derivación
@@ -2141,229 +2258,245 @@ export async function getCreditosWithUserByMesAnio(
   // cobros-02 pendientes en ese ambiente), el catch deja el map vacío y todo
   // cae al derivado vivo — mismo comportamiento de siempre.
   const ultimoBucketMap = new Map<number, number>();
-  if (creditosIds.length > 0) {
-    try {
-      const idsSql = sql.join(creditosIds.map((id) => sql`${id}`), sql`, `);
-      const ultimos = await db.execute<{ credito_id: number; bucket_nuevo: number }>(sql`
-        SELECT DISTINCT ON (h.credito_id) h.credito_id, h.bucket_nuevo
-        FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
-        INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
-        WHERE h.credito_id IN (${idsSql})
-          -- EN_CONVENIO: solo su historial de convenio (status_credito='EN_CONVENIO').
-          -- Sin esto, en rutas SIN el guard de estados_credito (/getAllCredits,
-          -- estado=EN_CONVENIO, o la rama ACTIVO que incluye EN_CONVENIO) el mapper
-          -- tomaría el bucket VIEJO pre-convenio. Sin fila del job → undefined →
-          -- el mapper cae a bucketDeCredito (null para EN_CONVENIO) (Codex #1223).
-          AND (c."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
-        ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC`);
-      for (const r of ultimos.rows) {
-        ultimoBucketMap.set(Number(r.credito_id), Number(r.bucket_nuevo));
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        const idsSql = sql.join(creditosIds.map((id) => sql`${id}`), sql`, `);
+        const ultimos = await db.execute<{ credito_id: number; bucket_nuevo: number }>(sql`
+          SELECT DISTINCT ON (h.credito_id) h.credito_id, h.bucket_nuevo
+          FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+          INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = h.credito_id
+          WHERE h.credito_id IN (${idsSql})
+            -- EN_CONVENIO: solo su historial de convenio (status_credito='EN_CONVENIO').
+            -- Sin esto, en rutas SIN el guard de estados_credito (/getAllCredits,
+            -- estado=EN_CONVENIO, o la rama ACTIVO que incluye EN_CONVENIO) el mapper
+            -- tomaría el bucket VIEJO pre-convenio. Sin fila del job → undefined →
+            -- el mapper cae a bucketDeCredito (null para EN_CONVENIO) (Codex #1223).
+            AND (c."statusCredit" <> 'EN_CONVENIO' OR h.status_credito = 'EN_CONVENIO')
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC`);
+        for (const r of ultimos.rows) {
+          ultimoBucketMap.set(Number(r.credito_id), Number(r.bucket_nuevo));
+        }
+      } catch (err) {
+        console.error("❌ Error cargando último bucket (motor):", err);
       }
-    } catch (err) {
-      console.error("❌ Error cargando último bucket (motor):", err);
     }
-  }
+  })());
 
   // 5️⃣ Próximas cuotas
   let proximasCuotasMap: Record<number, ProximaCuota> = {};
-  if (creditosIds.length > 0) {
-    try {
-      console.log("🔍 Buscando próximas cuotas...");
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        console.log("🔍 Buscando próximas cuotas...");
 
-      const cuotasRaw = await db
-        .select({
-          credito_id: cuotas_credito.credito_id,
-          cuota_id: cuotas_credito.cuota_id,
-          numero_cuota: cuotas_credito.numero_cuota,
-          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-          pagado: cuotas_credito.pagado,
-          pago_id: pagos_credito.pago_id,
-          validation_status: pagos_credito.validationStatus,
-        })
-        .from(cuotas_credito)
-        .leftJoin(
-          pagos_credito,
-          eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
-        )
-        .where(
-          and(
-            inArray(cuotas_credito.credito_id, creditosIds),
-            gte(cuotas_credito.fecha_vencimiento, fecha_desde ?? hoyStr),
-            fecha_hasta ? lte(cuotas_credito.fecha_vencimiento, fecha_hasta) : undefined,
-            gt(cuotas_credito.numero_cuota, 0)
+        const cuotasRaw = await db
+          .select({
+            credito_id: cuotas_credito.credito_id,
+            cuota_id: cuotas_credito.cuota_id,
+            numero_cuota: cuotas_credito.numero_cuota,
+            fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+            pagado: cuotas_credito.pagado,
+            pago_id: pagos_credito.pago_id,
+            validation_status: pagos_credito.validationStatus,
+          })
+          .from(cuotas_credito)
+          .leftJoin(
+            pagos_credito,
+            eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
           )
-        )
-        .orderBy(cuotas_credito.credito_id, cuotas_credito.fecha_vencimiento);
+          .where(
+            and(
+              inArray(cuotas_credito.credito_id, creditosIds),
+              gte(cuotas_credito.fecha_vencimiento, fecha_desde ?? hoyStr),
+              fecha_hasta ? lte(cuotas_credito.fecha_vencimiento, fecha_hasta) : undefined,
+              gt(cuotas_credito.numero_cuota, 0)
+            )
+          )
+          .orderBy(cuotas_credito.credito_id, cuotas_credito.fecha_vencimiento);
 
-      console.log(`📅 Cuotas encontradas: ${cuotasRaw.length}`);
+        console.log(`📅 Cuotas encontradas: ${cuotasRaw.length}`);
 
-      // 🔥 Solo la primera cuota de cada crédito
-      const cuotasPorCredito = new Map<number, any>();
-      cuotasRaw.forEach((cuota) => {
-        if (!cuotasPorCredito.has(cuota.credito_id)) {
-          cuotasPorCredito.set(cuota.credito_id, cuota);
-        }
-      });
+        // 🔥 Solo la primera cuota de cada crédito
+        const cuotasPorCredito = new Map<number, any>();
+        cuotasRaw.forEach((cuota) => {
+          if (!cuotasPorCredito.has(cuota.credito_id)) {
+            cuotasPorCredito.set(cuota.credito_id, cuota);
+          }
+        });
 
-      cuotasPorCredito.forEach((cuota, creditoId) => {
-        proximasCuotasMap[creditoId] = {
-          cuota_id: cuota.cuota_id,
-          numero_cuota: cuota.numero_cuota,
-          fecha_vencimiento: cuota.fecha_vencimiento,
-          pagado: cuota.pagado,
-          pago_id: cuota.pago_id,
-          validation_status: cuota.validation_status,
-          proximidad: calcularProximidad(cuota.fecha_vencimiento),
-        };
-      });
+        cuotasPorCredito.forEach((cuota, creditoId) => {
+          proximasCuotasMap[creditoId] = {
+            cuota_id: cuota.cuota_id,
+            numero_cuota: cuota.numero_cuota,
+            fecha_vencimiento: cuota.fecha_vencimiento,
+            pagado: cuota.pagado,
+            pago_id: cuota.pago_id,
+            validation_status: cuota.validation_status,
+            proximidad: calcularProximidad(cuota.fecha_vencimiento),
+          };
+        });
 
-      console.log(`📅 Próximas cuotas mapeadas: ${cuotasPorCredito.size}`);
-    } catch (err) {
-      console.error("❌ Error consultando próximas cuotas:", err);
+        console.log(`📅 Próximas cuotas mapeadas: ${cuotasPorCredito.size}`);
+      } catch (err) {
+        console.error("❌ Error consultando próximas cuotas:", err);
+      }
     }
-  }
+  })());
 
   // 5.5 Fecha de inicio (cuota 1) de cada crédito
   let fechaInicioMap: Record<number, string> = {};
-  if (creditosIds.length > 0) {
-    try {
-      const cuotasUno = await db
-        .select({
-          credito_id: cuotas_credito.credito_id,
-          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        })
-        .from(cuotas_credito)
-        .where(
-          and(
-            inArray(cuotas_credito.credito_id, creditosIds),
-            eq(cuotas_credito.numero_cuota, 1)
-          )
-        );
+  tareas.push((async () => {
+    if (creditosIds.length > 0) {
+      try {
+        const cuotasUno = await db
+          .select({
+            credito_id: cuotas_credito.credito_id,
+            fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          })
+          .from(cuotas_credito)
+          .where(
+            and(
+              inArray(cuotas_credito.credito_id, creditosIds),
+              eq(cuotas_credito.numero_cuota, 1)
+            )
+          );
 
-      cuotasUno.forEach((c) => {
-        fechaInicioMap[c.credito_id] = c.fecha_vencimiento as string;
-      });
-    } catch (err) {
-      console.error("Error consultando fecha inicio:", err);
+        cuotasUno.forEach((c) => {
+          fechaInicioMap[c.credito_id] = c.fecha_vencimiento as string;
+        });
+      } catch (err) {
+        console.error("Error consultando fecha inicio:", err);
+      }
     }
-  }
+  })());
 
   // 6️⃣ Cancelaciones & Incobrables
   let cancelacionesMap: Record<number, CreditCancelation> = {};
   let incobrablesMap: Record<number, BadDebt> = {};
 
-  try {
-    const canceladosIds = rows
-      .filter((r) => r.creditos.statusCredit === "CANCELADO")
-      .map((r) => r.creditos.credito_id);
-      
-    if (canceladosIds.length > 0) {
-      console.log("🛑 Créditos cancelados:", canceladosIds.length);
-      const cancelacionesRaw = await db
-        .select()
-        .from(credit_cancelations)
-        .where(
-          and(
-            inArray(credit_cancelations.credit_id, canceladosIds), 
-          )
-        );
+  tareas.push((async () => {
+    try {
+      const canceladosIds = rows
+        .filter((r) => r.creditos.statusCredit === "CANCELADO")
+        .map((r) => r.creditos.credito_id);
         
-      cancelacionesRaw.forEach((row) => {
-        cancelacionesMap[row.credit_id] = {
-          ...row,
-          fecha_cancelacion: row.fecha_cancelacion ?? "",
-          monto_cancelacion: Number(row.monto_cancelacion),
-        };
-      });
+      if (canceladosIds.length > 0) {
+        console.log("🛑 Créditos cancelados:", canceladosIds.length);
+        const cancelacionesRaw = await db
+          .select()
+          .from(credit_cancelations)
+          .where(
+            and(
+              inArray(credit_cancelations.credit_id, canceladosIds), 
+            )
+          );
+          
+        cancelacionesRaw.forEach((row) => {
+          cancelacionesMap[row.credit_id] = {
+            ...row,
+            fecha_cancelacion: row.fecha_cancelacion ?? "",
+            monto_cancelacion: Number(row.monto_cancelacion),
+          };
+        });
+      }
+    } catch (err) {
+      console.error("❌ Error consultando cancelaciones:", err);
     }
-  } catch (err) {
-    console.error("❌ Error consultando cancelaciones:", err);
-  }
+  })());
 
-  try {
-    const incobrablesIds = rows
-      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
-      .map((r) => r.creditos.credito_id);
-      
-    if (incobrablesIds.length > 0) {
-      console.log("⚠️ Créditos incobrables:", incobrablesIds.length);
-      const incobrablesRaw = await db
-        .select()
-        .from(bad_debts)
-        .where(inArray(bad_debts.credit_id, incobrablesIds));
+  tareas.push((async () => {
+    try {
+      const incobrablesIds = rows
+        .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
+        .map((r) => r.creditos.credito_id);
         
-      incobrablesRaw.forEach((row) => {
-        incobrablesMap[row.credit_id] = {
-          ...row,
-          fecha_registro: row.fecha_registro ?? "",
-          monto_incobrable: Number(row.monto_incobrable),
-        };
-      });
+      if (incobrablesIds.length > 0) {
+        console.log("⚠️ Créditos incobrables:", incobrablesIds.length);
+        const incobrablesRaw = await db
+          .select()
+          .from(bad_debts)
+          .where(inArray(bad_debts.credit_id, incobrablesIds));
+          
+        incobrablesRaw.forEach((row) => {
+          incobrablesMap[row.credit_id] = {
+            ...row,
+            fecha_registro: row.fecha_registro ?? "",
+            monto_incobrable: Number(row.monto_incobrable),
+          };
+        });
+      }
+    } catch (err) {
+      console.error("❌ Error consultando incobrables:", err);
     }
-  } catch (err) {
-    console.error("❌ Error consultando incobrables:", err);
-  }
+  })());
 
   // 6.5 Ritmo y techo del crecimiento de la mora, para TODA la página de una
   // vez. La tarjeta de mora del listado los muestra igual que el detalle, así
   // que tienen que viajar en cada fila; calcularlos crédito por crédito sería
   // una consulta por fila.
   let incrementosMoraMap = new Map<number, IncrementoMora>();
-  try {
-    const creditosUnicosParaMora = new Map<
-      number,
-      { credito_id: number; capital: string | null; statusCredit: string | null }
-    >();
-    rows.forEach((row) => {
-      if (!creditosUnicosParaMora.has(row.creditos.credito_id)) {
-        creditosUnicosParaMora.set(row.creditos.credito_id, {
-          credito_id: row.creditos.credito_id,
-          capital: row.creditos.capital ?? null,
-          statusCredit: row.creditos.statusCredit,
-        });
-      }
-    });
-    incrementosMoraMap = await incrementosMoraPorCredito([
-      ...creditosUnicosParaMora.values(),
-    ]);
-  } catch (err) {
-    // Fail-open: el listado no puede caerse porque la proyección de mora falle.
-    // Los campos quedan ausentes y la tarjeta vuelve a no decir el ritmo.
-    console.error("❌ Error calculando incrementos de mora:", err);
-  }
+  tareas.push((async () => {
+    try {
+      const creditosUnicosParaMora = new Map<
+        number,
+        { credito_id: number; capital: string | null; statusCredit: string | null }
+      >();
+      rows.forEach((row) => {
+        if (!creditosUnicosParaMora.has(row.creditos.credito_id)) {
+          creditosUnicosParaMora.set(row.creditos.credito_id, {
+            credito_id: row.creditos.credito_id,
+            capital: row.creditos.capital ?? null,
+            statusCredit: row.creditos.statusCredit,
+          });
+        }
+      });
+      incrementosMoraMap = await incrementosMoraPorCredito([
+        ...creditosUnicosParaMora.values(),
+      ]);
+    } catch (err) {
+      // Fail-open: el listado no puede caerse porque la proyección de mora falle.
+      // Los campos quedan ausentes y la tarjeta vuelve a no decir el ritmo.
+      console.error("❌ Error calculando incrementos de mora:", err);
+    }
+  })());
 
   // 6.6 Deuda vencida real (cuotas vencidas sin cubrir + mora), para TODA la
   // página de una vez.
   let montoVencidoMap = new Map<number, string>();
-  try {
-    const creditosUnicosParaVencido = new Map<
-      number,
-      {
-        credito_id: number;
-        cuota: string | null;
-        monto_mora: string | null;
-        statusCredit: string | null;
-      }
-    >();
-    rows.forEach((row) => {
-      const creditoId = row.creditos.credito_id;
-      if (!creditosUnicosParaVencido.has(creditoId)) {
-        creditosUnicosParaVencido.set(creditoId, {
-          credito_id: creditoId,
-          cuota: row.creditos.cuota ?? null,
-          monto_mora: morasMap[creditoId]?.monto_mora ?? null,
-          statusCredit: row.creditos.statusCredit ?? null,
-        });
-      }
-    });
-    montoVencidoMap = await montoVencidoPorCredito(
-      [...creditosUnicosParaVencido.values()],
-      hoyStr
-    );
-  } catch (err) {
-    // Fail-open: sin el campo el CRM vuelve a su aproximación.
-    console.error("❌ Error calculando deuda vencida:", err);
-  }
+  tareas.push((async () => {
+    try {
+      const creditosUnicosParaVencido = new Map<
+        number,
+        {
+          credito_id: number;
+          cuota: string | null;
+          monto_mora: string | null;
+          statusCredit: string | null;
+        }
+      >();
+      rows.forEach((row) => {
+        const creditoId = row.creditos.credito_id;
+        if (!creditosUnicosParaVencido.has(creditoId)) {
+          creditosUnicosParaVencido.set(creditoId, {
+            credito_id: creditoId,
+            cuota: row.creditos.cuota ?? null,
+            monto_mora: morasMap[creditoId]?.monto_mora ?? null,
+            statusCredit: row.creditos.statusCredit ?? null,
+          });
+        }
+      });
+      montoVencidoMap = await montoVencidoPorCredito(
+        [...creditosUnicosParaVencido.values()],
+        hoyStr
+      );
+    } catch (err) {
+      // Fail-open: sin el campo el CRM vuelve a su aproximación.
+      console.error("❌ Error calculando deuda vencida:", err);
+    }
+  })());
+
+  await Promise.all(tareas);
 
   // 7️⃣ 🔥 MAP FINAL - Sin duplicados
   let data: CreditoConInfo[] = [];
@@ -2473,49 +2606,7 @@ export async function getCreditosWithUserByMesAnio(
 
   // 8️⃣ Filtro de proximidad - YA SE APLICA EN LA QUERY PRINCIPAL (antes de paginación)
 
-  // 9️⃣ Paginación - Count total
-  let count = 0;
-  try {
-    let countQuery = db
-      .select({ count: sql<number>`COUNT(DISTINCT ${creditos.credito_id})` }) // 🔥 DISTINCT
-      .from(creditos)
-      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
-      .leftJoin(
-        platform_users,
-        eq(asesores.asesor_id, platform_users.asesor_id)
-      )
-      .leftJoin(
-        moras_credito,
-        and(
-          eq(creditos.credito_id, moras_credito.credito_id),
-          eq(moras_credito.activa, true)
-        )
-      );
-
-    // 🔥 JOIN con cuotas_credito si filtramos por proximidad
-    if (needsProximidadJoin) {
-      countQuery = countQuery.innerJoin(
-        cuotas_credito,
-        eq(creditos.credito_id, cuotas_credito.credito_id)
-      ) as any;
-    }
-
-    // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
-    if (inversionista_ids && inversionista_ids.length > 0) {
-      countQuery = countQuery.innerJoin(
-        creditos_inversionistas,
-        eq(creditos.credito_id, creditos_inversionistas.credito_id)
-      ) as any;
-    }
-
-    const [{ count: total }] = await countQuery.where(whereCondition);
-
-    count = Number(total);
-    console.log(`📊 Total créditos únicos: ${count}`);
-  } catch (err) {
-    console.error("❌ Error contando créditos:", err);
-  }
+  const count = await countP;
 
   return {
     data,

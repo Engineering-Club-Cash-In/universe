@@ -206,7 +206,9 @@ describe("credit detail no-current-installment branch", () => {
 		const source = await Bun.file(
 			resolve(import.meta.dir, "credits.ts"),
 		).text();
-		const moraQueryIndex = source.indexOf("const moraActual = await db");
+		// La consulta se arma sin await y se resuelve en el Promise.all de las
+		// consultas independientes, que también va antes de la rama terminal.
+		const moraQueryIndex = source.indexOf("const moraActualQ = db");
 		const noCurrentBranchIndex = source.indexOf("if (!cuotaActualDataResult");
 		const branch = source.match(
 			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,

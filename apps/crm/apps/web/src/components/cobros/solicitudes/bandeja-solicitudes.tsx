@@ -343,7 +343,7 @@ export function BandejaSolicitudes({
 									))}
 								</TableRow>
 							))
-						: filas.map((s, i) => {
+						: filas.map((s) => {
 								if (esExtra(s)) {
 									return (
 										<FilaAprobaciones

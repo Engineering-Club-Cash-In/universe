@@ -28,7 +28,8 @@ import {
  *  3. SOLO si con ese pago el crédito queda al día. Si no, nada.
  *  4. La mora de cuotas vencidas antes (fuera de la ventana) se cobra normal.
  *  5. Días hábiles: lunes a viernes menos los feriados bancarios de Guatemala
- *     (`FERIADOS_FIJOS_GT` + Jueves y Viernes Santo).
+ *     Si el año está en `FERIADOS_OBSERVADOS_GT` (calendario de Banguat) manda esa
+ *     tabla; si no, el cálculo nominal (`FERIADOS_FIJOS_GT` + Jueves y Viernes Santo).
  *
  * Para saber si "queda al día" se simula el reparto en el MISMO orden que
  * `insertPayment`: mora legítima → rubros → ajuste por fecha ideal → cuotas de
@@ -80,6 +81,18 @@ export const FERIADOS_FIJOS_GT = [
   "12-31", // Fin de año
 ] as const;
 
+/**
+ * Cierres bancarios OBSERVADOS por año, `MM-DD`. Fuente: calendario SIPA 2026 de
+ * Banguat, columna Guatemala (incluye los traslados: 26-jun, 29-jun, 14-ago, 12-oct,
+ * 2-nov). El medio día del 01-04 cuenta como hábil; el 24-dic se deja completo por
+ * decisión de negocio. 2027 se carga cuando Banguat lo publique (nov/dic): mientras
+ * tanto ese año usa el cálculo nominal, sin reglas de traslado.
+ */
+export const FERIADOS_OBSERVADOS_GT: Readonly<Record<number, readonly string[]>> = {
+  2026: ["01-01", "04-02", "04-03", "05-01", "06-26", "06-29", "08-14", "09-15",
+    "10-12", "10-20", "11-02", "12-24", "12-25", "12-31"],
+};
+
 const DIA_MS = 86_400_000;
 
 const aMs = (fecha: Date | string): number => {
@@ -111,6 +124,8 @@ export function domingoDePascua(anio: number): string {
 
 /** Todos los feriados bancarios de Guatemala de un año, como `YYYY-MM-DD`. */
 export function feriadosBancariosGT(anio: number): Set<string> {
+  const observados = FERIADOS_OBSERVADOS_GT[anio];
+  if (observados) return new Set(observados.map((mmdd) => `${anio}-${mmdd}`));
   const pascua = aMs(domingoDePascua(anio));
   return new Set([
     ...FERIADOS_FIJOS_GT.map((mmdd) => `${anio}-${mmdd}`),

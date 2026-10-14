@@ -25,7 +25,11 @@ describe("fechaLimiteBoletaTardia", () => {
     ["2026-10-03", "2026-10-05"], // sábado
     ["2026-10-04", "2026-10-05"], // domingo
     ["2026-09-15", "2026-09-16"], // feriado entre semana
-    ["2026-11-01", "2026-11-02"], // feriado en domingo
+    ["2026-11-01", "2026-11-03"], // domingo + cierre trasladado del lunes 2-nov
+    ["2026-06-28", "2026-06-30"], // domingo + 29-jun cerrado; 30-jun ya es hábil
+    ["2026-06-30", "2026-06-30"],
+    ["2026-10-31", "2026-11-03"],
+    ["2026-10-12", "2026-10-13"],
     ["2026-12-24", "2026-12-28"], // 24 + 25 + fin de semana
     ["2026-12-25", "2026-12-28"],
     ["2026-12-31", "2027-01-04"], // 31 + 1-ene + fin de semana
@@ -55,8 +59,8 @@ describe("boleta tardía con vencimiento inhábil", () => {
     expect(califica("2026-10-20", "2026-10-21", "2026-10-23").calificadas).toHaveLength(1);
     expect(califica("2026-10-20", "2026-10-22", "2026-10-23").razonSiNinguna).toBe("fuera_de_ventana");
   });
-  test("vence 1-nov domingo → boleta lunes 2-nov califica", () => {
-    expect(califica("2026-11-01", "2026-11-02", "2026-11-04").calificadas).toHaveLength(1);
+  test("vence 1-nov domingo → boleta martes 3-nov califica (2-nov cerrado)", () => {
+    expect(califica("2026-11-01", "2026-11-03", "2026-11-04").calificadas).toHaveLength(1);
   });
   test("vence Jueves Santo → boleta el lunes siguiente califica", () => {
     expect(califica("2026-04-02", "2026-04-06", "2026-04-07").calificadas).toHaveLength(1);

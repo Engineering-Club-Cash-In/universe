@@ -120,7 +120,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:fraudes?|estafas?|documentos?\s+falsos?|identidades?\s+falsas?)(?=\s|$)/g,
+			/(?:^|\s)(?:fraudes?|estafas?|documentos?\s+falsos?|identidad(?:es)?\s+falsas?)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "fraude", texto: limpio };

@@ -89,6 +89,7 @@ describe("clasificación de evidencia de Cartera", () => {
 		["Cliente moroso", "mala_paga"],
 		["Morosidad reiterada", "mala_paga"],
 		["Fraudes detectados", "fraude"],
+		["Identidad falsa", "fraude"],
 		["Créditos incobrables", "incobrable"],
 		["Incumplimientos de pago", "mala_paga"],
 	] as const)("reconoce variantes explícitas: %s", (texto, categoria) => {

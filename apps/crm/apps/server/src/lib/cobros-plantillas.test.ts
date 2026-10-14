@@ -24,6 +24,7 @@ import {
 	hayIncrementoMora,
 	agregarCuentaNexaABienvenida,
 	interpolar,
+	necesitaDetalleCartera,
 	PLANTILLAS_MENSAJES,
 	prepararCuentaNexaParaEnvio,
 	prepararExpectativaMoraParaEnvio,
@@ -1463,6 +1464,20 @@ describe("Video transferencia Nexa", () => {
 		expect(
 			prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", " 123 ", true),
 		).toEqual({ enviar: true, cuentaNexa: "123" });
+	});
+
+	test("el masivo carga el detalle de cartera (de donde sale la cuenta Nexa)", () => {
+		// Sin detalle la cuenta llega vacía y el gate descartaría a todos,
+		// incluso a los créditos que sí tienen cuenta.
+		expect(
+			necesitaDetalleCartera(
+				plantilla?.cuerpo ?? "",
+				plantilla?.soloConCuentaNexa === true,
+			),
+		).toBe(true);
+		expect(necesitaDetalleCartera(plantilla?.cuerpo ?? "", false)).toBe(false);
+		expect(necesitaDetalleCartera("Banco Nexa {cuentaNexa}", false)).toBe(true);
+		expect(necesitaDetalleCartera("Hola {clienteNombre}", false)).toBe(false);
 	});
 
 	test("sin asesor con teléfono se descarta (el cuerpo remite al ejecutivo)", () => {

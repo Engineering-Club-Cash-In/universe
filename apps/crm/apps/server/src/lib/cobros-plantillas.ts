@@ -751,6 +751,25 @@ export function prepararCuentaNexaParaEnvio(
 	return { enviar: true, cuentaNexa: cuenta };
 }
 
+/**
+ * El masivo pide a cartera-back el detalle de cada crédito solo si el mensaje
+ * lo necesita: las variables que salen de ahí o una plantilla
+ * `soloConCuentaNexa`, cuyo gate lee la cuenta Nexa del mismo detalle (sin él
+ * la cuenta queda vacía y se descartaría a todos).
+ */
+export function necesitaDetalleCartera(
+	cuerpo: string,
+	soloConCuentaNexa: boolean,
+): boolean {
+	return (
+		soloConCuentaNexa ||
+		cuerpo.includes("{montoAdeudado}") ||
+		cuerpo.includes("{incrementoDiarioMora}") ||
+		cuerpo.includes("{incrementoMaximoMensualMora}") ||
+		cuerpo.includes("{cuentaNexa}")
+	);
+}
+
 export function prepararTelefonoAsesorParaEnvio(
 	cuerpo: string,
 	telefono: string | null | undefined,

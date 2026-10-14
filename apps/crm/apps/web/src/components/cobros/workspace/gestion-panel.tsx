@@ -39,7 +39,10 @@ import {
 	AccionPendienteCelda,
 	fechaLarga,
 } from "@/components/cobros/asesor/fila-cartera";
-import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import {
+	type AbonoConvenio,
+	ConvenioModal,
+} from "@/components/cobros/convenio-modal";
 import { SolicitarInmovilizacionModal } from "@/components/cobros/inmovilizacion-solicitar-modal";
 import { InvestigacionRedesDialog } from "@/components/cobros/investigacion-redes-dialog";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -64,7 +67,11 @@ import { inicialesDe } from "@/components/ds/cards-credito";
 import { SegmentedNav } from "@/components/ds/ubicaciones";
 import { Button } from "@/components/ui/button";
 import { urlWhatsapp } from "@/lib/cobros/referencias";
-import { hrefTelefono, montoSugeridoPromesa } from "@/lib/cobros/reglas-caso";
+import {
+	fechaLargaGT,
+	hrefTelefono,
+	montoSugeridoPromesa,
+} from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 import {
@@ -211,6 +218,27 @@ function pasoEnCurso(p: Paso): boolean {
 		default:
 			return true;
 	}
+}
+
+/**
+ * Pagos de hoy (día de Guatemala) que contabilidad ya validó: los que pueden
+ * descontarse como abono inicial del convenio. Un pago aparece una vez aunque
+ * cubra varias cuotas.
+ */
+function abonosDeHoy(plan: CasoWorkspace["cuotas"]["plan"]): AbonoConvenio[] {
+	const hoy = fechaLargaGT(new Date());
+	const porId = new Map<number, AbonoConvenio>();
+	for (const cuota of plan) {
+		for (const p of cuota.pagos ?? []) {
+			if (p.pagoId === undefined || porId.has(p.pagoId)) continue;
+			if (p.estado !== "validado" && p.estado !== "parcial") continue;
+			if (!p.fechaPago || fechaLargaGT(p.fechaPago) !== hoy) continue;
+			const monto = Number(p.montoBoleta ?? p.montoAplicado ?? 0);
+			if (!(monto > 0)) continue;
+			porId.set(p.pagoId, { pagoId: p.pagoId, monto, estado: p.estado });
+		}
+	}
+	return [...porId.values()];
 }
 
 const NOMBRE_METODO: Record<CanalGestion["metodo"], string> = {
@@ -1172,6 +1200,7 @@ export function GestionPanel({
 				cuotaMensual={caso.convenio.cuotaMensual}
 				montoMora={caso.convenio.montoMora}
 				maxMeses={caso.convenio.maxMeses}
+				abonos={abonosDeHoy(caso.cuotas.plan)}
 				embebido
 				onCancelar={cancelar}
 				onCreado={(r) => {

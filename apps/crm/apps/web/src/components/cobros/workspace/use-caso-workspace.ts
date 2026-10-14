@@ -122,7 +122,14 @@ export type GestionCaso = ContactoHistorialFila & {
 
 /** Una cuota del plan de pagos (`getHistorialPagos`). */
 export type CuotaPlan = CuotaHistorialFila & {
-	pagos?: Array<{ montoAplicado?: string | number | null }> | null;
+	pagos?: Array<{
+		pagoId?: number;
+		montoBoleta?: string | number | null;
+		montoAplicado?: string | number | null;
+		fechaPago?: string | null;
+		/** "validado", "en_validacion" o "parcial". */
+		estado?: string;
+	}> | null;
 };
 
 /* ── El caso, listo para los paneles ────────────────────────────────────────── */

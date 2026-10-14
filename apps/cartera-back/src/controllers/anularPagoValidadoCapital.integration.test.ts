@@ -136,31 +136,36 @@ integrationTest("2) (e) inversionista que ya no está: 409 y la base queda intac
   expect(antes).toMatchObject({ paymentFalse: false, capital: "9000.00", pci: 2, cuotaPagada: true });
 });
 
-integrationTest("3) capital_validated con abonos_capital ya liquidados: 409 sin tocar nada", async () => {
+integrationTest("3) capital_validated (abono directo): 409 ABONO_DIRECTO_NO_SOPORTADO sin tocar nada", async () => {
   const { sql } = await setup();
   const pagoId = await sembrar(sql, { estado: "capital_validated" });
-  await sql`INSERT INTO cartera.abonos_capital (credito_id, inversionista_id, pago_id, monto, tipo, liquidado)
-    VALUES (${CREDITO}, 1, ${pagoId}, 250, 'CAPITAL', true)`;
   const antes = await foto(sql, pagoId);
 
-  await expect(anular(pagoId)).rejects.toMatchObject({ status: 409, code: "ABONO_CAPITAL_LIQUIDADO" });
+  await expect(anular(pagoId)).rejects.toMatchObject({ status: 409, code: "ABONO_DIRECTO_NO_SOPORTADO" });
 
   expect(await foto(sql, pagoId)).toEqual(antes);
-  const [{ n }] = await sql`SELECT count(*)::int AS n FROM cartera.abonos_capital WHERE pago_id = ${pagoId}`;
-  expect(n).toBe(1);
 });
 
-integrationTest("3b) capital_validated sin liquidar: repone y borra sus abonos_capital", async () => {
+integrationTest("3b) validated en cuota cerrada sin ninguna PCI (histórico): 409 CUOTA_CERRADA_SIN_REPARTO", async () => {
   const { sql } = await setup();
-  const pagoId = await sembrar(sql, { estado: "capital_validated" });
-  await sql`INSERT INTO cartera.abonos_capital (credito_id, inversionista_id, pago_id, monto, tipo, liquidado)
-    VALUES (${CREDITO}, 1, ${pagoId}, 250, 'CAPITAL', false), (${CREDITO}, 2, ${pagoId}, 250, 'CAPITAL', false)`;
+  const pagoId = await sembrar(sql, { pci: [] });
+  const antes = await foto(sql, pagoId);
+
+  await expect(anular(pagoId)).rejects.toMatchObject({ status: 409, code: "CUOTA_CERRADA_SIN_REPARTO" });
+
+  expect(await foto(sql, pagoId)).toEqual(antes);
+});
+
+integrationTest("3c) rama A (cuota abierta, sin PCI): solo se repone el capital", async () => {
+  const { sql } = await setup();
+  const pagoId = await sembrar(sql, { pci: [] });
+  await sql`UPDATE cartera.cuotas_credito SET pagado = false WHERE cuota_id = 1`;
 
   await anular(pagoId);
 
-  expect(await foto(sql, pagoId)).toMatchObject({ capital: "9500.00", suma: "9500.00", pci: 0, paymentFalse: true });
-  const [{ n }] = await sql`SELECT count(*)::int AS n FROM cartera.abonos_capital WHERE pago_id = ${pagoId}`;
-  expect(n).toBe(0);
+  expect(await foto(sql, pagoId)).toMatchObject({
+    capital: "9500.00", suma: "9000.00", inversionistas: [[1, "4500.00000000"], [2, "4500.00000000"]],
+  });
 });
 
 integrationTest("4) anular dos veces no repone dos veces", async () => {
@@ -186,3 +191,52 @@ integrationTest("5) INCOBRABLE en capital 0: la cuota se reabre y el capital se 
     inversionistas: [[1, "250.00000000"], [2, "250.00000000"]],
   });
 });
+
+integrationTest("5b) INCOBRABLE capital 0 y abono 0.01: la reapertura decide ANTES de reponer (la cuota sigue pagada)", async () => {
+  // capitalPrevio = 0 + 0.01 ≤ tolerancia → la cuota queda pagada. Si el capital se repusiera antes
+  // de reabrir, capitalPrevio sería 0.02 y la cuota se reabriría.
+  const { sql } = await setup();
+  const pagoId = await sembrar(sql, { status: "INCOBRABLE", capital: 0, abono: 0.01, pci: [[1, 0.01]] });
+
+  await anular(pagoId);
+
+  expect(await foto(sql, pagoId)).toMatchObject({ capital: "0.01", suma: "0.01", cuotaPagada: true, paymentFalse: true });
+});
+
+integrationTest("6) por la ruta real (falsePayment → anularPagoYRestituirMoraSerializado): 409 tipado y nada escrito", async () => {
+  const { sql } = await setup();
+  const pagoId = await sembrar(sql, { pci: [[1, 250], [99, 250]] });
+  await sql`INSERT INTO cartera.creditos_inversionistas_espejo (credito_id, inversionista_id, cuota_inversionista,
+      porcentaje_participacion_inversionista, monto_aportado, fecha_creacion)
+    VALUES (${CREDITO}, 1, 0, 70, 4500, now())`;
+  const antes = await foto(sql, pagoId);
+  const { falsePayment } = await import("./payments");
+  const { AnulacionCapitalNoRestituibleError } = await import("./restitucionCapitalError");
+
+  const error = await falsePayment(pagoId, CREDITO).catch((e: unknown) => e);
+
+  expect(error).toBeInstanceOf(AnulacionCapitalNoRestituibleError);
+  expect(error).toMatchObject({ status: 409, code: "INVERSIONISTA_YA_NO_ESTA" });
+  expect(await foto(sql, pagoId)).toEqual(antes);
+});
+
+for (const ruta of ["reversePayment", "revertPaymentToPending"] as const) {
+  integrationTest(`7) anular y después ${ruta}: 409 "ya está anulado", capital y Σ aportado intactos`, async () => {
+    const { sql } = await setup();
+    const pagoId = await sembrar(sql, {});
+    await anular(pagoId);
+    const anulado = await foto(sql, pagoId);
+    const handler = (await import(`./${ruta}`))[ruta];
+    const set: { status?: number } = {};
+
+    const res = await handler({ body: { credito_id: CREDITO, pago_id: pagoId }, set });
+
+    expect(set.status).toBe(409);
+    expect(res).toMatchObject({
+      success: false,
+      message: "El pago ya está anulado: no se puede revertir ni volver a pendiente",
+    });
+    expect(await foto(sql, pagoId)).toEqual(anulado);
+    expect(anulado).toMatchObject({ capital: "9500.00", suma: "9500.00" });
+  });
+}

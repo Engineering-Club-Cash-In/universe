@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { db } from "../database/index";
-import { creditos, pagos_credito } from "../database/db/schema";
+import { creditos, cuotas_credito, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
@@ -197,6 +197,7 @@ export async function anularPagoYRestituirMora(
       boletaTardiaIntentoId: pagos_credito.boletaTardiaIntentoId,
       abono_capital: pagos_credito.abono_capital,
       registerBy: pagos_credito.registerBy,
+      cuota_id: pagos_credito.cuota_id,
     })
     .from(pagos_credito)
     .where(
@@ -220,6 +221,11 @@ export async function anularPagoYRestituirMora(
   // escribir; el resto (PCI, roster, abonos_capital) lo decide `restituirCapital`, en esta tx.
   const rechazoCapital = precheckAnulacionConCapital({ ...pagoPrevio, statusCredit: creditoCandado.statusCredit });
   if (rechazoCapital) throw new AnulacionCapitalNoRestituibleError(rechazoCapital);
+  // Si la cuota está cerrada, RAMA B tuvo que repartir este pago (se lee antes de reabrirla).
+  const conCapital = !!pagoPrevio && mueveCapital(pagoPrevio.validationStatus, pagoPrevio.abono_capital);
+  const [cuota] = conCapital && pagoPrevio?.cuota_id != null
+    ? await tx.select({ pagado: cuotas_credito.pagado }).from(cuotas_credito).where(eq(cuotas_credito.cuota_id, pagoPrevio.cuota_id))
+    : [];
 
   // ¿Qué queda por restituir de la mora que este pago bajó? La pregunta —y su
   // ancla— viven en `moraDecrementoDePago.ts`, compartidas con la reversa de
@@ -276,8 +282,10 @@ export async function anularPagoYRestituirMora(
 
   // INMEDIATAMENTE DESPUÉS de reabrir: la reapertura evalúa el INCOBRABLE con capital + abono;
   // con el capital ya repuesto lo sumaría dos veces.
-  if (pagoPrevio && mueveCapital(pagoPrevio.validationStatus, pagoPrevio.abono_capital)) {
-    await deps.restituirCapital?.(tx, { pago_id, credito_id, credito: creditoCandado, pago: pagoPrevio });
+  if (conCapital) {
+    await deps.restituirCapital?.(tx, {
+      pago_id, credito_id, credito: creditoCandado, pago: pagoPrevio!, cuotaCerrada: cuota?.pagado === true,
+    });
   }
 
   // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento

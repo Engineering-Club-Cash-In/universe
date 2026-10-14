@@ -270,6 +270,7 @@ describe("un body con registerBy / usuario_id / email / user / usuario_email NO 
     let filas = 0;
     const deps = {
       conLock: async (_id: number, fn: any) => fn({} as never),
+      verificarFoto: async () => null,
       filasVivas: async () => (filas === 0 ? [] : [1]),
       condonacionViva: async () => null,
       condonacionDelIntento: async () => null,
@@ -347,8 +348,8 @@ describe("no existe otra ruta que llegue a condonar por boleta tardía sin pasar
   });
 
   test("boletaTardiaIntentoId (la opción que hace que insertPayment marque filas) solo la pasa boletaTardia; el cuerpo HTTP nunca llega ahí", () => {
-    // anularPagoMora y reversePayment LEEN la marca de la fila (para anular la condonación) o la limpian a null (8/11).
-    expect(quienes(/boletaTardiaIntentoId/)).toEqual(["controllers/anularPagoMora.ts", "controllers/boletaTardia.ts", "controllers/registerPayment.ts", "controllers/reversePayment.ts", "database/db/schema.ts"]);
+    // boletaTardiaFoto solo LEE la columna (excluye al propio intento al buscar fotos reusadas). anularPagoMora y reversePayment LEEN la marca de la fila (para anular la condonación) o la limpian a null (8/11).
+    expect(quienes(/boletaTardiaIntentoId/)).toEqual(["controllers/anularPagoMora.ts", "controllers/boletaTardia.ts", "controllers/boletaTardiaFoto.ts", "controllers/registerPayment.ts", "controllers/reversePayment.ts", "database/db/schema.ts"]);
     for (const archivo of ["controllers/anularPagoMora.ts", "controllers/reversePayment.ts"]) {
       const lineas = readFileSync(join(SRC, archivo), "utf8").split("\n").filter((l) => l.includes("boletaTardiaIntentoId") && !/^\s*(\/\/|\*|\/\*)/.test(l));
       expect(lineas.length).toBeGreaterThan(0);

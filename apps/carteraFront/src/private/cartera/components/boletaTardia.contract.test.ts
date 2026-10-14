@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
-import { cascadaSinCondonar, estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
+import { AVISO_VISTA_PREVIA_FALLIDA, cascadaSinCondonar, confirmacionEsperaVistaPrevia, estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
 
 const form = readFileSync(new URL("./PagoForm.tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("../hooks/registerPayment.ts", import.meta.url), "utf8");
@@ -209,7 +209,7 @@ describe("F7: el aviso de 'Abonar todo a Capital' usa la mora SIN condonar", () 
 
 describe("Codex r1 #11: Confirmar Pago espera la vista previa", () => {
   test("toma isLoading de la vista previa y lo pasa por la lógica pura (error o params null no bloquean)", () => {
-    expect(form).toContain("const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia } = useBoletaTardiaPreview(");
+    expect(form).toContain("const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia } = useBoletaTardiaPreview(");
     expect(form).toContain(
       "const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });",
     );
@@ -219,5 +219,20 @@ describe("Codex r1 #11: Confirmar Pago espera la vista previa", () => {
     const confirmar = region(pie, "onClick={handleConfirmarPago}", "</Button>", "botón confirmar");
     expect(confirmar).toContain("disabled={formik.isSubmitting || esperaVistaPrevia}");
     expect(confirmar).toContain('esperaVistaPrevia ? "Calculando condonación…"');
+  });
+});
+
+describe("la vista previa fallida no bloquea el pago", () => {
+  test("PagoForm lee isError de la consulta y muestra el aviso en la rama de pago normal, junto al recuadro", () => {
+    expect(form).toContain("isError: falloVistaPrevia");
+    expect(ramaPagoNormal).toContain("{falloVistaPrevia && <p role=\"status\"");
+    expect(ramaPagoNormal).toContain("{AVISO_VISTA_PREVIA_FALLIDA}");
+    expect(ramaCancelacion).not.toContain("falloVistaPrevia");
+  });
+  test("el aviso dice que el pago se registra sin condonar, y confirmar solo espera la primera carga (con error no espera)", () => {
+    expect(AVISO_VISTA_PREVIA_FALLIDA).toBe("No se pudo calcular la condonación por boleta tardía; el pago se registra sin condonar.");
+    const params = { credito_id: 1, monto_boleta: 1, otros: 0, abono_directo_capital: 0, fecha_boleta: "2026-10-01" };
+    expect(confirmacionEsperaVistaPrevia({ params, abierto: true, cargando: false })).toBe(false);
+    expect(estadoRecuadroBoletaTardia(undefined, { esCancelacion: false, numeroAutorizacion: "A", bancoId: 1, hayBoleta: true })).toEqual({ tipo: "oculto" });
   });
 });

@@ -136,3 +136,6 @@ export function avisoCondonacionAnulada(respuesta: unknown): string | null {
     ? "El pago se registró, pero el crédito no quedó al día: la condonación se deshizo y la mora sigue vigente."
     : null;
 }
+
+/** Aviso discreto cuando la vista previa de la condonación falló o venció: el pago NO se bloquea, se registra sin condonar. */
+export const AVISO_VISTA_PREVIA_FALLIDA = "No se pudo calcular la condonación por boleta tardía; el pago se registra sin condonar.";

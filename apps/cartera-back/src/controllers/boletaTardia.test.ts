@@ -1,5 +1,6 @@
 import "../utils/baseFalsaParaPruebas";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { motivoCondonacionBoletaTardia } from "../utils/motivoCondonacionBoletaTardia";
 import { condonacionBoletaTardiaSchema, registrarPagoConBoletaTardia, traeCondonacionBoletaTardia, type DepsBoletaTardia } from "./boletaTardia";
 process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
@@ -7,7 +8,7 @@ process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la 
 const explota = (nombre: string) => (() => { throw new Error(`no debía llamarse: ${nombre}`); }) as never;
 const depsQueNoSeUsan: DepsBoletaTardia = {
   conLock: explota("conLock"), insertPayment: explota("insertPayment"), decidir: explota("decidir"), condonar: explota("condonar"),
-  anular: explota("anular"), condonacionDelIntento: explota("condonacionDelIntento"), evaluarAlDia: explota("evaluarAlDia"), filasVivas: explota("filasVivas"), condonacionViva: explota("condonacionViva"),
+  anular: explota("anular"), verificarFoto: explota("verificarFoto"), condonacionDelIntento: explota("condonacionDelIntento"), evaluarAlDia: explota("evaluarAlDia"), filasVivas: explota("filasVivas"), condonacionViva: explota("condonacionViva"),
 };
 const INTENTO = "00000000-0000-4000-8000-000000000001";
 const cuerpo = (extra: Record<string, unknown> = {}) => ({
@@ -90,6 +91,7 @@ describe("identidad del pago: registerBy sale del actor verificado, no del body"
     const vistos: { registerBy?: unknown; actorCondonar?: unknown; actorAnular?: unknown } = {};
     const deps: DepsBoletaTardia = {
       ...depsQueNoSeUsan,
+      verificarFoto: (async () => null) as never,
       conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
       filasVivas: (async () => (++llamadas === 1 ? [] : [99])) as never,
       condonacionViva: (async () => null) as never,
@@ -111,6 +113,7 @@ describe("500 al condonar: no filtra el detalle del error (Drizzle trae consulta
     const secreto = 'Failed query: select "x" from cartera.creditos params: 12345,secreto@x.com';
     const deps: DepsBoletaTardia = {
       ...depsQueNoSeUsan,
+      verificarFoto: (async () => null) as never,
       conLock: (async (_id: number, fn: (l: unknown) => unknown) => fn({})) as never,
       filasVivas: (async () => []) as never,
       condonacionViva: (async () => null) as never,
@@ -131,5 +134,39 @@ describe("500 al condonar: no filtra el detalle del error (Drizzle trae consulta
     expect(JSON.stringify(r)).not.toContain("secreto");
     expect(JSON.stringify(r)).not.toContain("Failed query");
     expect(logs.join("\n")).toContain("Failed query");
+  });
+});
+
+describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
+  const sinLock = (verificarFoto: DepsBoletaTardia["verificarFoto"], vistos: unknown[] = []): DepsBoletaTardia => ({
+    ...depsQueNoSeUsan, verificarFoto: (async (e: unknown) => { vistos.push(e); return verificarFoto(e as never); }) as never,
+  });
+  test("foto rechazada (400): validación en url_boletas, sin tomar el lock ni condonar", async () => {
+    const set: { status?: number } = {};
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "La foto de la boleta ya se usó en otro pago." })));
+    expect(set.status).toBe(400);
+    expect(r.errors.url_boletas).toEqual(["La foto de la boleta ya se usó en otro pago."]);
+  });
+  test("R2 sin responder (503): mensaje claro y nada se escribe", async () => {
+    const set: { status?: number } = {};
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 503, message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación" })));
+    expect(set.status).toBe(503);
+    expect(r).toEqual({ success: false, code: "foto_no_verificada", message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación" });
+  });
+  test("recibe crédito, intento y las llaves tal cual llegaron", async () => {
+    const vistos: unknown[] = [];
+    await registrarPagoConBoletaTardia({ body: cuerpo(), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "x" }), vistos));
+    expect(vistos).toEqual([{ credito_id: 1, intento_id: INTENTO, llaves: ["00000000-0000-4000-8000-000000000001.jpg"] }]);
+  });
+  test("las validaciones de forma (400) corren antes y no gastan una llamada a R2", async () => {
+    const vistos: unknown[] = [];
+    await registrarPagoConBoletaTardia({ body: cuerpo({ url_boletas: ["x"] }), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => null, vistos));
+    expect(vistos).toEqual([]);
+  });
+  test("un pago SIN el bloque no pasa por esta ruta: la verificación vive solo en boletaTardia.ts", () => {
+    expect(traeCondonacionBoletaTardia({ url_boletas: ["x"] })).toBe(false);
+    expect(traeCondonacionBoletaTardia({ condonacionBoletaTardia: null })).toBe(false);
+    const quienes = ["registerPayment.ts", "registerPaymentPolicy.ts", "../routers/payments.ts"].filter((f) => /boletaTardiaFoto/.test(readFileSync(new URL(f, import.meta.url), "utf8")));
+    expect(quienes).toEqual([]);
   });
 });

@@ -109,7 +109,7 @@ async function elegirCreditos(n: number): Promise<number[]> {
 }
 
 const decidirHoy9 = (): any => (entrada: any) => calcular(entrada, { ...depsDecision(), hoy: () => HOY });
-const deps = (o: Record<string, unknown> = {}) => ({ ...depsBT(), decidir: decidirHoy9(), ...o }) as ReturnType<typeof depsBT>;
+const deps = (o: Record<string, unknown> = {}) => ({ ...depsBT(), verificarFoto: async () => null, decidir: decidirHoy9(), ...o }) as ReturnType<typeof depsBT>;
 
 type Prep = { ledger0: { CONDONACION: Big; ANULACION: Big }; credito: number; usuario_id: number; e: ReturnType<typeof esperado>; moraAntes: string; body: any; intento: string };
 async function preparar(credito: number, extra: { sumarMonto?: number } = {}): Promise<Prep> {

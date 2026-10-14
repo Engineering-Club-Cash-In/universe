@@ -64,7 +64,7 @@ const estado = async (sql: Sql, credito: number) => {
 };
 const armar = async (sql: Sql, o: Escritura = {}, d: Partial<DepsBoletaTardia> = {}): Promise<DepsBoletaTardia> => {
   const { depsReales } = await import("./boletaTardia");
-  return { ...depsReales(), decidir: decidirDesdeBd(sql), insertPayment: await insertFalso(sql, o), evaluarAlDia: (async () => ({ desactivarMora: true })) as never, ...d };
+  return { ...depsReales(), decidir: decidirDesdeBd(sql), insertPayment: await insertFalso(sql, o), evaluarAlDia: (async () => ({ desactivarMora: true })) as never, verificarFoto: async () => null, ...d };
 };
 
 integrationTest("camino feliz: condona, registra con el lock en mano (no se cuelga) y deja la condonación vigente", async () => {

@@ -8,6 +8,7 @@ import { validarFechaBoleta, ymdDeFechaCalendario } from "../utils/fechaCalendar
 import { motivoCondonacionBoletaTardia } from "../utils/motivoCondonacionBoletaTardia";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { calcularDecisionBoletaTardia } from "./boletaTardiaDecision";
+import { depsFotoReales, verificarFotoBoleta, type RechazoFoto } from "./boletaTardiaFoto";
 import { anularCondonacionBoletaTardia, condonarMoraDeCuotas, evaluarCreditoAlDia, hoyGuatemala } from "./latefee";
 import { insertPayment } from "./registerPayment";
 import { camposObligatoriosCondonacion, pagoSchema } from "./registerPaymentPolicy";
@@ -24,6 +25,8 @@ export type DepsBoletaTardia = {
   condonar: typeof condonarMoraDeCuotas;
   anular: typeof anularCondonacionBoletaTardia;
   evaluarAlDia: typeof evaluarCreditoAlDia;
+  /** Comprueba en R2 que cada foto de `url_boletas` exista, sea reciente y no sea de otro pago. `null` = pasa. */
+  verificarFoto: (entrada: { credito_id: number; intento_id: string; llaves: string[] }) => Promise<RechazoFoto | null>;
   /** pago_id de las filas VIVAS (paymentFalse = false) de ESE crédito con ese intento. */
   filasVivas: (credito_id: number, intento_id: string) => Promise<number[]>;
   /** Condonación viva (anulada_at IS NULL) de ESE crédito con ese intento. */
@@ -42,6 +45,7 @@ export const depsReales = (): DepsBoletaTardia => ({
   condonar: condonarMoraDeCuotas,
   anular: anularCondonacionBoletaTardia,
   evaluarAlDia: evaluarCreditoAlDia,
+  verificarFoto: (entrada) => verificarFotoBoleta(entrada, depsFotoReales()),
   filasVivas: async (credito_id, intento_id) =>
     (await db.select({ pago_id: pagos_credito.pago_id }).from(pagos_credito).where(and(
       eq(pagos_credito.credito_id, credito_id),
@@ -95,10 +99,19 @@ export async function registrarPagoConBoletaTardia(
   const errorFecha = validarFechaBoleta(p.fecha_boleta, ymdDeFechaCalendario(hoyGuatemala()));
   if (errorFecha) { set.status = 400; return validationFailed({ fecha_boleta: [errorFecha] }); }
 
+  // La foto es el control antifraude: se verifica en R2 ANTES del candado (no se retiene el lock del crédito esperando a la red).
+  const { intentoId, montoAceptado } = bloque.data;
+  const rechazoFoto = await deps.verificarFoto({ credito_id: p.credito_id, intento_id: intentoId, llaves: p.url_boletas });
+  if (rechazoFoto) {
+    set.status = rechazoFoto.status;
+    return rechazoFoto.status === 400
+      ? validationFailed({ url_boletas: [rechazoFoto.message] })
+      : { success: false, code: "foto_no_verificada", message: rechazoFoto.message };
+  }
+
   const actor = opciones.usuarioEmail;
   // El pago también queda a nombre del actor verificado: el `registerBy` del body es declarado por el cliente.
   const body = { ...ctx.body, numeroAutorizacion, registerBy: actor };
-  const { intentoId, montoAceptado } = bloque.data;
   const creditoId = p.credito_id;
 
   return deps.conLock(creditoId, async (paymentLock) => {

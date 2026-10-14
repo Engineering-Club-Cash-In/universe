@@ -85,6 +85,8 @@ const levantar = (url: string): Promise<Entorno> => (listo ??= (async () => {
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
     nexa_payment_event_id integer, createdat timestamp DEFAULT now(),
     "paymentFalse" boolean NOT NULL DEFAULT false, pagado boolean NOT NULL DEFAULT false, fecha_pago timestamp)`;
+  await sql`CREATE TABLE cartera.boletas (id serial PRIMARY KEY, pago_id integer NOT NULL REFERENCES cartera.pagos_credito(pago_id),
+    url_boleta varchar(255) NOT NULL, created_at timestamp DEFAULT now())`;
   for (const archivo of [
     "0043_mora_pagada_cuota.sql", "0051_condonacion_nexa_a_tiempo.sql", "0052_condonacion_nexa_pagos_pendientes.sql",
     "0053_condonacion_boleta_tardia_enum.sql", "0054_condonacion_boleta_tardia_columnas.sql",

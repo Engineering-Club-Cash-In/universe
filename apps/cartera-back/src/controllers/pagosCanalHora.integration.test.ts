@@ -35,7 +35,11 @@ const setup = () => (ready ??= (async () => {
       cuenta_empresa_id integer, fecha_boleta date, fecha_aplicado timestamp, cuota numeric, pagado boolean,
       abono_capital numeric, abono_interes numeric DEFAULT 0, abono_iva_12 numeric, abono_seguro numeric,
       abono_gps numeric, validation_status text, monto_aplicado numeric, origen_pago text,
-      nexa_payment_event_id integer, createdat timestamp DEFAULT now());
+      nexa_payment_event_id integer, createdat timestamp DEFAULT now(), boleta_tardia_intento_id uuid);
+    -- El listado ahora trae la condonación de boleta tardía (condonacionBoletaTardiaSql.ts): sin filas, solo las columnas que lee.
+    CREATE TABLE cartera.platform_users (id serial PRIMARY KEY, email text);
+    CREATE TABLE cartera.moras_condonaciones (condonacion_id serial PRIMARY KEY, credito_id integer, usuario_id integer,
+      intento_id uuid, monto_condonacion numeric, anulada_at timestamp);
     CREATE TABLE cartera.inversionistas (inversionista_id integer PRIMARY KEY, nombre text, emite_factura boolean);
     CREATE TABLE cartera.pagos_credito_inversionistas (pago_id integer, credito_id integer, inversionista_id integer,
       abono_capital numeric, abono_interes numeric, abono_iva_12 numeric, cuota numeric);

@@ -73,6 +73,7 @@ const setup = () => (ready ??= (async () => {
   await sql.unsafe(await migracion("0043_mora_pagada_cuota.sql")).simple();
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   const [{ hoy }] = await sql`SELECT to_char((now() AT TIME ZONE 'America/Guatemala')::date, 'YYYY-MM-DD') AS hoy`;
   return {
     sql,

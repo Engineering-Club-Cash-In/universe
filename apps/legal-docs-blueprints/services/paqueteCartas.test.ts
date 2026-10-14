@@ -84,6 +84,32 @@ describe("unir las cartas", () => {
 		expect(unido.getPageCount()).toBe(4);
 	});
 
+	test("deja afuera las hojas en blanco del final de una carta", async () => {
+		// Como la de carro nuevo en plural con un nombre largo: el último
+		// párrafo vacío se pasa a una hoja nueva, y WeeTrust rechaza el
+		// documento con esa hoja.
+		const conHojaVacia = await PDFDocument.load(
+			await carta(CARTA, "f)________________________", [2]),
+		);
+		conHojaVacia.addPage(CARTA);
+		const [cheques, ...resto] = await tresCartas();
+		const { pdf, composicion } = await unirCartas([
+			cheques,
+			{
+				contractType: ContractType.CARTA_CARRO_NUEVO,
+				label: "Carta de carro nuevo",
+				pdf: Buffer.from(await conHojaVacia.save()),
+			},
+			...resto,
+		]);
+
+		expect(composicion.map((c) => c.paginas)).toEqual([1, 1, 1, 2]);
+		expect((await PDFDocument.load(pdf)).getPageCount()).toBe(5);
+		// Las firmas de las cartas siguientes no se corren.
+		const posiciones = await posicionesDelPaquete(pdf, composicion, FIRMANTES);
+		expect(posiciones.map((p) => p.page)).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+	});
+
 	test("cada página conserva su tamaño", async () => {
 		const { pdf } = await unirCartas(await tresCartas());
 		const unido = await PDFDocument.load(pdf);

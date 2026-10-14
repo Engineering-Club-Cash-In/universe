@@ -9,6 +9,26 @@ import { getRenapData } from "./renap";
 const DOCUMENT_LABEL_OVERRIDES: Record<string, string> = {
   cobertura_inrexsa: "Cobertura Placas Particulares",
   cobertura_inrexsa_comercial: "Cobertura Placas Comerciales",
+  cobertura_gyt: "Cobertura Seguros G&T",
+  // Ventas a nombre de una sociedad.
+  solicitud_compra_vehiculo_tercero_sociedad: "Solicitud Compra Vehículo Tercero (Sociedad)",
+  carta_aceptacion_instalacion_gps_sociedad: "Carta Aceptación Instalación GPS (Sociedad)",
+  carta_traspaso_vehiculo_rdbe_sociedad: "Carta Traspaso Vehículo RDBE (Sociedad)",
+  descargo_responsabilidades_sociedad: "Descargo de Responsabilidades (Sociedad)",
+  cobertura_inrexsa_sociedad: "Cobertura Placas Particulares (Sociedad)",
+  cobertura_inrexsa_comercial_sociedad: "Cobertura Placas Comerciales (Sociedad)",
+  cobertura_gyt_sociedad: "Cobertura Seguros G&T (Sociedad)",
+  reconocimiento_deuda_sociedad: "Reconocimiento de Deuda (Sociedad)",
+  carta_carro_nuevo_sociedad: "Carta Carro Nuevo (Sociedad)",
+  contrato_privado_uso_sociedad: "Contrato Privado de Uso (Sociedad)",
+  pagare_unico_libre_protesto_sociedad: "Pagaré Único Libre de Protesto (Sociedad)",
+  carta_emision_cheques_sociedad: "Carta Emisión de Cheques (Sociedad)",
+  garantia_mobiliaria_sociedad: "Garantía Mobiliaria (Sociedad)",
+  // Derivados del enum quedaban "Anexo1 Confirmacion Participacion".
+  anexo1_confirmacion_participacion: "Anexo 1 - Confirmación de Participación",
+  anexo2_designacion_beneficiario: "Anexo 2 - Designación de Beneficiario",
+  anexo1_confirmacion_participacion_sociedad: "Anexo 1 - Confirmación de Participación (Sociedad)",
+  anexo2_designacion_beneficiario_sociedad: "Anexo 2 - Designación de Beneficiario (Sociedad)",
 };
 
 /**
@@ -28,7 +48,7 @@ function formatDocumentName(name: string): string {
     .join(" ");
 }
 
-export type DocumentCategoria = "ventas" | "inversiones" | "inversiones_sociedad" | "carta_poder";
+export type DocumentCategoria = "ventas" | "inversiones" | "inversiones_sociedad" | "carta_poder" | "ventas_sociedad";
 
 /**
  * 🎯 Controller: Fetch unique document names with both enum and formatted label.

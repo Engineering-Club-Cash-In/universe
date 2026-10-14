@@ -2652,3 +2652,86 @@ describe("updateOpportunity: reenviar el mismo cliente no lo reescribe", () => {
 		expect(escriturasSobreOportunidades()).toEqual([]);
 	});
 });
+
+describe("representante legal de la empresa", () => {
+	const OPORTUNIDAD = "73737373-7373-4373-8373-737373737373";
+	const CODEUDOR = "74747474-7474-4474-8474-747474747474";
+	const DPI = "1234567890101";
+
+	const escriturasSobreCodeudores = () =>
+		escrituras.filter((e) => e.tabla === coDebtors).map((e) => e.valores);
+
+	test("marcarlo en 80% no pasa por los candados del DPI y le quita la marca al anterior", async () => {
+		filasPorTabla.set(opportunities, [
+			{ id: OPORTUNIDAD, status: "open", closurePercentage: 80 },
+		]);
+		filasPorTabla.set(coDebtors, [{ opportunityId: OPORTUNIDAD }]);
+		filasDevueltasPorUpdate = [
+			{
+				id: CODEUDOR,
+				opportunityId: OPORTUNIDAD,
+				dpi: DPI,
+				esRepresentanteLegal: false,
+			},
+		];
+
+		await invocar(
+			crmRouter.updateCoDebtor,
+			{ id: CODEUDOR, esRepresentanteLegal: true },
+			contextoDe("juridico", "juridico"),
+		);
+
+		const [, quitarAlAnterior, marcar] = escriturasSobreCodeudores();
+		expect(quitarAlAnterior).toMatchObject({ esRepresentanteLegal: false });
+		expect(marcar).toEqual({ esRepresentanteLegal: true });
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	test("si ya era el representante no se reescribe la marca", async () => {
+		filasPorTabla.set(coDebtors, [{ opportunityId: OPORTUNIDAD }]);
+		filasDevueltasPorUpdate = [
+			{ id: CODEUDOR, opportunityId: OPORTUNIDAD, esRepresentanteLegal: true },
+		];
+
+		await invocar(
+			crmRouter.updateCoDebtor,
+			{ id: CODEUDOR, esRepresentanteLegal: true },
+			contextoDe("vendedor", "sales"),
+		);
+
+		expect(escriturasSobreCodeudores()).toHaveLength(1);
+	});
+
+	test("darlo de alta como representante le quita la marca al anterior antes del insert", async () => {
+		filasPorTabla.set(opportunities, [
+			{ id: OPORTUNIDAD, status: "open", closurePercentage: 30 },
+		]);
+		const anterior = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "false";
+		try {
+			await invocar(
+				crmRouter.createCoDebtor,
+				{
+					opportunityId: OPORTUNIDAD,
+					fullName: "Representante",
+					dpi: DPI,
+					esRepresentanteLegal: true,
+				},
+				contextoDe("vendedor", "sales"),
+			);
+		} finally {
+			if (anterior === undefined)
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			else process.env.ENABLE_CARTERA_BACK_INTEGRATION = anterior;
+		}
+
+		const sobreCodeudores = escrituras.filter((e) => e.tabla === coDebtors);
+		expect(sobreCodeudores.map((e) => e.tipo)).toEqual(["update", "insert"]);
+		expect(sobreCodeudores[0].valores).toMatchObject({
+			esRepresentanteLegal: false,
+		});
+		expect(sobreCodeudores[1].valores).toMatchObject({
+			esRepresentanteLegal: true,
+		});
+	});
+});

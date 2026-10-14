@@ -15,15 +15,22 @@ import type {
 } from "./historial";
 import {
 	type ConvenioFuente,
+	type DocumentoFuente,
 	type InmovilizacionFuente,
 	type InmovilizacionHistorialFuente,
+	ordenarPorAntiguedad,
+	type RebajaFuente,
 	type RecuperacionFuente,
 	type Solicitud,
+	solicitudDeDocumento,
+	solicitudDeRebaja,
 	solicitudesDeFuentes,
 } from "./normalizar";
 
 /** Convenios por aprobar que trae una consulta (mismo input que el Dashboard). */
 export const CONVENIOS_POR_CONSULTA = 100;
+/** Rebajas que el supervisor todavía puede resolver. */
+const ESTADOS_REBAJA_ACCIONABLES = ["pendiente", "error_aplicacion"];
 /** Apagados y reactivaciones del historial por cada «Cargar más». */
 export const INMOVILIZACIONES_POR_PAGINA = 50;
 
@@ -51,6 +58,35 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 		refetchOnWindowFocus: false,
 	});
 
+	const rebajas = useQuery({
+		// Sin filtro de estado: las abiertas van primero, y una que falló al
+		// aplicarse (`error_aplicacion`) sigue esperando al supervisor.
+		...orpc.getSolicitudesRebajaMora.queryOptions({
+			input: { limite: 200 },
+		}),
+		enabled: habilitado,
+		refetchOnWindowFocus: false,
+	});
+	const documentos = useQuery({
+		...orpcAparte.getSolicitudesDocumentos.queryOptions({
+			input: { estado: "pendiente" },
+		}),
+		enabled: habilitado,
+		refetchOnWindowFocus: false,
+	});
+	const extras = useMemo(
+		() =>
+			ordenarPorAntiguedad([
+				...((rebajas.data ?? []) as unknown as RebajaFuente[])
+					.filter((r) => ESTADOS_REBAJA_ACCIONABLES.includes(r.estado))
+					.map(solicitudDeRebaja),
+				...((documentos.data ?? []) as unknown as DocumentoFuente[]).map(
+					solicitudDeDocumento,
+				),
+			]),
+		[rebajas.data, documentos.data],
+	);
+
 	const datos = useMemo(
 		() =>
 			solicitudesDeFuentes({
@@ -69,27 +105,37 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 	return {
 		pendientes: datos.pendientes,
 		porEjecutar: datos.porEjecutar,
+		/** Rebajas de mora y documentos pendientes (filas sin Espacio de aprobación). */
+		extras,
 		/** Hay más convenios por aprobar de los que entraron en la consulta. */
 		conveniosFuera:
 			totalConvenios > conveniosTraidos ? totalConvenios - conveniosTraidos : 0,
 		cargando:
 			convenios.isLoading ||
 			recuperaciones.isLoading ||
-			inmovilizaciones.isLoading,
+			inmovilizaciones.isLoading ||
+			rebajas.isLoading ||
+			documentos.isLoading,
 		/** Fuentes que fallaron (las demás se muestran igual). */
 		errores: [
 			convenios.isError ? "convenios" : null,
 			recuperaciones.isError ? "recuperaciones del vehículo" : null,
 			inmovilizaciones.isError ? "apagados y reactivaciones" : null,
+			rebajas.isError ? "rebajas de mora" : null,
+			documentos.isError ? "solicitudes de documentos" : null,
 		].filter((e): e is string => e !== null),
 		actualizando:
 			convenios.isFetching ||
 			recuperaciones.isFetching ||
-			inmovilizaciones.isFetching,
+			inmovilizaciones.isFetching ||
+			rebajas.isFetching ||
+			documentos.isFetching,
 		refetch: () => {
 			void convenios.refetch();
 			void recuperaciones.refetch();
 			void inmovilizaciones.refetch();
+			void rebajas.refetch();
+			void documentos.refetch();
 		},
 		refetchConvenios: () => void convenios.refetch(),
 		/** Historial de recuperaciones (viene en la misma consulta). */

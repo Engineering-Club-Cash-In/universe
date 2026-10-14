@@ -5602,6 +5602,8 @@ export const cobrosRouter = {
 								montoBoleta: fila.monto_boleta ?? null,
 								montoAplicado: fila.monto_aplicado ?? null,
 								fechaPago: fila.fecha_pago ?? null,
+								// Estado de contabilidad del pago ("pending" = sin validar).
+								validationStatus: fila.validationStatus ?? null,
 								// validado = pagó completo y conta ya dio fe (o no hacía
 								// falta); en_validacion = completo esperando a conta;
 								// parcial = abonó pero la cuota sigue abierta.

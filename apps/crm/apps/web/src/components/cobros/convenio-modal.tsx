@@ -19,10 +19,9 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Handshake, Loader, Paperclip } from "lucide-react";
+import { Handshake, Loader } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { CrmPill } from "@/components/ds/cards-credito";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -74,6 +73,12 @@ interface ConvenioModalProps {
 	/** Tope de meses (getConvenioConfig). */
 	maxMeses: number;
 	/**
+	 * Workspace: pagos de HOY del crédito que pueden entrar como abono inicial
+	 * (ya validados por contabilidad). Se registran antes, como pago normal con
+	 * su comprobante; aquí solo se elige cuál descuenta el convenio.
+	 */
+	abonos?: AbonoConvenio[];
+	/**
 	 * Se llama tras crear con éxito, ANTES de cerrar — el padre refresca.
 	 * Recibe lo que devolvió cartera (montos, meses, si queda pendiente de
 	 * activación): el Workspace lo usa para el resumen de «Gestión registrada».
@@ -83,6 +88,15 @@ interface ConvenioModalProps {
 	embebido?: boolean;
 	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
 	onCancelar?: () => void;
+}
+
+/** Un pago del día que puede descontarse del convenio (`abonoInicialPagoId`). */
+export interface AbonoConvenio {
+	pagoId: number;
+	/** Monto del pago (el de la boleta), para mostrarlo. */
+	monto: number;
+	/** Lo que el pago aplicó a cada cuota (por `cuotaId`). */
+	aplicadoPorCuota: Record<number, number>;
 }
 
 /**
@@ -98,6 +112,7 @@ export interface ResultadoConvenio {
 	numeroMeses: number;
 	cantidadCuotas: number;
 	pendienteActivacion: boolean;
+	abonoInicialPagoId?: number | null;
 }
 
 const Q = (n: number) =>
@@ -115,6 +130,7 @@ export function ConvenioModal({
 	cuotaMensual,
 	montoMora,
 	maxMeses,
+	abonos = [],
 	onCreado,
 	embebido = false,
 	onCancelar,
@@ -139,6 +155,7 @@ export function ConvenioModal({
 	const [meses, setMeses] = useState<number>(1);
 	const [motivo, setMotivo] = useState("");
 	const [observaciones, setObservaciones] = useState("");
+	const [abonoId, setAbonoId] = useState<number | null>(null);
 
 	// Cada vez que se abre arranca limpio, con las vencidas preseleccionadas:
 	// es lo que casi siempre entra al convenio (las "1 y 2" que ya no pagó).
@@ -154,6 +171,7 @@ export function ConvenioModal({
 		setMeses(1);
 		setMotivo("");
 		setObservaciones("");
+		setAbonoId(null);
 	}, [abierto]);
 
 	// Embebido: el Workspace puede montar el formulario mientras el plan de
@@ -178,7 +196,21 @@ export function ConvenioModal({
 	const totalCuotas = seleccionadas.reduce((acc, c) => acc + c.monto, 0);
 	// El total NO se edita (pedido del PM, 2026-10-01): son las cuotas que se
 	// marquen más la mora. Para cambiarlo se marcan o desmarcan cuotas.
-	const total = Math.round((totalCuotas + montoMora) * 100) / 100;
+	// Con un abono inicial el convenio cubre solo el remanente. Se descuenta lo
+	// que el abono aplicó a las cuotas elegidas: la parte que fue a mora ya
+	// está en `montoMora`, que es la mora vigente.
+	const abono = abonos.find((a) => a.pagoId === abonoId) ?? null;
+	const descuentoAbono = abono
+		? seleccionadas.reduce(
+				(acc, c) => acc + (abono.aplicadoPorCuota[c.cuotaId] ?? 0),
+				0,
+			)
+		: 0;
+	const totalSinAbono = Math.round((totalCuotas + montoMora) * 100) / 100;
+	const total = Math.max(
+		0,
+		Math.round((totalSinAbono - descuentoAbono) * 100) / 100,
+	);
 	const cuotaConvenio = meses > 0 ? total / meses : 0;
 
 	const toggle = (cuotaId: number) =>
@@ -202,6 +234,7 @@ export function ConvenioModal({
 				// se abrió el modal y se confirmó, el convenio nacía por una
 				// cifra distinta a la aprobada (hallazgo de Codex, PR #1570).
 				montoTotal: total,
+				...(abono ? { abonoInicialPagoId: abono.pagoId } : {}),
 			})) as ResultadoConvenio,
 		onSuccess: (r) => {
 			toast.success(
@@ -458,36 +491,49 @@ export function ConvenioModal({
 			</div>
 
 			{embebido && (
-				// TODO(José) · tarea W4: abono inicial con comprobante dentro del convenio (docs/features/cobros-02/16-workspace-backend.md)
-				// El Figma («Convenio flexible») lo muestra; mientras el backend no
-				// exista va deshabilitado y no se envía nada.
 				<div className="space-y-2 rounded-md border border-dashed p-3">
-					<div className="flex flex-wrap items-center gap-2">
-						<Label
-							htmlFor="convenio-abono-hoy"
-							className="text-muted-foreground"
-						>
-							Monto abonado hoy (opcional)
-						</Label>
-						<CrmPill
-							tone="neutral"
-							kind="chip"
-							dot={false}
-							className="px-2 py-0.5"
-						>
-							Pronto
-						</CrmPill>
-					</div>
-					<CurrencyInput
-						id="convenio-abono-hoy"
-						value=""
-						onChange={() => {}}
-						disabled
-					/>
-					<Button type="button" variant="outline" size="sm" disabled>
-						<Paperclip className="mr-1.5 h-3.5 w-3.5" />
-						Adjuntar comprobante
-					</Button>
+					<Label htmlFor="convenio-abono-hoy">Abono de hoy (opcional)</Label>
+					{abonos.length === 0 ? (
+						<p className="text-muted-foreground text-xs">
+							El cliente no tiene abonos validados hoy. Para descontar un abono,
+							regístrelo primero como pago con su comprobante y espere la
+							validación de contabilidad.
+						</p>
+					) : (
+						<>
+							<Select
+								value={abonoId === null ? "ninguno" : String(abonoId)}
+								onValueChange={(v) =>
+									setAbonoId(v === "ninguno" ? null : Number(v))
+								}
+							>
+								<SelectTrigger id="convenio-abono-hoy">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="ninguno">Sin abono inicial</SelectItem>
+									{abonos.map((a) => (
+										<SelectItem key={a.pagoId} value={String(a.pagoId)}>
+											Pago #{a.pagoId} · {Q(a.monto)}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							{abono && total > 0 ? (
+								<p className="text-muted-foreground text-xs">
+									{descuentoAbono > 0
+										? `Se descuentan ${Q(descuentoAbono)} del total: el convenio cubre solo el remanente de ${Q(total)}.`
+										: "Este abono no se aplicó a las cuotas seleccionadas; la mora ya lo refleja, así que el total no cambia."}
+								</p>
+							) : null}
+							{abono && total <= 0 && seleccion.length > 0 ? (
+								<p className="text-danger-text text-xs">
+									El abono cubre todo lo seleccionado: no queda deuda para el
+									convenio. Elija otro abono o quite el abono inicial.
+								</p>
+							) : null}
+						</>
+					)}
 				</div>
 			)}
 

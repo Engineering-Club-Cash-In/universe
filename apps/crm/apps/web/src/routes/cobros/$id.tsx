@@ -113,6 +113,10 @@ import {
 	type VisitaRegistrada,
 } from "@/components/cobros/visita-dialog";
 import { type Visita, VisitasCard } from "@/components/cobros/visitas-card";
+import {
+	useMarcarAlertaLeida,
+	VerAlertasLeidas,
+} from "@/components/cobros/workspace/alertas-leidas";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	type Bucket,
@@ -858,6 +862,7 @@ function RouteComponent() {
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
 	});
+	const marcarAlertaLeida = useMarcarAlertaLeida(casoDetails.data?.id);
 	const alertasCaso =
 		(alertasCasoQuery.data as
 			| Array<{
@@ -2948,13 +2953,15 @@ function RouteComponent() {
 																{a.repeticiones > 1 &&
 																	` · ${a.repeticiones} avisos desde ${formatFechaGT(new Date(a.desde))}`}
 															</p>
-															{/* TODO(José) · tarea W5: marcar la alerta como leída. */}
 															<Button
 																type="button"
 																variant="text"
 																size="sm"
-																disabled
-																title="Pronto"
+																disabled={
+																	marcarAlertaLeida.isPending &&
+																	marcarAlertaLeida.variables === a.id
+																}
+																onClick={() => marcarAlertaLeida.mutate(a.id)}
 																className="h-auto shrink-0 px-0 text-[11px]"
 															>
 																Marcar como leída
@@ -2963,21 +2970,17 @@ function RouteComponent() {
 													</div>
 												);
 											})}
-											{/* TODO(José) · tarea W5: alertas leídas del caso. */}
 											<div className="flex items-center gap-2 pt-1">
-												<Button
-													type="button"
-													variant="text"
-													size="sm"
-													disabled
-													className="h-auto px-0"
-												>
-													Ver alertas leídas
-												</Button>
-												<Badge variant="secondary">Pronto</Badge>
+												<VerAlertasLeidas casoCobroId={caso.id} />
 											</div>
 										</CardContent>
 									</Card>
+								)}
+								{/* Sin alertas abiertas, las leídas siguen consultables. */}
+								{caso.id && alertasCaso.length === 0 && (
+									<div className="flex items-center">
+										<VerAlertasLeidas casoCobroId={caso.id} />
+									</div>
 								)}
 								<CardContactoResumen
 									onVerTodo={() => setVista("contacto")}

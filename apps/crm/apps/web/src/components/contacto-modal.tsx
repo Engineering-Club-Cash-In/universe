@@ -763,8 +763,8 @@ export function ContactoModal({
 				montoComprometido:
 					normalizeForSubmit(data.montoComprometido) || undefined,
 				proximoPaso: data.proximoPaso || undefined,
-				// Stubs W1 del Workspace: el server los acepta y hoy los ignora
-				// (TODO José · tarea W1). `direccion` y `participante` solo viajan
+				// Datos de la gestión del Workspace (W1): el server los guarda.
+				// `direccion` y `participante` solo viajan
 				// si el Workspace los dio; `telefonoContactado` viaja con el que dio
 				// el Workspace o, en embebido por teléfono (llamada, WhatsApp, SMS),
 				// con el que el asesor tenga seleccionado.

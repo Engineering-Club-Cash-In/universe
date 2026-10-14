@@ -51,7 +51,9 @@ export type AccionDirecta =
 	| "recepcion"
 	| "seguimiento"
 	| "deshacer-convenio"
-	| "carta-notarial";
+	| "carta-notarial"
+	| "rebaja"
+	| "juridico";
 
 /** Las gestiones de contacto del grupo «Contacto» (pedido U1). */
 export type InicioContacto =
@@ -96,6 +98,10 @@ export function tituloAccion(
 			return "Deshacer convenio de pago";
 		case "carta-notarial":
 			return "Carta notarial";
+		case "rebaja":
+			return "Solicitar rebaja de mora";
+		case "juridico":
+			return "Escalar a Jurídico";
 	}
 }
 
@@ -157,16 +163,23 @@ export function accionEntrega(
 	};
 }
 
-/** «Escalar a Jurídico»: no existe todavía (Pronto). */
-export function accionJuridico(): AccionGestion {
+/** «Escalar a Jurídico»: cartera solo lo acepta en B3 y B4 (el servidor lo valida). */
+export function accionJuridico(
+	caso: Pick<CasoWorkspace, "bucket">,
+	onClick: () => void,
+): AccionGestion {
+	const nivel = nivelDelCaso(caso);
 	return {
 		id: "juridico",
 		icono: Scale,
 		titulo: "Escalar a Jurídico",
 		subtitulo: "Sin acuerdo ni recuperación: el caso pasa al área legal",
 		tono: "danger",
-		// TODO(José) · tarea W3: escalar a Jurídico de forma manual.
-		pronto: true,
+		motivoBloqueo:
+			nivel === 3 || nivel === 4
+				? undefined
+				: "Cartera solo acepta escalar a Jurídico en los buckets B3 y B4.",
+		onClick,
 	};
 }
 
@@ -326,8 +339,8 @@ export function gruposDelInicio(
 		icono: Percent,
 		titulo: "Solicitar rebaja de mora",
 		subtitulo: "Requiere la aprobación del supervisor",
-		// TODO(José) · tarea W2: solicitud de rebaja de mora.
-		pronto: true,
+		motivoBloqueo: motivoSinMora(caso),
+		onClick: () => abrir("rebaja"),
 	});
 
 	// ── Campo y rescate (B2 en adelante) ─────────────────────────────────────
@@ -353,7 +366,7 @@ export function gruposDelInicio(
 				onClick: () => abrir("recepcion"),
 			});
 		}
-		if (nivel >= 3) filas.push(accionJuridico());
+		if (nivel >= 3) filas.push(accionJuridico(caso, () => abrir("juridico")));
 		if (filas.length > 0) {
 			vehiculo = { id: "vehiculo", titulo: "Vehículo", acciones: filas };
 		}
@@ -414,7 +427,8 @@ export type OpcionAcuerdo =
 	| "pago"
 	| "comprobante"
 	| "convenio"
-	| "entrega";
+	| "entrega"
+	| "rebaja";
 
 export function tituloOpcionAcuerdo(
 	opcion: OpcionAcuerdo,
@@ -433,6 +447,8 @@ export function tituloOpcionAcuerdo(
 			return "Convenio de pago";
 		case "entrega":
 			return "Entrega voluntaria";
+		case "rebaja":
+			return "Solicitar rebaja de mora";
 	}
 }
 
@@ -447,6 +463,12 @@ function motivoSinPromesa(caso: CasoWorkspace): string | undefined {
 	return p.cuotasDisponibles.length === 0 && p.montoMora <= 0
 		? "El crédito está al día: no tiene cuotas vencidas ni mora que prometer."
 		: undefined;
+}
+
+function motivoSinMora(caso: CasoWorkspace): string | undefined {
+	return caso.mora.monto > 0
+		? undefined
+		: "El caso no tiene mora acumulada para rebajar.";
 }
 
 export function opcionesDeAcuerdo(
@@ -515,8 +537,8 @@ export function opcionesDeAcuerdo(
 			icono: Percent,
 			titulo: "Solicitar rebaja de mora",
 			subtitulo: "Requiere la aprobación del supervisor",
-			// TODO(José) · tarea W2: solicitud de rebaja de mora.
-			pronto: true,
+			motivoBloqueo: motivoSinMora(caso),
+			onClick: () => elegir("rebaja"),
 		},
 	};
 }

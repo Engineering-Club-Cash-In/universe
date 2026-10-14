@@ -32,7 +32,9 @@ import {
 } from "@/lib/cobros/referencias";
 import { formatoQuetzales } from "@/lib/cobros/reglas-caso";
 import type { ConvenioDeshecho } from "./deshacer-convenio";
+import type { EscaladaJuridico } from "./escalar-juridico";
 import { etiquetaResultado, hoyConHora } from "./piezas";
+import type { RebajaSolicitada } from "./rebaja-mora";
 import type {
 	AvisoResumen,
 	FilaResumen,
@@ -274,6 +276,36 @@ export function resumenConvenioDeshecho(
 				? [{ label: "Cuotas vencidas", valor: String(r.cuotasAtrasadas) }]
 				: []),
 			{ label: "Motivo", valor: r.motivo },
+			registrada(),
+		],
+	};
+}
+
+export function resumenRebajaMora(r: RebajaSolicitada): ResumenRegistrada {
+	return {
+		titulo: "Rebaja de mora solicitada",
+		subtitulo: "El supervisor la aprueba o la rechaza.",
+		chip: { texto: "Pendiente de aprobación · hoy", tono: "warning" },
+		filas: [
+			{ label: "Monto solicitado", valor: formatoQuetzales(r.monto) },
+			{ label: "Mora al pedir", valor: formatoQuetzales(r.moraSnapshot) },
+			{ label: "Motivo", valor: r.notas },
+			registrada(),
+		],
+	};
+}
+
+export function resumenEscaladaJuridico(
+	r: EscaladaJuridico,
+): ResumenRegistrada {
+	return {
+		titulo: "Escalada a Jurídico solicitada",
+		subtitulo: "El supervisor la aprueba o la rechaza.",
+		chip: { texto: "Pendiente de aprobación · hoy", tono: "warning" },
+		filas: [
+			{ label: "Motivo", valor: r.motivo },
+			{ label: "Bucket al pedir", valor: r.bucket },
+			{ label: "Nota", valor: r.nota },
 			registrada(),
 		],
 	};

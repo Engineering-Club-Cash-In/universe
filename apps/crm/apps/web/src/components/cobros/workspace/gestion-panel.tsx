@@ -39,7 +39,10 @@ import {
 	AccionPendienteCelda,
 	fechaLarga,
 } from "@/components/cobros/asesor/fila-cartera";
-import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import {
+	type AbonoConvenio,
+	ConvenioModal,
+} from "@/components/cobros/convenio-modal";
 import { SolicitarInmovilizacionModal } from "@/components/cobros/inmovilizacion-solicitar-modal";
 import { InvestigacionRedesDialog } from "@/components/cobros/investigacion-redes-dialog";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -51,6 +54,7 @@ import {
 } from "@/components/cobros/referencias-dialogs";
 import { RegistrarPagoForm } from "@/components/cobros/registrar-pago-form";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
+import { hoyGT } from "@/components/cobros/supervision/formato";
 import {
 	VisitaDialog,
 	type VisitaProgramadaParaCompletar,
@@ -87,6 +91,7 @@ import {
 	telefonosValidos,
 } from "./gestion/contacto-valido";
 import { DeshacerConvenioForm } from "./gestion/deshacer-convenio";
+import { EscalarJuridicoForm } from "./gestion/escalar-juridico";
 import { InicioGestionVista } from "./gestion/inicio";
 import {
 	OpcionesAcuerdo,
@@ -103,6 +108,7 @@ import {
 	ListaGestiones,
 	PasoGestion,
 } from "./gestion/piezas";
+import { RebajaMoraForm } from "./gestion/rebaja-mora";
 import {
 	GestionRegistradaVista,
 	MensajeEnviadoVista,
@@ -114,9 +120,11 @@ import {
 	resumenContacto,
 	resumenConvenio,
 	resumenConvenioDeshecho,
+	resumenEscaladaJuridico,
 	resumenInvestigacion,
 	resumenLinksPagalo,
 	resumenPago,
+	resumenRebajaMora,
 	resumenRecepcion,
 	resumenRecuperacion,
 	resumenReferencia,
@@ -209,6 +217,46 @@ function pasoEnCurso(p: Paso): boolean {
 	}
 }
 
+/** Estados de contabilidad con los que cartera acepta un abono inicial. */
+const VALIDACION_ABONO = ["validated", "capital_validated"];
+
+/**
+ * Pagos de hoy (día de Guatemala) que contabilidad ya validó: los que pueden
+ * descontarse como abono inicial del convenio. Un pago repartido en varias
+ * cuotas aparece una vez; `aplicadoPorCuota` guarda cuánto cayó en cada una,
+ * porque solo eso baja el total de las cuotas elegidas (la parte que fue a
+ * mora ya está en la mora vigente).
+ */
+function abonosDeHoy(plan: CasoWorkspace["cuotas"]["plan"]): AbonoConvenio[] {
+	const hoy = hoyGT();
+	const porId = new Map<number, AbonoConvenio>();
+	for (const cuota of plan) {
+		const cuotaId = Number(cuota.id);
+		for (const p of cuota.pagos ?? []) {
+			if (p.pagoId === undefined) continue;
+			if (!VALIDACION_ABONO.includes(p.validationStatus ?? "")) continue;
+			// `fecha_pago` ya viene en hora de Guatemala (sin zona): el día es la
+			// parte de la fecha, sin convertirla otra vez (igual que cartera).
+			if (!p.fechaPago || p.fechaPago.slice(0, 10) !== hoy) continue;
+			const aplicado = Number(p.montoAplicado ?? 0);
+			const boleta = Number(p.montoBoleta ?? 0);
+			const monto = boleta > 0 ? boleta : aplicado;
+			if (!(monto > 0)) continue;
+			const abono = porId.get(p.pagoId) ?? {
+				pagoId: p.pagoId,
+				monto,
+				aplicadoPorCuota: {},
+			};
+			if (aplicado > 0 && Number.isFinite(cuotaId)) {
+				abono.aplicadoPorCuota[cuotaId] =
+					(abono.aplicadoPorCuota[cuotaId] ?? 0) + aplicado;
+			}
+			porId.set(p.pagoId, abono);
+		}
+	}
+	return [...porId.values()];
+}
+
 const NOMBRE_METODO: Record<CanalGestion["metodo"], string> = {
 	llamada: "Llamada",
 	whatsapp: "WhatsApp",
@@ -264,7 +312,7 @@ function participantesDelCaso(caso: CasoWorkspace): ParticipanteGestion[] {
 		correoInvalido:
 			!!caso.contacto.email && correoDeRelleno(caso.contacto.email),
 	};
-	// Codeudores: TODO(José) · tarea F2 (hoy `codeudores` llega null).
+	// Codeudores del crédito (`getFichaComplementos`, F2).
 	const codeudores: ParticipanteGestion[] = (
 		caso.complementos?.codeudores ?? []
 	).map((c) => {
@@ -581,7 +629,8 @@ export function GestionPanel({
 					accionEntrega(caso, () => abrirDirecta("entrega")),
 				);
 			}
-			if (nivelDelCaso(caso) >= 3) accesos.push(accionJuridico());
+			if (nivelDelCaso(caso) >= 3)
+				accesos.push(accionJuridico(caso, () => abrirDirecta("juridico")));
 		}
 		return (
 			<VisitaProgramadaTarjeta
@@ -907,6 +956,21 @@ export function GestionPanel({
 							),
 					);
 					break;
+				case "rebaja":
+					cuerpo = (
+						<RebajaMoraForm
+							casoCobroId={casoCobroId}
+							moraActual={caso.mora.monto}
+							onCancelar={cancelar}
+							onExito={(r) => {
+								registrar(resumenRebajaMora(r));
+								void registrarLlamadaDelAcuerdo(
+									"solicitud de rebaja de mora, pendiente de la aprobación del supervisor",
+								);
+							}}
+						/>
+					);
+					break;
 			}
 		} else {
 			formulario = true;
@@ -1152,6 +1216,7 @@ export function GestionPanel({
 				cuotaMensual={caso.convenio.cuotaMensual}
 				montoMora={caso.convenio.montoMora}
 				maxMeses={caso.convenio.maxMeses}
+				abonos={abonosDeHoy(caso.cuotas.plan)}
 				embebido
 				onCancelar={cancelar}
 				onCreado={(r) => {
@@ -1361,6 +1426,25 @@ export function GestionPanel({
 					/>
 				) : (
 					<SinDatos texto="Este caso no tiene un convenio vigente que se pueda deshacer." />
+				);
+				break;
+			case "rebaja":
+				cuerpo = (
+					<RebajaMoraForm
+						casoCobroId={casoCobroId}
+						moraActual={caso.mora.monto}
+						onCancelar={volver}
+						onExito={(r) => registrar(resumenRebajaMora(r))}
+					/>
+				);
+				break;
+			case "juridico":
+				cuerpo = (
+					<EscalarJuridicoForm
+						casoCobroId={casoCobroId}
+						onCancelar={volver}
+						onExito={(r) => registrar(resumenEscaladaJuridico(r))}
+					/>
 				);
 				break;
 			case "carta-notarial":

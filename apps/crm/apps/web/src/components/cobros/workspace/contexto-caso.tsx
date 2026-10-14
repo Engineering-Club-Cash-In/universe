@@ -107,8 +107,8 @@ import {
 } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 import { client } from "@/utils/orpc";
+import { useMarcarAlertaLeida, VerAlertasLeidas } from "./alertas-leidas";
 import { correoDeRelleno, telefonoDeRelleno } from "./gestion/contacto-valido";
-import { ChipPronto } from "./gestion/piezas";
 import type {
 	CasoWorkspace,
 	CuotaPlan,
@@ -201,8 +201,10 @@ export type ResumenContexto = {
 	 * «Cliente subió de bucket»…): van en un desplegable CERRADO por defecto.
 	 */
 	alertasCaso?: AlertaContexto[];
-	/** Reemplaza el pie del desplegable de alertas («Ver alertas leídas · Pronto»). */
+	/** Reemplaza el pie del desplegable de alertas («Ver alertas leídas»). */
 	pieAlertasCaso?: React.ReactNode;
+	/** Caso al que pertenecen las alertas: marcar como leída y ver las leídas. */
+	casoCobroId?: string | null;
 	contacto: {
 		/** `href` null = dato de relleno («00000000»): sin enlace, «Dato no válido». */
 		telefonos: Array<{ texto: string; href: string | null }>;
@@ -513,6 +515,7 @@ function PestanaResumen({
 	alertas,
 	alertasCaso = [],
 	pieAlertasCaso,
+	casoCobroId,
 	contacto,
 	vehiculoRecuperar,
 }: ResumenContexto) {
@@ -552,7 +555,16 @@ function PestanaResumen({
 			) : null}
 
 			{alertasCaso.length > 0 ? (
-				<AlertasCasoDesplegable alertas={alertasCaso} pie={pieAlertasCaso} />
+				<AlertasCasoDesplegable
+					alertas={alertasCaso}
+					pie={pieAlertasCaso}
+					casoCobroId={casoCobroId}
+				/>
+			) : casoCobroId ? (
+				// Sin alertas abiertas: las leídas siguen consultables.
+				<div className="flex items-center px-1">
+					<VerAlertasLeidas casoCobroId={casoCobroId} />
+				</div>
 			) : null}
 
 			{vehiculoRecuperar ? (
@@ -698,16 +710,19 @@ function PestanaResumen({
 /**
  * Las alertas del caso en UNA fila compacta, cerrada por defecto
  * («⚠ Alertas del caso · 3 ▾»). No están en el Figma: abiertas tapaban el
- * resumen. Al abrirla muestra la lista y, al pie, «Ver alertas leídas» (W5, «Pronto») o `pie` si se pasa.
+ * resumen. Al abrirla muestra la lista y, al pie, «Ver alertas leídas» o `pie` si se pasa.
  */
 function AlertasCasoDesplegable({
 	alertas,
 	pie,
+	casoCobroId,
 }: {
 	alertas: AlertaContexto[];
 	pie?: React.ReactNode;
+	casoCobroId?: string | null;
 }) {
 	const [abierto, setAbierto] = React.useState(false);
+	const marcarLeida = useMarcarAlertaLeida(casoCobroId);
 	const listaId = React.useId();
 	return (
 		<div className="flex flex-col overflow-hidden rounded-lg border border-line-subtle bg-surface">
@@ -756,15 +771,17 @@ function AlertasCasoDesplegable({
 										</span>
 									) : null}
 								</div>
-								{/* TODO(José) · tarea W5: marcar como leído el grupo de esta
-								    alerta (docs/features/cobros-02/16-workspace-backend.md). */}
 								<Button
 									type="button"
 									variant="ghost"
 									size="icon"
-									disabled
-									title="Marcar como leída · Pronto"
-									aria-label={`Marcar como leída: ${a.titulo} (pronto)`}
+									disabled={
+										!casoCobroId ||
+										(marcarLeida.isPending && marcarLeida.variables === a.id)
+									}
+									onClick={() => marcarLeida.mutate(a.id)}
+									title="Marcar como leída"
+									aria-label={`Marcar como leída: ${a.titulo}`}
 									className="size-7 shrink-0 text-fg-tertiary"
 								>
 									<CheckCheck className="size-3.5" />
@@ -773,21 +790,7 @@ function AlertasCasoDesplegable({
 						))}
 					</ul>
 					<div className="flex items-center gap-2 border-line-subtle border-t px-3 py-2">
-						{pie ?? (
-							// TODO(José) · tarea W5: alertas leídas del caso.
-							<>
-								<Button
-									type="button"
-									variant="text"
-									size="sm"
-									disabled
-									className="h-auto px-0"
-								>
-									Ver alertas leídas
-								</Button>
-								<ChipPronto />
-							</>
-						)}
+						{pie ?? <VerAlertasLeidas casoCobroId={casoCobroId} />}
 					</div>
 				</div>
 			) : null}
@@ -1517,6 +1520,7 @@ export function propsContextoDeCaso(
 			cobroHoy: cobro,
 			alertas,
 			alertasCaso,
+			casoCobroId: identidad.casoCobroId,
 			contacto: {
 				telefonos: caso.contacto.telefonos.map((t) => ({
 					texto: t,

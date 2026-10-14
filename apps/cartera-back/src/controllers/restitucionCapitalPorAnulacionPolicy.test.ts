@@ -179,6 +179,10 @@ describe("planRestitucionCapital: rechazos (409, no se anula nada)", () => {
       tipo: "RECHAZAR",
       codigo: "PCI_LIQUIDADO",
     });
+    expect(plan9507({ filasPci: [PCI(86, "1005.44", { estado_liquidacion: "POR_LIQUIDAR" })] })).toEqual({
+      tipo: "RECHAZAR",
+      codigo: "PCI_LIQUIDADO",
+    });
     expect(plan9507({ filasPci: [PCI(86, "1005.44", { liquidacion_id: 7 })] })).toEqual({
       tipo: "RECHAZAR",
       codigo: "PCI_LIQUIDADO",

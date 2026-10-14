@@ -12,7 +12,7 @@ import { isCreditStatusReversible, isReversibleIncobrablePayment } from "./rever
 export type CodigoAnulacionCapital =
   | "CREDITO_NO_REVERSIBLE" // (a) crédito fuera de REVERSIBLE_CREDIT_STATUSES (p. ej. CANCELADO)
   | "FILA_ESTRUCTURAL_INCOBRABLE" // (b) INCOBRABLE y la fila no es una recuperación real
-  | "PCI_LIQUIDADO" // (c) el reparto del pago ya se liquidó
+  | "PCI_LIQUIDADO" // (c) el reparto del pago ya se liquidó (o está por liquidarse)
   | "ABONO_CAPITAL_LIQUIDADO" // (d) el abono directo ya se liquidó o entró en un espejo
   | "INVERSIONISTA_YA_NO_ESTA" // (e) PCI con capital de un inversionista que salió del crédito
   | "REPARTO_INCONSISTENTE"; // (f) Σ PCI.abono_capital no cuadra con el abono del pago
@@ -114,7 +114,8 @@ export function planRestitucionCapital({
   if (!mueveCapital(pago.validationStatus, pago.abono_capital)) return { tipo: "SIN_CAPITAL" };
   const previo = precheckAnulacionConCapital({ ...pago, statusCredit: credito.statusCredit });
   if (previo) return { tipo: "RECHAZAR", codigo: previo };
-  if (filasPci.some((f) => f.estado_liquidacion === "LIQUIDADO" || f.liquidacion_id != null)) {
+  // POR_LIQUIDAR también: la plata ya está comprometida con el inversionista.
+  if (filasPci.some((f) => (f.estado_liquidacion ?? "NO_LIQUIDADO") !== "NO_LIQUIDADO" || f.liquidacion_id != null)) {
     return { tipo: "RECHAZAR", codigo: "PCI_LIQUIDADO" };
   }
   if (abonosCapital.some((a) => a.liquidado || a.pago_espejo_id != null)) {

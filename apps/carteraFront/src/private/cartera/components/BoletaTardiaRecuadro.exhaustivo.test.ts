@@ -523,7 +523,7 @@ describe("doble clic en Confirmar", () => {
   test("el botón 'Confirmar Pago' queda deshabilitado mientras formik.isSubmitting", () => {
     const pie = region(form, "<DialogFooter", "</DialogFooter>", "pie del modal");
     const confirmar = region(pie, "onClick={handleConfirmarPago}", "</Button>", "botón confirmar");
-    expect(confirmar).toContain("disabled={formik.isSubmitting}");
+    expect(confirmar).toContain("disabled={formik.isSubmitting || esperaVistaPrevia}");
   });
   test("el envío real es formik.handleSubmit (pone isSubmitting en true) y el submit no tiene otra vía sin el candado", () => {
     expect(hook).toContain("formik.handleSubmit();");

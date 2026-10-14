@@ -34,6 +34,7 @@ import { getDisplayedPartialContribution } from "../services/installmentContribu
 import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
 import {
   bloqueCondonacionParaEnviar,
+  confirmacionEsperaVistaPrevia,
   estaAceptada,
   estadoRecuadroBoletaTardia,
   moraAntesDeCondonar,
@@ -105,7 +106,9 @@ export function PagoForm() {
     },
     !!creditoCanceladoInfo,
   );
-  const { data: vistaBoletaTardia } = useBoletaTardiaPreview(paramsPreviewBoletaTardia, modalConfirmacionOpen, aperturaId);
+  const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia } = useBoletaTardiaPreview(paramsPreviewBoletaTardia, modalConfirmacionOpen, aperturaId);
+  // Confirmar espera la vista previa: sin ella el pago saldría sin la condonación que el asesor no llegó a ver.
+  const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });
   const entornoRecuadro = {
     esCancelacion: !!creditoCanceladoInfo,
     numeroAutorizacion: formik.values.numeroAutorizacion ?? "",
@@ -720,10 +723,10 @@ export function PagoForm() {
       </Button>
       <Button
         onClick={handleConfirmarPago}
-        disabled={formik.isSubmitting}
+        disabled={formik.isSubmitting || esperaVistaPrevia}
         className={`px-8 py-2.5 text-base font-bold shadow-md transition-all ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
-        {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelación" : "Confirmar Pago"}
+        {formik.isSubmitting ? "Procesando..." : esperaVistaPrevia ? "Calculando condonación…" : creditoCanceladoInfo ? "Confirmar Cancelación" : "Confirmar Pago"}
       </Button>
     </DialogFooter>
   </DialogContent>

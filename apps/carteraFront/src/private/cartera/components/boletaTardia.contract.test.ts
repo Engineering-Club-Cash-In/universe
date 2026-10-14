@@ -202,3 +202,18 @@ describe("F7: el aviso de 'Abonar todo a Capital' usa la mora SIN condonar", () 
     expect(form).toContain("const moraSinCondonarAplicada = Math.min(");
   });
 });
+
+describe("Codex r1 #11: Confirmar Pago espera la vista previa", () => {
+  test("toma isLoading de la vista previa y lo pasa por la lógica pura (error o params null no bloquean)", () => {
+    expect(form).toContain("const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia } = useBoletaTardiaPreview(");
+    expect(form).toContain(
+      "const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });",
+    );
+  });
+  test("el botón se deshabilita mientras espera y lo dice", () => {
+    const pie = region(form, "<DialogFooter", "</DialogFooter>", "pie del modal");
+    const confirmar = region(pie, "onClick={handleConfirmarPago}", "</Button>", "botón confirmar");
+    expect(confirmar).toContain("disabled={formik.isSubmitting || esperaVistaPrevia}");
+    expect(confirmar).toContain('esperaVistaPrevia ? "Calculando condonación…"');
+  });
+});

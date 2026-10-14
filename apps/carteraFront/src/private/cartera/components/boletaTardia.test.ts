@@ -235,3 +235,19 @@ describe("Codex r2 #1990: cascadaSinCondonar (aviso de 'Abonar todo a Capital')"
     expect(form).not.toContain("moraExtra");
   });
 });
+
+describe("Codex r2 #1994: la explicación del día inhábil también en los grises que califican por fecha", () => {
+  // Vence sábado 03-oct, boleta del lunes 05-oct: califica por fecha solo por el día inhábil.
+  const fechas = { fechaVencimiento: "2026-10-03", fechaBoleta: "2026-10-05", fechaRegistro: "2026-10-07", diasRetraso: 4 };
+  test("no_queda_al_dia y no_alcanza_mora con boleta posterior al vencimiento: lleva la anotación", () => {
+    for (const razon of ["no_queda_al_dia", "no_alcanza_mora"] as const) {
+      expect(textoFechasBoletaTardia(vista({ ...fechas, aplica: false, razon }))).toContain("(vence en día inhábil");
+    }
+  });
+  test("el mismo gris con boleta = vencimiento: sin anotación", () => {
+    expect(textoFechasBoletaTardia(vista({ ...fechas, fechaBoleta: "2026-10-03", aplica: false, razon: "no_queda_al_dia" }))).not.toContain("inhábil");
+  });
+  test("fuera_de_ventana con fechas: sin anotación (no califica)", () => {
+    expect(textoFechasBoletaTardia(vista({ ...fechas, aplica: false, razon: "fuera_de_ventana" }))).not.toContain("inhábil");
+  });
+});

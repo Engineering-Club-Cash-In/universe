@@ -95,8 +95,10 @@ export function bloqueCondonacionParaEnviar(vista: VistaPreviaBoletaTardia | nul
 export function textoFechasBoletaTardia(v: VistaPreviaBoletaTardia): string {
   if (!v.fechaVencimiento || !v.fechaBoleta) return "";
   const dias = v.diasRetraso ?? 0;
-  // Si la vista aplica y la boleta es posterior al vencimiento, es porque venció en día inhábil.
-  const inhabil = v.aplica && v.fechaBoleta > v.fechaVencimiento ? " (vence en día inhábil: cuenta el siguiente día hábil)" : "";
+  // Si califica por fecha (aplica, o gris que el back devuelve con el vencimiento que califica) y la boleta es
+  // posterior al vencimiento, es porque venció en día inhábil. Por razón, no solo por fechas: otra razón gris no califica.
+  const califica = v.aplica || v.razon === "no_queda_al_dia" || v.razon === "no_alcanza_mora";
+  const inhabil = califica && v.fechaBoleta > v.fechaVencimiento ? " (vence en día inhábil: cuenta el siguiente día hábil)" : "";
   return `Vence ${fechaCortaBoletaTardia(v.fechaVencimiento)}${inhabil} · Boleta ${fechaCortaBoletaTardia(v.fechaBoleta)} · Hoy ${fechaCortaBoletaTardia(v.fechaRegistro)} (${dias} ${dias === 1 ? "día" : "días"} de retraso)`;
 }
 export function textoMoraDelRetraso(v: VistaPreviaBoletaTardia): string {

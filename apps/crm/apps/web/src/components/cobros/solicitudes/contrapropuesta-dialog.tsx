@@ -308,10 +308,15 @@ function FormularioContrapropuesta({
 	const enviar = useMutation({
 		...orpc.contraproponerConvenio.mutationOptions(),
 		retry: false,
-		onSuccess: () => {
+		// También tras un fallo: si la respuesta se perdió con la contrapropuesta ya
+		// creada, el Espacio vuelve a leer el estado real en lugar de mostrar los
+		// controles de decisión que el servidor rechazaría.
+		onSettled: () => {
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getContrapropuestasConvenio.key(),
 			});
+		},
+		onSuccess: () => {
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getConveniosListado.key(),
 			});

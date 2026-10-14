@@ -265,7 +265,10 @@ export function MiEquipoAsesores({
 				retenidas: res.retenidas as { motivo: string }[],
 			} satisfies ResultadoReactivacion;
 		},
-		onSuccess: (res) => {
+		// También tras un fallo: si la respuesta se perdió con la reactivación ya
+		// hecha, se vuelve a leer el estado real en lugar de dejar al asesor como
+		// ausente (cada reintento recibiría «ya fue reactivado»).
+		onSettled: () => {
 			void queryClient.invalidateQueries({
 				queryKey: orpc.listarCoberturas.key(),
 			});
@@ -279,6 +282,8 @@ export function MiEquipoAsesores({
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getAsesoresTraslados.key(),
 			});
+		},
+		onSuccess: (res) => {
 			setResultado(res);
 			setReactivado(porReactivar?.datos.nombre ?? null);
 			setPorReactivar(null);

@@ -678,8 +678,12 @@ function FormularioAusencia({
 		<MarcarAusenteVista
 			paso={paso}
 			cargando={asesores.isPending || ausencias.isPending}
-			errorCarga={asesores.isError}
-			onReintentar={() => void asesores.refetch()}
+			// Sin las ausencias no se sabe a quién ya no se puede marcar: es error.
+			errorCarga={asesores.isError || ausencias.isError}
+			onReintentar={() => {
+				void asesores.refetch();
+				void ausencias.refetch();
+			}}
 			titulares={disponibles}
 			titular={titular}
 			onTitular={(v) => {

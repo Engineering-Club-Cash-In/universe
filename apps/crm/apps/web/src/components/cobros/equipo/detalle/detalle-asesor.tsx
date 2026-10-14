@@ -455,26 +455,36 @@ export function DetalleAsesor({
 						"Sin el catálogo no se puede saber quién es este asesor. Intente de nuevo en unos segundos.",
 					onReintentar: () => void asesoresQuery.refetch(),
 				}
-			: !asesor
+			: ausenciasQuery.isError
 				? {
+						// Sin las ausencias un asesor con el pool pausado se vería activo y
+						// se ofrecería marcarlo ausente de nuevo.
 						tipo: "error",
-						titulo: "Asesor no encontrado",
-						descripcion: `No hay un asesor con el número ${asesorId} en el pool de cartera. Elija otro asesor o vuelva a Mi equipo.`,
+						titulo: "No se pudieron cargar las ausencias",
+						descripcion:
+							"Sin ellas no se puede saber si este asesor está ausente. Intente de nuevo en unos segundos.",
+						onReintentar: () => void ausenciasQuery.refetch(),
 					}
-				: {
-						tipo: "listo",
-						asesor: {
-							asesorId,
-							nombre: asesor.nombre,
-							nivel: asesor.nivel,
-							estado,
-							ausencia: indefinida
-								? textoAusenciaIndefinida(indefinida)
-								: cobertura
-									? textoAusencia(cobertura)
-									: null,
-						},
-					};
+				: !asesor
+					? {
+							tipo: "error",
+							titulo: "Asesor no encontrado",
+							descripcion: `No hay un asesor con el número ${asesorId} en el pool de cartera. Elija otro asesor o vuelva a Mi equipo.`,
+						}
+					: {
+							tipo: "listo",
+							asesor: {
+								asesorId,
+								nombre: asesor.nombre,
+								nivel: asesor.nivel,
+								estado,
+								ausencia: indefinida
+									? textoAusenciaIndefinida(indefinida)
+									: cobertura
+										? textoAusencia(cobertura)
+										: null,
+							},
+						};
 
 	const avisos: string[] = [];
 	if (asesor && !userId) {

@@ -45,7 +45,10 @@ export type ContrapropuestaVistaProps = {
 	actual: { meses: number | null; cuota: number; primerPago: string | null };
 	meses: string;
 	onMeses: (valor: string) => void;
-	maxMeses: number;
+	/** Tope de cuotas del servidor; `null` mientras no se conoce. */
+	maxMeses: number | null;
+	/** Si no se pudo leer el tope: ofrece reintentar. */
+	onReintentarLimite?: () => void;
 	primerPago: string;
 	onPrimerPago: (fecha: string) => void;
 	/** Primer y último día elegibles del primer pago. */
@@ -62,6 +65,8 @@ export type ContrapropuestaVistaProps = {
 };
 
 export const MINIMO_NOTA_CONTRAPROPUESTA = 5;
+/** Igual que el esquema de `contraproponerConvenio` en el servidor. */
+export const MAXIMO_NOTA_CONTRAPROPUESTA = 1000;
 
 /** Igual que `MAX_DIAS_HASTA_PRIMER_PAGO` del servidor (que sigue validando). */
 export const MAX_DIAS_HASTA_PRIMER_PAGO = 90;
@@ -130,14 +135,16 @@ export function ContrapropuestaVista(p: ContrapropuestaVistaProps) {
 						type="number"
 						inputMode="numeric"
 						min={1}
-						max={p.maxMeses}
+						max={p.maxMeses ?? undefined}
 						step={1}
 						value={p.meses}
 						disabled={p.pendiente}
 						onChange={(e) => p.onMeses(e.target.value)}
 					/>
 					<p className="type-caption text-fg-tertiary">
-						Entre 1 y {p.maxMeses}.
+						{p.maxMeses === null
+							? "Cargando el límite…"
+							: `Entre 1 y ${p.maxMeses}.`}
 					</p>
 				</div>
 				<div className="space-y-1.5">
@@ -173,11 +180,19 @@ export function ContrapropuestaVista(p: ContrapropuestaVistaProps) {
 					onChange={(e) => p.onNota(e.target.value)}
 				/>
 				<p className="type-caption text-fg-tertiary">
-					Mínimo {MINIMO_NOTA_CONTRAPROPUESTA} caracteres.
+					Entre {MINIMO_NOTA_CONTRAPROPUESTA} y {MAXIMO_NOTA_CONTRAPROPUESTA}{" "}
+					caracteres ({p.nota.trim().length}/{MAXIMO_NOTA_CONTRAPROPUESTA}).
 				</p>
 			</div>
 
 			{p.error ? <FieldMessage variant="help">{p.error}</FieldMessage> : null}
+			{p.onReintentarLimite ? (
+				<div>
+					<Button variant="secondary" size="sm" onClick={p.onReintentarLimite}>
+						Reintentar
+					</Button>
+				</div>
+			) : null}
 			{p.errorServidor ? (
 				<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
 			) : null}
@@ -269,7 +284,9 @@ function FormularioContrapropuesta({
 	onEnviada: () => void;
 }) {
 	const config = useQuery(orpc.getConvenioConfig.queryOptions());
-	const maxMeses = maxMesesDeConvenio(config.data);
+	// El tope lo lee el servidor en cada envío: sin la configuración no se sabe
+	// qué cuotas son válidas y no se ofrece enviar.
+	const maxMeses = config.isSuccess ? maxMesesDeConvenio(config.data) : null;
 	const [meses, setMeses] = useState(String(convenio.numero_meses ?? ""));
 	const [primerPago, setPrimerPago] = useState(primerPagoActual ?? "");
 	const [nota, setNota] = useState("");
@@ -284,26 +301,33 @@ function FormularioContrapropuesta({
 	const ventana = ventanaPrimerPago(hoy, diaConvenio);
 	const numeroMeses = Number(meses);
 
-	const error = !(
-		Number.isInteger(numeroMeses) &&
-		numeroMeses >= 1 &&
-		numeroMeses <= maxMeses
-	)
-		? `El número de cuotas debe estar entre 1 y ${maxMeses}.`
-		: !primerPago
-			? "Indique la fecha del primer pago."
-			: primerPago < ventana.min
-				? diaConvenio && ventana.min > hoy
-					? "El primer pago debe ser posterior al día en que se firmó el convenio."
-					: "El primer pago no puede estar en el pasado."
-				: primerPago > ventana.max
-					? `El primer pago no puede ser dentro de más de ${MAX_DIAS_HASTA_PRIMER_PAGO} días.`
-					: numeroMeses === convenio.numero_meses &&
-							primerPago === primerPagoActual
-						? "Cambie las cuotas o la fecha del primer pago: es igual al plan del asesor."
-						: nota.trim().length < MINIMO_NOTA_CONTRAPROPUESTA
-							? `La nota debe tener al menos ${MINIMO_NOTA_CONTRAPROPUESTA} caracteres.`
-							: null;
+	const error =
+		maxMeses === null
+			? config.isError
+				? "No se pudo cargar el límite de cuotas del convenio."
+				: "Cargando el límite de cuotas del convenio…"
+			: !(
+						Number.isInteger(numeroMeses) &&
+						numeroMeses >= 1 &&
+						numeroMeses <= maxMeses
+					)
+				? `El número de cuotas debe estar entre 1 y ${maxMeses}.`
+				: !primerPago
+					? "Indique la fecha del primer pago."
+					: primerPago < ventana.min
+						? diaConvenio && ventana.min > hoy
+							? "El primer pago debe ser posterior al día en que se firmó el convenio."
+							: "El primer pago no puede estar en el pasado."
+						: primerPago > ventana.max
+							? `El primer pago no puede ser dentro de más de ${MAX_DIAS_HASTA_PRIMER_PAGO} días.`
+							: numeroMeses === convenio.numero_meses &&
+									primerPago === primerPagoActual
+								? "Cambie las cuotas o la fecha del primer pago: es igual al plan del asesor."
+								: nota.trim().length < MINIMO_NOTA_CONTRAPROPUESTA
+									? `La nota debe tener al menos ${MINIMO_NOTA_CONTRAPROPUESTA} caracteres.`
+									: nota.trim().length > MAXIMO_NOTA_CONTRAPROPUESTA
+										? `La nota no puede pasar de ${MAXIMO_NOTA_CONTRAPROPUESTA} caracteres.`
+										: null;
 
 	const enviar = useMutation({
 		...orpc.contraproponerConvenio.mutationOptions(),
@@ -345,6 +369,9 @@ function FormularioContrapropuesta({
 				enviar.reset();
 			}}
 			maxMeses={maxMeses}
+			onReintentarLimite={
+				config.isError ? () => void config.refetch() : undefined
+			}
 			primerPago={primerPago}
 			onPrimerPago={(v) => {
 				setPrimerPago(v);

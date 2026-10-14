@@ -20,6 +20,8 @@ const setup = async () => {
   await sql`CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, credito_id integer, cuota_id integer,
     monto_boleta numeric(18,2))`;
   // Las migraciones reales: nexa_payment_events (con la FK de pago_id sin ON DELETE) y pago_id_eliminado.
+  await sql`CREATE TABLE cartera.boletas (id serial PRIMARY KEY,
+    pago_id integer NOT NULL REFERENCES cartera.pagos_credito (pago_id), url_boleta varchar(255) NOT NULL)`;
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
@@ -73,6 +75,53 @@ integrationTest("borrarPagosDelCredito: desvincula los eventos Nexa, borra los p
   // Sin cuota 0: se borran todos los pagos del crédito y el evento restante también se desvincula.
   expect(await db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined))).toBe(1);
   expect((await sql`SELECT pago_id FROM cartera.pagos_credito WHERE credito_id = 1`).length).toBe(0);
+  await sql.end();
+});
+
+integrationTest("borrarPagosDelCredito: borra la boleta-imagen del pago Nexa antes que el pago (la FK no tiene ON DELETE)", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  const [nexa] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, nexa!.pago_id, "applied");
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${nexa!.pago_id}, 'https://r2/boletas-nexa/x.png')`;
+
+  await db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined));
+
+  expect((await sql`SELECT pago_id FROM cartera.pagos_credito`).length).toBe(0);
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
+
+  // La boleta de un pago manual no se toca: el DELETE sigue fallando por la FK, como antes.
+  const [manual] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${manual!.pago_id}, 'manual.png')`;
+  await expect(db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined))).rejects.toThrow();
+  expect((await sql`SELECT pago_id FROM cartera.boletas`).map((b) => b.pago_id)).toEqual([manual!.pago_id]);
+  await sql.end();
+});
+
+integrationTest("borrarPagosDelCredito: una boleta-imagen que se registra en paralelo no tumba el borrado", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  const [nexa] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, nexa!.pago_id, "billing_pending");
+
+  // El registro (otra conexión) ya insertó la boleta pero todavía no commitea.
+  const registro = await sql.reserve();
+  await registro`BEGIN`;
+  await registro`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${nexa!.pago_id}, 'https://r2/boletas-nexa/x.png')`;
+  const borrado = db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined));
+  await new Promise((r) => setTimeout(r, 300));
+  await registro`COMMIT`;
+  registro.release();
+
+  // Sin el FOR UPDATE el DELETE de boletas no la veía y el de pagos reventaba con 23503.
+  await borrado;
+  expect((await sql`SELECT pago_id FROM cartera.pagos_credito`).length).toBe(0);
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
   await sql.end();
 });
 

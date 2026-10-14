@@ -52,6 +52,19 @@ export async function borrarPagosDelCredito(
              GROUP BY nexa_payment_event_id) v
     WHERE e.id = v.evento_id AND e.pago_id IS NULL AND e.pago_id_eliminado IS NULL
       AND e.status <> 'failed'`);
+  // La imagen de boleta que cartera genera para los pagos Nexa (nexaBoletaImagen.ts) cuelga de
+  // `boletas.pago_id`, que referencia el pago sin ON DELETE: se borra antes. Solo la de los
+  // pagos Nexa; las boletas de los pagos manuales siguen como antes. El FOR UPDATE choca con el
+  // FOR KEY SHARE que toma el INSERT de la boleta por la FK: si un registro concurrente ya insertó,
+  // se espera su commit y el DELETE (snapshot nuevo) la ve; si no, ese INSERT falla por FK.
+  await tx.execute(sql`
+    SELECT pago_id FROM cartera.pagos_credito
+    WHERE ${filtroPagos} AND nexa_payment_event_id IS NOT NULL
+    ORDER BY pago_id FOR UPDATE`);
+  await tx.execute(sql`
+    DELETE FROM cartera.boletas
+    WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
+                       WHERE ${filtroPagos} AND nexa_payment_event_id IS NOT NULL)`);
   if (cuota0Id) {
     await tx
       .delete(pagos_credito)

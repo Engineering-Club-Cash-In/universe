@@ -1167,58 +1167,60 @@ const MENSAJE_FUERA_DE_TEMA =
 
 /**
  * Filtro barato previo al modelo: reglas por palabras clave, sin costo. Corta
- * lo que claramente no es del caso (código, intentos de saltarse las
- * instrucciones, otros clientes o la base de datos, y temas generales) antes
- * de reservar cupo o llamar a Gemini. Es deliberadamente conservador: ante la
- * duda deja pasar, y el prompt estricto cubre el resto.
+ * lo que claramente no es del caso antes de leer cartera, reservar cupo o
+ * llamar a Gemini. Es deliberadamente conservador: ante la duda deja pasar, y
+ * el prompt estricto (`REGLAS_PREGUNTA`) cubre el resto. Un falso negativo
+ * cuesta una llamada; un falso positivo le cierra la puerta a un asesor.
+ *
+ * Dos niveles:
+ * - `REGLAS_SIEMPRE`: artefactos que nunca son una pregunta de cobros (bloques
+ *   de código, sentencias SQL, pedir o anular las instrucciones del asistente).
+ * - `REGLAS_SIN_CONTEXTO`: temas ajenos (código en un lenguaje, clima, chistes,
+ *   cambio de rol, otros clientes, traducir…). Solo cortan si la pregunta no
+ *   menciona nada del caso (`VOCABULARIO_CASO`): el texto libre de las
+ *   gestiones puede decir «trabaja con Java», «el clima de negociación» o
+ *   «habló de fútbol», y con una palabra del caso decide el modelo.
  */
-const REGLAS_FUERA_DE_TEMA: RegExp[] = [
-	// Pedir código o consultas. Un lenguaje o una palabra técnica sola no corta:
-	// el texto libre de las gestiones puede mencionarlos, y «programa»,
-	// «código», «script» (de llamada), «algoritmo» (de la mora), «función» o
-	// «consulta» son vocabulario de cobros: sin lenguaje, lo ataja el prompt.
+const REGLAS_SIEMPRE: RegExp[] = [
 	/```/,
-	// Un lenguaje solo corta como orden («responde en python», «hazme una
-	// consulta sql»): «trabaja con Java» es un dato de la gestión.
-	/(^|[.!?;:,]\s*)(responde|contesta|escribe|escribeme|dame|hazme|haz|genera|generame|crea|creame|redacta|codifica|programa|explicame)\b[^?.!;]{0,40}\b((en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)|(consulta|query) sql)\b/,
-	/\bcodigo fuente\b/,
 	/\b(select\s+[\s\S]+?\s+from|insert into|drop table|delete from)\b/,
-	// Saltarse o extraer las instrucciones. Acotado a «instrucciones» y a
-	// «lo anterior»: «llamada anterior» o «desconoce las reglas del convenio»
-	// son vocabulario normal de cobros.
-	// Solo como orden (inicio de frase o tras puntuación): «¿El cliente ignora las
-	// instrucciones para el pago?» es del caso.
-	/(^|[.!?;:,]\s*)(por favor\s+|ahora\s+|y\s+)?(ignora|olvida)\w*\s+(todas\s+)?(tus|las)\s+(instrucciones|directrices|prompts?)\b/,
-	/(^|[.!?;:,]\s*)(por favor\s+|ahora\s+|y\s+)?(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
-	/\b(prompt|instrucciones) (del sistema|de sistema)\b|\bprompt (inicial|interno)\b|system prompt|jailbreak|modo (desarrollador|dios)\b/,
-	// Pedir las instrucciones propias. «instrucciones iniciales» o «internas» a
-	// secas pueden ser las de un pago o un convenio.
-	/\b(revela|muestra|muestrame|dime|repite|imprime|copia)\w*\s+(tus\s+instrucciones|tu\s+prompt|el\s+prompt)\b/,
-	// Cambio de rol, solo en imperativo (al inicio o tras puntuación): «el
-	// titular actúa como si no debiera» (también tras coma) no es una orden, ni
-	// «haz de cuenta que el cliente abona Q500» (un escenario del caso).
-	// Los signos «¿» y «¡» no cuentan como inicio: «¿Actúa como titular o como
-	// codeudor?» es una pregunta sobre el cliente con el sujeto omitido.
+	// «prompt» no es vocabulario de cobros; «instrucciones del sistema» sí puede
+	// serlo (el sistema de pago), así que no está aquí.
+	/\bsystem prompt\b|\bjailbreak\b|\bmodo (desarrollador|dios)\b|\bprompt (del sistema|de sistema|inicial|interno)\b/,
+	// Pedir código en un lenguaje: verbo + «código/script/función…» + lenguaje.
+	// Aunque mencione el caso («una función en python que sume cuotas») no es
+	// una pregunta de cobros.
+	/\b(escribe\w*|dame|hazme|genera\w*|crea\w*|programa\w*) (un |una |el |la )?(codigo|script|funcion|programa|algoritmo)\b[^?.!;]{0,40}\b(en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)\b/,
+	// «tus instrucciones» / «tu prompt» solo pueden ser las del asistente.
+	/\b(revela|muestrame|repite|imprime|copia|ignora|olvida)\w*\s+(todas\s+)?(tus\s+(instrucciones|directrices)|tu\s+prompt)\b/,
+];
+
+/** Palabras de un caso de cobros: con una de ellas, decide el modelo. */
+const VOCABULARIO_CASO =
+	/\b(cliente|clienta|titular|codeudor\w*|fiador\w*|deudor\w*|conyuge|referencias?|credito\w*|prestamo\w*|cuotas?|mora|saldos?|pag\w*|abon\w*|deudas?|debe\w*|convenios?|promesas?|prometi\w*|gestion\w*|llamadas?|visitas?|contactos?|asesor|cobro\w*|cobranza|vehiculos?|carro|seguros?|sifco|caso|capital|interes\w*|facturas?|boletas?|recibos?|bucket\w*|contratos?|garantia|embargo|juridico|ingresos?|salario|negociacion)\b/;
+
+const REGLAS_SIN_CONTEXTO: RegExp[] = [
+	// Código en un lenguaje: la palabra «código/script/función» o una orden de
+	// responder/escribir, junto al lenguaje. «su trabajo con Java» no lo pide.
+	/\b(codigo|script|funcion|programa|algoritmo)\b[^?.!;]{0,30}\b(en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)\b/,
+	/(^|[.!?;:,]\s*)(responde|contesta|escribe|escribeme|programa|codifica)\b[^?.!;]{0,40}\b(en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)\b/,
+	/\b(hazme|dame|escribe\w*|genera\w*|crea\w*) (una |la |un |el )?(consulta|query) sql\b|\bcodigo fuente\b/,
+	// Anular las instrucciones sin «tus» o «lo anterior»: solo como orden.
+	/(^|[.!?;:,]\s*)(por favor\s+|ahora\s+|y\s+)?(ignora|olvida)\w*\s+(todas\s+)?(las\s+(instrucciones|directrices)|(todo\s+)?lo\s+anterior)\b/,
+	// Cambio de rol, en imperativo. «¿» y «¡» no cuentan como inicio: «¿Actúa
+	// como titular o como codeudor?» es una pregunta sobre el cliente.
 	/(^|[.!?;:,]\s*)((actua|finge|comportate)\s+como\s+(?!si\b)|actua como si fueras\b)|(^|[.!?]\s*)(eres ahora|ahora eres) (un|una)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
-	// Otros casos o la base de datos: solo cuando se pide verlos. «¿Hay otros
-	// casos como este?» o «la base de datos del cliente» son del caso.
-	// Sin «créditos» ni «casos»: «todos los créditos del titular» es del caso.
-	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los (clientes|usuarios|asesores)|(otros|los demas) (clientes|usuarios|asesores))\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?todos los (clientes|usuarios|asesores)\b/,
-	// «la base de datos de SIFCO / del crédito» es un dato del caso: solo corta
-	// la base de datos a secas.
-	/\b(accede|acceso|consulta|consultar|lista|listar|vuelca|dump|muestrame|dame|exporta)\w*\s+(a |en )?(toda )?(la )?base de datos\b(?!\s+d(e|el)\b)|\bque (hay|tiene|contiene) (en )?(la )?base de datos\s*[?!.]*\s*$/,
-	// Temas generales: solo cuando piden contenido ajeno al caso. Una palabra
-	// suelta puede venir del texto libre de las gestiones («vendería bitcoin
-	// para pagar», «el clima afectó su cosecha», «receta médica»).
+	// Otros clientes o la base de datos.
+	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los|otros|los demas) (clientes|usuarios|asesores)\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?todos los (clientes|usuarios|asesores)\b/,
+	/\b(accede|acceso|consulta|consultar|lista|listar|vuelca|dump|muestrame|dame|exporta)\w*\s+(a |en )?(toda )?(la )?base de datos\b|\bque (hay|tiene|contiene) (en )?(la )?base de datos\b/,
+	// Temas generales, cuando se pide el contenido.
 	/\b(cuenta|cuentame|dime|dame|escribe|escribeme|canta|cantame|recita|recitame|inventa|inventame|recomienda|recomiendame|sugiere|sugiereme|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|horoscopo)\b|\breceta (de cocina|para (cocinar|preparar))\b/,
-	// Clima: «el clima de negociación» es el tono de una gestión.
-	/\bque clima hace\b|\bque clima (hay|tendremos|habra) (hoy|manana|ahora|esta (tarde|noche|semana))\b|\bcomo (esta|estara) el clima (hoy|manana|ahora|esta (tarde|noche|semana))\b|\bcomo (esta|estara) el clima\s*[?!.]*\s*$|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b(?! de)/,
-	/\b(quien gano|marcador|resultado)\b[^?.!]*\bfutbol\b|\bquien gano el partido\b|\btabla de posiciones\b/,
+	/\bque clima (hace|hay|tendremos|habra)\b|\bcomo (esta|estara|va a estar) el clima\b|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b/,
+	/\b(resultado|marcador) del (partido|juego|clasico)\b|\bquien gano el (partido|juego|clasico|mundial)\b|\btabla de posiciones\b/,
 	/\b(cuanto (vale|cuesta)|precio d\w+|cotizacion d\w+|a como esta)\s+(el |la |los )?(bitcoin|criptomonedas?|ethereum)\b/,
-	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
-	// traduce la mora?» o «La mora, traducida a cuotas, ¿cuánto es?» o «traductora de español a inglés» son
-	// del caso.
-	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\s+(esto|el texto|la frase|el mensaje|lo siguiente|al)\b|\b(traducir|traduccion)\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
+	// Traducir un texto: la orden o el pedido explícito. «¿En cuánto se traduce
+	// la mora?» o «trabaja en traducción al inglés» no lo piden.
+	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\s+(esto|el texto|la frase|el mensaje|lo siguiente|al)\b|\b(hazme|necesito|quiero|dame) (una |la )?traduccion\b|\btraducir\s+(\w+\s+){0,3}?al\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
 ];
 
 const sinTildes = (t: string) =>
@@ -1229,7 +1231,9 @@ const sinTildes = (t: string) =>
 
 export function preguntaFueraDeTema(pregunta: string): boolean {
 	const texto = sinTildes(pregunta);
-	return REGLAS_FUERA_DE_TEMA.some((regla) => regla.test(texto));
+	if (REGLAS_SIEMPRE.some((regla) => regla.test(texto))) return true;
+	if (VOCABULARIO_CASO.test(texto)) return false;
+	return REGLAS_SIN_CONTEXTO.some((regla) => regla.test(texto));
 }
 
 export async function preguntarAsistente(params: {

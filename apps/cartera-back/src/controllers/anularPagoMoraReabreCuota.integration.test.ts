@@ -210,7 +210,7 @@ integrationTest("INCOBRABLE con capital 0: anular el cierre validated con abono_
   await sql.end();
 });
 
-integrationTest("anular un abono directo a capital no replica capital_restante a las hermanas", async () => {
+integrationTest("anular un abono directo a capital se rechaza (409) y no replica capital_restante a las hermanas", async () => {
   const { sql } = await setup();
   const { parcialId } = await parcialYCierre(sql);
   const [directo] = await sql`INSERT INTO cartera.pagos_credito
@@ -219,7 +219,7 @@ integrationTest("anular un abono directo a capital no replica capital_restante a
        capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
     VALUES (1, 48, 'capital_validated', 300, 300, 0, 0, 0, 0, 0, 0, true, 9700, 0, 0, 0, 0, 0) RETURNING pago_id`;
 
-  await anular(directo!.pago_id as number);
+  await expect(anular(directo!.pago_id as number)).rejects.toMatchObject({ status: 409, code: "ABONO_DIRECTO_NO_SOPORTADO" });
 
   const [parcial] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
   expect(parcial).toMatchObject({ pagado: true, capital: 0 });

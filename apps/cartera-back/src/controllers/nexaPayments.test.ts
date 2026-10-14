@@ -227,6 +227,26 @@ test("registra y aplica una vez por el flujo canónico", async () => {
   expect(avisos).toEqual([{ eventId: 7, completedAntes: 1 }]);
 });
 
+test("el pago Nexa se registra con el banco Nexa cuando existe y sin banco si no", async () => {
+  const { getNexaInsertPaymentBody } = await import("./nexaPayments");
+  const body = { ...paymentBody("qa-banco"), transactionId: "36418016" };
+  expect(getNexaInsertPaymentBody(body, 5, 26)).toEqual({
+    credito_id: 10,
+    usuario_id: 5,
+    monto_boleta: "10.00",
+    fecha_pago: tokenDate,
+    fecha_boleta: "2026-09-08",
+    numeroAutorizacion: "36418016",
+    banco_id: 26,
+    cuotaApagar: 1,
+    url_boletas: [],
+    registerBy: "NEXA",
+    renuevo_o_nuevo: "NEXA",
+    origen_pago: "transferencia",
+  });
+  expect(getNexaInsertPaymentBody(body, 5, null)).not.toHaveProperty("banco_id");
+});
+
 test("no consume claim cuando el crédito no existe", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
   let claimed = false;

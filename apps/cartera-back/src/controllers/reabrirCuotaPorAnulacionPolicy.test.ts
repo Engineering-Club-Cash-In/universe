@@ -101,6 +101,17 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(p.reabrirFilas).toBe(true);
   });
 
+  test("hermana no_required CON plata que cubre sola (SIFCO / Caja) cuenta: no reabre", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "no_required", abono_capital: CUOTA, abono_interes: 0, monto_aplicado: CUOTA })] });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+  });
+
+  test("hermana no_required parcial: reabre igual que con una validated", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "no_required", monto_aplicado: 1161.38 })] });
+    expect(p).toEqual(plan({ hermanas: [hermana()] }));
+    expect(p.reabrirFilas).toBe(true);
+  });
+
   test("hermana no_required sin abonos no cuenta", () => {
     const p = plan({ hermanas: [hermana({ validationStatus: "no_required", abono_capital: 0, abono_interes: 0 })] });
     expect(p.reabrirFilas).toBe(true);
@@ -133,11 +144,13 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     }
   });
 
-  test("CANCELADO: repone restantes pero no reabre", () => {
-    const p = plan({ statusCredit: "CANCELADO" });
-    expect(p.replica).not.toBeNull();
-    expect(p.reabrirFilas).toBe(false);
-    expect(p.reabrirCuota).toBe(false);
+  test("CANCELADO (cerrado): repone restantes pero no reabre", () => {
+    for (const statusCredit of ["CANCELADO"]) {
+      const p = plan({ statusCredit });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
   });
 
   test("PENDIENTE_CANCELACION se reabre (ACTIVAR lo devuelve a ACTIVO)", () => {

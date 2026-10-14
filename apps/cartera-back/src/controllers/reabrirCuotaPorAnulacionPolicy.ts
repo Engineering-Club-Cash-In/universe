@@ -1,8 +1,10 @@
 import Big from "big.js";
 import {
   calcularCoberturaCuota,
+  cuentaComoHermanoVivo,
   shouldIncobrableInstallmentBePaid,
   sumarAplicadoACuota,
+  type DestinoSobrescribibleRow,
   type PagoCoberturaCuota,
   type RubrosCuotaRow,
 } from "./registerPaymentPolicy";
@@ -26,7 +28,8 @@ type BigInput = number | string | Big;
  * réplica de restantes (reversePayment.ts ~610-646) y su recálculo de `pagado`
  * (~926-1008). Para saber si las hermanas cubren la cuota usa
  * `calcularCoberturaCuota` con pendientes, el mismo criterio de suma por rubros
- * de `insertPayment` y de la anti-sobreaplicación.
+ * de `insertPayment` y de la anti-sobreaplicación. Hermanas vivas que cubren:
+ * validated, pending y `no_required` con plata (ver abajo).
  *
  * No hace nada cuando:
  *  - la fila anulada no cuelga de una cuota o no le aportó nada (solo mora /
@@ -89,7 +92,7 @@ export function planReaperturaCuotaPorAnulacion({
   capital?: BigInput | null;
   filaAnulada: FilaAnulada;
   /** Filas de la cuota que NO son la anulada (las anuladas las ignora la cobertura). */
-  hermanas: PagoCoberturaCuota[];
+  hermanas: (PagoCoberturaCuota & DestinoSobrescribibleRow)[];
 }): PlanReaperturaCuota {
   const cuotaId = filaAnulada.cuota_id;
   if (cuotaId === null || cuotaId === undefined) return SIN_CAMBIOS;
@@ -98,9 +101,18 @@ export function planReaperturaCuotaPorAnulacion({
   if (aplicadoALaCuota.lte(0)) return SIN_CAMBIOS;
 
   const cuota = new Big(montoCuota ?? 0);
+  // `no_required` con plata es un pago real (SIFCO; Caja vía /editPayment, crédito 890):
+  // `insertPayment` la netea con este mismo predicado y el cron la cuenta como cobertura
+  // (cuotaYaPagadaSql). Las semillas vacías no cuentan. Solo vale dentro de esta regla:
+  // `calcularCoberturaCuota` la comparten Nexa, la revalidación y la boleta tardía.
+  const cubrientes = hermanas.map((h) =>
+    h.validationStatus === "no_required" && cuentaComoHermanoVivo(h)
+      ? { ...h, validationStatus: "validated" }
+      : h,
+  );
   if (
     cuota.gt(0) &&
-    calcularCoberturaCuota({ montoCuota: cuota, pagos: hermanas, incluirPendientes: true })
+    calcularCoberturaCuota({ montoCuota: cuota, pagos: cubrientes, incluirPendientes: true })
       .cuotaCompleta
   ) {
     return SIN_CAMBIOS;

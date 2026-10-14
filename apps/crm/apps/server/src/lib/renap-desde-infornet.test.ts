@@ -57,12 +57,31 @@ describe("mapearFichaInfornetARenap", () => {
 			{
 				tipo: "DPI",
 				numero: DPI,
+				fechaVencimiento: "01/01/2020",
+			},
+			{
+				tipo: "DPI",
+				numero: "9999999999999",
+				fechaVencimiento: "01/01/2030",
+			},
+			{
+				tipo: "DPI",
+				numero: DPI,
 				fechaVencimiento: "01/01/2025",
 			},
 		]);
 
 		expect(persona?.civilStatus).toBe("C");
 		expect(persona?.dpiExpiracyDate).toBe("2025-01-01");
+		expect(
+			mapearFichaInfornetARenap(DPI, fichaBase, [
+				{
+					tipo: "DPI",
+					numero: "9999999999999",
+					fechaVencimiento: "01/01/2030",
+				},
+			])?.dpiExpiracyDate,
+		).toBeNull();
 		expect(
 			mapearFichaInfornetARenap(DPI, { ...fichaBase, estadoCivil: "SOLTERO" })
 				?.civilStatus,

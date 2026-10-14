@@ -28,7 +28,7 @@ export function mapearFichaInfornetARenap(
 		gender: mapearSexo(ficha.sexo),
 		civilStatus: mapearEstadoCivil(ficha.estadoCivil),
 		birthDate: mapearFecha(ficha.fechaNacimiento),
-		dpiExpiracyDate: mapearVencimientoDpi(documentos),
+		dpiExpiracyDate: mapearVencimientoDpi(dpi, documentos),
 		municipalityBornedIn: lugar?.municipio ?? null,
 		departmentBornedIn: lugar?.departamento ?? null,
 		bornedIn: texto(ficha.pais),
@@ -76,13 +76,26 @@ function mapearFecha(
 	return esValida ? `${anio}-${mes}-${dia}` : null;
 }
 
-function mapearVencimientoDpi(documentos: DocumentoIdentidad[]): string | null {
-	const dpi = documentos.find(
-		(documento) =>
-			documento.tipo.trim().toUpperCase() === "DPI" &&
-			Boolean(documento.fechaVencimiento),
-	);
-	return mapearFecha(dpi?.fechaVencimiento);
+function mapearVencimientoDpi(
+	dpiSolicitado: string,
+	documentos: DocumentoIdentidad[],
+): string | null {
+	const dpiNormalizado = soloDigitos(dpiSolicitado);
+	const fechas = documentos
+		.filter(
+			(documento) =>
+				documento.tipo.trim().toUpperCase() === "DPI" &&
+				soloDigitos(documento.numero) === dpiNormalizado,
+		)
+		.map((documento) => mapearFecha(documento.fechaVencimiento))
+		.filter((fecha): fecha is string => Boolean(fecha))
+		.sort();
+
+	return fechas[fechas.length - 1] ?? null;
+}
+
+function soloDigitos(valor: string | null | undefined): string {
+	return valor?.replace(/\D/g, "") ?? "";
 }
 
 /** "MUNICIPIO, DEPTO"; valores sin coma ("-NA-", "EXTRANJEROS NATURALIZADOS") no se pueden separar */

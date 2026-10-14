@@ -1048,21 +1048,32 @@ export async function enviarFacturaProgramada(
 				await tx
 					.delete(insuranceInvoiceSubmissions)
 					.where(eq(insuranceInvoiceSubmissions.id, programada.id));
-				await createNotification(
-					{
-						titulo: `Factura del seguro sin enviar - ${datos.cliente}`,
-						descripcion: `La factura del seguro estaba programada para ${NOMBRE_ASEGURADORA[resolverAseguradora(programada.confirmada, null)]}, pero al cierre corresponde ${NOMBRE_ASEGURADORA[aseguradora]}: no se envió. Para enviarla a ${NOMBRE_ASEGURADORA[aseguradora]} hay que borrarla y volver a subirla en los documentos de la oportunidad.`,
-						type: "aviso",
-						createdBy: confirmadoPor.userId,
-						createdByRole: confirmadoPor.userRole,
-						assignedToRole: "sales",
-						assignedTo: fila.assignedTo,
-						relatedEntityType: "opportunity",
-						relatedEntityId: opportunityId,
-						redirectPage: "opportunity_details",
-					},
-					tx,
-				);
+				// En un savepoint: si el aviso falla, la cancelación queda igual.
+				await tx
+					.transaction((savepoint) =>
+						createNotification(
+							{
+								titulo: `Factura del seguro sin enviar - ${datos.cliente}`,
+								descripcion: `La factura del seguro estaba programada para ${NOMBRE_ASEGURADORA[resolverAseguradora(programada.confirmada, null)]}, pero al cierre corresponde ${NOMBRE_ASEGURADORA[aseguradora]}: no se envió. Para enviarla a ${NOMBRE_ASEGURADORA[aseguradora]} hay que borrarla y volver a subirla en los documentos de la oportunidad.`,
+								type: "aviso",
+								createdBy: confirmadoPor.userId,
+								createdByRole: confirmadoPor.userRole,
+								assignedToRole: "sales",
+								assignedTo: fila.assignedTo,
+								relatedEntityType: "opportunity",
+								relatedEntityId: opportunityId,
+								redirectPage: "opportunity_details",
+							},
+							savepoint,
+						),
+					)
+					.catch((error) => {
+						console.error(
+							"[enviarFacturaProgramada] Se canceló la programación, pero no se pudo avisar al asesor",
+							{ opportunityId },
+							error,
+						);
+					});
 				return null;
 			}
 			const reservadoAt = new Date();

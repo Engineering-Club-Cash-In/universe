@@ -1546,6 +1546,36 @@ describe("factura programada para el cierre", () => {
 		expect(aviso?.descripcion).toContain("corresponde G&T");
 	});
 
+	test("si el aviso falla, la cancelación queda igual", async () => {
+		caso = casoAl(90);
+		facturaPrevia = [
+			{
+				id: "envio-prog",
+				status: "programado",
+				intento: 1,
+				confirmada: "universales",
+				key: KEY_ANTES,
+				nombre: "factura.pdf",
+			},
+		];
+		const original = dbFalsa.transaction;
+		let llamadas = 0;
+		// La primera es la transacción; la segunda, el savepoint del aviso.
+		dbFalsa.transaction = async (fn) => {
+			llamadas++;
+			if (llamadas === 2) throw new Error("notifications caído");
+			return fn(dbFalsa);
+		};
+		try {
+			expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBeNull();
+		} finally {
+			dbFalsa.transaction = original;
+		}
+		expect(llamadas).toBe(2);
+		expect(borradosDb).toEqual([insuranceInvoiceSubmissions]);
+		expect(correos).toHaveLength(0);
+	});
+
 	test("si la oportunidad no quedó ganada, la programada espera", async () => {
 		caso = casoAl(90, { status: "open" });
 		facturaPrevia = [

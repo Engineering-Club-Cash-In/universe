@@ -66,6 +66,7 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No presenta evidencia de fraude",
 		"No hay evidencia alguna de fraude",
 		"No cuenta con reportes de fraude",
+		"No cuenta con mora",
 		"No tiene antecedentes de mora",
 		"No existen antecedentes de fraude",
 		"Mora condonada",
@@ -129,6 +130,21 @@ describe("clasificación de evidencia de Cartera", () => {
 			}),
 		);
 		expect(riesgos.map((riesgo) => riesgo.categoria)).toContain("fraude");
+	});
+
+	test("considera evidencia histórica de incobrabilidad aunque el crédito vuelva a ACTIVO", () => {
+		const riesgos = evidenciaRiesgoCredito(
+			credito("ACTIVO", {
+				incobrable: {
+					motivo: "Fraude confirmado",
+					observaciones: null,
+				},
+			}),
+		);
+		expect(riesgos).toContainEqual({
+			categoria: "fraude",
+			texto: "Fraude confirmado",
+		});
 	});
 
 	test("no interpreta cuotas restantes de una cancelación como mora", () => {

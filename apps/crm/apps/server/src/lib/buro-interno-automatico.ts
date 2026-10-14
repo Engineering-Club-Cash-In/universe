@@ -69,6 +69,14 @@ export function esFichaManualActiva(
 	return persona?.activo === true && esFichaManual(persona);
 }
 
+/** Una baja automática del sistema puede reconciliarse; un retiro humano no. */
+export function esFichaAutomaticaReconciliable(persona: {
+	origen: string;
+	desactivadoPor: string | null;
+}): boolean {
+	return persona.origen === "automatico_cartera" && !persona.desactivadoPor;
+}
+
 export function decidirPersistenciaAutomatica(input: {
 	automatica: { activo: boolean } | null;
 }): DecisionPersistenciaAutomatica {

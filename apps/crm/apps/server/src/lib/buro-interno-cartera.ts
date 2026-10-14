@@ -68,7 +68,7 @@ export function normalizarMotivoRiesgo(texto: string): string {
 }
 
 const VERBO_ESTADO_NEGADO =
-	/(?:es|fue|esta|estuvo|hay|hubo|existe|presenta|presento|tiene|tuvo|registra|registro|reporta|reporto)/;
+	/(?:es|fue|esta|estuvo|hay|hubo|existe|presenta|presento|tiene|tuvo|cuenta\s+con|registra|registro|reporta|reporto)/;
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
 	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao])?)\\s+$`,
 );
@@ -199,6 +199,8 @@ export function evidenciaRiesgoCredito(
 	for (const motivo of [
 		cancelacion?.motivo,
 		cancelacion?.observaciones,
+		credito.incobrable?.motivo,
+		credito.incobrable?.observaciones,
 		credito.caido?.motivo,
 		credito.caido?.observaciones,
 	]) {

@@ -35,6 +35,7 @@ import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
 	decidirPersistenciaAutomatica,
+	esFichaAutomaticaReconciliable,
 	esFichaManual,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
@@ -1261,13 +1262,13 @@ async function registrarCoincidenciasCartera(
 				candidatos,
 				[...personasAutomaticas.values()]
 					.map(({ persona }) => persona)
-					.filter((persona) => persona.activo && !persona.desactivadoPor),
+					.filter(esFichaAutomaticaReconciliable),
 				reglas,
 			).map((coincidencia) => coincidencia.registroId),
 		);
 		for (const [personaId, estado] of personasAutomaticas) {
 			if (!personasAutomaticasCoincidentes.has(personaId)) continue;
-			if (!estado.persona.activo || estado.persona.desactivadoPor) continue;
+			if (!esFichaAutomaticaReconciliable(estado.persona)) continue;
 			const planVigencia = planificarVigenciaPersonaAutomatica(
 				estado.usuarios,
 				grupos.keys(),
@@ -1296,6 +1297,7 @@ async function registrarCoincidenciasCartera(
 				}
 				continue;
 			}
+			if (!estado.persona.activo) continue;
 			const ahora = new Date();
 			await tx
 				.update(buroInternoPersonas)

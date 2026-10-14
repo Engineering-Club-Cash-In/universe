@@ -30,6 +30,7 @@ import {
 	construirCierreAsesor,
 	resolverContactoAsesor,
 } from "../services/asesor-whatsapp";
+import { nombresClientePorSifco } from "../services/nombre-cliente-sifco";
 import type { ContextoCaso } from "../services/referencias-cobros-datos";
 import { persistCobrosSendLog } from "./cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "./messaging-test-mode";
@@ -657,6 +658,8 @@ export async function listarSolicitudesDocumentos(filtro: {
 			comentario: solicitudesDocumentosCobros.comentario,
 			estado: solicitudesDocumentosCobros.estado,
 			solicitadoEn: solicitudesDocumentosCobros.solicitadoEn,
+			// Usuario del CRM que la pidió: la bandeja marca «Su solicitud».
+			solicitadoPorId: solicitudesDocumentosCobros.solicitadoPor,
 			solicitadoPor: solicitante.name,
 			resueltoEn: solicitudesDocumentosCobros.resueltoEn,
 			resueltoPor: resolutor.name,
@@ -675,10 +678,17 @@ export async function listarSolicitudesDocumentos(filtro: {
 		.where(condiciones.length > 0 ? and(...condiciones) : undefined)
 		.orderBy(desc(solicitudesDocumentosCobros.solicitadoEn))
 		.limit(filtro.limite);
+	// Nombre del cliente, como en las bandejas de rebajas y Jurídico.
+	const clientes = await nombresClientePorSifco(
+		filas.flatMap((f) => (f.numeroCreditoSifco ? [f.numeroCreditoSifco] : [])),
+	);
 	return filas.map((f) => ({
 		...f,
 		...nombresDeActores(f),
 		documento: nombreDocumento(f.clave),
+		clienteNombre: f.numeroCreditoSifco
+			? (clientes.get(f.numeroCreditoSifco) ?? null)
+			: null,
 	}));
 }
 

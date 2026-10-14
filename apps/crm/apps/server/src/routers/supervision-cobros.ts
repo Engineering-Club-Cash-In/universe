@@ -26,6 +26,7 @@ import { z } from "zod";
 import { MOTIVOS_AUSENCIA } from "../lib/ausencia-asesor";
 import {
 	DECISIONES,
+	EVENTOS_BITACORA,
 	mensajeFueraDeAlcance,
 	TIPOS_BITACORA,
 } from "../lib/bitacora-supervision";
@@ -227,11 +228,22 @@ export const supervisionCobrosRouter = {
 	/**
 	 * M3 · Bitácora unificada y paginada de decisiones del supervisor: convenios,
 	 * apagados, reactivaciones, recuperaciones, rebajas de mora, Jurídico,
-	 * reasignaciones manuales, traslados y coberturas, más recientes primero.
+	 * documentos, contrapropuestas de convenio, reasignaciones manuales,
+	 * traslados, coberturas y ausencias indefinidas, más recientes primero.
 	 * Filtros por tipo, decisión, asesor que pidió y fecha (días de Guatemala,
 	 * inclusivos). Con `solicitanteId` o `decisiones` solo entran las
 	 * solicitudes (lo demás lo hace el supervisor, no se pide ni se decide).
 	 * Reemplaza la unión que el Historial de Solicitudes armaba en el navegador.
+	 *
+	 * - `eventos`: separa la baja de un asesor (traslado por despido o renuncia)
+	 *   del traslado, y la ausencia de la reactivación (coberturas y ausencias
+	 *   indefinidas). Solo filtra esos tipos.
+	 * - `busqueda`: número de crédito (SIFCO) o nombre del cliente. Deja fuera
+	 *   lo que no tiene crédito (traslados, coberturas y ausencias).
+	 *
+	 * Cada entrada trae además lo que su tipo necesita para el detalle: montos
+	 * de la rebaja, nota para Jurídico, bucket, documento, plan de la
+	 * contrapropuesta, asesor afectado y cuentas movidas.
 	 */
 	getBitacoraDecisiones: cobrosSupervisorProcedure
 		.input(
@@ -249,6 +261,11 @@ export const supervisionCobrosRouter = {
 				solicitanteId: z.string().min(1).optional(),
 				desde: z.string().date().optional(),
 				hasta: z.string().date().optional(),
+				eventos: z
+					.array(z.enum(EVENTOS_BITACORA))
+					.max(EVENTOS_BITACORA.length)
+					.optional(),
+				busqueda: z.string().trim().max(100).optional(),
 			}),
 		)
 		.handler(({ input }) => {

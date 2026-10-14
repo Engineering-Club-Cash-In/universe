@@ -10,8 +10,9 @@ import type { FiltroGestionCartera } from "@/components/cobros/asesor/filtros-ca
  *
  * Las categorías son las mismas que devuelven `getColaDia`, `getAlertasPromesas`
  * y `getAlertasConvenios`, más «todas» (lo que antes mostraba cada página
- * completa). Un segmento y un filtro de gestión (`?gestion=`) son excluyentes:
- * elegir uno limpia el otro.
+ * completa). `getTodosLosCreditos` las recibe tal cual (`cola`, `alertaPromesa`,
+ * `alertaConvenio`, S5) y las resuelve en el servidor. Un segmento y un filtro
+ * de gestión (`?gestion=`) son excluyentes: elegir uno limpia el otro.
  *
  * Aquí solo hay tipos, textos y helpers puros (sin consultas ni JSX).
  */
@@ -68,6 +69,8 @@ export type AlertaPromesa = {
 	numeroCreditoSifco: string | null;
 	clienteNombre: string | null;
 	asesorNombre: string | null;
+	/** asesor_id de cartera del dueño del crédito (S5). */
+	asesorId: number | null;
 	fechaPrometida: string | Date | null;
 	fechaAlerta: string | Date | null;
 	montoComprometido: string | null;
@@ -117,6 +120,7 @@ export type ItemCola = {
 	promesaProxima: boolean;
 	sinContacto: boolean;
 	promesaActiva: boolean;
+	/** Días hábiles completos sin gestión manual (S2). */
 	diasSinContacto: number | null;
 };
 
@@ -217,8 +221,9 @@ export const DEF_COLA: Record<CategoriaCola, DefCategoria> = {
 		},
 	},
 	sin_contacto: {
-		etiqueta: "+5 días sin contacto",
-		descripcion: "Cuentas sin contacto efectivo en más de 5 días.",
+		etiqueta: "Sin contacto en 3 días hábiles",
+		descripcion:
+			"Cuentas sin gestión manual en al menos 3 días hábiles completos (no cuentan los envíos automáticos ni los links de pago).",
 		vacio: {
 			titulo: "Sin casos sin contacto",
 			descripcion: `Todo el equipo tiene contacto reciente. ${NADA}`,
@@ -349,7 +354,7 @@ export const ETIQUETA_GESTION_SUPERVISION: Record<
 	FiltroGestionCartera,
 	string
 > = {
-	sin_gestion_48h: "Sin gestión >48h",
+	sin_gestion_48h: "Sin gestión en 3 días hábiles",
 	promesa_por_vencer: "Promesa por vencer",
 	convenio_pendiente: "Convenios por aprobar",
 	sin_contactar_hoy: "Sin contactar hoy",
@@ -366,17 +371,19 @@ export const GESTIONES_SUPERVISION: FiltroGestionCartera[] = [
 ];
 
 export const DESCRIPCION_GESTION: Record<FiltroGestionCartera, string> = {
-	sin_gestion_48h: "Sin gestiones registradas en las últimas 48 horas.",
+	sin_gestion_48h:
+		"Sin gestión manual en al menos 3 días hábiles completos (no cuentan los envíos automáticos ni los links de pago).",
 	sin_contactar_hoy: "Nadie los contactó hoy.",
 	promesa_por_vencer: "Promesa vigente que vence en los próximos 3 días.",
 	convenio_pendiente: "Convenio solicitado que espera la aprobación.",
-	sin_acuerdo: "Sin promesa ni convenio vigente.",
+	sin_acuerdo:
+		"Sin convenio, sin promesa vigente y sin promesa incumplida en los últimos 30 días.",
 };
 
 export const VACIO_GESTION: Record<FiltroGestionCartera, Vacio> = {
 	sin_gestion_48h: {
 		titulo: "Sin casos sin gestión",
-		descripcion: `Todo el equipo registró gestiones en las últimas 48 horas. ${NADA}`,
+		descripcion: `Todo el equipo registró gestiones en los últimos 3 días hábiles. ${NADA}`,
 	},
 	sin_contactar_hoy: {
 		titulo: "Sin casos por contactar hoy",
@@ -392,7 +399,7 @@ export const VACIO_GESTION: Record<FiltroGestionCartera, Vacio> = {
 	},
 	sin_acuerdo: {
 		titulo: "Sin casos sin acuerdo",
-		descripcion: `Todos los créditos de esta página tienen una promesa o un convenio vigente. ${NADA}`,
+		descripcion: `Todos los créditos tienen una promesa o un convenio vigente. ${NADA}`,
 	},
 };
 
@@ -484,13 +491,4 @@ export function contarPorCategoria<C extends string>(
 	const out: Partial<Record<string, number>> = { todas: todas.size };
 	for (const [cat, set] of por) out[cat] = set.size;
 	return out as Partial<Record<C | "todas", number>>;
-}
-
-/** Nombre de asesor comparable (cartera manda el mismo nombre en ambos lados). */
-export function normalizarNombre(nombre: string | null | undefined) {
-	return (nombre ?? "")
-		.normalize("NFD")
-		.replace(/\p{Diacritic}/gu, "")
-		.trim()
-		.toLowerCase();
 }

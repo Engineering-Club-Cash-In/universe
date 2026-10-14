@@ -16,17 +16,45 @@ import { EnlaceVer, TarjetaSupervision } from "./tarjeta";
  *   ASESOR         → pool de cartera (getAsesoresTraslados), con «Ausente» si
  *                    tiene una cobertura vigente hoy.
  *   CASOS          → cuentas del asesor en sus buckets (getCargaPorAsesorBucket).
- *   CONTACTOS HOY · META · RESCATE → tarea S4 («—» mientras no llegue).
+ *   CONTACTOS HOY  → gestiones manuales de hoy, en vivo (S4).
+ *   META           → recuperación del período ÷ meta prorrateada, en % (S4).
+ *   RESCATE        → recuperados ÷ (recuperados + escalados) del período (S4).
  *   AGENDA         → cumplimiento de agenda del último cierre (no está en el
  *                    Figma; es lo que hoy tiene el supervisor para medir al equipo).
- *   Punto          → verde ≥ 80 %, ámbar ≥ 60 %, rojo por debajo, gris sin dato
- *                    (sobre la agenda hasta que exista «rescate»).
+ *   Punto          → `estadoDelAsesor` (abajo): el mismo criterio en la pantalla
+ *                    y en el showcase.
  *
- * Cada fila abre la Cartera general filtrada por el asesor
- * (`/cobros/cartera?asesor=<asesor_id>`).
+ * Meta y Rescate dependen del período del segmentado Día / Semana / Mes;
+ * `actualizando` atenúa la tabla mientras llega el período nuevo.
+ *
+ * Cada fila abre el Detalle del asesor (`/cobros/equipo/<asesor_id>`).
  */
 
 export type EstadoAsesor = "bien" | "atencion" | "riesgo" | "sin_dato";
+
+/** Umbrales del punto de estado, en %: verde desde 80, ámbar desde 60. */
+export const UMBRAL_ESTADO = { bien: 80, atencion: 60 } as const;
+
+/**
+ * Punto de estado de cada asesor. Manda la **Meta** del período (recuperación ÷
+ * meta prorrateada), que es lo que colorea el Figma; si el asesor no tiene
+ * meta, se usa el cumplimiento de **Agenda** del último cierre. Verde desde
+ * 80 %, ámbar desde 60 %, rojo por debajo y gris sin ninguno de los dos.
+ *
+ * «Rescate» no entra: con pocos movimientos de bucket sale entre 50 y 100 %
+ * (1 de 1 = 100 %) y pintaría de verde a quien casi no movió su cartera
+ * (doc 23, S4).
+ */
+export function estadoDelAsesor(f: {
+	meta: number | null;
+	agenda: number | null;
+}): EstadoAsesor {
+	const pct = f.meta ?? f.agenda;
+	if (pct === null) return "sin_dato";
+	if (pct >= UMBRAL_ESTADO.bien) return "bien";
+	if (pct >= UMBRAL_ESTADO.atencion) return "atencion";
+	return "riesgo";
+}
 
 const PUNTO: Record<EstadoAsesor, { clase: string; texto: string }> = {
 	bien: { clase: "bg-success-solid", texto: "Al día" },
@@ -60,6 +88,8 @@ export type EquipoTablaProps = {
 	verEquipo: Destino;
 	/** Día del cierre de agenda que se muestra («06/10/2026»). */
 	fechaAgenda: string | null;
+	/** Llega el período nuevo: Meta y Rescate todavía son del anterior. */
+	actualizando?: boolean;
 };
 
 function pct(v: number | null) {
@@ -104,6 +134,7 @@ export function EquipoTabla({
 	onReintentar,
 	verEquipo,
 	fechaAgenda,
+	actualizando,
 }: EquipoTablaProps) {
 	let cuerpo: React.ReactNode;
 	if (cargando && filas.length === 0) {
@@ -139,8 +170,14 @@ export function EquipoTabla({
 	} else {
 		cuerpo = (
 			// Solo la tabla se desplaza en pantallas angostas; la página no.
-			<div className="-mx-2 overflow-x-auto">
-				<table className="w-full min-w-140 border-collapse text-sm">
+			<div
+				aria-busy={actualizando || undefined}
+				className={cn(
+					"-mx-2 overflow-x-auto transition-opacity duration-150",
+					actualizando && "opacity-60",
+				)}
+			>
+				<table className="w-full min-w-130 border-collapse text-sm">
 					<thead>
 						<tr className="border-divider border-b">
 							<th className={cn(th, "text-left")}>Asesor</th>
@@ -255,9 +292,19 @@ export function EquipoTabla({
 		<TarjetaSupervision
 			titulo="Equipo"
 			descripcion={
-				cargando && filas.length === 0
-					? "Cargando…"
-					: `${filas.length} ${filas.length === 1 ? "asesor" : "asesores"}`
+				cargando && filas.length === 0 ? (
+					"Cargando…"
+				) : (
+					<span className="inline-flex items-center gap-1">
+						{filas.length} {filas.length === 1 ? "asesor" : "asesores"}
+						<InfoTooltip>
+							El punto de cada fila sale de la Meta del período o, si el asesor
+							no tiene meta, de la Agenda: verde desde {UMBRAL_ESTADO.bien} %,
+							ámbar desde {UMBRAL_ESTADO.atencion} %, rojo por debajo y gris sin
+							datos.
+						</InfoTooltip>
+					</span>
+				)
 			}
 			accion={<EnlaceVer destino={verEquipo}>Ver equipo completo</EnlaceVer>}
 		>

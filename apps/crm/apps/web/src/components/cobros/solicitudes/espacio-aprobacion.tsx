@@ -10,9 +10,13 @@
  *
  * Las decisiones NO tienen lógica propia: abren los modales de siempre
  * (`ConvenioAprobacionModal`, `DecisionInmovilizacionModal`,
- * `DecidirSolicitudDialog`), con su validación, idempotencia e invalidaciones.
+ * `DecidirSolicitudDialog`) o, para rebajas de mora, Jurídico y documentos,
+ * `DecidirSolicitudModal`, con su validación, idempotencia e invalidaciones.
  * Las notas del supervisor llegan a esos modales como motivo inicial del
  * rechazo. Al confirmarse, el panel pasa a «Resuelto».
+ *
+ * Regla de cuatro ojos: quien pidió la solicitud no la decide (recuperación,
+ * rebaja y Jurídico; el servidor lo exige igual).
  *
  * Piezas:
  *  - `MarcoEspacioAprobacion` y `PanelSolicitudVista`: presentación (las usa
@@ -35,7 +39,6 @@ import {
 	ESTADOS_VEHICULO,
 	etiquetaMotivo,
 } from "server/src/lib/recuperacion-vehiculo";
-import { toast } from "sonner";
 import { ConvenioAprobacionModal } from "@/components/cobros/convenio-aprobacion-modal";
 import { DecisionPorConfirmarBanner } from "@/components/cobros/decision-por-confirmar-banner";
 import { DecisionInmovilizacionModal } from "@/components/cobros/inmovilizacion-decision-modal";
@@ -71,17 +74,28 @@ import {
 	listarIntentosPendientes,
 	suscribirseAIntentos,
 } from "@/lib/cobros/decision-intentos";
+import { PERMISSIONS } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
 import {
 	ContrapropuestaDialog,
+	type ContrapropuestaHistorialItem,
 	ContrapropuestaPendienteAviso,
+	estadoContrapropuesta,
+	HistorialContrapropuestasVista,
+	RetirarContrapropuestaDialog,
 } from "./contrapropuesta-dialog";
-import type {
-	RecuperacionFuente,
-	Solicitud,
-	TipoSolicitud,
+import {
+	DecidirSolicitudModal,
+	MINIMO_NOTA_RECHAZO,
+} from "./decidir-solicitud-modal";
+import {
+	etiquetaMotivoJuridico,
+	idSolicitante,
+	type RecuperacionFuente,
+	type Solicitud,
+	type TipoSolicitud,
 } from "./normalizar";
 import { ChipTipoSolicitud, quetzales } from "./piezas";
 
@@ -93,6 +107,9 @@ const TITULO_MODAL: Record<TipoSolicitud, string> = {
 	apagado: "Apagado",
 	reactivacion: "Reactivación",
 	recuperacion: "Recuperación del vehículo",
+	rebaja: "Rebaja de mora",
+	juridico: "Jurídico",
+	documentos: "Documentos",
 };
 
 const TITULO_SOLICITUD: Record<TipoSolicitud, string> = {
@@ -100,6 +117,9 @@ const TITULO_SOLICITUD: Record<TipoSolicitud, string> = {
 	apagado: "Autorizar apagado del vehículo",
 	reactivacion: "Autorizar reactivación del vehículo",
 	recuperacion: "Autorizar recuperación del vehículo",
+	rebaja: "Autorizar rebaja de mora",
+	juridico: "Autorizar escalar a Jurídico",
+	documentos: "Solicitud de documento",
 };
 
 const BOTON_APROBAR: Record<TipoSolicitud, string> = {
@@ -108,6 +128,9 @@ const BOTON_APROBAR: Record<TipoSolicitud, string> = {
 	reactivacion: "Autorizar reactivación",
 	// Mismo texto que el diálogo de decisión (DecidirSolicitudDialog).
 	recuperacion: "Aprobar y enviar a B4",
+	rebaja: "Aprobar rebaja",
+	juridico: "Aprobar y enviar a Jurídico",
+	documentos: "Aprobar",
 };
 
 /** Mínimo del motivo de rechazo de cada decisión (lo exige el servidor). */
@@ -116,7 +139,15 @@ const MINIMO_MOTIVO: Record<TipoSolicitud, number> = {
 	apagado: 5,
 	reactivacion: 5,
 	recuperacion: 10,
+	rebaja: MINIMO_NOTA_RECHAZO.rebaja,
+	juridico: MINIMO_NOTA_RECHAZO.juridico,
+	documentos: MINIMO_NOTA_RECHAZO.documentos,
 };
+
+/** Rebaja o escalado que cartera no pudo aplicar: aprobar es reintentar. */
+function esReintento(s: Solicitud) {
+	return (s.tipo === "rebaja" || s.tipo === "juridico") && s.errorAplicacion;
+}
 
 export type ResolucionSolicitud = {
 	decision: "aprobada" | "rechazada";
@@ -176,6 +207,48 @@ export function resolucionDe(
 						titulo: "Recuperación rechazada",
 						descripcion:
 							"El crédito permanece en su bucket. Se notificó el motivo a quien solicitó la recuperación.",
+					};
+		case "rebaja":
+			return aprobada
+				? {
+						decision,
+						titulo: "Rebaja aplicada",
+						descripcion:
+							"Cartera descontó el monto de la mora del crédito. Se avisó al asesor.",
+					}
+				: {
+						decision,
+						titulo: "Rebaja rechazada",
+						descripcion:
+							"La mora del crédito no cambió. Se avisó al asesor con la nota; puede pedir una nueva rebaja.",
+					};
+		case "juridico":
+			return aprobada
+				? {
+						decision,
+						titulo: "Escalado a Jurídico",
+						descripcion:
+							"El crédito pasó a B5 en estado En Jurídico y salió de la cartera del asesor. Se avisó al asesor.",
+					}
+				: {
+						decision,
+						titulo: "Escalado rechazado",
+						descripcion:
+							"El crédito permanece en su bucket. Se avisó al asesor con la nota.",
+					};
+		case "documentos":
+			return aprobada
+				? {
+						decision,
+						titulo: "Solicitud aprobada",
+						descripcion:
+							"La solicitud de documento quedó aprobada con su nota. La entrega al cliente se coordina aparte.",
+					}
+				: {
+						decision,
+						titulo: "Solicitud rechazada",
+						descripcion:
+							"La solicitud de documento quedó rechazada con su nota.",
 					};
 	}
 }
@@ -490,6 +563,153 @@ function DetalleRecuperacion({
 	);
 }
 
+/** Cartera no pudo aplicar lo aprobado: se reintenta o se rechaza. */
+function AvisoErrorAplicacion({
+	motivo,
+	que,
+}: {
+	motivo: string | null | undefined;
+	que: string;
+}) {
+	return (
+		<Aviso tono="danger">
+			<p className="font-semibold">No se pudo aplicar en cartera</p>
+			{motivo?.trim() ? <p className="mt-0.5">{motivo}</p> : null}
+			<p className="mt-0.5">
+				Puede reintentar la aprobación (cartera no aplica dos veces la misma
+				solicitud) o rechazarla para cerrar {que}.
+			</p>
+		</Aviso>
+	);
+}
+
+function DetalleRebaja({
+	solicitud,
+}: {
+	solicitud: Extract<Solicitud, { tipo: "rebaja" }>;
+}) {
+	const r = solicitud.rebaja;
+	const mora = Number(r.moraSnapshot);
+	const monto = Number(r.montoSolicitado);
+	const restante =
+		Number.isFinite(mora) && Number.isFinite(monto) ? mora - monto : null;
+	return (
+		<>
+			{solicitud.errorAplicacion ? (
+				<AvisoErrorAplicacion motivo={r.notaResolucion} que="la solicitud" />
+			) : null}
+			<p className="text-[13px] text-fg-secondary leading-snug">
+				Al aprobar se vuelve a leer la mora del crédito en cartera. Si ya no
+				alcanza para la rebaja, no se aprueba y puede rechazarla para que el
+				asesor pida una nueva.
+			</p>
+			<Bloque titulo="Rebaja solicitada">
+				<dl className="flex flex-col gap-2">
+					<Dato etiqueta="Monto pedido" tono="brand">
+						{quetzales(r.montoSolicitado)}
+					</Dato>
+					<Dato etiqueta="Mora al pedir">{quetzales(r.moraSnapshot)}</Dato>
+					<Dato etiqueta="Mora después de la rebaja">
+						{restante === null ? "—" : quetzales(Math.max(restante, 0))}
+					</Dato>
+					<Dato etiqueta="Solicitada por">{r.solicitadoPor ?? "—"}</Dato>
+				</dl>
+			</Bloque>
+			<Nota titulo="Motivo del asesor">
+				{r.notas?.trim() ? r.notas : "El asesor no dejó un motivo."}
+			</Nota>
+		</>
+	);
+}
+
+function DetalleJuridico({
+	solicitud,
+}: {
+	solicitud: Extract<Solicitud, { tipo: "juridico" }>;
+}) {
+	const j = solicitud.juridico;
+	return (
+		<>
+			{solicitud.errorAplicacion ? (
+				<AvisoErrorAplicacion motivo={j.notaResolucion} que="la solicitud" />
+			) : null}
+			<p className="text-[13px] text-fg-secondary leading-snug">
+				Al aprobar, el crédito pasa a{" "}
+				<strong className="font-semibold text-fg">B5</strong> en estado{" "}
+				<strong className="font-semibold text-fg">En Jurídico</strong> y sale de
+				la cartera del asesor: se asigna a otro asesor del pool de B5. El estado
+				se levanta solo cuando un pago deja el crédito sin cuotas vencidas ni
+				mora.
+			</p>
+			<Bloque titulo="Escalamiento">
+				<dl className="flex flex-col gap-2">
+					<Dato etiqueta="Motivo" tono="danger">
+						{etiquetaMotivoJuridico(j.motivo)}
+					</Dato>
+					<Dato etiqueta="Bucket al pedir">
+						{j.bucketSnapshot != null ? `B${j.bucketSnapshot}` : "—"}
+					</Dato>
+					<Dato etiqueta="Solicitada por">{j.solicitadoPor ?? "—"}</Dato>
+				</dl>
+			</Bloque>
+			<Nota titulo="Nota para Jurídico">
+				{j.notaJuridico?.trim()
+					? j.notaJuridico
+					: "El asesor no dejó una nota."}
+			</Nota>
+		</>
+	);
+}
+
+function DetalleDocumento({
+	solicitud,
+}: {
+	solicitud: Extract<Solicitud, { tipo: "documentos" }>;
+}) {
+	const d = solicitud.documento;
+	return (
+		<>
+			<Bloque titulo="Documento solicitado">
+				<dl className="flex flex-col gap-2">
+					<Dato etiqueta="Documento" tono="brand">
+						{d.documento}
+					</Dato>
+					<Dato etiqueta="Cliente">{d.clienteNombre?.trim() || "—"}</Dato>
+					<Dato etiqueta="Crédito">
+						{d.numeroCreditoSifco ? `#${d.numeroCreditoSifco}` : "—"}
+					</Dato>
+					<Dato etiqueta="Solicitada por">{d.solicitadoPor ?? "—"}</Dato>
+				</dl>
+			</Bloque>
+			<Nota titulo="Comentario del asesor">
+				{d.comentario?.trim()
+					? d.comentario
+					: "El asesor no dejó un comentario."}
+			</Nota>
+		</>
+	);
+}
+
+/**
+ * «Su solicitud»: la pidió quien mira. En la mayoría de los tipos la debe
+ * decidir otra persona (`bloquea`); en documentos solo se avisa, porque el
+ * servidor no lo impide y si se bloquea es una decisión de negocio pendiente.
+ */
+export function AvisoSuSolicitud({ bloquea = true }: { bloquea?: boolean }) {
+	return (
+		<div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+			<CrmPill tone="neutral" kind="chip" className="px-2 py-0.5">
+				Su solicitud
+			</CrmPill>
+			<span className="wrap-break-word min-w-0 flex-1">
+				{bloquea
+					? "Debe aprobarla otro supervisor o administrador. Si ya no aplica, cancélela desde la ficha."
+					: "Usted pidió este documento. Puede decidirla, pero conviene que la revise otro supervisor o administrador."}
+			</span>
+		</div>
+	);
+}
+
 /** «Convenio aprobado» · «Guardado en el historial · hoy» (Figma «Resuelto»). */
 export function ResueltoVista({
 	resolucion,
@@ -555,6 +775,31 @@ export function ResueltoVista({
 	);
 }
 
+/** Cómo se nombra la solicitud en los modales de decisión. */
+function quienEs(s: Solicitud) {
+	const cliente = s.cliente && s.cliente !== "Sin nombre" ? s.cliente : null;
+	if (s.tipo === "documentos") {
+		return `${s.documento.documento}${s.credito ? ` (crédito ${s.credito})` : ""}`;
+	}
+	if (cliente && s.credito) return `${cliente} (crédito ${s.credito})`;
+	return cliente ?? (s.credito ? `El crédito ${s.credito}` : "El crédito");
+}
+
+/** Lo que se decide, en una línea, para el modal. */
+function resumenDecision(s: Solicitud): string | null {
+	if (s.tipo === "rebaja") {
+		return `Rebaja de ${quetzales(s.rebaja.montoSolicitado)} sobre una mora de ${quetzales(s.rebaja.moraSnapshot)} al pedirla.`;
+	}
+	if (s.tipo === "juridico") {
+		return `Motivo: ${etiquetaMotivoJuridico(s.juridico.motivo)}${
+			s.juridico.bucketSnapshot != null
+				? ` · B${s.juridico.bucketSnapshot} al pedirlo`
+				: ""
+		}.`;
+	}
+	return null;
+}
+
 /* ── Panel derecho ──────────────────────────────────────────────────────────── */
 
 export type PanelSolicitudVistaProps = {
@@ -585,6 +830,8 @@ export type PanelSolicitudVistaProps = {
 	onContraproponer?: () => void;
 	/** El plan del convenio aún carga: el editor necesita su primer pago. */
 	cargandoPlan?: boolean;
+	/** Contrapropuestas ya resueltas del convenio (M4). */
+	contrapropuestas?: ContrapropuestaHistorialItem[];
 	className?: string;
 };
 
@@ -604,6 +851,7 @@ export function PanelSolicitudVista({
 	primerPago,
 	onContraproponer,
 	cargandoPlan = false,
+	contrapropuestas = [],
 	className,
 }: PanelSolicitudVistaProps) {
 	const notasId = React.useId();
@@ -634,6 +882,35 @@ export function PanelSolicitudVista({
 	const porEjecutar =
 		(solicitud.tipo === "apagado" || solicitud.tipo === "reactivacion") &&
 		solicitud.porEjecutar;
+	const reintento = esReintento(solicitud);
+
+	let detalle: React.ReactNode;
+	switch (solicitud.tipo) {
+		case "convenio":
+			detalle = (
+				<>
+					<DetalleConvenio solicitud={solicitud} primerPago={primerPago} />
+					<HistorialContrapropuestasVista items={contrapropuestas} />
+				</>
+			);
+			break;
+		case "recuperacion":
+			detalle = <DetalleRecuperacion solicitud={solicitud} />;
+			break;
+		case "rebaja":
+			detalle = <DetalleRebaja solicitud={solicitud} />;
+			break;
+		case "juridico":
+			detalle = <DetalleJuridico solicitud={solicitud} />;
+			break;
+		case "documentos":
+			detalle = <DetalleDocumento solicitud={solicitud} />;
+			break;
+		default:
+			detalle = (
+				<DetalleInmovilizacion solicitud={solicitud} conMapa={conMapa} />
+			);
+	}
 
 	return (
 		<section
@@ -652,6 +929,11 @@ export function PanelSolicitudVista({
 								Por ejecutar
 							</CrmPill>
 						) : null}
+						{reintento ? (
+							<CrmPill tone="danger" kind="chip" className="px-2 py-0.5">
+								No se pudo aplicar
+							</CrmPill>
+						) : null}
 					</div>
 					<h2 className="wrap-break-word font-semibold text-fg text-lg leading-[1.26]">
 						{porEjecutar
@@ -667,13 +949,7 @@ export function PanelSolicitudVista({
 
 				{aviso}
 
-				{solicitud.tipo === "convenio" ? (
-					<DetalleConvenio solicitud={solicitud} primerPago={primerPago} />
-				) : solicitud.tipo === "recuperacion" ? (
-					<DetalleRecuperacion solicitud={solicitud} />
-				) : (
-					<DetalleInmovilizacion solicitud={solicitud} conMapa={conMapa} />
-				)}
+				{detalle}
 
 				{decide || bloqueo ? (
 					<div className="flex flex-col gap-1.5">
@@ -692,9 +968,9 @@ export function PanelSolicitudVista({
 							disabled={!!bloqueo}
 						/>
 						<p className="type-caption text-fg-tertiary">
-							Si rechaza la solicitud, esta nota se envía como motivo (mínimo{" "}
-							{minimo} caracteres). Si la aprueba, queda guardada con la
-							aprobación.
+							{minimo > 0
+								? `Si rechaza la solicitud, esta nota se envía como motivo (mínimo ${minimo} caracteres). Si la aprueba, queda guardada con la aprobación.`
+								: "La nota queda guardada con la decisión (opcional)."}
 						</p>
 					</div>
 				) : null}
@@ -732,7 +1008,9 @@ export function PanelSolicitudVista({
 							title={bloqueo ?? undefined}
 							className="whitespace-normal"
 						>
-							{BOTON_APROBAR[solicitud.tipo]}
+							{reintento
+								? "Reintentar aplicación"
+								: BOTON_APROBAR[solicitud.tipo]}
 						</Button>
 					</div>
 				</footer>
@@ -1084,6 +1362,44 @@ function ContenidoEspacio({
 		};
 	}, [refrescandoPlan, queryClient]);
 	const [contraAbierta, setContraAbierta] = React.useState(false);
+	const [retirarId, setRetirarId] = React.useState<string | null>(null);
+
+	// M4: cómo terminaron las contrapropuestas anteriores. La fuente guarda ids:
+	// nombres y roles salen de los usuarios de cobros (un supervisor que
+	// «descarta» en realidad la retiró).
+	const hayHistorialContra = (contrapropuestas.data ?? []).some(
+		(c) => c.estado !== "pendiente",
+	);
+	const usuarios = useQuery({
+		...orpc.getUsuariosCobros.queryOptions(),
+		enabled: s.tipo === "convenio" && hayHistorialContra,
+		staleTime: 5 * 60 * 1000,
+	});
+	const historialContra = React.useMemo((): ContrapropuestaHistorialItem[] => {
+		const usuario = (id: string | null) =>
+			id ? (usuarios.data?.find((u) => u.id === id) ?? null) : null;
+		return (contrapropuestas.data ?? [])
+			.filter((c) => c.estado !== "pendiente")
+			.map((c) => {
+				const resolvio = usuario(c.resueltaPor);
+				return {
+					id: c.id,
+					estado: estadoContrapropuesta(
+						c.estado,
+						!!resolvio?.role && PERMISSIONS.canAssignCobros(resolvio.role),
+					),
+					numeroMeses: c.numeroMeses,
+					cuotaMensual: c.cuotaMensual,
+					primerPago: c.primerPago,
+					nota: c.nota,
+					creadaPor: usuario(c.creadaPor)?.name ?? null,
+					creadaEn: c.creadaEn,
+					resueltaPor: resolvio?.name ?? null,
+					resueltaEn: c.resueltaEn,
+					notaRespuesta: c.notaRespuesta,
+				};
+			});
+	}, [contrapropuestas.data, usuarios.data]);
 
 	const [notas, setNotas] = React.useState("");
 	const [decision, setDecision] = React.useState<"aprobar" | "rechazar" | null>(
@@ -1203,23 +1519,27 @@ function ContenidoEspacio({
 						primerPago: contraPendiente.primerPago,
 						nota: contraPendiente.nota,
 					}}
+					onRetirar={() => setRetirarId(contraPendiente.id)}
 				/>
 			);
 		}
-	} else if (s.tipo === "recuperacion" && s.recuperacion.esMia) {
+	} else if (
+		(s.tipo === "recuperacion" && s.recuperacion.esMia) ||
+		((s.tipo === "rebaja" || s.tipo === "juridico") &&
+			!!userId &&
+			idSolicitante(s) === userId)
+	) {
 		// Cuatro ojos: la propia no se decide (el servidor lo exige igual).
 		puedeDecidir = false;
-		aviso = (
-			<div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
-				<CrmPill tone="neutral" kind="chip" className="px-2 py-0.5">
-					Su solicitud
-				</CrmPill>
-				<span className="wrap-break-word min-w-0 flex-1">
-					Debe aprobarla otro supervisor o administrador. Si ya no aplica,
-					cancélela desde la ficha.
-				</span>
-			</div>
-		);
+		aviso = <AvisoSuSolicitud />;
+	} else if (
+		s.tipo === "documentos" &&
+		!!userId &&
+		idSolicitante(s) === userId
+	) {
+		// Documentos: solo el aviso. El servidor no aplica los cuatro ojos y
+		// bloquearlo es una decisión de negocio pendiente.
+		aviso = <AvisoSuSolicitud bloquea={false} />;
 	} else if (
 		(s.tipo === "apagado" || s.tipo === "reactivacion") &&
 		s.porEjecutar
@@ -1266,6 +1586,7 @@ function ContenidoEspacio({
 						aviso={aviso}
 						primerPago={primerPago}
 						cargandoPlan={planConvenio.isPending}
+						contrapropuestas={historialContra}
 						resolucion={resolucion}
 						onVolver={onCerrar}
 						onSiguiente={hayMas ? () => onIr(posicion + 1) : undefined}
@@ -1284,6 +1605,12 @@ function ContenidoEspacio({
 					fechaConvenio={planConvenio.data?.fecha_convenio ?? null}
 					onCerrar={() => setContraAbierta(false)}
 					onEnviada={() => undefined}
+				/>
+			) : null}
+			{s.tipo === "convenio" ? (
+				<RetirarContrapropuestaDialog
+					contrapropuestaId={retirarId}
+					onCerrar={() => setRetirarId(null)}
 				/>
 			) : null}
 
@@ -1332,6 +1659,33 @@ function ContenidoEspacio({
 							queryKey: orpc.getColaInmovilizaciones.key(),
 						});
 						resolver(decision === "aprobar" ? "aprobada" : "rechazada");
+					}}
+				/>
+			) : null}
+			{decision &&
+			(s.tipo === "rebaja" ||
+				s.tipo === "juridico" ||
+				s.tipo === "documentos") ? (
+				<DecidirSolicitudModal
+					tipo={s.tipo}
+					solicitudId={
+						s.tipo === "rebaja"
+							? s.rebaja.id
+							: s.tipo === "juridico"
+								? s.juridico.id
+								: s.documento.id
+					}
+					decision={decision}
+					quien={quienEs(s)}
+					resumen={resumenDecision(s)}
+					reintento={esReintento(s)}
+					notaInicial={notas}
+					onOpenChange={(abierto) => {
+						if (!abierto) setDecision(null);
+					}}
+					onDecidido={(d, descripcion) => {
+						const base = resolucionDe(s.tipo, d);
+						onResuelta(s.id, descripcion ? { ...base, descripcion } : base);
 					}}
 				/>
 			) : null}

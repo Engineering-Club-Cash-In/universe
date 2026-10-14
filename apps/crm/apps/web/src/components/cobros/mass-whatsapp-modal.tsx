@@ -111,8 +111,22 @@ interface MassWhatsappModalProps {
 		fechaHasta?: string;
 		excluirPagadosMes?: boolean;
 		soloConCuentaNexa?: boolean;
+		/** Cartera general (S5): asesor dueño (asesor_id de cartera). */
+		asesorId?: number;
+		/** Cartera general (S5): segmento de la cola o de las alertas. */
+		cola?: Parameters<typeof client.enviarWhatsappMasivoCobros>[0]["cola"];
+		alertaPromesa?: Parameters<
+			typeof client.enviarWhatsappMasivoCobros
+		>[0]["alertaPromesa"];
+		alertaConvenio?: Parameters<
+			typeof client.enviarWhatsappMasivoCobros
+		>[0]["alertaConvenio"];
 	};
 	etiquetaLabels?: Record<string, string>;
+	/** Nombre del asesor filtrado (solo para el resumen de filtros). */
+	asesorNombre?: string;
+	/** Etiqueta del segmento («Cola del día · SLA vence hoy»), para el resumen. */
+	segmentoNombre?: string;
 	totalDestinatarios?: number;
 	children: React.ReactNode;
 }
@@ -138,6 +152,8 @@ const TIME_LABELS: Record<string, string> = {
 export function MassWhatsappModal({
 	filtros,
 	etiquetaLabels,
+	asesorNombre,
+	segmentoNombre,
 	totalDestinatarios,
 	children,
 }: MassWhatsappModalProps) {
@@ -213,6 +229,10 @@ export function MassWhatsappModal({
 				fechaHasta: filtros.fechaHasta,
 				excluirPagadosMes: filtros.excluirPagadosMes,
 				soloConCuentaNexa: filtros.soloConCuentaNexa,
+				asesorId: filtros.asesorId,
+				cola: filtros.cola,
+				alertaPromesa: filtros.alertaPromesa,
+				alertaConvenio: filtros.alertaConvenio,
 			}),
 		onSuccess: (res) => {
 			// `descartados` ya incluye los que fallaron en el proveedor, así que
@@ -384,6 +404,15 @@ export function MassWhatsappModal({
 															filtros.estadoMora)
 														: "Todos"}
 											</li>
+											{filtros.asesorId !== undefined ? (
+												<li>
+													Asesor:{" "}
+													{asesorNombre ?? `Asesor #${filtros.asesorId}`}
+												</li>
+											) : null}
+											{segmentoNombre ? (
+												<li>Segmento: {segmentoNombre}</li>
+											) : null}
 											<li>Rango temporal: {formatRangoTemporal(filtros)}</li>
 											<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
 											<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
@@ -403,9 +432,9 @@ export function MassWhatsappModal({
 										{plantillaId === "cuenta_nexa_exclusiva" &&
 											!filtros.soloConCuentaNexa && (
 												<p className="mt-2 text-amber-700 text-xs dark:text-amber-400">
-													Esta plantilla solo se envía a créditos con cuenta Nexa
-													asignada; el resto se descarta. Active el filtro «Solo
-													con cuenta Nexa» para ver el total real.
+													Esta plantilla solo se envía a créditos con cuenta
+													Nexa asignada; el resto se descarta. Active el filtro
+													«Solo con cuenta Nexa» para ver el total real.
 												</p>
 											)}
 									</div>

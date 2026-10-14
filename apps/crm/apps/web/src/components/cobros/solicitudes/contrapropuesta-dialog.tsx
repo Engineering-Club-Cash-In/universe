@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { hoyGT } from "@/components/cobros/coberturas-panel";
@@ -9,6 +9,8 @@ import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
+	DialogFooter,
+	DialogHeader,
 	DialogTitle,
 	dialogTitleClassName,
 } from "@/components/ui/dialog";
@@ -20,7 +22,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { maxMesesDeConvenio } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 import { orpc, queryClient } from "@/utils/orpc";
-import { quetzales } from "./piezas";
+import {
+	fechaCorta,
+	quetzales,
+	TextoDecision,
+	type TonoDecision,
+} from "./piezas";
 
 /**
  * «Editar y contraproponer» (M4, Figma «WS Aprob · Convenio · Contrapropuesta»).
@@ -406,15 +413,18 @@ export type ContrapropuestaPendiente = {
 
 /**
  * Aviso del Espacio de aprobación mientras la contrapropuesta espera al asesor:
- * el convenio no se puede decidir hasta que responda.
+ * el convenio no se puede decidir hasta que responda. El supervisor puede
+ * retirarla (`onRetirar`) para decidir el plan original.
  */
 export function ContrapropuestaPendienteAviso({
 	contrapropuesta,
+	onRetirar,
 }: {
 	contrapropuesta: ContrapropuestaPendiente;
+	onRetirar?: () => void;
 }) {
 	return (
-		<div className="rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+		<div className="flex flex-col gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
 			<p className="wrap-break-word">
 				<span className="font-semibold text-fg">
 					Contrapropuesta esperando al asesor:
@@ -422,8 +432,277 @@ export function ContrapropuestaPendienteAviso({
 				{contrapropuesta.numeroMeses} cuotas de{" "}
 				{quetzales(contrapropuesta.cuotaMensual)}, primer pago el{" "}
 				{fechaLegible(contrapropuesta.primerPago)}. «{contrapropuesta.nota}». El
-				convenio no se puede decidir hasta que el asesor responda.
+				convenio no se puede decidir hasta que el asesor responda o usted la
+				retire.
 			</p>
+			{onRetirar ? (
+				<div>
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						onClick={onRetirar}
+					>
+						Retirar contrapropuesta
+					</Button>
+				</div>
+			) : null}
 		</div>
+	);
+}
+
+/* ── Retirar (el supervisor descarta su contrapropuesta) ─────────────────────── */
+
+export type RetirarContrapropuestaVistaProps = {
+	nota: string;
+	onNota: (nota: string) => void;
+	errorServidor: string | null;
+	pendiente: boolean;
+	onCancelar: () => void;
+	onRetirar: () => void;
+};
+
+/** Contenido del modal «Retirar la contrapropuesta» (sin el Dialog). */
+export function RetirarContrapropuestaVista(
+	p: RetirarContrapropuestaVistaProps,
+) {
+	const notaId = useId();
+	const largo = p.nota.trim().length;
+	const errorNota =
+		largo > MAXIMO_NOTA_CONTRAPROPUESTA
+			? `La nota no puede pasar de ${MAXIMO_NOTA_CONTRAPROPUESTA} caracteres.`
+			: null;
+	return (
+		<>
+			<DialogHeader>
+				<DialogTitle>Retirar la contrapropuesta</DialogTitle>
+				<DialogDescription>
+					El convenio vuelve al plan que propuso el asesor y queda pendiente de
+					su decisión. Se avisa al resto de supervisores.
+				</DialogDescription>
+			</DialogHeader>
+			<div className="flex flex-col gap-1.5">
+				<Label htmlFor={notaId}>Nota (opcional)</Label>
+				<Textarea
+					id={notaId}
+					rows={3}
+					value={p.nota}
+					disabled={p.pendiente}
+					placeholder="Por qué se retira…"
+					onChange={(e) => p.onNota(e.target.value)}
+				/>
+				{errorNota ? (
+					<FieldMessage variant="help">{errorNota}</FieldMessage>
+				) : null}
+			</div>
+			{p.errorServidor ? (
+				<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
+			) : null}
+			<DialogFooter>
+				<Button
+					type="button"
+					variant="outline"
+					disabled={p.pendiente}
+					onClick={p.onCancelar}
+				>
+					Cancelar
+				</Button>
+				<Button
+					type="button"
+					variant="destructive"
+					loading={p.pendiente}
+					disabled={p.pendiente || !!errorNota}
+					onClick={p.onRetirar}
+				>
+					Retirar contrapropuesta
+				</Button>
+			</DialogFooter>
+		</>
+	);
+}
+
+/**
+ * Retira la contrapropuesta pendiente (`responderContrapropuesta` con
+ * `accion: "descartar"`; el servidor deja al supervisor retirarla). Si el
+ * convenio ya no existe, la contrapropuesta queda sin efecto y se avisa.
+ */
+export function RetirarContrapropuestaDialog({
+	contrapropuestaId,
+	onCerrar,
+}: {
+	/** null = cerrado. */
+	contrapropuestaId: string | null;
+	onCerrar: () => void;
+}) {
+	const [nota, setNota] = useState("");
+	const retirar = useMutation({
+		...orpc.responderContrapropuesta.mutationOptions(),
+		retry: false,
+		onSettled: () => {
+			for (const queryKey of [
+				orpc.getContrapropuestasConvenio.key(),
+				orpc.getConveniosListado.key(),
+			]) {
+				void queryClient.invalidateQueries({ queryKey });
+			}
+		},
+		onSuccess: () => {
+			toast.success("Contrapropuesta retirada", {
+				description: "El convenio sigue con el plan del asesor.",
+			});
+			setNota("");
+			onCerrar();
+		},
+		onError: (e: Error & { code?: unknown }) => {
+			// Ya no estaba esperando respuesta: la vista vuelve a leer el estado real.
+			if (e.code === "NOT_FOUND" || e.code === "CONFLICT") {
+				toast.info(e.message);
+				onCerrar();
+			}
+		},
+	});
+	const abierto = contrapropuestaId !== null;
+	return (
+		<Dialog
+			open={abierto}
+			onOpenChange={(v) => {
+				if (!v && !retirar.isPending) {
+					retirar.reset();
+					onCerrar();
+				}
+			}}
+		>
+			<DialogContent className="sm:max-w-lg">
+				<RetirarContrapropuestaVista
+					nota={nota}
+					onNota={setNota}
+					errorServidor={
+						retirar.error &&
+						(retirar.error as { code?: unknown }).code !== "NOT_FOUND" &&
+						(retirar.error as { code?: unknown }).code !== "CONFLICT"
+							? retirar.error.message
+							: null
+					}
+					pendiente={retirar.isPending}
+					onCancelar={() => {
+						retirar.reset();
+						onCerrar();
+					}}
+					onRetirar={() => {
+						if (!contrapropuestaId) return;
+						retirar.mutate({
+							id: contrapropuestaId,
+							accion: "descartar",
+							nota: nota.trim() || undefined,
+						});
+					}}
+				/>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+/* ── Historial de contrapropuestas ───────────────────────────────────────────── */
+
+export type EstadoContrapropuesta =
+	| "pendiente"
+	| "aceptada"
+	| "descartada"
+	| "retirada"
+	| "sin_efecto";
+
+const ESTADO_CONTRAPROPUESTA: Record<
+	EstadoContrapropuesta,
+	{ etiqueta: string; tono: TonoDecision }
+> = {
+	pendiente: { etiqueta: "Esperando al asesor", tono: "warning" },
+	aceptada: { etiqueta: "Aceptada por el asesor", tono: "success" },
+	descartada: { etiqueta: "Descartada por el asesor", tono: "neutral" },
+	retirada: { etiqueta: "Retirada por el supervisor", tono: "neutral" },
+	sin_efecto: { etiqueta: "Sin efecto", tono: "neutral" },
+};
+
+/**
+ * Estado para mostrar. El servidor guarda «descartada» tanto si la descartó
+ * el asesor como si la retiró un supervisor: se distingue por el rol de quien
+ * la resolvió.
+ */
+export function estadoContrapropuesta(
+	estado: string,
+	resolvioSupervisor: boolean,
+): EstadoContrapropuesta {
+	if (estado === "descartada")
+		return resolvioSupervisor ? "retirada" : "descartada";
+	if (
+		estado === "aceptada" ||
+		estado === "sin_efecto" ||
+		estado === "pendiente"
+	)
+		return estado;
+	return "sin_efecto";
+}
+
+export type ContrapropuestaHistorialItem = {
+	id: string;
+	estado: EstadoContrapropuesta;
+	numeroMeses: number;
+	cuotaMensual: string | number;
+	primerPago: string;
+	nota: string;
+	/** Nombre de quien la envió. */
+	creadaPor: string | null;
+	creadaEn: string | Date;
+	resueltaPor: string | null;
+	resueltaEn: string | Date | null;
+	notaRespuesta: string | null;
+};
+
+/** «Contrapropuestas anteriores» del Espacio de aprobación del convenio. */
+export function HistorialContrapropuestasVista({
+	items,
+}: {
+	items: ContrapropuestaHistorialItem[];
+}) {
+	if (items.length === 0) return null;
+	return (
+		<section className="flex flex-col gap-2.5 rounded-xl bg-canvas px-4 py-3.5">
+			<h3 className="font-semibold text-[13px] text-fg leading-[1.26]">
+				Contrapropuestas anteriores
+			</h3>
+			<ol className="flex flex-col divide-y divide-divider">
+				{items.map((c) => {
+					const estado = ESTADO_CONTRAPROPUESTA[c.estado];
+					return (
+						<li
+							key={c.id}
+							className="flex flex-col gap-1 py-2.5 text-[13px] first:pt-0 last:pb-0"
+						>
+							<div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+								<span className="font-semibold text-fg tabular-nums">
+									{c.numeroMeses} cuotas de {quetzales(c.cuotaMensual)} · primer
+									pago {fechaLegible(c.primerPago)}
+								</span>
+								<TextoDecision tono={estado.tono}>
+									{estado.etiqueta}
+								</TextoDecision>
+							</div>
+							<p className="wrap-break-word text-fg-secondary text-xs">
+								Enviada{c.creadaPor ? ` por ${c.creadaPor}` : ""} el{" "}
+								{fechaCorta(c.creadaEn)} · «{c.nota}»
+							</p>
+							{c.resueltaEn ? (
+								<p className="wrap-break-word text-fg-tertiary text-xs">
+									{c.estado === "sin_efecto"
+										? "Quedó sin efecto"
+										: `Respondida${c.resueltaPor ? ` por ${c.resueltaPor}` : ""}`}{" "}
+									el {fechaCorta(c.resueltaEn)}
+									{c.notaRespuesta ? ` · «${c.notaRespuesta}»` : ""}
+								</p>
+							) : null}
+						</li>
+					);
+				})}
+			</ol>
+		</section>
 	);
 }

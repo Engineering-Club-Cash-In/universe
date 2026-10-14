@@ -20,6 +20,7 @@ import {
 	carteraBackClient,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import { contrapropuestaPendienteDelCaso } from "../services/contrapropuesta-del-caso";
 import {
 	conBloqueoDeConvenio,
 	contrapropuestaPendienteDe,
@@ -416,6 +417,24 @@ export const convenioDecisionRouter = {
 				esSupervisor: PERMISSIONS.canAssignCobros(context.userRole ?? ""),
 			}),
 		),
+
+	// M4 · La contrapropuesta que espera respuesta, POR CASO: la ficha y el
+	// Workspace no conocen el id del convenio pendiente. Mismo gate de acceso que
+	// la ficha; devuelve el plan original y el propuesto, o `null`.
+	getContrapropuestaPendienteDelCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			return contrapropuestaPendienteDelCaso({
+				casoCobroId: input.casoCobroId,
+				emailSesion: context.session.user.email,
+				esSupervisor: PERMISSIONS.canAssignCobros(context.userRole ?? ""),
+			});
+		}),
 
 	// M4 · Contrapropuestas de un convenio (la más reciente primero).
 	getContrapropuestasConvenio: cobrosProcedure

@@ -16,6 +16,10 @@ import {
 	type TabDetalle,
 } from "@/components/cobros/equipo/detalle/enlaces";
 import {
+	type CreditoProximoSubir,
+	ProximosSubirDialog,
+} from "@/components/cobros/equipo/detalle/proximos-subir";
+import {
 	ResumenAsesorVista,
 	type ResumenAsesorVistaProps,
 } from "@/components/cobros/equipo/detalle/resumen-asesor";
@@ -37,6 +41,7 @@ import {
 	type FilaSolicitudAsesor,
 	SolicitudesDeAsesorVista,
 } from "@/components/cobros/solicitudes/solicitudes-de-asesor";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
@@ -46,7 +51,7 @@ export const meta: ShowcaseMeta = {
 	figma:
 		"CRM Ventas › Supervisor › Detalle de asesor (2082:13), Cartera del asesor (3650:5563), Casos críticos (3662:5853), Historial de actividad (4063:12) y Solicitudes del asesor (3654:5711)",
 	description:
-		"Pantalla /cobros/equipo/$asesorId con datos de ejemplo: encabezado (nivel, estado, Trasladar cartera, Marcar ausente, Ver sus casos y selector de asesor) y las pestañas Resumen (KPIs, diagnóstico, casos críticos, vista rápida de su cartera e historial reciente), Agenda (cumplimiento por día con navegación), Actividad (Historial de gestiones del asesor con los chips del Figma, línea de tiempo o tabla, y Cambios de bucket) y Solicitudes. Estados: cargando, asesor no encontrado, sin usuario del CRM y vacío.",
+		"Pantalla /cobros/equipo/$asesorId con datos de ejemplo: encabezado (nivel, estado, Trasladar cartera, Marcar ausente o Reactivar, Ver sus casos y selector de asesor) y las pestañas Resumen (KPIs, diagnóstico, casos críticos con la lista de próximos a subir de bucket, vista rápida de su cartera e historial reciente), Agenda (cumplimiento por día con navegación), Actividad (Historial de gestiones del asesor con los chips del Figma, línea de tiempo o tabla, y Cambios de bucket) y Solicitudes. Estados: cargando, asesor no encontrado, sin usuario del CRM y vacío.",
 };
 
 /* ── Fechas de ejemplo ────────────────────────────────────────────────────── */
@@ -464,6 +469,39 @@ const SOLICITUDES: FilaSolicitudAsesor[] = [
 		resultado: "Falta evidencia de los intentos de contacto",
 		ficha: { id: "44870", seccion: "inmovilizacion" },
 	},
+	{
+		id: "s-4",
+		fecha: haceHoras(60),
+		tipo: "rebaja",
+		credito: "46980",
+		bucket: undefined,
+		cliente: "Luis Fernando Aguilar",
+		estado: "aprobada",
+		resultado: "Rebaja de Q 600.00 aplicada",
+		ficha: { id: "46980" },
+	},
+	{
+		id: "s-5",
+		fecha: haceHoras(70),
+		tipo: "documentos",
+		credito: "45210",
+		bucket: undefined,
+		cliente: "Ana Lucía Morales",
+		estado: "aprobada",
+		resultado: "Carta poder · Enviada por correo",
+		ficha: { id: "45210" },
+	},
+	{
+		id: "s-6",
+		fecha: haceHoras(96),
+		tipo: "juridico",
+		credito: "43110",
+		bucket: 4,
+		cliente: "Diana Herrera",
+		estado: "pendiente",
+		resultado: "Escalar a Jurídico · No quiere pagar",
+		ficha: { id: "43110" },
+	},
 ];
 
 /* ── Props base del Resumen ───────────────────────────────────────────────── */
@@ -509,13 +547,15 @@ const RESUMEN: ResumenAsesorVistaProps = {
 			{
 				clave: "sin_gestion",
 				cantidad: 8,
-				etiqueta: "sin gestión > 48h",
+				etiqueta: "sin gestión en 3 días hábiles",
 				destino: enlacesCriticos(ASESOR_ID).sinGestion,
 			},
 			{
 				clave: "proximos_bucket",
 				cantidad: 5,
 				etiqueta: "próximos a subir de bucket",
+				// En la pantalla abre la lista (ProximosSubirDialog).
+				onClick: nada,
 			},
 		],
 		total: 13,
@@ -789,6 +829,52 @@ function DetalleDemo({
 	);
 }
 
+/** M2 · `getProximosSubirBucket().items` de ejemplo. */
+const PROXIMOS: CreditoProximoSubir[] = (
+	[
+		["Ana Lucía Morales", "01010214147730", 2, 0, 2900, 450],
+		["Roberto Cárcamo", "01010214147120", 3, 1, 3600, 1280],
+		["Luis Fernando Aguilar", "01010214148215", 2, 2, 2500, 0],
+		["María José Contreras", "01010214148972", 1, 4, 1800, 120],
+		["Marvin Castillo", "01010214146980", 3, 6, 4100, 2300],
+	] as const
+).map(([cliente, sifco, bucketActual, dias, cuota, mora]) => {
+	const d = new Date(AHORA.getTime() + dias * 86_400_000);
+	return {
+		cliente,
+		sifco,
+		bucketActual,
+		bucketSiguiente: bucketActual + 1,
+		diasParaVencer: dias,
+		fechaVencimiento: aFechaISO_GT(d),
+		montoCuota: cuota,
+		montoMora: mora,
+	};
+});
+
+function ProximosDemo() {
+	const [abierto, setAbierto] = React.useState(false);
+	return (
+		<div className="flex flex-col items-start gap-2 py-3">
+			<p className="type-body-sm text-fg-secondary">
+				«Casos críticos › próximos a subir de bucket» abre esta lista; cada fila
+				abre el caso en el Workspace.
+			</p>
+			<Button size="sm" variant="outline" onClick={() => setAbierto(true)}>
+				Abrir la lista de ejemplo
+			</Button>
+			<ProximosSubirDialog
+				open={abierto}
+				onOpenChange={setAbierto}
+				nombre={NOMBRE}
+				items={PROXIMOS}
+				ventanaDias={7}
+				onAbrir={() => setAbierto(false)}
+			/>
+		</div>
+	);
+}
+
 const SIN_USUARIO = (
 	<EmptyState
 		variant="no-data"
@@ -824,7 +910,11 @@ export default function Showcase() {
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Ausente (con el Resumen cargando)">
+			<ShowcaseGroup title="Próximos a subir de bucket (lista detrás del contador, M2)">
+				<ProximosDemo />
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ausente: «Reactivar» desde el encabezado (con el Resumen cargando)">
 				<div className="-mx-4 rounded-2xl bg-canvas py-2">
 					<DetalleAsesorVista
 						asesorId={ASESOR_ID}
@@ -838,6 +928,7 @@ export default function Showcase() {
 						}}
 						asesores={ASESORES}
 						onCambiarAsesor={nada}
+						onReactivar={nada}
 						tab="resumen"
 						onTab={nada}
 						contenido={{

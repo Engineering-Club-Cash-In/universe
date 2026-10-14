@@ -1,10 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { hoyGT } from "@/components/cobros/supervision/formato";
 import type { BucketAsesor } from "@/components/ds/card-asesor";
 import { ROLES } from "@/lib/roles";
-import { client, orpc, orpcAparte, queryClient } from "@/utils/orpc";
+import { orpc, orpcAparte } from "@/utils/orpc";
 import {
 	AsesoresVista,
 	type FilaAsesorEquipo,
@@ -20,14 +19,9 @@ import {
 	textoAusencia,
 	textoAusenciaIndefinida,
 } from "./estado-asesor";
-import {
-	AsesorReactivadoDialog,
-	type CoberturaReactivar,
-	ConfirmarReactivarDialog,
-	type ResultadoReactivacion,
-} from "./reactivar-dialogs";
 import { resultadoRecuperacion } from "./recuperacion";
 import type { GrupoEquipo } from "./search";
+import { useReactivarAsesor } from "./use-reactivar-asesor";
 
 /**
  * Contenedor de «Mi equipo» › Asesores. Fuentes (todas ya existentes):
@@ -241,90 +235,15 @@ export function MiEquipoAsesores({
 
 	/* ── Reactivar = cancelar la cobertura o reactivar la ausencia indefinida ── */
 
-	const [porReactivar, setPorReactivar] = useState<{
-		asesorId: number;
-		/** Cobertura (`cancelarCobertura`) o ausencia indefinida (`reactivarAsesor`). */
-		id: string;
-		indefinida: boolean;
-		datos: CoberturaReactivar;
-	} | null>(null);
-	const [reactivado, setReactivado] = useState<string | null>(null);
-	const [resultado, setResultado] = useState<ResultadoReactivacion | null>(
-		null,
-	);
-
-	const cancelar = useMutation({
-		mutationFn: async (r: { id: string; indefinida: boolean }) => {
-			if (!r.indefinida) {
-				await client.cancelarCobertura({ id: r.id });
-				return null;
-			}
-			const res = await orpcAparte.reactivarAsesor.call({ id: r.id });
-			return {
-				devueltas: res.devueltas,
-				retenidas: res.retenidas as { motivo: string }[],
-			} satisfies ResultadoReactivacion;
-		},
-		// También tras un fallo: si la respuesta se perdió con la reactivación ya
-		// hecha, se vuelve a leer el estado real en lugar de dejar al asesor como
-		// ausente (cada reintento recibiría «ya fue reactivado»).
-		onSettled: () => {
-			void queryClient.invalidateQueries({
-				queryKey: orpc.listarCoberturas.key(),
-			});
-			void queryClient.invalidateQueries({
-				queryKey: orpcAparte.listarAusencias.key(),
-			});
-			void queryClient.invalidateQueries({
-				queryKey: orpc.getCargaPorAsesorBucket.key(),
-			});
-			// El pool vuelve: el catálogo cacheado trae al asesor sin buckets.
-			void queryClient.invalidateQueries({
-				queryKey: orpc.getAsesoresTraslados.key(),
-			});
-		},
-		onSuccess: (res) => {
-			setResultado(res);
-			setReactivado(porReactivar?.datos.nombre ?? null);
-			setPorReactivar(null);
-		},
-		onError: (e: Error) => toast.error(e.message),
+	const reactivar = useReactivarAsesor({
+		coberturas,
+		ausencias,
+		nombrePorUsuario,
+		hoy,
 	});
-
 	const pedirReactivar = (asesorId: number) => {
 		const a = activos.find((x) => x.asesor_id === asesorId);
-		cancelar.reset();
-		const indefinida = ausencias.find((x) => x.asesorId === asesorId);
-		if (a && indefinida) {
-			setPorReactivar({
-				asesorId,
-				id: indefinida.id,
-				indefinida: true,
-				datos: {
-					nombre: a.nombre,
-					motivo: indefinida.motivo,
-					desde: "",
-					hasta: "",
-					suplente: "",
-					indefinida: { aMedias: !!indefinida.reactivacionIniciadaAt },
-				},
-			});
-			return;
-		}
-		const c = a ? coberturaVigente(coberturas, a.userId, hoy) : null;
-		if (!a || !c) return;
-		setPorReactivar({
-			asesorId,
-			id: c.id,
-			indefinida: false,
-			datos: {
-				nombre: a.nombre,
-				motivo: c.motivo,
-				desde: c.desde,
-				hasta: c.hasta,
-				suplente: nombrePorUsuario.get(c.suplenteId) ?? "el suplente",
-			},
-		});
+		if (a) reactivar.pedir({ asesorId, nombre: a.nombre, userId: a.userId });
 	};
 
 	const avisos = [
@@ -363,7 +282,7 @@ export function MiEquipoAsesores({
 					void ausenciasEquipo.refetch();
 				}}
 				onReactivar={pedirReactivar}
-				reactivandoId={cancelar.isPending ? porReactivar?.asesorId : null}
+				reactivandoId={reactivar.reactivandoId}
 				fechaAgenda={
 					agendaQuery.data?.fecha
 						? new Date(`${agendaQuery.data.fecha}T12:00:00`).toLocaleDateString(
@@ -374,26 +293,7 @@ export function MiEquipoAsesores({
 				diasContactabilidad={DIAS_CONTACTABILIDAD}
 				avisos={avisos}
 			/>
-			<ConfirmarReactivarDialog
-				cobertura={porReactivar?.datos ?? null}
-				pendiente={cancelar.isPending}
-				onConfirmar={() =>
-					porReactivar &&
-					cancelar.mutate({
-						id: porReactivar.id,
-						indefinida: porReactivar.indefinida,
-					})
-				}
-				onCerrar={() => setPorReactivar(null)}
-			/>
-			<AsesorReactivadoDialog
-				nombre={reactivado}
-				resultado={resultado}
-				onCerrar={() => {
-					setReactivado(null);
-					setResultado(null);
-				}}
-			/>
+			{reactivar.dialogos}
 		</>
 	);
 }

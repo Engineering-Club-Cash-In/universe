@@ -92,6 +92,21 @@ Los esquemas de Drizzle (`db/schema/cobros.ts`, `inmovilizacion-unidad.ts` y `no
 - **Bitácora:** `getBitacoraDecisiones({ page, perPage, tipos?, decisiones?, solicitanteId?, desde?, hasta? })` → `{ items, page, perPage, total, totalPages }`. Cada ítem: `id`, `tipo`, `fecha`, `decision`, `estado`, `solicitante`, `decididoPor`, `credito`, `resumen`, `motivo`, `nota`, `refId`. Servicio en `services/bitacora-supervision.ts`.
 - **Traslados:** cartera `GET /buckets/traslados/historial` con paginación real, fechas y total (el listado viejo queda igual).
 - **Escaladas:** `getEscaladasAsesor({ userId, desde?, hasta?, limite? })` → `{ total, porTipo, items }`.
+- **Ampliación del 2026-10-14** (rama `feat/cobros-integracion-issues`, sin migración):
+  - `getBitacoraDecisiones` acepta `busqueda`: si son dígitos busca en el SIFCO; si es texto, en el nombre del cliente palabra por palabra, sin tildes. Traslados, coberturas y ausencias quedan fuera mientras se busca, porque no tienen crédito.
+  - También acepta `eventos` (`traslado`, `baja`, `ausencia`, `reactivacion`). Una baja es un traslado cuyo motivo empieza con «Despido» o «Renuncia».
+  - Tipos nuevos:
+    - `documento`: solicitudes resueltas.
+    - `contrapropuesta`: aceptada, descartada, retirada o sin efecto. «Retirada» = la cerró un supervisor o admin.
+    - `ausencia_indefinida`: dos eventos, la ausencia y la reactivación. Su reparto ya no sale repetido como traslado.
+  - Campos nuevos por entrada:
+    - Traslados: `asesorAfectado` y `cuentas.movidas`.
+    - Reasignaciones y recuperaciones: `bucket`.
+    - Rebajas: `montos`.
+    - Jurídico: `notaJuridico` y `bucket`.
+    - Documentos y contrapropuestas: `documento` y `plan`.
+    - Coberturas y ausencias: `periodo`.
+  - `getSolicitudesDocumentos` devuelve además `clienteNombre` y `solicitadoPorId`.
 
 ### M2 · Próximos a subir de bucket
 
@@ -152,7 +167,14 @@ Estado del cableado: **M1, M2, M3, M6 y M7** (y el «Primer pago» de M4) los ca
 | M6 | `equipo/estado-asesor.ts`: leer `nivel` de `getAsesoresTraslados` en lugar de derivarlo de los buckets. |
 | M7 | `equipo/asesores.tsx`: reemplazar el `useQueries` de `getHistorialAgendasResumen` por una llamada a `getContactabilidadPorAsesor({ desde, hasta, usuarioIds, roles: ["cobros"] })`. |
 
-### Extras fuera de los TODO (sin cablear todavía)
+### Extras fuera de los TODO
+
+> **2026-10-14:** todos los extras de esta tabla quedaron hechos en la rama `feat/cobros-integracion-issues`, salvo la hora de inicio del incidente, que no tiene campo.
+> - Se agregó el procedimiento `getContrapropuestaPendienteDelCaso({ casoCobroId })` en `convenio-decision.ts`, con la lógica en `services/contrapropuesta-del-caso.ts` y el acceso de la ficha.
+> - La tarjeta `ContrapropuestaCaso` aparece en el Workspace y en la ficha.
+> - El Espacio de aprobación permite retirar la contrapropuesta y muestra su historial.
+> - Las tres tarjetas de notificación están hechas.
+> - El editor de la contrapropuesta está en el showcase `cobros-solicitudes`.
 
 Lo que sigue no tenía un `TODO(José)` en el código, así que no entra en las entregas anteriores. Es el siguiente paso si se quiere cerrar bien M4 y M5:
 

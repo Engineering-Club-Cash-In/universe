@@ -18,11 +18,15 @@ import {
 import { DesempenoEquipo } from "@/components/cobros/supervision/desempeno-equipo";
 import {
 	EquipoTabla,
+	estadoDelAsesor,
 	type FilaEquipo,
 } from "@/components/cobros/supervision/equipo-tabla";
 import type { Periodo } from "@/components/cobros/supervision/formato";
 import { LinksPago } from "@/components/cobros/supervision/links-pago";
-import { PendientesHoy } from "@/components/cobros/supervision/pendientes-hoy";
+import {
+	type ItemPendiente,
+	PendientesHoy,
+} from "@/components/cobros/supervision/pendientes-hoy";
 import type { Bucket } from "@/components/ds/badges";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
@@ -31,7 +35,7 @@ export const meta: ShowcaseMeta = {
 	title: "Cobros · Dashboard del supervisor",
 	figma: "CRM Ventas › Supervisor › Dashboard · Supervisor (1954:14)",
 	description:
-		"DashboardSupervisorVista (components/cobros/supervision) con datos de ejemplo: encabezado, Sus pendientes de hoy (con Tareas B3), Desempeño del equipo, Links de pago, Aprobaciones pendientes, Cartera del equipo por bucket, y Equipo. Estados: hoy (stubs S1–S4 en «—»), con el backend de José completo, cargando, vacío y error.",
+		"DashboardSupervisorVista (components/cobros/supervision) con datos de ejemplo: encabezado, Sus pendientes de hoy (con Tareas B3), Desempeño del equipo, Links de pago, Aprobaciones pendientes (con rebajas, documentos y Jurídico), Cartera del equipo por bucket, y Equipo. Estados: completo (interactivo, con el cambio de período), actualizando el período, fuentes caídas («—»), cargando, vacío y error.",
 };
 
 /* ── Datos de ejemplo ─────────────────────────────────────────────────────── */
@@ -84,12 +88,30 @@ const APROBACIONES: FilaAprobacion[] = [
 	},
 	{
 		id: "5",
-		tipo: "convenio",
+		tipo: "juridico",
+		cliente: "Carlos Enrique Batres",
+		credito: "01010214145510",
+		asesor: "J. Pérez",
+		solicitadoEn: haceMin(60 * 2),
+		destino: { to: "/cobros/solicitudes", search: { tipo: "juridico" } },
+	},
+	{
+		id: "6",
+		tipo: "rebaja",
 		cliente: "Marvin Castillo",
 		credito: "01010214146980",
 		asesor: "M. Gómez",
+		solicitadoEn: haceMin(70),
+		destino: { to: "/cobros/solicitudes", search: { tipo: "rebaja" } },
+	},
+	{
+		id: "7",
+		tipo: "documentos",
+		cliente: "Estado de cuenta",
+		credito: "01010214147730",
+		asesor: "C. Ramírez",
 		solicitadoEn: haceMin(40),
-		destino: { to: "/cobros/solicitudes", search: { tipo: "convenio" } },
+		destino: { to: "/cobros/solicitudes", search: { tipo: "documentos" } },
 	},
 ];
 
@@ -112,7 +134,27 @@ const BANDEJAS = [
 		cantidad: 2,
 		destino: { to: "/cobros/solicitudes" },
 	},
+	{
+		clave: "rebajas",
+		etiqueta: "Rebaja de mora",
+		cantidad: 3,
+		destino: { to: "/cobros/solicitudes", search: { tipo: "rebaja" } },
+	},
+	{
+		clave: "documentos",
+		etiqueta: "Documentos",
+		cantidad: 5,
+		destino: { to: "/cobros/solicitudes", search: { tipo: "documentos" } },
+	},
+	{
+		clave: "juridico",
+		etiqueta: "Jurídico",
+		cantidad: 1,
+		destino: { to: "/cobros/solicitudes", search: { tipo: "juridico" } },
+	},
 ];
+/** Convenios 5 + recuperación 1 + apagados 2 + rebajas 3 + documentos 5 + Jurídico 1. */
+const TOTAL_APROBACIONES = BANDEJAS.reduce((t, b) => t + (b.cantidad ?? 0), 0);
 
 const CUENTAS: [Bucket, number][] = [
 	["B0", 128],
@@ -129,84 +171,80 @@ const SEGMENTOS = CUENTAS.map(([bucket, cuentas]) => ({
 	destino: cartera({ bucket }),
 }));
 
-const EQUIPO: FilaEquipo[] = [
-	["L. Morales", 92, 86, null],
-	["J. Pérez", 78, 71, null],
-	["C. Ramírez", 84, 54, "Vacaciones"],
-	["A. Díaz", 58, 81, null],
-].map(([nombre, casos, agenda, ausencia], i) => ({
+/**
+ * El punto de estado sale de `estadoDelAsesor`, el mismo criterio de la
+ * pantalla: la Meta del período y, sin meta, la Agenda (S. Juárez no tiene
+ * meta: su punto sale de la agenda). Rivas no tiene ninguno: gris.
+ */
+const EQUIPO: FilaEquipo[] = (
+	[
+		["L. Morales", 92, 24, 88, 74, 86, null],
+		["J. Pérez", 78, 15, 71, 66, 71, null],
+		["C. Ramírez", 84, 9, 54, 51, 54, "Vacaciones"],
+		["A. Díaz", 58, 19, 81, 100, 81, null],
+		["S. Juárez", 40, 12, null, null, 64, null],
+		["K. Rivas", 12, null, null, null, null, null],
+	] as const
+).map(([nombre, casos, contactosHoy, meta, rescate, agenda, ausencia], i) => ({
 	asesorId: i + 1,
-	nombre: nombre as string,
-	casos: casos as number,
-	contactosHoy: null,
-	meta: null,
-	rescate: null,
-	agenda: agenda as number,
-	ausencia: ausencia as string | null,
-	estado:
-		(agenda as number) >= 80
-			? "bien"
-			: (agenda as number) >= 60
-				? "atencion"
-				: "riesgo",
+	nombre,
+	casos,
+	contactosHoy,
+	meta,
+	rescate,
+	agenda,
+	ausencia,
+	estado: estadoDelAsesor({ meta, agenda }),
 	destino: { to: `/cobros/equipo/${i + 1}` },
 }));
 
-/** Lo mismo con S4 (contactos hoy, meta y rescate) como llegará del backend. */
-const EQUIPO_S4: FilaEquipo[] = EQUIPO.map((f, i) => ({
-	...f,
-	contactosHoy: [24, 15, 9, 19][i],
-	meta: [88, 71, 54, 81][i],
-	rescate: [74, 66, 51, 70][i],
-	estado: (["bien", "atencion", "riesgo", "bien"] as const)[i],
-}));
-
-const ITEMS_HOY = [
+const ITEMS_HOY: ItemPendiente[] = [
 	{
 		clave: "aprobaciones",
 		icono: ClipboardCheck,
-		tono: "neutral" as const,
-		valor: 8,
+		tono: "neutral",
+		valor: TOTAL_APROBACIONES,
 		etiqueta: "Aprobaciones pendientes",
-		info: "Convenios de pago por aprobar, solicitudes de recuperación del vehículo y de apagado o reactivación.",
+		info: "Convenios de pago por aprobar, solicitudes de recuperación del vehículo, de apagado o reactivación, rebajas de mora, documentos y escalados a Jurídico.",
 	},
 	{
 		clave: "rebajas",
 		icono: BadgePercent,
-		tono: "neutral" as const,
-		valor: null,
+		tono: "neutral",
+		valor: 3,
 		etiqueta: "Rebajas de mora por revisar",
-		pronto: true,
+		info: "Solicitudes de rebaja de mora pendientes o que no se pudieron aplicar y esperan su decisión.",
+		destino: { to: "/cobros/solicitudes", search: { tipo: "rebaja" } },
 	},
 	{
 		clave: "documentos",
 		icono: FileWarning,
-		tono: "danger" as const,
-		valor: null,
+		tono: "danger",
+		valor: 5,
 		etiqueta: "Documentos por autorizar",
-		pronto: true,
+		destino: { to: "/cobros/solicitudes", search: { tipo: "documentos" } },
 	},
 	{
 		clave: "sin_contacto",
 		icono: PhoneOff,
-		tono: "warning" as const,
+		tono: "warning",
 		valor: 6,
-		etiqueta: "Sin contacto > 5 días (equipo)",
-		info: "Créditos del equipo sin contacto en más de 5 días (criterio de la cola del día). El conteo de más de 3 días hábiles del diseño está pendiente.",
+		etiqueta: "Sin contacto en 3 días hábiles (equipo)",
+		info: "Créditos del equipo sin gestión manual en al menos 3 días hábiles completos. No cuentan los envíos automáticos ni los links de pago. Es el mismo criterio de la cola del día.",
 		destino: cartera({ cola: "sin_contacto" }),
 	},
 	{
 		clave: "prejuridico",
 		icono: Gavel,
-		tono: "warning" as const,
-		valor: null,
+		tono: "warning",
+		valor: 2,
 		etiqueta: "Listos para pasar a Prejurídico",
-		pronto: true,
+		info: "Créditos del equipo en B3, activos o morosos y sin promesa vigente, cuya 4.ª cuota vence en 7 días o menos.",
 	},
 	{
 		clave: "ausentes",
 		icono: UserX,
-		tono: "danger" as const,
+		tono: "danger",
 		valor: 1,
 		etiqueta: "Asesores ausentes",
 		info: "Asesores con una cobertura vigente hoy (vacaciones o permiso).",
@@ -217,25 +255,12 @@ const ITEMS_HOY = [
 	},
 ];
 
-/** Cómo se verá con S1/S2 completos. */
-const ITEMS_S1 = ITEMS_HOY.map((i) => {
-	switch (i.clave) {
-		case "rebajas":
-			return { ...i, valor: 3, pronto: false };
-		case "documentos":
-			return { ...i, valor: 5, pronto: false };
-		case "prejuridico":
-			return { ...i, valor: 2, pronto: false };
-		case "sin_contacto":
-			return {
-				...i,
-				etiqueta: "Sin contacto > 3 días (equipo)",
-				info: undefined,
-			};
-		default:
-			return i;
-	}
-});
+/** Una fuente del servidor no respondió: su conteo llega `null` («—»). */
+const ITEMS_SIN_FUENTE = ITEMS_HOY.map((i) =>
+	i.clave === "rebajas" || i.clave === "prejuridico"
+		? { ...i, valor: null }
+		: i,
+);
 
 /** Tareas B3: en la pantalla real es MisTareasB3 (consulta propia). */
 function TareasEjemplo() {
@@ -259,16 +284,17 @@ const BASE: DashboardSupervisorVistaProps = {
 	},
 	pendientes: {
 		items: ITEMS_HOY,
-		aprobaciones: { pendientes: 8, resueltasHoy: null },
+		// Resueltas hoy = aprobacionesResueltasHoy + otrasResueltasHoy.
+		aprobaciones: { pendientes: TOTAL_APROBACIONES, resueltasHoy: 6 },
 		cargando: false,
 		tareas: <TareasEjemplo />,
 	},
 	desempeno: {
 		periodo: "dia",
 		onPeriodo: nada,
-		recuperacion: null,
-		cuentasCuradas: null,
-		promesas: null,
+		recuperacion: { monto: 142_000, meta: 180_000, montoAnterior: 136_300 },
+		cuentasCuradas: { curadas: 48, total: 70, curadasAnterior: 40 },
+		promesas: { cumplidas: 38, pactadas: 50, montoIncumplido: 28_000 },
 		contactabilidad: { efectivos: 168, total: 200, porcentajeAnterior: 78 },
 		migracion: { bajaron: 8, subieron: 2 },
 	},
@@ -279,7 +305,7 @@ const BASE: DashboardSupervisorVistaProps = {
 	},
 	aprobaciones: {
 		filas: APROBACIONES,
-		total: 8,
+		total: TOTAL_APROBACIONES,
 		cargando: false,
 		error: false,
 		onReintentar: nada,
@@ -305,13 +331,29 @@ const BASE: DashboardSupervisorVistaProps = {
 	},
 };
 
-/** Normal (hoy, con los stubs en «—»): segmentado Día / Semana / Mes interactivo. */
+/**
+ * Completo e interactivo: al cambiar Día / Semana / Mes, las tarjetas y la tabla
+ * se atenúan con el spinner mientras «llega» el período nuevo (en la pantalla
+ * real, `isPlaceholderData` de las consultas con `keepPreviousData`).
+ */
 function DemoInteractivo() {
 	const [periodo, setPeriodo] = useState<Periodo>("dia");
+	const [actualizando, setActualizando] = useState(false);
+	const cambiar = (p: Periodo) => {
+		setPeriodo(p);
+		setActualizando(true);
+		window.setTimeout(() => setActualizando(false), 1200);
+	};
 	return (
 		<DashboardSupervisorVista
 			{...BASE}
-			desempeno={{ ...BASE.desempeno, periodo, onPeriodo: setPeriodo }}
+			desempeno={{
+				...BASE.desempeno,
+				periodo,
+				onPeriodo: cambiar,
+				actualizando,
+			}}
+			equipo={{ ...BASE.equipo, actualizando }}
 		/>
 	);
 }
@@ -327,30 +369,35 @@ function Marco({ children }: { children: React.ReactNode }) {
 export default function CobrosDashboardSupervisorShowcase() {
 	return (
 		<div className="space-y-8">
-			<ShowcaseGroup title="Hoy: stubs S1–S4 en «—» y «Pronto» (interactivo)">
+			<ShowcaseGroup title="Completo (interactivo: cambie el período)">
 				<Marco>
 					<DemoInteractivo />
 				</Marco>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Con el backend de José (S1–S4) completo">
+			<ShowcaseGroup title="Actualizando el período (muestra el anterior atenuado)">
+				<div className="space-y-6 py-4">
+					<DesempenoEquipo {...BASE.desempeno} periodo="semana" actualizando />
+					<EquipoTabla {...BASE.equipo} actualizando />
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Fuentes caídas: el servidor manda null y se ve «—»">
 				<div className="space-y-6 py-4">
 					<PendientesHoy
-						items={ITEMS_S1}
-						aprobaciones={{ pendientes: 8, resueltasHoy: 6 }}
+						items={ITEMS_SIN_FUENTE}
+						aprobaciones={{
+							pendientes: TOTAL_APROBACIONES,
+							resueltasHoy: null,
+						}}
 						cargando={false}
 					/>
 					<DesempenoEquipo
 						{...BASE.desempeno}
-						recuperacion={{
-							monto: 142_000,
-							meta: 180_000,
-							montoAnterior: 136_300,
-						}}
-						cuentasCuradas={{ curadas: 48, total: 70, curadasAnterior: 40 }}
-						promesas={{ cumplidas: 38, pactadas: 50, montoIncumplido: 28_000 }}
+						recuperacion={null}
+						cuentasCuradas={null}
+						promesas={null}
 					/>
-					<EquipoTabla {...BASE.equipo} filas={EQUIPO_S4} />
 				</div>
 			</ShowcaseGroup>
 

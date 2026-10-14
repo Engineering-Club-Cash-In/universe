@@ -58,6 +58,7 @@ import {
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
+import { DocumentosCaso } from "@/components/cobros/ficha/documentos-caso";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -68,7 +69,6 @@ import {
 import {
 	AsistenteIA,
 	CuotaPlanFila,
-	DocumentosFicha,
 	HistorialGestiones,
 	PendienteBackend,
 	ResumenCuentaCard,
@@ -117,6 +117,8 @@ import {
 	useMarcarAlertaLeida,
 	VerAlertasLeidas,
 } from "@/components/cobros/workspace/alertas-leidas";
+import { ContrapropuestaCaso } from "@/components/cobros/workspace/contrapropuesta-caso";
+import { SolicitudesAbiertasCaso } from "@/components/cobros/workspace/solicitudes-caso";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	type Bucket,
@@ -187,6 +189,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { abonosDeHoy, type CuotaConPagos } from "@/lib/cobros/abonos-convenio";
 import {
 	bucketDeEstado,
 	esBucketB2,
@@ -195,6 +198,11 @@ import {
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
 import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
+import {
+	contactoDeGestion,
+	etiquetaCanalGestion,
+	textoProximoContacto,
+} from "@/lib/cobros/gestion-contacto";
 import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
@@ -209,6 +217,7 @@ import {
 	deudaVencidaDelCaso,
 	diasMoraDelCaso,
 	direccionesDelCliente,
+	fechaLargaGT,
 	haySolicitudRecuperacionPendiente,
 	hrefTelefono,
 	idsPromesasParaRecalcular,
@@ -232,7 +241,7 @@ import {
 	textoReferenciasConTelefono,
 	ultimos8Digitos as ultimos8,
 } from "@/lib/cobros/reglas-caso";
-import { formatFechaLocal } from "@/lib/date-utils";
+import { formatFechaLocal, parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, orpcAparte } from "@/utils/orpc";
 
@@ -246,6 +255,56 @@ import { client, orpc, orpcAparte } from "@/utils/orpc";
 // con la que se guardó, sin importar dónde esté físicamente el asesor.
 function formatFechaGT(date: Date): string {
 	return date.toLocaleDateString("es-GT", { timeZone: "America/Guatemala" });
+}
+
+/** F8 (#1864) · Campos de dirección que se editan desde la ficha. */
+type CampoDireccion = "residencia" | "empresa" | "direccionTrabajo";
+
+/** Entrada de `guardarDireccionesCaso` (sin el caso). */
+type CambioDirecciones = {
+	residencia?: string;
+	trabajo?: { empresa?: string; direccion?: string };
+};
+
+/** Mismos topes que el esquema de `guardarDireccionesCaso`. */
+const MAX_DIRECCION = 500;
+const MAX_EMPRESA = 200;
+
+/**
+ * F8 · Lo que el asesor cambió respecto de lo que la ficha muestra; `null` si
+ * nada. Un campo vaciado va como "": el servidor vuelve a la dirección de
+ * origen (la del cliente o la de la solicitud de crédito).
+ */
+function cambioDeDirecciones(
+	editadas: Partial<Record<CampoDireccion, string>>,
+	actuales: Record<CampoDireccion, string>,
+): CambioDirecciones | null {
+	const cambio = (campo: CampoDireccion) => {
+		const v = editadas[campo];
+		return v !== undefined && v.trim() !== actuales[campo].trim()
+			? v.trim()
+			: undefined;
+	};
+	const residencia = cambio("residencia");
+	const empresa = cambio("empresa");
+	const direccion = cambio("direccionTrabajo");
+	if (
+		residencia === undefined &&
+		empresa === undefined &&
+		direccion === undefined
+	)
+		return null;
+	return {
+		...(residencia !== undefined ? { residencia } : {}),
+		...(empresa !== undefined || direccion !== undefined
+			? {
+					trabajo: {
+						...(empresa !== undefined ? { empresa } : {}),
+						...(direccion !== undefined ? { direccion } : {}),
+					},
+				}
+			: {}),
+	};
 }
 
 export const Route = createFileRoute("/cobros/$id")({
@@ -703,6 +762,11 @@ function RouteComponent() {
 		contactFormRef.current = nuevo;
 		setContactForm(nuevo);
 	};
+	// F8 (#1864): solo lo que el asesor tocó; lo demás se lee de las consultas
+	// (así, si los datos laborales llegan después de abrir la edición, se ven).
+	const [direccionesEditadas, setDireccionesEditadas] = useState<
+		Partial<Record<CampoDireccion, string>>
+	>({});
 
 	// Estado modal seguimiento
 	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
@@ -1187,6 +1251,13 @@ function RouteComponent() {
 		},
 	});
 
+	// F3 (#1864): el «Historial de cambios» sale de getFichaComplementos, que se
+	// guarda 5 minutos: sin invalidarlo, el cambio no se ve hasta recargar.
+	const refrescarHistorialCambios = () =>
+		queryClient.invalidateQueries({
+			queryKey: orpc.getFichaComplementos.key(),
+		});
+
 	const updateContactMutation = useMutation({
 		mutationFn: (data: {
 			telefonoPrincipal: string;
@@ -1208,10 +1279,44 @@ function RouteComponent() {
 					input: { creditoId: id },
 				}),
 			);
+			refrescarHistorialCambios();
 			setVista((v) => (v === "edicion" ? "contacto" : v));
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al actualizar contacto");
+		},
+	});
+
+	// F8 (#1864): residencia y trabajo corregidos desde la ficha. Los leen el
+	// detalle del crédito (residencia), los datos laborales (trabajo) y la
+	// bitácora: se refrescan los tres antes de soltar lo editado, para que la
+	// tarjeta no vuelva un instante al valor anterior.
+	const guardarDireccionesMutation = useMutation({
+		mutationFn: (cambio: CambioDirecciones) =>
+			orpcAparte.guardarDireccionesCaso.call({
+				casoCobroId: casoDetails.data?.id ?? "",
+				...cambio,
+			}),
+		// Sin toast de éxito: va dentro de «Guardar cambios», que ya avisa
+		// «Información de contacto actualizada».
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries(
+					orpc.getDetallesCreditoCarteraBack.queryOptions({
+						input: { creditoId: id },
+					}),
+				),
+				queryClient.invalidateQueries({
+					queryKey: orpc.getDatosLaboralesCaso.key(),
+				}),
+				refrescarHistorialCambios(),
+			]);
+			setDireccionesEditadas({});
+		},
+		onError: (err: Error) => {
+			toast.error(
+				`No se pudieron guardar las direcciones: ${err.message || "intente de nuevo."}`,
+			);
 		},
 	});
 
@@ -1242,6 +1347,7 @@ function RouteComponent() {
 		queryClient.invalidateQueries({
 			queryKey: orpc.getReferenciasCaso.key(),
 		});
+		refrescarHistorialCambios();
 	};
 
 	const guardarTelefonosMutation = useMutation({
@@ -1773,6 +1879,42 @@ function RouteComponent() {
 	const enConvenioCartera = caso.statusCredit === "EN_CONVENIO";
 	const seguimiento = seguimientoFicha.data;
 	const comp = complementos.data;
+	// F5 · Con el bloque del complemento, todo el seguro sale del MISMO vehículo
+	// (el del contrato) y la aseguradora de la oportunidad del caso; mezclarlo
+	// con `caso.*` (vehículo de la oportunidad) juntaba dos vehículos. Solo si
+	// el bloque no llegó se usa lo del caso.
+	const seguroFicha = comp?.seguro
+		? {
+				aseguradora: comp.seguro.aseguradora,
+				telefonoEmergencia: comp.seguro.telefonoEmergencia,
+				poliza: comp.seguro.poliza,
+				montoAsegurado: comp.seguro.montoAsegurado,
+				vencimiento: comp.seguro.vencimiento
+					? fechaLarga(parseFechaLocal(comp.seguro.vencimiento))
+					: null,
+			}
+		: {
+				aseguradora: caso.aseguradora,
+				telefonoEmergencia: caso.cabinaSeguro,
+				poliza: caso.vehiculoNumeroPoliza,
+				montoAsegurado: caso.vehiculoMontoAsegurado,
+				vencimiento: caso.vehiculoFechaVencimientoSeguro
+					? fechaLarga(new Date(caso.vehiculoFechaVencimientoSeguro))
+					: null,
+			};
+	// F8 · Lo que hoy muestran las tarjetas de dirección (la corregida desde
+	// cobros si la hay; si no, la de origen).
+	const direccionesActuales: Record<CampoDireccion, string> = {
+		residencia: caso.direccionContacto ?? "",
+		empresa: datosLaborales.data?.empresa ?? "",
+		direccionTrabajo: datosLaborales.data?.direccion ?? "",
+	};
+	const valorDireccion = (campo: CampoDireccion) =>
+		direccionesEditadas[campo] ?? direccionesActuales[campo];
+	const editarDireccion = (campo: CampoDireccion) => (valor: string) =>
+		setDireccionesEditadas((d) => ({ ...d, [campo]: valor }));
+	const direccionesCambiadas =
+		cambioDeDirecciones(direccionesEditadas, direccionesActuales) !== null;
 	const telHref = hrefTelefono;
 	const principales = telefonosDe(caso.telefonoPrincipal);
 	const alternativos = telefonosDe(caso.telefonoAlternativo);
@@ -1853,11 +1995,24 @@ function RouteComponent() {
 
 	// Guardar / cancelar la edición del contacto (antes, botones de la tarjeta).
 	const guardarContacto = () => {
-		if (!window.confirm("¿Desea actualizar la información de contacto?"))
+		if (
+			!window.confirm(
+				"¿Desea guardar los cambios de la información del cliente?",
+			)
+		)
 			return;
+		// Las direcciones se leen al hacer clic (no las toca la cola).
+		const direcciones = cambioDeDirecciones(
+			direccionesEditadas,
+			direccionesActuales,
+		);
 		// Por la cola, como el autoguardado: también escribe los teléfonos, y lee
 		// el formulario al salir para mandar lo más reciente.
 		encolarTelefonos(async () => {
+			// Primero las direcciones: el guardado del contacto cierra la edición,
+			// y si las direcciones fallan, lo editado tiene que seguir a la vista.
+			if (direcciones)
+				await guardarDireccionesMutation.mutateAsync(direcciones);
 			const f = contactFormRef.current;
 			const alt = telefonosParaGuardar(f.telefonoAlternativo);
 			await updateContactMutation.mutateAsync({
@@ -1880,8 +2035,9 @@ function RouteComponent() {
 				f.emailContacto.trim(),
 			]);
 		if (
-			normalizar(contactFormRef.current) !==
-				normalizar(contactGuardadoRef.current) &&
+			(normalizar(contactFormRef.current) !==
+				normalizar(contactGuardadoRef.current) ||
+				direccionesCambiadas) &&
 			!window.confirm(
 				"Hay cambios sin guardar en el contacto. ¿Salir sin guardarlos?",
 			)
@@ -1897,12 +2053,17 @@ function RouteComponent() {
 		};
 		cambiarContactForm(inicial);
 		contactGuardadoRef.current = inicial;
+		setDireccionesEditadas({});
 		setSegEdicion("info");
 		setVista("edicion");
 	};
 	const emailCambiado =
 		contactForm.emailContacto.trim() !==
 		(contactGuardadoRef.current.emailContacto ?? "").trim();
+	const pendientesDeGuardar = [
+		emailCambiado && "el correo",
+		direccionesCambiadas && "las direcciones",
+	].filter(Boolean);
 
 	return (
 		<div className="w-full space-y-5 p-4 sm:p-6">
@@ -2438,6 +2599,10 @@ function RouteComponent() {
 					{vista === "resumen" && (
 						<div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)]">
 							<div className="min-w-0 space-y-4">
+								{/* #1895 · Contrapropuesta del supervisor al convenio, y las
+								    solicitudes abiertas del caso (rebaja de mora, Jurídico). */}
+								{caso.id && <ContrapropuestaCaso casoCobroId={caso.id} />}
+								{caso.id && <SolicitudesAbiertasCaso casoCobroId={caso.id} />}
 								{caso.id && (
 									<InmovilizacionAlertaFicha
 										casoCobroId={caso.id}
@@ -3054,23 +3219,17 @@ function RouteComponent() {
 									}
 								/>
 								<CardSeguroFicha
-									aseguradora={caso.aseguradora || "—"}
+									aseguradora={seguroFicha.aseguradora || "—"}
 									tipoSeguro={comp?.seguro?.tipoSeguro ?? "—"}
-									telefonoEmergencia={caso.cabinaSeguro || "—"}
+									telefonoEmergencia={seguroFicha.telefonoEmergencia || "—"}
 									coberturas={comp?.seguro?.coberturas ?? "—"}
-									poliza={caso.vehiculoNumeroPoliza || undefined}
+									poliza={seguroFicha.poliza || undefined}
 									montoAsegurado={
-										caso.vehiculoMontoAsegurado
-											? fmtQ(caso.vehiculoMontoAsegurado)
+										seguroFicha.montoAsegurado
+											? fmtQ(seguroFicha.montoAsegurado)
 											: undefined
 									}
-									vencimiento={
-										caso.vehiculoFechaVencimientoSeguro
-											? fechaLarga(
-													new Date(caso.vehiculoFechaVencimientoSeguro),
-												)
-											: undefined
-									}
+									vencimiento={seguroFicha.vencimiento ?? undefined}
 								/>
 							</div>
 						</div>
@@ -3290,10 +3449,16 @@ function RouteComponent() {
 										]}
 									/>
 								))
-							) : (
+							) : complementos.isLoading ? (
 								<PendienteBackend titulo="Codeudores">
-									Los codeudores del crédito y sus datos de contacto se
-									mostrarán aquí. Pendiente de backend (tarea F2).
+									Cargando los codeudores del crédito…
+								</PendienteBackend>
+							) : (
+								// F2: null si no se pudo leer o si el caso no tiene oportunidad.
+								<PendienteBackend titulo="Codeudores">
+									No se pudieron cargar los codeudores. Si el crédito no tiene
+									una oportunidad vinculada en el CRM, no hay codeudores que
+									mostrar.
 								</PendienteBackend>
 							)}
 						</div>
@@ -3457,8 +3622,8 @@ function RouteComponent() {
 												</div>
 												<p className="text-muted-foreground text-xs">
 													Los teléfonos se guardan automáticamente al
-													ingresarlos o quitarlos. El botón «Guardar» aplica
-													solo al email.
+													ingresarlos o quitarlos. El botón «Guardar cambios»
+													aplica el correo y las direcciones.
 												</p>
 											</CrmCard>
 										</div>
@@ -3466,20 +3631,43 @@ function RouteComponent() {
 											<DireccionCard
 												titulo="Dirección de residencia"
 												filas={[
-													{ label: "Dirección", valor: caso.direccionContacto },
+													{
+														label: "Dirección",
+														valor: valorDireccion("residencia"),
+														onChange: editarDireccion("residencia"),
+														placeholder: "Ej.: 5a. avenida 10-20, zona 1",
+														maxLength: MAX_DIRECCION,
+														disabled: guardarDireccionesMutation.isPending,
+													},
 												]}
-												nota="La edición de direcciones queda pendiente de backend (tarea F8)."
+												nota="Si deja el campo vacío, se vuelve a usar la dirección registrada del cliente."
 											/>
 											<DireccionCard
 												titulo="Dirección de trabajo"
 												filas={[
 													{
 														label: "Empresa",
-														valor: datosLaborales.data?.empresa,
+														valor: valorDireccion("empresa"),
+														onChange: editarDireccion("empresa"),
+														placeholder: datosLaborales.isLoading
+															? "Cargando…"
+															: "Ej.: Distribuidora El Sol, S.A.",
+														maxLength: MAX_EMPRESA,
+														disabled:
+															datosLaborales.isLoading ||
+															guardarDireccionesMutation.isPending,
 													},
 													{
 														label: "Dirección",
-														valor: datosLaborales.data?.direccion,
+														valor: valorDireccion("direccionTrabajo"),
+														onChange: editarDireccion("direccionTrabajo"),
+														placeholder: datosLaborales.isLoading
+															? "Cargando…"
+															: "Ej.: 12 calle 1-25, zona 10",
+														maxLength: MAX_DIRECCION,
+														disabled:
+															datosLaborales.isLoading ||
+															guardarDireccionesMutation.isPending,
 													},
 													{
 														label: "Teléfono del trabajo",
@@ -3490,21 +3678,22 @@ function RouteComponent() {
 														valor: datosLaborales.data?.horario,
 													},
 												]}
-												nota="Fuente: solicitud de crédito (solo lectura)."
+												nota="Si deja la empresa o la dirección vacías, se vuelve a usar la de la solicitud de crédito. El teléfono y el horario son de la solicitud (solo lectura)."
 											/>
 										</div>
 									</div>
 									<FichaSaveBar
 										className="sticky bottom-4"
 										estado={
-											updateContactMutation.isPending
+											updateContactMutation.isPending ||
+											guardarDireccionesMutation.isPending
 												? "guardando"
 												: "con-cambios"
 										}
 										mensaje={
-											emailCambiado
-												? "El correo tiene cambios sin guardar"
-												: "Los teléfonos se guardan solos; «Guardar cambios» aplica el correo"
+											pendientesDeGuardar.length > 0
+												? `Hay cambios sin guardar en ${pendientesDeGuardar.join(" y ")}`
+												: "Los teléfonos se guardan solos; «Guardar cambios» aplica el correo y las direcciones"
 										}
 										onCancelar={() => {
 											void cancelarEdicionContacto();
@@ -3527,16 +3716,20 @@ function RouteComponent() {
 												antes={c.antes}
 												despues={c.despues}
 												autor={c.autor}
-												fechaOrigen={`${fechaLarga(new Date(c.fecha))} · ${c.origen}`}
+												fechaOrigen={`${fechaLargaGT(c.fecha)} · ${horaGT(c.fecha)} · ${c.origen}`}
 											/>
 										))
 									)}
 								</CrmCard>
-							) : (
+							) : complementos.isLoading ? (
 								<PendienteBackend titulo="Historial de cambios">
-									Aquí se verá cada cambio de los datos del cliente (antes →
-									después, quién y desde dónde). Pendiente de backend (tarea
-									F3).
+									Cargando el historial de cambios…
+								</PendienteBackend>
+							) : (
+								// El bloque llega en null si no se pudo leer la bitácora.
+								<PendienteBackend titulo="Historial de cambios">
+									No se pudo cargar el historial de cambios. Intente de nuevo en
+									unos minutos.
 								</PendienteBackend>
 							)}
 						</div>
@@ -3981,9 +4174,12 @@ function RouteComponent() {
 												},
 												contacto.fechaProximoContacto && {
 													label: "Seguimiento programado",
-													valor: formatFechaGT(
-														new Date(contacto.fechaProximoContacto),
-													),
+													// W1: con hora y medio («15 oct 2026 · 10:30 · por WhatsApp»).
+													valor:
+														textoProximoContacto(contacto) ??
+														formatFechaGT(
+															new Date(contacto.fechaProximoContacto),
+														),
 												},
 												contacto.proximoPaso && {
 													label: "Próximo paso",
@@ -4005,7 +4201,7 @@ function RouteComponent() {
 												titulo: (
 													<span className="inline-flex items-center gap-1.5">
 														{getMetodoIcon(contacto.metodoContacto)}
-														{etiquetaMetodoContacto(contacto.metodoContacto)}
+														{etiquetaCanalGestion(contacto)}
 													</span>
 												),
 												badge: (
@@ -4014,6 +4210,8 @@ function RouteComponent() {
 													</Badge>
 												),
 												subtitulo: `Por: ${contacto.realizadoPor || "Sin asignar"}`,
+												// W1: con quién habló y a qué teléfono.
+												contacto: contactoDeGestion(contacto),
 												tono,
 												nota: contacto.comentarios,
 												detalles,
@@ -4261,7 +4459,19 @@ function RouteComponent() {
 								conteo={comp?.historico?.length ?? null}
 								icono={<History />}
 								descripcion="Entradas y salidas de bucket, reestructuras y convenios"
-								estado={comp?.historico?.length === 0 ? "vacio" : "ok"}
+								// F4: null si cartera no respondió y no hay promesas cumplidas.
+								estado={
+									complementos.isLoading
+										? "cargando"
+										: !comp?.historico
+											? "error"
+											: comp.historico.length === 0
+												? "vacio"
+												: "ok"
+								}
+								onReintentar={() => {
+									void complementos.refetch();
+								}}
 								vacio="Sin hitos registrados."
 							>
 								{comp?.historico ? (
@@ -4273,13 +4483,7 @@ function RouteComponent() {
 											tono: "neutro" as const,
 										}))}
 									/>
-								) : (
-									<PendienteBackend titulo="Pronto">
-										Las entradas y salidas de bucket, reestructuras y convenios
-										del crédito se mostrarán aquí. Pendiente de backend (tarea
-										F4).
-									</PendienteBackend>
-								)}
+								) : null}
 							</SeccionHistorial>
 							{/* CB-033: aprobaciones/rechazos del convenio (también en Estado de cuenta). */}
 							<ConvenioDecisionesHistorial
@@ -4968,20 +5172,13 @@ function RouteComponent() {
 
 				{/* DOCUMENTOS — enviar al cliente / solicitar al supervisor (Figma 414:3423). */}
 				<TabsContent value="documentos">
-					<DocumentosFicha
-						enviar={[
-							{
-								clave: "tarjeta-circulacion",
-								nombre: "Tarjeta de circulación",
-								descripcion: "Documento vehicular",
-								motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-							},
-							{
-								clave: "seguro",
-								nombre: "Información de seguro",
-								descripcion: "Póliza vigente",
-								motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-							},
+					{/* F6 (#1864): tarjeta de circulación y seguro (enviar) y las cuatro
+					    solicitudes al supervisor salen del catálogo del caso. */}
+					<DocumentosCaso
+						casoCobroId={caso.id}
+						catalogo={comp?.documentos}
+						cargandoCatalogo={complementos.isLoading}
+						extrasEnviar={[
 							{
 								clave: "estado-cuenta",
 								nombre: "Estado de cuenta",
@@ -5000,17 +5197,6 @@ function RouteComponent() {
 									: undefined,
 							},
 						]}
-						solicitar={[
-							["contrato", "Contrato de crédito", "PDF · Documento legal"],
-							["carta-poder", "Carta poder", "Requiere firma del titular"],
-							["cambio-placas", "Cambio de placas", "Trámite vehicular"],
-							["expertaje", "Expertaje", "Avalúo del vehículo"],
-						].map(([clave, nombre, descripcion]) => ({
-							clave,
-							nombre,
-							descripcion,
-							motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-						}))}
 					/>
 				</TabsContent>
 
@@ -5136,6 +5322,8 @@ function RouteComponent() {
 						}}
 						casoCobroId={caso.id ?? ""}
 						clienteNombre={caso.clienteNombre || ""}
+						// W4: permite registrar el abono con comprobante desde el modal.
+						creditoId={id}
 						// La regla de elegibilidad vive en un módulo aparte
 						// (con tests) porque tiene que decir lo mismo que el
 						// server: qué cuota puede entrar y cuál ya está vencida
@@ -5144,6 +5332,9 @@ function RouteComponent() {
 						cuotaMensual={Number(caso.cuotaMensual || 0)}
 						montoMora={Number(caso.montoEnMora || 0)}
 						maxMeses={maxMesesConvenio}
+						// W4 (#1873): pagos de hoy ya validados, para el «Abono de hoy»
+						// (misma regla que el convenio del Workspace).
+						abonos={abonosDeHoy(cuotas as CuotaConPagos[])}
 						onCreado={() => {
 							if (convenioDesdeReactivacion) setReabrirReactivacion(true);
 							// El convenio cambia status, mora, bucket y cuotas del

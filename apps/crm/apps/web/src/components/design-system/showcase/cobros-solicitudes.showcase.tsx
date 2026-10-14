@@ -1,9 +1,22 @@
 import * as React from "react";
+import type { EntradaBitacora } from "server/src/lib/bitacora-supervision";
 import {
 	BandejaSolicitudes,
 	type FiltroTipoSolicitud,
 } from "@/components/cobros/solicitudes/bandeja-solicitudes";
 import {
+	type ContrapropuestaHistorialItem,
+	ContrapropuestaPendienteAviso,
+	ContrapropuestaVista,
+	type ContrapropuestaVistaProps,
+	RetirarContrapropuestaVista,
+} from "@/components/cobros/solicitudes/contrapropuesta-dialog";
+import {
+	DecidirSolicitudVista,
+	type DecidirSolicitudVistaProps,
+} from "@/components/cobros/solicitudes/decidir-solicitud-modal";
+import {
+	AvisoSuSolicitud,
 	MarcoEspacioAprobacion,
 	PanelSolicitudVista,
 	type ResolucionSolicitud,
@@ -11,20 +24,24 @@ import {
 } from "@/components/cobros/solicitudes/espacio-aprobacion";
 import {
 	type EntradaHistorial,
-	entradaDeInmovilizacion,
-	entradaDeReasignacion,
-	entradaDeRecuperacion,
-	entradaDeTraslado,
-	entradasDeCobertura,
+	entradaDeBitacora,
 	type FiltrosHistorial,
-	ordenarHistorial,
+	filtroServidorHistorial,
 } from "@/components/cobros/solicitudes/historial";
-import { HistorialDecisiones } from "@/components/cobros/solicitudes/historial-decisiones";
 import {
+	DetalleInmovilizacion,
+	DetalleRecuperacion,
+	HistorialDecisiones,
+} from "@/components/cobros/solicitudes/historial-decisiones";
+import {
+	type InmovilizacionHistorialFuente,
 	type RecuperacionFuente,
 	type Solicitud,
 	solicitudDeConvenio,
+	solicitudDeDocumento,
 	solicitudDeInmovilizacion,
+	solicitudDeJuridico,
+	solicitudDeRebaja,
 	solicitudDeRecuperacion,
 } from "@/components/cobros/solicitudes/normalizar";
 import {
@@ -36,8 +53,12 @@ import {
 	ContextoCasoVista,
 	type ContextoCasoVistaProps,
 } from "@/components/cobros/workspace/contexto-caso";
-import { CrmPill } from "@/components/ds/cards-credito";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	dialogPanelClassName,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
 export const meta: ShowcaseMeta = {
@@ -46,7 +67,7 @@ export const meta: ShowcaseMeta = {
 	figma:
 		"CRM Ventas › Supervisor › Aprobaciones (3310:12), Historial de decisiones (3602:5360), Espacio de aprobación (3699:5850, 3699:6285, 3329:7989, «WS Aprob · * · Resuelto») y Solicitudes del asesor (3654:5711)",
 	description:
-		"Pantalla /cobros/solicitudes con datos de ejemplo: la bandeja única (chips por tipo con conteo, buscador, asesor, «Por ejecutar», Rebaja y Documentos en «Pronto»), el Historial de decisiones (chips, tipo, estado y detalle por fila), el Espacio de aprobación por tipo (convenio con «Editar y contraproponer» en «Pronto», apagado, recuperación ajena y propia con la regla de cuatro ojos, por ejecutar) con su estado «Resuelto», y las solicitudes de un asesor (Detalle del asesor).",
+		"Pantalla /cobros/solicitudes con datos de ejemplo: la bandeja única (chips por tipo con conteo, buscador, asesor, «Por ejecutar», rebajas de mora con su error al aplicar, Jurídico y documentos), el Historial de decisiones sobre la bitácora del servidor (chips, tipo, estado, asesor, fechas, paginación y detalle por fila), el Espacio de aprobación por tipo (convenio con contrapropuesta pendiente e historial de contrapropuestas, apagado, recuperación, rebaja, Jurídico y documento; la regla de cuatro ojos; por ejecutar) con su estado «Resuelto», los modales de decisión, el editor de la contrapropuesta y las solicitudes de un asesor (Detalle del asesor).",
 };
 
 /* ── Datos de ejemplo ─────────────────────────────────────────────────────── */
@@ -217,6 +238,88 @@ const RECUPERACION_PROPIA = solicitudDeRecuperacion(
 	}),
 );
 
+const rebaja = (
+	id: string,
+	extra: Partial<Parameters<typeof solicitudDeRebaja>[0]>,
+) =>
+	solicitudDeRebaja({
+		id,
+		casoCobroId: `caso-${id}`,
+		numeroCreditoSifco: "01010214046120",
+		estado: "pendiente",
+		moraSnapshot: "1240.00",
+		montoSolicitado: "600.00",
+		notas:
+			"El cliente pagó las dos cuotas atrasadas y pide rebajar la mora que se acumuló mientras el banco liberaba su sueldo.",
+		solicitadoEn: hace(60 * 5),
+		solicitadoPorId: "u-ana",
+		solicitadoPor: "Ana Díaz",
+		clienteNombre: "Roberto Cárcamo",
+		...extra,
+	});
+
+const REBAJA = rebaja("rb1", {});
+const REBAJA_ERROR = rebaja("rb2", {
+	estado: "error_aplicacion",
+	numeroCreditoSifco: "01010214045987",
+	clienteNombre: "Gabriela Méndez",
+	solicitadoEn: hace(60 * 28),
+	montoSolicitado: "350.00",
+	moraSnapshot: "910.00",
+	notaResolucion:
+		"Cartera no respondió a tiempo. Intente de nuevo en unos minutos.",
+});
+const REBAJA_PROPIA = rebaja("rb3", {
+	numeroCreditoSifco: "01010214044017",
+	clienteNombre: "Julio César Barrios",
+	solicitadoPorId: "u-yo",
+	solicitadoPor: "Daniel Rodríguez",
+	solicitadoEn: hace(45),
+});
+
+const JURIDICO = solicitudDeJuridico({
+	id: "j1",
+	casoCobroId: "caso-j1",
+	numeroCreditoSifco: "01010214044410",
+	bucketSnapshot: 4,
+	motivo: "no_quiere_pagar",
+	notaJuridico:
+		"Se negó a pagar en tres llamadas y no recibe visitas; el vehículo sigue en circulación.",
+	estado: "pendiente",
+	solicitadoEn: hace(60 * 30),
+	solicitadoPorId: "u-luis",
+	solicitadoPor: "Luis Morales",
+	clienteNombre: "Andrea Solís",
+});
+
+const DOCUMENTO = solicitudDeDocumento({
+	id: "d1",
+	casoCobroId: "caso-d1",
+	numeroCreditoSifco: "01010214047330",
+	clave: "contrato",
+	comentario: "El cliente pide copia del contrato para su abogado.",
+	estado: "pendiente",
+	solicitadoEn: hace(60 * 2),
+	solicitadoPorId: "u-carmen",
+	solicitadoPor: "Carmen Ramírez",
+	documento: "Contrato de crédito",
+	clienteNombre: "Carlos Mendoza",
+});
+/** Pedida por quien mira: «Su solicitud», pero sin bloquear la decisión. */
+const DOCUMENTO_PROPIO = solicitudDeDocumento({
+	id: "d2",
+	casoCobroId: "caso-d2",
+	numeroCreditoSifco: "01010214045210",
+	clave: "carta-poder",
+	comentario: null,
+	estado: "pendiente",
+	solicitadoEn: hace(30),
+	solicitadoPorId: "u-yo",
+	solicitadoPor: "Daniel Rodríguez",
+	documento: "Carta poder",
+	clienteNombre: "Ana Lucía Morales",
+});
+
 const PENDIENTES: Solicitud[] = [
 	RECUPERACION,
 	RECUPERACION_PROPIA,
@@ -224,6 +327,10 @@ const PENDIENTES: Solicitud[] = [
 	CONVENIO,
 	CONVENIO_2,
 	REACTIVACION,
+	REBAJA,
+	REBAJA_ERROR,
+	JURIDICO,
+	DOCUMENTO,
 ].sort(
 	(a, b) =>
 		new Date(a.solicitadoEn ?? 0).getTime() -
@@ -295,109 +402,375 @@ const contextoDe = (s: Solicitud): ContextoCasoVistaProps => ({
 });
 
 /* Historial */
-const HIST_INMOV = [
-	{
-		id: "h1",
-		casoCobroId: "caso-h1",
-		numeroCreditoSifco: "01010214043990",
-		accion: "apagado",
-		estado: "ejecutada",
-		motivo: "Sin pagos desde mayo; no contesta.",
-		bucketSnapshot: 4,
-		solicitadoAt: hace(60 * 50),
-		solicitanteNombre: "Ana Díaz",
-		decididoAt: hace(60 * 48),
-		decididoPorNombre: "Daniel Rodríguez",
-		ejecutadoAt: hace(60 * 30),
-		ejecutadoPorNombre: "Ana Díaz",
-		referenciaEjecucion: "LEGION-4471",
-		evidenciaUrl: "https://example.com/evidencia.pdf",
-		evidenciaNombreArchivo: "confirmacion-legion.pdf",
-		ubicacionEjecucion: {
-			fuente: "manual",
-			direccion: "Predio de la 12 calle, zona 1",
-		},
-		clienteNombre: "Diana Herrera",
+const HIST_APAGADO: InmovilizacionHistorialFuente = {
+	id: "h1",
+	casoCobroId: "caso-h1",
+	numeroCreditoSifco: "01010214043990",
+	accion: "apagado",
+	estado: "ejecutada",
+	motivo: "Sin pagos desde mayo; no contesta.",
+	bucketSnapshot: 4,
+	solicitadoAt: hace(60 * 50),
+	solicitanteNombre: "Ana Díaz",
+	decididoAt: hace(60 * 48),
+	decididoPorNombre: "Daniel Rodríguez",
+	ejecutadoAt: hace(60 * 30),
+	ejecutadoPorNombre: "Ana Díaz",
+	referenciaEjecucion: "LEGION-4471",
+	evidenciaUrl: "https://example.com/evidencia.pdf",
+	evidenciaNombreArchivo: "confirmacion-legion.pdf",
+	ubicacionEjecucion: {
+		fuente: "manual",
+		direccion: "Predio de la 12 calle, zona 1",
 	},
-	{
-		id: "h2",
-		casoCobroId: "caso-h2",
-		numeroCreditoSifco: "01010214045210",
-		accion: "reactivacion",
-		estado: "rechazada",
-		motivo: "Prometió pagar el viernes.",
-		motivoRechazo: "Falta el comprobante del pago.",
-		bucketSnapshot: 3,
-		solicitadoAt: hace(60 * 70),
-		solicitanteNombre: "José Pérez",
-		decididoAt: hace(60 * 69),
-		decididoPorNombre: "Daniel Rodríguez",
-		clienteNombre: "Sergio Ramírez",
-	},
-] as const;
+	clienteNombre: "Diana Herrera",
+};
 
-const ENTRADAS: EntradaHistorial[] = ordenarHistorial([
-	...HIST_INMOV.map((i) => entradaDeInmovilizacion({ ...i })),
-	entradaDeRecuperacion(
-		recuperacion("r9", {
-			estadoSolicitud: "aprobada",
-			decidioPor: "Daniel Rodríguez",
-			decididoAt: hace(60 * 20),
-			motivoDecision: null,
-			cliente: "Roberto Cárcamo",
-			numeroSifco: "01010214047120",
-		}),
-	),
-	entradaDeRecuperacion(
-		recuperacion("r8", {
-			estadoSolicitud: "cancelada",
-			decidioPor: "José Pérez",
-			decididoAt: hace(60 * 90),
-			motivoDecision: "El cliente se puso al día.",
-		}),
-	),
-	entradaDeReasignacion({
-		historial_id: 77,
-		fecha: hace(60 * 40),
-		numero_credito_sifco: "01010214044870",
-		cliente: "Ana Lucía Morales",
-		asesor_anterior: "Carmen Ramírez",
-		asesor_nuevo: "Luis Morales",
-		bucket: 3,
-		bucket_prefijo: "B3",
-		origen: "API_MANUAL",
-		motivo: "Rebalanceo de cartera B3",
-		usuario: "daniel.r@clubcashin.com",
+const HIST_RECUPERACION = recuperacion("r9", {
+	estadoSolicitud: "aprobada",
+	decidioPor: "Daniel Rodríguez",
+	decididoAt: hace(60 * 20),
+	motivoDecision: null,
+	cliente: "Roberto Cárcamo",
+	numeroSifco: "01010214047120",
+});
+
+const persona = (nombre: string) => ({ userId: `u-${nombre}`, nombre });
+const yo = persona("Daniel Rodríguez");
+const b = (
+	x: Partial<EntradaBitacora> &
+		Pick<EntradaBitacora, "tipo" | "refId" | "fecha" | "estado">,
+): EntradaBitacora => ({
+	id: `${x.tipo}-${x.refId}`,
+	decision: null,
+	solicitante: null,
+	decididoPor: null,
+	credito: null,
+	resumen: null,
+	motivo: null,
+	nota: null,
+	...x,
+});
+
+const BITACORA: EntradaBitacora[] = [
+	b({
+		tipo: "rebaja",
+		refId: "rb7",
+		fecha: hace(25),
+		decision: "aprobada",
+		estado: "aplicada",
+		solicitante: persona("Ana Díaz"),
+		decididoPor: yo,
+		credito: { sifco: "01010214046120", cliente: "Roberto Cárcamo" },
+		motivo: "Pagó las cuotas atrasadas; pide rebajar la mora de la demora.",
+		nota: "Aprobada por pago completo de lo vencido.",
+		montos: {
+			solicitado: "600.00",
+			moraAlPedir: "1240.00",
+			aplicado: "600.00",
+		},
 	}),
-	entradaDeTraslado(
-		{
-			id: "op-5c1",
-			motivo: "Renuncia: último día el 30 de septiembre",
-			asesor_origen_id: 9,
-			actor_email: "supervisor@clubcashin.com",
-			created_at: hace(60 * 60),
-			cuentas: 31,
+	b({
+		tipo: "documento",
+		refId: "d7",
+		fecha: hace(60 * 2),
+		decision: "aprobada",
+		estado: "aprobada",
+		solicitante: persona("Carmen Ramírez"),
+		decididoPor: yo,
+		credito: { sifco: "01010214046980", cliente: "Ana Lucía Morales" },
+		motivo: "El cliente la necesita para el traspaso.",
+		nota: "Enviada por correo",
+		documento: "Carta poder",
+	}),
+	b({
+		tipo: "juridico",
+		refId: "j7",
+		fecha: hace(60 * 3),
+		decision: "rechazada",
+		estado: "rechazada",
+		solicitante: persona("Luis Morales"),
+		decididoPor: yo,
+		credito: { sifco: "01010214044410", cliente: "Andrea Solís" },
+		motivo: "no_contacto",
+		nota: "Falta visitar el lugar de trabajo antes de escalar.",
+		bucket: 4,
+		notaJuridico:
+			"No contesta desde agosto y la dirección de trabajo ya no es válida.",
+	}),
+	b({
+		tipo: "contrapropuesta",
+		refId: "c1",
+		fecha: hace(60 * 4),
+		estado: "aceptada",
+		decididoPor: persona("Carmen Ramírez"),
+		credito: { sifco: "01010214047330", cliente: "Carlos Mendoza" },
+		resumen: "6 → 8 cuotas de Q 1612.50",
+		motivo: "Ocho cuotas para no pasar del 30 % de su ingreso.",
+		plan: {
+			montoTotal: "12900.00",
+			original: {
+				numeroMeses: 6,
+				cuotaMensual: "2150.00",
+				primerPago: dia(10),
+			},
+			propuesto: {
+				numeroMeses: 8,
+				cuotaMensual: "1612.50",
+				primerPago: dia(20),
+			},
+			propuestaPor: yo,
+			nota: "Ocho cuotas para no pasar del 30 % de su ingreso.",
 		},
-		() => "Diego Morales",
-	),
-	...entradasDeCobertura(
-		{
-			id: "cob-1",
-			titularId: "u-laura",
-			suplenteId: "u-ana",
-			motivo: "vacaciones",
-			desde: dia(-12),
-			hasta: dia(-2),
-			canceladaEn: null,
-			createdAt: hace(60 * 24 * 14),
+	}),
+	b({
+		tipo: "contrapropuesta",
+		refId: "c0",
+		fecha: hace(60 * 5),
+		estado: "retirada",
+		decididoPor: yo,
+		credito: { sifco: "01010214048215", cliente: "Luis Fernando Aguilar" },
+		resumen: "5 → 4 cuotas de Q 3225.00",
+		motivo: "Cuatro cuotas para cerrar antes de fin de año.",
+		nota: "El cliente consiguió un ingreso extra.",
+		plan: {
+			montoTotal: "12900.00",
+			original: { numeroMeses: 5, cuotaMensual: "2580.00", primerPago: null },
+			propuesto: {
+				numeroMeses: 4,
+				cuotaMensual: "3225.00",
+				primerPago: dia(15),
+			},
+			propuestaPor: yo,
+			nota: "Cuatro cuotas para cerrar antes de fin de año.",
 		},
-		(id) => (id === "u-laura" ? "Laura Gómez" : "Ana Díaz"),
-		dia(0),
-	),
-]);
+	}),
+	b({
+		tipo: "convenio",
+		refId: "412",
+		fecha: hace(60 * 6),
+		decision: "aprobada",
+		estado: "aprobado",
+		solicitante: persona("Carmen Ramírez"),
+		decididoPor: yo,
+		credito: { sifco: "01010214047330", cliente: "Carlos Mendoza" },
+		resumen: "6 cuotas de Q 2150.00",
+		motivo: "Recuperó ingresos y puede pagar una cuota más baja.",
+		nota: "Plan sostenible con su ingreso actual.",
+	}),
+	b({
+		tipo: "rebaja",
+		refId: "rb6",
+		fecha: hace(60 * 9),
+		decision: "aprobada",
+		estado: "error_aplicacion",
+		solicitante: persona("José Pérez"),
+		decididoPor: yo,
+		credito: { sifco: "01010214045987", cliente: "Gabriela Méndez" },
+		motivo: "Error del banco al debitar la cuota de agosto.",
+		nota: "Cartera no respondió a tiempo. Intente de nuevo en unos minutos.",
+	}),
+	b({
+		tipo: "recuperacion",
+		refId: "r9",
+		fecha: hace(60 * 20),
+		decision: "aprobada",
+		estado: "aprobada",
+		solicitante: persona("José Pérez"),
+		decididoPor: yo,
+		credito: { sifco: "01010214047120", cliente: "Roberto Cárcamo" },
+		motivo: "El cliente ya no puede sostener los pagos.",
+	}),
+	b({
+		tipo: "apagado",
+		refId: "h1",
+		fecha: hace(60 * 48),
+		decision: "aprobada",
+		estado: "ejecutada",
+		solicitante: persona("Ana Díaz"),
+		decididoPor: yo,
+		credito: { sifco: "01010214043990", cliente: "Diana Herrera" },
+		motivo: "Sin pagos desde mayo; no contesta.",
+	}),
+	b({
+		tipo: "reasignacion",
+		refId: "77",
+		fecha: hace(60 * 52),
+		estado: "realizada",
+		decididoPor: { userId: null, nombre: "Daniel Rodríguez" },
+		credito: { sifco: "01010214044870", cliente: "Ana Lucía Morales" },
+		resumen: "Carmen Ramírez → Luis Morales",
+		motivo: "Rebalanceo de cartera B3",
+		bucket: 3,
+	}),
+	b({
+		tipo: "traslado",
+		refId: "op-5c1",
+		evento: "baja",
+		fecha: hace(60 * 60),
+		estado: "realizada",
+		decididoPor: { userId: null, nombre: "supervisor@clubcashin.com" },
+		resumen: "31 cuentas (redistribucion)",
+		motivo: "Renuncia: último día el 30 de septiembre",
+		asesorAfectado: { asesorId: 12, userId: null, nombre: "Diego Morales" },
+		cuentas: { movidas: 31 },
+	}),
+	b({
+		tipo: "traslado",
+		refId: "op-6d2",
+		evento: "traslado",
+		fecha: hace(60 * 64),
+		estado: "realizada",
+		decididoPor: yo,
+		resumen: "18 cuentas (por_bucket)",
+		motivo: "Redistribución: equilibrar B2 entre el equipo",
+		asesorAfectado: { asesorId: 5, userId: null, nombre: "Carmen Ramírez" },
+		cuentas: { movidas: 18 },
+	}),
+	b({
+		tipo: "ausencia_indefinida",
+		refId: "aus-1",
+		id: "reactivacion_indefinida-aus-1",
+		evento: "reactivacion",
+		fecha: hace(60 * 66),
+		estado: "reactivada",
+		decididoPor: yo,
+		resumen: "Wilson Pérez · ausente desde el 2026-10-01",
+		motivo: "incidente",
+		asesorAfectado: { asesorId: 8, userId: "u-wilson", nombre: "Wilson Pérez" },
+		periodo: { desde: dia(-13), hasta: dia(-3) },
+		cuentas: { movidas: 54, devueltas: 53, retenidas: 1 },
+	}),
+	b({
+		tipo: "ausencia_indefinida",
+		refId: "aus-1",
+		id: "ausencia_indefinida-aus-1",
+		evento: "ausencia",
+		fecha: hace(60 * 24 * 13),
+		estado: "reactivada",
+		decididoPor: yo,
+		resumen: "Wilson Pérez · 54 cuentas repartidas",
+		motivo: "incidente",
+		nota: "Accidente de tránsito; regresa cuando le den el alta.",
+		asesorAfectado: { asesorId: 8, userId: "u-wilson", nombre: "Wilson Pérez" },
+		periodo: { desde: dia(-13), hasta: dia(-3) },
+		cuentas: { movidas: 54 },
+	}),
+	b({
+		tipo: "reactivacion",
+		refId: "h2",
+		fecha: hace(60 * 69),
+		decision: "rechazada",
+		estado: "rechazada",
+		solicitante: persona("José Pérez"),
+		decididoPor: yo,
+		credito: { sifco: "01010214045210", cliente: "Sergio Ramírez" },
+		motivo: "Prometió pagar el viernes.",
+		nota: "Falta el comprobante del pago.",
+	}),
+	b({
+		tipo: "cobertura",
+		refId: "cob-1",
+		id: "reactivacion-cob-1",
+		evento: "reactivacion",
+		fecha: `${dia(-2)}T23:59:00-06:00`,
+		estado: "realizada",
+		resumen: `Laura Gómez · ${dia(-12)} al ${dia(-2)}`,
+		motivo: "vacaciones",
+		nota: "Terminó el período de la cobertura",
+	}),
+	b({
+		tipo: "cobertura",
+		refId: "cob-1",
+		id: "cobertura-cob-1",
+		evento: "ausencia",
+		fecha: hace(60 * 24 * 14),
+		estado: "realizada",
+		decididoPor: yo,
+		resumen: `Laura Gómez → Ana Díaz · ${dia(-12)} al ${dia(-2)}`,
+		motivo: "vacaciones",
+	}),
+];
+
+/** Lo que el servidor filtra y busca, imitado sobre los datos de ejemplo. */
+function bitacoraFiltrada(f: FiltrosHistorial): EntradaHistorial[] {
+	const sv = filtroServidorHistorial(f);
+	if (sv.vacio) return [];
+	const q = sv.busqueda?.toLowerCase();
+	return BITACORA.filter(
+		(e) =>
+			(!sv.tipos || sv.tipos.includes(e.tipo)) &&
+			(!sv.decisiones ||
+				(e.decision !== null && sv.decisiones.includes(e.decision))) &&
+			(!sv.solicitanteId || e.solicitante?.userId === sv.solicitanteId) &&
+			(!sv.eventos || !e.evento || sv.eventos.includes(e.evento)) &&
+			(!q ||
+				(!!e.credito &&
+					(e.credito.sifco.includes(q) ||
+						(e.credito.cliente ?? "").toLowerCase().includes(q)))),
+	).map(entradaDeBitacora);
+}
+
+/** El detalle completo que el Historial consulta al abrir una fila. */
+function DetalleExtraEjemplo({
+	entrada,
+	base,
+}: {
+	entrada: EntradaHistorial;
+	base: React.ReactNode;
+}) {
+	if (entrada.origen?.refId === "h1")
+		return <DetalleInmovilizacion i={HIST_APAGADO} />;
+	if (entrada.origen?.refId === "r9")
+		return <DetalleRecuperacion r={HIST_RECUPERACION} />;
+	return <>{base}</>;
+}
+
+/* Contrapropuestas del convenio */
+const CONTRAPROPUESTAS: ContrapropuestaHistorialItem[] = [
+	{
+		id: "c3",
+		estado: "retirada",
+		numeroMeses: 8,
+		cuotaMensual: "1612.50",
+		primerPago: dia(20),
+		nota: "Ocho cuotas para no pasar del 30 % de su ingreso.",
+		creadaPor: "Daniel Rodríguez",
+		creadaEn: hace(60 * 24 * 2),
+		resueltaPor: "Daniel Rodríguez",
+		resueltaEn: hace(60 * 24),
+		notaRespuesta: "El cliente consiguió un ingreso extra.",
+	},
+	{
+		id: "c2",
+		estado: "descartada",
+		numeroMeses: 4,
+		cuotaMensual: "3225.00",
+		primerPago: dia(10),
+		nota: "Cuatro cuotas para cerrar antes de fin de año.",
+		creadaPor: "Laura Gómez",
+		creadaEn: hace(60 * 24 * 4),
+		resueltaPor: "Carmen Ramírez",
+		resueltaEn: hace(60 * 24 * 3),
+		notaRespuesta: "La cuota no le alcanza al cliente.",
+	},
+	{
+		id: "c1",
+		estado: "aceptada",
+		numeroMeses: 6,
+		cuotaMensual: "2150.00",
+		primerPago: dia(15),
+		nota: "Mover el primer pago al día de cobro del cliente.",
+		creadaPor: "Daniel Rodríguez",
+		creadaEn: hace(60 * 24 * 6),
+		resueltaPor: "Carmen Ramírez",
+		resueltaEn: hace(60 * 24 * 5),
+		notaRespuesta: null,
+	},
+];
 
 /* Solicitudes de un asesor */
-const FILAS_ASESOR: FilaSolicitudAsesor[] = [
+const FILAS_ASESOR_EJEMPLO: FilaSolicitudAsesor[] = [
 	{
 		id: "1",
 		fecha: hace(60 * 3),
@@ -455,7 +828,67 @@ const FILAS_ASESOR: FilaSolicitudAsesor[] = [
 		resultado: "Convenio activo · 4 cuotas · Q 2,100.00 al mes",
 		ficha: { id: "01010214042750" },
 	},
+	{
+		id: "rebaja-rb1",
+		fecha: hace(60 * 5),
+		tipo: "rebaja",
+		credito: "01010214046120",
+		bucket: undefined,
+		cliente: "Roberto Cárcamo",
+		estado: "pendiente",
+		resultado: "Pide Q 600.00 de Q 1,240.00 de mora",
+		solicitud: REBAJA,
+		ficha: { id: "caso-rb1" },
+	},
+	{
+		id: "rebaja-rb7",
+		fecha: hace(60 * 30),
+		tipo: "rebaja",
+		credito: "01010214046980",
+		bucket: undefined,
+		cliente: "Luis Fernando Aguilar",
+		estado: "aprobada",
+		resultado: "Rebaja de Q 600.00 aplicada",
+		ficha: { id: "01010214046980" },
+	},
+	{
+		id: "documento-d7",
+		fecha: hace(60 * 32),
+		tipo: "documentos",
+		credito: "01010214045210",
+		bucket: undefined,
+		cliente: "Ana Lucía Morales",
+		estado: "aprobada",
+		resultado: "Carta poder · Enviada por correo",
+		ficha: { id: "01010214045210" },
+	},
+	{
+		id: "juridico-j7",
+		fecha: hace(60 * 24 * 3),
+		tipo: "juridico",
+		credito: "01010214043110",
+		bucket: 4,
+		cliente: "Diana Herrera",
+		estado: "aprobada",
+		resultado: "Enviado a Jurídico (B5)",
+		ficha: { id: "01010214043110" },
+	},
+	{
+		id: "rebaja-rb5",
+		fecha: hace(60 * 24 * 7),
+		tipo: "rebaja",
+		credito: "01010214041200",
+		bucket: undefined,
+		cliente: "Patricia López",
+		estado: "rechazada",
+		resultado: "Fuera de política: la mora es de menos de 30 días.",
+		ficha: { id: "01010214041200" },
+	},
 ];
+/** Las más recientes primero, como las ordena el contenedor. */
+const FILAS_ASESOR = [...FILAS_ASESOR_EJEMPLO].sort(
+	(a, b) => new Date(b.fecha ?? 0).getTime() - new Date(a.fecha ?? 0).getTime(),
+);
 
 /* ── Marcos ───────────────────────────────────────────────────────────────── */
 
@@ -474,12 +907,19 @@ function EspacioEjemplo({
 	resolucion,
 	aviso,
 	sinBotones = false,
+	bloqueo,
+	contrapropuestas,
+	conContraproponer = false,
 }: {
 	titulo: string;
 	solicitud: Solicitud;
 	resolucion?: ResolucionSolicitud;
 	aviso?: React.ReactNode;
 	sinBotones?: boolean;
+	/** Botones visibles pero deshabilitados (contrapropuesta pendiente…). */
+	bloqueo?: string;
+	contrapropuestas?: ContrapropuestaHistorialItem[];
+	conContraproponer?: boolean;
 }) {
 	const [notas, setNotas] = React.useState("");
 	return (
@@ -507,12 +947,25 @@ function EspacioEjemplo({
 							ahora={AHORA}
 							notas={notas}
 							onNotas={setNotas}
-							{...(sinBotones ? {} : { onAprobar: nada, onRechazar: nada })}
+							{...(sinBotones || bloqueo
+								? {}
+								: {
+										onAprobar: nada,
+										onRechazar: nada,
+										...(conContraproponer ? { onContraproponer: nada } : {}),
+									})}
+							bloqueo={bloqueo}
 							aviso={aviso}
 							resolucion={resolucion}
 							onVolver={nada}
 							onSiguiente={nada}
 							conMapa={false}
+							primerPago={
+								solicitud.tipo === "convenio"
+									? { cargando: false, valor: dia(15) }
+									: undefined
+							}
+							contrapropuestas={contrapropuestas}
 							className="h-full"
 						/>
 					}
@@ -609,13 +1062,24 @@ function DemoBandeja() {
 	);
 }
 
+const ASESORES_FILTRO = [
+	{ value: "u-Ana Díaz", label: "Ana Díaz" },
+	{ value: "u-Carmen Ramírez", label: "Carmen Ramírez" },
+	{ value: "u-José Pérez", label: "José Pérez" },
+	{ value: "u-Luis Morales", label: "Luis Morales" },
+];
+
 function DemoHistorial() {
 	const [filtros, setFiltros] = React.useState<FiltrosHistorial>({
 		vista: "todas",
 		tipo: "todas",
 		estado: "todos",
 		busqueda: "",
+		asesorId: null,
+		desde: null,
+		hasta: null,
 	});
+	const entradas = bitacoraFiltrada(filtros);
 	return (
 		<SolicitudesPaginaVista
 			tab="historial"
@@ -623,20 +1087,98 @@ function DemoHistorial() {
 			pendientes={PENDIENTES.length}
 		>
 			<HistorialDecisiones
-				entradas={ENTRADAS}
+				entradas={entradas}
+				total={entradas.length}
+				pagina={1}
+				totalPaginas={1}
+				onPagina={nada}
+				porPagina={20}
 				filtros={filtros}
 				onFiltros={(c) => setFiltros((f) => ({ ...f, ...c }))}
+				asesores={ASESORES_FILTRO}
 				cargando={false}
-				errores={[]}
+				error={false}
 				onReintentar={nada}
-				inmovilizaciones={{ cargadas: 2, total: 74 }}
-				onCargarMas={nada}
-				historialEquipo={{
-					to: "/cobros/equipo",
-					search: { tab: "asignacion" },
-				}}
+				DetalleExtra={DetalleExtraEjemplo}
 			/>
 		</SolicitudesPaginaVista>
+	);
+}
+
+/* ── Modales (vista estática: el Root cerrado solo da contexto a Radix) ─────── */
+
+function PanelModal({
+	titulo,
+	ancho = "w-120",
+	children,
+}: {
+	titulo: string;
+	ancho?: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<Dialog>
+			<figure className="flex flex-col gap-2 py-3">
+				<figcaption className="type-label-sm text-fg-tertiary">
+					{titulo}
+				</figcaption>
+				<div className={cn(dialogPanelClassName, "max-w-full", ancho)}>
+					{children}
+				</div>
+			</figure>
+		</Dialog>
+	);
+}
+
+function DecisionEjemplo(
+	props: Omit<
+		DecidirSolicitudVistaProps,
+		"nota" | "onNota" | "pendiente" | "onCancelar" | "onConfirmar"
+	> & { notaInicial?: string; pendiente?: boolean },
+) {
+	const [nota, setNota] = React.useState(props.notaInicial ?? "");
+	return (
+		<DecidirSolicitudVista
+			{...props}
+			nota={nota}
+			onNota={setNota}
+			pendiente={props.pendiente ?? false}
+			onCancelar={nada}
+			onConfirmar={nada}
+		/>
+	);
+}
+
+/** El editor de la contrapropuesta con estado local (cuotas, fecha y nota vivas). */
+function EditorContrapropuesta(
+	props: Partial<ContrapropuestaVistaProps> & { notaInicial?: string },
+) {
+	const [meses, setMeses] = React.useState(props.meses ?? "6");
+	const [primerPago, setPrimerPago] = React.useState(
+		props.primerPago ?? dia(15),
+	);
+	const [nota, setNota] = React.useState(props.notaInicial ?? "");
+	return (
+		<ContrapropuestaVista
+			cliente="Carlos Mendoza"
+			total={12900}
+			actual={{ meses: 6, cuota: 2150, primerPago: dia(15) }}
+			meses={meses}
+			onMeses={setMeses}
+			maxMeses={props.maxMeses === undefined ? 24 : props.maxMeses}
+			onReintentarLimite={props.onReintentarLimite}
+			primerPago={primerPago}
+			onPrimerPago={setPrimerPago}
+			minPrimerPago={dia(1)}
+			maxPrimerPago={dia(90)}
+			nota={nota}
+			onNota={setNota}
+			error={props.error ?? null}
+			errorServidor={props.errorServidor ?? null}
+			pendiente={props.pendiente ?? false}
+			onCancelar={nada}
+			onEnviar={nada}
+		/>
 	);
 }
 
@@ -649,7 +1191,7 @@ export default function CobrosSolicitudesShowcase() {
 				</Marco>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Historial de decisiones (3602:5360) · clic en una fila para ver el detalle">
+			<ShowcaseGroup title="Historial de decisiones (3602:5360) · bitácora del servidor; clic en una fila para ver el detalle">
 				<Marco>
 					<DemoHistorial />
 				</Marco>
@@ -658,8 +1200,27 @@ export default function CobrosSolicitudesShowcase() {
 			<ShowcaseGroup title="Espacio de aprobación por tipo">
 				<div className="flex flex-col gap-2">
 					<EspacioEjemplo
-						titulo="Convenio (3699:5850) · «Editar y contraproponer» en Pronto (M4)"
+						titulo="Convenio (3699:5850) · con «Editar y contraproponer» y las contrapropuestas anteriores"
 						solicitud={CONVENIO}
+						conContraproponer
+						contrapropuestas={CONTRAPROPUESTAS}
+					/>
+					<EspacioEjemplo
+						titulo="Convenio con una contrapropuesta esperando al asesor: no se decide; el supervisor puede retirarla"
+						solicitud={CONVENIO_2}
+						bloqueo="Hay una contrapropuesta esperando la respuesta del asesor"
+						aviso={
+							<ContrapropuestaPendienteAviso
+								contrapropuesta={{
+									numeroMeses: 8,
+									cuotaMensual: "1612.50",
+									primerPago: dia(20),
+									nota: "Ocho cuotas para no pasar del 30 % de su ingreso.",
+								}}
+								onRetirar={nada}
+							/>
+						}
+						contrapropuestas={CONTRAPROPUESTAS.slice(1)}
 					/>
 					<EspacioEjemplo
 						titulo="Apagado · acción crítica (3329:7989)"
@@ -673,17 +1234,34 @@ export default function CobrosSolicitudesShowcase() {
 						titulo="Recuperación propia: regla de cuatro ojos, sin botones"
 						solicitud={RECUPERACION_PROPIA}
 						sinBotones
-						aviso={
-							<div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
-								<CrmPill tone="neutral" kind="chip" className="px-2 py-0.5">
-									Su solicitud
-								</CrmPill>
-								<span className="min-w-0 flex-1">
-									Debe aprobarla otro supervisor o administrador. Si ya no
-									aplica, cancélela desde la ficha.
-								</span>
-							</div>
-						}
+						aviso={<AvisoSuSolicitud />}
+					/>
+					<EspacioEjemplo
+						titulo="Rebaja de mora (W2) · monto pedido, mora al pedir, motivo y quién la pidió"
+						solicitud={REBAJA}
+					/>
+					<EspacioEjemplo
+						titulo="Rebaja de mora que cartera no pudo aplicar: se reintenta o se rechaza"
+						solicitud={REBAJA_ERROR}
+					/>
+					<EspacioEjemplo
+						titulo="Rebaja de mora propia: regla de cuatro ojos, sin botones"
+						solicitud={REBAJA_PROPIA}
+						sinBotones
+						aviso={<AvisoSuSolicitud />}
+					/>
+					<EspacioEjemplo
+						titulo="Escalar a Jurídico (W3)"
+						solicitud={JURIDICO}
+					/>
+					<EspacioEjemplo
+						titulo="Solicitud de documento (F6) · con el nombre del cliente"
+						solicitud={DOCUMENTO}
+					/>
+					<EspacioEjemplo
+						titulo="Documento pedido por quien mira: «Su solicitud» como aviso, sin bloquear la decisión"
+						solicitud={DOCUMENTO_PROPIO}
+						aviso={<AvisoSuSolicitud bloquea={false} />}
 					/>
 					<EspacioEjemplo
 						titulo="Por ejecutar: aprobada, la registra el asesor en la Ficha 360"
@@ -710,6 +1288,126 @@ export default function CobrosSolicitudesShowcase() {
 						solicitud={RECUPERACION}
 						resolucion={resolucionDe("recuperacion", "rechazada")}
 					/>
+					<EspacioEjemplo
+						titulo="Rebaja aplicada"
+						solicitud={REBAJA}
+						resolucion={{
+							...resolucionDe("rebaja", "aprobada"),
+							descripcion:
+								"Cartera aplicó la rebaja. La mora del crédito quedó en Q 640.00. Se avisó al asesor.",
+						}}
+					/>
+					<EspacioEjemplo
+						titulo="Escalado a Jurídico"
+						solicitud={JURIDICO}
+						resolucion={resolucionDe("juridico", "aprobada")}
+					/>
+					<EspacioEjemplo
+						titulo="Solicitud de documento rechazada"
+						solicitud={DOCUMENTO}
+						resolucion={resolucionDe("documentos", "rechazada")}
+					/>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Modales de decisión (rebaja, Jurídico y documentos)">
+				<div className="flex flex-wrap items-start gap-6">
+					<PanelModal titulo="Aprobar una rebaja">
+						<DecisionEjemplo
+							tipo="rebaja"
+							decision="aprobar"
+							quien="Roberto Cárcamo (crédito 01010214046120)"
+							resumen="Rebaja de Q 600.00 sobre una mora de Q 1,240.00 al pedirla."
+						/>
+					</PanelModal>
+					<PanelModal titulo="La mora ya no alcanza: el servidor pide rechazarla">
+						<DecisionEjemplo
+							tipo="rebaja"
+							decision="aprobar"
+							quien="Roberto Cárcamo (crédito 01010214046120)"
+							resumen="Rebaja de Q 600.00 sobre una mora de Q 1,240.00 al pedirla."
+							ofrecerRechazo="La mora ahora es Q 420.00 y la rebaja pedida es Q 600.00. Rechácela para que el asesor pida una nueva."
+							onPasarARechazo={nada}
+						/>
+					</PanelModal>
+					<PanelModal titulo="Rechazar: nota de 10 caracteres o más">
+						<DecisionEjemplo
+							tipo="rebaja"
+							decision="rechazar"
+							quien="Roberto Cárcamo (crédito 01010214046120)"
+							notaInicial="Mora baja"
+						/>
+					</PanelModal>
+					<PanelModal titulo="Reintentar una rebaja que no se aplicó">
+						<DecisionEjemplo
+							tipo="rebaja"
+							decision="aprobar"
+							reintento
+							quien="Gabriela Méndez (crédito 01010214045987)"
+							errorServidor="Cartera no respondió a tiempo. Intente de nuevo en unos minutos."
+						/>
+					</PanelModal>
+					<PanelModal titulo="Aprobar el escalado a Jurídico">
+						<DecisionEjemplo
+							tipo="juridico"
+							decision="aprobar"
+							quien="Andrea Solís (crédito 01010214044410)"
+							resumen="Motivo: No quiere pagar · B4 al pedirlo."
+						/>
+					</PanelModal>
+					<PanelModal titulo="Rechazar una solicitud de documento (nota opcional)">
+						<DecisionEjemplo
+							tipo="documentos"
+							decision="rechazar"
+							quien="Contrato de crédito (crédito 01010214047330)"
+						/>
+					</PanelModal>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Editor de la contrapropuesta (M4, «WS Aprob · Convenio · Contrapropuesta»)">
+				<div className="flex flex-wrap items-start gap-6">
+					<PanelModal titulo="Igual al plan del asesor: no se puede enviar">
+						<EditorContrapropuesta error="Cambie las cuotas o la fecha del primer pago: es igual al plan del asesor." />
+					</PanelModal>
+					<PanelModal titulo="Lista para enviar (la cuota se recalcula)">
+						<EditorContrapropuesta
+							meses="8"
+							primerPago={dia(20)}
+							notaInicial="Ocho cuotas para no pasar del 30 % de su ingreso."
+						/>
+					</PanelModal>
+					<PanelModal titulo="Enviando">
+						<EditorContrapropuesta
+							meses="8"
+							notaInicial="Ocho cuotas para no pasar del 30 % de su ingreso."
+							pendiente
+						/>
+					</PanelModal>
+					<PanelModal titulo="Error del servidor">
+						<EditorContrapropuesta
+							meses="8"
+							notaInicial="Ocho cuotas para no pasar del 30 % de su ingreso."
+							errorServidor="El convenio ya no está pendiente: se decidió fuera del CRM."
+						/>
+					</PanelModal>
+					<PanelModal titulo="Sin el límite de cuotas: ofrece reintentar">
+						<EditorContrapropuesta
+							maxMeses={null}
+							error="No se pudo cargar el límite de cuotas del convenio."
+							onReintentarLimite={nada}
+						/>
+					</PanelModal>
+					<PanelModal titulo="Retirar la contrapropuesta">
+						<RetirarContrapropuestaVista
+							nota=""
+							onNota={nada}
+							errorServidor={null}
+							pendiente={false}
+							onCancelar={nada}
+							onRetirar={nada}
+						/>
+					</PanelModal>
 				</div>
 			</ShowcaseGroup>
 
@@ -727,7 +1425,7 @@ export default function CobrosSolicitudesShowcase() {
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Estados: cargando, vacío y Pronto">
+			<ShowcaseGroup title="Estados: cargando y vacío">
 				<div className="flex flex-col gap-6 py-4">
 					<BandejaSolicitudes
 						pendientes={[]}
@@ -758,9 +1456,9 @@ export default function CobrosSolicitudesShowcase() {
 						onAbrir={nada}
 					/>
 					<BandejaSolicitudes
-						pendientes={PENDIENTES}
+						pendientes={PENDIENTES.filter((s) => s.tipo !== "juridico")}
 						porEjecutar={[]}
-						tipo="rebaja"
+						tipo="juridico"
 						onTipo={nada}
 						busqueda=""
 						onBusqueda={nada}

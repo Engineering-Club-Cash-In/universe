@@ -4,11 +4,14 @@ import {
 	Clock,
 	FileText,
 	Loader2,
+	Phone,
 	Send,
 	Sparkles,
 	TriangleAlert,
+	UserRound,
 } from "lucide-react";
 import * as React from "react";
+import { partesGT } from "@/components/cobros/historial/formato";
 import {
 	CrmCard,
 	CrmDivider,
@@ -17,6 +20,12 @@ import {
 	crmText,
 } from "@/components/ds/cards-credito";
 import { Button } from "@/components/ui/button";
+import {
+	InputGroup,
+	InputGroupAddon,
+	InputGroupInput,
+} from "@/components/ui/input";
+import { fechaLargaGT } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 
 /**
@@ -96,7 +105,41 @@ export type ItemGestion = {
 	detalleNodo?: React.ReactNode;
 	/** Texto de la franja plegable cuando no hay nota. */
 	detalleEtiqueta?: string;
+	/**
+	 * W1 · Con quién se habló («Habló con: Juan Pérez (codeudor)») y el
+	 * teléfono marcado. Se ve siempre, bajo el subtítulo. Ver
+	 * `contactoDeGestion` (lib/cobros/gestion-contacto.ts).
+	 */
+	contacto?: { participante: string | null; telefono: string | null } | null;
 };
+
+/** W1 · «Habló con …» y el teléfono contactado, en una línea que se parte. */
+function ContactoGestion({
+	contacto,
+}: {
+	contacto: NonNullable<ItemGestion["contacto"]>;
+}) {
+	return (
+		<span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-fg-secondary text-xs">
+			{contacto.participante ? (
+				<span className="wrap-break-word inline-flex min-w-0 items-center gap-1">
+					<UserRound
+						aria-hidden
+						className="size-3.5 shrink-0 text-fg-tertiary"
+					/>
+					{contacto.participante}
+				</span>
+			) : null}
+			{contacto.telefono ? (
+				<span className="inline-flex items-center gap-1 tabular-nums">
+					<Phone aria-hidden className="size-3.5 shrink-0 text-fg-tertiary" />
+					<span className="sr-only">Teléfono contactado:</span>
+					{contacto.telefono}
+				</span>
+			) : null}
+		</span>
+	);
+}
 
 function NotaGestion({
 	nota,
@@ -188,6 +231,7 @@ export function HistorialGestiones({ items }: { items: ItemGestion[] }) {
 						{g.subtitulo ? (
 							<span className="text-fg-secondary text-xs">{g.subtitulo}</span>
 						) : null}
+						{g.contacto ? <ContactoGestion contacto={g.contacto} /> : null}
 						{g.extra ? <div className="mt-1">{g.extra}</div> : null}
 						<NotaGestion
 							nota={g.nota}
@@ -477,8 +521,10 @@ export type DocumentoFila = {
 	descripcion: string;
 	onClick?: () => void;
 	cargando?: boolean;
-	/** Sin acción todavía: se ve deshabilitado con el motivo. */
+	/** Sin acción: se ve deshabilitado con el motivo. */
 	motivoDeshabilitado?: string;
+	/** Estado del documento junto a la acción: «Solicitado», «Sin archivo». */
+	estado?: { etiqueta: string; tone: CrmTone };
 };
 
 function ListaDocumentos({
@@ -505,19 +551,34 @@ function ListaDocumentos({
 							<FileText aria-hidden className="size-4" />
 						</span>
 						<div className="flex min-w-0 flex-1 flex-col">
-							<span className="font-medium text-fg text-sm">{d.nombre}</span>
-							<span className="text-fg-tertiary text-xs">{d.descripcion}</span>
+							<span className="wrap-break-word font-medium text-fg text-sm">
+								{d.nombre}
+							</span>
+							<span className="wrap-break-word text-fg-tertiary text-xs">
+								{d.descripcion}
+							</span>
 						</div>
-						<Button
-							size="sm"
-							variant={variante}
-							disabled={!d.onClick || d.cargando}
-							loading={d.cargando}
-							title={d.motivoDeshabilitado}
-							onClick={d.onClick}
+						{d.estado ? (
+							<CrmPill tone={d.estado.tone} className="px-2.5 py-0.5">
+								{d.estado.etiqueta}
+							</CrmPill>
+						) : null}
+						{/* El `title` va en el contenedor: un botón deshabilitado no
+						    muestra el suyo en todos los navegadores. */}
+						<span
+							title={d.onClick ? undefined : d.motivoDeshabilitado}
+							className="shrink-0"
 						>
-							{d.onClick ? accion : "Pronto"}
-						</Button>
+							<Button
+								size="sm"
+								variant={variante}
+								disabled={!d.onClick || d.cargando}
+								loading={d.cargando}
+								onClick={d.onClick}
+							>
+								{accion}
+							</Button>
+						</span>
 					</div>
 				))}
 			</CrmCard>
@@ -559,6 +620,17 @@ type MensajeAsistente = {
 
 const PREGUNTA_MIN = 3;
 const PREGUNTA_MAX = 500;
+
+/**
+ * «Generado por IA · 8 oct 2026 · 14:28», en hora de Guatemala. `generadoEn`
+ * llega como timestamp ISO; si no se puede leer, solo «Generado por IA».
+ */
+export function generadoEnTexto(generadoEn: string): string {
+	const fecha = fechaLargaGT(generadoEn);
+	if (!fecha) return "Generado por IA";
+	const { hora, minuto } = partesGT(new Date(generadoEn));
+	return `Generado por IA · ${fecha} · ${hora}:${minuto}`;
+}
 
 export function AsistenteIA({
 	resumen,
@@ -668,35 +740,39 @@ export function AsistenteIA({
 					)}
 				</div>
 				<form
-					className="flex items-center gap-2 rounded-full border border-line-subtle bg-surface py-1.5 pr-1.5 pl-4"
 					onSubmit={(e) => {
 						e.preventDefault();
 						void enviar();
 					}}
 				>
-					<input
-						ref={inputRef}
-						disabled={!onPreguntar}
-						value={texto}
-						onChange={(e) => setTexto(e.target.value)}
-						maxLength={PREGUNTA_MAX}
-						placeholder={
-							onPreguntar
-								? "Pregúntele a la IA…"
-								: "Pregúntele a la IA… (pronto)"
-						}
-						aria-label="Pregunta al asistente"
-						className="min-w-0 flex-1 bg-transparent text-fg text-sm outline-none placeholder:text-fg-tertiary disabled:cursor-not-allowed"
-					/>
-					<Button
-						type="submit"
-						size="icon"
-						disabled={!puedeEnviar}
-						aria-label="Enviar pregunta"
-						className="rounded-full"
-					>
-						<Send aria-hidden />
-					</Button>
+					{/* Input del DS (InputGroup) en forma de píldora, con el botón
+					    de enviar adentro. */}
+					<InputGroup className="h-auto rounded-full py-1.5 pr-1.5 pl-4">
+						<InputGroupInput
+							ref={inputRef}
+							disabled={!onPreguntar}
+							value={texto}
+							onChange={(e) => setTexto(e.target.value)}
+							maxLength={PREGUNTA_MAX}
+							placeholder={
+								onPreguntar
+									? "Pregúntele a la IA…"
+									: "Pregúntele a la IA… (pronto)"
+							}
+							aria-label="Pregunta al asistente"
+						/>
+						<InputGroupAddon>
+							<Button
+								type="submit"
+								size="icon"
+								disabled={!puedeEnviar}
+								aria-label="Enviar pregunta"
+								className="rounded-full"
+							>
+								<Send aria-hidden />
+							</Button>
+						</InputGroupAddon>
+					</InputGroup>
 				</form>
 			</div>
 			<aside
@@ -728,7 +804,7 @@ export function AsistenteIA({
 							))}
 						</div>
 						<span className="text-[11px] text-fg-tertiary">
-							Generado por IA · {resumen.generadoEn}
+							{generadoEnTexto(resumen.generadoEn)}
 						</span>
 					</>
 				) : (

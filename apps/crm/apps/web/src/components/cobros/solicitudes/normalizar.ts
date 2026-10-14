@@ -1,11 +1,15 @@
 /**
  * Solicitudes que esperan la decisión del supervisor, en una forma común.
  *
- * Hay tres fuentes y cada una trae sus campos:
+ * Cada fuente trae sus campos:
  *  - convenios por aprobar (`getConveniosListado({ estado: "pending" })`);
  *  - apagados y reactivaciones (`getColaInmovilizaciones`: `pendiente_aprobacion`
  *    espera decisión; `aprobada` espera que el asesor registre la ejecución);
- *  - recuperaciones del vehículo (`getSolicitudesRecuperacion().pendientes`).
+ *  - recuperaciones del vehículo (`getSolicitudesRecuperacion().pendientes`);
+ *  - rebajas de mora (`getSolicitudesRebajaMora`, W2) y escalados a Jurídico
+ *    (`getSolicitudesJuridico`, W3): `pendiente` y `error_aplicacion` (no se
+ *    pudo aplicar en cartera: se reintenta o se rechaza) esperan al supervisor;
+ *  - solicitudes de documentos (`getSolicitudesDocumentos`, F6): `pendiente`.
  *
  * Lo usan el Dashboard del supervisor (bloque «Aprobaciones pendientes»), la
  * bandeja de /cobros/solicitudes y las solicitudes de cada asesor. Funciones
@@ -111,13 +115,98 @@ export type RecuperacionFuente = {
 	motivoDecision?: string | null;
 };
 
+/** Fila de `getSolicitudesRebajaMora` (W2). */
+export type RebajaFuente = {
+	id: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string | null;
+	/** pendiente · aprobada (aplicándose) · aplicada · error_aplicacion · rechazada · cancelada */
+	estado: string;
+	/** Mora del crédito cuando se pidió. */
+	moraSnapshot: string;
+	montoSolicitado: string;
+	montoAplicado?: string | null;
+	/** Motivo del asesor. */
+	notas: string;
+	solicitadoEn: string | Date | null;
+	/** Usuario del CRM que la pidió (regla de cuatro ojos). */
+	solicitadoPorId?: string | null;
+	solicitadoPor: string | null;
+	resueltoEn?: string | Date | null;
+	resueltoPor?: string | null;
+	/** Nota del supervisor o, en `error_aplicacion`, el motivo de cartera. */
+	notaResolucion?: string | null;
+	clienteNombre: string | null;
+};
+
+/** Fila de `getSolicitudesJuridico` (W3). */
+export type JuridicoFuente = {
+	id: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string | null;
+	/** Bucket del crédito cuando se pidió (B3 o B4). */
+	bucketSnapshot: number | null;
+	/** no_contacto · no_quiere_pagar · sin_acuerdo */
+	motivo: string;
+	/** Nota del asesor para Jurídico. */
+	notaJuridico: string;
+	estado: string;
+	solicitadoEn: string | Date | null;
+	solicitadoPorId?: string | null;
+	solicitadoPor: string | null;
+	resueltoEn?: string | Date | null;
+	resueltoPor?: string | null;
+	notaResolucion?: string | null;
+	clienteNombre: string | null;
+};
+
+/** Fila de `getSolicitudesDocumentos` (F6). */
+export type DocumentoFuente = {
+	id: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string | null;
+	clave?: string;
+	comentario: string | null;
+	estado?: string;
+	solicitadoEn: string | Date | null;
+	/** Usuario del CRM que la pidió («Su solicitud»). */
+	solicitadoPorId?: string | null;
+	/** Nombre de quien la pidió. */
+	solicitadoPor: string | null;
+	resueltoEn?: string | Date | null;
+	resueltoPor?: string | null;
+	notaResolucion?: string | null;
+	/** Nombre para mostrar del documento («Contrato de crédito»). */
+	documento: string;
+	/** Nombre del cliente del crédito (mismo criterio que rebajas y Jurídico). */
+	clienteNombre?: string | null;
+};
+
+/** Motivos del escalado a Jurídico (`MOTIVOS_JURIDICO` del servidor). */
+const MOTIVO_JURIDICO: Record<string, string> = {
+	no_contacto: "No contacto",
+	no_quiere_pagar: "No quiere pagar",
+	sin_acuerdo: "Sin acuerdo",
+};
+
+export function etiquetaMotivoJuridico(motivo: string | null | undefined) {
+	if (!motivo) return "—";
+	return MOTIVO_JURIDICO[motivo] ?? motivo;
+}
+
+/** Rebajas y escalados que todavía esperan al supervisor. */
+export const ESTADOS_ACCIONABLES_APLICACION = ["pendiente", "error_aplicacion"];
+
 /* ── Forma común ────────────────────────────────────────────────────────────── */
 
 export type TipoSolicitud =
 	| "convenio"
 	| "apagado"
 	| "reactivacion"
-	| "recuperacion";
+	| "recuperacion"
+	| "rebaja"
+	| "juridico"
+	| "documentos";
 
 type SolicitudBase = {
 	/** Único entre fuentes: «convenio-12», «inmovilizacion-uuid»… */
@@ -149,90 +238,48 @@ export type Solicitud =
 	| (SolicitudBase & {
 			tipo: "recuperacion";
 			recuperacion: RecuperacionFuente;
-	  });
-
-/** Rebaja de mora pendiente (`getSolicitudesRebajaMora`, W2). */
-export type RebajaFuente = {
-	id: string;
-	casoCobroId: string;
-	numeroCreditoSifco: string | null;
-	/** "pendiente", "error_aplicacion"… */
-	estado: string;
-	moraSnapshot: string;
-	montoSolicitado: string;
-	notas: string;
-	solicitadoEn: string | Date | null;
-	solicitadoPor: string | null;
-	clienteNombre: string | null;
-};
-
-/** Solicitud de documento pendiente (`getSolicitudesDocumentos`, F6). */
-export type DocumentoFuente = {
-	id: string;
-	casoCobroId: string;
-	numeroCreditoSifco: string | null;
-	comentario: string | null;
-	solicitadoEn: string | Date | null;
-	solicitadoPor: string | null;
-	/** Nombre para mostrar del documento («Contrato»). */
-	documento: string;
-};
-
-/**
- * Rebajas de mora y solicitudes de documentos: entran a la bandeja como filas
- * pendientes. Todavía no se deciden desde el Espacio de aprobación, por eso
- * no son parte de `Solicitud`.
- */
-export type SolicitudExtra = {
-	id: string;
-	tipo: "rebaja" | "documentos";
-	cliente: string;
-	credito: string | null;
-	casoCobroId: string | null;
-	asesor: string | null;
-	solicitadoEn: string | null;
-	monto: number | null;
-	/** Lo que pidió el asesor (motivo o comentario). */
-	detalle: string | null;
-};
-
-export function solicitudDeRebaja(r: RebajaFuente): SolicitudExtra {
-	return {
-		id: `rebaja-${r.id}`,
-		tipo: "rebaja",
-		cliente: r.clienteNombre ?? "Sin nombre",
-		credito: r.numeroCreditoSifco,
-		casoCobroId: r.casoCobroId,
-		asesor: r.solicitadoPor,
-		solicitadoEn: aIso(r.solicitadoEn),
-		monto: numero(r.montoSolicitado),
-		detalle:
-			r.estado === "error_aplicacion"
-				? `No se pudo aplicar, reintentar o rechazar · ${r.notas}`
-				: r.notas,
-	};
-}
-
-export function solicitudDeDocumento(d: DocumentoFuente): SolicitudExtra {
-	return {
-		id: `documento-${d.id}`,
-		tipo: "documentos",
-		cliente: d.documento,
-		credito: d.numeroCreditoSifco,
-		casoCobroId: d.casoCobroId,
-		asesor: d.solicitadoPor,
-		solicitadoEn: aIso(d.solicitadoEn),
-		monto: null,
-		detalle: d.comentario,
-	};
-}
+	  })
+	| (SolicitudBase & {
+			tipo: "rebaja";
+			rebaja: RebajaFuente;
+			/** Cartera no la pudo aplicar: se reintenta o se rechaza. */
+			errorAplicacion: boolean;
+	  })
+	| (SolicitudBase & {
+			tipo: "juridico";
+			juridico: JuridicoFuente;
+			errorAplicacion: boolean;
+	  })
+	| (SolicitudBase & { tipo: "documentos"; documento: DocumentoFuente });
 
 export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
 	convenio: "Convenio",
 	apagado: "Apagado",
 	reactivacion: "Reactivación",
 	recuperacion: "Recuperación del vehículo",
+	rebaja: "Rebaja de mora",
+	juridico: "Jurídico",
+	documentos: "Documentos",
 };
+
+/** Usuario del CRM que pidió la solicitud, si la fuente lo trae (cuatro ojos). */
+export function idSolicitante(s: Solicitud): string | null {
+	switch (s.tipo) {
+		case "rebaja":
+			return s.rebaja.solicitadoPorId ?? null;
+		case "juridico":
+			return s.juridico.solicitadoPorId ?? null;
+		case "recuperacion":
+			return s.recuperacion.solicitanteId ?? null;
+		case "apagado":
+		case "reactivacion":
+			return s.inmovilizacion.solicitadoPorId ?? null;
+		case "documentos":
+			return s.documento.solicitadoPorId ?? null;
+		default:
+			return null;
+	}
+}
 
 export function aIso(v: string | Date | null | undefined) {
 	if (!v) return null;
@@ -291,6 +338,74 @@ export function solicitudDeRecuperacion(r: RecuperacionFuente): Solicitud {
 	};
 }
 
+export function solicitudDeRebaja(r: RebajaFuente): Solicitud {
+	return {
+		id: `rebaja-${r.id}`,
+		tipo: "rebaja",
+		rebaja: r,
+		errorAplicacion: r.estado === "error_aplicacion",
+		cliente: r.clienteNombre?.trim() || "Sin nombre",
+		credito: r.numeroCreditoSifco,
+		casoCobroId: r.casoCobroId,
+		asesor: r.solicitadoPor,
+		solicitadoEn: aIso(r.solicitadoEn),
+		monto: numero(r.montoSolicitado),
+		bucket: null,
+	};
+}
+
+export function solicitudDeJuridico(j: JuridicoFuente): Solicitud {
+	return {
+		id: `juridico-${j.id}`,
+		tipo: "juridico",
+		juridico: j,
+		errorAplicacion: j.estado === "error_aplicacion",
+		cliente: j.clienteNombre?.trim() || "Sin nombre",
+		credito: j.numeroCreditoSifco,
+		casoCobroId: j.casoCobroId,
+		asesor: j.solicitadoPor,
+		solicitadoEn: aIso(j.solicitadoEn),
+		monto: null,
+		bucket: j.bucketSnapshot ?? null,
+	};
+}
+
+/** El documento pedido va en la segunda línea de la fila (con el crédito). */
+export function solicitudDeDocumento(d: DocumentoFuente): Solicitud {
+	return {
+		id: `documento-${d.id}`,
+		tipo: "documentos",
+		documento: d,
+		cliente: d.clienteNombre?.trim() || "Sin nombre",
+		credito: d.numeroCreditoSifco,
+		casoCobroId: d.casoCobroId,
+		asesor: d.solicitadoPor,
+		solicitadoEn: aIso(d.solicitadoEn),
+		monto: null,
+		bucket: null,
+	};
+}
+
+/** Rebajas y escalados que esperan al supervisor (pendientes o con error al aplicar). */
+export function rebajasAccionables(filas: unknown[] | undefined) {
+	return ((filas ?? []) as RebajaFuente[]).filter((r) =>
+		ESTADOS_ACCIONABLES_APLICACION.includes(r.estado),
+	);
+}
+
+export function juridicoAccionables(filas: unknown[] | undefined) {
+	return ((filas ?? []) as JuridicoFuente[]).filter((j) =>
+		ESTADOS_ACCIONABLES_APLICACION.includes(j.estado),
+	);
+}
+
+/** Documentos pendientes (la consulta ya filtra; se vuelve a mirar por si acaso). */
+export function documentosPendientes(filas: unknown[] | undefined) {
+	return ((filas ?? []) as DocumentoFuente[]).filter(
+		(d) => !d.estado || d.estado === "pendiente",
+	);
+}
+
 /** Las más antiguas primero; sin fecha, al final (orden estable). */
 export function ordenarPorAntiguedad<T extends { solicitadoEn: string | null }>(
 	filas: T[],
@@ -306,15 +421,20 @@ export function ordenarPorAntiguedad<T extends { solicitadoEn: string | null }>(
 }
 
 /**
- * Las tres fuentes en una sola lista. `pendientes` esperan la decisión del
+ * Todas las fuentes en una sola lista. `pendientes` esperan la decisión del
  * supervisor (las más antiguas primero); `porEjecutar` son los apagados y
  * reactivaciones ya aprobados que el asesor todavía no registró como
- * ejecutados (lo que el supervisor seguía en «Por ejecutar»).
+ * ejecutados (lo que el supervisor seguía en «Por ejecutar»). Rebajas,
+ * Jurídico y documentos son opcionales y llegan crudos: aquí se quedan solo
+ * los que esperan al supervisor.
  */
 export function solicitudesDeFuentes(fuentes: {
 	convenios: ConvenioFuente[];
 	inmovilizaciones: InmovilizacionFuente[];
 	recuperaciones: RecuperacionFuente[];
+	rebajas?: unknown[];
+	juridico?: unknown[];
+	documentos?: unknown[];
 }): { pendientes: Solicitud[]; porEjecutar: Solicitud[] } {
 	const pendientes = [
 		...fuentes.convenios.map(solicitudDeConvenio),
@@ -322,6 +442,9 @@ export function solicitudesDeFuentes(fuentes: {
 		...fuentes.inmovilizaciones
 			.filter((i) => i.estado === "pendiente_aprobacion")
 			.map(solicitudDeInmovilizacion),
+		...rebajasAccionables(fuentes.rebajas).map(solicitudDeRebaja),
+		...juridicoAccionables(fuentes.juridico).map(solicitudDeJuridico),
+		...documentosPendientes(fuentes.documentos).map(solicitudDeDocumento),
 	];
 	const porEjecutar = fuentes.inmovilizaciones
 		.filter((i) => i.estado === "aprobada")
@@ -339,17 +462,29 @@ export type DestinosAprobacion = {
 	convenio: Destino;
 	recuperacion: Destino;
 	inmovilizacion: Destino;
+	rebaja: Destino;
+	documentos: Destino;
+	juridico: Destino;
 };
 
 /**
  * El bloque «Aprobaciones pendientes» del Dashboard: las filas (las más
  * antiguas primero), el total y el acceso por bandeja. Cada fuente es
- * `undefined` mientras carga (su conteo queda en `null`).
+ * `undefined` mientras carga (su conteo queda en `null` y no suma al total).
+ * Rebajas, documentos y Jurídico llegan crudos (mismas consultas que la
+ * bandeja de /cobros/solicitudes): aquí se filtran los que esperan al
+ * supervisor, igual que en la bandeja, para que los conteos coincidan.
  */
 export function aprobacionesParaDashboard(fuentes: {
 	convenios?: { items?: unknown[]; total?: number };
 	recuperaciones?: { pendientes?: unknown[] };
 	inmovilizaciones?: unknown[];
+	/** `getSolicitudesRebajaMora({ limite: 200 })`. */
+	rebajas?: unknown[];
+	/** `getSolicitudesDocumentos({ estado: "pendiente" })`. */
+	documentos?: unknown[];
+	/** `getSolicitudesJuridico({ limite: 200 })`. */
+	juridico?: unknown[];
 	destinos: DestinosAprobacion;
 }): { filas: FilaAprobacion[]; total: number; bandejas: BandejaAprobacion[] } {
 	const { destinos } = fuentes;
@@ -359,6 +494,9 @@ export function aprobacionesParaDashboard(fuentes: {
 	const inmovilizaciones = (
 		(fuentes.inmovilizaciones ?? []) as InmovilizacionFuente[]
 	).filter((i) => i.estado === "pendiente_aprobacion");
+	const rebajas = rebajasAccionables(fuentes.rebajas);
+	const documentos = documentosPendientes(fuentes.documentos);
+	const juridico = juridicoAccionables(fuentes.juridico);
 
 	const fila = (s: Solicitud, destino: Destino): FilaAprobacion => ({
 		id: s.id,
@@ -376,6 +514,11 @@ export function aprobacionesParaDashboard(fuentes: {
 		),
 		...inmovilizaciones.map((i) =>
 			fila(solicitudDeInmovilizacion(i), destinos.inmovilizacion),
+		),
+		...rebajas.map((r) => fila(solicitudDeRebaja(r), destinos.rebaja)),
+		...juridico.map((j) => fila(solicitudDeJuridico(j), destinos.juridico)),
+		...documentos.map((d) =>
+			fila(solicitudDeDocumento(d), destinos.documentos),
 		),
 	]);
 
@@ -399,10 +542,34 @@ export function aprobacionesParaDashboard(fuentes: {
 			cantidad: fuentes.inmovilizaciones ? inmovilizaciones.length : null,
 			destino: destinos.inmovilizacion,
 		},
+		{
+			clave: "rebajas",
+			etiqueta: "Rebaja de mora",
+			cantidad: fuentes.rebajas ? rebajas.length : null,
+			destino: destinos.rebaja,
+		},
+		{
+			clave: "juridico",
+			etiqueta: "Jurídico",
+			cantidad: fuentes.juridico ? juridico.length : null,
+			destino: destinos.juridico,
+		},
+		{
+			clave: "documentos",
+			etiqueta: "Documentos",
+			cantidad: fuentes.documentos ? documentos.length : null,
+			destino: destinos.documentos,
+		},
 	];
 	return {
 		filas,
-		total: totalConvenios + recuperaciones.length + inmovilizaciones.length,
+		total:
+			(fuentes.convenios ? totalConvenios : 0) +
+			recuperaciones.length +
+			inmovilizaciones.length +
+			rebajas.length +
+			juridico.length +
+			documentos.length,
 		bandejas,
 	};
 }

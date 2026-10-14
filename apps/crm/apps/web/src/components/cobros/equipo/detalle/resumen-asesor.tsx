@@ -88,6 +88,8 @@ export type ItemCritico = {
 	/** «convenios pendientes de aprobación». */
 	etiqueta: string;
 	destino?: Destino;
+	/** En lugar de un enlace, abre algo aquí mismo (p. ej. la lista de M2). */
+	onClick?: () => void;
 	/** Sin fuente todavía: «—» con «Pronto». */
 	pronto?: boolean;
 	info?: string;
@@ -250,6 +252,9 @@ function KpisResumen({ kpis }: { kpis: KpisAsesor }) {
 	);
 }
 
+const claseEnlaceCritico =
+	"flex min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring";
+
 function CasosCriticos({
 	criticos,
 }: {
@@ -308,10 +313,19 @@ function CasosCriticos({
 								<EnlaceDestino
 									destino={item.destino}
 									title={item.info}
-									className="flex min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+									className={claseEnlaceCritico}
 								>
 									{texto}
 								</EnlaceDestino>
+							) : item.onClick && !item.pronto && item.cantidad ? (
+								<button
+									type="button"
+									onClick={item.onClick}
+									title={item.info}
+									className={cn(claseEnlaceCritico, "cursor-pointer text-left")}
+								>
+									{texto}
+								</button>
 							) : (
 								<span
 									className="flex min-w-0 items-center gap-2"

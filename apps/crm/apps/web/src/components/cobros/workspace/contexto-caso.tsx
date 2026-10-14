@@ -32,16 +32,20 @@ import {
 	MessageCircle,
 	MessageSquare,
 	Phone,
+	PhoneIncoming,
 	TriangleAlert,
 } from "lucide-react";
 import * as React from "react";
-import { etiquetaMetodoContacto } from "server/src/lib/gestion-temprana-b1";
 import {
 	RESULTADO_VISITA_LABEL,
 	type ResultadoVisita,
 } from "server/src/lib/visitas-cobros";
 import { toast } from "sonner";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
+import {
+	filasDocumentos,
+	useDocumentosCaso,
+} from "@/components/cobros/ficha/documentos-caso";
 import {
 	AsistenteIA,
 	CuotaPlanFila,
@@ -96,6 +100,11 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+	contactoDeGestion,
+	etiquetaCanalGestion,
+	textoProximoContacto,
+} from "@/lib/cobros/gestion-contacto";
 import { inicioDelDiaGT } from "@/lib/cobros/promesa-activa";
 import {
 	abreviarCreditosCrm,
@@ -1166,8 +1175,17 @@ const ESTADO_GESTION: Record<string, { label: string; tone: CrmTone }> = {
 	pago_registrado: { label: "Pago registrado", tone: "success" },
 };
 
-function iconoMetodo(metodo: string | null | undefined) {
+function iconoMetodo(
+	metodo: string | null | undefined,
+	direccion?: string | null,
+) {
 	switch (metodo) {
+		case "llamada":
+			return direccion === "entrante" ? (
+				<PhoneIncoming aria-hidden className="size-3.5" />
+			) : (
+				<Phone aria-hidden className="size-3.5" />
+			);
 		case "whatsapp":
 			return <MessageCircle aria-hidden className="size-3.5" />;
 		case "sms":
@@ -1208,12 +1226,13 @@ function itemDeGestion(g: GestionCaso): ItemGestion {
 	const detalles = [
 		g.acuerdosAlcanzados && { label: "Acuerdos", valor: g.acuerdosAlcanzados },
 		g.compromisosPago && { label: "Compromisos", valor: g.compromisosPago },
-		g.fechaProximoContacto && {
+		// W1: con la hora y el medio del próximo contacto, si se eligieron.
+		(g.fechaProximoContacto || g.horaProximoContacto) && {
 			label:
 				g.estadoContacto === "promesa_pago"
 					? "Fecha prometida"
 					: "Seguimiento programado",
-			valor: fechaGT(g.fechaProximoContacto),
+			valor: textoProximoContacto(g) ?? "",
 		},
 		g.proximoPaso && { label: "Próximo paso", valor: g.proximoPaso },
 		g.duracionLlamada && {
@@ -1228,8 +1247,8 @@ function itemDeGestion(g: GestionCaso): ItemGestion {
 			: "Sin fecha",
 		titulo: (
 			<span className="inline-flex items-center gap-1.5">
-				{iconoMetodo(g.metodoContacto)}
-				{etiquetaMetodoContacto(g.metodoContacto ?? "")}
+				{iconoMetodo(g.metodoContacto, g.direccionContacto)}
+				{etiquetaCanalGestion(g)}
 			</span>
 		),
 		badge: (
@@ -1246,6 +1265,7 @@ function itemDeGestion(g: GestionCaso): ItemGestion {
 				? fmtQ(g.montoComprometido)
 				: undefined,
 		subtitulo: `Por: ${g.realizadoPor || "Sin asignar"}`,
+		contacto: contactoDeGestion(g),
 		tono,
 		nota: g.comentarios,
 		detalles,
@@ -1314,8 +1334,23 @@ export function propsContextoDeCaso(
 		enviandoEstadoCuenta?: boolean;
 		onCartaNotarial?: () => void;
 		onAbrirFicha?: () => void;
+		/**
+		 * F6 · Filas de Documentos del catálogo del caso, con sus acciones
+		 * (`useDocumentosCaso`). Sin esto, el catálogo fijo sin acciones.
+		 */
+		documentos?: { enviar: DocumentoFila[]; solicitar: DocumentoFila[] };
 	} = {},
 ): ContextoCasoVistaProps {
+	const documentosF6 =
+		acciones.documentos ??
+		filasDocumentos({
+			catalogo: null,
+			cargandoCatalogo: false,
+			motivoSinAcciones: "No disponible en esta vista.",
+			enviando: null,
+			onEnviar: () => {},
+			onSolicitar: () => {},
+		});
 	const { identidad, bucket, mora, cuotas, cobroHoy, saldo } = caso;
 	// Mismo corte que la ficha: una cuota vence al pasar la medianoche GT.
 	const hoyInicio = inicioDelDiaGT();
@@ -1597,18 +1632,8 @@ export function propsContextoDeCaso(
 		},
 		documentos: {
 			enviar: [
-				{
-					clave: "tarjeta-circulacion",
-					nombre: "Tarjeta de circulación",
-					descripcion: "Documento vehicular",
-					motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-				},
-				{
-					clave: "seguro",
-					nombre: "Información de seguro",
-					descripcion: "Póliza vigente",
-					motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-				},
+				// F6: tarjeta de circulación y seguro, del catálogo del caso.
+				...documentosF6.enviar,
 				{
 					clave: "estado-cuenta",
 					nombre: "Estado de cuenta",
@@ -1628,17 +1653,8 @@ export function propsContextoDeCaso(
 						: "Regístrela desde la Ficha 360.",
 				},
 			],
-			solicitar: [
-				["contrato", "Contrato de crédito", "PDF · Documento legal"],
-				["carta-poder", "Carta poder", "Requiere firma del titular"],
-				["cambio-placas", "Cambio de placas", "Trámite vehicular"],
-				["expertaje", "Expertaje", "Avalúo del vehículo"],
-			].map(([clave, nombre, descripcion]) => ({
-				clave,
-				nombre,
-				descripcion,
-				motivoDeshabilitado: "Pendiente de backend (tarea F6).",
-			})),
+			// F6: contrato, carta poder, cambio de placas y expertaje.
+			solicitar: documentosF6.solicitar,
 		},
 		referencias: {
 			estado:
@@ -1703,6 +1719,14 @@ export function ContextoCaso({
 }) {
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] =
 		React.useState(false);
+	// F6 · Documentos del caso (mismo hook que la pestaña de la ficha). Va antes
+	// de los retornos tempranos: es un hook.
+	const documentos = useDocumentosCaso({
+		casoCobroId: caso.identidad.casoCobroId,
+		catalogo: caso.complementos?.documentos ?? null,
+		cargandoCatalogo: caso.cargandoComplementos,
+		soloLectura,
+	});
 	const enviarEstadoCuenta = useMutation({
 		mutationFn: () =>
 			client.enviarEstadoCuentaWhatsapp({
@@ -1762,6 +1786,7 @@ export function ContextoCaso({
 		enviandoEstadoCuenta: enviarEstadoCuenta.isPending,
 		onCartaNotarial: soloLectura ? undefined : onCartaNotarial,
 		onAbrirFicha,
+		documentos,
 	});
 
 	return (
@@ -1782,6 +1807,7 @@ export function ContextoCaso({
 				tabInicial={tabInicial}
 				className={className}
 			/>
+			{documentos.dialogos}
 			<AlertDialog
 				open={confirmarEstadoCuenta}
 				onOpenChange={setConfirmarEstadoCuenta}

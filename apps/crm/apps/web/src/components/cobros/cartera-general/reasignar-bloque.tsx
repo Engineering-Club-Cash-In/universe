@@ -1,4 +1,4 @@
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import {
 	ArrowLeftRight,
 	CircleCheck,
@@ -20,7 +20,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { ProgressBar } from "@/components/ui/progress";
 import {
 	Select,
 	SelectContent,
@@ -28,26 +27,31 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { client, orpc } from "@/utils/orpc";
-import { normalizarNombre } from "./segmentos";
+import { orpc, orpcAparte } from "@/utils/orpc";
 import type { AsesorOpcion } from "./vista-supervision";
 
 /**
  * «Reasignar en bloque» de la Cartera general (Figma 2262:12).
  *
- * Hoy no hay un endpoint de reasignación en bloque: se llama a
- * `reasignarAsesorCredito` una vez por crédito, en serie, con el mismo motivo
- * (lo mismo que hace el modal de /cobros/reasignaciones, uno a la vez). Si uno
- * falla, los demás siguen y al final se muestra el resumen. Por eso NO es
- * atómico: la tarea S6 de José (endpoint transaccional) lo reemplaza.
+ * Una sola llamada a `reasignarAsesorCreditosLote` (S6, doc 23), TODO O NADA:
+ * cartera valida el lote completo (el pool del bucket de cada crédito) y lo
+ * escribe en una transacción. Si un crédito no cumple, no se reasigna ninguno
+ * y el error dice cuáles fallaron (`data.errores`). Los que ya eran del asesor
+ * destino vuelven como `omitidos` (no es un error). Repetir el mismo lote es
+ * seguro: lo ya reasignado vuelve como omitido.
  *
- * Igual que el modal individual, solo se reasigna a un asesor del pool del
- * bucket del crédito (`getPoolAsesoresPorBucket`). Los créditos cuyo bucket no
- * tiene al asesor destino en su pool se omiten (y se dicen).
+ * Antes de mandar, el diálogo deja fuera (y lo dice) los créditos sin bucket
+ * del motor y los cuyo bucket no tiene al asesor destino en su pool
+ * (`getPoolAsesoresPorBucket`), como el modal individual: así el lote no falla
+ * por algo que ya se sabe. El servidor lo vuelve a validar.
  */
 
 const formatoEntero = new Intl.NumberFormat("es-GT");
+
+/** Tope de `reasignarAsesorCreditosLote` por llamada. */
+export const MAX_CREDITOS_LOTE = 200;
 
 export type CreditoReasignable = {
 	contratoId: string;
@@ -68,13 +72,21 @@ type Fallo = { sifco: string; cliente: string; motivo: string };
 
 export type ResultadoReasignacion = {
 	exitos: number;
+	/** Créditos que impidieron el lote (con error, nada se reasignó). */
 	fallos: Fallo[];
+	/** Dejados fuera antes de enviar o que ya eran del asesor destino. */
 	omitidos: Fallo[];
+	/** El lote no se aplicó: por qué. */
+	error?: {
+		mensaje: string;
+		/** Sin respuesta clara del servidor: pudo aplicarse; reintentar es seguro. */
+		incierto: boolean;
+	};
 };
 
 export type FaseReasignacion =
 	| { fase: "editar" }
-	| { fase: "ejecutando"; hechos: number; total: number }
+	| { fase: "ejecutando" }
 	| { fase: "resultado"; resultado: ResultadoReasignacion };
 
 export function creditoReasignable(fila: FilaCartera): CreditoReasignable {
@@ -86,6 +98,63 @@ export function creditoReasignable(fila: FilaCartera): CreditoReasignable {
 		sifco: fila.numeroCredito ?? fila.contratoId,
 		bucket: bucket ? Number(bucket.slice(1)) : null,
 		asesorNombre: fila.asesorNombre ?? null,
+	};
+}
+
+/** Error por crédito que devuelve el lote (`data.errores`). */
+type ErrorLote = { credito_id?: number; codigo?: string; message?: string };
+
+const TEXTO_CODIGO: Record<string, string> = {
+	no_encontrado: "No se encontró el crédito en cartera.",
+	fuera_del_funnel: "Está fuera del funnel operativo (sin bucket).",
+	asesor_no_elegible:
+		"El asesor destino no está en el pool activo de su bucket.",
+};
+
+/**
+ * Traduce el error del lote a lo que muestra el resumen. 400 y 409 son
+ * respuestas firmes (no se escribió nada); sin estado o con 5xx la respuesta
+ * se perdió y cartera pudo confirmar después.
+ */
+export function resultadoDeErrorLote(
+	error: unknown,
+	creditos: CreditoReasignable[],
+	omitidos: Fallo[],
+): ResultadoReasignacion {
+	const e = error as {
+		message?: string;
+		status?: number;
+		data?: { errores?: unknown };
+	} | null;
+	const errores = Array.isArray(e?.data?.errores)
+		? (e.data.errores as ErrorLote[])
+		: [];
+	const porId = new Map(creditos.map((c) => [c.creditoId, c]));
+	const fallos = errores.map((x): Fallo => {
+		const c = x.credito_id !== undefined ? porId.get(x.credito_id) : undefined;
+		return {
+			sifco:
+				c?.sifco ?? (x.credito_id !== undefined ? String(x.credito_id) : "—"),
+			cliente: c?.cliente ?? "Crédito",
+			motivo:
+				(x.codigo && TEXTO_CODIGO[x.codigo]) ??
+				x.message ??
+				"No se pudo reasignar.",
+		};
+	});
+	const status = typeof e?.status === "number" ? e.status : undefined;
+	const firme = status !== undefined && status >= 400 && status < 500;
+	return {
+		exitos: 0,
+		fallos,
+		omitidos,
+		error: {
+			mensaje:
+				e?.message && e.message.length > 0
+					? e.message
+					: "No se pudo reasignar el lote de créditos.",
+			incierto: !firme,
+		},
 	};
 }
 
@@ -105,6 +174,7 @@ export function ReasignarBloqueVista({
 	estado,
 	aReasignar,
 	onConfirmar,
+	onVolver,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -117,23 +187,29 @@ export function ReasignarBloqueVista({
 	motivo: string;
 	onMotivo: (motivo: string) => void;
 	estado: FaseReasignacion;
-	/** Cuántos se van a reasignar con el destino elegido (el resto se omite). */
+	/** Cuántos se envían con el destino elegido (el resto se deja fuera). */
 	aReasignar: number;
 	onConfirmar: () => void;
+	/** Tras un error: volver al formulario con el mismo destino y motivo. */
+	onVolver?: () => void;
 }) {
 	const ejecutando = estado.fase === "ejecutando";
+	const excedeTope = aReasignar > MAX_CREDITOS_LOTE;
 	const puedeConfirmar =
 		estado.fase === "editar" &&
 		destino !== null &&
 		motivo.trim().length > 0 &&
-		aReasignar > 0;
+		aReasignar > 0 &&
+		!excedeTope;
 	const omitir = destino === null ? 0 : creditos.length - aReasignar;
+	const conError =
+		estado.fase === "resultado" && estado.resultado.error !== undefined;
 
 	return (
 		<Dialog
 			open={open}
 			onOpenChange={(o) => {
-				// Mientras corre, el diálogo no se cierra (los pedidos siguen solos).
+				// Mientras corre, el diálogo no se cierra (la respuesta llega sola).
 				if (!ejecutando) onOpenChange(o);
 			}}
 		>
@@ -144,8 +220,8 @@ export function ReasignarBloqueVista({
 						{creditos.length === 1
 							? "1 crédito seleccionado."
 							: `${formatoEntero.format(creditos.length)} créditos seleccionados.`}{" "}
-						Solo se reasignan los créditos cuyo bucket tiene al asesor elegido
-						en su pool.
+						Se reasignan todos juntos: si uno no se puede reasignar, no se
+						reasigna ninguno.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -203,11 +279,17 @@ export function ReasignarBloqueVista({
 								<p className="type-caption text-danger-text">
 									No se pudo cargar el pool de algún bucket. Intente de nuevo.
 								</p>
+							) : excedeTope ? (
+								<p className="type-caption text-danger-text">
+									El máximo es de {MAX_CREDITOS_LOTE} créditos por lote. Quite{" "}
+									{formatoEntero.format(aReasignar - MAX_CREDITOS_LOTE)} de la
+									selección.
+								</p>
 							) : omitir > 0 ? (
 								<p className="type-caption text-warning-text">
 									{omitir === 1
-										? "1 crédito se omitirá: su bucket no tiene a este asesor en el pool o ya es su asesor."
-										: `${omitir} créditos se omitirán: su bucket no tiene a este asesor en el pool o ya es su asesor.`}
+										? "1 crédito queda fuera del lote: no tiene bucket o su bucket no tiene a este asesor en el pool."
+										: `${formatoEntero.format(omitir)} créditos quedan fuera del lote: no tienen bucket o su bucket no tiene a este asesor en el pool.`}
 								</p>
 							) : null}
 						</div>
@@ -225,21 +307,19 @@ export function ReasignarBloqueVista({
 								disabled={ejecutando}
 							/>
 						</div>
-
-						{estado.fase === "ejecutando" ? (
-							<ProgressBar
-								label="Reasignando…"
-								value={estado.hechos}
-								max={estado.total}
-								valueLabel={`${estado.hechos} de ${estado.total}`}
-							/>
-						) : null}
 					</div>
 				)}
 
 				<DialogFooter>
 					{estado.fase === "resultado" ? (
-						<Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+						<>
+							{conError && onVolver ? (
+								<Button variant="outline" onClick={onVolver}>
+									Volver a intentar
+								</Button>
+							) : null}
+							<Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+						</>
 					) : (
 						<>
 							<Button
@@ -250,7 +330,11 @@ export function ReasignarBloqueVista({
 								Cancelar
 							</Button>
 							<Button disabled={!puedeConfirmar} onClick={onConfirmar}>
-								<ArrowLeftRight aria-hidden />
+								{ejecutando ? (
+									<Spinner size="sm" tone="current" label="Reasignando" />
+								) : (
+									<ArrowLeftRight aria-hidden />
+								)}
 								{ejecutando
 									? "Reasignando…"
 									: aReasignar > 0
@@ -300,23 +384,40 @@ export function ResumenReasignacion({
 }: {
 	resultado: ResultadoReasignacion;
 }) {
+	const { error } = resultado;
 	return (
 		<div className="flex flex-col gap-4">
-			<p className="type-body-base flex items-center gap-2 text-fg">
-				<CircleCheck aria-hidden className="size-4 text-success-solid" />
-				{resultado.exitos === 1
-					? "1 crédito reasignado."
-					: `${formatoEntero.format(resultado.exitos)} créditos reasignados.`}
-			</p>
+			{error ? (
+				<div className="flex flex-col gap-1">
+					<p className="type-body-base flex items-center gap-2 text-fg">
+						<CircleX aria-hidden className="size-4 text-danger-solid" />
+						{error.incierto
+							? "No se pudo confirmar la reasignación."
+							: "No se reasignó ningún crédito."}
+					</p>
+					<p className="type-body-sm wrap-break-word text-fg-secondary">
+						{error.incierto
+							? "Cartera no respondió a tiempo y el lote pudo haberse aplicado. Volver a intentarlo es seguro: lo ya reasignado aparecerá como omitido."
+							: error.mensaje}
+					</p>
+				</div>
+			) : (
+				<p className="type-body-base flex items-center gap-2 text-fg">
+					<CircleCheck aria-hidden className="size-4 text-success-solid" />
+					{resultado.exitos === 1
+						? "1 crédito reasignado."
+						: `${formatoEntero.format(resultado.exitos)} créditos reasignados.`}
+				</p>
+			)}
 			<ListaResultado
 				icono={<CircleX aria-hidden className="size-3.5" />}
-				titulo="No se pudieron reasignar"
+				titulo="Impidieron el lote"
 				filas={resultado.fallos}
 				tono="text-danger-text"
 			/>
 			<ListaResultado
 				icono={<MinusCircle aria-hidden className="size-3.5" />}
-				titulo="Omitidos"
+				titulo={error ? "Quedaron fuera del lote" : "Omitidos"}
 				filas={resultado.omitidos}
 				tono="text-fg-tertiary"
 			/>
@@ -368,6 +469,9 @@ export function ReasignarBloqueDialog({
 	const [destino, setDestino] = useState<number | null>(null);
 	const [motivo, setMotivo] = useState("");
 	const [estado, setEstado] = useState<FaseReasignacion>({ fase: "editar" });
+	const lote = useMutation(
+		orpcAparte.reasignarAsesorCreditosLote.mutationOptions(),
+	);
 
 	// Cada apertura empieza de cero.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir
@@ -380,18 +484,14 @@ export function ReasignarBloqueDialog({
 		}
 	}, [open]);
 
+	// Lo que se sabe antes de enviar. «Ya es su asesor» lo decide el servidor
+	// (vuelve como omitido), con el dueño vigente y no con el nombre de la fila.
 	const motivoOmision = (c: CreditoReasignable, asesorId: number) => {
-		const asesor = asesores.find((a) => a.asesorId === asesorId);
 		if (c.bucket === null) return "No tiene bucket del motor.";
 		const pool = poolPorBucket.get(c.bucket);
 		if (!pool) return `No se pudo cargar el pool de B${c.bucket}.`;
 		if (!pool.has(asesorId))
 			return `El asesor no está en el pool de B${c.bucket}.`;
-		if (
-			asesor &&
-			normalizarNombre(asesor.nombre) === normalizarNombre(c.asesorNombre)
-		)
-			return "Ya es su asesor.";
 		return null;
 	};
 
@@ -408,53 +508,61 @@ export function ReasignarBloqueDialog({
 			? 0
 			: creditos.filter((c) => motivoOmision(c, destino) === null).length;
 
+	const invalidar = () => {
+		// Lo mismo que invalida el modal individual, más la cartera y la cola.
+		for (const key of [
+			orpc.getTodosLosCreditos.key(),
+			orpc.getColaDia.key(),
+			orpc.getCobrosDashboardStats.key(),
+			orpc.getCreditosPorBucket.key(),
+			orpc.getHistorialReasignaciones.key(),
+			orpc.getCargaPorAsesorBucket.key(),
+		]) {
+			void queryClient.invalidateQueries({ queryKey: key });
+		}
+	};
+
 	const confirmar = async () => {
 		if (destino === null) return;
-		const omitidos: Fallo[] = [];
-		const cola: CreditoReasignable[] = [];
+		const fuera: Fallo[] = [];
+		const enviar: CreditoReasignable[] = [];
 		for (const c of creditos) {
 			const m = motivoOmision(c, destino);
-			if (m) omitidos.push({ sifco: c.sifco, cliente: c.cliente, motivo: m });
-			else cola.push(c);
+			if (m) fuera.push({ sifco: c.sifco, cliente: c.cliente, motivo: m });
+			else enviar.push(c);
 		}
-		const fallos: Fallo[] = [];
-		let exitos = 0;
-		setEstado({ fase: "ejecutando", hechos: 0, total: cola.length });
-		// En serie: no se le pegan N pedidos juntos a cartera-back.
-		for (const [i, c] of cola.entries()) {
-			try {
-				await client.reasignarAsesorCredito({
-					creditoId: c.creditoId,
-					asesorNuevoId: destino,
-					motivo: motivo.trim(),
-				});
-				exitos++;
-			} catch (e) {
-				fallos.push({
-					sifco: c.sifco,
-					cliente: c.cliente,
+		setEstado({ fase: "ejecutando" });
+		try {
+			const res = await lote.mutateAsync({
+				creditoIds: enviar.map((c) => c.creditoId),
+				asesorNuevoId: destino,
+				motivo: motivo.trim(),
+			});
+			const porId = new Map(enviar.map((c) => [c.creditoId, c]));
+			const yaEran = res.omitidos.map((o): Fallo => {
+				const c = porId.get(o.creditoId);
+				return {
+					sifco: c?.sifco ?? String(o.creditoId),
+					cliente: c?.cliente ?? "Crédito",
 					motivo:
-						e instanceof Error && e.message
-							? e.message
-							: "No se pudo reasignar el asesor.",
-				});
-			}
-			setEstado({ fase: "ejecutando", hechos: i + 1, total: cola.length });
-		}
-		setEstado({ fase: "resultado", resultado: { exitos, fallos, omitidos } });
-		if (exitos > 0) {
-			// Lo mismo que invalida el modal individual, más la cartera y la cola.
-			for (const key of [
-				orpc.getTodosLosCreditos.key(),
-				orpc.getColaDia.key(),
-				orpc.getCobrosDashboardStats.key(),
-				orpc.getCreditosPorBucket.key(),
-				orpc.getHistorialReasignaciones.key(),
-				orpc.getCargaPorAsesorBucket.key(),
-			]) {
-				void queryClient.invalidateQueries({ queryKey: key });
-			}
-			onTerminado();
+						o.motivo === "ya_asignado" ? "Ya era de este asesor." : o.motivo,
+				};
+			});
+			setEstado({
+				fase: "resultado",
+				resultado: {
+					exitos: res.reasignados.length,
+					fallos: [],
+					omitidos: [...fuera, ...yaEran],
+				},
+			});
+			invalidar();
+			if (res.reasignados.length > 0) onTerminado();
+		} catch (e) {
+			const resultado = resultadoDeErrorLote(e, enviar, fuera);
+			setEstado({ fase: "resultado", resultado });
+			// Sin respuesta clara el lote pudo aplicarse: que la tabla lo muestre.
+			if (resultado.error?.incierto) invalidar();
 		}
 	};
 
@@ -473,6 +581,7 @@ export function ReasignarBloqueDialog({
 			estado={estado}
 			aReasignar={aReasignar}
 			onConfirmar={() => void confirmar()}
+			onVolver={() => setEstado({ fase: "editar" })}
 		/>
 	);
 }

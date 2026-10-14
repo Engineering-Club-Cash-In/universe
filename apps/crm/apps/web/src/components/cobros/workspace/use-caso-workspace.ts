@@ -22,6 +22,7 @@ import { inicialesDe } from "@/components/ds/cards-credito";
 import { authClient } from "@/lib/auth-client";
 import { useBucketsCatalogo } from "@/lib/cobros/buckets-catalogo";
 import type { CuotaConvenio } from "@/lib/cobros/convenio-cuotas";
+import type { DatosContactoGestion } from "@/lib/cobros/gestion-contacto";
 import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
@@ -73,6 +74,15 @@ import {
 	type SiguientePaso,
 } from "@/lib/inmovilizacion-siguiente-paso";
 import { type client, orpc } from "@/utils/orpc";
+import {
+	type ContrapropuestaPendiente,
+	useContrapropuestaDelCaso,
+} from "./contrapropuesta-caso";
+import {
+	type SolicitudJuridicoCaso,
+	type SolicitudRebajaCaso,
+	solicitudAbierta,
+} from "./solicitudes-caso";
 
 /* ── Tipos de las queries (el cliente ORPC los infiere) ─────────────────────── */
 
@@ -114,11 +124,12 @@ export type AlertaConvenio = {
 };
 
 /** Una gestión del historial (`getHistorialContactos`, limit 200). */
-export type GestionCaso = ContactoHistorialFila & {
-	metodoContacto?: string | null;
-	compromisosPago?: string | null;
-	duracionLlamada?: number | null;
-};
+export type GestionCaso = ContactoHistorialFila &
+	DatosContactoGestion & {
+		metodoContacto?: string | null;
+		compromisosPago?: string | null;
+		duracionLlamada?: number | null;
+	};
 
 /** Una cuota del plan de pagos (`getHistorialPagos`). */
 export type CuotaPlan = CuotaHistorialFila & {
@@ -154,6 +165,8 @@ export type CasoWorkspace = {
 	cargandoBucket: boolean;
 	/** El historial de gestiones sigue en vuelo. */
 	cargandoHistorial: boolean;
+	/** `getFichaComplementos` sigue en vuelo (catálogo de Documentos, F6). */
+	cargandoComplementos: boolean;
 	/** Detalle crudo de cartera (lo que no esté resumido abajo). */
 	detalle: CasoDetalle | null;
 
@@ -341,6 +354,17 @@ export type CasoWorkspace = {
 		/** Hay crédito de cartera: se pueden generar links de Págalo. */
 		puedeGenerarLinks: boolean;
 	};
+	/**
+	 * W2 y W3 · La solicitud abierta (pendiente, aplicándose o con error) de
+	 * rebaja de mora y de Jurídico: mientras exista, el servidor no deja pedir
+	 * otra del mismo tipo.
+	 */
+	solicitudes: {
+		rebajaAbierta: SolicitudRebajaCaso | null;
+		juridicoAbierta: SolicitudJuridicoCaso | null;
+	};
+	/** M4 · La contrapropuesta del supervisor que espera respuesta, si hay. */
+	contrapropuesta: ContrapropuestaPendiente | null;
 
 	// ── Usuario ──────────────────────────────────────────────────────────────
 	esSupervisor: boolean;
@@ -475,6 +499,23 @@ export function useCasoWorkspace(id: string): CasoWorkspace {
 		enabled: conCaso,
 	});
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	// W2, W3 y M4: las mismas llaves que `solicitudes-caso.tsx` y
+	// `contrapropuesta-caso.tsx` (las tarjetas comparten la caché).
+	const rebajasCaso = useQuery({
+		...orpc.getSolicitudesRebajaMoraDelCaso.queryOptions({
+			input: { casoCobroId },
+		}),
+		enabled: conCaso,
+	});
+	const juridicoCaso = useQuery({
+		...orpc.getSolicitudesJuridicoDelCaso.queryOptions({
+			input: { casoCobroId },
+		}),
+		enabled: conCaso,
+	});
+	const contrapropuesta = useContrapropuestaDelCaso(
+		conCaso ? casoCobroId : null,
+	);
 
 	const estadosPromesa = estadoPromesasPago.data as
 		| Record<string, EstadoPromesaUI>
@@ -500,6 +541,9 @@ export function useCasoWorkspace(id: string): CasoWorkspace {
 			orpc.getVisitasCaso.key(),
 			orpc.getReferenciasCaso.key(),
 			orpc.getInmovilizacionesCaso.key(),
+			orpc.getSolicitudesRebajaMoraDelCaso.key(),
+			orpc.getSolicitudesJuridicoDelCaso.key(),
+			orpc.getContrapropuestaPendienteDelCaso.key(),
 		]) {
 			queryClient.invalidateQueries({ queryKey: key });
 		}
@@ -576,6 +620,7 @@ export function useCasoWorkspace(id: string): CasoWorkspace {
 		noEncontrado: casoDetails.isSuccess && !casoDetails.data,
 		cargandoBucket: bucketActual.isPending,
 		cargandoHistorial: historialContactos.isLoading,
+		cargandoComplementos: complementos.isLoading,
 		detalle: caso,
 
 		identidad: {
@@ -732,6 +777,15 @@ export function useCasoWorkspace(id: string): CasoWorkspace {
 		pagos: {
 			puedeGenerarLinks: !!c.numeroCreditoSifco && !!c.carteraCreditoId,
 		},
+		solicitudes: {
+			rebajaAbierta:
+				(rebajasCaso.data ?? []).find((r) => solicitudAbierta(r.estado)) ??
+				null,
+			juridicoAbierta:
+				(juridicoCaso.data ?? []).find((j) => solicitudAbierta(j.estado)) ??
+				null,
+		},
+		contrapropuesta: contrapropuesta.data ?? null,
 
 		esSupervisor: esSupervisorCobros,
 		rol,

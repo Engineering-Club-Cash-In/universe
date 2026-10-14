@@ -41,7 +41,7 @@ export const meta: ShowcaseMeta = {
 	figma:
 		"CRM Ventas › Supervisor › Cartera general (2262:12) y estado vacío (2010:4449)",
 	description:
-		"Pantalla /cobros/cartera para supervisión y admin con datos de ejemplo: columna Asesor, filtro por asesor, chips rápidos de Figma, el selector «Cola del día y alertas» (reemplaza a la Cola del día y a las Alertas de promesas y de convenios), selección múltiple con «Reasignar en bloque», «Configurar SLA» y el estado vacío por segmento.",
+		"Pantalla /cobros/cartera para supervisión y admin con datos de ejemplo: columna Asesor, filtro por asesor, chips rápidos de Figma, el selector «Cola del día y alertas» (reemplaza a la Cola del día y a las Alertas de promesas y de convenios), selección múltiple con «Reasignar en bloque» (lote todo o nada), «Configurar SLA» y el estado vacío por segmento. Desde S5 el asesor, el segmento y «Sin acuerdo» se filtran en el servidor: total y páginas exactos, sin avisos de «solo la página visible».",
 };
 
 const hoy = new Date();
@@ -305,6 +305,7 @@ const PROMESAS: Map<string, DetalleSegmento> = new Map(
 			numeroCreditoSifco: f.numeroCredito,
 			clienteNombre: f.clienteNombre,
 			asesorNombre: f.asesorNombre,
+			asesorId: 4,
 			fechaPrometida: i % 2 === 0 ? hace(3) : hace(-2),
 			fechaAlerta: null,
 			montoComprometido: String(1500 + i * 250),
@@ -537,38 +538,93 @@ export default function CobrosCarteraGeneralShowcase() {
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="«Sin acuerdo» (se filtra sobre la página hasta S5)">
+			<ShowcaseGroup title="Segmento con el chip de bucket (B2) y un asesor: se combinan en el servidor">
 				<div className="py-3">
 					<Demo
-						filtrosIniciales={{ gestion: "sin_acuerdo" }}
-						filas={FILAS.filter((f) => f.estadoGestion === "sin_acuerdo")}
-						avisos={[
-							"«Sin acuerdo» se aplica sobre la página visible: el total y las demás páginas todavía no lo descuentan.",
-						]}
+						segmentoInicial={{ tipo: "cola", valor: "sin_contacto" }}
+						filtrosIniciales={{ etapa: "mora_60" }}
+						asesorInicial={2}
+						filas={FILAS.filter((f) => f.bucketNumero === 2)}
+						total={FILAS.filter((f) => f.bucketNumero === 2).length}
 					/>
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Reasignar en bloque · resumen al terminar">
-				<div className="max-w-[520px] py-3">
+			<ShowcaseGroup title="«Sin acuerdo» (filtrado en el servidor, total exacto)">
+				<div className="py-3">
+					<Demo
+						filtrosIniciales={{ gestion: "sin_acuerdo" }}
+						filas={FILAS.filter((f) => f.estadoGestion === "sin_acuerdo")}
+						total={
+							FILAS.filter((f) => f.estadoGestion === "sin_acuerdo").length
+						}
+					/>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Reasignar en bloque · resumen (lote todo o nada)">
+				<div className="grid gap-4 py-3 lg:grid-cols-3">
 					<div className="rounded-xl border border-line-subtle bg-surface p-5">
+						<p className="type-label-sm mb-3 text-fg-tertiary uppercase">
+							Lote aplicado
+						</p>
 						<ResumenReasignacion
 							resultado={{
 								exitos: 5,
-								fallos: [
-									{
-										sifco: "01010214117603",
-										cliente: "María José Contreras",
-										motivo: "Cartera no respondió a tiempo.",
-									},
-								],
+								fallos: [],
 								omitidos: [
 									{
 										sifco: "01010214117607",
 										cliente: "Patricia López",
 										motivo: "El asesor no está en el pool de B4.",
 									},
+									{
+										sifco: "01010214117611",
+										cliente: "Héctor Monzón",
+										motivo: "Ya era de este asesor.",
+									},
 								],
+							}}
+						/>
+					</div>
+					<div className="rounded-xl border border-line-subtle bg-surface p-5">
+						<p className="type-label-sm mb-3 text-fg-tertiary uppercase">
+							Lote rechazado (400)
+						</p>
+						<ResumenReasignacion
+							resultado={{
+								exitos: 0,
+								fallos: [
+									{
+										sifco: "01010214117603",
+										cliente: "María José Contreras",
+										motivo:
+											"El asesor destino no está en el pool activo de su bucket.",
+									},
+								],
+								omitidos: [],
+								error: {
+									mensaje:
+										"El lote no cumple: ningún crédito se reasignó. El asesor 12 no es elegible en B3 (crédito 2003).",
+									incierto: false,
+								},
+							}}
+						/>
+					</div>
+					<div className="rounded-xl border border-line-subtle bg-surface p-5">
+						<p className="type-label-sm mb-3 text-fg-tertiary uppercase">
+							Sin respuesta de cartera
+						</p>
+						<ResumenReasignacion
+							resultado={{
+								exitos: 0,
+								fallos: [],
+								omitidos: [],
+								error: {
+									mensaje:
+										"No se pudo reasignar el lote: el servicio de cartera no respondió correctamente.",
+									incierto: true,
+								},
 							}}
 						/>
 					</div>

@@ -3,7 +3,12 @@
  * única con todo lo que espera la decisión del supervisor, las más antiguas
  * primero. Chips por tipo con conteo, buscador, filtro por asesor y la tabla
  * del Figma («Cartera/FilaAprobaciones»). Clic en una fila abre el Espacio
- * de aprobación. Presentación pura.
+ * de aprobación (todos los tipos, también rebajas, Jurídico y documentos).
+ * Presentación pura.
+ *
+ * Conteos: cada chip cuenta sus filas y «Todas» es la suma de los chips de
+ * tipo (sin «Por ejecutar», que ya no espera al supervisor). Es el mismo
+ * número que la pestaña «Pendientes».
  */
 import { UserRound } from "lucide-react";
 import * as React from "react";
@@ -34,23 +39,13 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import {
 	coincideBusqueda,
 	normalizarTexto,
-	ordenarPorAntiguedad,
 	type Solicitud,
-	type SolicitudExtra,
 	type TipoSolicitud,
 } from "./normalizar";
 import { BucketSolicitud, ChipTipoSolicitud } from "./piezas";
 
-const esExtra = (s: Solicitud | SolicitudExtra): s is SolicitudExtra =>
-	s.tipo === "rebaja" || s.tipo === "documentos";
-
 /** `?tipo=` de /cobros/solicitudes. */
-export type FiltroTipoSolicitud =
-	| "todas"
-	| TipoSolicitud
-	| "por_ejecutar"
-	| "rebaja"
-	| "documentos";
+export type FiltroTipoSolicitud = "todas" | TipoSolicitud | "por_ejecutar";
 
 export const FILTROS_TIPO: FiltroTipoSolicitud[] = [
 	"todas",
@@ -58,9 +53,10 @@ export const FILTROS_TIPO: FiltroTipoSolicitud[] = [
 	"apagado",
 	"reactivacion",
 	"recuperacion",
-	"por_ejecutar",
 	"rebaja",
+	"juridico",
 	"documentos",
+	"por_ejecutar",
 ];
 
 const ETIQUETA_CHIP: Record<FiltroTipoSolicitud, string> = {
@@ -69,9 +65,10 @@ const ETIQUETA_CHIP: Record<FiltroTipoSolicitud, string> = {
 	apagado: "Apagado",
 	reactivacion: "Reactivación",
 	recuperacion: "Recuperación del vehículo",
-	por_ejecutar: "Por ejecutar",
 	rebaja: "Rebaja de mora",
+	juridico: "Jurídico",
 	documentos: "Documentos",
+	por_ejecutar: "Por ejecutar",
 };
 
 /** Estado vacío de cada chip (los textos de las páginas de antes). */
@@ -88,6 +85,7 @@ const VACIO: Record<FiltroTipoSolicitud, { titulo: string; texto?: string }> = {
 		titulo: "No hay solicitudes aprobadas pendientes de ejecución.",
 	},
 	rebaja: { titulo: "No hay solicitudes de rebaja de mora pendientes." },
+	juridico: { titulo: "No hay solicitudes para escalar a Jurídico." },
 	documentos: { titulo: "No hay solicitudes de documentos pendientes." },
 };
 
@@ -102,11 +100,38 @@ const COLUMNAS: ColumnaCartera[] = COLUMNAS_APROBACIONES.map((c) =>
 
 const POR_PAGINA = 20;
 
+/**
+ * Segunda línea de la fila: el crédito (y, por ejecutar, quién lo registra;
+ * en documentos, el documento pedido).
+ */
+function detalleFila(s: Solicitud, porEjecutar: boolean) {
+	const credito = s.credito ? `Crédito #${s.credito}` : null;
+	if (porEjecutar && credito)
+		return `${credito} · Lo registra el asesor en la Ficha 360`;
+	if (s.tipo === "documentos")
+		return [credito, s.documento.documento].filter(Boolean).join(" · ");
+	return credito;
+}
+
+/** Chip del tipo; rebajas y escalados que cartera no pudo aplicar llevan su aviso. */
+function TipoFila({ solicitud }: { solicitud: Solicitud }) {
+	const conError =
+		(solicitud.tipo === "rebaja" || solicitud.tipo === "juridico") &&
+		solicitud.errorAplicacion;
+	if (!conError) return <ChipTipoSolicitud tipo={solicitud.tipo} />;
+	return (
+		<span className="flex flex-col items-start gap-1">
+			<ChipTipoSolicitud tipo={solicitud.tipo} />
+			<span className="font-semibold text-[11px] text-danger-text leading-[1.26]">
+				No se pudo aplicar
+			</span>
+		</span>
+	);
+}
+
 export type BandejaSolicitudesProps = {
 	pendientes: Solicitud[];
 	porEjecutar: Solicitud[];
-	/** Rebajas de mora y documentos: filas que no abren el Espacio de aprobación. */
-	extras?: SolicitudExtra[];
 	tipo: FiltroTipoSolicitud;
 	onTipo: (tipo: FiltroTipoSolicitud) => void;
 	busqueda: string;
@@ -133,7 +158,6 @@ const TODOS = "__todos__";
 export function BandejaSolicitudes({
 	pendientes,
 	porEjecutar,
-	extras = [],
 	tipo,
 	onTipo,
 	busqueda,
@@ -154,43 +178,34 @@ export function BandejaSolicitudes({
 
 	const conteo = (t: FiltroTipoSolicitud) =>
 		t === "todas"
-			? pendientes.length + extras.length
+			? pendientes.length
 			: t === "por_ejecutar"
 				? porEjecutar.length
-				: t === "rebaja" || t === "documentos"
-					? extras.filter((s) => s.tipo === t).length
-					: pendientes.filter((s) => s.tipo === t).length;
+				: pendientes.filter((s) => s.tipo === t).length;
 
 	// Asesores con solicitudes (las fuentes solo traen el nombre).
 	const asesores = React.useMemo(() => {
 		const mapa = new Map<string, string>();
-		for (const s of [...pendientes, ...porEjecutar, ...extras]) {
+		for (const s of [...pendientes, ...porEjecutar]) {
 			const clave = normalizarTexto(s.asesor);
 			if (clave && !mapa.has(clave)) mapa.set(clave, s.asesor ?? "");
 		}
 		return [...mapa.entries()]
 			.map(([valor, nombre]) => ({ valor, nombre }))
 			.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
-	}, [pendientes, porEjecutar, extras]);
+	}, [pendientes, porEjecutar]);
 
-	const base: Array<Solicitud | SolicitudExtra> =
+	const base: Solicitud[] =
 		tipo === "por_ejecutar"
 			? porEjecutar
 			: tipo === "todas"
-				? ordenarPorAntiguedad<Solicitud | SolicitudExtra>([
-						...pendientes,
-						...extras,
-					])
-				: tipo === "rebaja" || tipo === "documentos"
-					? extras.filter((s) => s.tipo === tipo)
-					: pendientes.filter((s) => s.tipo === tipo);
+				? pendientes
+				: pendientes.filter((s) => s.tipo === tipo);
 	const visibles = base.filter(
 		(s) =>
 			coincideBusqueda(s, busqueda) &&
 			(asesor === null || normalizarTexto(s.asesor) === asesor),
 	);
-	// El Espacio de aprobación navega solo entre las que se pueden decidir.
-	const abrirables = visibles.filter((s): s is Solicitud => !esExtra(s));
 	const totalPaginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
 	const paginaActual = Math.min(pagina, totalPaginas);
 	const desde = (paginaActual - 1) * POR_PAGINA;
@@ -344,35 +359,7 @@ export function BandejaSolicitudes({
 								</TableRow>
 							))
 						: filas.map((s) => {
-								if (esExtra(s)) {
-									return (
-										<FilaAprobaciones
-											key={s.id}
-											// Solo se listan: sin el realce de las filas que abren algo.
-											className="hover:bg-surface"
-											cliente={s.cliente || "Sin nombre"}
-											detalle={
-												[s.credito ? `Crédito #${s.credito}` : null, s.detalle]
-													.filter(Boolean)
-													.join(" · ") || null
-											}
-											asesor={
-												s.asesor ? (
-													<AsesorChip nombre={nombreCorto(s.asesor)} />
-												) : (
-													<span className="text-fg-tertiary">—</span>
-												)
-											}
-											tipo={<ChipTipoSolicitud tipo={s.tipo} />}
-											monto={s.monto ?? "—"}
-											fecha={
-												s.solicitadoEn ? haceCuanto(s.solicitadoEn, ahora) : "—"
-											}
-											bucket={<span className="text-fg-tertiary">—</span>}
-										/>
-									);
-								}
-								const abrir = () => onAbrir(abrirables, abrirables.indexOf(s));
+								const abrir = () => onAbrir(visibles, visibles.indexOf(s));
 								return (
 									<FilaAprobaciones
 										key={s.id}
@@ -387,15 +374,7 @@ export function BandejaSolicitudes({
 											}
 										}}
 										cliente={s.cliente || "Sin nombre"}
-										detalle={
-											s.credito
-												? `Crédito #${s.credito}${
-														tipo === "por_ejecutar"
-															? " · Lo registra el asesor en la Ficha 360"
-															: ""
-													}`
-												: null
-										}
+										detalle={detalleFila(s, tipo === "por_ejecutar")}
 										asesor={
 											s.asesor ? (
 												<AsesorChip nombre={nombreCorto(s.asesor)} />
@@ -403,7 +382,7 @@ export function BandejaSolicitudes({
 												<span className="text-fg-tertiary">—</span>
 											)
 										}
-										tipo={<ChipTipoSolicitud tipo={s.tipo} />}
+										tipo={<TipoFila solicitud={s} />}
 										monto={s.monto ?? "—"}
 										fecha={
 											s.solicitadoEn ? haceCuanto(s.solicitadoEn, ahora) : "—"

@@ -148,6 +148,114 @@ export type BoletaNexaDeps = {
   urlPublica: (key: string) => string | null;
 };
 
+const logError = (evento: string, extra: Record<string, unknown>, error: unknown) => {
+  console.error(JSON.stringify({
+    level: "error",
+    event: evento,
+    ...extra,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+};
+
+export type ResultadoBoletasNexa = { generadas: number[]; omitidas: number[]; fallidas: number[] };
+
+/**
+ * Tope de cada trabajo de un pago (datos + render + subida + registro) y de la
+ * apertura de Chromium. Promise.race no cancela: un trabajo colgado puede seguir
+ * en segundo plano (y hasta registrar la boleta después, lo que es idempotente,
+ * o borrar su PNG si no la registra), pero deja de frenar al resto y a la cola.
+ */
+export const TIMEOUT_BOLETA_NEXA_MS = 60_000;
+
+const conTope = <T>(trabajo: Promise<T>, ms: number): Promise<T> => new Promise<T>((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`tiempo agotado (${ms} ms)`)), ms);
+  trabajo.then(
+    (valor) => { clearTimeout(timer); resolve(valor); },
+    (error) => { clearTimeout(timer); reject(error); },
+  );
+});
+
+/**
+ * El PNG subido que no quedó registrado (el pago dejó de ser elegible, ya
+ * tenía boleta, el registro falló) no lo encontraría nadie: con la key
+ * aleatoria nada lo pisa. Se borra para no dejar datos del cliente sueltos en
+ * el bucket público. Best-effort con su propio tope: nunca lanza; si falla,
+ * queda en el log con la key para borrarlo a mano.
+ */
+const borrarHuerfana = async (deps: BoletaNexaDeps, key: string, pagoId: number, timeoutMs: number) => {
+  try {
+    await conTope(deps.borrar(key), timeoutMs);
+  } catch (error) {
+    logError("nexa.boleta_imagen.error", { pago_id: pagoId, key, paso: "borrar_huerfana" }, error);
+  }
+};
+
+/**
+ * Genera la imagen de cada pago (una por pago_id, aunque compartan número de
+ * transferencia). Un solo browser para todos; un pago que falla no frena a los
+ * demás. Si Chromium no abre, corta ahí (los que faltan los retoma el próximo
+ * barrido) en vez de reintentarlo pago por pago. Nunca lanza.
+ */
+export async function generarBoletasNexa(
+  pagoIds: number[],
+  deps: BoletaNexaDeps = boletaNexaDeps,
+  timeoutMs = TIMEOUT_BOLETA_NEXA_MS,
+): Promise<ResultadoBoletasNexa> {
+  const resultado: ResultadoBoletasNexa = { generadas: [], omitidas: [], fallidas: [] };
+  let renderer: Awaited<ReturnType<BoletaNexaDeps["abrirRender"]>> | undefined;
+  const ids = [...new Set(pagoIds)];
+  try {
+    for (const [i, pagoId] of ids.entries()) {
+      try {
+        const datos = await conTope(deps.datos(pagoId), timeoutMs);
+        const key = keyBoletaNexa();
+        const url = deps.urlPublica(key);
+        if (!datos || !url) {
+          if (datos && !url) logError("nexa.boleta_imagen.error", { pago_id: pagoId }, "URL_PUBLIC_R2 no configurada");
+          resultado.omitidas.push(pagoId);
+          continue;
+        }
+        if (!renderer) {
+          const apertura = deps.abrirRender();
+          try {
+            renderer = await conTope(apertura, timeoutMs);
+          } catch (error) {
+            // Si Chromium termina de abrir DESPUÉS del tope, nadie lo usaría: se cierra apenas abra.
+            apertura
+              .then((tardio) => tardio.cerrar(), () => undefined)
+              .catch((e) => logError("nexa.boleta_imagen.error", { paso: "cerrar_chromium_tardio" }, e));
+            resultado.fallidas.push(...ids.slice(i));
+            logError("nexa.boleta_imagen.error", { pago_ids: ids.slice(i), paso: "abrir_chromium" }, error);
+            break;
+          }
+        }
+        const abierto = renderer;
+        const generada = await conTope((async () => {
+          const png = await abierto.render(htmlBoletaNexa(datos, logoNexaDataUri()));
+          let registrada = false;
+          try {
+            await deps.subir(key, png);
+            registrada = await deps.registrar(pagoId, url);
+            return registrada;
+          } finally {
+            // Va adentro del trabajo (no tras el tope): uno que termina tarde también
+            // limpia. Sin esperar, para no sumarle al tope del pago.
+            if (!registrada) void borrarHuerfana(deps, key, pagoId, timeoutMs);
+          }
+        })(), timeoutMs);
+        if (generada) resultado.generadas.push(pagoId);
+        else resultado.omitidas.push(pagoId);
+      } catch (error) {
+        resultado.fallidas.push(pagoId);
+        logError("nexa.boleta_imagen.error", { pago_id: pagoId }, error);
+      }
+    }
+  } finally {
+    if (renderer) await conTope(renderer.cerrar(), timeoutMs).catch(() => undefined);
+  }
+  return resultado;
+}
+
 // ========================================
 // Implementación real (BD, Chromium, R2)
 // ========================================

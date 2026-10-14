@@ -79,6 +79,7 @@ describe("clasificación de evidencia de Cartera", () => {
 
 	test.each([
 		["Vehículo reposeído", "vehiculo_recuperado"],
+		["Carro recuperado", "vehiculo_recuperado"],
 		["Cliente moroso", "mala_paga"],
 		["Morosidad reiterada", "mala_paga"],
 		["Fraudes detectados", "fraude"],
@@ -153,7 +154,11 @@ describe("clasificación de evidencia de Cartera", () => {
 		expect(
 			categoriaRiesgoPrioritaria(riesgos.map((riesgo) => riesgo.categoria)),
 		).toBe("fraude");
-		expect(riesgos).toHaveLength(1);
+		expect(riesgos).toContainEqual({
+			categoria: "incobrable",
+			texto: "Crédito con estado INCOBRABLE",
+		});
+		expect(riesgos).toHaveLength(2);
 	});
 
 	test("no repite el mismo motivo de un crédito INCOBRABLE", () => {

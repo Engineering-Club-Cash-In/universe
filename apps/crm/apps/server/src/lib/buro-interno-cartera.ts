@@ -127,7 +127,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:vehiculos?\s+(?:recuperad[oa]s?|reposeid[oa]s?)|recuperacion(?:es)?\s+de\s+vehiculos?|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
+			/(?:^|\s)(?:(?:vehiculos?|carros?)\s+(?:recuperad[oa]s?|reposeid[oa]s?)|recuperacion(?:es)?\s+de\s+(?:vehiculos?|carros?)|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "vehiculo_recuperado", texto: limpio };
@@ -178,24 +178,21 @@ export function evidenciaRiesgoCredito(
 		});
 	}
 	if (statusCredit === "INCOBRABLE") {
+		agregarRiesgo({
+			categoria: "incobrable",
+			texto: "Crédito con estado INCOBRABLE",
+		});
 		const detalles = [
 			credito.incobrable?.motivo,
 			credito.incobrable?.observaciones,
 		].filter((detalle): detalle is string => Boolean(detalle?.trim()));
-		if (detalles.length === 0) {
-			agregarRiesgo({
-				categoria: "incobrable",
-				texto: "Crédito con estado INCOBRABLE",
-			});
-		} else {
-			for (const detalle of detalles) {
-				agregarRiesgo(
-					clasificarMotivoExplicito(detalle) ?? {
-						categoria: "incobrable",
-						texto: detalle.trim(),
-					},
-				);
-			}
+		for (const detalle of detalles) {
+			agregarRiesgo(
+				clasificarMotivoExplicito(detalle) ?? {
+					categoria: "incobrable",
+					texto: detalle.trim(),
+				},
+			);
 		}
 	}
 	const cancelacion = credito.cancelacion;

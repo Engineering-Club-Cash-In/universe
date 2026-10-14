@@ -1175,36 +1175,38 @@ const MENSAJE_FUERA_DE_TEMA =
 const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	// Pedir código o consultas. Un lenguaje o una palabra técnica sola no corta:
 	// el texto libre de las gestiones puede mencionarlos, y «programa»,
-	// «código», «código en SIFCO» o «consulta» son vocabulario de cobros.
+	// «código», «script» (de llamada), «algoritmo» (de la mora), «función» o
+	// «consulta» son vocabulario de cobros: sin lenguaje, lo ataja el prompt.
 	/```/,
 	/\b(en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)\b|\b(consulta|query) sql\b/,
 	/\bcodigo fuente\b/,
-	/\bescribe\w* (un |una |el |la )?(script|software|funcion|algoritmo|query)\b/,
-	/\b(dame|hazme|crea\w*|genera\w*) (un |una |el |la )?(script|software|funcion|algoritmo|query)\b/,
 	/\b(select\s+[\s\S]+?\s+from|insert into|drop table|delete from)\b/,
 	// Saltarse o extraer las instrucciones. Acotado a «instrucciones» y a
 	// «lo anterior»: «llamada anterior» o «desconoce las reglas del convenio»
 	// son vocabulario normal de cobros.
 	/\b(ignora|olvida)\w*\s+(todas\s+)?(tus|las|sus)\s+(instrucciones|directrices|prompts?)\b/,
 	/\b(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
-	/\b(prompt|instrucciones) (del sistema|de sistema|internas?|iniciales)|system prompt|jailbreak|modo (desarrollador|dios|libre)/,
+	/\b(prompt|instrucciones) (del sistema|de sistema)\b|\bprompt (inicial|interno)\b|system prompt|jailbreak|modo (desarrollador|dios)\b/,
+	// Pedir las instrucciones propias. «instrucciones iniciales» o «internas» a
+	// secas pueden ser las de un pago o un convenio.
+	/\b(revela|muestra|muestrame|dime|repite|imprime|copia)\w*\s+(tus\s+instrucciones|tu\s+prompt|el\s+prompt)\b/,
 	// Cambio de rol, solo en imperativo (al inicio o tras puntuación): «el
 	// titular actúa como si no debiera» (también tras coma) no es una orden, ni
 	// «haz de cuenta que el cliente abona Q500» (un escenario del caso).
 	// Los signos «¿» y «¡» no cuentan como inicio: «¿Actúa como titular o como
 	// codeudor?» es una pregunta sobre el cliente con el sujeto omitido.
-	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\s+(?!si\b)|\bactua como si (fueras|eres|fuese)\b|\b(eres ahora|ahora eres) (un|una)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
+	/(^|[.!?;:,]\s*)((actua|finge|comportate)\s+como\s+(?!si\b)|actua como si fueras\b)|\b(eres ahora|ahora eres) (un|una)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
 	// Otros casos o la base de datos: solo cuando se pide verlos. «¿Hay otros
 	// casos como este?» o «la base de datos del cliente» son del caso.
-	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los|otros|los demas) (clientes|creditos|casos|usuarios|asesores)\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?(todos los|los demas|otros) (clientes|creditos|casos|usuarios|asesores)\b/,
+	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los (clientes|creditos|casos|usuarios|asesores)|(otros|los demas) (clientes|usuarios|asesores))\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?todos los (clientes|creditos|casos|usuarios|asesores)\b/,
 	/\b(accede|acceso|consulta|consultar|lista|listar|vuelca|dump|muestrame|dame|exporta)\w*\s+(a |en )?(toda )?(la )?base de datos\b|\bque (hay|tiene|contiene) (en )?(la )?base de datos\b/,
 	// Temas generales: solo cuando piden contenido ajeno al caso. Una palabra
 	// suelta puede venir del texto libre de las gestiones («vendería bitcoin
 	// para pagar», «el clima afectó su cosecha», «receta médica»).
-	/\b(cuent\w*|dime|dame|escrib\w*|cant\w*|recit\w*|inventa\w*|recomiend\w*|sugiere\w*|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|receta|horoscopo)\b/,
+	/\b(cuent\w*|dime|dame|escrib\w*|cant\w*|recit\w*|inventa\w*|recomiend\w*|sugiere\w*|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|horoscopo)\b|\breceta (de cocina|para (cocinar|preparar))\b/,
 	/\bque clima (hace|hay|tendremos|habra)\b|\bcomo (esta|estara|va a estar) el clima\b|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b/,
-	/\b(quien gano|resultado|marcador|tabla de posiciones)\b[^?.!]*\b(futbol|partido|liga|mundial)\b/,
-	/\b(precio|cotizacion|cuanto (vale|cuesta)|a como esta)\b[^?.!]*\b(bitcoin|criptomonedas?|ethereum)\b/,
+	/\b(quien gano|marcador|resultado)\b[^?.!]*\bfutbol\b|\bquien gano el partido\b|\btabla de posiciones\b/,
+	/\b(cuanto (vale|cuesta)|precio d\w+|cotizacion d\w+|a como esta)\s+(el |la |los )?(bitcoin|criptomonedas?|ethereum)\b/,
 	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
 	// traduce la mora?» es una pregunta del caso.
 	/(^|[.!?;:,]\s*)traduc\w*\b|\btraduc\w*\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,

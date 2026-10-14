@@ -1,6 +1,7 @@
 import "../utils/baseFalsaParaPruebas";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { verificarFotoBoleta, type DepsFotoBoleta } from "./boletaTardiaFoto";
 import { motivoCondonacionBoletaTardia } from "../utils/motivoCondonacionBoletaTardia";
 import { condonacionBoletaTardiaSchema, registrarPagoConBoletaTardia, traeCondonacionBoletaTardia, type DepsBoletaTardia } from "./boletaTardia";
 process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
@@ -143,25 +144,60 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
   });
   test("foto rechazada (400): validación en url_boletas, sin tomar el lock ni condonar", async () => {
     const set: { status?: number } = {};
-    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "La foto de la boleta ya se usó en otro pago." })));
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "La foto de la boleta ya se usó en otro pago.", motivo: "reusada" })));
     expect(set.status).toBe(400);
     expect(r.errors.url_boletas).toEqual(["La foto de la boleta ya se usó en otro pago."]);
   });
   test("R2 sin responder (503): mensaje claro y nada se escribe", async () => {
     const set: { status?: number } = {};
-    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 503, message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación" })));
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 503, message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación", motivo: "error_r2" })));
     expect(set.status).toBe(503);
     expect(r).toEqual({ success: false, code: "foto_no_verificada", message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación" });
   });
   test("recibe crédito, intento y las llaves tal cual llegaron", async () => {
     const vistos: unknown[] = [];
-    await registrarPagoConBoletaTardia({ body: cuerpo(), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "x" }), vistos));
+    await registrarPagoConBoletaTardia({ body: cuerpo(), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => ({ status: 400, message: "x", motivo: "reusada" }), vistos));
     expect(vistos).toEqual([{ credito_id: 1, intento_id: INTENTO, llaves: ["00000000-0000-4000-8000-000000000001.jpg"] }]);
   });
   test("las validaciones de forma (400) corren antes y no gastan una llamada a R2", async () => {
     const vistos: unknown[] = [];
     await registrarPagoConBoletaTardia({ body: cuerpo({ url_boletas: ["x"] }), set: {} }, { usuarioEmail: "a@x.com" }, sinLock(async () => null, vistos));
     expect(vistos).toEqual([]);
+  });
+  test("todo rechazo (400) y todo 503 deja un log estructurado con el motivo, sin secretos", async () => {
+    const LLAVE = "00000000-0000-4000-8000-000000000001.jpg";
+    const ahora = new Date("2026-10-13T20:00:00Z");
+    const buena = { ContentLength: 10, ContentType: "image/jpeg", LastModified: new Date(ahora.getTime() - 3_600_000) };
+    const noExiste = Object.assign(new Error("https://x?X-Amz-Signature=SECRETO"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
+    const casos: [string, Partial<DepsFotoBoleta>, number, string, string][] = [
+      ["no_existe", { head: async () => { throw noExiste; } }, 400, "foto_rechazada", "NotFound"],
+      ["vacia", { head: async () => ({ ...buena, ContentLength: 0 }) }, 400, "foto_rechazada", "image/jpeg"],
+      ["tipo_invalido", { head: async () => ({ ...buena, ContentType: "text/html" }) }, 400, "foto_rechazada", "text/html"],
+      ["vieja", { head: async () => ({ ...buena, LastModified: new Date("2026-01-01T00:00:00Z") }) }, 400, "foto_rechazada", "2026-01-01"],
+      ["reusada", { llavesYaUsadas: async () => [LLAVE] }, 400, "foto_rechazada", LLAVE],
+      ["error_r2", { head: async () => { throw Object.assign(new Error("SECRETO"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } }); } }, 503, "foto_no_verificada", "AccessDenied"],
+      ["timeout", { head: (_k, signal) => new Promise((_r, rej) => signal.addEventListener("abort", () => rej(new Error("SECRETO")))), timeoutMs: 20 }, 503, "foto_no_verificada", "SECRETO"],
+      ["error_base", { llavesYaUsadas: async () => { throw new Error("SECRETO"); } }, 503, "foto_no_verificada", "SECRETO"],
+    ];
+    const original = console.error;
+    try {
+      for (const [motivo, ajuste, status, evento, pista] of casos) {
+        const logs: string[] = [];
+        console.error = (m: string) => { logs.push(String(m)); };
+        const fotoDeps: DepsFotoBoleta = { head: async () => buena, llavesYaUsadas: async () => [], ahora: () => ahora, ...ajuste };
+        const set: { status?: number } = {};
+        await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock((e) => verificarFotoBoleta(e, fotoDeps)));
+        expect([motivo, set.status]).toEqual([motivo, status]);
+        expect(logs).toHaveLength(1);
+        const l = JSON.parse(logs[0]);
+        expect(l).toMatchObject({ level: "error", event: `boleta_tardia.${evento}`, credito_id: 1, intento_id: INTENTO, motivo });
+        if (motivo !== "error_base") expect(l.llave).toBe(LLAVE);
+        if (motivo === "timeout" || motivo === "error_base") expect(pista === "SECRETO").toBe(true);
+        else expect(logs[0]).toContain(pista);
+        expect(logs[0]).not.toContain("SECRETO");
+        expect(logs[0]).not.toContain("X-Amz");
+      }
+    } finally { console.error = original; }
   });
   test("un pago SIN el bloque no pasa por esta ruta: la verificación vive solo en boletaTardia.ts", () => {
     expect(traeCondonacionBoletaTardia({ url_boletas: ["x"] })).toBe(false);

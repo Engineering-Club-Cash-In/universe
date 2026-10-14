@@ -137,5 +137,15 @@ export function avisoCondonacionAnulada(respuesta: unknown): string | null {
     : null;
 }
 
-/** Aviso discreto cuando la vista previa de la condonación falló o venció: el pago NO se bloquea, se registra sin condonar. */
+/** Aviso discreto cuando la vista previa de la condonación falló por el servidor o la red: el pago NO se bloquea, se registra sin condonar. */
 export const AVISO_VISTA_PREVIA_FALLIDA = "No se pudo calcular la condonación por boleta tardía; el pago se registra sin condonar.";
+/** Falla de infraestructura = 5xx, sin respuesta (red) o timeout. Un 4xx (validación, sesión) no es "no se pudo calcular": no se avisa. */
+export function esFalloDeServidorORed(error: unknown): boolean {
+  const e = error as { response?: { status?: number }; request?: unknown; code?: string; isAxiosError?: boolean } | null;
+  if (!e || typeof e !== "object") return false;
+  if (e.response) return typeof e.response.status === "number" && e.response.status >= 500;
+  return e.isAxiosError === true || e.code === "ECONNABORTED" || e.code === "ETIMEDOUT" || e.code === "ERR_NETWORK";
+}
+/** El texto del aviso, o null si no hay nada que avisar. UNA sola fuente para PagoForm. */
+export const avisoVistaPreviaFallida = (isError: boolean, error: unknown): string | null =>
+  isError && esFalloDeServidorORed(error) ? AVISO_VISTA_PREVIA_FALLIDA : null;

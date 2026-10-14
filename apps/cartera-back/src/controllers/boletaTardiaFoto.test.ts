@@ -27,18 +27,35 @@ describe("verificarFotoBoleta", () => {
   test("no existe en R2: 400 pidiendo subirla de nuevo", async () => {
     const r = await verificarFotoBoleta(entrada(), arma(async () => { throw noExiste(); }));
     expect(r?.status).toBe(400);
+    expect(r?.motivo).toBe("no_existe");
+    expect(r?.llave).toBe(LLAVE);
     expect(r?.message).toContain("no se encontró");
   });
-  test("vacía, sin tamaño, tipo inválido, sin tipo, vieja o sin fecha: 400", async () => {
-    const malas = [
-      { ...buena, ContentLength: 0 }, { ...buena, ContentLength: undefined }, { ...buena, ContentType: "text/html" },
-      { ...buena, ContentType: "application/octet-stream" }, { ...buena, ContentType: undefined },
-      { ...buena, LastModified: horasAtras(24.01) }, { ...buena, LastModified: horasAtras(24 * 30) }, { ...buena, LastModified: undefined },
+  test("vacía, sin tamaño, tipo inválido, vieja o sin fecha: 400 con su motivo y el detalle recibido", async () => {
+    const malas: [Record<string, unknown>, string][] = [
+      [{ ...buena, ContentLength: 0 }, "vacia"], [{ ...buena, ContentLength: undefined }, "vacia"], [{ ...buena, ContentType: "text/html" }, "tipo_invalido"],
+      [{ ...buena, LastModified: horasAtras(24.01) }, "vieja"], [{ ...buena, LastModified: horasAtras(24 * 30) }, "vieja"], [{ ...buena, LastModified: undefined }, "vieja"],
     ];
-    for (const head of malas) {
+    for (const [head, motivo] of malas) {
       const r = await verificarFotoBoleta(entrada(), arma(async () => head));
-      expect([JSON.stringify(head), r?.status]).toEqual([JSON.stringify(head), 400]);
+      expect([JSON.stringify(head), r?.status, r?.motivo]).toEqual([JSON.stringify(head), 400, motivo]);
+      expect(r?.detalle).toHaveProperty("content_type");
     }
+  });
+  test("tipo octet-stream o ausente: solo vale si la llave termina en jpg/jpeg/png/pdf (sin importar mayúsculas)", async () => {
+    for (const ContentType of ["application/octet-stream", undefined, ""]) {
+      for (const ext of ["jpg", "jpeg", "png", "pdf", "JPG", "PdF"]) {
+        const k = `00000000-0000-4000-8000-000000000001.${ext}`;
+        expect(await verificarFotoBoleta(entrada([k]), arma(async () => ({ ...buena, ContentType })))).toBeNull();
+      }
+      for (const k of ["00000000-0000-4000-8000-000000000001.exe", "00000000-0000-4000-8000-000000000001.html", "00000000-0000-4000-8000-000000000001"]) {
+        const r = await verificarFotoBoleta(entrada([k]), arma(async () => ({ ...buena, ContentType })));
+        expect([k, r?.status, r?.motivo]).toEqual([k, 400, "tipo_invalido"]);
+        expect(r?.message).toBe("La foto de la boleta debe ser una imagen (.jpg, .jpeg, .png) o un PDF.");
+      }
+    }
+    // Un tipo explícito inválido no se salva por la extensión.
+    expect((await verificarFotoBoleta(entrada(), arma(async () => ({ ...buena, ContentType: "text/html" }))))?.motivo).toBe("tipo_invalido");
   });
   test("justo en el límite de 24 h pasa", async () => {
     expect(await verificarFotoBoleta(entrada(), arma(async () => ({ ...buena, LastModified: horasAtras(24) })))).toBeNull();
@@ -47,6 +64,8 @@ describe("verificarFotoBoleta", () => {
     for (const error of [new Error("ECONNRESET"), Object.assign(new Error("denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } })]) {
       const r = await verificarFotoBoleta(entrada(), arma(async () => { throw error; }));
       expect(r?.status).toBe(503);
+      expect(r?.motivo).toBe("error_r2");
+      expect(r?.detalle).toEqual({ error_name: error.name, http_status: (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? null });
       expect(r?.message).toBe("No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación");
     }
   });
@@ -54,6 +73,7 @@ describe("verificarFotoBoleta", () => {
     const t0 = Date.now();
     const r = await verificarFotoBoleta(entrada(), arma((_k, signal) => new Promise((_res, rej) => signal.addEventListener("abort", () => rej(new Error("abortado")))), { timeoutMs: 30 }));
     expect(r?.status).toBe(503);
+    expect(r?.motivo).toBe("timeout");
     expect(Date.now() - t0).toBeLessThan(1000);
   });
   test("con varias fotos TODAS deben pasar; una mala rechaza", async () => {
@@ -70,7 +90,9 @@ describe("verificarFotoBoleta", () => {
     let n = 0;
     const r = await verificarFotoBoleta(entrada(), arma(async () => { n++; return buena; }, { llavesYaUsadas: async () => [LLAVE] }));
     expect(r?.status).toBe(400);
-    expect(r?.message).toContain("ya se usó");
+    expect(r?.message).toBe("Esta boleta ya está asociada a otro pago; verifique la boleta antes de condonar.");
+    expect(r?.motivo).toBe("reusada");
+    expect(r?.llave).toBe(LLAVE);
     expect(n).toBe(0);
   });
   test("la consulta de reuso recibe crédito, intento y llaves (para excluir al mismo intento)", async () => {
@@ -81,5 +103,16 @@ describe("verificarFotoBoleta", () => {
   test("si la consulta de reuso falla: falla cerrado con 503", async () => {
     const r = await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: async () => { throw new Error("db caída"); } }));
     expect(r?.status).toBe(503);
+    expect(r?.motivo).toBe("error_base");
+  });
+  test("consulta de reuso colgada (p. ej. pool agotado): el tope corta y responde 503 timeout", async () => {
+    const t0 = Date.now();
+    const r = await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: () => new Promise(() => {}), timeoutMs: 30 }));
+    expect([r?.status, r?.motivo]).toEqual([503, "timeout"]);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+  test("el detalle de error nunca trae el mensaje del error (puede llevar URLs o credenciales)", async () => {
+    const r = await verificarFotoBoleta(entrada(), arma(async () => { throw new Error("https://x.r2.cloudflarestorage.com/?X-Amz-Signature=SECRETO"); }));
+    expect(JSON.stringify(r)).not.toContain("SECRETO");
   });
 });

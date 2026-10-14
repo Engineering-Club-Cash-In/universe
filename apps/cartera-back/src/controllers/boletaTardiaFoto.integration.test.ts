@@ -39,3 +39,20 @@ integrationTest("llavesYaUsadas contra la base real: otro pago vivo cuenta; el m
 
   expect(await usadas(1, I, [llave(1), llave(2), llave(7)])).toEqual([llave(2)]); // mezcla: solo las reusadas
 });
+
+integrationTest("la consulta de reuso corta a los 3 s si la tabla está bloqueada (statement_timeout) y no deja la tx abierta", async () => {
+  const { sql } = await levantarEsquemaBoletaTardia();
+  const { depsFotoReales } = await import("./boletaTardiaFoto");
+  let soltar!: () => void;
+  const libre = new Promise<void>((r) => { soltar = r; });
+  let bloqueada!: () => void;
+  const lista = new Promise<void>((r) => { bloqueada = r; });
+  const bloqueo = sql.begin(async (tx: any) => { await tx`LOCK TABLE cartera.boletas IN ACCESS EXCLUSIVE MODE`; bloqueada(); await libre; });
+  await lista;
+  const t0 = Date.now();
+  try {
+    await expect(depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)])).rejects.toThrow(/statement timeout/i);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+  } finally { soltar(); await bloqueo; }
+  expect(await depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)])).toEqual([]); // la conexión quedó sana
+}, 15_000);

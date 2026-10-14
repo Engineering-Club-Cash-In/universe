@@ -103,6 +103,10 @@ export async function registrarPagoConBoletaTardia(
   const { intentoId, montoAceptado } = bloque.data;
   const rechazoFoto = await deps.verificarFoto({ credito_id: p.credito_id, intento_id: intentoId, llaves: p.url_boletas });
   if (rechazoFoto) {
+    // Lo que ve el cliente es el mensaje; el motivo y los metadatos (sin credenciales ni URLs) quedan solo en el log.
+    log(rechazoFoto.status === 400 ? "foto_rechazada" : "foto_no_verificada", {
+      credito_id: p.credito_id, intento_id: intentoId, llave: rechazoFoto.llave ?? null, motivo: rechazoFoto.motivo, ...rechazoFoto.detalle,
+    });
     set.status = rechazoFoto.status;
     return rechazoFoto.status === 400
       ? validationFailed({ url_boletas: [rechazoFoto.message] })

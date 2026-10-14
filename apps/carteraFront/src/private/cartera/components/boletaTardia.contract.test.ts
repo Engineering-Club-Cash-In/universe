@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
-import { AVISO_VISTA_PREVIA_FALLIDA, cascadaSinCondonar, confirmacionEsperaVistaPrevia, estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
+import { AVISO_VISTA_PREVIA_FALLIDA, avisoVistaPreviaFallida, cascadaSinCondonar, confirmacionEsperaVistaPrevia, estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
 
 const form = readFileSync(new URL("./PagoForm.tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("../hooks/registerPayment.ts", import.meta.url), "utf8");
@@ -209,7 +209,7 @@ describe("F7: el aviso de 'Abonar todo a Capital' usa la mora SIN condonar", () 
 
 describe("Codex r1 #11: Confirmar Pago espera la vista previa", () => {
   test("toma isLoading de la vista previa y lo pasa por la lógica pura (error o params null no bloquean)", () => {
-    expect(form).toContain("const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia } = useBoletaTardiaPreview(");
+    expect(form).toContain("const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia, error: errorVistaPrevia } = useBoletaTardiaPreview(");
     expect(form).toContain(
       "const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });",
     );
@@ -223,16 +223,25 @@ describe("Codex r1 #11: Confirmar Pago espera la vista previa", () => {
 });
 
 describe("la vista previa fallida no bloquea el pago", () => {
-  test("PagoForm lee isError de la consulta y muestra el aviso en la rama de pago normal, junto al recuadro", () => {
-    expect(form).toContain("isError: falloVistaPrevia");
-    expect(ramaPagoNormal).toContain("{falloVistaPrevia && <p role=\"status\"");
-    expect(ramaPagoNormal).toContain("{AVISO_VISTA_PREVIA_FALLIDA}");
-    expect(ramaCancelacion).not.toContain("falloVistaPrevia");
+  const axiosErr = (response?: { status: number }, code?: string) => ({ isAxiosError: true, response, code });
+  test("el aviso sale solo con isError Y error de servidor/red/timeout; 4xx y sin error no avisan", () => {
+    expect(avisoVistaPreviaFallida(true, axiosErr({ status: 500 }))).toBe(AVISO_VISTA_PREVIA_FALLIDA);
+    expect(avisoVistaPreviaFallida(true, axiosErr({ status: 503 }))).toBe(AVISO_VISTA_PREVIA_FALLIDA);
+    expect(avisoVistaPreviaFallida(true, axiosErr(undefined, "ERR_NETWORK"))).toBe(AVISO_VISTA_PREVIA_FALLIDA);
+    expect(avisoVistaPreviaFallida(true, axiosErr(undefined, "ECONNABORTED"))).toBe(AVISO_VISTA_PREVIA_FALLIDA);
+    for (const status of [400, 401, 403, 404, 409, 422]) expect(avisoVistaPreviaFallida(true, axiosErr({ status }))).toBeNull();
+    expect(avisoVistaPreviaFallida(false, axiosErr({ status: 500 }))).toBeNull();
+    expect(avisoVistaPreviaFallida(false, null)).toBeNull();
+    expect(avisoVistaPreviaFallida(true, new Error("boom"))).toBeNull();
   });
-  test("el aviso dice que el pago se registra sin condonar, y confirmar solo espera la primera carga (con error no espera)", () => {
-    expect(AVISO_VISTA_PREVIA_FALLIDA).toBe("No se pudo calcular la condonación por boleta tardía; el pago se registra sin condonar.");
+  test("PagoForm conecta isError + error de la consulta con el aviso, solo en la rama de pago normal", () => {
+    expect(form).toContain("isError: falloVistaPrevia, error: errorVistaPrevia");
+    expect(form).toContain("avisoVistaPreviaFallida(falloVistaPrevia, errorVistaPrevia)");
+    expect(ramaPagoNormal).toContain("{avisoVistaPrevia && <p role=\"status\"");
+    expect(ramaCancelacion).not.toContain("avisoVistaPrevia");
+  });
+  test("con error, confirmar no espera la vista previa (el pago sigue sin condonar)", () => {
     const params = { credito_id: 1, monto_boleta: 1, otros: 0, abono_directo_capital: 0, fecha_boleta: "2026-10-01" };
     expect(confirmacionEsperaVistaPrevia({ params, abierto: true, cargando: false })).toBe(false);
-    expect(estadoRecuadroBoletaTardia(undefined, { esCancelacion: false, numeroAutorizacion: "A", bancoId: 1, hayBoleta: true })).toEqual({ tipo: "oculto" });
   });
 });

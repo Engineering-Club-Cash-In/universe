@@ -16,29 +16,47 @@ export type DepsFotoBoleta = {
   ahora?: () => Date;
   timeoutMs?: number;
 };
-export type RechazoFoto = { status: 400 | 503; message: string };
+export type MotivoFoto = "no_existe" | "vacia" | "tipo_invalido" | "vieja" | "reusada" | "error_r2" | "timeout" | "error_base";
+/** `detalle` va al log estructurado (nunca al cliente): solo metadatos del objeto o `name`/status del error; jamás mensajes de error, credenciales ni URLs. */
+export type RechazoFoto = { status: 400 | 503; message: string; motivo: MotivoFoto; llave?: string; detalle?: Record<string, unknown> };
 
 export const EDAD_MAXIMA_FOTO_MS = 24 * 3_600_000;
 export const TIMEOUT_FOTO_MS = 5_000;
+export const TIMEOUT_CONSULTA_REUSO = "3s";
 export const MENSAJE_FOTO_NO_VERIFICADA = "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación";
 const SUBIR_DE_NUEVO = "Suba la foto de la boleta de nuevo y vuelva a intentar.";
-const rechazo = (message: string): RechazoFoto => ({ status: 400, message });
-const rechazoOnull = (mensaje: string | null): RechazoFoto | null => (mensaje ? rechazo(mensaje) : null);
-const noVerificada: RechazoFoto = { status: 503, message: MENSAJE_FOTO_NO_VERIFICADA };
+const MENSAJE_FORMATO = "La foto de la boleta debe ser una imagen (.jpg, .jpeg, .png) o un PDF.";
+const MENSAJE_REUSO = "Esta boleta ya está asociada a otro pago; verifique la boleta antes de condonar.";
+const rechazo = (motivo: MotivoFoto, message: string, llave: string, detalle?: Record<string, unknown>): RechazoFoto => ({ status: 400, message, motivo, llave, detalle });
+const noVerificada = (motivo: MotivoFoto, llave?: string, detalle?: Record<string, unknown>): RechazoFoto => ({ status: 503, message: MENSAJE_FOTO_NO_VERIFICADA, motivo, llave, detalle });
 
+type ErrorSdk = { name?: string; $metadata?: { httpStatusCode?: number } } | null;
 const noExiste = (e: unknown) => {
-  const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  const x = e as ErrorSdk;
   return x?.name === "NotFound" || x?.name === "NoSuchKey" || x?.$metadata?.httpStatusCode === 404;
 };
+const detalleError = (e: unknown) => ({ error_name: (e as ErrorSdk)?.name ?? null, http_status: (e as ErrorSdk)?.$metadata?.httpStatusCode ?? null });
 
-const problemaDeLaFoto = (m: MetadatosFoto, ahora: Date): string | null => {
-  if (!m.ContentLength || m.ContentLength <= 0) return `La foto de la boleta está vacía. ${SUBIR_DE_NUEVO}`;
-  const tipo = (m.ContentType ?? "").toLowerCase();
-  if (!(tipo.startsWith("image/") || tipo === "application/pdf")) return `La foto de la boleta debe ser una imagen o un PDF. ${SUBIR_DE_NUEVO}`;
+/** Sin tipo útil (R2 guarda octet-stream o nada) solo vale si la extensión de la llave es de imagen/PDF. */
+const EXTENSION_ADMITIDA = /\.(jpe?g|png|pdf)$/i;
+const tipoAdmitido = (tipo: string, llave: string) =>
+  tipo.startsWith("image/") || tipo === "application/pdf" || ((tipo === "" || tipo === "application/octet-stream") && EXTENSION_ADMITIDA.test(llave));
+
+const problemaDeLaFoto = (m: MetadatosFoto, llave: string, ahora: Date): RechazoFoto | null => {
+  const detalle = { content_type: m.ContentType ?? null, content_length: m.ContentLength ?? null, last_modified: m.LastModified instanceof Date ? m.LastModified.toISOString() : null };
+  if (!m.ContentLength || m.ContentLength <= 0) return rechazo("vacia", `La foto de la boleta está vacía. ${SUBIR_DE_NUEVO}`, llave, detalle);
+  if (!tipoAdmitido((m.ContentType ?? "").toLowerCase(), llave)) return rechazo("tipo_invalido", MENSAJE_FORMATO, llave, detalle);
   if (!(m.LastModified instanceof Date) || ahora.getTime() - m.LastModified.getTime() > EDAD_MAXIMA_FOTO_MS) {
-    return `La foto de la boleta se subió hace más de 24 horas. ${SUBIR_DE_NUEVO}`;
+    return rechazo("vieja", `La foto de la boleta se subió hace más de 24 horas. ${SUBIR_DE_NUEVO}`, llave, detalle);
   }
   return null;
+};
+
+/** Corta una espera que no respeta señales (p. ej. conseguir conexión del pool). */
+const conTope = <T>(p: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>;
+  const tope = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error("tope"), { name: "TimeoutError" })), ms); });
+  return Promise.race([p, tope]).finally(() => clearTimeout(timer));
 };
 
 /** `null` = todas las fotos pasan. Cualquier duda (R2 caído, timeout, base caída) falla cerrado con 503. */
@@ -48,18 +66,20 @@ export async function verificarFotoBoleta(
 ): Promise<RechazoFoto | null> {
   const llaves = [...new Set(e.llaves)];
   const ahora = (deps.ahora ?? (() => new Date()))();
+  const timeoutMs = deps.timeoutMs ?? TIMEOUT_FOTO_MS;
   try {
-    if ((await deps.llavesYaUsadas(e.credito_id, e.intento_id, llaves)).length > 0) {
-      return rechazo(`La foto de la boleta ya se usó en otro pago. ${SUBIR_DE_NUEVO}`);
-    }
-  } catch {
-    return noVerificada;
+    const usadas = await conTope(deps.llavesYaUsadas(e.credito_id, e.intento_id, llaves), timeoutMs);
+    if (usadas.length > 0) return rechazo("reusada", MENSAJE_REUSO, usadas[0]);
+  } catch (error) {
+    return noVerificada((error as ErrorSdk)?.name === "TimeoutError" ? "timeout" : "error_base", undefined, detalleError(error));
   }
   const resultados = await Promise.all(llaves.map(async (llave): Promise<RechazoFoto | null> => {
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
-      return rechazoOnull(problemaDeLaFoto(await deps.head(llave, AbortSignal.timeout(deps.timeoutMs ?? TIMEOUT_FOTO_MS)), ahora));
+      return problemaDeLaFoto(await deps.head(llave, signal), llave, ahora);
     } catch (error) {
-      return noExiste(error) ? rechazo(`La foto de la boleta no se encontró en el servidor. ${SUBIR_DE_NUEVO}`) : noVerificada;
+      if (noExiste(error)) return rechazo("no_existe", `La foto de la boleta no se encontró en el servidor. ${SUBIR_DE_NUEVO}`, llave, detalleError(error));
+      return noVerificada(signal.aborted ? "timeout" : "error_r2", llave, detalleError(error));
     }
   }));
   // Si alguna no se pudo verificar manda el 503 (reintentable); si no, el primer 400.
@@ -75,7 +95,10 @@ const headReal: HeadFoto = async (llave, signal) => {
 /** `boletas.url_boleta` guarda `URL_PUBLIC_R2 + llave`; se acepta también la llave sola por si alguna fila vieja la trae así. */
 const llavesYaUsadasReal: DepsFotoBoleta["llavesYaUsadas"] = async (credito_id, intento_id, llaves) => {
   const base = import.meta.env.URL_PUBLIC_R2 ?? "";
-  const filas = await db.select({ url: boletas.url_boleta }).from(boletas)
+  // Transacción de solo lectura con tope propio: si la consulta se cuelga, el 503 llega antes de que la petición se quede esperando.
+  const filas = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('statement_timeout', ${TIMEOUT_CONSULTA_REUSO}, true)`);
+    return tx.select({ url: boletas.url_boleta }).from(boletas)
     .innerJoin(pagos_credito, eq(pagos_credito.pago_id, boletas.pago_id))
     .where(and(
       inArray(boletas.url_boleta, llaves.flatMap((l) => [l, `${base}${l}`])),
@@ -83,6 +106,7 @@ const llavesYaUsadasReal: DepsFotoBoleta["llavesYaUsadas"] = async (credito_id, 
       // IS DISTINCT FROM: un intento NULL (pago normal) del mismo crédito SÍ cuenta como otro pago.
       or(sql`${pagos_credito.credito_id} IS DISTINCT FROM ${credito_id}`, sql`${pagos_credito.boletaTardiaIntentoId} IS DISTINCT FROM ${intento_id}::uuid`),
     ));
+  }, { accessMode: "read only" });
   return llaves.filter((l) => filas.some((f) => f.url === l || f.url === `${base}${l}`));
 };
 

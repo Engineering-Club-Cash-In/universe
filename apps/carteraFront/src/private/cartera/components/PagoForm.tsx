@@ -41,7 +41,7 @@ import {
   moraAntesDeCondonar,
   moraEfectivaParaCobrar,
   parametrosPreviewBoletaTardia,
-  AVISO_VISTA_PREVIA_FALLIDA,
+  avisoVistaPreviaFallida,
 } from "./boletaTardia";
 import { useBoletaTardiaPreview } from "../hooks/useBoletaTardiaPreview";
 
@@ -108,7 +108,8 @@ export function PagoForm() {
     },
     !!creditoCanceladoInfo,
   );
-  const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia } = useBoletaTardiaPreview(paramsPreviewBoletaTardia, modalConfirmacionOpen, aperturaId);
+  const { data: vistaBoletaTardia, isLoading: cargandoVistaPrevia, isError: falloVistaPrevia, error: errorVistaPrevia } = useBoletaTardiaPreview(paramsPreviewBoletaTardia, modalConfirmacionOpen, aperturaId);
+  const avisoVistaPrevia = avisoVistaPreviaFallida(falloVistaPrevia, errorVistaPrevia);
   // Confirmar espera la vista previa: sin ella el pago saldría sin la condonación que el asesor no llegó a ver.
   const esperaVistaPrevia = confirmacionEsperaVistaPrevia({ params: paramsPreviewBoletaTardia, abierto: modalConfirmacionOpen, cargando: cargandoVistaPrevia });
   const entornoRecuadro = {
@@ -289,7 +290,7 @@ export function PagoForm() {
         aceptada={aceptada}
         onCambiarAceptada={(v) => setAceptadaIntentoId(v ? vistaBoletaTardia!.intentoId : null)}
       />
-      {falloVistaPrevia && <p role="status" className="text-xs text-gray-500">{AVISO_VISTA_PREVIA_FALLIDA}</p>}
+      {avisoVistaPrevia && <p role="status" className="text-xs text-gray-500">{avisoVistaPrevia}</p>}
       {(() => {
         const montoBoleta = Number(formik.values.monto_boleta) || 0;
         const otros = Number(formik.values.otros) || 0;

@@ -350,6 +350,10 @@ describe("no existe otra ruta que llegue a condonar por boleta tardía sin pasar
   test("boletaTardiaIntentoId (la opción que hace que insertPayment marque filas) solo la pasa boletaTardia; el cuerpo HTTP nunca llega ahí", () => {
     // boletaTardiaFoto solo LEE la columna (excluye al propio intento al buscar fotos reusadas). anularPagoMora y reversePayment LEEN la marca de la fila (para anular la condonación) o la limpian a null (8/11).
     expect(quienes(/boletaTardiaIntentoId/)).toEqual(["controllers/anularPagoMora.ts", "controllers/boletaTardia.ts", "controllers/boletaTardiaFoto.ts", "controllers/registerPayment.ts", "controllers/reversePayment.ts", "database/db/schema.ts"]);
+    // La excepción de boletaTardiaFoto.ts es de SOLO LECTURA: no escribe en la base ni mueve pagos.
+    const foto = readFileSync(join(SRC, "controllers/boletaTardiaFoto.ts"), "utf8").split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    expect(foto).not.toMatch(/\.(insert|update|delete)\(|insertPayment|condonarMoraDeCuotas|anularCondonacion/);
+    expect(foto).toContain('accessMode: "read only"');
     for (const archivo of ["controllers/anularPagoMora.ts", "controllers/reversePayment.ts"]) {
       const lineas = readFileSync(join(SRC, archivo), "utf8").split("\n").filter((l) => l.includes("boletaTardiaIntentoId") && !/^\s*(\/\/|\*|\/\*)/.test(l));
       expect(lineas.length).toBeGreaterThan(0);

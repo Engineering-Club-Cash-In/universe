@@ -39,7 +39,11 @@ const NO_REPLY_WARNING =
 // La bienvenida pide confirmar la recepción del mensaje (diseño "Mensajes Cobros
 // 2026") y la cuenta exclusiva Nexa va con el texto que definió cobros: ninguna
 // lleva el aviso no-reply.
-const IDS_SIN_AVISO = new Set(["bienvenida", "cuenta_nexa_exclusiva"]);
+const IDS_SIN_AVISO = new Set([
+	"bienvenida",
+	"cuenta_nexa_exclusiva",
+	"mensaje_video",
+]);
 
 const MAX_PARAMS_SIMPLETECH = 5;
 
@@ -1363,7 +1367,8 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 
 	test("se envía con la imagen: template mensaje4image y URL pública", () => {
 		expect(plantilla?.adjunto?.templateName).toBe("mensaje4image");
-		expect(plantilla?.adjunto?.imagenUrl).toMatch(/^https:\/\//);
+		expect(plantilla?.adjunto?.tipo).toBe("image");
+		expect(plantilla?.adjunto?.mediaUrl).toMatch(/^https:\/\//);
 	});
 
 	test("el mensaje editado necesita al menos un párrafo por variable del template", () => {
@@ -1421,5 +1426,48 @@ describe("Nueva cuenta exclusiva Nexa", () => {
 			enviar: true,
 			cuentaNexa: "",
 		});
+	});
+});
+
+describe("Video transferencia Nexa", () => {
+	const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === "mensaje_video");
+
+	test("se envía con video: template mensaje4video, 4 variables y URL pública", () => {
+		expect(plantilla).toBeDefined();
+		expect(plantilla?.adjunto?.tipo).toBe("video");
+		expect(plantilla?.adjunto?.templateName).toBe("mensaje4video");
+		expect(plantilla?.adjunto?.parametros).toBe(4);
+		expect(plantilla?.adjunto?.mediaUrl).toMatch(/^https:\/\/.+\.mp4$/);
+	});
+
+	test("el cuerpo trae un bloque por variable del template, cada uno en una línea", () => {
+		const adjunto = plantilla?.adjunto;
+		if (!adjunto) throw new Error("sin adjunto");
+		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
+		expect(cuerpoCubreAdjunto(plantilla?.cuerpo ?? "", adjunto)).toBe(true);
+		for (const bloque of bloques(plantilla?.cuerpo ?? "")) {
+			expect(bloque).not.toContain("\n");
+		}
+		expect(plantilla?.cuerpo).toContain("{clienteNombre}");
+		expect(plantilla?.cuerpo).toContain("{telefonoAsesor}");
+	});
+
+	test("sin cuenta Nexa se descarta aunque el cuerpo no use {cuentaNexa}", () => {
+		expect(plantilla?.soloConCuentaNexa).toBe(true);
+		expect(plantilla?.cuerpo).not.toContain("{cuentaNexa}");
+		for (const cuenta of [null, undefined, "", "   "]) {
+			expect(
+				prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", cuenta, true),
+			).toEqual({ enviar: false, motivo: COBROS_MOTIVO_SIN_CUENTA_NEXA });
+		}
+		expect(
+			prepararCuentaNexaParaEnvio(plantilla?.cuerpo ?? "", " 123 ", true),
+		).toEqual({ enviar: true, cuentaNexa: "123" });
+	});
+
+	test("sin asesor con teléfono se descarta (el cuerpo remite al ejecutivo)", () => {
+		expect(
+			prepararTelefonoAsesorParaEnvio(plantilla?.cuerpo ?? "", ""),
+		).toEqual({ enviar: false, motivo: COBROS_MOTIVO_SIN_TELEFONO_ASESOR });
 	});
 });

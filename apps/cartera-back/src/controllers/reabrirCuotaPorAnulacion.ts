@@ -57,6 +57,13 @@ export async function reabrirCuotaPorAnulacion(
       abono_seguro: pagos_credito.abono_seguro,
       abono_gps: pagos_credito.abono_gps,
       membresias_pago: pagos_credito.membresias_pago,
+      // Para `cuentaComoHermanoVivo` (hermanas `no_required` con plata cubren la cuota).
+      monto_aplicado: pagos_credito.monto_aplicado,
+      abono_interes_ci: pagos_credito.abono_interes_ci,
+      abono_iva_ci: pagos_credito.abono_iva_ci,
+      mora: pagos_credito.mora,
+      pagoConvenio: pagos_credito.pagoConvenio,
+      otros: pagos_credito.otros,
     })
     .from(pagos_credito)
     .where(

@@ -35,6 +35,7 @@ const setup = async () => {
     monto_aplicado numeric(18,2) NOT NULL DEFAULT 0, abono_capital numeric(18,2),
     abono_interes numeric(18,2), abono_iva_12 numeric(18,2), abono_seguro numeric(18,2),
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
+    abono_interes_ci numeric(18,2), abono_iva_ci numeric(18,2), pago_convenio numeric(18,2) NOT NULL DEFAULT 0,
     capital_restante numeric(18,2), interes_restante numeric(18,2), iva_12_restante numeric(18,2),
     seguro_restante numeric(18,2), gps_restante numeric(18,2), membresias numeric,
     fecha_pago timestamp DEFAULT now(),
@@ -161,5 +162,28 @@ integrationTest("crédito PENDIENTE_CANCELACION: la cuota también se reabre (AC
   expect(parcial).toMatchObject({ pagado: false, capital: 1294.23 });
   const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
   expect(cuota!.pagado).toBe(false);
+  await sql.end();
+});
+
+integrationTest("una hermana no_required con plata (SIFCO) que cubre la cuota sola: anular el cierre no reabre nada", async () => {
+  const { sql } = await setup();
+  const [sifco] = await sql`INSERT INTO cartera.pagos_credito
+      (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
+       abono_seguro, abono_gps, membresias_pago, mora, pagado,
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+    VALUES (1, 48, 'no_required', 2455.61, 2455.61, 0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0, 0, 0) RETURNING pago_id`;
+  const [cierre] = await sql`INSERT INTO cartera.pagos_credito
+      (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
+       abono_seguro, abono_gps, membresias_pago, mora, pagado,
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+    VALUES (1, 48, 'pending', 100, 100, 0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0, 0, 0) RETURNING pago_id`;
+  await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+
+  await anular(cierre!.pago_id as number);
+
+  const [fila] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${sifco!.pago_id}`;
+  expect(fila).toMatchObject({ pagado: true, capital: 0 });
+  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
+  expect(cuota!.pagado).toBe(true);
   await sql.end();
 });

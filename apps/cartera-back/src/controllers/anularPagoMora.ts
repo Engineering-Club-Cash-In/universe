@@ -15,6 +15,7 @@ import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // solo se resuelve cuando alguien corre esto de verdad contra la base.
 import type { revertirRubrosDelPago } from "./rubros";
 import type { anularCondonacionesNexaPorPagoPendiente } from "./condonacionNexaPagoPendiente";
+import type { anularCondonacionPorPagoInvalidado } from "./condonacionBoletaTardiaAnulacion";
 import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
@@ -70,6 +71,8 @@ export type AnularPagoMoraDeps = {
    * pendiente (drizzle/0052). Opcional: quien no la pasa no la corre.
    */
   anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
+  /** Anula la condonación de una boleta tardía cuyo pago se invalida (pendiente o validado). Opcional. */
+  anularCondonacionBoletaTardia?: typeof anularCondonacionPorPagoInvalidado;
 };
 
 const DEPS_REALES = (): AnularPagoMoraDeps => ({
@@ -85,11 +88,15 @@ const DEPS_REALES = (): AnularPagoMoraDeps => ({
     const { anularCondonacionesNexaPorPagoPendiente } = await import("./condonacionNexaPagoPendiente");
     return anularCondonacionesNexaPorPagoPendiente(params);
   }) as typeof anularCondonacionesNexaPorPagoPendiente,
+  anularCondonacionBoletaTardia: (async (params) => {
+    const { anularCondonacionPorPagoInvalidado } = await import("./condonacionBoletaTardiaAnulacion");
+    return anularCondonacionPorPagoInvalidado(params);
+  }) as typeof anularCondonacionPorPagoInvalidado,
 });
 
 export async function anularPagoYRestituirMora(
   tx: typeof db,
-  { pago_id, credito_id }: { pago_id: number; credito_id: number },
+  { pago_id, credito_id, usuario_email }: { pago_id: number; credito_id: number; usuario_email?: string },
   deps: AnularPagoMoraDeps = DEPS_REALES(),
 ): Promise<number> {
   // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver el
@@ -166,6 +173,7 @@ export async function anularPagoYRestituirMora(
       validationStatus: pagos_credito.validationStatus,
       created_at: pagos_credito.createdAt,
       nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
+      boletaTardiaIntentoId: pagos_credito.boletaTardiaIntentoId,
     })
     .from(pagos_credito)
     .where(
@@ -327,6 +335,17 @@ export async function anularPagoYRestituirMora(
     });
   }
 
+  // Boleta tardía: invalidar el pago (pendiente o validado) deshace la condonación del retraso. Va DESPUÉS de
+  // restituir la mora legítima L de arriba, en esta misma tx (ya tiene creditos FOR UPDATE).
+  await deps.anularCondonacionBoletaTardia?.({
+    credito_id,
+    pago_id,
+    boleta_tardia_intento_id: pagoPrevio?.boletaTardiaIntentoId,
+    accion: "anulo",
+    usuario_email,
+    dbClient: tx,
+  });
+
   // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
   // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad y el
   // ajuste tiene que quedar disponible para un pago futuro.
@@ -424,12 +443,12 @@ const DEPS_SERIALIZADO_REALES = (): AnularPagoSerializadoDeps => ({
 });
 
 export async function anularPagoYRestituirMoraSerializado(
-  { pago_id, credito_id }: { pago_id: number; credito_id: number },
+  { pago_id, credito_id, usuario_email }: { pago_id: number; credito_id: number; usuario_email?: string },
   deps: AnularPagoSerializadoDeps = DEPS_SERIALIZADO_REALES(),
 ): Promise<number> {
   return deps.withCreditLock(credito_id, () =>
     deps.runTransaction((tx) =>
-      deps.anular(tx as unknown as typeof db, { pago_id, credito_id }),
+      deps.anular(tx as unknown as typeof db, { pago_id, credito_id, usuario_email }),
     ),
   );
 }

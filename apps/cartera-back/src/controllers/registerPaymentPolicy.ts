@@ -3,15 +3,17 @@ import z from "zod";
 
 type BigInput = number | string | Big;
 
+export const montoBoletaSchema = z.union([
+  z.number().min(0),
+  z.string().regex(/^\d{1,16}\.\d{2}$/),
+]);
+
 // Schema del body de /newPayment. Vive en este módulo puro (sin conexión a
 // BD) para que los tests puedan importarlo sin levantar la base.
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.union([
-    z.number().min(0),
-    z.string().regex(/^\d{1,16}\.\d{2}$/),
-  ]),
+  monto_boleta: montoBoletaSchema,
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),
@@ -1482,3 +1484,65 @@ export function resolverCuotaParaFilaSuelta(opciones: {
 
   return null;
 }
+
+// La subida (`POST /upload`) guarda el archivo en el bucket con la llave `<uuid v4>[.ext]` y devuelve SOLO esa llave;
+// el cliente la manda en `url_boletas` y el servidor le antepone `URL_PUBLIC_R2` al guardar (registerPayment.ts).
+// Por eso "ser del bucket" = ser exactamente una llave que la subida pudo generar. Sin trim: se guarda tal cual. El uuid va en minúsculas (uuidv4 las genera y R2 distingue mayúsculas); la extensión no distingue.
+const LLAVE_BOLETA = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.[A-Za-z0-9]{1,10})?$/;
+
+/** `URL_PUBLIC_R2` sana: https, sin credenciales/consulta/fragmento, y con "/" final (el servidor concatena sin separador). */
+const baseR2Valida = (base: string | undefined): URL | null => {
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    const ok = u.protocol === "https:" && !u.username && !u.password && !u.search && !u.hash && base.endsWith("/");
+    return ok ? u : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Mensajes de error si alguna llave de `url_boletas` NO es del bucket de la app (o si el bucket no está configurado: falla cerrado). */
+export const erroresUrlBoletasDelBucket = (
+  url_boletas: string[],
+  r2BaseUrl: string | undefined = import.meta.env.URL_PUBLIC_R2,
+): string[] => {
+  const base = baseR2Valida(r2BaseUrl);
+  if (!base) {
+    return ["No se puede condonar por boleta tardía: falta configurar la dirección pública de las boletas (URL_PUBLIC_R2). Avise a soporte."];
+  }
+  const malas = url_boletas.filter((u) => {
+    if (typeof u !== "string" || !LLAVE_BOLETA.test(u)) return true;
+    // Defensa extra: lo que se va a guardar debe quedar en el mismo host y bajo la misma ruta del bucket.
+    try {
+      const final = new URL(`${base.href}${u}`);
+      return final.origin !== base.origin || !final.pathname.startsWith(base.pathname) || final.username !== "" || final.password !== "";
+    } catch {
+      return true;
+    }
+  });
+  return malas.length === 0
+    ? []
+    : ["La foto de la boleta no tiene un formato válido (use .jpg, .jpeg, .png o .pdf): renombre el archivo y vuelva a subirlo."];
+};
+
+/**
+ * Con `condonacionBoletaTardia` el servidor exige la boleta y su número de autorización (activan el freno de duplicados),
+ * y que TODA boleta sea un archivo subido al bucket de la app: la foto es el control antifraude de la condonación.
+ */
+export const camposObligatoriosCondonacion = (p: {
+  url_boletas: string[];
+  numeroAutorizacion?: string;
+  banco_id?: number;
+}, r2BaseUrl: string | undefined = import.meta.env.URL_PUBLIC_R2): Record<string, string[]> => {
+  const errores: Record<string, string[]> = {};
+  const exige = (campo: string) => [`${campo} es obligatorio para condonar por boleta tardía`];
+  if (!p.url_boletas.some((u) => typeof u === "string" && u.trim())) errores.url_boletas = exige("url_boletas");
+  else {
+    const delBucket = erroresUrlBoletasDelBucket(p.url_boletas, r2BaseUrl);
+    if (delBucket.length > 0) errores.url_boletas = delBucket;
+  }
+  if (!p.numeroAutorizacion?.trim()) errores.numeroAutorizacion = exige("numeroAutorizacion");
+  if (!p.banco_id) errores.banco_id = exige("banco_id");
+  return errores;
+};

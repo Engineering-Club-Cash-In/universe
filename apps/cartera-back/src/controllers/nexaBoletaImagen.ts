@@ -25,6 +25,8 @@ import { s3 } from "../utils/functions/uploadsFiles";
 /** Namespace PROPIO del advisory lock del registro (8765 pagos, 8766 espejo, 8767 cuenta Nexa). */
 export const BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE = 8768;
 
+export const boletaNexaHabilitada = () => process.env.NEXA_BOLETA_IMAGEN_ENABLED !== "false";
+
 export type DatosBoletaNexa = {
   pagoId: number;
   numeroAutorizacion: string | null;
@@ -254,6 +256,38 @@ export async function generarBoletasNexa(
     if (renderer) await conTope(renderer.cerrar(), timeoutMs).catch(() => undefined);
   }
   return resultado;
+}
+
+// Una sola generación a la vez (disparos y barrido): cada una abre un Chromium.
+// Cada turno tiene tope: un generador colgado no deja la cola bloqueada.
+let cola: Promise<unknown> = Promise.resolve();
+const encolar = <T>(trabajo: () => Promise<T>, topeMs: number): Promise<T> => {
+  const siguiente = cola.then(() => conTope(trabajo(), topeMs));
+  cola = siguiente.catch(() => undefined);
+  return siguiente;
+};
+// Margen del turno: el peor caso legítimo es (2n + 2) topes (datos y trabajo por
+// pago, más abrir y cerrar el browser); se deja uno más. Si fuera menor, un turno
+// lento pero sano liberaría la cola y abriría un segundo Chromium en paralelo.
+const topeDelTurno = (pagos: number, timeoutMs: number) => timeoutMs * (2 * pagos + 3);
+
+/**
+ * Disparo desde el pago Nexa ya aplicado: no se espera, no lanza (ni en
+ * síncrono ni como promesa rechazada) y no cambia nada del pago.
+ */
+export function generarBoletasNexaBestEffort(
+  pagoIds: number[],
+  generar: (pagoIds: number[]) => Promise<unknown> = (ids) => generarBoletasNexa(ids),
+  timeoutMs = TIMEOUT_BOLETA_NEXA_MS,
+): void {
+  try {
+    if (!boletaNexaHabilitada() || pagoIds.length === 0) return;
+    encolar(() => generar(pagoIds), topeDelTurno(pagoIds.length, timeoutMs)).catch((error) => {
+      logError("nexa.boleta_imagen.error", { pago_ids: pagoIds }, error);
+    });
+  } catch (error) {
+    logError("nexa.boleta_imagen.error", { pago_ids: pagoIds }, error);
+  }
 }
 
 // ========================================

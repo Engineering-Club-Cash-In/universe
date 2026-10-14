@@ -151,6 +151,77 @@ export type Solicitud =
 			recuperacion: RecuperacionFuente;
 	  });
 
+/** Rebaja de mora pendiente (`getSolicitudesRebajaMora`, W2). */
+export type RebajaFuente = {
+	id: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string | null;
+	moraSnapshot: string;
+	montoSolicitado: string;
+	notas: string;
+	solicitadoEn: string | Date | null;
+	solicitadoPor: string | null;
+	clienteNombre: string | null;
+};
+
+/** Solicitud de documento pendiente (`getSolicitudesDocumentos`, F6). */
+export type DocumentoFuente = {
+	id: string;
+	casoCobroId: string;
+	numeroCreditoSifco: string | null;
+	comentario: string | null;
+	solicitadoEn: string | Date | null;
+	solicitadoPor: string | null;
+	/** Nombre para mostrar del documento («Contrato»). */
+	documento: string;
+};
+
+/**
+ * Rebajas de mora y solicitudes de documentos: entran a la bandeja como filas
+ * pendientes. Todavía no se deciden desde el Espacio de aprobación, por eso
+ * no son parte de `Solicitud`.
+ */
+export type SolicitudExtra = {
+	id: string;
+	tipo: "rebaja" | "documentos";
+	cliente: string;
+	credito: string | null;
+	casoCobroId: string | null;
+	asesor: string | null;
+	solicitadoEn: string | null;
+	monto: number | null;
+	/** Lo que pidió el asesor (motivo o comentario). */
+	detalle: string | null;
+};
+
+export function solicitudDeRebaja(r: RebajaFuente): SolicitudExtra {
+	return {
+		id: `rebaja-${r.id}`,
+		tipo: "rebaja",
+		cliente: r.clienteNombre ?? "Sin nombre",
+		credito: r.numeroCreditoSifco,
+		casoCobroId: r.casoCobroId,
+		asesor: r.solicitadoPor,
+		solicitadoEn: aIso(r.solicitadoEn),
+		monto: numero(r.montoSolicitado),
+		detalle: r.notas,
+	};
+}
+
+export function solicitudDeDocumento(d: DocumentoFuente): SolicitudExtra {
+	return {
+		id: `documento-${d.id}`,
+		tipo: "documentos",
+		cliente: d.documento,
+		credito: d.numeroCreditoSifco,
+		casoCobroId: d.casoCobroId,
+		asesor: d.solicitadoPor,
+		solicitadoEn: aIso(d.solicitadoEn),
+		monto: null,
+		detalle: d.comentario,
+	};
+}
+
 export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
 	convenio: "Convenio",
 	apagado: "Apagado",
@@ -343,7 +414,10 @@ export function normalizarTexto(v: string | null | undefined) {
 }
 
 /** ¿La solicitud coincide con la búsqueda (cliente, crédito o SIFCO)? */
-export function coincideBusqueda(s: Solicitud, busqueda: string) {
+export function coincideBusqueda(
+	s: Pick<Solicitud, "cliente" | "credito" | "asesor">,
+	busqueda: string,
+) {
 	const q = normalizarTexto(busqueda);
 	if (!q) return true;
 	return [s.cliente, s.credito, s.asesor].some((v) =>

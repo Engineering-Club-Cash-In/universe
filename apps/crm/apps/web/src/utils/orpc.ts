@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
 import type { convenioDecisionRouter } from "../../../server/src/routers/convenio-decision";
+import type { fichaCobrosAccionesRouter } from "../../../server/src/routers/ficha-cobros-acciones";
 import type { gpsCatalogoBucketRouter } from "../../../server/src/routers/gps-catalogo-bucket";
 import type { gpsEventosRouter } from "../../../server/src/routers/gps-eventos-router";
 import type { gpsIntegracionRouter } from "../../../server/src/routers/gps-integracion";
@@ -139,7 +140,8 @@ export const orpcAparte = createTanstackQueryUtils(
 		RouterClient<
 			typeof misPendientesInmovilizacionRouter &
 				typeof gpsCatalogoBucketRouter &
-				typeof supervisionCobrosRouter
+				typeof supervisionCobrosRouter &
+				typeof fichaCobrosAccionesRouter
 		>
 	>(link),
 );

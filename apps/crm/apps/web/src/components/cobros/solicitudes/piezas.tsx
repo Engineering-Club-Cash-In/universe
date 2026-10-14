@@ -12,8 +12,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { TipoSolicitud } from "./normalizar";
 
-/** Tipos de la bandeja que todavía no existen (W2 y F6 de José). */
-export type TipoPronto = "rebaja" | "documentos";
+/** Tipos de la bandeja que no se deciden en el Espacio de aprobación. */
+export type TipoExtra = "rebaja" | "documentos";
 
 /**
  * Chip del tipo (Figma «Cartera/Tipo»). Mismos colores que el bloque del
@@ -21,7 +21,7 @@ export type TipoPronto = "rebaja" | "documentos";
  * azul.
  */
 const CHIP_TIPO: Record<
-	TipoSolicitud | TipoPronto,
+	TipoSolicitud | TipoExtra,
 	{ tono: TipoCarteraValor; etiqueta: string }
 > = {
 	convenio: { tono: "Convenio", etiqueta: "Convenio" },
@@ -37,7 +37,7 @@ export function ChipTipoSolicitud({
 	children,
 	className,
 }: {
-	tipo: TipoSolicitud | TipoPronto;
+	tipo: TipoSolicitud | TipoExtra;
 	children?: React.ReactNode;
 	className?: string;
 }) {

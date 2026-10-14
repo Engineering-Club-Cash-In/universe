@@ -362,6 +362,7 @@ export function SolicitudesPagina({
 					<BandejaSolicitudes
 						pendientes={bandeja.pendientes}
 						porEjecutar={bandeja.porEjecutar}
+						extras={bandeja.extras}
 						tipo={tipo}
 						onTipo={(t) => onSearch({ tipo: t })}
 						busqueda={busqueda}

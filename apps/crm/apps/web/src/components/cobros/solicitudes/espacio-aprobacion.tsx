@@ -35,6 +35,7 @@ import {
 	ESTADOS_VEHICULO,
 	etiquetaMotivo,
 } from "server/src/lib/recuperacion-vehiculo";
+import { toast } from "sonner";
 import { ConvenioAprobacionModal } from "@/components/cobros/convenio-aprobacion-modal";
 import { DecisionPorConfirmarBanner } from "@/components/cobros/decision-por-confirmar-banner";
 import { DecisionInmovilizacionModal } from "@/components/cobros/inmovilizacion-decision-modal";
@@ -73,12 +74,16 @@ import {
 import { cn } from "@/lib/utils";
 import { googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
+import {
+	ContrapropuestaDialog,
+	ContrapropuestaPendienteAviso,
+} from "./contrapropuesta-dialog";
 import type {
 	RecuperacionFuente,
 	Solicitud,
 	TipoSolicitud,
 } from "./normalizar";
-import { ChipPronto, ChipTipoSolicitud, quetzales } from "./piezas";
+import { ChipTipoSolicitud, quetzales } from "./piezas";
 
 /* ── Textos por tipo ────────────────────────────────────────────────────────── */
 
@@ -279,7 +284,7 @@ export function quienEsRecuperacion(r: RecuperacionFuente) {
 	return r.cliente?.trim() ? r.cliente.trim() : `El crédito ${r.numeroSifco}`;
 }
 
-/** Primer pago del plan (M4, `getPlanConvenio`); sin él se muestra «Pronto» (showcase). */
+/** Primer pago del plan (M4, `getPlanConvenio`); sin él se muestra «—». */
 export type PrimerPagoVista = { cargando: boolean; valor: string | null };
 
 function fechaPrimerPago(valor: string) {
@@ -319,10 +324,7 @@ function DetalleConvenio({
 								"—"
 							)
 						) : (
-							<span className="inline-flex items-center gap-1.5 font-normal text-fg-tertiary">
-								—
-								<ChipPronto />
-							</span>
+							"—"
 						)}
 					</Dato>
 					<Dato etiqueta="Bucket antes del convenio">
@@ -577,8 +579,12 @@ export type PanelSolicitudVistaProps = {
 	onSiguiente?: () => void;
 	/** Mapa chico de la ubicación del apagado (apagado en el showcase). */
 	conMapa?: boolean;
-	/** Primer pago del convenio pendiente (M4); sin esto se muestra «Pronto». */
+	/** Primer pago del convenio pendiente (M4); sin esto se muestra «—». */
 	primerPago?: PrimerPagoVista;
+	/** Abre el editor de la contrapropuesta (M4); solo convenios. */
+	onContraproponer?: () => void;
+	/** El plan del convenio aún carga: el editor necesita su primer pago. */
+	cargandoPlan?: boolean;
 	className?: string;
 };
 
@@ -596,6 +602,8 @@ export function PanelSolicitudVista({
 	onSiguiente,
 	conMapa = true,
 	primerPago,
+	onContraproponer,
+	cargandoPlan = false,
 	className,
 }: PanelSolicitudVistaProps) {
 	const notasId = React.useId();
@@ -694,20 +702,17 @@ export function PanelSolicitudVista({
 
 			{decide || bloqueo ? (
 				<footer className="flex shrink-0 flex-col gap-2 border-line-subtle border-t px-5 py-3 sm:px-6">
-					{solicitud.tipo === "convenio" ? (
-						// TODO(José) · tarea M4: contrapropuesta de convenio (Figma
-						// «WS Aprob · Convenio · Contrapropuesta»): total, número de
-						// cuotas, cuota recalculada y nota para el cliente.
+					{solicitud.tipo === "convenio" && onContraproponer ? (
 						<Button
 							type="button"
 							variant="secondary"
 							className="w-full"
-							disabled
-							title="Pronto: contrapropuesta del convenio"
+							onClick={onContraproponer}
+							disabled={!!bloqueo || cargandoPlan}
+							title={bloqueo ?? undefined}
 						>
 							<Pencil aria-hidden />
 							Editar y contraproponer
-							<ChipPronto className="ml-1" />
 						</Button>
 					) : null}
 					<div className="grid grid-cols-2 gap-2">
@@ -1006,6 +1011,80 @@ function ContenidoEspacio({
 				}
 			: undefined;
 
+	// M4: contrapropuesta que espera la respuesta del asesor (si la hay).
+	const contrapropuestas = useQuery({
+		...orpc.getContrapropuestasConvenio.queryOptions({
+			input: { convenioId: s.tipo === "convenio" ? s.convenio.convenio_id : 1 },
+		}),
+		enabled: s.tipo === "convenio",
+		// Sin esto cada cambio de foco volvería a bloquear los botones un instante.
+		staleTime: 30_000,
+	});
+	// La copia de la lista que guarda el Espacio no se actualiza: cuando el asesor
+	// acepta una contrapropuesta el plan cambia, así que cuotas, cuota y total se
+	// leen del plan del convenio (la misma lectura que se espera antes de decidir).
+	const sMostrada: Solicitud =
+		s.tipo === "convenio" && planConvenio.data
+			? {
+					...s,
+					convenio: {
+						...s.convenio,
+						monto_total_convenio: planConvenio.data.monto_total_convenio,
+						numero_meses: planConvenio.data.numero_meses,
+						cuota_mensual: planConvenio.data.cuota_mensual,
+					},
+				}
+			: s;
+	const contraPendiente =
+		s.tipo === "convenio"
+			? (contrapropuestas.data?.find((c) => c.estado === "pendiente") ?? null)
+			: null;
+	// Si la contrapropuesta se resuelve (el asesor la aceptó o descartó) con el
+	// Espacio abierto, el plan y la lista se vuelven a leer: la aceptada reescribe
+	// cuotas, cuota y primer pago, y no se puede aprobar sobre datos viejos.
+	// Los controles siguen bloqueados hasta que ambas lecturas terminen.
+	const hayContra = !!contraPendiente;
+	const [habiaContra, setHabiaContra] = React.useState(false);
+	const [refrescandoPlan, setRefrescandoPlan] = React.useState(false);
+	const [falloRefresco, setFalloRefresco] = React.useState(false);
+	if (hayContra !== habiaContra) {
+		// Al ajustar el estado durante el render no hay un cuadro intermedio con
+		// los botones habilitados y el plan anterior.
+		setHabiaContra(hayContra);
+		if (habiaContra) setRefrescandoPlan(true);
+	}
+	React.useEffect(() => {
+		if (!refrescandoPlan) return;
+		let vigente = true;
+		// Con `throwOnError`, un fallo de cualquiera de las dos lecturas no libera
+		// el bloqueo: se pide reintentar en lugar de mostrar el plan anterior.
+		Promise.all([
+			queryClient.invalidateQueries(
+				{ queryKey: orpc.getPlanConvenio.key() },
+				{ throwOnError: true },
+			),
+			queryClient.invalidateQueries(
+				{ queryKey: orpc.getConveniosListado.key() },
+				{ throwOnError: true },
+			),
+		]).then(
+			() => {
+				if (!vigente) return;
+				setFalloRefresco(false);
+				setRefrescandoPlan(false);
+			},
+			() => {
+				if (!vigente) return;
+				setFalloRefresco(true);
+				setRefrescandoPlan(false);
+			},
+		);
+		return () => {
+			vigente = false;
+		};
+	}, [refrescandoPlan, queryClient]);
+	const [contraAbierta, setContraAbierta] = React.useState(false);
+
 	const [notas, setNotas] = React.useState("");
 	const [decision, setDecision] = React.useState<"aprobar" | "rechazar" | null>(
 		null,
@@ -1057,6 +1136,76 @@ function ContenidoEspacio({
 				/>
 			);
 		}
+		// Sin saber si hay una contrapropuesta (cargando o con error) no se decide:
+		// el servidor rechazaría la decisión si la hubiera.
+		if (
+			!bloqueo &&
+			(contrapropuestas.isPending || contrapropuestas.isFetching)
+		) {
+			bloqueo = "Verificando si hay una contrapropuesta del convenio…";
+		} else if (!bloqueo && contrapropuestas.isError) {
+			bloqueo =
+				"No se pudo verificar si hay una contrapropuesta. Cierre y vuelva a abrir la solicitud.";
+		} else if (!bloqueo && planConvenio.isError) {
+			// Sin el plan no se ve el primer pago: no se decide ni se contrapropone.
+			bloqueo = "No se pudo cargar el plan del convenio";
+			aviso = (
+				<div className="flex flex-col gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+					<p>
+						No se pudo leer el plan del convenio (cuotas y primer pago). No se
+						puede decidir sin verlo.
+					</p>
+					<div>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							loading={planConvenio.isFetching}
+							onClick={() => void planConvenio.refetch()}
+						>
+							Reintentar
+						</Button>
+					</div>
+				</div>
+			);
+		} else if (!bloqueo && falloRefresco) {
+			bloqueo = "No se pudo actualizar el plan del convenio";
+			aviso = (
+				<div className="flex flex-col gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+					<p>
+						La contrapropuesta se resolvió y no se pudo leer el plan nuevo. No
+						se puede decidir sobre el plan anterior.
+					</p>
+					<div>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							onClick={() => {
+								setFalloRefresco(false);
+								setRefrescandoPlan(true);
+							}}
+						>
+							Reintentar
+						</Button>
+					</div>
+				</div>
+			);
+		} else if (!bloqueo && refrescandoPlan) {
+			bloqueo = "Actualizando el plan del convenio…";
+		} else if (contraPendiente && !bloqueo) {
+			bloqueo = "Hay una contrapropuesta esperando la respuesta del asesor";
+			aviso = (
+				<ContrapropuestaPendienteAviso
+					contrapropuesta={{
+						numeroMeses: contraPendiente.numeroMeses,
+						cuotaMensual: contraPendiente.cuotaMensual,
+						primerPago: contraPendiente.primerPago,
+						nota: contraPendiente.nota,
+					}}
+				/>
+			);
+		}
 	} else if (s.tipo === "recuperacion" && s.recuperacion.esMia) {
 		// Cuatro ojos: la propia no se decide (el servidor lo exige igual).
 		puedeDecidir = false;
@@ -1083,6 +1232,9 @@ function ContenidoEspacio({
 			? {
 					onAprobar: () => setDecision("aprobar"),
 					onRechazar: () => setDecision("rechazar"),
+					...(s.tipo === "convenio"
+						? { onContraproponer: () => setContraAbierta(true) }
+						: {}),
 				}
 			: {};
 
@@ -1106,13 +1258,14 @@ function ContenidoEspacio({
 				}
 				panel={
 					<PanelSolicitudVista
-						solicitud={s}
+						solicitud={sMostrada}
 						notas={notas}
 						onNotas={setNotas}
 						{...handlers}
 						bloqueo={bloqueo}
 						aviso={aviso}
 						primerPago={primerPago}
+						cargandoPlan={planConvenio.isPending}
 						resolucion={resolucion}
 						onVolver={onCerrar}
 						onSiguiente={hayMas ? () => onIr(posicion + 1) : undefined}
@@ -1120,6 +1273,19 @@ function ContenidoEspacio({
 					/>
 				}
 			/>
+
+			{s.tipo === "convenio" ? (
+				<ContrapropuestaDialog
+					abierto={contraAbierta}
+					convenio={
+						sMostrada.tipo === "convenio" ? sMostrada.convenio : s.convenio
+					}
+					primerPagoActual={planConvenio.data?.primer_pago ?? null}
+					fechaConvenio={planConvenio.data?.fecha_convenio ?? null}
+					onCerrar={() => setContraAbierta(false)}
+					onEnviada={() => undefined}
+				/>
+			) : null}
 
 			{/* Las decisiones: los modales de siempre, con su lógica intacta. */}
 			{decision && s.tipo === "convenio" && userId ? (

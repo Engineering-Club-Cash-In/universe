@@ -47,6 +47,24 @@ export function etiquetaNivel(nivel: NivelAsesor | null): string {
 	return nivel ? `Asesor ${NIVEL_ASESOR_LABEL[nivel]}` : "Sin pool asignado";
 }
 
+/**
+ * Asesores que cuentan en el equipo: activos y con buckets en el pool. Un asesor
+ * con ausencia indefinida se queda aunque no tenga buckets (cartera le apaga el
+ * pool al repartirle la cartera); sin su tarjeta no habría cómo reactivarlo.
+ */
+export function filtrarEquipoActivo<
+	A extends {
+		asesor_id: number;
+		activo?: boolean | null;
+		buckets: readonly number[];
+	},
+>(asesores: readonly A[], ausentes: ReadonlySet<number>): A[] {
+	return asesores.filter(
+		(a) =>
+			a.activo !== false && (a.buckets.length > 0 || ausentes.has(a.asesor_id)),
+	);
+}
+
 /* ── Estado ────────────────────────────────────────────────────────────── */
 
 export type EstadoAsesor = "al_dia" | "requiere_atencion" | "ausente";
@@ -223,7 +241,19 @@ export function fechaCorta(fecha: string): string {
 export const MOTIVO_COBERTURA_LABEL: Record<string, string> = {
 	vacaciones: "Vacaciones",
 	permiso: "Permiso",
+	incidente: "Incidente",
 };
+
+/** Línea de la tarjeta de un asesor con ausencia indefinida (M5): sin fecha de regreso. */
+export function textoAusenciaIndefinida(ausencia: {
+	motivo: string;
+	reactivacionIniciadaAt?: unknown;
+}): string {
+	const motivo = MOTIVO_COBERTURA_LABEL[ausencia.motivo] ?? ausencia.motivo;
+	return ausencia.reactivacionIniciadaAt
+		? `Ausente · ${motivo} · reactivación a medias`
+		: `Ausente · ${motivo} · cartera repartida, sin fecha de regreso`;
+}
 
 /**
  * «Ausente · Vacaciones · vuelve el 30 sep» (línea de la tarjeta ausente).

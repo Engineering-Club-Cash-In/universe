@@ -79,7 +79,12 @@ export function filtrarPorGrupo(
 		case "junior":
 		case "senior":
 		case "especial":
-			return filas.filter((f) => f.nivel === grupo);
+			// Un asesor ausente sin pool (su nivel no se puede calcular) se ve en
+			// todas las vistas de nivel: es donde queda su botón «Reactivar».
+			return filas.filter(
+				(f) =>
+					f.nivel === grupo || (f.nivel === null && f.estado === "ausente"),
+			);
 		case "atencion":
 			return filas.filter((f) => f.estado === "requiere_atencion");
 		default:
@@ -99,6 +104,8 @@ export function resumenEquipo(
 	];
 	const especiales = cuenta("especial");
 	if (especiales > 0) partes.push(`${especiales} Especial`);
+	const sinPool = niveles.filter((x) => x === null).length;
+	if (sinPool > 0) partes.push(`${sinPool} sin pool`);
 	return partes.join(" · ");
 }
 

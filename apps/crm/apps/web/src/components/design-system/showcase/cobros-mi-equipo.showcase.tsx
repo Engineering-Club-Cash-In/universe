@@ -29,7 +29,7 @@ export const meta: ShowcaseMeta = {
 	figma:
 		"CRM Ventas › Supervisor › Equipo · Supervisor (2028:13), vacío «Necesitan atención» (2044:12), Marcar ausente (3359:4251 / 3367:4244); Trasladar cartera con Reasignar (3631:5567), Redistribución (3360:4254) y éxito (3629:5636); Carga y asignación con Reportería (3550:5760)",
 	description:
-		"Mi equipo (components/cobros/equipo) con datos de ejemplo: encabezado con «Trasladar cartera» y «Marcar ausente» (primarios, en las tres pestañas), pestaña Asesores (tarjetas CardAsesor con nivel, estado, créditos por bucket, gestiones cumplidas, contactabilidad y recuperación «—» hasta M1; ausente con «Reactivar»), pestaña Día (Apertura, Cierre y Gestiones con el lenguaje de Reportería: KPIs, filas por bucket y por asesor que se despliegan, «Entradas de la noche») y pestaña Carga y asignación (KPIs del DS, carga por bucket que se despliega hacia sus asesores con Trasladar, Marcar ausente y Editar capacidad; historial con selector segmentado Reasignaciones · Traslados · Coberturas). Además: estado vacío de «Necesitan atención», cargando, error y los modales: «Trasladar cartera» en tres pasos (origen y reparto, revisión del reparto, resultado; real sobre una caché de ejemplo y con vistas previas de ejemplo), «Editar capacidad» y «Marcar ausente» (formulario, sin asesor elegido y revisión).",
+		"Mi equipo (components/cobros/equipo) con datos de ejemplo: encabezado con «Trasladar cartera» y «Marcar ausente» (primarios, en las tres pestañas), pestaña Asesores (tarjetas CardAsesor con nivel, estado, créditos por bucket, gestiones cumplidas, contactabilidad y recuperación «—» hasta M1; ausente con «Reactivar»), pestaña Día (Apertura, Cierre y Gestiones con el lenguaje de Reportería: KPIs, filas por bucket y por asesor que se despliegan, «Entradas de la noche») y pestaña Carga y asignación (KPIs del DS, carga por bucket que se despliega hacia sus asesores con Trasladar, Marcar ausente y Editar capacidad; historial con selector segmentado Reasignaciones · Traslados · Coberturas). Además: estado vacío de «Necesitan atención», cargando, error y los modales: «Trasladar cartera» en tres pasos (origen y reparto, revisión del reparto, resultado; real sobre una caché de ejemplo y con vistas previas de ejemplo), «Editar capacidad» y «Marcar ausente» (formulario, sin asesor elegido, revisión e incidente con reparto al equipo).",
 };
 
 /* ── Datos de ejemplo ─────────────────────────────────────────────────────── */
@@ -217,6 +217,11 @@ const BASE_AUSENTE: MarcarAusenteVistaProps = {
 	nombreSuplente: "Carlos Ramírez",
 	motivo: "vacaciones",
 	onMotivo: nada,
+	modo: "suplente",
+	onModo: nada,
+	reparto: null,
+	previewVencida: false,
+	onRecalcular: nada,
 	desde: "2026-10-12",
 	hasta: "2026-10-23",
 	onDesde: nada,
@@ -332,6 +337,52 @@ export default function CobrosMiEquipoShowcase() {
 					</PanelModal>
 					<PanelModal>
 						<MarcarAusenteVista {...BASE_AUSENTE} paso="revision" />
+					</PanelModal>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Modal «Marcar ausente» · Incidente con reparto al equipo (M5, Figma 3360:4254)">
+				<div className="flex flex-wrap items-start gap-6 py-4">
+					<PanelModal>
+						<MarcarAusenteVista
+							{...BASE_AUSENTE}
+							motivo="incidente"
+							modo="equipo"
+						/>
+					</PanelModal>
+					<PanelModal>
+						<MarcarAusenteVista
+							{...BASE_AUSENTE}
+							paso="revision"
+							motivo="incidente"
+							modo="equipo"
+							reparto={{
+								cuentas: 34,
+								conservadas: 2,
+								bloqueadas: 0,
+								venceEn: "2099-01-01T00:00:00.000Z",
+								receptores: [
+									{
+										asesorId: 1,
+										nombre: "Carlos Ramírez",
+										antes: 28,
+										despues: 40,
+									},
+									{
+										asesorId: 2,
+										nombre: "Lucía Méndez",
+										antes: 25,
+										despues: 35,
+									},
+									{
+										asesorId: 4,
+										nombre: "Pedro Castillo",
+										antes: 30,
+										despues: 42,
+									},
+								],
+							}}
+						/>
 					</PanelModal>
 				</div>
 			</ShowcaseGroup>

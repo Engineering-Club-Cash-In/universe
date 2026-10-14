@@ -279,7 +279,18 @@ export function DetalleAsesorVista({
 									</EnlaceDestino>
 								</Button>
 							)}
-							{onMarcarAusente ? (
+							{asesor.estado === "ausente" ? (
+								// Ya está ausente: marcarlo de nuevo se rechaza. Se reactiva
+								// desde su tarjeta en Mi equipo.
+								<Button
+									size="sm"
+									disabled
+									title="Ya está ausente: reactívelo desde Mi equipo"
+								>
+									<UserX aria-hidden />
+									Ausente
+								</Button>
+							) : onMarcarAusente ? (
 								<Button size="sm" onClick={onMarcarAusente}>
 									<UserX aria-hidden />
 									Marcar ausente

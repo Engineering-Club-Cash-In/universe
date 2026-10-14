@@ -19,6 +19,7 @@ import {
 	type NivelAsesor,
 	rangosContactabilidad,
 	textoAusencia,
+	textoAusenciaIndefinida,
 } from "@/components/cobros/equipo/estado-asesor";
 import {
 	resultadoRecuperacion,
@@ -207,6 +208,14 @@ export function DetalleAsesor({
 		}),
 		enabled: habilitado,
 	});
+	// M5: ausencia indefinida (cartera repartida al equipo), la misma fuente que
+	// las tarjetas de Mi equipo.
+	const ausenciasQuery = useQuery({
+		...orpcAparte.listarAusencias.queryOptions({
+			input: { soloVigentes: true },
+		}),
+		enabled: habilitado,
+	});
 	// El tipo de getHistorialAgendasResumen llega truncado (TS7056).
 	const orpcSinTipo = orpc as unknown as {
 		getHistorialAgendasResumen: typeof orpc.getCobrosDashboardStats;
@@ -237,6 +246,9 @@ export function DetalleAsesor({
 
 	const coberturas = (coberturasQuery.data ?? []) as unknown as Cobertura[];
 	const cobertura = coberturaVigente(coberturas, userId, hoy);
+	const indefinida = (ausenciasQuery.data ?? []).find(
+		(x) => x.asesorId === asesorId,
+	);
 	const agendaItems = (agendaQuery.data?.items ??
 		[]) as unknown as AgendaItem[];
 	const agendaFila = userId
@@ -252,10 +264,11 @@ export function DetalleAsesor({
 	const listoEstado =
 		!agendaQuery.isPending &&
 		!coberturasQuery.isPending &&
+		!ausenciasQuery.isPending &&
 		(!userId || !contactabilidadQuery.isPending);
 	const estado = listoEstado
 		? estadoAsesor({
-				ausente: !!cobertura,
+				ausente: !!cobertura || !!indefinida,
 				cumplimiento:
 					agendaFila && agendaFila.planificados > 0
 						? agendaFila.porcentaje
@@ -442,22 +455,36 @@ export function DetalleAsesor({
 						"Sin el catálogo no se puede saber quién es este asesor. Intente de nuevo en unos segundos.",
 					onReintentar: () => void asesoresQuery.refetch(),
 				}
-			: !asesor
+			: ausenciasQuery.isError
 				? {
+						// Sin las ausencias un asesor con el pool pausado se vería activo y
+						// se ofrecería marcarlo ausente de nuevo.
 						tipo: "error",
-						titulo: "Asesor no encontrado",
-						descripcion: `No hay un asesor con el número ${asesorId} en el pool de cartera. Elija otro asesor o vuelva a Mi equipo.`,
+						titulo: "No se pudieron cargar las ausencias",
+						descripcion:
+							"Sin ellas no se puede saber si este asesor está ausente. Intente de nuevo en unos segundos.",
+						onReintentar: () => void ausenciasQuery.refetch(),
 					}
-				: {
-						tipo: "listo",
-						asesor: {
-							asesorId,
-							nombre: asesor.nombre,
-							nivel: asesor.nivel,
-							estado,
-							ausencia: cobertura ? textoAusencia(cobertura) : null,
-						},
-					};
+				: !asesor
+					? {
+							tipo: "error",
+							titulo: "Asesor no encontrado",
+							descripcion: `No hay un asesor con el número ${asesorId} en el pool de cartera. Elija otro asesor o vuelva a Mi equipo.`,
+						}
+					: {
+							tipo: "listo",
+							asesor: {
+								asesorId,
+								nombre: asesor.nombre,
+								nivel: asesor.nivel,
+								estado,
+								ausencia: indefinida
+									? textoAusenciaIndefinida(indefinida)
+									: cobertura
+										? textoAusencia(cobertura)
+										: null,
+							},
+						};
 
 	const avisos: string[] = [];
 	if (asesor && !userId) {

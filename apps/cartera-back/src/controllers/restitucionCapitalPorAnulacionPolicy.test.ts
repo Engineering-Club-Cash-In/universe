@@ -46,7 +46,7 @@ const plan9507 = (cambios: Partial<Parameters<typeof planRestitucionCapital>[0]>
     credito: CREDITO_9507,
     filasPci: [PCI(86, "1005.44")],
     roster: ROSTER_9507,
-    abonosCapital: [],
+    cuotaCerrada: true,
     ...cambios,
   });
 
@@ -108,12 +108,11 @@ describe("planRestitucionCapital: reponer", () => {
         },
       ],
       borrarPci: true,
-      borrarAbonosCapital: false,
     });
   });
 
   it("rama A (la cuota nunca cerró, sin PCI): solo se repone el capital", () => {
-    const plan = plan9507({ filasPci: [] });
+    const plan = plan9507({ filasPci: [], cuotaCerrada: false });
     expect(plan).toMatchObject({ tipo: "REPONER", credito: { capital: "87624.70" }, inversionistas: [] });
   });
 
@@ -130,7 +129,7 @@ describe("planRestitucionCapital: reponer", () => {
       credito: { ...CREDITO_9507, capital: "2000.00" },
       filasPci: [PCI(2, "333.33"), PCI(1, "333.33"), PCI(3, "333.33")],
       roster,
-      abonosCapital: [],
+      cuotaCerrada: true,
     });
     if (plan.tipo !== "REPONER") throw new Error(plan.tipo);
     expect(plan.credito.capital).toBe("3000.00");
@@ -141,12 +140,6 @@ describe("planRestitucionCapital: reponer", () => {
     ]);
   });
 
-  it("capital_validated (abono directo): además borra sus abonos_capital", () => {
-    expect(plan9507({ pago: { ...PAGO_9507, validationStatus: "capital_validated" } })).toMatchObject({
-      tipo: "REPONER",
-      borrarAbonosCapital: true,
-    });
-  });
 
   it("INCOBRABLE con pago de recuperación: repone capital sin revivir interés ni IVA", () => {
     const plan = plan9507({ credito: { ...CREDITO_9507, statusCredit: "INCOBRABLE" } });
@@ -189,16 +182,15 @@ describe("planRestitucionCapital: rechazos (409, no se anula nada)", () => {
     });
   });
 
-  it("(d) abonos_capital del pago liquidado o ya en un espejo: ABONO_CAPITAL_LIQUIDADO", () => {
-    const pago = { ...PAGO_9507, validationStatus: "capital_validated" };
-    expect(plan9507({ pago, abonosCapital: [{ liquidado: true, pago_espejo_id: null }] })).toEqual({
+  it("abono directo a capital (capital_validated): ABONO_DIRECTO_NO_SOPORTADO por ahora", () => {
+    expect(plan9507({ pago: { ...PAGO_9507, validationStatus: "capital_validated" } })).toEqual({
       tipo: "RECHAZAR",
-      codigo: "ABONO_CAPITAL_LIQUIDADO",
+      codigo: "ABONO_DIRECTO_NO_SOPORTADO",
     });
-    expect(plan9507({ pago, abonosCapital: [{ liquidado: false, pago_espejo_id: 99 }] })).toEqual({
-      tipo: "RECHAZAR",
-      codigo: "ABONO_CAPITAL_LIQUIDADO",
-    });
+  });
+
+  it("validated en una cuota CERRADA sin ninguna PCI (histórico): CUOTA_CERRADA_SIN_REPARTO", () => {
+    expect(plan9507({ filasPci: [] })).toEqual({ tipo: "RECHAZAR", codigo: "CUOTA_CERRADA_SIN_REPARTO" });
   });
 
   it("(e) PCI con capital de un inversionista que ya no está en el crédito: INVERSIONISTA_YA_NO_ESTA", () => {
@@ -229,6 +221,12 @@ describe("precheckAnulacionConCapital (antes de tocar la fila)", () => {
 
   it("(a) CANCELADO con capital: CREDITO_NO_REVERSIBLE", () => {
     expect(precheckAnulacionConCapital({ ...base, statusCredit: "CANCELADO" })).toBe("CREDITO_NO_REVERSIBLE");
+  });
+
+  it("capital_validated: ABONO_DIRECTO_NO_SOPORTADO antes de tocar la fila", () => {
+    expect(precheckAnulacionConCapital({ ...base, validationStatus: "capital_validated" })).toBe(
+      "ABONO_DIRECTO_NO_SOPORTADO",
+    );
   });
 
   it("(b) INCOBRABLE con fila SIFCO_SYNC: FILA_ESTRUCTURAL_INCOBRABLE", () => {

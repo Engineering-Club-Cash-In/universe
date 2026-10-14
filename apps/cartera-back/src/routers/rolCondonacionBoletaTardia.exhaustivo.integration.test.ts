@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn } from "bun:test";
 import jwt from "jsonwebtoken";
 import {
   cerrarEsquemaBoletaTardia, integrationTest as it, levantarEsquemaBoletaTardia, uuidIntento, type Entorno,
@@ -144,9 +144,15 @@ describe("router real + platform_users real", () => {
     expect(await conteos()).toBe(antes);
   });
 
-  it("401/403 NO toman el candado del crédito ni escriben: con el advisory lock del crédito ocupado responden al instante; el permitido SÍ espera (control positivo)", async () => {
+  it("401/403 NO toman el candado del crédito ni escriben: con el advisory lock del crédito ocupado responden al instante; la foto no verificada (503) tampoco; el permitido SÍ espera (control positivo)", async () => {
     const CRED = 5;
     const antes = await conteos();
+    // La foto se verifica en R2 ANTES del candado. Sin R2 en local, se reemplaza el `send` del MISMO cliente que usa
+    // la verificación real (no `mock.module`): rechazando → 503; aprobando → la petición sigue hasta el lock.
+    const { s3 } = await import("../utils/functions/uploadsFiles");
+    const r2 = spyOn(s3, "send");
+    const r2Rechaza = () => r2.mockImplementation((async () => { throw Object.assign(new Error("R2 caído"), { name: "Error" }); }) as never);
+    const r2Aprueba = () => r2.mockImplementation((async () => ({ ContentLength: 1234, ContentType: "image/jpeg", LastModified: new Date() })) as never);
     let pendiente: Promise<{ status: number; texto: string }> | undefined;
     let soltar!: () => void;
     const retenido = new Promise<void>((r) => (soltar = r));
@@ -169,7 +175,13 @@ describe("router real + platform_users real", () => {
         const { r } = await tiempo(token);
         expect([nombre, r === "colgado" ? "colgado" : r.status]).toEqual([nombre, esperado]);
       }
-      // control positivo: el permitido con cuerpo completo llega a pedir el lock y se queda esperando
+      // foto no verificada (R2 caído): 503 al instante con el lock ocupado → no lo pidió
+      r2Rechaza();
+      const foto = await tiempo(tokenDe("admin", { role: "ADMIN" }));
+      expect(["foto no verificada", foto.r === "colgado" ? "colgado" : foto.r.status]).toEqual(["foto no verificada", 503]);
+      if (foto.r !== "colgado") expect(foto.r.texto).toContain('"code":"foto_no_verificada"');
+      // control positivo: con la foto aprobada, el permitido con cuerpo completo llega a pedir el lock y se queda esperando
+      r2Aprueba();
       pendiente = llamar("/newPayment", CUERPO_COMPLETO(CRED), tokenDe("admin", { role: "ADMIN" }));
       const r = await Promise.race([pendiente, sleep(1200).then(() => "esperando" as const)]);
       expect(r).toBe("esperando");
@@ -180,6 +192,8 @@ describe("router real + platform_users real", () => {
     soltar();
     await dueno;
     await pendiente; // el permitido termina (con lo que sea que diga el esquema mínimo); no importa el resultado
+    expect(r2).toHaveBeenCalled();
+    r2.mockRestore();
   }, 30_000);
 
   it("20 peticiones paralelas con el mismo token revocado en medio: antes 400, después 401, nunca un 'pasó' tardío incoherente con la base", async () => {

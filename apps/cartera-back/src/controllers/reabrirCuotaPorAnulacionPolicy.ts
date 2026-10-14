@@ -1,6 +1,7 @@
 import Big from "big.js";
 import {
   calcularCoberturaCuota,
+  shouldIncobrableInstallmentBePaid,
   sumarAplicadoACuota,
   type PagoCoberturaCuota,
   type RubrosCuotaRow,
@@ -16,24 +17,32 @@ type BigInput = number | string | Big;
  * ¿Anular (`falsePayment`) un pago obliga a REABRIR la cuota a la que aportó?
  *
  * `insertPayment` estampa en TODAS las filas vivas de la cuota dos cosas: el
- * `pagado = true` (cuando el pago la completa) y los `*_restante` ya descontados.
+ * `pagado = true` (cuando el pago la deja sin restantes, ver
+ * `shouldMarkInstallmentPaymentPaid`) y los `*_restante` ya descontados.
  * `falsePayment` solo invalida la fila del pago, así que si la cuota tenía un
  * parcial previo, esa hermana se quedaba con `pagado = true` y restantes en 0:
  * el cron la veía cubierta (la mora se dejaba de cobrar) y el pago siguiente se
- * saltaba la cuota. `reversePayment` ya lo resuelve con
- * `buildInstallmentRemainderReplication`; esta regla reusa esa pieza y el mismo
- * criterio de cobertura de `insertPayment` (`calcularCoberturaCuota`, con
- * pendientes: `insertPayment` marca `pagado` aun con el cierre pendiente).
+ * saltaba la cuota. `reversePayment` ya lo resuelve; esta regla reusa su
+ * réplica de restantes (reversePayment.ts ~610-646) y su recálculo de `pagado`
+ * (~926-1008). Para saber si las hermanas cubren la cuota usa
+ * `calcularCoberturaCuota` con pendientes, el mismo criterio de suma por rubros
+ * de `insertPayment` y de la anti-sobreaplicación.
  *
  * No hace nada cuando:
  *  - la fila anulada no cuelga de una cuota o no le aportó nada (solo mora /
  *    otros / convenio: cuelgan de la primera cuota pendiente sin pagarla);
  *  - las hermanas vivas cubren la cuota solas (no se reabre lo que ya estaba
- *    pagado sin este pago);
- *  - el crédito está cerrado (CANCELADO / PENDIENTE_CANCELACION).
+ *    pagado sin este pago).
  *
- * INCOBRABLE: se reponen restantes y filas, pero `cuotas_credito.pagado` no se
- * toca (la cuota de un castigado se cierra por capital, como en la reversa).
+ * Si la fila aportó y las hermanas no cubren, los restantes SIEMPRE se reponen
+ * (como en la reversa: no dependen del estado del crédito ni de `credito.cuota`).
+ * El estado decide solo el `pagado`:
+ *  - `cuota <= 0`: no hay contra qué medir, no se reabre.
+ *  - CANCELADO: no se reabre; es terminal (`desactivarNexaPorCancelacion`, no se
+ *    reactiva) y el cron lo excluye. PENDIENTE_CANCELACION SÍ se reabre: `ACTIVAR`
+ *    lo devuelve a ACTIVO sin tocar cuotas ni pagos.
+ *  - INCOBRABLE: como `reversePayment` (~967-1005), filas y cuota quedan con el
+ *    mismo valor, el de `shouldIncobrableInstallmentBePaid` (por capital).
  */
 export type RestantesFila = {
   capital_restante?: BigInput | null;
@@ -62,8 +71,6 @@ const SIN_CAMBIOS: PlanReaperturaCuota = {
   reabrirCuota: false,
 };
 
-const ESTADOS_CERRADOS = ["CANCELADO", "PENDIENTE_CANCELACION"];
-
 const masAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
   new Big(restante ?? 0).plus(abono ?? 0);
 
@@ -71,30 +78,33 @@ export function planReaperturaCuotaPorAnulacion({
   creditoId,
   montoCuota,
   statusCredit,
+  capital,
   filaAnulada,
   hermanas,
 }: {
   creditoId: number;
   montoCuota: BigInput | null | undefined;
   statusCredit?: string | null;
+  /** `creditos.capital`: solo lo usa INCOBRABLE para decidir si la cuota está pagada. */
+  capital?: BigInput | null;
   filaAnulada: FilaAnulada;
   /** Filas de la cuota que NO son la anulada (las anuladas las ignora la cobertura). */
   hermanas: PagoCoberturaCuota[];
 }): PlanReaperturaCuota {
   const cuotaId = filaAnulada.cuota_id;
   if (cuotaId === null || cuotaId === undefined) return SIN_CAMBIOS;
-  if (new Big(montoCuota ?? 0).lte(0)) return SIN_CAMBIOS;
-  if (statusCredit && ESTADOS_CERRADOS.includes(statusCredit)) return SIN_CAMBIOS;
 
   const aplicadoALaCuota = sumarAplicadoACuota([filaAnulada]);
   if (aplicadoALaCuota.lte(0)) return SIN_CAMBIOS;
 
-  const conPendientes = calcularCoberturaCuota({
-    montoCuota: montoCuota!,
-    pagos: hermanas,
-    incluirPendientes: true,
-  });
-  if (conPendientes.cuotaCompleta) return SIN_CAMBIOS;
+  const cuota = new Big(montoCuota ?? 0);
+  if (
+    cuota.gt(0) &&
+    calcularCoberturaCuota({ montoCuota: cuota, pagos: hermanas, incluirPendientes: true })
+      .cuotaCompleta
+  ) {
+    return SIN_CAMBIOS;
+  }
 
   const replica = buildInstallmentRemainderReplication({
     cuotaId,
@@ -111,14 +121,14 @@ export function planReaperturaCuotaPorAnulacion({
     filaAnulada: false,
   });
 
-  const sinPendientes = calcularCoberturaCuota({
-    montoCuota: montoCuota!,
-    pagos: hermanas,
+  // Solo el `pagado` depende de la cuota y del estado (ver el bloque de arriba).
+  const incobrablePagada = shouldIncobrableInstallmentBePaid({
+    statusCredit,
+    capital: capital === null || capital === undefined ? 0 : String(capital),
+    abonoCapital: 0,
   });
+  const reabrir =
+    cuota.gt(0) && statusCredit !== "CANCELADO" && incobrablePagada !== true;
 
-  return {
-    replica,
-    reabrirFilas: true,
-    reabrirCuota: statusCredit !== "INCOBRABLE" && !sinPendientes.cuotaCompleta,
-  };
+  return { replica, reabrirFilas: reabrir, reabrirCuota: reabrir };
 }

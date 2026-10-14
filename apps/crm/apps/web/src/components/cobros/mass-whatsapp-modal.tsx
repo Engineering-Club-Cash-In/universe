@@ -22,7 +22,10 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { PLANTILLAS_MENSAJES } from "@/lib/cobros/plantillas-mensajes";
+import {
+	PLANTILLAS_MENSAJES,
+	plantillaSoloConCuentaNexa,
+} from "@/lib/cobros/plantillas-mensajes";
 import { client } from "@/utils/orpc";
 import { WhatsappPreview } from "./whatsapp-preview";
 
@@ -396,7 +399,7 @@ export function MassWhatsappModal({
 													: "Todas"}
 											</li>
 										</ul>
-										{plantillaId === "cuenta_nexa_exclusiva" &&
+										{plantillaSoloConCuentaNexa(plantillaId) &&
 											!filtros.soloConCuentaNexa && (
 												<p className="mt-2 text-amber-700 text-xs dark:text-amber-400">
 													Esta plantilla solo se envía a créditos con cuenta Nexa

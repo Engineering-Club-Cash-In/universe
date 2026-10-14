@@ -519,20 +519,32 @@ export function interpolar(
 
 /**
  * Plantillas que solo aplican a créditos con cuenta Nexa: sin cuenta, el
- * mensaje saldría con "Banco Nexa / Cuenta Monetaria /" y el número en blanco.
+ * mensaje saldría con "Banco Nexa / Cuenta Monetaria /" y el número en blanco,
+ * o explicaría cómo transferir a una cuenta que el cliente no tiene (el video).
  * El masivo las descarta en el server (prepararCuentaNexaParaEnvio); el envío
  * individual las oculta con esta función.
  */
-const PLANTILLAS_SOLO_CON_CUENTA_NEXA = new Set(["cuenta_nexa_exclusiva"]);
+const PLANTILLAS_SOLO_CON_CUENTA_NEXA = new Set([
+	"cuenta_nexa_exclusiva",
+	"mensaje_video",
+]);
+
+/** true si el masivo descarta los créditos sin cuenta Nexa para esta plantilla. */
+export function plantillaSoloConCuentaNexa(
+	plantillaId: string | null | undefined,
+): boolean {
+	return PLANTILLAS_SOLO_CON_CUENTA_NEXA.has(plantillaId ?? "");
+}
 
 /**
  * true si la plantilla remite al cliente al teléfono del asesor
  * ({telefonoAsesor}) y NO lleva el aviso no-reply, que es lo único que
  * `prepararTelefonoAsesorParaEnvio` mira. El envío individual valida el
  * mensaje YA interpolado, donde {telefonoAsesor} ya se volvió "" y no hay forma
- * de saber que estaba; por eso se pregunta a la plantilla elegida. Hoy solo
- * aplica a "Nueva cuenta exclusiva Nexa": el resto lleva el aviso y ya queda
- * cubierto.
+ * de saber que estaba; por eso se pregunta a la plantilla elegida. Aplica a
+ * las plantillas sin aviso que mencionan al ejecutivo ("Nueva cuenta exclusiva
+ * Nexa" en el envío individual; el video es solo masivo y lo cubre el server):
+ * el resto lleva el aviso y ya queda cubierto.
  */
 export function plantillaRequiereTelefonoAsesor(
 	plantillaId: string | null | undefined,
@@ -546,12 +558,21 @@ export function plantillaRequiereTelefonoAsesor(
 	);
 }
 
+/**
+ * Plantillas que solo existen en el envío masivo: el video viaja en el header
+ * del template de WittyBots, que solo arma el masivo. Por el envío individual
+ * saldría el texto sin el video.
+ */
+const PLANTILLAS_SOLO_MASIVO = new Set(["mensaje_video"]);
+
 export function plantillasDisponibles(
 	cuentaNexa: string | null | undefined,
 ): PlantillaMensaje[] {
 	const tieneCuenta = Boolean(cuentaNexa?.trim());
 	return PLANTILLAS_MENSAJES.filter(
-		(p) => tieneCuenta || !PLANTILLAS_SOLO_CON_CUENTA_NEXA.has(p.id),
+		(p) =>
+			!PLANTILLAS_SOLO_MASIVO.has(p.id) &&
+			(tieneCuenta || !PLANTILLAS_SOLO_CON_CUENTA_NEXA.has(p.id)),
 	);
 }
 
@@ -693,6 +714,29 @@ Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia
 🔢 *Cuenta Monetaria : {cuentaNexa}*
 
 Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+	},
+	{
+		id: "mensaje_video",
+		nombre: "Video transferencia Nexa",
+		etapa: "al_dia",
+		asunto: "Cómo pagar a tu nueva cuenta exclusiva",
+		cuerpo: `{clienteNombre}, como parte de la nueva experiencia de pagos de tu crédito, te compartimos este video donde te mostramos paso a paso cómo realizar una transferencia a tu nueva cuenta exclusiva.
+
+Esta nueva modalidad te brinda una forma más simple de gestionar tus pagos.
+
+🎥 Mira el video y conoce lo fácil que es realizar tu transferencia.
+
+📞 Si tienes alguna consulta o necesitas apoyo para realizar tu primer pago, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+		// 4 bloques → template `mensaje4video` (video + 4 variables) (igual que el
+		// server). El template pone su saludo y la firma: sin aviso no-reply.
+		// Solo en el envío masivo (PLANTILLAS_SOLO_MASIVO).
+		cuerpoWhastapp: `{clienteNombre}, como parte de la nueva experiencia de pagos de tu crédito, te compartimos este video donde te mostramos paso a paso cómo realizar una transferencia a tu nueva cuenta exclusiva.
+
+Esta nueva modalidad te brinda una forma más simple de gestionar tus pagos.
+
+🎥 *Mira el video y conoce lo fácil que es realizar tu transferencia.*
+
+📞 Si tienes alguna consulta o necesitas apoyo para realizar tu primer pago, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

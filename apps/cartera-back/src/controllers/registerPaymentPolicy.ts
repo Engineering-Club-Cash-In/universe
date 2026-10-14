@@ -331,22 +331,41 @@ export const esPagoSaldoElegible = (pago: {
  * semilla `no_required` ANULADA más vieja sirve ÚNICAMENTE como fuente del saldo vigente (sus
  * `*_restante`); nunca como destino del cierre: el pago inserta una fila nueva viva.
  *
- * Ojo: sus restantes son el saldo INICIAL de la cuota solo si ningún pago anulado se los
- * descontó antes de que ella misma se anulara (en el 459 suman la cuota completa, 8,578.86).
+ * Una semilla anulada es plata que no existe: si recibió abonos antes de anularse, su saldo es
+ * cada restante MÁS su propio abono (misma regla que `masAbono` al anular). Sin abonos no cambia
+ * (crédito 459: suman la cuota completa, 8,578.86). Lo que no se puede reconstruir sin historial
+ * es un pago de OTRA fila, anulado después, que ya le hubiera estampado los restantes.
  */
-export const saldoDeRespaldoDeSemillaAnulada = <
-  T extends { validationStatus?: string | null; paymentFalse?: boolean | null },
->({
+type SemillaRespaldo = {
+  validationStatus?: string | null;
+  paymentFalse?: boolean | null;
+} & Partial<Record<
+  | "capital_restante" | "abono_capital" | "interes_restante" | "abono_interes"
+  | "iva_12_restante" | "abono_iva_12" | "seguro_restante" | "abono_seguro"
+  | "gps_restante" | "abono_gps" | "membresias" | "membresias_pago",
+  BigInput | null
+>>;
+
+const restanteMasAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
+  new Big(restante ?? 0).plus(abono ?? 0).toFixed(2);
+
+export const saldoDeRespaldoDeSemillaAnulada = <T extends SemillaRespaldo>({
   hayFilasVivas,
-  semillaAnulada,
+  semillaAnulada: s,
 }: {
   hayFilasVivas: boolean;
   semillaAnulada: T | undefined;
 }): T | undefined =>
-  !hayFilasVivas &&
-  semillaAnulada?.validationStatus === "no_required" &&
-  semillaAnulada.paymentFalse === true
-    ? semillaAnulada
+  !hayFilasVivas && s?.validationStatus === "no_required" && s.paymentFalse === true
+    ? {
+        ...s,
+        capital_restante: restanteMasAbono(s.capital_restante, s.abono_capital),
+        interes_restante: restanteMasAbono(s.interes_restante, s.abono_interes),
+        iva_12_restante: restanteMasAbono(s.iva_12_restante, s.abono_iva_12),
+        seguro_restante: restanteMasAbono(s.seguro_restante, s.abono_seguro),
+        gps_restante: restanteMasAbono(s.gps_restante, s.abono_gps),
+        membresias: restanteMasAbono(s.membresias, s.membresias_pago),
+      }
     : undefined;
 
 /**

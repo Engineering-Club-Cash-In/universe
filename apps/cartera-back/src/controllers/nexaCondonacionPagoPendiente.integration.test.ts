@@ -44,7 +44,7 @@ const setup = () => (ready ??= (async () => {
     ('PROCESO_AUTO','API_MANUAL','CONDONACION_INDIVIDUAL','CONDONACION_MASIVA')`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY,
     numero_credito_sifco text UNIQUE, "statusCredit" text, capital numeric(18,2), cuota numeric(18,2),
-    estado_devolucion text)`;
+    estado_devolucion text, porcentaje_interes numeric, seguro_10_cuotas numeric, gps numeric, membresias_pago numeric)`;
   await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY,
     credito_id integer NOT NULL REFERENCES cartera.creditos(credito_id),
     numero_cuota integer NOT NULL, fecha_vencimiento timestamp NOT NULL, pagado boolean NOT NULL DEFAULT false)`;
@@ -76,7 +76,7 @@ const setup = () => (ready ??= (async () => {
     fecha_pago timestamp, monto_aplicado numeric(18,2) NOT NULL DEFAULT 0, abono_capital numeric(18,2),
     abono_interes numeric(18,2), abono_iva_12 numeric(18,2), abono_seguro numeric(18,2),
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
-    createdat timestamp DEFAULT now())`;
+    registerby varchar(150) NOT NULL DEFAULT 'x', createdat timestamp DEFAULT now())`;
   await sql`CREATE TABLE cartera.ajuste_fecha_ideal_pago (id serial PRIMARY KEY, credito_id integer NOT NULL,
     monto_total numeric(18,2) NOT NULL, fecha_cobro timestamptz, pago_id integer)`;
   await sql`CREATE TABLE cartera.rubros_tipos (tipo_id serial PRIMARY KEY, obligatorio boolean NOT NULL DEFAULT false)`;

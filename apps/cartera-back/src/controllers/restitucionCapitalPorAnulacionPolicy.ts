@@ -27,7 +27,7 @@ type Num = string | number | null | undefined;
 
 const ESTADOS_QUE_MOVIERON_CAPITAL = ["validated", "capital_validated"];
 
-const mueveCapital = (validationStatus: string | null | undefined, abono_capital: Num) =>
+export const mueveCapital = (validationStatus: string | null | undefined, abono_capital: Num) =>
   ESTADOS_QUE_MOVIERON_CAPITAL.includes(validationStatus ?? "") && new Big(abono_capital ?? 0).gt(0);
 
 /** (a) y (b): se pueden decidir con el crédito y la fila candados, ANTES de marcar la fila. */

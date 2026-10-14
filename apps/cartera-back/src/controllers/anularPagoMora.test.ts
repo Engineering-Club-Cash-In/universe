@@ -31,6 +31,7 @@ import { MOTIVO_ANULACION_MORA_PREFIJO } from "../utils/motivoReversaMora";
 process.env.SUPABASE_DB_URL ??= "postgresql://nadie:nadie@127.0.0.1:1/ninguna";
 const { anularPagoYRestituirMora, DEPS_REALES } = await import("./anularPagoMora");
 const { reabrirCuotaPorAnulacion } = await import("./reabrirCuotaPorAnulacion");
+const { restituirCapitalPorAnulacion } = await import("./restituirCapitalPorAnulacion");
 
 const PAGO_ID = 301;
 const CREDITO_ID = 4242;
@@ -620,5 +621,60 @@ describe("crédito con la devolución a CUBE pendiente de autorización", () => 
 describe("DEPS_REALES de la anulación", () => {
   it("incluye la reapertura de la cuota", () => {
     expect(DEPS_REALES().reabrirCuota).toBe(reabrirCuotaPorAnulacion);
+  });
+});
+
+// ── ANULAR UN PAGO QUE YA BAJÓ CAPITAL ──────────────────────────────────────
+// La reposición del capital va INMEDIATAMENTE DESPUÉS de reabrir la cuota: la reapertura evalúa
+// el INCOBRABLE con capitalPrevio = capital + abono; si el capital ya estuviera repuesto, el abono
+// se sumaría dos veces. Y lo que se puede decidir con el crédito y la fila candados (estado del
+// crédito, fila estructural) se decide ANTES de marcar la fila.
+describe("anular un pago validado que bajó capital", () => {
+  const PAGO_VALIDADO = [
+    { mora: "0", paymentFalse: false, created_at: null, validationStatus: "validated", abono_capital: "100.00", registerBy: "asesor" },
+  ];
+  const credito = (statusCredit: string) => [{ credito_id: CREDITO_ID, statusCredit, capital: "900.00" }];
+  const orden: string[] = [];
+  const depsConCapital = () => ({
+    ...deps,
+    reabrirCuota: (async () => void orden.push("reabrirCuota")) as any,
+    restituirCapital: (async (_tx: any, args: any) => void orden.push(`restituirCapital:${args.pago.abono_capital}`)) as any,
+    revertirRubros: (async () => (orden.push("revertirRubros"), [])) as any,
+  });
+  const anularCon = () =>
+    anularPagoYRestituirMora(txFalso, { pago_id: PAGO_ID, credito_id: CREDITO_ID }, depsConCapital());
+
+  beforeEach(() => {
+    orden.length = 0;
+  });
+
+  it("orden: reabrirCuota → restituirCapital → revertirRubros", async () => {
+    prepararBase({ pago: PAGO_VALIDADO, credito: credito("ACTIVO") });
+    await anularCon();
+    expect(orden).toEqual(["reabrirCuota", "restituirCapital:100.00", "revertirRubros"]);
+  });
+
+  it("un pending no llama a la restitución (nunca bajó capital)", async () => {
+    prepararBase({ pago: [{ ...PAGO_VALIDADO[0], validationStatus: "pending" }], credito: credito("ACTIVO") });
+    await anularCon();
+    expect(orden).toEqual(["reabrirCuota", "revertirRubros"]);
+  });
+
+  it("crédito CANCELADO: 409 ANTES del UPDATE de la fila, sin ninguna escritura", async () => {
+    prepararBase({ pago: PAGO_VALIDADO, credito: credito("CANCELADO") });
+    await expect(anularCon()).rejects.toMatchObject({ status: 409, code: "CREDITO_NO_REVERSIBLE" });
+    expect(estado.llamadas.filter((l) => l.via !== "select" && l.via !== "select for update")).toEqual([]);
+    expect(orden).toEqual([]);
+    expect(estado.updateMoraArgs.length).toBe(0);
+  });
+
+  it("INCOBRABLE con fila estructural (SIFCO_SYNC): 409 sin escrituras", async () => {
+    prepararBase({ pago: [{ ...PAGO_VALIDADO[0], registerBy: "SIFCO_SYNC" }], credito: credito("INCOBRABLE") });
+    await expect(anularCon()).rejects.toMatchObject({ status: 409, code: "FILA_ESTRUCTURAL_INCOBRABLE" });
+    expect(estado.llamadas.filter((l) => l.via !== "select" && l.via !== "select for update")).toEqual([]);
+  });
+
+  it("DEPS_REALES incluye la restitución del capital", () => {
+    expect(DEPS_REALES().restituirCapital).toBe(restituirCapitalPorAnulacion);
   });
 });

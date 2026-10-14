@@ -7,9 +7,12 @@ const {
   formatearMontoQ,
   generarBoletasNexa,
   generarBoletasNexaBestEffort,
+  barrerBoletasNexaPendientes,
+  debeFallarBarridoBoletasNexa,
   ESTADOS_EVENTO_NEXA_APLICADO,
   htmlBoletaNexa,
   keyBoletaNexa,
+  reiniciarEsperaBoletasNexa,
 } = await import("./nexaBoletaImagen");
 type Deps = NonNullable<Parameters<typeof generarBoletasNexa>[1]>;
 type Datos = Awaited<ReturnType<Deps["datos"]>>;
@@ -80,6 +83,7 @@ function motor(
 
 afterEach(() => {
   delete process.env.NEXA_BOLETA_IMAGEN_ENABLED;
+  reiniciarEsperaBoletasNexa();
 });
 
 describe("htmlBoletaNexa", () => {
@@ -143,6 +147,18 @@ describe("generarBoletasNexa", () => {
     expect(m.subidas).toEqual([]);
     // Sin nada que dibujar ni se abre el browser.
     expect(m.eventos).toEqual([]);
+  });
+
+  test("no hace comprobante de un evento failed, manual_review o processing (la plata pudo volver)", async () => {
+    const m = motor([
+      { pago_id: 1, nexa: true, paymentFalse: false, evento: "failed" },
+      { pago_id: 2, nexa: true, paymentFalse: false, evento: "manual_review" },
+      { pago_id: 3, nexa: true, paymentFalse: false, evento: "processing" },
+      { pago_id: 4, nexa: true, paymentFalse: false, evento: "billed" },
+    ]);
+    expect(await barrerBoletasNexaPendientes(m.deps)).toEqual({ generadas: [4], omitidas: [], fallidas: [] });
+    expect(await generarBoletasNexa([1, 2, 3], m.deps)).toEqual({ generadas: [], omitidas: [1, 2, 3], fallidas: [] });
+    expect(m.boletas.map((b) => b.pago_id)).toEqual([4]);
   });
 
   test("un pago colgado se corta por tiempo y el siguiente sigue", async () => {
@@ -297,6 +313,89 @@ describe("generarBoletasNexa", () => {
     expect(errores.map((e) => JSON.parse(e))).toEqual([expect.objectContaining({
       event: "nexa.boleta_imagen.error", pago_id: 5, paso: "borrar_huerfana", key: m.subidas[0]!.key, error: "R2 caído",
     })]);
+  });
+});
+
+describe("barrerBoletasNexaPendientes", () => {
+  test("toma los pendientes del más viejo al más nuevo, hasta el límite", async () => {
+    const m = motor([3, 1, 2].map((pago_id) => ({ pago_id, nexa: true, paymentFalse: false })));
+    const r = await barrerBoletasNexaPendientes(m.deps, 2);
+    expect(r.generadas).toEqual([1, 2]);
+    expect(m.boletas.map((b) => b.pago_id)).toEqual([1, 2]);
+  });
+
+  test("un pago que siempre falla espera (1 h, 2 h…) y no le quita el lugar a los nuevos", async () => {
+    const m = motor([1, 2, 3].map((pago_id) => ({ pago_id, nexa: true, paymentFalse: false })));
+    const subir = m.deps.subir;
+    m.deps.subir = async (key, png) => {
+      if (pagoDelPng(png) === 1) throw new Error("R2 caído");
+      return subir(key, png);
+    };
+    const original = console.error;
+    console.error = () => undefined;
+    const hora = 60 * 60_000;
+    try {
+      const primero = await barrerBoletasNexaPendientes(m.deps, 1, 50, () => 0);
+      expect(primero).toEqual({ generadas: [], omitidas: [], fallidas: [1] });
+      expect(debeFallarBarridoBoletasNexa(primero)).toBe(true);
+      // En espera: el siguiente barrido toma el nuevo, no el que falla.
+      const segundo = await barrerBoletasNexaPendientes(m.deps, 1, 50, () => hora - 1);
+      expect(segundo.generadas).toEqual([2]);
+      expect(debeFallarBarridoBoletasNexa(segundo)).toBe(false);
+      // Pasada la hora se reintenta; falla otra vez y ahora espera 2 h.
+      expect((await barrerBoletasNexaPendientes(m.deps, 1, 50, () => hora)).fallidas).toEqual([1]);
+      expect((await barrerBoletasNexaPendientes(m.deps, 1, 50, () => 3 * hora - 1)).generadas).toEqual([3]);
+      expect((await barrerBoletasNexaPendientes(m.deps, 1, 50, () => 3 * hora)).fallidas).toEqual([1]);
+    } finally {
+      console.error = original;
+    }
+    expect(m.boletas.map((b) => b.pago_id)).toEqual([2, 3]);
+  });
+
+  test("un turno lento (cada paso dentro de su tope) no libera la cola: nunca dos Chromium a la vez", async () => {
+    const paso = 40; // cada paso tarda menos que el tope por paso (50 ms)
+    const espera = <T>(valor: T) => new Promise<T>((r) => setTimeout(() => r(valor), paso));
+    let abiertos = 0;
+    let maxAbiertos = 0;
+    const m = motor([1, 2, 3].map((pago_id) => ({ pago_id, nexa: true, paymentFalse: false })));
+    const datos = m.deps.datos;
+    m.deps.datos = async (id) => espera(await datos(id));
+    m.deps.abrirRender = async () => {
+      await espera(null);
+      abiertos += 1;
+      maxAbiertos = Math.max(maxAbiertos, abiertos);
+      return {
+        render: async (html) => espera(Buffer.from(html)),
+        cerrar: async () => { await espera(null); abiertos -= 1; },
+      };
+    };
+    const disparadas: number[][] = [];
+    const errores: string[] = [];
+    const original = console.error;
+    console.error = (msg: string) => { errores.push(msg); };
+    try {
+      const barrido = barrerBoletasNexaPendientes(m.deps, 3, 50);
+      // Llega un disparo mientras el barrido trabaja: tiene que esperar su turno.
+      generarBoletasNexaBestEffort([1], async (ids) => {
+        disparadas.push(ids);
+        const extra = await m.deps.abrirRender();
+        await extra.cerrar();
+      }, 50);
+      expect(await barrido).toEqual({ generadas: [1, 2, 3], omitidas: [], fallidas: [] });
+      await new Promise((r) => setTimeout(r, 200));
+    } finally {
+      console.error = original;
+    }
+    expect(errores).toEqual([]);
+    expect(disparadas).toEqual([[1]]);
+    expect(maxAbiertos).toBe(1);
+  });
+
+  test("con NEXA_BOLETA_IMAGEN_ENABLED=false no hace nada", async () => {
+    process.env.NEXA_BOLETA_IMAGEN_ENABLED = "false";
+    const m = motor([{ pago_id: 1, nexa: true, paymentFalse: false }]);
+    expect(await barrerBoletasNexaPendientes(m.deps)).toEqual({ generadas: [], omitidas: [], fallidas: [] });
+    expect(m.boletas).toEqual([]);
   });
 });
 

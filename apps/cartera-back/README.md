@@ -33,3 +33,15 @@ intentionally disabled, the API acknowledges the applied payment with additive
 starts, crashes, partial results, ambiguous responses, or local persistence
 failures leave `billing_running`/`billing_unknown` for manual reconciliation;
 they are never retried as fiscal mutations automatically.
+
+Each applied Nexa payment row gets a generated PNG "boleta" (transfer number,
+amount, date, credit, client) uploaded to `R2_BUCKET` under a random key
+(`boletas-nexa/<uuid>.png`, never the pago_id: the bucket is public) and
+registered in `cartera.boletas` with the `URL_PUBLIC_R2` prefix, like the
+boletas uploaded from the front. An uploaded image that does not end up
+registered is deleted from the bucket (best-effort, logged on failure). It is
+best-effort: generated after the payment is applied, never awaited, and a
+failure only logs `nexa.boleta_imagen.error`. The `generate_nexa_receipt_images`
+job (every 15 minutes) retries missing ones and backfills older payments.
+Enabled by default; `NEXA_BOLETA_IMAGEN_ENABLED=false` turns off both the
+trigger and the job.

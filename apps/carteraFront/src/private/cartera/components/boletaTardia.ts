@@ -110,7 +110,7 @@ export function esConflictoDeCondonacion(error: unknown): boolean {
 const TEXTO_RAZON: Record<RazonBoletaTardia | "mora_cambio", string> = {
   estado_no_aplica: "el estado del crédito no permite condonar",
   sin_mora: "el crédito ya no tiene mora por condonar",
-  fuera_de_ventana: "la boleta es posterior al vencimiento",
+  fuera_de_ventana: "la boleta es posterior al vencimiento o, si vencía en día inhábil, al siguiente día hábil",
   fuera_de_tope: "pasaron más de 5 días desde el vencimiento",
   no_alcanza_mora: "el pago no alcanza ni para la mora de cuotas anteriores",
   no_queda_al_dia: "con este pago el crédito no queda al día",

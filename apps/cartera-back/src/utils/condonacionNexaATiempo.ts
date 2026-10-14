@@ -423,6 +423,16 @@ export function disponibleParaCuotas(p: {
   return d.lt(0) ? new Big(0) : d;
 }
 
+/**
+ * Última fecha de boleta que cuenta como "a tiempo" para una cuota: su vencimiento
+ * si es día hábil; si no (sábado, domingo o feriado bancario), el siguiente día hábil.
+ */
+export function fechaLimiteBoletaTardia(fechaVencimiento: Date | string): string {
+  let ms = aMs(fechaVencimiento);
+  while (!esDiaHabilGT(aYmd(ms))) ms += DIA_MS;
+  return aYmd(ms);
+}
+
 const fechaBoletaValida = (fechaBoleta: string, hoy: Date | string): boolean =>
   validarFechaBoleta(fechaBoleta, ymdDeFechaCalendario(hoy)) === null;
 
@@ -441,8 +451,8 @@ export type ParamsBoletaTardia = ParamsDecisionCondonacion & {
 
 /**
  * Qué cuotas con mora califican para condonar por boleta tardía, y por qué no
- * ninguna. Una cuota califica si la boleta es de su vencimiento o anterior
- * Y lleva a lo sumo `TOPE_DIAS_BOLETA_TARDIA` días de mora. El control de
+ * ninguna. Una cuota califica si la boleta es de su vencimiento o anterior (si el
+ * vencimiento es día inhábil, hasta el siguiente día hábil) Y lleva a lo sumo `TOPE_DIAS_BOLETA_TARDIA` días de mora. El control de
  * período (anti boleta vieja) se mide contra la candidata más vieja.
  */
 export function cuotasQueCalificanBoletaTardia(p: Pick<
@@ -452,7 +462,7 @@ export function cuotasQueCalificanBoletaTardia(p: Pick<
   if (!fechaBoletaValida(p.fechaBoleta, p.hoy)) return { calificadas: [], razonSiNinguna: "boleta_invalida" };
   const boleta = aMs(p.fechaBoleta);
   const hoy = aMs(p.hoy);
-  const aTiempo = p.cuotasConMora.filter((c) => boleta <= aMs(c.fecha_vencimiento));
+  const aTiempo = p.cuotasConMora.filter((c) => boleta <= aMs(fechaLimiteBoletaTardia(c.fecha_vencimiento)));
   if (aTiempo.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_ventana" };
   // El tope acota también el MONTO: lo condonado sale de `diasAtraso`, así que debe coincidir con
   // `hoy − vencimiento`; si no (dato inconsistente del llamador) la cuota no califica.
@@ -475,7 +485,7 @@ export function cuotasQueCalificanBoletaTardia(p: Pick<
 
 /**
  * Boleta pagada a tiempo y registrada tarde: condona la mora que el retraso del
- * registro generó (cuotas con `fecha_boleta ≤ vencimiento` y a lo sumo
+ * registro generó (cuotas con `fecha_boleta ≤ fechaLimiteBoletaTardia(vencimiento)` y a lo sumo
  * `TOPE_DIAS_BOLETA_TARDIA` días de mora), solo si el pago deja el crédito al día.
  * Si para quedar al día hace falta un pago PENDIENTE vigente no condona
  * (`no_queda_al_dia`): a diferencia de Nexa, no se apoya en pendientes.

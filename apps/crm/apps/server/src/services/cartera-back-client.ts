@@ -1397,6 +1397,86 @@ export class CarteraBackClient {
 	// ========================================================================
 
 	/**
+	 * Lecturas GET simultáneas a la MISMA URL comparten una sola llamada.
+	 *
+	 * La caché de `request()` solo guarda respuestas ya terminadas: tres
+	 * pantallas que piden el mismo crédito a la vez (la ficha pide el detalle,
+	 * el historial de pagos…) llegaban las tres a cartera-back, cada una con
+	 * decenas de consultas, y se pisaban el pool de conexiones — 1.2 s solas,
+	 * 3-4 s juntas. Aquí la segunda y la tercera esperan a la primera.
+	 *
+	 * Opt-in (`unirLlamadasIguales`): hoy solo lo pide `getCredito`, el resto de
+	 * llamadas se comportan igual que antes. Además, solo para quien acepta
+	 * caché (`useCache`) y con la caché habilitada: las lecturas «en vivo»
+	 * (`useCache = false`, p. ej. registrar un pago) siguen yendo cada una por
+	 * su cuenta. No se une si el llamador trae su propia señal o plazo, ni si
+	 * cambió la caché mientras la llamada estaba en vuelo.
+	 */
+	private readonly lecturasEnVuelo = new Map<
+		string,
+		{ generacion: number; promesa: Promise<unknown> }
+	>();
+
+	private request<T>(
+		endpoint: string,
+		options: RequestInit = {},
+		useCache = false,
+		timeoutMs?: number | (() => number),
+		retryOnFailure?: boolean,
+		usarCircuitBreaker = true,
+		validarDentroDelBreaker?: (crudo: unknown) => void,
+		unirLlamadasIguales = false,
+	): Promise<T> {
+		const puedeUnirse =
+			unirLlamadasIguales &&
+			useCache &&
+			this.config.enableCache &&
+			(options.method || "GET").toUpperCase() === "GET" &&
+			!options.signal &&
+			timeoutMs === undefined &&
+			retryOnFailure === undefined &&
+			validarDentroDelBreaker === undefined;
+		if (!puedeUnirse) {
+			return this.ejecutarRequest<T>(
+				endpoint,
+				options,
+				useCache,
+				timeoutMs,
+				retryOnFailure,
+				usarCircuitBreaker,
+				validarDentroDelBreaker,
+			);
+		}
+
+		const clave = `${this.config.baseUrl}${endpoint}|breaker=${usarCircuitBreaker}`;
+		const generacion = this.cache.generacionActual();
+		const enVuelo = this.lecturasEnVuelo.get(clave);
+		if (enVuelo && enVuelo.generacion === generacion) {
+			return enVuelo.promesa as Promise<T>;
+		}
+
+		const promesa = this.ejecutarRequest<T>(
+			endpoint,
+			options,
+			useCache,
+			timeoutMs,
+			retryOnFailure,
+			usarCircuitBreaker,
+			validarDentroDelBreaker,
+		);
+		const entrada = { generacion, promesa };
+		this.lecturasEnVuelo.set(clave, entrada);
+		const limpiar = () => {
+			// Solo si sigue siendo la misma: no borrar una llamada más nueva.
+			if (this.lecturasEnVuelo.get(clave) === entrada) {
+				this.lecturasEnVuelo.delete(clave);
+			}
+		};
+		promesa.then(limpiar, limpiar);
+		return promesa;
+	}
+
+	/**
 	 * @param retryOnFailure fuerza la política de reintentos de esta llamada.
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
@@ -1408,7 +1488,7 @@ export class CarteraBackClient {
 	 *   de la autenticación, así que un número fijo calculado antes se pasa de
 	 *   lo que queda del presupuesto del llamador. Ver `cotaFetchConsultaMora`.
 	 */
-	private async request<T>(
+	private async ejecutarRequest<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
@@ -2152,6 +2232,10 @@ export class CarteraBackClient {
 			undefined,
 			undefined,
 			useCircuitBreaker,
+			undefined,
+			// La ficha pide el mismo crédito varias veces a la vez (detalle,
+			// historial de pagos): comparten una sola llamada.
+			true,
 		);
 		// Antes acá se hacía JSON.stringify(response, null, 2) del response
 		// COMPLETO: ~120 KB indentados escritos al log en cada llamada no

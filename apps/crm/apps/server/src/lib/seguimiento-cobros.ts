@@ -24,9 +24,14 @@
  *  · `link_pago_generado` no es gestión (se excluye en la query).
  */
 
-import { and, desc, gte, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { contactosCobros } from "../db/schema/cobros";
+import {
+	PREFIJO_CONVENIO_AUTO,
+	PREFIJO_PREMORA_AUTO,
+	PREFIJO_WSP_MASIVO,
+} from "./gestion-temprana-b1";
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import { origenDeComentario } from "./historial-agendas";
 
@@ -278,6 +283,18 @@ export function accionPendienteDe(
 }
 
 /**
+ * `comentarios` solo se usa para saber el ORIGEN de la gestión (por prefijo,
+ * `origenDeComentario`): traerlo entero era bajar el texto libre de miles de
+ * filas por la red solo para mirar sus primeros caracteres. Se corta al
+ * prefijo más largo, así `startsWith` da lo mismo que con el texto completo.
+ */
+const LARGO_PREFIJO_ORIGEN = Math.max(
+	PREFIJO_CONVENIO_AUTO.length,
+	PREFIJO_PREMORA_AUTO.length,
+	PREFIJO_WSP_MASIVO.length,
+);
+
+/**
  * Trae en lote las gestiones de los casos y devuelve el seguimiento de cada
  * uno. Dos cortes para no leer el historial completo: los últimos
  * DIAS_VENTANA_SEGUIMIENTO días, más las promesas abiertas de cualquier fecha.
@@ -303,7 +320,7 @@ export async function cargarSeguimientoPorCaso(
 			estadoPromesa: contactosCobros.estadoPromesa,
 			fechaProximoContacto: contactosCobros.fechaProximoContacto,
 			horaProximoContacto: contactosCobros.horaProximoContacto,
-			comentarios: contactosCobros.comentarios,
+			comentarios: sql<string | null>`left(${contactosCobros.comentarios}, ${LARGO_PREFIJO_ORIGEN})`,
 			participanteTipo: contactosCobros.participanteTipo,
 		})
 		.from(contactosCobros)

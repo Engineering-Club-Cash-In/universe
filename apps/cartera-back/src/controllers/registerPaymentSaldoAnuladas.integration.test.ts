@@ -75,3 +75,33 @@ integrationTest("un parcial validated VIVO sigue siendo el saldo vigente (no cam
   expect(Number(elegible!.pago.interes_restante)).toBe(1000);
   await sql.end();
 });
+
+integrationTest("cuota con SOLO filas anuladas (incluida la semilla): la semilla anulada más vieja es la fuente del saldo y no es destino", async () => {
+  const { sql } = await setup();
+  const [semilla] = await insertar(sql, { estado: "no_required", falso: true, interes: 4463.76, capital: 1737.05 });
+  await insertar(sql, { estado: "validated", falso: true, interes: 3663.76, capital: 1737.05, aplicado: 800 });
+  await insertar(sql, { estado: "no_required", falso: true, interes: 100, capital: 100 }); // otra anulada más nueva
+
+  const { db } = await import("../database");
+  const { pagosExistentesDeCuota, semillaAnuladaDeCuota } = await import("./registerPaymentQueries");
+  const { saldoDeRespaldoDeSemillaAnulada } = await import("./registerPaymentPolicy");
+  const vivas = await pagosExistentesDeCuota(db as never, 2, 9331);
+  expect(vivas).toHaveLength(0);
+  const respaldo = saldoDeRespaldoDeSemillaAnulada({
+    hayFilasVivas: vivas.length > 0,
+    semillaAnulada: await semillaAnuladaDeCuota(db as never, 2, 9331),
+  });
+  expect(respaldo?.pago_id).toBe(semilla!.pago_id);
+  expect(Number(respaldo!.interes_restante)).toBe(4463.76);
+  await sql.end();
+});
+
+integrationTest("cuota sin semilla anulada ni filas vivas (o con una fila viva): sin respaldo, igual que antes", async () => {
+  const { sql } = await setup();
+  const { db } = await import("../database");
+  const { semillaAnuladaDeCuota } = await import("./registerPaymentQueries");
+  expect(await semillaAnuladaDeCuota(db as never, 2, 9331)).toBeUndefined();
+  await insertar(sql, { estado: "validated", falso: true, interes: 0, capital: 0, aplicado: 10 }); // anulada que no es semilla
+  expect(await semillaAnuladaDeCuota(db as never, 2, 9331)).toBeUndefined();
+  await sql.end();
+});

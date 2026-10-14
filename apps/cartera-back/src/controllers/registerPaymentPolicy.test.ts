@@ -1879,3 +1879,20 @@ describe("esPagoSaldoElegible: una fila anulada nunca es saldo vigente", () => {
     expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "no_required" }))).toBe(false);
   });
 });
+
+describe("saldoDeRespaldoDeSemillaAnulada: cuota sin ninguna fila viva", () => {
+  const semilla = { validationStatus: "no_required", paymentFalse: true, interes_restante: "4463.76" };
+  it("sin filas vivas usa la semilla anulada SOLO como fuente del saldo", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: semilla })).toBe(semilla);
+  });
+  it("con alguna fila viva no se usa", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: true, semillaAnulada: semilla })).toBeUndefined();
+  });
+  it("sin semilla anulada: undefined (mismo comportamiento de antes)", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: undefined })).toBeUndefined();
+  });
+  it("una fila que no es semilla anulada no sirve", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: { ...semilla, paymentFalse: false } })).toBeUndefined();
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: { ...semilla, validationStatus: "validated" } })).toBeUndefined();
+  });
+});

@@ -4,6 +4,7 @@ process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/";
 
 afterAll(cerrarEsquemaBoletaTardia);
 const BASE = process.env.URL_PUBLIC_R2;
+const SENAL = new AbortController().signal;
 const llave = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}.jpg`;
 
 /** Pago con boleta: `intento` null = pago normal; `falso` = reversado. Devuelve el pago_id. */
@@ -20,24 +21,24 @@ integrationTest("llavesYaUsadas contra la base real: otro pago vivo cuenta; el m
   const I = uuidIntento(501);
 
   await pago(sql, 1, I, [`${BASE}${llave(1)}`]);                 // mismo crédito, mismo intento (doble clic)
-  expect(await usadas(1, I, [llave(1)])).toEqual([]);
+  expect(await usadas(1, I, [llave(1)], SENAL)).toEqual([]);
 
   await pago(sql, 2, null, [`${BASE}${llave(2)}`]);              // pago normal de otro crédito
-  expect(await usadas(1, I, [llave(2)])).toEqual([llave(2)]);
+  expect(await usadas(1, I, [llave(2)], SENAL)).toEqual([llave(2)]);
 
   await pago(sql, 1, null, [`${BASE}${llave(3)}`]);              // mismo crédito pero SIN intento (NULL): es otro pago
-  expect(await usadas(1, I, [llave(3)])).toEqual([llave(3)]);
+  expect(await usadas(1, I, [llave(3)], SENAL)).toEqual([llave(3)]);
 
   await pago(sql, 3, I, [`${BASE}${llave(4)}`]);                 // mismo intento pero OTRO crédito: reuso
-  expect(await usadas(1, I, [llave(4)])).toEqual([llave(4)]);
+  expect(await usadas(1, I, [llave(4)], SENAL)).toEqual([llave(4)]);
 
   await pago(sql, 4, null, [`${BASE}${llave(5)}`], true);        // pago reversado (paymentFalse): ya no cuenta
-  expect(await usadas(1, I, [llave(5)])).toEqual([]);
+  expect(await usadas(1, I, [llave(5)], SENAL)).toEqual([]);
 
   await pago(sql, 5, null, [llave(6)]);                          // fila vieja con la llave sola
-  expect(await usadas(1, I, [llave(6)])).toEqual([llave(6)]);
+  expect(await usadas(1, I, [llave(6)], SENAL)).toEqual([llave(6)]);
 
-  expect(await usadas(1, I, [llave(1), llave(2), llave(7)])).toEqual([llave(2)]); // mezcla: solo las reusadas
+  expect(await usadas(1, I, [llave(1), llave(2), llave(7)], SENAL)).toEqual([llave(2)]); // mezcla: solo las reusadas
 });
 
 integrationTest("la consulta de reuso corta a los 3 s si la tabla está bloqueada (statement_timeout) y no deja la tx abierta", async () => {
@@ -51,8 +52,25 @@ integrationTest("la consulta de reuso corta a los 3 s si la tabla está bloquead
   await lista;
   const t0 = Date.now();
   try {
-    await expect(depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)])).rejects.toThrow(/statement timeout/i);
+    await expect(depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)], new AbortController().signal)).rejects.toThrow(/statement timeout/i);
     expect(Date.now() - t0).toBeLessThan(5_000);
   } finally { soltar(); await bloqueo; }
-  expect(await depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)])).toEqual([]); // la conexión quedó sana
+  expect(await depsFotoReales().llavesYaUsadas(1, uuidIntento(900), [llave(900)], new AbortController().signal)).toEqual([]); // la conexión quedó sana
+}, 15_000);
+
+integrationTest("con la señal ya vencida la consulta de reuso se suelta sin ejecutar el SELECT (no espera el statement_timeout)", async () => {
+  const { sql } = await levantarEsquemaBoletaTardia();
+  const { depsFotoReales } = await import("./boletaTardiaFoto");
+  let soltar!: () => void;
+  const libre = new Promise<void>((r) => { soltar = r; });
+  let bloqueada!: () => void;
+  const lista = new Promise<void>((r) => { bloqueada = r; });
+  const bloqueo = sql.begin(async (tx: any) => { await tx`LOCK TABLE cartera.boletas IN ACCESS EXCLUSIVE MODE`; bloqueada(); await libre; });
+  await lista;
+  const t0 = Date.now();
+  try {
+    await expect(depsFotoReales().llavesYaUsadas(1, uuidIntento(901), [llave(901)], AbortSignal.abort())).rejects.not.toThrow(/statement timeout/i);
+    expect(Date.now() - t0).toBeLessThan(500);
+  } finally { soltar(); await bloqueo; }
+  expect(await depsFotoReales().llavesYaUsadas(1, uuidIntento(901), [llave(901)], new AbortController().signal)).toEqual([]); // la conexión quedó sana
 }, 15_000);

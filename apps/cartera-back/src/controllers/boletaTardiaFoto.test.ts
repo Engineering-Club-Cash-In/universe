@@ -98,7 +98,10 @@ describe("verificarFotoBoleta", () => {
   test("la consulta de reuso recibe crédito, intento y llaves (para excluir al mismo intento)", async () => {
     const vistas: unknown[] = [];
     await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: async (...a) => { vistas.push(a); return []; } }));
-    expect(vistas).toEqual([[1, INTENTO, [LLAVE]]]);
+    const a = vistas[0] as unknown[];
+    expect(vistas).toHaveLength(1);
+    expect(a.slice(0, 3)).toEqual([1, INTENTO, [LLAVE]]);
+    expect(a[3]).toBeInstanceOf(AbortSignal);
   });
   test("si la consulta de reuso falla: falla cerrado con 503", async () => {
     const r = await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: async () => { throw new Error("db caída"); } }));
@@ -114,5 +117,33 @@ describe("verificarFotoBoleta", () => {
   test("el detalle de error nunca trae el mensaje del error (puede llevar URLs o credenciales)", async () => {
     const r = await verificarFotoBoleta(entrada(), arma(async () => { throw new Error("https://x.r2.cloudflarestorage.com/?X-Amz-Signature=SECRETO"); }));
     expect(JSON.stringify(r)).not.toContain("SECRETO");
+  });
+  const llaveN = (n: number) => `00000000-0000-4000-8000-00000000000${n}.jpg`;
+  const contadores = () => {
+    const c = { head: 0, reuso: 0 };
+    return { c, deps: arma(async () => { c.head++; return buena; }, { llavesYaUsadas: async () => { c.reuso++; return []; } }) };
+  };
+  test("más de 3 llaves: 400 demasiadas sin consultar la base ni R2", async () => {
+    const { c, deps } = contadores();
+    const r = await verificarFotoBoleta(entrada([1, 2, 3, 4].map(llaveN)), deps);
+    expect([r?.status, r?.motivo]).toEqual([400, "demasiadas"]);
+    expect(r?.message).toContain("hasta 3 fotos");
+    expect(c).toEqual({ head: 0, reuso: 0 });
+  });
+  test("4 copias de la misma llave también se rechazan (el tope cuenta las crudas)", async () => {
+    const { c, deps } = contadores();
+    const r = await verificarFotoBoleta(entrada([LLAVE, LLAVE, LLAVE, LLAVE]), deps);
+    expect([r?.status, r?.motivo]).toEqual([400, "demasiadas"]);
+    expect(c).toEqual({ head: 0, reuso: 0 });
+  });
+  test("borde: 3 llaves distintas y buenas pasan", async () => {
+    const { deps } = contadores();
+    expect(await verificarFotoBoleta(entrada([1, 2, 3].map(llaveN)), deps)).toBeNull();
+  });
+  test("al vencer el tope, la señal que recibió la consulta de reuso queda abortada", async () => {
+    let señal: AbortSignal | undefined;
+    const r = await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: (_c, _i, _l, s) => { señal = s; return new Promise(() => {}); }, timeoutMs: 30 }));
+    expect([r?.status, r?.motivo]).toEqual([503, "timeout"]);
+    expect(señal?.aborted).toBe(true);
   });
 });

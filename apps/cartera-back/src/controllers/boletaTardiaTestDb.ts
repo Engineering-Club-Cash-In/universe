@@ -36,8 +36,14 @@ let listo: Promise<Entorno> | undefined;
  * Créditos 1..CREDITOS: MOROSO, capital 10000, cuotas id*10+4 (vencida hace 40 días) e id*10+5 (hace 10; la del retraso), ambas impagas
  * y una mora activa de 119.47 = 112.00 legítima + 7.47 del retraso (cuota id*10+5).
  */
-export const levantarEsquemaBoletaTardia = (): Promise<Entorno> => (listo ??= (async () => {
-  const sql = postgres(testDatabaseUrl!, { ssl: false, onnotice: () => undefined });
+export const levantarEsquemaBoletaTardia = (): Promise<Entorno> => {
+  // Sin URL, postgres.js usaría PG*/localhost y el DROP SCHEMA de abajo borraría esa base. Se rechaza FUERA de
+  // `listo`: memorizar el rechazo haría lanzar al `afterAll(cerrarEsquemaBoletaTardia)` de los demás archivos.
+  if (!testDatabaseUrl) return Promise.reject(new Error("levantarEsquemaBoletaTardia exige TEST_DATABASE_URL: nunca se conecta por defecto"));
+  return levantar(testDatabaseUrl);
+};
+const levantar = (url: string): Promise<Entorno> => (listo ??= (async () => {
+  const sql = postgres(url, { ssl: false, onnotice: () => undefined });
   await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
   await sql`CREATE SCHEMA cartera`;
   await sql`CREATE TYPE cartera.mora_evento_origen AS ENUM

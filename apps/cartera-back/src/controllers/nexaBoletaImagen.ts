@@ -14,7 +14,16 @@
  * Con NEXA_BOLETA_IMAGEN_ENABLED=false no se genera nada (por defecto, prendido).
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { sql } from "drizzle-orm";
+import { db } from "../database";
+import { launchBrowser } from "../utils/functions/browser";
+import { s3 } from "../utils/functions/uploadsFiles";
+
+/** Namespace PROPIO del advisory lock del registro (8765 pagos, 8766 espejo, 8767 cuenta Nexa). */
+export const BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE = 8768;
 
 export type DatosBoletaNexa = {
   pagoId: number;
@@ -111,3 +120,145 @@ export function logoNexaDataUri(): string | null {
   }
   return logoCache;
 }
+
+/**
+ * Key del PNG en R2_BUCKET (el bucket de las boletas del front, servido
+ * público; la URL pública va a `boletas.url_boleta`). Aleatoria, como el uuid
+ * de las boletas del front: con el pago_id cualquiera podría bajar los
+ * comprobantes ajenos probando números. Sin datos del pago ni del cliente: el
+ * vínculo es la fila de `boletas`. Cada llamada da una key nueva.
+ */
+export const keyBoletaNexa = () => `boletas-nexa/${randomUUID()}.png`;
+
+// ========================================
+// Orquestación (con dependencias inyectables)
+// ========================================
+
+export type BoletaNexaDeps = {
+  /** Pagos Nexa vivos sin boleta, del más viejo al más nuevo. */
+  pendientes: (limite: number) => Promise<number[]>;
+  /** Datos del pago si sigue siendo elegible (Nexa, no anulado, sin boleta); si no, null. */
+  datos: (pagoId: number) => Promise<DatosBoletaNexa | null>;
+  abrirRender: () => Promise<{ render: (html: string) => Promise<Buffer>; cerrar: () => Promise<void> }>;
+  subir: (key: string, png: Buffer) => Promise<void>;
+  /** Borra del bucket un PNG subido que no quedó registrado. */
+  borrar: (key: string) => Promise<void>;
+  /** Inserta la fila en `boletas` si el pago sigue elegible; false si no la insertó. */
+  registrar: (pagoId: number, urlBoleta: string) => Promise<boolean>;
+  urlPublica: (key: string) => string | null;
+};
+
+// ========================================
+// Implementación real (BD, Chromium, R2)
+// ========================================
+
+const filas = <T>(result: { rows: unknown[] }) => result.rows as T[];
+
+/**
+ * Solo pagos cuyo evento Nexa quedó aplicado: `complete` lo deja en
+ * billing_pending y la facturación lo lleva a billing_running/billed/
+ * billing_failed/billing_unknown (`applied` es el estado previo a facturar).
+ * Nunca failed, manual_review ni processing: ahí la plata pudo volver al
+ * cliente y no se le hace comprobante.
+ */
+export const ESTADOS_EVENTO_NEXA_APLICADO = [
+  "applied", "billing_pending", "billing_running", "billed", "billing_failed", "billing_unknown",
+] as const;
+const eventoAplicado = sql`EXISTS (
+  SELECT 1 FROM cartera.nexa_payment_events e
+  WHERE e.id = p.nexa_payment_event_id
+    AND e.status IN (${sql.join(ESTADOS_EVENTO_NEXA_APLICADO.map((estado) => sql`${estado}`), sql`, `)}))`;
+
+export const boletaNexaDeps: BoletaNexaDeps = {
+  pendientes: async (limite) => filas<{ pago_id: number }>(await db.execute(sql`
+    SELECT p.pago_id
+    FROM cartera.pagos_credito p
+    WHERE p.nexa_payment_event_id IS NOT NULL
+      AND p."paymentFalse" = false
+      AND ${eventoAplicado}
+      AND NOT EXISTS (SELECT 1 FROM cartera.boletas b WHERE b.pago_id = p.pago_id)
+    ORDER BY p.pago_id
+    LIMIT ${limite}
+  `)).map((f) => Number(f.pago_id)),
+  datos: async (pagoId) => {
+    // Texto en SQL: node-postgres convierte DATE a un Date local (correría el día) y numeric pierde formato.
+    const [fila] = filas<{
+      numero_autorizacion: string | null;
+      monto: string | null;
+      fecha_boleta: string | null;
+      numero_sifco: string | null;
+      cliente: string | null;
+    }>(await db.execute(sql`
+      SELECT p.numeroautorizacion AS numero_autorizacion,
+             p.monto_boleta::text AS monto,
+             to_char(p.fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
+             c.numero_credito_sifco AS numero_sifco,
+             u.nombre AS cliente
+      FROM cartera.pagos_credito p
+      LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+      LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      WHERE p.pago_id = ${pagoId}
+        AND p.nexa_payment_event_id IS NOT NULL
+        AND p."paymentFalse" = false
+        AND ${eventoAplicado}
+        AND NOT EXISTS (SELECT 1 FROM cartera.boletas b WHERE b.pago_id = p.pago_id)
+    `));
+    if (!fila) return null;
+    return {
+      pagoId,
+      numeroAutorizacion: fila.numero_autorizacion,
+      monto: fila.monto,
+      fechaBoleta: fila.fecha_boleta,
+      numeroSifco: fila.numero_sifco,
+      cliente: fila.cliente,
+    };
+  },
+  abrirRender: async () => {
+    const browser = await launchBrowser();
+    return {
+      render: async (html) => {
+        const page = await browser.newPage();
+        try {
+          await page.setViewport({ width: 700, height: 900, deviceScaleFactor: 2 });
+          await page.setContent(html, { waitUntil: "load" });
+          const tarjeta = await page.$("#boleta");
+          if (!tarjeta) throw new Error("no se encontró la tarjeta de la boleta");
+          return Buffer.from(await tarjeta.screenshot({ type: "png" }));
+        } finally {
+          await page.close().catch(() => undefined);
+        }
+      },
+      cerrar: () => browser.close(),
+    };
+  },
+  subir: async (key, png) => {
+    await s3.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+      Body: png,
+      ContentType: "image/png",
+    }));
+  },
+  borrar: async (key) => {
+    await s3.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key }));
+  },
+  registrar: async (pagoId, urlBoleta) => db.transaction(async (tx) => {
+    // Dos disparos a la vez (o disparo + barrido) se serializan por pago: el
+    // segundo ve la fila del primero y no inserta otra.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE}, ${pagoId})`);
+    const insertadas = await tx.execute(sql`
+      INSERT INTO cartera.boletas (pago_id, url_boleta)
+      SELECT p.pago_id, ${urlBoleta}
+      FROM cartera.pagos_credito p
+      WHERE p.pago_id = ${pagoId}
+        AND p.nexa_payment_event_id IS NOT NULL
+        AND p."paymentFalse" = false
+        AND ${eventoAplicado}
+        AND NOT EXISTS (SELECT 1 FROM cartera.boletas b WHERE b.pago_id = p.pago_id)
+      RETURNING id
+    `);
+    return insertadas.rows.length > 0;
+  }),
+  // Igual que prepararURLsBoletas (registerPayment.ts): URL_PUBLIC_R2 + key.
+  urlPublica: (key) => (process.env.URL_PUBLIC_R2 ? `${process.env.URL_PUBLIC_R2}${key}` : null),
+};

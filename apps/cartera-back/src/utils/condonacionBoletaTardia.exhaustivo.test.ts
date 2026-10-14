@@ -179,8 +179,10 @@ describe("2. boleta 'a tiempo' y control de período", () => {
   test("boleta = hoy (posterior al vencimiento): no entra", () => {
     expect(decidirCondonacionBoletaTardia(base({ boleta: "2026-10-03" })).condonar).toBe(false);
   });
-  test("boleta anterior pero posterior al vencimiento de la cuota previa: entra", () => {
-    expect(decidirCondonacionBoletaTardia(base({ boleta: "2026-08-31" })).condonar).toBe(true);
+  test("boleta posterior al límite (siguiente hábil) de la cuota previa: entra", () => {
+    // la previa vence domingo 30-ago: su límite es el lunes 31
+    expect(decidirCondonacionBoletaTardia(base({ boleta: "2026-09-01" })).condonar).toBe(true);
+    expect(razon(decidirCondonacionBoletaTardia(base({ boleta: "2026-08-31" })))).toBe("boleta_de_otro_periodo");
   });
   test("boleta = vencimiento de la cuota previa: boleta_de_otro_periodo (estrictamente posterior)", () => {
     expect(razon(decidirCondonacionBoletaTardia(base({ boleta: "2026-08-30" })))).toBe("boleta_de_otro_periodo");

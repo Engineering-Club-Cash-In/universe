@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { cuotasQueCalificanBoletaTardia, fechaLimiteBoletaTardia } from "./condonacionNexaATiempo";
+import {
+  cuotasQueCalificanBoletaTardia,
+  decidirCondonacionBoletaTardia,
+  fechaLimiteBoletaTardia,
+  type ParamsBoletaTardia,
+} from "./condonacionNexaATiempo";
 
 const DIA = 86_400_000;
 const dias = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DIA);
@@ -12,7 +17,7 @@ const califica = (venc: string, boleta: string, hoy: string, anterior: string | 
     fechaBoleta: boleta,
     hoy,
     vencimientoCuotaAnterior: new Map([[1, anterior]]),
-  } as never);
+  } as Parameters<typeof cuotasQueCalificanBoletaTardia>[0]);
 
 describe("fechaLimiteBoletaTardia", () => {
   test.each([
@@ -70,7 +75,29 @@ describe("boleta tardía con vencimiento inhábil", () => {
     expect(califica("2026-10-03", "2026-10-05", "2026-10-08").calificadas).toHaveLength(1);
   });
   test("anti boleta vieja: boleta ≤ vencimiento de la cuota anterior no califica", () => {
-    const r = califica("2026-10-03", "2026-10-05", "2026-10-07", "2026-10-05");
-    expect(r.razonSiNinguna).toBe("boleta_de_otro_periodo");
+    // cuota vence sábado 03-oct; la anterior venció el 03-sep (jueves)
+    expect(califica("2026-10-03", "2026-09-03", "2026-10-05", "2026-09-03").razonSiNinguna).toBe("boleta_de_otro_periodo");
+    expect(califica("2026-10-03", "2026-09-04", "2026-10-05", "2026-09-03").calificadas).toHaveLength(1);
+  });
+  test("anti boleta vieja con cuota anterior inhábil: la boleta del siguiente hábil es la de N-1", () => {
+    // N-1 vence sábado 03-oct, N vence 03-nov; boleta 05-oct (lunes) es el pago a tiempo de N-1
+    expect(califica("2026-11-03", "2026-10-05", "2026-11-05", "2026-10-03").razonSiNinguna).toBe("boleta_de_otro_periodo");
+    expect(califica("2026-11-03", "2026-10-06", "2026-11-05", "2026-10-03").calificadas).toHaveLength(1);
+  });
+});
+
+describe("monto condonado con vencimiento inhábil", () => {
+  test("vence sábado, boleta lunes, registrada el día 5 → condona la mora de 5 días", () => {
+    const p: ParamsBoletaTardia = {
+      statusCredit: "MOROSO", capital: "10000", rubrosPendientes: 0, ajusteFechaIdeal: null,
+      moraActiva: "18.67",
+      cuotasConMora: [{ cuota_id: 1, diasAtraso: 5, pagado: 0, fecha_vencimiento: "2026-10-03" }],
+      cuotasAbiertas: [{ cuota_id: 1, numero_cuota: 5, fecha_vencimiento: "2026-10-03", saldo: "1000" }],
+      hoy: "2026-10-08", fechaBoleta: "2026-10-05",
+      vencimientoCuotaAnterior: new Map([[1, "2026-09-03"]]), monto: "1000.00",
+    } as ParamsBoletaTardia;
+    const d = decidirCondonacionBoletaTardia(p);
+    expect(d.condonar).toBe(true);
+    if (d.condonar) expect(d.monto.toFixed(2)).toBe("18.67"); // 10,000 × 1.12% × 5 / 30
   });
 });

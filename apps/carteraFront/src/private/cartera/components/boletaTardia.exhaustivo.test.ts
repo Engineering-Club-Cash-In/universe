@@ -256,6 +256,9 @@ describe("fechas GT sin corrimiento de huso", () => {
   });
   test("pluralizacion de dias: 0, 1, 2, null", () => {
     expect(textoFechasBoletaTardia(vista({ diasRetraso: 1 }))).toContain("(1 día de retraso)");
+    // vence sábado 03-oct, boleta del lunes 05-oct: se avisa que cuenta el siguiente día hábil
+    expect(textoFechasBoletaTardia(vista({ fechaVencimiento: "2026-10-03", fechaBoleta: "2026-10-05", fechaRegistro: "2026-10-07", diasRetraso: 4 })))
+      .toBe("Vence 03-oct (vence en día inhábil: cuenta el siguiente día hábil) · Boleta 05-oct · Hoy 07-oct (4 días de retraso)");
     expect(textoFechasBoletaTardia(vista({ diasRetraso: 2 }))).toContain("(2 días de retraso)");
     expect(textoFechasBoletaTardia(vista({ diasRetraso: 0 }))).toContain("(0 días de retraso)");
   });
@@ -292,6 +295,10 @@ describe("endurecimiento 10a r1", () => {
     const mk = (aperturaId: number) => JSON.stringify(new Function("aperturaId", "params", `return ${key}`)(aperturaId, { credito_id: 1 }));
     expect(mk(1)).not.toBe(mk(2));
     expect(mk(1)).toBe(mk(1));
+  });
+  test("fuera_de_ventana menciona el siguiente día hábil", () => {
+    const msg = mensajeConflictoCondonacion({ response: { status: 409, data: { code: "ya_no_aplica", message: "La condonación ya no aplica (fuera_de_ventana)" } } });
+    expect(msg).toContain("siguiente día hábil");
   });
   test("cada razon (y mora_cambio) del 409 se traduce a espanol sin snake_case", () => {
     const razones = ["estado_no_aplica", "sin_mora", "fuera_de_ventana", "no_alcanza_mora", "no_queda_al_dia", "fuera_de_tope",

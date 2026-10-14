@@ -95,7 +95,9 @@ export function bloqueCondonacionParaEnviar(vista: VistaPreviaBoletaTardia | nul
 export function textoFechasBoletaTardia(v: VistaPreviaBoletaTardia): string {
   if (!v.fechaVencimiento || !v.fechaBoleta) return "";
   const dias = v.diasRetraso ?? 0;
-  return `Vence ${fechaCortaBoletaTardia(v.fechaVencimiento)} · Boleta ${fechaCortaBoletaTardia(v.fechaBoleta)} · Hoy ${fechaCortaBoletaTardia(v.fechaRegistro)} (${dias} ${dias === 1 ? "día" : "días"} de retraso)`;
+  // Si la vista aplica y la boleta es posterior al vencimiento, es porque venció en día inhábil.
+  const inhabil = v.aplica && v.fechaBoleta > v.fechaVencimiento ? " (vence en día inhábil: cuenta el siguiente día hábil)" : "";
+  return `Vence ${fechaCortaBoletaTardia(v.fechaVencimiento)}${inhabil} · Boleta ${fechaCortaBoletaTardia(v.fechaBoleta)} · Hoy ${fechaCortaBoletaTardia(v.fechaRegistro)} (${dias} ${dias === 1 ? "día" : "días"} de retraso)`;
 }
 export function textoMoraDelRetraso(v: VistaPreviaBoletaTardia): string {
   const cuotas = v.porCuota.map((c) => c.numero_cuota).sort((a, b) => a - b);

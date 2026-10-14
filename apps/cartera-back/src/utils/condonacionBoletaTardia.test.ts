@@ -85,8 +85,10 @@ describe("decidirCondonacionBoletaTardia", () => {
       .toEqual({ condonar: false, razon: "boleta_de_otro_periodo" });
     expect(decidirCondonacionBoletaTardia({ ...aTiempo, fechaBoleta: "2026-08-20" }))
       .toEqual({ condonar: false, razon: "boleta_de_otro_periodo" });
-    // un día después del vencimiento previo sí es de este período
-    expect(decidirCondonacionBoletaTardia({ ...aTiempo, fechaBoleta: "2026-08-31" }).condonar).toBe(true);
+    // 30-ago es domingo: el lunes 31 aún es la boleta a tiempo de la cuota previa; el 1-sep ya es de este período
+    expect(decidirCondonacionBoletaTardia({ ...aTiempo, fechaBoleta: "2026-08-31" }))
+      .toEqual({ condonar: false, razon: "boleta_de_otro_periodo" });
+    expect(decidirCondonacionBoletaTardia({ ...aTiempo, fechaBoleta: "2026-09-01" }).condonar).toBe(true);
   });
 
   test("cuota 1 (sin cuota anterior): el control de período no aplica", () => {

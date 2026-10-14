@@ -479,7 +479,7 @@ export function cuotasQueCalificanBoletaTardia(p: Pick<
   if (previo == null) {
     const esCuota1 = p.cuotasAbiertas.find((q) => q.cuota_id === masVieja.cuota_id)?.numero_cuota === 1;
     if (!esCuota1) return otroPeriodo;
-  } else if (boleta <= aMs(previo)) return otroPeriodo;
+  } else if (boleta <= aMs(fechaLimiteBoletaTardia(previo))) return otroPeriodo; // la boleta del siguiente hábil de N−1 es de N−1
   return { calificadas: dentroDelTope, razonSiNinguna: null };
 }
 

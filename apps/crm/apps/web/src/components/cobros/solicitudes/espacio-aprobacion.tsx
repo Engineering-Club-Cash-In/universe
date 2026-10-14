@@ -1017,7 +1017,24 @@ function ContenidoEspacio({
 			input: { convenioId: s.tipo === "convenio" ? s.convenio.convenio_id : 1 },
 		}),
 		enabled: s.tipo === "convenio",
+		// Sin esto cada cambio de foco volvería a bloquear los botones un instante.
+		staleTime: 30_000,
 	});
+	// La copia de la lista que guarda el Espacio no se actualiza: cuando el asesor
+	// acepta una contrapropuesta el plan cambia, así que cuotas, cuota y total se
+	// leen del plan del convenio (la misma lectura que se espera antes de decidir).
+	const sMostrada: Solicitud =
+		s.tipo === "convenio" && planConvenio.data
+			? {
+					...s,
+					convenio: {
+						...s.convenio,
+						monto_total_convenio: planConvenio.data.monto_total_convenio,
+						numero_meses: planConvenio.data.numero_meses,
+						cuota_mensual: planConvenio.data.cuota_mensual,
+					},
+				}
+			: s;
 	const contraPendiente =
 		s.tipo === "convenio"
 			? (contrapropuestas.data?.find((c) => c.estado === "pendiente") ?? null)
@@ -1121,7 +1138,10 @@ function ContenidoEspacio({
 		}
 		// Sin saber si hay una contrapropuesta (cargando o con error) no se decide:
 		// el servidor rechazaría la decisión si la hubiera.
-		if (!bloqueo && contrapropuestas.isPending) {
+		if (
+			!bloqueo &&
+			(contrapropuestas.isPending || contrapropuestas.isFetching)
+		) {
 			bloqueo = "Verificando si hay una contrapropuesta del convenio…";
 		} else if (!bloqueo && contrapropuestas.isError) {
 			bloqueo =
@@ -1216,7 +1236,7 @@ function ContenidoEspacio({
 				}
 				panel={
 					<PanelSolicitudVista
-						solicitud={s}
+						solicitud={sMostrada}
 						notas={notas}
 						onNotas={setNotas}
 						{...handlers}
@@ -1235,7 +1255,9 @@ function ContenidoEspacio({
 			{s.tipo === "convenio" ? (
 				<ContrapropuestaDialog
 					abierto={contraAbierta}
-					convenio={s.convenio}
+					convenio={
+						sMostrada.tipo === "convenio" ? sMostrada.convenio : s.convenio
+					}
 					primerPagoActual={planConvenio.data?.primer_pago ?? null}
 					fechaConvenio={planConvenio.data?.fecha_convenio ?? null}
 					onCerrar={() => setContraAbierta(false)}

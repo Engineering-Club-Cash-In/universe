@@ -3236,6 +3236,19 @@ export async function syncScheduleOnTermsChange({
       if (extraCuotaIds.length > 0) {
         const safeExtraCuotaIds = extraCuotaIds.filter((id): id is number => id !== null);
         if (safeExtraCuotaIds.length > 0) {
+          // La boleta-imagen de un pago Nexa (nexaBoletaImagen.ts) referencia el pago sin ON
+          // DELETE: se borra antes. Las boletas de pagos manuales no se tocan. El FOR UPDATE frena
+          // a un registro de boleta concurrente (ver borrarPagosDelCredito en fallenCredits.ts).
+          const cuotasNexa = sql.join(safeExtraCuotaIds.map((id) => sql`${id}`), sql`, `);
+          await tx.execute(sql`
+            SELECT pago_id FROM cartera.pagos_credito
+            WHERE cuota_id IN (${cuotasNexa}) AND nexa_payment_event_id IS NOT NULL
+            ORDER BY pago_id FOR UPDATE`);
+          await tx.execute(sql`
+            DELETE FROM cartera.boletas
+            WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
+                               WHERE cuota_id IN (${cuotasNexa})
+                                 AND nexa_payment_event_id IS NOT NULL)`);
           // delete related pagos first
           await tx
             .delete(pagos_credito)

@@ -21,7 +21,7 @@ const setup = async () => {
   await sql`CREATE TYPE cartera.mora_evento_origen AS ENUM
     ('PROCESO_AUTO','API_MANUAL','CONDONACION_INDIVIDUAL','CONDONACION_MASIVA')`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY,
-    numero_credito_sifco text, estado_devolucion text, cuota numeric(18,2), "statusCredit" text, capital numeric(18,2))`;
+    numero_credito_sifco text, estado_devolucion text, cuota numeric(18,2), "statusCredit" text, capital numeric(18,2), porcentaje_interes numeric, seguro_10_cuotas numeric, gps numeric, membresias_pago numeric)`;
   await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY, credito_id integer, pagado boolean DEFAULT false)`;
   await sql`CREATE TABLE cartera.moras_historial (historial_id serial PRIMARY KEY,
     credito_id integer NOT NULL, mora_id integer, tipo_evento text NOT NULL,

@@ -247,3 +247,50 @@ integrationTest("reactivarMora sin cuotas vencidas (criterio del cron): no react
   const [c] = await sql`SELECT motivo FROM cartera.moras_condonaciones WHERE intento_id = ${uuidIntento(30)}`;
   expect(c!.motivo).toContain("(sin cuotas vencidas)");
 });
+
+// Codex ronda 2 (#1980): la ruptura de convenio (`cerrarMoraPagadaDeCredito`) compensa el ledger de la condonación
+// sin marcar `anulada_at` y la mora se recrea desde cero. Anular después NO debe volver a sumar lo condonado.
+const romperConvenio = async (e: Awaited<ReturnType<typeof levantarEsquemaBoletaTardia>>, credito: number, moraRecreada: string) => {
+  const { cerrarMoraPagadaDeCredito } = await import("../utils/cerrarMoraPagadaDeCredito");
+  await e.database.db.transaction(async (tx) => {
+    expect(await cerrarMoraPagadaDeCredito({ credito_id: credito }, tx as never)).toBe(1);
+  });
+  await e.sql`UPDATE cartera.moras_credito SET monto_mora = ${moraRecreada}, activa = true WHERE credito_id = ${credito}`;
+};
+
+integrationTest("#1980 boleta tardía: tras la ruptura del convenio, anular no restituye lo que la mora recreada ya incluye", async () => {
+  const e = await levantarEsquemaBoletaTardia();
+  const { sql, latefee } = e;
+  await condonarBT(latefee, 31, uuidIntento(31));
+  await romperConvenio(e, 31, "150.00");
+  const [{ hist0 }] = await sql`SELECT count(*)::int AS hist0 FROM cartera.moras_historial WHERE credito_id = 31`;
+  const r = await latefee.anularCondonacionBoletaTardia({ intento_id: uuidIntento(31), credito_id: 31, motivo: "pago anulado", reactivarMora: true });
+  expect(r).toMatchObject({ anulada: true, restituida: false });
+  const [m] = await sql`SELECT monto_mora, activa FROM cartera.moras_credito WHERE credito_id = 31`;
+  expect(m).toEqual({ monto_mora: "150.00", activa: true });
+  const tipos = await sql`SELECT tipo FROM cartera.mora_pagada_cuota WHERE credito_id = 31 ORDER BY id`;
+  expect(tipos.map((t) => t.tipo)).toEqual(["CONDONACION", "REVERSA"]); // ninguna ANULACION nueva
+  const [{ hist }] = await sql`SELECT count(*)::int AS hist FROM cartera.moras_historial WHERE credito_id = 31`;
+  expect(hist).toBe(hist0); // sin INCREMENTO
+  const [c] = await sql`SELECT anulada_at, motivo FROM cartera.moras_condonaciones WHERE intento_id = ${uuidIntento(31)}`;
+  expect(c!.anulada_at).not.toBeNull();
+  expect(c!.motivo).toContain("SIN restituir la mora (ledger ya compensado (ruptura de convenio))");
+});
+
+integrationTest("#1980 Nexa: tras la ruptura del convenio, anular por evento marca la condonación y deja la mora recreada", async () => {
+  const e = await levantarEsquemaBoletaTardia();
+  const { sql, latefee } = e;
+  const c = await latefee.condonarMoraDeCuotas({
+    credito_id: 32, montoMoraEsperado: "119.47", monto: "7.47", cuotas: [{ cuota_id: 325, monto: "7.466667" }],
+    nexa_payment_event_id: 3201, motivo: "NEXA_ACH_A_TIEMPO",
+  });
+  expect(c.kind).toBe("condonada");
+  await romperConvenio(e, 32, "150.00");
+  expect(await latefee.anularCondonacionNexaATiempo({ nexa_payment_event_id: 3201, motivo: "rechazo" })).toEqual({ anulada: true, monto: "7.47" });
+  const [m] = await sql`SELECT monto_mora FROM cartera.moras_credito WHERE credito_id = 32`;
+  expect(m!.monto_mora).toBe("150.00");
+  const tipos = await sql`SELECT tipo FROM cartera.mora_pagada_cuota WHERE credito_id = 32 ORDER BY id`;
+  expect(tipos.map((t) => t.tipo)).toEqual(["CONDONACION", "REVERSA"]);
+  const [v] = await sql`SELECT anulada_at FROM cartera.moras_condonaciones WHERE nexa_payment_event_id = 3201`;
+  expect(v!.anulada_at).not.toBeNull();
+});

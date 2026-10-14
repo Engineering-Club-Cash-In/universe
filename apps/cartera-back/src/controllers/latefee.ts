@@ -2949,7 +2949,7 @@ async function anularCondonacionVivaEnTx(
     /** Con `reactivarMora`: las cuotas atrasadas que lleva la mora reactivada (criterio del cron). */
     cuotasAtrasadasAlReactivar?: number;
   },
-): Promise<{ anulada: false } | { anulada: true; monto: string; restituida: boolean }> {
+): Promise<{ anulada: false } | { anulada: true; monto: string; restituida: boolean; razon?: string }> {
   const [marcada] = await tx
     .update(moras_condonaciones)
     .set({ anulada_at: new Date() })
@@ -2960,14 +2960,21 @@ async function anularCondonacionVivaEnTx(
     .returning({ condonacion_id: moras_condonaciones.condonacion_id });
   if (!marcada) return { anulada: false };
 
-  await compensarAnotacionesVivas(
-    and(
-      eq(mora_pagada_cuota.condonacion_id, viva.condonacion_id),
-      eq(mora_pagada_cuota.tipo, "CONDONACION"),
-    )!,
+  const delLedger = and(
+    eq(mora_pagada_cuota.condonacion_id, viva.condonacion_id),
+    eq(mora_pagada_cuota.tipo, "CONDONACION"),
+  )!;
+  const compensadas = await compensarAnotacionesVivas(
+    delLedger,
     { tipo: "ANULACION", usuario_id: o.usuarioId, motivo: o.motivo },
     tx,
   );
+  if (compensadas === 0) {
+    // Tuvo ledger y alguien ya lo compensó: la ruptura de convenio (`cerrarMoraPagadaDeCredito`) recreó la mora
+    // desde cero SIN esta condonación. Restituir cobraría el monto dos veces. Sin ledger (todo sobrante), se restituye.
+    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(mora_pagada_cuota).where(delLedger);
+    if (n > 0) return { anulada: true, monto: viva.monto, restituida: false, razon: "ledger ya compensado (ruptura de convenio)" };
+  }
 
   const restitucion = await updateMora({
     credito_id: viva.credito_id,
@@ -3085,7 +3092,7 @@ export async function anularCondonacionBoletaTardia(params: (
       // mora cerrada (consultaMoraPolicy) y el modal de historial.
       await tx
         .update(moras_condonaciones)
-        .set({ motivo: sql`${moras_condonaciones.motivo} || ${` — anulada SIN restituir la mora (${razonNoReactiva})`}` })
+        .set({ motivo: sql`${moras_condonaciones.motivo} || ${` — anulada SIN restituir la mora (${r.razon ?? razonNoReactiva})`}` })
         .where(eq(moras_condonaciones.condonacion_id, viva.condonacion_id));
     }
     return { anulada: true, condonacion_id: viva.condonacion_id, monto: r.monto, restituida: r.restituida };

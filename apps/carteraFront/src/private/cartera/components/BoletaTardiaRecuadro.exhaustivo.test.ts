@@ -7,6 +7,7 @@ import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
 import {
   avisoCondonacionAnulada,
   bloqueCondonacionParaEnviar,
+  cascadaSinCondonar,
   estadoRecuadroBoletaTardia,
   moraDespuesDeCondonar,
   moraEfectivaParaCobrar,
@@ -48,7 +49,7 @@ const ancla = region(form, "/* MODAL DE CONFIRMACION PARA PAGO NORMAL */", null,
 const cascadaSrc = region(ancla, "const montoBoleta = Number(formik.values.monto_boleta) || 0;", "return (\n          <div className=\"bg-gradient-to-br from-green-50", "cascada");
 const NOMBRES = ["formik", "mora", "vistaBoletaTardia", "aceptada", "rubrosActual", "convenioActivoInfo", "dataCredito",
   "displayedPartialContribution", "cuotaSeleccionada", "moraEfectivaParaCobrar", "moraAntesDeCondonar", "escalonesQueConsumenLaBoleta",
-  "loQueElAbonoACapitalNoAplica", "montoParaAbonoDirectoACapital"];
+  "loQueElAbonoACapitalNoAplica", "montoParaAbonoDirectoACapital", "cascadaSinCondonar"];
 const SALIDA = "{ distribucion, montoRestante, montoOtrosAplicado, montoMoraAplicado, montoRubrosAplicado, montoConvenioAplicado, montoCuotaAplicado, cuotaNormal, cuotaQuedaCorta, textoCausas, moraMonto }";
 function compilar(cuerpo: string) {
   const js = new (globalThis as any).Bun.Transpiler({ loader: "ts" }).transformSync(`function f(${NOMBRES.join(",")}){\n${cuerpo}\nreturn ${SALIDA};}\nf;`);
@@ -79,6 +80,7 @@ function correr(fn: ReturnType<typeof compilar>, c: Caso, v: VistaPreviaBoletaTa
     c.mora, v, aceptada, c.rubros, { cuotaConvenioAPagar: c.convenio ?? 0 },
     { cuotaMensualAPagar: c.cuota, usuario: { saldo_a_favor: c.saldo ?? 0 } },
     c.abonos ?? 0, 7, moraEfectivaParaCobrar, moraAntesDeCondonar, escalonesQueConsumenLaBoleta, loQueElAbonoACapitalNoAplica, montoParaAbonoDirectoACapital,
+    cascadaSinCondonar,
   );
 }
 

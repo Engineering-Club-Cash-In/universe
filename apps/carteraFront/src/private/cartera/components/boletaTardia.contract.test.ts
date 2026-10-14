@@ -197,9 +197,8 @@ describe("F6: al confirmar se congela la condonación (el excedente cambia otros
 
 describe("F7: el aviso de 'Abonar todo a Capital' usa la mora SIN condonar", () => {
   test("noSeAplica recibe la mora local aplicada, no la condonada", () => {
-    const aviso = region(form, "const noSeAplica = loQueElAbonoACapitalNoAplica({", "const textoCausas", "aviso abonar a capital");
-    expect(aviso).toContain("mora: moraSinCondonarAplicada,");
-    expect(form).toContain("const moraSinCondonarAplicada = Math.min(");
+    const aviso = region(form, "const noSeAplica = loQueElAbonoACapitalNoAplica(", "const textoCausas", "aviso abonar a capital");
+    expect(aviso).toContain("mora: Number(mora || 0),"); // la local, que cascadaSinCondonar topa al disponible
   });
 });
 

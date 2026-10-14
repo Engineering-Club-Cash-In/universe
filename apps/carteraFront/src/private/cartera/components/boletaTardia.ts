@@ -67,6 +67,22 @@ export function moraAntesDeCondonar(moraLocal: number, vista: VistaPreviaBoletaT
   const total = Number(vista.moraACobrar) + Number(vista.montoCondonar);
   return Number.isFinite(total) ? redondear(total) : moraLocal;
 }
+/**
+ * La cascada del modal SIN condonar, para el aviso de "Abonar todo a Capital" (el botón descarta la condonación).
+ * `disponible` = boleta − abono directo − otros aplicados. mora → rubros → convenio (se topa pero NO resta) → cuota → excedente.
+ * Alimenta SOLO `loQueElAbonoACapitalNoAplica`, nunca `escalonesQueConsumenLaBoleta`.
+ */
+export function cascadaSinCondonar(p: { disponible: number; mora: number; rubros: number; convenio: number; cuotaNormal: number }) {
+  let r = Math.max(0, p.disponible);
+  const mora = Math.min(r, Math.max(0, p.mora));
+  r -= mora;
+  const rubros = Math.min(r, Math.max(0, p.rubros));
+  r -= rubros;
+  const convenio = Math.min(r, Math.max(0, p.convenio));
+  const cuota = p.cuotaNormal > 0 ? Math.min(r, p.cuotaNormal) : 0;
+  r -= cuota;
+  return { mora, rubros, convenio, cuota, excedente: r };
+}
 /** Solo viaja si el recuadro está en "casilla" (si pasó a gris después de marcar, no se envía), el monto es válido y hay intentoId. */
 export function bloqueCondonacionParaEnviar(vista: VistaPreviaBoletaTardia | null | undefined, aceptadaIntentoId: string | null, entorno: EntornoRecuadro): BloqueCondonacionBoletaTardia | undefined {
   if (!vista || !vista.intentoId || !estaAceptada(vista, aceptadaIntentoId)) return undefined;

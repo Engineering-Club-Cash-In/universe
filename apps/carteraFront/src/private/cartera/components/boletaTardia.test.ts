@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
-  avisoCondonacionAnulada, bloqueCondonacionParaEnviar, confirmacionEsperaVistaPrevia, esConflictoDeCondonacion, estaAceptada, estadoRecuadroBoletaTardia, fechaCortaBoletaTardia,
+  avisoCondonacionAnulada, bloqueCondonacionParaEnviar, cascadaSinCondonar, confirmacionEsperaVistaPrevia, esConflictoDeCondonacion, estaAceptada, estadoRecuadroBoletaTardia, fechaCortaBoletaTardia,
   mensajeConflictoCondonacion, moraDespuesDeCondonar, parametrosPreviewBoletaTardia, textoCasillaBoletaTardia,
   textoFechasBoletaTardia, textoMoraDelRetraso, type VistaPreviaBoletaTardia,
 } from "./boletaTardia";
@@ -195,5 +195,43 @@ describe("Codex r1 #11: Confirmar espera la vista previa", () => {
   test("la vista previa tiene timeout: colgada no traba el botón para siempre", () => {
     const src = readFileSync(new URL("../services/boletaTardia.services.ts", import.meta.url), "utf8");
     expect(src).toContain("{ timeout: 10_000 }");
+  });
+});
+
+describe("Codex r2 #1990: cascadaSinCondonar (aviso de 'Abonar todo a Capital')", () => {
+  const suma = (c: ReturnType<typeof cascadaSinCondonar>) => Math.round((c.mora + c.rubros + c.cuota + c.excedente) * 100) / 100;
+  test("el ejemplo de Codex: boleta Q100, mora local Q80, rubros Q60 → Q80 a mora y Q20 a rubros, nada más", () => {
+    expect(cascadaSinCondonar({ disponible: 100, mora: 80, rubros: 60, convenio: 0, cuotaNormal: 500 }))
+      .toEqual({ mora: 80, rubros: 20, convenio: 0, cuota: 0, excedente: 0 });
+  });
+  test("invariante: mora + rubros + cuota + excedente == disponible (el convenio no consume)", () => {
+    for (const e of [
+      { disponible: 100, mora: 80, rubros: 60, convenio: 30, cuotaNormal: 500 },
+      { disponible: 1000, mora: 80, rubros: 60, convenio: 300, cuotaNormal: 500 },
+      { disponible: 1000, mora: 0, rubros: 0, convenio: 0, cuotaNormal: 0 },
+      { disponible: 50, mora: 10, rubros: 0, convenio: 40, cuotaNormal: 20 },
+    ]) expect(suma(cascadaSinCondonar(e))).toBe(e.disponible);
+  });
+  test("con rubros que consumen todo, el convenio queda en 0", () => {
+    expect(cascadaSinCondonar({ disponible: 100, mora: 40, rubros: 60, convenio: 30, cuotaNormal: 500 }).convenio).toBe(0);
+  });
+  test("el convenio se topa al resto pero no lo resta: la cuota se paga igual", () => {
+    expect(cascadaSinCondonar({ disponible: 1000, mora: 0, rubros: 0, convenio: 300, cuotaNormal: 1000 }))
+      .toEqual({ mora: 0, rubros: 0, convenio: 300, cuota: 1000, excedente: 0 });
+  });
+  test("con mora = moraACobrar da lo mismo que la cascada del modal", () => {
+    // Modal: boleta 1000, mora condonada 35, rubros 60, convenio 100, cuota 500 → 35, 60, 100, 500 y excedente 405.
+    expect(cascadaSinCondonar({ disponible: 1000, mora: 35, rubros: 60, convenio: 100, cuotaNormal: 500 }))
+      .toEqual({ mora: 35, rubros: 60, convenio: 100, cuota: 500, excedente: 405 });
+  });
+  test("contract: con la casilla, el aviso de PagoForm usa cascadaSinCondonar y ya no la aritmética de moraExtra", () => {
+    const form = readFileSync(new URL("./PagoForm.tsx", import.meta.url), "utf8");
+    const i = form.indexOf("const noSeAplica = loQueElAbonoACapitalNoAplica(");
+    const aviso = form.slice(i, form.indexOf("const textoCausas", i));
+    expect(i).toBeGreaterThan(0);
+    expect(aviso).toContain("aceptada\n            ? cascadaSinCondonar({");
+    expect(aviso).toContain("mora: Number(mora || 0),");
+    expect(aviso).toContain("rubros: rubrosMonto,");
+    expect(form).not.toContain("moraExtra");
   });
 });

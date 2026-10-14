@@ -34,6 +34,7 @@ import { getDisplayedPartialContribution } from "../services/installmentContribu
 import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
 import {
   bloqueCondonacionParaEnviar,
+  cascadaSinCondonar,
   confirmacionEsperaVistaPrevia,
   estaAceptada,
   estadoRecuadroBoletaTardia,
@@ -446,24 +447,21 @@ export function PagoForm() {
           otros,
         });
 
-        // "Abonar todo a Capital" descarta la condonación: ahí la mora que queda pendiente es la SIN condonar.
-        const moraSinCondonarAplicada = Math.min(
-          Math.max(0, montoBoleta - abonoCapitalDirecto - montoOtrosAplicado),
-          Number(mora || 0),
+        // "Abonar todo a Capital" descarta la condonación: con la casilla, el aviso corre la cascada ENTERA
+        // con la mora SIN condonar (lo que la condonación liberaba no puede ir a rubros y cuota a la vez).
+        // Sin la casilla, es el desglose tal cual: la cuota es el término más común (sin ella una boleta
+        // normal dejaba todo en cero y el aviso no salía) y el excedente es lo que el modal pinta como saldo a favor.
+        const noSeAplica = loQueElAbonoACapitalNoAplica(
+          aceptada
+            ? cascadaSinCondonar({
+                disponible: Math.max(0, montoBoleta - abonoCapitalDirecto) - montoOtrosAplicado,
+                mora: Number(mora || 0),
+                rubros: rubrosMonto,
+                convenio: cuotaConvenio,
+                cuotaNormal,
+              })
+            : { mora: montoMoraAplicado, rubros: montoRubrosAplicado, convenio: montoConvenioAplicado, cuota: montoCuotaAplicado, excedente: montoRestante },
         );
-        const moraExtra = Math.max(0, moraSinCondonarAplicada - montoMoraAplicado);
-        const noSeAplica = loQueElAbonoACapitalNoAplica({
-          mora: moraSinCondonarAplicada,
-          rubros: montoRubrosAplicado,
-          convenio: montoConvenioAplicado,
-          // La cuota es el término que faltaba, y el caso más común: sin ella,
-          // una boleta normal sin mora ni rubros ni convenio dejaba todo en cero
-          // y el aviso no salía.
-          cuota: Math.max(0, montoCuotaAplicado - Math.max(0, moraExtra - montoRestante)),
-          // El excedente es lo que sobra al final de la cascada, que es lo mismo
-          // que el modal pinta como "Excedente (nuevo saldo a favor)".
-          excedente: Math.max(0, montoRestante - moraExtra),
-        });
 
         const textoCausas = consumo.escalones
           .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)

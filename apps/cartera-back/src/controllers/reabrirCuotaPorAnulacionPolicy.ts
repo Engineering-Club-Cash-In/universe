@@ -36,7 +36,7 @@ type BigInput = number | string | Big;
  *  - la fila anulada no cuelga de una cuota o no le aportó nada (solo mora /
  *    otros / convenio: cuelgan de la primera cuota pendiente sin pagarla);
  *  - las hermanas vivas cubren la cuota solas (no se reabre lo que ya estaba
- *    pagado sin este pago).
+ *    pagado sin este pago), salvo en INCOBRABLE, que decide por capital.
  *
  * Si la fila aportó y las hermanas no cubren, los restantes SIEMPRE se reponen
  * (como en la reversa: no dependen del estado del crédito ni de `credito.cuota`).
@@ -129,7 +129,11 @@ export function planReaperturaCuotaPorAnulacion({
       ? { ...h, validationStatus: "validated" }
       : h,
   );
+  // INCOBRABLE se rige por el capital, no por la suma: las filas estructurales del castigo
+  // (system_reset) la contaminan (registerPaymentPolicy ~1051-1061, crédito 23). Como
+  // reversePayment (~964-983), sin atajo: siempre repone y decide `pagado` con capitalPrevio.
   if (
+    statusCredit !== "INCOBRABLE" &&
     cuota.gt(0) &&
     calcularCoberturaCuota({ montoCuota: cuota, pagos: cubrientes, incluirPendientes: true })
       .cuotaCompleta

@@ -1,4 +1,7 @@
-import type { FichaPrincipalPersona } from "../db/schema/buro";
+import type {
+	DocumentoIdentidad,
+	FichaPrincipalPersona,
+} from "../db/schema/buro";
 import type { renapInfo } from "../db/schema/renap";
 
 /**
@@ -10,6 +13,7 @@ import type { renapInfo } from "../db/schema/renap";
 export function mapearFichaInfornetARenap(
 	dpi: string,
 	ficha: FichaPrincipalPersona,
+	documentos: DocumentoIdentidad[] = [],
 ): typeof renapInfo.$inferInsert | null {
 	const nombres = texto(ficha.nombres);
 	const apellidos = texto(ficha.apellidos);
@@ -22,7 +26,9 @@ export function mapearFichaInfornetARenap(
 		firstName: nombres,
 		firstLastName: apellidos,
 		gender: mapearSexo(ficha.sexo),
-		birthDate: mapearFechaNacimiento(ficha.fechaNacimiento),
+		civilStatus: mapearEstadoCivil(ficha.estadoCivil),
+		birthDate: mapearFecha(ficha.fechaNacimiento),
+		dpiExpiracyDate: mapearVencimientoDpi(documentos),
 		municipalityBornedIn: lugar?.municipio ?? null,
 		departmentBornedIn: lugar?.departamento ?? null,
 		bornedIn: texto(ficha.pais),
@@ -44,8 +50,17 @@ function mapearSexo(sexo: string | null | undefined): "M" | "F" | null {
 	return null;
 }
 
-/** `dd/mm/aaaa` → `aaaa-mm-dd`; fechas aproximadas ("APROX 12/1998") o inválidas quedan vacías */
-function mapearFechaNacimiento(
+function mapearEstadoCivil(
+	estadoCivil: string | null | undefined,
+): "S" | "C" | null {
+	const valor = estadoCivil?.trim().toUpperCase();
+	if (valor === "CASADO" || valor === "CASADA" || valor === "C") return "C";
+	if (valor === "SOLTERO" || valor === "SOLTERA" || valor === "S") return "S";
+	return null;
+}
+
+/** `dd/mm/aaaa` → `aaaa-mm-dd`; fechas aproximadas o inválidas quedan vacías */
+function mapearFecha(
 	fecha: string | null | undefined,
 ): string | null {
 	const partes = fecha?.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -59,6 +74,15 @@ function mapearFechaNacimiento(
 		utc.getUTCDate() === Number(dia);
 
 	return esValida ? `${anio}-${mes}-${dia}` : null;
+}
+
+function mapearVencimientoDpi(documentos: DocumentoIdentidad[]): string | null {
+	const dpi = documentos.find(
+		(documento) =>
+			documento.tipo.trim().toUpperCase() === "DPI" &&
+			Boolean(documento.fechaVencimiento),
+	);
+	return mapearFecha(dpi?.fechaVencimiento);
 }
 
 /** "MUNICIPIO, DEPTO"; valores sin coma ("-NA-", "EXTRANJEROS NATURALIZADOS") no se pueden separar */

@@ -10,6 +10,7 @@ const fichaBase: FichaPrincipalPersona = {
 	apellidos: "PEREZ LOPEZ DE FIGUEROA",
 	sexo: "FEMENINO",
 	fechaNacimiento: "13/08/1999",
+	estadoCivil: "CASADO",
 	lugarNacimiento: "MIXCO, GUATEMALA",
 	pais: "GUATEMALA",
 	nacionalidad: "GUATEMALTECA",
@@ -23,6 +24,7 @@ describe("mapearFichaInfornetARenap", () => {
 			firstName: "MARIA DE LOS ANGELES",
 			firstLastName: "PEREZ LOPEZ DE FIGUEROA",
 			gender: "F",
+			civilStatus: "C",
 			birthDate: "1999-08-13",
 			municipalityBornedIn: "MIXCO",
 			departmentBornedIn: "GUATEMALA",
@@ -41,14 +43,29 @@ describe("mapearFichaInfornetARenap", () => {
 			"secondLastName",
 			"marriedLastName",
 			"picture",
-			"civilStatus",
 			"deathDate",
 			"cedulaOrder",
 			"cedulaRegister",
-			"dpiExpiracyDate",
 		]) {
 			expect(persona).not.toHaveProperty(campo);
 		}
+	});
+
+	test("mapea estado civil y vigencia del DPI cuando Infornet los trae", () => {
+		const persona = mapearFichaInfornetARenap(DPI, fichaBase, [
+			{
+				tipo: "DPI",
+				numero: DPI,
+				fechaVencimiento: "01/01/2025",
+			},
+		]);
+
+		expect(persona?.civilStatus).toBe("C");
+		expect(persona?.dpiExpiracyDate).toBe("2025-01-01");
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, estadoCivil: "SOLTERO" })
+				?.civilStatus,
+		).toBe("S");
 	});
 
 	test("sin nombres o apellidos no hay registro", () => {

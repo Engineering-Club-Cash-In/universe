@@ -5,6 +5,7 @@ import { and, eq, gt, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { renapInfo } from "@/db/schema";
 import {
+	type DocumentoIdentidad,
 	type EstudioPersonaJSON,
 	type FichaPrincipalPersona,
 	infornetPersonaCache,
@@ -140,6 +141,7 @@ export class InfornetController {
 					await this.completarRenapDesdeInfornet(
 						dpi,
 						cache[0].estudioCompleto.fichaPrincipal,
+						cache[0].estudioCompleto.documentos,
 					);
 				}
 				return {
@@ -187,7 +189,11 @@ export class InfornetController {
 			await this.guardarEnCache(dpi, estudio, personaRenap[0]);
 
 			if (!CONSULTAR_RENAP && personaRenap.length === 0) {
-				await this.completarRenapDesdeInfornet(dpi, estudio.fichaPrincipal);
+				await this.completarRenapDesdeInfornet(
+					dpi,
+					estudio.fichaPrincipal,
+					estudio.documentos,
+				);
 			}
 
 			console.log("\n✅ ========== ESTUDIO COMPLETADO ==========\n");
@@ -262,9 +268,10 @@ export class InfornetController {
 	private async completarRenapDesdeInfornet(
 		dpi: string,
 		ficha: FichaPrincipalPersona,
+		documentos: DocumentoIdentidad[],
 	): Promise<void> {
 		try {
-			const persona = mapearFichaInfornetARenap(dpi, ficha);
+			const persona = mapearFichaInfornetARenap(dpi, ficha, documentos);
 			if (!persona) return;
 
 			await db

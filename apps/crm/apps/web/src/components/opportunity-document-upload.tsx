@@ -10,12 +10,24 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
+import {
+	type AseguradoraConfirmada,
+	useConfirmarEnvioFactura,
+} from "@/components/confirmar-envio-factura";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
+import {
+	avisoFacturaSubida,
+	etiquetaEnvioAseguradora,
+	type ResultadoFacturaSubida,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
 import {
 	COFIRMANTE_BANK_STATEMENT_HELP,
 	COFIRMANTE_BANK_STATEMENT_OPTION,
@@ -157,6 +169,7 @@ export function OpportunityDocumentUpload({
 		mutationFn: async (data: {
 			file: File;
 			documentType: ManualOpportunityDocumentType;
+			envioFacturaConfirmado?: AseguradoraConfirmada;
 		}) => {
 			const { key } = await uploadFileToR2WithRetry(data.file, {
 				resourceType: "opportunity_document",
@@ -172,10 +185,16 @@ export function OpportunityDocumentUpload({
 					size: data.file.size,
 					key,
 				},
+				envioFacturaConfirmado: data.envioFacturaConfirmado ?? null,
 			});
 		},
-		onSuccess: () => {
-			toast.success("Documento subido exitosamente");
+		onSuccess: (data) => {
+			const aviso = avisoFacturaSubida(
+				(data as { facturaSeguro?: ResultadoFacturaSubida | null } | undefined)
+					?.facturaSeguro,
+			);
+			if (aviso) toast[aviso.tipo](aviso.texto);
+			else toast.success("Documento subido exitosamente");
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
@@ -190,6 +209,8 @@ export function OpportunityDocumentUpload({
 			toast.error(`Error al subir documento: ${error.message}`);
 		},
 	});
+
+	const confirmacionFactura = useConfirmarEnvioFactura(opportunityId);
 
 	const deleteMutation = useMutation({
 		mutationFn: async (documentId: string) => {
@@ -252,6 +273,15 @@ export function OpportunityDocumentUpload({
 				}
 				setIncludeAll3Months(false);
 			})();
+		} else if (documentType === "seguro_vehiculo") {
+			const file = selectedFile;
+			void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
+				uploadMutation.mutate({
+					file,
+					documentType,
+					envioFacturaConfirmado: confirmada,
+				}),
+			);
 		} else {
 			uploadMutation.mutate({ file: selectedFile, documentType });
 		}
@@ -259,6 +289,7 @@ export function OpportunityDocumentUpload({
 
 	return (
 		<div className="space-y-6">
+			{confirmacionFactura.dialogo}
 			{/* Sección: Subir Documento */}
 			<div className="rounded-lg border bg-muted/30 p-4">
 				<div className="mb-4 flex items-center gap-2">
@@ -282,6 +313,7 @@ export function OpportunityDocumentUpload({
 								width="full"
 								popOverWidth="full"
 								isInModal={true}
+								disabled={confirmacionFactura.revisando}
 							/>
 						</div>
 
@@ -292,6 +324,7 @@ export function OpportunityDocumentUpload({
 								type="file"
 								accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls"
 								onChange={handleFileChange}
+								disabled={confirmacionFactura.revisando}
 								className="h-10 w-full rounded-md border bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:font-medium file:text-sm"
 							/>
 						</div>
@@ -347,7 +380,10 @@ export function OpportunityDocumentUpload({
 					<Button
 						onClick={handleUpload}
 						disabled={
-							!selectedFile || !documentType || uploadMutation.isPending
+							!selectedFile ||
+							!documentType ||
+							uploadMutation.isPending ||
+							confirmacionFactura.revisando
 						}
 						size="sm"
 					>
@@ -405,8 +441,29 @@ export function OpportunityDocumentUpload({
 												{doc.description}
 											</p>
 										)}
+									{doc.subidoDesde && (
+										<p className="text-muted-foreground text-xs">
+											{textoSubidoPor(doc)}
+										</p>
+									)}
+									{(() => {
+										const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+										return (
+											envio && (
+												<Badge className={`mt-1 text-xs ${envio.className}`}>
+													{envio.texto}
+												</Badge>
+											)
+										);
+									})()}
 								</div>
-								<div className="flex items-center gap-2">
+								<div className="flex flex-wrap items-center gap-2">
+									<ReintentoFacturaSeguro
+										opportunityId={opportunityId}
+										disponible={doc.envioAseguradora?.reintentoDisponible}
+										aseguradora={doc.envioAseguradora?.aseguradora}
+										reintentoDesde={doc.envioAseguradora?.reintentoDesde}
+									/>
 									{doc.url && (
 										<Button variant="outline" size="sm" asChild>
 											<a

@@ -139,7 +139,7 @@ describe("servicio: contrato sobre el fuente (sin DOM)", () => {
   const svc = leer("../services/boletaTardia.services.ts");
   test("POST a /pagos/boleta-tardia/preview con los params tal cual y devuelve res.data.data", () => {
     expect(svc).toContain("/pagos/boleta-tardia/preview");
-    expect(svc).toMatch(/api\.post[^(]*\(`\$\{API_URL\}\/pagos\/boleta-tardia\/preview`,\s*p\)/);
+    expect(svc).toMatch(/api\.post[^(]*\(`\$\{API_URL\}\/pagos\/boleta-tardia\/preview`,\s*p,\s*\{ timeout: 10_000 \}\)/);
     expect(svc).toContain("res.data.data");
   });
   test("el servicio no traga errores (sin try/catch que devuelva una vista por defecto)", () => {

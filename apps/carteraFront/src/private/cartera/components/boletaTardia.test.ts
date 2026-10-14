@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
-  avisoCondonacionAnulada, bloqueCondonacionParaEnviar, esConflictoDeCondonacion, estaAceptada, estadoRecuadroBoletaTardia, fechaCortaBoletaTardia,
+  avisoCondonacionAnulada, bloqueCondonacionParaEnviar, confirmacionEsperaVistaPrevia, esConflictoDeCondonacion, estaAceptada, estadoRecuadroBoletaTardia, fechaCortaBoletaTardia,
   mensajeConflictoCondonacion, moraDespuesDeCondonar, parametrosPreviewBoletaTardia, textoCasillaBoletaTardia,
   textoFechasBoletaTardia, textoMoraDelRetraso, type VistaPreviaBoletaTardia,
 } from "./boletaTardia";
@@ -181,5 +181,19 @@ describe("F1 hook: la apertura va en la queryKey", () => {
     const src = readFileSync(new URL("../hooks/useBoletaTardiaPreview.ts", import.meta.url), "utf8");
     expect(src).toContain("aperturaId = 0");
     expect(src).toContain('queryKey: ["boleta-tardia-preview", aperturaId, params]');
+  });
+});
+
+describe("Codex r1 #11: Confirmar espera la vista previa", () => {
+  const params = { credito_id: 1, monto_boleta: 1000, otros: 0, abono_directo_capital: 0, fecha_boleta: "2026-09-30" };
+  test("espera solo con el modal abierto, params válidos y la vista previa en su primera carga", () => {
+    expect(confirmacionEsperaVistaPrevia({ params, abierto: true, cargando: true })).toBe(true);
+    expect(confirmacionEsperaVistaPrevia({ params, abierto: true, cargando: false })).toBe(false);
+    expect(confirmacionEsperaVistaPrevia({ params: null, abierto: true, cargando: true })).toBe(false);
+    expect(confirmacionEsperaVistaPrevia({ params, abierto: false, cargando: true })).toBe(false);
+  });
+  test("la vista previa tiene timeout: colgada no traba el botón para siempre", () => {
+    const src = readFileSync(new URL("../services/boletaTardia.services.ts", import.meta.url), "utf8");
+    expect(src).toContain("{ timeout: 10_000 }");
   });
 });

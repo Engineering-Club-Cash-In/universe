@@ -51,6 +51,9 @@ export function moraDespuesDeCondonar(mora: number, vista: VistaPreviaBoletaTard
   if (!Number.isFinite(monto) || monto <= 0) return mora; // monto inválido: la mora no cambia (nunca sube ni da NaN)
   return Math.max(0, redondear(mora - monto));
 }
+/** Confirmar espera la vista previa solo mientras está en su primera carga; con error o sin params el pago sigue normal. */
+export const confirmacionEsperaVistaPrevia = (p: { params: ParamsPreviewBoletaTardia | null; abierto: boolean; cargando: boolean }): boolean =>
+  p.abierto && p.params !== null && p.cargando;
 /** Solo viaja si el recuadro está en "casilla" (si pasó a gris después de marcar, no se envía), el monto es válido y hay intentoId. */
 export function bloqueCondonacionParaEnviar(vista: VistaPreviaBoletaTardia | null | undefined, aceptadaIntentoId: string | null, entorno: EntornoRecuadro): BloqueCondonacionBoletaTardia | undefined {
   if (!vista || !vista.intentoId || !estaAceptada(vista, aceptadaIntentoId)) return undefined;

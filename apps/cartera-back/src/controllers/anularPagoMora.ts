@@ -4,6 +4,7 @@ import { creditos, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { reabrirCuotaPorAnulacion } from "./reabrirCuotaPorAnulacion";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // ── `./rubros` ENTRA COMO TIPO, Y COMO VALOR SOLO DENTRO DE LA FÁBRICA ─────
 // `./rubros` arrastra `../database/index`, o sea la conexión real. Importarlo
@@ -73,6 +74,12 @@ export type AnularPagoMoraDeps = {
   anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
   /** Anula la condonación de una boleta tardía cuyo pago se invalida (pendiente o validado). Opcional. */
   anularCondonacionBoletaTardia?: typeof anularCondonacionPorPagoInvalidado;
+  /**
+   * Reabre la cuota que el pago anulado había completado (restantes, `pagado` de
+   * las hermanas y de la cuota). Opcional: quien no la pasa no la corre, así las
+   * pruebas con bases falsas de cola no ven consultas de más.
+   */
+  reabrirCuota?: typeof reabrirCuotaPorAnulacion;
 };
 
 const DEPS_REALES = (): AnularPagoMoraDeps => ({
@@ -92,6 +99,7 @@ const DEPS_REALES = (): AnularPagoMoraDeps => ({
     const { anularCondonacionPorPagoInvalidado } = await import("./condonacionBoletaTardiaAnulacion");
     return anularCondonacionPorPagoInvalidado(params);
   }) as typeof anularCondonacionPorPagoInvalidado,
+  reabrirCuota: reabrirCuotaPorAnulacion,
 });
 
 export async function anularPagoYRestituirMora(
@@ -237,6 +245,12 @@ export async function anularPagoYRestituirMora(
   if (!actualizado.rowCount || actualizado.rowCount === 0) {
     throw new Error("No payment found to mark as false with the given criteria");
   }
+
+  // Si el pago había completado su cuota, las hermanas siguen con `pagado = true` y
+  // los restantes en 0 (los estampó `insertPayment`): el cron daba la cuota por
+  // cubierta y el pago siguiente la saltaba. Se reabre acá, en la misma
+  // transacción y bajo el candado del crédito, con el criterio de `reversePayment`.
+  await deps.reabrirCuota?.(tx, { pago_id, credito_id });
 
   // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento
   // de esa transferencia registre limpio en vez de reaplicar esta fila anulada.

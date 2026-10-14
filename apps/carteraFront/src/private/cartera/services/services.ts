@@ -2120,6 +2120,9 @@ export interface PagoDataInvestor {
   // true si ese evento Nexa quedó failed (Nexa devolvió el dinero): la fila sí se anula.
   nexaEventoFallido?: boolean;
 
+  // Condonación de mora ligada a la boleta tardía de este pago (viva o anulada); null si no hay.
+  condonacionBoletaTardia?: { condonacionId: number; monto: string; asesor: string; anulada?: boolean } | null;
+
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;

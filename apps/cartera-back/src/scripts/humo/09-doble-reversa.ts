@@ -36,7 +36,8 @@ const s = async () => Number((await sql`SELECT saldo_a_favor FROM cartera.usuari
 // Una boleta enorme contra el capital, para que sobre y se acredite saldo.
 const { insertPayment } = await import("../../controllers/registerPayment");
 const { reversePayment } = await import("../../controllers/reversePayment");
-const hoy = new Date().toISOString().slice(0, 10);
+// Día calendario de Guatemala (no UTC): de 18:00 a 23:59 GT el día UTC ya es "mañana" y fecha_boleta sería futura.
+const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guatemala" }).format(new Date());
 const s0 = await s();
 console.log(`\n  crédito ${CRED} (${c.statusCredit}, capital ${c.capital}), usuario ${c.usuario_id}`);
 console.log(`  saldo a favor inicial: ${s0}`);

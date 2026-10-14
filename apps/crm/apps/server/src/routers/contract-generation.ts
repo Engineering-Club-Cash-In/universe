@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { creditChecks } from "../db/schema/checks";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import {
 	contractGenerationSnapshots,
@@ -23,6 +24,14 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import {
+	coberturasQueNoCorresponden,
+	esCartaDeCobertura,
+} from "../lib/cobertura-por-aseguradora";
+import {
+	esCartaDeCheques,
+	mapChecksToDisbursementRows,
+} from "../lib/contract-disbursement";
 import {
 	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 	resolveLegacyContractGender,
@@ -64,6 +73,15 @@ import { eqDpi } from "../lib/dpi-lookup";
 import { armarFirmantes } from "../lib/firmantes-de-la-oportunidad";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { createNotification } from "../lib/notificaciones";
+import {
+	CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD,
+	type CodeudorDeLaOportunidad,
+	type DatosDeSociedad,
+	esOportunidadDeSociedad,
+	motivoParaNoGenerar,
+	motivoPorRepresentanteCambiado,
+	representanteLegalDe,
+} from "../lib/oportunidad-de-sociedad";
 import { juridicoProcedure } from "../lib/orpc";
 import {
 	agruparCartas,
@@ -75,6 +93,7 @@ import {
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import { conVencimientoDelContrato } from "../lib/vencimiento-del-contrato";
 import {
+	aseguradoraDeLaOportunidad,
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
 	transformToApiFormat,
@@ -286,8 +305,8 @@ function firmaDelGenerador(apiResponse: unknown): {
  * para la subida manual se arma acá, porque lo único que manda jurídico es el
  * archivo y el tipo de contrato.
  *
- * Con `subidaAMano`, si el cliente es una sociedad firma su representante (el
- * primer codeudor) y no la sociedad: ver `armarFirmantes`.
+ * Con `subidaAMano`, si la oportunidad es de una sociedad firma su
+ * representante legal y no la sociedad: ver `armarFirmantes`.
  */
 export async function firmantesDeLaOportunidad(
 	opportunityId: string,
@@ -315,8 +334,7 @@ export async function firmantesDeLaOportunidad(
 		.join(" ");
 
 	// Orden estable: el reparto de correos de prueba es posicional, así que los
-	// dos lados tienen que recorrer los codeudores en el mismo orden. Y en una
-	// sociedad, el primero registrado es su representante.
+	// dos lados tienen que recorrer los codeudores en el mismo orden.
 	const cofirmantes = await db
 		.select()
 		.from(coDebtors)
@@ -327,12 +345,14 @@ export async function firmantesDeLaOportunidad(
 		const signers = armarFirmantes({
 			titular: { email: lead.email, name: nombreTitular, dpi: lead.dpi },
 			codeudores: cofirmantes.map((cd) => ({
+				id: cd.id,
+				esRepresentanteLegal: cd.esRepresentanteLegal,
 				email: cd.email,
 				name: cd.fullName,
 				dpi: cd.dpi,
 			})),
-			sociedadFirmaPorSuRepresentante:
-				Boolean(opciones.subidaAMano) && lead.clientType === "empresa",
+			clientType: lead.clientType,
+			sociedadFirmaPorSuRepresentante: Boolean(opciones.subidaAMano),
 		});
 		return { leadId: lead.id, signers };
 	} catch (error) {
@@ -348,6 +368,28 @@ export async function firmantesDeLaOportunidad(
  * Del 90% en adelante los contratos que están en análisis son los que son:
  * cambiarlos ahí sería mover el piso de una decisión ya tomada.
  */
+/**
+ * Corta si se pide la carta de cobertura de la otra aseguradora.
+ *
+ * El asistente las deja deshabilitadas, pero la pantalla pudo cargarse antes de
+ * que cambiaran la cotización, y regenerar o subir a mano reusan el tipo que
+ * venía: se vuelve a leer la cotización acá.
+ */
+async function exigirCoberturaDeLaAseguradora(
+	opportunityId: string,
+	contractTypes: string[],
+): Promise<void> {
+	const noCorresponden = coberturasQueNoCorresponden(
+		await aseguradoraDeLaOportunidad(opportunityId),
+	);
+	const tipo = contractTypes.find((t) => noCorresponden[t]);
+	if (tipo) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${noCorresponden[tipo]}: no va la carta de cobertura de la otra aseguradora. Elegí la que corresponde.`,
+		});
+	}
+}
+
 async function exigirEtapaQuePermiteReemplazo(
 	opportunityId: string,
 ): Promise<{ stageId: string | null; porcentaje: number }> {
@@ -939,6 +981,63 @@ async function exigirQueSePuedaSubir(input: {
 	}
 }
 
+/**
+ * Lo que decide si la oportunidad es de una sociedad: el tipo de cliente del
+ * lead y sus codeudores, en orden de registro. Null si no existe.
+ */
+async function sociedadDeLaOportunidad(
+	opportunityId: string,
+): Promise<DatosDeSociedad<
+	CodeudorDeLaOportunidad & { dpi: string; email: string | null }
+> | null> {
+	const [oportunidad] = await db
+		.select({ clientType: leads.clientType })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	if (!oportunidad) return null;
+
+	const coDeudores = await db
+		.select({
+			id: coDebtors.id,
+			dpi: coDebtors.dpi,
+			email: coDebtors.email,
+			esRepresentanteLegal: coDebtors.esRepresentanteLegal,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+
+	return { clientType: oportunidad.clientType, coDeudores };
+}
+
+/**
+ * Corta si lo pedido no es la batería de la oportunidad: una sociedad lleva
+ * los de sociedad (y sin codeudores de más), una persona los individuales.
+ * Lo decide el servidor y no la pantalla, que pudo cargarse antes de que
+ * marcaran al representante.
+ */
+async function exigirLaBateriaDeLaOportunidad(
+	opportunityId: string,
+	contractTypes: string[],
+	/**
+	 * Quien firma como titular en lo que se va a emitir, cuando sale de una
+	 * generación anterior (regenerar): en una sociedad tiene que seguir siendo
+	 * el representante.
+	 */
+	titular?: { dpi?: string; email: string },
+): Promise<void> {
+	const datos = await sociedadDeLaOportunidad(opportunityId);
+	if (!datos) return;
+	const motivo =
+		motivoParaNoGenerar(datos, contractTypes) ??
+		(titular && esOportunidadDeSociedad(datos)
+			? motivoPorRepresentanteCambiado(representanteLegalDe(datos), titular)
+			: null);
+	if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
+}
+
 /** Firmante tal como lo manda el front. */
 const signerSchema = z.object({
 	role: z.enum(["TITULAR", "COFIRMANTE", "REP_LEGAL", "VENDEDOR"]),
@@ -952,29 +1051,63 @@ export const contractGenerationRouter = {
 	/**
 	 * Obtiene los tipos de contratos disponibles desde la API
 	 */
-	getContractTypes: juridicoProcedure.handler(async () => {
-		try {
-			const response = await getDocumentTypes();
-			if (!response.success) {
+	getContractTypes: juridicoProcedure
+		.input(
+			z
+				.object({
+					/**
+					 * Con la oportunidad, la batería es la que le toca: la de sociedad
+					 * si es de una empresa, sin opción de cambiarla. Sin ella, la de
+					 * ventas de siempre.
+					 */
+					opportunityId: z.string().uuid().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			try {
+				const datos = input?.opportunityId
+					? await sociedadDeLaOportunidad(input.opportunityId)
+					: null;
+				const esSociedad = datos ? esOportunidadDeSociedad(datos) : false;
+
+				const response = await getDocumentTypes(
+					esSociedad ? "ventas_sociedad" : undefined,
+				);
+				if (!response.success) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: "Error al obtener tipos de documentos",
+					});
+				}
+
+				// La declaración del vendedor no tiene versión de sociedad (la firma
+				// el vendedor): se toma de la de ventas, al final de la lista.
+				let data = response.data;
+				if (esSociedad) {
+					const deVentas = await getDocumentTypes();
+					const tambien = (deVentas.data ?? []).filter((doc) =>
+						CONTRATOS_DE_VENTA_TAMBIEN_EN_SOCIEDAD.includes(doc.enum),
+					);
+					data = [...data, ...tambien];
+				}
+
+				return {
+					success: true,
+					total: data.length,
+					data,
+					esSociedad,
+				};
+			} catch (error) {
+				console.error("[getContractTypes] Error:", error);
+				if (error instanceof ORPCError) throw error;
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message: "Error al obtener tipos de documentos",
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al obtener tipos de documentos",
 				});
 			}
-			return {
-				success: true,
-				total: response.total,
-				data: response.data,
-			};
-		} catch (error) {
-			console.error("[getContractTypes] Error:", error);
-			throw new ORPCError("INTERNAL_SERVER_ERROR", {
-				message:
-					error instanceof Error
-						? error.message
-						: "Error al obtener tipos de documentos",
-			});
-		}
-	}),
+		}),
 
 	/**
 	 * Obtiene documentos y campos por DPI y tipos seleccionados
@@ -1000,28 +1133,51 @@ export const contractGenerationRouter = {
 				// duplicados entre leads (154 grupos según la migración 0028) y un
 				// lead viejo puede traer el género vacío o distinto al del dueño de
 				// esta oportunidad, que es el que firma.
-				const [leadDeLaOportunidad] = input.opportunityId
+				// En una sociedad firma el representante, que es un codeudor: si el
+				// DPI es el de uno de los codeudores de la oportunidad, el género es
+				// el suyo y no el de la empresa.
+				const [codeudorConEseDpi] = input.opportunityId
 					? await db
-							.select({ gender: leads.gender })
-							.from(opportunities)
-							.innerJoin(leads, eq(opportunities.leadId, leads.id))
-							.where(eq(opportunities.id, input.opportunityId))
+							.select({ gender: coDebtors.gender })
+							.from(coDebtors)
+							.where(
+								and(
+									eq(coDebtors.opportunityId, input.opportunityId),
+									eqDpi(coDebtors.dpi, input.dpi),
+								),
+							)
 							.limit(1)
 					: [];
+
+				const [leadDeLaOportunidad] =
+					input.opportunityId && !codeudorConEseDpi
+						? await db
+								.select({ gender: leads.gender })
+								.from(opportunities)
+								.innerJoin(leads, eq(opportunities.leadId, leads.id))
+								.where(eq(opportunities.id, input.opportunityId))
+								.limit(1)
+						: [];
 
 				// Solo si ese lead no tiene género se busca por DPI: los duplicados
 				// son la misma persona, así que sirve cualquiera que sí lo tenga.
 				// eqDpi y no eq porque los DPI viejos quedaron guardados con
 				// espacios ("1648 57656 0101") y el front manda el DPI normalizado.
-				const [leadPorDpi] = leadDeLaOportunidad?.gender
-					? []
-					: await db
-							.select({ gender: leads.gender })
-							.from(leads)
-							.where(and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)))
-							.limit(1);
+				const [leadPorDpi] =
+					codeudorConEseDpi?.gender || leadDeLaOportunidad?.gender
+						? []
+						: await db
+								.select({ gender: leads.gender })
+								.from(leads)
+								.where(
+									and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)),
+								)
+								.limit(1);
 
-				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
+				const gender =
+					codeudorConEseDpi?.gender ??
+					leadDeLaOportunidad?.gender ??
+					leadPorDpi?.gender;
 				const generoFallback =
 					input.genero ??
 					(gender === "female"
@@ -1199,9 +1355,21 @@ export const contractGenerationRouter = {
 					...validation.missingVehicleFields,
 					...validation.missingLeadFields,
 					...validation.missingCreditFields,
+					...validation.missingRepresentanteFields,
 				];
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Faltan datos para generar contratos: ${allMissing.join(", ")}`,
+				});
+			}
+
+			// El camino viejo arma todo como persona individual y le manda la
+			// invitación al correo del lead: una sociedad va por el asistente, que
+			// firma con su representante y la batería de sociedad.
+			const datosSociedad = await sociedadDeLaOportunidad(input.opportunityId);
+			if (datosSociedad && esOportunidadDeSociedad(datosSociedad)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"La oportunidad es de una sociedad: los contratos se generan desde el asistente de jurídico.",
 				});
 			}
 
@@ -1449,6 +1617,36 @@ export const contractGenerationRouter = {
 					};
 				});
 
+				// La carta de cobertura depende de la aseguradora de la cotización, y
+				// sin la oportunidad no hay de dónde leerla: no se emite a ciegas.
+				if (
+					!input.opportunityId &&
+					input.contracts.some((c) => esCartaDeCobertura(c.contractType))
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Las cartas de cobertura se generan desde la oportunidad: hace falta la aseguradora de su cotización.",
+					});
+				}
+
+				// La carta de cheques deja afuera los que no son en GTQ: con alguno
+				// así no se emite, igual que en el asistente.
+				if (
+					input.opportunityId &&
+					input.contracts.some((c) => esCartaDeCheques(c.contractType))
+				) {
+					const cheques = await db
+						.select()
+						.from(creditChecks)
+						.where(eq(creditChecks.opportunityId, input.opportunityId));
+					const { omitidosPorMoneda } = mapChecksToDisbursementRows(cheques);
+					if (omitidosPorMoneda > 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se puede generar la carta de emisión de cheques: ${omitidosPorMoneda === 1 ? "hay un cheque" : `hay ${omitidosPorMoneda} cheques`} en una moneda distinta de GTQ. Corregí la moneda en el detalle de crédito.`,
+						});
+					}
+				}
+
 				// Las cartas van en un solo documento. Se agrupa acá, antes de pedir
 				// nada, y los resultados se emparejan contra ESTA lista: el
 				// generador devuelve uno por pedido, en orden, y con las cartas ya
@@ -1464,7 +1662,21 @@ export const contractGenerationRouter = {
 					input.opportunityId ?? null,
 					async () => {
 						if (input.opportunityId) {
+							// Con el titular que mandó la pantalla: si cambiaron al
+							// representante después de abrirla, la invitación le
+							// llegaría al anterior apenas se cree el documento.
+							await exigirLaBateriaDeLaOportunidad(
+								input.opportunityId,
+								input.contracts.map((c) => c.contractType),
+								input.contracts
+									.flatMap((c) => c.signers ?? [])
+									.find((f) => f.role === "TITULAR"),
+							);
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+							await exigirCoberturaDeLaAseguradora(
+								input.opportunityId,
+								input.contracts.map((c) => c.contractType),
+							);
 							await exigirQueElPaqueteTraigaLasVigentes(
 								input.opportunityId,
 								cartasDelPedido(aGenerar),
@@ -1752,6 +1964,20 @@ export const contractGenerationRouter = {
 					let etapa: Awaited<ReturnType<typeof exigirEtapaQuePermiteReemplazo>>;
 					try {
 						etapa = await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						// Entre generar y enlazar pudieron marcar o cambiar al
+						// representante: la batería y quien firma tienen que seguir
+						// siendo los de la oportunidad. Si no, se borran en WeeTrust.
+						await exigirLaBateriaDeLaOportunidad(
+							input.opportunityId,
+							input.contracts.flatMap((c) =>
+								c.contractType === PAQUETE_CARTAS
+									? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+									: [c.contractType],
+							),
+							(input.generationData ?? [])
+								.flatMap((c) => c.signers ?? [])
+								.find((f) => f.role === "TITULAR"),
+						);
 						// Entre generar y enlazar pudo instalarse otro paquete (otra
 						// pestaña, otra persona). Se revisa de nuevo antes de retirar nada.
 						await exigirQueElPaqueteTraigaLasVigentes(
@@ -2212,6 +2438,21 @@ export const contractGenerationRouter = {
 					const etapa = await exigirEtapaQuePermiteReemplazo(
 						input.opportunityId,
 					);
+					// La foto puede ser de antes de que marcaran (o cambiaran) al
+					// representante: la batería y quien firma tienen que seguir siendo
+					// los que le tocan hoy a la oportunidad.
+					await exigirLaBateriaDeLaOportunidad(
+						input.opportunityId,
+						contractsToRegenerate.map((c) => c.contractType),
+						contractsToRegenerate
+							.flatMap((c) => c.signers ?? [])
+							.find((f) => f.role === "TITULAR"),
+					);
+					// Y la cobertura, por si cambiaron la cotización después.
+					await exigirCoberturaDeLaAseguradora(
+						input.opportunityId,
+						contractsToRegenerate.map((c) => c.contractType),
+					);
 					const etapaInicial = etapa.stageId;
 					const porcentajeEtapa = etapa.porcentaje;
 					const aGenerar = agruparCartas(contractsWithNewDate);
@@ -2412,6 +2653,12 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			// Y de la batería de la oportunidad: uno individual no va en una
+			// sociedad, ni uno de sociedad en una persona.
+			await exigirLaBateriaDeLaOportunidad(input.opportunityId, [
+				input.contractType,
+			]);
+
 			// ~15 MB de PDF. Un contrato pesa bastante menos; lo que pasa de ahí es
 			// un escaneo sin comprimir y conviene frenarlo antes de pasearlo.
 			const bytes = Math.floor((input.pdfBase64.length * 3) / 4);
@@ -2421,25 +2668,31 @@ export const contractGenerationRouter = {
 				});
 			}
 
-			const { leadId, signers } = await firmantesDeLaOportunidad(
-				input.opportunityId,
-				{ subidaAMano: true },
-			);
+			// Quiénes firman, sacado de la oportunidad tal como está ahora. Se arma
+			// antes del candado para cortar temprano, y otra vez ya con el candado:
+			// en la espera pudieron cambiar al representante de la sociedad.
+			const prepararFirmantes = async () => {
+				const { leadId, signers } = await firmantesDeLaOportunidad(
+					input.opportunityId,
+					{ subidaAMano: true },
+				);
+				const firmantes = firmantesDelContrato(input.contractType, signers);
 
-			const firmantes = firmantesDelContrato(input.contractType, signers);
-
-			// Hace falta el titular, no cualquier firmante: sin él, el primer
-			// codeudor ocupa el bloque de deudores y termina firmando en la línea
-			// del cliente.
-			if (
-				!esFirmaFisica(input.contractType) &&
-				!firmantes?.some((f) => f.role === "TITULAR")
-			) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El cliente no tiene correo registrado. Cargalo antes de subir el contrato.",
-				});
-			}
+				// Hace falta el titular, no cualquier firmante: sin él, el primer
+				// codeudor ocupa el bloque de deudores y termina firmando en la línea
+				// del cliente.
+				if (
+					!esFirmaFisica(input.contractType) &&
+					!firmantes?.some((f) => f.role === "TITULAR")
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El cliente no tiene correo registrado. Cargalo antes de subir el contrato.",
+					});
+				}
+				return { leadId, firmantes };
+			};
+			await prepararFirmantes();
 
 			await exigirQueSePuedaSubir(input);
 
@@ -2458,8 +2711,16 @@ export const contractGenerationRouter = {
 				const { porcentaje: porcentajeEtapa } =
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
-				// esperaba el candado.
+				// esperaba el candado, o pudieron marcar al representante.
 				await exigirQueSePuedaSubir(input);
+				await exigirLaBateriaDeLaOportunidad(input.opportunityId, [
+					input.contractType,
+				]);
+				// La cobertura tiene que ser la de la aseguradora de la cotización.
+				await exigirCoberturaDeLaAseguradora(input.opportunityId, [
+					input.contractType,
+				]);
+				const { leadId, firmantes } = await prepararFirmantes();
 
 				// En WeeTrust se ve quién firma y qué firma, no el nombre con el
 				// que quedó guardado el archivo en la computadora de jurídico
@@ -2933,7 +3194,11 @@ async function callLegalDocsApi(
 			pagare: "pagare_unico_libre_protesto",
 			reconocimiento_deuda: "reconocimiento_deuda_feb_2025",
 			contrato_gps: "carta_aceptacion_instalacion_gps",
-			contrato_seguro: "cobertura_inrexsa",
+			// La carta de la aseguradora de la cotización: con G&T, la de G&T.
+			contrato_seguro:
+				data.oportunidad.aseguradora === "gyt"
+					? "cobertura_gyt"
+					: "cobertura_inrexsa",
 			declaracion_jurada: "declaracion_vendedor",
 			acta_entrega: "descargo_responsabilidades",
 			carta_compromiso: "carta_carro_nuevo",

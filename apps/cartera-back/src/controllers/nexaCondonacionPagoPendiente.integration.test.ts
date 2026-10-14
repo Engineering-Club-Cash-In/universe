@@ -90,6 +90,7 @@ const setup = () => (ready ??= (async () => {
   // 0052 dos veces: se aplica a mano y tiene que ser idempotente.
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   const [{ hoy }] = await sql`SELECT to_char((now() AT TIME ZONE 'America/Guatemala')::date, 'YYYY-MM-DD') AS hoy`;
   return {
     sql,
@@ -322,4 +323,19 @@ integrationTest("dos parciales PENDIENTES (pagado=false) que suman la cuota venc
   // daría la cuota 4 por cubierta y condonaría los 3.73 con el crédito no al día.
   expect(await ctx.runtime.condonarMoraNexaATiempo(pagoNexa(ctx.hoy, 8, "1112.00"), 108)).toBeUndefined();
   expect(await condonacion(ctx.sql, 8)).toEqual([]);
+});
+
+integrationTest("#1980: tras la ruptura del convenio, anular el pendiente marca la condonación y el log dice que NO se restituyó", async () => {
+  const ctx = await setup();
+  const pendiente = await condonarConPendiente(ctx, 20);
+  const { cerrarMoraPagadaDeCredito } = await import("../utils/cerrarMoraPagadaDeCredito");
+  await ctx.database.db.transaction(async (tx) => {
+    expect(await cerrarMoraPagadaDeCredito({ credito_id: 20 }, tx as never)).toBeGreaterThan(0);
+  });
+  await ctx.sql`UPDATE cartera.moras_credito SET monto_mora = 50, activa = true WHERE credito_id = 20`; // la mora recreada
+  const logs = await anularPago(ctx, 20, pendiente);
+  expect(await condonacion(ctx.sql, 20)).toMatchObject([{ anulada: true }]);
+  expect(await mora(ctx.sql, 20)).toBe("50.00");
+  const log = JSON.parse(logs.find((l) => l.includes("anulada_por_pago_pendiente"))!);
+  expect(log).toMatchObject({ credito_id: 20, pago_id: pendiente, restituida: false, monto_restituido: "0.00", monto_condonado: "3.73" });
 });

@@ -60,7 +60,10 @@ export async function anularCondonacionesNexaPorPagoPendiente({
       pago_id,
       condonacion_id: viva.condonacion_id,
       nexa_payment_event_id: viva.nexa_payment_event_id,
-      monto_restituido: resultado.monto,
+      // Tras una ruptura de convenio la anulación no restituye nada (la mora ya se recreó sin la condonación).
+      restituida: resultado.restituida,
+      monto_condonado: resultado.monto,
+      monto_restituido: resultado.restituida ? resultado.monto : "0.00",
     }));
   }
   return anuladas;

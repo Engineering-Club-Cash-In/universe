@@ -224,28 +224,42 @@ export const legalDocuments = pgTable("legal_documents", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 // Co-debtors table - Co-deudores/Co-firmantes de oportunidades
-export const coDebtors = pgTable("co_debtors", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	opportunityId: uuid("opportunity_id")
-		.notNull()
-		.references(() => opportunities.id, { onDelete: "cascade" }),
-	fullName: text("full_name").notNull(), // Nombre completo
-	dpi: text("dpi").notNull(), // DPI
-	age: integer("age"), // Edad
-	gender: text("gender"), // Género ('male' | 'female')
-	maritalStatus: maritalStatusEnum("marital_status"), // Estado civil
-	profession: text("profession"), // Profesión
-	nationality: text("nationality"), // Nacionalidad
-	email: text("email"), // Correo electrónico
-	phone: text("phone"), // Número de teléfono
-	occupation: occupationTypeEnum("occupation"), // Ocupación (owner/employee)
-	notes: text("notes"), // Notas
-	score: decimal("score", { precision: 3, scale: 2 }), // Score de crédito
-	fit: boolean("fit").default(false), // Si califica
-	scoredAt: timestamp("scored_at"), // Fecha de evaluación
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const coDebtors = pgTable(
+	"co_debtors",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		fullName: text("full_name").notNull(), // Nombre completo
+		dpi: text("dpi").notNull(), // DPI
+		age: integer("age"), // Edad
+		gender: text("gender"), // Género ('male' | 'female')
+		maritalStatus: maritalStatusEnum("marital_status"), // Estado civil
+		profession: text("profession"), // Profesión
+		nationality: text("nationality"), // Nacionalidad
+		email: text("email"), // Correo electrónico
+		phone: text("phone"), // Número de teléfono
+		occupation: occupationTypeEnum("occupation"), // Ocupación (owner/employee)
+		notes: text("notes"), // Notas
+		score: decimal("score", { precision: 3, scale: 2 }), // Score de crédito
+		fit: boolean("fit").default(false), // Si califica
+		scoredAt: timestamp("scored_at"), // Fecha de evaluación
+		// Firma por la empresa: con él marcado la oportunidad es de sociedad
+		// (ver `lib/oportunidad-de-sociedad.ts`).
+		esRepresentanteLegal: boolean("es_representante_legal")
+			.notNull()
+			.default(false),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		// Un solo representante por oportunidad
+		uniqueIndex("co_debtors_representante_legal_uq")
+			.on(table.opportunityId)
+			.where(sql`${table.esRepresentanteLegal}`),
+	],
+);
 
 // Credit Analysis table - Análisis de capacidad de pago
 export const creditAnalysis = pgTable(

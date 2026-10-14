@@ -328,12 +328,35 @@ describe("tipoRealDeFactura", () => {
 	};
 	const texto = (t: string) => new TextEncoder().encode(t);
 
-	const conCierre = (inicio: Uint8Array, cierre: number[]) => {
-		const b = new Uint8Array(64);
-		b.set(inicio);
-		b.set(cierre, 64 - cierre.length);
-		return b;
+	// JPEG mínimo: APP1 con una miniatura que trae su propio cierre, el
+	// inicio de los datos de la imagen (SOS) y el cierre (FFD9).
+	const jpeg = ({ cierre = true, despues = Buffer.alloc(0) } = {}) =>
+		new Uint8Array(
+			Buffer.concat([
+				Buffer.from([0xff, 0xd8]),
+				Buffer.from([0xff, 0xe1, 0x00, 0x08, 0xff, 0xd8, 0xff, 0xd9, 0, 0]),
+				Buffer.from([0xff, 0xda, 0x00, 0x04, 0x01, 0x00]),
+				Buffer.from([0x12, 0x34, 0xff, 0x00, 0x56]),
+				cierre ? Buffer.from([0xff, 0xd9]) : Buffer.alloc(0),
+				despues,
+			]),
+		);
+	const chunk = (tipo: string, datos: Buffer) => {
+		const largo = Buffer.alloc(4);
+		largo.writeUInt32BE(datos.length);
+		return Buffer.concat([largo, Buffer.from(tipo), datos, Buffer.alloc(4)]);
 	};
+	// PNG mínimo; el IDAT trae el texto "IEND" para que no cuente como cierre.
+	const png = ({ iend = true, despues = Buffer.alloc(0) } = {}) =>
+		new Uint8Array(
+			Buffer.concat([
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+				chunk("IHDR", Buffer.alloc(13)),
+				chunk("IDAT", Buffer.from("xxIENDxx")),
+				iend ? chunk("IEND", Buffer.alloc(0)) : Buffer.alloc(0),
+				despues,
+			]),
+		);
 	const webp = () => {
 		const b = Buffer.alloc(32);
 		b.write("RIFF", 0, "latin1");
@@ -346,35 +369,26 @@ describe("tipoRealDeFactura", () => {
 		expect(tipoRealDeFactura(texto("%PDF-1.7\n...\n%%EOF\n"))).toBe(
 			"application/pdf",
 		);
-		expect(
-			tipoRealDeFactura(conCierre(bytes(0xff, 0xd8, 0xff, 0xe0), [0xff, 0xd9])),
-		).toBe("image/jpeg");
-		expect(
-			tipoRealDeFactura(
-				conCierre(
-					bytes(
-						0x89,
-						0x50,
-						0x4e,
-						0x47,
-						0x0d,
-						0x0a,
-						0x1a,
-						0x0a,
-						0,
-						0,
-						0,
-						13,
-						0x49,
-						0x48,
-						0x44,
-						0x52,
-					),
-					[0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82],
-				),
-			),
-		).toBe("image/png");
+		expect(tipoRealDeFactura(jpeg())).toBe("image/jpeg");
+		expect(tipoRealDeFactura(png())).toBe("image/png");
 		expect(tipoRealDeFactura(webp())).toBe("image/webp");
+	});
+
+	test("lo que venga después del cierre no invalida el archivo", () => {
+		// Foto en movimiento (Pixel, Samsung): el video va después del FFD9.
+		expect(tipoRealDeFactura(jpeg({ despues: Buffer.alloc(2048, 0x42) }))).toBe(
+			"image/jpeg",
+		);
+		expect(tipoRealDeFactura(png({ despues: Buffer.alloc(2048) }))).toBe(
+			"image/png",
+		);
+		const pdfConRelleno = Buffer.concat([
+			Buffer.from("%PDF-1.4\n...\n%%EOF\n"),
+			Buffer.alloc(1536),
+		]);
+		expect(tipoRealDeFactura(new Uint8Array(pdfConRelleno))).toBe(
+			"application/pdf",
+		);
 	});
 
 	test("un PDF con basura antes del encabezado (lo admite el estándar)", () => {
@@ -389,6 +403,10 @@ describe("tipoRealDeFactura", () => {
 		expect(
 			tipoRealDeFactura(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
 		).toBeNull();
+		// El cierre de la miniatura o un "IEND" dentro de los datos no cuentan.
+		expect(tipoRealDeFactura(jpeg({ cierre: false }))).toBeNull();
+		expect(tipoRealDeFactura(png({ iend: false }))).toBeNull();
+		expect(tipoRealDeFactura(png().subarray(0, 40))).toBeNull();
 		expect(
 			tipoRealDeFactura(texto("RIFF\u00ff\u0000\u0000\u0000WEBPVP8 ")),
 		).toBeNull();

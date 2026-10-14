@@ -28,30 +28,67 @@ function empiezaCon(bytes: Uint8Array, firma: number[], desde = 0) {
 	return firma.every((b, i) => bytes[desde + i] === b);
 }
 
+const INICIO_PDF = Buffer.from("%PDF-");
+const FIN_PDF = Buffer.from("%%EOF");
+const FIN_JPEG = Buffer.from([0xff, 0xd9]);
+
+/**
+ * Recorre los segmentos hasta los datos de la imagen principal y exige el
+ * cierre (FFD9) después de ellos. Saltar los segmentos por su largo deja
+ * afuera la miniatura EXIF, que trae su propio cierre.
+ */
+function jpegCompleto(datos: Buffer): boolean {
+	let pos = 2;
+	while (pos + 4 <= datos.length) {
+		if (datos[pos] !== 0xff) return false;
+		const marcador = datos[pos + 1];
+		if (marcador === 0xff) {
+			pos++;
+		} else if (marcador === 0xda) {
+			return datos.indexOf(FIN_JPEG, pos + 2) !== -1;
+		} else if (marcador === 0x01 || (marcador >= 0xd0 && marcador <= 0xd9)) {
+			pos += 2;
+		} else {
+			pos += 2 + datos.readUInt16BE(pos + 2);
+		}
+	}
+	return false;
+}
+
+/** Recorre los chunks del PNG, desde IHDR hasta IEND, todos completos. */
+function pngCompleto(datos: Buffer): boolean {
+	if (datos.toString("latin1", 12, 16) !== "IHDR") return false;
+	let pos = 8;
+	while (pos + 12 <= datos.length) {
+		const largo = datos.readUInt32BE(pos);
+		if (pos + 12 + largo > datos.length) return false;
+		if (datos.toString("latin1", pos + 4, pos + 8) === "IEND") return true;
+		pos += 12 + largo;
+	}
+	return false;
+}
+
 /**
  * Tipo real del archivo según su firma, o null si no es PDF ni imagen
  * admitida. El tipo y el nombre que manda el cliente no se usan: el archivo
  * sale adjunto en un correo de Club Cash In.
  */
 export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
+	const datos = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	// El estándar de PDF admite basura antes del encabezado (hasta 1024 bytes).
-	const inicio = Buffer.from(bytes.subarray(0, 1024)).toString("latin1");
+	const inicioPdf = datos.subarray(0, 1024).indexOf(INICIO_PDF);
 	// Además de la firma, la marca de cierre de cada formato: un archivo
-	// truncado (solo la firma) no se puede abrir y no debe salir adjunto.
-	const final = Buffer.from(
-		bytes.subarray(Math.max(0, bytes.length - 1024)),
-	).toString("latin1");
-	if (inicio.includes("%PDF-")) {
-		return final.includes("%%EOF") ? "application/pdf" : null;
+	// truncado (solo la firma) no se puede abrir y no debe salir adjunto. Lo
+	// que venga después del cierre (relleno, el video de una foto en
+	// movimiento) no lo invalida.
+	if (inicioPdf !== -1) {
+		return datos.lastIndexOf(FIN_PDF) > inicioPdf ? "application/pdf" : null;
 	}
 	if (empiezaCon(bytes, [0xff, 0xd8, 0xff])) {
-		return final.includes("\xff\xd9") ? "image/jpeg" : null;
+		return jpegCompleto(datos) ? "image/jpeg" : null;
 	}
 	if (empiezaCon(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
-		return empiezaCon(bytes, [0x49, 0x48, 0x44, 0x52], 12) &&
-			final.includes("IEND")
-			? "image/png"
-			: null;
+		return pngCompleto(datos) ? "image/png" : null;
 	}
 	if (
 		empiezaCon(bytes, [0x52, 0x49, 0x46, 0x46]) &&

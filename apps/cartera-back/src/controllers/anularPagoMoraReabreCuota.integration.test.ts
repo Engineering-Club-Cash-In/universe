@@ -309,3 +309,23 @@ integrationTest("crédito CANCELADO: anular el ÚNICO pago repone restantes en l
   expect(cuota!.pagado).toBe(true);
   await sql.end();
 });
+
+integrationTest("anular un pago stale-zero (abonos 0, monto_aplicado = cuota) reabre la cuota con portadora", async () => {
+  const { sql } = await setup();
+  const [fila] = await sql`INSERT INTO cartera.pagos_credito
+      (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
+       abono_seguro, abono_gps, membresias_pago, mora, otros, pagado,
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+    VALUES (1, 48, 'validated', 2505.61, 0, 0, 0, 0, 0, 0, 50, '', true, 0, 0, 0, 0, 0, 0)
+    RETURNING pago_id`;
+  await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+
+  await anular(fila!.pago_id as number);
+
+  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
+  expect(cuota!.pagado).toBe(false);
+  const vivas = await sql`SELECT validation_status, pagado FROM cartera.pagos_credito
+    WHERE cuota_id = 48 AND "paymentFalse" = false`;
+  expect([...vivas]).toEqual([{ validation_status: "no_required", pagado: false }]);
+  await sql.end();
+});

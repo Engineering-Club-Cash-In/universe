@@ -1882,8 +1882,20 @@ describe("esPagoSaldoElegible: una fila anulada nunca es saldo vigente", () => {
 
 describe("saldoDeRespaldoDeSemillaAnulada: cuota sin ninguna fila viva", () => {
   const semilla = { validationStatus: "no_required", paymentFalse: true, interes_restante: "4463.76" };
-  it("sin filas vivas usa la semilla anulada SOLO como fuente del saldo", () => {
-    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: semilla })).toBe(semilla);
+  it("sin filas vivas usa la semilla anulada SOLO como fuente del saldo (virgen: mismos valores)", () => {
+    const r = registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: semilla });
+    expect(r).toMatchObject({ ...semilla, interes_restante: "4463.76", capital_restante: "0.00", membresias: "0.00" });
+  });
+  it("semilla que recibió plata antes de anularse: sus restantes se reconstruyen sumando sus propios abonos", () => {
+    const conPlata = {
+      ...semilla, capital_restante: "700", abono_capital: "300", interes_restante: "10", abono_interes: "5",
+      iva_12_restante: "1", abono_iva_12: "2", seguro_restante: "3", abono_seguro: "4",
+      gps_restante: "6", abono_gps: "7", membresias: "0", membresias_pago: "50",
+    };
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: conPlata })).toMatchObject({
+      paymentFalse: true, capital_restante: "1000.00", interes_restante: "15.00", iva_12_restante: "3.00",
+      seguro_restante: "7.00", gps_restante: "13.00", membresias: "50.00",
+    });
   });
   it("con alguna fila viva no se usa", () => {
     expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: true, semillaAnulada: semilla })).toBeUndefined();

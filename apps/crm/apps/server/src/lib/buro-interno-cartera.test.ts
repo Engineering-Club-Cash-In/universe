@@ -67,6 +67,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No hay evidencia alguna de fraude",
 		"No cuenta con reportes de fraude",
 		"No cuenta con mora",
+		"No se detectó fraude",
+		"No se encontró mora",
 		"No tiene antecedentes de mora",
 		"No existen antecedentes de fraude",
 		"Mora condonada",

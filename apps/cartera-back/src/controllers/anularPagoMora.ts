@@ -82,7 +82,7 @@ export type AnularPagoMoraDeps = {
   reabrirCuota?: typeof reabrirCuotaPorAnulacion;
 };
 
-const DEPS_REALES = (): AnularPagoMoraDeps => ({
+export const DEPS_REALES = (): AnularPagoMoraDeps => ({
   updateMora,
   resetAjusteFechaIdeal: resetAjusteFechaIdealSiPagoInvalidado,
   revertirRubros: (async (pago_id, ejecutor) => {

@@ -2976,6 +2976,12 @@ function RouteComponent() {
 										</CardContent>
 									</Card>
 								)}
+								{/* Sin alertas abiertas, las leídas siguen consultables. */}
+								{caso.id && alertasCaso.length === 0 && (
+									<div className="flex items-center">
+										<VerAlertasLeidas casoCobroId={caso.id} />
+									</div>
+								)}
 								<CardContactoResumen
 									onVerTodo={() => setVista("contacto")}
 									datos={[

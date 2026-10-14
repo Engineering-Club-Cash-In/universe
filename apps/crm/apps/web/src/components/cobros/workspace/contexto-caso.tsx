@@ -560,6 +560,11 @@ function PestanaResumen({
 					pie={pieAlertasCaso}
 					casoCobroId={casoCobroId}
 				/>
+			) : casoCobroId ? (
+				// Sin alertas abiertas: las leídas siguen consultables.
+				<div className="flex items-center px-1">
+					<VerAlertasLeidas casoCobroId={casoCobroId} />
+				</div>
 			) : null}
 
 			{vehiculoRecuperar ? (

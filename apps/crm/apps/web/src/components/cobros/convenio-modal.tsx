@@ -93,9 +93,10 @@ interface ConvenioModalProps {
 /** Un pago del día que puede descontarse del convenio (`abonoInicialPagoId`). */
 export interface AbonoConvenio {
 	pagoId: number;
+	/** Monto del pago (el de la boleta), para mostrarlo. */
 	monto: number;
-	/** "validado" o "parcial". */
-	estado: string;
+	/** Lo que el pago aplicó a cada cuota (por `cuotaId`). */
+	aplicadoPorCuota: Record<number, number>;
 }
 
 /**
@@ -195,12 +196,20 @@ export function ConvenioModal({
 	const totalCuotas = seleccionadas.reduce((acc, c) => acc + c.monto, 0);
 	// El total NO se edita (pedido del PM, 2026-10-01): son las cuotas que se
 	// marquen más la mora. Para cambiarlo se marcan o desmarcan cuotas.
-	// Con un abono inicial el convenio cubre solo el remanente.
+	// Con un abono inicial el convenio cubre solo el remanente. Se descuenta lo
+	// que el abono aplicó a las cuotas elegidas: la parte que fue a mora ya
+	// está en `montoMora`, que es la mora vigente.
 	const abono = abonos.find((a) => a.pagoId === abonoId) ?? null;
+	const descuentoAbono = abono
+		? seleccionadas.reduce(
+				(acc, c) => acc + (abono.aplicadoPorCuota[c.cuotaId] ?? 0),
+				0,
+			)
+		: 0;
 	const totalSinAbono = Math.round((totalCuotas + montoMora) * 100) / 100;
 	const total = Math.max(
 		0,
-		Math.round((totalSinAbono - (abono?.monto ?? 0)) * 100) / 100,
+		Math.round((totalSinAbono - descuentoAbono) * 100) / 100,
 	);
 	const cuotaConvenio = meses > 0 ? total / meses : 0;
 
@@ -512,8 +521,9 @@ export function ConvenioModal({
 							</Select>
 							{abono && total > 0 ? (
 								<p className="text-muted-foreground text-xs">
-									Se descuentan {Q(abono.monto)} del total: el convenio cubre
-									solo el remanente de {Q(total)}.
+									{descuentoAbono > 0
+										? `Se descuentan ${Q(descuentoAbono)} del total: el convenio cubre solo el remanente de ${Q(total)}.`
+										: "Este abono no se aplicó a las cuotas seleccionadas; la mora ya lo refleja, así que el total no cambia."}
 								</p>
 							) : null}
 							{abono && total <= 0 && seleccion.length > 0 ? (

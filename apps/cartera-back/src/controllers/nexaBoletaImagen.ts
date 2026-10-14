@@ -16,11 +16,12 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { sql } from "drizzle-orm";
 import { db } from "../database";
 import { launchBrowser } from "../utils/functions/browser";
 import { s3 } from "../utils/functions/uploadsFiles";
+import { borrarObjetoBoletaNexa, conTope } from "./nexaBoletaR2";
 
 /** Namespace PROPIO del advisory lock del registro (8765 pagos, 8766 espejo, 8767 cuenta Nexa). */
 export const BOLETA_NEXA_ADVISORY_LOCK_NAMESPACE = 8768;
@@ -169,14 +170,6 @@ export type ResultadoBoletasNexa = { generadas: number[]; omitidas: number[]; fa
  * o borrar su PNG si no la registra), pero deja de frenar al resto y a la cola.
  */
 export const TIMEOUT_BOLETA_NEXA_MS = 60_000;
-
-const conTope = <T>(trabajo: Promise<T>, ms: number): Promise<T> => new Promise<T>((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error(`tiempo agotado (${ms} ms)`)), ms);
-  trabajo.then(
-    (valor) => { clearTimeout(timer); resolve(valor); },
-    (error) => { clearTimeout(timer); reject(error); },
-  );
-});
 
 /**
  * El PNG subido que no quedó registrado (el pago dejó de ser elegible, ya
@@ -438,9 +431,7 @@ export const boletaNexaDeps: BoletaNexaDeps = {
       ContentType: "image/png",
     }));
   },
-  borrar: async (key) => {
-    await s3.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key }));
-  },
+  borrar: borrarObjetoBoletaNexa,
   registrar: async (pagoId, urlBoleta) => db.transaction(async (tx) => {
     // Dos disparos a la vez (o disparo + barrido) se serializan por pago: el
     // segundo ve la fila del primero y no inserta otra.

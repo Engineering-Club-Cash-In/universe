@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { BoletaTardiaRecuadro } from "./BoletaTardiaRecuadro";
-import { estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
+import { cascadaSinCondonar, estadoRecuadroBoletaTardia, moraAntesDeCondonar, moraEfectivaParaCobrar, type VistaPreviaBoletaTardia } from "./boletaTardia";
 
 const form = readFileSync(new URL("./PagoForm.tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("../hooks/registerPayment.ts", import.meta.url), "utf8");
@@ -198,7 +198,12 @@ describe("F6: al confirmar se congela la condonación (el excedente cambia otros
 describe("F7: el aviso de 'Abonar todo a Capital' usa la mora SIN condonar", () => {
   test("noSeAplica recibe la mora local aplicada, no la condonada", () => {
     const aviso = region(form, "const noSeAplica = loQueElAbonoACapitalNoAplica(", "const textoCausas", "aviso abonar a capital");
-    expect(aviso).toContain("mora: Number(mora || 0),"); // la local, que cascadaSinCondonar topa al disponible
+    expect(aviso).toContain("mora: moraAntesDeCondonar(Number(mora || 0), vistaBoletaTardia, aceptada),"); // la del servidor (la misma del tachado)
+  });
+  test("ejemplo 80/20: mora local 999, vista 35 + 45, boleta 100 y rubros 60 -> Q80 a mora y Q20 a rubros", () => {
+    const v = vista({ moraACobrar: "35.00", montoCondonar: "45.00" });
+    expect(cascadaSinCondonar({ disponible: 100, mora: moraAntesDeCondonar(999, v, true), rubros: 60, convenio: 0, cuotaNormal: 0 }))
+      .toMatchObject({ mora: 80, rubros: 20 });
   });
 });
 

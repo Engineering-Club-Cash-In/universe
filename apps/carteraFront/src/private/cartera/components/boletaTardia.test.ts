@@ -230,7 +230,7 @@ describe("Codex r2 #1990: cascadaSinCondonar (aviso de 'Abonar todo a Capital')"
     const aviso = form.slice(i, form.indexOf("const textoCausas", i));
     expect(i).toBeGreaterThan(0);
     expect(aviso).toContain("aceptada\n            ? cascadaSinCondonar({");
-    expect(aviso).toContain("mora: Number(mora || 0),");
+    expect(aviso).toContain("mora: moraAntesDeCondonar(Number(mora || 0), vistaBoletaTardia, aceptada),");
     expect(aviso).toContain("rubros: rubrosMonto,");
     expect(form).not.toContain("moraExtra");
   });

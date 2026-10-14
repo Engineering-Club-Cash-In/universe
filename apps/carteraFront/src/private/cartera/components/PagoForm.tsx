@@ -455,7 +455,7 @@ export function PagoForm() {
           aceptada
             ? cascadaSinCondonar({
                 disponible: Math.max(0, montoBoleta - abonoCapitalDirecto) - montoOtrosAplicado,
-                mora: Number(mora || 0),
+                mora: moraAntesDeCondonar(Number(mora || 0), vistaBoletaTardia, aceptada),
                 rubros: rubrosMonto,
                 convenio: cuotaConvenio,
                 cuotaNormal,

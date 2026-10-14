@@ -1178,7 +1178,9 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	// «código», «script» (de llamada), «algoritmo» (de la mora), «función» o
 	// «consulta» son vocabulario de cobros: sin lenguaje, lo ataja el prompt.
 	/```/,
-	/\b(en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)\b|\b(consulta|query) sql\b/,
+	// Un lenguaje solo corta como orden («responde en python», «hazme una
+	// consulta sql»): «trabaja con Java» es un dato de la gestión.
+	/(^|[.!?;:,]\s*)(responde|contesta|escribe|escribeme|dame|hazme|haz|genera|generame|crea|creame|redacta|codifica|programa|explicame)\b[^?.!;]{0,40}\b((en|con|usando) (python|javascript|typescript|java|php|html|css|bash|sql|regex)|(consulta|query) sql)\b/,
 	/\bcodigo fuente\b/,
 	/\b(select\s+[\s\S]+?\s+from|insert into|drop table|delete from)\b/,
 	// Saltarse o extraer las instrucciones. Acotado a «instrucciones» y a
@@ -1208,8 +1210,9 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	/\b(quien gano|marcador|resultado)\b[^?.!]*\bfutbol\b|\bquien gano el partido\b|\btabla de posiciones\b/,
 	/\b(cuanto (vale|cuesta)|precio d\w+|cotizacion d\w+|a como esta)\s+(el |la |los )?(bitcoin|criptomonedas?|ethereum)\b/,
 	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
-	// traduce la mora?» o «La mora, traducida a cuotas, ¿cuánto es?» son del caso.
-	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\b|\btraduc\w*\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
+	// traduce la mora?» o «La mora, traducida a cuotas, ¿cuánto es?» o «traductora de español a inglés» son
+	// del caso.
+	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\b|\b(traducir|traduccion)\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
 ];
 
 const sinTildes = (t: string) =>

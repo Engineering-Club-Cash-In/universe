@@ -10,8 +10,10 @@ import { planReaperturaCuotaPorAnulacion } from "./reabrirCuotaPorAnulacionPolic
  *
  * Corre DENTRO de la transacción de `anularPagoYRestituirMora`, después de marcar
  * la fila `paymentFalse = true`, así que `creditos` ya está candado. Orden de
- * escritura: `pagos_credito` (hermanas) y luego `cuotas_credito`, el mismo de
- * `aplicarPagoNormalEnTx`; no agrega aristas de candado.
+ * escritura: `pagos_credito` (hermanas) y luego `cuotas_credito`. Es el orden
+ * inverso al de RAMA B de `aplicarPagoNormalEnTx` (cuotas primero), pero no hay
+ * abrazo mortal: todos los escritores del crédito hacen cola en
+ * `withPaymentAdvisoryLock(credito_id)` y esta tx ya tiene `creditos FOR UPDATE`.
  */
 export async function reabrirCuotaPorAnulacion(
   tx: typeof db,
@@ -36,10 +38,10 @@ export async function reabrirCuotaPorAnulacion(
     .from(pagos_credito)
     .where(and(eq(pagos_credito.pago_id, pago_id), eq(pagos_credito.credito_id, credito_id)))
     .limit(1);
-  if (!anulada || anulada.cuota_id === null) return;
+  if (!anulada || anulada.cuota_id == null) return;
 
   const [credito] = await tx
-    .select({ cuota: creditos.cuota, statusCredit: creditos.statusCredit })
+    .select({ cuota: creditos.cuota, statusCredit: creditos.statusCredit, capital: creditos.capital })
     .from(creditos)
     .where(eq(creditos.credito_id, credito_id))
     .limit(1);
@@ -69,6 +71,7 @@ export async function reabrirCuotaPorAnulacion(
     creditoId: credito_id,
     montoCuota: credito?.cuota,
     statusCredit: credito?.statusCredit,
+    capital: credito?.capital,
     filaAnulada: anulada,
     hermanas,
   });

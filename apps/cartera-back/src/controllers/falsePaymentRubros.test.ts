@@ -210,6 +210,13 @@ const PAGO_SIN_MORA = [
 
 /** El estado del decremento de mora: sin marca y sin eventos del cron. */
 const SIN_DECREMENTO: unknown[] = [[], []];
+// Las 3 lecturas de `reabrirCuotaPorAnulacion` (la fila anulada, el crédito y las hermanas vivas
+// de la cuota). La boleta es de solo rubros: no le aportó nada a la cuota, así que no escribe.
+const LECTURAS_REABRIR_CUOTA: unknown[] = [
+  [{ cuota_id: 48, abono_capital: "0", abono_interes: "0" }],
+  [{ cuota: "1000.00", statusCredit: "ACTIVO", capital: "5000.00" }],
+  [],
+];
 
 /** El inversionista del espejo, resuelto por nombre: CUBE, que se excluye. */
 const CUBE = [{ nombre: "Cube Investments S.A.", status: "ACTIVO" }];
@@ -250,11 +257,13 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       PAGO_SIN_MORA, // SELECT pagos_credito FOR UPDATE (mora y createdAt)
       ...SIN_DECREMENTO, // el decremento marcado, y los eventos del cron
       { rowCount: 1 }, // UPDATE pagos_credito → paymentFalse
+      ...LECTURAS_REABRIR_CUOTA, // reapertura de la cuota (no aplica: sin abonos)
       RECLAMO_APLICADO, // reclamos de la boleta
       RUBRO_SALDADO, // el rubro, releído FOR UPDATE
       [], // UPDATE rubros
       [], // INSERT rubros_historial
       [], // DELETE rubros_pagos
+      [], // mora_pagada_cuota: anotaciones vivas del pago (revertirMoraPagadaDePago)
       [], // reset del ajuste por fecha ideal (returning)
       SIN_ESPEJO_DE_ESTE_PAGO, // re-chequeo ADENTRO del candado contra la marca
       CUBE // nombre del inversionista del espejo — AHORA va al final
@@ -329,6 +338,10 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       { tabla: "moras_historial", filas: [] },
       // UPDATE → paymentFalse (su `rowCount` es el guard de idempotencia)
       { tabla: "pagos_credito", filas: { rowCount: 1 } },
+      // reapertura de la cuota: la fila anulada, el crédito y las hermanas vivas
+      { tabla: "pagos_credito", filas: LECTURAS_REABRIR_CUOTA[0] },
+      { tabla: "creditos", filas: LECTURAS_REABRIR_CUOTA[1] },
+      { tabla: "pagos_credito", filas: LECTURAS_REABRIR_CUOTA[2] },
       // los reclamos de rubro de la boleta
       { tabla: "rubros_pagos", filas: RECLAMO_APLICADO },
       // el rubro, releído FOR UPDATE
@@ -336,6 +349,8 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       { tabla: "rubros", filas: [] }, // UPDATE saldo_pendiente
       { tabla: "rubros_historial", filas: [] }, // INSERT del rastro
       { tabla: "rubros_pagos", filas: [] }, // DELETE del reclamo
+      // anotaciones vivas del pago en mora_pagada_cuota (revertirMoraPagadaDePago)
+      { tabla: "mora_pagada_cuota", filas: [] },
       // reset del ajuste por fecha ideal: último, y dentro de la tx
       { tabla: "ajuste_fecha_ideal_pago", filas: [] },
       // ya fuera de la tx y ADENTRO del candado: ¿alguien más escribió el
@@ -406,11 +421,13 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       PAGO_SIN_MORA,
       ...SIN_DECREMENTO,
       { rowCount: 1 },
+      ...LECTURAS_REABRIR_CUOTA,
       RECLAMO_APLICADO,
       RUBRO_SALDADO,
       [],
       [],
       [],
+      [], // mora_pagada_cuota: anotaciones vivas del pago
       [{ id: 3 }], // reset del ajuste: devolvió la fila reseteada
       SIN_ESPEJO_DE_ESTE_PAGO, // re-chequeo adentro del candado
       CUBE

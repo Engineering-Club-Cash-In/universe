@@ -29,7 +29,8 @@ import { MOTIVO_ANULACION_MORA_PREFIJO } from "../utils/motivoReversaMora";
 // base —el `tx` y `updateMora` entran inyectados— y así no hace falta un
 // `mock.module("../database")` más, que sería global a toda la corrida.
 process.env.SUPABASE_DB_URL ??= "postgresql://nadie:nadie@127.0.0.1:1/ninguna";
-const { anularPagoYRestituirMora } = await import("./anularPagoMora");
+const { anularPagoYRestituirMora, DEPS_REALES } = await import("./anularPagoMora");
+const { reabrirCuotaPorAnulacion } = await import("./reabrirCuotaPorAnulacion");
 
 const PAGO_ID = 301;
 const CREDITO_ID = 4242;
@@ -610,5 +611,14 @@ describe("crédito con la devolución a CUBE pendiente de autorización", () => 
 
     expect(await anular()).toBe(1);
     expect(estado.updateMoraArgs.length).toBe(1);
+  });
+});
+
+// La ruta de producción (`falsePayment` → `anularPagoYRestituirMoraSerializado`) llama a la
+// anulación SIN deps, o sea con `DEPS_REALES`. Si se borra `reabrirCuota` de ahí, la anulación
+// vuelve a dejar la cuota cerrada y ninguna otra prueba que inyecte la dep a mano lo nota.
+describe("DEPS_REALES de la anulación", () => {
+  it("incluye la reapertura de la cuota", () => {
+    expect(DEPS_REALES().reabrirCuota).toBe(reabrirCuotaPorAnulacion);
   });
 });

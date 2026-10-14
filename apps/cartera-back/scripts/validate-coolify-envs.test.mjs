@@ -142,6 +142,29 @@ test("el manifiesto de producción declara lo que necesita el envío del estado 
 	}
 });
 
+test("el manifiesto de producción declara lo que necesita la condonación por boleta tardía", () => {
+	const declaradas = new Map(
+		manifiestoProduccion.required.map((e) => [e.key, e.runtime]),
+	);
+	// URL_PUBLIC_R2 se lee con import.meta.env (no lo ve leidasPorElServicio):
+	// va a mano. Sin ella la URL de la boleta nace "undefined..." y la condonación
+	// rechaza el pago; el HeadObject de la foto necesita las cuatro R2_*.
+	const requeridas = [
+		"URL_PUBLIC_R2",
+		"R2_ACCESS_KEY_ID",
+		"R2_BUCKET",
+		"R2_ENDPOINT",
+		"R2_SECRET_ACCESS_KEY",
+	];
+	for (const clave of requeridas) {
+		assert.ok(
+			declaradas.has(clave),
+			`${clave} la necesita la condonación por boleta tardía pero no está en required-env.production.json: el deploy pasaría en verde sin ella`,
+		);
+		assert.equal(declaradas.get(clave), true, `${clave} tiene que ser runtime`);
+	}
+});
+
 test("el manifiesto de producción no repite claves", () => {
 	const claves = manifiestoProduccion.required.map((e) => e.key);
 	assert.equal(new Set(claves).size, claves.length);

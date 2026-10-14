@@ -187,3 +187,35 @@ integrationTest("una hermana no_required con plata (SIFCO) que cubre la cuota so
   expect(cuota!.pagado).toBe(true);
   await sql.end();
 });
+
+integrationTest("INCOBRABLE con capital 0: anular el cierre validated con abono_capital reabre la cuota (la validación ya lo había restado)", async () => {
+  const { sql } = await setup();
+  await sql`UPDATE cartera.creditos SET "statusCredit" = 'INCOBRABLE', capital = 0 WHERE credito_id = 1`;
+  const { parcialId, cierreId } = await parcialYCierre(sql);
+  await sql`UPDATE cartera.pagos_credito SET validation_status = 'validated' WHERE pago_id = ${cierreId}`;
+  await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+
+  await anular(cierreId);
+
+  const [parcial] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
+  expect(parcial).toMatchObject({ pagado: false, capital: 1294.23 });
+  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
+  expect(cuota!.pagado).toBe(false);
+  await sql.end();
+});
+
+integrationTest("anular un abono directo a capital no replica capital_restante a las hermanas", async () => {
+  const { sql } = await setup();
+  const { parcialId } = await parcialYCierre(sql);
+  const [directo] = await sql`INSERT INTO cartera.pagos_credito
+      (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
+       abono_seguro, abono_gps, membresias_pago, mora, pagado,
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+    VALUES (1, 48, 'capital_validated', 300, 300, 0, 0, 0, 0, 0, 0, true, 9700, 0, 0, 0, 0, 0) RETURNING pago_id`;
+
+  await anular(directo!.pago_id as number);
+
+  const [parcial] = await sql`SELECT pagado, capital_restante::float AS capital FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
+  expect(parcial).toMatchObject({ pagado: true, capital: 0 });
+  await sql.end();
+});

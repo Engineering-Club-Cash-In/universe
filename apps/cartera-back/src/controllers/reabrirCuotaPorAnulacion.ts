@@ -22,6 +22,7 @@ export async function reabrirCuotaPorAnulacion(
   const [anulada] = await tx
     .select({
       cuota_id: pagos_credito.cuota_id,
+      validationStatus: pagos_credito.validationStatus,
       abono_capital: pagos_credito.abono_capital,
       abono_interes: pagos_credito.abono_interes,
       abono_iva_12: pagos_credito.abono_iva_12,

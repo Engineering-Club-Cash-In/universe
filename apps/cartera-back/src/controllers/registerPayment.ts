@@ -1339,7 +1339,7 @@ export const insertPayment = async (
         const existingPago =
           pagoOriginal ??
           allExistingPagos[0] ??
-          (semillaDeRespaldo ? { pago: semillaDeRespaldo } : undefined);
+          (semillaDeRespaldo ? { pago: { ...semillaDeRespaldo, paymentFalse: false } } : undefined); // la fila nueva no hereda la anulación
         const pagoSaldoVigente = saldoMasReciente ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
@@ -1737,9 +1737,9 @@ export const insertPayment = async (
         const mes_pagado = months[currentDate.getMonth()];
         // Boleta tardía: la fila nace viva aunque la reutilizada sea de relleno anulada
         // (heredar paymentFalse=true dejaría el pago invisible a la condonación/compensación).
-        // Siempre viva: `existingPago` ya no puede ser una fila anulada (la semilla de respaldo solo
-        // aporta el saldo) y la fila nueva no hereda `paymentFalse`.
-        const paymentFalse = false;
+        const paymentFalse = existingPago && !boletaTardiaIntentoId
+          ? existingPago.pago.paymentFalse
+          : false;
         const fechaGuatemala = paymentRegistrationDate();
 
         // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo

@@ -1186,8 +1186,10 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	// Saltarse o extraer las instrucciones. Acotado a «instrucciones» y a
 	// «lo anterior»: «llamada anterior» o «desconoce las reglas del convenio»
 	// son vocabulario normal de cobros.
-	/\b(ignora|olvida)\w*\s+(todas\s+)?(tus|las|sus)\s+(instrucciones|directrices|prompts?)\b/,
-	/\b(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
+	// Solo como orden (inicio de frase o tras puntuación): «¿El cliente ignora las
+	// instrucciones para el pago?» es del caso.
+	/(^|[.!?;:,]\s*)(por favor\s+|ahora\s+|y\s+)?(ignora|olvida)\w*\s+(todas\s+)?(tus|las)\s+(instrucciones|directrices|prompts?)\b/,
+	/(^|[.!?;:,]\s*)(por favor\s+|ahora\s+|y\s+)?(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
 	/\b(prompt|instrucciones) (del sistema|de sistema)\b|\bprompt (inicial|interno)\b|system prompt|jailbreak|modo (desarrollador|dios)\b/,
 	// Pedir las instrucciones propias. «instrucciones iniciales» o «internas» a
 	// secas pueden ser las de un pago o un convenio.
@@ -1197,22 +1199,26 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	// «haz de cuenta que el cliente abona Q500» (un escenario del caso).
 	// Los signos «¿» y «¡» no cuentan como inicio: «¿Actúa como titular o como
 	// codeudor?» es una pregunta sobre el cliente con el sujeto omitido.
-	/(^|[.!?;:,]\s*)((actua|finge|comportate)\s+como\s+(?!si\b)|actua como si fueras\b)|\b(eres ahora|ahora eres) (un|una)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
+	/(^|[.!?;:,]\s*)((actua|finge|comportate)\s+como\s+(?!si\b)|actua como si fueras\b)|(^|[.!?]\s*)(eres ahora|ahora eres) (un|una)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
 	// Otros casos o la base de datos: solo cuando se pide verlos. «¿Hay otros
 	// casos como este?» o «la base de datos del cliente» son del caso.
-	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los (clientes|creditos|casos|usuarios|asesores)|(otros|los demas) (clientes|usuarios|asesores))\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?todos los (clientes|creditos|casos|usuarios|asesores)\b/,
-	/\b(accede|acceso|consulta|consultar|lista|listar|vuelca|dump|muestrame|dame|exporta)\w*\s+(a |en )?(toda )?(la )?base de datos\b|\bque (hay|tiene|contiene) (en )?(la )?base de datos\b/,
+	// Sin «créditos» ni «casos»: «todos los créditos del titular» es del caso.
+	/\b(datos|informacion|saldos?|lista|listado|detalles?) de (todos los (clientes|usuarios|asesores)|(otros|los demas) (clientes|usuarios|asesores))\b|\b(muestrame|dame|listame|dime|lista)\s+(a\s+)?todos los (clientes|usuarios|asesores)\b/,
+	// «la base de datos de SIFCO / del crédito» es un dato del caso: solo corta
+	// la base de datos a secas.
+	/\b(accede|acceso|consulta|consultar|lista|listar|vuelca|dump|muestrame|dame|exporta)\w*\s+(a |en )?(toda )?(la )?base de datos\b(?!\s+d(e|el)\b)|\bque (hay|tiene|contiene) (en )?(la )?base de datos\s*[?!.]*\s*$/,
 	// Temas generales: solo cuando piden contenido ajeno al caso. Una palabra
 	// suelta puede venir del texto libre de las gestiones («vendería bitcoin
 	// para pagar», «el clima afectó su cosecha», «receta médica»).
 	/\b(cuenta|cuentame|dime|dame|escribe|escribeme|canta|cantame|recita|recitame|inventa|inventame|recomienda|recomiendame|sugiere|sugiereme|hazme)\s+(me\s+)?(un|una|el|la|algun|alguna|otro|otra)?\s*(chiste|poema|cancion|cuento|horoscopo)\b|\breceta (de cocina|para (cocinar|preparar))\b/,
-	/\bque clima (hace|hay|tendremos|habra)\b|\bcomo (esta|estara|va a estar) el clima\b|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b/,
+	// Clima: «el clima de negociación» es el tono de una gestión.
+	/\bque clima hace\b|\bque clima (hay|tendremos|habra) (hoy|manana|ahora|esta (tarde|noche|semana))\b|\bcomo (esta|estara) el clima (hoy|manana|ahora|esta (tarde|noche|semana))\b|\bcomo (esta|estara) el clima\s*[?!.]*\s*$|\bclima (de )?(hoy|manana)\b|\bpronostico del (clima|tiempo)\b(?! de)/,
 	/\b(quien gano|marcador|resultado)\b[^?.!]*\bfutbol\b|\bquien gano el partido\b|\btabla de posiciones\b/,
 	/\b(cuanto (vale|cuesta)|precio d\w+|cotizacion d\w+|a como esta)\s+(el |la |los )?(bitcoin|criptomonedas?|ethereum)\b/,
 	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
 	// traduce la mora?» o «La mora, traducida a cuotas, ¿cuánto es?» o «traductora de español a inglés» son
 	// del caso.
-	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\b|\b(traducir|traduccion)\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
+	/(^|[.!?;:,]\s*)(traduce|traduceme|traducelo|traducela)\s+(esto|el texto|la frase|el mensaje|lo siguiente|al)\b|\b(traducir|traduccion)\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
 ];
 
 const sinTildes = (t: string) =>

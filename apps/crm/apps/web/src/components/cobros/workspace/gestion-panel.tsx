@@ -87,6 +87,7 @@ import {
 	telefonosValidos,
 } from "./gestion/contacto-valido";
 import { DeshacerConvenioForm } from "./gestion/deshacer-convenio";
+import { EscalarJuridicoForm } from "./gestion/escalar-juridico";
 import { InicioGestionVista } from "./gestion/inicio";
 import {
 	OpcionesAcuerdo,
@@ -103,6 +104,7 @@ import {
 	ListaGestiones,
 	PasoGestion,
 } from "./gestion/piezas";
+import { RebajaMoraForm } from "./gestion/rebaja-mora";
 import {
 	GestionRegistradaVista,
 	MensajeEnviadoVista,
@@ -114,9 +116,11 @@ import {
 	resumenContacto,
 	resumenConvenio,
 	resumenConvenioDeshecho,
+	resumenEscaladaJuridico,
 	resumenInvestigacion,
 	resumenLinksPagalo,
 	resumenPago,
+	resumenRebajaMora,
 	resumenRecepcion,
 	resumenRecuperacion,
 	resumenReferencia,
@@ -264,7 +268,7 @@ function participantesDelCaso(caso: CasoWorkspace): ParticipanteGestion[] {
 		correoInvalido:
 			!!caso.contacto.email && correoDeRelleno(caso.contacto.email),
 	};
-	// Codeudores: TODO(José) · tarea F2 (hoy `codeudores` llega null).
+	// Codeudores del crédito (`getFichaComplementos`, F2).
 	const codeudores: ParticipanteGestion[] = (
 		caso.complementos?.codeudores ?? []
 	).map((c) => {
@@ -581,7 +585,8 @@ export function GestionPanel({
 					accionEntrega(caso, () => abrirDirecta("entrega")),
 				);
 			}
-			if (nivelDelCaso(caso) >= 3) accesos.push(accionJuridico());
+			if (nivelDelCaso(caso) >= 3)
+				accesos.push(accionJuridico(caso, () => abrirDirecta("juridico")));
 		}
 		return (
 			<VisitaProgramadaTarjeta
@@ -905,6 +910,21 @@ export function GestionPanel({
 							registrarLlamadaDelAcuerdo(
 								"el cliente entregará el vehículo voluntariamente",
 							),
+					);
+					break;
+				case "rebaja":
+					cuerpo = (
+						<RebajaMoraForm
+							casoCobroId={casoCobroId}
+							moraActual={caso.mora.monto}
+							onCancelar={cancelar}
+							onExito={(r) => {
+								registrar(resumenRebajaMora(r));
+								void registrarLlamadaDelAcuerdo(
+									"solicitud de rebaja de mora, pendiente de la aprobación del supervisor",
+								);
+							}}
+						/>
 					);
 					break;
 			}
@@ -1361,6 +1381,25 @@ export function GestionPanel({
 					/>
 				) : (
 					<SinDatos texto="Este caso no tiene un convenio vigente que se pueda deshacer." />
+				);
+				break;
+			case "rebaja":
+				cuerpo = (
+					<RebajaMoraForm
+						casoCobroId={casoCobroId}
+						moraActual={caso.mora.monto}
+						onCancelar={volver}
+						onExito={(r) => registrar(resumenRebajaMora(r))}
+					/>
+				);
+				break;
+			case "juridico":
+				cuerpo = (
+					<EscalarJuridicoForm
+						casoCobroId={casoCobroId}
+						onCancelar={volver}
+						onExito={(r) => registrar(resumenEscaladaJuridico(r))}
+					/>
 				);
 				break;
 			case "carta-notarial":

@@ -72,8 +72,6 @@ import {
 	sifcosQueTrabaja,
 } from "../lib/acceso-caso-cobro";
 import { sifcosConPagoPorConfirmar } from "../lib/agenda-asesor-cobros";
-import { agruparAlertasCaso, separarLeidas } from "../lib/alertas-caso";
-import { cargarMarcasAlertas } from "../lib/alertas-caso-db";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	payloadEdicionManual,
@@ -85,8 +83,8 @@ import {
 	origenCambioSchema,
 	registrarCambiosCaso,
 } from "../lib/cambios-datos-cliente";
-import { bucketsDelFunnelSiHaceFalta } from "../lib/cartera-filtros";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
+import { direccionResidenciaCasoSql } from "../lib/direcciones-caso";
 import {
 	deriveHasCapitalData,
 	recalculateCobrosPercentagesWithFallback,
@@ -110,8 +108,8 @@ import {
 	formatearIncrementoMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
-	prepararCuentaNexaParaEnvio,
 	prepararExpectativaMoraParaEnvio,
+	prepararCuentaNexaParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
@@ -136,12 +134,16 @@ import {
 	assertCreditoAsignadoEnCartera,
 	assertCreditoAsignadoEnCarteraPorSifco,
 } from "../lib/credito-cartera-ownership";
-import { direccionResidenciaCasoSql } from "../lib/direcciones-caso";
 import { eqDpi } from "../lib/dpi-lookup";
+import { bucketsDelFunnelSiHaceFalta } from "../lib/cartera-filtros";
 import { fetchAllPages } from "../lib/fetch-all-pages";
+import { memoConTtl } from "../lib/memo-ttl";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 import { esGestionAutomatica } from "../lib/historial-agendas";
-import { memoConTtl } from "../lib/memo-ttl";
+import {
+	diasHabilesSinContacto,
+	inicioVentanaConContacto,
+} from "../lib/sin-contacto";
 import {
 	getTestPhone,
 	isTestModeEnabled,
@@ -164,6 +166,11 @@ import {
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
+import {
+	agruparAlertasCaso,
+	separarLeidas,
+} from "../lib/alertas-caso";
+import { cargarMarcasAlertas } from "../lib/alertas-caso-db";
 import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import {
 	adminProcedure,
@@ -209,10 +216,6 @@ import {
 	sendWhatsappTemplate,
 	sendWhatsappTemplateBatch,
 } from "../lib/simpletech";
-import {
-	diasHabilesSinContacto,
-	inicioVentanaConContacto,
-} from "../lib/sin-contacto";
 import {
 	type AsesorEfectivo,
 	buscarAsesorCarteraPorEmail,
@@ -1053,10 +1056,7 @@ export const CATEGORIAS_ALERTA_CONVENIO = [
 // general lo envían tal cual.
 const COLAS_CARTERA_FILTRO = ["todas", ...COLAS_CARTERA] as const;
 const ALERTAS_PROMESA_FILTRO = ["todas", ...CATEGORIAS_ALERTA_PROMESA] as const;
-const ALERTAS_CONVENIO_FILTRO = [
-	"todas",
-	...CATEGORIAS_ALERTA_CONVENIO,
-] as const;
+const ALERTAS_CONVENIO_FILTRO = ["todas", ...CATEGORIAS_ALERTA_CONVENIO] as const;
 
 /**
  * Armar la cola completa tarda unos 3 s (recorre toda la cartera): cambiar de
@@ -1246,9 +1246,7 @@ async function sifcosPorFiltroGestion(
 	// al menos 3 días hábiles completos sin gestión manual. (La clave del filtro
 	// sigue siendo `sin_gestion_48h` para no romper el contrato con el front.)
 	const desde =
-		filtro === "sin_contactar_hoy"
-			? inicioHoy
-			: inicioVentanaConContacto(ahora);
+		filtro === "sin_contactar_hoy" ? inicioHoy : inicioVentanaConContacto(ahora);
 	if (filtro === "sin_contactar_hoy") {
 		const gestionados = await db
 			.selectDistinct({ numeroSifco: casosCobros.numeroCreditoSifco })
@@ -3443,11 +3441,7 @@ export const cobrosRouter = {
 		.input(createContactoCobrosSchema)
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			// promesaContactoId y visitaId no son columnas: se separan del payload.
 			// Los datos W1 del Workspace (dirección, participante, teléfono
 			// contactado) se separan también y se guardan aparte (`datosWorkspace`).
@@ -3675,11 +3669,7 @@ export const cobrosRouter = {
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const vacio = {
 				sesiones: [] as ActividadBotSesion[],
 				accesosFallidos: [] as ActividadBotInteraccion[],
@@ -3949,11 +3939,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			console.log(
 				"Obteniendo historial de contactos para el caso:",
 				input.casoCobroId,
@@ -4017,11 +4003,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const POR_PAGINA = 10;
 
 			const filtro = and(
@@ -6448,25 +6430,17 @@ export const cobrosRouter = {
 			// Con caso: el dueño del caso, y el SIFCO tiene que ser el del caso (si no, un caso propio
 			// con el SIFCO de otro crédito pagaría o registraría sobre ese crédito).
 			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 				const [casoPago] = await db
 					.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
 					.from(casosCobros)
 					.where(eq(casosCobros.id, input.casoCobroId))
 					.limit(1);
 				if (casoPago?.numeroCreditoSifco !== input.numeroSifco) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: "El crédito no corresponde al caso de cobros.",
-					});
+					throw new ORPCError("BAD_REQUEST", { message: "El crédito no corresponde al caso de cobros." });
 				}
 			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "Indique el caso de cobros para esta acción.",
-				});
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
 			}
 			// Verify the credit exists and user has access
 			const reference = await getCreditoReferenceByNumeroSifco(
@@ -6546,20 +6520,14 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// Dueño del caso, y el SIFCO tiene que ser el del caso (si no, un caso propio con el SIFCO
 			// de otro crédito crearía links de pago sobre ese crédito).
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const [casoLink] = await db
 				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
 				.from(casosCobros)
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.limit(1);
 			if (casoLink?.numeroCreditoSifco !== input.numeroSifco) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "El crédito no corresponde al caso de cobros.",
-				});
+				throw new ORPCError("BAD_REQUEST", { message: "El crédito no corresponde al caso de cobros." });
 			}
 			try {
 				return await createPagaloLinks({
@@ -7002,11 +6970,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const [caso] = await db
 				.select({
 					id: casosCobros.id,
@@ -8137,11 +8101,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const [updated] = await db
 				.update(casosCobros)
 				.set({
@@ -8176,15 +8136,9 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
 			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "Indique el caso de cobros para esta acción.",
-				});
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
 			}
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
 			const testMode = isTestModeEnabled();
@@ -8243,11 +8197,7 @@ export const cobrosRouter = {
 		.input(z.object({ casoCobroId: z.string().min(1) }))
 		.handler(async ({ input, context }) => {
 			// Dueño del caso: un cobros solo gestiona los créditos que trabaja en cartera.
-			await assertAccesoCasoCobro(
-				input.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			const resultado = await sendEstadoCuentaWhatsapp({
 				casoCobroId: input.casoCobroId,
 				userId: context.userId,
@@ -8987,10 +8937,7 @@ export const cobrosRouter = {
 				// {placa}) desaparece al interpolar y desplaza el resto: la plantilla
 				// con imagen se quedaría con una variable vacía y el proveedor la
 				// rechaza. Se revalida con el mensaje ya interpolado.
-				if (
-					plantilla.adjunto &&
-					!cuerpoCubreAdjunto(mensaje, plantilla.adjunto)
-				) {
+				if (plantilla.adjunto && !cuerpoCubreAdjunto(mensaje, plantilla.adjunto)) {
 					descartados.push({
 						numeroSifco: sifco,
 						clienteNombre,
@@ -9210,15 +9157,9 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
 			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "Indique el caso de cobros para esta acción.",
-				});
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
 			}
 			const escapeHtml = (s: string) =>
 				s
@@ -9307,15 +9248,9 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			// Con caso: el dueño del caso. Sin caso no hay dueño que verificar: solo admin o supervisor.
 			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
+				await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
 			} else if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "Indique el caso de cobros para esta acción.",
-				});
+				throw new ORPCError("FORBIDDEN", { message: "Indique el caso de cobros para esta acción." });
 			}
 			const token = process.env.SMS_TOKEN;
 			const apiKeyRaw = process.env.SMS_API_KEY;

@@ -119,7 +119,7 @@ const revertir = async (pagoId: number) => {
 const pagadoDe = async (sql: postgres.Sql, pagoId: number) =>
   (await sql`SELECT pagado FROM cartera.pagos_credito WHERE pago_id = ${pagoId}`)[0]!.pagado as boolean;
 
-integrationTest("cierre que sobrescribe la portadora: la anulada sigue sin pagado y revertirla no le quita el pagado al cierre", async () => {
+integrationTest("cierre que sobrescribe la portadora: la anulada sigue sin pagado y revertirla se rechaza sin quitarle el pagado al cierre", async () => {
   const ctx = await setup();
   await sembrarCredito(ctx.sql);
   const anulada = await fila(ctx.sql, { cuota: 1, estado: "pending", capital: 400 }); // única fila viva de la cuota 1
@@ -132,7 +132,7 @@ integrationTest("cierre que sobrescribe la portadora: la anulada sigue sin pagad
   expect(cierre).toMatchObject({ pagado: true, validation_status: "pending" });
   expect(await pagadoDe(ctx.sql, anulada)).toBe(false);
 
-  expect(await revertir(anulada)).toBe(200);
+  expect(await revertir(anulada)).toBe(409); // una boleta anulada ya no se revierte (PAGO_ANULADO_NO_REVERSIBLE)
   expect(await pagadoDe(ctx.sql, cierre!.pago_id as number)).toBe(true);
 });
 

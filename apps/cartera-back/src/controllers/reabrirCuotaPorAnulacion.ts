@@ -23,6 +23,11 @@ export async function reabrirCuotaPorAnulacion(
     .select({
       cuota_id: pagos_credito.cuota_id,
       validationStatus: pagos_credito.validationStatus,
+      // Para la fila portadora (copia los datos de calendario de la fila anulada).
+      cuota: pagos_credito.cuota,
+      cuota_interes: pagos_credito.cuota_interes,
+      fecha_vencimiento: pagos_credito.fecha_vencimiento,
+      total_restante: pagos_credito.total_restante,
       abono_capital: pagos_credito.abono_capital,
       abono_interes: pagos_credito.abono_interes,
       abono_iva_12: pagos_credito.abono_iva_12,
@@ -95,6 +100,48 @@ export async function reabrirCuotaPorAnulacion(
           eq(pagos_credito.paymentFalse, false),
         ),
       );
+  }
+  // Si la anulada era la ÚNICA fila viva de la cuota, `insertPayment` no tendría de dónde
+  // leer el saldo (lee 0) y el pago siguiente saltaría la cuota reabierta. Se deja una fila
+  // `no_required` sin plata que lo lleve, armada como las semillas de `createCredit`
+  // (createCredit.ts ~931-980). La anulada conserva sus abonos como evidencia.
+  if (plan.insertarPortadora && plan.replica) {
+    await tx.insert(pagos_credito).values({
+      credito_id,
+      cuota_id: anulada.cuota_id,
+      cuota: anulada.cuota,
+      cuota_interes: anulada.cuota_interes,
+      fecha_pago: null,
+      fecha_vencimiento: anulada.fecha_vencimiento,
+      abono_capital: "0",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_interes_ci: "0",
+      abono_iva_ci: "0",
+      abono_seguro: "0",
+      abono_gps: "0",
+      pago_del_mes: "0",
+      monto_boleta: "0",
+      renuevo_o_nuevo: "",
+      ...plan.replica.payload,
+      total_restante: anulada.total_restante,
+      membresias_pago: "0",
+      membresias_mes: "0",
+      otros: "",
+      mora: "0",
+      monto_boleta_cuota: "0",
+      seguro_total: "0",
+      pagado: false,
+      facturacion: "si",
+      mes_pagado: "",
+      reserva: "0",
+      observaciones: "",
+      paymentFalse: false,
+      pagoConvenio: "0",
+      monto_aplicado: "0",
+      validationStatus: "no_required",
+      registerBy: "system",
+    });
   }
   if (plan.reabrirFilas) {
     await tx

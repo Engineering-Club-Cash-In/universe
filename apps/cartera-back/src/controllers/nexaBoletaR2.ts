@@ -33,6 +33,9 @@ export function keyDeUrlBoletaNexa(url: string): string | null {
   return /^boletas-nexa\/[0-9a-f-]{36}\.png$/.test(key) ? key : null;
 }
 
+export const urlsDeBoletasBorradas = (resultado: { rows: unknown[] }) =>
+  (resultado.rows as Array<{ url_boleta: string }>).map((fila) => fila.url_boleta);
+
 const log = (nivel: "info" | "error", extra: Record<string, unknown>) =>
   console[nivel](JSON.stringify({ level: nivel, paso: "borrar_r2_tras_borrar_pago", ...extra }));
 
@@ -65,4 +68,15 @@ export async function borrarComprobantesNexaDeR2BestEffort(urls: readonly string
   } catch (error) {
     log("error", { event: "nexa.boleta_imagen.error", error: String(error) });
   }
+}
+
+/**
+ * Corre la transacción juntando las URLs de los comprobantes que borra y, solo si commiteó,
+ * dispara su borrado sin esperarlo. Si lanza (rollback), no se borra nada.
+ */
+export async function borrandoComprobantesNexaTrasCommit<T>(transaccion: (urls: string[]) => Promise<T>): Promise<T> {
+  const urls: string[] = [];
+  const resultado = await transaccion(urls);
+  void borrarComprobantesNexaDeR2BestEffort(urls);
+  return resultado;
 }

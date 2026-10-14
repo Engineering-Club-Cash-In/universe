@@ -81,6 +81,7 @@ import {
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
 import { reclamosVivosDeRubros } from "./rubros";
+import { borrandoComprobantesNexaTrasCommit, urlsDeBoletasBorradas } from "./nexaBoletaR2";
 
 
 // Estados en que cartera acepta un pago Nexa: la MISMA lista que `credit_not_payable`
@@ -2999,7 +3000,7 @@ export async function syncScheduleOnTermsChange({
   newPlazo,
   preloadCredit,
 }: SyncTermsInput) {
-  return await db.transaction(async (tx) => {
+  return await borrandoComprobantesNexaTrasCommit((urlsBoletas) => db.transaction(async (tx) => {
     // 1) Load current credit
     const [credit] = preloadCredit
       ? [{ credito_id: creditoId, ...preloadCredit }]
@@ -3244,11 +3245,12 @@ export async function syncScheduleOnTermsChange({
             SELECT pago_id FROM cartera.pagos_credito
             WHERE cuota_id IN (${cuotasNexa}) AND nexa_payment_event_id IS NOT NULL
             ORDER BY pago_id FOR UPDATE`);
-          await tx.execute(sql`
+          urlsBoletas.push(...urlsDeBoletasBorradas(await tx.execute(sql`
             DELETE FROM cartera.boletas
             WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
                                WHERE cuota_id IN (${cuotasNexa})
-                                 AND nexa_payment_event_id IS NOT NULL)`);
+                                 AND nexa_payment_event_id IS NOT NULL)
+            RETURNING url_boleta`)));
           // delete related pagos first
           await tx
             .delete(pagos_credito)
@@ -3274,7 +3276,7 @@ export async function syncScheduleOnTermsChange({
     }
 
     return { updated: true, changedCuota, changedPlazo };
-  });
+  }));
 }
 interface MergeCreditParams {
   numero_credito_origen: string; // El crédito que se va a absorber

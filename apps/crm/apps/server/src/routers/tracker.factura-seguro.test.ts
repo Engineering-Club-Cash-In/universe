@@ -1367,16 +1367,24 @@ describe("factura programada para el cierre", () => {
 			seEnviara: false,
 			programable: { aseguradora: "gyt" },
 		});
-		caso = casoAl(85, { status: "lost" });
-		expect(
-			"programable" in (await previsualizarFacturaSeguroDesdeCrm(ID)),
-		).toBe(false);
+		// Perdida, o del 90% en adelante sin ganar (ya no pasa por la
+		// confirmación de contratos, que es la que la manda): no se ofrece.
+		for (const c of [
+			casoAl(85, { status: "lost" }),
+			casoAl(90, { status: "on_hold" }),
+			casoAl(100, { status: "open" }),
+		]) {
+			caso = c;
+			expect(
+				"programable" in (await previsualizarFacturaSeguroDesdeCrm(ID)),
+			).toBe(false);
+		}
 	});
 
 	test("si el usuario la programó, queda registrada como programada y no sale todavía", async () => {
 		for (const c of [
+			casoAl(50, { status: "open" }),
 			casoAl(85, { status: "open" }),
-			casoAl(90, { status: "on_hold" }),
 		]) {
 			insertados.length = 0;
 			expect(await subir(c)).toMatchObject({
@@ -1388,6 +1396,14 @@ describe("factura programada para el cierre", () => {
 				documentId: "doc-antes",
 			});
 		}
+		expect(correos).toHaveLength(0);
+	});
+
+	test("al 90% sin ganar no se programa aunque el front lo pida", async () => {
+		const r = await subir(casoAl(90, { status: "on_hold" }));
+		expect(r).toMatchObject({ enviada: false });
+		expect("programada" in r).toBe(false);
+		expect(registroProgramado()).toBeUndefined();
 		expect(correos).toHaveLength(0);
 	});
 

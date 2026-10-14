@@ -704,15 +704,16 @@ function exigirMismoEstado(bajoBloqueo: string | undefined, alEmpezar: string) {
 }
 
 // Subida antes del cierre que se puede programar: al confirmar los contratos
-// la oportunidad queda ganada al 90% y la factura sale sola.
+// (85% → 90%) la oportunidad queda ganada y la factura sale sola. Del 90% en
+// adelante sin ganar ya no pasa por esa confirmación: no se programa.
 function programableAlCerrar(
 	fila: Pick<Fila, "companyId" | "closurePercentage">,
 	motivo: MotivoSinEnvioDesdeCrm,
 ): boolean {
 	return (
 		!!fila.companyId &&
-		(motivo === "sin_cerrar" ||
-			(motivo === "etapa" && fila.closurePercentage < ETAPA_FACTURA_SEGURO))
+		motivo === "etapa" &&
+		fila.closurePercentage < ETAPA_FACTURA_SEGURO
 	);
 }
 

@@ -66,6 +66,7 @@ import {
   cuentaComoHermanoVivo,
   resolverCuotaParaFilaSuelta,
   esPagoSaldoElegible,
+  saldoDeRespaldoDeSemillaAnulada,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -88,7 +89,7 @@ import {
   emitRecoveredDuplicatePendingInstallment,
 } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
-import { condicionUltimaCuotaPagada, pagosExistentesDeCuota } from "./registerPaymentQueries";
+import { condicionUltimaCuotaPagada, pagosExistentesDeCuota, semillaAnuladaDeCuota } from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -1317,7 +1318,6 @@ export const insertPayment = async (
         // quedándonos con el de pago_id más alto. Así un 2.º pago a la misma
         // cuota parte de lo que abonó el 1.º aunque aún no se haya validado, y
         // no duplica interés/IVA/seguro/membresías.
-        const existingPago = pagoOriginal ?? allExistingPagos[0];
         const candidatosSaldo = [
           ultimoPagoParcialConRestante,
           ultimoParcialPendiente && tieneRestante(ultimoParcialPendiente.pago)
@@ -1327,6 +1327,19 @@ export const insertPayment = async (
         const saldoMasReciente = candidatosSaldo.sort(
           (a, b) => b.pago.pago_id - a.pago.pago_id
         )[0];
+        // Cuota sin ninguna fila viva (datos viejos: todas anuladas, crédito 459 cuota 4): la semilla
+        // anulada aporta el saldo y hace de `existingPago` para que el pago escriba, pero NUNCA es
+        // destino (ver `destinoSobrescribible`): el pago INSERTA una fila nueva y viva.
+        const semillaDeRespaldo = saldoDeRespaldoDeSemillaAnulada({
+          hayFilasVivas: allExistingPagos.length > 0,
+          semillaAnulada: allExistingPagos.length > 0
+            ? undefined
+            : await semillaAnuladaDeCuota(db, cuota.cuotas_credito.cuota_id, credito.credito_id),
+        });
+        const existingPago =
+          pagoOriginal ??
+          allExistingPagos[0] ??
+          (semillaDeRespaldo ? { pago: semillaDeRespaldo } : undefined);
         const pagoSaldoVigente = saldoMasReciente ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
@@ -1364,7 +1377,7 @@ export const insertPayment = async (
         // REAL que SÍ debe contarse. Solo lo excluimos del set de hermanos cuando
         // realmente lo vamos a UPDATE-ar (i.e. cuando es sobrescribible); si no,
         // contar sus rubros evita re-aplicar interés/IVA/etc.
-        const destinoSobrescribible = existingPago
+        const destinoSobrescribible = existingPago && !semillaDeRespaldo
           ? esDestinoSobrescribible(existingPago.pago)
           : false;
         const pagoIdEnVuelo = destinoSobrescribible
@@ -1724,9 +1737,9 @@ export const insertPayment = async (
         const mes_pagado = months[currentDate.getMonth()];
         // Boleta tardía: la fila nace viva aunque la reutilizada sea de relleno anulada
         // (heredar paymentFalse=true dejaría el pago invisible a la condonación/compensación).
-        const paymentFalse = existingPago && !boletaTardiaIntentoId
-          ? existingPago.pago.paymentFalse
-          : false;
+        // Siempre viva: `existingPago` ya no puede ser una fila anulada (la semilla de respaldo solo
+        // aporta el saldo) y la fila nueva no hereda `paymentFalse`.
+        const paymentFalse = false;
         const fechaGuatemala = paymentRegistrationDate();
 
         // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo

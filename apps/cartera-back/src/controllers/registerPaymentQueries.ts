@@ -98,3 +98,28 @@ export const pagosExistentesDeCuota = (
       ),
     )
     .orderBy(asc(pagos_credito.pago_id));
+
+/**
+ * La semilla `no_required` ANULADA más vieja de la cuota (menor `pago_id`), o `undefined`.
+ * Solo para `saldoDeRespaldoDeSemillaAnulada`: nunca se usa como destino del cierre.
+ */
+export const semillaAnuladaDeCuota = async (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) => {
+  const [fila] = await executor
+    .select({ pago: pagos_credito })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, true),
+        eq(pagos_credito.validationStatus, "no_required"),
+      ),
+    )
+    .orderBy(asc(pagos_credito.pago_id))
+    .limit(1);
+  return fila?.pago;
+};

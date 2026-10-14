@@ -325,6 +325,30 @@ export const esPagoSaldoElegible = (pago: {
       pago.pagado === false &&
       pago.paymentFalse === false));
 
+/**
+ * Cuota SIN NINGUNA fila viva (datos viejos: todas anuladas, semilla incluida; crédito 459,
+ * cuota 4). Sin respaldo `insertPayment` lee restantes 0 y salta la cuota para siempre. La
+ * semilla `no_required` ANULADA más vieja sirve ÚNICAMENTE como fuente del saldo vigente (sus
+ * `*_restante`); nunca como destino del cierre: el pago inserta una fila nueva viva.
+ *
+ * Ojo: sus restantes son el saldo INICIAL de la cuota solo si ningún pago anulado se los
+ * descontó antes de que ella misma se anulara (en el 459 suman la cuota completa, 8,578.86).
+ */
+export const saldoDeRespaldoDeSemillaAnulada = <
+  T extends { validationStatus?: string | null; paymentFalse?: boolean | null },
+>({
+  hayFilasVivas,
+  semillaAnulada,
+}: {
+  hayFilasVivas: boolean;
+  semillaAnulada: T | undefined;
+}): T | undefined =>
+  !hayFilasVivas &&
+  semillaAnulada?.validationStatus === "no_required" &&
+  semillaAnulada.paymentFalse === true
+    ? semillaAnulada
+    : undefined;
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

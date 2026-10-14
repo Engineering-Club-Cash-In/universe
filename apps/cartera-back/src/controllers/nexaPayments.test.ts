@@ -227,6 +227,50 @@ test("registra y aplica una vez por el flujo canónico", async () => {
   expect(avisos).toEqual([{ eventId: 7, completedAntes: 1 }]);
 });
 
+test("el aviso de pago aplicado recibe todos los pagos del evento y, si revienta, el resultado no cambia", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  const correr = async (onPaymentApplied: (eventId: number, paymentIds: number[]) => void) => {
+    let registered = false;
+    const fallos: string[] = [];
+    const result = await processNexaPayment(
+      { ...paymentBody("qa-boleta-imagen"), amount: "20.00" },
+      { nonce: "nonce-boleta", payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => ({ kind: "new", eventId: 7 }),
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "ACTIVO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null, nexa_token: "1111222233334444" },
+        }),
+        // Un evento que cubrió dos cuotas: dos filas con el mismo número de transferencia.
+        findPayments: async () => registered
+          ? [
+              { paymentId: 17, validationStatus: "pending", amount: "10.00" },
+              { paymentId: 18, validationStatus: "pending", amount: "10.00" },
+            ]
+          : [],
+        registerPayment: async () => { registered = true; return { success: true }; },
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        onPaymentApplied,
+        fail: async (_eventId, code) => { fallos.push(code); },
+        ...successfulBilling,
+      },
+    );
+    return { result, fallos };
+  };
+
+  const avisos: [number, number[]][] = [];
+  const normal = await correr((eventId, paymentIds) => { avisos.push([eventId, paymentIds]); });
+  expect(avisos).toEqual([[7, [17, 18]]]);
+  expect(normal).toEqual({ result: { paymentId: 17, paymentIds: [17, 18], idempotent: false }, fallos: [] });
+
+  // La imagen de la boleta (u otro aviso) revienta: mismo resultado, sin marcar el evento fallido.
+  expect(await correr(() => { throw new Error("generador de boleta caído"); })).toEqual(normal);
+  expect(await correr(() => { void Promise.reject(new Error("rechazo async")).catch(() => undefined); })).toEqual(normal);
+});
+
 test("el pago Nexa se registra con el banco Nexa cuando existe y sin banco si no", async () => {
   const { getNexaInsertPaymentBody } = await import("./nexaPayments");
   const body = { ...paymentBody("qa-banco"), transactionId: "36418016" };

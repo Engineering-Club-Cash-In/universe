@@ -40,6 +40,7 @@ import {
 } from "../utils/paymentAdvisoryLock";
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
 import { bancoNexaId } from "./nexaBanco";
+import { generarBoletasNexaBestEffort } from "./nexaBoletaImagen";
 import { intentarReciboNexa, reciboNexaHabilitado } from "./nexaReciboPago";
 import {
   canAutomaticallyInvoiceNexa,
@@ -598,10 +599,12 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
       })
       .where(eq(nexa_payment_events.id, eventId));
   },
-  onPaymentApplied: (eventId) => {
+  onPaymentApplied: (eventId, paymentIds) => {
     void (async () => {
       if (await reciboNexaHabilitado()) await intentarReciboNexa(eventId);
     })().catch(() => undefined);
+    // Imagen de la boleta: sin esperar y sin poder romper el pago (ver nexaBoletaImagen.ts).
+    generarBoletasNexaBestEffort(paymentIds);
   },
   fail: async (eventId, code) => {
     await db

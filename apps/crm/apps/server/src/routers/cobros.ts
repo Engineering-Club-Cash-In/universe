@@ -62,6 +62,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	necesitaDetalleCartera,
 	prepararCuentaNexaParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
@@ -3709,12 +3710,11 @@ export const cobrosRouter = {
 			// su techo se ofrecen como variables insertables por su cuenta en el
 			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
 			// plantilla editada que use únicamente una de ellas se quedaría sin
-			// detalle y la cláusula desaparecería en silencio.
+			// detalle y la cláusula desaparecería en silencio. Las plantillas
+			// `soloConCuentaNexa` (el video) también lo cargan: su gate lee la
+			// cuenta Nexa de este detalle aunque el cuerpo no use {cuentaNexa}.
 			if (
-				cuerpoBase.includes("{montoAdeudado}") ||
-				cuerpoBase.includes("{incrementoDiarioMora}") ||
-				cuerpoBase.includes("{incrementoMaximoMensualMora}") ||
-				cuerpoBase.includes("{cuentaNexa}")
+				necesitaDetalleCartera(cuerpoBase, plantilla.soloConCuentaNexa === true)
 			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(

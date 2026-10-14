@@ -100,6 +100,30 @@ export const pagosExistentesDeCuota = (
     .orderBy(asc(pagos_credito.pago_id));
 
 /**
+ * ¿Queda alguna fila VIVA en la cuota, del estado que sea? Incluye las `pending` ya pagadas que
+ * `pagosExistentesDeCuota` deja afuera: una cuota que cerró un pago aún sin validar NO está
+ * huérfana, y no puede volver a cargarse desde la semilla anulada (crédito 459, cuota 4).
+ */
+export const hayFilaVivaEnCuota = async (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) => {
+  const [fila] = await executor
+    .select({ pagoId: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, false),
+      ),
+    )
+    .limit(1);
+  return fila !== undefined;
+};
+
+/**
  * La semilla `no_required` ANULADA más vieja de la cuota (menor `pago_id`), o `undefined`.
  * Solo para `saldoDeRespaldoDeSemillaAnulada`: nunca se usa como destino del cierre.
  */

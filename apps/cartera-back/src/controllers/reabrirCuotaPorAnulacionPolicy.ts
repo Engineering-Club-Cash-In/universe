@@ -16,6 +16,44 @@ import {
 
 type BigInput = number | string | Big;
 
+export type RestantesFila = {
+  capital_restante?: BigInput | null;
+  interes_restante?: BigInput | null;
+  iva_12_restante?: BigInput | null;
+  seguro_restante?: BigInput | null;
+  gps_restante?: BigInput | null;
+  membresias?: BigInput | null;
+};
+
+export type FilaAnulada = RubrosCuotaRow &
+  RestantesFila & { cuota_id?: number | null; validationStatus?: string | null };
+
+export type PlanReaperturaCuota = {
+  /** Restantes a estampar en las filas vivas de la cuota (null: no tocar). */
+  replica: ReplicaRestantesCuota | null;
+  /** Poner `pagado = false` en las filas vivas de la cuota. */
+  reabrirFilas: boolean;
+  /** Poner `cuotas_credito.pagado = false`. */
+  reabrirCuota: boolean;
+  /**
+   * La cuota se reabre y no queda ninguna fila viva de la que `insertPayment` pueda leer
+   * su saldo: hay que insertar una fila `no_required` sin plata que lo lleve (como las
+   * semillas de `createCredit`). Sin ella el pago siguiente se salta la cuota reabierta.
+   * Si no se reabre, ningún pago la lee y una fila abierta en una cuota cerrada confunde.
+   */
+  insertarPortadora: boolean;
+};
+
+const SIN_CAMBIOS: PlanReaperturaCuota = {
+  replica: null,
+  reabrirFilas: false,
+  reabrirCuota: false,
+  insertarPortadora: false,
+};
+
+const masAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
+  new Big(restante ?? 0).plus(abono ?? 0);
+
 /**
  * ¿Anular (`falsePayment`) un pago obliga a REABRIR la cuota a la que aportó?
  *
@@ -50,43 +88,6 @@ type BigInput = number | string | Big;
  *  - INCOBRABLE: como `reversePayment` (~967-1005), filas y cuota quedan con el
  *    mismo valor, el de `shouldIncobrableInstallmentBePaid` (por capital).
  */
-export type RestantesFila = {
-  capital_restante?: BigInput | null;
-  interes_restante?: BigInput | null;
-  iva_12_restante?: BigInput | null;
-  seguro_restante?: BigInput | null;
-  gps_restante?: BigInput | null;
-  membresias?: BigInput | null;
-};
-
-export type FilaAnulada = RubrosCuotaRow &
-  RestantesFila & { cuota_id?: number | null; validationStatus?: string | null };
-
-export type PlanReaperturaCuota = {
-  /** Restantes a estampar en las filas vivas de la cuota (null: no tocar). */
-  replica: ReplicaRestantesCuota | null;
-  /** Poner `pagado = false` en las filas vivas de la cuota. */
-  reabrirFilas: boolean;
-  /** Poner `cuotas_credito.pagado = false`. */
-  reabrirCuota: boolean;
-  /**
-   * No queda ninguna fila viva de la que `insertPayment` pueda leer el saldo de la
-   * cuota: hay que insertar una fila `no_required` sin plata que lo lleve (como las
-   * semillas de `createCredit`). Sin ella el pago siguiente se salta la cuota reabierta.
-   */
-  insertarPortadora: boolean;
-};
-
-const SIN_CAMBIOS: PlanReaperturaCuota = {
-  replica: null,
-  reabrirFilas: false,
-  reabrirCuota: false,
-  insertarPortadora: false,
-};
-
-const masAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
-  new Big(restante ?? 0).plus(abono ?? 0);
-
 export function planReaperturaCuotaPorAnulacion({
   creditoId,
   montoCuota,
@@ -157,9 +158,9 @@ export function planReaperturaCuotaPorAnulacion({
   });
 
   // Solo el `pagado` depende de la cuota y del estado (ver el bloque de arriba).
-  // La validación ya restó el abono de `creditos.capital` y `falsePayment` no lo devuelve
-  // (pendiente aparte): se evalúa con el capital de ANTES del pago, como `reversePayment`
-  // (~375-396), y solo si el pago estaba aplicado. Un pending nunca descontó capital.
+  // `capital` es el de `creditos` con el abono del pago todavía restado (la validación lo
+  // restó): se evalúa con el capital de ANTES del pago, como `reversePayment` (~375-396),
+  // y solo si el pago estaba aplicado. Un pending nunca descontó capital.
   const capitalPrevio = new Big(capital ?? 0).plus(
     esPagoAplicado(filaAnulada.validationStatus) ? (filaAnulada.abono_capital ?? 0) : 0,
   );
@@ -185,6 +186,6 @@ export function planReaperturaCuotaPorAnulacion({
     replica,
     reabrirFilas: reabrir,
     reabrirCuota: reabrir,
-    insertarPortadora: replica !== null && !hayDondeLeerSaldo,
+    insertarPortadora: replica !== null && !hayDondeLeerSaldo && reabrir,
   };
 }

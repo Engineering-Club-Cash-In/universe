@@ -241,6 +241,14 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(plan({ hermanas: [hermana({ validationStatus: "capital_validated" })] }).insertarPortadora).toBe(true);
   });
 
+  test("sin fila viva pero la cuota NO se reabre (CANCELADO / CAIDO / INCOBRABLE en 0 / cuota 0): sin portadora", () => {
+    for (const o of [{ statusCredit: "CANCELADO" }, { statusCredit: "CAIDO" }, { statusCredit: "INCOBRABLE", capital: 0 }, { montoCuota: 0 }]) {
+      const p = plan({ ...o, hermanas: [] });
+      expect(p.replica).not.toBeNull();
+      expect(p.insertarPortadora).toBe(false);
+    }
+  });
+
   test("sin cambios nunca pide la portadora", () => {
     expect(plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] }).insertarPortadora).toBe(false);
   });

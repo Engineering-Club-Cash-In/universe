@@ -1,4 +1,4 @@
-import { afterAll, expect } from "bun:test";
+import { afterAll, expect, spyOn } from "bun:test";
 import { sql as dsql } from "drizzle-orm";
 import {
   cerrarEsquemaBoletaTardia, condonarBT, EMAIL_ASESOR, integrationTest, levantarEsquemaBoletaTardia, uuidIntento, type Entorno,
@@ -129,4 +129,26 @@ integrationTest("F3: un actor INACTIVO que existe en platform_users firma con su
   expect(await emailVigenteDelActor({ id: u!.id })).toBe("inactivo.t8@clubcashin.test");
   expect(await emailVigenteDelActor({ id: 987654 })).toBeUndefined();
   expect(await emailVigenteDelActor(undefined)).toBeUndefined();
+});
+
+integrationTest("G3: el log dice el monto restituido REAL: 7.47 si restituyó; 0.00 tras una ruptura de convenio (restituida:false)", async () => {
+  const env = await levantarEsquemaBoletaTardia();
+  await condonarBT(env.latefee, 35, uuidIntento(235));
+  await condonarBT(env.latefee, 36, uuidIntento(236));
+  const { cerrarMoraPagadaDeCredito } = await import("../utils/cerrarMoraPagadaDeCredito");
+  await env.database.db.transaction(async (tx) => { await cerrarMoraPagadaDeCredito({ credito_id: 36 }, tx as never); });
+  await env.sql`UPDATE cartera.moras_credito SET monto_mora = 150 WHERE credito_id = 36`; // la mora recreada
+  const warns = spyOn(console, "warn").mockImplementation(() => undefined);
+  let logs: string[];
+  try {
+    await invalidar(env, 35, uuidIntento(235), { pago_id: 935 });
+    await invalidar(env, 36, uuidIntento(236), { pago_id: 936 });
+    logs = warns.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("condonacion_anulada_por_pago_invalidado"));
+  } finally {
+    warns.mockRestore();
+  }
+  const porPago = (p: number) => JSON.parse(logs.find((l) => l.includes(`"pago_id":${p}`))!);
+  expect(porPago(935)).toMatchObject({ restituida: true, monto_condonado: "7.47", monto_restituido: "7.47" });
+  expect(porPago(936)).toMatchObject({ restituida: false, monto_condonado: "7.47", monto_restituido: "0.00" });
+  expect((await mora(env, 36)).monto_mora).toBe("150.00");
 });

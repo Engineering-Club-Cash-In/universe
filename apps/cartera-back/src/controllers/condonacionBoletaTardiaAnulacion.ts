@@ -24,7 +24,9 @@ export async function anularCondonacionPorPagoInvalidado({
   if (!r.anulada) return { anulada: false };
   console.warn(JSON.stringify({
     level: "warn", event: "boleta_tardia.condonacion_anulada_por_pago_invalidado",
-    mensaje: motivo, credito_id, pago_id, condonacion_id: r.condonacion_id, monto_restituido: r.monto, restituida: r.restituida,
+    mensaje: motivo, credito_id, pago_id, condonacion_id: r.condonacion_id, restituida: r.restituida,
+    // Lo que de verdad volvió a la mora (0.00 si no restituyó, p. ej. tras una ruptura de convenio), igual que el log de Nexa.
+    monto_condonado: r.monto, monto_restituido: r.restituida ? r.monto : "0.00",
   }));
   return { anulada: true, condonacion_id: r.condonacion_id };
 }

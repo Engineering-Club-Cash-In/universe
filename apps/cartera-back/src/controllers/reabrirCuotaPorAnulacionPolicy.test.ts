@@ -124,21 +124,41 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     expect(plan({ filaAnulada: cierre({ cuota_id: null }) }).reabrirFilas).toBe(false);
   });
 
-  test("montoCuota nulo o cero: nada", () => {
-    expect(plan({ montoCuota: null }).reabrirFilas).toBe(false);
-    expect(plan({ montoCuota: 0 }).reabrirFilas).toBe(false);
+  test("montoCuota nulo o cero: repone restantes (como la reversa) pero no reabre pagado", () => {
+    for (const montoCuota of [null, 0]) {
+      const p = plan({ montoCuota });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
   });
 
-  test("crédito cancelado o pendiente de cancelación: nada", () => {
-    expect(plan({ statusCredit: "CANCELADO" }).reabrirFilas).toBe(false);
-    expect(plan({ statusCredit: "PENDIENTE_CANCELACION" }).reabrirFilas).toBe(false);
-  });
-
-  test("INCOBRABLE: repone restantes y filas pero no toca la cuota", () => {
-    const p = plan({ statusCredit: "INCOBRABLE" });
-    expect(p.reabrirFilas).toBe(true);
+  test("CANCELADO: repone restantes pero no reabre", () => {
+    const p = plan({ statusCredit: "CANCELADO" });
     expect(p.replica).not.toBeNull();
+    expect(p.reabrirFilas).toBe(false);
     expect(p.reabrirCuota).toBe(false);
+  });
+
+  test("PENDIENTE_CANCELACION se reabre (ACTIVAR lo devuelve a ACTIVO)", () => {
+    const p = plan({ statusCredit: "PENDIENTE_CANCELACION" });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital pendiente: filas y cuota se reabren juntas", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 500 });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital en cero (dentro de la tolerancia): repone pero no reabre nada", () => {
+    for (const capital of [0, 0.01, null]) {
+      const p = plan({ statusCredit: "INCOBRABLE", capital });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
   });
 
   test("restantes nulos se tratan como cero", () => {

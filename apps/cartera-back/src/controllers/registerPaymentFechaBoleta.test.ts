@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { camposObligatoriosCondonacion } from "./registerPaymentPolicy";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 describe("camposObligatoriosCondonacion", () => {
   test("completo → sin errores", () => {
-    expect(camposObligatoriosCondonacion({ url_boletas: ["b.jpg"], numeroAutorizacion: "A-1", banco_id: 3 })).toEqual({});
+    expect(camposObligatoriosCondonacion({ url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], numeroAutorizacion: "A-1", banco_id: 3 })).toEqual({});
   });
   test("falta cada uno → error por campo; espacios en blanco no cuentan", () => {
     expect(camposObligatoriosCondonacion({ url_boletas: [], numeroAutorizacion: "  ", banco_id: undefined })).toEqual({
@@ -14,7 +15,7 @@ describe("camposObligatoriosCondonacion", () => {
     });
   });
   test("banco_id 0 (valor inicial del formulario) no cuenta", () => {
-    expect(camposObligatoriosCondonacion({ url_boletas: ["b.jpg"], numeroAutorizacion: "A-1", banco_id: 0 })).toHaveProperty("banco_id");
+    expect(camposObligatoriosCondonacion({ url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], numeroAutorizacion: "A-1", banco_id: 0 })).toHaveProperty("banco_id");
   });
 });
 

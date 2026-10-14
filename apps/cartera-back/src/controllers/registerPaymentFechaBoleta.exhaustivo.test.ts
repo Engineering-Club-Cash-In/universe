@@ -4,6 +4,7 @@ import { db, lockPool } from "../database";
 import { insertPayment } from "./registerPayment";
 import { camposObligatoriosCondonacion } from "./registerPaymentPolicy";
 import { validarFechaBoleta } from "../utils/fechaCalendarioGT";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 /**
  * Caja negra de 6.a. Reloj: `setSystemTime` (no es mock.module). Base: falsa; los contadores
@@ -189,7 +190,7 @@ describe("validarFechaBoleta (util, mensajes en español)", () => {
 
 describe("camposObligatoriosCondonacion", () => {
   const MSG = (c: string) => [`${c} es obligatorio para condonar por boleta tardía`];
-  const ok = { url_boletas: ["b.jpg"], numeroAutorizacion: "A-1", banco_id: 3 };
+  const ok = { url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], numeroAutorizacion: "A-1", banco_id: 3 };
   const U = { url_boletas: MSG("url_boletas") };
   const N = { numeroAutorizacion: MSG("numeroAutorizacion") };
   const B = { banco_id: MSG("banco_id") };
@@ -219,12 +220,12 @@ describe("camposObligatoriosCondonacion", () => {
   test("numeroAutorizacion null no cuenta", () =>
     expect(camposObligatoriosCondonacion({ ...ok, numeroAutorizacion: null as any })).toEqual(N));
   test("varias boletas cuentan", () =>
-    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["a", "b"] })).toEqual({}));
+    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg", "00000000-0000-4000-8000-000000000002.pdf"] })).toEqual({}));
   // Ruling F2: debe haber al menos una url no vacía tras trim.
   test("url_boletas [''] o ['  '] cuenta como ausente", () => {
     expect(camposObligatoriosCondonacion({ ...ok, url_boletas: [""] })).toEqual(U);
     expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["  "] })).toEqual(U);
-    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["", "a.jpg"] })).toEqual({});
+    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["", "00000000-0000-4000-8000-000000000001.jpg"] })).toEqual({ url_boletas: expect.any(Array) });
   });
   test("numeroAutorizacion con espacios alrededor y contenido sí cuenta", () =>
     expect(camposObligatoriosCondonacion({ ...ok, numeroAutorizacion: "  A-1 " })).toEqual({}));

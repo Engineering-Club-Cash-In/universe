@@ -2,6 +2,7 @@ import "../utils/baseFalsaParaPruebas";
 import { describe, expect, test } from "bun:test";
 import { motivoCondonacionBoletaTardia } from "../utils/motivoCondonacionBoletaTardia";
 import { condonacionBoletaTardiaSchema, registrarPagoConBoletaTardia, traeCondonacionBoletaTardia, type DepsBoletaTardia } from "./boletaTardia";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 const explota = (nombre: string) => (() => { throw new Error(`no debía llamarse: ${nombre}`); }) as never;
 const depsQueNoSeUsan: DepsBoletaTardia = {
@@ -10,7 +11,7 @@ const depsQueNoSeUsan: DepsBoletaTardia = {
 };
 const INTENTO = "00000000-0000-4000-8000-000000000001";
 const cuerpo = (extra: Record<string, unknown> = {}) => ({
-  credito_id: 1, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["b.jpg"],
+  credito_id: 1, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"],
   banco_id: 1, numeroAutorizacion: "A-1", registerBy: "asesor@x.com", fecha_boleta: "2026-09-30", origen_pago: "boleta",
   condonacionBoletaTardia: { intentoId: INTENTO, montoAceptado: "11.20" }, ...extra,
 });
@@ -41,6 +42,20 @@ describe("validaciones 400 antes de tocar candados ni base", () => {
       expect(status).toBe(400);
       expect(r.success).toBe(false);
     }
+  });
+  test("la boleta debe ser una llave del bucket (no 'x', ni un enlace), y el bucket debe estar configurado", async () => {
+    for (const url_boletas of [["x"], ["https://evil.example/a.jpg"], ["00000000-0000-4000-8000-000000000001.jpg", "x"]]) {
+      const { r, status } = await correr(cuerpo({ url_boletas }));
+      expect(status).toBe(400);
+      expect(r.errors?.url_boletas?.[0]).toContain("foto de la boleta");
+    }
+    const previo = process.env.URL_PUBLIC_R2;
+    try {
+      delete process.env.URL_PUBLIC_R2;
+      const { r, status } = await correr(cuerpo());
+      expect(status).toBe(400);
+      expect(r.errors?.url_boletas?.[0]).toContain("URL_PUBLIC_R2");
+    } finally { process.env.URL_PUBLIC_R2 = previo; }
   });
   test("fecha_boleta inválida o futura (la boleta futura nunca llega a condonar)", async () => {
     for (const fecha_boleta of ["basura", "2999-01-01"]) expect((await correr(cuerpo({ fecha_boleta }))).status).toBe(400);

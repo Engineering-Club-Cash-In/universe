@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { rechazoSiNoEsRolActivo } from "./midleware";
 import { registrarPagoConBoletaTardia, traeCondonacionBoletaTardia, type DepsBoletaTardia } from "../controllers/boletaTardia";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 /**
  * Pruebas exhaustivas (caja negra) de la Tarea 7: el gate `rechazoSiNoEsRolActivo` y su cableado.
@@ -256,7 +257,7 @@ describe("un body con registerBy / usuario_id / email / user / usuario_email NO 
   const ACTOR = "Verificado@Base.com";
   const INTENTO = "00000000-0000-4000-8000-000000000042";
   const cuerpo = (extra: Record<string, unknown>) => ({
-    credito_id: 5, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["b.jpg"], banco_id: 1,
+    credito_id: 5, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], banco_id: 1,
     numeroAutorizacion: "A-1", registerBy: "intruso@x.com", fecha_boleta: "2026-09-30", origen_pago: "boleta",
     condonacionBoletaTardia: { intentoId: INTENTO, montoAceptado: "7.47" }, ...extra,
   });

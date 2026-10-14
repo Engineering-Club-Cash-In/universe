@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import Big from "big.js";
 import { randomUUID } from "node:crypto";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 /**
  * E2E de la Tarea 6.c: el flujo COMPLETO de boleta tardía (`registrarPagoConBoletaTardia`) con `insertPayment`,
@@ -118,7 +119,7 @@ async function preparar(credito: number, extra: { sumarMonto?: number } = {}): P
   const intento = randomUUID();
   const body = {
     credito_id: credito, usuario_id: u, monto_boleta: Number(e.need.plus(extra.sumarMonto ?? 0).toFixed(2)), fecha_pago: hoyReal,
-    fecha_boleta: e.boleta, cuotaApagar: 1, url_boletas: ["e2e-boleta.jpg"], banco_id: BANCO_ID, numeroAutorizacion: `E2E6C-${randomUUID()}`,
+    fecha_boleta: e.boleta, cuotaApagar: 1, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], banco_id: BANCO_ID, numeroAutorizacion: `E2E6C-${randomUUID()}`,
     registerBy: EMAIL, origen_pago: "boleta", condonacionBoletaTardia: { intentoId: intento, montoAceptado: e.condonar.toFixed(2) },
   };
   const l = await sql(`SELECT tipo, sum(monto)::text AS m FROM cartera.mora_pagada_cuota WHERE credito_id=$1 GROUP BY tipo`, [credito]);

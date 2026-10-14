@@ -3,6 +3,7 @@ import {
   EMAIL_ASESOR, cerrarEsquemaBoletaTardia, condonarBT, integrationTest, levantarEsquemaBoletaTardia, uuidIntento, type Sql,
 } from "./boletaTardiaTestDb";
 import type { DepsBoletaTardia } from "./boletaTardia";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 afterAll(cerrarEsquemaBoletaTardia);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -10,7 +11,7 @@ const terminaAntesDe = async <T>(p: Promise<T>, ms = 5_000) =>
   Promise.race([p.then(() => "termino" as const), sleep(ms).then(() => "colgado" as const)]);
 
 const cuerpo = (credito: number, intento: string, montoAceptado = "7.47", extra: Record<string, unknown> = {}) => ({
-  credito_id: credito, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["b.jpg"],
+  credito_id: credito, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2026-10-03", cuotaApagar: 5, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"],
   banco_id: 1, numeroAutorizacion: `A-${intento.slice(-4)}`, registerBy: EMAIL_ASESOR, fecha_boleta: "2026-09-30",
   origen_pago: "boleta", condonacionBoletaTardia: { intentoId: intento, montoAceptado }, ...extra,
 });

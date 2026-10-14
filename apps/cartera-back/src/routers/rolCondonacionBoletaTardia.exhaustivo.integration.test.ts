@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import {
   cerrarEsquemaBoletaTardia, integrationTest as it, levantarEsquemaBoletaTardia, uuidIntento, type Entorno,
 } from "../controllers/boletaTardiaTestDb";
+process.env.URL_PUBLIC_R2 = "https://pub-test.r2.dev/payments-receipts/"; // la condonación exige que la boleta sea una llave del bucket
 
 /**
  * Tarea 7, caja negra contra Postgres real (fixture de boletaTardia): el router REAL (`paymentRouter.handle`) con
@@ -19,7 +20,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const firmar = (p: Record<string, unknown>) => jwt.sign(p, SECRET);
 const BLOQUE_INVALIDO = {}; // bifurca (≠ null) pero no valida: si el gate PASA → 400; si rechaza → 401/403
 const CUERPO_COMPLETO = (credito: number, intento = uuidIntento(900 + credito)) => ({
-  credito_id: credito, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2020-01-05", cuotaApagar: 5, url_boletas: ["b.jpg"], banco_id: 1,
+  credito_id: credito, usuario_id: 1, monto_boleta: 1000, fecha_pago: "2020-01-05", cuotaApagar: 5, url_boletas: ["00000000-0000-4000-8000-000000000001.jpg"], banco_id: 1,
   numeroAutorizacion: `A-${credito}`, registerBy: "intruso@x.com", fecha_boleta: "2020-01-01", origen_pago: "boleta",
   condonacionBoletaTardia: { intentoId: intento, montoAceptado: "1.00" },
 });

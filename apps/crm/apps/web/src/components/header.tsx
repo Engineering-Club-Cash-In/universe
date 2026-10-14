@@ -21,6 +21,7 @@ import {
 	Settings,
 	ShieldBan,
 	ShieldCheck,
+	Stamp,
 	Target,
 	TrendingUp,
 	UserCircle,
@@ -376,6 +377,12 @@ export default function Header() {
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>
+										<Link to="/juridico/carta-poder" className="cursor-pointer">
+											<Stamp className="mr-2 h-4 w-4" />
+											Carta poder
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
 										<Link to="/juridico/dashboard" className="cursor-pointer">
 											<LayoutDashboard className="mr-2 h-4 w-4" />
 											Dashboard
@@ -724,6 +731,13 @@ function MobileNav({
 										<Link to="/juridico" className={MOBILE_LINK_CLASS}>
 											<Scale />
 											Gestión jurídica
+										</Link>
+										<Link
+											to="/juridico/carta-poder"
+											className={MOBILE_LINK_CLASS}
+										>
+											<Stamp />
+											Carta poder
 										</Link>
 										<Link
 											to="/juridico/dashboard"

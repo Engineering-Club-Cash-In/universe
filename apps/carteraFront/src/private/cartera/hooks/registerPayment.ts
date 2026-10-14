@@ -19,7 +19,7 @@ import {
   type Usuario,
   type RubroPendiente,
 } from "../services/services";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { canEnterCancellationPaymentFlow } from "./cancellationPaymentFlow";
 import { useResetCredit } from "./resetCredit";
@@ -28,6 +28,14 @@ import { zodToFormikValidate } from "@/lib/formErrors";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
+import {
+  avisoCondonacionAnulada,
+  esConflictoDeCondonacion,
+  mensajeConflictoCondonacion,
+  moraEfectivaParaCobrar,
+  type BloqueCondonacionBoletaTardia,
+  type VistaPreviaBoletaTardia,
+} from "../components/boletaTardia";
 import { getConvenioAplicado } from "../services/convenioContribution";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive({ message: "Debe seleccionar un crédito" }),
@@ -48,6 +56,10 @@ export const pagoSchema = z.object({
   numeroAutorizacion: z.string().optional(),
   registerBy: z.string().min(1, { message: "Usuario registrador requerido" }),
   origen_pago: z.enum(["transferencia", "cheque", "boleta"], { errorMap: () => ({ message: "Debe seleccionar un origen de pago" }) }),
+  condonacionBoletaTardia: z.object({
+    intentoId: z.string().uuid(),
+    montoAceptado: z.string().regex(/^\d{1,16}\.\d{2}$/),
+  }).optional(),
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -71,6 +83,19 @@ const [resetBuscador, setResetBuscador] = useState(false);
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
+  // Condonación de boleta tardía aceptada en el modal (PagoForm la fija; solo viaja si hay bloque).
+  // Ref (no estado): handleAbonoCapitalDirecto envía en el mismo tick en que la borra, y un closure viejo mandaría la condonación.
+  const vistaCondonacion = useRef<{ bloque?: BloqueCondonacionBoletaTardia; vista?: VistaPreviaBoletaTardia; aceptada: boolean }>({ aceptada: false });
+  // vistaEnVivo la escribe el efecto del preview (se vacía si la vista se recarga); vistaCondonacion es la CONGELADA al confirmar,
+  // la que usan el envío y la mora de handleFormSubmit. Así "a otros"/"a capital" (que cambian la vista) no pierden la condonación.
+  const vistaEnVivo = useRef<{ bloque?: BloqueCondonacionBoletaTardia; vista?: VistaPreviaBoletaTardia; aceptada: boolean }>({ aceptada: false });
+  const fijarCondonacion = (bloque: BloqueCondonacionBoletaTardia | undefined, vista: VistaPreviaBoletaTardia | undefined, aceptada: boolean) => {
+    vistaEnVivo.current = { bloque, vista, aceptada };
+  };
+  const soltarCondonacion = () => {
+    vistaEnVivo.current = { aceptada: false };
+    vistaCondonacion.current = { aceptada: false };
+  };
   // Rubros pendientes de cobro (tarjeta de circulación, placas, etc). A
   // diferencia de `mora`, `rubrosActual` SIEMPRE viaja como number desde el
   // back (no hace falta el `Number(x || 0)` defensivo que exige moraActual).
@@ -194,15 +219,20 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
           cuotaApagar:
             typeof cuotaSeleccionada === "number" ? cuotaSeleccionada : 0,
           url_boletas,
+          ...(vistaCondonacion.current.bloque ? { condonacionBoletaTardia: vistaCondonacion.current.bloque } : {}),
         };
         console.log("Valores a enviar:", valuesToSend);
          
         const response = await createPago(valuesToSend); // Esto es la respuesta completa
         toast.success(response.message || "¡Pago registrado correctamente!");
+        const avisoAnulada = avisoCondonacionAnulada(response);
+        if (avisoAnulada) toast.warning(avisoAnulada, { duration: 10000 });
     
 
         setStatus({ success: true });
         resetForm();
+        fijarCondonacion(undefined, undefined, false);
+        soltarCondonacion();
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
@@ -216,6 +246,14 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setArchivosParaSubir([]);
         setResetBuscador(true);
       } catch (error: any) {
+        soltarCondonacion();
+        if (esConflictoDeCondonacion(error)) {
+          // El servidor recalculó y la condonación cambió: PagoForm reabre el modal con el cálculo nuevo.
+          const mensaje = mensajeConflictoCondonacion(error);
+          toast.warning(mensaje, { duration: 7000 });
+          setStatus({ success: false, conflictoCondonacion: true, error: mensaje });
+          return;
+        }
         const backendMessage = getApiErrorMessage(
           error,
           "No se pudo registrar el pago",
@@ -423,6 +461,7 @@ useEffect(() => {
 }, [openBadDebt]);
 const handleFormSubmit = (e: React.FormEvent) => {
   e.preventDefault();
+  vistaCondonacion.current = vistaEnVivo.current; // se congela lo que el asesor vio y aceptó
 
   // ===== MANEJO DE CRÉDITO CANCELADO =====
   if (creditoCanceladoInfo) {
@@ -461,7 +500,8 @@ const  cuota = Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.c
 const otrosNum = Number(otros || 0);
 const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor || 0);
 const montoBoleta = Number(monto_boleta || 0);
-const moraNum = Number(mora || 0);
+// Con la condonación aceptada, la mora es la del servidor (la misma que usa el modal).
+const moraNum = moraEfectivaParaCobrar(Number(mora || 0), vistaCondonacion.current.vista, vistaCondonacion.current.aceptada);
 const cuotaConvenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar || 0);
 // `rubrosActual` ya viaja como number desde el back, pero el Number() se deja
 // por consistencia defensiva con el resto de montos de este bloque.
@@ -645,6 +685,9 @@ const handleAbonoCapitalDirecto = () => {
   console.log("Boleta:", montoBoleta, "| otros:", otrosTipeado, "| a capital:", aCapital);
   console.log("Cuota seleccionada:", cuotaSeleccionada);
 
+  // Un abono 100% a capital nunca arrastra la condonación de mora.
+  fijarCondonacion(undefined, undefined, false);
+  soltarCondonacion();
   formik.values.abono_directo_capital = aCapital;
   formik.values.cuotaApagar = cuotaSeleccionada;
 
@@ -888,6 +931,8 @@ async function handleResetCredito(montoIncobrable = 0) {
 }
   return {
     formik,
+    fijarCondonacion,
+    soltarCondonacion,
     fetchCredito,
     dataCredito,
     loadingCredito,

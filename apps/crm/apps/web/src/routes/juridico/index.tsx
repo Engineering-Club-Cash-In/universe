@@ -3,16 +3,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
-	Banknote,
 	CheckCircle,
 	FilePlus2,
 	FileText,
 	Landmark,
 	Loader2,
-	MoreHorizontal,
 	Scale,
 	Search,
-	Settings,
 	Target,
 	User,
 } from "lucide-react";
@@ -41,12 +38,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
 	Table,
@@ -589,7 +580,6 @@ function RouteComponent() {
 											<TableHead>Oportunidad</TableHead>
 											<TableHead>Cliente</TableHead>
 											<TableHead>Etapa</TableHead>
-											<TableHead className="text-right">Valor</TableHead>
 											<TableHead className="text-center">Contratos</TableHead>
 											<TableHead className="text-right">Acciones</TableHead>
 										</TableRow>
@@ -605,7 +595,7 @@ function RouteComponent() {
 													})
 												}
 											>
-												<TableCell>
+												<TableCell className="min-w-48 whitespace-normal">
 													<div className="text-sm">
 														<button
 															type="button"
@@ -624,7 +614,7 @@ function RouteComponent() {
 														</div>
 													</div>
 												</TableCell>
-												<TableCell>
+												<TableCell className="min-w-48 whitespace-normal">
 													<div className="text-sm">
 														<button
 															type="button"
@@ -651,14 +641,6 @@ function RouteComponent() {
 														{opp.stage.name} ({opp.stage.closurePercentage}%)
 													</Badge>
 												</TableCell>
-												<TableCell className="text-right">
-													<div className="flex items-center justify-end gap-1 font-medium text-green-600">
-														<Banknote className="h-4 w-4" />Q
-														{Number.parseFloat(
-															opp.value || "0",
-														).toLocaleString()}
-													</div>
-												</TableCell>
 												<TableCell className="text-center">
 													<Badge
 														variant={
@@ -669,68 +651,51 @@ function RouteComponent() {
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">
-													<DropdownMenu>
-														<DropdownMenuTrigger asChild>
+													<div className="flex items-center justify-end gap-2">
+														{/* Generar va en 80% y también en 85%: jurídico rehace la
+														    batería con otra fecha cuando los contratos vencieron
+														    mientras la oportunidad está en firma. */}
+														{etapaPermite(
+															"reemplazar",
+															opp.stage.closurePercentage,
+														) && (
 															<Button
-																variant="ghost"
+																variant="outline"
 																size="sm"
-																className="h-8 w-8 p-0"
+																asChild
 																onClick={(e) => e.stopPropagation()}
 															>
-																<MoreHorizontal className="h-4 w-4" />
-															</Button>
-														</DropdownMenuTrigger>
-														<DropdownMenuContent align="end">
-															<DropdownMenuItem asChild>
 																<Link
-																	to="/juridico/$leadId"
-																	params={{ leadId: opp.lead.id }}
-																	search={{ opportunityId: opp.id }}
-																	className="cursor-pointer"
+																	to="/juridico/generate/$opportunityId"
+																	params={{ opportunityId: opp.id }}
 																>
-																	<Settings className="mr-2 h-4 w-4" />
-																	Gestionar
+																	<FilePlus2 />
+																	Generar contratos
 																</Link>
-															</DropdownMenuItem>
-															{/* Generar va en 80% y también en 85%: jurídico rehace la
-															    batería con otra fecha cuando los contratos vencieron
-															    mientras la oportunidad está en firma. */}
-															{etapaPermite(
-																"reemplazar",
-																opp.stage.closurePercentage,
-															) && (
-																<DropdownMenuItem asChild>
-																	<Link
-																		to="/juridico/generate/$opportunityId"
-																		params={{ opportunityId: opp.id }}
-																		className="cursor-pointer"
-																		onClick={(e) => e.stopPropagation()}
-																	>
-																		<FilePlus2 className="mr-2 h-4 w-4" />
-																		Generar Contratos
-																	</Link>
-																</DropdownMenuItem>
+															</Button>
+														)}
+														{/* Sin contratos no hay nada que aprobar: el botón aparece
+														    cuando ya se generaron. */}
+														{canApproveLegalStage &&
+															opp.stage.closurePercentage === 80 &&
+															opp.contractCount > 0 && (
+																<Button
+																	variant="outline"
+																	size="sm"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		setOpportunityToApprove({
+																			id: opp.id,
+																			title: opp.title,
+																		});
+																		setIsApproveModalOpen(true);
+																	}}
+																>
+																	<CheckCircle />
+																	Aprobar (→ 85%)
+																</Button>
 															)}
-															{canApproveLegalStage &&
-																opp.stage.closurePercentage === 80 && (
-																	<DropdownMenuItem
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			setOpportunityToApprove({
-																				id: opp.id,
-																				title: opp.title,
-																			});
-																			setIsApproveModalOpen(true);
-																		}}
-																		disabled={opp.contractCount === 0}
-																		className="cursor-pointer"
-																	>
-																		<CheckCircle className="mr-2 h-4 w-4" />
-																		Aprobar (→ 85%)
-																	</DropdownMenuItem>
-																)}
-														</DropdownMenuContent>
-													</DropdownMenu>
+													</div>
 												</TableCell>
 											</TableRow>
 										))}

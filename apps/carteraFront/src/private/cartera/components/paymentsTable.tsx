@@ -70,6 +70,7 @@ import { ModalFacturasPago } from "./modalFacts";
 import { ModalDesgloseFacturas } from "./ModalDesgloseFacturas";
 import { motivoNoAnularPago, puedeAnularPago } from "./puedeAnularPago";
 import { DatePickerMUI } from "./calendar";
+import { claseInsigniaCondonacionBoletaTardia, etiquetaCondonacionBoletaTardia, valorCondonacionBoletaTardia } from "./condonacionBoletaTardiaEtiqueta";
 import { cierreCincoPm, etiquetaCanal, paramsRangoFechaPago, type CanalPago } from "@/lib/pagosCanalHora";
 
 // --- utilidades ---
@@ -1365,6 +1366,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                   {/* 🔘 Acciones */}
                   <div className="flex gap-3 mt-3 flex-wrap">
+                    {etiquetaCondonacionBoletaTardia(pago.condonacionBoletaTardia) && (
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${claseInsigniaCondonacionBoletaTardia(pago.condonacionBoletaTardia)}`}>
+                        {etiquetaCondonacionBoletaTardia(pago.condonacionBoletaTardia)}
+                      </span>
+                    )}
                     {/* Ver Boletas */}
                     {pago.boletas && pago.boletas.length > 0 ? (
                       pago.boletas.length === 1 ? (
@@ -1697,6 +1703,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           label: "Fecha Boleta",
                           value: pago.fechaBoleta ? formatDate(pago.fechaBoleta) : "—",
                         },
+                        valorCondonacionBoletaTardia(pago.condonacionBoletaTardia)
+                          ? { label: "Condonación por boleta tardía", value: valorCondonacionBoletaTardia(pago.condonacionBoletaTardia) }
+                          : null,
                         {
                           label: "Registrado por",
                           value: pago.registerByNombre || pago.registerBy || "—",
@@ -1860,6 +1869,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             align="end"
                             className="w-64 bg-white shadow-2xl border-2 border-blue-200 rounded-xl p-2"
                           >
+                            {etiquetaCondonacionBoletaTardia(pago.condonacionBoletaTardia) && (
+                              <div className={`px-2 py-1 mb-1 rounded-md text-xs font-semibold ${claseInsigniaCondonacionBoletaTardia(pago.condonacionBoletaTardia)}`}>
+                                {etiquetaCondonacionBoletaTardia(pago.condonacionBoletaTardia)}
+                              </div>
+                            )}
                             {/* Ver Boletas */}
                             {pago.boletas && pago.boletas.length > 0 ? (
                               pago.boletas.map((b, idx) => (
@@ -2351,6 +2365,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             label: "Fecha Boleta",
                             value: pago.fechaBoleta ? formatDate(pago.fechaBoleta) : "—",
                           },
+                          valorCondonacionBoletaTardia(pago.condonacionBoletaTardia)
+                            ? { label: "Condonación por boleta tardía", value: valorCondonacionBoletaTardia(pago.condonacionBoletaTardia) }
+                            : null,
                           {
                             label: "Registrado por",
                             value: pago.registerByNombre || pago.registerBy || "—",

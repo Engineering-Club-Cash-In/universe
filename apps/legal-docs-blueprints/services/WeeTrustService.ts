@@ -1191,12 +1191,13 @@ export class WeeTrustService {
 			// de la firma para que quede SOBRE la línea y no a partir de ella, y
 			// en los que se ubican por una etiqueta impresa debajo de la línea,
 			// lo que hay entre las dos: si no, el cuadro tapa la etiqueta.
-			const x = linea.pdfX;
+			const x =
+				config.firmaSobreLaRaya && !linea.porEtiqueta ? linea.pdfXRaya : linea.pdfX;
 			const y =
 				linea.pageHeight -
 				linea.pdfY -
 				SIGNATURE_HEIGHT -
-				(config.subirSobreLaEtiqueta ?? 0);
+				(linea.porEtiqueta ? (config.subirSobreLaEtiqueta ?? 0) : 0);
 
 			console.log(
 				`[WeeTrust]   firma ${i + 1}: ${esperados[i].role} -> pág. ${linea.pageNum} (${x.toFixed(0)}, ${y.toFixed(0)})`,
@@ -1526,12 +1527,13 @@ export class WeeTrustService {
 
 		return elegidas.map((linea, i) => {
 			const email = signerEmails[Math.min(i, signerEmails.length - 1)];
-			const x = linea.pdfX;
+			const x =
+				config.firmaSobreLaRaya && !linea.porEtiqueta ? linea.pdfXRaya : linea.pdfX;
 			const y =
 				linea.pageHeight -
 				linea.pdfY -
 				SIGNATURE_HEIGHT -
-				(config.subirSobreLaEtiqueta ?? 0);
+				(linea.porEtiqueta ? (config.subirSobreLaEtiqueta ?? 0) : 0);
 			return {
 				user: { email },
 				coordinates: { x, y },
@@ -1575,10 +1577,14 @@ export class WeeTrustService {
 		Array<{
 			pageNum: number;
 			pdfX: number;
+			/** Donde empiezan los guiones de la raya, después de su etiqueta. */
+			pdfXRaya: number;
 			pdfY: number;
 			pageWidth: number;
 			pageHeight: number;
 			debajo: string[];
+			/** Se ubicó por una etiqueta (o ancla), no por una raya de guiones. */
+			porEtiqueta: boolean;
 		}>
 	> {
 		const pdfDocument = await pdfjsLib.getDocument({
@@ -1618,10 +1624,12 @@ export class WeeTrustService {
 		const encontradas: Array<{
 			pageNum: number;
 			pdfX: number;
+			pdfXRaya: number;
 			pdfY: number;
 			pageWidth: number;
 			pageHeight: number;
 			debajo: string[];
+			porEtiqueta: boolean;
 		}> = [];
 
 		for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
@@ -1629,8 +1637,15 @@ export class WeeTrustService {
 			const textContent = await page.getTextContent();
 			const viewport = page.getViewport({ scale: 1.0 });
 
-			const items = (textContent.items as Array<{ str: string; transform: number[] }>)
-				.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
+			const items = (
+				textContent.items as Array<{ str: string; transform: number[]; width: number }>
+			)
+				.map((it) => ({
+					str: it.str,
+					x: it.transform[4],
+					y: it.transform[5],
+					width: it.width,
+				}))
 				.filter((it) => it.str.trim());
 
 			for (const item of items) {
@@ -1648,13 +1663,24 @@ export class WeeTrustService {
 					.slice(0, 3)
 					.map((otro) => otro.str.trim());
 
+				// pdf.js da el ancho del texto entero, no el de cada letra: el inicio
+				// de la raya se estima en proporción a los caracteres. Alcanza para
+				// no tapar la etiqueta, que es lo que importa.
+				const guion = item.str.indexOf("_");
+				const pdfXRaya =
+					guion > 0 && item.str.length > 0
+						? item.x + (item.width * guion) / item.str.length
+						: item.x;
+
 				encontradas.push({
 					pageNum,
 					pdfX: item.x,
+					pdfXRaya,
 					pdfY: item.y,
 					pageWidth: viewport.width,
 					pageHeight: viewport.height,
 					debajo,
+					porEtiqueta: !reLineaDeFirma.test(item.str.trim()),
 				});
 			}
 		}
@@ -1751,7 +1777,9 @@ export function identificacionDe(
 	// no dijo otra cosa) porque el inversionista entrega dinero y la relación se
 	// arma por correo, sin nadie de la empresa enfrente.
 	const conSelfie =
-		contractType === ContractType.RECONOCIMIENTO_DEUDA || deInversion;
+		contractType === ContractType.RECONOCIMIENTO_DEUDA ||
+		contractType === ContractType.RECONOCIMIENTO_DEUDA_SOCIEDAD ||
+		deInversion;
 
 	return {
 		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,

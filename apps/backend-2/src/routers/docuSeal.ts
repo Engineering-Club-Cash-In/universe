@@ -817,6 +817,7 @@ const docuSealRouter = new Elysia({
             t.Literal("inversiones"),
             t.Literal("inversiones_sociedad"),
             t.Literal("carta_poder"),
+            t.Literal("ventas_sociedad"),
           ])
         ),
       }),

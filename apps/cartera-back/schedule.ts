@@ -20,6 +20,7 @@ import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPag
 import config from './src/config';
 import { reintentarCuentasNexaPendientes } from './src/controllers/nexaCuentaReintentos';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
+import { barrerCondonacionesBoletaTardiaHuerfanas, debeFallarElBarrido } from './src/controllers/barridoCondonacionesBoletaTardia';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -218,6 +219,21 @@ export function iniciarTareasProgramadas() {
       'retry_nexa_accounts',
       async () => {
         await reintentarCuentasNexaPendientes();
+      },
+    );
+  });
+
+  // 🕓 Condonaciones de boleta tardía huérfanas - cada 15 minutos.
+  //    Anula las condonaciones vivas (entre 15 min y 24 h) que no tienen ninguna fila de pago con su intento (el
+  //    proceso murió entre condonar y registrar; sin esto la mora se pierde porque el cron respeta el ledger).
+  //    Ver barridoCondonacionesBoletaTardia.ts.
+  schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'sweep_late_slip_waivers',
+      async () => {
+        const r = await barrerCondonacionesBoletaTardiaHuerfanas();
+        // Avisa una sola vez por abandonada nueva (franja de 15 min) o revisión manual nueva (registro en memoria).
+        if (debeFallarElBarrido(r)) throw new Error("scheduled job reported failure");
       },
     );
   });

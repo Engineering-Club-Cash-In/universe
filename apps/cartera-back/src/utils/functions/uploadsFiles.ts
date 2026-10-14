@@ -65,6 +65,12 @@ export async function uploadFileController({
       const parts = file.name.split(".");
       if (parts.length > 1) ext = "." + parts.pop();
     }
+    // La llave debe pasar la regla del bucket (LLAVE_BOLETA en registerPaymentPolicy): una extensión rara
+    // ("Boleta 13.10.2026 (1)" da ".2026 (1)") se reemplaza por la del tipo real, o por ninguna.
+    if (!/^\.[A-Za-z0-9]{1,10}$/.test(ext)) {
+      const porTipo = EXTENSIONS_BY_MIME[file.type]?.[0];
+      ext = porTipo ? `.${porTipo}` : "";
+    }
     const filename = `${uuidv4()}${ext}`;
 
     // Convertir Blob a Buffer

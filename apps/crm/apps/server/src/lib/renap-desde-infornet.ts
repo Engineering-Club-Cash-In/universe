@@ -26,6 +26,7 @@ export function mapearFichaInfornetARenap(
 		municipalityBornedIn: lugar?.municipio ?? null,
 		departmentBornedIn: lugar?.departamento ?? null,
 		bornedIn: texto(ficha.pais),
+		nationality: texto(ficha.nacionalidad),
 		ocupation: texto(ficha.profesion),
 	};
 }

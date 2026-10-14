@@ -12,6 +12,7 @@ const fichaBase: FichaPrincipalPersona = {
 	fechaNacimiento: "13/08/1999",
 	lugarNacimiento: "MIXCO, GUATEMALA",
 	pais: "GUATEMALA",
+	nacionalidad: "GUATEMALTECA",
 	profesion: "ESTUDIANTE",
 };
 
@@ -26,6 +27,7 @@ describe("mapearFichaInfornetARenap", () => {
 			municipalityBornedIn: "MIXCO",
 			departmentBornedIn: "GUATEMALA",
 			bornedIn: "GUATEMALA",
+			nationality: "GUATEMALTECA",
 			ocupation: "ESTUDIANTE",
 		});
 	});
@@ -40,7 +42,6 @@ describe("mapearFichaInfornetARenap", () => {
 			"marriedLastName",
 			"picture",
 			"civilStatus",
-			"nationality",
 			"deathDate",
 			"cedulaOrder",
 			"cedulaRegister",

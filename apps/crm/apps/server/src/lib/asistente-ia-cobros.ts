@@ -1188,15 +1188,18 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	/\b(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
 	/\b(prompt|instrucciones) (del sistema|de sistema|internas?|iniciales)|system prompt|jailbreak|modo (desarrollador|dios|libre)/,
 	// Cambio de rol, solo en imperativo (al inicio o tras puntuación): «el
-	// titular actúa como si no debiera» no es una orden, ni «haz de cuenta que
+	// titular actúa como si no debiera» (también tras coma) no es una orden, ni «haz de cuenta que
 	// el cliente abona Q500» (un escenario del caso).
-	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\b|\b(eres ahora|ahora eres)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
+	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\s+(?!si\b)|\bactua como si (fueras|eres|fuese)\b|\b(eres ahora|ahora eres)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
 	// Otros casos o la base de datos.
 	/\bbase de datos|\b(otros?|demas|todos los) (clientes|creditos|casos|usuarios|asesores)\b/,
 	// Temas generales. Sin «noticias», «pronostico» ni «capital de» (son de
 	// cartera) y «cuento» solo como sustantivo: «¿con qué promesa cuento?» es el
 	// verbo contar.
-	/\b(clima|horoscopo|receta|chiste|poema|cancion|(un|el|este|ese|otro) cuento|futbol|bitcoin|criptomoneda|traduce|traducir|traduccion)\b/,
+	/\b(clima|horoscopo|receta|chiste|poema|cancion|(un|el|este|ese|otro) cuento|futbol|bitcoin|criptomoneda)\b/,
+	// Traducir un texto: imperativo o con idioma de destino. «¿En cuánto se
+	// traduce la mora?» es una pregunta del caso.
+	/(^|[.!?;:,]\s*)traduc\w*\b|\btraduc\w*\s+(\w+\s+){0,3}?(al|a)\s+(ingles|espanol|frances|aleman|portugues|italiano|chino)\b/,
 ];
 
 const sinTildes = (t: string) =>

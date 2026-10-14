@@ -1188,8 +1188,9 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	/\b(ignora|olvida)\w*\s+(todo\s+)?lo\s+anterior\b/,
 	/\b(prompt|instrucciones) (del sistema|de sistema|internas?|iniciales)|system prompt|jailbreak|modo (desarrollador|dios|libre)/,
 	// Cambio de rol, solo en imperativo (al inicio o tras puntuación): «el
-	// titular actúa como si no debiera» no es una orden.
-	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\b|\b(eres ahora|ahora eres)\b|\bhaz de cuenta\b/,
+	// titular actúa como si no debiera» no es una orden, ni «haz de cuenta que
+	// el cliente abona Q500» (un escenario del caso).
+	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\b|\b(eres ahora|ahora eres)\b|\bhaz de cuenta que (eres|fueras|seas)\b/,
 	// Otros casos o la base de datos.
 	/\bbase de datos|\b(otros?|demas|todos los) (clientes|creditos|casos|usuarios|asesores)\b/,
 	// Temas generales. Sin «noticias», «pronostico» ni «capital de» (son de

@@ -357,12 +357,21 @@ describe("tipoRealDeFactura", () => {
 				despues,
 			]),
 		);
-	const webp = () => {
-		const b = Buffer.alloc(32);
-		b.write("RIFF", 0, "latin1");
-		b.writeUInt32LE(24, 4);
-		b.write("WEBPVP8 ", 8, "latin1");
-		return new Uint8Array(b);
+	const chunkWebp = (tipo: string, largo: number) => {
+		const c = Buffer.alloc(8 + largo);
+		c.write(tipo, 0, "latin1");
+		c.writeUInt32LE(largo, 4);
+		return c;
+	};
+	const webp = (
+		chunks: Buffer[] = [chunkWebp("VP8 ", 12)],
+		despues = Buffer.alloc(0),
+	) => {
+		const cuerpo = Buffer.concat([Buffer.from("WEBP"), ...chunks]);
+		const cabecera = Buffer.alloc(8);
+		cabecera.write("RIFF", 0, "latin1");
+		cabecera.writeUInt32LE(cuerpo.length, 4);
+		return new Uint8Array(Buffer.concat([cabecera, cuerpo, despues]));
 	};
 
 	test("reconoce PDF, JPEG, PNG y WebP por su firma y su cierre", () => {
@@ -410,6 +419,24 @@ describe("tipoRealDeFactura", () => {
 		expect(
 			tipoRealDeFactura(texto("RIFF\u00ff\u0000\u0000\u0000WEBPVP8 ")),
 		).toBeNull();
+	});
+
+	test("un WebP necesita los datos de la imagen completos", () => {
+		// RIFF completo pero sin ning\u00fan chunk de WebP adentro.
+		const sinChunk = Buffer.alloc(20);
+		sinChunk.write("RIFF", 0, "latin1");
+		sinChunk.writeUInt32LE(12, 4);
+		sinChunk.write("WEBPxxxxxxxx", 8, "latin1");
+		expect(tipoRealDeFactura(new Uint8Array(sinChunk))).toBeNull();
+		expect(tipoRealDeFactura(webp([chunkWebp("VP8 ", 0)]))).toBeNull();
+		expect(tipoRealDeFactura(webp([chunkWebp("VP8X", 10)]))).toBeNull();
+		expect(tipoRealDeFactura(webp([chunkWebp("ICCP", 4)]))).toBeNull();
+		// VP8X (extendido) seguido de la imagen, y datos despu\u00e9s del RIFF.
+		expect(
+			tipoRealDeFactura(
+				webp([chunkWebp("VP8X", 10), chunkWebp("VP8L", 7)], Buffer.alloc(64)),
+			),
+		).toBe("image/webp");
 	});
 
 	test("rechaza ejecutables, documentos de Office, vacíos o sin firma", () => {

@@ -94,13 +94,31 @@ export function tipoRealDeFactura(bytes: Uint8Array): MimeFacturaSeguro | null {
 		empiezaCon(bytes, [0x52, 0x49, 0x46, 0x46]) &&
 		empiezaCon(bytes, [0x57, 0x45, 0x42, 0x50], 8)
 	) {
-		// El tamaño que declara el RIFF tiene que estar completo.
-		const declarado = Buffer.from(bytes.subarray(4, 8)).readUInt32LE(0);
-		return bytes.length >= 20 && declarado + 8 <= bytes.length
-			? "image/webp"
-			: null;
+		return webpCompleto(datos) ? "image/webp" : null;
 	}
 	return null;
+}
+
+/**
+ * El RIFF completo, que empieza con un chunk de WebP (VP8, VP8L o VP8X) y trae
+ * los datos de la imagen (VP8 o VP8L) enteros.
+ */
+function webpCompleto(datos: Buffer): boolean {
+	if (datos.length < 20) return false;
+	const fin = datos.readUInt32LE(4) + 8;
+	if (fin > datos.length) return false;
+	if (!["VP8 ", "VP8L", "VP8X"].includes(datos.toString("latin1", 12, 16))) {
+		return false;
+	}
+	let pos = 12;
+	while (pos + 8 <= fin) {
+		const tipo = datos.toString("latin1", pos, pos + 4);
+		const largo = datos.readUInt32LE(pos + 4);
+		if (pos + 8 + largo > fin) return false;
+		if ((tipo === "VP8 " || tipo === "VP8L") && largo > 0) return true;
+		pos += 8 + largo + (largo % 2);
+	}
+	return false;
 }
 
 const DOCX =

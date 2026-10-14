@@ -127,3 +127,37 @@ integrationTest("B) cuota sin ninguna fila viva ni semilla anulada: 409 de integ
   const [u] = await ctx.sql`SELECT saldo_a_favor FROM cartera.usuarios WHERE usuario_id = 1`;
   expect(Number(u!.saldo_a_favor)).toBe(0);
 });
+
+// M-3: una fila de capital (`capital` / `capital_validated`) viva no lleva saldo de cuota (interés/IVA
+// en 0, `capital_restante` del crédito): no puede tomar el lugar de la semilla ni contar como viva.
+const filaCapital = (sql: postgres.Sql) =>
+  sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, validation_status, "paymentFalse", pagado, monto_aplicado,
+      abono_capital, abono_interes, abono_iva_12, capital_restante, interes_restante, iva_12_restante, seguro_restante,
+      gps_restante, membresias, membresias_pago, cuota, cuota_interes, pago_convenio, registerby)
+    VALUES (${CREDITO}, 1, 'capital_validated', false, true, 300, 300, 0, 0, 2364, 0, 0, 0, 0, 0, 0, 1000, 100, 0, 'x')`;
+
+integrationTest("C) semilla anulada + fila capital_validated viva: el pago reparte interés/IVA desde la semilla", async () => {
+  const ctx = await setup();
+  await sembrarCredito(ctx.sql);
+  await fila(ctx.sql, { cuota: 1, estado: "no_required", anulada: true });
+  await filaCapital(ctx.sql);
+
+  const { status, res } = await pagar(ctx, 500);
+
+  expect({ status, success: res.success }).toEqual({ status: 200, success: true });
+  const [nueva] = await ctx.sql`SELECT abono_capital, abono_interes, abono_iva_12 FROM cartera.pagos_credito
+    WHERE cuota_id = 1 AND validation_status = 'pending' AND "paymentFalse" = false`;
+  expect([nueva!.abono_interes, nueva!.abono_iva_12, nueva!.abono_capital].map(Number)).toEqual([100, 12, 388]);
+});
+
+integrationTest("D) sin semilla y solo una fila capital_validated viva: 409 de integridad y nada escrito", async () => {
+  const ctx = await setup();
+  await sembrarCredito(ctx.sql);
+  await fila(ctx.sql, { cuota: 1, estado: "validated", anulada: true, pagado: true, aplicado: 400 });
+  await filaCapital(ctx.sql);
+
+  const { status, res } = await pagar(ctx, 500);
+
+  expect({ status, success: res.success }).toEqual({ status: 409, success: false });
+  expect(await filasPorCuota(ctx.sql)).toEqual({ 1: 2, 2: 1, 3: 1 });
+});

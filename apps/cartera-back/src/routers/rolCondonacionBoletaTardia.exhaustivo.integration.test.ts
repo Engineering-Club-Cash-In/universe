@@ -153,47 +153,52 @@ describe("router real + platform_users real", () => {
     const r2 = spyOn(s3, "send");
     const r2Rechaza = () => r2.mockImplementation((async () => { throw Object.assign(new Error("R2 caído"), { name: "Error" }); }) as never);
     const r2Aprueba = () => r2.mockImplementation((async () => ({ ContentLength: 1234, ContentType: "image/jpeg", LastModified: new Date() })) as never);
-    let pendiente: Promise<{ status: number; texto: string }> | undefined;
-    let soltar!: () => void;
-    const retenido = new Promise<void>((r) => (soltar = r));
-    const dueno = env.lock.withPaymentAdvisoryLock(CRED, async () => {
-      const tiempo = async (token: string | undefined, cuerpo: unknown = CUERPO_COMPLETO(CRED)) => {
-        const t0 = Date.now();
-        const r = await Promise.race([llamar("/newPayment", cuerpo, token), sleep(2500).then(() => "colgado" as const)]);
-        return { r, ms: Date.now() - t0 };
-      };
-      const rechazados: Array<[string, string | undefined, number]> = [
-        ["sin token", undefined, 401],
-        ["CONTA", tokenDe("conta", { role: "CONTA" }), 403],
-        ["CONTA con token ASESOR viejo", tokenDe("conta"), 403],
-        ["INVESTOR", tokenDe("inversionista", { role: "INVESTOR" }), 403],
-        ["ASESOR inactivo", tokenDe("asesorInactivo"), 401],
-        ["ADMIN inactivo", tokenDe("adminInactivo", { role: "ADMIN" }), 401],
-        ["id inexistente", firmar({ id: 999999, role: "ADMIN" }), 401],
-      ];
-      for (const [nombre, token, esperado] of rechazados) {
-        const { r } = await tiempo(token);
-        expect([nombre, r === "colgado" ? "colgado" : r.status]).toEqual([nombre, esperado]);
-      }
-      // foto no verificada (R2 caído): 503 al instante con el lock ocupado → no lo pidió
-      r2Rechaza();
-      const foto = await tiempo(tokenDe("admin", { role: "ADMIN" }));
-      expect(["foto no verificada", foto.r === "colgado" ? "colgado" : foto.r.status]).toEqual(["foto no verificada", 503]);
-      if (foto.r !== "colgado") expect(foto.r.texto).toContain('"code":"foto_no_verificada"');
-      // control positivo: con la foto aprobada, el permitido con cuerpo completo llega a pedir el lock y se queda esperando
-      r2Aprueba();
-      pendiente = llamar("/newPayment", CUERPO_COMPLETO(CRED), tokenDe("admin", { role: "ADMIN" }));
-      const r = await Promise.race([pendiente, sleep(1200).then(() => "esperando" as const)]);
-      expect(r).toBe("esperando");
-      await retenido;
-    });
-    await sleep(2800);
-    expect(await conteos()).toBe(antes); // durante el bloqueo nada se escribió
-    soltar();
-    await dueno;
-    await pendiente; // el permitido termina (con lo que sea que diga el esquema mínimo); no importa el resultado
-    expect(r2).toHaveBeenCalled();
-    r2.mockRestore();
+    try {
+      let pendiente: Promise<{ status: number; texto: string }> | undefined;
+      let soltar!: () => void;
+      const retenido = new Promise<void>((r) => (soltar = r));
+      const dueno = env.lock.withPaymentAdvisoryLock(CRED, async () => {
+        const tiempo = async (token: string | undefined, cuerpo: unknown = CUERPO_COMPLETO(CRED)) => {
+          const t0 = Date.now();
+          const r = await Promise.race([llamar("/newPayment", cuerpo, token), sleep(2500).then(() => "colgado" as const)]);
+          return { r, ms: Date.now() - t0 };
+        };
+        const rechazados: Array<[string, string | undefined, number]> = [
+          ["sin token", undefined, 401],
+          ["CONTA", tokenDe("conta", { role: "CONTA" }), 403],
+          ["CONTA con token ASESOR viejo", tokenDe("conta"), 403],
+          ["INVESTOR", tokenDe("inversionista", { role: "INVESTOR" }), 403],
+          ["ASESOR inactivo", tokenDe("asesorInactivo"), 401],
+          ["ADMIN inactivo", tokenDe("adminInactivo", { role: "ADMIN" }), 401],
+          ["id inexistente", firmar({ id: 999999, role: "ADMIN" }), 401],
+        ];
+        for (const [nombre, token, esperado] of rechazados) {
+          const { r } = await tiempo(token);
+          expect([nombre, r === "colgado" ? "colgado" : r.status]).toEqual([nombre, esperado]);
+        }
+        // los rechazados por rol ni siquiera llegan a verificar la foto en R2
+        expect(r2).not.toHaveBeenCalled();
+        // foto no verificada (R2 caído): 503 al instante con el lock ocupado → no lo pidió
+        r2Rechaza();
+        const foto = await tiempo(tokenDe("admin", { role: "ADMIN" }));
+        expect(["foto no verificada", foto.r === "colgado" ? "colgado" : foto.r.status]).toEqual(["foto no verificada", 503]);
+        if (foto.r !== "colgado") expect(foto.r.texto).toContain('"code":"foto_no_verificada"');
+        // control positivo: con la foto aprobada, el permitido con cuerpo completo llega a pedir el lock y se queda esperando
+        r2Aprueba();
+        pendiente = llamar("/newPayment", CUERPO_COMPLETO(CRED), tokenDe("admin", { role: "ADMIN" }));
+        const r = await Promise.race([pendiente, sleep(1200).then(() => "esperando" as const)]);
+        expect(r).toBe("esperando");
+        await retenido;
+      });
+      await sleep(2800);
+      expect(await conteos()).toBe(antes); // durante el bloqueo nada se escribió
+      soltar();
+      await dueno;
+      await pendiente; // el permitido termina (con lo que sea que diga el esquema mínimo); no importa el resultado
+      expect(r2).toHaveBeenCalled();
+    } finally {
+      r2.mockRestore();
+    }
   }, 30_000);
 
   it("20 peticiones paralelas con el mismo token revocado en medio: antes 400, después 401, nunca un 'pasó' tardío incoherente con la base", async () => {

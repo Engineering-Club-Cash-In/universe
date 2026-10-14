@@ -92,7 +92,7 @@ export function useEquipoActivo(habilitado: boolean) {
 			a.nombre.localeCompare(b.nombre, "es"),
 		);
 	}, [query.data, ausenciasQuery.data]);
-	return { query, activos };
+	return { query, activos, ausenciasQuery };
 }
 
 /** «10 asesores · 6 Junior · 4 Senior», o null mientras carga. */
@@ -114,7 +114,11 @@ export function MiEquipoAsesores({
 	const hoy = hoyGT();
 	const rango = rangosContactabilidad(hoy).actual;
 
-	const { query: asesoresQuery, activos } = useEquipoActivo(habilitado);
+	const {
+		query: asesoresQuery,
+		activos,
+		ausenciasQuery: ausenciasEquipo,
+	} = useEquipoActivo(habilitado);
 	const cargaQuery = useQuery({
 		...orpc.getCargaPorAsesorBucket.queryOptions({ input: {} }),
 		enabled: habilitado,
@@ -346,8 +350,13 @@ export function MiEquipoAsesores({
 					coberturasQuery.isLoading ||
 					ausenciasQuery.isLoading
 				}
-				error={asesoresQuery.isError}
-				onReintentar={() => void asesoresQuery.refetch()}
+				// Sin las ausencias no se sabe quién sigue en el equipo con el pool
+				// pausado: se trata como error de la página y el reintento relee ambas.
+				error={asesoresQuery.isError || ausenciasEquipo.isError}
+				onReintentar={() => {
+					void asesoresQuery.refetch();
+					void ausenciasEquipo.refetch();
+				}}
 				onReactivar={pedirReactivar}
 				reactivandoId={cancelar.isPending ? porReactivar?.asesorId : null}
 				fechaAgenda={

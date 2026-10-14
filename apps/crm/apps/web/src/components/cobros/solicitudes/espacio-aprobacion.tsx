@@ -1146,6 +1146,28 @@ function ContenidoEspacio({
 		} else if (!bloqueo && contrapropuestas.isError) {
 			bloqueo =
 				"No se pudo verificar si hay una contrapropuesta. Cierre y vuelva a abrir la solicitud.";
+		} else if (!bloqueo && planConvenio.isError) {
+			// Sin el plan no se ve el primer pago: no se decide ni se contrapropone.
+			bloqueo = "No se pudo cargar el plan del convenio";
+			aviso = (
+				<div className="flex flex-col gap-2 rounded-lg bg-muted px-3 py-2.5 text-[13px] text-fg-secondary">
+					<p>
+						No se pudo leer el plan del convenio (cuotas y primer pago). No se
+						puede decidir sin verlo.
+					</p>
+					<div>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							loading={planConvenio.isFetching}
+							onClick={() => void planConvenio.refetch()}
+						>
+							Reintentar
+						</Button>
+					</div>
+				</div>
+			);
 		} else if (!bloqueo && falloRefresco) {
 			bloqueo = "No se pudo actualizar el plan del convenio";
 			aviso = (

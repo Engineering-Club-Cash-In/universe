@@ -75,6 +75,13 @@ const PREFIJO_NEGACION_DIRECTA = new RegExp(
 const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,
 );
+const TERMINO_EVIDENCIA_NEGADA =
+	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?)/;
+const VERBO_DETECCION_NEGADO =
+	/(?:detect(?:o|aron|ado|ada|ados|adas)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:o|aron|ado|ada|ados|adas)|confirm(?:o|aron|ado|ada|ados|adas)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:o|aron|ado|ada|ados|adas)|observ(?:o|aron|ado|ada|ados|adas)|registr(?:o|aron|ado|ada|ados|adas)|report(?:o|aron|ado|ada|ados|adas)|existe|hay|hubo)/;
+const PREFIJO_NEGACION_INDIRECTA = new RegExp(
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+de)?\\s+$`,
+);
 const SUFIJO_NEGACION =
 	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?)(?=\s|$)/;
 
@@ -83,6 +90,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 	return (
 		PREFIJO_NEGACION_DIRECTA.test(prefijo) ||
 		PREFIJO_NEGACION_COORDINADA.test(prefijo) ||
+		PREFIJO_NEGACION_INDIRECTA.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }

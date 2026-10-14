@@ -60,6 +60,9 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No hubo mora ni incumplimiento",
 		"Nunca tuvo mora",
 		"No presenta falta de pago",
+		"No se detectó evidencia de fraude",
+		"Sin indicios de fraude",
+		"No existe evidencia de fraude",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -79,6 +82,14 @@ describe("clasificación de evidencia de Cartera", () => {
 		expect(clasificarMotivoExplicito("El cliente no pagó")?.categoria).toBe(
 			"mala_paga",
 		);
+	});
+
+	test("conserva evidencia afirmativa aunque exista una negación previa", () => {
+		expect(
+			clasificarMotivoExplicito(
+				"No se detectó evidencia de fraude inicialmente; luego se confirmó fraude",
+			)?.categoria,
+		).toBe("fraude");
 	});
 
 	test("normaliza tildes y espacios antes de clasificar", () => {

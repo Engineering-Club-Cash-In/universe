@@ -27,6 +27,7 @@ import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,11 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
+import {
+	etiquetaEnvioAseguradora,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
+import { formatearTamanoArchivo } from "@/lib/tamano-archivo";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -139,6 +145,16 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 										<Badge variant="outline" className="text-xs">
 											{documentTypeLabels[doc.documentType] || doc.documentType}
 										</Badge>
+										{(() => {
+											const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+											return (
+												envio && (
+													<Badge className={`flex-shrink-0 text-xs ${envio.className}`}>
+														{envio.texto}
+													</Badge>
+												)
+											);
+										})()}
 									</div>
 									{doc.description && (
 										<p className="mt-1 text-muted-foreground text-sm">
@@ -146,10 +162,8 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 										</p>
 									)}
 									<div className="mt-2 flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
-										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-										<span>
-											Subido por {doc.uploadedBy?.name || "Usuario desconocido"}
-										</span>
+										<span>{formatearTamanoArchivo(doc.size)}</span>
+										<span>{textoSubidoPor(doc)}</span>
 										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
 									</div>
 								</div>
@@ -163,6 +177,12 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 								<FileText className="mr-1 h-4 w-4" />
 								Ver Documento
 							</Button>
+							<ReintentoFacturaSeguro
+								opportunityId={opportunityId}
+								disponible={doc.envioAseguradora?.reintentoDisponible}
+								aseguradora={doc.envioAseguradora?.aseguradora}
+								reintentoDesde={doc.envioAseguradora?.reintentoDesde}
+							/>
 						</div>
 					</CardContent>
 				</Card>

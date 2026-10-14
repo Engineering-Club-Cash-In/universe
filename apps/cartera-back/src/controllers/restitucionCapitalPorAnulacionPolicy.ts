@@ -3,19 +3,25 @@ import { recomputeCreditAfterCapital } from "./registerPaymentPolicy";
 import { isCreditStatusReversible, isReversibleIncobrablePayment } from "./reversePaymentPolicy";
 
 /**
- * Anular un pago que YA bajó capital (validated / capital_validated con abono_capital > 0) tiene
+ * Anular un pago que YA bajó capital (validated con abono_capital > 0) tiene
  * que devolverle ese capital al crédito y a sus inversionistas, en la misma transacción que la
  * anulación. Esto es la regla pura; lee y escribe `restituirCapitalPorAnulacion.ts`.
  *
  * Cada código es un 409: la anulación no se hace y contabilidad lo resuelve a mano.
+ *
+ * Conocido y aceptado: si la validación topó el capital en 0 (recomputeCreditAfterCapital no deja
+ * negativos), reponer `0 + abono` repone de más por (abono − capital previo), igual que la reversa.
  */
 export type CodigoAnulacionCapital =
   | "CREDITO_NO_REVERSIBLE" // (a) crédito fuera de REVERSIBLE_CREDIT_STATUSES (p. ej. CANCELADO)
   | "FILA_ESTRUCTURAL_INCOBRABLE" // (b) INCOBRABLE y la fila no es una recuperación real
   | "PCI_LIQUIDADO" // (c) el reparto del pago ya se liquidó (o está por liquidarse)
-  | "ABONO_CAPITAL_LIQUIDADO" // (d) el abono directo ya se liquidó o entró en un espejo
+  // El abono directo (capital_validated) además re-siembra cuotas/pendientes con el capital nuevo
+  // y la reversa refresca la proyección; anularlo exige rehacer eso (pendiente). Por ahora, 409.
+  | "ABONO_DIRECTO_NO_SOPORTADO"
   | "INVERSIONISTA_YA_NO_ESTA" // (e) PCI con capital de un inversionista que salió del crédito
-  | "REPARTO_INCONSISTENTE"; // (f) Σ PCI.abono_capital no cuadra con el abono del pago
+  | "REPARTO_INCONSISTENTE" // (f) Σ PCI.abono_capital no cuadra con el abono del pago
+  | "CUOTA_CERRADA_SIN_REPARTO"; // cuota cerrada sin PCI: no se sabe si se rebajó a los inversionistas
 
 type Num = string | number | null | undefined;
 
@@ -37,6 +43,7 @@ export function precheckAnulacionConCapital({
   statusCredit?: string | null;
 }): CodigoAnulacionCapital | null {
   if (!mueveCapital(validationStatus, abono_capital)) return null;
+  if (validationStatus === "capital_validated") return "ABONO_DIRECTO_NO_SOPORTADO";
   if (!isCreditStatusReversible(statusCredit)) return "CREDITO_NO_REVERSIBLE";
   if (statusCredit === "INCOBRABLE" && !isReversibleIncobrablePayment({ validationStatus, registerBy })) {
     return "FILA_ESTRUCTURAL_INCOBRABLE";
@@ -82,7 +89,6 @@ export type PlanRestitucionCapital =
       credito: { capital: string; cuotaInteres: string; iva: string; deudaTotal: string };
       inversionistas: Array<{ id: number; inversionista_id: number } & ReturnType<typeof recalcularMontosInversionista>>;
       borrarPci: true;
-      borrarAbonosCapital: boolean;
     };
 
 export function planRestitucionCapital({
@@ -90,7 +96,7 @@ export function planRestitucionCapital({
   credito,
   filasPci,
   roster,
-  abonosCapital,
+  cuotaCerrada,
 }: {
   pago: { validationStatus?: string | null; abono_capital?: Num; registerBy?: string | null };
   credito: {
@@ -109,7 +115,8 @@ export function planRestitucionCapital({
     porcentaje_participacion_inversionista: Num;
     porcentaje_cash_in: Num;
   }>;
-  abonosCapital: Array<{ liquidado?: boolean | null; pago_espejo_id?: number | null }>;
+  /** `cuotas_credito.pagado` de la cuota del pago, leído ANTES de reabrirla. */
+  cuotaCerrada: boolean;
 }): PlanRestitucionCapital {
   if (!mueveCapital(pago.validationStatus, pago.abono_capital)) return { tipo: "SIN_CAPITAL" };
   const previo = precheckAnulacionConCapital({ ...pago, statusCredit: credito.statusCredit });
@@ -118,9 +125,8 @@ export function planRestitucionCapital({
   if (filasPci.some((f) => (f.estado_liquidacion ?? "NO_LIQUIDADO") !== "NO_LIQUIDADO" || f.liquidacion_id != null)) {
     return { tipo: "RECHAZAR", codigo: "PCI_LIQUIDADO" };
   }
-  if (abonosCapital.some((a) => a.liquidado || a.pago_espejo_id != null)) {
-    return { tipo: "RECHAZAR", codigo: "ABONO_CAPITAL_LIQUIDADO" };
-  }
+  // RAMA B reparte TODOS los validated de la cuota al cerrarla: cerrada y sin PCI es legado.
+  if (filasPci.length === 0 && cuotaCerrada) return { tipo: "RECHAZAR", codigo: "CUOTA_CERRADA_SIN_REPARTO" };
 
   // Lo que cada inversionista recupera: su PCI.abono_capital (sumado por si hubiera más de una fila).
   const abono = new Big(pago.abono_capital ?? 0);
@@ -180,6 +186,5 @@ export function planRestitucionCapital({
     },
     inversionistas,
     borrarPci: true,
-    borrarAbonosCapital: pago.validationStatus === "capital_validated",
   };
 }

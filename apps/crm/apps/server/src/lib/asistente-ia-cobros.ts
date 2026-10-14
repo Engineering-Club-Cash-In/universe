@@ -1173,11 +1173,11 @@ const MENSAJE_FUERA_DE_TEMA =
  * duda deja pasar, y el prompt estricto cubre el resto.
  */
 const REGLAS_FUERA_DE_TEMA: RegExp[] = [
-	// Pedir código o consultas. «programa» y «código» a secas no cuentan: en
-	// cobros son «programa de pagos» y «código del crédito».
+	// Pedir código o consultas. «programa», «código» y «código en SIFCO» no
+	// cuentan: en cobros son «programa de pagos» y «código del crédito».
 	/```/,
 	/\b(python|javascript|typescript|java|php|html|css|bash|regex|sql|json)\b/,
-	/\bcodigo (fuente|en)\b/,
+	/\bcodigo fuente\b/,
 	/\bescribe\w* (un |una |el |la )?(codigo|script|software|funcion|algoritmo|query|consulta)\b/,
 	/\b(dame|hazme|crea\w*|genera\w*) (un |una |el |la )?(script|software|funcion|algoritmo|query)\b/,
 	/\b(select\s+[\s\S]+?\s+from|insert into|drop table|delete from)\b/,
@@ -1192,8 +1192,10 @@ const REGLAS_FUERA_DE_TEMA: RegExp[] = [
 	/(^|[.!?;:,]\s*)(actua|finge|comportate)\s+como\b|\b(eres ahora|ahora eres)\b|\bhaz de cuenta\b/,
 	// Otros casos o la base de datos.
 	/\bbase de datos|\b(otros?|demas|todos los) (clientes|creditos|casos|usuarios|asesores)\b/,
-	// Temas generales. Sin «noticias», «pronostico» ni «capital de»: son de cartera.
-	/\b(clima|horoscopo|receta|chiste|poema|cancion|cuento|futbol|bitcoin|criptomoneda|traduce|traducir|traduccion)\b/,
+	// Temas generales. Sin «noticias», «pronostico» ni «capital de» (son de
+	// cartera) y «cuento» solo como sustantivo: «¿con qué promesa cuento?» es el
+	// verbo contar.
+	/\b(clima|horoscopo|receta|chiste|poema|cancion|(un|el|este|ese|otro) cuento|futbol|bitcoin|criptomoneda|traduce|traducir|traduccion)\b/,
 ];
 
 const sinTildes = (t: string) =>

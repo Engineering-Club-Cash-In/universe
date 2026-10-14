@@ -105,6 +105,7 @@ const documentCategories = {
 	],
 	"Documentos de Cierre (90%)": [
 		"seguro_vehiculo",
+		"factura_vehiculo",
 		"inscripcion_garantia_mobiliaria",
 		"traspaso",
 		"documentos_firmados_vendedor",
@@ -273,7 +274,7 @@ export function OpportunityDocumentUpload({
 				}
 				setIncludeAll3Months(false);
 			})();
-		} else if (documentType === "seguro_vehiculo") {
+		} else if (documentType === "factura_vehiculo") {
 			const file = selectedFile;
 			void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
 				uploadMutation.mutate({

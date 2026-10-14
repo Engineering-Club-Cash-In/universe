@@ -330,6 +330,13 @@
 			"when": 1791561800000,
 			"tag": "0052_insurance_invoice_submissions",
 			"breakpoints": true
+		},
+		{
+			"idx": 46,
+			"version": "7",
+			"when": 1791561900000,
+			"tag": "0053_add_factura_vehiculo_document_type",
+			"breakpoints": true
 		}
 	]
 }

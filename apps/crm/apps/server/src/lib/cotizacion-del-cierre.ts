@@ -5,7 +5,7 @@ import { opportunityCloseQuotations } from "../db/schema/quotations";
  * Guarda la cotización con la que el cierre armó el crédito, dentro de la
  * transacción que lo marca ganado. Nunca lanza: va en un savepoint, así que si
  * falla solo se descarta este registro y el cierre sigue (el crédito en cartera
- * ya existe). Sin registro, la factura del seguro reconstruye la cotización.
+ * ya existe). Sin registro, la factura del vehículo reconstruye la cotización.
  */
 export async function guardarCotizacionDelCierre(
 	opportunityId: string,

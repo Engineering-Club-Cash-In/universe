@@ -41,7 +41,7 @@ describe("documentosDelCaso", () => {
 	test("el caso ganado al 90% conserva el pendiente; al 100% no se marca; antes no pide factura", () => {
 		expect(tieneDocumentosPendientes(caso({}, 90, "aprobado"))).toBe(true);
 		expect(tieneDocumentosPendientes(caso({}, 100, "aprobado"))).toBe(false);
-		// Un Seguro del Vehículo de antes cuenta como subido.
+		// Una Factura del Vehículo de antes cuenta como subido.
 		expect(
 			documentosDelCaso(caso({ yaRegistrada: true }, 90, "aprobado")),
 		).toMatchObject([{ estado: "subido" }]);
@@ -58,7 +58,7 @@ describe("documentosDelCaso", () => {
 describe("resumenDocumentos", () => {
 	const doc = (estado: "pendiente" | "subido") => ({
 		clave: "factura_seguro" as const,
-		nombre: "Factura del seguro",
+		nombre: "Factura del vehículo",
 		estado,
 	});
 

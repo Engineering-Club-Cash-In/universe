@@ -1809,7 +1809,7 @@ export async function closeOpportunity(
 				data: { numeroSifco },
 			});
 			// En la misma transacción que el `won` (en un savepoint que no puede
-			// tumbar el cierre): la factura del seguro usa esta cotización tal cual.
+			// tumbar el cierre): la factura del vehículo usa esta cotización tal cual.
 			if (quotation?.id) {
 				await guardarCotizacionDelCierre(opportunityId, quotation.id, tx);
 			}

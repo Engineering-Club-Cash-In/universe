@@ -21,7 +21,7 @@ describe("armarCorreoFacturaSeguro", () => {
 			datos,
 			new Date("2026-09-29T20:00:00Z"), // 14:00 en Guatemala
 		);
-		expect(asunto).toBe("Nuevo crédito autorizado: RDBE, S.A. (9CB91550)");
+		expect(asunto).toBe("NUEVO SEGURO 9CB91550 RDBE, S.A.");
 		expect(html).toContain("Estimados, buenas tardes:");
 		expect(html).toContain("la garantía va al Cliente RDBE, S.A.");
 		expect(html).toContain("TIPO: Pick Up");
@@ -29,6 +29,15 @@ describe("armarCorreoFacturaSeguro", () => {
 		expect(html).toContain("Cuota Mensual Q 1,047.82");
 		expect(html).toContain("endoso a Cube Investments, S.A.");
 		expect(html).toContain("Vehículo: Toyota Hilux 2024 · VIN ABC123");
+	});
+
+	test("lo que va adjunto es la factura (del vehículo), no la del seguro", () => {
+		const { html } = armarCorreoFacturaSeguro(
+			datos,
+			new Date("2026-09-29T20:00:00Z"),
+		);
+		expect(html).toContain("por favor encuentren adjunta la factura.");
+		expect(html).not.toContain("factura del seguro");
 	});
 
 	test("el saludo sigue la hora de Guatemala", () => {

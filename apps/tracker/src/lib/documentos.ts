@@ -31,7 +31,7 @@ export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 					: "pendiente";
 		documentos.push({
 			clave: "factura_seguro",
-			nombre: "Factura del seguro",
+			nombre: "Factura del vehículo",
 			estado,
 		});
 	}

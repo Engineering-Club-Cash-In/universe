@@ -374,10 +374,14 @@ export const saldoDeRespaldoDeSemillaAnulada = <T extends SemillaRespaldo>({
  * escribirla y la plata se iría a saldo a favor sin rastro (crédito 365, cuota 4): hay que
  * rechazar el pago antes de escribir nada.
  */
+const esFilaDeCapital = (estado?: string | null) =>
+  estado === "capital" || estado === "capital_validated";
+
 export const cuotaSinFuenteDeSaldo = (
   pagos: { validationStatus?: string | null; paymentFalse?: boolean | null }[],
 ): boolean =>
-  !pagos.some((p) => p.paymentFalse !== true) &&
+  // Una fila de capital viva no lleva saldo de cuota (interés/IVA en 0): no cuenta como viva.
+  !pagos.some((p) => p.paymentFalse !== true && !esFilaDeCapital(p.validationStatus)) &&
   !pagos.some((p) => p.paymentFalse === true && p.validationStatus === "no_required");
 
 export type SaldoCuotaInput = {

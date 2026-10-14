@@ -70,6 +70,10 @@ export const condicionUltimaCuotaPagada = (credito_id: number) =>
     )
   );
 
+// Los abonos directos a capital cuelgan de una cuota pero no llevan su saldo (interés/IVA en 0 y
+// el `capital_restante` del crédito): no son destino, saldo ni "fila viva" de la cuota. `reset` sí.
+const FILAS_DE_CAPITAL: ("capital" | "capital_validated")[] = ["capital", "capital_validated"];
+
 /**
  * Las filas de la cuota entre las que `insertPayment` elige el saldo vigente y el destino del
  * cierre (`pagoOriginal`, `allExistingPagos[0]`). Una fila ANULADA (`paymentFalse = true`) nunca
@@ -90,6 +94,7 @@ export const pagosExistentesDeCuota = (
         eq(pagos_credito.cuota_id, cuotaId),
         eq(pagos_credito.credito_id, creditoId),
         eq(pagos_credito.paymentFalse, false),
+        notInArray(pagos_credito.validationStatus, FILAS_DE_CAPITAL),
         or(
           // Los `pending` entran solo si siguen sin pagar (los pagados ya pasaron por /aplicar-pago).
           notInArray(pagos_credito.validationStatus, ["pending"]),
@@ -117,6 +122,7 @@ export const hayFilaVivaEnCuota = async (
         eq(pagos_credito.cuota_id, cuotaId),
         eq(pagos_credito.credito_id, creditoId),
         eq(pagos_credito.paymentFalse, false),
+        notInArray(pagos_credito.validationStatus, FILAS_DE_CAPITAL),
       ),
     )
     .limit(1);

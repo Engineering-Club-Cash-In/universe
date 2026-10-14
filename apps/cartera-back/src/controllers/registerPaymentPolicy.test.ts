@@ -1918,6 +1918,12 @@ describe("cuotaSinFuenteDeSaldo: la cuota no tiene dónde escribirse", () => {
   it("con semilla anulada de respaldo: no (crédito 459, cuota 4)", () => {
     expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("no_required", true), f("validated", true)])).toBe(false);
   });
+  it("una fila de capital viva no lleva saldo de cuota: no cuenta como viva (M-3)", () => {
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital_validated", false)])).toBe(true);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital", false), f("validated", true)])).toBe(true);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital_validated", false), f("no_required", true)])).toBe(false);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("reset", false)])).toBe(false);
+  });
   it("con cualquier fila viva, incluida una pending ya pagada: no", () => {
     expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("validated", true), f("pending", false)])).toBe(false);
     expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("no_required", false)])).toBe(false);

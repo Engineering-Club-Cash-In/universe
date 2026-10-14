@@ -19,7 +19,7 @@ export interface VistaFactura {
 }
 
 /**
- * Qué muestra la sección "Factura del seguro" del caso. La decisión de fondo
+ * Qué muestra la sección "Factura del vehículo" del caso. La decisión de fondo
  * (quién puede subir) la toma el servidor; aquí solo se traduce.
  * `null` = el caso todavía no llega a esa etapa y la sección no se muestra.
  */
@@ -37,7 +37,7 @@ export function vistaFacturaSeguro(
 			accion: null,
 		};
 	}
-	// Con registro de envío, o con un "Seguro del Vehículo" de antes (el del
+	// Con registro de envío, o con una "Factura del Vehículo" de antes (el del
 	// proceso manual): ya hay factura y no se puede subir otra.
 	if (f.envio !== null || (f.yaRegistrada && caso.porcentaje >= 90)) {
 		return {
@@ -50,7 +50,7 @@ export function vistaFacturaSeguro(
 	if (f.habilitada) {
 		return {
 			tono: "accion",
-			titulo: "Sube la factura del seguro",
+			titulo: "Sube la factura del vehículo",
 			texto: "Revisa que sea la factura correcta: después de subirla no se puede reemplazar.",
 			accion: "subir",
 		};
@@ -66,7 +66,7 @@ export function vistaFacturaSeguro(
 	) {
 		return {
 			tono: "info",
-			titulo: "Factura del seguro pendiente",
+			titulo: "Factura del vehículo pendiente",
 			texto: f.motivo ?? "La sube el vendedor asignado.",
 			accion: null,
 		};

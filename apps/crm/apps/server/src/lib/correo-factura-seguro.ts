@@ -53,7 +53,7 @@ export function armarCorreoFacturaSeguro(
 
 	const lineas = [
 		`<p>Estimados, ${saludo(ahora)}:</p>`,
-		`<p>Hemos autorizado un nuevo crédito donde la garantía va al Cliente ${cliente}, por favor encuentren adjunta la factura del seguro.</p>`,
+		`<p>Hemos autorizado un nuevo crédito donde la garantía va al Cliente ${cliente}, por favor encuentren adjunta la factura.</p>`,
 		vehiculo ? `<p>Vehículo: ${escapar(vehiculo)}</p>` : "",
 		`<p>TIPO: ${escapar(d.tipoVehiculo ?? "—")}</p>`,
 		`<p>Monto por el que se asegura ${quetzales(d.montoAsegurado)}<br>Cuota Mensual ${quetzales(d.cuotaMensual)}</p>`,
@@ -63,7 +63,7 @@ export function armarCorreoFacturaSeguro(
 	];
 
 	return {
-		asunto: `Nuevo crédito autorizado: ${d.cliente} (${d.referencia})`,
+		asunto: `NUEVO SEGURO ${d.referencia} ${d.cliente}`,
 		html: lineas.filter(Boolean).join("\n"),
 	};
 }

@@ -53,10 +53,10 @@ describe("vistaFacturaSeguro", () => {
 	test("el gerente ve la factura pendiente al 90%, incluso con el caso ganado", () => {
 		expect(
 			vista({ motivo: "Solo el vendedor asignado puede subir la factura" }, 90, "aprobado"),
-		).toMatchObject({ titulo: "Factura del seguro pendiente", accion: null });
+		).toMatchObject({ titulo: "Factura del vehículo pendiente", accion: null });
 	});
 
-	test("con un Seguro del Vehículo de antes, muestra 'Factura recibida' y no deja subir otra", () => {
+	test("con una Factura del Vehículo de antes, muestra 'Factura recibida' y no deja subir otra", () => {
 		expect(vista({ yaRegistrada: true }, 90, "aprobado")).toMatchObject({
 			titulo: "Factura recibida",
 			accion: null,

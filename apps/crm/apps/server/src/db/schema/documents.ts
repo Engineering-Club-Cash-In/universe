@@ -89,6 +89,7 @@ export const documentTypeEnum = pgEnum("document_type", [
 
 	// === DOCUMENTOS ETAPA 90% (CIERRE) ===
 	"seguro_vehiculo", // Asegurar el Vehículo
+	"factura_vehiculo", // Factura del vehículo (la que manda la agencia al comprarlo)
 	"inscripcion_garantia_mobiliaria", // Inscripción de Garantía Mobiliaria
 	"traspaso", // Traspaso
 	"documentos_firmados_vendedor", // Documentos que firma el vendedor

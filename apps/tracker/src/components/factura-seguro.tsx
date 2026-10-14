@@ -112,7 +112,7 @@ export function FacturaSeguro({ caso }: { caso: Caso }) {
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
 						<h3 className="font-medium text-slate-900 text-sm">
-							Factura del seguro
+							Factura del vehículo
 						</h3>
 						<div
 							className={cn(

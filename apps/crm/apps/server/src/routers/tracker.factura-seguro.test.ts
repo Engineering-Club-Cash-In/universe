@@ -314,7 +314,7 @@ function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 		vehicleYear: 2020,
 		facturaEnvio: null,
 		facturaSubidaAt: null,
-		seguroPrevio: false,
+		facturaPrevia: false,
 		insuranceProvider: "universales",
 		vin: "VIN123",
 		...extra,
@@ -391,13 +391,13 @@ describe("facturaSeguro en el caso", () => {
 		});
 	});
 
-	test("con un Seguro del Vehículo de antes (proceso manual), ya cuenta como subida", async () => {
-		caso = casoAl(90, { seguroPrevio: true });
+	test("con una Factura del Vehículo de antes (proceso manual), ya cuenta como subida", async () => {
+		caso = casoAl(90, { facturaPrevia: true });
 		const [c] = await call(trackerRouter.getCasos, {}, ctx);
 		expect(c.facturaSeguro).toMatchObject({
 			habilitada: false,
 			yaRegistrada: true,
-			motivo: "La factura del seguro de este crédito ya fue subida",
+			motivo: "La factura del vehículo de este crédito ya fue subida",
 		});
 	});
 
@@ -488,7 +488,7 @@ describe("subirFacturaSeguro", () => {
 			await expect(subir()).rejects.toMatchObject({
 				code: "BAD_REQUEST",
 				message:
-					"La factura del seguro se sube cuando el crédito ya está cerrado (ganado)",
+					"La factura del vehículo se sube cuando el crédito ya está cerrado (ganado)",
 			});
 		}
 		expect(subidosR2).toHaveLength(0);
@@ -522,7 +522,7 @@ describe("subirFacturaSeguro", () => {
 		expect(borradosR2).toEqual([]);
 	});
 
-	test("si apareció un Seguro del Vehículo mientras subía, no registra ni envía", async () => {
+	test("si apareció una Factura del Vehículo mientras subía, no registra ni envía", async () => {
 		documentosRegistrados = [{ id: "doc-manual" }];
 		await expect(subir()).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(insertados).toHaveLength(0);
@@ -536,14 +536,14 @@ describe("subirFacturaSeguro", () => {
 		expect(bloqueosLead).toEqual(["share"]);
 	});
 
-	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {
+	test("sube a R2 desde el server, guarda el documento factura_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {
 		const r = await subir();
 
 		expect(r).toEqual({ envio: "enviado", aseguradora: "gyt" });
 		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
 		const doc = insertados.find((i) => i.tabla === opportunityDocuments);
 		expect(doc?.valores).toMatchObject({
-			documentType: "seguro_vehiculo",
+			documentType: "factura_vehiculo",
 			filePath: KEY,
 			originalName: "factura.pdf",
 			size: 2048,
@@ -1184,11 +1184,11 @@ describe("enviarFacturaSeguroDesdeCrm", () => {
 			],
 			[
 				casoAl(90, { facturaEnvio: "enviado" }),
-				"la oportunidad ya tiene su factura del seguro registrada",
+				"la oportunidad ya tiene su factura del vehículo registrada",
 			],
 			[
 				casoAl(90, { status: "lost" }),
-				"la oportunidad ya no admite la factura del seguro",
+				"la oportunidad ya no admite la factura del vehículo",
 			],
 			[
 				casoAl(90, { status: "open" }),
@@ -1639,7 +1639,7 @@ describe("verFacturaSeguro", () => {
 			call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
 		).rejects.toMatchObject({
 			code: "NOT_FOUND",
-			message: "Este caso todavía no tiene factura del seguro",
+			message: "Este caso todavía no tiene factura del vehículo",
 		});
 	});
 });

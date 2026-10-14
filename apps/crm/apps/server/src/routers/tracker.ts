@@ -13,6 +13,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
+import type { NewNotification } from "../db/schema/notifications";
 import {
 	type EstadoEnvioFactura,
 	insuranceInvoiceSubmissions,
@@ -47,6 +48,7 @@ import {
 	tipoPermitidoDesdeCrm,
 	tipoRealDeFactura,
 } from "../lib/factura-seguro";
+import { createNotification } from "../lib/notificaciones";
 import {
 	crmProcedure,
 	partnerIdentityProcedure,
@@ -986,6 +988,11 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
 	return { enviada: true, envio, aseguradora: registro.aseguradora };
 }
 
+const NOMBRE_ASEGURADORA: Record<Aseguradora, string> = {
+	gyt: "G&T",
+	universales: "Universales",
+};
+
 /**
  * Al confirmar los contratos (la oportunidad queda ganada al 90%), manda la
  * factura que el usuario programó al subirla antes del cierre. Solo esa: un
@@ -994,6 +1001,7 @@ export async function enviarFacturaSeguroDesdeCrm(params: {
  */
 export async function enviarFacturaProgramada(
 	opportunityId: string,
+	confirmadoPor: { userId: string; userRole: NewNotification["createdByRole"] },
 ): Promise<EstadoEnvioFactura | null> {
 	try {
 		const reservado = await db.transaction(async (tx) => {
@@ -1035,14 +1043,25 @@ export async function enviarFacturaProgramada(
 				await datosDelCorreoBajoBloqueo(tx, fila);
 			// Se programó para la aseguradora que el usuario vio: si al cierre
 			// corresponde otra, no sale sin reconfirmar y la programación se
-			// cancela (hay que volver a subirla).
+			// cancela. Se le avisa al asesor, que la vuelve a subir desde el CRM.
 			if (aseguradora !== programada.confirmada) {
 				await tx
 					.delete(insuranceInvoiceSubmissions)
 					.where(eq(insuranceInvoiceSubmissions.id, programada.id));
-				console.warn(
-					"[enviarFacturaProgramada] La aseguradora cambió: se canceló la programación",
-					{ opportunityId, confirmada: programada.confirmada, aseguradora },
+				await createNotification(
+					{
+						titulo: `Factura del seguro sin enviar - ${datos.cliente}`,
+						descripcion: `La factura del seguro estaba programada para ${NOMBRE_ASEGURADORA[resolverAseguradora(programada.confirmada, null)]}, pero al cierre corresponde ${NOMBRE_ASEGURADORA[aseguradora]}: no se envió. Para enviarla a ${NOMBRE_ASEGURADORA[aseguradora]} hay que borrarla y volver a subirla en los documentos de la oportunidad.`,
+						type: "aviso",
+						createdBy: confirmadoPor.userId,
+						createdByRole: confirmadoPor.userRole,
+						assignedToRole: "sales",
+						assignedTo: fila.assignedTo,
+						relatedEntityType: "opportunity",
+						relatedEntityId: opportunityId,
+						redirectPage: "opportunity_details",
+					},
+					tx,
 				);
 				return null;
 			}

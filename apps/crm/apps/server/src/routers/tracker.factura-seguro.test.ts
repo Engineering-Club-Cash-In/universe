@@ -10,6 +10,7 @@ import {
 	opportunityStageHistory,
 } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
+import { notifications } from "../db/schema/notifications";
 import {
 	insuranceInvoiceSubmissions,
 	opportunityAgencySellers,
@@ -630,16 +631,20 @@ describe("subirFacturaSeguro", () => {
 	});
 
 	test("el tipo guardado es el del contenido, no el declarado", async () => {
+		const chunk = (tipo: string, largo: number) => {
+			const c = Buffer.alloc(12 + largo);
+			c.writeUInt32BE(largo);
+			c.write(tipo, 4, "latin1");
+			return c;
+		};
 		const png = new File(
 			[
-				conContenido(
-					new Uint8Array([
-						0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49,
-						0x48, 0x44, 0x52,
-					]),
-					2048,
-					new Uint8Array([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
-				),
+				Buffer.concat([
+					Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+					chunk("IHDR", 13),
+					chunk("IDAT", 2000),
+					chunk("IEND", 0),
+				]),
 			],
 			"factura.jpg",
 			{ type: "image/jpeg" },
@@ -1479,6 +1484,8 @@ describe("factura programada para el cierre", () => {
 		expect(html).toContain("185,000");
 	});
 
+	const CONFIRMA = { userId: "juridico-1", userRole: "juridico" } as const;
+
 	test("al confirmar los contratos sale la programada, sin confirmación", async () => {
 		caso = casoAl(90);
 		facturaPrevia = [
@@ -1491,7 +1498,7 @@ describe("factura programada para el cierre", () => {
 				nombre: "factura.pdf",
 			},
 		];
-		expect(await enviarFacturaProgramada(ID)).toBe("enviado");
+		expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBe("enviado");
 		expect(actualizados[0]).toMatchObject({
 			status: "pendiente",
 			recipients: ["polizas@gyt.test"],
@@ -1507,9 +1514,9 @@ describe("factura programada para el cierre", () => {
 	test("un seguro subido sin programar (por ejemplo, a mano antes del deploy) no sale", async () => {
 		caso = casoAl(90);
 		facturaPrevia = [];
-		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBeNull();
 		facturaPrevia = [{ id: "envio-1", status: "enviado", intento: 1 }];
-		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBeNull();
 		expect(correos).toHaveLength(0);
 	});
 
@@ -1525,9 +1532,18 @@ describe("factura programada para el cierre", () => {
 				nombre: "factura.pdf",
 			},
 		];
-		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBeNull();
 		expect(borradosDb).toEqual([insuranceInvoiceSubmissions]);
 		expect(correos).toHaveLength(0);
+		// No se pierde el rastro: el asesor recibe el aviso para volver a subirla.
+		const aviso = insertados.find((i) => i.tabla === notifications)?.valores;
+		expect(aviso).toMatchObject({
+			createdBy: "juridico-1",
+			assignedToRole: "sales",
+			relatedEntityId: ID,
+		});
+		expect(aviso?.descripcion).toContain("programada para Universales");
+		expect(aviso?.descripcion).toContain("corresponde G&T");
 	});
 
 	test("si la oportunidad no quedó ganada, la programada espera", async () => {
@@ -1535,7 +1551,7 @@ describe("factura programada para el cierre", () => {
 		facturaPrevia = [
 			{ id: "envio-prog", status: "programado", intento: 1, key: KEY_ANTES },
 		];
-		expect(await enviarFacturaProgramada(ID)).toBeNull();
+		expect(await enviarFacturaProgramada(ID, CONFIRMA)).toBeNull();
 		expect(actualizados).toHaveLength(0);
 		expect(correos).toHaveLength(0);
 	});

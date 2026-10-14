@@ -4,6 +4,7 @@ import {
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
   resolverCuotaParaFilaSuelta,
+  claveBoletaDuplicada,
 } from "./registerPaymentPolicy";
 import * as registerPaymentPolicy from "./registerPaymentPolicy";
 
@@ -1927,5 +1928,18 @@ describe("cuotaSinFuenteDeSaldo: la cuota no tiene dónde escribirse", () => {
   it("con cualquier fila viva, incluida una pending ya pagada: no", () => {
     expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("validated", true), f("pending", false)])).toBe(false);
     expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("no_required", false)])).toBe(false);
+  });
+});
+
+describe("claveBoletaDuplicada", () => {
+  it("busca duplicados por autorización + banco en el pago manual", () => {
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016", banco_id: 26 }))
+      .toEqual({ numeroAutorizacion: "36418016", banco_id: 26 });
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016" })).toBeNull();
+    expect(claveBoletaDuplicada({ banco_id: 26 })).toBeNull();
+  });
+
+  it("no los busca en el pago Nexa: su idempotencia es por external_reference", () => {
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016", banco_id: 26, nexaPaymentEventId: 7 })).toBeNull();
   });
 });

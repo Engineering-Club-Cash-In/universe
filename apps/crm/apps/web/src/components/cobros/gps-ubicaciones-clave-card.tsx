@@ -13,6 +13,7 @@ import {
 	Loader2,
 	Map as MapIcon,
 	MapPin,
+	MapPinned,
 	RefreshCw,
 	Repeat,
 	Trash2,
@@ -21,22 +22,24 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
-import { GpsUbicacionesHistorial } from "@/components/cobros/gps-ubicaciones-historial";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useHistorialUbicaciones } from "@/components/cobros/gps-ubicaciones-historial";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+	type EnVivoFrecuentes,
+	TIPO_UBICACION_LABEL,
+	type TipoUbicacionClave,
+	UbicacionesFrecuentesVista,
+} from "@/components/cobros/ubicaciones/frecuentes-vista";
+import {
+	PanelCargando,
+	PanelError,
+	PanelVacio,
+} from "@/components/cobros/ubicaciones/panel";
+import { CrmCard, CrmPill } from "@/components/ds/cards-credito";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import { formatFechaSenal, googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
-
-const MOTIVO_MIN_LENGTH = 5;
 
 // Mismo margen que UMBRAL_CONFIRMACION_DOMICILIO_M del servidor
 // (apps/server/src/services/wialon/geo.ts): una probable casa se confirma si
@@ -69,39 +72,17 @@ function formatearDistancia(metros: number): string {
 		: `${(metros / 1000).toFixed(1)} km`;
 }
 
-type TipoUbicacionClave =
-	| "probable_casa"
-	| "probable_trabajo"
-	| "recurrente"
-	| "frecuente";
-
 const TIPO_CONFIG: Record<
 	TipoUbicacionClave,
-	{ label: string; icon: typeof Home; badgeClass: string }
+	{ icon: typeof Home; circulo: string }
 > = {
-	probable_casa: {
-		label: "Probable casa",
-		icon: Home,
-		badgeClass:
-			"bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-	},
+	probable_casa: { icon: Home, circulo: "bg-brand-subtle text-brand" },
 	probable_trabajo: {
-		label: "Probable trabajo",
 		icon: Briefcase,
-		badgeClass:
-			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+		circulo: "bg-info-subtle text-info-text",
 	},
-	recurrente: {
-		label: "Lugar recurrente",
-		icon: Repeat,
-		badgeClass:
-			"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
-	},
-	frecuente: {
-		label: "Visitado con frecuencia",
-		icon: MapPin,
-		badgeClass: "bg-muted text-muted-foreground",
-	},
+	recurrente: { icon: Repeat, circulo: "bg-success-subtle text-success-text" },
+	frecuente: { icon: MapPin, circulo: "bg-muted text-fg-secondary" },
 };
 
 // Días de la semana en el orden que devuelve patron.visitasPorDiaSemana
@@ -255,9 +236,12 @@ export function UbicacionesClaveLista({
 	const [mapaAbiertoId, setMapaAbiertoId] = useState<string | null>(null);
 
 	return (
-		<ul className="space-y-2">
+		<ul className="flex flex-col gap-2">
 			{ubicaciones.map((u) => {
-				const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
+				const config =
+					TIPO_CONFIG[u.tipo as TipoUbicacionClave] ?? TIPO_CONFIG.frecuente;
+				const etiqueta =
+					TIPO_UBICACION_LABEL[u.tipo as TipoUbicacionClave] ?? "Ubicación";
 				const Icon = config.icon;
 				const mapsUrl = googleMapsUrl(u.lat, u.lon);
 				const mapaAbierto = mapaAbiertoId === u.id;
@@ -280,70 +264,78 @@ export function UbicacionesClaveLista({
 						confirmada = null;
 					}
 				}
+				const horas = Math.round(u.horasTotales);
 				return (
-					<li className="rounded-md border p-3" key={u.id}>
-						<div className="flex items-start justify-between gap-3">
-							<div className="flex items-start gap-3">
-								<Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-								<div>
-									<div className="flex flex-wrap items-center gap-1.5">
-										<Badge className={config.badgeClass} variant="secondary">
-											{config.label}
-										</Badge>
-										{confirmada && (
-											<Badge
-												className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-												variant="secondary"
-											>
-												<BadgeCheck className="mr-1 h-3 w-3" />
-												Confirmado
-											</Badge>
-										)}
-									</div>
-									<p className="mt-1 text-muted-foreground text-xs">
-										{Math.round(u.horasTotales)} h en total · {u.visitas}{" "}
-										visitas en {u.diasDistintos} días
-										{patronTexto ? ` · ${patronTexto}` : ""}
-									</p>
-									{nochesTexto && (
-										<p className="text-muted-foreground text-xs">
-											{nochesTexto}
-										</p>
-									)}
-									<p className="text-muted-foreground text-xs">
-										Última vez: {formatFechaSenal(u.ultimaVisita)}
-									</p>
+					<li
+						className="rounded-xl border border-line-subtle bg-surface px-3.5 py-3"
+						key={u.id}
+					>
+						<div className="flex items-start gap-3">
+							<span
+								aria-hidden
+								className={cn(
+									"flex size-8 shrink-0 items-center justify-center rounded-full",
+									config.circulo,
+								)}
+							>
+								<Icon className="size-4" />
+							</span>
+							<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+								<div className="flex flex-wrap items-center gap-1.5">
+									<span className="font-semibold text-fg text-sm leading-[1.26]">
+										{etiqueta}
+									</span>
+									{confirmada ? (
+										<CrmPill dot={false} kind="chip" tone="success">
+											<BadgeCheck aria-hidden className="size-3" />
+											Confirmado
+										</CrmPill>
+									) : null}
 								</div>
+								<p className="text-fg-secondary text-xs">
+									{horas} h en total · {u.visitas} visitas en {u.diasDistintos}{" "}
+									días
+									{patronTexto ? ` · ${patronTexto}` : ""}
+								</p>
+								{nochesTexto ? (
+									<p className="text-fg-secondary text-xs">{nochesTexto}</p>
+								) : null}
+								<p className="text-[11px] text-fg-tertiary">
+									Última vez: {formatFechaSenal(u.ultimaVisita)}
+								</p>
 							</div>
-							{mapsUrl && (
+							{mapsUrl ? (
 								<Button
 									aria-expanded={mapaAbierto}
+									aria-label={mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
 									className="shrink-0"
 									onClick={() => setMapaAbiertoId(mapaAbierto ? null : u.id)}
 									size="sm"
 									type="button"
-									variant="outline"
+									variant={mapaAbierto ? "secondary" : "ghost"}
 								>
-									<MapIcon className="mr-1.5 h-3.5 w-3.5" />
-									{mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
+									<MapIcon aria-hidden />
+									<span className="hidden sm:inline">
+										{mapaAbierto ? "Ocultar mapa" : "Ver mapa"}
+									</span>
 								</Button>
-							)}
+							) : null}
 						</div>
 						{casoCobroId &&
-							tipoDomicilio &&
-							domicilioQuery.data?.[tipoDomicilio] && (
-								<VerificarDomicilio
-									casoCobroId={casoCobroId}
-									domicilio={domicilioQuery.data[tipoDomicilio]}
-									lugar={{ lat: u.lat, lon: u.lon, radioM: u.radioM ?? 0 }}
-									tipo={tipoDomicilio}
-								/>
-							)}
-						{mapaAbierto && mapsUrl && (
-							<div className="mt-3 space-y-1.5">
+						tipoDomicilio &&
+						domicilioQuery.data?.[tipoDomicilio] ? (
+							<VerificarDomicilio
+								casoCobroId={casoCobroId}
+								domicilio={domicilioQuery.data[tipoDomicilio]}
+								lugar={{ lat: u.lat, lon: u.lon, radioM: u.radioM ?? 0 }}
+								tipo={tipoDomicilio}
+							/>
+						) : null}
+						{mapaAbierto && mapsUrl ? (
+							<div className="mt-3 flex flex-col gap-1.5">
 								<GpsMapaPreview latitude={u.lat} longitude={u.lon} />
 								<a
-									className="text-primary text-xs hover:underline"
+									className="text-brand text-xs hover:underline"
 									href={mapsUrl}
 									rel="noreferrer"
 									target="_blank"
@@ -351,7 +343,7 @@ export function UbicacionesClaveLista({
 									Abrir en Google Maps
 								</a>
 							</div>
-						)}
+						) : null}
 					</li>
 				);
 			})}
@@ -468,10 +460,8 @@ function VerificarDomicilio({
 	// solo se puede quitar.
 	if (!direccion) {
 		return (
-			<div className="mt-3 space-y-2 border-t pt-3">
-				<p className="text-muted-foreground text-xs italic">
-					{textos.sinDireccion}
-				</p>
+			<div className="mt-3 space-y-2 border-line-subtle border-t pt-3">
+				<p className="text-fg-tertiary text-xs">{textos.sinDireccion}</p>
 				{ubicado && (
 					<Button
 						disabled={quitar.isPending}
@@ -495,9 +485,9 @@ function VerificarDomicilio({
 	const mostrarFormulario = !ubicado || cambiando || desactualizado;
 
 	return (
-		<div className="mt-3 space-y-2 border-t pt-3">
+		<div className="mt-3 space-y-2 border-line-subtle border-t pt-3">
 			{desactualizado && (
-				<p className="flex items-start gap-1.5 font-medium text-amber-700 text-sm dark:text-amber-400">
+				<p className="flex items-start gap-1.5 font-medium text-sm text-warning-text">
 					<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
 					La dirección del cliente cambió desde que se ubicó este punto.
 					Búsquela de nuevo y compárela otra vez.
@@ -509,8 +499,8 @@ function VerificarDomicilio({
 					<p
 						className={
 							coincide
-								? "flex items-center gap-1.5 font-medium text-green-700 text-sm dark:text-green-400"
-								: "flex items-center gap-1.5 font-medium text-amber-700 text-sm dark:text-amber-400"
+								? "flex items-center gap-1.5 font-medium text-sm text-success-text"
+								: "flex items-center gap-1.5 font-medium text-sm text-warning-text"
 						}
 					>
 						{coincide ? (
@@ -559,14 +549,14 @@ function VerificarDomicilio({
 						}
 					}}
 				>
-					<p className="text-muted-foreground text-xs">
+					<p className="text-fg-secondary text-xs">
 						Verifique si {textos.pregunta}: busque la dirección del cliente en
 						Google Maps, copie el link (o las coordenadas) y péguelo aquí. Use
 						el link completo del navegador: los links cortos del botón
 						«Compartir» del celular no traen coordenadas.
 					</p>
 					<p className="break-words text-xs">
-						<span className="text-muted-foreground">{textos.direccion}: </span>
+						<span className="text-fg-tertiary">{textos.direccion}: </span>
 						{direccion}
 					</p>
 					<div className="flex flex-wrap items-center gap-1.5">
@@ -669,29 +659,24 @@ function CalcularAhora({
 	});
 
 	return (
-		<div className="mt-3 space-y-1.5">
-			<Button
-				disabled={calcular.isPending}
-				onClick={() => calcular.mutate({ casoCobroId, vehicleId })}
-				size="sm"
-				type="button"
-				variant="outline"
-			>
-				{calcular.isPending ? (
-					<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-				) : (
-					<RefreshCw className="mr-2 h-4 w-4" />
-				)}
-				{calcular.isPending ? "Calculando…" : "Calcular ahora"}
-			</Button>
-			<p className="text-muted-foreground text-xs">
-				Si es la primera vez que se consulta este vehículo, puede tardar unos
-				segundos: se baja su historial de los últimos 60 días.
-			</p>
-		</div>
+		<Button
+			disabled={calcular.isPending}
+			onClick={() => calcular.mutate({ casoCobroId, vehicleId })}
+			size="sm"
+			type="button"
+			variant="outline"
+		>
+			{calcular.isPending ? (
+				<Loader2 aria-hidden className="animate-spin" />
+			) : (
+				<RefreshCw aria-hidden />
+			)}
+			{calcular.isPending ? "Calculando…" : "Calcular ahora"}
+		</Button>
 	);
 }
 
+/** Resultado de la consulta en vivo: carga, error, la lista o «Calcular ahora». */
 export function UbicacionesClaveResultado({
 	ubicaciones,
 	casoCobroId,
@@ -701,27 +686,22 @@ export function UbicacionesClaveResultado({
 	casoCobroId: string;
 	vehicleId: string;
 }) {
-	if (ubicaciones.isLoading) {
-		return (
-			<div className="flex justify-center py-4">
-				<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-			</div>
-		);
+	// isFetching (no isLoading): repetir la consulta con el mismo motivo no
+	// cambia la clave, y sin esto se verían los datos viejos como nuevos.
+	if (ubicaciones.isFetching) {
+		return <PanelCargando texto="Consultando las ubicaciones frecuentes…" />;
 	}
 	if (ubicaciones.isError) {
 		return (
-			<p className="text-destructive text-sm">
-				No se pudieron cargar las ubicaciones clave:{" "}
-				{ubicaciones.error?.message ?? "Error inesperado"}
-			</p>
+			<PanelError
+				detalle={ubicaciones.error?.message ?? "Error inesperado"}
+				texto="No se pudieron cargar las ubicaciones frecuentes."
+			/>
 		);
 	}
 	if (ubicaciones.data?.auditada === false) {
 		return (
-			<p className="text-destructive text-sm">
-				No se pudo registrar la auditoría de la consulta. Por seguridad no se
-				muestran las ubicaciones.
-			</p>
+			<PanelError texto="No se pudo registrar la auditoría de la consulta. Por seguridad no se muestran las ubicaciones." />
 		);
 	}
 	if (ubicaciones.data && ubicaciones.data.ubicaciones.length > 0) {
@@ -733,132 +713,109 @@ export function UbicacionesClaveResultado({
 		);
 	}
 	return (
-		<div>
-			<p className="text-muted-foreground text-sm italic">
-				No hay suficientes datos todavía para identificar ubicaciones clave de
-				este vehículo.
-			</p>
-			<CalcularAhora
-				casoCobroId={casoCobroId}
-				onCalculado={() => ubicaciones.refetch()}
-				vehicleId={vehicleId}
-			/>
-		</div>
+		<PanelVacio
+			accion={
+				<CalcularAhora
+					casoCobroId={casoCobroId}
+					onCalculado={() => ubicaciones.refetch()}
+					vehicleId={vehicleId}
+				/>
+			}
+			descripcion="Si es la primera vez que se consulta este vehículo, calcúlelas ahora: puede tardar unos segundos, porque se baja su historial de los últimos 60 días."
+			icono={<MapPinned />}
+			titulo="No hay suficientes datos todavía para identificar ubicaciones frecuentes"
+		/>
 	);
 }
 
 /**
- * Tarjeta independiente de ubicaciones clave (con su propio gate de motivo).
- * La Ficha 360 ya no la usa: ahí va dentro de la carta GPS / Wialon. Sigue
- * en el diálogo de visita, que no tiene carta GPS.
+ * Ubicaciones frecuentes (CB-119, D-15): datos y acciones. La vista está en
+ * `ubicaciones/frecuentes-vista.tsx`. La usan la pestaña de la Ficha 360
+ * (`embedded`) y el diálogo de visita (con su propio marco).
+ *
+ * Por defecto se ve lo último que ya se consultó: cada consulta guarda lo que
+ * mostró, y verlo no es una consulta nueva. Una consulta NUEVA sigue pidiendo
+ * motivo y queda en gps_consulta_logs, porque revela dónde vive o trabaja el
+ * cliente.
  */
 export function GpsUbicacionesClaveCard({
 	casoCobroId,
 	vehicleId,
 	embedded = false,
+	activo = true,
 }: {
 	casoCobroId: string;
 	vehicleId: string;
-	// Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título.
+	// Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta.
 	embedded?: boolean;
+	/**
+	 * La pestaña está visible. Las pestañas quedan montadas: el historial se
+	 * pide la primera vez que se abre, no al entrar a la ficha.
+	 */
+	activo?: boolean;
 }) {
-	const [motivo, setMotivo] = useState("");
 	const [motivoConfirmado, setMotivoConfirmado] = useState<string | null>(null);
+	const [abierta, setAbierta] = useState(activo);
+	useEffect(() => {
+		if (activo) setAbierta(true);
+	}, [activo]);
 
 	const ubicaciones = useUbicacionesClaveQuery({
 		casoCobroId,
 		vehicleId,
 		motivo: motivoConfirmado,
 	});
+	const historial = useHistorialUbicaciones({
+		casoCobroId,
+		vehicleId,
+		habilitado: abierta,
+	});
 
-	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
+	const consultar = (motivo: string) => {
+		// Mismo texto que la anterior: la clave no cambia y se repite a mano
+		// (cada vista queda auditada por separado).
+		if (motivo === motivoConfirmado) void ubicaciones.refetch();
+		else setMotivoConfirmado(motivo);
+	};
 
-	const Raiz = embedded ? "div" : Card;
-	const Cabecera = embedded ? "div" : CardHeader;
-	const Cuerpo = embedded ? "div" : CardContent;
-	const Descripcion = embedded ? "p" : CardDescription;
+	const enVivo: EnVivoFrecuentes | null =
+		motivoConfirmado == null
+			? null
+			: {
+					motivo: motivoConfirmado,
+					cargando: ubicaciones.isFetching,
+					registrada: ubicaciones.data?.auditada === true,
+					at: ubicaciones.dataUpdatedAt
+						? new Date(ubicaciones.dataUpdatedAt)
+						: null,
+					contenido: (
+						<UbicacionesClaveResultado
+							casoCobroId={casoCobroId}
+							ubicaciones={ubicaciones}
+							vehicleId={vehicleId}
+						/>
+					),
+				};
 
+	const vista = (
+		<UbicacionesFrecuentesVista
+			casoCobroId={casoCobroId}
+			enVivo={enVivo}
+			historial={historial.historial}
+			historialActualizado={historial.dataUpdatedAt > ubicaciones.dataUpdatedAt}
+			idCampo={`motivo-ubicaciones-${vehicleId}`}
+			onConsultar={consultar}
+			paginacion={historial.paginacion}
+			renderLugares={(lugares, caso) => (
+				<UbicacionesClaveLista casoCobroId={caso} ubicaciones={lugares} />
+			)}
+		/>
+	);
+
+	if (embedded) return vista;
 	return (
-		<Raiz>
-			<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
-				{!embedded && (
-					<CardTitle className="flex items-center gap-2">
-						<MapPin className="h-5 w-5" />
-						Ubicaciones clave
-					</CardTitle>
-				)}
-				<Descripcion
-					className={embedded ? "text-muted-foreground text-sm" : undefined}
-				>
-					Lugares donde el vehículo pasa más tiempo (casa, trabajo, lugares
-					recurrentes), calculados automáticamente contra los últimos 60 días de
-					historial GPS. Orienta la búsqueda si es necesario recuperar el
-					vehículo.
-				</Descripcion>
-			</Cabecera>
-			<Cuerpo>
-				{motivoConfirmado == null ? (
-					<form
-						className="space-y-3"
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (motivoValido) setMotivoConfirmado(motivo.trim());
-						}}
-					>
-						<p className="text-muted-foreground text-sm">
-							Esta información revela dónde vive o trabaja el cliente. Cada
-							consulta queda registrada con su motivo.
-						</p>
-						<div>
-							<Label htmlFor={`motivo-ubicaciones-${vehicleId}`}>Motivo</Label>
-							<Input
-								id={`motivo-ubicaciones-${vehicleId}`}
-								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej.: Preparar visita de recuperación"
-								value={motivo}
-							/>
-						</div>
-						<Button disabled={!motivoValido} type="submit">
-							<MapPin className="mr-2 h-4 w-4" />
-							Ver ubicaciones clave
-						</Button>
-					</form>
-				) : (
-					<UbicacionesClaveResultado
-						casoCobroId={casoCobroId}
-						ubicaciones={ubicaciones}
-						vehicleId={vehicleId}
-					/>
-				)}
-				{motivoConfirmado != null && (
-					<div className="mt-4 flex items-center justify-between border-t pt-3">
-						<p className="text-muted-foreground text-xs">
-							{ubicaciones.isLoading
-								? "Registrando consulta"
-								: ubicaciones.data?.auditada
-									? "Consulta registrada"
-									: "Consulta no registrada"}{" "}
-							— motivo: "{motivoConfirmado}"
-						</p>
-						<Button
-							onClick={() => {
-								setMotivoConfirmado(null);
-								setMotivo("");
-							}}
-							size="sm"
-							variant="ghost"
-						>
-							Consultar de nuevo
-						</Button>
-					</div>
-				)}
-				<div className="mt-2">
-					<GpsUbicacionesHistorial
-						casoCobroId={casoCobroId}
-						vehicleId={vehicleId}
-					/>
-				</div>
-			</Cuerpo>
-		</Raiz>
+		<CrmCard className="gap-4 p-4" superficie="outline">
+			{vista}
+		</CrmCard>
 	);
 }

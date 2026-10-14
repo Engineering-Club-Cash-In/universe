@@ -19,6 +19,12 @@ import { useEffect, useRef, useState } from "react";
 import { MOTIVOS_INMOVILIZACION } from "server/src/lib/inmovilizacion-unidad";
 import { toast } from "sonner";
 import {
+	PanelCargando,
+	PanelEncabezado,
+	PanelVacio,
+} from "@/components/cobros/ubicaciones/panel";
+import { CrmPill } from "@/components/ds/cards-credito";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -206,22 +212,24 @@ export function InmovilizacionCard({
 	});
 
 	const sinInmovilizacion = embedded ? (
-		<p className="text-muted-foreground text-sm">
-			Este crédito no tiene inmovilización de unidad disponible.
-		</p>
+		<PanelVacio
+			descripcion="El apagado se habilita en B2, B3 y B4 para unidades con GPS vinculado."
+			icono={<LockOpen />}
+			titulo="Este crédito no tiene inmovilización de unidad disponible"
+		/>
 	) : null;
 
 	if (inmov.isLoading) {
-		const cargando = (
-			<div className="flex items-center justify-center py-8">
-				<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-			</div>
-		);
-		return embedded ? (
-			cargando
-		) : (
+		if (embedded) {
+			return <PanelCargando texto="Cargando apagado y reactivación…" />;
+		}
+		return (
 			<Card>
-				<CardContent className="p-0">{cargando}</CardContent>
+				<CardContent className="p-0">
+					<div className="flex items-center justify-center py-8">
+						<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+					</div>
+				</CardContent>
 			</Card>
 		);
 	}
@@ -310,13 +318,47 @@ export function InmovilizacionCard({
 	const Cuerpo = embedded ? "div" : CardContent;
 	const Descripcion = embedded ? "p" : CardDescription;
 
+	// Solo supervisor/admin: la cola decide/ejecuta solicitudes de TODOS los
+	// casos, no solo este — mismo gate que la ruta (canAssignCobros).
+	const verCola = esSupervisor ? (
+		<Button asChild size="sm" variant="outline">
+			<Link
+				to="/cobros/solicitudes"
+				search={{
+					// Con la unidad apagada, lo que se pide es reactivarla.
+					tipo: estadoUnidad === "inmovilizada" ? "reactivacion" : "apagado",
+				}}
+			>
+				<ClipboardList className="mr-2 h-4 w-4" />
+				Ver cola de aprobación
+			</Link>
+		</Button>
+	) : null;
+
 	return (
 		<Raiz>
-			<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
-				<div className="flex items-center justify-between">
-					{embedded ? (
-						<span />
-					) : (
+			{embedded ? (
+				<PanelEncabezado
+					accion={
+						<>
+							<CrmPill
+								kind="chip"
+								tone={estadoUnidad === "inmovilizada" ? "danger" : "success"}
+							>
+								{estadoUnidad === "inmovilizada"
+									? "Unidad inmovilizada"
+									: "Unidad activa"}
+							</CrmPill>
+							{verCola}
+						</>
+					}
+					className="mb-4"
+					descripcion="Solicitud de apagado o reactivación, con aprobación del supervisor. Ejecución manual: LEGION la aplica por fuera del CRM."
+					titulo="Apagado y reactivación de la unidad"
+				/>
+			) : (
+				<Cabecera>
+					<div className="flex items-center justify-between">
 						<CardTitle className="flex items-center gap-2 text-base">
 							{estadoUnidad === "inmovilizada" ? (
 								<Lock className="h-4 w-4 text-destructive" />
@@ -325,44 +367,23 @@ export function InmovilizacionCard({
 							)}
 							Apagado y reactivación de la unidad
 						</CardTitle>
-					)}
-					<div className="flex items-center gap-2">
-						{/* Solo supervisor/admin: la cola decide/ejecuta solicitudes de
-						    TODOS los casos, no solo este — mismo gate que la ruta
-						    (canAssignCobros). */}
-						{esSupervisor && (
-							<Button asChild size="sm" variant="outline">
-								<Link
-									to="/cobros/solicitudes"
-									search={{
-										// Con la unidad apagada, lo que se pide es reactivarla.
-										tipo:
-											estadoUnidad === "inmovilizada"
-												? "reactivacion"
-												: "apagado",
-									}}
-								>
-									<ClipboardList className="mr-2 h-4 w-4" />
-									Ver cola de aprobación
-								</Link>
-							</Button>
-						)}
-						<Badge
-							variant={
-								estadoUnidad === "inmovilizada" ? "destructive" : "secondary"
-							}
-						>
-							{estadoUnidad === "inmovilizada" ? "Inmovilizada" : "Activa"}
-						</Badge>
+						<div className="flex items-center gap-2">
+							{verCola}
+							<Badge
+								variant={
+									estadoUnidad === "inmovilizada" ? "destructive" : "secondary"
+								}
+							>
+								{estadoUnidad === "inmovilizada" ? "Inmovilizada" : "Activa"}
+							</Badge>
+						</div>
 					</div>
-				</div>
-				<Descripcion
-					className={embedded ? "text-muted-foreground text-sm" : undefined}
-				>
-					Solicitud de apagado o reactivación, con aprobación del supervisor.
-					Ejecución manual: LEGION la aplica por fuera del CRM.
-				</Descripcion>
-			</Cabecera>
+					<Descripcion>
+						Solicitud de apagado o reactivación, con aprobación del supervisor.
+						Ejecución manual: LEGION la aplica por fuera del CRM.
+					</Descripcion>
+				</Cabecera>
+			)}
 			<Cuerpo className="space-y-4">
 				{/* Un panel por pendiente: el rechazo reciente convive con otro trámite
 				    en curso (p. ej. la llamada del apagado) en vez de quedar tapado. */}

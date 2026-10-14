@@ -5,26 +5,14 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import {
-	Copy,
-	ExternalLink,
-	Gauge,
-	Link2,
-	Loader2,
-	MapPin,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { Copy, ExternalLink, Gauge, Link2, Loader2 } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { GpsConsultasHistorial } from "@/components/cobros/gps-consultas-historial";
-import { DatosTelemetria } from "@/components/cobros/gps-telemetria-datos";
+import { useHistorialConsultasGps } from "@/components/cobros/gps-consultas-historial";
+import type { EnVivoGps } from "@/components/cobros/ubicaciones/gps-derivar";
+import { GpsUbicacionVista } from "@/components/cobros/ubicaciones/gps-ubicacion-vista";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -35,32 +23,31 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-	limpiarPlacaParaBusqueda,
-	MOTIVO_SIN_VINCULO,
-} from "@/routes/cobros/-gps-ficha";
-import { type client, orpc } from "@/utils/orpc";
-
-const MOTIVO_MIN_LENGTH = 5;
+import { limpiarPlacaParaBusqueda } from "@/routes/cobros/-gps-ficha";
+import { orpc } from "@/utils/orpc";
 
 /**
- * Tarjeta de GPS/Wialon en el tab Vehículo de la Ficha 360 (CB-118).
+ * Pestaña GPS / Wialon de la Ficha 360 (CB-118): datos y acciones. La vista
+ * está en `ubicaciones/gps-ubicacion-vista.tsx`.
  *
- * Va como componente aparte y no inline en $id.tsx (que ya pasa de 4500 líneas)
- * y con su propia query, para que una consulta a Wialon —un proveedor externo
- * que puede tardar o estar caído— nunca retrase ni bloquee el resto de la ficha.
+ * Va como componente aparte y no inline en $id.tsx y con sus propias queries,
+ * para que una consulta a Wialon —un proveedor externo que puede tardar o
+ * estar caído— nunca retrase ni bloquee el resto de la ficha.
  *
- * La historia exige que "cada consulta quede auditada con usuario, motivo y
- * cuenta": no se muestra ubicación de nada hasta que el asesor escribe por
- * qué la necesita. Por eso NO hay refetchInterval — un refresco silencioso en
- * segundo plano no tendría motivo que auditar, y cada actualización real pasa
- * de nuevo por este mismo gate.
+ * Por defecto se ve la última consulta registrada (sale del historial, que
+ * guarda lo que respondió Wialon): no hace falta consultar de nuevo para saber
+ * dónde estaba el vehículo. Una consulta NUEVA sigue exigiendo motivo, porque
+ * la historia pide que «cada consulta quede auditada con usuario, motivo y
+ * cuenta». Por eso NO hay refetchInterval: un refresco silencioso no tendría
+ * motivo que auditar.
  */
 export function GpsVehiculoCard({
 	casoCobroId,
 	vehicleId,
 	esSupervisor,
 	embedded = false,
+	activo = true,
+	mapa,
 }: {
 	// El servidor valida acceso al caso y que el vehículo sea el suyo, y toma
 	// de ahí el SIFCO de la bitácora (no se manda desde el cliente).
@@ -69,10 +56,20 @@ export function GpsVehiculoCard({
 	esSupervisor: boolean;
 	// Dentro de una pestaña de VehiculoGpsTabs: sin marco de tarjeta ni título.
 	embedded?: boolean;
+	/**
+	 * La pestaña está visible. Las pestañas quedan montadas: el historial se
+	 * pide la primera vez que se abre (p. ej. no al llegar por el deep link de
+	 * apagado).
+	 */
+	activo?: boolean;
+	mapa?: ReactNode;
 }) {
 	const queryClient = useQueryClient();
-	const [motivo, setMotivo] = useState("");
 	const [motivoConfirmado, setMotivoConfirmado] = useState<string | null>(null);
+	const [abierta, setAbierta] = useState(activo);
+	useEffect(() => {
+		if (activo) setAbierta(true);
+	}, [activo]);
 
 	const gps = useQuery({
 		...orpc.getGpsVehiculo.queryOptions({
@@ -88,10 +85,8 @@ export function GpsVehiculoCard({
 		// Cada fetch inserta una fila de auditoría en el servidor: ningún
 		// refetch implícito (foco de ventana, reconexión, dato "stale", reintento)
 		// puede dispararlo, o la bitácora registraría vistas que nadie pidió con
-		// el motivo de una consulta anterior. gcTime 0 hace lo inverso: al volver
-		// al gate (o desmontar la tarjeta) la respuesta se descarta, así que
-		// confirmar de nuevo —aunque sea con el mismo texto— sí va al servidor y
-		// queda auditado, en vez de servir la ubicación vieja desde caché.
+		// el motivo de una consulta anterior. gcTime 0: al desmontar la pestaña
+		// la respuesta se descarta en vez de servirse desde caché.
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: 0,
 		// El "retry" del toast global de errores invalida todas las queries;
@@ -101,6 +96,12 @@ export function GpsVehiculoCard({
 		refetchOnReconnect: false,
 		refetchOnMount: false,
 		retry: false,
+	});
+
+	const historial = useHistorialConsultasGps({
+		casoCobroId,
+		vehicleId,
+		habilitado: abierta,
 	});
 
 	// La consulta inserta una fila en gps_consulta_logs: el historial se
@@ -114,234 +115,101 @@ export function GpsVehiculoCard({
 		}
 	}, [dataUpdatedAt, queryClient]);
 
-	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
+	const nuevaConsulta = (motivo: string) => {
+		// Volver a consultar exige un motivo de nuevo, aunque sea el mismo
+		// texto: cada vista queda auditada por separado. Con el mismo texto la
+		// query no cambia de clave, así que se repite a mano.
+		if (motivo === motivoConfirmado) void gps.refetch();
+		else setMotivoConfirmado(motivo);
+	};
 
-	const Raiz = embedded ? "div" : Card;
-	const Cabecera = embedded ? "div" : CardHeader;
-	const Cuerpo = embedded ? "div" : CardContent;
-	const Descripcion = embedded ? "p" : CardDescription;
+	const enVivo: EnVivoGps | null =
+		motivoConfirmado == null
+			? null
+			: gps.isFetching
+				? { estado: "cargando", motivo: motivoConfirmado }
+				: gps.data
+					? {
+							estado: "listo",
+							motivo: motivoConfirmado,
+							datos: gps.data,
+							at: new Date(gps.dataUpdatedAt),
+						}
+					: gps.isError
+						? {
+								estado: "error",
+								motivo: motivoConfirmado,
+								mensaje:
+									gps.error?.message || "Error inesperado al consultar el GPS.",
+							}
+						: { estado: "cargando", motivo: motivoConfirmado };
 
-	const unidadVinculada = gps.data?.estado === "vinculado" ? gps.data : null;
-	// Embebido no tiene título: sin nombre de unidad ni aviso de placa la
-	// cabecera quedaría vacía y solo sumaría margen sobre el formulario.
-	const hayCabecera = !embedded || unidadVinculada != null;
+	const vinculado = gps.data?.estado === "vinculado" ? gps.data : null;
 
-	return (
-		<Raiz>
-			{hayCabecera && (
-				<Cabecera className={embedded ? "mb-3 space-y-1" : undefined}>
-					<div className="flex items-center justify-between">
-						{!embedded && (
-							<CardTitle className="flex items-center gap-2">
-								<MapPin className="h-5 w-5" />
-								GPS / Wialon
-							</CardTitle>
-						)}
-						{unidadVinculada && (
-							<span className="text-muted-foreground text-xs">
-								{unidadVinculada.unitName}
-							</span>
-						)}
-					</div>
-					{unidadVinculada?.vinculoOrigen === "placa" && (
-						<Descripcion
-							className={embedded ? "text-muted-foreground text-sm" : undefined}
-						>
-							Unidad identificada automáticamente por la placa.
-						</Descripcion>
-					)}
-				</Cabecera>
-			)}
-			<Cuerpo>
-				{motivoConfirmado == null ? (
-					// <form> para que Enter confirme el motivo igual que el botón (y
-					// respete su disabled): el asesor no tiene que soltar el teclado.
-					<form
-						className="space-y-3"
-						onSubmit={(e) => {
-							e.preventDefault();
-							if (motivoValido) setMotivoConfirmado(motivo.trim());
-						}}
-					>
-						<p className="text-muted-foreground text-sm">
-							Cada consulta de ubicación queda registrada con su motivo. Escriba
-							por qué necesita ver el GPS de este vehículo.
-						</p>
-						<div>
-							<Label htmlFor={`motivo-gps-${vehicleId}`}>Motivo</Label>
-							<Input
-								id={`motivo-gps-${vehicleId}`}
-								onChange={(e) => setMotivo(e.target.value)}
-								placeholder="Ej.: Cliente en mora crítica, ubicar para gestión de recuperación"
-								value={motivo}
-							/>
-						</div>
-						<Button disabled={!motivoValido} type="submit">
-							<MapPin className="mr-2 h-4 w-4" />
-							Ver ubicación
-						</Button>
-					</form>
-				) : gps.isLoading ? (
-					<div className="flex justify-center py-4">
-						<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-					</div>
-				) : gps.data?.estado === "vinculado" ? (
-					<TelemetriaVinculada
-						datos={gps.data}
-						esSupervisor={esSupervisor}
-						onVinculado={() => gps.refetch()}
-						vehicleId={vehicleId}
-					/>
-				) : gps.data?.estado === "sin_vinculo" ? (
-					<SinVinculo
-						datos={gps.data}
-						esSupervisor={esSupervisor}
-						onVinculado={() => gps.refetch()}
-						vehicleId={vehicleId}
-					/>
-				) : (
-					// Wialon caído: nota discreta, no una alerta roja. Que el proveedor
-					// no responda no es un problema del crédito ni del asesor.
-					<div className="space-y-1 py-2">
-						<p className="text-muted-foreground text-sm italic">
-							No se pudo consultar el GPS en este momento
-							{gps.data?.estado === "no_disponible" && gps.data.error.message
-								? `: ${gps.data.error.message}`
-								: gps.error?.message
-									? `: ${gps.error.message}`
-									: "."}
-						</p>
-						{gps.data?.estado === "no_disponible" &&
-							gps.data.error.code === "WIALON_NO_DISPONIBLE" && (
-								<p className="text-muted-foreground text-xs">
-									La integración está temporalmente deshabilitada por fallos
-									repetidos. Use el portal de La Legión o contacte a su
-									supervisor mientras se restablece.
-								</p>
-							)}
-						{gps.data?.estado === "no_disponible" && gps.data.referencia && (
-							<p className="text-muted-foreground text-xs">
-								Referencia para soporte:{" "}
-								<span className="font-mono">{gps.data.referencia}</span>
-							</p>
-						)}
-					</div>
-				)}
-				{motivoConfirmado != null && (
-					<div className="mt-4 flex items-center justify-between border-t pt-3">
-						<p className="text-muted-foreground text-xs">
-							{/* El servidor informa si la consulta quedó en la bitácora
-							    (`auditada`), en todas las respuestas. Sin acceso al caso
-							    (error) tampoco se registró. */}
-							{gps.isLoading
-								? "Registrando consulta"
-								: gps.data?.auditada
-									? "Consulta registrada"
-									: "Consulta no registrada"}{" "}
-							— motivo: "{motivoConfirmado}"
-						</p>
-						<Button
-							onClick={() => {
-								// Volver a consultar exige un motivo de nuevo, aunque sea el
-								// mismo texto: cada vista queda auditada por separado.
-								setMotivoConfirmado(null);
-								setMotivo("");
-							}}
-							size="sm"
-							variant="ghost"
-						>
-							Consultar de nuevo
-						</Button>
-					</div>
-				)}
-				<div className="mt-3 border-t pt-2">
-					<GpsConsultasHistorial
-						casoCobroId={casoCobroId}
-						vehicleId={vehicleId}
-					/>
-				</div>
-			</Cuerpo>
-		</Raiz>
-	);
-}
-
-// El contrato lo define el servidor (gpsVehiculoOutputSchema); acá solo se
-// extraen las ramas de la unión para tipar cada sub-componente.
-type GpsVehiculoOutput = Awaited<ReturnType<typeof client.getGpsVehiculo>>;
-type GpsVinculado = Extract<GpsVehiculoOutput, { estado: "vinculado" }>;
-type GpsSinVinculo = Extract<GpsVehiculoOutput, { estado: "sin_vinculo" }>;
-
-function TelemetriaVinculada({
-	datos,
-	esSupervisor,
-	onVinculado,
-	vehicleId,
-}: {
-	datos: GpsVinculado;
-	esSupervisor: boolean;
-	onVinculado: () => void;
-	vehicleId: string;
-}) {
-	return (
-		<div className="space-y-4">
-			<DatosTelemetria
-				telemetria={datos.telemetria}
-				unitName={datos.unitName}
-				acciones={
-					esSupervisor ? (
+	const vista = (
+		<GpsUbicacionVista
+			enVivo={enVivo}
+			esSupervisor={esSupervisor}
+			extrasEnVivo={{
+				acciones:
+					esSupervisor && vinculado ? (
 						<TrackingLinkDialog
 							// key: al corregir el vínculo cambia la unidad y el diálogo se
 							// reutilizaría con la URL de rastreo de la unidad ANTERIOR.
-							key={datos.unitId}
-							unitId={datos.unitId}
-							unitName={datos.unitName}
+							key={vinculado.unitId}
+							unitId={vinculado.unitId}
+							unitName={vinculado.unitName}
 						/>
-					) : null
-				}
-			/>
-
-			{/* También para vínculos que fijó un supervisor: si eligió mal, esta
-			    es la única forma de corregirlo desde la UI. */}
-			{esSupervisor && (
-				<CorregirVinculo
-					onVinculado={onVinculado}
-					placa={datos.placa}
-					vehicleId={vehicleId}
-				/>
-			)}
-		</div>
+					) : null,
+				pie: vinculado ? (
+					<>
+						{vinculado.vinculoOrigen === "placa" ? (
+							<p className="text-fg-tertiary text-xs">
+								Unidad identificada automáticamente por la placa.
+							</p>
+						) : null}
+						{/* También para vínculos que fijó un supervisor: si eligió mal,
+						    esta es la única forma de corregirlo desde la UI. */}
+						{esSupervisor ? (
+							<CorregirVinculo
+								onVinculado={() => gps.refetch()}
+								placa={vinculado.placa}
+								vehicleId={vehicleId}
+							/>
+						) : null}
+					</>
+				) : null,
+				sinVinculo: (datos) =>
+					esSupervisor ? (
+						<SelectorUnidad
+							candidatos={datos.candidatos}
+							onVinculado={() => gps.refetch()}
+							placaSugerida={datos.placa}
+							vehicleId={vehicleId}
+						/>
+					) : (
+						<p className="text-fg-secondary text-xs">
+							Un supervisor puede vincular la unidad GPS de este vehículo.
+						</p>
+					),
+			}}
+			historial={historial.historial}
+			historialActualizado={historial.dataUpdatedAt > gps.dataUpdatedAt}
+			idCampo={`motivo-gps-${vehicleId}`}
+			mapa={mapa}
+			onConsultar={nuevaConsulta}
+			paginacion={historial.paginacion}
+		/>
 	);
-}
 
-function SinVinculo({
-	datos,
-	esSupervisor,
-	onVinculado,
-	vehicleId,
-}: {
-	datos: GpsSinVinculo;
-	esSupervisor: boolean;
-	onVinculado: () => void;
-	vehicleId: string;
-}) {
+	if (embedded) return vista;
 	return (
-		<div className="space-y-4">
-			<p className="text-muted-foreground text-sm">
-				{MOTIVO_SIN_VINCULO[datos.motivo]}
-			</p>
-			{esSupervisor ? (
-				<SelectorUnidad
-					candidatos={datos.candidatos}
-					onVinculado={onVinculado}
-					placaSugerida={datos.placa}
-					vehicleId={vehicleId}
-				/>
-			) : (
-				<p className="text-muted-foreground text-xs italic">
-					Un supervisor puede vincular la unidad GPS de este vehículo.
-				</p>
-			)}
-		</div>
+		<Card>
+			<CardHeader>
+				<CardTitle>GPS / Wialon</CardTitle>
+			</CardHeader>
+			<CardContent>{vista}</CardContent>
+		</Card>
 	);
 }
 

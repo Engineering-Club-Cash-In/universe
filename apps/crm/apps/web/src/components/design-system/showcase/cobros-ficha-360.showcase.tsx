@@ -4,11 +4,12 @@ import {
 	CreditCard,
 	History,
 	Home,
+	LockOpen,
 	Mail,
 	Phone,
 	Users,
 } from "lucide-react";
-import type * as React from "react";
+import * as React from "react";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import { SolicitarDocumentoVista } from "@/components/cobros/ficha/documentos-caso";
 import {
@@ -16,7 +17,6 @@ import {
 	DireccionCard,
 	EncabezadoModulo,
 	PersonaContacto,
-	UbicacionVerificada,
 } from "@/components/cobros/ficha/ficha-modulos";
 import {
 	AsistenteIA,
@@ -35,6 +35,30 @@ import {
 	FilaSeguimiento,
 	FranjaSeguimiento,
 } from "@/components/cobros/ficha/ficha-resumen";
+import { NotificacionesGpsVista } from "@/components/cobros/gps-eventos-historial";
+import { UbicacionesClaveLista } from "@/components/cobros/gps-ubicaciones-clave-card";
+import { UbicacionesFrecuentesVista } from "@/components/cobros/ubicaciones/frecuentes-vista";
+import type {
+	ConsultaGps,
+	GpsVehiculoOutput,
+} from "@/components/cobros/ubicaciones/gps-derivar";
+import {
+	GpsUbicacionVista,
+	type HistorialGps,
+} from "@/components/cobros/ubicaciones/gps-ubicacion-vista";
+import { PanelVacio } from "@/components/cobros/ubicaciones/panel";
+import {
+	VehiculoEdicionForm,
+	VehiculoResumen,
+} from "@/components/cobros/ubicaciones/vehiculo-resumen";
+import {
+	type DireccionVisitas,
+	VisitasUbicacionVista,
+} from "@/components/cobros/ubicaciones/visitas-vista";
+import {
+	PestanasUbicacion,
+	type PestanaUbicacion,
+} from "@/components/cobros/vehiculo-gps-tabs";
 import { BucketBadge, MoraBadge, PromesaBadge } from "@/components/ds/badges";
 import { CardCobro, CardPromesa } from "@/components/ds/cards-cobranza";
 import { CrmPill } from "@/components/ds/cards-credito";
@@ -342,34 +366,124 @@ export default function CobrosFicha360Showcase() {
 				</Marco>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Ubicaciones verificadas (con visita y sin visita)">
+			<ShowcaseGroup title="Ubicaciones · GPS con última consulta (sin subpestañas)">
 				<Marco>
-					<EncabezadoModulo onVolver={() => undefined}>
-						<SegmentedNav
-							className="w-full"
-							value="verificadas"
-							onValueChange={() => undefined}
-							opciones={[
-								{ value: "verificadas", label: "Ubicaciones verificadas" },
-								{ value: "vehiculo", label: "Ubicación del vehículo" },
-							]}
-						/>
-					</EncabezadoModulo>
-					<UbicacionVerificada
-						persona="Cristian Hernández López"
-						verificacion={{
-							direccion: "12 calle 4-55, Zona 10, Guatemala",
-							mapa: <MapView className="h-64 w-full" />,
-							fotos: [{}, {}, {}, {}, {}],
-							comentarios:
-								"Se confirmó que el titular reside en la dirección indicada. Casa de dos niveles, portón negro.",
-							resultado: "Promesa de pago",
-							pie: "Verificada el 12 jun 2026 · Responsable: Carlos Ramírez",
+					<Encabezado tab="ubicaciones" />
+					<VehiculoDemo gps="vinculado" />
+					<TabsUbicacionDemo inicial="gps" />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · GPS con las consultas anteriores expandidas">
+				<Marco>
+					<TabsUbicacionDemo inicial="gps" gps={<GpsDemo abiertas />} />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · GPS sin consultas">
+				<Marco>
+					<TabsUbicacionDemo
+						inicial="gps"
+						gps={<GpsDemo historial={{ estado: "listo", entradas: [] }} />}
+					/>
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · GPS sin unidad vinculada">
+				<Marco>
+					<VehiculoDemo gps="sin-gps" />
+					<TabsUbicacionDemo
+						inicial="gps"
+						gps={
+							<GpsDemo
+								historial={{
+									estado: "listo",
+									entradas: [consultaDemo("s1", SIN_VINCULO, 0.4)],
+								}}
+							/>
+						}
+					/>
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · GPS cargando y con error">
+				<Marco>
+					<GpsDemo historial={{ estado: "cargando" }} />
+					<GpsDemo
+						historial={{
+							estado: "error",
+							mensaje: "No tiene acceso a este caso de cobros.",
+							onReintentar: () => undefined,
 						}}
 					/>
-					<UbicacionVerificada
-						persona="Cristian Hernández López"
-						verificacion={null}
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · Ubicaciones frecuentes (última consulta y sin consultas)">
+				<Marco>
+					<TabsUbicacionDemo inicial="ubicaciones" />
+					<FrecuentesDemo vacio />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · Visitas (verificada y sin visita)">
+				<Marco>
+					<TabsUbicacionDemo inicial="visitas" />
+					<VisitasUbicacionVista
+						direcciones={[
+							{
+								clave: "residencia",
+								direccionRegistrada: "12 calle 4-55, Zona 10, Guatemala",
+								verificacion: null,
+							},
+							{
+								clave: "trabajo",
+								direccionRegistrada: null,
+								verificacion: null,
+							},
+						]}
+						bloqueoVisita="Las visitas se registran de B2 a B4."
+						onRegistrarVisita={() => undefined}
+					/>
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · Notificaciones (con eventos y vacío)">
+				<Marco>
+					<TabsUbicacionDemo inicial="notificaciones" />
+					<NotificacionesGpsVista estado="listo" eventos={[]} />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Ubicaciones · Vehículo (edición y crédito migrado)">
+				<Marco>
+					<VehiculoResumen
+						titulo="Toyota Hilux 2021"
+						placa="P-472GST"
+						tipo="Pick-up"
+						datos={[]}
+						onEditar={() => undefined}
+						edicion={
+							<VehiculoEdicionForm
+								form={{
+									make: "Toyota",
+									model: "Hilux",
+									year: 2021,
+									licensePlate: "P-472GST",
+								}}
+								onChange={() => undefined}
+								onGuardar={() => undefined}
+								onCancelar={() => undefined}
+								guardando={false}
+							/>
+						}
+					/>
+					<VehiculoResumen
+						titulo="Vehículo sin datos"
+						placa={null}
+						datos={[]}
+						migrado
+						onEditar={() => undefined}
 					/>
 				</Marco>
 			</ShowcaseGroup>
@@ -674,5 +788,327 @@ export default function CobrosFicha360Showcase() {
 				</Marco>
 			</ShowcaseGroup>
 		</div>
+	);
+}
+
+/* ── Ubicaciones: datos de ejemplo ──────────────────────────────────────────── */
+
+const MAPA_DEMO = (
+	<MapView className="h-52 w-full sm:h-64 lg:h-auto lg:min-h-64 lg:flex-1" />
+);
+
+const HACE = (horas: number) => new Date(Date.now() - horas * 3_600_000);
+
+const telemetriaDemo = (
+	lat: number,
+	horasPosicion: number,
+	velocidad = 0,
+): GpsVehiculoOutput => ({
+	estado: "vinculado",
+	auditada: true,
+	unitId: 4721,
+	unitName: "P-472GST HILUX",
+	vinculoOrigen: "persistido",
+	placa: "P-472GST",
+	telemetria: {
+		latitude: lat,
+		longitude: -90.5069,
+		speedKmh: velocidad,
+		isIgnitionOn: velocidad > 0,
+		mileageKm: 84_213,
+		engineHours: 2_310,
+		ultimaSenalAt: HACE(horasPosicion),
+		ultimaPosicionAt: HACE(horasPosicion),
+	},
+});
+
+const SIN_VINCULO: GpsVehiculoOutput = {
+	estado: "sin_vinculo",
+	auditada: true,
+	motivo: "sin_coincidencia",
+	placa: "P-472GST",
+	candidatos: [],
+};
+
+function consultaDemo(
+	id: string,
+	snapshot: GpsVehiculoOutput | null,
+	horas: number,
+	opciones: {
+		motivo?: string;
+		usuario?: string;
+		origen?: string;
+		repeticiones?: number;
+	} = {},
+): ConsultaGps {
+	const createdAt = HACE(horas);
+	const motivo =
+		opciones.motivo ?? "Cliente no contesta, ubicar antes de la visita";
+	const usuario = opciones.usuario ?? "Caren Rivera";
+	return {
+		id,
+		motivo,
+		origen: opciones.origen ?? "telemetria",
+		unitName: "P-472GST HILUX",
+		userNombre: usuario,
+		createdAt,
+		snapshot,
+		consultas: Array.from({ length: opciones.repeticiones ?? 1 }, (_, i) => ({
+			id: `${id}-${i}`,
+			motivo: i === 0 ? motivo : "Seguimiento de promesa incumplida",
+			userNombre: i === 0 ? usuario : "Samuel Gamboa",
+			createdAt: HACE(horas + i * 20),
+		})),
+	};
+}
+
+const HISTORIAL_GPS: HistorialGps = {
+	estado: "listo",
+	entradas: [
+		consultaDemo("g1", telemetriaDemo(14.5951, 0.15), 0.1, { repeticiones: 2 }),
+		consultaDemo("g2", null, 26, {
+			origen: "ubicaciones_clave",
+			motivo: "Preparar visita de recuperación",
+			usuario: "Samuel Gamboa",
+		}),
+		consultaDemo("g3", telemetriaDemo(14.6312, 30, 42), 30, {
+			motivo: "Confirmar si el vehículo circula en horario laboral",
+		}),
+		consultaDemo(
+			"g4",
+			{
+				estado: "no_disponible",
+				auditada: true,
+				error: {
+					code: "WIALON_TIMEOUT",
+					message: "Wialon no respondió a tiempo.",
+				},
+				referencia: "gps-7f3a91",
+			},
+			52,
+			{ motivo: "Verificar ubicación por denuncia de venta" },
+		),
+		consultaDemo("g5", telemetriaDemo(14.6011, 75), 75),
+		consultaDemo("g6", telemetriaDemo(14.6044, 99), 99),
+		consultaDemo("g7", telemetriaDemo(14.6099, 120), 120),
+	],
+};
+
+function GpsDemo({
+	historial = HISTORIAL_GPS,
+	abiertas = false,
+}: {
+	historial?: HistorialGps;
+	abiertas?: boolean;
+}) {
+	return (
+		<GpsUbicacionVista
+			anterioresAbiertas={abiertas}
+			historial={historial}
+			enVivo={null}
+			historialActualizado={false}
+			esSupervisor={false}
+			onConsultar={() => undefined}
+			idCampo="motivo-gps-demo"
+			mapa={MAPA_DEMO}
+		/>
+	);
+}
+
+const LUGARES_DEMO = [
+	{
+		id: "u1",
+		lat: 14.5951,
+		lon: -90.5069,
+		radioM: 80,
+		tipo: "probable_casa" as const,
+		horasTotales: 412,
+		diasDistintos: 52,
+		visitas: 58,
+		patron: { noches: 41, nochesTotales: 52, nocturna: 300, laboral: 60 },
+		ultimaVisita: HACE(10),
+		primeraVisita: HACE(24 * 60),
+		calculadoAt: HACE(8),
+		confirmadaDomicilio: true,
+	},
+	{
+		id: "u2",
+		lat: 14.6011,
+		lon: -90.5132,
+		radioM: 60,
+		tipo: "probable_trabajo" as const,
+		horasTotales: 186,
+		diasDistintos: 31,
+		visitas: 33,
+		patron: { laboral: 160, nocturna: 0 },
+		ultimaVisita: HACE(30),
+		primeraVisita: HACE(24 * 58),
+		calculadoAt: HACE(8),
+	},
+	{
+		id: "u3",
+		lat: 14.6211,
+		lon: -90.5301,
+		radioM: 50,
+		tipo: "recurrente" as const,
+		horasTotales: 24,
+		diasDistintos: 8,
+		visitas: 9,
+		patron: { visitasPorDiaSemana: [0, 0, 0, 0, 0, 0, 8] },
+		ultimaVisita: HACE(80),
+		primeraVisita: HACE(24 * 50),
+		calculadoAt: HACE(8),
+	},
+];
+
+function FrecuentesDemo({ vacio = false }: { vacio?: boolean }) {
+	return (
+		<UbicacionesFrecuentesVista
+			historial={
+				vacio
+					? { estado: "listo", entradas: [] }
+					: {
+							estado: "listo",
+							entradas: [
+								{
+									id: "f1",
+									motivo: "Preparar visita de recuperación",
+									userNombre: "Samuel Gamboa",
+									createdAt: HACE(26),
+									snapshot: { ubicaciones: LUGARES_DEMO },
+								},
+								{
+									id: "f2",
+									motivo: "Cliente indica que cambió de residencia",
+									userNombre: "Caren Rivera",
+									createdAt: HACE(24 * 9),
+									snapshot: { ubicaciones: LUGARES_DEMO.slice(0, 1) },
+								},
+							],
+						}
+			}
+			enVivo={null}
+			historialActualizado={false}
+			onConsultar={() => undefined}
+			idCampo={vacio ? "motivo-frecuentes-vacio" : "motivo-frecuentes-demo"}
+			renderLugares={(lugares) => (
+				<UbicacionesClaveLista ubicaciones={lugares} />
+			)}
+		/>
+	);
+}
+
+const VISITAS_DEMO: DireccionVisitas[] = [
+	{
+		clave: "residencia",
+		direccionRegistrada: "12 calle 4-55, Zona 10, Guatemala",
+		verificacion: {
+			direccion: "12 calle 4-55, Zona 10, Guatemala",
+			mapa: (
+				<MapView className="h-52 w-full sm:h-60 lg:h-auto lg:min-h-60 lg:flex-1" />
+			),
+			fotos: [{}, {}, {}, {}, {}],
+			comentarios:
+				"Se confirmó que el titular reside en la dirección indicada. Casa de dos niveles, portón negro. Atendió un familiar directo.",
+			resultado: "Promesa de pago",
+			fecha: "12 jun 2026",
+			responsable: "Carlos Ramírez",
+		},
+	},
+	{
+		clave: "trabajo",
+		direccionRegistrada: "Distribuidora El Sol, 12 calle 1-25, zona 10",
+		verificacion: null,
+	},
+];
+
+function VehiculoDemo({ gps }: { gps: "vinculado" | "sin-gps" }) {
+	return (
+		<VehiculoResumen
+			titulo="Toyota Hilux 2021"
+			placa="P-472GST"
+			tipo="Pick-up"
+			gps={
+				gps === "vinculado" ? (
+					<CrmPill kind="chip" tone="success">
+						GPS vinculado
+					</CrmPill>
+				) : (
+					<CrmPill kind="chip" tone="warning">
+						Sin GPS vinculado
+					</CrmPill>
+				)
+			}
+			onEditar={() => undefined}
+			datos={[
+				{ label: "Motor", valor: "2GD-4829173" },
+				{ label: "Chasis", valor: "MR0HA3CD100783402" },
+				{ label: "Pasajeros", valor: "5" },
+				{ label: "Uso", valor: "Particular" },
+				{ label: "Póliza de seguro", valor: "AUTO-2024-118822" },
+				{ label: "Monto asegurado", valor: "Q120,000" },
+				{ label: "Vencimiento del seguro", valor: "30/6/2027" },
+			]}
+		/>
+	);
+}
+
+function TabsUbicacionDemo({
+	inicial,
+	gps = <GpsDemo />,
+}: {
+	inicial: PestanaUbicacion;
+	gps?: React.ReactNode;
+}) {
+	const [pestana, setPestana] = React.useState<PestanaUbicacion>(inicial);
+	return (
+		<PestanasUbicacion
+			value={pestana}
+			onValueChange={setPestana}
+			gps={gps}
+			frecuentes={<FrecuentesDemo />}
+			visitas={
+				<VisitasUbicacionVista
+					direcciones={VISITAS_DEMO}
+					onRegistrarVisita={() => undefined}
+					onFotoClick={() => undefined}
+				/>
+			}
+			notificaciones={
+				<NotificacionesGpsVista
+					estado="listo"
+					eventos={[
+						{
+							id: "e1",
+							tipo: "desconexion_energia",
+							wialonUnitId: 4721,
+							ocurridoAt: HACE(5),
+							lat: 14.5951,
+							lon: -90.5069,
+							velocidadKmh: 0,
+							notificado: true,
+						},
+						{
+							id: "e2",
+							tipo: "sin_reportar",
+							wialonUnitId: 4721,
+							ocurridoAt: HACE(50),
+							lat: null,
+							lon: null,
+							velocidadKmh: null,
+							notificado: false,
+						},
+					]}
+				/>
+			}
+			conteoNotificaciones={2}
+			apagado={
+				<PanelVacio
+					icono={<LockOpen />}
+					titulo="Este crédito no tiene inmovilización de unidad disponible"
+					descripcion="El apagado se habilita en B2, B3 y B4 para unidades con GPS vinculado."
+				/>
+			}
+		/>
 	);
 }

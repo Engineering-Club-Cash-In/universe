@@ -64,7 +64,6 @@ import {
 	DireccionCard,
 	EncabezadoModulo,
 	PersonaContacto,
-	UbicacionVerificada,
 } from "@/components/cobros/ficha/ficha-modulos";
 import {
 	AsistenteIA,
@@ -106,7 +105,18 @@ import {
 	TelefonosEditor,
 	telefonosParaGuardar,
 } from "@/components/cobros/telefonos-editor";
-import { VehiculoGpsTabs } from "@/components/cobros/vehiculo-gps-tabs";
+import {
+	VehiculoEdicionForm,
+	VehiculoResumen,
+} from "@/components/cobros/ubicaciones/vehiculo-resumen";
+import {
+	type DireccionVisitas,
+	VisitasUbicacionVista,
+} from "@/components/cobros/ubicaciones/visitas-vista";
+import {
+	EstadoGpsUnidad,
+	VehiculoGpsTabs,
+} from "@/components/cobros/vehiculo-gps-tabs";
 import {
 	VisitaDialog,
 	type VisitaProgramadaParaCompletar,
@@ -714,12 +724,6 @@ function RouteComponent() {
 	const [vista, setVista] = useState<"resumen" | "contacto" | "edicion">(
 		"resumen",
 	);
-	const [segUbicaciones, setSegUbicaciones] = useState<
-		"verificadas" | "vehiculo"
-	>(seccion === "inmovilizacion" ? "vehiculo" : "verificadas");
-	const [segVerificadas, setSegVerificadas] = useState<
-		"residencia" | "trabajo"
-	>("residencia");
 	const [segEdicion, setSegEdicion] = useState<"info" | "cambios">("info");
 	const [segHistorial, setSegHistorial] = useState<"actual" | "historico">(
 		"actual",
@@ -729,11 +733,10 @@ function RouteComponent() {
 		setTabActivaEstado(tab);
 		setVista("resumen");
 	};
-	// El vehículo (GPS, inmovilización, recuperación) vive en la pestaña
-	// Ubicaciones › Ubicación del vehículo; antes era «Vehículo / GPS».
+	// El vehículo (GPS, visitas, inmovilización, recuperación) vive en la
+	// pestaña Ubicaciones; antes era «Vehículo / GPS».
 	const irAVehiculo = () => {
 		setTabActiva("ubicaciones");
-		setSegUbicaciones("vehiculo");
 	};
 	// El aviso del Resumen lleva directo a la sub-pestaña de apagado/reactivación;
 	// la señal le avisa a VehiculoGpsTabs (sin desmontarlo) aunque ya esté en otra.
@@ -1962,7 +1965,8 @@ function RouteComponent() {
 		fechaLarga(d),
 	);
 
-	// Ubicaciones verificadas: la última visita REALIZADA a cada dirección.
+	// Pestaña Ubicaciones › Visitas (antes «Ubicaciones verificadas»): la
+	// última visita REALIZADA a cada dirección, junto a la dirección registrada.
 	const visitaVerificada = (tipo: "residencia" | "trabajo") => {
 		const v = (visitasCaso.data ?? []).find(
 			(x) => x.tipo === tipo && x.estado === "realizada",
@@ -1974,7 +1978,11 @@ function RouteComponent() {
 			direccion: v.direccion,
 			mapa:
 				lat !== undefined && lng !== undefined ? (
-					<GpsMapaPreview latitude={lat} longitude={lng} className="h-64" />
+					<GpsMapaPreview
+						latitude={lat}
+						longitude={lng}
+						className="h-52 sm:h-60 lg:h-auto lg:min-h-60 lg:flex-1"
+					/>
 				) : undefined,
 			fotos: v.evidencias.map((e) => ({
 				src: e.url ?? undefined,
@@ -1985,13 +1993,15 @@ function RouteComponent() {
 				? (RESULTADO_VISITA_LABEL[v.resultado as ResultadoVisita] ??
 					v.resultado)
 				: null,
-			pie: `Verificada el ${v.fechaVisita ? fechaLarga(new Date(v.fechaVisita)) : "—"}${
-				v.responsable ? ` · Responsable: ${v.responsable}` : ""
-			}`,
+			fecha: v.fechaVisita ? fechaLarga(new Date(v.fechaVisita)) : "—",
+			responsable: v.responsable,
 			fotosUrls: v.evidencias.map((e) => e.url),
 		};
 	};
-	const verificada = visitaVerificada(segVerificadas);
+	const verificaciones = {
+		residencia: visitaVerificada("residencia"),
+		trabajo: visitaVerificada("trabajo"),
+	};
 
 	// Guardar / cancelar la edición del contacto (antes, botones de la tarjeta).
 	const guardarContacto = () => {
@@ -3736,307 +3746,85 @@ function RouteComponent() {
 					)}
 				</TabsContent>
 
-				{/* UBICACIONES — verificadas en campo y GPS del vehículo (antes
-				    pestaña «Vehículo / GPS»). */}
+				{/* UBICACIONES — el vehículo y sus herramientas en una sola vista:
+				    cabecera compacta del vehículo y, debajo, las pestañas GPS /
+				    Wialon, ubicaciones frecuentes, visitas (antes «Ubicaciones
+				    verificadas»), notificaciones y apagado. */}
 				<TabsContent value="ubicaciones">
-					<div className="space-y-5">
-						<SegmentedNav
-							className="w-full"
-							value={segUbicaciones}
-							onValueChange={(v) =>
-								setSegUbicaciones(v as "verificadas" | "vehiculo")
+					<div className="space-y-4">
+						<VehiculoResumen
+							titulo={
+								isVehiculoMigrado
+									? "Vehículo sin datos"
+									: [caso.vehiculoMarca, caso.vehiculoModelo, caso.vehiculoYear]
+											.filter(Boolean)
+											.join(" ") || "Vehículo sin datos"
 							}
-							opciones={[
-								{ value: "verificadas", label: "Ubicaciones verificadas" },
-								{ value: "vehiculo", label: "Ubicación del vehículo" },
+							placa={caso.vehiculoPlaca || null}
+							tipo={
+								caso.vehiculoTipo && caso.vehiculoTipo !== "N/A"
+									? caso.vehiculoTipo
+									: null
+							}
+							migrado={isVehiculoMigrado}
+							gps={caso.id ? <EstadoGpsUnidad casoCobroId={caso.id} /> : null}
+							onEditar={caso.vehicleId ? handleEditVehicle : undefined}
+							edicion={
+								isEditingVehicle ? (
+									<VehiculoEdicionForm
+										form={vehicleForm}
+										onChange={setVehicleForm}
+										onGuardar={() => updateVehicleMutation.mutate(vehicleForm)}
+										onCancelar={() => setIsEditingVehicle(false)}
+										guardando={updateVehicleMutation.isPending}
+									/>
+								) : undefined
+							}
+							datos={[
+								...(caso.vehiculoMotor
+									? [{ label: "Motor", valor: caso.vehiculoMotor }]
+									: []),
+								...(caso.vehiculoChasis
+									? [{ label: "Chasis", valor: caso.vehiculoChasis }]
+									: []),
+								...(caso.vehiculoAsientos
+									? [{ label: "Pasajeros", valor: caso.vehiculoAsientos }]
+									: []),
+								...(caso.vehiculoUso
+									? [{ label: "Uso", valor: caso.vehiculoUso }]
+									: []),
+								...(caso.vehiculoNumeroPoliza
+									? [
+											{
+												label: "Póliza de seguro",
+												valor: caso.vehiculoNumeroPoliza,
+											},
+										]
+									: []),
+								...(caso.vehiculoNumeroPoliza && caso.vehiculoMontoAsegurado
+									? [
+											{
+												label: "Monto asegurado",
+												valor: `Q${Number(
+													caso.vehiculoMontoAsegurado,
+												).toLocaleString()}`,
+											},
+										]
+									: []),
+								...(caso.vehiculoNumeroPoliza &&
+								caso.vehiculoFechaVencimientoSeguro
+									? [
+											{
+												label: "Vencimiento del seguro",
+												valor: new Date(
+													caso.vehiculoFechaVencimientoSeguro,
+												).toLocaleDateString("es-GT"),
+											},
+										]
+									: []),
 							]}
 						/>
-						{segUbicaciones === "verificadas" ? (
-							<div className="space-y-5">
-								<div className="flex flex-wrap items-center justify-between gap-4">
-									<h2 className="font-bold text-[26px] leading-[1.26]">
-										Ubicaciones verificadas
-									</h2>
-									<SegmentedNav
-										value={segVerificadas}
-										onValueChange={(v) =>
-											setSegVerificadas(v as "residencia" | "trabajo")
-										}
-										opciones={[
-											{ value: "residencia", label: "Residencia" },
-											{ value: "trabajo", label: "Trabajo" },
-										]}
-									/>
-								</div>
-								<UbicacionVerificada
-									persona={caso.clienteNombre || "Cliente sin nombre"}
-									verificacion={verificada}
-									onFotoClick={(i) => {
-										const url = verificada?.fotosUrls[i];
-										if (url) window.open(url, "_blank", "noopener");
-									}}
-								/>
-							</div>
-						) : (
-							<div className="space-y-5">
-								<div className="flex flex-col gap-1 border-b pb-5">
-									<h2 className="font-bold text-[26px] leading-[1.26]">
-										Ubicación del vehículo
-									</h2>
-									<p className="text-muted-foreground text-sm">
-										{[
-											`${caso.vehiculoMarca ?? ""} ${caso.vehiculoModelo ?? ""}`.trim(),
-											caso.vehiculoPlaca,
-											"GPS de la garantía",
-										]
-											.filter(Boolean)
-											.join(" · ")}
-									</p>
-								</div>
-								<div className="space-y-6">
-									{/* Información del Vehículo */}
-									<Card>
-										<CardHeader>
-											<div className="flex items-center justify-between">
-												<CardTitle className="flex items-center gap-2">
-													<Car className="h-5 w-5" />
-													Vehículo
-												</CardTitle>
-												{caso.vehicleId && !isEditingVehicle && (
-													<Button
-														variant="ghost"
-														size="sm"
-														onClick={handleEditVehicle}
-													>
-														<Pencil className="h-4 w-4" />
-													</Button>
-												)}
-											</div>
-										</CardHeader>
-										<CardContent className="space-y-3">
-											{isEditingVehicle ? (
-												<div className="space-y-3">
-													<div>
-														<Label htmlFor="vehicle-make">Marca</Label>
-														<Input
-															id="vehicle-make"
-															value={vehicleForm.make}
-															onChange={(e) =>
-																setVehicleForm((f) => ({
-																	...f,
-																	make: e.target.value,
-																}))
-															}
-															placeholder="Ej.: Toyota"
-														/>
-													</div>
-													<div>
-														<Label htmlFor="vehicle-model">Modelo</Label>
-														<Input
-															id="vehicle-model"
-															value={vehicleForm.model}
-															onChange={(e) =>
-																setVehicleForm((f) => ({
-																	...f,
-																	model: e.target.value,
-																}))
-															}
-															placeholder="Ej.: Corolla"
-														/>
-													</div>
-													<div>
-														<Label htmlFor="vehicle-year">Año</Label>
-														<Input
-															id="vehicle-year"
-															type="number"
-															value={vehicleForm.year}
-															onChange={(e) =>
-																setVehicleForm((f) => ({
-																	...f,
-																	year: Number(e.target.value),
-																}))
-															}
-															placeholder="Ej.: 2020"
-														/>
-													</div>
-													<div>
-														<Label htmlFor="vehicle-plate">Placa</Label>
-														<Input
-															id="vehicle-plate"
-															value={vehicleForm.licensePlate}
-															onChange={(e) =>
-																setVehicleForm((f) => ({
-																	...f,
-																	licensePlate: e.target.value,
-																}))
-															}
-															placeholder="Ej.: P-123ABC"
-														/>
-													</div>
-													<div className="flex gap-2">
-														<Button
-															size="sm"
-															onClick={() =>
-																updateVehicleMutation.mutate(vehicleForm)
-															}
-															disabled={
-																updateVehicleMutation.isPending ||
-																!vehicleForm.make ||
-																!vehicleForm.model
-															}
-														>
-															{updateVehicleMutation.isPending
-																? "Guardando..."
-																: "Guardar"}
-														</Button>
-														<Button
-															size="sm"
-															variant="outline"
-															onClick={() => setIsEditingVehicle(false)}
-															disabled={updateVehicleMutation.isPending}
-														>
-															Cancelar
-														</Button>
-													</div>
-												</div>
-											) : (
-												<>
-													{/* Grilla: en una card a ancho completo, una sola columna de
-									    etiquetas dejaba 3/4 de la tarjeta en blanco. */}
-													<div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-														{isVehiculoMigrado && (
-															<div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
-																<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-																<div className="text-xs">
-																	<p className="font-medium text-amber-800 dark:text-amber-200">
-																		Vehículo sin información
-																	</p>
-																	<p className="text-amber-700 dark:text-amber-300">
-																		Este crédito fue migrado y no tiene datos
-																		del vehículo. Edite la información
-																		manualmente.
-																	</p>
-																</div>
-															</div>
-														)}
-														<div>
-															<p className="text-muted-foreground text-sm">
-																Vehículo
-															</p>
-															<p className="font-medium">
-																{caso.vehiculoMarca} {caso.vehiculoModelo}{" "}
-																{caso.vehiculoYear}
-															</p>
-														</div>
-														{caso.vehiculoTipo &&
-															caso.vehiculoTipo !== "N/A" && (
-																<div>
-																	<p className="text-muted-foreground text-sm">
-																		Tipo
-																	</p>
-																	<p className="font-medium">
-																		{caso.vehiculoTipo}
-																	</p>
-																</div>
-															)}
-														<div>
-															<p className="text-muted-foreground text-sm">
-																Placa
-															</p>
-															<p className="font-medium">
-																{caso.vehiculoPlaca || "-"}
-															</p>
-														</div>
-														{caso.vehiculoMotor && (
-															<div>
-																<p className="text-muted-foreground text-sm">
-																	Motor
-																</p>
-																<p className="font-medium text-xs">
-																	{caso.vehiculoMotor}
-																</p>
-															</div>
-														)}
-														{caso.vehiculoChasis && (
-															<div>
-																<p className="text-muted-foreground text-sm">
-																	Chasis
-																</p>
-																<p className="font-medium text-xs">
-																	{caso.vehiculoChasis}
-																</p>
-															</div>
-														)}
-														{caso.vehiculoAsientos && (
-															<div>
-																<p className="text-muted-foreground text-sm">
-																	Pasajeros
-																</p>
-																<p className="font-medium">
-																	{caso.vehiculoAsientos}
-																</p>
-															</div>
-														)}
-														{caso.vehiculoUso && (
-															<div>
-																<p className="text-muted-foreground text-sm">
-																	Uso
-																</p>
-																<p className="font-medium">
-																	{caso.vehiculoUso}
-																</p>
-															</div>
-														)}
-													</div>
-													{/* Información del Seguro */}
-													{caso.vehiculoNumeroPoliza && (
-														<div className="border-t pt-3">
-															<p className="mb-2 flex items-center gap-1 text-muted-foreground text-xs">
-																<Shield className="h-3 w-3" />
-																Seguro
-															</p>
-															<div className="space-y-2 text-xs">
-																<div>
-																	<p className="text-muted-foreground">
-																		Póliza
-																	</p>
-																	<p className="font-medium">
-																		{caso.vehiculoNumeroPoliza}
-																	</p>
-																</div>
-																{caso.vehiculoMontoAsegurado && (
-																	<div>
-																		<p className="text-muted-foreground">
-																			Monto Asegurado
-																		</p>
-																		<p className="font-medium">
-																			Q
-																			{Number(
-																				caso.vehiculoMontoAsegurado,
-																			).toLocaleString()}
-																		</p>
-																	</div>
-																)}
-																{caso.vehiculoFechaVencimientoSeguro && (
-																	<div>
-																		<p className="text-muted-foreground">
-																			Vencimiento
-																		</p>
-																		<p className="font-medium">
-																			{new Date(
-																				caso.vehiculoFechaVencimientoSeguro,
-																			).toLocaleDateString("es-GT")}
-																		</p>
-																	</div>
-																)}
-															</div>
-														</div>
-													)}
-												</>
-											)}
-										</CardContent>
-									</Card>
-									{/* Herramientas de la unidad en una sola tarjeta con pestañas.
+						{/* Herramientas de la unidad en una sola tarjeta con pestañas.
 						    - GPS / Wialon (CB-118): query propia para que una consulta al
 						      proveedor externo no retrase el resto de la ficha. El key
 						      fuerza componentes nuevos al cambiar de crédito: esta ruta no
@@ -4060,54 +3848,72 @@ function RouteComponent() {
 						      botón de apagado con bucketNumero (el server valida B2/B3/B4,
 						      fail closed, pero así el asesor no se entera del rechazo solo
 						      después de hacer el pedido). */}
-									{caso.id && (
-										<VehiculoGpsTabs
-											bucketNumero={bucketNumero}
-											casoCobroId={caso.id}
-											esSupervisor={esSupervisorCobros}
-											key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
-											pestanaInicial={seccion}
-											abrirInmovilizacion={irAInmovilizacion}
-											onInmovilizacionAbierta={() =>
-												setIrAInmovilizacion(false)
-											}
-											convenioBloqueo={convenioMotivoBloqueo}
-											onCrearConvenio={() => {
-												setConvenioDesdeReactivacion(true);
-												setConvenioAbierto(true);
-											}}
-											onReactivacionReabierta={() =>
-												setReabrirReactivacion(false)
-											}
-											onRegistrarPromesa={() => {
-												setPromesaDesdeReactivacion(true);
-												setPromesaAbierta(true);
-											}}
-											reabrirReactivacion={reabrirReactivacion}
-											onRegistrarLlamada={(inmovilizacionId, accion) => {
-												setInmovilizacionLlamada({
-													id: inmovilizacionId,
-													accion,
-												});
-												setCanalContacto("llamada");
-											}}
-											vehicleId={caso.vehicleId ?? null}
-										/>
-									)}
-									{/* CB-042 · El registro de recuperación (forzosa o entrega
+						{caso.id && (
+							<VehiculoGpsTabs
+								bucketNumero={bucketNumero}
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+								key={`${id}:${caso.vehicleId ?? "sin-vehiculo"}`}
+								pestanaInicial={seccion}
+								abrirInmovilizacion={irAInmovilizacion}
+								onInmovilizacionAbierta={() => setIrAInmovilizacion(false)}
+								convenioBloqueo={convenioMotivoBloqueo}
+								onCrearConvenio={() => {
+									setConvenioDesdeReactivacion(true);
+									setConvenioAbierto(true);
+								}}
+								onReactivacionReabierta={() => setReabrirReactivacion(false)}
+								onRegistrarPromesa={() => {
+									setPromesaDesdeReactivacion(true);
+									setPromesaAbierta(true);
+								}}
+								reabrirReactivacion={reabrirReactivacion}
+								onRegistrarLlamada={(inmovilizacionId, accion) => {
+									setInmovilizacionLlamada({
+										id: inmovilizacionId,
+										accion,
+									});
+									setCanalContacto("llamada");
+								}}
+								vehicleId={caso.vehicleId ?? null}
+								visitas={
+									<VisitasUbicacionVista
+										direcciones={(
+											[
+												["residencia", direccionesCliente.residencia],
+												[
+													"trabajo",
+													direccionesCliente.trabajo?.direccion ?? null,
+												],
+											] as const
+										).map(
+											([clave, direccionRegistrada]): DireccionVisitas => ({
+												clave,
+												direccionRegistrada,
+												verificacion: verificaciones[clave],
+											}),
+										)}
+										onRegistrarVisita={(tipo) => setVisitaAbierta({ tipo })}
+										bloqueoVisita={bloqueoVisita}
+										onFotoClick={(tipo, i) => {
+											const url = verificaciones[tipo]?.fotosUrls[i];
+											if (url) window.open(url, "_blank", "noopener");
+										}}
+									/>
+								}
+							/>
+						)}
+						{/* CB-042 · El registro de recuperación (forzosa o entrega
 						    voluntaria). Reemplaza la tarjeta vieja, que solo salía para
 						    incobrables y leía una tabla que nadie llenaba. */}
-									{caso.id && (
-										<RecuperacionVehiculoCard
-											casoCobroId={caso.id}
-											bucketNumero={bucketNumero}
-											enRecuperacion={enRecuperacion}
-											puedeGestionar={puedeRecuperarVehiculo}
-											esSupervisor={esSupervisorCobros}
-										/>
-									)}
-								</div>
-							</div>
+						{caso.id && (
+							<RecuperacionVehiculoCard
+								casoCobroId={caso.id}
+								bucketNumero={bucketNumero}
+								enRecuperacion={enRecuperacion}
+								puedeGestionar={puedeRecuperarVehiculo}
+								esSupervisor={esSupervisorCobros}
+							/>
 						)}
 					</div>
 				</TabsContent>

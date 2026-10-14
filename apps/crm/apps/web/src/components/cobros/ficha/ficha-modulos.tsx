@@ -1,4 +1,4 @@
-import { Lock, MapPin, Pencil } from "lucide-react";
+import { Lock, Pencil } from "lucide-react";
 import type * as React from "react";
 import {
 	CrmAvatar,
@@ -8,14 +8,15 @@ import {
 	inicialesDe,
 } from "@/components/ds/cards-credito";
 import { FichaEditableRow } from "@/components/ds/ficha-edicion";
-import { PhotoStrip, VolverButton } from "@/components/ds/ubicaciones";
+import { VolverButton } from "@/components/ds/ubicaciones";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
  * Ficha 360 · módulos que se abren desde el Resumen («Volver al resumen»):
- * Contacto (1366:12), Ubicaciones (1209:10624 / 1209:10804 / 1211:12) y
- * Edición de la información del cliente (1177:877 / 1179:1089).
+ * Contacto (1366:12) y Edición de la información del cliente (1177:877 /
+ * 1179:1089). Ubicaciones (1209:10624 / 1209:10804 / 1211:12) vive en
+ * `components/cobros/ubicaciones/`.
  * Solo presentación.
  */
 
@@ -180,118 +181,6 @@ export function PersonaContacto({
 			</dl>
 			{children}
 		</CrmCard>
-	);
-}
-
-/* ── Ubicaciones verificadas ────────────────────────────────────────────────── */
-
-export type VerificacionUbicacion = {
-	direccion: string;
-	/** Mapa real (iframe) si la visita guardó coordenadas. */
-	mapa?: React.ReactNode;
-	fotos: Array<{ src?: string; alt?: string }>;
-	comentarios?: string | null;
-	/** "Verificada el 12 jun 2026 · Responsable: Carlos Ramírez". */
-	pie: string;
-	/** Resultado de la visita ("Pago total", "Sin contacto"…). */
-	resultado?: string | null;
-};
-
-export function UbicacionVerificada({
-	persona,
-	rol = "Titular",
-	verificacion,
-	onFotoClick,
-	compacto = false,
-}: {
-	persona: string;
-	rol?: string;
-	verificacion: VerificacionUbicacion | null;
-	onFotoClick?: (indice: number) => void;
-	/**
-	 * Workspace: las dos tarjetas (fotos y comentarios) van lado a lado según
-	 * el ancho del panel (container query), no de la pantalla.
-	 */
-	compacto?: boolean;
-}) {
-	return (
-		<div className={cn("flex flex-col gap-5", compacto && "@container")}>
-			<div className="flex items-center gap-2.5 border-line-subtle border-b pb-5">
-				<span className="font-semibold text-[15px] text-fg">{persona}</span>
-				<CrmPill tone="neutral" dot={false} className="px-2.5 py-0.5">
-					{rol}
-				</CrmPill>
-			</div>
-			{verificacion ? (
-				<>
-					<div className="flex flex-wrap items-center gap-3">
-						<CrmPill tone="success">Dirección verificada</CrmPill>
-						<span className="wrap-break-word min-w-0 text-fg text-sm">
-							{verificacion.direccion}
-						</span>
-						{verificacion.resultado ? (
-							<CrmPill tone="neutral" kind="chip">
-								{verificacion.resultado}
-							</CrmPill>
-						) : null}
-					</div>
-					<CrmCard superficie="outline" className="gap-3 p-4">
-						<h3 className={crmText.title}>Ubicación en el mapa</h3>
-						{verificacion.mapa ?? (
-							<div className="flex h-40 items-center justify-center gap-2 rounded-xl bg-muted text-fg-secondary text-sm">
-								<MapPin aria-hidden className="size-4" />
-								La visita no registró coordenadas.
-							</div>
-						)}
-					</CrmCard>
-					<div
-						className={cn(
-							"grid gap-5",
-							compacto ? "@2xl:grid-cols-2" : "lg:grid-cols-2",
-						)}
-					>
-						<CrmCard superficie="outline" className="gap-3 p-4">
-							<h3 className={crmText.title}>Fotografías de la visita</h3>
-							{verificacion.fotos.length > 0 ? (
-								<PhotoStrip
-									fotos={verificacion.fotos}
-									onFotoClick={onFotoClick}
-									onVerMas={onFotoClick ? () => onFotoClick(3) : undefined}
-								/>
-							) : (
-								<p className="text-fg-tertiary text-sm">Sin fotografías.</p>
-							)}
-						</CrmCard>
-						<CrmCard superficie="outline" className="gap-2 p-4">
-							<h3 className={crmText.title}>Comentarios del verificador</h3>
-							<p className="wrap-break-word text-fg-secondary text-sm leading-relaxed">
-								{verificacion.comentarios || "Sin comentarios."}
-							</p>
-						</CrmCard>
-					</div>
-					<p className="text-fg-tertiary text-xs">{verificacion.pie}</p>
-				</>
-			) : (
-				<div className="flex flex-col items-center gap-2 rounded-xl border border-line border-dashed bg-muted/40 px-6 py-12 text-center">
-					<span
-						aria-hidden
-						className="mb-2 flex size-11 items-center justify-center rounded-full bg-line-subtle"
-					>
-						<MapPin className="size-5 text-fg-tertiary" />
-					</span>
-					<p className="font-semibold text-base text-fg">
-						Sin verificación registrada
-					</p>
-					<p className="text-fg-secondary text-sm">
-						Esta dirección aún no ha sido verificada en campo.
-					</p>
-					<p className="max-w-md text-fg-tertiary text-xs">
-						La información de la visita (mapa, fotos y comentarios) se mostrará
-						aquí automáticamente cuando se registre una visita realizada.
-					</p>
-				</div>
-			)}
-		</div>
 	);
 }
 

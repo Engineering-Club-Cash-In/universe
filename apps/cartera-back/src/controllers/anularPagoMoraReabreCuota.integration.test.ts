@@ -274,3 +274,38 @@ integrationTest("con una hermana viva que no cubre no se inserta portadora", asy
   expect(n).toBe(1);
   await sql.end();
 });
+
+integrationTest("reabrir las filas no le quita el pagado a las capital_validated ni a las reset de la cuota", async () => {
+  const { sql } = await setup();
+  const { parcialId, cierreId } = await parcialYCierre(sql);
+  const otras = await sql`INSERT INTO cartera.pagos_credito
+      (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
+       abono_seguro, abono_gps, membresias_pago, mora, pagado,
+       capital_restante, interes_restante, iva_12_restante, seguro_restante, gps_restante, membresias)
+    VALUES (1, 48, 'capital_validated', 300, 300, 0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0, 0, 0),
+           (1, 48, 'reset', 200, 200, 0, 0, 0, 0, 0, 0, true, 0, 0, 0, 0, 0, 0) RETURNING pago_id`;
+  await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+
+  await anular(cierreId);
+
+  const [parcial] = await sql`SELECT pagado FROM cartera.pagos_credito WHERE pago_id = ${parcialId}`;
+  expect(parcial!.pagado).toBe(false);
+  const filas = await sql`SELECT pagado FROM cartera.pagos_credito
+    WHERE pago_id IN ${sql(otras.map((o) => o.pago_id as number))}`;
+  expect(filas.map((f) => f.pagado)).toEqual([true, true]);
+  await sql.end();
+});
+
+integrationTest("crédito CANCELADO: anular el ÚNICO pago repone restantes en la anulada pero no deja portadora", async () => {
+  const { sql } = await setup();
+  await sql`UPDATE cartera.creditos SET "statusCredit" = 'CANCELADO' WHERE credito_id = 1`;
+  const pagoId = await unicoPago(sql, "pending"); // pending: no movió capital, se puede anular en CANCELADO
+
+  await anular(pagoId);
+
+  const [{ n }] = await sql`SELECT count(*)::int AS n FROM cartera.pagos_credito WHERE cuota_id = 48 AND "paymentFalse" = false`;
+  expect(n).toBe(0);
+  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
+  expect(cuota!.pagado).toBe(true);
+  await sql.end();
+});

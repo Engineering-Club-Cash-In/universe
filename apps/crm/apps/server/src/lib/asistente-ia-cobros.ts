@@ -1173,12 +1173,12 @@ const MENSAJE_FUERA_DE_TEMA =
  * duda deja pasar, y el prompt estricto cubre el resto.
  */
 const REGLAS_FUERA_DE_TEMA: RegExp[] = [
-	// Pedir código o consultas. «programa», «código» y «código en SIFCO» no
+	// Pedir código o consultas. «programa», «código» y «código en SIFCO», «escríbeme el código SIFCO» y «consulta» no
 	// cuentan: en cobros son «programa de pagos» y «código del crédito».
 	/```/,
 	/\b(python|javascript|typescript|java|php|html|css|bash|regex|sql|json)\b/,
 	/\bcodigo fuente\b/,
-	/\bescribe\w* (un |una |el |la )?(codigo|script|software|funcion|algoritmo|query|consulta)\b/,
+	/\bescribe\w* (un |una |el |la )?(script|software|funcion|algoritmo|query)\b/,
 	/\b(dame|hazme|crea\w*|genera\w*) (un |una |el |la )?(script|software|funcion|algoritmo|query)\b/,
 	/\b(select\s+[\s\S]+?\s+from|insert into|drop table|delete from)\b/,
 	// Saltarse o extraer las instrucciones. Acotado a «instrucciones» y a

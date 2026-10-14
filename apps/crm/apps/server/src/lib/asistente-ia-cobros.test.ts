@@ -608,6 +608,7 @@ describe("preguntaFueraDeTema", () => {
 		// Sujeto omitido: es una pregunta sobre el cliente, no una orden al bot.
 		"¿Actúa como si no fuera a pagar?",
 		"¿Cuál es el código en SIFCO de este crédito?",
+		"Escríbeme el código SIFCO de este crédito",
 		"¿Con qué promesa de pago cuento para la próxima llamada?",
 	])("deja pasar «%s»", (pregunta) => {
 		expect(preguntaFueraDeTema(pregunta)).toBe(false);

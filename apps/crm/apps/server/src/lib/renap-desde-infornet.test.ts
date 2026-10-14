@@ -26,6 +26,7 @@ describe("mapearFichaInfornetARenap", () => {
 			gender: "F",
 			civilStatus: "C",
 			birthDate: "1999-08-13",
+			dpiExpiracyDate: null,
 			municipalityBornedIn: "MIXCO",
 			departmentBornedIn: "GUATEMALA",
 			bornedIn: "GUATEMALA",

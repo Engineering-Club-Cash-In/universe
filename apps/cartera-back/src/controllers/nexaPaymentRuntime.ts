@@ -39,13 +39,14 @@ import {
   withPaymentBindingLock,
 } from "../utils/paymentAdvisoryLock";
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
+import { bancoNexaId } from "./nexaBanco";
 import { intentarReciboNexa, reciboNexaHabilitado } from "./nexaReciboPago";
 import {
   canAutomaticallyInvoiceNexa,
   CondonacionConservadaError,
   type CondonacionNexaIncierta,
   createNexaPaymentHandler,
-  getNexaReceiptFields,
+  getNexaInsertPaymentBody,
   NexaPaymentError,
   type NexaPaymentBody,
   type NexaPaymentDependencies,
@@ -550,18 +551,10 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     }
 
     const set = { status: 200 };
+    // Banco "Nexa" si existe; si no (o si la lectura falla), sin banco como antes.
+    const bancoId = await bancoNexaId();
     const result = await insertPayment({
-      body: {
-        credito_id: body.creditoId,
-        usuario_id: usuarioId,
-        monto_boleta: body.amount,
-        ...getNexaReceiptFields(body),
-        cuotaApagar: 1,
-        url_boletas: [],
-        registerBy: "NEXA",
-        renuevo_o_nuevo: "NEXA",
-        origen_pago: "transferencia",
-      },
+      body: getNexaInsertPaymentBody(body, usuarioId, bancoId),
       set,
     }, {
       nexaPaymentEventId: eventId,

@@ -159,6 +159,20 @@ export const getNexaReceiptFields = (body: NexaPaymentBody) => {
   };
 };
 
+/** Body de `insertPayment` para el pago Nexa. Sin banco "Nexa" (null), va sin banco_id. */
+export const getNexaInsertPaymentBody = (body: NexaPaymentBody, usuarioId: number, bancoId: number | null) => ({
+  credito_id: body.creditoId,
+  usuario_id: usuarioId,
+  monto_boleta: body.amount,
+  ...getNexaReceiptFields(body),
+  ...(bancoId === null ? {} : { banco_id: bancoId }),
+  cuotaApagar: 1,
+  url_boletas: [],
+  registerBy: "NEXA",
+  renuevo_o_nuevo: "NEXA",
+  origen_pago: "transferencia",
+});
+
 export type NexaPaymentDependencies = {
   withCreditLock: (
     creditoId: number,

@@ -68,7 +68,7 @@ describe("planReaperturaCuotaPorAnulacion", () => {
 
   test("las hermanas cubren la cuota solas: no toca nada", () => {
     const p = plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] });
-    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
   });
 
   test("tolerancia de un centavo: Q0.01 menos todavía cubre, Q0.02 menos no", () => {
@@ -103,7 +103,7 @@ describe("planReaperturaCuotaPorAnulacion", () => {
 
   test("hermana no_required CON plata que cubre sola (SIFCO / Caja) cuenta: no reabre", () => {
     const p = plan({ hermanas: [hermana({ validationStatus: "no_required", abono_capital: CUOTA, abono_interes: 0, monto_aplicado: CUOTA })] });
-    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
   });
 
   test("hermana no_required parcial: reabre igual que con una validated", () => {
@@ -128,7 +128,7 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     const p = plan({
       filaAnulada: cierre({ abono_capital: 0, abono_interes: 0 }),
     });
-    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
   });
 
   test("fila sin cuota: nada", () => {
@@ -193,8 +193,27 @@ describe("planReaperturaCuotaPorAnulacion", () => {
   test("abono directo a capital (capital / capital_validated): fuera de la lógica de cuota, sin cambios", () => {
     for (const validationStatus of ["capital", "capital_validated"]) {
       const p = plan({ filaAnulada: cierre({ validationStatus, abono_capital: 500 }) });
-      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
     }
+  });
+
+  test("sin ninguna fila viva de la cuota: pide insertar la portadora de saldo", () => {
+    expect(plan({ hermanas: [] }).insertarPortadora).toBe(true);
+    expect(plan({ hermanas: [hermana({ paymentFalse: true })] }).insertarPortadora).toBe(true);
+  });
+
+  test("hermana validated / pending / no_required que no cubre: ya hay de dónde leer el saldo", () => {
+    for (const validationStatus of ["validated", "pending", "no_required"]) {
+      expect(plan({ hermanas: [hermana({ validationStatus })] }).insertarPortadora).toBe(false);
+    }
+  });
+
+  test("solo una hermana de capital: no sirve de saldo, pide la portadora", () => {
+    expect(plan({ hermanas: [hermana({ validationStatus: "capital_validated" })] }).insertarPortadora).toBe(true);
+  });
+
+  test("sin cambios nunca pide la portadora", () => {
+    expect(plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] }).insertarPortadora).toBe(false);
   });
 
   test("restantes nulos se tratan como cero", () => {

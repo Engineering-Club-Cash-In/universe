@@ -6,6 +6,7 @@ const {
   formatearFechaBoleta,
   formatearMontoQ,
   generarBoletasNexa,
+  generarBoletasNexaBestEffort,
   ESTADOS_EVENTO_NEXA_APLICADO,
   htmlBoletaNexa,
   keyBoletaNexa,
@@ -296,5 +297,51 @@ describe("generarBoletasNexa", () => {
     expect(errores.map((e) => JSON.parse(e))).toEqual([expect.objectContaining({
       event: "nexa.boleta_imagen.error", pago_id: 5, paso: "borrar_huerfana", key: m.subidas[0]!.key, error: "R2 caído",
     })]);
+  });
+});
+
+describe("generarBoletasNexaBestEffort", () => {
+  test("no lanza ni deja promesas rechazadas cuando el generador falla", async () => {
+    const errores: string[] = [];
+    const original = console.error;
+    console.error = (msg: string) => { errores.push(msg); };
+    try {
+      expect(generarBoletasNexaBestEffort([17], () => { throw new Error("sync"); })).toBeUndefined();
+      expect(generarBoletasNexaBestEffort([18], async () => { throw new Error("async"); })).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      console.error = original;
+    }
+    expect(errores.map((e) => JSON.parse(e))).toEqual([
+      expect.objectContaining({ event: "nexa.boleta_imagen.error", pago_ids: [17], error: "sync" }),
+      expect.objectContaining({ event: "nexa.boleta_imagen.error", pago_ids: [18], error: "async" }),
+    ]);
+  });
+
+  test("un generador colgado no deja la cola bloqueada", async () => {
+    const llamadas: number[][] = [];
+    const original = console.error;
+    const errores: string[] = [];
+    console.error = (msg: string) => { errores.push(msg); };
+    try {
+      generarBoletasNexaBestEffort([1], () => new Promise(() => undefined), 5);
+      generarBoletasNexaBestEffort([2], async (ids) => { llamadas.push(ids); }, 5);
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      console.error = original;
+    }
+    expect(llamadas).toEqual([[2]]);
+    expect(JSON.parse(errores[0]!)).toMatchObject({ pago_ids: [1], error: expect.stringContaining("tiempo agotado") });
+  });
+
+  test("apagado o sin pagos no dispara", async () => {
+    const llamadas: number[][] = [];
+    process.env.NEXA_BOLETA_IMAGEN_ENABLED = "false";
+    generarBoletasNexaBestEffort([1], async (ids) => { llamadas.push(ids); });
+    delete process.env.NEXA_BOLETA_IMAGEN_ENABLED;
+    generarBoletasNexaBestEffort([], async (ids) => { llamadas.push(ids); });
+    generarBoletasNexaBestEffort([5, 6], async (ids) => { llamadas.push(ids); });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(llamadas).toEqual([[5, 6]]);
   });
 });

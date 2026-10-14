@@ -232,7 +232,7 @@ export function iniciarTareasProgramadas() {
       'sweep_late_slip_waivers',
       async () => {
         const r = await barrerCondonacionesBoletaTardiaHuerfanas();
-        // Avisa una sola vez por abandonada/revisión manual nueva (cada una cae en una franja de 15 min).
+        // Avisa una sola vez por abandonada nueva (franja de 15 min) o revisión manual nueva (registro en memoria).
         if (debeFallarElBarrido(r)) throw new Error("scheduled job reported failure");
       },
     );

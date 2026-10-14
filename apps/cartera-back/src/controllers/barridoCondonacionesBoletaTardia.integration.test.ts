@@ -149,7 +149,8 @@ integrationTest("F1: tryWithPaymentAdvisoryLock no espera, y libera el lock aunq
 
 integrationTest("F2: filas vivas SIN marca creadas después de la condonación: no se anula, queda para revisión manual", async () => {
   const { sql, latefee } = await levantarEsquemaBoletaTardia();
-  const { barrerCondonacionesBoletaTardiaHuerfanas, depsBarridoReales } = await barrido();
+  const { barrerCondonacionesBoletaTardiaHuerfanas, depsBarridoReales, olvidarAvisosRevisionManualParaPruebas } = await barrido();
+  olvidarAvisosRevisionManualParaPruebas();
   await condonarBT(latefee, 22, uuidIntento(322));
   await envejecer(sql, uuidIntento(322), 60);
   await sql`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, createdat) VALUES (22, 'pending', 500, now())`;
@@ -163,7 +164,7 @@ integrationTest("F2: filas vivas SIN marca creadas después de la condonación: 
   try {
     r = await barrerCondonacionesBoletaTardiaHuerfanas({ ...reales, candidatas: async () => (await reales.candidatas()).filter((c) => [21, 22].includes(c.credito_id)) });
   } finally { console.warn = w; }
-  expect(r).toMatchObject({ revision_manual: 1, revision_manual_repetida: 1, revision_manual_nueva: 0, anuladas: 1 });
+  expect(r).toMatchObject({ revision_manual: 1, revision_manual_repetida: 0, revision_manual_nueva: 1, anuladas: 1 });
   expect(await viva(sql, uuidIntento(322))).toBe(true);
   expect(await viva(sql, uuidIntento(321))).toBe(false);
   expect(warns.some((m) => m.includes("condonacion_huerfana_revision_manual") && m.includes("322"))).toBe(true);
@@ -231,13 +232,21 @@ integrationTest("un fallo en una candidata no detiene a las demás y se cuenta",
   expect(await viva(sql, uuidIntento(338))).toBe(false);
 });
 
-integrationTest("FF2: primera_vez solo en la primera franja de 15 min tras el umbral; la repetida no", async () => {
+integrationTest("FF2 (Codex r1 #12): la revisión manual se avisa en la 1ª corrida que la clasifica, aunque ya tenga 45 min; la 2ª es repetida", async () => {
   const { sql, latefee } = await levantarEsquemaBoletaTardia();
-  const { depsBarridoReales } = await barrido();
-  await condonarBT(latefee, 39, uuidIntento(339));
-  await envejecer(sql, uuidIntento(339), 20);
+  const { barrerCondonacionesBoletaTardiaHuerfanas, depsBarridoReales, olvidarAvisosRevisionManualParaPruebas } = await barrido();
+  olvidarAvisosRevisionManualParaPruebas();
   await condonarBT(latefee, 40, uuidIntento(340));
-  await envejecer(sql, uuidIntento(340), 45);
-  const c = (await depsBarridoReales().candidatas()).filter((x) => [39, 40].includes(x.credito_id));
-  expect(Object.fromEntries(c.map((x) => [x.credito_id, x.primera_vez]))).toEqual({ 39: true, 40: false });
+  await envejecer(sql, uuidIntento(340), 45); // fuera de la vieja franja de 30 min: antes no avisaba nunca
+  await sql`INSERT INTO cartera.pagos_credito (credito_id, validation_status, monto_aplicado, createdat) VALUES (40, 'pending', 500, now())`;
+  const reales = depsBarridoReales();
+  const soloLa40 = { ...reales, candidatas: async () => (await reales.candidatas()).filter((c) => c.credito_id === 40) };
+  const w = console.warn; console.warn = () => {};
+  try {
+    const r1 = await barrerCondonacionesBoletaTardiaHuerfanas(soloLa40);
+    expect(r1).toMatchObject({ revision_manual: 1, revision_manual_nueva: 1, revision_manual_repetida: 0 });
+    const r2 = await barrerCondonacionesBoletaTardiaHuerfanas(soloLa40);
+    expect(r2).toMatchObject({ revision_manual: 1, revision_manual_nueva: 0, revision_manual_repetida: 1 });
+  } finally { console.warn = w; }
+  expect(await viva(sql, uuidIntento(340))).toBe(true);
 });

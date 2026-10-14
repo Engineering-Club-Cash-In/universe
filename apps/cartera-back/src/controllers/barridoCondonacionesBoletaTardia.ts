@@ -23,8 +23,10 @@ import { anularCondonacionBoletaTardia } from "./latefee";
  * sembradas o reutilizadas conservan un `createdat` anterior a la condonación, así que ahí la guarda no actúa: el
  * pago existe pero perdió la marca (o nunca la tuvo) y el barrido anula la condonación. Es benigno porque
  * `reactivarMora: false` no revive nada: solo compensa el ledger de la condonación.
- * Una revisión manual sigue siendo candidata en cada corrida (15 min): solo la PRIMERA vez que el barrido la ve
- * (`primera_vez`) hace fallar el job; las repetidas se cuentan aparte (`revision_manual_repetida`) y se loguean.
+ * Una revisión manual sigue siendo candidata en cada corrida (15 min): solo la PRIMERA corrida que la CLASIFICA hace
+ * fallar el job (registro en memoria, no la antigüedad: una corrida sin lock, solapada o un scheduler caído no
+ * pierden el aviso); las repetidas se cuentan aparte (`revision_manual_repetida`) y se loguean. Un reinicio del
+ * proceso vuelve a avisar una vez cada revisión manual viva (sobre-aviso, el lado seguro).
  *
  * Limitación (E-15): las condonaciones vivas cuyo registro dejó el log `verificacion_fallida` NO son detectables por
  * dato (solo queda el log en boletaTardia.ts); no hay columna ni motivo persistido. Tienen filas vivas, así que el
@@ -34,7 +36,7 @@ export const MINUTOS_GRACIA_CONDONACION_HUERFANA = 15;
 export const HORAS_MAXIMAS_CONDONACION_HUERFANA = 24;
 const LOTE = 200;
 
-type Candidata = { condonacion_id: number; credito_id: number; intento_id: string; primera_vez?: boolean };
+type Candidata = { condonacion_id: number; credito_id: number; intento_id: string };
 
 export type DepsBarrido = {
   candidatas: () => Promise<Candidata[]>;
@@ -52,8 +54,7 @@ const filas = <T>(r: unknown): T[] => (Array.isArray(r) ? r : (r as { rows?: T[]
 // `fecha` es timestamp sin zona con DEFAULT now(): se compara en SQL, no en JS (postgres.js la correría +6h).
 const huerfanas = (rango: ReturnType<typeof sql>) => async (): Promise<Candidata[]> =>
   filas<Candidata>(await db.execute(sql`
-    SELECT mc.condonacion_id, mc.credito_id, mc.intento_id::text AS intento_id,
-      (mc.fecha > now() - make_interval(mins => ${2 * MINUTOS_GRACIA_CONDONACION_HUERFANA})) AS primera_vez
+    SELECT mc.condonacion_id, mc.credito_id, mc.intento_id::text AS intento_id
     FROM cartera.moras_condonaciones mc
     WHERE mc.anulada_at IS NULL AND mc.intento_id IS NOT NULL ${rango}
       AND NOT EXISTS (SELECT 1 FROM cartera.pagos_credito p
@@ -87,6 +88,10 @@ export const depsBarridoReales = (): DepsBarrido => ({
 });
 
 let enCurso = false;
+/** condonacion_id de las revisiones manuales ya avisadas; se olvida la que deja de ser candidata. */
+const avisadasRevisionManual = new Set<number>();
+/** Solo para pruebas: el registro vive en el módulo. */
+export const olvidarAvisosRevisionManualParaPruebas = () => avisadasRevisionManual.clear();
 
 /** El job falla (y alerta) solo por lo nuevo: una revisión manual repetida no vuelve a avisar cada 15 minutos. */
 export const debeFallarElBarrido = (r: { fallidas: number; abandonadas_nuevas: number; revision_manual_nueva: number }) =>
@@ -113,7 +118,8 @@ export async function barrerCondonacionesBoletaTardiaHuerfanas(deps: DepsBarrido
           if (!(await deps.sinFilasVivas(c.credito_id, c.intento_id))) { resultado.omitidas++; return; }
           if (await deps.filasSinMarca(c.condonacion_id)) {
             resultado.revision_manual++;
-            if (c.primera_vez) resultado.revision_manual_nueva++; else resultado.revision_manual_repetida++;
+            if (avisadasRevisionManual.has(c.condonacion_id)) resultado.revision_manual_repetida++;
+            else { resultado.revision_manual_nueva++; avisadasRevisionManual.add(c.condonacion_id); }
             console.warn(JSON.stringify({ level: "warn", event: "boleta_tardia.condonacion_huerfana_revision_manual", ...c }));
             return;
           }
@@ -137,6 +143,8 @@ export async function barrerCondonacionesBoletaTardiaHuerfanas(deps: DepsBarrido
         console.error(JSON.stringify({ level: "error", event: "boleta_tardia.barrido_fallo", ...c, error: error instanceof Error ? error.message : String(error) }));
       }
     }
+    const vigentes = new Set(candidatas.map((c) => c.condonacion_id));
+    for (const id of avisadasRevisionManual) if (!vigentes.has(id)) avisadasRevisionManual.delete(id);
     try {
       for (const c of await deps.abandonadas()) {
         resultado.abandonadas_nuevas++;

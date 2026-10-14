@@ -6,6 +6,7 @@ import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
+import { borrandoComprobantesNexaTrasCommit, urlsDeBoletasBorradas } from "./nexaBoletaR2";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -102,7 +103,7 @@ export const ajustarCuotasConSIFCO = async ({
   };
 
 
-  await db.transaction(async (tx) => {
+  await borrandoComprobantesNexaTrasCommit((urlsBoletas) => db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
     const cuotasExcedentes = cuotasExistentes.filter(
       (c) => c.numero_cuota > plazo_completo
@@ -119,11 +120,12 @@ export const ajustarCuotasConSIFCO = async ({
         SELECT pago_id FROM cartera.pagos_credito
         WHERE cuota_id IN (${cuotasNexa}) AND nexa_payment_event_id IS NOT NULL
         ORDER BY pago_id FOR UPDATE`);
-      await tx.execute(sql`
+      urlsBoletas.push(...urlsDeBoletasBorradas(await tx.execute(sql`
         DELETE FROM cartera.boletas
         WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
                            WHERE cuota_id IN (${cuotasNexa})
-                             AND nexa_payment_event_id IS NOT NULL)`);
+                             AND nexa_payment_event_id IS NOT NULL)
+        RETURNING url_boleta`)));
       await tx
         .delete(pagos_credito)
         .where(inArray(pagos_credito.cuota_id, cuotaIdsExcedentes));
@@ -249,7 +251,7 @@ export const ajustarCuotasConSIFCO = async ({
       })
     );
 
-  });
+  }));
 
   emitSifcoPaymentMigration({
     outcome: "completed",

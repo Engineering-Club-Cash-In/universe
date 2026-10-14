@@ -45,3 +45,16 @@ failure only logs `nexa.boleta_imagen.error`. The `generate_nexa_receipt_images`
 job (every 15 minutes) retries missing ones and backfills older payments.
 Enabled by default; `NEXA_BOLETA_IMAGEN_ENABLED=false` turns off both the
 trigger and the job.
+
+When a Nexa payment row is deleted (`marcarCreditoComoCaido`, the plazo reduction in
+`syncScheduleOnTermsChange`, `ajustarCuotasConSIFCO`), its PNG is also deleted from
+R2, only after the transaction commits, without awaiting, and only when
+`LOG_ENVIRONMENT=production` (baked into the image by the prod deploy). DEV and
+local share the bucket and may hold PROD URLs, so there it only logs. Only keys
+matching `boletas-nexa/<uuid>.png` are deleted; failures log
+`nexa.boleta_imagen.error` with `paso: "borrar_r2_tras_borrar_pago"` and the key.
+Left out on purpose: `reversePayment` (it only voids rows of `failed` events, which
+never get an image, and zero placeholders) and the admin tools `recalculateFromJson`,
+`processFromExcelFull` and `migration.ts`, which delete the `boletas` row but leave
+the PNG (delete it by hand). A URL already handed out works until the deletion, plus
+whatever the CDN cache keeps.

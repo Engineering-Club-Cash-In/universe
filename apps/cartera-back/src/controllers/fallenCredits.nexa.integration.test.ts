@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import postgres from "postgres";
 import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 
@@ -384,5 +384,84 @@ integrationTest("la guarda de no reversible deja anular las filas de un evento f
   const [evApplied] = await sql`SELECT nexa_payment_event_id AS id FROM cartera.pagos_credito WHERE pago_id = ${porStatus.applied!}`;
   expect(await db.transaction((tx) => pagoNexaBloqueaAnular(tx, evFailed!.id))).toBe(false);
   expect(await db.transaction((tx) => pagoNexaBloqueaAnular(tx, evApplied!.id))).toBe(true);
+  await sql.end();
+});
+
+// El comprobante PNG se borra de R2 recién después del commit, y solo en producción. R2 es un spy.
+const urlR2 = "https://r2/boletas-nexa/0f8b7c1e-2a3d-4e5f-8a9b-0c1d2e3f4a5b.png";
+const conR2Falso = async <T>(trabajo: (borradas: unknown[]) => Promise<T>) => {
+  const config = (await import("../config")).default;
+  const { s3 } = await import("../utils/functions/uploadsFiles");
+  const borradas: unknown[] = [];
+  const send = spyOn(s3, "send").mockImplementation((async (c: { input: { Key: string } }) => {
+    borradas.push(c.input.Key);
+  }) as never);
+  const antes = config.environment;
+  config.environment = "production";
+  try {
+    return await trabajo(borradas);
+  } finally {
+    config.environment = antes;
+    send.mockRestore();
+  }
+};
+const pagoNexaConBoleta = async (sql: postgres.Sql, cuota: number) => {
+  const [p] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta) VALUES (1, ${cuota}, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, p!.pago_id, "applied");
+  // Desvinculado: si el evento apunta al pago, credits y migratePayments siguen frenados por esa FK.
+  await sql`UPDATE cartera.nexa_payment_events SET pago_id = NULL`;
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${p!.pago_id}, ${urlR2})`;
+};
+
+integrationTest("borrarPagosDelCredito devuelve la URL del comprobante; R2 lo borra tras el commit y nunca tras un rollback", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  const { borrandoComprobantesNexaTrasCommit } = await import("./nexaBoletaR2");
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  await pagoNexaConBoleta(sql, 11);
+  await conR2Falso(async (borradas) => {
+    await expect(borrandoComprobantesNexaTrasCommit((urls) => db.transaction(async (tx) => {
+      await borrarPagosDelCredito(tx, 1, undefined, urls);
+      expect(urls).toEqual([urlR2]);
+      throw new Error("rollback");
+    }))).rejects.toThrow("rollback");
+    await Bun.sleep(20);
+    expect(borradas).toEqual([]);
+    expect((await sql`SELECT url_boleta FROM cartera.boletas`).length).toBe(1);
+
+    await borrandoComprobantesNexaTrasCommit((urls) => db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined, urls)));
+    await Bun.sleep(20);
+    expect(borradas).toEqual([urlR2.slice(urlR2.indexOf("boletas-nexa/"))]);
+  });
+  await sql.end();
+});
+
+integrationTest("reducir el plazo (credits) y ajustar con SIFCO (migratePayments) borran de R2 el comprobante del pago Nexa", async () => {
+  const { sql } = await setup();
+  process.env.RESEND_API_KEY ??= "re_test_only";
+  process.env.EMAIL_DOMAIN ??= "example.test";
+  const { syncScheduleOnTermsChange } = await import("./credits");
+  const { ajustarCuotasConSIFCO } = await import("./migratePayments");
+  await sql`ALTER TABLE cartera.creditos ADD plazo integer, ADD cuota numeric, ADD cuota_interes numeric,
+    ADD numero_credito_sifco varchar(40)`;
+  await sql`ALTER TABLE cartera.cuotas_credito ADD fecha_vencimiento date, ADD pagado boolean DEFAULT false,
+    ADD liquidado_inversionistas boolean DEFAULT false, ADD fecha_liquidacion_inversionistas timestamp, ADD createdat timestamp`;
+  await sql`ALTER TABLE cartera.pagos_credito ADD fecha_vencimiento date`;
+  await sql`INSERT INTO cartera.creditos VALUES (1, 3, 100, 10, '0101')`;
+  await sql`INSERT INTO cartera.cuotas_credito (cuota_id, credito_id, numero_cuota, fecha_vencimiento)
+    VALUES (11, 1, 1, '2026-01-30'), (12, 1, 2, '2026-02-28'), (13, 1, 3, '2026-03-30')`;
+  await pagoNexaConBoleta(sql, 13);
+  await pagoNexaConBoleta(sql, 12);
+  const key = urlR2.slice(urlR2.indexOf("boletas-nexa/"));
+
+  await conR2Falso(async (borradas) => {
+    await syncScheduleOnTermsChange({ creditoId: 1, newCuota: 100, newPlazo: 2, preloadCredit: { cuota: 100, plazo: 3 } as never });
+    await Bun.sleep(20);
+    expect(borradas).toEqual([key]);
+    await ajustarCuotasConSIFCO({ numero_credito_sifco: "0101", cuota_esperada: 1, fecha_cuota: "2026-01-30", plazo_completo: 1 });
+    await Bun.sleep(20);
+    expect(borradas).toEqual([key, key]);
+  });
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
   await sql.end();
 });

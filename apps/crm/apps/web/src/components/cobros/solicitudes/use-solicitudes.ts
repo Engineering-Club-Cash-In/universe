@@ -29,6 +29,8 @@ import {
 
 /** Convenios por aprobar que trae una consulta (mismo input que el Dashboard). */
 export const CONVENIOS_POR_CONSULTA = 100;
+/** Rebajas que el supervisor todavía puede resolver. */
+const ESTADOS_REBAJA_ACCIONABLES = ["pendiente", "error_aplicacion"];
 /** Apagados y reactivaciones del historial por cada «Cargar más». */
 export const INMOVILIZACIONES_POR_PAGINA = 50;
 
@@ -57,8 +59,10 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 	});
 
 	const rebajas = useQuery({
+		// Sin filtro de estado: las abiertas van primero, y una que falló al
+		// aplicarse (`error_aplicacion`) sigue esperando al supervisor.
 		...orpc.getSolicitudesRebajaMora.queryOptions({
-			input: { estado: "pendiente" },
+			input: { limite: 200 },
 		}),
 		enabled: habilitado,
 		refetchOnWindowFocus: false,
@@ -73,9 +77,9 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 	const extras = useMemo(
 		() =>
 			ordenarPorAntiguedad([
-				...((rebajas.data ?? []) as unknown as RebajaFuente[]).map(
-					solicitudDeRebaja,
-				),
+				...((rebajas.data ?? []) as unknown as RebajaFuente[])
+					.filter((r) => ESTADOS_REBAJA_ACCIONABLES.includes(r.estado))
+					.map(solicitudDeRebaja),
 				...((documentos.data ?? []) as unknown as DocumentoFuente[]).map(
 					solicitudDeDocumento,
 				),

@@ -54,6 +54,7 @@ import {
 } from "@/components/cobros/referencias-dialogs";
 import { RegistrarPagoForm } from "@/components/cobros/registrar-pago-form";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
+import { hoyGT } from "@/components/cobros/supervision/formato";
 import {
 	VisitaDialog,
 	type VisitaProgramadaParaCompletar,
@@ -67,11 +68,7 @@ import { inicialesDe } from "@/components/ds/cards-credito";
 import { SegmentedNav } from "@/components/ds/ubicaciones";
 import { Button } from "@/components/ui/button";
 import { urlWhatsapp } from "@/lib/cobros/referencias";
-import {
-	fechaLargaGT,
-	hrefTelefono,
-	montoSugeridoPromesa,
-} from "@/lib/cobros/reglas-caso";
+import { hrefTelefono, montoSugeridoPromesa } from "@/lib/cobros/reglas-caso";
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 import {
@@ -231,14 +228,16 @@ const VALIDACION_ABONO = ["validated", "capital_validated"];
  * mora ya está en la mora vigente).
  */
 function abonosDeHoy(plan: CasoWorkspace["cuotas"]["plan"]): AbonoConvenio[] {
-	const hoy = fechaLargaGT(new Date());
+	const hoy = hoyGT();
 	const porId = new Map<number, AbonoConvenio>();
 	for (const cuota of plan) {
 		const cuotaId = Number(cuota.id);
 		for (const p of cuota.pagos ?? []) {
 			if (p.pagoId === undefined) continue;
 			if (!VALIDACION_ABONO.includes(p.validationStatus ?? "")) continue;
-			if (!p.fechaPago || fechaLargaGT(p.fechaPago) !== hoy) continue;
+			// `fecha_pago` ya viene en hora de Guatemala (sin zona): el día es la
+			// parte de la fecha, sin convertirla otra vez (igual que cartera).
+			if (!p.fechaPago || p.fechaPago.slice(0, 10) !== hoy) continue;
 			const aplicado = Number(p.montoAplicado ?? 0);
 			const boleta = Number(p.montoBoleta ?? 0);
 			const monto = boleta > 0 ? boleta : aplicado;

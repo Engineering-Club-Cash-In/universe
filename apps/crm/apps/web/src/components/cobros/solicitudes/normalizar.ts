@@ -156,6 +156,8 @@ export type RebajaFuente = {
 	id: string;
 	casoCobroId: string;
 	numeroCreditoSifco: string | null;
+	/** "pendiente", "error_aplicacion"… */
+	estado: string;
 	moraSnapshot: string;
 	montoSolicitado: string;
 	notas: string;
@@ -204,7 +206,10 @@ export function solicitudDeRebaja(r: RebajaFuente): SolicitudExtra {
 		asesor: r.solicitadoPor,
 		solicitadoEn: aIso(r.solicitadoEn),
 		monto: numero(r.montoSolicitado),
-		detalle: r.notas,
+		detalle:
+			r.estado === "error_aplicacion"
+				? `No se pudo aplicar, reintentar o rechazar · ${r.notas}`
+				: r.notas,
 	};
 }
 

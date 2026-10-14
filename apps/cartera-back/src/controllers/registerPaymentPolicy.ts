@@ -1487,8 +1487,8 @@ export function resolverCuotaParaFilaSuelta(opciones: {
 
 // La subida (`POST /upload`) guarda el archivo en el bucket con la llave `<uuid v4>[.ext]` y devuelve SOLO esa llave;
 // el cliente la manda en `url_boletas` y el servidor le antepone `URL_PUBLIC_R2` al guardar (registerPayment.ts).
-// Por eso "ser del bucket" = ser exactamente una llave que la subida pudo generar. Sin trim: se guarda tal cual.
-const LLAVE_BOLETA = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.[A-Za-z0-9]{1,10})?$/i;
+// Por eso "ser del bucket" = ser exactamente una llave que la subida pudo generar. Sin trim: se guarda tal cual. El uuid va en minúsculas (uuidv4 las genera y R2 distingue mayúsculas); la extensión no distingue.
+const LLAVE_BOLETA = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.[A-Za-z0-9]{1,10})?$/;
 
 /** `URL_PUBLIC_R2` sana: https, sin credenciales/consulta/fragmento, y con "/" final (el servidor concatena sin separador). */
 const baseR2Valida = (base: string | undefined): URL | null => {
@@ -1523,7 +1523,7 @@ export const erroresUrlBoletasDelBucket = (
   });
   return malas.length === 0
     ? []
-    : ["La foto de la boleta debe subirse desde la pantalla de cobro (no se acepta un enlace o nombre escrito a mano). Vuelva a subir la foto y reintente."];
+    : ["La foto de la boleta no tiene un formato válido (use .jpg, .jpeg, .png o .pdf): renombre el archivo y vuelva a subirlo."];
 };
 
 /**

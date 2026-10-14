@@ -4,9 +4,9 @@ import { camposObligatoriosCondonacion, erroresUrlBoletasDelBucket } from "./reg
 
 const BASE = "https://pub-0000.r2.dev/payments-receipts/";
 const U1 = "000d9d65-0bbf-4890-90d9-784fcc1e5a50.jpeg";
-const U2 = "ABCDEF12-0bbf-4890-90d9-784fcc1e5a50.pdf";
+const U2 = "abcdef12-0bbf-4890-90d9-784fcc1e5a50.PDF"; // extensión en mayúsculas: válida
 const U3 = "000d9d65-0bbf-4890-90d9-784fcc1e5a50"; // archivo sin extensión
-const MSG_BOLETA = ["La foto de la boleta debe subirse desde la pantalla de cobro (no se acepta un enlace o nombre escrito a mano). Vuelva a subir la foto y reintente."];
+const MSG_BOLETA = ["La foto de la boleta no tiene un formato válido (use .jpg, .jpeg, .png o .pdf): renombre el archivo y vuelva a subirlo."];
 const MSG_CONFIG = ["No se puede condonar por boleta tardía: falta configurar la dirección pública de las boletas (URL_PUBLIC_R2). Avise a soporte."];
 const pago = (url_boletas: string[]) => ({ url_boletas, numeroAutorizacion: "A-1", banco_id: 3 });
 
@@ -36,6 +36,7 @@ describe("condonación: la boleta debe ser un archivo del bucket de la app", () 
     ["extensión con barra", `${U1}./x`],
     ["uuid con consulta", `${U1}?x=1`],
     ["uuid con fragmento", `${U1}#x`],
+    ["uuid con hex en mayúsculas (R2 distingue mayúsculas)", "ABCDEF12-0bbf-4890-90d9-784fcc1e5a50.pdf"],
     ["uuid truncado", "000d9d65-0bbf-4890-90d9"],
     ["cadena vacía dentro de la lista", ""],
   ];
@@ -100,6 +101,6 @@ describe("condonación: la boleta debe ser un archivo del bucket de la app", () 
     expect(normal).not.toContain("camposObligatoriosCondonacion");
     expect(normal).not.toContain("erroresUrlBoletasDelBucket");
     const router = readFileSync(new URL("../routers/payments.ts", import.meta.url), "utf8");
-    expect(router).toContain("if (!traeCondonacionBoletaTardia(ctx.body)) return insertPayment(ctx);");
+    expect(router).toMatch(/if\s*\(\s*!\s*traeCondonacionBoletaTardia\(\s*ctx\.body\s*\)\s*\)\s*\{?\s*return\s+insertPayment\(\s*ctx\s*\)/);
   });
 });

@@ -225,7 +225,7 @@ describe("camposObligatoriosCondonacion", () => {
   test("url_boletas [''] o ['  '] cuenta como ausente", () => {
     expect(camposObligatoriosCondonacion({ ...ok, url_boletas: [""] })).toEqual(U);
     expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["  "] })).toEqual(U);
-    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["", "00000000-0000-4000-8000-000000000001.jpg"] })).toEqual({ url_boletas: expect.any(Array) });
+    expect(camposObligatoriosCondonacion({ ...ok, url_boletas: ["", "00000000-0000-4000-8000-000000000001.jpg"] })).toEqual({ url_boletas: ["La foto de la boleta no tiene un formato válido (use .jpg, .jpeg, .png o .pdf): renombre el archivo y vuelva a subirlo."] });
   });
   test("numeroAutorizacion con espacios alrededor y contenido sí cuenta", () =>
     expect(camposObligatoriosCondonacion({ ...ok, numeroAutorizacion: "  A-1 " })).toEqual({}));

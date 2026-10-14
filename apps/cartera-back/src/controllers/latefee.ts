@@ -2678,13 +2678,13 @@ export async function condonarMoraDeCuotas(params: {
   /** Reparto por cuota para el ledger, de la más vieja a la más nueva. */
   cuotas: { cuota_id: number; monto: Big | string | number }[];
   motivo: string;
-  /** Default: el usuario de sistema de Nexa. La boleta tardía manda el email VERIFICADO del asesor. */
-  usuario_email?: string;
   dbClient?: typeof db;
 } & (
   // UNA sola llave: Nexa → nexa_payment_event_id; boleta tardía → intento_id.
-  | { origen?: "CONDONACION_NEXA_A_TIEMPO"; nexa_payment_event_id: number; intento_id?: undefined }
-  | { origen: "CONDONACION_BOLETA_TARDIA"; intento_id: string; nexa_payment_event_id?: undefined }
+  // usuario_email: Nexa cae por default a su usuario de sistema; la boleta tardía
+  // lo exige (el email VERIFICADO del asesor), para no atribuirla a Nexa.
+  | { origen?: "CONDONACION_NEXA_A_TIEMPO"; nexa_payment_event_id: number; intento_id?: undefined; usuario_email?: string }
+  | { origen: "CONDONACION_BOLETA_TARDIA"; intento_id: string; nexa_payment_event_id?: undefined; usuario_email: string }
 )): Promise<
   | { kind: "condonada" | "ya_condonada"; condonacion_id: number; monto: string }
   | { kind: "sin_cambio"; razon: "sin_mora" | "mora_cambio" | "monto_invalido" }
@@ -2699,6 +2699,9 @@ export async function condonarMoraDeCuotas(params: {
     ? params.intento_id === undefined || params.nexa_payment_event_id !== undefined
     : params.nexa_payment_event_id === undefined || params.intento_id !== undefined) {
     throw new Error("condonarMoraDeCuotas: se requiere exactamente una llave (nexa_payment_event_id con origen Nexa, o intento_id con origen CONDONACION_BOLETA_TARDIA)");
+  }
+  if (esBoleta && !params.usuario_email?.trim()) {
+    throw new Error("condonarMoraDeCuotas: la boleta tardía exige usuario_email del actor");
   }
   const llave = esBoleta
     ? eq(moras_condonaciones.intento_id, params.intento_id!)

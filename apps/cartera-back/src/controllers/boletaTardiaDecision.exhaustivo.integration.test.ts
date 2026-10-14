@@ -284,9 +284,11 @@ integrationTest("cuota 1: con cuota 0 (desembolso) la boleta debe ser posterior;
   const { sql } = await levantarEsquemaBoletaTardia();
   const base = (extra: CuotaSeed[]) => sembrar(sql, { mora: "11.20", cuotas: [{ n: 1, venc: "2026-09-30" }, ...extra] });
   const dd = await deps();
-  // Con cuota 0 del 15-sep.
+  // Con cuota 0 del 15-sep (feriado en GT: su límite hábil es el 16-sep). PR 19: la boleta debe ser posterior al
+  // LÍMITE hábil de la previa, no a su fecha: el 16-sep ya no califica, el 17-sep sí.
   const con0 = await base([{ n: 0, venc: "2026-09-15", pagado: true }]);
-  expect((await calcular(ent(con0, { fecha_boleta: "2026-09-16" }), dd)).aplica).toBe(true);
+  expect((await calcular(ent(con0, { fecha_boleta: "2026-09-17" }), dd)).aplica).toBe(true);
+  expect((await calcular(ent(con0, { fecha_boleta: "2026-09-16" }), dd)).razon).toBe("boleta_de_otro_periodo"); // = límite hábil del desembolso
   expect((await calcular(ent(con0, { fecha_boleta: "2026-09-15" }), dd)).razon).toBe("boleta_de_otro_periodo"); // igual al desembolso: no es posterior
   expect((await calcular(ent(con0, { fecha_boleta: "2026-09-14" }), dd)).razon).toBe("boleta_de_otro_periodo");
   expect((await calcular(ent(con0, { fecha_boleta: "2026-08-01" }), dd)).razon).toBe("boleta_de_otro_periodo");
@@ -352,12 +354,15 @@ integrationTest("tope POR CUOTA: la cuota de 13 días es mora legítima (se cobr
   // Alcanza la mora pero no las cuotas: 1 centavo corto pasa por tolerancia; 2 centavos no.
   expect((await calcular(ent(id, { monto_boleta: total.minus("0.01").toFixed(2) }), dd)).aplica).toBe(true);
   expect((await calcular(ent(id, { monto_boleta: total.minus("0.02").toFixed(2) }), dd)).razon).toBe("no_queda_al_dia");
-  // Boleta del 20-sep = vencimiento de la cuota previa de la 12: no es de este período. Del 21-sep en adelante sí.
+  // La cuota previa de la 12 vence el 20-sep (domingo): su límite hábil es el lunes 21-sep (PR 19). Las boletas del
+  // 20 y del 21 no son de este período; del 22-sep en adelante sí.
   const r20 = await calcular(ent(id, { fecha_boleta: "2026-09-20", monto_boleta: total.toFixed(2) }), dd);
   expect([r20.aplica, r20.razon]).toEqual([false, "boleta_de_otro_periodo"]);
   const r21 = await calcular(ent(id, { fecha_boleta: "2026-09-21", monto_boleta: total.toFixed(2) }), dd);
-  expect(r21.aplica).toBe(true);
-  expect(r21.porCuota.map((c) => c.numero_cuota)).toEqual([12]);
+  expect([r21.aplica, r21.razon]).toEqual([false, "boleta_de_otro_periodo"]);
+  const r22 = await calcular(ent(id, { fecha_boleta: "2026-09-22", monto_boleta: total.toFixed(2) }), dd);
+  expect(r22.aplica).toBe(true);
+  expect(r22.porCuota.map((c) => c.numero_cuota)).toEqual([12]);
 });
 
 integrationTest("fecha_boleta inválida o futura → boleta_invalida, y se devuelve tal cual vino", async () => {

@@ -241,7 +241,7 @@ let mockMontoRestarCalculo = new Big(0);
 let mockSumaComprasPendientes = new Big(0);
 let mockSumaComprasCompletadasMesActual = new Big(0);
 let mockSumaComprasMesAnterior = new Big(0);
-let mockFechaCompraMesAnterior: Date | null = null;
+let mockComprasMesAnterior: { monto_aportado: string; fecha_completada: Date }[] = [];
 mock.module("../utils/comprasAjuste", () => ({
   calcularAjusteCompras: mock(() => Promise.resolve({
     montoRestarValidacion: mockMontoRestarValidacion,
@@ -256,7 +256,7 @@ mock.module("../utils/comprasAjuste", () => ({
   })),
   columnasCompraAjuste: {},
   obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(mockSumaComprasMesAnterior)),
-  obtenerFechaCompraMesAnterior: mock(() => Promise.resolve(mockFechaCompraMesAnterior)),
+  obtenerComprasMesAnterior: mock(() => Promise.resolve(mockComprasMesAnterior)),
   obtenerSumaComprasPendientes: mock(() => Promise.resolve(mockSumaComprasPendientes)),
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
@@ -281,7 +281,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockSumaComprasPendientes = new Big(0);
     mockSumaComprasCompletadasMesActual = new Big(0);
     mockSumaComprasMesAnterior = new Big(0);
-    mockFechaCompraMesAnterior = null;
+    mockComprasMesAnterior = [];
     mockInsertedValues = [];
     mockLockedCreditRows = null;
     mockCreditLockCalls = 0;
@@ -485,7 +485,9 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
 
   it("proporcional por fecha de la compra: ampliación del mes re-selló fecha_inicio", async () => {
     mockCreditosInversionistaEspejo = espejoAmpliado("2026-10-06");
-    mockFechaCompraMesAnterior = new Date("2026-09-08T12:00:00Z"); // compra #990
+    mockComprasMesAnterior = [
+      { monto_aportado: "35000", fecha_completada: new Date("2026-09-08T12:00:00Z") }, // compra #990
+    ];
     mockSumaComprasMesAnterior = new Big(35000);
     // La ampliación de octubre (27,800) sale de la base: cobra desde noviembre.
     mockMontoRestarCalculo = new Big(27800);
@@ -505,6 +507,106 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
 
     expect(interesInsertado().abono_interes).toBe("2053.33");
+  });
+
+  // Varias compras del mismo inversionista en el mes anterior: cada una cobra sus
+  // propios días. Con una sola fecha (la de la última) las primeras cobraban de menos.
+  const compraDel = (monto: string, dia: string) => ({
+    monto_aportado: monto,
+    fecha_completada: new Date(`2026-09-${dia}T12:00:00Z`),
+  });
+
+  it("tres compras del mes anterior en días distintos: cada una cobra sus días", async () => {
+    mockCreditosInversionistaEspejo = espejoAmpliado("2026-10-06");
+    mockComprasMesAnterior = [compraDel("8000", "25"), compraDel("12000", "15"), compraDel("15000", "08")];
+    mockSumaComprasMesAnterior = new Big(35000);
+    mockMontoRestarCalculo = new Big(27800);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // 10% × 80%: 15,000 → 1,200 × 22/30 = 880; 12,000 → 960 × 15/30 = 480;
+    // 8,000 → 640 × 5/30 = 106.67. Con una sola ventana (25 sep) daría 466.67.
+    const fila = interesInsertado();
+    expect(fila.abono_interes).toBe("1466.67");
+    expect(fila.abono_iva_12).toBe("176");
+    expect(fila.abono_interes_sin_compras).toBe("0");
+    expect(fila.abono_interes_con_compras).toBe("1466.67");
+  });
+
+  it("monto viejo cobra mes completo y cada compra del mes anterior sus días", async () => {
+    mockCreditosInversionistaEspejo = [{ ...espejoAmpliado("2026-09-20")[0], montoAportado: "50000.00000000" }];
+    mockComprasMesAnterior = [compraDel("10000", "20"), compraDel("15000", "08")];
+    mockSumaComprasMesAnterior = new Big(25000);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // Viejo 25,000 → 2,000 completo; 15,000 → 1,200 × 22/30 = 880; 10,000 → 800 × 10/30 = 266.67.
+    const fila = interesInsertado();
+    expect(fila.abono_interes_sin_compras).toBe("2000");
+    expect(fila.abono_interes_con_compras).toBe("1146.67");
+    expect(fila.abono_interes).toBe("3146.67");
+  });
+
+  it("una compra el día 1 del mes anterior cobra el mes completo aunque haya otra después", async () => {
+    mockCreditosInversionistaEspejo = [{ ...espejoAmpliado("2026-09-20")[0], montoAportado: "15000.00000000" }];
+    mockComprasMesAnterior = [compraDel("5000", "20"), compraDel("10000", "01")];
+    mockSumaComprasMesAnterior = new Big(15000);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // 10,000 → 800 completo; 5,000 → 400 × 10/30 = 133.33.
+    expect(interesInsertado().abono_interes).toBe("933.33");
+  });
+
+  it("dos compras del mismo día actúan como una sola (misma fórmula y redondeo de antes)", async () => {
+    mockCreditosInversionistaEspejo = espejoAmpliado("2026-10-06");
+    mockComprasMesAnterior = [compraDel("20000", "08"), compraDel("15000", "08")];
+    mockSumaComprasMesAnterior = new Big(35000);
+    mockMontoRestarCalculo = new Big(27800);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // Igual que con la compra única #990: 2,800 × 22/30 = 2,053.33, sin desglose.
+    const fila = interesInsertado();
+    expect(fila.abono_interes).toBe("2053.33");
+    expect(fila.abono_interes_sin_compras).toBeNull();
+  });
+
+  it("compra sellada con el reloj a las 02:00 UTC del día 1 (31 ago en GT) cobra mes completo", async () => {
+    mockCreditosInversionistaEspejo = [{ ...espejoAmpliado("2026-09-20")[0], montoAportado: "15000.00000000" }];
+    mockComprasMesAnterior = [
+      compraDel("5000", "20"),
+      { monto_aportado: "10000", fecha_completada: new Date("2026-09-01T02:00:00Z") },
+    ];
+    mockSumaComprasMesAnterior = new Big(15000);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    expect(interesInsertado().abono_interes).toBe("933.33");
+  });
+
+  it("si las compras fechadas no suman lo mismo que la suma del mes, cae a la ventana única de antes", async () => {
+    mockCreditosInversionistaEspejo = espejoAmpliado("2026-10-06");
+    // Una tercera compra sin fecha_completada entra a la suma (por updated_at) pero no a la lista.
+    mockComprasMesAnterior = [compraDel("8000", "25"), compraDel("15000", "08")];
+    mockSumaComprasMesAnterior = new Big(35000);
+    mockMontoRestarCalculo = new Big(27800);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // Rama vieja: 2,800 × 5/30 (día 25) = 466.67.
+    expect(interesInsertado().abono_interes).toBe("466.67");
+  });
+
+  it("si las compras del mes anterior superan la base, cae a la rama proporcional pura de antes", async () => {
+    mockCreditosInversionistaEspejo = [{ ...espejoAmpliado("2026-09-25")[0], montoAportado: "20000.00000000" }];
+    mockComprasMesAnterior = [compraDel("8000", "25"), compraDel("15000", "08")];
+    mockSumaComprasMesAnterior = new Big(23000);
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, false, 99, new Date("2026-10-08T00:00:00Z"));
+
+    // Rama vieja: 20,000 × 10% × 80% = 1,600 × 5/30 = 266.67.
+    expect(interesInsertado().abono_interes).toBe("266.67");
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {

@@ -196,24 +196,31 @@ export async function obtenerSumaComprasMesAnterior(
   );
 }
 
+/** Compra de cartera del mes anterior con su día de entrada (ver obtenerComprasMesAnterior). */
+export interface CompraMesAnterior {
+  monto_aportado: string;
+  fecha_completada: Date;
+}
+
 /**
- * `fecha_completada` de la compra de cartera MÁS RECIENTE completada en el MES
- * ANTERIOR a `fechaPeriodo`, o null si no hay.
+ * Compras de cartera completadas en el MES ANTERIOR a `fechaPeriodo`, de la más
+ * reciente a la más vieja, con su `fecha_completada`. Vacío si no hay.
  *
- * El interés proporcional la usa como día de entrada: una ampliación completada en
+ * El interés proporcional las usa como día de entrada: una ampliación completada en
  * el mes en curso re-sella `fecha_inicio_participacion` (completeEspejo) y con eso
- * se pierde el día en que entró la compra del mes anterior.
+ * se pierde el día en que entró la compra del mes anterior. Y con varias compras en
+ * el mes, cada una cobra sus propios días: una sola fecha no alcanza.
  *
  * A diferencia de `obtenerSumaComprasMesAnterior`, NO cae a `updated_at`: la
  * facturación (cofidi) lo reescribe al cerrar `pendiente_facturar` y movería el día
  * de entrada a otro mes. Una compra sin `fecha_completada` no aporta fecha y el
  * llamador sigue con `fecha_inicio_participacion`, como antes.
  */
-export async function obtenerFechaCompraMesAnterior(
+export async function obtenerComprasMesAnterior(
   credito_id: number,
   inversionista_id: number,
   fechaPeriodo: Date,
-): Promise<Date | null> {
+): Promise<CompraMesAnterior[]> {
   const mes = fechaPeriodo.getMonth();
   const anio = fechaPeriodo.getFullYear();
   const mesAnterior = mes === 0 ? 11 : mes - 1;
@@ -222,8 +229,11 @@ export async function obtenerFechaCompraMesAnterior(
   const inicioMesAnterior = new Date(anioMesAnterior, mesAnterior, 1);
   const inicioMesActual = new Date(anio, mes, 1);
 
-  const [compra] = await db
-    .select({ fecha_completada: compras_credito_inversionista.fecha_completada })
+  const compras = await db
+    .select({
+      monto_aportado: compras_credito_inversionista.monto_aportado,
+      fecha_completada: compras_credito_inversionista.fecha_completada,
+    })
     .from(compras_credito_inversionista)
     .where(
       and(
@@ -236,10 +246,13 @@ export async function obtenerFechaCompraMesAnterior(
         lt(compras_credito_inversionista.fecha_completada, inicioMesActual),
       ),
     )
-    .orderBy(desc(compras_credito_inversionista.fecha_completada))
-    .limit(1);
+    .orderBy(desc(compras_credito_inversionista.fecha_completada));
 
-  return compra?.fecha_completada ?? null;
+  return compras.flatMap((c) =>
+    c.fecha_completada
+      ? [{ monto_aportado: c.monto_aportado, fecha_completada: c.fecha_completada }]
+      : [],
+  );
 }
 
 /**

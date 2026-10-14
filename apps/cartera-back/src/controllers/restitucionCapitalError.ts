@@ -9,9 +9,10 @@ const RAZON: Record<CodigoAnulacionCapital, string> = {
   CREDITO_NO_REVERSIBLE: "el crédito está en un estado que no admite reponer capital",
   FILA_ESTRUCTURAL_INCOBRABLE: "es una fila del sistema de un crédito incobrable, no una recuperación",
   PCI_LIQUIDADO: "el reparto a inversionistas de este pago ya se liquidó",
-  ABONO_CAPITAL_LIQUIDADO: "el abono a capital ya se liquidó o entró en un cálculo de pagos",
+  ABONO_DIRECTO_NO_SOPORTADO: "es un abono directo a capital, que todavía no se puede anular",
   INVERSIONISTA_YA_NO_ESTA: "un inversionista que recibió capital de este pago ya no está en el crédito",
   REPARTO_INCONSISTENTE: "el reparto a inversionistas no cuadra con el abono a capital del pago",
+  CUOTA_CERRADA_SIN_REPARTO: "su cuota está cerrada pero el pago no tiene reparto a inversionistas registrado",
 };
 
 export class AnulacionCapitalNoRestituibleError extends Error {
@@ -19,7 +20,7 @@ export class AnulacionCapitalNoRestituibleError extends Error {
   constructor(readonly code: CodigoAnulacionCapital) {
     super(
       `No se puede anular este pago: ya bajó capital y ${RAZON[code]}. ` +
-        "Contabilidad lo resuelve con un ajuste manual o revirtiendo el pago; no se anuló nada.",
+        "Contabilidad lo resuelve con un ajuste manual; no se anuló nada.",
     );
   }
 }

@@ -278,13 +278,15 @@ describe("la reversa restituye la mora que de verdad falta", () => {
     expect(tablasConsultadas).not.toContain(moras_historial);
   });
 
-  test("revertir una boleta YA anulada no restituye de nuevo", async () => {
-    // La anulación por boleta falsa ya le devolvió su mora al crédito.
-    const { restituciones, tablasConsultadas } = await revertir({
+  test("revertir una boleta YA anulada se rechaza antes de escribir: no restituye de nuevo", async () => {
+    // La anulación por boleta falsa ya le devolvió su mora (y su capital) al crédito: la reversa
+    // la rechaza con 409 (PAGO_ANULADO_NO_REVERSIBLE) antes de tocar nada.
+    const { restituciones, tablasConsultadas, tablasActualizadas } = await revertir({
       pago: { ...pagoConMora, paymentFalse: true },
     });
 
     expect(restituciones).toHaveLength(0);
-    expect(tablasConsultadas).toContain(moras_historial);
+    expect(tablasActualizadas).toHaveLength(0);
+    expect(tablasConsultadas).not.toContain(moras_historial);
   });
 });

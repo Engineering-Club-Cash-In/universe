@@ -21,7 +21,7 @@
  * la corrida.
  */
 import { beforeEach, describe, expect, it } from "bun:test";
-import { creditos, moras_historial, pagos_credito } from "../database/db/schema";
+import { creditos, cuotas_credito, moras_historial, pagos_credito } from "../database/db/schema";
 import { MOTIVO_ANULACION_MORA_PREFIJO } from "../utils/motivoReversaMora";
 
 // El módulo arrastra `../database` (por `./latefee`), que exige la URL al
@@ -638,7 +638,8 @@ describe("anular un pago validado que bajó capital", () => {
   const depsConCapital = () => ({
     ...deps,
     reabrirCuota: (async () => void orden.push("reabrirCuota")) as any,
-    restituirCapital: (async (_tx: any, args: any) => void orden.push(`restituirCapital:${args.pago.abono_capital}`)) as any,
+    restituirCapital: (async (_tx: any, args: any) =>
+      void orden.push(`restituirCapital:${args.pago.abono_capital}:cerrada=${args.cuotaCerrada}`)) as any,
     revertirRubros: (async () => (orden.push("revertirRubros"), [])) as any,
   });
   const anularCon = () =>
@@ -648,10 +649,12 @@ describe("anular un pago validado que bajó capital", () => {
     orden.length = 0;
   });
 
-  it("orden: reabrirCuota → restituirCapital → revertirRubros", async () => {
-    prepararBase({ pago: PAGO_VALIDADO, credito: credito("ACTIVO") });
+  it("orden: reabrirCuota → restituirCapital → revertirRubros (con la cuota leída ANTES de reabrir)", async () => {
+    prepararBase({ pago: [{ ...PAGO_VALIDADO[0], cuota_id: 7 }], credito: credito("ACTIVO") });
+    estado.selects.splice(2, 0, [{ pagado: true }]); // cuotas_credito.pagado, antes del UPDATE
     await anularCon();
-    expect(orden).toEqual(["reabrirCuota", "restituirCapital:100.00", "revertirRubros"]);
+    expect(orden).toEqual(["reabrirCuota", "restituirCapital:100.00:cerrada=true", "revertirRubros"]);
+    expect(estado.llamadas[2]).toEqual({ tabla: cuotas_credito, via: "select" });
   });
 
   it("un pending no llama a la restitución (nunca bajó capital)", async () => {

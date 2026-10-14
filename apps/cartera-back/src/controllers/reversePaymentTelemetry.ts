@@ -1,3 +1,4 @@
+import { PAGO_ANULADO_NO_REVERSIBLE } from "./reversePaymentPolicy";
 import type {
   InvoiceVoidingResult,
   PaymentReversalResult,
@@ -90,6 +91,7 @@ export function classifyPaymentReversalFailure(
   if (
     input.errorMessage === "Payment is not marked as paid"
     || input.errorMessage === "Incobrable structural row cannot be reversed"
+    || input.errorMessage === PAGO_ANULADO_NO_REVERSIBLE
   ) {
     return { outcome: "rejected", ...common, manualActionRequired: false, reasonCode: "state_conflict" };
   }

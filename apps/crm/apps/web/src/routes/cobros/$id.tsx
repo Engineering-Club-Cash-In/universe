@@ -5035,6 +5035,8 @@ function RouteComponent() {
 
 				<TabsContent value="asistente">
 					<AsistenteIA
+						// Otro caso (cambia el $id sin remontar la ruta) = chat desde cero.
+						key={caso.id}
 						resumen={comp?.resumenIA ?? null}
 						onPreguntar={
 							caso.id

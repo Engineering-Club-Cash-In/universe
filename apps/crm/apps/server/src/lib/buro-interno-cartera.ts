@@ -106,7 +106,7 @@ const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,
 );
 const TERMINO_EVIDENCIA_NEGADA =
-	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?)/;
+	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?)/;
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(

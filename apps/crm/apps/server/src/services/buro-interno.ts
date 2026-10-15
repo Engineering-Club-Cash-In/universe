@@ -1850,6 +1850,9 @@ async function registrarCoincidenciasCarteraSinCola(
 				datosDeseados,
 			);
 			if (cambioAutomatico) {
+				// Datos de identidad nuevos pueden convertir una coincidencia débil
+				// ya autorizada en una más fuerte: se vuelve a revisar.
+				cambiosEvidencia.add("actualizacion_identidad");
 				const [actualizada] = await tx
 					.update(buroInternoPersonas)
 					.set({ ...datosDeseados, updatedAt: ahora })

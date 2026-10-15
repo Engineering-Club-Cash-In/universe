@@ -146,12 +146,12 @@ export function planRestitucionCapital({
   if (filasPci.length > 0) {
     const repartido = [...porInversionista.values()].reduce((s, m) => s.plus(m), new Big(0));
     const residuo = abono.minus(repartido);
-    // Sin ningún inversionista con abono no hay a quién restituirle: no se repone solo el crédito.
-    if (porInversionista.size === 0 || residuo.abs().gt(new Big(0.01).times(filasPci.length))) {
+    const [mayor] = [...porInversionista.entries()].sort((a, b) => b[1].cmp(a[1]) || a[0] - b[0]);
+    // Sin PCI con abono, o con un residuo negativo que dejaría negativo al mayor, no hay a quién restituir.
+    if (!mayor || residuo.abs().gt(new Big(0.01).times(filasPci.length)) || mayor[1].plus(residuo).lt(0)) {
       return { tipo: "RECHAZAR", codigo: "REPARTO_INCONSISTENTE" };
     }
-    const [mayor] = [...porInversionista.entries()].sort((a, b) => b[1].cmp(a[1]) || a[0] - b[0]);
-    porInversionista.set(mayor![0], mayor![1].plus(residuo));
+    porInversionista.set(mayor[0], mayor[1].plus(residuo));
   }
 
   const recomputado = recomputeCreditAfterCapital({

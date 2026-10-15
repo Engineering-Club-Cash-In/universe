@@ -190,7 +190,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 		) ||
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:faltas?\s+de\s+pago|dej(?:o|aron)\s+de\s+pagar|no\s+pag(?:o|aron))(?=\s|$)/g,
+			/(?:^|\s)(?:faltas?\s+de\s+pago|dej(?:o|aron)\s+de\s+pagar|no\s+pag(?:o|aron)|no\s+(?:pudo|pudieron|puede|pueden|podia|podian)\s+(?:seguir\s+)?pag(?:ar|ando))(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "mala_paga", texto: limpio };

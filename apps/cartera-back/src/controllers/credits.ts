@@ -276,6 +276,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         abono_seguro: pagos_credito.abono_seguro,
         abono_gps: pagos_credito.abono_gps,
         abono_membresias: pagos_credito.membresias_mes,
+        // El CRM calcula con esto lo aplicado a la CUOTA (sin mora/otros ni
+        // abonos a capital) y descarta los pagos anulados.
+        membresias_pago: pagos_credito.membresias_pago,
+        paymentFalse: pagos_credito.paymentFalse,
 
         // 🔥 RESTANTES
         capital_restante: pagos_credito.capital_restante,
@@ -425,6 +429,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         abono_seguro: pagos_credito.abono_seguro,
         abono_gps: pagos_credito.abono_gps,
         abono_membresias: pagos_credito.membresias_mes,
+        // El CRM calcula con esto lo aplicado a la CUOTA (sin mora/otros ni
+        // abonos a capital) y descarta los pagos anulados.
+        membresias_pago: pagos_credito.membresias_pago,
+        paymentFalse: pagos_credito.paymentFalse,
 
         // 🔥 RESTANTES
         capital_restante: pagos_credito.capital_restante,
@@ -498,6 +506,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         abono_seguro: pagos_credito.abono_seguro,
         abono_gps: pagos_credito.abono_gps,
         abono_membresias: pagos_credito.membresias_mes,
+        // El CRM calcula con esto lo aplicado a la CUOTA (sin mora/otros ni
+        // abonos a capital) y descarta los pagos anulados.
+        membresias_pago: pagos_credito.membresias_pago,
+        paymentFalse: pagos_credito.paymentFalse,
         capital_restante: pagos_credito.capital_restante,
         interes_restante: pagos_credito.interes_restante,
         iva_12_restante: pagos_credito.iva_12_restante,

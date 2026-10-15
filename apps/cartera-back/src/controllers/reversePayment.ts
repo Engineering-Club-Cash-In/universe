@@ -46,6 +46,7 @@ import {
   buildInstallmentRemainderReplication,
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
+  PAGO_ANULADO_NO_REVERSIBLE,
   REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
@@ -243,6 +244,7 @@ export function createReversePayment(
       if (!pago) {
         throw new Error("Payment not found");
       }
+      if (pago.paymentFalse === true) throw new Error(PAGO_ANULADO_NO_REVERSIBLE);
       // Re-chequeo bajo el candado y antes de escribir: un callback Nexa en
       // vuelo pudo tomar esta fila después de la lectura previa. El catch lo
       // convierte en 409 y la transacción no deja nada escrito.
@@ -620,16 +622,8 @@ export function createReversePayment(
           membresias: nuevoMembresiasRestante,
         },
         aplicadoALaCuota,
-        // Y hay un segundo caso: la fila YA ESTÁ ANULADA. `falsePayment` anula
-        // con sólo `pagado: false, paymentFalse: true` — CONSERVA los `abono_*`,
-        // así que `aplicadoALaCuota` no es cero y la guarda de arriba no la
-        // atrapa. Pero la fila anulada está fuera de la contabilidad de la cuota
-        // (el saldo replicado se estampa con `paymentFalse = false`), así que
-        // devolverle sus abonos al saldo sería doble conteo: le estamparía a las
-        // hermanas VIVAS plata que ya no existe. La reversa de la fila anulada
-        // SÍ sigue (es la única vía que limpia la fila zombi); lo que se salta
-        // es la réplica. Ver el helper.
-        filaAnulada: pago.paymentFalse === true,
+        // Una fila YA ANULADA no llega hasta acá: se rechaza al leerla (PAGO_ANULADO_NO_REVERSIBLE).
+        filaAnulada: false,
       });
 
       // Se llama DESPUÉS de la mutación de cada rama (reset de la fila, o su
@@ -1395,6 +1389,10 @@ export function createReversePayment(
       }, telemetryLogger);
     }
 
+    if (errorMessage === PAGO_ANULADO_NO_REVERSIBLE) {
+      set.status = 409;
+      return { success: false, message: errorMessage };
+    }
     // Determinar status code según el tipo de error
     if (errorMessage === "Payment not found") {
       set.status = 404;

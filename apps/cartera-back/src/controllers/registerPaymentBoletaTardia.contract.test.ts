@@ -53,10 +53,9 @@ describe("insertPayment marca cada fila con boletaTardiaIntentoId", () => {
     }
   });
 
-  test("F3: con intento la fila nace paymentFalse=false (no hereda la anulada); sin intento hereda como siempre", () => {
-    expect(insertPaymentSrc).toMatch(
-      /const paymentFalse = existingPago && !boletaTardiaIntentoId\s*\?\s*existingPago\.pago\.paymentFalse\s*:\s*false;/,
-    );
+  test("F3: la fila nace siempre paymentFalse=false (nunca hereda una anulada, con o sin intento)", () => {
+    expect(insertPaymentSrc).toMatch(/paymentFalse: false, \/\/ `existingPago` siempre es viva/);
+    expect(insertPaymentSrc).not.toContain("existingPago.pago.paymentFalse");
   });
 
   test("F4: pagoData escribe null explícito para borrar una marca vieja en el UPDATE de cierre", () => {

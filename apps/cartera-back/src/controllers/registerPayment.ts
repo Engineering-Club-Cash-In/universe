@@ -65,6 +65,9 @@ import {
   getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
   resolverCuotaParaFilaSuelta,
+  esPagoSaldoElegible,
+  saldoDeRespaldoDeSemillaAnulada,
+  cuotaSinFuenteDeSaldo,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -87,7 +90,12 @@ import {
   emitRecoveredDuplicatePendingInstallment,
 } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
-import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
+import {
+  condicionUltimaCuotaPagada,
+  hayFilaVivaEnCuota,
+  pagosExistentesDeCuota,
+  semillaAnuladaDeCuota,
+} from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -543,6 +551,20 @@ const obtenerInfoCompletaCredito = async (
       }
     }
     const cuotasPendientesUnicas = Array.from(porNumeroCuota.values());
+    // Una cuota sin fila viva ni semilla anulada no tiene dónde escribirse: el loop la saltaría y
+    // la plata quedaría en saldo a favor sin rastro. Se rechaza ACÁ, antes de que la mora, el
+    // "otros" o cualquier cuota escriban algo (el abono solo-capital y el de solo otros no la usan).
+    const cuotaHuerfana = esSoloCapital || pagoSoloOtros
+      ? undefined
+      : cuotasPendientesUnicas.find((item) =>
+          cuotaSinFuenteDeSaldo(cuotasParaValidar.get(item.cuotas_credito.cuota_id)?.pagos ?? []),
+        );
+    if (cuotaHuerfana) {
+      set.status = 409;
+      throw new Error(
+        `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota #${cuotaHuerfana.cuotas_credito.numero_cuota} no tiene ninguna fila de pago viva; revisá la cuota antes de registrar el pago`
+      );
+    }
     const cuotaIdsPendientes = new Set(
       cuotasPagables.map((item) => item.cuotas_credito.cuota_id)
     );
@@ -1264,31 +1286,11 @@ export const insertPayment = async (
 
       if (disponible_restante.gt(0)) {
         // Verificar si existe pago previo - priorizar el original (no_required)
-        const allExistingPagos = await db
-          .select({ pago: pagos_credito })
-          .from(pagos_credito)
-          .innerJoin(
-            cuotas_credito,
-            eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-          )
-          .where(
-            and(
-              eq(
-                pagos_credito.cuota_id,
-                cuota.cuotas_credito.cuota_id
-              ),
-              eq(pagos_credito.credito_id, credito.credito_id),
-              or(
-                ne(pagos_credito.validationStatus, "pending"),
-                and(
-                  eq(pagos_credito.validationStatus, "pending"),
-                  eq(pagos_credito.pagado, false),
-                  eq(pagos_credito.paymentFalse, false)
-                )
-              )
-            )
-          )
-          .orderBy(asc(pagos_credito.pago_id));
+        const allExistingPagos = await pagosExistentesDeCuota(
+          db,
+          cuota.cuotas_credito.cuota_id,
+          credito.credito_id
+        );
 
         // Último pago PARCIAL aún `pending` de esta cuota (todavía no pasó por
         // /aplicar-pago). El query de arriba excluye los `pending`, pero para
@@ -1321,11 +1323,6 @@ export const insertPayment = async (
             .plus(pago.membresias ?? 0)
             .plus(pago.capital_restante ?? 0)
             .gt(0);
-        const esPagoSaldoElegible = (pago: typeof pagos_credito.$inferSelect) =>
-          pago.validationStatus === "validated" ||
-          (pago.validationStatus === "pending" &&
-            pago.pagado === false &&
-            pago.paymentFalse === false);
         const ultimoPagoParcialConRestante = [...allExistingPagos]
           .reverse()
           .find(
@@ -1341,7 +1338,6 @@ export const insertPayment = async (
         // quedándonos con el de pago_id más alto. Así un 2.º pago a la misma
         // cuota parte de lo que abonó el 1.º aunque aún no se haya validado, y
         // no duplica interés/IVA/seguro/membresías.
-        const existingPago = pagoOriginal ?? allExistingPagos[0];
         const candidatosSaldo = [
           ultimoPagoParcialConRestante,
           ultimoParcialPendiente && tieneRestante(ultimoParcialPendiente.pago)
@@ -1351,6 +1347,24 @@ export const insertPayment = async (
         const saldoMasReciente = candidatosSaldo.sort(
           (a, b) => b.pago.pago_id - a.pago.pago_id
         )[0];
+        // Cuota sin ninguna fila viva (datos viejos: todas anuladas, crédito 459 cuota 4): la semilla
+        // anulada aporta el saldo y hace de `existingPago` para que el pago escriba, pero NUNCA es
+        // destino (ver `destinoSobrescribible`): el pago INSERTA una fila nueva y viva.
+        // "Viva" = cualquier fila no anulada, también la `pending` ya pagada que la query de arriba
+        // deja afuera: si esa cerró la cuota, recargarla desde la semilla la sobre-aplica.
+        const hayFilasVivas =
+          allExistingPagos.length > 0 ||
+          (await hayFilaVivaEnCuota(db, cuota.cuotas_credito.cuota_id, credito.credito_id));
+        const semillaDeRespaldo = saldoDeRespaldoDeSemillaAnulada({
+          hayFilasVivas,
+          semillaAnulada: hayFilasVivas
+            ? undefined
+            : await semillaAnuladaDeCuota(db, cuota.cuotas_credito.cuota_id, credito.credito_id),
+        });
+        const existingPago =
+          pagoOriginal ??
+          allExistingPagos[0] ??
+          (semillaDeRespaldo ? { pago: { ...semillaDeRespaldo, paymentFalse: false } } : undefined); // la fila nueva no hereda la anulación
         const pagoSaldoVigente = saldoMasReciente ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
@@ -1388,7 +1402,7 @@ export const insertPayment = async (
         // REAL que SÍ debe contarse. Solo lo excluimos del set de hermanos cuando
         // realmente lo vamos a UPDATE-ar (i.e. cuando es sobrescribible); si no,
         // contar sus rubros evita re-aplicar interés/IVA/etc.
-        const destinoSobrescribible = existingPago
+        const destinoSobrescribible = existingPago && !semillaDeRespaldo
           ? esDestinoSobrescribible(existingPago.pago)
           : false;
         const pagoIdEnVuelo = destinoSobrescribible
@@ -1746,11 +1760,6 @@ export const insertPayment = async (
           "Diciembre",
         ];
         const mes_pagado = months[currentDate.getMonth()];
-        // Boleta tardía: la fila nace viva aunque la reutilizada sea de relleno anulada
-        // (heredar paymentFalse=true dejaría el pago invisible a la condonación/compensación).
-        const paymentFalse = existingPago && !boletaTardiaIntentoId
-          ? existingPago.pago.paymentFalse
-          : false;
         const fechaGuatemala = paymentRegistrationDate();
 
         // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo
@@ -1837,7 +1846,7 @@ export const insertPayment = async (
           // fila reescrita conserva la `fecha_aplicado` de su vida anterior
           // (los placeholders `no_required` de SIFCO suelen traerla).
           fecha_aplicado: null,
-          paymentFalse: paymentFalse,
+          paymentFalse: false, // `existingPago` siempre es viva (la semilla de respaldo llega en false)
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,
           registerBy: registerBy,
@@ -1943,7 +1952,12 @@ export const insertPayment = async (
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
-                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                  and(
+                    eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                    eq(pagos_credito.credito_id, credito.credito_id),
+                    // Una anulada nunca cerró la cuota: con `pagado` la reversa la tomaría por el cierre.
+                    eq(pagos_credito.paymentFalse, false)
+                  )
                 );
 
               if (
@@ -2105,7 +2119,12 @@ export const insertPayment = async (
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
-                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                  and(
+                    eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+                    eq(pagos_credito.credito_id, credito.credito_id),
+                    // Una anulada nunca cerró la cuota: con `pagado` la reversa la tomaría por el cierre.
+                    eq(pagos_credito.paymentFalse, false)
+                  )
                 );
 
               if (

@@ -1,0 +1,317 @@
+import { describe, expect, test } from "bun:test";
+import { AnulacionSinDesgloseError, planReaperturaCuotaPorAnulacion } from "./reabrirCuotaPorAnulacionPolicy";
+
+const CUOTA = 2455.61;
+const hermana = (o: Record<string, unknown> = {}) => ({
+  pago_id: 1,
+  validationStatus: "validated",
+  paymentFalse: false,
+  abono_capital: 1000,
+  abono_interes: 161.38,
+  abono_iva_12: 0,
+  abono_seguro: 0,
+  abono_gps: 0,
+  membresias_pago: 0,
+  ...o,
+});
+// Cierre de 1294.23 sobre un parcial de 1161.38: restantes ya en 0.
+const cierre = (o: Record<string, unknown> = {}) => ({
+  cuota_id: 48,
+  abono_capital: 1000,
+  abono_interes: 294.23,
+  abono_iva_12: 0,
+  abono_seguro: 0,
+  abono_gps: 0,
+  membresias_pago: 0,
+  capital_restante: 0,
+  interes_restante: 0,
+  iva_12_restante: 0,
+  seguro_restante: 0,
+  gps_restante: 0,
+  membresias: 0,
+  ...o,
+});
+const plan = (o: Record<string, unknown> = {}) =>
+  planReaperturaCuotaPorAnulacion({
+    creditoId: 932,
+    montoCuota: CUOTA,
+    statusCredit: "ACTIVO",
+    filaAnulada: cierre(),
+    hermanas: [hermana()],
+    ...o,
+  } as never);
+
+describe("planReaperturaCuotaPorAnulacion", () => {
+  test("cierre anulado con parcial que no cubre: repone restantes, reabre filas y cuota", () => {
+    const p = plan();
+    expect(p.reabrirFilas).toBe(true);
+    expect(p.reabrirCuota).toBe(true);
+    expect(p.replica?.cuotaId).toBe(48);
+    expect(p.replica?.creditoId).toBe(932);
+    expect(p.replica?.payload).toEqual({
+      capital_restante: "1000",
+      interes_restante: "294.23",
+      iva_12_restante: "0",
+      seguro_restante: "0",
+      gps_restante: "0",
+      membresias: "0",
+    });
+  });
+
+  test("parcial anulado (cuota seguía abierta): repone restantes igual", () => {
+    const p = plan({
+      filaAnulada: cierre({ abono_capital: 500, abono_interes: 0, capital_restante: 794.23, interes_restante: 294.23 }),
+    });
+    expect(p.replica?.payload.capital_restante).toBe("1294.23");
+    expect(p.replica?.payload.interes_restante).toBe("294.23");
+  });
+
+  test("las hermanas cubren la cuota solas: no toca nada", () => {
+    const p = plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+  });
+
+  test("tolerancia de un centavo: Q0.01 menos todavía cubre, Q0.02 menos no", () => {
+    const cubre = plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.6 })] });
+    expect(cubre.reabrirFilas).toBe(false);
+    const noCubre = plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.59 })] });
+    expect(noCubre.reabrirFilas).toBe(true);
+  });
+
+  test("hermana pendiente que cubre sola: no reabre las filas", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "pending", abono_capital: 2000, abono_interes: 455.61 })] });
+    expect(p.reabrirFilas).toBe(false);
+    expect(p.reabrirCuota).toBe(false);
+  });
+
+  test("hermana pendiente que cubre y la cuota ya estaba pagada por validadas: nada", () => {
+    const p = plan({
+      hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 }), hermana({ pago_id: 2, validationStatus: "pending" })],
+    });
+    expect(p.reabrirFilas).toBe(false);
+  });
+
+  test("validada + pendiente hermanas cubren la cuota entre las dos: nada", () => {
+    const p = plan({ hermanas: [hermana(), hermana({ pago_id: 2, validationStatus: "pending", abono_capital: 1294.23, abono_interes: 0 })] });
+    expect(p.reabrirFilas).toBe(false);
+  });
+
+  test("hermana ya anulada no cuenta como cobertura", () => {
+    const p = plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61, paymentFalse: true })] });
+    expect(p.reabrirFilas).toBe(true);
+  });
+
+  test("hermana no_required CON plata que cubre sola (SIFCO / Caja) cuenta: no reabre", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "no_required", abono_capital: CUOTA, abono_interes: 0, monto_aplicado: CUOTA })] });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+  });
+
+  test("hermana no_required parcial: reabre igual que con una validated", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "no_required", monto_aplicado: 1161.38 })] });
+    expect(p).toEqual(plan({ hermanas: [hermana()] }));
+    expect(p.reabrirFilas).toBe(true);
+  });
+
+  test("hermana no_required sin abonos no cuenta", () => {
+    const p = plan({ hermanas: [hermana({ validationStatus: "no_required", abono_capital: 0, abono_interes: 0 })] });
+    expect(p.reabrirFilas).toBe(true);
+  });
+
+  test("cuota sin hermanas: repone igual (la cuota queda abierta y con su saldo)", () => {
+    const p = plan({ hermanas: [] });
+    expect(p.reabrirFilas).toBe(true);
+    expect(p.reabrirCuota).toBe(true);
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("fila anulada que no aportó a la cuota (solo mora): nada", () => {
+    const p = plan({
+      filaAnulada: cierre({ abono_capital: 0, abono_interes: 0 }),
+    });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+  });
+
+  test("fila sin cuota: nada", () => {
+    expect(plan({ filaAnulada: cierre({ cuota_id: null }) }).reabrirFilas).toBe(false);
+  });
+
+  test("montoCuota nulo o cero: repone restantes (como la reversa) pero no reabre pagado", () => {
+    for (const montoCuota of [null, 0]) {
+      const p = plan({ montoCuota });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
+  });
+
+  test("CANCELADO y CAIDO (cerrados): repone restantes pero no reabre", () => {
+    for (const statusCredit of ["CANCELADO", "CAIDO"]) {
+      const p = plan({ statusCredit });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
+  });
+
+  test("PENDIENTE_CANCELACION se reabre (ACTIVAR lo devuelve a ACTIVO)", () => {
+    const p = plan({ statusCredit: "PENDIENTE_CANCELACION" });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital pendiente: filas y cuota se reabren juntas", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 500 });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital en cero (dentro de la tolerancia): repone pero no reabre nada", () => {
+    for (const capital of [0, 0.01, null]) {
+      const p = plan({ statusCredit: "INCOBRABLE", capital });
+      expect(p.replica).not.toBeNull();
+      expect(p.reabrirFilas).toBe(false);
+      expect(p.reabrirCuota).toBe(false);
+    }
+  });
+
+  test("INCOBRABLE con capital 0 y anulada validated con abono_capital: la validación ya lo restó, se reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "validated", abono_capital: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+  });
+
+  test("INCOBRABLE con capital 0 y anulada pending: nunca descontó capital, no reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "pending", abono_capital: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+    expect(p.replica).not.toBeNull();
+  });
+
+  test("INCOBRABLE con capital 0 y anulada validated sin abono_capital: no reabre", () => {
+    const p = plan({ statusCredit: "INCOBRABLE", capital: 0, filaAnulada: cierre({ validationStatus: "validated", abono_capital: 0, abono_interes: 500 }) });
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+  });
+
+  // Crédito 23: una fila estructural viva (system_reset) hace parecer cubierta la cuota.
+  // INCOBRABLE no usa el atajo de cobertura, como reversePayment (~964-983).
+  const incobrableCubierta = (o: Record<string, unknown>, anulada: Record<string, unknown>) =>
+    plan({
+      statusCredit: "INCOBRABLE",
+      montoCuota: 500,
+      filaAnulada: cierre({ abono_capital: 200, abono_interes: 0, ...anulada }),
+      hermanas: [hermana({ referencia: "system_reset", abono_capital: 500, abono_interes: 0 })],
+      ...o,
+    });
+
+  test("INCOBRABLE con hermana validated que cubre: decide por capitalPrevio, no por el atajo", () => {
+    const p = incobrableCubierta({ capital: 800 }, { validationStatus: "validated" });
+    expect(p.replica).not.toBeNull();
+    expect(p.replica?.payload.capital_restante).toBe("200");
+    expect(p).toMatchObject({ reabrirFilas: true, reabrirCuota: true });
+  });
+
+  test("INCOBRABLE con hermana que cubre, capital 0 y anulada pending: repone pero no reabre", () => {
+    const p = incobrableCubierta({ capital: 0 }, { validationStatus: "pending" });
+    expect(p.replica).not.toBeNull();
+    expect(p).toMatchObject({ reabrirFilas: false, reabrirCuota: false });
+  });
+
+  test("ACTIVO con la misma hermana que cubre: el atajo sigue en SIN_CAMBIOS", () => {
+    const p = incobrableCubierta({ statusCredit: "ACTIVO", capital: 800 }, { validationStatus: "validated" });
+    expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+  });
+
+  test("abono directo a capital (capital / capital_validated): fuera de la lógica de cuota, sin cambios", () => {
+    for (const validationStatus of ["capital", "capital_validated"]) {
+      const p = plan({ filaAnulada: cierre({ validationStatus, abono_capital: 500 }) });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+  });
+
+  test("fila reset anulada (cierre/castigo): estructural, sin cambios aunque INCOBRABLE y CANCELADO", () => {
+    for (const statusCredit of ["INCOBRABLE", "CANCELADO"]) {
+      const p = plan({
+        statusCredit,
+        capital: 1000,
+        montoCuota: 1000,
+        hermanas: [],
+        filaAnulada: cierre({ validationStatus: "reset", abono_capital: 500, abono_interes: 0 }),
+      });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+  });
+
+  test("sin ninguna fila viva de la cuota: pide insertar la portadora de saldo", () => {
+    expect(plan({ hermanas: [] }).insertarPortadora).toBe(true);
+    expect(plan({ hermanas: [hermana({ paymentFalse: true })] }).insertarPortadora).toBe(true);
+  });
+
+  test("hermana validated / pending / no_required que no cubre: ya hay de dónde leer el saldo", () => {
+    for (const validationStatus of ["validated", "pending", "no_required"]) {
+      expect(plan({ hermanas: [hermana({ validationStatus })] }).insertarPortadora).toBe(false);
+    }
+  });
+
+  test("solo una hermana de capital: no sirve de saldo, pide la portadora", () => {
+    expect(plan({ hermanas: [hermana({ validationStatus: "capital_validated" })] }).insertarPortadora).toBe(true);
+  });
+
+  test("sin fila viva pero la cuota NO se reabre (CANCELADO / CAIDO / INCOBRABLE en 0 / cuota 0): sin portadora", () => {
+    for (const o of [{ statusCredit: "CANCELADO" }, { statusCredit: "CAIDO" }, { statusCredit: "INCOBRABLE", capital: 0 }, { montoCuota: 0 }]) {
+      const p = plan({ ...o, hermanas: [] });
+      expect(p.replica).not.toBeNull();
+      expect(p.insertarPortadora).toBe(false);
+    }
+  });
+
+  test("sin cambios nunca pide la portadora", () => {
+    expect(plan({ hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] }).insertarPortadora).toBe(false);
+  });
+
+  // Vía stale-zero (registerPayment ~1696-1708): sube monto_aplicado sin repartir rubros.
+  const staleZero = (o: Record<string, unknown> = {}) =>
+    cierre({ validationStatus: "validated", abono_capital: 0, abono_interes: 0, monto_aplicado: CUOTA, mora: 0, otros: "", pagoConvenio: 0, ...o });
+  test("stale-zero (abonos 0, neto = cuota) que cerró la cuota: 409 sin desglose, no se reabre", () => {
+    for (const o of [{}, { monto_aplicado: CUOTA + 75, mora: 50, otros: "20", pagoConvenio: 5 }]) {
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [] })).toThrow(AnulacionSinDesgloseError);
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [hermana()] })).toThrow(
+        "El pago no tiene desglose por rubro: no se puede anular automáticamente; revisalo con contabilidad",
+      );
+    }
+  });
+
+  test("stale-zero con monto_aplicado bruto (= cuota, con mora/otros/convenio): 409 sin desglose", () => {
+    for (const o of [{ mora: 50 }, { otros: "20" }, { pagoConvenio: 5 }]) {
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [] })).toThrow(AnulacionSinDesgloseError);
+    }
+  });
+
+  test("stale-zero en una cuota que no se reabriría (CANCELADO / CAIDO / INCOBRABLE en 0): nada", () => {
+    for (const o of [{ statusCredit: "CANCELADO" }, { statusCredit: "CAIDO" }, { statusCredit: "INCOBRABLE", capital: 0 }]) {
+      const p = plan({ ...o, filaAnulada: staleZero(), hermanas: [] });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+  });
+
+  test("abonos 0 con neto distinto de la cuota (sobrante legado, 552/111135): nada", () => {
+    for (const filaAnulada of [
+      staleZero({ monto_aplicado: 105.77 }),
+      staleZero({ monto_aplicado: CUOTA + 0.02 }),
+      staleZero({ monto_aplicado: CUOTA + 50, mora: 0 }),
+    ]) {
+      const p = plan({ montoCuota: CUOTA, filaAnulada, hermanas: [] });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+    const p552 = plan({ montoCuota: 1894.23, filaAnulada: staleZero({ monto_aplicado: 105.77 }), hermanas: [] });
+    expect(p552.replica).toBeNull();
+  });
+
+  test("stale-zero con hermanas que cubren (91506 / 40155): nada", () => {
+    const p = plan({ filaAnulada: staleZero(), hermanas: [hermana({ abono_capital: 2000, abono_interes: 455.61 })] });
+    expect(p.reabrirFilas).toBe(false);
+  });
+
+  test("restantes nulos se tratan como cero", () => {
+    const p = plan({ filaAnulada: cierre({ capital_restante: null, membresias: null }) });
+    expect(p.replica?.payload.capital_restante).toBe("1000");
+    expect(p.replica?.payload.membresias).toBe("0");
+  });
+});

@@ -882,6 +882,24 @@ export interface CreditoDirectoResponse {
 	cuotasConPagoEnValidacion?: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
 	/**
+	 * Mora GENERADA por cuota vencida (cartera-back `construirDesgloseMora`):
+	 * capital × 1.12% × min(1, díasAtraso/30), menos lo abonado. Cubre las cuotas
+	 * vencidas impagas, incluso sin ningún pago. Opcional: un cartera-back viejo
+	 * no lo manda, y con crédito EN_CONVENIO/INCOBRABLE viene vacío.
+	 */
+	desgloseMora?: {
+		cuotas: {
+			numero_cuota: number;
+			fecha_vencimiento: string;
+			dias_atraso: number;
+			topada: boolean;
+			en_validacion: boolean;
+			generado: string;
+			abonado: string;
+			pendiente: string;
+		}[];
+	} | null;
+	/**
 	 * Cuánto sube la mora de ESTE crédito por cada día que pase (lo que sumará
 	 * la próxima corrida del cron): 1/30 del cargo mensual por cada cuota
 	 * vencida que todavía no llegó a su techo de 30 días. Lo calcula

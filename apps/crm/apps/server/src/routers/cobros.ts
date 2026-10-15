@@ -5709,11 +5709,23 @@ export const cobrosRouter = {
 							}
 						}
 
+						// Mora GENERADA por cuota vencida (cartera-back). `pago_mora` es la
+						// cobrada en una fila de pago: una vencida sin pagos no la tiene.
+						const desglosePorCuota = new Map(
+							(creditoCompleto.desgloseMora?.cuotas ?? []).map((d) => [
+								d.numero_cuota,
+								d,
+							]),
+						);
+
 						// Mapear a estructura esperada por frontend
 						return Array.from(cuotasUnicas.values())
 							.sort((a, b) => a.numero_cuota - b.numero_cuota)
 							.map((cuota) => {
 								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								const desglose = cuota.pagado
+									? undefined
+									: desglosePorCuota.get(cuota.numero_cuota);
 								const montoCuota = resolveInstallmentAmount(
 									cuota.cuota,
 									creditoCompleto.credito.cuota,
@@ -5743,7 +5755,11 @@ export const cobrosRouter = {
 											? "en_validacion"
 											: "pendiente",
 									pagos: pagosPorCuota.get(cuota.numero_cuota) ?? [],
-									diasMora: 0,
+									diasMora: desglose?.dias_atraso ?? 0,
+									moraGenerada: desglose ? Number(desglose.generado) : 0,
+									moraAbonada: desglose ? Number(desglose.abonado) : 0,
+									moraPendiente: desglose ? Number(desglose.pendiente) : 0,
+									moraTopada: desglose?.topada ?? false,
 									detallesPago: cuota.pagado
 										? {
 												abonoCapital: cuota.abono_capital || "0",

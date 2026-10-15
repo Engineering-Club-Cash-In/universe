@@ -100,7 +100,7 @@ const VERBO_ESTADO_NEGADO = new RegExp(
 );
 // Acepta un artículo antes del término: "no se detectó el fraude".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido))?|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
 );
 const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,

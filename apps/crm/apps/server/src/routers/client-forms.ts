@@ -14,8 +14,18 @@ import { crmProcedure, publicProcedure } from "../lib/orpc";
 import {
 	armarParticipantes,
 	claveDeFormulario,
+	type EntradaParticipantes,
+	type FilaDeFormulario,
 	nombreDelFormulario,
+	participantesDeLaAlerta,
+	personasPropias,
 } from "../lib/participantes-formulario";
+import {
+	type NivelAlertaReferencias,
+	nivelAlertaReferencias,
+} from "../lib/permiso-alerta-referencias";
+import type { ReferenciaDuplicada } from "../lib/referencia-coincidencias";
+import { buscarReferenciasDuplicadasLote } from "../lib/referencia-duplicada";
 import { validarDpi } from "../utils/cui-validation";
 
 const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
@@ -535,6 +545,157 @@ function serializeRow(row: unknown): FormRow {
 	return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
 }
 
+/** Una referencia de la solicitud que ya figura en otro cliente. */
+type ReferenciaEnAlerta = {
+	tipo: "personal" | "familiar";
+	indice: number;
+	nombre: string;
+	dpi: string;
+	total: number;
+	/** Quiénes son esos otros clientes: solo con nivel «detalle». */
+	coincidencias?: ReferenciaDuplicada[];
+};
+
+/** La alerta de una oportunidad; `null` en la respuesta si el usuario no la puede ver. */
+export type AlertaReferencias = {
+	nivel: Exclude<NivelAlertaReferencias, "ninguno">;
+	/** La búsqueda falló: no es lo mismo que «sin coincidencias». */
+	error: boolean;
+	participantes: {
+		personType: "lead" | "coDebtor";
+		personId: string;
+		nombre: string;
+		etiqueta: string;
+		referencias: ReferenciaEnAlerta[];
+	}[];
+};
+
+/** Lo que la alerta necesita de la oportunidad; cada endpoint lo lee a su manera. */
+type DatosDeLaAlerta = Omit<
+	EntradaParticipantes,
+	"tokens" | "lead" | "coDebtors" | "creditRows" | "financialRows"
+> & {
+	lead:
+		| (NonNullable<EntradaParticipantes["lead"]> & { dpi: string | null })
+		| null;
+	coDebtors: (EntradaParticipantes["coDebtors"][number] & { dpi: string })[];
+	/** Con sus dos listas de referencias (JSONB sin garantías). */
+	solicitudes: (FilaDeFormulario & { dpi?: string | null } & Record<
+			"referenciasPersonales" | "referenciasCrediticias",
+			unknown
+		>)[];
+	/** Solo sirven para nombrar a un histórico: se piden si hay algo que mostrar. */
+	patrimoniales: () => Promise<FilaDeFormulario[]>;
+};
+
+/**
+ * Las referencias de cada participante (hasta `MAX_REFERENCIAS_POR_LISTA` por
+ * lista, aunque datos viejos traigan más) que ya son de OTRO cliente: ni de
+ * esta oportunidad ni de sus personas propias. Una sola búsqueda.
+ */
+async function referenciasRepetidas(datos: DatosDeLaAlerta) {
+	const planas: (Omit<ReferenciaEnAlerta, "total"> & {
+		participante: string;
+		telefono?: string | number;
+	})[] = [];
+	for (const solicitud of datos.solicitudes) {
+		for (const [tipo, referencias] of [
+			["personal", solicitud.referenciasPersonales],
+			["familiar", solicitud.referenciasCrediticias],
+		] as const) {
+			if (!Array.isArray(referencias)) continue;
+			const revisadas = referencias.slice(0, MAX_REFERENCIAS_POR_LISTA);
+			for (const [indice, referencia] of revisadas.entries()) {
+				// JSONB sin garantías: un null o un número no deben llegar a la vista como «null».
+				const dato = (referencia ?? {}) as Record<string, unknown>;
+				planas.push({
+					participante: claveDeFormulario(solicitud),
+					tipo,
+					indice,
+					nombre: String(dato.nombre ?? ""),
+					dpi: String(dato.dpi ?? ""),
+					telefono: dato.telefono as string | number | undefined,
+				});
+			}
+		}
+	}
+
+	const porParticipante = new Map<string, ReferenciaEnAlerta[]>();
+	if (planas.length === 0) return porParticipante;
+	// Las mismas personas que nombra la alerta, históricos incluidos.
+	const propias = personasPropias({ ...datos, creditRows: datos.solicitudes });
+	const resultados = await buscarReferenciasDuplicadasLote(planas, {
+		excluirOportunidadId: datos.opportunityId,
+		excluirLeadIds: propias.leadIds,
+		excluirDpis: propias.dpis,
+	});
+	for (const [
+		i,
+		{ participante, telefono: _, ...referencia },
+	] of planas.entries()) {
+		const { total, coincidencias } = resultados[i];
+		if (total === 0) continue;
+		const lista = porParticipante.get(participante) ?? [];
+		lista.push({ ...referencia, total, coincidencias });
+		porParticipante.set(participante, lista);
+	}
+	return porParticipante;
+}
+
+/**
+ * La alerta que ven «Formularios del Cliente» y la pantalla de análisis, con
+ * los mismos participantes (`participantesDeLaAlerta`). Con nivel «aviso» el
+ * recorte se hace acá, en el servidor: no sale nada de los otros clientes. Si
+ * la búsqueda falla devuelve `error` y la pantalla sigue cargando.
+ */
+async function alertaDeReferencias(
+	nivel: AlertaReferencias["nivel"],
+	datos: DatosDeLaAlerta,
+): Promise<AlertaReferencias> {
+	try {
+		const repetidas = await referenciasRepetidas(datos);
+		if (repetidas.size === 0) return { nivel, error: false, participantes: [] };
+		const participantes = participantesDeLaAlerta({
+			...datos,
+			creditRows: datos.solicitudes,
+			financialRows: await datos.patrimoniales(),
+		});
+		return {
+			nivel,
+			error: false,
+			participantes: [...participantes].flatMap(([clave, p]) => {
+				const referencias = repetidas.get(clave) ?? [];
+				if (referencias.length === 0) return [];
+				return {
+					personType: p.personType,
+					personId: p.personId,
+					nombre: p.displayName,
+					etiqueta: p.roleLabel,
+					// Sin detalle, nada de los otros clientes sale del servidor.
+					referencias:
+						nivel === "detalle"
+							? referencias
+							: referencias.map(({ coincidencias: _, ...aviso }) => aviso),
+				};
+			}),
+		};
+	} catch (error) {
+		// Sin el error completo: el de la base trae los parámetros (DPI, teléfonos).
+		const { name, code, cause } = (error ?? {}) as {
+			name?: string;
+			code?: string;
+			cause?: { code?: string };
+		};
+		console.error(
+			"[alertaDeReferencias] No se pudo buscar referencias repetidas, opportunity:",
+			datos.opportunityId,
+			name ?? typeof error,
+			code ?? cause?.code ?? "",
+		);
+		return { nivel, error: true, participantes: [] };
+	}
+}
+
 export const clientFormsRouter = {
 	generateFormToken: crmProcedure
 		.input(
@@ -934,7 +1095,7 @@ export const clientFormsRouter = {
 
 	getClientFormData: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const opp = await getOpportunityOrThrow(input.opportunityId);
 			const vehicle = await getVehicleForOpportunity(input.opportunityId);
 
@@ -1013,10 +1174,28 @@ export const clientFormsRouter = {
 				},
 			);
 
+			// La alerta se decide antes de buscar: sin permiso ni se consulta.
+			const nivel = nivelAlertaReferencias({
+				userRole: context.userRole,
+				userId: context.userId,
+				assignedTo: opp.assignedTo,
+			});
+			const alertaReferencias =
+				nivel === "ninguno"
+					? null
+					: await alertaDeReferencias(nivel, {
+							opportunityId: input.opportunityId,
+							lead: lead ?? null,
+							coDebtors: coDebtorsList,
+							solicitudes: creditRows,
+							patrimoniales: async () => financialRows,
+						});
+
 			return {
 				opportunityId: input.opportunityId,
 				vehicle,
 				participants,
+				alertaReferencias,
 			};
 		}),
 

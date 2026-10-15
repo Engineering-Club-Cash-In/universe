@@ -155,8 +155,11 @@ export function planReaperturaCuotaPorAnulacion({
     [filaAnulada.abono_capital, filaAnulada.abono_interes, filaAnulada.abono_iva_12,
       filaAnulada.abono_seguro, filaAnulada.abono_gps, filaAnulada.membresias_pago]
       .every((a) => new Big(a ?? 0).eq(0)) &&
-    cuota.gt(0) && netoStaleZero.minus(cuota).abs().lte(0.01);
-  const aplicadoALaCuota = esStaleZero ? netoStaleZero : sumarAplicadoACuota([filaAnulada]);
+    cuota.gt(0) &&
+    // Filas viejas guardaban `monto_aplicado` bruto (con mora/otros dentro): vale bruto o neto.
+    (netoStaleZero.minus(cuota).abs().lte(0.01) ||
+      new Big(filaAnulada.monto_aplicado ?? 0).minus(cuota).abs().lte(0.01));
+  const aplicadoALaCuota = esStaleZero ? cuota : sumarAplicadoACuota([filaAnulada]);
   if (aplicadoALaCuota.lte(0)) return SIN_CAMBIOS;
 
   // `no_required` con plata es un pago real (SIFCO; Caja vía /editPayment, crédito 890):

@@ -278,6 +278,12 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     }
   });
 
+  test("stale-zero con monto_aplicado bruto (= cuota, con mora/otros/convenio): 409 sin desglose", () => {
+    for (const o of [{ mora: 50 }, { otros: "20" }, { pagoConvenio: 5 }]) {
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [] })).toThrow(AnulacionSinDesgloseError);
+    }
+  });
+
   test("stale-zero en una cuota que no se reabriría (CANCELADO / CAIDO / INCOBRABLE en 0): nada", () => {
     for (const o of [{ statusCredit: "CANCELADO" }, { statusCredit: "CAIDO" }, { statusCredit: "INCOBRABLE", capital: 0 }]) {
       const p = plan({ ...o, filaAnulada: staleZero(), hermanas: [] });

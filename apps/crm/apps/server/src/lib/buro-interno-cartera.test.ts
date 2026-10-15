@@ -114,6 +114,11 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Cliente víctima de estafa",
 		"Fue víctima de una estafa",
 		"Es víctima del fraude",
+		"Fraude no detectado",
+		"Mora no aplica",
+		"Fraude no fue comprobado",
+		"Estafa no confirmada",
+		"Mora no existe",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -138,6 +143,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		["10 cuotas en mora", "mala_paga"],
 		["2 cuotas atrasadas", "mala_paga"],
 		["Atrasos de pago", "mala_paga"],
+		["Cliente en mora, no aplica descuento", "mala_paga"],
+		["Fraude no detectado, pero cayó en mora", "mala_paga"],
 	] as const)("reconoce variantes explícitas: %s", (texto, categoria) => {
 		expect(clasificarMotivoExplicito(texto)?.categoria).toBe(categoria);
 	});

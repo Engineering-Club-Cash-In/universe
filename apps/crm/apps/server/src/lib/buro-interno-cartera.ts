@@ -110,7 +110,7 @@ const TERMINO_EVIDENCIA_NEGADA =
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+(?:ni|y|o)\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
 );
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;

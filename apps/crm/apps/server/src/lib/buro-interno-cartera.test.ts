@@ -124,6 +124,10 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Fraude no fue comprobado",
 		"Estafa no confirmada",
 		"Mora no existe",
+		"No se detectó el fraude",
+		"No se confirmó la mora",
+		"No se registró una estafa",
+		"Sin el fraude reportado",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -151,6 +155,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		["Cliente en mora, no aplica descuento", "mala_paga"],
 		["Fraude no detectado, pero cayó en mora", "mala_paga"],
 		["Cayó en mora", "mala_paga"],
+		["No se detectó el fraude, pero cayó en mora", "mala_paga"],
+		["Se confirmó el fraude", "fraude"],
 		["Incurrió en mora", "mala_paga"],
 		["No incurrió en mora hasta 2024, luego cayó en mora", "mala_paga"],
 	] as const)("reconoce variantes explícitas: %s", (texto, categoria) => {

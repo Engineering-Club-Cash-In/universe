@@ -1400,8 +1400,13 @@ async function registrarCoincidenciasCarteraSinCola(
 							grupoActual.usuario.nit,
 						)
 					: [];
+				// Un cliente con una sola identidad y sin leads no se confunde con otra
+				// persona: su ficha sigue siendo suya aunque Cartera corrija el nombre.
 				if (
 					grupoActual &&
+					!(
+						identidadesActuales.length <= 1 && grupoActual.leads.length === 0
+					) &&
 					!personaGuardadaFiguraEnCliente(estado.persona, {
 						nombresCompletos: [
 							...identidadesActuales.map((identidad) => identidad.nombreCompleto),
@@ -1551,6 +1556,13 @@ async function registrarCoincidenciasCarteraSinCola(
 					? textoOpcional(grupo.usuario.nit)
 					: null);
 
+			// Con una sola identidad y sin leads, las fuentes del mismo usuario
+			// bastan para reconocer la ficha aunque Cartera corrija el nombre;
+			// así se conserva un retiro manual de Cobros.
+			const identidadUnicaCartera =
+				separarIdentidadesClienteCartera(grupo.usuario.nombre, grupo.usuario.nit)
+					.length <= 1 && grupo.leads.length === 0;
+
 			const condicionIdentidad = or(
 				objetivo.personaAutomatica?.id
 					? eq(buroInternoPersonas.id, objetivo.personaAutomatica.id)
@@ -1578,10 +1590,12 @@ async function registrarCoincidenciasCarteraSinCola(
 				),
 				// La ficha guardada puede seguir apuntando a un SIFCO que ya no está
 				// en riesgo; se reconoce por sus fuentes del mismo usuario de Cartera
-				// y el mismo nombre, sin mezclar las personas de un usuario con `/`.
+				// y, si el cliente tiene varias identidades o leads, también por nombre.
 				and(
 					sql`exists (select 1 from ${buroInternoFuentesCartera} where ${buroInternoFuentesCartera.personaId} = ${buroInternoPersonas.id} and ${buroInternoFuentesCartera.carteraUsuarioId} = ${usuarioId})`,
-					sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
+					identidadUnicaCartera
+						? undefined
+						: sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 				),
 			);
 			const condicionesCandidato = objetivo.candidatos.flatMap((candidato) => {

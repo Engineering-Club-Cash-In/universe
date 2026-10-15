@@ -13,6 +13,7 @@ import {
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
 	fuentesCoincidentesPorUsuario,
+	identidadActualDePersonaGuardada,
 	indexarRelacionesLeadPorSifco,
 	personaGuardadaFiguraEnCliente,
 	reintentarSinTurno,
@@ -445,5 +446,82 @@ describe("reintentarSinTurno", () => {
 				{ maxMs: 1_000, ahora, esperar },
 			),
 		).rejects.toThrow("ocupado");
+	});
+});
+
+describe("identidadActualDePersonaGuardada", () => {
+	const lead = {
+		id: "lead-1",
+		dpi: null,
+		nit: null,
+		nombres: "Juan",
+		apellidos: "Pérez",
+	};
+
+	test("devuelve el lead con el mismo id", () => {
+		const resultado = identidadActualDePersonaGuardada(
+			{
+				leadId: "lead-1",
+				dpi: null,
+				nit: null,
+				nombres: "Otro",
+				apellidos: "Nombre",
+			},
+			{
+				identidades: [{ nombreCompleto: "Juan Pérez", nit: null }],
+				leads: [lead],
+			},
+		);
+		expect(resultado).toEqual({ lead, identidad: null });
+	});
+
+	test("devuelve la identidad base con el mismo NIT normalizado", () => {
+		const identidad = { nombreCompleto: "Empresa Uno", nit: "1234" };
+		const resultado = identidadActualDePersonaGuardada(
+			{
+				leadId: null,
+				dpi: null,
+				nit: "123-4",
+				nombres: "Empresa",
+				apellidos: "Dos",
+			},
+			{ identidades: [identidad], leads: [] },
+		);
+		expect(resultado).toEqual({ lead: null, identidad });
+	});
+
+	test("cliente de identidad única sin leads corresponde a esa identidad", () => {
+		const identidad = { nombreCompleto: "María López", nit: null };
+		const resultado = identidadActualDePersonaGuardada(
+			{
+				leadId: null,
+				dpi: null,
+				nit: null,
+				nombres: "Juan",
+				apellidos: "Pérez",
+			},
+			{ identidades: [identidad], leads: [] },
+		);
+		expect(resultado).toEqual({ lead: null, identidad });
+	});
+
+	test("sin coincidencias con dos identidades devuelve nulos", () => {
+		const resultado = identidadActualDePersonaGuardada(
+			{
+				leadId: null,
+				dpi: null,
+				nit: null,
+				nombres: "Juan",
+				apellidos: "Pérez",
+			},
+			{
+				identidades: [
+					{ nombreCompleto: "María López", nit: "111" },
+					{ nombreCompleto: "Carlos Ruiz", nit: "222" },
+				],
+				leads: [],
+			},
+		);
+		expect(resultado).toEqual({ lead: null, identidad: null });
 	});
 });

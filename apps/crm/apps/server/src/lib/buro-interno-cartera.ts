@@ -94,9 +94,9 @@ export function normalizarMotivoRiesgo(texto: string): string {
 }
 
 const VERBO_DETECCION_NEGADO =
-	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|comet(?:e|en|io|ieron|ido)|adeud(?:a|an|aba|aban|o)|pose(?:e|en|ia|ian)|mantien(?:e|en)|manten(?:ia|ian)|tiene|existe(?:n)?|hay|hubo)/;
+	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|comet(?:e|en|io|ieron|ido)|adeud(?:a|an|aba|aban|o)|pose(?:e|en|ia|ian)|mantien(?:e|en)|manten(?:ia|ian)|tiene|existe(?:n)?|existia(?:n)?|hay|hubo)/;
 const VERBO_ESTADO_NEGADO = new RegExp(
-	`(?:es|era|eran|son|fue|fueron|esta|estaba|estaban|estuvo|tiene|tenia|tenian|tuvo|habia|habian|cuenta\\s+con|ha\\s+(?:habido|tenido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
+	`(?:es|era|eran|son|fue|fueron|esta|estaba|estaban|estuvo|tiene|tenia|tenian|tuvo|habia|habian|existia|existian|presentaba|presentaban|registraba|registraban|reportaba|reportaban|cuenta\\s+con|ha\\s+(?:habido|tenido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
 );
 // Acepta un artículo antes del término: "no se detectó el fraude".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(

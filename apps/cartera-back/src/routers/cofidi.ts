@@ -35,44 +35,18 @@ import { NITSoapClient } from "../cofidi/nitGenerator";
 import { formatearFechaSAT } from "../utils/functions/fechaSAT";
 import type { DTERequest } from "../cofidi/types";
 import {
-  SAT_CONFIG,
   CLUB_CASHIN_CONFIG,
   COFIDI_CONFIG,
+  SAT_CONFIG,
   getInversionistaFacturadorConfig,
-  SE_PRESTA_CONFIG,
-  SE_PRESTA_SAT_CONFIG,
-  AMJK_CONFIG,
-  AMJK_SAT_CONFIG,
-  CREACION_IMAGEN_CONFIG,
-  CREACION_IMAGEN_SAT_CONFIG,
-  GRUPO_BATRO_CONFIG,
-  GRUPO_BATRO_SAT_CONFIG,
-  AUTOCASH_CONFIG,
-  AUTOCASH_SAT_CONFIG,
 } from "../utils/functions/const";
+import { EMISORES, emisorPorClave } from "../cofidi/emisores";
 
-// 🔥 Mapa de emisores disponibles para facturar
-const EMISORES_CONFIG = {
-  CUBE: { config: CLUB_CASHIN_CONFIG, satConfig: SAT_CONFIG },
-  SE_PRESTA: { config: SE_PRESTA_CONFIG, satConfig: SE_PRESTA_SAT_CONFIG },
-  AMJK: { config: AMJK_CONFIG, satConfig: AMJK_SAT_CONFIG },
-  CREACION_IMAGEN: { config: CREACION_IMAGEN_CONFIG, satConfig: CREACION_IMAGEN_SAT_CONFIG },
-  GRUPO_BATRO: { config: GRUPO_BATRO_CONFIG, satConfig: GRUPO_BATRO_SAT_CONFIG },
-  AUTOCASH: { config: AUTOCASH_CONFIG, satConfig: AUTOCASH_SAT_CONFIG },
-} as const;
-
-type EmisorKey = keyof typeof EMISORES_CONFIG;
 type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
 type FacturarGenericoItem = {
   monto: number;
   rubro: string;
 };
-
-// 🔥 Mapa inverso: NIT emisor → config (para anulación automática)
-const EMISOR_POR_NIT: Record<string, { config: typeof CLUB_CASHIN_CONFIG; satConfig: typeof SAT_CONFIG }> = {};
-for (const [, value] of Object.entries(EMISORES_CONFIG)) {
-  EMISOR_POR_NIT[value.config.emisor.nit] = value as any;
-}
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -2575,12 +2549,12 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
     // ============================================
     console.log('📡 Intentando anulación con cada emisor...');
 
-    const emisoresParaIntentar = Object.entries(EMISORES_CONFIG);
     let resultado: any = null;
     let emisorUsado = "";
     let xmlAnulacion = "";
 
-    for (const [emisorKey, emisorConf] of emisoresParaIntentar) {
+    for (const { clave: emisorKey, config, satConfig } of EMISORES) {
+      const emisorConf = { config, satConfig };
       const nitEmisor = emisorConf.config.emisor.nit;
 
       // Reconstruir XML con el NIT del emisor correcto
@@ -3478,8 +3452,13 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         console.log("🔥 ========== FACTURANDO GENÉRICO ==========");
 
         // 🔥 Obtener configuración del emisor
-        const emisorKey = emisor.toUpperCase() as keyof typeof EMISORES_CONFIG;
-        const emisorConfig = EMISORES_CONFIG[emisorKey];
+        const emisorEntry = emisorPorClave(emisor.toUpperCase());
+        if (!emisorEntry) {
+          set.status = 400;
+          return { success: false, error: `Emisor "${emisor}" no existe.` };
+        }
+        const emisorKey = emisorEntry.clave;
+        const emisorConfig = { config: emisorEntry.config, satConfig: emisorEntry.satConfig };
 
         console.log(`📝 NIT: ${nit} | Items: ${itemsInput.length} | Usuario: ${created_by || "N/A"}`);
         console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
@@ -3740,14 +3719,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
           })
         ),
         created_by: t.Optional(t.Number()),
-        emisor: t.Union([
-          t.Literal("CUBE"),
-          t.Literal("SE_PRESTA"),
-          t.Literal("AMJK"),
-          t.Literal("CREACION_IMAGEN"),
-          t.Literal("GRUPO_BATRO"),
-          t.Literal("AUTOCASH"),
-        ]),
+        emisor: t.Union(EMISORES.map((e) => t.Literal(e.clave))),
         credito_nuevo: t.Optional(t.Boolean({ default: false })),
         // Opcional: fecha de vencimiento del abono cambiario (yyyy-mm-dd).
         // Si no viene, se usa la fecha de hoy (comportamiento original).

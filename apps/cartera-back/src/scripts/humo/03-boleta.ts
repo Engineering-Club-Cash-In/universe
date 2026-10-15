@@ -17,7 +17,8 @@ const { insertPayment } = await import(
   "../../controllers/registerPayment"
 );
 
-const hoy = new Date().toISOString().slice(0, 10);
+// Día calendario de Guatemala (no UTC): de 18:00 a 23:59 GT el día UTC ya es "mañana" y fecha_boleta sería futura.
+const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guatemala" }).format(new Date());
 const set: any = { status: 200 };
 const res: any = await insertPayment({
   body: {

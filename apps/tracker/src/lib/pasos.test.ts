@@ -16,6 +16,7 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 	referencia: "11111111",
 	cliente: "Juan P.",
 	agencia: "JAC GUATEMALA",
+	vendedor: null,
 	vehiculo: null,
 	valorVehiculo: 100000,
 	pasoActual: 1,
@@ -24,6 +25,13 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 	cerrado: false,
 	actualizadoAt: "2026-07-01T12:00:00.000Z",
 	historial: [],
+	facturaSeguro: {
+		habilitada: false,
+		motivo: null,
+		subidaAt: null,
+		envio: null,
+		yaRegistrada: false,
+	},
 	...parcial,
 });
 

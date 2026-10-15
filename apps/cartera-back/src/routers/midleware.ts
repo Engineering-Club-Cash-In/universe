@@ -75,3 +75,40 @@ export async function rechazoSiNoEsAdminActivo(
   }
   return null;
 }
+
+export type SesionVerificada =
+  | { ok: true; email: string; role: string }
+  | { ok: false; body: { success: false; message: string } };
+
+/**
+ * Gate por rol con revalidación contra platform_users (mismo criterio que
+ * `rechazoSiNoEsAdminActivo`, para varios roles). Devuelve el email y el rol
+ * VIGENTES de la base: el email es el que firma una condonación (nunca el del
+ * token ni el del body). Si la base falla, lanza: falla CERRADO.
+ */
+export async function rechazoSiNoEsRolActivo(
+  user: any,
+  set: any,
+  roles: readonly string[],
+  buscarSesion: (id: unknown) => Promise<{ email: string; role: string; is_active: boolean } | null> = findSessionUser
+): Promise<SesionVerificada> {
+  const noAutorizado = {
+    success: false as const,
+    message: `[ERROR] No autorizado (requiere ${roles.join(" o ")})`,
+  };
+  if (!user || typeof user.role !== "string" || !roles.includes(user.role)) {
+    set.status = 403;
+    return { ok: false, body: noAutorizado };
+  }
+  const vigente = await buscarSesion(user.id);
+  // Sin email utilizable no hay a nombre de quién firmar: la sesión no sirve.
+  if (!vigente || !vigente.is_active || typeof vigente.email !== "string" || vigente.email.trim() === "") {
+    set.status = 401;
+    return { ok: false, body: SESION_NO_VALIDA };
+  }
+  if (!roles.includes(vigente.role)) {
+    set.status = 403;
+    return { ok: false, body: noAutorizado };
+  }
+  return { ok: true, email: vigente.email, role: vigente.role };
+}

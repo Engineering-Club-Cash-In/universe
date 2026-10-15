@@ -95,6 +95,8 @@ export const carteraCatalog = {
         'provision_portal_accounts', 'retry_crm_contract_batches', 'deliver_nexa_events',
         'retry_nexa_receipts',
         'retry_nexa_accounts',
+        'sweep_late_slip_waivers',
+        'generate_nexa_receipt_images',
       ],
     },
     provider: {

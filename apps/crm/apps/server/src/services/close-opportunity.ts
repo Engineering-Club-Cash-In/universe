@@ -26,6 +26,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { auditedTransaction, auditRecord } from "../lib/audit";
+import { guardarCotizacionDelCierre } from "../lib/cotizacion-del-cierre";
 import { eqDpi } from "../lib/dpi-lookup";
 import { calcularFinanciamientoFechaIdeal } from "../lib/fecha-ideal-cotizacion";
 import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
@@ -1807,6 +1808,11 @@ export async function closeOpportunity(
 				action: "mark_won",
 				data: { numeroSifco },
 			});
+			// En la misma transacción que el `won` (en un savepoint que no puede
+			// tumbar el cierre): la factura del vehículo usa esta cotización tal cual.
+			if (quotation?.id) {
+				await guardarCotizacionDelCierre(opportunityId, quotation.id, tx);
+			}
 
 			// Update vehicle status to 'sold'
 			if (opportunity.vehicleId) {

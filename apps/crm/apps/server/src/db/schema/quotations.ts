@@ -243,9 +243,11 @@ export const opportunityCloseQuotations = pgTable(
 		opportunityId: uuid("opportunity_id")
 			.primaryKey()
 			.references(() => opportunities.id, { onDelete: "cascade" }),
+		// Sin cascada: la cotización del cierre no se puede borrar mientras esté
+		// registrada (la usa el correo de la factura).
 		quotationId: uuid("quotation_id")
 			.notNull()
-			.references(() => quotations.id, { onDelete: "cascade" }),
+			.references(() => quotations.id, { onDelete: "no action" }),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 	},
 );

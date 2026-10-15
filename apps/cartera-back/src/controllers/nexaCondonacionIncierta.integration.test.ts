@@ -84,6 +84,7 @@ const setup = () => (ready ??= (async () => {
   await sql.unsafe(await migracion("0043_mora_pagada_cuota.sql")).simple();
   await sql.unsafe(await migracion("0051_condonacion_nexa_a_tiempo.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   for (const id of CREDITOS) {
     await sql`INSERT INTO cartera.creditos VALUES (${id}, ${`S-${id}`}, 'MOROSO', 10000)`;
     // Cuota 4 vencida hace 20 días (la que el pago tiene que cubrir) y cuota 5 a futuro.

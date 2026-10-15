@@ -601,11 +601,21 @@ export interface PlantillaMensaje {
 	asunto: string;
 	cuerpo: string;
 	/**
-	 * Plantilla con imagen: se envía por un template de WittyBots con header de
-	 * imagen y `parametros` variables de body (un bloque del cuerpo por variable),
-	 * en vez de `mensajeNparametro`.
+	 * Plantilla con imagen o video: se envía por un template de WittyBots con
+	 * header de ese tipo y `parametros` variables de body (un bloque del cuerpo
+	 * por variable), en vez de `mensajeNparametro`.
 	 */
-	adjunto?: { templateName: string; imagenUrl: string; parametros: number };
+	adjunto?: {
+		templateName: string;
+		tipo: "image" | "video";
+		mediaUrl: string;
+		parametros: number;
+	};
+	/**
+	 * Solo se envía a créditos con cuenta Nexa aunque el cuerpo no use
+	 * {cuentaNexa} (p. ej. el video de cómo transferir a la cuenta exclusiva).
+	 */
+	soloConCuentaNexa?: boolean;
 }
 
 /**
@@ -635,6 +645,15 @@ export function cuerpoCubreAdjunto(
 export const CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL =
 	process.env.COBROS_CUENTA_NEXA_IMAGEN_URL ||
 	"https://pub-e8fc0de6a599420ea473808b97217fdd.r2.dev/cobros/extras/a7f8d584-2c7d-4260-bf83-8acfe59457bf.jpeg";
+
+/**
+ * Video del mensaje con video (bucket público `crm` de R2). MP4 H.264/AAC de
+ * hasta 16 MB, que es lo que WhatsApp acepta en el header del template.
+ * `COBROS_MENSAJE_VIDEO_URL` permite cambiarlo sin desplegar.
+ */
+export const MENSAJE_VIDEO_URL =
+	process.env.COBROS_MENSAJE_VIDEO_URL ||
+	"https://pub-e8fc0de6a599420ea473808b97217fdd.r2.dev/cobros/extras/bed686ea-0317-4781-be30-b788e851c976.mp4";
 
 export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
@@ -714,19 +733,41 @@ export const COBROS_MOTIVO_SIN_CUENTA_NEXA =
  * Nexa: el cliente recibiría "Banco Nexa / Cuenta Monetaria / " sin número. La
  * plantilla "Nueva cuenta exclusiva Nexa" solo le sale a quien ya tiene cuenta;
  * el resto se descarta con motivo (mismo patrón que los otros gates).
+ * `exigirCuenta` aplica la misma regla a plantillas que hablan de la cuenta
+ * sin mostrar el número (`soloConCuentaNexa`).
  */
 export function prepararCuentaNexaParaEnvio(
 	cuerpo: string,
 	cuentaNexa: string | null | undefined,
+	exigirCuenta = false,
 ): { enviar: true; cuentaNexa: string } | { enviar: false; motivo: string } {
 	const cuenta = cuentaNexa?.trim() ?? "";
-	if (!cuerpo.includes("{cuentaNexa}")) {
+	if (!exigirCuenta && !cuerpo.includes("{cuentaNexa}")) {
 		return { enviar: true, cuentaNexa: cuenta };
 	}
 	if (!cuenta) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_CUENTA_NEXA };
 	}
 	return { enviar: true, cuentaNexa: cuenta };
+}
+
+/**
+ * El masivo pide a cartera-back el detalle de cada crédito solo si el mensaje
+ * lo necesita: las variables que salen de ahí o una plantilla
+ * `soloConCuentaNexa`, cuyo gate lee la cuenta Nexa del mismo detalle (sin él
+ * la cuenta queda vacía y se descartaría a todos).
+ */
+export function necesitaDetalleCartera(
+	cuerpo: string,
+	soloConCuentaNexa: boolean,
+): boolean {
+	return (
+		soloConCuentaNexa ||
+		cuerpo.includes("{montoAdeudado}") ||
+		cuerpo.includes("{incrementoDiarioMora}") ||
+		cuerpo.includes("{incrementoMaximoMensualMora}") ||
+		cuerpo.includes("{cuentaNexa}")
+	);
 }
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -983,7 +1024,8 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		asunto: "Tu nueva cuenta exclusiva para pagos",
 		adjunto: {
 			templateName: "mensaje4image",
-			imagenUrl: CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL,
+			tipo: "image",
+			mediaUrl: CUENTA_NEXA_EXCLUSIVA_IMAGEN_URL,
 			parametros: 4,
 		},
 		// Template `mensaje4image` (header imagen + 4 variables de body). WhatsApp
@@ -1001,6 +1043,33 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 🔢 *Cuenta Monetaria : {cuentaNexa}*
 
 Tus canales actuales continúan habilitados. Sin embargo, esta nueva alternativa fue diseñada para brindarte una experiencia más simple y eficiente. 📞 Si tienes alguna consulta, comunícate con tu ejecutivo al {telefonoAsesor}.`,
+	},
+	{
+		id: "mensaje_video",
+		nombre: "Video transferencia Nexa",
+		etapa: "al_dia",
+		asunto: "Cómo pagar a tu nueva cuenta exclusiva",
+		adjunto: {
+			templateName: "mensaje4video",
+			tipo: "video",
+			mediaUrl: MENSAJE_VIDEO_URL,
+			parametros: 4,
+		},
+		// Explica cómo transferir a la cuenta exclusiva: sin cuenta Nexa no
+		// aplica, aunque el cuerpo no muestre el número.
+		soloConCuentaNexa: true,
+		// Template `mensaje4video` (header video + 4 variables de body). Mismas
+		// reglas que `mensaje4image`: un bloque por variable, cada bloque en una
+		// sola línea (WhatsApp no admite saltos de línea dentro de una variable).
+		// El template ya antepone su saludo y cierra con "Att, Club Cash In": el
+		// cuerpo arranca con el nombre y no lleva firma ni aviso no-reply.
+		cuerpo: `{clienteNombre}, como parte de la nueva experiencia de pagos de tu crédito, te compartimos este video donde te mostramos paso a paso cómo realizar una transferencia a tu nueva cuenta exclusiva.
+
+Esta nueva modalidad te brinda una forma más simple de gestionar tus pagos.
+
+🎥 *Mira el video y conoce lo fácil que es realizar tu transferencia.*
+
+📞 Si tienes alguna consulta o necesitas apoyo para realizar tu primer pago, comunícate con tu ejecutivo al {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",

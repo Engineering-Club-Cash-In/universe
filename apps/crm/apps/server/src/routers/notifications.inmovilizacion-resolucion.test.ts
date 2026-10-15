@@ -281,33 +281,4 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		});
 		expect(updateLlamado).toBe(true);
 	});
-
-	it("b3_llamada_supervisor (CB-035): resolved/dismissed a mano rechaza y reabrir una terminal usa el texto genérico", async () => {
-		cobrosTipoMock = "b3_llamada_supervisor";
-		notifStatusMock = "pending";
-		for (const status of ["resolved", "dismissed"] as const) {
-			await expect(
-				call(
-					notificationsRouter.changeNotificationStatus,
-					{ notificationId: "11111111-1111-1111-1111-111111111111", status },
-					{ context: ctx() },
-				),
-			).rejects.toMatchObject({ code: "BAD_REQUEST" });
-		}
-		notifStatusMock = "resolved";
-		await expect(
-			call(
-				notificationsRouter.changeNotificationStatus,
-				{
-					notificationId: "11111111-1111-1111-1111-111111111111",
-					status: "pending",
-				},
-				{ context: ctx() },
-			),
-		).rejects.toMatchObject({
-			code: "BAD_REQUEST",
-			message:
-				"No se puede reabrir una notificación de un flujo de cobros que ya fue resuelta.",
-		});
-	});
 });

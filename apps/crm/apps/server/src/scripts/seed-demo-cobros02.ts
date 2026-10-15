@@ -2487,41 +2487,6 @@ async function sembrar() {
 			cahIns.map((r) => r.historial_id),
 		);
 
-		// Tareas de B3 para el supervisor: ingresos a B3 de los últimos 3 días hábiles.
-		const desdeB3 =
-			sumarHabiles(sumarDias(HOY, -6), 0) < sumarDias(HOY, -4)
-				? sumarDias(HOY, -4)
-				: sumarDias(HOY, -6);
-		for (const r of bhIns) {
-			if (r.tipo_evento !== "SUBIDA" || r.bucket_nuevo !== 3) continue;
-			const fecha = String(r.fecha);
-			if (fecha.slice(0, 10) < desdeB3) continue;
-			const c = datos.creditos.find((x) => x.id === r.credito_id);
-			const casoId = c ? casoPorSifco.get(c.sifco) : undefined;
-			if (!c || !casoId) continue;
-			const vence = enGT(
-				sumarHabiles(sumarDias(fecha.slice(0, 10), 1), 3),
-				23,
-				59,
-				59,
-			);
-			for (const sup of datos.supervisores)
-				notif({
-					titulo: "Llamar al cliente: ingresó a B3",
-					descripcion: `El crédito ${c.sifco} (${(fichaPorSifco.get(c.sifco)?.nombre as string) || "cliente"}) ingresó a ${bucketNombre.get(3)}. Llame al cliente antes del ${fechaLegible(vence.slice(0, 10))} para intervenir; si no se cumple, se generará una alerta.`,
-					type: "action_required",
-					cobros_tipo: "b3_llamada_supervisor",
-					cobros_dedup_key: `b3:${r.historial_id}`,
-					fecha_vencimiento: vence,
-					created_by: ctx.sistema,
-					created_by_role: "admin",
-					assigned_to_role: "cobros_supervisor",
-					assigned_to: sup.id,
-					related_entity_id: casoId,
-					created_at: sumarMin(fecha, 8 * 60),
-				});
-		}
-
 		const ins = async (tabla: string, filas: Fila[], extra = "") => {
 			const r = await insertar(
 				tx,

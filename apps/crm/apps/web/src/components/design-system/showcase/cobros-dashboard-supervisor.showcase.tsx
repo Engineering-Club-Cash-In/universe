@@ -262,19 +262,6 @@ const ITEMS_SIN_FUENTE = ITEMS_HOY.map((i) =>
 		: i,
 );
 
-/** Tareas B3: en la pantalla real es MisTareasB3 (consulta propia). */
-function TareasEjemplo() {
-	return (
-		<div className="flex flex-col gap-2 border-brand/20 border-t pt-3">
-			<span className="type-label-base text-fg">Mis tareas · 2</span>
-			<p className="type-caption text-fg-secondary">
-				Aquí se muestran las Tareas B3 del supervisor (MisTareasB3): llamadas
-				por ingreso a B3, vencidas primero, con «Ver caso».
-			</p>
-		</div>
-	);
-}
-
 const BASE: DashboardSupervisorVistaProps = {
 	encabezado: {
 		saludo: "Buen día",
@@ -287,7 +274,6 @@ const BASE: DashboardSupervisorVistaProps = {
 		// Resueltas hoy = aprobacionesResueltasHoy + otrasResueltasHoy.
 		aprobaciones: { pendientes: TOTAL_APROBACIONES, resueltasHoy: 6 },
 		cargando: false,
-		tareas: <TareasEjemplo />,
 	},
 	desempeno: {
 		periodo: "dia",

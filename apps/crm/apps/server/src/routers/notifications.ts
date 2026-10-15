@@ -386,10 +386,6 @@ export const notificationsRouter = {
 				// Recordatorio de apagado aprobado sin ejecutar: se cierra al ejecutarlo
 				// o cancelarlo, no a mano (ocultarlo no ejecuta nada).
 				"inmovilizacion_ejecutar_pendiente",
-				// CB-035: la tarea de llamada por ingreso a B3 se cierra al registrar
-				// una llamada en el caso (createContactoCobros) o por el job; ocultarla
-				// a mano dejaría al supervisor sin la tarea y sin la alerta de vencida.
-				"b3_llamada_supervisor",
 				// CB-043: la solicitud de recuperación se cierra al decidirla (o al
 				// cancelarse / quedar sin efecto). Ocultarla a mano dejaba la
 				// solicitud pendiente sin nadie que la viera.

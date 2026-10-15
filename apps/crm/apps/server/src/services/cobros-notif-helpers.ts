@@ -40,8 +40,6 @@ export type CobrosNotifTipo =
 	| "inmovilizacion_apagado_ejecutado"
 	| "inmovilizacion_reactivacion_ejecutada"
 	| "recuperacion_vehiculo"
-	| "b3_llamada_supervisor"
-	| "b3_llamada_vencida"
 	| "visita_programada"
 	| "recuperacion_pendiente_aprobacion"
 	| "recuperacion_resuelta"
@@ -153,8 +151,6 @@ export function filasNotificacionCobros(params: {
 	dedupKey?: string;
 	/** `type` de la notificación. Default `reminder`; las tareas usan `action_required`. */
 	type?: "reminder" | "action_required";
-	/** Plazo de la tarea (CB-035). Se omite en los avisos que no tienen vencimiento. */
-	fechaVencimiento?: Date;
 }): NewNotification[] {
 	const base = {
 		titulo: params.titulo,
@@ -165,9 +161,6 @@ export function filasNotificacionCobros(params: {
 		relatedEntityId: params.casoId,
 		redirectPage: "cobros_detail" as const,
 		...(params.dedupKey ? { cobrosDedupKey: params.dedupKey } : {}),
-		...(params.fechaVencimiento
-			? { fechaVencimiento: params.fechaVencimiento }
-			: {}),
 	};
 
 	const filas: NewNotification[] = [];

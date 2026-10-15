@@ -138,7 +138,6 @@ import { recuperacionSolicitudesRouter } from "./routers/recuperacion-solicitude
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import { referenciasCobrosRouter } from "./routers/referencias-cobros";
 import { supervisionCobrosRouter } from "./routers/supervision-cobros";
-import { tareasCobrosRouter } from "./routers/tareas-cobros";
 import { visitasCobrosRouter } from "./routers/visitas-cobros";
 import { wialonRouter } from "./routers/wialon";
 import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
@@ -345,7 +344,6 @@ const handler = new RPCHandler(
 		referenciasCobrosRouter,
 		visitasCobrosRouter,
 		investigacionesRedesCobrosRouter,
-		tareasCobrosRouter,
 		partnerTrackerRouter,
 		buroInternoProcedures,
 		misPendientesInmovilizacionRouter,

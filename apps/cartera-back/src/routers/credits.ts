@@ -57,7 +57,10 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
 import { StatusCredit } from "../database/db/schema";
 import { obtenerCreditosParaBuroInterno } from "../controllers/buroInternoCredits";
-import { ErrorEntradaBuroInterno } from "../controllers/buroInternoCursor";
+import {
+  ErrorEntradaBuroInterno,
+  ErrorSnapshotBuroInterno,
+} from "../controllers/buroInternoCursor";
 
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
@@ -133,6 +136,10 @@ export const creditRouter = new Elysia()
     } catch (error) {
       if (error instanceof ErrorEntradaBuroInterno) {
         set.status = 400;
+        return { message: error.message };
+      }
+      if (error instanceof ErrorSnapshotBuroInterno) {
+        set.status = 409;
         return { message: error.message };
       }
       console.error("Error consultando créditos para buró interno:", error);

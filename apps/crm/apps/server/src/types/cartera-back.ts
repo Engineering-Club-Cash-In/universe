@@ -766,6 +766,7 @@ export interface PaginaCreditosBuroInterno {
 	hasMore: boolean;
 	nextCursor: string | null;
 	snapshotMaxCreditoId: number;
+	snapshotVersion: string;
 }
 
 export interface GetAllCreditsParams {

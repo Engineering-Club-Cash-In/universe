@@ -86,7 +86,7 @@ const PREFIJO_NEGACION_INDIRECTA = new RegExp(
 	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
 );
 const PREFIJO_CONTEXTO_NO_RIESGO =
-	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|victimas?\s+de)\s+$/;
+	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
 const SUFIJO_NEGACION =
 	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
 
@@ -281,7 +281,9 @@ export function validarPaginaCreditosBuroInterno(
 		typeof value.hasMore !== "boolean" ||
 		!(typeof value.nextCursor === "string" || value.nextCursor === null) ||
 		!Number.isSafeInteger(value.snapshotMaxCreditoId) ||
-		Number(value.snapshotMaxCreditoId) < 0
+		Number(value.snapshotMaxCreditoId) < 0 ||
+		typeof value.snapshotVersion !== "string" ||
+		!/^[a-f0-9]{32}$/.test(value.snapshotVersion)
 	) {
 		throw new Error(
 			"Cartera devolvió una página inválida para el buró interno.",

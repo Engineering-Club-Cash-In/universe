@@ -1007,6 +1007,7 @@ async function cargarCreditosCarteraSinCompartir(): Promise<
 	let cursor: string | undefined;
 	let cursorAnterior: string | undefined;
 	let snapshotMaxCreditoId: number | null = null;
+	let snapshotVersion: string | null = null;
 	let ultimoCreditoId = 0;
 
 	for (let page = 1; page <= 10_000; page += 1) {
@@ -1018,13 +1019,16 @@ async function cargarCreditosCarteraSinCompartir(): Promise<
 			!Number.isSafeInteger(respuesta.snapshotMaxCreditoId) ||
 			respuesta.snapshotMaxCreditoId < 0 ||
 			(snapshotMaxCreditoId !== null &&
-				respuesta.snapshotMaxCreditoId !== snapshotMaxCreditoId)
+				respuesta.snapshotMaxCreditoId !== snapshotMaxCreditoId) ||
+			(snapshotVersion !== null &&
+				respuesta.snapshotVersion !== snapshotVersion)
 		) {
 			throw new Error(
-				"El límite de la consulta de créditos de Cartera cambió durante la búsqueda del buró.",
+				"La versión de la consulta de créditos de Cartera cambió durante la búsqueda del buró.",
 			);
 		}
 		snapshotMaxCreditoId ??= respuesta.snapshotMaxCreditoId;
+		snapshotVersion ??= respuesta.snapshotVersion;
 		if (respuesta.data.length === 0 && respuesta.hasMore) {
 			throw new Error(
 				"Cartera devolvió una página vacía con más créditos pendientes para el buró.",

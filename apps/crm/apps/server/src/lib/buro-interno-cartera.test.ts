@@ -83,6 +83,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Descuento de mora autorizado",
 		"Canceló pagando la mora pendiente",
 		"Cliente víctima de estafa",
+		"Fue víctima de una estafa",
+		"Es víctima del fraude",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -110,6 +112,14 @@ describe("clasificación de evidencia de Cartera", () => {
 		expect(
 			clasificarMotivoExplicito(
 				"No se detectó evidencia de fraude inicialmente; luego se confirmó fraude",
+			)?.categoria,
+		).toBe("fraude");
+	});
+
+	test("no oculta fraude afirmativo posterior a un contexto de víctima", () => {
+		expect(
+			clasificarMotivoExplicito(
+				"Fue víctima de una estafa; luego cometió fraude",
 			)?.categoria,
 		).toBe("fraude");
 	});
@@ -255,6 +265,7 @@ describe("contrato de la página de Cartera", () => {
 			hasMore: false,
 			nextCursor: null,
 			snapshotMaxCreditoId: 1,
+			snapshotVersion: "0123456789abcdef0123456789abcdef",
 		};
 		expect(() => validarPaginaCreditosBuroInterno(pagina)).not.toThrow();
 	});
@@ -266,6 +277,7 @@ describe("contrato de la página de Cartera", () => {
 				hasMore: false,
 				nextCursor: null,
 				snapshotMaxCreditoId: 1,
+				snapshotVersion: "0123456789abcdef0123456789abcdef",
 			}),
 		).toThrow("crédito inválido");
 	});
@@ -284,7 +296,20 @@ describe("contrato de la página de Cartera", () => {
 				hasMore: false,
 				nextCursor: null,
 				snapshotMaxCreditoId: 1,
+				snapshotVersion: "0123456789abcdef0123456789abcdef",
 			}),
 		).toThrow("crédito inválido");
+	});
+
+	test("rechaza una versión de snapshot inválida", () => {
+		expect(() =>
+			validarPaginaCreditosBuroInterno({
+				data: [],
+				hasMore: false,
+				nextCursor: null,
+				snapshotMaxCreditoId: 1,
+				snapshotVersion: "invalida",
+			}),
+		).toThrow("página inválida");
 	});
 });

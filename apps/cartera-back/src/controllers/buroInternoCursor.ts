@@ -8,23 +8,32 @@ export class ErrorEntradaBuroInterno extends Error {
 	}
 }
 
+export class ErrorSnapshotBuroInterno extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ErrorSnapshotBuroInterno";
+	}
+}
+
 export type CursorBuroInterno = {
 	lastCreditoId: number;
 	maxCreditoId: number;
+	snapshotVersion: string;
 };
 
 export function codificarCursorBuroInterno(cursor: CursorBuroInterno): string {
-	return `${cursor.lastCreditoId}:${cursor.maxCreditoId}`;
+	return `${cursor.lastCreditoId}:${cursor.maxCreditoId}:${cursor.snapshotVersion}`;
 }
 
 export function decodificarCursorBuroInterno(
 	value: string | undefined,
 ): CursorBuroInterno | null {
 	if (value === undefined || value === "") return null;
-	const match = /^(\d+):(\d+)$/.exec(value);
+	const match = /^(\d+):(\d+):([a-f0-9]{32})$/.exec(value);
 	if (!match) throw new ErrorEntradaBuroInterno("Cursor de buró inválido.");
 	const lastCreditoId = Number(match[1]);
 	const maxCreditoId = Number(match[2]);
+	const snapshotVersion = match[3];
 	if (
 		!Number.isSafeInteger(lastCreditoId) ||
 		!Number.isSafeInteger(maxCreditoId) ||
@@ -34,7 +43,7 @@ export function decodificarCursorBuroInterno(
 	) {
 		throw new ErrorEntradaBuroInterno("Cursor de buró inválido.");
 	}
-	return { lastCreditoId, maxCreditoId };
+	return { lastCreditoId, maxCreditoId, snapshotVersion };
 }
 
 export function parsearTamanioPaginaBuroInterno(

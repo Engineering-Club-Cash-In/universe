@@ -19,9 +19,6 @@ import { type Destino, EnlaceDestino } from "./destino";
  * La barra cuenta los mismos tipos en los dos lados: pendientes = convenios,
  * recuperaciones, apagados, rebajas, documentos y Jurídico; resueltas =
  * `aprobacionesResueltasHoy` + `otrasResueltasHoy`.
- *
- * `tareas` es el hueco de las Tareas B3 del supervisor (MisTareasB3), que se
- * mudaron aquí desde la Cola del día: se dibujan al pie, separadas por una línea.
  */
 
 export type TonoPendiente = "neutral" | "warning" | "danger" | "brand";
@@ -60,8 +57,6 @@ export type PendientesHoyProps = {
 	/** Aprobaciones pendientes ahora y resueltas hoy (`null` = sin dato, «—»). */
 	aprobaciones: { pendientes: number | null; resueltasHoy: number | null };
 	cargando: boolean;
-	/** Tareas B3 del supervisor (MisTareasB3); se oculta solo si no hay tareas. */
-	tareas?: React.ReactNode;
 };
 
 function ContenidoItem({ item }: { item: ItemPendiente }) {
@@ -162,7 +157,6 @@ export function PendientesHoy({
 	items,
 	aprobaciones,
 	cargando,
-	tareas,
 }: PendientesHoyProps) {
 	return (
 		<section
@@ -190,7 +184,6 @@ export function PendientesHoy({
 					</ul>
 				</>
 			)}
-			{tareas}
 		</section>
 	);
 }

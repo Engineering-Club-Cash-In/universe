@@ -815,8 +815,6 @@ export function ContactoModal({
 			if (visitaId) {
 				queryClient.invalidateQueries({ queryKey: orpc.getVisitasCaso.key() });
 			}
-			// CB-035: una llamada cierra la tarea B3 del caso en el servidor.
-			queryClient.invalidateQueries(orpc.getMisTareasCobros.queryOptions());
 			onCreado?.(contacto);
 			form.reset();
 			// Embebido no cierra nada: el Workspace pasa a «Gestión registrada»

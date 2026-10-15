@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { saludoPorHora } from "@/components/cobros/asesor/dashboard-asesor-vista";
-import { MisTareasB3 } from "@/components/cobros/mis-tareas-b3";
 import { aprobacionesParaDashboard } from "@/components/cobros/solicitudes/normalizar";
 import type { Bucket } from "@/components/ds/badges";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -215,13 +214,6 @@ export function DashboardSupervisor() {
 	const agendaQuery = useQuery({
 		...orpc.getCumplimientoAgendaResumen.queryOptions({ input: {} }),
 		enabled: habilitado,
-	});
-
-	// Mismo queryKey que usa MisTareasB3: solo para saber si hay tareas.
-	const tareasQuery = useQuery({
-		...orpc.getMisTareasCobros.queryOptions(),
-		enabled: habilitado,
-		refetchInterval: 60_000,
 	});
 
 	/* ── Derivados ─────────────────────────────────────────────────────────── */
@@ -467,8 +459,6 @@ export function DashboardSupervisor() {
 		);
 	}
 
-	const tieneTareas = (tareasQuery.data?.tareas?.length ?? 0) > 0;
-
 	return (
 		<DashboardSupervisorVista
 			encabezado={{
@@ -487,9 +477,6 @@ export function DashboardSupervisor() {
 					resueltasHoy,
 				},
 				cargando: cargandoAprobaciones && coberturasQuery.isLoading,
-				tareas: tieneTareas ? (
-					<MisTareasB3 onVerCaso={(sifco) => abrirFicha(sifco, "caso")} />
-				) : null,
 			}}
 			desempeno={{
 				periodo,

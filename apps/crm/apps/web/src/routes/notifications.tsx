@@ -53,13 +53,10 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import {
 	COBROS_TIPO_PRIORITARIO,
-	COBROS_TIPOS_TAREA,
 	coincideFiltroCobros,
 	esPrioritaria,
-	FILTRO_COBROS_TAREAS,
 	FILTRO_COBROS_TODAS,
 	ordenarPorPrioridad,
-	tareaVencida,
 } from "@/lib/notificaciones-cobros";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
@@ -623,10 +620,14 @@ function NotificationsPage() {
 		"all",
 	);
 	// COBROS-02: filtro por subtipo de alerta de cobros (columna cobros_tipo).
-	const [cobrosFilter, setCobrosFilter] = usePersistedState<string>(
+	const [cobrosFilterGuardado, setCobrosFilter] = usePersistedState<string>(
 		"notifications/cobrosFilter",
 		"all",
 	);
+	// "__tareas__" era el filtro «Solo tareas» (CB-035, retirado): si quedó
+	// guardado en la sesión, se trata como "all" en vez de filtrar la lista a vacío.
+	const cobrosFilter =
+		cobrosFilterGuardado === "__tareas__" ? "all" : cobrosFilterGuardado;
 
 	// Tipos (redirect_page) que este usuario/rol realmente tiene — alimenta el
 	// dropdown para que solo aparezcan las opciones a las que tiene acceso.
@@ -805,16 +806,6 @@ function NotificationsPage() {
 			.map((t) => ({ value: t, label: COBROS_TIPO_CONFIG[t]?.label ?? t }))
 			.sort((a, b) => a.label.localeCompare(b.label));
 	}, [notifications]);
-
-	// ¿Hay tareas (CB-035) en lo que ve el usuario? Solo entonces se ofrece el
-	// grupo "Solo tareas" en el filtro.
-	const hayTareas = useMemo(
-		() =>
-			notifications.some(
-				(n) => n.cobrosTipo && COBROS_TIPOS_TAREA.includes(n.cobrosTipo),
-			),
-		[notifications],
-	);
 
 	// Para mostrar de qué aviso viene cada alerta de modo agente.
 	const titulosPorId = useMemo(
@@ -1081,11 +1072,6 @@ function NotificationsPage() {
 							<SelectItem value={FILTRO_COBROS_TODAS}>
 								Solo alertas de cobros
 							</SelectItem>
-							{(hayTareas || cobrosFilter === FILTRO_COBROS_TAREAS) && (
-								<SelectItem value={FILTRO_COBROS_TAREAS}>
-									Solo tareas
-								</SelectItem>
-							)}
 							{availableCobrosTipos.map((opt) => (
 								<SelectItem key={opt.value} value={opt.value}>
 									{opt.label}
@@ -1181,7 +1167,6 @@ function NotificationCard({
 		relatedEntityId: string | null;
 		redirectPage?: string | null;
 		cobrosTipo?: string | null;
-		fechaVencimiento?: Date | null;
 		notificacionOrigenId?: string | null;
 		createdAt: Date;
 	};
@@ -1255,15 +1240,6 @@ function NotificationCard({
 	const isInProgress = notification.status === "in_progress";
 	const isAviso = notification.type === "aviso";
 	const isUploadType = notification.type === "action_upload_files";
-	// Las tareas de cobros se cierran solas (llamada registrada / job): el
-	// backend rechaza Resolver y Descartar a mano, así que no se ofrecen.
-	const esTareaCobros =
-		!!notification.cobrosTipo &&
-		COBROS_TIPOS_TAREA.includes(notification.cobrosTipo);
-	const plazoVencido =
-		esTareaCobros &&
-		!!notification.fechaVencimiento &&
-		tareaVencida(notification.fechaVencimiento);
 	const isResolved = notification.status === "resolved";
 	const isDismissed = notification.status === "dismissed";
 	const prioritaria = esPrioritaria(notification);
@@ -1326,23 +1302,6 @@ function NotificationCard({
 									{notification.descripcion}
 								</p>
 							)}
-							{notification.fechaVencimiento &&
-								notification.cobrosTipo &&
-								COBROS_TIPOS_TAREA.includes(notification.cobrosTipo) && (
-									<p
-										className={`mt-1 font-medium text-[11px] ${
-											plazoVencido
-												? "text-red-600 dark:text-red-400"
-												: "text-orange-700 dark:text-orange-400"
-										}`}
-									>
-										{plazoVencido ? "Venció el" : "Vence el"}{" "}
-										{new Date(notification.fechaVencimiento).toLocaleDateString(
-											"es-GT",
-											{ timeZone: "America/Guatemala" },
-										)}
-									</p>
-								)}
 							{notification.notificacionOrigenId && (
 								<p className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
 									<Link2 className="h-3 w-3" />
@@ -1529,21 +1488,6 @@ function NotificationCard({
 									>
 										<XCircle className="mr-1 h-3 w-3" />
 										Descartar
-									</Button>
-								)}
-							</>
-						) : esTareaCobros ? (
-							<>
-								{isPending && (
-									<Button
-										size="sm"
-										variant="outline"
-										className="h-7 text-xs"
-										onClick={() => onChangeStatus("read")}
-										disabled={isChanging}
-									>
-										<Eye className="mr-1 h-3 w-3" />
-										Leída
 									</Button>
 								)}
 							</>

@@ -235,7 +235,6 @@ import {
 	isCarteraBackEnabled,
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
-import { cerrarTareasB3DelCaso } from "../services/check-b3-llamada";
 import {
 	notificarConvenioPendienteAprobacion,
 	notificarConvenioResuelto,
@@ -3692,13 +3691,6 @@ export const cobrosRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(casosCobros.id, datos.casoCobroId));
-			}
-
-			// CB-035: una llamada nueva cumple la tarea de llamada por ingreso a B3.
-			// (Editar una promesa no registra gestión nueva.) Best-effort, con await:
-			// es un UPDATE local acotado y ya se traga sus propios errores.
-			if (!promesaContactoId && datos.metodoContacto === "llamada") {
-				await cerrarTareasB3DelCaso(datos.casoCobroId);
 			}
 
 			// CB-030: promesa creada o editada → push best-effort hacia cartera-back

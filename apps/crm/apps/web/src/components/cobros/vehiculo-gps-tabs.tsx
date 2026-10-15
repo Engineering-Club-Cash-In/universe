@@ -10,6 +10,7 @@ import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { CrmCard, CrmPill } from "@/components/ds/cards-credito";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { reglasApagado } from "@/lib/cobros/reglas-caso";
 import { orpc } from "@/utils/orpc";
 
 export type PestanaUbicacion =
@@ -44,7 +45,7 @@ export function PestanasUbicacion({
 	frecuentes?: ReactNode;
 	visitas: ReactNode;
 	notificaciones: ReactNode;
-	apagado: ReactNode;
+	apagado?: ReactNode;
 	conteoNotificaciones?: number;
 }) {
 	return (
@@ -79,10 +80,12 @@ export function PestanasUbicacion({
 						<Bell />
 						Notificaciones
 					</TabsTrigger>
-					<TabsTrigger className={trigger} value="inmovilizacion">
-						<LockOpen />
-						Apagado y reactivación
-					</TabsTrigger>
+					{apagado ? (
+						<TabsTrigger className={trigger} value="inmovilizacion">
+							<LockOpen />
+							Apagado y reactivación
+						</TabsTrigger>
+					) : null}
 				</TabsList>
 				<div className="p-4 sm:p-5">
 					{gps ? (
@@ -101,9 +104,15 @@ export function PestanasUbicacion({
 					<TabsContent className={contenido} forceMount value="notificaciones">
 						{notificaciones}
 					</TabsContent>
-					<TabsContent className={contenido} forceMount value="inmovilizacion">
-						{apagado}
-					</TabsContent>
+					{apagado ? (
+						<TabsContent
+							className={contenido}
+							forceMount
+							value="inmovilizacion"
+						>
+							{apagado}
+						</TabsContent>
+					) : null}
 				</div>
 			</Tabs>
 		</CrmCard>
@@ -210,27 +219,54 @@ export function VehiculoGpsTabs({
 
 	const eventos = useEventosGpsCaso(casoCobroId);
 
+	// Misma consulta que EstadoGpsUnidad (misma clave): sin GPS vinculado no hay
+	// unidad que apagar, así que la pestaña no se ofrece. Mientras carga tampoco,
+	// para que no aparezca y desaparezca.
+	const inmov = useQuery({
+		...orpc.getInmovilizacionesCaso.queryOptions({ input: { casoCobroId } }),
+		staleTime: 30_000,
+		refetchOnWindowFocus: false,
+	});
+	// Sin GPS solo se conserva si hay algo que auditar o reactivar (solicitud
+	// abierta, llamada pendiente, historial o unidad apagada): mismo gate que la tarjeta.
+	const sinApagado =
+		!!inmov.data &&
+		!inmov.data.tieneGps &&
+		!reglasApagado(inmov.data, bucketNumero).mostrarTarjeta;
+	const mostrarApagado = !!inmov.data && !sinApagado;
+	// Pestaña visible: si la elegida (p. ej. por deep link) no está disponible,
+	// cargando, con error o sin GPS, se muestra otra sin perder la elección: al
+	// llegar los datos y habilitarse, vuelve sola a la de apagado.
+	const pestanaVisible: PestanaUbicacion =
+		pestana === "inmovilizacion" && !mostrarApagado
+			? vehicleId
+				? "gps"
+				: "visitas"
+			: pestana;
+
 	return (
 		<PestanasUbicacion
 			apagado={
-				<InmovilizacionCard
-					bucketNumero={bucketNumero}
-					casoCobroId={casoCobroId}
-					convenioBloqueo={convenioBloqueo}
-					embedded
-					esSupervisor={esSupervisor}
-					onCrearConvenio={onCrearConvenio}
-					onReactivacionReabierta={onReactivacionReabierta}
-					onRegistrarLlamada={onRegistrarLlamada}
-					onRegistrarPromesa={onRegistrarPromesa}
-					reabrirReactivacion={reabrirReactivacion}
-				/>
+				!mostrarApagado ? undefined : (
+					<InmovilizacionCard
+						bucketNumero={bucketNumero}
+						casoCobroId={casoCobroId}
+						convenioBloqueo={convenioBloqueo}
+						embedded
+						esSupervisor={esSupervisor}
+						onCrearConvenio={onCrearConvenio}
+						onReactivacionReabierta={onReactivacionReabierta}
+						onRegistrarLlamada={onRegistrarLlamada}
+						onRegistrarPromesa={onRegistrarPromesa}
+						reabrirReactivacion={reabrirReactivacion}
+					/>
+				)
 			}
 			conteoNotificaciones={eventos.data?.length}
 			frecuentes={
 				vehicleId ? (
 					<GpsUbicacionesClaveCard
-						activo={pestana === "ubicaciones"}
+						activo={pestanaVisible === "ubicaciones"}
 						casoCobroId={casoCobroId}
 						embedded
 						vehicleId={vehicleId}
@@ -240,7 +276,7 @@ export function VehiculoGpsTabs({
 			gps={
 				vehicleId ? (
 					<GpsVehiculoCard
-						activo={pestana === "gps"}
+						activo={pestanaVisible === "gps"}
 						casoCobroId={casoCobroId}
 						embedded
 						esSupervisor={esSupervisor}
@@ -252,7 +288,7 @@ export function VehiculoGpsTabs({
 				<GpsEventosHistorial casoCobroId={casoCobroId} embedded />
 			}
 			onValueChange={setPestana}
-			value={pestana}
+			value={pestanaVisible}
 			visitas={visitas}
 		/>
 	);

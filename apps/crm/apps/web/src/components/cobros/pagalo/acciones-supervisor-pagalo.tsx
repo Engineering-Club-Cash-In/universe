@@ -30,6 +30,8 @@ import { authClient } from "@/lib/auth-client";
 import {
 	accionesDisponibles,
 	esReintentoForzado,
+	mensajeVerificacionPagalo,
+	type ResultadoVerificacionPagalo,
 } from "@/lib/cobros/pagalo-acciones";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -131,27 +133,9 @@ export function AccionesSupervisorPagalo({
 
 	const mutationVerificar = useMutation({
 		mutationFn: () => verificar({ groupId, casoCobroId }),
-		onSuccess: (r: {
-			aplicado?: boolean;
-			pagados?: number;
-			statusFinal?: string;
-		}) => {
-			// Se dice lo que PASÓ, no "listo": el caso más común es que el
-			// cliente todavía no pagó, y un toast de éxito ahí hace creer que
-			// el pago entró.
-			if (r?.aplicado) toast.success("Pago verificado y aplicado en cartera.");
-			else if (r?.pagados)
-				toast.success(
-					`${r.pagados} link(s) confirmados. Falta el resto para aplicar.`,
-				);
-			else if (r?.statusFinal === "REVIEW_REQUIRED")
-				toast.warning(
-					"El grupo está en revisión. Revise el motivo en la bitácora.",
-				);
-			else
-				toast.info(
-					"Págalo todavía no reporta el pago. Intente de nuevo más tarde.",
-				);
+		onSuccess: (r: ResultadoVerificacionPagalo) => {
+			const { tipo, mensaje } = mensajeVerificacionPagalo(r);
+			toast[tipo](mensaje);
 			invalidarQueries();
 		},
 		onError: (error: Error) => toast.error(error.message),

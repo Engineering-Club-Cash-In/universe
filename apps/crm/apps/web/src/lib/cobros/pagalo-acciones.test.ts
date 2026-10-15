@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { accionesDisponibles } from "./pagalo-acciones";
+import {
+	accionesDisponibles,
+	mensajeVerificacionPagalo,
+} from "./pagalo-acciones";
 
 describe("accionesDisponibles", () => {
 	test("asesor (no supervisor) no ve ninguna acción de supervisor", () => {
@@ -132,5 +135,101 @@ describe("accionesDisponibles", () => {
 				},
 			);
 		});
+	});
+});
+
+describe("mensajeVerificacionPagalo", () => {
+	test("aplicado gana sobre cualquier otro dato", () => {
+		expect(
+			mensajeVerificacionPagalo({ aplicado: true, pagados: 2 }),
+		).toMatchObject({ tipo: "success" });
+	});
+
+	test("links confirmados sin aplicar avisa que falta el resto", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			statusFinal: "PARTIALLY_PAID",
+		});
+		expect(r.tipo).toBe("success");
+		expect(r.mensaje).toContain("1 link(s) confirmados");
+	});
+
+	test("grupo en revisión es una advertencia, aunque se haya confirmado un link", () => {
+		for (const pagados of [0, 1]) {
+			expect(
+				mensajeVerificacionPagalo({ pagados, statusFinal: "REVIEW_REQUIRED" }),
+			).toMatchObject({ tipo: "warning" });
+		}
+	});
+
+	test("último link confirmado pero el despacho falló: no dice que falta el resto", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			statusFinal: "APPLICATION_FAILED",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).not.toContain("Falta el resto");
+		expect(r.mensaje).toContain("cartera no pudo aplicarlo");
+	});
+
+	test("reintento de un grupo ya fallido que vuelve a fallar no se confunde con «sin pago»", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 0,
+			statusFinal: "APPLICATION_FAILED",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).not.toContain("todavía no reporta");
+	});
+
+	test("pago confirmado esperando aplicarse (despacho tomado por otro proceso)", () => {
+		for (const statusFinal of ["READY_TO_APPLY", "APPLYING"]) {
+			const r = mensajeVerificacionPagalo({ pagados: 1, statusFinal });
+			expect(r.tipo).toBe("info");
+			expect(r.mensaje).toContain("falta aplicarlo");
+		}
+	});
+
+	test("una consulta o voucher fallido no se reporta como «sin pago»", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 0,
+			errores: 1,
+			statusFinal: "PENDING_PAYMENT",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).toContain("No se pudo verificar");
+		expect(r.mensaje).not.toContain("todavía no reporta");
+	});
+
+	test("un link confirmado y otro con error avisa de ambos", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			errores: 1,
+			statusFinal: "PARTIALLY_PAID",
+		});
+		expect(r.tipo).toBe("warning");
+		expect(r.mensaje).toContain("1 link(s) confirmados");
+		expect(r.mensaje).toContain("falló al verificarse");
+	});
+
+	test("el estado final sigue mandando sobre los errores", () => {
+		expect(
+			mensajeVerificacionPagalo({
+				pagados: 1,
+				errores: 1,
+				statusFinal: "APPLICATION_FAILED",
+			}).tipo,
+		).toBe("error");
+		expect(mensajeVerificacionPagalo({ aplicado: true, errores: 1 }).tipo).toBe(
+			"success",
+		);
+	});
+
+	test("sin pago en Págalo no se celebra nada", () => {
+		for (const r of [
+			undefined,
+			{ pagados: 0, statusFinal: "PENDING_PAYMENT" },
+		]) {
+			expect(mensajeVerificacionPagalo(r)).toMatchObject({ tipo: "info" });
+		}
 	});
 });

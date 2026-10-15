@@ -25,7 +25,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { authClient } from "@/lib/auth-client";
+import {
+	mensajeVerificacionPagalo,
+	type ResultadoVerificacionPagalo,
+} from "@/lib/cobros/pagalo-acciones";
 import {
 	copyPagaloLink,
 	getPagaloGroupSummary,
@@ -33,7 +36,6 @@ import {
 	previewMensajePagaloLinks,
 } from "@/lib/cobros/pagalo-link-display";
 import { parseOtrosGTQ } from "@/lib/cobros/pagalo-otros";
-import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 const q = (value: unknown) =>
@@ -359,13 +361,16 @@ export function PagaloLinkDialog({
 		setSelected(
 			todasSeleccionadas ? [] : cuotas.map((cuota: any) => cuota.cuota_id),
 		);
-	// PRUEBA: dispara un ciclo del poller Págalo a demanda, sin esperar el
-	// setInterval de 5 min. Con poller+dispatch unificados, un solo click
-	// alcanza para llevar un link pagado hasta COMPLETED. Borrar junto con
-	// el procedure probarPollPagalo cuando el ciclo automático esté probado.
+	// "Actualizar estado": le pregunta a Págalo por los links de ESTE grupo sin
+	// esperar la cadencia del poller (ignora next_poll_at y el backoff del
+	// dispatch) y, si con eso queda listo, aplica el pago en cartera de una vez.
 	const pollMutation = useMutation({
-		mutationFn: () => (client as any).probarPollPagalo(),
-		onSuccess: (result: any) => {
+		mutationFn: () =>
+			(client as any).verificarPagoLinksGrupo({
+				groupId: grupoPendiente.groupId,
+				casoCobroId,
+			}),
+		onSuccess: (result: ResultadoVerificacionPagalo) => {
 			// .key() = prefijo del path → invalida TODAS las páginas del
 			// historial, que ahora va por crédito y paginado.
 			queryClient.invalidateQueries({
@@ -381,20 +386,17 @@ export function PagaloLinkDialog({
 			// sin este reset, un link marcado pagado por el poll seguiría
 			// mostrándose ACTIVE/copiable acá (hallazgo de Codex, PR #1477).
 			mutation.reset();
-			console.log("[Págalo] resultado del poll:", result);
-			toast.success(
-				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revise la consola.`,
-			);
+			const { tipo, mensaje } = mensajeVerificacionPagalo(result);
+			toast[tipo](mensaje);
 		},
 		onError: (error: Error) =>
-			toast.error(error.message || "No se pudo ejecutar el poll de Págalo"),
+			toast.error(error.message || "No se pudo verificar el estado en Págalo"),
 	});
-	// CB-127: probarPollPagalo pasó a cobrosSupervisorProcedure — el botón
-	// era visible para cualquier asesor sin gate, y disparaba el poller
-	// ENTERO (todos los links pendientes de todos los casos), no solo los
-	// de este caso puntual.
-	const { data: session } = authClient.useSession();
-	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
+	// Grupo cerrado (aplicado o cancelado): no hay nada que consultar y el
+	// server rechaza la verificación.
+	const grupoCerrado =
+		grupoPendiente?.status === "COMPLETED" ||
+		grupoPendiente?.status === "CANCELLED";
 
 	// Abrir el modal y encontrarse la lista en vez del selector se lee como un
 	// error: hay que decir por qué no se están eligiendo cuotas. Los recién
@@ -447,13 +449,9 @@ export function PagaloLinkDialog({
 									</p>
 								)}
 							</div>
-							{/* Temporal: fuerza el ciclo del poller sin esperar los 5
-									    min. Vive acá —discreto, junto al estado que refresca—
-									    en vez de encabezar el modal como si fuera la acción
-									    principal. Solo supervisores (CB-127): dispara el poller
-									    ENTERO, no solo los links de este caso. Borrar junto con
-									    probarPollPagalo. */}
-							{esSupervisor && (
+							{/* Consulta a Págalo por los links de este grupo sin esperar el
+									    backoff, y aplica el pago si ya quedó completo. */}
+							{!grupoCerrado && grupoPendiente?.groupId && (
 								<Button
 									className="shrink-0"
 									disabled={pollMutation.isPending}

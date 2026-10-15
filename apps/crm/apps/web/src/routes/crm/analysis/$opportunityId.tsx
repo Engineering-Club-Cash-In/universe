@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
 import { BuroInternoAnalisis } from "@/components/buro-interno/BuroInternoAnalisis";
+import { ReferenciasRepetidasAnalisis } from "@/components/client-forms/ReferenciasRepetidasAnalisis";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -630,6 +631,9 @@ function OpportunityDocumentsPage() {
 				currentUserRole={userProfile.data?.role}
 				onBloqueoChange={setBloqueadoPorBuroInterno}
 			/>
+
+			{/* Referencias que ya figuran en otro cliente: informativo, no bloquea */}
+			<ReferenciasRepetidasAnalisis opportunityId={opportunityId} />
 
 			{/* Asignaciones pendientes: informativo, no bloquea la aprobación */}
 			{(() => {

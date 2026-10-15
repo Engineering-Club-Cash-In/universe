@@ -78,9 +78,9 @@ import {
 	CardContactoResumen,
 	CardEstadoCobro,
 	CardSeguroFicha,
+	estadoCobroFicha,
 	FilaSeguimiento,
 	FranjaSeguimiento,
-	estadoCobroFicha,
 	tipoTimelineDeGestion,
 } from "@/components/cobros/ficha/ficha-resumen";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
@@ -89,6 +89,7 @@ import {
 	PuntoPendienteInmovilizacion,
 } from "@/components/cobros/inmovilizacion-alerta-ficha";
 import { InvestigacionRedesCard } from "@/components/cobros/investigacion-redes-card";
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -130,6 +131,7 @@ import {
 } from "@/components/cobros/workspace/alertas-leidas";
 import { ContrapropuestaCaso } from "@/components/cobros/workspace/contrapropuesta-caso";
 import { SolicitudesAbiertasCaso } from "@/components/cobros/workspace/solicitudes-caso";
+import { useCasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	type Bucket,
@@ -179,7 +181,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
@@ -724,6 +725,9 @@ function RouteComponent() {
 	const [tabActiva, setTabActivaEstado] = useState(
 		seccion === "inmovilizacion" ? "ubicaciones" : "resumen",
 	);
+	// «Contexto del caso» a la izquierda de los modales de acción. Comparte las
+	// llaves de caché con las consultas de esta ficha: no pide nada nuevo.
+	const contextoModales = useCasoWorkspace(id);
 	const [vista, setVista] = useState<"resumen" | "contacto" | "edicion">(
 		"resumen",
 	);
@@ -5048,7 +5052,10 @@ function RouteComponent() {
 			{/* Modales: montados fuera de las tabs para que no se desmonten al
 			    cambiar de pestaña. Todos controlados desde las acciones. */}
 			<Dialog open={boletaAbierta} onOpenChange={setBoletaAbierta}>
-				<DialogContent className="flex max-h-[92vh] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col overflow-hidden sm:max-w-none">
+				<ModalContenidoConContexto
+					caso={contextoModales}
+					className="flex max-h-[92vh] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col overflow-hidden sm:max-w-none"
+				>
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Upload className="h-5 w-5 text-emerald-600" />
@@ -5063,11 +5070,12 @@ function RouteComponent() {
 						{boletaAbierta && (
 							<RegistrarPagoForm
 								creditoId={id}
+								conContexto
 								onVolver={() => setBoletaAbierta(false)}
 							/>
 						)}
 					</div>
-				</DialogContent>
+				</ModalContenidoConContexto>
 			</Dialog>
 			{caso.id && (
 				<>
@@ -5081,6 +5089,7 @@ function RouteComponent() {
 									    parcial + promesa" propone lo que falta después de lo que
 									    pagó, y es la única variante con el monto editable. */}
 					<ContactoModal
+						contexto={contextoModales}
 						key={promesaDesdeVisita?.visitaId ?? "promesa"}
 						{...propsContacto}
 						metodoInicial={
@@ -5123,6 +5132,7 @@ function RouteComponent() {
 									    verdad (ni pagadas ni en validación): es lo mismo que
 									    cartera considera elegible y el server lo re-valida. */}
 					<ConvenioModal
+						contexto={contextoModales}
 						open={convenioAbierto}
 						onOpenChange={(abierto) => {
 							setConvenioAbierto(abierto);
@@ -5175,6 +5185,7 @@ function RouteComponent() {
 								    cierra al elegir y se lo llevaría puesto. */}
 					{caso.numeroCreditoSifco && caso.carteraCreditoId && (
 						<PagaloLinkDialog
+							contexto={contextoModales}
 							casoCobroId={caso.id}
 							numeroSifco={caso.numeroCreditoSifco}
 							creditoId={caso.carteraCreditoId}
@@ -5189,6 +5200,7 @@ function RouteComponent() {
 								    a null. */}
 					{canalContacto && (
 						<ContactoModal
+							contexto={contextoModales}
 							key={canalContacto}
 							{...propsContacto}
 							metodoInicial={canalContacto}
@@ -5238,6 +5250,7 @@ function RouteComponent() {
 								    dice si traslada (B1–B3) o solo registra (entrega en B4). */}
 					{caso.id && envioRecuperacion && operacionEnvio && (
 						<RecuperacionVehiculoDialog
+							contexto={contextoModales}
 							open
 							onOpenChange={(abierto) => {
 								if (!abierto) {
@@ -5261,6 +5274,7 @@ function RouteComponent() {
 								    completar una programada. Al guardar abre lo que sigue. */}
 					{caso.id && visitaAbierta && (
 						<VisitaDialog
+							contexto={contextoModales}
 							open
 							onOpenChange={(abierto) => {
 								if (!abierto) setVisitaAbierta(null);

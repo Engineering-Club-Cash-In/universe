@@ -119,6 +119,7 @@ export function RegistrarPagoForm({
 	onVolver,
 	onExito,
 	embebido = false,
+	conContexto = false,
 	className,
 }: {
 	/** Mismo id que la ruta de la Ficha 360 (SIFCO o caso). */
@@ -139,6 +140,11 @@ export function RegistrarPagoForm({
 	 * pago»). Sin esto, la página/modal de la ficha de siempre.
 	 */
 	embebido?: boolean;
+	/**
+	 * Modal de la Ficha con «Contexto del caso» al lado: una sola columna y sin
+	 * «Resumen del crédito» (el contexto ya muestra esa información).
+	 */
+	conContexto?: boolean;
 	className?: string;
 }) {
 	const queryClient = useQueryClient();
@@ -1146,8 +1152,15 @@ export function RegistrarPagoForm({
 				// boleta y revisar los datos), a la derecha el crédito como
 				// contexto fijo. Antes todo iba apilado y el formulario quedaba
 				// debajo del pliegue, después de un resumen de media pantalla.
-				<div className="grid gap-6 lg:grid-cols-5 lg:items-start">
-					<div className="space-y-6 lg:col-span-3">
+				<div
+					className={cn(
+						"grid gap-6",
+						!conContexto && "lg:grid-cols-5 lg:items-start",
+					)}
+				>
+					{/* Sin «Resumen del crédito»; el convenio activo sí se avisa. */}
+					{conContexto && tarjetaConvenio}
+					<div className={cn("space-y-6", !conContexto && "lg:col-span-3")}>
 						{pasoBoleta}
 
 						{pasoDatos}
@@ -1162,11 +1175,13 @@ export function RegistrarPagoForm({
 						</div>
 					</div>
 
-					<div className="space-y-6 lg:sticky lg:top-6 lg:col-span-2">
-						{tarjetaResumen}
+					{!conContexto && (
+						<div className="space-y-6 lg:sticky lg:top-6 lg:col-span-2">
+							{tarjetaResumen}
 
-						{tarjetaConvenio}
-					</div>
+							{tarjetaConvenio}
+						</div>
+					)}
 				</div>
 			) : (
 				tarjetaError

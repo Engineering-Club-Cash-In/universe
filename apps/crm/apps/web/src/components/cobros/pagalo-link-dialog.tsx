@@ -10,12 +10,13 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { deduplicarCuotasPagalo } from "server/src/lib/pagalo-installments";
 import { toast } from "sonner";
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
+import type { CasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -64,6 +65,7 @@ export function PagaloLinkDialog({
 	onOpenChange,
 	mostrarTrigger = true,
 	embebido = false,
+	contexto,
 	onCancelar,
 	onExito,
 }: {
@@ -80,6 +82,8 @@ export function PagaloLinkDialog({
 	mostrarTrigger?: boolean;
 	/** Workspace: se pinta dentro del panel de gestión, sin Dialog ni trigger. */
 	embebido?: boolean;
+	/** Ficha 360: caso cuyo «Contexto del caso» se muestra a la izquierda del modal. */
+	contexto?: CasoWorkspace;
 	/** Solo con `embebido`: el botón secundario del pie («Cancelar»/«Volver»). */
 	onCancelar?: () => void;
 	/**
@@ -936,14 +940,17 @@ export function PagaloLinkDialog({
 					</Button>
 				</DialogTrigger>
 			)}
-			<DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
+			<ModalContenidoConContexto
+				caso={contexto}
+				className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden"
+			>
 				<DialogHeader>
 					<DialogTitle>Links de pago Págalo</DialogTitle>
 					<DialogDescription>{descripcion}</DialogDescription>
 				</DialogHeader>
 				<div className="min-h-0 flex-1 overflow-y-auto pr-1">{contenido}</div>
 				{links.length === 0 && <DialogFooter>{botonCrear}</DialogFooter>}
-			</DialogContent>
+			</ModalContenidoConContexto>
 		</Dialog>
 	);
 }

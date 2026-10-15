@@ -37,16 +37,17 @@ import {
 	type TipoEnvioRecuperacion,
 } from "server/src/lib/recuperacion-vehiculo";
 import { toast } from "sonner";
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
 import {
 	ChecklistFormulario,
 	type RespuestasChecklist,
 	respuestasIniciales,
 } from "@/components/cobros/recuperacion-checklist";
+import type { CasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -116,6 +117,8 @@ interface RecuperacionVehiculoDialogProps {
 	onExito?: (r: ResultadoRecuperacion) => void;
 	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
 	embebido?: boolean;
+	/** Ficha 360: caso cuyo «Contexto del caso» se muestra a la izquierda del modal. */
+	contexto?: CasoWorkspace;
 	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
 	onCancelar?: () => void;
 }
@@ -176,6 +179,7 @@ function FormularioRecuperacion({
 	desdeVisita,
 	onExito,
 	embebido = false,
+	contexto,
 	onCancelar,
 }: RecuperacionVehiculoDialogProps) {
 	const queryClient = useQueryClient();
@@ -811,7 +815,10 @@ function FormularioRecuperacion({
 	}
 
 	return (
-		<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+		<ModalContenidoConContexto
+			caso={contexto}
+			className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+		>
 			<DialogHeader>
 				<DialogTitle>{titulo}</DialogTitle>
 				<DialogDescription asChild>
@@ -830,6 +837,6 @@ function FormularioRecuperacion({
 					{botonEnviar}
 				</div>
 			</DialogFooter>
-		</DialogContent>
+		</ModalContenidoConContexto>
 	);
 }

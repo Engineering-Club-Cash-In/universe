@@ -180,7 +180,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)\s+(?:(?:fue|fueron|ha\s+sido|han\s+sido)\s+)?(?:recuperad[oa]s?|reposeid[oa]s?|recogid[oa]s?|recolectad[oa]s?)|se\s+(?:recuper|recogi|recolect)(?:o|aron|a|an)\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion(?:es)?\s+de\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion\s+y\s+venta|venta\s+por\s+recuperacion|(?:se\s+realiza|se\s+realizo|se\s+hizo|realizo)\s+(?:la\s+)?recoleccion|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
+			/(?:^|\s)(?:(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)\s+(?:(?:fue|fueron|ha\s+sido|han\s+sido)\s+)?(?:recuperad[oa]s?|reposeid[oa]s?|recogid[oa]s?|recolectad[oa]s?)|se\s+(?:recuper|recogi|recolect)(?:o|aron|a|an)\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion(?:es)?\s+de\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion\s+y\s+venta|venta\s+por\s+recuperacion|(?:se\s+realiza|se\s+realizo|se\s+hizo|realizo)\s+(?:la\s+)?recoleccion(?!\s+de\s+(?:(?:los|las|el|la)\s+)?(?:documentos?|documentacion|papeles|papeleria|firmas?|expedientes?|requisitos?|boletas?|comprobantes?))|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "vehiculo_recuperado", texto: limpio };

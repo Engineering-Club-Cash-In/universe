@@ -230,6 +230,40 @@ describe("planRestitucionCapital: rechazos (409, no se anula nada)", () => {
   });
 });
 
+describe("residuo negativo que dejaría negativa la restitución", () => {
+  const rosterN = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: i + 1,
+      inversionista_id: i + 1,
+      monto_aportado: "1000",
+      porcentaje_participacion_inversionista: "50",
+      porcentaje_cash_in: "50",
+    }));
+  const planN = (n: number, abono: string) =>
+    planRestitucionCapital({
+      pago: { validationStatus: "validated", abono_capital: abono, registerBy: "x" },
+      credito: { ...CREDITO_9507, capital: "2000.00" },
+      filasPci: Array.from({ length: n }, (_, i) => PCI(i + 1, "0.01")),
+      roster: rosterN(n),
+      cuotaCerrada: true,
+    });
+  const rechazo = { tipo: "RECHAZAR", codigo: "REPARTO_INCONSISTENTE" } as const;
+
+  it("abono 0.02 entre 4 PCI de 0.01: REPARTO_INCONSISTENTE", () => {
+    expect(planN(4, "0.02")).toEqual(rechazo);
+  });
+
+  it("abono 0.03 entre 5 PCI de 0.01: REPARTO_INCONSISTENTE", () => {
+    expect(planN(5, "0.03")).toEqual(rechazo);
+  });
+
+  it("residuo positivo chico: sigue en REPONER y el residuo va al mayor", () => {
+    const plan = planN(3, "0.04");
+    if (plan.tipo !== "REPONER") throw new Error(plan.tipo);
+    expect(plan.inversionistas.map((i) => i.monto_aportado)).toEqual(["1000.02000000", "1000.01000000", "1000.01000000"]);
+  });
+});
+
 describe("precheckAnulacionConCapital (antes de tocar la fila)", () => {
   const base = { validationStatus: "validated", abono_capital: "100", registerBy: "asesor", statusCredit: "ACTIVO" };
 

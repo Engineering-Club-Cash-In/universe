@@ -7,12 +7,13 @@ import {
 	Loader2,
 	Plus,
 	Search,
+	Store,
 	Trash2,
 	User,
 	X,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { type Control, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { VendorGenderSelect } from "@/components/contract-parties/VendorGenderSelect";
@@ -80,21 +81,54 @@ export const Route = createFileRoute("/crm/vendors")({
 	component: VendorsPage,
 });
 
-const vendorSchema = z.object({
-	name: z.string().min(1, "El nombre es requerido"),
-	phone: z.string().optional(),
-	dpi: z
-		.string()
-		.min(13, "DPI debe tener 13 dígitos")
-		.max(13, "DPI debe tener 13 dígitos"),
-	vendorType: z.enum(["individual", "empresa"], {
-		message: "Tipo de vendedor requerido",
-	}),
-	companyName: z.string().optional(),
-	email: z.string().email("Email inválido").optional().or(z.literal("")),
-	address: z.string().optional(),
-	gender: z.enum(["male", "female"]).optional(),
-});
+const TIPO_LABEL: Record<string, string> = {
+	individual: "Individual",
+	empresa: "Empresa",
+	agencia: "Vendedor de agencia",
+};
+
+// Un vendedor de agencia no es el vendedor legal del carro: se identifica por
+// su agencia y su correo (login del tracker), y el DPI es opcional.
+const vendorSchema = z
+	.object({
+		name: z.string().min(1, "El nombre es requerido"),
+		phone: z.string().optional(),
+		dpi: z.string().optional(),
+		vendorType: z.enum(["individual", "empresa", "agencia"], {
+			message: "Tipo de vendedor requerido",
+		}),
+		companyName: z.string().optional(),
+		companyId: z.string().optional(),
+		email: z.string().email("Email inválido").optional().or(z.literal("")),
+		address: z.string().optional(),
+		gender: z.enum(["male", "female"]).optional(),
+	})
+	.superRefine((v, ctx) => {
+		const dpi = v.dpi?.trim() ?? "";
+		if (v.vendorType === "agencia") {
+			if (!v.companyId) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["companyId"],
+					message: "Selecciona la agencia o predio",
+				});
+			}
+			if (!v.email) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["email"],
+					message: "El correo es requerido para un vendedor de agencia",
+				});
+			}
+		}
+		if ((v.vendorType !== "agencia" || dpi) && dpi.length !== 13) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["dpi"],
+				message: "DPI debe tener 13 dígitos",
+			});
+		}
+	});
 
 type VendorFormData = z.infer<typeof vendorSchema>;
 
@@ -105,12 +139,23 @@ type VendorFormData = z.infer<typeof vendorSchema>;
  * no se les podría corregir el nombre ni completar el género.
  */
 const createVendorSchema = vendorSchema.refine(
-	(v) => v.vendorType !== "individual" || cuiValido(normalizarDpi(v.dpi)),
+	(v) => v.vendorType !== "individual" || cuiValido(normalizarDpi(v.dpi ?? "")),
 	{
 		path: ["dpi"],
 		message: "El DPI no es válido: revisa los dígitos",
 	},
 );
+
+function datosParaGuardar(data: VendorFormData) {
+	const esAgencia = data.vendorType === "agencia";
+	return {
+		...data,
+		dpi: data.dpi?.trim() || null,
+		companyId: esAgencia ? data.companyId || null : null,
+		phone: data.phone || undefined,
+		email: data.email || undefined,
+	};
+}
 
 function VendorsPage() {
 	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/vendors/searchTerm", "");
@@ -132,15 +177,16 @@ function VendorsPage() {
 	const vendorsQuery = useQuery({
 		...orpc.getVendors.queryOptions(),
 	});
+	const companiesQuery = useQuery({
+		...orpc.getCompaniesForContracts.queryOptions(),
+	});
+	const agencias: Array<{ id: string; name: string }> =
+		companiesQuery.data ?? [];
 
 	// Mutations
 	const createVendorMutation = useMutation({
 		mutationFn: async (data: VendorFormData) => {
-			return await client.createVendor({
-				...data,
-				phone: data.phone || undefined,
-				email: data.email || undefined,
-			});
+			return await client.createVendor(datosParaGuardar(data));
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getVendors"] });
@@ -154,14 +200,7 @@ function VendorsPage() {
 
 	const updateVendorMutation = useMutation({
 		mutationFn: async ({ id, data }: { id: string; data: VendorFormData }) => {
-			return await client.updateVendor({
-				id,
-				data: {
-					...data,
-					phone: data.phone || undefined,
-					email: data.email || undefined,
-				},
-			});
+			return await client.updateVendor({ id, data: datosParaGuardar(data) });
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getVendors"] });
@@ -196,6 +235,7 @@ function VendorsPage() {
 			dpi: "",
 			vendorType: "individual",
 			companyName: "",
+			companyId: undefined,
 			email: "",
 			address: "",
 			gender: undefined,
@@ -205,6 +245,8 @@ function VendorsPage() {
 	const editForm = useForm<VendorFormData>({
 		resolver: zodResolver(vendorSchema),
 	});
+	const createEsAgencia = createForm.watch("vendorType") === "agencia";
+	const editEsAgencia = editForm.watch("vendorType") === "agencia";
 
 	// DPI → RENAP: autollena nombre y género (solo persona individual).
 	// La identidad sigue al DPI: se recuerda de qué DPI salieron el nombre y el
@@ -254,10 +296,13 @@ function VendorsPage() {
 	const filteredVendors = vendorsQuery.data?.filter((vendor: any) => {
 		const matchesSearch =
 			vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			vendor.dpi.includes(searchTerm) ||
+			(vendor.dpi ?? "").includes(searchTerm) ||
 			(vendor.phone ?? "").includes(searchTerm) ||
 			(vendor.companyName &&
-				vendor.companyName.toLowerCase().includes(searchTerm.toLowerCase()));
+				vendor.companyName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+			(vendor.agenciaNombre ?? "")
+				.toLowerCase()
+				.includes(searchTerm.toLowerCase());
 
 		const matchesType =
 			vendorTypeFilter === "all" || vendor.vendorType === vendorTypeFilter;
@@ -270,9 +315,10 @@ function VendorsPage() {
 		editForm.reset({
 			name: vendor.name,
 			phone: vendor.phone ?? "",
-			dpi: vendor.dpi,
+			dpi: vendor.dpi ?? "",
 			vendorType: vendor.vendorType,
 			companyName: vendor.companyName || "",
+			companyId: vendor.companyId ?? undefined,
 			email: vendor.email || "",
 			address: vendor.address || "",
 			gender: vendor.gender ?? undefined,
@@ -281,7 +327,9 @@ function VendorsPage() {
 		editLookup.cancelar();
 		// El nombre y género guardados son de este DPI
 		editDatosDe.current =
-			vendor.vendorType === "individual" ? soloDigitosDpi(vendor.dpi) : null;
+			vendor.vendorType === "individual"
+				? soloDigitosDpi(vendor.dpi ?? "")
+				: null;
 		setIsEditOpen(true);
 	};
 
@@ -308,7 +356,8 @@ function VendorsPage() {
 				<div>
 					<h1 className="font-bold text-3xl">Vendedores de Vehículos</h1>
 					<p className="mt-2 text-muted-foreground">
-						Gestiona la información de los vendedores de vehículos
+						Gestiona los vendedores de vehículos y los vendedores de agencias y
+						predios
 					</p>
 				</div>
 
@@ -372,7 +421,9 @@ function VendorsPage() {
 										name="dpi"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>DPI</FormLabel>
+												<FormLabel>
+													{createEsAgencia ? "DPI (opcional)" : "DPI"}
+												</FormLabel>
 												<div className="flex gap-2">
 													<FormControl>
 														<Input
@@ -397,7 +448,9 @@ function VendorsPage() {
 														title="Buscar en RENAP"
 														disabled={createLookup.isPending}
 														onClick={() =>
-															createLookup.buscar(createForm.getValues("dpi"), { force: true })
+															createLookup.buscar(createForm.getValues("dpi") ?? "", {
+																force: true,
+															})
 														}
 													>
 														{createLookup.isPending ? (
@@ -431,6 +484,9 @@ function VendorsPage() {
 															Persona Individual
 														</SelectItem>
 														<SelectItem value="empresa">Empresa</SelectItem>
+														<SelectItem value="agencia">
+															Vendedor de agencia/predio
+														</SelectItem>
 													</SelectContent>
 												</Select>
 												<FormMessage />
@@ -472,13 +528,21 @@ function VendorsPage() {
 									/>
 								)}
 
+								{createEsAgencia && (
+									<AgenciaField control={createForm.control} agencias={agencias} />
+								)}
+
 								<div className="grid grid-cols-2 gap-4">
 									<FormField
 										control={createForm.control}
 										name="email"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>Email (opcional)</FormLabel>
+												<FormLabel>
+													{createEsAgencia
+														? "Email (acceso al tracker)"
+														: "Email (opcional)"}
+												</FormLabel>
 												<FormControl>
 													<Input placeholder="email@ejemplo.com" {...field} />
 												</FormControl>
@@ -543,6 +607,7 @@ function VendorsPage() {
 								<SelectItem value="all">Todos</SelectItem>
 								<SelectItem value="individual">Persona Individual</SelectItem>
 								<SelectItem value="empresa">Empresa</SelectItem>
+								<SelectItem value="agencia">Vendedor de agencia/predio</SelectItem>
 							</SelectContent>
 						</Select>
 						{hasActiveFilters && (
@@ -590,23 +655,25 @@ function VendorsPage() {
 										<TableRow key={vendor.id}>
 											<TableCell>
 												<div className="flex items-center gap-2">
-													{vendor.vendorType === "empresa" ? (
+													{vendor.vendorType === "agencia" ? (
+														<Store className="h-4 w-4 text-muted-foreground" />
+													) : vendor.vendorType === "empresa" ? (
 														<Building2 className="h-4 w-4 text-muted-foreground" />
 													) : (
 														<User className="h-4 w-4 text-muted-foreground" />
 													)}
 													<div>
 														<div className="font-medium">{vendor.name}</div>
-														{vendor.companyName && (
+														{(vendor.companyName || vendor.agenciaNombre) && (
 															<div className="text-muted-foreground text-sm">
-																{vendor.companyName}
+																{vendor.companyName || vendor.agenciaNombre}
 															</div>
 														)}
 													</div>
 												</div>
 											</TableCell>
 											<TableCell className="font-mono text-sm">
-												{vendor.dpi}
+												{vendor.dpi ?? "—"}
 											</TableCell>
 											<TableCell>
 												<div className="text-sm">
@@ -621,15 +688,15 @@ function VendorsPage() {
 											<TableCell>
 												<Badge
 													variant={
-														vendor.vendorType === "empresa"
-															? "default"
-															: "secondary"
+														vendor.vendorType === "individual"
+															? "secondary"
+															: vendor.vendorType === "agencia"
+																? "outline"
+																: "default"
 													}
 													className="capitalize"
 												>
-													{vendor.vendorType === "empresa"
-														? "Empresa"
-														: "Individual"}
+													{TIPO_LABEL[vendor.vendorType] ?? vendor.vendorType}
 												</Badge>
 											</TableCell>
 											<TableCell className="text-right">
@@ -715,7 +782,9 @@ function VendorsPage() {
 										name="dpi"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>DPI</FormLabel>
+												<FormLabel>
+													{editEsAgencia ? "DPI (opcional)" : "DPI"}
+												</FormLabel>
 												<div className="flex gap-2">
 													<FormControl>
 														<Input
@@ -740,7 +809,9 @@ function VendorsPage() {
 														title="Buscar en RENAP"
 														disabled={editLookup.isPending}
 														onClick={() =>
-															editLookup.buscar(editForm.getValues("dpi"), { force: true })
+															editLookup.buscar(editForm.getValues("dpi") ?? "", {
+																force: true,
+															})
 														}
 													>
 														{editLookup.isPending ? (
@@ -774,6 +845,9 @@ function VendorsPage() {
 															Persona Individual
 														</SelectItem>
 														<SelectItem value="empresa">Empresa</SelectItem>
+														<SelectItem value="agencia">
+															Vendedor de agencia/predio
+														</SelectItem>
 													</SelectContent>
 												</Select>
 												<FormMessage />
@@ -815,13 +889,21 @@ function VendorsPage() {
 									/>
 								)}
 
+								{editEsAgencia && (
+									<AgenciaField control={editForm.control} agencias={agencias} />
+								)}
+
 								<div className="grid grid-cols-2 gap-4">
 									<FormField
 										control={editForm.control}
 										name="email"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>Email (opcional)</FormLabel>
+												<FormLabel>
+													{editEsAgencia
+														? "Email (acceso al tracker)"
+														: "Email (opcional)"}
+												</FormLabel>
 												<FormControl>
 													<Input placeholder="email@ejemplo.com" {...field} />
 												</FormControl>
@@ -892,5 +974,40 @@ function VendorsPage() {
 				</AlertDialogContent>
 			</AlertDialog>
 		</div>
+	);
+}
+
+function AgenciaField({
+	control,
+	agencias,
+}: {
+	control: Control<VendorFormData>;
+	agencias: Array<{ id: string; name: string }>;
+}) {
+	return (
+		<FormField
+			control={control}
+			name="companyId"
+			render={({ field }) => (
+				<FormItem>
+					<FormLabel>Agencia o predio</FormLabel>
+					<Select onValueChange={field.onChange} value={field.value}>
+						<FormControl>
+							<SelectTrigger>
+								<SelectValue placeholder="Selecciona la agencia" />
+							</SelectTrigger>
+						</FormControl>
+						<SelectContent>
+							{agencias.map((agencia) => (
+								<SelectItem key={agencia.id} value={agencia.id}>
+									{agencia.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<FormMessage />
+				</FormItem>
+			)}
+		/>
 	);
 }

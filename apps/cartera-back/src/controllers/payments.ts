@@ -28,7 +28,7 @@ import {
 import { updateMora } from "./latefee";
 import { anularPagoYRestituirMoraSerializado } from "./anularPagoMora";
 import { CreditWithoutInvestorMirrorError } from "../utils/espejoInversionistasGuard";
-import { calcularAjusteCompras, obtenerFechaCompraMesAnterior, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerComprasMesAnterior, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { partesGT } from "../utils/functions/diaGuatemala";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
@@ -41,6 +41,7 @@ import {
   PENDING_RETURN_AUTHORIZATION_CODE,
 } from "../utils/pendingReturnGuard";
 import { esCube } from "../utils/devolucionCompletada";
+import { CONDONACION_BOLETA_TARDIA_SELECT_SQL } from "./condonacionBoletaTardiaSql";
 import {
   desligarFilaDeEventoNexaFallido,
   NexaPaymentNotReversibleError,
@@ -64,6 +65,13 @@ export const crearResumenAbonosCuota = (input: Parameters<
     tiene_abono_parcial: resumen.tieneAbonoParcial,
   };
 };
+
+// Día calendario de Guatemala de un instante, como Date local a medianoche: es lo que
+// esperan calcularVentanaProporcional y la comparación de mes del interés proporcional.
+function diaGTComoFechaLocal(instante: Date): Date {
+  const p = partesGT(instante);
+  return new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
+}
 
 // ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
@@ -810,18 +818,20 @@ export async function insertPagosCreditoInversionistas(
       ? fechaDelPeriodo.getFullYear() - 1
       : fechaDelPeriodo.getFullYear();
 
-    // Día de entrada: el de la compra de cartera del mes anterior (su fecha_completada,
-    // leída en hora GT). Si hubo una ampliación este mes, completeEspejo ya re-selló
-    // fecha_inicio_participacion al mes en curso y con ella la compra del mes anterior
-    // perdía su proporcional. Sin compra del mes anterior, se usa fecha_inicio como antes.
-    const fechaCompraMesAnterior = isCube
-      ? null
-      : await obtenerFechaCompraMesAnterior(credito_id, inv.inversionista_id, fechaDelPeriodo);
+    // Compras de cartera del mes anterior, de la más reciente a la más vieja. CUBE no
+    // hace la consulta.
+    const comprasMesAnterior = isCube
+      ? []
+      : await obtenerComprasMesAnterior(credito_id, inv.inversionista_id, fechaDelPeriodo);
+
+    // Día de entrada: el de la compra de cartera más reciente del mes anterior (su
+    // fecha_completada, leída en hora GT). Si hubo una ampliación este mes, completeEspejo
+    // ya re-selló fecha_inicio_participacion al mes en curso y con ella la compra del mes
+    // anterior perdía su proporcional. Sin compra del mes anterior, se usa fecha_inicio
+    // como antes.
+    const fechaCompraMesAnterior = comprasMesAnterior[0]?.fecha_completada ?? null;
     const fechaEntrada = fechaCompraMesAnterior
-      ? (() => {
-          const p = partesGT(fechaCompraMesAnterior);
-          return new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
-        })()
+      ? diaGTComoFechaLocal(fechaCompraMesAnterior)
       : fechaInicio;
 
     const esMesAnterior =
@@ -846,7 +856,8 @@ export async function insertPagosCreditoInversionistas(
       // tocan al inversionista. El piso de 1 día vive en el helper (ver
       // utils/functions/diasParticipacion.ts): si la fecha cae el ÚLTIMO día del
       // mes, la resta daría 0 y cobraría cero interés pese a haber participado.
-      // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo.
+      // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo
+      // (con compras en varios días, el reparto por día de abajo repite esa regla).
       const { diasDelMes, diasProporcionales } = calcularVentanaProporcional(
         fechaEntrada!
       );
@@ -892,7 +903,88 @@ export async function insertPagosCreditoInversionistas(
 
       const porcentajeInteresBig = new Big(currentCredit?.porcentaje_interes ?? 0);
 
-      if (hayMontoViejo) {
+      // Compras del mes anterior en DÍAS DISTINTOS: una sola ventana (la de la más
+      // reciente) les cobraría a las primeras solo los días de la última. Cada día cobra
+      // sus propios días y el monto viejo, si queda, su mes completo. Las compras de un
+      // mismo día se suman y redondean juntas (completeEspejo completa todas las pendientes
+      // con la misma fecha_completada): un solo día no entra acá y las fórmulas de abajo
+      // siguen iguales, centavo por centavo. Se exige que las compras fechadas sumen lo
+      // mismo que `sumaCompras` (una compra sin fecha_completada dejaría monto sin
+      // repartir) y que no superen la base, como en el desglose de abajo.
+      const comprasPorDia = new Map<string, { dia: Date; monto: Big }>();
+      for (const compra of comprasMesAnterior) {
+        const dia = diaGTComoFechaLocal(compra.fecha_completada);
+        const clave = `${dia.getFullYear()}-${dia.getMonth() + 1}-${dia.getDate()}`;
+        const grupo = comprasPorDia.get(clave) ?? { dia, monto: new Big(0) };
+        grupo.monto = grupo.monto.plus(new Big(compra.monto_aportado ?? 0));
+        comprasPorDia.set(clave, grupo);
+      }
+      const sumaComprasFechadas = [...comprasPorDia.values()].reduce(
+        (acc, g) => acc.plus(g.monto),
+        new Big(0),
+      );
+      const variosDiasDeCompra =
+        comprasPorDia.size >= 2 &&
+        sumaCompras.gt(0) &&
+        sumaComprasFechadas.eq(sumaCompras) &&
+        !sumaCompras.gt(montoAportadoBig);
+
+      if (variosDiasDeCompra) {
+        interesSinCompras = montoViejo.gt(0)
+          ? montoViejo
+              .times(porcentajeInteresBig)
+              .div(100)
+              .times(porcentajeInversion)
+              .div(100)
+              .round(2)
+          : new Big(0);
+
+        console.log(`   📅 INTERÉS PROPORCIONAL CON COMPRAS DEL MES ANTERIOR EN ${comprasPorDia.size} DÍAS (una ventana por día):`);
+        console.log(`      monto_aportado espejo: ${montoAportadoBig.toString()}`);
+        console.log(`      monto viejo (mes completo): ${montoViejo.toString()} → interes_sin_compras: ${interesSinCompras.toString()}`);
+
+        interesConCompras = new Big(0);
+        for (const [clave, grupo] of comprasPorDia) {
+          const ventana = calcularVentanaProporcional(grupo.dia);
+          const interesMesCompleto = grupo.monto
+            .times(porcentajeInteresBig)
+            .div(100)
+            .times(porcentajeInversion)
+            .div(100);
+          // Misma regla del día 1 que `esMesAnterior`: participó el mes completo. Una
+          // compra sellada con el reloj (sin fecha del modal) en las primeras horas UTC
+          // del día 1 entra al mes anterior por el SQL pero en hora GT es el último día
+          // del mes previo: también cobra el mes completo, no 1 día.
+          const mesCompleto =
+            ventana.diaInicio === 1 ||
+            grupo.dia.getMonth() !== mesAnterior ||
+            grupo.dia.getFullYear() !== anioMesAnterior;
+          const interesDia = (
+            mesCompleto
+              ? interesMesCompleto
+              : interesMesCompleto.times(ventana.diasProporcionales).div(ventana.diasDelMes)
+          ).round(2);
+          interesConCompras = interesConCompras.plus(interesDia);
+          console.log(
+            `      compras Q${grupo.monto.toString()} del ${clave}: ` +
+            `${mesCompleto ? "mes completo" : `${ventana.diasProporcionales}/${ventana.diasDelMes} días`} → ${interesDia.toString()}`
+          );
+        }
+
+        ivaSinCompras = interesSinCompras.gt(0)
+          ? interesSinCompras.times(0.12).round(2)
+          : new Big(0);
+        ivaConCompras = interesConCompras.gt(0)
+          ? interesConCompras.times(0.12).round(2)
+          : new Big(0);
+
+        bigInteres = interesSinCompras.plus(interesConCompras);
+        bigIVA = ivaSinCompras.plus(ivaConCompras);
+
+        console.log(`      interes_con_compras: ${interesConCompras.toString()}`);
+        console.log(`      bigInteres total: ${bigInteres.toString()}`);
+        console.log(`      bigIVA total: ${bigIVA.toString()}`);
+      } else if (hayMontoViejo) {
         // Tarifa mensual completa sobre el monto viejo.
         interesSinCompras = montoViejo
           .times(porcentajeInteresBig)
@@ -1970,7 +2062,7 @@ export async function insertPagosCreditoInversionistasSpecial(
 
   return resolvedInserts;
 }
-export async function falsePayment(pago_id: number, credito_id: number) {
+export async function falsePayment(pago_id: number, credito_id: number, usuario_email?: string) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
@@ -2297,6 +2389,7 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   const updatedCount = await anularPagoYRestituirMoraSerializado({
     pago_id,
     credito_id,
+    usuario_email,
   });
 
   // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
@@ -2972,6 +3065,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         (p.nexa_payment_event_id IS NOT NULL) AS "entroPorNexa",
         EXISTS (SELECT 1 FROM cartera.nexa_payment_events ne
           WHERE ne.id = p.nexa_payment_event_id AND ne.status = 'failed') AS "nexaEventoFallido",
+        ${sql.raw(CONDONACION_BOLETA_TARDIA_SELECT_SQL)},
 
         -- 💳 Info del crédito
         json_build_object(
@@ -3320,6 +3414,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       origenPago: r.origenPago,
       entroPorNexa: r.entroPorNexa === true,
       nexaEventoFallido: r.nexaEventoFallido === true,
+      condonacionBoletaTardia: r.condonacionBoletaTardia ?? null,
       credito: r.credito,
       banderaReinversion: r.banderaReinversion ?? false,
       pendienteFacturar: r.pendienteFacturar ?? false,

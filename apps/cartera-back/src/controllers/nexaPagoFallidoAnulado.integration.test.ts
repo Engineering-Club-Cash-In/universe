@@ -27,8 +27,8 @@ const setup = async () => {
   await sql`CREATE TYPE cartera.mora_evento_origen AS ENUM
     ('PROCESO_AUTO','API_MANUAL','CONDONACION_INDIVIDUAL','CONDONACION_MASIVA')`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY,
-    numero_credito_sifco text, estado_devolucion text)`;
-  await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY, credito_id integer)`;
+    numero_credito_sifco text, estado_devolucion text, "statusCredit" text, capital numeric(18,2), porcentaje_interes numeric, seguro_10_cuotas numeric, gps numeric, membresias_pago numeric)`;
+  await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY, credito_id integer, pagado boolean)`;
   await sql`CREATE TABLE cartera.moras_historial (historial_id serial PRIMARY KEY,
     credito_id integer NOT NULL, mora_id integer, tipo_evento text NOT NULL,
     origen cartera.mora_evento_origen NOT NULL,
@@ -43,7 +43,8 @@ const setup = async () => {
     abono_interes numeric(18,2), abono_iva_12 numeric(18,2), abono_seguro numeric(18,2),
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
     pagado boolean, createdat timestamp DEFAULT now(),
-    "paymentFalse" boolean NOT NULL DEFAULT false)`;
+    "paymentFalse" boolean NOT NULL DEFAULT false, registerby varchar(150) NOT NULL DEFAULT 'x',
+    boleta_tardia_intento_id uuid)`; // columna de 0054 que el esquema de drizzle ya pide
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql.unsafe(await migracion("0043_mora_pagada_cuota.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
@@ -51,7 +52,7 @@ const setup = async () => {
   await sql`CREATE TABLE cartera.ajuste_fecha_ideal_pago (id serial PRIMARY KEY, credito_id integer,
     fecha_cobro timestamp, pago_id integer)`;
   await sql`CREATE TABLE cartera.pagos_credito_inversionistas_espejo (id serial PRIMARY KEY, pago_id integer)`;
-  await sql`INSERT INTO cartera.creditos VALUES (1, 'S-1', NULL)`;
+  await sql`INSERT INTO cartera.creditos VALUES (1, 'S-1', NULL, 'ACTIVO', 1000)`;
   await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1)`;
   return { sql };
 };

@@ -12,6 +12,7 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
+import { PAGO_ANULADO_NO_REVERSIBLE } from "./reversePaymentPolicy";
 import { desaplicarRubrosDelPago } from "./rubros";
 import { emitPaymentReversalToPending } from "../utils/structuredLogger";
 import {
@@ -97,7 +98,8 @@ class RevertPaymentCreditRejection extends Error {
     readonly reasonCode:
       | "credit_not_found"
       | "state_conflict"
-      | "capital_no_soportado",
+      | "capital_no_soportado"
+      | "pago_anulado",
     mensaje = "Credit not found or not active"
   ) {
     super(mensaje);
@@ -218,6 +220,9 @@ export function createRevertPaymentToPending(
 
       if (!pago) {
         throw new Error("Payment not found");
+      }
+      if (pago.paymentFalse === true) {
+        throw new RevertPaymentCreditRejection("pago_anulado", PAGO_ANULADO_NO_REVERSIBLE);
       }
       // Re-chequeo bajo el candado y antes de escribir: un callback Nexa en
       // vuelo pudo tomar esta fila después de la lectura previa (que queda
@@ -411,6 +416,8 @@ export function createRevertPaymentToPending(
       }
 
       // 7️⃣ ACTUALIZAR ESTADO DEL PAGO A PENDING Y ANULAR FECHA
+      // Esta ruta NO anula la condonación por boleta tardía: el pago sigue vivo y contabilidad lo revalida
+      // (tampoco devuelve la mora que el pago cobró).
       await tx
         .update(pagos_credito)
         .set({
@@ -514,7 +521,7 @@ export function createRevertPaymentToPending(
         // ruta no maneja—; el motivo fino viaja en el mensaje de la respuesta,
         // que es donde lo lee la persona.
         reasonCode:
-          reasonCode === "capital_no_soportado" ? "state_conflict" : reasonCode,
+          reasonCode === "capital_no_soportado" || reasonCode === "pago_anulado" ? "state_conflict" : reasonCode,
         durationMs: elapsedMilliseconds(startedAt),
       });
     } else {
@@ -536,7 +543,7 @@ export function createRevertPaymentToPending(
     // alguien reescriba un mensaje.
     if (
       error instanceof RevertPaymentCreditRejection &&
-      error.reasonCode === "capital_no_soportado"
+      (error.reasonCode === "capital_no_soportado" || error.reasonCode === "pago_anulado")
     ) {
       set.status = 409;
       return { success: false, message: error.message };

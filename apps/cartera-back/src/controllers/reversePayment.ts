@@ -21,6 +21,7 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
 import type { anularCondonacionesNexaPorPagoPendiente } from "./condonacionNexaPagoPendiente";
+import type { anularCondonacionPorPagoInvalidado, emailVigenteDelActor } from "./condonacionBoletaTardiaAnulacion";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 import {
@@ -45,6 +46,7 @@ import {
   buildInstallmentRemainderReplication,
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
+  PAGO_ANULADO_NO_REVERSIBLE,
   REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
@@ -144,6 +146,10 @@ export interface ReversePaymentDependencies {
    * estaba pendiente (drizzle/0052). Opcional: quien no la pasa no la corre.
    */
   readonly anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
+  /** Anula la condonación de una boleta tardía cuyo pago se revierte (pendiente o validado). Opcional. */
+  readonly anularCondonacionBoletaTardia?: typeof anularCondonacionPorPagoInvalidado;
+  /** Email vigente de quien revierte, para firmar la anulación. Opcional: sin él firma el sistema. */
+  readonly emailDelActor?: typeof emailVigenteDelActor;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -159,12 +165,20 @@ const defaultDependencies: ReversePaymentDependencies = {
     const { anularCondonacionesNexaPorPagoPendiente: anular } = await import("./condonacionNexaPagoPendiente");
     return anular(params);
   },
+  anularCondonacionBoletaTardia: async (params) => {
+    const { anularCondonacionPorPagoInvalidado: anular } = await import("./condonacionBoletaTardiaAnulacion");
+    return anular(params);
+  },
+  emailDelActor: async (user) => {
+    const { emailVigenteDelActor: email } = await import("./condonacionBoletaTardiaAnulacion");
+    return email(user);
+  },
 };
 
 export function createReversePayment(
   dependencies: ReversePaymentDependencies = defaultDependencies,
 ) {
-  return async ({ body, set, telemetryLogger }: any) => {
+  return async ({ body, set, telemetryLogger, user: actor }: any) => {
   const startedAt = safeNow();
   let previousPaymentState: "applied" | "pending" | "unknown" = "unknown";
   let mayHaveGlobalPersistence = false;
@@ -193,6 +207,8 @@ export function createReversePayment(
       };
     }
     const { credito_id, pago_id } = parseResult.data;
+    // Quien revierte firma la anulación de la condonación de boleta tardía (E-7). Antes de abrir nada.
+    const usuario_email = await dependencies.emailDelActor?.(actor);
 
     // Pago Nexa: no se anula. Salida rápida antes del candado; el chequeo que
     // decide va dentro de la transacción (paso 2️⃣).
@@ -228,6 +244,7 @@ export function createReversePayment(
       if (!pago) {
         throw new Error("Payment not found");
       }
+      if (pago.paymentFalse === true) throw new Error(PAGO_ANULADO_NO_REVERSIBLE);
       // Re-chequeo bajo el candado y antes de escribir: un callback Nexa en
       // vuelo pudo tomar esta fila después de la lectura previa. El catch lo
       // convierte en 409 y la transacción no deja nada escrito.
@@ -605,16 +622,8 @@ export function createReversePayment(
           membresias: nuevoMembresiasRestante,
         },
         aplicadoALaCuota,
-        // Y hay un segundo caso: la fila YA ESTÁ ANULADA. `falsePayment` anula
-        // con sólo `pagado: false, paymentFalse: true` — CONSERVA los `abono_*`,
-        // así que `aplicadoALaCuota` no es cero y la guarda de arriba no la
-        // atrapa. Pero la fila anulada está fuera de la contabilidad de la cuota
-        // (el saldo replicado se estampa con `paymentFalse = false`), así que
-        // devolverle sus abonos al saldo sería doble conteo: le estamparía a las
-        // hermanas VIVAS plata que ya no existe. La reversa de la fila anulada
-        // SÍ sigue (es la única vía que limpia la fila zombi); lo que se salta
-        // es la réplica. Ver el helper.
-        filaAnulada: pago.paymentFalse === true,
+        // Una fila YA ANULADA no llega hasta acá: se rechaza al leerla (PAGO_ANULADO_NO_REVERSIBLE).
+        filaAnulada: false,
       });
 
       // Se llama DESPUÉS de la mutación de cada rama (reset de la fila, o su
@@ -693,6 +702,9 @@ export function createReversePayment(
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
+            // La fila ya no es de la boleta tardía: sin esto conserva el intento viejo y una nueva invalidación
+            // (o el barrido) lo toma por una fila viva de esa condonación.
+            boletaTardiaIntentoId: null,
 
             /**
              * Y se limpia lo ACREDITADO, no sólo los montos.
@@ -791,6 +803,7 @@ export function createReversePayment(
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
+              boletaTardiaIntentoId: null, // ver la nota del reset de arriba
               // Misma limpieza que la rama de arriba: sin esto una segunda
               // reversa le vuelve a restar al cliente lo que este pago acreditó.
               saldo_a_favor_acreditado: "0",
@@ -1002,6 +1015,19 @@ export function createReversePayment(
           dbClient: tx as unknown as typeof db,
         });
       }
+
+      // ======================================================================
+      // 🕓 CONDONACIÓN POR BOLETA TARDÍA DE ESTE PAGO
+      // ======================================================================
+      // Revertir el pago (pendiente o validado) deshace la condonación del retraso. DESPUÉS de restituir L (6️⃣) y del ledger.
+      await dependencies.anularCondonacionBoletaTardia?.({
+        credito_id,
+        pago_id,
+        boleta_tardia_intento_id: pago.boletaTardiaIntentoId,
+        accion: "revirtio",
+        usuario_email,
+        dbClient: tx as unknown as typeof db,
+      });
 
       // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN
@@ -1363,6 +1389,10 @@ export function createReversePayment(
       }, telemetryLogger);
     }
 
+    if (errorMessage === PAGO_ANULADO_NO_REVERSIBLE) {
+      set.status = 409;
+      return { success: false, message: errorMessage };
+    }
     // Determinar status code según el tipo de error
     if (errorMessage === "Payment not found") {
       set.status = 404;

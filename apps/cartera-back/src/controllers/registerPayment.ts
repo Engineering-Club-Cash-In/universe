@@ -68,6 +68,7 @@ import {
   esPagoSaldoElegible,
   saldoDeRespaldoDeSemillaAnulada,
   cuotaSinFuenteDeSaldo,
+  claveBoletaDuplicada,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -836,13 +837,17 @@ export const insertPayment = async (
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
-    const boletasExistentes = numeroAutorizacion && banco_id
+    const claveDuplicada = claveBoletaDuplicada({ numeroAutorizacion, banco_id, nexaPaymentEventId });
+    const boletasExistentes = claveDuplicada
       ? await db
         .select({
           numeroAutorizacion: pagos_credito.numeroAutorizacion,
         })
         .from(pagos_credito)
-        .where(and(eq(pagos_credito.numeroAutorizacion, numeroAutorizacion), eq(pagos_credito.banco_id, banco_id)))
+        .where(and(
+          eq(pagos_credito.numeroAutorizacion, claveDuplicada.numeroAutorizacion),
+          eq(pagos_credito.banco_id, claveDuplicada.banco_id),
+        ))
       : [];
 
       if (boletasExistentes.length > 0) {

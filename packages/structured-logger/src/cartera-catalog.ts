@@ -96,6 +96,7 @@ export const carteraCatalog = {
         'retry_nexa_receipts',
         'retry_nexa_accounts',
         'sweep_late_slip_waivers',
+        'generate_nexa_receipt_images',
       ],
     },
     provider: {

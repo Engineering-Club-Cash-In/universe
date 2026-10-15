@@ -47,6 +47,26 @@ export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) 
   return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:?\d{2})$/, "Z"));
 };
 
+/**
+ * La boleta duplicada se busca por número de autorización + banco. El pago de
+ * Nexa no pasa por acá: ya tiene su idempotencia por `external_reference` en
+ * `nexa_payment_events`, y este chequeo no mira `paymentFalse`, así que el
+ * reintento de un evento `failed` cuya fila vieja quedó anulada daría un 409
+ * falso (y Nexa devolvería un dinero que sí puede entrar).
+ * Devuelve la clave a buscar, o null si no corresponde buscar.
+ */
+export const claveBoletaDuplicada = ({
+  numeroAutorizacion,
+  banco_id,
+  nexaPaymentEventId,
+}: {
+  numeroAutorizacion?: string;
+  banco_id?: number;
+  nexaPaymentEventId?: number;
+}) => (numeroAutorizacion && banco_id && nexaPaymentEventId === undefined
+  ? { numeroAutorizacion, banco_id }
+  : null);
+
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",
   message:

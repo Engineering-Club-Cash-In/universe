@@ -1391,29 +1391,6 @@ async function registrarCoincidenciasCartera(
 					? textoOpcional(grupo.usuario.nit)
 					: null);
 
-			const fuentesDeUsuario = await tx
-				.select({
-					persona: buroInternoPersonas,
-				})
-				.from(buroInternoFuentesCartera)
-				.innerJoin(
-					buroInternoPersonas,
-					eq(buroInternoPersonas.id, buroInternoFuentesCartera.personaId),
-				)
-				.where(
-					and(
-						eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
-						eq(buroInternoPersonas.origen, "automatico_cartera"),
-					),
-				)
-				.orderBy(
-					desc(buroInternoPersonas.activo),
-					desc(buroInternoPersonas.createdAt),
-				)
-				.limit(1);
-			let personaExistente = fuentesDeUsuario[0]?.persona ?? null;
-			if (personaExistente?.desactivadoPor) continue;
-
 			const condicionIdentidad = or(
 				grupo.lead?.id
 					? eq(buroInternoPersonas.leadId, grupo.lead.id)
@@ -1437,6 +1414,27 @@ async function registrarCoincidenciasCartera(
 					),
 				),
 			);
+			// Un usuario de Cartera puede representar varias personas separadas por
+			// `/`. La ficha existente se busca por la identidad actual, no por el
+			// usuario de Cartera completo, para no sobrescribir otra persona.
+			let personaExistente =
+				(
+					await tx
+						.select({ persona: buroInternoPersonas })
+						.from(buroInternoPersonas)
+						.where(
+							and(
+								eq(buroInternoPersonas.origen, "automatico_cartera"),
+								condicionIdentidad,
+							),
+						)
+						.orderBy(
+							desc(buroInternoPersonas.activo),
+							desc(buroInternoPersonas.createdAt),
+						)
+						.limit(1)
+				)[0]?.persona ?? null;
+			if (personaExistente?.desactivadoPor) continue;
 			const fichaManual = (
 				await tx
 					.select({ persona: buroInternoPersonas })
@@ -1612,7 +1610,12 @@ async function registrarCoincidenciasCartera(
 					evidencia: buroInternoFuentesCartera.evidencia,
 				})
 				.from(buroInternoFuentesCartera)
-				.where(eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId));
+				.where(
+					and(
+						eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+						eq(buroInternoFuentesCartera.personaId, personaExistente.id),
+					),
+				);
 			const fuenteActualPorCredito = new Map(
 				fuentesActuales.map((fuente) => [fuente.creditoId, fuente]),
 			);

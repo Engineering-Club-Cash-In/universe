@@ -323,6 +323,13 @@
 			"when": 1791892800000,
 			"tag": "0051_buro_interno_cartera_automatico",
 			"breakpoints": true
+		},
+		{
+			"idx": 45,
+			"version": "7",
+			"when": 1791896400000,
+			"tag": "0052_buro_interno_fuentes_por_identidad",
+			"breakpoints": true
 		}
 	]
 }

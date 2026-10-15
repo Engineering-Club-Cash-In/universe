@@ -140,7 +140,8 @@ export const buroInternoFuentesCartera = pgTable(
 			.defaultNow(),
 	},
 	(table) => [
-		uniqueIndex("buro_interno_fuentes_cartera_usuario_credito_uq").on(
+		uniqueIndex("buro_interno_fuentes_cartera_persona_usuario_credito_uq").on(
+			table.personaId,
 			table.carteraUsuarioId,
 			table.carteraCreditoId,
 		),

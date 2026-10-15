@@ -177,8 +177,19 @@ export function fuentesCoincidentesPorUsuario(input: {
 	);
 }
 
-/** Recupera las identidades de la solicitud que originaron el match de una fuente. */
-export function candidatosCoincidentesConFuente<
+const CLAVES_REGLAS_IDENTIDAD = new Set([
+	"lead_igual",
+	"dpi_igual",
+	"nit_igual",
+	"nombre_completo_igual",
+]);
+
+/**
+ * Recupera candidatos que son la misma identidad que la fuente. Las reglas de
+ * familia, contacto o parecido no conceden precedencia a una ficha manual del
+ * candidato sobre la persona riesgosa de Cartera.
+ */
+export function candidatosIdentidadCoincidentesConFuente<
 	T extends { origen: string; etiqueta: string },
 >(input: {
 	candidatos: Iterable<T>;
@@ -186,11 +197,16 @@ export function candidatosCoincidentesConFuente<
 		registroId: string;
 		origen: string;
 		etiqueta: string;
+		reglas: Iterable<{ clave: string }>;
 	}>;
 	fuenteId: string;
 }): T[] {
 	const coincidencias = [...input.coincidencias].filter(
-		(coincidencia) => coincidencia.registroId === input.fuenteId,
+		(coincidencia) =>
+			coincidencia.registroId === input.fuenteId &&
+			[...coincidencia.reglas].some((regla) =>
+				CLAVES_REGLAS_IDENTIDAD.has(regla.clave),
+			),
 	);
 	return [...input.candidatos].filter((candidato) =>
 		coincidencias.some(
@@ -199,6 +215,22 @@ export function candidatosCoincidentesConFuente<
 				coincidencia.etiqueta === candidato.etiqueta,
 		),
 	);
+}
+
+/** Añade una ficha guardada sin omitirla por otros objetivos del mismo usuario. */
+export function agregarObjetivoPersonaGuardada<
+	T extends { personaAutomatica: { id: string } | null },
+>(objetivos: T[], objetivo: T): T[] {
+	if (
+		objetivo.personaAutomatica &&
+		objetivos.some(
+			(actual) =>
+				actual.personaAutomatica?.id === objetivo.personaAutomatica?.id,
+		)
+	) {
+		return objetivos;
+	}
+	return [...objetivos, objetivo];
 }
 
 /**

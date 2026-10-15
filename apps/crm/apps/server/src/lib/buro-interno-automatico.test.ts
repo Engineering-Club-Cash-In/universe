@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+	agregarObjetivoPersonaGuardada,
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
-	candidatosCoincidentesConFuente,
+	candidatosIdentidadCoincidentesConFuente,
 	type DatosPersonaAutomaticaComparables,
 	decidirPersistenciaAutomatica,
 	EvaluacionBuroInternoInestableError,
@@ -149,7 +150,7 @@ describe("sincronización de fichas automáticas", () => {
 		);
 	});
 
-	test("conserva el candidato que originó una coincidencia solo por nombre", () => {
+	test("usa al candidato para precedencia manual solo por identidad", () => {
 		const titular = {
 			origen: "titular",
 			etiqueta: "Titular",
@@ -163,18 +164,48 @@ describe("sincronización de fichas automáticas", () => {
 			apellidos: "López Pérez",
 		};
 		expect(
-			candidatosCoincidentesConFuente({
+			candidatosIdentidadCoincidentesConFuente({
 				candidatos: [titular, codeudor],
 				coincidencias: [
 					{
 						registroId: "cartera-persona-jose",
 						origen: "titular",
 						etiqueta: "Titular",
+						reglas: [{ clave: "mismos_apellidos" }],
+					},
+					{
+						registroId: "cartera-persona-jose",
+						origen: "codeudor",
+						etiqueta: "Codeudor: Ana López",
+						reglas: [{ clave: "nombre_completo_igual" }],
 					},
 				],
 				fuenteId: "cartera-persona-jose",
 			}),
-		).toEqual([titular]);
+		).toEqual([codeudor]);
+	});
+
+	test("agrega cada ficha guardada aunque ya exista un objetivo del usuario", () => {
+		type Objetivo = {
+			clave: string;
+			personaAutomatica: { id: string } | null;
+		};
+		const objetivoCrudo: Objetivo = {
+			clave: "identidad-actual",
+			personaAutomatica: null,
+		};
+		const objetivoGuardado: Objetivo = {
+			clave: "identidad-historica",
+			personaAutomatica: { id: "persona-juan" },
+		};
+		const objetivos = agregarObjetivoPersonaGuardada(
+			[objetivoCrudo],
+			objetivoGuardado,
+		);
+		expect(objetivos).toEqual([objetivoCrudo, objetivoGuardado]);
+		expect(agregarObjetivoPersonaGuardada(objetivos, objetivoGuardado)).toEqual(
+			objetivos,
+		);
 	});
 
 	test("enriquece leads por SIFCO directo o por referencia", () => {

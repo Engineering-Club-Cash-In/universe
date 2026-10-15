@@ -32,9 +32,10 @@ import {
 } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
 import {
+	agregarObjetivoPersonaGuardada,
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
-	candidatosCoincidentesConFuente,
+	candidatosIdentidadCoincidentesConFuente,
 	decidirPersistenciaAutomatica,
 	esFichaAutomaticaReconciliable,
 	esFichaManual,
@@ -1259,7 +1260,7 @@ async function registrarCoincidenciasCartera(
 				return [{
 					lead: origen.lead,
 					identidad: origen.identidad,
-					candidatos: candidatosCoincidentesConFuente({
+					candidatos: candidatosIdentidadCoincidentesConFuente({
 						candidatos,
 						coincidencias,
 						fuenteId,
@@ -1380,22 +1381,25 @@ async function registrarCoincidenciasCartera(
 			for (const usuarioId of estado.usuarios) {
 				if (!grupos.has(usuarioId)) continue;
 				const objetivos = objetivosPorUsuario.get(usuarioId) ?? [];
-				if (objetivos.length > 0) continue;
-				objetivosPorUsuario.set(usuarioId, [{
+				const coincidenciasPersona = evaluarCoincidencias(
+					candidatos,
+					[estado.persona],
+					reglas,
+				);
+				objetivosPorUsuario.set(usuarioId, agregarObjetivoPersonaGuardada(objetivos, {
 					lead: null,
 					identidad: null,
-					candidatos: candidatos.filter((candidato) =>
-						evaluarCoincidencias(
-							[candidato],
-							[estado.persona],
-							reglas,
-						).length > 0,
-					),
+					candidatos: candidatosIdentidadCoincidentesConFuente({
+						candidatos,
+						coincidencias: coincidenciasPersona,
+						fuenteId: estado.persona.id,
+					}),
 					personaAutomatica: estado.persona,
-				}]);
+				}));
 			}
 		}
 		const personasProcesadas = new Set<string>();
+		const personasProcesadasPorUsuario = new Set<string>();
 		for (const usuarioId of usuariosASincronizar) {
 			const grupo = porId.get(usuarioId);
 			if (!grupo) continue;
@@ -1509,6 +1513,15 @@ async function registrarCoincidenciasCartera(
 						.limit(1)
 				)[0]?.persona ?? null;
 			if (personaExistente?.desactivadoPor) continue;
+			const clavePersonaUsuario = personaExistente
+				? `${personaExistente.id}:${usuarioId}`
+				: null;
+			if (
+				clavePersonaUsuario &&
+				personasProcesadasPorUsuario.has(clavePersonaUsuario)
+			) {
+				continue;
+			}
 			const fichaManual = (
 				await tx
 					.select({ persona: buroInternoPersonas })
@@ -1828,6 +1841,7 @@ async function registrarCoincidenciasCartera(
 			estadoMemoria.usuarios.add(usuarioId);
 			personasAutomaticas.set(personaExistente.id, estadoMemoria);
 			personasProcesadas.add(personaExistente.id);
+			personasProcesadasPorUsuario.add(`${personaExistente.id}:${usuarioId}`);
 			}
 		}
 	});

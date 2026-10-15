@@ -89,7 +89,7 @@ export function SolicitudesPaginaVista({
 				<p className="type-body-base text-fg-secondary">
 					{esHistorial
 						? "Aprobaciones y acciones del supervisor · las más recientes primero"
-						: `${pendientes === null ? "…" : pendientes.toLocaleString("es-GT")} ${pendientes === 1 ? "solicitud" : "solicitudes"} · de sus asesores · ordenadas por antigüedad`}
+						: `${pendientes === null ? "…" : pendientes.toLocaleString("es-GT")} ${pendientes === 1 ? "solicitud" : "solicitudes"} · de sus asesores · las más recientes primero`}
 				</p>
 			</header>
 

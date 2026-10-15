@@ -62,16 +62,35 @@ describe("solicitudesDeFuentes", () => {
 			documentos: [documento("7")],
 		});
 		expect(pendientes.map((s) => s.id)).toEqual([
-			"juridico-5",
+			"documento-7",
 			"rebaja-1",
 			"rebaja-2",
-			"documento-7",
+			"juridico-5",
 		]);
 		const conError = pendientes.find((s) => s.id === "rebaja-2");
 		expect(conError?.tipo === "rebaja" && conError.errorAplicacion).toBe(true);
 		const j = pendientes.find((s) => s.id === "juridico-5");
 		expect(j?.cliente).toBe("Sin nombre");
 		expect(j?.bucket).toBe(4);
+	});
+
+	test("las más recientes primero; sin fecha, al final", () => {
+		const { pendientes } = solicitudesDeFuentes({
+			convenios: [],
+			inmovilizaciones: [],
+			recuperaciones: [],
+			rebajas: [
+				{ ...rebajas[0], solicitadoEn: null },
+				{ ...rebajas[1], solicitadoEn: "2026-10-12T00:00:00.000Z" },
+			],
+			juridico: escalados,
+			documentos: [],
+		});
+		expect(pendientes.map((s) => s.id)).toEqual([
+			"rebaja-2",
+			"juridico-5",
+			"rebaja-1",
+		]);
 	});
 
 	test("el solicitante de la rebaja sirve para los cuatro ojos", () => {

@@ -1,6 +1,6 @@
 /**
  * Pestaña «Pendientes» de /cobros/solicitudes (Figma 3310:12): una bandeja
- * única con todo lo que espera la decisión del supervisor, las más antiguas
+ * única con todo lo que espera la decisión del supervisor, las más recientes
  * primero. Chips por tipo con conteo, buscador, filtro por asesor y la tabla
  * del Figma («Cartera/FilaAprobaciones»). Clic en una fila abre el Espacio
  * de aprobación (todos los tipos, también rebajas, Jurídico y documentos).

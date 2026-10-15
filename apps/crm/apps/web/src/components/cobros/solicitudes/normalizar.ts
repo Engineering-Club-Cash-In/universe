@@ -420,9 +420,23 @@ export function ordenarPorAntiguedad<T extends { solicitadoEn: string | null }>(
 	});
 }
 
+/** Las más recientes primero (orden de entrada); sin fecha, al final (orden estable). */
+export function ordenarPorRecientes<T extends { solicitadoEn: string | null }>(
+	filas: T[],
+): T[] {
+	return [...filas].sort((a, b) => {
+		if (!a.solicitadoEn && !b.solicitadoEn) return 0;
+		if (!a.solicitadoEn) return 1;
+		if (!b.solicitadoEn) return -1;
+		return (
+			new Date(b.solicitadoEn).getTime() - new Date(a.solicitadoEn).getTime()
+		);
+	});
+}
+
 /**
  * Todas las fuentes en una sola lista. `pendientes` esperan la decisión del
- * supervisor (las más antiguas primero); `porEjecutar` son los apagados y
+ * supervisor (las más recientes primero); `porEjecutar` son los apagados y
  * reactivaciones ya aprobados que el asesor todavía no registró como
  * ejecutados (lo que el supervisor seguía en «Por ejecutar»). Rebajas,
  * Jurídico y documentos son opcionales y llegan crudos: aquí se quedan solo
@@ -450,8 +464,8 @@ export function solicitudesDeFuentes(fuentes: {
 		.filter((i) => i.estado === "aprobada")
 		.map(solicitudDeInmovilizacion);
 	return {
-		pendientes: ordenarPorAntiguedad(pendientes),
-		porEjecutar: ordenarPorAntiguedad(porEjecutar),
+		pendientes: ordenarPorRecientes(pendientes),
+		porEjecutar: ordenarPorRecientes(porEjecutar),
 	};
 }
 

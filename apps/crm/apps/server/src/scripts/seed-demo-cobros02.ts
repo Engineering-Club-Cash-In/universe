@@ -2567,6 +2567,36 @@ async function sembrar() {
 		await ins("coberturas_agenda_cobros", coberturas);
 		await ins("agenda_cobros_snapshots", snapshots);
 		await ins("agenda_cobros_snapshot_items", items);
+		// Las agendas que ya capturó el job (no se crean de nuevo) se completan con
+		// los créditos que el asesor gestionó ese día en el seed: sin esto el
+		// cumplimiento de esos días sale ~0 % aunque haya gestiones sembradas.
+		if (diasAgenda.length) {
+			const completados = await tx.unsafe(
+				`INSERT INTO public.agenda_cobros_snapshot_items
+				   (id, snapshot_id, caso_cobro_id, numero_credito_sifco, bucket_snapshot, motivo_agenda, atendido, promesa_cumplida)
+				 SELECT DISTINCT ON (s.id, k.numero_credito_sifco)
+				        gen_random_uuid(), s.id, k.id, k.numero_credito_sifco, cc.bucket_snapshot, 'sla_hoy', false, false
+				 FROM public.agenda_cobros_snapshots s
+				 JOIN public.contactos_cobros cc
+				   ON cc.realizado_por = s.asesor_id
+				  AND (cc.fecha_contacto - interval '6 hours')::date = s.fecha_gt
+				 JOIN public.casos_cobros k ON k.id = cc.caso_cobro_id
+				 WHERE s.fecha_gt = ANY($1::text::date[])
+				   AND (cc.id = ANY($2::text::uuid[])
+				        OR EXISTS (SELECT 1 FROM public.seed_demo_filas f
+				                   WHERE f.tabla = 'public.contactos_cobros' AND f.pk = cc.id::text))
+				 ON CONFLICT (snapshot_id, numero_credito_sifco) DO NOTHING
+				 RETURNING id`,
+				[arrTxt(diasAgenda), arrTxt(contactos.map((x) => x.id as string))],
+			);
+			marcar(
+				"public.agenda_cobros_snapshot_items",
+				(completados as Fila[]).map((r) => r.id),
+			);
+			console.log(
+				`  agenda_cobros_snapshot_items (agendas del job completadas): ${completados.length}`,
+			);
+		}
 		for (const dia of diasAgenda) await cerrarAgenda(tx, dia);
 		await ins("notifications", notifs);
 

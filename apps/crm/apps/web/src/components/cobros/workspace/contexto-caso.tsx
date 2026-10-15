@@ -504,17 +504,14 @@ export function ContextoCasoVista({
 				)}
 			</div>
 
-			{/* Pie fijo */}
-			<footer className="border-line-subtle border-t px-5 py-3">
-				<Button
-					variant="secondary"
-					className="w-full"
-					onClick={onAbrirFicha}
-					disabled={!onAbrirFicha}
-				>
-					Abrir Ficha 360
-				</Button>
-			</footer>
+			{/* Pie fijo (sin él cuando ya se está en la Ficha) */}
+			{onAbrirFicha ? (
+				<footer className="border-line-subtle border-t px-5 py-3">
+					<Button variant="secondary" className="w-full" onClick={onAbrirFicha}>
+						Abrir Ficha 360
+					</Button>
+				</footer>
+			) : null}
 		</section>
 	);
 }
@@ -1709,7 +1706,8 @@ export function ContextoCaso({
 	className,
 }: {
 	caso: CasoWorkspace;
-	onAbrirFicha: () => void;
+	/** Sin él no hay «Abrir Ficha 360» (p. ej. los modales de la propia Ficha). */
+	onAbrirFicha?: () => void;
 	/** Abre el registro de la carta notarial (lo maneja el Workspace). */
 	onCartaNotarial?: () => void;
 	tabInicial?: TabContexto;
@@ -1773,11 +1771,17 @@ export function ContextoCaso({
 						</div>
 					)}
 				</div>
-				<footer className="border-line-subtle border-t px-5 py-3">
-					<Button variant="secondary" className="w-full" onClick={onAbrirFicha}>
-						Abrir Ficha 360
-					</Button>
-				</footer>
+				{onAbrirFicha ? (
+					<footer className="border-line-subtle border-t px-5 py-3">
+						<Button
+							variant="secondary"
+							className="w-full"
+							onClick={onAbrirFicha}
+						>
+							Abrir Ficha 360
+						</Button>
+					</footer>
+				) : null}
 			</section>
 		);
 	}

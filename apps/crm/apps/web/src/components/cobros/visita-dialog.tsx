@@ -55,7 +55,9 @@ import {
 } from "server/src/lib/visitas-cobros";
 import { toast } from "sonner";
 import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
 import { AvisoFaltante } from "@/components/cobros/recuperacion-vehiculo-dialog";
+import type { CasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import {
 	ahoraRedondeado,
 	FechaHoraPicker,
@@ -68,7 +70,6 @@ import {
 } from "@/components/ui/collapsible";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
@@ -170,6 +171,8 @@ interface VisitaDialogProps {
 	onProgramada?: (r: VisitaProgramadaResumen) => void;
 	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
 	embebido?: boolean;
+	/** Ficha 360: caso cuyo «Contexto del caso» se muestra a la izquierda del modal. */
+	contexto?: CasoWorkspace;
 	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
 	onCancelar?: () => void;
 }
@@ -220,6 +223,7 @@ function FormularioVisita({
 	onRegistrada,
 	onProgramada,
 	embebido = false,
+	contexto,
 	onCancelar,
 }: VisitaDialogProps) {
 	const queryClient = useQueryClient();
@@ -1305,7 +1309,11 @@ function FormularioVisita({
 	}
 
 	return (
-		<DialogContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col gap-0 rounded-none p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
+		<ModalContenidoConContexto
+			caso={contexto}
+			rellenoFormulario={false}
+			className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col gap-0 rounded-none p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg"
+		>
 			<DialogHeader className="border-b px-4 pt-4 pb-3 text-left sm:px-6">
 				<DialogTitle className="pr-8">{titulo}</DialogTitle>
 				<DialogDescription>{descripcion}</DialogDescription>
@@ -1339,6 +1347,6 @@ function FormularioVisita({
 					</Button>
 				</div>
 			</div>
-		</DialogContent>
+		</ModalContenidoConContexto>
 	);
 }

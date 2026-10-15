@@ -22,17 +22,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Handshake, Loader, Receipt } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
 import {
 	type PagoRegistrado,
 	RegistrarPagoForm,
 } from "@/components/cobros/registrar-pago-form";
+import type { CasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
@@ -98,6 +99,8 @@ interface ConvenioModalProps {
 	onCreado?: (resultado: ResultadoConvenio) => void;
 	/** Workspace: se pinta dentro del panel de gestión, sin Dialog. */
 	embebido?: boolean;
+	/** Ficha 360: caso cuyo «Contexto del caso» se muestra a la izquierda del modal. */
+	contexto?: CasoWorkspace;
 	/** Solo con `embebido`: el botón secundario del pie («Cancelar»). */
 	onCancelar?: () => void;
 }
@@ -152,6 +155,7 @@ export function ConvenioModal({
 	creditoId,
 	onCreado,
 	embebido = false,
+	contexto,
 	onCancelar,
 }: ConvenioModalProps) {
 	const queryClient = useQueryClient();
@@ -701,8 +705,10 @@ export function ConvenioModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent
+			<ModalContenidoConContexto
 				ref={setCajaDialogo}
+				caso={contexto}
+				rellenoFormulario={false}
 				className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
 			>
 				<DialogHeader className="px-6 pt-6">
@@ -744,7 +750,7 @@ export function ConvenioModal({
 						</DialogFooter>
 					</form>
 				)}
-			</DialogContent>
+			</ModalContenidoConContexto>
 		</Dialog>
 	);
 }

@@ -20,7 +20,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
 import { WhatsappPreview } from "@/components/cobros/whatsapp-preview";
+import type { CasoWorkspace } from "@/components/cobros/workspace/use-caso-workspace";
 import { SegmentedNav } from "@/components/ds/ubicaciones";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -36,7 +38,6 @@ import {
 } from "@/components/ui/currency-input";
 import {
 	Dialog,
-	DialogContent,
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
@@ -231,6 +232,8 @@ export interface ContactoModalProps {
 	 * siempre.
 	 */
 	embebido?: boolean;
+	/** Ficha 360: caso cuyo «Contexto del caso» se muestra a la izquierda del modal. */
+	contexto?: CasoWorkspace;
 	/** Solo con `embebido`: el botón «Cancelar» del pie. */
 	onCancelar?: () => void;
 	/** Restringe el select de Resultado (completo). Si queda 1, se oculta el select. */
@@ -380,6 +383,7 @@ export function ContactoModal({
 	aseguradora = "",
 	cabinaSeguro = "",
 	embebido = false,
+	contexto,
 	onCancelar,
 	estadosPermitidos,
 	estadoInicial,
@@ -2291,7 +2295,10 @@ export function ContactoModal({
 	return (
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
-			<DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden sm:max-w-2xl">
+			<ModalContenidoConContexto
+				caso={contexto}
+				className="flex max-h-[90vh] flex-col gap-0 overflow-hidden sm:max-w-2xl"
+			>
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						{esPromesa ? (
@@ -2314,8 +2321,12 @@ export function ContactoModal({
 								: "Registre los detalles de la interacción con el cliente y programe el próximo seguimiento."}
 					</DialogDescription>
 				</DialogHeader>
-				<div className="flex min-h-0 flex-1 flex-col pt-4">{panel}</div>
-			</DialogContent>
+				<div
+					className={cn("flex min-h-0 flex-1 flex-col", !contexto && "pt-4")}
+				>
+					{panel}
+				</div>
+			</ModalContenidoConContexto>
 		</Dialog>
 	);
 }

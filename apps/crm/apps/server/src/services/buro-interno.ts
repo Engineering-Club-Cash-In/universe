@@ -1279,7 +1279,11 @@ async function registrarCoincidenciasCarteraSinCola(
 					}),
 					personaAutomatica: null,
 				}];
-			}),
+			})
+				// Los objetivos ligados a un lead del CRM van primero: así la ficha
+				// nace con su leadId y DPI, y la identidad base de Cartera que
+				// coincide con la misma persona resuelve después a esa ficha.
+				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead))),
 		);
 	}
 		const fuentesAutomaticas = await tx

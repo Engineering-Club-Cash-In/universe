@@ -81,9 +81,9 @@ function formatDisplayDate(date: Date | string | null): string {
 	}).format(new Date(date));
 }
 
-// Prefija celdas que empiecen con operadores de fórmula para evitar CSV injection
+// Prefija con apóstrofe las celdas que empiezan con fórmula o con tab/CR/LF (CSV injection)
 function sanitizeCSVCell(value: string): string {
-	return /^[=+\-@]/.test(value) ? `'${value}` : value;
+	return /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
 }
 
 function tipoLabel(source: "agency" | "property"): string {

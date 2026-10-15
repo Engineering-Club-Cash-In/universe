@@ -45,6 +45,8 @@ import {
 	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
 	personaGuardadaFiguraEnCliente,
+	reintentarSinTurno,
+	SinTurnoBuroInternoError,
 	usuariosParaSincronizacionAutomatica,
 } from "../lib/buro-interno-automatico";
 import {
@@ -162,6 +164,16 @@ export async function tomarCandadoBuroInterno(
 	await ejecutor.execute(
 		sql`SELECT pg_advisory_xact_lock(hashtext('buro_interno'))`,
 	);
+}
+
+/** Igual que `tomarCandadoBuroInterno`, pero sin esperar: indica si lo obtuvo. */
+async function intentarCandadoBuroInterno(
+	ejecutor: Pick<typeof db, "execute">,
+): Promise<boolean> {
+	const { rows } = await ejecutor.execute<{ obtenido: boolean }>(
+		sql`SELECT pg_try_advisory_xact_lock(hashtext('buro_interno')) AS obtenido`,
+	);
+	return rows[0]?.obtenido === true;
 }
 
 /** "" y espacios cuentan como vacío */
@@ -1075,12 +1087,14 @@ async function cargarCreditosCarteraCompletos(): Promise<CreditoBuroInterno[]> {
 }
 
 // Las evaluaciones del mismo proceso esperan turno antes de abrir la
-// transacción, para no retener conexiones mientras otra descarga Cartera.
+// transacción. Entre instancias, quien no obtiene el candado cierra su
+// transacción y reintenta en memoria, sin retener una conexión mientras otra
+// descarga Cartera.
 const enColaSincronizacionCartera = crearColaSerial();
 
 function registrarCoincidenciasCartera(candidatos: CandidatoBuroInterno[]) {
 	return enColaSincronizacionCartera(() =>
-		registrarCoincidenciasCarteraSinCola(candidatos),
+		reintentarSinTurno(() => registrarCoincidenciasCarteraSinCola(candidatos)),
 	);
 }
 
@@ -1093,7 +1107,9 @@ async function registrarCoincidenciasCarteraSinCola(
 	candidatos: CandidatoBuroInterno[],
 ) {
 	await db.transaction(async (tx) => {
-		await tomarCandadoBuroInterno(tx);
+		if (!(await intentarCandadoBuroInterno(tx))) {
+			throw new SinTurnoBuroInternoError();
+		}
 	const creditos = await cargarCreditosCarteraCompletos();
 	type LeadCartera = {
 		id: string;

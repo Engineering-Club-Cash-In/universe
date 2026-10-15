@@ -352,3 +352,47 @@ export function crearColaSerial(): <T>(tarea: () => Promise<T>) => Promise<T> {
 		return resultado;
 	};
 }
+
+/** La sincronización no obtuvo el candado del buró: otra instancia lo tiene. */
+export class SinTurnoBuroInternoError extends Error {
+	constructor() {
+		super("El candado del buró interno está ocupado.");
+		this.name = "SinTurnoBuroInternoError";
+	}
+}
+
+/**
+ * Reintenta una tarea mientras falle por falta de turno, esperando en memoria
+ * (sin retener conexiones de la base) con espera creciente hasta `maxMs`.
+ * Cualquier otro error se propaga de inmediato.
+ */
+export async function reintentarSinTurno<T>(
+	tarea: () => Promise<T>,
+	opciones: {
+		maxMs?: number;
+		esperar?: (ms: number) => Promise<void>;
+		ahora?: () => number;
+	} = {},
+): Promise<T> {
+	const maxMs = opciones.maxMs ?? 60_000;
+	const esperar =
+		opciones.esperar ??
+		((ms: number) => new Promise<void>((resolver) => setTimeout(resolver, ms)));
+	const ahora = opciones.ahora ?? Date.now;
+	const inicio = ahora();
+	let espera = 100;
+	for (;;) {
+		try {
+			return await tarea();
+		} catch (error) {
+			if (!(error instanceof SinTurnoBuroInternoError)) throw error;
+			if (ahora() - inicio + espera > maxMs) {
+				throw new Error(
+					"El buró interno está ocupado sincronizando con Cartera. Intenta de nuevo en unos segundos.",
+				);
+			}
+			await esperar(espera);
+			espera = Math.min(espera * 2, 2_000);
+		}
+	}
+}

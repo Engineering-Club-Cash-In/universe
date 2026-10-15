@@ -34,7 +34,8 @@ export function personaGuardadaFiguraEnCliente(
 	if (nit && cliente.nits.some((valor) => normalizarNitMatch(valor) === nit)) {
 		return true;
 	}
-	const compactar = (valor: string) => normalizarTexto(valor).replace(/\s+/g, "");
+	const compactar = (valor: string) =>
+		normalizarTexto(valor).replace(/\s+/g, "");
 	const nombre = compactar(`${persona.nombres} ${persona.apellidos}`);
 	return (
 		nombre.length > 0 &&
@@ -333,4 +334,21 @@ export async function evaluarConHuellaEstable<T>(parametros: {
 	}
 
 	throw new EvaluacionBuroInternoInestableError();
+}
+
+/**
+ * Serializa en memoria las tareas de este proceso. Quien espera turno no abre
+ * transacción ni retiene una conexión de la base; el candado de Postgres sigue
+ * coordinando entre instancias. Un fallo no bloquea a las tareas siguientes.
+ */
+export function crearColaSerial(): <T>(tarea: () => Promise<T>) => Promise<T> {
+	let cola: Promise<unknown> = Promise.resolve();
+	return <T>(tarea: () => Promise<T>): Promise<T> => {
+		const resultado = cola.then(tarea, tarea);
+		cola = resultado.then(
+			() => undefined,
+			() => undefined,
+		);
+		return resultado;
+	};
 }

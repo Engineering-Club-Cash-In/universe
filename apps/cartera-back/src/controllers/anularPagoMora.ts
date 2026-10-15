@@ -1,9 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import type { db } from "../database/index";
-import { creditos, pagos_credito } from "../database/db/schema";
+import { creditos, cuotas_credito, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { reabrirCuotaPorAnulacion } from "./reabrirCuotaPorAnulacion";
+import { restituirCapitalPorAnulacion } from "./restituirCapitalPorAnulacion";
+import { mueveCapital, precheckAnulacionConCapital } from "./restitucionCapitalPorAnulacionPolicy";
+import { AnulacionCapitalNoRestituibleError } from "./restitucionCapitalError";
 import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // ── `./rubros` ENTRA COMO TIPO, Y COMO VALOR SOLO DENTRO DE LA FÁBRICA ─────
 // `./rubros` arrastra `../database/index`, o sea la conexión real. Importarlo
@@ -73,9 +77,17 @@ export type AnularPagoMoraDeps = {
   anularCondonacionesPorPagoPendiente?: typeof anularCondonacionesNexaPorPagoPendiente;
   /** Anula la condonación de una boleta tardía cuyo pago se invalida (pendiente o validado). Opcional. */
   anularCondonacionBoletaTardia?: typeof anularCondonacionPorPagoInvalidado;
+  /**
+   * Reabre la cuota que el pago anulado había completado (restantes, `pagado` de
+   * las hermanas y de la cuota). Opcional: quien no la pasa no la corre, así las
+   * pruebas con bases falsas de cola no ven consultas de más.
+   */
+  reabrirCuota?: typeof reabrirCuotaPorAnulacion;
+  /** Repone capital e inversionistas si el pago ya los había bajado (validated). Opcional, como `reabrirCuota`. */
+  restituirCapital?: typeof restituirCapitalPorAnulacion;
 };
 
-const DEPS_REALES = (): AnularPagoMoraDeps => ({
+export const DEPS_REALES = (): AnularPagoMoraDeps => ({
   updateMora,
   resetAjusteFechaIdeal: resetAjusteFechaIdealSiPagoInvalidado,
   revertirRubros: (async (pago_id, ejecutor) => {
@@ -92,6 +104,8 @@ const DEPS_REALES = (): AnularPagoMoraDeps => ({
     const { anularCondonacionPorPagoInvalidado } = await import("./condonacionBoletaTardiaAnulacion");
     return anularCondonacionPorPagoInvalidado(params);
   }) as typeof anularCondonacionPorPagoInvalidado,
+  reabrirCuota: reabrirCuotaPorAnulacion,
+  restituirCapital: restituirCapitalPorAnulacion,
 });
 
 export async function anularPagoYRestituirMora(
@@ -113,6 +127,13 @@ export async function anularPagoYRestituirMora(
       // no sobre una foto que alguien más pueda estar cambiando.
       numero_credito_sifco: creditos.numero_credito_sifco,
       estado_devolucion: creditos.estado_devolucion,
+      // Para reponer el capital si el pago ya lo había bajado (restituirCapital).
+      capital: creditos.capital,
+      statusCredit: creditos.statusCredit,
+      porcentaje_interes: creditos.porcentaje_interes,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      gps: creditos.gps,
+      membresias_pago: creditos.membresias_pago,
     })
     .from(creditos)
     .where(eq(creditos.credito_id, credito_id))
@@ -174,6 +195,9 @@ export async function anularPagoYRestituirMora(
       created_at: pagos_credito.createdAt,
       nexaPaymentEventId: pagos_credito.nexaPaymentEventId,
       boletaTardiaIntentoId: pagos_credito.boletaTardiaIntentoId,
+      abono_capital: pagos_credito.abono_capital,
+      registerBy: pagos_credito.registerBy,
+      cuota_id: pagos_credito.cuota_id,
     })
     .from(pagos_credito)
     .where(
@@ -191,6 +215,17 @@ export async function anularPagoYRestituirMora(
   if (await pagoNexaBloqueaAnular(tx, pagoPrevio?.nexaPaymentEventId)) {
     throw new NexaPaymentNotReversibleError();
   }
+
+  // Un pago que ya bajó capital solo se anula si ese capital se puede reponer. Lo que se decide
+  // con el crédito y la fila candados (estado del crédito, fila estructural) va acá, antes de
+  // escribir; el resto (PCI, roster, abonos_capital) lo decide `restituirCapital`, en esta tx.
+  const rechazoCapital = precheckAnulacionConCapital({ ...pagoPrevio, statusCredit: creditoCandado.statusCredit });
+  if (rechazoCapital) throw new AnulacionCapitalNoRestituibleError(rechazoCapital);
+  // Si la cuota está cerrada, RAMA B tuvo que repartir este pago (se lee antes de reabrirla).
+  const conCapital = !!pagoPrevio && mueveCapital(pagoPrevio.validationStatus, pagoPrevio.abono_capital);
+  const [cuota] = conCapital && pagoPrevio?.cuota_id != null
+    ? await tx.select({ pagado: cuotas_credito.pagado }).from(cuotas_credito).where(eq(cuotas_credito.cuota_id, pagoPrevio.cuota_id))
+    : [];
 
   // ¿Qué queda por restituir de la mora que este pago bajó? La pregunta —y su
   // ancla— viven en `moraDecrementoDePago.ts`, compartidas con la reversa de
@@ -236,6 +271,21 @@ export async function anularPagoYRestituirMora(
   // la mora a un pago que no le pertenece sería peor que no hacer nada.
   if (!actualizado.rowCount || actualizado.rowCount === 0) {
     throw new Error("No payment found to mark as false with the given criteria");
+  }
+
+  // Si el pago había completado su cuota, las hermanas siguen con `pagado = true` y
+  // los restantes en 0 (los estampó `insertPayment`): el cron daba la cuota por
+  // cubierta y el pago siguiente la saltaba. Se reabre acá, en la misma
+  // transacción y bajo el candado del crédito, con la réplica de `reversePayment` y la
+  // cobertura de `insertPayment`.
+  await deps.reabrirCuota?.(tx, { pago_id, credito_id });
+
+  // INMEDIATAMENTE DESPUÉS de reabrir: la reapertura evalúa el INCOBRABLE con capital + abono;
+  // con el capital ya repuesto lo sumaría dos veces.
+  if (conCapital) {
+    await deps.restituirCapital?.(tx, {
+      pago_id, credito_id, credito: creditoCandado, pago: pagoPrevio!, cuotaCerrada: cuota?.pagado === true,
+    });
   }
 
   // Fila de un evento Nexa `failed` (Nexa devolvió el dinero): se desliga para que un reintento

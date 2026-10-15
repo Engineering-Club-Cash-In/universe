@@ -307,6 +307,83 @@ export const cuentaComoHermanoVivo = (
 ): boolean =>
   pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
 
+/**
+ * ¿Esta fila puede ser el SALDO VIGENTE de la cuota (de ella se leen los `*_restante`)?
+ *
+ * Una fila anulada (`paymentFalse = true`) NUNCA: su `*_restante` es el de DESPUÉS del pago
+ * que se anuló (ej. 0), y tomarlo hace que el pago siguiente parta de un saldo que ya no
+ * existe y cierre la cuota corta (crédito 9331, cuota 2).
+ */
+export const esPagoSaldoElegible = (pago: {
+  validationStatus?: string | null;
+  pagado?: boolean | null;
+  paymentFalse?: boolean | null;
+}): boolean =>
+  pago.paymentFalse !== true &&
+  (pago.validationStatus === "validated" ||
+    (pago.validationStatus === "pending" &&
+      pago.pagado === false &&
+      pago.paymentFalse === false));
+
+/**
+ * Cuota SIN NINGUNA fila viva (datos viejos: todas anuladas, semilla incluida; crédito 459,
+ * cuota 4). Sin respaldo `insertPayment` lee restantes 0 y salta la cuota para siempre. La
+ * semilla `no_required` ANULADA más vieja sirve ÚNICAMENTE como fuente del saldo vigente (sus
+ * `*_restante`); nunca como destino del cierre: el pago inserta una fila nueva viva.
+ *
+ * Una semilla anulada es plata que no existe: si recibió abonos antes de anularse, su saldo es
+ * cada restante MÁS su propio abono (misma regla que `masAbono` al anular). Sin abonos no cambia
+ * (crédito 459: suman la cuota completa, 8,578.86). Lo que no se puede reconstruir sin historial
+ * es un pago de OTRA fila, anulado después, que ya le hubiera estampado los restantes.
+ */
+type SemillaRespaldo = {
+  validationStatus?: string | null;
+  paymentFalse?: boolean | null;
+} & Partial<Record<
+  | "capital_restante" | "abono_capital" | "interes_restante" | "abono_interes"
+  | "iva_12_restante" | "abono_iva_12" | "seguro_restante" | "abono_seguro"
+  | "gps_restante" | "abono_gps" | "membresias" | "membresias_pago",
+  BigInput | null
+>>;
+
+const restanteMasAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
+  new Big(restante ?? 0).plus(abono ?? 0).toFixed(2);
+
+export const saldoDeRespaldoDeSemillaAnulada = <T extends SemillaRespaldo>({
+  hayFilasVivas,
+  semillaAnulada: s,
+}: {
+  hayFilasVivas: boolean;
+  semillaAnulada: T | undefined;
+}): T | undefined =>
+  !hayFilasVivas && s?.validationStatus === "no_required" && s.paymentFalse === true
+    ? {
+        ...s,
+        capital_restante: restanteMasAbono(s.capital_restante, s.abono_capital),
+        interes_restante: restanteMasAbono(s.interes_restante, s.abono_interes),
+        iva_12_restante: restanteMasAbono(s.iva_12_restante, s.abono_iva_12),
+        seguro_restante: restanteMasAbono(s.seguro_restante, s.abono_seguro),
+        gps_restante: restanteMasAbono(s.gps_restante, s.abono_gps),
+        membresias: restanteMasAbono(s.membresias, s.membresias_pago),
+      }
+    : undefined;
+
+/**
+ * ¿La cuota se quedó sin NINGUNA fuente de saldo? Ni una fila viva (cualquier estado, pagada o no)
+ * ni una semilla `no_required` anulada que sirva de respaldo. `insertPayment` no tendría dónde
+ * escribirla y la plata se iría a saldo a favor sin rastro (crédito 365, cuota 4): hay que
+ * rechazar el pago antes de escribir nada.
+ */
+const esFilaDeCapital = (estado?: string | null) =>
+  estado === "capital" || estado === "capital_validated";
+
+export const cuotaSinFuenteDeSaldo = (
+  pagos: { validationStatus?: string | null; paymentFalse?: boolean | null }[],
+): boolean =>
+  // Una fila de capital viva no lleva saldo de cuota (interés/IVA en 0): no cuenta como viva.
+  !pagos.some((p) => p.paymentFalse !== true && !esFilaDeCapital(p.validationStatus)) &&
+  !pagos.some((p) => p.paymentFalse === true && p.validationStatus === "no_required");
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

@@ -257,6 +257,29 @@ describe("residuo negativo que dejaría negativa la restitución", () => {
     expect(planN(5, "0.03")).toEqual(rechazo);
   });
 
+  it("abono 0.04 con PCI [0.01, 0, 0, 0] y roster de 4: la tolerancia cuenta inversionistas con capital, no filas", () => {
+    const plan = planRestitucionCapital({
+      pago: { validationStatus: "validated", abono_capital: "0.04", registerBy: "x" },
+      credito: { ...CREDITO_9507, capital: "2000.00" },
+      filasPci: [PCI(1, "0.01"), PCI(2, "0"), PCI(3, "0"), PCI(4, "0")],
+      roster: rosterN(4),
+      cuotaCerrada: true,
+    });
+    expect(plan).toEqual(rechazo);
+  });
+
+  it("caso real: PCI 1120.41 con abono 1120.40 repone y suma 1120.40", () => {
+    const plan = planRestitucionCapital({
+      pago: { validationStatus: "validated", abono_capital: "1120.40", registerBy: "x" },
+      credito: { ...CREDITO_9507, capital: "2000.00" },
+      filasPci: [PCI(1, "1120.41")],
+      roster: rosterN(1),
+      cuotaCerrada: true,
+    });
+    if (plan.tipo !== "REPONER") throw new Error(plan.tipo);
+    expect(plan.inversionistas.map((i) => i.monto_aportado)).toEqual(["2120.40000000"]);
+  });
+
   it("residuo positivo chico: sigue en REPONER y el residuo va al mayor", () => {
     const plan = planN(3, "0.04");
     if (plan.tipo !== "REPONER") throw new Error(plan.tipo);

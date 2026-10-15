@@ -141,14 +141,14 @@ export function planRestitucionCapital({
   }
 
   // Las PCI van a 2 decimales y la validación restó con precisión completa: el residuo de
-  // redondeo (hasta un centavo por fila) va al de mayor abono, así Δ Σ monto_aportado == Δ capital.
+  // redondeo (hasta un centavo por inversionista con capital) va al de mayor abono, así Δ Σ monto_aportado == Δ capital.
   // Sin PCI (la cuota nunca cerró: RAMA A no reparte) solo se repone el capital.
   if (filasPci.length > 0) {
     const repartido = [...porInversionista.values()].reduce((s, m) => s.plus(m), new Big(0));
     const residuo = abono.minus(repartido);
     const [mayor] = [...porInversionista.entries()].sort((a, b) => b[1].cmp(a[1]) || a[0] - b[0]);
     // Sin PCI con abono, o con un residuo negativo que dejaría negativo al mayor, no hay a quién restituir.
-    if (!mayor || residuo.abs().gt(new Big(0.01).times(filasPci.length)) || mayor[1].plus(residuo).lt(0)) {
+    if (!mayor || residuo.abs().gt(new Big(0.01).times(porInversionista.size)) || mayor[1].plus(residuo).lt(0)) {
       return { tipo: "RECHAZAR", codigo: "REPARTO_INCONSISTENTE" };
     }
     porInversionista.set(mayor[0], mayor[1].plus(residuo));

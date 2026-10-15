@@ -128,6 +128,10 @@ const PREFIJO_ESTADO_EN_NEGADO = new RegExp(
 // una cantidad cero informa que no hubo atraso.
 const PREFIJO_CANTIDAD_CERO =
 	/(?:^|\s)(?:0|cero|ningun[ao]?)(?:\s+(?:cuotas?|pagos?|meses|dias)\s+(?:en|de))?\s+$/;
+// "No se pudo comprobar el fraude", "no fue posible confirmar la mora":
+// una verificación que no se logró no afirma el riesgo.
+const PREFIJO_VERIFICACION_FALLIDA =
+	/(?:^|\s)no(?:\s+se)?\s+(?:pudo|pudieron|puede|pueden|logro|lograron|fue\s+posible|ha\s+sido\s+posible)\s+(?:comprobar|confirmar|detectar|identificar|evidenciar|verificar|demostrar|acreditar)(?:\s+(?:el|la|los|las|un|una|unos|unas|ningun[ao]?))?\s+$/;
 // Negación pospuesta: "fraude no detectado", "mora no comprobada". "No aplica"
 // solo cuenta al final del texto, para no negar "mora, no aplica descuento".
 const SUFIJO_NEGACION =
@@ -144,6 +148,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_DEUDA_NEGADA.test(prefijo) ||
 		PREFIJO_ESTADO_EN_NEGADO.test(prefijo) ||
 		PREFIJO_CANTIDAD_CERO.test(prefijo) ||
+		PREFIJO_VERIFICACION_FALLIDA.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }

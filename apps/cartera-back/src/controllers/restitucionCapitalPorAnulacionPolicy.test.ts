@@ -204,6 +204,24 @@ describe("planRestitucionCapital: rechazos (409, no se anula nada)", () => {
     expect(plan9507({ filasPci: [PCI(86, "1005.44"), PCI(999, "0.00")] })).toMatchObject({ tipo: "REPONER" });
   });
 
+  it("(f2) PCI todas en capital 0 (cuota cerrada): REPARTO_INCONSISTENTE, no repone sin inversionista", () => {
+    const rechazo = { tipo: "RECHAZAR", codigo: "REPARTO_INCONSISTENTE" } as const;
+    // redondeo a cero: abono de 0.01 y tres PCI en 0.00
+    expect(
+      plan9507({
+        pago: { ...PAGO_9507, abono_capital: "0.01" },
+        filasPci: [PCI(86, "0.00"), PCI(87, "0.00"), PCI(88, "0.00")],
+      }),
+    ).toEqual(rechazo);
+    // caso real (crédito 16): abono 20000 y una PCI con capital 0 (solo interés)
+    expect(
+      plan9507({
+        pago: { ...PAGO_9507, abono_capital: "20000" },
+        filasPci: [PCI(86, "0", { abono_interes: "1951.25" })],
+      }),
+    ).toEqual(rechazo);
+  });
+
   it("(f) el reparto no cuadra con el abono más allá de la tolerancia: REPARTO_INCONSISTENTE", () => {
     expect(plan9507({ filasPci: [PCI(86, "1000.00")] })).toEqual({
       tipo: "RECHAZAR",

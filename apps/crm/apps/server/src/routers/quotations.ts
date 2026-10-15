@@ -6,6 +6,7 @@ import {
 	companies,
 	leads,
 	opportunities,
+	opportunityCloseQuotations,
 	quotations,
 	vehicles,
 } from "../db/schema";
@@ -15,6 +16,7 @@ import { calculateMonthlyPayment } from "../lib/quotation-calculations";
 import {
 	canManageAnyQuotation,
 	canManageQuotations,
+	motivoParaNoBorrarCotizacion,
 } from "../lib/quotation-permissions";
 import { getInsuranceCost } from "./insurance";
 
@@ -522,7 +524,30 @@ export const quotationsRouter = {
 				});
 			}
 
-			await db.delete(quotations).where(eq(quotations.id, input.quotationId));
+			// La oportunidad se bloquea para que un cierre en curso termine antes de
+			// decidir: si gana, ya no se borra.
+			await db.transaction(async (tx) => {
+				const [oportunidad] = existing.opportunityId
+					? await tx
+							.select({ status: opportunities.status })
+							.from(opportunities)
+							.where(eq(opportunities.id, existing.opportunityId))
+							.for("share")
+					: [];
+				const [delCierre] = await tx
+					.select({ quotationId: opportunityCloseQuotations.quotationId })
+					.from(opportunityCloseQuotations)
+					.where(eq(opportunityCloseQuotations.quotationId, input.quotationId))
+					.limit(1);
+				const motivo = motivoParaNoBorrarCotizacion({
+					estadoOportunidad: oportunidad?.status ?? null,
+					esDelCierre: !!delCierre,
+				});
+				if (motivo) {
+					throw new ORPCError("CONFLICT", { message: motivo });
+				}
+				await tx.delete(quotations).where(eq(quotations.id, input.quotationId));
+			});
 
 			return { success: true };
 		}),

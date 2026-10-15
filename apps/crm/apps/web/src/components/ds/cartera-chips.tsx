@@ -32,6 +32,7 @@ export type EstadoGestionValor =
 	| "Sin acuerdo"
 	| "Promesa vigente"
 	| "Convenio vigente"
+	| "Convenio pendiente"
 	| "Promesa incumplida";
 
 const estadoGestionTone: Record<
@@ -48,6 +49,12 @@ const estadoGestionTone: Record<
 	"Convenio vigente": {
 		chip: "bg-success-subtle text-success-text",
 		punto: "bg-success-solid",
+	},
+	// Tampoco está en Figma: EN_CONVENIO esperando la aprobación del
+	// supervisor (Ficha 360). Tono warning, como las aprobaciones pendientes.
+	"Convenio pendiente": {
+		chip: "bg-warning-subtle text-warning-text",
+		punto: "bg-warning-solid",
 	},
 	"Promesa incumplida": {
 		chip: "bg-danger-subtle text-danger-text",

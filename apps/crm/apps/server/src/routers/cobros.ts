@@ -980,7 +980,7 @@ export async function marcarInmovilizacionEnviadaARecuperacion(params: {
  * `credito_id` exacto — nunca por SIFCO, que del otro lado se compara con
  * `ILIKE '%valor%'`.
  */
-async function resolverConvenioVigenteDelCaso(casoCobroId: string) {
+export async function resolverConvenioVigenteDelCaso(casoCobroId: string) {
 	const [caso] = await db
 		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
 		.from(casosCobros)

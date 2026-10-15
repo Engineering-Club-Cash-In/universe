@@ -80,6 +80,7 @@ import {
 	CardSeguroFicha,
 	FilaSeguimiento,
 	FranjaSeguimiento,
+	estadoCobroFicha,
 	tipoTimelineDeGestion,
 } from "@/components/cobros/ficha/ficha-resumen";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
@@ -2662,13 +2663,12 @@ function RouteComponent() {
 								)}
 
 								<CardEstadoCobro
-									estado={
-										enConvenioCartera
-											? { etiqueta: "En convenio", tone: "info" }
-											: diasMora > 0
-												? { etiqueta: "En mora", tone: "danger" }
-												: { etiqueta: "Al día", tone: "success" }
-									}
+									estado={estadoCobroFicha({
+										enConvenio: enConvenioCartera,
+										diasMora,
+										estadoGestion: seguimiento?.estadoGestion,
+										cargandoSeguimiento: seguimientoFicha.isPending,
+									})}
 									diasMora={diasMora}
 									bucket={bucketPrefijo ? `bucket ${bucketPrefijo}` : undefined}
 									filas={[
@@ -5160,6 +5160,13 @@ function RouteComponent() {
 									input: { creditoId: id },
 								}),
 							);
+							// Chip «Convenio pendiente» y botón «Deshacer convenio».
+							queryClient.invalidateQueries({
+								queryKey: orpc.getSeguimientoFicha.key(),
+							});
+							queryClient.invalidateQueries({
+								queryKey: orpc.getConvenioVigenteDelCaso.key(),
+							});
 						}}
 					/>
 					{/* El diálogo vive fuera del dropdown: dentro, el menú se

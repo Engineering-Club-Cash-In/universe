@@ -123,6 +123,7 @@ const ESTADO_GESTION: Record<string, EstadoGestionValor> = {
 	promesa_vigente: "Promesa vigente",
 	promesa_incumplida: "Promesa incumplida",
 	convenio_vigente: "Convenio vigente",
+	convenio_pendiente: "Convenio pendiente",
 };
 
 export function EstadoGestionCelda({ estado }: { estado: string }) {

@@ -17,6 +17,7 @@ import type {
 	TipoEnvioRecuperacion,
 } from "server/src/lib/recuperacion-vehiculo";
 import { moraDeEstado } from "@/components/cobros/asesor/fila-cartera";
+import { estadoCobroFicha } from "@/components/cobros/ficha/ficha-resumen";
 import type { Bucket, Mora } from "@/components/ds/badges";
 import { inicialesDe } from "@/components/ds/cards-credito";
 import { authClient } from "@/lib/auth-client";
@@ -222,7 +223,7 @@ export type CasoWorkspace = {
 		/** En recuperación y ya subió a B5 (banda roja de la ficha). */
 		recuperacionEnB5: boolean;
 		/** «Estado del cobro»: En convenio / En mora / Al día. */
-		estadoCobro: { etiqueta: string; tone: "info" | "danger" | "success" };
+		estadoCobro: ReturnType<typeof estadoCobroFicha>;
 	};
 
 	// ── Cuotas y saldo ───────────────────────────────────────────────────────
@@ -266,7 +267,7 @@ export type CasoWorkspace = {
 		proximoContactoEn: string | Date | null;
 		diasSinGestion: number | null;
 		contactabilidad: SeguimientoFichaDatos["contactabilidad"] | null;
-		/** sin_acuerdo / promesa_vigente / promesa_incumplida / convenio_vigente. */
+		/** sin_acuerdo / promesa_vigente / promesa_incumplida / convenio_vigente / convenio_pendiente. */
 		estadoGestion: string | null;
 		/** Acción pendiente que calcula el server (tipo + fecha). */
 		accionPendiente: SeguimientoFichaDatos["accionPendiente"] | null;
@@ -656,11 +657,12 @@ export function useCasoWorkspace(id: string): CasoWorkspace {
 			enRecuperacion,
 			recuperacionEnB5:
 				enRecuperacion && bucket.numero !== null && bucket.numero >= 5,
-			estadoCobro: enConvenio
-				? { etiqueta: "En convenio", tone: "info" }
-				: diasMora > 0
-					? { etiqueta: "En mora", tone: "danger" }
-					: { etiqueta: "Al día", tone: "success" },
+			estadoCobro: estadoCobroFicha({
+				enConvenio,
+				diasMora,
+				estadoGestion: seguimiento?.estadoGestion,
+				cargandoSeguimiento: seguimientoFicha.isPending,
+			}),
 		},
 
 		cuotas: {

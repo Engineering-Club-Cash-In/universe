@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { diasSinGestion, nivelContactabilidad } from "./ficha-cobros";
+import {
+	diasSinGestion,
+	estadoGestionConConvenio,
+	nivelContactabilidad,
+} from "./ficha-cobros";
 
 describe("nivelContactabilidad", () => {
 	test("sin intentos no hay nivel", () => {
@@ -31,5 +35,29 @@ describe("diasSinGestion", () => {
 	test("cuenta días de Guatemala, no de UTC", () => {
 		// 2026-10-04 23:30 GT = 2026-10-05 05:30 UTC → hace 2 días en GT.
 		expect(diasSinGestion(new Date("2026-10-05T05:30:00Z"), ahora)).toBe(2);
+	});
+});
+
+describe("estadoGestionConConvenio", () => {
+	test("EN_CONVENIO sin aprobar → convenio pendiente", () => {
+		expect(estadoGestionConConvenio("convenio_vigente", false)).toBe(
+			"convenio_pendiente",
+		);
+	});
+	test("convenio aprobado (activo) → sigue vigente", () => {
+		expect(estadoGestionConConvenio("convenio_vigente", true)).toBe(
+			"convenio_vigente",
+		);
+	});
+	test("cartera no respondió → se deja como venía", () => {
+		expect(estadoGestionConConvenio("convenio_vigente", null)).toBe(
+			"convenio_vigente",
+		);
+	});
+	test("sin convenio no toca el estado", () => {
+		expect(estadoGestionConConvenio("promesa_vigente", false)).toBe(
+			"promesa_vigente",
+		);
+		expect(estadoGestionConConvenio("sin_acuerdo", false)).toBe("sin_acuerdo");
 	});
 });

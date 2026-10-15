@@ -6,8 +6,28 @@
  */
 
 import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
+import type { EstadoGestion } from "./seguimiento-cobros";
 
 export type NivelContactabilidad = "alta" | "media" | "baja";
+
+/**
+ * Chip de estado de gestión del encabezado de la ficha. Cartera pone el
+ * crédito en EN_CONVENIO apenas el asesor crea el convenio, pero lo guarda con
+ * `activo = false` hasta que el supervisor lo aprueba: mientras tanto es
+ * «Convenio pendiente», no «Convenio vigente».
+ *
+ * `convenioActivo`: true/false según cartera; null = no se pudo saber (cartera
+ * apagada o caída) → se deja el estado como venía, igual que antes.
+ */
+export function estadoGestionConConvenio(
+	estado: EstadoGestion,
+	convenioActivo: boolean | null,
+): EstadoGestion {
+	if (estado === "convenio_vigente" && convenioActivo === false) {
+		return "convenio_pendiente";
+	}
+	return estado;
+}
 
 /** Ventana en la que se mide la contactabilidad de UN caso. */
 export const DIAS_VENTANA_CONTACTABILIDAD = 60;

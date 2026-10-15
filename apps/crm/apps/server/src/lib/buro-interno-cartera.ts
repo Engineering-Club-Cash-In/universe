@@ -123,8 +123,10 @@ const PREFIJO_ESTADO_EN_NEGADO =
 // una cantidad cero informa que no hubo atraso.
 const PREFIJO_CANTIDAD_CERO =
 	/(?:^|\s)(?:0|cero|ningun[ao]?)(?:\s+(?:cuotas?|pagos?|meses|dias)\s+(?:en|de))?\s+$/;
+// Negación pospuesta: "fraude no detectado", "mora no comprobada". "No aplica"
+// solo cuenta al final del texto, para no negar "mora, no aplica descuento".
 const SUFIJO_NEGACION =
-	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
+	/^\s+(?:(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|condonad[oa]s?)|no\s+(?:(?:fue|fueron|ha\s+sido|se)\s+)?(?:confirmad[oa]s?|detectad[oa]s?|comprobad[oa]s?|identificad[oa]s?|registrad[oa]s?|reportad[oa]s?|evidenciad[oa]s?)|no\s+(?:existe|existio|hubo)|no\s+aplica(?=\s*$))(?=\s|$)/;
 
 function estaNegada(texto: string, inicio: number, fin: number): boolean {
 	const prefijo = texto.slice(0, inicio);

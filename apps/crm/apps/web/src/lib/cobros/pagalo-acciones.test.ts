@@ -189,6 +189,41 @@ describe("mensajeVerificacionPagalo", () => {
 		}
 	});
 
+	test("una consulta o voucher fallido no se reporta como «sin pago»", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 0,
+			errores: 1,
+			statusFinal: "PENDING_PAYMENT",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).toContain("No se pudo verificar");
+		expect(r.mensaje).not.toContain("todavía no reporta");
+	});
+
+	test("un link confirmado y otro con error avisa de ambos", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			errores: 1,
+			statusFinal: "PARTIALLY_PAID",
+		});
+		expect(r.tipo).toBe("warning");
+		expect(r.mensaje).toContain("1 link(s) confirmados");
+		expect(r.mensaje).toContain("falló al verificarse");
+	});
+
+	test("el estado final sigue mandando sobre los errores", () => {
+		expect(
+			mensajeVerificacionPagalo({
+				pagados: 1,
+				errores: 1,
+				statusFinal: "APPLICATION_FAILED",
+			}).tipo,
+		).toBe("error");
+		expect(mensajeVerificacionPagalo({ aplicado: true, errores: 1 }).tipo).toBe(
+			"success",
+		);
+	});
+
 	test("sin pago en Págalo no se celebra nada", () => {
 		for (const r of [
 			undefined,

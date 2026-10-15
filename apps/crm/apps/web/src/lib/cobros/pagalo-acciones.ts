@@ -121,6 +121,8 @@ export function esReintentoForzado(status: string, esAdmin: boolean): boolean {
 export type ResultadoVerificacionPagalo = {
 	aplicado?: boolean;
 	pagados?: number;
+	/** Links cuya consulta a Págalo o cuyo voucher falló en esta corrida. */
+	errores?: number;
 	statusFinal?: string;
 };
 
@@ -159,6 +161,16 @@ export function mensajeVerificacionPagalo(
 			mensaje:
 				"Pago confirmado en Págalo; falta aplicarlo en cartera. Intente de nuevo en unos segundos.",
 		};
+	// Una consulta o un voucher que falló no es "el cliente no ha pagado": el
+	// grupo puede seguir en PENDING_PAYMENT con un pago real sin ver todavía.
+	if (r?.errores) {
+		return {
+			tipo: r.pagados ? "warning" : "error",
+			mensaje: r.pagados
+				? `${r.pagados} link(s) confirmados, pero ${r.errores} falló al verificarse. Intente de nuevo; si persiste, revise el log del servidor.`
+				: `No se pudo verificar en Págalo (${r.errores} error(es)). Intente de nuevo; si persiste, revise el log del servidor.`,
+		};
+	}
 	if (r?.pagados)
 		return {
 			tipo: "success",

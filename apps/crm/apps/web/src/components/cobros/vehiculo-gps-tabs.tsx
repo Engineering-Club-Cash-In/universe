@@ -234,11 +234,15 @@ export function VehiculoGpsTabs({
 		!inmov.data.tieneGps &&
 		!reglasApagado(inmov.data, bucketNumero).mostrarTarjeta;
 	const mostrarApagado = !!inmov.data && !sinApagado;
-	useEffect(() => {
-		if (sinApagado && pestana === "inmovilizacion") {
-			setPestana(vehicleId ? "gps" : "visitas");
-		}
-	}, [sinApagado, pestana, vehicleId]);
+	// Pestaña visible: si la elegida (p. ej. por deep link) no está disponible,
+	// cargando, con error o sin GPS, se muestra otra sin perder la elección: al
+	// llegar los datos y habilitarse, vuelve sola a la de apagado.
+	const pestanaVisible: PestanaUbicacion =
+		pestana === "inmovilizacion" && !mostrarApagado
+			? vehicleId
+				? "gps"
+				: "visitas"
+			: pestana;
 
 	return (
 		<PestanasUbicacion
@@ -284,7 +288,7 @@ export function VehiculoGpsTabs({
 				<GpsEventosHistorial casoCobroId={casoCobroId} embedded />
 			}
 			onValueChange={setPestana}
-			value={pestana}
+			value={pestanaVisible}
 			visitas={visitas}
 		/>
 	);

@@ -10,5 +10,6 @@ describe("huella de aprobación del buró interno", () => {
 		);
 
 		expect(consulta.sql).toContain("public.buro_interno_fuentes_cartera");
+		expect(consulta.sql).toContain("md5(string_agg");
 	});
 });

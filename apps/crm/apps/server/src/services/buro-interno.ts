@@ -1942,6 +1942,26 @@ export function huellaEvaluacionSql(
 	const foto = (tabla: string, filtro?: SQL) =>
 		sql`(SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '')
 			FROM ${sql.raw(tabla)}${filtro ? sql` WHERE ${filtro}` : sql``})`;
+	// Las fuentes automáticas pueden actualizarse con relojes distintos y una
+	// huella basada en count + max(updated_at) puede no detectar todos los
+	// cambios. El contenido completo, ordenado por id, produce una versión
+	// determinística para el gate de aprobación.
+	const fotoFuentesCartera = sql`(SELECT coalesce(md5(string_agg(
+			concat_ws('|',
+				id::text,
+				persona_id::text,
+				cartera_usuario_id::text,
+				cartera_credito_id::text,
+				numero_credito_sifco,
+				estado_credito,
+				categoria,
+				motivo,
+				evidencia::text,
+				observado_at::text,
+				created_at::text,
+				updated_at::text
+			), '~' ORDER BY id)), '')
+		FROM public.buro_interno_fuentes_cartera)`;
 
 	// `renapinfo` no tiene timestamps y el titular se arma con esos nombres
 	// cuando ya está sincronizado, así que se versiona con un hash de ellos
@@ -1956,7 +1976,7 @@ export function huellaEvaluacionSql(
 
 	return sql`concat_ws('|',
 		${foto("public.buro_interno_personas", sql`activo`)},
-		${foto("public.buro_interno_fuentes_cartera")},
+		${fotoFuentesCartera},
 		${foto("public.buro_interno_reglas")},
 		${foto("public.co_debtors", sql`opportunity_id = ${opportunityIdExpr}`)},
 		${foto("public.referencias_lead", sql`lead_id = ${leadIdExpr}`)},

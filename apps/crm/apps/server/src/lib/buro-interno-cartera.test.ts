@@ -86,6 +86,9 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Mora condonada",
 		"Se condonó la mora",
 		"Cliente al día, sin problemas de mora",
+		"No tiene problemas de mora",
+		"No presentó problemas de mora",
+		"No hay problemas de fraude",
 		"No se le cobró mora",
 		"No aplica mora",
 		"Descuento de mora autorizado",
@@ -99,6 +102,8 @@ describe("clasificación de evidencia de Cartera", () => {
 
 	test.each([
 		["Vehículo reposeído", "vehiculo_recuperado"],
+		["El vehículo fue recuperado", "vehiculo_recuperado"],
+		["Se recuperó el vehículo", "vehiculo_recuperado"],
 		["Carro recuperado", "vehiculo_recuperado"],
 		["Cliente moroso", "mala_paga"],
 		["Morosidad reiterada", "mala_paga"],

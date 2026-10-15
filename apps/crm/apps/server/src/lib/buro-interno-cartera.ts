@@ -116,6 +116,8 @@ const PREFIJO_NEGACION_INDIRECTA = new RegExp(
 );
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
+const PREFIJO_PROBLEMAS_NEGADOS =
+	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+problemas?\s+de\s+$/;
 const SUFIJO_NEGACION =
 	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
 
@@ -126,6 +128,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_NEGACION_COORDINADA.test(prefijo) ||
 		PREFIJO_NEGACION_INDIRECTA.test(prefijo) ||
 		PREFIJO_CONTEXTO_NO_RIESGO.test(prefijo) ||
+		PREFIJO_PROBLEMAS_NEGADOS.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }
@@ -157,7 +160,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:(?:vehiculos?|carros?)\s+(?:recuperad[oa]s?|reposeid[oa]s?)|recuperacion(?:es)?\s+de\s+(?:vehiculos?|carros?)|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
+			/(?:^|\s)(?:(?:vehiculos?|carros?)\s+(?:(?:fue|fueron|ha\s+sido|han\s+sido)\s+)?(?:recuperad[oa]s?|reposeid[oa]s?)|se\s+recuper(?:o|aron|a|an)\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?)|recuperacion(?:es)?\s+de\s+(?:vehiculos?|carros?)|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "vehiculo_recuperado", texto: limpio };

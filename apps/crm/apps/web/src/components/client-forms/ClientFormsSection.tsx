@@ -27,6 +27,11 @@ import {
 	generateFinancialStatementPdf,
 } from "@/lib/generate-client-form-pdfs";
 import { client } from "@/utils/orpc";
+import {
+	AlertaReferenciasRepetidas,
+	AlertaSinVerificar,
+	ReferenciasPorParticipante,
+} from "./AlertaReferenciasRepetidas";
 
 interface ClientFormsSectionProps {
 	opportunityId: string;
@@ -94,6 +99,18 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 	}
 
 	const participants: ClientFormParticipant[] = data?.participants ?? [];
+	// Alerta de referencias repetidas (null si este usuario no la puede ver).
+	const alerta = data?.alertaReferencias ?? null;
+	const claveDe = (p: { personType: string; personId: string }) =>
+		`${p.personType}:${p.personId}`;
+	const repetidasDe = new Map(
+		alerta?.participantes.map((p) => [claveDe(p), p.referencias]),
+	);
+	// Quien dejó solicitud pero ya no tiene tarjeta (codeudor borrado sin enlace).
+	const sinTarjeta =
+		alerta?.participantes.filter(
+			(p) => !participants.some((card) => claveDe(card) === claveDe(p)),
+		) ?? [];
 	const completedCount = participants.filter(
 		(participant) =>
 			participant.creditApplicationExists &&
@@ -113,6 +130,8 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					<Badge variant="secondary">Pendiente</Badge>
 				)}
 			</div>
+
+			{alerta?.error && <AlertaSinVerificar />}
 
 			<div className="space-y-4">
 				{participants.map((participant) => {
@@ -304,6 +323,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 								</div>
 							</div>
 
+							<AlertaReferenciasRepetidas
+								referencias={repetidasDe.get(key) ?? []}
+							/>
+
 							{(participant.creditApplication ||
 								participant.financialStatement) && (
 								<div className="flex flex-wrap gap-3">
@@ -346,6 +369,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 						</div>
 					);
 				})}
+				<ReferenciasPorParticipante participantes={sinTarjeta} />
 			</div>
 
 		<AlertDialog

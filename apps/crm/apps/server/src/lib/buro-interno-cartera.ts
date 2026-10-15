@@ -94,13 +94,13 @@ export function normalizarMotivoRiesgo(texto: string): string {
 }
 
 const VERBO_DETECCION_NEGADO =
-	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|adeud(?:a|an|aba|aban|o)|pose(?:e|en|ia|ian)|mantien(?:e|en)|manten(?:ia|ian)|tiene|existe(?:n)?|hay|hubo)/;
+	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|comet(?:e|en|io|ieron|ido)|adeud(?:a|an|aba|aban|o)|pose(?:e|en|ia|ian)|mantien(?:e|en)|manten(?:ia|ian)|tiene|existe(?:n)?|hay|hubo)/;
 const VERBO_ESTADO_NEGADO = new RegExp(
 	`(?:es|fue|esta|estuvo|tiene|tuvo|cuenta\\s+con|ha\\s+(?:habido|tenido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
 );
 // Acepta un artículo antes del término: "no se detectó el fraude".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao])?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]|\\s+cometer)?|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao])?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
 );
 const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,

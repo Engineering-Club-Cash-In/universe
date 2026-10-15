@@ -122,6 +122,37 @@ url_para_node() {
   sed -E 's/([?&])sslrootcert=[^&]*&/\1/; s/[?&]sslrootcert=[^&]*$//' <<<"$1"
 }
 
+# Un `ALTER SCHEMA … RENAME` cambia el nombre del schema pero NO reescribe el
+# texto de las funciones plpgsql: sus cuerpos siguen diciendo
+# `<schema>_nuevo.tabla` (lo que dejó `renombrar_dump`/`renombrar_migracion`),
+# y el primer INSERT/UPDATE que dispare el trigger revienta con «relation
+# "<schema>_nuevo.x" does not exist» (así cayó el import de Págalo, 2026-10-15).
+# Se corre DESPUÉS del swap, cuando el encabezado de cada función ya dice el
+# schema definitivo, y solo se reescribe lo que apunta al nombre de trabajo.
+# Falla si queda alguna función con la referencia colgada.
+#   uso: corregir_funciones_tras_swap URL SCHEMA NUEVO
+corregir_funciones_tras_swap() {
+  local url="$1" schema="$2" nuevo="$3" sql pendientes
+  sql="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -c "
+    SELECT replace(pg_get_functiondef(p.oid), '${nuevo}.', '${schema}.') || ';'
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = '${schema}' AND p.prokind IN ('f', 'p')
+      AND strpos(p.prosrc, '${nuevo}.') > 0
+    ORDER BY p.proname, p.oid")"
+  if [[ -n "$sql" ]]; then
+    echo "· funciones con referencias a ${nuevo}: $(grep -c '^CREATE OR REPLACE' <<<"$sql")"
+    { echo "BEGIN;"; echo "$sql"; echo "COMMIT;"; } | psql "$url" -X -v ON_ERROR_STOP=1 -q -f - \
+      || die "No se pudieron reescribir las funciones que apuntan a ${nuevo}."
+  fi
+  pendientes="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -c "
+    SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = '${schema}' AND p.prokind IN ('f', 'p')
+      AND strpos(p.prosrc, '${nuevo}.') > 0")"
+  [[ "$pendientes" == "0" ]] \
+    || die "Quedan $pendientes funciones de ${schema} apuntando a ${nuevo}: el swap ya se hizo, hay que corregirlas a mano."
+  echo "· funciones de ${schema} sin referencias a ${nuevo}"
+}
+
 # Radiografía de un schema ya cargado: pool, cartera por bucket y asesor,
 # funnel sin línea base, convenios sin backfill. Solo lectura (ROLLBACK).
 #   uso: verificar_schema URL SCHEMA

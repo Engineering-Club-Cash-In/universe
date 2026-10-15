@@ -36,7 +36,7 @@
 #   5. MOTOR sobre `_nuevo`: procesarMoras (buckets + reasignación) y convenios
 #   6. `02` con conservar=1: alinea los residuos que el motor no toca
 #      (créditos con capital 0, buckets sin pool)
-#   7. Swap por rename + retención de backups
+#   7. Swap por rename + reescritura del schema en el cuerpo de las funciones + retención de backups
 #
 # Uso:
 #   alinear_desde_prod.sh --prod URL_SUPABASE --neon URL_DIRECTA_NEON \
@@ -460,6 +460,10 @@ if [[ $SIN_SWAP -eq 1 ]]; then
 fi
 log "7 · swap: $SCHEMA → $BK · $NUEVO → $SCHEMA"
 pn -q -o /dev/null -c "BEGIN; ALTER SCHEMA \"$SCHEMA\" RENAME TO \"$BK\"; ALTER SCHEMA \"$NUEVO\" RENAME TO \"$SCHEMA\"; COMMIT;"
+
+# El rename no toca el cuerpo de las funciones: hay que apuntarlas al nombre definitivo.
+log "7b · funciones de $SCHEMA: $NUEVO → $SCHEMA en sus cuerpos"
+corregir_funciones_tras_swap "$NEON" "$SCHEMA" "$NUEVO"
 
 log "retención · conservar los últimos $RETENCION backups ${SCHEMA}_bk_YYYYMMDD_HHMM"
 for viejo_bk in $(pn -At -c "SELECT nspname FROM pg_namespace WHERE nspname ~ '^${SCHEMA}_bk_[0-9]{8}_[0-9]{4}\$' ORDER BY nspname DESC OFFSET $RETENCION"); do

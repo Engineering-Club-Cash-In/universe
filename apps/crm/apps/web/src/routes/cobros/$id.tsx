@@ -3995,7 +3995,12 @@ function RouteComponent() {
 													? 0
 													: (cuota.pagos ?? []).reduce(
 															(suma: number, pago: any) =>
-																suma + Number(pago.montoAplicado ?? 0),
+																suma +
+																Number(
+																	pago.montoAplicadoCuota ??
+																		pago.montoAplicado ??
+																		0,
+																),
 															0,
 														);
 												const saldoCuota = Math.max(

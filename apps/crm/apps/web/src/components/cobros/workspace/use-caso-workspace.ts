@@ -144,6 +144,8 @@ export type CuotaPlan = CuotaHistorialFila & {
 		pagoId?: number;
 		montoBoleta?: string | number | null;
 		montoAplicado?: string | number | null;
+		/** Lo aplicado a la cuota contractual (sin la mora/otros de un pago legacy). */
+		montoAplicadoCuota?: number;
 		fechaPago?: string | null;
 		/** Contabilidad: "pending" = todavía sin validar. */
 		validationStatus?: string | null;

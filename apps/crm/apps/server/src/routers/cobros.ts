@@ -5670,10 +5670,30 @@ export const cobrosRouter = {
 							const pagoCompleto = Boolean(
 								fila.pago_pagado ?? fila.pago_cuota_completa,
 							);
+							// Lo aplicado a la CUOTA contractual (capital + interés + IVA +
+							// seguro + GPS + membresías), como `sumarAplicadoACuota` de
+							// cartera-back. `monto_aplicado` de un pago legacy de solo
+							// mora/otros incluye esos rubros, que no son cuota. Sin ningún
+							// rubro en la fila (dato viejo) se cae a `monto_aplicado`.
+							const rubrosCuota = [
+								fila.abono_capital,
+								fila.abono_interes,
+								fila.abono_iva_12,
+								fila.abono_seguro,
+								fila.abono_gps,
+								fila.membresias_pago,
+							];
+							const montoAplicadoCuota = rubrosCuota.every((r) => r == null)
+								? montoAplicado
+								: Math.round(
+										rubrosCuota.reduce((suma, r) => suma + Number(r ?? 0), 0) *
+											100,
+									) / 100;
 							lista.push({
 								pagoId: fila.pago_id,
 								montoBoleta: fila.monto_boleta ?? null,
 								montoAplicado: fila.monto_aplicado ?? null,
+								montoAplicadoCuota,
 								fechaPago: fila.fecha_pago ?? null,
 								// Estado de contabilidad del pago ("pending" = sin validar).
 								validationStatus: fila.validationStatus ?? null,

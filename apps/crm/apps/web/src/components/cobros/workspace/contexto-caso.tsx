@@ -1111,7 +1111,8 @@ function cuotaDelPlan(
 	const abonado = esPagada
 		? 0
 		: (cuota.pagos ?? []).reduce(
-				(suma, pago) => suma + Number(pago.montoAplicado ?? 0),
+				(suma, pago) =>
+					suma + Number(pago.montoAplicadoCuota ?? pago.montoAplicado ?? 0),
 				0,
 			);
 	const saldoCuota = Math.max(Number(cuota.montoCuota) - abonado, 0);

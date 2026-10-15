@@ -20,17 +20,33 @@ describe("días hábiles bancarios de Guatemala", () => {
     expect(domingoDePascua(2025)).toBe("2025-04-20");
   });
 
-  test("feriados fijos + Jueves y Viernes Santo", () => {
+  test("2026 usa el calendario observado de Banguat (con traslados)", () => {
     const f = feriadosBancariosGT(2026);
-    for (const d of ["2026-01-01", "2026-04-02", "2026-04-03", "2026-05-01", "2026-06-30",
-      "2026-07-01", "2026-08-15", "2026-09-15", "2026-10-20", "2026-11-01", "2026-12-24", "2026-12-25", "2026-12-31"]) {
-      expect(f.has(d)).toBe(true);
-    }
-    expect(f.size).toBe(13);
+    expect([...f].sort()).toEqual(["2026-01-01", "2026-04-02", "2026-04-03", "2026-05-01", "2026-06-26",
+      "2026-06-29", "2026-08-14", "2026-09-15", "2026-10-12", "2026-10-20", "2026-11-02", "2026-12-24",
+      "2026-12-25", "2026-12-31"]);
     expect(esDiaHabilGT("2026-10-20")).toBe(false);
     expect(esDiaHabilGT("2026-10-10")).toBe(false); // sábado
     expect(esDiaHabilGT("2026-10-11")).toBe(false); // domingo
-    expect(esDiaHabilGT("2026-10-12")).toBe(true);
+    expect(esDiaHabilGT("2026-10-12")).toBe(false); // cierre bancario trasladado
+    expect(esDiaHabilGT("2026-11-02")).toBe(false);
+    expect(esDiaHabilGT("2026-06-26")).toBe(false);
+    expect(esDiaHabilGT("2026-06-30")).toBe(true);
+    expect(esDiaHabilGT("2026-07-01")).toBe(true);
+  });
+
+  test("Nexa 2026: vence 7-oct, pago el 13-oct (12-oct cerrado) → dentro de la ventana", () => {
+    expect(sumarDiasHabilesGT("2026-10-07", 3)).toBe("2026-10-13");
+    expect(pagoNexaDentroDeVentana("2026-10-07", "2026-10-13")).toBe(true);
+    expect(pagoNexaDentroDeVentana("2026-10-07", "2026-10-14")).toBe(false);
+  });
+
+  test("año sin tabla (2027): cálculo nominal, sin traslados", () => {
+    const f = feriadosBancariosGT(2027);
+    expect(f.size).toBe(13);
+    expect(esDiaHabilGT("2027-06-30")).toBe(false);
+    expect(esDiaHabilGT("2027-07-01")).toBe(false);
+    expect(esDiaHabilGT("2027-03-25")).toBe(false); // Jueves Santo
   });
 
   test("15-ago (Asunción) es feriado y se salta: miércoles 13-ago-2025 + 3 hábiles = martes 19-ago", () => {
@@ -49,9 +65,10 @@ describe("días hábiles bancarios de Guatemala", () => {
   });
 
   test("vence viernes, paga martes → en ventana (sábado y domingo no cuentan)", () => {
-    expect(sumarDiasHabilesGT("2026-10-09", 3)).toBe("2026-10-14");
+    expect(sumarDiasHabilesGT("2026-10-09", 3)).toBe("2026-10-15"); // lun 12 cerrado
     expect(pagoNexaDentroDeVentana("2026-10-09", "2026-10-13")).toBe(true);
-    expect(pagoNexaDentroDeVentana("2026-10-09", "2026-10-15")).toBe(false);
+    expect(pagoNexaDentroDeVentana("2026-10-09", "2026-10-15")).toBe(true);
+    expect(pagoNexaDentroDeVentana("2026-10-09", "2026-10-16")).toBe(false);
   });
 
   test("vence miércoles antes de Jueves/Viernes Santo: la ventana corre hasta el miércoles siguiente", () => {

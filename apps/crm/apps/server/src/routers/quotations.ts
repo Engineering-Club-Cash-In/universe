@@ -1,20 +1,23 @@
 import { ORPCError } from "@orpc/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
 	companies,
 	leads,
 	opportunities,
+	opportunityCloseQuotations,
 	quotations,
 	vehicles,
 } from "../db/schema";
+import { claveDeFirma } from "../lib/contratos-candado";
 import { buildServerInsurancePersistence } from "../lib/insurance-selection";
 import { crmProcedure } from "../lib/orpc";
 import { calculateMonthlyPayment } from "../lib/quotation-calculations";
 import {
 	canManageAnyQuotation,
 	canManageQuotations,
+	motivoParaNoBorrarCotizacion,
 } from "../lib/quotation-permissions";
 import { getInsuranceCost } from "./insurance";
 
@@ -522,7 +525,37 @@ export const quotationsRouter = {
 				});
 			}
 
-			await db.delete(quotations).where(eq(quotations.id, input.quotationId));
+			// Toma el mismo candado que la confirmación de contratos
+			// (conCandadoDeFirma), que lo sostiene durante todo el cierre: un borrado
+			// que llega en medio espera a que termine y, si la oportunidad quedó
+			// ganada, ya no borra.
+			await db.transaction(async (tx) => {
+				if (existing.opportunityId) {
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(${claveDeFirma(existing.opportunityId)})`,
+					);
+				}
+				const [oportunidad] = existing.opportunityId
+					? await tx
+							.select({ status: opportunities.status })
+							.from(opportunities)
+							.where(eq(opportunities.id, existing.opportunityId))
+							.for("share")
+					: [];
+				const [delCierre] = await tx
+					.select({ quotationId: opportunityCloseQuotations.quotationId })
+					.from(opportunityCloseQuotations)
+					.where(eq(opportunityCloseQuotations.quotationId, input.quotationId))
+					.limit(1);
+				const motivo = motivoParaNoBorrarCotizacion({
+					estadoOportunidad: oportunidad?.status ?? null,
+					esDelCierre: !!delCierre,
+				});
+				if (motivo) {
+					throw new ORPCError("CONFLICT", { message: motivo });
+				}
+				await tx.delete(quotations).where(eq(quotations.id, input.quotationId));
+			});
 
 			return { success: true };
 		}),

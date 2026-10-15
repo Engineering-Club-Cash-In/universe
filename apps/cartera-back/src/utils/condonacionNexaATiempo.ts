@@ -4,7 +4,7 @@ import {
   getAjusteFechaIdealADeducir,
 } from "../controllers/registerPaymentPolicy";
 import { DIAS_PAGO_PENDIENTE_FRENA_MORA } from "./cuotaYaPagadaSql";
-import { fechaCalendarioGT } from "./fechaCalendarioGT";
+import { fechaCalendarioGT, validarFechaBoleta, ymdDeFechaCalendario } from "./fechaCalendarioGT";
 import {
   moraPendientePorCuota,
   repartirPagoDeMora,
@@ -28,7 +28,8 @@ import {
  *  3. SOLO si con ese pago el crédito queda al día. Si no, nada.
  *  4. La mora de cuotas vencidas antes (fuera de la ventana) se cobra normal.
  *  5. Días hábiles: lunes a viernes menos los feriados bancarios de Guatemala
- *     (`FERIADOS_FIJOS_GT` + Jueves y Viernes Santo).
+ *     Si el año está en `FERIADOS_OBSERVADOS_GT` (calendario de Banguat) manda esa
+ *     tabla; si no, el cálculo nominal (`FERIADOS_FIJOS_GT` + Jueves y Viernes Santo).
  *
  * Para saber si "queda al día" se simula el reparto en el MISMO orden que
  * `insertPayment`: mora legítima → rubros → ajuste por fecha ideal → cuotas de
@@ -80,6 +81,18 @@ export const FERIADOS_FIJOS_GT = [
   "12-31", // Fin de año
 ] as const;
 
+/**
+ * Cierres bancarios OBSERVADOS por año, `MM-DD`. Fuente: calendario SIPA 2026 de
+ * Banguat, columna Guatemala (incluye los traslados: 26-jun, 29-jun, 14-ago, 12-oct,
+ * 2-nov). El medio día del 01-04 cuenta como hábil; el 24-dic se deja completo por
+ * decisión de negocio. 2027 se carga cuando Banguat lo publique (nov/dic): mientras
+ * tanto ese año usa el cálculo nominal, sin reglas de traslado.
+ */
+export const FERIADOS_OBSERVADOS_GT: Readonly<Record<number, readonly string[]>> = {
+  2026: ["01-01", "04-02", "04-03", "05-01", "06-26", "06-29", "08-14", "09-15",
+    "10-12", "10-20", "11-02", "12-24", "12-25", "12-31"],
+};
+
 const DIA_MS = 86_400_000;
 
 const aMs = (fecha: Date | string): number => {
@@ -111,6 +124,8 @@ export function domingoDePascua(anio: number): string {
 
 /** Todos los feriados bancarios de Guatemala de un año, como `YYYY-MM-DD`. */
 export function feriadosBancariosGT(anio: number): Set<string> {
+  const observados = FERIADOS_OBSERVADOS_GT[anio];
+  if (observados) return new Set(observados.map((mmdd) => `${anio}-${mmdd}`));
   const pascua = aMs(domingoDePascua(anio));
   return new Set([
     ...FERIADOS_FIJOS_GT.map((mmdd) => `${anio}-${mmdd}`),
@@ -149,7 +164,7 @@ export function pagoNexaDentroDeVentana(
   return aMs(fechaBanco) <= aMs(sumarDiasHabilesGT(fechaVencimiento, DIAS_HABILES_VENTANA_NEXA));
 }
 
-type BigInput = Big | string | number;
+export type BigInput = Big | string | number;
 
 /** Una cuota que HOY devenga mora, con el criterio del cron (`cuotasParaPendienteDeCreditos`). */
 export type CuotaConMoraNexa = CuotaParaPendiente & { fecha_vencimiento: Date | string };
@@ -242,48 +257,74 @@ export type RazonSinCondonacionNexa =
   | "no_alcanza_mora"
   | "no_queda_al_dia";
 
+/** Razones de la regla genérica: las de Nexa más las propias de la boleta tardía. */
+export type RazonSinCondonacion =
+  | RazonSinCondonacionNexa
+  | "fuera_de_tope" // la cuota lleva más de 5 días de mora
+  | "boleta_invalida" // fecha_boleta con formato malo, imposible o futura
+  | "boleta_de_otro_periodo"; // la boleta no es posterior al vencimiento de la cuota previa
+
+export type DecisionSiCondona = {
+  condonar: true;
+  /** Total a condonar, en centavos. */
+  monto: Big;
+  /** Lo que queda de mora y cobra el pago (la mora legítima). */
+  moraACobrar: Big;
+  /** Reparto para el ledger, solo cuotas dentro de la ventana. */
+  cuotas: { cuota_id: number; monto: Big }[];
+  /**
+   * Pagos pendientes de cuotas vencidas sin los que el crédito no quedaría
+   * al día (ordenados, sin repetir). Vacío = no depende de ninguno.
+   */
+  pagosPendientes: number[];
+};
+
 export type DecisionCondonacionNexa =
   | { condonar: false; razon: RazonSinCondonacionNexa }
-  | {
-      condonar: true;
-      /** Total a condonar, en centavos. */
-      monto: Big;
-      /** Lo que queda de mora y cobra el pago (la mora legítima). */
-      moraACobrar: Big;
-      /** Reparto para el ledger, solo cuotas dentro de la ventana. */
-      cuotas: { cuota_id: number; monto: Big }[];
-      /**
-       * Pagos pendientes de cuotas vencidas sin los que el crédito no quedaría
-       * al día (ordenados, sin repetir). Vacío = no depende de ninguno.
-       */
-      pagosPendientes: number[];
-    };
+  | DecisionSiCondona;
+
+export type DecisionCondonacion =
+  | { condonar: false; razon: RazonSinCondonacion }
+  | DecisionSiCondona;
 
 const TOLERANCIA_CUOTA = new Big("0.01");
 
-export function decidirCondonacionNexaATiempo(params: {
+export type ParamsDecisionCondonacion = {
   statusCredit: string | null;
   capital: BigInput | null;
   /** `moras_credito.monto_mora` de la mora ACTIVA, o null si no hay. */
   moraActiva: BigInput | null;
   cuotasConMora: CuotaConMoraNexa[];
   cuotasAbiertas: CuotaAbiertaNexa[];
-  /** Monto del pago Nexa. */
+  /** Disponible que reparte el pago (Nexa: el monto; boleta: `disponibleParaCuotas`). */
   monto: BigInput;
-  /** `tokenDate.slice(0, 10)`. */
-  fechaBanco: string;
   /** Hoy en Guatemala: define qué cuotas siguen vencidas. */
   hoy: Date | string;
   /** Lo que los rubros vivos podrían tomar de la boleta (ver `cobrarRubrosParaBoleta`). */
   rubrosPendientes: BigInput;
   ajusteFechaIdeal: { id: number; monto_total: BigInput } | null;
-}): DecisionCondonacionNexa {
+};
+
+/** Qué mora es "del retraso" (condonable). Nexa: vencimiento + 3 hábiles; boleta tardía: ver abajo. */
+export type ReglaDeVentana = {
+  enVentana: (cuota: CuotaConMoraNexa) => boolean;
+  /** Se evalúa justo después de `sin_mora`; una razón corta la decisión. */
+  validarPrevio?: () => RazonSinCondonacion | null;
+  /** Razón cuando ninguna cuota con mora está en ventana. */
+  razonSinCuotasEnVentana: () => RazonSinCondonacion;
+};
+
+export function decidirCondonacion(
+  params: ParamsDecisionCondonacion & { regla: ReglaDeVentana },
+): DecisionCondonacion {
   // EN_CONVENIO / INCOBRABLE / … no devengan mora (STATUS_EXCLUIDOS_MORA).
   if (!["ACTIVO", "MOROSO"].includes(params.statusCredit ?? "")) {
     return { condonar: false, razon: "estado_no_aplica" };
   }
   const moraActual = new Big(params.moraActiva ?? 0);
   if (moraActual.lte(0)) return { condonar: false, razon: "sin_mora" };
+  const previo = params.regla.validarPrevio?.() ?? null;
+  if (previo) return { condonar: false, razon: previo };
 
   // Cuotas duplicadas (mismo numero_cuota): insertPayment solo paga la de mayor cuota_id, que es la
   // única que llega en `cuotasAbiertas`. Una cuota con mora que no está ahí es la duplicada vieja:
@@ -298,16 +339,14 @@ export function decidirCondonacionNexaATiempo(params: {
     cuotas: params.cuotasConMora,
   });
   const enVentana = new Set(
-    params.cuotasConMora
-      .filter((c) => pagoNexaDentroDeVentana(c.fecha_vencimiento, params.fechaBanco))
-      .map((c) => c.cuota_id),
+    params.cuotasConMora.filter((c) => params.regla.enVentana(c)).map((c) => c.cuota_id),
   );
   const pendientesVentana = porCuota.filter((c) => enVentana.has(c.cuota_id));
   const moraVentana = pendientesVentana.reduce((acc, c) => acc.plus(c.pendiente), new Big(0));
   const moraLegitima = porCuota
     .filter((c) => !enVentana.has(c.cuota_id))
     .reduce((acc, c) => acc.plus(c.pendiente), new Big(0));
-  if (moraVentana.lte(0)) return { condonar: false, razon: "fuera_de_ventana" };
+  if (moraVentana.lte(0)) return { condonar: false, razon: params.regla.razonSinCuotasEnVentana() };
 
   // `monto_mora` es el total redondeado a centavos; la parte legítima se cobra
   // redondeada y el resto es de la ventana. El tope (la mora de la ventana
@@ -315,7 +354,7 @@ export function decidirCondonacionNexaATiempo(params: {
   const tope = moraVentana.round(2, Big.roundUp);
   const resto = moraActual.minus(moraLegitima.round(2, Big.roundHalfUp));
   const montoCondonar = (resto.lt(tope) ? resto : tope).round(2, Big.roundDown);
-  if (montoCondonar.lte(0)) return { condonar: false, razon: "fuera_de_ventana" };
+  if (montoCondonar.lte(0)) return { condonar: false, razon: params.regla.razonSinCuotasEnVentana() };
   const moraACobrar = moraActual.minus(montoCondonar);
 
   // ── Simulación del reparto de insertPayment ────────────────────────────────
@@ -354,6 +393,8 @@ export function decidirCondonacionNexaATiempo(params: {
     // parcial que este pago completaría se rechazó arriba): el crédito queda al
     // día gracias a ellos —el cron le da 7 días a un pendiente—. La condonación
     // se marca con ellos y se anula si alguno se anula o se revierte sin validarse.
+    // (La boleta tardía no se apoya en pendientes: lo descarta
+    // `decidirCondonacionBoletaTardia`.)
     if (vencida) for (const id of cuota.pagosPendientes ?? []) pagosPendientes.add(id);
   }
 
@@ -365,4 +406,126 @@ export function decidirCondonacionNexaATiempo(params: {
     cuotas: reparto,
     pagosPendientes: [...pagosPendientes].sort((a, b) => a - b),
   };
+}
+
+/** Nexa (ACH): firma pública y comportamiento idénticos a los de antes de la generalización. */
+export function decidirCondonacionNexaATiempo(
+  params: ParamsDecisionCondonacion & {
+    /** `tokenDate.slice(0, 10)`. */
+    fechaBanco: string;
+  },
+): DecisionCondonacionNexa {
+  const { fechaBanco, ...resto } = params;
+  return decidirCondonacion({
+    ...resto,
+    regla: {
+      enVentana: (c) => pagoNexaDentroDeVentana(c.fecha_vencimiento, fechaBanco),
+      razonSinCuotasEnVentana: () => "fuera_de_ventana",
+    },
+  }) as DecisionCondonacionNexa;
+}
+
+// ── Boleta pagada a tiempo, registrada tarde ─────────────────────────────────
+export const TOPE_DIAS_BOLETA_TARDIA = 5;
+
+/** El disponible que usa `insertPayment` (`calcularMontoEfectivo`): boleta − otros − abono directo, sin pasar de 0. */
+export function disponibleParaCuotas(p: {
+  montoBoleta: BigInput;
+  otros?: BigInput | null;
+  abonoDirectoCapital?: BigInput | null;
+}): Big {
+  const d = new Big(p.montoBoleta).minus(p.otros ?? 0).minus(p.abonoDirectoCapital ?? 0);
+  return d.lt(0) ? new Big(0) : d;
+}
+
+/**
+ * Última fecha de boleta que cuenta como "a tiempo" para una cuota: su vencimiento
+ * si es día hábil; si no (sábado, domingo o feriado bancario), el siguiente día hábil.
+ */
+export function fechaLimiteBoletaTardia(fechaVencimiento: Date | string): string {
+  let ms = aMs(fechaVencimiento);
+  while (!esDiaHabilGT(aYmd(ms))) ms += DIA_MS;
+  return aYmd(ms);
+}
+
+const fechaBoletaValida = (fechaBoleta: string, hoy: Date | string): boolean =>
+  validarFechaBoleta(fechaBoleta, ymdDeFechaCalendario(hoy)) === null;
+
+export type ParamsBoletaTardia = ParamsDecisionCondonacion & {
+  /** `pagos_credito.fecha_boleta`, `YYYY-MM-DD`. */
+  fechaBoleta: string;
+  /**
+   * cuota_id → vencimiento (`YYYY-MM-DD`) de la cuota número N−1 del crédito.
+   * Una entrada AUSENTE nunca equivale a "cuota 1": la cuota no califica
+   * (`boleta_de_otro_periodo`). Para la cuota 1 el valor esperado es la FECHA DE
+   * DESEMBOLSO del crédito; `null` solo se tolera en la cuota 1 y únicamente si
+   * el crédito no tiene fecha de desembolso. `null` en una cuota > 1 no califica.
+   */
+  vencimientoCuotaAnterior: ReadonlyMap<number, string | null>;
+};
+
+/**
+ * Qué cuotas con mora califican para condonar por boleta tardía, y por qué no
+ * ninguna. Una cuota califica si la boleta es de su vencimiento o anterior (si el
+ * vencimiento es día inhábil, hasta el siguiente día hábil) Y lleva a lo sumo `TOPE_DIAS_BOLETA_TARDIA` días de mora. El control de
+ * período (anti boleta vieja) se mide contra la candidata más vieja.
+ */
+export function cuotasQueCalificanBoletaTardia(p: Pick<
+  ParamsBoletaTardia,
+  "cuotasConMora" | "cuotasAbiertas" | "fechaBoleta" | "hoy" | "vencimientoCuotaAnterior"
+>): { calificadas: CuotaConMoraNexa[]; razonSiNinguna: RazonSinCondonacion | null } {
+  if (!fechaBoletaValida(p.fechaBoleta, p.hoy)) return { calificadas: [], razonSiNinguna: "boleta_invalida" };
+  const boleta = aMs(p.fechaBoleta);
+  const hoy = aMs(p.hoy);
+  const aTiempo = p.cuotasConMora.filter((c) => boleta <= aMs(fechaLimiteBoletaTardia(c.fecha_vencimiento)));
+  if (aTiempo.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_ventana" };
+  // El tope acota también el MONTO: lo condonado sale de `diasAtraso`, así que debe coincidir con
+  // `hoy − vencimiento`; si no (dato inconsistente del llamador) la cuota no califica.
+  const dentroDelTope = aTiempo.filter((c) => {
+    const dias = (hoy - aMs(c.fecha_vencimiento)) / DIA_MS;
+    return dias <= TOPE_DIAS_BOLETA_TARDIA && c.diasAtraso === dias;
+  });
+  if (dentroDelTope.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_tope" };
+  const masVieja = [...dentroDelTope].sort((a, b) => aMs(a.fecha_vencimiento) - aMs(b.fecha_vencimiento))[0]!;
+  const otroPeriodo: { calificadas: CuotaConMoraNexa[]; razonSiNinguna: RazonSinCondonacion } =
+    { calificadas: [], razonSiNinguna: "boleta_de_otro_periodo" };
+  if (!p.vencimientoCuotaAnterior.has(masVieja.cuota_id)) return otroPeriodo; // ausente ≠ cuota 1
+  const previo = p.vencimientoCuotaAnterior.get(masVieja.cuota_id);
+  if (previo == null) {
+    const esCuota1 = p.cuotasAbiertas.find((q) => q.cuota_id === masVieja.cuota_id)?.numero_cuota === 1;
+    if (!esCuota1) return otroPeriodo;
+  } else if (boleta <= aMs(fechaLimiteBoletaTardia(previo))) return otroPeriodo; // la boleta del siguiente hábil de N−1 es de N−1
+  return { calificadas: dentroDelTope, razonSiNinguna: null };
+}
+
+/**
+ * Boleta pagada a tiempo y registrada tarde: condona la mora que el retraso del
+ * registro generó (cuotas con `fecha_boleta ≤ fechaLimiteBoletaTardia(vencimiento)` y a lo sumo
+ * `TOPE_DIAS_BOLETA_TARDIA` días de mora), solo si el pago deja el crédito al día.
+ * Si para quedar al día hace falta un pago PENDIENTE vigente no condona
+ * (`no_queda_al_dia`): a diferencia de Nexa, no se apoya en pendientes.
+ *
+ * Limitaciones conocidas (spec 4.1, se documentan, no se resuelven):
+ *  - Dos boletas del mismo día para la misma cuota no califican: la segunda cae
+ *    en `cierreDiferido`/`no_queda_al_dia`.
+ *  - El control de período se mide contra la candidata más vieja: con
+ *    vencimientos mensuales solo una cuota puede calificar, y medirlo cuota a
+ *    cuota haría imposible el caso de varias cuotas en ventana (spec §6).
+ */
+export function decidirCondonacionBoletaTardia(p: ParamsBoletaTardia): DecisionCondonacion {
+  const { fechaBoleta, vencimientoCuotaAnterior, ...resto } = p;
+  const calif = cuotasQueCalificanBoletaTardia({
+    cuotasConMora: p.cuotasConMora, cuotasAbiertas: p.cuotasAbiertas, fechaBoleta, hoy: p.hoy, vencimientoCuotaAnterior,
+  });
+  const ids = new Set(calif.calificadas.map((c) => c.cuota_id));
+  const d = decidirCondonacion({
+    ...resto,
+    regla: {
+      validarPrevio: () => (calif.razonSiNinguna === "boleta_invalida" ? "boleta_invalida" : null),
+      enVentana: (c) => ids.has(c.cuota_id),
+      razonSinCuotasEnVentana: () => calif.razonSiNinguna ?? "fuera_de_ventana",
+    },
+  });
+  if (d.condonar && d.pagosPendientes.length > 0) return { condonar: false, razon: "no_queda_al_dia" };
+  return d;
 }

@@ -62,6 +62,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	necesitaDetalleCartera,
 	prepararCuentaNexaParaEnvio,
 	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
@@ -3364,7 +3365,7 @@ export const cobrosRouter = {
 				});
 			}
 
-			// Las plantillas con imagen tienen un número fijo de variables y
+			// Las plantillas con imagen o video tienen un número fijo de variables y
 			// WhatsApp rechaza las vacías: el mensaje editado no puede quedarse con
 			// menos párrafos que variables.
 			if (
@@ -3372,7 +3373,7 @@ export const cobrosRouter = {
 				!cuerpoCubreAdjunto(cuerpoBase, plantilla.adjunto)
 			) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: `Esta plantilla lleva imagen y necesita al menos ${plantilla.adjunto.parametros} párrafos separados por una línea en blanco; el mensaje editado tiene menos.`,
+					message: `Esta plantilla lleva ${plantilla.adjunto.tipo === "video" ? "video" : "imagen"} y necesita al menos ${plantilla.adjunto.parametros} párrafos separados por una línea en blanco; el mensaje editado tiene menos.`,
 				});
 			}
 
@@ -3709,12 +3710,11 @@ export const cobrosRouter = {
 			// su techo se ofrecen como variables insertables por su cuenta en el
 			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
 			// plantilla editada que use únicamente una de ellas se quedaría sin
-			// detalle y la cláusula desaparecería en silencio.
+			// detalle y la cláusula desaparecería en silencio. Las plantillas
+			// `soloConCuentaNexa` (el video) también lo cargan: su gate lee la
+			// cuenta Nexa de este detalle aunque el cuerpo no use {cuentaNexa}.
 			if (
-				cuerpoBase.includes("{montoAdeudado}") ||
-				cuerpoBase.includes("{incrementoDiarioMora}") ||
-				cuerpoBase.includes("{incrementoMaximoMensualMora}") ||
-				cuerpoBase.includes("{cuentaNexa}")
+				necesitaDetalleCartera(cuerpoBase, plantilla.soloConCuentaNexa === true)
 			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
@@ -3861,9 +3861,12 @@ export const cobrosRouter = {
 				// {cuentaNexa} ("Nueva cuenta exclusiva Nexa") solo se manda a
 				// créditos que ya tienen cuenta Nexa; sin ella se descarta antes que
 				// mandar "Banco Nexa / Cuenta Monetaria /" con el número en blanco.
+				// Las plantillas `soloConCuentaNexa` (el video de cómo transferir)
+				// también, aunque no muestren el número.
 				const cuentaNexa = prepararCuentaNexaParaEnvio(
 					cuerpoBase,
 					detalleCartera?.cuentaNexa,
+					plantilla.soloConCuentaNexa === true,
 				);
 				if (!cuentaNexa.enviar) {
 					descartados.push({
@@ -3949,7 +3952,7 @@ export const cobrosRouter = {
 						numeroSifco: sifco,
 						clienteNombre,
 						motivo:
-							"el mensaje queda con menos párrafos que variables de la plantilla con imagen (un dato vacío dejó un párrafo en blanco)",
+							"el mensaje queda con menos párrafos que variables de la plantilla con imagen o video (un dato vacío dejó un párrafo en blanco)",
 					});
 					continue;
 				}
@@ -4004,8 +4007,8 @@ export const cobrosRouter = {
 									templateName: plantilla.adjunto.templateName,
 									parametros: plantilla.adjunto.parametros,
 									header: {
-										type: "image" as const,
-										url: plantilla.adjunto.imagenUrl,
+										type: plantilla.adjunto.tipo,
+										url: plantilla.adjunto.mediaUrl,
 									},
 								},
 							}

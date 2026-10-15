@@ -1,3 +1,47 @@
+import {
+	normalizarDpiMatch,
+	normalizarNitMatch,
+	normalizarTexto,
+} from "./buro-interno-match";
+
+/**
+ * Una ficha guardada sigue representando al cliente de Cartera si coincide
+ * con alguna de sus identidades actuales por lead, DPI, NIT o nombre completo.
+ * Si el cliente dejó de listarla (p. ej. "Juan / María" pasó a "Juan"), no
+ * debe seguir recibiendo sus fuentes de riesgo.
+ */
+export function personaGuardadaFiguraEnCliente(
+	persona: {
+		nombres: string;
+		apellidos: string;
+		leadId: string | null;
+		dpi: string | null;
+		nit: string | null;
+	},
+	cliente: {
+		nombresCompletos: string[];
+		leadIds: string[];
+		dpis: Array<string | null>;
+		nits: Array<string | null>;
+	},
+): boolean {
+	if (persona.leadId && cliente.leadIds.includes(persona.leadId)) return true;
+	const dpi = normalizarDpiMatch(persona.dpi);
+	if (dpi && cliente.dpis.some((valor) => normalizarDpiMatch(valor) === dpi)) {
+		return true;
+	}
+	const nit = normalizarNitMatch(persona.nit);
+	if (nit && cliente.nits.some((valor) => normalizarNitMatch(valor) === nit)) {
+		return true;
+	}
+	const compactar = (valor: string) => normalizarTexto(valor).replace(/\s+/g, "");
+	const nombre = compactar(`${persona.nombres} ${persona.apellidos}`);
+	return (
+		nombre.length > 0 &&
+		cliente.nombresCompletos.some((valor) => compactar(valor) === nombre)
+	);
+}
+
 export type DatosPersonaAutomaticaComparables = {
 	activo: boolean;
 	leadId: string | null;

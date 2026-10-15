@@ -13,8 +13,61 @@ import {
 	evaluarConHuellaEstable,
 	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
+	personaGuardadaFiguraEnCliente,
 	usuariosParaSincronizacionAutomatica,
 } from "./buro-interno-automatico";
+
+describe("personaGuardadaFiguraEnCliente", () => {
+	const clienteVacio = {
+		nombresCompletos: [] as string[],
+		leadIds: [] as string[],
+		dpis: [] as Array<string | null>,
+		nits: [] as Array<string | null>,
+	};
+	const personaBase = {
+		nombres: "Juan",
+		apellidos: "Pérez",
+		leadId: null,
+		dpi: null,
+		nit: null,
+	};
+
+	test("false cuando la persona guardada ya no figura en el cliente", () => {
+		expect(
+			personaGuardadaFiguraEnCliente(
+				{ nombres: "María", apellidos: "López", leadId: null, dpi: null, nit: null },
+				{ ...clienteVacio, nombresCompletos: ["Juan Pérez"] },
+			),
+		).toBe(false);
+	});
+
+	test("true por nombre, ignorando tildes, mayúsculas y espacios", () => {
+		expect(
+			personaGuardadaFiguraEnCliente(personaBase, {
+				...clienteVacio,
+				nombresCompletos: ["JUAN  PEREZ"],
+			}),
+		).toBe(true);
+	});
+
+	test("true por NIT aunque el nombre sea distinto", () => {
+		expect(
+			personaGuardadaFiguraEnCliente(
+				{ nombres: "María", apellidos: "López", leadId: null, dpi: null, nit: "123-4" },
+				{ ...clienteVacio, nits: ["1234"] },
+			),
+		).toBe(true);
+	});
+
+	test("true por lead aunque el nombre sea distinto", () => {
+		expect(
+			personaGuardadaFiguraEnCliente(
+				{ nombres: "María", apellidos: "López", leadId: "L1", dpi: null, nit: null },
+				{ ...clienteVacio, leadIds: ["L1"] },
+			),
+		).toBe(true);
+	});
+});
 
 const persona: DatosPersonaAutomaticaComparables = {
 	activo: true,

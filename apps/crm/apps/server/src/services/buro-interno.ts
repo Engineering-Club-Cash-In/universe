@@ -43,6 +43,7 @@ import {
 	evaluarConHuellaEstable,
 	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
+	personaGuardadaFiguraEnCliente,
 	usuariosParaSincronizacionAutomatica,
 } from "../lib/buro-interno-automatico";
 import {
@@ -1375,11 +1376,37 @@ async function registrarCoincidenciasCartera(
 			usuariosConRiesgo: grupos.keys(),
 		});
 		if (usuariosASincronizar.length === 0) return;
+		const retirosPorIdentidad: Array<{ personaId: string; usuarioId: number }> = [];
 		for (const personaId of personasAutomaticasCoincidentes) {
 			const estado = personasAutomaticas.get(personaId);
 			if (!estado) continue;
 			for (const usuarioId of estado.usuarios) {
 				if (!grupos.has(usuarioId)) continue;
+				const grupoActual = grupos.get(usuarioId);
+				const identidadesActuales = grupoActual
+					? separarIdentidadesClienteCartera(
+							grupoActual.usuario.nombre,
+							grupoActual.usuario.nit,
+						)
+					: [];
+				if (
+					grupoActual &&
+					!personaGuardadaFiguraEnCliente(estado.persona, {
+						nombresCompletos: [
+							...identidadesActuales.map((identidad) => identidad.nombreCompleto),
+							...grupoActual.leads.map((lead) => `${lead.nombres} ${lead.apellidos}`),
+						],
+						leadIds: grupoActual.leads.map((lead) => lead.id),
+						dpis: grupoActual.leads.map((lead) => lead.dpi),
+						nits: [
+							...identidadesActuales.map((identidad) => identidad.nit),
+							...grupoActual.leads.map((lead) => lead.nit),
+						],
+					})
+				) {
+					retirosPorIdentidad.push({ personaId, usuarioId });
+					continue;
+				}
 				const objetivos = objetivosPorUsuario.get(usuarioId) ?? [];
 				const coincidenciasPersona = evaluarCoincidencias(
 					candidatos,
@@ -1397,6 +1424,82 @@ async function registrarCoincidenciasCartera(
 					personaAutomatica: estado.persona,
 				}));
 			}
+		}
+		// Identidades que el cliente de Cartera ya no lista: se retiran sus
+		// fuentes de ese usuario y, si la ficha queda sin evidencia, se retira.
+		for (const { personaId, usuarioId } of retirosPorIdentidad) {
+			await tx
+				.delete(buroInternoFuentesCartera)
+				.where(
+					and(
+						eq(buroInternoFuentesCartera.personaId, personaId),
+						eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+					),
+				);
+			await registrarEvento(tx, {
+				accion: "retiro_fuentes_automaticas_cartera",
+				actor: null,
+				personaId,
+				detalle: {
+					usuariosCarteraId: [usuarioId],
+					motivo: "identidad_no_figura_en_cartera",
+				},
+			});
+			await invalidarAutorizacionesPorCambioAutomatico(tx, personaId, [
+				"retiro_fuentes",
+			]);
+			const fuentesRestantes = await tx
+				.select({
+					numeroCreditoSifco: buroInternoFuentesCartera.numeroCreditoSifco,
+					categoria: buroInternoFuentesCartera.categoria,
+					motivo: buroInternoFuentesCartera.motivo,
+				})
+				.from(buroInternoFuentesCartera)
+				.where(eq(buroInternoFuentesCartera.personaId, personaId));
+			const ahora = new Date();
+			if (fuentesRestantes.length === 0) {
+				const [retirada] = await tx
+					.update(buroInternoPersonas)
+					.set({
+						activo: false,
+						desactivadoAt: ahora,
+						motivoDesactivacion:
+							"La identidad ya no figura en el cliente de Cartera.",
+						updatedAt: ahora,
+					})
+					.where(
+						and(
+							eq(buroInternoPersonas.id, personaId),
+							eq(buroInternoPersonas.activo, true),
+						),
+					)
+					.returning({ id: buroInternoPersonas.id });
+				if (retirada) {
+					await registrarEvento(tx, {
+						accion: "retiro_automatico_cartera",
+						actor: null,
+						personaId,
+						detalle: { usuariosCarteraId: [usuarioId] },
+					});
+					await invalidarAutorizacionesPorCambioAutomatico(tx, personaId, [
+						"retiro_automatico",
+					]);
+				}
+				continue;
+			}
+			const resumen = resumirFuentesRiesgo(fuentesRestantes);
+			await tx
+				.update(buroInternoPersonas)
+				.set({ ...resumen, updatedAt: ahora })
+				.where(
+					and(
+						eq(buroInternoPersonas.id, personaId),
+						or(
+							sql`${buroInternoPersonas.categoria} <> ${resumen.categoria}`,
+							sql`${buroInternoPersonas.motivo} <> ${resumen.motivo}`,
+						),
+					),
+				);
 		}
 		const personasProcesadas = new Set<string>();
 		const personasProcesadasPorUsuario = new Set<string>();
@@ -1461,6 +1564,13 @@ async function registrarCoincidenciasCartera(
 						),
 						sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 					),
+				),
+				// La ficha guardada puede seguir apuntando a un SIFCO que ya no está
+				// en riesgo; se reconoce por sus fuentes del mismo usuario de Cartera
+				// y el mismo nombre, sin mezclar las personas de un usuario con `/`.
+				and(
+					sql`exists (select 1 from ${buroInternoFuentesCartera} where ${buroInternoFuentesCartera.personaId} = ${buroInternoPersonas.id} and ${buroInternoFuentesCartera.carteraUsuarioId} = ${usuarioId})`,
+					sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 				),
 			);
 			const condicionesCandidato = objetivo.candidatos.flatMap((candidato) => {

@@ -113,8 +113,15 @@ export function fechaLarga(valor: Date | string | null | undefined) {
 	return f ? format(f, "d MMM yyyy", { locale: es }).replace(".", "") : "";
 }
 
-/** "15:30" en hora de Guatemala; null si es medianoche GT (día sin hora asignada). */
-function horaGTSiHay(valor: Date | string | null | undefined): string | null {
+/**
+ * "15:30" en hora de Guatemala. `conHora` (del servidor) dice si el asesor puso
+ * hora: así una llamada a las 00:00 explícita se muestra y un día sin hora no.
+ */
+function horaGTSiHay(
+	valor: Date | string | null | undefined,
+	conHora: boolean | undefined,
+): string | null {
+	if (conHora === false) return null;
 	const f = aFecha(valor);
 	if (!f || (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(valor))) {
 		return null;
@@ -125,6 +132,7 @@ function horaGTSiHay(valor: Date | string | null | undefined): string | null {
 		minute: "2-digit",
 		hour12: false,
 	});
+	if (conHora) return hora === "24:00" ? "00:00" : hora;
 	return hora === "00:00" || hora === "24:00" ? null : hora;
 }
 
@@ -207,7 +215,8 @@ export function AccionPendienteCelda({ accion }: { accion: Accion | null }) {
 	}
 	const def = ACCION[accion.tipo];
 	const dia = esHoy(accion.fecha) ? "hoy" : fechaCorta(accion.fecha);
-	const hora = accion.tipo === "llamar" ? horaGTSiHay(accion.fecha) : null;
+	const hora =
+		accion.tipo === "llamar" ? horaGTSiHay(accion.fecha, accion.conHora) : null;
 	const fecha = hora ? `${dia} · ${hora}` : dia;
 	return (
 		<AccionPendiente

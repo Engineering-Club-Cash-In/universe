@@ -323,6 +323,29 @@ describe("hora del próximo contacto (B8)", () => {
 		);
 	});
 
+	it("la acción llamar marca conHora: 00:00 explícita sí, sin hora no", () => {
+		const accion = (hora?: string) =>
+			accionPendienteDe(
+				resumirSeguimiento(
+					[
+						fila({
+							fechaContacto: gt("2026-10-05"),
+							estadoContacto: "no_contesta",
+							fechaProximoContacto: gt("2026-10-07", "00:00"),
+							horaProximoContacto: hora,
+						}),
+					],
+					AHORA,
+				),
+				{},
+				AHORA,
+			);
+		expect(accion("00:00:00")?.conHora).toBe(true);
+		expect(accion("15:30")?.conHora).toBe(true);
+		expect(accion()?.conHora).toBe(false);
+		expect(accion("25:00")?.conHora).toBe(false);
+	});
+
 	it("conHoraGT ignora una hora inválida", () => {
 		const dia = gt("2026-10-07", "00:00");
 		expect(conHoraGT(dia, "25:00").toISOString()).toBe(dia.toISOString());

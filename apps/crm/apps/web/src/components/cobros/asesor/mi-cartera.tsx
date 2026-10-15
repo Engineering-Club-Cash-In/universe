@@ -38,7 +38,10 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
-import { usePersistedState } from "@/hooks/usePersistedState";
+import {
+	asegurarFiltrosDelUsuario,
+	usePersistedState,
+} from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketsParaRender,
@@ -169,13 +172,15 @@ function useDebounced<T>(valor: T, ms: number, alCambiar?: () => void) {
 }
 
 export function MiCartera({ search }: { search: CarteraSearch }) {
-	// Debe ir antes que los usePersistedState (ver aplicarUrl).
+	const { data: session } = authClient.useSession();
+	// Debe ir antes que los usePersistedState (ver aplicarUrl). Primero se
+	// descartan los filtros que haya dejado otro usuario en esta pestaña.
 	useState(() => {
+		if (session?.user.id) asegurarFiltrosDelUsuario(session.user.id);
 		aplicarUrl(search);
 		return true;
 	});
 	const navigate = useNavigate();
-	const { data: session } = authClient.useSession();
 	const userRole = session?.user.role ?? "";
 	// Supervisión y admin: Cartera general (los dos roles por igual).
 	const esSup = PERMISSIONS.canAssignCobros(userRole);
@@ -374,6 +379,18 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	});
 	const perfil = perfilQ.data;
 	const sinAsesor = !!perfil && perfil.sinAsesor && !perfil.esSupervision;
+
+	// Un asesor no puede quedar filtrado por un bucket que no es suyo (filtro
+	// heredado de otra sesión o ?bucket= manual): se descarta al tener el perfil.
+	useEffect(() => {
+		if (!perfil || perfil.esSupervision || perfil.buckets.length === 0) return;
+		const b = bucketDeEstadoMora(etapa);
+		if (!b) return;
+		if (!perfil.buckets.includes(BUCKETS_CARTERA.indexOf(b))) {
+			setEtapa(null);
+			setPage(1);
+		}
+	}, [perfil, etapa, setEtapa, setPage]);
 
 	const statsQ = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions({

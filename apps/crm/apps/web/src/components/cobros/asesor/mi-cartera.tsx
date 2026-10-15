@@ -38,10 +38,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
-import {
-	asegurarFiltrosDelUsuario,
-	usePersistedState,
-} from "@/hooks/usePersistedState";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketsParaRender,
@@ -172,15 +169,13 @@ function useDebounced<T>(valor: T, ms: number, alCambiar?: () => void) {
 }
 
 export function MiCartera({ search }: { search: CarteraSearch }) {
-	const { data: session } = authClient.useSession();
-	// Debe ir antes que los usePersistedState (ver aplicarUrl). Primero se
-	// descartan los filtros que haya dejado otro usuario en esta pestaña.
+	// Debe ir antes que los usePersistedState (ver aplicarUrl).
 	useState(() => {
-		if (session?.user.id) asegurarFiltrosDelUsuario(session.user.id);
 		aplicarUrl(search);
 		return true;
 	});
 	const navigate = useNavigate();
+	const { data: session } = authClient.useSession();
 	const userRole = session?.user.role ?? "";
 	// Supervisión y admin: Cartera general (los dos roles por igual).
 	const esSup = PERMISSIONS.canAssignCobros(userRole);

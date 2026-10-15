@@ -12,6 +12,7 @@ import {
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { useState } from "react";
 import { logo } from "@/assets";
+import { GuardaFiltrosUsuario } from "@/components/cobros/guarda-filtros-usuario";
 import Header from "@/components/header";
 import Loader from "@/components/loader";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -54,6 +55,7 @@ function RootComponent() {
 
 	const location = useRouterState({ select: (s) => s.location });
 	const isPublicForm = location.pathname.startsWith("/formulario");
+	const isCobros = location.pathname.startsWith("/cobros");
 
 	const [client] = useState<RouterClient<typeof appRouter>>(() =>
 		createORPCClient(link),
@@ -66,7 +68,15 @@ function RootComponent() {
 			<ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
 				<div className={isPublicForm ? "" : "grid h-svh grid-rows-[auto_1fr]"}>
 					{!isPublicForm && <Header />}
-					{isFetching ? <Loader /> : <Outlet />}
+					{isFetching ? (
+						<Loader />
+					) : isCobros ? (
+						<GuardaFiltrosUsuario>
+							<Outlet />
+						</GuardaFiltrosUsuario>
+					) : (
+						<Outlet />
+					)}
 				</div>
 				<Toaster richColors />
 			</ThemeProvider>

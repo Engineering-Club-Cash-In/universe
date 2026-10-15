@@ -310,7 +310,7 @@ integrationTest("crédito CANCELADO: anular el ÚNICO pago repone restantes en l
   await sql.end();
 });
 
-integrationTest("anular un pago stale-zero (abonos 0, monto_aplicado = cuota) reabre la cuota con portadora", async () => {
+integrationTest("anular un pago stale-zero (abonos 0, monto_aplicado = cuota) que cerró la cuota: 409 y nada escrito", async () => {
   const { sql } = await setup();
   const [fila] = await sql`INSERT INTO cartera.pagos_credito
       (credito_id, cuota_id, validation_status, monto_aplicado, abono_capital, abono_interes, abono_iva_12,
@@ -319,13 +319,18 @@ integrationTest("anular un pago stale-zero (abonos 0, monto_aplicado = cuota) re
     VALUES (1, 48, 'validated', 2505.61, 0, 0, 0, 0, 0, 0, 50, '', true, 0, 0, 0, 0, 0, 0)
     RETURNING pago_id`;
   await sql`UPDATE cartera.cuotas_credito SET pagado = true WHERE cuota_id = 48`;
+  const foto = async () => JSON.stringify([
+    await sql`SELECT * FROM cartera.pagos_credito ORDER BY pago_id`,
+    await sql`SELECT * FROM cartera.cuotas_credito ORDER BY cuota_id`,
+    await sql`SELECT * FROM cartera.creditos`,
+  ]);
+  const antes = await foto();
 
-  await anular(fila!.pago_id as number);
+  const { AnulacionSinDesgloseError } = await import("./reabrirCuotaPorAnulacionPolicy");
+  const error = await anular(fila!.pago_id as number).then(() => null, (e: unknown) => e);
 
-  const [cuota] = await sql`SELECT pagado FROM cartera.cuotas_credito WHERE cuota_id = 48`;
-  expect(cuota!.pagado).toBe(false);
-  const vivas = await sql`SELECT validation_status, pagado FROM cartera.pagos_credito
-    WHERE cuota_id = 48 AND "paymentFalse" = false`;
-  expect([...vivas]).toEqual([{ validation_status: "no_required", pagado: false }]);
+  expect(error).toBeInstanceOf(AnulacionSinDesgloseError);
+  expect((error as { status: number }).status).toBe(409);
+  expect(await foto()).toBe(antes); // la fila sigue viva y pagada, la cuota cerrada, sin portadora
   await sql.end();
 });

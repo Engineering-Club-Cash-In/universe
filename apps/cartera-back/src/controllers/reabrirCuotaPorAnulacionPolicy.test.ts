@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { planReaperturaCuotaPorAnulacion } from "./reabrirCuotaPorAnulacionPolicy";
+import { AnulacionSinDesgloseError, planReaperturaCuotaPorAnulacion } from "./reabrirCuotaPorAnulacionPolicy";
 
 const CUOTA = 2455.61;
 const hermana = (o: Record<string, unknown> = {}) => ({
@@ -269,16 +269,19 @@ describe("planReaperturaCuotaPorAnulacion", () => {
   // Vía stale-zero (registerPayment ~1696-1708): sube monto_aplicado sin repartir rubros.
   const staleZero = (o: Record<string, unknown> = {}) =>
     cierre({ validationStatus: "validated", abono_capital: 0, abono_interes: 0, monto_aplicado: CUOTA, mora: 0, otros: "", pagoConvenio: 0, ...o });
-  test("stale-zero (abonos 0, neto = cuota): reabre con los restantes previos en 0 y portadora", () => {
+  test("stale-zero (abonos 0, neto = cuota) que cerró la cuota: 409 sin desglose, no se reabre", () => {
     for (const o of [{}, { monto_aplicado: CUOTA + 75, mora: 50, otros: "20", pagoConvenio: 5 }]) {
-      const p = plan({ filaAnulada: staleZero(o), hermanas: [] });
-      expect(p.reabrirFilas).toBe(true);
-      expect(p.reabrirCuota).toBe(true);
-      expect(p.insertarPortadora).toBe(true);
-      expect(p.replica?.payload).toEqual({
-        capital_restante: "0", interes_restante: "0", iva_12_restante: "0",
-        seguro_restante: "0", gps_restante: "0", membresias: "0",
-      });
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [] })).toThrow(AnulacionSinDesgloseError);
+      expect(() => plan({ filaAnulada: staleZero(o), hermanas: [hermana()] })).toThrow(
+        "El pago no tiene desglose por rubro: no se puede anular automáticamente; revisalo con contabilidad",
+      );
+    }
+  });
+
+  test("stale-zero en una cuota que no se reabriría (CANCELADO / CAIDO / INCOBRABLE en 0): nada", () => {
+    for (const o of [{ statusCredit: "CANCELADO" }, { statusCredit: "CAIDO" }, { statusCredit: "INCOBRABLE", capital: 0 }]) {
+      const p = plan({ ...o, filaAnulada: staleZero(), hermanas: [] });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
     }
   });
 

@@ -815,12 +815,24 @@ export function GestionPanel({
 		const telefonoContacto =
 			canal.metodo === "email" ? undefined : (telefono ?? undefined);
 		const alSubpaso = (o: OpcionAcuerdo | null) => setPaso({ ...p, opcion: o });
-		const volverParticipante = () =>
+		// «Cambiar participante»: «Atrás» del participante regresa a este resultado.
+		const cambiarParticipante = () =>
 			setPaso({
 				t: "participante",
 				canal,
 				llamadaIniciada: p.llamadaIniciada,
 				volver: p,
+			});
+		// «Atrás» del resultado: paso anterior del flujo, sin `volver`; si no, el
+		// «Atrás» del participante regresaría aquí en bucle y nunca al inicio.
+		// Con la llamada ya marcada se conserva `volver`: salir al inicio sin
+		// registrarla descartaría la gestión sin pasar por el guardián.
+		const atrasResultado = () =>
+			setPaso({
+				t: "participante",
+				canal,
+				llamadaIniciada: p.llamadaIniciada,
+				volver: p.llamadaIniciada ? p : undefined,
 			});
 		// Con la llamada ya marcada, «Cancelar» no abandona la gestión: vuelve a
 		// elegir el resultado (lo que pasó en la llamada hay que registrarlo).
@@ -1014,8 +1026,8 @@ export function GestionPanel({
 			<ResultadoGestionVista
 				banda={bandaDe(canal)}
 				tonoBanda={canal.metodo === "llamada" ? "success" : "brand"}
-				onCambiarParticipante={volverParticipante}
-				onAtras={volverParticipante}
+				onCambiarParticipante={cambiarParticipante}
+				onAtras={atrasResultado}
 				resultados={resultados}
 				resultado={resultado}
 				onResultado={(r) => setPaso({ ...p, resultado: r, opcion: null })}

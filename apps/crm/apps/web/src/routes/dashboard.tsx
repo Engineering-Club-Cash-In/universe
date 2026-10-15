@@ -63,6 +63,9 @@ const MONTH_NAMES = [
 	"Diciembre",
 ];
 
+// Del mes más viejo al elegido: claro → fuerte. El último se lee también en modo oscuro.
+const PIPELINE_MES_COLORS = ["#bfdbfe", "#60a5fa", "#2563eb"];
+
 function RouteComponent() {
 	const {
 		data: session,
@@ -163,6 +166,18 @@ function RouteComponent() {
 	}
 
 	const userRole = userProfile.data?.role;
+
+	const pipelineMeses = chartData.data?.pipelineMeses ?? [];
+	const etiquetaMes = (i: number) => {
+		const m = pipelineMeses[i];
+		return m ? `${MONTH_NAMES[m.month - 1]} ${m.year}` : "";
+	};
+	const rangoPipeline =
+		pipelineMeses.length === 3
+			? pipelineMeses[0].year === pipelineMeses[2].year
+				? `${MONTH_NAMES[pipelineMeses[0].month - 1]} a ${MONTH_NAMES[pipelineMeses[2].month - 1]} ${pipelineMeses[2].year}`
+				: `${etiquetaMes(0)} a ${etiquetaMes(2)}`
+			: "";
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -762,7 +777,7 @@ function RouteComponent() {
 							<CardHeader>
 								<CardTitle>Pipeline por Etapa</CardTitle>
 								<CardDescription>
-									Valor acumulado en cada etapa de ventas
+									Acumulado de {rangoPipeline}, por mes de creación
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
@@ -800,18 +815,26 @@ function RouteComponent() {
 											formatter={(value) =>
 												`Q${Number(value).toLocaleString()}`
 											}
+											labelFormatter={(label, payload) => {
+												let total = 0;
+												for (const p of payload ?? []) {
+													total += Number(p.value ?? 0);
+												}
+												return `${label} — Total Q${total.toLocaleString()}`;
+											}}
 										/>
-										<Bar dataKey="valor" name="Valor">
-											{chartData.data.pipeline.map((entry, i) => (
-												<Cell
-													key={`pipeline-${
-														// biome-ignore lint/suspicious/noArrayIndexKey: chart cell
-														i
-													}`}
-													fill={entry.color || "#3b82f6"}
+										<Legend />
+										{(["valorMes0", "valorMes1", "valorMes2"] as const).map(
+											(key, i) => (
+												<Bar
+													key={key}
+													dataKey={key}
+													name={etiquetaMes(i)}
+													stackId="pipeline"
+													fill={PIPELINE_MES_COLORS[i]}
 												/>
-											))}
-										</Bar>
+											),
+										)}
 									</BarChart>
 								</ResponsiveContainer>
 							</CardContent>

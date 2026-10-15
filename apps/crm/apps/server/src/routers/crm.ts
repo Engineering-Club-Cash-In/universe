@@ -122,6 +122,7 @@ import {
 } from "../lib/gate-mora-dpi";
 import {
 	getGuatemalaMonthWindow,
+	getUltimosTresMesesGT,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
 import {
@@ -11143,7 +11144,12 @@ export const crmRouter = {
 				context.userRole === "admin" || context.userRole === "sales_supervisor";
 			const userFilter = isGlobal ? undefined : context.userId;
 
-			// 1) Pipeline por Etapa: count + sum(value) grouped by stage
+			// 1) Pipeline por Etapa: acumulado de los 3 meses que terminan en el mes elegido,
+			// separado por mes de creación para pintar un color por mes. cantidad y valor son el total de los 3.
+			// gte/lt (no sql crudo) para que la fecha pase por el codificador de la columna.
+			const mesesPipeline = getUltimosTresMesesGT(input.year, input.month);
+			const valorDelMes = (mes: (typeof mesesPipeline)[number]) =>
+				sql<string>`coalesce(sum(case when ${gte(opportunities.createdAt, mes.startOfMonth)} and ${lt(opportunities.createdAt, mes.endOfMonth)} then ${opportunities.value} end), 0)`;
 			const pipelineRows = await db
 				.select({
 					stageId: salesStages.id,
@@ -11152,14 +11158,17 @@ export const crmRouter = {
 					stageOrder: salesStages.order,
 					cantidad: count(),
 					valor: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+					valorMes0: valorDelMes(mesesPipeline[0]),
+					valorMes1: valorDelMes(mesesPipeline[1]),
+					valorMes2: valorDelMes(mesesPipeline[2]),
 				})
 				.from(opportunities)
 				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(
 					and(
 						eq(opportunities.status, "open"),
-						gte(opportunities.createdAt, startOfMonth),
-						lt(opportunities.createdAt, endOfMonth),
+						gte(opportunities.createdAt, mesesPipeline[0].startOfMonth),
+						lt(opportunities.createdAt, mesesPipeline[2].endOfMonth),
 						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 					),
 				)
@@ -11176,6 +11185,13 @@ export const crmRouter = {
 				cantidad: r.cantidad,
 				valor: Number.parseFloat(r.valor) || 0,
 				color: r.stageColor,
+				valorMes0: Number.parseFloat(r.valorMes0) || 0,
+				valorMes1: Number.parseFloat(r.valorMes1) || 0,
+				valorMes2: Number.parseFloat(r.valorMes2) || 0,
+			}));
+			const pipelineMeses = mesesPipeline.map(({ year, month }) => ({
+				year,
+				month,
 			}));
 
 			// 2) Ranking vendedores por monto colocado (stage >= threshold)
@@ -11382,7 +11398,15 @@ export const crmRouter = {
 				(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
 			);
 
-			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
+			return {
+				pipeline,
+				pipelineMeses,
+				ranking,
+				activity,
+				byTipoCredito,
+				byMarca,
+				byMedio,
+			};
 		}),
 
 	/**

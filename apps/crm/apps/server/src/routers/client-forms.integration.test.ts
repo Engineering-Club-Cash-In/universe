@@ -916,7 +916,9 @@ describe.skipIf(!esLocal || dbMockeado)(
 					const { contexto: suyo } = await sesion("sales");
 					const espia = spyOn(dbCompartido, "execute");
 					try {
-						expect(await alertaDe(oppYo, suyo)).toBeNull();
+						await expect(alertaDe(oppYo, suyo)).rejects.toMatchObject({
+							code: "FORBIDDEN",
+						});
 						expect(espia).not.toHaveBeenCalled();
 					} finally {
 						espia.mockRestore();
@@ -930,6 +932,143 @@ describe.skipIf(!esLocal || dbMockeado)(
 					).rejects.toMatchObject({
 						code: "UNAUTHORIZED",
 					});
+				});
+			});
+		});
+
+		describe("ventas solo ve los formularios de sus oportunidades", () => {
+			type Expediente = { titular: string; opp: string };
+			/** Titular con solicitud, estado patrimonial y enlace: lo que se protege. */
+			async function expediente(asignadaA: string): Promise<Expediente> {
+				const titular = await crearLead("TitularPrivado", DPI_B);
+				const opp = await crearOpp(titular, asignadaA);
+				await crearEnlace(opp, "lead", titular);
+				await solicitudDe(
+					opp,
+					"lead",
+					titular,
+					[{ nombre: "Ref Privada", telefono: "87870001", dpi: DPI_A }],
+					null,
+					"Privada",
+				);
+				await patrimonialDe(opp, "lead", titular, "Privada");
+				return { titular, opp };
+			}
+			async function cuantasFilas(opp: string) {
+				const r = await db.execute(sql`
+					SELECT
+						(SELECT count(*) FROM credit_applications WHERE opportunity_id = ${opp}::uuid)::int AS solicitudes,
+						(SELECT count(*) FROM financial_statements WHERE opportunity_id = ${opp}::uuid)::int AS patrimoniales,
+						(SELECT count(*) FROM client_form_tokens WHERE opportunity_id = ${opp}::uuid)::int AS enlaces`);
+				return r.rows[0];
+			}
+
+			const pedidos: [
+				string,
+				(e: Expediente, ctx: Contexto) => Promise<unknown>,
+			][] = [
+				[
+					"getClientFormData",
+					(e, ctx) =>
+						call(router.getClientFormData, { opportunityId: e.opp }, ctx),
+				],
+				[
+					"getReferenciasRepetidas",
+					(e, ctx) =>
+						call(router.getReferenciasRepetidas, { opportunityId: e.opp }, ctx),
+				],
+				[
+					"getFormTokenByOpportunity",
+					(e, ctx) =>
+						call(
+							router.getFormTokenByOpportunity,
+							{ opportunityId: e.opp },
+							ctx,
+						),
+				],
+				[
+					"generateFormToken",
+					(e, ctx) =>
+						call(
+							router.generateFormToken,
+							{
+								opportunityId: e.opp,
+								personType: "lead",
+								personId: e.titular,
+							},
+							ctx,
+						),
+				],
+			];
+
+			describe.each(pedidos)("%s", (_, pedir) => {
+				test("ventas, en su oportunidad, puede", async () => {
+					const { id, contexto: suyo } = await sesion("sales");
+					expect(await pedir(await expediente(id), suyo)).not.toBeNull();
+				});
+
+				test.each([
+					"admin",
+					"analyst",
+					"sales_supervisor",
+					"cobros",
+					"cobros_supervisor",
+					"accounting",
+					"juridico",
+				])("%s sigue pudiendo en una oportunidad que no tiene asignada", async (rol) => {
+					const e = await expediente(usuario);
+					const { contexto: suyo } = await sesion(rol);
+					expect(await pedir(e, suyo)).not.toBeNull();
+				});
+
+				test("ventas, en una oportunidad ajena: FORBIDDEN, sin leer ni tocar los formularios", async () => {
+					const e = await expediente(usuario);
+					const antes = await cuantasFilas(e.opp);
+					const { contexto: suyo } = await sesion("sales");
+
+					const consultas: string[] = [];
+					const original = pg.Client.prototype.query;
+					const espia = spyOn(pg.Client.prototype, "query").mockImplementation(
+						function (this: unknown, ...args: unknown[]) {
+							const texto = args[0];
+							consultas.push(
+								typeof texto === "string"
+									? texto
+									: String((texto as { text?: string })?.text ?? ""),
+							);
+							// biome-ignore lint/suspicious/noExplicitAny: passthrough
+							return (original as any).apply(this, args);
+						} as never,
+					);
+					try {
+						await expect(pedir(e, suyo)).rejects.toMatchObject({
+							code: "FORBIDDEN",
+						});
+					} finally {
+						espia.mockRestore();
+					}
+
+					// Llegó a preguntar (la oportunidad), pero no a los datos del cliente.
+					expect(consultas.join("\n")).toContain('"opportunities"');
+					for (const tabla of [
+						"leads",
+						"co_debtors",
+						"credit_applications",
+						"financial_statements",
+						"client_form_tokens",
+					]) {
+						expect(consultas.filter((c) => c.includes(`"${tabla}"`))).toEqual(
+							[],
+						);
+					}
+					expect(await cuantasFilas(e.opp)).toEqual(antes);
+				});
+
+				test("sin sesión: UNAUTHORIZED", async () => {
+					const e = await expediente(usuario);
+					await expect(
+						pedir(e, { context: {} } as never),
+					).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 				});
 			});
 		});

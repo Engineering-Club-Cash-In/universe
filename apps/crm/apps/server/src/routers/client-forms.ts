@@ -26,6 +26,7 @@ import {
 } from "../lib/permiso-alerta-referencias";
 import type { ReferenciaDuplicada } from "../lib/referencia-coincidencias";
 import { buscarReferenciasDuplicadasLote } from "../lib/referencia-duplicada";
+import { ROLES } from "../lib/roles";
 import { validarDpi } from "../utils/cui-validation";
 
 const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
@@ -351,6 +352,24 @@ async function getOpportunityOrThrow(opportunityId: string) {
 	}
 
 	return opp;
+}
+
+/**
+ * Ventas solo trabaja los formularios de las oportunidades asignadas a sí
+ * mismo, la misma regla que el resto del CRM (crm.ts, upload.ts). Va antes de
+ * leer o tocar cualquier formulario: la solicitud trae DPI, firma, referencias
+ * y estado patrimonial del cliente. Los demás roles con acceso a clientes no
+ * cambian acá.
+ */
+function exigirOportunidadPropiaDeVentas(
+	opp: { assignedTo: string },
+	usuario: { userRole?: string | null; userId: string },
+) {
+	if (usuario.userRole === ROLES.SALES && opp.assignedTo !== usuario.userId) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No tienes permiso para ver los formularios de esta oportunidad",
+		});
+	}
 }
 
 async function resolveParticipant(
@@ -720,7 +739,11 @@ export const clientFormsRouter = {
 				personId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			exigirOportunidadPropiaDeVentas(
+				await getOpportunityOrThrow(input.opportunityId),
+				context,
+			);
 			await resolveParticipant(
 				input.opportunityId,
 				input.personType,
@@ -1117,6 +1140,7 @@ export const clientFormsRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }): Promise<AlertaReferencias | null> => {
 			const opp = await getOpportunityOrThrow(input.opportunityId);
+			exigirOportunidadPropiaDeVentas(opp, context);
 			// Se autoriza antes de leer nada más: sin permiso ni se busca.
 			const nivel = nivelAlertaReferencias({
 				userRole: context.userRole,
@@ -1184,6 +1208,7 @@ export const clientFormsRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			const opp = await getOpportunityOrThrow(input.opportunityId);
+			exigirOportunidadPropiaDeVentas(opp, context);
 			const vehicle = await getVehicleForOpportunity(input.opportunityId);
 
 			const [lead] = opp.leadId
@@ -1288,7 +1313,15 @@ export const clientFormsRouter = {
 
 	getFormTokenByOpportunity: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Los enlaces abren el formulario público con los datos del cliente.
+			// Solo ventas lee la oportunidad: el resto sigue igual que antes.
+			if (context.userRole === ROLES.SALES) {
+				exigirOportunidadPropiaDeVentas(
+					await getOpportunityOrThrow(input.opportunityId),
+					context,
+				);
+			}
 			const tokenRows = await db
 				.select()
 				.from(clientFormTokens)

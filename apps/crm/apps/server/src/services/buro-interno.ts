@@ -1686,6 +1686,41 @@ async function registrarCoincidenciasCartera(
 				});
 			}
 
+			// Una ficha reactivada o vinculada en esta misma pasada puede conservar
+			// fuentes de otros usuarios de Cartera que ya perdieron el riesgo. Se
+			// purgan antes de resumir, para no arrastrar evidencia retirada.
+			const usuariosSinRiesgoEnPersona = planificarVigenciaPersonaAutomatica(
+				(
+					await tx
+						.selectDistinct({
+							carteraUsuarioId: buroInternoFuentesCartera.carteraUsuarioId,
+						})
+						.from(buroInternoFuentesCartera)
+						.where(eq(buroInternoFuentesCartera.personaId, personaExistente.id))
+				).map((fuente) => fuente.carteraUsuarioId),
+				grupos.keys(),
+			).usuariosSinRiesgo;
+			if (usuariosSinRiesgoEnPersona.length > 0) {
+				cambiosEvidencia.add("retiro_fuentes");
+				await tx
+					.delete(buroInternoFuentesCartera)
+					.where(
+						and(
+							eq(buroInternoFuentesCartera.personaId, personaExistente.id),
+							inArray(
+								buroInternoFuentesCartera.carteraUsuarioId,
+								usuariosSinRiesgoEnPersona,
+							),
+						),
+					);
+				await registrarEvento(tx, {
+					accion: "retiro_fuentes_automaticas_cartera",
+					actor: null,
+					personaId: personaExistente.id,
+					detalle: { usuariosCarteraId: usuariosSinRiesgoEnPersona },
+				});
+			}
+
 			const idsCreditosVigentes = grupo.creditos.map(
 				(credito) => credito.creditos.credito_id,
 			);

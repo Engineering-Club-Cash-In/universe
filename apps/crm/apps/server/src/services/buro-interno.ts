@@ -1668,9 +1668,13 @@ async function registrarCoincidenciasCarteraSinCola(
 						: undefined,
 				];
 			});
+			// La precedencia manual también reconoce el nombre exacto de la
+			// identidad de Cartera: un candidato puede llegar a ella solo por una
+			// regla de familia, sin una coincidencia de identidad propia.
 			const condicionFichaManual = or(
 				condicionIdentidad,
 				...condicionesCandidato,
+				sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 			);
 			// Un usuario de Cartera puede representar varias personas separadas por
 			// `/`. La ficha existente se busca por la identidad actual, no por el

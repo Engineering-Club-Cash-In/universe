@@ -804,6 +804,9 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         fechaExpiraLabel: formatFechaLargaGT(expira),
         fechaBajaLabel: formatFechaLargaGT(diaBaja),
       },
+      // La misma hora que recibe la batería del CRM: el asunto lleva la hora de
+      // la aceptación y así cada compra queda en su propia conversación.
+      aceptadaEn: ahora,
     });
 
     // ── 6. Abrirle a jurídico la batería de contratos de cada inversionista ──

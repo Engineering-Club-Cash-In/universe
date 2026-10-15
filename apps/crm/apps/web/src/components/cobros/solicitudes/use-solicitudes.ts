@@ -120,7 +120,7 @@ export function useSolicitudesPendientes(habilitado: boolean) {
 	];
 
 	return {
-		/** Todo lo que espera la decisión del supervisor, las más antiguas primero. */
+		/** Todo lo que espera la decisión del supervisor, las más recientes primero. */
 		pendientes: datos.pendientes,
 		porEjecutar: datos.porEjecutar,
 		/** Hay más convenios por aprobar de los que entraron en la consulta. */

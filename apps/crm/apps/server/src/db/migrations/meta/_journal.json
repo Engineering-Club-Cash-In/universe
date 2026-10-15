@@ -337,6 +337,13 @@
 			"when": 1791561900000,
 			"tag": "0053_add_factura_vehiculo_document_type",
 			"breakpoints": true
+		},
+		{
+			"idx": 47,
+			"version": "7",
+			"when": 1791562000000,
+			"tag": "0054_close_quotation_fk_no_action",
+			"breakpoints": true
 		}
 	]
 }

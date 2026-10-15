@@ -134,6 +134,37 @@ export function FilaSeguimiento({
 
 /* ── Estado del cobro ───────────────────────────────────────────────────────── */
 
+/**
+ * Pill de «Estado del cobro» (ficha y modal del caso). Un crédito EN_CONVENIO
+ * puede tener el convenio esperando al supervisor: eso lo sabe el seguimiento
+ * (`estadoGestion = convenio_pendiente`). Mientras carga se muestra neutro para
+ * no pintar «En convenio» y saltar a «pendiente» un instante después.
+ */
+export function estadoCobroFicha({
+	enConvenio,
+	diasMora,
+	estadoGestion,
+	cargandoSeguimiento,
+}: {
+	enConvenio: boolean;
+	diasMora: number;
+	estadoGestion: string | null | undefined;
+	cargandoSeguimiento: boolean;
+}): { etiqueta: string; tone: CrmTone } {
+	if (enConvenio) {
+		if (cargandoSeguimiento) {
+			return { etiqueta: "Verificando convenio", tone: "neutral" };
+		}
+		if (estadoGestion === "convenio_pendiente") {
+			return { etiqueta: "Convenio pendiente de aprobación", tone: "warning" };
+		}
+		return { etiqueta: "En convenio", tone: "info" };
+	}
+	return diasMora > 0
+		? { etiqueta: "En mora", tone: "danger" }
+		: { etiqueta: "Al día", tone: "success" };
+}
+
 export function CardEstadoCobro({
 	estado,
 	diasMora,

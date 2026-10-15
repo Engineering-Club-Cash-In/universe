@@ -38,6 +38,7 @@ import { cargarDocumentos } from "../lib/documentos-ficha";
 import {
 	DIAS_VENTANA_CONTACTABILIDAD,
 	diasSinGestion,
+	estadoGestionConConvenio,
 	type NivelContactabilidad,
 	nivelContactabilidad,
 } from "../lib/ficha-cobros";
@@ -57,8 +58,12 @@ import {
 	cargarSeguimientoPorCaso,
 	estadoGestionDe,
 } from "../lib/seguimiento-cobros";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { resolverContextoCaso } from "../services/referencias-cobros-datos";
-import { assertAccesoCasoCobro } from "./cobros";
+import {
+	assertAccesoCasoCobro,
+	resolverConvenioVigenteDelCaso,
+} from "./cobros";
 
 /* ── Contratos de lo que llena José ─────────────────────────────────────────── */
 
@@ -170,6 +175,24 @@ export const fichaCobrosRouter = {
 				context.userId,
 				context.userRole,
 			);
+			// EN_CONVENIO también lo es un convenio esperando al supervisor: se
+			// pregunta a cartera si está aprobado (activo). Arranca ya, en
+			// paralelo con las consultas de abajo. Si cartera no responde, el chip
+			// queda como antes («Convenio vigente»).
+			const convenioActivoP: Promise<boolean | null> =
+				input.enConvenio && isCarteraBackEnabled()
+					? resolverConvenioVigenteDelCaso(input.casoCobroId).then(
+							(convenio) => !!convenio,
+							(err) => {
+								console.error(
+									"[getSeguimientoFicha] no se pudo consultar el convenio:",
+									err,
+								);
+								return null;
+							},
+						)
+					: Promise.resolve(null);
+
 			const ahora = new Date();
 			const seguimiento =
 				(await cargarSeguimientoPorCaso([input.casoCobroId], ahora)).get(
@@ -216,6 +239,12 @@ export const fichaCobrosRouter = {
 			const accion = seguimiento
 				? accionPendienteDe(seguimiento, {}, ahora)
 				: null;
+			const convenioActivo = await convenioActivoP;
+			const estadoGestion = seguimiento
+				? estadoGestionDe(seguimiento, input.enConvenio)
+				: input.enConvenio
+					? ("convenio_vigente" as const)
+					: ("sin_acuerdo" as const);
 			return {
 				intentosSinContacto: seguimiento?.intentosSinContacto ?? 0,
 				ultimoIntentoEn: seguimiento?.ultimoIntentoEn ?? null,
@@ -229,11 +258,7 @@ export const fichaCobrosRouter = {
 					logrados,
 					total,
 				},
-				estadoGestion: seguimiento
-					? estadoGestionDe(seguimiento, input.enConvenio)
-					: input.enConvenio
-						? ("convenio_vigente" as const)
-						: ("sin_acuerdo" as const),
+				estadoGestion: estadoGestionConConvenio(estadoGestion, convenioActivo),
 				accionPendiente: accion
 					? { tipo: accion.tipo, fecha: accion.fecha }
 					: null,

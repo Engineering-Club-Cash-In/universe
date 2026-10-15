@@ -6,7 +6,8 @@
  *  · Seguimiento      → "3 intentos sin contacto · Último intento: 11 ago" /
  *                       "Sin intento hoy"
  *  · Estado de gestión → Sin acuerdo / Promesa vigente / Promesa incumplida /
- *                        Convenio vigente
+ *                        Convenio vigente (la ficha distingue además
+ *                        Convenio pendiente de aprobación)
  *  · Acción pendiente  → Llamar / Promesa vence hoy / Promesa vencida /
  *                        Promesa por vencer / Cuota vence hoy / Gestionar (SLA) /
  *                        Confirmar pago
@@ -72,7 +73,9 @@ export type EstadoGestion =
 	| "sin_acuerdo"
 	| "promesa_vigente"
 	| "promesa_incumplida"
-	| "convenio_vigente";
+	| "convenio_vigente"
+	/** Solo la ficha: EN_CONVENIO sin aprobar (`estadoGestionConConvenio`). */
+	| "convenio_pendiente";
 
 export interface SeguimientoCaso {
 	/** Último intento manual (logrado o no). */

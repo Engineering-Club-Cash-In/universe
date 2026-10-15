@@ -89,6 +89,9 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No tiene problemas de mora",
 		"No presentó problemas de mora",
 		"No hay problemas de fraude",
+		"No tiene cuotas en mora",
+		"No tiene deuda en mora",
+		"Sin cuotas en mora",
 		"No se le cobró mora",
 		"No aplica mora",
 		"Descuento de mora autorizado",
@@ -135,6 +138,14 @@ describe("clasificación de evidencia de Cartera", () => {
 				"Fue víctima de una estafa; luego cometió fraude",
 			)?.categoria,
 		).toBe("fraude");
+	});
+
+	test("conserva riesgo posterior a una negacion con sustantivos intermedios", () => {
+		expect(
+			clasificarMotivoExplicito(
+				"No tiene cuotas en mora; registra mora reiterada",
+			)?.categoria,
+		).toBe("mala_paga");
 	});
 
 	test("normaliza tildes y espacios antes de clasificar", () => {

@@ -118,6 +118,8 @@ const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
 const PREFIJO_PROBLEMAS_NEGADOS =
 	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+problemas?\s+de\s+$/;
+const PREFIJO_DEUDA_NEGADA =
+	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|hay|existe(?:n)?|presenta|presento|cuenta\s+con))?)\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?)\s+(?:en|de)\s+$/;
 const SUFIJO_NEGACION =
 	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
 
@@ -129,6 +131,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_NEGACION_INDIRECTA.test(prefijo) ||
 		PREFIJO_CONTEXTO_NO_RIESGO.test(prefijo) ||
 		PREFIJO_PROBLEMAS_NEGADOS.test(prefijo) ||
+		PREFIJO_DEUDA_NEGADA.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }

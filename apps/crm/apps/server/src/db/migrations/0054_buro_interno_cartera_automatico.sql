@@ -31,10 +31,17 @@ CREATE TABLE IF NOT EXISTS public.buro_interno_fuentes_cartera (
 	evidencia jsonb NOT NULL DEFAULT '{}'::jsonb,
 	observado_at timestamptz NOT NULL DEFAULT now(),
 	created_at timestamptz NOT NULL DEFAULT now(),
-	updated_at timestamptz NOT NULL DEFAULT now(),
-	CONSTRAINT buro_interno_fuentes_cartera_usuario_credito_uq
-		UNIQUE (cartera_usuario_id, cartera_credito_id)
+	updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Un mismo crédito de un usuario compuesto de Cartera puede respaldar la ficha
+-- de cada identidad, sin que una identidad posterior sobrescriba la anterior.
+CREATE UNIQUE INDEX IF NOT EXISTS buro_interno_fuentes_cartera_persona_usuario_credito_uq
+	ON public.buro_interno_fuentes_cartera (
+		persona_id,
+		cartera_usuario_id,
+		cartera_credito_id
+	);
 
 CREATE INDEX IF NOT EXISTS buro_interno_fuentes_cartera_persona_idx
 	ON public.buro_interno_fuentes_cartera (persona_id);

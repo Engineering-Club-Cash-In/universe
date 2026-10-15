@@ -25,6 +25,55 @@ const OPCIONES_PANEL = [
 	{ value: "formulario", label: "Formulario" },
 ] as const;
 
+/**
+ * Los dos paneles. Vive DENTRO del `DialogContent`: Radix lo desmonta al cerrar,
+ * así que el panel móvil vuelve a «Formulario» en cada apertura (el modal que lo
+ * usa puede quedar montado aunque esté cerrado).
+ */
+function PanelesConContexto({
+	caso,
+	rellenoFormulario,
+	children,
+}: {
+	caso: CasoWorkspace;
+	rellenoFormulario: boolean;
+	children: React.ReactNode;
+}) {
+	const [panelMovil, setPanelMovil] = React.useState<PanelMovil>("formulario");
+	return (
+		<>
+			{/* Móvil: un panel a la vez */}
+			<div className="flex shrink-0 justify-center border-line-subtle border-b px-4 py-2 lg:hidden">
+				<PeriodSelector
+					aria-label="Panel del modal"
+					value={panelMovil}
+					onChange={setPanelMovil}
+					options={OPCIONES_PANEL}
+				/>
+			</div>
+			<div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.12fr)]">
+				<div
+					className={cn(
+						"min-h-0 min-w-0 overflow-y-auto overflow-x-hidden border-line-subtle bg-canvas lg:block lg:border-r",
+						panelMovil === "contexto" ? "block" : "hidden",
+					)}
+				>
+					<ContextoCaso soloLectura caso={caso} className="h-full bg-canvas" />
+				</div>
+				<div
+					className={cn(
+						"min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden bg-surface lg:flex",
+						rellenoFormulario && "gap-5 p-6",
+						panelMovil === "formulario" ? "flex" : "hidden",
+					)}
+				>
+					{children}
+				</div>
+			</div>
+		</>
+	);
+}
+
 type Props = React.ComponentProps<typeof DialogContent> & {
 	/** Caso del que se muestra el contexto; sin él, un `DialogContent` normal. */
 	caso?: CasoWorkspace;
@@ -40,7 +89,6 @@ export function ModalContenidoConContexto({
 	ref,
 	...rest
 }: Props) {
-	const [panelMovil, setPanelMovil] = React.useState<PanelMovil>("formulario");
 	// Los popovers (combobox, calendarios) se montan en la caja del modal.
 	const [cajaModal, setCajaModal] = React.useState<HTMLDivElement | null>(null);
 	const refCombinada = React.useCallback(
@@ -67,38 +115,9 @@ export function ModalContenidoConContexto({
 			{...rest}
 		>
 			<PopoverPortalContext.Provider value={cajaModal}>
-				{/* Móvil: un panel a la vez */}
-				<div className="flex shrink-0 justify-center border-line-subtle border-b px-4 py-2 lg:hidden">
-					<PeriodSelector
-						aria-label="Panel del modal"
-						value={panelMovil}
-						onChange={setPanelMovil}
-						options={OPCIONES_PANEL}
-					/>
-				</div>
-				<div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.12fr)]">
-					<div
-						className={cn(
-							"min-h-0 min-w-0 overflow-y-auto overflow-x-hidden border-line-subtle bg-canvas lg:block lg:border-r",
-							panelMovil === "contexto" ? "block" : "hidden",
-						)}
-					>
-						<ContextoCaso
-							soloLectura
-							caso={caso}
-							className="h-full bg-canvas"
-						/>
-					</div>
-					<div
-						className={cn(
-							"min-h-0 min-w-0 flex-col overflow-y-auto overflow-x-hidden bg-surface lg:flex",
-							rellenoFormulario && "gap-5 p-6",
-							panelMovil === "formulario" ? "flex" : "hidden",
-						)}
-					>
-						{children}
-					</div>
-				</div>
+				<PanelesConContexto caso={caso} rellenoFormulario={rellenoFormulario}>
+					{children}
+				</PanelesConContexto>
 			</PopoverPortalContext.Provider>
 		</DialogContent>
 	);

@@ -44,7 +44,7 @@ export function PestanasUbicacion({
 	frecuentes?: ReactNode;
 	visitas: ReactNode;
 	notificaciones: ReactNode;
-	apagado: ReactNode;
+	apagado?: ReactNode;
 	conteoNotificaciones?: number;
 }) {
 	return (
@@ -79,10 +79,12 @@ export function PestanasUbicacion({
 						<Bell />
 						Notificaciones
 					</TabsTrigger>
-					<TabsTrigger className={trigger} value="inmovilizacion">
-						<LockOpen />
-						Apagado y reactivación
-					</TabsTrigger>
+					{apagado ? (
+						<TabsTrigger className={trigger} value="inmovilizacion">
+							<LockOpen />
+							Apagado y reactivación
+						</TabsTrigger>
+					) : null}
 				</TabsList>
 				<div className="p-4 sm:p-5">
 					{gps ? (
@@ -101,9 +103,15 @@ export function PestanasUbicacion({
 					<TabsContent className={contenido} forceMount value="notificaciones">
 						{notificaciones}
 					</TabsContent>
-					<TabsContent className={contenido} forceMount value="inmovilizacion">
-						{apagado}
-					</TabsContent>
+					{apagado ? (
+						<TabsContent
+							className={contenido}
+							forceMount
+							value="inmovilizacion"
+						>
+							{apagado}
+						</TabsContent>
+					) : null}
 				</div>
 			</Tabs>
 		</CrmCard>
@@ -210,21 +218,42 @@ export function VehiculoGpsTabs({
 
 	const eventos = useEventosGpsCaso(casoCobroId);
 
+	// Misma consulta que EstadoGpsUnidad (misma clave): sin GPS vinculado no hay
+	// unidad que apagar, así que la pestaña no se ofrece. Mientras carga tampoco,
+	// para que no aparezca y desaparezca.
+	const inmov = useQuery({
+		...orpc.getInmovilizacionesCaso.queryOptions({ input: { casoCobroId } }),
+		staleTime: 30_000,
+		refetchOnWindowFocus: false,
+	});
+	const sinApagado =
+		!!inmov.data &&
+		!inmov.data.tieneGps &&
+		inmov.data.estadoUnidad !== "inmovilizada";
+	const mostrarApagado = !!inmov.data && !sinApagado;
+	useEffect(() => {
+		if (sinApagado && pestana === "inmovilizacion") {
+			setPestana(vehicleId ? "gps" : "visitas");
+		}
+	}, [sinApagado, pestana, vehicleId]);
+
 	return (
 		<PestanasUbicacion
 			apagado={
-				<InmovilizacionCard
-					bucketNumero={bucketNumero}
-					casoCobroId={casoCobroId}
-					convenioBloqueo={convenioBloqueo}
-					embedded
-					esSupervisor={esSupervisor}
-					onCrearConvenio={onCrearConvenio}
-					onReactivacionReabierta={onReactivacionReabierta}
-					onRegistrarLlamada={onRegistrarLlamada}
-					onRegistrarPromesa={onRegistrarPromesa}
-					reabrirReactivacion={reabrirReactivacion}
-				/>
+				!mostrarApagado ? undefined : (
+					<InmovilizacionCard
+						bucketNumero={bucketNumero}
+						casoCobroId={casoCobroId}
+						convenioBloqueo={convenioBloqueo}
+						embedded
+						esSupervisor={esSupervisor}
+						onCrearConvenio={onCrearConvenio}
+						onReactivacionReabierta={onReactivacionReabierta}
+						onRegistrarLlamada={onRegistrarLlamada}
+						onRegistrarPromesa={onRegistrarPromesa}
+						reabrirReactivacion={reabrirReactivacion}
+					/>
+				)
 			}
 			conteoNotificaciones={eventos.data?.length}
 			frecuentes={

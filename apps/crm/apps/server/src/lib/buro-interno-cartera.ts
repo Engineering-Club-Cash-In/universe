@@ -29,8 +29,7 @@ export function separarIdentidadesClienteCartera(
 		.filter(Boolean);
 	const nits = (nit ?? "")
 		.split("/")
-		.map((parte) => parte.trim())
-		.filter(Boolean);
+		.map((parte) => parte.trim());
 
 	return nombres.map((nombreCompleto, indice) => ({
 		nombreCompleto,
@@ -120,6 +119,8 @@ const PREFIJO_PROBLEMAS_NEGADOS =
 	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
 	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|hay|existe(?:n)?|presenta|presento|cuenta\s+con))?)\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?)\s+(?:en|de)\s+$/;
+const PREFIJO_ESTADO_EN_NEGADO =
+	/(?:^|\s)(?:no(?:\s+(?:se\s+)?)?(?:esta|estan|estuvo|estuvieron|estaba|estaban)|nunca\s+(?:esta|estan|estuvo|estuvieron|estaba|estaban))\s+en\s+$/;
 const SUFIJO_NEGACION =
 	/^\s+(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|no\s+confirmad[oa]s?|condonad[oa]s?)(?=\s|$)/;
 
@@ -132,6 +133,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_CONTEXTO_NO_RIESGO.test(prefijo) ||
 		PREFIJO_PROBLEMAS_NEGADOS.test(prefijo) ||
 		PREFIJO_DEUDA_NEGADA.test(prefijo) ||
+		PREFIJO_ESTADO_EN_NEGADO.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }

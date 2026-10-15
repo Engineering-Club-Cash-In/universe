@@ -92,6 +92,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No tiene cuotas en mora",
 		"No tiene deuda en mora",
 		"Sin cuotas en mora",
+		"No está en mora",
+		"Nunca estuvo en mora",
 		"No tiene cuotas atrasadas",
 		"Sin cuotas atrasadas",
 		"Sin atrasos de pago",
@@ -290,6 +292,18 @@ describe("identidades compuestas de clientes históricos", () => {
 		).toEqual([
 			{ nombreCompleto: "Ana López Pérez", nit: "1234567" },
 			{ nombreCompleto: "Marta Díaz Ruiz", nit: null },
+		]);
+	});
+
+	test("conserva las posiciones vacías de NIT en clientes compuestos", () => {
+		expect(
+			separarIdentidadesClienteCartera(
+				"Ana López Pérez / Marta Díaz Ruiz",
+				" / 7654321",
+			),
+		).toEqual([
+			{ nombreCompleto: "Ana López Pérez", nit: null },
+			{ nombreCompleto: "Marta Díaz Ruiz", nit: "7654321" },
 		]);
 	});
 

@@ -83,6 +83,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Nunca ha tenido mora",
 		"No tiene antecedentes de mora",
 		"No existen antecedentes de fraude",
+		"Sin historial de mora",
+		"No tiene historial de mora",
 		"Mora condonada",
 		"Se condonó la mora",
 		"Cliente al día, sin problemas de mora",

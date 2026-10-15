@@ -19,6 +19,11 @@ import { client } from './src/database';
 import { reintentarRecibosNexaPendientes } from './src/controllers/nexaReciboPago';
 import config from './src/config';
 import { reintentarCuentasNexaPendientes } from './src/controllers/nexaCuentaReintentos';
+import {
+  barrerBoletasNexaPendientes,
+  boletaNexaHabilitada,
+  debeFallarBarridoBoletasNexa,
+} from './src/controllers/nexaBoletaImagen';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 import { barrerCondonacionesBoletaTardiaHuerfanas, debeFallarElBarrido } from './src/controllers/barridoCondonacionesBoletaTardia';
 
@@ -234,6 +239,23 @@ export function iniciarTareasProgramadas() {
         const r = await barrerCondonacionesBoletaTardiaHuerfanas();
         // Avisa una sola vez por abandonada nueva (franja de 15 min) o revisión manual nueva (registro en memoria).
         if (debeFallarElBarrido(r)) throw new Error("scheduled job reported failure");
+      },
+    );
+  });
+
+  // 🖼️ Imagen de boleta de los pagos Nexa - cada 15 minutos.
+  //    Genera la imagen de hasta 25 pagos Nexa vivos sin boleta (del más viejo
+  //    al más nuevo): retoma los que el disparo del pago no generó y hace el
+  //    backfill. Con NEXA_BOLETA_IMAGEN_ENABLED=false no hace nada. Ver
+  //    nexaBoletaImagen.ts.
+  schedule.scheduleJob({ rule: '*/15 * * * *', tz: TZ_GUATEMALA }, async () => {
+    if (!boletaNexaHabilitada()) return;
+    await runScheduledJob(
+      'generate_nexa_receipt_images',
+      async () => {
+        const r = await barrerBoletasNexaPendientes();
+        // Pagos que no se pudieron generar: el job sale como fallido (el detalle va en nexa.boleta_imagen.error).
+        if (debeFallarBarridoBoletasNexa(r)) throw new Error("scheduled job reported failure");
       },
     );
   });

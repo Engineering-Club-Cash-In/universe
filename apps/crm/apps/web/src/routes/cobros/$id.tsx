@@ -451,6 +451,8 @@ function getMetodoIcon(metodo: string) {
 			return <Home className="h-3 w-3" />;
 		case "visita_trabajo":
 			return <Briefcase className="h-3 w-3" />;
+		case "pago":
+			return <Banknote className="h-3 w-3" />;
 		default:
 			return <Phone className="h-3 w-3" />;
 	}

@@ -113,6 +113,21 @@ export function fechaLarga(valor: Date | string | null | undefined) {
 	return f ? format(f, "d MMM yyyy", { locale: es }).replace(".", "") : "";
 }
 
+/** "15:30" en hora de Guatemala; null si es medianoche GT (día sin hora asignada). */
+function horaGTSiHay(valor: Date | string | null | undefined): string | null {
+	const f = aFecha(valor);
+	if (!f || (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(valor))) {
+		return null;
+	}
+	const hora = f.toLocaleTimeString("es-GT", {
+		timeZone: "America/Guatemala",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	});
+	return hora === "00:00" || hora === "24:00" ? null : hora;
+}
+
 function esHoy(valor: Date | string | null | undefined) {
 	const f = aFecha(valor);
 	return !!f && f.toDateString() === new Date().toDateString();
@@ -191,7 +206,9 @@ export function AccionPendienteCelda({ accion }: { accion: Accion | null }) {
 		return <span className="text-[13px] text-fg-tertiary">—</span>;
 	}
 	const def = ACCION[accion.tipo];
-	const fecha = esHoy(accion.fecha) ? "hoy" : fechaCorta(accion.fecha);
+	const dia = esHoy(accion.fecha) ? "hoy" : fechaCorta(accion.fecha);
+	const hora = accion.tipo === "llamar" ? horaGTSiHay(accion.fecha) : null;
+	const fecha = hora ? `${dia} · ${hora}` : dia;
 	return (
 		<AccionPendiente
 			tipo={def.tipo}

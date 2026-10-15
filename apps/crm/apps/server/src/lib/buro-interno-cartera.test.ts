@@ -208,6 +208,7 @@ describe("clasificación de evidencia de Cartera", () => {
 			"Cliente no sin capacidad de pago, se realiza recoleccion y se pone a la venta unidad",
 			"vehiculo_recuperado",
 		],
+		["Se realizó la recolección del vehículo", "vehiculo_recuperado"],
 		["No quiere pagar su saldo insoluto", "mala_paga"],
 		[
 			"El pago del seguro no cubre la totalidad de la deuda cliente no quiso pagar el restante",
@@ -228,6 +229,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Se realizó la recolección de documentos",
 		"Se realiza recolección de firmas pendientes",
 		"Se hizo la recolección de los papeles del cliente",
+		"Se realizó la recolección de información del cliente",
+		"Se realizó la recolección de pagos",
 	])("no marca motivos reales sin riesgo: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});

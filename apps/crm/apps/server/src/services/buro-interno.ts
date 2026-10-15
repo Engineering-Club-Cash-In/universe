@@ -36,6 +36,7 @@ import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
 	candidatosIdentidadCoincidentesConFuente,
+	crearColaSerial,
 	decidirPersistenciaAutomatica,
 	esFichaAutomaticaReconciliable,
 	esFichaManual,
@@ -1073,12 +1074,22 @@ async function cargarCreditosCarteraCompletos(): Promise<CreditoBuroInterno[]> {
 	}
 }
 
+// Las evaluaciones del mismo proceso esperan turno antes de abrir la
+// transacción, para no retener conexiones mientras otra descarga Cartera.
+const enColaSincronizacionCartera = crearColaSerial();
+
+function registrarCoincidenciasCartera(candidatos: CandidatoBuroInterno[]) {
+	return enColaSincronizacionCartera(() =>
+		registrarCoincidenciasCarteraSinCola(candidatos),
+	);
+}
+
 /**
  * Añade al catálogo únicamente clientes elegibles que coinciden con alguien
  * de la solicitud. Se usa el matcher actual y una clave estable de usuario
  * Cartera para que consultas repetidas no dupliquen personas.
  */
-async function registrarCoincidenciasCartera(
+async function registrarCoincidenciasCarteraSinCola(
 	candidatos: CandidatoBuroInterno[],
 ) {
 	await db.transaction(async (tx) => {

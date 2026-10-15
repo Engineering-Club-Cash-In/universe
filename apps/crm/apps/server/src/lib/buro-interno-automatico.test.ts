@@ -4,6 +4,7 @@ import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
 	candidatosIdentidadCoincidentesConFuente,
+	crearColaSerial,
 	type DatosPersonaAutomaticaComparables,
 	decidirPersistenciaAutomatica,
 	EvaluacionBuroInternoInestableError,
@@ -35,7 +36,13 @@ describe("personaGuardadaFiguraEnCliente", () => {
 	test("false cuando la persona guardada ya no figura en el cliente", () => {
 		expect(
 			personaGuardadaFiguraEnCliente(
-				{ nombres: "María", apellidos: "López", leadId: null, dpi: null, nit: null },
+				{
+					nombres: "María",
+					apellidos: "López",
+					leadId: null,
+					dpi: null,
+					nit: null,
+				},
 				{ ...clienteVacio, nombresCompletos: ["Juan Pérez"] },
 			),
 		).toBe(false);
@@ -53,7 +60,13 @@ describe("personaGuardadaFiguraEnCliente", () => {
 	test("true por NIT aunque el nombre sea distinto", () => {
 		expect(
 			personaGuardadaFiguraEnCliente(
-				{ nombres: "María", apellidos: "López", leadId: null, dpi: null, nit: "123-4" },
+				{
+					nombres: "María",
+					apellidos: "López",
+					leadId: null,
+					dpi: null,
+					nit: "123-4",
+				},
 				{ ...clienteVacio, nits: ["1234"] },
 			),
 		).toBe(true);
@@ -62,7 +75,13 @@ describe("personaGuardadaFiguraEnCliente", () => {
 	test("true por lead aunque el nombre sea distinto", () => {
 		expect(
 			personaGuardadaFiguraEnCliente(
-				{ nombres: "María", apellidos: "López", leadId: "L1", dpi: null, nit: null },
+				{
+					nombres: "María",
+					apellidos: "López",
+					leadId: "L1",
+					dpi: null,
+					nit: null,
+				},
 				{ ...clienteVacio, leadIds: ["L1"] },
 			),
 		).toBe(true);
@@ -346,5 +365,29 @@ describe("huella estable para aprobar análisis", () => {
 				maxIntentos: 2,
 			}),
 		).rejects.toBeInstanceOf(EvaluacionBuroInternoInestableError);
+	});
+});
+
+describe("crearColaSerial", () => {
+	test("ejecuta las tareas de una en una", async () => {
+		const cola = crearColaSerial();
+		const eventos: string[] = [];
+		const tarea = (n: number) => async () => {
+			eventos.push(`inicio-${n}`);
+			await new Promise((r) => setTimeout(r, 5));
+			eventos.push(`fin-${n}`);
+		};
+		await Promise.all([cola(tarea(1)), cola(tarea(2))]);
+		expect(eventos).toEqual(["inicio-1", "fin-1", "inicio-2", "fin-2"]);
+	});
+
+	test("continúa después de una tarea fallida", async () => {
+		const cola = crearColaSerial();
+		const p1 = cola(async () => {
+			throw new Error("fallo");
+		});
+		const p2 = cola(async () => 42);
+		await expect(p1).rejects.toThrow();
+		expect(await p2).toBe(42);
 	});
 });

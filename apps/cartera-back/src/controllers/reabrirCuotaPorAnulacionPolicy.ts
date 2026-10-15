@@ -112,7 +112,10 @@ export function planReaperturaCuotaPorAnulacion({
   // `sumarAplicadoACuota` suma su `abono_capital`, pero no le aportó nada a la cuota.
   if (
     filaAnulada.validationStatus === "capital" ||
-    filaAnulada.validationStatus === "capital_validated"
+    filaAnulada.validationStatus === "capital_validated" ||
+    // Fila estructural del cierre/castigo: como la reversa, no es una recuperación.
+    // Las hermanas reset siguen contando como vivas.
+    filaAnulada.validationStatus === "reset"
   ) {
     return SIN_CAMBIOS;
   }

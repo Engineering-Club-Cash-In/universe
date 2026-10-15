@@ -134,8 +134,10 @@ const PREFIJO_VERIFICACION_FALLIDA =
 	/(?:^|\s)no(?:\s+se)?\s+(?:pudo|pudieron|puede|pueden|logro|lograron|fue\s+posible|ha\s+sido\s+posible)\s+(?:comprobar|confirmar|detectar|identificar|evidenciar|verificar|demostrar|acreditar)(?:\s+(?:el|la|los|las|un|una|unos|unas|ningun[ao]?))?\s+$/;
 // Negación pospuesta: "fraude no detectado", "mora no comprobada". "No aplica"
 // solo cuenta al final del texto, para no negar "mora, no aplica descuento".
-const SUFIJO_NEGACION =
-	/^\s+(?:(?:(?:fue|ha\s+sido)\s+)?(?:descartad[oa]s?|condonad[oa]s?)|no\s+(?:(?:fue|fueron|ha\s+sido|se)\s+)?(?:confirmad[oa]s?|detectad[oa]s?|comprobad[oa]s?|identificad[oa]s?|registrad[oa]s?|reportad[oa]s?|evidenciad[oa]s?)|no\s+(?:existe|existio|hubo)|(?:aun\s+|todavia\s+)?sin\s+(?:confirmar|comprobar|detectar|verificar|acreditar|demostrar|evidenciar)|no\s+aplica(?=\s*$))(?=\s|$)/;
+// También "fraude sin evidencia", "mora sin pruebas".
+const SUFIJO_NEGACION = new RegExp(
+	`^\\s+(?:(?:(?:fue|ha\\s+sido)\\s+)?(?:descartad[oa]s?|condonad[oa]s?)|no\\s+(?:(?:fue|fueron|ha\\s+sido|se)\\s+)?(?:confirmad[oa]s?|detectad[oa]s?|comprobad[oa]s?|identificad[oa]s?|registrad[oa]s?|reportad[oa]s?|evidenciad[oa]s?)|no\\s+(?:existe|existio|hubo)|(?:aun\\s+|todavia\\s+)?sin\\s+(?:(?:confirmar|comprobar|detectar|verificar|acreditar|demostrar|evidenciar)|(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})|no\\s+aplica(?=\\s*$))(?=\\s|$)`,
+);
 
 function estaNegada(texto: string, inicio: number, fin: number): boolean {
 	const prefijo = texto.slice(0, inicio);

@@ -180,6 +180,10 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Estafa sin comprobar",
 		"Mora sin confirmar",
 		"Fraude aún sin verificar",
+		"No está reportado como moroso",
+		"No figura como moroso",
+		"No fue declarado incobrable",
+		"Nunca fue clasificado como moroso",
 	])("ignora evidencia explícitamente negada: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});
@@ -219,6 +223,9 @@ describe("clasificación de evidencia de Cartera", () => {
 		["No hay ningún registro de mora, pero cayó en mora", "mala_paga"],
 		["Se encuentra en mora", "mala_paga"],
 		["Ausencia de fraude, pero cayó en mora", "mala_paga"],
+		["Reportado como moroso", "mala_paga"],
+		["Fue declarado incobrable", "incobrable"],
+		["No figura como moroso, pero cayó en mora", "mala_paga"],
 		["No se encontraba en mora, luego cayó en mora", "mala_paga"],
 		["Fraude sin confirmar, pero cayó en mora", "mala_paga"],
 		["Fraude sin evidencia, pero cayó en mora", "mala_paga"],

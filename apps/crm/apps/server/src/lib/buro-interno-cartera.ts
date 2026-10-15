@@ -133,6 +133,10 @@ const PREFIJO_CANTIDAD_CERO =
 // una verificación que no se logró no afirma el riesgo.
 const PREFIJO_VERIFICACION_FALLIDA =
 	/(?:^|\s)no(?:\s+se)?\s+(?:pudo|pudieron|puede|pueden|logro|lograron|fue\s+posible|ha\s+sido\s+posible)\s+(?:comprobar|confirmar|detectar|identificar|evidenciar|verificar|demostrar|acreditar)(?:\s+(?:el|la|los|las|un|una|unos|unas|ningun[ao]?))?\s+$/;
+// "No está reportado como moroso", "no figura como moroso", "no fue declarado
+// incobrable": una clasificación negada no afirma el riesgo.
+const PREFIJO_CLASIFICACION_NEGADA =
+	/(?:^|\s)(?:no|nunca)(?:\s+se)?(?:\s+(?:esta|estaba|estan|fue|fueron|ha\s+sido|han\s+sido|era|es))?\s+(?:reportad[oa]s?|declarad[oa]s?|registrad[oa]s?|clasificad[oa]s?|calificad[oa]s?|considerad[oa]s?|catalogad[oa]s?|marcad[oa]s?|figura|figuraba|figuran|aparece|aparecia|aparecen)(?:\s+como)?\s+$/;
 // Negación pospuesta: "fraude no detectado", "mora no comprobada". "No aplica"
 // solo cuenta al final del texto, para no negar "mora, no aplica descuento".
 // También "fraude sin evidencia", "mora sin pruebas".
@@ -152,6 +156,7 @@ function estaNegada(texto: string, inicio: number, fin: number): boolean {
 		PREFIJO_ESTADO_EN_NEGADO.test(prefijo) ||
 		PREFIJO_CANTIDAD_CERO.test(prefijo) ||
 		PREFIJO_VERIFICACION_FALLIDA.test(prefijo) ||
+		PREFIJO_CLASIFICACION_NEGADA.test(prefijo) ||
 		SUFIJO_NEGACION.test(texto.slice(fin))
 	);
 }

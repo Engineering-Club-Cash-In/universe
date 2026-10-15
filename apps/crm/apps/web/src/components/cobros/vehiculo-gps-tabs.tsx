@@ -266,7 +266,7 @@ export function VehiculoGpsTabs({
 			frecuentes={
 				vehicleId ? (
 					<GpsUbicacionesClaveCard
-						activo={pestana === "ubicaciones"}
+						activo={pestanaVisible === "ubicaciones"}
 						casoCobroId={casoCobroId}
 						embedded
 						vehicleId={vehicleId}
@@ -276,7 +276,7 @@ export function VehiculoGpsTabs({
 			gps={
 				vehicleId ? (
 					<GpsVehiculoCard
-						activo={pestana === "gps"}
+						activo={pestanaVisible === "gps"}
 						casoCobroId={casoCobroId}
 						embedded
 						esSupervisor={esSupervisor}

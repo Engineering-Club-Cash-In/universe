@@ -37,6 +37,7 @@ import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIF
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
+import { AnulacionSinDesgloseError } from "../controllers/reabrirCuotaPorAnulacionPolicy";
 import { RubroError } from "../controllers/rubros";
 import { registrarPagoConBoletaTardia, traeCondonacionBoletaTardia } from "../controllers/boletaTardia";
 import { EntradaBoletaTardiaInvalida, vistaPreviaBoletaTardia } from "../controllers/boletaTardiaDecision";
@@ -277,6 +278,11 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      // Pago stale-zero (sin desglose por rubro) que cerró su cuota: no se anuló nada.
+      if (error instanceof AnulacionSinDesgloseError) {
+        set.status = 409;
+        return { success: false, code: error.code, message: error.message };
+      }
       if (esNexaPaymentNotReversibleError(error)) {
         set.status = 409;
         return respuestaNexaNoReversible();

@@ -51,6 +51,20 @@ export type PlanReaperturaCuota = {
   insertarPortadora: boolean;
 };
 
+/**
+ * 409: anular una fila stale-zero (abonos en 0, `monto_aplicado` neto = `credito.cuota`) que cerró
+ * la cuota. Reabrirla con restantes en 0 deja una cuota que un pago no exacto salta (crédito 8,
+ * cuota 16) y `cuotas_credito` no guarda el desglose para reconstruirla. Se tira dentro de la
+ * transacción de la anulación, así que no queda nada escrito.
+ */
+export class AnulacionSinDesgloseError extends Error {
+  readonly status = 409 as const;
+  readonly code = "PAGO_SIN_DESGLOSE";
+  constructor() {
+    super("El pago no tiene desglose por rubro: no se puede anular automáticamente; revisalo con contabilidad");
+  }
+}
+
 const SIN_CAMBIOS: PlanReaperturaCuota = {
   replica: null,
   reabrirFilas: false,
@@ -129,8 +143,9 @@ export function planReaperturaCuotaPorAnulacion({
 
   const cuota = new Big(montoCuota ?? 0);
   // Vía stale-zero (registerPayment.ts ~1696-1708): con los restantes ya en 0, el pago exacto de la
-  // cuota sube `monto_aplicado` sin repartir rubros. Solo si el neto es justo `credito.cuota`: los
-  // sobrantes legados con abonos en 0 (552/111135) no saldaron nada y siguen sin cambios.
+  // cuota sube `monto_aplicado` sin repartir rubros. Solo si el neto es justo `credito.cuota` (los
+  // sobrantes legados con abonos en 0, 552/111135, no saldaron nada y siguen sin cambios); si la
+  // cuota se reabriría, se rechaza (ver `AnulacionSinDesgloseError`).
   const otros = String(filaAnulada.otros ?? "").trim();
   const netoStaleZero = new Big(filaAnulada.monto_aplicado ?? 0)
     .minus(filaAnulada.mora ?? 0)
@@ -196,6 +211,10 @@ export function planReaperturaCuotaPorAnulacion({
     cuota.gt(0) && statusCredit !== "CANCELADO" &&
     statusCredit !== "CAIDO" &&
     incobrablePagada !== true;
+  if (esStaleZero) {
+    if (reabrir) throw new AnulacionSinDesgloseError();
+    return SIN_CAMBIOS;
+  }
 
   // `insertPayment` toma el saldo vigente de filas validated / pending / no_required vivas
   // (registerPayment.ts ~1262-1370); las de capital no sirven. Sin ninguna, lee 0.

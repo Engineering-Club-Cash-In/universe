@@ -5,6 +5,7 @@ import {
 	desc,
 	eq,
 	gte,
+	inArray,
 	isNotNull,
 	lt,
 	lte,
@@ -31,8 +32,13 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { metasMensuales } from "../db/schema/metas";
+import { opportunityAgencySellers } from "../db/schema/partners";
 import { quotations } from "../db/schema/quotations";
-import { vehicleInspections, vehicles } from "../db/schema/vehicles";
+import {
+	vehicleInspections,
+	vehicles,
+	vehicleVendors,
+} from "../db/schema/vehicles";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	getLeadSourceChannelType,
@@ -42,6 +48,7 @@ import {
 	adminProcedure,
 	closedCreditsReportProcedure,
 	efectividadPorEtapaReportProcedure,
+	leadsPredioAgenciaReportProcedure,
 	metaColocacionReportProcedure,
 	porcentajeEfectividadReportProcedure,
 	protectedProcedure,
@@ -964,6 +971,270 @@ export const getReportePorcentajeEfectividad =
 				})),
 			};
 		});
+
+export const SIN_PREDIO_AGENCIA_LABEL = "Sin predio/agencia";
+export type AtribucionPredioAgencia = "lead" | "oportunidad";
+
+// Un lead con empresa propia se atribuye a ella; si no, a la de su oportunidad.
+export function atribuirPredioAgencia(
+	leadCompanyId: string | null,
+	oportunidadCompanyId: string | null,
+): AtribucionPredioAgencia | null {
+	if (leadCompanyId) return "lead";
+	if (oportunidadCompanyId) return "oportunidad";
+	return null;
+}
+
+export type LeadPredioAgenciaRegistro = {
+	leadId: string;
+	createdAt: Date;
+	nombre: string | null;
+	source: "agency" | "property";
+	leadStatus: string;
+	companyId: string | null;
+	companyName: string | null;
+	atribucion: AtribucionPredioAgencia | null;
+	asesor: string | null;
+	opportunityId: string | null;
+	etapaNombre: string | null;
+	etapaPorcentaje: number | null;
+	cerro: boolean;
+	monto: number | null;
+	vendedorAgencia: string | null;
+};
+
+export function buildLeadsPredioAgenciaResumen(
+	registros: LeadPredioAgenciaRegistro[],
+) {
+	const porEmpresaMap = new Map<
+		string | null,
+		{
+			companyId: string | null;
+			nombre: string;
+			leadsAgencia: number;
+			leadsPredio: number;
+			leads: number;
+			conOportunidad: number;
+			cerrados: number;
+			monto: number;
+		}
+	>();
+
+	for (const registro of registros) {
+		let fila = porEmpresaMap.get(registro.companyId);
+		if (!fila) {
+			fila = {
+				companyId: registro.companyId,
+				nombre:
+					registro.companyId === null
+						? SIN_PREDIO_AGENCIA_LABEL
+						: (registro.companyName?.trim() ?? ""),
+				leadsAgencia: 0,
+				leadsPredio: 0,
+				leads: 0,
+				conOportunidad: 0,
+				cerrados: 0,
+				monto: 0,
+			};
+			porEmpresaMap.set(registro.companyId, fila);
+		}
+
+		fila.leads += 1;
+		if (registro.source === "agency") fila.leadsAgencia += 1;
+		if (registro.source === "property") fila.leadsPredio += 1;
+		if (registro.opportunityId !== null) fila.conOportunidad += 1;
+		if (registro.cerro) fila.cerrados += 1;
+		if (registro.cerro) fila.monto += registro.monto ?? 0;
+	}
+
+	const porEmpresa = [...porEmpresaMap.values()]
+		.map((fila) => ({ ...fila, conversion: pctOf(fila.cerrados, fila.leads) }))
+		.sort((a, b) => {
+			if ((a.companyId === null) !== (b.companyId === null)) {
+				return a.companyId === null ? 1 : -1;
+			}
+			if (b.leads !== a.leads) return b.leads - a.leads;
+			if (b.cerrados !== a.cerrados) return b.cerrados - a.cerrados;
+			return a.nombre.localeCompare(b.nombre);
+		});
+
+	const cerrados = registros.filter((registro) => registro.cerro).length;
+
+	return {
+		totales: {
+			leads: registros.length,
+			conOportunidad: registros.filter(
+				(registro) => registro.opportunityId !== null,
+			).length,
+			cerrados,
+			monto: registros.reduce(
+				(total, registro) =>
+					total + (registro.cerro ? (registro.monto ?? 0) : 0),
+				0,
+			),
+			conversion: pctOf(cerrados, registros.length),
+		},
+		porEmpresa,
+	};
+}
+
+const leadsPredioAgenciaInputSchema = z.object({
+	startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+	endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+	tipo: z.enum(["agency", "property"]).optional(),
+	companyId: z.union([z.string().uuid(), z.literal("sin_asignar")]).optional(),
+});
+
+/**
+ * Reporte Leads por predio/agencia
+ * Embudo de los leads de agencia o predio creados en el rango, por empresa:
+ * con oportunidad, cerrados (alguna vez en etapa 90%+) y monto cerrado.
+ * La empresa es la del lead o, si no tiene, la de su oportunidad: la más reciente que cerró o, si ninguna cerró, la más reciente (sin migradas).
+ */
+export const getReporteLeadsPredioAgencia = leadsPredioAgenciaReportProcedure
+	.input(leadsPredioAgenciaInputSchema)
+	.handler(async ({ input }) => {
+		const { start, end } = parseGuatemalaDateRange(
+			input.startDate,
+			input.endDate,
+		);
+
+		const everClosed = db
+			.select({ opportunityId: opportunityStageHistory.opportunityId })
+			.from(opportunityStageHistory)
+			.innerJoin(
+				salesStages,
+				eq(opportunityStageHistory.toStageId, salesStages.id),
+			)
+			.where(gte(salesStages.closurePercentage, CLOSED_STAGE_THRESHOLD))
+			.groupBy(opportunityStageHistory.opportunityId)
+			.as("ever_closed_lead");
+
+		const oportunidadDelLead = db
+			.selectDistinctOn([opportunities.leadId], {
+				leadId: opportunities.leadId,
+				opportunityId: opportunities.id,
+				companyId: opportunities.companyId,
+				stageId: opportunities.stageId,
+				value: opportunities.value,
+				cerro: sql<boolean>`(${everClosed.opportunityId} IS NOT NULL)`.as(
+					"cerro",
+				),
+			})
+			.from(opportunities)
+			.leftJoin(everClosed, eq(everClosed.opportunityId, opportunities.id))
+			.where(
+				and(
+					isNotNull(opportunities.leadId),
+					ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
+				),
+			)
+			.orderBy(
+				opportunities.leadId,
+				sql`(${everClosed.opportunityId} IS NOT NULL) DESC`,
+				desc(opportunities.createdAt),
+			)
+			.as("oportunidad_del_lead");
+
+		const empresaId = sql<
+			string | null
+		>`COALESCE(${leads.companyId}, ${oportunidadDelLead.companyId})`;
+
+		const empresaFiltro =
+			input.companyId === "sin_asignar"
+				? sql`${empresaId} IS NULL`
+				: input.companyId
+					? sql`${empresaId} = ${input.companyId}`
+					: undefined;
+
+		const registrosRaw = await db
+			.select({
+				leadId: leads.id,
+				createdAt: leads.createdAt,
+				nombre: sql<
+					string | null
+				>`NULLIF(TRIM(CONCAT_WS(' ', ${leads.firstName}, ${leads.lastName})), '')`,
+				source: sql<"agency" | "property">`${leads.source}`,
+				leadStatus: leads.status,
+				leadCompanyId: leads.companyId,
+				oportunidadCompanyId: oportunidadDelLead.companyId,
+				companyId: empresaId,
+				companyName: companies.name,
+				asesor: user.name,
+				opportunityId: oportunidadDelLead.opportunityId,
+				etapaNombre: salesStages.name,
+				etapaPorcentaje: salesStages.closurePercentage,
+				cerro: oportunidadDelLead.cerro,
+				value: oportunidadDelLead.value,
+				vendedorAgencia: vehicleVendors.name,
+			})
+			.from(leads)
+			.leftJoin(oportunidadDelLead, eq(oportunidadDelLead.leadId, leads.id))
+			.leftJoin(companies, eq(companies.id, empresaId))
+			.leftJoin(salesStages, eq(salesStages.id, oportunidadDelLead.stageId))
+			.leftJoin(user, eq(user.id, leads.assignedTo))
+			.leftJoin(
+				opportunityAgencySellers,
+				eq(
+					opportunityAgencySellers.opportunityId,
+					oportunidadDelLead.opportunityId,
+				),
+			)
+			.leftJoin(
+				vehicleVendors,
+				eq(vehicleVendors.id, opportunityAgencySellers.sellerId),
+			)
+			.where(
+				and(
+					gte(leads.createdAt, start),
+					lte(leads.createdAt, end),
+					inArray(
+						leads.source,
+						input.tipo ? [input.tipo] : ["agency", "property"],
+					),
+					ne(leads.status, "migrate"),
+					empresaFiltro,
+				),
+			)
+			.orderBy(desc(leads.createdAt))
+			.limit(MAX_REPORT_ROWS + 1);
+
+		if (registrosRaw.length > MAX_REPORT_ROWS) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"El rango seleccionado devuelve demasiados registros. Reduce el rango de fechas.",
+			});
+		}
+
+		const registros: LeadPredioAgenciaRegistro[] = registrosRaw.map((row) => {
+			const cerro = Boolean(row.cerro);
+			return {
+				leadId: row.leadId,
+				createdAt: row.createdAt,
+				nombre: row.nombre,
+				source: row.source,
+				leadStatus: row.leadStatus,
+				companyId: row.companyId,
+				companyName: row.companyName?.trim() || null,
+				atribucion: atribuirPredioAgencia(
+					row.leadCompanyId,
+					row.oportunidadCompanyId,
+				),
+				asesor: row.asesor,
+				opportunityId: row.opportunityId,
+				etapaNombre: row.etapaNombre,
+				etapaPorcentaje: row.etapaPorcentaje,
+				cerro,
+				monto: cerro ? Number.parseFloat(row.value ?? "") || 0 : null,
+				vendedorAgencia: row.vendedorAgencia,
+			};
+		});
+
+		return {
+			...buildLeadsPredioAgenciaResumen(registros),
+			registros,
+		};
+	});
 
 /**
  * Reporte de Tiempo de Cierre de Crédito

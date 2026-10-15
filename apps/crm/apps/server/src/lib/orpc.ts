@@ -493,6 +493,37 @@ const requireEfectividadPorEtapaReport = o.middleware(
 	},
 );
 
+const requireLeadsPredioAgenciaReport = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canAccessLeadsPredioAgenciaReport(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Leads por predio/agencia report access required",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
 const requireViewOpportunityContracts = o.middleware(
 	async ({ context, next }) => {
 		if (!context.session?.user) {
@@ -840,6 +871,9 @@ export const metaColocacionReportProcedure = publicProcedure.use(
 );
 export const efectividadPorEtapaReportProcedure = publicProcedure.use(
 	requireEfectividadPorEtapaReport,
+);
+export const leadsPredioAgenciaReportProcedure = publicProcedure.use(
+	requireLeadsPredioAgenciaReport,
 );
 export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,

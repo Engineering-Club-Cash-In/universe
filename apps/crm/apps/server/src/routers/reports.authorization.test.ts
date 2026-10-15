@@ -49,7 +49,9 @@ const contextForCurrentRole = () =>
 		context: { session: { user: { id: "test-user" } } },
 	}) as never;
 
-const { adminProcedure } = await import("../lib/orpc");
+const { adminProcedure, leadsPredioAgenciaReportProcedure } = await import(
+	"../lib/orpc"
+);
 const { getDashboardExecutivo } = await import("./reports");
 const { reportesCarteraRouter } = await import("./reportes-cartera");
 
@@ -123,6 +125,40 @@ describe("report authorization", () => {
 				{ mes: 7, anio: 2026 },
 				contextForCurrentRole(),
 			),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+});
+
+describe("leads predio/agencia report authorization", () => {
+	test("allows admins and sales supervisors", async () => {
+		const procedure = leadsPredioAgenciaReportProcedure.handler(
+			() => "allowed",
+		);
+
+		currentRole = ROLES.ADMIN;
+		await expect(
+			call(procedure, undefined, contextForCurrentRole()),
+		).resolves.toBe("allowed");
+
+		currentRole = ROLES.SALES_SUPERVISOR;
+		await expect(
+			call(procedure, undefined, contextForCurrentRole()),
+		).resolves.toBe("allowed");
+	});
+
+	test("rejects sales and analysts", async () => {
+		const procedure = leadsPredioAgenciaReportProcedure.handler(
+			() => "allowed",
+		);
+
+		currentRole = ROLES.SALES;
+		await expect(
+			call(procedure, undefined, contextForCurrentRole()),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+		currentRole = ROLES.ANALYST;
+		await expect(
+			call(procedure, undefined, contextForCurrentRole()),
 		).rejects.toMatchObject({ code: "FORBIDDEN" });
 	});
 });

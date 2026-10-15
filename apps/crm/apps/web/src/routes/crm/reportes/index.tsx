@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
+import { LeadsPredioAgenciaContent } from "@/components/reports/leads-predio-agencia-report";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
@@ -38,7 +39,11 @@ function RouteComponent() {
 	const canEtapa = userRole
 		? PERMISSIONS.canAccessEfectividadPorEtapaReport(userRole)
 		: false;
-	const canAny = canTiempo || canEfectividad || canMeta || canEtapa;
+	const canPredioAgencia = userRole
+		? PERMISSIONS.canAccessLeadsPredioAgenciaReport(userRole)
+		: false;
+	const canAny =
+		canTiempo || canEfectividad || canMeta || canEtapa || canPredioAgencia;
 	const isPending = sessionPending || userProfile.isPending;
 
 	useEffect(() => {
@@ -86,8 +91,8 @@ function RouteComponent() {
 			<div>
 				<h1 className="font-bold text-3xl tracking-tight">Reportes</h1>
 				<p className="mt-1 text-muted-foreground">
-					Reportes de ventas: colocación, efectividad, tiempo de cierre y
-					efectividad por etapa.
+					Reportes de ventas: colocación, efectividad, tiempo de cierre,
+					efectividad por etapa y leads por predio/agencia.
 				</p>
 			</div>
 
@@ -102,6 +107,11 @@ function RouteComponent() {
 					)}
 					{canEtapa && (
 						<TabsTrigger value="etapa">Efectividad por Etapa</TabsTrigger>
+					)}
+					{canPredioAgencia && (
+						<TabsTrigger value="predio-agencia">
+							Leads por predio/agencia
+						</TabsTrigger>
 					)}
 				</TabsList>
 
@@ -123,6 +133,11 @@ function RouteComponent() {
 				{canEtapa && (
 					<TabsContent value="etapa" className="space-y-6">
 						<EfectividadPorEtapaContent />
+					</TabsContent>
+				)}
+				{canPredioAgencia && (
+					<TabsContent value="predio-agencia" className="space-y-6">
+						<LeadsPredioAgenciaContent />
 					</TabsContent>
 				)}
 			</Tabs>

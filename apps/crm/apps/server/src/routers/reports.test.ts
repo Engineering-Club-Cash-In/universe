@@ -3,13 +3,17 @@ import { getLeadSourceChannelType } from "../lib/lead-sources";
 import {
 	aggregateEfectividadPorTipoCanal,
 	aggregateTiempoCierrePorTipoCanal,
+	atribuirPredioAgencia,
 	buildColocacionPorEmpresaRows,
+	buildLeadsPredioAgenciaResumen,
 	buildPorcentajeEfectividadFuenteRows,
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
 	isClosedCreditReportCarteraStatusIncluded,
 	isPorcentajeEfectividadOpportunityStatusIncluded,
 	isPorcentajeEfectividadPeriodCloseIncluded,
+	type LeadPredioAgenciaRegistro,
+	SIN_PREDIO_AGENCIA_LABEL,
 } from "./reports";
 
 describe("isClosedCreditReportCarteraStatusIncluded", () => {
@@ -481,5 +485,167 @@ describe("aggregateTiempoCierrePorTipoCanal", () => {
 				maxDias: 3.5,
 			},
 		]);
+	});
+});
+
+describe("atribuirPredioAgencia", () => {
+	test("prefers the lead company when it is set", () => {
+		expect(atribuirPredioAgencia("empresa-lead", "empresa-opp")).toBe("lead");
+	});
+
+	test("falls back to the opportunity company", () => {
+		expect(atribuirPredioAgencia(null, "empresa-opp")).toBe("oportunidad");
+	});
+
+	test("returns null when neither has a company", () => {
+		expect(atribuirPredioAgencia(null, null)).toBeNull();
+	});
+});
+
+describe("buildLeadsPredioAgenciaResumen", () => {
+	const registro = (
+		overrides: Partial<LeadPredioAgenciaRegistro>,
+	): LeadPredioAgenciaRegistro => ({
+		leadId: "lead",
+		createdAt: new Date("2026-07-01T12:00:00.000Z"),
+		nombre: "Cliente",
+		source: "agency",
+		leadStatus: "new",
+		companyId: null,
+		companyName: null,
+		atribucion: null,
+		asesor: null,
+		opportunityId: null,
+		etapaNombre: null,
+		etapaPorcentaje: null,
+		cerro: false,
+		monto: null,
+		vendedorAgencia: null,
+		...overrides,
+	});
+
+	test("groups by company and splits agency and property leads", () => {
+		const resumen = buildLeadsPredioAgenciaResumen([
+			registro({
+				companyId: "a",
+				companyName: " Empresa A ",
+				opportunityId: "o1",
+				cerro: true,
+				monto: 1000,
+			}),
+			registro({ companyId: "a", companyName: "Empresa A" }),
+			registro({
+				companyId: "b",
+				companyName: "Empresa B",
+				source: "property",
+				opportunityId: "o2",
+			}),
+		]);
+
+		expect(resumen.porEmpresa).toEqual([
+			{
+				companyId: "a",
+				nombre: "Empresa A",
+				leadsAgencia: 2,
+				leadsPredio: 0,
+				leads: 2,
+				conOportunidad: 1,
+				cerrados: 1,
+				monto: 1000,
+				conversion: 50,
+			},
+			{
+				companyId: "b",
+				nombre: "Empresa B",
+				leadsAgencia: 0,
+				leadsPredio: 1,
+				leads: 1,
+				conOportunidad: 1,
+				cerrados: 0,
+				monto: 0,
+				conversion: 0,
+			},
+		]);
+		expect(resumen.totales).toEqual({
+			leads: 3,
+			conOportunidad: 2,
+			cerrados: 1,
+			monto: 1000,
+			conversion: 33.3,
+		});
+	});
+
+	test("keeps the unassigned bucket last even when it has the most leads", () => {
+		const resumen = buildLeadsPredioAgenciaResumen([
+			registro({ companyId: "b", companyName: "Empresa B" }),
+			registro({}),
+			registro({}),
+			registro({}),
+		]);
+
+		expect(resumen.porEmpresa.map((fila) => fila.companyId)).toEqual([
+			"b",
+			null,
+		]);
+		expect(resumen.porEmpresa[1]?.nombre).toBe(SIN_PREDIO_AGENCIA_LABEL);
+	});
+
+	test("sums the amount only for closed opportunities", () => {
+		const resumen = buildLeadsPredioAgenciaResumen([
+			registro({
+				companyId: "a",
+				companyName: "A",
+				opportunityId: "o1",
+				cerro: true,
+				monto: 500,
+			}),
+			registro({
+				companyId: "a",
+				companyName: "A",
+				opportunityId: "o2",
+				cerro: true,
+				monto: 250,
+			}),
+			registro({
+				companyId: "a",
+				companyName: "A",
+				opportunityId: "o3",
+				cerro: false,
+				monto: 999,
+			}),
+		]);
+
+		expect(resumen.porEmpresa[0]?.monto).toBe(750);
+		expect(resumen.totales.monto).toBe(750);
+	});
+
+	test("rounds the conversion to one decimal", () => {
+		const resumen = buildLeadsPredioAgenciaResumen([
+			registro({
+				companyId: "a",
+				companyName: "A",
+				opportunityId: "o4",
+				cerro: true,
+				monto: 1,
+			}),
+			registro({ companyId: "a", companyName: "A" }),
+			registro({ companyId: "a", companyName: "A" }),
+		]);
+
+		expect(resumen.porEmpresa[0]?.conversion).toBe(33.3);
+		expect(resumen.totales.conversion).toBe(33.3);
+	});
+
+	test("returns zero totals and no companies for an empty list", () => {
+		expect(buildLeadsPredioAgenciaResumen([])).toEqual({
+			totales: {
+				leads: 0,
+				conOportunidad: 0,
+				cerrados: 0,
+				monto: 0,
+				conversion: 0,
+			},
+			porEmpresa: [],
+		});
 	});
 });

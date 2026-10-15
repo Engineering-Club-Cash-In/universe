@@ -174,7 +174,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:malas?\s+pagas?|mal(?:os?|as?)\s+pagadores?|impagos?|incumplimientos?(?:\s+de\s+pago)?|moras?|moros[oa]s?|morosidad(?:es)?)(?=\s|$)/g,
+			/(?:^|\s)(?:malas?\s+pagas?|mal(?:os?|as?)\s+pagadores?|impagos?|incumplimientos?(?:\s+de\s+pago)?|moras?|moros[oa]s?|morosidad(?:es)?|cuotas?\s+atrasadas?|atrasos?\s+de\s+pago)(?=\s|$)/g,
 		) ||
 		contieneAfirmacion(
 			normalizado,

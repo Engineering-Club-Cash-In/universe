@@ -1630,6 +1630,7 @@ async function registrarCoincidenciasCartera(
 					.where(
 						and(
 							eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+						eq(buroInternoFuentesCartera.personaId, personaExistente.id),
 							inArray(
 								buroInternoFuentesCartera.carteraCreditoId,
 								fuentesObsoletas,

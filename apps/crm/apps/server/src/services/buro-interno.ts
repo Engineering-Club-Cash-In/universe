@@ -1231,10 +1231,14 @@ async function registrarCoincidenciasCarteraSinCola(
 				nombres: lead?.nombres || nombres,
 				apellidos: lead?.apellidos || apellidos,
 				dpi: lead?.dpi ?? null,
+				// El NIT del cliente solo se hereda a un lead si el cliente no es
+				// compuesto: en "Juan / María" no se sabe a quién pertenece.
 				nit:
 					textoOpcional(lead?.nit) ??
 					textoOpcional(identidad?.nit) ??
-					(lead ? textoOpcional(grupo.usuario.nit) : null),
+					(lead && !grupo.usuario.nombre.includes("/")
+						? textoOpcional(grupo.usuario.nit)
+						: null),
 				telefono: lead?.telefono ?? null,
 				direccion: lead?.direccion ?? grupo.usuario.direccion ?? null,
 			});

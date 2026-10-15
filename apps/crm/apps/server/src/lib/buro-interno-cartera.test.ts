@@ -203,6 +203,11 @@ describe("clasificación de evidencia de Cartera", () => {
 			"Cliente no tenia el dinero para pagar, se recolecto la unidad y se coloco a la venta, quedo un monto pendiente  para cubrir la deuda",
 			"vehiculo_recuperado",
 		],
+		["Se realizó la recolección de la unidad", "vehiculo_recuperado"],
+		[
+			"Cliente no sin capacidad de pago, se realiza recoleccion y se pone a la venta unidad",
+			"vehiculo_recuperado",
+		],
 		["No quiere pagar su saldo insoluto", "mala_paga"],
 		[
 			"El pago del seguro no cubre la totalidad de la deuda cliente no quiso pagar el restante",
@@ -220,6 +225,9 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Listado de créditos para cancelar - Diego Esau Lara Morales",
 		"Recolección de documentos pendiente",
 		"En negociación para pagar.",
+		"Se realizó la recolección de documentos",
+		"Se realiza recolección de firmas pendientes",
+		"Se hizo la recolección de los papeles del cliente",
 	])("no marca motivos reales sin riesgo: %s", (texto) => {
 		expect(clasificarMotivoExplicito(texto)).toBeNull();
 	});

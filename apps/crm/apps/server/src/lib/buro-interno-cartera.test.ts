@@ -144,6 +144,10 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Nunca se encontró en mora",
 		"Ausencia de fraude",
 		"Ausencia de mora",
+		"Jamás tuvo mora",
+		"Jamás cometió fraude",
+		"Jamás fue moroso",
+		"Jamás se encontró en mora",
 		"No presenta indicios ni evidencia de fraude",
 		"Sin pruebas ni indicios de estafa",
 		"No existe ningún riesgo de fraude",
@@ -226,6 +230,7 @@ describe("clasificación de evidencia de Cartera", () => {
 		["Se encuentra en mora", "mala_paga"],
 		["Ausencia de fraude, pero cayó en mora", "mala_paga"],
 		["Reportado como moroso", "mala_paga"],
+		["Jamás tuvo mora, pero cayó en mora", "mala_paga"],
 		[
 			"No presenta indicios ni evidencia de fraude, pero cayó en mora",
 			"mala_paga",

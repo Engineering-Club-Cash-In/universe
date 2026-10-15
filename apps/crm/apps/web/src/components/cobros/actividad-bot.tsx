@@ -1,26 +1,20 @@
 /**
- * Actividad del cliente en el bot de WhatsApp, agrupada por referencia.
+ * Actividad del cliente en el bot de WhatsApp: lo que hizo en cada sesión.
  *
  * La conversación del bot ya tiene un id —la referencia del paso 1— y el
- * server la devuelve agrupada y numerada (getActividadBot): acá solo se pinta.
- * "Referencia 1" es la sesión más vieja del cliente; se muestran TODAS sus
- * sesiones (titular y codeudores), y lo que fue sobre OTRO crédito va marcado
- * con su SIFCO en vez de esconderse.
+ * server la devuelve agrupada y numerada (getActividadBot). Cada sesión es una
+ * fila de la línea de tiempo unificada del historial (`eventosDeBot`); acá
+ * solo se pinta su detalle. "Referencia 1" es la sesión más vieja del cliente;
+ * se muestran TODAS sus sesiones (titular y codeudores), y lo que fue sobre
+ * OTRO crédito va marcado con su SIFCO en vez de esconderse.
  *
  * Contrato: docs/features/bot-whatsapp-cobros/06-historial-interacciones.md
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Bot, UserRound, UsersRound } from "lucide-react";
-import {
-	HistorialGestiones,
-	type ItemGestion,
-	SeccionHistorial,
-} from "@/components/cobros/ficha/ficha-pestanas";
+import { AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { orpc } from "@/utils/orpc";
 
-type InteraccionBot = {
+export type InteraccionBot = {
 	id: string;
 	accion: string;
 	exito: boolean;
@@ -196,109 +190,46 @@ function FilaInteraccion({
 	);
 }
 
-export function ActividadBot({
-	casoCobroId,
+/** Lo que hizo el cliente en una sesión del bot (detalle plegable de la fila). */
+export function InteraccionesSesionBot({
+	interacciones,
 	numeroSifcoCaso,
 }: {
-	casoCobroId: string;
+	interacciones: InteraccionBot[];
 	numeroSifcoCaso: string | null;
 }) {
-	const actividad = useQuery({
-		...orpc.getActividadBot.queryOptions({ input: { casoCobroId } }),
-		enabled: !!casoCobroId,
-	});
-
-	const sesiones = actividad.data?.sesiones ?? [];
-	const accesosFallidos = actividad.data?.accesosFallidos ?? [];
-
-	const items: ItemGestion[] = sesiones.map((sesion) => {
-		const fallidas = sesion.interacciones.filter((i) => !i.exito).length;
-		return {
-			id: `${sesion.numero}-${sesion.referenciaSufijo}`,
-			cuando: fechaHora(sesion.inicio),
-			titulo: (
-				<span
-					className="inline-flex items-center gap-1.5"
-					title={`Referencia …${sesion.referenciaSufijo}`}
-				>
-					<Bot className="h-3.5 w-3.5" />
-					Referencia {sesion.numero}
-				</span>
-			),
-			badge: (
-				<Badge variant="outline" className="gap-1 text-[10px]">
-					{sesion.operadoPor === "codeudor" ? (
-						<UsersRound className="h-3 w-3" />
-					) : (
-						<UserRound className="h-3 w-3" />
-					)}
-					{sesion.operadoPor === "codeudor"
-						? `Codeudor${sesion.codeudorNombre ? `: ${sesion.codeudorNombre}` : ""}`
-						: "Titular"}
-				</Badge>
-			),
-			subtitulo: `${sesion.interacciones.length} ${sesion.interacciones.length === 1 ? "interacción" : "interacciones"}${fallidas > 0 ? ` · ${fallidas} con error` : ""}`,
-			tono: fallidas > 0 ? "sin-contacto" : "logrado",
-			detalleEtiqueta: "Ver lo que hizo en el bot",
-			detalleNodo: (
-				<div>
-					{sesion.interacciones.map((interaccion) => (
-						<FilaInteraccion
-							key={interaccion.id}
-							interaccion={interaccion}
-							numeroSifcoCaso={numeroSifcoCaso}
-						/>
-					))}
-				</div>
-			),
-		};
-	});
-	if (accesosFallidos.length > 0) {
-		items.push({
-			id: "accesos-fallidos",
-			cuando: fechaHora(accesosFallidos[0].creadoEn),
-			titulo: "Intentos de acceso sin sesión",
-			subtitulo: `${accesosFallidos.length} ${accesosFallidos.length === 1 ? "intento" : "intentos"}`,
-			tono: "fallido",
-			detalleEtiqueta: "Ver los intentos",
-			detalleNodo: (
-				<div>
-					{accesosFallidos.map((interaccion) => (
-						<div key={interaccion.id} className="flex items-start gap-3 py-1.5">
-							<span className="w-32 shrink-0 pt-0.5 text-muted-foreground text-xs tabular-nums">
-								{fechaHora(interaccion.creadoEn)}
-							</span>
-							<p className="text-amber-700 text-sm dark:text-amber-400">
-								<AlertCircle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-								{describir(interaccion)}
-							</p>
-						</div>
-					))}
-				</div>
-			),
-		});
-	}
-
 	return (
-		<SeccionHistorial
-			titulo="Actividad en el bot de WhatsApp"
-			conteo={actividad.isLoading ? "…" : sesiones.length}
-			icono={<Bot />}
-			// Codex (PR #1411): un fallo de red/permiso NO es "nunca usó el bot" —
-			// decir eso convertiría un error nuestro en historial falso.
-			estado={
-				actividad.isLoading
-					? "cargando"
-					: actividad.isError
-						? "error"
-						: items.length === 0
-							? "vacio"
-							: "ok"
-			}
-			onReintentar={() => actividad.refetch()}
-			vacio="Este cliente todavía no ha usado el bot de WhatsApp."
-		>
-			<HistorialGestiones items={items} />
-		</SeccionHistorial>
+		<div>
+			{interacciones.map((interaccion) => (
+				<FilaInteraccion
+					key={interaccion.id}
+					interaccion={interaccion}
+					numeroSifcoCaso={numeroSifcoCaso}
+				/>
+			))}
+		</div>
+	);
+}
+
+/** Intentos de acceso sin sesión (no llegaron a tener referencia). */
+export function AccesosFallidosBot({
+	interacciones,
+}: {
+	interacciones: InteraccionBot[];
+}) {
+	return (
+		<div>
+			{interacciones.map((interaccion) => (
+				<div key={interaccion.id} className="flex items-start gap-3 py-1.5">
+					<span className="w-32 shrink-0 pt-0.5 text-muted-foreground text-xs tabular-nums">
+						{fechaHora(interaccion.creadoEn)}
+					</span>
+					<p className="text-amber-700 text-sm dark:text-amber-400">
+						<AlertCircle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+						{describir(interaccion)}
+					</p>
+				</div>
+			))}
+		</div>
 	);
 }

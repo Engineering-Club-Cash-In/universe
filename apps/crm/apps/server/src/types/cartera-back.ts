@@ -402,6 +402,12 @@ export interface PoolPorAsesorRow {
 	nombre: string;
 	email_cash_in: string | null;
 	activo: boolean | null;
+	/**
+	 * Correo del usuario del CRM que lo supervisa (cartera `asesores.
+	 * supervisor_email`, migración cobros-02/0027). `null` = sin asignar;
+	 * ausente en un cartera-back sin esa versión.
+	 */
+	supervisor_email?: string | null;
 	buckets: number[];
 }
 

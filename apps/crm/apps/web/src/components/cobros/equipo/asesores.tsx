@@ -100,10 +100,13 @@ export function MiEquipoAsesores({
 	habilitado,
 	grupo,
 	onGrupo,
+	onDarDeBaja,
 }: {
 	habilitado: boolean;
 	grupo: GrupoEquipo;
 	onGrupo: (grupo: GrupoEquipo) => void;
+	/** «Dar de baja» del menú «⋯» de cada tarjeta (abre el modal de la ruta). */
+	onDarDeBaja?: (asesorId: number) => void;
 }) {
 	const hoy = hoyGT();
 	const rango = rangosContactabilidad(hoy).actual;
@@ -283,6 +286,7 @@ export function MiEquipoAsesores({
 				}}
 				onReactivar={pedirReactivar}
 				reactivandoId={reactivar.reactivandoId}
+				onDarDeBaja={onDarDeBaja}
 				fechaAgenda={
 					agendaQuery.data?.fecha
 						? new Date(`${agendaQuery.data.fecha}T12:00:00`).toLocaleDateString(

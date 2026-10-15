@@ -1,6 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import type { CargaData } from "@/components/cobros/equipo/asignacion/carga-resumen-vista";
 import {
 	type CapacidadDestino,
@@ -21,6 +20,8 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+	bucketsParaDestinoUnico,
+	partirCarteraPorPool,
 	puedeRecibirTodosBuckets,
 	validarFormularioTraslado,
 } from "@/lib/cobros/traslados";
@@ -37,6 +38,20 @@ async function refrescarTraslados() {
 			orpc.getColaDia.key(),
 		].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
 	);
+}
+
+/**
+ * cartera-back rechaza la vista previa (409) si el origen tiene créditos fuera
+ * del funnel y nadie los recibe: «El asesor origen tiene N cuenta(s) fuera del
+ * funnel (…). Selecciona un responsable para ellas.». Devuelve N (o null si
+ * no viene el número), o `undefined` si el error es otro.
+ */
+export function especialesDelError(
+	mensaje: string | undefined,
+): { cuantos: number | null } | undefined {
+	if (!mensaje || !/fuera del funnel/i.test(mensaje)) return undefined;
+	const n = /tiene\s+(\d+)/i.exec(mensaje)?.[1];
+	return { cuantos: n ? Number(n) : null };
 }
 
 /** Cuentas y capacidad de un asesor sumadas en esos buckets (null sin datos). */
@@ -61,13 +76,16 @@ function capacidadDe(
  * presentación por pasos en `TrasladoVista`
  * (components/cobros/equipo/asignacion/trasladar-vista.tsx):
  *   - formulario: mismas validaciones (`validarFormularioTraslado`):
- *     explicación obligatoria con «Otro», responsable de cuentas sin bucket
- *     obligatorio con despido o renuncia, destino por bucket completo.
+ *     nota obligatoria con «Otro», responsable de los créditos fuera de
+ *     cobranza obligatorio con despido o renuncia, destino por bucket completo.
+ *     Si cartera-back rechaza la vista previa porque el origen tiene créditos
+ *     fuera de cobranza sin responsable, se recuerda cuántos (hasta cambiar de
+ *     origen) para mostrar esa pregunta y se traduce el mensaje.
  *   - revisión: `previsualizarTraslado` con su vencimiento (un único timeout al
  *     instante exacto) y su clave de idempotencia (`crypto.randomUUID`).
  *   - confirmación: AlertDialog «Confirmar traslado permanente» y
  *     `confirmarTraslado` con la misma clave; un 409 descarta la vista previa.
- *   - resultado: «Traslado confirmado» e invalidaciones (`refrescarTraslados`).
+ *   - resultado: «Cartera redistribuida» e invalidaciones (`refrescarTraslados`).
  *
  * Props:
  *   - `origenInicial` (asesor_id de cartera): abre con ese asesor de origen.
@@ -111,6 +129,14 @@ export function TrasladosPanel({
 	// Paso visible: la revisión solo se muestra con una vista previa vigente
 	// en memoria; «Atrás» vuelve al formulario sin tocar nada más.
 	const [enRevision, setEnRevision] = useState(false);
+	// Créditos fuera de cobranza del origen, si una vista previa lo dijo: la
+	// pregunta «¿quién queda a cargo?» se muestra solo entonces (o si es
+	// obligatoria). Se olvida al cambiar de origen.
+	const [especialesOrigen, setEspecialesOrigen] = useState<{
+		cuantos: number | null;
+	} | null>(null);
+	// Asesores que recibieron créditos (para el paso de éxito).
+	const [receptoresResultado, setReceptoresResultado] = useState<number>();
 	const nombres = new Map(asesores.data?.map((a) => [a.asesor_id, a.nombre]));
 	const origenSeleccionado = /^\d+$/.test(origen) && Number(origen) > 0;
 	const cargaOrigen = useQuery({
@@ -120,13 +146,24 @@ export function TrasladosPanel({
 		enabled: origenSeleccionado,
 	});
 	const cargaOrigenPendiente = origenSeleccionado && cargaOrigen.isPending;
+	const filasCartera =
+		cargaOrigen.data?.porAsesor.find(
+			(asesor) => asesor.asesor_id === Number(origen),
+		)?.porBucket ?? [];
+	// Buckets en los que el origen TIENE créditos (con los sueltos): cada uno
+	// necesita destino en «Un asesor por bucket». Uno sin créditos no.
 	const bucketsOrigen = [
-		...new Set(
-			cargaOrigen.data?.porAsesor
-				.find((asesor) => asesor.asesor_id === Number(origen))
-				?.porBucket.map((bucket) => bucket.bucket) ?? [],
-		),
+		...new Set(filasCartera.filter((d) => d.cuentas > 0).map((d) => d.bucket)),
 	].sort((a, b) => a - b);
+	const poolOrigen =
+		asesores.data?.find((a) => String(a.asesor_id) === origen)?.buckets ?? [];
+	// «A un solo asesor» se elige por el pool del origen (como el suplente de
+	// «Marcar ausente»), no por los buckets de cada crédito suelto.
+	const bucketsDestinoUnico = bucketsParaDestinoUnico(filasCartera, poolOrigen);
+	const bucketsSueltos = partirCarteraPorPool(
+		filasCartera,
+		poolOrigen,
+	).sueltos.map((d) => d.bucket);
 	// Capacidad de los destinos (solo informativa; ver el comentario de arriba).
 	const cargaEquipo = useQuery({
 		...orpc.getCargaPorAsesorBucket.queryOptions({ input: {} }),
@@ -157,6 +194,8 @@ export function TrasladosPanel({
 		setResultado(null);
 		setPage(1);
 		setEnRevision(false);
+		// El aviso de la vista previa anterior ya no aplica a lo que se cambió.
+		previsualizar.reset();
 	};
 	const previsualizar = useMutation({
 		mutationFn: () => {
@@ -183,11 +222,19 @@ export function TrasladosPanel({
 			return client.previsualizarTraslado(solicitud);
 		},
 		onSuccess: (data) => {
+			const especiales = data.asignaciones.filter(
+				(a) => (a as { estadoEspecial?: string }).estadoEspecial,
+			).length;
+			if (especiales > 0) setEspecialesOrigen({ cuantos: especiales });
 			setPreview(data);
 			setClave(crypto.randomUUID());
 			setPage(1);
 			setResultado(null);
 			setEnRevision(true);
+		},
+		onError: (error) => {
+			const especiales = especialesDelError(error.message);
+			if (especiales) setEspecialesOrigen(especiales);
 		},
 	});
 	const confirmar = useMutation({
@@ -200,10 +247,14 @@ export function TrasladosPanel({
 			});
 		},
 		onSuccess: (data) => {
+			setReceptoresResultado(
+				preview
+					? new Set(preview.asignaciones.map((a) => a.asesorNuevoId)).size
+					: undefined,
+			);
 			setResultado(data);
 			setPreview(null);
 			setConfirmando(false);
-			toast.success(`${data.cuentas} cuentas trasladadas`);
 			void refrescarTraslados();
 		},
 		onError: (error: Error & { code?: string }) => {
@@ -247,9 +298,8 @@ export function TrasladosPanel({
 
 	const catalogo = asesores.data ?? [];
 	const asesorOrigen = catalogo.find((a) => String(a.asesor_id) === origen);
-	const filasOrigen = cargaOrigen.data?.porAsesor.find(
-		(a) => a.asesor_id === Number(origen),
-	)?.porBucket;
+	const filasOrigen = filasCartera;
+	const errorEspeciales = especialesDelError(previsualizar.error?.message);
 	const paso = resultado
 		? "resultado"
 		: enRevision && preview
@@ -271,6 +321,7 @@ export function TrasladosPanel({
 					setDestino("");
 					setDestinoEspecial("");
 					setDestinosPorBucket({});
+					setEspecialesOrigen(null);
 					limpiar();
 				}}
 				origenInfo={
@@ -306,18 +357,39 @@ export function TrasladosPanel({
 						(a) =>
 							a.activo &&
 							String(a.asesor_id) !== origen &&
-							puedeRecibirTodosBuckets(bucketsOrigen, a.buckets),
+							puedeRecibirTodosBuckets(bucketsDestinoUnico, a.buckets),
 					)
 					.map((asesor) => ({
 						asesor,
 						capacidad: capacidadDe(
 							cargaEquipoData,
 							asesor.asesor_id,
-							bucketsOrigen,
+							bucketsDestinoUnico,
 						),
-					}))}
+						noCubre: bucketsSueltos.filter((b) => !asesor.buckets.includes(b)),
+					}))
+					// Primero quienes también atienden los créditos sueltos.
+					.sort((a, b) => a.noCubre.length - b.noCubre.length)}
 				cargandoBucketsOrigen={cargaOrigenPendiente}
 				bucketsOrigen={bucketsOrigen}
+				bucketsDestinoUnico={bucketsDestinoUnico}
+				onUsarPorBucket={() => {
+					// El destino único se queda con los buckets que atiende; el resto
+					// (los sueltos) quedan por elegir.
+					const elegido = catalogo.find((a) => String(a.asesor_id) === destino);
+					setModo("destino_por_bucket");
+					setDestino("");
+					setDestinosPorBucket(
+						elegido
+							? Object.fromEntries(
+									bucketsOrigen
+										.filter((b) => elegido.buckets.includes(b))
+										.map((b) => [b, destino]),
+								)
+							: {},
+					);
+					limpiar();
+				}}
 				destinosPorBucket={destinosPorBucket}
 				onDestinoBucket={(bucket, value) => {
 					setDestinosPorBucket((actual) => ({
@@ -350,6 +422,8 @@ export function TrasladosPanel({
 						a.activo && a.buckets.length > 0 && String(a.asesor_id) !== origen,
 				)}
 				requiereDestinoEspecial={requiereDestinoEspecial}
+				especialesOrigen={especialesOrigen}
+				faltaResponsableEspecial={!!errorEspeciales}
 				razon={razon}
 				onRazon={(v) => {
 					setRazon(v);
@@ -361,7 +435,10 @@ export function TrasladosPanel({
 					limpiar();
 				}}
 				errorFormulario={errorFormulario}
-				errorPrevisualizar={previsualizar.error?.message ?? null}
+				// El rechazo por créditos fuera de cobranza se explica en su pregunta.
+				errorPrevisualizar={
+					errorEspeciales ? null : (previsualizar.error?.message ?? null)
+				}
 				previsualizando={previsualizar.isPending}
 				onCancelar={onCerrar}
 				onRevisar={() => previsualizar.mutate()}
@@ -379,7 +456,9 @@ export function TrasladosPanel({
 				confirmando={confirmar.isPending}
 				onAtras={() => setEnRevision(false)}
 				onConfirmar={() => setConfirmando(true)}
-				resultado={resultado}
+				resultado={
+					resultado ? { ...resultado, receptores: receptoresResultado } : null
+				}
 				onListo={onCerrar}
 			/>
 			<AlertDialog
@@ -388,11 +467,14 @@ export function TrasladosPanel({
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Confirmar traslado permanente</AlertDialogTitle>
+						<AlertDialogTitle>¿Confirmar el traslado?</AlertDialogTitle>
 						<AlertDialogDescription>
-							Se cambiará el responsable de {preview?.asignaciones.length ?? 0}{" "}
-							cuentas de {nombres.get(Number(origen))}. Motivo: {motivo}. Cada
-							cambio quedará en el historial.
+							{preview?.asignaciones.length === 1
+								? "1 crédito"
+								: `${preview?.asignaciones.length ?? 0} créditos`}{" "}
+							de {nombres.get(Number(origen))} pasan a su nuevo asesor. Es
+							permanente: para deshacerlo habría que hacer otro traslado. Cada
+							cambio queda en el historial. Motivo: {motivo}.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

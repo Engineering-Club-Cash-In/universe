@@ -117,7 +117,10 @@ export async function devolverTraslado(params: {
   const detalle = await detalleTraslado(params.operacionId);
   const [origen] = (
     await db.execute<{ asesor_origen_id: number; es_ausencia: boolean }>(sql`
-      SELECT asesor_origen_id, COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false) AS es_ausencia
+      SELECT asesor_origen_id,
+        -- La baja de un asesor también pausa el pool, pero es definitiva: no se devuelve.
+        (COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false)
+          AND COALESCE(solicitud->>'desactivarOrigen', 'false') <> 'true') AS es_ausencia
       FROM ${schema}.operaciones_traslado_cartera WHERE id = ${params.operacionId}::uuid`)
   ).rows;
   // Solo se devuelve el reparto de una ausencia (el traslado que pausó el pool): un

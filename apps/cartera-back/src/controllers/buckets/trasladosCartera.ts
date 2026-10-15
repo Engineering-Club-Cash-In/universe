@@ -33,8 +33,18 @@ export const solicitudTrasladoSchema = z.object({
    * devuelven también en un replay idempotente.
    */
   pausarPoolOrigen: z.boolean().optional(),
+  /**
+   * COBROS-02 · Baja de asesor: al confirmar, el asesor de origen queda
+   * DESACTIVADO (asesores.activo = false, fuera del balanceo y de su pool, login
+   * de cartera inactivo) en la MISMA transacción que reparte su cartera. Exige
+   * `pausarPoolOrigen` (sin ventana en la que el motor le asigne cuentas) y no
+   * admite `mantenerEspeciales`: en una baja no se queda ninguna cuenta con él.
+   */
+  desactivarOrigen: z.boolean().optional(),
   actorEmail: z.string().email(),
 }).superRefine((v, ctx) => {
+  if (v.desactivarOrigen && !v.pausarPoolOrigen) ctx.addIssue({ code: "custom", message: "La baja del asesor requiere sacarlo de su pool (pausarPoolOrigen)" });
+  if (v.desactivarOrigen && v.mantenerEspeciales) ctx.addIssue({ code: "custom", message: "En una baja ninguna cuenta se queda con el asesor: indique el responsable de las cuentas fuera del funnel" });
   if (v.modo === "traslado_completo" && (!v.asesorDestinoId || v.asesorDestinoId === v.asesorOrigenId)) ctx.addIssue({ code: "custom", message: "Selecciona un destino distinto del origen" });
   if (v.modo === "redistribucion" && v.asesorDestinoId) ctx.addIssue({ code: "custom", message: "La redistribución usa todos los receptores elegibles" });
   if (v.modo === "destino_por_bucket" && (!v.destinosPorBucket || !Object.keys(v.destinosPorBucket).length)) ctx.addIssue({ code: "custom", message: "Selecciona un destino para cada bucket" });
@@ -277,7 +287,7 @@ async function bloquearDestinos(
  * usuario desde el CRM. Lo que sí garantiza es que el responsable registrado
  * existe, está activo y es resoluble — la auditoría deja de poder quedar vacía.
  */
-async function exigirActorRegistrado(executor: Executor, actorEmail: string) {
+export async function exigirActorRegistrado(executor: Executor, actorEmail: string) {
   const encontrado = (await executor.execute<{ id: number }>(sql`
     SELECT id FROM ${schema}.platform_users
     WHERE lower(email) = lower(${actorEmail}) AND is_active LIMIT 1
@@ -301,7 +311,7 @@ export async function previsualizarTrasladoCarteraMasivo(raw: unknown) {
 }
 
 export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
-  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional(), motivo: z.string().min(1).max(1000).optional() }).parse(raw);
+  const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email(), asesorOrigenId: z.number().int().positive().optional(), pausarPoolOrigen: z.boolean().optional(), desactivarOrigen: z.boolean().optional(), motivo: z.string().min(1).max(1000).optional() }).parse(raw);
   try {
     return await db.transaction(async tx => {
     const row = (await tx.execute<{ id: string; estado: string; motivo: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada & { bucketsPausados?: number[] }; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
@@ -320,6 +330,16 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     if (input.pausarPoolOrigen && !row.solicitud.pausarPoolOrigen) {
       throw new TrasladoConflict("La previsualización no incluye la pausa del pool");
     }
+    // La baja va en las dos direcciones: no se da de baja con una previsualización
+    // que no la incluye, ni se confirma una baja por la ruta de un traslado normal
+    // (quien la confirma debe saber que el asesor queda desactivado).
+    if (!!input.desactivarOrigen !== !!row.solicitud.desactivarOrigen) {
+      throw new TrasladoConflict(
+        row.solicitud.desactivarOrigen
+          ? "Esta previsualización es la baja de un asesor: confírmela desde «Dar de baja»"
+          : "La previsualización no incluye la baja del asesor",
+      );
+    }
     if (row.estado === "confirmada") {
       if (row.idempotency_key !== input.idempotencyKey) throw new TrasladoConflict("La operación ya fue confirmada con otra solicitud");
       return {
@@ -327,6 +347,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         operacionId: row.id,
         cuentas: row.preview.asignaciones.length,
         ...(row.solicitud.pausarPoolOrigen ? { bucketsPausados: row.solicitud.bucketsPausados ?? [] } : {}),
+        ...(row.solicitud.desactivarOrigen ? { desactivado: true as const } : {}),
       };
     }
     // Solo una confirmación NUEVA escribe historial. Un replay idempotente no
@@ -366,7 +387,11 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
           SELECT activo FROM ${schema}.asesores WHERE asesor_id = ${row.solicitud.asesorOrigenId} FOR UPDATE`)
       ).rows;
       if (!origenFila?.activo) {
-        throw new TrasladoConflict("El asesor está desactivado: no se puede marcar ausente. Para repartir su cartera use un traslado.");
+        throw new TrasladoConflict(
+          row.solicitud.desactivarOrigen
+            ? "El asesor ya está dado de baja."
+            : "El asesor está desactivado: no se puede marcar ausente. Para repartir su cartera use un traslado.",
+        );
       }
       const sinBalanceo = await tx.execute(sql`
         UPDATE ${schema}.asesores SET activo_para_creditos = false
@@ -404,7 +429,8 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     }
     // Con `mantenerEspeciales` (ausencia, M5) un traslado sin cuentas que repartir es
     // válido: el asesor sin cartera operativa igual debe poder marcarse ausente.
-    if (plan.bloqueos.length || (!plan.asignaciones.length && !row.solicitud.mantenerEspeciales)) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
+    // En una baja tampoco: un asesor sin cartera igual se tiene que poder dar de baja.
+    if (plan.bloqueos.length || (!plan.asignaciones.length && !row.solicitud.mantenerEspeciales && !row.solicitud.desactivarOrigen)) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
     // Un solo CTE mantiene UPDATE, historial y detalle atómicos. El CAS por
     // fila preserva la protección frente a reasignaciones manuales; si una
     // sola fila cambió, se lanza conflicto y la transacción revierte lote
@@ -502,8 +528,23 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND activo
         RETURNING bucket`);
       bucketsPausados = pausados.rows.map((f) => Number(f.bucket)).sort((a, b) => a - b);
+      // Baja: el asesor queda desactivado en ESTA transacción, con su cartera ya
+      // repartida (el conteo de arriba exige que no le quede ningún crédito) y su
+      // pool apagado. O todo o nada: nunca queda un asesor inactivo con cuentas, ni
+      // uno sin cuentas que el motor pueda volver a llenar. La fila de `asesores` ya
+      // está bloqueada (FOR UPDATE de la pausa). Su login de cartera (rol ASESOR)
+      // también se apaga; la cuenta del CRM la deshabilita el CRM después.
+      if (row.solicitud.desactivarOrigen) {
+        await tx.execute(sql`UPDATE ${schema}.asesores
+          SET activo = false, activo_para_creditos = false
+          WHERE asesor_id = ${row.solicitud.asesorOrigenId}`);
+        await tx.execute(sql`UPDATE ${schema}.platform_users SET is_active = false
+          WHERE asesor_id = ${row.solicitud.asesorOrigenId} AND role = 'ASESOR' AND is_active`);
+      }
+      // `ausente` también en la baja: `validarAsesorExplicito` (createCredit) no le
+      // asigna créditos nuevos a quien lo tiene. Un alta posterior lo apaga.
       await tx.execute(sql`UPDATE ${schema}.operaciones_traslado_cartera
-        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados, ausente: true })}::jsonb
+        SET solicitud = solicitud || ${JSON.stringify({ bucketsPausados, creditosPausados, ausente: true, ...(row.solicitud.desactivarOrigen ? { desactivado: true } : {}) })}::jsonb
         WHERE id = ${row.id}::uuid`);
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA
@@ -524,6 +565,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       operacionId: row.id,
       cuentas: plan.asignaciones.length,
       ...(bucketsPausados ? { bucketsPausados } : {}),
+      ...(row.solicitud.desactivarOrigen ? { desactivado: true as const } : {}),
     };
     });
   } catch (error) {
@@ -538,7 +580,10 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
 export async function consultarTrasladoPorClave(clave: string) {
   const fila = (await db.execute<{ id: string; cuentas: number; buckets: number[] | null; asesor_origen_id: number; es_ausencia: boolean }>(sql`
     SELECT id, jsonb_array_length(preview->'asignaciones') AS cuentas,
-      asesor_origen_id, COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false) AS es_ausencia,
+      asesor_origen_id,
+      -- La baja también pausa el pool, pero no es una ausencia: no se reconcilia como tal.
+      (COALESCE(solicitud->>'pausarPoolOrigen' = 'true', false)
+        AND COALESCE(solicitud->>'desactivarOrigen', 'false') <> 'true') AS es_ausencia,
       CASE WHEN jsonb_typeof(solicitud->'bucketsPausados') = 'array'
         THEN ARRAY(SELECT jsonb_array_elements_text(solicitud->'bucketsPausados')::int) END AS buckets
     FROM ${schema}.operaciones_traslado_cartera

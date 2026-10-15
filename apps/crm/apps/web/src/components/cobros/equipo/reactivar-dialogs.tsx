@@ -8,16 +8,13 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogIcon,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { ExitoModal, NotaModal } from "./asignacion/piezas-modal";
 import { fechaCorta, MOTIVO_COBERTURA_LABEL } from "./estado-asesor";
 
 /**
@@ -50,20 +47,31 @@ export type ResultadoReactivacion = {
 	retenidas: { motivo: string }[];
 };
 
-const MOTIVO_RETENIDA: Record<string, string> = {
-	cambio_de_dueno: "cambiaron de dueño durante la ausencia",
-	fuera_del_funnel: "ya no se gestionan (canceladas o caídas)",
-	bucket_fuera_del_pool: "pasaron a un bucket que el asesor no atiende",
+/** Por qué un crédito no volvió, en singular y en plural. */
+const MOTIVO_RETENIDA: Record<string, [string, string]> = {
+	cambio_de_dueno: [
+		"cambió de dueño durante la ausencia",
+		"cambiaron de dueño durante la ausencia",
+	],
+	fuera_del_funnel: [
+		"quedó fuera de cobranza (cancelado o caído)",
+		"quedaron fuera de cobranza (cancelados o caídos)",
+	],
+	bucket_fuera_del_pool: [
+		"pasó a un bucket que el asesor no atiende",
+		"pasaron a un bucket que el asesor no atiende",
+	],
 };
 
-/** «3 cambiaron de dueño…, 1 ya no se gestiona…» */
+/** «2 cambiaron de dueño…», «1 quedó fuera de cobranza…» */
 function resumenRetenidas(retenidas: { motivo: string }[]) {
 	const cuenta = new Map<string, number>();
 	for (const r of retenidas)
 		cuenta.set(r.motivo, (cuenta.get(r.motivo) ?? 0) + 1);
-	return [...cuenta].map(
-		([motivo, n]) => `${n} ${MOTIVO_RETENIDA[motivo] ?? motivo}`,
-	);
+	return [...cuenta].map(([motivo, n]) => {
+		const texto = MOTIVO_RETENIDA[motivo];
+		return `${n} ${texto ? texto[n === 1 ? 0 : 1] : motivo}`;
+	});
 }
 
 export function ConfirmarReactivarDialog({
@@ -94,8 +102,8 @@ export function ConfirmarReactivarDialog({
 									? "La reactivación quedó a medias: se repite desde donde se cortó. "
 									: ""}
 								Se le devolverá la cartera que se repartió al equipo (salvo lo
-								que ya cambió de dueño o de bucket), volverá a recibir cuentas
-								nuevas y se avisará al equipo.
+								que ya cambió de dueño o de bucket), volverá a recibir créditos
+								nuevos y se avisará al equipo.
 							</>
 						) : null}
 						{cobertura?.indefinida ? null : (
@@ -141,53 +149,81 @@ export function ConfirmarReactivarDialog({
 	);
 }
 
-/** Figma «Modal · Asesor reactivado» (3366:4235), en usted. */
+/** Texto de «Asesor reactivado» según la clase de ausencia. */
+function textoReactivado(
+	nombre: string | null,
+	resultado: ResultadoReactivacion | null | undefined,
+) {
+	if (!resultado)
+		return `${nombre} se reincorporó. Se canceló su ausencia y sus tareas de agenda vuelven a ser suyas desde hoy; su cartera nunca cambió de dueño.`;
+	const devueltas =
+		resultado.devueltas === 1
+			? "Se le devolvió 1 crédito"
+			: `Se le devolvieron ${resultado.devueltas.toLocaleString("es-GT")} créditos`;
+	return `${nombre} se reincorporó. ${devueltas} de su cartera y vuelve a recibir créditos nuevos.`;
+}
+
+/**
+ * Figma «Asesor reactivado» (3366:4235), en usted: ícono verde, título, qué
+ * pasó con su cartera, lo que se quedó con quien lo recibió y, en la ausencia
+ * con reparto (el servidor avisa al equipo), «Se notificó al equipo por el
+ * sistema». Sin el Dialog: así el showcase lo pinta en línea.
+ */
+export function AsesorReactivadoVista({
+	nombre,
+	resultado,
+	onCerrar,
+}: {
+	nombre: string | null;
+	/** Solo en la ausencia indefinida (M5): créditos devueltos y retenidos. */
+	resultado?: ResultadoReactivacion | null;
+	onCerrar: () => void;
+}) {
+	const retenidas = resultado ? resumenRetenidas(resultado.retenidas) : [];
+	return (
+		<ExitoModal
+			titulo="Asesor reactivado"
+			onListo={onCerrar}
+			extra={
+				retenidas.length ? (
+					<NotaModal tono="neutral" titulo="Se quedaron con quien los recibió">
+						<ul className="list-disc pl-4">
+							{retenidas.map((t) => (
+								<li key={t}>{t}</li>
+							))}
+						</ul>
+					</NotaModal>
+				) : null
+			}
+			nota={resultado ? "Se notificó al equipo por el sistema." : undefined}
+		>
+			{textoReactivado(nombre, resultado)}
+		</ExitoModal>
+	);
+}
+
 export function AsesorReactivadoDialog({
 	nombre,
 	resultado,
 	onCerrar,
 }: {
 	nombre: string | null;
-	/** Solo en la ausencia indefinida (M5): cuentas devueltas y retenidas. */
+	/** Solo en la ausencia indefinida (M5): créditos devueltos y retenidos. */
 	resultado?: ResultadoReactivacion | null;
 	onCerrar: () => void;
 }) {
-	const retenidas = resultado ? resumenRetenidas(resultado.retenidas) : [];
 	return (
 		<Dialog open={!!nombre} onOpenChange={(abierto) => !abierto && onCerrar()}>
-			<DialogContent className="sm:max-w-md" showCloseButton={false}>
-				<DialogHeader>
-					<DialogIcon />
-					<DialogTitle>Asesor reactivado</DialogTitle>
-					<DialogDescription>
-						{resultado
-							? `${nombre} se reincorporó: volvió al pool y se le devolvieron ${resultado.devueltas} cuentas.`
-							: `${nombre} se reincorporó: se canceló su ausencia y sus tareas de agenda vuelven a ser suyas desde hoy. Su cartera siempre conservó su propietario.`}
-					</DialogDescription>
-				</DialogHeader>
-				{retenidas.length ? (
-					<div className="rounded-xl bg-muted px-4 py-3 text-fg-secondary text-sm">
-						<p className="font-medium text-fg">
-							Se quedaron con quien las recibió:
-						</p>
-						<ul className="mt-1 list-disc pl-5">
-							{retenidas.map((t) => (
-								<li key={t}>{t}</li>
-							))}
-						</ul>
-					</div>
-				) : null}
-				{resultado ? (
-					<p className="rounded-xl bg-muted px-4 py-3 text-fg-secondary text-sm">
-						El sistema avisa al equipo de la reincorporación. Si hace falta,
-						confírmesela también usted.
-					</p>
-				) : null}
-				<DialogFooter>
-					<Button className="w-full" onClick={onCerrar}>
-						Entendido
-					</Button>
-				</DialogFooter>
+			<DialogContent className="sm:max-w-120" showCloseButton={false}>
+				<DialogTitle className="sr-only">Asesor reactivado</DialogTitle>
+				<DialogDescription className="sr-only">
+					{textoReactivado(nombre, resultado)}
+				</DialogDescription>
+				<AsesorReactivadoVista
+					nombre={nombre}
+					resultado={resultado}
+					onCerrar={onCerrar}
+				/>
 			</DialogContent>
 		</Dialog>
 	);

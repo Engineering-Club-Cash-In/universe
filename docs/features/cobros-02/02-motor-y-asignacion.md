@@ -169,16 +169,35 @@ ese bucket; el motor decide quién lo recibe.
 
 `elegirAsesorParaBucket(pool, carga, asesorActual)`:
 
-1. Pool vacío → **no se toca el asesor** (se conserva el actual y se cuenta en `sinPoolDestino`). Nunca se deja un crédito huérfano.
+1. Pool vacío → **no se toca el asesor** (se conserva el actual y se cuenta en `sinPoolDestino`). Nunca se deja un crédito huérfano. Los créditos con un dueño fuera del pool de su bucket se ven en `GET /buckets/creditos-fuera-de-pool`.
 2. El asesor actual también está en el pool del bucket destino → **se queda**. Sin churn innecesario.
 3. Si no → el asesor del pool con **menos carga en ese bucket**; a igualdad, el de menor `asesor_id` (determinístico).
+
 
 La carga se mantiene **viva durante la corrida**, así que si en una misma noche caen 40
 créditos al mismo bucket, se reparten parejo en vez de irse todos al que estaba más
 liviano al arrancar.
 
-`INICIAL` **no reasigna**: la línea base no es un movimiento, solo el registro de dónde
-estaba el crédito cuando el motor lo vio por primera vez.
+### Créditos con el dueño fuera del pool (2026-10-15)
+
+El motor solo reasigna **cuando el crédito cambia de bucket**, así que un dueño que queda
+fuera del pool por otra vía se queda ahí. Pasó en el sandbox: el paso 6 de la alineación
+(`02`, con `conservar=1`) leía el bucket de la mora activa. Los créditos con capital 0 o
+negativo no tienen mora, así que los leyó como B0 y se los dio a una asesora de B0 (286,
+930, 8845), mientras el motor, que cuenta cuotas, los tenía en B5 y B3.
+
+- **El `02` se corrigió:** lee el bucket igual que `bucketActualSql` (último historial; sin
+  historial, la mora activa; y el piso por estado).
+- **Para verlos:** `GET /buckets/creditos-fuera-de-pool` (`?incluir_convenios=true` agrega
+  los EN_CONVENIO, que el convenio congela).
+- **Para sanearlos:** `src/scripts/sanearCreditosFueraDePool.ts`, con `--dry-run` o
+  `--aplicar --confirmar-bd=…`. Reasigna con la reasignación en lote existente y
+  bitácora `API_MANUAL`. En DEV se corrió el 2026-10-15: 3 reasignados y 0 pendientes.
+- **Lo que no se hizo:** que el motor concilie cada noche a todos los dueños fuera del pool.
+  Se probó y se revirtió, porque `createCredit` reparte los créditos nuevos por carga
+  general y no por bucket: el motor movería cada crédito nuevo esa misma noche, y la
+  primera corrida podía alargar el lock del job de moras. Para eso, primero hay que hacer
+  que `createCredit` elija del pool de B0.
 
 ### Reasignación manual
 
@@ -218,6 +237,39 @@ Tres cosas que vale conocer del diseño:
 > `nivelacion` aparece en el `CHECK` de la tabla pero ningún validador lo acepta: hoy es
 > código muerto.
 
+### Alta y baja de asesor (Mi equipo)
+
+Figma «05 · Alta y Baja de Asesor». Procedimientos en `routers/equipo-alta-baja.ts` del CRM
+(supervisión y admin por igual); flujo en `services/alta-baja-asesor.ts`, reglas puras en
+`lib/alta-baja-asesor.ts`.
+
+**Alta** (`crearAsesorCobros`). CRM y cartera son dos bases: no hay una transacción que
+cubra todo, así que el orden es el seguro y **cada paso es idempotente** (repetir el alta
+con los mismos datos retoma donde quedó):
+
+1. **Usuario del CRM** con rol Cobros: se crea (sin contraseña; entra con Google), se
+   vincula si ya existe o se vuelve a habilitar si lo suspendió una baja. Va primero: un
+   asesor en el pool recibe créditos del motor y tiene que poder entrar. Supervisión puede
+   crear usuarios **solo** con rol Cobros y correo de la empresa; otro rol sigue siendo de
+   Administración › Usuarios.
+2. **Asesor y pool en cartera** (`POST /buckets/asesores/alta`, una transacción,
+   idempotente por correo): `email_cash_in`, `supervisor_email` (migración cobros-02/0027) y
+   el pool del nivel (Junior B0–B1, Senior B2–B4, Especial B5) con la capacidad más común del
+   equipo. Reactiva a un asesor dado de baja con el mismo correo.
+3. **Cartera inicial**: N créditos de los asesores del nivel con más carga, quitando siempre
+   al que más tiene (`planCarteraInicial`), con la **reasignación en bloque** (S6, todo o
+   nada). Solo se mueve lo que falta para llegar a N: un reintento no duplica.
+
+**Baja** (`previsualizarBajaAsesor` → `confirmarBajaAsesor`): el traslado `redistribucion`
+por capacidad (el de la ausencia M5) con `pausarPoolOrigen` y **`desactivarOrigen`**. Las
+cuentas fuera del funnel van a un responsable (sugerido: su nivel, con menos carga). Al
+confirmar, **una sola transacción de cartera** reparte todo (falla si algún crédito queda
+sin destino), saca al asesor del pool y lo desactiva (`activo`, `activo_para_creditos` y su
+login de cartera); después el CRM suspende su usuario y cierra sus sesiones. Si eso último
+falla, repetir la confirmación con la misma clave no repite el reparto. No se da de baja a
+quien está ausente o en una cobertura vigente. El motivo empieza con «Baja de asesor:» y la
+bitácora lo muestra como baja.
+
 ### Coberturas temporales (CB-114 / CC2-23)
 
 Vacaciones y permisos **no mueven la cartera**. Se registra una cobertura
@@ -236,17 +288,17 @@ responde siempre mirando `credito_asesor_historial`:
 
 | Quién | `origen` | Cuándo |
 | --- | --- | --- |
-| El motor (`procesarMoras`) | `PROCESO_AUTO` | Solo cuando el crédito cambia de bucket |
+| El motor (`procesarMoras`) | `PROCESO_AUTO` | Cuando el crédito cambia de bucket |
 | El job de convenios | `PROCESO_AUTO` | Igual, y también en su `INICIAL` |
 | Reasignación manual | `API_MANUAL` | Un crédito, con motivo y usuario |
 | Traslado masivo | `API_MANUAL` | En lote, con el id de la operación en el motivo |
 | Recuperación de vehículo | `API_MANUAL` | Al mandar el crédito a B4, si el dueño no cubre ese bucket ([doc 7](./07-recuperacion-de-vehiculo.md)) |
 
-**¿El motor deshace un traslado?** No mientras el crédito no cambie de bucket. El traslado
+**¿El motor deshace un traslado?** No, mientras el destino siga siendo elegible. El traslado
 exige que el destino esté en el pool del bucket **actual**, y `elegirAsesorParaBucket`
-conserva al asesor que ya es elegible en el destino. El único caso en que el motor
-sobrescribe un destino elegido a mano es si el crédito cambia de bucket **y** ese asesor no
-pertenece al pool del bucket nuevo, que es justamente el comportamiento buscado.
+conserva al asesor que ya es elegible. El motor solo sobrescribe un destino elegido a mano
+si ese asesor deja de pertenecer al pool del bucket del crédito: porque el crédito cambió
+de bucket, o porque al asesor lo sacaron del pool. Es justamente el comportamiento buscado.
 
 ## Cómo interactúa un pago con el bucket
 
@@ -303,4 +355,6 @@ nunca pasaron por la carga inicial (que los excluye por estar fuera del funnel).
 
 Para correr el motor a mano: `POST /moras/procesar` (devuelve el resumen
 `{iniciales, subidas, bajadas, reasignados, sinPoolDestino}`) y
-`POST /buckets/convenio/procesar`.
+`POST /buckets/convenio/procesar`. La cola de créditos con un asesor que no atiende su
+bucket: `GET /buckets/creditos-fuera-de-pool` (`?incluir_convenios=true` agrega los
+EN_CONVENIO, que el convenio congela).

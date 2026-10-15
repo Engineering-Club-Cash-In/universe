@@ -1,14 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import {
 	ArrowRight,
-	Check,
 	ChevronDown,
 	Clock,
 	Info,
-	Plus,
 	TriangleAlert,
 } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId } from "react";
 import { type Bucket, BucketBadge } from "@/components/ds/badges";
 import { CrmAvatar, CrmPill, inicialesDe } from "@/components/ds/cards-credito";
 import { bucketSolidClass } from "@/components/ds/distribucion-bucket";
@@ -20,16 +18,25 @@ import {
 } from "@/components/ui/collapsible";
 import { dialogTitleClassName } from "@/components/ui/dialog";
 import { FieldMessage } from "@/components/ui/field-message";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Label } from "@/components/ui/label";
 import { Pagination } from "@/components/ui/pagination";
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { resumirTraslado } from "@/lib/cobros/traslados";
+import { partirCarteraPorPool, resumirTraslado } from "@/lib/cobros/traslados";
 import { cn } from "@/lib/utils";
 import type { client } from "@/utils/orpc";
 import { etiquetaNivel, nivelAsesor } from "../estado-asesor";
-import { AvatarMini } from "./carga-resumen-vista";
+import {
+	ExitoModal,
+	type FilaReparto,
+	Flecha,
+	ListaReparto,
+	NotaModal,
+	plural,
+	TarjetaOpcion,
+} from "./piezas-modal";
 import {
 	type AsesorTraslado,
 	EstadoConsulta,
@@ -37,18 +44,26 @@ import {
 } from "./selector-asesor";
 
 /**
- * «Trasladar cartera» — presentación del modal, por pasos, con el estándar
- * compacto de «Marcar ausente» (Figma 3367:4244) y las piezas de «Reasignar»
- * (3631:5567 / 3627:5567: tarjetas de radio con barra de capacidad y motivo en
- * chips), «Redistribución de cartera» (3360:4254: lista «antes → después +N»)
- * y la pantalla de éxito (3629:5636).
+ * «Trasladar cartera» — presentación del modal, por pasos, con el estándar de
+ * «Marcar ausente» y el Figma «09 · Disponibilidad y redistribución»
+ * («Redistribución de cartera» 3360:4254: lista «antes → después +N»;
+ * «Cartera redistribuida» 3360:4312) y las tarjetas de «Reasignar» (3631:5567:
+ * radio con barra de capacidad).
  *
- *   1. formulario → asesor de origen, forma de repartir, motivo, explicación
- *                   y, si aplica, el responsable de las cuentas sin bucket.
- *   2. revision   → el resultado de `previsualizarTraslado`: receptores,
- *                   contadores, vencimiento, bloqueos, cuentas sin bucket
- *                   operativo, créditos sin destino y el detalle por crédito.
- *   3. resultado  → «Traslado confirmado».
+ *   1. formulario → de quién es la cartera, motivo (y nota), cómo se reparte,
+ *                   quién la recibe y, solo si el asesor los tiene (o si se
+ *                   va de la empresa), quién queda a cargo de sus créditos
+ *                   fuera de cobranza. Los créditos «sueltos» (en buckets que
+ *                   el origen no atiende: el motor los subió de bucket y
+ *                   siguen a su nombre) se muestran aparte; «A un solo
+ *                   asesor» se elige por el pool del origen y avisa que esos
+ *                   créditos solo se mueven si quien recibe atiende su bucket
+ *                   (si no, cartera-back los bloquea y no se puede confirmar).
+ *   2. revision   → el resultado de `previsualizarTraslado`: una fila por
+ *                   asesor que recibe, hasta cuándo vale, lo que impide
+ *                   confirmar, los créditos fuera de cobranza y el detalle por
+ *                   crédito.
+ *   3. resultado  → «Cartera redistribuida».
  *
  * Presentación pura: el estado, las validaciones, la vista previa, la
  * confirmación (con su AlertDialog) y las invalidaciones viven en
@@ -95,7 +110,7 @@ export const MOTIVOS_TRASLADO: Record<RazonTraslado, string> = {
 };
 
 const CHIPS_MOTIVO: { valor: RazonTraslado; etiqueta: string }[] = [
-	{ valor: "redistribucion", etiqueta: "Redistribución" },
+	{ valor: "redistribucion", etiqueta: "Redistribución operativa" },
 	{ valor: "despido", etiqueta: "Despido" },
 	{ valor: "renuncia", etiqueta: "Renuncia" },
 	{ valor: "otro", etiqueta: "Otro" },
@@ -104,19 +119,32 @@ const CHIPS_MOTIVO: { valor: RazonTraslado; etiqueta: string }[] = [
 const MODOS: { valor: ModoTraslado; titulo: string; detalle: string }[] = [
 	{
 		valor: "redistribucion",
-		titulo: "Repartir entre el equipo",
-		detalle: "Entre los asesores activos de cada bucket.",
+		titulo: "Entre el equipo",
+		detalle: "Cada crédito va al asesor de su bucket con menos créditos.",
 	},
 	{
 		valor: "traslado_completo",
 		titulo: "A un solo asesor",
-		detalle: "Recibe toda la cartera y atiende todos sus buckets.",
+		detalle: "Recibe toda la cartera; debe atender todos sus buckets.",
 	},
 	{
 		valor: "destino_por_bucket",
-		titulo: "Destino por bucket",
+		titulo: "Un asesor por bucket",
 		detalle: "Usted elige quién recibe cada bucket.",
 	},
+];
+
+/** Créditos fuera de cobranza: qué es cada estado (desplegable del paso 1). */
+const ESTADOS_FUERA: { estado: string; descripcion: string }[] = [
+	{
+		estado: "Cancelado",
+		descripcion: "Crédito cerrado; se conserva para consulta e historial.",
+	},
+	{
+		estado: "Pendiente de cancelación",
+		descripcion: "El cierre administrativo aún está en proceso.",
+	},
+	{ estado: "Caído", descripcion: "Dado de baja de la cobranza activa." },
 ];
 
 /** Cuentas y capacidad base de un asesor en uno o varios buckets. */
@@ -127,7 +155,7 @@ export type OrigenTraslado = {
 	activo: boolean;
 	/** Buckets del pool (definen el nivel). */
 	buckets: number[];
-	/** Cuentas de su cartera por bucket; `null` mientras carga. */
+	/** Créditos de su cartera por bucket; `null` mientras carga. */
 	porBucket: { bucket: number; cuentas: number }[] | null;
 };
 
@@ -150,10 +178,23 @@ export type TrasladoVistaProps = {
 	/** «A un solo asesor»: el elegido y los candidatos con su capacidad. */
 	destino: string;
 	onDestino: (asesorId: string) => void;
-	destinos: { asesor: AsesorTraslado; capacidad: CapacidadDestino | null }[];
+	destinos: {
+		asesor: AsesorTraslado;
+		capacidad: CapacidadDestino | null;
+		/** Buckets de créditos sueltos que este destino no atiende. */
+		noCubre?: number[];
+	}[];
 	/** Los buckets de la cartera del origen todavía se están cargando. */
 	cargandoBucketsOrigen: boolean;
+	/** Buckets en los que el origen tiene créditos (sueltos incluidos). */
 	bucketsOrigen: number[];
+	/**
+	 * Buckets que debe atender quien reciba toda la cartera: los del pool del
+	 * origen (sin los sueltos). Por defecto, `bucketsOrigen`.
+	 */
+	bucketsDestinoUnico?: number[];
+	/** Pasa a «Un asesor por bucket» con el destino único en sus buckets. */
+	onUsarPorBucket?: () => void;
 	destinosPorBucket: Record<number, string>;
 	onDestinoBucket: (bucket: number, asesorId: string) => void;
 	candidatosPorBucket: Record<number, AsesorTraslado[]>;
@@ -162,11 +203,19 @@ export type TrasladoVistaProps = {
 		asesorId: number,
 		bucket: number,
 	) => CapacidadDestino | null;
+	/** Responsable de los créditos fuera de cobranza (`asesorDestinoEspecialId`). */
 	destinoEspecial: string;
 	onDestinoEspecial: (asesorId: string) => void;
 	candidatosEspecial: AsesorTraslado[];
-	/** Despido o renuncia: el responsable de las cuentas sin bucket es obligatorio. */
+	/** Despido o renuncia: el responsable de los créditos fuera de cobranza es obligatorio. */
 	requiereDestinoEspecial: boolean;
+	/**
+	 * El origen tiene créditos fuera de cobranza (lo dijo la vista previa): la
+	 * pregunta se muestra. `cuantos` es null si no se sabe el número.
+	 */
+	especialesOrigen?: { cuantos: number | null } | null;
+	/** La vista previa se rechazó porque falta quién quede a cargo de ellos. */
+	faltaResponsableEspecial?: boolean;
 	razon: RazonTraslado;
 	onRazon: (razon: RazonTraslado) => void;
 	detalle: string;
@@ -188,18 +237,22 @@ export type TrasladoVistaProps = {
 	errorConfirmar: string | null;
 	confirmando: boolean;
 	onAtras: () => void;
-	/** Abre la confirmación final («Confirmar traslado permanente»). */
+	/** Abre la confirmación final. */
 	onConfirmar: () => void;
 
 	/* Paso 3 */
-	resultado: { cuentas: number; operacionId: string } | null;
+	resultado: {
+		cuentas: number;
+		operacionId: string;
+		/** Asesores que recibieron créditos. */
+		receptores?: number;
+	} | null;
 	onListo: () => void;
 };
 
 /* ── Utilidades ─────────────────────────────────────────────────────────── */
 
 const POR_PAGINA = 25;
-const RECEPTORES_VISIBLES = 6;
 
 function aBucket(numero: number | null): Bucket | null {
 	return numero !== null && numero >= 0 && numero <= 5
@@ -214,18 +267,14 @@ export function listaBuckets(buckets: readonly number[]) {
 	return `${nombres.slice(0, -1).join(", ")} y ${nombres.at(-1)}`;
 }
 
-function plural(n: number, uno: string, varios: string) {
-	return `${n.toLocaleString("es-GT")} ${n === 1 ? uno : varios}`;
-}
-
 function descripcionEstadoEspecial(estado: string) {
 	return (
 		{
-			INCOBRABLE: "Cuenta marcada para gestión no recuperable.",
+			INCOBRABLE: "Marcado como no recuperable.",
 			CANCELADO: "Crédito cerrado; se conserva para consulta e historial.",
-			PENDIENTE_CANCELACION: "Cierre administrativo aún en proceso.",
-			CAIDO: "Crédito dado de baja de cobranza activa.",
-		}[estado] ?? "Cuenta sin bucket operativo."
+			PENDIENTE_CANCELACION: "El cierre administrativo aún está en proceso.",
+			CAIDO: "Dado de baja de la cobranza activa.",
+		}[estado] ?? "Sin bucket de cobranza."
 	);
 }
 
@@ -257,6 +306,15 @@ function agruparCuentasEspeciales(asignaciones: AsignacionPreview[]) {
 			});
 	}
 	return [...grupos.values()];
+}
+
+/** Razón de un bloqueo de la vista previa, en lenguaje de supervisor. */
+function razonBloqueo(razon: string, bucket: number) {
+	return razon === "destino_no_elegible"
+		? `El asesor elegido no atiende B${bucket}`
+		: razon === "destino_no_configurado"
+			? `Falta elegir quién recibe B${bucket}`
+			: `Ningún otro asesor activo atiende B${bucket}`;
 }
 
 /* ── Piezas ─────────────────────────────────────────────────────────────── */
@@ -291,7 +349,7 @@ function ComposicionCartera({
 	);
 }
 
-/** Asesor de origen: avatar, nivel, cuentas y su reparto por bucket. */
+/** Asesor de origen: avatar, nivel, créditos y su reparto por bucket. */
 function ResumenOrigen({
 	info,
 	cargando,
@@ -305,6 +363,10 @@ function ResumenOrigen({
 	onCambiar: () => void;
 }) {
 	const total = info.porBucket?.reduce((t, d) => t + d.cuentas, 0) ?? null;
+	const { propios, sueltos } = partirCarteraPorPool(
+		info.porBucket ?? [],
+		info.buckets,
+	);
 	return (
 		<div className="flex items-center gap-3 rounded-xl bg-brand-subtle/60 px-3.5 py-3">
 			<CrmAvatar iniciales={inicialesDe(info.nombre)} activo={info.activo} />
@@ -324,11 +386,23 @@ function ResumenOrigen({
 					{cargando
 						? " · cargando su cartera…"
 						: total !== null
-							? ` · ${plural(total, "cuenta", "cuentas")} a trasladar`
+							? ` · ${plural(total, "crédito", "créditos")} por trasladar`
 							: ""}
 				</p>
-				{!cargando && info.porBucket?.length ? (
-					<ComposicionCartera porBucket={info.porBucket} />
+				{!cargando && propios.length ? (
+					<ComposicionCartera porBucket={propios} />
+				) : null}
+				{!cargando && sueltos.length ? (
+					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<span className="inline-flex items-center gap-1 font-medium text-[11px] text-warning-text leading-[1.26]">
+							Fuera de su pool:
+							<InfoTooltip label="Qué son los créditos fuera de su pool">
+								Créditos que pasaron a un bucket que {info.nombre} no atiende y
+								siguen a su nombre.
+							</InfoTooltip>
+						</span>
+						<ComposicionCartera porBucket={sueltos} />
+					</div>
 				) : null}
 			</div>
 			<Button
@@ -344,55 +418,21 @@ function ResumenOrigen({
 	);
 }
 
-/** Tarjeta de radio de la forma de repartir. */
-function TarjetaModo({
-	id,
-	valor,
-	titulo,
-	detalle,
-	activo,
-}: {
-	id: string;
-	valor: ModoTraslado;
-	titulo: string;
-	detalle: string;
-	activo: boolean;
-}) {
-	return (
-		<label
-			htmlFor={id}
-			className={cn(
-				"flex min-w-0 cursor-pointer gap-2.5 rounded-xl border px-3 py-2.5 transition-colors duration-150 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 sm:flex-col sm:gap-1.5",
-				activo
-					? "border-brand bg-brand-subtle"
-					: "border-line bg-surface hover:bg-muted/60",
-			)}
-		>
-			<RadioGroupItem id={id} value={valor} className="mt-0.5 sm:mt-0" />
-			<span className="flex min-w-0 flex-col gap-0.5">
-				<span className="font-semibold text-[13px] text-fg leading-[1.26]">
-					{titulo}
-				</span>
-				<span className="text-[11px] text-fg-secondary leading-[1.3]">
-					{detalle}
-				</span>
-			</span>
-		</label>
-	);
-}
-
-/** «Asignar a»: tarjeta de radio con la barra de capacidad (Figma 3631:5567). */
+/** «Quién la recibe»: tarjeta de radio con la barra de capacidad (Figma 3631:5567). */
 function TarjetaDestino({
 	id,
 	asesor,
 	capacidad,
 	buckets,
+	noCubre = [],
 	activo,
 }: {
 	id: string;
 	asesor: AsesorTraslado;
 	capacidad: CapacidadDestino | null;
 	buckets: number[];
+	/** Buckets de créditos sueltos que no atiende. */
+	noCubre?: number[];
 	activo: boolean;
 }) {
 	const libre = capacidad ? capacidad.capacidad - capacidad.cuentas : null;
@@ -404,7 +444,7 @@ function TarjetaDestino({
 		<label
 			htmlFor={id}
 			className={cn(
-				"flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors duration-150 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60",
+				"flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors duration-150 has-disabled:cursor-not-allowed has-disabled:opacity-60",
 				activo
 					? "border-brand bg-brand-subtle"
 					: "border-line bg-surface hover:bg-muted/60",
@@ -426,24 +466,29 @@ function TarjetaDestino({
 									: "text-fg-tertiary",
 						)}
 					>
-						{plural(capacidad.cuentas, "cuenta", "cuentas")} en{" "}
+						{plural(capacidad.cuentas, "crédito", "créditos")} en{" "}
 						{listaBuckets(buckets)} ·{" "}
 						{libre > 0
-							? `capacidad para +${libre.toLocaleString("es-GT")}`
-							: "sin capacidad disponible"}
+							? `espacio para ${libre.toLocaleString("es-GT")} más`
+							: "ya está en su capacidad"}
 					</span>
 				) : (
 					<span className="text-fg-tertiary text-xs leading-[1.26]">
 						Atiende {listaBuckets(asesor.buckets)}
 					</span>
 				)}
+				{noCubre.length ? (
+					<span className="text-[11px] text-warning-text leading-[1.26]">
+						No atiende {listaBuckets(noCubre)}
+					</span>
+				) : null}
 			</span>
 			{capacidad ? (
 				<Progress
 					value={Math.min(pct, 100)}
 					size="sm"
 					tone={libre !== null && libre <= 0 ? "warning" : "success"}
-					aria-label={`Utilización de ${asesor.nombre}`}
+					aria-label={`Carga de ${asesor.nombre} frente a su capacidad`}
 					className="w-16 shrink-0 sm:w-22"
 				/>
 			) : null}
@@ -451,7 +496,7 @@ function TarjetaDestino({
 	);
 }
 
-/** Pista bajo el destino de un bucket: «20 de 30 en B2 · capacidad para +10». */
+/** Pista bajo el destino de un bucket: «20 de 30 en B2 · espacio para 10 más». */
 function PistaCapacidad({
 	capacidad,
 	bucket,
@@ -469,10 +514,10 @@ function PistaCapacidad({
 			)}
 		>
 			{capacidad.cuentas.toLocaleString("es-GT")} de{" "}
-			{capacidad.capacidad.toLocaleString("es-GT")} en B{bucket} ·{" "}
+			{capacidad.capacidad.toLocaleString("es-GT")} créditos en B{bucket} ·{" "}
 			{libre > 0
-				? `capacidad para +${libre.toLocaleString("es-GT")}`
-				: "sin capacidad disponible"}
+				? `espacio para ${libre.toLocaleString("es-GT")} más`
+				: "ya está en su capacidad"}
 		</p>
 	);
 }
@@ -520,14 +565,14 @@ function EnlaceCredito({
 	);
 }
 
-/** Caja de aviso (peligro / alerta) de la revisión. */
+/** Caja de aviso (peligro / alerta / neutra) de la revisión, con contenido debajo. */
 function Aviso({
 	tono,
 	titulo,
 	descripcion,
 	children,
 }: {
-	tono: "danger" | "warning";
+	tono: "danger" | "warning" | "neutral";
 	titulo: ReactNode;
 	descripcion?: ReactNode;
 	children?: ReactNode;
@@ -537,7 +582,11 @@ function Aviso({
 			role={tono === "danger" ? "alert" : undefined}
 			className={cn(
 				"flex flex-col gap-2 rounded-xl p-3.5",
-				tono === "danger" ? "bg-danger-subtle" : "bg-warning-subtle",
+				tono === "danger"
+					? "bg-danger-subtle"
+					: tono === "warning"
+						? "bg-warning-subtle"
+						: "bg-canvas",
 			)}
 		>
 			<div className="flex gap-2">
@@ -545,20 +594,28 @@ function Aviso({
 					aria-hidden
 					className={cn(
 						"mt-0.5 size-4 shrink-0",
-						tono === "danger" ? "text-danger-solid" : "text-warning-solid",
+						tono === "danger"
+							? "text-danger-solid"
+							: tono === "warning"
+								? "text-warning-solid"
+								: "text-fg-tertiary",
 					)}
 				/>
 				<div className="flex min-w-0 flex-col gap-0.5">
 					<p
 						className={cn(
 							"font-semibold text-[13px] leading-[1.26]",
-							tono === "danger" ? "text-danger-text" : "text-warning-text",
+							tono === "danger"
+								? "text-danger-text"
+								: tono === "warning"
+									? "text-warning-text"
+									: "text-fg",
 						)}
 					>
 						{titulo}
 					</p>
 					{descripcion ? (
-						<p className="text-fg-secondary text-xs leading-[1.3]">
+						<p className="text-fg-secondary text-xs leading-[1.35]">
 							{descripcion}
 						</p>
 					) : null}
@@ -582,115 +639,100 @@ function DisparadorDesplegable({ children }: { children: ReactNode }) {
 	);
 }
 
-/** Fila de receptor: «Carlos Ramírez · B2 — 20 → 26 +6» (Figma 3360:4254). */
-function FilaReceptor({
-	nombre,
-	bucket,
-	cuentas,
-	compromisos,
-	carga,
-}: {
-	nombre: string;
-	bucket: number | null;
-	cuentas: number;
-	compromisos: number;
-	carga: { antes: number; despues: number; capacidad: number } | undefined;
-}) {
-	const b = aBucket(bucket);
-	const sobrecarga = !!carga && carga.despues > carga.capacidad;
-	return (
-		<li className="flex items-center gap-2.5 py-2.5">
-			<AvatarMini nombre={nombre} />
-			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<div className="flex min-w-0 items-center gap-2">
-					<span className="truncate font-medium text-[13px] text-fg leading-[1.26]">
-						{nombre}
-					</span>
-					{b ? (
-						<BucketBadge bucket={b} className="px-1 py-0.5" />
-					) : (
-						<CrmPill tone="neutral" kind="chip" dot={false} className="px-2">
-							Sin bucket operativo
-						</CrmPill>
-					)}
-				</div>
-				<span
-					className={cn(
-						"text-[11px] leading-[1.26]",
-						sobrecarga ? "text-danger-text" : "text-fg-tertiary",
-					)}
-				>
-					{compromisos > 0
-						? `${plural(compromisos, "con compromiso", "con compromiso")}`
-						: "Sin compromisos"}
-					{carga
-						? ` · capacidad ${carga.capacidad.toLocaleString("es-GT")}${sobrecarga ? " · sobrecarga" : ""}`
-						: ""}
-				</span>
-			</div>
-			<span className="shrink-0 text-fg-secondary text-xs tabular-nums leading-[1.26]">
-				{carga ? `${carga.antes} → ${carga.despues}` : "—"}
-			</span>
-			<span
-				className={cn(
-					"shrink-0 rounded-full px-2 py-0.75 font-semibold text-[11px] tabular-nums leading-[1.26]",
-					sobrecarga
-						? "bg-danger-subtle text-danger-text"
-						: "bg-success-subtle text-success-text",
-				)}
-			>
-				+{cuentas.toLocaleString("es-GT")}
-			</span>
-		</li>
-	);
-}
+/* ── Paso 1 · De quién, por qué y cómo ────────────────────────────────── */
 
-/** Mini contador de la revisión (operativas · con compromiso · sin destino). */
-function Contador({
-	valor,
-	etiqueta,
-	tono = "neutral",
+/** «Créditos fuera de cobranza (N): ¿quién queda a cargo?» */
+function ResponsableFueraDeCobranza({
+	id,
+	p,
 }: {
-	valor: number;
-	etiqueta: string;
-	tono?: "neutral" | "danger";
+	id: string;
+	p: TrasladoVistaProps;
 }) {
+	const cuantos = p.especialesOrigen?.cuantos ?? null;
+	const nombre = p.origenInfo?.nombre ?? "El asesor";
 	return (
-		<div className="flex min-w-0 flex-col gap-0.5 rounded-xl bg-canvas px-3 py-2.5">
-			<span
-				className={cn(
-					"font-bold text-lg tabular-nums leading-[1.26]",
-					tono === "danger" && valor > 0 ? "text-danger-text" : "text-fg",
-				)}
-			>
-				{valor.toLocaleString("es-GT")}
-			</span>
-			<span className="text-[11px] text-fg-secondary leading-[1.26]">
-				{etiqueta}
-			</span>
+		<div
+			className={cn(
+				"flex flex-col gap-2 rounded-xl border p-3.5",
+				p.faltaResponsableEspecial && !p.destinoEspecial
+					? "border-warning-solid bg-warning-subtle/50"
+					: "border-line-subtle",
+			)}
+		>
+			<TituloSeccion htmlFor={id}>
+				Créditos fuera de cobranza
+				{cuantos ? ` (${cuantos.toLocaleString("es-GT")})` : ""}: ¿quién queda a
+				cargo?{" "}
+				<span className="font-normal text-fg-tertiary">
+					{p.requiereDestinoEspecial ? "(obligatorio)" : ""}
+				</span>
+			</TituloSeccion>
+			<p className="text-fg-secondary text-xs leading-[1.4]">
+				{p.requiereDestinoEspecial
+					? `${nombre} deja la empresa: sus créditos cancelados, caídos o pendientes de cancelación no pueden quedar a su nombre.`
+					: `${nombre} tiene créditos cancelados, caídos o pendientes de cancelación.`}{" "}
+				Como ya no se cobran ni tienen bucket, no entran en el reparto:
+				conservan su estado y solo cambia quién queda a cargo.
+			</p>
+			<SelectorAsesor
+				id={id}
+				value={p.destinoEspecial}
+				onChange={p.onDestinoEspecial}
+				asesores={p.candidatosEspecial}
+				disabled={p.ocupado}
+			/>
+			{p.faltaResponsableEspecial && !p.destinoEspecial ? (
+				<FieldMessage role="alert" variant="warning">
+					Elija quién queda a cargo para poder ver el reparto.
+				</FieldMessage>
+			) : null}
+			<Collapsible>
+				<DisparadorDesplegable>¿Qué créditos son estos?</DisparadorDesplegable>
+				<CollapsibleContent>
+					<ul className="mt-2 flex flex-col gap-1.5 text-xs leading-[1.35]">
+						{ESTADOS_FUERA.map((e) => (
+							<li key={e.estado}>
+								<span className="font-semibold text-fg">{e.estado}:</span>{" "}
+								<span className="text-fg-secondary">{e.descripcion}</span>
+							</li>
+						))}
+					</ul>
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }
 
-/* ── Paso 1 · Origen y forma de repartir ──────────────────────────────── */
-
 function PasoFormulario(p: TrasladoVistaProps) {
-	const [responsableAbierto, setResponsableAbierto] = useState(false);
 	// Ids únicos por instancia (el showcase pinta varias a la vez): «…-origen»,
 	// «…-modo-redistribucion», «…-destino-bucket-2», etc.
 	const uid = useId();
 	const id = (sufijo: string) => `traslado${uid}${sufijo}`;
+	// Solo si aplica: si el asesor se va de la empresa (obligatorio), si la
+	// vista previa dijo que tiene créditos fuera de cobranza o si ya se eligió.
 	const mostrarResponsable =
 		p.requiereDestinoEspecial ||
 		!!p.destinoEspecial ||
-		responsableAbierto ||
-		// cartera-back rechaza la vista previa si el origen tiene cuentas fuera
-		// del funnel y nadie las recibe: el campo queda a la vista para elegirlo.
-		!!p.errorPrevisualizar;
+		!!p.especialesOrigen ||
+		!!p.faltaResponsableEspecial;
+	// Créditos sueltos: en buckets que el origen no atiende (fuera de su pool).
+	const nombreOrigen = p.origenInfo?.nombre ?? "el asesor";
+	const { sueltos } = partirCarteraPorPool(
+		p.origenInfo?.porBucket ?? [],
+		p.origenInfo?.buckets ?? [],
+	);
+	const bucketsSueltos = sueltos.map((d) => d.bucket);
+	const creditosSueltos = sueltos.reduce((t, d) => t + d.cuentas, 0);
+	const bucketsUnico = p.bucketsDestinoUnico ?? p.bucketsOrigen;
+	const destinoElegido = p.destinos.find(
+		(d) => String(d.asesor.asesor_id) === p.destino,
+	);
+	const sueltosSinDestino = destinoElegido?.noCubre ?? [];
 
 	return (
 		<>
-			{/* Asesor de origen */}
+			{/* De quién es la cartera */}
 			{p.origenInfo ? (
 				<ResumenOrigen
 					info={p.origenInfo}
@@ -701,7 +743,7 @@ function PasoFormulario(p: TrasladoVistaProps) {
 			) : (
 				<div className="flex flex-col gap-2">
 					<TituloSeccion htmlFor={id("-origen")}>
-						Asesor de origen
+						Asesor que entrega la cartera
 					</TituloSeccion>
 					<SelectorAsesor
 						id={id("-origen")}
@@ -714,123 +756,7 @@ function PasoFormulario(p: TrasladoVistaProps) {
 				</div>
 			)}
 
-			{/* Forma de repartir */}
-			<fieldset className="flex flex-col gap-2" disabled={p.ocupado}>
-				<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
-					Distribución
-				</legend>
-				<RadioGroup
-					value={p.modo}
-					onValueChange={(v) => p.onModo(v as ModoTraslado)}
-					aria-label="Distribución"
-					className="grid gap-2 sm:grid-cols-3"
-				>
-					{MODOS.map((m) => (
-						<TarjetaModo
-							key={m.valor}
-							id={id(`-modo-${m.valor}`)}
-							valor={m.valor}
-							titulo={m.titulo}
-							detalle={m.detalle}
-							activo={p.modo === m.valor}
-						/>
-					))}
-				</RadioGroup>
-			</fieldset>
-
-			{/* A un solo asesor: tarjetas con la capacidad de cada candidato */}
-			{p.modo === "traslado_completo" ? (
-				<fieldset
-					className="flex flex-col gap-2"
-					disabled={p.ocupado || p.cargandoBucketsOrigen}
-				>
-					<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
-						Asignar a
-					</legend>
-					{p.cargandoBucketsOrigen ? (
-						<p className="text-fg-secondary text-sm">
-							Cargando buckets de la cartera…
-						</p>
-					) : p.destinos.length ? (
-						<RadioGroup
-							value={p.destino}
-							onValueChange={p.onDestino}
-							aria-label="Asesor de destino"
-							className="-m-1 max-h-72 gap-2 overflow-y-auto p-1"
-						>
-							{p.destinos.map((d) => (
-								<TarjetaDestino
-									key={d.asesor.asesor_id}
-									id={id(`-destino-${d.asesor.asesor_id}`)}
-									asesor={d.asesor}
-									capacidad={d.capacidad}
-									buckets={p.bucketsOrigen}
-									activo={p.destino === String(d.asesor.asesor_id)}
-								/>
-							))}
-						</RadioGroup>
-					) : (
-						<FieldMessage variant="warning">
-							{p.origen
-								? `Ningún asesor activo atiende ${listaBuckets(p.bucketsOrigen) || "todos los buckets de esta cartera"}.`
-								: "Seleccione un asesor de origen para ver quién puede recibir su cartera."}
-						</FieldMessage>
-					)}
-				</fieldset>
-			) : null}
-
-			{/* Destino por bucket */}
-			{p.modo === "destino_por_bucket" ? (
-				<fieldset className="flex flex-col gap-2.5" disabled={p.ocupado}>
-					<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
-						Destino por bucket
-					</legend>
-					{p.cargandoBucketsOrigen ? (
-						<p className="text-fg-secondary text-sm">
-							Cargando buckets de la cartera…
-						</p>
-					) : p.bucketsOrigen.length ? (
-						p.bucketsOrigen.map((bucket) => {
-							const b = aBucket(bucket);
-							const elegido = p.destinosPorBucket[bucket] ?? "";
-							return (
-								<div
-									key={bucket}
-									className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1"
-								>
-									<Label
-										htmlFor={id(`-destino-bucket-${bucket}`)}
-										className="mt-2.5"
-									>
-										{b ? <BucketBadge bucket={b} /> : `B${bucket}`}
-										<span className="sr-only">Destino de B{bucket}</span>
-									</Label>
-									<div className="flex min-w-0 flex-col gap-1">
-										<SelectorAsesor
-											id={id(`-destino-bucket-${bucket}`)}
-											value={elegido}
-											onChange={(v) => p.onDestinoBucket(bucket, v)}
-											asesores={p.candidatosPorBucket[bucket] ?? []}
-										/>
-										{elegido ? (
-											<PistaCapacidad
-												bucket={bucket}
-												capacidad={p.capacidadEnBucket(Number(elegido), bucket)}
-											/>
-										) : null}
-									</div>
-								</div>
-							);
-						})
-					) : (
-						<p className="text-fg-secondary text-sm">
-							Seleccione un asesor de origen para ver sus buckets.
-						</p>
-					)}
-				</fieldset>
-			) : null}
-
-			{/* Motivo en chips */}
+			{/* Motivo y nota */}
 			<fieldset className="flex flex-col gap-2" disabled={p.ocupado}>
 				<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
 					Motivo
@@ -851,10 +777,9 @@ function PasoFormulario(p: TrasladoVistaProps) {
 					))}
 				</div>
 			</fieldset>
-
 			<div className="flex flex-col gap-2">
 				<TituloSeccion htmlFor={id("-detalle")}>
-					Explicación{" "}
+					Nota para el historial{" "}
 					<span className="font-normal text-fg-tertiary">
 						{p.razon === "otro" ? "(obligatoria)" : "(opcional)"}
 					</span>
@@ -863,56 +788,194 @@ function PasoFormulario(p: TrasladoVistaProps) {
 					id={id("-detalle")}
 					maxLength={900}
 					rows={2}
-					placeholder="Contexto del traslado para el historial…"
+					placeholder={
+						p.razon === "otro"
+							? "Explique el motivo del traslado…"
+							: "Contexto para el historial de traslados…"
+					}
 					value={p.detalle}
 					disabled={p.ocupado}
 					onChange={(e) => p.onDetalle(e.target.value)}
 				/>
 			</div>
 
-			{/* Responsable de las cuentas sin bucket operativo (solo si aplica) */}
-			{mostrarResponsable ? (
-				<div className="flex flex-col gap-2">
-					<TituloSeccion htmlFor={id("-destino-especial")}>
-						Responsable de cuentas sin bucket operativo{" "}
-						<span className="font-normal text-fg-tertiary">
-							{p.requiereDestinoEspecial ? "(obligatorio)" : "(si aplica)"}
-						</span>
-					</TituloSeccion>
-					<SelectorAsesor
-						id={id("-destino-especial")}
-						value={p.destinoEspecial}
-						onChange={p.onDestinoEspecial}
-						asesores={p.candidatosEspecial}
-						disabled={p.ocupado}
-					/>
-					<p className="text-[11px] text-fg-tertiary leading-[1.35]">
-						Incobrables, cancelados, pendientes de cancelación y caídos:
-						conservan su estado y no reciben bucket; solo cambia el responsable.
-						Si el origen tiene alguna, debe elegir a quién pasan.
-					</p>
-				</div>
-			) : (
-				<Button
-					type="button"
-					variant="text"
-					size="sm"
-					className="-ml-2 w-fit"
-					disabled={p.ocupado}
-					onClick={() => setResponsableAbierto(true)}
+			{/* Cómo se reparte */}
+			<fieldset className="flex flex-col gap-2" disabled={p.ocupado}>
+				<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
+					¿Cómo se reparte?
+				</legend>
+				<RadioGroup
+					value={p.modo}
+					onValueChange={(v) => p.onModo(v as ModoTraslado)}
+					aria-label="Cómo se reparte"
+					className="grid gap-2 sm:grid-cols-3"
 				>
-					<Plus aria-hidden />
-					Responsable de cuentas sin bucket operativo
-				</Button>
-			)}
+					{MODOS.map((m) => (
+						<TarjetaOpcion
+							key={m.valor}
+							id={id(`-modo-${m.valor}`)}
+							valor={m.valor}
+							titulo={m.titulo}
+							detalle={m.detalle}
+							activo={p.modo === m.valor}
+							className="px-3 py-2.5 sm:flex-col sm:gap-1.5"
+						/>
+					))}
+				</RadioGroup>
+			</fieldset>
 
-			<div className="flex gap-2.5 rounded-xl bg-info-subtle p-3 text-info-text text-xs leading-[1.35]">
-				<Info aria-hidden className="mt-px size-4 shrink-0" />
-				<p>
-					Los compromisos conservan sus condiciones. Antes de confirmar,
-					revisará el reparto por asesor y bucket.
-				</p>
-			</div>
+			{/* Créditos sueltos: qué les pasa en cada forma de repartir. En «A un
+			    solo asesor», una vez elegido el destino manda el aviso de su tarjeta. */}
+			{sueltos.length &&
+			!p.cargandoBucketsOrigen &&
+			!(p.modo === "traslado_completo" && destinoElegido) ? (
+				<NotaModal
+					tono={p.modo === "traslado_completo" ? "warning" : "info"}
+					icono={p.modo === "traslado_completo" ? <TriangleAlert /> : <Info />}
+				>
+					{plural(creditosSueltos, "crédito está", "créditos están")} en{" "}
+					{listaBuckets(bucketsSueltos)}, que {nombreOrigen} no atiende.{" "}
+					{p.modo === "redistribucion"
+						? "Se reparten entre quienes sí atienden esos buckets."
+						: p.modo === "traslado_completo"
+							? "Solo se mueven si quien recibe atiende esos buckets; si no, el traslado no se puede confirmar."
+							: "Elija también quién los recibe."}
+				</NotaModal>
+			) : null}
+
+			{/* A un solo asesor: tarjetas con la capacidad de cada candidato */}
+			{p.modo === "traslado_completo" ? (
+				<fieldset
+					className="flex flex-col gap-2"
+					disabled={p.ocupado || p.cargandoBucketsOrigen}
+				>
+					<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
+						¿Quién la recibe?
+					</legend>
+					{p.cargandoBucketsOrigen ? (
+						<p className="text-fg-secondary text-sm">
+							Cargando los buckets de su cartera…
+						</p>
+					) : p.destinos.length ? (
+						<RadioGroup
+							value={p.destino}
+							onValueChange={p.onDestino}
+							aria-label="Asesor que recibe la cartera"
+							className="-m-1 max-h-72 gap-2 overflow-y-auto p-1"
+						>
+							{p.destinos.map((d) => (
+								<TarjetaDestino
+									key={d.asesor.asesor_id}
+									id={id(`-destino-${d.asesor.asesor_id}`)}
+									asesor={d.asesor}
+									capacidad={d.capacidad}
+									buckets={bucketsUnico}
+									noCubre={d.noCubre}
+									activo={p.destino === String(d.asesor.asesor_id)}
+								/>
+							))}
+						</RadioGroup>
+					) : (
+						<FieldMessage variant="warning">
+							{p.origen
+								? `Ningún asesor activo atiende ${listaBuckets(bucketsUnico) || "todos los buckets de esta cartera"}. Pruebe «Entre el equipo» o «Un asesor por bucket».`
+								: "Seleccione primero de quién es la cartera para ver quién puede recibirla."}
+						</FieldMessage>
+					)}
+					{destinoElegido && sueltosSinDestino.length ? (
+						<div className="flex flex-col items-start gap-1.5">
+							<FieldMessage variant="warning">
+								{destinoElegido.asesor.nombre} no atiende{" "}
+								{listaBuckets(sueltosSinDestino)}: esos créditos no se pueden
+								mover en este modo y el traslado no se podrá confirmar.
+							</FieldMessage>
+							{p.onUsarPorBucket ? (
+								<Button
+									type="button"
+									variant="text"
+									size="sm"
+									className="-ml-2"
+									onClick={p.onUsarPorBucket}
+								>
+									Elegir quién recibe cada bucket
+								</Button>
+							) : null}
+						</div>
+					) : null}
+				</fieldset>
+			) : null}
+
+			{/* Un asesor por bucket */}
+			{p.modo === "destino_por_bucket" ? (
+				<fieldset className="flex flex-col gap-2.5" disabled={p.ocupado}>
+					<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
+						¿Quién recibe cada bucket?
+					</legend>
+					{p.cargandoBucketsOrigen ? (
+						<p className="text-fg-secondary text-sm">
+							Cargando los buckets de su cartera…
+						</p>
+					) : p.bucketsOrigen.length ? (
+						p.bucketsOrigen.map((bucket) => {
+							const b = aBucket(bucket);
+							const elegido = p.destinosPorBucket[bucket] ?? "";
+							return (
+								<div
+									key={bucket}
+									className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1"
+								>
+									<Label
+										htmlFor={id(`-destino-bucket-${bucket}`)}
+										className="mt-2.5"
+									>
+										{b ? <BucketBadge bucket={b} /> : `B${bucket}`}
+										<span className="sr-only">Quién recibe B{bucket}</span>
+									</Label>
+									<div className="flex min-w-0 flex-col gap-1">
+										<SelectorAsesor
+											id={id(`-destino-bucket-${bucket}`)}
+											value={elegido}
+											onChange={(v) => p.onDestinoBucket(bucket, v)}
+											asesores={p.candidatosPorBucket[bucket] ?? []}
+										/>
+										{bucketsSueltos.includes(bucket) ? (
+											<p className="text-[11px] text-warning-text leading-[1.26]">
+												Fuera del pool de {nombreOrigen} ·{" "}
+												{plural(
+													sueltos.find((d) => d.bucket === bucket)?.cuentas ??
+														0,
+													"crédito suelto",
+													"créditos sueltos",
+												)}
+											</p>
+										) : null}
+										{elegido ? (
+											<PistaCapacidad
+												bucket={bucket}
+												capacidad={p.capacidadEnBucket(Number(elegido), bucket)}
+											/>
+										) : null}
+									</div>
+								</div>
+							);
+						})
+					) : (
+						<p className="text-fg-secondary text-sm">
+							Seleccione primero de quién es la cartera para ver sus buckets.
+						</p>
+					)}
+				</fieldset>
+			) : null}
+
+			{/* Créditos fuera de cobranza (solo si aplica) */}
+			{mostrarResponsable ? (
+				<ResponsableFueraDeCobranza id={id("-destino-especial")} p={p} />
+			) : null}
+
+			<NotaModal tono="info" icono={<Info />}>
+				Las promesas de pago vigentes pasan con sus condiciones. Antes de
+				confirmar verá cómo queda el reparto.
+			</NotaModal>
 
 			{p.errorFormulario ? (
 				<FieldMessage variant="help">{p.errorFormulario}</FieldMessage>
@@ -934,17 +997,79 @@ function PasoFormulario(p: TrasladoVistaProps) {
 					loading={p.previsualizando}
 					onClick={p.onRevisar}
 				>
-					{p.previsualizando ? "Calculando…" : "Revisar reparto"}
+					{p.previsualizando ? "Calculando…" : "Ver reparto"}
 				</Button>
 			</div>
 		</>
 	);
 }
 
-/* ── Paso 2 · Revisión del reparto ────────────────────────────────────── */
+/* ── Paso 2 · Redistribución de cartera ───────────────────────────────── */
+
+/** Una fila por asesor que recibe: «Carlos Ramírez · 28 → 43 · +15». */
+function filasPorAsesor(
+	preview: PreviewTraslado,
+	operativas: AsignacionPreview[],
+	nombre: (id: number) => string,
+): FilaReparto[] {
+	const porAsesor = new Map<
+		number,
+		{
+			cuentas: number;
+			compromisos: number;
+			buckets: { bucket: number | null; cuentas: number }[];
+		}
+	>();
+	for (const r of resumirTraslado(operativas)) {
+		const fila = porAsesor.get(r.asesorId) ?? {
+			cuentas: 0,
+			compromisos: 0,
+			buckets: [],
+		};
+		fila.cuentas += r.cuentas;
+		fila.compromisos += r.compromisos;
+		fila.buckets.push({ bucket: r.bucket, cuentas: r.cuentas });
+		porAsesor.set(r.asesorId, fila);
+	}
+	return [...porAsesor]
+		.map(([asesorId, f]) => {
+			const carga = preview.carga.filter((c) => c.asesorId === asesorId);
+			const recibe = new Set(f.buckets.map((b) => b.bucket));
+			const excedidos = carga.filter(
+				(c) => recibe.has(c.bucket) && c.despues > c.capacidad,
+			);
+			const antes = carga.reduce((t, c) => t + c.antes, 0);
+			const despues = carga.length
+				? carga.reduce((t, c) => t + c.despues, 0)
+				: f.cuentas;
+			const partes = [
+				f.buckets
+					.map((b) =>
+						b.bucket === null
+							? `sin bucket +${b.cuentas}`
+							: `B${b.bucket} +${b.cuentas}`,
+					)
+					.join(" · "),
+				f.compromisos > 0
+					? plural(f.compromisos, "con promesa de pago", "con promesa de pago")
+					: null,
+				excedidos.length
+					? `supera su capacidad en ${listaBuckets(excedidos.map((c) => c.bucket))}`
+					: null,
+			].filter(Boolean);
+			return {
+				clave: asesorId,
+				nombre: nombre(asesorId),
+				antes: carga.length ? antes : 0,
+				despues,
+				detalle: partes.join(" · "),
+				alerta: excedidos.length > 0,
+			};
+		})
+		.sort((a, b) => b.despues - b.antes - (a.despues - a.antes));
+}
 
 function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
-	const [todosReceptores, setTodosReceptores] = useState(false);
 	const { preview } = p;
 	const nombre = (id: number) => p.nombres[id] ?? String(id);
 	const asignaciones = preview.asignaciones as AsignacionPreview[];
@@ -952,43 +1077,42 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 	const operativas = asignaciones.filter((a) => !a.estadoEspecial);
 	const especiales = asignaciones.filter((a) => a.estadoEspecial);
 	const gruposEspeciales = agruparCuentasEspeciales(especiales);
-	const resumen = resumirTraslado(operativas);
-	const receptores = new Set(resumen.map((r) => r.asesorId)).size;
-	const visibles = todosReceptores
-		? resumen
-		: resumen.slice(0, RECEPTORES_VISIBLES);
-	const ocultos = resumen.length - visibles.length;
+	const filas = filasPorAsesor(preview, operativas, nombre);
+	const receptores = new Set(asignaciones.map((a) => a.asesorNuevoId)).size;
+	const promesas = operativas.filter((a) => a.prioridad === 0).length;
 	const totalPaginas = Math.max(1, Math.ceil(operativas.length / POR_PAGINA));
 	const vence = new Date(preview.venceEn).toLocaleTimeString("es-GT", {
 		timeZone: "America/Guatemala",
+		hour: "2-digit",
+		minute: "2-digit",
 	});
+	const responsablesEspeciales = [
+		...new Set(especiales.map((c) => c.asesorNuevoId)),
+	];
+	// «A un solo asesor» con créditos en buckets que el destino no atiende
+	// (p. ej. los sueltos del origen): cartera-back los bloquea todos.
+	const bucketsBloqueados = [
+		...new Set(preview.bloqueos.map((b) => b.bucket)),
+	].sort((a, b) => a - b);
+	const destinoNoCubre =
+		p.modo === "traslado_completo" &&
+		preview.bloqueos.length > 0 &&
+		preview.bloqueos.every((b) => b.razon === "destino_no_elegible");
 
 	return (
 		<>
-			<p className="-mt-2.5 text-fg-secondary text-xs leading-[1.3]">
+			<p className="-mt-2 text-fg-secondary text-sm leading-[1.3]">
 				Cartera de {nombre(Number(p.origen))} ·{" "}
-				{plural(preview.asignaciones.length, "cuenta", "cuentas")} →{" "}
+				{plural(asignaciones.length, "crédito", "créditos")} <Flecha />
+				<span className="sr-only">entre</span>{" "}
 				{plural(receptores, "asesor", "asesores")}
 			</p>
-
-			<div className="grid grid-cols-3 gap-2">
-				<Contador valor={operativas.length} etiqueta="operativas" />
-				<Contador
-					valor={operativas.filter((a) => a.prioridad === 0).length}
-					etiqueta="con compromiso vigente"
-				/>
-				<Contador
-					valor={excluidos.length}
-					etiqueta="sin destino"
-					tono="danger"
-				/>
-			</div>
 
 			{p.vencido ? (
 				<Aviso
 					tono="danger"
-					titulo="La previsualización venció."
-					descripcion="Calcule el reparto nuevamente para no aplicar una distribución desactualizada."
+					titulo="Este reparto ya no vale"
+					descripcion="Pasaron más de 10 minutos desde que se calculó y la cartera pudo cambiar. Calcúlelo de nuevo para confirmar."
 				>
 					<Button
 						size="sm"
@@ -1002,41 +1126,53 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 					</Button>
 				</Aviso>
 			) : (
-				<div className="flex gap-2.5 rounded-xl bg-info-subtle p-3 text-info-text text-xs leading-[1.35]">
-					<Clock aria-hidden className="mt-px size-4 shrink-0" />
-					<p>
-						Puede confirmar este reparto hasta las{" "}
-						<span className="font-semibold">{vence}</span> (Guatemala). Después
-						deberá calcularlo de nuevo.
-					</p>
-				</div>
+				<NotaModal tono="info" icono={<Clock />}>
+					{promesas > 0
+						? `${plural(promesas, "crédito tiene", "créditos tienen")} promesa de pago vigente: pasan con sus condiciones. `
+						: ""}
+					Puede confirmar este reparto hasta las{" "}
+					<span className="font-semibold">{vence}</span> (hora de Guatemala).
+				</NotaModal>
 			)}
 
 			{preview.bloqueos.length > 0 ? (
 				<Aviso
 					tono="danger"
-					titulo={`No se puede confirmar: ${plural(preview.bloqueos.length, "cuenta", "cuentas")} sin destino válido.`}
+					titulo={`No se puede confirmar: ${plural(preview.bloqueos.length, "crédito no tiene quién lo reciba", "créditos no tienen quién los reciba")}`}
+					descripcion={
+						destinoNoCubre
+							? `Están en ${listaBuckets(bucketsBloqueados)}, que ${nombre(Number(p.destino))} no atiende. En «A un solo asesor» no se pueden mover, y mientras tanto no se puede confirmar. Elija quién recibe esos buckets; ${nombre(Number(p.destino))} se queda con el resto.`
+							: p.modo === "redistribucion"
+								? "Ningún otro asesor activo atiende ese bucket. Agregue a alguien a ese bucket y vuelva a calcular el reparto."
+								: "Vuelva atrás y elija otro destino para esos buckets."
+					}
 				>
 					<ul className="flex max-h-36 flex-col gap-1 overflow-y-auto pl-6 text-fg-secondary text-xs leading-[1.3]">
 						{preview.bloqueos.map((b) => (
 							<li key={b.creditoId}>
-								Crédito {b.creditoId} · B{b.bucket}:{" "}
-								{b.razon === "destino_no_elegible"
-									? "El destino no cubre este bucket"
-									: b.razon === "destino_no_configurado"
-										? "No se eligió destino para este bucket"
-										: "No hay otro asesor elegible"}
+								Crédito {b.creditoId} · {razonBloqueo(b.razon, b.bucket)}
 							</li>
 						))}
 					</ul>
+					{destinoNoCubre && p.onUsarPorBucket ? (
+						<Button
+							size="sm"
+							variant="outline"
+							className="w-fit bg-surface"
+							disabled={p.ocupado}
+							onClick={p.onUsarPorBucket}
+						>
+							Elegir quién recibe cada bucket
+						</Button>
+					) : null}
 				</Aviso>
 			) : null}
 
 			{excluidos.length > 0 ? (
 				<Aviso
 					tono="danger"
-					titulo="Créditos sin destino"
-					descripcion="No se trasladan ni se puede confirmar hasta asignar bucket operativo a estas cuentas."
+					titulo={`No se puede confirmar: ${plural(excluidos.length, "crédito no tiene", "créditos no tienen")} bucket`}
+					descripcion="Están en convenio u otro estado sin bucket, y este traslado no los puede mover. Mientras sigan en esta cartera no se puede confirmar."
 				>
 					<ul className="flex max-h-48 flex-col divide-y divide-danger-solid/15 overflow-y-auto pl-6">
 						{excluidos.map((e) => (
@@ -1062,11 +1198,33 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 				</Aviso>
 			) : null}
 
+			{/* Quién recibe: antes → después +N */}
+			{asignaciones.length === 0 ? (
+				<p className="text-fg-secondary text-sm">
+					Esta cartera no tiene créditos para trasladar.
+				</p>
+			) : filas.length > 0 ? (
+				<ListaReparto filas={filas} />
+			) : null}
+
 			{especiales.length > 0 ? (
 				<Aviso
-					tono="warning"
-					titulo="Cuentas sin bucket operativo"
-					descripcion="Cambian de responsable, conservan su estado y no suman a la carga ni a la capacidad."
+					tono="neutral"
+					titulo={
+						<span className="inline-flex flex-wrap items-center gap-x-1.5">
+							Créditos fuera de cobranza ({especiales.length})
+							<ArrowRight
+								aria-label="quedan a cargo de"
+								className="inline size-3.5 text-fg-tertiary"
+							/>
+							{responsablesEspeciales.map(nombre).join(", ")}
+							<InfoTooltip label="Qué son los créditos fuera de cobranza">
+								Cancelados, caídos o pendientes de cancelación. Ya no se cobran
+								ni tienen bucket: no cuentan en la carga ni en la capacidad.
+							</InfoTooltip>
+						</span>
+					}
+					descripcion="Conservan su estado; solo cambia quién queda a cargo."
 				>
 					<ul className="flex flex-col gap-1.5 pl-6">
 						{gruposEspeciales.map((g) => (
@@ -1078,12 +1236,7 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 									<span className="font-semibold">
 										{etiquetaEstado(g.estado)}
 									</span>{" "}
-									· {plural(g.cuentas, "cuenta", "cuentas")}{" "}
-									<ArrowRight
-										aria-label="pasan a"
-										className="inline size-3 text-fg-tertiary"
-									/>{" "}
-									{nombre(g.asesorId)}
+									· {plural(g.cuentas, "crédito", "créditos")}
 								</span>
 								<span className="text-[11px] text-fg-secondary leading-[1.26]">
 									{descripcionEstadoEspecial(g.estado)}
@@ -1096,7 +1249,7 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 							Ver {plural(especiales.length, "crédito", "créditos")}
 						</DisparadorDesplegable>
 						<CollapsibleContent>
-							<ul className="mt-2 flex max-h-60 flex-col divide-y divide-warning-solid/20 overflow-y-auto rounded-lg bg-surface px-3">
+							<ul className="mt-2 flex max-h-60 flex-col divide-y divide-divider overflow-y-auto rounded-lg bg-surface px-3">
 								{especiales.map((c) => (
 									<li
 										key={c.creditoId}
@@ -1121,41 +1274,6 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 						</CollapsibleContent>
 					</Collapsible>
 				</Aviso>
-			) : null}
-
-			{/* Receptores: antes → después +N */}
-			{asignaciones.length === 0 ? (
-				<p className="text-fg-secondary text-sm">
-					No hay cuentas disponibles para trasladar.
-				</p>
-			) : resumen.length > 0 ? (
-				<div className="flex flex-col">
-					<ul className="flex flex-col divide-y divide-divider">
-						{visibles.map((r) => (
-							<FilaReceptor
-								key={`${r.bucket}:${r.asesorId}`}
-								nombre={nombre(r.asesorId)}
-								bucket={r.bucket}
-								cuentas={r.cuentas}
-								compromisos={r.compromisos}
-								carga={preview.carga.find(
-									(c) => c.bucket === r.bucket && c.asesorId === r.asesorId,
-								)}
-							/>
-						))}
-					</ul>
-					{ocultos > 0 || todosReceptores ? (
-						<button
-							type="button"
-							onClick={() => setTodosReceptores((v) => !v)}
-							className="w-fit cursor-pointer rounded-sm text-[11px] text-fg-tertiary leading-[1.26] outline-none hover:text-fg-secondary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-						>
-							{todosReceptores
-								? "Ver menos"
-								: `y ${plural(ocultos, "fila", "filas")} más…`}
-						</button>
-					) : null}
-				</div>
 			) : null}
 
 			{/* Detalle por crédito (paginado de 25 en 25) */}
@@ -1190,7 +1308,7 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 													{a.asesorAnteriorId
 														? nombre(a.asesorAnteriorId)
 														: "Sin asesor"}{" "}
-													→{" "}
+													<Flecha className="size-3" />{" "}
 													<span className="font-semibold text-fg">
 														{nombre(a.asesorNuevoId)}
 													</span>
@@ -1203,14 +1321,14 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 														kind="chip"
 														className="px-2 py-0.5 text-[11px]"
 													>
-														Compromiso
+														Promesa de pago
 													</CrmPill>
 												) : null}
 												{b ? (
 													<BucketBadge bucket={b} className="px-1 py-0.5" />
 												) : (
 													<span className="text-[11px] text-fg-tertiary">
-														Sin bucket operativo
+														Sin bucket
 													</span>
 												)}
 											</span>
@@ -1241,8 +1359,7 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 					Atrás
 				</Button>
 				<Button disabled={!p.puedeConfirmar} onClick={p.onConfirmar}>
-					Confirmar {preview.asignaciones.length.toLocaleString("es-GT")}{" "}
-					{preview.asignaciones.length === 1 ? "cuenta" : "cuentas"}
+					Confirmar traslado
 				</Button>
 			</div>
 		</>
@@ -1253,33 +1370,39 @@ function PasoRevision(p: TrasladoVistaProps & { preview: PreviewTraslado }) {
 
 function PasoResultado({
 	resultado,
+	modo,
 	nombreOrigen,
 	onListo,
 }: {
-	resultado: { cuentas: number; operacionId: string };
+	resultado: NonNullable<TrasladoVistaProps["resultado"]>;
+	modo: ModoTraslado;
 	nombreOrigen: string | null;
 	onListo: () => void;
 }) {
 	return (
-		<output className="flex min-w-0 flex-col items-center gap-3.5 py-2 text-center">
-			<span className="flex size-16 items-center justify-center rounded-full bg-success-subtle text-success-solid">
-				<Check aria-hidden className="size-8" strokeWidth={3} />
-			</span>
-			<h2 className={cn(dialogTitleClassName, "text-xl")}>
-				Traslado confirmado
-			</h2>
-			<p className="text-fg-secondary text-sm leading-[1.35]">
-				{plural(resultado.cuentas, "cuenta trasladada", "cuentas trasladadas")}
-				{nombreOrigen ? ` de la cartera de ${nombreOrigen}` : ""}.
+		<ExitoModal
+			titulo={
+				modo === "traslado_completo"
+					? "Cartera trasladada"
+					: "Cartera redistribuida"
+			}
+			onListo={onListo}
+			nota="Queda en el historial de traslados."
+		>
+			<p>
+				{resultado.cuentas === 1
+					? "Se trasladó 1 crédito"
+					: `Se trasladaron ${resultado.cuentas.toLocaleString("es-GT")} créditos`}
+				{nombreOrigen ? ` de la cartera de ${nombreOrigen}` : ""}
+				{resultado.receptores
+					? ` a ${plural(resultado.receptores, "asesor", "asesores")}`
+					: ""}
+				.
 			</p>
-			<p className="max-w-full rounded-lg bg-brand-subtle px-3.5 py-2.5 font-medium text-brand text-xs leading-[1.35]">
-				Operación <span className="break-all">{resultado.operacionId}</span> ·
-				queda en el historial de traslados.
+			<p className="mt-1 break-all text-fg-tertiary text-xs">
+				Operación {resultado.operacionId}
 			</p>
-			<Button className="mt-1 min-w-28" onClick={onListo}>
-				Listo
-			</Button>
-		</output>
+		</ExitoModal>
 	);
 }
 
@@ -1291,6 +1414,7 @@ export function TrasladoVista(p: TrasladoVistaProps) {
 		return (
 			<PasoResultado
 				resultado={p.resultado}
+				modo={p.modo}
 				nombreOrigen={p.origenInfo?.nombre ?? null}
 				onListo={p.onListo}
 			/>
@@ -1302,7 +1426,7 @@ export function TrasladoVista(p: TrasladoVistaProps) {
 	return (
 		<div className="flex min-w-0 flex-col gap-4">
 			<h2 className={cn(dialogTitleClassName, "pr-10")}>
-				{revision ? "Revisión del reparto" : "Trasladar cartera"}
+				{revision ? "Redistribución de cartera" : "Trasladar cartera"}
 			</h2>
 			{p.cargando || p.errorCarga ? (
 				<EstadoConsulta error={p.errorCarga} retry={p.onReintentar} />

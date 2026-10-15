@@ -4,6 +4,7 @@ import {
 	LayoutList,
 	TriangleAlert,
 	UserCheck,
+	UserMinus,
 	UserRound,
 	UserX,
 } from "lucide-react";
@@ -107,6 +108,8 @@ export type DetalleAsesorVistaProps = {
 	onReactivar?: () => void;
 	/** La reactivación está en curso. */
 	reactivando?: boolean;
+	/** Abre «Dar de baja» aquí mismo (Figma «05 · Alta y Baja de Asesor»). */
+	onDarDeBaja?: () => void;
 };
 
 export function EstadoAsesorChip({
@@ -190,6 +193,7 @@ export function DetalleAsesorVista({
 	onMarcarAusente,
 	onReactivar,
 	reactivando,
+	onDarDeBaja,
 }: DetalleAsesorVistaProps) {
 	const enlaces = enlacesAsesor(asesorId);
 	const asesor = carga.tipo === "listo" ? carga.asesor : null;
@@ -319,6 +323,12 @@ export function DetalleAsesorVista({
 									Ver sus casos
 								</EnlaceDestino>
 							</Button>
+							{onDarDeBaja ? (
+								<Button variant="outline" size="sm" onClick={onDarDeBaja}>
+									<UserMinus aria-hidden />
+									Dar de baja
+								</Button>
+							) : null}
 						</div>
 					) : null}
 				</div>

@@ -11,6 +11,8 @@
  *   ?accion=trasladar|ausente&asesor=<asesor_id de cartera>
  *                                               abre «Trasladar cartera» o
  *                                               «Marcar ausente» con el asesor elegido
+ *   ?accion=alta                                abre «Crear asesor»
+ *   ?accion=baja&asesor=<asesor_id de cartera>  abre «Dar de baja» de ese asesor
  *
  * Los valores por defecto no se escriben en la URL.
  */
@@ -37,7 +39,12 @@ export const SECCIONES_HISTORIAL = [
 ] as const;
 export type SeccionHistorial = (typeof SECCIONES_HISTORIAL)[number];
 
-export const ACCIONES_EQUIPO = ["trasladar", "ausente"] as const;
+export const ACCIONES_EQUIPO = [
+	"trasladar",
+	"ausente",
+	"alta",
+	"baja",
+] as const;
 export type AccionEquipo = (typeof ACCIONES_EQUIPO)[number];
 
 export type EquipoSearch = {

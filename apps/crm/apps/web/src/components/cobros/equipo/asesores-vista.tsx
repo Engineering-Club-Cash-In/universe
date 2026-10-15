@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, EllipsisVertical, UserMinus } from "lucide-react";
 import type * as React from "react";
 import {
 	type Destino,
@@ -8,6 +8,12 @@ import { type BucketAsesor, CardAsesor } from "@/components/ds/card-asesor";
 import { CrmPill } from "@/components/ds/cards-credito";
 import { FilterChip } from "@/components/ds/cartera-chips";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -31,7 +37,9 @@ import type { GrupoEquipo } from "./search";
  *
  * Al hacer clic en una tarjeta se abre el Detalle del asesor
  * (`/cobros/equipo/<asesor_id>`). En la tarjeta de un asesor ausente,
- * «Reactivar» cancela su cobertura vigente (lo confirma el contenedor).
+ * «Reactivar» cancela su cobertura vigente (lo confirma el contenedor). El
+ * menú «⋯» de la tarjeta tiene «Dar de baja» (Figma «05 · Alta y Baja de
+ * Asesor»).
  */
 
 export type FilaAsesorEquipo = {
@@ -63,6 +71,8 @@ export type AsesoresVistaProps = {
 	/** Reactivar a un asesor ausente (cancela su cobertura vigente). */
 	onReactivar?: (asesorId: number) => void;
 	reactivandoId?: number | null;
+	/** «Dar de baja» del menú «⋯» de la tarjeta (sin él no hay menú). */
+	onDarDeBaja?: (asesorId: number) => void;
 	/** Día del último cierre de agenda («06/10/2026»). */
 	fechaAgenda: string | null;
 	/** Días que mide la contactabilidad. */
@@ -109,14 +119,45 @@ export function resumenEquipo(
 	return partes.join(" · ");
 }
 
+/** Menú «⋯» de la tarjeta: queda sobre el enlace que la cubre (z-10). */
+function MenuTarjeta({
+	nombre,
+	onDarDeBaja,
+}: {
+	nombre: string;
+	onDarDeBaja: () => void;
+}) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					aria-label={`Más acciones para ${nombre}`}
+				>
+					<EllipsisVertical aria-hidden />
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end">
+				<DropdownMenuItem variant="destructive" onSelect={onDarDeBaja}>
+					<UserMinus aria-hidden />
+					Dar de baja
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
 function TarjetaAsesor({
 	fila,
 	onReactivar,
 	reactivando,
+	onDarDeBaja,
 }: {
 	fila: FilaAsesorEquipo;
 	onReactivar?: (asesorId: number) => void;
 	reactivando: boolean;
+	onDarDeBaja?: (asesorId: number) => void;
 }) {
 	const bajaContactabilidad =
 		fila.contactabilidad !== null &&
@@ -131,9 +172,17 @@ function TarjetaAsesor({
 				nombre={fila.nombre}
 				rol={etiquetaNivel(fila.nivel)}
 				estadoChip={
-					<CrmPill kind="chip" tone={TONO_ESTADO_ASESOR[fila.estado]}>
-						{ESTADO_ASESOR_LABEL[fila.estado]}
-					</CrmPill>
+					<div className="flex shrink-0 items-center gap-1">
+						<CrmPill kind="chip" tone={TONO_ESTADO_ASESOR[fila.estado]}>
+							{ESTADO_ASESOR_LABEL[fila.estado]}
+						</CrmPill>
+						{onDarDeBaja ? (
+							<MenuTarjeta
+								nombre={fila.nombre}
+								onDarDeBaja={() => onDarDeBaja(fila.asesorId)}
+							/>
+						) : null}
+					</div>
 				}
 				creditosAsignados={fila.creditos ?? 0}
 				distribucion={fila.distribucion}
@@ -212,6 +261,7 @@ export function AsesoresVista({
 	onReintentar,
 	onReactivar,
 	reactivandoId,
+	onDarDeBaja,
 	fechaAgenda,
 	diasContactabilidad,
 	avisos = [],
@@ -278,6 +328,7 @@ export function AsesoresVista({
 						fila={f}
 						onReactivar={onReactivar}
 						reactivando={reactivandoId === f.asesorId}
+						onDarDeBaja={onDarDeBaja}
 					/>
 				))}
 			</div>

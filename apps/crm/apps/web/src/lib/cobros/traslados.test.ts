@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import {
+	bucketsParaDestinoUnico,
+	partirCarteraPorPool,
 	puedeRecibirTodosBuckets,
 	resumirTraslado,
 	validarFormularioTraslado,
@@ -97,5 +99,40 @@ test("agrupa cuentas y compromisos por receptor y bucket sin mezclar buckets", (
 	).toEqual([
 		{ bucket: 1, asesorId: 2, cuentas: 2, compromisos: 1 },
 		{ bucket: 2, asesorId: 2, cuentas: 1, compromisos: 1 },
+	]);
+});
+
+test("separa los créditos sueltos (fuera del pool del origen) de su cartera", () => {
+	// Caren: pool B0; el motor subió un crédito a B3 y otro a B5.
+	const caren = [
+		{ bucket: 0, cuentas: 529 },
+		{ bucket: 3, cuentas: 1 },
+		{ bucket: 5, cuentas: 1 },
+		{ bucket: 1, cuentas: 0 },
+	];
+	expect(partirCarteraPorPool(caren, [0, 1])).toEqual({
+		propios: [{ bucket: 0, cuentas: 529 }],
+		sueltos: [
+			{ bucket: 3, cuentas: 1 },
+			{ bucket: 5, cuentas: 1 },
+		],
+	});
+	// Sin pool conocido todo es propio.
+	expect(partirCarteraPorPool(caren, []).sueltos).toEqual([]);
+});
+
+test("«A un solo asesor» exige los buckets del pool del origen, no los de los sueltos", () => {
+	const caren = [
+		{ bucket: 0, cuentas: 529 },
+		{ bucket: 3, cuentas: 1 },
+		{ bucket: 5, cuentas: 1 },
+	];
+	const requeridos = bucketsParaDestinoUnico(caren, [0]);
+	expect(requeridos).toEqual([0]);
+	// Wilson (pool B0) puede recibirla.
+	expect(puedeRecibirTodosBuckets(requeridos, [0])).toBe(true);
+	// Solo sueltos: se exigen los de sus créditos.
+	expect(bucketsParaDestinoUnico([{ bucket: 4, cuentas: 2 }], [0])).toEqual([
+		4,
 	]);
 });

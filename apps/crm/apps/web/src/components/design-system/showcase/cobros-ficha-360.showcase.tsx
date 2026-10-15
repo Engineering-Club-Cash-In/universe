@@ -1,17 +1,12 @@
-import {
-	Briefcase,
-	Clock,
-	CreditCard,
-	History,
-	Home,
-	LockOpen,
-	Mail,
-	Phone,
-	Users,
-} from "lucide-react";
+import { Briefcase, Home, LockOpen, Mail, Phone, Users } from "lucide-react";
 import * as React from "react";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import { SolicitarDocumentoVista } from "@/components/cobros/ficha/documentos-caso";
+import {
+	EnviarCorreoEstadoCuentaVista,
+	EstadoCuentaAccionesBarra,
+	VistaPreviaEstadoCuentaVista,
+} from "@/components/cobros/ficha/estado-cuenta-acciones";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -22,7 +17,6 @@ import {
 	AsistenteIA,
 	CuotaPlanFila,
 	DocumentosFicha,
-	HistorialGestiones,
 	PendienteBackend,
 	ResumenCuentaCard,
 	RotuloSeccion,
@@ -35,6 +29,7 @@ import {
 	FilaSeguimiento,
 	FranjaSeguimiento,
 } from "@/components/cobros/ficha/ficha-resumen";
+import { HistorialUnificado } from "@/components/cobros/ficha/historial-unificado";
 import { NotificacionesGpsVista } from "@/components/cobros/gps-eventos-historial";
 import { UbicacionesClaveLista } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { UbicacionesFrecuentesVista } from "@/components/cobros/ubicaciones/frecuentes-vista";
@@ -71,6 +66,7 @@ import { Button } from "@/components/ui/button";
 import { dialogPanelClassName } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { historialDemo } from "./_historial-unificado-demo";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
 export const meta: ShowcaseMeta = {
@@ -78,7 +74,7 @@ export const meta: ShowcaseMeta = {
 	title: "Cobros · Ficha 360",
 	figma: "CRM Ventas › Asesor Junior › 04 · Consulta · Ficha 360 (1887:4118)",
 	description:
-		"La Ficha 360 rediseñada (/cobros/$id) con datos de ejemplo: encabezado, Resumen, Contacto (con un correo largo), Ubicaciones, Edición (direcciones editables), Historial, Estado de cuenta, Documentos (con el modal de solicitud) y Asistente IA. Los bloques sin backend se ven como «Pronto».",
+		"La Ficha 360 rediseñada (/cobros/$id) con datos de ejemplo: encabezado, Resumen, Contacto (con un correo largo), Ubicaciones, Edición (direcciones editables), Historial (una sola línea de tiempo con chips de filtro, actual e histórico), Estado de cuenta, Documentos (con el modal de solicitud) y Asistente IA. Los bloques sin backend se ven como «Pronto».",
 };
 
 function Marco({ children }: { children: React.ReactNode }) {
@@ -132,7 +128,7 @@ function Encabezado({ tab = "resumen" }: { tab?: string }) {
 			<Tabs value={tab}>
 				<TabsList>
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
-					<TabsTrigger value="historial" count={8}>
+					<TabsTrigger value="historial" count={9}>
 						Historial
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
@@ -556,90 +552,44 @@ export default function CobrosFicha360Showcase() {
 				</Marco>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Historial actual">
+			<ShowcaseGroup title="Historial · actual (una sola línea de tiempo con chips)">
 				<Marco>
 					<Encabezado tab="historial" />
-					<SeccionHistorial
-						titulo="Historial del crédito"
-						conteo={3}
-						icono={<Clock />}
-						descripcion="Llamadas, mensajes y visitas registradas por el equipo"
-					>
-						<HistorialGestiones
-							items={[
-								{
-									id: "1",
-									cuando: "20 jul 2026 · 10:30",
-									// W1: entrante, con quién se habló y el teléfono.
-									titulo: "Llamada entrante",
-									badge: (
-										<Badge className="bg-green-100 text-green-800">
-											Contactado
-										</Badge>
-									),
-									subtitulo: "Por: Caren Rivera",
-									contacto: {
-										participante: "Habló con: Juan Pérez López (codeudor)",
-										telefono: "5555-1234",
-									},
-									tono: "logrado",
-									nota: "Cliente perdió el empleo temporalmente; retomará pagos en agosto.",
-									detalles: [
-										{
-											label: "Seguimiento programado",
-											valor: "5 ago 2026 · 10:30 · por WhatsApp",
-										},
-										{ label: "Próximo paso", valor: "Llamar el 5 de agosto" },
-									],
-								},
-								{
-									id: "2",
-									cuando: "08 jul 2026 · 11:05",
-									titulo: "Llamada",
-									badge: (
-										<Badge className="bg-yellow-100 text-yellow-800">
-											No Contesta
-										</Badge>
-									),
-									subtitulo: "Por: Caren Rivera",
-									contacto: {
-										participante: "Intentó con: Ana Contreras (titular)",
-										telefono: "4444-9876",
-									},
-									tono: "sin-contacto",
-								},
-								{
-									id: "3",
-									cuando: "28 jun 2026 · 09:00",
-									titulo: "WhatsApp",
-									badge: (
-										<Badge className="bg-red-100 text-red-800">
-											Rechaza Pagar
-										</Badge>
-									),
-									subtitulo: "Por: Caren Rivera",
-									tono: "fallido",
-									nota: "Prefiere ser contactado después de las 6:00 pm.",
-								},
-							]}
-						/>
-					</SeccionHistorial>
-					<SeccionHistorial
-						titulo="Vida del crédito"
-						conteo={null}
-						icono={<History />}
-						descripcion="Entradas y salidas de bucket, reestructuras y convenios"
-						estado="error"
-						onReintentar={() => undefined}
+					<HistorialUnificado datos={historialDemo()} />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Historial · histórico (antes del ingreso al bucket actual)">
+				<Marco>
+					<HistorialUnificado
+						datos={historialDemo()}
+						periodoInicial="historico"
 					/>
-					<SeccionHistorial
-						titulo="Links de pago"
-						conteo={0}
-						icono={<CreditCard />}
-						descripcion="Todos los links Págalo generados para este crédito"
-						estado="vacio"
-						vacio="Sin links de pago generados para este crédito."
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Historial · filtro Pagos, fuentes con error o cargando y «Cargar más»">
+				<Marco>
+					<HistorialUnificado
+						datos={historialDemo({ conAvisos: true })}
+						filtroInicial="pagos"
 					/>
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Historial · filtro sin registros y cargando">
+				<Marco>
+					<HistorialUnificado
+						datos={historialDemo()}
+						periodoInicial="historico"
+						filtroInicial="links"
+					/>
+					<HistorialUnificado datos={historialDemo({ cargando: true })} />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Sección vacía (Referencias)">
+				<Marco>
 					<SeccionHistorial
 						titulo="Referencias"
 						conteo={0}
@@ -653,9 +603,11 @@ export default function CobrosFicha360Showcase() {
 
 			<ShowcaseGroup title="Estado de cuenta">
 				<Marco>
-					<Button size="lg" className="w-full">
-						Enviar por WhatsApp
-					</Button>
+					<EstadoCuentaAccionesBarra
+						onVistaPrevia={() => undefined}
+						onWhatsapp={() => undefined}
+						onCorreo={() => undefined}
+					/>
 					<ResumenCuentaCard
 						saldoTotal="Q42,000.00"
 						filas={[
@@ -683,6 +635,83 @@ export default function CobrosFicha360Showcase() {
 						/>
 					</div>
 				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Estado de cuenta · acciones (enviando y sin correo registrado)">
+				<Marco>
+					<EstadoCuentaAccionesBarra
+						onVistaPrevia={() => undefined}
+						onWhatsapp={() => undefined}
+						onCorreo={() => undefined}
+						enviandoWhatsapp
+					/>
+					<EstadoCuentaAccionesBarra
+						onVistaPrevia={() => undefined}
+						onWhatsapp={() => undefined}
+						onCorreo={() => undefined}
+						enviandoCorreo
+						sinCorreo
+					/>
+					<EstadoCuentaAccionesBarra onVistaPrevia={() => undefined} />
+				</Marco>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Estado de cuenta · Vista previa (modal: generando y error)">
+				<div className="grid gap-5 lg:grid-cols-2">
+					<div
+						className={cn(dialogPanelClassName, "relative")}
+						data-testid="modal-vista-previa-estado-cuenta"
+					>
+						<VistaPreviaEstadoCuentaVista
+							estado="generando"
+							onCerrar={() => undefined}
+						/>
+					</div>
+					<div className={cn(dialogPanelClassName, "relative")}>
+						<VistaPreviaEstadoCuentaVista
+							estado="error"
+							error="Este crédito todavía no tiene movimientos, no hay estado de cuenta que mostrar."
+							onReintentar={() => undefined}
+							onCerrar={() => undefined}
+						/>
+					</div>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Estado de cuenta · Enviar por correo (modal)">
+				<div className="grid gap-5 lg:grid-cols-3">
+					<div
+						className={cn(dialogPanelClassName, "max-w-md")}
+						data-testid="modal-correo-estado-cuenta"
+					>
+						<EnviarCorreoEstadoCuentaVista
+							correo="maria.lopez@correo.com"
+							onCorreo={() => undefined}
+							correoRegistrado="maria.lopez@correo.com"
+							onCancelar={() => undefined}
+							onEnviar={() => undefined}
+						/>
+					</div>
+					<div className={cn(dialogPanelClassName, "max-w-md")}>
+						<EnviarCorreoEstadoCuentaVista
+							correo="otro.correo@empresa.com"
+							onCorreo={() => undefined}
+							correoRegistrado="maria.lopez@correo.com"
+							enviando
+							onCancelar={() => undefined}
+							onEnviar={() => undefined}
+						/>
+					</div>
+					<div className={cn(dialogPanelClassName, "max-w-md")}>
+						<EnviarCorreoEstadoCuentaVista
+							correo=""
+							onCorreo={() => undefined}
+							correoRegistrado={null}
+							onCancelar={() => undefined}
+							onEnviar={() => undefined}
+						/>
+					</div>
+				</div>
 			</ShowcaseGroup>
 
 			<ShowcaseGroup title="Documentos">

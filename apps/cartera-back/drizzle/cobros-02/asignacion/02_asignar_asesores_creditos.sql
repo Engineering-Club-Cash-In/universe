@@ -1,19 +1,21 @@
 -- =====================================================================
 -- COBROS-02 · Asignación inicial — PASO 2/3: crédito → asesor de su bucket
 -- =====================================================================
--- Requiere el PASO 1 (pool en asesor_bucket). Todo SET-BASED: se deriva el
--- bucket de cada crédito con las MISMAS reglas del motor (bucketDeCredito
--- en latefee.ts) usando la mora activa, y se reparte por bucket:
+-- Requiere el PASO 1 (pool en asesor_bucket). Todo SET-BASED: se lee el
+-- bucket ACTUAL de cada crédito (último buckets_historial; sin historial, las
+-- reglas del motor sobre la mora activa — ver el paso 1), y se reparte por bucket:
 --   · bucket con 1 asesor  → asignación directa
 --   · bucket con N asesores → round-robin determinístico (parejo, ordenado
 --     por credito_id, asesores ordenados por asesor_id)
 --
--- Reglas de derivación (idénticas al motor):
+-- Lectura del bucket (la de `bucketActualSql`):
 --   1. statusCredit fuera del funnel (CANCELADO, PENDIENTE_CANCELACION,
 --      EN_CONVENIO, CAIDO) → NO se toca el crédito.
---   2. statusCredit en buckets.estados_incluidos (INCOBRABLE → B5) manda.
---   3. Si no, cuotas_atrasadas de la mora ACTIVA contra los rangos del
---      catálogo (sin mora activa = 0 → B0; cuotas_max NULL = abierto).
+--   2. La última fila de buckets_historial, si existe (lo que dejó el motor).
+--   3. Sin historial: statusCredit en buckets.estados_incluidos (INCOBRABLE →
+--      B5) manda; si no, cuotas_atrasadas de la mora ACTIVA contra los rangos
+--      del catálogo (sin mora activa = 0 → B0; cuotas_max NULL = abierto).
+--   4. Piso por estado (buckets.estados_piso): EN_RECUPERACION ≥ B4.
 --
 -- ⚠️ DECISIÓN DE RAÍZ: el UPDATE toca ÚNICAMENTE creditos.asesor_id.
 --    Nada más del crédito se modifica. Bitácora SIEMPRE (append-only).
@@ -41,22 +43,42 @@ BEGIN;
 
 SET LOCAL search_path TO :"schema";
 
--- 1) Derivar bucket por crédito (misma derivación que 03_linea_base).
+-- 1) Bucket ACTUAL por crédito: la misma lectura que `bucketActualSql`
+--    (lib/buckets-classification.ts), la que usan el listado por bucket, la
+--    reasignación manual y la cola de créditos fuera de pool.
+--      · primero la ÚLTIMA fila de buckets_historial (lo que dejó el motor);
+--      · si el crédito no tiene historial (carga inicial), la derivación por
+--        estado y por la mora activa, como antes;
+--      · y el PISO por estado (EN_RECUPERACION nunca por debajo de B4).
+--    Antes este paso derivaba SIEMPRE de la mora activa. En la alineación corre
+--    DESPUÉS del motor, y un crédito sin mora (capital 0 o negativo: el cron no
+--    se la crea) se leía B0 aunque el motor —que cuenta cuotas— lo tuviera en
+--    B3/B5: se le daba a un asesor de B0 y el motor, sin cambio de bucket, no lo
+--    volvía a tocar. Casos 286, 930 y 8845 del sandbox (2026-10-13).
 CREATE TEMP TABLE tmp_bucket ON COMMIT DROP AS
 SELECT
   c.credito_id,
   c.asesor_id AS asesor_actual,
-  COALESCE(
-    -- prioridad 1: estados incluidos explícitos del catálogo (INCOBRABLE → B5)
-    (SELECT b.numero FROM buckets b
-      WHERE b.activo AND c."statusCredit" = ANY (b.estados_incluidos)
-      ORDER BY b.numero LIMIT 1),
-    -- prioridad 2: rango de cuotas atrasadas del catálogo
-    (SELECT b.numero FROM buckets b
-      WHERE b.activo
-        AND COALESCE(m.cuotas_atrasadas, 0) >= b.cuotas_min
-        AND (b.cuotas_max IS NULL OR COALESCE(m.cuotas_atrasadas, 0) <= b.cuotas_max)
-      ORDER BY b.numero LIMIT 1)
+  GREATEST(
+    (SELECT bp.numero FROM buckets bp
+      WHERE bp.activo AND c."statusCredit" = ANY (bp.estados_piso)
+      ORDER BY bp.numero DESC LIMIT 1),
+    COALESCE(
+      (SELECT h.bucket_nuevo FROM buckets_historial h
+        WHERE h.credito_id = c.credito_id
+        ORDER BY h.fecha DESC, h.historial_id DESC
+        LIMIT 1),
+      -- sin historial, prioridad 1: estados incluidos del catálogo (INCOBRABLE → B5)
+      (SELECT b.numero FROM buckets b
+        WHERE b.activo AND c."statusCredit" = ANY (b.estados_incluidos)
+        ORDER BY b.numero LIMIT 1),
+      -- sin historial, prioridad 2: rango de cuotas atrasadas de la mora activa
+      (SELECT b.numero FROM buckets b
+        WHERE b.activo
+          AND COALESCE(m.cuotas_atrasadas, 0) >= b.cuotas_min
+          AND (b.cuotas_max IS NULL OR COALESCE(m.cuotas_atrasadas, 0) <= b.cuotas_max)
+        ORDER BY b.numero LIMIT 1)
+    )
   ) AS bucket
 FROM creditos c
 LEFT JOIN moras_credito m ON m.credito_id = c.credito_id AND m.activa = true

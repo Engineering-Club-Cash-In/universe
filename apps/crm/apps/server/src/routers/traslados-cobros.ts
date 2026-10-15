@@ -65,8 +65,22 @@ export const trasladosCobrosRouter = {
 					u.email.trim().toLowerCase() ===
 					a.email_cash_in?.trim().toLowerCase(),
 			);
+			// Alta y baja de asesor: su supervisor (cartera `supervisor_email`).
+			const correoSupervisor = a.supervisor_email?.trim().toLowerCase();
+			const supervisor = correoSupervisor
+				? usuarios.find(
+						(u) => u.email.trim().toLowerCase() === correoSupervisor,
+					)
+				: undefined;
 			return {
 				...a,
+				supervisor: correoSupervisor
+					? {
+							email: correoSupervisor,
+							userId: supervisor?.id ?? null,
+							nombre: supervisor?.name ?? correoSupervisor,
+						}
+					: null,
 				// M6 · nivel real del asesor (lib/nivel-asesor.ts), no derivado en el front.
 				nivel: nivelPorBuckets(a.buckets),
 				userId: crm?.id ?? null,

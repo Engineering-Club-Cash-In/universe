@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Info, Users } from "lucide-react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { Info, TriangleAlert } from "lucide-react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { CampoFecha } from "@/components/cobros/campo-fecha";
 import { hoyGT } from "@/components/cobros/coberturas-panel";
 import { CrmAvatar, inicialesDe } from "@/components/ds/cards-credito";
@@ -16,10 +15,18 @@ import {
 import { FieldMessage } from "@/components/ui/field-message";
 import { Label } from "@/components/ui/label";
 import { PopoverPortalContext } from "@/components/ui/popover";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { RadioGroup } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { client, orpc, orpcAparte, queryClient } from "@/utils/orpc";
-import { etiquetaNivel, nivelAsesor } from "../estado-asesor";
+import { etiquetaNivel, fechaCorta, nivelAsesor } from "../estado-asesor";
+import {
+	ExitoModal,
+	Flecha,
+	ListaReparto,
+	NotaModal,
+	plural,
+	TarjetaOpcion,
+} from "./piezas-modal";
 import {
 	type AsesorTraslado,
 	EstadoConsulta,
@@ -27,22 +34,29 @@ import {
 } from "./selector-asesor";
 
 /**
- * «Marcar ausente» — Figma «Modal · Marcar ausente» (3359:4251 Vacaciones y
- * 3367:4244 Incidente/Permiso), sobre el formulario REAL de coberturas
- * (CB-114, antes la pestaña «Coberturas» de `/cobros/reasignaciones`):
- * titular (activo, con usuario del CRM habilitado), suplente (solo quien cubre
- * todos los buckets del titular), motivo Vacaciones o Permiso, primer y último
- * día (desde hoy), revisar y registrar con idempotencia (`crypto.randomUUID`).
- * Durante la ausencia, la agenda del titular se muestra al suplente; la
- * cartera conserva su propietario.
+ * «Marcar ausente» — Figma «09 · Disponibilidad y redistribución»: «Marcar
+ * ausente» (3359:4251 Vacaciones y 3367:4244 Permiso/Incidente),
+ * «Redistribución de cartera» (3360:4254) y «Cartera redistribuida»
+ * (3360:4312). Tres pasos:
  *
- * Además de la cobertura con suplente, «Repartir su cartera entre el equipo»
- * (M5, Figma «Redistribución» 3360:4254) marca al asesor ausente SIN fecha de
- * regreso: se previsualiza el reparto de sus cuentas según la capacidad del
- * equipo (`previsualizarRepartoAusencia`), se confirma
- * (`marcarAusenteIndefinido`) y el asesor queda fuera del pool hasta que se le
- * reactive. El motivo «Incidente» solo existe en este modo. La hora de inicio
- * es la de la confirmación.
+ *   1. formulario → asesor, motivo (Vacaciones · Permiso · Incidente) y UNA
+ *      pregunta: «¿Qué pasa con su cartera mientras no está?».
+ *        - «Un compañero atiende su agenda» = cobertura con suplente
+ *          (`crearCobertura`, CB-114): fechas cerradas (días completos, desde
+ *          hoy), el suplente debe atender todos los buckets del asesor y ve sus
+ *          tareas de agenda; la cartera NO cambia de dueño. Se registra
+ *          directo desde este paso.
+ *        - «Repartir su cartera entre el equipo» = ausencia indefinida (M5):
+ *          empieza al confirmar, sin fecha de regreso; la cartera se reparte
+ *          según la capacidad de cada asesor (`previsualizarRepartoAusencia`) y
+ *          el asesor sale del pool hasta que se le reactive. «Incidente» solo
+ *          existe en este modo.
+ *   2. revision (solo al repartir) → la lista «antes → después +N»; se
+ *      confirma con `marcarAusenteIndefinido` (vista previa de 10 minutos).
+ *   3. exito → «Cartera redistribuida» o «Ausencia registrada».
+ *
+ * Idempotencia: `crypto.randomUUID()` por solicitud; cualquier cambio del
+ * formulario genera otra clave y descarta el reparto calculado.
  */
 
 export type MotivoAusencia = "vacaciones" | "permiso" | "incidente";
@@ -50,11 +64,11 @@ export type ModoAusencia = "suplente" | "equipo";
 
 /** Reparto previsualizado, ya resumido por asesor receptor. */
 export type RepartoAusencia = {
-	/** Cuentas que se reparten. */
+	/** Créditos que se reparten. */
 	cuentas: number;
-	/** Cuentas fuera de cobro (canceladas, caídas…) que se quedan con el asesor. */
+	/** Créditos sin bucket (cancelados, caídos, en convenio…) que se quedan con el asesor. */
 	conservadas: number;
-	/** Cuentas sin un destino válido (p. ej. ningún otro asesor cubre su bucket): no se puede confirmar. */
+	/** Créditos sin un destino válido (ningún otro asesor atiende su bucket): no se puede confirmar. */
 	bloqueadas: number;
 	/** Hasta cuándo vale la previsualización (ISO). */
 	venceEn: string;
@@ -67,7 +81,7 @@ export type RepartoAusencia = {
 };
 
 export type MarcarAusenteVistaProps = {
-	paso: "formulario" | "revision";
+	paso: "formulario" | "revision" | "exito";
 	cargando: boolean;
 	errorCarga: boolean;
 	onReintentar: () => void;
@@ -75,7 +89,7 @@ export type MarcarAusenteVistaProps = {
 	titulares: AsesorTraslado[];
 	titular: string;
 	onTitular: (asesorId: string) => void;
-	/** Datos del titular elegido (encabezado del Figma). */
+	/** Datos del asesor elegido (encabezado del Figma). */
 	titularInfo: {
 		nombre: string;
 		buckets: number[];
@@ -89,10 +103,10 @@ export type MarcarAusenteVistaProps = {
 	nombreSuplente: string | null;
 	motivo: MotivoAusencia;
 	onMotivo: (motivo: MotivoAusencia) => void;
-	/** Quién atiende la ausencia: un suplente (fechas cerradas) o el equipo (sin regreso fijo). */
+	/** Qué pasa con la cartera: un suplente atiende la agenda o se reparte al equipo. */
 	modo: ModoAusencia;
 	onModo: (modo: ModoAusencia) => void;
-	/** Reparto previsualizado (revisión del modo «equipo»). */
+	/** Reparto previsualizado (paso «revision»). */
 	reparto: RepartoAusencia | null;
 	/** La previsualización ya venció: hay que recalcular el reparto. */
 	previewVencida: boolean;
@@ -107,9 +121,13 @@ export type MarcarAusenteVistaProps = {
 	errorServidor: string | null;
 	pendiente: boolean;
 	onCancelar: () => void;
+	/** Paso 1: registra la cobertura (suplente) o calcula el reparto (equipo). */
 	onContinuar: () => void;
 	onVolver: () => void;
 	onConfirmar: () => void;
+	/** Reparto confirmado (paso «exito» del modo equipo). */
+	resultado: { cuentas: number; receptores: number } | null;
+	onListo: () => void;
 };
 
 const MOTIVOS: { valor: MotivoAusencia; etiqueta: string }[] = [
@@ -124,318 +142,405 @@ const MOTIVO_TEXTO: Record<MotivoAusencia, string> = {
 	incidente: "un incidente",
 };
 
-/** «2026-10-12» → «12/10/2026». */
-function fechaLegible(fecha: string) {
-	const [y, m, d] = fecha.split("-");
-	return y && m && d ? `${d}/${m}/${y}` : fecha;
-}
-
-/** Revisión del modo «equipo» (Figma «Redistribución»): a quién va la cartera. */
-function ResumenReparto({
-	nombre,
-	motivo,
-	reparto,
+function Seccion({
+	children,
+	htmlFor,
 }: {
-	nombre: string;
-	motivo: MotivoAusencia;
-	reparto: RepartoAusencia | null;
+	children: ReactNode;
+	htmlFor?: string;
 }) {
-	if (!reparto) return null;
-	return (
-		<div className="space-y-3">
-			<p className="text-fg-secondary text-sm leading-normal">
-				{nombre} estará ausente por {MOTIVO_TEXTO[motivo]}, sin fecha de
-				regreso. Se repartirán {reparto.cuentas} cuentas entre{" "}
-				{reparto.receptores.length} asesores, según la capacidad de cada uno.
-				{reparto.conservadas > 0
-					? ` Otras ${reparto.conservadas} (canceladas o caídas) no se gestionan y se quedan con ${nombre}.`
-					: ""}
-			</p>
-			{reparto.bloqueadas > 0 ? (
-				<FieldMessage role="alert" variant="warning">
-					No se puede confirmar: {reparto.bloqueadas}{" "}
-					{reparto.bloqueadas === 1 ? "cuenta" : "cuentas"} sin destino válido
-					(ningún otro asesor cubre su bucket). Resuélvalo y vuelva a calcular
-					el reparto.
-				</FieldMessage>
-			) : null}
-			<ul className="divide-y divide-line-subtle rounded-xl border border-line-subtle">
-				{reparto.receptores.map((r) => (
-					<li
-						key={r.asesorId}
-						className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
-					>
-						<span className="truncate text-fg">{r.nombre}</span>
-						<span className="shrink-0 text-fg-secondary tabular-nums">
-							{r.antes} → {r.despues}{" "}
-							<span className="text-fg-tertiary">(+{r.despues - r.antes})</span>
-						</span>
-					</li>
-				))}
-			</ul>
-		</div>
+	return htmlFor ? (
+		<Label htmlFor={htmlFor} className="font-semibold text-[13px] text-fg">
+			<span>{children}</span>
+		</Label>
+	) : (
+		<p className="font-semibold text-[13px] text-fg leading-[1.26]">
+			{children}
+		</p>
 	);
 }
 
-/** Contenido del modal (sin el Dialog: así el showcase lo pinta en línea). */
-export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
-	const revision = p.paso === "revision";
-	const equipo = p.modo === "equipo";
-	const vencida = equipo && revision && p.previewVencida;
-	return (
-		<div className="flex flex-col gap-5">
-			<h2 className={cn(dialogTitleClassName, "pr-10")}>
-				{revision
-					? equipo
-						? "Redistribución de la cartera"
-						: "Registrar cobertura"
-					: "Marcar ausente"}
-			</h2>
+/* ── Paso 1 · Motivo, fechas y qué pasa con la cartera ────────────────── */
 
-			{p.cargando || p.errorCarga ? (
-				<EstadoConsulta error={p.errorCarga} retry={p.onReintentar} />
-			) : revision ? (
-				<>
-					{equipo ? (
-						<ResumenReparto
-							nombre={p.titularInfo?.nombre ?? ""}
-							motivo={p.motivo}
-							reparto={p.reparto}
-						/>
-					) : (
-						<p className="text-fg-secondary text-sm leading-normal">
-							{p.titularInfo?.nombre} estará ausente por{" "}
-							{MOTIVO_TEXTO[p.motivo]} del {fechaLegible(p.desde)} al{" "}
-							{fechaLegible(p.hasta)}, ambos incluidos. Suplente propuesto:{" "}
-							{p.nombreSuplente}. Sus tareas de agenda se mostrarán al suplente.
+function PasoAusencia(p: MarcarAusenteVistaProps) {
+	const uid = useId();
+	const id = (sufijo: string) => `ausente${uid}${sufijo}`;
+	const equipo = p.modo === "equipo";
+	const incidente = p.motivo === "incidente";
+	const nombre = p.titularInfo?.nombre ?? null;
+	const creditos = p.titularInfo?.creditos ?? null;
+	const cartera =
+		creditos !== null
+			? `Su cartera de ${plural(creditos, "crédito", "créditos")}`
+			: "Su cartera";
+
+	return (
+		<>
+			{/* Asesor que se ausenta */}
+			{p.titularInfo ? (
+				<div className="flex items-center gap-3">
+					<CrmAvatar iniciales={inicialesDe(p.titularInfo.nombre)} />
+					<div className="min-w-0 flex-1">
+						<p className="truncate font-semibold text-fg text-sm">
+							{p.titularInfo.nombre}
 						</p>
-					)}
-					{vencida ? (
-						<FieldMessage role="alert" variant="warning">
-							El reparto previsualizado venció (vale 10 minutos). Recalcúlelo
-							para confirmar la ausencia.
-						</FieldMessage>
-					) : p.errorServidor ? (
-						<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
-					) : null}
-					<div className="grid grid-cols-2 gap-3">
-						<Button
-							variant="secondary"
-							disabled={p.pendiente}
-							onClick={p.onVolver}
-						>
-							Volver
-						</Button>
-						<Button
-							loading={p.pendiente}
-							disabled={equipo && !vencida && (p.reparto?.bloqueadas ?? 0) > 0}
-							onClick={vencida ? p.onRecalcular : p.onConfirmar}
-						>
-							{p.pendiente
-								? vencida
-									? "Calculando reparto…"
-									: "Registrando…"
-								: vencida
-									? "Recalcular reparto"
-									: equipo
-										? p.errorServidor
-											? "Reintentar confirmación"
-											: "Confirmar ausencia"
-										: "Registrar cobertura"}
-						</Button>
+						<p className="text-fg-secondary text-xs">
+							{etiquetaNivel(nivelAsesor(p.titularInfo.buckets))}
+							{creditos !== null
+								? ` · ${plural(creditos, "crédito asignado", "créditos asignados")}`
+								: ""}
+						</p>
 					</div>
-				</>
+					<Button
+						variant="text"
+						size="sm"
+						disabled={p.pendiente}
+						onClick={() => p.onTitular("")}
+					>
+						Cambiar
+					</Button>
+				</div>
+			) : (
+				<div className="flex flex-col gap-2">
+					<Seccion htmlFor={id("-titular")}>Asesor que se ausenta</Seccion>
+					<SelectorAsesor
+						id={id("-titular")}
+						value={p.titular}
+						onChange={p.onTitular}
+						asesores={p.titulares}
+					/>
+				</div>
+			)}
+			{p.avisoTitular ? (
+				<FieldMessage role="alert" variant="warning">
+					{p.avisoTitular}
+				</FieldMessage>
+			) : null}
+
+			{/* Motivo */}
+			<fieldset className="flex flex-col gap-2" disabled={p.pendiente}>
+				<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
+					Motivo
+				</legend>
+				<div className="grid grid-cols-3 gap-2">
+					{MOTIVOS.map((m) => (
+						<Button
+							key={m.valor}
+							type="button"
+							variant={p.motivo === m.valor ? "default" : "outline"}
+							aria-pressed={p.motivo === m.valor}
+							className="px-2"
+							onClick={() => p.onMotivo(m.valor)}
+						>
+							{m.etiqueta}
+						</Button>
+					))}
+				</div>
+			</fieldset>
+
+			{/* La única pregunta sobre la cartera */}
+			<fieldset className="flex flex-col gap-2" disabled={p.pendiente}>
+				<legend className="mb-2 font-semibold text-[13px] text-fg leading-[1.26]">
+					¿Qué pasa con su cartera mientras no está?
+				</legend>
+				<RadioGroup
+					value={p.modo}
+					onValueChange={(v) => p.onModo(v as ModoAusencia)}
+					aria-label="Qué pasa con su cartera mientras no está"
+					className="gap-2"
+				>
+					<TarjetaOpcion
+						id={id("-modo-suplente")}
+						valor="suplente"
+						titulo="Un compañero atiende su agenda"
+						detalle="La cartera sigue siendo suya. Usted fija las fechas y, al terminar, la agenda vuelve sola."
+						nota={
+							incidente
+								? "No aplica a un incidente: no tiene fecha de regreso."
+								: undefined
+						}
+						disabled={incidente}
+						activo={!equipo}
+					/>
+					<TarjetaOpcion
+						id={id("-modo-equipo")}
+						valor="equipo"
+						titulo="Repartir su cartera entre el equipo hasta que regrese"
+						detalle="Se reparte según la capacidad de cada asesor y no recibe créditos nuevos hasta que usted lo reactive."
+						activo={equipo}
+					/>
+				</RadioGroup>
+			</fieldset>
+
+			{/* Fechas, hora y suplente según la opción */}
+			{equipo ? (
+				<NotaModal
+					tono="warning"
+					icono={<TriangleAlert />}
+					titulo="Desde hoy · Fin: indefinido"
+				>
+					La ausencia empieza al confirmar. Cuando regrese, use «Reactivar» en
+					su tarjeta y se le devuelve su cartera.
+				</NotaModal>
 			) : (
 				<>
-					{/* Asesor que se ausenta */}
-					{p.titularInfo ? (
-						<div className="flex items-center gap-3">
-							<CrmAvatar iniciales={inicialesDe(p.titularInfo.nombre)} />
-							<div className="min-w-0 flex-1">
-								<p className="truncate font-semibold text-fg text-sm">
-									{p.titularInfo.nombre}
-								</p>
-								<p className="text-fg-secondary text-xs">
-									{etiquetaNivel(nivelAsesor(p.titularInfo.buckets))}
-									{p.titularInfo.creditos !== null
-										? ` · ${p.titularInfo.creditos} créditos asignados`
-										: ""}
-								</p>
-							</div>
-							<Button
-								variant="text"
-								size="sm"
+					<div className="grid gap-3 sm:grid-cols-2">
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor={id("-desde")}>Desde</Label>
+							<CampoFecha
+								id={id("-desde")}
+								min={p.hoy}
+								value={p.desde}
 								disabled={p.pendiente}
-								onClick={() => p.onTitular("")}
-							>
-								Cambiar
-							</Button>
-						</div>
-					) : (
-						<div className="space-y-2">
-							<Label htmlFor="cobertura-titular">Asesor que se ausenta</Label>
-							<SelectorAsesor
-								id="cobertura-titular"
-								value={p.titular}
-								onChange={p.onTitular}
-								asesores={p.titulares}
+								onChange={p.onDesde}
 							/>
 						</div>
-					)}
-					{p.avisoTitular ? (
-						<FieldMessage role="alert" variant="warning">
-							{p.avisoTitular}
-						</FieldMessage>
-					) : null}
-
-					<fieldset className="space-y-2" disabled={p.pendiente}>
-						<legend className="mb-2 font-medium text-fg text-sm">Motivo</legend>
-						<div className="grid grid-cols-2 gap-2.5">
-							{MOTIVOS.map((m) => (
-								<Button
-									key={m.valor}
-									type="button"
-									variant={p.motivo === m.valor ? "default" : "outline"}
-									aria-pressed={p.motivo === m.valor}
-									onClick={() => p.onMotivo(m.valor)}
-								>
-									{m.etiqueta}
-								</Button>
-							))}
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor={id("-hasta")}>Hasta (incluido)</Label>
+							<CampoFecha
+								id={id("-hasta")}
+								min={p.desde}
+								value={p.hasta}
+								disabled={p.pendiente}
+								onChange={p.onHasta}
+							/>
 						</div>
-					</fieldset>
-
-					{equipo ? null : (
-						<div className="grid gap-3 sm:grid-cols-2">
-							<div className="space-y-1.5">
-								<Label htmlFor="cobertura-desde">Desde (primer día)</Label>
-								<CampoFecha
-									id="cobertura-desde"
-									min={p.hoy}
-									value={p.desde}
-									disabled={p.pendiente}
-									onChange={p.onDesde}
-								/>
-							</div>
-							<div className="space-y-1.5">
-								<Label htmlFor="cobertura-hasta">Hasta (incluido)</Label>
-								<CampoFecha
-									id="cobertura-hasta"
-									min={p.desde}
-									value={p.hasta}
-									disabled={p.pendiente}
-									onChange={p.onHasta}
-								/>
-							</div>
-						</div>
-					)}
-
-					<fieldset className="space-y-2.5" disabled={p.pendiente}>
-						<legend className="mb-2 font-medium text-fg text-sm">
-							¿Quién atiende su agenda?
-						</legend>
-						<RadioGroup
-							value={p.modo}
-							onValueChange={(v) => p.onModo(v as ModoAusencia)}
-							aria-label="Quién atiende su agenda"
-						>
-							<div className="flex items-center gap-2">
-								<RadioGroupItem
-									value="suplente"
-									id="cobertura-reparto-suplente"
-									disabled={p.motivo === "incidente"}
-								/>
-								<Label
-									htmlFor="cobertura-reparto-suplente"
-									className={cn(p.motivo === "incidente" && "text-fg-tertiary")}
-								>
-									Un suplente
-								</Label>
-							</div>
-							{equipo ? null : (
-								<div className="space-y-1.5 pl-6">
-									<Label htmlFor="cobertura-suplente" className="sr-only">
-										Suplente
-									</Label>
-									<SelectorAsesor
-										id="cobertura-suplente"
-										value={p.suplente}
-										onChange={p.onSuplente}
-										asesores={p.suplentes}
-										disabled={!p.titularInfo}
-									/>
-									{p.titularInfo && !p.suplentes.length ? (
-										<FieldMessage variant="warning">
-											Ningún suplente habilitado cubre todos los buckets del
-											titular.
-										</FieldMessage>
-									) : null}
-								</div>
-							)}
-							<div className="flex items-center gap-2">
-								<RadioGroupItem value="equipo" id="cobertura-reparto-equipo" />
-								<Label htmlFor="cobertura-reparto-equipo" className="gap-1.5">
-									<Users aria-hidden className="size-4" />
-									Repartir su cartera entre el equipo
-								</Label>
-							</div>
-						</RadioGroup>
-					</fieldset>
-
-					<div className="flex gap-2.5 rounded-xl bg-info-subtle p-3 text-info-text text-sm leading-normal">
-						<Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-						{equipo ? (
-							<p>
-								La ausencia no tiene fecha de regreso: su cartera se reparte
-								entre el equipo según la capacidad de cada asesor y no recibe
-								cuentas nuevas hasta que usted lo reactive. Al reactivarlo se le
-								devuelve lo que no haya cambiado de dueño. Antes de confirmar
-								verá el reparto.
-							</p>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Seccion htmlFor={id("-suplente")}>
+							Compañero que atiende su agenda
+						</Seccion>
+						<SelectorAsesor
+							id={id("-suplente")}
+							value={p.suplente}
+							onChange={p.onSuplente}
+							asesores={p.suplentes}
+							disabled={!p.titularInfo || p.pendiente}
+						/>
+						{p.titularInfo && !p.suplentes.length ? (
+							<FieldMessage variant="warning">
+								Ningún compañero activo atiende todos sus buckets. Puede
+								repartir su cartera entre el equipo.
+							</FieldMessage>
 						) : (
-							<p>
-								{p.titularInfo && p.nombreSuplente
-									? `Durante esas fechas, las tareas de agenda de ${p.titularInfo.nombre} se muestran a ${p.nombreSuplente}.`
-									: "Durante la ausencia, las tareas de agenda del titular se muestran al suplente."}{" "}
-								La cartera conserva su propietario. Vacaciones y permisos son
-								por días completos, en horario de Guatemala.
+							<p className="text-fg-tertiary text-xs leading-[1.35]">
+								Solo aparecen quienes atienden todos sus buckets.
 							</p>
 						)}
 					</div>
-
-					{p.error ? (
-						<FieldMessage variant="help">{p.error}</FieldMessage>
-					) : null}
-					{p.errorServidor ? (
-						<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
-					) : null}
-
-					<div className="grid grid-cols-2 gap-3">
-						<Button
-							variant="secondary"
-							disabled={p.pendiente}
-							onClick={p.onCancelar}
-						>
-							Cancelar
-						</Button>
-						<Button
-							loading={p.pendiente && equipo}
-							disabled={!!p.error || p.pendiente}
-							onClick={p.onContinuar}
-						>
-							{p.pendiente && equipo ? "Calculando reparto…" : "Continuar"}
-						</Button>
-					</div>
 				</>
+			)}
+
+			{/* Qué va a pasar (caja azul del Figma) */}
+			<NotaModal tono="info" icono={<Info />}>
+				{equipo ? (
+					<>
+						{cartera} se repartirá entre el equipo hasta que usted lo reactive.
+						Antes de confirmar verá cómo queda el reparto.
+					</>
+				) : nombre && p.nombreSuplente && p.desde && p.hasta ? (
+					<>
+						Del {fechaCorta(p.desde)} al {fechaCorta(p.hasta)},{" "}
+						{p.nombreSuplente} verá las tareas de agenda de {nombre}. {cartera}{" "}
+						no cambia de dueño.
+					</>
+				) : (
+					<>
+						Durante la ausencia, el compañero ve sus tareas de agenda. {cartera}{" "}
+						no cambia de dueño. Son días completos, en horario de Guatemala.
+					</>
+				)}
+			</NotaModal>
+
+			{p.error ? <FieldMessage variant="help">{p.error}</FieldMessage> : null}
+			{p.errorServidor ? (
+				<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
+			) : null}
+
+			<div className="grid grid-cols-2 gap-3">
+				<Button
+					variant="secondary"
+					disabled={p.pendiente}
+					onClick={p.onCancelar}
+				>
+					Cancelar
+				</Button>
+				<Button
+					loading={p.pendiente}
+					disabled={!!p.error || p.pendiente}
+					onClick={p.onContinuar}
+				>
+					{p.pendiente
+						? equipo
+							? "Calculando reparto…"
+							: "Registrando…"
+						: equipo
+							? "Continuar"
+							: "Registrar ausencia"}
+				</Button>
+			</div>
+		</>
+	);
+}
+
+/* ── Paso 2 · Redistribución de cartera (solo al repartir) ────────────── */
+
+function PasoReparto(
+	p: MarcarAusenteVistaProps & { reparto: RepartoAusencia },
+) {
+	const { reparto } = p;
+	const nombre = p.titularInfo?.nombre ?? "el asesor";
+	const vencida = p.previewVencida;
+	const bloqueada = !vencida && reparto.bloqueadas > 0;
+	return (
+		<>
+			<p className="-mt-3 text-fg-secondary text-sm leading-[1.3]">
+				Cartera de {nombre} · {plural(reparto.cuentas, "crédito", "créditos")}{" "}
+				<Flecha />
+				<span className="sr-only">entre</span>{" "}
+				{plural(reparto.receptores.length, "asesor", "asesores")}
+			</p>
+
+			<NotaModal tono="info" icono={<Info />}>
+				Se reparte según la capacidad de cada asesor. Si hace falta, después
+				puede reasignar créditos a mano.
+			</NotaModal>
+
+			{reparto.bloqueadas > 0 ? (
+				<NotaModal
+					tono="danger"
+					role="alert"
+					icono={<TriangleAlert />}
+					titulo={`No se puede confirmar: ${plural(reparto.bloqueadas, "crédito no tiene quién lo reciba", "créditos no tienen quién los reciba")}`}
+				>
+					Ningún otro asesor activo atiende su bucket. Agregue a alguien a ese
+					bucket y vuelva a calcular el reparto.
+				</NotaModal>
+			) : null}
+
+			{reparto.receptores.length ? (
+				<ListaReparto
+					filas={reparto.receptores.map((r) => ({
+						clave: r.asesorId,
+						nombre: r.nombre,
+						antes: r.antes,
+						despues: r.despues,
+					}))}
+				/>
+			) : (
+				<p className="text-fg-secondary text-sm leading-[1.4]">
+					No tiene créditos en cobranza para repartir: solo quedará ausente y
+					dejará de recibir créditos nuevos.
+				</p>
+			)}
+
+			{reparto.conservadas > 0 ? (
+				<NotaModal tono="neutral">
+					{plural(
+						reparto.conservadas,
+						"crédito sin bucket",
+						"créditos sin bucket",
+					)}{" "}
+					(cancelados, caídos o en convenio){" "}
+					{reparto.conservadas === 1 ? "se queda" : "se quedan"} a nombre de{" "}
+					{nombre}: no entran en el reparto.
+				</NotaModal>
+			) : null}
+
+			{vencida ? (
+				<FieldMessage role="alert" variant="warning">
+					Este reparto se calculó hace más de 10 minutos y ya no vale.
+					Recalcúlelo para confirmar la ausencia.
+				</FieldMessage>
+			) : p.errorServidor ? (
+				<FieldMessage role="alert">{p.errorServidor}</FieldMessage>
+			) : null}
+
+			<div className="grid grid-cols-2 gap-3">
+				<Button variant="secondary" disabled={p.pendiente} onClick={p.onVolver}>
+					Atrás
+				</Button>
+				<Button
+					loading={p.pendiente}
+					disabled={bloqueada}
+					onClick={vencida ? p.onRecalcular : p.onConfirmar}
+				>
+					{p.pendiente
+						? vencida
+							? "Calculando…"
+							: "Confirmando…"
+						: vencida
+							? "Recalcular reparto"
+							: p.errorServidor
+								? "Reintentar"
+								: "Confirmar redistribución"}
+				</Button>
+			</div>
+		</>
+	);
+}
+
+/* ── Paso 3 · Éxito ───────────────────────────────────────────────────── */
+
+function PasoExito(p: MarcarAusenteVistaProps) {
+	const nombre = p.titularInfo?.nombre ?? "El asesor";
+	if (p.modo === "equipo") {
+		const r = p.resultado;
+		return (
+			<ExitoModal
+				titulo="Cartera redistribuida"
+				onListo={p.onListo}
+				nota="Cuando regrese, use «Reactivar» en su tarjeta para devolverle su cartera."
+			>
+				{nombre} quedó ausente por {MOTIVO_TEXTO[p.motivo]} desde hoy, sin fecha
+				de regreso.{" "}
+				{r && r.cuentas > 0
+					? `Sus ${plural(r.cuentas, "crédito se repartió", "créditos se repartieron")} entre ${plural(r.receptores, "asesor", "asesores")}.`
+					: "No tenía créditos en cobranza para repartir y ya no recibe créditos nuevos."}
+			</ExitoModal>
+		);
+	}
+	return (
+		<ExitoModal
+			titulo="Ausencia registrada"
+			onListo={p.onListo}
+			nota="Queda en el historial de coberturas. Si regresa antes, use «Reactivar» en su tarjeta."
+		>
+			{nombre} estará ausente por {MOTIVO_TEXTO[p.motivo]} del{" "}
+			{fechaCorta(p.desde)} al {fechaCorta(p.hasta)}.{" "}
+			{p.nombreSuplente ?? "El suplente"} atiende su agenda; sus créditos siguen
+			siendo suyos.
+		</ExitoModal>
+	);
+}
+
+/* ── Vista ──────────────────────────────────────────────────────────── */
+
+/** Contenido del modal (sin el Dialog: así el showcase lo pinta en línea). */
+export function MarcarAusenteVista(p: MarcarAusenteVistaProps) {
+	if (p.paso === "exito") return <PasoExito {...p} />;
+	const reparto =
+		p.paso === "revision" && p.modo === "equipo" ? p.reparto : null;
+	return (
+		<div className="flex min-w-0 flex-col gap-5">
+			<h2 className={cn(dialogTitleClassName, "pr-10")}>
+				{reparto ? "Redistribución de cartera" : "Marcar ausente"}
+			</h2>
+			{p.cargando || p.errorCarga ? (
+				<EstadoConsulta error={p.errorCarga} retry={p.onReintentar} />
+			) : reparto ? (
+				<PasoReparto {...p} reparto={reparto} />
+			) : (
+				<PasoAusencia {...p} />
 			)}
 		</div>
 	);
 }
 
 /**
- * Contenedor del modal: catálogo `getAsesoresTraslados`, créditos del titular
- * (`getCargaPorAsesorBucket`) y `crearCobertura`. Misma lógica y mismas
- * validaciones que el formulario de la página vieja.
+ * Contenedor del modal: catálogo `getAsesoresTraslados`, créditos del asesor
+ * (`getCargaPorAsesorBucket`), ausencias vigentes (`listarAusencias`),
+ * `crearCobertura` y el reparto de M5. Mismas validaciones de siempre.
  */
 export function MarcarAusenteDialog({
 	abierto,
@@ -461,7 +566,8 @@ export function MarcarAusenteDialog({
 			>
 				<DialogTitle className="sr-only">Marcar ausente</DialogTitle>
 				<DialogDescription className="sr-only">
-					Registre la ausencia de un asesor y quién atiende su agenda.
+					Registre la ausencia de un asesor y qué pasa con su cartera mientras
+					no está.
 				</DialogDescription>
 				<PopoverPortalContext.Provider value={caja}>
 					{abierto ? (
@@ -496,13 +602,18 @@ function FormularioAusencia({
 	const [desde, setDesde] = useState(hoyGT);
 	const [hasta, setHasta] = useState(hoyGT);
 	const [id, setId] = useState(() => crypto.randomUUID());
-	const [paso, setPaso] = useState<"formulario" | "revision">("formulario");
+	const [paso, setPaso] =
+		useState<MarcarAusenteVistaProps["paso"]>("formulario");
 	const [modo, setModo] = useState<ModoAusencia>("suplente");
 	const [preview, setPreview] = useState<{
 		previewId: string;
 		reparto: RepartoAusencia;
 	} | null>(null);
 	const [vencida, setVencida] = useState(false);
+	const [resultado, setResultado] = useState<{
+		cuentas: number;
+		receptores: number;
+	} | null>(null);
 
 	const asesores = useQuery(orpc.getAsesoresTraslados.queryOptions());
 	// Quien ya tiene una ausencia indefinida no se puede marcar de nuevo.
@@ -541,15 +652,15 @@ function FormularioAusencia({
 			: null;
 
 	const error = !origen
-		? "Seleccione el titular."
+		? "Seleccione al asesor que se ausenta."
 		: modo === "equipo"
 			? null
 			: !receptor
-				? "Seleccione un suplente habilitado para los buckets del titular."
+				? "Seleccione al compañero que atenderá su agenda."
 				: !desde || !hasta || desde > hasta
 					? "Indique un rango de fechas válido."
 					: desde < hoyGT()
-						? "La cobertura debe comenzar hoy o después."
+						? "La ausencia debe comenzar hoy o después."
 						: null;
 
 	const previsualizar = useMutation({
@@ -607,7 +718,7 @@ function FormularioAusencia({
 		onError: (e) => {
 			if (/venci/i.test(e.message)) setVencida(true);
 		},
-		onSuccess: () => {
+		onSuccess: (data) => {
 			void queryClient.invalidateQueries({
 				queryKey: orpcAparte.listarAusencias.key(),
 			});
@@ -618,12 +729,13 @@ function FormularioAusencia({
 			void queryClient.invalidateQueries({
 				queryKey: orpc.getAsesoresTraslados.key(),
 			});
-			toast.success("Ausencia registrada", {
-				description: `${origen?.nombre ?? "El asesor"} quedó ausente y su cartera se repartió entre el equipo.`,
+			setResultado({
+				cuentas: data?.cuentasRepartidas ?? preview?.reparto.cuentas ?? 0,
+				receptores: preview?.reparto.receptores.length ?? 0,
 			});
 			// Sin `onRegistrada`: esa señal lleva al historial de coberturas, donde
 			// una ausencia indefinida no aparece.
-			onCerrar();
+			setPaso("exito");
 		},
 		// Un fallo (incluso ambiguo: timeout o 5xx) deja la revisión abierta: el
 		// reintento reenvía la MISMA confirmación (mismo `id` y `previewId`), que es
@@ -635,7 +747,7 @@ function FormularioAusencia({
 		retry: false,
 		mutationFn: () => {
 			if (!origen?.userId || !receptor?.userId)
-				throw new Error("Seleccione el titular y el suplente.");
+				throw new Error("Seleccione al asesor y al compañero que lo cubre.");
 			if (motivo === "incidente")
 				throw new Error("El incidente se registra repartiendo la cartera.");
 			return client.crearCobertura({
@@ -647,19 +759,16 @@ function FormularioAusencia({
 				hasta,
 			});
 		},
-		onSuccess: (data) => {
+		onSuccess: () => {
 			void queryClient.invalidateQueries({
 				queryKey: orpc.listarCoberturas.key(),
 			});
-			toast.success("Cobertura registrada", {
-				description: `Cobertura ${data.id}. Agenda del suplente actualizada.`,
-			});
 			onRegistrada({ desde, hasta });
-			onCerrar();
+			setPaso("exito");
 		},
 		onError: () => setPaso("formulario"),
 	});
-	// Cualquier cambio invalida la revisión: nueva clave de idempotencia.
+	// Cualquier cambio invalida lo calculado: nueva clave de idempotencia.
 	const cambiar = () => {
 		setId(crypto.randomUUID());
 		crear.reset();
@@ -746,17 +855,17 @@ function FormularioAusencia({
 			}
 			onCancelar={onCerrar}
 			onContinuar={() => {
-				if (modo !== "equipo") return setPaso("revision");
+				// Con suplente se registra directo: el resumen azul ya dice qué pasa.
+				if (modo !== "equipo") return crear.mutate();
 				if (origen)
 					previsualizar.mutate({ asesorId: origen.asesor_id, motivo });
 			}}
 			onVolver={() => {
 				// Volver invalida el reparto (puede vencer): se pide uno nuevo.
-				if (modo === "equipo") cambiar();
+				cambiar();
 				setPaso("formulario");
 			}}
 			onConfirmar={() => {
-				if (modo !== "equipo") return crear.mutate();
 				if (origen && preview)
 					confirmarEquipo.mutate({
 						id,
@@ -765,6 +874,8 @@ function FormularioAusencia({
 						previewId: preview.previewId,
 					});
 			}}
+			resultado={resultado}
+			onListo={onCerrar}
 		/>
 	);
 }

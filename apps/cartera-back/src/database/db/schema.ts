@@ -2020,6 +2020,10 @@
     // 🔥 Si es false, el asesor NO entra al balanceo de carga al crear créditos
     // (getAsesorConMenorCarga lo ignora). Reemplaza el hardcode nombre != 'Gerencia'.
     activo_para_creditos: boolean("activo_para_creditos").notNull().default(true),
+    // COBROS-02 · supervisor del asesor de cobros: correo de su usuario del CRM
+    // (mismo puente que email_cash_in). Lo escribe el alta desde «Mi equipo»
+    // (POST /buckets/asesores/alta); null = sin asignar. Migración 0027.
+    supervisorEmail: varchar("supervisor_email", { length: 150 }),
   });
 
   export const cuentasEmpresa = customSchema.table("cuentas_empresa", {

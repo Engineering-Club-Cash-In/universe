@@ -111,6 +111,7 @@ import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { cartaPoderRouter } from "./routers/carta-poder";
 import { metasAsesorCobrosRouter } from "./routers/cobros-asesor";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { equipoAltaBajaRouter } from "./routers/equipo-alta-baja";
 import { fichaCobrosAccionesRouter } from "./routers/ficha-cobros-acciones";
 import { gpsCatalogoBucketRouter } from "./routers/gps-catalogo-bucket";
 import { gpsEventosRouter } from "./routers/gps-eventos-router";
@@ -349,6 +350,7 @@ const handler = new RPCHandler(
 		misPendientesInmovilizacionRouter,
 		gpsCatalogoBucketRouter,
 		supervisionCobrosRouter,
+		equipoAltaBajaRouter,
 		metasAsesorCobrosRouter,
 		fichaCobrosAccionesRouter,
 		cartaPoderRouter,

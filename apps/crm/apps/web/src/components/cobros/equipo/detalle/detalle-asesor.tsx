@@ -444,8 +444,8 @@ export function DetalleAsesor({
 	}, [queryClient]);
 	const workspace = useWorkspaceCasos({ alCerrar: refrescarCartera });
 	const [panel, setPanel] = useState<string | null>(null);
-	// «Trasladar cartera» y «Marcar ausente» abren los mismos modales de Mi
-	// equipo, aquí mismo y con este asesor elegido.
+	// «Trasladar cartera», «Marcar ausente» y «Dar de baja» abren los mismos
+	// modales de Mi equipo, aquí mismo y con este asesor elegido.
 	const [accion, setAccion] = useState<AccionEquipo | undefined>();
 	const proximos = proximosQuery.data?.items ?? [];
 
@@ -549,6 +549,7 @@ export function DetalleAsesor({
 				avisos={avisos}
 				onTrasladar={() => setAccion("trasladar")}
 				onMarcarAusente={() => setAccion("ausente")}
+				onDarDeBaja={() => setAccion("baja")}
 				onReactivar={
 					asesor
 						? () =>

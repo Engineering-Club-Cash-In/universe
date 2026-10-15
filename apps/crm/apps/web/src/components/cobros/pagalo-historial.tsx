@@ -1,40 +1,23 @@
 /**
- * Rastro completo de Págalo (CB-028/CB-127) del CRÉDITO: todos los grupos
- * creados a lo largo del tiempo (puede haber más de uno — un grupo completado
- * o cancelado libera el slot y permite crear otro nuevo), más reciente
- * primero, cada uno con su timeline de eventos append-only, badges de motivo
- * de falla/reintentos/antigüedad/generación, el detalle "Links por cuota" bajo
- * demanda, y las acciones de supervisor.
+ * Detalle de un grupo de links de Págalo (CB-028/CB-127): los links con su
+ * estado, motivo de falla, reintentos, antigüedad y generación, el detalle
+ * «Links por cuota» bajo demanda y la bitácora. Lo pinta la línea de tiempo
+ * unificada del historial (Ficha 360 y Workspace), plegado en la fila del
+ * grupo; las acciones de grupo del supervisor van a la vista en la fila.
  *
- * Va por crédito y paginado, no por caso: un crédito puede acumular varios
- * casos de cobro y el asesor espera ver TODOS los links que se le generaron,
- * no solo los del caso vigente ni solo los que siguen pendientes de pago. El
- * crédito lo resuelve el servidor a partir del caso (getPagaloHistorial): un
- * id de crédito es numérico y enumerable, mandarlo desde acá sería pedirle al
- * cliente que elija qué links puede ver.
+ * Los grupos los carga `useHistorialUnificado` por crédito (no por caso): un
+ * crédito acumula varios casos de cobro y el asesor espera ver TODOS los links
+ * que se le generaron. El crédito lo resuelve el servidor a partir del caso
+ * (getPagaloHistorial): un id de crédito es numérico y enumerable.
  */
 import { useQuery } from "@tanstack/react-query";
-import {
-	CheckCircle2,
-	ChevronLeft,
-	ChevronRight,
-	CreditCard,
-	XCircle,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import {
-	HistorialGestiones,
-	SeccionHistorial,
-	type TonoGestion,
-} from "@/components/cobros/ficha/ficha-pestanas";
+import { XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { authClient } from "@/lib/auth-client";
 import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
 import {
 	agruparLinksPorGeneracion,
@@ -42,17 +25,10 @@ import {
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
-import { PERMISSIONS } from "@/lib/roles";
-import { client, orpc } from "@/utils/orpc";
-import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
+import { client } from "@/utils/orpc";
 import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
 import { AccionesLinkPagalo } from "./pagalo/chip-link-pagalo";
-import {
-	antiguedadLink,
-	etiquetaMotivo,
-	fechaHora,
-	getEstadoGrupoInfo,
-} from "./pagalo/formato-pagalo";
+import { antiguedadLink, fechaHora } from "./pagalo/formato-pagalo";
 
 type Link = {
 	id: string;
@@ -73,7 +49,7 @@ type Link = {
 	transactionAmount: string | null;
 };
 
-type Grupo = {
+export type GrupoPagalo = {
 	id: string;
 	status: string;
 	origen: "ASESOR" | "BOT";
@@ -250,12 +226,12 @@ function LinksPorCuota({
 }
 
 /** Detalle de un grupo (va plegado en la línea de tiempo). */
-function GrupoPagaloDetalle({
+export function GrupoPagaloDetalle({
 	grupo,
 	casoCobroId,
 	esSupervisor,
 }: {
-	grupo: Grupo;
+	grupo: GrupoPagalo;
 	casoCobroId: string;
 	esSupervisor: boolean;
 }) {
@@ -334,170 +310,5 @@ function GrupoPagaloDetalle({
 				abiertoPorDefecto={false}
 			/>
 		</div>
-	);
-}
-
-const POR_PAGINA = 5;
-
-/** Punto de la línea de tiempo según el estado del grupo. */
-function tonoGrupo(status: string): TonoGestion {
-	if (status === "COMPLETED") return "logrado";
-	if (status === "APPLICATION_FAILED" || status === "REVIEW_REQUIRED")
-		return "fallido";
-	if (status === "CANCELLED") return "neutro";
-	return "sin-contacto";
-}
-
-export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
-	const [pagina, setPagina] = useState(1);
-	const { data: session } = authClient.useSession();
-	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
-	// El componente se reusa al navegar de un caso a otro (misma ruta): sin
-	// esto, la página vieja viaja al caso nuevo y, si el crédito nuevo tiene
-	// menos páginas, el servidor devuelve una página vacía con `total > 0` — se
-	// veía "Sin links" y los controles de paginación escondidos, sin forma de
-	// volver a la 1 salvo recargando (Codex, PR #1498).
-	const casoRenderizado = useRef(casoCobroId);
-	const casoCambio = casoRenderizado.current !== casoCobroId;
-	useEffect(() => {
-		casoRenderizado.current = casoCobroId;
-		setPagina(1);
-	}, [casoCobroId]);
-	const historial = useQuery({
-		...orpc.getPagaloHistorial.queryOptions({
-			input: { casoCobroId, page: pagina, pageSize: POR_PAGINA },
-		}),
-		enabled: !!casoCobroId,
-		// Sin esto la lista parpadea a vacío en cada cambio de página. Pero SOLO
-		// entre páginas del mismo caso: al cambiar de caso, seguir pintando los
-		// grupos anteriores mostraría —y dejaría copiar— links de pago del
-		// cliente que se acaba de dejar atrás.
-		placeholderData: (anterior) => (casoCambio ? undefined : anterior),
-	});
-	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
-	const grupos = data?.grupos ?? [];
-	const total = data?.total ?? 0;
-	const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
-	// Red de seguridad del mismo problema: si el total encogió por cualquier
-	// otra vía (un grupo borrado, un refetch), la página fuera de rango no puede
-	// dejar la sección vacía y sin controles.
-	useEffect(() => {
-		if (!historial.isLoading && pagina > totalPaginas) setPagina(1);
-	}, [historial.isLoading, pagina, totalPaginas]);
-
-	return (
-		<SeccionHistorial
-			titulo="Links de pago"
-			conteo={historial.isLoading ? "…" : total}
-			icono={<CreditCard />}
-			descripcion="Todos los links Págalo generados para este crédito"
-			estado={
-				historial.isLoading
-					? "cargando"
-					: historial.isError
-						? "error"
-						: grupos.length === 0
-							? "vacio"
-							: "ok"
-			}
-			onReintentar={() => historial.refetch()}
-			// El asesor tiene que poder distinguir "no se generó ninguno" de "se
-			// rompió algo".
-			vacio="Sin links de pago generados para este crédito."
-			derecha={
-				totalPaginas > 1 ? (
-					<div className="flex items-center gap-2">
-						<Button
-							disabled={pagina === 1}
-							onClick={() => setPagina((p) => Math.max(1, p - 1))}
-							size="icon-sm"
-							type="button"
-							variant="secondary"
-							aria-label="Página anterior"
-						>
-							<ChevronLeft />
-						</Button>
-						<span className="text-fg-secondary text-xs">
-							{pagina} de {totalPaginas}
-						</span>
-						<Button
-							disabled={pagina >= totalPaginas}
-							onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-							size="icon-sm"
-							type="button"
-							variant="secondary"
-							aria-label="Página siguiente"
-						>
-							<ChevronRight />
-						</Button>
-					</div>
-				) : undefined
-			}
-		>
-			<HistorialGestiones
-				items={grupos.map((grupo) => {
-					const estadoInfo = getEstadoGrupoInfo(grupo.status);
-					const motivoRevision = etiquetaMotivo(grupo.lastDispatchError);
-					return {
-						id: grupo.id,
-						cuando: grupo.createdAt ? fechaHora(grupo.createdAt) : "Sin fecha",
-						titulo: (
-							<span className="inline-flex items-center gap-1.5">
-								<CreditCard className="h-3.5 w-3.5 text-violet-600" />
-								Links de pago
-							</span>
-						),
-						badge: (
-							<Badge className={estadoInfo.className}>{estadoInfo.label}</Badge>
-						),
-						derecha: q(grupo.totalAmount),
-						// Los grupos del bot no tienen persona detrás: el servidor manda
-						// `creadoPor` en null y acá se nombra al bot, en vez de
-						// atribuirle los links a un asesor que nunca los generó.
-						subtitulo:
-							grupo.origen === "BOT"
-								? "Por: Bot de WhatsApp"
-								: `Por: ${grupo.creadoPor ?? "—"}`,
-						tono: tonoGrupo(grupo.status),
-						extra: (
-							<div className="space-y-1.5">
-								{grupo.carteraImportId && grupo.status === "COMPLETED" && (
-									<p className="text-green-700 text-xs dark:text-green-400">
-										<CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-										Pago validado y aplicado en cartera (importación #
-										{grupo.carteraImportId}); la factura se emite después
-									</p>
-								)}
-								{motivoRevision && grupo.status !== "COMPLETED" && (
-									<p className="text-red-700 text-xs dark:text-red-400">
-										<XCircle className="mr-1 inline h-3.5 w-3.5" />
-										{motivoRevision}
-									</p>
-								)}
-								{/* Las acciones de grupo (CB-127) quedan siempre a la vista:
-								    un grupo pagado esperando al dispatcher se empuja desde acá.
-								    El componente devuelve null si no hay nada que ofrecer.
-								    `carteraCreditoId` puede venir null en grupos viejos: solo se
-								    usa para invalidar la query del grupo activo. */}
-								<AccionesSupervisorPagalo
-									casoCobroId={casoCobroId}
-									creditoId={grupo.carteraCreditoId ?? 0}
-									groupId={grupo.id}
-									status={grupo.status}
-								/>
-							</div>
-						),
-						detalleEtiqueta: `Ver ${grupo.links.length === 1 ? "el link" : `los ${grupo.links.length} links`}, cuotas y bitácora`,
-						detalleNodo: (
-							<GrupoPagaloDetalle
-								grupo={grupo}
-								casoCobroId={casoCobroId}
-								esSupervisor={esSupervisor}
-							/>
-						),
-					};
-				})}
-			/>
-		</SeccionHistorial>
 	);
 }

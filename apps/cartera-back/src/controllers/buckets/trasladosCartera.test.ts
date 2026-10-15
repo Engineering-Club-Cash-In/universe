@@ -19,6 +19,8 @@ let updateMatches: boolean;
 let actorRegistrado: boolean;
 let lockTimeout: boolean;
 let quedanCreditosEnOrigen: boolean;
+/** `asesores.activo` del origen que lee la pausa del pool (ausencia o baja). */
+let origenActivo = true;
 const executor = {
   async execute(statement: SQL) {
     const { sql: query, params } = dialect.sqlToQuery(statement);
@@ -27,6 +29,7 @@ const executor = {
     if (query.includes("pg_advisory_xact_lock") && lockTimeout) {
       throw { cause: { code: "55P03" } };
     }
+    if (query.includes("SELECT activo FROM")) return { rows: [{ activo: origenActivo }] };
     if (query.includes("WITH asignaciones")) {
       writes.push(query);
       const serializadas = params.find((param) => typeof param === "string" && param.startsWith("["));
@@ -68,7 +71,7 @@ const { previsualizarTrasladoCarteraMasivo, confirmarTrasladoCarteraMasivo, soli
 const entrada = { asesorOrigenId: 10, modo: "redistribucion", motivo: "Renuncia", actorEmail: "supervisor@example.com" };
 
 beforeEach(() => {
-  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true; lockTimeout = false; quedanCreditosEnOrigen = false;
+  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true; lockTimeout = false; quedanCreditosEnOrigen = false; origenActivo = true;
   creditos = [10, 20, 20, 20, 20].map((asesor_id, i) => ({ credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: i === 0 }));
 });
 
@@ -306,4 +309,62 @@ test("reintento idempotente conserva éxito aunque actor se desactive después",
   const primero = await confirmarTrasladoCarteraMasivo(input);
   actorRegistrado = false;
   await expect(confirmarTrasladoCarteraMasivo(input)).resolves.toEqual(primero);
+});
+
+// COBROS-02 · Baja de asesor: el reparto, la pausa del pool y la desactivación
+// son UNA transacción; la previsualización y la confirmación tienen que coincidir.
+const baja = { ...entrada, motivo: "Baja de asesor: Renuncia voluntaria", pausarPoolOrigen: true, desactivarOrigen: true };
+
+test("contrato de la baja: exige pausar el pool y no conserva cuentas", () => {
+  expect(solicitudTrasladoSchema.safeParse(baja).success).toBe(true);
+  expect(solicitudTrasladoSchema.safeParse({ ...baja, pausarPoolOrigen: false }).success).toBe(false);
+  expect(solicitudTrasladoSchema.safeParse({ ...baja, mantenerEspeciales: true }).success).toBe(false);
+});
+
+test("confirmar la baja reparte y desactiva al asesor en la misma operación", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(baja);
+  const input = { previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: baja.actorEmail, asesorOrigenId: 10, pausarPoolOrigen: true, desactivarOrigen: true };
+  const r = await confirmarTrasladoCarteraMasivo(input);
+  expect(r).toMatchObject({ success: true, cuentas: 1, desactivado: true });
+  const desactiva = queries.findIndex((q) => q.includes("SET activo = false, activo_para_creditos = false"));
+  const reparto = queries.findIndex((q) => q.includes("WITH asignaciones"));
+  expect(reparto).toBeGreaterThan(-1);
+  // Primero se mueve la cartera (y se comprueba que no le queda nada), luego se desactiva.
+  expect(desactiva).toBeGreaterThan(reparto);
+  expect(queries.some((q) => q.includes("platform_users SET is_active = false") && q.includes("'ASESOR'"))).toBe(true);
+  expect(queries.some((q) => q.includes("SET solicitud = solicitud ||") && q.includes("desactivado"))).toBe(true);
+  // Reintento con la misma clave: mismo resultado, sin escribir de nuevo.
+  const escrituras = writes.length;
+  await expect(confirmarTrasladoCarteraMasivo(input)).resolves.toEqual(r);
+  expect(writes.length).toBe(escrituras);
+});
+
+test("una baja no se confirma como traslado normal ni al revés", async () => {
+  const pBaja = await previsualizarTrasladoCarteraMasivo(baja);
+  await expect(
+    confirmarTrasladoCarteraMasivo({ previewId: pBaja.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: baja.actorEmail }),
+  ).rejects.toThrow(/Dar de baja/);
+  const pNormal = await previsualizarTrasladoCarteraMasivo(entrada);
+  await expect(
+    confirmarTrasladoCarteraMasivo({ previewId: pNormal.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: entrada.actorEmail, desactivarOrigen: true }),
+  ).rejects.toThrow(/no incluye la baja/);
+  expect(writes).toEqual([]);
+});
+
+test("un asesor sin cartera también se puede dar de baja", async () => {
+  creditos = [20, 20, 30].map((asesor_id, i) => ({ credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: false }));
+  const p = await previsualizarTrasladoCarteraMasivo(baja);
+  expect(p.asignaciones).toEqual([]);
+  await expect(
+    confirmarTrasladoCarteraMasivo({ previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: baja.actorEmail, desactivarOrigen: true }),
+  ).resolves.toMatchObject({ cuentas: 0, desactivado: true });
+});
+
+test("la baja de un asesor ya desactivado se rechaza sin repartir", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(baja);
+  origenActivo = false;
+  await expect(
+    confirmarTrasladoCarteraMasivo({ previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: baja.actorEmail, desactivarOrigen: true }),
+  ).rejects.toThrow(/ya está dado de baja/);
+  expect(writes.some((q) => q.includes("WITH asignaciones"))).toBe(false);
 });

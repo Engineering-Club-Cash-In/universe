@@ -17,6 +17,8 @@ export type AsesorConBuckets = {
   nombre: string;
   email_cash_in: string | null;
   activo: boolean | null;
+  /** Correo del usuario del CRM que lo supervisa (null = sin asignar). */
+  supervisor_email: string | null;
   buckets: number[];
 };
 
@@ -38,6 +40,7 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
       nombre: asesores.nombre,
       email_cash_in: asesores.emailCashIn,
       activo: asesores.activo,
+      supervisor_email: asesores.supervisorEmail,
       bucket: asesor_bucket.bucket,
     })
     .from(asesores)
@@ -55,6 +58,7 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
         nombre: r.nombre,
         email_cash_in: r.email_cash_in,
         activo: r.activo,
+        supervisor_email: r.supervisor_email,
         buckets: [],
       });
     }

@@ -17,9 +17,9 @@ export type AsesorTraslado = Awaited<
 /**
  * Selector de asesor: `Combobox` del design system con búsqueda (la lista
  * crece con el equipo). Valor: `asesor_id` como texto ("" = sin elegir).
- * Opciones: nombre, «(inactivo)» y sus buckets. Volver a elegir la opción
- * marcada la quita. Dentro de un modal, el menú se monta en la caja del modal
- * (`PopoverPortalContext`).
+ * Opciones: nombre, «(inactivo)» y sus buckets («sin buckets» si no atiende
+ * ninguno). Volver a elegir la opción marcada la quita. Dentro de un modal,
+ * el menú se monta en la caja del modal (`PopoverPortalContext`).
  */
 export function SelectorAsesor({
 	id,
@@ -43,7 +43,7 @@ export function SelectorAsesor({
 		.map((a) => ({
 			value: String(a.asesor_id),
 			label: `${a.nombre}${!a.activo ? " (inactivo)" : ""}${
-				a.buckets.length ? ` · B${a.buckets.join(", B")}` : " · sin pool"
+				a.buckets.length ? ` · B${a.buckets.join(", B")}` : " · sin buckets"
 			}`,
 		}));
 	return (

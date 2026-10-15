@@ -39,7 +39,7 @@ import type { SeccionHistorial } from "@/components/cobros/equipo/search";
 import { Button } from "@/components/ui/button";
 import { dialogPanelClassName } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { orpc } from "@/utils/orpc";
+import { orpc, orpcAparte } from "@/utils/orpc";
 import { ShowcaseGroup } from "./_layout";
 
 /**
@@ -68,6 +68,7 @@ const asesorPool = (
 	nivel: nivelAsesor(buckets),
 	userId: `u${asesor_id}`,
 	usuarioHabilitado: true,
+	supervisor: null,
 });
 
 /** Catálogo `getAsesoresTraslados` de ejemplo (el equipo de la pestaña Asesores). */
@@ -642,6 +643,99 @@ function propsTraslado(
 	};
 }
 
+/* ── Caso real: créditos sueltos fuera del pool (Caren, pool B0) ───────── */
+
+/**
+ * Caren Rivera atiende solo B0 (529 créditos), pero el motor subió un crédito
+ * a B3 y otro a B5 y siguen a su nombre. Wilson Gómez (B0) puede recibir su
+ * cartera; esos dos créditos no, porque no atiende B3 ni B5.
+ */
+const CAREN = asesorPool(20, "Caren Rivera", [0]);
+const WILSON = asesorPool(21, "Wilson Gómez", [0]);
+const ANA = POOL[6];
+
+const PREVIEW_CAREN: PreviewTraslado = {
+	previewId: "7a1c2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+	venceEn: "2099-01-01T16:42:00Z",
+	asignaciones: Array.from({ length: 529 }, (_, i) => ({
+		creditoId: 60000 + i,
+		numeroCreditoSifco: `0101021416${String(i).padStart(4, "0")}`,
+		cliente: CLIENTES[i % CLIENTES.length],
+		asesorAnteriorId: 20,
+		asesorNuevoId: 21,
+		bucket: 0,
+		prioridad: i % 9 === 0 ? (0 as const) : (1 as const),
+	})),
+	bloqueos: [
+		{ bucket: 3, creditoId: 2315665, razon: "destino_no_elegible" },
+		{ bucket: 5, creditoId: 113000, razon: "destino_no_elegible" },
+	],
+	excluidos: [],
+	carga: [
+		{
+			asesorId: 21,
+			nombre: "Wilson Gómez",
+			bucket: 0,
+			antes: 512,
+			despues: 1041,
+			capacidad: 1100,
+		},
+		{
+			asesorId: 20,
+			nombre: "Caren Rivera",
+			bucket: 0,
+			antes: 529,
+			despues: 0,
+			capacidad: 600,
+		},
+	],
+};
+
+/** Props con Caren como origen y «A un solo asesor» → Wilson. */
+function propsCaren(
+	cambios: Partial<TrasladoVistaProps> = {},
+): TrasladoVistaProps {
+	return propsTraslado({
+		asesores: [...POOL, CAREN, WILSON],
+		origen: "20",
+		origenInfo: {
+			nombre: CAREN.nombre,
+			activo: true,
+			buckets: CAREN.buckets,
+			porBucket: [
+				{ bucket: 0, cuentas: 529 },
+				{ bucket: 3, cuentas: 1 },
+				{ bucket: 5, cuentas: 1 },
+			],
+		},
+		modo: "traslado_completo",
+		destino: "21",
+		destinos: [
+			{
+				asesor: WILSON,
+				capacidad: { cuentas: 512, capacidad: 1100 },
+				noCubre: [3, 5],
+			},
+			{
+				asesor: ANA,
+				capacidad: { cuentas: 10, capacidad: 20 },
+				noCubre: [3, 5],
+			},
+		],
+		bucketsOrigen: [0, 3, 5],
+		bucketsDestinoUnico: [0],
+		candidatosPorBucket: {
+			0: [WILSON, ANA],
+			3: POOL.filter((a) => a.buckets.includes(3)),
+			5: POOL.filter((a) => a.buckets.includes(5)),
+		},
+		candidatosEspecial: [...POOL, WILSON],
+		nombres: { ...NOMBRES, 20: CAREN.nombre, 21: WILSON.nombre },
+		onUsarPorBucket: nada,
+		...cambios,
+	});
+}
+
 /** Los tres pasos, interactivos, con datos de ejemplo. */
 function useTrasladoDemo(): TrasladoVistaProps {
 	const [paso, setPaso] = useState<TrasladoVistaProps["paso"]>("formulario");
@@ -652,16 +746,20 @@ function useTrasladoDemo(): TrasladoVistaProps {
 	const [especial, setEspecial] = useState("");
 	const [detalle, setDetalle] = useState("");
 	const [pagina, setPagina] = useState(1);
+	// Simula el 409 de cartera-back: Marta tiene 2 créditos fuera de cobranza
+	// y la primera vista previa sin responsable se rechaza.
+	const [faltaResponsable, setFaltaResponsable] = useState(false);
+	const [conocidos, setConocidos] = useState(false);
 	const requiere = razon === "despido" || razon === "renuncia";
 	const error =
 		razon === "otro" && !detalle.trim()
-			? "Seleccione un motivo y complete la explicación."
+			? "Con el motivo «Otro», escriba la nota que explica el traslado."
 			: modo === "traslado_completo" && !destino
-				? "Seleccione un asesor de destino."
+				? "Seleccione quién recibe la cartera."
 				: requiere && !especial
-					? "Seleccione un responsable para las cuentas sin bucket operativo."
+					? "Elija quién queda a cargo de los créditos fuera de cobranza."
 					: modo === "destino_por_bucket" && (!porBucket[2] || !porBucket[3])
-						? `Seleccione un asesor de destino para B${porBucket[2] ? 3 : 2}.`
+						? `Seleccione quién recibe B${porBucket[2] ? 3 : 2}.`
 						: null;
 	return propsTraslado({
 		paso,
@@ -676,21 +774,33 @@ function useTrasladoDemo(): TrasladoVistaProps {
 		destinosPorBucket: porBucket,
 		onDestinoBucket: (b, v) => setPorBucket((x) => ({ ...x, [b]: v })),
 		destinoEspecial: especial,
-		onDestinoEspecial: setEspecial,
+		onDestinoEspecial: (v) => {
+			setEspecial(v);
+			setFaltaResponsable(false);
+		},
 		requiereDestinoEspecial: requiere,
+		especialesOrigen: conocidos ? { cuantos: 2 } : null,
+		faltaResponsableEspecial: faltaResponsable,
 		razon,
 		onRazon: setRazon,
 		detalle,
 		onDetalle: setDetalle,
 		errorFormulario: error,
-		onRevisar: () => setPaso("revision"),
+		onRevisar: () => {
+			if (!especial) {
+				setConocidos(true);
+				setFaltaResponsable(true);
+				return;
+			}
+			setPaso("revision");
+		},
 		preview: PREVIEW,
 		puedeConfirmar: true,
 		pagina,
 		onPagina: setPagina,
 		onAtras: () => setPaso("formulario"),
 		onConfirmar: () => setPaso("resultado"),
-		resultado: { cuentas: 36, operacionId: PREVIEW.previewId },
+		resultado: { cuentas: 36, operacionId: PREVIEW.previewId, receptores: 2 },
 		onListo: () => setPaso("formulario"),
 	});
 }
@@ -738,6 +848,12 @@ clienteDemo.setQueryData(
 clienteDemo.setQueryData(
 	orpc.getCargaPorAsesorBucket.queryOptions({ input: {} }).queryKey,
 	{ ...CARGA, fecha: "2026-10-07" } as never,
+);
+// «Marcar ausente» lee las ausencias vigentes para no ofrecer a quien ya está ausente.
+clienteDemo.setQueryData(
+	orpcAparte.listarAusencias.queryOptions({ input: { soloVigentes: true } })
+		.queryKey,
+	[] as never,
 );
 
 /**
@@ -832,7 +948,7 @@ export function GruposAsignacion() {
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Trasladar · paso 1 con «A un solo asesor» y con «Destino por bucket»">
+			<ShowcaseGroup title="Trasladar · paso 1 con «A un solo asesor», con «Un asesor por bucket» y despido (responsable obligatorio) y con créditos fuera de cobranza detectados">
 				<div className="flex flex-wrap items-start gap-6 py-4">
 					<PanelTraslado>
 						<TrasladoVista
@@ -847,15 +963,33 @@ export function GruposAsignacion() {
 								razon: "despido",
 								requiereDestinoEspecial: true,
 								errorFormulario:
-									"Seleccione un responsable para las cuentas sin bucket operativo.",
+									"Elija quién queda a cargo de los créditos fuera de cobranza.",
+							})}
+						/>
+					</PanelTraslado>
+					<PanelTraslado>
+						<TrasladoVista
+							{...propsTraslado({
+								especialesOrigen: { cuantos: 2 },
+								faltaResponsableEspecial: true,
 							})}
 						/>
 					</PanelTraslado>
 				</div>
 			</ShowcaseGroup>
 
-			<ShowcaseGroup title="Trasladar · paso 2 con problemas y paso 3">
+			<ShowcaseGroup title="Trasladar · paso 2 «Redistribución de cartera» (normal y con problemas) y paso 3 «Cartera redistribuida»">
 				<div className="flex flex-wrap items-start gap-6 py-4">
+					<PanelTraslado>
+						<TrasladoVista
+							{...propsTraslado({
+								paso: "revision",
+								preview: PREVIEW,
+								destinoEspecial: "1",
+								puedeConfirmar: true,
+							})}
+						/>
+					</PanelTraslado>
 					<PanelTraslado>
 						<TrasladoVista
 							{...propsTraslado({
@@ -869,7 +1003,37 @@ export function GruposAsignacion() {
 						<TrasladoVista
 							{...propsTraslado({
 								paso: "resultado",
-								resultado: { cuentas: 36, operacionId: PREVIEW.previewId },
+								resultado: {
+									cuentas: 36,
+									operacionId: PREVIEW.previewId,
+									receptores: 2,
+								},
+							})}
+						/>
+					</PanelTraslado>
+				</div>
+			</ShowcaseGroup>
+
+			<ShowcaseGroup title="Trasladar · créditos sueltos fuera del pool (caso Caren: pool B0 con un crédito en B3 y otro en B5)">
+				<div className="flex flex-wrap items-start gap-6 py-4">
+					<PanelTraslado>
+						<TrasladoVista {...propsCaren()} />
+					</PanelTraslado>
+					<PanelTraslado>
+						<TrasladoVista
+							{...propsCaren({
+								modo: "destino_por_bucket",
+								destino: "",
+								destinosPorBucket: { 0: "21" },
+								errorFormulario: "Seleccione quién recibe B3.",
+							})}
+						/>
+					</PanelTraslado>
+					<PanelTraslado>
+						<TrasladoVista
+							{...propsCaren({
+								paso: "revision",
+								preview: PREVIEW_CAREN,
 							})}
 						/>
 					</PanelTraslado>

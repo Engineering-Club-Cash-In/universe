@@ -18,22 +18,17 @@
  */
 import { useMutation } from "@tanstack/react-query";
 import {
-	Banknote,
 	Briefcase,
 	Car,
 	CheckCheck,
 	ChevronDown,
 	Clock,
-	FileText,
 	HandCoins,
 	Home,
 	Lock,
 	Mail,
 	MapPin,
-	MessageCircle,
-	MessageSquare,
 	Phone,
-	PhoneIncoming,
 	TriangleAlert,
 } from "lucide-react";
 import * as React from "react";
@@ -48,20 +43,24 @@ import {
 	useDocumentosCaso,
 } from "@/components/cobros/ficha/documentos-caso";
 import {
+	EstadoCuentaAcciones,
+	EstadoCuentaAccionesBarra,
+} from "@/components/cobros/ficha/estado-cuenta-acciones";
+import {
 	AsistenteIA,
 	CuotaPlanFila,
 	type DocumentoFila,
 	DocumentosFicha,
 	type EstadoCuota,
-	HistorialGestiones,
-	HistoricoCredito,
-	type ItemGestion,
-	PendienteBackend,
 	ResumenCuentaCard,
 	RotuloSeccion,
-	type TonoGestion,
 } from "@/components/cobros/ficha/ficha-pestanas";
 import { CardEstadoCobro } from "@/components/cobros/ficha/ficha-resumen";
+import {
+	type DatosHistorialUnificado,
+	HistorialUnificado,
+} from "@/components/cobros/ficha/historial-unificado";
+import { useHistorialUnificado } from "@/components/cobros/ficha/use-historial-unificado";
 import {
 	estadoReferencia,
 	etiquetaOrigen,
@@ -82,7 +81,6 @@ import {
 	inicialesDe,
 } from "@/components/ds/cards-credito";
 import { SinContacto } from "@/components/ds/indicadores";
-import { SegmentedNav } from "@/components/ds/ubicaciones";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -102,10 +100,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-	contactoDeGestion,
-	etiquetaCanalGestion,
-	textoProximoContacto,
-} from "@/lib/cobros/gestion-contacto";
+	cortePeriodoActual,
+	eventoDeHito,
+	eventosDeContactos,
+	mezclarEventos,
+} from "@/lib/cobros/historial-unificado";
 import { inicioDelDiaGT } from "@/lib/cobros/promesa-activa";
 import {
 	abreviarCreditosCrm,
@@ -119,11 +118,7 @@ import { cn } from "@/lib/utils";
 import { client, orpcAparte } from "@/utils/orpc";
 import { useMarcarAlertaLeida, VerAlertasLeidas } from "./alertas-leidas";
 import { correoDeRelleno, telefonoDeRelleno } from "./gestion/contacto-valido";
-import type {
-	CasoWorkspace,
-	CuotaPlan,
-	GestionCaso,
-} from "./use-caso-workspace";
+import type { CasoWorkspace, CuotaPlan } from "./use-caso-workspace";
 
 /* ── Tipos de la vista ──────────────────────────────────────────────────────── */
 
@@ -289,14 +284,11 @@ export type ContextoCasoVistaProps = {
 	 */
 	cuentaNexa?: string | null;
 	resumen: ResumenContexto;
-	historial: {
-		estado: Estado;
-		total: number;
-		items: ItemGestion[];
-		onReintentar?: () => void;
-	};
-	/** Vida del crédito; null = pendiente de backend. */
-	historico: Array<{ id: string; descripcion: string; fecha: string }> | null;
+	/**
+	 * Historial unificado (`useHistorialUnificado`): la misma línea de tiempo
+	 * con chips de filtro que la Ficha 360.
+	 */
+	historial: DatosHistorialUnificado;
 	estadoCuenta: {
 		saldoTotal: string;
 		filas: Array<{ label: string; valor: string; tono?: "danger" | "success" }>;
@@ -305,6 +297,11 @@ export type ContextoCasoVistaProps = {
 		/** Sin handler, el botón «Enviar por WhatsApp» no se muestra. */
 		onEnviar?: () => void;
 		enviando?: boolean;
+		/**
+		 * Barra de acciones ya armada (vista previa · WhatsApp · correo, la pone
+		 * el contenedor). Sin ella se pinta solo «Enviar por WhatsApp».
+		 */
+		acciones?: React.ReactNode;
 	};
 	documentos: { enviar: DocumentoFila[]; solicitar: DocumentoFila[] };
 	referencias: { estado: Estado; items: ReferenciaContexto[] };
@@ -320,7 +317,6 @@ export type ContextoCasoVistaProps = {
 
 /* ── Vista ──────────────────────────────────────────────────────────────────── */
 
-const POR_PAGINA_HISTORIAL = 10;
 const POR_PAGINA_CUOTAS = 12;
 
 export function ContextoCasoVista({
@@ -337,7 +333,6 @@ export function ContextoCasoVista({
 	cuentaNexa,
 	resumen,
 	historial,
-	historico,
 	estadoCuenta,
 	documentos,
 	referencias,
@@ -478,11 +473,7 @@ export function ContextoCasoVista({
 			>
 				{tab === "resumen" && <PestanaResumen {...resumen} />}
 				{tab === "historial" && (
-					<PestanaHistorial
-						historial={historial}
-						historico={historico}
-						inicial={historialInicial}
-					/>
+					<PestanaHistorial historial={historial} inicial={historialInicial} />
 				)}
 				{tab === "estado-cuenta" && <PestanaEstadoCuenta {...estadoCuenta} />}
 				{tab === "asistente" && (
@@ -852,90 +843,15 @@ function FilaContacto({
 
 /* ── Historial ──────────────────────────────────────────────────────────────── */
 
+/** Misma línea de tiempo que la Ficha 360 (gestiones, pagos, links, bot…). */
 function PestanaHistorial({
 	historial,
-	historico,
 	inicial,
 }: {
 	historial: ContextoCasoVistaProps["historial"];
-	historico: ContextoCasoVistaProps["historico"];
 	inicial: "actual" | "historico";
 }) {
-	const [seg, setSeg] = React.useState(inicial);
-	const [visibles, setVisibles] = React.useState(POR_PAGINA_HISTORIAL);
-	return (
-		<div className="flex flex-col gap-4">
-			<SegmentedNav
-				className="self-start"
-				value={seg}
-				onValueChange={(v) => setSeg(v as "actual" | "historico")}
-				opciones={[
-					{ value: "actual", label: "Historial actual" },
-					{ value: "historico", label: "Histórico" },
-				]}
-			/>
-			{seg === "actual" ? (
-				<div className="flex flex-col gap-3">
-					<RotuloSeccion>
-						Historial del crédito · {historial.total}{" "}
-						{historial.total === 1 ? "gestión" : "gestiones"}
-					</RotuloSeccion>
-					{historial.estado === "cargando" ? (
-						<p className="text-fg-tertiary text-sm">Cargando…</p>
-					) : historial.estado === "error" ? (
-						<div className="flex flex-wrap items-center gap-3">
-							<p className="text-fg-secondary text-sm">
-								No se pudo cargar el historial.
-							</p>
-							{historial.onReintentar ? (
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={historial.onReintentar}
-								>
-									Reintentar
-								</Button>
-							) : null}
-						</div>
-					) : historial.estado === "vacio" || historial.items.length === 0 ? (
-						<p className="text-fg-tertiary text-sm">
-							No hay gestiones registradas para este caso.
-						</p>
-					) : (
-						<>
-							<HistorialGestiones items={historial.items.slice(0, visibles)} />
-							{historial.items.length > visibles ? (
-								<Button
-									variant="ghost"
-									size="sm"
-									className="self-center"
-									onClick={() => setVisibles((v) => v + POR_PAGINA_HISTORIAL)}
-								>
-									Ver más ({historial.items.length - visibles})
-								</Button>
-							) : null}
-						</>
-					)}
-				</div>
-			) : (
-				<div className="flex flex-col gap-3">
-					<RotuloSeccion>Vida completa del crédito</RotuloSeccion>
-					{historico ? (
-						historico.length > 0 ? (
-							<HistoricoCredito hitos={historico} />
-						) : (
-							<p className="text-fg-tertiary text-sm">Sin hitos registrados.</p>
-						)
-					) : (
-						<PendienteBackend titulo="Pronto">
-							Las entradas y salidas de bucket, reestructuras y convenios del
-							crédito se mostrarán aquí. Pendiente de backend (tarea F4).
-						</PendienteBackend>
-					)}
-				</div>
-			)}
-		</div>
-	);
+	return <HistorialUnificado datos={historial} periodoInicial={inicial} />;
 }
 
 /* ── Estado de cuenta ───────────────────────────────────────────────────────── */
@@ -947,21 +863,18 @@ function PestanaEstadoCuenta({
 	estadoPlan,
 	onEnviar,
 	enviando,
+	acciones,
 }: ContextoCasoVistaProps["estadoCuenta"]) {
 	const [visibles, setVisibles] = React.useState(POR_PAGINA_CUOTAS);
 	return (
 		<div className="flex flex-col gap-4">
-			{onEnviar ? (
-				<Button
-					className="w-full"
-					disabled={enviando}
-					loading={enviando}
-					onClick={onEnviar}
-				>
-					<MessageCircle aria-hidden />
-					{enviando ? "Enviando estado de cuenta…" : "Enviar por WhatsApp"}
-				</Button>
-			) : null}
+			{acciones ??
+				(onEnviar ? (
+					<EstadoCuentaAccionesBarra
+						onWhatsapp={onEnviar}
+						enviandoWhatsapp={enviando}
+					/>
+				) : null)}
 			<ResumenCuentaCard saldoTotal={saldoTotal} filas={filas} />
 			<div className="flex flex-col">
 				<RotuloSeccion>Plan de pagos</RotuloSeccion>
@@ -1152,123 +1065,26 @@ function PestanaUbicaciones({
 
 /* ── Contenedor ─────────────────────────────────────────────────────────────── */
 
-const horaGT = (d: Date | string) =>
-	new Date(d).toLocaleTimeString("es-GT", {
-		timeZone: "America/Guatemala",
-		hour: "2-digit",
-		minute: "2-digit",
-		hour12: false,
-	});
-
-/** Etiqueta y color de cada resultado de gestión (tokens del DS). */
-const ESTADO_GESTION: Record<string, { label: string; tone: CrmTone }> = {
-	contactado: { label: "Contactado", tone: "success" },
-	promesa_pago: { label: "Promesa de pago", tone: "brand" },
-	no_contesta: { label: "No contesta", tone: "warning" },
-	mensaje_enviado: { label: "Mensaje enviado", tone: "info" },
-	acuerdo_parcial: { label: "Acuerdo parcial", tone: "brand" },
-	rechaza_pagar: { label: "Rechaza pagar", tone: "danger" },
-	numero_equivocado: { label: "Número equivocado", tone: "neutral" },
-	link_pago_generado: { label: "Link de pago generado", tone: "brand" },
-	pago_registrado: { label: "Pago registrado", tone: "success" },
-};
-
-function iconoMetodo(
-	metodo: string | null | undefined,
-	direccion?: string | null,
-) {
-	switch (metodo) {
-		case "llamada":
-			return direccion === "entrante" ? (
-				<PhoneIncoming aria-hidden className="size-3.5" />
-			) : (
-				<Phone aria-hidden className="size-3.5" />
-			);
-		case "whatsapp":
-			return <MessageCircle aria-hidden className="size-3.5" />;
-		case "sms":
-			return <MessageSquare aria-hidden className="size-3.5" />;
-		case "email":
-			return <Mail aria-hidden className="size-3.5" />;
-		case "visita_domicilio":
-			return <Home aria-hidden className="size-3.5" />;
-		case "visita_trabajo":
-			return <Briefcase aria-hidden className="size-3.5" />;
-		case "carta_notarial":
-			return <FileText aria-hidden className="size-3.5" />;
-		case "pago":
-			return <Banknote aria-hidden className="size-3.5" />;
-		default:
-			return <Phone aria-hidden className="size-3.5" />;
-	}
-}
-
-/** Una gestión del historial → fila de la línea de tiempo (mismo criterio que la ficha). */
-function itemDeGestion(g: GestionCaso): ItemGestion {
-	const estado = ESTADO_GESTION[g.estadoContacto ?? ""] ?? {
-		label: g.estadoContacto ?? "—",
-		tone: "neutral" as const,
-	};
-	const tono: TonoGestion = [
-		"contactado",
-		"acuerdo_parcial",
-		"pago_registrado",
-	].includes(g.estadoContacto ?? "")
-		? "logrado"
-		: ["no_contesta", "numero_equivocado", "mensaje_enviado"].includes(
-					g.estadoContacto ?? "",
-				)
-			? "sin-contacto"
-			: g.estadoContacto === "rechaza_pagar"
-				? "fallido"
-				: "neutro";
-	const fechaGT = (v: string | Date) => fechaLargaGT(v);
-	const detalles = [
-		g.acuerdosAlcanzados && { label: "Acuerdos", valor: g.acuerdosAlcanzados },
-		g.compromisosPago && { label: "Compromisos", valor: g.compromisosPago },
-		// W1: con la hora y el medio del próximo contacto, si se eligieron.
-		(g.fechaProximoContacto || g.horaProximoContacto) && {
-			label:
-				g.estadoContacto === "promesa_pago"
-					? "Fecha prometida"
-					: "Seguimiento programado",
-			valor: textoProximoContacto(g) ?? "",
-		},
-		g.proximoPaso && { label: "Próximo paso", valor: g.proximoPaso },
-		g.duracionLlamada && {
-			label: "Duración",
-			valor: `${Math.floor(g.duracionLlamada / 60)}:${(g.duracionLlamada % 60).toString().padStart(2, "0")} min`,
-		},
-	].filter(Boolean) as Array<{ label: string; valor: string }>;
+/**
+ * Historial sin consultas propias: gestiones, promesas y vida del crédito que
+ * ya trae el caso. Lo usa `propsContextoDeCaso` si no recibe el historial
+ * completo de `useHistorialUnificado` (que es lo que pasa `ContextoCaso`).
+ */
+function historialBasico(caso: CasoWorkspace): DatosHistorialUnificado {
+	const hitos = caso.complementos?.historico ?? null;
 	return {
-		id: g.id,
-		cuando: g.fechaContacto
-			? `${fechaGT(g.fechaContacto)} · ${horaGT(g.fechaContacto)}`
-			: "Sin fecha",
-		titulo: (
-			<span className="inline-flex items-center gap-1.5">
-				{iconoMetodo(g.metodoContacto, g.direccionContacto)}
-				{etiquetaCanalGestion(g)}
-			</span>
+		eventos: mezclarEventos(
+			eventosDeContactos(caso.gestiones, caso.estadosPromesa),
+			(hitos ?? []).map(eventoDeHito),
 		),
-		badge: (
-			<CrmPill
-				kind="chip"
-				tone={estado.tone}
-				className="px-2 py-0.5 text-[11px]"
-			>
-				{estado.label}
-			</CrmPill>
-		),
-		derecha:
-			g.estadoContacto === "promesa_pago" && g.montoComprometido != null
-				? fmtQ(g.montoComprometido)
-				: undefined,
-		subtitulo: `Por: ${g.realizadoPor || "Sin asignar"}`,
-		contacto: contactoDeGestion(g),
-		tono,
-		nota: g.comentarios,
-		detalles,
+		corte: cortePeriodoActual({ fechaEntradaBucket: null, hitos }),
+		horizonte: null,
+		cargando: caso.cargandoHistorial,
+		fuentes: [],
+		hayMasEnServidor: false,
+		cargandoMas: false,
+		onCargarMas: () => {},
+		avisos: [],
 	};
 }
 
@@ -1339,6 +1155,8 @@ export function propsContextoDeCaso(
 		 * (`useDocumentosCaso`). Sin esto, el catálogo fijo sin acciones.
 		 */
 		documentos?: { enviar: DocumentoFila[]; solicitar: DocumentoFila[] };
+		/** Historial unificado (`useHistorialUnificado`). */
+		historial?: DatosHistorialUnificado;
 	} = {},
 ): ContextoCasoVistaProps {
 	const documentosF6 =
@@ -1578,22 +1396,7 @@ export function propsContextoDeCaso(
 			},
 			vehiculoRecuperar,
 		},
-		historial: {
-			estado: caso.cargandoHistorial
-				? "cargando"
-				: caso.gestiones.length === 0
-					? "vacio"
-					: "ok",
-			total: caso.gestiones.length,
-			items: caso.gestiones.map(itemDeGestion),
-		},
-		historico: comp?.historico
-			? comp.historico.map((h) => ({
-					id: h.id,
-					descripcion: h.descripcion,
-					fecha: fechaLargaGT(h.fecha),
-				}))
-			: null,
+		historial: acciones.historial ?? historialBasico(caso),
 		estadoCuenta: {
 			saldoTotal:
 				saldo.deudaTotal != null
@@ -1619,11 +1422,9 @@ export function propsContextoDeCaso(
 					valor: fechaLargaGT(cuotas.proxima?.fechaVencimiento) || "—",
 				},
 			],
-			cuotas: ordenarPlanDePagos(
-				cuotas.plan,
-				cuotas.proxima?.numeroCuota ?? null,
-				hoyInicio,
-			).map((c) => cuotaDelPlan(c, cuotas.total, hoyInicio)),
+			cuotas: ordenarPlanDePagos(cuotas.plan).map((c) =>
+				cuotaDelPlan(c, cuotas.total, hoyInicio),
+			),
 			estadoPlan: cuotas.cargandoPlan ? "cargando" : "ok",
 			onEnviar: identidad.casoCobroId
 				? acciones.onEnviarEstadoCuenta
@@ -1728,6 +1529,14 @@ export function ContextoCaso({
 		cargandoCatalogo: caso.cargandoComplementos,
 		soloLectura,
 	});
+	// La misma línea de tiempo que la Ficha 360 (mismas consultas y llaves).
+	const historial = useHistorialUnificado({
+		casoCobroId: caso.identidad.casoCobroId ?? "",
+		idRuta: caso.id,
+		numeroSifco: caso.identidad.numeroSifco || caso.id,
+		estadosPromesa: caso.estadosPromesa,
+		conPagalo: !!caso.identidad.carteraCreditoId,
+	});
 	const enviarEstadoCuenta = useMutation({
 		mutationFn: () =>
 			client.enviarEstadoCuentaWhatsapp({
@@ -1794,6 +1603,7 @@ export function ContextoCaso({
 		onCartaNotarial: soloLectura ? undefined : onCartaNotarial,
 		onAbrirFicha,
 		documentos,
+		historial,
 	});
 
 	return (
@@ -1802,6 +1612,19 @@ export function ContextoCaso({
 				// Otro caso = pestañas y «Ver más» desde cero.
 				key={caso.id}
 				{...props}
+				estadoCuenta={{
+					...props.estadoCuenta,
+					// Vista previa · WhatsApp · correo (mismas acciones que la ficha).
+					acciones: (
+						<EstadoCuentaAcciones
+							casoCobroId={caso.identidad.casoCobroId}
+							correoCliente={caso.contacto.email}
+							onEnviarWhatsapp={props.estadoCuenta.onEnviar}
+							enviandoWhatsapp={enviarEstadoCuenta.isPending}
+							soloLectura={soloLectura}
+						/>
+					),
+				}}
 				onPreguntarIA={
 					caso.identidad.casoCobroId
 						? (pregunta) =>

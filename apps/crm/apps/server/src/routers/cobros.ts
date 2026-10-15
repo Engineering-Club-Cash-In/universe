@@ -257,6 +257,11 @@ import {
 	type TrasladoConfirmado,
 } from "../services/recuperacion-vehiculo";
 import {
+	codigoEstadoCuentaCasoAHttp,
+	obtenerEstadoCuentaPdf,
+	sendEstadoCuentaEmail,
+} from "../services/estado-cuenta-caso";
+import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
 } from "../services/send-estado-cuenta-whatsapp";
@@ -8293,6 +8298,54 @@ export const cobrosRouter = {
 				telefono: resultado.telefono,
 				templateMessageId: resultado.templateMessageId,
 			};
+		}),
+
+	/**
+	 * Vista previa del estado de cuenta: el mismo PDF que se envía por WhatsApp
+	 * y por correo, generado en cartera en cada llamada. Devuelve su URL.
+	 */
+	generarEstadoCuentaPdf: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().min(1) }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			const resultado = await obtenerEstadoCuentaPdf({
+				casoCobroId: input.casoCobroId,
+				userId: context.userId,
+				puedeVerTodos: PERMISSIONS.canViewAllCasosCobros(context.userRole),
+			});
+			if (!resultado.ok) {
+				throw new ORPCError(codigoEstadoCuentaCasoAHttp(resultado.codigo), {
+					message: resultado.mensaje,
+				});
+			}
+			return { url: resultado.url, nombreArchivo: resultado.nombreArchivo };
+		}),
+
+	/**
+	 * Envía el estado de cuenta por correo, con el PDF adjunto. Sin `email`, va
+	 * al correo del cliente en el CRM. Mismo permiso que el WhatsApp.
+	 */
+	enviarEstadoCuentaEmail: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().min(1),
+				email: z.string().trim().email("Ingrese un correo válido.").optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(input.casoCobroId, context.userId, context.userRole);
+			const resultado = await sendEstadoCuentaEmail({
+				casoCobroId: input.casoCobroId,
+				userId: context.userId,
+				puedeVerTodos: PERMISSIONS.canViewAllCasosCobros(context.userRole),
+				email: input.email,
+			});
+			if (!resultado.sent) {
+				throw new ORPCError(codigoEstadoCuentaCasoAHttp(resultado.codigo), {
+					message: resultado.mensaje,
+				});
+			}
+			return { success: true, email: resultado.email, emailId: resultado.emailId };
 		}),
 
 	enviarWhatsappMasivoCobros: cobrosProcedure

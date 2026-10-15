@@ -29,6 +29,8 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0014_estado_facturacion_pago.sql` | Visibilidad de la facturación (Daniel 2026-08-27): `pagos_credito.factura_status/factura_error/factura_at` (qué pago quedó sin factura o a medias, separado de `validation_status`) y `facturas_electronicas.rubro/inversionista_id` (qué cubre cada DTE) + backfill del histórico desde `facturacion_desglose`. NO refactura nada: es información para conta. |
 | `0016_cb033_convenio_decisiones.sql` | CB-033: dos tablas — `convenio_operaciones` (reclamo idempotente del `operacion_id`, muta al cerrar) y `convenio_decisiones` (bitácora append-only de aprobación/rechazo, indexada por `credito_id` porque el rechazo borra la fila de `convenios_pago`). FK cruzada `convenio_operaciones.decision_id → convenio_decisiones` es `DEFERRABLE INITIALLY DEFERRED` (se resuelve dentro de la misma transacción del servicio, `convenioDecision.ts`). Ver [Ficha 360 §3.5](../../../../docs/features/cobros-02/06-ficha-360.md#35-aprobación-de-convenios-cb-033) en el CRM. |
 
+| `0027_cobros_supervisor_asesor.sql` | Alta y baja de asesor desde «Mi equipo»: `asesores.supervisor_email` (correo del usuario del CRM que lo supervisa, normalizado; NULL = sin asignar). Lo escribe `POST /buckets/asesores/alta` y lo lee `/buckets/pool-por-asesor`. Correr ANTES de desplegar el cartera-back que la lista en el esquema. |
+
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 
 Scripts **set-based** (nada de ir crédito por crédito) para poblar el modelo

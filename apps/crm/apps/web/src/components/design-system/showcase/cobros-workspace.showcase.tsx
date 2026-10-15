@@ -27,7 +27,7 @@ import {
 	CATALOGO_DOCUMENTOS,
 	filasDocumentos,
 } from "@/components/cobros/ficha/documentos-caso";
-import type { ItemGestion } from "@/components/cobros/ficha/ficha-pestanas";
+import { EstadoCuentaAccionesBarra } from "@/components/cobros/ficha/estado-cuenta-acciones";
 import {
 	ContextoCasoVista,
 	type ContextoCasoVistaProps,
@@ -69,10 +69,10 @@ import {
 	vistaDeJuridico,
 	vistaDeRebaja,
 } from "@/components/cobros/workspace/solicitudes-caso";
-import { CrmPill } from "@/components/ds/cards-credito";
 import { AccionPendiente } from "@/components/ds/indicadores";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { historialDemo } from "./_historial-unificado-demo";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
 export const meta: ShowcaseMeta = {
@@ -87,97 +87,6 @@ export const meta: ShowcaseMeta = {
 /* ── Datos de ejemplo ─────────────────────────────────────────────────────── */
 
 const CORREO_LARGO = "maria.jose.contreras.lopez1994@correo-largo.com.gt";
-
-const gestion = (
-	id: string,
-	cuando: string,
-	canal: string,
-	resultado: { texto: string; tone: "success" | "warning" | "brand" },
-	tono: ItemGestion["tono"],
-	nota: string,
-	derecha?: string,
-	contacto?: ItemGestion["contacto"],
-): ItemGestion => ({
-	id,
-	cuando,
-	titulo: (
-		<span className="inline-flex items-center gap-1.5">
-			{canal.endsWith("entrante") ? (
-				<PhoneIncoming aria-hidden className="size-3.5" />
-			) : (
-				<Phone aria-hidden className="size-3.5" />
-			)}
-			{canal}
-		</span>
-	),
-	contacto,
-	badge: (
-		<CrmPill
-			kind="chip"
-			tone={resultado.tone}
-			className="px-2 py-0.5 text-[11px]"
-		>
-			{resultado.texto}
-		</CrmPill>
-	),
-	subtitulo: "Por: Ana García",
-	tono,
-	nota,
-	derecha,
-	detalles: [
-		{
-			label: "Seguimiento programado",
-			valor: "15 ago 2026 · 10:00 · por llamada",
-		},
-		{ label: "Próximo paso", valor: "Llamar el 15 ago a las 10:00" },
-	],
-});
-
-const HISTORIAL: ItemGestion[] = [
-	gestion(
-		"g1",
-		"20 jul 2026 · 10:30",
-		"WhatsApp",
-		{ texto: "Mensaje enviado", tone: "brand" },
-		"sin-contacto",
-		"Se envió la tarjeta de circulación por WhatsApp.",
-	),
-	gestion(
-		"g2",
-		"18 jul 2026 · 16:45",
-		"Llamada entrante",
-		{ texto: "Contactado", tone: "success" },
-		"logrado",
-		"El cliente solicitó el cambio de placas; se trasladó al supervisor.",
-		undefined,
-		{
-			participante: "Habló con: Juan Pérez López (codeudor)",
-			telefono: "5555-1234",
-		},
-	),
-	gestion(
-		"g3",
-		"15 jul 2026 · 09:12",
-		"Llamada",
-		{ texto: "Promesa de pago", tone: "brand" },
-		"neutro",
-		"Promesa de pago registrada automáticamente desde la gestión de la llamada con el titular.",
-		"Q2,500.00",
-	),
-	gestion(
-		"g4",
-		"11 jul 2026 · 08:05",
-		"Llamada",
-		{ texto: "No contesta", tone: "warning" },
-		"sin-contacto",
-		"Buzón de voz.",
-		undefined,
-		{
-			participante: "Intentó con: María José Contreras López (titular)",
-			telefono: "4444-9876",
-		},
-	),
-];
 
 /** F6 · Filas de Documentos del catálogo (mismo armado que el Workspace). */
 const DOCUMENTOS_F6 = filasDocumentos({
@@ -248,8 +157,7 @@ const BASE: ContextoCasoVistaProps = {
 		},
 		vehiculoRecuperar: null,
 	},
-	historial: { estado: "ok", total: HISTORIAL.length, items: HISTORIAL },
-	historico: null,
+	historial: historialDemo(),
 	estadoCuenta: {
 		saldoTotal: "Q41,600.00",
 		filas: [
@@ -284,6 +192,14 @@ const BASE: ContextoCasoVistaProps = {
 		],
 		estadoPlan: "ok",
 		onEnviar: () => undefined,
+		// Lo que arma el contenedor: vista previa · WhatsApp · correo.
+		acciones: (
+			<EstadoCuentaAccionesBarra
+				onVistaPrevia={() => undefined}
+				onWhatsapp={() => undefined}
+				onCorreo={() => undefined}
+			/>
+		),
 	},
 	documentos: {
 		enviar: [
@@ -1080,7 +996,7 @@ export default function CobrosWorkspaceShowcase() {
 					/>
 					<Panel titulo="Historial actual" props={BASE} tab="historial" />
 					<Panel
-						titulo="Histórico (pendiente de backend)"
+						titulo="Histórico (antes del ingreso al bucket actual)"
 						props={BASE}
 						tab="historial"
 						historial="historico"

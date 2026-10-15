@@ -9,26 +9,25 @@ export function validarFormularioTraslado(input: {
 	motivo: string;
 }): string | null {
 	if (!/^\d+$/.test(input.origen) || Number(input.origen) <= 0)
-		return "Seleccione un asesor de origen.";
+		return "Seleccione el asesor que entrega la cartera.";
 	if (!input.motivo.trim())
-		return "Seleccione un motivo y complete la explicación.";
+		return "Con el motivo «Otro», escriba la nota que explica el traslado.";
 	if (input.modo === "traslado_completo") {
-		if (!input.destino) return "Seleccione un asesor de destino.";
+		if (!input.destino) return "Seleccione quién recibe la cartera.";
 		if (input.destino === input.origen)
-			return "Origen y destino deben ser distintos.";
+			return "Quien recibe la cartera debe ser otro asesor.";
 	}
 	if (input.requiereDestinoEspecial) {
 		if (!input.destinoEspecial)
-			return "Seleccione un responsable para las cuentas sin bucket operativo.";
+			return "Elija quién queda a cargo de los créditos fuera de cobranza.";
 		if (input.destinoEspecial === input.origen)
-			return "El responsable de cuentas sin bucket debe ser distinto del origen.";
+			return "Quien queda a cargo de los créditos fuera de cobranza debe ser otro asesor.";
 	}
 	if (input.modo === "destino_por_bucket") {
 		const faltante = (input.bucketsOrigen ?? []).find(
 			(bucket) => !input.destinosPorBucket?.[bucket],
 		);
-		if (faltante !== undefined)
-			return `Seleccione un asesor de destino para B${faltante}.`;
+		if (faltante !== undefined) return `Seleccione quién recibe B${faltante}.`;
 		// Fallback `{}`, no `[]`: el tipo es un objeto por bucket. Con `[]`
 		// funcionaba de casualidad (Object.values de un array vacío también da
 		// []) pero mentía sobre la forma del dato.
@@ -37,9 +36,44 @@ export function validarFormularioTraslado(input: {
 				(destino) => destino === input.origen,
 			)
 		)
-			return "El destino de cada bucket debe ser distinto del origen.";
+			return "Quien recibe cada bucket debe ser otro asesor.";
 	}
 	return null;
+}
+
+/**
+ * Separa la cartera del asesor de origen en lo que está en los buckets que él
+ * atiende (su pool) y los créditos «sueltos»: los que el motor subió a un
+ * bucket que no atiende y siguen a su nombre. Solo cuenta buckets con
+ * créditos. Sin pool conocido (p. ej. un asesor inactivo) todo cuenta como
+ * propio, que es como se trataba antes.
+ */
+export function partirCarteraPorPool(
+	porBucket: readonly { bucket: number; cuentas: number }[],
+	pool: readonly number[],
+) {
+	const conCreditos = porBucket.filter((d) => d.cuentas > 0);
+	if (!pool.length) return { propios: conCreditos, sueltos: [] };
+	return {
+		propios: conCreditos.filter((d) => pool.includes(d.bucket)),
+		sueltos: conCreditos.filter((d) => !pool.includes(d.bucket)),
+	};
+}
+
+/**
+ * Buckets que debe atender quien reciba TODA la cartera («A un solo asesor»):
+ * los del pool del origen en los que tiene créditos (igual que el suplente de
+ * «Marcar ausente»), no los de cada crédito suelto. Si solo tiene sueltos, los
+ * de sus créditos.
+ */
+export function bucketsParaDestinoUnico(
+	porBucket: readonly { bucket: number; cuentas: number }[],
+	pool: readonly number[],
+): number[] {
+	const { propios, sueltos } = partirCarteraPorPool(porBucket, pool);
+	return (propios.length ? propios : sueltos)
+		.map((d) => d.bucket)
+		.sort((a, b) => a - b);
 }
 
 export function puedeRecibirTodosBuckets(

@@ -420,36 +420,31 @@ export function esCuotaDelPlan(c: { numeroCuota?: unknown }): boolean {
 }
 
 /**
- * Orden del plan de pagos (Ficha 360 y Workspace), sin la cuota 0, con lo
- * relevante arriba:
- *  1. vencidas, en validación y la próxima, de la más vieja a la más nueva;
- *  2. pagadas, de la más reciente a la más vieja;
- *  3. futuras, en orden.
+ * Orden del plan de pagos (Ficha 360 y Workspace): de la cuota 1 a la última,
+ * sin importar el estado, y sin la cuota 0. Pedido del usuario (2026-10-15):
+ * agrupar por estado lo dejaba «desordenado».
  */
-export function ordenarPlanDePagos<
-	T extends {
-		numeroCuota?: unknown;
-		estadoMora?: string | null;
-		fechaVencimiento?: string | null;
-	},
->(
+export function ordenarPlanDePagos<T extends { numeroCuota?: unknown }>(
 	cuotas: readonly T[],
-	numeroProxima: number | null,
-	hoyInicio: Date = inicioDelDiaGT(),
 ): T[] {
-	const grupo = (c: T) => {
-		if (c.estadoMora === "pagado") return 1;
-		if (c.estadoMora === "en_validacion") return 0;
-		const vencida =
-			!!c.fechaVencimiento && new Date(c.fechaVencimiento) < hoyInicio;
-		if (vencida || Number(c.numeroCuota) === numeroProxima) return 0;
-		return 2;
-	};
 	return cuotas
 		.filter(esCuotaDelPlan)
-		.map((c) => ({ c, n: Number(c.numeroCuota), g: grupo(c) }))
-		.sort((a, b) => a.g - b.g || (a.g === 1 ? b.n - a.n : a.n - b.n))
-		.map((x) => x.c);
+		.slice()
+		.sort((a, b) => Number(a.numeroCuota) - Number(b.numeroCuota));
+}
+
+/**
+ * Página en la que conviene abrir el plan paginado: la de la primera cuota
+ * sin pagar (la que hay que cobrar). Si todas están pagadas, la última.
+ */
+export function paginaInicialPlan<T extends { estadoMora?: string | null }>(
+	ordenadas: readonly T[],
+	porPagina: number,
+): number {
+	if (ordenadas.length === 0 || porPagina <= 0) return 1;
+	const idx = ordenadas.findIndex((c) => c.estadoMora !== "pagado");
+	const pos = idx === -1 ? ordenadas.length - 1 : idx;
+	return Math.floor(pos / porPagina) + 1;
 }
 
 /** Cuotas del plan: pagadas, último mes pagado y próximo pago. */

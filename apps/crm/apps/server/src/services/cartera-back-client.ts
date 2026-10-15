@@ -4075,6 +4075,8 @@ export class CarteraBackClient {
 		/** M5: cartera rechaza la previsualización si es de otro asesor o sin pausa de pool. */
 		asesorOrigenId?: number;
 		pausarPoolOrigen?: boolean;
+		/** Baja de asesor: debe coincidir con la previsualización (en ambos sentidos). */
+		desactivarOrigen?: boolean;
 		/** M5: cartera rechaza la confirmación si el motivo difiere del previsualizado. */
 		motivo?: string;
 	}) {
@@ -4097,6 +4099,42 @@ export class CarteraBackClient {
 			`/buckets/traslados?page=${page}`,
 			{ method: "GET" },
 		);
+	}
+
+	/**
+	 * Alta de asesor desde «Mi equipo»: el asesor (`email_cash_in` = su correo
+	 * del CRM) y su pool en una transacción de cartera. Idempotente por correo:
+	 * con el mismo pool devuelve `accion: "existente"` sin escribir. 400 si los
+	 * datos no son válidos; 409 si el correo es de otro asesor activo, de uno con
+	 * el pool pausado o está repetido.
+	 */
+	async altaAsesorCobros(input: {
+		nombre: string;
+		email: string;
+		buckets: number[];
+		/** Capacidad de cada bucket nuevo del pool (bucket → cuentas). */
+		capacidades?: Record<string, number>;
+		/** Correo del usuario del CRM que lo supervisa (cartera `supervisor_email`). */
+		supervisorEmail?: string;
+		actorEmail: string;
+	}): Promise<{
+		success: true;
+		asesor_id: number;
+		nombre: string;
+		email_cash_in: string;
+		buckets: number[];
+		supervisor_email: string | null;
+		accion: "creado" | "reactivado" | "vinculado" | "existente";
+	}> {
+		try {
+			return await this.request("/buckets/asesores/alta", {
+				method: "POST",
+				body: JSON.stringify(input),
+			});
+		} finally {
+			// El catálogo de asesores y sus pools (getPoolPorAsesor, carga…) cambia.
+			this.cache.invalidate("/buckets/");
+		}
 	}
 
 	/** M5 · devuelve al asesor a los buckets que se le pausaron. */

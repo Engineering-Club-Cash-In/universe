@@ -14,6 +14,7 @@ import {
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
 import { reasignarAsesorLote } from "../controllers/buckets/reasignarAsesorLote";
+import { getCreditosFueraDePool } from "../controllers/buckets/creditosFueraDePool";
 import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
 import { enviarAJuridico, escalamientoAplicado } from "../controllers/buckets/juridico";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
@@ -27,6 +28,7 @@ import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
 import { AusenciaError, detalleTraslado, devolverTraslado, reanudarPoolAsesor } from "../controllers/buckets/ausenciaAsesor";
+import { altaAsesorCobros } from "../controllers/buckets/altaAsesor";
 import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, listarTrasladosCarteraPaginado, consultarTrasladoPorClave, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import {
@@ -199,7 +201,7 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), ponderarPorCapacidad: t.Optional(t.Boolean()), mantenerEspeciales: t.Optional(t.Boolean()), pausarPoolOrigen: t.Optional(t.Boolean()), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
+  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), ponderarPorCapacidad: t.Optional(t.Boolean()), mantenerEspeciales: t.Optional(t.Boolean()), pausarPoolOrigen: t.Optional(t.Boolean()), desactivarOrigen: t.Optional(t.Boolean()), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
   .post("/buckets/traslados/confirmar", async ({ body, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     try { return await confirmarTrasladoCarteraMasivo(body); }
@@ -212,7 +214,7 @@ export const bucketsRouter = new Elysia()
       set.status = 409;
       return { success: false, message: error.message };
     }
-  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }), asesorOrigenId: t.Optional(t.Integer({ minimum: 1 })), pausarPoolOrigen: t.Optional(t.Boolean()), motivo: t.Optional(t.String({ minLength: 1, maxLength: 1000 })) }) })
+  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }), asesorOrigenId: t.Optional(t.Integer({ minimum: 1 })), pausarPoolOrigen: t.Optional(t.Boolean()), desactivarOrigen: t.Optional(t.Boolean()), motivo: t.Optional(t.String({ minLength: 1, maxLength: 1000 })) }) })
   .get("/buckets/traslados/clave/:clave", async ({ params, set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     return { success: true, data: await consultarTrasladoPorClave(params.clave) };
@@ -265,6 +267,23 @@ export const bucketsRouter = new Elysia()
       return { success: false, message: error.message, error: error.code };
     }
   }, { params: t.Object({ asesor_id: t.Numeric({ minimum: 1 }) }), body: t.Object({ buckets: t.Array(t.Integer({ minimum: 0, maximum: 5 })), operacion_id: t.Optional(t.String({ format: "uuid" })) }) })
+
+  // COBROS-02 — Alta de asesor desde «Mi equipo» del CRM: asesor + pool en una
+  // transacción, idempotente por correo. La baja va por el traslado con
+  // `desactivarOrigen` (previsualizar/confirmar de arriba).
+  .post("/buckets/asesores/alta", async ({ body, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try { return await altaAsesorCobros(body); }
+    catch (error) {
+      if (error instanceof ZodError) {
+        set.status = 400;
+        return { success: false, message: error.issues[0]?.message ?? "Solicitud de alta inválida" };
+      }
+      if (!(error instanceof TrasladoConflict)) throw error;
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+  }, { body: t.Object({ nombre: t.String({ minLength: 1, maxLength: 100 }), email: t.String({ format: "email", maxLength: 150 }), buckets: t.Array(t.Integer({ minimum: 0, maximum: 5 }), { minItems: 1, maxItems: 6 }), supervisorEmail: t.Optional(t.String({ format: "email", maxLength: 150 })), capacidades: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1, maximum: 2000 }))), actorEmail: t.String({ format: "email" }) }) })
 
   // Histórico de transiciones de bucket, paginado y con filtros + resumen.
   .get(
@@ -1009,6 +1028,40 @@ export const bucketsRouter = new Elysia()
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
       }),
+    },
+  )
+
+  // Cola de créditos FUERA DE POOL: su asesor no está en el pool activo de su
+  // bucket actual (o no tienen asesor). El motor los concilia cada noche; los que
+  // salen acá son los que no tienen a nadie elegible en el pool, los de un asesor
+  // con ausencia abierta o los que entraron después de la última corrida. Solo
+  // lectura. `incluir_convenios=true` agrega los EN_CONVENIO (congelados, no se
+  // concilian solos).
+  .get(
+    "/buckets/creditos-fuera-de-pool",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const data = await getCreditosFueraDePool({
+          incluirConvenios: query?.incluir_convenios === "true",
+        });
+        return {
+          success: true,
+          total: data.length,
+          sin_elegible: data.filter((c) => c.pool_del_bucket.length === 0).length,
+          data,
+        };
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudieron leer los créditos fuera de pool",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({ incluir_convenios: t.Optional(t.String()) }),
     },
   )
 

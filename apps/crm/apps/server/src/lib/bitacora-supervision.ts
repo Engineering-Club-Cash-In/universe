@@ -72,10 +72,11 @@ export const TIPOS_CON_EVENTO: readonly TipoBitacora[] = [
 
 /**
  * ¿El traslado es la baja de un asesor? El motivo se arma en el panel de
- * traslados como «Despido: …» o «Renuncia: …» (o solo «Despido»).
+ * traslados como «Despido: …» o «Renuncia: …» (o solo «Despido»), y en «Dar de
+ * baja» de Mi equipo como «Baja de asesor: …» (`motivoDeLaBaja`).
  */
 export function esBajaDeAsesor(motivo: string | null | undefined) {
-	return /^(despido|renuncia)\b/i.test((motivo ?? "").trim());
+	return /^(despido|renuncia|baja de asesor)\b/i.test((motivo ?? "").trim());
 }
 
 /** Evento de un traslado según su motivo. */

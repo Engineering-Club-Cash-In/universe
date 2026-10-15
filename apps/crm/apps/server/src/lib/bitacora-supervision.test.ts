@@ -165,6 +165,13 @@ describe("eventos de los asesores", () => {
 		expect(eventoDeTraslado("  renuncia: último día el viernes")).toBe("baja");
 		expect(eventoDeTraslado("Redistribución de cartera")).toBe("traslado");
 		expect(eventoDeTraslado("Renunciaron los clientes")).toBe("traslado");
+		// «Dar de baja» de Mi equipo (motivoDeLaBaja), con cualquier motivo.
+		expect(
+			eventoDeTraslado(
+				"Baja de asesor: Fin de contrato · último día de trabajo 30/10/2026",
+			),
+		).toBe("baja");
+		expect(eventoDeTraslado("Bajada de bucket")).toBe("traslado");
 		expect(eventoDeTraslado(null)).toBe("traslado");
 	});
 

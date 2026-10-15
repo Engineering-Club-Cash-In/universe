@@ -34,9 +34,10 @@ import { PERMISSIONS, ROLES } from "@/lib/roles";
  *   /cobros/reasignaciones → ?tab=asignacion
  * Contrato de URL completo en components/cobros/equipo/search.ts.
  *
- * «Trasladar cartera» y «Marcar ausente» están en el encabezado (las tres
- * pestañas) y abren modales SOBRE la pestaña actual: `?accion=` ya no fuerza
- * `tab=asignacion`. Los enlaces del Detalle del asesor
+ * «Crear asesor», «Trasladar cartera» y «Marcar ausente» están en el
+ * encabezado (las tres pestañas) y abren modales SOBRE la pestaña actual:
+ * `?accion=` ya no fuerza `tab=asignacion`. «Dar de baja» se abre desde el menú
+ * «⋯» de cada tarjeta (`?accion=baja&asesor=`). Los enlaces del Detalle del asesor
  * (`?tab=asignacion&accion=…&asesor=`) siguen funcionando igual.
  */
 export const Route = createFileRoute("/cobros/equipo/")({
@@ -93,6 +94,7 @@ function MiEquipoPage() {
 				subtitulo={subtitulo}
 				acciones={
 					<AccionesEquipo
+						onCrearAsesor={() => ir({ accion: "alta", asesor: undefined })}
 						onTrasladar={() => ir({ accion: "trasladar", asesor: undefined })}
 						onMarcarAusente={() => ir({ accion: "ausente", asesor: undefined })}
 					/>
@@ -102,6 +104,7 @@ function MiEquipoPage() {
 						habilitado={habilitado}
 						grupo={search.grupo ?? "todos"}
 						onGrupo={(grupo) => ir({ grupo })}
+						onDarDeBaja={(asesor) => ir({ accion: "baja", asesor })}
 					/>
 				}
 				dia={

@@ -11,7 +11,7 @@ import { PopoverPortalContext } from "@/components/ui/popover";
 
 /** Descripción del modal para lectores de pantalla (la usa también el showcase). */
 export const DESCRIPCION_TRASLADO =
-	"Revise la distribución por asesor y bucket antes de confirmar. Los compromisos conservan sus condiciones.";
+	"Elija de quién es la cartera y cómo se reparte; antes de confirmar verá cómo queda el reparto. Las promesas de pago vigentes pasan con sus condiciones.";
 
 /**
  * Caja del modal «Trasladar cartera»: compacta como «Marcar ausente» (Figma
@@ -61,7 +61,8 @@ export function TrasladarDialogMarco({
 /**
  * «Trasladar cartera» (botón del encabezado de Mi equipo o fila de Carga y
  * asignación): el traslado masivo COMPLETO de `TrasladosPanel` en tres pasos
- * (origen y forma de repartir → revisión del reparto → resultado).
+ * (de quién y cómo se reparte → «Redistribución de cartera» → «Cartera
+ * redistribuida»).
  */
 export function TrasladarDialog({
 	abierto,

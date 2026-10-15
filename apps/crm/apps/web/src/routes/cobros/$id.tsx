@@ -15,7 +15,6 @@ import {
 	FileText,
 	HandCoins,
 	Handshake,
-	History,
 	Home,
 	KeyRound,
 	Loader,
@@ -49,7 +48,6 @@ import {
 	type TipoVisita,
 } from "server/src/lib/visitas-cobros";
 import { toast } from "sonner";
-import { ActividadBot } from "@/components/cobros/actividad-bot";
 import {
 	EstadoGestionCelda,
 	fechaLarga,
@@ -59,6 +57,7 @@ import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisi
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
 import { DocumentosCaso } from "@/components/cobros/ficha/documentos-caso";
+import { EstadoCuentaAcciones } from "@/components/cobros/ficha/estado-cuenta-acciones";
 import {
 	DatosPersonalesCard,
 	DireccionCard,
@@ -68,11 +67,9 @@ import {
 import {
 	AsistenteIA,
 	CuotaPlanFila,
-	HistorialGestiones,
 	PendienteBackend,
 	ResumenCuentaCard,
 	RotuloSeccion,
-	SeccionHistorial,
 } from "@/components/cobros/ficha/ficha-pestanas";
 import {
 	CardContactoResumen,
@@ -83,6 +80,8 @@ import {
 	FranjaSeguimiento,
 	tipoTimelineDeGestion,
 } from "@/components/cobros/ficha/ficha-resumen";
+import { HistorialUnificado } from "@/components/cobros/ficha/historial-unificado";
+import { useHistorialUnificado } from "@/components/cobros/ficha/use-historial-unificado";
 import { GpsMapaPreview } from "@/components/cobros/gps-mapa-preview";
 import {
 	InmovilizacionAlertaFicha,
@@ -90,7 +89,6 @@ import {
 } from "@/components/cobros/inmovilizacion-alerta-ficha";
 import { InvestigacionRedesCard } from "@/components/cobros/investigacion-redes-card";
 import { ModalContenidoConContexto } from "@/components/cobros/modal-con-contexto";
-import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
@@ -211,11 +209,6 @@ import {
 } from "@/lib/cobros/buckets-catalogo";
 import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
 import {
-	contactoDeGestion,
-	etiquetaCanalGestion,
-	textoProximoContacto,
-} from "@/lib/cobros/gestion-contacto";
-import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
 	tienePromesaActiva,
@@ -242,6 +235,7 @@ import {
 	motivoBloqueoVisitaCaso,
 	operacionEnvioRecuperacion,
 	ordenarPlanDePagos,
+	paginaInicialPlan,
 	permisosCobros,
 	promesaActivaDelCaso,
 	promesasDePago,
@@ -602,7 +596,6 @@ function RouteComponent() {
 	const { data: session } = authClient.useSession();
 
 	// Estados de paginación
-	const [contactosPage, setContactosPage] = useState(1);
 	const [cuotasPage, setCuotasPage] = useState(1);
 	// Jerarquía de acciones: los canales viven en un dropdown y UN solo modal
 	// controlado (antes eran 6 copias del mismo bloque de props).
@@ -732,9 +725,6 @@ function RouteComponent() {
 		"resumen",
 	);
 	const [segEdicion, setSegEdicion] = useState<"info" | "cambios">("info");
-	const [segHistorial, setSegHistorial] = useState<"actual" | "historico">(
-		"actual",
-	);
 	// Cambiar de pestaña vuelve el Resumen a su vista principal.
 	const setTabActiva = (tab: string) => {
 		setTabActivaEstado(tab);
@@ -820,18 +810,6 @@ function RouteComponent() {
 			debeMostrarProyeccionMora(casoDetails.data),
 	});
 
-	// La lista que PINTA la tarjeta "Historial de Contactos": paginada de
-	// verdad en el server (10 por página, sin promesas — esas tienen su
-	// tarjeta). La página anterior se queda como placeholder mientras carga la
-	// nueva, para que el pager no parpadee.
-	const historialContactosPagina = useQuery({
-		...orpc.getHistorialContactosPaginado.queryOptions({
-			input: { casoCobroId: casoDetails.data?.id || "", pagina: contactosPage },
-		}),
-		enabled: !!session && !!casoDetails.data?.id,
-		placeholderData: (previa) => previa,
-	});
-
 	// CB-036: solo para el contador de la pestaña Referencias. Es la misma
 	// query (misma llave) que pinta ReferenciasView, así que abrir la pestaña
 	// no vuelve a pedirla.
@@ -915,6 +893,21 @@ function RouteComponent() {
 			!!(casoDetails.data?.numeroCreditoSifco || id),
 	});
 
+	// La pestaña Historial: todas las fuentes del crédito en una sola línea de
+	// tiempo. Reusa las consultas de arriba (misma llave) y agrega Págalo, bot
+	// y decisiones de convenio. Va acá —y no dentro de la pestaña— porque el
+	// contador de la pestaña es lo que pasó en el bucket actual.
+	const historialUnificado = useHistorialUnificado({
+		casoCobroId: casoDetails.data?.id || "",
+		idRuta: id || "",
+		numeroSifco: casoDetails.data?.numeroCreditoSifco || id || "",
+		estadosPromesa: estadoPromesasPago.data as
+			| Record<string, EstadoPromesaUI>
+			| undefined,
+		habilitado: !!session,
+		conPagalo: !!casoDetails.data?.carteraCreditoId,
+	});
+
 	// CB-029: promesa ACTIVA del caso = pendiente (estado recalculado) cuya fecha
 	// prometida no pasó. A lo sumo una; si abre el modal, se EDITA esa (no se crea
 	// otra que se sobreponga). El backend igual valida "una sola activa".
@@ -964,17 +957,6 @@ function RouteComponent() {
 			input: { numeroSifco: id || "" },
 		}),
 		enabled: !!session && !!id,
-	});
-
-	// Recordatorios Premora enviados al crédito (CC2-11). No depende del caso:
-	// aplica también a créditos al día sin caso de cobros.
-	const recordatoriosPremora = useQuery({
-		...orpc.getRecordatoriosPremora.queryOptions({
-			input: {
-				numeroSifco: casoDetails.data?.numeroCreditoSifco || id || "",
-			},
-		}),
-		enabled: !!session && !!(casoDetails.data?.numeroCreditoSifco || id),
 	});
 
 	// COBROS-02 Fase 3 — estado del convenio de ESTE crédito, para la banda roja.
@@ -1495,6 +1477,21 @@ function RouteComponent() {
 		},
 	});
 
+	// El plan va de la cuota 1 a la última; al cargar, abre en la página de la
+	// primera cuota sin pagar (la que hay que cobrar). Solo la primera vez, para
+	// no mover al asesor si ya cambió de página.
+	const paginaPlanFijada = useRef(false);
+	useEffect(() => {
+		if (paginaPlanFijada.current || !historialPagos.data) return;
+		paginaPlanFijada.current = true;
+		setCuotasPage(
+			paginaInicialPlan(
+				ordenarPlanDePagos(historialPagos.data as any[]),
+				ITEMS_PER_PAGE,
+			),
+		);
+	}, [historialPagos.data]);
+
 	if (casoDetails.isLoading) {
 		return (
 			<div className="container mx-auto p-6">
@@ -1530,10 +1527,6 @@ function RouteComponent() {
 
 	// El guard de "Caso No Encontrado" (arriba) ya cortó si no hay datos.
 	const caso = casoDetails.data as CasoDetalle;
-	// La página actual del Historial de Contactos, ya filtrada y cortada por el
-	// server (las promesas van en su propia tarjeta, CB-020).
-	const contactos = historialContactosPagina.data?.contactos ?? [];
-	const totalContactos = historialContactosPagina.data?.total ?? 0;
 	const totalReferencias = referenciasCaso.data?.referencias.length ?? 0;
 	// CB-036: acceso directo en la tarjeta de contacto. Teléfonos del cliente
 	// que se consiguieron (de una referencia o sueltos) y que todavía no están
@@ -1545,7 +1538,6 @@ function RouteComponent() {
 	const textoReferencias = textoReferenciasConTelefono(
 		referenciasCaso.data?.referencias ?? [],
 	);
-	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 
 	// El bloque de props que comparten TODOS los modales de contacto: antes
@@ -1944,12 +1936,8 @@ function RouteComponent() {
 		return f ? f.replace(/^\d+\s/, "") : "—";
 	};
 	const totalCuotas = planCuotas.total;
-	// Mismo orden que el Workspace: vencidas y la próxima arriba, sin cuota 0.
-	const planOrdenado = ordenarPlanDePagos(
-		cuotas as any[],
-		proximaCuota ? Number(proximaCuota.numeroCuota) : null,
-		hoyInicio,
-	);
+	// Mismo orden que el Workspace: de la cuota 1 a la última, sin cuota 0.
+	const planOrdenado = ordenarPlanDePagos(cuotas as any[]);
 
 	// "Cobro de hoy" (mismas cuentas que el «Total a cobrar» de antes).
 	const { totalMoraCuotas, totalParcial, avisoCrecimientoMora } =
@@ -2588,7 +2576,7 @@ function RouteComponent() {
 			>
 				<TabsList className="overflow-x-auto">
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
-					<TabsTrigger value="historial" count={totalContactos}>
+					<TabsTrigger value="historial" count={historialUnificado.totalActual}>
 						Historial
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
@@ -3924,402 +3912,23 @@ function RouteComponent() {
 					</div>
 				</TabsContent>
 
-				{/* HISTORIAL — qué se hizo y qué prometió el cliente. */}
-				<TabsContent value="historial" className="space-y-5">
-					<SegmentedNav
-						value={segHistorial}
-						onValueChange={(v) => setSegHistorial(v as "actual" | "historico")}
-						opciones={[
-							{ value: "actual", label: "Historial actual" },
-							{ value: "historico", label: "Histórico" },
-						]}
-					/>
-					{segHistorial === "actual" ? (
-						<div className="space-y-5">
-							{/* Codex (PR #1411): un fallo de red/DB no es "no hay contactos". */}
-							<SeccionHistorial
-								titulo="Historial del crédito"
-								conteo={totalContactos}
-								icono={<Clock />}
-								descripcion="Llamadas, mensajes y visitas registradas por el equipo"
-								estado={
-									historialContactosPagina.isLoading
-										? "cargando"
-										: historialContactosPagina.isError
-											? "error"
-											: totalContactos === 0
-												? "vacio"
-												: "ok"
-								}
-								onReintentar={() => historialContactosPagina.refetch()}
-								vacio="No hay contactos registrados para este caso."
-							>
-								<>
-									<HistorialGestiones
-										items={contactos.map((contacto: any) => {
-											const estadoInfo = getEstadoContacto(
-												contacto.estadoContacto,
-											);
-											const tono = [
-												"contactado",
-												"acuerdo_parcial",
-												"pago_registrado",
-											].includes(contacto.estadoContacto)
-												? "logrado"
-												: [
-															"no_contesta",
-															"numero_equivocado",
-															"mensaje_enviado",
-														].includes(contacto.estadoContacto)
-													? "sin-contacto"
-													: contacto.estadoContacto === "rechaza_pagar"
-														? "fallido"
-														: "neutro";
-											const detalles = [
-												contacto.acuerdosAlcanzados && {
-													label: "Acuerdos",
-													valor: contacto.acuerdosAlcanzados,
-												},
-												contacto.compromisosPago && {
-													label: "Compromisos",
-													valor: contacto.compromisosPago,
-												},
-												contacto.fechaProximoContacto && {
-													label: "Seguimiento programado",
-													// W1: con hora y medio («15 oct 2026 · 10:30 · por WhatsApp»).
-													valor:
-														textoProximoContacto(contacto) ??
-														formatFechaGT(
-															new Date(contacto.fechaProximoContacto),
-														),
-												},
-												contacto.proximoPaso && {
-													label: "Próximo paso",
-													valor: contacto.proximoPaso,
-												},
-												contacto.duracionLlamada && {
-													label: "Duración",
-													valor: `${Math.floor((contacto.duracionLlamada || 0) / 60)}:${((contacto.duracionLlamada || 0) % 60).toString().padStart(2, "0")} min`,
-												},
-											].filter(Boolean) as Array<{
-												label: string;
-												valor: string;
-											}>;
-											return {
-												id: contacto.id,
-												cuando: contacto.fechaContacto
-													? `${fechaLarga(new Date(contacto.fechaContacto))} · ${horaGT(contacto.fechaContacto)}`
-													: "Sin fecha",
-												titulo: (
-													<span className="inline-flex items-center gap-1.5">
-														{getMetodoIcon(contacto.metodoContacto)}
-														{etiquetaCanalGestion(contacto)}
-													</span>
-												),
-												badge: (
-													<Badge className={estadoInfo.color}>
-														{estadoInfo.label}
-													</Badge>
-												),
-												subtitulo: `Por: ${contacto.realizadoPor || "Sin asignar"}`,
-												// W1: con quién habló y a qué teléfono.
-												contacto: contactoDeGestion(contacto),
-												tono,
-												nota: contacto.comentarios,
-												detalles,
-											};
-										})}
-									/>
-									<Pagination
-										currentPage={contactosPage}
-										totalItems={totalContactos}
-										itemsPerPage={contactosPorPagina}
-										onPageChange={setContactosPage}
-									/>
-								</>
-							</SeccionHistorial>
-							{caso.id && caso.carteraCreditoId && (
-								<PagaloHistorial casoCobroId={caso.id} />
-							)}
-							{/* CB-020: Promesas de Pago — filtro sobre los mismos contactos
-							    (no query aparte). Cumplida/incumplida/pendiente viene de
-							    estadoPromesa, persistido por getEstadoPromesasPago verificando
-							    cuotas + mora en cartera-back. */}
-							{promesasPago.length > 0 &&
-								(() => {
-									const hoy = new Date();
-									// Igual al EstadoPromesa de lib/promesa-pago.ts del backend.
-									type EstadoPromesa = "pendiente" | "cumplida" | "incumplida";
-									const estadoBadge: Record<
-										EstadoPromesa,
-										{ label: string; color: string }
-									> = {
-										cumplida: {
-											label: "Cumplida",
-											color: "bg-green-100 text-green-800",
-										},
-										incumplida: {
-											label: "Incumplida",
-											color: "bg-red-100 text-red-800",
-										},
-										pendiente: {
-											label: "Pendiente",
-											color: "bg-blue-100 text-blue-800",
-										},
-									};
-									return (
-										<SeccionHistorial
-											titulo="Promesas de pago"
-											conteo={promesasPago.length}
-											icono={<HandCoins />}
-											descripcion="Cuotas y/o mora que el cliente prometió pagar"
-										>
-											<HistorialGestiones
-												items={promesasPago.map((promesa: any) => {
-													const fechaPrometida = promesa.fechaProximoContacto
-														? new Date(promesa.fechaProximoContacto)
-														: null;
-													// Prioriza el resultado recién calculado (en memoria)
-													// sobre la columna DB, que puede ir un ciclo atrás.
-													const estadoPromesa: EstadoPromesa =
-														(
-															estadoPromesasPago.data as
-																| Record<string, EstadoPromesa>
-																| undefined
-														)?.[promesa.id] ??
-														promesa.estadoPromesa ??
-														"pendiente";
-													// Mismo criterio de gracia que el backend (finDeGraciaGT
-													// en lib/promesa-pago.ts) (Codex, PR #1147).
-													const finDeGraciaGT = fechaPrometida
-														? new Date(
-																fechaPrometida.getTime() + 24 * 60 * 60 * 1000,
-															)
-														: null;
-													const vencida =
-														finDeGraciaGT !== null &&
-														finDeGraciaGT <= hoy &&
-														estadoPromesa !== "cumplida";
-													const badge = estadoBadge[estadoPromesa];
-													const tieneRango =
-														promesa.cuotaInicio != null &&
-														promesa.cuotaFin != null;
-													// Fila legacy (antes de CB-020) puede no tener rango ni
-													// mora: no se inventa lo que prometió (Codex, PR #1147).
-													const etiquetaRango = tieneRango
-														? promesa.cuotaInicio === promesa.cuotaFin
-															? `Cuota #${promesa.cuotaInicio}`
-															: `Cuotas #${promesa.cuotaInicio} a #${promesa.cuotaFin}`
-														: promesa.incluyeMora
-															? "Mora del crédito"
-															: "Sin rango ni mora especificados";
-													return {
-														id: promesa.id,
-														cuando: `Para el ${fechaPrometida ? fechaLarga(fechaPrometida) : "—"} · registrada el ${promesa.fechaContacto ? fechaLarga(new Date(promesa.fechaContacto)) : "—"}`,
-														titulo: (
-															<span
-																className={
-																	tieneRango || promesa.incluyeMora
-																		? undefined
-																		: "text-muted-foreground italic"
-																}
-																title={
-																	tieneRango || promesa.incluyeMora
-																		? undefined
-																		: "Registro anterior a la validación obligatoria de rango o mora. Revise los comentarios para conocer lo que prometió el cliente."
-																}
-															>
-																{etiquetaRango}
-																{tieneRango && promesa.incluyeMora
-																	? " + mora"
-																	: ""}
-															</span>
-														),
-														badge: (
-															<span className="inline-flex items-center gap-1.5">
-																<Badge className={badge.color}>
-																	{badge.label}
-																</Badge>
-																{vencida && (
-																	<Badge className="bg-red-600 text-white">
-																		Vencida
-																	</Badge>
-																)}
-															</span>
-														),
-														derecha:
-															promesa.montoComprometido != null
-																? fmtQ(promesa.montoComprometido)
-																: undefined,
-														subtitulo: `Por: ${promesa.realizadoPor || "Sin asignar"}`,
-														tono:
-															estadoPromesa === "cumplida"
-																? "logrado"
-																: estadoPromesa === "incumplida" || vencida
-																	? "fallido"
-																	: "sin-contacto",
-														nota: promesa.comentarios,
-														detalles: [
-															promesa.compromisosPago && {
-																label: "Compromiso",
-																valor: promesa.compromisosPago,
-															},
-															promesa.proximoPaso && {
-																label: "Próximo paso",
-																valor: promesa.proximoPaso,
-															},
-														].filter(Boolean) as Array<{
-															label: string;
-															valor: string;
-														}>,
-													};
-												})}
-											/>
-										</SeccionHistorial>
-									);
-								})()}
-							{/* Recordatorios Premora enviados (CC2-11). */}
-							<SeccionHistorial
-								titulo="Recordatorios de pago"
-								conteo={(recordatoriosPremora.data?.recordatorios ?? []).length}
-								icono={<CalendarClock />}
-								descripcion="Recordatorios automáticos Premora (D-5 / D-3 / D-1 / D-0) enviados por WhatsApp"
-								estado={
-									recordatoriosPremora.isLoading
-										? "cargando"
-										: recordatoriosPremora.isError
-											? "error"
-											: (recordatoriosPremora.data?.recordatorios ?? [])
-														.length === 0
-												? "vacio"
-												: "ok"
-								}
-								onReintentar={() => recordatoriosPremora.refetch()}
-								vacio="Sin recordatorios enviados a este crédito."
-							>
-								<HistorialGestiones
-									items={(recordatoriosPremora.data?.recordatorios ?? []).map(
-										(rec: {
-											id: string;
-											tipo: string | null;
-											telefono: string | null;
-											enviado: boolean;
-											error: string | null;
-											modoPrueba: boolean;
-											fecha: string | Date;
-										}) => ({
-											id: rec.id,
-											cuando: `${fechaLarga(new Date(rec.fecha))} · ${horaGT(rec.fecha)}`,
-											titulo: (
-												<span className="inline-flex items-center gap-1.5">
-													<MessageCircle className="h-3.5 w-3.5" />
-													Recordatorio{" "}
-													{(rec.tipo ?? "")
-														.replace("premora_", "D-")
-														.replace("_mora", "")}
-												</span>
-											),
-											badge: (
-												<span className="inline-flex flex-wrap items-center gap-1.5">
-													<Badge
-														className={
-															rec.enviado
-																? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-																: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300"
-														}
-													>
-														{rec.enviado ? "Enviado" : "Falló"}
-													</Badge>
-													{(rec.tipo ?? "").endsWith("_mora") && (
-														<Badge
-															variant="outline"
-															className="border-red-300 text-[10px] text-red-700 dark:text-red-400"
-														>
-															Variante mora
-														</Badge>
-													)}
-													{rec.modoPrueba && (
-														<Badge
-															variant="outline"
-															className="border-amber-300 text-[10px] text-amber-700 dark:text-amber-400"
-														>
-															Prueba
-														</Badge>
-													)}
-												</span>
-											),
-											subtitulo: rec.telefono
-												? `Al ${rec.telefono}`
-												: "Sin teléfono",
-											tono: rec.enviado ? "logrado" : "fallido",
-											nota: rec.error,
-										}),
-									)}
-								/>
-							</SeccionHistorial>
-							{caso.id && (
-								<ActividadBot
-									casoCobroId={caso.id}
-									numeroSifcoCaso={caso.numeroCreditoSifco ?? id ?? null}
-								/>
-							)}
-						</div>
-					) : (
-						<div className="space-y-5">
-							<SeccionHistorial
-								titulo="Vida del crédito"
-								conteo={comp?.historico?.length ?? null}
-								icono={<History />}
-								descripcion="Entradas y salidas de bucket, reestructuras y convenios"
-								// F4: null si cartera no respondió y no hay promesas cumplidas.
-								estado={
-									complementos.isLoading
-										? "cargando"
-										: !comp?.historico
-											? "error"
-											: comp.historico.length === 0
-												? "vacio"
-												: "ok"
-								}
-								onReintentar={() => {
-									void complementos.refetch();
-								}}
-								vacio="Sin hitos registrados."
-							>
-								{comp?.historico ? (
-									<HistorialGestiones
-										items={comp.historico.map((h) => ({
-											id: h.id,
-											cuando: fechaLarga(new Date(h.fecha)),
-											titulo: h.descripcion,
-											tono: "neutro" as const,
-										}))}
-									/>
-								) : null}
-							</SeccionHistorial>
-							{/* CB-033: aprobaciones/rechazos del convenio (también en Estado de cuenta). */}
-							<ConvenioDecisionesHistorial
-								casoCobroId={casoDetails.data?.id || ""}
-							/>
-						</div>
-					)}
+				{/* HISTORIAL — todo lo que pasó con el crédito en una sola línea de
+				    tiempo (gestiones, promesas, pagos, links, recordatorios, bot y
+				    vida del crédito), con chips de filtro. «Historial actual» va
+				    desde el ingreso al bucket actual; «Histórico», lo anterior. */}
+				<TabsContent value="historial">
+					<HistorialUnificado datos={historialUnificado} />
 				</TabsContent>
 
 				{/* ESTADO DE CUENTA — la deuda: cuotas, contrato y convenio. */}
 				<TabsContent value="estado-cuenta" className="space-y-5">
-					{caso.id && (
-						<Button
-							size="lg"
-							className="w-full"
-							disabled={enviarEstadoCuentaMutation.isPending}
-							loading={enviarEstadoCuentaMutation.isPending}
-							onClick={() => setConfirmarEstadoCuenta(true)}
-						>
-							{enviarEstadoCuentaMutation.isPending
-								? "Enviando estado de cuenta…"
-								: "Enviar por WhatsApp"}
-						</Button>
-					)}
+					{/* Vista previa · WhatsApp · correo: acciones del mismo nivel. */}
+					<EstadoCuentaAcciones
+						casoCobroId={caso.id}
+						correoCliente={caso.emailContacto}
+						onEnviarWhatsapp={() => setConfirmarEstadoCuenta(true)}
+						enviandoWhatsapp={enviarEstadoCuentaMutation.isPending}
+					/>
 					<ResumenCuentaCard
 						saldoTotal={
 							caso.deudaTotal != null

@@ -59,6 +59,7 @@ import {
 	dialogPanelClassName,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { historialDemo } from "./_historial-unificado-demo";
 import { ShowcaseGroup, type ShowcaseMeta } from "./_layout";
 
 export const meta: ShowcaseMeta = {
@@ -380,8 +381,7 @@ const CONTEXTO: ContextoCasoVistaProps = {
 		},
 		vehiculoRecuperar: null,
 	},
-	historial: { estado: "vacio", total: 0, items: [] },
-	historico: null,
+	historial: historialDemo({ vacio: true }),
 	estadoCuenta: {
 		saldoTotal: "Q41,600.00",
 		filas: [{ label: "Saldo vencido", valor: "Q7,000.00", tono: "danger" }],

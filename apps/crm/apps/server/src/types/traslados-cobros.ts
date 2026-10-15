@@ -11,6 +11,8 @@ export type SolicitudTraslado = {
 	mantenerEspeciales?: boolean;
 	/** M5: el asesor de origen sale de su pool en la misma transacción que el traslado. */
 	pausarPoolOrigen?: boolean;
+	/** Baja de asesor: al confirmar, el origen queda desactivado en la misma transacción (exige `pausarPoolOrigen`). */
+	desactivarOrigen?: boolean;
 };
 export type PreviewTraslado = {
 	previewId: string;
@@ -52,6 +54,8 @@ export type ResultadoTraslado = {
 	cuentas: number;
 	/** Solo con `pausarPoolOrigen`: los buckets que estaban activos y se pausaron. */
 	bucketsPausados?: number[];
+	/** Solo con `desactivarOrigen`: el asesor quedó desactivado en cartera. */
+	desactivado?: true;
 };
 export type HistorialTraslado = {
 	id: string;

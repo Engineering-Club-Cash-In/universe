@@ -570,6 +570,21 @@ export type AlertaReferencias = {
 	}[];
 };
 
+/** De una solicitud o estado patrimonial, solo lo que identifica y nombra a su dueño. */
+function columnasDelNombre(
+	tabla: typeof creditApplications | typeof financialStatements,
+) {
+	return {
+		personType: tabla.personType,
+		personId: tabla.personId,
+		opportunityId: tabla.opportunityId,
+		primerNombre: tabla.primerNombre,
+		segundoNombre: tabla.segundoNombre,
+		primerApellido: tabla.primerApellido,
+		segundoApellido: tabla.segundoApellido,
+	};
+}
+
 /** Lo que la alerta necesita de la oportunidad; cada endpoint lo lee a su manera. */
 type DatosDeLaAlerta = Omit<
 	EntradaParticipantes,
@@ -1091,6 +1106,78 @@ export const clientFormsRouter = {
 			}
 
 			return { success: true };
+		}),
+
+	/**
+	 * Para la pantalla de análisis: la misma alerta que `getClientFormData`
+	 * (mismo armado, participantes y permisos), leyendo solo las columnas que
+	 * hacen falta: sin firmas, formularios completos ni enlaces.
+	 */
+	getReferenciasRepetidas: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }): Promise<AlertaReferencias | null> => {
+			const opp = await getOpportunityOrThrow(input.opportunityId);
+			// Se autoriza antes de leer nada más: sin permiso ni se busca.
+			const nivel = nivelAlertaReferencias({
+				userRole: context.userRole,
+				userId: context.userId,
+				assignedTo: opp.assignedTo,
+			});
+			if (nivel === "ninguno") return null;
+
+			const [lead, codeudores, solicitudes] = await Promise.all([
+				opp.leadId
+					? db
+							.select({
+								id: leads.id,
+								dpi: leads.dpi,
+								email: leads.email,
+								phone: leads.phone,
+								firstName: leads.firstName,
+								middleName: leads.middleName,
+								lastName: leads.lastName,
+								secondLastName: leads.secondLastName,
+							})
+							.from(leads)
+							.where(eq(leads.id, opp.leadId))
+							.limit(1)
+							.then(([fila]) => fila ?? null)
+					: null,
+				db
+					.select({
+						id: coDebtors.id,
+						fullName: coDebtors.fullName,
+						dpi: coDebtors.dpi,
+						email: coDebtors.email,
+						phone: coDebtors.phone,
+					})
+					.from(coDebtors)
+					.where(eq(coDebtors.opportunityId, input.opportunityId))
+					.orderBy(coDebtors.createdAt),
+				db
+					.select({
+						...columnasDelNombre(creditApplications),
+						email: creditApplications.email,
+						telMovil: creditApplications.telMovil,
+						// el DPI que escribió quien la llenó: lo hace persona propia
+						dpi: creditApplications.dpi,
+						referenciasPersonales: creditApplications.referenciasPersonales,
+						referenciasCrediticias: creditApplications.referenciasCrediticias,
+					})
+					.from(creditApplications)
+					.where(eq(creditApplications.opportunityId, input.opportunityId)),
+			]);
+			return alertaDeReferencias(nivel, {
+				opportunityId: input.opportunityId,
+				lead,
+				coDebtors: codeudores,
+				solicitudes,
+				patrimoniales: () =>
+					db
+						.select(columnasDelNombre(financialStatements))
+						.from(financialStatements)
+						.where(eq(financialStatements.opportunityId, input.opportunityId)),
+			});
 		}),
 
 	getClientFormData: crmProcedure

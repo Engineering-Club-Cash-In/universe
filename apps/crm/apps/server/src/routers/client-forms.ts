@@ -11,6 +11,11 @@ import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { verificarDpiDelFormulario } from "../lib/client-form-dpi";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
+import {
+	armarParticipantes,
+	claveDeFormulario,
+	nombreDelFormulario,
+} from "../lib/participantes-formulario";
 import { validarDpi } from "../utils/cui-validation";
 
 const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
@@ -530,22 +535,6 @@ function serializeRow(row: unknown): FormRow {
 	return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
 }
 
-function getParticipantNameFromForm(
-	row: Record<string, unknown> | null,
-): string {
-	if (!row) return "";
-	const fullName = [
-		row.primerNombre,
-		row.segundoNombre,
-		row.primerApellido,
-		row.segundoApellido,
-	]
-		.map((value) => (typeof value === "string" ? value.trim() : ""))
-		.filter(Boolean)
-		.join(" ");
-	return fullName;
-}
-
 export const clientFormsRouter = {
 	generateFormToken: crmProcedure
 		.input(
@@ -642,9 +631,7 @@ export const clientFormsRouter = {
 
 			if (!participantRef) {
 				const displayName =
-					getParticipantNameFromForm(
-						serializeRow(existingCredit ?? existingFinancial),
-					) || "Titular";
+					nombreDelFormulario(existingCredit ?? existingFinancial) || "Titular";
 
 				return {
 					opportunityId: tokenRow.opportunityId,
@@ -979,134 +966,26 @@ export const clientFormsRouter = {
 
 			const latestTokens = new Map<string, TokenRow>();
 			for (const tokenRow of tokenRows) {
-				const key =
-					tokenRow.personType && tokenRow.personId
-						? `${tokenRow.personType}:${tokenRow.personId}`
-						: `legacy:${tokenRow.opportunityId}`;
+				const key = claveDeFormulario(tokenRow);
 				if (!latestTokens.has(key)) {
 					latestTokens.set(key, tokenRow);
 				}
 			}
 
 			const creditByPerson = new Map(
-				creditRows.map((row) => [
-					row.personType && row.personId
-						? `${row.personType}:${row.personId}`
-						: `legacy:${row.opportunityId}`,
-					row,
-				]),
+				creditRows.map((row) => [claveDeFormulario(row), row]),
 			);
 			const financialByPerson = new Map(
-				financialRows.map((row) => [
-					row.personType && row.personId
-						? `${row.personType}:${row.personId}`
-						: `legacy:${row.opportunityId}`,
-					row,
-				]),
+				financialRows.map((row) => [claveDeFormulario(row), row]),
 			);
-			const participantMap = new Map<
-				string,
-				{
-					personType: "lead" | "coDebtor";
-					personId: string;
-					displayName: string;
-					roleLabel: string;
-					email: string | null;
-					phone: string | null;
-					canGenerateLink: boolean;
-				}
-			>();
-
-			if (lead) {
-				participantMap.set(`lead:${lead.id}`, {
-					personType: "lead",
-					personId: lead.id,
-					displayName: [
-						lead.firstName,
-						lead.middleName,
-						lead.lastName,
-						lead.secondLastName,
-					]
-						.filter(Boolean)
-						.join(" "),
-					roleLabel: "Titular",
-					email: lead.email,
-					phone: lead.phone,
-					canGenerateLink: true,
-				});
-			}
-
-			for (const [index, coDebtor] of coDebtorsList.entries()) {
-				participantMap.set(`coDebtor:${coDebtor.id}`, {
-					personType: "coDebtor",
-					personId: coDebtor.id,
-					displayName: coDebtor.fullName,
-					roleLabel: `Co-firmante ${index + 1}`,
-					email: coDebtor.email,
-					phone: coDebtor.phone,
-					canGenerateLink: true,
-				});
-			}
-
-			for (const tokenRow of tokenRows) {
-				if (!tokenRow.personType || !tokenRow.personId) continue;
-				const key = `${tokenRow.personType}:${tokenRow.personId}`;
-				if (participantMap.has(key)) continue;
-				const creditApp = serializeRow(creditByPerson.get(key) ?? null);
-				const financialStmt = serializeRow(financialByPerson.get(key) ?? null);
-				participantMap.set(key, {
-					personType: tokenRow.personType as "lead" | "coDebtor",
-					personId: tokenRow.personId,
-					displayName:
-						getParticipantNameFromForm(creditApp) ||
-						getParticipantNameFromForm(financialStmt) ||
-						(tokenRow.personType === "lead"
-							? "Titular historico"
-							: "Co-firmante historico"),
-					roleLabel:
-						tokenRow.personType === "lead"
-							? "Titular historico"
-							: "Co-firmante historico",
-					email:
-						(typeof creditApp?.email === "string" ? creditApp.email : null) ??
-						null,
-					phone:
-						(typeof creditApp?.telMovil === "string"
-							? creditApp.telMovil
-							: null) ?? null,
-					canGenerateLink: false,
-				});
-			}
-
-			if (
-				latestTokens.has(`legacy:${input.opportunityId}`) ||
-				creditByPerson.has(`legacy:${input.opportunityId}`) ||
-				financialByPerson.has(`legacy:${input.opportunityId}`)
-			) {
-				const creditApp = serializeRow(
-					creditByPerson.get(`legacy:${input.opportunityId}`) ?? null,
-				);
-				const financialStmt = serializeRow(
-					financialByPerson.get(`legacy:${input.opportunityId}`) ?? null,
-				);
-				participantMap.set(`legacy:${input.opportunityId}`, {
-					personType: "lead",
-					personId: `legacy:${input.opportunityId}`,
-					displayName:
-						getParticipantNameFromForm(creditApp) ||
-						getParticipantNameFromForm(financialStmt) ||
-						"Titular legacy",
-					roleLabel: "Titular legacy",
-					email:
-						(typeof creditApp?.email === "string" ? creditApp.email : null) ??
-						null,
-					phone:
-						(typeof creditApp?.telMovil === "string"
-							? creditApp.telMovil
-							: null) ?? null,
-					canGenerateLink: false,
-				});
-			}
+			const participantMap = armarParticipantes({
+				opportunityId: input.opportunityId,
+				lead: lead ?? null,
+				coDebtors: coDebtorsList,
+				tokens: tokenRows,
+				creditRows,
+				financialRows,
+			});
 
 			const participants = Array.from(participantMap.entries()).map(
 				([key, participant]) => {

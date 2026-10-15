@@ -1,5 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type SubmitHandler, useForm } from "react-hook-form";
+import {
+	type SubmitHandler,
+	type UseFormRegisterReturn,
+	useForm,
+} from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +22,31 @@ interface CreditApplicationFormProps {
 function FieldError({ message }: { message?: string }) {
 	if (!message) return null;
 	return <p className="text-destructive text-sm">{message}</p>;
+}
+
+/** DPI opcional de una referencia, con la pista y para qué se pide. */
+function CampoDpiReferencia({
+	registro,
+	error,
+}: {
+	registro: UseFormRegisterReturn;
+	error?: string;
+}) {
+	return (
+		<div className="space-y-2">
+			<Label>DPI (opcional)</Label>
+			<Input
+				inputMode="numeric"
+				maxLength={15}
+				placeholder="13 dígitos"
+				{...registro}
+			/>
+			<FieldError message={error} />
+			<p className="text-muted-foreground text-xs">
+				Nos ayuda a identificar a la persona.
+			</p>
+		</div>
+	);
 }
 
 export function CreditApplicationForm({
@@ -81,18 +110,18 @@ export function CreditApplicationForm({
 			conyugeTelOficina: "",
 			conyugeTelMovil: "",
 			referenciasCrediticias: [
-				{ nombre: "", telefono: "" },
-				{ nombre: "", telefono: "" },
-				{ nombre: "", telefono: "" },
+				{ nombre: "", telefono: "", dpi: "" },
+				{ nombre: "", telefono: "", dpi: "" },
+				{ nombre: "", telefono: "", dpi: "" },
 			],
 			cuentasBancarias: [
 				{ numero: "", tipo: "", banco: "" },
 				{ numero: "", tipo: "", banco: "" },
 			],
 			referenciasPersonales: [
-				{ nombre: "", relacion: "", telefono: "" },
-				{ nombre: "", relacion: "", telefono: "" },
-				{ nombre: "", relacion: "", telefono: "" },
+				{ nombre: "", relacion: "", telefono: "", dpi: "" },
+				{ nombre: "", relacion: "", telefono: "", dpi: "" },
+				{ nombre: "", relacion: "", telefono: "", dpi: "" },
 			],
 			esPep: false,
 			comoSeEntero: "",
@@ -387,7 +416,10 @@ export function CreditApplicationForm({
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{[0, 1, 2].map((i) => (
-						<div key={i} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+						<div
+							key={i}
+							className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+						>
 							<div className="space-y-2">
 								<Label>Nombre {i + 1}</Label>
 								<Input {...register(`referenciasCrediticias.${i}.nombre`)} />
@@ -399,6 +431,10 @@ export function CreditApplicationForm({
 									{...register(`referenciasCrediticias.${i}.telefono`)}
 								/>
 							</div>
+							<CampoDpiReferencia
+								registro={register(`referenciasCrediticias.${i}.dpi`)}
+								error={errors.referenciasCrediticias?.[i]?.dpi?.message}
+							/>
 						</div>
 					))}
 				</CardContent>
@@ -443,7 +479,10 @@ export function CreditApplicationForm({
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{[0, 1, 2].map((i) => (
-						<div key={i} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+						<div
+							key={i}
+							className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+						>
 							<div className="space-y-2">
 								<Label>Nombre {i + 1}</Label>
 								<Input {...register(`referenciasPersonales.${i}.nombre`)} />
@@ -459,6 +498,10 @@ export function CreditApplicationForm({
 									{...register(`referenciasPersonales.${i}.telefono`)}
 								/>
 							</div>
+							<CampoDpiReferencia
+								registro={register(`referenciasPersonales.${i}.dpi`)}
+								error={errors.referenciasPersonales?.[i]?.dpi?.message}
+							/>
 						</div>
 					))}
 				</CardContent>

@@ -94,9 +94,9 @@ export const creditApplications = pgTable(
 		conyugeTelMovil: text("conyuge_tel_movil"),
 
 		// JSON arrays
-		referenciasCrediticias: jsonb("referencias_crediticias"), // [{nombre, telefono}]
+		referenciasCrediticias: jsonb("referencias_crediticias"), // [{nombre, telefono, dpi?}] (referencias familiares)
 		cuentasBancarias: jsonb("cuentas_bancarias"), // [{numero, tipo, banco}]
-		referenciasPersonales: jsonb("referencias_personales"), // [{nombre, relacion, telefono}]
+		referenciasPersonales: jsonb("referencias_personales"), // [{nombre, relacion, telefono, dpi?}]
 
 		// Control interno
 		esPep: boolean("es_pep").default(false),

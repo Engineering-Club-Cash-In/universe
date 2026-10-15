@@ -25,6 +25,39 @@ function sumArray(arr: unknown): number {
 	}, 0);
 }
 
+export const HEAD_REFERENCIAS_FAMILIARES = ["#", "Nombre", "Teléfono", "DPI"];
+export const HEAD_REFERENCIAS_PERSONALES = [
+	"#",
+	"Nombre",
+	"Relación",
+	"Teléfono",
+	"DPI",
+];
+
+// Una fila con solo DPI también cuenta: es el dato que sirve para identificar a la persona.
+export function filasReferenciasFamiliares(refs: any[]) {
+	return refs
+		.filter((r: any) => r.nombre || r.telefono || r.dpi)
+		.map((r: any, i: number) => [
+			i + 1,
+			val(r.nombre),
+			val(r.telefono),
+			val(r.dpi),
+		]);
+}
+
+export function filasReferenciasPersonales(refs: any[]) {
+	return refs
+		.filter((r: any) => r.nombre || r.telefono || r.dpi)
+		.map((r: any, i: number) => [
+			i + 1,
+			val(r.nombre),
+			val(r.relacion),
+			val(r.telefono),
+			val(r.dpi),
+		]);
+}
+
 // biome-ignore lint: PDF generation uses any for flexible data
 type FormData = Record<string, any>;
 
@@ -221,11 +254,9 @@ export function generateCreditApplicationPdf(data: FormData) {
 			startY: y,
 			theme: "grid",
 			styles: { fontSize: 8, cellPadding: 2 },
-			head: [["#", "Nombre", "Teléfono"]],
+			head: [HEAD_REFERENCIAS_FAMILIARES],
 			headStyles: { fillColor: [60, 60, 60] },
-			body: data.referenciasCrediticias
-				.filter((r: any) => r.nombre || r.telefono)
-				.map((r: any, i: number) => [i + 1, val(r.nombre), val(r.telefono)]),
+			body: filasReferenciasFamiliares(data.referenciasCrediticias),
 		});
 
 		y = (doc as any).lastAutoTable.finalY + 8;
@@ -282,16 +313,9 @@ export function generateCreditApplicationPdf(data: FormData) {
 			startY: y,
 			theme: "grid",
 			styles: { fontSize: 8, cellPadding: 2 },
-			head: [["#", "Nombre", "Relación", "Teléfono"]],
+			head: [HEAD_REFERENCIAS_PERSONALES],
 			headStyles: { fillColor: [60, 60, 60] },
-			body: data.referenciasPersonales
-				.filter((r: any) => r.nombre || r.telefono)
-				.map((r: any, i: number) => [
-					i + 1,
-					val(r.nombre),
-					val(r.relacion),
-					val(r.telefono),
-				]),
+			body: filasReferenciasPersonales(data.referenciasPersonales),
 		});
 
 		y = (doc as any).lastAutoTable.finalY + 8;

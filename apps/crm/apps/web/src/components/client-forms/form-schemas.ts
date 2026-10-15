@@ -1,9 +1,21 @@
 import { z } from "zod";
+import { cuiValido } from "@/lib/dpi";
 
-// Schema para referencia crediticia
-const referenciaCrediticiaSchema = z.object({
+// DPI opcional de una referencia: vacío vale; si lo escriben, con el mismo
+// validador del DPI del titular.
+const dpiReferenciaSchema = z
+	.string()
+	.optional()
+	// Solo se toleran espacios y guiones: letras o puntos no son un DPI.
+	.refine((v) => !v?.trim() || cuiValido(v.replace(/[\s-]/g, "")), {
+		message: "DPI inválido, revisá el número",
+	});
+
+// Schema para referencia familiar (llave legada `referenciasCrediticias`)
+export const referenciaCrediticiaSchema = z.object({
 	nombre: z.string().optional(),
 	telefono: z.string().optional(),
+	dpi: dpiReferenciaSchema,
 });
 
 // Schema para cuenta bancaria
@@ -14,10 +26,11 @@ const cuentaBancariaSchema = z.object({
 });
 
 // Schema para referencia personal
-const referenciaPersonalSchema = z.object({
+export const referenciaPersonalSchema = z.object({
 	nombre: z.string().optional(),
 	relacion: z.string().optional(),
 	telefono: z.string().optional(),
+	dpi: dpiReferenciaSchema,
 });
 
 export const creditApplicationSchema = z.object({
@@ -78,9 +91,10 @@ export const creditApplicationSchema = z.object({
 	conyugeTelMovil: z.string().optional(),
 
 	// JSON arrays
-	referenciasCrediticias: z.array(referenciaCrediticiaSchema),
+	// El formulario muestra 3 por lista; mismo tope holgado que el servidor.
+	referenciasCrediticias: z.array(referenciaCrediticiaSchema).max(10),
 	cuentasBancarias: z.array(cuentaBancariaSchema),
-	referenciasPersonales: z.array(referenciaPersonalSchema),
+	referenciasPersonales: z.array(referenciaPersonalSchema).max(10),
 
 	// Control interno
 	esPep: z.boolean().optional(),

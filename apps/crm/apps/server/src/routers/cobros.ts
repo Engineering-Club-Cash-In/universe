@@ -5673,15 +5673,18 @@ export const cobrosRouter = {
 							// Lo aplicado a la CUOTA contractual (capital + interés + IVA +
 							// seguro + GPS + membresías), como `sumarAplicadoACuota` de
 							// cartera-back. `monto_aplicado` no sirve: en un pago legacy de
-							// solo mora/otros incluye esos rubros. Solo cuentan los pagos
-							// vivos (validated/pending, no anulados), como la cobertura de
-							// cartera: un abono directo a capital (`capital`), una semilla
-							// (`no_required`) o un pago anulado no pagan la cuota. Si los
-							// rubros dan 0 (el pago se aplicó sin repartirlos) se usa
-							// `monto_aplicado` menos mora y otros.
+							// solo mora/otros incluye esos rubros. Cuentan los pagos no
+							// anulados `validated`/`pending` y los `no_required` con plata
+							// real en los rubros (un legacy como el del crédito 890; las
+							// semillas de SIFCO traen los rubros en 0 y aportan 0). Un abono
+							// directo a capital (`capital`) no paga la cuota. En los
+							// `validated`/`pending`, si los rubros dan 0 (el pago se aplicó
+							// sin repartirlos) se usa `monto_aplicado` menos mora y otros.
+							const estadoPago = fila.validationStatus;
 							const pagoVivo =
-								(fila.validationStatus === "validated" ||
-									fila.validationStatus === "pending") &&
+								(estadoPago === "validated" ||
+									estadoPago === "pending" ||
+									estadoPago === "no_required") &&
 								fila.paymentFalse !== true;
 							const rubrosCuota = Math.round(
 								[
@@ -5697,12 +5700,14 @@ export const cobrosRouter = {
 								? 0
 								: rubrosCuota > 0
 									? rubrosCuota / 100
-									: Math.max(
-											montoAplicado -
-												Number(fila.pago_mora ?? 0) -
-												(Number(fila.pago_otros) || 0),
-											0,
-										);
+									: estadoPago === "no_required"
+										? 0
+										: Math.max(
+												montoAplicado -
+													Number(fila.pago_mora ?? 0) -
+													(Number(fila.pago_otros) || 0),
+												0,
+											);
 							lista.push({
 								pagoId: fila.pago_id,
 								montoBoleta: fila.monto_boleta ?? null,

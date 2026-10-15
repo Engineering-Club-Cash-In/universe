@@ -43,6 +43,7 @@ import {
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
 	fuentesCoincidentesPorUsuario,
+	identidadActualDePersonaGuardada,
 	indexarRelacionesLeadPorSifco,
 	personaGuardadaFiguraEnCliente,
 	reintentarSinTurno,
@@ -1452,6 +1453,12 @@ async function registrarCoincidenciasCarteraSinCola(
 					retirosPorIdentidad.push({ personaId, usuarioId });
 					continue;
 				}
+				const identidadActual = grupoActual
+					? identidadActualDePersonaGuardada(estado.persona, {
+							identidades: identidadesActuales,
+							leads: grupoActual.leads,
+						})
+					: { lead: null, identidad: null };
 				const objetivos = objetivosPorUsuario.get(usuarioId) ?? [];
 				const coincidenciasPersona = evaluarCoincidencias(
 					candidatos,
@@ -1459,8 +1466,8 @@ async function registrarCoincidenciasCarteraSinCola(
 					reglas,
 				);
 				objetivosPorUsuario.set(usuarioId, agregarObjetivoPersonaGuardada(objetivos, {
-					lead: null,
-					identidad: null,
+					lead: identidadActual.lead,
+					identidad: identidadActual.identidad,
 					candidatos: candidatosIdentidadCoincidentesConFuente({
 						candidatos,
 						coincidencias: coincidenciasPersona,
@@ -1572,15 +1579,20 @@ async function registrarCoincidenciasCarteraSinCola(
 			);
 			const { categoria, motivo } = resumenGrupo;
 			const nombresFuente =
-				objetivo.personaAutomatica?.nombres ??
-				(objetivo.lead?.nombres || nombres || grupo.usuario.nombre);
+				objetivo.lead?.nombres ||
+				(identidadBase ? nombres : undefined) ||
+				objetivo.personaAutomatica?.nombres ||
+				nombres ||
+				grupo.usuario.nombre;
 			const apellidosFuente =
-				objetivo.personaAutomatica?.apellidos ??
-				(objetivo.lead?.apellidos || apellidos);
+				objetivo.lead?.apellidos ||
+				(identidadBase ? apellidos : undefined) ||
+				objetivo.personaAutomatica?.apellidos ||
+				apellidos;
 			const nitFuente =
-				textoOpcional(objetivo.personaAutomatica?.nit) ??
 				textoOpcional(objetivo.lead?.nit) ??
 				textoOpcional(identidadBase?.nit) ??
+				textoOpcional(objetivo.personaAutomatica?.nit) ??
 				(!grupo.usuario.nombre.includes("/") && !objetivo.personaAutomatica
 					? textoOpcional(grupo.usuario.nit)
 					: null);
@@ -1791,7 +1803,9 @@ async function registrarCoincidenciasCarteraSinCola(
 			if (!personaExistente) continue;
 			const cambiosEvidencia = new Set<string>();
 			const compartePersona =
-				Boolean(objetivo.personaAutomatica) ||
+				(Boolean(objetivo.personaAutomatica) &&
+					!objetivo.lead &&
+					!objetivo.identidad) ||
 				personasProcesadas.has(personaExistente.id) ||
 				[
 					...(personasAutomaticas.get(personaExistente.id)?.usuarios ?? []),

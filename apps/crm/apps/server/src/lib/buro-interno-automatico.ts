@@ -396,3 +396,65 @@ export async function reintentarSinTurno<T>(
 		}
 	}
 }
+
+/**
+ * Busca, entre las identidades actuales de un cliente de Cartera, la que
+ * corresponde a una ficha guardada, para refrescar sus datos desde la fuente
+ * vigente. Prioriza el lead (por id, DPI, NIT o nombre) y luego la identidad
+ * base (por NIT o nombre). Un cliente con una sola identidad y sin leads
+ * corresponde a esa identidad.
+ */
+export function identidadActualDePersonaGuardada<
+	L extends {
+		id: string;
+		dpi: string | null;
+		nit: string | null;
+		nombres: string;
+		apellidos: string;
+	},
+	I extends { nombreCompleto: string; nit: string | null },
+>(
+	persona: {
+		leadId: string | null;
+		dpi: string | null;
+		nit: string | null;
+		nombres: string;
+		apellidos: string;
+	},
+	cliente: { identidades: I[]; leads: L[] },
+): { lead: L | null; identidad: I | null } {
+	const compactar = (valor: string) =>
+		normalizarTexto(valor).replace(/\s+/g, "");
+	const nombre = compactar(`${persona.nombres} ${persona.apellidos}`);
+	const dpi = normalizarDpiMatch(persona.dpi);
+	const nit = normalizarNitMatch(persona.nit);
+	const lead =
+		cliente.leads.find(
+			(l) => persona.leadId !== null && l.id === persona.leadId,
+		) ??
+		cliente.leads.find(
+			(l) => dpi !== null && normalizarDpiMatch(l.dpi) === dpi,
+		) ??
+		cliente.leads.find(
+			(l) => nit !== null && normalizarNitMatch(l.nit) === nit,
+		) ??
+		cliente.leads.find(
+			(l) =>
+				nombre.length > 0 &&
+				compactar(`${l.nombres} ${l.apellidos}`) === nombre,
+		) ??
+		null;
+	if (lead) return { lead, identidad: null };
+	const identidad =
+		cliente.identidades.find(
+			(i) => nit !== null && normalizarNitMatch(i.nit) === nit,
+		) ??
+		cliente.identidades.find(
+			(i) => nombre.length > 0 && compactar(i.nombreCompleto) === nombre,
+		) ??
+		(cliente.identidades.length === 1 && cliente.leads.length === 0
+			? cliente.identidades[0]
+			: null) ??
+		null;
+	return { lead: null, identidad };
+}

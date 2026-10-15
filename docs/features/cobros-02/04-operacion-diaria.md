@@ -117,8 +117,6 @@ llegaba para todo.
 | `promesa_incumplida` | Justo cuando una promesa pasa a incumplida — **solo en la transición**, no todos los días | Asesor + supervisores |
 | `cliente_subido` | El crédito subió de bucket anoche | Solo el asesor |
 | `sin_contacto_3d` | Subió a bucket ≥ 1 y lleva 3 días hábiles sin contacto | Asesor + supervisores |
-| `b3_llamada_supervisor` | Un crédito **ingresó a B3** (SUBIDA): es una **tarea** con vencimiento (CB-035) | Solo supervisores |
-| `b3_llamada_vencida` | La tarea anterior venció sin llamada (CB-035) | Supervisores + asesor dueño |
 
 **Días hábiles con regla de oro:** lunes a viernes, **pero si el 15 o el fin de mes cae en
 fin de semana, ese día sí cuenta** — son días de pago y la cartera se mueve.
@@ -128,56 +126,20 @@ con el usuario del CRM comparando `asesores.email_cash_in` con el email del usua
 
 Pantalla: `/cobros/notifications`, con las tarjetas coloreadas por tipo.
 
-### Tarea de llamada al supervisor al ingresar a B3 (CB-035)
+### Tarea de llamada al supervisor al ingresar a B3 (CB-035) — retirada
 
-Al pasar un crédito a B3 (Rescate) el supervisor recibe una **tarea de llamada** para
-intervenir a tiempo. Si nadie llama dentro del plazo, se genera una alerta.
+La tarea `b3_llamada_supervisor` y su alerta `b3_llamada_vencida` **ya no se generan**:
+el job de las 08:00 GT solo emite `cliente_subido` y `sin_contacto_3d`. Tampoco existen la
+sección «Mis tareas» del dashboard del supervisor, el endpoint `getMisTareasCobros` ni la
+opción «Solo tareas» del filtro de notificaciones.
 
-- **Qué es "ingresar a B3":** un evento `SUBIDA` con `bucket_nuevo = 3` en el historial de
-  buckets. Una `BAJADA` de B4 a B3 no cuenta (el crédito viene mejorando); un salto directo
-  B1→B3 sí.
-- **Plazo:** 3 **días hábiles** (regla de oro) contados desde el día **siguiente** a la
-  subida — el motor la sella a las 23:59 GT, así que ese día no cuenta. `fecha_vencimiento`
-  guarda el último instante (23:59:59 GT) del tercer día hábil.
-- **Cuándo aparece:** en el job de las 08:00 GT (el motor de buckets corre a medianoche y el
-  CRM solo lo ve por el historial), junto a `cliente_subido` y `sin_contacto_3d`. Reusa los
-  eventos que ese job ya trajo de cartera-back.
-- **A quién:** a **todos** los `cobros_supervisor` (no existe mapeo asesor → supervisor).
-  Una fila por supervisor, con `type = action_required`.
-- **Se cumple** al registrar una **llamada** en el caso (contestada o no): el cierre es
-  inmediato desde `createContactoCobros`, y el job lo reconcilia por si falló. Solo
-  `metodoContacto = 'llamada'` cuenta — los contactos automáticos del sistema (WhatsApp de
-  premora/convenios, link Págalo, pagos) nunca lo cumplen.
-- **Se retira sola (`dismissed`, sin alerta)** si el crédito tuvo otro evento de bucket
-  después del ingreso (bajó, subió a B4, o re-ingresó con un episodio nuevo), o si el evento
-  ya salió de la ventana de 60 días del historial.
-- **Alerta de vencida:** una por episodio, a supervisores + asesor dueño. La tarea original
-  **sigue abierta** hasta que se llame.
-- **No se puede resolver ni descartar a mano** (`COBROS_TIPO_RESOLUCION_BLOQUEADA`): se cierra
-  por la llamada. La alerta `b3_llamada_vencida` sí.
-- **Dedup por episodio:** `uq_notifications_cobros_dedup` con la llave `b3:<historial_id>`
-  (tarea) y `vencida:b3:<historial_id>` (alerta), insertando con `onConflictDoNothing`.
-  La ventana de creación es de 7 días para que una mañana sin job no pierda tareas; repetir
-  es inocuo.
-- **Requiere caso activo:** si el SIFCO no tiene `casos_cobros` activo no se crea nada (igual
-  que el resto de alertas).
-- **Convive con `sin_contacto_3d`:** un crédito en B3 sin contacto seguirá disparando también
-  esa alerta. Son señales distintas (falta del asesor vs. tarea del supervisor); si el ruido
-  molesta, excluir B3 de `sin_contacto_3d` es un cambio de una línea, pero es decisión de
-  negocio.
-- **Dónde se ve la tarea:**
-  - **Notificaciones:** el filtro de alertas de cobros tiene la opción **"Solo tareas"**
-    (solo `b3_llamada_supervisor`; la alerta de vencida no es tarea). La tarjeta muestra
-    "Vence el dd/mm/aaaa".
-  - **"Mis tareas" en la Cola del día** (`/cobros/cola`, solo supervisor): el supervisor no
-    tiene agenda propia — `/cobros/mi-dia` lo redirige a la cola del equipo — así que sus
-    tareas abiertas se listan en un bloque arriba de la cola, ordenadas vencidas → vencen
-    hoy → en plazo, con badge de plazo y botón "Ver caso". Se alimenta de `getMisTareasCobros`
-    (solo `notifications` local): se ve aunque cartera-back esté caído y la cola falle. Se
-    oculta si no hay tareas.
-- **Fuera de alcance:** las tareas **no** son ítems de la cola ni entran a los snapshots de
-  agenda ni al % de cumplimiento (mide gestión de créditos del asesor). Migración:
-  `0068_cb035_b3_llamada.sql`.
+- **Qué queda en la base:** los valores del enum `cobros_notif_tipo`, la migración
+  `0068_cb035_b3_llamada.sql` y la columna `notifications.fecha_vencimiento` (nullable).
+  Postgres no permite quitar valores de un enum y no estorban.
+- **Notificaciones ya creadas:** siguen mostrándose con su texto y ahora se pueden
+  **resolver o descartar a mano** (ya no están en `COBROS_TIPO_RESOLUCION_BLOQUEADA`).
+- **Convive con `sin_contacto_3d`:** un crédito en B3 sin contacto sigue disparando esa
+  alerta; es la única señal automática de falta de contacto en Rescate.
 
 ---
 

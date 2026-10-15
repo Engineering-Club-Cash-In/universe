@@ -48,7 +48,6 @@ S5 y S6 los consume la Cartera general.
 | --- | --- | --- |
 | Aprobaciones pendientes | `getConveniosListado({estado:"pending"})`, `getSolicitudesRecuperacion().pendientes` y `getColaInmovilizaciones()` con estado `pendiente_aprobacion` | Real. Documentos y rebajas: S1 |
 | Asesores ausentes | `listarCoberturas({desde:hoy, hasta:hoy})`, sin las canceladas | Real |
-| Tareas B3 | `getMisTareasCobros` (componente `MisTareasB3`, que salió de la Cola del día) | Real. Las tareas se asignan a supervisores, así que un admin ve la lista vacía |
 | Contactabilidad del equipo | `getHistorialAgendasResumen` del período y del anterior | Real |
 | Migración de bucket | `getCierreDiarioPorRango`: suma de `bajaron` y `subieron` | Real. El día en curso se suma después del cierre de las 22:00 |
 | Links de pago | `getPagaloSupervision`: pendientes = `conteoPorEstado` de LINKS_PENDING, PENDING_PAYMENT y PARTIALLY_PAID; vencidos = `total` con `problemasLink:["EXPIRED"]` | Real |

@@ -10,6 +10,7 @@ import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { CrmCard, CrmPill } from "@/components/ds/cards-credito";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { reglasApagado } from "@/lib/cobros/reglas-caso";
 import { orpc } from "@/utils/orpc";
 
 export type PestanaUbicacion =
@@ -226,10 +227,12 @@ export function VehiculoGpsTabs({
 		staleTime: 30_000,
 		refetchOnWindowFocus: false,
 	});
+	// Sin GPS solo se conserva si hay algo que auditar o reactivar (solicitud
+	// abierta, llamada pendiente, historial o unidad apagada): mismo gate que la tarjeta.
 	const sinApagado =
 		!!inmov.data &&
 		!inmov.data.tieneGps &&
-		inmov.data.estadoUnidad !== "inmovilizada";
+		!reglasApagado(inmov.data, bucketNumero).mostrarTarjeta;
 	const mostrarApagado = !!inmov.data && !sinApagado;
 	useEffect(() => {
 		if (sinApagado && pestana === "inmovilizacion") {

@@ -184,8 +184,8 @@ export const buroInternoReglas = pgTable(
  * Autorizaciones para aprobar un análisis pese al buró interno. Una coincidencia
  * de severidad alta frena la aprobación; el analista la levanta con un motivo,
  * y la autorización vale solo para esa oportunidad, esa persona y la identidad
- * que se evaluó: si después aparece otra coincidencia alta, o la oportunidad
- * cambia de lead o de DPI, vuelve a frenar.
+ * que se evaluó: si después aparece otra coincidencia alta, cambia la evidencia
+ * automática, o la oportunidad cambia de lead o de DPI, vuelve a frenar.
  */
 export const buroInternoAutorizaciones = pgTable(
 	"buro_interno_autorizaciones",
@@ -231,7 +231,8 @@ export const buroInternoEventos = pgTable(
 		/**
 		 * Manuales: alta, edicion, baja, regla_actualizada, consulta,
 		 * autorizacion_analisis. Automáticas de Cartera: alta, retiro,
-		 * reactivacion, actualizacion, vinculo y retiro de fuentes.
+		 * reactivacion, actualizacion, vinculo, retiro de fuentes e invalidacion
+		 * de autorizaciones por cambios de evidencia.
 		 */
 		accion: text("accion").notNull(),
 		detalle: jsonb("detalle").$type<Record<string, unknown>>(),

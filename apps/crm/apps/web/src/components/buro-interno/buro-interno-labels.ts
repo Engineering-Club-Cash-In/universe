@@ -73,6 +73,8 @@ export const ETIQUETA_ACCION: Record<string, string> = {
 	actualizacion_automatica_cartera: "Actualizado automáticamente desde Cartera",
 	vinculo_automatico_cartera: "Vinculado a evidencia de Cartera",
 	retiro_fuentes_automaticas_cartera: "Fuentes de Cartera retiradas",
+	invalidacion_autorizaciones_automaticas_cartera:
+		"Autorizaciones invalidadas por cambios en Cartera",
 };
 
 export function formatearFecha(fecha: Date | string | null | undefined) {

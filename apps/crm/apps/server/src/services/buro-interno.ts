@@ -93,7 +93,7 @@ export class BuroInternoValidacionError extends Error {
 
 export type ActorBuroInterno = { id: string; rol: string | null };
 
-type Ejecutor = Pick<typeof db, "insert">;
+type Ejecutor = Pick<typeof db, "delete" | "insert">;
 
 async function registrarEvento(
 	ejecutor: Ejecutor,
@@ -112,6 +112,27 @@ async function registrarEvento(
 		detalle: evento.detalle ?? null,
 		realizadoPor: evento.actor?.id ?? null,
 		realizadoPorRol: evento.actor?.rol ?? "system",
+	});
+}
+
+async function invalidarAutorizacionesPorCambioAutomatico(
+	ejecutor: Ejecutor,
+	personaId: string,
+	motivos: string[],
+): Promise<void> {
+	const eliminadas = await ejecutor
+		.delete(buroInternoAutorizaciones)
+		.where(eq(buroInternoAutorizaciones.personaId, personaId))
+		.returning({ opportunityId: buroInternoAutorizaciones.opportunityId });
+	if (eliminadas.length === 0) return;
+	await registrarEvento(ejecutor, {
+		accion: "invalidacion_autorizaciones_automaticas_cartera",
+		actor: null,
+		personaId,
+		detalle: {
+			motivos: [...new Set(motivos)],
+			oportunidadesId: eliminadas.map(({ opportunityId }) => opportunityId),
+		},
 	});
 }
 
@@ -1324,6 +1345,9 @@ async function registrarCoincidenciasCartera(
 							usuariosCarteraId: planVigencia.usuariosSinRiesgo,
 						},
 					});
+					await invalidarAutorizacionesPorCambioAutomatico(tx, personaId, [
+						"retiro_fuentes",
+					]);
 				}
 				continue;
 			}
@@ -1345,6 +1369,9 @@ async function registrarCoincidenciasCartera(
 				personaId,
 				detalle: { usuariosCarteraId: [...estado.usuarios] },
 			});
+			await invalidarAutorizacionesPorCambioAutomatico(tx, personaId, [
+				"retiro_automatico",
+			]);
 		}
 		// La consulta en línea solo reconcilia personas relacionadas con el
 		// candidato. El mantenimiento global queda fuera del candado interactivo.
@@ -1531,6 +1558,7 @@ async function registrarCoincidenciasCartera(
 				}
 			}
 			if (!personaExistente) continue;
+			const cambiosEvidencia = new Set<string>();
 			const compartePersona =
 				personasProcesadas.has(personaExistente.id) ||
 				[
@@ -1580,6 +1608,7 @@ async function registrarCoincidenciasCartera(
 				if (actualizada) personaExistente = actualizada;
 			}
 			if (decisionPersistencia === "reactivar") {
+				cambiosEvidencia.add("reactivacion");
 				await registrarEvento(tx, {
 					accion: "reactivacion_automatica_cartera",
 					actor: null,
@@ -1617,6 +1646,7 @@ async function registrarCoincidenciasCartera(
 				idsCreditosVigentes,
 			);
 			if (fuentesObsoletas.length > 0) {
+				cambiosEvidencia.add("retiro_fuentes");
 				await tx
 					.delete(buroInternoFuentesCartera)
 					.where(
@@ -1661,6 +1691,7 @@ async function registrarCoincidenciasCartera(
 					credito.creditos.credito_id,
 				);
 				if (!fuenteExistente) {
+					cambiosEvidencia.add("nueva_fuente");
 					await tx.insert(buroInternoFuentesCartera).values({
 						...datosDeseadosFuente,
 						carteraUsuarioId: usuarioId,
@@ -1669,6 +1700,7 @@ async function registrarCoincidenciasCartera(
 						updatedAt: ahora,
 					});
 				} else if (cambioFuenteCartera(fuenteExistente, datosDeseadosFuente)) {
+					cambiosEvidencia.add("actualizacion_fuente");
 					await tx
 						.update(buroInternoFuentesCartera)
 						.set({
@@ -1692,12 +1724,20 @@ async function registrarCoincidenciasCartera(
 				personaExistente.categoria !== resumenPersona.categoria ||
 				personaExistente.motivo !== resumenPersona.motivo;
 			if (cambioResumen) {
+				cambiosEvidencia.add("actualizacion_resumen");
 				const [actualizada] = await tx
 					.update(buroInternoPersonas)
 					.set({ ...resumenPersona, updatedAt: ahora })
 					.where(eq(buroInternoPersonas.id, personaExistente.id))
 					.returning();
 				if (actualizada) personaExistente = actualizada;
+			}
+			if (cambiosEvidencia.size > 0) {
+				await invalidarAutorizacionesPorCambioAutomatico(
+					tx,
+					personaExistente.id,
+					[...cambiosEvidencia],
+				);
 			}
 			if (
 				decisionPersistencia !== "reactivar" &&
@@ -1968,16 +2008,29 @@ export async function autorizarOportunidad(
 	motivo: string,
 	actor: ActorBuroInterno,
 ) {
-	const evaluacion = await evaluarOportunidad(opportunityId);
+	const evaluacionInicial = await evaluarOportunidad(opportunityId);
 
-	if (evaluacion.bloqueantes.length === 0) {
+	if (evaluacionInicial.bloqueantes.length === 0) {
 		throw new BuroInternoValidacionError(
 			"No hay coincidencias del buró interno frenando esta oportunidad",
 		);
 	}
 
+	let evaluacionAutorizada = evaluacionInicial;
 	await db.transaction(async (tx) => {
-		for (const bloqueante of evaluacion.bloqueantes) {
+		await tomarCandadoBuroInterno(tx);
+		// La sincronización automática usa el mismo candado. Se vuelve a leer el
+		// catálogo después de adquirirlo para no autorizar evidencia que cambió
+		// entre la evaluación inicial y la escritura de la autorización.
+		evaluacionAutorizada = await evaluarOportunidad(opportunityId, {
+			sincronizarCartera: false,
+		});
+		if (evaluacionAutorizada.bloqueantes.length === 0) {
+			throw new BuroInternoValidacionError(
+				"Las coincidencias del buró interno cambiaron antes de autorizar; vuelva a revisar la oportunidad",
+			);
+		}
+		for (const bloqueante of evaluacionAutorizada.bloqueantes) {
 			// Si ya hay una fila para esta persona pero de otra identidad (le
 			// cambiaron el lead o el DPI), se reemplaza: esa autorización vieja
 			// ya no aplica y sin esto el analista no podría dar la nueva.
@@ -1988,8 +2041,8 @@ export async function autorizarOportunidad(
 				.values({
 					opportunityId,
 					personaId: bloqueante.registroId,
-					leadId: evaluacion.identidad.leadId,
-					dpi: evaluacion.identidad.dpi,
+					leadId: evaluacionAutorizada.identidad.leadId,
+					dpi: evaluacionAutorizada.identidad.dpi,
 					motivo: motivo.trim(),
 					autorizadoPor: actor.id,
 				})
@@ -1999,8 +2052,8 @@ export async function autorizarOportunidad(
 						buroInternoAutorizaciones.personaId,
 					],
 					set: {
-						leadId: evaluacion.identidad.leadId,
-						dpi: evaluacion.identidad.dpi,
+						leadId: evaluacionAutorizada.identidad.leadId,
+						dpi: evaluacionAutorizada.identidad.dpi,
 						motivo: motivo.trim(),
 						autorizadoPor: actor.id,
 						createdAt: new Date(),

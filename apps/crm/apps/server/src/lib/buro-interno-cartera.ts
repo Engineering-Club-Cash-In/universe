@@ -9,6 +9,35 @@ export type RiesgoCartera = {
 	texto: string;
 };
 
+export type IdentidadClienteCartera = {
+	nombreCompleto: string;
+	nit: string | null;
+};
+
+/**
+ * Los datos históricos de Cartera pueden agrupar varias personas separadas por
+ * `/`. Cada nombre se vuelve una identidad de match y solo recibe el NIT de la
+ * misma posición; un NIT único no se replica hacia las demás personas.
+ */
+export function separarIdentidadesClienteCartera(
+	nombre: string,
+	nit: string | null,
+): IdentidadClienteCartera[] {
+	const nombres = nombre
+		.split("/")
+		.map((parte) => parte.trim())
+		.filter(Boolean);
+	const nits = (nit ?? "")
+		.split("/")
+		.map((parte) => parte.trim())
+		.filter(Boolean);
+
+	return nombres.map((nombreCompleto, indice) => ({
+		nombreCompleto,
+		nit: nits[indice] || null,
+	}));
+}
+
 const PRIORIDAD_CATEGORIA: Record<BuroInternoCategoria, number> = {
 	fraude: 0,
 	vehiculo_recuperado: 1,

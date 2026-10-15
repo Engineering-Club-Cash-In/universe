@@ -49,6 +49,8 @@ import {
 	planificarVigenciaPersonaAutomatica,
 	type RiesgoCartera,
 	resumirFuentesRiesgo,
+	separarIdentidadesClienteCartera,
+	type IdentidadClienteCartera,
 } from "../lib/buro-interno-cartera";
 import {
 	type CandidatoBuroInterno,
@@ -68,7 +70,10 @@ import { isUniqueViolation } from "../lib/db-errors";
 import { eqDpi } from "../lib/dpi-lookup";
 import type { CreditoBuroInterno } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
-import { isCarteraBackPaymentsEnabled } from "./cartera-back-integration";
+import {
+	isCarteraBackEnabled,
+	isCarteraBackPaymentsEnabled,
+} from "./cartera-back-integration";
 
 export class BuroInternoNoEncontradoError extends Error {
 	constructor(mensaje = "El registro del buró interno no existe") {
@@ -990,7 +995,7 @@ export async function consultarPersona(
 			direccion: consulta.direccion,
 		},
 	];
-	if (isCarteraBackPaymentsEnabled()) {
+	if (isCarteraBackEnabled()) {
 		await registrarCoincidenciasCartera(candidatos);
 	}
 	const coincidencias = await evaluar(candidatos);
@@ -1090,6 +1095,7 @@ async function registrarCoincidenciasCartera(
 		riesgos: RiesgoCartera[];
 		leads: LeadCartera[];
 		lead: LeadCartera | null;
+		identidad: IdentidadClienteCartera | null;
 	};
 	const grupos = new Map<number, GrupoCartera>();
 	for (const credito of creditos) {
@@ -1104,6 +1110,7 @@ async function registrarCoincidenciasCartera(
 			riesgos: [],
 			leads: [],
 			lead: null,
+			identidad: null,
 		};
 		grupo.creditos.push(credito);
 		grupo.riesgos.push(
@@ -1186,29 +1193,44 @@ async function registrarCoincidenciasCartera(
 	const fuentes: RegistroParaMatch[] = [];
 	const origenFuente = new Map<
 		string,
-		{ usuarioId: number; lead: LeadCartera | null }
+		{
+			usuarioId: number;
+			lead: LeadCartera | null;
+			identidad: IdentidadClienteCartera | null;
+		}
 	>();
 	const porId = new Map<number, GrupoCartera>();
 	for (const [usuarioId, grupo] of grupos) {
-		const { nombres, apellidos } = sugerirNombresApellidos(
-			grupo.usuario.nombre,
-		);
-		const agregarFuente = (id: string, lead: LeadCartera | null) => {
+		const agregarFuente = (
+			id: string,
+			lead: LeadCartera | null,
+			identidad: IdentidadClienteCartera | null,
+		) => {
+			const nombreBase = identidad?.nombreCompleto ?? grupo.usuario.nombre;
+			const { nombres, apellidos } = sugerirNombresApellidos(nombreBase);
 			fuentes.push({
 				id,
 				leadId: lead?.id ?? null,
 				nombres: lead?.nombres || nombres,
 				apellidos: lead?.apellidos || apellidos,
 				dpi: lead?.dpi ?? null,
-				nit: textoOpcional(lead?.nit) ?? textoOpcional(grupo.usuario.nit),
+				nit:
+					textoOpcional(lead?.nit) ??
+					textoOpcional(identidad?.nit) ??
+					(lead ? textoOpcional(grupo.usuario.nit) : null),
 				telefono: lead?.telefono ?? null,
 				direccion: lead?.direccion ?? grupo.usuario.direccion ?? null,
 			});
-			origenFuente.set(id, { usuarioId, lead });
+			origenFuente.set(id, { usuarioId, lead, identidad });
 		};
-		agregarFuente(`cartera-user-${usuarioId}-base`, null);
+		for (const [indice, identidad] of separarIdentidadesClienteCartera(
+			grupo.usuario.nombre,
+			grupo.usuario.nit,
+		).entries()) {
+			agregarFuente(`cartera-user-${usuarioId}-base-${indice}`, null, identidad);
+		}
 		for (const lead of grupo.leads) {
-			agregarFuente(`cartera-user-${usuarioId}-lead-${lead.id}`, lead);
+			agregarFuente(`cartera-user-${usuarioId}-lead-${lead.id}`, lead, null);
 		}
 		porId.set(usuarioId, grupo);
 	}
@@ -1226,6 +1248,9 @@ async function registrarCoincidenciasCartera(
 				candidatos.some((candidato) => candidato.leadId === origen.lead?.id))
 		) {
 			grupo.lead = origen.lead;
+		}
+		if (grupo && origen.identidad && !grupo.lead && !grupo.identidad) {
+			grupo.identidad = origen.identidad;
 		}
 	}
 		const fuentesAutomaticas = await tx
@@ -1337,9 +1362,9 @@ async function registrarCoincidenciasCartera(
 		for (const usuarioId of usuariosASincronizar) {
 			const grupo = porId.get(usuarioId);
 			if (!grupo) continue;
-			const { nombres, apellidos } = sugerirNombresApellidos(
-				grupo.usuario.nombre,
-			);
+			const identidadBase = grupo.identidad;
+			const nombreBase = identidadBase?.nombreCompleto ?? grupo.usuario.nombre;
+			const { nombres, apellidos } = sugerirNombresApellidos(nombreBase);
 			const sifcos = [
 				...new Set(grupo.creditos.map((c) => c.creditos.numero_credito_sifco)),
 			].sort();
@@ -1360,7 +1385,11 @@ async function registrarCoincidenciasCartera(
 				grupo.lead?.nombres || nombres || grupo.usuario.nombre;
 			const apellidosFuente = grupo.lead?.apellidos || apellidos;
 			const nitFuente =
-				textoOpcional(grupo.lead?.nit) ?? textoOpcional(grupo.usuario.nit);
+				textoOpcional(grupo.lead?.nit) ??
+				textoOpcional(identidadBase?.nit) ??
+				(!grupo.usuario.nombre.includes("/")
+					? textoOpcional(grupo.usuario.nit)
+					: null);
 
 			const fuentesDeUsuario = await tx
 				.select({
@@ -1835,7 +1864,7 @@ export async function evaluarOportunidad(
 		dpi: normalizarDpiMatch(fila.dpi),
 	};
 
-	if ((opciones.sincronizarCartera ?? true) && isCarteraBackPaymentsEnabled()) {
+	if ((opciones.sincronizarCartera ?? true) && isCarteraBackEnabled()) {
 		await registrarCoincidenciasCartera(candidatos);
 	}
 

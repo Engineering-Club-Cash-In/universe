@@ -8,6 +8,7 @@ import {
 	normalizarMotivoRiesgo,
 	planificarVigenciaPersonaAutomatica,
 	resumirFuentesRiesgo,
+	separarIdentidadesClienteCartera,
 	validarRespuestaCreditosBuroInterno,
 } from "./buro-interno-cartera";
 
@@ -243,6 +244,38 @@ describe("clasificación de evidencia de Cartera", () => {
 			categoria: "incobrable",
 			texto: "Seguimiento de cobros",
 		});
+	});
+});
+
+describe("identidades compuestas de clientes históricos", () => {
+	test("empareja cada nombre con el NIT de la misma posición", () => {
+		expect(
+			separarIdentidadesClienteCartera(
+				"Ana López Pérez / Marta Díaz Ruiz",
+				"1234567/7654321",
+			),
+		).toEqual([
+			{ nombreCompleto: "Ana López Pérez", nit: "1234567" },
+			{ nombreCompleto: "Marta Díaz Ruiz", nit: "7654321" },
+		]);
+	});
+
+	test("no asigna el NIT único de la primera persona a los demás nombres", () => {
+		expect(
+			separarIdentidadesClienteCartera(
+				"Ana López Pérez / Marta Díaz Ruiz",
+				"1234567",
+			),
+		).toEqual([
+			{ nombreCompleto: "Ana López Pérez", nit: "1234567" },
+			{ nombreCompleto: "Marta Díaz Ruiz", nit: null },
+		]);
+	});
+
+	test("mantiene sin cambios a un cliente individual", () => {
+		expect(
+			separarIdentidadesClienteCartera("Ana López Pérez", "1234567"),
+		).toEqual([{ nombreCompleto: "Ana López Pérez", nit: "1234567" }]);
 	});
 });
 

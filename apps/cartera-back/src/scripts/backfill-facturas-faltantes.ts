@@ -21,14 +21,7 @@ import { facturas_electronicas, pagos_credito, cuotas_credito } from "../databas
 import { SATClientService } from "../cofidi/satClientService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
 import { launchBrowser } from "../utils/functions/browser";
-import {
-  SAT_CONFIG,
-  SE_PRESTA_SAT_CONFIG,
-  AMJK_SAT_CONFIG,
-  CREACION_IMAGEN_SAT_CONFIG,
-  GRUPO_BATRO_SAT_CONFIG,
-  AUTOCASH_SAT_CONFIG,
-} from "../utils/functions/const";
+import { EMISORES } from "../cofidi/emisores";
 
 const INSERT = process.argv.includes("--insert");
 const PDF = process.argv.includes("--pdf");
@@ -73,14 +66,9 @@ const PAGO_ID_OVERRIDE: Record<string, number> = {
 const nitDeConfig = (cfg: any): string => cfg.entity ?? cfg.nit;
 
 // Solo configs con credenciales presentes (GRUPO_BATRO puede faltar en .env).
-const SAT_CONFIGS = [
-  ["CUBE", SAT_CONFIG],
-  ["SE_PRESTA", SE_PRESTA_SAT_CONFIG],
-  ["AMJK", AMJK_SAT_CONFIG],
-  ["CREACION_IMAGEN", CREACION_IMAGEN_SAT_CONFIG],
-  ["GRUPO_BATRO", GRUPO_BATRO_SAT_CONFIG],
-  ["AUTOCASH", AUTOCASH_SAT_CONFIG],
-].filter(([, cfg]: any) => cfg.requestor && cfg.endpointUrl) as [string, any][];
+const SAT_CONFIGS = EMISORES.map((e) => [e.clave, e.satConfig] as const).filter(
+  ([, cfg]: any) => cfg.requestor && cfg.endpointUrl
+);
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 

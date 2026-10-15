@@ -91,6 +91,8 @@ export interface SeguimientoCaso {
 	 * promesa. Con hora si el asesor la puso (B8); si no, medianoche GT del día.
 	 */
 	proximaLlamadaEn: Date | null;
+	/** La próxima llamada tiene hora puesta por el asesor (puede ser 00:00 explícita). */
+	proximaLlamadaConHora?: boolean;
 	/** Promesa vigente más próxima (pendiente, fecha ≥ hoy). */
 	promesaVigenteEn: Date | null;
 	/** La promesa más reciente fracasó (incumplida o pendiente ya vencida) hace ≤ 30 días. */
@@ -116,6 +118,12 @@ const MS_DIA = 24 * 60 * 60 * 1000;
  * El día de `fecha` (GT) a la hora `hora` ("HH:MM[:SS]", hora GT). Sin hora
  * válida devuelve `fecha` tal cual (medianoche GT, como se guarda el día).
  */
+/** `conHoraGT` aplica `hora` solo si es válida ("HH:MM[:SS]", 00–23 / 00–59). */
+export function horaGTValida(hora: string | null | undefined): boolean {
+	const m = hora ? /^(\d{2}):(\d{2})/.exec(hora) : null;
+	return !!m && Number(m[1]) <= 23 && Number(m[2]) <= 59;
+}
+
 export function conHoraGT(fecha: Date, hora: string | null | undefined): Date {
 	const m = hora ? /^(\d{2}):(\d{2})/.exec(hora) : null;
 	if (!m) return fecha;
@@ -165,6 +173,9 @@ export function resumirSeguimiento(
 				)
 			: null;
 
+	const proximaLlamadaConHora =
+		!!proximaLlamadaEn && horaGTValida(ultimaNoPromesa?.horaProximoContacto);
+
 	// Promesas: todas (también las registradas por envíos automáticos no
 	// existen — una promesa siempre es manual, pero no se filtra por las dudas).
 	const promesas = filas
@@ -200,6 +211,7 @@ export function resumirSeguimiento(
 		intentadoHoy: deHoy.length > 0,
 		contactadoHoy: deHoy.some((f) => ESTADOS_LOGRADO.has(f.estadoContacto)),
 		proximaLlamadaEn,
+		proximaLlamadaConHora,
 		promesaVigenteEn: vigentes[0] ?? null,
 		promesaIncumplida,
 		promesaIncumplidaEn: promesaIncumplida
@@ -233,6 +245,8 @@ export interface AccionPendiente {
 	tipo: TipoAccionPendiente;
 	/** Fecha de referencia (llamada agendada, promesa, límite SLA). */
 	fecha: Date | null;
+	/** Solo `llamar`: la fecha trae la hora que puso el asesor (incluye 00:00). */
+	conHora?: boolean;
 }
 
 /**
@@ -260,7 +274,11 @@ export function accionPendienteDe(
 	if (esHoy(seguimiento.promesaVigenteEn))
 		return { tipo: "promesa_hoy", fecha: seguimiento.promesaVigenteEn };
 	if (esHoy(seguimiento.proximaLlamadaEn))
-		return { tipo: "llamar", fecha: seguimiento.proximaLlamadaEn };
+		return {
+			tipo: "llamar",
+			fecha: seguimiento.proximaLlamadaEn,
+			conHora: seguimiento.proximaLlamadaConHora,
+		};
 	if (extras.venceHoy) return { tipo: "cuota_vence_hoy", fecha: null };
 	if (seguimiento.promesaIncumplida)
 		return {
@@ -281,7 +299,11 @@ export function accionPendienteDe(
 			};
 	}
 	if (seguimiento.proximaLlamadaEn)
-		return { tipo: "llamar", fecha: seguimiento.proximaLlamadaEn };
+		return {
+			tipo: "llamar",
+			fecha: seguimiento.proximaLlamadaEn,
+			conHora: seguimiento.proximaLlamadaConHora,
+		};
 	return null;
 }
 
@@ -323,7 +345,9 @@ export async function cargarSeguimientoPorCaso(
 			estadoPromesa: contactosCobros.estadoPromesa,
 			fechaProximoContacto: contactosCobros.fechaProximoContacto,
 			horaProximoContacto: contactosCobros.horaProximoContacto,
-			comentarios: sql<string | null>`left(${contactosCobros.comentarios}, ${LARGO_PREFIJO_ORIGEN})`,
+			comentarios: sql<
+				string | null
+			>`left(${contactosCobros.comentarios}, ${LARGO_PREFIJO_ORIGEN})`,
 			participanteTipo: contactosCobros.participanteTipo,
 		})
 		.from(contactosCobros)

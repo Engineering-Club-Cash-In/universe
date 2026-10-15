@@ -18,6 +18,7 @@
  */
 import { useMutation } from "@tanstack/react-query";
 import {
+	Banknote,
 	Briefcase,
 	Car,
 	CheckCheck,
@@ -1198,6 +1199,8 @@ function iconoMetodo(
 			return <Briefcase aria-hidden className="size-3.5" />;
 		case "carta_notarial":
 			return <FileText aria-hidden className="size-3.5" />;
+		case "pago":
+			return <Banknote aria-hidden className="size-3.5" />;
 		default:
 			return <Phone aria-hidden className="size-3.5" />;
 	}

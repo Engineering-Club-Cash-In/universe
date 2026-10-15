@@ -260,7 +260,11 @@ export const fichaCobrosRouter = {
 				},
 				estadoGestion: estadoGestionConConvenio(estadoGestion, convenioActivo),
 				accionPendiente: accion
-					? { tipo: accion.tipo, fecha: accion.fecha }
+					? {
+							tipo: accion.tipo,
+							fecha: accion.fecha,
+							conHora: accion.conHora,
+						}
 					: null,
 			};
 		}),

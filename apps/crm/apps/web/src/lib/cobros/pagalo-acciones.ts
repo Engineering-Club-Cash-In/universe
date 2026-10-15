@@ -128,24 +128,41 @@ export type ResultadoVerificacionPagalo = {
  * Qué decirle a la persona tras "Verificar ahora"/"Actualizar estado". Se dice
  * lo que PASÓ, no "listo": el caso más común es que el cliente todavía no
  * pagó, y un toast de éxito ahí hace creer que el pago entró.
+ *
+ * El estado final manda sobre el conteo de links: `pagados` cuenta lo que se
+ * confirmó EN ESTA corrida, y el último link puede confirmarse en la misma
+ * corrida en que el despacho a cartera falla o la manda a revisión. Mirar
+ * `pagados` primero decía "falta el resto" de un grupo que ya estaba completo.
  */
 export function mensajeVerificacionPagalo(
 	r: ResultadoVerificacionPagalo | undefined,
-): { tipo: "success" | "warning" | "info"; mensaje: string } {
+): { tipo: "success" | "warning" | "info" | "error"; mensaje: string } {
 	if (r?.aplicado)
 		return {
 			tipo: "success",
 			mensaje: "Pago verificado y aplicado en cartera.",
 		};
-	if (r?.pagados)
-		return {
-			tipo: "success",
-			mensaje: `${r.pagados} link(s) confirmados. Falta el resto para aplicar.`,
-		};
 	if (r?.statusFinal === "REVIEW_REQUIRED")
 		return {
 			tipo: "warning",
 			mensaje: "El grupo está en revisión. Revise el motivo en la bitácora.",
+		};
+	if (r?.statusFinal === "APPLICATION_FAILED")
+		return {
+			tipo: "error",
+			mensaje:
+				"Págalo confirmó el pago, pero cartera no pudo aplicarlo. Se reintenta solo; el motivo queda en la bitácora.",
+		};
+	if (r?.statusFinal === "READY_TO_APPLY" || r?.statusFinal === "APPLYING")
+		return {
+			tipo: "info",
+			mensaje:
+				"Pago confirmado en Págalo; falta aplicarlo en cartera. Intente de nuevo en unos segundos.",
+		};
+	if (r?.pagados)
+		return {
+			tipo: "success",
+			mensaje: `${r.pagados} link(s) confirmados. Falta el resto para aplicar.`,
 		};
 	return {
 		tipo: "info",

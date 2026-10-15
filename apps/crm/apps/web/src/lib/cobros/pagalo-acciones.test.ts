@@ -154,10 +154,39 @@ describe("mensajeVerificacionPagalo", () => {
 		expect(r.mensaje).toContain("1 link(s) confirmados");
 	});
 
-	test("grupo en revisión es una advertencia", () => {
-		expect(
-			mensajeVerificacionPagalo({ pagados: 0, statusFinal: "REVIEW_REQUIRED" }),
-		).toMatchObject({ tipo: "warning" });
+	test("grupo en revisión es una advertencia, aunque se haya confirmado un link", () => {
+		for (const pagados of [0, 1]) {
+			expect(
+				mensajeVerificacionPagalo({ pagados, statusFinal: "REVIEW_REQUIRED" }),
+			).toMatchObject({ tipo: "warning" });
+		}
+	});
+
+	test("último link confirmado pero el despacho falló: no dice que falta el resto", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			statusFinal: "APPLICATION_FAILED",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).not.toContain("Falta el resto");
+		expect(r.mensaje).toContain("cartera no pudo aplicarlo");
+	});
+
+	test("reintento de un grupo ya fallido que vuelve a fallar no se confunde con «sin pago»", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 0,
+			statusFinal: "APPLICATION_FAILED",
+		});
+		expect(r.tipo).toBe("error");
+		expect(r.mensaje).not.toContain("todavía no reporta");
+	});
+
+	test("pago confirmado esperando aplicarse (despacho tomado por otro proceso)", () => {
+		for (const statusFinal of ["READY_TO_APPLY", "APPLYING"]) {
+			const r = mensajeVerificacionPagalo({ pagados: 1, statusFinal });
+			expect(r.tipo).toBe("info");
+			expect(r.mensaje).toContain("falta aplicarlo");
+		}
 	});
 
 	test("sin pago en Págalo no se celebra nada", () => {

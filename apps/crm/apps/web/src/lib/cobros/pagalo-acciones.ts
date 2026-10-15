@@ -117,3 +117,38 @@ export function accionesDisponibles(
 export function esReintentoForzado(status: string, esAdmin: boolean): boolean {
 	return esAdmin && ESTADOS_FORZABLES_ADMIN.has(status as EstadoGrupoPagalo);
 }
+
+export type ResultadoVerificacionPagalo = {
+	aplicado?: boolean;
+	pagados?: number;
+	statusFinal?: string;
+};
+
+/**
+ * Qué decirle a la persona tras "Verificar ahora"/"Actualizar estado". Se dice
+ * lo que PASÓ, no "listo": el caso más común es que el cliente todavía no
+ * pagó, y un toast de éxito ahí hace creer que el pago entró.
+ */
+export function mensajeVerificacionPagalo(
+	r: ResultadoVerificacionPagalo | undefined,
+): { tipo: "success" | "warning" | "info"; mensaje: string } {
+	if (r?.aplicado)
+		return {
+			tipo: "success",
+			mensaje: "Pago verificado y aplicado en cartera.",
+		};
+	if (r?.pagados)
+		return {
+			tipo: "success",
+			mensaje: `${r.pagados} link(s) confirmados. Falta el resto para aplicar.`,
+		};
+	if (r?.statusFinal === "REVIEW_REQUIRED")
+		return {
+			tipo: "warning",
+			mensaje: "El grupo está en revisión. Revise el motivo en la bitácora.",
+		};
+	return {
+		tipo: "info",
+		mensaje: "Págalo todavía no reporta el pago. Intente de nuevo más tarde.",
+	};
+}

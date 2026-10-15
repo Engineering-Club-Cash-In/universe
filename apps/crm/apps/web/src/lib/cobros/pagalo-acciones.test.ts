@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { accionesDisponibles } from "./pagalo-acciones";
+import {
+	accionesDisponibles,
+	mensajeVerificacionPagalo,
+} from "./pagalo-acciones";
 
 describe("accionesDisponibles", () => {
 	test("asesor (no supervisor) no ve ninguna acción de supervisor", () => {
@@ -132,5 +135,37 @@ describe("accionesDisponibles", () => {
 				},
 			);
 		});
+	});
+});
+
+describe("mensajeVerificacionPagalo", () => {
+	test("aplicado gana sobre cualquier otro dato", () => {
+		expect(
+			mensajeVerificacionPagalo({ aplicado: true, pagados: 2 }),
+		).toMatchObject({ tipo: "success" });
+	});
+
+	test("links confirmados sin aplicar avisa que falta el resto", () => {
+		const r = mensajeVerificacionPagalo({
+			pagados: 1,
+			statusFinal: "PARTIALLY_PAID",
+		});
+		expect(r.tipo).toBe("success");
+		expect(r.mensaje).toContain("1 link(s) confirmados");
+	});
+
+	test("grupo en revisión es una advertencia", () => {
+		expect(
+			mensajeVerificacionPagalo({ pagados: 0, statusFinal: "REVIEW_REQUIRED" }),
+		).toMatchObject({ tipo: "warning" });
+	});
+
+	test("sin pago en Págalo no se celebra nada", () => {
+		for (const r of [
+			undefined,
+			{ pagados: 0, statusFinal: "PENDING_PAYMENT" },
+		]) {
+			expect(mensajeVerificacionPagalo(r)).toMatchObject({ tipo: "info" });
+		}
 	});
 });

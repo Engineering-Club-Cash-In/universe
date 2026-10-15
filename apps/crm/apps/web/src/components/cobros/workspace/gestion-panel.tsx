@@ -825,11 +825,14 @@ export function GestionPanel({
 			});
 		// «Atrás» del resultado: paso anterior del flujo, sin `volver`; si no, el
 		// «Atrás» del participante regresaría aquí en bucle y nunca al inicio.
+		// Con la llamada ya marcada se conserva `volver`: salir al inicio sin
+		// registrarla descartaría la gestión sin pasar por el guardián.
 		const atrasResultado = () =>
 			setPaso({
 				t: "participante",
 				canal,
 				llamadaIniciada: p.llamadaIniciada,
+				volver: p.llamadaIniciada ? p : undefined,
 			});
 		// Con la llamada ya marcada, «Cancelar» no abandona la gestión: vuelve a
 		// elegir el resultado (lo que pasó en la llamada hay que registrarlo).

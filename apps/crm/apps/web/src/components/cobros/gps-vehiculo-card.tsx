@@ -112,6 +112,11 @@ export function GpsVehiculoCard({
 			queryClient.invalidateQueries({
 				queryKey: orpc.getGpsConsultasCaso.key(),
 			});
+			// La consulta puede vincular la unidad sola (placa) y el vínculo manual
+			// vuelve a consultar: la pestaña de apagado depende de ese estado.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInmovilizacionesCaso.key(),
+			});
 		}
 	}, [dataUpdatedAt, queryClient]);
 

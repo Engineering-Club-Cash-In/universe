@@ -1022,86 +1022,32 @@ let cargaCreditosCarteraEnCurso: Promise<CreditoBuroInterno[]> | null = null;
 async function cargarCreditosCarteraSinCompartir(): Promise<
 	CreditoBuroInterno[]
 > {
-	const creditos: CreditoBuroInterno[] = [];
+	const respuesta = await carteraBackClient.obtenerCreditosBuroInterno();
 	const idsVistos = new Set<number>();
-	const pageSize = 1_000;
-	let cursor: string | undefined;
-	let cursorAnterior: string | undefined;
-	let snapshotMaxCreditoId: number | null = null;
-	let snapshotVersion: string | null = null;
 	let ultimoCreditoId = 0;
-
-	for (let page = 1; page <= 10_000; page += 1) {
-		const respuesta = await carteraBackClient.obtenerCreditosBuroInterno({
-			cursor,
-			pageSize,
-		});
+	for (const credito of respuesta.data) {
+		const id = credito.creditos?.credito_id;
 		if (
-			!Number.isSafeInteger(respuesta.snapshotMaxCreditoId) ||
-			respuesta.snapshotMaxCreditoId < 0 ||
-			(snapshotMaxCreditoId !== null &&
-				respuesta.snapshotMaxCreditoId !== snapshotMaxCreditoId) ||
-			(snapshotVersion !== null &&
-				respuesta.snapshotVersion !== snapshotVersion)
+			!Number.isSafeInteger(id) ||
+			id <= ultimoCreditoId ||
+			idsVistos.has(id)
 		) {
 			throw new Error(
-				"La versión de la consulta de créditos de Cartera cambió durante la búsqueda del buró.",
+				"Cartera devolvió IDs de crédito repetidos o fuera de orden al consultar el buró.",
 			);
-		}
-		snapshotMaxCreditoId ??= respuesta.snapshotMaxCreditoId;
-		snapshotVersion ??= respuesta.snapshotVersion;
-		if (respuesta.data.length === 0 && respuesta.hasMore) {
-			throw new Error(
-				"Cartera devolvió una página vacía con más créditos pendientes para el buró.",
-			);
-		}
-		for (const credito of respuesta.data) {
-			const id = credito.creditos?.credito_id;
-			if (
-				!Number.isSafeInteger(id) ||
-				id <= ultimoCreditoId ||
-				id > respuesta.snapshotMaxCreditoId ||
-				idsVistos.has(id)
-			) {
-				throw new Error(
-					"Cartera devolvió IDs de crédito repetidos o fuera de orden al consultar el buró.",
-				);
-			}
-			if (
-				!Number.isSafeInteger(credito.usuarios?.usuario_id) ||
-				credito.creditos.usuario_id !== credito.usuarios.usuario_id
-			) {
-				throw new Error(
-					"Cartera devolvió una relación inválida entre crédito y cliente al consultar el buró.",
-				);
-			}
-			idsVistos.add(id);
-			ultimoCreditoId = id;
-			creditos.push(credito);
-		}
-		if (!respuesta.hasMore) {
-			if (respuesta.nextCursor !== null) {
-				throw new Error(
-					"Cartera devolvió un cursor inesperado al finalizar la búsqueda del buró.",
-				);
-			}
-			return creditos;
 		}
 		if (
-			!respuesta.nextCursor ||
-			respuesta.nextCursor === cursorAnterior ||
-			respuesta.nextCursor === cursor
+			!Number.isSafeInteger(credito.usuarios?.usuario_id) ||
+			credito.creditos.usuario_id !== credito.usuarios.usuario_id
 		) {
 			throw new Error(
-				"Cartera devolvió un cursor inválido o repetido al consultar el buró.",
+				"Cartera devolvió una relación inválida entre crédito y cliente al consultar el buró.",
 			);
 		}
-		cursorAnterior = cursor;
-		cursor = respuesta.nextCursor;
+		idsVistos.add(id);
+		ultimoCreditoId = id;
 	}
-	throw new Error(
-		"La consulta del buró excedió el máximo de páginas de Cartera.",
-	);
+	return respuesta.data;
 }
 
 /** Comparte únicamente cargas simultáneas; no conserva resultados para aprobaciones futuras. */
@@ -1684,7 +1630,7 @@ async function registrarCoincidenciasCartera(
 					evidencia: {
 						riesgos: riesgosCredito,
 						cuotasAtrasadasAlCancelar:
-							credito.cancelacion?.cuotas_atrasadas ?? null,
+							credito.cancelaciones[0]?.cuotas_atrasadas ?? null,
 					},
 				};
 				const fuenteExistente = fuenteActualPorCredito.get(

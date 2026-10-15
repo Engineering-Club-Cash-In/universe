@@ -1,7 +1,7 @@
 import type { BuroInternoCategoria } from "../db/schema/buro-interno";
 import type {
 	CreditoBuroInterno,
-	PaginaCreditosBuroInterno,
+	RespuestaCreditosBuroInterno,
 } from "../types/cartera-back";
 
 export type RiesgoCartera = {
@@ -70,7 +70,7 @@ export function normalizarMotivoRiesgo(texto: string): string {
 const VERBO_DETECCION_NEGADO =
 	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|tiene|existe(?:n)?|hay|hubo)/;
 const VERBO_ESTADO_NEGADO = new RegExp(
-	`(?:es|fue|esta|estuvo|tiene|tuvo|cuenta\\s+con|${VERBO_DETECCION_NEGADO.source})`,
+	`(?:es|fue|esta|estuvo|tiene|tuvo|cuenta\\s+con|ha\\s+(?:habido|tenido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
 );
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
 	`(?:^|\\s)(?:sin(?:\\s+ningun[ao])?|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|nunca(?:\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao])?)\\s+$`,
@@ -183,10 +183,9 @@ export function evidenciaRiesgoCredito(
 			categoria: "incobrable",
 			texto: "Crédito con estado INCOBRABLE",
 		});
-		const detalles = [
-			credito.incobrable?.motivo,
-			credito.incobrable?.observaciones,
-		].filter((detalle): detalle is string => Boolean(detalle?.trim()));
+		const detalles = credito.incobrables
+			.flatMap(({ motivo, observaciones }) => [motivo, observaciones])
+			.filter((detalle): detalle is string => Boolean(detalle?.trim()));
 		for (const detalle of detalles) {
 			agregarRiesgo(
 				clasificarMotivoExplicito(detalle) ?? {
@@ -196,15 +195,21 @@ export function evidenciaRiesgoCredito(
 			);
 		}
 	}
-	const cancelacion = credito.cancelacion;
-	for (const motivo of [
-		cancelacion?.motivo,
-		cancelacion?.observaciones,
-		credito.incobrable?.motivo,
-		credito.incobrable?.observaciones,
-		credito.caido?.motivo,
-		credito.caido?.observaciones,
-	]) {
+	const motivosHistoricos = [
+		...credito.cancelaciones.flatMap(({ motivo, observaciones }) => [
+			motivo,
+			observaciones,
+		]),
+		...credito.incobrables.flatMap(({ motivo, observaciones }) => [
+			motivo,
+			observaciones,
+		]),
+		...credito.caidos.flatMap(({ motivo, observaciones }) => [
+			motivo,
+			observaciones,
+		]),
+	];
+	for (const motivo of motivosHistoricos) {
 		const riesgo = motivo ? clasificarMotivoExplicito(motivo) : null;
 		if (riesgo) agregarRiesgo(riesgo);
 	}
@@ -256,7 +261,6 @@ function esDetalleRiesgoValido(
 	value: unknown,
 	conCuotasAtrasadas = false,
 ): boolean {
-	if (value === null) return true;
 	if (
 		!esObjeto(value) ||
 		typeof value.motivo !== "string" ||
@@ -272,19 +276,10 @@ function esDetalleRiesgoValido(
 }
 
 /** Lanza dentro del circuit breaker si Cartera responde 200 con contrato inválido. */
-export function validarPaginaCreditosBuroInterno(
+export function validarRespuestaCreditosBuroInterno(
 	value: unknown,
-): asserts value is PaginaCreditosBuroInterno {
-	if (
-		!esObjeto(value) ||
-		!Array.isArray(value.data) ||
-		typeof value.hasMore !== "boolean" ||
-		!(typeof value.nextCursor === "string" || value.nextCursor === null) ||
-		!Number.isSafeInteger(value.snapshotMaxCreditoId) ||
-		Number(value.snapshotMaxCreditoId) < 0 ||
-		typeof value.snapshotVersion !== "string" ||
-		!/^[a-f0-9]{32}$/.test(value.snapshotVersion)
-	) {
+): asserts value is RespuestaCreditosBuroInterno {
+	if (!esObjeto(value) || !Array.isArray(value.data)) {
 		throw new Error(
 			"Cartera devolvió una página inválida para el buró interno.",
 		);
@@ -308,9 +303,14 @@ export function validarPaginaCreditosBuroInterno(
 			typeof item.usuarios.nombre !== "string" ||
 			!esTextoONulo(item.usuarios.nit) ||
 			!esTextoONulo(item.usuarios.direccion) ||
-			!esDetalleRiesgoValido(item.cancelacion, true) ||
-			!esDetalleRiesgoValido(item.incobrable) ||
-			!esDetalleRiesgoValido(item.caido)
+			!Array.isArray(item.cancelaciones) ||
+			!item.cancelaciones.every((detalle) =>
+				esDetalleRiesgoValido(detalle, true),
+			) ||
+			!Array.isArray(item.incobrables) ||
+			!item.incobrables.every((detalle) => esDetalleRiesgoValido(detalle)) ||
+			!Array.isArray(item.caidos) ||
+			!item.caidos.every((detalle) => esDetalleRiesgoValido(detalle))
 		) {
 			throw new Error(
 				"Cartera devolvió un crédito inválido para el buró interno.",

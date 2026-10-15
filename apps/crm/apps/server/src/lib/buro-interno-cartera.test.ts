@@ -8,7 +8,7 @@ import {
 	normalizarMotivoRiesgo,
 	planificarVigenciaPersonaAutomatica,
 	resumirFuentesRiesgo,
-	validarPaginaCreditosBuroInterno,
+	validarRespuestaCreditosBuroInterno,
 } from "./buro-interno-cartera";
 
 function credito(
@@ -28,9 +28,9 @@ function credito(
 			nit: "123",
 			direccion: null,
 		},
-		cancelacion: null,
-		incobrable: null,
-		caido: null,
+		cancelaciones: [],
+		incobrables: [],
+		caidos: [],
 		...parcial,
 	};
 }
@@ -73,6 +73,13 @@ describe("clasificación de evidencia de Cartera", () => {
 		"No se reporta fraude",
 		"No registra mora",
 		"No detecta fraude",
+		"No ha presentado mora",
+		"No ha reportado fraude",
+		"No ha habido fraude",
+		"No ha detectado fraude",
+		"No ha encontrado mora",
+		"No ha registrado incumplimientos de pago",
+		"Nunca ha tenido mora",
 		"No tiene antecedentes de mora",
 		"No existen antecedentes de fraude",
 		"Mora condonada",
@@ -143,19 +150,36 @@ describe("clasificación de evidencia de Cartera", () => {
 	test("considera evidencia explícita aunque el estado actual sea ACTIVO", () => {
 		const riesgos = evidenciaRiesgoCredito(
 			credito("ACTIVO", {
-				caido: { motivo: "Fraude confirmado", observaciones: null },
+				caidos: [{ motivo: "Fraude confirmado", observaciones: null }],
 			}),
 		);
 		expect(riesgos.map((riesgo) => riesgo.categoria)).toContain("fraude");
 	});
 
+	test("conserva el fraude de una caída histórica aunque la caída más reciente sea neutral", () => {
+		const riesgos = evidenciaRiesgoCredito(
+			credito("CAIDO", {
+				caidos: [
+					{ motivo: "Reasignación operativa", observaciones: null },
+					{ motivo: "Fraude confirmado", observaciones: null },
+				],
+			}),
+		);
+		expect(riesgos).toContainEqual({
+			categoria: "fraude",
+			texto: "Fraude confirmado",
+		});
+	});
+
 	test("considera evidencia histórica de incobrabilidad aunque el crédito vuelva a ACTIVO", () => {
 		const riesgos = evidenciaRiesgoCredito(
 			credito("ACTIVO", {
-				incobrable: {
-					motivo: "Fraude confirmado",
-					observaciones: null,
-				},
+				incobrables: [
+					{
+						motivo: "Fraude confirmado",
+						observaciones: null,
+					},
+				],
 			}),
 		);
 		expect(riesgos).toContainEqual({
@@ -167,11 +191,13 @@ describe("clasificación de evidencia de Cartera", () => {
 	test("no interpreta cuotas restantes de una cancelación como mora", () => {
 		const riesgos = evidenciaRiesgoCredito(
 			credito("CANCELADO", {
-				cancelacion: {
-					cuotas_atrasadas: 12,
-					motivo: "Cancelación anticipada",
-					observaciones: "Cliente al día, sin problemas de mora",
-				},
+				cancelaciones: [
+					{
+						cuotas_atrasadas: 12,
+						motivo: "Cancelación anticipada",
+						observaciones: "Cliente al día, sin problemas de mora",
+					},
+				],
 			}),
 		);
 		expect(riesgos).toEqual([]);
@@ -180,10 +206,12 @@ describe("clasificación de evidencia de Cartera", () => {
 	test("prioriza fraude explícito en el motivo de un crédito INCOBRABLE", () => {
 		const riesgos = evidenciaRiesgoCredito(
 			credito("INCOBRABLE", {
-				incobrable: {
-					motivo: "Incobrable por fraude confirmado",
-					observaciones: null,
-				},
+				incobrables: [
+					{
+						motivo: "Incobrable por fraude confirmado",
+						observaciones: null,
+					},
+				],
 			}),
 		);
 		expect(riesgos.map((riesgo) => riesgo.categoria)).toContain("fraude");
@@ -200,10 +228,12 @@ describe("clasificación de evidencia de Cartera", () => {
 	test("no repite el mismo motivo de un crédito INCOBRABLE", () => {
 		const riesgos = evidenciaRiesgoCredito(
 			credito("INCOBRABLE", {
-				incobrable: {
-					motivo: "Crédito incobrable",
-					observaciones: "Seguimiento de cobros",
-				},
+				incobrables: [
+					{
+						motivo: "Crédito incobrable",
+						observaciones: "Seguimiento de cobros",
+					},
+				],
 			}),
 		);
 		expect(
@@ -258,58 +288,41 @@ describe("reconciliación de fuentes automáticas", () => {
 	});
 });
 
-describe("contrato de la página de Cartera", () => {
-	test("acepta una página válida", () => {
-		const pagina = {
-			data: [credito("ACTIVO")],
-			hasMore: false,
-			nextCursor: null,
-			snapshotMaxCreditoId: 1,
-			snapshotVersion: "0123456789abcdef0123456789abcdef",
-		};
-		expect(() => validarPaginaCreditosBuroInterno(pagina)).not.toThrow();
+describe("contrato de la respuesta de Cartera", () => {
+	test("acepta una respuesta válida", () => {
+		expect(() =>
+			validarRespuestaCreditosBuroInterno({ data: [credito("ACTIVO")] }),
+		).not.toThrow();
 	});
 
 	test("rechaza un 200 con créditos incompletos", () => {
 		expect(() =>
-			validarPaginaCreditosBuroInterno({
+			validarRespuestaCreditosBuroInterno({
 				data: [{}],
-				hasMore: false,
-				nextCursor: null,
-				snapshotMaxCreditoId: 1,
-				snapshotVersion: "0123456789abcdef0123456789abcdef",
 			}),
 		).toThrow("crédito inválido");
 	});
 
 	test("rechaza evidencia anidada inválida", () => {
 		const invalido = credito("CANCELADO", {
-			cancelacion: {
-				motivo: "Mora",
-				observaciones: null,
-				cuotas_atrasadas: -1,
-			},
+			cancelaciones: [
+				{
+					motivo: "Mora",
+					observaciones: null,
+					cuotas_atrasadas: -1,
+				},
+			],
 		});
 		expect(() =>
-			validarPaginaCreditosBuroInterno({
+			validarRespuestaCreditosBuroInterno({
 				data: [invalido],
-				hasMore: false,
-				nextCursor: null,
-				snapshotMaxCreditoId: 1,
-				snapshotVersion: "0123456789abcdef0123456789abcdef",
 			}),
 		).toThrow("crédito inválido");
 	});
 
-	test("rechaza una versión de snapshot inválida", () => {
-		expect(() =>
-			validarPaginaCreditosBuroInterno({
-				data: [],
-				hasMore: false,
-				nextCursor: null,
-				snapshotMaxCreditoId: 1,
-				snapshotVersion: "invalida",
-			}),
-		).toThrow("página inválida");
+	test("rechaza una respuesta sin arreglo de créditos", () => {
+		expect(() => validarRespuestaCreditosBuroInterno({ data: null })).toThrow(
+			"página inválida",
+		);
 	});
 });

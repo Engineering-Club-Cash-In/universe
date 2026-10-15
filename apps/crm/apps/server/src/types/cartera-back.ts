@@ -752,21 +752,17 @@ export interface CreditoBuroInterno {
 		nit: string | null;
 		direccion: string | null;
 	};
-	cancelacion: {
+	cancelaciones: Array<{
 		motivo: string;
 		observaciones: string | null;
 		cuotas_atrasadas: number;
-	} | null;
-	incobrable: { motivo: string; observaciones: string | null } | null;
-	caido: { motivo: string; observaciones: string | null } | null;
+	}>;
+	incobrables: Array<{ motivo: string; observaciones: string | null }>;
+	caidos: Array<{ motivo: string; observaciones: string | null }>;
 }
 
-export interface PaginaCreditosBuroInterno {
+export interface RespuestaCreditosBuroInterno {
 	data: CreditoBuroInterno[];
-	hasMore: boolean;
-	nextCursor: string | null;
-	snapshotMaxCreditoId: number;
-	snapshotVersion: string;
 }
 
 export interface GetAllCreditsParams {

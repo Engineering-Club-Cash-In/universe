@@ -766,7 +766,8 @@ async function contextoDeSocio(context: Context) {
 	// funcionando para que el socio pueda ver su estado y cambiar su contraseña
 	// aunque nadie le haya asignado una agencia todavía. Solo requirePartnerAccess
 	// (los datos del tracker) exige companyIds no vacío.
-	const companyIds = await resolvePartnerScope(userId);
+	const membresias = await resolvePartnerScope(userId);
+	const companyIds = membresias.map((m) => m.companyId);
 
 	const [partnerAccount] = await db
 		.select({ passwordChangedAt: partnerAccounts.passwordChangedAt })
@@ -780,6 +781,7 @@ async function contextoDeSocio(context: Context) {
 		userId,
 		userRole,
 		companyIds,
+		membresias,
 		partnerAccount,
 	};
 }

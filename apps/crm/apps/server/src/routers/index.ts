@@ -49,6 +49,8 @@ export const crmAppRouter = {
 	updateCompany: crmRouter.updateCompany,
 	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
 	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
+	getOpportunityAgencySeller: crmRouter.getOpportunityAgencySeller,
+	setOpportunityAgencySeller: crmRouter.setOpportunityAgencySeller,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,
@@ -72,6 +74,9 @@ export const crmAppRouter = {
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
+	getEnvioFacturaSeguroCrm: crmRouter.getEnvioFacturaSeguroCrm,
+	// Vive en el router del tracker, pero lo usa el CRM: así el cliente web lo tipa.
+	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
 	getDocumentRequirementsByClientType:
 		crmRouter.getDocumentRequirementsByClientType,
@@ -353,6 +358,7 @@ export const legalAppRouter = {
 export const miscAppRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
+	getAgencySellers: vendorsRouter.getAgencySellers,
 	getVendorById: vendorsRouter.getById,
 	getVendorByVehicleId: vendorsRouter.getByVehicleId,
 	createVendor: vendorsRouter.create,
@@ -547,6 +553,9 @@ export const partnerTrackerRouter = {
 	getPartnerAgencies: trackerRouter.getPartnerAgencies,
 	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
 	changePartnerPassword: trackerRouter.changePartnerPassword,
+	subirFacturaSeguro: trackerRouter.subirFacturaSeguro,
+	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
+	verFacturaSeguro: trackerRouter.verFacturaSeguro,
 };
 
 // Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.

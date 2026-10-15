@@ -1,4 +1,5 @@
-import { and, eq, gt, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, notInArray, or } from "drizzle-orm";
+import type { db } from "../database/index";
 import { cuotas_credito, pagos_credito } from "../database/db";
 
 /**
@@ -68,3 +69,87 @@ export const condicionUltimaCuotaPagada = (credito_id: number) =>
       gt(pagos_credito.abono_interes, "0")
     )
   );
+
+// Los abonos directos a capital cuelgan de una cuota pero no llevan su saldo (interés/IVA en 0 y
+// el `capital_restante` del crédito): no son destino, saldo ni "fila viva" de la cuota. `reset` sí.
+const FILAS_DE_CAPITAL: ("capital" | "capital_validated")[] = ["capital", "capital_validated"];
+
+/**
+ * Las filas de la cuota entre las que `insertPayment` elige el saldo vigente y el destino del
+ * cierre (`pagoOriginal`, `allExistingPagos[0]`). Una fila ANULADA (`paymentFalse = true`) nunca
+ * entra, sea `pending`, `validated` o `no_required`: sus restantes son los de después de un pago
+ * que ya no existe, y el cierre no puede sobrescribirla (crédito 9331, cuota 2).
+ */
+export const pagosExistentesDeCuota = (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) =>
+  executor
+    .select({ pago: pagos_credito })
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, false),
+        notInArray(pagos_credito.validationStatus, FILAS_DE_CAPITAL),
+        or(
+          // Los `pending` entran solo si siguen sin pagar (los pagados ya pasaron por /aplicar-pago).
+          notInArray(pagos_credito.validationStatus, ["pending"]),
+          eq(pagos_credito.pagado, false),
+        ),
+      ),
+    )
+    .orderBy(asc(pagos_credito.pago_id));
+
+/**
+ * ¿Queda alguna fila VIVA en la cuota, del estado que sea? Incluye las `pending` ya pagadas que
+ * `pagosExistentesDeCuota` deja afuera: una cuota que cerró un pago aún sin validar NO está
+ * huérfana, y no puede volver a cargarse desde la semilla anulada (crédito 459, cuota 4).
+ */
+export const hayFilaVivaEnCuota = async (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) => {
+  const [fila] = await executor
+    .select({ pagoId: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, false),
+        notInArray(pagos_credito.validationStatus, FILAS_DE_CAPITAL),
+      ),
+    )
+    .limit(1);
+  return fila !== undefined;
+};
+
+/**
+ * La semilla `no_required` ANULADA más vieja de la cuota (menor `pago_id`), o `undefined`.
+ * Solo para `saldoDeRespaldoDeSemillaAnulada`: nunca se usa como destino del cierre.
+ */
+export const semillaAnuladaDeCuota = async (
+  executor: typeof db,
+  cuotaId: number,
+  creditoId: number,
+) => {
+  const [fila] = await executor
+    .select({ pago: pagos_credito })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.cuota_id, cuotaId),
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.paymentFalse, true),
+        eq(pagos_credito.validationStatus, "no_required"),
+      ),
+    )
+    .orderBy(asc(pagos_credito.pago_id))
+    .limit(1);
+  return fila?.pago;
+};

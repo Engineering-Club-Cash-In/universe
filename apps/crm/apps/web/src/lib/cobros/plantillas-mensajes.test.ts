@@ -24,6 +24,7 @@ import {
 	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
 	plantillaRequiereTelefonoAsesor,
+	plantillaSoloConCuentaNexa,
 	plantillasDisponibles,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
@@ -35,7 +36,11 @@ const NO_REPLY_WARNING =
 // La bienvenida pide confirmar la recepción del mensaje (diseño "Mensajes Cobros
 // 2026") y la cuenta exclusiva Nexa va con el texto que definió cobros: ninguna
 // lleva el aviso no-reply.
-const IDS_SIN_AVISO = new Set(["bienvenida", "cuenta_nexa_exclusiva"]);
+const IDS_SIN_AVISO = new Set([
+	"bienvenida",
+	"cuenta_nexa_exclusiva",
+	"mensaje_video",
+]);
 
 const MAX_PARAMS_SIMPLETECH = 5;
 
@@ -1059,5 +1064,35 @@ describe("plantillaRequiereTelefonoAsesor", () => {
 		expect(plantillaRequiereTelefonoAsesor("nope")).toBe(false);
 		expect(plantillaRequiereTelefonoAsesor(null)).toBe(false);
 		expect(plantillaRequiereTelefonoAsesor("")).toBe(false);
+	});
+});
+
+describe("Video transferencia Nexa", () => {
+	const ID = "mensaje_video";
+
+	test("no se ofrece en el envío individual (el video solo viaja en el masivo)", () => {
+		for (const cuenta of [null, undefined, "", "1234567890123456"]) {
+			expect(plantillasDisponibles(cuenta).some((p) => p.id === ID)).toBe(
+				false,
+			);
+		}
+	});
+
+	test("en el masivo cuenta como plantilla solo para créditos con cuenta Nexa", () => {
+		expect(plantillaSoloConCuentaNexa(ID)).toBe(true);
+		expect(plantillaSoloConCuentaNexa("cuenta_nexa_exclusiva")).toBe(true);
+		expect(plantillaSoloConCuentaNexa("al_dia")).toBe(false);
+		expect(plantillaSoloConCuentaNexa(null)).toBe(false);
+	});
+
+	test("el texto de WhatsApp trae 4 bloques con nombre y teléfono del ejecutivo", () => {
+		const p = PLANTILLAS_MENSAJES.find((x) => x.id === ID);
+		const cuerpo = p?.cuerpoWhastapp ?? "";
+		expect(
+			cuerpo.split(/\n\s*\n/g).filter((bloque) => bloque.trim()),
+		).toHaveLength(4);
+		expect(cuerpo).toContain("{clienteNombre}");
+		expect(cuerpo).toContain("{telefonoAsesor}");
+		expect(cuerpo).not.toContain(NO_REPLY_WARNING);
 	});
 });

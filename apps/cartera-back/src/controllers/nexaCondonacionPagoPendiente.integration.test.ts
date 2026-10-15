@@ -44,7 +44,7 @@ const setup = () => (ready ??= (async () => {
     ('PROCESO_AUTO','API_MANUAL','CONDONACION_INDIVIDUAL','CONDONACION_MASIVA')`;
   await sql`CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY,
     numero_credito_sifco text UNIQUE, "statusCredit" text, capital numeric(18,2), cuota numeric(18,2),
-    estado_devolucion text)`;
+    estado_devolucion text, porcentaje_interes numeric, seguro_10_cuotas numeric, gps numeric, membresias_pago numeric)`;
   await sql`CREATE TABLE cartera.cuotas_credito (cuota_id integer PRIMARY KEY,
     credito_id integer NOT NULL REFERENCES cartera.creditos(credito_id),
     numero_cuota integer NOT NULL, fecha_vencimiento timestamp NOT NULL, pagado boolean NOT NULL DEFAULT false)`;
@@ -76,7 +76,7 @@ const setup = () => (ready ??= (async () => {
     fecha_pago timestamp, monto_aplicado numeric(18,2) NOT NULL DEFAULT 0, abono_capital numeric(18,2),
     abono_interes numeric(18,2), abono_iva_12 numeric(18,2), abono_seguro numeric(18,2),
     abono_gps numeric(18,2), membresias_pago numeric, mora numeric(18,2), otros text,
-    createdat timestamp DEFAULT now())`;
+    registerby varchar(150) NOT NULL DEFAULT 'x', createdat timestamp DEFAULT now())`;
   await sql`CREATE TABLE cartera.ajuste_fecha_ideal_pago (id serial PRIMARY KEY, credito_id integer NOT NULL,
     monto_total numeric(18,2) NOT NULL, fecha_cobro timestamptz, pago_id integer)`;
   await sql`CREATE TABLE cartera.rubros_tipos (tipo_id serial PRIMARY KEY, obligatorio boolean NOT NULL DEFAULT false)`;
@@ -90,6 +90,7 @@ const setup = () => (ready ??= (async () => {
   // 0052 dos veces: se aplica a mano y tiene que ser idempotente.
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
   await sql.unsafe(await migracion("0052_condonacion_nexa_pagos_pendientes.sql")).simple();
+  await sql.unsafe(await migracion("0054_condonacion_boleta_tardia_columnas.sql")).simple(); // columnas nuevas que el esquema de drizzle ya pide
   const [{ hoy }] = await sql`SELECT to_char((now() AT TIME ZONE 'America/Guatemala')::date, 'YYYY-MM-DD') AS hoy`;
   return {
     sql,
@@ -322,4 +323,19 @@ integrationTest("dos parciales PENDIENTES (pagado=false) que suman la cuota venc
   // daría la cuota 4 por cubierta y condonaría los 3.73 con el crédito no al día.
   expect(await ctx.runtime.condonarMoraNexaATiempo(pagoNexa(ctx.hoy, 8, "1112.00"), 108)).toBeUndefined();
   expect(await condonacion(ctx.sql, 8)).toEqual([]);
+});
+
+integrationTest("#1980: tras la ruptura del convenio, anular el pendiente marca la condonación y el log dice que NO se restituyó", async () => {
+  const ctx = await setup();
+  const pendiente = await condonarConPendiente(ctx, 20);
+  const { cerrarMoraPagadaDeCredito } = await import("../utils/cerrarMoraPagadaDeCredito");
+  await ctx.database.db.transaction(async (tx) => {
+    expect(await cerrarMoraPagadaDeCredito({ credito_id: 20 }, tx as never)).toBeGreaterThan(0);
+  });
+  await ctx.sql`UPDATE cartera.moras_credito SET monto_mora = 50, activa = true WHERE credito_id = 20`; // la mora recreada
+  const logs = await anularPago(ctx, 20, pendiente);
+  expect(await condonacion(ctx.sql, 20)).toMatchObject([{ anulada: true }]);
+  expect(await mora(ctx.sql, 20)).toBe("50.00");
+  const log = JSON.parse(logs.find((l) => l.includes("anulada_por_pago_pendiente"))!);
+  expect(log).toMatchObject({ credito_id: 20, pago_id: pendiente, restituida: false, monto_restituido: "0.00", monto_condonado: "3.73" });
 });

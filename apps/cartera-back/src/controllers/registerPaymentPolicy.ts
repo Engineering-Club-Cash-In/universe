@@ -3,15 +3,17 @@ import z from "zod";
 
 type BigInput = number | string | Big;
 
+export const montoBoletaSchema = z.union([
+  z.number().min(0),
+  z.string().regex(/^\d{1,16}\.\d{2}$/),
+]);
+
 // Schema del body de /newPayment. Vive en este módulo puro (sin conexión a
 // BD) para que los tests puedan importarlo sin levantar la base.
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.union([
-    z.number().min(0),
-    z.string().regex(/^\d{1,16}\.\d{2}$/),
-  ]),
+  monto_boleta: montoBoletaSchema,
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),
@@ -44,6 +46,26 @@ export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) 
   // Preserve its wall-clock fields rather than shifting the day to Guatemala.
   return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:?\d{2})$/, "Z"));
 };
+
+/**
+ * La boleta duplicada se busca por número de autorización + banco. El pago de
+ * Nexa no pasa por acá: ya tiene su idempotencia por `external_reference` en
+ * `nexa_payment_events`, y este chequeo no mira `paymentFalse`, así que el
+ * reintento de un evento `failed` cuya fila vieja quedó anulada daría un 409
+ * falso (y Nexa devolvería un dinero que sí puede entrar).
+ * Devuelve la clave a buscar, o null si no corresponde buscar.
+ */
+export const claveBoletaDuplicada = ({
+  numeroAutorizacion,
+  banco_id,
+  nexaPaymentEventId,
+}: {
+  numeroAutorizacion?: string;
+  banco_id?: number;
+  nexaPaymentEventId?: number;
+}) => (numeroAutorizacion && banco_id && nexaPaymentEventId === undefined
+  ? { numeroAutorizacion, banco_id }
+  : null);
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",
@@ -304,6 +326,83 @@ export const cuentaComoHermanoVivo = (
   pago: DestinoSobrescribibleRow
 ): boolean =>
   pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
+
+/**
+ * ¿Esta fila puede ser el SALDO VIGENTE de la cuota (de ella se leen los `*_restante`)?
+ *
+ * Una fila anulada (`paymentFalse = true`) NUNCA: su `*_restante` es el de DESPUÉS del pago
+ * que se anuló (ej. 0), y tomarlo hace que el pago siguiente parta de un saldo que ya no
+ * existe y cierre la cuota corta (crédito 9331, cuota 2).
+ */
+export const esPagoSaldoElegible = (pago: {
+  validationStatus?: string | null;
+  pagado?: boolean | null;
+  paymentFalse?: boolean | null;
+}): boolean =>
+  pago.paymentFalse !== true &&
+  (pago.validationStatus === "validated" ||
+    (pago.validationStatus === "pending" &&
+      pago.pagado === false &&
+      pago.paymentFalse === false));
+
+/**
+ * Cuota SIN NINGUNA fila viva (datos viejos: todas anuladas, semilla incluida; crédito 459,
+ * cuota 4). Sin respaldo `insertPayment` lee restantes 0 y salta la cuota para siempre. La
+ * semilla `no_required` ANULADA más vieja sirve ÚNICAMENTE como fuente del saldo vigente (sus
+ * `*_restante`); nunca como destino del cierre: el pago inserta una fila nueva viva.
+ *
+ * Una semilla anulada es plata que no existe: si recibió abonos antes de anularse, su saldo es
+ * cada restante MÁS su propio abono (misma regla que `masAbono` al anular). Sin abonos no cambia
+ * (crédito 459: suman la cuota completa, 8,578.86). Lo que no se puede reconstruir sin historial
+ * es un pago de OTRA fila, anulado después, que ya le hubiera estampado los restantes.
+ */
+type SemillaRespaldo = {
+  validationStatus?: string | null;
+  paymentFalse?: boolean | null;
+} & Partial<Record<
+  | "capital_restante" | "abono_capital" | "interes_restante" | "abono_interes"
+  | "iva_12_restante" | "abono_iva_12" | "seguro_restante" | "abono_seguro"
+  | "gps_restante" | "abono_gps" | "membresias" | "membresias_pago",
+  BigInput | null
+>>;
+
+const restanteMasAbono = (restante?: BigInput | null, abono?: BigInput | null) =>
+  new Big(restante ?? 0).plus(abono ?? 0).toFixed(2);
+
+export const saldoDeRespaldoDeSemillaAnulada = <T extends SemillaRespaldo>({
+  hayFilasVivas,
+  semillaAnulada: s,
+}: {
+  hayFilasVivas: boolean;
+  semillaAnulada: T | undefined;
+}): T | undefined =>
+  !hayFilasVivas && s?.validationStatus === "no_required" && s.paymentFalse === true
+    ? {
+        ...s,
+        capital_restante: restanteMasAbono(s.capital_restante, s.abono_capital),
+        interes_restante: restanteMasAbono(s.interes_restante, s.abono_interes),
+        iva_12_restante: restanteMasAbono(s.iva_12_restante, s.abono_iva_12),
+        seguro_restante: restanteMasAbono(s.seguro_restante, s.abono_seguro),
+        gps_restante: restanteMasAbono(s.gps_restante, s.abono_gps),
+        membresias: restanteMasAbono(s.membresias, s.membresias_pago),
+      }
+    : undefined;
+
+/**
+ * ¿La cuota se quedó sin NINGUNA fuente de saldo? Ni una fila viva (cualquier estado, pagada o no)
+ * ni una semilla `no_required` anulada que sirva de respaldo. `insertPayment` no tendría dónde
+ * escribirla y la plata se iría a saldo a favor sin rastro (crédito 365, cuota 4): hay que
+ * rechazar el pago antes de escribir nada.
+ */
+const esFilaDeCapital = (estado?: string | null) =>
+  estado === "capital" || estado === "capital_validated";
+
+export const cuotaSinFuenteDeSaldo = (
+  pagos: { validationStatus?: string | null; paymentFalse?: boolean | null }[],
+): boolean =>
+  // Una fila de capital viva no lleva saldo de cuota (interés/IVA en 0): no cuenta como viva.
+  !pagos.some((p) => p.paymentFalse !== true && !esFilaDeCapital(p.validationStatus)) &&
+  !pagos.some((p) => p.paymentFalse === true && p.validationStatus === "no_required");
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
@@ -1482,3 +1581,65 @@ export function resolverCuotaParaFilaSuelta(opciones: {
 
   return null;
 }
+
+// La subida (`POST /upload`) guarda el archivo en el bucket con la llave `<uuid v4>[.ext]` y devuelve SOLO esa llave;
+// el cliente la manda en `url_boletas` y el servidor le antepone `URL_PUBLIC_R2` al guardar (registerPayment.ts).
+// Por eso "ser del bucket" = ser exactamente una llave que la subida pudo generar. Sin trim: se guarda tal cual. El uuid va en minúsculas (uuidv4 las genera y R2 distingue mayúsculas); la extensión no distingue.
+const LLAVE_BOLETA = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.[A-Za-z0-9]{1,10})?$/;
+
+/** `URL_PUBLIC_R2` sana: https, sin credenciales/consulta/fragmento, y con "/" final (el servidor concatena sin separador). */
+const baseR2Valida = (base: string | undefined): URL | null => {
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    const ok = u.protocol === "https:" && !u.username && !u.password && !u.search && !u.hash && base.endsWith("/");
+    return ok ? u : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Mensajes de error si alguna llave de `url_boletas` NO es del bucket de la app (o si el bucket no está configurado: falla cerrado). */
+export const erroresUrlBoletasDelBucket = (
+  url_boletas: string[],
+  r2BaseUrl: string | undefined = import.meta.env.URL_PUBLIC_R2,
+): string[] => {
+  const base = baseR2Valida(r2BaseUrl);
+  if (!base) {
+    return ["No se puede condonar por boleta tardía: falta configurar la dirección pública de las boletas (URL_PUBLIC_R2). Avise a soporte."];
+  }
+  const malas = url_boletas.filter((u) => {
+    if (typeof u !== "string" || !LLAVE_BOLETA.test(u)) return true;
+    // Defensa extra: lo que se va a guardar debe quedar en el mismo host y bajo la misma ruta del bucket.
+    try {
+      const final = new URL(`${base.href}${u}`);
+      return final.origin !== base.origin || !final.pathname.startsWith(base.pathname) || final.username !== "" || final.password !== "";
+    } catch {
+      return true;
+    }
+  });
+  return malas.length === 0
+    ? []
+    : ["La foto de la boleta no tiene un formato válido (use .jpg, .jpeg, .png o .pdf): renombre el archivo y vuelva a subirlo."];
+};
+
+/**
+ * Con `condonacionBoletaTardia` el servidor exige la boleta y su número de autorización (activan el freno de duplicados),
+ * y que TODA boleta sea un archivo subido al bucket de la app: la foto es el control antifraude de la condonación.
+ */
+export const camposObligatoriosCondonacion = (p: {
+  url_boletas: string[];
+  numeroAutorizacion?: string;
+  banco_id?: number;
+}, r2BaseUrl: string | undefined = import.meta.env.URL_PUBLIC_R2): Record<string, string[]> => {
+  const errores: Record<string, string[]> = {};
+  const exige = (campo: string) => [`${campo} es obligatorio para condonar por boleta tardía`];
+  if (!p.url_boletas.some((u) => typeof u === "string" && u.trim())) errores.url_boletas = exige("url_boletas");
+  else {
+    const delBucket = erroresUrlBoletasDelBucket(p.url_boletas, r2BaseUrl);
+    if (delBucket.length > 0) errores.url_boletas = delBucket;
+  }
+  if (!p.numeroAutorizacion?.trim()) errores.numeroAutorizacion = exige("numeroAutorizacion");
+  if (!p.banco_id) errores.banco_id = exige("banco_id");
+  return errores;
+};

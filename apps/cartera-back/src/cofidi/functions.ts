@@ -1,22 +1,7 @@
 // src/utils/factura-html-generator.ts
 
-import {
-  AMJK_CONFIG,
-  AUTOCASH_CONFIG,
-  CLUB_CASHIN_CONFIG,
-  CREACION_IMAGEN_CONFIG,
-  GRUPO_BATRO_CONFIG,
-  SE_PRESTA_CONFIG,
-} from "../utils/functions/const";
-
-const FACTURADORES = [
-  CLUB_CASHIN_CONFIG,
-  SE_PRESTA_CONFIG,
-  AMJK_CONFIG,
-  CREACION_IMAGEN_CONFIG,
-  GRUPO_BATRO_CONFIG,
-  AUTOCASH_CONFIG,
-];
+import { CLUB_CASHIN_CONFIG } from "../utils/functions/const";
+import { emisorPorNit } from "./emisores";
 
 const leyendaPagoDirecto = (frases: ReadonlyArray<{
   tipoFrase: number;
@@ -36,7 +21,7 @@ const leyendaPagoDirecto = (frases: ReadonlyArray<{
 // cambia la resolución a un emisor, se cambia en su config y el PDF la sigue.
 // Un emisor sin resolución de pago directo cae en la de CUBE (lo de siempre).
 export function leyendaISREmisor(nitEmisor: string): string {
-  const config = FACTURADORES.find((c) => c.emisor.nit === String(nitEmisor));
+  const config = emisorPorNit(nitEmisor)?.config;
   return (
     (config && leyendaPagoDirecto(config.frases)) ??
     leyendaPagoDirecto(CLUB_CASHIN_CONFIG.frases)!

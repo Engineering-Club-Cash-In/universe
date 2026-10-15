@@ -4,6 +4,7 @@ import {
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
   resolverCuotaParaFilaSuelta,
+  claveBoletaDuplicada,
 } from "./registerPaymentPolicy";
 import * as registerPaymentPolicy from "./registerPaymentPolicy";
 
@@ -1859,5 +1860,86 @@ describe("resolverCuotaParaFilaSuelta", () => {
 
   it("tolera undefined, no sólo null", () => {
     expect(resolverCuotaParaFilaSuelta({})).toBeNull();
+  });
+});
+
+describe("esPagoSaldoElegible: una fila anulada nunca es saldo vigente", () => {
+  const fila = (o: Record<string, unknown>) => ({ validationStatus: "validated", pagado: true, paymentFalse: false, ...o });
+  it("validated viva: elegible", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({}))).toBe(true);
+  });
+  it("validated ANULADA: no elegible (sus restantes son de después del pago)", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ paymentFalse: true }))).toBe(false);
+  });
+  it("pending no pagado vivo: elegible; anulado o pagado: no", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: false }))).toBe(true);
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: false, paymentFalse: true }))).toBe(false);
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "pending", pagado: true }))).toBe(false);
+  });
+  it("no_required nunca es saldo elegible", () => {
+    expect(registerPaymentPolicy.esPagoSaldoElegible(fila({ validationStatus: "no_required" }))).toBe(false);
+  });
+});
+
+describe("saldoDeRespaldoDeSemillaAnulada: cuota sin ninguna fila viva", () => {
+  const semilla = { validationStatus: "no_required", paymentFalse: true, interes_restante: "4463.76" };
+  it("sin filas vivas usa la semilla anulada SOLO como fuente del saldo (virgen: mismos valores)", () => {
+    const r = registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: semilla });
+    expect(r).toMatchObject({ ...semilla, interes_restante: "4463.76", capital_restante: "0.00", membresias: "0.00" });
+  });
+  it("semilla que recibió plata antes de anularse: sus restantes se reconstruyen sumando sus propios abonos", () => {
+    const conPlata = {
+      ...semilla, capital_restante: "700", abono_capital: "300", interes_restante: "10", abono_interes: "5",
+      iva_12_restante: "1", abono_iva_12: "2", seguro_restante: "3", abono_seguro: "4",
+      gps_restante: "6", abono_gps: "7", membresias: "0", membresias_pago: "50",
+    };
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: conPlata })).toMatchObject({
+      paymentFalse: true, capital_restante: "1000.00", interes_restante: "15.00", iva_12_restante: "3.00",
+      seguro_restante: "7.00", gps_restante: "13.00", membresias: "50.00",
+    });
+  });
+  it("con alguna fila viva no se usa", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: true, semillaAnulada: semilla })).toBeUndefined();
+  });
+  it("sin semilla anulada: undefined (mismo comportamiento de antes)", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: undefined })).toBeUndefined();
+  });
+  it("una fila que no es semilla anulada no sirve", () => {
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: { ...semilla, paymentFalse: false } })).toBeUndefined();
+    expect(registerPaymentPolicy.saldoDeRespaldoDeSemillaAnulada({ hayFilasVivas: false, semillaAnulada: { ...semilla, validationStatus: "validated" } })).toBeUndefined();
+  });
+});
+
+describe("cuotaSinFuenteDeSaldo: la cuota no tiene dónde escribirse", () => {
+  const f = (validationStatus: string, paymentFalse: boolean) => ({ validationStatus, paymentFalse });
+  it("solo filas anuladas que no son semilla: sí (crédito 365, cuota 4)", () => {
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("pending", true), f("validated", true)])).toBe(true);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([])).toBe(true);
+  });
+  it("con semilla anulada de respaldo: no (crédito 459, cuota 4)", () => {
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("no_required", true), f("validated", true)])).toBe(false);
+  });
+  it("una fila de capital viva no lleva saldo de cuota: no cuenta como viva (M-3)", () => {
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital_validated", false)])).toBe(true);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital", false), f("validated", true)])).toBe(true);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("capital_validated", false), f("no_required", true)])).toBe(false);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("reset", false)])).toBe(false);
+  });
+  it("con cualquier fila viva, incluida una pending ya pagada: no", () => {
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("validated", true), f("pending", false)])).toBe(false);
+    expect(registerPaymentPolicy.cuotaSinFuenteDeSaldo([f("no_required", false)])).toBe(false);
+  });
+});
+
+describe("claveBoletaDuplicada", () => {
+  it("busca duplicados por autorización + banco en el pago manual", () => {
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016", banco_id: 26 }))
+      .toEqual({ numeroAutorizacion: "36418016", banco_id: 26 });
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016" })).toBeNull();
+    expect(claveBoletaDuplicada({ banco_id: 26 })).toBeNull();
+  });
+
+  it("no los busca en el pago Nexa: su idempotencia es por external_reference", () => {
+    expect(claveBoletaDuplicada({ numeroAutorizacion: "36418016", banco_id: 26, nexaPaymentEventId: 7 })).toBeNull();
   });
 });

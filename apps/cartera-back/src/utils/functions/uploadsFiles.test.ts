@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createCarteraStructuredLogger } from '../structuredLogger';
 import { uploadFileController } from './uploadsFiles';
+import { erroresUrlBoletasDelBucket } from '../../controllers/registerPaymentPolicy';
 
 describe('uploadFileController', () => {
   test('preserves the 400 response when no Blob is provided', async () => {
@@ -71,5 +72,38 @@ describe('uploadFileController', () => {
       }),
     ]);
     expect(lines.join('\n')).not.toContain('synthetic provider secret');
+  });
+});
+
+describe('uploadFileController: la llave que genera cumple la regla del bucket (Codex r4 #2)', () => {
+  const subir = async (name: string, type: string) => {
+    const set = { status: 200 };
+    const storage = { send: async () => ({}) };
+    const res = (await uploadFileController({ body: { file: new File(['x'], name, { type }) }, set, storage })) as { filename: string };
+    return res.filename;
+  };
+
+  test('nombre con puntos y espacios + image/jpeg: la llave cumple LLAVE_BOLETA y termina en .jpg', async () => {
+    const llave = await subir('Boleta 13.10.2026 (1)', 'image/jpeg');
+    expect(erroresUrlBoletasDelBucket([llave], 'https://r2.example/')).toEqual([]);
+    expect(llave.endsWith('.jpg')).toBe(true);
+  });
+
+  test('una extensión buena se conserva tal cual', async () => {
+    const llave = await subir('recibo.PDF', 'application/pdf');
+    expect(llave.endsWith('.PDF')).toBe(true);
+    expect(erroresUrlBoletasDelBucket([llave], 'https://r2.example/')).toEqual([]);
+  });
+
+  test('nombre que termina en punto + application/pdf: .pdf', async () => {
+    const llave = await subir('x.', 'application/pdf');
+    expect(llave.endsWith('.pdf')).toBe(true);
+    expect(erroresUrlBoletasDelBucket([llave], 'https://r2.example/')).toEqual([]);
+  });
+
+  test('extensión rara y sin tipo: la llave queda en el uuid solo', async () => {
+    const llave = await subir('a.jpg_large', '');
+    expect(llave).not.toContain('.');
+    expect(erroresUrlBoletasDelBucket([llave], 'https://r2.example/')).toEqual([]);
   });
 });

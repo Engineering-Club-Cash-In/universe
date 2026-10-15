@@ -253,6 +253,7 @@ export const getDocumentTypeLabel = (documentType: string): string => {
 		multas_vehiculo: "Multas del Vehículo",
 		// === Documentos Etapa 90% (Cierre) ===
 		seguro_vehiculo: "Seguro del Vehículo",
+		factura_vehiculo: "Factura del Vehículo",
 		inscripcion_garantia_mobiliaria: "Inscripción Garantía Mobiliaria",
 		traspaso: "Traspaso",
 		documentos_firmados_vendedor: "Documentos Firmados por Vendedor",

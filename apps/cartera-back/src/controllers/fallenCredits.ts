@@ -12,6 +12,7 @@ import {
 import { and, eq, sql, ne, desc, gte, lte } from "drizzle-orm";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { contarPagosNexaCredito } from "./nexaDashboard";
+import { borrandoComprobantesNexaTrasCommit, urlsDeBoletasBorradas } from "./nexaBoletaR2";
 
 /**
  * Borra los pagos del crédito (menos los de la cuota 0, si existe). Antes desvincula los eventos
@@ -28,12 +29,14 @@ import { contarPagosNexaCredito } from "./nexaDashboard";
  * Un evento `failed` nunca recibe la marca: Nexa rechazó esa transferencia y devolvió el dinero, y
  * con la marca el reintento se contestaría como aplicado (classifyNexaClaim). En el primer UPDATE
  * solo se le suelta el pago_id (lo exige la FK), sin marcarlo.
- * Mismo filtro en los UPDATE y en el DELETE.
+ * Mismo filtro en los UPDATE y en el DELETE. Deja en `urlsBoletas` las URLs de los comprobantes
+ * Nexa borrados, para que el llamador los borre de R2 recién después del commit (nexaBoletaR2.ts).
  */
 export async function borrarPagosDelCredito(
   tx: Pick<typeof db, "execute" | "delete">,
   creditoId: number,
   cuota0Id: number | undefined,
+  urlsBoletas: string[] = [],
 ): Promise<number> {
   const filtroPagos = cuota0Id
     ? sql`credito_id = ${creditoId} AND cuota_id <> ${cuota0Id}`
@@ -52,6 +55,20 @@ export async function borrarPagosDelCredito(
              GROUP BY nexa_payment_event_id) v
     WHERE e.id = v.evento_id AND e.pago_id IS NULL AND e.pago_id_eliminado IS NULL
       AND e.status <> 'failed'`);
+  // La imagen de boleta que cartera genera para los pagos Nexa (nexaBoletaImagen.ts) cuelga de
+  // `boletas.pago_id`, que referencia el pago sin ON DELETE: se borra antes. Solo la de los
+  // pagos Nexa; las boletas de los pagos manuales siguen como antes. El FOR UPDATE choca con el
+  // FOR KEY SHARE que toma el INSERT de la boleta por la FK: si un registro concurrente ya insertó,
+  // se espera su commit y el DELETE (snapshot nuevo) la ve; si no, ese INSERT falla por FK.
+  await tx.execute(sql`
+    SELECT pago_id FROM cartera.pagos_credito
+    WHERE ${filtroPagos} AND nexa_payment_event_id IS NOT NULL
+    ORDER BY pago_id FOR UPDATE`);
+  urlsBoletas.push(...urlsDeBoletasBorradas(await tx.execute(sql`
+    DELETE FROM cartera.boletas
+    WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
+                       WHERE ${filtroPagos} AND nexa_payment_event_id IS NOT NULL)
+    RETURNING url_boleta`)));
   if (cuota0Id) {
     await tx
       .delete(pagos_credito)
@@ -254,7 +271,7 @@ export async function marcarCreditoComoCaido({
     }
 
     let eventosDesvinculados = 0;
-    const resultado = await db.transaction(async (tx) => {
+    const resultado = await borrandoComprobantesNexaTrasCommit((urlsBoletas) => db.transaction(async (tx) => {
       // 0. Ningún pago Nexa con la factura en curso o sin confirmar: se niega sin escribir nada.
       const facturando = await eventosNexaFacturando(tx, credito_id);
       if (facturando.length > 0) {
@@ -268,7 +285,7 @@ export async function marcarCreditoComoCaido({
       }
 
       // 1. Eliminar pagos (excepto los de cuota 0), desvinculando antes los eventos Nexa
-      eventosDesvinculados = await borrarPagosDelCredito(tx, credito_id, cuota0Id);
+      eventosDesvinculados = await borrarPagosDelCredito(tx, credito_id, cuota0Id, urlsBoletas);
 
       // 2. Eliminar cuotas (excepto cuota 0)
       await tx
@@ -301,7 +318,7 @@ export async function marcarCreditoComoCaido({
         message: "Crédito marcado como CAIDO exitosamente.",
         data: registro,
       };
-    });
+    }));
 
     if (resultado.success && (eventosDesvinculados > 0 || (pagosNexa?.cantidad ?? 0) > 0)) {
       console.warn(

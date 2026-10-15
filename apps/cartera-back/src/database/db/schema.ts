@@ -495,10 +495,20 @@
     // se anula o se revierte sin validarse, la condonación se anula sola.
     // Ver drizzle/0052_condonacion_nexa_pagos_pendientes.sql.
     pagos_pendientes_ids: integer("pagos_pendientes_ids").array(),
+    // Boleta pagada a tiempo y registrada tarde: UUID del intento (apertura del modal) que originó
+    // la condonación. Liga con pagos_credito.boleta_tardia_intento_id, sin FK. drizzle/0054.
+    intento_id: uuid("intento_id"),
   }, (t) => [
     uniqueIndex("uq_moras_condonaciones_nexa_evento_viva")
       .on(t.nexa_payment_event_id)
       .where(sql`${t.nexa_payment_event_id} IS NOT NULL AND ${t.anulada_at} IS NULL`),
+    uniqueIndex("uq_moras_condonaciones_intento_viva")
+      .on(t.intento_id)
+      .where(sql`${t.intento_id} IS NOT NULL AND ${t.anulada_at} IS NULL`),
+    // 0056: búsqueda por intento y crédito incluyendo anuladas (insignia de contabilidad).
+    index("moras_condonaciones_idx_intento")
+      .on(t.intento_id, t.credito_id)
+      .where(sql`${t.intento_id} IS NOT NULL`),
   ]);
 
   // Tipo de registro en mora_pagada_cuota: PAGO (cobro), CONDONACION, REVERSA, ANULACION
@@ -583,6 +593,7 @@
     "CONDONACION_MASIVA",
     // Pago Nexa (ACH) que llegó a tiempo: ver drizzle/0051.
     "CONDONACION_NEXA_A_TIEMPO",
+    "CONDONACION_BOLETA_TARDIA", // Boleta tardía: ver drizzle/0053.
   ]);
 
   export const moras_historial = customSchema.table("moras_historial", {
@@ -716,6 +727,8 @@
     numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }),
     registerBy:varchar("registerby",{length:150}).notNull(),
     nexaPaymentEventId: integer("nexa_payment_event_id"),
+    // Intento (modal) de boleta tardía que escribió esta fila: ver moras_condonaciones.intento_id. drizzle/0054.
+    boletaTardiaIntentoId: uuid("boleta_tardia_intento_id"),
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
@@ -726,6 +739,9 @@
     origen_pago: origenPagoEnum("origen_pago"),
   }, (table) => ({
     cuotaIdx: index("idx_pagos_credito_cuota").on(table.cuota_id),
+    boletaTardiaIdx: index("pagos_credito_idx_boleta_tardia_intento")
+      .on(table.boletaTardiaIntentoId)
+      .where(sql`${table.boletaTardiaIntentoId} IS NOT NULL`),
   }));
   export const nexa_credit_bindings = customSchema.table(
     "nexa_credit_bindings",

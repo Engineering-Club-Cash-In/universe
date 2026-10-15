@@ -29,6 +29,10 @@ export const REVERSIBLE_CREDIT_STATUSES = [
   "INCOBRABLE",
 ] as const;
 
+// Una boleta anulada (falsePayment) ya devolvió capital, inversionistas y mora: revertirla o
+// volverla a pendiente lo haría otra vez. Las dos rutas la rechazan antes de escribir (409).
+export const PAGO_ANULADO_NO_REVERSIBLE = "El pago ya está anulado: no se puede revertir ni volver a pendiente";
+
 export function isCreditStatusReversible(status?: string | null) {
   return (
     status != null &&

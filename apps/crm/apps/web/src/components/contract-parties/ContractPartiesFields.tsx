@@ -95,6 +95,12 @@ export function ContractPartiesFields({
 	const vendorsQuery = useQuery({
 		...orpc.getVendors.queryOptions(),
 		enabled: !esNuevo,
+		// Un vendedor de agencia nunca es el vendedor legal del contrato, y es
+		// el único que puede no tener DPI.
+		select: (vendors) =>
+			vendors
+				.filter((v) => v.vendorType !== "agencia")
+				.map((v) => ({ ...v, dpi: v.dpi ?? "" })),
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompaniesForContracts.queryOptions(),

@@ -22,6 +22,8 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
+	insuranceInvoiceSubmissions,
+	opportunityAgencySellers,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
@@ -62,6 +64,12 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
+import {
+	asegurarVendedorLegal,
+	esVendedorDeAgencia,
+	limpiarVendedorSiCambiaAgencia,
+	vendedorSigueValido,
+} from "../lib/agency-sellers";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	isReservedBankCoverageDescription,
@@ -85,6 +93,12 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
+import {
+	envioSinConfirmar,
+	puedeReenviarFacturaSeguro,
+	puedeReintentarDesdeCrm,
+	reintentoDisponibleDesde,
+} from "../lib/factura-seguro";
 import {
 	aplicarDeltaMontosInversionistas,
 	calcularRegeneracionCotizacionFechaIdeal,
@@ -224,6 +238,11 @@ import {
 	runOpportunityDocumentDeleteCore,
 	runOpportunityDocumentUploadCore,
 } from "./opportunity-document-core";
+import {
+	enviarFacturaSeguroDesdeCrm,
+	previsualizarFacturaSeguroDesdeCrm,
+	type ResultadoFacturaDesdeCrm,
+} from "./tracker";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -1269,19 +1288,33 @@ export const crmRouter = {
 			if (soloPorSerElAsesor) {
 				condiciones.push(eq(opportunities.assignedTo, context.userId));
 			}
-			const [actualizada] = await db
-				.update(opportunities)
-				.set({
-					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
-					...(input.companyId !== undefined && { companyId: input.companyId }),
-					updatedAt: new Date(),
-				})
-				.where(and(...condiciones))
-				.returning({
-					id: opportunities.id,
-					vendorId: opportunities.vendorId,
-					companyId: opportunities.companyId,
-				});
+			const [actualizada] = await db.transaction(async (tx) => {
+				// Oportunidad antes que vendedor: mismo orden de bloqueo que el
+				// resto de las rutas, para no interbloquearse con ellas.
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update");
+				await asegurarVendedorLegal(tx, input.vendorId);
+				const filas = await tx
+					.update(opportunities)
+					.set({
+						...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+						...(input.companyId !== undefined && { companyId: input.companyId }),
+						updatedAt: new Date(),
+					})
+					.where(and(...condiciones))
+					.returning({
+						id: opportunities.id,
+						vendorId: opportunities.vendorId,
+						companyId: opportunities.companyId,
+					});
+				if (filas[0] && input.companyId !== undefined) {
+					await limpiarVendedorSiCambiaAgencia(tx, input.opportunityId);
+				}
+				return filas;
+			});
 			if (!actualizada) {
 				// Distinguir el motivo: la fila cambió entre la lectura y el UPDATE
 				const [ahora] = await db
@@ -1312,6 +1345,125 @@ export const crmRouter = {
 				action: "update",
 			});
 			return actualizada;
+		}),
+
+	getOpportunityAgencySeller: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [asignado] = await db
+				.select({
+					sellerId: opportunityAgencySellers.sellerId,
+					name: vehicleVendors.name,
+					email: vehicleVendors.email,
+				})
+				.from(opportunityAgencySellers)
+				.innerJoin(
+					vehicleVendors,
+					eq(vehicleVendors.id, opportunityAgencySellers.sellerId),
+				)
+				.where(eq(opportunityAgencySellers.opportunityId, input.opportunityId))
+				.limit(1);
+			return asignado ?? null;
+		}),
+
+	/**
+	 * Vendedor de la agencia/predio que colocó la oportunidad. Define qué
+	 * usuarios del tracker la ven; no es el vendedor legal del contrato.
+	 */
+	setOpportunityAgencySeller: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				sellerId: z.string().uuid().nullable(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// La oportunidad va FOR UPDATE: un cambio de agencia (UPDATE de la
+			// fila) u otra asignación esperan a que esta termine, así que la
+			// agencia validada es la vigente al escribir. El vendedor va FOR SHARE
+			// para que no lo muevan de agencia en medio.
+			await db.transaction(async (tx) => {
+				const [oportunidad] = await tx
+					.select({
+						assignedTo: opportunities.assignedTo,
+						companyId: opportunities.companyId,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update")
+					.limit(1);
+				if (!oportunidad) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+
+				const puedeEditar =
+					PERMISSIONS.canAccessAnalysis(context.userRole) ||
+					oportunidad.assignedTo === context.userId;
+				if (!puedeEditar) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para editar esta oportunidad",
+					});
+				}
+
+				if (input.sellerId === null) {
+					await tx
+						.delete(opportunityAgencySellers)
+						.where(
+							eq(opportunityAgencySellers.opportunityId, input.opportunityId),
+						);
+					return;
+				}
+
+				const [vendedor] = await tx
+					.select({
+						vendorType: vehicleVendors.vendorType,
+						companyId: vehicleVendors.companyId,
+					})
+					.from(vehicleVendors)
+					.where(eq(vehicleVendors.id, input.sellerId))
+					.for("share")
+					.limit(1);
+				if (!vendedor || !esVendedorDeAgencia(vendedor)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El vendedor seleccionado no es de una agencia o predio",
+					});
+				}
+				if (!vendedorSigueValido(vendedor.companyId, oportunidad.companyId)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El vendedor no pertenece a la agencia de esta oportunidad",
+					});
+				}
+
+				const ahora = new Date();
+				await tx
+					.insert(opportunityAgencySellers)
+					.values({
+						opportunityId: input.opportunityId,
+						sellerId: input.sellerId,
+						assignedBy: context.userId,
+						createdAt: ahora,
+						updatedAt: ahora,
+					})
+					.onConflictDoUpdate({
+						target: opportunityAgencySellers.opportunityId,
+						set: {
+							sellerId: input.sellerId,
+							assignedBy: context.userId,
+							updatedAt: ahora,
+						},
+					});
+			});
+
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update",
+				data: { agencySellerId: input.sellerId },
+			});
+			return { sellerId: input.sellerId };
 		}),
 
 	setCompanyRazonSocial: crmProcedure
@@ -3306,24 +3458,29 @@ export const crmRouter = {
 				}
 			}
 
-			const newOpportunity = await db
-				.insert(opportunities)
-				.values({
-					...input,
-					companyId,
-					source,
-					campaign,
-					nit: leadNit,
-					assignedTo,
-					// Un alta directa en análisis necesita poder consultar Buró en el 30%.
-					buroRevalidacionAl30: etapaInicial.closurePercentage === 30,
-					expectedCloseDate: input.expectedCloseDate
-						? new Date(input.expectedCloseDate)
-						: undefined,
-					createdBy: context.userId,
-					updatedAt: new Date(),
-				})
-				.returning();
+			// En una transacción con el vendedor tomado FOR SHARE: no lo pueden
+			// convertir en vendedor de agencia entre la validación y el insert.
+			const newOpportunity = await db.transaction(async (tx) => {
+				await asegurarVendedorLegal(tx, input.vendorId);
+				return tx
+					.insert(opportunities)
+					.values({
+						...input,
+						companyId,
+						source,
+						campaign,
+						nit: leadNit,
+						assignedTo,
+						// Un alta directa en análisis necesita poder consultar Buró en el 30%.
+						buroRevalidacionAl30: etapaInicial.closurePercentage === 30,
+						expectedCloseDate: input.expectedCloseDate
+							? new Date(input.expectedCloseDate)
+							: undefined,
+						createdBy: context.userId,
+						updatedAt: new Date(),
+					})
+					.returning();
+			});
 			auditRecord({
 				entity: "opportunity",
 				id: newOpportunity[0].id,
@@ -4377,6 +4534,14 @@ export const crmRouter = {
 							: undefined,
 					);
 				}
+				// Oportunidad antes que vendedor (orden de bloqueo común a todas las
+				// rutas); el vendedor queda FOR SHARE hasta el commit.
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.id, id))
+					.for("update");
+				await asegurarVendedorLegal(tx, input.vendorId);
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
 				// vieja: sin `expectedUpdatedAt`, entre el cálculo y este UPDATE otra
 				// transacción pudo reabrir y avanzar la misma fila (≥90% o won), y el
@@ -4486,6 +4651,15 @@ export const crmRouter = {
 						reason: `${RAZON_TRANSICION_REVALIDACION}: se reabrió una oportunidad perdida que ya había cruzado el 30%`,
 						isOverride: false,
 					});
+				}
+
+				// En la misma transacción, como en las otras rutas que cambian la
+				// agencia: la limpieza compara contra la agencia vigente en el DELETE.
+				if (
+					filas[0] &&
+					filas[0].companyId !== currentOpportunity[0].companyId
+				) {
+					await limpiarVendedorSiCambiaAgencia(tx, id);
 				}
 
 				return filas;
@@ -6989,18 +7163,72 @@ export const crmRouter = {
 						id: user.id,
 						name: user.name,
 					},
+					// La agencia solo si la subió un socio desde el tracker: desde el CRM
+					// la sube un usuario interno, no la agencia. El estado del correo
+					// viene en las dos vías.
+					subidoDesde: sql<
+						string | null
+					>`case when ${user.role} = 'partner' then ${companies.name} end`,
+					envioAseguradora: {
+						estado: insuranceInvoiceSubmissions.status,
+						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
+						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+						actualizadoAt: insuranceInvoiceSubmissions.updatedAt,
+						retryCount: insuranceInvoiceSubmissions.retryCount,
+					},
 				})
 				.from(opportunityDocuments)
 				.leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+				.leftJoin(
+					insuranceInvoiceSubmissions,
+					eq(insuranceInvoiceSubmissions.documentId, opportunityDocuments.id),
+				)
+				.leftJoin(
+					companies,
+					eq(companies.id, insuranceInvoiceSubmissions.companyId),
+				)
 				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
 				.orderBy(opportunityDocuments.uploadedAt);
+
+			const puedeReintentar = puedeReintentarDesdeCrm(
+				{ userId: context.userId, userRole: context.userRole },
+				opportunity[0].assignedTo,
+			);
 
 			// Generar URLs firmadas para cada documento
 			const documentsWithUrls = await Promise.all(
 				documents.map(async (doc) => {
 					const url = await getFileUrl(doc.filePath);
+					const { envioAseguradora } = doc;
 					return {
 						...doc,
+						envioAseguradora: envioAseguradora && {
+							estado: envioAseguradora.estado,
+							aseguradora: envioAseguradora.aseguradora,
+							enviadoAt: envioAseguradora.enviadoAt,
+							sinConfirmar: envioSinConfirmar({
+								envio: envioAseguradora.estado,
+								envioActualizadoAt: envioAseguradora.actualizadoAt,
+							}),
+							// Solo si quien mira puede usarlo: así el botón no aparece para
+							// recibir después un "sin permiso".
+							reintentoDisponible:
+								puedeReintentar &&
+								opportunity[0].status === "won" &&
+								puedeReenviarFacturaSeguro({
+									envio: envioAseguradora.estado,
+									envioActualizadoAt: envioAseguradora.actualizadoAt,
+									retryCount: envioAseguradora.retryCount ?? 0,
+								}).ok,
+							reintentoDesde:
+								puedeReintentar && opportunity[0].status === "won"
+									? (reintentoDisponibleDesde({
+											envio: envioAseguradora.estado,
+											envioActualizadoAt: envioAseguradora.actualizadoAt,
+											retryCount: envioAseguradora.retryCount ?? 0,
+										})?.toISOString() ?? null)
+									: null,
+						},
 						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
@@ -7010,6 +7238,31 @@ export const crmRouter = {
 			);
 
 			return documentsWithUrls;
+		}),
+
+	// Para la confirmación del CRM antes de subir una "Factura del Vehículo".
+	getEnvioFacturaSeguroCrm: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [opportunity] = await db
+				.select({ assignedTo: opportunities.assignedTo })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+			if (
+				context.userRole === "sales" &&
+				opportunity.assignedTo !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver esta oportunidad",
+				});
+			}
+			return previsualizarFacturaSeguroDesdeCrm(input.opportunityId);
 		}),
 
 	uploadOpportunityDocument: crmProcedure
@@ -7024,6 +7277,16 @@ export const crmRouter = {
 					size: z.number(),
 					key: z.string(), // R2 key from presigned upload
 				}),
+				// "Factura del Vehículo": la aseguradora a la que el usuario confirmó
+				// el envío. Sin esto la factura se guarda pero no se manda.
+				// { programado }: aceptó que salga sola a esa aseguradora al
+				// confirmar los contratos.
+				envioFacturaConfirmado: z
+					.union([
+						z.enum(["gyt", "universales"]),
+						z.object({ programado: z.enum(["gyt", "universales"]) }),
+					])
+					.nullish(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -7227,7 +7490,33 @@ export const crmRouter = {
 				consultarBuroAlVeinteTrasGuardar(input.opportunityId, context.userId);
 			}
 
-			return newDocument;
+			// La factura del vehículo subida desde el CRM también va a la aseguradora
+			// (mismo envío que el tracker). El documento ya quedó guardado: un
+			// error del envío se informa sin tumbar la subida.
+			const facturaSeguro: ResultadoFacturaDesdeCrm | null =
+				input.documentType === "factura_vehiculo"
+					? await enviarFacturaSeguroDesdeCrm({
+							opportunityId: input.opportunityId,
+							documentId: newDocument.id,
+							key: uploadedFile.key,
+							nombre: input.file.name,
+							mimeType: uploadedFile.mimeType,
+							aseguradoraConfirmada: input.envioFacturaConfirmado,
+							userId: context.userId,
+							userRole: context.userRole,
+						}).catch((error) => {
+							console.error(
+								"[uploadOpportunityDocument] No se pudo enviar la factura del vehículo",
+								error,
+							);
+							return {
+								enviada: false as const,
+								motivo: "no se pudo procesar el envío a la aseguradora",
+							};
+						})
+					: null;
+
+			return { ...newDocument, facturaSeguro };
 		}),
 
 	deleteOpportunityDocument: crmProcedure
@@ -7248,6 +7537,69 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Documento no encontrado",
 				});
+			}
+
+			// Los permisos van primero: sin permiso, no se revela nada más.
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor" &&
+				context.userRole !== "analyst" &&
+				document.uploadedBy !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar este documento",
+				});
+			}
+
+			// La factura del vehículo registrada para la aseguradora es el respaldo
+			// del correo: borrarla permitiría subir y enviar otra. Una programada
+			// para el cierre todavía no salió y sí se puede quitar.
+			const [facturaRegistrada] = await db
+				.select({
+					id: insuranceInvoiceSubmissions.id,
+					status: insuranceInvoiceSubmissions.status,
+				})
+				.from(insuranceInvoiceSubmissions)
+				.where(eq(insuranceInvoiceSubmissions.documentId, input.documentId))
+				.limit(1);
+			if (facturaRegistrada && facturaRegistrada.status !== "programado") {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esta factura del vehículo ya se registró para la aseguradora y no se puede eliminar",
+				});
+			}
+			if (facturaRegistrada) {
+				// Bajo bloqueo, como la reserva del envío al cierre: si mientras
+				// tanto empezó a enviarse, no se borra. El archivo se borra de R2
+				// solo después de quitarlo de la base.
+				const borrada = await db.transaction(async (tx) => {
+					const [programada] = await tx
+						.select({ id: insuranceInvoiceSubmissions.id })
+						.from(insuranceInvoiceSubmissions)
+						.where(
+							and(
+								eq(insuranceInvoiceSubmissions.id, facturaRegistrada.id),
+								eq(insuranceInvoiceSubmissions.status, "programado"),
+							),
+						)
+						.for("update");
+					if (!programada) return false;
+					await tx
+						.delete(insuranceInvoiceSubmissions)
+						.where(eq(insuranceInvoiceSubmissions.id, programada.id));
+					await tx
+						.delete(opportunityDocuments)
+						.where(eq(opportunityDocuments.id, input.documentId));
+					return true;
+				});
+				if (!borrada) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Esta factura del vehículo ya empezó a enviarse a la aseguradora y no se puede eliminar",
+					});
+				}
+				await deleteFileFromR2(document.filePath).catch(() => {});
+				return { success: true };
 			}
 
 			// Verificar permisos
@@ -9610,6 +9962,7 @@ export const crmRouter = {
 						.select({
 							id: vehicleVendors.id,
 							gender: vehicleVendors.gender,
+							vendorType: vehicleVendors.vendorType,
 						})
 						.from(vehicleVendors)
 						.where(
@@ -9618,8 +9971,19 @@ export const crmRouter = {
 								dpiVendedor.valid ? dpiVendedor.dpiLimpio : input.vendedor.dpi,
 							),
 						)
+						// NO KEY UPDATE y no SHARE: abajo se puede completar el género
+						// de esta fila, y dos avances con el mismo vendedor que la
+						// tomaran compartida se interbloquearían al escribir. Sigue
+						// frenando a `vendors.update` (ver `asegurarVendedorLegal`).
+						.for("no key update")
 						.limit(1);
 
+					if (existente && esVendedorDeAgencia(existente)) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Ese DPI es de un vendedor de agencia y no puede ser el vendedor del vehículo",
+						});
+					}
 					if (existente) {
 						// Un vendedor ya registrado solo se COMPLETA: el nombre y el
 						// género llegan precargados de la pantalla, así que
@@ -9730,6 +10094,9 @@ export const crmRouter = {
 						message:
 							"La oportunidad cambió mientras se asignaban inversionistas",
 					});
+				}
+				if (input.agencia !== undefined) {
+					await limpiarVendedorSiCambiaAgencia(tx, input.opportunityId);
 				}
 				auditRecord({
 					entity: "opportunity",

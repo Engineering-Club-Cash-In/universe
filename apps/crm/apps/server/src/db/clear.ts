@@ -1,3 +1,4 @@
+import { eq, isNotNull } from "drizzle-orm";
 import { db } from "./index";
 import { auctionExpenses, auctionVehicles } from "./schema/auctionVehicles";
 import {
@@ -19,15 +20,17 @@ import {
 	salesStages,
 } from "./schema/crm";
 import { licenseQrVerifications } from "./schema/license-verification";
+import { opportunityAgencySellers, partnerMembers } from "./schema/partners";
 import {
 	inspectionChecklistItems,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
+	vehicleVendors,
 } from "./schema/vehicles";
 
 async function clearAllCRMData() {
-	console.log("🗑️ Clearing all CRM data...");
+	console.log("🗑 Clearing all CRM data...");
 
 	try {
 		// Delete cobros data first (most dependent)
@@ -91,6 +94,15 @@ async function clearAllCRMData() {
 
 		await db.delete(leads);
 		console.log("✅ Leads cleared");
+
+		// Los vendedores de agencia apuntan a su company (FK restrict): primero
+		// lo que los referencia y después ellos.
+		await db.delete(opportunityAgencySellers);
+		await db.delete(partnerMembers).where(isNotNull(partnerMembers.sellerId));
+		await db
+			.delete(vehicleVendors)
+			.where(eq(vehicleVendors.vendorType, "agencia"));
+		console.log("✅ Agency sellers cleared");
 
 		await db.delete(companies);
 		console.log("✅ Companies cleared");

@@ -71,6 +71,7 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
+import { recalcularMontosInversionista } from "./restitucionCapitalPorAnulacionPolicy";
 import { resolverModosEfectivosLiquidacion } from "./purchaseClassification";
 import type { ModalidadFacturacion } from "./modalidadFacturacion";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
@@ -1621,36 +1622,20 @@ export async function processAndReplaceCreditInvestors(
     const porcentajeInversion = new Big(
       inv.porcentaje_participacion_inversionista
     );
-    const cuota = montoAportado
-      .times(credit.porcentaje_interes)
-      .div(100)
-      .round(2);
-
-    // Proportional amounts
-    const montoInversionista = cuota
-      .times(porcentajeInversion)
-      .div(100)
-      .round(2);
-    const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
-
-    // IVAs
-    const ivaInversionista = montoInversionista.gt(0)
-      ? montoInversionista.times(0.12).round(2)
-      : new Big(0);
-    const ivaCashIn = montoCashIn.gt(0)
-      ? montoCashIn.times(0.12).round(2)
-      : new Big(0);
+    // Misma fórmula que repone la anulación de un pago validado (restitucionCapitalPorAnulacionPolicy).
+    const montos = recalcularMontosInversionista({
+      montoAportado,
+      porcentajeInversion,
+      porcentajeCashIn,
+      porcentajeInteres: credit.porcentaje_interes,
+    });
 
     return {
       ...inv, // trae el id necesario para el update
       credito_id,
-      monto_aportado: montoAportado.toFixed(8),
+      ...montos,
       porcentaje_cash_in: porcentajeCashIn.toString(),
       porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toFixed(2),
-      monto_cash_in: montoCashIn.toFixed(2),
-      iva_inversionista: ivaInversionista.toFixed(2),
-      iva_cash_in: ivaCashIn.toFixed(2),
       fecha_creacion: new Date(),
       cuota_inversionista: inv.cuota_inversionista,
     };

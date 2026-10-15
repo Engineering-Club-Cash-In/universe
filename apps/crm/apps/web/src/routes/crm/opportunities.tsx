@@ -53,7 +53,12 @@ import { z } from "zod";
 import { BuroSummaryCard } from "@/components/buro-summary-card";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import {
+	type AseguradoraConfirmada,
+	useConfirmarEnvioFactura,
+} from "@/components/confirmar-envio-factura";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
+import { ReintentoFacturaSeguro } from "@/components/reintento-factura-seguro";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -72,6 +77,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { OpportunityAgencySellerCard } from "@/components/contract-parties/OpportunityAgencySellerCard";
 import { OpportunityContractPartyCard } from "@/components/contract-parties/OpportunityContractPartyCard";
 import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
@@ -108,6 +114,12 @@ import {
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import {
+	avisoFacturaSubida,
+	etiquetaEnvioAseguradora,
+	type ResultadoFacturaSubida,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
+import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
@@ -123,6 +135,7 @@ import {
 	getManualOpportunityDocumentFields,
 	type ManualOpportunityDocumentType,
 } from "@/lib/manual-opportunity-document";
+import { formatearTamanoArchivo } from "@/lib/tamano-archivo";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
@@ -974,6 +987,12 @@ function RouteComponent() {
 
 	const vendorsQuery = useQuery({
 		...orpc.getVendors.queryOptions(),
+		// Un vendedor de agencia nunca es el vendedor legal del contrato, y es
+		// el único que puede no tener DPI.
+		select: (vendors) =>
+			vendors
+				.filter((v) => v.vendorType !== "agencia")
+				.map((v) => ({ ...v, dpi: v.dpi ?? "" })),
 	});
 
 	const canFilterBySalesperson =
@@ -1489,6 +1508,10 @@ function RouteComponent() {
 			companyId?: string | null;
 		}) => client.setOpportunityContractParty(input),
 		onSuccess: async () => {
+			// Cambiar la agencia puede quitar al vendedor de agencia asignado
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityAgencySeller.key(),
+			});
 			const frescas = await client.getOpportunities();
 			const actualizada = frescas.find(
 				(opp) => opp.id === selectedOpportunity?.id,
@@ -2603,6 +2626,14 @@ function RouteComponent() {
 												</span>
 											</div>
 										</div>
+									)}
+
+									{selectedOpportunity.company?.id && (
+										<OpportunityAgencySellerCard
+											opportunityId={selectedOpportunity.id}
+											companyId={selectedOpportunity.company.id}
+											disabled={!puedeEditarPartesContrato}
+										/>
 									)}
 
 									{/* Expected Close Date */}
@@ -4225,6 +4256,7 @@ function DocumentsManager({
 	// Upload a single document with a specific type
 	const uploadSingleDocument = async (
 		docType: ManualOpportunityDocumentType | "",
+		envioFacturaConfirmado: AseguradoraConfirmada = null,
 	) => {
 		if (!selectedFile || !docType) return;
 
@@ -4242,12 +4274,13 @@ function DocumentsManager({
 				size: selectedFile.size,
 				key,
 			},
+			envioFacturaConfirmado,
 		});
 	};
 
 	// Upload mutation
 	const uploadMutation = useMutation({
-		mutationFn: async () => {
+		mutationFn: async (envioFacturaConfirmado?: AseguradoraConfirmada) => {
 			if (
 				includeAll3Months &&
 				["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
@@ -4267,10 +4300,15 @@ function DocumentsManager({
 				}
 				return;
 			}
-			return uploadSingleDocument(documentType);
+			return uploadSingleDocument(documentType, envioFacturaConfirmado);
 		},
-		onSuccess: () => {
-			toast.success("Documento subido exitosamente");
+		onSuccess: (data) => {
+			const aviso = avisoFacturaSubida(
+				(data as { facturaSeguro?: ResultadoFacturaSubida | null } | undefined)
+					?.facturaSeguro,
+			);
+			if (aviso) toast[aviso.tipo](aviso.texto);
+			else toast.success("Documento subido exitosamente");
 			setSelectedFile(null);
 			setDescription("");
 			setDocumentType("");
@@ -4295,6 +4333,8 @@ function DocumentsManager({
 			toast.error(error.message || "Error al subir el documento");
 		},
 	});
+
+	const confirmacionFactura = useConfirmarEnvioFactura(opportunityId);
 
 	// Delete mutation
 	const deleteMutation = useMutation({
@@ -4455,6 +4495,7 @@ function DocumentsManager({
 		{ value: "multas_vehiculo", label: "Multas del Vehículo" },
 		// === Documentos Etapa 90% (Cierre) ===
 		{ value: "seguro_vehiculo", label: "Seguro del Vehículo" },
+		{ value: "factura_vehiculo", label: "Factura del Vehículo" },
 		{
 			value: "inscripcion_garantia_mobiliaria",
 			label: "Inscripción Garantía Mobiliaria",
@@ -4760,6 +4801,7 @@ function DocumentsManager({
 							placeholder="Buscar tipo de documento..."
 							width="full"
 							isInModal={true}
+							disabled={confirmacionFactura.revisando}
 						/>
 					</div>
 
@@ -4831,6 +4873,7 @@ function DocumentsManager({
 							type="file"
 							onChange={handleFileSelect}
 							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+							disabled={confirmacionFactura.revisando}
 						/>
 						<p className="text-muted-foreground text-xs">
 							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX, XLS, XLSX.
@@ -4850,6 +4893,7 @@ function DocumentsManager({
 							<Button
 								size="sm"
 								variant="ghost"
+								disabled={confirmacionFactura.revisando}
 								onClick={() => {
 									setSelectedFile(null);
 									if (fileInputRef.current) {
@@ -4868,12 +4912,22 @@ function DocumentsManager({
 							!selectedFile ||
 							!documentType ||
 							uploadMutation.isPending ||
+							confirmacionFactura.revisando ||
 							(documentType === "other" && !description.trim())
 						}
-						onClick={() => uploadMutation.mutate()}
+						onClick={() => {
+							if (documentType === "factura_vehiculo") {
+								void confirmacionFactura.confirmarSiSeEnvia((confirmada) =>
+									uploadMutation.mutate(confirmada),
+								);
+								return;
+							}
+							uploadMutation.mutate(null);
+						}}
 					>
 						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}
 					</Button>
+					{confirmacionFactura.dialogo}
 				</CardContent>
 			</Card>
 
@@ -4946,23 +5000,38 @@ function DocumentsManager({
 													</Badge>
 												);
 											})()}
+										{(() => {
+											const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+											return (
+												envio && (
+													<Badge className={`flex-shrink-0 text-xs ${envio.className}`}>
+														{envio.texto}
+													</Badge>
+												)
+											);
+										})()}
 									</div>
 											{doc.description && (
 												<p className="mt-1 text-muted-foreground text-xs">
 													{doc.description}
 												</p>
 											)}
-											<div className="mt-1 flex items-center gap-4 text-muted-foreground text-xs">
-												<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-												<span>
-													Subido por{" "}
-													{doc.uploadedBy?.name || "Usuario desconocido"}
-												</span>
-												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
+											<div className="mt-1 space-y-0.5 text-muted-foreground text-xs">
+												<p>{textoSubidoPor(doc)}</p>
+												<p>
+													{formatGuatemalaDateTime(doc.uploadedAt)} ·{" "}
+													{formatearTamanoArchivo(doc.size)}
+												</p>
 											</div>
 										</div>
 									</div>
 								<div className="flex flex-shrink-0 items-center gap-2">
+									<ReintentoFacturaSeguro
+										opportunityId={opportunityId}
+										disponible={doc.envioAseguradora?.reintentoDisponible}
+										aseguradora={doc.envioAseguradora?.aseguradora}
+										reintentoDesde={doc.envioAseguradora?.reintentoDesde}
+									/>
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&
 										integrityStatusResolved &&

@@ -39,6 +39,8 @@
 
 		{ "key": "SIFCO_DB_URL", "runtime": true },
 
-		{ "key": "SUPABASE_DB_URL", "runtime": true }
+		{ "key": "SUPABASE_DB_URL", "runtime": true },
+
+		{ "key": "URL_PUBLIC_R2", "runtime": true }
 	]
 }

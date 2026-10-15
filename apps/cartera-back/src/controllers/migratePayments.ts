@@ -1,11 +1,12 @@
 import Big from "big.js";
-import { eq, and, gt, asc, inArray, lte } from "drizzle-orm";
+import { eq, and, gt, asc, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
+import { borrandoComprobantesNexaTrasCommit, urlsDeBoletasBorradas } from "./nexaBoletaR2";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -102,7 +103,7 @@ export const ajustarCuotasConSIFCO = async ({
   };
 
 
-  await db.transaction(async (tx) => {
+  await borrandoComprobantesNexaTrasCommit((urlsBoletas) => db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
     const cuotasExcedentes = cuotasExistentes.filter(
       (c) => c.numero_cuota > plazo_completo
@@ -111,6 +112,20 @@ export const ajustarCuotasConSIFCO = async ({
     if (cuotasExcedentes.length > 0) {
       const cuotaIdsExcedentes = cuotasExcedentes.map(c => c.cuota_id);
 
+      // La boleta-imagen de un pago Nexa (nexaBoletaImagen.ts) referencia el pago sin ON
+      // DELETE: se borra antes. Las boletas de pagos manuales no se tocan. El FOR UPDATE frena
+      // a un registro de boleta concurrente (ver borrarPagosDelCredito en fallenCredits.ts).
+      const cuotasNexa = sql.join(cuotaIdsExcedentes.map((id) => sql`${id}`), sql`, `);
+      await tx.execute(sql`
+        SELECT pago_id FROM cartera.pagos_credito
+        WHERE cuota_id IN (${cuotasNexa}) AND nexa_payment_event_id IS NOT NULL
+        ORDER BY pago_id FOR UPDATE`);
+      urlsBoletas.push(...urlsDeBoletasBorradas(await tx.execute(sql`
+        DELETE FROM cartera.boletas
+        WHERE pago_id IN (SELECT pago_id FROM cartera.pagos_credito
+                           WHERE cuota_id IN (${cuotasNexa})
+                             AND nexa_payment_event_id IS NOT NULL)
+        RETURNING url_boleta`)));
       await tx
         .delete(pagos_credito)
         .where(inArray(pagos_credito.cuota_id, cuotaIdsExcedentes));
@@ -236,7 +251,7 @@ export const ajustarCuotasConSIFCO = async ({
       })
     );
 
-  });
+  }));
 
   emitSifcoPaymentMigration({
     outcome: "completed",

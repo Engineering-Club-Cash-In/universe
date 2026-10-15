@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import postgres from "postgres";
 import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 
@@ -20,6 +20,8 @@ const setup = async () => {
   await sql`CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, credito_id integer, cuota_id integer,
     monto_boleta numeric(18,2))`;
   // Las migraciones reales: nexa_payment_events (con la FK de pago_id sin ON DELETE) y pago_id_eliminado.
+  await sql`CREATE TABLE cartera.boletas (id serial PRIMARY KEY,
+    pago_id integer NOT NULL REFERENCES cartera.pagos_credito (pago_id), url_boleta varchar(255) NOT NULL)`;
   await sql.unsafe(await migracion("0039_add_nexa_internal_payments.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
   await sql.unsafe(await migracion("0050_nexa_evento_pago_eliminado.sql")).simple();
@@ -73,6 +75,53 @@ integrationTest("borrarPagosDelCredito: desvincula los eventos Nexa, borra los p
   // Sin cuota 0: se borran todos los pagos del crédito y el evento restante también se desvincula.
   expect(await db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined))).toBe(1);
   expect((await sql`SELECT pago_id FROM cartera.pagos_credito WHERE credito_id = 1`).length).toBe(0);
+  await sql.end();
+});
+
+integrationTest("borrarPagosDelCredito: borra la boleta-imagen del pago Nexa antes que el pago (la FK no tiene ON DELETE)", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  const [nexa] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, nexa!.pago_id, "applied");
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${nexa!.pago_id}, 'https://r2/boletas-nexa/x.png')`;
+
+  await db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined));
+
+  expect((await sql`SELECT pago_id FROM cartera.pagos_credito`).length).toBe(0);
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
+
+  // La boleta de un pago manual no se toca: el DELETE sigue fallando por la FK, como antes.
+  const [manual] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${manual!.pago_id}, 'manual.png')`;
+  await expect(db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined))).rejects.toThrow();
+  expect((await sql`SELECT pago_id FROM cartera.boletas`).map((b) => b.pago_id)).toEqual([manual!.pago_id]);
+  await sql.end();
+});
+
+integrationTest("borrarPagosDelCredito: una boleta-imagen que se registra en paralelo no tumba el borrado", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  const [nexa] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta)
+    VALUES (1, 11, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, nexa!.pago_id, "billing_pending");
+
+  // El registro (otra conexión) ya insertó la boleta pero todavía no commitea.
+  const registro = await sql.reserve();
+  await registro`BEGIN`;
+  await registro`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${nexa!.pago_id}, 'https://r2/boletas-nexa/x.png')`;
+  const borrado = db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined));
+  await new Promise((r) => setTimeout(r, 300));
+  await registro`COMMIT`;
+  registro.release();
+
+  // Sin el FOR UPDATE el DELETE de boletas no la veía y el de pagos reventaba con 23503.
+  await borrado;
+  expect((await sql`SELECT pago_id FROM cartera.pagos_credito`).length).toBe(0);
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
   await sql.end();
 });
 
@@ -335,5 +384,84 @@ integrationTest("la guarda de no reversible deja anular las filas de un evento f
   const [evApplied] = await sql`SELECT nexa_payment_event_id AS id FROM cartera.pagos_credito WHERE pago_id = ${porStatus.applied!}`;
   expect(await db.transaction((tx) => pagoNexaBloqueaAnular(tx, evFailed!.id))).toBe(false);
   expect(await db.transaction((tx) => pagoNexaBloqueaAnular(tx, evApplied!.id))).toBe(true);
+  await sql.end();
+});
+
+// El comprobante PNG se borra de R2 recién después del commit, y solo en producción. R2 es un spy.
+const urlR2 = "https://r2/boletas-nexa/0f8b7c1e-2a3d-4e5f-8a9b-0c1d2e3f4a5b.png";
+const conR2Falso = async <T>(trabajo: (borradas: unknown[]) => Promise<T>) => {
+  const config = (await import("../config")).default;
+  const { s3 } = await import("../utils/functions/uploadsFiles");
+  const borradas: unknown[] = [];
+  const send = spyOn(s3, "send").mockImplementation((async (c: { input: { Key: string } }) => {
+    borradas.push(c.input.Key);
+  }) as never);
+  const antes = config.environment;
+  config.environment = "production";
+  try {
+    return await trabajo(borradas);
+  } finally {
+    config.environment = antes;
+    send.mockRestore();
+  }
+};
+const pagoNexaConBoleta = async (sql: postgres.Sql, cuota: number) => {
+  const [p] = await sql`INSERT INTO cartera.pagos_credito (credito_id, cuota_id, monto_boleta) VALUES (1, ${cuota}, 100) RETURNING pago_id`;
+  await insertarEvento(sql, 1, p!.pago_id, "applied");
+  // Desvinculado: si el evento apunta al pago, credits y migratePayments siguen frenados por esa FK.
+  await sql`UPDATE cartera.nexa_payment_events SET pago_id = NULL`;
+  await sql`INSERT INTO cartera.boletas (pago_id, url_boleta) VALUES (${p!.pago_id}, ${urlR2})`;
+};
+
+integrationTest("borrarPagosDelCredito devuelve la URL del comprobante; R2 lo borra tras el commit y nunca tras un rollback", async () => {
+  const { sql, db, borrarPagosDelCredito } = await setup();
+  const { borrandoComprobantesNexaTrasCommit } = await import("./nexaBoletaR2");
+  await sql`INSERT INTO cartera.creditos VALUES (1)`;
+  await sql`INSERT INTO cartera.cuotas_credito VALUES (11, 1, 1)`;
+  await pagoNexaConBoleta(sql, 11);
+  await conR2Falso(async (borradas) => {
+    await expect(borrandoComprobantesNexaTrasCommit((urls) => db.transaction(async (tx) => {
+      await borrarPagosDelCredito(tx, 1, undefined, urls);
+      expect(urls).toEqual([urlR2]);
+      throw new Error("rollback");
+    }))).rejects.toThrow("rollback");
+    await Bun.sleep(20);
+    expect(borradas).toEqual([]);
+    expect((await sql`SELECT url_boleta FROM cartera.boletas`).length).toBe(1);
+
+    await borrandoComprobantesNexaTrasCommit((urls) => db.transaction((tx) => borrarPagosDelCredito(tx, 1, undefined, urls)));
+    await Bun.sleep(20);
+    expect(borradas).toEqual([urlR2.slice(urlR2.indexOf("boletas-nexa/"))]);
+  });
+  await sql.end();
+});
+
+integrationTest("reducir el plazo (credits) y ajustar con SIFCO (migratePayments) borran de R2 el comprobante del pago Nexa", async () => {
+  const { sql } = await setup();
+  process.env.RESEND_API_KEY ??= "re_test_only";
+  process.env.EMAIL_DOMAIN ??= "example.test";
+  const { syncScheduleOnTermsChange } = await import("./credits");
+  const { ajustarCuotasConSIFCO } = await import("./migratePayments");
+  await sql`ALTER TABLE cartera.creditos ADD plazo integer, ADD cuota numeric, ADD cuota_interes numeric,
+    ADD numero_credito_sifco varchar(40)`;
+  await sql`ALTER TABLE cartera.cuotas_credito ADD fecha_vencimiento date, ADD pagado boolean DEFAULT false,
+    ADD liquidado_inversionistas boolean DEFAULT false, ADD fecha_liquidacion_inversionistas timestamp, ADD createdat timestamp`;
+  await sql`ALTER TABLE cartera.pagos_credito ADD fecha_vencimiento date`;
+  await sql`INSERT INTO cartera.creditos VALUES (1, 3, 100, 10, '0101')`;
+  await sql`INSERT INTO cartera.cuotas_credito (cuota_id, credito_id, numero_cuota, fecha_vencimiento)
+    VALUES (11, 1, 1, '2026-01-30'), (12, 1, 2, '2026-02-28'), (13, 1, 3, '2026-03-30')`;
+  await pagoNexaConBoleta(sql, 13);
+  await pagoNexaConBoleta(sql, 12);
+  const key = urlR2.slice(urlR2.indexOf("boletas-nexa/"));
+
+  await conR2Falso(async (borradas) => {
+    await syncScheduleOnTermsChange({ creditoId: 1, newCuota: 100, newPlazo: 2, preloadCredit: { cuota: 100, plazo: 3 } as never });
+    await Bun.sleep(20);
+    expect(borradas).toEqual([key]);
+    await ajustarCuotasConSIFCO({ numero_credito_sifco: "0101", cuota_esperada: 1, fecha_cuota: "2026-01-30", plazo_completo: 1 });
+    await Bun.sleep(20);
+    expect(borradas).toEqual([key, key]);
+  });
+  expect((await sql`SELECT id FROM cartera.boletas`).length).toBe(0);
   await sql.end();
 });

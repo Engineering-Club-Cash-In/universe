@@ -316,6 +316,27 @@
 			"when": 1791561600000,
 			"tag": "0050_co_debtors_representante_legal",
 			"breakpoints": true
+		},
+		{
+			"idx": 44,
+			"version": "7",
+			"when": 1791561700000,
+			"tag": "0051_add_agency_sellers",
+			"breakpoints": true
+		},
+		{
+			"idx": 45,
+			"version": "7",
+			"when": 1791561800000,
+			"tag": "0052_insurance_invoice_submissions",
+			"breakpoints": true
+		},
+		{
+			"idx": 46,
+			"version": "7",
+			"when": 1791561900000,
+			"tag": "0053_add_factura_vehiculo_document_type",
+			"breakpoints": true
 		}
 	]
 }

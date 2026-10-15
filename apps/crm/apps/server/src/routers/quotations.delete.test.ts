@@ -11,6 +11,7 @@ type Row = Record<string, unknown>;
 const rows = new Map<unknown, Row[]>();
 const borradas: unknown[] = [];
 const bloqueadas: unknown[] = [];
+const eventos: string[] = [];
 
 function select() {
 	let tabla: unknown;
@@ -23,6 +24,7 @@ function select() {
 		limit: () => builder,
 		for: (modo: string) => {
 			bloqueadas.push({ tabla, modo });
+			eventos.push(`for ${modo}`);
 			return builder;
 		},
 		// biome-ignore lint/suspicious/noThenProperty: los builders de Drizzle son thenables.
@@ -34,9 +36,14 @@ function select() {
 
 const fakeDb = {
 	select,
+	execute: async () => {
+		eventos.push("candado");
+		return [];
+	},
 	delete: (tabla: unknown) => ({
 		where: async () => {
 			borradas.push(tabla);
+			eventos.push("delete");
 		},
 	}),
 	transaction: async <T>(operacion: (tx: unknown) => Promise<T>) =>
@@ -65,6 +72,7 @@ beforeEach(() => {
 	rows.clear();
 	borradas.length = 0;
 	bloqueadas.length = 0;
+	eventos.length = 0;
 	rows.set(quotations, [
 		{ id: QUOTATION_ID, opportunityId: OPPORTUNITY_ID, salesUserId: "admin-1" },
 	]);
@@ -93,12 +101,18 @@ describe("deleteQuotation", () => {
 		expect(bloqueadas).toEqual([{ tabla: opportunities, modo: "share" }]);
 	});
 
+	test("toma el candado de la confirmación de contratos antes de decidir", async () => {
+		await borrar();
+		expect(eventos).toEqual(["candado", "for share", "delete"]);
+	});
+
 	test("una cotización sin oportunidad se sigue pudiendo borrar", async () => {
 		rows.set(quotations, [
 			{ id: QUOTATION_ID, opportunityId: null, salesUserId: "admin-1" },
 		]);
 		expect(await borrar()).toEqual({ success: true });
 		expect(borradas).toEqual([quotations]);
+		expect(eventos).not.toContain("candado");
 	});
 
 	test("un asesor no borra la cotización de otro (como antes)", async () => {

@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -10,6 +10,7 @@ import {
 	quotations,
 	vehicles,
 } from "../db/schema";
+import { claveDeFirma } from "../lib/contratos-candado";
 import { buildServerInsurancePersistence } from "../lib/insurance-selection";
 import { crmProcedure } from "../lib/orpc";
 import { calculateMonthlyPayment } from "../lib/quotation-calculations";
@@ -524,9 +525,16 @@ export const quotationsRouter = {
 				});
 			}
 
-			// La oportunidad se bloquea para que un cierre en curso termine antes de
-			// decidir: si gana, ya no se borra.
+			// Toma el mismo candado que la confirmación de contratos
+			// (conCandadoDeFirma), que lo sostiene durante todo el cierre: un borrado
+			// que llega en medio espera a que termine y, si la oportunidad quedó
+			// ganada, ya no borra.
 			await db.transaction(async (tx) => {
+				if (existing.opportunityId) {
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(${claveDeFirma(existing.opportunityId)})`,
+					);
+				}
 				const [oportunidad] = existing.opportunityId
 					? await tx
 							.select({ status: opportunities.status })

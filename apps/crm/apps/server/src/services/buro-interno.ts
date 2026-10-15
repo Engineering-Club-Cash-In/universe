@@ -1072,6 +1072,8 @@ async function cargarCreditosCarteraCompletos(): Promise<CreditoBuroInterno[]> {
 async function registrarCoincidenciasCartera(
 	candidatos: CandidatoBuroInterno[],
 ) {
+	await db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
 	const creditos = await cargarCreditosCarteraCompletos();
 	type LeadCartera = {
 		id: string;
@@ -1120,7 +1122,7 @@ async function registrarCoincidenciasCartera(
 		),
 	];
 	if (sifcosParaEnriquecer.length > 0) {
-		const leadsRelacionados = await db
+		const leadsRelacionados = await tx
 			.select({
 				sifcoDirecto: opportunities.numeroSifco,
 				sifcoReferencia: carteraBackReferences.numeroCreditoSifco,
@@ -1226,8 +1228,6 @@ async function registrarCoincidenciasCartera(
 			grupo.lead = origen.lead;
 		}
 	}
-	await db.transaction(async (tx) => {
-		await tomarCandadoBuroInterno(tx);
 		const fuentesAutomaticas = await tx
 			.select({
 				persona: buroInternoPersonas,
@@ -1896,9 +1896,9 @@ async function cargarAutorizaciones(
 }
 
 /**
- * Foto de todo lo que entra en una evaluación: el catálogo activo, las reglas
- * de coincidencia y la gente de la solicitud (lead, sus datos de RENAP,
- * codeudores y referencias).
+ * Foto de todo lo que entra en una evaluación: el catálogo activo, sus fuentes
+ * de Cartera, las reglas de coincidencia y la gente de la solicitud (lead, sus
+ * datos de RENAP, codeudores y referencias).
  *
  * El gate de aprobación compara esta misma expresión dentro del UPDATE que
  * aprueba: si algo de eso cambió entre la revisión y la escritura —cobros
@@ -1927,6 +1927,7 @@ export function huellaEvaluacionSql(
 
 	return sql`concat_ws('|',
 		${foto("public.buro_interno_personas", sql`activo`)},
+		${foto("public.buro_interno_fuentes_cartera")},
 		${foto("public.buro_interno_reglas")},
 		${foto("public.co_debtors", sql`opportunity_id = ${opportunityIdExpr}`)},
 		${foto("public.referencias_lead", sql`lead_id = ${leadIdExpr}`)},

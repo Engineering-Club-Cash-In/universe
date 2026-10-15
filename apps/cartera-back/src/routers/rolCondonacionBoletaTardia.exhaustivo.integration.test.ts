@@ -152,7 +152,10 @@ describe("router real + platform_users real", () => {
     const { s3 } = await import("../utils/functions/uploadsFiles");
     const r2 = spyOn(s3, "send");
     const r2Rechaza = () => r2.mockImplementation((async () => { throw Object.assign(new Error("R2 caído"), { name: "Error" }); }) as never);
-    const r2Aprueba = () => r2.mockImplementation((async () => ({ ContentLength: 1234, ContentType: "image/jpeg", LastModified: new Date() })) as never);
+    // HEAD: metadatos buenos; GET de los primeros bytes: firma JPEG.
+    const r2Aprueba = () => r2.mockImplementation((async (cmd: { input: { Range?: string } }) => (cmd.input.Range
+      ? { Body: { transformToByteArray: async () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]) } }
+      : { ContentLength: 1234, ContentType: "image/jpeg", LastModified: new Date() })) as never);
     try {
       let pendiente: Promise<{ status: number; texto: string }> | undefined;
       let soltar!: () => void;

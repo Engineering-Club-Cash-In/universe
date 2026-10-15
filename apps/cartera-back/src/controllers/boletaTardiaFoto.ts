@@ -1,4 +1,4 @@
-import { HeadObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import { boletas, pagos_credito } from "../database/db";
@@ -9,14 +9,17 @@ import { boletas, pagos_credito } from "../database/db";
  */
 export type MetadatosFoto = { ContentLength?: number; ContentType?: string; LastModified?: Date };
 export type HeadFoto = (llave: string, signal: AbortSignal) => Promise<MetadatosFoto>;
+/** Primeros bytes del objeto (hasta `BYTES_FIRMA`): el `ContentType` lo declara quien sube, el contenido no miente. */
+export type InicioFoto = (llave: string, signal: AbortSignal) => Promise<Uint8Array>;
 export type DepsFotoBoleta = {
   head: HeadFoto;
+  inicio: InicioFoto;
   /** Llaves (de `llaves`) que ya cuelgan de OTRO pago vivo, sin contar las filas del mismo crédito con el mismo intento. */
   llavesYaUsadas: (credito_id: number, intento_id: string, llaves: string[], signal: AbortSignal) => Promise<string[]>;
   ahora?: () => Date;
   timeoutMs?: number;
 };
-export type MotivoFoto = "no_existe" | "vacia" | "tipo_invalido" | "vieja" | "reusada" | "error_r2" | "timeout" | "error_base" | "demasiadas";
+export type MotivoFoto = "no_existe" | "vacia" | "tipo_invalido" | "contenido_invalido" | "vieja" | "reusada" | "error_r2" | "timeout" | "error_base" | "demasiadas";
 /** `detalle` va al log estructurado (nunca al cliente): solo metadatos del objeto o `name`/status del error; jamás mensajes de error, credenciales ni URLs. */
 export type RechazoFoto = { status: 400 | 503; message: string; motivo: MotivoFoto; llave?: string; detalle?: Record<string, unknown> };
 
@@ -43,6 +46,17 @@ const detalleError = (e: unknown) => ({ error_name: (e as ErrorSdk)?.name ?? nul
 const EXTENSION_ADMITIDA = /\.(jpe?g|png|pdf)$/i;
 const tipoAdmitido = (tipo: string, llave: string) =>
   tipo.startsWith("image/") || tipo === "application/pdf" || ((tipo === "" || tipo === "application/octet-stream") && EXTENSION_ADMITIDA.test(llave));
+
+export const BYTES_FIRMA = 1024;
+const empiezaCon = (b: Uint8Array, firma: number[]) => firma.every((x, i) => b[i] === x);
+const PDF = [...Buffer.from("%PDF-", "latin1")];
+/**
+ * JPEG (FF D8 FF), PNG (89 50 4E 47 0D 0A 1A 0A) o PDF (`%PDF-`) en el byte 0. La norma admite basura antes de `%PDF-`:
+ * más adentro del primer KB solo vale si además se declaró `application/pdf` (si no, un texto con "%PDF-" en el medio pasaría).
+ */
+const firmaAdmitida = (b: Uint8Array, tipo: string) =>
+  empiezaCon(b, [0xff, 0xd8, 0xff]) || empiezaCon(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) || empiezaCon(b, PDF) ||
+  (tipo === "application/pdf" && b.subarray(0, BYTES_FIRMA).some((_x, i) => empiezaCon(b.subarray(i), PDF)));
 
 const problemaDeLaFoto = (m: MetadatosFoto, llave: string, ahora: Date): RechazoFoto | null => {
   const detalle = { content_type: m.ContentType ?? null, content_length: m.ContentLength ?? null, last_modified: m.LastModified instanceof Date ? m.LastModified.toISOString() : null };
@@ -82,7 +96,11 @@ export async function verificarFotoBoleta(
   const resultados = await Promise.all(llaves.map(async (llave): Promise<RechazoFoto | null> => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {
-      return problemaDeLaFoto(await deps.head(llave, signal), llave, ahora);
+      const metadatos = await deps.head(llave, signal);
+      const problema = problemaDeLaFoto(metadatos, llave, ahora);
+      // Solo después del HEAD (un objeto vacío nunca llega al GET con Range, que daría 416) y con la MISMA señal: comparten el tope.
+      if (problema || firmaAdmitida(await deps.inicio(llave, signal), (metadatos.ContentType ?? "").toLowerCase())) return problema;
+      return rechazo("contenido_invalido", MENSAJE_FORMATO, llave, { content_type: metadatos.ContentType ?? null, content_length: metadatos.ContentLength ?? null });
     } catch (error) {
       if (noExiste(error)) return rechazo("no_existe", `La foto de la boleta no se encontró en el servidor. ${SUBIR_DE_NUEVO}`, llave, detalleError(error));
       return noVerificada(signal.aborted ? "timeout" : "error_r2", llave, detalleError(error));
@@ -96,6 +114,13 @@ const headReal: HeadFoto = async (llave, signal) => {
   // Mismo cliente S3/R2 que la subida (`POST /upload`): misma config y misma Key (la llave tal cual, sin prefijo propio).
   const { s3 } = await import("../utils/functions/uploadsFiles");
   return s3.send(new HeadObjectCommand({ Bucket: process.env.R2_BUCKET, Key: llave }), { abortSignal: signal });
+};
+
+const inicioReal: InicioFoto = async (llave, signal) => {
+  const { s3 } = await import("../utils/functions/uploadsFiles");
+  const r = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET, Key: llave, Range: `bytes=0-${BYTES_FIRMA - 1}` }), { abortSignal: signal });
+  if (!r.Body) throw Object.assign(new Error("GET sin cuerpo"), { name: "SinCuerpo" });
+  return r.Body.transformToByteArray();
 };
 
 /** `boletas.url_boleta` guarda `URL_PUBLIC_R2 + llave`; se acepta también la llave sola por si alguna fila vieja la trae así. */
@@ -117,4 +142,4 @@ const llavesYaUsadasReal: DepsFotoBoleta["llavesYaUsadas"] = async (credito_id, 
   return llaves.filter((l) => filas.some((f) => f.url === l || f.url === `${base}${l}`));
 };
 
-export const depsFotoReales = (): DepsFotoBoleta => ({ head: headReal, llavesYaUsadas: llavesYaUsadasReal });
+export const depsFotoReales = (): DepsFotoBoleta => ({ head: headReal, inicio: inicioReal, llavesYaUsadas: llavesYaUsadasReal });

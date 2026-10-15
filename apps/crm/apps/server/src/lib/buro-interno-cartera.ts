@@ -117,8 +117,12 @@ const PREFIJO_PROBLEMAS_NEGADOS =
 	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
 	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|hay|existe(?:n)?|presenta|presento|cuenta\s+con))?)\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?)\s+(?:en|de)\s+$/;
-const PREFIJO_ESTADO_EN_NEGADO =
-	/(?:^|\s)(?:no(?:\s+(?:se\s+)?)?(?:esta|estan|estuvo|estuvieron|estaba|estaban)|nunca\s+(?:esta|estan|estuvo|estuvieron|estaba|estaban))\s+en\s+$/;
+// "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
+const VERBO_ESTADO_EN =
+	/(?:esta|estan|estuvo|estuvieron|estaba|estaban|incurr(?:e|en|io|ieron|ido)|cae|caen|cay(?:o|eron)|caido|entr(?:a|an|o|aron|ado)|ha(?:n)?\s+(?:estado|caido|incurrido|entrado))/;
+const PREFIJO_ESTADO_EN_NEGADO = new RegExp(
+	`(?:^|\\s)(?:no(?:\\s+se)?|nunca)\\s+${VERBO_ESTADO_EN.source}\\s+en\\s+$`,
+);
 // "0 cuotas en mora", "cero cuotas atrasadas", "ninguna cuota en mora":
 // una cantidad cero informa que no hubo atraso.
 const PREFIJO_CANTIDAD_CERO =

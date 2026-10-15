@@ -15,6 +15,8 @@ import {
 	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
 	personaGuardadaFiguraEnCliente,
+	reintentarSinTurno,
+	SinTurnoBuroInternoError,
 	usuariosParaSincronizacionAutomatica,
 } from "./buro-interno-automatico";
 
@@ -389,5 +391,59 @@ describe("crearColaSerial", () => {
 		const p2 = cola(async () => 42);
 		await expect(p1).rejects.toThrow();
 		expect(await p2).toBe(42);
+	});
+});
+
+describe("reintentarSinTurno", () => {
+	const reloj = () => {
+		let t = 0;
+		return {
+			ahora: () => t,
+			esperar: async (ms: number) => {
+				t += ms;
+			},
+		};
+	};
+
+	test("reintenta hasta obtener turno", async () => {
+		const { ahora, esperar } = reloj();
+		let llamadas = 0;
+		const resultado = await reintentarSinTurno(
+			async () => {
+				llamadas += 1;
+				if (llamadas < 3) throw new SinTurnoBuroInternoError();
+				return "ok";
+			},
+			{ ahora, esperar },
+		);
+		expect(resultado).toBe("ok");
+		expect(llamadas).toBe(3);
+	});
+
+	test("propaga otros errores sin reintentar", async () => {
+		const { ahora, esperar } = reloj();
+		let llamadas = 0;
+		await expect(
+			reintentarSinTurno(
+				async () => {
+					llamadas += 1;
+					throw new Error("x");
+				},
+				{ ahora, esperar },
+			),
+		).rejects.toThrow("x");
+		expect(llamadas).toBe(1);
+	});
+
+	test("falla tras el tiempo máximo", async () => {
+		const { ahora, esperar } = reloj();
+		await expect(
+			reintentarSinTurno(
+				async () => {
+					throw new SinTurnoBuroInternoError();
+				},
+				{ maxMs: 1_000, ahora, esperar },
+			),
+		).rejects.toThrow("ocupado");
 	});
 });

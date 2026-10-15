@@ -6,9 +6,9 @@ import { db } from "../database";
 import { moras_condonaciones, pagos_credito } from "../database/db";
 import { validarFechaBoleta, ymdDeFechaCalendario } from "../utils/fechaCalendarioGT";
 import { motivoCondonacionBoletaTardia } from "../utils/motivoCondonacionBoletaTardia";
-import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { tryWithBoletaLlavesLock, withPaymentAdvisoryLock, type PaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { calcularDecisionBoletaTardia } from "./boletaTardiaDecision";
-import { depsFotoReales, verificarFotoBoleta, type RechazoFoto } from "./boletaTardiaFoto";
+import { depsFotoReales, rechazoPorReuso, verificarFotoBoleta, type RechazoFoto } from "./boletaTardiaFoto";
 import { anularCondonacionBoletaTardia, condonarMoraDeCuotas, evaluarCreditoAlDia, hoyGuatemala } from "./latefee";
 import { insertPayment } from "./registerPayment";
 import { camposObligatoriosCondonacion, pagoSchema } from "./registerPaymentPolicy";
@@ -20,6 +20,10 @@ export const condonacionBoletaTardiaSchema = z.object({
 
 export type DepsBoletaTardia = {
   conLock: typeof withPaymentAdvisoryLock;
+  /** Candado no bloqueante de las llaves de `url_boletas`, DENTRO del candado del crédito y en su conexión (`tryWithBoletaLlavesLock`). */
+  conLlaves: typeof tryWithBoletaLlavesLock;
+  /** Segundo chequeo de reuso, ya con los dos candados (solo la base, sin R2). `null` = ninguna llave usada. */
+  verificarReuso: DepsBoletaTardia["verificarFoto"];
   insertPayment: typeof insertPayment;
   decidir: typeof calcularDecisionBoletaTardia;
   condonar: typeof condonarMoraDeCuotas;
@@ -40,6 +44,8 @@ export const traeCondonacionBoletaTardia = (body: any): boolean => body?.condona
 
 export const depsReales = (): DepsBoletaTardia => ({
   conLock: withPaymentAdvisoryLock,
+  conLlaves: tryWithBoletaLlavesLock,
+  verificarReuso: (entrada) => rechazoPorReuso(entrada, depsFotoReales().llavesYaUsadas),
   insertPayment,
   decidir: calcularDecisionBoletaTardia,
   condonar: condonarMoraDeCuotas,
@@ -117,9 +123,7 @@ export async function registrarPagoConBoletaTardia(
   const errorFecha = validarFechaBoleta(p.fecha_boleta, ymdDeFechaCalendario(hoyGuatemala()));
   if (errorFecha) { set.status = 400; return validationFailed({ fecha_boleta: [errorFecha] }); }
 
-  // La foto es el control antifraude: se verifica en R2 ANTES del candado (no se retiene el lock del crédito esperando a la red).
-  const rechazoFoto = await deps.verificarFoto({ credito_id: p.credito_id, intento_id: intentoId, llaves: p.url_boletas });
-  if (rechazoFoto) {
+  const responderRechazoFoto = (rechazoFoto: RechazoFoto) => {
     // Lo que ve el cliente es el mensaje; el motivo y los metadatos (sin credenciales ni URLs) quedan solo en el log.
     log(rechazoFoto.status === 400 ? "foto_rechazada" : "foto_no_verificada", {
       credito_id: p.credito_id, intento_id: intentoId, llave: rechazoFoto.llave ?? null, motivo: rechazoFoto.motivo, ...rechazoFoto.detalle,
@@ -128,17 +132,22 @@ export async function registrarPagoConBoletaTardia(
     return rechazoFoto.status === 400
       ? validationFailed({ url_boletas: [rechazoFoto.message] })
       : { success: false, code: "foto_no_verificada", message: rechazoFoto.message };
-  }
+  };
+  // La foto es el control antifraude: se verifica en R2 ANTES del candado (no se retiene el lock del crédito esperando a la red).
+  const entradaFoto = { credito_id: p.credito_id, intento_id: intentoId, llaves: p.url_boletas };
+  const rechazoFoto = await deps.verificarFoto(entradaFoto);
+  if (rechazoFoto) return responderRechazoFoto(rechazoFoto);
 
   const actor = opciones.usuarioEmail;
   // El pago también queda a nombre del actor verificado: el `registerBy` del body es declarado por el cliente.
   const body = { ...ctx.body, numeroAutorizacion, registerBy: actor };
   const creditoId = p.credito_id;
 
-  return deps.conLock(creditoId, async (paymentLock) => {
-    // 1. Idempotencia (otra vez, ya con el candado: dos primeros intentos simultáneos solo se ordenan acá).
-    const repetido = await yaRegistrado(creditoId);
-    if (repetido) return repetido;
+  // Corre con el candado del crédito Y el de las llaves de la foto (sostenido hasta que insertPayment escribe `boletas`).
+  const registrarConCandados = async (paymentLock: PaymentAdvisoryLock) => {
+    // 1b. Reuso otra vez, ya con los dos candados: quien tuvo la llave antes ya escribió sus `boletas`.
+    const reuso = await deps.verificarReuso(entradaFoto);
+    if (reuso) return responderRechazoFoto(reuso);
 
     let cond: Awaited<ReturnType<DepsBoletaTardia["condonar"]>>;
     try {
@@ -221,5 +230,18 @@ export async function registrarPagoConBoletaTardia(
     }
     if (errorRegistro !== undefined) throw errorRegistro;
     return { ...(respuesta as object), condonacionBoletaTardia: { condonacion_id: cond.condonacion_id, monto: cond.monto, estado } };
+  };
+
+  return deps.conLock(creditoId, async (paymentLock) => {
+    // 1. Idempotencia (otra vez, ya con el candado: dos primeros intentos simultáneos solo se ordenan acá).
+    const repetido = await yaRegistrado(creditoId);
+    if (repetido) return repetido;
+    // Dos créditos con la misma foto no se esperan por el candado del crédito, y el chequeo de reuso de arriba pudo leer
+    // antes del insert del otro: candado por llave, no bloqueante y en la MISMA conexión (una sola conexión de lockPool por pago).
+    const conLlaves = await deps.conLlaves(paymentLock, p.url_boletas, () => registrarConCandados(paymentLock));
+    if (conLlaves.adquirido) return conLlaves.valor;
+    log("foto_en_uso", { credito_id: creditoId, intento_id: intentoId, llave: conLlaves.llave });
+    set.status = 400;
+    return validationFailed({ url_boletas: ["Esta boleta se está registrando en otra solicitud; espere unos segundos y vuelva a intentar."] });
   });
 }

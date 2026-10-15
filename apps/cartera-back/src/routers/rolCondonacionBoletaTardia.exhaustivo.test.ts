@@ -270,7 +270,9 @@ describe("un body con registerBy / usuario_id / email / user / usuario_email NO 
     let filas = 0;
     const deps = {
       conLock: async (_id: number, fn: any) => fn({} as never),
+      conLlaves: async (_lock: unknown, _l: string[], fn: any) => ({ adquirido: true, valor: await fn() }),
       verificarFoto: async () => null,
+      verificarReuso: async () => null,
       filasVivas: async () => (filas === 0 ? [] : [1]),
       condonacionViva: async () => null,
       condonacionDelIntento: async () => null,

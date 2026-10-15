@@ -75,6 +75,20 @@ const conTope = <T>(p: Promise<T>, ms: number): Promise<T> => {
   return Promise.race([p, tope]).finally(() => clearTimeout(timer));
 };
 
+/** Reuso de las llaves en OTRO pago vivo. `null` = ninguna usada; si la consulta falla o vence, 503 (falla cerrado). */
+export async function rechazoPorReuso(
+  e: { credito_id: number; intento_id: string; llaves: string[] },
+  llavesYaUsadas: DepsFotoBoleta["llavesYaUsadas"],
+  timeoutMs = TIMEOUT_FOTO_MS,
+): Promise<RechazoFoto | null> {
+  try {
+    const usadas = await conTope(llavesYaUsadas(e.credito_id, e.intento_id, [...new Set(e.llaves)], AbortSignal.timeout(timeoutMs)), timeoutMs);
+    return usadas.length > 0 ? rechazo("reusada", MENSAJE_REUSO, usadas[0]) : null;
+  } catch (error) {
+    return noVerificada((error as ErrorSdk)?.name === "TimeoutError" ? "timeout" : "error_base", undefined, detalleError(error));
+  }
+}
+
 /** `null` = todas las fotos pasan. Cualquier duda (R2 caído, timeout, base caída) falla cerrado con 503. */
 export async function verificarFotoBoleta(
   e: { credito_id: number; intento_id: string; llaves: string[] },
@@ -87,12 +101,8 @@ export async function verificarFotoBoleta(
   const llaves = [...new Set(e.llaves)];
   const ahora = (deps.ahora ?? (() => new Date()))();
   const timeoutMs = deps.timeoutMs ?? TIMEOUT_FOTO_MS;
-  try {
-    const usadas = await conTope(deps.llavesYaUsadas(e.credito_id, e.intento_id, llaves, AbortSignal.timeout(timeoutMs)), timeoutMs);
-    if (usadas.length > 0) return rechazo("reusada", MENSAJE_REUSO, usadas[0]);
-  } catch (error) {
-    return noVerificada((error as ErrorSdk)?.name === "TimeoutError" ? "timeout" : "error_base", undefined, detalleError(error));
-  }
+  const reuso = await rechazoPorReuso({ ...e, llaves }, deps.llavesYaUsadas, timeoutMs);
+  if (reuso) return reuso;
   const resultados = await Promise.all(llaves.map(async (llave): Promise<RechazoFoto | null> => {
     const signal = AbortSignal.timeout(timeoutMs);
     try {

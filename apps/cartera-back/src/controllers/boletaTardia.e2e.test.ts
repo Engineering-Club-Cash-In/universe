@@ -109,7 +109,8 @@ async function elegirCreditos(n: number): Promise<number[]> {
 }
 
 const decidirHoy9 = (): any => (entrada: any) => calcular(entrada, { ...depsDecision(), hoy: () => HOY });
-const deps = (o: Record<string, unknown> = {}) => ({ ...depsBT(), verificarFoto: async () => null, decidir: decidirHoy9(), ...o }) as ReturnType<typeof depsBT>;
+// Todas las pruebas usan la misma llave de foto: sin R2 ni chequeo de reuso (ni el de afuera ni el de bajo el candado).
+const deps = (o: Record<string, unknown> = {}) => ({ ...depsBT(), verificarFoto: async () => null, verificarReuso: async () => null, decidir: decidirHoy9(), ...o }) as ReturnType<typeof depsBT>;
 
 type Prep = { ledger0: { CONDONACION: Big; ANULACION: Big }; credito: number; usuario_id: number; e: ReturnType<typeof esperado>; moraAntes: string; body: any; intento: string };
 async function preparar(credito: number, extra: { sumarMonto?: number } = {}): Promise<Prep> {

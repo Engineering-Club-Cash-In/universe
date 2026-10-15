@@ -10,6 +10,7 @@ const explota = (nombre: string) => (() => { throw new Error(`no debía llamarse
 const depsQueNoSeUsan: DepsBoletaTardia = {
   conLock: explota("conLock"), insertPayment: explota("insertPayment"), decidir: explota("decidir"), condonar: explota("condonar"),
   anular: explota("anular"), verificarFoto: explota("verificarFoto"), condonacionDelIntento: explota("condonacionDelIntento"), evaluarAlDia: explota("evaluarAlDia"), filasVivas: (async () => []) as never, condonacionViva: explota("condonacionViva"),
+  conLlaves: (async (_lock: unknown, _llaves: string[], fn: () => Promise<unknown>) => ({ adquirido: true, valor: await fn() })) as never, verificarReuso: (async () => null) as never,
 };
 const INTENTO = "00000000-0000-4000-8000-000000000001";
 const cuerpo = (extra: Record<string, unknown> = {}) => ({
@@ -267,5 +268,79 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
     expect(traeCondonacionBoletaTardia({ condonacionBoletaTardia: null })).toBe(false);
     const quienes = ["registerPayment.ts", "registerPaymentPolicy.ts", "../routers/payments.ts"].filter((f) => /boletaTardiaFoto/.test(readFileSync(new URL(f, import.meta.url), "utf8")));
     expect(quienes).toEqual([]);
+  });
+});
+
+describe("candado de las llaves de la foto (dos créditos no pueden usar la misma foto a la vez)", () => {
+  const n = { condonar: 0, insert: 0, conLock: 0 };
+  const armar = (d: Partial<DepsBoletaTardia>): DepsBoletaTardia => ({
+    ...depsQueNoSeUsan,
+    verificarFoto: (async () => null) as never,
+    conLock: (async (_id: number, fn: (l: unknown) => unknown) => { n.conLock++; return fn({}); }) as never,
+    condonacionViva: (async () => null) as never,
+    decidir: (async () => ({ aplica: true, montoCondonar: "11.20", moraActiva: "20.00", porCuota: [{ cuota_id: 1, numero_cuota: 5, monto: "11.20" }], fechaRegistro: "2026-10-13" })) as never,
+    condonar: (async () => { n.condonar++; return { kind: "condonada", condonacion_id: 3, monto: "11.20" }; }) as never,
+    insertPayment: (async () => { n.insert++; return { success: true }; }) as never,
+    filasVivas: (async () => (n.insert > 0 ? [9] : [])) as never,
+    evaluarAlDia: (async () => ({ desactivarMora: true })) as never,
+    ...d,
+  });
+  const correrCon = async (deps: DepsBoletaTardia) => {
+    n.condonar = n.insert = n.conLock = 0;
+    const set: { status?: number } = {};
+    const r: any = await registrarPagoConBoletaTardia({ body: cuerpo({ url_boletas: ["00000000-0000-4000-8000-000000000001.jpg", "00000000-0000-4000-8000-000000000001.jpg"] }), set }, { usuarioEmail: "a@x.com" }, deps);
+    return { r, status: set.status };
+  };
+  const silencio = async <T>(f: () => Promise<T>) => {
+    const original = console.error;
+    console.error = () => {};
+    try { return await f(); } finally { console.error = original; }
+  };
+  test("toma las llaves de url_boletas DENTRO del candado del crédito, con ese mismo candado (una sola conexión)", async () => {
+    const orden: string[] = [];
+    const vistas: unknown[] = [];
+    const candado = { soy: "el candado del crédito" };
+    await correrCon(armar({
+      conLlaves: (async (lock: unknown, llaves: string[], fn: () => Promise<unknown>) => { vistas.push([lock, llaves]); orden.push("llaves"); return { adquirido: true, valor: await fn() }; }) as never,
+      conLock: (async (_id: number, fn: (l: unknown) => unknown) => { orden.push("credito"); return fn(candado); }) as never,
+    }));
+    expect(orden).toEqual(["credito", "llaves"]);
+    expect(vistas).toEqual([[candado, ["00000000-0000-4000-8000-000000000001.jpg", "00000000-0000-4000-8000-000000000001.jpg"]]]);
+  });
+  test("llave ocupada por otra solicitud: 400 en url_boletas con la llave en el log, sin condonar ni registrar", async () => {
+    const logs: string[] = [];
+    const original = console.error;
+    console.error = (m: string) => { logs.push(String(m)); };
+    let res: Awaited<ReturnType<typeof correrCon>>;
+    try {
+      res = await correrCon(armar({ conLlaves: (async () => ({ adquirido: false, llave: "k-ocupada.jpg" })) as never }));
+    } finally { console.error = original; }
+    expect(res.status).toBe(400);
+    expect(res.r.errors.url_boletas).toEqual(["Esta boleta se está registrando en otra solicitud; espere unos segundos y vuelva a intentar."]);
+    expect(n).toEqual({ condonar: 0, insert: 0, conLock: 1 });
+    expect(JSON.parse(logs[0]!)).toMatchObject({ event: "boleta_tardia.foto_en_uso", credito_id: 1, intento_id: INTENTO, llave: "k-ocupada.jpg" });
+  });
+  test("el segundo chequeo de reuso (ya con los candados) encuentra la llave usada: 400, sin condonar ni registrar", async () => {
+    const vistos: unknown[] = [];
+    const { r, status } = await silencio(() => correrCon(armar({
+      verificarReuso: (async (e: unknown) => { vistos.push(e); return { status: 400, message: "Esta boleta ya está asociada a otro pago; verifique la boleta antes de condonar.", motivo: "reusada", llave: "k" }; }) as never,
+    })));
+    expect(status).toBe(400);
+    expect(r.errors.url_boletas).toEqual(["Esta boleta ya está asociada a otro pago; verifique la boleta antes de condonar."]);
+    expect(vistos).toEqual([{ credito_id: 1, intento_id: INTENTO, llaves: ["00000000-0000-4000-8000-000000000001.jpg", "00000000-0000-4000-8000-000000000001.jpg"] }]);
+    expect([n.conLock, n.condonar, n.insert]).toEqual([1, 0, 0]);
+  });
+  test("el segundo chequeo falla: 503 foto_no_verificada, sin condonar ni registrar", async () => {
+    const { r, status } = await silencio(() => correrCon(armar({
+      verificarReuso: (async () => ({ status: 503, message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación", motivo: "error_base" })) as never,
+    })));
+    expect(status).toBe(503);
+    expect(r).toEqual({ success: false, code: "foto_no_verificada", message: "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación" });
+    expect([n.condonar, n.insert]).toEqual([0, 0]);
+  });
+  test("sin conflicto: condona y registra una vez", async () => {
+    const { r } = await correrCon(armar({}));
+    expect(r.success).toBe(true);
+    expect([n.condonar, n.insert]).toEqual([1, 1]);
   });
 });

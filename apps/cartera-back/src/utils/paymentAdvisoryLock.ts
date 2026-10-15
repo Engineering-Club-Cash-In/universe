@@ -14,6 +14,8 @@ export type PaymentAdvisoryLock = { readonly [paymentLockBrand]: true };
 const heldPaymentLocks = new WeakMap<PaymentAdvisoryLock, {
   creditoId: number;
   connection: PaymentAdvisoryLockConnection;
+  /** Lo marca quien tomó otro candado de sesión en esta conexión y no pudo soltarlo: el dueño la destruye al terminar. */
+  destruir?: boolean;
 }>();
 
 export const holdsPaymentAdvisoryLock = (
@@ -65,6 +67,7 @@ export async function withPaymentAdvisoryLock<T>(
 ): Promise<T> {
   const lockConn: PaymentAdvisoryLockConnection = await pool.connect();
   const lock = {} as PaymentAdvisoryLock;
+  const held = { creditoId: credito_id, connection: lockConn, destruir: false };
   // Si el unlock falla, la sesión conserva el lock: la conexión se destruye en vez de volver al pool.
   let destruir = false;
   try {
@@ -72,10 +75,11 @@ export async function withPaymentAdvisoryLock<T>(
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
-    heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });
+    heldPaymentLocks.set(lock, held);
     return await fn(lock);
   } finally {
     heldPaymentLocks.delete(lock);
+    destruir = held.destruir;
     try {
       await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
         PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -101,6 +105,7 @@ export async function tryWithPaymentAdvisoryLock<T>(
 ): Promise<{ adquirido: true; valor: T } | { adquirido: false }> {
   const lockConn: PaymentAdvisoryLockConnection = await pool.connect();
   const lock = {} as PaymentAdvisoryLock;
+  const held = { creditoId: credito_id, connection: lockConn, destruir: false };
   let tomado = false;
   let destruir = false;
   try {
@@ -110,10 +115,11 @@ export async function tryWithPaymentAdvisoryLock<T>(
     ]) as { rows?: { ok?: boolean }[] };
     tomado = r.rows?.[0]?.ok === true;
     if (!tomado) return { adquirido: false };
-    heldPaymentLocks.set(lock, { creditoId: credito_id, connection: lockConn });
+    heldPaymentLocks.set(lock, held);
     return { adquirido: true, valor: await fn(lock) };
   } finally {
     heldPaymentLocks.delete(lock);
+    destruir = held.destruir;
     if (tomado) {
       try {
         await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [PAYMENT_ADVISORY_LOCK_NAMESPACE, credito_id]);
@@ -123,5 +129,43 @@ export async function tryWithPaymentAdvisoryLock<T>(
       }
     }
     if (destruir) lockConn.release(true); else lockConn.release();
+  }
+}
+
+/** Espacio de las llaves de foto de boleta (8765 pago, 8766 espejo, 8767 cuenta Nexa, 8768 boleta Nexa). */
+export const BOLETA_LLAVE_ADVISORY_LOCK_NAMESPACE = 8769;
+
+/**
+ * Candado NO bloqueante por llave de foto de boleta (`pg_try_advisory_lock(8769, hashtext(llave))`), tomado DENTRO del
+ * candado del crédito y en SU MISMA conexión: cada pago usa una sola conexión de `lockPool` (pedir una segunda mientras
+ * se retiene la primera puede trabar el pool entero). Dos créditos distintos no se esperan entre sí; sin esto dos
+ * condonaciones con la misma foto pasarían las dos. Llaves sin repetir y ordenadas; si alguna está ocupada suelta las
+ * tomadas y devuelve `{ adquirido: false, llave }` sin correr `fn`. Una colisión de `hashtext` solo da un rechazo falso,
+ * reintentable. Libera siempre; si un unlock falla, marca la conexión para que el dueño del candado del crédito la destruya.
+ */
+export async function tryWithBoletaLlavesLock<T>(
+  lock: PaymentAdvisoryLock,
+  llaves: readonly string[],
+  fn: () => Promise<T>,
+): Promise<{ adquirido: true; valor: T } | { adquirido: false; llave: string }> {
+  const held = heldPaymentLocks.get(lock);
+  if (!held) throw new Error("Canonical payment lock is not held");
+  const tomadas: string[] = [];
+  try {
+    for (const llave of [...new Set(llaves)].sort()) {
+      const r = await held.connection.query("SELECT pg_try_advisory_lock($1, hashtext($2)) AS ok", [BOLETA_LLAVE_ADVISORY_LOCK_NAMESPACE, llave]) as { rows?: { ok?: boolean }[] };
+      if (r.rows?.[0]?.ok !== true) return { adquirido: false, llave };
+      tomadas.push(llave);
+    }
+    return { adquirido: true, valor: await fn() };
+  } finally {
+    for (const llave of tomadas) {
+      try {
+        await held.connection.query("SELECT pg_advisory_unlock($1, hashtext($2))", [BOLETA_LLAVE_ADVISORY_LOCK_NAMESPACE, llave]);
+      } catch (unlockError) {
+        held.destruir = true;
+        console.error("⚠️ Error liberando advisory lock de llave de boleta:", unlockError);
+      }
+    }
   }
 }

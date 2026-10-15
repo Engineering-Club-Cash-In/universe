@@ -9,6 +9,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { limpiarFiltrosPersistidos } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import { getRoleColor, getRoleLabel } from "@/lib/roles";
@@ -94,6 +95,7 @@ export default function UserMenu() {
 								detail: { userId: session.user.id },
 								reason: "user-clicked-sign-out",
 							});
+							limpiarFiltrosPersistidos();
 							await authClient.signOut();
 							window.location.href = "/";
 						}}

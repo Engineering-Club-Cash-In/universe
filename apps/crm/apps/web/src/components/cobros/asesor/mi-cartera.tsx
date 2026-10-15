@@ -375,6 +375,18 @@ export function MiCartera({ search }: { search: CarteraSearch }) {
 	const perfil = perfilQ.data;
 	const sinAsesor = !!perfil && perfil.sinAsesor && !perfil.esSupervision;
 
+	// Un asesor no puede quedar filtrado por un bucket que no es suyo (filtro
+	// heredado de otra sesión o ?bucket= manual): se descarta al tener el perfil.
+	useEffect(() => {
+		if (!perfil || perfil.esSupervision || perfil.buckets.length === 0) return;
+		const b = bucketDeEstadoMora(etapa);
+		if (!b) return;
+		if (!perfil.buckets.includes(BUCKETS_CARTERA.indexOf(b))) {
+			setEtapa(null);
+			setPage(1);
+		}
+	}, [perfil, etapa, setEtapa, setPage]);
+
 	const statsQ = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions({
 			input: { emailCobrador: emailConsulta },

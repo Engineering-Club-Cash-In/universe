@@ -180,7 +180,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:(?:vehiculos?|carros?)\s+(?:(?:fue|fueron|ha\s+sido|han\s+sido)\s+)?(?:recuperad[oa]s?|reposeid[oa]s?)|se\s+recuper(?:o|aron|a|an)\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?)|recuperacion(?:es)?\s+de\s+(?:vehiculos?|carros?)|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
+			/(?:^|\s)(?:(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)\s+(?:(?:fue|fueron|ha\s+sido|han\s+sido)\s+)?(?:recuperad[oa]s?|reposeid[oa]s?|recogid[oa]s?|recolectad[oa]s?)|se\s+(?:recuper|recogi|recolect)(?:o|aron|a|an)\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion(?:es)?\s+de\s+(?:(?:el|la|los|las)\s+)?(?:vehiculos?|carros?|camion(?:es)?|unidad(?:es)?|motos?|motocicletas?)|recuperacion\s+y\s+venta|venta\s+por\s+recuperacion|(?:se\s+realiza|se\s+realizo|se\s+hizo|realizo)\s+(?:la\s+)?recoleccion|reposeid[oa]s?|reposesion(?:es)?)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "vehiculo_recuperado", texto: limpio };
@@ -195,7 +195,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 		) ||
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:faltas?\s+de\s+pago|dej(?:o|aron)\s+de\s+pagar|no\s+pag(?:o|aron)|no\s+(?:pudo|pudieron|puede|pueden|podia|podian)\s+(?:seguir\s+)?pag(?:ar|ando))(?=\s|$)/g,
+			/(?:^|\s)(?:faltas?\s+de\s+pago|dej(?:o|aron)\s+de\s+pagar|no\s+pag(?:o|aron)|no\s+(?:pudo|pudieron|puede|pueden|podia|podian)\s+(?:seguir\s+)?pag(?:ar|ando)|no\s+(?:tiene|tenia|tenian|tuvo|cuenta|contaba|contaban)\s+(?:con\s+)?(?:el\s+)?dinero\s+para\s+(?:realizar\s+)?(?:los\s+|el\s+)?pag(?:ar|os?)|sin\s+capacidad\s+de\s+pago|no\s+(?:quiere|quiso|quisieron|quieren)\s+pagar)(?=\s|$)/g,
 		)
 	) {
 		return { categoria: "mala_paga", texto: limpio };

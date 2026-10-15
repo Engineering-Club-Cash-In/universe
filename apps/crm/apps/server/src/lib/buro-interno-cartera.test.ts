@@ -183,6 +183,47 @@ describe("clasificación de evidencia de Cartera", () => {
 		expect(clasificarMotivoExplicito(texto)?.categoria).toBe(categoria);
 	});
 
+	test.each([
+		["Camión recuperado y colocado en crédito.", "vehiculo_recuperado"],
+		["recuperacion y venta por financiamiento", "vehiculo_recuperado"],
+		["venta por recuperación", "vehiculo_recuperado"],
+		[
+			"Se recupero unidad y se coloco a la venta quedando un saldo insoluto",
+			"vehiculo_recuperado",
+		],
+		[
+			"Se recogio la unidad, se coloco a la venta quedando un pago pendiente",
+			"vehiculo_recuperado",
+		],
+		[
+			"Cliente no cuenta con el dinero para realizar los pagos , se pone a la venta la unidad",
+			"mala_paga",
+		],
+		[
+			"Cliente no tenia el dinero para pagar, se recolecto la unidad y se coloco a la venta, quedo un monto pendiente  para cubrir la deuda",
+			"vehiculo_recuperado",
+		],
+		["No quiere pagar su saldo insoluto", "mala_paga"],
+		[
+			"El pago del seguro no cubre la totalidad de la deuda cliente no quiso pagar el restante",
+			"mala_paga",
+		],
+	] as const)("clasifica motivos reales de Cartera: %s", (texto, categoria) => {
+		expect(clasificarMotivoExplicito(texto)?.categoria).toBe(categoria);
+	});
+
+	test.each([
+		"cancelacion por pago total de vehiculo",
+		"Cliente termino de pagar su credito",
+		"PAGO TOTAL",
+		"Por la demora que se tuvo al realizar desembolso el cliente indica que ya no desea el crédito,",
+		"Listado de créditos para cancelar - Diego Esau Lara Morales",
+		"Recolección de documentos pendiente",
+		"En negociación para pagar.",
+	])("no marca motivos reales sin riesgo: %s", (texto) => {
+		expect(clasificarMotivoExplicito(texto)).toBeNull();
+	});
+
 	test("conserva expresiones afirmativas con la palabra no", () => {
 		expect(clasificarMotivoExplicito("El cliente no pagó")?.categoria).toBe(
 			"mala_paga",

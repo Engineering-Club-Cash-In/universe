@@ -620,10 +620,14 @@ function NotificationsPage() {
 		"all",
 	);
 	// COBROS-02: filtro por subtipo de alerta de cobros (columna cobros_tipo).
-	const [cobrosFilter, setCobrosFilter] = usePersistedState<string>(
+	const [cobrosFilterGuardado, setCobrosFilter] = usePersistedState<string>(
 		"notifications/cobrosFilter",
 		"all",
 	);
+	// "__tareas__" era el filtro «Solo tareas» (CB-035, retirado): si quedó
+	// guardado en la sesión, se trata como "all" en vez de filtrar la lista a vacío.
+	const cobrosFilter =
+		cobrosFilterGuardado === "__tareas__" ? "all" : cobrosFilterGuardado;
 
 	// Tipos (redirect_page) que este usuario/rol realmente tiene — alimenta el
 	// dropdown para que solo aparezcan las opciones a las que tiene acceso.

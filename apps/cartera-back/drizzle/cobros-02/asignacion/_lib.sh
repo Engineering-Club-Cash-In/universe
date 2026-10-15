@@ -122,35 +122,64 @@ url_para_node() {
   sed -E 's/([?&])sslrootcert=[^&]*&/\1/; s/[?&]sslrootcert=[^&]*$//' <<<"$1"
 }
 
+# El swap: SCHEMA → BK y NUEVO → SCHEMA, en UNA sola transacción junto con la
+# reescritura de las funciones.
+#
 # Un `ALTER SCHEMA … RENAME` cambia el nombre del schema pero NO reescribe el
 # texto de las funciones plpgsql: sus cuerpos siguen diciendo
 # `<schema>_nuevo.tabla` (lo que dejó `renombrar_dump`/`renombrar_migracion`),
 # y el primer INSERT/UPDATE que dispare el trigger revienta con «relation
 # "<schema>_nuevo.x" does not exist» (así cayó el import de Págalo, 2026-10-15).
-# Se corre DESPUÉS del swap, cuando el encabezado de cada función ya dice el
-# schema definitivo, y solo se reescribe lo que apunta al nombre de trabajo.
-# Falla si queda alguna función con la referencia colgada.
-#   uso: corregir_funciones_tras_swap URL SCHEMA NUEVO
-corregir_funciones_tras_swap() {
-  local url="$1" schema="$2" nuevo="$3" sql pendientes
-  sql="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -c "
+#
+# Reescribirlas en una transacción APARTE, después del swap, dejaba una ventana
+# con el schema ya promovido y sus triggers rotos, y si la reescritura fallaba
+# el sandbox quedaba roto sin reversa. Por eso:
+#   1. ANTES del swap se genera, desde el schema de trabajo, el
+#      `CREATE OR REPLACE` de cada función cuyo cuerpo menciona `<nuevo>.`, ya
+#      con `<nuevo>.` → `<schema>.` (el encabezado también: dentro de la
+#      transacción, tras los dos rename, `<schema>.f` ya es la función de NUEVO).
+#   2. Una sola sesión corre: los dos rename, las reescrituras y una
+#      verificación que ABORTA si queda alguna función con la referencia
+#      colgada. Cualquier error corta el script (ON_ERROR_STOP) antes del COMMIT
+#      y Postgres revierte TODO: el vivo sigue siendo el vivo.
+# Nadie ve el swap hasta el COMMIT, así que no hay momento con triggers rotos.
+#   uso: intercambiar_schemas_y_funciones URL SCHEMA NUEVO BK
+intercambiar_schemas_y_funciones() {
+  local url="$1" schema="$2" nuevo="$3" bk="$4" reescrituras
+  local nombre
+  for nombre in "$schema" "$nuevo" "$bk"; do
+    [[ "$nombre" =~ ^[a-z0-9_]+$ ]] || die "Nombre de schema no válido para el swap: '$nombre'"
+  done
+  reescrituras="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -c "
     SELECT replace(pg_get_functiondef(p.oid), '${nuevo}.', '${schema}.') || ';'
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = '${schema}' AND p.prokind IN ('f', 'p')
+    WHERE n.nspname = '${nuevo}' AND p.prokind IN ('f', 'p')
       AND strpos(p.prosrc, '${nuevo}.') > 0
-    ORDER BY p.proname, p.oid")"
-  if [[ -n "$sql" ]]; then
-    echo "· funciones con referencias a ${nuevo}: $(grep -c '^CREATE OR REPLACE' <<<"$sql")"
-    { echo "BEGIN;"; echo "$sql"; echo "COMMIT;"; } | psql "$url" -X -v ON_ERROR_STOP=1 -q -f - \
-      || die "No se pudieron reescribir las funciones que apuntan a ${nuevo}."
-  fi
-  pendientes="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -c "
-    SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = '${schema}' AND p.prokind IN ('f', 'p')
-      AND strpos(p.prosrc, '${nuevo}.') > 0")"
-  [[ "$pendientes" == "0" ]] \
-    || die "Quedan $pendientes funciones de ${schema} apuntando a ${nuevo}: el swap ya se hizo, hay que corregirlas a mano."
-  echo "· funciones de ${schema} sin referencias a ${nuevo}"
+    ORDER BY p.proname, p.oid")" || die "No se pudieron leer las funciones de ${nuevo}."
+  echo "· funciones con referencias a ${nuevo}: $(grep -c '^CREATE OR REPLACE' <<<"$reescrituras" || true)"
+  {
+    echo "BEGIN;"
+    echo "ALTER SCHEMA \"${schema}\" RENAME TO \"${bk}\";"
+    echo "ALTER SCHEMA \"${nuevo}\" RENAME TO \"${schema}\";"
+    [[ -z "$reescrituras" ]] || echo "$reescrituras"
+    cat <<SQL
+DO \$verificacion\$
+DECLARE colgadas int;
+BEGIN
+  SELECT count(*) INTO colgadas
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = '${schema}' AND p.prokind IN ('f', 'p')
+    AND strpos(p.prosrc, '${nuevo}.') > 0;
+  IF colgadas > 0 THEN
+    RAISE EXCEPTION 'Quedan % funciones de ${schema} apuntando a ${nuevo}: se revierte el swap.', colgadas;
+  END IF;
+END
+\$verificacion\$;
+COMMIT;
+SQL
+  } | psql "$url" -X -v ON_ERROR_STOP=1 -q -o /dev/null -f - \
+    || die "El swap se revirtió: ${schema} sigue siendo el vivo y ${nuevo} quedó sin tocar."
+  echo "· swap aplicado; ninguna función de ${schema} apunta a ${nuevo}"
 }
 
 # Radiografía de un schema ya cargado: pool, cartera por bucket y asesor,

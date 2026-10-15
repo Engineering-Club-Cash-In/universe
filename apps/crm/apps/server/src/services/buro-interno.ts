@@ -1406,14 +1406,15 @@ async function registrarCoincidenciasCarteraSinCola(
 					: [];
 				// Un cliente con una sola identidad y sin leads no se confunde con otra
 				// persona: su ficha sigue siendo suya aunque Cartera corrija el nombre.
-				// Solo aplica a fichas sin lead ni DPI guardados.
+				// Solo aplica a fichas sin lead, DPI ni NIT guardados.
 				if (
 					grupoActual &&
 					!(
 						identidadesActuales.length <= 1 &&
 						grupoActual.leads.length === 0 &&
 						!estado.persona.leadId &&
-						!estado.persona.dpi
+						!estado.persona.dpi &&
+						!estado.persona.nit
 					) &&
 					!personaGuardadaFiguraEnCliente(estado.persona, {
 						nombresCompletos: [
@@ -1567,7 +1568,7 @@ async function registrarCoincidenciasCarteraSinCola(
 			// Con una sola identidad y sin leads, las fuentes del mismo usuario
 			// bastan para reconocer la ficha aunque Cartera corrija el nombre;
 			// así se conserva un retiro manual de Cobros.
-			// Solo aplica a fichas sin lead ni DPI guardados; las demás exigen el nombre.
+			// Solo aplica a fichas sin lead, DPI ni NIT guardados; las demás exigen el nombre.
 			const identidadUnicaCartera =
 				separarIdentidadesClienteCartera(grupo.usuario.nombre, grupo.usuario.nit)
 					.length <= 1 && grupo.leads.length === 0;
@@ -1604,7 +1605,7 @@ async function registrarCoincidenciasCarteraSinCola(
 					sql`exists (select 1 from ${buroInternoFuentesCartera} where ${buroInternoFuentesCartera.personaId} = ${buroInternoPersonas.id} and ${buroInternoFuentesCartera.carteraUsuarioId} = ${usuarioId})`,
 					identidadUnicaCartera
 						? or(
-								sql`(${buroInternoPersonas.leadId} IS NULL AND ${buroInternoPersonas.dpi} IS NULL)`,
+								sql`(${buroInternoPersonas.leadId} IS NULL AND ${buroInternoPersonas.dpi} IS NULL AND ${buroInternoPersonas.nit} IS NULL)`,
 								sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 							)
 						: sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,

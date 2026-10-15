@@ -226,6 +226,19 @@ describe("planReaperturaCuotaPorAnulacion", () => {
     }
   });
 
+  test("fila reset anulada (cierre/castigo): estructural, sin cambios aunque INCOBRABLE y CANCELADO", () => {
+    for (const statusCredit of ["INCOBRABLE", "CANCELADO"]) {
+      const p = plan({
+        statusCredit,
+        capital: 1000,
+        montoCuota: 1000,
+        hermanas: [],
+        filaAnulada: cierre({ validationStatus: "reset", abono_capital: 500, abono_interes: 0 }),
+      });
+      expect(p).toEqual({ replica: null, reabrirFilas: false, reabrirCuota: false, insertarPortadora: false });
+    }
+  });
+
   test("sin ninguna fila viva de la cuota: pide insertar la portadora de saldo", () => {
     expect(plan({ hermanas: [] }).insertarPortadora).toBe(true);
     expect(plan({ hermanas: [hermana({ paymentFalse: true })] }).insertarPortadora).toBe(true);

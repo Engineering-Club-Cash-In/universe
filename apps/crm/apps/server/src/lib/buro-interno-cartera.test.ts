@@ -96,6 +96,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		"Nunca estuvo en mora",
 		"No tiene cuotas atrasadas",
 		"Sin cuotas atrasadas",
+			"No tiene cuotas vencidas",
+			"Sin cuotas vencidas",
 		"Sin atrasos de pago",
 		"No se le cobró mora",
 		"No aplica mora",
@@ -120,6 +122,8 @@ describe("clasificación de evidencia de Cartera", () => {
 		["Créditos incobrables", "incobrable"],
 		["Incumplimientos de pago", "mala_paga"],
 		["Cuotas atrasadas", "mala_paga"],
+			["Cuotas vencidas", "mala_paga"],
+			["Cancelado con 2 cuotas vencidas", "mala_paga"],
 		["Atrasos de pago", "mala_paga"],
 	] as const)("reconoce variantes explícitas: %s", (texto, categoria) => {
 		expect(clasificarMotivoExplicito(texto)?.categoria).toBe(categoria);

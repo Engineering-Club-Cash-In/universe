@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
+	candidatosCoincidentesConFuente,
 	type DatosPersonaAutomaticaComparables,
 	decidirPersistenciaAutomatica,
 	EvaluacionBuroInternoInestableError,
@@ -9,6 +10,7 @@ import {
 	esFichaManual,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
+	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
 	usuariosParaSincronizacionAutomatica,
 } from "./buro-interno-automatico";
@@ -129,6 +131,52 @@ describe("sincronización de fichas automáticas", () => {
 		).toEqual([20, 30]);
 	});
 
+	test("conserva cada identidad coincidente de un mismo usuario de Cartera", () => {
+		expect(
+			fuentesCoincidentesPorUsuario({
+				coincidencias: [
+					{ registroId: "usuario-20-persona-1" },
+					{ registroId: "usuario-20-persona-2" },
+					{ registroId: "usuario-20-persona-1" },
+				],
+				usuarioPorFuente: new Map([
+					["usuario-20-persona-1", 20],
+					["usuario-20-persona-2", 20],
+				]),
+			}),
+		).toEqual(
+			new Map([[20, ["usuario-20-persona-1", "usuario-20-persona-2"]]]),
+		);
+	});
+
+	test("conserva el candidato que originó una coincidencia solo por nombre", () => {
+		const titular = {
+			origen: "titular",
+			etiqueta: "Titular",
+			nombres: "Pedro Fernando",
+			apellidos: "Morales Estrada",
+		};
+		const codeudor = {
+			origen: "codeudor",
+			etiqueta: "Codeudor: Ana López",
+			nombres: "Ana",
+			apellidos: "López Pérez",
+		};
+		expect(
+			candidatosCoincidentesConFuente({
+				candidatos: [titular, codeudor],
+				coincidencias: [
+					{
+						registroId: "cartera-persona-jose",
+						origen: "titular",
+						etiqueta: "Titular",
+					},
+				],
+				fuenteId: "cartera-persona-jose",
+			}),
+		).toEqual([titular]);
+	});
+
 	test("enriquece leads por SIFCO directo o por referencia", () => {
 		const directo = {
 			id: "lead-directo",
@@ -158,10 +206,9 @@ describe("sincronización de fichas automáticas", () => {
 			sifcoReferencia: null,
 		};
 		expect(
-			indexarRelacionesLeadPorSifco(
-				[directo, segundaRelacion],
-				["SIFCO-1"],
-			).get("SIFCO-1")?.map((lead) => lead.id),
+			indexarRelacionesLeadPorSifco([directo, segundaRelacion], ["SIFCO-1"])
+				.get("SIFCO-1")
+				?.map((lead) => lead.id),
 		).toEqual(["lead-directo", "lead-segundo"]);
 	});
 });

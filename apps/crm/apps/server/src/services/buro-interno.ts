@@ -34,11 +34,13 @@ import { renapInfo } from "../db/schema/renap";
 import {
 	cambioFuenteCartera,
 	cambioPersonaAutomatica,
+	candidatosCoincidentesConFuente,
 	decidirPersistenciaAutomatica,
 	esFichaAutomaticaReconciliable,
 	esFichaManual,
 	esFichaManualActiva,
 	evaluarConHuellaEstable,
+	fuentesCoincidentesPorUsuario,
 	indexarRelacionesLeadPorSifco,
 	usuariosParaSincronizacionAutomatica,
 } from "../lib/buro-interno-automatico";
@@ -1094,8 +1096,12 @@ async function registrarCoincidenciasCartera(
 		creditos: CreditoBuroInterno[];
 		riesgos: RiesgoCartera[];
 		leads: LeadCartera[];
+	};
+	type ObjetivoIdentidad = {
 		lead: LeadCartera | null;
 		identidad: IdentidadClienteCartera | null;
+		candidatos: CandidatoBuroInterno[];
+		personaAutomatica: BuroInternoPersona | null;
 	};
 	const grupos = new Map<number, GrupoCartera>();
 	for (const credito of creditos) {
@@ -1109,8 +1115,6 @@ async function registrarCoincidenciasCartera(
 			creditos: [],
 			riesgos: [],
 			leads: [],
-			lead: null,
-			identidad: null,
 		};
 		grupo.creditos.push(credito);
 		grupo.riesgos.push(
@@ -1235,23 +1239,35 @@ async function registrarCoincidenciasCartera(
 		porId.set(usuarioId, grupo);
 	}
 	const coincidencias = evaluarCoincidencias(candidatos, fuentes, reglas);
-	const usuariosCoincidentes = new Set<number>();
-	for (const coincidencia of coincidencias) {
-		const origen = origenFuente.get(coincidencia.registroId);
-		if (!origen) continue;
-		usuariosCoincidentes.add(origen.usuarioId);
-		const grupo = grupos.get(origen.usuarioId);
-		if (
-			grupo &&
-			origen.lead &&
-			(!grupo.lead ||
-				candidatos.some((candidato) => candidato.leadId === origen.lead?.id))
-		) {
-			grupo.lead = origen.lead;
-		}
-		if (grupo && origen.identidad && !grupo.lead && !grupo.identidad) {
-			grupo.identidad = origen.identidad;
-		}
+	const fuentesPorUsuario = fuentesCoincidentesPorUsuario({
+		coincidencias,
+		usuarioPorFuente: new Map(
+			[...origenFuente].map(([fuenteId, origen]) => [
+				fuenteId,
+				origen.usuarioId,
+			]),
+		),
+	});
+	const usuariosCoincidentes = new Set(fuentesPorUsuario.keys());
+	const objetivosPorUsuario = new Map<number, ObjetivoIdentidad[]>();
+	for (const [usuarioId, fuenteIds] of fuentesPorUsuario) {
+		objetivosPorUsuario.set(
+			usuarioId,
+			fuenteIds.flatMap((fuenteId) => {
+				const origen = origenFuente.get(fuenteId);
+				if (!origen) return [];
+				return [{
+					lead: origen.lead,
+					identidad: origen.identidad,
+					candidatos: candidatosCoincidentesConFuente({
+						candidatos,
+						coincidencias,
+						fuenteId,
+					}),
+					personaAutomatica: null,
+				}];
+			}),
+		);
 	}
 		const fuentesAutomaticas = await tx
 			.select({
@@ -1358,11 +1374,33 @@ async function registrarCoincidenciasCartera(
 			usuariosConRiesgo: grupos.keys(),
 		});
 		if (usuariosASincronizar.length === 0) return;
+		for (const personaId of personasAutomaticasCoincidentes) {
+			const estado = personasAutomaticas.get(personaId);
+			if (!estado) continue;
+			for (const usuarioId of estado.usuarios) {
+				if (!grupos.has(usuarioId)) continue;
+				const objetivos = objetivosPorUsuario.get(usuarioId) ?? [];
+				if (objetivos.length > 0) continue;
+				objetivosPorUsuario.set(usuarioId, [{
+					lead: null,
+					identidad: null,
+					candidatos: candidatos.filter((candidato) =>
+						evaluarCoincidencias(
+							[candidato],
+							[estado.persona],
+							reglas,
+						).length > 0,
+					),
+					personaAutomatica: estado.persona,
+				}]);
+			}
+		}
 		const personasProcesadas = new Set<string>();
 		for (const usuarioId of usuariosASincronizar) {
 			const grupo = porId.get(usuarioId);
 			if (!grupo) continue;
-			const identidadBase = grupo.identidad;
+			for (const objetivo of objetivosPorUsuario.get(usuarioId) ?? []) {
+			const identidadBase = objetivo.identidad;
 			const nombreBase = identidadBase?.nombreCompleto ?? grupo.usuario.nombre;
 			const { nombres, apellidos } = sugerirNombresApellidos(nombreBase);
 			const sifcos = [
@@ -1382,23 +1420,30 @@ async function registrarCoincidenciasCartera(
 			);
 			const { categoria, motivo } = resumenGrupo;
 			const nombresFuente =
-				grupo.lead?.nombres || nombres || grupo.usuario.nombre;
-			const apellidosFuente = grupo.lead?.apellidos || apellidos;
+				objetivo.personaAutomatica?.nombres ??
+				(objetivo.lead?.nombres || nombres || grupo.usuario.nombre);
+			const apellidosFuente =
+				objetivo.personaAutomatica?.apellidos ??
+				(objetivo.lead?.apellidos || apellidos);
 			const nitFuente =
-				textoOpcional(grupo.lead?.nit) ??
+				textoOpcional(objetivo.personaAutomatica?.nit) ??
+				textoOpcional(objetivo.lead?.nit) ??
 				textoOpcional(identidadBase?.nit) ??
-				(!grupo.usuario.nombre.includes("/")
+				(!grupo.usuario.nombre.includes("/") && !objetivo.personaAutomatica
 					? textoOpcional(grupo.usuario.nit)
 					: null);
 
 			const condicionIdentidad = or(
-				grupo.lead?.id
-					? eq(buroInternoPersonas.leadId, grupo.lead.id)
+				objetivo.personaAutomatica?.id
+					? eq(buroInternoPersonas.id, objetivo.personaAutomatica.id)
 					: undefined,
-				grupo.lead?.dpi
+				objetivo.lead?.id
+					? eq(buroInternoPersonas.leadId, objetivo.lead.id)
+					: undefined,
+				objetivo.lead?.dpi
 					? eq(
 							buroInternoPersonas.dpi,
-							normalizarDpiMatch(grupo.lead.dpi) ?? "",
+							normalizarDpiMatch(objetivo.lead.dpi) ?? "",
 						)
 					: undefined,
 				nitFuente && normalizarNitMatch(nitFuente)
@@ -1413,6 +1458,35 @@ async function registrarCoincidenciasCartera(
 						sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
 					),
 				),
+			);
+			const condicionesCandidato = objetivo.candidatos.flatMap((candidato) => {
+				const nombreCandidato = candidato.nombres?.trim()
+					? {
+							nombres: candidato.nombres,
+							apellidos: candidato.apellidos ?? "",
+						}
+					: sugerirNombresApellidos(candidato.nombreCompleto ?? "");
+				return [
+					candidato.leadId
+						? eq(buroInternoPersonas.leadId, candidato.leadId)
+						: undefined,
+					normalizarDpiMatch(candidato.dpi)
+						? eq(
+								buroInternoPersonas.dpi,
+								normalizarDpiMatch(candidato.dpi) ?? "",
+							)
+						: undefined,
+					normalizarNitMatch(candidato.nit)
+						? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${normalizarNitMatch(candidato.nit)}`
+						: undefined,
+					nombreCandidato.nombres || nombreCandidato.apellidos
+						? sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombreCandidato.nombres, nombreCandidato.apellidos)}`
+						: undefined,
+				];
+			});
+			const condicionFichaManual = or(
+				condicionIdentidad,
+				...condicionesCandidato,
 			);
 			// Un usuario de Cartera puede representar varias personas separadas por
 			// `/`. La ficha existente se busca por la identidad actual, no por el
@@ -1442,7 +1516,7 @@ async function registrarCoincidenciasCartera(
 					.where(
 						and(
 							eq(buroInternoPersonas.origen, "manual"),
-							condicionIdentidad,
+							condicionFichaManual,
 						),
 					)
 					.orderBy(desc(buroInternoPersonas.createdAt))
@@ -1489,15 +1563,18 @@ async function registrarCoincidenciasCartera(
 				const [personaInsertada] = await tx
 					.insert(buroInternoPersonas)
 					.values({
-						leadId: grupo.lead?.id ?? null,
+						leadId: objetivo.lead?.id ?? null,
 						origen: "automatico_cartera",
 						numeroCreditoSifco: sifcos[0] ?? null,
 						nombres: nombresFuente,
 						apellidos: apellidosFuente,
-						dpi: grupo.lead?.dpi ? normalizarDpiMatch(grupo.lead.dpi) : null,
+						dpi: objetivo.lead?.dpi
+							? normalizarDpiMatch(objetivo.lead.dpi)
+							: null,
 						nit: nitFuente,
-						telefono: grupo.lead?.telefono ?? null,
-						direccion: grupo.lead?.direccion ?? grupo.usuario.direccion ?? null,
+						telefono: objetivo.lead?.telefono ?? null,
+						direccion:
+							objetivo.lead?.direccion ?? grupo.usuario.direccion ?? null,
 						categoria,
 						motivo,
 						creadoPor: null,
@@ -1533,6 +1610,7 @@ async function registrarCoincidenciasCartera(
 			if (!personaExistente) continue;
 			const cambiosEvidencia = new Set<string>();
 			const compartePersona =
+				Boolean(objetivo.personaAutomatica) ||
 				personasProcesadas.has(personaExistente.id) ||
 				[
 					...(personasAutomaticas.get(personaExistente.id)?.usuarios ?? []),
@@ -1542,7 +1620,7 @@ async function registrarCoincidenciasCartera(
 				activo: true,
 				leadId: compartePersona
 					? personaExistente.leadId
-					: (grupo.lead?.id ?? null),
+					: (objetivo.lead?.id ?? null),
 				numeroCreditoSifco: compartePersona
 					? personaExistente.numeroCreditoSifco
 					: (sifcos[0] ?? null),
@@ -1552,16 +1630,16 @@ async function registrarCoincidenciasCartera(
 					: apellidosFuente,
 				dpi: compartePersona
 					? personaExistente.dpi
-					: grupo.lead?.dpi
-						? normalizarDpiMatch(grupo.lead.dpi)
+					: objetivo.lead?.dpi
+						? normalizarDpiMatch(objetivo.lead.dpi)
 						: null,
 				nit: compartePersona ? personaExistente.nit : nitFuente,
 				telefono: compartePersona
 					? personaExistente.telefono
-					: (grupo.lead?.telefono ?? null),
+					: (objetivo.lead?.telefono ?? null),
 				direccion: compartePersona
 					? personaExistente.direccion
-					: (grupo.lead?.direccion ?? grupo.usuario.direccion ?? null),
+					: (objetivo.lead?.direccion ?? grupo.usuario.direccion ?? null),
 				categoria: compartePersona ? personaExistente.categoria : categoria,
 				motivo: compartePersona ? personaExistente.motivo : motivo,
 				desactivadoPor: null,
@@ -1750,6 +1828,7 @@ async function registrarCoincidenciasCartera(
 			estadoMemoria.usuarios.add(usuarioId);
 			personasAutomaticas.set(personaExistente.id, estadoMemoria);
 			personasProcesadas.add(personaExistente.id);
+			}
 		}
 	});
 }

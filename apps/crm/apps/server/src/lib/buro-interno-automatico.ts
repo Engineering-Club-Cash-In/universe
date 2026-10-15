@@ -56,9 +56,7 @@ export type DecisionPersistenciaAutomatica =
 	| "reactivar";
 
 /** Una ficha manual demuestra que Cobros ya gestionó a la persona. */
-export function esFichaManual(
-	persona: { origen: string } | null,
-): boolean {
+export function esFichaManual(persona: { origen: string } | null): boolean {
 	return persona?.origen === "manual";
 }
 
@@ -159,6 +157,48 @@ export function usuariosParaSincronizacionAutomatica(input: {
 		}
 	}
 	return [...resultado].sort((a, b) => a - b);
+}
+
+/** Conserva todas las identidades de Cartera que produjeron una coincidencia. */
+export function fuentesCoincidentesPorUsuario(input: {
+	coincidencias: Iterable<{ registroId: string }>;
+	usuarioPorFuente: ReadonlyMap<string, number>;
+}): Map<number, string[]> {
+	const resultado = new Map<number, Set<string>>();
+	for (const coincidencia of input.coincidencias) {
+		const usuarioId = input.usuarioPorFuente.get(coincidencia.registroId);
+		if (usuarioId === undefined) continue;
+		const fuentes = resultado.get(usuarioId) ?? new Set<string>();
+		fuentes.add(coincidencia.registroId);
+		resultado.set(usuarioId, fuentes);
+	}
+	return new Map(
+		[...resultado].map(([usuarioId, fuentes]) => [usuarioId, [...fuentes]]),
+	);
+}
+
+/** Recupera las identidades de la solicitud que originaron el match de una fuente. */
+export function candidatosCoincidentesConFuente<
+	T extends { origen: string; etiqueta: string },
+>(input: {
+	candidatos: Iterable<T>;
+	coincidencias: Iterable<{
+		registroId: string;
+		origen: string;
+		etiqueta: string;
+	}>;
+	fuenteId: string;
+}): T[] {
+	const coincidencias = [...input.coincidencias].filter(
+		(coincidencia) => coincidencia.registroId === input.fuenteId,
+	);
+	return [...input.candidatos].filter((candidato) =>
+		coincidencias.some(
+			(coincidencia) =>
+				coincidencia.origen === candidato.origen &&
+				coincidencia.etiqueta === candidato.etiqueta,
+		),
+	);
 }
 
 /**

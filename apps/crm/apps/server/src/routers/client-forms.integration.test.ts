@@ -1071,6 +1071,36 @@ describe.skipIf(!esLocal || dbMockeado)(
 					).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 				});
 			});
+
+			test("generateFormToken: si la reasignan entre la verificación y la transacción, FORBIDDEN y no borra nada", async () => {
+				const { id, contexto: suyo } = await sesion("sales");
+				const e = await expediente(id);
+				const antes = await cuantasFilas(e.opp);
+				// El supervisor reasigna justo cuando el handler abre la transacción:
+				// la verificación temprana ya pasó con el dueño viejo.
+				const original = dbCompartido.transaction.bind(dbCompartido);
+				const espia = spyOn(dbCompartido, "transaction").mockImplementation(
+					(async (...args: unknown[]) => {
+						await db.execute(
+							sql`UPDATE opportunities SET assigned_to = ${usuario} WHERE id = ${e.opp}::uuid`,
+						);
+						// biome-ignore lint/suspicious/noExplicitAny: passthrough
+						return (original as any)(...args);
+					}) as never,
+				);
+				try {
+					await expect(
+						call(
+							router.generateFormToken,
+							{ opportunityId: e.opp, personType: "lead", personId: e.titular },
+							suyo,
+						),
+					).rejects.toMatchObject({ code: "FORBIDDEN" });
+				} finally {
+					espia.mockRestore();
+				}
+				expect(await cuantasFilas(e.opp)).toEqual(antes);
+			});
 		});
 
 		describe("getClientFormData: lo que no cambia con la alerta", () => {

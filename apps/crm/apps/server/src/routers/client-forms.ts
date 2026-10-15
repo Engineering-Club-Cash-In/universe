@@ -754,6 +754,24 @@ export const clientFormsRouter = {
 			expiresAt.setDate(expiresAt.getDate() + 7);
 
 			const tokenRow = await db.transaction(async (tx) => {
+				// Se vuelve a verificar con la oportunidad tomada FOR SHARE: la
+				// verificación de arriba es una lectura suelta, y una reasignación
+				// (UPDATE de la fila) entre ella y este punto dejaría al asesor viejo
+				// borrar la solicitud firmada de una oportunidad que ya no es suya.
+				// Con el candado, la reasignación espera a que esto termine, o esto
+				// ve al dueño nuevo.
+				const [vigente] = await tx
+					.select({ assignedTo: opportunities.assignedTo })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("share");
+				if (!vigente) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				exigirOportunidadPropiaDeVentas(vigente, context);
+
 				await tx
 					.delete(creditApplications)
 					.where(

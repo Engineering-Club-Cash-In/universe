@@ -115,7 +115,7 @@ const PREFIJO_NEGACION_INDIRECTA = new RegExp(
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
 const PREFIJO_PROBLEMAS_NEGADOS =
-	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+problemas?\s+de\s+$/;
+	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+(?:ningun[ao]?\s+)?problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
 	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|hay|existe(?:n)?|presenta|presento|cuenta\s+con))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
 // "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
